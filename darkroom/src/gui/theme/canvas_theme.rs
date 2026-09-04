@@ -1,6 +1,6 @@
 //! [`CanvasTheme`]: the graph canvas ground and the grid ruled across it.
 
-use palantir::Color;
+use palantir::RgbaF32;
 
 use crate::gui::theme::palette::Palette;
 
@@ -9,9 +9,9 @@ use crate::gui::theme::palette::Palette;
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct CanvasTheme {
     /// Ground fill behind the whole graph.
-    pub(crate) bg: Color,
+    pub(crate) bg: RgbaF32,
     /// Backdrop grid dot colour.
-    pub(crate) dot: Color,
+    pub(crate) dot: RgbaF32,
     /// World-space base spacing between dots. Wrapped by a power-of-2
     /// multiplier as the user zooms so the field never collapses into noise —
     /// see `gui::pane::graph::background`.

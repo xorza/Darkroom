@@ -30,7 +30,7 @@ use std::fmt::Display;
 use common::FloatExt;
 use glam::{UVec2, Vec2};
 use palantir::{
-    Align, Background, Color, Configure, HAlign, ImageDownsample, ImageFilter, ImageFit,
+    Align, Background, RgbaF32, Configure, HAlign, ImageDownsample, ImageFilter, ImageFit,
     ImageHandle, Panel, Sense, Shape, Sizing, Spacing, Ui, VAlign, WidgetId, fmt,
 };
 
@@ -227,8 +227,8 @@ impl ImageViewer {
 
         let fill = match prefs.background {
             ViewerBackground::Theme | ViewerBackground::Checker => theme.canvas.bg,
-            ViewerBackground::Black => Color::BLACK,
-            ViewerBackground::White => Color::WHITE,
+            ViewerBackground::Black => RgbaF32::BLACK,
+            ViewerBackground::White => RgbaF32::WHITE,
         };
         let mut prefs_changed = false;
         Panel::zstack()

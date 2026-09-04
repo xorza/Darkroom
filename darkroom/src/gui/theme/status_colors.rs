@@ -1,6 +1,6 @@
 //! [`StatusColors`]: the run-status inks a node header reports with.
 
-use palantir::Color;
+use palantir::RgbaF32;
 
 use crate::gui::theme::palette::Palette;
 
@@ -16,15 +16,15 @@ use crate::gui::theme::palette::Palette;
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct StatusColors {
     /// It worked / it ran — green.
-    pub(crate) success: Color,
+    pub(crate) success: RgbaF32,
     /// It was reused from cache — the accent cyan.
-    pub(crate) info: Color,
+    pub(crate) info: RgbaF32,
     /// It is happening right now — teal.
-    pub(crate) busy: Color,
+    pub(crate) busy: RgbaF32,
     /// It is incomplete but not broken — orange.
-    pub(crate) warning: Color,
+    pub(crate) warning: RgbaF32,
     /// It failed — red.
-    pub(crate) error: Color,
+    pub(crate) error: RgbaF32,
 }
 
 impl StatusColors {

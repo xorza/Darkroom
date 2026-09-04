@@ -1,4 +1,4 @@
-use palantir::ColorU8;
+use palantir::RgbaU8;
 
 use super::*;
 
@@ -10,22 +10,22 @@ fn assert_close(actual: f32, expected: f32) {
 }
 
 /// The single color a solid brush carries, or `None` for a gradient.
-fn solid(brush: &CurveBrush) -> Option<Color> {
+fn solid(brush: &CurveBrush) -> Option<RgbaF32> {
     brush.as_brush().as_solid()
 }
 
 /// A linear brush's `(t = 0, t = 1)` stop colors, or `None` for a solid.
 /// Stops are stored quantized, so the comparisons below go through
-/// [`ColorU8`] rather than the float color.
-fn gradient(brush: &CurveBrush) -> Option<(ColorU8, ColorU8)> {
+/// [`RgbaU8`] rather than the float color.
+fn gradient(brush: &CurveBrush) -> Option<(RgbaU8, RgbaU8)> {
     let g = brush.as_brush().as_linear()?;
     Some((g.stops[0].color(), g.stops[g.stops.len() - 1].color()))
 }
 
 #[test]
 fn emphasis_tiers_fade_dim_and_lift() {
-    let canvas = Color::linear_rgba(0.0, 0.0, 0.0, 1.0);
-    let c = Color::linear_rgba(1.0, 0.5, 0.0, 1.0);
+    let canvas = RgbaF32::new(0.0, 0.0, 0.0, 1.0);
+    let c = RgbaF32::new(1.0, 0.5, 0.0, 1.0);
     let rest = WireEmphasis::resolve(canvas, false);
     // Rest pulls 15% toward the (black) canvas: r 1.0→0.85, g 0.5→0.425.
     let dimmed = rest.tint(c, false);
@@ -50,7 +50,7 @@ fn emphasis_tiers_fade_dim_and_lift() {
 
 #[test]
 fn stroke_lets_the_broken_alarm_win_over_hover() {
-    let rest = WireEmphasis::resolve(Color::linear_rgba(0.0, 0.0, 0.0, 1.0), false);
+    let rest = WireEmphasis::resolve(RgbaF32::new(0.0, 0.0, 0.0, 1.0), false);
 
     // Plain wire: no lift at all.
     let idle = rest.stroke(2.0, false, false);
@@ -70,7 +70,7 @@ fn stroke_lets_the_broken_alarm_win_over_hover() {
 
     // A fading pass still gives a broken wire full width — that's the
     // alarm read against the dimmed rest of the set.
-    let fading = WireEmphasis::resolve(Color::linear_rgba(0.0, 0.0, 0.0, 1.0), true);
+    let fading = WireEmphasis::resolve(RgbaF32::new(0.0, 0.0, 0.0, 1.0), true);
     let faded_hover = fading.stroke(2.0, false, true);
     assert!(!faded_hover.hovered);
     assert_eq!(faded_hover.width, 2.0);
@@ -79,10 +79,10 @@ fn stroke_lets_the_broken_alarm_win_over_hover() {
 
 #[test]
 fn brush_gradients_differing_ends_and_flattens_equal_ones() {
-    let canvas = Color::linear_rgba(0.0, 0.0, 0.0, 1.0);
+    let canvas = RgbaF32::new(0.0, 0.0, 0.0, 1.0);
     let rest = WireEmphasis::resolve(canvas, false);
-    let a = Color::linear_rgba(1.0, 0.0, 0.0, 1.0);
-    let b = Color::linear_rgba(0.0, 1.0, 0.0, 1.0);
+    let a = RgbaF32::new(1.0, 0.0, 0.0, 1.0);
+    let b = RgbaF32::new(0.0, 1.0, 0.0, 1.0);
 
     // Distinct ends run p0 → p3 as a gradient, each stop taken through this
     // frame's tier — the rest-dim pull, not the raw color.

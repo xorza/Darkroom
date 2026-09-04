@@ -18,7 +18,7 @@
 //! commits.
 
 use glam::Vec2;
-use palantir::{Color, CurveBrush, LineCap, LinearGradient, Rect, Shape, Size, Stop, Ui};
+use palantir::{RgbaF32, CurveBrush, LineCap, LinearGradient, Rect, Shape, Size, Stop, Ui};
 use scenarium::NodeId;
 
 use crate::gui::graph_ctx::GraphCtx;
@@ -256,20 +256,20 @@ impl WirePass<'_, '_> {
 /// so each end of a wire visually matches the glyph it touches.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(crate) struct WireTint {
-    start: Color,
-    end: Color,
+    start: RgbaF32,
+    end: RgbaF32,
 }
 
 impl WireTint {
     /// Distinct colors per end, which lower to a gradient along the curve.
-    pub(crate) fn new(start: Color, end: Color) -> Self {
+    pub(crate) fn new(start: RgbaF32, end: RgbaF32) -> Self {
         Self { start, end }
     }
 
     /// One color for the whole curve — an event wire (events carry no data
     /// type), or a data wire whose type mismatch paints it all in the warning
     /// color.
-    pub(crate) fn flat(color: Color) -> Self {
+    pub(crate) fn flat(color: RgbaF32) -> Self {
         Self {
             start: color,
             end: color,
@@ -306,14 +306,14 @@ const WIRE_HOVER_WIDTH: f32 = 1.25;
 #[derive(Debug)]
 pub(crate) struct WireEmphasis {
     fading: bool,
-    canvas_bg: Color,
+    canvas_bg: RgbaF32,
 }
 
 impl WireEmphasis {
     /// Resolve this frame's emphasis inputs. `fading` is "any wire gesture
     /// is active" — the callers OR together the two drag controllers and
     /// the breaker.
-    pub(crate) fn resolve(canvas_bg: Color, fading: bool) -> Self {
+    pub(crate) fn resolve(canvas_bg: RgbaF32, fading: bool) -> Self {
         Self { fading, canvas_bg }
     }
 
@@ -355,7 +355,7 @@ impl WireEmphasis {
     }
 
     /// The tiered color for a (non-broken) wire endpoint.
-    fn tint(&self, c: Color, emphasized: bool) -> Color {
+    fn tint(&self, c: RgbaF32, emphasized: bool) -> RgbaF32 {
         if self.fading {
             c.with_alpha(WIRE_DRAG_FADE)
         } else if emphasized {

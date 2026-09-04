@@ -1,5 +1,5 @@
 use glam::Vec2;
-use palantir::{ColorU8, Image, ImageFit, ImageHandle, Shape, Ui};
+use palantir::{Image, ImageFit, ImageHandle, Shape, SrgbaU8, Ui};
 
 use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
 use crate::gui::theme::Theme;
@@ -38,7 +38,7 @@ pub(super) struct CanvasBackground {
 /// bits for exact `Eq`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct DotKey {
-    color: ColorU8,
+    color: SrgbaU8,
     radius_bits: u32,
     spacing_bits: u32,
 }
@@ -46,7 +46,7 @@ struct DotKey {
 impl DotKey {
     fn from_theme(theme: &Theme) -> Self {
         Self {
-            color: theme.canvas.dot.to_srgb_u8(),
+            color: theme.canvas.dot.to_srgba_u8(),
             radius_bits: theme.canvas.dot_radius.to_bits(),
             spacing_bits: theme.canvas.dot_spacing.to_bits(),
         }
@@ -119,7 +119,7 @@ fn wrap_multiplier(zoom: f32) -> f32 {
 fn build_tile(theme: &Theme) -> Image {
     let n = TILE_PX;
     let radius = (theme.canvas.dot_radius * n as f32 / theme.canvas.dot_spacing).max(0.5);
-    let c = theme.canvas.dot.to_srgb_u8();
+    let c = theme.canvas.dot.to_srgba_u8();
     let center = n as f32 * 0.5;
     let r2 = radius * radius;
     let mut pixels = Vec::with_capacity((n * n * 4) as usize);

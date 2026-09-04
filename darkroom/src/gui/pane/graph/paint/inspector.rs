@@ -25,7 +25,7 @@ use std::fmt::Display;
 
 use glam::Vec2;
 use palantir::{
-    Background, Color, Configure, Corners, FontWeight, Panel, Sense, Shadow, Sizing, Spacing,
+    Background, RgbaF32, Configure, Corners, FontWeight, Panel, Sense, Shadow, Sizing, Spacing,
     Stroke, Text, TextInput, TextStyle, TextWrap, Ui, WidgetId, fmt,
 };
 use scenarium::DataType;
@@ -173,7 +173,7 @@ impl Inspectors {
         // shadow alone. Width stays constant so pin-cycling never reflows.
         let border = match mode {
             InspectMode::Pinned => theme.colors.badge_graph,
-            InspectMode::Open => Color::TRANSPARENT,
+            InspectMode::Open => RgbaF32::TRANSPARENT,
         };
         let chrome = Background::rounded(theme.card.fill, Corners::all(theme.card.corner_radius))
             .with_stroke(Stroke::solid(border, 1.0))
@@ -276,9 +276,9 @@ impl Inspectors {
     }
 }
 
-/// Color for a log line by level: info reads as muted body text, warn
+/// RgbaF32 for a log line by level: info reads as muted body text, warn
 /// reuses the missing-inputs glow (orange), error the errored glow (red).
-fn log_color(theme: &Theme, ui: &Ui, level: LogLevel) -> Color {
+fn log_color(theme: &Theme, ui: &Ui, level: LogLevel) -> RgbaF32 {
     match level {
         LogLevel::Info => ui.theme().text.color.with_alpha(0.85),
         LogLevel::Warn => theme.status.warning,

@@ -1,7 +1,7 @@
 //! [`Palette`]: darkroom's colour roster, read from the baked-in
 //! `assets/ayu-graphite.ron`.
 
-use palantir::Color;
+use palantir::RgbaF32;
 
 use crate::gui::theme::type_colors::TypeColors;
 
@@ -32,67 +32,67 @@ const AYU_GRAPHITE: &str = include_str!("../../../assets/ayu-graphite.ron");
 #[derive(Debug, serde::Deserialize)]
 pub(crate) struct Palette {
     /// Ground fill behind the whole graph.
-    pub(crate) canvas_bg: Color,
+    pub(crate) canvas_bg: RgbaF32,
     /// Backdrop grid dot colour.
-    pub(crate) canvas_dot: Color,
+    pub(crate) canvas_dot: RgbaF32,
     /// Top-chrome fill behind the menu bar and tab strip.
-    pub(crate) chrome_fill: Color,
+    pub(crate) chrome_fill: RgbaF32,
     /// Inactive tab chip.
-    pub(crate) tab_inactive: Color,
+    pub(crate) tab_inactive: RgbaF32,
     /// Node body fill, and the surface tier palantir gives its own popups.
-    pub(crate) node_fill: Color,
+    pub(crate) node_fill: RgbaF32,
     /// Resting card outline. Transparent — the shadow carries the edge.
-    pub(crate) node_border: Color,
+    pub(crate) node_border: RgbaF32,
     /// Header band, a step off the body so the band reads against it.
-    pub(crate) header_fill: Color,
+    pub(crate) header_fill: RgbaF32,
     /// Ambient elevation shadow. A near-black ground takes a lot of alpha
     /// before a shadow registers at all.
-    pub(crate) node_ambient_shadow: Color,
+    pub(crate) node_ambient_shadow: RgbaF32,
     /// Primary ink.
-    pub(crate) text: Color,
+    pub(crate) text: RgbaF32,
     /// De-emphasized chrome ink.
-    pub(crate) text_muted: Color,
+    pub(crate) text_muted: RgbaF32,
     /// Disabled ink.
-    pub(crate) text_disabled: Color,
+    pub(crate) text_disabled: RgbaF32,
     /// Control fill one step up from the chrome behind it.
-    pub(crate) elem_mid: Color,
+    pub(crate) elem_mid: RgbaF32,
     /// Control fill two steps up — the emphasis tier.
-    pub(crate) elem_strong: Color,
+    pub(crate) elem_strong: RgbaF32,
     /// Focus ring.
-    pub(crate) border_focused: Color,
+    pub(crate) border_focused: RgbaF32,
     /// Rubber-band sweep and committed selection halo.
-    pub(crate) selection_rect: Color,
+    pub(crate) selection_rect: RgbaF32,
     /// A wire whose endpoint no longer resolves.
-    pub(crate) connection_broken: Color,
+    pub(crate) connection_broken: RgbaF32,
     /// The scribble that cuts wires.
-    pub(crate) breaker_stroke: Color,
+    pub(crate) breaker_stroke: RgbaF32,
     /// Positional colour for an untyped input port.
-    pub(crate) input_port: Color,
+    pub(crate) input_port: RgbaF32,
     /// Positional colour for an untyped output port.
-    pub(crate) output_port: Color,
+    pub(crate) output_port: RgbaF32,
     /// Event emitters, subscription pins and event wires — the sink
     /// marker's red, so the trigger machinery reads as one family.
-    pub(crate) event_port: Color,
+    pub(crate) event_port: RgbaF32,
     /// Port and event label ink.
-    pub(crate) port_label: Color,
+    pub(crate) port_label: RgbaF32,
     /// Inspect chip and pinned-inspector outline.
-    pub(crate) badge_graph: Color,
+    pub(crate) badge_graph: RgbaF32,
     /// Sink chip.
-    pub(crate) badge_sink: Color,
+    pub(crate) badge_sink: RgbaF32,
     /// Persist-to-disk cache chip.
-    pub(crate) badge_cache: Color,
+    pub(crate) badge_cache: RgbaF32,
     /// Impure marker.
-    pub(crate) badge_impure: Color,
+    pub(crate) badge_impure: RgbaF32,
     /// It worked / it ran.
-    pub(crate) status_success: Color,
+    pub(crate) status_success: RgbaF32,
     /// It was reused from cache.
-    pub(crate) status_info: Color,
+    pub(crate) status_info: RgbaF32,
     /// It is happening right now.
-    pub(crate) status_busy: Color,
+    pub(crate) status_busy: RgbaF32,
     /// It is incomplete but not broken.
-    pub(crate) status_warning: Color,
+    pub(crate) status_warning: RgbaF32,
     /// It failed.
-    pub(crate) status_error: Color,
+    pub(crate) status_error: RgbaF32,
     /// Data-type hues for wires and typed port circles.
     pub(crate) type_colors: TypeColors,
 }

@@ -3,7 +3,7 @@
 //! only when the node retains bytes — a zero pool is dropped and an idle node
 //! shows no strip at all, matching the window status bar.
 
-use palantir::{Align, Background, Color, Configure, Corners, Panel, Sizing, Spacing, Ui, VAlign};
+use palantir::{Align, Background, RgbaF32, Configure, Corners, Panel, Sizing, Spacing, Ui, VAlign};
 
 use crate::gui::widgets::support::{
     CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, footer_background, labeled_value,
@@ -59,7 +59,7 @@ pub(super) fn memory_row(ui: &mut Ui, ncx: NodeCtx<'_>) {
 
 /// One pool: a colored dot, an uppercase micro-label, and the byte figure. The
 /// value takes the node's default text color; the label is muted.
-fn meter(ui: &mut Ui, theme: &Theme, hue: Color, label: &'static str, bytes: usize) {
+fn meter(ui: &mut Ui, theme: &Theme, hue: RgbaF32, label: &'static str, bytes: usize) {
     Panel::hstack()
         .id_salt(("node_mem_meter", label))
         .size((Sizing::HUG, Sizing::HUG))
@@ -74,7 +74,7 @@ fn meter(ui: &mut Ui, theme: &Theme, hue: Color, label: &'static str, bytes: usi
 /// A small filled circle occupying `DOT`×`DOT` of layout so the label flows
 /// after it. Named apart from `widgets::support::dot`, which emits a bare
 /// `Shape` and takes no layout space — same picture, opposite contract.
-fn dot_cell(ui: &mut Ui, hue: Color) {
+fn dot_cell(ui: &mut Ui, hue: RgbaF32) {
     Panel::zstack()
         .id_salt("node_mem_dot")
         .size((Sizing::fixed(DOT), Sizing::fixed(DOT)))
@@ -100,7 +100,7 @@ fn proportion_bar(ui: &mut Ui, theme: &Theme, ram: RamUsage) {
 }
 
 /// One weighted segment of the proportion bar.
-fn bar_segment(ui: &mut Ui, salt: &'static str, hue: Color, weight: f32) {
+fn bar_segment(ui: &mut Ui, salt: &'static str, hue: RgbaF32, weight: f32) {
     Panel::zstack()
         .id_salt(("node_mem_seg", salt))
         .size((Sizing::fill(weight), Sizing::FILL))

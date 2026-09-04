@@ -10,7 +10,7 @@
 //!
 //! [`TypeScale`]: crate::gui::theme::type_scale::TypeScale
 
-use palantir::{Align, Color, Configure, Rect, Text, Ui};
+use palantir::{Align, Configure, Rect, RgbaF32, SrgbaU8, Text, Ui};
 
 use crate::core::io::preferences::ViewerBackground;
 use crate::gui::theme::Theme;
@@ -47,7 +47,7 @@ pub(super) fn checker_image() -> palantir::Image {
 }
 
 /// Four inward corner brackets — "fit the image to the view".
-pub(super) fn draw_fit(ui: &mut Ui, s: f32, color: Color) {
+pub(super) fn draw_fit(ui: &mut Ui, s: f32, color: RgbaF32) {
     let t = s * 0.07; // bar thickness
     let len = s * 0.18; // bar length
     let o = s * 0.26; // inset from the button edge
@@ -69,13 +69,13 @@ pub(super) fn draw_fit(ui: &mut Ui, s: f32, color: Color) {
 }
 
 /// "1:1" label — zoom to 100%.
-pub(super) fn draw_100(ui: &mut Ui, s: f32, color: Color) {
+pub(super) fn draw_100(ui: &mut Ui, s: f32, color: RgbaF32) {
     let style = colored_text(ui, color, s * LABEL_GLYPH_FILL);
     Text::new("1:1").style(&style).align(Align::CENTER).show(ui);
 }
 
 /// 2×2 grid of hard squares — nearest (pixelated) sampling.
-pub(super) fn draw_pixels(ui: &mut Ui, s: f32, color: Color) {
+pub(super) fn draw_pixels(ui: &mut Ui, s: f32, color: RgbaF32) {
     let cell = s * 0.18;
     let gap = s * 0.08;
     let o = (s - (2.0 * cell + gap)) * 0.5;
@@ -106,11 +106,11 @@ pub(super) fn draw_swatch(
     // re-reject the one mode it already handled.
     match mode {
         ViewerBackground::Theme => filled_rect(ui, rect, 2.0, theme.canvas.bg),
-        ViewerBackground::Black => filled_rect(ui, rect, 2.0, Color::BLACK),
-        ViewerBackground::White => filled_rect(ui, rect, 2.0, Color::WHITE),
+        ViewerBackground::Black => filled_rect(ui, rect, 2.0, RgbaF32::BLACK),
+        ViewerBackground::White => filled_rect(ui, rect, 2.0, RgbaF32::WHITE),
         ViewerBackground::Checker => {
-            let light = Color::rgb_u8(CHECKER_LIGHT_U8, CHECKER_LIGHT_U8, CHECKER_LIGHT_U8);
-            let dark = Color::rgb_u8(CHECKER_DARK_U8, CHECKER_DARK_U8, CHECKER_DARK_U8);
+            let light = RgbaF32::from_srgba(SrgbaU8::rgb(CHECKER_LIGHT_U8, CHECKER_LIGHT_U8, CHECKER_LIGHT_U8));
+            let dark = RgbaF32::from_srgba(SrgbaU8::rgb(CHECKER_DARK_U8, CHECKER_DARK_U8, CHECKER_DARK_U8));
             filled_rect(ui, rect, 2.0, dark);
             // Two light quads on the diagonal make the 2×2 mini checker.
             let h = d * 0.5;

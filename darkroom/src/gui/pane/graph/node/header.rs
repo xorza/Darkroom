@@ -12,7 +12,7 @@
 use std::f32::consts::{FRAC_PI_4, PI};
 
 use palantir::{
-    Align, Color, Configure, FontFamily, Panel, Sizing, Spacing, Spinner, Text, TextStyle, Ui,
+    Align, RgbaF32, Configure, FontFamily, Panel, Sizing, Spacing, Spinner, Text, TextStyle, Ui,
     VAlign, WidgetId, fmt,
 };
 use scenarium::{CacheMode, NodeId};
@@ -319,7 +319,7 @@ pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
 #[derive(Debug)]
 struct PropertyChip {
     glyph: &'static str,
-    on_color: Color,
+    on_color: RgbaF32,
     on: bool,
     tag: &'static str,
     tip: &'static str,
@@ -400,7 +400,7 @@ fn play_chip(ui: &mut Ui, theme: &Theme, node: NodeCtx<'_>) -> bool {
 /// visual center sits left of its bounding box's. Points are inset by
 /// the rounding radius: the SDF rounds by dilating, so the glyph grows
 /// back out to the intended extents.
-fn draw_play_triangle(ui: &mut Ui, color: Color) {
+fn draw_play_triangle(ui: &mut Ui, color: RgbaF32) {
     play_triangle(ui, BADGE_SIZE, 0.5, color);
 }
 

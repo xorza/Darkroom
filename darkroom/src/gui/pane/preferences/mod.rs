@@ -13,7 +13,7 @@
 use std::path::{Path, PathBuf};
 
 use palantir::{
-    Align, Background, Button, Checkbox, Color, Configure, FontWeight, HAlign, Panel, Sense,
+    Align, Background, Button, Checkbox, RgbaF32, Configure, FontWeight, HAlign, Panel, Sense,
     Sizing, Spacing, Stroke, Text, TextEdit, TextStyle, Tooltip, Ui, VAlign, WidgetId,
 };
 
@@ -333,7 +333,7 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
     // Last frame's hover drives the brighten — this frame's response isn't
     // known until after `show`.
     let link_color = if ui.response_for(id).hovered {
-        theme.colors.badge_graph.lerp(Color::hex(0xffffff), 0.5)
+        theme.colors.badge_graph.lerp(RgbaF32::hex(0xffffff), 0.5)
     } else {
         theme.colors.badge_graph
     };

@@ -1,7 +1,7 @@
 //! One node's body: the widget that records it, and what recording it reports.
 
 use glam::Vec2;
-use palantir::{Background, Color, Configure, Corners, Panel, Sense, Shadow, Sizing, Stroke, Ui};
+use palantir::{Background, RgbaF32, Configure, Corners, Panel, Sense, Shadow, Sizing, Stroke, Ui};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
@@ -193,7 +193,7 @@ impl<'a> NodeWidget<'a> {
 /// The accent color for a node's last-run status, or `None` when it
 /// didn't run. Shared by the body glow and the header time label so they
 /// read as one cue.
-pub(crate) fn exec_color(theme: &Theme, status: ExecStatus) -> Option<Color> {
+pub(crate) fn exec_color(theme: &Theme, status: ExecStatus) -> Option<RgbaF32> {
     match status {
         ExecStatus::None => None,
         ExecStatus::Cached => Some(theme.status.info),

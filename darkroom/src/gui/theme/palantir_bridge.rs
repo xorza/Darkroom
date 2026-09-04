@@ -1,7 +1,7 @@
 //! The palantir-side half of the theme: darkroom's palette projected onto
 //! [`palantir::Palette`], and the [`palantir::Theme`] that builds.
 
-use palantir::{Background, ButtonTheme, Color, Corners, Stroke, TextStyle, WidgetLook};
+use palantir::{Background, ButtonTheme, RgbaF32, Corners, Stroke, TextStyle, WidgetLook};
 
 use crate::gui::theme::palette::Palette;
 use crate::gui::theme::type_scale::TypeScale;
@@ -31,19 +31,19 @@ pub(super) fn palantir_palette_for(p: &Palette) -> palantir::Palette {
 /// the roles whose palantir counterpart lands on a different rung than
 /// darkroom wants.
 ///
-/// A bundle rather than five parameters: four of them are `Color`, so
+/// A bundle rather than five parameters: four of them are `RgbaF32`, so
 /// any two of them swap and still compile.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct BridgeRoles<'a> {
     /// The band the menu bar, the status bar and every tab strip sit on.
-    pub(super) chrome_fill: Color,
+    pub(super) chrome_fill: RgbaF32,
     /// Resting fill of an unselected tab chip.
-    pub(super) tab_inactive: Color,
+    pub(super) tab_inactive: RgbaF32,
     /// The selection cap on a strip that does not hold focus, and the
     /// chrome lift behind a hovered strip glyph.
-    pub(super) header_fill: Color,
+    pub(super) header_fill: RgbaF32,
     /// The unsaved-changes dot.
-    pub(super) warning: Color,
+    pub(super) warning: RgbaF32,
     /// How round a card is — a tab chip is one.
     pub(super) corner_radius: f32,
     pub(super) text: &'a TypeScale,
@@ -104,7 +104,7 @@ fn tab_roles(theme: &mut palantir::Theme, p: &palantir::Palette, r: BridgeRoles<
     // The selected chip keeps palantir's `terminal_bg` fill, which is
     // darkroom's canvas: its bottom edge dissolves into the pane below.
     let top = Corners::top(r.corner_radius);
-    let chip = |fill: Color| Background::rounded(fill, top);
+    let chip = |fill: RgbaF32| Background::rounded(fill, top);
     tabs.inactive.normal.background = chip(r.tab_inactive);
     tabs.inactive.hovered.background = chip(p.elem_mid);
     tabs.inactive.active.background = chip(p.elem_strong);
@@ -153,7 +153,7 @@ pub(super) fn menu_button_for(
     text: &TypeScale,
 ) -> ButtonTheme {
     let mut mb = ButtonTheme::menu_button(p);
-    let restyle = |look: &mut WidgetLook, color: Color| {
+    let restyle = |look: &mut WidgetLook, color: RgbaF32| {
         let style = look.text.take().unwrap_or(fallback_text);
         look.text = Some(style.with_color(color).with_font_size(text.body));
     };

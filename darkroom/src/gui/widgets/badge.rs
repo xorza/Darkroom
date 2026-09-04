@@ -8,7 +8,7 @@
 //! tooltip, and maps the returned click onto its own intent.
 
 use palantir::{
-    Align, Background, Color, Configure, Corners, FontWeight, Panel, Sense, Sizing, Spacing,
+    Align, Background, RgbaF32, Configure, Corners, FontWeight, Panel, Sense, Sizing, Spacing,
     Stroke, Text, TextStyle, Ui, WidgetId,
 };
 
@@ -53,7 +53,7 @@ enum BadgeKind {
 #[derive(Debug, Clone, Copy)]
 enum BadgeGlyph {
     Char(&'static str),
-    Drawn(fn(&mut Ui, Color)),
+    Drawn(fn(&mut Ui, RgbaF32)),
 }
 
 /// One header indicator chip; the two families render differently (see
@@ -64,13 +64,13 @@ enum BadgeGlyph {
 #[derive(Debug)]
 pub(crate) struct Badge {
     glyph: BadgeGlyph,
-    color: Color,
+    color: RgbaF32,
     /// Ink to swap to while the pointer is over the chip, for a control whose
     /// whole face — border, glyph, hover fill — points at the outcome of the
     /// click rather than at a setting. `None` keeps [`Self::color`] in every
     /// state. Caller-supplied like the rest, so this module still names no
     /// palette slot of its own.
-    hover_color: Option<Color>,
+    hover_color: Option<RgbaF32>,
     tip: &'static str,
     kind: BadgeKind,
 }
@@ -79,7 +79,7 @@ impl Badge {
     /// An interactive chip (`filled` = its "on" state; `wid` makes it clickable).
     pub(crate) fn control(
         glyph: &'static str,
-        color: Color,
+        color: RgbaF32,
         filled: bool,
         wid: WidgetId,
         tip: &'static str,
@@ -100,8 +100,8 @@ impl Badge {
     pub(crate) fn action(
         wid: WidgetId,
         tip: &'static str,
-        draw: fn(&mut Ui, Color),
-        rest: Color,
+        draw: fn(&mut Ui, RgbaF32),
+        rest: RgbaF32,
     ) -> Self {
         Badge {
             glyph: BadgeGlyph::Drawn(draw),
@@ -113,7 +113,7 @@ impl Badge {
     }
 
     /// Swap the chip's ink to `color` while the pointer is over it.
-    pub(crate) fn hover_color(mut self, color: Color) -> Self {
+    pub(crate) fn hover_color(mut self, color: RgbaF32) -> Self {
         self.hover_color = Some(color);
         self
     }
@@ -123,7 +123,7 @@ impl Badge {
     pub(crate) fn marker(
         salt: &'static str,
         glyph: &'static str,
-        color: Color,
+        color: RgbaF32,
         tip: &'static str,
     ) -> Self {
         Badge {

@@ -3,7 +3,7 @@
 
 use glam::Vec2;
 use palantir::{
-    Color, Configure, Panel, Rect, Sense, Shape, Sizing, Spacing, TextInput, Ui, WidgetId,
+    RgbaF32, Configure, Panel, Rect, Sense, Shape, Sizing, Spacing, TextInput, Ui, WidgetId,
 };
 
 use crate::gui::widgets::support::{filled_rect, stroked_rect, tooltip_after};
@@ -31,7 +31,7 @@ const OUTLINE_WIDTH: f32 = 2.5;
 #[derive(Clone, Copy, Debug)]
 enum GlyphShape {
     /// A filled disc, optionally ringed by an annulus strictly outside it.
-    Circle { outline: Option<Color> },
+    Circle { outline: Option<RgbaF32> },
     /// An isosceles triangle whose apex points right before `turn` rotates it
     /// about the box center.
     Arrow { turn: f32 },
@@ -67,7 +67,7 @@ pub(crate) struct PortGlyph<'a> {
     /// Side of the *painted* shape; the sensing box is [`HIT_SCALE`] of this.
     size: f32,
     shape: GlyphShape,
-    fill: Color,
+    fill: RgbaF32,
     placement: Placement,
     tip: Option<TextInput<'a>>,
 }
@@ -103,7 +103,7 @@ impl<'a> PortGlyph<'a> {
             wid,
             size,
             shape,
-            fill: Color::WHITE,
+            fill: RgbaF32::WHITE,
             placement: Placement::Margin(Spacing::ZERO),
             tip: None,
         }
@@ -121,14 +121,14 @@ impl<'a> PortGlyph<'a> {
     }
 
     /// Ink of the painted shape. Defaults to white — every caller sets it.
-    pub(crate) fn fill(mut self, color: Color) -> Self {
+    pub(crate) fn fill(mut self, color: RgbaF32) -> Self {
         self.fill = color;
         self
     }
 
     /// Ring a circle with an annulus strictly outside its fill. Ignored by
     /// [`arrow`](Self::arrow). Default: no ring.
-    pub(crate) fn outline(mut self, color: Color) -> Self {
+    pub(crate) fn outline(mut self, color: RgbaF32) -> Self {
         if let GlyphShape::Circle { outline } = &mut self.shape {
             *outline = Some(color);
         }
@@ -208,7 +208,7 @@ impl<'a> PortGlyph<'a> {
 
 impl GlyphShape {
     /// Paint into the `size`-sided square at `inset` within the `hit`-sided box.
-    fn draw(self, ui: &mut Ui, size: f32, inset: f32, hit: f32, fill: Color) {
+    fn draw(self, ui: &mut Ui, size: f32, inset: f32, hit: f32, fill: RgbaF32) {
         match self {
             GlyphShape::Circle { outline } => {
                 let rect = Rect::new(inset, inset, size, size);
