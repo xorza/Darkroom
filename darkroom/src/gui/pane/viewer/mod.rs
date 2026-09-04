@@ -511,7 +511,7 @@ pub(crate) fn node_label(doc: &Document, node_id: NodeId) -> &str {
 /// physical pixel, which is the space every viewport in this module is
 /// expressed in, so the framing math never sees raw texels.
 fn logical_size(image: &DrawableImage, ui: &Ui) -> Vec2 {
-    image.handle.size().as_vec2() / ui.display().scale_factor
+    image.handle.size().as_vec2() / ui.display().scale_factor()
 }
 
 /// Stable id for a viewer's pane — keyed by node so switching between two
