@@ -7,3 +7,5 @@
 - quickbench - runonce cli arg
 - palantir prelude
 - simplify cpu image updating without allocation
+- custom panels
+- custom renderer backends
