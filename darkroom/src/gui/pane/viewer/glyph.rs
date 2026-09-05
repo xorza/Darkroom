@@ -109,8 +109,16 @@ pub(super) fn draw_swatch(
         ViewerBackground::Black => filled_rect(ui, rect, 2.0, RgbaF32::BLACK),
         ViewerBackground::White => filled_rect(ui, rect, 2.0, RgbaF32::WHITE),
         ViewerBackground::Checker => {
-            let light = RgbaF32::from_srgba(SrgbaU8::rgb(CHECKER_LIGHT_U8, CHECKER_LIGHT_U8, CHECKER_LIGHT_U8));
-            let dark = RgbaF32::from_srgba(SrgbaU8::rgb(CHECKER_DARK_U8, CHECKER_DARK_U8, CHECKER_DARK_U8));
+            let light = RgbaF32::from_srgba(SrgbaU8::rgb(
+                CHECKER_LIGHT_U8,
+                CHECKER_LIGHT_U8,
+                CHECKER_LIGHT_U8,
+            ));
+            let dark = RgbaF32::from_srgba(SrgbaU8::rgb(
+                CHECKER_DARK_U8,
+                CHECKER_DARK_U8,
+                CHECKER_DARK_U8,
+            ));
             filled_rect(ui, rect, 2.0, dark);
             // Two light quads on the diagonal make the 2×2 mini checker.
             let h = d * 0.5;

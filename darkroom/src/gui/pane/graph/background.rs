@@ -25,17 +25,11 @@ const TILE_PX: u32 = 64;
 /// cost of one draw call.
 #[derive(Default, Debug)]
 pub(super) struct CanvasBackground {
-    /// `(params, handle)` of the registered dot tile. Reused while the
-    /// params are unchanged so we don't synthesize a 64×64 image every
-    /// frame (the registry's `register` takes the `Image` by value, so
-    /// even a cache hit would allocate the tile to hand in).
+    // Reuse the tile until its inputs change; constructing its pixels allocates.
     tile: Option<(DotKey, ImageHandle)>,
 }
 
-/// The theme inputs `build_tile` reads. The per-frame "did the theme
-/// change?" compare: an unchanged key reuses the cached tile handle
-/// instead of re-synthesizing and re-uploading. Floats stored as raw
-/// bits for exact `Eq`.
+// Float bits preserve exact equality for cache invalidation.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct DotKey {
     color: SrgbaU8,
@@ -91,10 +85,8 @@ impl CanvasBackground {
         {
             return handle.clone();
         }
-        // A changed `key` means a theme swap: register a fresh tile and
-        // drop the old handle, freeing the previous tile's GPU texture.
         let handle = ui
-            .register_image(build_tile(theme))
+            .register_image(&build_tile(theme))
             .expect("canvas tile fits every supported GPU");
         self.tile = Some((key, handle.clone()));
         handle

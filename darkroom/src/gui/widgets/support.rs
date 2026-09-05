@@ -8,7 +8,7 @@ use std::fmt::Display;
 use glam::Vec2;
 
 use palantir::{
-    Background, RgbaF32, Configure, Corners, FontFamily, Panel, Rect, ResponseSnapshot, Shape,
+    Background, Configure, Corners, FontFamily, Panel, Rect, ResponseSnapshot, RgbaF32, Shape,
     Sizing, Stroke, Text, TextInput, TextStyle, Tooltip, Ui, fmt,
 };
 

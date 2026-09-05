@@ -3,7 +3,7 @@
 
 use glam::Vec2;
 use palantir::{
-    RgbaF32, Configure, Panel, Rect, Sense, Shape, Sizing, Spacing, TextInput, Ui, WidgetId,
+    Configure, Panel, Rect, RgbaF32, Sense, Shape, Sizing, Spacing, TextInput, Ui, WidgetId,
 };
 
 use crate::gui::widgets::support::{filled_rect, stroked_rect, tooltip_after};

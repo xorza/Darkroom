@@ -1,7 +1,7 @@
 //! One node's body: the widget that records it, and what recording it reports.
 
 use glam::Vec2;
-use palantir::{Background, RgbaF32, Configure, Corners, Panel, Sense, Shadow, Sizing, Stroke, Ui};
+use palantir::{Background, Configure, Corners, Panel, RgbaF32, Sense, Shadow, Sizing, Stroke, Ui};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;

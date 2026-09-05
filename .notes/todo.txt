@@ -9,3 +9,4 @@
 - simplify cpu image updating without allocation
 - custom panels
 - custom renderer backends
+- ui resources + shared resources + HostShared

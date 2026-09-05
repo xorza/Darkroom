@@ -203,7 +203,6 @@ impl PreviewImage {
         }
     }
 
-    /// Register the value's pixels at full resolution.
     fn upload(ui: &Ui, value: &DynamicValue) -> Result<ImageHandle, PreviewImageError> {
         // Not a fallible step here, unlike in `prepare_content`: a
         // `PreviewImage` is only ever built over a value that already
@@ -253,15 +252,13 @@ fn prepare_drawable(
     if native_size.x == 0 || native_size.y == 0 {
         return Err(PreviewImageError::Empty);
     }
-    // Whichever ceiling is lower, and no ceiling at all only when neither the
-    // caller nor the device names one.
     let ceiling = [max_dim, ui.max_image_dimension()]
         .into_iter()
         .flatten()
         .min();
     let raster = rgba8_raster(&cpu, capped_target(native_size, ceiling));
     Ok(DrawableImage {
-        handle: ui.register_image(raster)?,
+        handle: ui.register_image(&raster)?,
         native_size,
         native_format: cpu.desc().color_format,
     })

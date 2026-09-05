@@ -12,7 +12,7 @@
 use std::f32::consts::{FRAC_PI_4, PI};
 
 use palantir::{
-    Align, RgbaF32, Configure, FontFamily, Panel, Sizing, Spacing, Spinner, Text, TextStyle, Ui,
+    Align, Configure, FontFamily, Panel, RgbaF32, Sizing, Spacing, Spinner, Text, TextStyle, Ui,
     VAlign, WidgetId, fmt,
 };
 use scenarium::{CacheMode, NodeId};
