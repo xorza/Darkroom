@@ -30,8 +30,8 @@ use std::fmt::Display;
 use common::FloatExt;
 use glam::{UVec2, Vec2};
 use palantir::{
-    Align, Background, RgbaF32, Configure, HAlign, ImageDownsample, ImageFilter, ImageFit,
-    ImageHandle, Panel, Sense, Shape, Sizing, Spacing, Ui, VAlign, WidgetId, fmt,
+    Align, Background, Configure, HAlign, ImageDownsample, ImageFilter, ImageFit, ImageHandle,
+    Panel, RgbaF32, Sense, Shape, Sizing, Spacing, Ui, VAlign, WidgetId, fmt,
 };
 
 use crate::core::document::{Document, Viewport};
@@ -57,7 +57,6 @@ pub(crate) struct ImageViewer {
     /// The preview node this viewer shows — keys the pane's widget id so
     /// two viewer tabs never share gesture responses.
     node_id: NodeId,
-    /// Texture dimensions used to decide whether a new revision needs a refit.
     source_size: Option<UVec2>,
     /// Explicit viewport once the user pans/zooms; `None` = fit-to-pane
     /// (recomputed each frame, so it tracks pane resizes). The image's
@@ -123,8 +122,6 @@ impl ShownSource {
         }
     }
 
-    /// The texture, for the framing and gesture math that mean nothing
-    /// without one.
     fn image(&self) -> Option<&DrawableImage> {
         match self {
             Self::Image(image) => Some(image),
@@ -132,8 +129,6 @@ impl ShownSource {
         }
     }
 
-    /// The line to draw *in place of* an image. Exactly complementary to
-    /// [`Self::image`], so the pane draws one or the other and never both.
     fn hint(&self) -> Option<PreviewMessage<'_>> {
         match self {
             Self::Image(_) => None,
@@ -155,8 +150,6 @@ impl ImageViewer {
         }
     }
 
-    /// Back to fit-to-pane framing (and cancel any pan in progress) for a
-    /// source change, the fit button, or a double-click.
     fn reset_framing(&mut self) {
         self.view = None;
         self.pan_anchor = None;
@@ -192,8 +185,6 @@ impl ImageViewer {
             .or_else(|| Some(fit_viewport(logical_size(image, ui), pane?)))
     }
 
-    /// Keep framing across same-size revisions and refit when the displayed
-    /// texture dimensions change or the source disappears.
     fn sync_source(&mut self, source_size: Option<UVec2>) {
         if source_size != self.source_size {
             self.reset_framing();
@@ -247,16 +238,7 @@ impl ImageViewer {
                     let image = Shape::image(shown.handle.clone())
                         .min_filter(ImageFilter::Linear)
                         .mag_filter(prefs.mag_filter)
-                        // A viewer's whole job is a frame shown smaller than it
-                        // is, which is exactly where one bilinear tap reads a
-                        // shifting slice of each pixel's source footprint and
-                        // makes fine detail blink under a pan. `Peak` rather
-                        // than `Mean` because these are astronomical frames: a
-                        // one-texel star area-averaged over its footprint drops
-                        // below visibility, and an overview that hides the
-                        // stars is not an overview. It reads brighter than the
-                        // true average — the trade a "find things" view wants,
-                        // and the reason the 100% button exists.
+                        // Area averaging preserves source brightness when minifying.
                         .downsample(ImageDownsample::Mean);
                     ui.add_shape(match self.effective_view(ui, shown, pane) {
                         Some(v) => image
@@ -294,7 +276,7 @@ impl ImageViewer {
         let handle = self
             .checker
             .get_or_insert_with(|| {
-                ui.register_image(glyph::checker_image())
+                ui.register_image(&glyph::checker_image())
                     .expect("checker image fits every supported GPU")
             })
             .clone();
@@ -302,7 +284,6 @@ impl ImageViewer {
             Shape::image(handle)
                 .fit(ImageFit::Tile {
                     offset: Vec2::ZERO,
-                    // The 2×2 tile is one checker period = 2 squares across.
                     scale: pane / (2.0 * glyph::CHECKER_SQUARE_PX),
                 })
                 .min_filter(ImageFilter::Nearest)
@@ -395,8 +376,6 @@ impl ImageViewer {
                             changed = true;
                         }
                     }
-                    // Rule between the backdrop radio stack and the
-                    // sampling toggle — two concepts, one pill.
                     pill_rule(ui, theme);
                     changed |= filter_toggle(ui, theme, node_id, &mut prefs.mag_filter);
                 });
@@ -542,7 +521,7 @@ mod tests {
         let mut h = UiHarness::arena();
         let handle = h
             .ui()
-            .register_image(glyph::checker_image())
+            .register_image(&glyph::checker_image())
             .expect("a 2x2 checker fits every supported GPU");
         // The texture is the 2×2 checker either way; `native_size` is what
         // says whether the view is capped below its source.
@@ -560,15 +539,10 @@ mod tests {
             .to_string()
         };
 
-        // Texture matches the source, and a fit-mode viewer with no arranged
-        // pane yet has no zoom to report: the head stands alone.
         let full = shown(UVec2::new(2, 2));
         assert_eq!(line(&full, None), "img · 2 × 2 · RGBA u8");
-        // Zoom is a percentage rounded to whole points, appended last.
         assert_eq!(line(&full, Some(1.25)), "img · 2 × 2 · RGBA u8 · 125%");
 
-        // A source larger than its texture is a capped view, and that clause
-        // sits ahead of the zoom.
         let capped = shown(UVec2::new(8192, 4096));
         assert_eq!(
             line(&capped, None),
@@ -674,7 +648,6 @@ mod tests {
         let theme = Theme::default();
         let mut prefs = ViewerPreferences::default();
         let mut viewer = ImageViewer::new(node);
-        // The size the dock hands down on the pass a tab appears.
         let pane = Some(Vec2::new(800.0, 600.0));
         // The record closure runs once per pass, so counting it is what
         // says the frame settled in one — palantir keeps its pass structure

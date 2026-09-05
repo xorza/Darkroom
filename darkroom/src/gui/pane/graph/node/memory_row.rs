@@ -3,7 +3,9 @@
 //! only when the node retains bytes — a zero pool is dropped and an idle node
 //! shows no strip at all, matching the window status bar.
 
-use palantir::{Align, Background, RgbaF32, Configure, Corners, Panel, Sizing, Spacing, Ui, VAlign};
+use palantir::{
+    Align, Background, Configure, Corners, Panel, RgbaF32, Sizing, Spacing, Ui, VAlign,
+};
 
 use crate::gui::widgets::support::{
     CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, footer_background, labeled_value,

@@ -4,7 +4,7 @@
 //! own glyphs and toggle color policy.
 
 use palantir::{
-    Background, RgbaF32, Configure, Corners, Panel, Sense, Separator, Sizing, Spacing, Ui, WidgetId,
+    Background, Configure, Corners, Panel, RgbaF32, Sense, Separator, Sizing, Spacing, Ui, WidgetId,
 };
 
 use crate::gui::theme::Theme;

@@ -25,7 +25,7 @@ use std::fmt::Display;
 
 use glam::Vec2;
 use palantir::{
-    Background, RgbaF32, Configure, Corners, FontWeight, Panel, Sense, Shadow, Sizing, Spacing,
+    Background, Configure, Corners, FontWeight, Panel, RgbaF32, Sense, Shadow, Sizing, Spacing,
     Stroke, Text, TextInput, TextStyle, TextWrap, Ui, WidgetId, fmt,
 };
 use scenarium::DataType;

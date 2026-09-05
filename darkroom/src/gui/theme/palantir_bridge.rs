@@ -1,7 +1,7 @@
 //! The palantir-side half of the theme: darkroom's palette projected onto
 //! [`palantir::Palette`], and the [`palantir::Theme`] that builds.
 
-use palantir::{Background, ButtonTheme, RgbaF32, Corners, Stroke, TextStyle, WidgetLook};
+use palantir::{Background, ButtonTheme, Corners, RgbaF32, Stroke, TextStyle, WidgetLook};
 
 use crate::gui::theme::palette::Palette;
 use crate::gui::theme::type_scale::TypeScale;

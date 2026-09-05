@@ -11,7 +11,7 @@
 
 use glam::Vec2;
 use palantir::{
-    Align, RgbaF32, Configure, HAlign, Panel, Rect, Shape, Sizing, Spacing, Ui, VAlign, WidgetId,
+    Align, Configure, HAlign, Panel, Rect, RgbaF32, Shape, Sizing, Spacing, Ui, VAlign, WidgetId,
 };
 
 use crate::gui::app::commands::AppCommand;

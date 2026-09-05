@@ -13,7 +13,7 @@
 use std::path::{Path, PathBuf};
 
 use palantir::{
-    Align, Background, Button, Checkbox, RgbaF32, Configure, FontWeight, HAlign, Panel, Sense,
+    Align, Background, Button, Checkbox, Configure, FontWeight, HAlign, Panel, RgbaF32, Sense,
     Sizing, Spacing, Stroke, Text, TextEdit, TextStyle, Tooltip, Ui, VAlign, WidgetId,
 };
 

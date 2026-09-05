@@ -8,7 +8,7 @@
 //! tooltip, and maps the returned click onto its own intent.
 
 use palantir::{
-    Align, Background, RgbaF32, Configure, Corners, FontWeight, Panel, Sense, Sizing, Spacing,
+    Align, Background, Configure, Corners, FontWeight, Panel, RgbaF32, Sense, Sizing, Spacing,
     Stroke, Text, TextStyle, Ui, WidgetId,
 };
 

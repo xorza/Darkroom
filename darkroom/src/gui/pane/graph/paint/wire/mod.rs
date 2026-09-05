@@ -18,7 +18,7 @@
 //! commits.
 
 use glam::Vec2;
-use palantir::{RgbaF32, CurveBrush, LineCap, LinearGradient, Rect, Shape, Size, Stop, Ui};
+use palantir::{CurveBrush, LineCap, LinearGradient, Rect, RgbaF32, Shape, Size, Stop, Ui};
 use scenarium::NodeId;
 
 use crate::gui::graph_ctx::GraphCtx;
