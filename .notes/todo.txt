@@ -6,7 +6,5 @@
 - image buffer and lens image interleaved/planar formats
 - quickbench - runonce cli arg
 - palantir prelude
-- simplify cpu image updating without allocation
 - custom panels
 - custom renderer backends
-- ui resources + shared resources + HostShared
