@@ -22,7 +22,7 @@ struct RenameState {
     /// The in-progress draft plus blur-edge tracking, shared with
     /// `gui::pane::graph::node::value_editor`'s buffered fields — see
     /// [`EditBuffer`] for why the latch needs to survive the
-    /// `request_focus` → focus-landing gap this widget opens.
+    /// `set_focus` → focus-landing gap this widget opens.
     edit: EditBuffer,
 }
 
@@ -178,7 +178,7 @@ impl<'a> InlineRename<'a> {
             HAlign::Right | HAlign::Center => Spacing::xy(caret_room, 0.0),
             _ => Spacing::new(0.0, 0.0, 2.0 * caret_room, 0.0),
         };
-        if !ui.state_mut::<RenameState>(id).active {
+        if !ui.state_or_default::<RenameState>(id).active {
             // `DRAG` as well as `CLICK`: the label captures the press
             // (so it can register clicks / double-click-to-edit), but
             // a press that turns into a drag must still be available
@@ -212,14 +212,14 @@ impl<'a> InlineRename<'a> {
             let clicked = resp.left.clicked();
             let double_clicked = resp.left.double_clicked();
             if double_clicked {
-                let st = ui.state_mut::<RenameState>(id);
+                let st = ui.state_or_default::<RenameState>(id);
                 st.active = true;
                 st.edit.reset_latch();
                 // Refilled, not replaced — the row's buffer keeps whatever
                 // capacity the last rename grew it to.
                 st.edit.text.clear();
                 st.edit.text.push_str(name);
-                ui.request_focus(Some(id));
+                ui.set_focus(id);
             }
             return RenameEvent {
                 clicked,
@@ -227,7 +227,7 @@ impl<'a> InlineRename<'a> {
             };
         }
 
-        let mut draft = std::mem::take(&mut ui.state_mut::<RenameState>(id).edit.text);
+        let mut draft = std::mem::take(&mut ui.state_or_default::<RenameState>(id).edit.text);
         // Both signals come off the editor, not off `ui`. A focused
         // `TextEdit` declares a `TEXT_FIELD` scope, which takes Enter
         // (`KeyClass::Text`) and Escape (`KeyClass::Escape`) — so polling
@@ -254,7 +254,10 @@ impl<'a> InlineRename<'a> {
             (edit.submitted, edit.cancelled)
         };
         let focused = ui.focused_id() == Some(id);
-        let blurred = ui.state_mut::<RenameState>(id).edit.blur_edge(focused);
+        let blurred = ui
+            .state_or_default::<RenameState>(id)
+            .edit
+            .blur_edge(focused);
         // Commit on Enter or on blur; Esc wins as a cancel. Escape blurs
         // too, so `cancelled` has to be tested first.
         let commit = !cancelled && (submitted || blurred);
@@ -262,17 +265,17 @@ impl<'a> InlineRename<'a> {
         // every other one hands the buffer straight back, so an open rename
         // copies its text once per commit rather than once per frame.
         let committed = (commit && draft.as_str() != name).then(|| draft.clone());
-        ui.state_mut::<RenameState>(id).edit.text = draft;
+        ui.state_or_default::<RenameState>(id).edit.text = draft;
         if !(commit || cancelled) {
             return RenameEvent {
                 clicked: false,
                 committed: None,
             };
         }
-        let st = ui.state_mut::<RenameState>(id);
+        let st = ui.state_or_default::<RenameState>(id);
         st.active = false;
         st.edit.reset_latch();
-        ui.request_focus(None);
+        ui.clear_focus();
         RenameEvent {
             clicked: false,
             committed,

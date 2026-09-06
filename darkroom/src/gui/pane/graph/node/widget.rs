@@ -36,7 +36,7 @@ pub(super) struct NodeResponse {
 /// shares.
 ///
 /// A builder in palantir's shape — `new(..).show(ui, ..)` — but taking its
-/// state `&mut` rather than keeping it in `ui.state_mut()`, because none of
+/// state `&mut` rather than keeping it in `ui.state_or_default()`, because none of
 /// what [`NodeUI`] holds is per-node: there is one pointer so one drag, and
 /// `row_tracks` is deliberately one buffer the whole frame slices out of.
 /// Per-widget state would reintroduce the allocation it exists to avoid.

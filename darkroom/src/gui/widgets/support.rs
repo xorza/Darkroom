@@ -7,10 +7,9 @@ use std::fmt::Display;
 
 use glam::Vec2;
 
-use palantir::{
-    Background, Configure, Corners, FontFamily, Panel, Rect, ResponseSnapshot, RgbaF32, Shape,
-    Sizing, Stroke, Text, TextInput, TextStyle, Tooltip, Ui, fmt,
-};
+use palantir::prelude::*;
+use palantir::widget::Shape;
+use palantir::{Corners, FontFamily, ResponseSnapshot, TextInput};
 
 use crate::gui::theme::Theme;
 

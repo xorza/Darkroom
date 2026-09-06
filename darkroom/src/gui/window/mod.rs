@@ -161,7 +161,7 @@ impl MainWindow {
             // Escape all stop here rather than doubling as graph edits,
             // while `ACCEL` (Ctrl+S, Ctrl+R, …) still lands on the app
             // mid-edit.
-            .input_scope(KeyFilter::all() - KeyFilter::TEXT)
+            .input_scope(KeyFilter::all().difference(KeyFilter::TEXT))
             .show(ui, |ui| {
                 Panel::hstack()
                     .id_salt("chrome_row")

@@ -179,7 +179,7 @@ impl NodePalette<'_> {
             .margin(Spacing::new(0.0, 0.0, 0.0, SEARCH_ROW_GAP))
             .show(ui);
         if focus {
-            ui.request_focus(Some(search_id));
+            ui.set_focus(search_id);
         }
         // Folded after the field records, so it reflects this frame's typing.
         search.fold();

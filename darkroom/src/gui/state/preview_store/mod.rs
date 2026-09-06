@@ -258,7 +258,7 @@ fn prepare_drawable(
         .min();
     let raster = rgba8_raster(&cpu, capped_target(native_size, ceiling));
     Ok(DrawableImage {
-        handle: ui.register_image(&raster)?,
+        handle: ui.load_image(&raster)?,
         native_size,
         native_format: cpu.desc().color_format,
     })
@@ -272,7 +272,7 @@ fn rgba8_raster(cpu: &CpuImage, target: UVec2) -> Raster {
     assert_eq!(desc.color_format, ColorFormat::RGBA_U8);
     let pixels = rgba.into_bytes();
     assert_eq!(pixels.len(), desc.row_bytes() * desc.height);
-    Raster::from_rgba8(target.x, target.y, pixels)
+    Raster::from_srgba8(target, pixels)
 }
 
 /// `native` scaled to fit `max_dim` on its longest edge — aspect preserved,

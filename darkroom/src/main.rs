@@ -16,7 +16,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use common::is_debug;
-use palantir::{Image, WindowConfig, WinitHost, WinitHostError};
+use palantir::{Image, UVec2, WindowConfig, WinitHost, WinitHostError};
 
 use crate::core::io::preferences::Preferences;
 use crate::gui::MAIN_WINDOW;
@@ -98,7 +98,7 @@ fn load_icon() -> Option<Image> {
         .ok()?
         .to_rgba8();
     let (w, h) = rgba.dimensions();
-    Some(Image::from_rgba8(w, h, rgba.into_raw()))
+    Some(Image::from_srgba8(UVec2::new(w, h), rgba.into_raw()))
 }
 
 /// Minimal stderr tracing subscriber, `RUST_LOG`-controlled (defaults to

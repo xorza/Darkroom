@@ -1,6 +1,6 @@
 //! Why a published value has no image to draw.
 
-use palantir::RegisterImageError;
+use palantir::ImageLoadError;
 
 /// Why a preview value could not become a texture.
 ///
@@ -19,5 +19,5 @@ pub(crate) enum PreviewImageError {
     /// The renderer refused the texture — larger than the device's maximum
     /// 2D dimension.
     #[error("{0}")]
-    Register(#[from] RegisterImageError),
+    Register(#[from] ImageLoadError),
 }

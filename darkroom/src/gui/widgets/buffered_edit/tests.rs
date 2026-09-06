@@ -17,9 +17,9 @@ fn blur_edge_fires_once_on_the_true_to_false_transition() {
 }
 
 #[test]
-fn blur_edge_ignores_the_request_focus_gap() {
+fn blur_edge_ignores_the_set_focus_gap() {
     // Mirrors inline_rename: `reset_latch` at session start, then
-    // one or more frames where `request_focus` hasn't landed yet
+    // one or more frames where `set_focus` hasn't landed yet
     // (still reads unfocused) before it actually does.
     let mut buf = EditBuffer::default();
     buf.reset_latch();
@@ -49,7 +49,7 @@ fn reset_latch_forces_a_non_blur_exit() {
 
 #[test]
 fn blur_edge_matches_a_plain_last_frame_register_without_a_gap() {
-    // For a caller that never opens a request_focus gap (value_editor),
+    // For a caller that never opens a set_focus gap (value_editor),
     // the latch must reduce exactly to `was_focused = focused`, checked
     // by hand-computing the reference formula alongside the latch.
     let mut buf = EditBuffer::default();

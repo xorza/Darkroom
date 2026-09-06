@@ -80,7 +80,7 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
             field.max().y <= results.min.y + 0.5,
             "{label}: the results overlap the search field ({field:?} vs {results:?})",
         );
-        let used = menu.padding.vert() + field.size.h + menu.gap + results.size.h;
+        let used = menu.padding.vertical_sum() + field.size.h + menu.gap + results.size.h;
         assert!(
             used <= cap + 0.5,
             "{label}: field {} + results {} + chrome overflows the {cap} cap (used {used})",

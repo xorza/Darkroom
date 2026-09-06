@@ -2,9 +2,8 @@
 //! rounded triangle in a generously grown hit box, with a hover tooltip.
 
 use glam::Vec2;
-use palantir::{
-    Configure, Panel, Rect, RgbaF32, Sense, Shape, Sizing, Spacing, TextInput, Ui, WidgetId,
-};
+use palantir::widget::Shape;
+use palantir::{Configure, Panel, Rect, RgbaF32, Sense, Sizing, Spacing, TextInput, Ui, WidgetId};
 
 use crate::gui::widgets::support::{filled_rect, stroked_rect, tooltip_after};
 

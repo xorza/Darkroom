@@ -197,7 +197,7 @@ fn chrome_above_results(ui: &Ui) -> f32 {
         },
         |rect| rect.size.h,
     );
-    menu.padding.vert() + menu.gap + row
+    menu.padding.vertical_sum() + menu.gap + row
 }
 
 #[cfg(test)]
