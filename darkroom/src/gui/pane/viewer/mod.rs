@@ -27,11 +27,10 @@ mod glyph;
 use scenarium::NodeId;
 use std::fmt::Display;
 
-use common::FloatExt;
 use glam::{UVec2, Vec2};
 use palantir::{
     Align, Background, Configure, HAlign, ImageDownsample, ImageFilter, ImageFit, ImageHandle,
-    Panel, RgbaF32, Sense, Shape, Sizing, Spacing, Ui, VAlign, WidgetId, fmt,
+    Panel, RgbaF32, Sense, Shape, Sizing, Spacing, Ui, VAlign, WidgetId, ZoomFactor, fmt,
 };
 
 use crate::core::document::{Document, Viewport};
@@ -403,7 +402,7 @@ impl ImageViewer {
             || resp.middle.drag.started()
             || resp.scroll.pixels != Vec2::ZERO
             || resp.scroll.lines.y != 0.0
-            || !resp.scroll.zoom.approximately_eq(1.0);
+            || resp.scroll.zoom != ZoomFactor::ONE;
         if self.view.is_none() && !adjusting {
             return;
         }

@@ -403,7 +403,7 @@ fn snapshot<K: GlyphKey>(
     PortInfo {
         layout_center,
         screen_rect: r.rect,
-        hovered: r.hovered,
+        hovered: r.hovered(),
         drag_started: r.left.drag.started(),
         dragging: r.left.drag.started() || r.left.drag.delta().is_some(),
     }

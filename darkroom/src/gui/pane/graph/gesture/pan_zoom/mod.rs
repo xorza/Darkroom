@@ -6,7 +6,7 @@
 
 use common::FloatExt;
 use glam::Vec2;
-use palantir::{Rect, ResponseState, Size, Ui};
+use palantir::{Rect, ResponseState, Size, Ui, ZoomFactor};
 
 use crate::core::document::Viewport;
 use crate::core::edit::graph_intent::GraphIntent;
@@ -64,14 +64,14 @@ pub(crate) fn fold_scroll_zoom(
             max_zoom,
         );
     }
-    if (resp.scroll.zoom - 1.0).abs() > f32::EPSILON
+    if resp.scroll.zoom != ZoomFactor::ONE
         && let Some(pivot) = resp.pointer_local
     {
         zoom_about(
             &mut v.pan,
             &mut v.zoom,
             pivot,
-            resp.scroll.zoom,
+            resp.scroll.zoom.get(),
             min_zoom,
             max_zoom,
         );
