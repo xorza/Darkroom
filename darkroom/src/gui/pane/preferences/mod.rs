@@ -332,7 +332,7 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
     let id = WidgetId::from_hash(("preferences.download_hint", link_label));
     // Last frame's hover drives the brighten — this frame's response isn't
     // known until after `show`.
-    let link_color = if ui.response_for(id).hovered {
+    let link_color = if ui.response_for(id).hovered() {
         theme.colors.badge_graph.lerp(RgbaF32::hex(0xffffff), 0.5)
     } else {
         theme.colors.badge_graph

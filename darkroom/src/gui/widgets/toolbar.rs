@@ -120,7 +120,7 @@ impl Chip {
         theme: &Theme,
         draw_glyph: impl FnOnce(&mut Ui, f32, RgbaF32),
     ) -> bool {
-        let hovered = ui.response_for(self.wid).hovered;
+        let hovered = ui.response_for(self.wid).hovered();
         // Glyph and fill vary on different axes: the glyph only inverts
         // for the toggled state, the fill also lifts on hover.
         let glyph = if self.toggled {

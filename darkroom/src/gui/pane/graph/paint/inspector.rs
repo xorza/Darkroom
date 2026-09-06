@@ -26,7 +26,7 @@ use std::fmt::Display;
 use glam::Vec2;
 use palantir::{
     Background, Configure, Corners, FontWeight, Panel, RgbaF32, Sense, Shadow, Sizing, Spacing,
-    Stroke, Text, TextInput, TextStyle, TextWrap, Ui, WidgetId, fmt,
+    Stroke, Text, TextInput, TextStyle, TextWrap, Ui, WidgetId, ZoomFactor, fmt,
 };
 use scenarium::DataType;
 use scenarium::Library;
@@ -299,7 +299,7 @@ fn outside_action(ui: &Ui, body_acted: bool) -> bool {
         || dragged
         || oc.scroll.lines != Vec2::ZERO
         || oc.scroll.pixels != Vec2::ZERO
-        || (oc.scroll.zoom - 1.0).abs() > f32::EPSILON;
+        || oc.scroll.zoom != ZoomFactor::ONE;
     // The node half comes off the draw that just ran.
     canvas_acted || body_acted
 }

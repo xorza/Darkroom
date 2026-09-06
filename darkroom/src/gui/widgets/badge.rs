@@ -147,7 +147,7 @@ impl Badge {
         // control can carry one — a marker senses `HOVER` for its tooltip but
         // never restyles.
         if let (Some(hovered), BadgeKind::Control { wid, .. }) = (hover_color, kind)
-            && ui.response_for(wid).hovered
+            && ui.response_for(wid).hovered()
         {
             color = hovered;
         }
@@ -178,7 +178,7 @@ impl Badge {
             BadgeKind::Control { wid, filled } => {
                 // Last-frame hover (`response_for`) lifts the fill so the chip
                 // reads as pressable — the same trick the tab-strip chips use.
-                let alpha = match (filled, ui.response_for(wid).hovered) {
+                let alpha = match (filled, ui.response_for(wid).hovered()) {
                     (true, true) => CHIP_ON_HOVER_ALPHA,
                     (true, false) => CHIP_ON_ALPHA,
                     (false, true) => CHIP_TINT_ALPHA,

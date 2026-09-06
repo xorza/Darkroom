@@ -84,7 +84,7 @@ pub(super) fn preview_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
         })
         .response
         .snapshot();
-    if content.hovered {
+    if content.hovered() {
         ui.set_cursor(CursorIcon::Pointer);
     }
     // The card's one action: open this node's value at full resolution. Asked
