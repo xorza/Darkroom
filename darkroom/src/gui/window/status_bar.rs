@@ -9,9 +9,7 @@
 //! appears and vanishes reads as layout jitter, and a permanent one keeps
 //! the dock from resizing when a run lands.
 
-use palantir::{
-    Align, Background, Configure, HAlign, Panel, Sizing, Spacing, Text, Ui, VAlign, WidgetId, fmt,
-};
+use palantir::prelude::*;
 use scenarium::RamUsage;
 
 use crate::gui::app::ctx::AppCtx;

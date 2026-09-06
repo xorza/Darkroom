@@ -7,7 +7,8 @@
 //! here, so adding a control means adding a row to [`BACKDROPS`] or a function
 //! beside [`filter_toggle`] rather than growing the record pass.
 
-use palantir::{Configure, ImageFilter, Panel, Sizing, Spacing, Text, TextInput, Ui, WidgetId};
+use palantir::prelude::*;
+use palantir::{ImageFilter, TextInput};
 use scenarium::NodeId;
 
 use crate::core::io::preferences::ViewerBackground;

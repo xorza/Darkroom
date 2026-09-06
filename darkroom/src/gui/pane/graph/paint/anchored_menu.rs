@@ -1,5 +1,6 @@
 use glam::Vec2;
-use palantir::{Anchor, ClickOutside, CloseHandle, Configure, Popup, Sizing, Ui};
+use palantir::prelude::*;
+use palantir::{Anchor, ClickOutside, CloseHandle};
 use scenarium::NodeId;
 
 use crate::gui::pane::graph::gesture::slot::GestureSlot;

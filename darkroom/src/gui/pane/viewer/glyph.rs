@@ -10,7 +10,8 @@
 //!
 //! [`TypeScale`]: crate::gui::theme::type_scale::TypeScale
 
-use palantir::{Align, Configure, Rect, RgbaF32, SrgbaU8, Text, UVec2, Ui};
+use palantir::SrgbaU8;
+use palantir::prelude::*;
 
 use crate::core::io::preferences::ViewerBackground;
 use crate::gui::theme::Theme;

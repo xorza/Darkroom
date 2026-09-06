@@ -7,10 +7,8 @@
 //! like the rest of `widgets` — a caller supplies the glyph, colour, id, and
 //! tooltip, and maps the returned click onto its own intent.
 
-use palantir::{
-    Align, Background, Configure, Corners, FontWeight, Panel, RgbaF32, Sense, Sizing, Spacing,
-    Stroke, Text, TextStyle, Ui, WidgetId,
-};
+use palantir::FontWeight;
+use palantir::prelude::*;
 
 use crate::gui::widgets::support::tooltip_after;
 

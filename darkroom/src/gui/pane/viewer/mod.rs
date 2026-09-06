@@ -28,11 +28,9 @@ use scenarium::NodeId;
 use std::fmt::Display;
 
 use glam::{UVec2, Vec2};
+use palantir::prelude::*;
 use palantir::widget::Shape;
-use palantir::{
-    Align, Background, Configure, HAlign, ImageDownsample, ImageFilter, ImageFit, ImageHandle,
-    Panel, RgbaF32, Sense, Sizing, Spacing, Ui, VAlign, WidgetId, ZoomFactor, fmt,
-};
+use palantir::{ImageDownsample, ImageFilter, ImageFit, ImageHandle, ZoomFactor};
 
 use crate::core::document::{Document, Viewport};
 use crate::core::io::preferences::{ViewerBackground, ViewerPreferences};

@@ -35,10 +35,8 @@ use std::borrow::Cow;
 use std::fmt::{Display, Write as _};
 use std::path::Path;
 
-use palantir::{
-    Button, Checkbox, ComboBox, Configure, DragValue, Sizing, TextEdit, TextEditTheme, TextWrap,
-    Ui, WidgetId, fmt,
-};
+use palantir::prelude::*;
+use palantir::{TextEditTheme, TextWrap};
 use scenarium::{ConstValue, DataType, FsPathMode, Library, ValueVariant};
 
 use crate::gui::theme::const_value_editor_theme::ConstValueEditorTheme;

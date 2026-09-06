@@ -4,9 +4,8 @@
 use std::cmp::Ordering;
 
 use glam::Vec2;
-use palantir::{
-    CloseHandle, Configure, MenuItem, Panel, Scroll, Sizing, Spacing, Text, TextEdit, Tooltip, Ui,
-};
+use palantir::CloseHandle;
+use palantir::prelude::*;
 use scenarium::Func;
 use scenarium::NodeId;
 use scenarium::{Node, NodeKind};

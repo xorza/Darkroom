@@ -11,11 +11,9 @@
 use std::fmt::Display;
 
 use imaginarium::ColorFormat;
+use palantir::prelude::*;
 use palantir::widget::Shape;
-use palantir::{
-    Align, Configure, CursorIcon, DockOp, ImageFit, Justify, Panel, Sense, Sizing, Spacing, Text,
-    TextWrap, Ui, VAlign, WidgetId, fmt,
-};
+use palantir::{CursorIcon, DockOp, ImageFit, TextWrap};
 use scenarium::NodeId;
 
 use crate::core::document::TabRef;

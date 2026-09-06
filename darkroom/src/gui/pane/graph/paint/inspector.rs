@@ -24,10 +24,8 @@ use std::collections::BTreeMap;
 use std::fmt::Display;
 
 use glam::Vec2;
-use palantir::{
-    Background, Configure, Corners, FontWeight, Panel, RgbaF32, Sense, Shadow, Sizing, Spacing,
-    Stroke, Text, TextInput, TextStyle, TextWrap, Ui, WidgetId, ZoomFactor, fmt,
-};
+use palantir::prelude::*;
+use palantir::{FontWeight, TextInput, TextWrap, ZoomFactor};
 use scenarium::DataType;
 use scenarium::Library;
 use scenarium::LogLevel;

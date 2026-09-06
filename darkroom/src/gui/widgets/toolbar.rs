@@ -3,9 +3,7 @@
 //! toolbar and the image viewer's control panel; each caller keeps its
 //! own glyphs and toggle color policy.
 
-use palantir::{
-    Background, Configure, Corners, Panel, RgbaF32, Sense, Separator, Sizing, Spacing, Ui, WidgetId,
-};
+use palantir::prelude::*;
 
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::tooltip_after;
