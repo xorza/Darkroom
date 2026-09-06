@@ -23,7 +23,8 @@ pub(crate) mod paint;
 pub(crate) mod toolbar;
 
 use glam::Vec2;
-use palantir::{Background, Configure, Panel, Sense, Sizing, TranslateScale, Ui};
+use palantir::TranslateScale;
+use palantir::prelude::*;
 
 use crate::core::document::Document;
 use crate::core::edit::graph_intent::GraphIntent;

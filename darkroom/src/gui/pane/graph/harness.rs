@@ -8,8 +8,9 @@
 //! frame the app never performs.
 
 use glam::{UVec2, Vec2};
+use palantir::DockOp;
 use palantir::internals::UiHarness;
-use palantir::{Configure, DockOp, Panel, Rect, Sizing, Ui};
+use palantir::prelude::*;
 use scenarium::NodeId;
 
 use crate::core::document::harness::DocFixture;

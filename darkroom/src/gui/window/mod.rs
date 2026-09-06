@@ -5,10 +5,8 @@ pub(crate) mod status_bar;
 
 use std::collections::HashMap;
 
-use palantir::{
-    Align, Background, Configure, DockOp, DockView, KeyFilter, Panel, Sizing, TabOverflow, Ui,
-    VAlign, WidgetId,
-};
+use palantir::prelude::*;
+use palantir::{DockOp, DockView, KeyFilter, TabOverflow};
 use scenarium::{NodeId, OutputTypes};
 
 use crate::core::document::{Document, TabRef};

@@ -12,10 +12,8 @@ use std::fmt::Display;
 use std::sync::Arc;
 
 use glam::Vec2;
-use palantir::{
-    Align, CloseHandle, Configure, ContextMenu, Grid, HAlign, InternedStr, MenuItem, Panel, Sense,
-    Sizing, Spacing, Text, TextStyle, Track, Ui, VAlign, WidgetId, fmt,
-};
+use palantir::prelude::*;
+use palantir::{CloseHandle, InternedStr};
 use scenarium::Binding;
 use scenarium::FuncEvent;
 use scenarium::InputPort;

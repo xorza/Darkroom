@@ -4,7 +4,7 @@
 //! requested while it has edits; the returned [`DiscardOutcome`] is applied
 //! immediately after the dialog finishes authoring.
 
-use palantir::{Button, Checkbox, Configure, Modal, Panel, Text, Ui, WidgetId};
+use palantir::prelude::*;
 
 /// The user's answer to the unsaved-changes prompt for one frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

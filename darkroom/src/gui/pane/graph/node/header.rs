@@ -11,10 +11,8 @@
 
 use std::f32::consts::{FRAC_PI_4, PI};
 
-use palantir::{
-    Align, Configure, FontFamily, Panel, RgbaF32, Sizing, Spacing, Spinner, Text, TextStyle, Ui,
-    VAlign, WidgetId, fmt,
-};
+use palantir::FontFamily;
+use palantir::prelude::*;
 use scenarium::{CacheMode, NodeId};
 
 use crate::core::edit::graph_intent::GraphIntent;

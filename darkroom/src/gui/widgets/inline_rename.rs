@@ -6,10 +6,7 @@
 //! `gui::pane::graph::node::value_editor`; both share the blur-edge /
 //! buffered-text core in [`crate::gui::widgets::buffered_edit`].
 
-use palantir::{
-    Align, Configure, HAlign, Justify, Panel, Sense, Sizing, Spacing, Text, TextEdit, Ui, VAlign,
-    WidgetId,
-};
+use palantir::prelude::*;
 
 use crate::gui::theme::inline_rename_theme::InlineRenameTheme;
 use crate::gui::widgets::buffered_edit::EditBuffer;
