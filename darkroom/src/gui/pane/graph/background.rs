@@ -1,5 +1,6 @@
 use glam::Vec2;
-use palantir::{Image, ImageFit, ImageHandle, Shape, SrgbaU8, Ui};
+use palantir::widget::Shape;
+use palantir::{Image, ImageFit, ImageHandle, SrgbaU8, UVec2, Ui};
 
 use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
 use crate::gui::theme::Theme;
@@ -18,7 +19,7 @@ const MAX_WRAP: f32 = 2.0;
 /// filtering across the zoom-wrap range.
 const TILE_PX: u32 = 64;
 
-/// Dotted canvas backdrop, drawn as one tiled [`Shape::image`](palantir::Shape::image). A small
+/// Dotted canvas backdrop, drawn as one tiled [`Shape::image`](palantir::widget::Shape::image). A small
 /// dot tile is generated once, registered into palantir's image cache,
 /// and stamped across the whole canvas by a single tiled image whose UV
 /// transform carries the pan/zoom — so the grid pans and zooms for the
@@ -86,7 +87,7 @@ impl CanvasBackground {
             return handle.clone();
         }
         let handle = ui
-            .register_image(&build_tile(theme))
+            .load_image(&build_tile(theme))
             .expect("canvas tile fits every supported GPU");
         self.tile = Some((key, handle.clone()));
         handle
@@ -126,7 +127,7 @@ fn build_tile(theme: &Theme) -> Image {
             }
         }
     }
-    Image::from_rgba8(n, n, pixels)
+    Image::from_srgba8(UVec2::splat(n), pixels)
 }
 
 #[cfg(test)]

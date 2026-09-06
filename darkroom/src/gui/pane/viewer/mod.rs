@@ -28,9 +28,10 @@ use scenarium::NodeId;
 use std::fmt::Display;
 
 use glam::{UVec2, Vec2};
+use palantir::widget::Shape;
 use palantir::{
     Align, Background, Configure, HAlign, ImageDownsample, ImageFilter, ImageFit, ImageHandle,
-    Panel, RgbaF32, Sense, Shape, Sizing, Spacing, Ui, VAlign, WidgetId, ZoomFactor, fmt,
+    Panel, RgbaF32, Sense, Sizing, Spacing, Ui, VAlign, WidgetId, ZoomFactor, fmt,
 };
 
 use crate::core::document::{Document, Viewport};
@@ -275,7 +276,7 @@ impl ImageViewer {
         let handle = self
             .checker
             .get_or_insert_with(|| {
-                ui.register_image(&glyph::checker_image())
+                ui.load_image(&glyph::checker_image())
                     .expect("checker image fits every supported GPU")
             })
             .clone();
@@ -520,7 +521,7 @@ mod tests {
         let mut h = UiHarness::arena();
         let handle = h
             .ui()
-            .register_image(&glyph::checker_image())
+            .load_image(&glyph::checker_image())
             .expect("a 2x2 checker fits every supported GPU");
         // The texture is the 2×2 checker either way; `native_size` is what
         // says whether the view is capped below its source.

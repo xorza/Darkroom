@@ -76,7 +76,7 @@ pub(super) fn show(ui: &mut Ui, file_name: Option<&str>, tail: &str) -> DiscardO
     // recorded once the dialog closes, so the row is swept and the next
     // open starts unchecked.
     let dont_ask_id = WidgetId::from_hash("discard_dialog::dont_ask_again");
-    let mut dont_ask_again = *ui.state_mut::<bool>(dont_ask_id);
+    let mut dont_ask_again = *ui.state_or_default::<bool>(dont_ask_id);
 
     let mut choice = DiscardChoice::Stay;
     let resp = Modal::new()
@@ -133,7 +133,7 @@ pub(super) fn show(ui: &mut Ui, file_name: Option<&str>, tail: &str) -> DiscardO
         choice = DiscardChoice::Cancel;
     }
 
-    *ui.state_mut::<bool>(dont_ask_id) = dont_ask_again;
+    *ui.state_or_default::<bool>(dont_ask_id) = dont_ask_again;
     DiscardOutcome {
         choice,
         dont_ask_again,

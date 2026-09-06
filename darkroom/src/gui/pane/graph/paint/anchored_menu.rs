@@ -1,5 +1,5 @@
 use glam::Vec2;
-use palantir::{ClickOutside, CloseHandle, Configure, Popup, Sizing, Ui};
+use palantir::{Anchor, ClickOutside, CloseHandle, Configure, Popup, Sizing, Ui};
 use scenarium::NodeId;
 
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
@@ -71,7 +71,7 @@ impl AnchoredMenu {
         let min_width = ctx.min_width;
         let gap = ctx.gap;
         let mut pick = None;
-        let mut popup = Popup::anchored_to(anchor)
+        let mut popup = Popup::new(Anchor::at_point(anchor))
             .click_outside(ClickOutside::Dismiss)
             .background(chrome)
             .id_salt(id_salt)

@@ -75,14 +75,14 @@ fn conversion_produces_opaque_rgba8_at_the_target_size() {
         RawImage::new_with_data(ImageDesc::new(2, 1, ColorFormat::RGBA_U8), bytes.clone()).unwrap();
     assert_eq!(
         rgba8_raster(&rgba, UVec2::new(2, 1)),
-        Raster::from_rgba8(2, 1, bytes)
+        Raster::from_srgba8(UVec2::new(2, 1), bytes)
     );
 
     let rgb =
         RawImage::new_with_data(ImageDesc::new(1, 1, ColorFormat::RGB_F32), vec![0; 12]).unwrap();
     assert_eq!(
         rgba8_raster(&rgb, UVec2::new(1, 1)),
-        Raster::from_rgba8(1, 1, vec![0, 0, 0, 255])
+        Raster::from_srgba8(UVec2::ONE, vec![0, 0, 0, 255])
     );
 }
 

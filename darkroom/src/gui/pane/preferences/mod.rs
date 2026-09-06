@@ -210,14 +210,14 @@ fn model_row(ui: &mut Ui, theme: &Theme, row: ModelRow, path: &mut PathBuf, out:
     // branch below compares against the mirrored `seen` instead.
     {
         let canonical = path.to_string_lossy();
-        let field = ui.state_mut::<PathField>(id);
+        let field = ui.state_or_default::<PathField>(id);
         if field.seen != canonical {
             field.text.replace_range(.., &canonical);
             field.seen.replace_range(.., &canonical);
             field.problem = path_problem(&canonical);
         }
     }
-    let field = ui.state_mut::<PathField>(id);
+    let field = ui.state_or_default::<PathField>(id);
     let problem = field.problem;
     let mut draft = std::mem::take(&mut field.text);
     Panel::vstack()
@@ -267,12 +267,12 @@ fn model_row(ui: &mut Ui, theme: &Theme, row: ModelRow, path: &mut PathBuf, out:
                     // Against the mirror, not a re-read of `path`: `seen` was
                     // just synced to it, and comparing there keeps `path`
                     // unborrowed for the write on the next line.
-                    let field = ui.state_mut::<PathField>(id);
+                    let field = ui.state_or_default::<PathField>(id);
                     if commit && draft != field.seen {
                         *path = PathBuf::from(draft.clone());
                         out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
                     }
-                    let field = ui.state_mut::<PathField>(id);
+                    let field = ui.state_or_default::<PathField>(id);
                     field.text = draft;
                     if commit {
                         // Re-stat on every commit — even an unchanged path:

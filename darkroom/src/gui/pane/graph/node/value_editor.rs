@@ -182,7 +182,7 @@ fn combo_pick<S>(
     let mut idx = before;
     ComboBox::labeled(&mut idx, options, label)
         .id(id)
-        .style(&theme.drag_value.chip)
+        .button_style(&theme.drag_value.chip)
         .size((Sizing::FILL, Sizing::FILL))
         .min_size((theme.width, 0.0))
         .show(ui);
@@ -348,7 +348,7 @@ fn buffered_text_edit<T: ?Sized>(
     width: f32,
 ) -> Option<String> {
     let focused = ui.focused_id() == Some(id);
-    let blurred = ui.state_mut::<EditBuffer>(id).blur_edge(focused);
+    let blurred = ui.state_or_default::<EditBuffer>(id).blur_edge(focused);
     EditBuffer::with_text(ui, id, |ui, text| {
         if !focused && !blurred {
             text.clear();
@@ -473,7 +473,7 @@ mod tests {
                     committed.is_none(),
                     "frame {frame}: an unfocused editor commits nothing"
                 );
-                buffered = ui.state_mut::<EditBuffer>(id).text.clone();
+                buffered = ui.state_or_default::<EditBuffer>(id).text.clone();
             });
             assert_eq!(buffered, "42", "frame {frame}");
         }
@@ -488,7 +488,7 @@ mod tests {
                     read_only_label(ui, &theme.const_value_editor, read_only, &value).is_none(),
                     "frame {frame}: a read-only field never commits"
                 );
-                buffered = ui.state_mut::<EditBuffer>(read_only).text.clone();
+                buffered = ui.state_or_default::<EditBuffer>(read_only).text.clone();
             });
             assert_eq!(buffered, "42", "frame {frame}");
         }

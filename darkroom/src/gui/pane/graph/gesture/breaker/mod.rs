@@ -1,5 +1,6 @@
 use glam::Vec2;
-use palantir::{LineCap, LineJoin, PointerButton, PolylineColors, Rect, Shape, Ui};
+use palantir::widget::{LineCap, LineJoin, PolylineColors, Shape};
+use palantir::{PointerButton, Rect, Ui};
 use scenarium::NodeId;
 use scenarium::{InputPort, Subscription};
 

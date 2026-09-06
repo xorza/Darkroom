@@ -10,7 +10,7 @@
 //!
 //! [`TypeScale`]: crate::gui::theme::type_scale::TypeScale
 
-use palantir::{Align, Configure, Rect, RgbaF32, SrgbaU8, Text, Ui};
+use palantir::{Align, Configure, Rect, RgbaF32, SrgbaU8, Text, UVec2, Ui};
 
 use crate::core::io::preferences::ViewerBackground;
 use crate::gui::theme::Theme;
@@ -43,7 +43,7 @@ pub(super) fn checker_image() -> palantir::Image {
         [D, D, D, 255],
         [L, L, L, 255],
     ];
-    palantir::Image::from_rgba8(2, 2, px.into_iter().flatten().collect())
+    palantir::Image::from_srgba8(UVec2::splat(2), px.into_iter().flatten().collect())
 }
 
 /// Four inward corner brackets — "fit the image to the view".
@@ -151,6 +151,9 @@ mod tests {
             L, L, L, 255,  D, D, D, 255,
             D, D, D, 255,  L, L, L, 255,
         ];
-        assert_eq!(img, palantir::Image::from_rgba8(2, 2, expected.to_vec()));
+        assert_eq!(
+            img,
+            palantir::Image::from_srgba8(UVec2::splat(2), expected.to_vec())
+        );
     }
 }

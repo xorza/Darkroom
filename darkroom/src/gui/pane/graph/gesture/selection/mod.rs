@@ -2,7 +2,8 @@ use scenarium::NodeId;
 use std::collections::BTreeSet;
 
 use glam::Vec2;
-use palantir::{Rect, Shape, Stroke, Ui};
+use palantir::widget::Shape;
+use palantir::{Rect, Stroke, Ui};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::pane::graph::canvas::outer_canvas_widget_id;

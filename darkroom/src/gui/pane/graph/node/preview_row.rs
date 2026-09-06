@@ -11,9 +11,10 @@
 use std::fmt::Display;
 
 use imaginarium::ColorFormat;
+use palantir::widget::Shape;
 use palantir::{
-    Align, Configure, CursorIcon, DockOp, ImageFit, Justify, Panel, Sense, Shape, Sizing, Spacing,
-    Text, TextWrap, Ui, VAlign, WidgetId, fmt,
+    Align, Configure, CursorIcon, DockOp, ImageFit, Justify, Panel, Sense, Sizing, Spacing, Text,
+    TextWrap, Ui, VAlign, WidgetId, fmt,
 };
 use scenarium::NodeId;
 

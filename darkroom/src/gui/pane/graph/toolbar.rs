@@ -10,8 +10,9 @@
 //! `GraphIntent::SetViewport` directly.
 
 use glam::Vec2;
+use palantir::widget::Shape;
 use palantir::{
-    Align, Configure, HAlign, Panel, Rect, RgbaF32, Shape, Sizing, Spacing, Ui, VAlign, WidgetId,
+    Align, Configure, HAlign, Panel, Rect, RgbaF32, Sizing, Spacing, Ui, VAlign, WidgetId,
 };
 
 use crate::gui::app::commands::AppCommand;

@@ -5,14 +5,14 @@
 //! conventional trigger to commit a text-field edit.
 //!
 //! The one thing callers can't share: a widget driven through
-//! `Ui::request_focus` (`inline_rename`'s double-click swap from label
+//! `Ui::set_focus` (`inline_rename`'s double-click swap from label
 //! to editor) opens a gap of one or more frames between the request and
 //! focus actually landing, during which a plain "focused last frame, not
 //! now" check would misread "hasn't landed yet" as a blur.
 //! [`EditBuffer::blur_edge`] arms its latch only once focus truly lands
 //! and disarms it the instant a blur is reported, so it's safe for a
-//! `request_focus`-driven caller and a plain click-to-focus one alike —
-//! `value_editor` never calls `request_focus`, so the gap never opens
+//! `set_focus`-driven caller and a plain click-to-focus one alike —
+//! `value_editor` never calls `set_focus`, so the gap never opens
 //! and the latch reduces to a last-frame focus register.
 
 use palantir::{Ui, WidgetId};
@@ -22,7 +22,7 @@ use palantir::{Ui, WidgetId};
 pub(crate) struct EditBuffer {
     pub(crate) text: String,
     /// Arms once focus lands, disarms the instant a blur is reported —
-    /// not a plain last-frame mirror, so a pending `request_focus`
+    /// not a plain last-frame mirror, so a pending `set_focus`
     /// doesn't read as a blur before it lands (see module docs).
     focus_latch: bool,
 }
@@ -40,9 +40,9 @@ impl EditBuffer {
         id: WidgetId,
         body: impl FnOnce(&mut Ui, &mut String) -> R,
     ) -> R {
-        let mut text = std::mem::take(&mut ui.state_mut::<Self>(id).text);
+        let mut text = std::mem::take(&mut ui.state_or_default::<Self>(id).text);
         let out = body(ui, &mut text);
-        ui.state_mut::<Self>(id).text = text;
+        ui.state_or_default::<Self>(id).text = text;
         out
     }
 
@@ -57,7 +57,7 @@ impl EditBuffer {
 
     /// Force the latch closed outside of a blur — call when an edit
     /// session ends some other way (Enter, or Escape while still
-    /// focused) or (re)starts via `request_focus`, so a stale armed
+    /// focused) or (re)starts via `set_focus`, so a stale armed
     /// latch can't misfire as a blur on the next frame or session.
     pub(crate) fn reset_latch(&mut self) {
         self.focus_latch = false;
