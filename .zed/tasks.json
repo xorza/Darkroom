@@ -1,13 +1,18 @@
 [
   {
     "label": "run darkroom",
-    "command": "RUST_BACKTRACE=1 cargo",
+    // `env` rather than a `VAR=1 cargo` command prefix: that prefix is POSIX
+    // shell syntax, and Zed spawns tasks through PowerShell on Windows, which
+    // reads it as a command name and fails.
+    "command": "cargo",
     "args": ["run", "-p", "darkroom"],
+    "env": { "RUST_BACKTRACE": "1" },
   },
   {
     "label": "run darkroom release",
-    "command": "RUST_BACKTRACE=1 cargo",
+    "command": "cargo",
     "args": ["run", "--release", "-p", "darkroom"],
+    "env": { "RUST_BACKTRACE": "1" },
   },
   {
     "label": "run darkroom release-max with tracy",
@@ -24,7 +29,7 @@
   },
   {
     "label": "run palantir showcase",
-    "command": "RUST_BACKTRACE=1 cargo",
+    "command": "cargo",
     "args": [
       "run",
       "--release",
@@ -33,6 +38,7 @@
       "--example",
       "showcase",
     ],
+    "env": { "RUST_BACKTRACE": "1" },
   },
   {
     "label": "run palantir showcase with tracy",
