@@ -2468,7 +2468,7 @@ dependencies = [
 
 [[package]]
 name = "palantir"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "arboard",
  "bytemuck",
@@ -2498,7 +2498,7 @@ dependencies = [
 
 [[package]]
 name = "palantir-anim-derive"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "proc-macro2",
  "quote",
