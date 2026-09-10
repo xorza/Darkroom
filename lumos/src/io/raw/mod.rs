@@ -11,7 +11,6 @@ mod tests;
 use libraw_sys as sys;
 #[cfg(unix)]
 use std::ffi::CString;
-#[cfg(not(unix))]
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
@@ -906,6 +905,30 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
     })
 }
 
+/// What a refused libraw open means, for whichever call this host makes.
+///
+/// libraw answers one opaque code whether the path is unreadable or its
+/// contents are not a raw, so the filesystem is asked which it was: an
+/// unreadable path is an [`ImageError::Io`] on every host rather than a `Raw`
+/// one on some. Cold — only a refused open pays for the syscall.
+///
+/// One home for both hosts, because the two are indistinguishable to a caller
+/// and a wording that lives in two places drifts apart. The message names what
+/// the caller lost, not the call that lost it: a buffer is how one host reaches
+/// libraw, and the same rejected file must read alike on either.
+fn open_refused(path: &Path, ret: i32) -> ImageError {
+    if let Err(source) = fs::File::open(path) {
+        return ImageError::Io {
+            path: path.to_path_buf(),
+            source,
+        };
+    }
+    raw_err(
+        path,
+        format!("libraw: Failed to open file, error code: {ret}"),
+    )
+}
+
 #[cfg(unix)]
 fn open_libraw_input(
     inner: *mut sys::libraw_data_t,
@@ -916,10 +939,7 @@ fn open_libraw_input(
     // SAFETY: `inner` is valid and the C string remains alive for the complete call.
     let ret = unsafe { sys::libraw_open_file(inner, path_c.as_ptr()) };
     if ret != 0 {
-        return Err(raw_err(
-            path,
-            format!("libraw: Failed to open file, error code: {ret}"),
-        ));
+        return Err(open_refused(path, ret));
     }
     Ok(None)
 }
@@ -936,10 +956,7 @@ fn open_libraw_input(
     // SAFETY: `inner` is valid and `buf` remains owned by the returned `UnpackedRaw`.
     let ret = unsafe { sys::libraw_open_buffer(inner, buf.as_ptr() as *const _, buf.len()) };
     if ret != 0 {
-        return Err(raw_err(
-            path,
-            format!("libraw: Failed to open buffer, error code: {ret}"),
-        ));
+        return Err(open_refused(path, ret));
     }
     Ok(Some(buf))
 }

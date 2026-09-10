@@ -9,10 +9,13 @@ use crate::io::raw::*;
 #[test]
 fn load_raw_invalid_path() {
     let path = Path::new("/nonexistent/path/to/file.raf");
-    let result = load_raw(path, &CancelToken::never());
-    assert!(result.is_err());
-    let err = result.unwrap_err().to_string();
-    assert!(err.contains("Failed to open file"));
+    // A path that cannot be read is an `Io` error; a readable file libraw
+    // refuses is a `Raw` one, pinned by `load_raw_rejects_invalid_files`.
+    let error = load_raw(path, &CancelToken::never()).unwrap_err();
+    assert!(
+        matches!(&error, ImageError::Io { path: io_path, .. } if io_path == path),
+        "a missing file should read as an Io error, got: {error}",
+    );
 
     let cancel = CancelToken::new();
     cancel.cancel();
@@ -68,8 +71,18 @@ fn load_raw_rejects_invalid_files() {
 
         // The rejection happens while libraw is being opened, so the state exists and has to free
         // itself on the way out — the failure path most likely to leak the instance.
-        let error = LibrawState::open(&path).unwrap_err().to_string();
-        assert!(error.contains("Failed to open file"), "{case:?}: {error}");
+        //
+        // The file reads back, so what libraw refuses is its contents: a `Raw` error on every
+        // platform, worded alike whether libraw was handed the path or the bytes.
+        let error = LibrawState::open(&path).unwrap_err();
+        assert!(
+            matches!(&error, ImageError::Raw { .. }),
+            "{case:?}: contents libraw refuses should read as a Raw error, got: {error}",
+        );
+        assert!(
+            error.to_string().contains("Failed to open file"),
+            "{case:?}: {error}",
+        );
     }
 }
 
