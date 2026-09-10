@@ -170,8 +170,8 @@ pub(crate) fn results_wid() -> WidgetId {
 }
 
 /// Vertical space the palette's chrome claims above the scrolling results: the
-/// popup's own padding, the gutter between its two children, the search field,
-/// and [`SEARCH_ROW_GAP`] under it.
+/// popup's own padding, plus everything the layout placed between the search
+/// field's top edge and the results' top edge.
 ///
 /// The inner `Scroll` needs this subtracted from the popup's height cap
 /// because a stack hands every non-`Fill` child its *full* main extent — a
@@ -181,23 +181,30 @@ pub(crate) fn results_wid() -> WidgetId {
 /// scroll reports zero desired height and the popup collapses onto its search
 /// row.
 ///
-/// Every term is read rather than assumed — the field's height off its own
-/// last-frame rect, the rest off the theme slot the popup is built from — so
-/// restyling the field's text or the menu's padding resizes the results area
-/// with it instead of silently mis-sizing the scroll. Only the first frame of
-/// the first open has no rect yet and falls back to one line of body text.
+/// Every term is read rather than assumed — the two rows off their own
+/// last-frame rects, the padding off the theme slot the popup is built from —
+/// so restyling the field's text or the menu's padding resizes the results
+/// area with it instead of silently mis-sizing the scroll.
+///
+/// The span between the rows is measured rather than re-summed from the
+/// field's height, [`SEARCH_ROW_GAP`] and the stack's gutter. A sum has to be
+/// kept in step with what `body` records, and a term missing from it shrinks
+/// the chrome by that much, which lands as rows painted past the popup's
+/// bottom edge. Measuring covers whatever the layout put between the rows,
+/// including a row added later. Only the first frame of the first open has no
+/// rects yet, and estimates the span from one line of body text.
 fn chrome_above_results(ui: &Ui) -> f32 {
     let menu = &ui.theme().context_menu;
-    // An arranged rect is margin-inclusive, so the field's already carries
-    // [`SEARCH_ROW_GAP`]; only the bare-line fallback has to add it.
-    let row = ui.response_for(search_field_wid()).layout_rect.map_or_else(
+    let field = ui.response_for(search_field_wid()).layout_rect;
+    let results = ui.response_for(results_wid()).layout_rect;
+    let rows = field.zip(results).map_or_else(
         || {
             let text = &ui.theme().text;
-            text.line_height_for(text.font_size_px) + SEARCH_ROW_GAP
+            text.line_height_for(text.font_size_px) + SEARCH_ROW_GAP + menu.gap
         },
-        |rect| rect.size.h,
+        |(field, results)| results.min.y - field.min.y,
     );
-    menu.padding.vertical_sum() + menu.gap + row
+    menu.padding.vertical_sum() + rows
 }
 
 #[cfg(test)]
