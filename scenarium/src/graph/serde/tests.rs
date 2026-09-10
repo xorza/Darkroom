@@ -24,6 +24,9 @@ impl<'de> Deserialize<'de> for CheckedBindings {
     }
 }
 
+/// The refusal is asserted for every format. The reason is asserted only where it survives:
+/// `bitcode::Error` is a zero-sized type outside debug builds and prints `bitcode error` there,
+/// so a release run can prove the document does not decode but not which check refused it.
 #[test]
 fn duplicate_ports_fail_in_every_binding_format() {
     let port = InputPort::new(NodeId::unique(), 0);
@@ -35,12 +38,15 @@ fn duplicate_ports_fail_in_every_binding_format() {
     for format in [SerdeFormat::Ron, SerdeFormat::Bitcode] {
         let bytes = serialize(&bindings, format).unwrap();
         let error = deserialize::<CheckedBindings>(&bytes, format)
-            .unwrap_err()
+            .expect_err("a repeated input port does not decode")
             .to_string();
-        assert!(
-            error.contains("duplicate binding for input port"),
-            "unexpected {format:?} error: {error}"
-        );
+
+        if format != SerdeFormat::Bitcode || cfg!(debug_assertions) {
+            assert!(
+                error.contains("duplicate binding for input port"),
+                "unexpected {format:?} error: {error}"
+            );
+        }
     }
 }
 

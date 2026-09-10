@@ -234,27 +234,34 @@ fn weighted_mean_survives_catastrophic_cancellation() {
     assert!((weighted_mean_f32(&values, &weights) - expected).abs() < 1e-4);
 }
 
-#[test]
-#[should_panic(expected = "must have the same length")]
-fn weighted_mean_rejects_mismatched_lengths() {
-    // `zip` would silently truncate to the shorter slice and return a mean over a subset.
-    let _ = weighted_mean_f32(&[1.0, 2.0, 3.0, 4.0, 5.0], &[1.0, 1.0, 1.0]);
-}
+/// Every screen below is a `debug_assert!`: the combine runs once per output pixel, so a release
+/// build drops them and the calls return a number instead of panicking.
+#[cfg(debug_assertions)]
+mod contract {
+    use super::*;
 
-#[test]
-#[should_panic(expected = "cannot sum negative")]
-fn weighted_mean_rejects_negative_weights() {
-    let _ = weighted_mean_f32(&[1.0, 2.0], &[1.0, -2.0]);
-}
+    #[test]
+    #[should_panic(expected = "must have the same length")]
+    fn weighted_mean_rejects_mismatched_lengths() {
+        // `zip` would silently truncate to the shorter slice and return a mean over a subset.
+        let _ = weighted_mean_f32(&[1.0, 2.0, 3.0, 4.0, 5.0], &[1.0, 1.0, 1.0]);
+    }
 
-#[test]
-#[should_panic(expected = "empty slice")]
-fn weighted_mean_rejects_an_empty_slice() {
-    let _ = weighted_mean_f32(&[], &[]);
-}
+    #[test]
+    #[should_panic(expected = "cannot sum negative")]
+    fn weighted_mean_rejects_negative_weights() {
+        let _ = weighted_mean_f32(&[1.0, 2.0], &[1.0, -2.0]);
+    }
 
-#[test]
-#[should_panic(expected = "empty slice")]
-fn mean_rejects_an_empty_slice() {
-    let _ = mean_f32(&[]);
+    #[test]
+    #[should_panic(expected = "empty slice")]
+    fn weighted_mean_rejects_an_empty_slice() {
+        let _ = weighted_mean_f32(&[], &[]);
+    }
+
+    #[test]
+    #[should_panic(expected = "empty slice")]
+    fn mean_rejects_an_empty_slice() {
+        let _ = mean_f32(&[]);
+    }
 }
