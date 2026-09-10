@@ -66,7 +66,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
         CfaFrameInfo::from_file(light_paths[0].as_ref(), &load_context).map_err(|source| {
             Error::Load {
                 path: light_paths[0].as_ref().to_path_buf(),
-                source,
+                source: Box::new(source),
             }
         })?;
     let plan = MemoryPlan::plan(
@@ -141,7 +141,7 @@ fn decode_calibrate_demosaic(
         Err(source) => {
             return Err(Error::Load {
                 path: path.to_path_buf(),
-                source,
+                source: Box::new(source),
             });
         }
     };
@@ -164,7 +164,7 @@ fn decode_calibrate_demosaic(
             DemosaicError::Cancelled => Error::Stack(StackError::Cancelled),
             DemosaicError::InvalidXTransPattern(source) => Error::Load {
                 path: path.to_path_buf(),
-                source: raw::raw_err(path, source.to_string()),
+                source: Box::new(raw::raw_err(path, source.to_string())),
             },
         })
 }

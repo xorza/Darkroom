@@ -80,10 +80,14 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
             field.max().y <= results.min.y + 0.5,
             "{label}: the results overlap the search field ({field:?} vs {results:?})",
         );
-        let used = menu.padding.vertical_sum() + field.size.h + menu.gap + results.size.h;
+        // Spanned from the field's top to the results' bottom rather than
+        // rebuilt from the terms `chrome_above_results` adds up: a term missing
+        // from both sides of a rebuilt sum cancels, and the test passes over
+        // exactly the gap the popup then paints its rows outside.
+        let used = menu.padding.vertical_sum() + (results.max().y - field.min.y);
         assert!(
             used <= cap + 0.5,
-            "{label}: field {} + results {} + chrome overflows the {cap} cap (used {used})",
+            "{label}: field {} and results {} overflow the {cap} cap (used {used})",
             field.size.h,
             results.size.h,
         );
