@@ -38,7 +38,7 @@ several.
 ```
 cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
-cargo test --lib --tests --all-features
+cargo test --tests --all-features
 cargo clippy --all-targets --features bench -- -D warnings
 ```
 
@@ -48,7 +48,7 @@ The last line is the CPU-only leg: every feature but `wgpu`, which
 second run — nothing is gated `not(feature = "wgpu")`, so the CPU-only build
 runs the same CPU code the `--all-features` test run already covers. The first
 `not(feature = "wgpu")` gate brings back
-`cargo test --lib --tests --features bench`.
+`cargo test --tests --features bench`.
 
 ## Cross-arch verification
 
