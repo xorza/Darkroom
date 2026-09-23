@@ -19,7 +19,11 @@ framework with a visual editor.
 - **`palantir`** — our in-development immediate-mode GUI library.
 
 `palantir`, `fits-well`, `imaginarium`, and `quickbench` are standalone
-projects pulled into this workspace as git submodules. Changes inside them,
+projects checked out here as git submodules and `exclude`d from this Cargo
+workspace — each is its own workspace root, with its own lockfile and profiles.
+Run cargo for them from inside their directory: from the root, `cargo fmt -p`
+rejects them as non-members, and `clippy`/`test -p` build them as
+dependencies under this workspace's lockfile and profiles. Changes inside them,
 especially to `Cargo.toml`, must remain valid when the project is checked out
 and built independently; do not make them inherit settings from the enclosing
 workspace.
