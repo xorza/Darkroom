@@ -33,6 +33,23 @@ Name the target. An unfiltered `cargo bench` links every bench binary at once
 under a fat-LTO profile and can get OOM-killed; cap with `-j 2` if you need
 several.
 
+## Verification
+
+```
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --lib --tests --all-features
+cargo clippy --all-targets --features bench -- -D warnings
+```
+
+The last line is the CPU-only leg: every feature but `wgpu`, which
+`--all-features` always turns on. It catches CPU code that reaches a
+`wgpu`-gated item, and imports or helpers only gated code uses. Tests need no
+second run — nothing is gated `not(feature = "wgpu")`, so the CPU-only build
+runs the same CPU code the `--all-features` test run already covers. The first
+`not(feature = "wgpu")` gate brings back
+`cargo test --lib --tests --features bench`.
+
 ## Cross-arch verification
 
 Half the SIMD here is `aarch64`-only, so an x86 host's usual chain never
