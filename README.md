@@ -59,7 +59,7 @@ GUI, and the imaging stack it draws on:
 | **[darkroom](darkroom)** | The editor app itself — canvas, node UI, and the edit/undo pipeline. *Default member.* |
 | **scenarium** | The headless graph engine: the graph model plus compile→plan→execute on a tokio worker. |
 | **[palantir](https://github.com/xorza/palantir)** | The immediate-mode GUI — WPF-style two-pass layout, wgpu renderer. *Submodule.* |
-| **common** | Shared leaf utilities: typed UUID ids, serialization + format detection, 2D buffers, async primitives. |
+| **common** | Shared leaf utilities: typed UUID ids, serialization + format detection, cooperative cancellation, struct introspection, file discovery + atomic publication. |
 | **lens** | The image + astronomical node libraries — adapts `imaginarium` operations into graph nodes. |
 | **imaginarium** | Image library with CPU and wgpu GPU operations. *Submodule.* |
 | **lumos** | Astronomical pipeline: RAW/FITS decode, calibration, star detection, registration, stacking, drizzle. |
