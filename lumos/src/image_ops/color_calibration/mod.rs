@@ -1,5 +1,5 @@
 //! Color calibration: neutralize the per-channel sky background and remove the residual green cast
-//! from a one-shot-color stack. See `color_calibration/README.md` for the algorithm research.
+//! from a one-shot-color stack.
 //!
 //! - [`NeutralizeBackground`] (linear, pre-stretch): estimate each channel's background and
 //!   additively shift them to a common level, so the sky is neutral gray (R=G=B).

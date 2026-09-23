@@ -1,4 +1,4 @@
-//! Image denoising via a caller-supplied ONNX model (e.g. DeepSNR). See `ml/README.md`.
+//! Image denoising via a caller-supplied ONNX model (e.g. DeepSNR).
 //!
 //! Runs the model through the shared `ort` [`backend`](crate::image_ops::ml::backend) (overlapping 512² tiles,
 //! feather-blended). A **display-domain** operation: these CNN denoisers are trained on stretched

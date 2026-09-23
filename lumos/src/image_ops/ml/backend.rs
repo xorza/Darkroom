@@ -5,8 +5,8 @@
 //!
 //! The tile loop is **sequential** and lets ONNX Runtime use its default (all-core) intra-op
 //! threading. These nets are memory-bandwidth-bound (~125 MB of weights streamed per tile), so
-//! running tiles concurrently (one `Session` per worker) was measured slower *and* exhausted RAM —
-//! see `ml/README.md`. ~60 s for a full 24 MP frame on a 10-core machine.
+//! running tiles concurrently (one `Session` per worker) was measured slower *and* exhausted RAM.
+//! ~60 s for a full 24 MP frame on a 10-core machine.
 
 use std::path::PathBuf;
 
@@ -26,7 +26,7 @@ const FEATHER_RAMP: f32 = 64.0;
 const FEATHER_MIN: f32 = 0.02;
 
 /// Where the ONNX model is and how finely to tile. lumos ships **no model** — the caller supplies a
-/// legally-obtained `.onnx` (see `ml/README.md`).
+/// legally-obtained `.onnx`.
 #[derive(Debug, Clone)]
 pub struct TiledOnnxConfig {
     /// Path to the caller-supplied ONNX model.

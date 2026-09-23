@@ -1,5 +1,4 @@
-//! Local contrast enhancement via Contrast-Limited Adaptive Histogram Equalization (CLAHE). See
-//! `local_contrast/README.md` for the algorithm.
+//! Local contrast enhancement via Contrast-Limited Adaptive Histogram Equalization (CLAHE).
 //!
 //! A **display-domain** (post-stretch, `[0,1]`) operation: tile the image, equalize each tile's
 //! histogram with a clip limit (so flat regions aren't over-amplified), and bilinearly blend the

@@ -1,7 +1,7 @@
 //! Whole-image ML timing probe (`#[ignore]`): loads the 125 MB model and runs star removal over the
 //! *entire* bundled frame to report wall-clock cost. Tiles run sequentially with ORT's default
 //! intra-op threading — concurrent Sessions were measured slower and memory-hungry on this
-//! memory-bound model (see `ml/README.md`).
+//! memory-bound model.
 //!
 //! Run: `cargo test -p lumos --release --features ml,real-data ml_full_image -- --ignored --nocapture`.
 

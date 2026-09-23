@@ -1,12 +1,11 @@
 //! Gradient / background extraction — model the smoothly-varying unwanted background (light
 //! pollution, sky glow, moon glow, residual vignetting) on the **linear** master and remove it,
-//! without eroding large-scale real signal. See `README.md` for the algorithm research, primary
-//! sources, and the wider design (tiled-mesh and TPS alternatives).
+//! without eroding large-scale real signal.
 //!
-//! This implements the README's **safe default** (§3a): a robust tiled sky estimate fed to a
-//! **low-order 2D polynomial** surface, fit by least squares with iterative outlier rejection, then
-//! removed per channel. Low order is *why* it can't eat large nebulosity — a degree ≤ 4 surface
-//! physically cannot represent small-scale structure, only the broad gradient.
+//! The **safe default** over a tiled mesh or thin-plate splines: a robust tiled sky estimate fed
+//! to a **low-order 2D polynomial** surface, fit by least squares with iterative outlier rejection,
+//! then removed per channel. Low order is *why* it can't eat large nebulosity — a degree ≤ 4
+//! surface physically cannot represent small-scale structure, only the broad gradient.
 //!
 //! Distinct from background *neutralization* (`color_calibration::neutralize_background`, which only
 //! equalizes per-channel offsets): this removes a **spatial surface**, per channel (light pollution
@@ -194,8 +193,8 @@ struct Sample {
 /// Pearson mode). Reuses the
 /// exact estimator star detection uses, so the gradient fit and the detector see the same sky. The
 /// grid 3×3 median filter is **off** (it would bias a real gradient's boundary tiles; outlier tiles
-/// are instead rejected by the surface fit's residual clip). A `None` object mask for now — passing a
-/// star/bright-signal mask here is the §6.2 refinement.
+/// are instead rejected by the surface fit's residual clip). A `None` object mask for now — a
+/// star/bright-signal mask from the star detector belongs in that slot.
 fn collect_samples(
     channel: &Buffer2<f32>,
     tile: usize,
