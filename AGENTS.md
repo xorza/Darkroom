@@ -1,22 +1,33 @@
-AI coding rules for Rust projects.
+# Darkroom
 
-## Project
+A node-graph editor for image and data pipelines: a graph compiles → plans →
+executes on a background worker, and the editor is a native desktop app on
+Palantir.
 
-Scenarium is a Cargo workspace for a node-based data processing pipeline
-framework with a visual editor.
+## Crates
+
+Workspace members, each listed after the crates it depends on:
 
 - **`common`** — shared utilities: typed ids, cancellation, serialization,
-  small extension traits. Pure leaf crate — depends on nothing in-tree.
+  small extension traits. Pure leaf crate — its only in-tree dependency is its
+  own `common-derive` proc-macro.
 - **`scenarium`** — the node-graph framework: an authoring graph model plus a
-  compile → plan → execute pipeline.
-- **`darkroom`** — the editor app, built on Palantir.
+  compile → plan → execute pipeline. Uses `common`.
+- **`lumos`** — astronomical image-processing pipeline. Uses `common`,
+  `imaginarium`, `fits-well`.
 - **`lens`** — node-function library adapting image and astronomical
-  processing into Scenarium's workflow.
-- **`lumos`** — astronomical image-processing pipeline.
-- **`fits-well`** — FITS reader and writer.
-- **`imaginarium`** — image library with CPU and GPU operations.
-- **`quickbench`** — tiny no-frills micro-benchmark harness.
+  processing into Scenarium's workflow. Uses `common`, `scenarium`,
+  `imaginarium`, `lumos`.
+- **`darkroom`** — the editor app, the workspace's only binary. Uses `common`,
+  `scenarium`, `lens`, `imaginarium`, `palantir`.
+
+Git submodules:
+
 - **`palantir`** — our in-development immediate-mode GUI library.
+- **`imaginarium`** — image library with CPU and GPU operations.
+- **`fits-well`** — FITS reader and writer.
+- **`quickbench`** — tiny no-frills micro-benchmark harness; a `lumos`
+  dev-dependency.
 
 `palantir`, `fits-well`, `imaginarium`, and `quickbench` are standalone
 projects checked out here as git submodules and `exclude`d from this Cargo
@@ -28,23 +39,28 @@ especially to `Cargo.toml`, must remain valid when the project is checked out
 and built independently; do not make them inherit settings from the enclosing
 workspace.
 
+`default-members = ["darkroom"]`: a bare `cargo run` launches the editor, and a
+bare `cargo test` or `cargo clippy` covers `darkroom` alone.
+
+## Verification
+
+For each touched member crate, one chained command:
+
+```
+cargo fmt -p <crate> && cargo clippy -p <crate> --all-targets --all-features -- -D warnings && cargo test -p <crate> --tests --all-features
+```
+
+A crate's own AGENTS.md may name a test feature set, which then replaces
+`--all-features` in `cargo test` — `lumos` does. A submodule runs the same
+chain from its own directory; `palantir` and `imaginarium` name their own
+commands.
+
 ## Conventions
 
 **Compatibility.** Existing project files and APIs do not need backward
 compatibility for now. Change serialized shapes and break APIs freely when that
 simplifies the current design; do not add migrations, compatibility shims,
 legacy deserializers, or legacy-format tests.
-
-**Watch the bench link count.** The root `[profile.bench]` is fat-LTO with
-full debug info, so each bench binary links its entire dependency graph in
-one codegen unit — GBs apiece — and cargo runs those links in parallel across
-every target. A crate with many bench targets can exhaust RAM and get
-OOM-killed on an unfiltered `cargo bench` / `cargo bench --no-run`.
-
-- Compile-checking them: clippy `--all-targets` covers benches with no
-  optimized link, which the verification chain already does.
-- Running one: name the target — `cargo bench -p <crate> --bench <name>`.
-- Linking several: cap with `-j 2`.
 
 **UUIDs / IDs.** Every new UUID literal (a `NodeId`, `FuncId`, `TypeId`, or
 any other `id_type!`-backed id) must be generated with the real `uuidgen` tool,
