@@ -174,7 +174,7 @@ impl Inspectors {
             InspectMode::Open => RgbaF32::TRANSPARENT,
         };
         let chrome = Background::rounded(theme.card.fill, Corners::all(theme.card.corner_radius))
-            .with_stroke(Stroke::solid(border, 1.0))
+            .with_border(Stroke::new(border, 1.0))
             // Same elevation swatch as the node bodies, so every floating
             // surface casts one kind of shadow (bigger blur — the panel sits higher).
             .with_shadow(Shadow::drop(

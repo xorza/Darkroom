@@ -253,7 +253,7 @@ fn model_row(ui: &mut Ui, theme: &Theme, row: ModelRow, path: &mut PathBuf, out:
                             &mut style.looks.active,
                         ] {
                             let bg = &mut look.background;
-                            bg.stroke = Stroke::solid(theme.status.error, bg.stroke.width);
+                            bg.border = Stroke::new(theme.status.error, bg.border.width);
                         }
                         style
                     });

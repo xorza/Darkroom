@@ -191,7 +191,7 @@ impl SelectionUI {
         ui.add_shape(
             Shape::rect(rect)
                 .fill(theme.colors.selection_fill())
-                .stroke(Stroke::solid(theme.colors.selection_border(), 1.0)),
+                .border(Stroke::new(theme.colors.selection_border(), 1.0)),
         );
     }
 }

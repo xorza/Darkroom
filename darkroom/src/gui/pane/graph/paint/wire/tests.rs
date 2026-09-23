@@ -1,4 +1,4 @@
-use palantir::RgbaU8;
+use palantir::SrgbaU8;
 
 use super::*;
 
@@ -9,19 +9,21 @@ fn assert_close(actual: f32, expected: f32) {
     );
 }
 
-/// The single color a solid brush carries, or `None` for a gradient.
-fn solid(brush: &CurveBrush) -> Option<RgbaF32> {
-    brush.as_brush().as_solid()
+/// The single color a flat paint carries, or `None` for a ramp.
+fn solid(paint: &WirePaint) -> Option<RgbaF32> {
+    paint.ramp.is_none().then_some(paint.color)
 }
 
-/// A linear brush's `(t = 0, t = 1)` stop colors, or `None` for a solid.
+/// A ramp's `(t = 0, t = 1)` stop colors, or `None` for a flat paint. A
+/// ramp rides a white stroke, so its stops are the colors that show.
 /// Stops are stored quantized, so the comparisons below go through
-/// [`RgbaU8`] rather than the float color.
-fn gradient(brush: &CurveBrush) -> Option<(RgbaU8, RgbaU8)> {
-    let g = brush.as_brush().as_linear()?;
+/// [`SrgbaU8`] rather than the float color.
+fn gradient(paint: &WirePaint) -> Option<(SrgbaU8, SrgbaU8)> {
+    let ramp = paint.ramp?;
+    assert_eq!(paint.color, RgbaF32::WHITE, "a ramp multiplies white");
     Some((
-        g.stops[0].color().into(),
-        g.stops[g.stops.len() - 1].color().into(),
+        ramp.stops[0].color().into(),
+        ramp.stops[ramp.stops.len() - 1].color().into(),
     ))
 }
 
@@ -81,7 +83,7 @@ fn stroke_lets_the_broken_alarm_win_over_hover() {
 }
 
 #[test]
-fn brush_gradients_differing_ends_and_flattens_equal_ones() {
+fn paint_ramps_differing_ends_and_flattens_equal_ones() {
     let canvas = RgbaF32::new(0.0, 0.0, 0.0, 1.0);
     let rest = WireEmphasis::resolve(canvas, false);
     let a = RgbaF32::new(1.0, 0.0, 0.0, 1.0);
@@ -89,46 +91,46 @@ fn brush_gradients_differing_ends_and_flattens_equal_ones() {
 
     // Distinct ends run p0 → p3 as a gradient, each stop taken through this
     // frame's tier — the rest-dim pull, not the raw color.
-    let (start, end) = gradient(&rest.brush(WireTint::new(a, b), false))
+    let (start, end) = gradient(&rest.paint(WireTint::new(a, b), false))
         .expect("two different endpoint colors lower to a gradient");
     assert_eq!(start, rest.tint(a, false).into());
     assert_eq!(end, rest.tint(b, false).into());
     assert_ne!(start, end, "and the two ends stay distinguishable");
     // Emphasized keeps both stops at full strength.
     let (start, end) =
-        gradient(&rest.brush(WireTint::new(a, b), true)).expect("still a gradient when emphasized");
+        gradient(&rest.paint(WireTint::new(a, b), true)).expect("still a gradient when emphasized");
     assert_eq!((start, end), (a.into(), b.into()));
 
     // Equal ends — an event wire, or a type-mismatched data wire — collapse to
-    // one flat brush rather than a gradient between two identical stops.
+    // one flat paint rather than a ramp between two identical stops.
     assert_eq!(
-        solid(&rest.brush(WireTint::flat(a), true)),
+        solid(&rest.paint(WireTint::flat(a), true)),
         Some(a),
         "a flat tint paints solid"
     );
     // `WireTint::new` with the same color both sides is the same thing: the
     // collapse is decided on the resolved colors, not on which constructor ran.
     assert_eq!(
-        solid(&rest.brush(WireTint::new(a, a), true)),
+        solid(&rest.paint(WireTint::new(a, a), true)),
         Some(a),
         "equal ends collapse however they were built"
     );
     // Two colors that differ *only* before the tier still differ after it, so
     // the collapse can't swallow a real gradient.
     assert!(
-        gradient(&rest.brush(WireTint::new(a, b), false)).is_some(),
+        gradient(&rest.paint(WireTint::new(a, b), false)).is_some(),
         "the tier is applied per end, not to a pre-collapsed pair"
     );
 
     // A fading pass drops both stops to the fade alpha and keeps the gradient;
     // a flat tint keeps painting solid through it.
     let fading = WireEmphasis::resolve(canvas, true);
-    let (start, end) = gradient(&fading.brush(WireTint::new(a, b), false))
+    let (start, end) = gradient(&fading.paint(WireTint::new(a, b), false))
         .expect("a faded wire keeps its gradient");
     assert_eq!(start, a.with_alpha(WIRE_DRAG_FADE).into());
     assert_eq!(end, b.with_alpha(WIRE_DRAG_FADE).into());
     assert_eq!(
-        solid(&fading.brush(WireTint::flat(a), false)).map(|c| c.a),
+        solid(&fading.paint(WireTint::flat(a), false)).map(|c| c.a),
         Some(WIRE_DRAG_FADE),
         "and a flat one keeps painting solid"
     );
