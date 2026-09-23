@@ -1,5 +1,5 @@
 //! Real-data background (gradient) extraction on the bundled stacked master. Background extraction
-//! is *canonically* a linear-domain step (see `background_extraction/README.md`); this exercises it
+//! is *canonically* a linear-domain step; this exercises it
 //! on the **stretched** master to flatten the display-domain background, saving a viewable
 //! before/after. Gated behind the `real-data` feature.
 

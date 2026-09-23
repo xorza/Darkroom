@@ -35,3 +35,17 @@ image: **load / decode → calibrate → detect stars → register → combine**
 an optional final **stretch** into the display domain. The science deliverable
 is the linear stacked master; stretching is display-prep that runs strictly
 after all linear-domain work.
+
+## Verification
+
+Tests leave out `real-data`:
+
+```
+cargo test -p lumos --lib --tests --features ml,internals
+```
+
+`real-data` turns on the tests that read the gitignored ~7.4 GB dataset in
+`test_data/lumos_data/` (`testing::calibration_dir` asserts it is there); run
+them only when asked. The ML tests among them also need caller-supplied
+weights — `STARNET2_ONNX` / `DEEPSNR_ONNX`, or the default files in
+`test_data/` — and skip without them.

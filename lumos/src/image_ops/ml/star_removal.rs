@@ -1,4 +1,4 @@
-//! Star removal via a StarNet-style ONNX model (caller-supplied weights). See `ml/README.md`.
+//! Star removal via a StarNet-style ONNX model (caller-supplied weights).
 //!
 //! Runs the model through the shared `ort` [`backend`](crate::image_ops::ml::backend) (overlapping 512² tiles,
 //! feather-blended) and recovers the stars layer by **unscreen**. A **display-domain** operation:

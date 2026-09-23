@@ -1,4 +1,4 @@
-//! HDR multiscale dynamic-range compression. See `hdr/README.md`.
+//! HDR multiscale dynamic-range compression.
 //!
 //! Reveal detail in an overexposed bright region (galaxy/nebula cores, Milky-Way star clouds) by
 //! compressing the **large-scale** brightness while preserving fine detail: à trous starlet
