@@ -2,8 +2,9 @@
 
 An image-processing library with **CPU (SIMD: SSE/AVX2/NEON) and GPU (wgpu
 compute) backends**, a unified CPU/GPU image buffer, and 9-format pixel
-polymorphism. A workspace member of Scenarium and a git submodule; consumed by
-`lens`/`lumos`. Pre-alpha, breaks freely.
+polymorphism. A standalone crate, checked out as a git submodule of Darkroom
+and consumed there by `lens`, `lumos`, and `darkroom`. Pre-alpha, breaks
+freely.
 
 ## Posture
 
@@ -26,12 +27,11 @@ so `benches/*.rs` stays harness wiring and no production module goes `pub` for a
 benchmark's sake. `bench` implies `internals`.
 
 ```
-cargo bench -p imaginarium --bench contrast_brightness
+cargo bench -p imaginarium --features bench --bench contrast_brightness
 ```
 
-Name the target. An unfiltered `cargo bench` links every bench binary at once
-under a fat-LTO profile and can get OOM-killed; cap with `-j 2` if you need
-several.
+`--features bench` is not optional: every bench target declares
+`required-features = ["bench"]`, and cargo refuses to build it without one.
 
 ## Verification
 
