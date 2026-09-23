@@ -41,7 +41,7 @@ after all linear-domain work.
 Tests leave out `real-data`:
 
 ```
-cargo test -p lumos --lib --tests --features ml,internals
+cargo test -p lumos --tests --features ml,internals
 ```
 
 `real-data` turns on the tests that read the gitignored ~7.4 GB dataset in
