@@ -6,7 +6,7 @@
 //! rule placed. That single value is what the cull test, the breaker probe, and
 //! the paint call all take, and [`WirePass::draw_wire`] runs all three in one
 //! call off the per-frame inputs both renderers need — so they stay visually
-//! identical apart from brush and handle shape, and can't drift.
+//! identical apart from paint and handle shape, and can't drift.
 //!
 //! **The gesture.** [`GlyphDrag`] is one drag from a latched glyph to whatever
 //! compatible glyph the pointer is over, generic over the two
@@ -19,7 +19,7 @@
 
 use glam::Vec2;
 use palantir::widget::{LineCap, Shape};
-use palantir::{CurveBrush, LinearGradient, Rect, RgbaF32, Size, Stop, Ui};
+use palantir::{ColorRamp, Rect, RgbaF32, Size, Stroke, Ui};
 use scenarium::NodeId;
 
 use crate::gui::graph_ctx::GraphCtx;
@@ -120,12 +120,35 @@ impl Wire {
     /// Emit the stroked curve (round caps). The single place the wire
     /// `Shape` is built, so data and event curves can't drift in width
     /// policy, cap, or primitive.
-    pub(crate) fn add(&self, ui: &mut Ui, width: f32, brush: impl Into<CurveBrush>) {
-        ui.add_shape(
-            Shape::cubic_bezier(self.p0, self.p1, self.p2, self.p3, width)
-                .brush(brush)
-                .cap(LineCap::Round),
-        );
+    pub(crate) fn add(&self, ui: &mut Ui, width: f32, paint: impl Into<WirePaint>) {
+        let WirePaint { color, ramp } = paint.into();
+        let mut shape = Shape::cubic_bezier(
+            self.p0,
+            self.p1,
+            self.p2,
+            self.p3,
+            Stroke::new(color, width),
+        )
+        .cap(LineCap::Round);
+        if let Some(ramp) = ramp {
+            shape = shape.ramp(ramp);
+        }
+        ui.add_shape(shape);
+    }
+}
+
+/// What one wire paints with: its stroke colour, and the ramp that colour
+/// multiplies along the curve when the two ends differ.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) struct WirePaint {
+    color: RgbaF32,
+    ramp: Option<ColorRamp>,
+}
+
+impl From<RgbaF32> for WirePaint {
+    /// One colour for the whole curve.
+    fn from(color: RgbaF32) -> Self {
+        Self { color, ramp: None }
     }
 }
 
@@ -214,7 +237,7 @@ pub(crate) struct WirePass<'a, 'p> {
 }
 
 impl WirePass<'_, '_> {
-    /// Cull, breaker-probe, brush, and paint one committed wire, reporting
+    /// Cull, breaker-probe, tier, and paint one committed wire, reporting
     /// whether the breaker crossed it — the whole per-wire body, shared by both
     /// renderers so they can't drift in culling, emphasis, or alarm color.
     ///
@@ -242,12 +265,12 @@ impl WirePass<'_, '_> {
             .stroke(self.dcx.theme().stroke_width, broken, endpoint_hover);
         // A broken wire paints flat so the alarm read isn't diluted by the
         // family's own gradient, and it outranks the hover tint outright.
-        let brush = if broken {
-            CurveBrush::from(self.dcx.theme().colors.connection_broken)
+        let paint = if broken {
+            WirePaint::from(self.dcx.theme().colors.connection_broken)
         } else {
-            self.emphasis.brush(tint(), stroke.hovered)
+            self.emphasis.paint(tint(), stroke.hovered)
         };
-        wire.add(ui, stroke.width, brush);
+        wire.add(ui, stroke.width, paint);
         broken
     }
 }
@@ -330,22 +353,20 @@ impl WireEmphasis {
         }
     }
 
-    /// The brush for a non-broken wire: `tint`'s endpoint colors run through
-    /// this frame's tier. Equal ends lower to a flat brush rather than a
-    /// gradient between two identical stops.
-    fn brush(&self, tint: WireTint, emphasized: bool) -> CurveBrush {
+    /// The paint for a non-broken wire: `tint`'s endpoint colors run
+    /// through this frame's tier. Distinct ends ramp `p0` → `p3` over a
+    /// white stroke, so the ramp's colors are the ones that show. Equal
+    /// ends paint flat rather than ramping between two identical stops.
+    fn paint(&self, tint: WireTint, emphasized: bool) -> WirePaint {
         let start = self.tint(tint.start, emphasized);
         let end = self.tint(tint.end, emphasized);
         if start == end {
-            return CurveBrush::from(start);
+            return WirePaint::from(start);
         }
-        // Palantir's cubic-curve lowering samples a linear-gradient brush
-        // along the curve parameter `t` and ignores `angle`, so we pass 0.0
-        // and the gradient runs `p0` → `p3` whichever way the curve points.
-        CurveBrush::from(LinearGradient::new(
-            0.0,
-            [Stop::new(0.0, start), Stop::new(1.0, end)],
-        ))
+        WirePaint {
+            color: RgbaF32::WHITE,
+            ramp: Some(ColorRamp::two_stop(start, end)),
+        }
     }
 
     /// Whether this wire is hover-emphasized: an endpoint glyph is

@@ -121,7 +121,7 @@ impl<'a> NodeWidget<'a> {
             .sense(Sense::CLICK | Sense::DRAG)
             .background(
                 Background::rounded(theme.card.fill, Corners::all(theme.card.corner_radius))
-                    .with_stroke(Stroke::solid(border, border_width))
+                    .with_border(Stroke::new(border, border_width))
                     .with_shadow(shadow),
             )
             .show(ui, |ui| {

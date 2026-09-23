@@ -183,7 +183,7 @@ impl Badge {
                     (false, false) => 0.0,
                 };
                 let mut background = Background {
-                    stroke: Stroke::solid(color, 1.0),
+                    border: Stroke::new(color, 1.0),
                     corners: Corners::all(3.0),
                     ..Default::default()
                 };

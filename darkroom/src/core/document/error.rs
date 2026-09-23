@@ -2,8 +2,6 @@
 
 use scenarium::{GraphValidationError, NodeId};
 
-use palantir::DockError;
-
 use crate::core::document::TabRef;
 
 #[derive(Debug, thiserror::Error)]
@@ -29,8 +27,6 @@ pub(crate) enum DocumentValidationError {
         #[source]
         source: GraphViewValidationError,
     },
-    #[error("dock: {0}")]
-    Dock(#[from] DockError<TabRef>),
     #[error("open tab references a missing target {tab:?}")]
     MissingTab { tab: TabRef },
 }

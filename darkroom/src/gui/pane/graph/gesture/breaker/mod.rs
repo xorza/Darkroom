@@ -1,6 +1,6 @@
 use glam::Vec2;
-use palantir::widget::{LineCap, LineJoin, PolylineColors, Shape};
-use palantir::{PointerButton, Rect, Ui};
+use palantir::widget::{LineCap, LineJoin, Shape};
+use palantir::{PointerButton, Rect, Stroke, Ui};
 use scenarium::NodeId;
 use scenarium::{InputPort, Subscription};
 
@@ -392,8 +392,7 @@ impl BreakerUI {
         ui.add_shape(
             Shape::polyline(
                 &self.scribble.points,
-                PolylineColors::Single(theme.colors.breaker_stroke),
-                theme.stroke_width,
+                Stroke::new(theme.colors.breaker_stroke, theme.stroke_width),
             )
             .cap(LineCap::Round)
             .join(LineJoin::Round),

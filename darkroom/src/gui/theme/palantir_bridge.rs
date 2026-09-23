@@ -10,7 +10,8 @@ use crate::gui::theme::type_scale::TypeScale;
 /// [`palantir::Theme::from_palette`] wants, so every widget palantir paints
 /// reads the same palette as darkroom-owned chrome. Two notes on the
 /// mapping:
-/// - `terminal_bg` wants the editor / terminal surface — the graph canvas.
+/// - `window_bg` is the window clear and the selected tab chip — the graph
+///   canvas, so a chip dissolves into the pane below it.
 /// - `elem` and `node_fill` are one colour by design: nodes and palantir's
 ///   own surfaces sit on the same tier.
 pub(super) fn palantir_palette_for(p: &Palette) -> palantir::Palette {
@@ -18,7 +19,7 @@ pub(super) fn palantir_palette_for(p: &Palette) -> palantir::Palette {
         text: p.text,
         text_muted: p.text_muted,
         text_disabled: p.text_disabled,
-        terminal_bg: p.canvas_bg,
+        window_bg: p.canvas_bg,
         elem: p.node_fill,
         elem_mid: p.elem_mid,
         elem_strong: p.elem_strong,
@@ -101,7 +102,7 @@ fn tab_roles(theme: &mut palantir::Theme, p: &palantir::Palette, r: BridgeRoles<
     tabs.corner = r.corner_radius;
     tabs.accent_idle = r.header_fill;
     tabs.badge = r.warning;
-    // The selected chip keeps palantir's `terminal_bg` fill, which is
+    // The selected chip keeps palantir's `window_bg` fill, which is
     // darkroom's canvas: its bottom edge dissolves into the pane below.
     let top = Corners::top(r.corner_radius);
     let chip = |fill: RgbaF32| Background::rounded(fill, top);
@@ -132,7 +133,7 @@ fn tab_roles(theme: &mut palantir::Theme, p: &palantir::Palette, r: BridgeRoles<
     // The ghost chip trailing the pointer wears the chrome band, so it
     // reads as a tab lifted off its strip rather than as a popup.
     theme.dock.ghost.background = Background::rounded(r.chrome_fill, Corners::all(4.0))
-        .with_stroke(Stroke::solid(p.accent, 1.0));
+        .with_border(Stroke::new(p.accent, 1.0));
 }
 
 /// Menu-bar trigger look: palantir's [`ButtonTheme::menu_button`] recipe

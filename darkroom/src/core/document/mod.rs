@@ -435,7 +435,6 @@ impl Document {
             .validate(&self.graph)
             .map_err(|source| DocumentValidationError::MainView { source })?;
 
-        self.layout.validate()?;
         for tab in self.layout.all_tabs() {
             if !self.holds_tab(tab) {
                 return Err(DocumentValidationError::MissingTab { tab });

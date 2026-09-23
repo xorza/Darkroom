@@ -112,7 +112,7 @@ pub(crate) fn stroked_rect(ui: &mut Ui, rect: Rect, radius: f32, color: RgbaF32,
     ui.add_shape(
         Shape::rect(rect)
             .corners(radius)
-            .stroke(Stroke::solid(color, width)),
+            .border(Stroke::new(color, width)),
     );
 }
 
