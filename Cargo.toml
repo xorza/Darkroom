@@ -103,60 +103,17 @@ debug = false
 incremental = false
 
 
-[profile.dev.package.wgpu]
+[profile.dev.package."*"]
 opt-level = 3
-[profile.dev.package.wgpu-core]
-opt-level = 3
-[profile.dev.package.wgpu-hal]
-opt-level = 3
-[profile.dev.package.wgpu-types]
-opt-level = 3
-[profile.dev.package.naga]
-opt-level = 3
-[profile.dev.package.gpu-allocator]
-opt-level = 3
-[profile.dev.package.image]
-opt-level = 3
-[profile.dev.package.tiff]
-opt-level = 3
-[profile.dev.package.spirv]
-opt-level = 3
-[profile.dev.package.ash]
-opt-level = 3
-[profile.dev.package.png]
-opt-level = 3
-[profile.dev.package.zune-jpeg]
-opt-level = 3
-[profile.dev.package.nalgebra]
-opt-level = 3
-[profile.dev.package.half]
-opt-level = 3
-[profile.dev.package.miniz_oxide]
-opt-level = 3
-[profile.dev.package.flate2]
-opt-level = 3
-[profile.dev.package.lz4_flex]
-opt-level = 3
-[profile.dev.package.fits-well]
-opt-level = 3
-[profile.dev.package.libraw-rs-sys]
-opt-level = 3
-[profile.dev.package.cosmic-text]
-opt-level = 3
-[profile.dev.package.swash]
-opt-level = 3
-[profile.dev.package.fontdb]
-opt-level = 3
-[profile.dev.package.ttf-parser]
-opt-level = 3
-[profile.dev.package."owned_ttf_parser"]
-opt-level = 3
-[profile.dev.package.font-types]
-opt-level = 3
-[profile.dev.package.read-fonts]
-opt-level = 3
-[profile.dev.package.skrifa]
-opt-level = 3
+
+# The submodules edited and debugged most stay unoptimized, like the workspace members. A
+# per-package entry takes precedence over "*".
+[profile.dev.package.palantir]
+opt-level = 0
+[profile.dev.package.imaginarium]
+opt-level = 0
+[profile.dev.package.quickbench]
+opt-level = 0
 
 
 [workspace.lints.rust]
