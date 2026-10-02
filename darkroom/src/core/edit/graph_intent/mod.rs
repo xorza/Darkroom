@@ -412,14 +412,16 @@ impl GraphIntent {
                 },
             }),
             Self::Raise { key } => {
-                let Some(placement) = view.item_placements.get(&key) else {
+                let (Some(placement), Some(to)) =
+                    (view.item_placements.get(&key), view.raised_z(key))
+                else {
                     return Ok(None);
                 };
                 UndoStep::Raise(Raise {
                     key,
                     z: Change {
                         from: placement.z,
-                        to: view.front_z(),
+                        to,
                     },
                 })
             }

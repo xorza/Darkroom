@@ -115,11 +115,6 @@ Severity: High — user files and user-wired graphs crash the process or the wor
 - [ ] `lumos/src/stacking/star_detection/detector/stages/filter/mod.rs` `remove_duplicate_stars` — `FilterConfig::validate` accepts `duplicate_min_separation = 0.0`; the spatial-hash path divides by `cell_size = 0.0`, every coordinate becomes `i64::MAX`, and `cell_x + dx` overflows (debug panic; release puts all stars in one cell, O(n²)). Zero separation should mean "no dedup" and return early.
 - [ ] `imaginarium/src/drawing.rs` `draw_circle` / `draw_dot` — for a shape entirely left of or above the image, `((cx + r).ceil() as i32).min(width as i32 - 1) as usize` is negative and wraps to ~2^64; the distance test rejects every pixel, so the loop runs essentially forever. Clamp in `i32` and return early on an empty box.
 
-## Raising a node is never a no-op, so clicks fill the undo history
-Severity: High — every click on an already-frontmost node records an undo entry that changes nothing visible; z grows without bound.
-
-- [ ] `darkroom/src/core/edit/graph_intent/mod.rs` `GraphIntent::into_step` (`Raise` arm) / `darkroom/src/core/document/mod.rs` `GraphView::front_z` — `to` is `front_z()` = `max(z) + 1` over all placements *including* `key`, so for the frontmost node `from = max` and `to = max + 1`, and `Raise::is_noop` is never true — contrary to its own doc. `GraphIntent::click` always chains a `Raise`, so N clicks on a selected frontmost node cost N Ctrl+Z that appear to do nothing. No test covers it. Compute the max over the other items and emit no step when `key` alone holds it.
-
 ## Esc commits the text a user tried to cancel
 Severity: High — the same commit-on-blur logic is written three times; two copies write the cancelled draft into the document or preferences.
 
