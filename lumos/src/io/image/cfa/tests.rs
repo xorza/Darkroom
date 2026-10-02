@@ -192,68 +192,6 @@ fn master_cfa_fits_round_trips_mono_and_xtrans_patterns() {
 }
 
 #[test]
-fn cfa_type_mono_color_at() {
-    let mono = CfaType::Mono;
-    assert_eq!(mono.color_at(Vec2us::new(0, 0)), 0);
-    assert_eq!(mono.color_at(Vec2us::new(5, 5)), 0);
-}
-
-#[test]
-fn cfa_type_bayer_rggb_color_at() {
-    let bayer = CfaType::Bayer(CfaPattern::Rggb);
-    // RGGB: (x=0,y=0)=R, (x=1,y=0)=G, (x=0,y=1)=G, (x=1,y=1)=B
-    assert_eq!(bayer.color_at(Vec2us::new(0, 0)), 0); // R
-    assert_eq!(bayer.color_at(Vec2us::new(1, 0)), 1); // G
-    assert_eq!(bayer.color_at(Vec2us::new(0, 1)), 1); // G
-    assert_eq!(bayer.color_at(Vec2us::new(1, 1)), 2); // B
-}
-
-#[test]
-fn cfa_type_bayer_bggr_color_at() {
-    let bayer = CfaType::Bayer(CfaPattern::Bggr);
-    // BGGR: (x=0,y=0)=B, (x=1,y=0)=G, (x=0,y=1)=G, (x=1,y=1)=R
-    assert_eq!(bayer.color_at(Vec2us::new(0, 0)), 2); // B
-    assert_eq!(bayer.color_at(Vec2us::new(1, 0)), 1); // G
-    assert_eq!(bayer.color_at(Vec2us::new(0, 1)), 1); // G
-    assert_eq!(bayer.color_at(Vec2us::new(1, 1)), 0); // R
-}
-
-#[test]
-fn cfa_type_bayer_wrapping() {
-    let bayer = CfaType::Bayer(CfaPattern::Rggb);
-    // Pattern repeats every 2 pixels
-    assert_eq!(
-        bayer.color_at(Vec2us::new(0, 0)),
-        bayer.color_at(Vec2us::new(2, 0))
-    );
-    assert_eq!(
-        bayer.color_at(Vec2us::new(0, 0)),
-        bayer.color_at(Vec2us::new(0, 2))
-    );
-    assert_eq!(
-        bayer.color_at(Vec2us::new(1, 1)),
-        bayer.color_at(Vec2us::new(3, 3))
-    );
-}
-
-#[test]
-fn cfa_type_xtrans_color_at() {
-    let xtrans = CfaType::XTrans(XTRANS_PATTERN);
-    assert_eq!(xtrans.color_at(Vec2us::new(0, 0)), 1); // G
-    assert_eq!(xtrans.color_at(Vec2us::new(2, 0)), 0); // R
-    assert_eq!(xtrans.color_at(Vec2us::new(0, 2)), 2); // B
-    // Wrapping
-    assert_eq!(
-        xtrans.color_at(Vec2us::new(6, 0)),
-        xtrans.color_at(Vec2us::new(0, 0))
-    );
-    assert_eq!(
-        xtrans.color_at(Vec2us::new(0, 6)),
-        xtrans.color_at(Vec2us::new(0, 0))
-    );
-}
-
-#[test]
 fn subtract_takes_the_dark_off_every_sample() {
     let mut light = make_cfa(Size2us::new(2, 2), vec![0.5, 0.6, 0.7, 0.8], CfaType::Mono);
     let dark = make_cfa(Size2us::new(2, 2), vec![0.1, 0.1, 0.1, 0.1], CfaType::Mono);
@@ -357,5 +295,45 @@ fn each_pattern_names_its_demosaic() {
     ] {
         assert_eq!(cfa_type.demosaic_provenance(), demosaic, "{cfa_type:?}");
         assert_eq!(cfa_type.demosaiced_color(), color, "{cfa_type:?}");
+    }
+}
+
+/// The colour at every position of two periods, for each pattern, from each source that states it:
+/// the `BAYERPAT` spelling read letter by letter, LibRaw's `filters` word, `CfaPattern`, and
+/// `CfaType`; mono is red-index 0 everywhere and X-Trans is its rows, both wrapping.
+#[test]
+fn every_pattern_names_the_colour_at_each_position() {
+    let colour_of = |letter: u8| match letter {
+        b'R' => 0,
+        b'G' => 1,
+        b'B' => 2,
+        _ => unreachable!(),
+    };
+    for (pattern, filters) in [
+        (CfaPattern::Rggb, 0x9494_9494),
+        (CfaPattern::Bggr, 0x1616_1616),
+        (CfaPattern::Grbg, 0x6161_6161),
+        (CfaPattern::Gbrg, 0x4949_4949),
+    ] {
+        let spelling = pattern.bayerpat().as_bytes();
+        for y in 0..4 {
+            for x in 0..4 {
+                let expected = colour_of(spelling[(y % 2) * 2 + x % 2]);
+                let pos = Vec2us::new(x, y);
+                assert_eq!(pattern.color_at(pos) as u8, expected, "{pattern:?} {pos:?}");
+                assert_eq!(CfaType::Bayer(pattern).color_at(pos), expected);
+                assert_eq!(raw::libraw_filter_color(filters, y, x) as u8, expected);
+            }
+        }
+    }
+    for y in 0..12 {
+        for x in 0..12 {
+            let pos = Vec2us::new(x, y);
+            assert_eq!(CfaType::Mono.color_at(pos), 0);
+            assert_eq!(
+                CfaType::XTrans(XTRANS_PATTERN).color_at(pos),
+                XTRANS_PATTERN.rows()[y % 6][x % 6]
+            );
+        }
     }
 }

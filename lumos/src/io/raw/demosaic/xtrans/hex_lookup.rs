@@ -150,42 +150,12 @@ impl HexLookup {
 #[cfg(test)]
 mod tests {
     use crate::io::raw::demosaic::xtrans::hex_lookup::*;
+    use crate::testing::cfa::XTRANS_PATTERN;
     use std::ptr;
-
-    fn test_pattern() -> XTransPattern {
-        XTransPattern::new([
-            [1, 1, 0, 1, 1, 2],
-            [1, 1, 2, 1, 1, 0],
-            [2, 0, 1, 0, 2, 1],
-            [1, 1, 2, 1, 1, 0],
-            [1, 1, 0, 1, 1, 2],
-            [0, 2, 1, 2, 0, 1],
-        ])
-        .unwrap()
-    }
-
-    #[test]
-    fn hex_lookup_construction() {
-        let pattern = test_pattern();
-        let hex = HexLookup::new(&pattern);
-
-        // All entries should be filled (no sentinel values)
-        for r in 0..3 {
-            for c in 0..3 {
-                for e in 0..HEX_ENTRIES {
-                    let off = &hex.offsets[r][c][e];
-                    assert!(
-                        off.dy != i32::MAX && off.dx != i32::MAX,
-                        "Unfilled entry [{r}][{c}][{e}]"
-                    );
-                }
-            }
-        }
-    }
 
     #[test]
     fn hex_lookup_offsets_in_range() {
-        let pattern = test_pattern();
+        let pattern = XTRANS_PATTERN;
         let hex = HexLookup::new(&pattern);
 
         // All offsets should be within a reasonable range (±3 pixels)
@@ -206,7 +176,7 @@ mod tests {
 
     #[test]
     fn hex_lookup_solitary_green_phase() {
-        let pattern = test_pattern();
+        let pattern = XTRANS_PATTERN;
         let hex = HexLookup::new(&pattern);
 
         assert!(hex.sgrow < 3);
@@ -223,7 +193,7 @@ mod tests {
 
     #[test]
     fn hex_lookup_has_green_neighbors() {
-        let pattern = test_pattern();
+        let pattern = XTRANS_PATTERN;
         let hex = HexLookup::new(&pattern);
 
         // For non-green pixels, hex neighbors should include green positions
@@ -258,7 +228,7 @@ mod tests {
 
     #[test]
     fn hex_lookup_mod3_wrapping() {
-        let pattern = test_pattern();
+        let pattern = XTRANS_PATTERN;
         let hex = HexLookup::new(&pattern);
 
         // get() should wrap via % 3

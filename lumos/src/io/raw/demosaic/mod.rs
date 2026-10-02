@@ -39,7 +39,7 @@ mod memory_tests {
     use crate::testing::cfa::XTRANS_PATTERN;
 
     #[test]
-    fn demosaic_memory_matches_live_allocations() {
+    fn demosaic_memory_counts_each_plane_the_kernel_holds() {
         let even = ImageDimensions::new((10, 8), 1);
         let odd = ImageDimensions::new((5, 3), 1);
 

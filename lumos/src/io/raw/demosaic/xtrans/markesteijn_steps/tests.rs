@@ -154,98 +154,72 @@ fn homogeneity_uses_the_center_threshold_for_the_entire_window() {
     assert_eq!(homo[center], 9);
 }
 
+/// `YPbPr::from_rgb` against hand values: luma is `0.2627 R + 0.6780 G + 0.0593 B`, Pb is
+/// `(B − Y) · 0.56433` and Pr is `(R − Y) · 0.67815`, computed in decimal and written to f32's
+/// seven digits. The function rounds each of its three to five f32 operations once, on values
+/// below 1, so with the rounding of the decimals it agrees to within 5 · 2⁻²⁴ + 5e-8 < 4e-7;
+/// neutral greys have no chroma.
 #[test]
-fn ypbpr_conversion_white() {
-    // White (1,1,1) → Y=1, Pb=0, Pr=0
-    let y: f32 = 0.2627 * 1.0 + 0.6780 * 1.0 + 0.0593 * 1.0;
-    let pb: f32 = (1.0 - y) * 0.56433;
-    let pr: f32 = (1.0 - y) * 0.67815;
-    assert!((y - 1.0).abs() < 1e-4, "Y={y}");
-    assert!(pb.abs() < 1e-4, "Pb={pb}");
-    assert!(pr.abs() < 1e-4, "Pr={pr}");
+fn ypbpr_matches_hand_values() {
+    for (rgb, expected) in [
+        ([1.0, 0.0, 0.0], [0.2627, -0.148_249_5, 0.5]),
+        ([0.0, 1.0, 0.0], [0.678, -0.382_615_7, -0.459_785_7]),
+        ([0.0, 0.0, 1.0], [0.0593, 0.530_865_2, -0.040_214_3]),
+        ([1.0, 1.0, 1.0], [1.0, 0.0, 0.0]),
+        ([0.5, 0.5, 0.5], [0.5, 0.0, 0.0]),
+        ([0.0, 0.0, 0.0], [0.0, 0.0, 0.0]),
+    ] {
+        let [r, g, b] = rgb;
+        let YPbPr { luma, pb, pr } = YPbPr::from_rgb(r, g, b);
+        for (name, actual, expected) in [
+            ("Y", luma, expected[0]),
+            ("Pb", pb, expected[1]),
+            ("Pr", pr, expected[2]),
+        ] {
+            assert!(
+                (actual - expected).abs() < 4e-7,
+                "{name} of {rgb:?}: {actual} vs {expected}"
+            );
+        }
+    }
 }
 
+/// Uniform input has no structure: away from the border the reconstruction leaves unfilled, the
+/// horizontal and vertical candidates are the input everywhere, so their derivatives are zero to
+/// the rounding of the luma weights (three products and two sums of values below 1, under 1e-6).
+/// The diagonal candidates are left empty at 2×2-green sites by design (see
+/// `reconstruction_preserves_native_samples_and_canonical_empty_directions`), so their derivatives
+/// are not.
 #[test]
-fn ypbpr_conversion_primary_colors() {
-    // Pure red (1,0,0): Y=0.2627, Pb=-0.2627*0.56433, Pr=0.7373*0.67815
-    let YPbPr { luma: y, pb, pr } = YPbPr::from_rgb(1.0, 0.0, 0.0);
-    assert!((y - 0.2627).abs() < 1e-6, "Red Y={y}");
-    assert!((pb - (-0.2627 * 0.56433)).abs() < 1e-6, "Red Pb={pb}");
-    assert!((pr - (0.7373 * 0.67815)).abs() < 1e-4, "Red Pr={pr}");
-
-    // Pure green (0,1,0): Y=0.6780, Pb=-0.6780*0.56433, Pr=-0.6780*0.67815
-    let YPbPr { luma: y, pb, pr } = YPbPr::from_rgb(0.0, 1.0, 0.0);
-    assert!((y - 0.6780).abs() < 1e-6, "Green Y={y}");
-    assert!((pb - (-0.6780 * 0.56433)).abs() < 1e-6, "Green Pb={pb}");
-    assert!((pr - (-0.6780 * 0.67815)).abs() < 1e-4, "Green Pr={pr}");
-
-    // Pure blue (0,0,1): Y=0.0593, Pb=0.9407*0.56433, Pr=-0.0593*0.67815
-    let YPbPr { luma: y, pb, pr } = YPbPr::from_rgb(0.0, 0.0, 1.0);
-    assert!((y - 0.0593).abs() < 1e-6, "Blue Y={y}");
-    assert!((pb - (0.9407 * 0.56433)).abs() < 1e-4, "Blue Pb={pb}");
-    assert!((pr - (-0.0593 * 0.67815)).abs() < 1e-4, "Blue Pr={pr}");
-
-    // Mid-gray (0.5, 0.5, 0.5): Y=0.5, Pb=0, Pr=0
-    let YPbPr { luma: y, pb, pr } = YPbPr::from_rgb(0.5, 0.5, 0.5);
-    assert!((y - 0.5).abs() < 1e-6, "Gray Y={y}");
-    assert!(pb.abs() < 1e-6, "Gray Pb={pb}");
-    assert!(pr.abs() < 1e-6, "Gray Pr={pr}");
-}
-
-#[test]
-fn ypbpr_conversion_black() {
-    // Black (0,0,0) → Y=0, Pb=0, Pr=0
-    let y: f32 = 0.2627 * 0.0 + 0.6780 * 0.0 + 0.0593 * 0.0;
-    let pb: f32 = (0.0 - y) * 0.56433;
-    let pr: f32 = (0.0 - y) * 0.67815;
-    assert_eq!(y, 0.0);
-    assert_eq!(pb, 0.0);
-    assert_eq!(pr, 0.0);
-}
-
-#[test]
-fn derivatives_of_uniform_input_are_finite_and_expose_directional_candidates() {
-    let raw_w = 24;
-    let raw_h = 24;
-    let w = 12;
-    let h = 12;
-    let pixels = w * h;
-    let data = vec![to_u16(0.5); raw_w * raw_h];
-    let xtrans = make_xtrans(
-        &data,
-        SensorLayout {
-            raw: Size2us::new(raw_w, raw_h),
-            active: Size2us::new(w, h),
-            margin: Vec2us::new(6, 6),
-        },
-    );
+fn derivatives_of_uniform_input_vanish_inside_the_border() {
+    let size = Size2us::new(24, 24);
+    let (w, h) = (size.width, size.height);
+    let pixels = size.pixel_count();
+    let data = vec![to_u16(0.5); pixels];
+    let xtrans = make_xtrans(&data, SensorLayout::cropped(size));
     let hex = HexLookup::new(&xtrans.raw_pattern);
 
     let mut gmin = vec![0.0f32; pixels];
     let mut gmax = vec![1.0f32; pixels];
     compute_green_minmax(&xtrans, &hex, &mut gmin, &mut gmax);
-
     let mut green_dir = vec![0.0f32; NDIR * pixels];
     interpolate_green(&xtrans, &hex, &gmin, &gmax, &mut green_dir);
-
     let mut colors = vec![[0.0; 2]; NDIR * pixels];
     reconstruct_colors(&xtrans, &hex, &green_dir, &mut colors);
     let mut drv = vec![f32::NAN; NDIR * pixels];
     compute_derivatives(&xtrans, &green_dir, &colors, &mut drv);
 
-    let mut nonzero = [0usize; NDIR];
-    for d in 0..NDIR {
-        for y in 2..h - 2 {
-            for x in 2..w - 2 {
-                let val = drv[d * pixels + y * w + x];
-                assert!(val.is_finite(), "NaN derivative at d={d} y={y} x={x}");
-                assert!(val >= 0.0, "Negative derivative at d={d} y={y} x={x}");
-                nonzero[d] += usize::from(val > 1e-6);
+    for d in 0..2 {
+        for y in 6..h - 6 {
+            for x in 6..w - 6 {
+                let value = drv[d * pixels + y * w + x];
+                assert!(
+                    (0.0..1e-6).contains(&value),
+                    "direction {d} at ({x}, {y}): {value}"
+                );
             }
         }
     }
-    assert!(nonzero[0] > 0);
-    assert_ne!(nonzero[0], nonzero[2]);
 }
 
 #[test]
