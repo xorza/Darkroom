@@ -12,8 +12,8 @@ use crate::stacking::star_detection::threshold_mask::simd::process_words_scalar;
 #[cfg(target_arch = "x86_64")]
 use crate::stacking::star_detection::threshold_mask::simd::sse41::process_words_sse;
 use crate::testing::simd_check::backend::Backend;
-use crate::testing::simd_check::simd_tier::SimdTier;
 use crate::testing::simd_check::{DATA_SHAPES, SWEEP_WIDTHS};
+use imaginarium::SimdTier;
 
 type WordsFn = unsafe fn(&[f32], &[f32], &[f32], ThresholdParams, &mut [u64], Range<usize>);
 

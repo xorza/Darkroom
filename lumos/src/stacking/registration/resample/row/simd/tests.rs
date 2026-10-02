@@ -14,7 +14,10 @@ use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::testing::prelude::*;
 use crate::testing::simd_check::backend::Backend;
 use crate::testing::simd_check::data_shape::DataShape;
-use crate::testing::simd_check::simd_tier::SimdTier;
+use imaginarium::SimdTier;
+
+#[cfg(target_arch = "x86_64")]
+use crate::testing::simd_check;
 use crate::testing::simd_check::{SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar};
 
 type BilinearFn = unsafe fn(&Buffer2<f32>, &mut [f32], usize, &Transform);
@@ -196,7 +199,7 @@ fn lanczos_window_backends_match_scalar() {
 #[test]
 fn lanczos_weight_gather_matches_scalar_lookups() {
     fn check<const A: usize, const SIZE: usize>() {
-        if !SimdTier::Avx2Fma.runs_here() {
+        if !simd_check::runs_here(SimdTier::Avx2Fma) {
             return;
         }
         let lut = kernel::get_lanczos_lut(A);

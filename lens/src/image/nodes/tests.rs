@@ -4,7 +4,7 @@ use scenarium::testing::func_invoker::FuncInvoker;
 use imaginarium::ColorFormat;
 use scenarium::{ConstValue, DynamicValue};
 
-use crate::image::format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat, conversion_target};
+use crate::image::format::{AS_IS, CONVERSION_FORMAT_DATATYPE, conversion_target};
 use crate::image::nodes::image_library;
 use crate::image::{IMAGE_DATA_TYPE, Image};
 
@@ -26,7 +26,7 @@ fn format_defaults_are_exact() {
     assert_eq!(convert.inputs[1].data_type, CONVERSION_FORMAT_DATATYPE);
     assert_eq!(
         convert.inputs[1].default_value,
-        Some(ConstValue::Enum(ConversionFormat::RgbU8.label())),
+        Some(ConstValue::Enum("RGB u8".to_string())),
     );
 
     let save = library.by_name("Save Image").unwrap();
@@ -38,7 +38,7 @@ fn format_defaults_are_exact() {
     assert_eq!(names, ["Image", "Path", "Format"]);
     assert_eq!(
         save.inputs[2].default_value,
-        Some(ConstValue::Enum(ConversionFormat::AsIs.label())),
+        Some(ConstValue::Enum(AS_IS.to_string())),
     );
 }
 
@@ -58,7 +58,7 @@ async fn load_and_save_round_trip_exact_pixels() {
             [
                 DynamicValue::from_custom(Image::from(image)),
                 ConstValue::FsPath(path.display().to_string()).into(),
-                ConstValue::Enum(ConversionFormat::AsIs.label()).into(),
+                ConstValue::Enum(AS_IS.to_string()).into(),
             ],
         )
         .await
@@ -112,4 +112,39 @@ async fn blend_refuses_a_destination_of_another_size_or_format() {
             .await
             .is_ok()
     );
+}
+
+/// A zero or non-finite scale, and a non-finite rotation or shift, fail the node with an input
+/// error instead of crashing the worker; the identity runs.
+#[tokio::test]
+async fn transform_refuses_a_transform_with_no_inverse() {
+    let library = image_library();
+    let transform = library.by_name("Transform").unwrap();
+    let run = |values: [f64; 5]| {
+        let image = DynamicValue::from_custom(Image::from(
+            imaginarium::Image::new_black(imaginarium::ImageDesc::new(2, 2, ColorFormat::L_U8))
+                .unwrap(),
+        ));
+        let inputs = [image]
+            .into_iter()
+            .chain(values.map(|value| ConstValue::Float(value).into()))
+            .collect::<Vec<DynamicValue>>();
+        async move { FuncInvoker::default().call(transform, inputs).await }
+    };
+
+    for values in [
+        [0.0, 1.0, 0.0, 0.0, 0.0],
+        [1.0, f64::NAN, 0.0, 0.0, 0.0],
+        [1.0, 1.0, f64::INFINITY, 0.0, 0.0],
+        [1.0, 1.0, 0.0, 0.0, f64::NAN],
+    ] {
+        assert!(
+            matches!(
+                run(values).await,
+                Err(scenarium::InvokeError::InvalidInput { index: 1, .. })
+            ),
+            "{values:?}"
+        );
+    }
+    assert!(run([1.0, 1.0, 0.0, 0.0, 0.0]).await.is_ok());
 }

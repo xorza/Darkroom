@@ -11,11 +11,22 @@
 
 pub(crate) mod backend;
 pub(crate) mod data_shape;
-pub(crate) mod simd_tier;
+
+use imaginarium::SimdTier;
 
 use crate::testing::assertions::is_close;
 use crate::testing::simd_check::backend::Backend;
 use crate::testing::simd_check::data_shape::DataShape;
+
+/// Whether a test can run `tier`'s backend here. When it cannot, the line on stderr says so,
+/// since a test has no skipped state and would otherwise pass without checking it.
+pub(crate) fn runs_here(tier: SimdTier) -> bool {
+    let supported = tier.is_supported();
+    if !supported {
+        eprintln!("SKIPPED: this CPU has no {tier}, so its backend is not checked");
+    }
+    supported
+}
 
 /// The inputs every SIMD cross-check runs over. Adding one here covers every kernel at once,
 /// which is the point — the per-module copies could not do that.
@@ -202,10 +213,10 @@ mod tests {
     use std::cell::Cell;
 
     use crate::testing::simd_check::backend::Backend;
-    use crate::testing::simd_check::simd_tier::SimdTier;
     use crate::testing::simd_check::{
         DATA_SHAPES, SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar,
     };
+    use imaginarium::SimdTier;
 
     /// A tier every host of its architecture has.
     #[cfg(target_arch = "x86_64")]

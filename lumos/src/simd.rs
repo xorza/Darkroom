@@ -48,13 +48,13 @@ pub(crate) const NEON_F32_LANES: usize = 4;
 /// which is checked in the same expression.
 macro_rules! dispatch {
     (@available avx2) => {
-        ::imaginarium::cpu_features::has_avx2()
+        ::imaginarium::SimdTier::Avx2.is_supported()
     };
     (@available avx2_fma) => {
-        ::imaginarium::cpu_features::has_avx2_fma()
+        ::imaginarium::SimdTier::Avx2Fma.is_supported()
     };
     (@available sse4_1) => {
-        ::imaginarium::cpu_features::has_sse4_1()
+        ::imaginarium::SimdTier::Sse41.is_supported()
     };
     // SSE2 is part of the x86_64 baseline.
     (@available sse2) => {
@@ -108,7 +108,9 @@ pub(crate) use dispatch;
 
 #[cfg(test)]
 mod tests {
-    use imaginarium::cpu_features;
+    #[cfg(target_arch = "x86_64")]
+    use imaginarium::SimdTier;
+
     /// Every arm returns the tag of the backend it stands for, so a test can name which rung the
     /// ladder took on the machine it is running on without any SIMD in the picture.
     fn taken(force_scalar: bool) -> &'static str {
@@ -142,15 +144,16 @@ mod tests {
     fn a_false_guard_falls_through_to_scalar_and_a_true_one_does_not() {
         assert_eq!(taken(true), "scalar");
 
-        let expected = if cfg!(target_arch = "aarch64") {
-            "neon"
-        } else if cfg!(target_arch = "x86_64") && cpu_features::has_avx2_fma() {
-            "avx2_fma"
-        } else if cfg!(target_arch = "x86_64") && cpu_features::has_sse4_1() {
-            "sse4_1"
-        } else {
-            "scalar"
+        #[cfg(target_arch = "x86_64")]
+        let expected = match SimdTier::widest() {
+            Some(tier) if tier >= SimdTier::Avx2Fma => "avx2_fma",
+            Some(tier) if tier >= SimdTier::Sse41 => "sse4_1",
+            _ => "scalar",
         };
+        #[cfg(target_arch = "aarch64")]
+        let expected = "neon";
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        let expected = "scalar";
         assert_eq!(taken(false), expected);
     }
 
@@ -168,7 +171,7 @@ mod tests {
         }
 
         #[cfg(target_arch = "x86_64")]
-        if cpu_features::has_sse4_1() {
+        if SimdTier::Sse41.is_supported() {
             assert_eq!(skip_first(true), "sse4_1");
         }
         #[cfg(target_arch = "aarch64")]

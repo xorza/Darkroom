@@ -7,8 +7,8 @@ use crate::image_ops::stretching::simd::avx2;
 #[cfg(target_arch = "aarch64")]
 use crate::image_ops::stretching::simd::neon;
 use crate::testing::simd_check::backend::Backend;
-use crate::testing::simd_check::simd_tier::SimdTier;
 use crate::testing::simd_check::{SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar};
+use imaginarium::SimdTier;
 
 type PlanesFn = unsafe fn(&mut [f32], &mut [f32], &mut [f32], f32, f32);
 

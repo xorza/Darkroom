@@ -4,6 +4,7 @@
 //! decision — which container, which decoder, what transfer function, what colour interpretation,
 //! which demosaic.
 
+use imaginarium::FileFormat;
 use serde::{Deserialize, Serialize};
 
 use crate::io::image::fits::provenance::FitsTransferProvenance;
@@ -20,6 +21,16 @@ pub enum SourceContainer {
     Tiff,
     Png,
     Jpeg,
+}
+
+impl From<FileFormat> for SourceContainer {
+    fn from(format: FileFormat) -> Self {
+        match format {
+            FileFormat::Png => Self::Png,
+            FileFormat::Jpeg => Self::Jpeg,
+            FileFormat::Tiff => Self::Tiff,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

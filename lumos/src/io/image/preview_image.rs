@@ -2,20 +2,19 @@
 
 use std::path::Path;
 
-use imaginarium::{ChannelCount, Image};
+use imaginarium::{ChannelCount, FileFormat, Image};
 
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode as fits_decode;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
-    TransferProvenance,
+    SourceContainer, TransferProvenance,
 };
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::standard::{
-    FITS_EXTENSIONS, STANDARD_IMAGE_EXTENSIONS, f32_target_format, file_extension,
-    read_standard_image, standard_container,
+    FITS_EXTENSIONS, f32_target_format, file_extension, read_standard_image,
 };
 use crate::io::raw;
 
@@ -41,7 +40,7 @@ impl PreviewImage {
             return raw::load_raw(path, &context.cancel).map(Into::into);
         }
 
-        if STANDARD_IMAGE_EXTENSIONS.contains(&extension.as_str()) {
+        if let Some(format) = FileFormat::from_extension(&extension) {
             let decoded = read_standard_image(path)?;
             context.check_cancelled(path)?;
             let alpha_dropped = decoded.desc().color_format.channel_count == ChannelCount::Rgba;
@@ -49,7 +48,7 @@ impl PreviewImage {
             let image = decoded.convert(target);
             let metadata = ImageMetadata {
                 provenance: Some(ImageProvenance {
-                    container: standard_container(&extension),
+                    container: SourceContainer::from(format),
                     decoder: DecoderProvenance::Imaginarium,
                     transfer: TransferProvenance::UnspecifiedRaster,
                     color: ColorProvenance::UnmanagedRaster { alpha_dropped },
