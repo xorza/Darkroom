@@ -166,7 +166,6 @@ Paths are relative to the repository root.
 - [ ] `imaginarium/src/image/tests.rs:88-94` — `save_tiff_with_misaligned_bytes_returns_error` saves nothing. It tests `Image::new_with_data` with a wrong length and only checks `is_err()`. Rename it, and match the concrete `Error` variant.
 - [ ] `imaginarium/src/ops/contrast_brightness/cpu/tests.rs:320-331` (`test_large_image`) — despite the name it uses the 61×38 lena and asserts only "changed". `every_knob_direction_changes_every_format` (`:179`) already subsumes it. Delete it.
 - [ ] `darkroom/src/gui/pane/graph/gesture/new_node/tests.rs:69-76` — the same doc paragraph appears twice on `assert_fits`.
-- [ ] `quickbench/src/lib.rs:10-11` — the crate doc tells users to "disable with `Bencher::without_lock`". That method exists only in `#[cfg(test)] mod internals` (`:425-438`), so the public docs advertise an API that does not exist.
 
 ## The test harness breaks its own contracts
 A harness helper does something other than what its doc promises. Every test built on it inherits the wrong result.
@@ -217,9 +216,6 @@ Paths without a crate prefix are relative to `scenarium/src/`.
 ### darkroom, lens, imaginarium, quickbench, root `test_resources/`
 Paths are relative to the repository root.
 
-- [ ] `quickbench/src/tests.rs:67-84`, and every bench in `tests.rs` — `resolve_output_dir` (`lib.rs:280-287`) gives `QUICKBENCH_OUTPUT_DIR` precedence over the builder. With that variable set in the developer's shell, `bench_persists_results_when_output_dir_set` fails, because the file goes elsewhere, and `iter_cap` / `time_cap` write result files into the user's directory. Clear or override the variable inside the test, or make the precedence injectable.
-- [ ] `quickbench/src/tests.rs:37`, `:47`, `:69` — fixed shared paths under `temp_dir()` (`quickbench-test-read`, `-persist`) collide across concurrent runs of the suite and are left behind on panic. Use a unique path that is removed on drop.
-- [ ] `quickbench/src/tests.rs:20-33` — `time_cap_stops_within_budget` is a wall-clock assertion (`total <= 200 ms`) plus `iterations > 0`. The measuring loop has no injectable clock. Test the stop rule on a closure that advances a fake clock, or drop the bound.
 - [ ] `lens/src/utility/fs_watch/tests.rs:211-231`, `:351-390` — real sleeps (`sleep(50ms)`, `timeout(200ms)`) and an `elapsed()` assertion. The debounce uses `tokio::time::timeout` (`mod.rs:10`), so `#[tokio::test(start_paused = true)]` would make both tests exact and instant: assert that the fire lands at exactly 250 ms. This needs tokio's `test-util` feature in lens `[dev-dependencies]`; the workspace `tokio` has `full`, which does not include it. That is a manifest change for you to approve.
 - [ ] `darkroom/src/core/io/preferences/tests.rs:14-32` — `expect("the test host has a home directory")` fails on a container without `HOME`/`XDG_CONFIG_HOME`. The equality also compares `Preferences::path()` with `platform::config_dir()`, the same function, so it is a tautology. The real resolution is already covered without the environment by `platform/{linux,macos,windows}` `resolve_config_dir` tests. Drop this test or reduce it to the file-name check.
 
