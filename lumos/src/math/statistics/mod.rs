@@ -14,7 +14,7 @@ pub(crate) mod float;
 /// demand. Carrying the MAD rather than an already-scaled sigma is what keeps "median and MAD"
 /// and "median and sigma" one type instead of two, and applies the 1.4826 factor exactly once,
 /// where the caller needs Gaussian units.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub(crate) struct MedianMad {
     pub(crate) median: f32,
     pub(crate) mad: f32,

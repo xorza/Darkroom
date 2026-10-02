@@ -4,7 +4,7 @@ use common::{CancelToken, TempDir};
 
 use crate::execution::cache::digest::{Digest, DigestHasher};
 use crate::execution::cache::resource::error::StampError;
-use crate::execution::cache::resource::{FileId, FsPathId, StampJob, epoch_offset_ns};
+use crate::execution::cache::resource::{FsPathId, StampJob};
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::graph::identity::FuncId;
 use crate::testing::program::ProgramBuilder;
@@ -260,38 +260,14 @@ fn directory_identity_separates_non_utf8_names() {
     );
 }
 
-/// `duration_since(UNIX_EPOCH).ok().unwrap_or(0)` mapped *every* mtime
-/// before 1970 onto the same `0` as the epoch itself, so two files
-/// differing only in when they were modified shared a pure node's cache
-/// key. (The third state it folded into that same `0` — a metadata read
-/// that simply failed — is no longer a value at all; an unstampable file
-/// is left out of the map entirely.)
+/// Files that differ only in an mtime before, at or after the epoch digest apart. Same length
+/// throughout, so mtime is the only field in play; the signed conversion itself is
+/// `common::FileIdentity`'s to test.
 #[test]
 fn file_identity_separates_pre_epoch_mtimes() {
-    use std::time::{Duration, UNIX_EPOCH};
-
-    // The conversion: signed, so before and after the epoch are ordered
-    // rather than folded together. Hand-computed against the epoch.
-    assert_eq!(epoch_offset_ns(UNIX_EPOCH), 0);
-    assert_eq!(
-        epoch_offset_ns(UNIX_EPOCH + Duration::from_secs(1)),
-        1_000_000_000,
-    );
-    assert_eq!(
-        epoch_offset_ns(UNIX_EPOCH - Duration::from_secs(1)),
-        -1_000_000_000,
-    );
-    assert_eq!(
-        epoch_offset_ns(UNIX_EPOCH - Duration::from_nanos(3)),
-        -3,
-        "sub-second resolution survives on the pre-epoch side too",
-    );
-
-    // …and that the identities built from them stay apart. Same length
-    // throughout, so mtime is the only field in play.
     let digest_of = |mtime_ns| {
         let mut hasher = DigestHasher::new();
-        FsPathId::File(FileId { len: 4, mtime_ns }).hash(&mut hasher);
+        FsPathId::file(4, mtime_ns).hash(&mut hasher);
         hasher.finish()
     };
     let all = [

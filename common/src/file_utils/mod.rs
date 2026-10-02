@@ -1,4 +1,6 @@
-//! Atomic same-directory publication.
+//! Atomic same-directory publication, and the identity a cache keyed on a file compares.
+
+pub(crate) mod file_identity;
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};

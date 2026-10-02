@@ -1,5 +1,6 @@
 //! Memory planning and RAM/mmap storage shared by stacking stages.
 
+pub(crate) mod cache_key;
 pub(crate) mod error;
 pub(crate) mod frame_facts;
 pub(crate) mod frame_quality;
@@ -13,6 +14,7 @@ use std::path::Path;
 
 use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
+use memmap2::Mmap;
 
 use crate::io::image::cfa::{CfaFrameInfo, CfaType};
 use crate::io::image::error::ImageError;
@@ -22,14 +24,19 @@ use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::null_mask::NullMask;
 use crate::memory;
+use crate::stacking::frame_store::cache_key::CacheKey;
+use crate::stacking::frame_store::cache_key::DecoderKind;
 use crate::stacking::frame_store::error::FrameStoreError;
 use crate::stacking::frame_store::frame_quality::FrameQuality;
 use crate::stacking::frame_store::frame_stats::FrameStats;
-use crate::stacking::frame_store::spill::{FrameSpill, spill_channels, write_plane};
+use crate::stacking::frame_store::spill::{Committed, FrameSpill, write_file, write_plane};
 use crate::stacking::frame_store::stored_plane::StoredPlane;
 
 /// Image operations needed by the shared frame store.
 pub(crate) trait StackableImage: Send + Sync + Debug + Sized {
+    /// The decoder [`Self::load`] runs, which a kept cache records beside the planes it wrote.
+    const DECODER: DecoderKind;
+
     fn dimensions(&self) -> ImageDimensions;
     fn channel(&self, channel: usize) -> &[f32];
     fn metadata(&self) -> &ImageMetadata;
@@ -129,23 +136,21 @@ impl StoredFrame {
         }
     }
 
-    /// Write the frame's channels and quality planes under `directory` and memory-map them back.
+    /// Write the frame's channels and quality planes to `spill`'s files and memory-map them back.
     ///
     /// Borrows everything it writes: the caller keeps its buffers, which is what lets the warp
     /// stage hand the same ones to the next frame rather than allocating a set that has to be
     /// faulted in from scratch.
     pub(crate) fn spill(
-        directory: &Path,
-        name: &str,
+        spill: &FrameSpill<'_>,
         image: &impl StackableImage,
         quality: &FrameQuality<Buffer2<f32>>,
         source_stats: FrameStats,
     ) -> Result<Self, FrameStoreError> {
-        let spill = FrameSpill::new(directory, name);
-        let channels = spill_channels(spill, image)?;
-        let quality = quality.try_map(|kind, plane| {
-            let path = spill.quality_path(kind);
-            write_plane(&path, plane.pixels())?;
+        let channels = spill.spill_channels(image)?;
+        let quality = quality.try_map(|plane, buffer| {
+            let path = spill.quality_path(plane);
+            write_plane(&path, buffer.pixels())?;
             StoredPlane::map(path)
         })?;
         Ok(Self {
@@ -153,6 +158,54 @@ impl StoredFrame {
             quality,
             source_stats,
         })
+    }
+
+    /// [`Self::spill`], then commit the files as a kept frame decoded under `key`.
+    pub(crate) fn cache(
+        spill: &FrameSpill<'_>,
+        key: CacheKey,
+        image: &impl StackableImage,
+        quality: &FrameQuality<Buffer2<f32>>,
+        source_stats: FrameStats,
+    ) -> Result<Self, FrameStoreError> {
+        let frame = Self::spill(spill, image, quality, source_stats)?;
+        spill.commit(key, !quality.is_none(), &frame.source_stats)?;
+        Ok(frame)
+    }
+
+    /// The frame [`Self::cache`] committed to `spill`'s files under `key`, mapped; `None` when
+    /// there is none whole to reuse — no commit under this key, or a plane missing or of another
+    /// size.
+    pub(crate) fn reuse(
+        spill: &FrameSpill<'_>,
+        key: CacheKey,
+        dimensions: ImageDimensions,
+    ) -> Result<Option<Self>, FrameStoreError> {
+        let Some(Committed {
+            stats: source_stats,
+            carries_quality,
+        }) = spill.committed(key)
+        else {
+            return Ok(None);
+        };
+        if !spill.channels_on_disk(dimensions)
+            || (carries_quality && !spill.quality_on_disk(dimensions))
+        {
+            return Ok(None);
+        }
+        let channels = (0..dimensions.channels())
+            .map(|channel| StoredPlane::map(spill.channel_path(channel)))
+            .collect::<Result<_, _>>()?;
+        let quality = if carries_quality {
+            FrameQuality::read_spilled(|plane| StoredPlane::map(spill.quality_path(plane)))?
+        } else {
+            FrameQuality::None
+        };
+        Ok(Some(Self {
+            channels,
+            quality,
+            source_stats,
+        }))
     }
 }
 
@@ -162,20 +215,31 @@ pub(crate) struct StoredImage {
     pub(super) metadata: ImageMetadata,
     pub(super) dimensions: ImageDimensions,
     channels: ArrayVec<StoredPlane, 3>,
+    /// The words of the image's [`NullMask`], for a source that declared nulls. Spilled with the
+    /// channels: without it the fill under every null reads back as a measurement.
+    nulls: Option<Mmap>,
 }
 
 impl StoredImage {
-    /// Write `image`'s channels under `directory` and memory-map them back.
+    /// Write `image`'s channels and null mask to `spill`'s files and memory-map them back.
     pub(crate) fn spill(
-        directory: &Path,
-        name: &str,
+        spill: &FrameSpill<'_>,
         image: &LinearImage,
     ) -> Result<Self, FrameStoreError> {
-        let dimensions = image.dimensions();
+        let nulls = image
+            .nulls
+            .as_ref()
+            .map(|nulls| {
+                let path = spill.nulls_path();
+                write_file(&path, bytemuck::cast_slice(nulls.bits().words.as_slice()))?;
+                spill::map_file(&path)
+            })
+            .transpose()?;
         Ok(Self {
             metadata: image.metadata.clone(),
-            dimensions,
-            channels: spill_channels(FrameSpill::new(directory, name), image)?,
+            dimensions: image.dimensions(),
+            channels: spill.spill_channels(image)?,
+            nulls,
         })
     }
 
@@ -187,6 +251,10 @@ impl StoredImage {
             .map(|plane| plane.chunk(0, sample_count).to_vec());
         let mut image = LinearImage::from_planar_channels(self.dimensions, planes);
         image.metadata = self.metadata.clone();
+        image.nulls = self
+            .nulls
+            .as_ref()
+            .map(|words| NullMask::from_words(self.dimensions.size(), bytemuck::cast_slice(words)));
         image
     }
 }

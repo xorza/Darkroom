@@ -4,13 +4,13 @@
 //! either a `Buffer2` in RAM or a memory map over a file, and every read goes through the same
 //! [`StoredPlane::chunk`] either way.
 
-use std::fs::File;
 use std::path::PathBuf;
 
 use imaginarium::Buffer2;
 use memmap2::Mmap;
 
 use crate::stacking::frame_store::error::FrameStoreError;
+use crate::stacking::frame_store::spill;
 
 /// One planar f32 buffer, either resident or memory-mapped.
 #[derive(Debug)]
@@ -22,16 +22,7 @@ pub(crate) enum StoredPlane {
 impl StoredPlane {
     /// Memory-map a spilled plane file.
     pub(crate) fn map(path: PathBuf) -> Result<Self, FrameStoreError> {
-        let file = File::open(&path).map_err(|source| FrameStoreError::OpenFile {
-            path: path.clone(),
-            source,
-        })?;
-        let mmap = unsafe {
-            Mmap::map(&file).map_err(|source| FrameStoreError::MemoryMap {
-                path: path.clone(),
-                source,
-            })?
-        };
+        let mmap = spill::map_file(&path)?;
         #[cfg(unix)]
         {
             use memmap2::Advice;

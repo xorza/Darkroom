@@ -1,17 +1,11 @@
 //! Tier selection, frame loading, and persistent cache sidecars.
 
-use std::sync::OnceLock;
-
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::sync::OnceLock;
 
-use arrayvec::ArrayVec;
-use common::CancelToken;
-use common::SerdeFormat;
-use common::file_utils;
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use common::{CancelToken, FileIdentity};
+use imaginarium::Buffer2;
 
 use crate::concurrency;
 use crate::error::FrameDimensionMismatch;
@@ -22,13 +16,12 @@ use crate::io::image::load_context::LoadContext;
 use crate::memory;
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::error::Error;
+use crate::stacking::frame_store::cache_key::CacheKey;
 use crate::stacking::frame_store::error::FrameStoreError;
 use crate::stacking::frame_store::frame_quality::FrameQuality;
 use crate::stacking::frame_store::frame_stats::FrameStats;
-use crate::stacking::frame_store::spill::CachedQuality;
 use crate::stacking::frame_store::spill::FrameSpill;
 use crate::stacking::frame_store::spill_directory::SpillDirectory;
-use crate::stacking::frame_store::stored_plane::StoredPlane;
 use crate::stacking::frame_store::{FramePeek, StackableImage, StoredFrame};
 use crate::stacking::progress::stage_counter::StageCounter;
 use crate::stacking::progress::{ProgressCallback, StackingStage};
@@ -79,11 +72,15 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     // Dimensions drive the in-memory-vs-disk tier decision. Peek the header without a decode when
     // the format allows it (RAW), so the in-memory path can decode every frame in parallel rather
     // than decoding frame 0 serially first; otherwise decode frame 0 and reuse it below.
-    let (peek, first_image) = if let Some(peek) = I::peek(first_path, &context) {
+    let (peek, early) = if let Some(peek) = I::peek(first_path, &context) {
         (peek, None)
     } else {
+        let source = CachedSource::of(first_path);
         let image = load_image::<I>(first_path, &context)?;
-        (FramePeek::of_decoded(&image), Some(image))
+        (
+            FramePeek::of_decoded(&image),
+            Some(EarlyDecode { image, source }),
+        )
     };
     let dimensions = peek.dimensions;
     // Frames of a set share a source, so frame 0 stands for all of them — including whether they
@@ -109,23 +106,17 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
             paths,
             &progress,
             dimensions,
-            first_image,
+            early.map(|early| early.image),
             available_memory,
             &context,
         )?
     } else {
-        // Disk tier (large stacks): the serial-first-frame path. If the header was peeked we
-        // haven't decoded frame 0 yet, so decode it now — rare, since calibration fits in RAM.
-        let first = match first_image {
-            Some(img) => img,
-            None => load_image::<I>(first_path, &context)?,
-        };
         load_to_disk::<I, P>(
             paths,
             config,
             &progress,
             dimensions,
-            first,
+            early,
             available_memory,
             &context,
         )?
@@ -155,17 +146,78 @@ fn load_image<I: StackableImage>(path: &Path, context: &LoadContext) -> Result<I
     }
 }
 
+/// Frame 0 decoded ahead of the tier decision, because its format has no header to peek.
+#[derive(Debug)]
+struct EarlyDecode<I> {
+    image: I,
+    /// The source as it was before the decode, which only the disk tier reads — for its
+    /// source-change check — so only the disk tier fails on it.
+    source: Result<CachedSource, FrameStoreError>,
+}
+
+/// A decoded frame and its source as it was before the decode.
+#[derive(Debug)]
+struct Decoded<I> {
+    image: I,
+    source: CachedSource,
+}
+
+/// A source file as a kept cache names it: its canonical path, and its identity when it was read.
+#[derive(Debug)]
+struct CachedSource {
+    canonical: PathBuf,
+    identity: FileIdentity,
+}
+
+impl CachedSource {
+    fn of(path: &Path) -> Result<Self, FrameStoreError> {
+        let metadata_error = |source| FrameStoreError::ReadMetadata {
+            path: path.to_path_buf(),
+            source,
+        };
+        let canonical = fs::canonicalize(path).map_err(metadata_error)?;
+        let identity = FileIdentity::of(&canonical).map_err(metadata_error)?;
+        Ok(Self {
+            canonical,
+            identity,
+        })
+    }
+}
+
+/// A decoded frame that passed the per-frame checks, with what was measured on it.
+#[derive(Debug)]
+struct CheckedImage<I> {
+    image: I,
+    stats: FrameStats,
+    quality: FrameQuality<Buffer2<f32>>,
+}
+
+/// A decoded frame's per-frame checks, in the order `validate_frame` runs them — geometry, its
+/// facts against `facts` when the set's are known, then its samples — and its statistics and
+/// quality planes.
+fn check_decoded<I: StackableImage>(
+    image: I,
+    index: usize,
+    dimensions: ImageDimensions,
+    facts: Option<&SetFacts>,
+    cancel: &CancelToken,
+) -> Result<CheckedImage<I>, Error> {
+    FrameDimensionMismatch::check(index, dimensions, image.dimensions())?;
+    if let Some(facts) = facts {
+        facts.check(index, &FrameFacts::of(&image))?;
+    }
+    validate_image_samples(&image, index, cancel)?;
+    Ok(CheckedImage {
+        stats: FrameStats::measure(&image),
+        quality: FrameQuality::for_unwarped(&image),
+        image,
+    })
+}
+
 #[derive(Debug)]
 struct LoadedMemoryFrame {
     frame: StoredFrame,
     metadata: Option<ImageMetadata>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct SourceIdentity {
-    canonical_path: Vec<u8>,
-    byte_len: u64,
-    modified_nanos: i128,
 }
 
 /// Load all images into memory and compute per-frame channel statistics.
@@ -235,9 +287,9 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
     })
 }
 
-/// A decoded frame's per-frame checks, in the order `validate_frame` runs them: geometry, its
-/// facts against frame 0's once those are known, then its samples. Frame 0 publishes its facts
-/// for the frames decoding beside it; the full in-order check of the set runs once all are in.
+/// [`check_decoded`] for a frame decoding beside the others: frame 0 publishes its facts for the
+/// rest, and each later frame checks against them once they are known. The full in-order check of
+/// the set runs once all are in.
 fn admit_decoded<I: StackableImage>(
     image: I,
     index: usize,
@@ -245,21 +297,15 @@ fn admit_decoded<I: StackableImage>(
     first_facts: &OnceLock<SetFacts>,
     cancel: &CancelToken,
 ) -> Result<LoadedMemoryFrame, Error> {
-    FrameDimensionMismatch::check(index, dimensions, image.dimensions())?;
-    let facts = FrameFacts::of(&image);
+    let metadata = (index == 0).then(|| image.metadata().clone());
+    let checked = check_decoded(image, index, dimensions, first_facts.get(), cancel)?;
     if index == 0 {
         first_facts
-            .set(SetFacts::of_first(&facts))
+            .set(SetFacts::of_first(&checked.stats.facts))
             .expect("frame 0 decodes once");
-    } else if let Some(first) = first_facts.get() {
-        first.check(index, &facts)?;
     }
-    validate_image_samples(&image, index, cancel)?;
-    let metadata = (index == 0).then(|| image.metadata().clone());
-    let stats = FrameStats::measure(&image);
-    let quality = FrameQuality::for_unwarped(&image);
     Ok(LoadedMemoryFrame {
-        frame: StoredFrame::from_memory(image, quality, stats),
+        frame: StoredFrame::from_memory(checked.image, checked.quality, checked.stats),
         metadata,
     })
 }
@@ -272,30 +318,40 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     config: &CacheConfig,
     progress: &ProgressCallback,
     dimensions: ImageDimensions,
-    first_image: I,
+    early: Option<EarlyDecode<I>>,
     available_memory: u64,
     context: &LoadContext,
 ) -> Result<LoadedTier, Error> {
-    let cancel = &context.cancel;
     let spill_directory = SpillDirectory::create(&config.cache_dir, config.keep_cache)?;
     let cache_dir = spill_directory.path();
 
-    // Cache first image and compute stats. Frame 0 carries the stack metadata, and the facts every
-    // later frame is checked against as it decodes.
-    let first_facts = SetFacts::of_first(&FrameFacts::of(&first_image));
-    validate_image_samples(&first_image, 0, cancel)?;
-    let metadata = first_image.metadata().clone();
-    let first_stats = FrameStats::measure(&first_image);
+    // Frame 0 first and alone: it carries the stack metadata, and the facts every later frame is
+    // checked against as it decodes. It is always decoded, since only a decode yields the metadata;
+    // its cache serves a later run in which it is not frame 0.
     let first_path = paths[0].as_ref();
-    let base_filename = FrameSpill::cache_name(first_path);
-    let first_cached = StoredFrame::spill(
+    let first = if let Some(early) = early {
+        Decoded {
+            source: early.source?,
+            image: early.image,
+        }
+    } else {
+        let source = CachedSource::of(first_path)?;
+        Decoded {
+            image: load_image::<I>(first_path, context)?,
+            source,
+        }
+    };
+    let metadata = first.image.metadata().clone();
+    let first = cache_frame::<I>(
         cache_dir,
-        &base_filename,
-        &first_image,
-        &FrameQuality::for_unwarped(&first_image),
-        first_stats,
-    )
-    .map_err(Error::from)?;
+        first_path,
+        0,
+        dimensions,
+        None,
+        context,
+        Some(first),
+    )?;
+    let first_facts = SetFacts::of_first(&first.source_stats.facts);
     let cached_count = StageCounter::new(progress, StackingStage::Loading, paths.len());
     cached_count.complete_one();
 
@@ -312,27 +368,24 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     );
     let remaining = concurrency::try_par_map_limited(&paths[1..], concurrency, |offset, path| {
         // Cancelled: stop decoding further frames (the slow phase).
-        if cancel.is_cancelled() {
+        if context.cancel.is_cancelled() {
             return Err(Error::Cancelled);
         }
-        let path = path.as_ref();
-        let base_filename = FrameSpill::cache_name(path);
-        load_and_cache_frame::<I>(
+        let frame = cache_frame::<I>(
             cache_dir,
-            &base_filename,
-            path,
-            dimensions,
+            path.as_ref(),
             offset + 1,
-            &first_facts,
+            dimensions,
+            Some(&first_facts),
             context,
-        )
-        .inspect(|_| {
-            cached_count.complete_one();
-        })
+            None,
+        )?;
+        cached_count.complete_one();
+        Ok(frame)
     })?;
 
     let mut frames = Vec::with_capacity(paths.len());
-    frames.push(first_cached);
+    frames.push(first);
     frames.extend(remaining);
 
     tracing::info!(
@@ -349,212 +402,56 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     })
 }
 
-fn source_identity(path: &Path) -> Result<SourceIdentity, FrameStoreError> {
-    let canonical = fs::canonicalize(path).map_err(|source| FrameStoreError::ReadMetadata {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let metadata = fs::metadata(&canonical).map_err(|source| FrameStoreError::ReadMetadata {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let modified = metadata
-        .modified()
-        .map_err(|source| FrameStoreError::ReadMetadata {
-            path: path.to_path_buf(),
-            source,
-        })?;
-    let modified_nanos = match modified.duration_since(UNIX_EPOCH) {
-        Ok(duration) => duration.as_nanos() as i128,
-        Err(error) => -(error.duration().as_nanos() as i128),
-    };
-    Ok(SourceIdentity {
-        canonical_path: canonical.as_os_str().as_encoded_bytes().to_vec(),
-        byte_len: metadata.len(),
-        modified_nanos,
-    })
-}
-
-/// Layout tag carried by every sidecar.
+/// Frame `index` through the cache in `cache_dir`: the planes a committed cache holds for this
+/// source and decoder, or a decode written there and committed.
 ///
-/// Bitcode is not self-describing, so a file written by a build whose sidecar structs differed
-/// would otherwise decode into plausible nonsense instead of being rejected. Bump this whenever
-/// [`SourceIdentity`] or [`FrameStats`] changes shape; a cache that fails the check is simply
-/// re-decoded.
-const SIDECAR_FORMAT: u32 = 2;
-
-/// A sidecar payload behind its layout tag.
-#[derive(Debug, Serialize, Deserialize)]
-struct Sidecar<T> {
-    format: u32,
-    value: T,
-}
-
-fn write_sidecar_value<T: Serialize>(path: PathBuf, value: &T) -> Result<(), FrameStoreError> {
-    let sidecar = Sidecar {
-        format: SIDECAR_FORMAT,
-        value,
-    };
-    // Sidecars are plain scalars and a byte vector; a failure here would be a broken derive, not
-    // anything the filesystem or the caller can cause.
-    let bytes = common::serialize(&sidecar, SerdeFormat::Bitcode)
-        .expect("a sidecar of plain scalars always serializes");
-    write_sidecar(path, &bytes)
-}
-
-/// Read a sidecar back, or `None` if it is absent, unreadable, or not this layout.
-fn read_sidecar_value<T: DeserializeOwned>(path: &Path) -> Option<T> {
-    let bytes = fs::read(path).ok()?;
-    let sidecar: Sidecar<T> = common::deserialize(&bytes, SerdeFormat::Bitcode).ok()?;
-    (sidecar.format == SIDECAR_FORMAT).then_some(sidecar.value)
-}
-
-fn meta_path(cache_dir: &Path, base_filename: &str) -> PathBuf {
-    cache_dir.join(format!("{}.meta", base_filename.trim_end_matches(".bin")))
-}
-
-fn write_source_meta(
+/// `decoded` is a frame already decoded, which is written rather than looked up: the decode a
+/// lookup would save is already spent. The source's identity is read before the decode and again
+/// after it, and a frame whose source changed in between is refused rather than cached under the
+/// identity it had before.
+fn cache_frame<I: StackableImage>(
     cache_dir: &Path,
-    base_filename: &str,
-    identity: &SourceIdentity,
-) -> Result<(), FrameStoreError> {
-    write_sidecar_value(meta_path(cache_dir, base_filename), identity)
-}
-
-fn validate_source_meta(cache_dir: &Path, base_filename: &str, identity: &SourceIdentity) -> bool {
-    read_sidecar_value::<SourceIdentity>(&meta_path(cache_dir, base_filename))
-        .is_some_and(|stored| stored == *identity)
-}
-
-/// Load an image and cache it, or reuse existing cache files if valid.
-fn load_and_cache_frame<I: StackableImage>(
-    cache_dir: &Path,
-    base_filename: &str,
-    source_path: &Path,
+    path: &Path,
+    index: usize,
     dimensions: ImageDimensions,
-    frame_index: usize,
-    first_facts: &SetFacts,
+    facts: Option<&SetFacts>,
     context: &LoadContext,
+    decoded: Option<Decoded<I>>,
 ) -> Result<StoredFrame, Error> {
     let cancel = &context.cancel;
-    let channels = dimensions.channels();
-    let identity_before = source_identity(source_path)?;
+    let (source, decoded_image) = match decoded {
+        Some(Decoded { image, source }) => (source, Some(image)),
+        None => (CachedSource::of(path)?, None),
+    };
+    let spill = FrameSpill::cached(cache_dir, &source.canonical, I::DECODER);
+    let key = CacheKey::new(source.identity, I::DECODER);
 
-    // Check if all channel files exist, have correct size, and source hasn't changed
-    let spill = FrameSpill::new(cache_dir, base_filename);
-    let meta_valid = validate_source_meta(cache_dir, base_filename, &identity_before);
-    let cached_stats = read_frame_stats(cache_dir, base_filename);
-    // A frame whose source declared null pixels cached quality planes beside its channels; reusing
-    // the channels without them would put the fill back into the stack as data on every run after
-    // the first.
-    let cached_quality = spill.cached_quality(dimensions);
-    let can_reuse = meta_valid
-        && cached_stats.is_some()
-        && spill.channels_reusable(dimensions)
-        && cached_quality != CachedQuality::Torn;
-
-    if can_reuse {
-        // Reuse existing cache files - just mmap them
-        let mut planes = ArrayVec::new();
-        for c in 0..channels {
-            planes.push(StoredPlane::map(spill.channel_path(c))?);
-        }
-        tracing::debug!(
-            source = %source_path.display(),
-            "Reusing existing cache files"
-        );
-        let quality = match cached_quality {
-            CachedQuality::Present => {
-                FrameQuality::read_spilled(|kind| StoredPlane::map(spill.quality_path(kind)))?
-            }
-            CachedQuality::Absent => FrameQuality::None,
-            // Reading a torn pair as either other state would silently change what the frame
-            // contributes; `can_reuse` is what keeps this unreachable, and a panic here says the
-            // two have drifted apart rather than letting the cache decide.
-            CachedQuality::Torn => {
-                unreachable!("a torn quality pair is excluded from reuse before this point")
-            }
-        };
-        let frame = StoredFrame {
-            channels: planes,
-            quality,
-            source_stats: cached_stats.expect("valid cache has readable frame statistics"),
-        };
-        first_facts.check(frame_index, &frame.source_stats.facts)?;
-        validate_stored_samples(
-            &frame.channels,
-            dimensions.pixel_count(),
-            frame_index,
-            cancel,
-        )?;
-        // Mapped from disk, so held to the pairing the combine divides by like any other planes.
-        validate_stored_quality(frame_index, &frame, dimensions, cancel)?;
-        Ok(frame)
-    } else {
-        // Load image and write to cache
-        let image = load_image::<I>(source_path, context)?;
-
-        FrameDimensionMismatch::check(frame_index, dimensions, image.dimensions())?;
-        first_facts.check(frame_index, &FrameFacts::of(&image))?;
-        validate_image_samples(&image, frame_index, cancel)?;
-        let identity_after = source_identity(source_path)?;
-        if identity_after != identity_before {
-            return Err(FrameStoreError::SourceChanged {
-                path: source_path.to_path_buf(),
-            }
-            .into());
-        }
-
-        let stats = FrameStats::measure(&image);
-        let stored = StoredFrame::spill(
-            cache_dir,
-            base_filename,
-            &image,
-            &FrameQuality::for_unwarped(&image),
-            stats.clone(),
-        )
-        .map_err(Error::from)?;
-
-        // The identity sidecar is the commit record for the planes and stats.
-        write_frame_stats(cache_dir, base_filename, &stats)?;
-        write_source_meta(cache_dir, base_filename, &identity_after)?;
-
-        Ok(stored)
-    }
-}
-
-/// Path for the sidecar stats file.
-fn stats_path(cache_dir: &Path, base_filename: &str) -> PathBuf {
-    cache_dir.join(format!("{}.stats", base_filename.trim_end_matches(".bin")))
-}
-
-/// Write frame stats to a sidecar file.
-fn write_frame_stats(
-    cache_dir: &Path,
-    base_filename: &str,
-    stats: &FrameStats,
-) -> Result<(), FrameStoreError> {
-    write_sidecar_value(stats_path(cache_dir, base_filename), stats)
-}
-
-fn write_sidecar(path: PathBuf, bytes: &[u8]) -> Result<(), FrameStoreError> {
-    file_utils::publish_bytes(&path, bytes, file_utils::PublicationMode::Cache)
-        .map_err(|source| FrameStoreError::WriteFile { path, source })
-}
-
-/// Read frame stats from a sidecar file.
-fn read_frame_stats(cache_dir: &Path, base_filename: &str) -> Option<FrameStats> {
-    let stats: FrameStats = read_sidecar_value(&stats_path(cache_dir, base_filename))?;
-    // A file can decode cleanly and still hold a sigma that would poison every weight derived
-    // from it, so the value is checked rather than just the layout. Rejecting means re-decoding
-    // the frame, not failing the run.
-    if stats
-        .quantization_sigma
-        .is_some_and(|sigma| !sigma.is_finite() || sigma <= 0.0)
+    if decoded_image.is_none()
+        && let Some(frame) = StoredFrame::reuse(&spill, key, dimensions)?
     {
-        return None;
+        tracing::debug!(source = %path.display(), "Reusing existing cache files");
+        if let Some(facts) = facts {
+            facts.check(index, &frame.source_stats.facts)?;
+        }
+        validate_stored_samples(&frame.channels, dimensions.pixel_count(), index, cancel)?;
+        // Mapped from disk, so held to the pairing the combine divides by like any other planes.
+        validate_stored_quality(index, &frame, dimensions, cancel)?;
+        return Ok(frame);
     }
-    Some(stats)
+
+    let image = match decoded_image {
+        Some(image) => image,
+        None => load_image::<I>(path, context)?,
+    };
+    let checked = check_decoded(image, index, dimensions, facts, cancel)?;
+    if CachedSource::of(path)?.identity != source.identity {
+        return Err(FrameStoreError::SourceChanged {
+            path: path.to_path_buf(),
+        }
+        .into());
+    }
+    StoredFrame::cache(&spill, key, &checked.image, &checked.quality, checked.stats)
+        .map_err(Error::from)
 }
 
 #[cfg(test)]

@@ -6,6 +6,7 @@ use crate::stacking::combine::cache::*;
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::frame_store::frame_quality::{FramePlane, FrameQuality};
 use crate::stacking::frame_store::frame_stats::FrameStats;
+use crate::stacking::frame_store::spill::FrameSpill;
 use crate::testing::cfa::make_cfa;
 use crate::testing::prelude::*;
 use common::TempDir;
@@ -579,8 +580,7 @@ fn cleanup_removes_files() {
     let image = LinearImage::from_pixels(dims, pixels);
 
     let cached_frame = StoredFrame::spill(
-        &spill_path,
-        "cleanup_test.bin",
+        &FrameSpill::new(&spill_path, "cleanup_test"),
         &image,
         &FrameQuality::None,
         FrameStats::measure(&image),
@@ -654,10 +654,9 @@ fn read_channel_chunk_disk_backed() {
     let image = LinearImage::from_pixels(dims, pixels);
 
     // Cache the image to disk
-    let base_filename = "test_chunk.bin";
+    let base_filename = "test_chunk";
     let cached_frame = StoredFrame::spill(
-        spill_directory.path(),
-        base_filename,
+        &FrameSpill::new(spill_directory.path(), base_filename),
         &image,
         &FrameQuality::None,
         FrameStats::measure(&image),
@@ -714,10 +713,9 @@ fn frame_count_disk_backed() {
     for i in 0..3 {
         let pixels: Vec<f32> = vec![i as f32; 4];
         let image = LinearImage::from_pixels(dims, pixels);
-        let base_filename = format!("frame{i}.bin");
+        let base_filename = format!("frame{i}");
         let cached_frame = StoredFrame::spill(
-            spill_directory.path(),
-            &base_filename,
+            &FrameSpill::new(spill_directory.path(), &base_filename),
             &image,
             &FrameQuality::None,
             FrameStats::measure(&image),

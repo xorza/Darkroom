@@ -18,7 +18,7 @@
 //!   derives expand to `::common::…` paths through every one of them, so
 //!   [`IntrospectInteger`], [`IntrospectFloat`] and [`IntrospectError`] are
 //!   exported for generated code to name rather than for hand-written `use`s.
-//! - [`file_utils`] — atomic same-directory publication.
+//! - [`file_utils`] — atomic same-directory publication, and [`FileIdentity`].
 //!
 //! [`FloatExt`], [`is_debug`] and [`id_type!`] stand on their own. `TempDir`,
 //! `TempFile` and the `internals` module are test scaffolding, gated behind
@@ -67,6 +67,7 @@ pub(crate) mod introspect;
 pub(crate) mod serde;
 
 pub use cancel_token::CancelToken;
+pub use file_utils::file_identity::FileIdentity;
 pub use float_ext::FloatExt;
 #[cfg(any(test, feature = "internals"))]
 pub use internals::temp_dir::TempDir;

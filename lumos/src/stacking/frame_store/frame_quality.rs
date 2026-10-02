@@ -158,16 +158,15 @@ impl<P> FrameQuality<P> {
         matches!(self, Self::None)
     }
 
-    /// Convert each plane by reference, tagging it with the name its spill file carries. Which
-    /// plane answers to which name is stated here alone, so a writer and a later reader cannot
-    /// disagree.
+    /// Convert each plane by reference, tagging it with the [`FramePlane`] it is. Which plane is
+    /// which is stated here alone, so a writer and a later reader cannot disagree.
     ///
     /// Borrows rather than consumes because its one caller writes the planes to disk and maps them
     /// back — it never needed to own them, and leaving them with the caller is what lets a warped
     /// frame's buffers be reused for the next frame instead of being freed and faulted in again.
     pub(crate) fn try_map<Q, E>(
         &self,
-        mut convert: impl FnMut(&'static str, &P) -> Result<Q, E>,
+        mut convert: impl FnMut(FramePlane, &P) -> Result<Q, E>,
     ) -> Result<FrameQuality<Q>, E> {
         match self {
             Self::None => Ok(FrameQuality::None),
@@ -175,24 +174,24 @@ impl<P> FrameQuality<P> {
                 coverage,
                 confidence,
             } => Ok(FrameQuality::Planes {
-                coverage: convert("coverage", coverage)?,
-                confidence: convert("confidence", confidence)?,
+                coverage: convert(FramePlane::Coverage, coverage)?,
+                confidence: convert(FramePlane::Confidence, confidence)?,
             }),
         }
     }
 
-    /// Read a pair back from the spill names [`Self::try_map`] wrote it under.
+    /// Read a pair back by the [`FramePlane`]s [`Self::try_map`] wrote it under.
     ///
-    /// Its inverse, and here for the same reason: which plane answers to which name is decided in
-    /// this file alone, so a writer and a later reader cannot disagree. The caller establishes that
+    /// Its inverse, and here for the same reason: which plane is which is decided in this file
+    /// alone, so a writer and a later reader cannot disagree. The caller establishes that
     /// both are there — see [`CachedQuality`](crate::stacking::frame_store::spill::CachedQuality) —
     /// which is why this reads a plane rather than looking for one.
     pub(crate) fn read_spilled<E>(
-        mut read: impl FnMut(&'static str) -> Result<P, E>,
+        mut read: impl FnMut(FramePlane) -> Result<P, E>,
     ) -> Result<Self, E> {
         Ok(Self::Planes {
-            coverage: read("coverage")?,
-            confidence: read("confidence")?,
+            coverage: read(FramePlane::Coverage)?,
+            confidence: read(FramePlane::Confidence)?,
         })
     }
 }

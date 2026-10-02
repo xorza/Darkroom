@@ -33,6 +33,7 @@ use crate::io::raw::demosaic::xtrans::markesteijn;
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::{XTransPattern, XTransPatternError};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
+use crate::stacking::frame_store::cache_key::DecoderKind;
 use crate::stacking::frame_store::{FramePeek, StackableImage};
 use common::CancelToken;
 use imaginarium::Buffer2;
@@ -170,6 +171,8 @@ pub struct CfaImage {
 }
 
 impl StackableImage for CfaImage {
+    const DECODER: DecoderKind = DecoderKind::Cfa;
+
     fn dimensions(&self) -> ImageDimensions {
         ImageDimensions::new((self.data.width(), self.data.height()), 1)
     }

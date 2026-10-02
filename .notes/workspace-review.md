@@ -45,11 +45,6 @@ Severity: High — diagonally elongated stars pass the eccentricity filter under
 - [ ] `lumos/src/stacking/star_detection/centroid/gaussian_fit/mod.rs` `Gaussian2D` — parameters `[x0, y0, amp, σx, σy, bg]` have no rotation term; a star elongated at 45° fits with `σx ≈ σy`.
 - [ ] `lumos/src/stacking/star_detection/centroid/mod.rs` `measure_star` — `fit_eccentricity = sqrt(1−(σmin/σmax)²)` replaces the rotation-invariant covariance eccentricity, so that star reports ≈0 against `max_eccentricity = 0.5`. `fit_fwhm` is the geometric mean of axis-projected sigmas while the moments path uses `sqrt(trace/2)` — two FWHM definitions. The rotated-ellipse tests in `centroid/tests/robustness.rs` exercise only moments.
 
-## Frame validation differs by entry point, and the spill tier drops null masks
-Severity: High — the same frames stack differently depending on which entry point loaded them and on how much RAM was free.
-
-- [ ] `lumos/src/stacking/frame_store/mod.rs` `StoredImage::spill` / `StoredImage::load` — only channels and metadata are written; `nulls` is dropped and `load` rebuilds through `from_planar_channels` (`nulls: None`). On the RAM tier `WarpBuffers::warp_into` takes the `MaskedWarp` branch; on the spill tier (`FrameTier::hold` → `PipelineFrame::Spilled`) the median fill under every null enters the warp, the reference frame and `FrameStats::measure` as real data, and the MAD understates the noise. `CfaFrameInfo::may_carry_nulls` shows masked mosaic FITS lights are expected.
-
 ## A disabled producer's stale digest keys its consumer's cache
 Severity: High — a quietly wrong cache hit: a value computed with an input the run no longer delivers is served as current.
 
@@ -133,19 +128,6 @@ Severity: Medium — the largest registered-normalization pass does twice the wo
 - [ ] `normalization/mod.rs` `compute_frame_norms` — `Normalization::Global` switches estimator (MAD-ratio gain vs a Deming fit) whenever any frame carries quality planes, so one FITS with a single `BLANK` pixel changes the gain model for every frame. Partial coverage should change where statistics are measured, not which estimator runs. `stratified_valid_indices` polls cancel with a per-pixel modulo that `CANCEL_POLL_CHUNK`'s doc says was removed.
 - [ ] `lumos/src/stacking/combine/cache/mod.rs` `FrameCache::process_chunked(weights, frame_norms, ..)` — every call passes `cache.frame_norms.as_deref()` back into a method on that same cache. `combine_cached` / `run_stacking` hand `normalization` to the builder separately from `config`, and `FrameCache::normalization` is stored only so `run_stacking` can `assert_eq!` the two copies.
 - [ ] `combine/cache/core.rs` `CacheCore::process_chunks` / `read_channel_chunk` are generic over `F` and an accessor closure, with one call passing `&[StoredFrame]` and `|frame| &frame.channels`. `run_stacking`'s `Mean(rejection)` arm repeats the `Winsorized` arm verbatim minus the sigma.
-
-## The disk frame cache keys, names and sidecars are owned in several places
-Severity: Medium — stale or foreign planes can be reused, and frame 0 is never cached across runs.
-
-- [ ] `lumos/src/stacking/frame_store/spill.rs` `FrameSpill::cache_name` — the key is `blake3(path)`, with `SourceIdentity` adding length and mtime; nothing records which decoder (`CfaImage` vs `LinearImage`) or which decode version produced the planes. With `keep_cache`, a RAW decoded once as a demosaiced `LinearImage` leaves a right-sized `_c0.bin` that a later `CfaImage` load mmaps as its mosaic; a decoder change silently reuses old planes. `SIDECAR_FORMAT` versions only the sidecar struct, via a "bump this" comment.
-- [ ] `lumos/src/stacking/combine/cache/loader/mod.rs` `load_to_disk` — frame 0 is decoded serially and spilled without `write_frame_stats`/`write_source_meta` and without the `SourceChanged` check, so it is never reusable and its source can change mid-read unnoticed. `load_in_memory` / `load_to_disk` / `load_and_cache_frame` spell "validate → `FrameStats::measure` → `FrameQuality::for_unwarped` → `StoredFrame::{from_memory,spill}`" four times.
-- [ ] `loader/mod.rs` `meta_path` / `stats_path` build sidecar paths with `trim_end_matches(".bin")` while `FrameSpill` claims every name comes from it (its `stem` uses `strip_suffix`); `cache_name` appends `.bin` only for consumers to strip it. `frame_quality.rs` `FrameQuality::try_map`/`read_spilled` and `spill.rs` `FrameSpill::cached_quality` hard-code `"coverage"`/`"confidence"`, and `FramePlane`'s `Display` repeats them.
-
-## File-source identity is implemented three times across crates
-Severity: Medium — one copy carries the bug another copy documents as fixed.
-
-- [ ] `lumos/src/stacking/combine/cache/loader/mod.rs` `source_identity`, `scenarium/src/execution/cache/resource/mod.rs` `FileId::from_metadata` / `epoch_offset_ns`, and `lens/src/astro/nodes/calibration.rs` `frame_set_key` are three `(len, mtime-ns)` identities. lumos and scenarium use signed nanoseconds and error on a missing mtime; lens uses `.ok().and_then(duration_since(..).ok()).unwrap_or(0)`, which scenarium's own comment calls the pre-1970 collapse bug. Put one identity in `common::file_utils`.
-- [ ] `lens/src/astro/nodes/calibration.rs` `build_masters_cached` — `frame_set_key` (one `stat` per frame, can fail the node with `FrameSetKeyError`) runs before `cache.then(..)`, so it runs and can error with `Cache` off.
 
 ## Calibration-master construction is duplicated between lens and lumos
 Severity: Medium — two copies of the role → preset table; ~150 lines of lumos scheduling with no production caller.

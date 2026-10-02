@@ -4,10 +4,9 @@ use scenarium::FuncId;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
 
-use common::CancelToken;
 use common::file_utils::{self, PublicationMode};
+use common::{CancelToken, FileIdentity};
 use lumos::ProgressCallback;
 use lumos::{
     CalibrationMasters, CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD, LoadContext,
@@ -151,15 +150,19 @@ fn build_masters_cached(
         if frames.is_empty() {
             return Ok(None);
         }
-        let source_key = frame_set_key(&frames)?;
-        let cache_paths = cache.then(|| role_cache_paths(&frames, file)).transpose()?;
+        // Keyed only with the cache on: the key is a `stat` per frame, and one that fails would
+        // fail a node that never reads the cache.
+        let cached = cache
+            .then(|| -> Result<_, BuildMastersError> {
+                let paths = role_cache_paths(&frames, file)?;
+                let marker = format!("{CACHE_PRESENT}{}", frame_set_key(&frames)?);
+                Ok((paths, marker))
+            })
+            .transpose()?;
 
-        if let Some(cache_paths) = &cache_paths {
+        if let Some((cache_paths, expected_marker)) = &cached {
             match fs::read_to_string(&cache_paths.marker).ok().as_deref() {
-                Some(marker)
-                    if marker == format!("{CACHE_PRESENT}{source_key}")
-                        && cache_paths.master.is_file() =>
-                {
+                Some(marker) if marker == expected_marker && cache_paths.master.is_file() => {
                     let context = LoadContext {
                         cancel: cancel.clone(),
                         ..Default::default()
@@ -180,14 +183,13 @@ fn build_masters_cached(
         let master =
             stack_cfa_master(&frames, config, ProgressCallback::default(), cancel.clone())?
                 .expect("a non-empty calibration frame set produces a master");
-        if let Some(cache_paths) = cache_paths {
+        if let Some((cache_paths, marker)) = cached {
             master
                 .save_fits(&cache_paths.master)
                 .map_err(|source| BuildMastersError::Cache {
                     path: cache_paths.master.clone(),
                     source,
                 })?;
-            let marker = format!("{CACHE_PRESENT}{source_key}");
             file_utils::publish_bytes(
                 &cache_paths.marker,
                 marker.as_bytes(),
@@ -242,19 +244,14 @@ fn frame_set_key(frames: &[PathBuf]) -> Result<String, FrameSetKeyError> {
             .file_name()
             .expect("raw frame path has a file name")
             .as_encoded_bytes();
-        let metadata = fs::metadata(frame).map_err(|source| FrameSetKeyError::Metadata {
+        let identity = FileIdentity::of(frame).map_err(|source| FrameSetKeyError::Metadata {
             path: frame.clone(),
             source,
         })?;
-        let modified = metadata
-            .modified()
-            .ok()
-            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-            .map_or(0, |duration| duration.as_nanos());
         hasher.update(&(name.len() as u64).to_le_bytes());
         hasher.update(name);
-        hasher.update(&metadata.len().to_le_bytes());
-        hasher.update(&modified.to_le_bytes());
+        hasher.update(&identity.len.to_le_bytes());
+        hasher.update(&identity.mtime_ns.to_le_bytes());
     }
     Ok(hasher.finalize().to_hex().to_string())
 }
@@ -276,7 +273,11 @@ mod tests {
 
     use common::TempDir;
 
-    use crate::astro::nodes::calibration::{BuildMastersError, frame_set_key, role_cache_paths};
+    use common::CancelToken;
+
+    use crate::astro::nodes::calibration::{
+        BuildMastersError, build_masters_cached, frame_set_key, role_cache_paths,
+    };
 
     #[test]
     fn role_cache_requires_one_source_directory() {
@@ -325,5 +326,24 @@ mod tests {
         assert_ne!(edited, two_frames);
         fs::remove_file(&first).unwrap();
         assert_ne!(frame_set_key(&[]).unwrap(), edited);
+    }
+
+    /// A missing frame fails the key's `stat` with the cache on, and with it off the key is never
+    /// computed: the stack is what reports the missing file.
+    #[test]
+    fn frame_set_key_runs_only_with_the_cache_on() {
+        let dir = TempDir::new("lens-master-key-cache-off");
+        let missing = dir.join("missing.raf");
+        let build = |cache| {
+            build_masters_cached(
+                [Some(vec![missing.clone()]), None, None, None],
+                3.0,
+                cache,
+                CancelToken::never(),
+            )
+            .unwrap_err()
+        };
+        assert!(matches!(build(true), BuildMastersError::FrameSet(_)));
+        assert!(matches!(build(false), BuildMastersError::Stack(_)));
     }
 }

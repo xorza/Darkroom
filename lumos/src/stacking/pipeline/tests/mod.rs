@@ -651,10 +651,22 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
         blank(),
         shifted(&base, &reg, -8.0, -2.0),
     ];
+    // Frames 1 and 3 declare a block of pixels null, so both tiers carry a mask from decode to
+    // warp: the spill tier has to bring it back from disk for the two stacks to agree.
     let paths: Vec<PathBuf> = frames
         .iter()
         .enumerate()
-        .map(|(index, frame)| write_mono_cfa_light(scratch.path(), index, frame))
+        .map(|(index, frame)| {
+            let mut frame = frame.clone();
+            if index == 1 || index == 3 {
+                let width = frame.width();
+                let pixels = frame.channel_mut(0).pixels_mut();
+                for y in 10..18 {
+                    pixels[y * width + 20..y * width + 30].fill(f32::NAN);
+                }
+            }
+            write_mono_cfa_light(scratch.path(), index, &frame)
+        })
         .collect();
 
     let mut config = AlignStackConfig::default();
