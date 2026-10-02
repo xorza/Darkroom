@@ -29,7 +29,8 @@ use crate::math::vec2us::Vec2us;
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct XTransNormalization<'a> {
     pub(crate) channel_black: [f32; 3],
-    pub(crate) inv_range: f32,
+    /// `maximum − black` in ADU; samples are divided by it.
+    pub(crate) span: f32,
     pub(crate) black_repeat: Option<&'a BlackRepeat>,
 }
 
@@ -173,11 +174,20 @@ impl XTransPattern {
 /// The f32 path is used by `CfaImage` after calibration (avoids lossy f32->u16 roundtrip).
 #[derive(Debug)]
 enum PixelSource<'a> {
-    U16(&'a [u16]),
+    /// Sensor counts, black-subtracted per channel and divided by the span as they are read.
+    U16 {
+        data: &'a [u16],
+        channel_black: [f32; 3],
+        span: f32,
+    },
+    /// The same, with a spatial black pattern on top of the per-channel levels.
     U16WithRepeat {
         data: &'a [u16],
+        channel_black: [f32; 3],
+        span: f32,
         repeat: &'a BlackRepeat,
     },
+    /// Calibrated samples, already normalized.
     F32(&'a [f32]),
 }
 
@@ -197,10 +207,6 @@ pub(crate) struct XTransImage<'a> {
     pub(crate) margin: Vec2us,
     /// CFA pattern anchored at the full raw buffer origin.
     pub(crate) raw_pattern: XTransPattern,
-    /// Per-channel black levels [R=0, G=1, B=2] for u16 path normalization.
-    channel_black: [f32; 3],
-    /// 1.0 / (maximum - `common_black`) for normalization (u16 path only).
-    inv_range: f32,
 }
 
 impl<'a> XTransImage<'a> {
@@ -219,20 +225,28 @@ impl<'a> XTransImage<'a> {
         } = layout;
         let XTransNormalization {
             channel_black,
-            inv_range,
+            span,
             black_repeat,
         } = normalization;
-        let data = black_repeat.map_or(PixelSource::U16(data), |repeat| {
-            PixelSource::U16WithRepeat { data, repeat }
-        });
+        let data = match black_repeat {
+            None => PixelSource::U16 {
+                data,
+                channel_black,
+                span,
+            },
+            Some(repeat) => PixelSource::U16WithRepeat {
+                data,
+                channel_black,
+                span,
+                repeat,
+            },
+        };
         Self {
             data,
             raw,
             active,
             margin,
             raw_pattern,
-            channel_black,
-            inv_range,
         }
     }
 
@@ -256,8 +270,6 @@ impl<'a> XTransImage<'a> {
             active,
             margin,
             raw_pattern,
-            channel_black: [0.0; 3],
-            inv_range: 1.0,
         }
     }
 
@@ -269,16 +281,25 @@ impl<'a> XTransImage<'a> {
     pub(crate) fn read_normalized(&self, raw_y: usize, raw_x: usize) -> f32 {
         let idx = raw_y * self.raw.width + raw_x;
         match &self.data {
-            PixelSource::U16(data) => {
+            PixelSource::U16 {
+                data,
+                channel_black,
+                span,
+            } => {
                 let val = f32::from(data[idx]);
                 let ch = self.raw_pattern.color_at(Vec2us::new(raw_x, raw_y)) as usize;
-                ((val - self.channel_black[ch]).max(0.0) * self.inv_range).min(1.0)
+                ((val - channel_black[ch]).max(0.0) / span).min(1.0)
             }
-            PixelSource::U16WithRepeat { data, repeat } => {
+            PixelSource::U16WithRepeat {
+                data,
+                channel_black,
+                span,
+                repeat,
+            } => {
                 let val = f32::from(data[idx]);
                 let ch = self.raw_pattern.color_at(Vec2us::new(raw_x, raw_y)) as usize;
                 let repeat_delta = repeat.at_raw(raw_y, raw_x, self.margin);
-                ((val - self.channel_black[ch]) * self.inv_range - repeat_delta).clamp(0.0, 1.0)
+                ((val - channel_black[ch]) / span - repeat_delta).clamp(0.0, 1.0)
             }
             PixelSource::F32(data) => data[idx],
         }
@@ -299,7 +320,7 @@ pub(crate) mod internals {
         [0, 2, 1, 2, 0, 1],
     ];
 
-    pub(crate) const TEST_INV_RANGE: f32 = 1.0 / 65535.0;
+    pub(crate) const TEST_SPAN: f32 = 65535.0;
 
     pub(crate) fn test_pattern_array() -> [[u8; 6]; 6] {
         TEST_PATTERN
@@ -320,7 +341,7 @@ pub(crate) mod internals {
             test_pattern(),
             XTransNormalization {
                 channel_black: [0.0; 3],
-                inv_range: TEST_INV_RANGE,
+                span: TEST_SPAN,
                 black_repeat: None,
             },
         )

@@ -14,6 +14,7 @@ use crate::io::image::image_provenance::{
 };
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::null_mask::NullMask;
+use crate::io::image::sample_domain::ScaleOrigin;
 use crate::math::statistics::MedianMad;
 use crate::stacking::combine::cache::tests::make_test_cache;
 use crate::stacking::combine::cache_config::CacheConfig;
@@ -681,35 +682,39 @@ fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
     // `float32` one holding the same ADU is taken as already normalized and divided by 1. Both
     // present as `FitsNormalized` and agree on every other axis, and `Normalization::Global` would
     // absorb the 65535× into its fitted gain and hand back a plausible-looking stack.
-    let domain = |physical_scale: f32, unit: Option<&str>| ImageProvenance {
-        container: SourceContainer::Fits,
-        decoder: DecoderProvenance::FitsWell,
-        transfer: TransferProvenance::FitsNormalized(FitsTransferProvenance {
-            bscale: 1.0,
-            bzero: 0.0,
-            physical_scale,
-            unit: unit.map(str::to_owned),
-            hdu: FitsHduProvenance {
-                index: 0,
-                extname: None,
-                extver: None,
-            },
-            checksum: FitsChecksumProvenance {
-                datasum: FitsChecksumState::NotChecked,
-                checksum: FitsChecksumState::NotChecked,
-            },
-        }),
-        color: ColorProvenance::Monochrome,
-        clipped: false,
-        demosaic: DemosaicProvenance::None,
-        row_order: RowOrder::TopDown,
-    };
-    let frame = |declared: Option<(f32, Option<&str>)>| {
+    let domain =
+        |physical_scale: f32, scale_origin: ScaleOrigin, unit: Option<&str>| ImageProvenance {
+            container: SourceContainer::Fits,
+            decoder: DecoderProvenance::FitsWell,
+            transfer: TransferProvenance::FitsNormalized(FitsTransferProvenance {
+                bscale: 1.0,
+                bzero: 0.0,
+                physical_scale,
+                scale_origin,
+                unit: unit.map(str::to_owned),
+                hdu: FitsHduProvenance {
+                    index: 0,
+                    extname: None,
+                    extver: None,
+                },
+                checksum: FitsChecksumProvenance {
+                    datasum: FitsChecksumState::NotChecked,
+                    checksum: FitsChecksumState::NotChecked,
+                },
+            }),
+            color: ColorProvenance::Monochrome,
+            clipped: false,
+            demosaic: DemosaicProvenance::None,
+            row_order: RowOrder::TopDown,
+        };
+    type Declared<'a> = Option<(f32, ScaleOrigin, Option<&'a str>)>;
+    let frame = |declared: Declared<'_>| {
         let mut image = LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0; 4]);
-        image.metadata.provenance = declared.map(|(scale, unit)| domain(scale, unit));
+        image.metadata.provenance =
+            declared.map(|(scale, origin, unit)| domain(scale, origin, unit));
         image
     };
-    let stack = |frames: [Option<(f32, Option<&str>)>; 2]| {
+    let stack = |frames: [Declared<'_>; 2]| {
         stack_images(
             frames
                 .map(|declared| frame(declared).into())
@@ -723,22 +728,39 @@ fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
 
     assert!(
         matches!(
-            stack([Some((65_535.0, None)), Some((1.0, None))]).unwrap_err(),
+            stack([
+                Some((65_535.0, ScaleOrigin::Declared, None)),
+                Some((1.0, ScaleOrigin::Assumed, None)),
+            ])
+            .unwrap_err(),
             Error::SampleDomainMismatch {
                 index: 1,
                 reference_index: 0,
                 ..
             }
         ),
-        "a 65535x span difference must be named, not absorbed into the fitted gain"
+        "a declared span against an assumed one must be named, not absorbed into the fitted gain"
     );
+
+    // Two declared spans in one unit convert exactly: frame 1 reads 1.0 on twice frame 0's span,
+    // so it is worth 2.0 of frame 0's units and the mean is 1.5.
+    let converted = stack([
+        Some((1.0, ScaleOrigin::Declared, None)),
+        Some((2.0, ScaleOrigin::Declared, None)),
+    ])
+    .unwrap();
+    assert_eq!(converted.image.channel(0).pixels(), &[1.5; 4]);
 
     // The same rejection with no span to give it away: one span, two quantities. Without BUNIT
     // these two frames are indistinguishable, and a surface brightness would be averaged with a
     // count rate.
     assert!(
         matches!(
-            stack([Some((1.0, Some("Jy/beam"))), Some((1.0, Some("count/s"))),]).unwrap_err(),
+            stack([
+                Some((1.0, ScaleOrigin::Declared, Some("Jy/beam"))),
+                Some((1.0, ScaleOrigin::Declared, Some("count/s"))),
+            ])
+            .unwrap_err(),
             Error::SampleDomainMismatch {
                 index: 1,
                 reference_index: 0,
@@ -755,9 +777,9 @@ fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
         matches!(
             stack_images(
                 [
-                    Some((1.0, None)),
-                    Some((1.0, Some("Jy/beam"))),
-                    Some((1.0, Some("count/s"))),
+                    Some((1.0, ScaleOrigin::Declared, None)),
+                    Some((1.0, ScaleOrigin::Declared, Some("Jy/beam"))),
+                    Some((1.0, ScaleOrigin::Declared, Some("count/s"))),
                 ]
                 .map(|declared| frame(declared).into())
                 .into_iter()
@@ -778,12 +800,24 @@ fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
 
     // Matching domains stack, and so does a set where a frame declares none — an undeclared span
     // or unit is "cannot tell", which must not reject an in-memory frame.
+    let declared = ScaleOrigin::Declared;
+    let assumed = ScaleOrigin::Assumed;
     for domains in [
-        [Some((65_535.0, None)), Some((65_535.0, None))],
-        [Some((65_535.0, None)), None],
+        [
+            Some((65_535.0, declared, None)),
+            Some((65_535.0, declared, None)),
+        ],
+        [Some((65_535.0, declared, None)), None],
         [None, None],
-        [Some((1.0, Some("ADU"))), Some((1.0, Some("ADU")))],
-        [Some((1.0, Some("ADU"))), Some((1.0, None))],
+        [
+            Some((1.0, declared, Some("ADU"))),
+            Some((1.0, declared, Some("ADU"))),
+        ],
+        [
+            Some((1.0, declared, Some("ADU"))),
+            Some((1.0, declared, None)),
+        ],
+        [Some((1.0, assumed, None)), Some((1.0, assumed, None))],
     ] {
         assert!(stack(domains).is_ok(), "domains {domains:?} must stack");
     }

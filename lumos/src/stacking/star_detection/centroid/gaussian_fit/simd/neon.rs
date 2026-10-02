@@ -1,4 +1,4 @@
-//! NEON SIMD implementation for Gaussian2D batch operations (aarch64).
+//! NEON SIMD implementation for `Gaussian2D` batch operations (aarch64).
 //!
 //! Processes 2 f64 pixels per NEON iteration for `batch_build_normal_equations`
 //! and `batch_compute_chi2`. Uses a fast polynomial `exp()` approximation
@@ -16,7 +16,7 @@ use std::arch::aarch64::*;
 
 const LOG2E: f64 = LOG2_E;
 
-/// Fast vectorized exp() for 2 f64 lanes using Cephes polynomial approximation.
+/// Fast vectorized `exp()` for 2 f64 lanes using Cephes polynomial approximation.
 #[inline]
 unsafe fn simd_exp_fast(x: float64x2_t) -> float64x2_t {
     unsafe {
@@ -71,7 +71,7 @@ unsafe fn simd_exp_fast(x: float64x2_t) -> float64x2_t {
 
 /// Batch build normal equations (J^T J, J^T r, chi²) using NEON.
 ///
-/// For N=6 (Gaussian2D), accumulates 21 upper-triangle hessian elements,
+/// For N=6 (`Gaussian2D`), accumulates 21 upper-triangle hessian elements,
 /// 6 gradient elements, and chi² directly in NEON registers (28 total).
 pub(super) unsafe fn batch_build_normal_equations_neon(
     model: &Gaussian2D,
@@ -332,7 +332,7 @@ mod tests {
 
     use crate::stacking::star_detection::centroid::gaussian_fit::simd::neon::*;
 
-    /// Test that simd_exp_fast produces results close to std exp().
+    /// Test that `simd_exp_fast` produces results close to std `exp()`.
     #[test]
     fn simd_exp_fast_accuracy() {
         let test_values: &[f64] = &[
@@ -360,7 +360,7 @@ mod tests {
         }
     }
 
-    /// Test simd_exp_fast with the typical Gaussian exponent range.
+    /// Test `simd_exp_fast` with the typical Gaussian exponent range.
     #[test]
     fn simd_exp_fast_gaussian_range() {
         for i in 0..1000 {

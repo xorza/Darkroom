@@ -13,7 +13,7 @@ use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode::{load_cfa_fits, load_linear_fits};
 use crate::io::image::fits::options::{FitsFloatScale, FitsLoadOptions, FitsNullPolicy};
 use crate::io::image::load_context::LoadContext;
-use crate::io::image::sample_domain::SampleDomain;
+use crate::io::image::sample_domain::{SampleDomain, ScaleOrigin};
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::internals::test_pattern_array;
 use crate::stacking::frame_store::{FramePeek, StackableImage};
@@ -290,7 +290,28 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     let adu_domain = domain_of(&adu).unwrap();
     assert_eq!(bare_domain.scale, 1.0);
     assert_eq!(adu_domain.scale, 65_535.0);
-    assert!(!bare_domain.commensurate_with(&adu_domain));
+    assert_eq!(bare_domain.origin, ScaleOrigin::Assumed);
+    assert_eq!(bare_domain.conversion_to(&adu_domain), None);
+
+    // The path loaders refuse the set too, before combining a byte; the same two files on one
+    // span stack. (`stack` from paths used to skip this check entirely.)
+    let stack_paths = |paths: &[&std::path::Path]| {
+        crate::stacking::combine::stack::stack(
+            paths,
+            crate::StackConfig::default(),
+            crate::ProgressCallback::default(),
+            CancelToken::never(),
+        )
+    };
+    assert!(matches!(
+        stack_paths(&[&normalized_path, &adu_path]),
+        Err(crate::StackError::SampleDomainMismatch {
+            index: 1,
+            reference_index: 0,
+            ..
+        })
+    ));
+    assert!(stack_paths(&[&normalized_path, &normalized_path]).is_ok());
 }
 
 #[test]
@@ -312,25 +333,25 @@ fn fits_bunit_travels_with_the_samples_and_separates_frames_the_span_cannot() {
     assert_eq!(jansky.scale, counts.scale, "the span must not be the axis");
     assert_eq!(jansky.unit.as_deref(), Some("Jy/beam"));
     assert_eq!(counts.unit.as_deref(), Some("count/s"));
-    assert!(!jansky.commensurate_with(&counts));
+    assert_eq!(jansky.conversion_to(&counts), None);
 
     // Trailing blanks are not significant in a FITS string, so padding is not a mismatch...
     let padded = load("float32_bunit_padded", "Jy/beam   ");
     assert_eq!(padded.unit.as_deref(), Some("Jy/beam"));
-    assert!(padded.commensurate_with(&jansky));
+    assert_eq!(padded.conversion_to(&jansky), Some(1.0));
 
     // ...and an all-blank BUNIT states no unit rather than an empty one, which leaves the frame
     // comparable to anything on the same span instead of disagreeing with all of them.
     let blank = load("float32_bunit_blank", "   ");
     assert_eq!(blank.unit, None);
-    assert!(blank.commensurate_with(&jansky));
-    assert!(blank.commensurate_with(&counts));
+    assert_eq!(blank.conversion_to(&jansky), Some(1.0));
+    assert_eq!(blank.conversion_to(&counts), Some(1.0));
 
     // Case is part of the unit: mega- and milli-jansky per steradian are 10^9 apart, and folding
     // case here would hide exactly the mismatch this check exists to catch.
     let mega = load("float32_bunit_mega", "MJy/sr");
     let milli = load("float32_bunit_milli", "mJy/sr");
-    assert!(!mega.commensurate_with(&milli));
+    assert_eq!(mega.conversion_to(&milli), None);
 }
 
 #[test]

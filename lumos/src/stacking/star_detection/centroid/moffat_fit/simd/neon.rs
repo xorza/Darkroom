@@ -1,7 +1,7 @@
-//! NEON SIMD implementation for MoffatFixedBeta batch operations (aarch64).
+//! NEON SIMD implementation for `MoffatFixedBeta` batch operations (aarch64).
 //!
 //! Processes 2 f64 pixels per NEON iteration for `batch_build_normal_equations`
-//! and `batch_compute_chi2`. Supports HalfInt, Int, and General PowStrategy variants.
+//! and `batch_compute_chi2`. Supports `HalfInt`, Int, and General `PowStrategy` variants.
 
 use crate::stacking::star_detection::centroid::lm_optimizer::{FitData, LMModel, NormalEquations};
 use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFixedBeta, PowStrategy};
@@ -71,7 +71,7 @@ unsafe fn simd_fast_pow_neg(u: float64x2_t, strategy: PowStrategy) -> float64x2_
 
 /// Batch build normal equations (J^T J, J^T r, chi²) using NEON.
 ///
-/// For N=5 (MoffatFixedBeta), accumulates 15 upper-triangle hessian elements,
+/// For N=5 (`MoffatFixedBeta`), accumulates 15 upper-triangle hessian elements,
 /// 5 gradient elements, and chi² directly in NEON registers.
 pub(super) unsafe fn batch_build_normal_equations_neon(
     model: &MoffatFixedBeta,

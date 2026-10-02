@@ -2,7 +2,7 @@ use crate::io::raw::demosaic::interleave_planes;
 use crate::io::raw::demosaic::sensor_layout::SensorLayout;
 use crate::io::raw::demosaic::xtrans::XTransNormalization;
 use crate::io::raw::demosaic::xtrans::internals::{
-    TEST_INV_RANGE, make_xtrans, test_pattern, test_pattern_array, to_u16,
+    TEST_SPAN, make_xtrans, test_pattern, test_pattern_array, to_u16,
 };
 use crate::io::raw::demosaic::xtrans::markesteijn::*;
 use crate::testing::prelude::*;
@@ -339,7 +339,7 @@ fn markesteijn_preserves_green_at_green_pixel() {
         pattern.clone(),
         XTransNormalization {
             channel_black: [0.0; 3],
-            inv_range: TEST_INV_RANGE,
+            span: TEST_SPAN,
             black_repeat: None,
         },
     );

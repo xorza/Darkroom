@@ -301,16 +301,16 @@ fn hot_mask_spatial_distribution_and_repeatability() {
     println!("  second spatial metrics: {second_metrics:?}");
     println!("  full spatial metrics: {full_metrics:?}");
 
-    assert_eq!(first_metrics.hot_count, 50_248);
-    assert_eq!(first_metrics.edge_count, 18_598);
-    assert_eq!(first_metrics.max_bin_count, 871);
-    assert_eq!(second_metrics.hot_count, 50_341);
-    assert_eq!(second_metrics.edge_count, 18_606);
-    assert_eq!(second_metrics.max_bin_count, 866);
-    assert_eq!(full_metrics.hot_count, 51_279);
-    assert_eq!(full_metrics.edge_count, 18_984);
-    assert_eq!(full_metrics.max_bin_count, 885);
-    assert_eq!(intersection, 45_296);
+    assert_eq!(first_metrics.hot_count, 50_909);
+    assert_eq!(first_metrics.edge_count, 18_849);
+    assert_eq!(first_metrics.max_bin_count, 883);
+    assert_eq!(second_metrics.hot_count, 50_162);
+    assert_eq!(second_metrics.edge_count, 18_545);
+    assert_eq!(second_metrics.max_bin_count, 865);
+    assert_eq!(full_metrics.hot_count, 51_408);
+    assert_eq!(full_metrics.edge_count, 19_032);
+    assert_eq!(full_metrics.max_bin_count, 890);
+    assert_eq!(intersection, 45_507);
 }
 
 #[quick_bench(warmup_iters = 0, iters = 1)]

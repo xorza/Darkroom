@@ -520,6 +520,8 @@ impl FrameCache {
 
     fn from_tiered_paths(loaded: LoadedCache, normalization: Normalization) -> Result<Self, Error> {
         let LoadedCache { frames, core } = loaded;
+        validate_sample_domains(&frames)?;
+        validate_row_orders(&frames)?;
         let frame_norms =
             compute_frame_norms(&frames, core.dimensions, normalization, &core.cancel)?;
         Ok(Self {

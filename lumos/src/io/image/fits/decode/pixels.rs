@@ -82,7 +82,7 @@ pub(super) fn read_decoded_hdu(
     // DATAMAX is a saturation level in the file's sample units, so it only stays comparable to the
     // samples if it is divided by the same span they were.
     if let Some(data_max) = &mut metadata.data_max {
-        *data_max /= f64::from(plan.sample_divisor);
+        *data_max /= f64::from(plan.sample_scale.divisor);
     }
     metadata.provenance = Some(ImageProvenance {
         container: SourceContainer::Fits,
@@ -90,12 +90,13 @@ pub(super) fn read_decoded_hdu(
         transfer: TransferProvenance::FitsNormalized(FitsTransferProvenance {
             bscale: plan.scaling.bscale,
             bzero: plan.scaling.bzero,
-            physical_scale: plan.sample_divisor,
+            physical_scale: plan.sample_scale.physical,
+            scale_origin: plan.sample_scale.origin,
             // An all-blank BUNIT parses to the single significant space §4.2.1.1 requires, which
             // states no unit rather than an empty one — left alone it would disagree with every
             // real unit. Surrounding blanks are a writer artifact rather than part of a unit name,
             // so both ends go, and the domain comparison downstream is then plain equality — see
-            // `SampleDomain::commensurate_with` for why it stops there and does not fold case.
+            // `SampleDomain::conversion_to` for why it stops there and does not fold case.
             unit: read_text(header, "BUNIT")
                 .map_err(|source| fits_err(path, source))?
                 .map(|unit| unit.trim().to_owned())
@@ -280,11 +281,10 @@ fn read_fits_plane(
             ));
         }
         let chunk_nulls =
-            normalize_and_locate_nulls(&mut pixels, plan.sample_divisor, &context.cancel).map_err(
-                |Cancelled| ImageError::Cancelled {
+            normalize_and_locate_nulls(&mut pixels, plan.sample_scale.divisor, &context.cancel)
+                .map_err(|Cancelled| ImageError::Cancelled {
                     path: path.to_path_buf(),
-                },
-            )?;
+                })?;
         // Each chunk locates its nulls in its own index space; the plane's is what a caller can act
         // on, so the offset is applied here rather than threaded into the pass.
         if let Some(chunk_nulls) = chunk_nulls {

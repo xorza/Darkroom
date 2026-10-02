@@ -76,7 +76,10 @@ pub(super) unsafe fn median_filter_row_neon(
 // Nine sibling lane values feeding a fixed comparator network, not a group with a name:
 // an array or struct would replace the network's named registers with indices and hand LLVM
 // an aggregate to promote back into exactly those registers.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "nine lane registers feed one comparator network"
+)]
 unsafe fn median9_neon(
     mut v0: float32x4_t,
     mut v1: float32x4_t,
@@ -98,7 +101,6 @@ unsafe fn median9_neon(
 
 #[cfg(test)]
 mod tests {
-    #[allow(unused_imports)]
     use crate::stacking::star_detection::median_filter::simd::neon::*;
 
     #[test]

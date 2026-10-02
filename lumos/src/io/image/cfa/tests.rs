@@ -1,8 +1,14 @@
 use crate::io::image::cfa::*;
 use crate::io::image::error::ImageError;
+use crate::io::image::image_provenance::{
+    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
+    SourceContainer, TransferProvenance,
+};
 use crate::io::image::load_context::LoadContext;
+use crate::io::image::sample_domain::ScaleOrigin;
 use crate::io::raw::demosaic::DemosaicKind;
 use crate::io::raw::demosaic::xtrans::internals::test_pattern_array;
+use crate::io::raw::provenance::RawTransferProvenance;
 use crate::testing::make_cfa;
 
 #[test]
@@ -55,6 +61,48 @@ fn a_masters_nulls_survive_the_fits_round_trip() {
     // written, because what was written for it was "no measurement".
     let data = loaded.data.to_vec();
     assert_eq!([data[0], data[2], data[3]], [0.1f32, 0.3, 0.4]);
+}
+
+/// A master records the span its samples were normalized by, so a reload keeps the domain it was
+/// stacked in — a RAW-sourced master is still a declared `maximum − black`, bit for bit, and still
+/// calibrates the RAW lights it was built for. Without the record, the float samples reload with an
+/// assumed scale of 1 and every light is refused.
+#[test]
+fn a_masters_declared_sample_domain_survives_the_fits_round_trip() {
+    let directory = common::TempDir::new("lumos-cfa-domain");
+    for span in [15_360.0f32, 1_234.567_8] {
+        let mut master = make_cfa(Size2us::new(2, 2), vec![0.25; 4], CfaType::Mono);
+        master.metadata.provenance = Some(ImageProvenance {
+            container: SourceContainer::CameraRaw,
+            decoder: DecoderProvenance::LibRaw,
+            transfer: TransferProvenance::RawNormalized(RawTransferProvenance {
+                physical_scale: span,
+            }),
+            color: ColorProvenance::Monochrome,
+            clipped: false,
+            demosaic: DemosaicProvenance::None,
+            row_order: RowOrder::TopDown,
+        });
+        let path = directory.path().join(format!("master_{span}.fits"));
+        master.save_fits(&path).unwrap();
+        let loaded = CfaImage::from_file(&path, &LoadContext::default()).unwrap();
+
+        let domain = loaded
+            .metadata
+            .sample_domain()
+            .expect("a FITS master has a domain");
+        assert_eq!(domain.scale.to_bits(), span.to_bits(), "span {span}");
+        assert_eq!(domain.origin, ScaleOrigin::Declared, "span {span}");
+        assert_eq!(
+            loaded.data.to_vec(),
+            vec![0.25; 4],
+            "samples are stored normalized"
+        );
+        assert_eq!(
+            domain.conversion_to(&master.metadata.sample_domain().unwrap()),
+            Some(1.0)
+        );
+    }
 }
 
 #[test]
@@ -225,7 +273,7 @@ fn subtract_takes_the_dark_off_every_sample() {
     let mut light = make_cfa(Size2us::new(2, 2), vec![0.5, 0.6, 0.7, 0.8], CfaType::Mono);
     let dark = make_cfa(Size2us::new(2, 2), vec![0.1, 0.1, 0.1, 0.1], CfaType::Mono);
 
-    light.subtract(&dark);
+    light.subtract(&dark, 1.0);
 
     assert!((light.data[0] - 0.4).abs() < 1e-6);
     assert!((light.data[1] - 0.5).abs() < 1e-6);
@@ -233,12 +281,28 @@ fn subtract_takes_the_dark_off_every_sample() {
     assert!((light.data[3] - 0.7).abs() < 1e-6);
 }
 
+/// The dark is expressed in the light's domain before it is subtracted: on a span four times the
+/// light's, a dark sample of 0.125 is worth 0.5. Dyadic values, so the result is exact.
+#[test]
+fn subtract_converts_the_dark_into_the_lights_domain_first() {
+    let mut light = make_cfa(
+        Size2us::new(2, 2),
+        vec![0.75, 1.0, 0.5, 0.625],
+        CfaType::Mono,
+    );
+    let dark = make_cfa(Size2us::new(2, 2), vec![0.125; 4], CfaType::Mono);
+
+    light.subtract(&dark, 4.0);
+
+    assert_eq!(light.data.pixels(), &[0.25, 0.5, 0.0, 0.125]);
+}
+
 #[test]
 #[should_panic(expected = "dimensions mismatch")]
 fn subtract_dimension_mismatch() {
     let mut light = make_cfa(Size2us::new(2, 2), vec![0.5; 4], CfaType::Mono);
     let dark = make_cfa(Size2us::new(3, 3), vec![0.1; 9], CfaType::Mono);
-    light.subtract(&dark);
+    light.subtract(&dark, 1.0);
 }
 
 #[test]

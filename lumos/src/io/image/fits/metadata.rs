@@ -3,6 +3,7 @@ use fits_well::header::Header;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::image_metadata::{BitPix, ImageMetadata};
 use crate::io::image::image_provenance::RowOrder;
+use crate::io::image::sample_domain::ScaleOrigin;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::XTransPattern;
 
@@ -43,6 +44,10 @@ pub(super) fn read_metadata(
     })
 }
 
+/// The lumos keyword recording the scale a written image's samples were normalized by. See
+/// `SampleScale` in the decoder for how a reader uses it.
+pub(crate) const SAMPLE_SCALE_KEYWORD: &str = "LUMSCALE";
+
 pub(super) fn write_image_metadata(
     header: &mut Header,
     metadata: &ImageMetadata,
@@ -76,6 +81,14 @@ pub(super) fn write_image_metadata(
     set_optional_real(header, "DATAMAX", metadata.data_max)?;
     if metadata.calibrated {
         header.set("LUMCAL", true)?;
+    }
+    // The samples go out already normalized, so the scale they were normalized by is the one fact a
+    // reader cannot recover from the data. Only a declared scale is recorded: an assumed one is a
+    // guess the reader can make again, and recording it would promote it to a declaration.
+    if let Some(domain) = metadata.sample_domain()
+        && domain.origin == ScaleOrigin::Declared
+    {
+        header.set(SAMPLE_SCALE_KEYWORD, f64::from(domain.scale))?;
     }
     if let Some(unit) = metadata
         .provenance

@@ -462,7 +462,17 @@ impl CalibrationMasters {
             bias,
             flat_dark,
         } = images;
-        let flat_subtractor = flat_dark.as_ref().or(bias.as_ref());
+        let flat_subtractor = match (&flat, &flat_dark, &bias) {
+            (Some(flat), Some(subtractor), _) => Some((
+                subtractor,
+                master_scale(flat, subtractor, MasterRole::FlatDark)?,
+            )),
+            (Some(flat), None, Some(subtractor)) => Some((
+                subtractor,
+                master_scale(flat, subtractor, MasterRole::Bias)?,
+            )),
+            _ => None,
+        };
         let subtracted_flat = flat.map(|flat| prepared_flat::subtract(flat, flat_subtractor));
 
         // Hot pixels from the dark, cold/dead pixels from the subtracted flat — None if neither
@@ -634,13 +644,18 @@ impl CalibrationMasters {
             "calibrate() called on an already-calibrated frame"
         );
         self.validate_against_light(image)?;
+        // 1. Dark subtraction (or bias), in the light's own domain.
+        let subtracted = match (&self.masters.dark, &self.masters.bias) {
+            (Some(dark), _) => Some((dark, MasterRole::Dark)),
+            (None, Some(bias)) => Some((bias, MasterRole::Bias)),
+            (None, None) => None,
+        };
+        let subtracted = subtracted
+            .map(|(master, role)| master_scale(image, master, role).map(|scale| (master, scale)))
+            .transpose()?;
         image.metadata.calibrated = true;
-
-        // 1. Dark subtraction
-        if let Some(ref dark) = self.masters.dark {
-            image.subtract(dark);
-        } else if let Some(ref bias) = self.masters.bias {
-            image.subtract(bias);
+        if let Some((master, scale)) = subtracted {
+            image.subtract(master, scale);
         }
 
         // 2. Flat division
@@ -688,15 +703,18 @@ impl CalibrationMasters {
                     master: master_pattern.clone(),
                 });
             }
-            // Only when both declare one: a synthesized master has no domain to compare, and
-            // refusing on that would reject every in-memory fixture.
-            if let (Some(light_domain), Some(master_domain)) =
-                (&light_domain, master.metadata.sample_domain())
-                && !light_domain.commensurate_with(&master_domain)
+            // The flat divides a normalized copy of itself, so its own scale cancels; only a
+            // different stated unit disqualifies it. The subtracted master's scale is checked where
+            // it is converted (`master_scale`). Only when both declare a domain: a synthesized
+            // master has none, and refusing on that would reject every in-memory fixture.
+            if role == MasterRole::Flat
+                && let (Some(light_domain), Some(master_domain)) =
+                    (&light_domain, master.metadata.sample_domain())
+                && !master_domain.units_agree(light_domain)
             {
                 return Err(CalibrationError::SampleDomainMismatch {
                     component: role,
-                    light: light_domain.clone(),
+                    frame: light_domain.clone(),
                     master: master_domain,
                 });
             }
@@ -724,4 +742,29 @@ impl CalibrationMasters {
 
         Ok(())
     }
+}
+
+/// The factor that expresses `master`'s samples in `frame`'s domain, for the master in `role`.
+///
+/// `1.0` when either declares no domain: a synthesized frame has none, and there is nothing to
+/// convert between. An error when the two cannot be related exactly — a different stated unit, or
+/// a span the decoder had to assume — because subtracting across such a gap silently does nothing.
+fn master_scale(
+    frame: &CfaImage,
+    master: &CfaImage,
+    role: MasterRole,
+) -> Result<f32, CalibrationError> {
+    let (Some(frame_domain), Some(master_domain)) = (
+        frame.metadata.sample_domain(),
+        master.metadata.sample_domain(),
+    ) else {
+        return Ok(1.0);
+    };
+    master_domain
+        .conversion_to(&frame_domain)
+        .ok_or(CalibrationError::SampleDomainMismatch {
+            component: role,
+            frame: frame_domain,
+            master: master_domain,
+        })
 }

@@ -55,7 +55,9 @@ pub(crate) fn validate_image_samples(
     )
 }
 
-/// Check that every frame declaring a sample domain declares the same one.
+/// Check that every frame declaring a sample domain can be expressed in the first one's: one unit,
+/// and either an equal scale or two declared ones the combine converts between
+/// ([`SampleDomain::conversion_to`]).
 ///
 /// A frame that declares none — synthesized rather than decoded, or a preview raster — is skipped
 /// rather than treated as agreeing: there is nothing to compare, and rejecting on it would refuse
@@ -63,11 +65,11 @@ pub(crate) fn validate_image_samples(
 /// error names a concrete pair.
 ///
 /// Scale and unit get a reference each rather than sharing one, because a frame can state a scale
-/// and no unit — and [`SampleDomain::commensurate_with`] is deliberately blind across that gap, so
-/// it is not transitive. Comparing everything against frame 0 alone would let a `Jy/beam` frame and
-/// a `count/s` frame through whenever the frame that happened to come first stated no unit; here
-/// the first frame to state a unit owns that half of the reference, and the error names whichever
-/// frame the mismatch is actually with.
+/// and no unit — and [`SampleDomain::units_agree`] is deliberately blind across that gap, so it is
+/// not transitive. Comparing everything against frame 0 alone would let a `Jy/beam` frame and a
+/// `count/s` frame through whenever the frame that happened to come first stated no unit; here the
+/// first frame to state a unit owns that half of the reference, and the error names whichever frame
+/// the mismatch is actually with.
 pub(crate) fn validate_sample_domains(frames: &[StoredFrame]) -> Result<(), Error> {
     let mut scale: Option<(usize, &SampleDomain)> = None;
     let mut unit: Option<(usize, &SampleDomain)> = None;
@@ -77,7 +79,7 @@ pub(crate) fn validate_sample_domains(frames: &[StoredFrame]) -> Result<(), Erro
         };
         match scale {
             None => scale = Some((index, domain)),
-            Some((reference_index, expected)) if domain.scale != expected.scale => {
+            Some((reference_index, expected)) if domain.conversion_to(expected).is_none() => {
                 return Err(Error::SampleDomainMismatch {
                     index,
                     actual: domain.clone(),

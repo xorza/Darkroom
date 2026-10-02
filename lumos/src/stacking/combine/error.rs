@@ -88,14 +88,13 @@ pub enum Error {
     /// Two frames were decoded into different sample domains, so combining them would average
     /// values that do not mean the same thing.
     ///
-    /// Reached when both frames declare a domain and the domains differ — a `uint16` FITS divided
-    /// by 65535 stacked against a `float32` one taken as already normalized, two RAWs whose
-    /// `maximum − black` differ, or two frames on the same span whose `BUNIT` names different
-    /// quantities. `Normalization::Global` would otherwise absorb the ratio into its fitted gain
-    /// and hand back a plausible-looking result.
+    /// Reached when both frames declare a domain and one cannot be expressed in the other's: a
+    /// different stated unit, or a span the decoder had to assume — a `float32` FITS taken as
+    /// already normalized stacked against a `uint16` one divided by 65535. Two declared spans in
+    /// one unit (two RAWs whose `maximum − black` differ) are converted, not refused.
     #[error(
         "frame {index} was decoded into sample domain {actual}, but frame {reference_index} used \
-         {expected}; frames from different domains cannot be combined"
+         {expected}; neither can be expressed in the other"
     )]
     SampleDomainMismatch {
         index: usize,

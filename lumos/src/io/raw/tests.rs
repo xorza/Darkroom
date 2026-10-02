@@ -229,7 +229,7 @@ fn normalize_maps_the_black_to_maximum_range_onto_zero_to_one() {
     // Test the SIMD normalization function
     let black = 512.0;
     let maximum = 16383.0;
-    let inv_range = 1.0 / (maximum - black);
+    let span = maximum - black;
 
     // Test data with known values
     let input: Vec<u16> = vec![
@@ -240,7 +240,7 @@ fn normalize_maps_the_black_to_maximum_range_onto_zero_to_one() {
         20000, // Above maximum -> clamped to 1.0
     ];
 
-    let result = normalize_u16_to_f32_parallel(&input, black, inv_range);
+    let result = normalize_u16_to_f32_parallel(&input, black, span);
 
     assert_eq!(result.len(), input.len());
 
@@ -274,9 +274,9 @@ fn normalize_u16_large_array() {
     let size = 100_000;
     let input: Vec<u16> = (0..size).map(|i| (i % 65536) as u16).collect();
     let black = 0.0;
-    let inv_range = 1.0 / 65535.0;
+    let span = 65535.0;
 
-    let result = normalize_u16_to_f32_parallel(&input, black, inv_range);
+    let result = normalize_u16_to_f32_parallel(&input, black, span);
 
     assert_eq!(result.len(), size);
 
@@ -300,7 +300,7 @@ fn normalize_active_area_crops_and_applies_bayer_deltas() {
         margin: Vec2us::new(2, 1),
     };
     let black = 100.0;
-    let inv_range = 0.001;
+    let span = 1000.0;
     let filters = 0x94949494;
     let channel_delta = [0.1, 0.2, 0.3, 0.4];
     let mut raw_data = vec![65_535; layout.raw.width * 4];
@@ -308,15 +308,14 @@ fn normalize_active_area_crops_and_applies_bayer_deltas() {
     raw_data[2 * layout.raw.width + 2..2 * layout.raw.width + 5]
         .copy_from_slice(&[300, 1100, 1200]);
 
-    let without_delta =
-        normalize_active_area::<true>(&raw_data, layout, black, inv_range, None, None);
+    let without_delta = normalize_active_area::<true>(&raw_data, layout, black, span, None, None);
     assert_eq!(without_delta, [0.0, 0.0, 0.1, 0.2, 1.0, 1.0]);
 
     let clamped = normalize_active_area::<true>(
         &raw_data,
         layout,
         black,
-        inv_range,
+        span,
         Some(ChannelBlackDelta::LibRawFilter {
             visible_filters: filters,
             values: channel_delta,
@@ -327,7 +326,7 @@ fn normalize_active_area_crops_and_applies_bayer_deltas() {
         &raw_data,
         layout,
         black,
-        inv_range,
+        span,
         Some(ChannelBlackDelta::LibRawFilter {
             visible_filters: filters,
             values: channel_delta,
@@ -358,7 +357,7 @@ fn direct_and_calibration_normalization_share_raw_linear_color_scale() {
     let raw_width = 3;
     let raw_data = [600; 9];
     let black = 100.0;
-    let inv_range = 0.001;
+    let span = 1000.0;
     let filters = 0x94949494;
     let channel_delta = [0.1, 0.02, 0.03, 0.04];
     let visible_pattern = CfaPattern::Rggb;
@@ -381,7 +380,7 @@ fn direct_and_calibration_normalization_share_raw_linear_color_scale() {
                 }
             }
 
-            let mut direct = normalize_u16_to_f32_parallel(&raw_data, black, inv_range);
+            let mut direct = normalize_u16_to_f32_parallel(&raw_data, black, span);
             apply_bayer_black_corrections(
                 &mut direct,
                 raw_width,
@@ -399,7 +398,7 @@ fn direct_and_calibration_normalization_share_raw_linear_color_scale() {
                 &raw_data,
                 layout,
                 black,
-                inv_range,
+                span,
                 Some(ChannelBlackDelta::LibRawFilter {
                     visible_filters: filters,
                     values: channel_delta,
@@ -439,7 +438,7 @@ fn spatial_black_repeat_uses_visible_coordinates_with_nonzero_margins() {
 
     assert_eq!(black.common, 115.0);
     assert_eq!(black.per_channel, [115.0, 125.0, 135.0, 125.0]);
-    assert!((black.inv_range - 0.001).abs() < 1e-10);
+    assert_eq!(black.span, 1000.0);
     for (&actual, expected) in black.channel_delta_norm.iter().zip([0.0, 0.01, 0.02, 0.01]) {
         assert!((actual - expected).abs() < 1e-8);
     }
@@ -462,7 +461,7 @@ fn spatial_black_repeat_uses_visible_coordinates_with_nonzero_margins() {
     raw_data[layout.raw.width + 2..layout.raw.width + 5].copy_from_slice(&[315, 327, 319]);
     raw_data[2 * layout.raw.width + 2..2 * layout.raw.width + 5].copy_from_slice(&[331, 343, 335]);
 
-    let mut direct = normalize_u16_to_f32_parallel(&raw_data, black.common, black.inv_range);
+    let mut direct = normalize_u16_to_f32_parallel(&raw_data, black.common, black.span);
     apply_bayer_black_corrections(
         &mut direct,
         layout.raw.width,
@@ -475,7 +474,7 @@ fn spatial_black_repeat_uses_visible_coordinates_with_nonzero_margins() {
         &raw_data,
         layout,
         black.common,
-        black.inv_range,
+        black.span,
         Some(ChannelBlackDelta::LibRawFilter {
             visible_filters: 0x94949494,
             values: black.channel_delta_norm,
@@ -507,7 +506,7 @@ fn xtrans_direct_and_calibration_black_corrections_match() {
     let raw_pattern = test_pattern_array();
     let common_black = 100.0;
     let channel_black = [110.0, 120.0, 130.0];
-    let inv_range = 0.001;
+    let span = 1000.0;
     let raw_data = vec![600u16; raw_width * raw_height];
     let repeat = BlackRepeat {
         size: Size2us::new(3, 2),
@@ -531,7 +530,7 @@ fn xtrans_direct_and_calibration_black_corrections_match() {
                 XTransPattern::new(raw_pattern).unwrap(),
                 XTransNormalization {
                     channel_black,
-                    inv_range,
+                    span,
                     black_repeat: Some(&repeat),
                 },
             );
@@ -539,7 +538,7 @@ fn xtrans_direct_and_calibration_black_corrections_match() {
                 &raw_data,
                 layout,
                 common_black,
-                inv_range,
+                span,
                 Some(ChannelBlackDelta::XTrans {
                     visible_pattern,
                     values: [0.01, 0.02, 0.03],
@@ -611,7 +610,7 @@ fn real_xtrans_channel_black_matches_direct_and_calibration_paths() {
                 raw.black_level.per_channel[1],
                 raw.black_level.per_channel[2],
             ],
-            inv_range: raw.black_level.inv_range,
+            span: raw.black_level.span,
             black_repeat: raw.black_level.repeat.as_ref(),
         },
     );
@@ -677,11 +676,11 @@ fn invalid_camera_white_balance_is_absent() {
 #[test]
 fn normalize_below_black_clamped() {
     let black = 500.0;
-    let inv_range = 1.0 / 1000.0;
+    let span = 1000.0;
 
     // All values below black
     let input: Vec<u16> = vec![0, 100, 200, 499];
-    let result = normalize_u16_to_f32_parallel(&input, black, inv_range);
+    let result = normalize_u16_to_f32_parallel(&input, black, span);
 
     for (i, &v) in result.iter().enumerate() {
         assert!(
@@ -697,15 +696,15 @@ fn normalize_below_black_clamped() {
 #[test]
 fn normalize_unclamped_preserves_out_of_range() {
     let black = 500.0;
-    let inv_range = 1.0 / 1000.0; // white level = 1500
+    let span = 1000.0; // white level = 1500
 
     // below black, below black, in range, above white
     let input: Vec<u16> = vec![0, 100, 499, 700, 2000];
     let mut unclamped = vec![0.0; input.len()];
-    normalize_u16_to_f32_into::<false>(&input, &mut unclamped, black, inv_range);
-    let clamped = normalize_u16_to_f32_parallel(&input, black, inv_range);
+    normalize_u16_to_f32_into::<false>(&input, &mut unclamped, black, span);
+    let clamped = normalize_u16_to_f32_parallel(&input, black, span);
 
-    // Unclamped is the exact affine map (value - black) * inv_range; negatives
+    // Unclamped is the exact affine map (value - black) / span; negatives
     // and >1 are retained.
     let unclamped_expected = [-0.5, -0.4, -0.001, 0.2, 1.5];
     for (i, (&got, &want)) in unclamped.iter().zip(unclamped_expected.iter()).enumerate() {
@@ -771,8 +770,7 @@ fn consolidate_black_levels_uniform() {
     assert_eq!(bl.common, 512.0);
     assert_eq!(bl.per_channel, [512.0; 4]);
     assert_eq!(bl.channel_delta_norm, [0.0; 4]);
-    let expected_inv = 1.0 / (16383.0 - 512.0);
-    assert!((bl.inv_range - expected_inv).abs() < 1e-10);
+    assert_eq!(bl.span, 16383.0 - 512.0);
 }
 
 /// Per-channel cblack[0..3] nonzero, no spatial pattern.
@@ -795,12 +793,11 @@ fn consolidate_black_levels_per_channel() {
     assert_eq!(bl.per_channel[2], 115.0); // B: 15-5+105
     assert_eq!(bl.per_channel[3], 105.0); // G2: 5-5+105
 
-    let inv = 1.0 / (4096.0 - 105.0);
-    assert!((bl.inv_range - inv).abs() < 1e-10);
-    // delta_norm[c] = (per_channel[c] - common) * inv_range
-    assert!((bl.channel_delta_norm[0] - 5.0 * inv).abs() < 1e-6);
-    assert!(bl.channel_delta_norm[1].abs() < 1e-10);
-    assert!((bl.channel_delta_norm[2] - 10.0 * inv).abs() < 1e-6);
+    assert_eq!(bl.span, 4096.0 - 105.0);
+    // delta_norm[c] = (per_channel[c] - common) / span, divided once
+    assert_eq!(bl.channel_delta_norm[0], 5.0 / 3991.0);
+    assert_eq!(bl.channel_delta_norm[1], 0.0);
+    assert_eq!(bl.channel_delta_norm[2], 10.0 / 3991.0);
     assert!(bl.channel_delta_norm[3].abs() < 1e-10);
 }
 
@@ -831,12 +828,11 @@ fn consolidate_black_levels_bayer_2x2_fold() {
     assert_eq!(bl.per_channel[2], 216.0); // B: 12 + 204
     assert_eq!(bl.per_channel[3], 212.0); // G2: 8 + 204
 
-    let inv = 1.0 / (16383.0 - 204.0);
-    assert!((bl.inv_range - inv).abs() < 1e-10);
-    assert!(bl.channel_delta_norm[0].abs() < 1e-10); // R: no delta
-    assert!((bl.channel_delta_norm[1] - 4.0 * inv).abs() < 1e-6); // G1
-    assert!((bl.channel_delta_norm[2] - 12.0 * inv).abs() < 1e-6); // B
-    assert!((bl.channel_delta_norm[3] - 8.0 * inv).abs() < 1e-6); // G2
+    assert_eq!(bl.span, 16383.0 - 204.0);
+    assert_eq!(bl.channel_delta_norm[0], 0.0); // R: no delta
+    assert_eq!(bl.channel_delta_norm[1], 4.0 / 16179.0); // G1
+    assert_eq!(bl.channel_delta_norm[2], 12.0 / 16179.0); // B
+    assert_eq!(bl.channel_delta_norm[3], 8.0 / 16179.0); // G2
 }
 
 /// X-Trans 1x1 spatial pattern folded into all channels.

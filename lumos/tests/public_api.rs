@@ -12,8 +12,8 @@ use lumos::{
     InvalidConfigField, LinearFitClipConfig, LinearImage, LoadContext, MasterRole, NoiseModel,
     Normalization, PercentileClipConfig, QualityMap, QualityPlanes, RansacConfig,
     RawTransferProvenance, RegistrationCatalog, RegistrationConfig, RegistrationError,
-    RegistrationMatchingConfig, Rejection, SampleDomain, SigmaClipConfig, SipConfig, SmallN,
-    StackConfig, StackConfigError, StackError, StackProduct, StarDetectionBackgroundConfig,
+    RegistrationMatchingConfig, Rejection, SampleDomain, ScaleOrigin, SigmaClipConfig, SipConfig,
+    SmallN, StackConfig, StackConfigError, StackError, StackProduct, StarDetectionBackgroundConfig,
     StarDetectionCandidateConfig, StarDetectionConfig, StarDetectionDiagnostics,
     StarDetectionFilterConfig, StarDetectionFwhmConfig, StarDetectionMeasurementConfig,
     StarDetectionQualityFilterDiagnostics, StarDetector, StarMatch, TransferProvenance, Transform,
@@ -51,6 +51,7 @@ fn file_loading_policy_is_available_from_the_crate_root() {
         bscale: 1.0,
         bzero: 0.0,
         physical_scale: 65_535.0,
+        scale_origin: ScaleOrigin::Declared,
         unit: Some("adu".to_owned()),
         hdu: FitsHduProvenance {
             index: 3,
@@ -76,12 +77,13 @@ fn file_loading_policy_is_available_from_the_crate_root() {
 
     // Both decoders answer the same question about their samples, so a caller can compare two
     // frames' domains without knowing which produced them. The FITS answer carries the declared
-    // BUNIT; a RAW frame states none, which is why the two are still commensurate here.
+    // BUNIT; a RAW frame states none, which is why the two still convert here.
     let fits = provenance.sample_domain().unwrap();
     assert_eq!(
         fits,
         SampleDomain {
             scale: 65_535.0,
+            origin: ScaleOrigin::Declared,
             unit: Some("adu".to_owned()),
         }
     );
@@ -94,10 +96,11 @@ fn file_loading_policy_is_available_from_the_crate_root() {
         raw,
         SampleDomain {
             scale: 65_535.0,
+            origin: ScaleOrigin::Declared,
             unit: None,
         }
     );
-    assert!(fits.commensurate_with(&raw));
+    assert_eq!(fits.conversion_to(&raw), Some(1.0));
     assert_eq!(TransferProvenance::UnspecifiedRaster.sample_domain(), None);
 }
 
