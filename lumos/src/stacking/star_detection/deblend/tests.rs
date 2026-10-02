@@ -1,5 +1,5 @@
-//! Integration tests for deblending algorithms.
-//! These tests compare behavior between `local_maxima` and `multi_threshold`.
+//! Tests of the shared component data, and comparisons of `local_maxima` with
+//! `multi_threshold`.
 
 use crate::stacking::star_detection::deblend::internals::{
     TestComponent, deblend_multi_threshold_test, make_test_component,
@@ -69,4 +69,26 @@ fn local_vs_multi_threshold_two_stars() {
 
     assert_eq!(local_result.len(), 2, "Local maxima should find 2 stars");
     assert_eq!(mt_result.len(), 2, "Multi-threshold should find 2 stars");
+}
+
+#[test]
+fn iter_pixels_count() {
+    let TestComponent {
+        pixels,
+        labels,
+        data,
+    } = make_test_component(
+        Size2us::new(100, 100),
+        &[SyntheticStar::new(
+            Vec2::new(50.0, 50.0),
+            1.0,
+            StarProfile::Gaussian { sigma: 3.0 },
+        )],
+    );
+
+    let iter_count = data.iter_pixels(&pixels, &labels).count();
+    assert_eq!(
+        iter_count, data.area,
+        "iter_pixels should yield exactly area pixels"
+    );
 }

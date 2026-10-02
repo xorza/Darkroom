@@ -1197,34 +1197,6 @@ fn asymmetric_star_sround() {
     );
 }
 
-#[test]
-fn star_is_round() {
-    use crate::stacking::star_detection::star::Star;
-
-    let round_star = Star::at(DVec2::new(10.0, 10.0)).with_roundness(Roundness {
-        ground: 0.05,
-        sround: 0.03,
-    });
-
-    let non_round_star = round_star.with_roundness(Roundness {
-        ground: 0.5,
-        sround: 0.4,
-    });
-
-    assert!(
-        round_star.is_round(0.2),
-        "Round star should pass roundness check"
-    );
-    assert!(
-        !non_round_star.is_round(0.2),
-        "Non-round star should fail roundness check"
-    );
-    assert!(
-        non_round_star.is_round(1.0),
-        "All stars should pass with max_roundness=1.0"
-    );
-}
-
 /// Metrics must be measured against a sky annulus centred on the position the fit actually
 /// reported. The annulus samples by rounded centre, so when the fit crosses a pixel boundary the
 /// estimate taken back at the moments position describes a different ring — on a sky gradient

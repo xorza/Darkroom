@@ -503,30 +503,9 @@ Paths are relative to `lumos/src/stacking/registration/`.
 - [ ] `distortion/tps/mod.rs:1-5` — TPS is not called from production (`#![cfg_attr(not(test), allow(dead_code))]`). 384 production lines and the 1030-line `tps/tests.rs` exist only to test each other, and `distortion/point_normalization.rs:31-33` (`denormalize`) is kept alive for it. The AGENTS.md scope rule is "remove it rather than carry it".
 - [ ] `transform/mod.rs:387-397` — `Transform::deviation_from_identity` is a test-only wrapper whose only caller is its own test (`transform/tests.rs:403-420`). `DMat3::deviation_from_identity` is already tested in `math/dmat3/tests.rs:225-240`. Delete both.
 - [ ] `result/tests.rs:137`, `:193-210` — these pin the `Display` text of `RegistrationError::StarDetection` and `RansacFailureReason::{DegeneratePointSet, SingularMatrix, InsufficientInliers}`, none of which production ever constructs (grep finds them only in `result/mod.rs` and this test). The tests keep dead public variants looking covered.
-- [ ] `resample/bench.rs:231-249` — `bench_interpolate_lanczos3_single` times the test oracle `kernel::internals::interpolate_lanczos`, which does not ship.
 
 ## Placement, gating and bench layout
 Test, internals and bench code sits where the rules say it must not, or is gated so that it never runs.
-
-### lumos — star_detection
-Short paths are relative to `lumos/src/stacking/star_detection/`.
-
-- [ ] Tests that belong with another owner:
-  - `centroid/tests/measurement.rs:1210` (`star_is_round`) duplicates `star.rs:157`.
-  - `local_maxima/tests.rs:103` tests `ComponentData::iter_pixels`, which is owned by `deblend/mod.rs`.
-  - `tests/stage_effects/{detection_tests,deblend_tests}.rs` call the single-stage `detect_stars_test`, which `tests/mod.rs:8-15`'s own rule assigns to the detect stage's `tests`.
-- [ ] `lumos/src/stacking/star_detection/tests/mem_budget_probe.rs:167-292` and `tests/real_data.rs:28-293` — an `#[ignore]`d, env-var-driven measurement probe written as a test. The real-data tests are double-gated: `#[ignore]` on top of `feature = "real-data"`, so `--features real-data` alone runs none of them, which contradicts AGENTS.md. `detect_rho_opiuchi` (`:117`) asserts only `!stars.is_empty()`. The three tests copy-paste the "load rho-opiuchi" preamble (`:33-47`, `:139-151`, `:297-310`).
-
-### lumos — registration
-Paths are relative to `lumos/src/stacking/registration/`.
-
-- [ ] `resample/kernel/mod.rs:209-223` — a gated `impl LanczosLut` sits outside the gated `internals` module that follows it. Move it into `kernel/internals.rs`.
-- [ ] `tuning.rs:64-114` — the inline tests are 45% of the file, so it should become `tuning/{mod.rs, tests.rs}`.
-- [ ] `resample/kernel/tests.rs:51-118` — the `math::lanczos::kernel` tests belong in `math/lanczos.rs`, which has none.
-- [ ] `ransac/tests/scoring.rs:92-175` — tests for `sampling.rs` live in the scoring file.
-- [ ] `triangle/tests/matching.rs:462-500` — tests `Triangle::is_similar` (geometry) from the matching file, duplicating `geometry.rs:245-339`.
-- [ ] `real_data_tests.rs:248-342` — two `#[quick_bench]` benches outside `bench.rs`. `:255-257` writes into `test_data/lumos_data/registered_lights` and never cleans it up. `:344-386` tests star-detection weighting, not registration. `:128-151` re-implements `register`'s private `take(max_stars)` star selection to rebuild inlier positions, which silently mis-indexes if `register` changes.
-- [ ] `resample/bench.rs:33-162` — eight copy-pasted plane-warp benches differ only in size and method; they should be one helper. `create_test_image` (`:14`) duplicates a `testing::synthetic::patterns` builder. `:248` places `#[quick_bench]` above the doc comment.
 
 ### lumos — combine, drizzle
 Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).

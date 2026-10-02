@@ -22,3 +22,6 @@ pub(crate) fn kernel(x: f32, a: f32) -> f32 {
     let pi_x_a = pi_x / a;
     (pi_x.sin() / pi_x) * (pi_x_a.sin() / pi_x_a)
 }
+
+#[cfg(test)]
+mod tests;

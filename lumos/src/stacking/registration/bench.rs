@@ -61,3 +61,118 @@ fn bench_register_500_stars(b: ::quickbench::Bencher) {
     let config = RegistrationConfig::default();
     b.bench(|| black_box(register(black_box(&ref_stars), black_box(&target), &config)));
 }
+
+/// Benchmarks on the dataset's RAW lights.
+#[cfg(feature = "real-data")]
+mod real_data {
+    use std::hint::black_box;
+    use std::path::PathBuf;
+
+    use ::quickbench::quick_bench;
+    use common::TempDir;
+
+    use crate::io::image::linear::LinearImage;
+    use crate::stacking::registration::config::Config as RegistrationConfig;
+    use crate::stacking::registration::register;
+    use crate::stacking::registration::resample::warp;
+    use crate::stacking::star_detection::config::Config;
+    use crate::stacking::star_detection::detector::StarDetector;
+    use crate::testing::real_data::{LightPair, first_and_last_lights, raw_frames, raw_light};
+
+    #[quick_bench(warmup_iters = 0, iters = 1)]
+    fn bench_register_and_warp_all(b: ::quickbench::Bencher) {
+        let paths = raw_frames("Lights");
+        let images: Vec<LinearImage> = paths.iter().map(|path| raw_light(path)).collect();
+        // The warped frames go to a fresh directory, never into the dataset.
+        let output_dir = TempDir::new("lumos-registered-lights");
+        println!(
+            "Loaded {} lights; writing under {}",
+            images.len(),
+            output_dir.path().display()
+        );
+
+        b.bench(|| {
+            let star_config = Config::precise_ground();
+            let mut detector = StarDetector::from_config(star_config).unwrap();
+
+            // Detect stars in all frames
+            let detections: Vec<_> = images.iter().map(|img| detector.detect(img)).collect();
+
+            let reg_config = RegistrationConfig::default();
+            let ref_stars = &detections[0].stars;
+
+            println!(
+                "Reference: {:?} ({} stars)",
+                paths[0].file_name().unwrap(),
+                ref_stars.len()
+            );
+
+            // Save reference frame as-is
+            let tiff_name =
+                |path: &PathBuf| format!("{}.tiff", path.file_stem().unwrap().to_string_lossy());
+            let ref_output = output_dir.join(tiff_name(&paths[0]));
+            images[0]
+                .save(&ref_output)
+                .expect("Failed to save reference frame");
+
+            // Register and warp each subsequent frame
+            for i in 1..images.len() {
+                let name = paths[i].file_name().unwrap();
+                let target_stars = &detections[i].stars;
+
+                let result = match register(ref_stars, target_stars, &reg_config) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        println!("  {name:?}: FAILED ({e:?}), skipping");
+                        continue;
+                    }
+                };
+
+                println!(
+                    "  {:?}: {} inliers, RMS {:.4} px, {:.1} ms",
+                    name,
+                    result.num_inliers(),
+                    result.rms_error(),
+                    result.elapsed_ms(),
+                );
+
+                let warped = warp(&images[i], &result.warp_transform(), &reg_config.warp).image;
+
+                let output_path = output_dir.join(tiff_name(&paths[i]));
+                warped
+                    .save(&output_path)
+                    .expect("Failed to save warped frame");
+            }
+
+            println!(
+                "Saved {} registered frames to {:?}",
+                images.len(),
+                output_dir
+            );
+        });
+    }
+
+    #[quick_bench(warmup_iters = 3, iters = 30)]
+    fn bench_register_stars(b: ::quickbench::Bencher) {
+        let LightPair {
+            first: img1,
+            last: img2,
+        } = first_and_last_lights();
+
+        // Pre-detect stars (not part of the benchmark)
+        let star_config = Config::default();
+        let mut detector = StarDetector::from_config(star_config).unwrap();
+        let result1 = detector.detect(&img1);
+        let result2 = detector.detect(&img2);
+
+        let reg_config = RegistrationConfig::default();
+
+        b.bench(|| {
+            black_box(register(
+                black_box(&result1.stars),
+                black_box(&result2.stars),
+                &reg_config,
+            ))
+        });
+    }
+}

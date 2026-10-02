@@ -14,9 +14,12 @@
 //! - [`ml_support`] (feature `ml`) — weight resolution and the stretched master the `ml`
 //!   prototypes in `image_ops/ml/tests/` share.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use common::file_utils;
+use common::{CancelToken, file_utils};
+
+use crate::io::image::linear::LinearImage;
+use crate::io::raw::load_raw_cfa;
 
 use crate::io::raw::RAW_EXTENSIONS;
 
@@ -53,6 +56,33 @@ pub(crate) fn raw_frames(subdir: &str) -> Vec<PathBuf> {
         "real-data {subdir}/ holds no RAW frames"
     );
     frames
+}
+
+/// A RAW light, demosaiced without calibration: registration and detection need its stars, not
+/// its noise floor.
+pub(crate) fn raw_light(path: &Path) -> LinearImage {
+    load_raw_cfa(path, &CancelToken::never())
+        .expect("load a RAW light")
+        .demosaic(&CancelToken::never())
+        .expect("demosaic a RAW light")
+}
+
+/// Two RAW lights of one field.
+#[derive(Debug)]
+pub(crate) struct LightPair {
+    pub(crate) first: LinearImage,
+    pub(crate) last: LinearImage,
+}
+
+/// The first and last RAW lights of the dataset, demosaiced: two frames of one field, offset by
+/// the drift of a night's sequence.
+pub(crate) fn first_and_last_lights() -> LightPair {
+    let lights = raw_frames("Lights");
+    assert!(lights.len() >= 2, "real-data Lights/ needs two frames");
+    LightPair {
+        first: raw_light(&lights[0]),
+        last: raw_light(&lights[lights.len() - 1]),
+    }
 }
 
 /// Shared scaffolding for the `ml`-gated real-data prototypes (`star_removal`, `ml_denoise`):
