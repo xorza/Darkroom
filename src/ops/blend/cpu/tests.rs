@@ -1,9 +1,10 @@
 use strum::IntoEnumIterator;
 
-use crate::common::color_format::{ALL_FORMATS, ColorFormat};
+use crate::common::color_format::{ALL_FORMATS, ColorFormat, SampleType};
 use crate::common::image_diff::{max_pixel_diff, pixels_equal};
 use crate::common::internals::create_test_image;
 use crate::image::Image;
+use crate::image::image_desc::ImageDesc;
 use crate::ops::blend::cpu;
 use crate::ops::blend::{Blend, BlendMode};
 
@@ -35,6 +36,8 @@ fn blend_mode_formulas() {
         // dst >= 0.5, so Screen doubled: 1 - 2 * 0.4 * 0.2 = 0.84
         (BlendMode::Overlay, 0.6, 0.8, 0.84),
     ];
+    // The operands and the expected values are decimals, which f32 holds to within 6e-8 each;
+    // two products and a sum of them stay well inside 1e-6.
     for (mode, src, dst, want) in cases {
         let got = mode.blend(src, dst, 1.0);
         assert!(
@@ -55,9 +58,36 @@ fn blend_mode_formulas() {
     assert!((none - 0.2).abs() < 1e-6, "alpha=0 = {none}, want dst 0.2");
 }
 
+/// Every `u8` and `u16` value blended over itself by `Normal` at alpha 0.3 is itself: the mix
+/// `v · 0.3 + v · 0.7` lands within a few f32 ulps of `v`, and rounding brings it back — where
+/// truncation lost one step on 11 of the 256 bytes and 2162 of the 65 536 words. Through
+/// whatever kernel dispatch picks.
+#[test]
+fn blending_a_value_over_itself_keeps_it() {
+    let bytes: Vec<u8> = (0..=u8::MAX).collect();
+    let words: Vec<u16> = (0..=u16::MAX).collect();
+    for (format, width, data) in [
+        (ColorFormat::RGBA_U8, 64, bytes.clone()),
+        (ColorFormat::L_U8, 256, bytes),
+        (
+            ColorFormat::RGBA_U16,
+            16384,
+            bytemuck::cast_slice(&words).to_vec(),
+        ),
+    ] {
+        let image = Image::new_with_data(ImageDesc::new(width, 1, format), data).unwrap();
+        let output = blend(Blend::new(BlendMode::Normal, 0.3), &image, &image);
+        assert!(
+            pixels_equal(&image, &output),
+            "{format}: off by {}",
+            max_pixel_diff(&image, &output)
+        );
+    }
+}
+
 #[test]
 fn alpha_zero_returns_dst() {
-    for &format in ALL_FORMATS {
+    for format in ALL_FORMATS {
         let src = create_test_image(format, 8, 4, 0);
         let dst = create_test_image(format, 8, 4, 100);
 
@@ -75,7 +105,7 @@ fn alpha_zero_returns_dst() {
 
 #[test]
 fn alpha_one_normal_returns_src() {
-    for &format in ALL_FORMATS {
+    for format in ALL_FORMATS {
         let src = create_test_image(format, 8, 4, 0);
         let dst = create_test_image(format, 8, 4, 100);
 
@@ -133,16 +163,26 @@ fn multiply_by_black_zeroes_color() {
 /// the same units, down to dividing where the reference divides.
 ///
 /// The widths straddle the four-pixel vector body: 3 is tail only, 17 is four
-/// vectors plus a tail, 64 is vectors only.
+/// vectors plus a tail, 64 is vectors only. The float images carry NaN, the
+/// infinities and out-of-range values, which every backend must pass through as
+/// the reference does, and a NaN alpha reaches the integer paths.
 #[test]
 fn simd_matches_scalar_reference() {
-    for &format in ALL_FORMATS {
+    for format in ALL_FORMATS {
         for width in [3, 17, 64] {
             let src = create_test_image(format, width, 3, 0);
-            let dst = create_test_image(format, width, 3, 100);
+            let mut dst = create_test_image(format, width, 3, 100);
+            if format.sample_type == SampleType::F32 {
+                let specials = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -0.5, 1.5, -0.0];
+                let samples: &mut [f32] = bytemuck::cast_slice_mut(dst.bytes_mut());
+                for (sample, special) in samples.iter_mut().step_by(5).zip(specials.iter().cycle())
+                {
+                    *sample = *special;
+                }
+            }
 
             for mode in BlendMode::iter() {
-                for alpha in [0.0, 0.35, 1.0] {
+                for alpha in [0.0, 0.35, 1.0, f32::NAN] {
                     let params = Blend::new(mode, alpha);
                     let dispatched = blend(params, &src, &dst);
                     let mut reference = Image::new_black(dst.desc()).unwrap();

@@ -1,5 +1,3 @@
-#[cfg(feature = "bench")]
-pub(crate) mod bench;
 mod cpu;
 #[cfg(feature = "wgpu")]
 mod gpu;
@@ -50,25 +48,22 @@ impl Transform {
         Self::default()
     }
 
-    /// Sets the affine transformation directly.
-    pub fn affine(mut self, transform: Affine2) -> Self {
-        self.transform = transform;
-        self
-    }
-
     /// Applies a scale transformation.
+    #[must_use]
     pub fn scale(mut self, scale: Vec2) -> Self {
         self.transform *= Affine2::from_scale(scale);
         self
     }
 
     /// Applies a rotation transformation (angle in radians).
+    #[must_use]
     pub fn rotate(mut self, angle: f32) -> Self {
         self.transform *= Affine2::from_angle(angle);
         self
     }
 
     /// Applies a rotation around a center point (angle in radians).
+    #[must_use]
     pub fn rotate_around(mut self, angle: f32, center: Vec2) -> Self {
         self.transform *= Affine2::from_translation(center)
             * Affine2::from_angle(angle)
@@ -77,34 +72,52 @@ impl Transform {
     }
 
     /// Applies a translation transformation.
+    #[must_use]
     pub fn translate(mut self, translation: Vec2) -> Self {
         self.transform *= Affine2::from_translation(translation);
         self
     }
 
     /// Sets the filter mode.
+    #[must_use]
     pub fn filter(mut self, filter: FilterMode) -> Self {
         self.filter = filter;
         self
+    }
+
+    /// The output-to-input map every backend samples through.
+    ///
+    /// # Panics
+    /// Unless the transform is invertible: a zero, subnormal or non-finite
+    /// determinant has no inverse that maps pixels to pixels.
+    pub(crate) fn inverse(&self) -> Affine2 {
+        let determinant = self.transform.matrix2.determinant();
+        assert!(
+            determinant.is_normal(),
+            "the transform is not invertible: determinant {determinant}"
+        );
+        self.transform.inverse()
     }
 
     /// Applies the affine transform on the CPU, sampling `input` into `output`.
     ///
     /// `output`'s descriptor sets the result dimensions (which may differ from
     /// the input's); output pixels whose source maps outside the input are zero.
-    /// Grayscale and RGB sample against an implicit opaque alpha; RGBA carries
-    /// its own alpha through the same interpolation as the color channels.
+    /// Every channel, alpha included, interpolates the same way.
     ///
     /// # Panics
-    /// Panics if input and output have different color formats.
+    /// Panics if input and output have different color formats, or if the
+    /// transform is not invertible.
     pub fn apply_cpu(&self, input: &Image, output: &mut Image) {
         cpu::apply(self, input, output);
     }
 
-    /// Applies the transform to the input image, writing to output.
+    /// Applies the transform on the GPU, sampling `input` into `output`, as
+    /// [`Self::apply_cpu`] does.
     ///
-    /// The output image dimensions determine the size of the result.
-    /// Areas outside the transformed input will be transparent (RGBA 0,0,0,0).
+    /// # Panics
+    /// Panics if input and output have different color formats, or if the
+    /// transform is not invertible.
     #[cfg(feature = "wgpu")]
     pub fn apply_gpu(
         &self,
@@ -113,6 +126,9 @@ impl Transform {
         input: &GpuImage,
         output: &mut GpuImage,
     ) {
-        gpu::apply(self, ctx, pipeline, input, output)
+        gpu::apply(self, ctx, pipeline, input, output);
     }
 }
+
+#[cfg(feature = "bench")]
+pub(crate) mod bench;

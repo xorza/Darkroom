@@ -7,8 +7,6 @@ pub(crate) mod pipeline;
 use strum_macros::{EnumIter, EnumString, VariantNames};
 
 #[cfg(feature = "wgpu")]
-use crate::common::error::Result;
-#[cfg(feature = "wgpu")]
 use crate::gpu::Gpu;
 #[cfg(feature = "wgpu")]
 use crate::gpu::gpu_image::GpuImage;
@@ -20,7 +18,7 @@ use crate::ops::blend::pipeline::GpuBlendPipeline;
 ///
 /// The formulas are stated on the variants because the names do not fix them:
 /// `Subtract` takes `src` *from* `dst`, and `Overlay` switches formula on the
-/// destination rather than the source. [`BlendMode::blend`] is the one
+/// destination rather than the source. `BlendMode::blend` is the one
 /// definition every backend — scalar, SIMD and the GPU shader — evaluates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, EnumIter, EnumString, VariantNames)]
 #[repr(u8)]
@@ -94,12 +92,14 @@ impl Blend {
     }
 
     /// Builder method to set blend mode.
+    #[must_use]
     pub fn mode(mut self, mode: BlendMode) -> Self {
         self.mode = mode;
         self
     }
 
     /// Builder method to set alpha.
+    #[must_use]
     pub fn alpha(mut self, alpha: f32) -> Self {
         self.alpha = alpha;
         self
@@ -112,14 +112,14 @@ impl Blend {
     /// # Panics
     /// Panics unless all three images share a descriptor.
     pub fn apply_cpu(&self, src: &Image, dst: &Image, output: &mut Image) {
-        cpu::apply(self, src, dst, output);
+        cpu::apply(*self, src, dst, output);
     }
 
-    /// Blends `src` over `dst` into `output` on the GPU, for U8 and F32 storage
-    /// in L, LA, RGB and RGBA.
+    /// Blends `src` over `dst` into `output` on the GPU, as [`Self::apply_cpu`]
+    /// does.
     ///
     /// # Panics
-    /// Panics unless all three images share dimensions and color format.
+    /// Panics unless all three images share a descriptor.
     #[cfg(feature = "wgpu")]
     pub fn apply_gpu(
         &self,
@@ -128,7 +128,7 @@ impl Blend {
         src: &GpuImage,
         dst: &GpuImage,
         output: &mut GpuImage,
-    ) -> Result<()> {
-        gpu::apply(self, ctx, pipeline, src, dst, output)
+    ) {
+        gpu::apply(*self, ctx, pipeline, src, dst, output);
     }
 }

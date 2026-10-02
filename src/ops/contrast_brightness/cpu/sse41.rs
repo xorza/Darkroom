@@ -4,7 +4,7 @@
 
 use std::arch::x86_64::*;
 
-use crate::ops::contrast_brightness::cpu::{ChannelAffine, ContrastBrightnessApply};
+use crate::ops::contrast_brightness::channel_affine::ChannelAffine;
 
 /// The affine's constants, splatted once per row.
 #[derive(Debug, Clone, Copy)]
@@ -33,7 +33,7 @@ impl Splat {
         let scaled = _mm_add_ps(_mm_mul_ps(_mm_cvtepi32_ps(values), self.scale), self.offset);
         // `cvtps_epi32` rounds to nearest, ties to even, matching the scalar
         // reference's `round_ties_even`.
-        _mm_cvtps_epi32(_mm_min_ps(_mm_max_ps(scaled, self.min), self.max))
+        _mm_cvtps_epi32(_mm_min_ps(self.max, _mm_max_ps(self.min, scaled)))
     }
 
     /// Four `f32` channel values in and out.
@@ -41,7 +41,9 @@ impl Splat {
     #[target_feature(enable = "sse4.1")]
     fn apply_f32(self, values: __m128) -> __m128 {
         let scaled = _mm_add_ps(_mm_mul_ps(values, self.scale), self.offset);
-        _mm_min_ps(_mm_max_ps(scaled, self.min), self.max)
+        // `max` and `min` return their second operand for a NaN, so the value goes second
+        // and a NaN passes through as `f32::clamp` passes it.
+        _mm_min_ps(self.max, _mm_max_ps(self.min, scaled))
     }
 }
 
@@ -71,7 +73,7 @@ pub(super) unsafe fn u8_flat(row: &mut [u8], count: usize, affine: ChannelAffine
     }
 
     for value in tail {
-        *value = value.apply(affine);
+        *value = affine.apply(*value);
     }
 }
 
@@ -105,7 +107,7 @@ pub(super) unsafe fn u8_rgba(row: &mut [u8], pixels: usize, affine: ChannelAffin
 
     for pixel in tail.as_chunks_mut::<4>().0 {
         for value in &mut pixel[..3] {
-            *value = value.apply(affine);
+            *value = affine.apply(*value);
         }
     }
 }
@@ -130,7 +132,7 @@ pub(super) unsafe fn u16_flat(row: &mut [u8], count: usize, affine: ChannelAffin
     }
 
     for value in tail {
-        *value = value.apply(affine);
+        *value = affine.apply(*value);
     }
 }
 
@@ -157,7 +159,7 @@ pub(super) unsafe fn u16_rgba(row: &mut [u8], pixels: usize, affine: ChannelAffi
 
     for pixel in tail.as_chunks_mut::<4>().0 {
         for value in &mut pixel[..3] {
-            *value = value.apply(affine);
+            *value = affine.apply(*value);
         }
     }
 }
@@ -178,7 +180,7 @@ pub(super) unsafe fn f32_flat(row: &mut [u8], count: usize, affine: ChannelAffin
     }
 
     for value in tail {
-        *value = value.apply(affine);
+        *value = affine.apply(*value);
     }
 }
 
@@ -204,7 +206,7 @@ pub(super) unsafe fn f32_rgba(row: &mut [u8], pixels: usize, affine: ChannelAffi
     // stays correct if the chunk ever covers more than one pixel.
     for pixel in tail.as_chunks_mut::<4>().0 {
         for value in &mut pixel[..3] {
-            *value = value.apply(affine);
+            *value = affine.apply(*value);
         }
     }
 }

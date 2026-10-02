@@ -1,25 +1,3 @@
-/// Shorter alias for `#[cfg(target_arch = "x86_64")]`
-#[macro_export]
-macro_rules! cfg_x86_64 {
-    ($($item:item)*) => {
-        $(
-            #[cfg(target_arch = "x86_64")]
-            $item
-        )*
-    };
-}
-
-/// Shorter alias for `#[cfg(target_arch = "aarch64")]`
-#[macro_export]
-macro_rules! cfg_aarch64 {
-    ($($item:item)*) => {
-        $(
-            #[cfg(target_arch = "aarch64")]
-            $item
-        )*
-    };
-}
-
 #[cfg(feature = "bench")]
 pub mod bench;
 mod common;
@@ -33,14 +11,12 @@ mod ops;
 pub use glam::{Affine2, Vec2};
 
 pub use crate::common::color::Color;
-pub use crate::common::color_format::{
-    ALL_FORMATS, ALPHA_FORMATS, ChannelCount, ChannelSize, ChannelType, ColorFormat,
-};
+pub use crate::common::color_format::{ALL_FORMATS, ChannelCount, ColorFormat, SampleType};
 pub use crate::common::error::{Error, Result};
 
 pub use crate::common::buffer2::Buffer2;
-pub use crate::image::pixels::planar::PlanarPixels;
-pub use crate::image::{Image, ImageDesc, SUPPORTED_EXTENSIONS};
+pub use crate::image::image_desc::ImageDesc;
+pub use crate::image::{Image, SUPPORTED_EXTENSIONS};
 
 pub use crate::ops::blend::{Blend, BlendMode};
 pub use crate::ops::contrast_brightness::ContrastBrightness;

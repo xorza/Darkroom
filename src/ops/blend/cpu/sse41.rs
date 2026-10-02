@@ -81,12 +81,15 @@ impl Splat {
     /// there, in the reference's order: multiply, then clamp the product. For
     /// float storage `max` is one, so the multiply is exact and the clamp is the
     /// whole step.
+    ///
+    /// `maxps` and `minps` return their second operand when either is NaN, so the
+    /// value goes second: a NaN passes through as `f32::clamp` passes it.
     #[inline]
     #[target_feature(enable = "sse4.1")]
     fn scale_clamp(self, blended: __m128) -> __m128 {
         _mm_min_ps(
-            _mm_max_ps(_mm_mul_ps(blended, self.max), self.zero),
             self.max,
+            _mm_max_ps(self.zero, _mm_mul_ps(blended, self.max)),
         )
     }
 
@@ -96,7 +99,7 @@ impl Splat {
     /// The divide is what the reference does. `value * (1.0 / 255.0)` would be
     /// several times cheaper but disagrees with it for 126 of the 256 byte
     /// values, which is enough to shift an output byte by one once the result is
-    /// scaled back up and truncated.
+    /// scaled back up and rounded.
     #[inline]
     #[target_feature(enable = "sse4.1")]
     fn normalize<const BYTE: i32>(self, pixels: __m128i) -> __m128 {
@@ -107,14 +110,16 @@ impl Splat {
     }
 
     /// One `RGBA_U8` pixel of the four in `src`/`dst`, blended and returned as
-    /// four `i32` lanes ready to pack. `cvttps` truncates toward zero, which is
-    /// what the reference's `as u8` does.
+    /// four `i32` lanes ready to pack. `cvtps` rounds to nearest with ties to even
+    /// under the default MXCSR, as the reference's `round_ties_even` does; a NaN
+    /// converts to `i32::MIN`, which the unsigned packs saturate to zero, as `as u8`
+    /// takes NaN.
     #[inline]
     #[target_feature(enable = "sse4.1")]
     fn blend_u8<const BYTE: i32>(self, mode: BlendMode, src: __m128i, dst: __m128i) -> __m128i {
         let src = self.normalize::<BYTE>(src);
         let dst = self.normalize::<BYTE>(dst);
-        _mm_cvttps_epi32(self.scale_clamp(self.blend(mode, src, dst)))
+        _mm_cvtps_epi32(self.scale_clamp(self.blend(mode, src, dst)))
     }
 }
 

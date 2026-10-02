@@ -1,18 +1,16 @@
 use std::any::{Any, TypeId};
+use std::collections::HashMap;
+use std::fmt;
 
-use hashbrown::HashMap;
-use hashbrown::hash_map::Entry;
-
-use crate::common::error::Result;
 use crate::gpu::Gpu;
 
 /// Trait marker for GPU pipelines that can be cached.
-pub trait GpuPipeline: Any + std::fmt::Debug + Send + Sync {}
+pub trait GpuPipeline: Any + fmt::Debug + Send + Sync {}
 
 /// Cache for GPU pipelines, and the [`Gpu`] they were built against.
 ///
 /// Lazily initializes pipelines on first use to avoid startup cost
-/// for unused operations. Pipelines are stored by their TypeId.
+/// for unused operations. Pipelines are stored by their `TypeId`.
 ///
 /// Purely a cache: it decides nothing about where an image lives or which backend an op runs on.
 /// A caller that wants the GPU builds one of these, uploads with [`crate::GpuImage::from_image`],
@@ -24,7 +22,7 @@ pub struct GpuContext {
 }
 
 impl GpuContext {
-    /// Creates a new GpuContext with no pipelines initialized.
+    /// Creates a new `GpuContext` with no pipelines initialized.
     pub fn new(gpu: Gpu) -> Self {
         Self {
             gpu,
@@ -33,22 +31,17 @@ impl GpuContext {
     }
 
     /// Returns the pipeline of type T, creating it with the provided function if needed.
-    pub fn get_or_create<T, F>(&mut self, create: F) -> Result<&T>
+    pub fn get_or_create<T, F>(&mut self, create: F) -> &T
     where
         T: GpuPipeline,
-        F: FnOnce(&Gpu) -> Result<T>,
+        F: FnOnce(&Gpu) -> T,
     {
-        let type_id = TypeId::of::<T>();
-        if let Entry::Vacant(e) = self.pipelines.entry(type_id) {
-            e.insert(Box::new(create(&self.gpu)?));
-        }
-
-        let pipeline = self
+        let pipeline: &dyn GpuPipeline = &**self
             .pipelines
-            .get(&type_id)
-            .expect("pipeline was just inserted");
-        Ok((pipeline.as_ref() as &dyn Any)
+            .entry(TypeId::of::<T>())
+            .or_insert_with(|| Box::new(create(&self.gpu)));
+        (pipeline as &dyn Any)
             .downcast_ref::<T>()
-            .expect("pipeline type mismatch - this is a bug"))
+            .expect("a pipeline is stored under its own TypeId")
     }
 }

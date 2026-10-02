@@ -1,7 +1,15 @@
+#![cfg_attr(
+    feature = "wgpu",
+    expect(
+        clippy::print_stdout,
+        reason = "an example reports what it did on stdout"
+    )
+)]
+
 mod common;
 
-use common::*;
-use imaginarium::*;
+use common::{ensure_output_dir, load_lena_rgba_u8, print_image_info, save_image};
+use imaginarium::{Blend, BlendMode, Image};
 
 fn main() {
     ensure_output_dir();
@@ -22,19 +30,25 @@ fn main() {
 /// Upload both inputs, allocate the output on the device, run, download.
 #[cfg(feature = "wgpu")]
 fn on_gpu(src: &Image, dst: &Image) {
+    use imaginarium::{Gpu, GpuBlendPipeline, GpuContext, GpuImage};
+
     let Ok(gpu) = Gpu::new() else {
         println!("no GPU available, skipping the GPU example");
         return;
     };
     let mut context = GpuContext::new(gpu.clone());
-    let pipeline = context.get_or_create(GpuBlendPipeline::new).unwrap();
+    let pipeline = context.get_or_create(GpuBlendPipeline::new);
 
-    let src_gpu = GpuImage::from_image(&gpu, src);
-    let dst_gpu = GpuImage::from_image(&gpu, dst);
-    let mut output_gpu = GpuImage::new_empty(&gpu, src.desc());
-    Blend::new(BlendMode::Screen, 0.5)
-        .apply_gpu(&gpu, pipeline, &src_gpu, &dst_gpu, &mut output_gpu)
-        .unwrap();
+    let src_gpu = GpuImage::from_image(&gpu, src).expect("upload");
+    let dst_gpu = GpuImage::from_image(&gpu, dst).expect("upload");
+    let mut output_gpu = GpuImage::new_empty(&gpu, src.desc()).expect("allocate");
+    Blend::new(BlendMode::Screen, 0.5).apply_gpu(
+        &gpu,
+        pipeline,
+        &src_gpu,
+        &dst_gpu,
+        &mut output_gpu,
+    );
 
     save_image(&output_gpu.to_image(&gpu).unwrap(), "blend_gpu.png");
 }

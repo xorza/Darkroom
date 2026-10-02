@@ -1,24 +1,38 @@
 //! `Buffer2<T>` — a generic 2D buffer over `Vec<T>` with `(x, y)`, linear, and
-//! range indexing plus `Deref` to `[T]`. Imaginarium owns the type and stores
-//! its size as plain `usize` fields. Both pixel layouts build on it: interleaved
-//! `InterleavedPixels` stores `Buffer2<[T; N]>`, while `PlanarPixels` stores one
-//! `Buffer2<T>` per channel. Lumos uses it for `LinearImage` channel planes.
+//! range indexing plus `Deref` to `[T]`. An interleaved image stores
+//! `Buffer2<[T; N]>`; a planar one, one `Buffer2<T>` per channel, and
+//! [`Buffer2::interleave`] / [`Buffer2::deinterleave`] move between the two.
+//! Lumos uses it for `LinearImage` channel planes.
 
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range};
-use std::slice;
+use std::{array, slice, vec};
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+use rayon::prelude::*;
+
+/// `width × height` values in row-major order.
+///
+/// Every indexed access is bounds-checked in release against the whole buffer;
+/// that `x < width` — which keeps a column from spilling into the next row — is
+/// checked in debug builds, where a per-pixel accessor can afford it.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Buffer2<T> {
     pixels: Vec<T>,
     width: usize,
     height: usize,
 }
 
+/// `width · height`, or a panic naming the dimensions when it does not fit.
+fn pixel_count(width: usize, height: usize) -> usize {
+    width
+        .checked_mul(height)
+        .unwrap_or_else(|| panic!("{width}×{height} pixels do not fit in usize"))
+}
+
 impl<T> Buffer2<T> {
     pub fn new(width: usize, height: usize, pixels: Vec<T>) -> Self {
         assert_eq!(
             pixels.len(),
-            width * height,
+            pixel_count(width, height),
             "pixels length must equal width * height"
         );
         Self {
@@ -30,42 +44,31 @@ impl<T> Buffer2<T> {
 
     #[inline]
     pub fn get(&self, x: usize, y: usize) -> &T {
-        assert!(x < self.width && y < self.height);
-        &self.pixels[y * self.width + x]
+        &self[(x, y)]
     }
 
     #[inline]
     pub fn get_mut(&mut self, x: usize, y: usize) -> &mut T {
-        assert!(x < self.width && y < self.height);
-        &mut self.pixels[y * self.width + x]
+        &mut self[(x, y)]
     }
 
     #[inline]
     pub fn row(&self, y: usize) -> &[T] {
-        assert!(y < self.height);
-        let start = y * self.width;
-        &self.pixels[start..start + self.width]
+        &self.pixels[y * self.width..][..self.width]
     }
 
     #[inline]
     pub fn row_mut(&mut self, y: usize) -> &mut [T] {
-        assert!(y < self.height);
-        let start = y * self.width;
-        &mut self.pixels[start..start + self.width]
+        &mut self.pixels[y * self.width..][..self.width]
     }
 
     #[inline]
-    pub fn index(&self, x: usize, y: usize) -> usize {
-        y * self.width + x
-    }
-
-    #[inline]
-    pub fn width(&self) -> usize {
+    pub const fn width(&self) -> usize {
         self.width
     }
 
     #[inline]
-    pub fn height(&self) -> usize {
+    pub const fn height(&self) -> usize {
         self.height
     }
 
@@ -83,35 +86,51 @@ impl<T> Buffer2<T> {
     pub fn into_vec(self) -> Vec<T> {
         self.pixels
     }
-
-    #[inline]
-    pub fn copy_from(&mut self, other: &Self)
-    where
-        T: Copy,
-    {
-        assert_eq!(self.width, other.width, "width mismatch");
-        assert_eq!(self.height, other.height, "height mismatch");
-        self.pixels.copy_from_slice(&other.pixels);
-    }
 }
 
 impl<T: Default + Clone> Buffer2<T> {
     pub fn new_default(width: usize, height: usize) -> Self {
-        Self {
-            pixels: vec![T::default(); width * height],
-            width,
-            height,
-        }
+        Self::new_filled(width, height, T::default())
     }
 }
 
 impl<T: Clone> Buffer2<T> {
     pub fn new_filled(width: usize, height: usize, value: T) -> Self {
         Self {
-            pixels: vec![value; width * height],
+            pixels: vec![value; pixel_count(width, height)],
             width,
             height,
         }
+    }
+}
+
+impl<T: Copy + Send + Sync, const N: usize> Buffer2<[T; N]> {
+    /// Interleaves `N` channel planes into one pixel buffer.
+    ///
+    /// # Panics
+    /// Unless every plane has the dimensions of the first.
+    pub fn interleave(planes: [&Buffer2<T>; N]) -> Self {
+        let (width, height) = (planes[0].width, planes[0].height);
+        for plane in planes {
+            assert_eq!(
+                (plane.width, plane.height),
+                (width, height),
+                "all channel planes must share dimensions"
+            );
+        }
+        let pixels = (0..width * height)
+            .into_par_iter()
+            .map(|i| planes.map(|plane| plane.pixels[i]))
+            .collect();
+        Self::new(width, height, pixels)
+    }
+
+    /// The `N` channel planes of this pixel buffer.
+    pub fn deinterleave(&self) -> [Buffer2<T>; N] {
+        array::from_fn(|channel| {
+            let plane = self.pixels.par_iter().map(|pixel| pixel[channel]).collect();
+            Buffer2::new(self.width, self.height, plane)
+        })
     }
 }
 
@@ -120,6 +139,7 @@ impl<T> Index<(usize, usize)> for Buffer2<T> {
 
     #[inline]
     fn index(&self, (x, y): (usize, usize)) -> &Self::Output {
+        debug_assert!(x < self.width, "x {x} outside width {}", self.width);
         &self.pixels[y * self.width + x]
     }
 }
@@ -127,6 +147,7 @@ impl<T> Index<(usize, usize)> for Buffer2<T> {
 impl<T> IndexMut<(usize, usize)> for Buffer2<T> {
     #[inline]
     fn index_mut(&mut self, (x, y): (usize, usize)) -> &mut Self::Output {
+        debug_assert!(x < self.width, "x {x} outside width {}", self.width);
         &mut self.pixels[y * self.width + x]
     }
 }
@@ -204,7 +225,7 @@ impl<'a, T> IntoIterator for &'a mut Buffer2<T> {
 
 impl<T> IntoIterator for Buffer2<T> {
     type Item = T;
-    type IntoIter = std::vec::IntoIter<T>;
+    type IntoIter = vec::IntoIter<T>;
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
@@ -221,16 +242,19 @@ impl<T> From<Buffer2<T>> for Vec<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::common::buffer2::Buffer2;
 
     #[test]
-    fn new_stores_dimensions_and_pixels() {
-        let buf = Buffer2::new(3, 2, vec![10, 20, 30, 40, 50, 60]);
-        assert_eq!(buf.width(), 3);
-        assert_eq!(buf.height(), 2);
-        assert_eq!(buf.len(), 6); // via Deref to [T]
-        assert_eq!(*buf.get(2, 1), 60); // y*width + x = 1*3+2 = 5
-        assert_eq!(buf[(0, 1)], 40); // 1*3+0 = 3
+    fn indexing_is_row_major() {
+        let mut buf = Buffer2::new(3, 2, vec![10, 20, 30, 40, 50, 60]);
+        assert_eq!((buf.width(), buf.height(), buf.len()), (3, 2, 6));
+        // y · width + x: (2, 1) → 5, (0, 1) → 3.
+        assert_eq!(*buf.get(2, 1), 60);
+        assert_eq!(buf[(0, 1)], 40);
+        assert_eq!(buf.row(1), &[40, 50, 60]);
+        *buf.get_mut(1, 0) = 99;
+        buf.row_mut(1)[2] = 7;
+        assert_eq!(buf.pixels(), &[10, 99, 30, 40, 50, 7]);
     }
 
     #[test]
@@ -240,21 +264,47 @@ mod tests {
     }
 
     #[test]
-    fn new_default_is_zeroed() {
-        let buf: Buffer2<f32> = Buffer2::new_default(4, 3);
-        assert_eq!(buf.len(), 12);
-        assert!(buf.iter().all(|&v| v == 0.0));
+    #[should_panic(expected = "do not fit in usize")]
+    fn overflowing_dimensions_are_refused() {
+        Buffer2::<u8>::new_default(usize::MAX, 2);
+    }
+
+    /// `(3, 0)` is in the buffer's memory — it is `(0, 1)` — but not in its first row.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "x 3 outside width 3")]
+    fn a_column_past_the_width_is_refused_in_debug() {
+        let buf = Buffer2::new(3, 2, vec![0u8; 6]);
+        let _ = buf[(3, 0)];
     }
 
     #[test]
-    fn get_mut_and_copy_from() {
-        let mut buf = Buffer2::new(2, 2, vec![1, 2, 3, 4]);
-        *buf.get_mut(1, 0) = 99;
-        assert_eq!(*buf.get(1, 0), 99);
+    #[should_panic(expected = "out of range")]
+    fn a_row_past_the_height_is_refused() {
+        let buf = Buffer2::new(3, 2, vec![0u8; 6]);
+        let _ = buf.row(2);
+    }
 
-        let src = Buffer2::new(2, 2, vec![10, 20, 30, 40]);
-        let mut dst = Buffer2::new_default(2, 2);
-        dst.copy_from(&src);
-        assert_eq!(dst.pixels(), src.pixels());
+    /// RGB 2×1: R = [1, 4], G = [2, 5], B = [3, 6] ⟷ pixels [[1, 2, 3], [4, 5, 6]].
+    #[test]
+    fn interleave_and_deinterleave_are_inverse() {
+        let planes = [
+            Buffer2::new(2, 1, vec![1u8, 4]),
+            Buffer2::new(2, 1, vec![2u8, 5]),
+            Buffer2::new(2, 1, vec![3u8, 6]),
+        ];
+        let interleaved = Buffer2::interleave(planes.each_ref());
+        assert_eq!(interleaved.pixels(), &[[1, 2, 3], [4, 5, 6]]);
+        assert_eq!(interleaved.deinterleave(), planes);
+    }
+
+    #[test]
+    #[should_panic(expected = "all channel planes must share dimensions")]
+    fn interleave_rejects_mismatched_planes() {
+        let planes = [
+            Buffer2::new(2, 1, vec![1.0f32, 2.0]),
+            Buffer2::new(1, 1, vec![3.0]),
+        ];
+        Buffer2::interleave(planes.each_ref());
     }
 }

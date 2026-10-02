@@ -8,7 +8,7 @@
 
 use std::arch::aarch64::*;
 
-use crate::ops::contrast_brightness::cpu::{ChannelAffine, ContrastBrightnessApply};
+use crate::ops::contrast_brightness::channel_affine::ChannelAffine;
 
 /// The affine's constants, splatted once per row.
 #[derive(Debug, Clone, Copy)]
@@ -86,7 +86,7 @@ pub(super) unsafe fn u8_flat(row: &mut [u8], count: usize, affine: ChannelAffine
     }
 
     for value in tail {
-        *value = value.apply(affine);
+        *value = affine.apply(*value);
     }
 }
 
@@ -112,7 +112,7 @@ pub(super) unsafe fn u8_rgba(row: &mut [u8], pixels: usize, affine: ChannelAffin
 
     for pixel in tail.as_chunks_mut::<4>().0 {
         for value in &mut pixel[..3] {
-            *value = value.apply(affine);
+            *value = affine.apply(*value);
         }
     }
 }
@@ -132,7 +132,7 @@ pub(super) unsafe fn u16_flat(row: &mut [u8], count: usize, affine: ChannelAffin
     }
 
     for value in tail {
-        *value = value.apply(affine);
+        *value = affine.apply(*value);
     }
 }
 
@@ -158,7 +158,7 @@ pub(super) unsafe fn u16_rgba(row: &mut [u8], pixels: usize, affine: ChannelAffi
 
     for pixel in tail.as_chunks_mut::<4>().0 {
         for value in &mut pixel[..3] {
-            *value = value.apply(affine);
+            *value = affine.apply(*value);
         }
     }
 }
@@ -178,7 +178,7 @@ pub(super) unsafe fn f32_flat(row: &mut [u8], count: usize, affine: ChannelAffin
     }
 
     for value in tail {
-        *value = value.apply(affine);
+        *value = affine.apply(*value);
     }
 }
 
@@ -204,7 +204,7 @@ pub(super) unsafe fn f32_rgba(row: &mut [u8], pixels: usize, affine: ChannelAffi
 
     for pixel in tail.as_chunks_mut::<4>().0 {
         for value in &mut pixel[..3] {
-            *value = value.apply(affine);
+            *value = affine.apply(*value);
         }
     }
 }

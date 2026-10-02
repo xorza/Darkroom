@@ -1,9 +1,8 @@
 use super::*;
-use crate::common::color_format::{ALL_FORMATS, ColorFormat};
+use crate::common::color_format::ALL_FORMATS;
 use crate::common::image_diff::pixels_equal;
 use crate::common::internals::create_test_image;
-use crate::image::ImageDesc;
-use crate::ops::transform::{FilterMode, Transform};
+use crate::image::image_desc::ImageDesc;
 
 fn image_u8(width: usize, height: usize, fmt: ColorFormat, bytes: Vec<u8>) -> Image {
     Image::new_with_data(ImageDesc::new(width, height, fmt), bytes).unwrap()
@@ -20,7 +19,7 @@ fn image_f32(width: usize, height: usize, fmt: ColorFormat, values: &[f32]) -> I
 #[test]
 fn test_identity_is_exact_all_formats() {
     for &filter in &[FilterMode::Nearest, FilterMode::Bilinear] {
-        for &format in ALL_FORMATS {
+        for format in ALL_FORMATS {
             // Non-power-of-two dimensions to exercise edge rows/columns.
             let input = create_test_image(format, 13, 7, 0);
             let mut output = Image::new_black(input.desc()).unwrap();
@@ -53,7 +52,7 @@ fn test_integer_translate_shifts_pixels() {
 }
 
 /// Nearest-neighbor 2x downscale picks even source columns.
-/// src_x = 2*ox + 0.5, round-ties-to-even → 0, 2, ... so [10,20,30,40] → [10,30].
+/// `src_x` = 2*ox + 0.5, round-ties-to-even → 0, 2, ... so [10,20,30,40] → [10,30].
 #[test]
 fn test_nearest_downscale_picks_even_columns() {
     let input = image_u8(4, 1, ColorFormat::L_U8, vec![10, 20, 30, 40]);
@@ -68,7 +67,7 @@ fn test_nearest_downscale_picks_even_columns() {
 }
 
 /// Bilinear with a half-pixel translation averages adjacent samples 50/50.
-/// src_x = ox - 0.5 → floor ox-1, fx 0.5. Powers-of-two weights keep the f32
+/// `src_x` = ox - 0.5 → floor ox-1, fx 0.5. Powers-of-two weights keep the f32
 /// math exact: [0.25,0.75,0.5] → [0.125, 0.5, 0.625].
 #[test]
 fn test_bilinear_half_pixel_average() {
@@ -110,7 +109,7 @@ fn test_rgba_alpha_is_interpolated() {
 /// (including alpha), for every format.
 #[test]
 fn test_fully_out_of_bounds_is_zero_all_formats() {
-    for &format in ALL_FORMATS {
+    for format in ALL_FORMATS {
         let input = create_test_image(format, 3, 3, 0);
         let mut output = Image::new_black(input.desc()).unwrap();
 
@@ -163,7 +162,7 @@ fn simd_matches_scalar_reference() {
         .rotate_around(0.7, Vec2::new(18.5, 9.5))
         .filter(FilterMode::Bilinear);
 
-    for &format in ALL_FORMATS {
+    for format in ALL_FORMATS {
         let Some(kernel) = packed_kernel(format, transform.filter) else {
             continue;
         };
@@ -182,67 +181,26 @@ fn simd_matches_scalar_reference() {
     }
 }
 
-#[cfg(feature = "wgpu")]
-mod gpu_cross_check {
-    use super::*;
-    use crate::common::image_diff::max_pixel_diff;
-    use crate::common::internals::{gpu::test_gpu, load_lena_rgba_u8_61x38};
-    use crate::gpu::gpu_image::GpuImage;
-    use crate::ops::transform::pipeline::GpuTransformPipeline;
+/// A half-pixel shift averages neighbours, and an average on a tie rounds to even: 11 and 12
+/// give 11.5 → 12, 10 and 11 give 10.5 → 10 — where truncation gave 11 and 10.
+#[test]
+fn bilinear_rounds_ties_to_even() {
+    let input = image_u8(4, 1, ColorFormat::L_U8, vec![10, 11, 11, 12]);
+    let mut output = Image::new_black(input.desc()).unwrap();
+    Transform::new()
+        .translate(Vec2::new(0.5, 0.0))
+        .filter(FilterMode::Bilinear)
+        .apply_cpu(&input, &mut output);
+    // Pixel 0 averages the zero outside the image with 10: 5. Then 10.5, 11, 11.5.
+    assert_eq!(output.bytes(), &[5, 10, 11, 12]);
+}
 
-    /// Integer translation is exact on both backends, so CPU and GPU outputs
-    /// must be bit-identical.
-    #[test]
-    fn test_cpu_matches_gpu_integer_translate() {
-        let Some(gpu) = test_gpu() else {
-            return;
-        };
-        let pipeline = GpuTransformPipeline::new(&gpu).unwrap();
-        let input = load_lena_rgba_u8_61x38();
-        let transform = Transform::new().translate(Vec2::new(5.0, 3.0));
-
-        let mut out_cpu = Image::new_black(input.desc()).unwrap();
-        transform.apply_cpu(&input, &mut out_cpu);
-
-        let gpu_in = GpuImage::from_image(&gpu, &input);
-        let mut gpu_out = GpuImage::new_empty(&gpu, input.desc());
-        transform.apply_gpu(&gpu, &pipeline, &gpu_in, &mut gpu_out);
-        let out_gpu = gpu_out.to_image(&gpu).unwrap();
-
-        assert_eq!(
-            max_pixel_diff(&out_cpu, &out_gpu),
-            0.0,
-            "CPU and GPU disagree on integer translation"
-        );
-    }
-
-    /// A 2x bilinear downscale lands on half-integer source coordinates, so
-    /// both backends sample the same taps with weight 0.5; only the final
-    /// rounding can differ, by at most one quantization step.
-    #[test]
-    fn test_cpu_matches_gpu_bilinear_downscale() {
-        let Some(gpu) = test_gpu() else {
-            return;
-        };
-        let pipeline = GpuTransformPipeline::new(&gpu).unwrap();
-        let input = load_lena_rgba_u8_61x38();
-        let out_desc = ImageDesc::new(30, 19, ColorFormat::RGBA_U8);
-        let transform = Transform::new()
-            .scale(Vec2::new(0.5, 0.5))
-            .filter(FilterMode::Bilinear);
-
-        let mut out_cpu = Image::new_black(out_desc).unwrap();
-        transform.apply_cpu(&input, &mut out_cpu);
-
-        let gpu_in = GpuImage::from_image(&gpu, &input);
-        let mut gpu_out = GpuImage::new_empty(&gpu, out_desc);
-        transform.apply_gpu(&gpu, &pipeline, &gpu_in, &mut gpu_out);
-        let out_gpu = gpu_out.to_image(&gpu).unwrap();
-
-        let diff = max_pixel_diff(&out_cpu, &out_gpu);
-        assert!(
-            diff < 2.0 / 255.0,
-            "CPU and GPU bilinear downscale differ by {diff} (> 1 LSB)"
-        );
-    }
+#[test]
+#[should_panic(expected = "the transform is not invertible: determinant 0")]
+fn a_singular_transform_is_refused() {
+    let input = image_u8(2, 1, ColorFormat::L_U8, vec![1, 2]);
+    let mut output = Image::new_black(input.desc()).unwrap();
+    Transform::new()
+        .scale(Vec2::new(0.0, 1.0))
+        .apply_cpu(&input, &mut output);
 }

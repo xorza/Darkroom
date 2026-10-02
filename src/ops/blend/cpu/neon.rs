@@ -99,7 +99,7 @@ impl Splat {
     /// The divide is what the reference does. `value * (1.0 / 255.0)` would be
     /// several times cheaper but disagrees with it for 126 of the 256 byte
     /// values, which is enough to shift an output byte by one once the result is
-    /// scaled back up and truncated.
+    /// scaled back up and rounded.
     #[inline]
     unsafe fn normalize(self, bytes: uint8x16_t) -> [float32x4_t; 4] {
         unsafe {
@@ -121,18 +121,18 @@ impl Splat {
 }
 
 /// Four blended pixels, already clamped to `[0, 255]`, packed back into 16
-/// bytes. `vcvtq_u32_f32` truncates toward zero, which is what the reference's
-/// `as u8` does.
+/// bytes. `vcvtnq_u32_f32` rounds to nearest with ties to even, as the
+/// reference's `round_ties_even` does, and takes NaN to zero, as `as u8` does.
 #[inline]
 unsafe fn narrow(pixels: [float32x4_t; 4]) -> uint8x16_t {
     unsafe {
         let lo = vcombine_u16(
-            vmovn_u32(vcvtq_u32_f32(pixels[0])),
-            vmovn_u32(vcvtq_u32_f32(pixels[1])),
+            vmovn_u32(vcvtnq_u32_f32(pixels[0])),
+            vmovn_u32(vcvtnq_u32_f32(pixels[1])),
         );
         let hi = vcombine_u16(
-            vmovn_u32(vcvtq_u32_f32(pixels[2])),
-            vmovn_u32(vcvtq_u32_f32(pixels[3])),
+            vmovn_u32(vcvtnq_u32_f32(pixels[2])),
+            vmovn_u32(vcvtnq_u32_f32(pixels[3])),
         );
         vcombine_u8(vmovn_u16(lo), vmovn_u16(hi))
     }

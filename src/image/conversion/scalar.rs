@@ -1,326 +1,126 @@
-use std::mem::size_of;
+//! The scalar reference every conversion kernel is checked against.
 
-use bytemuck::Pod;
+use crate::common::color_format::{ChannelCount, ColorFormat, SampleType};
+use crate::common::luma;
+use crate::common::sample::Sample;
 
-use crate::common::color_format::*;
-
-pub(crate) trait ChannelConvert<To>: Copy {
-    fn convert(self) -> To;
-}
-
-/// Trait for computing luminance from RGB channels.
-/// Uses Rec. 709 (sRGB) weights: 0.2126*R + 0.7152*G + 0.0722*B
-pub(super) trait RgbToLuminance: Copy {
+/// A storage type's Rec. 709 luminance of one RGB triple, in that type.
+pub(crate) trait Luminance: Sample {
     fn luminance(r: Self, g: Self, b: Self) -> Self;
 }
 
-/// Trait for getting the opaque alpha value for a channel type.
-/// For integers this is max value (255, 65535), for floats it's 1.0.
-pub(super) trait OpaqueAlpha: Copy {
-    fn opaque_alpha() -> Self;
-}
-
-macro_rules! impl_convert_identity {
-    ($($t:ty),+) => {
-        $(
-            impl ChannelConvert<$t> for $t {
-                #[inline]
-                fn convert(self) -> $t { self }
-            }
-        )+
-    };
-}
-
-impl_convert_identity!(u8, u16, f32);
-
-macro_rules! impl_convert_upscale_unsigned {
-    ($from:ty, $to:ty) => {
-        impl ChannelConvert<$to> for $from {
-            #[inline]
-            fn convert(self) -> $to {
-                let shift = (size_of::<$to>() - size_of::<$from>()) * 8;
-                (self as $to) << shift | (self as $to)
-            }
-        }
-    };
-}
-
-macro_rules! impl_convert_downscale {
-    ($from:ty, $to:ty) => {
-        impl ChannelConvert<$to> for $from {
-            #[inline]
-            fn convert(self) -> $to {
-                let shift = (size_of::<$from>() - size_of::<$to>()) * 8;
-                (self >> shift) as $to
-            }
-        }
-    };
-}
-
-macro_rules! impl_convert_int_to_float {
-    ($int:ty, $float:ty) => {
-        impl ChannelConvert<$float> for $int {
-            #[inline]
-            fn convert(self) -> $float {
-                self as $float / <$int>::MAX as $float
-            }
-        }
-    };
-}
-
-// Float to integer. Rounds to nearest, ties to even, to match the SSE/AVX/NEON kernels
-// (`cvtps_epi32` / `vcvtnq_*`); the `as` cast then saturates out-of-range values. A plain
-// truncating cast would diverge from the SIMD paths.
-macro_rules! impl_convert_float_to_int {
-    ($float:ty, $int:ty) => {
-        impl ChannelConvert<$int> for $float {
-            #[inline]
-            fn convert(self) -> $int {
-                (self as f64 * <$int>::MAX as f64).round_ties_even() as $int
-            }
-        }
-    };
-}
-
-impl_convert_upscale_unsigned!(u8, u16);
-
-impl_convert_downscale!(u16, u8);
-
-impl_convert_int_to_float!(u8, f32);
-impl_convert_int_to_float!(u16, f32);
-
-impl_convert_float_to_int!(f32, u8);
-impl_convert_float_to_int!(f32, u16);
-
-use super::{LUMA_B, LUMA_G, LUMA_R};
-
-impl RgbToLuminance for u8 {
+impl Luminance for u8 {
     #[inline]
     fn luminance(r: Self, g: Self, b: Self) -> Self {
-        ((r as u32 * LUMA_R + g as u32 * LUMA_G + b as u32 * LUMA_B) >> 16) as u8
+        let [wr, wg, wb] = luma::WEIGHTS_Q16;
+        let sum = u32::from(r) * wr + u32::from(g) * wg + u32::from(b) * wb;
+        luma::round_q16(u64::from(sum)) as Self
     }
 }
 
-impl RgbToLuminance for u16 {
+impl Luminance for u16 {
     #[inline]
     fn luminance(r: Self, g: Self, b: Self) -> Self {
-        ((r as u64 * LUMA_R as u64 + g as u64 * LUMA_G as u64 + b as u64 * LUMA_B as u64) >> 16)
-            as u16
+        let [wr, wg, wb] = luma::WEIGHTS_Q16.map(u64::from);
+        let sum = u64::from(r) * wr + u64::from(g) * wg + u64::from(b) * wb;
+        luma::round_q16(sum) as Self
     }
 }
 
-impl RgbToLuminance for f32 {
+impl Luminance for f32 {
     #[inline]
     fn luminance(r: Self, g: Self, b: Self) -> Self {
-        0.2126 * r + 0.7152 * g + 0.0722 * b
+        let [wr, wg, wb] = luma::WEIGHTS_F32;
+        wr * r + wg * g + wb * b
     }
 }
 
-impl OpaqueAlpha for u8 {
-    #[inline]
-    fn opaque_alpha() -> Self {
-        255
+/// A row converter: one packed source row of `width` pixels into one packed destination row.
+pub(crate) type ScalarRowFn = fn(src: &[u8], dst: &mut [u8], width: usize);
+
+/// The scalar row converter for a pair of formats.
+pub(crate) const fn row_converter(from: ColorFormat, to: ColorFormat) -> ScalarRowFn {
+    match from.sample_type {
+        SampleType::U8 => row_converter_from::<u8>(from.channel_count, to),
+        SampleType::U16 => row_converter_from::<u16>(from.channel_count, to),
+        SampleType::F32 => row_converter_from::<f32>(from.channel_count, to),
     }
 }
 
-impl OpaqueAlpha for u16 {
-    #[inline]
-    fn opaque_alpha() -> Self {
-        65535
+const fn row_converter_from<S: Luminance>(from: ChannelCount, to: ColorFormat) -> ScalarRowFn {
+    match to.sample_type {
+        SampleType::U8 => row_converter_between::<S, u8>(from, to.channel_count),
+        SampleType::U16 => row_converter_between::<S, u16>(from, to.channel_count),
+        SampleType::F32 => row_converter_between::<S, f32>(from, to.channel_count),
     }
 }
 
-impl OpaqueAlpha for f32 {
-    #[inline]
-    fn opaque_alpha() -> Self {
-        1.0
+const fn row_converter_between<S: Luminance, D: Sample>(
+    from: ChannelCount,
+    to: ChannelCount,
+) -> ScalarRowFn {
+    match (from, to) {
+        (ChannelCount::L, ChannelCount::L) => convert_row::<S, D, 1, 1>,
+        (ChannelCount::L, ChannelCount::Rgb) => convert_row::<S, D, 1, 3>,
+        (ChannelCount::L, ChannelCount::Rgba) => convert_row::<S, D, 1, 4>,
+        (ChannelCount::Rgb, ChannelCount::L) => convert_row::<S, D, 3, 1>,
+        (ChannelCount::Rgb, ChannelCount::Rgb) => convert_row::<S, D, 3, 3>,
+        (ChannelCount::Rgb, ChannelCount::Rgba) => convert_row::<S, D, 3, 4>,
+        (ChannelCount::Rgba, ChannelCount::L) => convert_row::<S, D, 4, 1>,
+        (ChannelCount::Rgba, ChannelCount::Rgb) => convert_row::<S, D, 4, 3>,
+        (ChannelCount::Rgba, ChannelCount::Rgba) => convert_row::<S, D, 4, 4>,
     }
 }
 
-/// Convert a single row of pixels using scalar code.
-/// This is the fallback when SIMD is not available.
-#[inline]
-fn convert_row_scalar<From, To>(
-    from_row: &[u8],
-    to_row: &mut [u8],
+/// One row, pixel by pixel. A source with fewer channels broadcasts grey and adds an opaque
+/// alpha; a source with more drops alpha, and reduces colour to luminance in the source type
+/// before the sample type changes.
+pub(crate) fn convert_row<S: Luminance, D: Sample, const FROM: usize, const TO: usize>(
+    src: &[u8],
+    dst: &mut [u8],
     width: usize,
-    from_channels: usize,
-    to_channels: usize,
-) where
-    From: Pod + ChannelConvert<To> + RgbToLuminance,
-    To: Pod + OpaqueAlpha,
-{
-    let from_row_bytes = width * from_channels * size_of::<From>();
-    let to_row_bytes = width * to_channels * size_of::<To>();
-
-    let from_row: &[From] = bytemuck::cast_slice(&from_row[..from_row_bytes]);
-    let to_row: &mut [To] = bytemuck::cast_slice_mut(&mut to_row[..to_row_bytes]);
-
-    for x in 0..width {
-        let src = &from_row[x * from_channels..];
-        let dst = &mut to_row[x * to_channels..];
-
-        // Channel counts are always 1 (L), 3 (RGB), or 4 (RGBA).
-        match (to_channels, from_channels) {
-            (1, 1) => dst[0] = src[0].convert(),
-            (1, 3) | (1, 4) => dst[0] = From::luminance(src[0], src[1], src[2]).convert(),
-
-            (3, 1) => {
-                let v = src[0].convert();
-                dst[0] = v;
-                dst[1] = v;
-                dst[2] = v;
-            }
-            (3, 3) | (3, 4) => {
-                dst[0] = src[0].convert();
-                dst[1] = src[1].convert();
-                dst[2] = src[2].convert();
-            }
-
-            (4, 1) => {
-                let v = src[0].convert();
-                dst[0] = v;
-                dst[1] = v;
-                dst[2] = v;
-                dst[3] = To::opaque_alpha();
-            }
-            (4, 3) => {
-                dst[0] = src[0].convert();
-                dst[1] = src[1].convert();
-                dst[2] = src[2].convert();
-                dst[3] = To::opaque_alpha();
-            }
-            (4, 4) => {
-                dst[0] = src[0].convert();
-                dst[1] = src[1].convert();
-                dst[2] = src[2].convert();
-                dst[3] = src[3].convert();
-            }
-
-            _ => unreachable!(),
-        }
-    }
-}
-
-/// Get the Rust type size and conversion function for a given channel size/type pair.
-#[derive(Clone, Copy)]
-pub(super) struct ConversionInfo {
-    from_channels: usize,
-    to_channels: usize,
-    from_size: ChannelSize,
-    to_size: ChannelSize,
-}
-
-impl ConversionInfo {
-    pub(super) fn new(from_fmt: ColorFormat, to_fmt: ColorFormat) -> Self {
-        fn validate_size_type(size: ChannelSize, typ: ChannelType) {
-            match (size, typ) {
-                (ChannelSize::_8bit | ChannelSize::_16bit, ChannelType::UInt) => {}
-                (ChannelSize::_32bit, ChannelType::Float) => {}
-                _ => unreachable!("unsupported format: {:?} {:?}", size, typ),
-            }
-        }
-        validate_size_type(from_fmt.channel_size, from_fmt.channel_type);
-        validate_size_type(to_fmt.channel_size, to_fmt.channel_type);
-
-        Self {
-            from_channels: from_fmt.channel_count.channel_count() as usize,
-            to_channels: to_fmt.channel_count.channel_count() as usize,
-            from_size: from_fmt.channel_size,
-            to_size: to_fmt.channel_size,
-        }
-    }
-}
-
-/// Dispatch row conversion based on channel sizes.
-/// This calls the appropriate generic convert_row_scalar with the right types.
-pub(super) fn dispatch_convert_row_scalar(
-    from_row: &[u8],
-    to_row: &mut [u8],
-    width: usize,
-    info: &ConversionInfo,
 ) {
-    match (info.from_size, info.to_size) {
-        (ChannelSize::_8bit, ChannelSize::_8bit) => {
-            convert_row_scalar::<u8, u8>(
-                from_row,
-                to_row,
-                width,
-                info.from_channels,
-                info.to_channels,
-            );
+    let src: &[S] = bytemuck::cast_slice(&src[..width * FROM * size_of::<S>()]);
+    let dst: &mut [D] = bytemuck::cast_slice_mut(&mut dst[..width * TO * size_of::<D>()]);
+    let (src, _) = src.as_chunks::<FROM>();
+    let (dst, _) = dst.as_chunks_mut::<TO>();
+    for (src, dst) in src.iter().zip(dst) {
+        convert_pixel(src, dst);
+    }
+}
+
+#[inline]
+fn convert_pixel<S: Luminance, D: Sample, const FROM: usize, const TO: usize>(
+    src: &[S; FROM],
+    dst: &mut [D; TO],
+) {
+    match (FROM, TO) {
+        (1, _) => {
+            let grey = src[0].convert();
+            dst[..TO.min(3)].fill(grey);
         }
-        (ChannelSize::_8bit, ChannelSize::_16bit) => {
-            convert_row_scalar::<u8, u16>(
-                from_row,
-                to_row,
-                width,
-                info.from_channels,
-                info.to_channels,
-            );
+        (_, 1) => dst[0] = S::luminance(src[0], src[1], src[2]).convert(),
+        _ => {
+            for (dst, &src) in dst.iter_mut().zip(&src[..3]) {
+                *dst = src.convert();
+            }
         }
-        (ChannelSize::_8bit, ChannelSize::_32bit) => {
-            convert_row_scalar::<u8, f32>(
-                from_row,
-                to_row,
-                width,
-                info.from_channels,
-                info.to_channels,
-            );
-        }
-        (ChannelSize::_16bit, ChannelSize::_8bit) => {
-            convert_row_scalar::<u16, u8>(
-                from_row,
-                to_row,
-                width,
-                info.from_channels,
-                info.to_channels,
-            );
-        }
-        (ChannelSize::_16bit, ChannelSize::_16bit) => {
-            convert_row_scalar::<u16, u16>(
-                from_row,
-                to_row,
-                width,
-                info.from_channels,
-                info.to_channels,
-            );
-        }
-        (ChannelSize::_16bit, ChannelSize::_32bit) => {
-            convert_row_scalar::<u16, f32>(
-                from_row,
-                to_row,
-                width,
-                info.from_channels,
-                info.to_channels,
-            );
-        }
-        (ChannelSize::_32bit, ChannelSize::_8bit) => {
-            convert_row_scalar::<f32, u8>(
-                from_row,
-                to_row,
-                width,
-                info.from_channels,
-                info.to_channels,
-            );
-        }
-        (ChannelSize::_32bit, ChannelSize::_16bit) => {
-            convert_row_scalar::<f32, u16>(
-                from_row,
-                to_row,
-                width,
-                info.from_channels,
-                info.to_channels,
-            );
-        }
-        (ChannelSize::_32bit, ChannelSize::_32bit) => {
-            convert_row_scalar::<f32, f32>(
-                from_row,
-                to_row,
-                width,
-                info.from_channels,
-                info.to_channels,
-            );
-        }
+    }
+    if TO == 4 {
+        dst[3] = if FROM == 4 {
+            src[3].convert()
+        } else {
+            D::FULL_SCALE
+        };
+    }
+}
+
+/// Element by element through [`Sample::convert`] — the sub-vector tail of an element kernel,
+/// so a tail can never disagree with the reference.
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+pub(crate) fn convert_elements<S: Sample, D: Sample>(src: &[S], dst: &mut [D]) {
+    debug_assert_eq!(src.len(), dst.len());
+    for (dst, &src) in dst.iter_mut().zip(src) {
+        *dst = src.convert();
     }
 }

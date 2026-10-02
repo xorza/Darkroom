@@ -2,137 +2,42 @@ use std::fs::File;
 use std::path::Path;
 
 use bytemuck::Pod;
-use tiff::encoder::colortype::*;
-use tiff::encoder::{TiffEncoder, TiffValue, colortype};
-use tiff::tags::{PhotometricInterpretation, SampleFormat};
+use tiff::encoder::colortype::{
+    ColorType, Gray8, Gray16, Gray32Float, RGB8, RGB16, RGB32Float, RGBA8, RGBA16, RGBA32Float,
+};
+use tiff::encoder::{TiffEncoder, TiffValue};
 
-use crate::common::color_format::{ChannelCount, ChannelSize, ChannelType};
-use crate::common::error::{Error, Result};
-use crate::image::Image;
+use crate::common::color_format::{ChannelCount, SampleType};
+use crate::common::error::Result;
+use crate::image::{Image, io};
 
-macro_rules! define_int_color_type {
-    ($name:ident, $inner:ty, $photometric:expr, $bits:expr, $channels:expr) => {
-        struct $name;
-
-        impl ColorType for $name {
-            type Inner = $inner;
-            const TIFF_VALUE: PhotometricInterpretation = $photometric;
-            const BITS_PER_SAMPLE: &'static [u16] = &[$bits; $channels];
-            const SAMPLE_FORMAT: &'static [SampleFormat] = &[SampleFormat::Uint; $channels];
-
-            fn horizontal_predict(row: &[Self::Inner], result: &mut Vec<Self::Inner>) {
-                let sample_size = Self::SAMPLE_FORMAT.len();
-
-                if row.len() < sample_size {
-                    debug_assert!(false);
-                    return;
-                }
-
-                let (start, rest) = row.split_at(sample_size);
-
-                result.extend_from_slice(start);
-                if result.capacity() - result.len() < rest.len() {
-                    return;
-                }
-
-                result.extend(
-                    row.iter()
-                        .zip(rest)
-                        .map(|(prev, current)| current.wrapping_sub(*prev)),
-                );
-            }
-        }
-    };
+pub(super) fn save_tiff(image: &Image, filename: &Path) -> Result<()> {
+    let format = image.desc().color_format;
+    match (format.channel_count, format.sample_type) {
+        (ChannelCount::L, SampleType::U8) => write::<Gray8>(image, filename),
+        (ChannelCount::L, SampleType::U16) => write::<Gray16>(image, filename),
+        (ChannelCount::L, SampleType::F32) => write::<Gray32Float>(image, filename),
+        (ChannelCount::Rgb, SampleType::U8) => write::<RGB8>(image, filename),
+        (ChannelCount::Rgb, SampleType::U16) => write::<RGB16>(image, filename),
+        (ChannelCount::Rgb, SampleType::F32) => write::<RGB32Float>(image, filename),
+        (ChannelCount::Rgba, SampleType::U8) => write::<RGBA8>(image, filename),
+        (ChannelCount::Rgba, SampleType::U16) => write::<RGBA16>(image, filename),
+        (ChannelCount::Rgba, SampleType::F32) => write::<RGBA32Float>(image, filename),
+    }
 }
 
-macro_rules! define_float_color_type {
-    ($name:ident, $inner:ty, $photometric:expr, $bits:expr, $channels:expr) => {
-        struct $name;
-
-        impl ColorType for $name {
-            type Inner = $inner;
-            const TIFF_VALUE: PhotometricInterpretation = $photometric;
-            const BITS_PER_SAMPLE: &'static [u16] = &[$bits; $channels];
-            const SAMPLE_FORMAT: &'static [SampleFormat] = &[SampleFormat::IEEEFP; $channels];
-
-            fn horizontal_predict(_: &[Self::Inner], _: &mut Vec<Self::Inner>) {
-                unreachable!()
-            }
-        }
-    };
-}
-
-// Gray (BlackIsZero); only the formats `ColorFormat` actually has — U8/U16/F32.
-define_int_color_type!(Gray8U, u8, PhotometricInterpretation::BlackIsZero, 8, 1);
-define_int_color_type!(Gray16U, u16, PhotometricInterpretation::BlackIsZero, 16, 1);
-define_float_color_type!(Gray32F, f32, PhotometricInterpretation::BlackIsZero, 32, 1);
-
-define_int_color_type!(RGB8U, u8, PhotometricInterpretation::RGB, 8, 3);
-define_int_color_type!(RGB16U, u16, PhotometricInterpretation::RGB, 16, 3);
-define_float_color_type!(RGB32F, f32, PhotometricInterpretation::RGB, 32, 3);
-
-define_int_color_type!(RGBA8U, u8, PhotometricInterpretation::RGB, 8, 4);
-define_int_color_type!(RGBA16U, u16, PhotometricInterpretation::RGB, 16, 4);
-define_float_color_type!(RGBA32F, f32, PhotometricInterpretation::RGB, 32, 4);
-
-macro_rules! dispatch_tiff {
-    ($image:expr, $filename:expr, {
-        $( ($count:ident, $size:ident, $type:ident) => $color_type:ty ),+ $(,)?
-    }) => {
-        match (
-            $image.desc().color_format.channel_count,
-            $image.desc().color_format.channel_size,
-            $image.desc().color_format.channel_type,
-        ) {
-            $(
-                (ChannelCount::$count, ChannelSize::$size, ChannelType::$type) => {
-                    save_tiff_internal::<$color_type, _>($image, $filename)?
-                }
-            )+
-            (_, _, _) => {
-                return Err(Error::UnsupportedFormat(format!(
-                    "TIFF format: {:?} {:?} {:?}",
-                    $image.desc().color_format.channel_count,
-                    $image.desc().color_format.channel_size,
-                    $image.desc().color_format.channel_type
-                )));
-            }
-        }
-    };
-}
-
-pub(super) fn save_tiff<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()> {
-    dispatch_tiff!(image, filename, {
-        // L (grayscale)
-        (L, _8bit, UInt) => Gray8U,
-        (L, _16bit, UInt) => Gray16U,
-        (L, _32bit, Float) => Gray32F,
-        // RGB
-        (Rgb, _8bit, UInt) => RGB8U,
-        (Rgb, _16bit, UInt) => RGB16U,
-        (Rgb, _32bit, Float) => RGB32F,
-        // RGBA
-        (Rgba, _8bit, UInt) => RGBA8U,
-        (Rgba, _16bit, UInt) => RGBA16U,
-        (Rgba, _32bit, Float) => RGBA32F,
-    });
-
-    Ok(())
-}
-
-fn save_tiff_internal<CT, P: AsRef<Path>>(image: &Image, filename: P) -> Result<()>
+/// Writes `image` as the TIFF colour type `C`, whose sample type the caller matched to the
+/// image's format — so the cast of the image's own aligned storage cannot fail.
+fn write<C>(image: &Image, filename: &Path) -> Result<()>
 where
-    CT: colortype::ColorType,
-    CT::Inner: Pod,
-    [CT::Inner]: TiffValue,
+    C: ColorType,
+    C::Inner: Pod,
+    [C::Inner]: TiffValue,
 {
-    let buf: &[CT::Inner] = bytemuck::try_cast_slice(image.bytes())?;
-
+    let samples: &[C::Inner] = bytemuck::cast_slice(image.bytes());
+    let [width, height] = io::encoder_dimensions(image)?;
     let mut file = File::create(filename)?;
     let mut tiff = TiffEncoder::new(&mut file)?;
-    let img = tiff.new_image::<CT>(image.desc().width as u32, image.desc().height as u32)?;
-
-    img.write_data(buf)?;
-
+    tiff.new_image::<C>(width, height)?.write_data(samples)?;
     Ok(())
 }

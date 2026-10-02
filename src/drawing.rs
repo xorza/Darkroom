@@ -1,102 +1,88 @@
-//! Drawing primitives — circles, dots, crosses, lines and rectangles — over
-//! `L_F32` and `RGB_F32` images. On a single-channel image a color is written
-//! as its luminance; every entry point panics on any other format.
+//! Drawing primitives — circles and crosses — over `L_F32` and `RGB_F32` images. On a
+//! single-channel image a color is written as its luminance; every entry point panics on any
+//! other format.
 
-use crate::common::color_format::{ChannelSize, ChannelType};
-use crate::{Color, Image};
+use std::ops::RangeInclusive;
+
 use glam::Vec2;
 
-/// Validates that the image uses an f32 format suitable for drawing.
-fn assert_f32_image(image: &Image) {
-    let fmt = image.desc().color_format;
-    assert_eq!(
-        fmt.channel_size,
-        ChannelSize::_32bit,
-        "Drawing requires f32 image, got {fmt:?}"
-    );
-    assert_eq!(
-        fmt.channel_type,
-        ChannelType::Float,
-        "Drawing requires float image, got {fmt:?}"
-    );
+use crate::common::color_format::ColorFormat;
+use crate::{Color, Image};
+
+/// The `f32` pixels of an `L_F32` or `RGB_F32` image, with its geometry.
+#[derive(Debug)]
+struct Canvas<'a> {
+    pixels: &'a mut [f32],
+    width: usize,
+    height: usize,
+    channels: usize,
 }
 
-/// Draws a hollow circle, its outline `thickness` pixels wide and centered on
-/// the nominal radius.
+impl<'a> Canvas<'a> {
+    /// # Panics
+    /// Unless `image` is `L_F32` or `RGB_F32`.
+    fn new(image: &'a mut Image) -> Self {
+        let desc = image.desc();
+        assert!(
+            desc.color_format == ColorFormat::L_F32 || desc.color_format == ColorFormat::RGB_F32,
+            "drawing requires an L_F32 or RGB_F32 image, got {}",
+            desc.color_format
+        );
+        Self {
+            pixels: bytemuck::cast_slice_mut(image.bytes_mut()),
+            width: desc.width,
+            height: desc.height,
+            channels: desc.color_format.channel_count.count(),
+        }
+    }
+
+    fn set(&mut self, x: usize, y: usize, color: Color) {
+        let pixel = &mut self.pixels[(y * self.width + x) * self.channels..][..self.channels];
+        match pixel {
+            [grey] => *grey = color.luminance(),
+            [r, g, b] => [*r, *g, *b] = [color.r, color.g, color.b],
+            _ => unreachable!("a canvas has one or three channels"),
+        }
+    }
+
+    /// Every pixel whose bounding box `[lo, hi]` reaches, as column and row ranges, or `None`
+    /// when the box misses the image — or is not a box at all, for a NaN bound.
+    fn covered(&self, lo: Vec2, hi: Vec2) -> Option<[RangeInclusive<usize>; 2]> {
+        Some([
+            span(lo.x, hi.x, self.width)?,
+            span(lo.y, hi.y, self.height)?,
+        ])
+    }
+}
+
+/// The pixel indices from `⌊lo⌋` to `⌈hi⌉` that lie in `0..extent`.
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "both ends are clamped to zero or above"
+)]
+fn span(lo: f32, hi: f32, extent: usize) -> Option<RangeInclusive<usize>> {
+    let first = lo.floor().max(0.0);
+    let last = hi.ceil().min(extent as f32 - 1.0);
+    (first <= last).then_some(first as usize..=last as usize)
+}
+
+/// Draws a hollow circle: every pixel whose centre lies between `radius − thickness / 2` and
+/// `radius + thickness / 2` from `center`.
 ///
 /// # Panics
 /// Panics unless `image` is `L_F32` or `RGB_F32`.
 pub fn draw_circle(image: &mut Image, center: Vec2, radius: f32, color: Color, thickness: f32) {
-    assert_f32_image(image);
-    let cx = center.x;
-    let cy = center.y;
-    let desc = image.desc();
-    let width = desc.width;
-    let height = desc.height;
-    let channels = desc.color_format.channel_count as usize;
-    let stride = desc.row_bytes() / 4; // stride in f32 elements
-
-    let pixels: &mut [f32] = bytemuck::cast_slice_mut(image.bytes_mut());
-
-    let half_thick = thickness / 2.0;
-    let min_radius = (radius - half_thick).max(0.0);
-    let max_radius = radius + half_thick;
-    let min_r_sq = min_radius * min_radius;
-    let max_r_sq = max_radius * max_radius;
-
-    // Bounding box for the circle
-    let x_min = ((cx - max_radius).floor() as i32).max(0) as usize;
-    let x_max = ((cx + max_radius).ceil() as i32).min(width as i32 - 1) as usize;
-    let y_min = ((cy - max_radius).floor() as i32).max(0) as usize;
-    let y_max = ((cy + max_radius).ceil() as i32).min(height as i32 - 1) as usize;
-
-    for y in y_min..=y_max {
-        for x in x_min..=x_max {
-            let dx = x as f32 - cx;
-            let dy = y as f32 - cy;
-            let dist_sq = dx * dx + dy * dy;
-
-            if dist_sq >= min_r_sq && dist_sq <= max_r_sq {
-                let idx = y * stride + x * channels;
-                draw_pixel(pixels, idx, channels, color);
-            }
-        }
-    }
-}
-
-/// Draws a filled circle.
-///
-/// # Panics
-/// Panics unless `image` is `L_F32` or `RGB_F32`.
-pub fn draw_dot(image: &mut Image, center: Vec2, radius: f32, color: Color) {
-    assert_f32_image(image);
-    let cx = center.x;
-    let cy = center.y;
-    let desc = image.desc();
-    let width = desc.width;
-    let height = desc.height;
-    let channels = desc.color_format.channel_count as usize;
-    let stride = desc.row_bytes() / 4;
-
-    let pixels: &mut [f32] = bytemuck::cast_slice_mut(image.bytes_mut());
-
-    let r_sq = radius * radius;
-
-    // Bounding box
-    let x_min = ((cx - radius).floor() as i32).max(0) as usize;
-    let x_max = ((cx + radius).ceil() as i32).min(width as i32 - 1) as usize;
-    let y_min = ((cy - radius).floor() as i32).max(0) as usize;
-    let y_max = ((cy + radius).ceil() as i32).min(height as i32 - 1) as usize;
-
-    for y in y_min..=y_max {
-        for x in x_min..=x_max {
-            let dx = x as f32 - cx;
-            let dy = y as f32 - cy;
-            let dist_sq = dx * dx + dy * dy;
-
-            if dist_sq <= r_sq {
-                let idx = y * stride + x * channels;
-                draw_pixel(pixels, idx, channels, color);
+    let mut canvas = Canvas::new(image);
+    let inner = (radius - thickness / 2.0).max(0.0);
+    let outer = radius + thickness / 2.0;
+    let Some([columns, rows]) = canvas.covered(center - outer, center + outer) else {
+        return;
+    };
+    for y in rows {
+        for x in columns.clone() {
+            let distance_sq = (Vec2::new(x as f32, y as f32) - center).length_squared();
+            if (inner * inner..=outer * outer).contains(&distance_sq) {
+                canvas.set(x, y, color);
             }
         }
     }
@@ -108,242 +94,140 @@ pub fn draw_dot(image: &mut Image, center: Vec2, radius: f32, color: Color) {
 /// # Panics
 /// Panics unless `image` is `L_F32` or `RGB_F32`.
 pub fn draw_cross(image: &mut Image, center: Vec2, arm_length: f32, color: Color, thickness: f32) {
-    assert_f32_image(image);
-    let cx = center.x;
-    let cy = center.y;
-    // Horizontal arm
+    let mut canvas = Canvas::new(image);
+    let horizontal = Vec2::new(arm_length, 0.0);
+    let vertical = Vec2::new(0.0, arm_length);
     draw_line(
-        image,
-        Vec2::new(cx - arm_length, cy),
-        Vec2::new(cx + arm_length, cy),
+        &mut canvas,
+        center - horizontal,
+        center + horizontal,
         color,
         thickness,
     );
-    // Vertical arm
     draw_line(
-        image,
-        Vec2::new(cx, cy - arm_length),
-        Vec2::new(cx, cy + arm_length),
+        &mut canvas,
+        center - vertical,
+        center + vertical,
         color,
         thickness,
     );
 }
 
-/// Draws a straight line, `thickness` pixels wide, by walking the major axis
-/// Bresenham-style.
-///
-/// # Panics
-/// Panics unless `image` is `L_F32` or `RGB_F32`.
-pub fn draw_line(image: &mut Image, start: Vec2, end: Vec2, color: Color, thickness: f32) {
-    assert_f32_image(image);
-    let x1 = start.x;
-    let y1 = start.y;
-    let x2 = end.x;
-    let y2 = end.y;
-    let desc = image.desc();
-    let width = desc.width;
-    let height = desc.height;
-    let channels = desc.color_format.channel_count as usize;
-    let stride = desc.row_bytes() / 4;
-
-    let pixels: &mut [f32] = bytemuck::cast_slice_mut(image.bytes_mut());
-
-    let dx = x2 - x1;
-    let dy = y2 - y1;
-    let length = (dx * dx + dy * dy).sqrt();
-
-    if length < 0.001 {
-        // Just a point
-        let x = x1.round() as i32;
-        let y = y1.round() as i32;
-        if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
-            let idx = y as usize * stride + x as usize * channels;
-            draw_pixel(pixels, idx, channels, color);
-        }
+/// Draws every pixel whose centre lies within `thickness / 2` of the segment — and, for a line
+/// thinner than a pixel, within half a pixel, which keeps one pixel per column of a shallow line
+/// and one per row of a steep one, so a hairline stays connected.
+fn draw_line(canvas: &mut Canvas<'_>, start: Vec2, end: Vec2, color: Color, thickness: f32) {
+    let reach = (thickness / 2.0).max(0.5);
+    let Some([columns, rows]) = canvas.covered(start.min(end) - reach, start.max(end) + reach)
+    else {
         return;
-    }
-
-    // Normalized direction
-    let ux = dx / length;
-    let uy = dy / length;
-
-    // Perpendicular direction for thickness
-    let px = -uy;
-    let py = ux;
-
-    let half_thick = thickness / 2.0;
-
-    // Step along the line
-    let steps = (length.ceil() as usize).max(1);
-    for i in 0..=steps {
-        let t = i as f32 / steps as f32;
-        let lx = x1 + dx * t;
-        let ly = y1 + dy * t;
-
-        // Draw perpendicular pixels for thickness
-        let thick_steps = (thickness.ceil() as i32).max(1);
-        for j in -thick_steps..=thick_steps {
-            let offset = j as f32 * 0.5;
-            if offset.abs() > half_thick {
-                continue;
-            }
-
-            let px_pos = lx + px * offset;
-            let py_pos = ly + py * offset;
-
-            let x = px_pos.round() as i32;
-            let y = py_pos.round() as i32;
-
-            if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
-                let idx = y as usize * stride + x as usize * channels;
-                draw_pixel(pixels, idx, channels, color);
+    };
+    let along = end - start;
+    let length_sq = along.length_squared();
+    for y in rows {
+        for x in columns.clone() {
+            let point = Vec2::new(x as f32, y as f32);
+            let t = if length_sq > 0.0 {
+                ((point - start).dot(along) / length_sq).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            if (point - (start + along * t)).length_squared() <= reach * reach {
+                canvas.set(x, y, color);
             }
         }
-    }
-}
-
-/// Draws a rectangle outline as four lines, `thickness` pixels wide.
-///
-/// # Panics
-/// Panics unless `image` is `L_F32` or `RGB_F32`.
-pub fn draw_rect(image: &mut Image, top_left: Vec2, size: Vec2, color: Color, thickness: f32) {
-    assert_f32_image(image);
-    let x = top_left.x;
-    let y = top_left.y;
-    let x2 = x + size.x;
-    let y2 = y + size.y;
-
-    // Top
-    draw_line(image, Vec2::new(x, y), Vec2::new(x2, y), color, thickness);
-    // Bottom
-    draw_line(image, Vec2::new(x, y2), Vec2::new(x2, y2), color, thickness);
-    // Left
-    draw_line(image, Vec2::new(x, y), Vec2::new(x, y2), color, thickness);
-    // Right
-    draw_line(image, Vec2::new(x2, y), Vec2::new(x2, y2), color, thickness);
-}
-
-/// Helper to draw a single pixel with the given color.
-#[inline]
-fn draw_pixel(pixels: &mut [f32], idx: usize, channels: usize, color: Color) {
-    match channels {
-        1 => {
-            pixels[idx] = color.luminance();
-        }
-        2 => {
-            pixels[idx] = color.luminance();
-            pixels[idx + 1] = color.a;
-        }
-        3 => {
-            pixels[idx] = color.r;
-            pixels[idx + 1] = color.g;
-            pixels[idx + 2] = color.b;
-        }
-        4 => {
-            pixels[idx] = color.r;
-            pixels[idx + 1] = color.g;
-            pixels[idx + 2] = color.b;
-            pixels[idx + 3] = color.a;
-        }
-        _ => unreachable!("invalid channel count: {}", channels),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{ColorFormat, ImageDesc};
+    use glam::Vec2;
 
-    fn create_test_image(width: usize, height: usize, channels: usize) -> Image {
-        let format = if channels == 1 {
-            ColorFormat::L_F32
-        } else {
-            ColorFormat::RGB_F32
-        };
-        let desc = ImageDesc::new(width, height, format);
-        Image::new_black(desc).unwrap()
+    use crate::drawing::{draw_circle, draw_cross};
+    use crate::{Color, ColorFormat, Image, ImageDesc};
+
+    fn canvas(format: ColorFormat, size: usize) -> Image {
+        Image::new_black(ImageDesc::new(size, size, format)).unwrap()
     }
 
-    #[test]
-    fn test_draw_circle() {
-        let mut img = create_test_image(100, 100, 3);
-        draw_circle(&mut img, Vec2::new(50.0, 50.0), 20.0, Color::RED, 2.0);
-
-        // Check that some pixels were drawn
-        let pixels: &[f32] = bytemuck::cast_slice(img.bytes());
-        let has_red = pixels
-            .chunks(3)
-            .any(|p| p[0] > 0.5 && p[1] < 0.1 && p[2] < 0.1);
-        assert!(has_red, "Circle should have red pixels");
+    /// The `(x, y)` of every pixel whose first channel was drawn.
+    fn drawn(image: &Image) -> Vec<(usize, usize)> {
+        let desc = image.desc();
+        let channels = desc.color_format.channel_count.count();
+        let pixels: &[f32] = bytemuck::cast_slice(image.bytes());
+        (0..desc.height)
+            .flat_map(|y| (0..desc.width).map(move |x| (x, y)))
+            .filter(|&(x, y)| pixels[(y * desc.width + x) * channels] != 0.0)
+            .collect()
     }
 
+    /// A ring of zero thickness at radius 2 holds exactly the centres at distance 2:
+    /// `x² + y² = 4` has only the four axis solutions on the integer grid.
     #[test]
-    fn test_draw_dot() {
-        let mut img = create_test_image(100, 100, 3);
-        draw_dot(&mut img, Vec2::new(50.0, 50.0), 5.0, Color::GREEN);
-
-        // Check center pixel
-        let pixels: &[f32] = bytemuck::cast_slice(img.bytes());
-        let idx = (50 * 100 + 50) * 3;
-        assert!(pixels[idx + 1] > 0.5, "Center should be green");
-    }
-
-    #[test]
-    fn test_draw_cross() {
-        let mut img = create_test_image(100, 100, 3);
-        draw_cross(&mut img, Vec2::new(50.0, 50.0), 10.0, Color::BLUE, 1.0);
-
-        // Check center pixel
-        let pixels: &[f32] = bytemuck::cast_slice(img.bytes());
-        let idx = (50 * 100 + 50) * 3;
-        assert!(pixels[idx + 2] > 0.5, "Center should be blue");
-    }
-
-    #[test]
-    fn test_draw_line() {
-        let mut img = create_test_image(100, 100, 3);
-        draw_line(
-            &mut img,
-            Vec2::new(10.0, 10.0),
-            Vec2::new(90.0, 90.0),
-            Color::WHITE,
-            1.0,
+    fn a_circle_draws_the_centres_on_its_ring() {
+        let mut image = canvas(ColorFormat::RGB_F32, 5);
+        draw_circle(
+            &mut image,
+            Vec2::new(2.0, 2.0),
+            2.0,
+            Color::rgb(1.0, 0.5, 0.25),
+            0.0,
         );
+        assert_eq!(drawn(&image), [(2, 0), (0, 2), (4, 2), (2, 4)]);
+        let pixels: &[f32] = bytemuck::cast_slice(image.bytes());
+        assert_eq!(&pixels[..3 * 3][2 * 3..], &[1.0, 0.5, 0.25]);
+    }
 
-        // Check a point on the diagonal
-        let pixels: &[f32] = bytemuck::cast_slice(img.bytes());
-        let idx = (50 * 100 + 50) * 3;
-        assert!(pixels[idx] > 0.5, "Diagonal point should be white");
+    /// Clipped at the top-left corner, and off the image entirely — which once wrapped the
+    /// bounding box to `usize::MAX` and looped for good.
+    #[test]
+    fn a_circle_off_the_edge_is_clipped() {
+        let mut image = canvas(ColorFormat::L_F32, 3);
+        draw_circle(&mut image, Vec2::ZERO, 1.0, Color::GREEN, 0.0);
+        assert_eq!(drawn(&image), [(1, 0), (0, 1)]);
+
+        for center in [
+            Vec2::new(-50.0, 1.0),
+            Vec2::new(1.0, -50.0),
+            Vec2::new(60.0, 1.0),
+        ] {
+            let mut image = canvas(ColorFormat::L_F32, 3);
+            draw_circle(&mut image, center, 3.0, Color::GREEN, 2.0);
+            assert_eq!(drawn(&image), [], "{center}");
+        }
+        let mut image = canvas(ColorFormat::L_F32, 3);
+        draw_circle(&mut image, Vec2::NAN, 3.0, Color::GREEN, 2.0);
+        assert_eq!(drawn(&image), []);
+    }
+
+    /// A one-pixel cross is one row and one column; a three-pixel one, three of each. Grey
+    /// takes the colour's luminance: green's weight, 0.7152.
+    #[test]
+    fn a_cross_is_as_thick_as_asked() {
+        let mut image = canvas(ColorFormat::L_F32, 5);
+        draw_cross(&mut image, Vec2::new(2.0, 2.0), 2.0, Color::GREEN, 1.0);
+        let row: Vec<_> = (0..5).map(|x| (x, 2)).collect();
+        let mut expected: Vec<_> = (0..5).map(|y| (2, y)).chain(row).collect();
+        expected.sort_by_key(|&(x, y)| (y, x));
+        expected.dedup();
+        assert_eq!(drawn(&image), expected);
+        let pixels: &[f32] = bytemuck::cast_slice(image.bytes());
+        assert_eq!(pixels[2 * 5 + 2], 0.7152);
+
+        let mut image = canvas(ColorFormat::L_F32, 7);
+        draw_cross(&mut image, Vec2::new(3.0, 3.0), 3.0, Color::GREEN, 3.0);
+        let bands = |x: usize, y: usize| (2..=4).contains(&x) || (2..=4).contains(&y);
+        let expected: Vec<_> = (0..7)
+            .flat_map(|y| (0..7).map(move |x| (x, y)))
+            .filter(|&(x, y)| bands(x, y))
+            .collect();
+        assert_eq!(drawn(&image), expected);
     }
 
     #[test]
-    fn test_draw_rect() {
-        let mut img = create_test_image(100, 100, 3);
-        draw_rect(
-            &mut img,
-            Vec2::new(20.0, 20.0),
-            Vec2::new(60.0, 40.0),
-            Color::YELLOW,
-            1.0,
-        );
-
-        // Check a corner pixel
-        let pixels: &[f32] = bytemuck::cast_slice(img.bytes());
-        let idx = (20 * 100 + 20) * 3;
-        assert!(
-            pixels[idx] > 0.5 && pixels[idx + 1] > 0.5,
-            "Corner should be yellow"
-        );
-    }
-
-    #[test]
-    fn test_draw_on_grayscale() {
-        let mut img = create_test_image(100, 100, 1);
-        draw_circle(&mut img, Vec2::new(50.0, 50.0), 10.0, Color::WHITE, 2.0);
-
-        // Check that pixels were drawn
-        let pixels: &[f32] = bytemuck::cast_slice(img.bytes());
-        let has_bright = pixels.iter().any(|&p| p > 0.5);
-        assert!(has_bright, "Should have bright pixels");
+    #[should_panic(expected = "drawing requires an L_F32 or RGB_F32 image, got RGBA f32")]
+    fn rgba_is_refused() {
+        let mut image = canvas(ColorFormat::RGBA_F32, 3);
+        draw_circle(&mut image, Vec2::ONE, 1.0, Color::GREEN, 1.0);
     }
 }

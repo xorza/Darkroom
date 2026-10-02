@@ -1,5 +1,3 @@
-#[cfg(feature = "bench")]
-pub(crate) mod bench;
 mod cpu;
 
 use crate::image::Image;
@@ -32,3 +30,6 @@ impl Preview {
         cpu::generate(self, input)
     }
 }
+
+#[cfg(feature = "bench")]
+pub(crate) mod bench;

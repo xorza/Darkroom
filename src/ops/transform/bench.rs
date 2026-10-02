@@ -26,7 +26,7 @@ pub fn bench(c: &mut Criterion) {
     group.warm_up_time(Duration::from_secs(1));
     group.measurement_time(Duration::from_secs(3));
 
-    for &format in ALL_FORMATS {
+    for format in ALL_FORMATS {
         let input = create_test_image(format, WIDTH, HEIGHT, 0);
         let mut output = Image::new_black(input.desc()).unwrap();
         // Criterion turns ids into report paths, so keep them space-free.

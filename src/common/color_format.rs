@@ -1,165 +1,118 @@
-use crate::common::error::{Error, Result};
+use std::fmt;
 
-#[derive(Debug, Hash, PartialEq, Eq, Copy, Clone, Default)]
+/// How many interleaved channels a pixel holds.
+#[derive(Debug, Hash, PartialEq, Eq, Copy, Clone)]
 #[repr(u8)]
 pub enum ChannelCount {
     L = 1,
     Rgb = 3,
-    #[default]
     Rgba = 4,
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, Copy, Clone, Default)]
-#[repr(u8)]
-pub enum ChannelSize {
-    #[default]
-    _8bit = 1,
-    _16bit = 2,
-    _32bit = 4,
+/// The storage type of one channel value.
+#[derive(Debug, Hash, PartialEq, Eq, Copy, Clone)]
+pub enum SampleType {
+    U8,
+    U16,
+    F32,
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, Copy, Clone, Default)]
-#[repr(u8)]
-pub enum ChannelType {
-    #[default]
-    UInt,
-    Float,
-}
-
-#[derive(Clone, Copy, Debug, Hash, Default, PartialEq, Eq)]
+/// A pixel format: channel count × sample type. Every one of the nine products is a format the
+/// crate stores, converts and processes, so no value of this type is invalid.
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct ColorFormat {
     pub channel_count: ChannelCount,
-    pub channel_size: ChannelSize,
-    pub channel_type: ChannelType,
+    pub sample_type: SampleType,
 }
 
 impl ChannelCount {
-    pub fn channel_count(&self) -> u8 {
-        *self as u8
-    }
-    fn byte_count(&self, channel_size: ChannelSize) -> u8 {
-        self.channel_count() * channel_size.byte_count()
+    pub const fn count(self) -> usize {
+        self as usize
     }
 }
 
-impl ChannelSize {
-    pub fn byte_count(&self) -> u8 {
-        *self as u8
-    }
-    pub(crate) fn from_bit_count(bit_count: u8) -> Result<ChannelSize> {
-        match bit_count {
-            8 => Ok(ChannelSize::_8bit),
-            16 => Ok(ChannelSize::_16bit),
-            32 => Ok(ChannelSize::_32bit),
-            _ => Err(Error::InvalidColorFormat(format!(
-                "invalid channel size: {bit_count} bits"
-            ))),
+impl SampleType {
+    /// Bytes one channel value occupies.
+    pub const fn size(self) -> usize {
+        match self {
+            Self::U8 => 1,
+            Self::U16 => 2,
+            Self::F32 => 4,
         }
+    }
+
+    pub const fn bits(self) -> usize {
+        self.size() * 8
+    }
+
+    pub const fn is_float(self) -> bool {
+        matches!(self, Self::F32)
     }
 }
 
 impl ColorFormat {
-    pub fn byte_count(&self) -> u8 {
-        self.channel_count.byte_count(self.channel_size)
-    }
+    pub const L_U8: Self = Self::new(ChannelCount::L, SampleType::U8);
+    pub const L_U16: Self = Self::new(ChannelCount::L, SampleType::U16);
+    pub const L_F32: Self = Self::new(ChannelCount::L, SampleType::F32);
+    pub const RGB_U8: Self = Self::new(ChannelCount::Rgb, SampleType::U8);
+    pub const RGB_U16: Self = Self::new(ChannelCount::Rgb, SampleType::U16);
+    pub const RGB_F32: Self = Self::new(ChannelCount::Rgb, SampleType::F32);
+    pub const RGBA_U8: Self = Self::new(ChannelCount::Rgba, SampleType::U8);
+    pub const RGBA_U16: Self = Self::new(ChannelCount::Rgba, SampleType::U16);
+    pub const RGBA_F32: Self = Self::new(ChannelCount::Rgba, SampleType::F32);
 
-    fn is_supported(&self) -> bool {
-        ALL_FORMATS.contains(self)
-    }
-
-    pub(crate) fn validate(&self) -> Result<()> {
-        if !self.is_supported() {
-            return Err(Error::InvalidColorFormat(format!(
-                "unsupported color format: {self:?}"
-            )));
-        }
-        Ok(())
-    }
-}
-
-impl From<(ChannelCount, ChannelSize, ChannelType)> for ColorFormat {
-    fn from(value: (ChannelCount, ChannelSize, ChannelType)) -> Self {
-        ColorFormat {
-            channel_count: value.0,
-            channel_size: value.1,
-            channel_type: value.2,
+    pub const fn new(channel_count: ChannelCount, sample_type: SampleType) -> Self {
+        Self {
+            channel_count,
+            sample_type,
         }
     }
-}
 
-macro_rules! define_color_formats {
-    ($(($prefix:ident, $count:ident)),+ $(,)?) => {
-        paste::paste! {
-            impl ColorFormat {
-                $(
-                    pub const [<$prefix _U8>]:  ColorFormat = ColorFormat { channel_count: ChannelCount::$count, channel_size: ChannelSize::_8bit,  channel_type: ChannelType::UInt };
-                    pub const [<$prefix _U16>]: ColorFormat = ColorFormat { channel_count: ChannelCount::$count, channel_size: ChannelSize::_16bit, channel_type: ChannelType::UInt };
-                    pub const [<$prefix _F32>]: ColorFormat = ColorFormat { channel_count: ChannelCount::$count, channel_size: ChannelSize::_32bit, channel_type: ChannelType::Float };
-                )+
-            }
-        }
-    };
-}
+    /// Bytes one pixel occupies.
+    pub const fn byte_count(self) -> usize {
+        self.channel_count.count() * self.sample_type.size()
+    }
 
-define_color_formats!((L, L), (RGB, Rgb), (RGBA, Rgba),);
-
-impl std::fmt::Display for ChannelCount {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ChannelCount::L => write!(f, "L"),
-            ChannelCount::Rgb => write!(f, "RGB"),
-            ChannelCount::Rgba => write!(f, "RGBA"),
-        }
+    /// Whether the last channel is alpha.
+    pub const fn has_alpha(self) -> bool {
+        matches!(self.channel_count, ChannelCount::Rgba)
     }
 }
 
-impl std::fmt::Display for ChannelSize {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ChannelSize::_8bit => write!(f, "8"),
-            ChannelSize::_16bit => write!(f, "16"),
-            ChannelSize::_32bit => write!(f, "32"),
-        }
+impl fmt::Display for ChannelCount {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::L => "L",
+            Self::Rgb => "RGB",
+            Self::Rgba => "RGBA",
+        })
     }
 }
 
-impl std::fmt::Display for ChannelType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ChannelType::UInt => write!(f, "u"),
-            ChannelType::Float => write!(f, "f"),
-        }
+impl fmt::Display for SampleType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::U8 => "u8",
+            Self::U16 => "u16",
+            Self::F32 => "f32",
+        })
     }
 }
 
-impl std::fmt::Display for ColorFormat {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{} {}{}",
-            self.channel_count, self.channel_type, self.channel_size
-        )
+impl fmt::Display for ColorFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {}", self.channel_count, self.sample_type)
     }
 }
 
-/// All supported color formats.
-pub const ALL_FORMATS: &[ColorFormat] = &[
-    //
+/// Every color format.
+pub const ALL_FORMATS: [ColorFormat; 9] = [
     ColorFormat::L_U8,
     ColorFormat::L_U16,
     ColorFormat::L_F32,
-    //
     ColorFormat::RGB_U8,
     ColorFormat::RGB_U16,
     ColorFormat::RGB_F32,
-    //
-    ColorFormat::RGBA_U8,
-    ColorFormat::RGBA_U16,
-    ColorFormat::RGBA_F32,
-];
-
-/// Formats with an alpha channel (RGBA).
-pub const ALPHA_FORMATS: &[ColorFormat] = &[
     ColorFormat::RGBA_U8,
     ColorFormat::RGBA_U16,
     ColorFormat::RGBA_F32,

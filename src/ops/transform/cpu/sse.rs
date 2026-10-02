@@ -6,8 +6,9 @@
 //!
 //! Every step matches the scalar reference bit-for-bit: widening is exact for
 //! `0..=255` / `0..=65535`, the blend uses plain muls + adds (no FMA), the clamp
-//! is `max`/`min`, and the float→int convert truncates toward zero (`cvtt`) like
-//! `as`. The `sse_matches_scalar` test asserts exact equality.
+//! is `max`/`min`, and the float→int convert rounds to nearest with ties to even
+//! (`cvtps2dq` under the default MXCSR) like `round_ties_even`. The
+//! `sse_matches_scalar` test asserts exact equality.
 //!
 //! All SIMD work flows through `process_row`, which is `#[target_feature(enable =
 //! "sse4.1")]`; the `#[inline]` helpers below are pulled into that feature
@@ -18,12 +19,14 @@ use std::arch::x86_64::*;
 use glam::{Affine2, Vec2};
 use rayon::prelude::*;
 
-use super::{Transform, TransformElem};
+use crate::common::sample::Sample;
 use crate::image::Image;
+use crate::ops::transform::Transform;
+use crate::ops::transform::cpu::pixel_index;
 
 /// A packed (RGB/RGBA) element type that loads/stores one pixel's `N` channels
 /// as the low `N` lanes of an `f32x4`.
-pub(super) trait SsePacked: TransformElem {
+pub(super) trait SsePacked: Sample {
     /// Loads the `N` channels at element index `base` into the low `N` lanes
     /// (higher lanes are zero).
     ///
@@ -46,16 +49,20 @@ impl SsePacked for u8 {
             // Pack the channels into the low bytes of a u32; for N==3 read the 3
             // bytes individually to avoid a 4-byte over-read past the last pixel.
             let packed: u32 = match N {
-                4 => (p as *const u32).read_unaligned(),
-                3 => *p as u32 | ((*p.add(1) as u32) << 8) | ((*p.add(2) as u32) << 16),
+                4 => p.cast::<u32>().read_unaligned(),
+                3 => u32::from(*p) | (u32::from(*p.add(1)) << 8) | (u32::from(*p.add(2)) << 16),
                 _ => unreachable!(),
             };
             // Zero-extend the 4 low bytes to 4 i32 lanes, then to f32.
-            let i = _mm_cvtepu8_epi32(_mm_cvtsi32_si128(packed as i32));
+            let i = _mm_cvtepu8_epi32(_mm_cvtsi32_si128(packed.cast_signed()));
             _mm_cvtepi32_ps(i)
         }
     }
     #[inline]
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "each lane is clamped to 0..=255 first"
+    )]
     unsafe fn store<const N: usize>(out: &mut [u8], base: usize, v: __m128) {
         unsafe {
             let i = clamp_to_i32(v, 255.0);
@@ -66,7 +73,8 @@ impl SsePacked for u8 {
                     // range, so saturation never triggers. Low 4 bytes are lanes.
                     let u16x = _mm_packus_epi32(i, i);
                     let u8x = _mm_packus_epi16(u16x, u16x);
-                    (p as *mut u32).write_unaligned(_mm_cvtsi128_si32(u8x) as u32);
+                    p.cast::<u32>()
+                        .write_unaligned(_mm_cvtsi128_si32(u8x).cast_unsigned());
                 }
                 3 => {
                     *p = _mm_extract_epi32::<0>(i) as u8;
@@ -85,10 +93,10 @@ impl SsePacked for u16 {
         unsafe {
             let p = pixels.as_ptr().add(base);
             let u16x = match N {
-                4 => _mm_loadl_epi64(p as *const __m128i),
+                4 => _mm_loadl_epi64(p.cast::<__m128i>()),
                 3 => {
                     let tmp = [*p, *p.add(1), *p.add(2), 0u16];
-                    _mm_loadl_epi64(tmp.as_ptr() as *const __m128i)
+                    _mm_loadl_epi64(tmp.as_ptr().cast::<__m128i>())
                 }
                 _ => unreachable!(),
             };
@@ -96,12 +104,16 @@ impl SsePacked for u16 {
         }
     }
     #[inline]
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "each lane is clamped to 0..=65535 first"
+    )]
     unsafe fn store<const N: usize>(out: &mut [u16], base: usize, v: __m128) {
         unsafe {
             let i = clamp_to_i32(v, 65535.0);
             let p = out.as_mut_ptr().add(base);
             match N {
-                4 => _mm_storel_epi64(p as *mut __m128i, _mm_packus_epi32(i, i)),
+                4 => _mm_storel_epi64(p.cast::<__m128i>(), _mm_packus_epi32(i, i)),
                 3 => {
                     *p = _mm_extract_epi32::<0>(i) as u16;
                     *p.add(1) = _mm_extract_epi32::<1>(i) as u16;
@@ -130,7 +142,7 @@ impl SsePacked for f32 {
     }
     #[inline]
     unsafe fn store<const N: usize>(out: &mut [f32], base: usize, v: __m128) {
-        // Unclamped, matching the scalar f32 `from_f32`.
+        // Unclamped, matching the scalar `f32::from_f32`.
         unsafe {
             let p = out.as_mut_ptr().add(base);
             match N {
@@ -148,11 +160,12 @@ impl SsePacked for f32 {
     }
 }
 
-/// Clamps `v` to `[0, max]` and truncates toward zero — matches `from_f32`.
+/// Clamps `v` to `[0, max]` and rounds to nearest with ties to even — matches
+/// [`Sample::from_f32`], NaN to zero included.
 #[inline]
 fn clamp_to_i32(v: __m128, max: f32) -> __m128i {
     unsafe {
-        _mm_cvttps_epi32(_mm_min_ps(
+        _mm_cvtps_epi32(_mm_min_ps(
             _mm_max_ps(v, _mm_setzero_ps()),
             _mm_set1_ps(max),
         ))
@@ -181,10 +194,11 @@ fn read_tap<T: SsePacked, const N: usize>(
     x: i32,
     y: i32,
 ) -> __m128 {
-    if x < 0 || y < 0 || x >= w as i32 || y >= h as i32 {
+    let Some(pixel) = pixel_index(w, h, x, y) else {
+        // SAFETY: SSE is baseline on x86_64.
         return unsafe { _mm_setzero_ps() };
-    }
-    let base = (y as usize * w + x as usize) * N;
+    };
+    let base = pixel * N;
     // SAFETY: the bounds check above guarantees `base + N <= pixels.len()`.
     unsafe { T::load::<N>(pixels, base) }
 }
@@ -204,7 +218,7 @@ pub(super) unsafe fn apply_packed<T: SsePacked, const N: usize>(
     let out_stride = output.desc().row_bytes();
 
     let in_pixels: &[T] = bytemuck::cast_slice(input.bytes());
-    let inv = transform.transform.inverse();
+    let inv = transform.inverse();
 
     output
         .bytes_mut()
