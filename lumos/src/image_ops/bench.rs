@@ -12,7 +12,7 @@
 //! reported numbers are the net op cost.
 //!
 //! Gated behind the `real-data` feature (the dataset is). Run:
-//! `cargo test -p lumos --release --features real-data image_ops::bench -- --ignored --nocapture`
+//! `cargo test -p lumos --release --features bench,real-data image_ops::bench -- --ignored --nocapture`
 
 use crate::testing::prelude::*;
 use quickbench::quick_bench;

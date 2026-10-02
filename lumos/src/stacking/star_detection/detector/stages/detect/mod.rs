@@ -389,7 +389,7 @@ pub(crate) mod internals {
     /// Reaches `collect_component_data` from the detector's benchmarks; production code and the
     /// tests both go through `DetectResult::from_image`. Narrower gate than the module because
     /// only the benches want it.
-    #[cfg(feature = "internals")]
+    #[cfg(feature = "bench")]
     pub(crate) fn collect_components(
         label_map: &crate::stacking::star_detection::labeling::LabelMap,
     ) -> Vec<crate::stacking::star_detection::deblend::ComponentData> {

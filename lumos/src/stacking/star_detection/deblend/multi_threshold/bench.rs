@@ -1,6 +1,6 @@
 //! Benchmarks for multi-threshold deblending.
 //!
-//! Run with: `cargo test -p lumos --release bench_multi_threshold -- --ignored --nocapture`
+//! Run with: `cargo test -p lumos --release --features bench bench_multi_threshold -- --ignored --nocapture`
 
 use crate::testing::prelude::*;
 use ::quickbench::quick_bench;

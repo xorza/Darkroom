@@ -27,8 +27,11 @@ planes (coverage, weight, variance/noise) that let a downstream tool
 Tests leave out `real-data`:
 
 ```
-cargo test -p lumos --tests --features ml,internals
+cargo test -p lumos --tests --features ml
 ```
+
+Benches are quickbench `#[test] #[ignore]` functions in `bench.rs` files, compiled only with
+the `bench` feature: `cargo test -p lumos --release --features bench <filter> -- --ignored --nocapture`.
 
 `real-data` runs the tests that read the gitignored ~7.4 GB dataset in
 `test_data/lumos_data/` — only when asked. Its ML tests also need ONNX weights

@@ -9,7 +9,7 @@ use std::ops::Range;
 use crate::simd::dispatch;
 use crate::stacking::star_detection::threshold_mask::ThresholdParams;
 
-#[cfg(all(test, feature = "internals"))]
+#[cfg(all(test, feature = "bench"))]
 mod bench;
 
 #[cfg(target_arch = "x86_64")]

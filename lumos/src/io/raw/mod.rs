@@ -3,7 +3,7 @@ mod error;
 mod normalize;
 pub(crate) mod provenance;
 
-#[cfg(all(test, feature = "internals"))]
+#[cfg(all(test, feature = "bench"))]
 mod bench;
 #[cfg(test)]
 mod tests;

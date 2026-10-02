@@ -1,6 +1,6 @@
 //! Benchmarks for local maxima deblending.
 //!
-//! Run with: `cargo test -p lumos --release bench_local_maxima -- --ignored --nocapture`
+//! Run with: `cargo test -p lumos --release --features bench bench_local_maxima -- --ignored --nocapture`
 
 use crate::testing::prelude::*;
 use ::quickbench::quick_bench;

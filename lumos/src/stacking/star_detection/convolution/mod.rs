@@ -10,7 +10,7 @@ mod simd;
 
 use simd::mirror_index;
 
-#[cfg(all(test, feature = "internals"))]
+#[cfg(all(test, feature = "bench"))]
 mod bench;
 #[cfg(test)]
 mod tests;

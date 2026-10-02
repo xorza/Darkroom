@@ -1,6 +1,6 @@
 //! Benchmarks for full star detection pipeline.
 //!
-//! Run with: `cargo test -p lumos --release bench_star_detection -- --ignored --nocapture`
+//! Run with: `cargo test -p lumos --release --features bench bench_star_detection -- --ignored --nocapture`
 
 use crate::testing::prelude::*;
 use ::quickbench::quick_bench;

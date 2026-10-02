@@ -3,7 +3,7 @@
 //! Builds a synthetic light-frame set in memory and stacks it, so the measured time is the combine
 //! hot path: normalization, weight resolution, per-pixel rejection, and weighted accumulation.
 //!
-//! Run: `cargo test -p lumos --release combine::bench -- --ignored --nocapture`
+//! Run: `cargo test -p lumos --release --features bench combine::bench -- --ignored --nocapture`
 
 use crate::testing::prelude::*;
 use quickbench::quick_bench;

@@ -6,7 +6,7 @@ pub(crate) mod error;
 mod fits;
 mod prepared_flat;
 
-#[cfg(all(test, feature = "internals"))]
+#[cfg(all(test, feature = "bench"))]
 mod bench;
 #[cfg(all(test, feature = "real-data"))]
 mod real_data_tests;

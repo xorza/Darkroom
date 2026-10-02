@@ -204,7 +204,7 @@ fn compact_by_mask(stars: &mut Vec<Star>, kept: &[bool]) -> usize {
     removed_count
 }
 
-#[cfg(all(test, feature = "internals"))]
+#[cfg(all(test, feature = "bench"))]
 pub(crate) mod internals {
     use crate::stacking::star_detection::star::Star;
 

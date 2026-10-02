@@ -21,7 +21,7 @@
 //! three times samples 120 ms of whatever the governor was doing, and it reported swings of ±40%
 //! and even a negative rotation cost until it was measured over a second like every other case.
 //!
-//! Run: `cargo test -p lumos --release drizzle::bench -- --ignored --nocapture`
+//! Run: `cargo test -p lumos --release --features bench drizzle::bench -- --ignored --nocapture`
 
 use crate::testing::prelude::*;
 use quickbench::quick_bench;

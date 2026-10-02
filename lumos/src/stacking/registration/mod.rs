@@ -57,7 +57,7 @@ pub(crate) mod transform;
 pub(crate) mod triangle;
 mod tuning;
 
-#[cfg(all(test, feature = "internals"))]
+#[cfg(all(test, feature = "bench"))]
 mod bench;
 #[cfg(all(test, feature = "real-data"))]
 mod real_data_tests;

@@ -34,7 +34,7 @@ pub(crate) mod rgb;
 pub(crate) mod stretching;
 pub(crate) mod wavelet;
 
-#[cfg(all(test, feature = "internals", feature = "real-data"))]
+#[cfg(all(test, feature = "bench", feature = "real-data"))]
 mod bench;
 #[cfg(test)]
 mod mem_budget_probe;

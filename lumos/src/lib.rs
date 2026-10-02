@@ -34,9 +34,6 @@ pub(crate) mod memory;
 pub(crate) mod simd;
 pub(crate) mod stacking;
 
-#[cfg(test)]
-pub(crate) mod testing;
-
 pub use error::{FrameDimensionMismatch, InvalidConfigField};
 pub use io::image::PREVIEW_IMAGE_EXTENSIONS;
 pub use io::image::cfa::{CfaImage, CfaType};
@@ -158,3 +155,6 @@ pub use image_ops::ml::backend::{MlError, TiledOnnxConfig};
 pub use image_ops::ml::denoise::MlDenoise;
 #[cfg(feature = "ml")]
 pub use image_ops::ml::star_removal::{RemoveStars, StarRemovalResult};
+
+#[cfg(test)]
+pub(crate) mod testing;
