@@ -1,4 +1,4 @@
-//! Shared test helpers for centroid fitting tests (gaussian_fit, moffat_fit).
+//! Shared test helpers for centroid fitting tests (`gaussian_fit`, `moffat_fit`).
 
 use imaginarium::Buffer2;
 
@@ -30,7 +30,7 @@ impl Perturbation {
                 }
             }
             Perturbation::Gaussian { sigma, seed } => {
-                patterns::add_gaussian_noise(pixels, sigma, seed)
+                patterns::add_gaussian_noise(pixels, sigma, seed);
             }
         }
     }
@@ -43,7 +43,6 @@ impl Perturbation {
 /// of calling [`NormalEquations::mirror_lower_triangle`] — sharing that step with the code under
 /// test would let a bug in it pass unnoticed. Unweighted, matching the unweighted batch paths it
 /// is compared against.
-#[allow(clippy::needless_range_loop)]
 pub(super) fn reference_normal_equations<const N: usize>(
     jacobian: &[[f64; N]],
     residuals: &[f64],

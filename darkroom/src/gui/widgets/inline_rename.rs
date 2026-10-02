@@ -121,12 +121,11 @@ impl<'a> InlineRename<'a> {
         // the borrow, and built only when the caller supplied no bundle
         // — the styled path costs nothing for having this here.
         let ambient;
-        let theme = match style {
-            Some(theme) => theme,
-            None => {
-                ambient = InlineRenameTheme::flattened(&ui.theme().text_edit);
-                &ambient
-            }
+        let theme = if let Some(theme) = style {
+            theme
+        } else {
+            ambient = InlineRenameTheme::flattened(&ui.theme().text_edit);
+            &ambient
         };
         // The label sits inside a `MIN_EDIT_WIDTH` panel so short names
         // still present a clickable target; the parent's main-axis
@@ -296,7 +295,7 @@ mod tests {
     use palantir::Key;
     use palantir::internals::UiHarness;
 
-    impl<'a> InlineRename<'a> {
+    impl InlineRename<'_> {
         /// Which edge the name hugs, in both the idle label and the active
         /// editor. Defaults to [`HAlign::Left`].
         ///

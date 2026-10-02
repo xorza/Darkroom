@@ -94,9 +94,9 @@ pub(crate) fn add_bayer_pattern(
 /// Bayer pattern types.
 // Only RGGB is exercised today; the others stay available for future synthetic fixtures
 // needing a non-default CFA layout.
-#[allow(dead_code)]
+#[expect(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(clippy::upper_case_acronyms)]
+#[expect(clippy::upper_case_acronyms)]
 pub(crate) enum BayerPattern {
     RGGB,
     GRBG,

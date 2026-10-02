@@ -24,7 +24,7 @@
 //!
 //! Textual edit state: a `TextEdit` round-trip through `i64`/`f64`
 //! formatting would clobber partial input (typing "3." would reformat
-//! to "3" on the next frame). The buffer lives in palantir's StateMap
+//! to "3" on the next frame). The buffer lives in palantir's `StateMap`
 //! keyed by the editor id ([`crate::gui::widgets::buffered_edit::EditBuffer`],
 //! shared with [`crate::gui::widgets::inline_rename`]'s renaming editor);
 //! we mirror canonical → buffer only while unfocused — skipping the blur
@@ -45,7 +45,7 @@ use crate::gui::widgets::buffered_edit::EditBuffer;
 /// Render the editor for `value`. Returns the new value when the user
 /// committed an edit this frame (scrub released, Enter, blur, or a
 /// discrete pick), otherwise `None`. `id` must be stable across frames
-/// so the TextEdit / buffer state survives. Every visual axis (button
+/// so the `TextEdit` / buffer state survives. Every visual axis (button
 /// look, field width) comes off `theme`.
 pub(super) fn show(
     ui: &mut Ui,
@@ -327,8 +327,8 @@ impl Display for PathPreview<'_> {
     }
 }
 
-/// Render a TextEdit whose buffer survives across frames via palantir's
-/// StateMap. Returns the buffer's text on the frame the edit commits (Enter,
+/// Render a `TextEdit` whose buffer survives across frames via palantir's
+/// `StateMap`. Returns the buffer's text on the frame the edit commits (Enter,
 /// or focus left the field), `None` on every other.
 ///
 /// While the editor is unfocused, `mirror` refills the cleared buffer from

@@ -44,7 +44,7 @@ impl StampGrid {
 }
 
 /// Stack-allocated stamp data extracted around a star candidate.
-/// Uses ArrayVec to avoid heap allocations for typical stamp sizes.
+/// Uses `ArrayVec` to avoid heap allocations for typical stamp sizes.
 #[derive(Debug)]
 pub(super) struct StampData {
     /// Pixel values (background-subtracted at the caller if needed), row-major over the stamp.
@@ -80,7 +80,7 @@ impl FitNoise {
         let signal = (z - background).max(0.0);
         1.0 / self
             .noise_model
-            .variance_normalized(signal, self.sky_noise as f64, 1)
+            .variance_normalized(signal, f64::from(self.sky_noise), 1)
             .max(1e-12)
     }
 }
@@ -145,7 +145,7 @@ impl StampFit {
         // going through either array.
         let frac_x = pos.x - icx as f64;
         let frac_y = pos.y - icy as f64;
-        let sky = background as f64;
+        let sky = f64::from(background);
 
         let mut z = ArrayVec::new();
         // Filled only for a weighted fit, but an empty `ArrayVec` costs nothing to carry: its
@@ -161,7 +161,7 @@ impl StampFit {
             // One bounds check per row rather than per pixel — the guard above has already
             // established the whole stamp is inside the frame.
             let row = pixels.row(y);
-            let ddy = dy as f64 - frac_y;
+            let ddy = f64::from(dy) - frac_y;
 
             for dx in -radius_i32..=radius_i32 {
                 let value = row[(icx + dx as isize) as usize];
@@ -170,7 +170,7 @@ impl StampFit {
                 peak = peak.max(value);
 
                 let signal = (value64 - sky).max(0.0);
-                let ddx = dx as f64 - frac_x;
+                let ddx = f64::from(dx) - frac_x;
                 sum_r2 += signal * (ddx * ddx + ddy * ddy);
                 sum_w += signal;
 
@@ -203,7 +203,7 @@ impl StampFit {
 
     /// Amplitude seed: the stamp's peak above the sky, floored so the optimizer starts positive.
     pub(super) fn amplitude_seed(&self, background: f32) -> f64 {
-        (self.stamp.peak - background).max(0.01) as f64
+        f64::from((self.stamp.peak - background).max(0.01))
     }
 
     /// Lift a fitted centre out of the stamp frame back into image coordinates.

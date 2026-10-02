@@ -88,7 +88,7 @@ pub struct Graph {
 }
 
 /// One event-subscription edge: `subscriber` fires when `emitter`'s event
-/// `event_idx` triggers. Ordered (emitter, event_idx, subscriber) so the
+/// `event_idx` triggers. Ordered (emitter, `event_idx`, subscriber) so the
 /// `BTreeSet` holding these dedups and iterates deterministically — which is
 /// what lets a compile wire each emitter's subscriber lists in a fixed order.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]

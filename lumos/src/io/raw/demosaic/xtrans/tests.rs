@@ -237,7 +237,7 @@ fn process_xtrans_normalization() {
     .unwrap();
 
     for &val in rgb.iter().flatten() {
-        assert!((val - 0.5).abs() < 0.01, "Expected ~0.5, got {}", val);
+        assert!((val - 0.5).abs() < 0.01, "Expected ~0.5, got {val}");
     }
 }
 
@@ -297,7 +297,7 @@ fn process_xtrans_full_range() {
     .unwrap();
 
     for &val in rgb.iter().flatten() {
-        assert!((val - 1.0).abs() < 0.001, "Expected 1.0, got {}", val);
+        assert!((val - 1.0).abs() < 0.001, "Expected 1.0, got {val}");
     }
 }
 
@@ -365,7 +365,7 @@ fn process_xtrans_f32_uniform() {
     .unwrap();
 
     for &val in rgb.iter().flatten() {
-        assert!((val - 0.5).abs() < 0.01, "Expected ~0.5, got {}", val);
+        assert!((val - 0.5).abs() < 0.01, "Expected ~0.5, got {val}");
     }
 }
 
@@ -474,7 +474,7 @@ fn process_xtrans_f32_matches_u16_path() {
         .collect();
     let raw_f32: Vec<f32> = raw_u16
         .iter()
-        .map(|&v| (v as f32 - black).max(0.0) * inv_range)
+        .map(|&v| (f32::from(v) - black).max(0.0) * inv_range)
         .collect();
 
     let rgb_u16 = process_xtrans(

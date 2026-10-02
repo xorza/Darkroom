@@ -1,4 +1,4 @@
-//! AVX2+FMA SIMD implementation for Gaussian2D batch operations.
+//! AVX2+FMA SIMD implementation for `Gaussian2D` batch operations.
 //!
 //! Processes 4 f64 pixels per AVX2 iteration for `batch_build_normal_equations`
 //! and `batch_compute_chi2`. Uses a fast polynomial `exp()` approximation
@@ -16,7 +16,7 @@ use std::arch::x86_64::*;
 
 const LOG2E: f64 = LOG2_E;
 
-/// Fast vectorized exp() for 4 f64 lanes using Cephes polynomial approximation.
+/// Fast vectorized `exp()` for 4 f64 lanes using Cephes polynomial approximation.
 ///
 /// Achieves ~1e-13 relative accuracy, which is more than sufficient for
 /// Levenberg-Marquardt fitting where the solver converges to ~1e-8.
@@ -78,7 +78,7 @@ unsafe fn simd_exp_fast(x: __m256d) -> __m256d {
 
 /// Batch build normal equations (J^T J, J^T r, chi²) using AVX2+FMA.
 ///
-/// For N=6 (Gaussian2D), accumulates 21 upper-triangle hessian elements,
+/// For N=6 (`Gaussian2D`), accumulates 21 upper-triangle hessian elements,
 /// 6 gradient elements, and chi² directly in AVX2 registers (28 total).
 ///
 /// # Safety
@@ -348,7 +348,7 @@ mod tests {
 
     use crate::stacking::star_detection::centroid::gaussian_fit::simd::avx2::*;
 
-    /// Test that simd_exp_fast produces results close to std exp().
+    /// Test that `simd_exp_fast` produces results close to std `exp()`.
     #[test]
     fn simd_exp_fast_accuracy() {
         if !imaginarium::cpu_features::has_avx2_fma() {
@@ -383,7 +383,7 @@ mod tests {
         }
     }
 
-    /// Test simd_exp_fast with the typical Gaussian exponent range.
+    /// Test `simd_exp_fast` with the typical Gaussian exponent range.
     #[test]
     fn simd_exp_fast_gaussian_range() {
         if !imaginarium::cpu_features::has_avx2_fma() {
@@ -393,7 +393,7 @@ mod tests {
         // Gaussian fitting exponents are always ≤ 0: -0.5 * r²/σ²
         // For stamp_radius=15, sigma=1.0: max |exponent| = 0.5 * 15² = 112.5
         for i in 0..1000 {
-            let x = -(i as f64) * 0.5; // Range: 0 to -500
+            let x = -f64::from(i) * 0.5; // Range: 0 to -500
             let input = [x; 4];
             let result = unsafe {
                 let v = _mm256_loadu_pd(input.as_ptr());

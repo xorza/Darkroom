@@ -153,7 +153,7 @@ fn bayer_removes_cosmic_rays_preserves_star() {
     let size = Size2us::new(48, 48);
     let mut data = Buffer2::new_filled(size.width, size.height, 0.05f32);
     let mut rng = TestRng::new(11);
-    for v in data.iter_mut() {
+    for v in &mut data {
         *v += rng.next_gaussian_f32() * 0.003;
     }
     SyntheticStar::new(
@@ -215,7 +215,7 @@ fn bayer_tight_star_eaten_is_a_known_limitation() {
     let size = Size2us::new(48, 48);
     let mut data = Buffer2::new_filled(size.width, size.height, 0.05f32);
     let mut rng = TestRng::new(13);
-    for v in data.iter_mut() {
+    for v in &mut data {
         *v += rng.next_gaussian_f32() * 0.003;
     }
     // σ=1.0 → FWHM≈2.35 px in the mosaic

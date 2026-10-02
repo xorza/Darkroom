@@ -46,7 +46,7 @@ fn zero_distortion_produces_zero_correction() {
 
     for y in (0..=400).step_by(100) {
         for x in (0..=400).step_by(100) {
-            let p = DVec2::new(x as f64, y as f64);
+            let p = DVec2::new(f64::from(x), f64::from(y));
             ref_points.push(p);
             target_points.push(p);
         }
@@ -63,20 +63,10 @@ fn zero_distortion_produces_zero_correction() {
 
     // Verify all coefficients are essentially zero
     for (i, &c) in sip.coeffs_u.iter().enumerate() {
-        assert!(
-            c.abs() < 1e-12,
-            "coeffs_u[{}] should be ~0, got {:.e}",
-            i,
-            c
-        );
+        assert!(c.abs() < 1e-12, "coeffs_u[{i}] should be ~0, got {c:.e}");
     }
     for (i, &c) in sip.coeffs_v.iter().enumerate() {
-        assert!(
-            c.abs() < 1e-12,
-            "coeffs_v[{}] should be ~0, got {:.e}",
-            i,
-            c
-        );
+        assert!(c.abs() < 1e-12, "coeffs_v[{i}] should be ~0, got {c:.e}");
     }
 
     // Corrections at all points should be zero
@@ -194,9 +184,7 @@ fn max_correction_at_corners() {
 
     assert!(
         max_corr > expected_corner_correction * 0.9,
-        "Max correction {:.4} should be close to expected corner correction {:.4}",
-        max_corr,
-        expected_corner_correction
+        "Max correction {max_corr:.4} should be close to expected corner correction {expected_corner_correction:.4}"
     );
 
     // Also verify max_correction at center region is much smaller
@@ -206,8 +194,7 @@ fn max_correction_at_corners() {
     let center_correction = (sip.correct(center) - center).length();
     assert!(
         center_correction < 1e-10,
-        "Correction at center should be ~0, got {:.e}",
-        center_correction
+        "Correction at center should be ~0, got {center_correction:.e}"
     );
 }
 
@@ -218,7 +205,7 @@ fn max_correction_zero_distortion() {
     let mut target_points = Vec::new();
     for y in (0..=400).step_by(100) {
         for x in (0..=400).step_by(100) {
-            let p = DVec2::new(x as f64, y as f64);
+            let p = DVec2::new(f64::from(x), f64::from(y));
             ref_points.push(p);
             target_points.push(p);
         }
@@ -236,8 +223,7 @@ fn max_correction_zero_distortion() {
     let max_corr = sip.max_correction(Size2us::new(400, 400), 100.0);
     assert!(
         max_corr < 1e-8,
-        "Zero distortion max_correction should be ~0, got {:.e}",
-        max_corr
+        "Zero distortion max_correction should be ~0, got {max_corr:.e}"
     );
 }
 
@@ -273,11 +259,10 @@ fn compute_corrected_residuals_all_small_for_fitted_data() {
     let sip = fit_sip(&ref_points, &target_points, &transform, &config).polynomial;
 
     let residuals = sip.compute_corrected_residuals(&ref_points, &target_points, &transform);
-    let max_residual = residuals.iter().cloned().fold(0.0_f64, f64::max);
+    let max_residual = residuals.iter().copied().fold(0.0_f64, f64::max);
     assert!(
         max_residual < 0.05,
-        "Max individual residual should be small, got {:.6}",
-        max_residual
+        "Max individual residual should be small, got {max_residual:.6}"
     );
 }
 
@@ -294,7 +279,7 @@ fn higher_order_fits_higher_order_distortion_better() {
 
     for y in (0..=1000).step_by(50) {
         for x in (0..=1000).step_by(50) {
-            let p = DVec2::new(x as f64, y as f64);
+            let p = DVec2::new(f64::from(x), f64::from(y));
             let d = p - center;
             let r2 = d.length_squared();
             let r4 = r2 * r2;
@@ -325,13 +310,11 @@ fn higher_order_fits_higher_order_distortion_better() {
     // Order 4 should fit the 4th-order component much better than order 2
     assert!(
         rms_4 < rms_2,
-        "Order 4 RMS ({:.6}) should be less than order 2 RMS ({:.6})",
-        rms_4,
-        rms_2
+        "Order 4 RMS ({rms_4:.6}) should be less than order 2 RMS ({rms_2:.6})"
     );
     // Order 4 should produce a reasonably tight fit
     // (SIP polynomials are not exact for r^4 terms due to cross-term modeling)
-    assert!(rms_4 < 0.5, "Order 4 RMS should be small: {:.6}", rms_4);
+    assert!(rms_4 < 0.5, "Order 4 RMS should be small: {rms_4:.6}");
 }
 
 #[test]
@@ -361,7 +344,6 @@ fn different_k_values_produce_different_corrections() {
     let ratio = corr_2 / corr_1;
     assert!(
         (ratio - 5.0).abs() < 0.5,
-        "Correction ratio should be ~5.0 (k ratio), got {:.4}",
-        ratio
+        "Correction ratio should be ~5.0 (k ratio), got {ratio:.4}"
     );
 }

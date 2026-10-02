@@ -1,7 +1,7 @@
 //! SIMD-accelerated background estimation utilities.
 //!
 //! This module provides runtime dispatch to the best available SIMD implementation:
-//! - AVX2/SSE on x86_64
+//! - AVX2/SSE on `x86_64`
 //! - NEON on aarch64
 //! - Scalar fallback on other platforms
 

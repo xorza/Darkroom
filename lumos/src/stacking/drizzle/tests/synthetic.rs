@@ -51,7 +51,7 @@ fn drizzle_frames(
 }
 
 fn sum(px: &[f32]) -> f64 {
-    px.iter().map(|&v| v as f64).sum()
+    px.iter().map(|&v| f64::from(v)).sum()
 }
 
 fn peak(px: &[f32]) -> f32 {
@@ -65,7 +65,7 @@ fn star_centroid(px: &[f32], size: Size2us) -> DVec2 {
     let mut sy = 0.0;
     for y in 0..size.height {
         for x in 0..size.width {
-            let v = px[size.index_of(Vec2us::new(x, y))] as f64;
+            let v = f64::from(px[size.index_of(Vec2us::new(x, y))]);
             s += v;
             sx += v * x as f64;
             sy += v * y as f64;
@@ -108,7 +108,7 @@ fn drizzle_conserves_total_flux() {
         )
         .unwrap();
         let out_flux = sum(result.image.channel(0).pixels());
-        let expected = single_flux * (scale * scale) as f64;
+        let expected = single_flux * f64::from(scale * scale);
         assert!(
             (out_flux - expected).abs() < expected * 0.05,
             "scale {scale}: Σ_out {out_flux:.3} vs scale²·Σ_in {expected:.3}"
@@ -146,16 +146,16 @@ fn drizzle_places_star_at_scaled_truth_position() {
     let out = result.image.channel(0);
     let center = star_centroid(out.pixels(), Size2us::new(out.width(), out.height()));
     assert!(
-        (center.x - pos.x * scale as f64).abs() < 1.0,
+        (center.x - pos.x * f64::from(scale)).abs() < 1.0,
         "centroid x {:.2} vs pos·scale {}",
         center.x,
-        pos.x * scale as f64
+        pos.x * f64::from(scale)
     );
     assert!(
-        (center.y - pos.y * scale as f64).abs() < 1.0,
+        (center.y - pos.y * f64::from(scale)).abs() < 1.0,
         "centroid y {:.2} vs pos·scale {}",
         center.y,
-        pos.y * scale as f64
+        pos.y * f64::from(scale)
     );
 }
 

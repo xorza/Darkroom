@@ -25,7 +25,7 @@ use crate::stacking::registration::tests::helpers::{
 const FWHM_LOOSE: f32 = 3.34; // max_sigma ~1.67
 const FWHM_SUBPIXEL: f32 = 0.66; // max_sigma ~0.33
 
-/// Standard config for robustness tests: min_stars=6, min_matches=4.
+/// Standard config for robustness tests: `min_stars=6`, `min_matches=4`.
 fn robustness_config(transform_type: TransformType) -> Config {
     Config {
         transform_type: TransformModel::Fixed(transform_type),
@@ -184,8 +184,7 @@ fn outlier_rejection_20_percent_spurious() {
 
     assert!(
         max_error < 2.0,
-        "Max transformation error too large with 20% spurious: {} pixels",
-        max_error
+        "Max transformation error too large with 20% spurious: {max_error} pixels"
     );
 }
 
@@ -302,15 +301,11 @@ fn partial_overlap_diagonal() {
 
     assert!(
         (recovered_dx - dx).abs() < 1.0,
-        "X translation error with diagonal overlap: expected {}, got {}",
-        dx,
-        recovered_dx
+        "X translation error with diagonal overlap: expected {dx}, got {recovered_dx}"
     );
     assert!(
         (recovered_dy - dy).abs() < 1.0,
-        "Y translation error with diagonal overlap: expected {}, got {}",
-        dy,
-        recovered_dy
+        "Y translation error with diagonal overlap: expected {dy}, got {recovered_dy}"
     );
 }
 
@@ -366,15 +361,11 @@ fn subpixel_translation_half_pixel() {
 
     assert!(
         (recovered_dx - dx).abs() < 0.1,
-        "Half-pixel X error: expected {}, got {}",
-        dx,
-        recovered_dx
+        "Half-pixel X error: expected {dx}, got {recovered_dx}"
     );
     assert!(
         (recovered_dy - dy).abs() < 0.1,
-        "Half-pixel Y error: expected {}, got {}",
-        dy,
-        recovered_dy
+        "Half-pixel Y error: expected {dy}, got {recovered_dy}"
     );
 }
 
@@ -422,10 +413,7 @@ fn subpixel_scale() {
     // Should recover 0.1% scale within 0.05%
     assert!(
         scale_error < 0.0005,
-        "Subpixel scale error: expected {}, got {}, error {}",
-        scale,
-        recovered_scale,
-        scale_error
+        "Subpixel scale error: expected {scale}, got {recovered_scale}, error {scale_error}"
     );
 }
 
@@ -454,15 +442,11 @@ fn minimum_stars_translation() {
 
     assert!(
         (recovered_dx - dx).abs() < 0.5,
-        "Translation error with 6 stars: expected {}, got {}",
-        dx,
-        recovered_dx
+        "Translation error with 6 stars: expected {dx}, got {recovered_dx}"
     );
     assert!(
         (recovered_dy - dy).abs() < 0.5,
-        "Translation error with 6 stars: expected {}, got {}",
-        dy,
-        recovered_dy
+        "Translation error with 6 stars: expected {dy}, got {recovered_dy}"
     );
 }
 
@@ -497,8 +481,7 @@ fn minimum_stars_similarity() {
 
     assert!(
         max_error < 1.0,
-        "Max error with 8 stars: {} pixels",
-        max_error
+        "Max error with 8 stars: {max_error} pixels"
     );
 }
 
@@ -556,9 +539,7 @@ fn stress_transform_noise_outliers() {
 
     assert!(
         rotation_error < 0.02,
-        "Rotation error under stress: expected {} rad, got {} rad",
-        angle_rad,
-        recovered_angle
+        "Rotation error under stress: expected {angle_rad} rad, got {recovered_angle} rad"
     );
 
     assert!(
@@ -607,7 +588,7 @@ fn stress_partial_overlap_with_noise() {
             let new_y = sin_a * r.x + cos_a * r.y + center.y + offset.y;
             (50.0..=1950.0).contains(&new_x) && (50.0..=1950.0).contains(&new_y)
         })
-        .cloned()
+        .copied()
         .collect();
 
     let config = robustness_config(TransformType::Euclidean);
@@ -620,9 +601,7 @@ fn stress_partial_overlap_with_noise() {
 
     assert!(
         rotation_error < 0.03,
-        "Rotation error with overlap+noise: {} vs {}",
-        recovered_angle,
-        angle_rad
+        "Rotation error with overlap+noise: {recovered_angle} vs {angle_rad}"
     );
 }
 
@@ -650,9 +629,7 @@ fn stress_dense_field_large_transform() {
 
     assert!(
         scale_error < 0.002,
-        "Scale error in dense field: expected {}, got {}",
-        scale,
-        recovered_scale
+        "Scale error in dense field: expected {scale}, got {recovered_scale}"
     );
 
     // Should match many stars in dense field
@@ -703,8 +680,7 @@ fn large_rotation_45_degrees() {
 
     assert!(
         max_error < 1.0,
-        "Max transformation error with 45° rotation: {} pixels",
-        max_error
+        "Max transformation error with 45° rotation: {max_error} pixels"
     );
 }
 
@@ -747,8 +723,7 @@ fn large_rotation_90_degrees() {
 
     assert!(
         max_error < 1.0,
-        "Max transformation error with 90° rotation: {} pixels",
-        max_error
+        "Max transformation error with 90° rotation: {max_error} pixels"
     );
 }
 
@@ -804,10 +779,7 @@ fn extreme_scale_2x() {
 
     assert!(
         scale_error < 0.01,
-        "2x scale error too large: expected {}, got {}, error {}",
-        scale,
-        recovered_scale,
-        scale_error
+        "2x scale error too large: expected {scale}, got {recovered_scale}, error {scale_error}"
     );
 
     // Validate transform accuracy
@@ -820,8 +792,7 @@ fn extreme_scale_2x() {
 
     assert!(
         max_error < 2.0,
-        "Max transformation error with 2x scale: {} pixels",
-        max_error
+        "Max transformation error with 2x scale: {max_error} pixels"
     );
 }
 
@@ -846,10 +817,7 @@ fn extreme_scale_half() {
 
     assert!(
         scale_error < 0.01,
-        "0.5x scale error too large: expected {}, got {}, error {}",
-        scale,
-        recovered_scale,
-        scale_error
+        "0.5x scale error too large: expected {scale}, got {recovered_scale}, error {scale_error}"
     );
 
     let mut max_error = 0.0f64;
@@ -861,8 +829,7 @@ fn extreme_scale_half() {
 
     assert!(
         max_error < 2.0,
-        "Max transformation error with 0.5x scale: {} pixels",
-        max_error
+        "Max transformation error with 0.5x scale: {max_error} pixels"
     );
 }
 
@@ -892,9 +859,7 @@ fn extreme_scale_with_rotation() {
 
     assert!(
         scale_error < 0.01,
-        "Combined scale error: expected {}, got {}",
-        scale,
-        recovered_scale
+        "Combined scale error: expected {scale}, got {recovered_scale}"
     );
 
     let recovered_angle = result.transform().rotation_angle();
@@ -943,8 +908,7 @@ fn affine_with_outliers() {
 
     assert!(
         max_error < 2.0,
-        "Max affine transformation error with outliers: {} pixels",
-        max_error
+        "Max affine transformation error with outliers: {max_error} pixels"
     );
 }
 
@@ -1024,8 +988,7 @@ fn homography_with_outliers() {
 
     assert!(
         max_error < 3.0,
-        "Max homography transformation error with outliers: {} pixels",
-        max_error
+        "Max homography transformation error with outliers: {max_error} pixels"
     );
 }
 
@@ -1056,7 +1019,7 @@ fn homography_with_noise_and_partial_overlap() {
             let new_y = s.pos.y / w;
             (50.0..=1950.0).contains(&new_x) && (50.0..=1950.0).contains(&new_y)
         })
-        .cloned()
+        .copied()
         .collect();
 
     let config = Config {

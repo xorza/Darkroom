@@ -111,7 +111,7 @@ fn register_two_calibrated_lights() {
 
     println!("Registration result:");
     println!("  Matched stars: {}", result.num_inliers());
-    println!("  RMS error:     {:.4} pixels", baseline_rms);
+    println!("  RMS error:     {baseline_rms:.4} pixels");
     println!("  Elapsed:       {:.1} ms", result.elapsed_ms());
 
     let t = result.transform().translation_components();
@@ -176,9 +176,9 @@ fn register_two_calibrated_lights() {
     let improvement = (baseline_rms - sip_rms) / baseline_rms * 100.0;
 
     println!("\nSIP correction (order 4) on same inliers:");
-    println!("  Baseline RMS:      {:.4} pixels", baseline_rms);
-    println!("  With SIP RMS:      {:.4} pixels", sip_rms);
-    println!("  Improvement:       {:.1}%", improvement);
+    println!("  Baseline RMS:      {baseline_rms:.4} pixels");
+    println!("  With SIP RMS:      {sip_rms:.4} pixels");
+    println!("  Improvement:       {improvement:.1}%");
     println!(
         "  Max SIP correction: {:.4} pixels",
         sip.polynomial
@@ -187,9 +187,7 @@ fn register_two_calibrated_lights() {
 
     assert!(
         sip_rms <= baseline_rms + 1e-10,
-        "SIP should not worsen RMS: baseline={:.4}, sip={:.4}",
-        baseline_rms,
-        sip_rms
+        "SIP should not worsen RMS: baseline={baseline_rms:.4}, sip={sip_rms:.4}"
     );
 
     assert!(
@@ -288,7 +286,7 @@ fn bench_register_and_warp_all(b: ::quickbench::Bencher) {
             let result = match register(ref_stars, target_stars, &reg_config) {
                 Ok(r) => r,
                 Err(e) => {
-                    println!("  {:?}: FAILED ({:?}), skipping", name, e);
+                    println!("  {name:?}: FAILED ({e:?}), skipping");
                     continue;
                 }
             };

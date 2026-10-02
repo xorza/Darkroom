@@ -117,7 +117,6 @@ impl Badge {
     }
 
     /// A read-only descriptor pill. `salt` is its stable id for the tooltip.
-    #[allow(clippy::self_named_constructors)]
     pub(crate) fn marker(
         salt: &'static str,
         glyph: &'static str,

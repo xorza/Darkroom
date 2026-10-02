@@ -59,7 +59,7 @@ struct GaussianFitDebug {
 }
 
 /// 2D Gaussian model for L-M optimization (6 parameters).
-/// Parameters: [x0, y0, amplitude, sigma_x, sigma_y, background]
+/// Parameters: [x0, y0, amplitude, `sigma_x`, `sigma_y`, background]
 #[derive(Debug)]
 struct Gaussian2D {
     stamp_radius: f64,
@@ -137,14 +137,14 @@ impl GaussianFit {
         let fit = StampFit::prepare::<6>(pixels, pos, grid, background, noise)?;
 
         // Both axes start from the same circular seed; the fit pulls them apart.
-        let sigma_est = fit.sigma_est as f64;
+        let sigma_est = f64::from(fit.sigma_est);
         let initial_params: [f64; 6] = [
             fit.local_pos.x,
             fit.local_pos.y,
             fit.amplitude_seed(background),
             sigma_est,
             sigma_est,
-            background as f64,
+            f64::from(background),
         ];
 
         let model = Gaussian2D {

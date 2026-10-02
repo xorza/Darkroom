@@ -16,12 +16,12 @@ use crate::stacking::registration::triangle::geometry::Triangle;
 /// Threshold for switching between dense and sparse vote matrix storage.
 ///
 /// When `n_ref * n_target < DENSE_VOTE_THRESHOLD`, use a dense Vec<u16> matrix.
-/// Otherwise, use a sparse HashMap for memory efficiency.
+/// Otherwise, use a sparse `HashMap` for memory efficiency.
 ///
 /// Memory analysis at threshold (250,000 entries):
 /// - Dense: 250,000 * 2 bytes (u16) = 500 KB
 /// - Sparse: Only stores non-zero votes, but each entry costs ~40 bytes
-///   (key: 16 bytes + value: 8 bytes + HashMap overhead)
+///   (key: 16 bytes + value: 8 bytes + `HashMap` overhead)
 ///
 /// Dense is faster for small point counts due to direct indexing (O(1) vs hash lookup).
 /// For 500x500 points (250K entries), dense is still preferred. Beyond that, sparse wins.
@@ -56,10 +56,10 @@ impl PointMatch {
     }
 }
 
-/// Vote matrix storage - either dense (Vec) or sparse (HashMap).
+/// Vote matrix storage - either dense (Vec) or sparse (`HashMap`).
 #[derive(Debug)]
 pub(super) enum VoteMatrix {
-    /// Dense storage for small point counts: votes[ref_idx * n_target + target_idx]
+    /// Dense storage for small point counts: votes[`ref_idx` * `n_target` + `target_idx`]
     Dense { votes: Vec<u16>, n_target: usize },
     /// Sparse storage for large point counts (u32 saves memory vs usize)
     Sparse(HashMap<(usize, usize), u32>),
@@ -86,9 +86,7 @@ impl VoteMatrix {
                 let new_val = votes[idx].saturating_add(1);
                 debug_assert!(
                     new_val < u16::MAX,
-                    "Vote overflow: too many matching triangles for point pair ({}, {})",
-                    ref_idx,
-                    target_idx
+                    "Vote overflow: too many matching triangles for point pair ({ref_idx}, {target_idx})"
                 );
                 votes[idx] = new_val;
             }
@@ -148,7 +146,7 @@ pub(super) fn build_invariant_tree(triangles: &[Triangle]) -> Option<KdTree> {
 /// based on the sorted side lengths (vertices correspond by position in sorted order).
 ///
 /// Uses dense matrix for small point counts (faster due to direct indexing),
-/// sparse HashMap for large counts (memory efficient).
+/// sparse `HashMap` for large counts (memory efficient).
 pub(super) fn vote_for_correspondences(
     target_triangles: &[Triangle],
     ref_triangles: &[Triangle],

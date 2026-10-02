@@ -938,21 +938,17 @@ fn sigma_clipped_stats_iterations_improve_result() {
     // 0 iterations: no clipping, median biased to 0.32 by outlier presence
     assert!(
         (median_0iter - 0.32).abs() < 1e-6,
-        "0 iterations should give 0.32, got {}",
-        median_0iter
+        "0 iterations should give 0.32, got {median_0iter}"
     );
     // 3 iterations: clipping removes outliers, converges to true median 0.30
     assert!(
         (median_3iter - 0.30).abs() < 1e-6,
-        "3 iterations should recover true median 0.30, got {}",
-        median_3iter
+        "3 iterations should recover true median 0.30, got {median_3iter}"
     );
     // Clipping brings result closer to true center
     assert!(
         (median_3iter - 0.30).abs() < (median_0iter - 0.30).abs(),
-        "3 iterations median {} should be closer to 0.30 than 0 iterations {}",
-        median_3iter,
-        median_0iter
+        "3 iterations median {median_3iter} should be closer to 0.30 than 0 iterations {median_0iter}"
     );
 }
 

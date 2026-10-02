@@ -149,17 +149,17 @@ impl StackableImage for CfaImage {
         self.quantization_sigma
     }
 
-    fn load(path: &std::path::Path, context: &LoadContext) -> Result<Self, ImageError> {
+    fn load(path: &Path, context: &LoadContext) -> Result<Self, ImageError> {
         CfaImage::from_file(path, context)
     }
 
-    fn peek(path: &std::path::Path, context: &LoadContext) -> Option<FramePeek> {
+    fn peek(path: &Path, context: &LoadContext) -> Option<FramePeek> {
         CfaFrameInfo::from_file(path, context)
             .ok()
             .map(FramePeek::from)
     }
 
-    fn into_planes(self) -> arrayvec::ArrayVec<imaginarium::Buffer2<f32>, 3> {
+    fn into_planes(self) -> arrayvec::ArrayVec<Buffer2<f32>, 3> {
         let mut planes = arrayvec::ArrayVec::new();
         planes.push(self.data);
         planes
@@ -206,7 +206,7 @@ impl CfaImage {
     /// Resident RAM held by this frame: its single f32 CFA plane's pixel bytes.
     /// Metadata is negligible against a full-sensor plane.
     pub fn ram_bytes(&self) -> usize {
-        self.data.width() * self.data.height() * std::mem::size_of::<f32>()
+        self.data.width() * self.data.height() * size_of::<f32>()
     }
 
     /// Save this sensor-domain image as a checksummed floating-point FITS file.
@@ -241,7 +241,7 @@ impl CfaImage {
         }
     }
 
-    /// Demosaic this CFA image into a 3-channel LinearImage.
+    /// Demosaic this CFA image into a 3-channel `LinearImage`.
     /// Consumes self.
     pub(crate) fn demosaic(mut self, cancel: &CancelToken) -> Result<LinearImage, DemosaicError> {
         self.repair_nulls();
@@ -305,7 +305,7 @@ impl CfaImage {
         })
     }
 
-    /// Subtract another CfaImage pixel-by-pixel (dark subtraction).
+    /// Subtract another `CfaImage` pixel-by-pixel (dark subtraction).
     ///
     /// May produce negative pixel values when dark noise exceeds signal.
     /// This is intentional: the f32 pipeline preserves negatives, and stacking

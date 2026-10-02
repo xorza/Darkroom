@@ -205,12 +205,12 @@ fn collect_samples(
 
     let mut samples = Vec::with_capacity(grid.stats.width() * grid.stats.height());
     for ty in 0..grid.stats.height() {
-        let y = norm(grid.centers_y[ty] as f64, size.height);
+        let y = norm(f64::from(grid.centers_y[ty]), size.height);
         for (tx, &cx) in grid.centers_x.iter().enumerate() {
             samples.push(Sample {
-                x: norm(cx as f64, size.width),
+                x: norm(f64::from(cx), size.width),
                 y,
-                z: grid.stats[(tx, ty)].sky as f64,
+                z: f64::from(grid.stats[(tx, ty)].sky),
             });
         }
     }
@@ -300,7 +300,7 @@ fn fit_surface(
         if sigma <= 0.0 {
             break;
         }
-        let thresh = kappa as f64 * sigma;
+        let thresh = f64::from(kappa) * sigma;
         let kept: Vec<Sample> = active
             .iter()
             .zip(&residuals)
@@ -410,7 +410,7 @@ fn axis_moments(n: usize, d1: usize) -> [f64; 5] {
     for k in 0..n {
         let t = norm(k as f64, n);
         let mut p = 1.0;
-        for moment in moments[..d1].iter_mut() {
+        for moment in &mut moments[..d1] {
             *moment += p;
             p *= t;
         }

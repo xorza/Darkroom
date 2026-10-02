@@ -52,7 +52,7 @@ impl BackgroundField {
         match self {
             BackgroundField::Uniform { level } => add_uniform_background(&mut pixels, *level),
             BackgroundField::Gradient { start, end, angle } => {
-                add_gradient_background(&mut pixels, size, *start, *end, *angle)
+                add_gradient_background(&mut pixels, size, *start, *end, *angle);
             }
             BackgroundField::Vignette {
                 center,
@@ -165,8 +165,8 @@ impl Scene {
             let pos = if i < core_count {
                 // Rejection-sample a central Gaussian back into bounds.
                 loop {
-                    let x = cx + rng.next_gaussian_f32() as f64 * core_sigma;
-                    let y = cy + rng.next_gaussian_f32() as f64 * core_sigma;
+                    let x = cx + f64::from(rng.next_gaussian_f32()) * core_sigma;
+                    let y = cy + f64::from(rng.next_gaussian_f32()) * core_sigma;
                     if x >= margin
                         && x < size.width as f64 - margin
                         && y >= margin

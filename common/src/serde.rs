@@ -256,7 +256,7 @@ mod tests {
         let bytes = serialize(&value, SerdeFormat::Lz4).unwrap();
         let expected_size = u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize;
         let payload = lz4_flex::block::decompress(&bytes[4..], expected_size).unwrap();
-        assert_eq!(payload, br#"[1,2,3,1000,-42]"#);
+        assert_eq!(payload, br"[1,2,3,1000,-42]");
         let back: Vec<i64> = deserialize(&bytes, SerdeFormat::Lz4).unwrap();
         assert_eq!(back, value);
     }

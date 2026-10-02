@@ -76,7 +76,7 @@ fn clahe_increases_low_contrast() {
 #[test]
 fn clahe_tile_mappings_are_monotonic() {
     let px: Vec<f32> = (0..80 * 80)
-        .map(|i| ((i % 80) as f32 / 79.0 + (i / 80) as f32 / 79.0) * 0.5)
+        .map(|i| f32::midpoint((i % 80) as f32 / 79.0, (i / 80) as f32 / 79.0))
         .collect();
     let intensity = Buffer2::new(80, 80, px);
     let luts = build_tile_luts(&intensity, 4, 2.0);

@@ -137,7 +137,7 @@ pub(super) fn windowed_covariance(
                     Some(local) => local.bg,
                     None => bg_row[x],
                 };
-                let wv = column_weight * row_weight * (px_row[x] - bg) as f64;
+                let wv = column_weight * row_weight * f64::from(px_row[x] - bg);
                 w_sum += wv;
                 mxx += wv * fx * fx;
                 myy += wv * fy * fy;

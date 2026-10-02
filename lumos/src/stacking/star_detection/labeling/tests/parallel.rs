@@ -99,8 +99,7 @@ fn strip_boundary_vertical_line() {
         assert_eq!(
             label_map[y * width + 200],
             label,
-            "Pixel at y={} should have same label",
-            y
+            "Pixel at y={y} should have same label"
         );
     }
 }
@@ -275,8 +274,7 @@ fn one_pattern_labels_the_same_at_any_size() {
         let label_map = LabelMap::from_mask(&mask, Connectivity::Four);
 
         // Count expected: one component per line
-        let expected_lines =
-            (size.height - 5) / 10 + if (size.height - 5) % 10 >= 1 { 1 } else { 0 };
+        let expected_lines = (size.height - 5) / 10 + usize::from((size.height - 5) % 10 >= 1);
         (label_map.num_labels(), expected_lines)
     };
 

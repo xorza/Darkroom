@@ -5,8 +5,13 @@
 // signal as `common::is_debug`; `release-max` inherits `release`, so it has it
 // off and gets the GUI subsystem.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![deny(unsafe_code)]
 
 #[cfg(test)]
+#[expect(
+    unsafe_code,
+    reason = "a `GlobalAlloc` is an `unsafe` trait; the audit counts allocations"
+)]
 mod alloc_audit;
 mod core;
 mod gui;

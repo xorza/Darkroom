@@ -88,7 +88,7 @@ fn form_triangles_from_neighbors_no_duplicates() {
     let triangles = form_triangles_from_neighbors(&tree, 5);
 
     let mut sorted = triangles.clone();
-    sorted.sort();
+    sorted.sort_unstable();
     sorted.dedup();
     assert_eq!(sorted.len(), triangles.len(), "Found duplicate triangles");
 }

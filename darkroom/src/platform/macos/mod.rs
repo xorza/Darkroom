@@ -7,6 +7,10 @@ use std::process::Command;
 use crate::gui::HostHandle;
 use crate::gui::app::App;
 
+#[expect(
+    unsafe_code,
+    reason = "adds an Objective-C method to the winit delegate class"
+)]
 pub(crate) mod open_files;
 
 /// The delegate patch has to land after `EventLoop::new` built the delegate

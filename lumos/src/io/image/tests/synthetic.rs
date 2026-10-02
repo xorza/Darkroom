@@ -1,7 +1,7 @@
 //! Load/decode round-trip tests on synthetic frames.
 //!
 //! `fits-well` ships a `FitsWriter`, so a synthetic FITS can be written and read back through the
-//! real `load_linear_fits` path — exercising BitPix selection, the unsigned-via-BZERO convention,
+//! real `load_linear_fits` path — exercising `BitPix` selection, the unsigned-via-BZERO convention,
 //! the division of integer samples into the `[0, 1]` domain (and the float path's exemption from
 //! it), and both halves of the null convention. The demosaic path is exercised by building mosaics
 //! from known colours and demosaicing them back.
@@ -547,7 +547,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     assert_eq!(
         <CfaImage as StackableImage>::peek(&path, &LoadContext::default()),
         Some(FramePeek {
-            dimensions: crate::ImageDimensions::new((size.width, size.height), 1),
+            dimensions: ImageDimensions::new((size.width, size.height), 1),
             may_carry_nulls: true,
         })
     );
@@ -689,7 +689,7 @@ fn demosaic_uniform_bayer_recovers_colour() {
         for y in 6..size.height - 6 {
             for x in 6..size.width - 6 {
                 let v = ch[size.index_of(Vec2us::new(x, y))];
-                sum += v as f64;
+                sum += f64::from(v);
                 devs.push((v - true_c).abs());
             }
         }

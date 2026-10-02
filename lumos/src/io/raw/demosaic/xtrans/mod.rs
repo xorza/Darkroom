@@ -170,7 +170,7 @@ impl XTransPattern {
 /// Pixel data source: either raw u16 sensor values or calibrated f32.
 ///
 /// The u16 path is used by the raw loader (saves ~47 MB by deferring normalization).
-/// The f32 path is used by CfaImage after calibration (avoids lossy f32->u16 roundtrip).
+/// The f32 path is used by `CfaImage` after calibration (avoids lossy f32->u16 roundtrip).
 #[derive(Debug)]
 enum PixelSource<'a> {
     U16(&'a [u16]),
@@ -199,7 +199,7 @@ pub(crate) struct XTransImage<'a> {
     pub(crate) raw_pattern: XTransPattern,
     /// Per-channel black levels [R=0, G=1, B=2] for u16 path normalization.
     channel_black: [f32; 3],
-    /// 1.0 / (maximum - common_black) for normalization (u16 path only).
+    /// 1.0 / (maximum - `common_black`) for normalization (u16 path only).
     inv_range: f32,
 }
 
@@ -238,7 +238,7 @@ impl<'a> XTransImage<'a> {
 
     /// Create from calibrated f32 data, including negative and above-unity samples.
     ///
-    /// Used by CfaImage after calibration to avoid lossy f32->u16->f32 roundtrip.
+    /// Used by `CfaImage` after calibration to avoid lossy f32->u16->f32 roundtrip.
     pub(crate) fn with_margins_f32(
         data: &'a [f32],
         layout: SensorLayout,
@@ -270,12 +270,12 @@ impl<'a> XTransImage<'a> {
         let idx = raw_y * self.raw.width + raw_x;
         match &self.data {
             PixelSource::U16(data) => {
-                let val = data[idx] as f32;
+                let val = f32::from(data[idx]);
                 let ch = self.raw_pattern.color_at(Vec2us::new(raw_x, raw_y)) as usize;
                 ((val - self.channel_black[ch]).max(0.0) * self.inv_range).min(1.0)
             }
             PixelSource::U16WithRepeat { data, repeat } => {
-                let val = data[idx] as f32;
+                let val = f32::from(data[idx]);
                 let ch = self.raw_pattern.color_at(Vec2us::new(raw_x, raw_y)) as usize;
                 let repeat_delta = repeat.at_raw(raw_y, raw_x, self.margin);
                 ((val - self.channel_black[ch]) * self.inv_range - repeat_delta).clamp(0.0, 1.0)

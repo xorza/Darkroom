@@ -569,7 +569,7 @@ fn both_front_ends_report_the_same_stages() {
                 reports
                     .lock()
                     .unwrap()
-                    .push((progress.stage, progress.current, progress.total))
+                    .push((progress.stage, progress.current, progress.total));
             }
         });
         (reports, callback)
@@ -783,7 +783,7 @@ fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
     let dark_paths = calibration_image_paths("Darks").unwrap_or_default();
     let bias_paths = calibration_image_paths("Bias").unwrap_or_default();
     let flat_paths = calibration_image_paths("Flats").unwrap_or_default();
-    let empty: Vec<std::path::PathBuf> = Vec::new();
+    let empty: Vec<PathBuf> = Vec::new();
     let masters = CalibrationMasters::from_files(
         CalibrationSet {
             dark: &dark_paths,
@@ -833,7 +833,7 @@ fn streaming_disk_tier_matches_ram_on_real_lights() {
     let dark_paths = calibration_image_paths("Darks").unwrap_or_default();
     let bias_paths = calibration_image_paths("Bias").unwrap_or_default();
     let flat_paths = calibration_image_paths("Flats").unwrap_or_default();
-    let empty: Vec<std::path::PathBuf> = Vec::new();
+    let empty: Vec<PathBuf> = Vec::new();
     let masters = CalibrationMasters::from_files(
         CalibrationSet {
             dark: &dark_paths,

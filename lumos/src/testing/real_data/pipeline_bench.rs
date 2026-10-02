@@ -137,7 +137,7 @@ fn bench_full_pipeline() {
     std::fs::create_dir_all(&calibrated_dir).expect("Failed to create calibrated_lights dir");
     for (path, img) in light_paths.iter().zip(calibrated.iter()) {
         let filename = path.file_stem().unwrap().to_string_lossy();
-        let out_path = calibrated_dir.join(format!("{}_calibrated.tiff", filename));
+        let out_path = calibrated_dir.join(format!("{filename}_calibrated.tiff"));
         img.save(&out_path)
             .expect("Failed to save calibrated light");
     }
@@ -207,7 +207,7 @@ fn bench_full_pipeline() {
     let registered_dir = cal_dir.join("registered_lights");
     std::fs::create_dir_all(&registered_dir).expect("Failed to create registered_lights dir");
     for (i, img) in registered.iter().enumerate() {
-        let out_path = registered_dir.join(format!("registered_{:04}.tiff", i));
+        let out_path = registered_dir.join(format!("registered_{i:04}.tiff"));
         img.save(&out_path)
             .expect("Failed to save registered light");
     }
@@ -221,7 +221,7 @@ fn bench_full_pipeline() {
     let step_start = Instant::now();
 
     let registered_paths: Vec<_> = (0..registered.len())
-        .map(|i| registered_dir.join(format!("registered_{:04}.tiff", i)))
+        .map(|i| registered_dir.join(format!("registered_{i:04}.tiff")))
         .collect();
 
     let stack_config = StackConfig {

@@ -160,7 +160,7 @@ impl BitBuffer2 {
         self.words.fill(fill);
     }
 
-    /// Copy contents from another BitBuffer2.
+    /// Copy contents from another `BitBuffer2`.
     #[inline]
     pub(crate) fn copy_from(&mut self, other: &Self) {
         assert_eq!(self.size, other.size, "size mismatch");
@@ -293,7 +293,7 @@ impl Index<(usize, usize)> for BitBuffer2 {
 // return a mutable reference to a single bit. Use `set(idx, value)` or
 // `set_at(pos, value)` methods instead.
 
-/// Convert BitBuffer2 to Vec<bool>.
+/// Convert `BitBuffer2` to Vec<bool>.
 impl From<BitBuffer2> for Vec<bool> {
     #[inline]
     fn from(buf: BitBuffer2) -> Self {
@@ -301,7 +301,7 @@ impl From<BitBuffer2> for Vec<bool> {
     }
 }
 
-/// Convert &BitBuffer2 to Vec<bool>.
+/// Convert &`BitBuffer2` to Vec<bool>.
 impl From<&BitBuffer2> for Vec<bool> {
     #[inline]
     fn from(buf: &BitBuffer2) -> Self {

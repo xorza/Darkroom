@@ -130,7 +130,7 @@ impl ActionStack {
         }
         let entry = &self.entries[self.cursor];
         let steps = Self::deserialize_steps(Self::slice_bytes(&self.actions, &entry.range));
-        for step in steps.iter() {
+        for step in &steps {
             step.apply(doc);
             on_step(step);
         }

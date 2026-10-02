@@ -114,7 +114,7 @@ const SCROLL_ZOOM_BASE: f32 = 1.0025;
 ///   rubber-band selection.
 /// - **Scroll** (`Sense::SCROLL`): mouse wheel / touchpad swipe →
 ///   zoom-about-cursor (graph-editor convention: Figma / Blender
-///   node editor / ComfyUI). Vertical delta only; horizontal is
+///   node editor / `ComfyUI`). Vertical delta only; horizontal is
 ///   ignored. Palantir ingests the scroll delta already-negated
 ///   so `+y` means "scroll content down" → zoom out, `-y` (wheel
 ///   up) → zoom in.

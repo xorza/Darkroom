@@ -31,7 +31,7 @@ pub(crate) struct DetectionMetrics {
     precision: f32,
     /// F1 score: harmonic mean of detection rate and precision
     f1_score: f32,
-    /// False positive rate: FP / total_detected
+    /// False positive rate: FP / `total_detected`
     pub(crate) false_positive_rate: f32,
 
     // Positional accuracy
@@ -137,7 +137,11 @@ pub(crate) fn compute_detection_metrics(
 ) -> DetectionMetrics {
     let truth_positions: Vec<DVec2> = ground_truth.iter().map(|s| s.pos).collect();
     let detected_positions: Vec<DVec2> = detected.iter().map(|s| s.pos).collect();
-    let pairs = match_catalogs(&truth_positions, &detected_positions, match_radius as f64);
+    let pairs = match_catalogs(
+        &truth_positions,
+        &detected_positions,
+        f64::from(match_radius),
+    );
 
     let true_positives = pairs.len();
     let false_negatives = ground_truth.len() - true_positives;
@@ -188,7 +192,7 @@ pub(crate) fn compute_detection_metrics(
         sorted[sorted.len() / 2]
     };
 
-    let max_centroid_error = centroid_errors.iter().cloned().fold(0.0, f32::max);
+    let max_centroid_error = centroid_errors.iter().copied().fold(0.0, f32::max);
 
     let std_centroid_error = if centroid_errors.len() > 1 {
         let variance = centroid_errors
@@ -256,7 +260,7 @@ pub(crate) fn compute_detection_metrics(
 /// Save metrics to a text file.
 pub(crate) fn save_metrics(metrics: &DetectionMetrics, path: &Path) {
     let mut file = File::create(path).expect("Failed to create metrics file");
-    write!(file, "{}", metrics).expect("Failed to write metrics");
+    write!(file, "{metrics}").expect("Failed to write metrics");
 }
 
 /// Pass/fail criteria for visual tests.
@@ -366,14 +370,14 @@ mod tests {
 
     fn make_truth(x: f64, y: f64) -> ObservedSource {
         ObservedSource {
-            pos: glam::DVec2::new(x, y),
+            pos: DVec2::new(x, y),
             flux: 100.0,
             fwhm: 3.0,
         }
     }
 
     fn make_det(x: f32, y: f32) -> Star {
-        Star::at(glam::DVec2::new(x as f64, y as f64)).with_eccentricity(0.0)
+        Star::at(DVec2::new(f64::from(x), f64::from(y))).with_eccentricity(0.0)
     }
 
     #[test]

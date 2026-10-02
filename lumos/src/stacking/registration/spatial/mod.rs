@@ -384,12 +384,11 @@ impl BoundedMaxHeap {
                 largest = right;
             }
 
-            if largest != idx {
-                items.swap(idx, largest);
-                idx = largest;
-            } else {
+            if largest == idx {
                 break;
             }
+            items.swap(idx, largest);
+            idx = largest;
         }
     }
 }

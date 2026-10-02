@@ -17,7 +17,7 @@ use crate::stacking::drizzle::geometry::boxer;
 const ROW_ROUNDING_SLACK: f64 = 0.5;
 /// A drop whose kernel taps sum to less than this has no normalizer worth dividing by.
 const KERNEL_WEIGHT_MIN: f32 = 1e-10;
-/// Per STScI the Gaussian's FWHM is the drop size, and `σ = FWHM / (2·√(2·ln 2))`.
+/// Per `STScI` the Gaussian's FWHM is the drop size, and `σ = FWHM / (2·√(2·ln 2))`.
 const GAUSSIAN_FWHM_PER_SIGMA: f64 = 2.3548;
 /// Where the Gaussian is truncated, in σ — it has fallen to ~1% of its peak by there.
 const GAUSSIAN_RADIUS_SIGMAS: f64 = 3.0;
@@ -225,7 +225,7 @@ impl<'a> OutputBand<'a> {
     /// coordinates, then iterates the output pixels in the bounding box and computes the exact
     /// overlap via `boxer()`.
     ///
-    /// Reference: STScI cdrizzlebox.c `do_kernel_square`.
+    /// Reference: `STScI` cdrizzlebox.c `do_kernel_square`.
     fn distribute_square(&mut self, source: &FrameSource, half_drop: f64) {
         let margin = source.quad_row_extent(half_drop) + ROW_ROUNDING_SLACK;
         self.scan(source, margin, |band, pixel| {

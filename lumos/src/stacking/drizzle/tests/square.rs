@@ -27,10 +27,7 @@ fn square_kernel_identity_uniform() {
     for (i, (&actual, &expected)) in out.iter().zip(pixels.iter()).enumerate() {
         assert!(
             (actual - expected).abs() < 1e-4,
-            "Pixel {} should be {}, got {}",
-            i,
-            expected,
-            actual
+            "Pixel {i} should be {expected}, got {actual}"
         );
     }
 }
@@ -67,8 +64,7 @@ fn square_kernel_rotation() {
     let center_coverage = result.coverage.as_ref().unwrap()[(10, 10)];
     assert!(
         center_coverage > 0.0,
-        "Center should have coverage, got {}",
-        center_coverage
+        "Center should have coverage, got {center_coverage}"
     );
 
     // All covered pixels should have value ~3.0 (uniform weighted mean)
@@ -80,9 +76,7 @@ fn square_kernel_rotation() {
     for (i, &val) in covered_pixels.iter().enumerate() {
         assert!(
             (val - 3.0).abs() < 0.05,
-            "Covered pixel {} should be ~3.0, got {}",
-            i,
-            val
+            "Covered pixel {i} should be ~3.0, got {val}"
         );
     }
 }
@@ -133,16 +127,14 @@ fn square_kernel_pixfrac() {
 
     assert!(
         covered_1 > covered_2,
-        "pixfrac=1.0 should cover more pixels ({}) than pixfrac=0.5 ({})",
-        covered_1,
-        covered_2
+        "pixfrac=1.0 should cover more pixels ({covered_1}) than pixfrac=0.5 ({covered_2})"
     );
 }
 
 /// Test square kernel with per-pixel weights.
 ///
 /// Uniform image = 5.0, pixel (1,1) excluded via weight=0.
-/// scale=1, pixfrac=1. Output (1,1) should be fill_value, others = 5.0.
+/// scale=1, pixfrac=1. Output (1,1) should be `fill_value`, others = 5.0.
 #[test]
 fn square_kernel_with_pixel_weights() {
     let image = constant_mono_image(Size2us::new(4, 4), 5.0);
@@ -323,14 +315,12 @@ fn boxer_rotated_partial_clip() {
     // The rotated square extends beyond [0,1]×[0,1], so overlap < 1.0
     assert!(
         area < 1.0,
-        "30° rotated square should partially clip, got area {}",
-        area
+        "30° rotated square should partially clip, got area {area}"
     );
     // But the center is at (0.5,0.5) so most of the area is inside
     assert!(
         area > 0.8,
-        "Most of the rotated square should be inside, got area {}",
-        area
+        "Most of the rotated square should be inside, got area {area}"
     );
 
     // Verified by Python reference implementation of sgarea/boxer:
@@ -342,9 +332,7 @@ fn boxer_rotated_partial_clip() {
     let expected = 0.845299;
     assert!(
         (area - expected).abs() < 1e-4,
-        "Expected overlap ~{:.6}, got {:.6}",
-        expected,
-        area
+        "Expected overlap ~{expected:.6}, got {area:.6}"
     );
 }
 
@@ -423,16 +411,16 @@ fn square_matches_turbo_only_while_the_drop_stays_axis_aligned() {
 /// Rotate 15° around center. Total input flux = 4*4*10 + (400-16)*1 = 544.
 ///
 /// After drizzle at scale=1, pixfrac=1 with Square kernel, the total weighted flux
-/// should be conserved: sum(data) = sum(original_flux * weight), and since each
+/// should be conserved: sum(data) = `sum(original_flux` * weight), and since each
 /// input pixel's total weight contribution sums to ~1.0 (for interior pixels where
 /// the full drop lands on the output grid), the total output flux should approximate
 /// the total input flux.
 ///
-/// We check sum(output * coverage_weight) ≈ sum(input).
-/// More precisely: sum(data_buf) should equal sum(input * per_pixel_total_weight).
+/// We check sum(output * `coverage_weight`) ≈ sum(input).
+/// More precisely: `sum(data_buf)` should equal sum(input * `per_pixel_total_weight`).
 /// For fully-covered interior pixels, each input pixel's overlap sums to jaco
 /// (the drop area in output space), and weight = overlap/jaco, so total weight = 1.0.
-/// Therefore sum(output_pixel * weight) ≈ sum(input_pixel) for interior pixels.
+/// Therefore `sum(output_pixel` * weight) ≈ `sum(input_pixel)` for interior pixels.
 #[test]
 fn square_kernel_flux_conservation() {
     let mut pixels = vec![1.0f32; 20 * 20];
@@ -493,8 +481,7 @@ fn square_kernel_flux_conservation() {
     let center_val = out[10 * 20 + 10];
     assert!(
         (center_val - 10.0).abs() < 0.5,
-        "Center pixel should be ~10.0 (bright patch), got {}",
-        center_val
+        "Center pixel should be ~10.0 (bright patch), got {center_val}"
     );
 }
 
@@ -529,8 +516,7 @@ fn square_kernel_two_frame_weighted_mean() {
     let center = out[3 * 6 + 3];
     assert!(
         (center - 6.5).abs() < 1e-4,
-        "Weighted mean should be 6.5, got {}",
-        center
+        "Weighted mean should be 6.5, got {center}"
     );
 
     // Check a corner pixel too

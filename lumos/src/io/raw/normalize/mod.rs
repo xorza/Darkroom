@@ -30,7 +30,7 @@ fn normalize_generic<const CLAMP: bool>(data: &[u16], black: f32, inv_range: f32
 /// remainders. `CLAMP` gates the `[0, 1]` floor/ceil.
 #[inline(always)]
 fn normalize_one<const CLAMP: bool>(val: u16, black: f32, inv_range: f32) -> f32 {
-    let subtracted = (val as f32) - black;
+    let subtracted = f32::from(val) - black;
     if CLAMP {
         (subtracted.max(0.0) * inv_range).min(1.0)
     } else {

@@ -741,9 +741,7 @@ fn gaussian_fit_multiple_positions() {
 
         assert!(
             result.is_some(),
-            "Failed for offset ({}, {})",
-            offset_x,
-            offset_y
+            "Failed for offset ({offset_x}, {offset_y})"
         );
         let result = result.unwrap();
         assert!(
@@ -794,9 +792,9 @@ fn reference_normal_equations_symmetry() {
 
     // All values should be finite
     for (i, &g) in gradient.iter().enumerate() {
-        assert!(g.is_finite(), "Gradient[{}] not finite", i);
+        assert!(g.is_finite(), "Gradient[{i}] not finite");
         for (j, &h) in hessian[i].iter().enumerate() {
-            assert!(h.is_finite(), "Hessian[{}][{}] not finite", i, j);
+            assert!(h.is_finite(), "Hessian[{i}][{j}] not finite");
         }
     }
 }
@@ -821,10 +819,7 @@ fn reference_normal_equations_values() {
         let expected = (i + 1) as f64;
         assert!(
             (g - expected).abs() < 1e-6,
-            "Gradient[{}] = {}, expected {}",
-            i,
-            g,
-            expected
+            "Gradient[{i}] = {g}, expected {expected}"
         );
     }
 
@@ -834,11 +829,7 @@ fn reference_normal_equations_values() {
             let expected = ((i + 1) * (j + 1)) as f64;
             assert!(
                 (h - expected).abs() < 1e-6,
-                "Hessian[{}][{}] = {}, expected {}",
-                i,
-                j,
-                h,
-                expected
+                "Hessian[{i}][{j}] = {h}, expected {expected}"
             );
         }
     }
@@ -897,13 +888,12 @@ fn reference_normal_equations_positive_semidefinite() {
         }
         assert!(
             result >= -1e-6,
-            "Hessian not positive semi-definite: x^T H x = {}",
-            result
+            "Hessian not positive semi-definite: x^T H x = {result}"
         );
     }
 }
 
-/// Test that reference_normal_equations produces correct results with many rows.
+/// Test that `reference_normal_equations` produces correct results with many rows.
 #[test]
 fn reference_normal_equations_many_rows() {
     let n = 17;
@@ -963,9 +953,7 @@ fn reference_normal_equations_many_rows() {
             );
             assert!(
                 (hessian[i][j] - hessian[j][i]).abs() < 1e-6,
-                "Hessian not symmetric at [{},{}]",
-                i,
-                j,
+                "Hessian not symmetric at [{i},{j}]",
             );
         }
     }
@@ -976,11 +964,11 @@ fn reference_normal_equations_many_rows() {
 fn reference_normal_equations_exactly_8_rows() {
     let jacobian: Vec<[f64; 6]> = (0..8)
         .map(|i| {
-            let v = (i + 1) as f64;
+            let v = f64::from(i + 1);
             [v, v * 0.5, v * 0.3, v * 0.8, v * 0.1, v * 0.6]
         })
         .collect();
-    let residuals: Vec<f64> = (0..8).map(|i| 0.1 * (i as f64 - 3.5)).collect();
+    let residuals: Vec<f64> = (0..8).map(|i| 0.1 * (f64::from(i) - 3.5)).collect();
 
     let NormalEquations {
         hessian, gradient, ..
@@ -1199,22 +1187,19 @@ fn gaussian_fit_extreme_amplitude_range() {
             &config,
         );
 
-        assert!(result.is_some(), "Failed for amplitude=10^{}", amp_exp);
+        assert!(result.is_some(), "Failed for amplitude=10^{amp_exp}");
         let result = result.unwrap();
         assert!(
             result.pos.x.is_finite(),
-            "Non-finite x for amplitude=10^{}",
-            amp_exp
+            "Non-finite x for amplitude=10^{amp_exp}"
         );
         assert!(
             result.pos.y.is_finite(),
-            "Non-finite y for amplitude=10^{}",
-            amp_exp
+            "Non-finite y for amplitude=10^{amp_exp}"
         );
         assert!(
             result.debug.amplitude.is_finite(),
-            "Non-finite amplitude for amplitude=10^{}",
-            amp_exp
+            "Non-finite amplitude for amplitude=10^{amp_exp}"
         );
     }
 }

@@ -350,8 +350,8 @@ fn reconcile_follows_ids_when_the_index_space_shifts() {
     cache.install_for_test(&installed);
     for i in 0..3u32 {
         let slot = &mut cache.slots[NodeIdx(i)];
-        slot.current_digest = Some(digest(i as u128 + 1));
-        slot.load_output(complete_snapshot(out()), Some(digest(i as u128 + 1)));
+        slot.current_digest = Some(digest(u128::from(i) + 1));
+        slot.load_output(complete_snapshot(out()), Some(digest(u128::from(i) + 1)));
         slot.state.set(i);
     }
 

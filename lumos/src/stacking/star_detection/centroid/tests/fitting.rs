@@ -17,7 +17,7 @@ fn weighted_centroid_precision_statistical() {
 
     for dx in 0..10 {
         for dy in 0..10 {
-            let true_pos = DVec2::new(64.0 + dx as f64 * 0.1, 64.0 + dy as f64 * 0.1);
+            let true_pos = DVec2::new(64.0 + f64::from(dx) * 0.1, 64.0 + f64::from(dy) * 0.1);
 
             let pixels =
                 SyntheticStar::new(true_pos.as_vec2(), 1.0, StarProfile::Gaussian { sigma })
@@ -59,19 +59,16 @@ fn weighted_centroid_precision_statistical() {
         }
     }
 
-    let avg_error = total_error / count as f64;
+    let avg_error = total_error / f64::from(count);
 
     // Weighted centroid should achieve ~0.05 pixel accuracy on average
     assert!(
         avg_error < 0.1,
-        "Average centroid error {} exceeds 0.1 pixels (count={})",
-        avg_error,
-        count
+        "Average centroid error {avg_error} exceeds 0.1 pixels (count={count})"
     );
     assert!(
         max_error < 0.2,
-        "Max centroid error {} exceeds 0.2 pixels",
-        max_error
+        "Max centroid error {max_error} exceeds 0.2 pixels"
     );
 }
 
@@ -124,19 +121,16 @@ fn gaussian_fit_precision_statistical() {
         }
     }
 
-    let avg_error = total_error / count as f64;
+    let avg_error = total_error / f64::from(count);
 
     // Gaussian fitting should achieve ~0.01 pixel accuracy
     assert!(
         avg_error < 0.02,
-        "Average Gaussian fit error {} exceeds 0.02 pixels (count={})",
-        avg_error,
-        count
+        "Average Gaussian fit error {avg_error} exceeds 0.02 pixels (count={count})"
     );
     assert!(
         max_error < 0.05,
-        "Max Gaussian fit error {} exceeds 0.05 pixels",
-        max_error
+        "Max Gaussian fit error {max_error} exceeds 0.05 pixels"
     );
 }
 
@@ -191,19 +185,16 @@ fn moffat_fit_precision_statistical() {
         }
     }
 
-    let avg_error = total_error / count as f64;
+    let avg_error = total_error / f64::from(count);
 
     // Moffat fitting should achieve ~0.01 pixel accuracy
     assert!(
         avg_error < 0.02,
-        "Average Moffat fit error {} exceeds 0.02 pixels (count={})",
-        avg_error,
-        count
+        "Average Moffat fit error {avg_error} exceeds 0.02 pixels (count={count})"
     );
     assert!(
         max_error < 0.05,
-        "Max Moffat fit error {} exceeds 0.05 pixels",
-        max_error
+        "Max Moffat fit error {max_error} exceeds 0.05 pixels"
     );
 }
 
@@ -399,18 +390,14 @@ fn moffat_fwhm_formula() {
     let expected = 2.0 * alpha * (2.0f32.powf(1.0 / beta) - 1.0).sqrt();
     assert!(
         (fwhm - expected).abs() < 1e-6,
-        "FWHM formula incorrect: {} vs {}",
-        fwhm,
-        expected
+        "FWHM formula incorrect: {fwhm} vs {expected}"
     );
 
     // Verify round-trip
     let alpha_back = fwhm_beta_to_alpha(fwhm, beta);
     assert!(
         (alpha_back - alpha).abs() < 1e-6,
-        "Round-trip failed: {} vs {}",
-        alpha_back,
-        alpha
+        "Round-trip failed: {alpha_back} vs {alpha}"
     );
 
     // Test limiting case: as beta -> infinity, Moffat -> Gaussian
@@ -459,7 +446,7 @@ fn gaussian_fit_sigma_recovery() {
         );
 
         let result =
-            result.unwrap_or_else(|| panic!("Fit should return Some for sigma={}", true_sigma));
+            result.unwrap_or_else(|| panic!("Fit should return Some for sigma={true_sigma}"));
 
         // Check that sigma values are accurate (convergence flag may be false if
         // initial guess was already close, causing small parameter changes)
@@ -518,7 +505,7 @@ fn moffat_fit_alpha_recovery() {
             None,
             &config,
         )
-        .unwrap_or_else(|| panic!("Fit should return Some for alpha={}", true_alpha));
+        .unwrap_or_else(|| panic!("Fit should return Some for alpha={true_alpha}"));
 
         // Check that alpha is accurate (convergence flag may be false if
         // initial guess was already close)
@@ -574,11 +561,7 @@ fn gaussian_fit_with_noise() {
 
     // With noise, expect slightly worse but still good accuracy
     let error = ((result.pos.x - true_cx).powi(2) + (result.pos.y - true_cy).powi(2)).sqrt();
-    assert!(
-        error < 0.15,
-        "Position error {} too large with noise",
-        error
-    );
+    assert!(error < 0.15, "Position error {error} too large with noise");
 }
 
 /// Verify GROUND is close to 0 for circular sources.

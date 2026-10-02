@@ -17,10 +17,10 @@ pub(super) const PHASE_POOL_FRACTIONS: [f64; 3] = [0.25, 0.50, 1.0];
 /// Whether each phase uses weighted sampling (vs uniform random).
 pub(super) const PHASE_WEIGHTED: [bool; 3] = [true, true, false];
 
-/// Create a ChaCha8Rng from an optional seed.
+/// Create a `ChaCha8Rng` from an optional seed.
 ///
 /// When `seed` is `None`, seeds from `thread_rng()` for non-deterministic behavior.
-/// Always using ChaCha8Rng avoids enum dispatch overhead on every RNG call.
+/// Always using `ChaCha8Rng` avoids enum dispatch overhead on every RNG call.
 pub(super) fn make_rng(seed: Option<u64>) -> rand_chacha::ChaCha8Rng {
     use rand_chacha::rand_core::SeedableRng;
     match seed {
@@ -83,7 +83,7 @@ pub(super) fn random_sample_into<R: Rng>(
     buffer: &mut Vec<usize>,
     indices: &mut Vec<usize>,
 ) {
-    debug_assert!(k <= n, "Cannot sample {} indices from {}", k, n);
+    debug_assert!(k <= n, "Cannot sample {k} indices from {n}");
 
     // Initialize or resize the persistent index array
     if indices.len() != n {

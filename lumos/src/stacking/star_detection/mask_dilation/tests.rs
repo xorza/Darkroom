@@ -66,12 +66,7 @@ fn dilate_mask_single_pixel_radius_1() {
     // Should dilate to 3x3 square centered at (2,2)
     for y in 1..=3 {
         for x in 1..=3 {
-            assert!(
-                dilated.get(y * 5 + x),
-                "Pixel ({}, {}) should be true",
-                x,
-                y
-            );
+            assert!(dilated.get(y * 5 + x), "Pixel ({x}, {y}) should be true");
         }
     }
     // Corners should be false
@@ -94,12 +89,7 @@ fn dilate_mask_single_pixel_radius_2() {
     let mut count = 0;
     for y in 1..=5 {
         for x in 1..=5 {
-            assert!(
-                dilated.get(y * 7 + x),
-                "Pixel ({}, {}) should be true",
-                x,
-                y
-            );
+            assert!(dilated.get(y * 7 + x), "Pixel ({x}, {y}) should be true");
             count += 1;
         }
     }

@@ -25,12 +25,7 @@ fn solve_d2_linear_data_gives_zero() {
     solve_natural_spline_d2(&values, &centers, &mut d2, &mut scratch);
 
     for (i, &d) in d2.iter().enumerate() {
-        assert!(
-            d.abs() < 1e-5,
-            "d2[{}] = {} should be 0 for linear data",
-            i,
-            d
-        );
+        assert!(d.abs() < 1e-5, "d2[{i}] = {d} should be 0 for linear data");
     }
 }
 
@@ -108,18 +103,8 @@ fn cubic_spline_eval_endpoints() {
     let val_0 = cubic_spline_eval(f0, f1, d0, d1, h, 0.0);
     let val_1 = cubic_spline_eval(f0, f1, d0, d1, h, 1.0);
 
-    assert!(
-        (val_0 - f0).abs() < 1e-6,
-        "t=0: expected {}, got {}",
-        f0,
-        val_0
-    );
-    assert!(
-        (val_1 - f1).abs() < 1e-6,
-        "t=1: expected {}, got {}",
-        f1,
-        val_1
-    );
+    assert!((val_0 - f0).abs() < 1e-6, "t=0: expected {f0}, got {val_0}");
+    assert!((val_1 - f1).abs() < 1e-6, "t=1: expected {f1}, got {val_1}");
 }
 
 #[test]
@@ -136,8 +121,7 @@ fn cubic_spline_eval_midpoint() {
     let val = cubic_spline_eval(f0, f1, d0, d1, h, 0.5);
     assert!(
         (val - 147.75).abs() < 1e-4,
-        "t=0.5: expected 147.75, got {}",
-        val
+        "t=0.5: expected 147.75, got {val}"
     );
 }
 
@@ -154,10 +138,7 @@ fn cubic_spline_eval_zero_d2_is_linear() {
         let expected = (1.0 - t) * f0 + t * f1;
         assert!(
             (val - expected).abs() < 1e-5,
-            "t={}: expected {}, got {}",
-            t,
-            expected,
-            val
+            "t={t}: expected {expected}, got {val}"
         );
     }
 }
@@ -371,10 +352,7 @@ fn spline_roundtrip_interior_continuity() {
 
         assert!(
             (val_left - val_right).abs() < 1e-4,
-            "C0 break at node {}: left={}, right={}",
-            i,
-            val_left,
-            val_right
+            "C0 break at node {i}: left={val_left}, right={val_right}"
         );
 
         // C1 check: numerical derivative from both sides should match
@@ -395,10 +373,7 @@ fn spline_roundtrip_interior_continuity() {
         let deriv_right = (val_right_p - val_right) / (eps * h_right);
         assert!(
             (deriv_left - deriv_right).abs() < 0.1,
-            "C1 break at node {}: deriv_left={}, deriv_right={}",
-            i,
-            deriv_left,
-            deriv_right
+            "C1 break at node {i}: deriv_left={deriv_left}, deriv_right={deriv_right}"
         );
     }
 }

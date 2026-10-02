@@ -20,7 +20,7 @@ pub struct Star {
     pub snr: f32,
     /// Peak pixel value (for saturation detection).
     pub peak: f32,
-    /// Sharpness metric (peak / flux_in_core). Cosmic rays have high sharpness (>0.8),
+    /// Sharpness metric (peak / `flux_in_core`). Cosmic rays have high sharpness (>0.8),
     /// real stars have lower sharpness (typically 0.2-0.6 depending on seeing).
     pub sharpness: f32,
     /// The DAOFIND roundness metrics.

@@ -107,9 +107,9 @@ fn random_sample_into_produces_unique_indices() {
         }
         // All indices unique
         let mut sorted = buffer.clone();
-        sorted.sort();
+        sorted.sort_unstable();
         sorted.dedup();
-        assert_eq!(sorted.len(), k, "Duplicate indices: {:?}", buffer);
+        assert_eq!(sorted.len(), k, "Duplicate indices: {buffer:?}");
         // Persistent array stays valid (undone swaps)
         assert_eq!(indices.len(), n);
         for (i, &v) in indices.iter().enumerate() {
@@ -132,7 +132,7 @@ fn random_sample_into_k_equals_n() {
 
     assert_eq!(buffer.len(), 5);
     let mut sorted = buffer.clone();
-    sorted.sort();
+    sorted.sort_unstable();
     assert_eq!(sorted, vec![0, 1, 2, 3, 4]);
 }
 
@@ -148,7 +148,7 @@ fn weighted_sample_into_pool_smaller_than_k() {
 
     weighted_sample_into(&mut rng, &pool, &weights, 5, &mut buffer, &mut scratch);
     let mut sorted = buffer.clone();
-    sorted.sort();
+    sorted.sort_unstable();
     assert_eq!(sorted, vec![5, 10, 15]);
 }
 
@@ -157,7 +157,7 @@ fn weighted_sample_into_returns_k_unique() {
     use rand::SeedableRng;
     let mut rng = SmallRng::seed_from_u64(42);
     let pool: Vec<usize> = (0..20).collect();
-    let weights: Vec<f64> = (0..20).map(|i| i as f64 + 1.0).collect();
+    let weights: Vec<f64> = (0..20).map(|i| f64::from(i) + 1.0).collect();
     let k = 4;
     let mut buffer = Vec::new();
     let mut scratch = Vec::new();
@@ -168,14 +168,9 @@ fn weighted_sample_into_returns_k_unique() {
 
         // All unique
         let mut sorted = buffer.clone();
-        sorted.sort();
+        sorted.sort_unstable();
         sorted.dedup();
-        assert_eq!(
-            sorted.len(),
-            k,
-            "Duplicates in weighted sample: {:?}",
-            buffer
-        );
+        assert_eq!(sorted.len(), k, "Duplicates in weighted sample: {buffer:?}");
 
         // All from pool
         for &idx in &buffer {

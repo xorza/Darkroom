@@ -189,7 +189,7 @@ impl Mul<f64> for DMat3 {
     #[inline]
     fn mul(self, rhs: f64) -> DMat3 {
         let mut out = self;
-        for v in out.data.iter_mut() {
+        for v in &mut out.data {
             *v *= rhs;
         }
         out

@@ -148,5 +148,5 @@ mod square;
 /// A registration transform with the drizzle output scale composed in, the way `accumulate_image`
 /// builds it before handing it to a kernel.
 fn output_transform(transform: Transform, scale: f32) -> Transform {
-    Transform::scale(DVec2::splat(scale as f64)).compose(&transform)
+    Transform::scale(DVec2::splat(f64::from(scale))).compose(&transform)
 }

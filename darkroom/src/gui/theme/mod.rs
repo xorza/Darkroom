@@ -121,7 +121,7 @@ pub(crate) struct Theme {
     pub(crate) menu_button: ButtonTheme,
 
     /// Palantir-side widget theme. Pushed onto `Ui::theme` once at
-    /// startup so every palantir widget (Button, TextEdit, MenuItem,
+    /// startup so every palantir widget (Button, `TextEdit`, `MenuItem`,
     /// Scroll, Tooltip…) reads a darkroom-tuned palette without each
     /// call site restyling per use.
     pub(crate) palantir_theme: palantir::Theme,

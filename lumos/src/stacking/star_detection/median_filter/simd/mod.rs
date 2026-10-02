@@ -1,7 +1,7 @@
 //! SIMD-accelerated 3x3 median filter.
 //!
 //! This module provides runtime dispatch to the best available SIMD implementation:
-//! - AVX2/SSE4.1 on x86_64
+//! - AVX2/SSE4.1 on `x86_64`
 //! - NEON on aarch64
 //! - Scalar fallback on other platforms
 //!
@@ -188,7 +188,7 @@ fn median_filter_row_scalar(
 // Nine sibling lane values feeding a fixed comparator network, not a group with a name:
 // an array or struct would replace the network's named registers with indices and hand LLVM
 // an aggregate to promote back into exactly those registers.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 fn median9_scalar(
     mut v0: f32,
     mut v1: f32,

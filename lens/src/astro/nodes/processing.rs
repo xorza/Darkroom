@@ -93,16 +93,16 @@ fn register_denoise(library: &mut Library) {
                       inputs, outputs, ..
                   }| {
                 Box::pin(async move {
-                    let config = inputs[2]
-                        .as_custom::<ConfigValue<Denoise>>()
-                        .map(|config| config.0)
-                        .unwrap_or_else(|| Denoise {
+                    let config = inputs[2].as_custom::<ConfigValue<Denoise>>().map_or_else(
+                        || Denoise {
                             strength: inputs[1]
                                 .as_f64()
                                 .map(|value| value as f32)
                                 .expect("strength input type is validated at the compile boundary"),
                             ..Default::default()
-                        });
+                        },
+                        |config| config.0,
+                    );
                     let value = std::mem::take(&mut inputs[0]);
                     outputs[0] =
                         runtime::run_frame_op(value, move |image| config.apply(image)).await?;
@@ -175,16 +175,16 @@ fn register_hdr(library: &mut Library) {
                       inputs, outputs, ..
                   }| {
                 Box::pin(async move {
-                    let config = inputs[2]
-                        .as_custom::<ConfigValue<Hdr>>()
-                        .map(|config| config.0)
-                        .unwrap_or_else(|| Hdr {
+                    let config = inputs[2].as_custom::<ConfigValue<Hdr>>().map_or_else(
+                        || Hdr {
                             amount: inputs[1]
                                 .as_f64()
                                 .map(|value| value as f32)
                                 .expect("amount input type is validated at the compile boundary"),
                             ..Default::default()
-                        });
+                        },
+                        |config| config.0,
+                    );
                     let value = std::mem::take(&mut inputs[0]);
                     outputs[0] =
                         runtime::run_frame_op(value, move |image| config.apply(image)).await?;
@@ -212,14 +212,15 @@ fn register_local_contrast(library: &mut Library) {
                 Box::pin(async move {
                     let config = inputs[2]
                         .as_custom::<ConfigValue<LocalContrast>>()
-                        .map(|config| config.0)
-                        .unwrap_or_else(|| LocalContrast {
-                            strength: inputs[1]
-                                .as_f64()
-                                .map(|value| value as f32)
-                                .expect("strength input type is validated at the compile boundary"),
-                            ..Default::default()
-                        });
+                        .map_or_else(
+                            || LocalContrast {
+                                strength: inputs[1].as_f64().map(|value| value as f32).expect(
+                                    "strength input type is validated at the compile boundary",
+                                ),
+                                ..Default::default()
+                            },
+                            |config| config.0,
+                        );
                     let value = std::mem::take(&mut inputs[0]);
                     outputs[0] =
                         runtime::run_frame_op(value, move |image| config.apply(image)).await?;
@@ -242,7 +243,7 @@ fn frame_input(name: &str) -> FuncInput {
 fn float_input(name: &str, default: f32, description: &str) -> FuncInput {
     FuncInput::required(name, DataType::Float)
         .description(description)
-        .default(default as f64)
+        .default(f64::from(default))
 }
 
 fn processing_func(

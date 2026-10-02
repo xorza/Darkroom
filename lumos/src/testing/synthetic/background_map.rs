@@ -1,6 +1,6 @@
-//! BackgroundEstimate generation for testing.
+//! `BackgroundEstimate` generation for testing.
 //!
-//! Provides utilities to create BackgroundEstimate instances for benchmarks and tests.
+//! Provides utilities to create `BackgroundEstimate` instances for benchmarks and tests.
 
 use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::background::background_estimate::{
@@ -10,7 +10,7 @@ use crate::stacking::star_detection::config::background_config::BackgroundConfig
 use crate::stacking::star_detection::resources::DetectionResources;
 use imaginarium::Buffer2;
 
-/// Create a uniform BackgroundEstimate with constant background and noise values.
+/// Create a uniform `BackgroundEstimate` with constant background and noise values.
 pub(crate) fn uniform(size: Size2us, background: f32, noise: f32) -> BackgroundEstimate {
     let mut bg_buf = Buffer2::new_default(size.width, size.height);
     let mut noise_buf = Buffer2::new_default(size.width, size.height);

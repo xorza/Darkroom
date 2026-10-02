@@ -34,7 +34,7 @@ fn run_challenging_test(
         Ok(()) => println!("PASS: all aspirational criteria met"),
         Err(failures) => {
             for f in &failures {
-                println!("INFO (aspirational): {}", f);
+                println!("INFO (aspirational): {f}");
             }
         }
     }

@@ -126,8 +126,8 @@ fn cosmic_ray_rejection() {
     println!("  True stars: {}", ground_truth.len());
     println!("  Cosmic rays: {}", cr_positions.len());
     println!("  Detected stars: {}", stars.len());
-    println!("  True detections: {}", true_detections);
-    println!("  CR false positives: {}", cr_false_positives);
+    println!("  True detections: {true_detections}");
+    println!("  CR false positives: {cr_false_positives}");
     println!("  CR rejection rate: {:.1}%", cr_rejection_rate * 100.0);
     println!("  Star detection rate: {:.1}%", detection_rate * 100.0);
 

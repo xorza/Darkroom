@@ -46,7 +46,7 @@ pub enum StoreError {
     },
 }
 
-pub(crate) type StoreResult = std::result::Result<StoreOutcome, StoreError>;
+pub(crate) type StoreResult = Result<StoreOutcome, StoreError>;
 
 /// A blob that would not go away. A blob that was never there is not one of
 /// these — an eviction wants the file gone, and an absent file already is.

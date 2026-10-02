@@ -116,7 +116,7 @@ pub(crate) fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFr
 
     // 7. Bias pedestal + bad columns (deterministic structure, always applied).
     if camera.bias.offset != 0.0 {
-        for p in raw.iter_mut() {
+        for p in &mut raw {
             *p += camera.bias.offset;
         }
     }
@@ -141,14 +141,14 @@ pub(crate) fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFr
     }
 
     // 11. Saturate / clamp to the valid normalized range.
-    for p in raw.iter_mut() {
+    for p in &mut raw {
         *p = p.clamp(0.0, camera.saturation);
     }
 
     let dims = ImageDimensions::new((width, height), 1);
     let mut image = LinearImage::from_planar_channels(dims, [raw]);
     image.metadata.image_type = Some("Light".to_string());
-    image.metadata.exposure_time = Some(obs.exposure_s as f64);
+    image.metadata.exposure_time = Some(f64::from(obs.exposure_s));
 
     SimFrame {
         image,

@@ -54,7 +54,7 @@ mod tests {
         let mut s = 0.0;
         for y in y0..y0 + size {
             for x in x0..x0 + size {
-                s += px[(x, y)] as f64;
+                s += f64::from(px[(x, y)]);
             }
         }
         s

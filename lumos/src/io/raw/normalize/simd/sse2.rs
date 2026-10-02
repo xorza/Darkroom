@@ -4,7 +4,7 @@ use std::arch::x86_64::*;
 
 use crate::io::raw::normalize::normalize_one;
 
-/// SSE2 SIMD normalization for x86_64 (fallback without SSE4.1).
+/// SSE2 SIMD normalization for `x86_64` (fallback without SSE4.1).
 #[target_feature(enable = "sse2")]
 pub(super) unsafe fn normalize_chunk_sse2<const CLAMP: bool>(
     input: &[u16],
@@ -24,7 +24,7 @@ pub(super) unsafe fn normalize_chunk_sse2<const CLAMP: bool>(
             let idx = i * 4;
             // Load 4 u16 values (64 bits) and unpack to i32 using SSE2
             // _mm_loadl_epi64 loads 64 bits into lower half, zeros upper half
-            let vals_u16 = _mm_loadl_epi64(input.as_ptr().add(idx) as *const __m128i);
+            let vals_u16 = _mm_loadl_epi64(input.as_ptr().add(idx).cast::<__m128i>());
             // Unpack low 16-bit integers to 32-bit by interleaving with zeros
             let vals_i32 = _mm_unpacklo_epi16(vals_u16, _mm_setzero_si128());
             let vals_f32 = _mm_cvtepi32_ps(vals_i32);

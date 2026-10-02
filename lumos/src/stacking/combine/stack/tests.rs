@@ -388,10 +388,7 @@ fn assert_channel_near(result: &LinearPixels, channel: usize, expected: f32, tol
     for &pixel in result.channel(channel).pixels() {
         assert!(
             (pixel - expected).abs() < tol,
-            "Channel {} should be ~{}, got {}",
-            channel,
-            expected,
-            pixel
+            "Channel {channel} should be ~{expected}, got {pixel}"
         );
     }
 }
@@ -1276,7 +1273,7 @@ fn signed_uniform_warp_and_weighted_combine_preserve_dc() {
     let dims = ImageDimensions::new((24, 20), 1);
     let expected = -0.7;
     let source = LinearImage::from_pixels(dims, vec![expected; dims.pixel_count()]);
-    let transform = WarpTransform::new(Transform::translation(glam::DVec2::new(-2.37, 1.43)));
+    let transform = WarpTransform::new(Transform::translation(DVec2::new(-2.37, 1.43)));
     let config = StackConfig {
         method: CombineMethod::Mean(Rejection::None),
         normalization: Normalization::None,
@@ -1329,7 +1326,7 @@ fn registered_global_normalization_uses_paired_signal_samples() {
             &source,
             resample::warp(
                 &source,
-                &WarpTransform::new(Transform::translation(glam::DVec2::splat(0.5))),
+                &WarpTransform::new(Transform::translation(DVec2::splat(0.5))),
                 &params,
             ),
         ),
@@ -1373,7 +1370,7 @@ fn registered_noise_weight_applies_half_pixel_confidence_once() {
             &source,
             resample::warp(
                 &source,
-                &WarpTransform::new(Transform::translation(glam::DVec2::splat(0.5))),
+                &WarpTransform::new(Transform::translation(DVec2::splat(0.5))),
                 &params,
             ),
         ),
@@ -1977,13 +1974,11 @@ fn dispatch_normalized_vs_unnormalized() {
     let unnorm_pixel = result_unnorm.pixels.channel(0)[0];
     assert!(
         (norm_pixel - 100.0).abs() < 1.0,
-        "Normalized should be ~100, got {}",
-        norm_pixel
+        "Normalized should be ~100, got {norm_pixel}"
     );
     assert!(
         (unnorm_pixel - 150.0).abs() < 1.0,
-        "Unnormalized should be ~150, got {}",
-        unnorm_pixel
+        "Unnormalized should be ~150, got {unnorm_pixel}"
     );
 }
 

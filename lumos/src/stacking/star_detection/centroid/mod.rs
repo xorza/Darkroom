@@ -69,17 +69,17 @@ const MIN_STAMP_RADIUS: usize = 4;
 /// for very large PSFs.
 const MAX_STAMP_RADIUS: usize = 15;
 
-/// Maximum stamp side length in pixels (31 for stamp_radius=15).
+/// Maximum stamp side length in pixels (31 for `stamp_radius=15`).
 pub(super) const MAX_STAMP_SIZE: usize = 2 * MAX_STAMP_RADIUS + 1;
 
-/// Maximum stamp pixels (31×31 for stamp_radius=15).
+/// Maximum stamp pixels (31×31 for `stamp_radius=15`).
 pub(super) const MAX_STAMP_PIXELS: usize = MAX_STAMP_SIZE.pow(2);
 
-/// Maximum annulus outer radius (1.5 × MAX_STAMP_RADIUS, rounded up).
+/// Maximum annulus outer radius (1.5 × `MAX_STAMP_RADIUS`, rounded up).
 const MAX_ANNULUS_OUTER_RADIUS: usize = (MAX_STAMP_RADIUS * 3).div_ceil(2); // = 23
 
-/// Maximum annulus pixels for LocalAnnulus background method.
-/// Computed as the area of a square with side 2×outer_radius+1.
+/// Maximum annulus pixels for `LocalAnnulus` background method.
+/// Computed as the area of a square with side `2×outer_radius+1`.
 pub(super) const MAX_ANNULUS_PIXELS: usize = (2 * MAX_ANNULUS_OUTER_RADIUS + 1).pow(2); // = 47² = 2209
 
 /// Centroid convergence threshold in pixels.
@@ -281,7 +281,7 @@ pub(super) fn measure_star(
         CentroidMethod::WeightedMoments => {
             // Already computed above
         }
-    };
+    }
 
     // The estimate above was centred on the moments position, and the fit has since moved the
     // star. `compute_annulus_background` samples by rounded centre, so re-running it only changes
@@ -338,7 +338,7 @@ fn refine_centroid(
     // Adaptive sigma based on expected FWHM
     // sigma ≈ FWHM / FWHM_TO_SIGMA, use 0.8× for tighter weighting to reduce noise
     let sigma = (expected_fwhm / FWHM_TO_SIGMA * 0.8).clamp(1.0, stamp_radius as f32 * 0.5);
-    let two_sigma_sq = 2.0 * (sigma as f64) * (sigma as f64);
+    let two_sigma_sq = 2.0 * f64::from(sigma) * f64::from(sigma);
 
     let mut sum_x = 0.0f64;
     let mut sum_y = 0.0f64;
@@ -484,7 +484,7 @@ fn compute_star(
                 Some(local) => local.bg,
                 None => bg_row[x],
             };
-            let value = (px_row[x] - bg).max(0.0) as f64;
+            let value = f64::from((px_row[x] - bg).max(0.0));
 
             flux += value;
             peak_value = peak_value.max(value);
@@ -513,7 +513,7 @@ fn compute_star(
             // Collect noise from background region (outer ring)
             let r2 = dx * dx + dy * dy;
             if background_override.is_none() && r2 > outer_ring_threshold {
-                noise_sum += noise_row[x] as f64;
+                noise_sum += f64::from(noise_row[x]);
                 noise_count += 1;
             }
         }
@@ -552,7 +552,7 @@ fn compute_star(
 
     // Eccentricity from covariance matrix eigenvalues
     let discriminant = (trace * trace - 4.0 * det).max(0.0);
-    let lambda1 = (trace + discriminant.sqrt()) / 2.0;
+    let lambda1 = f64::midpoint(trace, discriminant.sqrt());
     let lambda2 = (trace - discriminant.sqrt()) / 2.0;
 
     let eccentricity = if lambda1 > f64::EPSILON {
@@ -604,7 +604,9 @@ fn compute_snr(flux: f32, sky_noise: f32, npix: usize, noise_model: Option<&Nois
     let sky_var = sky_noise * sky_noise;
 
     let total_var = match noise_model {
-        Some(noise) => noise.variance_normalized(flux as f64, sky_noise as f64, npix) as f32,
+        Some(noise) => {
+            noise.variance_normalized(f64::from(flux), f64::from(sky_noise), npix) as f32
+        }
         None => npix as f32 * sky_var,
     };
 

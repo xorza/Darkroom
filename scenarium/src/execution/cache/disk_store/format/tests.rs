@@ -141,7 +141,7 @@ impl CustomValueCodec for BlobCodec {
         value: &dyn CustomValue,
         writer: &mut (dyn AsyncWrite + Unpin + Send),
         _ctx: &mut ContextStore,
-    ) -> std::result::Result<(), CodecError> {
+    ) -> Result<(), CodecError> {
         let blob = value
             .as_any()
             .downcast_ref::<Blob>()
@@ -155,7 +155,7 @@ impl CustomValueCodec for BlobCodec {
         reader: &mut (dyn AsyncRead + Unpin + Send),
         byte_len: u64,
         _ctx: &mut ContextStore,
-    ) -> std::result::Result<Arc<dyn CustomValue>, CodecError> {
+    ) -> Result<Arc<dyn CustomValue>, CodecError> {
         self.decode_calls.fetch_add(1, Ordering::SeqCst);
         let mut bytes = Vec::with_capacity(usize::try_from(byte_len)?);
         if matches!(self.behavior, DecodeBehavior::ReadAll) {
@@ -284,7 +284,7 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
         match (actual, expected) {
             (DynamicValue::Unbound, DynamicValue::Unbound) => {}
             (DynamicValue::Static(actual), DynamicValue::Static(expected)) => {
-                assert_eq!(actual, expected)
+                assert_eq!(actual, expected);
             }
             _ => panic!("restored value kind differs from the encoded value"),
         }

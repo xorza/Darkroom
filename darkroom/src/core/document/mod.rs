@@ -478,7 +478,7 @@ mod tests {
     #[test]
     fn node_liveness_is_one_rule_with_two_declared_narrowings() {
         let mut fixture = DocFixture::default();
-        let preview_func = crate::core::preview::preview_func(Default::default());
+        let preview_func = preview::preview_func(Default::default());
         fixture.library.add(preview_func.clone());
         let preview = fixture.doc.graph.add(Node::from(&preview_func));
         let plain = fixture.stub_at(Vec2::ZERO);

@@ -46,7 +46,7 @@ fn load_single_raw_from_env() {
         return;
     };
 
-    println!("Loading file: {:?}", first_file);
+    println!("Loading file: {first_file:?}");
 
     let image = CfaImage::from_file(first_file, &LoadContext::default())
         .expect("Failed to load CFA image")

@@ -306,6 +306,10 @@ fn replace(source: &Path, destination: &Path, _mode: PublicationMode) -> io::Res
 }
 
 #[cfg(windows)]
+#[expect(
+    unsafe_code,
+    reason = "`MoveFileExW` is the Win32 call that replaces a file in one step"
+)]
 fn replace(source: &Path, destination: &Path, mode: PublicationMode) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt as _;
 

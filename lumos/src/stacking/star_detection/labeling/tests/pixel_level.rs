@@ -98,8 +98,7 @@ fn exact_labels_u_shape() {
     for &idx in &[0, 2, 3, 5, 6, 7, 8] {
         assert_eq!(
             label_map[idx], label,
-            "Pixel {} should have label {}",
-            idx, label
+            "Pixel {idx} should have label {label}"
         );
     }
 

@@ -53,7 +53,7 @@ impl ConstValue {
         match self {
             ConstValue::Float(value) => Some(*value),
             ConstValue::Int(value) => Some(*value as f64),
-            ConstValue::Bool(value) => Some(*value as i64 as f64),
+            ConstValue::Bool(value) => Some(i64::from(*value) as f64),
             _ => None,
         }
     }
@@ -62,7 +62,7 @@ impl ConstValue {
         match self {
             ConstValue::Int(value) => Some(*value),
             ConstValue::Float(value) => Some(*value as i64),
-            ConstValue::Bool(value) => Some(*value as i64),
+            ConstValue::Bool(value) => Some(i64::from(*value)),
             _ => None,
         }
     }
@@ -184,13 +184,13 @@ impl From<i64> for ConstValue {
 
 impl From<i32> for ConstValue {
     fn from(value: i32) -> Self {
-        ConstValue::Int(value as i64)
+        ConstValue::Int(i64::from(value))
     }
 }
 
 impl From<f32> for ConstValue {
     fn from(value: f32) -> Self {
-        ConstValue::Float(value as f64)
+        ConstValue::Float(f64::from(value))
     }
 }
 

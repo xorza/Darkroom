@@ -3,6 +3,8 @@
 //! processing. `config_node` is the shared `common::Introspect` →
 //! config-builder bridge.
 
+#![forbid(unsafe_code)]
+
 mod astro;
 mod config_node;
 mod image;

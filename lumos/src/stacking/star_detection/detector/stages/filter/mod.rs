@@ -118,8 +118,8 @@ fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
         return remove_duplicate_stars_simple(stars, min_separation);
     }
 
-    let min_sep_sq = (min_separation * min_separation) as f64;
-    let cell_size = min_separation as f64;
+    let min_sep_sq = f64::from(min_separation * min_separation);
+    let cell_size = f64::from(min_separation);
 
     // Sparse spatial hash keyed by integer cell coordinate: only cells that actually hold a star
     // are allocated, so memory and time are O(stars). A dense grid is O(field_area / min_sep²) —
@@ -164,7 +164,7 @@ fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
 
 /// Simple O(n²) duplicate removal for small star counts.
 fn remove_duplicate_stars_simple(stars: &mut Vec<Star>, min_separation: f32) -> usize {
-    let min_sep_sq = (min_separation * min_separation) as f64;
+    let min_sep_sq = f64::from(min_separation * min_separation);
     let mut kept = vec![true; stars.len()];
 
     for i in 0..stars.len() {

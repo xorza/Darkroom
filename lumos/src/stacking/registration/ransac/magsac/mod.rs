@@ -3,7 +3,7 @@
 //! Inspired by MAGSAC++ (Barath & Matas 2020): instead of a binary inlier/outlier decision, each
 //! point gets a continuous loss that grades how well it fits, removing manual threshold tuning.
 //!
-//! This is **not** the paper's exact `ρ` (which uses the n=4 DoF incomplete gammas). It is a
+//! This is **not** the paper's exact `ρ` (which uses the n=4 `DoF` incomplete gammas). It is a
 //! lighter monotone saturating loss built on the closed-form `γ(1, x) = 1 − exp(−x)` (no lookup
 //! table): quadratic (≈ r²/4) near zero, saturating at `σ²_max/2`. It is monotone non-decreasing
 //! in the residual — the property a robust loss must have.
@@ -22,11 +22,11 @@ fn gamma_k2(x: f64) -> f64 {
 /// module docs — this is a lighter loss than the paper's exact `ρ`).
 #[derive(Debug)]
 pub(super) struct MagsacScorer {
-    /// Maximum sigma squared (σ²_max)
+    /// Maximum sigma squared (`σ²_max`)
     max_sigma_sq: f64,
     /// Outlier loss (assigned to points beyond threshold)
     outlier_loss: f64,
-    /// Threshold squared for outlier classification (χ² · σ²_max)
+    /// Threshold squared for outlier classification (χ² · `σ²_max`)
     threshold_sq: f64,
 }
 
@@ -35,7 +35,7 @@ impl MagsacScorer {
     ///
     /// # Arguments
     /// * `max_sigma` - Maximum noise scale in pixels. Points with residuals
-    ///   greater than ~3·max_sigma are treated as outliers.
+    ///   greater than ~`3·max_sigma` are treated as outliers.
     pub(super) fn new(max_sigma: f64) -> Self {
         let max_sigma_sq = max_sigma * max_sigma;
         let threshold_sq = CHI2_99_2DOF * max_sigma_sq;
@@ -55,7 +55,7 @@ impl MagsacScorer {
     /// Compute MAGSAC++ loss for a single point.
     ///
     /// Lower loss = better fit. The loss smoothly transitions from 0
-    /// (perfect fit) to outlier_loss (clear outlier).
+    /// (perfect fit) to `outlier_loss` (clear outlier).
     #[inline]
     pub(super) fn loss(&self, residual_sq: f64) -> f64 {
         if residual_sq > self.threshold_sq {

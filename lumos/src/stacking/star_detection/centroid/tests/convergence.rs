@@ -44,16 +44,14 @@ fn phase1_reaches_good_accuracy_in_few_iterations() {
     let diff = ((pos_2iter.x - pos_full.x).powi(2) + (pos_2iter.y - pos_full.y).powi(2)).sqrt();
     assert!(
         diff < 0.2,
-        "After 2 iterations, position should be within 0.2px of converged result, got {:.4}px diff",
-        diff
+        "After 2 iterations, position should be within 0.2px of converged result, got {diff:.4}px diff"
     );
 
     // And within 0.3px of the true position
     let error = ((pos_2iter.x - true_pos.x).powi(2) + (pos_2iter.y - true_pos.y).powi(2)).sqrt();
     assert!(
         error < 0.3,
-        "After 2 iterations, position should be within 0.3px of true position, got {:.4}px error",
-        error
+        "After 2 iterations, position should be within 0.3px of true position, got {error:.4}px error"
     );
 }
 
@@ -67,7 +65,7 @@ fn single_phase1_iteration_provides_good_seed() {
     // Test multiple sub-pixel offsets
     for dx in 0..5 {
         for dy in 0..5 {
-            let true_pos = DVec2::new(32.0 + dx as f64 * 0.2, 32.0 + dy as f64 * 0.2);
+            let true_pos = DVec2::new(32.0 + f64::from(dx) * 0.2, 32.0 + f64::from(dy) * 0.2);
             let pixels = SyntheticStar::new(
                 true_pos.as_vec2(),
                 0.8,
@@ -96,7 +94,7 @@ fn single_phase1_iteration_provides_good_seed() {
     }
 }
 
-/// Verify that GaussianFit accuracy is equivalent whether Phase 1 runs 2 or 10 iterations.
+/// Verify that `GaussianFit` accuracy is equivalent whether Phase 1 runs 2 or 10 iterations.
 #[test]
 fn gaussian_fit_accuracy_independent_of_phase1_iterations() {
     use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
@@ -158,8 +156,7 @@ fn gaussian_fit_accuracy_independent_of_phase1_iterations() {
 
     assert!(
         diff < 0.01,
-        "Gaussian fit should converge to same position regardless of Phase 1 iterations: diff={:.4}",
-        diff
+        "Gaussian fit should converge to same position regardless of Phase 1 iterations: diff={diff:.4}"
     );
 
     // Both should be close to true position
@@ -168,12 +165,11 @@ fn gaussian_fit_accuracy_independent_of_phase1_iterations() {
     .sqrt();
     assert!(
         error_2iter < 0.05,
-        "Gaussian fit from 2-iter seed should achieve <0.05px accuracy, got {:.4}",
-        error_2iter
+        "Gaussian fit from 2-iter seed should achieve <0.05px accuracy, got {error_2iter:.4}"
     );
 }
 
-/// Verify that MoffatFit accuracy is equivalent whether Phase 1 runs 2 or 10 iterations.
+/// Verify that `MoffatFit` accuracy is equivalent whether Phase 1 runs 2 or 10 iterations.
 #[test]
 fn moffat_fit_accuracy_independent_of_phase1_iterations() {
     use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFit, MoffatFitConfig};
@@ -241,8 +237,7 @@ fn moffat_fit_accuracy_independent_of_phase1_iterations() {
 
     assert!(
         diff < 0.01,
-        "Moffat fit should converge to same position regardless of Phase 1 iterations: diff={:.4}",
-        diff
+        "Moffat fit should converge to same position regardless of Phase 1 iterations: diff={diff:.4}"
     );
 
     // Both should be close to true position
@@ -251,8 +246,7 @@ fn moffat_fit_accuracy_independent_of_phase1_iterations() {
     .sqrt();
     assert!(
         error_2iter < 0.05,
-        "Moffat fit from 2-iter seed should achieve <0.05px accuracy, got {:.4}",
-        error_2iter
+        "Moffat fit from 2-iter seed should achieve <0.05px accuracy, got {error_2iter:.4}"
     );
 }
 
@@ -283,7 +277,7 @@ fn compute_stamp_radius_scales_and_clamps() {
 /// Verifies that using only 2 pre-fit moments iterations produces equivalent
 /// centroid results compared to using 10 iterations before Gaussian/Moffat fitting.
 ///
-/// This test validates the design decision in MOMENTS_ITERATIONS_BEFORE_FIT:
+/// This test validates the design decision in `MOMENTS_ITERATIONS_BEFORE_FIT`:
 /// the L-M optimizer refines position independently and converges to the same
 /// result regardless of Phase 1 precision.
 #[test]
@@ -366,13 +360,11 @@ fn prefit_moments_iterations_sufficient() {
         // Both should converge
         assert!(
             result_from_2iter.is_some(),
-            "Gaussian fit from 2-iter moments failed for sigma={}",
-            sigma
+            "Gaussian fit from 2-iter moments failed for sigma={sigma}"
         );
         assert!(
             result_from_10iter.is_some(),
-            "Gaussian fit from 10-iter moments failed for sigma={}",
-            sigma
+            "Gaussian fit from 10-iter moments failed for sigma={sigma}"
         );
 
         let pos_final_2iter = result_from_2iter.unwrap().pos;
@@ -382,12 +374,8 @@ fn prefit_moments_iterations_sufficient() {
         let diff = (pos_final_2iter - pos_final_10iter).length();
         assert!(
             diff < 0.01,
-            "Position difference {:.6} pixels exceeds 0.01 for sigma={}: \
-             2-iter={:?}, 10-iter={:?}",
-            diff,
-            sigma,
-            pos_final_2iter,
-            pos_final_10iter
+            "Position difference {diff:.6} pixels exceeds 0.01 for sigma={sigma}: \
+             2-iter={pos_final_2iter:?}, 10-iter={pos_final_10iter:?}"
         );
 
         // Both should be accurate to within 0.05 pixels of true position
@@ -395,15 +383,11 @@ fn prefit_moments_iterations_sufficient() {
         let error_10iter = (pos_final_10iter - true_pos).length();
         assert!(
             error_2iter < 0.05,
-            "2-iter centroid error {:.4} exceeds 0.05 for sigma={}",
-            error_2iter,
-            sigma
+            "2-iter centroid error {error_2iter:.4} exceeds 0.05 for sigma={sigma}"
         );
         assert!(
             error_10iter < 0.05,
-            "10-iter centroid error {:.4} exceeds 0.05 for sigma={}",
-            error_10iter,
-            sigma
+            "10-iter centroid error {error_10iter:.4} exceeds 0.05 for sigma={sigma}"
         );
     }
 }
@@ -500,9 +484,6 @@ fn prefit_moments_iterations_sufficient_moffat() {
     let diff = (pos_final_2iter - pos_final_10iter).length();
     assert!(
         diff < 0.01,
-        "Moffat position difference {:.6} pixels exceeds 0.01: 2-iter={:?}, 10-iter={:?}",
-        diff,
-        pos_final_2iter,
-        pos_final_10iter
+        "Moffat position difference {diff:.6} pixels exceeds 0.01: 2-iter={pos_final_2iter:?}, 10-iter={pos_final_10iter:?}"
     );
 }

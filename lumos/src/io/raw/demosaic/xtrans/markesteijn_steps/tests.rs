@@ -99,10 +99,7 @@ fn interpolate_green_uniform() {
             let g = green_dir[d * w * h + i];
             assert!(
                 (g - 0.5).abs() < 0.05,
-                "green_dir[{}][{}] = {} (expected ~0.5)",
-                d,
-                i,
-                g
+                "green_dir[{d}][{i}] = {g} (expected ~0.5)"
             );
         }
     }
@@ -128,12 +125,12 @@ fn homogeneity_uniform_derivatives() {
             let h1 = homo[pixels + idx];
             let h2 = homo[2 * pixels + idx];
             let h3 = homo[3 * pixels + idx];
-            assert_eq!(h0, h1, "Homogeneity mismatch at ({},{})", y, x);
-            assert_eq!(h1, h2, "Homogeneity mismatch at ({},{})", y, x);
-            assert_eq!(h2, h3, "Homogeneity mismatch at ({},{})", y, x);
+            assert_eq!(h0, h1, "Homogeneity mismatch at ({y},{x})");
+            assert_eq!(h1, h2, "Homogeneity mismatch at ({y},{x})");
+            assert_eq!(h2, h3, "Homogeneity mismatch at ({y},{x})");
             // With uniform drv=1.0, threshold = 8.0, all drv <= threshold
             // so count should be 9 (full 3×3 window)
-            assert_eq!(h0, 9, "Expected 9 at ({},{}), got {}", y, x, h0);
+            assert_eq!(h0, 9, "Expected 9 at ({y},{x}), got {h0}");
         }
     }
 }
@@ -165,9 +162,9 @@ fn ypbpr_conversion_white() {
     let y: f32 = 0.2627 * 1.0 + 0.6780 * 1.0 + 0.0593 * 1.0;
     let pb: f32 = (1.0 - y) * 0.56433;
     let pr: f32 = (1.0 - y) * 0.67815;
-    assert!((y - 1.0).abs() < 1e-4, "Y={}", y);
-    assert!(pb.abs() < 1e-4, "Pb={}", pb);
-    assert!(pr.abs() < 1e-4, "Pr={}", pr);
+    assert!((y - 1.0).abs() < 1e-4, "Y={y}");
+    assert!(pb.abs() < 1e-4, "Pb={pb}");
+    assert!(pr.abs() < 1e-4, "Pr={pr}");
 }
 
 #[test]
@@ -420,7 +417,8 @@ fn homogeneity_scores_match_direct_five_by_five_windows() {
                 let mut expected = 0u32;
                 for sample_y in y.saturating_sub(2)..=(y + 2).min(height - 1) {
                     for sample_x in x.saturating_sub(2)..=(x + 2).min(width - 1) {
-                        expected += homo[direction * pixels + sample_y * width + sample_x] as u32;
+                        expected +=
+                            u32::from(homo[direction * pixels + sample_y * width + sample_x]);
                     }
                 }
                 assert_eq!(scores[y * width + x][direction], expected);

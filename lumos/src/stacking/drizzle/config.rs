@@ -10,12 +10,12 @@ pub enum DrizzleKernel {
     /// Square kernel: true polygon clipping via Sutherland-Hodgman / Green's theorem.
     /// Transforms all 4 corners of each input pixel drop, computes exact quadrilateral-
     /// to-output-pixel overlap area. Correct for any transform including rotation and shear.
-    /// Reference: STScI cdrizzlebox.c `do_kernel_square` / `boxer` / `sgarea`.
+    /// Reference: `STScI` cdrizzlebox.c `do_kernel_square` / `boxer` / `sgarea`.
     Square,
     /// Turbo kernel: axis-aligned rectangular drop centered on the transformed pixel center.
     /// Approximation of true square kernel — always aligned with output X/Y axes regardless
     /// of rotation. Fast and adequate when rotation between frames is small. Default.
-    /// (Named "turbo" in STScI DrizzlePac; "square" there uses full polygon clipping.)
+    /// (Named "turbo" in `STScI` `DrizzlePac`; "square" there uses full polygon clipping.)
     #[default]
     Turbo,
     /// Point kernel - single pixel contribution.

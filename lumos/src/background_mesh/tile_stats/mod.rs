@@ -139,7 +139,7 @@ fn collect_all_pixels(pixels: &Buffer2<f32>, tile: URect, values: &mut Vec<f32>)
     }
 }
 
-/// Collect sampled pixels using strided access (~MAX_TILE_SAMPLES pixels).
+/// Collect sampled pixels using strided access (~`MAX_TILE_SAMPLES` pixels).
 #[inline]
 fn collect_sampled_pixels(pixels: &Buffer2<f32>, tile: URect, values: &mut Vec<f32>) {
     let width = pixels.width();

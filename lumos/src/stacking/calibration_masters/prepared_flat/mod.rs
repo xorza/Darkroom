@@ -63,7 +63,7 @@ pub(super) fn apply(flat: &CfaImage, image: &mut CfaImage) {
 }
 
 fn normalize_mono(flat: &mut Buffer2<f32>) {
-    let sum: f64 = flat.par_iter().map(|&value| value as f64).sum();
+    let sum: f64 = flat.par_iter().map(|&value| f64::from(value)).sum();
     let mean = (sum / flat.len() as f64) as f32;
     assert!(
         mean > f32::EPSILON,
@@ -85,7 +85,7 @@ fn normalize_cfa(flat: &mut Buffer2<f32>, cfa_type: &CfaType) {
             let mut counts = [0u64; 3];
             for (x, value) in row.iter_mut().enumerate() {
                 let color = cfa_type.color_at(Vec2us::new(x, y)) as usize;
-                sums[color] += *value as f64;
+                sums[color] += f64::from(*value);
                 counts[color] += 1;
             }
             (sums, counts)

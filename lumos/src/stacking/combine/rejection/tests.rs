@@ -101,7 +101,7 @@ fn sigma_clip_removes_outlier() {
     let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
     let remaining = SigmaClipConfig::new(2.0, 3).reject(&mut values, &mut scratch());
     let mean = mean_f32(&values[..remaining]);
-    assert!(mean < 10.0, "Expected outlier to be clipped, got {}", mean);
+    assert!(mean < 10.0, "Expected outlier to be clipped, got {mean}");
     assert!(remaining < 8);
 }
 
@@ -118,7 +118,7 @@ fn asymmetric_sigma_clip_removes_high_outlier() {
     let remaining =
         SigmaClipConfig::new_asymmetric(4.0, 2.0, 3).reject(&mut values, &mut scratch());
     let mean = mean_f32(&values[..remaining]);
-    assert!(mean < 10.0, "High outlier should be clipped, got {}", mean);
+    assert!(mean < 10.0, "High outlier should be clipped, got {mean}");
     assert!(remaining < 8);
 }
 
@@ -132,14 +132,12 @@ fn asymmetric_sigma_clip_keeps_low_with_high_threshold() {
 
     assert!(
         remaining >= 9,
-        "Low outlier should be kept, remaining={}",
-        remaining
+        "Low outlier should be kept, remaining={remaining}"
     );
     let mean = mean_f32(&values[..remaining]);
     assert!(
         mean < 2.5,
-        "Mean should be < 2.5 due to kept low outlier, got {}",
-        mean
+        "Mean should be < 2.5 due to kept low outlier, got {mean}"
     );
 }
 
@@ -391,11 +389,10 @@ fn sigma_clip_indices_track_survivors() {
     let surviving = &s.indices[..remaining];
     assert!(
         !surviving.contains(&7),
-        "Frame 7 (outlier) should not survive, survivors: {:?}",
-        surviving
+        "Frame 7 (outlier) should not survive, survivors: {surviving:?}"
     );
     for &idx in surviving {
-        assert!(idx < 8, "Invalid surviving index: {}", idx);
+        assert!(idx < 8, "Invalid surviving index: {idx}");
     }
 }
 
@@ -408,11 +405,10 @@ fn linear_fit_indices_track_survivors() {
     let surviving = &s.indices[..remaining];
     assert!(
         !surviving.contains(&4),
-        "Frame 4 (outlier) should not survive, survivors: {:?}",
-        surviving
+        "Frame 4 (outlier) should not survive, survivors: {surviving:?}"
     );
     for &idx in surviving {
-        assert!(idx < 6, "Invalid surviving index: {}", idx);
+        assert!(idx < 6, "Invalid surviving index: {idx}");
     }
 }
 
@@ -430,11 +426,10 @@ fn percentile_indices_track_survivors() {
     // Survivors (values 2,3,4) should map to original indices 3, 2, 4
     assert!(
         !surviving.contains(&0) && !surviving.contains(&1),
-        "Frames 0 (5.0) and 1 (1.0) should be clipped, survivors: {:?}",
-        surviving
+        "Frames 0 (5.0) and 1 (1.0) should be clipped, survivors: {surviving:?}"
     );
     for &idx in surviving {
-        assert!(idx < 5, "Invalid surviving index: {}", idx);
+        assert!(idx < 5, "Invalid surviving index: {idx}");
     }
 }
 
@@ -449,8 +444,7 @@ fn no_rejection_preserves_all_indices() {
     for i in 0..5 {
         assert!(
             surviving.contains(&i),
-            "Index {} should survive when no rejection occurs",
-            i
+            "Index {i} should survive when no rejection occurs"
         );
     }
 }
@@ -499,7 +493,7 @@ fn combine_mean_sigma_clip() {
     let mean = Rejection::sigma_clip(2.0)
         .combine_mean(&mut values, &[1.0; 8], &mut scratch(), true)
         .value;
-    assert!(mean < 10.0, "Outlier should be clipped, got {}", mean);
+    assert!(mean < 10.0, "Outlier should be clipped, got {mean}");
 }
 
 #[test]
@@ -513,8 +507,7 @@ fn weighted_percentile_uses_weights() {
 
     assert!(
         mean > 5.5 + 0.5,
-        "Weighted percentile should be pulled toward heavily weighted value 8, got {}",
-        mean
+        "Weighted percentile should be pulled toward heavily weighted value 8, got {mean}"
     );
 }
 
@@ -535,9 +528,7 @@ fn weighted_winsorized_uses_weights() {
 
     assert!(
         mean < unweighted_mean,
-        "Weighted winsorized (heavy on 1.0) should be less than uniform: {} vs {}",
-        mean,
-        unweighted_mean,
+        "Weighted winsorized (heavy on 1.0) should be less than uniform: {mean} vs {unweighted_mean}",
     );
 }
 
@@ -550,7 +541,7 @@ fn weighted_asymmetric_sigma_clip() {
         .combine_mean(&mut values, &weights, &mut scratch(), true)
         .value;
 
-    assert!(mean < 2.5, "Should be pulled toward 1.0, got {}", mean);
+    assert!(mean < 2.5, "Should be pulled toward 1.0, got {mean}");
 }
 
 #[test]
@@ -564,8 +555,7 @@ fn weighted_sigma_clip_weight_alignment() {
 
     assert!(
         (mean - 2.0).abs() < 0.25,
-        "Weighted mean should be ~2.0 (dominated by frame 0, weight=10.0), got {}",
-        mean
+        "Weighted mean should be ~2.0 (dominated by frame 0, weight=10.0), got {mean}"
     );
 }
 
@@ -582,8 +572,7 @@ fn weighted_linear_fit_weight_alignment() {
 
     assert!(
         mean < 1.1,
-        "Weighted mean should be pulled toward frame 0 (value=1.0, weight=10.0), got {}",
-        mean
+        "Weighted mean should be pulled toward frame 0 (value=1.0, weight=10.0), got {mean}"
     );
 }
 
@@ -598,8 +587,7 @@ fn weighted_gesd_weight_alignment() {
 
     assert!(
         (mean - 1.0).abs() < 0.05,
-        "Weighted mean should be ~1.0 (dominated by frame 0, weight=10.0), got {}",
-        mean
+        "Weighted mean should be ~1.0 (dominated by frame 0, weight=10.0), got {mean}"
     );
 }
 
@@ -734,12 +722,11 @@ fn sigma_clip_multiple_outliers() {
     let remaining = SigmaClipConfig::new(2.0, 3).reject(&mut values, &mut scratch());
     // All three outliers should be removed
     for &v in &values[..remaining] {
-        assert!(v < 10.0, "Outlier {} should have been clipped", v);
+        assert!(v < 10.0, "Outlier {v} should have been clipped");
     }
     assert!(
         remaining <= 5,
-        "Expected at most 5 survivors, got {}",
-        remaining
+        "Expected at most 5 survivors, got {remaining}"
     );
 }
 
@@ -773,8 +760,7 @@ fn linear_fit_rejects_extreme_outlier() {
     let surviving = &s.indices[..remaining];
     assert!(
         !surviving.contains(&7),
-        "Frame 7 (outlier 50.0) should not survive, survivors: {:?}",
-        surviving
+        "Frame 7 (outlier 50.0) should not survive, survivors: {surviving:?}"
     );
 }
 
@@ -792,9 +778,7 @@ fn linear_fit_tighter_than_sigma_clip() {
     // Linear fit should reject more aggressively than sigma clip
     assert!(
         lf_remaining <= sc_remaining,
-        "Linear fit (remaining={}) should be at least as aggressive as sigma clip (remaining={})",
-        lf_remaining,
-        sc_remaining
+        "Linear fit (remaining={lf_remaining}) should be at least as aggressive as sigma clip (remaining={sc_remaining})"
     );
 }
 
@@ -825,7 +809,7 @@ fn weighted_mean_indexed_basic() {
     let indices = [0, 1, 2];
     let mut buf = Vec::new();
     let mean = weighted_mean_indexed(&values, &weights, &indices, &mut buf);
-    assert!((mean - 2.5).abs() < 1e-6, "Expected 2.5, got {}", mean);
+    assert!((mean - 2.5).abs() < 1e-6, "Expected 2.5, got {mean}");
 }
 
 #[test]
@@ -856,8 +840,7 @@ fn combine_mean_percentile_unweighted() {
     // Clips 2 low (1,2) and 2 high (9,10), mean of [3,4,5,6,7,8] = 5.5
     assert!(
         (mean - 5.5).abs() < 0.01,
-        "Unweighted percentile mean should be 5.5, got {}",
-        mean
+        "Unweighted percentile mean should be 5.5, got {mean}"
     );
 }
 
@@ -1347,8 +1330,7 @@ fn weighted_mean_indexed_all_zero_weights() {
     let result = weighted_mean_indexed(&values, &weights, &indices, &mut buf);
     assert!(
         (result - 0.0).abs() < 1e-6,
-        "Should return 0.0, got {}",
-        result
+        "Should return 0.0, got {result}"
     );
 }
 
@@ -1381,7 +1363,7 @@ fn weighted_mean_indexed_preserves_small_increments() {
     // A naive f32 sum gives ~2e7/17 ≈ 1_176_470.59, off by 8/17 ≈ 0.47.
     let expected = (2.0e7_f64 + 8.0) / 17.0;
     assert!(
-        (mean as f64 - expected).abs() < 0.1,
+        (f64::from(mean) - expected).abs() < 0.1,
         "precise mean {mean} must be within 0.1 of {expected} (naive loses ~0.47)"
     );
 }

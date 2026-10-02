@@ -80,11 +80,7 @@ impl HexLookup {
                 // d indexes into ORTH to get direction vectors
                 let mut d = 0;
                 while d < 10 {
-                    let g = if pattern.color_at(Vec2us::new(col, row)) == 1 {
-                        1i32
-                    } else {
-                        0i32
-                    };
+                    let g = i32::from(pattern.color_at(Vec2us::new(col, row)) == 1);
 
                     // Check if neighbor in this direction is green
                     // Add 6 before converting to usize so negative offsets wrap correctly
@@ -266,13 +262,13 @@ mod tests {
 
         // get() should wrap via % 3
         assert_eq!(
-            hex.get(0, 0) as *const _,
-            hex.get(3, 3) as *const _,
+            std::ptr::from_ref(hex.get(0, 0)),
+            std::ptr::from_ref(hex.get(3, 3)),
             "get(0,0) should equal get(3,3)"
         );
         assert_eq!(
-            hex.get(1, 2) as *const _,
-            hex.get(4, 5) as *const _,
+            std::ptr::from_ref(hex.get(1, 2)),
+            std::ptr::from_ref(hex.get(4, 5)),
             "get(1,2) should equal get(4,5)"
         );
     }

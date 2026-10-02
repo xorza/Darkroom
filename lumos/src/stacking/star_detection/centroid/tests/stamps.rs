@@ -106,8 +106,7 @@ fn refine_centroid_adaptive_sigma_small_fwhm() {
     let error = ((new_pos.x - true_pos.x).powi(2) + (new_pos.y - true_pos.y).powi(2)).sqrt();
     assert!(
         error < 0.5,
-        "Centroid error {} too large for small FWHM",
-        error
+        "Centroid error {error} too large for small FWHM"
     );
 }
 
@@ -139,8 +138,7 @@ fn refine_centroid_adaptive_sigma_large_fwhm() {
     let error = ((new_pos.x - true_pos.x).powi(2) + (new_pos.y - true_pos.y).powi(2)).sqrt();
     assert!(
         error < 0.5,
-        "Centroid error {} too large for large FWHM",
-        error
+        "Centroid error {error} too large for large FWHM"
     );
 }
 
@@ -331,8 +329,7 @@ fn local_annulus_vs_global_map() {
     .sqrt();
     assert!(
         pos_diff < 0.5,
-        "GlobalMap and LocalAnnulus should give similar positions: diff={}",
-        pos_diff
+        "GlobalMap and LocalAnnulus should give similar positions: diff={pos_diff}"
     );
 
     // Both should have positive flux and SNR

@@ -122,7 +122,7 @@ fn bench_drizzle_kernels(b: ::quickbench::Bencher) {
     let base = star_field(FIELD, 250, 5).image;
     let aligned = dithered_set(&base, 0.0);
 
-    b.bench_labeled("frame-clone", || black_box(aligned.to_vec()));
+    b.bench_labeled("frame-clone", || black_box(aligned.clone()));
 
     for kernel in KERNELS {
         let config = kernel_config(kernel);

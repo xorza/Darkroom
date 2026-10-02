@@ -31,7 +31,7 @@ impl CustomValueCodec for ImageCodec {
         value: &dyn CustomValue,
         writer: &mut (dyn AsyncWrite + Unpin + Send),
         _ctx: &mut ContextStore,
-    ) -> std::result::Result<(), BoxError> {
+    ) -> Result<(), BoxError> {
         let image = value
             .as_any()
             .downcast_ref::<Image>()
@@ -55,7 +55,7 @@ impl CustomValueCodec for ImageCodec {
         reader: &mut (dyn AsyncRead + Unpin + Send),
         byte_len: u64,
         _ctx: &mut ContextStore,
-    ) -> std::result::Result<Arc<dyn CustomValue>, BoxError> {
+    ) -> Result<Arc<dyn CustomValue>, BoxError> {
         if byte_len < HEADER_LEN {
             return Err(format!("image cache payload is only {byte_len} bytes").into());
         }

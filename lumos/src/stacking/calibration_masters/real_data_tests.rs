@@ -12,7 +12,7 @@
 //!
 //! Run:
 //!   cargo test -p lumos --release --features real-data \
-//!     calibration_masters::real_data_tests -- --ignored --nocapture
+//!     `calibration_masters::real_data_tests` -- --ignored --nocapture
 
 use crate::math::size2us::Size2us;
 use std::hint::black_box;

@@ -41,7 +41,7 @@ pub(crate) fn available_memory() -> u64 {
 }
 
 pub(crate) fn memory_budget(available_memory: u64) -> u64 {
-    (available_memory as u128 * MEMORY_PERCENT as u128 / 100) as u64
+    (u128::from(available_memory) * u128::from(MEMORY_PERCENT) / 100) as u64
 }
 
 /// Bytes one frame's pixels occupy, planar f32.
@@ -77,8 +77,7 @@ impl ChunkMemoryLayout {
             .width
             .checked_mul(self.input_planes)
             .and_then(|value| value.checked_mul(size_of::<f32>()))
-            .map(|value| value as u64)
-            .unwrap_or(u64::MAX);
+            .map_or(u64::MAX, |value| value as u64);
         if bytes_per_row == 0 {
             return MIN_CHUNK_ROWS;
         }
@@ -87,8 +86,7 @@ impl ChunkMemoryLayout {
             .checked_mul(size.height)
             .and_then(|value| value.checked_mul(self.resident_planes))
             .and_then(|value| value.checked_mul(size_of::<f32>()))
-            .map(|value| value as u64)
-            .unwrap_or(u64::MAX);
+            .map_or(u64::MAX, |value| value as u64);
         (memory_budget(available_memory).saturating_sub(resident_bytes) / bytes_per_row)
             .max(MIN_CHUNK_ROWS as u64) as usize
     }
@@ -378,7 +376,7 @@ mod tests {
         for (width, channels, frames, available) in cases {
             let input_planes = channels * frames;
             let bytes_per_row = (width * input_planes * size_of::<f32>()) as u64;
-            let usable = (available as u128 * 75 / 100) as u64;
+            let usable = (u128::from(available) * 75 / 100) as u64;
             let expected = (usable / bytes_per_row).max(MIN_CHUNK_ROWS as u64) as usize;
             assert_eq!(
                 ChunkMemoryLayout {

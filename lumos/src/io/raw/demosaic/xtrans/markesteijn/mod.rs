@@ -24,7 +24,7 @@
 //! Total: 18P f32 arena, where P = width × height (+ 3P for the planar output buffers)
 //! ```
 //!
-//! Region A holds green_dir (4 directions), written in Step 2, read through Step 6.
+//! Region A holds `green_dir` (4 directions), written in Step 2, read through Step 6.
 //! Region E holds directional `[red, blue]` pairs, written in Step 3 and read through Step 6.
 //! Region B is used as `drv` in Steps 4–5, then as four `u32` scores per pixel in Step 6.
 //! Region C is used as `gmin` in Steps 1–2, then reinterpreted as `homo` (u8) in Steps 5–6.
@@ -48,8 +48,8 @@ pub(crate) fn demosaic_memory(size: Size2us) -> DemosaicMemory {
     let output_words = pixels.saturating_mul(3);
     let peak_words = pixels.saturating_mul(1 + ARENA_WORDS_PER_PIXEL + 3);
     DemosaicMemory {
-        output_bytes: output_words.saturating_mul(std::mem::size_of::<f32>()),
-        peak_bytes: peak_words.saturating_mul(std::mem::size_of::<f32>()),
+        output_bytes: output_words.saturating_mul(size_of::<f32>()),
+        peak_bytes: peak_words.saturating_mul(size_of::<f32>()),
     }
 }
 
@@ -95,10 +95,10 @@ impl DemosaicArena {
 
     fn final_blend_buffers(&mut self) -> FinalBlendBuffers<'_> {
         const {
-            assert!(std::mem::size_of::<f32>() == std::mem::size_of::<u32>());
-            assert!(std::mem::align_of::<f32>() >= std::mem::align_of::<u32>());
-            assert!(NDIR * std::mem::size_of::<f32>() == std::mem::size_of::<[u32; NDIR]>());
-            assert!(std::mem::align_of::<f32>() >= std::mem::align_of::<[u32; NDIR]>());
+            assert!(size_of::<f32>() == size_of::<u32>());
+            assert!(align_of::<f32>() >= align_of::<u32>());
+            assert!(NDIR * size_of::<f32>() == size_of::<[u32; NDIR]>());
+            assert!(align_of::<f32>() >= align_of::<[u32; NDIR]>());
         }
         debug_assert_eq!(self.storage.len() % ARENA_WORDS_PER_PIXEL, 0);
         let pixels = self.storage.len() / ARENA_WORDS_PER_PIXEL;
@@ -181,7 +181,7 @@ pub(crate) fn demosaic(
         let region_e = &mut rest[..8 * pixels];
         // SAFETY: `[f32; 2]` has the same alignment as f32 and exactly covers Region E.
         let colors = unsafe {
-            std::slice::from_raw_parts_mut(region_e.as_mut_ptr() as *mut [f32; 2], NDIR * pixels)
+            std::slice::from_raw_parts_mut(region_e.as_mut_ptr().cast::<[f32; 2]>(), NDIR * pixels)
         };
         markesteijn_steps::reconstruct_colors(xtrans, &hex, region_a, colors);
     }
@@ -202,7 +202,7 @@ pub(crate) fn demosaic(
         let region_b = &mut rest[..4 * pixels];
         // SAFETY: Region E was fully initialized as `[f32; 2]` in Step 3.
         let colors = unsafe {
-            std::slice::from_raw_parts(region_e.as_ptr() as *const [f32; 2], NDIR * pixels)
+            std::slice::from_raw_parts(region_e.as_ptr().cast::<[f32; 2]>(), NDIR * pixels)
         };
         markesteijn_steps::compute_derivatives(xtrans, region_a, colors, region_b);
     }
@@ -223,8 +223,9 @@ pub(crate) fn demosaic(
         let drv = &before_c[12 * pixels..];
         // SAFETY: Region C (f32 at [16P..17P]) reinterpreted as u8 for homo.
         // gmin data is dead after Step 2. f32 alignment (4) satisfies u8 alignment (1).
-        let homo =
-            unsafe { std::slice::from_raw_parts_mut(region_c.as_mut_ptr() as *mut u8, pixels * 4) };
+        let homo = unsafe {
+            std::slice::from_raw_parts_mut(region_c.as_mut_ptr().cast::<u8>(), pixels * 4)
+        };
         markesteijn_steps::compute_homogeneity(drv, xtrans.active, homo, region_d);
     }
     tracing::debug!(

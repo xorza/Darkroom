@@ -30,7 +30,7 @@ mod tests;
 #[cfg(all(test, feature = "internals"))]
 mod bench;
 
-/// Maximum children per node (same as MAX_PEAKS since each child becomes a candidate).
+/// Maximum children per node (same as `MAX_PEAKS` since each child becomes a candidate).
 const MAX_CHILDREN: usize = MAX_PEAKS;
 
 /// Sentinel value indicating no pixel value at grid position.
@@ -50,13 +50,13 @@ fn bounding_box(pixels: &[Pixel]) -> URect {
 
 /// Grid-based pixel lookup for fast neighbor access during connected component finding.
 ///
-/// Replaces HashMap<Vec2us, f32> and HashSet<Vec2us> with flat arrays indexed by
+/// Replaces `HashMap`<Vec2us, f32> and `HashSet`<Vec2us> with flat arrays indexed by
 /// local coordinates within the bounding box. This eliminates hash computation
 /// overhead which was a major bottleneck (17% of CPU time).
 ///
 /// Uses a generation counter for the visited array to avoid clearing on each reset.
 /// Each cell stores the generation when it was last visited; comparing against
-/// current_generation gives O(1) reset instead of O(n) clearing.
+/// `current_generation` gives O(1) reset instead of O(n) clearing.
 #[derive(Debug)]
 struct PixelGrid {
     /// Pixel values indexed by local coordinates.
@@ -67,7 +67,7 @@ struct PixelGrid {
     /// Generation when each cell was last visited. Cell is visited if
     /// `visited_generation[idx] == visited_generation_counter`.
     visited_generation: Vec<u32>,
-    /// Generation counter for values (incremented on each reset_with_pixels).
+    /// Generation counter for values (incremented on each `reset_with_pixels`).
     current_generation: u32,
     /// Separate generation counter for visited state (incremented on each new BFS).
     visited_generation_counter: u32,
@@ -154,7 +154,7 @@ impl PixelGrid {
         }
     }
 
-    /// Get pixel value at local index, or NO_PIXEL if not present in current generation.
+    /// Get pixel value at local index, or `NO_PIXEL` if not present in current generation.
     #[inline]
     unsafe fn get_value_unchecked(&self, idx: usize) -> f32 {
         // SAFETY: every operation below relies only on the precondition this function's own
@@ -187,7 +187,7 @@ impl PixelGrid {
 
 /// Grid-based node assignment for tracking which tree node each pixel belongs to.
 ///
-/// Replaces HashMap<Vec2us, usize> with a flat array for O(1) lookup/update.
+/// Replaces `HashMap`<Vec2us, usize> with a flat array for O(1) lookup/update.
 /// Uses a generation counter to avoid O(n) clearing on each reset.
 #[derive(Debug)]
 struct NodeGrid {
@@ -259,10 +259,10 @@ impl NodeGrid {
     #[inline]
     fn get(&self, pos: Vec2us) -> Option<usize> {
         let idx = self.cell_index(pos)?;
-        if self.nodes_generation[idx] != self.current_generation {
-            None
-        } else {
+        if self.nodes_generation[idx] == self.current_generation {
             Some(self.nodes[idx] as usize)
+        } else {
+            None
         }
     }
 
@@ -285,7 +285,7 @@ struct DeblendNode {
     /// Total flux in this branch.
     flux: f32,
     /// Child nodes (branches that split from this node at higher threshold).
-    /// Uses SmallVec to avoid heap allocation for common case (0-2 children).
+    /// Uses `SmallVec` to avoid heap allocation for common case (0-2 children).
     children: SmallVec<[usize; MAX_CHILDREN]>,
 }
 
@@ -343,7 +343,7 @@ impl Index<usize> for RegionSet {
 /// are needed by every search, so they travel together.
 #[derive(Debug)]
 struct RegionScratch {
-    /// Grid for fast pixel lookup (replaces HashMap).
+    /// Grid for fast pixel lookup (replaces `HashMap`).
     grid: PixelGrid,
     /// BFS queue for connected component finding (flat grid indices).
     queue: Vec<u32>,
@@ -517,11 +517,11 @@ pub(crate) fn deblend_multi_threshold(
     assign_pixels_to_objects(data, pixels, labels, &tree, &leaves)
 }
 
-/// Inline capacity for deblend tree SmallVec.
+/// Inline capacity for deblend tree `SmallVec`.
 /// Measurements show avg ~3 nodes, max ~170, so 16 covers most cases on stack.
 const TREE_INLINE_CAP: usize = 16;
 
-/// SmallVec type for deblend trees - avoids heap for typical small trees.
+/// `SmallVec` type for deblend trees - avoids heap for typical small trees.
 type DeblendTree = SmallVec<[DeblendNode; TREE_INLINE_CAP]>;
 
 /// The exponentially spaced ladder one component is cut at: the floor to start
@@ -768,7 +768,7 @@ fn create_child_nodes(
 }
 
 /// Maximum expected tree size for stack allocation.
-/// Trees are small: O(n_thresholds * MAX_PEAKS) but practically much smaller
+/// Trees are small: `O(n_thresholds` * `MAX_PEAKS`) but practically much smaller
 /// since most components don't split at every level.
 const MAX_TREE_SIZE: usize = 128;
 
@@ -909,7 +909,7 @@ const NO_REGION_LIMIT: usize = usize::MAX;
 
 /// Find connected regions using grid-based BFS, replacing whatever `regions` held.
 ///
-/// Stops once `max_regions` have been found. Uses PixelGrid for O(1) neighbor lookup with
+/// Stops once `max_regions` have been found. Uses `PixelGrid` for O(1) neighbor lookup with
 /// flat-index BFS queue.
 fn find_connected_regions_grid(
     pixels: &[Pixel],
@@ -934,8 +934,8 @@ fn find_connected_regions_grid(
 /// Visit 8-connected neighbors using grid-based lookup with flat indices.
 ///
 /// This is the hot path - fully unchecked since the grid always has a 1-pixel
-/// border (guaranteed by wrapping_sub in reset_with_pixels). Border cells have
-/// NO_PIXEL via generation check so they won't propagate BFS further.
+/// border (guaranteed by `wrapping_sub` in `reset_with_pixels`). Border cells have
+/// `NO_PIXEL` via generation check so they won't propagate BFS further.
 ///
 /// # Safety
 /// `idx` must be a valid local index within the grid with at least 1 cell of

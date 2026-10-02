@@ -137,7 +137,7 @@ async fn update_with_evolved_func_recompiles_and_runs_new_lambda() {
                 outputs[0] = ConstValue::Int(2).into();
                 Ok(())
             });
-        })
+        });
     });
 
     assert_eq!(
@@ -198,7 +198,7 @@ async fn update_with_a_grown_output_list_retires_the_shorter_snapshot() {
         g.edit_func("generate", |func| {
             func.outputs
                 .push(crate::graph::func::FuncOutput::new("W", DataType::Int));
-        })
+        });
     });
     e.run_sinks().await;
 }

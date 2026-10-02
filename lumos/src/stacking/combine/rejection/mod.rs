@@ -221,7 +221,7 @@ impl Rejection {
     /// than by position.
     ///
     /// Only the mean is weighted; [`Self::reject`] decides survivors from the values alone. That
-    /// is deliberate, and matches what ImageIntegration, Siril and DSS all do: rejection asks
+    /// is deliberate, and matches what `ImageIntegration`, Siril and DSS all do: rejection asks
     /// which samples disagree with their neighbours, which is a question about the normalized
     /// values, not about how much each frame is trusted. It is also what keeps GESD available —
     /// its critical values come from the t-distribution for `n` iid observations, and there is no

@@ -289,11 +289,11 @@ fn collect_component_data(label_map: &LabelMap) -> Vec<ComponentData> {
 }
 
 fn dense_component_jobs(num_labels: usize, pixel_count: usize, max_jobs: usize) -> usize {
-    let bytes_per_job = num_labels.saturating_mul(std::mem::size_of::<ComponentData>());
+    let bytes_per_job = num_labels.saturating_mul(size_of::<ComponentData>());
     if bytes_per_job == 0 {
         return max_jobs;
     }
-    let scratch_budget = pixel_count.saturating_mul(std::mem::size_of::<u32>());
+    let scratch_budget = pixel_count.saturating_mul(size_of::<u32>());
     (scratch_budget / bytes_per_job).clamp(1, max_jobs)
 }
 
@@ -318,7 +318,7 @@ fn collect_component_data_dense(label_map: &LabelMap, num_jobs: usize) -> Vec<Co
         let mut touched = Vec::with_capacity(num_labels.min(1024));
 
         accumulate_component_rows(labels, width, start_row, end_row, &mut local, |index| {
-            touched.push(index)
+            touched.push(index);
         });
 
         let mut result = result.lock();

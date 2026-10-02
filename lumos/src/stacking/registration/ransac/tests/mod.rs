@@ -18,7 +18,7 @@ fn estimator_with_max_sigma(max_sigma: f64, config: RansacConfig) -> RansacEstim
     RansacEstimator::new(config, max_sigma)
 }
 
-/// Create PointMatch objects from paired point arrays with uniform confidence.
+/// Create `PointMatch` objects from paired point arrays with uniform confidence.
 fn make_matches(n: usize) -> Vec<PointMatch> {
     (0..n)
         .map(|i| PointMatch {
@@ -30,7 +30,7 @@ fn make_matches(n: usize) -> Vec<PointMatch> {
         .collect()
 }
 
-/// Create PointMatch objects with custom confidences.
+/// Create `PointMatch` objects with custom confidences.
 fn make_matches_with_confidence(confidences: &[f64]) -> Vec<PointMatch> {
     confidences
         .iter()

@@ -92,7 +92,7 @@ impl LabelMap {
         Self { labels, num_labels }
     }
 
-    /// Release this LabelMap's buffer back to the pool.
+    /// Release this `LabelMap`'s buffer back to the pool.
     pub(crate) fn release_to_pool(self, pool: &mut DetectionResources) {
         pool.release_u32(self.labels);
     }

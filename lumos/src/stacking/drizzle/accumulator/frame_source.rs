@@ -209,7 +209,7 @@ impl<'a> FrameSource<'a> {
             .pixel_weights
             .map_or(1.0, |weights| weights[pixel.index]);
         let weight = self.weight * pixel_weight;
-        (weight > 0.0).then_some(weight as f64)
+        (weight > 0.0).then_some(f64::from(weight))
     }
 }
 

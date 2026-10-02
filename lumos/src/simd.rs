@@ -1,6 +1,6 @@
 //! The crate's one architecture-dispatch prologue.
 //!
-//! Every hand-written SIMD kernel is reached through [`dispatch!`], which expands to the x86_64
+//! Every hand-written SIMD kernel is reached through [`dispatch!`], which expands to the `x86_64`
 //! feature ladder, the aarch64 NEON arm and the scalar fallback in one fixed shape. One macro
 //! rather than a ladder per kernel family, so nothing can disagree on arm order, on where the
 //! `unsafe` block and its SAFETY note go, or on which spelling keeps the compiler from calling
@@ -71,8 +71,10 @@ macro_rules! dispatch {
         }
     };
 
+    // An unguarded arm still goes through `if`: a bare `return` would make the scalar fallback
+    // unreachable on aarch64 only, which no single lint expectation can state for both targets.
     (@neon $call:expr) => {
-        return unsafe { $call };
+        $crate::simd::dispatch!(@neon $call, true)
     };
     (@neon $call:expr, $guard:expr) => {
         if $guard {
@@ -97,7 +99,6 @@ macro_rules! dispatch {
                 $crate::simd::dispatch!(@neon $neon_call $(, $neon_guard)?);
             }
         )?
-        #[allow(unreachable_code)]
         return $scalar;
     }};
 }

@@ -129,17 +129,11 @@ fn image_registration_translation() {
     // Noiseless fixture: recovery is limited only by centroid scatter, so the gate is sub-pixel.
     assert!(
         dx_error < 0.3,
-        "X translation error too large: expected {}, got {}, error {}",
-        dx,
-        recovered_dx,
-        dx_error
+        "X translation error too large: expected {dx}, got {recovered_dx}, error {dx_error}"
     );
     assert!(
         dy_error < 0.3,
-        "Y translation error too large: expected {}, got {}, error {}",
-        dy,
-        recovered_dy,
-        dy_error
+        "Y translation error too large: expected {dy}, got {recovered_dy}, error {dy_error}"
     );
 
     assert!(
@@ -191,10 +185,7 @@ fn image_registration_rotation() {
 
     assert!(
         rotation_error < 0.02,
-        "Rotation error too large: expected {} rad, got {} rad, error {}",
-        angle_rad,
-        recovered_angle,
-        rotation_error
+        "Rotation error too large: expected {angle_rad} rad, got {recovered_angle} rad, error {rotation_error}"
     );
 
     assert!(
@@ -247,10 +238,7 @@ fn image_registration_similarity() {
 
     assert!(
         scale_error < 0.005,
-        "Scale error too large: expected {}, got {}, error {}",
-        scale,
-        recovered_scale,
-        scale_error
+        "Scale error too large: expected {scale}, got {recovered_scale}, error {scale_error}"
     );
 
     let recovered_angle = result.transform().rotation_angle();
@@ -258,9 +246,7 @@ fn image_registration_similarity() {
 
     assert!(
         rotation_error < 0.02,
-        "Rotation error too large: expected {} rad, got {} rad",
-        angle_rad,
-        recovered_angle
+        "Rotation error too large: expected {angle_rad} rad, got {recovered_angle} rad"
     );
 
     assert!(
@@ -336,15 +322,11 @@ fn image_registration_with_noise() {
 
     assert!(
         dx_error < 2.0,
-        "X translation error too large: expected {}, got {}",
-        dx,
-        recovered_dx
+        "X translation error too large: expected {dx}, got {recovered_dx}"
     );
     assert!(
         dy_error < 2.0,
-        "Y translation error too large: expected {}, got {}",
-        dy,
-        recovered_dy
+        "Y translation error too large: expected {dy}, got {recovered_dy}"
     );
 }
 
@@ -451,14 +433,6 @@ fn image_registration_large_image() {
     let dx_error = (recovered_dx - dx).abs();
     let dy_error = (recovered_dy - dy).abs();
 
-    assert!(
-        dx_error < 1.0,
-        "X translation error too large: {}",
-        dx_error
-    );
-    assert!(
-        dy_error < 1.0,
-        "Y translation error too large: {}",
-        dy_error
-    );
+    assert!(dx_error < 1.0, "X translation error too large: {dx_error}");
+    assert!(dy_error < 1.0, "Y translation error too large: {dy_error}");
 }

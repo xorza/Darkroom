@@ -5,12 +5,12 @@ use crate::background_mesh::*;
 /// Number of sigma-clipping iterations for tests.
 const TEST_SIGMA_CLIP_ITERATIONS: usize = 2;
 
-/// Create a TileGrid with default test parameters (no mask, default sigma clip iterations)
+/// Create a `TileGrid` with default test parameters (no mask, default sigma clip iterations)
 fn make_grid(pixels: &Buffer2<f32>, tile_size: usize) -> TileGrid {
     compute_grid(pixels, None, tile_size, TEST_SIGMA_CLIP_ITERATIONS, true)
 }
 
-/// Create a TileGrid with mask
+/// Create a `TileGrid` with mask
 fn make_grid_with_mask(pixels: &Buffer2<f32>, tile_size: usize, mask: &BitBuffer2) -> TileGrid {
     compute_grid(
         pixels,
@@ -340,7 +340,7 @@ fn debug_impl() {
     let pixels = Buffer2::new_filled(64, 64, 0.5);
     let grid = make_grid(&pixels, 32);
 
-    let debug_str = format!("{:?}", grid);
+    let debug_str = format!("{grid:?}");
     assert!(debug_str.contains("TileGrid"));
 }
 

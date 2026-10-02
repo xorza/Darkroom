@@ -142,7 +142,7 @@ fn build_tile_luts(intensity: &Buffer2<f32>, tiles: usize, clip_limit: f32) -> V
         // Clip each bin at the limit and redistribute the excess equally (contrast limiting).
         let clip = (clip_limit * count as f32 / N_BINS as f32).max(1.0) as u32;
         let mut excess = 0u32;
-        for c in hist.iter_mut() {
+        for c in &mut hist {
             if *c > clip {
                 excess += *c - clip;
                 *c = clip;

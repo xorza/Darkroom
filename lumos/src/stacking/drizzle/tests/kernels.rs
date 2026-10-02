@@ -2,7 +2,7 @@ use super::*;
 
 /// Test turbo kernel drop size and overlap with hand-computed values.
 ///
-/// Setup: 4×4 input, scale=2, pixfrac=0.8 → drop_size = 1.6, half_drop = 0.8.
+/// Setup: 4×4 input, scale=2, pixfrac=0.8 → `drop_size` = 1.6, `half_drop` = 0.8.
 /// Integer-center: input pixel (1,1) center (1,1), ×scale 2 → output center (2,2).
 /// Output: 8×8. Drop covers [1.2, 2.8]² → cells 1,2,3 with per-axis overlaps 0.3/1.0/0.3.
 ///
@@ -39,7 +39,7 @@ fn turbo_kernel_overlap_exact() {
 /// Test turbo kernel with non-integer translation producing asymmetric overlap.
 ///
 /// Uniform image value=1.0, translation=(0.25, 0.0).
-/// scale=2, pixfrac=1.0 → drop_size = 2.0, half_drop = 1.0
+/// scale=2, pixfrac=1.0 → `drop_size` = 2.0, `half_drop` = 1.0
 /// Pixel (0,0) center at (0.5+0.25, 0.5) = (0.75, 0.5), scaled to (1.5, 1.0).
 /// Drop from (0.5, 0.0) to (2.5, 2.0).
 ///
@@ -80,12 +80,12 @@ fn turbo_kernel_fractional_shift() {
     );
 }
 
-/// Test that min_weight_fraction works with normalized weights.
+/// Test that `min_weight_fraction` works with normalized weights.
 ///
 /// Single bright pixel (0,0), pixfrac=0.5 (drop width 1.0), scale=2, sub-pixel shift (0.1, 0).
 /// The drop centers at output (0.2, 0) and splits unevenly between cells (0,0) and (1,0):
-/// x-overlaps 0.8 and 0.2. max_weight = 0.8; threshold = min_weight_fraction(0.6) * 0.8 = 0.48.
-/// cell (0,0): weight 0.8 ≥ 0.48 → kept (1.0). cell (1,0): weight 0.2 < 0.48 → fill_value.
+/// x-overlaps 0.8 and 0.2. `max_weight` = 0.8; threshold = `min_weight_fraction(0.6)` * 0.8 = 0.48.
+/// cell (0,0): weight 0.8 ≥ 0.48 → kept (1.0). cell (1,0): weight 0.2 < 0.48 → `fill_value`.
 #[test]
 fn min_weight_fraction_normalized() {
     let mut pixels = vec![0.0f32; 4 * 4];
@@ -129,8 +129,7 @@ fn gaussian_kernel_uniform_preserves_value() {
     let center_val = out[10 * w + 10];
     assert!(
         (center_val - 3.0).abs() < 0.05,
-        "Interior Gaussian value should be ~3.0, got {}",
-        center_val
+        "Interior Gaussian value should be ~3.0, got {center_val}"
     );
 }
 
@@ -159,8 +158,7 @@ fn lanczos_kernel_uniform_preserves_value() {
     let center_val = out[10 * 20 + 10];
     assert!(
         (center_val - 5.0).abs() < 0.01,
-        "Lanczos uniform should be ~5.0, got {}",
-        center_val
+        "Lanczos uniform should be ~5.0, got {center_val}"
     );
 }
 
@@ -190,8 +188,7 @@ fn lanczos_clamping_no_negative_output() {
     let min_val = out.iter().copied().fold(f32::INFINITY, f32::min);
     assert!(
         min_val >= 0.0,
-        "Lanczos output should be clamped to >= 0.0, got min={}",
-        min_val
+        "Lanczos output should be clamped to >= 0.0, got min={min_val}"
     );
 }
 
@@ -200,7 +197,7 @@ fn lanczos_clamping_no_negative_output() {
 /// Frame 1: uniform value 2.0, weight 1.0
 /// Frame 2: uniform value 6.0, weight 3.0
 /// Expected weighted mean: (2.0*w1 + 6.0*w3) / (w1+w3) at each pixel.
-/// Since pixel_weight = frame_weight * overlap * inv_area, and both frames
+/// Since `pixel_weight` = `frame_weight` * overlap * `inv_area`, and both frames
 /// have the same overlap geometry, the weighted mean simplifies to:
 /// (2.0 * 1.0 + 6.0 * 3.0) / (1.0 + 3.0) = (2 + 18) / 4 = 5.0
 #[test]
@@ -219,16 +216,15 @@ fn two_frame_weighted_mean() {
     let center_val = out[10 * 20 + 10];
     assert!(
         (center_val - 5.0).abs() < 1e-5,
-        "Weighted mean should be 5.0, got {}",
-        center_val
+        "Weighted mean should be 5.0, got {center_val}"
     );
 }
 
 /// Test pixfrac changes the drop size and thus the weight distribution.
 ///
 /// With scale=2 and non-integer-centered drop (via translation):
-/// pixfrac=1.0 → drop_size=2.0: large drop hits many output pixels
-/// pixfrac=0.3 → drop_size=0.6: small drop hits fewer output pixels
+/// pixfrac=1.0 → `drop_size=2.0`: large drop hits many output pixels
+/// pixfrac=0.3 → `drop_size=0.6`: small drop hits fewer output pixels
 #[test]
 fn pixfrac_changes_weight_distribution() {
     // Use translation (0.1, 0.1) to avoid integer-centered drops
@@ -264,9 +260,7 @@ fn pixfrac_changes_weight_distribution() {
     // pixfrac=1.0 should cover more output pixels than pixfrac=0.3
     assert!(
         covered_1 > covered_2,
-        "pixfrac=1.0 should cover more pixels ({}) than pixfrac=0.3 ({})",
-        covered_1,
-        covered_2
+        "pixfrac=1.0 should cover more pixels ({covered_1}) than pixfrac=0.3 ({covered_2})"
     );
 }
 
@@ -310,7 +304,7 @@ fn rgb_channels_independent() {
 
 /// Test scale=1 with pixfrac=1 (shift-and-add equivalent).
 ///
-/// At scale=1, pixfrac=1: drop_size=1.0, covering exactly one output pixel per input pixel.
+/// At scale=1, pixfrac=1: `drop_size=1.0`, covering exactly one output pixel per input pixel.
 /// With identity transform, output should exactly equal input.
 #[test]
 fn scale1_pixfrac1_identity() {
@@ -337,18 +331,15 @@ fn scale1_pixfrac1_identity() {
     for (i, (&actual, &expected)) in out.iter().zip(pixels.iter()).enumerate() {
         assert!(
             (actual - expected).abs() < 1e-5,
-            "Pixel {} should be {}, got {}",
-            i,
-            expected,
-            actual
+            "Pixel {i} should be {expected}, got {actual}"
         );
     }
 }
 
-/// Test that custom fill_value appears in uncovered pixels.
+/// Test that custom `fill_value` appears in uncovered pixels.
 ///
 /// Point kernel at scale=2 leaves gaps (even-coordinate pixels uncovered).
-/// With fill_value = -999.0, those gaps should contain -999.0 instead of 0.0.
+/// With `fill_value` = -999.0, those gaps should contain -999.0 instead of 0.0.
 #[test]
 fn fill_value_in_uncovered_pixels() {
     let image = constant_mono_image(Size2us::new(4, 4), 1.0);
@@ -412,8 +403,7 @@ fn zero_weight_frame_ignored() {
     let center = out[8 * 16 + 8];
     assert!(
         (center - 3.0).abs() < 1e-5,
-        "Zero-weight frame should not affect output, got {}",
-        center
+        "Zero-weight frame should not affect output, got {center}"
     );
     assert_eq!(
         result.coverage.as_ref().unwrap()[(8, 8)],
@@ -497,16 +487,14 @@ fn gaussian_kernel_with_translation() {
     let center = out[12 * w + 14];
     assert!(
         (center - 4.0).abs() < 0.05,
-        "Gaussian interior with translation should be ~4.0, got {}",
-        center
+        "Gaussian interior with translation should be ~4.0, got {center}"
     );
 
     // Another interior pixel
     let other = out[10 * w + 10];
     assert!(
         (other - 4.0).abs() < 0.05,
-        "Gaussian interior pixel should be ~4.0, got {}",
-        other
+        "Gaussian interior pixel should be ~4.0, got {other}"
     );
 
     // Pixel far outside the translated input region: should be fill_value (0.0)
@@ -544,16 +532,14 @@ fn lanczos_kernel_with_translation() {
     let center = out[10 * 20 + 10];
     assert!(
         (center - 7.0).abs() < 0.05,
-        "Lanczos with translation should preserve uniform value ~7.0, got {}",
-        center
+        "Lanczos with translation should preserve uniform value ~7.0, got {center}"
     );
 
     // Another interior pixel
     let other = out[8 * 20 + 12];
     assert!(
         (other - 7.0).abs() < 0.05,
-        "Lanczos interior pixel should be ~7.0, got {}",
-        other
+        "Lanczos interior pixel should be ~7.0, got {other}"
     );
 }
 
@@ -567,7 +553,7 @@ fn lanczos_kernel_with_translation() {
 /// With weight map: pixel (1,1) contributes nothing. Output (1,1) receives
 /// only flux from neighboring drops that overlap it. With scale=1,pixfrac=1
 /// each input pixel maps to exactly one output pixel, so (1,1) gets no
-/// contribution at all → fill_value = 0.0.
+/// contribution at all → `fill_value` = 0.0.
 #[test]
 fn pixel_weight_zero_excludes_pixel() {
     let mut pixels = vec![1.0f32; 4 * 4];
@@ -660,7 +646,7 @@ fn pixel_weight_scales_contribution() {
 /// Test bad pixel mask: multiple zero-weight pixels in a uniform field.
 ///
 /// 8×8 uniform image = 5.0. Weight map has 3 bad pixels at (2,3), (5,1), (7,7).
-/// scale=1, pixfrac=1. Bad pixels produce fill_value; all others = 5.0.
+/// scale=1, pixfrac=1. Bad pixels produce `fill_value`; all others = 5.0.
 #[test]
 fn pixel_weight_bad_pixel_mask() {
     let image = constant_mono_image(Size2us::new(8, 8), 5.0);
@@ -779,15 +765,13 @@ fn pixel_weight_with_gaussian_kernel() {
     let far = out[2 * w + 2];
     assert!(
         (far - 4.0).abs() < 0.05,
-        "Far pixel should be ~4.0, got {}",
-        far
+        "Far pixel should be ~4.0, got {far}"
     );
 
     // Another far pixel
     let far2 = out[20 * w + 20];
     assert!(
         (far2 - 4.0).abs() < 0.05,
-        "Far pixel should be ~4.0, got {}",
-        far2
+        "Far pixel should be ~4.0, got {far2}"
     );
 }

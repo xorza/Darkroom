@@ -18,9 +18,7 @@ fn gaussian_kernel_1d_normalization() {
         let sum: f32 = kernel.iter().sum();
         assert!(
             (sum - 1.0).abs() < 1e-6,
-            "Kernel should sum to 1.0, got {} for sigma={}",
-            sum,
-            sigma
+            "Kernel should sum to 1.0, got {sum} for sigma={sigma}"
         );
     }
 }
@@ -89,7 +87,7 @@ fn gaussian_convolve_uniform_image() {
     let mut temp = Buffer2::new_default(width, height);
     gaussian_convolve(&pixels, 2.0, &mut result, &mut temp);
 
-    for v in result.iter() {
+    for v in &result {
         assert!(
             (v - 0.5).abs() < 1e-5,
             "Uniform image should stay uniform after convolution"
@@ -116,9 +114,7 @@ fn gaussian_convolve_preserves_total_flux() {
 
     assert!(
         (output_sum - input_sum).abs() < 0.01,
-        "Total flux should be preserved: input={}, output={}",
-        input_sum,
-        output_sum
+        "Total flux should be preserved: input={input_sum}, output={output_sum}"
     );
 }
 
@@ -148,9 +144,7 @@ fn gaussian_convolve_spreads_point_source() {
     let peak = result.row(16)[16];
     assert!(
         (peak - expected_peak).abs() < 1e-5,
-        "Peak {} should equal kernel center^2 = {}",
-        peak,
-        expected_peak
+        "Peak {peak} should equal kernel center^2 = {expected_peak}"
     );
 
     // Value at (17,16) = center_val * kernel[center+1] (one step in x, zero in y)
@@ -159,9 +153,7 @@ fn gaussian_convolve_spreads_point_source() {
     let actual_neighbor = result.row(16)[17];
     assert!(
         (actual_neighbor - expected_neighbor).abs() < 1e-5,
-        "Neighbor {} should equal {} (kernel product)",
-        actual_neighbor,
-        expected_neighbor
+        "Neighbor {actual_neighbor} should equal {expected_neighbor} (kernel product)"
     );
 }
 
@@ -214,10 +206,7 @@ fn gaussian_convolve_peak_matches_kernel_product() {
 
         assert!(
             (actual_peak - expected_peak).abs() < 1e-5,
-            "sigma={}: peak {} should match kernel center^2 = {}",
-            sigma,
-            actual_peak,
-            expected_peak
+            "sigma={sigma}: peak {actual_peak} should match kernel center^2 = {expected_peak}"
         );
     }
 }
@@ -252,7 +241,7 @@ fn gaussian_convolve_edge_handling() {
     // Total flux may exceed 1.0 near edges due to mirror boundary conditions
     // (reflected virtual pixels add energy). Just verify it's positive and finite.
     let total: f32 = result.iter().sum();
-    assert!(total > 0.0, "Total flux should be positive, got {}", total);
+    assert!(total > 0.0, "Total flux should be positive, got {total}");
 }
 
 #[test]
@@ -295,12 +284,7 @@ fn gaussian_convolve_small_image() {
 
     // Convolution of uniform image with normalized kernel should give exactly 1.0
     for (i, v) in result.iter().enumerate() {
-        assert!(
-            (*v - 1.0).abs() < 1e-4,
-            "Pixel {} should be 1.0, got {}",
-            i,
-            v
-        );
+        assert!((*v - 1.0).abs() < 1e-4, "Pixel {i} should be 1.0, got {v}");
     }
 }
 
@@ -328,7 +312,7 @@ fn matched_filter_subtracts_background() {
     );
 
     // Result should be near zero
-    for v in result.iter() {
+    for v in &result {
         assert!(v.abs() < 1e-5, "Flat field at background should give ~0");
     }
 }
@@ -368,11 +352,9 @@ fn matched_filter_detects_star() {
     assert_eq!(
         max_idx,
         cy * width + cx,
-        "Maximum should be at star center ({},{})",
-        cx,
-        cy
+        "Maximum should be at star center ({cx},{cy})"
     );
-    assert!(peak > 0.1, "Star peak {} should be substantial", peak);
+    assert!(peak > 0.1, "Star peak {peak} should be substantial");
 }
 
 #[test]
@@ -387,7 +369,7 @@ fn matched_filter_boosts_snr() {
     let cy = 32;
     let sigma = 2.0;
     SyntheticStar::new(
-        glam::Vec2::new(cx as f32, cy as f32),
+        Vec2::new(cx as f32, cy as f32),
         0.3,
         StarProfile::Gaussian { sigma },
     )
@@ -459,7 +441,7 @@ fn matched_filter_preserves_negative_residuals() {
 
     // Negative residuals are preserved for correct noise statistics.
     // Uniform below-background input should produce negative convolved output.
-    for &v in result.iter() {
+    for &v in &result {
         assert!(
             v < 0.0,
             "Below-background pixels should produce negative output"
@@ -510,7 +492,7 @@ fn matched_filter_noise_normalization() {
         let mut count = 0usize;
         for y in margin..height - margin {
             for x in margin..width - margin {
-                let v = result.row(y)[x] as f64;
+                let v = f64::from(result.row(y)[x]);
                 sum += v;
                 sum_sq += v * v;
                 count += 1;
@@ -521,7 +503,7 @@ fn matched_filter_noise_normalization() {
         let output_sigma = variance.sqrt();
 
         // Allow 30% tolerance for finite-sample and boundary effects.
-        let ratio = output_sigma / noise_sigma as f64;
+        let ratio = output_sigma / f64::from(noise_sigma);
         assert!(
             (0.7..1.3).contains(&ratio),
             "axis_ratio={axis_ratio}: output noise should match input noise after normalization; \
@@ -554,10 +536,7 @@ fn separable_vs_direct_equivalence() {
     for (i, (&a, &b)) in result_sep.iter().zip(result_direct.iter()).enumerate() {
         assert!(
             (a - b).abs() < 1e-5,
-            "Separable and direct should match at {}: {} vs {}",
-            i,
-            a,
-            b
+            "Separable and direct should match at {i}: {a} vs {b}"
         );
     }
 }
@@ -586,11 +565,7 @@ fn elliptical_kernel_normalization() {
                 let sum: f32 = kernel.weights.iter().sum();
                 assert!(
                     (sum - 1.0).abs() < 1e-5,
-                    "Elliptical kernel should sum to 1.0, got {} for sigma={}, axis_ratio={}, angle={}",
-                    sum,
-                    sigma,
-                    axis_ratio,
-                    angle
+                    "Elliptical kernel should sum to 1.0, got {sum} for sigma={sigma}, axis_ratio={axis_ratio}, angle={angle}"
                 );
             }
         }
@@ -646,7 +621,7 @@ fn elliptical_convolve_uniform_image() {
     let mut temp = Buffer2::new_default(width, height);
     elliptical_gaussian_convolve(&pixels, 2.0, 0.5, 0.5, &mut result, &mut temp);
 
-    for v in result.iter() {
+    for v in &result {
         assert!(
             (v - 0.5).abs() < 1e-4,
             "Uniform image should stay uniform after elliptical convolution"
@@ -670,9 +645,7 @@ fn elliptical_convolve_preserves_flux() {
 
     assert!(
         (output_sum - input_sum).abs() < 0.01,
-        "Elliptical convolution should preserve flux: input={}, output={}",
-        input_sum,
-        output_sum
+        "Elliptical convolution should preserve flux: input={input_sum}, output={output_sum}"
     );
 }
 
@@ -724,10 +697,7 @@ fn elliptical_convolve_axis_ratio_1_matches_circular() {
     {
         assert!(
             (a - b).abs() < 1e-4,
-            "axis_ratio=1.0 should match circular convolution at {}: {} vs {}",
-            i,
-            a,
-            b
+            "axis_ratio=1.0 should match circular convolution at {i}: {a} vs {b}"
         );
     }
 }
@@ -753,9 +723,7 @@ fn elliptical_convolve_rotation_invariance() {
 
     assert!(
         (sum_0 - sum_90).abs() < 1e-4,
-        "Total flux should be same at different angles: {} vs {}",
-        sum_0,
-        sum_90
+        "Total flux should be same at different angles: {sum_0} vs {sum_90}"
     );
 
     // The patterns should be rotated 90 degrees
@@ -794,16 +762,13 @@ fn elliptical_convolve_various_axis_ratios() {
         let sum: f32 = result.iter().sum();
         assert!(
             (sum - 1.0).abs() < 0.01,
-            "Flux should be 1.0 for axis_ratio={}: got {}",
-            axis_ratio,
-            sum
+            "Flux should be 1.0 for axis_ratio={axis_ratio}: got {sum}"
         );
 
         let peak = result.row(16)[16];
         assert!(
             peak > 0.0,
-            "Peak should be positive for axis_ratio={}",
-            axis_ratio
+            "Peak should be positive for axis_ratio={axis_ratio}"
         );
         peaks.push((axis_ratio, peak));
     }
@@ -835,9 +800,7 @@ fn gaussian_kernel_known_values() {
 
     assert!(
         (ratio - expected_ratio).abs() < 1e-5,
-        "Gaussian ratio at x=1 should be exp(-0.5): {} vs {}",
-        ratio,
-        expected_ratio
+        "Gaussian ratio at x=1 should be exp(-0.5): {ratio} vs {expected_ratio}"
     );
 }
 

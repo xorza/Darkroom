@@ -21,8 +21,7 @@ fn boundary_64() {
         assert_eq!(
             label_map[1 * width + x],
             label,
-            "Pixel at x={} should have same label",
-            x
+            "Pixel at x={x} should have same label"
         );
     }
 }
@@ -48,8 +47,7 @@ fn boundary_128() {
         assert_eq!(
             label_map[1 * width + x],
             label,
-            "Pixel at x={} should have same label",
-            x
+            "Pixel at x={x} should have same label"
         );
     }
 }

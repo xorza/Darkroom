@@ -3,7 +3,7 @@
 //! These tests verify that the registrator correctly estimates transforms
 //! from known star position correspondences (without actual image data).
 //!
-//! Tests for all TransformType variants:
+//! Tests for all `TransformType` variants:
 //! - Translation (2 DOF)
 //! - Euclidean (3 DOF: translation + rotation)
 //! - Similarity (4 DOF: translation + rotation + uniform scale)
@@ -133,8 +133,7 @@ fn registration_similarity_transform() {
 
     assert!(
         max_error < 1.0,
-        "Max transformation error too large: {} pixels",
-        max_error
+        "Max transformation error too large: {max_error} pixels"
     );
 
     // Validate rotation is approximately correct
@@ -142,10 +141,7 @@ fn registration_similarity_transform() {
     let rotation_error = (recovered_angle - angle_rad).abs();
     assert!(
         rotation_error < 0.01,
-        "Rotation error too large: expected {} rad, got {} rad, error {}",
-        angle_rad,
-        recovered_angle,
-        rotation_error
+        "Rotation error too large: expected {angle_rad} rad, got {recovered_angle} rad, error {rotation_error}"
     );
 
     // Validate scale is approximately correct
@@ -153,10 +149,7 @@ fn registration_similarity_transform() {
     let scale_error = (recovered_scale - scale).abs();
     assert!(
         scale_error < 0.001,
-        "Scale error too large: expected {}, got {}, error {}",
-        scale,
-        recovered_scale,
-        scale_error
+        "Scale error too large: expected {scale}, got {recovered_scale}, error {scale_error}"
     );
 
     // Check RMS error is small
@@ -251,16 +244,8 @@ fn registration_large_translation() {
     let dx_error = (recovered.x - dx).abs();
     let dy_error = (recovered.y - dy).abs();
 
-    assert!(
-        dx_error < 0.1,
-        "X translation error too large: {}",
-        dx_error
-    );
-    assert!(
-        dy_error < 0.1,
-        "Y translation error too large: {}",
-        dy_error
-    );
+    assert!(dx_error < 0.1, "X translation error too large: {dx_error}");
+    assert!(dy_error < 0.1, "Y translation error too large: {dy_error}");
 }
 
 #[test]
@@ -296,18 +281,14 @@ fn registration_euclidean_rotation_only() {
     let rotation_error = (recovered_angle - angle_rad).abs();
     assert!(
         rotation_error < 0.001,
-        "Rotation error too large: expected {} rad, got {} rad, error {}",
-        angle_rad,
-        recovered_angle,
-        rotation_error
+        "Rotation error too large: expected {angle_rad} rad, got {recovered_angle} rad, error {rotation_error}"
     );
 
     // Scale should be ~1.0 for Euclidean
     let recovered_scale = result.transform().scale_factor();
     assert!(
         (recovered_scale - 1.0).abs() < 0.001,
-        "Scale should be 1.0 for Euclidean, got {}",
-        recovered_scale
+        "Scale should be 1.0 for Euclidean, got {recovered_scale}"
     );
 
     assert!(
@@ -353,17 +334,14 @@ fn registration_euclidean_translation_and_rotation() {
 
     assert!(
         max_error < 0.5,
-        "Max transformation error too large: {} pixels",
-        max_error
+        "Max transformation error too large: {max_error} pixels"
     );
 
     let recovered_angle = result.transform().rotation_angle();
     let rotation_error = (recovered_angle - angle_rad).abs();
     assert!(
         rotation_error < 0.01,
-        "Rotation error too large: {} vs {}",
-        recovered_angle,
-        angle_rad
+        "Rotation error too large: {recovered_angle} vs {angle_rad}"
     );
 }
 
@@ -401,8 +379,7 @@ fn registration_affine_differential_scale() {
 
     assert!(
         max_error < 1.0,
-        "Max transformation error too large: {} pixels",
-        max_error
+        "Max transformation error too large: {max_error} pixels"
     );
 
     assert!(
@@ -446,8 +423,7 @@ fn registration_affine_with_shear() {
 
     assert!(
         max_error < 1.0,
-        "Max transformation error too large: {} pixels",
-        max_error
+        "Max transformation error too large: {max_error} pixels"
     );
 }
 
@@ -495,8 +471,7 @@ fn registration_affine_rotation_and_differential_scale() {
 
     assert!(
         max_error < 1.0,
-        "Max transformation error too large: {} pixels",
-        max_error
+        "Max transformation error too large: {max_error} pixels"
     );
 
     assert!(
@@ -544,8 +519,7 @@ fn registration_homography_mild_perspective() {
 
     assert!(
         max_error < 2.0,
-        "Max transformation error too large: {} pixels",
-        max_error
+        "Max transformation error too large: {max_error} pixels"
     );
 
     assert!(
@@ -593,8 +567,7 @@ fn registration_homography_with_rotation() {
 
     assert!(
         max_error < 2.0,
-        "Max transformation error too large: {} pixels",
-        max_error
+        "Max transformation error too large: {max_error} pixels"
     );
 }
 
@@ -626,8 +599,7 @@ fn similarity_recovers_from_euclidean_data() {
     let recovered_scale = result.transform().scale_factor();
     assert!(
         (recovered_scale - 1.0).abs() < 0.001,
-        "Scale should be ~1.0 for Euclidean data, got {}",
-        recovered_scale
+        "Scale should be ~1.0 for Euclidean data, got {recovered_scale}"
     );
 
     // Rotation should be accurate
@@ -635,9 +607,7 @@ fn similarity_recovers_from_euclidean_data() {
     let rotation_error = (recovered_angle - angle_rad).abs();
     assert!(
         rotation_error < 0.01,
-        "Rotation error: {} vs {}",
-        recovered_angle,
-        angle_rad
+        "Rotation error: {recovered_angle} vs {angle_rad}"
     );
 }
 
@@ -674,8 +644,7 @@ fn affine_recovers_from_similarity_data() {
 
     assert!(
         max_error < 0.5,
-        "Max transformation error too large: {} pixels",
-        max_error
+        "Max transformation error too large: {max_error} pixels"
     );
 }
 

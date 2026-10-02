@@ -110,9 +110,7 @@ fn scorer_loss_at_threshold_boundary() {
     assert!(loss_just_below <= loss_just_above);
     assert!(
         (loss_just_below - loss_just_above).abs() < 0.03,
-        "Discontinuity at threshold: just_below={}, just_above={}",
-        loss_just_below,
-        loss_just_above
+        "Discontinuity at threshold: just_below={loss_just_below}, just_above={loss_just_above}"
     );
 }
 
@@ -132,9 +130,7 @@ fn scorer_different_sigma_changes_loss() {
     // Different as expected
     assert!(
         (loss_1 - loss_2).abs() > 0.1,
-        "Different sigma must produce different losses: loss_1={}, loss_2={}",
-        loss_1,
-        loss_2
+        "Different sigma must produce different losses: loss_1={loss_1}, loss_2={loss_2}"
     );
 }
 

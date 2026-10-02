@@ -63,11 +63,10 @@ pub(super) fn preview_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
         .justify(Justify::Center)
         // Only an image opens a viewer, so only an image is clickable.
         .sense(if has_image { Sense::CLICK } else { Sense::NONE })
-        .show(ui, |ui| match stored.and_then(StoredContent::image) {
-            Some(image) => {
+        .show(ui, |ui| {
+            if let Some(image) = stored.and_then(StoredContent::image) {
                 ui.add_shape(Shape::image(image.preview.handle.clone()).fit(ImageFit::Contain));
-            }
-            None => {
+            } else {
                 // `message` is complementary to `image`, so this covers a
                 // formatted non-image value and a value that failed to prepare
                 // alike; `EMPTY_LABEL` covers having nothing at all.
@@ -144,7 +143,7 @@ struct FormatLabel(ColorFormat);
 
 impl Display for FormatLabel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let bits = self.0.channel_size.byte_count() as u32 * 8;
+        let bits = u32::from(self.0.channel_size.byte_count()) * 8;
         write!(f, "{} \u{b7} {bits}-bit", self.0.channel_count)
     }
 }

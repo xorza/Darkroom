@@ -119,7 +119,7 @@ pub(crate) fn remove_random_star_list(stars: &[Star], fraction: f64, seed: u64) 
     stars
         .iter()
         .filter(|_| rng.next_f64() >= fraction)
-        .cloned()
+        .copied()
         .collect()
 }
 
@@ -164,7 +164,7 @@ pub(crate) fn filter_stars_to_bounds(
     stars
         .iter()
         .filter(|s| s.pos.x >= min_x && s.pos.x <= max_x && s.pos.y >= min_y && s.pos.y <= max_y)
-        .cloned()
+        .copied()
         .collect()
 }
 

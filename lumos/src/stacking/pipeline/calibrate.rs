@@ -150,12 +150,11 @@ fn decode_calibrate_demosaic(
         // Dispatched per CFA type inside `reject_cosmic_rays` (mono / Bayer-deinterleave /
         // X-Trans same-color). Only an unlabeled frame is skipped — its pattern is unknown, so any
         // same-color/Laplacian stencil could corrupt a mislabeled mosaic.
-        match &cfa.metadata.cfa_type {
-            Some(_) => {
-                let removed = reject_cosmic_rays(&mut cfa, cr);
-                tracing::info!(removed, "rejected cosmic rays");
-            }
-            None => tracing::warn!("frame has no CFA pattern; skipping cosmic-ray rejection"),
+        if cfa.metadata.cfa_type.is_some() {
+            let removed = reject_cosmic_rays(&mut cfa, cr);
+            tracing::info!(removed, "rejected cosmic rays");
+        } else {
+            tracing::warn!("frame has no CFA pattern; skipping cosmic-ray rejection")
         }
     }
     // Demosaic is the other heavy step; it polls `cancel` internally and bails mid-pass.

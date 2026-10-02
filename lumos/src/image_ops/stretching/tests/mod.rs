@@ -197,7 +197,7 @@ fn ghs_protection_tails_are_linear() {
     );
     // f(1)=1 and the [hp, 1] segment is linear, so f(0.9) = (f(0.8) + 1)/2.
     assert!(
-        (c.eval(0.9) - 0.5 * (c.eval(0.8) + 1.0)).abs() < 1e-4,
+        (c.eval(0.9) - f32::midpoint(c.eval(0.8), 1.0)).abs() < 1e-4,
         "highlight tail linear to white"
     );
 }

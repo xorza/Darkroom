@@ -142,8 +142,7 @@ fn ransac_30_percent_outliers() {
     for outlier_idx in 10..14 {
         assert!(
             !result.inliers.contains(&outlier_idx),
-            "Outlier {} should not be in inliers",
-            outlier_idx
+            "Outlier {outlier_idx} should not be in inliers"
         );
     }
 }
@@ -367,7 +366,7 @@ fn ransac_affine_with_shear() {
 
     for i in 0..ref_points.len() {
         let error = (result.transform.apply(ref_points[i]) - target_points[i]).length();
-        assert!(error < 0.1, "Error {} at point {}", error, i);
+        assert!(error < 0.1, "Error {error} at point {i}");
     }
 }
 
@@ -421,7 +420,7 @@ fn ransac_homography_near_affine() {
 
     for &i in &result.inliers {
         let error = (result.transform.apply(ref_points[i]) - target_points[i]).length();
-        assert!(error < 0.5, "Error {} at point {}", error, i);
+        assert!(error < 0.5, "Error {error} at point {i}");
     }
 }
 
@@ -431,8 +430,8 @@ fn ransac_large_coordinates() {
     let ref_points: Vec<DVec2> = (0..10)
         .map(|i| {
             DVec2::new(
-                2000.0 + (i % 5) as f64 * 100.0,
-                1500.0 + (i / 5) as f64 * 100.0,
+                2000.0 + f64::from(i % 5) * 100.0,
+                1500.0 + f64::from(i / 5) * 100.0,
             )
         })
         .collect();
@@ -457,7 +456,7 @@ fn ransac_large_coordinates() {
     assert_eq!(result.inliers.len(), 10);
     for i in 0..ref_points.len() {
         let error = (result.transform.apply(ref_points[i]) - target_points[i]).length();
-        assert!(error < 0.1, "Error {} at point {}", error, i);
+        assert!(error < 0.1, "Error {error} at point {i}");
     }
 }
 
@@ -465,7 +464,7 @@ fn ransac_large_coordinates() {
 fn ransac_extreme_scale_coordinates() {
     // Points at 1e6 scale
     let ref_points: Vec<DVec2> = (0..20)
-        .map(|i| DVec2::new((i % 5) as f64 * 1e6, (i / 5) as f64 * 1e6))
+        .map(|i| DVec2::new(f64::from(i % 5) * 1e6, f64::from(i / 5) * 1e6))
         .collect();
 
     let known = Transform::translation(DVec2::new(5000.0, -3000.0));
@@ -596,8 +595,8 @@ fn similarity_near_unity_scale() {
     let ref_points: Vec<DVec2> = (0..20)
         .map(|i| {
             DVec2::new(
-                100.0 + (i % 5) as f64 * 100.0,
-                100.0 + (i / 5) as f64 * 100.0,
+                100.0 + f64::from(i % 5) * 100.0,
+                100.0 + f64::from(i / 5) * 100.0,
             )
         })
         .collect();

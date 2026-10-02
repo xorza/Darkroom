@@ -100,18 +100,14 @@ fn verify_ccl_invariants(mask: &[bool], labels: &[u32], size: Size2us, connectiv
     // Invariant 1: Background pixels have label 0
     for (i, (&m, &l)) in mask.iter().zip(labels.iter()).enumerate() {
         if !m {
-            assert_eq!(
-                l, 0,
-                "Background pixel at index {} has non-zero label {}",
-                i, l
-            );
+            assert_eq!(l, 0, "Background pixel at index {i} has non-zero label {l}");
         }
     }
 
     // Invariant 2: Foreground pixels have non-zero labels
     for (i, (&m, &l)) in mask.iter().zip(labels.iter()).enumerate() {
         if m {
-            assert!(l > 0, "Foreground pixel at index {} has zero label", i);
+            assert!(l > 0, "Foreground pixel at index {i} has zero label");
         }
     }
 
@@ -168,8 +164,7 @@ fn verify_ccl_invariants(mask: &[bool], labels: &[u32], size: Size2us, connectiv
         for l in 1..=max_label {
             assert!(
                 label_present[l as usize],
-                "Label {} is missing from sequential range 1..{}",
-                l, max_label
+                "Label {l} is missing from sequential range 1..{max_label}"
             );
         }
     }
@@ -229,19 +224,16 @@ fn verify_same_grouping(labels_a: &[u32], labels_b: &[u32], len: usize) {
             continue; // Both background
         }
 
-        if la == 0 || lb == 0 {
-            panic!(
-                "Pixel {} has label {} in A but {} in B (one is background)",
-                i, la, lb
-            );
-        }
+        assert!(
+            !(la == 0 || lb == 0),
+            "Pixel {i} has label {la} in A but {lb} in B (one is background)"
+        );
 
         match a_to_b.get(&la) {
             Some(&expected_b) => {
                 assert_eq!(
                     lb, expected_b,
-                    "Inconsistent grouping: label {} in A maps to both {} and {} in B",
-                    la, expected_b, lb
+                    "Inconsistent grouping: label {la} in A maps to both {expected_b} and {lb} in B"
                 );
             }
             None => {

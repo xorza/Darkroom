@@ -100,7 +100,7 @@ fn build_case(case: &MetricsCase) -> (Vec<DVec2>, Vec<DVec2>) {
     let mut target_points = Vec::new();
     for y in (0..=1000).step_by(case.grid_step) {
         for x in (0..=1000).step_by(case.grid_step) {
-            let p = DVec2::new(x as f64, y as f64);
+            let p = DVec2::new(f64::from(x), f64::from(y));
             let d = p - CENTRE;
             let r2 = d.length_squared();
             ref_points.push(p);
@@ -241,7 +241,7 @@ fn fit_sip_metrics_match_every_fixture() {
 
         match case.rejected {
             Rejected::Exactly(expected) => {
-                assert_eq!(result.points_rejected, expected, "{name}: rejection count")
+                assert_eq!(result.points_rejected, expected, "{name}: rejection count");
             }
             Rejected::AtLeast(floor) => assert!(
                 result.points_rejected >= floor,

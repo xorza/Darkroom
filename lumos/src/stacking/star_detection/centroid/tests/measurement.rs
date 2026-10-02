@@ -52,9 +52,7 @@ fn refine_centroid_offset_converges() {
     let new_error = ((new_pos.x - true_pos.x).powi(2) + (new_pos.y - true_pos.y).powi(2)).sqrt();
     assert!(
         new_error < old_error,
-        "Refinement should reduce error: {} -> {}",
-        old_error,
-        new_error
+        "Refinement should reduce error: {old_error} -> {new_error}"
     );
 }
 
@@ -136,7 +134,7 @@ fn refine_centroid_iterative_convergence() {
 
     for iteration in 0..MAX_MOMENTS_ITERATIONS {
         let result = refine_centroid(&pixels, &bg, pos, TEST_STAMP_RADIUS, TEST_EXPECTED_FWHM);
-        assert!(result.is_some(), "Iteration {} failed", iteration);
+        assert!(result.is_some(), "Iteration {iteration} failed");
 
         let new_pos = result.unwrap();
         let delta = new_pos - pos;
@@ -149,7 +147,7 @@ fn refine_centroid_iterative_convergence() {
 
     // Should converge close to true position
     let error = ((pos.x - true_pos.x).powi(2) + (pos.y - true_pos.y).powi(2)).sqrt();
-    assert!(error < 0.2, "Failed to converge: error = {}", error);
+    assert!(error < 0.2, "Failed to converge: error = {error}");
 }
 
 #[test]
@@ -617,9 +615,7 @@ fn flux_proportional_to_amplitude() {
 
     assert!(
         (flux_ratio - amp_ratio).abs() < 0.5,
-        "Flux ratio {} should be close to amplitude ratio {}",
-        flux_ratio,
-        amp_ratio
+        "Flux ratio {flux_ratio} should be close to amplitude ratio {amp_ratio}"
     );
 }
 
@@ -729,7 +725,7 @@ fn eccentricity_orientation_invariant() {
 
     // Should have similar eccentricity (within 20%)
     let diff = (metrics_x.eccentricity - metrics_y.eccentricity).abs();
-    let avg = (metrics_x.eccentricity + metrics_y.eccentricity) / 2.0;
+    let avg = f32::midpoint(metrics_x.eccentricity, metrics_y.eccentricity);
     assert!(
         diff / avg < 0.2,
         "X and Y elongated stars should have similar eccentricity: {} vs {}",
@@ -778,8 +774,7 @@ fn snr_formula_consistency() {
     let snr_ratio = metrics1.snr / metrics2.snr;
     assert!(
         (snr_ratio - 2.0).abs() < 0.1,
-        "SNR ratio should be ~2 when noise doubles: got {}",
-        snr_ratio
+        "SNR ratio should be ~2 when noise doubles: got {snr_ratio}"
     );
 }
 
@@ -852,7 +847,7 @@ fn fwhm_independent_of_amplitude() {
 
     // FWHM should be within 20% of each other
     let diff = (metrics_dim.fwhm - metrics_bright.fwhm).abs();
-    let avg = (metrics_dim.fwhm + metrics_bright.fwhm) / 2.0;
+    let avg = f32::midpoint(metrics_dim.fwhm, metrics_bright.fwhm);
     assert!(
         diff / avg < 0.2,
         "FWHM should be amplitude-independent: dim={}, bright={}",
@@ -935,10 +930,7 @@ fn eccentricity_increases_with_elongation() {
 
     assert!(
         ecc_1 < ecc_2 && ecc_2 < ecc_3,
-        "Eccentricity should increase with elongation: {} < {} < {}",
-        ecc_1,
-        ecc_2,
-        ecc_3
+        "Eccentricity should increase with elongation: {ecc_1} < {ecc_2} < {ecc_3}"
     );
 }
 
@@ -1031,10 +1023,10 @@ fn measure_star_multiple_stars_independent() {
 
     // Verify each star is close to its true position
     for star in &stars {
-        let near_star1 = (star.pos.x - star1_cx as f64).abs() < 1.0
-            && (star.pos.y - star1_cy as f64).abs() < 1.0;
-        let near_star2 = (star.pos.x - star2_cx as f64).abs() < 1.0
-            && (star.pos.y - star2_cy as f64).abs() < 1.0;
+        let near_star1 = (star.pos.x - f64::from(star1_cx)).abs() < 1.0
+            && (star.pos.y - f64::from(star1_cy)).abs() < 1.0;
+        let near_star2 = (star.pos.x - f64::from(star2_cx)).abs() < 1.0
+            && (star.pos.y - f64::from(star2_cy)).abs() < 1.0;
         assert!(
             near_star1 || near_star2,
             "Star at ({}, {}) not near either true position",
@@ -1210,7 +1202,7 @@ fn asymmetric_star_sround() {
 fn star_is_round() {
     use crate::stacking::star_detection::star::Star;
 
-    let round_star = Star::at(glam::DVec2::new(10.0, 10.0)).with_roundness(Roundness {
+    let round_star = Star::at(DVec2::new(10.0, 10.0)).with_roundness(Roundness {
         ground: 0.05,
         sround: 0.03,
     });

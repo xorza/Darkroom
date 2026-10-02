@@ -2,7 +2,7 @@
 //!
 //! Runs the model through the shared `ort` [`backend`](crate::image_ops::ml::backend) (overlapping 512² tiles,
 //! feather-blended). A **display-domain** operation: these CNN denoisers are trained on stretched
-//! data, so feed the stretched `[0,1]` image — mirroring how NoiseXTerminator / GraXpert AI denoise
+//! data, so feed the stretched `[0,1]` image — mirroring how `NoiseXTerminator` / GraXpert AI denoise
 //! are applied (after the stretch / channel combination).
 
 use std::path::PathBuf;

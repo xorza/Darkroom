@@ -597,8 +597,10 @@ impl PlanOutcome {
         self.states
             .iter()
             .find(|(row_name, _)| row_name == name)
-            .map(|(_, state)| *state)
-            .unwrap_or_else(|| panic!("no node named {name:?} in the installed program"))
+            .map_or_else(
+                || panic!("no node named {name:?} in the installed program"),
+                |(_, state)| *state,
+            )
     }
 
     /// Sorted by name — see [`RunOutcome::cached`] for why.

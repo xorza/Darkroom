@@ -1299,7 +1299,7 @@ fn ram_bytes_sums_present_frames_and_defects() {
     assert_eq!(defects.ram_bytes(), 0);
     defects.hot_indices = vec![1, 2];
     defects.cold_indices = vec![7];
-    assert_eq!(defects.ram_bytes(), 3 * std::mem::size_of::<usize>());
+    assert_eq!(defects.ram_bytes(), 3 * size_of::<usize>());
 
     // The bundle sums present roles + the defect map; absent roles add nothing.
     let masters = CalibrationMasters {
@@ -1314,7 +1314,7 @@ fn ram_bytes_sums_present_frames_and_defects() {
     // 320 (dark: 80·4) + 64 (flat: 16·4) + 24 (defects: 3·8) = 408 bytes.
     assert_eq!(
         masters.ram_bytes(),
-        10 * 8 * 4 + 4 * 4 * 4 + 3 * std::mem::size_of::<usize>()
+        10 * 8 * 4 + 4 * 4 * 4 + 3 * size_of::<usize>()
     );
     assert_eq!(
         masters.defect_summary(),

@@ -425,15 +425,14 @@ fn bayer_same_color_neighbors() {
     pixels[2] = 70.0; // (2,0)
     pixels[4 * 6 + 2] = 80.0; // (2,4)
 
-    let pixels = imaginarium::Buffer2::new(6, 6, pixels);
+    let pixels = Buffer2::new(6, 6, pixels);
     let result = SameColorMedian::Bayer.at(&pixels, Vec2us::new(2, 2), None);
 
     // Neighbors: 50, 60, 70, 80, 100 (0,2=100), 100 (4,2=100), 100 (0,4=100), 100 (4,4=100)
     // Sorted: 50, 60, 70, 80, 100, 100, 100, 100 → median of 8 = (80+100)/2 = 90
     assert!(
         (result - 90.0).abs() < f32::EPSILON,
-        "Expected 90.0, got {}",
-        result
+        "Expected 90.0, got {result}"
     );
 }
 
@@ -445,15 +444,14 @@ fn bayer_same_color_neighbors_corner() {
         999.0, 10.0, 50.0, 10.0, 10.0, 10.0, 10.0, 10.0, 60.0, 10.0, 70.0, 10.0, 10.0, 10.0, 10.0,
         10.0,
     ];
-    let pixels = imaginarium::Buffer2::new(4, 4, pixels);
+    let pixels = Buffer2::new(4, 4, pixels);
     let result = SameColorMedian::Bayer.at(&pixels, Vec2us::ZERO, None);
 
     // Same-color neighbors: (2,0)=50, (0,2)=60, (2,2)=70
     // Median of [50, 60, 70] = 60
     assert!(
         (result - 60.0).abs() < f32::EPSILON,
-        "Expected 60.0, got {}",
-        result
+        "Expected 60.0, got {result}"
     );
 }
 
@@ -480,11 +478,7 @@ fn cfa_hot_pixel_detection_large() {
 
     assert_eq!(defect_map.hot_count(), hot_positions.len());
     for &idx in &hot_positions {
-        assert!(
-            is_hot(&defect_map, idx),
-            "Hot pixel at {} not detected",
-            idx
-        );
+        assert!(is_hot(&defect_map, idx), "Hot pixel at {idx} not detected");
     }
 }
 
@@ -815,7 +809,7 @@ fn xtrans_offsets_match_brute_force() {
 fn xtrans_median_selects_same_color() {
     let pattern = CfaType::XTrans(XTRANS_PATTERN);
     let size = Size2us::new(24usize, 24usize);
-    let color_val = |c: u8| 0.1 * (c + 1) as f32; // R→0.1, G→0.2, B→0.3
+    let color_val = |c: u8| 0.1 * f32::from(c + 1); // R→0.1, G→0.2, B→0.3
     let px: Vec<f32> = (0..size.pixel_count())
         .map(|i| color_val(pattern.color_at(Vec2us::new(i % size.width, i / size.width))))
         .collect();
@@ -840,7 +834,7 @@ fn xtrans_median_selects_same_color() {
 fn xtrans_cold_pixel_detected() {
     let pattern = CfaType::XTrans(XTRANS_PATTERN);
     let size = Size2us::new(24usize, 24usize);
-    let color_val = |c: u8| 0.1 * (c + 1) as f32;
+    let color_val = |c: u8| 0.1 * f32::from(c + 1);
     let mut px: Vec<f32> = (0..size.pixel_count())
         .map(|i| color_val(pattern.color_at(Vec2us::new(i % size.width, i / size.width))))
         .collect();
@@ -884,7 +878,7 @@ fn same_color_median_skips_masked_neighbours() {
     // 3x3 with the centre defective. Four neighbours read 10 and four read 1000, so including
     // the high four moves the median from 10 to 505 — a gap no rounding could blur.
     let size = Size2us::new(3, 3);
-    let pixels = imaginarium::Buffer2::new(
+    let pixels = Buffer2::new(
         3,
         3,
         vec![

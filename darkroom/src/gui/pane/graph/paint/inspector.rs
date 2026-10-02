@@ -153,8 +153,7 @@ impl Inspectors {
             // ever record.
             let node_w = geometry
                 .node_world_rect(node)
-                .map(|r| r.size.w)
-                .unwrap_or(theme.card.min_width);
+                .map_or(theme.card.min_width, |r| r.size.w);
             let pos = node.pos + Vec2::new(node_w + theme.floating_widget_gap, 0.0);
             let ncx = node.with_hover(wid::hovered(ui, node.id));
             self.draw_one(ui, ncx, mode, pos);
@@ -274,7 +273,7 @@ impl Inspectors {
     }
 }
 
-/// RgbaF32 for a log line by level: info reads as muted body text, warn
+/// `RgbaF32` for a log line by level: info reads as muted body text, warn
 /// reuses the missing-inputs glow (orange), error the errored glow (red).
 fn log_color(theme: &Theme, ui: &Ui, level: LogLevel) -> RgbaF32 {
     match level {

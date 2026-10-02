@@ -1,5 +1,5 @@
 //! Integration tests for deblending algorithms.
-//! These tests compare behavior between local_maxima and multi_threshold.
+//! These tests compare behavior between `local_maxima` and `multi_threshold`.
 
 use crate::stacking::star_detection::deblend::internals::{
     TestComponent, deblend_multi_threshold_test, make_test_component,

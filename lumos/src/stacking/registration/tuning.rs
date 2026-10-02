@@ -4,9 +4,9 @@
 //! collected here because they are only meaningful relative to each other, and because two of them
 //! are the number `0.5` and mean entirely different things:
 //!
-//! - [`max_sigma_from_fwhm`] sets σ_max, the noise scale MAGSAC scores against. **Seeing-relative.**
-//! - [`recovery_radius`] turns σ_max into the distance match recovery accepts a nearest neighbour
-//!   at. **Derived from σ_max**, at the same 99% confidence MAGSAC uses for its outlier boundary.
+//! - [`max_sigma_from_fwhm`] sets `σ_max`, the noise scale MAGSAC scores against. **Seeing-relative.**
+//! - [`recovery_radius`] turns `σ_max` into the distance match recovery accepts a nearest neighbour
+//!   at. **Derived from `σ_max`**, at the same 99% confidence MAGSAC uses for its outlier boundary.
 //! - [`AUTO_UPGRADE_THRESHOLD`] is the RMS a model must reach for `Auto` to stop adding degrees of
 //!   freedom. **Absolute**, and deliberately not seeing-relative — see its docs.
 //!
@@ -16,14 +16,14 @@
 
 use crate::math::statistics::CHI2_99_2DOF;
 
-/// σ_max (px) for MAGSAC scoring, from the median FWHM of the two star catalogs.
+/// `σ_max` (px) for MAGSAC scoring, from the median FWHM of the two star catalogs.
 ///
 /// Half the FWHM is not a centroid-noise estimate — real centroid error is
 /// `≈ FWHM / (2.355·SNR)`, one to two orders of magnitude smaller. It is an upper bound, and the
 /// quantity that makes it the right one is what it implies downstream: MAGSAC treats residuals past
 /// `√χ²₀.₉₉(2)·σ_max ≈ 3.03·σ_max` as outliers, so `σ_max = FWHM/2` puts that boundary at
 /// **≈ 1.5 FWHM** — a star displaced by more than one and a half PSF widths is a different star,
-/// not a mis-centroided one. σ_max being an upper bound rather than an estimate is what MAGSAC
+/// not a mis-centroided one. `σ_max` being an upper bound rather than an estimate is what MAGSAC
 /// wants: it integrates the loss over `[0, σ_max]`, so an over-tight bound discards real matches
 /// while a loose one only costs discrimination.
 ///
@@ -48,7 +48,7 @@ pub(super) fn recovery_radius(max_sigma: f64) -> f64 {
 /// Maximum RMS (px) at which an `Auto` rung is accepted before escalating to a model with more
 /// degrees of freedom.
 ///
-/// Absolute, not seeing-relative, because it answers a different question from σ_max: not "is this
+/// Absolute, not seeing-relative, because it answers a different question from `σ_max`: not "is this
 /// pair plausible?" but "would another degree of freedom fit anything but noise?". Half a pixel
 /// sits above the centroid noise floor of any reasonable frame (`FWHM/(2.355·SNR)` is ~0.2 px even
 /// at FWHM 5 px and SNR 10) and well below the residual a genuinely wrong model leaves — the
