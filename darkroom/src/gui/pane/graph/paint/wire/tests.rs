@@ -39,8 +39,8 @@ fn emphasis_tiers_fade_dim_and_lift() {
     assert_close(dimmed.b, 0.0);
     // Emphasis keeps the full color and lifts the width by 1.25×.
     assert_eq!(rest.tint(c, true), c);
-    assert_eq!(rest.width(2.0, true), 2.5);
-    assert_eq!(rest.width(2.0, false), 2.0);
+    assert_eq!(WireEmphasis::width(2.0, true), 2.5);
+    assert_eq!(WireEmphasis::width(2.0, false), 2.0);
     // Endpoint hover carries the emphasis at rest…
     assert!(rest.hovered(true));
     assert!(!rest.hovered(false));

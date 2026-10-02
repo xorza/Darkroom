@@ -88,10 +88,10 @@ fn install(
 /// with the two it holds at the swap.
 fn reinstall(
     cache: &mut RuntimeCache,
-    previous: CompiledGraph,
+    previous: &CompiledGraph,
     next: CompiledGraph,
 ) -> CompiledGraph {
-    cache.reconcile(Some(&previous), &next);
+    cache.reconcile(Some(previous), &next);
     next
 }
 
@@ -305,7 +305,7 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
     slot.load_output(complete_snapshot(out()), Some(digest));
 
     // Same func: everything survives.
-    installed = reinstall(&mut cache, installed, build(func_id));
+    installed = reinstall(&mut cache, &installed, build(func_id));
     assert_eq!(cache.slots[node_idx].state.get::<u32>(), Some(&17));
     assert_eq!(
         cache.slots[node_idx].event_state.lock().await.get::<u32>(),
@@ -315,7 +315,7 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
 
     // Changed func id: state and event state drop; the resident value stays —
     // its validity is digest-keyed and the digest folds the func identity.
-    reinstall(&mut cache, installed, build(FuncId::from_u128(78)));
+    reinstall(&mut cache, &installed, build(FuncId::from_u128(78)));
     assert!(
         cache.slots[node_idx].state.is_none(),
         "a func change must drop the predecessor's state"
@@ -359,7 +359,7 @@ fn reconcile_follows_ids_when_the_index_space_shifts() {
     // Node 1 is deleted and node 4 appended: ids sort to 2, 3, 4, so every
     // surviving node slides down one index. Both programs are named, the way
     // `ExecutionEngine::install` names them at the swap.
-    reinstall(&mut cache, installed, build(&[2, 3, 4]));
+    reinstall(&mut cache, &installed, build(&[2, 3, 4]));
 
     assert_eq!(
         cache.slots[NodeIdx(0)].current_digest,

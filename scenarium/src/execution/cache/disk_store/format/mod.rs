@@ -273,6 +273,10 @@ where
     Ok(Some(prefix))
 }
 
+#[expect(
+    clippy::map_err_ignore,
+    reason = "a `TryFromIntError` says only that the value does not fit, which the error it becomes states"
+)]
 async fn read_prefix<R>(
     reader: &mut R,
     file_len: u64,
@@ -486,6 +490,10 @@ async fn read_static(
     }
 }
 
+#[expect(
+    clippy::map_err_ignore,
+    reason = "a `TryFromIntError` says only that the value does not fit, which the error it becomes states; the entry is rejected as a whole; where its UTF-8 breaks does not matter"
+)]
 async fn read_string(
     reader: &mut (impl AsyncRead + Unpin),
     payload_len: u64,
@@ -504,6 +512,10 @@ async fn read_string(
         .map_err(|_| CodecFormatError::Frame("cached string is not valid UTF-8".into()))
 }
 
+#[expect(
+    clippy::map_err_ignore,
+    reason = "a `TryFromIntError` says only that the value does not fit, which the error it becomes states; the entry is rejected as a whole; where its UTF-8 breaks does not matter"
+)]
 async fn read_strings(
     reader: &mut (impl AsyncRead + Unpin),
     payload_len: u64,

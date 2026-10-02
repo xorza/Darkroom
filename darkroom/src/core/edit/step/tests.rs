@@ -47,8 +47,8 @@ fn set_input(input: InputPort, from: Option<Binding>, to: Option<Binding>) -> Un
     })
 }
 
-fn cst(v: f64) -> Option<Binding> {
-    Some(Binding::Const(ConstValue::Float(v)))
+fn cst(v: f64) -> Binding {
+    Binding::Const(ConstValue::Float(v))
 }
 
 fn subscription(emitter: NodeId, subscriber: NodeId, from: bool, to: bool) -> UndoStep {
@@ -121,7 +121,7 @@ fn dirties_document_splits_edits_from_navigation() {
             },
         }),
         move_step(node_id, Vec2::ZERO, Vec2::new(5.0, 5.0)),
-        set_input(InputPort::new(node_id, 0), None, cst(1.0)),
+        set_input(InputPort::new(node_id, 0), None, Some(cst(1.0))),
         node_property(node_id, CacheMode::None, CacheMode::Ram),
         subscription(node_id, NodeId::unique(), false, true),
     ];
@@ -163,7 +163,7 @@ fn invalidates_cached_geometry_splits_resizes_from_moves() {
             z: Change { from: 0, to: 7 },
         }),
         // Value-only: the editor stays present at its `Fixed` size.
-        set_input(port, cst(1.0), cst(2.0)),
+        set_input(port, Some(cst(1.0)), Some(cst(2.0))),
         // A dimmed body and a filled badge keep the same rect...
         node_property(node_id, CacheMode::None, CacheMode::Ram),
         // ...and an event wire paints between glyphs that are already there.
@@ -191,10 +191,10 @@ fn invalidates_cached_geometry_splits_resizes_from_moves() {
                 to: "a-much-longer-title".into(),
             },
         }),
-        set_input(port, None, cst(1.0)),
+        set_input(port, None, Some(cst(1.0))),
         // ...and removing it is the connection commit, the case Pass B has
         // always existed for.
-        set_input(port, cst(1.0), None),
+        set_input(port, Some(cst(1.0)), None),
         // A node arriving — or coming back on an undo — has no cached port
         // offsets for its wires to anchor to.
         node_presence(),

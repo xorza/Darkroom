@@ -241,14 +241,16 @@ impl Executor {
                 // A cancelled node didn't complete, so it has neither a run to report nor a
                 // failure of its own — the run as a whole is what was cancelled. `Skipped`
                 // alongside `Failed`: a cancel can land before the invoke, on the path walk
-                // that would have keyed it, and it is no more a failure there.
+                // that would have keyed it, and it is no more a failure there. A node the
+                // cut left uncached ran nothing either.
                 NodeOutcome::Failed {
                     error: RunError::Cancelled { .. },
                     ..
                 }
                 | NodeOutcome::Skipped {
                     error: RunError::Cancelled { .. },
-                } => None,
+                }
+                | NodeOutcome::Cut { cached: false } => None,
                 // A genuine failure did run: one row carries both the attempt's time and the
                 // reason it ended, so nothing has to reconcile a node listed as two things.
                 NodeOutcome::Failed { secs, error } => {
@@ -265,8 +267,7 @@ impl Executor {
                 // The planner may have stopped at this node for want of an input — the one
                 // verdict that isn't the run loop's to give, since a node it never reached
                 // holds no outcome of its own.
-                NodeOutcome::Pending => self.missing_inputs(program, schedule, node_idx),
-                NodeOutcome::Cut { cached: false } => None,
+                NodeOutcome::Pending => Self::missing_inputs(program, schedule, node_idx),
             };
             let ram = node_ram[node_idx];
             if status.is_none() && ram.total() == 0 {
@@ -287,7 +288,6 @@ impl Executor {
     /// reached its verdict with) rather than stored: only the rare missing node pays for it,
     /// so it isn't worth a column spanning the program.
     fn missing_inputs(
-        &self,
         program: &CompiledGraph,
         schedule: &RunSchedule,
         node_idx: NodeIdx,

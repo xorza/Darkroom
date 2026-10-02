@@ -47,7 +47,10 @@ pub struct Image {
 /// ~680 bytes of inline padding — once per graph value, beside megabytes of pixels — for a heap
 /// allocation and an indirection on the astro path, which is the wrong way round.
 #[derive(Debug)]
-#[expect(clippy::large_enum_variant)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "boxing would trade inline padding for an indirection on the astro path"
+)]
 enum Pixels {
     /// One `f32` plane per channel: what the `lumos` astro ops read and write.
     PlanarCpu(LinearImage),

@@ -390,16 +390,16 @@ mod tests {
     /// some splice of the old name and the new character.
     #[test]
     fn entering_edit_mode_selects_the_whole_name() {
-        let theme = Theme::default();
-        let id = WidgetId::from_hash("rename-select-all");
-        let mut h = UiHarness::new(UVec2::new(300, 100));
-
         fn render(ui: &mut Ui, id: WidgetId, theme: &Theme) -> RenameEvent {
             InlineRename::new("Alpha")
                 .id(id)
                 .style(&theme.inline_rename)
                 .show(ui)
         }
+
+        let theme = Theme::default();
+        let id = WidgetId::from_hash("rename-select-all");
+        let mut h = UiHarness::new(UVec2::new(300, 100));
 
         // Lay the label out, then double-click it to open the editor.
         h.frame(|ui| {

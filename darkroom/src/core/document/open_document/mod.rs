@@ -172,7 +172,7 @@ impl OpenDocument {
             batch.push(step);
         }
         self.history.push_current(&batch);
-        Ok(self.land(signals))
+        Ok(self.land(&signals))
     }
 
     /// Replay the last entry backwards. Reports whether the canvas's cached
@@ -187,7 +187,7 @@ impl OpenDocument {
             .undo(&mut self.document, &mut |step| signals.fold(step));
         ReplayOutcome {
             took,
-            relayout: self.land(signals),
+            relayout: self.land(&signals),
         }
     }
 
@@ -200,7 +200,7 @@ impl OpenDocument {
             .redo(&mut self.document, &mut |step| signals.fold(step));
         ReplayOutcome {
             took,
-            relayout: self.land(signals),
+            relayout: self.land(&signals),
         }
     }
 
@@ -210,7 +210,7 @@ impl OpenDocument {
     /// Returns the one signal whose effect is a *call* rather than a stored
     /// flag, so it has to travel back to whoever holds the `Ui`.
     #[must_use]
-    fn land(&mut self, signals: StepSignals) -> Relayout {
+    fn land(&mut self, signals: &StepSignals) -> Relayout {
         // A content edit (or an undone/redone one) leaves the doc differing
         // from the last save — barring the exact round-trip back to it, where
         // we accept a stale "dirty" rather than tracking saved state

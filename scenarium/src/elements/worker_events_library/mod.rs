@@ -23,6 +23,10 @@ struct FpsEventState {
     frame_no: i64,
 }
 
+#[expect(
+    clippy::map_err_ignore,
+    reason = "the conversion error says only that the period is out of range, which the error it becomes states"
+)]
 fn fps_period(frequency: f64) -> InvokeResult<Option<Duration>> {
     const EXPECTED: &str = "zero or a finite positive frequency with a representable period";
 

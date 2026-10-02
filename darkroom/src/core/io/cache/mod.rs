@@ -33,6 +33,10 @@ pub(crate) fn prepare_document_cache_root(doc_path: &Path) -> PathBuf {
 /// cache folder (blobs + the ignore file itself) stays out of version control.
 /// A failure just means no `.gitignore` yet — the cache still works, since blob
 /// writes recreate the dir.
+#[expect(
+    clippy::let_underscore_must_use,
+    reason = "the ignore file is a courtesy; a cache without it still works"
+)]
 fn ensure_gitignore(root: &Path) {
     if fs::create_dir_all(root).is_err() {
         return;

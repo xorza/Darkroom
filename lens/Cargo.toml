@@ -24,4 +24,5 @@ blake3 = { workspace = true }
 parking_lot = { workspace = true }
 
 [dev-dependencies]
+common = { workspace = true, features = ["internals"] }
 scenarium = { workspace = true, features = ["internals"] }

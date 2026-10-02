@@ -1,3 +1,27 @@
+// Lints of the workspace set that stay `allow` there until lumos is swept (plan 2.2);
+// this crate is clean for them, so they warn here.
+#![warn(
+    unused_macro_rules,
+    clippy::allow_attributes_without_reason,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::ignore_without_reason,
+    clippy::items_after_statements,
+    clippy::large_stack_arrays,
+    clippy::large_types_passed_by_value,
+    clippy::let_underscore_must_use,
+    clippy::map_err_ignore,
+    clippy::match_same_arms,
+    clippy::missing_fields_in_debug,
+    clippy::needless_pass_by_value,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::should_panic_without_expect,
+    clippy::struct_field_names,
+    clippy::trivially_copy_pass_by_ref,
+    clippy::unused_result_ok,
+    clippy::unused_self
+)]
 // Release builds link as a Windows GUI binary, so double-clicking the .exe in
 // Explorer opens the window alone instead of trailing a console behind it.
 // Dev builds keep the console subsystem — that is where `init_tracing`'s
@@ -109,6 +133,10 @@ fn load_icon() -> Option<Image> {
 
 /// Minimal stderr tracing subscriber, `RUST_LOG`-controlled (defaults to
 /// `info`). `try_init` is a no-op if a subscriber is already installed.
+#[expect(
+    clippy::let_underscore_must_use,
+    reason = "a subscriber that is already installed keeps serving, which is what `try_init` allows"
+)]
 fn init_tracing() {
     use tracing_subscriber::EnvFilter;
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));

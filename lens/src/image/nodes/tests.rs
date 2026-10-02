@@ -35,7 +35,7 @@ fn adjust_image_runs_in_place_only_for_unique_cpu_inputs() {
     let image = patterned_image();
     let unique_ptr = image.bytes().as_ptr();
     let unique = DynamicValue::from_custom(Image::from(image));
-    let adjusted = adjust_image(op, unique).unwrap();
+    let adjusted = adjust_image(op, unique);
     let adjusted_cpu = adjusted.interleaved();
     assert_eq!(adjusted_cpu.bytes().as_ptr(), unique_ptr);
     assert_ne!(adjusted_cpu.bytes(), pattern.as_slice());
@@ -44,7 +44,7 @@ fn adjust_image_runs_in_place_only_for_unique_cpu_inputs() {
     let shared_ptr = image.bytes().as_ptr();
     let shared = DynamicValue::from_custom(Image::from(image));
     let holder = shared.clone();
-    let adjusted_shared = adjust_image(op, shared).unwrap();
+    let adjusted_shared = adjust_image(op, shared);
     let shared_cpu = adjusted_shared.interleaved();
     assert_ne!(shared_cpu.bytes().as_ptr(), shared_ptr);
     let original = holder.as_custom::<Image>().unwrap();

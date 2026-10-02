@@ -349,7 +349,7 @@ impl WireEmphasis {
         let hovered = !broken && self.hovered(endpoint_hover);
         WireStroke {
             hovered,
-            width: self.width(base_width, hovered || broken),
+            width: Self::width(base_width, hovered || broken),
         }
     }
 
@@ -389,7 +389,7 @@ impl WireEmphasis {
 
     /// The tiered stroke width. Broken-alarm wires pass `emphasized: true`
     /// too: full width against the faded rest of the set is the alarm.
-    fn width(&self, base: f32, emphasized: bool) -> f32 {
+    fn width(base: f32, emphasized: bool) -> f32 {
         if emphasized {
             base * WIRE_HOVER_WIDTH
         } else {

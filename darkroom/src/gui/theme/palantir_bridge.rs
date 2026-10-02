@@ -58,7 +58,7 @@ pub(super) struct BridgeRoles<'a> {
 /// Takes the type scale rather than reaching for a private menu-font
 /// const: menu rows are ordinary UI text, so they read
 /// [`TypeScale::body`] like every other surface at that tier.
-pub(super) fn palantir_theme_for(p: &palantir::Palette, r: BridgeRoles<'_>) -> palantir::Theme {
+pub(super) fn palantir_for(p: &palantir::Palette, r: BridgeRoles<'_>) -> palantir::Theme {
     let BridgeRoles {
         chrome_fill, text, ..
     } = r;

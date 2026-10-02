@@ -37,9 +37,11 @@ pub(super) struct FileId {
 /// syscall this crate has no dependency for.
 fn epoch_offset_ns(time: SystemTime) -> i128 {
     match time.duration_since(UNIX_EPOCH) {
-        Ok(after) => after.as_nanos() as i128,
+        Ok(after) => i128::try_from(after.as_nanos()).expect("a time offset in ns fits i128"),
         // Pre-epoch: the error carries the distance the other way.
-        Err(before) => -(before.duration().as_nanos() as i128),
+        Err(before) => {
+            -i128::try_from(before.duration().as_nanos()).expect("a time offset in ns fits i128")
+        }
     }
 }
 

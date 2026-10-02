@@ -64,6 +64,10 @@ impl Publication {
 }
 
 impl Drop for Publication {
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "best-effort cleanup: a temporary that cannot be removed is left behind"
+    )]
     fn drop(&mut self) {
         if !self.temporary.as_os_str().is_empty() {
             let _ = fs::remove_file(&self.temporary);
@@ -222,8 +226,8 @@ fn temporary_path(destination: &Path) -> io::Result<PathBuf> {
 pub fn files_with_extensions(dir: &Path, extensions: &[&str]) -> io::Result<Vec<PathBuf>> {
     let entries = fs::read_dir(dir).map_err(|error| {
         path_error(
-            format!("failed to read directory '{}'", dir.display()),
-            error,
+            &format!("failed to read directory '{}'", dir.display()),
+            &error,
         )
     })?;
     let mut files = Vec::new();
@@ -231,15 +235,15 @@ pub fn files_with_extensions(dir: &Path, extensions: &[&str]) -> io::Result<Vec<
     for entry in entries {
         let entry = entry.map_err(|error| {
             path_error(
-                format!("failed to read entry in directory '{}'", dir.display()),
-                error,
+                &format!("failed to read entry in directory '{}'", dir.display()),
+                &error,
             )
         })?;
         let path = entry.path();
         let metadata = fs::metadata(&path).map_err(|error| {
             path_error(
-                format!("failed to read metadata for '{}'", path.display()),
-                error,
+                &format!("failed to read metadata for '{}'", path.display()),
+                &error,
             )
         })?;
         if !metadata.is_file() {
@@ -356,7 +360,7 @@ fn sync_parent(_parent: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn path_error(message: String, source: io::Error) -> io::Error {
+fn path_error(message: &str, source: &io::Error) -> io::Error {
     io::Error::new(source.kind(), format!("{message}: {source}"))
 }
 

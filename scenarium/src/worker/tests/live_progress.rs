@@ -115,6 +115,10 @@ async fn live_patches_reach_the_host_before_downstream_nodes_run() {
         {
             entries.fetch_add(status.nodes.len() as u64, Ordering::SeqCst);
         }
+        #[expect(
+            clippy::unused_result_ok,
+            reason = "a report sent during teardown has no reader"
+        )]
         tx.send(report).ok();
     });
     worker

@@ -94,7 +94,7 @@ async fn unwritten_output_port_is_cleared_before_reexecution() {
             .lambda(async_lambda!(
                 move |Invocation { outputs, .. }| { invocations = Arc::clone(&invocations) } => {
                     let run = invocations.fetch_add(1, Ordering::Relaxed);
-                    outputs[0] = ConstValue::Int(100 + run as i64).into();
+                    outputs[0] = ConstValue::Int(100 + i64::try_from(run).unwrap()).into();
                     if run == 0 {
                         // Only the first run writes the second port.
                         outputs[1] = ConstValue::Int(20).into();

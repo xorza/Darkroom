@@ -220,7 +220,7 @@ fn format_any(value: &ConstValue, out: &mut String) {
         ConstValue::Null => {}
         ConstValue::Float(v) => format_float(*v, out),
         other => {
-            let _ = write!(out, "{}", other.value_text());
+            write!(out, "{}", other.value_text()).expect("writing to a String cannot fail");
         }
     }
 }
@@ -262,7 +262,7 @@ fn read_only_label(
     // field read-only: anything typed into it is gone by the next record.
     EditBuffer::with_text(ui, id, |ui, text| {
         text.clear();
-        let _ = write!(text, "{}", value.value_text());
+        write!(text, "{}", value.value_text()).expect("writing to a String cannot fail");
         TextEdit::new(text)
             .id(id)
             .style(&theme.drag_value.editor)
@@ -379,7 +379,7 @@ fn format_string(value: &str, out: &mut String) {
 /// `f64::parse` but reads as an integer to a user. `{:?}` keeps the
 /// trailing `.0` so the field looks like a float.
 fn format_float(v: f64, out: &mut String) {
-    let _ = write!(out, "{v:?}");
+    write!(out, "{v:?}").expect("writing to a String cannot fail");
 }
 
 /// Editor for an `Int` const: an editable `DragValue` — drag horizontally

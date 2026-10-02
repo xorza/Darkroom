@@ -127,20 +127,20 @@ impl Default for WideDefaults {
 
 #[derive(Debug, Default, Introspect)]
 struct NumericKinds {
-    i8_value: i8,
-    i16_value: i16,
-    i32_value: i32,
-    i64_value: i64,
-    i128_value: i128,
-    isize_value: isize,
-    u8_value: u8,
-    u16_value: u16,
-    u32_value: u32,
-    u64_value: u64,
-    u128_value: u128,
-    usize_value: usize,
-    f32_value: f32,
-    f64_value: f64,
+    i8: i8,
+    i16: i16,
+    i32: i32,
+    i64: i64,
+    i128: i128,
+    isize: isize,
+    u8: u8,
+    u16: u16,
+    u32: u32,
+    u64: u64,
+    u128: u128,
+    usize: usize,
+    f32: f32,
+    f64: f64,
 }
 
 #[test]

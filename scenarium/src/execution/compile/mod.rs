@@ -319,11 +319,10 @@ impl Compiler {
         binding: Option<&Binding>,
     ) -> ExecutionBinding {
         match binding {
-            None => ExecutionBinding::None,
             Some(Binding::Const(value)) if library.const_satisfies(input, value) => {
                 ExecutionBinding::Const(value.clone())
             }
-            Some(Binding::Const(_)) => ExecutionBinding::None,
+            None | Some(Binding::Const(_)) => ExecutionBinding::None,
             Some(Binding::Bind(src)) => {
                 // A port the table missed is one no chain reached *and* no
                 // declaration names, and `Any` is what that resolved to before

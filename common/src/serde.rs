@@ -78,6 +78,10 @@ pub enum Lz4SizeError {
     Limit { size: usize, limit: usize },
 }
 
+#[expect(
+    clippy::map_err_ignore,
+    reason = "a `TryFromIntError` says only that the value does not fit, which the error it becomes states"
+)]
 fn checked_lz4_uncompressed_size(uncompressed_size: usize) -> Result<u32, Lz4SizeError> {
     let header_size =
         u32::try_from(uncompressed_size).map_err(|_| Lz4SizeError::HeaderCapacity {
