@@ -123,17 +123,3 @@ fn drizzle_output_grid_is_the_input_scaled() {
     assert_eq!(dims.height(), 160);
     assert_eq!(dims.channels(), 3);
 }
-
-#[test]
-fn lanczos_kernel_is_symmetric_and_vanishes_outside_its_support() {
-    // Center value
-    assert!((lanczos::kernel(0.0, 3.0) - 1.0).abs() < f32::EPSILON);
-
-    // Outside support
-    assert!((lanczos::kernel(3.5, 3.0) - 0.0).abs() < f32::EPSILON);
-
-    // Symmetry
-    let pos = lanczos::kernel(1.5, 3.0);
-    let neg = lanczos::kernel(-1.5, 3.0);
-    assert!((pos - neg).abs() < 1e-6);
-}

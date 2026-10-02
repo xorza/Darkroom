@@ -80,5 +80,6 @@ mod local_optimization;
 mod math;
 mod plausibility;
 mod progressive;
+mod sampling;
 mod scoring;
 mod transforms;

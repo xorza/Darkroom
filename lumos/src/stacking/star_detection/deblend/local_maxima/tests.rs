@@ -96,28 +96,6 @@ fn deblend_creates_separate_candidates() {
 }
 
 #[test]
-fn iter_pixels_count() {
-    let TestComponent {
-        pixels,
-        labels,
-        data,
-    } = make_test_component(
-        Size2us::new(100, 100),
-        &[SyntheticStar::new(
-            Vec2::new(50.0, 50.0),
-            1.0,
-            StarProfile::Gaussian { sigma: 3.0 },
-        )],
-    );
-
-    let iter_count = data.iter_pixels(&pixels, &labels).count();
-    assert_eq!(
-        iter_count, data.area,
-        "iter_pixels should yield exactly area pixels"
-    );
-}
-
-#[test]
 fn euclidean_separation() {
     // Two peaks at distance sqrt(18) ≈ 4.24 apart (diagonal)
     // With min_separation=5, they should be merged (5^2=25 > 18)

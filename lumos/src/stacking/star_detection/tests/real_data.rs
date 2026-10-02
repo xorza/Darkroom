@@ -10,11 +10,15 @@ use common::internals::debug_output_path;
 use crate::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
+use crate::stacking::registration::config::Config as RegistrationConfig;
+use crate::stacking::registration::register;
+use crate::stacking::registration::transform::TransformModel;
 use crate::stacking::star_detection::config::Config;
+use crate::stacking::star_detection::config::measurement_config::{CentroidMethod, NoiseModel};
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::stacking::star_detection::threshold_mask::{ThresholdParams, create_threshold_mask};
 use crate::testing::init_tracing;
-use crate::testing::real_data::dataset_path;
+use crate::testing::real_data::{LightPair, dataset_path, first_and_last_lights};
 use glam::Vec2;
 use imaginarium::Color;
 use imaginarium::ColorFormat;
@@ -283,4 +287,66 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     pool.release_bit(mask);
     background.release_to_pool(&mut pool);
     pool.release_f32(grayscale);
+}
+
+/// PR1 validation: inverse-variance-weighted PSF fitting should not worsen (and ideally
+/// improves) registration RMS vs unweighted, by producing lower-variance sub-pixel
+/// centroids. Runs the pair of lights through `GaussianFit` with and without a
+/// `NoiseModel`, registers each, and compares.
+#[test]
+fn weighted_fit_registration_rms() {
+    let LightPair {
+        first: img1,
+        last: img2,
+    } = first_and_last_lights();
+
+    // 30,000 e-/normalized unit is representative of physical gain × the 14-bit signal range.
+    let noise_model = NoiseModel::from_normalized(30_000.0, 30.0);
+
+    /// What one registration of the pair reported.
+    #[derive(Debug)]
+    struct Registered {
+        rms: f64,
+        inliers: usize,
+    }
+    let register_with = |noise: Option<NoiseModel>| {
+        let mut config = Config::precise_ground();
+        config.measurement.centroid_method = CentroidMethod::GaussianFit;
+        config.measurement.noise_model = noise;
+        let mut detector = StarDetector::from_config(config).unwrap();
+        let s1 = detector.detect(&img1).stars;
+        let s2 = detector.detect(&img2).stars;
+        let mut reg_config = RegistrationConfig {
+            transform_type: TransformModel::Auto,
+            sip: None,
+            ..RegistrationConfig::default()
+        };
+        // Seeded, so the two runs differ only in their centroids.
+        reg_config.ransac.seed = Some(0x5EED);
+        let r = register(&s1, &s2, &reg_config).expect("registration should succeed");
+        Registered {
+            rms: r.rms_error(),
+            inliers: r.num_inliers(),
+        }
+    };
+
+    let Registered {
+        rms: unweighted_rms,
+        inliers: unweighted_n,
+    } = register_with(None);
+    let Registered {
+        rms: weighted_rms,
+        inliers: weighted_n,
+    } = register_with(Some(noise_model));
+
+    println!("PR1 weighted-fit registration:");
+    println!("  unweighted: RMS {unweighted_rms:.4} px, {unweighted_n} matches");
+    println!("  weighted:   RMS {weighted_rms:.4} px, {weighted_n} matches");
+
+    // Weighting must not meaningfully worsen registration. The two catalogs differ, so RANSAC keeps
+    // different inlier sets; 5% is the margin "not meaningfully worse" allows on that.
+    assert!(
+        weighted_rms <= unweighted_rms * 1.05,
+        "weighted RMS {weighted_rms:.4} should be ≤ unweighted {unweighted_rms:.4} ×1.05"
+    );
 }

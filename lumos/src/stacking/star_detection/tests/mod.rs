@@ -5,12 +5,13 @@
 //!
 //! # Where a star-detection test goes
 //!
-//! One question decides it: **does the test call the detector, or one stage's function?**
+//! One question decides it: **does the test call several stages together, or one function?**
 //!
-//! - One stage's function — `background_map::estimate`, `gaussian_convolve`, `measure_star` — goes
-//!   in that module's own `tests/`, beside the unit tests for the same code. It does not belong
-//!   here however realistic its fixture is.
-//! - The detector — `detect_stars_test` or `StarDetector::detect` — goes here, in
+//! - One function — `background_map::estimate`, `gaussian_convolve`, `measure_star` — goes in that
+//!   module's own `tests/`, beside the unit tests for the same code. It does not belong here
+//!   however realistic its fixture is.
+//! - Several stages — `detect_stars_test`, which runs thresholding, labeling and deblending as the
+//!   detect stage does, or the whole `StarDetector::detect` — goes here, in
 //!   [`stage_effects`] when the field is built to stress one stage's contribution, or in
 //!   [`pipeline_tests`] when it grades overall detection quality on a kind of field.
 //!
