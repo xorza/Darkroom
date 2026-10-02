@@ -1,28 +1,47 @@
-use crate::stacking::frame_store::spill::CachedQuality;
+use crate::stacking::frame_store::frame_quality::FramePlane;
 use crate::stacking::frame_store::spill_directory::SpillDirectory;
 use crate::stacking::frame_store::spill_directory::internals::{marker, stale_run_directory};
 use crate::stacking::frame_store::*;
-use common::TempDir;
+use common::{FileIdentity, TempDir};
 use std::fs;
 
+/// A spilled image reads back with its pixels, metadata and null mask, over whatever stale file
+/// held its name; one with no nulls writes no mask and reads back with none.
 #[test]
 fn stored_image_roundtrip_overwrites_stale_pixels() {
     let directory = TempDir::new("frame_store_image");
-    let dimensions = ImageDimensions::new((2, 2), 1);
-    let mut image = LinearImage::from_pixels(dimensions, vec![0.1, 0.2, 0.3, 0.4]);
+    let dimensions = ImageDimensions::new((3, 2), 1);
+    let mut image = LinearImage::from_pixels(dimensions, vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
     image.metadata.exposure_time = Some(30.0);
-    let path = directory.join("calibrated_c0.bin");
-    write_plane(&path, &[9.0; 4]).unwrap();
+    let spill = FrameSpill::new(directory.path(), "calibrated");
+    let path = spill.channel_path(0);
+    write_plane(&path, &[9.0; 6]).unwrap();
 
-    let stored = StoredImage::spill(directory.path(), "calibrated", &image).unwrap();
+    let stored = StoredImage::spill(&spill, &image).unwrap();
     let loaded = stored.load();
-    assert_eq!(loaded.channel(0).pixels(), &[0.1, 0.2, 0.3, 0.4]);
+    assert_eq!(loaded.channel(0).pixels(), &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
     assert_eq!(loaded.metadata.exposure_time, Some(30.0));
+    assert!(loaded.nulls.is_none());
+    assert!(!spill.nulls_path().exists());
 
     // Dropping the image does not remove its planes: the spill directory owns that decision, so
     // that `keep_cache` can hold them. See `spill_directory_removes_planes_unless_asked_to_keep`.
     drop(stored);
     assert!(path.exists());
+
+    // Pixels 1 and 5 null: the spill tier warps under the same mask as the RAM tier.
+    let masked_spill = FrameSpill::new(directory.path(), "masked");
+    image.nulls = NullMask::of_non_finite(
+        dimensions.size(),
+        &[&[0.0, f32::NAN, 0.0, 0.0, 0.0, f32::NAN]],
+    );
+    let loaded = StoredImage::spill(&masked_spill, &image).unwrap().load();
+    let nulls = loaded.nulls.expect("the mask is spilled with the planes");
+    assert_eq!(nulls.count(), 2);
+    assert_eq!(
+        (0..6).map(|index| nulls.is_null(index)).collect::<Vec<_>>(),
+        [false, true, false, false, false, true]
+    );
 }
 
 /// The one owner of spilled-file cleanup, and the only thing `keep_cache` acts through.
@@ -49,8 +68,9 @@ fn spill_directory_removes_only_its_own_planes_unless_asked_to_keep() {
         assert_eq!(directory.path().parent(), Some(root.as_path()));
         assert!(directory.path().join(marker()).is_file());
 
-        let stored = StoredImage::spill(directory.path(), "calibrated", &image).unwrap();
-        let plane = directory.path().join("calibrated_c0.bin");
+        let spill = FrameSpill::new(directory.path(), "calibrated");
+        let stored = StoredImage::spill(&spill, &image).unwrap();
+        let plane = spill.channel_path(0);
         assert!(plane.exists(), "keep={keep}: plane was not written");
 
         // The frame going away must not take the file with it — only the directory decides.
@@ -198,55 +218,99 @@ fn an_unwarped_frames_nulls_become_the_pair_the_combine_gates_on() {
     );
 }
 
+/// A cached frame comes back whole or not at all. Its quality planes return with its channels —
+/// reusing the channels without them would put the fill under its nulls into the stack as data on
+/// every run after the first — and a frame committed with them is rebuilt when one or both are
+/// gone, rather than read as a frame with no nulls. Another key finds nothing.
 #[test]
-fn a_spilled_frames_quality_planes_survive_the_cache_round_trip() {
-    // The warm-cache case: reusing a frame's channels without its quality planes would put the
-    // fill under its nulls back into the stack as data on every run after the first.
+fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
     let directory = TempDir::new("frame_store_cached_quality");
     let dimensions = ImageDimensions::new((2, 2), 1);
+    let key = CacheKey::new(
+        FileIdentity {
+            len: 16,
+            mtime_ns: 1,
+        },
+        DecoderKind::Linear,
+    );
     let mut image = LinearImage::from_pixels(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
     image.nulls = NullMask::of_non_finite(dimensions.size(), &[&[1.0, 2.0, f32::NAN, 4.0]]);
-    let quality = FrameQuality::for_unwarped(&image);
-    let stats = FrameStats::measure(&image);
-    let frame = StoredFrame::spill(directory.path(), "frame.bin", &image, &quality, stats).unwrap();
-    drop(frame);
+    let cache = |name, image: &LinearImage| {
+        let spill = FrameSpill::new(directory.path(), name);
+        let quality = FrameQuality::for_unwarped(image);
+        drop(StoredFrame::cache(&spill, key, image, &quality, FrameStats::measure(image)).unwrap());
+        spill
+    };
 
-    let spill = FrameSpill::new(directory.path(), "frame.bin");
-    assert_eq!(spill.cached_quality(dimensions), CachedQuality::Present);
-    let reread =
-        FrameQuality::read_spilled(|kind| StoredPlane::map(spill.quality_path(kind))).unwrap();
+    let spill = cache("masked", &image);
+    let reused = StoredFrame::reuse(&spill, key, dimensions)
+        .unwrap()
+        .unwrap();
+    assert_eq!(reused.channels[0].chunk(0, 4), &[1.0, 2.0, 3.0, 4.0]);
     assert_eq!(
-        reread.coverage().unwrap().chunk(0, 4),
+        reused.quality.coverage().unwrap().chunk(0, 4),
         &[1.0, 1.0, 0.0, 1.0]
     );
     assert_eq!(
-        reread.confidence().unwrap().chunk(0, 4),
+        reused.quality.confidence().unwrap().chunk(0, 4),
         &[1.0, 1.0, 0.0, 1.0]
     );
-    drop(reread);
+    drop(reused);
 
-    // A frame that wrote no planes reads back as carrying none, so the two states stay
-    // distinguishable rather than both looking like "nothing cached".
+    let other_version = CacheKey {
+        decode_version: key.decode_version ^ 1,
+        ..key
+    };
+    let other_decoder = CacheKey {
+        decoder: DecoderKind::Cfa,
+        ..key
+    };
+    for other in [other_version, other_decoder] {
+        assert!(
+            StoredFrame::reuse(&spill, other, dimensions)
+                .unwrap()
+                .is_none()
+        );
+    }
+    assert!(
+        StoredFrame::reuse(&spill, key, ImageDimensions::new((4, 1), 1))
+            .unwrap()
+            .is_some(),
+        "the same sample count is the same plane size"
+    );
+    assert!(
+        StoredFrame::reuse(&spill, key, ImageDimensions::new((3, 2), 1))
+            .unwrap()
+            .is_none(),
+        "planes of another size"
+    );
+
+    fs::remove_file(spill.quality_path(FramePlane::Confidence)).unwrap();
+    assert!(
+        StoredFrame::reuse(&spill, key, dimensions)
+            .unwrap()
+            .is_none()
+    );
+    fs::remove_file(spill.quality_path(FramePlane::Coverage)).unwrap();
+    assert!(
+        StoredFrame::reuse(&spill, key, dimensions)
+            .unwrap()
+            .is_none()
+    );
+
     let plain = LinearImage::from_pixels(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
-    let stats = FrameStats::measure(&plain);
-    let frame = StoredFrame::spill(
-        directory.path(),
-        "plain.bin",
-        &plain,
-        &FrameQuality::for_unwarped(&plain),
-        stats,
-    )
-    .unwrap();
-    drop(frame);
-    assert_eq!(
-        FrameSpill::new(directory.path(), "plain.bin").cached_quality(dimensions),
-        CachedQuality::Absent
+    let spill = cache("plain", &plain);
+    let reused = StoredFrame::reuse(&spill, key, dimensions)
+        .unwrap()
+        .unwrap();
+    assert!(reused.quality.is_none());
+    drop(reused);
+    fs::remove_file(spill.channel_path(0)).unwrap();
+    assert!(
+        StoredFrame::reuse(&spill, key, dimensions)
+            .unwrap()
+            .is_none()
     );
-
-    // One plane without the other is neither state, and must not be read as either: the cache is
-    // rebuilt instead.
-    fs::remove_file(spill.quality_path("confidence")).unwrap();
-    assert_eq!(spill.cached_quality(dimensions), CachedQuality::Torn);
 }
 
 #[test]
@@ -262,66 +326,74 @@ fn plane_persistence_roundtrips_pixels() {
     drop(mapped);
 }
 
+/// A cached frame's files are named by its source and decoder: the same pair always finds the same
+/// files, and another path or decoder never does. Every file of one frame hangs off one stem.
 #[test]
-fn spill_names_are_stable_path_specific_and_share_one_stem() {
+fn spill_names_are_stable_per_source_and_decoder_and_share_one_stem() {
     let path = Path::new("/test/deterministic.fits");
-    let expected = FrameSpill::cache_name(path);
-    assert_eq!(expected.len(), 64 + ".bin".len());
+    let cache_dir = Path::new("/cache");
+    let hashed = FrameSpill::cached(cache_dir, path, DecoderKind::Linear);
+    let channel = hashed.channel_path(0);
+    let stem = channel
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .strip_suffix("_c0.bin")
+        .unwrap()
+        .to_owned();
+    assert_eq!(stem.len(), 64);
     assert!(
-        expected
-            .strip_suffix(".bin")
-            .unwrap()
-            .bytes()
+        stem.bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
     );
-    assert_eq!(FrameSpill::cache_name(path), expected);
-    assert_ne!(
-        FrameSpill::cache_name(Path::new("/test/other.fits")),
-        expected
-    );
-
-    // Every file of one frame hangs off the same stem: the `.bin` of a cache name is stripped
-    // once, so channels and quality planes sit beside each other instead of one gaining a
-    // doubled extension.
-    let stem = expected.trim_end_matches(".bin");
-    let cache_dir = Path::new("/cache");
-    let hashed = FrameSpill::new(cache_dir, &expected);
     assert_eq!(
-        hashed.channel_path(0),
-        cache_dir.join(format!("{stem}_c0.bin"))
+        FrameSpill::cached(cache_dir, path, DecoderKind::Linear).channel_path(0),
+        channel
     );
+    for other in [
+        FrameSpill::cached(
+            cache_dir,
+            Path::new("/test/other.fits"),
+            DecoderKind::Linear,
+        ),
+        FrameSpill::cached(cache_dir, path, DecoderKind::Cfa),
+    ] {
+        assert_ne!(other.channel_path(0), channel);
+    }
     assert_eq!(
-        hashed.quality_path("coverage"),
+        hashed.quality_path(FramePlane::Coverage),
         cache_dir.join(format!("{stem}_coverage.bin"))
     );
 
     let plain = FrameSpill::new(cache_dir, "frame");
     assert_eq!(plain.channel_path(2), cache_dir.join("frame_c2.bin"));
     assert_eq!(
-        plain.quality_path("confidence"),
+        plain.quality_path(FramePlane::Confidence),
         cache_dir.join("frame_confidence.bin")
     );
+    assert_eq!(plain.nulls_path(), cache_dir.join("frame_nulls.bin"));
 }
 
 #[test]
-fn channels_reusable_requires_every_plane_at_the_expected_size() {
+fn channels_on_disk_requires_every_plane_at_the_expected_size() {
     let directory = TempDir::new("frame_store_reuse");
     let dimensions = ImageDimensions::new((4, 3), 3);
     let spill = FrameSpill::new(directory.path(), "reuse");
 
     // 4×3 f32 = 48 bytes per plane, three planes. Nothing on disk yet.
-    assert!(!spill.channels_reusable(dimensions));
+    assert!(!spill.channels_on_disk(dimensions));
 
     write_plane(&spill.channel_path(0), &[0.0f32; 12]).unwrap();
     write_plane(&spill.channel_path(1), &[0.0f32; 12]).unwrap();
     assert!(
-        !spill.channels_reusable(dimensions),
+        !spill.channels_on_disk(dimensions),
         "two of three channels present is not reusable"
     );
 
     write_plane(&spill.channel_path(2), &[0.0f32; 12]).unwrap();
-    assert!(spill.channels_reusable(dimensions));
+    assert!(spill.channels_on_disk(dimensions));
 
     // Same files, geometry that implies 8×3 = 24 pixels = 96 bytes: stale, not reusable.
-    assert!(!spill.channels_reusable(ImageDimensions::new((8, 3), 3)));
+    assert!(!spill.channels_on_disk(ImageDimensions::new((8, 3), 3)));
 }

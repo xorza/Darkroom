@@ -3,6 +3,7 @@ use crate::testing::prelude::*;
 use arrayvec::ArrayVec;
 
 use crate::stacking::frame_store::frame_quality::FramePlane;
+use crate::stacking::frame_store::spill::FrameSpill;
 
 use crate::error::FrameDimensionMismatch;
 use crate::io::image::cfa::{CfaImage, CfaType};
@@ -193,8 +194,7 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
         .enumerate()
         .map(|(i, f)| {
             StoredFrame::spill(
-                spill_directory.path(),
-                &format!("f{i}"),
+                &FrameSpill::new(spill_directory.path(), &format!("f{i}")),
                 &f.image,
                 &f.quality,
                 f.source_stats,
@@ -253,8 +253,7 @@ fn mapped_frames_reject_nonfinite_samples_before_combining() {
     let scratch = TempDir::new("lumos_nonfinite_mapped_frame");
     let spill_directory = SpillDirectory::create(&scratch.join("cache"), false).unwrap();
     let frame = StoredFrame::spill(
-        spill_directory.path(),
-        "frame",
+        &FrameSpill::new(spill_directory.path(), "frame"),
         &invalid,
         &FrameQuality::None,
         source_stats,

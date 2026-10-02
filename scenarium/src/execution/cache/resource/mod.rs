@@ -8,62 +8,17 @@ pub(crate) mod error;
 
 use crate::execution::cache::resource::error::StampError;
 use std::fs;
-use std::fs::Metadata;
-use std::io;
 use std::mem;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
 
-use common::CancelToken;
+use common::{CancelToken, FileIdentity};
 use hashbrown::HashSet;
 
 use crate::execution::cache::digest::{Digest, DigestHasher};
 
-/// Metadata identity of one filesystem entry.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct FileId {
-    len: u64,
-    /// Nanoseconds from the Unix epoch, **negative before it**. Signed
-    /// because `duration_since(..).ok().unwrap_or(0)` gave every pre-1970
-    /// mtime the same `0` as the epoch itself.
-    mtime_ns: i128,
-}
-
-/// Signed nanoseconds between `time` and the Unix epoch.
-///
-/// Split out from [`FileId::from_metadata`] because the pre-epoch arm is
-/// the whole point and setting a real file's mtime to 1969 needs a
-/// syscall this crate has no dependency for.
-fn epoch_offset_ns(time: SystemTime) -> i128 {
-    match time.duration_since(UNIX_EPOCH) {
-        Ok(after) => i128::try_from(after.as_nanos()).expect("a time offset in ns fits i128"),
-        // Pre-epoch: the error carries the distance the other way.
-        Err(before) => {
-            -i128::try_from(before.duration().as_nanos()).expect("a time offset in ns fits i128")
-        }
-    }
-}
-
-impl FileId {
-    /// Fails when the filesystem reports no modification time. Length
-    /// alone is not an identity — a same-length edit would reuse the
-    /// cache — so the path is given up rather than stamped on half of it.
-    fn from_metadata(metadata: &Metadata) -> io::Result<Self> {
-        Ok(Self {
-            len: metadata.len(),
-            mtime_ns: epoch_offset_ns(metadata.modified()?),
-        })
-    }
-
-    fn hash(&self, hasher: &mut DigestHasher) {
-        hasher.write_pod(self.len).write_pod(self.mtime_ns);
-    }
-}
-
 #[derive(Clone, Copy, Debug)]
 pub(super) enum FsPathId {
-    File(FileId),
+    File(FileIdentity),
     /// Every file beneath the root, folded in relative-path order.
     Directory(Digest),
 }
@@ -72,8 +27,10 @@ impl FsPathId {
     pub(super) fn hash(&self, hasher: &mut DigestHasher) {
         match self {
             Self::File(file) => {
-                hasher.write_bytes(&[0]);
-                file.hash(hasher);
+                hasher
+                    .write_bytes(&[0])
+                    .write_pod(file.len)
+                    .write_pod(file.mtime_ns);
             }
             Self::Directory(digest) => {
                 hasher.write_bytes(&[1]).write_bytes(&digest.0);
@@ -194,7 +151,7 @@ impl StampJob {
         if metadata.is_dir() {
             self.stamp_directory(Path::new(path), cancel)
         } else {
-            Ok(FsPathId::File(FileId::from_metadata(&metadata)?))
+            Ok(FsPathId::File(FileIdentity::from_metadata(&metadata)?))
         }
     }
 
@@ -231,7 +188,8 @@ impl StampJob {
             // as the first one classified it.
             let metadata = fs::symlink_metadata(root.join(rel))?;
             hasher.write_len_prefixed(rel.as_os_str().as_encoded_bytes());
-            FileId::from_metadata(&metadata)?.hash(&mut hasher);
+            let file = FileIdentity::from_metadata(&metadata)?;
+            hasher.write_pod(file.len).write_pod(file.mtime_ns);
         }
         Ok(FsPathId::Directory(hasher.finish()))
     }
@@ -277,14 +235,16 @@ impl StampJob {
 
 #[cfg(test)]
 pub(super) mod internals {
-    use crate::execution::cache::resource::{FileId, FsPathId};
+    use common::FileIdentity;
+
+    use crate::execution::cache::resource::FsPathId;
 
     impl FsPathId {
         /// A file identity without a filesystem behind it, so a digest that
         /// folds a path can be pinned to a constant — no test controls a
         /// real file's mtime.
         pub(crate) fn file(len: u64, mtime_ns: i128) -> Self {
-            FsPathId::File(FileId { len, mtime_ns })
+            FsPathId::File(FileIdentity { len, mtime_ns })
         }
     }
 }

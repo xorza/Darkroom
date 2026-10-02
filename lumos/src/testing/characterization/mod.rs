@@ -9,7 +9,8 @@
 mod snapshot;
 
 use crate::image_ops::stretching::Stretch;
-use crate::io::image::cfa::CfaType;
+use crate::io::image::cfa::{CfaImage, CfaType};
+use crate::io::image::fits::cfa::save_cfa_fits;
 use crate::io::image::load_context::LoadContext;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::stacking::calibration_masters::{
@@ -17,6 +18,7 @@ use crate::stacking::calibration_masters::{
 };
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::stack::{StackFrame, stack_images};
+use crate::stacking::frame_store::cache_key::DECODE_PINS;
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::register;
@@ -28,6 +30,7 @@ use crate::stacking::star_detection::star::Star;
 use crate::testing::cfa::make_cfa;
 use crate::testing::characterization::snapshot::Snapshot;
 use crate::testing::prelude::*;
+use common::TempDir;
 #[cfg(target_arch = "x86_64")]
 use imaginarium::SimdTier;
 
@@ -44,6 +47,16 @@ fn pinned_host() -> bool {
         eprintln!("SKIPPED: the characterization snapshots are pinned on x86_64 only");
         false
     }
+}
+
+/// A decode a frame cache can hold, against its pin in [`DECODE_PINS`].
+fn assert_decode(decode: &str, snapshot: &Snapshot, pin: &str) {
+    assert_eq!(
+        snapshot.finish(),
+        pin,
+        "the {decode} output moved: state the reason with the change and set its DECODE_PINS entry \
+         to this digest, which changes DECODE_VERSION so a kept frame cache decodes again"
+    );
 }
 
 fn assert_snapshot(stage: &str, snapshot: &Snapshot, expected: &str) {
@@ -98,7 +111,37 @@ fn decode_snapshot() {
     let image = LinearImage::from_file(path, &LoadContext::default()).unwrap();
     let mut snapshot = Snapshot::default();
     image_snapshot(&mut snapshot, &image);
-    assert_snapshot("FITS decode", &snapshot, "eef15741e2043c92");
+    assert_decode("FITS decode", &snapshot, DECODE_PINS.fits_linear);
+
+    // A three-channel float TIFF written from the star field, read back as linear data.
+    let scratch = TempDir::new("characterization_decode");
+    let size = Size2us::new(48, 40);
+    let channels = [0x61, 0x62, 0x63].map(|seed| star_field(size, 10, seed).image);
+    let rgb = LinearImage::from_planar_channels(
+        ImageDimensions::new(size, 3),
+        channels
+            .iter()
+            .map(|image| image.channel(0).pixels().to_vec()),
+    );
+    let tiff = scratch.join("field.tiff");
+    rgb.save(&tiff).unwrap();
+    let image = LinearImage::from_file(&tiff, &LoadContext::default()).unwrap();
+    let mut snapshot = Snapshot::default();
+    image_snapshot(&mut snapshot, &image);
+    assert_decode("float TIFF decode", &snapshot, DECODE_PINS.float_tiff);
+
+    // An RGGB mosaic FITS, read back as its sensor plane.
+    let fits = scratch.join("mosaic.fits");
+    let mosaic = make_cfa(
+        size,
+        channels[0].channel(0).pixels().to_vec(),
+        CfaType::Bayer(CfaPattern::Rggb),
+    );
+    save_cfa_fits(&fits, &mosaic).unwrap();
+    let cfa = CfaImage::from_file(&fits, &LoadContext::default()).unwrap();
+    let mut snapshot = Snapshot::default();
+    snapshot.f32s(cfa.data.pixels());
+    assert_decode("mosaic FITS decode", &snapshot, DECODE_PINS.fits_cfa);
 }
 
 /// A Bayer light through bias, dark and flat masters, then demosaiced.
@@ -281,5 +324,5 @@ fn raw_decode_snapshot() {
     let cfa = load_raw_cfa(path, &LoadContext::default()).unwrap();
     let mut snapshot = Snapshot::default();
     snapshot.f32s(cfa.data.pixels());
-    assert_snapshot("RAW decode", &snapshot, "b6144af28244502b");
+    assert_decode("RAW decode", &snapshot, DECODE_PINS.raw_cfa);
 }

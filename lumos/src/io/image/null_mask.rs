@@ -42,6 +42,15 @@ impl NullMask {
         (count > 0).then_some(Self { nulls, count })
     }
 
+    /// A mask restored from the words [`Self::bits`] holds, as a spill wrote them.
+    pub(crate) fn from_words(size: Size2us, words: &[u64]) -> Self {
+        let mut nulls = BitBuffer2::new_default(size);
+        nulls.words.copy_from_slice(words);
+        let count = nulls.count_ones();
+        assert!(count > 0, "a spilled null mask holds at least one null");
+        Self { nulls, count }
+    }
+
     /// How many pixels carry no measurement. Never zero — a mask with nothing in it is `None`.
     pub(crate) fn count(&self) -> usize {
         self.count

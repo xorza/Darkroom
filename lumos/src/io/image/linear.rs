@@ -21,6 +21,7 @@ use crate::io::image::load_context::LoadContext;
 use crate::io::image::null_mask::NullMask;
 use crate::io::image::standard::{f32_target_format, read_standard_image, scientific_rejection};
 use crate::stacking::frame_store::StackableImage;
+use crate::stacking::frame_store::cache_key::DecoderKind;
 
 /// A one- or three-channel floating-point image in a linear numeric domain.
 #[derive(Debug, Clone)]
@@ -310,6 +311,8 @@ impl LinearImage {
 }
 
 impl StackableImage for LinearImage {
+    const DECODER: DecoderKind = DecoderKind::Linear;
+
     fn dimensions(&self) -> ImageDimensions {
         self.dimensions()
     }

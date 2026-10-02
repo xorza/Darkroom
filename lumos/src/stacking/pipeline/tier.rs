@@ -7,6 +7,7 @@ use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::frame_store::frame_quality::FrameQuality;
 use crate::stacking::frame_store::frame_stats::FrameStats;
+use crate::stacking::frame_store::spill::FrameSpill;
 use crate::stacking::frame_store::spill_directory::SpillDirectory;
 use crate::stacking::frame_store::{StoredFrame, StoredImage};
 use crate::stacking::pipeline::frame::PipelineFrame;
@@ -48,9 +49,11 @@ impl FrameTier {
     pub(crate) fn hold(&self, name: &str, image: LinearImage) -> Result<PipelineFrame, Error> {
         match self {
             Self::Ram => Ok(PipelineFrame::Resident(image)),
-            Self::Spill(directory) => StoredImage::spill(directory.path(), name, &image)
-                .map(PipelineFrame::Spilled)
-                .map_err(|source| Error::Stack(StackError::from(source))),
+            Self::Spill(directory) => {
+                StoredImage::spill(&FrameSpill::new(directory.path(), name), &image)
+                    .map(PipelineFrame::Spilled)
+                    .map_err(|source| Error::Stack(StackError::from(source)))
+            }
         }
     }
 
@@ -84,9 +87,13 @@ impl FrameTier {
                 reusable: None,
             }),
             Self::Spill(directory) => {
-                let frame =
-                    StoredFrame::spill(directory.path(), name, &image, &quality, source_stats)
-                        .map_err(|source| Error::Stack(StackError::from(source)))?;
+                let frame = StoredFrame::spill(
+                    &FrameSpill::new(directory.path(), name),
+                    &image,
+                    &quality,
+                    source_stats,
+                )
+                .map_err(|source| Error::Stack(StackError::from(source)))?;
                 let FrameQuality::Planes {
                     coverage,
                     confidence,
@@ -117,10 +124,13 @@ impl FrameTier {
         let quality = FrameQuality::for_unwarped(&image);
         match self {
             Self::Ram => Ok(StoredFrame::from_memory(image, quality, source_stats)),
-            Self::Spill(directory) => {
-                StoredFrame::spill(directory.path(), name, &image, &quality, source_stats)
-                    .map_err(|source| Error::Stack(StackError::from(source)))
-            }
+            Self::Spill(directory) => StoredFrame::spill(
+                &FrameSpill::new(directory.path(), name),
+                &image,
+                &quality,
+                source_stats,
+            )
+            .map_err(|source| Error::Stack(StackError::from(source))),
         }
     }
 
