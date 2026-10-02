@@ -9,10 +9,8 @@ use std::path::Path;
 use imaginarium::{ChannelCount, ColorFormat, Image};
 
 use crate::io::image::error::ImageError;
-use crate::io::image::image_provenance::SourceContainer;
 
 pub(crate) const FITS_EXTENSIONS: &[&str] = &["fits", "fit"];
-pub(crate) const STANDARD_IMAGE_EXTENSIONS: &[&str] = &["tiff", "tif", "png", "jpg", "jpeg"];
 
 pub(crate) fn file_extension(path: &Path) -> String {
     path.extension()
@@ -33,15 +31,6 @@ pub(crate) fn read_standard_image(path: &Path) -> Result<Image, ImageError> {
         path: path.to_path_buf(),
         source,
     })
-}
-
-pub(crate) fn standard_container(extension: &str) -> SourceContainer {
-    match extension {
-        "tiff" | "tif" => SourceContainer::Tiff,
-        "png" => SourceContainer::Png,
-        "jpg" | "jpeg" => SourceContainer::Jpeg,
-        _ => unreachable!("standard extension was validated before selecting its container"),
-    }
 }
 
 /// The `f32` target format a given image deinterleaves into: `L_F32` for

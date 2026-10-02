@@ -1,6 +1,6 @@
 //! In-memory image adjustment, conversion, blending, and transform nodes.
 
-use imaginarium::{Blend, BlendMode, ContrastBrightness, Transform, Vec2};
+use imaginarium::{Blend, BlendMode, ColorFormat, ContrastBrightness, Transform, Vec2};
 use scenarium::FuncId;
 use scenarium::Invocation;
 use scenarium::{ConstValue, DataType, DynamicValue, InvokeError};
@@ -85,7 +85,7 @@ fn register_convert(library: &mut Library) {
             )
             .input(
                 enum_input::<ConversionFormat>("Format", &CONVERSION_FORMAT_DATATYPE)
-                    .default(ConstValue::Enum(ConversionFormat::RgbU8.label()))
+                    .default(ConstValue::Enum(ColorFormat::RGB_U8.name().to_string()))
                     .description("Target color format."),
             )
             .output(
@@ -241,17 +241,25 @@ fn register_transform(library: &mut Library) {
                                 .expect("transform input type is validated at the compile boundary")
                                 as f32
                         };
-                        let mut output = imaginarium::Image::new_black(image.desc())
-                            .map_err(InvokeError::external)?;
                         let center = Vec2::new(
                             image.desc().width as f32 / 2.0,
                             image.desc().height as f32 / 2.0,
                         );
-                        Transform::new()
-                            .scale(Vec2::new(scalar(1), scalar(2)))
+                        let scale = Vec2::new(scalar(1), scalar(2));
+                        let transform = Transform::new()
+                            .scale(scale)
                             .rotate_around(scalar(3), center)
-                            .translate(Vec2::new(scalar(4), scalar(5)))
-                            .apply_cpu(&image.interleaved(), &mut output);
+                            .translate(Vec2::new(scalar(4), scalar(5)));
+                        if !transform.is_invertible() {
+                            return Err(InvokeError::invalid_input(
+                                1,
+                                "a scale, rotation and translation that make an invertible transform",
+                                (1..6).map(scalar).collect::<Vec<f32>>(),
+                            ));
+                        }
+                        let mut output = imaginarium::Image::new_black(image.desc())
+                            .map_err(InvokeError::external)?;
+                        transform.apply_cpu(&image.interleaved(), &mut output);
                         outputs[0] = DynamicValue::from_custom(Image::from(output));
                         Ok(())
                     })

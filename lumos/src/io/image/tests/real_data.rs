@@ -7,24 +7,9 @@ use common::CancelToken;
 
 use common::internals::debug_output_path;
 
-use crate::io::image::PREVIEW_IMAGE_EXTENSIONS;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::load_context::LoadContext;
-use crate::io::image::standard::{FITS_EXTENSIONS, STANDARD_IMAGE_EXTENSIONS};
-use crate::io::raw;
 use crate::io::raw::raw_files;
-
-#[test]
-fn loadable_extensions_match_decoder_policies() {
-    let expected: Vec<&str> = FITS_EXTENSIONS
-        .iter()
-        .chain(raw::RAW_EXTENSIONS)
-        .chain(STANDARD_IMAGE_EXTENSIONS)
-        .copied()
-        .collect();
-
-    assert_eq!(PREVIEW_IMAGE_EXTENSIONS, expected);
-}
 
 #[test]
 fn load_single_raw_from_env() {

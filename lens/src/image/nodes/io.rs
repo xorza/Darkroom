@@ -10,7 +10,9 @@ use scenarium::{ConstValue, DataType, DynamicValue, FsPathConfig, FsPathMode, In
 use scenarium::{Func, FuncInput, FuncLambda, FuncOutput, Library};
 
 use crate::config_node::enum_input;
-use crate::image::format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat, conversion_target};
+use crate::image::format::{
+    AS_IS, CONVERSION_FORMAT_DATATYPE, ConversionFormat, conversion_target,
+};
 use crate::image::{IMAGE_DATA_TYPE, Image};
 use scenarium::Invocation;
 use tokio::task;
@@ -74,7 +76,7 @@ fn register_save(library: &mut Library) {
             )
             .input(
                 enum_input::<ConversionFormat>("Format", &CONVERSION_FORMAT_DATATYPE)
-                    .default(ConstValue::Enum(ConversionFormat::AsIs.label()))
+                    .default(ConstValue::Enum(AS_IS.to_string()))
                     .description(
                         "Convert to this color format before saving; \"As Is\" keeps the source format.",
                     ),

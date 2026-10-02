@@ -6,7 +6,7 @@ use crate::io::raw::normalize::simd::neon;
 #[cfg(target_arch = "x86_64")]
 use crate::io::raw::normalize::simd::{sse2, sse41};
 use crate::testing::simd_check::backend::Backend;
-use crate::testing::simd_check::simd_tier::SimdTier;
+use imaginarium::SimdTier;
 
 type ChunkFn = unsafe fn(&[u16], &mut [f32], f32, f32);
 

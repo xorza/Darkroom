@@ -1,7 +1,7 @@
 use std::ops::SubAssign;
 use std::path::Path;
 
-use imaginarium::{Buffer2, ChannelCount, Image};
+use imaginarium::{Buffer2, ChannelCount, FileFormat, Image};
 use rayon::prelude::*;
 
 use crate::image_ops::SAMPLES_PER_BLOCK;
@@ -12,14 +12,13 @@ use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
-    TransferProvenance,
+    SourceContainer, TransferProvenance,
 };
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::null_mask::NullMask;
 use crate::io::image::standard::{
-    FITS_EXTENSIONS, STANDARD_IMAGE_EXTENSIONS, f32_target_format, file_extension,
-    read_standard_image, scientific_rejection, standard_container,
+    FITS_EXTENSIONS, f32_target_format, file_extension, read_standard_image, scientific_rejection,
 };
 use crate::io::raw;
 use crate::stacking::frame_store::StackableImage;
@@ -59,8 +58,8 @@ impl LinearImage {
             ));
         }
 
-        if STANDARD_IMAGE_EXTENSIONS.contains(&extension.as_str()) {
-            if !matches!(extension.as_str(), "tiff" | "tif") {
+        if let Some(format) = FileFormat::from_extension(&extension) {
+            if format != FileFormat::Tiff {
                 return Err(scientific_rejection(
                     path,
                     "PNG and JPEG are preview-only because their transfer and color transforms are not decoded",
@@ -89,7 +88,7 @@ impl LinearImage {
             };
             let mut image = LinearImage::from(&decoded);
             image.metadata.provenance = Some(ImageProvenance {
-                container: standard_container(&extension),
+                container: SourceContainer::from(format),
                 decoder: DecoderProvenance::Imaginarium,
                 transfer: TransferProvenance::DeclaredLinearRaster,
                 color,

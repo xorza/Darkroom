@@ -1,6 +1,8 @@
 //! [`Backend`]: one SIMD backend of a kernel, as the cross-check sweeps it.
 
-use crate::testing::simd_check::simd_tier::SimdTier;
+use imaginarium::SimdTier;
+
+use crate::testing::simd_check;
 
 /// One SIMD backend of a kernel: the tier it needs, the kernel itself (usually its function), and
 /// the narrowest width its safety contract admits.
@@ -31,11 +33,11 @@ impl<B: Copy> Backend<B> {
     }
 
     /// The backends of `backends` the running CPU can execute, in order; each one it cannot is
-    /// reported (see [`SimdTier::runs_here`]).
+    /// reported (see [`simd_check::runs_here`]).
     pub(crate) fn supported(backends: &[Backend<B>]) -> impl Iterator<Item = Backend<B>> {
         backends
             .iter()
             .copied()
-            .filter(|backend| backend.tier.runs_here())
+            .filter(|backend| simd_check::runs_here(backend.tier))
     }
 }

@@ -7,6 +7,7 @@ use crate::testing::prelude::*;
 use common::TempDir;
 use imaginarium::{ColorFormat, Image, ImageDesc};
 
+use crate::io::image::PREVIEW_IMAGE_EXTENSIONS;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::provenance::FitsTransferProvenance;
 use crate::io::image::image_metadata::{BitPix, ImageMetadata};
@@ -14,6 +15,17 @@ use crate::io::image::image_provenance::{ColorProvenance, ImageProvenance, Trans
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::preview_image::PreviewImage;
 use crate::stacking::frame_store::StackableImage;
+
+#[test]
+fn preview_extensions_are_fits_then_raw_then_imaginarium() {
+    assert_eq!(
+        PREVIEW_IMAGE_EXTENSIONS,
+        [
+            "fits", "fit", "raf", "cr2", "cr3", "nef", "arw", "dng", "png", "jpg", "jpeg", "tiff",
+            "tif",
+        ]
+    );
+}
 
 #[test]
 fn metadata_default() {

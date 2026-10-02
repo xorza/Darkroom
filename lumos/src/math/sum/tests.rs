@@ -6,9 +6,9 @@ use crate::math::sum::{mean_f32, scalar, sum_f32, weighted_mean_f32};
 #[cfg(target_arch = "x86_64")]
 use crate::simd::AVX2_F32_LANES;
 #[cfg(target_arch = "x86_64")]
-use crate::testing::simd_check::simd_tier::SimdTier;
+use crate::testing::simd_check;
 #[cfg(target_arch = "x86_64")]
-use imaginarium::cpu_features;
+use imaginarium::SimdTier;
 use std::iter;
 
 /// Lengths that straddle every gate and its remainder: under the 4-lane NEON minimum, under the
@@ -120,7 +120,7 @@ fn mean_agrees_bit_for_bit_with_the_unit_weighted_mean() {
 fn gates_differ(len: usize) -> bool {
     #[cfg(target_arch = "x86_64")]
     {
-        cpu_features::has_avx2() && (AVX2_F32_LANES..AVX2_SUM_F32_CROSSOVER).contains(&len)
+        SimdTier::Avx2.is_supported() && (AVX2_F32_LANES..AVX2_SUM_F32_CROSSOVER).contains(&len)
     }
     #[cfg(not(target_arch = "x86_64"))]
     {
@@ -141,7 +141,7 @@ fn gates_differ(len: usize) -> bool {
 #[test]
 #[cfg(target_arch = "x86_64")]
 fn the_split_gate_window_is_where_the_two_entry_points_diverge() {
-    if !SimdTier::Avx2.runs_here() {
+    if !simd_check::runs_here(SimdTier::Avx2) {
         return;
     }
 

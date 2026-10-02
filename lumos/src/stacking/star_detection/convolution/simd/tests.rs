@@ -11,8 +11,8 @@ use crate::stacking::star_detection::convolution::simd::{
 use crate::testing::prelude::*;
 use crate::testing::simd_check::backend::Backend;
 use crate::testing::simd_check::data_shape::DataShape;
-use crate::testing::simd_check::simd_tier::SimdTier;
 use crate::testing::simd_check::{SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar};
+use imaginarium::SimdTier;
 
 type RowFn = unsafe fn(&[f32], &mut [f32], &[f32], usize);
 type ColsRowFn = unsafe fn(&[f32], &mut [f32], Size2us, usize, &[f32], usize);

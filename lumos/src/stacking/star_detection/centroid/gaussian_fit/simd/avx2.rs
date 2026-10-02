@@ -347,12 +347,14 @@ mod tests {
     use std::f64::consts::PI;
 
     use crate::stacking::star_detection::centroid::gaussian_fit::simd::avx2::*;
-    use crate::testing::simd_check::simd_tier::SimdTier;
+    use imaginarium::SimdTier;
+
+    use crate::testing::simd_check;
 
     /// Test that `simd_exp_fast` produces results close to std `exp()`.
     #[test]
     fn simd_exp_fast_accuracy() {
-        if !SimdTier::Avx2Fma.runs_here() {
+        if !simd_check::runs_here(SimdTier::Avx2Fma) {
             return;
         }
 
@@ -387,7 +389,7 @@ mod tests {
     /// Test `simd_exp_fast` with the typical Gaussian exponent range.
     #[test]
     fn simd_exp_fast_gaussian_range() {
-        if !SimdTier::Avx2Fma.runs_here() {
+        if !simd_check::runs_here(SimdTier::Avx2Fma) {
             return;
         }
 

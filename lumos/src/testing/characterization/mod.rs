@@ -28,13 +28,17 @@ use crate::stacking::star_detection::star::Star;
 use crate::testing::cfa::make_cfa;
 use crate::testing::characterization::snapshot::Snapshot;
 use crate::testing::prelude::*;
-use crate::testing::simd_check::simd_tier::SimdTier;
+#[cfg(target_arch = "x86_64")]
+use imaginarium::SimdTier;
+
+#[cfg(target_arch = "x86_64")]
+use crate::testing::simd_check;
 use crate::testing::synthetic::fixtures::star_field;
 
 /// Whether this host computes the pinned digests; another one reports why it skips.
 fn pinned_host() -> bool {
     #[cfg(target_arch = "x86_64")]
-    return SimdTier::Avx2Fma.runs_here();
+    return simd_check::runs_here(SimdTier::Avx2Fma);
     #[cfg(not(target_arch = "x86_64"))]
     {
         eprintln!("SKIPPED: the characterization snapshots are pinned on x86_64 only");

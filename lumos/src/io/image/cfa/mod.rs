@@ -9,6 +9,7 @@ pub(crate) mod same_color;
 use std::io;
 use std::path::Path;
 
+use imaginarium::FileFormat;
 use rayon::prelude::*;
 
 use crate::io::image::cfa::same_color::SameColorMedian;
@@ -20,9 +21,7 @@ use crate::io::image::image_provenance::{ColorProvenance, DemosaicProvenance};
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::null_mask::NullMask;
-use crate::io::image::standard::{
-    FITS_EXTENSIONS, STANDARD_IMAGE_EXTENSIONS, file_extension, scientific_rejection,
-};
+use crate::io::image::standard::{FITS_EXTENSIONS, file_extension, scientific_rejection};
 use crate::io::raw;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::sensor_layout::SensorLayout;
@@ -194,7 +193,7 @@ impl CfaImage {
         if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {
             return raw::load_raw_cfa(path, &context.cancel);
         }
-        if STANDARD_IMAGE_EXTENSIONS.contains(&extension.as_str()) {
+        if FileFormat::from_extension(&extension).is_some() {
             return Err(scientific_rejection(
                 path,
                 "generic raster decoders do not establish a scientific CFA contract",
