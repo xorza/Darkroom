@@ -27,7 +27,7 @@ use imaginarium::Buffer2;
 #[cfg(test)]
 mod tests;
 
-#[cfg(all(test, feature = "internals"))]
+#[cfg(all(test, feature = "bench"))]
 mod bench;
 
 /// Maximum children per node (same as `MAX_PEAKS` since each child becomes a candidate).

@@ -1,5 +1,5 @@
 //! Benchmark module for background estimation.
-//! Run with: cargo test -p lumos --release `bench_background` -- --ignored --nocapture
+//! Run with: cargo test -p lumos --release --features bench `bench_background` -- --ignored --nocapture
 
 use crate::testing::prelude::*;
 use quickbench::quick_bench;

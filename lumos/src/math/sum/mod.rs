@@ -17,7 +17,7 @@ mod neon;
 mod scalar;
 mod weighted_sums;
 
-#[cfg(all(test, feature = "internals"))]
+#[cfg(all(test, feature = "bench"))]
 mod bench;
 
 use crate::math::sum::weighted_sums::WeightedSums;

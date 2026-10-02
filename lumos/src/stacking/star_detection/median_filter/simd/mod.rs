@@ -102,7 +102,7 @@ macro_rules! median9_simd_sort {
     }};
 }
 
-#[cfg(all(test, feature = "internals"))]
+#[cfg(all(test, feature = "bench"))]
 mod bench;
 
 #[cfg(target_arch = "x86_64")]

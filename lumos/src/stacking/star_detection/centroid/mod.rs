@@ -21,7 +21,7 @@ mod moffat_fit;
 mod simd;
 pub(crate) mod stamp;
 
-#[cfg(all(test, feature = "internals"))]
+#[cfg(all(test, feature = "bench"))]
 mod bench;
 #[cfg(test)]
 mod internals;

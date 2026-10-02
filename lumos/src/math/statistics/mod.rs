@@ -401,5 +401,5 @@ fn sigma_clipped_core(
 #[cfg(test)]
 mod tests;
 
-#[cfg(all(test, feature = "internals"))]
+#[cfg(all(test, feature = "bench"))]
 mod bench;

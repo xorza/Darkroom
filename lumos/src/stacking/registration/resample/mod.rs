@@ -9,7 +9,7 @@ use crate::stacking::registration::config::WarpParams;
 use crate::stacking::registration::resample::masked_warp::MaskedWarp;
 use crate::stacking::registration::transform::WarpTransform;
 
-#[cfg(all(test, feature = "internals"))]
+#[cfg(all(test, feature = "bench"))]
 mod bench;
 mod kernel;
 mod masked_warp;

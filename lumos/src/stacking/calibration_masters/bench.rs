@@ -5,7 +5,7 @@
 //! through the same engine benched in `stacking::combine::bench`
 //! (`bench_stack_{bias,dark,flat}_*`), so it isn't duplicated here.
 //!
-//! Run: `cargo test -p lumos --release calibration_masters::bench -- --ignored --nocapture`
+//! Run: `cargo test -p lumos --release --features bench calibration_masters::bench -- --ignored --nocapture`
 
 use crate::testing::XTRANS_PATTERN;
 use crate::testing::prelude::*;

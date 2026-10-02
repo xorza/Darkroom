@@ -1,6 +1,6 @@
 //! Benchmarks for Moffat fitting.
 //!
-//! Run with: `cargo test -p lumos --release bench_moffat -- --ignored --nocapture`
+//! Run with: `cargo test -p lumos --release --features bench bench_moffat -- --ignored --nocapture`
 use crate::stacking::star_detection::centroid::stamp::StampGrid;
 use crate::testing::prelude::*;
 

@@ -13,7 +13,7 @@ pub(crate) mod frame;
 pub(crate) mod result;
 pub(crate) mod tier;
 
-#[cfg(all(test, feature = "internals"))]
+#[cfg(all(test, feature = "bench"))]
 mod bench;
 #[cfg(test)]
 mod tests;

@@ -3,7 +3,7 @@
 //! This module provides efficient dilation operations on bit buffers,
 //! used for connecting nearby pixels in star detection and background masking.
 
-#[cfg(all(test, feature = "internals"))]
+#[cfg(all(test, feature = "bench"))]
 mod bench;
 #[cfg(test)]
 mod tests;

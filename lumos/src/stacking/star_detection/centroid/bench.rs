@@ -1,6 +1,6 @@
 //! Benchmarks for centroid computation.
 //!
-//! Run with: `cargo test -p lumos --release bench_centroid -- --ignored --nocapture`
+//! Run with: `cargo test -p lumos --release --features bench bench_centroid -- --ignored --nocapture`
 use crate::stacking::star_detection::centroid::compute_stamp_radius;
 use crate::stacking::star_detection::centroid::stamp::StampGrid;
 use crate::testing::prelude::*;

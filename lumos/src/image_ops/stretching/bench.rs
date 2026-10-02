@@ -1,6 +1,6 @@
 //! Benchmarks for the display-stretch stage (linear stacked master → viewable image), the
 //! two automatic color-preserving curves. Run:
-//! `cargo test -p lumos --release stretching::bench -- --ignored --nocapture`
+//! `cargo test -p lumos --release --features bench stretching::bench -- --ignored --nocapture`
 
 use crate::testing::prelude::*;
 use quickbench::quick_bench;
