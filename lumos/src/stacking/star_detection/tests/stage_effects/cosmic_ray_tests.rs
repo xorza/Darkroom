@@ -10,7 +10,6 @@ use crate::stacking::star_detection::tests::Scenario;
 use crate::testing::init_tracing;
 use crate::testing::synthetic::artifacts::add_cosmic_rays;
 use crate::testing::visual::{ToneMap, gray_to_rgb, save, save_image};
-use common::internals::test_output_path;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
 
@@ -38,7 +37,7 @@ fn cosmic_ray_rejection() {
     save(
         &pixels_vec,
         Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_cr_rejection_input.png"),
+        "synthetic_starfield/stage_cr_rejection_input.png",
         ToneMap::Clamp,
     );
 
@@ -85,10 +84,7 @@ fn cosmic_ray_rejection() {
         );
     }
 
-    save_image(
-        img,
-        &test_output_path("synthetic_starfield/stage_cr_rejection_overlay.png"),
-    );
+    save_image(img, "synthetic_starfield/stage_cr_rejection_overlay.png");
 
     // Count how many cosmic rays were falsely detected as stars
     let mut cr_false_positives = 0;

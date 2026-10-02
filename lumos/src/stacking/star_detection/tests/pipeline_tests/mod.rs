@@ -6,7 +6,6 @@ use crate::testing::prelude::*;
 use crate::testing::synthetic::observe::SimFrame;
 use crate::testing::visual::report::{DetectionMetrics, compute_detection_metrics, save_metrics};
 use crate::testing::visual::{ToneMap, save, save_comparison};
-use common::internals::test_output_path;
 
 mod challenging_tests;
 mod standard_tests;
@@ -29,7 +28,7 @@ fn run_test(
     save(
         pixels,
         Size2us::new(width, height),
-        &test_output_path(&format!("synthetic_starfield/{prefix}_{name}_input.png")),
+        &format!("synthetic_starfield/{prefix}_{name}_input.png"),
         ToneMap::Clamp,
     );
 
@@ -46,14 +45,12 @@ fn run_test(
         truth,
         &stars,
         match_radius,
-        &test_output_path(&format!(
-            "synthetic_starfield/{prefix}_{name}_comparison.png"
-        )),
+        &format!("synthetic_starfield/{prefix}_{name}_comparison.png"),
     );
 
     save_metrics(
         &metrics,
-        &test_output_path(&format!("synthetic_starfield/{prefix}_{name}_metrics.txt")),
+        &format!("synthetic_starfield/{prefix}_{name}_metrics.txt"),
     );
 
     println!("\n{name} results:");

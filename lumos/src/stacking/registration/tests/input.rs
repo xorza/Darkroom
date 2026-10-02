@@ -1,6 +1,7 @@
 //! Registration's handling of the star lists it is handed: too few, degenerate FWHM,
 //! mismatched counts.
 
+use crate::stacking::registration::tests::helpers::register;
 use crate::stacking::registration::*;
 
 // Registration reads only `pos` and `fwhm`, so these fixtures set the FWHM under test and

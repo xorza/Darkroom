@@ -3,11 +3,11 @@
 use crate::stacking::star_detection::star::Star;
 use crate::testing::synthetic::metrics::match_catalogs;
 use crate::testing::synthetic::observe::ObservedSource;
+use common::internals;
 use glam::DVec2;
 use std::fmt;
 use std::fs::File;
 use std::io::Write;
-use std::path::Path;
 
 /// Comprehensive detection metrics.
 #[derive(Debug, Clone)]
@@ -258,9 +258,12 @@ pub(crate) fn compute_detection_metrics(
 }
 
 /// Save metrics to a text file.
-pub(crate) fn save_metrics(metrics: &DetectionMetrics, path: &Path) {
-    let mut file = File::create(path).expect("Failed to create metrics file");
-    write!(file, "{metrics}").expect("Failed to write metrics");
+/// Write `metrics` as text to the debug file `name`, when debug output is on.
+pub(crate) fn save_metrics(metrics: &DetectionMetrics, name: &str) {
+    if let Some(path) = internals::debug_output_path(name) {
+        let mut file = File::create(path).expect("Failed to create metrics file");
+        write!(file, "{metrics}").expect("Failed to write metrics");
+    }
 }
 
 /// Pass/fail criteria for visual tests.

@@ -4,10 +4,11 @@
 //! radial (barrel) optical distortion through `register()` end-to-end and verifies the SIP fit
 //! recovers it — the residuals collapse versus a linear-only registration of the same field.
 
+use crate::stacking::registration::Config;
 use crate::stacking::registration::distortion::sip::SipConfig;
 use crate::stacking::registration::tests::helpers;
+use crate::stacking::registration::tests::helpers::register;
 use crate::stacking::registration::transform::Transform;
-use crate::stacking::registration::{Config, register};
 use crate::testing::prelude::*;
 use crate::testing::synthetic::transforms::{generate_random_positions, positions_to_stars};
 

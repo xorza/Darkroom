@@ -10,11 +10,15 @@ use rand::rngs::SmallRng;
 
 const TOL: f64 = 1e-6;
 
+/// The seed a test that names none runs with, so every run draws the same samples.
+const TEST_SEED: u64 = 0x5EED;
+
 fn make_estimator(config: RansacConfig) -> RansacEstimator {
-    RansacEstimator::new(config, 1.0)
+    estimator_with_max_sigma(1.0, config)
 }
 
-fn estimator_with_max_sigma(max_sigma: f64, config: RansacConfig) -> RansacEstimator {
+fn estimator_with_max_sigma(max_sigma: f64, mut config: RansacConfig) -> RansacEstimator {
+    config.seed.get_or_insert(TEST_SEED);
     RansacEstimator::new(config, max_sigma)
 }
 

@@ -267,7 +267,8 @@ fn warp_homography_roundtrip() {
 
 #[test]
 fn warp_with_detected_transform() {
-    use crate::stacking::registration::{Config as RegConfig, register};
+    use crate::stacking::registration::Config as RegConfig;
+    use crate::stacking::registration::tests::helpers::register;
     use crate::stacking::star_detection::config::Config as StarConfig;
 
     let width = 256;

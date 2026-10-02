@@ -4,6 +4,8 @@
 
 use std::time::Instant;
 
+use common::internals::debug_output_path;
+
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::config::Config;
@@ -12,7 +14,6 @@ use crate::stacking::star_detection::threshold_mask::{ThresholdParams, create_th
 use crate::testing::init_tracing;
 use crate::testing::real_data::dataset_dir;
 use crate::{CentroidMethod, ImageDimensions};
-use common::internals::test_output_path;
 use glam::Vec2;
 use imaginarium::Color;
 use imaginarium::ColorFormat;
@@ -104,12 +105,12 @@ fn detect_rho_opiuchi() {
     // Convert back to RGB_U8 for saving
     let output_img = output_img.convert(ColorFormat::RGB_U8);
 
-    // Save output
-    let output_path = test_output_path("rho-opiuchi-detection.jpg");
-    output_img
-        .save_file(&output_path)
-        .expect("Failed to save output image");
-    println!("\nSaved detection result to: {output_path:?}");
+    if let Some(output_path) = debug_output_path("rho-opiuchi-detection.jpg") {
+        output_img
+            .save_file(&output_path)
+            .expect("Failed to save output image");
+        println!("\nSaved detection result to: {}", output_path.display());
+    }
 
     assert!(
         !result.stars.is_empty(),
@@ -152,7 +153,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     let config = Config::precise_ground();
     let mut pool = DetectionResources::new(Size2us::new(width, height));
 
-    let out = |name: &str| test_output_path(&format!("rho-opiuchi-inspect/{name}"));
+    let out = |name: &str| format!("rho-opiuchi-inspect/{name}");
 
     // 1. Grayscale
     let grayscale = prepare::prepare(&linear_image, &mut pool);

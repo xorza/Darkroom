@@ -9,7 +9,6 @@ use crate::testing::prelude::*;
 use crate::testing::synthetic::backgrounds::NebulaConfig;
 use crate::testing::synthetic::scene::BackgroundField;
 use crate::testing::visual::{ToneMap, save};
-use common::internals::test_output_path;
 
 /// Tile size these fixtures are built around.
 ///
@@ -51,7 +50,7 @@ fn background_uniform() {
     save(
         pixels.pixels(),
         Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_bg_uniform_input.png"),
+        "synthetic_starfield/stage_bg_uniform_input.png",
         ToneMap::Clamp,
     );
 
@@ -59,7 +58,7 @@ fn background_uniform() {
     save(
         background.background.pixels(),
         Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_bg_uniform_background.png"),
+        "synthetic_starfield/stage_bg_uniform_background.png",
         ToneMap::Clamp,
     );
 
@@ -72,7 +71,7 @@ fn background_uniform() {
     save(
         &subtracted,
         Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_bg_uniform_subtracted.png"),
+        "synthetic_starfield/stage_bg_uniform_subtracted.png",
         ToneMap::Clamp,
     );
 
@@ -138,14 +137,14 @@ fn background_gradient() {
     save(
         &pixels,
         Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_bg_gradient_input.png"),
+        "synthetic_starfield/stage_bg_gradient_input.png",
         ToneMap::Clamp,
     );
 
     save(
         background.background.pixels(),
         Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_bg_gradient_background.png"),
+        "synthetic_starfield/stage_bg_gradient_background.png",
         ToneMap::Clamp,
     );
 
@@ -157,7 +156,7 @@ fn background_gradient() {
     save(
         &subtracted,
         Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_bg_gradient_subtracted.png"),
+        "synthetic_starfield/stage_bg_gradient_subtracted.png",
         ToneMap::Clamp,
     );
 
@@ -223,14 +222,14 @@ fn background_vignette() {
     save(
         &pixels,
         Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_bg_vignette_input.png"),
+        "synthetic_starfield/stage_bg_vignette_input.png",
         ToneMap::Clamp,
     );
 
     save(
         background.background.pixels(),
         Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_bg_vignette_background.png"),
+        "synthetic_starfield/stage_bg_vignette_background.png",
         ToneMap::Clamp,
     );
 
@@ -242,7 +241,7 @@ fn background_vignette() {
     save(
         &subtracted,
         Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_bg_vignette_subtracted.png"),
+        "synthetic_starfield/stage_bg_vignette_subtracted.png",
         ToneMap::Clamp,
     );
 
@@ -319,14 +318,14 @@ fn background_nebula() {
     save(
         &pixels,
         Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_bg_nebula_input.png"),
+        "synthetic_starfield/stage_bg_nebula_input.png",
         ToneMap::Clamp,
     );
 
     save(
         background.background.pixels(),
         Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_bg_nebula_background.png"),
+        "synthetic_starfield/stage_bg_nebula_background.png",
         ToneMap::Clamp,
     );
 
@@ -338,7 +337,7 @@ fn background_nebula() {
     save(
         &subtracted,
         Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_bg_nebula_subtracted.png"),
+        "synthetic_starfield/stage_bg_nebula_subtracted.png",
         ToneMap::Clamp,
     );
 
