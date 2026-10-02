@@ -1,4 +1,5 @@
-use crate::common::color_format::{ALL_FORMATS, ColorFormat};
+use crate::common::color_format::{ALL_FORMATS, ColorFormat, SampleType};
+use crate::common::internals::create_test_image;
 use crate::image::conversion::scalar::{self, Luminance};
 use crate::image::{Image, ImageDesc};
 
@@ -132,4 +133,54 @@ fn converting_to_the_same_format_copies() {
         assert_eq!(image.convert_to(format).bytes(), bytes, "{format}");
         assert_eq!(image.convert(format).bytes(), bytes, "{format}");
     }
+}
+
+/// Characterization snapshot: per source format, one digest of its conversion to every other
+/// format, so a change to any conversion names the source it moved. It pins what the code does,
+/// not what is right; a change that moves it states why. The source is the shared test pattern
+/// (every byte value, or floats on `[0, 1)` including exact halves of a step) plus, for float
+/// sources, values outside `[0, 1]` and both infinities, which the narrowing clamps. No NaN: its
+/// payload after a float copy is unspecified. Every tier is bit-exact with the scalar reference,
+/// so the digests hold on any host.
+#[test]
+fn conversion_snapshot() {
+    /// FNV-1a, 64-bit: a stable digest that needs no dependency.
+    fn fnv1a(mut hash: u64, bytes: &[u8]) -> u64 {
+        for &byte in bytes {
+            hash = (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
+        }
+        hash
+    }
+
+    let digests = ALL_FORMATS.map(|from| {
+        let mut source = create_test_image(from, 37, 5, 3);
+        if from.sample_type == SampleType::F32 {
+            let edges = [-1.0f32, -0.0, 1.5, 255.0, f32::INFINITY, f32::NEG_INFINITY];
+            let floats: &mut [f32] = bytemuck::cast_slice_mut(source.bytes_mut());
+            for (sample, edge) in floats.iter_mut().step_by(7).zip(edges.iter().cycle()) {
+                *sample = *edge;
+            }
+        }
+        ALL_FORMATS
+            .into_iter()
+            .filter(|&to| to != from)
+            .fold(0xcbf2_9ce4_8422_2325, |hash, to| {
+                fnv1a(hash, source.convert_to(to).bytes())
+            })
+    });
+    assert_eq!(
+        digests,
+        [
+            0x9ea7_29de_559c_c2c0,
+            0xd7e2_d9e6_0205_c2d6,
+            0x31b8_5564_15cf_3954,
+            0x9663_c6e6_3a09_8633,
+            0xdf72_b5cb_a0c9_3f6e,
+            0xfd40_a1fc_4c65_efab,
+            0x3d90_45ee_858f_9220,
+            0x57f6_0eb1_563a_d39c,
+            0xd127_9c0a_f0fa_1ab8,
+        ],
+        "a conversion snapshot moved: state why, or find the regression"
+    );
 }
