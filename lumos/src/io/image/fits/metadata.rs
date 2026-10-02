@@ -1,7 +1,8 @@
 use fits_well::header::Header;
+use fits_well::image::SampleType;
 
 use crate::io::image::cfa::{CfaImage, CfaType};
-use crate::io::image::image_metadata::{BitPix, ImageMetadata};
+use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::RowOrder;
 use crate::io::image::sample_domain::ScaleOrigin;
 use crate::io::raw::demosaic::bayer::CfaPattern;
@@ -10,7 +11,7 @@ use crate::io::raw::demosaic::xtrans::XTransPattern;
 pub(super) fn read_metadata(
     header: &Header,
     header_dimensions: Vec<usize>,
-    bitpix: BitPix,
+    sample_type: SampleType,
 ) -> fits_well::Result<ImageMetadata> {
     Ok(ImageMetadata {
         object: read_text(header, "OBJECT")?,
@@ -19,9 +20,8 @@ pub(super) fn read_metadata(
         date_obs: read_text(header, "DATE-OBS")?,
         exposure_time: header.get_real("EXPTIME")?,
         iso: read_u32(header, "ISOSPEED")?,
-        bitpix,
+        sample_type: Some(sample_type),
         header_dimensions,
-        cfa_type: read_cfa_from_headers(header)?,
         camera_white_balance: read_camera_white_balance(header)?,
         filter: read_text(header, "FILTER")?,
         gain: header.get_real("GAIN")?,
@@ -117,16 +117,16 @@ pub(super) fn write_cfa_metadata(header: &mut Header, cfa: &CfaImage) -> fits_we
     if let Some(row_order) = cfa.metadata.row_order() {
         header.set(SOURCE_ROW_ORDER, row_order.keyword())?;
     }
-    match cfa.metadata.cfa_type.as_ref() {
-        Some(CfaType::Mono) => {
+    match cfa.cfa_type {
+        CfaType::Mono => {
             header.set("CFATYPE", "MONO")?;
         }
-        Some(CfaType::Bayer(pattern)) => {
+        CfaType::Bayer(pattern) => {
             header.set("CFATYPE", "BAYER")?;
-            header.set("BAYERPAT", bayerpat(*pattern))?;
+            header.set("BAYERPAT", bayerpat(pattern))?;
         }
-        Some(CfaType::XTrans(pattern)) => {
-            XTransPattern::new(*pattern).map_err(|_| fits_well::FitsError::TypeMismatch {
+        CfaType::XTrans(pattern) => {
+            XTransPattern::new(pattern).map_err(|_| fits_well::FitsError::TypeMismatch {
                 name: "CFATYPE".to_string(),
                 expected: "valid X-Trans pattern",
             })?;
@@ -139,12 +139,6 @@ pub(super) fn write_cfa_metadata(header: &mut Header, cfa: &CfaImage) -> fits_we
                     .collect::<String>();
                 header.set(&keyword, value)?;
             }
-        }
-        None => {
-            return Err(fits_well::FitsError::TypeMismatch {
-                name: "CFATYPE".to_string(),
-                expected: "declared CFA sensor type",
-            });
         }
     }
 

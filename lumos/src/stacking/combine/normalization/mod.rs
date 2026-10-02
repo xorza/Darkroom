@@ -323,6 +323,7 @@ fn measure_common_stats(
             quantization_sigma: frame.source_stats.quantization_sigma,
             domain: frame.source_stats.domain.clone(),
             row_order: frame.source_stats.row_order,
+            cfa_type: frame.source_stats.cfa_type,
         })
         .collect())
 }

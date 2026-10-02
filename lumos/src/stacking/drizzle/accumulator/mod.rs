@@ -256,6 +256,8 @@ impl DrizzleAccumulator {
             // Drizzle redistributes flux by geometry rather than combining aligned samples, so
             // there is no per-frame quantization step to propagate.
             quantization_sigma: None,
+            // Drizzle takes demosaiced frames, which carry no mosaic.
+            cfa_type: None,
         }
     }
 

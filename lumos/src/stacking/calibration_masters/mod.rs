@@ -678,11 +678,7 @@ impl CalibrationMasters {
     /// `CfaImage::subtract`'s assert. Masters are read from user-chosen files, so a set that does
     /// not fit the light is bad input, not a broken invariant.
     fn validate_against_light(&self, image: &CfaImage) -> Result<(), CalibrationError> {
-        let light = image
-            .metadata
-            .cfa_type
-            .as_ref()
-            .ok_or(CalibrationError::MissingLightCfaPattern)?;
+        let light = image.cfa_type;
         let light_size = Size2us::new(image.data.width(), image.data.height());
         let light_domain = image.metadata.sample_domain();
 
@@ -691,16 +687,11 @@ impl CalibrationMasters {
             .iter()
             .filter_map(|(role, master)| master.as_ref().map(|master| (role, master)))
         {
-            let master_pattern = master
-                .metadata
-                .cfa_type
-                .as_ref()
-                .ok_or(CalibrationError::MissingMasterCfaPattern { component: role })?;
-            if master_pattern != light {
+            if master.cfa_type != light {
                 return Err(CalibrationError::CfaPatternMismatch {
                     component: role,
-                    light: light.clone(),
-                    master: master_pattern.clone(),
+                    light,
+                    master: master.cfa_type,
                 });
             }
             // The flat divides a normalized copy of itself, so its own scale cancels; only a

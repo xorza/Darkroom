@@ -29,10 +29,8 @@ pub(crate) fn make_cfa(size: Size2us, pixels: Vec<f32>, cfa_type: CfaType) -> Cf
 pub(crate) fn cfa_from_plane(data: Buffer2<f32>, cfa_type: CfaType) -> CfaImage {
     CfaImage {
         data,
-        metadata: ImageMetadata {
-            cfa_type: Some(cfa_type),
-            ..Default::default()
-        },
+        cfa_type,
+        metadata: ImageMetadata::default(),
         quantization_sigma: None,
         nulls: None,
     }
@@ -42,10 +40,8 @@ pub(crate) fn cfa_from_plane(data: Buffer2<f32>, cfa_type: CfaType) -> CfaImage 
 pub(crate) fn constant_cfa(size: Size2us, value: f32, cfa_type: CfaType) -> CfaImage {
     CfaImage {
         data: Buffer2::new_filled(size.width, size.height, value),
-        metadata: ImageMetadata {
-            cfa_type: Some(cfa_type),
-            ..Default::default()
-        },
+        cfa_type,
+        metadata: ImageMetadata::default(),
         quantization_sigma: None,
         nulls: None,
     }

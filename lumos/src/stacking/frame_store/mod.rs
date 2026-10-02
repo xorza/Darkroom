@@ -13,7 +13,7 @@ use std::path::Path;
 use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 
-use crate::io::image::cfa::CfaFrameInfo;
+use crate::io::image::cfa::{CfaFrameInfo, CfaType};
 use crate::io::image::error::ImageError;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
@@ -32,6 +32,8 @@ pub(crate) trait StackableImage: Send + Sync + Debug + Sized {
     fn dimensions(&self) -> ImageDimensions;
     fn channel(&self, channel: usize) -> &[f32];
     fn metadata(&self) -> &ImageMetadata;
+    /// The mosaic pattern of an undemosaiced sensor frame; `None` for any other image.
+    fn cfa_type(&self) -> Option<CfaType>;
     fn load(path: &Path, context: &LoadContext) -> Result<Self, ImageError>;
 
     fn quantization_sigma(&self) -> Option<f32> {

@@ -39,10 +39,8 @@ fn a_masters_nulls_survive_the_fits_round_trip() {
     // fabrication the mask exists to prevent.
     let cfa = CfaImage {
         data: Buffer2::new(2, 2, vec![0.1f32, 0.2, 0.3, 0.4]),
-        metadata: ImageMetadata {
-            cfa_type: Some(CfaType::Mono),
-            ..Default::default()
-        },
+        cfa_type: CfaType::Mono,
+        metadata: ImageMetadata::default(),
         quantization_sigma: None,
         nulls: NullMask::of_non_finite(Size2us::new(2usize, 2usize), &[&[0.0, f32::NAN, 0.0, 0.0]]),
     };
@@ -108,8 +106,8 @@ fn a_masters_declared_sample_domain_survives_the_fits_round_trip() {
 fn master_cfa_save_load_round_trips_data_and_pattern() {
     let cfa = CfaImage {
         data: Buffer2::new(2, 2, vec![0.1f32, 0.2, 0.3, 0.4]),
+        cfa_type: CfaType::Bayer(CfaPattern::Bggr),
         metadata: ImageMetadata {
-            cfa_type: Some(CfaType::Bayer(CfaPattern::Bggr)),
             camera_white_balance: Some([2.0, 1.0, 1.5, 1.0]),
             ..Default::default()
         },
@@ -121,15 +119,12 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
     cfa.save_fits(&path).unwrap();
     let info = CfaFrameInfo::from_file(&path, &LoadContext::default()).unwrap();
     assert_eq!(info.dimensions, ImageDimensions::new((2, 2), 1));
-    assert_eq!(info.demosaic, DemosaicKind::BayerRcd);
+    assert_eq!(info.cfa_type, CfaType::Bayer(CfaPattern::Bggr));
     let loaded = CfaImage::from_file(&path, &LoadContext::default()).unwrap();
 
     assert_eq!((loaded.data.width(), loaded.data.height()), (2, 2));
     assert_eq!(loaded.data.to_vec(), vec![0.1f32, 0.2, 0.3, 0.4]);
-    assert!(matches!(
-        loaded.metadata.cfa_type,
-        Some(CfaType::Bayer(CfaPattern::Bggr))
-    ));
+    assert_eq!(loaded.cfa_type, CfaType::Bayer(CfaPattern::Bggr));
     assert_eq!(
         loaded.metadata.camera_white_balance,
         Some([2.0, 1.0, 1.5, 1.0])
@@ -181,10 +176,8 @@ fn master_cfa_fits_round_trips_mono_and_xtrans_patterns() {
     ] {
         let image = CfaImage {
             data: Buffer2::new(2, 2, vec![0.1f32, 0.2, 0.3, 0.4]),
-            metadata: ImageMetadata {
-                cfa_type: Some(cfa_type.clone()),
-                ..Default::default()
-            },
+            cfa_type,
+            metadata: ImageMetadata::default(),
             quantization_sigma: None,
             nulls: None,
         };
@@ -193,7 +186,7 @@ fn master_cfa_fits_round_trips_mono_and_xtrans_patterns() {
         image.save_fits(&path).unwrap();
         let loaded = CfaImage::from_file(path, &LoadContext::default()).unwrap();
 
-        assert_eq!(loaded.metadata.cfa_type, Some(cfa_type), "{name}");
+        assert_eq!(loaded.cfa_type, cfa_type, "{name}");
         assert_eq!(loaded.data.pixels(), image.data.pixels(), "{name}");
     }
 }
@@ -309,11 +302,62 @@ fn subtract_dimension_mismatch() {
 fn data_len() {
     let img = CfaImage::from_plane(
         Buffer2::new(10, 20, vec![0.0; 200]),
-        ImageMetadata {
-            cfa_type: Some(CfaType::Mono),
-            ..ImageMetadata::default()
-        },
+        CfaType::Mono,
+        ImageMetadata::default(),
     );
     assert_eq!(img.data.len(), 200);
     assert_eq!(img.quantization_sigma, None);
+}
+
+/// LibRaw's `filters` and `colors` classify a sensor: one colour is mono whatever the word says,
+/// `filters == 0` with three colours is a linear DNG, sRAW or Foveon that LibRaw processes itself,
+/// `9` is X-Trans with the pattern LibRaw keeps apart, a 2-row-periodic word is Bayer, and any
+/// other word is an exotic CFA that LibRaw processes too.
+#[test]
+fn from_libraw_classifies_the_sensor() {
+    let xtrans = [[1; 6]; 6];
+    assert_eq!(CfaType::from_libraw(0, 1, xtrans), Some(CfaType::Mono));
+    assert_eq!(
+        CfaType::from_libraw(0x9494_9494, 1, xtrans),
+        Some(CfaType::Mono)
+    );
+    assert_eq!(CfaType::from_libraw(0, 3, xtrans), None);
+    assert_eq!(
+        CfaType::from_libraw(9, 3, xtrans),
+        Some(CfaType::XTrans(xtrans))
+    );
+    assert_eq!(
+        CfaType::from_libraw(0x9494_9494, 3, xtrans),
+        Some(CfaType::Bayer(CfaPattern::Rggb))
+    );
+    assert_eq!(
+        CfaType::from_libraw(0x1616_1616, 3, xtrans),
+        Some(CfaType::Bayer(CfaPattern::Bggr))
+    );
+    assert_eq!(CfaType::from_libraw(0x1234_5678, 3, xtrans), None);
+}
+
+/// Each pattern names the demosaic lumos runs on it and what its output colour means.
+#[test]
+fn each_pattern_names_its_demosaic() {
+    for (cfa_type, demosaic, color) in [
+        (
+            CfaType::Mono,
+            DemosaicProvenance::None,
+            ColorProvenance::Monochrome,
+        ),
+        (
+            CfaType::Bayer(CfaPattern::Rggb),
+            DemosaicProvenance::LumosRcd,
+            ColorProvenance::SensorRgb,
+        ),
+        (
+            CfaType::XTrans([[1; 6]; 6]),
+            DemosaicProvenance::LumosMarkesteijn,
+            ColorProvenance::SensorRgb,
+        ),
+    ] {
+        assert_eq!(cfa_type.demosaic_provenance(), demosaic, "{cfa_type:?}");
+        assert_eq!(cfa_type.demosaiced_color(), color, "{cfa_type:?}");
+    }
 }

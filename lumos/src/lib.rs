@@ -46,7 +46,7 @@ pub use io::image::fits::provenance::{
     FitsChecksumProvenance, FitsChecksumState, FitsHduProvenance, FitsTransferProvenance,
 };
 pub use io::image::image_dimensions::ImageDimensions;
-pub use io::image::image_metadata::{BitPix, ImageMetadata};
+pub use io::image::image_metadata::ImageMetadata;
 pub use io::image::image_provenance::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
     SourceContainer, TransferProvenance,

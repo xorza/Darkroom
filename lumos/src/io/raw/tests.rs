@@ -574,7 +574,7 @@ fn real_xtrans_channel_black_matches_direct_and_calibration_paths() {
         .iter()
         .filter_map(|path| open_raw(path).ok())
         .find(|raw| {
-            matches!(raw.sensor_type, SensorType::XTrans)
+            matches!(raw.cfa_type, Some(CfaType::XTrans(_)))
                 && raw
                     .black_level
                     .channel_delta_norm
@@ -622,22 +622,27 @@ fn real_xtrans_channel_black_matches_direct_and_calibration_paths() {
 
 #[test]
 fn camera_white_balance_is_canonicalized() {
-    let bayer = SensorType::Bayer(CfaPattern::Rggb);
+    let bayer = Some(CfaType::Bayer(CfaPattern::Rggb));
     assert_eq!(
-        canonical_camera_white_balance(&bayer, [4.0, 2.0, 3.0, 2.0]),
+        canonical_camera_white_balance(bayer, [4.0, 2.0, 3.0, 2.0]),
         Some([2.0, 1.0, 1.5, 1.0])
     );
     assert_eq!(
-        canonical_camera_white_balance(&bayer, [2.0, 1.0, 1.5, 0.0]),
+        canonical_camera_white_balance(bayer, [2.0, 1.0, 1.5, 0.0]),
         Some([2.0, 1.0, 1.5, 1.0])
     );
     assert_eq!(
-        canonical_camera_white_balance(&SensorType::XTrans, [2.0, 1.0, 1.5, 9.0]),
+        canonical_camera_white_balance(Some(CfaType::XTrans([[1; 6]; 6])), [2.0, 1.0, 1.5, 9.0]),
         Some([2.0, 1.0, 1.5, 1.0])
     );
     assert_eq!(
-        canonical_camera_white_balance(&SensorType::Monochrome, [2.0, 1.0, 1.5, 1.0]),
+        canonical_camera_white_balance(Some(CfaType::Mono), [2.0, 1.0, 1.5, 1.0]),
         None
+    );
+    // A sensor LibRaw processes itself (a linear DNG) still reports its multipliers.
+    assert_eq!(
+        canonical_camera_white_balance(None, [4.0, 2.0, 3.0, 2.0]),
+        Some([2.0, 1.0, 1.5, 1.0])
     );
 }
 
@@ -649,11 +654,11 @@ fn invalid_camera_white_balance_is_absent() {
         [2.0, f32::NAN, 1.5, 1.0],
         [2.0, f32::INFINITY, 1.5, 1.0],
     ];
-    let sensor_type = SensorType::Bayer(CfaPattern::Rggb);
+    let cfa_type = Some(CfaType::Bayer(CfaPattern::Rggb));
 
     for input in invalid {
         assert!(
-            canonical_camera_white_balance(&sensor_type, input).is_none(),
+            canonical_camera_white_balance(cfa_type, input).is_none(),
             "{input:?}"
         );
     }

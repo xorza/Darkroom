@@ -4,6 +4,7 @@ use arrayvec::ArrayVec;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::io::image::cfa::CfaType;
 use crate::io::image::image_provenance::RowOrder;
 use crate::io::image::sample_domain::SampleDomain;
 use crate::math::statistics::{MedianMad, mad_with_scratch, median_mut};
@@ -22,6 +23,8 @@ pub(crate) struct FrameStats {
     /// [`RowOrder`]. Carried here for the same reason as the domain: the metadata
     /// it comes from is dropped for every frame but the first, and this is what travels instead.
     pub(crate) row_order: Option<RowOrder>,
+    /// The frame's mosaic pattern, for an undemosaiced sensor frame; carried for the same reason.
+    pub(crate) cfa_type: Option<CfaType>,
 }
 
 impl FrameStats {
@@ -42,6 +45,7 @@ impl FrameStats {
         let quantization_sigma = image.quantization_sigma();
         let domain = image.metadata().sample_domain();
         let row_order = image.metadata().row_order();
+        let cfa_type = image.cfa_type();
         let nulls = image.nulls();
         let channels = (0..dimensions.channels())
             .into_par_iter()
@@ -83,6 +87,7 @@ impl FrameStats {
             quantization_sigma,
             domain,
             row_order,
+            cfa_type,
         }
     }
 }

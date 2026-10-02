@@ -348,7 +348,7 @@ fn source_identity(path: &Path) -> Result<SourceIdentity, FrameStoreError> {
 /// would otherwise decode into plausible nonsense instead of being rejected. Bump this whenever
 /// [`SourceIdentity`] or [`FrameStats`] changes shape; a cache that fails the check is simply
 /// re-decoded.
-const SIDECAR_FORMAT: u32 = 1;
+const SIDECAR_FORMAT: u32 = 2;
 
 /// A sidecar payload behind its layout tag.
 #[derive(Debug, Serialize, Deserialize)]

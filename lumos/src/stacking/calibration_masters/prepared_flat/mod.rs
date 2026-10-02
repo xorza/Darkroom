@@ -31,11 +31,11 @@ pub(super) fn subtract(mut flat: CfaImage, subtractor: Option<(&CfaImage, f32)>)
 /// [`CalibrationError::NonPositiveFlat`] when a colour (or the whole mono frame) has no positive
 /// mean: a property of the user's flats, not of this code.
 pub(super) fn normalize(mut flat: CfaImage) -> Result<CfaImage, CalibrationError> {
-    match flat.metadata.cfa_type.as_ref() {
-        Some(cfa_type) if cfa_type.num_colors() == 3 => {
-            normalize_cfa(&mut flat.data, cfa_type)?;
+    match flat.cfa_type {
+        CfaType::Mono => normalize_mono(&mut flat.data)?,
+        cfa_type @ (CfaType::Bayer(_) | CfaType::XTrans(_)) => {
+            normalize_cfa(&mut flat.data, &cfa_type)?;
         }
-        _ => normalize_mono(&mut flat.data)?,
     }
     Ok(flat)
 }

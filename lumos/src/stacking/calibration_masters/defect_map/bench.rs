@@ -13,5 +13,5 @@ fn bench_collect_color_samples(b: quickbench::Bencher) {
         (0..size.pixel_count()).map(|i| (i % 1000) as f32).collect(),
     );
     let cfa = CfaType::Bayer(CfaPattern::Rggb);
-    b.bench(|| hint::black_box(collect_color_samples(hint::black_box(&data), Some(&cfa), 0)));
+    b.bench(|| hint::black_box(collect_color_samples(hint::black_box(&data), cfa, 0)));
 }

@@ -62,14 +62,8 @@ fn raw_frame_info_matches_full_decode() {
         "peeked header dims must match the decoded frame"
     );
     assert_eq!(
-        peeked.demosaic,
-        loaded
-            .metadata
-            .cfa_type
-            .as_ref()
-            .expect("decoded CFA type")
-            .demosaic_kind(),
-        "peeked sensor layout must select the decoded frame's demosaic algorithm"
+        peeked.cfa_type, loaded.cfa_type,
+        "the peeked sensor pattern must be the decoded frame's"
     );
 }
 

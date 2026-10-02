@@ -13,7 +13,9 @@ use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode::DecodedFitsImage;
 use crate::io::image::fits::decode::plan::FitsDecodePlan;
 use crate::io::image::fits::error::{fits_err, fits_unsupported};
-use crate::io::image::fits::metadata::{read_metadata, read_row_order, read_text};
+use crate::io::image::fits::metadata::{
+    read_cfa_from_headers, read_metadata, read_row_order, read_text,
+};
 use crate::io::image::fits::options::FitsNullPolicy;
 use crate::io::image::fits::provenance::{
     FitsChecksumProvenance, FitsHduProvenance, FitsTransferProvenance,
@@ -77,8 +79,9 @@ pub(super) fn read_decoded_hdu(
         planes.into_iter().map(|plane| plane.samples),
     );
 
-    let mut metadata =
-        read_metadata(header, plan.shape, plan.bitpix).map_err(|source| fits_err(path, source))?;
+    let cfa_type = read_cfa_from_headers(header).map_err(|source| fits_err(path, source))?;
+    let mut metadata = read_metadata(header, plan.shape, plan.sample_type)
+        .map_err(|source| fits_err(path, source))?;
     // DATAMAX is a saturation level in the file's sample units, so it only stays comparable to the
     // samples if it is divided by the same span they were.
     if let Some(data_max) = &mut metadata.data_max {
@@ -104,7 +107,7 @@ pub(super) fn read_decoded_hdu(
             hdu,
             checksum,
         }),
-        color: if metadata.cfa_type.is_some() {
+        color: if cfa_type.is_some() {
             ColorProvenance::SensorCfa
         } else if plan.dimensions.is_grayscale() {
             ColorProvenance::Monochrome
@@ -121,6 +124,7 @@ pub(super) fn read_decoded_hdu(
 
     Ok(DecodedFitsImage {
         metadata,
+        cfa_type,
         pixels,
         nulls,
     })

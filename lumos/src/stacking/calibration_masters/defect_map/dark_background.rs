@@ -41,7 +41,7 @@ pub(super) struct DarkBackground {
 impl DarkBackground {
     pub(super) fn fit(
         data: &Buffer2<f32>,
-        cfa_type: Option<&CfaType>,
+        cfa_type: CfaType,
         cancel: &CancelToken,
     ) -> Result<Self, Error> {
         let width = data.width();
@@ -52,7 +52,7 @@ impl DarkBackground {
         );
         let tiles_x = width.div_ceil(DARK_BACKGROUND_TILE_SIZE);
         let tiles_y = height.div_ceil(DARK_BACKGROUND_TILE_SIZE);
-        let pattern = CfaType::or_mono(cfa_type);
+        let pattern = cfa_type;
         let num_colors = pattern.num_colors();
 
         let mut tiles: Vec<DarkTile> = (0..tiles_x * tiles_y)

@@ -10,7 +10,6 @@ pub(crate) mod load_context;
 pub(crate) mod null_mask;
 pub(crate) mod preview_image;
 pub(crate) mod sample_domain;
-pub(crate) mod sensor;
 pub(crate) mod standard;
 
 use imaginarium::SUPPORTED_EXTENSIONS;

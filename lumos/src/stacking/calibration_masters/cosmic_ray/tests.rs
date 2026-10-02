@@ -175,10 +175,8 @@ fn bayer_removes_cosmic_rays_preserves_star() {
     }
     let mut img = CfaImage {
         data,
-        metadata: ImageMetadata {
-            cfa_type: Some(CfaType::Bayer(CfaPattern::Rggb)),
-            ..Default::default()
-        },
+        cfa_type: CfaType::Bayer(CfaPattern::Rggb),
+        metadata: ImageMetadata::default(),
         quantization_sigma: None,
         nulls: None,
     };
@@ -231,10 +229,8 @@ fn bayer_tight_star_eaten_is_a_known_limitation() {
     }
     let mut img = CfaImage {
         data,
-        metadata: ImageMetadata {
-            cfa_type: Some(CfaType::Bayer(CfaPattern::Rggb)),
-            ..Default::default()
-        },
+        cfa_type: CfaType::Bayer(CfaPattern::Rggb),
+        metadata: ImageMetadata::default(),
         quantization_sigma: None,
         nulls: None,
     };
@@ -291,10 +287,8 @@ fn xtrans_removes_cosmic_ray_preserves_flat_field() {
 
     let mut img = CfaImage {
         data: Buffer2::new(size.width, size.height, data),
-        metadata: ImageMetadata {
-            cfa_type: Some(cfa.clone()),
-            ..Default::default()
-        },
+        cfa_type: cfa,
+        metadata: ImageMetadata::default(),
         quantization_sigma: None,
         nulls: None,
     };

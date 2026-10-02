@@ -24,12 +24,6 @@ pub enum CalibrationError {
     /// dark given as the flat) and a subtractor at the wrong level both end here.
     #[error("the subtracted flat has no positive mean{}", channel.map_or(String::new(), |c| format!(" in colour channel {c}")))]
     NonPositiveFlat { channel: Option<usize> },
-    /// The light frame does not identify its sensor pattern.
-    #[error("light frame is missing CFA pattern metadata")]
-    MissingLightCfaPattern,
-    /// A calibration master does not identify its sensor pattern.
-    #[error("{component} master is missing CFA pattern metadata")]
-    MissingMasterCfaPattern { component: MasterRole },
     /// A calibration master was captured with a different sensor pattern.
     #[error(
         "{component} master CFA pattern {master:?} does not match light frame pattern {light:?}"

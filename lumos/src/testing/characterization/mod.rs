@@ -140,9 +140,9 @@ fn calibrate_snapshot() {
     let bayer = CfaType::Bayer(CfaPattern::Rggb);
     let masters = CalibrationMasters::from_images(
         CalibrationSet {
-            dark: Some(make_cfa(size, dark, bayer.clone())),
-            flat: Some(make_cfa(size, flat, bayer.clone())),
-            bias: Some(make_cfa(size, bias, bayer.clone())),
+            dark: Some(make_cfa(size, dark, bayer)),
+            flat: Some(make_cfa(size, flat, bayer)),
+            bias: Some(make_cfa(size, bias, bayer)),
             flat_dark: None,
         },
         DEFAULT_SIGMA_THRESHOLD,
