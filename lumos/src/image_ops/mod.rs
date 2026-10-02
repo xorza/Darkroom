@@ -43,32 +43,3 @@ mod mem_budget_probe;
 /// recursive split/join overhead (it dominated SCNR); a coarse block amortizes that while staying
 /// load-balanced and letting the inner loop auto-vectorize.
 pub(crate) const SAMPLES_PER_BLOCK: usize = 8192;
-
-#[cfg(test)]
-pub(crate) mod internals {
-    use crate::io::image::linear::LinearImage;
-    use imaginarium::Buffer2;
-
-    pub(crate) fn channel_plane(image: &LinearImage, channel: usize) -> Buffer2<f32> {
-        image.channel(channel).clone()
-    }
-
-    pub(crate) fn channel_samples(image: &LinearImage, channel: usize) -> Vec<f32> {
-        image.channel(channel).pixels().to_vec()
-    }
-
-    pub(crate) fn mean(samples: &[f32]) -> f32 {
-        assert!(!samples.is_empty());
-        samples.iter().sum::<f32>() / samples.len() as f32
-    }
-
-    pub(crate) fn standard_deviation(samples: &[f32]) -> f32 {
-        let mean = mean(samples);
-        (samples
-            .iter()
-            .map(|&sample| (sample - mean) * (sample - mean))
-            .sum::<f32>()
-            / samples.len() as f32)
-            .sqrt()
-    }
-}

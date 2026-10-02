@@ -401,24 +401,6 @@ fn compose_rotation_then_translation() {
 }
 
 #[test]
-fn deviation_from_identity_is_the_frobenius_norm_of_the_difference() {
-    // Identity has zero deviation
-    let id = Transform::identity();
-    assert_close!(id.deviation_from_identity(), 0.0, EPSILON);
-
-    // Translation has non-zero deviation
-    let t = Transform::translation(DVec2::new(3.0, 4.0));
-    // Deviation is Frobenius norm of (M - I)
-    // M - I = [[0,0,3],[0,0,4],[0,0,0]]
-    // Frobenius = sqrt(9 + 16) = sqrt(25) = 5.0
-    let dev = t.deviation_from_identity();
-    assert!(
-        (dev - 5.0).abs() < EPSILON,
-        "Expected deviation 5.0, got {dev}"
-    );
-}
-
-#[test]
 fn homography_perspective_hand_computed() {
     // Homography: h = [1, 0, 10, 0, 1, 20, 0.002, 0.001]
     // For point (200, 100):

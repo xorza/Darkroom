@@ -2,7 +2,6 @@
 //! the linear domain, then stretch and SCNR into a viewable image — saving only the final result.
 //! Gated behind the `real-data` feature.
 
-use crate::image_ops::internals::channel_plane;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::math::statistics::{mad_to_sigma, mad_with_scratch, median_mut};
@@ -15,7 +14,7 @@ use crate::{Denoise, NeutralizeBackground, Scnr, Stretch};
 /// gradients and extended signal cancel in the difference, so this isolates the pixel-scale noise
 /// that denoising removes (unlike a global sigma, which is dominated by real structure).
 fn highfreq_noise(image: &LinearImage, channel: usize) -> f32 {
-    let buf = channel_plane(image, channel);
+    let buf = image.channel(channel).clone();
     let width = buf.width();
     let px = buf.pixels();
     let n = px.len();

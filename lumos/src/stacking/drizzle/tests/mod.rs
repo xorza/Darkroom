@@ -1,4 +1,11 @@
+mod accumulation;
+mod config;
+mod geometry;
+mod jacobian;
+mod kernels;
+mod square;
 mod synthetic;
+
 use crate::testing::prelude::*;
 use crate::testing::synthetic::fixtures::star_field;
 use std::f64::consts::{FRAC_PI_4, PI};
@@ -6,9 +13,6 @@ use std::f64::consts::{FRAC_PI_4, PI};
 use crate::error::FrameDimensionMismatch;
 use crate::io::image::load_context::LoadContext;
 use crate::stacking::drizzle::accumulator::frame_source::internals::input_rows;
-use crate::stacking::drizzle::accumulator::internals::{
-    accumulated_flux_sum, add_image as add_test_image, add_image_with_band_rows,
-};
 use crate::stacking::drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
 use crate::stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::stacking::drizzle::error::{DrizzleConfigError, DrizzleError};
@@ -20,28 +24,6 @@ use crate::stacking::stack_product::StackProduct;
 use crate::stacking::stack_product::coverage::Coverage;
 use crate::stacking::stack_product::quality_map::QualityMap;
 use crate::stacking::stack_product::quality_planes::QualityPlanes;
-
-trait DrizzleAccumulatorTestExt {
-    fn add_image(
-        &mut self,
-        image: LinearImage,
-        transform: &Transform,
-        weight: f32,
-        pixel_weights: Option<&Buffer2<f32>>,
-    );
-}
-
-impl DrizzleAccumulatorTestExt for DrizzleAccumulator {
-    fn add_image(
-        &mut self,
-        image: LinearImage,
-        transform: &Transform,
-        weight: f32,
-        pixel_weights: Option<&Buffer2<f32>>,
-    ) {
-        add_test_image(self, image, transform, weight, pixel_weights);
-    }
-}
 
 fn accumulator(input_dims: ImageDimensions, config: DrizzleConfig) -> DrizzleAccumulator {
     DrizzleAccumulator::new(input_dims, config).expect("test drizzle config must be valid")
@@ -136,13 +118,6 @@ fn drizzle_frames(
         .map(|(source, transform)| DrizzleFrame::new(source, transform))
         .collect()
 }
-
-mod accumulation;
-mod config;
-mod geometry;
-mod jacobian;
-mod kernels;
-mod square;
 
 /// A registration transform with the drizzle output scale composed in, the way `accumulate_image`
 /// builds it before handing it to a kernel.

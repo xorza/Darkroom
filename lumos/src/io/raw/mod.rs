@@ -3,9 +3,6 @@ mod error;
 mod normalize;
 pub(crate) mod provenance;
 
-#[cfg(all(test, feature = "bench", feature = "real-data"))]
-mod bench;
-
 use libraw_sys as sys;
 use std::ffi;
 #[cfg(unix)]
@@ -1215,5 +1212,39 @@ fn extract_iso(inner: *mut sys::libraw_data_t) -> Option<u32> {
     }
 }
 
+#[cfg(all(test, feature = "real-data"))]
+pub(crate) mod internals {
+    use std::path::Path;
+
+    use crate::io::image::error::ImageError;
+    use crate::io::image::linear::LinearImage;
+    use crate::io::raw::open_raw;
+
+    /// Load a raw file through libraw's own demosaic, the reference ours is compared with.
+    pub(crate) fn load_raw_libraw_demosaic(
+        path: &Path,
+        user_qual: i32,
+    ) -> Result<LinearImage, ImageError> {
+        let raw = open_raw(path)?;
+
+        // Set demosaic quality before processing
+        // SAFETY: `raw` owns the libraw instance for the rest of this function.
+        unsafe {
+            (*raw.libraw.as_ptr()).params.user_qual = user_qual;
+        }
+
+        let demosaiced = raw.demosaic_libraw_fallback()?;
+
+        Ok(LinearImage::from_pixels(
+            demosaiced.dimensions,
+            demosaiced.pixels,
+        ))
+    }
+}
+
+#[cfg(all(test, feature = "bench", feature = "real-data"))]
+mod bench;
+#[cfg(all(test, feature = "real-data"))]
+mod quality_report;
 #[cfg(test)]
 mod tests;

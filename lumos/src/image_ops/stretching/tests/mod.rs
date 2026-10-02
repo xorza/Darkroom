@@ -1,7 +1,6 @@
 #[cfg(feature = "real-data")]
 mod real_data;
 
-use crate::image_ops::internals::channel_plane as channel;
 use crate::image_ops::stretching::*;
 use crate::testing::images::{gray_image as gray, rgb_image as rgb};
 use crate::testing::prelude::*;
@@ -285,7 +284,7 @@ fn ghs_end_to_end_lifts_background_and_stays_in_range() {
     px.extend(iter::repeat_n(0.8f32, 10));
     let mut img = gray(Size2us::new(10, 10), px.clone());
     Stretch::ghs(5.0, 0.0, 0.1).apply(&mut img).unwrap();
-    let out = channel(&img, 0).to_vec();
+    let out = img.channel(0).to_vec();
     for &v in &out {
         assert!((0.0..=1.0).contains(&v), "output in [0,1]: {v}");
     }
@@ -307,9 +306,9 @@ fn color_preserving_keeps_channel_ratio_and_caps_highlights() {
         color: ColorMode::ColorPreserving,
     };
     cfg.apply(&mut img).unwrap();
-    let r = channel(&img, 0).to_vec();
-    let g = channel(&img, 1).to_vec();
-    let b = channel(&img, 2).to_vec();
+    let r = img.channel(0).to_vec();
+    let g = img.channel(1).to_vec();
+    let b = img.channel(2).to_vec();
     // Pixel 0: ratio preserved, below the white point.
     assert!(
         (r[0] / g[0] - 2.0).abs() < 1e-3,
@@ -349,10 +348,10 @@ fn per_channel_neutralizes_color_preserving_keeps_it() {
     .apply(&mut unlinked)
     .unwrap();
 
-    let lr = channel(&linked, 0).to_vec();
-    let lg = channel(&linked, 1).to_vec();
-    let ur = channel(&unlinked, 0).to_vec();
-    let ug = channel(&unlinked, 1).to_vec();
+    let lr = linked.channel(0).to_vec();
+    let lg = linked.channel(1).to_vec();
+    let ur = unlinked.channel(0).to_vec();
+    let ug = unlinked.channel(1).to_vec();
     // Color-preserving keeps the red bias in the background.
     assert!(
         lr[0] > lg[0] + 0.1,
@@ -381,7 +380,7 @@ fn end_to_end_gray_auto_stf_brightens_background_to_target() {
 
     let mut img = gray(Size2us::new(10, 10), px);
     Stretch::auto_stf().apply(&mut img).unwrap();
-    let out = channel(&img, 0).to_vec();
+    let out = img.channel(0).to_vec();
 
     for &v in &out {
         assert!((0.0..=1.0).contains(&v), "output out of [0,1]: {v}");

@@ -1,8 +1,8 @@
 use crate::image_ops::error::OpError;
-use crate::image_ops::internals::{channel_plane as channel, mean, standard_deviation as std_dev};
 use crate::image_ops::local_contrast::{LocalContrast, build_tile_luts};
 use crate::testing::images::{gray_image as gray, rgb_image as rgb};
 use crate::testing::prelude::*;
+use crate::testing::synthetic::metrics::pixel_stats;
 
 /// A low-contrast horizontal gradient (intensity in `[0.45, 0.55]`).
 fn low_contrast(size: Size2us) -> Vec<f32> {
@@ -22,7 +22,7 @@ fn clahe_strength_zero_is_identity() {
     .apply(&mut img)
     .unwrap();
     assert_eq!(
-        channel(&img, 0).to_vec(),
+        img.channel(0).to_vec(),
         px,
         "strength 0 leaves the image untouched"
     );
@@ -35,7 +35,7 @@ fn clahe_output_stays_in_range() {
         .collect();
     let mut img = gray(Size2us::new(96, 96), px);
     LocalContrast::default().apply(&mut img).unwrap();
-    for &v in &channel(&img, 0).to_vec() {
+    for &v in &img.channel(0).to_vec() {
         assert!((0.0..=1.0).contains(&v), "output in [0,1]: {v}");
     }
 }
@@ -45,11 +45,11 @@ fn clahe_flat_region_not_blown_up() {
     // Contrast-limited: a flat field must stay put, not get stretched to full range.
     let mut img = gray(Size2us::new(64, 64), vec![0.5; 64 * 64]);
     LocalContrast::default().apply(&mut img).unwrap();
-    let out = channel(&img, 0).to_vec();
+    let out = img.channel(0).to_vec();
     assert!(
         out.iter().all(|&v| (v - 0.5).abs() < 0.05),
         "flat 0.5 stays ~0.5 (mean {})",
-        mean(&out)
+        (pixel_stats(&out).mean as f32)
     );
 }
 
@@ -57,7 +57,7 @@ fn clahe_flat_region_not_blown_up() {
 fn clahe_increases_low_contrast() {
     // A low-contrast gradient gets its local contrast expanded → higher spread.
     let px = low_contrast(Size2us::new(64, 64));
-    let in_std = std_dev(&px);
+    let in_std = pixel_stats(&px).std as f32;
     let mut img = gray(Size2us::new(64, 64), px);
     LocalContrast {
         tiles: 4,
@@ -66,7 +66,7 @@ fn clahe_increases_low_contrast() {
     }
     .apply(&mut img)
     .unwrap();
-    let out_std = std_dev(&channel(&img, 0));
+    let out_std = pixel_stats(img.channel(0)).std as f32;
     assert!(
         out_std > in_std,
         "local contrast expanded: {out_std} > {in_std}"
@@ -101,9 +101,9 @@ fn clahe_is_color_preserving() {
     let mut img = rgb(size, r, i.clone(), i.clone());
     LocalContrast::default().apply(&mut img).unwrap();
     let (ro, go, bo) = (
-        channel(&img, 0).to_vec(),
-        channel(&img, 1).to_vec(),
-        channel(&img, 2).to_vec(),
+        img.channel(0).to_vec(),
+        img.channel(1).to_vec(),
+        img.channel(2).to_vec(),
     );
     assert_eq!(go, bo, "G and B stay equal");
     // Where red isn't clamped at 1, the 2:1 ratio is preserved.

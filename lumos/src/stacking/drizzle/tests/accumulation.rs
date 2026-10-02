@@ -560,7 +560,7 @@ fn band_count_does_not_change_the_result() {
                     ..DrizzleConfig::default()
                 };
                 let mut accumulator = accumulator(dimensions, config);
-                add_image_with_band_rows(&mut accumulator, image.clone(), &transform, band_rows);
+                accumulator.add_image_with_band_rows(image.clone(), &transform, band_rows);
                 accumulator.finalize()
             };
 
@@ -619,4 +619,55 @@ fn input_row_estimate_widens_to_the_frame_across_the_vanishing_line() {
     // two are input rows [-2.5, 1.5], so rows 0, 1 and 2.
     let shifted = Transform::translation(DVec2::new(0.0, 2.0));
     assert_eq!(input_rows(&image, shifted, 0..4, 200, 0.5), 0..3);
+}
+
+#[test]
+fn drizzle_accumulator_rejects_invalid_frame_inputs() {
+    let config = DrizzleConfig::x2();
+    let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
+
+    let mut frame = DrizzleFrame::new(
+        constant_mono_image(Size2us::new(4, 4), 1.0),
+        Transform::identity(),
+    );
+    frame.pixel_weight_map = Some(Buffer2::new_filled(3, 3, 1.0));
+    let error = acc.add_frame(frame).unwrap_err();
+    assert!(matches!(
+        error,
+        DrizzleError::PixelWeightDimensionMismatch {
+            index: 0,
+            expected_width: 4,
+            expected_height: 4,
+            actual_width: 3,
+            actual_height: 3,
+        }
+    ));
+
+    let mut frame = DrizzleFrame::new(
+        constant_mono_image(Size2us::new(4, 4), 1.0),
+        Transform::identity(),
+    );
+    frame.weight = f32::NAN;
+    let error = acc.add_frame(frame).unwrap_err();
+    assert!(matches!(
+        error,
+        DrizzleError::InvalidFrameWeight { index: 0, value } if value.is_nan()
+    ));
+
+    let mut pixel_weights = vec![1.0; 16];
+    pixel_weights[5] = -0.25;
+    let mut frame = DrizzleFrame::new(
+        constant_mono_image(Size2us::new(4, 4), 1.0),
+        Transform::identity(),
+    );
+    frame.pixel_weight_map = Some(Buffer2::new(4, 4, pixel_weights));
+    let error = acc.add_frame(frame).unwrap_err();
+    assert!(matches!(
+        error,
+        DrizzleError::InvalidPixelWeight {
+            frame_index: 0,
+            pixel_index: 5,
+            value: -0.25,
+        }
+    ));
 }

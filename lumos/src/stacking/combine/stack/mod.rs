@@ -37,7 +37,7 @@ use crate::stacking::stack_product::quality_planes::QualityPlanes;
 /// support at unit confidence throughout. Plain `LinearImage`s convert with `.into()`; registered
 /// frames must use [`StackFrame::registered`] so source-domain noise is captured before
 /// interpolation.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StackFrame {
     pub(crate) image: LinearImage,
     pub(crate) quality: FrameQuality<Buffer2<f32>>,
