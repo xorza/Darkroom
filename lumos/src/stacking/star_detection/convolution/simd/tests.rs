@@ -1,30 +1,61 @@
 //! Tests for SIMD convolution implementations.
 
+#[cfg(target_arch = "aarch64")]
+use crate::stacking::star_detection::convolution::simd::neon;
+#[cfg(target_arch = "x86_64")]
+use crate::stacking::star_detection::convolution::simd::x86;
 use crate::stacking::star_detection::convolution::simd::{
     Kernel2d, convolve_2d_row, convolve_2d_row_scalar, convolve_cols_direct,
     convolve_cols_row_scalar, convolve_row, convolve_row_scalar, mirror_index,
 };
 use crate::testing::prelude::*;
+use crate::testing::simd_check::data_shape::DataShape;
 
-/// Whole-image scalar column convolution — a parity oracle for [`convolve_cols_direct`] (production
-/// uses the parallel path; this serial loop over `convolve_cols_row_scalar` is the reference).
-fn convolve_cols_scalar_ref(
-    input: &[f32],
-    output: &mut [f32],
-    size: Size2us,
-    kernel: &[f32],
-    radius: usize,
-) {
-    for y in 0..size.height {
-        convolve_cols_row_scalar(
-            input,
-            &mut output[y * size.width..(y + 1) * size.width],
-            size,
-            y,
-            kernel,
-            radius,
-        );
-    }
+type RowFn = unsafe fn(&[f32], &mut [f32], &[f32], usize);
+type ColsRowFn = unsafe fn(&[f32], &mut [f32], Size2us, usize, &[f32], usize);
+type Row2dFn = unsafe fn(&[f32], &mut [f32], Size2us, usize, Kernel2d<'_>);
+
+const ROW_BACKENDS: &[Backend<RowFn>] = &[
+    #[cfg(target_arch = "x86_64")]
+    Backend::new(SimdTier::Avx2Fma, x86::convolve_row_avx2),
+    #[cfg(target_arch = "x86_64")]
+    Backend::new(SimdTier::Sse41, x86::convolve_row_sse41),
+    #[cfg(target_arch = "aarch64")]
+    Backend::new(SimdTier::Neon, neon::convolve_row_neon),
+];
+
+const COLS_ROW_BACKENDS: &[Backend<ColsRowFn>] = &[
+    #[cfg(target_arch = "x86_64")]
+    Backend::new(SimdTier::Avx2Fma, x86::convolve_cols_row_avx2),
+    #[cfg(target_arch = "x86_64")]
+    Backend::new(SimdTier::Sse41, x86::convolve_cols_row_sse41),
+    #[cfg(target_arch = "aarch64")]
+    Backend::new(SimdTier::Neon, neon::convolve_cols_row_neon),
+];
+
+const ROW_2D_BACKENDS: &[Backend<Row2dFn>] = &[
+    #[cfg(target_arch = "x86_64")]
+    Backend::new(SimdTier::Avx2Fma, x86::convolve_2d_row_avx2),
+    #[cfg(target_arch = "x86_64")]
+    Backend::new(SimdTier::Sse41, x86::convolve_2d_row_sse41),
+    #[cfg(target_arch = "aarch64")]
+    Backend::new(SimdTier::Neon, neon::convolve_2d_row_neon),
+];
+
+/// An asymmetric kernel, so a tap applied in mirrored order shows.
+fn asymmetric_kernel(radius: usize) -> Vec<f32> {
+    (0..=2 * radius).map(|i| (i as f32 + 1.0) * 0.05).collect()
+}
+
+fn absolute(values: &[f32]) -> Vec<f32> {
+    values.iter().map(|value| value.abs()).collect()
+}
+
+/// An image of `size` whose row `y` is the shape's row for seed `y`.
+fn shape_image(shape: &DataShape, size: Size2us) -> Vec<f32> {
+    (0..size.height)
+        .flat_map(|y| shape.row(size.width, y))
+        .collect()
 }
 
 #[test]
@@ -58,160 +89,37 @@ fn convolve_row_scalar_average() {
     assert!((output[3] - 1.0).abs() < 1e-6);
 }
 
-/// Every data shape against the scalar reference, at three radii. Replaces five tests that each
-/// pinned one shape at one radius; the dense width/radius sweep below covers a different axis and
-/// stays as its own regression guard.
+/// Every backend, at every radius through eight, over every shape at the sweep widths and at
+/// every width across the alignments where the last vector lands on the mirrored edge (where an
+/// off-by-one once over-read one element past the row). Radii above four are the NEON overshoot
+/// case. A row needs more than `2r` samples for the mirror to stay inside it.
 #[test]
-fn convolve_row_simd_matches_scalar_across_shapes() {
-    for radius in [1usize, 2, 3] {
-        let ksize = 2 * radius + 1;
-        // Asymmetric, so a mirrored-tap error cannot be masked by symmetry.
-        let kernel: Vec<f32> = (0..ksize).map(|i| (i as f32 + 1.0) * 0.05).collect();
+fn convolve_row_backends_match_scalar() {
+    for radius in 1..=8 {
+        let kernel = asymmetric_kernel(radius);
         let widths: Vec<usize> = SWEEP_WIDTHS
             .iter()
             .copied()
-            .filter(|&w| w > 2 * radius)
+            .chain(2 * radius + 8..2 * radius + 48)
+            .filter(|&width| width > 2 * radius)
             .collect();
-        assert_simd_matches_scalar(&widths, 1e-3, |shape, width| {
-            let input = shape.row(width, 0);
-            let mut simd = vec![0.0f32; width];
-            let mut scalar = vec![0.0f32; width];
-            convolve_row(&input, &mut simd, &kernel, radius);
-            convolve_row_scalar(&input, &mut scalar, &kernel, radius);
-            ScalarSimd { scalar, simd }
-        });
-    }
-}
-
-#[test]
-fn convolve_row_simd_matches_scalar_width_radius_sweep() {
-    // Regression guard for the row-kernel boundary off-by-one: the SIMD interior must equal the
-    // mirrored scalar reference at *every* width. The old bug only surfaced when the final SIMD
-    // iteration landed exactly on the safe-region edge (a width/radius alignment) — it over-read
-    // one element past the row and skipped mirroring at column `width - radius`. Sweep widths
-    // across those alignments for several radii, including radius > 4 (the NEON-overshoot case).
-    for radius in [1usize, 2, 3, 5, 7] {
-        let ksize = 2 * radius + 1;
-        // Asymmetric kernel so a boundary tap error can't be masked by symmetry.
-        let kernel: Vec<f32> = (0..ksize).map(|i| (i as f32 + 1.0) * 0.05).collect();
-        for width in (2 * radius + 8)..(2 * radius + 48) {
-            let input: Vec<f32> = (0..width).map(|i| (i as f32 * 0.37).sin() + 1.0).collect();
-            let mut simd = vec![0.0f32; width];
-            let mut scalar = vec![0.0f32; width];
-            convolve_row(&input, &mut simd, &kernel, radius);
-            convolve_row_scalar(&input, &mut scalar, &kernel, radius);
-            for x in 0..width {
-                assert!(
-                    (simd[x] - scalar[x]).abs() < 1e-3,
-                    "row SIMD != scalar at radius={radius} width={width} x={x}: {} vs {}",
-                    simd[x],
-                    scalar[x]
-                );
-            }
-        }
-    }
-}
-
-/// One slice of the row-convolution parity surface: SIMD against the scalar reference.
-#[derive(Debug)]
-struct RowParityCase {
-    name: &'static str,
-    widths: Vec<usize>,
-    radii: Vec<usize>,
-    /// The signal, built for a width. The shape matters: a smooth ramp, a wave and an impulse
-    /// stress the mirrored boundary differently.
-    input: fn(usize) -> Vec<f32>,
-    tolerance: f32,
-}
-
-/// SIMD and scalar row convolution agree over every width, radius and signal shape that mattered.
-///
-/// Five separate tests each pinned one corner of this surface — widths below a register, one wide
-/// row, radii one through eight, a hand-built boundary case, and a three-element row. They are one
-/// table because they assert the same property and differ only in where they sample it.
-///
-/// Every row uses the same *asymmetric* kernel, `(i + 1)·0.05`. Three of the tests this replaces
-/// used a symmetric box, which cannot catch a kernel applied in mirrored tap order — the class of
-/// bug this parity check exists for.
-#[test]
-fn convolve_row_simd_matches_scalar_over_every_width_and_radius() {
-    fn ramp(width: usize) -> Vec<f32> {
-        (0..width).map(|i| i as f32 + 1.0).collect()
-    }
-    fn half_ramp(width: usize) -> Vec<f32> {
-        (0..width).map(|i| i as f32 * 0.5).collect()
-    }
-    fn wave(width: usize) -> Vec<f32> {
-        (0..width).map(|i| (i as f32).sin() * 10.0 + 50.0).collect()
-    }
-    fn impulse(width: usize) -> Vec<f32> {
-        let mut input = vec![0.0f32; width];
-        input[width / 2] = 1.0;
-        input
-    }
-
-    let cases = [
-        // Below one SIMD register the kernel never enters its vector path. Three is the narrowest
-        // a radius-1 mirror can work on, so it is the floor.
-        RowParityCase {
-            name: "rows narrower than a SIMD register",
-            widths: (3..16).collect(),
-            radii: vec![1],
-            input: ramp,
-            tolerance: 1e-5,
-        },
-        // A row long enough for many vector iterations, with a wide kernel over a signal that
-        // changes sign of slope repeatedly.
-        RowParityCase {
-            name: "a long row with a wide kernel",
-            widths: vec![100],
-            radii: vec![5],
-            input: wave,
-            tolerance: 1e-4,
-        },
-        // Radii four, six and eight are not in the dense sweep's {1,2,3,5,7}, so this is the only
-        // place they are exercised.
-        RowParityCase {
-            name: "every radius through eight",
-            widths: vec![64],
-            radii: (1..=8).collect(),
-            input: half_ramp,
-            tolerance: 1e-4,
-        },
-        // An impulse puts the whole kernel on the boundary between zero and non-zero output,
-        // where a tap misalignment shows as a shifted response rather than a small error.
-        RowParityCase {
-            name: "an impulse",
-            widths: vec![64],
-            radii: vec![2],
-            input: impulse,
-            tolerance: 1e-5,
-        },
-    ];
-
-    for case in &cases {
-        for &radius in &case.radii {
-            let kernel: Vec<f32> = (0..=(2 * radius))
-                .map(|i| (i as f32 + 1.0) * 0.05)
-                .collect();
-            for &width in &case.widths {
-                let input = (case.input)(width);
-                let mut simd = vec![0.0f32; width];
+        let abs_kernel = absolute(&kernel);
+        assert_simd_matches_scalar(
+            ROW_BACKENDS,
+            &widths,
+            ScalarSimd::sum_tolerance(kernel.len()),
+            |kernel_fn, shape, width| {
+                let input = shape.row(width, 0);
                 let mut scalar = vec![0.0f32; width];
-                convolve_row(&input, &mut simd, &kernel, radius);
+                let mut simd = vec![0.0f32; width];
+                let mut magnitude = vec![0.0f32; width];
                 convolve_row_scalar(&input, &mut scalar, &kernel, radius);
-
-                for x in 0..width {
-                    assert!(
-                        (simd[x] - scalar[x]).abs() < case.tolerance,
-                        "{}: radius {radius} width {width} column {x}: {} vs {}",
-                        case.name,
-                        simd[x],
-                        scalar[x]
-                    );
-                }
-            }
-        }
+                convolve_row_scalar(&absolute(&input), &mut magnitude, &abs_kernel, radius);
+                // SAFETY: the harness runs only backends whose tier this CPU has.
+                unsafe { kernel_fn(&input, &mut simd, &kernel, radius) };
+                ScalarSimd::of_sums(scalar, simd, magnitude)
+            },
+        );
     }
 }
 
@@ -319,45 +227,6 @@ fn mirror_index_far_out_of_bounds() {
 }
 
 #[test]
-fn convolve_cols_matches_scalar() {
-    let width = 16;
-    let height = 32;
-    let input: Vec<f32> = (0..width * height)
-        .map(|i| (i as f32 * 0.1).sin())
-        .collect();
-    let kernel = vec![0.1, 0.2, 0.4, 0.2, 0.1];
-    let radius = 2;
-
-    let mut output_simd = vec![0.0f32; width * height];
-    let mut output_scalar = vec![0.0f32; width * height];
-
-    convolve_cols_direct(
-        &input,
-        &mut output_simd,
-        Size2us::new(width, height),
-        &kernel,
-        radius,
-    );
-    convolve_cols_scalar_ref(
-        &input,
-        &mut output_scalar,
-        Size2us::new(width, height),
-        &kernel,
-        radius,
-    );
-
-    for i in 0..width * height {
-        assert!(
-            (output_simd[i] - output_scalar[i]).abs() < 1e-5,
-            "Column convolution mismatch at {}: {} vs {}",
-            i,
-            output_simd[i],
-            output_scalar[i]
-        );
-    }
-}
-
-#[test]
 fn convolve_cols_uniform_input() {
     let width = 32;
     let height = 32;
@@ -429,88 +298,90 @@ fn convolve_cols_impulse_response() {
     }
 }
 
+/// Every column backend against the scalar reference, on images whose rows are the sweep's
+/// shapes: the whole output, so the mirrored top and bottom rows are compared with the interior.
 #[test]
-fn convolve_cols_various_sizes() {
-    for (width, height) in [(8, 8), (16, 32), (64, 16), (100, 100)] {
-        let input: Vec<f32> = (0..width * height).map(|i| i as f32 * 0.01).collect();
-        let kernel = vec![0.25, 0.5, 0.25];
-        let radius = 1;
-
-        let mut output_simd = vec![0.0f32; width * height];
-        let mut output_scalar = vec![0.0f32; width * height];
-
-        convolve_cols_direct(
-            &input,
-            &mut output_simd,
-            Size2us::new(width, height),
-            &kernel,
-            radius,
+fn convolve_cols_backends_match_scalar() {
+    for radius in [1, 2, 3, 5] {
+        let kernel = asymmetric_kernel(radius);
+        let abs_kernel = absolute(&kernel);
+        let height = 2 * radius + 6;
+        assert_simd_matches_scalar(
+            COLS_ROW_BACKENDS,
+            SWEEP_WIDTHS,
+            ScalarSimd::sum_tolerance(kernel.len()),
+            |kernel_fn, shape, width| {
+                let size = Size2us::new(width, height);
+                let input = shape_image(shape, size);
+                let abs_input = absolute(&input);
+                let mut scalar = vec![0.0f32; width * height];
+                let mut simd = vec![0.0f32; width * height];
+                let mut magnitude = vec![0.0f32; width * height];
+                for y in 0..height {
+                    let row = y * width..(y + 1) * width;
+                    let scalar_row = &mut scalar[row.clone()];
+                    convolve_cols_row_scalar(&input, scalar_row, size, y, &kernel, radius);
+                    let magnitude_row = &mut magnitude[row.clone()];
+                    convolve_cols_row_scalar(
+                        &abs_input,
+                        magnitude_row,
+                        size,
+                        y,
+                        &abs_kernel,
+                        radius,
+                    );
+                    // SAFETY: the harness runs only backends whose tier this CPU has.
+                    unsafe { kernel_fn(&input, &mut simd[row], size, y, &kernel, radius) };
+                }
+                ScalarSimd::of_sums(scalar, simd, magnitude)
+            },
         );
-        convolve_cols_scalar_ref(
-            &input,
-            &mut output_scalar,
-            Size2us::new(width, height),
-            &kernel,
-            radius,
-        );
-
-        for i in 0..width * height {
-            assert!(
-                (output_simd[i] - output_scalar[i]).abs() < 1e-4,
-                "Size {}x{} mismatch at {}: {} vs {}",
-                width,
-                height,
-                i,
-                output_simd[i],
-                output_scalar[i]
-            );
-        }
     }
 }
 
+/// Every 2D backend against the scalar reference, for each odd kernel size through nine, on the
+/// two mirrored rows at each edge and one interior row.
 #[test]
-fn convolve_2d_row_matches_scalar() {
-    let width = 32;
-    let height = 32;
-    let input: Vec<f32> = (0..width * height)
-        .map(|i| (i as f32 * 0.1).sin())
-        .collect();
-
-    // Gaussian-like 3x3 kernel, sums to 1.0
-    let weights = vec![
-        0.0625, 0.125, 0.0625, 0.125, 0.25, 0.125, 0.0625, 0.125, 0.0625,
-    ];
-    let kernel = Kernel2d::new(&weights, 3);
-
-    for y in 0..height {
-        let mut output_simd = vec![0.0f32; width];
-        let mut output_scalar = vec![0.0f32; width];
-
-        convolve_2d_row(
-            &input,
-            &mut output_simd,
-            Size2us::new(width, height),
-            y,
-            kernel,
+fn convolve_2d_row_backends_match_scalar() {
+    for ksize in [3, 5, 7, 9] {
+        let radius = ksize / 2;
+        let weights: Vec<f32> = (0..ksize * ksize)
+            .map(|i| (i as f32 + 1.0) * 0.01)
+            .collect();
+        let kernel = Kernel2d::new(&weights, ksize);
+        // The weights are positive, so they are their own absolute values.
+        let height = 2 * radius + 6;
+        let widths: Vec<usize> = SWEEP_WIDTHS
+            .iter()
+            .copied()
+            .filter(|&width| width > 2 * radius)
+            .collect();
+        assert_simd_matches_scalar(
+            ROW_2D_BACKENDS,
+            &widths,
+            ScalarSimd::sum_tolerance(weights.len()),
+            |kernel_fn, shape, width| {
+                let size = Size2us::new(width, height);
+                let input = shape_image(shape, size);
+                let abs_input = absolute(&input);
+                let mut scalar = Vec::new();
+                let mut simd = Vec::new();
+                let mut magnitude = Vec::new();
+                for y in [0, 1, height / 2, height - 2, height - 1] {
+                    let mut scalar_row = vec![0.0f32; width];
+                    let mut simd_row = vec![0.0f32; width];
+                    let mut magnitude_row = vec![0.0f32; width];
+                    convolve_2d_row_scalar(&input, &mut scalar_row, size, y, kernel);
+                    convolve_2d_row_scalar(&abs_input, &mut magnitude_row, size, y, kernel);
+                    // SAFETY: the harness runs only backends whose tier this CPU has.
+                    unsafe { kernel_fn(&input, &mut simd_row, size, y, kernel) };
+                    scalar.extend(scalar_row);
+                    simd.extend(simd_row);
+                    magnitude.extend(magnitude_row);
+                }
+                ScalarSimd::of_sums(scalar, simd, magnitude)
+            },
         );
-        convolve_2d_row_scalar(
-            &input,
-            &mut output_scalar,
-            Size2us::new(width, height),
-            y,
-            kernel,
-        );
-
-        for x in 0..width {
-            assert!(
-                (output_simd[x] - output_scalar[x]).abs() < 1e-5,
-                "2D row {} mismatch at x={}: {} vs {}",
-                y,
-                x,
-                output_simd[x],
-                output_scalar[x]
-            );
-        }
     }
 }
 
@@ -560,93 +431,6 @@ fn convolve_2d_row_impulse() {
     for (x, &v) in output.iter().enumerate() {
         if x != 8 {
             assert!(v.abs() < 1e-6, "Non-impulse position should be zero");
-        }
-    }
-}
-
-#[test]
-fn convolve_2d_row_various_kernel_sizes() {
-    let width = 32;
-    let height = 32;
-    let input: Vec<f32> = (0..width * height).map(|i| i as f32 * 0.01).collect();
-
-    for ksize in [3, 5, 7, 9] {
-        let weights: Vec<f32> = vec![1.0 / (ksize * ksize) as f32; ksize * ksize];
-        let kernel = Kernel2d::new(&weights, ksize);
-
-        for y in [0, height / 2, height - 1] {
-            let mut output_simd = vec![0.0f32; width];
-            let mut output_scalar = vec![0.0f32; width];
-
-            convolve_2d_row(
-                &input,
-                &mut output_simd,
-                Size2us::new(width, height),
-                y,
-                kernel,
-            );
-            convolve_2d_row_scalar(
-                &input,
-                &mut output_scalar,
-                Size2us::new(width, height),
-                y,
-                kernel,
-            );
-
-            for x in 0..width {
-                assert!(
-                    (output_simd[x] - output_scalar[x]).abs() < 1e-4,
-                    "Kernel size {}, row {}, x {}: {} vs {}",
-                    ksize,
-                    y,
-                    x,
-                    output_simd[x],
-                    output_scalar[x]
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn convolve_2d_row_boundary_handling() {
-    let width = 8;
-    let height = 8;
-    let input: Vec<f32> = (0..width * height).map(|i| (i + 1) as f32).collect();
-
-    let weights: Vec<f32> = vec![1.0 / 25.0; 25];
-    let kernel = Kernel2d::new(&weights, 5);
-
-    // Test boundary rows
-    for y in [0, 1, height - 2, height - 1] {
-        let mut output_simd = vec![0.0f32; width];
-        let mut output_scalar = vec![0.0f32; width];
-
-        convolve_2d_row(
-            &input,
-            &mut output_simd,
-            Size2us::new(width, height),
-            y,
-            kernel,
-        );
-        convolve_2d_row_scalar(
-            &input,
-            &mut output_scalar,
-            Size2us::new(width, height),
-            y,
-            kernel,
-        );
-
-        for x in 0..width {
-            assert!(
-                (output_simd[x] - output_scalar[x]).abs() < 1e-4,
-                "Boundary row {}, x {}: {} vs {}",
-                y,
-                x,
-                output_simd[x],
-                output_scalar[x]
-            );
-            assert!(output_simd[x].is_finite(), "Output should be finite");
         }
     }
 }

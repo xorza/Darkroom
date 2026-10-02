@@ -344,15 +344,15 @@ pub(super) unsafe fn batch_compute_chi2_avx2(
 
 #[cfg(test)]
 mod tests {
-    use imaginarium::cpu_features;
     use std::f64::consts::PI;
 
     use crate::stacking::star_detection::centroid::gaussian_fit::simd::avx2::*;
+    use crate::testing::simd_check::simd_tier::SimdTier;
 
     /// Test that `simd_exp_fast` produces results close to std `exp()`.
     #[test]
     fn simd_exp_fast_accuracy() {
-        if !cpu_features::has_avx2_fma() {
+        if !SimdTier::Avx2Fma.runs_here() {
             return;
         }
 
@@ -387,7 +387,7 @@ mod tests {
     /// Test `simd_exp_fast` with the typical Gaussian exponent range.
     #[test]
     fn simd_exp_fast_gaussian_range() {
-        if !cpu_features::has_avx2_fma() {
+        if !SimdTier::Avx2Fma.runs_here() {
             return;
         }
 

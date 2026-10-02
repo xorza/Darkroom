@@ -27,17 +27,15 @@ pub(super) unsafe fn interpolate_segment_cubic_sse(
         let one = _mm_set1_ps(1.0);
         let two = _mm_set1_ps(2.0);
         let zero = _mm_setzero_ps();
-        let step4 = _mm_set1_ps(ramp.step * 4.0);
-
-        let mut t_v = _mm_set_ps(
-            ramp.start + 3.0 * ramp.step,
-            ramp.start + 2.0 * ramp.step,
-            ramp.start + ramp.step,
-            ramp.start,
-        );
+        let start = _mm_set1_ps(ramp.start);
+        let step = _mm_set1_ps(ramp.step);
+        let lanes = _mm_set_ps(3.0, 2.0, 1.0, 0.0);
 
         let mut i = 0;
         while i + 4 <= len {
+            // `start + i·step` per lane, as `SegmentRamp::t_at` rounds it (see the AVX2 kernel).
+            let index = _mm_add_ps(_mm_set1_ps(i as f32), lanes);
+            let t_v = _mm_add_ps(start, _mm_mul_ps(index, step));
             let t = _mm_min_ps(_mm_max_ps(t_v, zero), one);
             let ct = _mm_sub_ps(one, t);
 
@@ -62,7 +60,6 @@ pub(super) unsafe fn interpolate_segment_cubic_sse(
             let n_result = _mm_sub_ps(n_linear, _mm_mul_ps(t_ct, n_cubic));
             _mm_storeu_ps(noise_out.as_mut_ptr().add(i), n_result);
 
-            t_v = _mm_add_ps(t_v, step4);
             i += 4;
         }
 

@@ -187,6 +187,3 @@ unsafe fn median9_sse41(
     median9_simd_sort!(_mm_min_ps, _mm_max_ps; v0, v1, v2, v3, v4, v5, v6, v7, v8);
     v4
 }
-
-#[cfg(test)]
-mod tests;

@@ -27,21 +27,17 @@ pub(super) unsafe fn interpolate_segment_cubic_avx2(
         let one = _mm256_set1_ps(1.0);
         let two = _mm256_set1_ps(2.0);
         let zero = _mm256_setzero_ps();
-        let step8 = _mm256_set1_ps(ramp.step * 8.0);
-
-        let mut t_v = _mm256_set_ps(
-            ramp.start + 7.0 * ramp.step,
-            ramp.start + 6.0 * ramp.step,
-            ramp.start + 5.0 * ramp.step,
-            ramp.start + 4.0 * ramp.step,
-            ramp.start + 3.0 * ramp.step,
-            ramp.start + 2.0 * ramp.step,
-            ramp.start + ramp.step,
-            ramp.start,
-        );
+        let start = _mm256_set1_ps(ramp.start);
+        let step = _mm256_set1_ps(ramp.step);
+        let lanes = _mm256_set_ps(7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0, 0.0);
 
         let mut i = 0;
         while i + 8 <= len {
+            // `start + i·step` per lane, as `SegmentRamp::t_at` rounds it: a parameter stepped by
+            // repeated addition would drift from the scalar one along the segment. The lane index
+            // is exact in f32 for any row length below 2²⁴, and no FMA, which would round once.
+            let index = _mm256_add_ps(_mm256_set1_ps(i as f32), lanes);
+            let t_v = _mm256_add_ps(start, _mm256_mul_ps(index, step));
             let t = _mm256_min_ps(_mm256_max_ps(t_v, zero), one);
             let ct = _mm256_sub_ps(one, t);
 
@@ -62,7 +58,6 @@ pub(super) unsafe fn interpolate_segment_cubic_avx2(
             let n_result = _mm256_fnmadd_ps(t_ct, n_cubic, n_linear);
             _mm256_storeu_ps(noise_out.as_mut_ptr().add(i), n_result);
 
-            t_v = _mm256_add_ps(t_v, step8);
             i += 8;
         }
 
@@ -80,19 +75,12 @@ pub(super) unsafe fn interpolate_segment_cubic_avx2(
             let two4 = _mm_set1_ps(2.0);
             let zero4 = _mm_setzero_ps();
 
-            let cur = ramp.start + i as f32 * ramp.step;
-            let t4 = _mm_min_ps(
-                _mm_max_ps(
-                    _mm_set_ps(
-                        cur + 3.0 * ramp.step,
-                        cur + 2.0 * ramp.step,
-                        cur + ramp.step,
-                        cur,
-                    ),
-                    zero4,
-                ),
-                one4,
+            let index4 = _mm_add_ps(_mm_set1_ps(i as f32), _mm_set_ps(3.0, 2.0, 1.0, 0.0));
+            let t_raw4 = _mm_add_ps(
+                _mm_set1_ps(ramp.start),
+                _mm_mul_ps(index4, _mm_set1_ps(ramp.step)),
             );
+            let t4 = _mm_min_ps(_mm_max_ps(t_raw4, zero4), one4);
             let ct4 = _mm_sub_ps(one4, t4);
             let two_minus_t4 = _mm_sub_ps(two4, t4);
             let one_plus_t4 = _mm_add_ps(one4, t4);

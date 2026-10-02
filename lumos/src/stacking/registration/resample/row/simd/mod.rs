@@ -130,3 +130,6 @@ pub(super) fn lanczos_accumulate<const SIZE: usize>(
         scalar => None,
     }
 }
+
+#[cfg(test)]
+mod tests;

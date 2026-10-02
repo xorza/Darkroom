@@ -1,8 +1,13 @@
 //! Tests for sum operations.
 
+#[cfg(target_arch = "x86_64")]
 use crate::math::sum::AVX2_SUM_F32_CROSSOVER;
 use crate::math::sum::{mean_f32, scalar, sum_f32, weighted_mean_f32};
+#[cfg(target_arch = "x86_64")]
 use crate::simd::AVX2_F32_LANES;
+#[cfg(target_arch = "x86_64")]
+use crate::testing::simd_check::simd_tier::SimdTier;
+#[cfg(target_arch = "x86_64")]
 use imaginarium::cpu_features;
 use std::iter;
 
@@ -136,7 +141,7 @@ fn gates_differ(len: usize) -> bool {
 #[test]
 #[cfg(target_arch = "x86_64")]
 fn the_split_gate_window_is_where_the_two_entry_points_diverge() {
-    if !cpu_features::has_avx2() {
+    if !SimdTier::Avx2.runs_here() {
         return;
     }
 

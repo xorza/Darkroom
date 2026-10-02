@@ -7,8 +7,12 @@
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
+#[cfg(target_arch = "x86_64")]
 use crate::math::sum::avx2;
+#[cfg(target_arch = "aarch64")]
+use crate::math::sum::neon;
 use crate::math::sum::{scalar, sum_f32, weighted_mean_f32};
+#[cfg(target_arch = "x86_64")]
 use imaginarium::cpu_features;
 
 const BENCH_SIZE: usize = 10_000;
@@ -38,7 +42,7 @@ fn bench_sum_f32(b: ::quickbench::Bencher) {
 
     #[cfg(target_arch = "aarch64")]
     b.bench_labeled("neon", || unsafe {
-        black_box(crate::math::sum::neon::sum_f32(black_box(&data)))
+        black_box(neon::sum_f32(black_box(&data)))
     });
 
     #[cfg(target_arch = "x86_64")]
@@ -62,10 +66,7 @@ fn bench_weighted_mean_f32(b: ::quickbench::Bencher) {
 
     #[cfg(target_arch = "aarch64")]
     b.bench_labeled("neon", || unsafe {
-        black_box(crate::math::sum::neon::weighted_sums(
-            black_box(&data),
-            black_box(&weights),
-        ))
+        black_box(neon::weighted_sums(black_box(&data), black_box(&weights)))
     });
 
     #[cfg(target_arch = "x86_64")]
@@ -95,7 +96,7 @@ fn bench_sum_f32_crossover(b: ::quickbench::Bencher) {
         #[cfg(target_arch = "aarch64")]
         b.bench_labeled(&format!("neon_{len}"), || {
             for _ in 0..calls {
-                black_box(unsafe { crate::math::sum::neon::sum_f32(black_box(&data)) });
+                black_box(unsafe { neon::sum_f32(black_box(&data)) });
             }
         });
 
@@ -126,9 +127,7 @@ fn bench_weighted_sums_crossover(b: ::quickbench::Bencher) {
         #[cfg(target_arch = "aarch64")]
         b.bench_labeled(&format!("neon_{len}"), || {
             for _ in 0..calls {
-                black_box(unsafe {
-                    crate::math::sum::neon::weighted_sums(black_box(&data), black_box(&weights))
-                });
+                black_box(unsafe { neon::weighted_sums(black_box(&data), black_box(&weights)) });
             }
         });
 

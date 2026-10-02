@@ -129,7 +129,7 @@ pub(super) unsafe fn convolve_2d_row_neon(
     output_row: &mut [f32],
     size: Size2us,
     y: usize,
-    kernel: Kernel2d,
+    kernel: Kernel2d<'_>,
 ) {
     unsafe {
         use crate::stacking::star_detection::convolution::simd::mirror_index;
@@ -187,39 +187,6 @@ pub(super) unsafe fn convolve_2d_row_neon(
             }
             output_row[x] = sum;
             x += 1;
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::stacking::star_detection::convolution::simd::neon::*;
-
-    #[test]
-    fn neon_matches_scalar() {
-        let input: Vec<f32> = (0..256).map(|i| (i as f32).sin()).collect();
-        let kernel = vec![0.05, 0.1, 0.2, 0.3, 0.2, 0.1, 0.05];
-        let radius = 3;
-
-        let mut output_neon = vec![0.0f32; 256];
-        let mut output_scalar = vec![0.0f32; 256];
-
-        unsafe {
-            convolve_row_neon(&input, &mut output_neon, &kernel, radius);
-        }
-
-        for (x, out) in output_scalar.iter_mut().enumerate() {
-            *out = convolve_pixel_scalar(&input, &kernel, radius, x, 256);
-        }
-
-        for i in 0..256 {
-            assert!(
-                (output_neon[i] - output_scalar[i]).abs() < 1e-5,
-                "NEON mismatch at {}: {} vs {}",
-                i,
-                output_neon[i],
-                output_scalar[i]
-            );
         }
     }
 }

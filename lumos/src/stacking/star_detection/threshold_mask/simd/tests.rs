@@ -1,9 +1,55 @@
 //! Cross-checks that every backend's packed words match the scalar reference exactly.
 
+use std::ops::Range;
+
+use crate::stacking::star_detection::threshold_mask::ThresholdParams;
 use crate::stacking::star_detection::threshold_mask::internals::{TEST_MIN_NOISE, test_params};
+#[cfg(target_arch = "x86_64")]
+use crate::stacking::star_detection::threshold_mask::simd::avx2::process_words_avx2;
+#[cfg(target_arch = "aarch64")]
+use crate::stacking::star_detection::threshold_mask::simd::neon::process_words_neon;
 use crate::stacking::star_detection::threshold_mask::simd::process_words_scalar;
+#[cfg(target_arch = "x86_64")]
+use crate::stacking::star_detection::threshold_mask::simd::sse41::process_words_sse;
+use crate::testing::simd_check::backend::Backend;
+use crate::testing::simd_check::simd_tier::SimdTier;
 use crate::testing::simd_check::{DATA_SHAPES, SWEEP_WIDTHS};
-use imaginarium::cpu_features;
+
+type WordsFn = unsafe fn(&[f32], &[f32], &[f32], ThresholdParams, &mut [u64], Range<usize>);
+
+/// A backend's two threshold modes, named so neither can stand in for the other.
+#[derive(Debug, Clone, Copy)]
+struct Modes {
+    with_bg: WordsFn,
+    without_bg: WordsFn,
+}
+
+const BACKENDS: &[Backend<Modes>] = &[
+    #[cfg(target_arch = "x86_64")]
+    Backend::new(
+        SimdTier::Avx2,
+        Modes {
+            with_bg: process_words_avx2::<true>,
+            without_bg: process_words_avx2::<false>,
+        },
+    ),
+    #[cfg(target_arch = "x86_64")]
+    Backend::new(
+        SimdTier::Sse41,
+        Modes {
+            with_bg: process_words_sse::<true>,
+            without_bg: process_words_sse::<false>,
+        },
+    ),
+    #[cfg(target_arch = "aarch64")]
+    Backend::new(
+        SimdTier::Neon,
+        Modes {
+            with_bg: process_words_neon::<true>,
+            without_bg: process_words_neon::<false>,
+        },
+    ),
+];
 
 /// The shared sweep plus widths spanning whole 64-pixel words. Every backend vectorizes full words
 /// and hands whatever is left to `process_words_scalar`, so a word exactly filled, a word and a
@@ -35,7 +81,7 @@ fn threshold_at(with_bg: bool, bg: f32, noise: f32, sigma: f32) -> f32 {
 /// paths must apply identically, and pixels are forced onto the exact threshold at both word edges
 /// and in the tail, where a strict `>` must leave them unset.
 fn assert_mode_matches_scalar(
-    name: &str,
+    tier: SimdTier,
     with_bg: bool,
     run_backend: impl Fn(&[f32], &[f32], &[f32], f32, &mut [u64], usize),
 ) {
@@ -78,57 +124,33 @@ fn assert_mode_matches_scalar(
 
             assert_eq!(
                 backend_words, scalar_words,
-                "{name} vs scalar, shape {} w={width} with_bg={with_bg}",
+                "{tier} vs scalar, shape {} w={width} with_bg={with_bg}",
                 shape.name
             );
         }
     }
 }
 
-/// Run a backend's two threshold modes against the scalar reference. Takes the kernel by name, as
-/// brought into scope by the caller's `use`.
-///
-/// A macro because the mode is a const generic: writing the `::<true>`/`::<false>` pairing here once
-/// is what keeps a caller from handing the harness one mode's kernel while claiming the other, and
-/// from passing a `bg` slice to the kernel that ignores it.
-macro_rules! assert_backend_matches_scalar {
-    ($name:literal, $backend:ident) => {
-        assert_mode_matches_scalar($name, true, |pixels, bg, noise, sigma, words, end| unsafe {
-            $backend::<true>(pixels, bg, noise, test_params(sigma), words, 0..end)
-        });
+/// Both modes of every backend the host has against the scalar reference.
+#[test]
+fn backends_match_scalar_packed() {
+    for backend in Backend::supported(BACKENDS) {
+        let modes = backend.kernel;
+        // SAFETY: `supported` yields only backends whose tier this CPU has; the spans are the
+        // slices' own lengths.
         assert_mode_matches_scalar(
-            $name,
-            false,
-            |pixels, _bg, noise, sigma, words, end| unsafe {
-                $backend::<false>(pixels, &[], noise, test_params(sigma), words, 0..end)
+            backend.tier,
+            true,
+            |pixels, bg, noise, sigma, words, end| unsafe {
+                (modes.with_bg)(pixels, bg, noise, test_params(sigma), words, 0..end);
             },
         );
-    };
-}
-
-#[cfg(target_arch = "x86_64")]
-#[test]
-fn avx2_matches_scalar_packed() {
-    if !cpu_features::has_avx2() {
-        return; // backend not present on this host
+        assert_mode_matches_scalar(
+            backend.tier,
+            false,
+            |pixels, _bg, noise, sigma, words, end| unsafe {
+                (modes.without_bg)(pixels, &[], noise, test_params(sigma), words, 0..end);
+            },
+        );
     }
-    use crate::stacking::star_detection::threshold_mask::simd::avx2::process_words_avx2;
-    assert_backend_matches_scalar!("AVX2", process_words_avx2);
-}
-
-#[cfg(target_arch = "x86_64")]
-#[test]
-fn sse41_matches_scalar_packed() {
-    if !cpu_features::has_sse4_1() {
-        return; // backend not present on this host
-    }
-    use crate::stacking::star_detection::threshold_mask::simd::sse41::process_words_sse;
-    assert_backend_matches_scalar!("SSE4.1", process_words_sse);
-}
-
-#[cfg(target_arch = "aarch64")]
-#[test]
-fn neon_matches_scalar_packed() {
-    use crate::stacking::star_detection::threshold_mask::simd::neon::process_words_neon;
-    assert_backend_matches_scalar!("NEON", process_words_neon);
 }
