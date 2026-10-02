@@ -30,8 +30,8 @@ pub enum ImageError {
     #[error("Failed to read file '{path}': {source}")]
     Io { path: PathBuf, source: io::Error },
 
-    #[error("Unsupported file extension: '{extension}'")]
-    UnsupportedFormat { extension: String },
+    #[error("No decoder reads the extension of '{path}'")]
+    UnsupportedFormat { path: PathBuf },
 
     #[error("Scientific image input '{path}' was rejected: {reason}")]
     ScientificInputRejected { path: PathBuf, reason: String },

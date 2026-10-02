@@ -48,7 +48,10 @@ pub enum TransferProvenance {
     /// Sensor samples divided into the same domain by `maximum − black` — see
     /// [`RawTransferProvenance::physical_scale`].
     RawNormalized(RawTransferProvenance),
-    DeclaredLinearRaster,
+    /// A floating-point raster, taken as linear: no TIFF tag lumos reads states a transfer
+    /// function, and float samples are how linear data is stored.
+    FloatRaster,
+    /// A raster decoded for display only, whose transfer function is not read.
     UnspecifiedRaster,
 }
 
@@ -83,10 +86,9 @@ impl TransferProvenance {
                 // thing differently.
                 unit: None,
             }),
-            // A float raster declared linear is taken as it stands, so one sample is one unit of
-            // whatever the file already held — which it does not name, and whose span it does not
-            // state either.
-            TransferProvenance::DeclaredLinearRaster => Some(SampleDomain {
+            // A float raster is taken as it stands, so one sample is one unit of whatever the file
+            // already held — which it does not name, and whose span it does not state either.
+            TransferProvenance::FloatRaster => Some(SampleDomain {
                 scale: 1.0,
                 origin: ScaleOrigin::Assumed,
                 unit: None,

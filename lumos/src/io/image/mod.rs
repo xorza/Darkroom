@@ -4,6 +4,7 @@ pub(crate) mod fits;
 pub(crate) mod image_dimensions;
 pub(crate) mod image_metadata;
 pub(crate) mod image_provenance;
+pub(crate) mod input_format;
 pub(crate) mod linear;
 pub(crate) mod linear_pixels;
 pub(crate) mod load_context;
@@ -14,7 +15,7 @@ pub(crate) mod standard;
 
 use imaginarium::SUPPORTED_EXTENSIONS;
 
-use crate::io::image::standard::FITS_EXTENSIONS;
+use crate::io::image::input_format::FITS_EXTENSIONS;
 use crate::io::raw::RAW_EXTENSIONS;
 
 /// Every file extension accepted by [`preview_image::PreviewImage::from_file`]: FITS, camera RAW,

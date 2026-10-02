@@ -585,7 +585,7 @@ fn stack_images_rejects_frames_whose_rows_run_from_opposite_ends() {
         image.metadata.provenance = row_order.map(|row_order| ImageProvenance {
             container: SourceContainer::Tiff,
             decoder: DecoderProvenance::Imaginarium,
-            transfer: TransferProvenance::DeclaredLinearRaster,
+            transfer: TransferProvenance::FloatRaster,
             color: ColorProvenance::Monochrome,
             clipped: false,
             demosaic: DemosaicProvenance::None,
