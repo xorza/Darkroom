@@ -1297,3 +1297,41 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
     );
     assert_eq!(star.snr, expected.snr, "snr disagrees for the same reason");
 }
+
+/// Sky noise is zero-mean, so it must not add flux. A ±σ checkerboard on a known sky is the exact
+/// case: the stamp holds one more `+σ` than `−σ` pixel, so its signed flux is exactly σ and its
+/// SNR exactly `σ / (σ·√npix) = 1 / (2r + 1)` — every value is dyadic or a perfect square, so the
+/// f32 arithmetic is exact. Clipping each pixel at zero instead keeps the `(npix + 1) / 2`
+/// positive pixels and reports `(npix + 1) / (2·√npix)`, about `r` — above the default
+/// `min_snr = 10` from r = 10 on, for a stamp holding no star at all.
+#[test]
+fn sky_noise_adds_no_flux_or_snr() {
+    const SIGMA: f32 = 0.0625;
+    const SKY: f32 = 0.25;
+    let size = Size2us::new(48, 48);
+    let pixels = Buffer2::new(
+        size.width,
+        size.height,
+        (0..size.pixel_count())
+            .map(|i| {
+                let (x, y) = (i % size.width, i / size.width);
+                if (x + y) % 2 == 0 {
+                    SKY + SIGMA
+                } else {
+                    SKY - SIGMA
+                }
+            })
+            .collect(),
+    );
+    let bg = background_map::uniform(size, SKY, SIGMA);
+
+    for radius in [7, 13, 15] {
+        let star = compute_star(&pixels, &bg, DVec2::splat(24.0), 0.0, radius, None, None)
+            .expect("one net +σ pixel is positive flux");
+        assert_eq!(
+            star.flux, SIGMA,
+            "r = {radius}: the signed sum of the stamp"
+        );
+        assert_eq!(star.snr, 1.0 / (2 * radius + 1) as f32, "r = {radius}");
+    }
+}
