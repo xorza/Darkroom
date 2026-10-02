@@ -501,7 +501,6 @@ Paths are relative to the repository root.
 Paths are relative to `lumos/src/stacking/registration/`.
 
 - [ ] `distortion/tps/mod.rs:1-5` — TPS is not called from production (`#![cfg_attr(not(test), allow(dead_code))]`). 384 production lines and the 1030-line `tps/tests.rs` exist only to test each other, and `distortion/point_normalization.rs:31-33` (`denormalize`) is kept alive for it. The AGENTS.md scope rule is "remove it rather than carry it".
-- [ ] `transform/mod.rs:387-397` — `Transform::deviation_from_identity` is a test-only wrapper whose only caller is its own test (`transform/tests.rs:403-420`). `DMat3::deviation_from_identity` is already tested in `math/dmat3/tests.rs:225-240`. Delete both.
 - [ ] `result/tests.rs:137`, `:193-210` — these pin the `Display` text of `RegistrationError::StarDetection` and `RansacFailureReason::{DegeneratePointSet, SingularMatrix, InsufficientInliers}`, none of which production ever constructs (grep finds them only in `result/mod.rs` and this test). The tests keep dead public variants looking covered.
 
 ## Placement, gating and bench layout
@@ -510,26 +509,8 @@ Test, internals and bench code sits where the rules say it must not, or is gated
 ### lumos — combine, drizzle
 Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
 
-- [ ] `combine/tests/mem_budget.rs:160` tests `CommonDomain`'s bit packing by reading `mask.words`. `CommonDomain::full_mask` was made `pub(crate)` only for this test (`combine/normalization/common_domain.rs:33-36` says so). Move the test into `common_domain.rs` and drop the visibility to private.
-- [ ] `combine/stack/tests.rs:66-111` tests `SourceSigmas`, which lives in `combine/stack/quantization.rs`. It needs a `#[cfg(test)] internals` constructor (`quantization.rs:132-143`) that a test module inside `quantization.rs` would not need.
 - [ ] `combine/stack/tests.rs:1807-2107` (`norm_*`, `global_norm_*`, `multiplicative_*`, `normalized_stacking_rgb`, `dispatch_*`) tests `normalization::compute_frame_norms`, so normalization coverage is split across two files. Move it to `combine/normalization/tests.rs`.
 - [ ] `combine/cache/tests.rs:709-837` tests `FrameStats::measure` (frame_store), not the cache.
-- [ ] `combine/cache/mod.rs:590` declares `pub(crate) mod tests;` so that `stack/tests.rs:18` can import `make_test_cache`. The helper belongs in the `internals` module already at `:534`.
-- [ ] `drizzle/tests/mod.rs:25-45` — the `DrizzleAccumulatorTestExt` trait exists only to give method syntax to the free fn `internals::add_image` (`drizzle/accumulator/mod.rs:383`). Make the internals helpers `impl DrizzleAccumulator` methods, and remove the trait and the `add_test_image` alias.
-- [ ] `drizzle/tests/config.rs:280` tests `crate::math::lanczos::kernel`, which belongs in `src/math/lanczos.rs`, which has no tests. `drizzle/tests/geometry.rs:4` is frame-input validation, not geometry. `square.rs:304` (`boxer`) and `square.rs:545-699` (`local_jacobian`, `AreaMagnification`) are geometry tests filed under the Square kernel. In `drizzle/tests/mod.rs`, `mod synthetic;` sits at `:1` while the other `mod` lines sit mid-file at `:141-146`, followed by a helper (`:150`).
-- [ ] `combine/bench.rs:39-52` — `run()` calls `frames()` inside `b.bench`, so every timed iteration also synthesizes 30 × 1 MP frames (a 31M-step hash loop and 120 MB of allocation). This contradicts the module doc ("measured time is the combine hot path"). `drizzle/bench.rs:99-125` measures its per-iteration clone as a separate `frame-clone` row.
-- [ ] `combine/tests/real_data.rs:9-53` — it depends on another test's output (`registered_lights`, "run registration tests first"), asserts nothing about the result, and writes `stacked_light.tiff` into the data directory. It is a pipeline runner, not a test.
-
-### lumos — io, math, image_ops, background_mesh, bit_buffer2
-Paths are relative to the repository root.
-
-- [ ] Real-data tests are both `#[cfg(feature = "real-data")]` and `#[ignore]`, so `cargo test --features real-data` (the run AGENTS.md describes) executes none of them. Cases: `io/raw/tests.rs:158-160, 198-200`, `io/image/tests/real_data.rs:28`, `image_ops/stretching/tests/real_data.rs:31`, `image_ops/color_calibration/tests/real_data.rs:19`, `image_ops/background_extraction/tests/real_data.rs:44-45`, and `image_ops/denoise/tests/real_data.rs`. Other dataset readers have no feature gate at all: `io/raw/tests.rs:578` (`real_xtrans_channel_black…`, which `expect()`s the dataset rather than skipping), and `io/raw/bench.rs:10, 30, 91, 188, 278`, compiled into every `internals` build. Pick one gate.
-- [ ] `lumos/src/image_ops/mem_budget_probe.rs:1-16, 87, 117-131` — stale. The docs describe an "interleaved `Image`" and `crate::image_ops::error::on_planes`, which no longer exists. The ceiling `master + max(working, master)` models "the interleaved master being rebuilt", which planar `LinearImage` never does. The assertion message says "2x headroom", but the code applies 5/4. Re-derive the expected peak for the planar chain.
-- [ ] `lumos/src/image_ops/color_calibration/mod.rs:61` — `channel_backgrounds` is `pub(crate)` and its doc names "the colour-calibration tests/fixtures" as callers. Its only other users are the child `tests` module, which can see private items, so it should be private.
-- [ ] `lumos/src/image_ops/mod.rs:47-73` — `internals` is an aggregator of generic helpers that read no privates of `image_ops`. `channel_plane` clones a whole plane to read it, and is imported `as channel` in some files while `channel_samples` (a `Vec`) is imported `as channel` in another, so one alias name means two types. Use `image.channel(c)` directly and the harness metrics.
-- [ ] `lumos/src/math/dmat3/mod.rs:228-231`, `:224` — `as_array_mut` and `to_array` are test-only API used only by `dmat3/tests.rs` to test themselves. `IndexMut` and `From<DMat3> for [f64; 9]` already provide both. `from_rows` is used only in that file and can be a local fn there.
-- [ ] `lumos/src/image_ops/ml/tests/mod.rs:1-9` — `#[cfg(feature = "ml")]` is repeated inside a module the parent already gates on `ml` (`image_ops/mod.rs:31`).
-- [ ] `io/raw/bench.rs:30, 91, 188, 357` hand-roll `Instant` timing loops beside `#[quick_bench]` ones. `bench_rcd_demosaic_core` (`:357`) needs no dataset and could be a quick_bench. A correctness `#[test]` lives in `bench.rs` (`:579`). `stretching/bench.rs:47, 62` clone the 72 MB master inside the timed closure, which is what `image_ops/bench.rs:57`'s pre-cloned pool exists to avoid.
 
 ## Unused fixtures and stray test output
 Checked-in files that nothing reads, and files that tests write into the tree.

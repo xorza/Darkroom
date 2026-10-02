@@ -53,9 +53,8 @@ impl NeutralizeBackground {
     }
 }
 
-/// Per-channel sigma-clipped median background of an RGB image. Used by
-/// [`NeutralizeBackground::apply`] and the colour-calibration tests/fixtures.
-pub(crate) fn channel_backgrounds(image: &LinearImage) -> Rgb {
+/// Per-channel sigma-clipped median background of an RGB image.
+fn channel_backgrounds(image: &LinearImage) -> Rgb {
     let mut scratch = Vec::new();
     Rgb {
         r: channel_background(image.channel(0), &mut scratch),

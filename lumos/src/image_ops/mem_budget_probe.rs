@@ -1,19 +1,15 @@
-//! Live peak-RSS memory probe for the image-op chain, and the baseline instrument for the
-//! interleaved → planar migration.
+//! Live peak-RSS memory probe for the image-op chain.
 //!
-//! What it watches: an op family entered once as an interleaved [`Image`] and driven through the
-//! three ops that allocate image-sized scratch — `ExtractBackground`, `Denoise` (a three-plane
-//! wavelet workspace) and `Stretch` (a capped subsample). Each op runs through
-//! [`crate::image_ops::error::on_planes`], which holds the master's planes and releases the
-//! interleaved buffer, so the expected peak is *planes + the widest of (op working set, the
-//! interleaved master being rebuilt)* — 2× the master, and flat in the op count, since every op
-//! releases its working set before the next one starts.
+//! What it watches: a planar RGB master driven in place through the three ops that allocate
+//! image-sized scratch — `ExtractBackground`, `Denoise` (a three-plane wavelet workspace) and
+//! `Stretch` (a capped subsample). The master's planes stay resident throughout and each op
+//! releases its working set before the next one starts, so the expected peak is *the master + the
+//! widest op working set*, flat in the op count.
 //!
 //! Why it exists: three image-sized allocations is a plausible shape for this chain and 3× a
 //! full-frame master is a lot of RAM, so the arrangement wants a measurement rather than an
-//! argument. It has already caught two: a working set allocated outside `on_planes` and so held
-//! live across the re-interleave, and the naive write-back that keeps the old interleaved buffer
-//! alive while building its replacement.
+//! argument: a working set held across ops, or one op allocating a second master-sized copy,
+//! shows here and nowhere else.
 //!
 //! `#[ignore]`d because peak RSS is a per-process high-water mark, so run one config per process
 //! with a filter:
@@ -84,7 +80,7 @@ fn image_ops_memory_probe() {
     );
     let master_bytes = (dimensions.sample_count() * size_of::<f32>()) as u64;
     println!(
-        "\nimage-op chain probe: {}x{} RGB f32 master ({} MB interleaved)",
+        "\nimage-op chain probe: {}x{} RGB f32 master ({} MB)",
         dimensions.width(),
         dimensions.height(),
         master_bytes / MB,
@@ -114,21 +110,20 @@ fn image_ops_memory_probe() {
         anon_mb as f64 / (master_bytes / MB) as f64
     );
 
-    // The planes are resident for the whole op and the widest thing beside them is either the op's
-    // own working set or the interleaved master being rebuilt — whichever is larger — so 2
-    // master-sized units is the structural expectation, which the measurement matches at 2.03x.
-    // Headroom is only 25% rather than the 2x the frame-pipeline probes use: those size a ceiling
-    // around a tiering decision that legitimately varies, whereas this chain's allocations are a
-    // handful of image-sized `Vec`s that glibc serves straight from mmap, and it reproduces to
-    // within 1 MB. 2x headroom here would sit above 3 resident masters and so would wave through
-    // exactly the arrangement this probe exists to catch.
+    // The planes are resident for the whole chain and the widest thing beside them is `Denoise`'s
+    // three single-channel planes, one master-sized unit for an RGB master — so 2 master-sized
+    // units is the structural expectation. Headroom is only 25% rather than the 2x the
+    // frame-pipeline probes use: those size a ceiling around a tiering decision that legitimately
+    // varies, whereas this chain's allocations are a handful of image-sized `Vec`s that glibc
+    // serves straight from mmap. 2x headroom here would sit above 3 resident masters and so would
+    // wave through exactly the arrangement this probe exists to catch.
     let working_bytes = WORKING_PLANES * master_bytes / 3;
-    let ceiling_mb = 5 * (master_bytes + working_bytes.max(master_bytes)) / 4 / MB;
+    let ceiling_mb = 5 * (master_bytes + working_bytes) / 4 / MB;
     if measured(anon_mb, "ceiling check") {
         assert!(
             anon_mb <= ceiling_mb,
             "peak heap {anon_mb} MB exceeded the {ceiling_mb} MB ceiling \
-             (master {} MB + {WORKING_PLANES} working planes, 2x headroom)",
+             (master {} MB + {WORKING_PLANES} working planes, 25% headroom)",
             master_bytes / MB,
         );
         println!("ceiling check OK: peak heap {anon_mb} MB <= {ceiling_mb} MB");

@@ -8,18 +8,7 @@ use crate::stacking::frame_store::frame_stats::FrameStats;
 use crate::testing::prelude::*;
 use common::TempDir;
 
-/// Create an in-memory [`FrameCache`] from loaded images, with no coverage (test helper).
-pub(crate) fn make_test_cache(images: Vec<LinearImage>) -> FrameCache {
-    let frames = images.into_iter().map(StackFrame::from).collect();
-    FrameCache::from_stack_frames(
-        frames,
-        &CacheConfig::default(),
-        Normalization::None,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .expect("test images must be non-empty and dimension-consistent")
-}
+use crate::stacking::combine::cache::internals::make_test_cache;
 
 #[test]
 fn unrequested_quality_planes_are_never_allocated() {

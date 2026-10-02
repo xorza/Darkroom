@@ -133,13 +133,13 @@ pub(crate) fn score_rejection(rejected: &[usize], injected: &[usize]) -> Rejecti
 
 /// Mean and (population) standard deviation of a pixel slice.
 #[derive(Debug, Clone, Copy)]
-pub(super) struct PixelStats {
-    pub(super) mean: f64,
-    pub(super) std: f64,
+pub(crate) struct PixelStats {
+    pub(crate) mean: f64,
+    pub(crate) std: f64,
 }
 
 /// Compute mean and standard deviation of `pixels`.
-pub(super) fn pixel_stats(pixels: &[f32]) -> PixelStats {
+pub(crate) fn pixel_stats(pixels: &[f32]) -> PixelStats {
     let n = pixels.len();
     if n == 0 {
         return PixelStats {

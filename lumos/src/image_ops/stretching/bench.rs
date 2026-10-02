@@ -44,32 +44,25 @@ fn linear_master() -> LinearImage {
     LinearImage::from_planar_channels(dims, vec![r, g, bch])
 }
 
+/// Each automatic stretch end to end on the RGB master, plus the clone each pays: `apply`
+/// stretches in place, so every call takes a fresh copy (re-stretching one image would feed an
+/// already-stretched master back in), and the `clone` row is what that copy costs.
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_stretch_auto_stf_rgb(b: ::quickbench::Bencher) {
+fn bench_stretch_rgb(b: ::quickbench::Bencher) {
     let master = linear_master();
-    let stretch = Stretch::auto_stf();
-    // A fresh clone per call: `apply` stretches in place, so re-stretching the same image would
-    // feed an already-stretched master back in.
-    b.bench(|| {
-        let mut img = master.clone();
-        stretch
-            .apply(&mut img)
-            .expect("stretch applies to an RGB f32 master");
-        black_box(img)
-    });
-}
-
-#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_stretch_auto_asinh_rgb(b: ::quickbench::Bencher) {
-    let master = linear_master();
-    let stretch = Stretch::auto_asinh();
-    b.bench(|| {
-        let mut img = master.clone();
-        stretch
-            .apply(&mut img)
-            .expect("stretch applies to an RGB f32 master");
-        black_box(img)
-    });
+    b.bench_labeled("clone", || black_box(master.clone()));
+    for (label, stretch) in [
+        ("auto_stf", Stretch::auto_stf()),
+        ("auto_asinh", Stretch::auto_asinh()),
+    ] {
+        b.bench_labeled(label, || {
+            let mut img = master.clone();
+            stretch
+                .apply(&mut img)
+                .expect("stretch applies to an RGB f32 master");
+            black_box(img)
+        });
+    }
 }
 
 /// Single-thread throughput of the color-preserving arcsinh kernel itself, isolated from the

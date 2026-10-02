@@ -130,14 +130,53 @@ impl MaxSigma {
 }
 
 #[cfg(test)]
-pub(crate) mod internals {
+mod tests {
     use crate::stacking::combine::stack::quantization::SourceSigmas;
 
-    impl SourceSigmas {
-        /// A set built straight from per-frame σ values, so a test can pin the arithmetic without
-        /// standing up the frames that would otherwise have declared them.
-        pub(crate) fn from_values(sigmas: impl IntoIterator<Item = f32>) -> Self {
-            Self(sigmas.into_iter().collect())
-        }
+    #[test]
+    fn quantization_helpers_follow_per_frame_coefficients_and_median_order_statistics() {
+        let source_sigma = 0.01;
+        let equal_sigmas = [source_sigma; 4];
+        let equal_mean = SourceSigmas(Vec::from(equal_sigmas))
+            .combined_mean(None, None, 0..4)
+            .unwrap();
+        assert!(
+            (equal_mean - 0.005).abs() < f32::EPSILON,
+            "four-frame equal mean: σ/√4 = 0.005, got {equal_mean}"
+        );
+
+        let source_sigmas = [0.01, 0.02];
+        let weighted = SourceSigmas(Vec::from(source_sigmas))
+            .combined_mean(Some(&[0.75, 0.25]), None, 0..2)
+            .unwrap();
+        let expected_weighted = ((0.75f32 * 0.01).powi(2) + (0.25f32 * 0.02).powi(2)).sqrt();
+        assert!(
+            (weighted - expected_weighted).abs() < f32::EPSILON,
+            "weighted unequal-source mean: expected {expected_weighted}, got {weighted}"
+        );
+
+        let median_two = SourceSigmas(Vec::from([source_sigma; 2]))
+            .combined_median(None)
+            .unwrap();
+        let median_three = SourceSigmas(Vec::from([source_sigma; 3]))
+            .combined_median(None)
+            .unwrap();
+        assert!(
+            (median_two - source_sigma / 2.0f32.sqrt()).abs() < f32::EPSILON,
+            "two-sample uniform median averages both samples: σ/√2, got {median_two}"
+        );
+        assert!(
+            (median_three - source_sigma * (3.0f32 / 5.0).sqrt()).abs() < f32::EPSILON,
+            "three-sample uniform median order statistic: σ·√(3/5), got {median_three}"
+        );
+        assert!(
+            (SourceSigmas(Vec::from(source_sigmas))
+                .combined_median(None)
+                .unwrap()
+                - 0.02)
+                .abs()
+                < f32::EPSILON,
+            "unequal uniform source widths must retain the conservative largest σ"
+        );
     }
 }

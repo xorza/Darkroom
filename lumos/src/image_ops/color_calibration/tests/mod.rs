@@ -2,7 +2,6 @@
 mod real_data;
 
 use crate::image_ops::color_calibration::*;
-use crate::image_ops::internals::channel_samples as channel;
 use crate::testing::images::{gray_image as gray, rgb_image as rgb};
 use crate::testing::prelude::*;
 
@@ -34,7 +33,11 @@ fn neutralize_equalizes_backgrounds_and_makes_image_neutral() {
         "backgrounds equalized to min: {after:?}"
     );
     // The whole image is now neutral (R=G=B per pixel) — the green pedestal is gone from the star too.
-    let (rc, gc, bc) = (channel(&img, 0), channel(&img, 1), channel(&img, 2));
+    let (rc, gc, bc) = (
+        img.channel(0).pixels(),
+        img.channel(1).pixels(),
+        img.channel(2).pixels(),
+    );
     for i in 0..rc.len() {
         assert!(
             (gc[i] - rc[i]).abs() < 1e-6 && (bc[i] - rc[i]).abs() < 1e-6,
@@ -62,7 +65,11 @@ fn scnr_average_neutral_clamps_only_green_excess() {
         vec![0.2, 0.5],
     );
     Scnr::average_neutral().apply(&mut img).unwrap();
-    let (r, g, b) = (channel(&img, 0), channel(&img, 1), channel(&img, 2));
+    let (r, g, b) = (
+        img.channel(0).pixels(),
+        img.channel(1).pixels(),
+        img.channel(2).pixels(),
+    );
     assert!(
         (g[0] - 0.2).abs() < 1e-6,
         "G clamped to (R+B)/2 = 0.2, got {}",
@@ -83,7 +90,7 @@ fn scnr_additive_mask_amount_zero_noop_and_full_hand_computed() {
     let mut img0 = rgb(Size2us::new(1, 1), vec![0.2], vec![0.6], vec![0.2]);
     Scnr::additive_mask(0.0).apply(&mut img0).unwrap();
     assert!(
-        (channel(&img0, 1)[0] - 0.6).abs() < 1e-6,
+        (img0.channel(1).pixels()[0] - 0.6).abs() < 1e-6,
         "amount 0 is a no-op"
     );
 
@@ -91,9 +98,9 @@ fn scnr_additive_mask_amount_zero_noop_and_full_hand_computed() {
     let mut img1 = rgb(Size2us::new(1, 1), vec![0.2], vec![0.6], vec![0.2]);
     Scnr::additive_mask(1.0).apply(&mut img1).unwrap();
     assert!(
-        (channel(&img1, 1)[0] - 0.24).abs() < 1e-6,
+        (img1.channel(1).pixels()[0] - 0.24).abs() < 1e-6,
         "additive mask at full strength: {}",
-        channel(&img1, 1)[0]
+        img1.channel(1).pixels()[0]
     );
 }
 
@@ -102,7 +109,11 @@ fn color_ops_are_noops_on_grayscale() {
     let mut g = gray(Size2us::new(2, 1), vec![0.3, 0.7]);
     NeutralizeBackground.apply(&mut g).unwrap();
     Scnr::average_neutral().apply(&mut g).unwrap();
-    assert_eq!(channel(&g, 0), vec![0.3, 0.7], "grayscale left unchanged");
+    assert_eq!(
+        g.channel(0).pixels(),
+        vec![0.3, 0.7],
+        "grayscale left unchanged"
+    );
 }
 
 #[test]

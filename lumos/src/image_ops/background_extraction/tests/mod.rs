@@ -2,7 +2,6 @@
 mod real_data;
 
 use crate::image_ops::background_extraction::*;
-use crate::image_ops::internals::channel_plane as channel;
 use crate::image_ops::stretching::Stretch;
 use crate::math::statistics::median_mut;
 use crate::testing::images::rgb_image as rgb;
@@ -90,7 +89,7 @@ fn subtract_removes_linear_gradient() {
     // mean: 0.5 + 0.0008·99.5 + 0.0006·79.5 = 0.6273. The fit runs in f64 and the output is
     // stored in f32, whose spacing near 0.6 is 6e-8; 1e-6 allows for that rounding and the
     // surface's own.
-    let out = channel(&img, 0);
+    let out = img.channel(0);
     let px = out.pixels();
     assert!(
         max_dev(px) < 1e-6,
@@ -116,7 +115,7 @@ fn subtract_leaves_a_flat_sky_unchanged() {
     }
     .apply(&mut img)
     .unwrap();
-    assert!(channel(&img, 0).pixels().iter().all(|&v| v == 0.3125));
+    assert!(img.channel(0).pixels().iter().all(|&v| v == 0.3125));
 }
 
 #[test]
@@ -136,7 +135,7 @@ fn subtract_removes_pedestal_keeps_stars() {
     }
     .apply(&mut img)
     .unwrap();
-    let out = channel(&img, 0);
+    let out = img.channel(0);
     // Per-tile sigma-clip rejects the lone star pixel, so the modeled sky is the flat 0.3
     // pedestal: a model with no variation removes nothing, and the star keeps its 0.95.
     assert!(
@@ -173,7 +172,7 @@ fn divide_corrects_quadratic_vignette() {
     .unwrap();
     // The quadratic vignette is exactly degree-2; dividing by the normalized model flattens it to a
     // constant (= signal·mean(vignette)).
-    let Extent { lo, hi } = extent(channel(&img, 0).pixels());
+    let Extent { lo, hi } = extent(img.channel(0).pixels());
     assert!(
         hi - lo < 0.01,
         "divide flattens the vignette: residual range {} (lo {lo} hi {hi})",
@@ -197,7 +196,7 @@ fn higher_degree_fits_cubic_better() {
         }
         .apply(&mut img)
         .unwrap();
-        energy(channel(&img, 0).pixels())
+        energy(img.channel(0).pixels())
     };
     let e1 = resid_energy(1);
     let e3 = resid_energy(3);
@@ -233,7 +232,7 @@ fn removes_independent_per_channel_gradients() {
     // Each channel is flat at its own mean: r 0.40 + 0.0010·59.5, g 0.30 + 0.0008·49.5,
     // b 0.50 − 0.0005·59.5 + 0.0006·49.5.
     for (c, level) in [(0, 0.4595), (1, 0.3396), (2, 0.49995)] {
-        let plane = channel(&img, c);
+        let plane = img.channel(c);
         let px = plane.pixels();
         assert!(
             max_dev(px) < 1e-6,
@@ -267,7 +266,7 @@ fn rank_deficient_sample_grid_is_reported_without_mutating_the_image() {
     let mut img = gray(Size2us::new(8, 64), |x, y| {
         0.2 + 0.01 * x as f32 + 0.001 * y as f32
     });
-    let before = channel(&img, 0).pixels().to_vec();
+    let before = img.channel(0).pixels().to_vec();
 
     let err = ExtractBackground {
         degree: 1,
@@ -290,7 +289,7 @@ fn rank_deficient_sample_grid_is_reported_without_mutating_the_image() {
         "expected the one-column sample grid's rank failure, got {err:?}"
     );
     assert_eq!(
-        channel(&img, 0).pixels(),
+        img.channel(0).pixels(),
         before,
         "a failed fit must not partially rewrite its channel"
     );
@@ -321,7 +320,7 @@ fn auto_stretches_hit_their_target_after_gradient_removal() {
         let mut img = gray_image(size, sky.clone());
         ExtractBackground::default().apply(&mut img).unwrap();
         stretch.apply(&mut img).unwrap();
-        let mut px = channel(&img, 0).pixels().to_vec();
+        let mut px = img.channel(0).pixels().to_vec();
         let median = median_mut(&mut px);
         assert!(
             (median - 0.2).abs() < 1e-4,

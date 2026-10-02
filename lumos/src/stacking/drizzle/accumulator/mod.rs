@@ -379,38 +379,40 @@ impl DrizzleAccumulator {
 pub(crate) mod internals {
     use crate::stacking::drizzle::accumulator::*;
 
-    /// Add `image` as an otherwise default frame, panicking on the mismatches a fixture must not
-    /// have.
-    pub(crate) fn add_image(
-        accumulator: &mut DrizzleAccumulator,
-        image: LinearImage,
-        transform: &Transform,
-        weight: f32,
-        pixel_weights: Option<&Buffer2<f32>>,
-    ) {
-        accumulator
-            .add_frame(DrizzleFrame {
+    impl DrizzleAccumulator {
+        /// Add `image` as an otherwise default frame, panicking on the mismatches a fixture must
+        /// not have.
+        pub(crate) fn add_image(
+            &mut self,
+            image: LinearImage,
+            transform: &Transform,
+            weight: f32,
+            pixel_weights: Option<&Buffer2<f32>>,
+        ) {
+            self.add_frame(DrizzleFrame {
                 source: image,
                 transform: *transform,
                 weight,
                 pixel_weight_map: pixel_weights.cloned(),
             })
             .expect("test frame must be coherent with the accumulator");
-    }
+        }
 
-    /// [`add_image`] with the output band height pinned, so a test can compare band counts.
-    pub(crate) fn add_image_with_band_rows(
-        accumulator: &mut DrizzleAccumulator,
-        image: LinearImage,
-        transform: &Transform,
-        band_rows: usize,
-    ) {
-        accumulator.band_rows_override = Some(band_rows);
-        add_image(accumulator, image, transform, 1.0, None);
-        accumulator.band_rows_override = None;
-    }
+        /// [`DrizzleAccumulator::add_image`] with the output band height pinned, so a test can
+        /// compare band counts.
+        pub(crate) fn add_image_with_band_rows(
+            &mut self,
+            image: LinearImage,
+            transform: &Transform,
+            band_rows: usize,
+        ) {
+            self.band_rows_override = Some(band_rows);
+            self.add_image(image, transform, 1.0, None);
+            self.band_rows_override = None;
+        }
 
-    pub(crate) fn accumulated_flux_sum(accumulator: &DrizzleAccumulator, channel: usize) -> f32 {
-        accumulator.data[channel].pixels().iter().sum()
+        pub(crate) fn accumulated_flux_sum(&self, channel: usize) -> f32 {
+            self.data[channel].pixels().iter().sum()
+        }
     }
 }

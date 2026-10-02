@@ -3,9 +3,9 @@ mod real_data;
 
 use crate::image_ops::denoise::{Denoise, Threshold};
 use crate::image_ops::error::OpError;
-use crate::image_ops::internals::{channel_plane as channel, mean, standard_deviation as std_dev};
 use crate::testing::images::{gray_image as gray, rgb_image as rgb};
 use crate::testing::prelude::*;
+use crate::testing::synthetic::metrics::pixel_stats;
 
 fn noisy(size: Size2us, bg: f32, sigma: f32, seed: u64) -> Vec<f32> {
     let mut rng = TestRng::new(seed);
@@ -32,21 +32,21 @@ fn denoise_reduces_white_noise_and_preserves_mean() {
     let size = Size2us::new(128, 128);
     let (bg, sigma) = (0.5, 0.05);
     let px = noisy(size, bg, sigma, 12345);
-    let in_std = std_dev(&px);
+    let in_std = pixel_stats(&px).std as f32;
 
     let mut img = gray(size, px);
     Denoise::default().apply(&mut img).unwrap();
-    let out = channel(&img, 0).to_vec();
+    let out = img.channel(0).to_vec();
 
-    let out_std = std_dev(&out);
+    let out_std = pixel_stats(&out).std as f32;
     assert!(
         out_std < 0.6 * in_std,
         "white noise reduced: out_std {out_std} vs in_std {in_std}"
     );
     assert!(
-        (mean(&out) - bg).abs() < 0.01,
+        ((pixel_stats(&out).mean as f32) - bg).abs() < 0.01,
         "DC preserved near {bg}: {}",
-        mean(&out)
+        (pixel_stats(&out).mean as f32)
     );
 }
 
@@ -68,8 +68,8 @@ fn higher_k_smooths_more() {
     }
     .apply(&mut img5)
     .unwrap();
-    let s2 = std_dev(&channel(&img2, 0));
-    let s5 = std_dev(&channel(&img5, 0));
+    let s2 = pixel_stats(img2.channel(0)).std as f32;
+    let s5 = pixel_stats(img5.channel(0)).std as f32;
     assert!(
         s5 < s2,
         "higher k thresholds more, leaving less noise: s5 {s5} vs s2 {s2}"
@@ -90,7 +90,7 @@ fn strength_zero_is_identity_and_blends_between() {
     .apply(&mut img0)
     .unwrap();
     assert_eq!(
-        channel(&img0, 0).to_vec(),
+        img0.channel(0).to_vec(),
         px,
         "strength 0 leaves the image untouched"
     );
@@ -105,9 +105,9 @@ fn strength_zero_is_identity_and_blends_between() {
     .apply(&mut half)
     .unwrap();
     Denoise::default().apply(&mut full).unwrap();
-    let in_std = std_dev(&px);
-    let half_std = std_dev(&channel(&half, 0));
-    let full_std = std_dev(&channel(&full, 0));
+    let in_std = pixel_stats(&px).std as f32;
+    let half_std = pixel_stats(half.channel(0)).std as f32;
+    let full_std = pixel_stats(full.channel(0)).std as f32;
     assert!(
         full_std < half_std && half_std < in_std,
         "blend ordering: full {full_std} < half {half_std} < in {in_std}"
@@ -132,15 +132,15 @@ fn hard_and_soft_thresholds_differ() {
     }
     .apply(&mut soft)
     .unwrap();
-    let hv = channel(&hard, 0).to_vec();
-    let sv = channel(&soft, 0).to_vec();
+    let hv = hard.channel(0).to_vec();
+    let sv = soft.channel(0).to_vec();
     assert!(hv != sv, "hard and soft produce different results");
     // Soft additionally shrinks the kept coefficients, so it is at least as smooth.
     assert!(
-        std_dev(&sv) <= std_dev(&hv) + 1e-6,
+        (pixel_stats(&sv).std as f32) <= (pixel_stats(&hv).std as f32) + 1e-6,
         "soft no rougher than hard: soft {} hard {}",
-        std_dev(&sv),
-        std_dev(&hv)
+        (pixel_stats(&sv).std as f32),
+        (pixel_stats(&hv).std as f32)
     );
 }
 
@@ -157,7 +157,7 @@ fn denoise_preserves_bright_feature() {
     }
     let mut img = gray(size, px);
     Denoise::default().apply(&mut img).unwrap();
-    let out = channel(&img, 0).to_vec();
+    let out = img.channel(0).to_vec();
 
     // 4x4 interior of the block stays near 0.9.
     let interior: Vec<f32> = (30..34)
@@ -165,9 +165,9 @@ fn denoise_preserves_bright_feature() {
         .map(|(yy, xx)| out[yy * size.width + xx])
         .collect();
     assert!(
-        mean(&interior) > 0.8,
+        (pixel_stats(&interior).mean as f32) > 0.8,
         "bright feature preserved: interior mean {}",
-        mean(&interior)
+        (pixel_stats(&interior).mean as f32)
     );
     // A flat corner far from the block is smoothed below the input noise floor.
     let corner: Vec<f32> = (0..10)
@@ -175,9 +175,9 @@ fn denoise_preserves_bright_feature() {
         .map(|(yy, xx)| out[yy * size.width + xx])
         .collect();
     assert!(
-        std_dev(&corner) < 0.02,
+        (pixel_stats(&corner).std as f32) < 0.02,
         "background corner smoothed: {}",
-        std_dev(&corner)
+        (pixel_stats(&corner).std as f32)
     );
 }
 
@@ -187,11 +187,15 @@ fn denoise_is_per_channel_on_rgb() {
     let r = noisy(size, 0.5, 0.03, 2024);
     let g = noisy(size, 0.5, 0.05, 4048);
     let b = noisy(size, 0.5, 0.04, 6072);
-    let in_std = [std_dev(&r), std_dev(&g), std_dev(&b)];
+    let in_std = [
+        (pixel_stats(&r).std as f32),
+        (pixel_stats(&g).std as f32),
+        (pixel_stats(&b).std as f32),
+    ];
     let mut img = rgb(size, r, g, b);
     Denoise::default().apply(&mut img).unwrap();
     for (c, &expected) in in_std.iter().enumerate() {
-        let out_std = std_dev(&channel(&img, c));
+        let out_std = pixel_stats(img.channel(c)).std as f32;
         assert!(
             out_std < expected,
             "channel {c} denoised: {out_std} < {expected}"
@@ -210,7 +214,7 @@ fn denoise_handles_images_smaller_than_the_kernel() {
     let mut one = gray(Size2us::new(1, 1), vec![0.42]);
     Denoise::default().apply(&mut one).unwrap();
     assert!(
-        (channel(&one, 0).to_vec()[0] - 0.42).abs() < 1e-6,
+        (one.channel(0).to_vec()[0] - 0.42).abs() < 1e-6,
         "1x1 has no detail to remove"
     );
 }

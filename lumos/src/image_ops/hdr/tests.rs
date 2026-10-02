@@ -1,6 +1,5 @@
 use crate::image_ops::error::OpError;
 use crate::image_ops::hdr::Hdr;
-use crate::image_ops::internals::channel_plane as channel;
 use crate::image_ops::wavelet::atrous_smooth;
 use crate::testing::images::gray_image as gray;
 use crate::testing::prelude::*;
@@ -35,7 +34,7 @@ fn hdr_amount_zero_is_identity() {
     .apply(&mut img)
     .unwrap();
     assert_eq!(
-        channel(&img, 0).to_vec(),
+        img.channel(0).to_vec(),
         px,
         "amount 0 leaves the image untouched"
     );
@@ -56,7 +55,7 @@ fn hdr_compresses_large_scale_contrast() {
     }
     .apply(&mut img)
     .unwrap();
-    let out = channel(&img, 0).to_vec();
+    let out = img.channel(0).to_vec();
     let out_contrast = out[ci] - out[0];
     assert!(
         out_contrast < in_contrast * 0.7,
@@ -73,7 +72,7 @@ fn hdr_amount_controls_compression() {
     let contrast_at = |amount: f32| {
         let mut img = gray(size, px.clone());
         Hdr { scales: 3, amount }.apply(&mut img).unwrap();
-        let o = channel(&img, 0).to_vec();
+        let o = img.channel(0).to_vec();
         o[ci] - o[0]
     };
     assert!(
@@ -102,7 +101,7 @@ fn hdr_preserves_fine_detail() {
     }
     .apply(&mut img)
     .unwrap();
-    let out = channel(&img, 0).to_vec();
+    let out = img.channel(0).to_vec();
     // Adjacent-pixel contrast along a dark row (corner side, no clipping) is the fine texture.
     let tex_in: f32 = (0..size.width - 1).map(|x| (px[x + 1] - px[x]).abs()).sum();
     let tex_out: f32 = (0..size.width - 1)
@@ -152,7 +151,7 @@ fn hdr_matches_explicit_pyramid_reference() {
     let px = dome(size);
     let mut img = gray(size, px.clone());
     Hdr { scales, amount }.apply(&mut img).unwrap();
-    let out = channel(&img, 0);
+    let out = img.channel(0);
     let expected = reference_hdr(&px, size, scales, amount);
     for (o, e) in out.pixels().iter().zip(&expected) {
         assert!(
@@ -166,7 +165,7 @@ fn hdr_matches_explicit_pyramid_reference() {
 fn hdr_output_stays_in_range() {
     let mut img = gray(Size2us::new(96, 96), dome(Size2us::new(96, 96)));
     Hdr::default().apply(&mut img).unwrap();
-    for &v in &channel(&img, 0).to_vec() {
+    for &v in &img.channel(0).to_vec() {
         assert!((0.0..=1.0).contains(&v), "output in [0,1]: {v}");
     }
 }

@@ -1,56 +1,5 @@
 use super::*;
 
-#[test]
-fn drizzle_accumulator_rejects_invalid_frame_inputs() {
-    let config = DrizzleConfig::x2();
-    let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
-
-    let mut frame = DrizzleFrame::new(
-        constant_mono_image(Size2us::new(4, 4), 1.0),
-        Transform::identity(),
-    );
-    frame.pixel_weight_map = Some(Buffer2::new_filled(3, 3, 1.0));
-    let error = acc.add_frame(frame).unwrap_err();
-    assert!(matches!(
-        error,
-        DrizzleError::PixelWeightDimensionMismatch {
-            index: 0,
-            expected_width: 4,
-            expected_height: 4,
-            actual_width: 3,
-            actual_height: 3,
-        }
-    ));
-
-    let mut frame = DrizzleFrame::new(
-        constant_mono_image(Size2us::new(4, 4), 1.0),
-        Transform::identity(),
-    );
-    frame.weight = f32::NAN;
-    let error = acc.add_frame(frame).unwrap_err();
-    assert!(matches!(
-        error,
-        DrizzleError::InvalidFrameWeight { index: 0, value } if value.is_nan()
-    ));
-
-    let mut pixel_weights = vec![1.0; 16];
-    pixel_weights[5] = -0.25;
-    let mut frame = DrizzleFrame::new(
-        constant_mono_image(Size2us::new(4, 4), 1.0),
-        Transform::identity(),
-    );
-    frame.pixel_weight_map = Some(Buffer2::new(4, 4, pixel_weights));
-    let error = acc.add_frame(frame).unwrap_err();
-    assert!(matches!(
-        error,
-        DrizzleError::InvalidPixelWeight {
-            frame_index: 0,
-            pixel_index: 5,
-            value: -0.25,
-        }
-    ));
-}
-
 /// Test sgarea with a horizontal segment from (0,0.5) to (1,0.5).
 ///
 /// This is a left-to-right segment at y=0.5 across the full unit square.
@@ -300,5 +249,75 @@ fn boxer_rotated_diamond() {
     assert!(
         (area - 0.5).abs() < 1e-12,
         "Diamond inscribed in unit square should have area 0.5, got {area}"
+    );
+}
+
+/// Test boxer with a rotated rectangle that partially clips output pixel.
+///
+/// A square rotated 30° centered at (0.5, 0.5) with half-side 0.5.
+/// Corners at center ± rotated (±0.5, ±0.5):
+///   cos30 = √3/2 ≈ 0.8660, sin30 = 0.5
+///   BL: (0.5 + (-0.5*cos30 - (-0.5)*sin30), 0.5 + (-0.5*sin30 + (-0.5)*cos30))
+///     = (0.5 + (-0.4330 + 0.25), 0.5 + (-0.25 - 0.4330))
+///     = (0.3170, -0.1830)
+///   BR: (0.5 + (0.5*cos30 - (-0.5)*sin30), 0.5 + (0.5*sin30 + (-0.5)*cos30))
+///     = (0.5 + (0.4330 + 0.25), 0.5 + (0.25 - 0.4330))
+///     = (1.1830, 0.3170)
+///   TR: (0.5 + (0.5*cos30 - 0.5*sin30), 0.5 + (0.5*sin30 + 0.5*cos30))
+///     = (0.5 + (0.4330 - 0.25), 0.5 + (0.25 + 0.4330))
+///     = (0.6830, 1.1830)
+///   TL: (0.5 + (-0.5*cos30 - 0.5*sin30), 0.5 + (-0.5*sin30 + 0.5*cos30))
+///     = (0.5 + (-0.4330 - 0.25), 0.5 + (-0.25 + 0.4330))
+///     = (-0.1830, 0.6830)
+///
+/// The quad area = 1.0 (unit square rotated). The overlap with the unit square
+/// [0,1]×[0,1] must be strictly between 0 and 1 since corners extend beyond.
+/// By symmetry (30° rotation around center), the overlap should be ~0.933.
+/// (Exact: 1 - 2 triangles clipped, each triangle has base 0.183 and height ~0.183*tan60)
+///
+/// Rather than computing the exact analytical value, we verify:
+/// 1) 0 < overlap < 1 (it's a partial clip)
+/// 2) overlap is close to the quad area minus the clipped triangles
+#[test]
+fn boxer_rotated_partial_clip() {
+    let cos30 = (PI / 6.0).cos();
+    let sin30 = (PI / 6.0).sin();
+    let cx = 0.5;
+    let cy = 0.5;
+
+    // Rotate (±0.5, ±0.5) by 30° around (cx, cy)
+    let corners = [
+        (-0.5, -0.5), // BL
+        (0.5, -0.5),  // BR
+        (0.5, 0.5),   // TR
+        (-0.5, 0.5),  // TL
+    ];
+
+    let quad: [DVec2; 4] = corners
+        .map(|(dx, dy)| DVec2::new(cx + dx * cos30 - dy * sin30, cy + dx * sin30 + dy * cos30));
+
+    let area = boxer(DVec2::new(0.0, 0.0), &quad);
+
+    // The rotated square extends beyond [0,1]×[0,1], so overlap < 1.0
+    assert!(
+        area < 1.0,
+        "30° rotated square should partially clip, got area {area}"
+    );
+    // But the center is at (0.5,0.5) so most of the area is inside
+    assert!(
+        area > 0.8,
+        "Most of the rotated square should be inside, got area {area}"
+    );
+
+    // Verified by Python reference implementation of sgarea/boxer:
+    //   Edge 0→1: sgarea(DVec2::new(0.3170, -0.1830), DVec2::new(1.1830, 0.3170)) = 0.038675
+    //   Edge 1→2: sgarea(DVec2::new(1.1830, 0.3170), DVec2::new(0.6830, 1.1830)) = -0.278312
+    //   Edge 2→3: sgarea(DVec2::new(0.6830, 1.1830), DVec2::new(-0.1830, 0.6830)) = -0.644338
+    //   Edge 3→0: sgarea(DVec2::new(-0.1830, 0.6830), DVec2::new(0.3170, -0.1830)) = 0.038675
+    //   Sum = -0.845299, abs = 0.845299
+    let expected = 0.845_299;
+    assert!(
+        (area - expected).abs() < 1e-4,
+        "Expected overlap ~{expected:.6}, got {area:.6}"
     );
 }

@@ -1,6 +1,12 @@
 use crate::math::dmat3::*;
 use crate::testing::prelude::*;
 
+fn from_rows(row0: [f64; 3], row1: [f64; 3], row2: [f64; 3]) -> DMat3 {
+    DMat3::from_array([
+        row0[0], row0[1], row0[2], row1[0], row1[1], row1[2], row2[0], row2[1], row2[2],
+    ])
+}
+
 const EPS: f64 = 1e-10;
 
 /// Bool rather than an assertion because two tests assert matrices are *not* equal.
@@ -20,11 +26,10 @@ fn every_constructor_and_accessor_round_trips() {
 
     for m in [
         DMat3::from_array(DATA),
-        DMat3::from_rows([1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]),
+        from_rows([1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]),
         DATA.into(),
     ] {
         assert_eq!(*m.as_array(), DATA);
-        assert_eq!(m.to_array(), DATA);
         let out: [f64; 9] = m.into();
         assert_eq!(out, DATA);
         // Indexing is row-major over the same flat storage.
@@ -34,13 +39,16 @@ fn every_constructor_and_accessor_round_trips() {
     }
 }
 
-/// The two mutable paths reach the same storage the read paths do.
+/// Mutable indexing reaches the same storage the read paths do.
 #[test]
 fn mutable_accessors_write_through() {
     let mut m = DMat3::identity();
     m[2] = 5.0;
-    m.as_array_mut()[5] = -3.0;
-    assert_eq!(m.to_array(), [1.0, 0.0, 5.0, 0.0, 1.0, -3.0, 0.0, 0.0, 1.0]);
+    m[5] = -3.0;
+    assert_eq!(
+        *m.as_array(),
+        [1.0, 0.0, 5.0, 0.0, 1.0, -3.0, 0.0, 0.0, 1.0]
+    );
 }
 
 /// `identity` is the multiplicative identity, and `default` is `identity` — not merely a matrix
@@ -67,20 +75,20 @@ fn determinant_identity() {
 #[test]
 fn determinant_singular() {
     // Two identical rows → det = 0
-    let m = DMat3::from_rows([1.0, 2.0, 3.0], [1.0, 2.0, 3.0], [4.0, 5.0, 6.0]);
+    let m = from_rows([1.0, 2.0, 3.0], [1.0, 2.0, 3.0], [4.0, 5.0, 6.0]);
     assert_close!(m.determinant(), 0.0, EPS);
 }
 
 #[test]
 fn determinant_known() {
-    let m = DMat3::from_rows([2.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 4.0]);
+    let m = from_rows([2.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 4.0]);
     assert_close!(m.determinant(), 24.0, EPS);
 }
 
 #[test]
 fn determinant_negative() {
     // Swapping two rows negates the determinant
-    let m = DMat3::from_rows([0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+    let m = from_rows([0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
     assert_close!(m.determinant(), -1.0, EPS);
 }
 
@@ -97,7 +105,7 @@ fn inverse_singular_returns_none() {
 
     // Rank-deficient with large elements (det = 0 but scale³ = 1e9): still singular —
     // the relative threshold must not be fooled by magnitude.
-    let m = DMat3::from_rows([1e3, 0.0, 0.0], [0.0, 1e3, 0.0], [1e3, 0.0, 0.0]);
+    let m = from_rows([1e3, 0.0, 0.0], [0.0, 1e3, 0.0], [1e3, 0.0, 0.0]);
     assert!(m.inverse().is_none());
 }
 
@@ -106,17 +114,17 @@ fn inverse_small_scale_not_misclassified_singular() {
     // 1e-5·I is perfectly conditioned but det = 1e-15 — the old fixed 1e-12 threshold
     // wrongly called it singular. Relative test: 1e-15 > 1e-12·(1e-5)³ = 1e-27 → invertible,
     // inverse = 1e5·I.
-    let m = DMat3::from_rows([1e-5, 0.0, 0.0], [0.0, 1e-5, 0.0], [0.0, 0.0, 1e-5]);
+    let m = from_rows([1e-5, 0.0, 0.0], [0.0, 1e-5, 0.0], [0.0, 0.0, 1e-5]);
     let inv = m
         .inverse()
         .expect("well-conditioned small-scale matrix must invert");
-    let expected = DMat3::from_rows([1e5, 0.0, 0.0], [0.0, 1e5, 0.0], [0.0, 0.0, 1e5]);
+    let expected = from_rows([1e5, 0.0, 0.0], [0.0, 1e5, 0.0], [0.0, 0.0, 1e5]);
     assert!(mat_approx_eq(&inv, &expected));
 }
 
 #[test]
 fn inverse_roundtrip() {
-    let m = DMat3::from_rows([1.0, 2.0, 3.0], [0.0, 1.0, 4.0], [5.0, 6.0, 0.0]);
+    let m = from_rows([1.0, 2.0, 3.0], [0.0, 1.0, 4.0], [5.0, 6.0, 0.0]);
     let inv = m.inverse().unwrap();
     let product = m.mul_mat(&inv);
     assert!(
@@ -127,15 +135,15 @@ fn inverse_roundtrip() {
 
 #[test]
 fn inverse_diagonal() {
-    let m = DMat3::from_rows([2.0, 0.0, 0.0], [0.0, 4.0, 0.0], [0.0, 0.0, 5.0]);
+    let m = from_rows([2.0, 0.0, 0.0], [0.0, 4.0, 0.0], [0.0, 0.0, 5.0]);
     let inv = m.inverse().unwrap();
-    let expected = DMat3::from_rows([0.5, 0.0, 0.0], [0.0, 0.25, 0.0], [0.0, 0.0, 0.2]);
+    let expected = from_rows([0.5, 0.0, 0.0], [0.0, 0.25, 0.0], [0.0, 0.0, 0.2]);
     assert!(mat_approx_eq(&inv, &expected));
 }
 
 #[test]
 fn mul_identity() {
-    let m = DMat3::from_rows([1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]);
+    let m = from_rows([1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]);
     let product = m.mul_mat(&DMat3::identity());
     assert!(mat_approx_eq(&product, &m));
 
@@ -145,29 +153,29 @@ fn mul_identity() {
 
 #[test]
 fn mul_known() {
-    let a = DMat3::from_rows([1.0, 2.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
-    let b = DMat3::from_rows([1.0, 0.0, 3.0], [0.0, 1.0, 4.0], [0.0, 0.0, 1.0]);
+    let a = from_rows([1.0, 2.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
+    let b = from_rows([1.0, 0.0, 3.0], [0.0, 1.0, 4.0], [0.0, 0.0, 1.0]);
     let c = a.mul_mat(&b);
     // Row 0: [1*1+2*0+0*0, 1*0+2*1+0*0, 1*3+2*4+0*1] = [1, 2, 11]
     // Row 1: [0, 1, 4]
     // Row 2: [0, 0, 1]
-    let expected = DMat3::from_rows([1.0, 2.0, 11.0], [0.0, 1.0, 4.0], [0.0, 0.0, 1.0]);
+    let expected = from_rows([1.0, 2.0, 11.0], [0.0, 1.0, 4.0], [0.0, 0.0, 1.0]);
     assert!(mat_approx_eq(&c, &expected));
 }
 
 #[test]
 fn mul_operator() {
-    let a = DMat3::from_rows([2.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 1.0]);
-    let b = DMat3::from_rows([1.0, 0.0, 5.0], [0.0, 1.0, 7.0], [0.0, 0.0, 1.0]);
+    let a = from_rows([2.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 1.0]);
+    let b = from_rows([1.0, 0.0, 5.0], [0.0, 1.0, 7.0], [0.0, 0.0, 1.0]);
     let c = a * b;
-    let expected = DMat3::from_rows([2.0, 0.0, 10.0], [0.0, 3.0, 21.0], [0.0, 0.0, 1.0]);
+    let expected = from_rows([2.0, 0.0, 10.0], [0.0, 3.0, 21.0], [0.0, 0.0, 1.0]);
     assert!(mat_approx_eq(&c, &expected));
 }
 
 #[test]
 fn mul_non_commutative() {
-    let a = DMat3::from_rows([1.0, 2.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
-    let b = DMat3::from_rows([1.0, 0.0, 0.0], [3.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
+    let a = from_rows([1.0, 2.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
+    let b = from_rows([1.0, 0.0, 0.0], [3.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
     let ab = a * b;
     let ba = b * a;
     // A*B != B*A for these matrices
@@ -212,31 +220,12 @@ fn transform_point_at_infinity_returns_infinity() {
 
 #[test]
 fn transform_point_roundtrip() {
-    let m = DMat3::from_rows([1.1, 0.2, 5.0], [-0.1, 0.9, -3.0], [0.0, 0.0, 1.0]);
+    let m = from_rows([1.1, 0.2, 5.0], [-0.1, 0.9, -3.0], [0.0, 0.0, 1.0]);
     let inv = m.inverse().unwrap();
     let p = DVec2::new(10.0, -5.0);
     let p2 = inv.transform_point(m.transform_point(p));
     assert_close!(p2.x, p.x, EPS);
     assert_close!(p2.y, p.y, EPS);
-}
-
-#[test]
-fn deviation_from_identity_zero() {
-    assert_close!(DMat3::identity().deviation_from_identity(), 0.0, EPS);
-}
-
-#[test]
-fn deviation_from_identity_nonzero() {
-    let m = DMat3::from_array([1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
-    // Only m[2] differs by 1.0
-    assert_close!(m.deviation_from_identity(), 1.0, EPS);
-}
-
-#[test]
-fn deviation_from_identity_multiple_elements() {
-    // Diagonal elements differ by 1.0 each: (2-1)^2 + (2-1)^2 + (2-1)^2 = 3
-    let m = DMat3::from_rows([2.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 2.0]);
-    assert_close!(m.deviation_from_identity(), 3.0_f64.sqrt(), EPS);
 }
 
 #[test]
@@ -251,7 +240,7 @@ fn mul_scalar() {
     let m = DMat3::from_array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
     let scaled = m * 2.0;
     assert_eq!(
-        scaled.to_array(),
+        *scaled.as_array(),
         [2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0]
     );
 }
@@ -268,7 +257,7 @@ fn scalar_mul_commutative() {
 fn mul_scalar_zero() {
     let m = DMat3::from_array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
     let z = m * 0.0;
-    assert_eq!(z.to_array(), [0.0; 9]);
+    assert_eq!(*z.as_array(), [0.0; 9]);
 }
 
 #[test]

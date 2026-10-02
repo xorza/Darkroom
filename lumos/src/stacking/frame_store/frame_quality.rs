@@ -69,7 +69,7 @@ impl Display for FramePlane {
 /// and `source_noise_variance` a non-zero one to divide by.
 ///
 /// [`validate_frame_quality`]: crate::stacking::combine::cache::validation::validate_frame_quality
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum FrameQuality<P> {
     /// No quality planes at all — a frame that was never warped and whose source declared every
     /// pixel measured, which is the overwhelming majority of them.

@@ -539,15 +539,30 @@ pub(crate) mod internals {
 
     use common::CancelToken;
 
+    use crate::io::image::linear::LinearImage;
     use crate::stacking::combine::cache::FrameCache;
     use crate::stacking::combine::cache::core::CacheCore;
     use crate::stacking::combine::cache_config::CacheConfig;
     use crate::stacking::combine::config::Normalization;
     use crate::stacking::combine::normalization::compute_frame_norms;
+    use crate::stacking::combine::stack::StackFrame;
     use crate::stacking::frame_store::frame_quality::FrameQuality;
     use crate::stacking::frame_store::frame_stats::FrameStats;
     use crate::stacking::frame_store::{StackableImage, StoredFrame};
     use crate::stacking::progress::ProgressCallback;
+
+    /// Create an in-memory [`FrameCache`] from loaded images, with no coverage (test helper).
+    pub(crate) fn make_test_cache(images: Vec<LinearImage>) -> FrameCache {
+        let frames = images.into_iter().map(StackFrame::from).collect();
+        FrameCache::from_stack_frames(
+            frames,
+            &CacheConfig::default(),
+            Normalization::None,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .expect("test images must be non-empty and dimension-consistent")
+    }
 
     impl FrameCache {
         /// An in-memory cache over already-decoded frames — the shape `from_paths` builds, without
@@ -589,4 +604,4 @@ pub(crate) mod internals {
 }
 
 #[cfg(test)]
-pub(crate) mod tests;
+mod tests;
