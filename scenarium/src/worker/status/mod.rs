@@ -116,7 +116,7 @@ pub(crate) struct WorkerStatusPatch<'a> {
 }
 
 impl WorkerStatusPatch<'_> {
-    pub(crate) fn push(&mut self, progress: RunProgress) {
+    pub(crate) fn push(&mut self, progress: &RunProgress) {
         let update = Arc::get_mut(self.status)
             .expect("status patch must remain unpublished while it is populated");
         debug_assert_eq!(update.kind, WorkerStatusKind::Patch);

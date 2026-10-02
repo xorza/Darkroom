@@ -143,9 +143,9 @@ mod tests {
 
     #[test]
     fn checker_image_is_one_2x2_period() {
-        let img = checker_image();
         const L: u8 = CHECKER_LIGHT_U8;
         const D: u8 = CHECKER_DARK_U8;
+        let img = checker_image();
         // Row-major light/dark, dark/light — one full checker period.
         #[rustfmt::skip]
         let expected = [

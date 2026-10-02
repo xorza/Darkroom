@@ -94,13 +94,12 @@ pub(crate) fn register(library: &mut Library) {
                         let registration =
                             preset::resolve::<RegistrationKnobs, RegistrationPreset>(&inputs[3]);
                         let stack = preset::resolve::<CombineKnobs, CombinePreset>(&inputs[4]);
-                        let reference = match inputs[5]
-                            .as_i64()
-                            .expect("reference input type is validated at the compile boundary")
-                        {
-                            index if index >= 0 => Reference::Index(index as usize),
-                            _ => Reference::Auto,
-                        };
+                        // A negative index asks for the automatic reference.
+                        let reference =
+                            usize::try_from(inputs[5].as_i64().expect(
+                                "reference input type is validated at the compile boundary",
+                            ))
+                            .map_or(Reference::Auto, Reference::Index);
                         let config = AlignStackConfig {
                             detection,
                             registration,

@@ -139,7 +139,7 @@ impl Session {
         //    read just ahead of it: unlike undo/redo they only queue an
         //    `AppCommand`, so they need no drain of their own and simply have
         //    to land before `App` takes the tier.
-        self.menu_shortcut(ui, requests);
+        Self::menu_shortcut(ui, requests);
         self.main_window
             .frame(ui, WindowCtx::new(ctx, &self.open), preferences, requests);
         // Graph edits the record surfaced (node select, cache toggle, const
@@ -192,7 +192,7 @@ impl Session {
     /// the others' subscription that frame). Save-As (Ctrl+Shift+S) is
     /// checked before Save (Ctrl+S) so the shift variant wins its
     /// combo. Theme actions are menu-only — no shortcut.
-    fn menu_shortcut(&self, ui: &mut Ui, requests: &mut Requests) {
+    fn menu_shortcut(ui: &mut Ui, requests: &mut Requests) {
         let new = ui.key_pressed(NEW_SHORTCUT);
         let open = ui.key_pressed(OPEN_SHORTCUT);
         let save_as = ui.key_pressed(SAVE_AS_SHORTCUT);

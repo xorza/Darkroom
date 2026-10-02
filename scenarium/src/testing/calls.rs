@@ -62,6 +62,6 @@ impl Calls {
     /// output says both that the node ran and how many times it has.
     pub fn tally(&self) -> impl Fn(&[DynamicValue]) -> ConstValue + Send + Sync + 'static {
         let calls = self.clone();
-        move |_| ConstValue::Int(calls.0.fetch_add(1, Ordering::SeqCst) as i64 + 1)
+        move |_| ConstValue::Int(i64::try_from(calls.0.fetch_add(1, Ordering::SeqCst)).unwrap() + 1)
     }
 }

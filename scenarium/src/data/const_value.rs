@@ -19,6 +19,10 @@ pub enum ConstValue {
 }
 
 impl PartialEq for ConstValue {
+    #[expect(
+        clippy::match_same_arms,
+        reason = "each variant pair binds its own payload type, so the arms cannot merge"
+    )]
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (ConstValue::Null, ConstValue::Null) => true,

@@ -27,7 +27,7 @@ use crate::gui::theme::chrome_colors::ChromeColors;
 use crate::gui::theme::const_value_editor_theme::ConstValueEditorTheme;
 use crate::gui::theme::inline_rename_theme::InlineRenameTheme;
 use crate::gui::theme::palantir_bridge::{
-    BridgeRoles, menu_button_for, palantir_palette_for, palantir_theme_for,
+    BridgeRoles, menu_button_for, palantir_for, palantir_palette_for,
 };
 use crate::gui::theme::palette::Palette;
 use crate::gui::theme::port_theme::PortTheme;
@@ -43,10 +43,10 @@ use crate::gui::theme::type_scale::TypeScale;
 /// geometry as well as color.
 ///
 /// Also owns the palantir [`palantir::Theme`] this app wants on its
-/// `Ui`. [`crate::gui::app::App::new`] copies `palantir_theme` into
+/// `Ui`. [`crate::gui::app::App::new`] copies `palantir` into
 /// `ui.theme` once before the first frame, so palantir-side widgets
 /// (buttons, text edits, menus, scrollbars) read from the same source.
-/// Tweak fields on `theme.palantir_theme` during construction to
+/// Tweak fields on `theme.palantir` during construction to
 /// override palantir's defaults.
 ///
 /// Serializable so the whole bundle (palantir palette + darkroom
@@ -124,7 +124,7 @@ pub(crate) struct Theme {
     /// startup so every palantir widget (Button, `TextEdit`, `MenuItem`,
     /// Scroll, Tooltip…) reads a darkroom-tuned palette without each
     /// call site restyling per use.
-    pub(crate) palantir_theme: palantir::Theme,
+    pub(crate) palantir: palantir::Theme,
 }
 
 impl Theme {
@@ -188,7 +188,7 @@ impl Theme {
         // so bolding it is the only difference between the two slots.
         let card = CardTheme::from_palette(p);
         let status = StatusColors::from_palette(p);
-        let palantir_theme = palantir_theme_for(
+        let palantir = palantir_for(
             &pal,
             BridgeRoles {
                 chrome_fill: colors.chrome_fill,
@@ -202,7 +202,7 @@ impl Theme {
         let inline_rename = InlineRenameTheme::from_palette(&pal);
         let inline_rename_title = inline_rename.clone().with_text(TextStyle {
             weight: FontWeight::BOLD,
-            ..palantir_theme.text
+            ..palantir.text
         });
         Self {
             // The three measurements that belong to no widget group; the
@@ -221,8 +221,8 @@ impl Theme {
             const_value_editor_revealed: ConstValueEditorTheme::revealed_from_palette(&pal),
             inline_rename,
             inline_rename_title,
-            menu_button: menu_button_for(&pal, palantir_theme.text, &TypeScale::DEFAULT),
-            palantir_theme,
+            menu_button: menu_button_for(&pal, palantir.text, &TypeScale::DEFAULT),
+            palantir,
         }
     }
 }
@@ -264,7 +264,7 @@ mod tests {
         let mut theme = Theme::default();
         theme.card.min_width = 137.5;
         theme.colors.text_muted = RgbaF32::hex(0x0012_3456);
-        theme.palantir_theme.window_clear = RgbaF32::hex(0x00ab_cdef);
+        theme.palantir.window_clear = RgbaF32::hex(0x00ab_cdef);
 
         let bytes = common::serialize(&theme, SerdeFormat::Ron).expect("serialize theme");
         let back: Theme = common::deserialize(&bytes, SerdeFormat::Ron)
@@ -274,15 +274,15 @@ mod tests {
         assert_eq!(back.colors.text_muted, RgbaF32::hex(0x0012_3456));
         assert_eq!(back.canvas.bg, theme.canvas.bg);
         // Nested palantir palette round-trips too.
-        assert_eq!(back.palantir_theme.window_clear, RgbaF32::hex(0x00ab_cdef));
+        assert_eq!(back.palantir.window_clear, RgbaF32::hex(0x00ab_cdef));
         // The infinite tooltip-height axis survives `Size`'s serde.
-        assert!(back.palantir_theme.tooltip.max_size.h.is_infinite());
-        assert_eq!(back.palantir_theme.tooltip.max_size.w, 280.0);
+        assert!(back.palantir.tooltip.max_size.h.is_infinite());
+        assert_eq!(back.palantir.tooltip.max_size.w, 280.0);
     }
 
     /// Pin which palette role reaches which field, plus the non-trivial
     /// palantir tweak, so a regression in `Theme::build`'s wiring, in
-    /// `palantir_theme_for`, or in `menu_button_for` fails loudly. Against
+    /// `palantir_for`, or in `menu_button_for` fails loudly. Against
     /// the loaded palette rather than hex literals: the values are the
     /// palette's to choose, but landing `header_fill` in `canvas.bg` is
     /// still a bug.
@@ -302,8 +302,8 @@ mod tests {
         assert_ne!(theme.canvas.bg, theme.card.header_fill);
         assert_ne!(theme.ports.input, theme.ports.output);
         // The palantir half is the same palette, not palantir's own default.
-        assert_eq!(theme.palantir_theme.window_clear, p.canvas_bg);
-        assert!(theme.palantir_theme.tooltip.max_size.h.is_infinite());
+        assert_eq!(theme.palantir.window_clear, p.canvas_bg);
+        assert!(theme.palantir.tooltip.max_size.h.is_infinite());
         // The menu-bar font was shrunk from palantir's default to ours.
         let menu_text = theme
             .menu_button

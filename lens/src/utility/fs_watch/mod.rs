@@ -83,7 +83,7 @@ impl WatchState {
         let callback_path = owned_path.clone();
         let mut watcher =
             notify::recommended_watcher(move |res: notify::Result<notify::Event>| match res {
-                Ok(event) if is_content_change(&event.kind) => callback_signal.notify_one(),
+                Ok(event) if is_content_change(event.kind) => callback_signal.notify_one(),
                 Ok(_) => {}
                 Err(error) => tracing::warn!(
                     path = %callback_path,
@@ -133,7 +133,7 @@ impl Debug for WatchState {
 /// it's filtered too. `Modify(Any)` is still kept: some backends (macOS
 /// `FSEvents`) report a real write that coarsely, and dropping it would swallow
 /// genuine changes.
-fn is_content_change(kind: &EventKind) -> bool {
+fn is_content_change(kind: EventKind) -> bool {
     match kind {
         EventKind::Modify(ModifyKind::Metadata(_)) => false,
         EventKind::Create(_) | EventKind::Remove(_) | EventKind::Modify(_) => true,
@@ -220,12 +220,11 @@ pub fn fs_watch_library() -> Library {
                             .as_bool()
                             .expect("recursive input type is validated at the compile boundary");
                         let debounce = Duration::from_millis(
-                            inputs[2]
-                                .as_i64()
-                                .expect(
-                                    "debounce input type is validated at the compile boundary",
-                                )
-                                .max(0) as u64,
+                            // A negative debounce is none.
+                            u64::try_from(inputs[2].as_i64().expect(
+                                "debounce input type is validated at the compile boundary",
+                            ))
+                            .unwrap_or(0),
                         );
 
                         if path.is_empty() {

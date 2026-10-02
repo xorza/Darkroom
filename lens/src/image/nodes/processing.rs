@@ -2,7 +2,7 @@
 
 use imaginarium::{Blend, BlendMode, ContrastBrightness, Transform, Vec2};
 use scenarium::Invocation;
-use scenarium::{ConstValue, DataType, DynamicValue, InvokeError, InvokeResult};
+use scenarium::{ConstValue, DataType, DynamicValue, InvokeError};
 use scenarium::{Func, FuncInput, FuncLambda, FuncOutput, Library};
 
 use crate::config_node::enum_input;
@@ -57,7 +57,7 @@ fn register_brightness(library: &mut Library) {
                         .as_f64()
                         .expect("contrast input type is validated at the compile boundary")
                         as f32;
-                    let image = adjust_image(ContrastBrightness::new(contrast, brightness), value)?;
+                    let image = adjust_image(ContrastBrightness::new(contrast, brightness), value);
                     outputs[0] = DynamicValue::from_custom(image);
                     Ok(())
                 })
@@ -253,7 +253,7 @@ fn register_transform(library: &mut Library) {
     );
 }
 
-fn adjust_image(op: ContrastBrightness, value: DynamicValue) -> InvokeResult<Image> {
+fn adjust_image(op: ContrastBrightness, value: DynamicValue) -> Image {
     // Contrast/brightness works in place, so an owned input is adjusted where it stands — no output
     // image to allocate. Only a value still shared with other consumers has to be copied first.
     let mut image = match value.into_custom::<Image>() {
@@ -268,17 +268,17 @@ fn adjust_image(op: ContrastBrightness, value: DynamicValue) -> InvokeResult<Ima
     };
 
     op.apply_cpu(image.interleaved_mut());
-    Ok(image)
+    image
 }
 
 #[cfg(test)]
 pub(super) mod internals {
     use imaginarium::ContrastBrightness;
-    use scenarium::{DynamicValue, InvokeResult};
+    use scenarium::DynamicValue;
 
     use crate::image::Image;
 
-    pub(crate) fn adjust_image(op: ContrastBrightness, value: DynamicValue) -> InvokeResult<Image> {
+    pub(crate) fn adjust_image(op: ContrastBrightness, value: DynamicValue) -> Image {
         super::adjust_image(op, value)
     }
 }

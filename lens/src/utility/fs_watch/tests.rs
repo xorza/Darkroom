@@ -1,25 +1,15 @@
+use common::TempDir;
+
 use crate::utility::fs_watch::{WATCH_DIRECTORY_FUNC_ID, WatchState, fs_watch_library};
 use scenarium::ConstValue;
 use scenarium::{AnyState, ContextManager, FuncBehavior, FuncLambda};
 use scenarium::{DynamicValue, Invocation, InvokeError, OutputDemand, SharedAnyState};
-use std::env;
 use std::fs;
-use std::path::PathBuf;
-use std::process;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Instant;
 use tokio::sync::Notify;
 use tokio::task;
 use tokio::time::{Duration, sleep, timeout};
-
-fn unique_temp_dir() -> PathBuf {
-    static COUNTER: AtomicU32 = AtomicU32::new(0);
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir = env::temp_dir().join(format!("lens-watch-test-{}-{}", process::id(), n));
-    fs::create_dir_all(&dir).unwrap();
-    dir
-}
 
 async fn try_invoke_watch(
     lambda: &FuncLambda,
@@ -99,34 +89,34 @@ fn classifies_filesystem_event_kinds() {
     };
 
     // Subscribed: writes, new files, removes, renames.
-    assert!(is_content_change(&EventKind::Create(CreateKind::File)));
-    assert!(is_content_change(&EventKind::Remove(RemoveKind::File)));
-    assert!(is_content_change(&EventKind::Modify(ModifyKind::Data(
+    assert!(is_content_change(EventKind::Create(CreateKind::File)));
+    assert!(is_content_change(EventKind::Remove(RemoveKind::File)));
+    assert!(is_content_change(EventKind::Modify(ModifyKind::Data(
         DataChange::Content
     ))));
-    assert!(is_content_change(&EventKind::Modify(ModifyKind::Name(
+    assert!(is_content_change(EventKind::Modify(ModifyKind::Name(
         RenameMode::Both
     ))));
     // Coarse `Modify(Any)` is kept — macOS FSEvents reports real writes that way.
-    assert!(is_content_change(&EventKind::Modify(ModifyKind::Any)));
+    assert!(is_content_change(EventKind::Modify(ModifyKind::Any)));
 
     // Dropped: metadata-only changes (incl. access time), reads, and the
     // uncategorized catch-alls.
-    assert!(!is_content_change(&EventKind::Modify(
-        ModifyKind::Metadata(MetadataKind::AccessTime)
-    )));
-    assert!(!is_content_change(&EventKind::Modify(
-        ModifyKind::Metadata(MetadataKind::Permissions)
-    )));
-    assert!(!is_content_change(&EventKind::Access(AccessKind::Read)));
-    assert!(!is_content_change(&EventKind::Any));
-    assert!(!is_content_change(&EventKind::Other));
+    assert!(!is_content_change(EventKind::Modify(ModifyKind::Metadata(
+        MetadataKind::AccessTime
+    ))));
+    assert!(!is_content_change(EventKind::Modify(ModifyKind::Metadata(
+        MetadataKind::Permissions
+    ))));
+    assert!(!is_content_change(EventKind::Access(AccessKind::Read)));
+    assert!(!is_content_change(EventKind::Any));
+    assert!(!is_content_change(EventKind::Other));
 }
 
 #[tokio::test]
 async fn passes_directory_through_and_seeds_watcher() {
-    let dir = unique_temp_dir();
-    let dir_str = dir.to_str().unwrap();
+    let dir = TempDir::new("lens-watch");
+    let dir_str = dir.path().to_str().unwrap();
     let lib = fs_watch_library();
     let func = lib.by_name("Watch Directory").unwrap();
 
@@ -149,14 +139,12 @@ async fn passes_directory_through_and_seeds_watcher() {
     let ws = guard.get::<WatchState>().expect("watcher seeded");
     assert_eq!(ws.path, dir_str);
     assert!(ws.recursive);
-
-    let _ = fs::remove_dir_all(&dir);
 }
 
 #[tokio::test]
 async fn reuses_watcher_until_params_change() {
-    let dir = unique_temp_dir();
-    let dir_str = dir.to_str().unwrap();
+    let dir = TempDir::new("lens-watch");
+    let dir_str = dir.path().to_str().unwrap();
     let lib = fs_watch_library();
     let func = lib.by_name("Watch Directory").unwrap();
 
@@ -210,8 +198,6 @@ async fn reuses_watcher_until_params_change() {
     let guard = event_state.lock().await;
     assert!(!guard.get::<WatchState>().unwrap().recursive);
     drop(guard);
-
-    let _ = fs::remove_dir_all(&dir);
 }
 
 #[tokio::test]
@@ -241,8 +227,8 @@ async fn empty_path_skips_watcher_and_event_parks() {
 /// the node outputs an empty path.
 #[tokio::test]
 async fn clearing_path_tears_down_previous_watcher() {
-    let dir = unique_temp_dir();
-    let dir_str = dir.to_str().unwrap();
+    let dir = TempDir::new("lens-watch");
+    let dir_str = dir.path().to_str().unwrap();
     let lib = fs_watch_library();
     let func = lib.by_name("Watch Directory").unwrap();
 
@@ -266,13 +252,11 @@ async fn clearing_path_tears_down_previous_watcher() {
         event_state.lock().await.get::<WatchState>().is_none(),
         "the stale watcher must be dropped with its OS watch"
     );
-
-    let _ = fs::remove_dir_all(&dir);
 }
 
 #[tokio::test]
 async fn invalid_replacement_drops_previous_watcher() {
-    let dir = unique_temp_dir();
+    let dir = TempDir::new("lens-watch");
     let lib = fs_watch_library();
     let func = lib.by_name("Watch Directory").unwrap();
     let mut ctx = ContextManager::default();
@@ -284,7 +268,7 @@ async fn invalid_replacement_drops_previous_watcher() {
         &mut ctx,
         &mut state,
         &event_state,
-        dir.to_str().unwrap(),
+        dir.path().to_str().unwrap(),
         true,
     )
     .await;
@@ -309,7 +293,7 @@ async fn invalid_replacement_drops_previous_watcher() {
         &mut ctx,
         &mut state,
         &event_state,
-        dir.to_str().unwrap(),
+        dir.path().to_str().unwrap(),
         true,
     )
     .await;
@@ -330,18 +314,20 @@ async fn invalid_replacement_drops_previous_watcher() {
             .contains("failed to inspect watch directory")
     );
     assert!(event_state.lock().await.get::<WatchState>().is_none());
-
-    let _ = fs::remove_dir_all(&dir);
 }
 
 #[tokio::test]
 async fn watcher_signals_on_content_change() {
-    let dir = unique_temp_dir();
-    let ws = WatchState::new(dir.to_str().unwrap(), false, Duration::ZERO).unwrap();
+    let dir = TempDir::new("lens-watch");
+    let ws = WatchState::new(dir.path().to_str().unwrap(), false, Duration::ZERO).unwrap();
     let signal = Arc::clone(&ws.signal);
 
     // Absorb any spurious event from creating the directory itself, so the
     // assertion below measures the file write specifically.
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "with no spurious event to absorb, the wait times out, which is fine"
+    )]
     let _ = timeout(Duration::from_millis(300), signal.notified()).await;
 
     fs::write(dir.join("new.txt"), b"hello").unwrap();
@@ -351,19 +337,23 @@ async fn watcher_signals_on_content_change() {
         .expect("creating a file in the watched dir must fire the watcher");
 
     drop(ws);
-    let _ = fs::remove_dir_all(&dir);
 }
 
 #[tokio::test]
 async fn debounce_collapses_burst_into_one_fire() {
-    let dir = unique_temp_dir();
+    let dir = TempDir::new("lens-watch");
     let lib = fs_watch_library();
     let func = lib.by_name("Watch Directory").unwrap();
 
     // Seed per-node state with a 200ms-debounce watcher, then drive the real
     // `changed` event lambda against a hand-pulsed signal (a "burst").
     let event_state = SharedAnyState::default();
-    let ws = WatchState::new(dir.to_str().unwrap(), false, Duration::from_millis(200)).unwrap();
+    let ws = WatchState::new(
+        dir.path().to_str().unwrap(),
+        false,
+        Duration::from_millis(200),
+    )
+    .unwrap();
     let signal = Arc::clone(&ws.signal);
     event_state.lock().await.set(ws);
 
@@ -391,6 +381,4 @@ async fn debounce_collapses_burst_into_one_fire() {
         "fire must be delayed by the debounce window, got {:?}",
         start.elapsed()
     );
-
-    let _ = fs::remove_dir_all(&dir);
 }

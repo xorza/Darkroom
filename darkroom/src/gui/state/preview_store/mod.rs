@@ -278,6 +278,10 @@ fn rgba8_raster(cpu: &CpuImage, target: UVec2) -> Raster {
 /// `native` scaled to fit `max_dim` on its longest edge — aspect preserved,
 /// never upscaled. `None` is no ceiling, and answers the source's own
 /// dimensions.
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "each edge is rounded and clamped to at least 1 before the cast"
+)]
 fn capped_target(native: UVec2, max_dim: Option<NonZeroU32>) -> UVec2 {
     let Some(max_dim) = max_dim else {
         return native;

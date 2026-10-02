@@ -423,7 +423,7 @@ impl RuntimeCache {
                     // producer's value; unreadable (pre-run) ⇒ `None`, re-stamped at reach
                     // time by the run loop.
                     if input.stamps_fs_path {
-                        self.hash_bound_fs_path(&mut hasher, addr)?;
+                        self.hash_bound_fs_path(&mut hasher, *addr)?;
                     }
                 }
             }
@@ -439,7 +439,7 @@ impl RuntimeCache {
     /// run", and the run loop then re-stamps at reach time, when the producers have settled
     /// and any disk-backed path producer was hydrated (`executor.rs`). A mis-typed delivered
     /// value folds a distinct marker instead.
-    fn hash_bound_fs_path(&self, hasher: &mut DigestHasher, addr: &OutputAddr) -> Option<()> {
+    fn hash_bound_fs_path(&self, hasher: &mut DigestHasher, addr: OutputAddr) -> Option<()> {
         // The *current* snapshot, so a value produced under an older digest
         // cannot deliver a reference into this key.
         let delivered = self.slots[addr.node_idx]
@@ -503,6 +503,10 @@ impl RuntimeCache {
         // A fresh run identifies afresh.
         self.fs_paths.clear();
         self.stamp_job.clear_queue();
+        #[expect(
+            clippy::let_underscore_must_use,
+            reason = "a path that fails here fails again, as its node's, when the run reaches it"
+        )]
         let _ = self.identify(program, executing, cancel).await;
     }
 
@@ -923,6 +927,10 @@ pub(crate) mod internals {
         /// path that will not stamp simply does not land, exactly as in the
         /// batched pre-run pass.
         pub(crate) fn prepare_node_blocking(&mut self, program: &CompiledGraph, node_idx: NodeIdx) {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "a path that will not stamp simply does not land, as in the batched pass"
+            )]
             let _ = self.prepare_nodes_blocking(program, [node_idx]);
         }
 

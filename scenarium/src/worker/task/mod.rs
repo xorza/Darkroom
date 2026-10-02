@@ -232,6 +232,10 @@ where
         }
 
         for reply in self.intent.syncs.drain(..) {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "a requester that stopped waiting needs no reply"
+            )]
             let _ = reply.send(());
         }
     }
@@ -430,7 +434,7 @@ where
 {
     fn progress(&mut self, progress: RunProgress) {
         let mut patch = self.status.patch();
-        patch.push(progress);
+        patch.push(&progress);
         (self.callback)(WorkerReport::Status(patch.finish()));
     }
 }

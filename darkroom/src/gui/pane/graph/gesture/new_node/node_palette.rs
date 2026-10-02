@@ -28,15 +28,15 @@ enum PaletteEntry<'a> {
 impl<'a> PaletteEntry<'a> {
     /// Borrowed from the palette's sources rather than from `self`, so a
     /// name outlives any borrow of the row that yielded it.
-    fn name(&self) -> &'a str {
-        match *self {
+    fn name(self) -> &'a str {
+        match self {
             PaletteEntry::Func(f) => &f.name,
             PaletteEntry::Special(s) => &s.func().name,
         }
     }
 
-    fn category(&self) -> &'a str {
-        match *self {
+    fn category(self) -> &'a str {
+        match self {
             PaletteEntry::Func(f) => &f.category,
             PaletteEntry::Special(s) => &s.func().category,
         }
@@ -333,7 +333,12 @@ mod tests {
             .map(|column| {
                 (
                     column.category,
-                    column.entries.iter().map(PaletteEntry::name).collect(),
+                    column
+                        .entries
+                        .iter()
+                        .copied()
+                        .map(PaletteEntry::name)
+                        .collect(),
                 )
             })
             .collect()

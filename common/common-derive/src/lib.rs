@@ -16,6 +16,31 @@
 //! `Display`/`FromStr` and no derive crate beyond this one, so any crate that
 //! already depends on `common` can describe its own config types.
 
+// Lints of the workspace set that stay `allow` there until lumos is swept (plan 2.2);
+// this crate is clean for them, so they warn here.
+#![warn(
+    unused_macro_rules,
+    clippy::allow_attributes_without_reason,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::ignore_without_reason,
+    clippy::items_after_statements,
+    clippy::large_stack_arrays,
+    clippy::large_types_passed_by_value,
+    clippy::let_underscore_must_use,
+    clippy::map_err_ignore,
+    clippy::match_same_arms,
+    clippy::missing_fields_in_debug,
+    clippy::needless_pass_by_value,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::should_panic_without_expect,
+    clippy::struct_field_names,
+    clippy::trivially_copy_pass_by_ref,
+    clippy::unused_result_ok,
+    clippy::unused_self
+)]
+
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::quote;
@@ -27,10 +52,10 @@ use syn::{
 #[proc_macro_derive(Introspect, attributes(config))]
 pub fn derive_introspect(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    expand(input).unwrap_or_else(|err| err.to_compile_error().into())
+    expand(&input).unwrap_or_else(|err| err.to_compile_error().into())
 }
 
-fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
+fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let ident = &input.ident;
     let Data::Struct(data) = &input.data else {
         return Err(syn::Error::new_spanned(
@@ -87,12 +112,12 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
 #[proc_macro_derive(IntrospectEnum, attributes(config))]
 pub fn derive_introspect_enum(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    expand_enum(input).unwrap_or_else(|err| err.to_compile_error().into())
+    expand_enum(&input).unwrap_or_else(|err| err.to_compile_error().into())
 }
 
-fn expand_enum(input: DeriveInput) -> syn::Result<TokenStream> {
+fn expand_enum(input: &DeriveInput) -> syn::Result<TokenStream> {
     let ident = &input.ident;
-    let type_id = enum_type_id(&input)?;
+    let type_id = enum_type_id(input)?;
     let Data::Enum(data) = &input.data else {
         return Err(syn::Error::new_spanned(
             ident,
@@ -259,7 +284,7 @@ fn kind_tokens(kind: &Kind) -> TokenStream2 {
 
 /// The default `FieldValue` for `place` (e.g. `d.field`, or `(*v)` for an
 /// `Option`'s payload).
-fn default_scalar(kind: &Kind, place: TokenStream2) -> TokenStream2 {
+fn default_scalar(kind: &Kind, place: &TokenStream2) -> TokenStream2 {
     match kind {
         Kind::Int(ty) => quote! {
             ::common::FieldValue::Int(
@@ -282,9 +307,9 @@ fn default_scalar(kind: &Kind, place: TokenStream2) -> TokenStream2 {
 
 fn default_tokens(fname: &Ident, kind: &Kind) -> TokenStream2 {
     let Kind::Option(inner, _) = kind else {
-        return default_scalar(kind, quote!(d.#fname));
+        return default_scalar(kind, &quote!(d.#fname));
     };
-    let some = default_scalar(inner, quote!((*v)));
+    let some = default_scalar(inner, &quote!((*v)));
     quote! {
         match &d.#fname {
             ::core::option::Option::None => ::common::FieldValue::Null,

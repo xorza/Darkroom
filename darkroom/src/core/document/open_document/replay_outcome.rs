@@ -18,7 +18,10 @@ pub(crate) struct ReplayOutcome {
     /// what *didn't* record an entry: that a dock op leaves the history
     /// untouched is a claim about the absence of a step, and no document
     /// state shows it.
-    #[cfg_attr(not(test), expect(dead_code))]
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "only the tests read whether a step was recorded")
+    )]
     pub(crate) took: bool,
     /// Whether the replayed steps stranded `CanvasGeometry`'s cross-frame
     /// caches.

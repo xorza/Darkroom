@@ -14,12 +14,16 @@ fn fixture() -> Compiled {
 /// The cone back in the fixture's own names, so an assertion says which nodes
 /// were reached rather than wherever the id sort happened to place them.
 fn reached<'n>(cone: &mut ConsumerCone, f: &'n Compiled, seeds: &[&str]) -> Vec<&'n str> {
-    seeded(cone, f, seeds.iter().map(|name| f.id(name)).collect())
+    seeded(
+        cone,
+        f,
+        &seeds.iter().map(|name| f.id(name)).collect::<Vec<_>>(),
+    )
 }
 
 /// [`reached`] for the seeds a fixture spells as raw ids — the one case a name
 /// cannot express, since the point is an id the program never held.
-fn seeded<'n>(cone: &mut ConsumerCone, f: &'n Compiled, seeds: Vec<NodeId>) -> Vec<&'n str> {
+fn seeded<'n>(cone: &mut ConsumerCone, f: &'n Compiled, seeds: &[NodeId]) -> Vec<&'n str> {
     cone.of(
         &f.program,
         seeds.iter().filter_map(|node_id| f.program.node(*node_id)),
@@ -51,7 +55,7 @@ fn the_cone_reaches_downstream_and_stops() {
         "an unwired node reaches only itself"
     );
     assert!(
-        seeded(cone, &f, vec![NodeId::unique()]).is_empty(),
+        seeded(cone, &f, &[NodeId::unique()]).is_empty(),
         "an id the program never held seeds nothing"
     );
 }

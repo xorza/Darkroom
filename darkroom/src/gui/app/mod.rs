@@ -161,7 +161,7 @@ impl App {
             requests: Requests::default(),
         };
         // Onto the Ui before frame 1, so palantir's own widgets paint right.
-        ui.set_theme(app.theme.palantir_theme.clone());
+        ui.set_theme(app.theme.palantir.clone());
         // ui.debug_overlay.damage_rect = true;
         app
     }
@@ -316,7 +316,7 @@ impl App {
     /// after `Editor::frame` has handed its own back, and `App::frame` spends
     /// both together.
     #[must_use]
-    fn pick_input_path(&mut self, pick: PathPick) -> Relayout {
+    fn pick_input_path(&mut self, pick: &PathPick) -> Relayout {
         let extensions: Vec<&str> = pick.config.extensions.iter().map(String::as_str).collect();
         let value = match pick.config.mode {
             FsPathMode::ExistingFile => dialogs::pick_existing_file(&extensions)

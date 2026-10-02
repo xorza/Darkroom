@@ -157,11 +157,11 @@ impl Inspectors {
                 .map_or(theme.card.min_width, |r| r.size.w);
             let pos = node.pos + Vec2::new(node_w + theme.floating_widget_gap, 0.0);
             let ncx = node.with_hover(wid::hovered(ui, node.id));
-            self.draw_one(ui, ncx, mode, pos);
+            Self::draw_one(ui, ncx, mode, pos);
         }
     }
 
-    fn draw_one(&self, ui: &mut Ui, ncx: NodeCtx<'_>, mode: InspectMode, pos: Vec2) {
+    fn draw_one(ui: &mut Ui, ncx: NodeCtx<'_>, mode: InspectMode, pos: Vec2) {
         let (theme, node) = (ncx.theme(), ncx);
         let logs = ncx.graph_ctx.run_state().logs(node.id);
         let error = ncx.graph_ctx.run_state().error(node.id);

@@ -337,7 +337,7 @@ fn type_mismatched_wiring_lowers_as_unbound_through_wildcard_chains() {
 }
 
 #[test]
-fn node_remove_test() -> TestResult {
+fn node_remove_test() {
     let mut g = TestGraph::sample();
 
     let sum = g.id("sum");
@@ -358,8 +358,6 @@ fn node_remove_test() -> TestResult {
         assert_ne!(dst.node_id, sum);
         assert_ne!(src.node_id, sum);
     }
-
-    Ok(())
 }
 
 /// The rule the editor applies before it lets a wire land: a back-edge closes
@@ -627,6 +625,16 @@ fn serialization_round_trips_a_graph_through_every_format() -> TestResult {
 /// graph's own mutations *assert* gets **checked** instead.
 #[test]
 fn loading_rejects_a_corrupt_graph() {
+    // A mirror of `Graph`'s wire shape. `RawValue` keeps every field's exact text,
+    // so the duplicated entry below is the only thing authored. The mirror names
+    // every field, so a new one on `Graph` fails its decode, which points here.
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct WireGraph {
+        nodes: Box<RawValue>,
+        bindings: Vec<Box<RawValue>>,
+        subscriptions: Box<RawValue>,
+    }
+
     let mut g = TestGraph::sample();
     g.graph.set_input_binding(
         InputPort::new(g.id("sum"), 0),
@@ -660,17 +668,6 @@ fn loading_rejects_a_corrupt_graph() {
 
     // Bindings decode from a sequence into a map, so a repeated input port is
     // caught during decode rather than by validation after it.
-    // `RawValue` keeps every field's exact text, so the duplicated entry is
-    // the only thing authored here. The mirror has to name every field, so a
-    // new one on `Graph` fails this decode — which points here, not at the
-    // assertion below.
-    #[derive(serde::Serialize, serde::Deserialize)]
-    struct WireGraph {
-        nodes: Box<RawValue>,
-        bindings: Vec<Box<RawValue>>,
-        subscriptions: Box<RawValue>,
-    }
-
     let encoded = ser::to_string(&TestGraph::sample().graph).unwrap();
     let mut wire: WireGraph = ron::from_str(&encoded).expect("the wire shape still matches");
     wire.bindings.push(wire.bindings[0].clone());

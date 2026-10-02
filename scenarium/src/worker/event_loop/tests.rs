@@ -106,7 +106,7 @@ async fn pause_gate_blocks_event_loop_iterations() {
         .expect("Expected first event");
 
     // Close the gate - event loop should pause
-    let _guard = pause_gate.close();
+    let guard = pause_gate.close();
 
     // Record count after closing gate
     time::sleep(Duration::from_millis(20)).await;
@@ -123,7 +123,7 @@ async fn pause_gate_blocks_event_loop_iterations() {
     );
 
     // Drop guard to reopen gate
-    drop(_guard);
+    drop(guard);
 
     // Wait for more events to flow
     time::sleep(Duration::from_millis(100)).await;

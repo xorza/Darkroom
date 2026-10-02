@@ -111,7 +111,7 @@ impl ActiveEventLoop {
                 );
                 EventLoopWake::TaskPanicked(LambdaPanic {
                     node_id,
-                    message: panic_message(error.into_panic()),
+                    message: panic_message(&*error.into_panic()),
                 })
             }
         }
@@ -131,7 +131,7 @@ impl ActiveEventLoop {
                     if error.is_panic() {
                         panics.push(LambdaPanic {
                             node_id,
-                            message: panic_message(error.into_panic()),
+                            message: panic_message(&*error.into_panic()),
                         });
                     } else {
                         assert!(
@@ -153,7 +153,7 @@ impl ActiveEventLoop {
     }
 }
 
-fn panic_message(payload: Box<dyn Any + Send>) -> String {
+fn panic_message(payload: &(dyn Any + Send)) -> String {
     if let Some(message) = payload.downcast_ref::<&str>() {
         (*message).to_string()
     } else if let Some(message) = payload.downcast_ref::<String>() {
