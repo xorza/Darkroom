@@ -333,7 +333,9 @@ pub(crate) fn demosaic(
                 if ry < 3 || ry + 3 >= rh {
                     return;
                 }
-                let col_start = 3 + ((ry + 1) & 1);
+                // The red and blue sites of this row, which step 4.1 reads back: the first
+                // non-green column at or past 3 (librtprocess: `3 + (fc(row, 1) & 1)`).
+                let col_start = 3 + (pattern.color_at(Vec2us::new(1, ry)) & 1);
                 let mut rx = col_start;
                 while rx < rw.saturating_sub(3) {
                     let idx = ry * rw + rx;
