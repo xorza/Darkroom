@@ -205,23 +205,6 @@ Same name, different algorithm, and a parameter whose numbers mean something els
       the per-survivor accumulation costs one extra multiply per survivor and makes the plane an
       actual variance.
 
-## 8. Rejection centres are the upper-middle order statistic, not the median
-
-- [ ] `SigmaClipConfig` uses `active[len / 2]`, `WinsorizedClipConfig` uses `working[mid]`, and
-      `LinearFitClipConfig`'s seed pass uses `median_f32_fast` — all the upper-middle element. For
-      even N that is biased high: at n = 10 the expected offset is +0.123σ, at n = 20 +0.087σ.
-
-- [ ] A symmetric band `center ± kσ` then sits high, so the **low** side clips harder than the high
-      side. For an astro stack that is backwards — satellites, cosmic rays and aircraft are all
-      high-side events, and the asymmetric constructors exist precisely to clip the high side harder.
-
-- [ ] `sorted_mad` is measured about the same shifted centre, which inflates it slightly and
-      partially masks the effect, but does not cancel it.
-
-- [ ] The median **combine** is correct: `run_stacking` calls `median_f32_mut`, which averages the
-      two middle values for even N. So the bias is confined to the rejection centres, and the two
-      conventions coexist in one module without either doc saying so.
-
 ## 9. GESD's automatic outlier cap is far below the references, worst exactly where the preset turns it on
 
 - [ ] `GesdConfig::max_outliers_for_size` is `(n/4).min(2 if n < 25 else 10)`. Siril's default is
@@ -399,8 +382,6 @@ Checked in detail and found right — recorded so a later reader does not re-der
 - [ ] No test pins percentile clipping's semantics against a stated definition, so finding 3 reads as
       intentional from inside the module.
 - [ ] No test that `LinearFitClipConfig` with `max_iterations = 1` performs a linear fit.
-- [ ] Nothing covers the even-N centre convention, in either direction — neither that the rejection
-      centre is the upper-middle nor that the median combine averages.
 - [ ] The memory tests model frame residency only; the normalization scratch of finding 6 is
       unmodelled and unmeasured.
 - [ ] `Weighting::Noise` has no test that a noisier frame actually receives less weight *after*

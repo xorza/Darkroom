@@ -1367,3 +1367,14 @@ fn weighted_mean_indexed_preserves_small_increments() {
         "precise mean {mean} must be within 0.1 of {expected} (naive loses ~0.47)"
     );
 }
+
+/// The rejection centre and its MAD are the median of an even count, not its upper-middle element.
+/// [1, 3, 7, 9]: centre (3 + 7)/2 = 5; deviations [4, 2, 2, 4] ranked [2, 2, 4, 4] → (2 + 4)/2 = 3.
+/// [1, 3, 7]: centre 3; deviations [2, 0, 4] ranked [0, 2, 4] → 2.
+#[test]
+fn rejection_centre_and_mad_are_medians_at_both_parities() {
+    assert_eq!(sorted_median(&[1.0, 3.0, 7.0, 9.0]), 5.0);
+    assert_eq!(sorted_mad(&[1.0, 3.0, 7.0, 9.0], 5.0), 3.0);
+    assert_eq!(sorted_median(&[1.0, 3.0, 7.0]), 3.0);
+    assert_eq!(sorted_mad(&[1.0, 3.0, 7.0], 3.0), 2.0);
+}

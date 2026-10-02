@@ -90,11 +90,25 @@ fn compact_within(
     write
 }
 
+/// Median of an **ascending-sorted** slice: the middle element, or the mean of the two middle ones
+/// for an even count. The rejection centre; the upper-middle element alone sits high by up to half
+/// the gap between the two middles, which makes a symmetric band clip the low side harder.
+fn sorted_median(sorted: &[f32]) -> f32 {
+    let m = sorted.len();
+    debug_assert!(m > 0);
+    if m % 2 == 1 {
+        sorted[m / 2]
+    } else {
+        f32::midpoint(sorted[m / 2 - 1], sorted[m / 2])
+    }
+}
+
 /// MAD (median absolute deviation from `center`) of an **ascending-sorted** slice, without a
 /// scratch buffer or quickselect. The absolute deviations split into two ascending runs — the
 /// elements below `center` read backwards, and those at/above `center` read forwards — so a
-/// two-pointer merge yields them in global ascending order. Advancing to rank `len/2` reproduces
-/// `median_fast` of the deviations exactly (the same upper-middle order statistic).
+/// two-pointer merge yields them in global ascending order up to rank `len / 2`; for an even
+/// count the MAD is the mean of the deviations at ranks `len / 2 − 1` and `len / 2`, the same
+/// median [`median_fast`](crate::math::statistics::median_fast) takes.
 fn sorted_mad(sorted: &[f32], center: f32) -> f32 {
     let m = sorted.len();
     debug_assert!(m > 0);
@@ -102,10 +116,12 @@ fn sorted_mad(sorted: &[f32], center: f32) -> f32 {
     let mut l = split; // left run consumes sorted[l - 1] going down
     let mut r = split; // right run consumes sorted[r] going up
     let target = m / 2;
+    let mut previous = 0.0f32;
     let mut dev = 0.0f32;
     for _ in 0..=target {
         let left = (l > 0).then(|| center - sorted[l - 1]);
         let right = (r < m).then(|| sorted[r] - center);
+        previous = dev;
         dev = match (left, right) {
             (Some(ld), Some(rd)) if ld <= rd => {
                 l -= 1;
@@ -126,7 +142,11 @@ fn sorted_mad(sorted: &[f32], center: f32) -> f32 {
             (None, None) => break,
         };
     }
-    dev
+    if m.is_multiple_of(2) {
+        f32::midpoint(previous, dev)
+    } else {
+        dev
+    }
 }
 
 /// Pixel rejection algorithm applied before combining.

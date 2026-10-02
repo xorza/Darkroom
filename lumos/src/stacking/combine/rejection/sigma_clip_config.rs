@@ -4,7 +4,9 @@ use crate::error::InvalidConfigField;
 use crate::math::statistics::mad_to_sigma;
 use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::stacking::combine::rejection::sigma_bounds::SigmaBounds;
-use crate::stacking::combine::rejection::{begin_rejection, sorted_mad, validate_max_iterations};
+use crate::stacking::combine::rejection::{
+    begin_rejection, sorted_mad, sorted_median, validate_max_iterations,
+};
 
 /// Configuration for sigma clipping.
 ///
@@ -102,7 +104,7 @@ impl SigmaClipConfig {
                 break;
             }
 
-            let center = active[len / 2];
+            let center = sorted_median(active);
             let sigma = mad_to_sigma(sorted_mad(active, center));
 
             if sigma < f32::EPSILON {

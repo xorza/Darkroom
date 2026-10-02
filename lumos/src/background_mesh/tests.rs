@@ -1,6 +1,7 @@
 use crate::background_mesh::tile_stats::TileComponent;
 use crate::background_mesh::workspace::internals::compute_grid;
 use crate::background_mesh::*;
+use crate::math::statistics::mad_to_sigma;
 
 /// Number of sigma-clipping iterations for tests.
 const TEST_SIGMA_CLIP_ITERATIONS: usize = 2;
@@ -526,21 +527,12 @@ fn mad_sigma_known_value() {
     let grid = make_grid(&pixels, 10);
     let stats = grid.stats[(0, 0)];
 
-    // Approximate median for even-length array returns the upper-middle element (5), the
-    // mean is 4.5, and |mean − median| = 0.5 < 0.3σ ≈ 1.33, so the Pearson mode fires:
-    // sky = 2.5·5 − 1.5·4.5 = 5.75. (The 0.5 "skew" is the fast-median convention on a
-    // 10-sample fixture; on real ≥1000-sample tiles the offset is negligible.)
-    assert!(
-        (stats.sky - 5.75).abs() < 0.1,
-        "Pearson-mode sky should be 5.75, got {}",
-        stats.sky
-    );
-    // Sigma should be ~4.4 (MAD=3 * 1.4826)
-    assert!(
-        (stats.sigma - 4.4).abs() < 0.5,
-        "Sigma should be ~4.4, got {}",
-        stats.sigma
-    );
+    // Ten copies of 0..9: the median is (4 + 5)/2 = 4.5, equal to the mean, so the Pearson mode
+    // gives sky = 2.5·4.5 − 1.5·4.5 = 4.5. The deviations |x − 4.5| are 0.5..4.5, twenty of
+    // each, so ranks 49 and 50 of the hundred are both 2.5: σ = 1.4826·2.5. No value lies past
+    // 3σ = 11.1 from the median, so the clip keeps all of them.
+    assert_eq!(stats.sky, 4.5);
+    assert_eq!(stats.sigma, mad_to_sigma(2.5f32));
 }
 
 #[test]

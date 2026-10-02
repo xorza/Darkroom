@@ -5,7 +5,7 @@
 use crate::error::InvalidConfigField;
 use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::stacking::combine::rejection::sigma_bounds::SigmaBounds;
-use crate::stacking::combine::rejection::{begin_rejection, compact_within};
+use crate::stacking::combine::rejection::{begin_rejection, compact_within, sorted_median};
 
 /// Configuration for winsorized sigma clipping.
 ///
@@ -78,10 +78,7 @@ impl WinsorizedClipConfig {
         working.extend_from_slice(values);
         working.sort_unstable_by(f32::total_cmp);
 
-        // `select_nth_unstable`'s median (index len/2) equals the sorted element at that index,
-        // so `working[mid]` reproduces the previous `median_fast` result exactly.
-        let mid = working.len() / 2;
-        let mut center = working[mid];
+        let mut center = sorted_median(working);
         let mut sigma = winsorized_stddev(working, center) * WINSORIZED_CORRECTION;
 
         if sigma < f32::EPSILON {
@@ -98,7 +95,7 @@ impl WinsorizedClipConfig {
                 *v = v.clamp(low_bound, high_bound);
             }
 
-            center = working[mid];
+            center = sorted_median(working);
             let sigma_new = winsorized_stddev(working, center) * WINSORIZED_CORRECTION;
 
             if sigma_new < f32::EPSILON {
