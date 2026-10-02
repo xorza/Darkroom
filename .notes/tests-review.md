@@ -132,9 +132,6 @@ Paths are relative to the repository root.
 - [ ] `darkroom/src/gui/pane/viewer/camera.rs:83-90`, `:106-111` — the "on a 2x display … physical px" cases never pass a scale factor, because `fit_viewport` and `zoom_about_pane_center` take none. These are the same logical-space computation on a smaller image, labelled as DPI coverage. Rewrite the comments to say what is computed, or test the scale path where it actually lives.
 - [ ] `darkroom/src/gui/pane/graph/gesture/new_node/tests.rs:69-76` — the same doc paragraph appears twice on `assert_fits`.
 
-## Nondeterministic and environment-dependent tests
-Unseeded randomness, wall-clock waits, fixed shared paths and host-specific state make a result unrepeatable or let a broken path pass.
-
 ## Loose tolerances where the exact answer is known
 Deterministic, often noiseless fixtures are asserted with bands that have no stated reason. A regression of the size of the band passes. In some cases the band hides a production bug.
 
@@ -489,9 +486,6 @@ Paths are relative to the repository root.
 - [ ] `darkroom/src/gui/pane/graph/gesture/pan_zoom/tests.rs:45-99`, `:101-151` — the four `scroll_to_zoom_factor` tests and the two pivot-invariance tests should each be one table.
 - [ ] `darkroom/src/gui/pane/graph/gesture/breaker/tests.rs:132-173` — the three `intersects_cubic_*` cases should be one table.
 
-## Test-only code in production, and dead test helpers
-Production items that exist only to be tested, and harness items that nothing calls.
-
 ## Placement, gating and bench layout
 Test, internals and bench code sits where the rules say it must not, or is gated so that it never runs.
 
@@ -500,9 +494,6 @@ Paths are relative to `lumos/src/stacking/`, except those that start with `lumos
 
 - [ ] `combine/stack/tests.rs:1807-2107` (`norm_*`, `global_norm_*`, `multiplicative_*`, `normalized_stacking_rgb`, `dispatch_*`) tests `normalization::compute_frame_norms`, so normalization coverage is split across two files. Move it to `combine/normalization/tests.rs`.
 - [ ] `combine/cache/tests.rs:709-837` tests `FrameStats::measure` (frame_store), not the cache.
-
-## Unused fixtures and stray test output
-Checked-in files that nothing reads, and files that tests write into the tree.
 
 ## Stale, wrong and change-narrating comments
 Comments that describe code that no longer exists, contradict the asserted values, or narrate history.
