@@ -46,9 +46,7 @@ impl PreviewImage {
             context.check_cancelled(path)?;
             let alpha_dropped = decoded.desc().color_format.channel_count == ChannelCount::Rgba;
             let target = f32_target_format(&decoded);
-            let image = decoded
-                .convert(target)
-                .expect("standard image converts to its f32 channel format");
+            let image = decoded.convert(target);
             let metadata = ImageMetadata {
                 provenance: Some(ImageProvenance {
                     container: standard_container(&extension),

@@ -42,8 +42,7 @@ fn detect_rho_opiuchi() {
 
     let img = imaginarium::Image::read_file(&image_path)
         .expect("Failed to load image")
-        .convert(ColorFormat::L_F32)
-        .expect("Failed to convert to grayscale");
+        .convert(ColorFormat::L_F32);
 
     let linear_image = linear_image_from_l_f32(&img);
     println!(
@@ -87,8 +86,7 @@ fn detect_rho_opiuchi() {
     // Load original image for visualization (RGB_F32 for drawing functions)
     let mut output_img = imaginarium::Image::read_file(&image_path)
         .expect("Failed to load image")
-        .convert(ColorFormat::RGB_F32)
-        .expect("Failed to convert to RGB_F32");
+        .convert(ColorFormat::RGB_F32);
 
     // Draw circles around all detected stars
     for star in &result.stars {
@@ -104,9 +102,7 @@ fn detect_rho_opiuchi() {
     println!("Drew {} circles", result.stars.len());
 
     // Convert back to RGB_U8 for saving
-    let output_img = output_img
-        .convert(ColorFormat::RGB_U8)
-        .expect("Failed to convert to RGB_U8");
+    let output_img = output_img.convert(ColorFormat::RGB_U8);
 
     // Save output
     let output_path = test_output_path("rho-opiuchi-detection.jpg");
@@ -147,8 +143,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
 
     let img = imaginarium::Image::read_file(&image_path)
         .expect("Failed to load image")
-        .convert(ColorFormat::L_F32)
-        .expect("Failed to convert to grayscale");
+        .convert(ColorFormat::L_F32);
 
     let linear_image = linear_image_from_l_f32(&img);
     let width = linear_image.width();
@@ -307,8 +302,7 @@ fn quick_bench_detect_rho_opiuchi(b: quickbench::Bencher) {
     // Preload image outside of benchmark loop
     let img = imaginarium::Image::read_file(&image_path)
         .expect("Failed to load image")
-        .convert(ColorFormat::L_F32)
-        .expect("Failed to convert to grayscale");
+        .convert(ColorFormat::L_F32);
 
     let linear_image = linear_image_from_l_f32(&img);
     println!(

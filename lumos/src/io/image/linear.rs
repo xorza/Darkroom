@@ -1,7 +1,7 @@
 use std::ops::SubAssign;
 use std::path::Path;
 
-use imaginarium::{Buffer2, ChannelCount, ChannelType, Image};
+use imaginarium::{Buffer2, ChannelCount, Image};
 use rayon::prelude::*;
 
 use crate::image_ops::SAMPLES_PER_BLOCK;
@@ -69,7 +69,7 @@ impl LinearImage {
 
             let decoded = read_standard_image(path)?;
             context.check_cancelled(path)?;
-            if decoded.desc().color_format.channel_type != ChannelType::Float {
+            if !decoded.desc().color_format.sample_type.is_float() {
                 return Err(scientific_rejection(
                     path,
                     "scientific raster input must be an explicitly declared floating-point TIFF",
@@ -404,10 +404,7 @@ impl From<&Image> for LinearImage {
         if image.desc().color_format == target {
             Self::from_f32_image(image)
         } else {
-            let converted = image
-                .convert_to(target)
-                .expect("image converts to its f32 channel format");
-            Self::from_f32_image(&converted)
+            Self::from_f32_image(&image.convert_to(target))
         }
     }
 }

@@ -92,8 +92,8 @@ pub(crate) fn gray_to_rgb(pixels: &[f32], size: Size2us, tone: ToneMap) -> Image
 /// Converts to `RGB_U8` if needed since some formats don't support float data.
 pub(crate) fn save_image(image: Image, path: &Path) {
     let out = output_path(path);
-    let image_u8 = if image.desc().color_format.channel_type == imaginarium::ChannelType::Float {
-        image.convert(ColorFormat::RGB_U8).unwrap()
+    let image_u8 = if image.desc().color_format.sample_type.is_float() {
+        image.convert(ColorFormat::RGB_U8)
     } else {
         image
     };
@@ -180,7 +180,6 @@ pub(crate) fn save_linear(image: &crate::io::image::linear::LinearImage, name: &
     std::fs::create_dir_all(path.parent().unwrap()).expect("create test_output dir");
     Image::from(image)
         .convert(ColorFormat::RGB_U8)
-        .expect("convert to RGB_U8")
         .save_file(&path)
         .expect("save png");
     eprintln!("wrote {}", path.display());

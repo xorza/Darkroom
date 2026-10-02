@@ -56,8 +56,9 @@ macro_rules! dispatch {
     (@available sse4_1) => {
         ::imaginarium::cpu_features::has_sse4_1()
     };
+    // SSE2 is part of the x86_64 baseline.
     (@available sse2) => {
-        ::imaginarium::cpu_features::has_sse2()
+        true
     };
 
     (@x86 $feat:ident, $call:expr) => {

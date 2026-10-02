@@ -19,7 +19,7 @@ edition = "2024"
 common = { path = "common" }
 quickbench = { path = "quickbench" }
 scenarium = { path = "scenarium" }
-imaginarium = { path = "imaginarium", features = ["wgpu"] }
+imaginarium = { path = "imaginarium" }
 lens = { path = "lens" }
 lumos = { path = "lumos" }
 palantir = { path = "palantir" }

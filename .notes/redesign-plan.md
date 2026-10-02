@@ -393,7 +393,7 @@ Every persisted format the plan changes, and what an old file does after the cha
 | Lumos frame cache (sidecars, planes) | W2 (`CacheKey`, frame 0 sidecars, null plane) | `SIDECAR_FORMAT` 1 → 2, plus `DECODE_VERSION` in the key | Cache miss; the frame decodes again. Persistent cache entries of the old format are replaced. |
 | Lens master cache marker | W1, W2 (`FileIdentity`) | marker carries the master format version | Cache miss; rebuild. |
 | Scenarium disk blobs | W9 (digest of disabled producers) | `FORMAT_VERSION` 9 → 10 | Cache miss; recompute. |
-| Lens image codec payload | W10 (layout byte) | codec version up | Cache miss; recompute. |
+| Lens image codec payload | W11 (format bytes, done: version 3), W10 (layout byte) | codec version up | Cache miss; recompute. |
 | Darkroom document (graph bindings) | W9 (signature digest), W10 (D12 ports) | document carries per-func signature digests | A document with changed ports fails loudly naming the node; one with unchanged funcs loads. |
 | Darkroom preferences | W13 (load error is reported) | none | A parse error is reported and the file is kept, not overwritten. |
 | Undo history | W13 | not persisted | — |
@@ -506,3 +506,9 @@ Decisions taken during implementation that the plan did not foresee, newest last
 - **Sample domains convert instead of matching exactly (W1, done early).** The real dataset failed calibration: each RAW frame is normalized by its own `maximum − black`, the black level moves between frames (1019, 1023, 1024), and the domain check demanded equal spans — so the real-data pipeline had failed since 2026-08-12. `SampleDomain` now records whether its scale was declared or assumed; two declared scales in one unit convert by their exact ratio, an assumed one must match. `FitsFloatScale::Normalized` counts as assumed: "already in [0, 1]" says nothing about ADU, and declaring it would convert a Siril-normalized frame against 16-bit ADU by 65 535. Masters record `LUMSCALE`; CFA FITS version 2.
 - **RAW normalization divides by an exact span (W5 item, done with W1).** The f32 reciprocal rounded twice and made the span read back as 15359.999.
 - **Real-data fixture.** `stacked_light.tiff` is produced by `bench_full_pipeline` (TR item still open). It was regenerated once so the real-data tests could run; 22 of 24 pass. The two failures are logged in `ISSUES.md`.
+- **`ColorFormat` is `ChannelCount × SampleType`, not a 9-variant enum (W11).** All nine products are formats, so the struct admits no invalid value, and most dispatch keys on the sample type alone. `ChannelSize`/`ChannelType` are gone.
+- **Luminance rounds (W11).** The Q16 Rec. 709 sum rounded down; it now rounds half to even like every other narrowing, and the weights are derived from the standard's decimals at compile time.
+- **NaN passes every clamp the way `f32::clamp` does (W11).** The SSE/AVX clamps put the value second, where `maxps`/`minps` return it for a NaN. Test comparisons treat any NaN as equal to any NaN, since Rust leaves NaN payloads unspecified.
+- **The GPU transform interpolates in native units, like the CPU (W11).** GPU tests compare with the CPU within 1 LSB for integers and `1e-6` for `f32` (WGSL division is 2.5 ULP and may fuse multiply-add).
+- **Lens image codec version 3 (W11).** The format is two header bytes now; old cache entries miss (section 5).
+
