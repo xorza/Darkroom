@@ -624,7 +624,7 @@ fn both_front_ends_report_the_same_stages() {
 /// The always-run counterpart to `streaming_disk_tier_matches_ram_on_real_lights`, which needs
 /// the `real-data` feature and its dataset.
 ///
-/// Both runs read the same mono-CFA FITS lights and differ only in `available_memory`, the input
+/// Both runs read the same mono-CFA FITS lights and differ only in `memory_override`, the input
 /// `MemoryPlan::plan` keys its tier decision on. RANSAC is seeded, removing the pipeline's only other
 /// source of nondeterminism, so any difference the assertions find is a real divergence.
 #[test]
@@ -673,11 +673,11 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
     config.registration.ransac.seed = Some(0x5EED_0F5E);
 
     let mut ram_config = config.clone();
-    ram_config.stack.cache.available_memory = Some(u64::MAX);
+    ram_config.stack.cache.memory_override = Some(u64::MAX);
     ram_config.stack.cache.cache_dir = scratch.join("ram_cache");
 
     let mut streaming_config = config;
-    streaming_config.stack.cache.available_memory = Some(1);
+    streaming_config.stack.cache.memory_override = Some(1);
     streaming_config.stack.cache.cache_dir = scratch.join("streaming_cache");
     // Kept so the premise assertion below can observe that the spill tier really ran; the whole
     // scratch tree goes away when `scratch` drops.
@@ -865,7 +865,7 @@ fn streaming_disk_tier_matches_ram_on_real_lights() {
 
     // RAM tier: huge memory budget → the all-in-memory path.
     let mut ram_cfg = config.clone();
-    ram_cfg.stack.cache.available_memory = Some(u64::MAX);
+    ram_cfg.stack.cache.memory_override = Some(u64::MAX);
     let ram = calibrate_align_stack(
         lights,
         &masters,
@@ -877,7 +877,7 @@ fn streaming_disk_tier_matches_ram_on_real_lights() {
 
     // Disk tier: a 1-byte budget forces the streaming disk path.
     let mut disk_cfg = config;
-    disk_cfg.stack.cache.available_memory = Some(1);
+    disk_cfg.stack.cache.memory_override = Some(1);
     let disk = calibrate_align_stack(
         lights,
         &masters,

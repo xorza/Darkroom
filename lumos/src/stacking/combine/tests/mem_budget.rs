@@ -1,15 +1,10 @@
-//! Whether the combine respects its memory budget, across two levels.
+//! Whether the tier a budget selects changes the combine: the disk (spill + mmap) and in-memory
+//! tiers must combine the same frames into an identical master. This exercises the real
+//! [`load_to_disk`]/[`load_in_memory`] loaders that the in-memory `stack_images` bypasses.
 //!
-//! - **Budget accounting** ([`load_budget_is_respected_across_configs`]): a deterministic sweep
-//!   over (frame size, count, budget), asserting the loader's chosen decode concurrency never lets
-//!   projected peak load heap exceed the usable budget — the invariant behind the ~2× overshoot fix.
-//! - **Tier correctness** ([`disk_and_memory_tiers_produce_identical_masters`]): the disk (spill +
-//!   mmap) and in-memory tiers must combine the same frames into an identical master — the tier a
-//!   budget selects is an implementation detail that must never change the result. This exercises
-//!   the real [`load_to_disk`]/[`load_in_memory`] loaders that the in-memory `stack_images` bypasses.
-//!
-//! The live peak-RSS measurement is the `#[ignore]`d `master_stack_memory_probe` test in
-//! `mem_budget_probe`; here we assert the deterministic invariants instead.
+//! The budget accounting itself is `memory::tests::planned_concurrency_never_overshoots_its_tier_budget`,
+//! which sweeps the loader's plan too; the live peak-RSS measurement is the `#[ignore]`d
+//! `master_stack_memory_probe` test in `mem_budget_probe`.
 //!
 //! [`load_to_disk`]: crate::stacking::combine::cache
 //! [`load_in_memory`]: crate::stacking::combine::cache
@@ -21,7 +16,6 @@ use fits_well::image::Image;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::math::size2us::Size2us;
-use crate::memory::{fits_in_memory, load_concurrency, memory_budget};
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::stack::stack;
 use crate::stacking::progress::ProgressCallback;
@@ -29,43 +23,6 @@ use common::TempDir;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
-
-/// The tiered loader's core guarantee, as an invariant sweep: for any (frame size, count, budget),
-/// the chosen concurrency must not let peak *load* heap exceed the usable budget. Project that peak
-/// — resident set + concurrency × the real 2× per-decode transient — and assert it fits, except at
-/// the irreducible floor where not even one decode fits the budget (concurrency pinned to 1). This
-/// is what the `master_stack_memory_probe` measured live; here it's deterministic. It fails if the
-/// divisor ever reverts to the resident frame size (the ~2× overshoot bug), since concurrency would
-/// then double and the projection blow the budget.
-#[test]
-fn load_budget_is_respected_across_configs() {
-    const MIB: u64 = 1024 * 1024;
-    let workers = 32;
-    for &frame_mb in &[16u64, 64, 137, 512] {
-        let frame = (frame_mb * MIB) as usize;
-        let transient = 2 * frame; // matches DECODE_TRANSIENT_FACTOR in `cache`
-        for &count in &[4usize, 12, 24, 60] {
-            for &budget_gb in &[1u64, 2, 4, 8, 16] {
-                let budget = budget_gb * 1024 * MIB;
-                let usable = memory_budget(budget);
-                let resident_frames = if fits_in_memory(frame, count, budget) {
-                    count
-                } else {
-                    0
-                };
-                let c = load_concurrency(frame, transient, resident_frames, budget, workers);
-                let projected = resident_frames as u64 * frame as u64 + c as u64 * transient as u64;
-                assert!(
-                    projected <= usable || c == 1,
-                    "frame={frame_mb}MB count={count} budget={budget_gb}GB: concurrency {c} \
-                     projects {}MB peak > {}MB usable",
-                    projected / MIB,
-                    usable / MIB,
-                );
-            }
-        }
-    }
-}
 
 /// Write a spatially-uniform 16-bit FITS frame (`value` in every pixel) to `path`.
 fn write_const_fits(path: &Path, size: Size2us, value: u16) {
@@ -81,7 +38,7 @@ fn write_const_fits(path: &Path, size: Size2us, value: u16) {
     fs::write(path, &buf).expect("write fits");
 }
 
-/// The spill tier (`available_memory = 1`) and the resident tier (`u64::MAX`) must combine the same
+/// The spill tier (`memory_override = 1`) and the resident tier (`u64::MAX`) must combine the same
 /// frames into the same master, and that master must equal the plain mean of the frames — verified
 /// through the loader itself, so FITS normalization can't skew the expectation.
 #[test]
@@ -103,9 +60,9 @@ fn disk_and_memory_tiers_produce_identical_masters() {
         })
         .collect();
 
-    let master = |available_memory: u64, tag: &str| {
+    let master = |memory_override: u64, tag: &str| {
         let mut config = StackConfig::mean(); // Mean, no rejection → exact average.
-        config.cache.available_memory = Some(available_memory);
+        config.cache.memory_override = Some(memory_override);
         config.cache.cache_dir = dir.join(format!("cache_{tag}"));
         stack(
             &paths,

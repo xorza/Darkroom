@@ -7,10 +7,11 @@ use common::CancelToken;
 use crate::io::cancelled::Cancelled;
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage};
 use crate::io::image::error::ImageError;
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
-use crate::memory;
-use crate::memory::MemoryPlan;
+use crate::memory::run_memory::RunMemory;
+use crate::memory::{MemoryPlan, PerFrameBytes, RunShape};
 use crate::stacking::calibration_masters::CalibrationMasters;
 use crate::stacking::calibration_masters::cosmic_ray::reject_cosmic_rays;
 use crate::stacking::combine::error::Error as StackError;
@@ -50,15 +51,10 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     }
     config.validate()?;
     let total = light_paths.len();
-    // Sample the machine once, here, and hand the resolved config to every stage below, so the
-    // tier decision and the decode budget are derived from the same figure. An unresolved config
-    // samples lazily and `LoadContext::default()` samples again, which can disagree.
-    let system_available = memory::available_memory();
-    let config = &config.with_resolved_memory(system_available);
-    let available = config.stack.cache.planning_memory();
-    // From the system reading, not `available`: the config's figure is a tier-planning override
-    // and must not shrink what a single FITS decode may allocate.
-    let load_context = LoadContext::new(cancel.clone(), memory::memory_budget(system_available));
+    // Sample the machine once, here, and hand the reading to every stage below, so the tier
+    // decision, the chunk sizes and the decode ceiling are derived from the same figure.
+    let memory = RunMemory::read(config.stack.cache.memory_override);
+    let load_context = memory.load_context(cancel.clone());
 
     // Peek the sensor dimensions (no decode) so the tier is decided before any frame is read.
     let frame_info =
@@ -68,18 +64,27 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
                 source: Box::new(source),
             }
         })?;
-    let plan = MemoryPlan::plan(
-        frame_info.dimensions.pixel_count() * size_of::<f32>(),
-        frame_info.cfa_type.demosaic_memory(frame_info.dimensions),
-        total,
-        rayon::current_num_threads(),
-        available,
+    let plane_bytes = frame_info.dimensions.pixel_count() * size_of::<f32>();
+    let demosaic = frame_info.cfa_type.demosaic_memory(frame_info.dimensions);
+    let output = ImageDimensions::new(
+        frame_info.dimensions.size(),
+        frame_info.cfa_type.num_colors(),
     );
-    let tier = FrameTier::for_plan(&plan, &config.stack.cache)?;
+    let plan = MemoryPlan::plan(
+        RunShape {
+            frame_count: total,
+            decode: demosaic,
+            warp: Some(PerFrameBytes::new(plane_bytes, demosaic)),
+            output_bytes: config.stack.quality.resident_bytes(output),
+        },
+        rayon::current_num_threads(),
+        memory.planning(),
+    );
+    let tier = FrameTier::for_plan(&plan, &config.stack.cache, memory)?;
 
     tracing::info!(
         frames = total,
-        available_mb = available / (1024 * 1024),
+        planning_mb = memory.planning() / (1024 * 1024),
         concurrency = plan.decode_concurrency,
         spilling = tier.spills(),
         "Loading, calibrating and demosaicing raw lights (RAW decode — the slow phase)"

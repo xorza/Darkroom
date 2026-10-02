@@ -23,6 +23,8 @@ use crate::io::image::error::ImageError;
 use crate::io::image::load_context::LoadContext;
 use crate::math::size2us::Size2us;
 use crate::memory;
+use crate::memory::run_memory::RunMemory;
+use crate::memory::{MemoryPlan, RunShape};
 use crate::stacking::calibration_masters::error::CalibrationError;
 use crate::stacking::combine::cache::FrameCache;
 use crate::stacking::combine::config::StackConfig;
@@ -284,23 +286,10 @@ pub struct CalibrationMasters {
     defect_map: Option<DefectMap>,
 }
 
-/// Frame-weighted share of the memory budget for one role when [`CalibrationMasters::from_files`]
-/// loads the roles concurrently: proportional to the role's frame count. Two properties matter — the
-/// shares sum to at most `available` (flooring, so concurrent loads can't overcommit RAM), and a
-/// role fits its share *exactly* when the whole set fits the budget (so no role is pushed to disk
-/// while the total fits). An empty role gets nothing; a degenerate `total == 0` gets the whole
-/// budget (no divide-by-zero).
-fn weighted_budget(available: u64, role_frames: usize, total: usize) -> u64 {
-    if total == 0 {
-        return available;
-    }
-    // `available · role_frames` can't overflow u64 for any real RAM size × frame count.
-    available * role_frames as u64 / total as u64
-}
-
 /// Whether all of `frames`' roles fit in RAM at once — the in-memory-vs-disk decision for the whole
-/// set. The per-frame footprint is peeked from one frame's header (all calibration frames share a
-/// sensor) without a full decode. No frames, or a peek failure, returns `true`: per-role tiering is
+/// set, by the one tier rule ([`MemoryPlan`]): every frame resident, plus each role's master. The
+/// per-frame footprint is peeked from one frame's header (all calibration frames share a sensor)
+/// without a full decode. No frames, or a peek failure, returns `true`: per-role tiering is
 /// memory-safe regardless, so this only governs whether to *optimize* for staying in RAM.
 ///
 /// The footprint includes the two quality planes a frame carries when its source declared pixels
@@ -311,7 +300,7 @@ fn weighted_budget(available: u64, role_frames: usize, total: usize) -> u64 {
 fn frames_fit_in_memory<P: AsRef<Path> + Sync>(
     frames: &CalibrationSet<&[P]>,
     total_frames: usize,
-    available: u64,
+    memory: RunMemory,
     context: &LoadContext,
 ) -> Result<bool, Error> {
     let Some(first) = frames
@@ -322,12 +311,21 @@ fn frames_fit_in_memory<P: AsRef<Path> + Sync>(
     else {
         return Ok(true);
     };
+    let roles = frames.iter().filter(|(_, paths)| !paths.is_empty()).count();
     match CfaFrameInfo::from_file(first.as_ref(), context) {
-        Ok(info) => Ok(memory::fits_in_memory(
-            FramePeek::from(info).resident_bytes(),
-            total_frames,
-            available,
-        )),
+        Ok(info) => {
+            let peek = FramePeek::from(info);
+            let shape = RunShape::decoded_stack(
+                total_frames,
+                peek.resident_bytes(),
+                memory::frame_bytes(peek.dimensions),
+                roles * QualityPlanes::IMAGE_ONLY.resident_bytes(peek.dimensions),
+            );
+            Ok(
+                MemoryPlan::plan(shape, rayon::current_num_threads(), memory.planning())
+                    .fits_in_ram,
+            )
+        }
         Err(ImageError::Cancelled { .. }) => Err(Error::Cancelled),
         Err(_) => Ok(true),
     }
@@ -344,15 +342,14 @@ struct RoleStack<'a, P> {
 }
 
 impl<P: AsRef<Path> + Sync> RoleStack<'_, P> {
-    /// Charge this role its frame-weighted share of `available`, for roles that load concurrently.
-    fn with_shared_budget(mut self, available: u64, total_frames: usize) -> Self {
-        self.config.cache.available_memory =
-            Some(weighted_budget(available, self.paths.len(), total_frames));
-        self
-    }
-
-    fn run(self, cancel: CancelToken) -> Result<Option<CfaImage>, Error> {
-        stack_cfa_master(self.paths, self.config, ProgressCallback::default(), cancel)
+    fn run(self, memory: RunMemory, cancel: CancelToken) -> Result<Option<CfaImage>, Error> {
+        stack_master(
+            self.paths,
+            self.config,
+            memory,
+            ProgressCallback::default(),
+            cancel,
+        )
     }
 }
 
@@ -372,6 +369,18 @@ pub fn stack_cfa_master(
     progress: ProgressCallback,
     cancel: CancelToken,
 ) -> Result<Option<CfaImage>, Error> {
+    let memory = RunMemory::read(config.cache.memory_override);
+    stack_master(paths, config, memory, progress, cancel)
+}
+
+/// [`stack_cfa_master`] under a memory figure the caller read.
+fn stack_master(
+    paths: &[impl AsRef<Path> + Sync],
+    config: StackConfig,
+    memory: RunMemory,
+    progress: ProgressCallback,
+    cancel: CancelToken,
+) -> Result<Option<CfaImage>, Error> {
     // `None` rather than `Error::NoFrames`: an absent calibration role is normal, and this is
     // the one thing `combine_cached` cannot decide for us.
     if paths.is_empty() {
@@ -387,7 +396,7 @@ pub fn stack_cfa_master(
     // `cancel` rides on the cache from construction, so the RAW-decode load loop
     // polls it too (not just the combine).
     let product = combine_cached(&config, paths.len(), "cfa paths", || {
-        FrameCache::from_cfa_paths(paths, &config.cache, config.normalization, progress, cancel)
+        FrameCache::from_cfa_paths(paths, &config, memory, progress, cancel)
     })?;
 
     Ok(Some(product.into_cfa_master()))
@@ -569,12 +578,12 @@ impl CalibrationMasters {
             return Err(Error::Cancelled);
         }
         let total_frames: usize = frames.iter().map(|(_, paths)| paths.len()).sum();
-        // One reading for the whole calibration run: the fit check below and the decode ceiling
-        // the context carries are both sized against it, so no role can be tiered against one
-        // figure and decoded against another.
-        let available = memory::available_memory();
-        let context = LoadContext::new(cancel.clone(), memory::memory_budget(available));
-        let concurrent = frames_fit_in_memory(&frames, total_frames, available, &context)?;
+        // One reading for the whole calibration run: the fit check below, every role's tiering and
+        // the decode ceiling are all sized against it, whether the roles run side by side or one
+        // after another.
+        let memory = RunMemory::read(None);
+        let context = memory.load_context(cancel.clone());
+        let concurrent = frames_fit_in_memory(&frames, total_frames, memory, &context)?;
 
         // The one role → preset table. Each preset carries its own small-frame fallback
         // (`StackConfig::small_n`), so no frame-count special-casing is needed here.
@@ -602,11 +611,12 @@ impl CalibrationMasters {
         // its cache frees before the next one loads, so a share would push a role that fits in RAM
         // onto disk for nothing.
         let jobs = jobs.into_roles().map(|(_, job)| {
-            if concurrent {
-                job.with_shared_budget(available, total_frames)
+            let budget = if concurrent {
+                memory.share(job.paths.len(), total_frames)
             } else {
-                job
-            }
+                memory
+            };
+            (job, budget)
         });
 
         // Independent stacks on the shared rayon pool — work-stealing interleaves their parallel
@@ -616,11 +626,11 @@ impl CalibrationMasters {
         // role by stacking it with `stack_cfa_master`.
         let masters: Vec<Option<CfaImage>> = if concurrent {
             jobs.into_par_iter()
-                .map(|job| job.run(cancel.clone()))
+                .map(|(job, budget)| job.run(budget, cancel.clone()))
                 .collect::<Result<_, Error>>()?
         } else {
             jobs.into_iter()
-                .map(|job| job.run(cancel.clone()))
+                .map(|(job, budget)| job.run(budget, cancel.clone()))
                 .collect::<Result<_, Error>>()?
         };
 

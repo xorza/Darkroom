@@ -41,7 +41,11 @@ use std::time::Instant;
 use common::CancelToken;
 use glam::DVec2;
 
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
+use crate::io::raw::demosaic::DemosaicMemory;
+use crate::memory;
+use crate::memory::{PerFrameBytes, memory_budget};
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::stack::stack;
 use crate::stacking::pipeline::align::align_and_stack;
@@ -50,6 +54,7 @@ use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::resample::warp;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
+use crate::stacking::stack_product::quality_planes::QualityPlanes;
 use crate::testing::mem_probe::{
     BudgetChoice, MB, RssSampler, budget_ceiling_mb, ensure_frames, env_parse, measured,
     parse_budget, two_x_ceiling_mb,
@@ -95,8 +100,8 @@ fn pipeline_stack_budget_probe() -> io::Result<()> {
         "resident set  {:.2} GB per stage if fully in-memory (Σ frames as f32)",
         resident_if_ram as f64 / 1e9
     );
-    if let Some(avail) = budget.available_memory {
-        let usable = (u128::from(avail) * 75 / 100) as u64;
+    if let Some(avail) = budget.memory_override {
+        let usable = memory_budget(avail);
         let tier = if resident_if_ram <= usable {
             "in-memory (resident)"
         } else {
@@ -129,7 +134,7 @@ fn pipeline_stack_budget_probe() -> io::Result<()> {
     let start = Instant::now();
     for (k, stage) in stages.iter().enumerate() {
         let mut config = StackConfig::sigma_clipped(3.0);
-        config.cache.available_memory = budget.available_memory;
+        config.cache.memory_override = budget.memory_override;
         // A per-stage cache dir under the (real-disk) base, removed on drop so temp disk doesn't grow
         // across stages either. Distinct dirs avoid any cross-stage file reuse confusing the tiering.
         config.cache.cache_dir = base.join(format!("cache_{k}"));
@@ -186,11 +191,6 @@ fn pipeline_stack_budget_probe() -> io::Result<()> {
 
     Ok(())
 }
-
-/// Generous per-frame working set, in f32 planes, for a concurrent detector: the star-detection pool
-/// (~6 image planes) plus slack for its transient (non-pooled) allocations. The align probe's peak is
-/// bounded by `threads ×` this (concurrent detection) plus the resident warped set.
-const DETECT_WORKING_PLANES: usize = 8;
 
 #[test]
 #[ignore = "manual live peak-RSS probe; run explicitly with a filter, one config per process"]
@@ -278,14 +278,21 @@ fn align_stack_memory_probe() {
         anon_mb as f64 / n as f64
     );
 
-    // The RAM path's working set: the resident warped frames (channels + one coverage plane each)
-    // that `stack_images` holds, plus concurrent detection scratch (`threads ×` the per-detector
-    // pool). Peak must stay within a generous 2× of that — a per-frame buffer leak in detection,
-    // warp, or the combine would push it over.
+    // The RAM path's working set, by the planner's own accounting: the resident warped frames
+    // (pixels plus their two quality planes) and the combine's output beside them, plus
+    // `threads ×` one frame's working set (the warp's source and output, or the detector's pool).
+    // Peak must stay within a generous 2× of that — a per-frame buffer leak in detection, warp, or
+    // the combine would push it over.
     let threads = rayon::current_num_threads();
-    let resident_planes = (n * (channels + 1)) as u64;
-    let working_planes = (DETECT_WORKING_PLANES * threads) as u64;
-    let ceiling_mb = two_x_ceiling_mb(resident_planes * frame_bytes, working_planes * frame_bytes);
+    let dimensions = ImageDimensions::new(size, channels);
+    let decoded = DemosaicMemory {
+        output_bytes: memory::frame_bytes(dimensions),
+        peak_bytes: memory::frame_bytes(dimensions),
+    };
+    let per_frame = PerFrameBytes::new(frame_bytes as usize, decoded);
+    let resident = (n * per_frame.warped + QualityPlanes::ALL.resident_bytes(dimensions)) as u64;
+    let working = (threads * per_frame.working) as u64;
+    let ceiling_mb = two_x_ceiling_mb(resident, working);
 
     assert!(
         result.alignment.registered >= 2,

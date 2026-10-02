@@ -6,8 +6,6 @@ pub(crate) mod sample;
 pub(crate) mod set_facts;
 pub(crate) mod validation;
 
-use std::sync::OnceLock;
-
 use common::CancelToken;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
@@ -19,16 +17,16 @@ use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
+use crate::memory::run_memory::RunMemory;
 use crate::stacking::combine::cache::core::{
-    CacheCore, ChunkContext, coverage_chunk_memory_layout, quality_plane_chunks,
+    CacheCore, CacheTier, ChunkContext, coverage_chunk_memory_layout, quality_plane_chunks,
     weighted_chunk_memory_layout,
 };
 use crate::stacking::combine::cache::loader::LoadedCache;
 use crate::stacking::combine::cache::sample::{CombineScratch, CombinedSample};
 use crate::stacking::combine::cache::set_facts::SetFacts;
 use crate::stacking::combine::cache::validation::validate_frame;
-use crate::stacking::combine::cache_config::CacheConfig;
-use crate::stacking::combine::config::Normalization;
+use crate::stacking::combine::config::{Normalization, StackConfig};
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::error::check_cancel;
 use crate::stacking::combine::normalization::{FrameNorm, compute_frame_norms};
@@ -36,7 +34,6 @@ use crate::stacking::combine::pixel_coverage::PixelCoverage;
 use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::stacking::combine::stack::StackFrame;
 use crate::stacking::frame_store::StoredFrame;
-use crate::stacking::frame_store::spill_directory::SpillDirectory;
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::stack_product::StackProduct;
 use crate::stacking::stack_product::coverage::Coverage;
@@ -79,10 +76,9 @@ pub(crate) struct FrameCache {
 
 #[derive(Debug)]
 pub(crate) struct FrameCacheParams {
-    pub(crate) spill_directory: Option<SpillDirectory>,
+    pub(crate) tier: CacheTier,
     pub(crate) dimensions: ImageDimensions,
     pub(crate) metadata: ImageMetadata,
-    pub(crate) config: CacheConfig,
     pub(crate) normalization: Normalization,
     pub(crate) progress: ProgressCallback,
     pub(crate) cancel: CancelToken,
@@ -95,10 +91,9 @@ impl FrameCache {
         params: FrameCacheParams,
     ) -> Result<Self, Error> {
         let FrameCacheParams {
-            spill_directory,
+            tier,
             dimensions,
             metadata,
-            config,
             normalization,
             progress,
             cancel,
@@ -113,13 +108,11 @@ impl FrameCache {
             frame_norms,
             normalization,
             core: CacheCore {
-                spill_directory,
+                tier,
                 dimensions,
                 metadata,
-                config,
                 progress,
                 cancel,
-                chunk_memory: OnceLock::new(),
             },
         })
     }
@@ -127,7 +120,6 @@ impl FrameCache {
     /// Build an in-memory frame-quality-aware cache from [`StackFrame`]s.
     pub(crate) fn from_stack_frames(
         frames: Vec<StackFrame>,
-        config: &CacheConfig,
         normalization: Normalization,
         progress: ProgressCallback,
         cancel: CancelToken,
@@ -171,13 +163,11 @@ impl FrameCache {
             frame_norms,
             normalization,
             core: CacheCore {
-                spill_directory: None,
+                tier: CacheTier::Resident,
                 dimensions,
                 metadata,
-                config: config.clone(),
                 progress,
                 cancel,
-                chunk_memory: OnceLock::new(),
             },
         })
     }
@@ -231,14 +221,14 @@ impl FrameCache {
         let inv_frames = 1.0 / frame_count as f32;
 
         // Coverage planes share their frame's tier, so they may be mmap-backed: read them in the
-        // same row-aligned chunks the combine uses, against the reading the combine sized against
-        // — `CacheCore::chunk_available_memory` took it there and hands back the same figure here.
+        // same row-aligned chunks the combine uses, against the figure the combine sized against.
         let chunk_rows = self
             .core
-            .chunk_available_memory()
-            .map_or(height, |available_memory| {
+            .tier
+            .chunk_memory()
+            .map_or(height, |chunk_memory| {
                 coverage_chunk_memory_layout(&self.frames, dimensions.channels(), planes)
-                    .optimal_chunk_rows(dimensions.size(), available_memory)
+                    .optimal_chunk_rows(dimensions.size(), chunk_memory)
             });
 
         let mut start_row = 0;
@@ -332,7 +322,7 @@ impl FrameCache {
             &self.frames,
             |frame| &frame.channels,
             memory,
-            self.core.chunk_available_memory(),
+            self.core.tier.chunk_memory(),
             |output_slice, ctx| {
                 let ChunkContext {
                     frames,
@@ -455,33 +445,33 @@ impl FrameCache {
         }
     }
 
-    /// Build a cache from CFA calibration frame files (tiered in-memory/disk per available RAM).
+    /// Build a cache from CFA calibration frame files, tiered in RAM or on disk under `memory`.
     pub(crate) fn from_cfa_paths<P: AsRef<Path> + Sync>(
         paths: &[P],
-        config: &CacheConfig,
-        normalization: Normalization,
+        config: &StackConfig,
+        memory: RunMemory,
         progress: ProgressCallback,
         cancel: CancelToken,
     ) -> Result<Self, Error> {
         Self::from_tiered_paths(
-            loader::load_tiered::<CfaImage, P>(paths, config, progress, cancel)?,
-            normalization,
+            loader::load_tiered::<CfaImage, P>(paths, config, memory, progress, cancel)?,
+            config.normalization,
         )
     }
 
-    /// Build a cache from light-frame image files (tiered per available RAM). Nothing here was
-    /// warped, so a frame has full support and unit confidence everywhere unless its source
-    /// declared pixels with no measurement.
+    /// Build a cache from light-frame image files, tiered in RAM or on disk under `memory`. Nothing
+    /// here was warped, so a frame has full support and unit confidence everywhere unless its
+    /// source declared pixels with no measurement.
     pub(crate) fn from_paths<P: AsRef<Path> + Sync>(
         paths: &[P],
-        config: &CacheConfig,
-        normalization: Normalization,
+        config: &StackConfig,
+        memory: RunMemory,
         progress: ProgressCallback,
         cancel: CancelToken,
     ) -> Result<Self, Error> {
         Self::from_tiered_paths(
-            loader::load_tiered::<LinearImage, P>(paths, config, progress, cancel)?,
-            normalization,
+            loader::load_tiered::<LinearImage, P>(paths, config, memory, progress, cancel)?,
+            config.normalization,
         )
     }
 
@@ -506,14 +496,11 @@ impl FrameCache {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use std::sync::OnceLock;
-
     use common::CancelToken;
 
     use crate::io::image::linear::LinearImage;
     use crate::stacking::combine::cache::FrameCache;
-    use crate::stacking::combine::cache::core::CacheCore;
-    use crate::stacking::combine::cache_config::CacheConfig;
+    use crate::stacking::combine::cache::core::{CacheCore, CacheTier};
     use crate::stacking::combine::config::Normalization;
     use crate::stacking::combine::normalization::compute_frame_norms;
     use crate::stacking::combine::stack::StackFrame;
@@ -527,7 +514,6 @@ pub(crate) mod internals {
         let frames = images.into_iter().map(StackFrame::from).collect();
         FrameCache::from_stack_frames(
             frames,
-            &CacheConfig::default(),
             Normalization::None,
             ProgressCallback::default(),
             CancelToken::never(),
@@ -554,13 +540,11 @@ pub(crate) mod internals {
                 })
                 .collect();
             let core = CacheCore {
-                spill_directory: None,
+                tier: CacheTier::Resident,
                 dimensions,
                 metadata,
-                config: CacheConfig::default(),
                 progress: ProgressCallback::default(),
                 cancel: CancelToken::never(),
-                chunk_memory: OnceLock::new(),
             };
             let frame_norms = compute_frame_norms(&frames, dimensions, normalization, &core.cancel)
                 .expect("frames without coverage have no failing normalization path");

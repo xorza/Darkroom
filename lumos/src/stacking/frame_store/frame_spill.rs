@@ -1,4 +1,4 @@
-//! Where a spilled frame's planes and sidecars live on disk, and what they are called.
+//! [`FrameSpill`]: where a spilled frame's planes and sidecars live on disk, and what they are called.
 //!
 //! Every name the frame store writes comes from [`FrameSpill`], so the writer that produced a file
 //! and a later run looking for it cannot disagree about where it is. The files themselves are not
@@ -269,10 +269,10 @@ mod tests {
     use crate::stacking::frame_store::cache_key::{CacheKey, DecoderKind};
     use crate::stacking::frame_store::error::FrameStoreError;
     use crate::stacking::frame_store::frame_facts::FrameFacts;
-    use crate::stacking::frame_store::frame_stats::FrameStats;
-    use crate::stacking::frame_store::spill::{
+    use crate::stacking::frame_store::frame_spill::{
         Commit, FrameSpill, SIDECAR_FORMAT, SIDECAR_PIN, Sidecar,
     };
+    use crate::stacking::frame_store::frame_stats::FrameStats;
 
     fn stats(channels: &[(f32, f32)], quantization_sigma: Option<f32>) -> FrameStats {
         FrameStats {

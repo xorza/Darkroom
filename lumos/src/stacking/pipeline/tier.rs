@@ -3,11 +3,13 @@
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
 use crate::memory::MemoryPlan;
+use crate::memory::run_memory::RunMemory;
+use crate::stacking::combine::cache::core::CacheTier;
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::frame_store::frame_quality::FrameQuality;
+use crate::stacking::frame_store::frame_spill::FrameSpill;
 use crate::stacking::frame_store::frame_stats::FrameStats;
-use crate::stacking::frame_store::spill::FrameSpill;
 use crate::stacking::frame_store::spill_directory::SpillDirectory;
 use crate::stacking::frame_store::{StoredFrame, StoredImage};
 use crate::stacking::pipeline::frame::PipelineFrame;
@@ -27,29 +29,41 @@ pub(crate) struct StoredWarp {
 #[derive(Debug)]
 pub(crate) enum FrameTier {
     Ram,
-    Spill(SpillDirectory),
+    /// Spilled into `directory`; the combine reads it in row chunks sized against
+    /// `chunk_memory`, the run's planning figure.
+    Spill {
+        directory: SpillDirectory,
+        chunk_memory: u64,
+    },
 }
 
 impl FrameTier {
     /// Spill when the plan says the frame set plus its scratch will not fit.
-    pub(crate) fn for_plan(plan: &MemoryPlan, cache: &CacheConfig) -> Result<Self, Error> {
+    pub(crate) fn for_plan(
+        plan: &MemoryPlan,
+        cache: &CacheConfig,
+        memory: RunMemory,
+    ) -> Result<Self, Error> {
         if plan.fits_in_ram {
             return Ok(Self::Ram);
         }
         SpillDirectory::create(&cache.cache_dir, cache.keep_cache)
-            .map(Self::Spill)
+            .map(|directory| Self::Spill {
+                directory,
+                chunk_memory: memory.planning(),
+            })
             .map_err(|source| Error::Stack(StackError::from(source)))
     }
 
-    pub(crate) fn spills(&self) -> bool {
-        matches!(self, Self::Spill(_))
+    pub(crate) const fn spills(&self) -> bool {
+        matches!(self, Self::Spill { .. })
     }
 
     /// Park a calibrated frame between detection and registration.
     pub(crate) fn hold(&self, name: &str, image: LinearImage) -> Result<PipelineFrame, Error> {
         match self {
             Self::Ram => Ok(PipelineFrame::Resident(image)),
-            Self::Spill(directory) => {
+            Self::Spill { directory, .. } => {
                 StoredImage::spill(&FrameSpill::new(directory.path(), name), &image)
                     .map(PipelineFrame::Spilled)
                     .map_err(|source| Error::Stack(StackError::from(source)))
@@ -86,7 +100,7 @@ impl FrameTier {
                 frame: StoredFrame::from_memory(image, quality, source_stats),
                 reusable: None,
             }),
-            Self::Spill(directory) => {
+            Self::Spill { directory, .. } => {
                 let frame = StoredFrame::spill(
                     &FrameSpill::new(directory.path(), name),
                     &image,
@@ -124,7 +138,7 @@ impl FrameTier {
         let quality = FrameQuality::for_unwarped(&image);
         match self {
             Self::Ram => Ok(StoredFrame::from_memory(image, quality, source_stats)),
-            Self::Spill(directory) => StoredFrame::spill(
+            Self::Spill { directory, .. } => StoredFrame::spill(
                 &FrameSpill::new(directory.path(), name),
                 &image,
                 &quality,
@@ -134,11 +148,17 @@ impl FrameTier {
         }
     }
 
-    /// Hand the directory to the combine, which owns it until its memory maps have dropped.
-    pub(crate) fn into_spill_directory(self) -> Option<SpillDirectory> {
+    /// Hand the tier to the combine, which owns the directory until its memory maps have dropped.
+    pub(crate) fn into_cache_tier(self) -> CacheTier {
         match self {
-            Self::Ram => None,
-            Self::Spill(directory) => Some(directory),
+            Self::Ram => CacheTier::Resident,
+            Self::Spill {
+                directory,
+                chunk_memory,
+            } => CacheTier::Spilled {
+                directory,
+                chunk_memory,
+            },
         }
     }
 }

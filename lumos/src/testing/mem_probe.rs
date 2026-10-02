@@ -11,6 +11,7 @@
 
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
+use crate::memory::DECODE_TRANSIENT_FACTOR;
 use std::env;
 use std::fs;
 use std::io::{self, Write};
@@ -278,12 +279,12 @@ pub(crate) fn ensure_frames(
     })
 }
 
-/// A resolved memory budget for a live probe: the `available_memory` to hand the stacker (or `None` =
+/// A resolved memory budget for a live probe: the `memory_override` to hand the stacker (or `None` =
 /// query the system), plus a human label for the report. Parsed from a `LUMOS_*_BUDGET` env var by
 /// [`parse_budget`]; the `ram`/`disk` sentinels force the resident/spill tier.
 #[derive(Debug, Clone)]
 pub(crate) struct BudgetChoice {
-    pub(crate) available_memory: Option<u64>,
+    pub(crate) memory_override: Option<u64>,
     pub(crate) label: String,
 }
 
@@ -291,7 +292,7 @@ impl BudgetChoice {
     /// Query the system for available memory — no fixed budget, so no numeric ceiling is asserted.
     pub(crate) fn auto() -> Self {
         Self {
-            available_memory: None,
+            memory_override: None,
             label: "auto (system available)".into(),
         }
     }
@@ -299,7 +300,7 @@ impl BudgetChoice {
     /// A fixed budget of `mb` MiB.
     pub(crate) fn mb(mb: u64) -> Self {
         Self {
-            available_memory: Some(mb * MB),
+            memory_override: Some(mb * MB),
             label: format!("{mb} MB"),
         }
     }
@@ -314,11 +315,11 @@ pub(crate) fn parse_budget(env_key: &str, default: BudgetChoice) -> BudgetChoice
         Some("auto") => BudgetChoice::auto(),
         // u64::MAX ⇒ everything fits ⇒ in-memory tier. 1 byte ⇒ nothing fits ⇒ spill tier.
         Some("ram") => BudgetChoice {
-            available_memory: Some(u64::MAX),
+            memory_override: Some(u64::MAX),
             label: "ram (force resident)".into(),
         },
         Some("disk") => BudgetChoice {
-            available_memory: Some(1),
+            memory_override: Some(1),
             label: "disk (force spill)".into(),
         },
         Some(n) => {
@@ -343,8 +344,9 @@ pub(crate) fn measured(anon_mb: u64, check: &str) -> bool {
 }
 
 /// The MiB budget to assert peak heap against, or `None` when no numeric check applies: the
-/// `auto`/`ram` sentinels aren't real ceilings, a budget below one in-flight decode's floor (~3× a
-/// frame — one ~2× decode transient plus the output frame) can't be honored by any tiering, and off
+/// `auto`/`ram` sentinels aren't real ceilings, a budget below one in-flight decode's floor (its
+/// transient, `DECODE_TRANSIENT_FACTOR` frames, plus the output frame) can't be honored by any
+/// tiering, and off
 /// Linux there's no measurement (prints a SKIPPED line via [`measured`]). Centralizes the shared skip
 /// logic so each probe keeps only its own pass/fail message.
 pub(crate) fn budget_ceiling_mb(
@@ -352,8 +354,9 @@ pub(crate) fn budget_ceiling_mb(
     budget: &BudgetChoice,
     frame_bytes: u64,
 ) -> Option<u64> {
-    let budget_bytes = budget.available_memory?;
-    if budget_bytes == u64::MAX || budget_bytes < 3 * frame_bytes {
+    let budget_bytes = budget.memory_override?;
+    let decode_floor = (DECODE_TRANSIENT_FACTOR as u64 + 1) * frame_bytes;
+    if budget_bytes == u64::MAX || budget_bytes < decode_floor {
         return None;
     }
     measured(anon_mb, "budget check").then_some(budget_bytes / MB)

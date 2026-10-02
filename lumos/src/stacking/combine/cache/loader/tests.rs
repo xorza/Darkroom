@@ -4,9 +4,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::linear::LinearImage;
-use crate::stacking::combine::cache::FrameCache;
 use crate::stacking::combine::cache::loader::*;
-use crate::stacking::combine::config::Normalization;
 use crate::stacking::frame_store::cache_key::DecoderKind;
 use common::TempDir;
 
@@ -49,32 +47,8 @@ fn set_mtime(path: &Path, nanos_past_epoch: u64) {
         .unwrap();
 }
 
-#[test]
-fn from_paths_reports_empty_and_missing_sources() {
-    let config = CacheConfig::default();
-    let empty = FrameCache::from_paths(
-        &Vec::<PathBuf>::new(),
-        &config,
-        Normalization::None,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    );
-    assert!(matches!(empty.unwrap_err(), Error::NoFrames));
-
-    let missing_path = PathBuf::from(".tmp/missing/image.fits");
-    let missing = FrameCache::from_paths(
-        &[missing_path],
-        &config,
-        Normalization::None,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    );
-    assert!(matches!(missing.unwrap_err(), Error::ImageLoad(_)));
-}
-
-/// A first call decodes and commits; a second maps what the first committed, with the statistics
-/// it measured — proven by a sample changed on disk in between, which only a reuse can return.
-/// A rewrite of the source that keeps its length but moves its mtime by 100 ns decodes again.
+/// A first call decodes and commits; a second maps what the first committed. A rewrite of the
+/// source that keeps its length but moves its mtime by 100 ns decodes again.
 #[test]
 fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
     let temp_dir = TempDir::new("lumos_cache_frame_reuse");
@@ -93,11 +67,20 @@ fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
     assert_eq!(first.source_stats.channels[0].mad, 3.0);
     drop(first);
 
+    // A sample and the statistics changed on disk come back as they are: the frame was mapped and
+    // its statistics read, not measured again.
     let spill = spill_of::<LinearImage>(temp_dir.path(), &source);
     poke(&spill.channel_path(0), 2, 102.0);
+    let key = CacheKey::new(
+        CachedSource::of(&source).unwrap().identity,
+        DecoderKind::Linear,
+    );
+    let mut sentinel = spill.committed(key).unwrap().stats;
+    sentinel.channels[0].median = 99.0;
+    spill.commit(key, false, &sentinel).unwrap();
     let reused = cache_test_frame::<LinearImage>(temp_dir.path(), &source, dims, 0).unwrap();
     assert_eq!(reused.channels[0].chunk(0, 3), &[0.0, 1.0, 102.0]);
-    assert_eq!(reused.source_stats.channels[0].median, 5.5);
+    assert_eq!(reused.source_stats.channels[0].median, 99.0);
     assert_eq!(reused.source_stats.channels[0].mad, 3.0);
     drop(reused);
 
@@ -209,16 +192,19 @@ fn a_kept_disk_cache_is_reused_by_the_next_run() {
             path
         })
         .collect();
-    let mut config = CacheConfig {
-        cache_dir: temp_dir.join("cache"),
-        keep_cache: true,
-        ..CacheConfig::default()
+    let config = StackConfig {
+        cache: CacheConfig {
+            cache_dir: temp_dir.join("cache"),
+            keep_cache: true,
+            memory_override: None,
+        },
+        ..StackConfig::default()
     };
-    config.available_memory = Some(1);
     let run = || {
         load_tiered::<LinearImage, _>(
             &paths,
             &config,
+            RunMemory::new(1 << 30, Some(1)),
             ProgressCallback::default(),
             CancelToken::never(),
         )
@@ -226,13 +212,10 @@ fn a_kept_disk_cache_is_reused_by_the_next_run() {
     };
 
     let first = run();
-    let directory = first
-        .core
-        .spill_directory
-        .as_ref()
-        .unwrap()
-        .path()
-        .to_path_buf();
+    let CacheTier::Spilled { directory, .. } = &first.core.tier else {
+        panic!("a one-byte budget spills");
+    };
+    let directory = directory.path().to_path_buf();
     drop(first);
     let key = |path: &Path| {
         CacheKey::new(

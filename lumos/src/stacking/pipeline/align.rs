@@ -8,7 +8,9 @@ use common::CancelToken;
 use crate::concurrency;
 use crate::error::FrameDimensionMismatch;
 use crate::io::image::linear::LinearImage;
-use crate::memory::MemoryPlan;
+use crate::io::raw::demosaic::DemosaicMemory;
+use crate::memory::run_memory::RunMemory;
+use crate::memory::{MemoryPlan, PerFrameBytes, RunShape};
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::combine::stack::stack_stored_frames;
 use crate::stacking::frame_store::StoredFrame;
@@ -52,18 +54,32 @@ pub fn align_and_stack(
     }
     config.validate()?;
 
-    // One reading for the run; see `AlignStackConfig::with_resolved_memory`.
-    let config = &config.with_resolved_memory(memory::available_memory());
+    // One reading for the run, for the tier decision and the combine's chunk sizes alike.
+    let memory = RunMemory::read(config.stack.cache.memory_override);
     let total = lights.len();
-    // The inputs are already decoded and resident, so only the warped outputs and the per-frame
-    // scratch are still in question.
-    let plan = MemoryPlan::for_decoded_frames(
-        lights[0].dimensions(),
-        total,
+    // The inputs are already decoded and resident: their decode left exactly their own bytes and
+    // has no transient, so only the warped outputs, the per-frame scratch and the combine's output
+    // are still in question.
+    let dimensions = lights[0].dimensions();
+    let frame_bytes = memory::frame_bytes(dimensions);
+    let decoded = DemosaicMemory {
+        output_bytes: frame_bytes,
+        peak_bytes: frame_bytes,
+    };
+    let plan = MemoryPlan::plan(
+        RunShape {
+            frame_count: total,
+            decode: decoded,
+            warp: Some(PerFrameBytes::new(
+                dimensions.pixel_count() * size_of::<f32>(),
+                decoded,
+            )),
+            output_bytes: config.stack.quality.resident_bytes(dimensions),
+        },
         rayon::current_num_threads(),
-        config.stack.cache.planning_memory(),
+        memory.planning(),
     );
-    let tier = FrameTier::for_plan(&plan, &config.stack.cache)?;
+    let tier = FrameTier::for_plan(&plan, &config.stack.cache, memory)?;
 
     tracing::info!(frames = total, spilling = tier.spills(), "Detecting stars");
     let detected_count = StageCounter::new(&progress, StackingStage::Preparing, total);
@@ -282,7 +298,7 @@ pub(crate) fn register_warp_and_stack(
     tracing::info!(frames = registered, "Stacking aligned frames");
     let stacked = stack_stored_frames(
         frames,
-        tier.into_spill_directory(),
+        tier.into_cache_tier(),
         dimensions,
         metadata,
         config.stack.clone(),

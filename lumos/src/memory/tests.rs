@@ -1,4 +1,8 @@
+use crate::io::image::cfa::CfaType;
+use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::memory::*;
+use crate::stacking::stack_product::quality_planes::QualityPlanes;
+use crate::testing::cfa::XTRANS_PATTERN;
 
 const MIB: u64 = 1024 * 1024;
 const GB: u64 = 1024 * MIB;
@@ -78,26 +82,57 @@ fn load_concurrency_accounts_for_resident_and_transient_memory() {
     }
 }
 
+/// A stack decoded straight into the combine fits when its frames, one decode's statistics scratch
+/// and the combine's resident output all fit. Ten 4 MiB frames are 40 MiB, one scratch frame
+/// makes the decode peak 44, and two output planes make the combine peak 48: 48 MiB usable is
+/// the boundary, and output planes the frames alone leave room for still spill the run.
 #[test]
-fn fits_in_memory_honors_budget_boundary_channels_and_overflow() {
-    let bytes_per_image = 1000 * 1000 * size_of::<f32>();
-    let frame_count = 10;
-    let bytes_needed = (bytes_per_image * frame_count) as u64;
-    let available_at_boundary = (bytes_needed * 100).div_ceil(75);
+fn a_decoded_stack_charges_its_frames_scratch_and_output() {
+    let frame = plane(4);
+    let shape =
+        |output_planes: usize| RunShape::decoded_stack(10, frame, frame, output_planes * frame);
+    let boundary = available_for_usable(48 * MIB);
+    assert!(MemoryPlan::plan(shape(2), 8, boundary).fits_in_ram);
+    assert!(!MemoryPlan::plan(shape(2), 8, boundary - 2).fits_in_ram);
+    assert!(MemoryPlan::plan(shape(0), 8, boundary - 2).fits_in_ram);
+    assert!(!MemoryPlan::plan(shape(3), 8, boundary).fits_in_ram);
 
-    assert!(fits_in_memory(
-        bytes_per_image,
-        frame_count,
-        available_at_boundary
+    // A masked frame's quality planes are resident, the scratch is one plain frame on top: 30 MiB
+    // resident, 34 MiB decode peak.
+    let masked = RunShape::decoded_stack(10, 3 * MIB as usize, MIB as usize, 0);
+    assert_eq!(masked.decode.output_bytes, 3 * MIB as usize);
+    assert_eq!(masked.decode.peak_bytes, 4 * MIB as usize);
+    assert!(MemoryPlan::plan(masked, 8, available_for_usable(31 * MIB)).fits_in_ram);
+    assert!(!MemoryPlan::plan(masked, 8, available_for_usable(31 * MIB) - 2).fits_in_ram);
+
+    // Saturating arithmetic: a frame count no budget can hold never wraps into "fits".
+    assert!(
+        !MemoryPlan::plan(RunShape::decoded_stack(2, usize::MAX, 1, 0), 8, u64::MAX).fits_in_ram
+    );
+}
+
+/// The combine's output planes are charged beside the warped frames, not only the decode and
+/// warp peaks: at `QualityPlanes::ALL` an RGB output is 3 × (image, weight, variance) + coverage
+/// = 10 planes, which flips a set the warp stage alone would keep in RAM.
+#[test]
+fn a_warped_run_charges_the_combine_output() {
+    let plane_bytes = plane(10);
+    let output = QualityPlanes::ALL.resident_bytes(ImageDimensions::new(
+        ((10 * MIB) as usize / size_of::<f32>(), 1),
+        3,
     ));
-    assert!(!fits_in_memory(
-        bytes_per_image,
-        frame_count,
-        available_at_boundary - 2
-    ));
-    assert!(fits_in_memory(6000 * 4000 * 4, 20, 4 * GB));
-    assert!(!fits_in_memory(6000 * 4000 * 3 * 4, 20, 4 * GB));
-    assert!(!fits_in_memory(usize::MAX, 2, u64::MAX));
+    assert_eq!(output, 10 * plane_bytes);
+    let shape = |output_bytes| RunShape {
+        frame_count: 5,
+        decode: mono(plane_bytes),
+        warp: Some(PerFrameBytes::new(plane_bytes, mono(plane_bytes))),
+        output_bytes,
+    };
+    // Mono: warped 3P each, 15P resident; one worker's working set max(1 + 3, 8) = 8P makes the
+    // warp peak 23P, and the output's 10P makes the combine peak 25P, which decides.
+    assert!(MemoryPlan::plan(shape(output), 1, available_for_usable(25 * 10 * MIB)).fits_in_ram);
+    assert!(!MemoryPlan::plan(shape(output), 1, available_for_usable(24 * 10 * MIB)).fits_in_ram);
+    assert!(MemoryPlan::plan(shape(0), 1, available_for_usable(24 * 10 * MIB)).fits_in_ram);
 }
 
 #[test]
@@ -115,7 +150,7 @@ fn optimal_chunk_rows_matches_budget_arithmetic() {
     for (width, channels, frames, available) in cases {
         let input_planes = channels * frames;
         let bytes_per_row = (width * input_planes * size_of::<f32>()) as u64;
-        let usable = (u128::from(available) * 75 / 100) as u64;
+        let usable = memory_budget(available);
         let expected = (usable / bytes_per_row).max(MIN_CHUNK_ROWS as u64) as usize;
         assert_eq!(
             ChunkMemoryLayout {
@@ -160,66 +195,69 @@ fn plane(mib: u64) -> usize {
     (mib * MIB) as usize
 }
 
-fn memory(plane_bytes: usize, output_planes: usize, peak_planes: usize) -> DemosaicMemory {
-    DemosaicMemory {
-        output_bytes: output_planes * plane_bytes,
-        peak_bytes: peak_planes * plane_bytes,
-    }
+/// What each demosaic costs for a frame whose planes are `plane_bytes`, from the demosaics' own
+/// accounting: a one-row frame, so RCD's half-width planes are exactly half of it.
+fn demosaic(cfa_type: CfaType, plane_bytes: usize) -> DemosaicMemory {
+    let width = plane_bytes / size_of::<f32>();
+    assert!(
+        width.is_multiple_of(2),
+        "an even width keeps RCD's half planes exact"
+    );
+    cfa_type.demosaic_memory(ImageDimensions::new((width, 1), 1))
 }
 
 fn mono(plane_bytes: usize) -> DemosaicMemory {
-    memory(plane_bytes, 1, 1)
+    demosaic(CfaType::Mono, plane_bytes)
 }
 
 fn bayer(plane_bytes: usize) -> DemosaicMemory {
-    memory(plane_bytes, 3, 7)
+    demosaic(CfaType::Bayer(CfaPattern::Rggb), plane_bytes)
 }
 
 fn xtrans(plane_bytes: usize) -> DemosaicMemory {
-    memory(plane_bytes, 3, 22)
+    demosaic(CfaType::XTrans(XTRANS_PATTERN), plane_bytes)
 }
 
-fn available_for_usable(usable: u64) -> u64 {
-    (usable * 100).div_ceil(75)
-}
-
-/// A run handed decoded frames plans exactly as one that decoded them into the same bytes with no
-/// transient arena — that equivalence is the whole content of `for_decoded_frames`, which exists so
-/// `align_and_stack` need not encode "already decoded" as a `DemosaicMemory` with equal halves.
-///
-/// Checked across both tier outcomes, since the two halves feed `fits_in_ram` differently: the
-/// decode peak sets one floor and the resident warped set another.
+/// The planes the boundary arithmetic below is written in: output and peak are 1 and 1 planes for
+/// mono, 3 and 7 for RCD (six full planes and two half ones in its directional pass, four and the
+/// output in its last), and 3 and 22 for Markesteijn (the frame, its 18-word arena, the output).
 #[test]
-fn a_decoded_set_plans_as_a_decode_with_no_transient() {
-    let mut tiers = Vec::new();
-    for (mib, frames, available) in [(4u64, 10usize, 8 * GB), (100, 40, 4 * GB)] {
-        let dimensions = ImageDimensions::new(((mib * MIB) as usize / size_of::<f32>(), 1), 3);
-        let frame_bytes = dimensions.sample_count() * size_of::<f32>();
-        let threads = 8;
-
-        tiers.push(
-            MemoryPlan::for_decoded_frames(dimensions, frames, threads, available).fits_in_ram,
-        );
-        assert_eq!(
-            MemoryPlan::for_decoded_frames(dimensions, frames, threads, available),
-            MemoryPlan::plan(
-                dimensions.pixel_count() * size_of::<f32>(),
-                DemosaicMemory {
-                    output_bytes: frame_bytes,
-                    peak_bytes: frame_bytes,
-                },
-                frames,
-                threads,
-                available,
-            ),
-            "{frames} frames of {mib} MiB against {available} bytes"
-        );
+fn demosaic_costs_in_planes() {
+    let plane_bytes = plane(10);
+    for (memory, output, peak) in [
+        (mono(plane_bytes), 1, 1),
+        (bayer(plane_bytes), 3, 7),
+        (xtrans(plane_bytes), 3, 22),
+    ] {
+        assert_eq!(memory.output_bytes, output * plane_bytes);
+        assert_eq!(memory.peak_bytes, peak * plane_bytes);
     }
-    assert_eq!(
-        tiers,
-        [true, false],
-        "the two cases must land on opposite sides of the tier decision"
-    );
+}
+
+/// The smallest availability whose budget is `usable`: the inverse of [`memory_budget`].
+fn available_for_usable(usable: u64) -> u64 {
+    (usable * 100).div_ceil(MEMORY_PERCENT)
+}
+
+/// A warping run of `frames` frames whose decode is `demosaic`, with no output charge: the decode and
+/// warp peaks alone, which is what these tests pin.
+fn plan(
+    plane_bytes: usize,
+    demosaic: DemosaicMemory,
+    frames: usize,
+    threads: usize,
+    available: u64,
+) -> MemoryPlan {
+    MemoryPlan::plan(
+        RunShape {
+            frame_count: frames,
+            decode: demosaic,
+            warp: Some(PerFrameBytes::new(plane_bytes, demosaic)),
+            output_bytes: 0,
+        },
+        threads,
+        available,
+    )
 }
 
 #[test]
@@ -229,12 +267,9 @@ fn scratch_reserve_streams_a_set_whose_frames_alone_would_fit() {
     let demosaic = xtrans(plane_bytes);
 
     // The warped set alone fits; it is the per-worker scratch on top that forces the spill.
-    assert!(fits_in_memory(
-        PerFrameBytes::new(plane_bytes, demosaic).warped,
-        frames,
-        available
-    ));
-    assert!(!MemoryPlan::plan(plane_bytes, demosaic, frames, threads, available).fits_in_ram);
+    let warped = PerFrameBytes::new(plane_bytes, demosaic).warped;
+    assert!((warped * frames) as u64 <= memory_budget(available));
+    assert!(!plan(plane_bytes, demosaic, frames, threads, available).fits_in_ram);
 }
 
 #[test]
@@ -268,10 +303,7 @@ fn streaming_concurrency_uses_the_selected_demosaic_peak() {
     ];
 
     for (demosaic, expected) in expected {
-        assert_eq!(
-            MemoryPlan::plan(plane_bytes, demosaic, 10, 8, 8 * GB),
-            expected
-        );
+        assert_eq!(plan(plane_bytes, demosaic, 10, 8, 8 * GB), expected);
     }
 }
 
@@ -279,7 +311,7 @@ fn streaming_concurrency_uses_the_selected_demosaic_peak() {
 fn small_set_uses_all_workers_in_ram() {
     let plane_bytes = plane(10);
     assert_eq!(
-        MemoryPlan::plan(plane_bytes, xtrans(plane_bytes), 5, 8, 8 * GB),
+        plan(plane_bytes, xtrans(plane_bytes), 5, 8, 8 * GB),
         MemoryPlan {
             fits_in_ram: true,
             decode_concurrency: 5,
@@ -301,7 +333,7 @@ fn ram_tier_respects_algorithm_specific_concurrency_boundaries() {
     // 420 MiB left beyond the 3P×5 resident outputs: X-Trans's 19P admits two workers where
     // Bayer's 4P and mono's nothing admit all four.
     assert_eq!(
-        MemoryPlan::plan(plane_bytes, xtrans(plane_bytes), frames, threads, boundary),
+        plan(plane_bytes, xtrans(plane_bytes), frames, threads, boundary),
         MemoryPlan {
             fits_in_ram: true,
             decode_concurrency: 2,
@@ -309,7 +341,7 @@ fn ram_tier_respects_algorithm_specific_concurrency_boundaries() {
         }
     );
     for demosaic in [mono(plane_bytes), bayer(plane_bytes)] {
-        let plan = MemoryPlan::plan(plane_bytes, demosaic, frames, threads, boundary);
+        let plan = plan(plane_bytes, demosaic, frames, threads, boundary);
         assert_eq!(plan.decode_concurrency, 4);
         assert!(plan.fits_in_ram);
     }
@@ -317,14 +349,14 @@ fn ram_tier_respects_algorithm_specific_concurrency_boundaries() {
     // A MiB under the boundary and the three-channel pair spills; mono's 47 planes still fit.
     let under = available_for_usable(569 * MIB);
     for demosaic in [bayer(plane_bytes), xtrans(plane_bytes)] {
-        assert!(!MemoryPlan::plan(plane_bytes, demosaic, frames, threads, under).fits_in_ram);
+        assert!(!plan(plane_bytes, demosaic, frames, threads, under).fits_in_ram);
     }
-    assert!(MemoryPlan::plan(plane_bytes, mono(plane_bytes), frames, threads, under).fits_in_ram);
+    assert!(plan(plane_bytes, mono(plane_bytes), frames, threads, under).fits_in_ram);
 
     // Headroom scales the X-Trans fan-out: 760 usable less 150 resident is 610 MiB, three 19P
     // transients' worth.
     assert_eq!(
-        MemoryPlan::plan(
+        plan(
             plane_bytes,
             xtrans(plane_bytes),
             frames,
@@ -336,19 +368,35 @@ fn ram_tier_respects_algorithm_specific_concurrency_boundaries() {
     );
 }
 
+/// For every frame size, count, worker count and budget, the planned fan-out keeps each stage's
+/// projected peak — the resident set plus `concurrency ×` one in-flight frame — within the usable
+/// budget, unless not even one frame fits and the fan-out is pinned to 1. Swept for warping runs
+/// of each demosaic and for stacks decoded straight into the combine, whose per-decode transient
+/// is the statistics scratch beside the frame.
 #[test]
 fn planned_concurrency_never_overshoots_its_tier_budget() {
     for &plane_mib in &[16u64, 64, 100, 400] {
         let plane_bytes = plane(plane_mib);
-        let memories = [mono(plane_bytes), bayer(plane_bytes), xtrans(plane_bytes)];
-        for demosaic in memories {
-            for &frames in &[4usize, 12, 30, 60] {
+        let decoded = |frames| RunShape::decoded_stack(frames, plane_bytes, plane_bytes, 0);
+        for &frames in &[4usize, 12, 30, 60] {
+            let shapes = [mono(plane_bytes), bayer(plane_bytes), xtrans(plane_bytes)]
+                .map(|demosaic| RunShape {
+                    frame_count: frames,
+                    decode: demosaic,
+                    warp: Some(PerFrameBytes::new(plane_bytes, demosaic)),
+                    output_bytes: 0,
+                })
+                .into_iter()
+                .chain([decoded(frames)]);
+            for shape in shapes {
+                let decode = shape.decode;
+                let (warped, working) = shape.warp.map_or((decode.output_bytes, 0), |per_frame| {
+                    (per_frame.warped, per_frame.working)
+                });
                 for &threads in &[1usize, 8, 32] {
                     for &budget_gib in &[1u64, 2, 4, 8, 16] {
                         let available = budget_gib * GB;
-                        let plan =
-                            MemoryPlan::plan(plane_bytes, demosaic, frames, threads, available);
-                        let per_frame = PerFrameBytes::new(plane_bytes, demosaic);
+                        let plan = MemoryPlan::plan(shape, threads, available);
                         let usable = memory_budget(available);
                         let worker_cap = frames.min(threads.max(1));
 
@@ -357,18 +405,17 @@ fn planned_concurrency_never_overshoots_its_tier_budget() {
                         assert!(plan.decode_concurrency >= 1 && plan.warp_concurrency >= 1);
 
                         let decode_peak = if plan.fits_in_ram {
-                            (demosaic.output_bytes as u64).saturating_mul(frames as u64)
-                                + (demosaic.peak_bytes.saturating_sub(demosaic.output_bytes) as u64)
+                            (decode.output_bytes as u64).saturating_mul(frames as u64)
+                                + (decode.peak_bytes.saturating_sub(decode.output_bytes) as u64)
                                     .saturating_mul(plan.decode_concurrency as u64)
                         } else {
-                            (demosaic.peak_bytes.max(per_frame.working) as u64)
+                            (decode.peak_bytes.max(working) as u64)
                                 .saturating_mul(plan.decode_concurrency as u64)
                         };
                         let warp_peak = if plan.fits_in_ram {
-                            (per_frame.warped * frames) as u64
-                                + per_frame.working as u64 * plan.warp_concurrency as u64
+                            (warped * frames) as u64 + working as u64 * plan.warp_concurrency as u64
                         } else {
-                            per_frame.working as u64 * plan.warp_concurrency as u64
+                            working as u64 * plan.warp_concurrency as u64
                         };
                         assert!(
                             decode_peak <= usable || plan.decode_concurrency == 1,
@@ -395,9 +442,9 @@ fn budget_flips_the_tier_and_scales_streaming_fanout() {
     let demosaic = xtrans(plane_bytes);
     let (frames, threads) = (20, 16);
 
-    let tight = MemoryPlan::plan(plane_bytes, demosaic, frames, threads, 2 * GB);
-    let roomy_streaming = MemoryPlan::plan(plane_bytes, demosaic, frames, threads, 16 * GB);
-    let ample = MemoryPlan::plan(plane_bytes, demosaic, frames, threads, 1 << 50);
+    let tight = plan(plane_bytes, demosaic, frames, threads, 2 * GB);
+    let roomy_streaming = plan(plane_bytes, demosaic, frames, threads, 16 * GB);
+    let ample = plan(plane_bytes, demosaic, frames, threads, 1 << 50);
 
     assert!(!tight.fits_in_ram);
     assert!(!roomy_streaming.fits_in_ram);

@@ -3,7 +3,7 @@ use crate::testing::prelude::*;
 use arrayvec::ArrayVec;
 
 use crate::stacking::frame_store::frame_quality::FramePlane;
-use crate::stacking::frame_store::spill::FrameSpill;
+use crate::stacking::frame_store::frame_spill::FrameSpill;
 
 use crate::error::FrameDimensionMismatch;
 use crate::io::image::cfa::{CfaImage, CfaType};
@@ -25,6 +25,7 @@ use crate::stacking::combine::normalization;
 use crate::stacking::combine::normalization::ChannelNorm;
 use crate::stacking::combine::rejection::percentile_clip_config::PercentileClipConfig;
 use crate::stacking::combine::stack::*;
+use crate::stacking::frame_store::spill_directory::SpillDirectory;
 use crate::stacking::registration::config::{self, InterpolationMethod};
 use crate::stacking::registration::resample;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
@@ -204,7 +205,7 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
         .collect();
     let disk = stack_stored_frames(
         stored,
-        Some(spill_directory),
+        CacheTier::of(Some(spill_directory), RunMemory::new(1 << 30, None)),
         dims,
         metadata,
         config,
@@ -262,7 +263,7 @@ fn mapped_frames_reject_nonfinite_samples_before_combining() {
 
     let error = stack_stored_frames(
         vec![frame],
-        Some(spill_directory),
+        CacheTier::of(Some(spill_directory), RunMemory::new(1 << 30, None)),
         dimensions,
         ImageMetadata::default(),
         StackConfig::mean(),
@@ -1112,7 +1113,6 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
         .collect();
         FrameCache::from_stack_frames(
             frames,
-            &CacheConfig::default(),
             Normalization::Multiplicative,
             ProgressCallback::default(),
             CancelToken::never(),
@@ -1319,7 +1319,6 @@ fn registered_global_normalization_uses_paired_signal_samples() {
     ];
     let cache = FrameCache::from_stack_frames(
         frames,
-        &CacheConfig::default(),
         Normalization::Global,
         ProgressCallback::default(),
         CancelToken::never(),
@@ -1363,7 +1362,6 @@ fn registered_noise_weight_applies_half_pixel_confidence_once() {
     ];
     let cache = FrameCache::from_stack_frames(
         frames,
-        &CacheConfig::default(),
         Normalization::None,
         ProgressCallback::default(),
         CancelToken::never(),
@@ -1987,7 +1985,7 @@ fn disk_backed_stack_combines_via_mmap() {
         method: CombineMethod::Mean(Rejection::None),
         normalization: Normalization::None,
         cache: CacheConfig {
-            available_memory: Some(1), // forces disk-backed (mmap) storage
+            memory_override: Some(1), // forces disk-backed (mmap) storage
             ..CacheConfig::with_cache_dir(temp_dir.join("cache"))
         },
         ..Default::default()

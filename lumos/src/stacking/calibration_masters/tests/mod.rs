@@ -19,7 +19,6 @@ use crate::stacking::calibration_masters::DEFAULT_SIGMA_THRESHOLD;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
 use crate::stacking::calibration_masters::error::CalibrationError;
 use crate::stacking::calibration_masters::stack_cfa_master;
-use crate::stacking::calibration_masters::weighted_budget;
 use crate::stacking::combine::config::{CombineMethod, StackConfig, Weighting};
 use crate::stacking::combine::error::{Error, StackConfigError};
 use crate::stacking::combine::rejection::Rejection;
@@ -40,37 +39,6 @@ use std::fs;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::process;
-
-#[test]
-fn weighted_budget_never_overcommits() {
-    // The frame-weighted split is the memory-safety guarantee for concurrent role loading: the
-    // per-role shares must sum to at most the whole budget, a bigger role must get a bigger share,
-    // an empty role nothing, and a degenerate total the whole budget (no divide-by-zero).
-    let avail = 30_000_000_000u64;
-    let counts = [15usize, 15, 20, 0];
-    let total: usize = counts.iter().sum();
-
-    let sum: u64 = counts
-        .iter()
-        .map(|&n| weighted_budget(avail, n, total))
-        .sum();
-    assert!(sum <= avail, "weighted shares overcommit: {sum} > {avail}");
-
-    assert!(
-        weighted_budget(avail, 20, total) > weighted_budget(avail, 15, total),
-        "more frames → larger share"
-    );
-    assert_eq!(
-        weighted_budget(avail, 0, total),
-        0,
-        "empty role gets nothing"
-    );
-    assert_eq!(
-        weighted_budget(avail, 5, 0),
-        avail,
-        "degenerate total → whole budget"
-    );
-}
 
 #[test]
 fn calibrating_a_calibrated_light_is_refused() {

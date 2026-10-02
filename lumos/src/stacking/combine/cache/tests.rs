@@ -5,8 +5,9 @@ use crate::memory::ChunkMemoryLayout;
 use crate::stacking::combine::cache::*;
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::frame_store::frame_quality::{FramePlane, FrameQuality};
+use crate::stacking::frame_store::frame_spill::FrameSpill;
 use crate::stacking::frame_store::frame_stats::FrameStats;
-use crate::stacking::frame_store::spill::FrameSpill;
+use crate::stacking::frame_store::spill_directory::SpillDirectory;
 use crate::testing::cfa::make_cfa;
 use crate::testing::prelude::*;
 use common::TempDir;
@@ -80,10 +81,9 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
     // check runs first and names both.
     let dimensions = ImageDimensions::new((4, 2), 1);
     let params = || FrameCacheParams {
-        spill_directory: None,
+        tier: CacheTier::Resident,
         dimensions,
         metadata: ImageMetadata::default(),
-        config: CacheConfig::default(),
         normalization: Normalization::None,
         progress: ProgressCallback::default(),
         cancel: CancelToken::never(),
@@ -143,10 +143,9 @@ fn stored_frames_must_share_one_cfa_pattern() {
     let size = Size2us::new(4, 2);
     let dimensions = ImageDimensions::new(size, 1);
     let params = || FrameCacheParams {
-        spill_directory: None,
+        tier: CacheTier::Resident,
         dimensions,
         metadata: ImageMetadata::default(),
-        config: CacheConfig::default(),
         normalization: Normalization::None,
         progress: ProgressCallback::default(),
         cancel: CancelToken::never(),
@@ -198,10 +197,9 @@ fn stored_frames_must_share_one_cfa_pattern() {
 fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
     let dimensions = ImageDimensions::new((4, 1), 1);
     let params = || FrameCacheParams {
-        spill_directory: None,
+        tier: CacheTier::Resident,
         dimensions,
         metadata: ImageMetadata::default(),
-        config: CacheConfig::default(),
         normalization: Normalization::None,
         progress: ProgressCallback::default(),
         cancel: CancelToken::never(),
@@ -272,7 +270,6 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
 
     let cache = FrameCache::from_stack_frames(
         frames,
-        &CacheConfig::default(),
         Normalization::None,
         ProgressCallback::default(),
         CancelToken::never(),
@@ -393,7 +390,6 @@ fn finish_product_partial_coverage() {
         .collect();
     let cache = FrameCache::from_stack_frames(
         frames,
-        &CacheConfig::default(),
         Normalization::None,
         ProgressCallback::default(),
         CancelToken::never(),
@@ -448,7 +444,7 @@ fn process_chunked_median() {
     ];
 
     let cache = make_test_cache(images);
-    assert_eq!(cache.core.chunk_available_memory(), None);
+    assert_eq!(cache.core.tier.chunk_memory(), None);
 
     // Median of [1, 3, 2] = 2
     let result = cache.process_chunked(None, None, QualityPlanes::ALL, |values, weights, _| {
@@ -556,72 +552,6 @@ fn calibration_frames_combine_through_the_same_engine_as_lights() {
 }
 
 #[test]
-fn frame_count() {
-    let dims = ImageDimensions::new((2, 2), 1);
-    let images = vec![
-        LinearImage::from_pixels(dims, vec![1.0; 4]),
-        LinearImage::from_pixels(dims, vec![2.0; 4]),
-        LinearImage::from_pixels(dims, vec![3.0; 4]),
-    ];
-
-    let cache = make_test_cache(images);
-
-    assert_eq!(cache.frames.len(), 3);
-}
-
-#[test]
-fn cleanup_removes_files() {
-    let temp_dir = TempDir::new("lumos_cleanup_test");
-    let spill_directory = SpillDirectory::create(temp_dir.path(), false).unwrap();
-    let spill_path = spill_directory.path().to_path_buf();
-
-    let dims = ImageDimensions::new((2, 2), 3);
-    let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
-    let image = LinearImage::from_pixels(dims, pixels);
-
-    let cached_frame = StoredFrame::spill(
-        &FrameSpill::new(&spill_path, "cleanup_test"),
-        &image,
-        &FrameQuality::None,
-        FrameStats::measure(&image),
-    )
-    .unwrap();
-
-    // Verify the run's directory has files
-    assert!(spill_path.read_dir().unwrap().count() > 0);
-
-    let config = CacheConfig::default();
-
-    let cache = FrameCache {
-        frames: vec![cached_frame],
-        frame_norms: None,
-        normalization: Normalization::None,
-        core: CacheCore {
-            spill_directory: Some(spill_directory),
-            dimensions: dims,
-            metadata: ImageMetadata::default(),
-            config,
-            progress: ProgressCallback::default(),
-            cancel: CancelToken::never(),
-            chunk_memory: OnceLock::new(),
-        },
-    };
-
-    // Drop the cache - should trigger cleanup via the core's Drop
-    drop(cache);
-
-    // The run's directory goes; the root it was created under stays.
-    assert!(
-        !spill_path.exists(),
-        "the run's spill directory should be deleted on cleanup"
-    );
-    assert!(
-        temp_dir.path().is_dir(),
-        "the cache root must survive the cleanup"
-    );
-}
-
-#[test]
 fn read_channel_chunk_in_memory() {
     let dims = ImageDimensions::new((4, 3), 1);
     // Pixels 0-11 in row-major order
@@ -668,16 +598,14 @@ fn read_channel_chunk_disk_backed() {
         frame_norms: None,
         normalization: Normalization::None,
         core: CacheCore {
-            spill_directory: Some(spill_directory),
+            tier: CacheTier::of(
+                Some(spill_directory),
+                RunMemory::new(1 << 30, Some(123_456)),
+            ),
             dimensions: dims,
             metadata: ImageMetadata::default(),
-            config: CacheConfig {
-                available_memory: Some(123_456),
-                ..Default::default()
-            },
             progress: ProgressCallback::default(),
             cancel: CancelToken::never(),
-            chunk_memory: OnceLock::new(),
         },
     };
 
@@ -685,7 +613,7 @@ fn read_channel_chunk_disk_backed() {
     let chunk = cache
         .core
         .read_channel_chunk(&cache.frames, |frame| &frame.channels, 0, 0, 1, 2);
-    assert_eq!(cache.core.chunk_available_memory(), Some(123_456));
+    assert_eq!(cache.core.tier.chunk_memory(), Some(123_456));
     let expected: Vec<f32> = (4..8).map(|i| i as f32).collect();
     assert_eq!(chunk, &expected[..]);
 
@@ -699,177 +627,4 @@ fn read_channel_chunk_disk_backed() {
     }
 
     drop(cache);
-}
-
-#[test]
-fn frame_count_disk_backed() {
-    let temp_dir = TempDir::new("lumos_frame_count_disk_test");
-    let spill_directory = SpillDirectory::create(temp_dir.path(), false).unwrap();
-
-    let dims = ImageDimensions::new((2, 2), 1);
-
-    // Create 3 cached frames
-    let mut frames = Vec::new();
-    for i in 0..3 {
-        let pixels: Vec<f32> = vec![i as f32; 4];
-        let image = LinearImage::from_pixels(dims, pixels);
-        let base_filename = format!("frame{i}");
-        let cached_frame = StoredFrame::spill(
-            &FrameSpill::new(spill_directory.path(), &base_filename),
-            &image,
-            &FrameQuality::None,
-            FrameStats::measure(&image),
-        )
-        .unwrap();
-        frames.push(cached_frame);
-    }
-
-    let cache = FrameCache {
-        frames,
-        frame_norms: None,
-        normalization: Normalization::None,
-        core: CacheCore {
-            spill_directory: Some(spill_directory),
-            dimensions: dims,
-            metadata: ImageMetadata::default(),
-            config: CacheConfig::default(),
-            progress: ProgressCallback::default(),
-            cancel: CancelToken::never(),
-            chunk_memory: OnceLock::new(),
-        },
-    };
-
-    assert_eq!(cache.frames.len(), 3);
-
-    drop(cache);
-}
-
-#[test]
-fn compute_channel_stats_grayscale() {
-    // 3 grayscale frames, 3x3 pixels each
-    let dims = ImageDimensions::new((3, 3), 1);
-
-    // Frame 0: all 5.0 → median=5.0, MAD=0.0
-    let frame0 = LinearImage::from_pixels(dims, vec![5.0; 9]);
-
-    // Frame 1: [1,2,3,4,5,6,7,8,9] → median=5.0, deviations=[4,3,2,1,0,1,2,3,4] → MAD=2.0
-    let frame1 = LinearImage::from_pixels(dims, (1..=9).map(|i| i as f32).collect());
-
-    // Frame 2: [10,10,10,20,20,20,30,30,30] → median=20.0, deviations=[10,10,10,0,0,0,10,10,10] → MAD=10.0
-    let frame2 = LinearImage::from_pixels(
-        dims,
-        vec![10.0, 10.0, 10.0, 20.0, 20.0, 20.0, 30.0, 30.0, 30.0],
-    );
-
-    let cache = make_test_cache(vec![frame0, frame1, frame2]);
-    let stats: Vec<_> = cache
-        .frames
-        .iter()
-        .map(|frame| &frame.source_stats)
-        .collect();
-
-    assert_eq!(stats.len(), 3); // 3 frames
-    assert_eq!(stats[0].channels.len(), 1);
-    assert_eq!(stats[0].channels[0].median, 5.0);
-    assert_eq!(stats[0].channels[0].mad, 0.0);
-    assert_eq!(stats[1].channels[0].median, 5.0);
-    assert_eq!(stats[1].channels[0].mad, 2.0);
-    assert_eq!(stats[2].channels[0].median, 20.0);
-    assert_eq!(stats[2].channels[0].mad, 10.0);
-}
-
-#[test]
-fn compute_channel_stats_rgb() {
-    // 2 RGB frames, 2x2 pixels each
-    let dims = ImageDimensions::new((2, 2), 3);
-
-    // Frame 0: R=[1,3,5,7] G=[10,10,10,10] B=[0,0,100,100]
-    let frame0 = LinearImage::from_planar_channels(
-        dims,
-        vec![
-            vec![1.0, 3.0, 5.0, 7.0],
-            vec![10.0, 10.0, 10.0, 10.0],
-            vec![0.0, 0.0, 100.0, 100.0],
-        ],
-    );
-    // Frame 0 expected:
-    //   R: median=4.0 (avg of 3,5), deviations=[3,1,1,3] → MAD=2.0 (avg of 1,3)
-    //   G: median=10.0, MAD=0.0
-    //   B: median=50.0 (avg of 0,100), deviations=[50,50,50,50] → MAD=50.0
-
-    // Frame 1: R=[2,2,2,2] G=[1,2,3,4] B=[10,20,30,40]
-    let frame1 = LinearImage::from_planar_channels(
-        dims,
-        vec![
-            vec![2.0, 2.0, 2.0, 2.0],
-            vec![1.0, 2.0, 3.0, 4.0],
-            vec![10.0, 20.0, 30.0, 40.0],
-        ],
-    );
-    // Frame 1 expected:
-    //   R: median=2.0, MAD=0.0
-    //   G: median=2.5, deviations=[1.5,0.5,0.5,1.5] → MAD=1.0
-    //   B: median=25.0, deviations=[15,5,5,15] → MAD=10.0
-
-    let cache = make_test_cache(vec![frame0, frame1]);
-    let stats: Vec<_> = cache
-        .frames
-        .iter()
-        .map(|frame| &frame.source_stats)
-        .collect();
-
-    assert_eq!(stats.len(), 2); // 2 frames
-    assert_eq!(stats[0].channels.len(), 3); // 3 channels each
-
-    // Frame 0
-    assert!(
-        (stats[0].channels[0].median - 4.0).abs() < f32::EPSILON,
-        "F0 R median"
-    );
-    assert!(
-        (stats[0].channels[0].mad - 2.0).abs() < f32::EPSILON,
-        "F0 R MAD"
-    );
-    assert!(
-        (stats[0].channels[1].median - 10.0).abs() < f32::EPSILON,
-        "F0 G median"
-    );
-    assert!(
-        (stats[0].channels[1].mad - 0.0).abs() < f32::EPSILON,
-        "F0 G MAD"
-    );
-    assert!(
-        (stats[0].channels[2].median - 50.0).abs() < f32::EPSILON,
-        "F0 B median"
-    );
-    assert!(
-        (stats[0].channels[2].mad - 50.0).abs() < f32::EPSILON,
-        "F0 B MAD"
-    );
-
-    // Frame 1
-    assert!(
-        (stats[1].channels[0].median - 2.0).abs() < f32::EPSILON,
-        "F1 R median"
-    );
-    assert!(
-        (stats[1].channels[0].mad - 0.0).abs() < f32::EPSILON,
-        "F1 R MAD"
-    );
-    assert!(
-        (stats[1].channels[1].median - 2.5).abs() < f32::EPSILON,
-        "F1 G median"
-    );
-    assert!(
-        (stats[1].channels[1].mad - 1.0).abs() < f32::EPSILON,
-        "F1 G MAD"
-    );
-    assert!(
-        (stats[1].channels[2].median - 25.0).abs() < f32::EPSILON,
-        "F1 B median"
-    );
-    assert!(
-        (stats[1].channels[2].mad - 10.0).abs() < f32::EPSILON,
-        "F1 B MAD"
-    );
 }

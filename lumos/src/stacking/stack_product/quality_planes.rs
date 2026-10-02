@@ -1,5 +1,7 @@
 //! Which ancillary planes a combine is asked to produce.
 
+use crate::io::image::image_dimensions::ImageDimensions;
+
 /// Which ancillary per-pixel planes a combine should produce.
 ///
 /// Each one is a full image-sized allocation — per channel for weight and variance — that the
@@ -31,6 +33,21 @@ impl QualityPlanes {
         weight: false,
         variance: false,
     };
+
+    /// Image-sized planes a combine keeps resident per output channel: the combined pixels, plus
+    /// whichever of weight and variance were asked for and so are allocated up front.
+    pub(crate) const fn resident_planes_per_channel(self) -> usize {
+        1 + self.weight as usize + self.variance as usize
+    }
+
+    /// Bytes a resident combine holds beside its frames for an output of `dimensions`: the
+    /// per-channel planes, and the one coverage plane if coverage was asked for. An upper bound
+    /// for a run whose frames turn out to carry no quality planes, whose coverage is a constant.
+    pub(crate) const fn resident_bytes(self, dimensions: ImageDimensions) -> usize {
+        let planes =
+            dimensions.channels() * self.resident_planes_per_channel() + self.coverage as usize;
+        planes * dimensions.pixel_count() * size_of::<f32>()
+    }
 
     /// Drop the planes this combine method cannot produce, so the request reaching the reducer
     /// is exactly what it will write.

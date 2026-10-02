@@ -10,7 +10,7 @@ use imaginarium::Buffer2;
 use memmap2::Mmap;
 
 use crate::stacking::frame_store::error::FrameStoreError;
-use crate::stacking::frame_store::spill;
+use crate::stacking::frame_store::frame_spill;
 
 /// One planar f32 buffer, either resident or memory-mapped.
 #[derive(Debug)]
@@ -22,7 +22,7 @@ pub(crate) enum StoredPlane {
 impl StoredPlane {
     /// Memory-map a spilled plane file.
     pub(crate) fn map(path: PathBuf) -> Result<Self, FrameStoreError> {
-        let mmap = spill::map_file(&path)?;
+        let mmap = frame_spill::map_file(&path)?;
         #[cfg(unix)]
         {
             use memmap2::Advice;

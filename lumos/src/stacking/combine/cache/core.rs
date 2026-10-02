@@ -5,15 +5,13 @@
 //! one call that hides whether a plane is resident or memory-mapped — and hand the pair to the
 //! reducer. An in-memory stack is a single chunk; a spilled one is as many as the budget dictates.
 
-use std::sync::OnceLock;
-
 use common::CancelToken;
 
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::memory::ChunkMemoryLayout;
-use crate::stacking::combine::cache_config::CacheConfig;
+use crate::memory::run_memory::RunMemory;
 use crate::stacking::frame_store::StoredFrame;
 use crate::stacking::frame_store::spill_directory::SpillDirectory;
 use crate::stacking::frame_store::stored_plane::StoredPlane;
@@ -21,30 +19,62 @@ use crate::stacking::progress::{ProgressCallback, StackingStage};
 use crate::stacking::stack_product::quality_planes::QualityPlanes;
 
 /// Shared cache context + combine engine — everything that doesn't depend on the frame type.
-/// Owned by composition inside [`FrameCache`](super::FrameCache); all frames share one tier, and
-/// `spill_directory` is `Some` only when the planes are memory-mapped.
+/// Owned by composition inside [`FrameCache`](super::FrameCache); all frames share one tier.
 #[derive(Debug)]
 pub(crate) struct CacheCore {
-    pub(crate) spill_directory: Option<SpillDirectory>,
+    pub(crate) tier: CacheTier,
     /// Image dimensions (same for all frames).
     pub(crate) dimensions: ImageDimensions,
     /// Metadata from the first frame.
     pub(crate) metadata: ImageMetadata,
-    /// Configuration for cache operations.
-    pub(crate) config: CacheConfig,
     /// Progress callback.
     pub(crate) progress: ProgressCallback,
     /// Cooperative cancel flag, present during validation and normalization and polled by
     /// [`Self::process_chunks`] during the combine.
     pub(crate) cancel: CancelToken,
-    /// The memory reading every chunk sizing in this combine shares, taken on the first ask.
-    ///
-    /// [`CacheConfig::planning_memory`] samples the system when the config carries no pinned
-    /// figure, so an unresolved one answers two different numbers when asked twice — and the
-    /// coverage pass has to size against the figure the combine already sized against, or the output
-    /// planes the combine has since allocated are charged against a reading taken before they
-    /// existed. Holding it here is what lets the two passes ask independently.
-    pub(crate) chunk_memory: OnceLock<Option<u64>>,
+}
+
+/// Where a cache's frames live, and for spilled ones what the combine sizes its row chunks against.
+#[derive(Debug)]
+pub(crate) enum CacheTier {
+    /// Every plane in RAM: the combine walks whole planes and needs no budget.
+    Resident,
+    /// Planes memory-mapped from files in `directory`, read in row chunks sized against
+    /// `chunk_memory`: the run's planning figure, one number for the combine and for the coverage
+    /// pass after it.
+    Spilled {
+        #[cfg_attr(
+            not(test),
+            expect(
+                dead_code,
+                reason = "held, not read: the directory outlives the memory maps in the frames"
+            )
+        )]
+        directory: SpillDirectory,
+        chunk_memory: u64,
+    },
+}
+
+impl CacheTier {
+    /// The tier of frames spilled to `directory`, or resident for `None`, under `memory`.
+    pub(crate) fn of(directory: Option<SpillDirectory>, memory: RunMemory) -> Self {
+        directory.map_or(Self::Resident, |directory| Self::Spilled {
+            directory,
+            chunk_memory: memory.planning(),
+        })
+    }
+
+    /// What a spilled combine sizes its row chunks against; `None` for a resident one.
+    pub(crate) const fn chunk_memory(&self) -> Option<u64> {
+        match self {
+            Self::Resident => None,
+            Self::Spilled { chunk_memory, .. } => Some(*chunk_memory),
+        }
+    }
+
+    pub(crate) const fn spills(&self) -> bool {
+        matches!(self, Self::Spilled { .. })
+    }
 }
 
 /// Per-chunk context handed to the [`CacheCore::process_chunks`] closure: the input frame
@@ -60,15 +90,6 @@ pub(super) struct ChunkContext<'a> {
     /// Global pixel index of this chunk's first pixel — for indexing full-frame,
     /// channel-independent maps such as coverage.
     pub(super) pixel_offset: usize,
-}
-
-/// Planes a combine keeps resident per output channel: the combined pixels, plus whichever
-/// quality planes were asked for and so were allocated up front.
-///
-/// Coverage is not among them — it has no per-channel plane and is accumulated after the combine,
-/// in [`FrameCache::finish_product`](super::FrameCache::finish_product).
-pub(crate) fn resident_planes_per_channel(planes: QualityPlanes) -> usize {
-    1 + usize::from(planes.weight) + usize::from(planes.variance)
 }
 
 /// Each frame's slice of one frame-quality plane over `[start, end)`, `None` where the frame
@@ -97,7 +118,7 @@ pub(crate) fn weighted_chunk_memory_layout(
 ) -> ChunkMemoryLayout {
     ChunkMemoryLayout {
         input_planes: frames.iter().map(|frame| 1 + frame.quality.count()).sum(),
-        resident_planes: output_channels * resident_planes_per_channel(planes),
+        resident_planes: output_channels * planes.resident_planes_per_channel(),
     }
 }
 
@@ -114,20 +135,11 @@ pub(crate) fn coverage_chunk_memory_layout(
             .iter()
             .filter(|frame| !frame.quality.is_none())
             .count(),
-        resident_planes: output_channels * resident_planes_per_channel(planes) + 1,
+        resident_planes: output_channels * planes.resident_planes_per_channel() + 1,
     }
 }
 
 impl CacheCore {
-    /// `None` for a resident combine, which walks whole planes and needs no budget at all.
-    pub(super) fn chunk_available_memory(&self) -> Option<u64> {
-        *self.chunk_memory.get_or_init(|| {
-            self.spill_directory
-                .as_ref()
-                .map(|_| self.config.planning_memory())
-        })
-    }
-
     /// Combine engine: walk the output in memory-bounded row chunks (whole planes for in-memory
     /// stacks, bounded row chunks for disk-backed), gather each frame's channel slice for the
     /// chunk via [`StoredPlane::chunk`], and hand `(output_slice, ChunkContext)` to `process`. The frames
@@ -137,7 +149,7 @@ impl CacheCore {
         frames: &[F],
         frame_channels: Channels,
         memory: ChunkMemoryLayout,
-        available_memory: Option<u64>,
+        chunk_memory: Option<u64>,
         mut process: Process,
     ) -> LinearPixels
     where
@@ -149,8 +161,8 @@ impl CacheCore {
         let width = dims.width();
         let height = dims.height();
 
-        let chunk_rows = available_memory.map_or(height, |available_memory| {
-            memory.optimal_chunk_rows(dims.size(), available_memory)
+        let chunk_rows = chunk_memory.map_or(height, |chunk_memory| {
+            memory.optimal_chunk_rows(dims.size(), chunk_memory)
         });
 
         let mut output = LinearPixels::new_zeroed(dims);
