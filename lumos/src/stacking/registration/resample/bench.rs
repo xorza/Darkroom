@@ -7,10 +7,13 @@ use std::hint::black_box;
 use ::quickbench::quick_bench;
 
 use crate::stacking::registration::config::{self, InterpolationMethod};
-use crate::stacking::registration::resample::{self, kernel, plane, quality, row};
+use crate::stacking::registration::resample::internals::warp_plane;
+use crate::stacking::registration::resample::kernel::LanczosOrder;
+use crate::stacking::registration::resample::row_positions::RowPositions;
+use crate::stacking::registration::resample::{self, quality, row};
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 
-/// `plane::warp` of a `side`-square gradient by the test transform with `method`.
+/// One plane of a `side`-square gradient warped by the test transform with `method`.
 fn bench_plane_warp(b: quickbench::Bencher, side: usize, method: InterpolationMethod) {
     let input = patterns::diagonal_gradient(Size2us::new(side, side));
     let mut output = Buffer2::new_default(side, side);
@@ -18,7 +21,7 @@ fn bench_plane_warp(b: quickbench::Bencher, side: usize, method: InterpolationMe
     let params = config::internals::warp_params(method);
 
     b.bench(|| {
-        plane::warp(
+        warp_plane(
             black_box(&input),
             black_box(&mut output),
             &black_box(WarpTransform::new(transform)),
@@ -63,14 +66,22 @@ fn bench_warp_lanczos3_1k_single_thread(b: quickbench::Bencher) {
     let wt = WarpTransform::new(transform);
     let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
 
+    let size = Size2us::new(input.width(), input.height());
+    let mut positions = RowPositions::default();
     b.bench(|| {
-        let width = input.width();
-        for (y, row) in black_box(&mut output)
+        for (y, output_row) in black_box(&mut output)
             .pixels_mut()
-            .chunks_mut(width)
+            .chunks_mut(size.width)
             .enumerate()
         {
-            row::lanczos(black_box(&input), row, y, &wt, &params);
+            positions.fill(y, size.width, &wt, size);
+            row::sample_row(
+                black_box(&input),
+                positions.positions(),
+                params.method,
+                params.border_value,
+                output_row,
+            );
         }
     });
 }
@@ -144,7 +155,7 @@ fn bench_warp_with_quality_lanczos3_1k(b: quickbench::Bencher) {
 
 #[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_lut_lookup(b: quickbench::Bencher) {
-    let lut = kernel::get_lanczos_lut(3);
+    let lut = LanczosOrder::Three.lut();
     let test_values: Vec<f32> = (0..1000).map(|i| (i as f32 / 1000.0) * 3.0 - 1.5).collect();
 
     b.bench(|| {
@@ -198,4 +209,65 @@ fn bench_warp_into_reused_4k(b: quickbench::Bencher) {
             &params,
         );
     });
+}
+
+/// A 2k RGB frame through `warp_into` with a SIP correction: the transform is non-linear, so this
+/// is the case where every channel, the quality maps and validity each need the source positions.
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
+fn bench_warp_into_rgb_sip_2k(b: quickbench::Bencher) {
+    let size = Size2us::new(2048, 2048);
+    let plane = patterns::diagonal_gradient(size).pixels().to_vec();
+    let image = LinearImage::from_planar_channels(
+        ImageDimensions::new((size.width, size.height), 3),
+        [plane.clone(), plane.clone(), plane],
+    );
+    let warp = sip_warp(size);
+    let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
+    let mut buffers = resample::WarpBuffers::new(image.dimensions());
+    b.bench(|| buffers.warp_into(black_box(&image), black_box(&warp), &params));
+}
+
+/// A 2k RGB frame through `warp_into` with a homography: numerators and denominator are affine in x,
+/// so a row can step them.
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
+fn bench_warp_into_rgb_homography_2k(b: quickbench::Bencher) {
+    let size = Size2us::new(2048, 2048);
+    let plane = patterns::diagonal_gradient(size).pixels().to_vec();
+    let image = LinearImage::from_planar_channels(
+        ImageDimensions::new((size.width, size.height), 3),
+        [plane.clone(), plane.clone(), plane],
+    );
+    let warp = WarpTransform::new(Transform::homography([
+        1.0, 0.003, 4.0, -0.002, 1.0, 2.5, 1e-7, -2e-7,
+    ]));
+    let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
+    let mut buffers = resample::WarpBuffers::new(image.dimensions());
+    b.bench(|| buffers.warp_into(black_box(&image), black_box(&warp), &params));
+}
+
+/// The test transform with an order-3 SIP fitted to a mild radial field over `size`.
+fn sip_warp(size: Size2us) -> WarpTransform {
+    use crate::stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
+    let transform = create_test_transform();
+    let center = DVec2::new(size.width as f64 / 2.0, size.height as f64 / 2.0);
+    let mut reference = Vec::new();
+    for y in (0..size.height).step_by(128) {
+        for x in (0..size.width).step_by(128) {
+            reference.push(DVec2::new(x as f64, y as f64));
+        }
+    }
+    let target: Vec<DVec2> = reference
+        .iter()
+        .map(|&r| {
+            let d = r - center;
+            transform.apply(r + d * 2e-9 * d.length_squared())
+        })
+        .collect();
+    let config = SipConfig {
+        order: 3,
+        reference_point: Some(center),
+        ..SipConfig::default()
+    };
+    let fit = SipPolynomial::fit_from_transform(&reference, &target, &transform, &config).unwrap();
+    WarpTransform::with_sip(transform, fit.polynomial)
 }

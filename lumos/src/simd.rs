@@ -16,10 +16,6 @@
 #[cfg(target_arch = "x86_64")]
 pub(crate) const AVX2_F32_LANES: usize = 8;
 
-/// f32 lanes in one SSE vector register.
-#[cfg(target_arch = "x86_64")]
-pub(crate) const SSE_F32_LANES: usize = 4;
-
 /// f32 lanes in one NEON vector register.
 #[cfg(target_arch = "aarch64")]
 pub(crate) const NEON_F32_LANES: usize = 4;

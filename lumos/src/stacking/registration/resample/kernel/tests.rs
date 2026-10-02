@@ -2,13 +2,13 @@ use crate::math::lanczos;
 use crate::testing::prelude::*;
 
 use crate::stacking::registration::config::{self, InterpolationMethod, WarpParams};
-use crate::stacking::registration::resample::kernel::{self, internals};
+use crate::stacking::registration::resample::kernel::{self, LanczosOrder, internals};
 
 /// Shorthand for tests: interpolate with a method and default border/clamp settings.
 fn interp(data: &Buffer2<f32>, x: f32, y: f32, method: InterpolationMethod) -> f32 {
     internals::interpolate(
         data,
-        Vec2::new(x, y),
+        DVec2::new(f64::from(x), f64::from(y)),
         &config::internals::warp_params(method),
     )
 }
@@ -52,9 +52,10 @@ fn lanczos_lut_matches_direct_computation() {
     // LUT should match direct computation within quantization tolerance.
     // LUT resolution is 4096 samples/unit, so max quantization error ~0.5/4096 in x,
     // which maps to at most ~0.001 in kernel value.
-    for a in [2, 3, 4] {
+    for order in [LanczosOrder::Two, LanczosOrder::Three, LanczosOrder::Four] {
+        let a = order.a();
         let a_f32 = a as f32;
-        let lut = kernel::get_lanczos_lut(a);
+        let lut = order.lut();
 
         for &x in &[0.0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 2.5] {
             if x >= a_f32 {
@@ -72,8 +73,9 @@ fn lanczos_lut_matches_direct_computation() {
 
 #[test]
 fn lanczos_lut_symmetry() {
-    for a in [2, 3, 4] {
-        let lut = kernel::get_lanczos_lut(a);
+    for order in [LanczosOrder::Two, LanczosOrder::Three, LanczosOrder::Four] {
+        let a = order.a();
+        let lut = order.lut();
         for &x in &[0.1, 0.5, 1.0, 1.5] {
             let pos = lut.lookup(x);
             let neg = lut.lookup(-x);
@@ -87,8 +89,9 @@ fn lanczos_lut_symmetry() {
 
 #[test]
 fn lanczos_lut_special_values() {
-    for a in [2, 3, 4] {
-        let lut = kernel::get_lanczos_lut(a);
+    for order in [LanczosOrder::Two, LanczosOrder::Three, LanczosOrder::Four] {
+        let a = order.a();
+        let lut = order.lut();
         let a_f32 = a as f32;
 
         // At x=0: kernel = 1
@@ -385,7 +388,7 @@ fn custom_border_value() {
     };
 
     // Fully outside should use the custom border value
-    let val = internals::interpolate(&data_buf, Vec2::new(-5.0, -5.0), &params);
+    let val = internals::interpolate(&data_buf, DVec2::new(-5.0, -5.0), &params);
     assert!(
         (val - (-99.0)).abs() < TOL,
         "Expected border_value -99.0, got {val}"

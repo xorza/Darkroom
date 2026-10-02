@@ -85,13 +85,19 @@ impl FrameTier {
         buffers: WarpBuffers,
         source_stats: FrameStats,
     ) -> Result<StoredWarp, Error> {
+        let WarpBuffers {
+            pixels,
+            coverage,
+            confidence,
+            rows,
+        } = buffers;
         let quality = FrameQuality::Planes {
-            coverage: buffers.coverage,
-            confidence: buffers.confidence,
+            coverage,
+            confidence,
         };
         let image = LinearImage {
             metadata,
-            pixels: buffers.pixels,
+            pixels,
             // Warped output; see `resample::warp` for why the source's mask does not come with it.
             nulls: None,
         };
@@ -121,6 +127,7 @@ impl FrameTier {
                         pixels: image.pixels,
                         coverage,
                         confidence,
+                        rows,
                     }),
                 })
             }
