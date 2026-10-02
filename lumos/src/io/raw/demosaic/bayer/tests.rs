@@ -229,9 +229,9 @@ fn bayer_image_valid() {
         margin: Vec2us::new(1, 1),
     };
     let bayer = BayerImage::with_margins(&data, layout, CfaPattern::Rggb);
-    assert_eq!(bayer.raw, Size2us::new(4, 4));
-    assert_eq!(bayer.active, Size2us::new(2, 2));
-    assert_eq!(bayer.margin, Vec2us::new(1, 1));
+    assert_eq!(bayer.layout.raw, Size2us::new(4, 4));
+    assert_eq!(bayer.layout.active, Size2us::new(2, 2));
+    assert_eq!(bayer.layout.margin, Vec2us::new(1, 1));
 }
 
 /// Helper: create a `BayerImage` from a flat CFA array with no margins.

@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::io::raw;
 use crate::io::raw::demosaic::sensor_layout::SensorLayout;
-use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
 pub(crate) mod rcd;
@@ -148,12 +147,8 @@ impl CfaPattern {
 pub(crate) struct BayerImage<'a> {
     /// Decoded or calibrated linear samples; calibration may put values outside `[0, 1]`.
     pub(crate) data: &'a [f32],
-    /// Extent of the raw data buffer.
-    pub(crate) raw: Size2us,
-    /// Extent of the active/output image area.
-    pub(crate) active: Size2us,
-    /// Top-left corner of the active area within the raw buffer.
-    pub(crate) margin: Vec2us,
+    /// Where the visible window sits in the data.
+    pub(crate) layout: SensorLayout,
     /// CFA pattern anchored at the full raw buffer origin.
     pub(crate) raw_cfa_pattern: CfaPattern,
 }
@@ -169,11 +164,6 @@ impl<'a> BayerImage<'a> {
         raw_cfa_pattern: CfaPattern,
     ) -> Self {
         layout.validate(data.len());
-        let SensorLayout {
-            raw,
-            active,
-            margin,
-        } = layout;
 
         debug_assert!(
             data.iter().all(|v| v.is_finite()),
@@ -182,9 +172,7 @@ impl<'a> BayerImage<'a> {
 
         Self {
             data,
-            raw,
-            active,
-            margin,
+            layout,
             raw_cfa_pattern,
         }
     }

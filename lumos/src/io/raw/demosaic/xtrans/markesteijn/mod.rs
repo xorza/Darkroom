@@ -133,14 +133,14 @@ pub(crate) fn demosaic(
 ) -> Result<[Vec<f32>; 3], Cancelled> {
     use std::time::Instant;
 
-    let width = xtrans.active.width;
-    let height = xtrans.active.height;
+    let width = xtrans.layout.active.width;
+    let height = xtrans.layout.active.height;
     let pixels = width * height;
 
     // Build lookup tables
     let hex = HexLookup::new(&xtrans.raw_pattern);
     // Allocate all working memory in one shot
-    let mut arena = DemosaicArena::new(xtrans.active);
+    let mut arena = DemosaicArena::new(xtrans.layout.active);
 
     // Step 1: Compute green min/max bounds for non-green pixels
     // Writes: Region C (gmin), Region D (gmax)
@@ -226,7 +226,7 @@ pub(crate) fn demosaic(
         // gmin data is dead after Step 2. f32 alignment (4) satisfies u8 alignment (1).
         let homo =
             unsafe { slice::from_raw_parts_mut(region_c.as_mut_ptr().cast::<u8>(), pixels * 4) };
-        markesteijn_steps::compute_homogeneity(drv, xtrans.active, homo, region_d);
+        markesteijn_steps::compute_homogeneity(drv, xtrans.layout.active, homo, region_d);
     }
     tracing::debug!(
         "  Step 5 (homogeneity): {:.1}ms",
