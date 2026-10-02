@@ -605,13 +605,19 @@ fn sigma_clipped_over_every_sample_shape() {
     }
 }
 
-/// A stricter kappa clips more, and lands closer to the true centre.
-///
-/// Two fixtures, because the two tests this replaces each built their own and asserted the same
-/// property. The second pins exact medians: with 50 at 0.50, 30 at 0.54 and 20 at 0.80, the
-/// approximate median is 0.54 and MAD 0.04, so sigma is 0.059. kappa 1.5 gives a threshold of
-/// 0.089 and rejects the 0.80 group, converging on 0.50; kappa 5.0 gives 0.297, keeps them, and
-/// stays at the biased 0.54.
+/// Every exit reports the same median: a run that converges and one that never iterates both give
+/// (2 + 3)/2 for [1, 2, 3, 4]. The converged exit used to report the upper-middle 3.
+#[test]
+fn sigma_clipped_reports_one_median_on_every_exit() {
+    let mut deviations = Vec::new();
+    for iterations in [0, 3] {
+        let mut values = vec![1.0f32, 2.0, 3.0, 4.0];
+        let stats = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, iterations);
+        assert_eq!(stats.median, 2.5, "{iterations} iterations");
+    }
+}
+
+/// A stricter kappa clips an outlier a looser one keeps, so the two land on different medians.
 #[test]
 fn sigma_clipped_stricter_kappa_clips_harder() {
     let mut deviations = Vec::new();
@@ -621,41 +627,18 @@ fn sigma_clipped_stricter_kappa_clips_harder() {
         ClippedStats::sigma_clipped(&mut values, deviations, kappa, 3)
     };
 
-    let wide = {
-        let mut v = vec![50.0f32; 90];
-        v.extend([20.0, 25.0, 75.0, 80.0, 0.0, 100.0]);
-        v
-    };
-    let strict = clip(&wide, 1.5, &mut deviations);
-    let loose = clip(&wide, 5.0, &mut deviations);
-    assert!((strict.median - 50.0).abs() < 5.0);
-    assert!((loose.median - 50.0).abs() < 5.0);
-    assert!(
-        strict.sigma <= loose.sigma,
-        "strict sigma {} should not exceed loose {}",
-        strict.sigma,
-        loose.sigma
-    );
-
-    let biased = {
-        let mut v = vec![0.50f32; 50];
-        v.extend(vec![0.54; 30]);
-        v.extend(vec![0.80; 20]);
-        v
-    };
-    let strict = clip(&biased, 1.5, &mut deviations);
-    let loose = clip(&biased, 5.0, &mut deviations);
-    assert!(
-        (strict.median - 0.5).abs() < 1e-6,
-        "strict kappa should recover the true median 0.5, got {}",
-        strict.median
-    );
-    assert!(
-        (strict.median - 0.5).abs() < (loose.median - 0.5).abs(),
-        "strict median {} should beat loose {}",
-        strict.median,
-        loose.median
-    );
+    // 0..39 plus one outlier at 60. Both runs start at median 20: the deviations |x − 20| are
+    // 0, then 1..19 twice, then 20 and 40, so rank 20 of the 41 is 10 and σ = 1.4826·10 = 14.83.
+    // κ = 1.5 gives 22.2, clipping the 60; the 40 survivors' deviations |x − 19.5| are 0.5..19.5
+    // twice, so ranks 19 and 20 are 9.5 and 10.5 and the MAD stays 10 — nothing more clips, and
+    // the median is 19.5. κ = 5 gives 74, keeping the 60: the median stays 20.
+    let values: Vec<f32> = (0..40).map(|v| v as f32).chain([60.0]).collect();
+    let strict = clip(&values, 1.5, &mut deviations);
+    let loose = clip(&values, 5.0, &mut deviations);
+    assert_eq!(strict.median, 19.5);
+    assert_eq!(loose.median, 20.0);
+    assert_eq!(strict.sigma, mad_to_sigma(10.0f32));
+    assert_eq!(loose.sigma, mad_to_sigma(10.0f32));
 }
 
 /// The deviations buffer is scratch the caller owns and reuses across calls of different sizes.
@@ -763,8 +746,9 @@ fn median_fast_truth_table() {
             expected: 3.0,
         },
         MedianCase {
+            // Sorted [1, 2, 5, 8]: (2 + 5) / 2.
             values: &[5.0, 2.0, 8.0, 1.0],
-            expected: 5.0,
+            expected: 3.5,
         },
         MedianCase {
             values: &[42.0],
@@ -772,7 +756,7 @@ fn median_fast_truth_table() {
         },
         MedianCase {
             values: &[7.0, 3.0],
-            expected: 7.0,
+            expected: 5.0,
         },
         MedianCase {
             values: &[5.0; 20],
@@ -791,33 +775,20 @@ fn median_fast_truth_table() {
     }
 }
 
+/// `median_fast` and `median_mut` are one median: the middle element for an odd count, the mean of
+/// the two middle ones for an even count. Sorted [1, 3, 7, 9] → (3 + 7)/2; sorted [2, 4, 6, 8, 10]
+/// → 6.
 #[test]
-fn median_fast_differs_from_exact_on_even() {
-    // Sorted: [1, 3, 7, 9], mid=2
-    // Exact: (3+7)/2 = 5.0
-    // Fast: values[2] = 7.0
-    let mut values_fast = [9.0f32, 1.0, 7.0, 3.0];
-    let mut values_exact = values_fast;
-    let fast = median_fast(&mut values_fast);
-    let exact = median_mut(&mut values_exact);
-    assert_eq!(exact, 5.0);
-    assert_eq!(fast, 7.0);
-    assert!(
-        (fast - exact).abs() > 1.0,
-        "fast and exact should differ for even N"
-    );
-}
-
-#[test]
-fn median_fast_agrees_with_exact_on_odd() {
-    // For odd N, both return the same middle element
-    // Sorted: [2, 4, 6, 8, 10], mid=2, median=6
-    let mut values_fast = [10.0f32, 4.0, 6.0, 2.0, 8.0];
-    let mut values_exact = values_fast;
-    let fast = median_fast(&mut values_fast);
-    let exact = median_mut(&mut values_exact);
-    assert!((fast - exact).abs() < f32::EPSILON);
-    assert_eq!(fast, 6.0);
+fn median_fast_matches_median_mut_at_both_parities() {
+    for (values, expected) in [
+        (vec![9.0f32, 1.0, 7.0, 3.0], 5.0),
+        (vec![10.0, 4.0, 6.0, 2.0, 8.0], 6.0),
+    ] {
+        let fast = median_fast(&mut values.clone());
+        let exact = median_mut(&mut values.clone());
+        assert_eq!(fast, expected, "{values:?}");
+        assert_eq!(exact, expected, "{values:?}");
+    }
 }
 
 /// [`mad_fast`] over odd and even lengths, a uniform run, both degenerate lengths, and data whose
@@ -835,8 +806,8 @@ fn mad_fast_truth_table_holds_at_both_widths() {
         (&[1.0, 2.0, 3.0, 4.0, 5.0], 3.0, 1.0),
         // |r - 3| over [1, 2, 3, 4, 100] = [2, 1, 0, 1, 97]; ranked [0, 1, 1, 2, 97], index 2 = 1.
         (&[1.0, 2.0, 3.0, 4.0, 100.0], 3.0, 1.0),
-        // Even count takes the upper middle: [2, 1, 1, 97] ranked [1, 1, 2, 97], index 2 = 2.
-        (&[1.0, 2.0, 4.0, 100.0], 3.0, 2.0),
+        // Even count averages the two middles: [2, 1, 1, 97] ranked [1, 1, 2, 97] → (1 + 2)/2.
+        (&[1.0, 2.0, 4.0, 100.0], 3.0, 1.5),
         // A short call after the long ones above measures only its own deviations:
         // |r - 20| = [10, 0, 10] ranked [0, 10, 10], index 1 = 10.
         (&[10.0, 20.0, 30.0], 20.0, 10.0),
@@ -962,23 +933,22 @@ fn mad_floored_raises_only_a_spread_below_the_floor() {
     assert_eq!(mad_floored(5.0, 10.0, 0.5), 5.0);
 }
 
-/// The upper-middle convention, and the equivalence a caller trades a full sort for.
+/// One selection gives the same median a full sort does, at both parities and with duplicates
+/// present — what SIP's clip relies on when it trades the sort away.
 #[test]
-fn median_fast_takes_the_upper_middle_of_a_sorted_run() {
-    // Sorted: [1, 3, 7, 9]. Index len/2 = 2 holds 7.0, where averaging gives (3 + 7)/2 = 5.0.
-    assert_eq!(median_fast(&mut [9.0f64, 1.0, 7.0, 3.0]), 7.0);
-    assert_eq!(median_mut(&mut [9.0f64, 1.0, 7.0, 3.0]), 5.0);
-
-    // What SIP's clip relies on: whatever a full sort leaves at `len / 2`, one selection returns
-    // bit-identically, at both parities and with duplicates present.
+fn median_fast_equals_the_sorted_median() {
     for len in 1..40usize {
         let data: Vec<f64> = (0..len)
             .map(|i| (i * 37 % len) as f64 * 0.1 - 1.5)
             .collect();
         let mut sorted = data.clone();
         sorted.sort_unstable_by(f64::total_cmp);
-        let mut fast = data.clone();
-        assert_eq!(median_fast(&mut fast), sorted[len / 2], "len = {len}");
+        let expected = if len % 2 == 1 {
+            sorted[len / 2]
+        } else {
+            f64::midpoint(sorted[len / 2 - 1], sorted[len / 2])
+        };
+        assert_eq!(median_fast(&mut data.clone()), expected, "len = {len}");
     }
 }
 

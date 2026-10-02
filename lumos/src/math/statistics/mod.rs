@@ -128,11 +128,8 @@ pub(crate) fn robust_sigma_f64(data: &[f64], scratch: &mut Vec<f64>) -> f64 {
     MAD_TO_SIGMA * mad_with_scratch(data, median, scratch)
 }
 
-/// Fast approximate median: one partition under [`Float::fast_cmp`], no NaN handling.
-///
-/// Returns the upper-middle element for even-length arrays (no averaging). That convention is
-/// what lets a caller that sorted and indexed `[len / 2]` switch to this and get the same value
-/// out: a full sort's element at that rank is exactly what one selection returns.
+/// Median under [`Float::fast_cmp`], with no NaN handling: one partition, plus a scan of the lower
+/// half for an even count, whose median is the mean of the two middle elements.
 ///
 /// `data` must contain no NaN: comparing one orders it `Equal` against everything, which is not
 /// a total order, and `select_nth_unstable_by` is then free to return any element. Not unsound —
@@ -147,9 +144,13 @@ pub(crate) fn median_fast<F: Float>(data: &mut [F]) -> F {
         "median_fast requires NaN-free data; use median_mut for data that may hold NaN"
     );
 
-    let mid = data.len() / 2;
-    let (_, median, _) = data.select_nth_unstable_by(mid, F::fast_cmp);
-    *median
+    let len = data.len();
+    let (lower, median, _) = data.select_nth_unstable_by(len / 2, F::fast_cmp);
+    if len % 2 == 1 {
+        return *median;
+    }
+    let below = lower.iter().copied().reduce(F::max).unwrap();
+    (below + *median) * F::HALF
 }
 
 /// Replace `scratch` with `|value - median|` for each of `values`, leaving it exactly as long.
