@@ -110,7 +110,10 @@ fn filter_fwhm_outliers(stars: &mut Vec<Star>, max_deviation: f32) -> usize {
 /// filter, at the cost of an O(n log n) build and n radius queries whose results are mostly
 /// discarded, in place of a structure built as the single pass goes.
 fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
-    if stars.len() < 2 {
+    // Both paths count a pair as duplicate only when strictly closer than `min_separation`, so a
+    // separation of zero removes nothing. Said here rather than reached: the spatial hash would
+    // divide by it.
+    if stars.len() < 2 || min_separation == 0.0 {
         return 0;
     }
 

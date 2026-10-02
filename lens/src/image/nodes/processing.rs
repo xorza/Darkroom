@@ -162,6 +162,15 @@ fn register_blend(library: &mut Library) {
                             .as_f64()
                             .expect("alpha input type is validated at the compile boundary")
                             as f32;
+                        // Two independent wires: a different size or format is the user's
+                        // graph, not a broken invariant, and the blend kernel asserts on it.
+                        if destination.desc() != source.desc() {
+                            return Err(InvokeError::invalid_input(
+                                1,
+                                "an image with the source's size and format",
+                                destination.desc(),
+                            ));
+                        }
                         let mut output = imaginarium::Image::new_black(source.desc())
                             .map_err(InvokeError::external)?;
                         Blend::new(mode, alpha).apply_cpu(

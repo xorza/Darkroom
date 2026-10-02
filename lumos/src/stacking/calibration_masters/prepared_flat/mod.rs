@@ -10,6 +10,7 @@ use rayon::prelude::*;
 
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::math::vec2us::Vec2us;
+use crate::stacking::calibration_masters::error::CalibrationError;
 
 // Bounds amplification at dead/near-zero photosites while keeping every pixel calibrated.
 const MIN_NORMALIZED_FLAT: f32 = 0.1;
@@ -24,15 +25,19 @@ pub(super) fn subtract(mut flat: CfaImage, subtractor: Option<(&CfaImage, f32)>)
     flat
 }
 
-pub(super) fn normalize(mut flat: CfaImage) -> CfaImage {
+/// Normalize the subtracted flat to a mean of one, per CFA colour.
+///
+/// # Errors
+/// [`CalibrationError::NonPositiveFlat`] when a colour (or the whole mono frame) has no positive
+/// mean: a property of the user's flats, not of this code.
+pub(super) fn normalize(mut flat: CfaImage) -> Result<CfaImage, CalibrationError> {
     match flat.metadata.cfa_type.as_ref() {
         Some(cfa_type) if cfa_type.num_colors() == 3 => {
-            normalize_cfa(&mut flat.data, cfa_type);
+            normalize_cfa(&mut flat.data, cfa_type)?;
         }
-        _ => normalize_mono(&mut flat.data),
+        _ => normalize_mono(&mut flat.data)?,
     }
-
-    flat
+    Ok(flat)
 }
 
 pub(super) fn apply(flat: &CfaImage, image: &mut CfaImage) {
@@ -52,20 +57,20 @@ pub(super) fn apply(flat: &CfaImage, image: &mut CfaImage) {
         .for_each(|(pixel, divisor)| *pixel /= divisor);
 }
 
-fn normalize_mono(flat: &mut Buffer2<f32>) {
+fn normalize_mono(flat: &mut Buffer2<f32>) -> Result<(), CalibrationError> {
     let sum: f64 = flat.par_iter().map(|&value| f64::from(value)).sum();
     let mean = (sum / flat.len() as f64) as f32;
-    assert!(
-        mean > f32::EPSILON,
-        "Flat frame mean is zero or negative after subtraction"
-    );
+    if mean.is_nan() || mean <= f32::EPSILON {
+        return Err(CalibrationError::NonPositiveFlat { channel: None });
+    }
     let inv_mean = 1.0 / mean;
 
     flat.par_iter_mut()
         .for_each(|value| *value = (*value * inv_mean).max(MIN_NORMALIZED_FLAT));
+    Ok(())
 }
 
-fn normalize_cfa(flat: &mut Buffer2<f32>, cfa_type: &CfaType) {
+fn normalize_cfa(flat: &mut Buffer2<f32>, cfa_type: &CfaType) -> Result<(), CalibrationError> {
     let width = flat.width();
     let (sums, counts) = flat
         .par_chunks_mut(width)
@@ -93,15 +98,13 @@ fn normalize_cfa(flat: &mut Buffer2<f32>, cfa_type: &CfaType) {
 
     let mut inv_means = [0.0f32; 3];
     for color in 0..3 {
-        assert!(
-            counts[color] > 0,
-            "Flat has no pixels for color channel {color}"
-        );
+        // A channel with no pixels divides 0 by 0.
         let mean = (sums[color] / counts[color] as f64) as f32;
-        assert!(
-            mean > f32::EPSILON,
-            "Flat channel {color} mean is zero or negative"
-        );
+        if mean.is_nan() || mean <= f32::EPSILON {
+            return Err(CalibrationError::NonPositiveFlat {
+                channel: Some(color),
+            });
+        }
         inv_means[color] = 1.0 / mean;
     }
 
@@ -111,6 +114,7 @@ fn normalize_cfa(flat: &mut Buffer2<f32>, cfa_type: &CfaType) {
             *value = (*value * inv_means[color]).max(MIN_NORMALIZED_FLAT);
         }
     });
+    Ok(())
 }
 
 #[cfg(test)]

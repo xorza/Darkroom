@@ -400,6 +400,20 @@ fn remove_duplicate_stars_over_every_geometry() {
     }
 }
 
+/// `duplicate_min_separation = 0` passes validation and means "no deduplication" on both paths —
+/// the spatial-hash one too, which used to divide every coordinate by the zero cell size.
+#[test]
+fn zero_separation_removes_nothing_on_either_path() {
+    for count in [10, SPATIAL_HASH_CROSSOVER + 50] {
+        // Every star twice, at exactly the same spot.
+        let mut stars: Vec<Star> = (0..count)
+            .map(|i| Star::at(DVec2::new((i / 2) as f64 * 3.0, 7.0)).with_flux(1.0))
+            .collect();
+        assert_eq!(remove_duplicate_stars(&mut stars, 0.0), 0, "{count} stars");
+        assert_eq!(stars.len(), count);
+    }
+}
+
 #[test]
 fn remove_duplicate_stars_many_duplicates() {
     // 20 stars along x=10..19.5, y=10, spacing=0.5px, all within 8px of star[0]
