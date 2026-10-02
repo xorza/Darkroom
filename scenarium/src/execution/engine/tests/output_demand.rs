@@ -2,7 +2,7 @@ use super::*;
 
 use crate::async_lambda;
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn unused_output_marked_skip() {
     let seen: Arc<Mutex<Vec<OutputDemand>>> = Arc::new(Mutex::new(Vec::new()));
 
@@ -39,7 +39,7 @@ async fn unused_output_marked_skip() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn cached_node_reruns_when_a_previously_skipped_output_becomes_needed() {
     let calls = Arc::new(Mutex::new(0));
     let received = Arc::new(Mutex::new(Vec::new()));

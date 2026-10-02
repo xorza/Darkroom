@@ -6,10 +6,9 @@ use scenarium::{AnyState, ContextManager, FuncBehavior, FuncLambda};
 use scenarium::{DynamicValue, Invocation, InvokeError, OutputDemand, SharedAnyState};
 use std::fs;
 use std::sync::Arc;
-use std::time::Instant;
 use tokio::sync::Notify;
 use tokio::task;
-use tokio::time::{Duration, sleep, timeout};
+use tokio::time::{Duration, Instant, sleep, timeout};
 
 async fn try_invoke_watch(
     lambda: &FuncLambda,
@@ -200,7 +199,7 @@ async fn reuses_watcher_until_params_change() {
     drop(guard);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn empty_path_skips_watcher_and_event_parks() {
     let lib = fs_watch_library();
     let func = lib.by_name("Watch Directory").unwrap();
@@ -339,7 +338,7 @@ async fn watcher_signals_on_content_change() {
     drop(ws);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn debounce_collapses_burst_into_one_fire() {
     let dir = TempDir::new("lens-watch");
     let lib = fs_watch_library();
@@ -363,22 +362,14 @@ async fn debounce_collapses_burst_into_one_fire() {
     let handle = tokio::spawn(async move { lambda.invoke(es).await });
     task::yield_now().await;
 
-    // Two pulses 50ms apart — both inside the 200ms window.
+    // Two pulses 50ms apart, both inside the 200ms window: the window restarts
+    // at the second pulse, so the one fire lands at 50 + 200 = 250ms.
     signal.notify_one();
     sleep(Duration::from_millis(50)).await;
     signal.notify_one();
+    sleep(Duration::from_millis(199)).await;
+    assert!(!handle.is_finished(), "must not fire inside the window");
 
-    // The first pulse must not have fired immediately — it's being debounced.
-    assert!(!handle.is_finished(), "must not fire mid-burst");
-
-    // Exactly one fire, only after the window elapses past the last pulse.
-    timeout(Duration::from_secs(2), handle)
-        .await
-        .expect("debounced fire")
-        .unwrap();
-    assert!(
-        start.elapsed() >= Duration::from_millis(200),
-        "fire must be delayed by the debounce window, got {:?}",
-        start.elapsed()
-    );
+    handle.await.unwrap();
+    assert_eq!(start.elapsed(), Duration::from_millis(250));
 }

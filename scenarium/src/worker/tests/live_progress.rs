@@ -3,7 +3,7 @@ use super::*;
 /// A run's progress reaches the host as it happens: the install first, then
 /// the switch to `Executing`, then one `Running` and one `Executed` patch
 /// for the node, and only then the completion.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn node_patches_stream_before_completion() {
     let mut w = TestWorker::printing("hi");
     let compiled = w.compile();
@@ -82,7 +82,7 @@ async fn node_patches_stream_before_completion() {
 ///
 /// The callback itself is the subject here, so this one wires a raw
 /// [`Worker`] rather than going through the harness.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn live_patches_reach_the_host_before_downstream_nodes_run() {
     let patch_entries = Arc::new(AtomicU64::new(0));
     let seen_by_second = Arc::new(AtomicU64::new(u64::MAX));

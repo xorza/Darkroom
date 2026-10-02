@@ -1,7 +1,6 @@
 use super::*;
 use std::future;
 use tokio::task;
-use tokio::time;
 
 /// `exit` drains the event tasks — dropping their futures — and publishes
 /// idle before returning, after which the worker refuses messages.
@@ -34,7 +33,7 @@ async fn exit_waits_for_active_event_cleanup_and_the_idle_report() {
     });
 
     w.settle([w.update(), WorkerMessage::StartEventLoop]).await;
-    timeout(Duration::from_millis(500), entered.notified())
+    timeout(PATIENCE, entered.notified())
         .await
         .expect("the event future did not start");
 
@@ -82,11 +81,11 @@ async fn exit_cancels_active_execution_before_joining() {
 
     let mut w = TestWorker::over(graph);
     w.send_many([w.update(), TestWorker::sinks()]);
-    timeout(Duration::from_millis(500), entered.notified())
+    timeout(PATIENCE, entered.notified())
         .await
         .expect("execution did not start");
 
-    timeout(Duration::from_millis(500), w.worker.exit())
+    timeout(PATIENCE, w.worker.exit())
         .await
         .expect("the worker did not exit")
         .unwrap();
@@ -94,25 +93,34 @@ async fn exit_cancels_active_execution_before_joining() {
     assert!(observed_cancel.load(Ordering::SeqCst));
 }
 
-/// Dropping a `Worker` without `exit` still shuts it down: no callback
-/// fires afterwards. The callback itself is the subject, so this wires a
-/// raw worker.
+/// Dropping a `Worker` without `exit` still shuts it down: the task drops its
+/// callback, so no callback can fire afterwards. The callback holds a sender
+/// whose receiver closes exactly when the callback is dropped, which proves it
+/// without a wait. The callback itself is the subject, so this wires a raw
+/// worker.
 #[tokio::test]
 async fn drop_without_exit_shuts_down_cleanly() {
     let reports = Calls::default();
+    let (sentinel, callback_dropped) = oneshot::channel::<()>();
     {
         let counter = reports.clone();
-        let worker = Worker::new(move |_| counter.bump());
+        let worker = Worker::new(move |_| {
+            let _alive = &sentinel;
+            counter.bump();
+        });
         let (reply, ack) = oneshot::channel();
         worker.send(WorkerMessage::Sync { reply }).unwrap();
         ack.await.unwrap();
     }
-
     let before = reports.count();
-    time::sleep(Duration::from_millis(50)).await;
+
+    timeout(PATIENCE, callback_dropped)
+        .await
+        .expect("the dropped worker kept its callback")
+        .expect_err("the callback's sender closes unused");
     assert_eq!(
         before,
         reports.count(),
-        "no callback must fire after the Worker is dropped"
+        "no callback fired while the Worker was shutting down"
     );
 }

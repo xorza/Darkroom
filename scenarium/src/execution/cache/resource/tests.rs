@@ -1,3 +1,5 @@
+#[cfg(unix)]
+use common::Unreadable;
 use common::{CancelToken, TempDir};
 
 use crate::execution::cache::digest::{Digest, DigestHasher};
@@ -28,30 +30,27 @@ fn directory_identity_tracks_entry_changes() {
     let dir = TempDir::new("dir");
     let path = dir.path().to_string_lossy().into_owned();
 
+    // A directory that will not list has no identity to stamp, and is
+    // deliberately *not* handed one: a marker value would be perfectly stable,
+    // so the node would go on reusing a cached result while the contents it
+    // cannot see changed underneath it. Skipped where the process reads
+    // through mode 000.
     #[cfg(unix)]
     {
-        use std::fs::Permissions;
-        use std::os::unix::fs::PermissionsExt;
-
-        // A directory that will not list has no identity to stamp, and is
-        // deliberately *not* handed one: a marker value would be perfectly
-        // stable, so the node would go on reusing a cached result while
-        // the contents it cannot see changed underneath it.
         let empty = fingerprint(&path);
-        let permissions = |mode: u32| Permissions::from_mode(mode);
-        fs::set_permissions(dir.path(), permissions(0o000)).unwrap();
-        let unreadable = StampJob::default().stamp(&path, &CancelToken::never());
-        fs::set_permissions(dir.path(), permissions(0o755)).unwrap();
-
-        assert!(
-            unreadable.is_err(),
-            "an unlistable directory must surface its error, not a stamp: {unreadable:?}",
-        );
-        assert_eq!(
-            fingerprint(&path),
-            empty,
-            "and it stamps again once readable"
-        );
+        if let Some(locked) = Unreadable::new(dir.path()) {
+            let unreadable = StampJob::default().stamp(&path, &CancelToken::never());
+            drop(locked);
+            assert!(
+                unreadable.is_err(),
+                "an unlistable directory must surface its error, not a stamp: {unreadable:?}",
+            );
+            assert_eq!(
+                fingerprint(&path),
+                empty,
+                "and it stamps again once readable"
+            );
+        }
     }
 
     fs::write(dir.join("a.fits"), b"one").unwrap();

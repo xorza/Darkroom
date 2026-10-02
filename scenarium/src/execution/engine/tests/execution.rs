@@ -14,7 +14,7 @@ fn shifting_source(cell: Arc<AtomicI64>) -> impl FnOnce(NodeSpec) -> NodeSpec {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn simple_compute() {
     let b = Arc::new(AtomicI64::new(5));
     let mut g = TestGraph::new();
@@ -45,7 +45,7 @@ async fn simple_compute() {
     assert_eq!(run.logs(), ["63"], "sum = 2 + 7 = 9, mult = 9 * 7 = 63");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn schedule_stable_across_repeated_runs() {
     let mut e = TestEngine::over(TestGraph::sample());
 
@@ -74,7 +74,7 @@ async fn schedule_stable_across_repeated_runs() {
 /// Output buffers are wiped before a re-running node is invoked, so an
 /// unwritten output cannot retain a prior run's value. This sink has no
 /// demanded outputs, so leaving one port `Unbound` is valid.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn unwritten_output_port_is_cleared_before_reexecution() {
     use crate::async_lambda;
 

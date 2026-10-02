@@ -88,7 +88,7 @@ async fn a_disabled_sink_stays_out_of_sink_runs() {
     assert!(run.missing_inputs().is_empty());
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_cancel_with_no_active_run_does_not_reach_the_next_one() {
     let mut w = TestWorker::printing("hi");
 

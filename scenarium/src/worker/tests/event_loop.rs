@@ -25,7 +25,7 @@ async fn start_then_stop() {
     w.drain();
     w.settle([WorkerMessage::StopEventLoop]).await;
     w.drain();
-    w.nothing_runs_within(QUIET).await;
+    w.assert_no_run().await;
 }
 
 #[tokio::test]
@@ -51,7 +51,7 @@ async fn sink_seeds_with_start_event_loop_complete_once() {
     ]);
 
     assert_eq!(w.run().await.logs(), ["hi"]);
-    w.nothing_runs_within(QUIET).await;
+    w.assert_no_run().await;
 }
 
 /// Either message arriving while the loop is already running stops the

@@ -68,7 +68,7 @@ fn func_nodes_keep_identity() {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn clear_resets_graph() {
     let mut e = TestEngine::over(TestGraph::sample());
     e.run_sinks().await;

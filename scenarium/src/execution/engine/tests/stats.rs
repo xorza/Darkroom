@@ -6,7 +6,7 @@ use crate::execution::report::NodeExecutionStatus;
 /// longer declares must still compile — the dangling binding degrades
 /// to unbound (a required input reports missing), a dangling
 /// subscription and pin wire nothing.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn dangling_wiring_compiles_and_reports_missing_input() {
     let mut e = TestEngine::over(TestGraph::sample());
     // sum's required input 0 bound to an output `get_a` doesn't have, plus a
@@ -26,7 +26,7 @@ async fn dangling_wiring_compiles_and_reports_missing_input() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn executed_nodes_reported() {
     let mut e = TestEngine::over(TestGraph::sample());
 

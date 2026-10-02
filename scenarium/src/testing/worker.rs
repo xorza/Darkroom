@@ -38,7 +38,7 @@ use crate::worker::status::{WorkerStatus, WorkerStatusKind};
 /// How long a wait here gives the worker before failing the test — generous
 /// enough that a loaded machine does not flake, bounded so a wedged worker
 /// fails instead of hanging the suite.
-const PATIENCE: Duration = Duration::from_secs(5);
+pub(crate) const PATIENCE: Duration = Duration::from_secs(5);
 
 /// A [`TestGraph`] with a live worker over it.
 #[derive(Debug)]
@@ -278,12 +278,31 @@ impl TestWorker {
         assert!(extra.is_err(), "unexpected worker report: {extra:?}");
     }
 
-    /// Assert no run finishes within `d`.
+    /// [`settle`](Self::settle) `msgs`, then assert the batch completed no run.
     ///
-    /// Activity and patch statuses are not runs and do not count — the claim
-    /// is that nothing *executed*, which is what "silent no-op" means.
-    pub(crate) async fn nothing_runs_within(&mut self, d: Duration) {
-        let outcome = timeout(d, self.finished()).await;
-        assert!(outcome.is_err(), "unexpected run: {outcome:?}");
+    /// The worker executes a batch's run before it answers the batch's `Sync`,
+    /// so every run the batch caused has reported by the time `settle` returns.
+    /// Activity and patch statuses are not runs and do not count — the claim is
+    /// that nothing *executed*, which is what "silent no-op" means.
+    pub(crate) async fn settle_without_run(
+        &mut self,
+        msgs: impl IntoIterator<Item = WorkerMessage>,
+    ) {
+        self.settle(msgs).await;
+        let runs: Vec<WorkerReport> = self
+            .drain()
+            .into_iter()
+            .filter(|report| {
+                matches!(report, WorkerReport::Status(status)
+                    if matches!(status.kind, WorkerStatusKind::Completed { .. }))
+            })
+            .collect();
+        assert!(runs.is_empty(), "unexpected run: {runs:?}");
+    }
+
+    /// Assert that nothing has run since the last read, and that nothing is about
+    /// to: a bare [`settle_without_run`](Self::settle_without_run).
+    pub(crate) async fn assert_no_run(&mut self) {
+        self.settle_without_run(None::<WorkerMessage>).await;
     }
 }

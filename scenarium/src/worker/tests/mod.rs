@@ -18,15 +18,13 @@ use crate::graph::identity::{EventPort, NodeId};
 use crate::graph::node::CacheMode;
 use crate::testing::calls::Calls;
 use crate::testing::graph::TestGraph;
+use crate::testing::worker::PATIENCE;
 use crate::testing::worker::TestWorker;
 use crate::worker::Worker;
 use crate::worker::error::WorkerError;
 use crate::worker::protocol::{WorkerMessage, WorkerReport};
 use crate::worker::status::{WorkerActivity, WorkerStatusKind};
 use crate::{ConstValue, DataType, RamUsage, async_lambda};
-
-/// How long a "nothing happens" claim watches for before it is believed.
-const QUIET: Duration = Duration::from_millis(100);
 
 mod batching;
 mod cache;

@@ -1,6 +1,6 @@
 use super::*;
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn node_error_propagates_to_dependents() {
     let mut g = TestGraph::sample_values(1, 42);
     g.fails("get_a", "Intentional failure in get_a");

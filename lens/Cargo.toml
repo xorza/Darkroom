@@ -26,3 +26,4 @@ parking_lot = { workspace = true }
 [dev-dependencies]
 common = { workspace = true, features = ["internals"] }
 scenarium = { workspace = true, features = ["internals"] }
+tokio = { workspace = true, features = ["test-util"] }
