@@ -49,9 +49,6 @@ Severity: High — diagonally elongated stars pass the eccentricity filter under
 Severity: High — the same frames stack differently depending on which entry point loaded them and on how much RAM was free.
 
 - [ ] `lumos/src/stacking/frame_store/mod.rs` `StoredImage::spill` / `StoredImage::load` — only channels and metadata are written; `nulls` is dropped and `load` rebuilds through `from_planar_channels` (`nulls: None`). On the RAM tier `WarpBuffers::warp_into` takes the `MaskedWarp` branch; on the spill tier (`FrameTier::hold` → `PipelineFrame::Spilled`) the median fill under every null enters the warp, the reference frame and `FrameStats::measure` as real data, and the MAD understates the noise. `CfaFrameInfo::may_carry_nulls` shows masked mosaic FITS lights are expected.
-- [ ] `lumos/src/stacking/combine/cache/loader/mod.rs` `load_and_cache_frame` (reuse branch) — reused `coverage`/`confidence` planes are mmapped from disk and never pass `validate_frame_quality`, the function `FrameQuality`'s doc names as where spilled planes are held to the pairing invariant (`source_noise_variance` divides by confidence).
-- [ ] `lumos/src/stacking/combine/cache/mod.rs` `from_stored_frames` / `from_stack_frames` — the two in-memory constructors run the per-frame validation in different orders (domains first vs last; geometry by sample count vs width/height). One `validate(frames, dimensions, cancel)` called by all three constructors removes the "which entry point checks what" matrix.
-- [ ] `lumos/src/stacking/calibration_masters/mod.rs` `CalibrationMasters::from_images` — `prepared_flat::subtract` subtracts the flat-dark/bias from the flat without checking that they share a CFA pattern; `validate_against_light` compares each master to the light only.
 
 ## A disabled producer's stale digest keys its consumer's cache
 Severity: High — a quietly wrong cache hit: a value computed with an input the run no longer delivers is served as current.

@@ -3,6 +3,7 @@
 pub(crate) mod core;
 mod loader;
 pub(crate) mod sample;
+pub(crate) mod set_facts;
 pub(crate) mod validation;
 
 use std::sync::OnceLock;
@@ -24,10 +25,8 @@ use crate::stacking::combine::cache::core::{
 };
 use crate::stacking::combine::cache::loader::LoadedCache;
 use crate::stacking::combine::cache::sample::{CombineScratch, CombinedSample};
-use crate::stacking::combine::cache::validation::{
-    validate_cfa_types, validate_frame_quality, validate_image_samples, validate_row_orders,
-    validate_sample_domains, validate_stored_geometry, validate_stored_samples,
-};
+use crate::stacking::combine::cache::set_facts::SetFacts;
+use crate::stacking::combine::cache::validation::validate_frame;
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::Error;
@@ -37,7 +36,6 @@ use crate::stacking::combine::pixel_coverage::PixelCoverage;
 use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::stacking::combine::stack::StackFrame;
 use crate::stacking::frame_store::StoredFrame;
-use crate::stacking::frame_store::frame_quality::FrameQuality;
 use crate::stacking::frame_store::spill_directory::SpillDirectory;
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::stack_product::StackProduct;
@@ -105,34 +103,9 @@ impl FrameCache {
             progress,
             cancel,
         } = params;
-        check_cancel(&cancel)?;
-        // Before any geometry or contents: two frames from different sample domains are not the
-        // same measurement, and every check below would pass on them.
-        validate_sample_domains(&frames)?;
-        validate_row_orders(&frames)?;
-        validate_cfa_types(&frames)?;
+        let mut facts = SetFacts::default();
         for (index, frame) in frames.iter().enumerate() {
-            // Geometry before contents: every read below and in the combine slices a plane to
-            // `pixel_count`, so a short plane would panic out of a slice index rather than
-            // reporting which frame was the wrong shape.
-            validate_stored_geometry(frame, dimensions, index)?;
-            validate_stored_samples(&frame.channels, dimensions.pixel_count(), index, &cancel)?;
-            // Same guarantee `from_stack_frames` gives caller-supplied planes: each plane in range
-            // and the two agreeing on where the frame has support, so the gate and the weight
-            // multiplier below can't be handed a value that silently corrupts the combine.
-            if let FrameQuality::Planes {
-                coverage,
-                confidence,
-            } = &frame.quality
-            {
-                let pixel_count = dimensions.pixel_count();
-                validate_frame_quality(
-                    index,
-                    coverage.chunk(0, pixel_count),
-                    confidence.chunk(0, pixel_count),
-                    &cancel,
-                )?;
-            }
+            validate_frame(index, frame, dimensions, &mut facts, &cancel)?;
         }
         let frame_norms = compute_frame_norms(&frames, dimensions, normalization, &cancel)?;
         Ok(Self {
@@ -166,15 +139,10 @@ impl FrameCache {
         let dimensions = frames[0].image.dimensions();
         let metadata = frames[0].image.metadata.clone();
 
+        // Width and height before the shared check, which a stored plane can only compare by
+        // sample count: a 4×2 frame in a 2×4 set has the right count and the wrong shape.
         for (index, frame) in frames.iter().enumerate() {
-            check_cancel(&cancel)?;
-            if index > 0 {
-                FrameDimensionMismatch::check(index, dimensions, frame.image.dimensions())?;
-            }
-            validate_image_samples(&frame.image, index, &cancel)?;
-            // Geometry before contents, as in `from_stored_frames`: `pixels()` is read to the
-            // plane's own length, so a wrong-shaped plane has to be named here rather than
-            // reported as bad values.
+            FrameDimensionMismatch::check(index, dimensions, frame.image.dimensions())?;
             for (kind, plane) in frame.quality.present() {
                 if (plane.width(), plane.height()) != (dimensions.width(), dimensions.height()) {
                     return Err(Error::WarpPlaneDimensionMismatch {
@@ -187,22 +155,15 @@ impl FrameCache {
                     });
                 }
             }
-            if let FrameQuality::Planes {
-                coverage,
-                confidence,
-            } = &frame.quality
-            {
-                validate_frame_quality(index, coverage.pixels(), confidence.pixels(), &cancel)?;
-            }
         }
-        check_cancel(&cancel)?;
         let stored = frames
             .into_iter()
             .map(|frame| StoredFrame::from_memory(frame.image, frame.quality, frame.source_stats))
             .collect::<Vec<_>>();
-        validate_sample_domains(&stored)?;
-        validate_row_orders(&stored)?;
-        validate_cfa_types(&stored)?;
+        let mut facts = SetFacts::default();
+        for (index, frame) in stored.iter().enumerate() {
+            validate_frame(index, frame, dimensions, &mut facts, &cancel)?;
+        }
         let frame_norms = compute_frame_norms(&stored, dimensions, normalization, &cancel)?;
 
         Ok(Self {
@@ -234,8 +195,8 @@ impl FrameCache {
             linear_variance: linear_variance_pixels,
         } = combined;
         let dimensions = self.core.dimensions;
-        // Every frame carries the first one's pattern: `validate_cfa_types` held them to it.
-        let cfa_type = self.frames[0].source_stats.cfa_type;
+        // Every frame carries the first one's pattern: `SetFacts` held them to it.
+        let cfa_type = self.frames[0].source_stats.facts.cfa_type;
         let image = LinearImage {
             metadata: self.core.metadata.clone(),
             pixels,
@@ -526,8 +487,12 @@ impl FrameCache {
 
     fn from_tiered_paths(loaded: LoadedCache, normalization: Normalization) -> Result<Self, Error> {
         let LoadedCache { frames, core } = loaded;
-        validate_sample_domains(&frames)?;
-        validate_row_orders(&frames)?;
+        // The loader ran each frame's own checks as it decoded, and its facts against frame 0's;
+        // the facts a later frame states first are compared here, in order.
+        let mut facts = SetFacts::default();
+        for (index, frame) in frames.iter().enumerate() {
+            facts.admit(index, &frame.source_stats.facts)?;
+        }
         let frame_norms =
             compute_frame_norms(&frames, core.dimensions, normalization, &core.cancel)?;
         Ok(Self {

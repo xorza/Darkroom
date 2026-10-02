@@ -33,9 +33,11 @@ use crate::stacking::frame_store::{FramePeek, StackableImage, StoredFrame};
 use crate::stacking::progress::{ProgressCallback, StackingStage};
 
 use crate::stacking::combine::cache::CacheCore;
+use crate::stacking::combine::cache::set_facts::SetFacts;
 use crate::stacking::combine::cache::validation::{
-    validate_image_samples, validate_stored_samples,
+    validate_image_samples, validate_stored_quality, validate_stored_samples,
 };
+use crate::stacking::frame_store::frame_facts::FrameFacts;
 
 #[derive(Debug)]
 struct LoadedTier {
@@ -190,8 +192,15 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
 
     // When the header couldn't be peeked the caller pre-loaded frame 0, so the batch starts at
     // frame 1 and reuses it; otherwise every frame (frame 0 included) decodes in parallel. Frame 0
-    // supplies the stack metadata either way.
-    let start = usize::from(first.is_some());
+    // supplies the stack metadata either way, and its facts as soon as it has decoded, so a frame
+    // that disagrees stops the load before the rest of the set decodes.
+    let first_facts = OnceLock::new();
+    let mut first_frame = None;
+    if let Some(first_image) = first {
+        let frame = admit_decoded(first_image, 0, dimensions, &first_facts, cancel)?;
+        first_frame = Some(frame);
+    }
+    let start = usize::from(first_frame.is_some());
     let loaded = concurrency::try_par_map_limited(&paths[start..], concurrency, |offset, path| {
         let idx = offset + start;
         // Cancelled: stop decoding further frames (the slow phase).
@@ -199,25 +208,14 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
             return Err(Error::Cancelled);
         }
         let image = load_image::<I>(path.as_ref(), context)?;
-        FrameDimensionMismatch::check(idx, dimensions, image.dimensions())?;
-        validate_image_samples(&image, idx, cancel)?;
-        let metadata = (idx == 0).then(|| image.metadata().clone());
-        let stats = FrameStats::measure(&image);
-        let quality = FrameQuality::for_unwarped(&image);
-        Ok(LoadedMemoryFrame {
-            frame: StoredFrame::from_memory(image, quality, stats),
-            metadata,
-        })
+        admit_decoded(image, idx, dimensions, &first_facts, cancel)
     })?;
 
     let mut frames = Vec::with_capacity(paths.len());
     let mut metadata = None;
-    if let Some(first_image) = first {
-        validate_image_samples(&first_image, 0, cancel)?;
-        metadata = Some(first_image.metadata().clone());
-        let stats = FrameStats::measure(&first_image);
-        let quality = FrameQuality::for_unwarped(&first_image);
-        frames.push(StoredFrame::from_memory(first_image, quality, stats));
+    if let Some(first_frame) = first_frame {
+        metadata = first_frame.metadata;
+        frames.push(first_frame.frame);
     }
     for loaded_frame in loaded {
         if loaded_frame.metadata.is_some() {
@@ -233,6 +231,35 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
         frames,
         spill_directory: None,
         metadata: metadata.expect("frame 0 provides metadata"),
+    })
+}
+
+/// A decoded frame's per-frame checks, in the order `validate_frame` runs them: geometry, its
+/// facts against frame 0's once those are known, then its samples. Frame 0 publishes its facts
+/// for the frames decoding beside it; the full in-order check of the set runs once all are in.
+fn admit_decoded<I: StackableImage>(
+    image: I,
+    index: usize,
+    dimensions: ImageDimensions,
+    first_facts: &OnceLock<SetFacts>,
+    cancel: &CancelToken,
+) -> Result<LoadedMemoryFrame, Error> {
+    FrameDimensionMismatch::check(index, dimensions, image.dimensions())?;
+    let facts = FrameFacts::of(&image);
+    if index == 0 {
+        first_facts
+            .set(SetFacts::of_first(&facts))
+            .expect("frame 0 decodes once");
+    } else if let Some(first) = first_facts.get() {
+        first.check(index, &facts)?;
+    }
+    validate_image_samples(&image, index, cancel)?;
+    let metadata = (index == 0).then(|| image.metadata().clone());
+    let stats = FrameStats::measure(&image);
+    let quality = FrameQuality::for_unwarped(&image);
+    Ok(LoadedMemoryFrame {
+        frame: StoredFrame::from_memory(image, quality, stats),
+        metadata,
     })
 }
 
@@ -252,7 +279,9 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     let spill_directory = SpillDirectory::create(&config.cache_dir, config.keep_cache)?;
     let cache_dir = spill_directory.path();
 
-    // Cache first image and compute stats. Frame 0 carries the stack metadata.
+    // Cache first image and compute stats. Frame 0 carries the stack metadata, and the facts every
+    // later frame is checked against as it decodes.
+    let first_facts = SetFacts::of_first(&FrameFacts::of(&first_image));
     validate_image_samples(&first_image, 0, cancel)?;
     let metadata = first_image.metadata().clone();
     let first_stats = FrameStats::measure(&first_image);
@@ -292,6 +321,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
             path,
             dimensions,
             offset + 1,
+            &first_facts,
             context,
         )
     })?;
@@ -400,6 +430,7 @@ fn load_and_cache_frame<I: StackableImage>(
     source_path: &Path,
     dimensions: ImageDimensions,
     frame_index: usize,
+    first_facts: &SetFacts,
     context: &LoadContext,
 ) -> Result<StoredFrame, Error> {
     let cancel = &context.cancel;
@@ -446,18 +477,22 @@ fn load_and_cache_frame<I: StackableImage>(
             quality,
             source_stats: cached_stats.expect("valid cache has readable frame statistics"),
         };
+        first_facts.check(frame_index, &frame.source_stats.facts)?;
         validate_stored_samples(
             &frame.channels,
             dimensions.pixel_count(),
             frame_index,
             cancel,
         )?;
+        // Mapped from disk, so held to the pairing the combine divides by like any other planes.
+        validate_stored_quality(frame_index, &frame, dimensions, cancel)?;
         Ok(frame)
     } else {
         // Load image and write to cache
         let image = load_image::<I>(source_path, context)?;
 
         FrameDimensionMismatch::check(frame_index, dimensions, image.dimensions())?;
+        first_facts.check(frame_index, &FrameFacts::of(&image))?;
         validate_image_samples(&image, frame_index, cancel)?;
         let identity_after = source_identity(source_path)?;
         if identity_after != identity_before {

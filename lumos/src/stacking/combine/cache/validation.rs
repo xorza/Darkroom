@@ -8,12 +8,11 @@
 use common::CancelToken;
 
 use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::image_provenance::RowOrder;
-use crate::io::image::sample_domain::SampleDomain;
 use crate::stacking::combine::CANCEL_POLL_CHUNK;
+use crate::stacking::combine::cache::set_facts::SetFacts;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::error::check_cancel;
-use crate::stacking::frame_store::frame_quality::FramePlane;
+use crate::stacking::frame_store::frame_quality::{FramePlane, FrameQuality};
 use crate::stacking::frame_store::stored_plane::StoredPlane;
 use crate::stacking::frame_store::{StackableImage, StoredFrame};
 
@@ -55,118 +54,53 @@ pub(crate) fn validate_image_samples(
     )
 }
 
-/// Check that every frame declaring a sample domain can be expressed in the first one's: one unit,
-/// and either an equal scale or two declared ones the combine converts between
-/// ([`SampleDomain::conversion_to`]).
-///
-/// A frame that declares none — synthesized rather than decoded, or a preview raster — is skipped
-/// rather than treated as agreeing: there is nothing to compare, and rejecting on it would refuse
-/// every in-memory fixture. The first frame that does declare one becomes the reference, so the
-/// error names a concrete pair.
-///
-/// Scale and unit get a reference each rather than sharing one, because a frame can state a scale
-/// and no unit — and [`SampleDomain::units_agree`] is deliberately blind across that gap, so it is
-/// not transitive. Comparing everything against frame 0 alone would let a `Jy/beam` frame and a
-/// `count/s` frame through whenever the frame that happened to come first stated no unit; here the
-/// first frame to state a unit owns that half of the reference, and the error names whichever frame
-/// the mismatch is actually with.
-pub(crate) fn validate_sample_domains(frames: &[StoredFrame]) -> Result<(), Error> {
-    let mut scale: Option<(usize, &SampleDomain)> = None;
-    let mut unit: Option<(usize, &SampleDomain)> = None;
-    for (index, frame) in frames.iter().enumerate() {
-        let Some(domain) = frame.source_stats.domain.as_ref() else {
-            continue;
-        };
-        match scale {
-            None => scale = Some((index, domain)),
-            Some((reference_index, expected)) if domain.conversion_to(expected).is_none() => {
-                return Err(Error::SampleDomainMismatch {
-                    index,
-                    actual: domain.clone(),
-                    reference_index,
-                    expected: expected.clone(),
-                });
-            }
-            Some(_) => {}
-        }
-        if domain.unit.is_none() {
-            continue;
-        }
-        match unit {
-            None => unit = Some((index, domain)),
-            Some((reference_index, expected)) if domain.unit != expected.unit => {
-                return Err(Error::SampleDomainMismatch {
-                    index,
-                    actual: domain.clone(),
-                    reference_index,
-                    expected: expected.clone(),
-                });
-            }
-            Some(_) => {}
-        }
-    }
-    Ok(())
+/// Check stored frame `index` in the one fixed order every cache constructor uses: its geometry
+/// against the cache's, its facts against the set's ([`SetFacts`]), then its samples and its
+/// quality planes. Geometry first because every later read slices a plane to `pixel_count`, and
+/// the facts before the samples because they are a comparison, while the samples are a pass over
+/// every pixel.
+pub(crate) fn validate_frame(
+    index: usize,
+    frame: &StoredFrame,
+    dimensions: ImageDimensions,
+    facts: &mut SetFacts,
+    cancel: &CancelToken,
+) -> Result<(), Error> {
+    check_cancel(cancel)?;
+    validate_stored_geometry(frame, dimensions, index)?;
+    facts.admit(index, &frame.source_stats.facts)?;
+    validate_stored_samples(&frame.channels, dimensions.pixel_count(), index, cancel)?;
+    validate_stored_quality(index, frame, dimensions, cancel)
 }
 
-/// Check that every frame declaring a row order declares the same one.
-///
-/// Rows are decoded in the order the file stores them — Siril's rule that `ROWORDER` "shall not be
-/// used to unflip the image data for stacking" — so two frames declaring different orders are
-/// vertically mirrored views of the same sky. Averaging them is meaningless, and registration
-/// cannot reconcile it either: triangle matching rejects a mirrored field by default, and a
-/// similarity transform has no reflection to express it with. The failure otherwise surfaces as an
-/// unexplained registration failure a long way from the frame that caused it.
-///
-/// A frame declaring none — synthesized rather than decoded — is skipped rather than treated as
-/// agreeing, as everywhere else here.
-pub(crate) fn validate_row_orders(frames: &[StoredFrame]) -> Result<(), Error> {
-    let mut reference: Option<(usize, RowOrder)> = None;
-    for (index, frame) in frames.iter().enumerate() {
-        let Some(row_order) = frame.source_stats.row_order else {
-            continue;
-        };
-        match reference {
-            None => reference = Some((index, row_order)),
-            Some((reference_index, expected)) if row_order != expected => {
-                return Err(Error::RowOrderMismatch {
-                    index,
-                    actual: row_order,
-                    reference_index,
-                    expected,
-                });
-            }
-            Some(_) => {}
-        }
-    }
-    Ok(())
-}
-
-/// Check that every frame carries the first frame's mosaic pattern, or, like it, none.
-pub(crate) fn validate_cfa_types(frames: &[StoredFrame]) -> Result<(), Error> {
-    let Some(reference) = frames.first() else {
-        return Ok(());
-    };
-    let expected = reference.source_stats.cfa_type;
-    for (index, frame) in frames.iter().enumerate().skip(1) {
-        let actual = frame.source_stats.cfa_type;
-        if actual != expected {
-            return Err(Error::CfaPatternMismatch {
-                index,
-                actual,
-                reference_index: 0,
-                expected,
-            });
-        }
+/// The quality pair of a stored frame, if it carries one — see [`validate_frame_quality`].
+pub(crate) fn validate_stored_quality(
+    index: usize,
+    frame: &StoredFrame,
+    dimensions: ImageDimensions,
+    cancel: &CancelToken,
+) -> Result<(), Error> {
+    if let FrameQuality::Planes {
+        coverage,
+        confidence,
+    } = &frame.quality
+    {
+        let pixel_count = dimensions.pixel_count();
+        validate_frame_quality(
+            index,
+            coverage.chunk(0, pixel_count),
+            confidence.chunk(0, pixel_count),
+            cancel,
+        )?;
     }
     Ok(())
 }
 
 /// Check a stored frame's shape against the geometry the cache was built for.
 ///
-/// The counterpart to the dimension checks [`FrameCache::from_stack_frames`](super::FrameCache::from_stack_frames) makes on
-/// caller-supplied images. A stored plane carries no width or height, so this compares plane
-/// counts and sample counts instead — enough to guarantee every `chunk(..)` below is in range.
-pub(crate) fn validate_stored_geometry(
+/// A stored plane carries no width or height, so this compares plane counts and sample counts —
+/// enough to guarantee every `chunk(..)` below is in range.
+fn validate_stored_geometry(
     frame: &StoredFrame,
     dimensions: ImageDimensions,
     index: usize,

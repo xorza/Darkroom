@@ -18,7 +18,7 @@ use std::path::Path;
 use common::CancelToken;
 use rayon::prelude::*;
 
-use crate::io::image::cfa::{CfaFrameInfo, CfaImage};
+use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType};
 use crate::io::image::error::ImageError;
 use crate::io::image::load_context::LoadContext;
 use crate::math::size2us::Size2us;
@@ -128,7 +128,8 @@ impl<T> CalibrationSet<T> {
 }
 
 impl CalibrationSet<Option<CfaImage>> {
-    /// The sensor extent every present master shares, or `None` when the set is empty.
+    /// The sensor extent every present master shares, or `None` when the set is empty; they must
+    /// share one CFA pattern too.
     ///
     /// The masters are combined pixel-for-pixel by flat index — dark subtracted from flat,
     /// defects detected on one and corrected on another — so a set that spans two sensors has no
@@ -136,25 +137,32 @@ impl CalibrationSet<Option<CfaImage>> {
     /// operations, which each assert on only the pair they touch and cover the set unevenly: a
     /// bias in a set with no flat is never anyone's operand.
     fn common_dimensions(&self) -> Result<Option<Size2us>, CalibrationError> {
-        let mut expected = None;
+        let mut expected: Option<(Size2us, CfaType)> = None;
         for (role, master) in self
             .iter()
             .filter_map(|(role, master)| master.as_ref().map(|master| (role, master)))
         {
             let size = Size2us::new(master.data.width(), master.data.height());
-            match expected {
-                None => expected = Some(size),
-                Some(expected) if expected == size => {}
-                Some(expected) => {
-                    return Err(CalibrationError::DimensionMismatch {
-                        component: role.into(),
-                        expected,
-                        master: size,
-                    });
-                }
+            let Some((expected_size, expected_pattern)) = expected else {
+                expected = Some((size, master.cfa_type));
+                continue;
+            };
+            if size != expected_size {
+                return Err(CalibrationError::DimensionMismatch {
+                    component: role.into(),
+                    expected: expected_size,
+                    master: size,
+                });
+            }
+            if master.cfa_type != expected_pattern {
+                return Err(CalibrationError::CfaPatternMismatch {
+                    component: role,
+                    expected: expected_pattern,
+                    master: master.cfa_type,
+                });
             }
         }
-        Ok(expected)
+        Ok(expected.map(|(size, _)| size))
     }
 }
 
@@ -690,7 +698,7 @@ impl CalibrationMasters {
             if master.cfa_type != light {
                 return Err(CalibrationError::CfaPatternMismatch {
                     component: role,
-                    light,
+                    expected: light,
                     master: master.cfa_type,
                 });
             }

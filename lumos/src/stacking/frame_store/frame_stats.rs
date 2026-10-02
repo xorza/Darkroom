@@ -4,27 +4,17 @@ use arrayvec::ArrayVec;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::io::image::cfa::CfaType;
-use crate::io::image::image_provenance::RowOrder;
-use crate::io::image::sample_domain::SampleDomain;
 use crate::math::statistics::{MedianMad, mad_with_scratch, median_mut};
 use crate::stacking::frame_store::StackableImage;
+use crate::stacking::frame_store::frame_facts::FrameFacts;
 
 /// Per-frame statistics: one median/MAD pair per channel.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct FrameStats {
     pub(crate) channels: ArrayVec<MedianMad, 3>,
     pub(crate) quantization_sigma: Option<f32>,
-    /// What the frame's decoder said one sample is worth — see
-    /// [`ImageMetadata::sample_domain`](crate::ImageMetadata::sample_domain). Carried beside the
-    /// statistics because it is what makes two frames' statistics comparable at all.
-    pub(crate) domain: Option<SampleDomain>,
-    /// Which end of the image the frame's first stored row belongs to — see
-    /// [`RowOrder`]. Carried here for the same reason as the domain: the metadata
-    /// it comes from is dropped for every frame but the first, and this is what travels instead.
-    pub(crate) row_order: Option<RowOrder>,
-    /// The frame's mosaic pattern, for an undemosaiced sensor frame; carried for the same reason.
-    pub(crate) cfa_type: Option<CfaType>,
+    /// What the decoder said the samples are; what makes two frames' statistics comparable at all.
+    pub(crate) facts: FrameFacts,
 }
 
 impl FrameStats {
@@ -43,9 +33,7 @@ impl FrameStats {
     pub(crate) fn measure(image: &impl StackableImage) -> Self {
         let dimensions = image.dimensions();
         let quantization_sigma = image.quantization_sigma();
-        let domain = image.metadata().sample_domain();
-        let row_order = image.metadata().row_order();
-        let cfa_type = image.cfa_type();
+        let facts = FrameFacts::of(image);
         let nulls = image.nulls();
         let channels = (0..dimensions.channels())
             .into_par_iter()
@@ -85,9 +73,7 @@ impl FrameStats {
         Self {
             channels,
             quantization_sigma,
-            domain,
-            row_order,
-            cfa_type,
+            facts,
         }
     }
 }

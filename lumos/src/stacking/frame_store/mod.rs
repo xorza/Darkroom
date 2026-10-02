@@ -1,6 +1,7 @@
 //! Memory planning and RAM/mmap storage shared by stacking stages.
 
 pub(crate) mod error;
+pub(crate) mod frame_facts;
 pub(crate) mod frame_quality;
 pub(crate) mod frame_stats;
 pub(crate) mod spill;
