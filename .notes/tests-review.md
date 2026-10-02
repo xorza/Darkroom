@@ -123,30 +123,6 @@ Paths without a crate prefix are relative to `scenarium/src/`.
 - [ ] `common/src/introspect/tests.rs:50` and `:448-453`: `assert_ne!(Speed::TYPE_ID, Mode::TYPE_ID)` and `assert_ne!(Mode::TYPE_ID, other::Mode::TYPE_ID)` compare hand-typed uuid literals, so they cannot fail. The derived `Speed::TYPE_ID` is never pinned to its attribute value. Assert `Speed::TYPE_ID == "3effbd19-d4a8-4a9b-a931-78fd0e4f8adb"`. Delete the `other::Mode` test: both enums are hand-written, so it tests nothing.
 - [ ] `scenarium/src/execution/executor/tests.rs:332` (`assert_ne!(a, b)`) and `scenarium/src/graph/tests.rs:62-64` (`assert_ne!(CacheMode::Ram, CacheMode::Disk)`): distinct by construction, so they cannot fail. Delete them.
 
-### fits-well
-Paths are relative to `fits-well/`.
-
-- [ ] `src/ascii/tests.rs:260-277` — `approx(parse_ascii_float("-3.0-1", 1), -0.3)` passes only because of the `< 1e-12` slack. The production value is `-0.30000000000000004`; cfitsio/astropy (`strtod("-3.0e-1")`) give `-0.3`. I confirmed this through the public API: a `TABLE` with `TFORM1 = 'E8.1'` and the cell `  -3.0-1` reads back `Float([Some(-0.30000000000000004)])`. The cause is in `src/ascii/mod.rs:349-356` (`value *= 10f64.powi(..)`, and `/ 10f64.powi(decimals)` on the implied-decimal path). The comment there claims strtod parity. The production bug is logged in `.notes/ISSUES.md`. Better shape: assert `to_bits()` equality against `format!("{m}e{e}").parse::<f64>()` for every case, and add `-3.0-1`, `1.0E-320` and `1.0E+308` rows. The same check applies to `src/ascii/tests.rs:310` (`(value - 0.0314159).abs() < 1e-12`).
-- [ ] `src/reader/tests.rs:641-646`, `src/ascii/tests.rs:62-68`, `src/groups/tests.rs:63-74`, `src/table/column_reader/tests.rs:24,34-37` — the same "detached metadata" pattern four times. A field of a by-value metadata/view copy is assigned, then the test asserts the value it just assigned (`detached.gcount = 0; assert_eq!(detached.gcount, 0)`). That pub-field assignability is a compile-time fact, and the follow-up check that the source is unchanged is guaranteed by the borrow rules. Delete all four blocks.
-- [ ] `tests/public_api.rs:14-22,33-41` — `adapt_i16` is the test's own helper. The assertions (`samples.as_ptr() == owned_ptr`) test `Vec` move semantics, not fits-well. The only crate-facing content is the `let _: T = …` type ascriptions at `:43-54`. Keep those as a compile-only API-path check and drop the adapter.
-- [ ] `src/block.rs:57-63` (inline test `block_geometry_constants_are_consistent`) asserts `BLOCK_SIZE == 2880` and `CARD_SIZE == 80`, which restates the definitions. `src/block.rs:110-115` asserts a property of `u64::wrapping_mul`, not of `padded_len`. Delete both. `padded_len_is_idempotent_on_aligned_input` (`:96-101`) is already covered by the `2880`/`5760` rows of `blocks_for_rounds_up_at_the_boundary`.
-- [ ] `src/checksum.rs:105-116` — `encoded_checksum_is_alphanumeric_and_sums_to_negative_zero` checks only `is_ascii_alphanumeric`. The doc comment says it also checks that encoded chars plus the sum fold to all-ones. Neither the name's property nor the comment's is asserted.
-- [ ] `src/compress/table/tests.rs:161-165` — the "spot-check a decoded value" reads `original.column_by_idx(1)`, i.e. the uncompressed reference fixture, not `restored`. Assert on `restored`.
-- [ ] `src/compress/decode/tests.rs:166-167` — the orphaned doc comment ("Build a fixed-width BINTABLE, write it, then round-trip it through table compression …") sits on `decompresses_nocompress_tile_verbatim`. It describes `check_table_roundtrip` in another file.
-- [ ] `src/writer/tests.rs:774-775` — the comment says TFORM2 is "a P descriptor sized to the longest row (5)", but only `kind.code() == 'P'` is asserted. Assert `get_text("TFORM2") == Some("1PJ(5)")`. `:776-783` should be `assert_eq!(got, vla_rows)`.
-- [ ] `src/writer/tests.rs:1189-1193` — asserts `members()`/`is_null()` on the **input** `fields`, not on the read-back column. That duplicates `src/table/character_field.rs:59-94`. Either assert on `table.column_by_idx(0)` or delete it.
-- [ ] Loops that `zip` actual against expected without a length assert pass vacuously on a short or empty result:
-  - `src/data/tests.rs:500,508` (`raw_image_fuses_big_endian_physical_conversion`)
-  - `src/compress/encode/tests.rs:457` (`float_write_preserves_nan_nulls`)
-  - `src/compress/quantize.rs:366` (inline test, `data.iter().zip(&back)`)
-  Add `assert_eq!(actual.len(), expected.len())`, or compare whole vectors via `to_bits`.
-- [ ] `src/compress/encode/tests.rs:13-84` and `src/compress/table/tests.rs:122-137` — two `#[ignore]` "emit_*" tests:
-  - Nothing consumes their output.
-  - They write to fixed relative paths `.tmp/wr_*.fits` / `.tmp/my_ctable.fits`.
-  - They fail on a fresh clone, because `.tmp/` is gitignored and `File::create` does not create it.
-  - The generator for the checked-in `comp_*.fits` fixtures is not in the repo at all.
-  Move them to an `examples/` or `xtask` generator that documents how `tests/data/fits/comp_*` were produced, or delete them.
-
 ### darkroom, lens, imaginarium, quickbench, root `test_resources/`
 Paths are relative to the repository root.
 
@@ -317,43 +293,6 @@ Paths without a crate prefix are relative to `scenarium/src/`.
 - [ ] `scenarium/src/execution/engine/tests/argument_values.rs:30,34,41` and `topology.rs:21`: `approximately_eq(2.0)` on values that are exactly `2 as f64`. Use `==`, since an unexplained tolerance hides nothing here.
 - [ ] `scenarium/src/worker/batch/tests.rs:59-69`: `len()` + `contains` where `assert_eq!(.., [event])` / `[node_id]` is exact. Same at `engine/tests/events.rs:140` (`triggered_events.len() == 1`, where `[tick]` is known).
 
-### fits-well
-Paths are relative to `fits-well/`.
-
-- [ ] Astropy celestial goldens use four different tolerances, and each sweep hand-rolls the loop that `wcs::internals::assert_astropy_golden` (`src/wcs/mod.rs:647`) already provides:
-  - `src/wcs/projection/tests.rs:23-49` (1e-9)
-  - `:76-99` (1e-7)
-  - `:117-271` (1e-7)
-  - `:728-764` (1e-8)
-  - `src/wcs/linear_transform/tests.rs:80-86` checks `CROTA_GOLDEN` at 1e-8, while `table_wcs/tests.rs:348,369` checks the same table at 1e-9 through the helper.
-
-  Route everything through the helper, with one tolerance derived from the goldens' printed precision (10 decimals → 5e-11).
-- [ ] `src/wcs/axis/tests.rs:324` vs `:399` — `table_26_spectral_algorithms_match_wcslib` uses 2e-14 relative and `derived_spectral_types_match_wcslib` uses 5e-11 (2500× looser). The loop bodies are otherwise identical. Merge them into one sweep with a per-row tolerance that says why.
-- [ ] Time tolerances with no reason given:
-  - `src/time/tests.rs:18-19`: 1e-7 d. The JD goldens are exact for 4 of 5 rows.
-  - `:152`: 1e-6 d for J2000, which is exact by definition.
-  - `:158`: 1e-4 d, i.e. 8.6 s, for B1950.
-  - `:321`: 1e-5 d.
-  - `:453,454,557,560,632,633,705,715` use `< 1e-12` on ~58 000-magnitude MJDs. That is exact equality in disguise; write `assert_eq!`.
-  - `:730-736`: 1e-9 on exactly representable values; use `assert_eq!`.
-- [ ] Loose bounds where the exact value is computable:
-  - `src/groups/tests.rs:30-34` — `2_445_728 < params[4] < 2_445_730`. Read the stored f32 and assert `PZERO5 + PSCAL5·raw` exactly.
-  - `src/reader/tests.rs:1176` — `physical().iter().any(is_nan)`. The blank sits at source index 13, which is section index 2; assert `physical[2].is_nan()` and exactly one NaN.
-  - `src/writer/tests.rs:1810` — `assert_ne!(ZTILE1, Some(999))`. Assert the regenerated tile (2).
-  - `src/header/card/tests.rs:263` — `records.len() >= 2`. The 125-char value has a computable record count; assert it exactly.
-  - `src/wcs/projection/tests.rs:617-618` — the cube corner is only checked with `is_finite`.
-  - `src/time/tests.rs:69` — `to_jd(..).is_finite()` for ±99999. Both JDs are computable.
-- [ ] Quantization tolerances not derived from the quantizer:
-  - `src/compress/encode/tests.rs:270-279` (`raw_error < 0.2`, `physical_error < 0.5`) and `:461` (`< 0.2`). Read the tile `ZSCALE` from the table and assert `|err| ≤ ZSCALE/2` (and `BSCALE·ZSCALE/2` for physical).
-  - `src/compress/quantize.rs:371` (inline) adds an unexplained `+ 1e-9`.
-- [ ] "It runs" checks on real fixtures:
-  - `src/reader/tests.rs:664-672` asserts lengths only.
-  - `:675-690` checks only 4 of 262 144 pixels.
-  - `src/table/tests.rs:34-41` checks only lengths of ANNAME/STABXYZ.
-  - `src/groups/tests.rs:27` checks only `array_physical(0).len()`.
-
-  Pin at least one known value per column or array.
-
 ## Risky behavior with no test
 Branches with real failure modes that no test reaches.
 
@@ -409,25 +348,6 @@ Paths without a crate prefix are relative to `scenarium/src/`.
 - [ ] `common/common-derive/src/lib.rs`: no tests at all. The `type_id` attribute errors (missing, non-uuid, non-canonical, duplicate, `lib.rs:416-450`) are untested. Unit-test `enum_type_id` with `syn::parse_quote!` inside the proc-macro crate, which needs no new dependency.
 - [ ] `scenarium/src/execution/engine/tests/stats.rs:5-27`: the doc says "a dangling subscription and pin wire nothing", but only the missing port is asserted. Assert `compiled.subscribers(..)` is empty. The file name `stats.rs` also does not match its contents.
 - [ ] `common`'s `id_type!` macro (`common/src/macros.rs`) has no test in `common`. Its only coverage is `scenarium/src/graph/tests.rs:424-432` in another crate.
-
-### fits-well
-Paths are relative to `fits-well/`.
-
-- [ ] `src/writer/tests.rs:1398-1527` (all checksum tests) — there is no known-answer vector. `tests/data/fits/comp_table_cfitsio.fits` and `comp_table_vla.fits` carry cfitsio-written CHECKSUM/DATASUM on both HDUs, and no test calls `verify_checksum` on them. I checked: all four HDUs currently report `Valid/Valid`. Add that as an independent-implementation test, plus one `checksum::encode(sum, true)` known-answer string.
-- [ ] `src/writer/tests.rs:370-373` — `assert_table_column_writes` only unwraps the write. At `:986,990,1046`, the accepted `TSCAL/TZERO/TNULL` boundary values (`i64::MIN`, `u8::MAX`, …) are never read back. Return the reader and assert the emitted keyword values, as `image_blank_is_type_and_range_checked_before_output` (`:1650-1665`) already does for BLANK.
-- [ ] `src/compress/encode/tests.rs:375-396` — `dither_option_sets_zquantiz_and_round_trips` checks only `v.len() == 24*16` after decode. It should do two things:
-  - Assert each pixel is within the tile's `ZSCALE/2`.
-  - Prove the parameter matters: the `None`, `Subtractive1` and `Subtractive2` decoded planes or streams must differ pairwise.
-- [ ] Missing boundaries:
-  - `src/header/tests.rs:436-447` tests NAXIS 1000 (rejected) and 3, but not 999 (the limit).
-  - `src/wcs/celestial_frame/tests.rs:29-50` tests EQUINOX 1950 → FK4 and 2000 → FK5, but not 1984.0, where §8.1 switches the default.
-  - `src/wcs/tests.rs:253-263` rejects WCSAXES −1/0/1000, but never accepts 999.
-- [ ] `benches/wcs.rs:47-63` — the allocation-count invariants are regression guards that only run under `cargo bench`, never `cargo test`:
-  - TAB forward == 4 allocations.
-  - TAB inverse == 4 allocations.
-  - Inverse allocations are independent of search depth.
-
-  `lib.rs:198-202` (`tabular_inverse_at_fraction`) exists only to feed them. Move them into a test with a counting allocator (an integration test binary can install a `#[global_allocator]`), and state where the 4 comes from.
 
 ### darkroom, lens, imaginarium, quickbench, root `test_resources/`
 Paths are relative to the repository root.
@@ -528,11 +448,6 @@ Paths without a crate prefix are relative to `scenarium/src/`.
 - [ ] `scenarium/src/execution/cache/runtime/tests.rs:21-23`: `complete_snapshot` is an identity wrapper over `OutputSnapshot::new`. Also `:260-264`, `:300-304`, `:351-355` re-spell `resident_slot(Some(d), Some(d), out())` inline.
 - [ ] `scenarium/src/execution/executor/tests.rs:20` and `scenarium/src/execution/schedule/tests.rs:440` define the same `value(i64) -> DynamicValue` helper. Move it next to `ProgramBuilder`.
 - [ ] `scenarium/src/execution/schedule/tests.rs:221-225,264-268,282-287`: the `Planner::default()` + `RunSchedule::default()` + `plan(..)` boilerplate is repeated where `ProgramBuilder::plan/try_plan` already exist. `dependency_cycle_is_rejected` is `prog.try_plan(&RunSeeds::sinks())`. The sites that deliberately reuse one planner across calls are fine.
-
-### fits-well
-Paths are relative to `fits-well/`.
-
-- [ ] `src/compress/decode/tests.rs:579-588` — the expected value re-types the production constant and formula (`4 * 1024 * 1024 / retained_bytes`, cf. `src/compress/decode/mod.rs:183-191`), so it cannot disagree with them. Hoist `DECODE_WAVE_BYTES` and reference it. Add the `.max(1)` clamp case (one tile larger than the budget), and a second `D` (e.g. `i64` vs `u8`) to prove the type parameter matters. `src/compress/encode/tests.rs:670-685` uses the magic `1024×4097` to "cross the wave boundary"; derive it from the same constant.
 
 ### darkroom, lens, imaginarium, quickbench, root `test_resources/`
 Paths are relative to the repository root.
@@ -642,84 +557,6 @@ Paths without a crate prefix are relative to `scenarium/src/`.
 - [ ] `scenarium/src/graph/tests.rs:334-358` (`node_remove_test`): it returns `TestResult` without any `?`, and the disable-everything loop (`:341-344`) has nothing to do with removal.
 - [ ] `scenarium/src/execution/engine/tests/node_seeds.rs:88` duplicates `:94`: the `output_i64("mult") == None` assertion is already covered by `outputs("mult").is_empty()`.
 - [ ] `scenarium/src/library/tests.rs:254` (`invoke_by_id_and_index`): there is no "index" in the test, and the `by_name` → `.id` → `by_id` round trip (`:276-277`) tests lookup only incidentally.
-
-### fits-well
-Paths are relative to `fits-well/`.
-
-- [ ] Four builders turn card text into 80-byte records:
-  - `src/header/mod.rs:579-590` (`from_card_lines`, appends END and parses)
-  - `src/header/tests.rs:6` (`header_bytes`)
-  - `src/reader/tests.rs:419` (`fits_file`, also block-pads)
-  - `src/header/card/tests.rs:6` (`raw`)
-
-  Make it one `card_bytes` plus `from_card_lines` / `fits_file` layered on it.
-- [ ] `table_impl::internals::table_header` exists, yet the mandatory BINTABLE cards are re-typed by hand at:
-  - `src/table/bit_column/tests.rs:49-59` (that file imports `table_header` and uses it two tests earlier; this is `table_header(8, 2, &["1PX"])` + `PCOUNT 3`)
-  - `src/reader/tests.rs:73-84,124-134`
-  - `src/compress/table/tests.rs:170-180,220-230,434-450`
-  - `src/compress/decode/tests.rs:173,239,288,337,444,502,554`
-  - `src/wcs/tabular/tests.rs:21-29`
-  - `src/wcs/bench.rs:121-134,163-174`
-
-  The seven compressed-image headers in `compress/decode/tests.rs` want a `compressed_image_header(cmptype, zbitpix, znaxis, ztile, columns)` helper.
-- [ ] The `-TAB` lookup fixture exists three times:
-  - `src/reader/tests.rs:47-98` (`write_tab_lookup_columns`)
-  - `src/wcs/tabular/tests.rs:15-45` (`lookup_table`)
-  - `src/wcs/bench.rs:118-176`
-
-  `tab_header` (`tabular/tests.rs:47-61`) is re-typed at `reader/tests.rs:158-174` and `bench.rs:178-189`. `resolved_wcs` (`tabular/tests.rs:84-96`) is re-typed at `bench.rs:152-157,190-195`. `bench.rs:160-196` (`tabular_inverse_wcs`) is exactly the `(2,2,2)` fixture of `tabular/tests.rs:174-183`. Put one `tabular::internals` module (gated `any(test, feature = "bench")`) behind all three.
-- [ ] `Scaling::IDENTITY` exists, yet the literal `Scaling { bscale: 1.0, bzero: 0.0, blank: None }` appears about 60 times:
-  - `src/data/tests.rs` (≈14)
-  - `src/compress/encode/tests.rs` (≈14)
-  - `src/reader/tests.rs:755,785,825`
-  - `src/compress/decode/tests.rs:530`
-  - `benches/*.rs`
-
-  `src/writer/tests.rs:67` even defines a private `identity()` copy. Many could be `Image::new(..)`.
-- [ ] The unsigned offsets are re-typed although `U16_OFFSET/U32_OFFSET/U64_OFFSET` exist (and are used at `src/data/tests.rs:528-538` and `src/table/column_reader/tests.rs:313`):
-  - `src/data/tests.rs:353,366,419,443,458,582-592,623,669`
-  - `src/writer/tests.rs:1301,1357-1365`
-  - `src/table/column_reader/tests.rs:208,229`
-- [ ] `src/wcs/spectral_frame/tests.rs:30,52,137,148` re-type `2.997_924_58e8`. `SPEED_OF_LIGHT` exists and `wcs/axis/tests.rs:32` uses it.
-- [ ] Write-then-reopen boilerplate:
-  - `write_to_vec` is duplicated at `src/reader/tests.rs:744` and `src/writer/tests.rs:61`.
-  - `ascii_table` (`writer/tests.rs:82`) duplicates `write_table` (`src/ascii/tests.rs:7`).
-  - The sequence "new writer → write → `FitsReader::open(Cursor::new(w.into_inner().into_inner()))` → `read_image(1).decode()`" appears 15× in `compress/encode/tests.rs` and 13× in `writer/tests.rs`.
-
-  One `round_trip(...) -> StreamReader<Cursor<Vec<u8>>>` helper covers them.
-- [ ] `AsciiWriteColumn` is spelled out as a full 8-field struct literal about 17× in `src/ascii/tests.rs` (`:193-222,321-340,370-379,388-397,405-414,427-466,489-546,568-577,623-632,645-664`) and in `src/writer/tests.rs:392-401,446-455,681-690`. The builder `AsciiWriteColumn::new(..).with_decimals(..).with_null(..)` is already used at `writer/tests.rs:1931-1940`. The ASCII `TABLE` mandatory header is likewise re-typed 7× in `ascii/tests.rs` (`:44,105,145,167,293,692,722`) with no `ascii_table_header` analogue of `table_header`.
-- [ ] Synthetic fixture formulas are repeated:
-  - The `x*7 − y*5` 24×16 ramp appears at `src/compress/decode/tests.rs:13-17`, `src/compress/encode/tests.rs:18-19,88-89,646-647`.
-  - The PLIO mask `(x+y)%7` appears at `decode/tests.rs:131`, `encode/tests.rs:47,564`.
-  - The table columns SHORT/INT/FLT/DBL/BYTE/VEC appear at `compress/table/tests.rs:19-54` and `benches/compress.rs:213-254`.
-- [ ] The fixture directory string is spelled out instead of going through `reader::internals::open_fixture`:
-  - `src/groups/tests.rs:9,204` (`File::open`)
-  - `src/wcs/tests.rs:16-19` (`open_wcs`)
-  - `src/compress/table/tests.rs:130`
-  - `src/reader/tests.rs:273,300,361,397,407,618`
-
-  Add `fixture_path` / `fixture_bytes` beside `open_fixture`.
-- [ ] Hand-built WCS headers, which want `celestial_header(proj, crpix, crval, cdelt, pv)` and `spectral_header(ctype, unit, crval, cdelt)` helpers:
-  - The 2-axis celestial builder appears ≈20×: `src/wcs/projection/tests.rs:27,85,105,251,276,306,340,366,380,401,418,436,744`, `src/wcs/tests.rs:88,150,179`, `src/wcs/linear_transform/tests.rs:69,91,148`, `src/wcs/axis/tests.rs:69`.
-  - The 1-axis spectral builder appears ≈8×: `src/wcs/axis/tests.rs:129,312,387,470,515,537,552`, `src/wcs/spectral_frame/tests.rs:8`.
-  - `src/wcs/table_wcs/tests.rs` hand-writes the same WCS three times (image / pixel-list / vector-cell keyword families) in each test (`:16-42,101-126,330-367,374-435`). It also re-types `wcs_tan.fits`'s header values (`:65-77,150-162`).
-
-  A helper that renders one WCS description into each keyword family would replace most of the 545 lines.
-- [ ] `src/groups/tests.rs:82-96,129-141,178-186,214-222,257-265,285-293` — the random-groups header is rebuilt six times. Use one `groups_header(bitpix, naxis, pcount, gcount)`.
-- [ ] `src/reader/tests.rs:22-45` — in `CountingCursor`, `bytes_read` is redundant with `read_ranges` (it is the sum of their lengths). Keep only the ranges.
-- [ ] `src/error.rs:326-447` — `display_messages_are_specific` re-types ~20 `#[error("...")]` strings, making a second source of truth for static text. Keep the arms that carry formatting logic (`Indexed`/`Ranked` plurals at `:449-511`) and drop the pure restatements.
-- [ ] `src/header/tests.rs:410-420` duplicates `src/writer/tests.rs:1248-1259` (render → parse → `cards ==`). `header/tests.rs:41-46` and `:104-109` both assert the 8-card count; the comment at `:108` says so.
-- [ ] `write_pq_descriptor` Q/P encoding is tested three times: `src/endian.rs:152-157` (inside `decode_and_encode_are_inverse_and_big_endian`), `src/endian.rs:183-197`, and `src/writer/tests.rs:1571-1606`. Keep one table in `endian.rs`, including the overflow rows from writer.
-- [ ] `src/compress/decode/tests.rs:34-48,115-118` — four one-line tests over `check_decoded`; make them one table. `check_float` (`:139-150`) and `decompresses_float_with_nan_nulls` (`:84-113`) become one helper if compared via `to_bits`. `check_i32_against_ref` lacks the length assert that `check_float` has.
-- [ ] `src/compress/decode/tests.rs:527-545` tests `encode::compress_image` overflow inside the decode test file, and duplicates `src/writer/tests.rs:428-437`. Move it to `encode/tests.rs` or drop it.
-- [ ] `src/compress/encode/tests.rs:560-582` (PLIO) and `:643-666` (NOCOMPRESS) are extra rows of the `compression_write_round_trips_through_decode` loop (`:100-126`). `:687-742` (`empty_naxis0…`, `empty_first_axis…`) are one table, and the `match` ladder at `:715-720` is `assert_eq!(back.decode(), samples)`.
-- [ ] `src/compress/quantize.rs:403-410` (inline) — the Rice i32-vs-i64 bitstream equivalence is a Rice property. Move it to `src/compress/rice.rs` tests.
-- [ ] `src/data/tests.rs:298-313` and `:315-329` use the same fixture (the comment at `:317` says so). The u16/u32/i8 unsigned views are covered three times: `:346-386`, `:388-407`, `:518-556`.
-- [ ] `src/reader/tests.rs:700-731` and `:868-898` both test case-insensitive `hdu_index`. `:750-778` and `:820-848` build the identical U8 `[10,20,30,40]` image.
-- [ ] `src/wcs/tests.rs:79-84` (`reference_pixel_maps_to_crval`) is the `(256,256)` row of `TAN_GOLDEN`, already checked by `pixel_to_world_matches_astropy`.
-- [ ] `src/time/tests.rs:146-163`, `:300-309` and `:312-326` all check J2000 = MJD 51544.5 / JD 2451545.0.
-- [ ] `src/table/column_reader/tests.rs:80-110` and `:385-415` use the same `1I` + TSCAL 2 / TZERO 10 fixture.
-- [ ] `src/writer/tests.rs:411-549` repeats "new writer → `assert!(matches!(write, Err(..)))` → `assert!(…is_empty())`" ~12×. Two arms (`:433-437`, `:440-444`) omit the empty-output check. Generalize `assert_table_column_rejected` (`:375`) into an `assert_rejected_before_output(write_fn, pattern)` used everywhere, including `ascii/tests.rs:380-421,552-583,633-638` and `writer/tests.rs:1666-1681,1726-1731`.
 
 ### darkroom, lens, imaginarium, quickbench, root `test_resources/`
 Paths are relative to the repository root.
@@ -854,26 +691,6 @@ Paths without a crate prefix are relative to `scenarium/src/`.
 - [ ] `scenarium/src/graph/tests.rs:740-760` repeats `scenarium/src/testing/graph/tests.rs:143-167` (`spec_flags_reach_the_declaration`), which checks the same sink/uncacheable/impure flags. `graph/tests.rs:778-789` (`node_events_expose_names_and_arity`) tests the `Func` builder and belongs in `graph/func/mod.rs` tests, next to `default_cache_mode_defaults_to_none_and_builder_overrides` (`graph/func/mod.rs:541`).
 - [ ] Inline `crate::` paths in expressions: `engine/tests/compile_regressions.rs:132,200`, `engine/tests/cache_persistence/cache_modes.rs:437`.
 
-### fits-well
-Paths are relative to `fits-well/`.
-
-- [ ] `src/header/card/mod.rs:138-142` — `#[cfg(test)] fn render` is a mid-file, test-only method in the production `impl Card`. The tests can use the existing `render_records` (`card/tests.rs:17`, built on `render_into`). Remove the method.
-- [ ] `src/header/mod.rs:579-590` — `from_card_lines` is a loose `#[cfg(test)] pub(crate) fn`, not inside a gated `internals` mod. Callers alias it as `header` (`hdu/tests.rs:2`, `data/tests.rs:5`, `writer/tests.rs:16`).
-- [ ] These inline test modules are past the split threshold and should become `foo/{mod.rs, tests.rs}`:
-  - `src/error.rs` (206 test lines, more than 150)
-  - `src/block.rs` (65 of 118 lines = 55%)
-  - `src/bitpix.rs` (45 of 112 = 40.2%)
-- [ ] `src/writer/table.rs:846` — `pub(super) mod internals` holds a `pub(crate) fn`. Every other helper module is `pub(crate) mod internals`.
-- [ ] Bench layout does not follow the `bench` feature convention:
-  - There is no `bench` feature. Benches require `internals`, and `criterion` is an unconditional dev-dependency (`Cargo.toml:47-48,71-87`).
-  - The facade is `#[cfg(feature = "internals")] pub mod internals` (`src/lib.rs:149`) rather than `pub mod bench`.
-  - `src/wcs/bench.rs` is gated on `internals` (`src/wcs/mod.rs:63`).
-  - The `benches/*.rs` files carry fixture builders, a global allocator and assertions instead of thin wiring: `benches/decode.rs:43-70`, `benches/read.rs:36-66`, `benches/compress.rs:38-95,213-267`, `benches/wcs.rs:12-63`.
-- [ ] `benches/decode.rs:43-47` and `benches/read.rs:36-38` — `elem_bytes` re-derives the element size from `code()`. Its comment says there is "no dependency on a crate-internal `elem_size`", but `Bitpix::elem_size` is `pub` (`src/bitpix.rs:53`). `sample_data` and `UNIT_BYTES` are also duplicated between the two files.
-- [ ] `src/lib.rs:162-167` — the `encode_image` bench facade allocates a fresh `Vec` per call. So `benches/decode.rs:86-97` ("encode") times the allocation and 64 MiB of page faults, not the swap; production `encode_into` reuses its buffer. Take a caller-owned `&mut Vec<u8>` and `clear()` it per iteration.
-- [ ] `benches/decode.rs:137-164` (`read_image`) and `benches/read.rs:68-86` (`read_image/seek`) time the same Cursor-seek read twice in two binaries. The `read_image_view` group is split across the two (`decode.rs:172-203` "seek" arm, `read.rs:109-133` "slice" arm). Give each group one owning binary.
-- [ ] `examples/inspect.rs:16` and `examples/wcs.rs:16` default to `tests/data/fits/*`, but `Cargo.toml:14-21` excludes `tests/` from the package. Both examples fail from the published crate.
-
 ### darkroom, lens, imaginarium, quickbench, root `test_resources/`
 Paths are relative to the repository root.
 
@@ -899,19 +716,6 @@ Paths are relative to the repository root.
 Short paths are relative to `lumos/src/stacking/star_detection/`.
 
 - [ ] About 90 PNG/TXT files are written per default test run to fixed paths under the workspace `test_output/` (`pipeline_tests/mod.rs:192-227` ×22 tests, `background/tests/synthetic_skies.rs`, `convolution/tests/matched_filter.rs`, `stage_effects/{detection,cosmic_ray}_tests.rs`). Nothing cleans them up, and concurrent test binaries collide on the same paths.
-
-### fits-well
-Paths are relative to `fits-well/`.
-
-- [ ] `tests/data/fits/` — 8 of the 34 checked-in files (≈9.4 MB of the 11 MB) are referenced by no test, bench or example:
-  - `1904-66_AIT.fits`, `1904-66_CAR.fits`, `1904-66_SIN.fits`, `1904-66_TAN.fits` (4×161 KB)
-  - `EUVEngc4151imgx.fits` (4.3 MB)
-  - `FGSf64y0106m_a1f.fits` (2.5 MB)
-  - `NICMOSn4hk12010_mos.fits` (1.2 MB)
-  - `WFPC2u5780205r_c0fx.fits` (0.7 MB)
-
-  Their only references were removed in `38d7f98`. The four `1904-66_*` files are astropy's projection samples, so they could replace the hand-built AIT/CAR/SIN/TAN golden headers in `wcs/projection/tests.rs`. Otherwise delete all eight. There are no byte-identical duplicates among the fixtures (md5 checked).
-- [ ] `benches/read.rs:89-100` — the mmap arm writes three 64 MiB files to the crate-local fixed path `.tmp/read_bench_*.fits` and never removes them. 192 MB currently sit in `fits-well/.tmp/`. Use a per-run temp dir and delete it afterwards.
 
 ### darkroom, lens, imaginarium, quickbench, root `test_resources/`
 Paths are relative to the repository root.
@@ -1016,19 +820,6 @@ Paths are relative to the repository root.
 Paths without a crate prefix are relative to `scenarium/src/`.
 
 - [ ] Comments that narrate change: `scenarium/src/worker/event_loop/tests.rs:168-172` ("Stale-event filtering is now structural…", also `//` rather than `///` on a test doc), and `scenarium/src/worker/batch/tests.rs:160-162` ("implicit today (Option::replace)").
-
-### fits-well
-Paths are relative to `fits-well/`.
-
-- [ ] Remove the "was / now / former" narration and the opaque review IDs:
-  - `src/reader/tests.rs:468` ("the old `assert_eq!` would panic; now it is a clean error")
-  - `src/compress/encode/tests.rs:587` ("was dropped before"), `:373-374` ("rather than always emitting the hardcoded …")
-  - `src/ascii/tests.rs:183-185` ("now resolve names through one implementation")
-  - `src/compress/quantize.rs:403-404` (inline, "as the former widened representation")
-  - `src/compress/decode/tests.rs:500` (`R2-2`)
-  - `src/compress/table/tests.rs:433` (`R2-3`)
-  - `src/compress/hcompress.rs:1587` (inline, `R2-4`)
-  - `src/wcs/projection/tests.rs:724` ("all v2 projections")
 
 ### darkroom, lens, imaginarium, quickbench, root `test_resources/`
 Paths are relative to the repository root.
