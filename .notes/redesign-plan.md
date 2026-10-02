@@ -1,14 +1,7 @@
 # Structural redesign plan
 
-Sources: `.notes/ISSUES.md`, `.notes/workspace-review.md`, `.notes/tests-review.md`.
+Sources: `.notes/ISSUES.md`, `.notes/workspace-review.md` (WR), `.notes/tests-review.md` (TR).
 Out of scope: `palantir`, and the findings in `lumos/.notes/*.md` (this plan only avoids conflicts with them).
-
-Rules for the work:
-
-- Delete a review item when its fix lands, as each review file asks. Delete a heading when its group is empty.
-- Every bug noticed outside the current step goes to `.notes/ISSUES.md`.
-- No commit until you say so. Each step ends with the verification chain for the crates it touched.
-- Decisions are marked **D1**…**D13**. All are made (section 2).
 
 ---
 
@@ -21,7 +14,7 @@ The submodule update changed no reviewed code. `fits-well`, `imaginarium` and `q
 | Every cited path exists | 841 items, both reviews | All resolve. 22 short or generated paths (`port_row.rs`, `stacked_light.tiff`, proposed files) resolve by suffix or are outputs. |
 | Every cited symbol exists | same | All exist. The 39 misses are external names (wcslib `celset`, LibRaw `color3_image`, `ManuallyDrop`) or name fragments (`_50_percent`). |
 | Cited line is near its named symbol | 86 `path:line (name)` pairs | 71 within 8 lines. |
-| Cited line is inside its file | 2663 line numbers | `tests-review.md` has wrong line numbers in some items, for example `math/fwhm.rs:78` (test is at 34), `wavelet/tests.rs:208` (at 63), `fwhm/tests.rs:240-339` (at 65-143, the file has 218 lines and never had more than 234). The content of these items is correct. Use the symbol names, not the line numbers. |
+| Cited line is inside its file | 2663 line numbers | `tests-review.md` has wrong line numbers in some items, for example `math/fwhm.rs:78` (test is at 34), `wavelet/tests.rs:208` (at 63), `fwhm/tests.rs:240-339` (at 65-143; the file has 218 lines and never had more than 234). The content of these items is correct. Use the symbol names, not the line numbers. |
 | Content, by reading code | all 6 `ISSUES.md` bugs, all 20 High groups, about 60 Medium items, 20 Low items, 20 test items | All confirmed, with the notes below. |
 | Content, by running probes | fits-well WCS (5 claims), compressed table round trip | All confirmed. |
 
@@ -34,32 +27,54 @@ Notes from the content check:
 
 ---
 
-## 1. Phase 0 — build and lint baseline
+## 1. Rules for every step
 
-These two items come first because every later step builds and lints under them.
+These rules apply to every step in every phase. They exist because the plan changes numeric results, file formats and public APIs in many crates, and a regression must be loud.
 
-### 1.1 One dev-profile rule for dependency optimization
+1. **Test first.** A step that fixes a finding starts with a test that fails on the current code and names the finding. The fix makes it pass. A probe from section 0 becomes such a test (`fits-well` WCS domain, compressed-table round trip with constant data).
+2. **Characterization snapshots before rewrites.** Before phase 5, record bit-exact hashes of the outputs of the synthetic `lumos` pipeline per stage (decode, calibrate, detect, register, warp, combine, stretch), and of the `imaginarium` conversions over `ALL_FORMATS`. Each step lists the snapshots it is expected to change and why. A snapshot that changes without a listed reason stops the step.
+3. **Every step leaves every chain green.** So any step boundary is a safe commit point. Commits happen only when you say so.
+4. **Bookkeeping in the same step.** A step deletes the review items it closes (WR, TR, `ISSUES.md`) and deletes empty headings. At the end of each phase, a search for the closed symbols in the review files must find nothing.
+5. **A persisted format that changes fails loudly.** Section 5 lists every persisted format the plan touches, with the version bump and the failure mode for an old file: a clear error or a cache miss, never data read with the wrong meaning.
+6. **Never delete what the code did not create.** Any code that removes files or directories removes only items that carry its own marker (section 4, W2).
+7. **A submodule API change updates its workspace callers in the same step.** The step runs the submodule's own chain from its directory and the workspace chain for every caller. A submodule change must stay valid in a standalone checkout.
+8. **SIMD on both architectures.** A step that changes a SIMD kernel runs `cargo clippy --target aarch64-unknown-linux-gnu` for the NEON code, and runs the crate's tests on the macOS laptop (aarch64) through its tmux session. If that host is not available, the step report says that NEON was only compile-checked.
+9. **Every new tolerance states its reason** in the code: what error it absorbs and why that size.
+
+---
+
+## 2. Phase 0 — build and lint baseline
+
+### 2.1 One dev-profile rule for dependency optimization
 
 Replace the 30 `[profile.dev.package.<name>]` blocks in the root `Cargo.toml` with:
 
 ```toml
 [profile.dev.package."*"]
 opt-level = 3
+
+# The submodules you edit and debug most: unoptimized like the workspace members.
+[profile.dev.package.palantir]
+opt-level = 0
+[profile.dev.package.imaginarium]
+opt-level = 0
+[profile.dev.package.quickbench]
+opt-level = 0
 ```
 
-Cargo applies `"*"` to every package that is not a workspace member. It does not apply to build scripts and proc-macros, which use `[profile.dev.build-override]`, so `syn` and the derive crates keep their fast build. This is the form the Cargo book documents and the form Bevy recommends.
+Cargo applies `"*"` to every package that is not a workspace member. The excluded submodules are not members, so `"*"` covers them too, and the explicit entries above take precedence (per **D1**, this keeps today's behaviour; `fits-well` stays optimized). `"*"` does not apply to build scripts and proc-macros, which use `[profile.dev.build-override]`, so `syn` and the derive crates keep their fast build. This is the form the Cargo book documents and the form Bevy recommends.
 
-The excluded submodules (`palantir`, `imaginarium`, `fits-well`, `quickbench`) are not workspace members, so `"*"` also covers them. Today only `fits-well` is optimized. Per **D1**, `palantir`, `imaginarium` and `quickbench` stay at `opt-level = 0` through explicit `[profile.dev.package.<name>] opt-level = 0` entries, which take precedence over `"*"`. That keeps today's behaviour.
+Verification: `cargo build -v` shows `-C opt-level=3` for one dependency (for example `tiff`) and no `opt-level` flag for `palantir`. Record the clean-build time and the time to run the `lumos` test suite before and after.
 
-Verification: `cargo build` (darkroom), then `cargo build -p lumos --tests --features ml,internals`. Record the clean-build time before and after.
+### 2.2 Lint set
 
-### 1.2 Lint set
+Measured with clippy 0.1.99 on all eight crates (`--all-targets --all-features`, lints passed on the command line, `clippy.toml` given through `CLIPPY_CONF_DIR`, no change to the repo). Counts are distinct sites.
 
-Measured with clippy 0.1.99 on all eight crates (`--all-targets --all-features`, lints passed on the command line, no manifest change). Counts are distinct sites.
+**Level policy:** every lint is `warn`, not `deny`. The verification chain runs clippy with `-D warnings`, so a warning fails the chain, but a build in the middle of an edit still works. The current workspace `deny` entries change to `warn`. Groups (`rust_2018_idioms`, `clippy::pedantic`) take `priority = -1` so that single lints override them.
 
-**Level policy:** every lint is `warn`, not `deny`. The verification chain runs clippy with `-D warnings`, so a warning fails the chain, but a build in the middle of an edit still works. The current workspace `deny` entries change to `warn`.
+**Suppressions:** every suppression is `#[expect(lint, reason = "…")]`, never `#[allow]`. `clippy::allow_attributes` (20 sites) and `clippy::allow_attributes_without_reason` (31 sites) enforce this. An `expect` that no longer fires is itself a warning, so a stale suppression cannot stay.
 
-The submodules have their own `[lints]` tables and must not inherit from the workspace. The same set goes into `imaginarium`, `fits-well` and `quickbench` `Cargo.toml` by copy.
+**Submodules** have their own `[lints]` tables and must not inherit from the workspace. The same set goes into `imaginarium`, `fits-well` and `quickbench` by copy, with a `clippy.toml` in each.
 
 | Lint | Hits | Verdict | Reason |
 |---|---|---|---|
@@ -71,16 +86,17 @@ The submodules have their own `[lints]` tables and must not inherit from the wor
 | `trivial_numeric_casts` | 6 | adopt | |
 | `unused_lifetimes` | 0 | adopt | Guard. |
 | `unused_macro_rules` | 2 | adopt | Both in `lumos`. Matches "remove unused code". |
-| `unsafe_code` | 323 | **not workspace-wide** | SIMD needs `unsafe` (`lumos` 169, `imaginarium` 122, `fits-well` 23). `darkroom` has 9, all in `alloc_audit.rs` (a `GlobalAlloc`). Put `#![forbid(unsafe_code)]` in `common`, `scenarium`, `lens` and `quickbench` (0 hits), and `#![deny(unsafe_code)]` in `darkroom` with an `allow` and a reason on `alloc_audit`. |
+| `unsafe_code` | 323 | per crate, not workspace-wide | SIMD needs `unsafe` (`lumos` 169, `imaginarium` 122, `fits-well` 23). `#![forbid(unsafe_code)]` in `common`, `scenarium`, `lens`, `quickbench` (0 hits; `-F unsafe_code` compiles `common` and `scenarium`, and `lens` has no derive that emits `unsafe`). `#![deny(unsafe_code)]` in `darkroom`, with `#[expect(unsafe_code, reason = …)]` on `alloc_audit` (9 sites, a `GlobalAlloc`). If a later derive emits `allow(unsafe_code)`, that crate moves from `forbid` to `deny`. |
 | `clippy::pedantic` (group) | ≈ 4 300 | adopt, with the allow-list below | |
-| `clippy::print_stdout` / `print_stderr` | 325 / 53 | adopt | Every `lumos` hit is in test, bench, probe or example code. Set `allow-print-in-tests = true` in `clippy.toml`, and allow the lint at the top of each example and in `quickbench`'s report printer. |
-| `clippy::absolute_paths` | 766 | adopt | Matches the rules "no inline paths" and "free functions stay namespace-qualified" (`use std::fs; fs::create_dir_all`). The one exception in the rules (a gated inline statement in place of a cfg'd import) gets a local `allow` with a reason. |
+| `clippy::print_stdout` / `print_stderr` | 325 / 53 → 90 / 16 | adopt | With `allow-print-in-tests = true` in `clippy.toml`, what remains is in `examples/`, in `quickbench`'s report printer and in two real-data helpers. Those get a file-level `expect` with a reason. |
+| `clippy::absolute_paths` | 766 | adopt | Matches the rules "no inline paths" and "free functions stay namespace-qualified" (`use std::fs; fs::create_dir_all`). The one exception in the rules (a gated inline statement in place of a cfg'd import) gets an `expect` with a reason. |
 | `clippy::clone_on_ref_ptr` | 0 | keep | Already on. |
 | `clippy::dbg_macro`, `clippy::todo` | 0 | adopt | Guards. |
-| `clippy::let_underscore_must_use` | 36 | adopt | `let _ = fs::remove_file(..)` swallows an error. Deliberate best-effort cleanup in `Drop` gets `#[expect(.., reason = "..")]`. |
+| `clippy::let_underscore_must_use` | 36 | adopt | `let _ = fs::remove_file(..)` swallows an error. Deliberate best-effort cleanup in `Drop` gets an `expect` with a reason. |
 | `clippy::unused_result_ok` | 11 | adopt | Same class (`.ok();` to discard). |
-| `clippy::map_err_ignore` | 59 | adopt | `map_err(\|_\| ..)` drops the source. Keep the source, or allow with a reason where the source carries nothing (`TryFromIntError`). |
+| `clippy::map_err_ignore` | 59 | adopt | `map_err(\|_\| ..)` drops the source. Keep the source, or `expect` with a reason where the source carries nothing (`TryFromIntError`). |
 | `clippy::self_named_module_files` | 0 | adopt | Guard for the rule "never `foo.rs` beside `foo/`". |
+| `clippy::allow_attributes`, `clippy::allow_attributes_without_reason` | 20, 31 | adopt | See "Suppressions" above. |
 | `missing_errors_doc`, `missing_panics_doc`, `must_use_candidate`, `assert_is_empty` | — | allow | As in your list. |
 
 Pedantic allow-list, each with a reason in the manifest comment:
@@ -95,54 +111,45 @@ Pedantic allow-list, each with a reason in the manifest comment:
 | `float_cmp` | 42 | Exact comparison is deliberate (`SampleDomain::commensurate_with`, sentinels, tests that assert exact values). |
 | `cast_ptr_alignment` | 61 | Every hit feeds an unaligned load (`_mm_loadu_*`). |
 
-Kept from pedantic, with notes: `cast_lossless` (478, autofix to `f64::from`), `uninlined_format_args` (462, autofix), `doc_markdown` (296, with a `doc-valid-idents` list in `clippy.toml` for `LibRaw`, `PixInsight`, `wcslib`, …), `unreadable_literal` (280, autofix), `ignore_without_reason` (119, every `#[ignore]` states why), `return_self_not_must_use` (85, catches a dropped builder), `ptr_as_ptr` (70, `.cast()`), `wildcard_imports` (40, with `allowed-wildcard-imports` for `std::arch::*`), `manual_midpoint`, `stable_sort_primitive`, `trivially_copy_pass_by_ref`, `needless_pass_by_value` and the rest of the small ones.
+Kept from pedantic, with notes: `cast_lossless` (478, autofix to `f64::from`), `uninlined_format_args` (462, autofix), `doc_markdown` (296 → 241 with a first `doc-valid-idents` list; the list grows as the sweep finds names), `unreadable_literal` (280, autofix), `ignore_without_reason` (119, every `#[ignore]` states why), `return_self_not_must_use` (85, catches a dropped builder), `ptr_as_ptr` (70, `.cast()`), `wildcard_imports` (40 → 15 with `allowed-wildcard-imports` for `std::arch`), `manual_midpoint`, `stable_sort_primitive`, `trivially_copy_pass_by_ref`, `needless_pass_by_value` and the rest of the small ones.
 
-Per **D2**, `cast_sign_loss` (308) and `cast_possible_wrap` (348) are on. Both flag `imaginarium/src/drawing.rs:49`, which is the `draw_circle` wrap bug in the workspace review.
+Per **D2**, `cast_sign_loss` (308) and `cast_possible_wrap` (348) are on. Both flag `imaginarium/src/drawing.rs:49`, which is the `draw_circle` wrap bug in the workspace review. In SIMD index code with proven bounds, the `expect` sits on the kernel function and its reason names the bound; elsewhere the cast becomes `try_from` or a type change.
 
-Order of work for 1.2: (1) add the lints with every new one at `allow`; (2) enable them one at a time, autofix first, then hand fixes, one crate per chain run; (3) end with the full set at `warn`. A lint that needs a hand fix inside code that a later workstream rewrites waits for that workstream and is listed there.
+**Migration path.** Cargo does not allow a member to override single lints while it has `[lints] workspace = true`, so a workspace-level lint is on in every member at once. The migration therefore goes per crate through source attributes, which take precedence over the flags Cargo passes:
+
+1. Add the full set to `[workspace.lints]` with every new lint at `allow`, plus `clippy.toml`.
+2. Per crate, add `#![warn(<lint>)]` at the crate root for one lint group at a time, autofix first, then hand fixes, then the chain for that crate.
+3. When every member is clean for a lint, set it to `warn` in `[workspace.lints]` and remove the crate attributes.
+
+A lint whose hand fixes fall inside code that a later workstream rewrites stays at the crate-attribute stage for that crate, and the workstream lists it.
 
 ---
 
-## 2. Decisions
+## 3. Decisions
 
 All decisions were made on 2026-10-02.
 
 | ID | Question | Decision | Effect on the plan |
 |---|---|---|---|
-| D1 | Which submodules stay at `opt-level = 0` in dev? | `palantir`, `imaginarium`, `quickbench` | Same behaviour as today. 1.1 adds `[profile.dev.package.<name>] opt-level = 0` for those three. |
-| D2 | `cast_sign_loss` and `cast_possible_wrap`? | Enable both | 1.2 enables them. About 650 sites get `try_from` or a local `allow` with a reason. |
-| D3 | Thin-plate spline? | Keep as work in progress | `tps/` stays with its `cfg_attr(not(test), allow(dead_code))` and module note. W3 does not touch it. The TR item that asks to remove it is closed as "kept deliberately". |
+| D1 | Which submodules stay at `opt-level = 0` in dev? | `palantir`, `imaginarium`, `quickbench` | Same behaviour as today (2.1). |
+| D2 | `cast_sign_loss` and `cast_possible_wrap`? | Enable both | About 650 sites get `try_from`, a type change or a reasoned `expect` (2.2). |
+| D3 | Thin-plate spline? | Keep as work in progress | `tps/` stays with its `cfg_attr(not(test), allow(dead_code))` and module note; that attribute becomes an `expect` with a reason. W3 does not touch it. The TR item that asks to remove it is closed as "kept deliberately". |
 | D4 | `imaginarium` GPU in this workspace? | Drop the `wgpu` feature from the workspace dependency | The GPU code stays in `imaginarium` with its fixes (W11). `scenarium`'s `ContextType` and the `&mut ContextStore` parameters go (W9). |
 | D5 | `scenarium` wildcard outputs? | Keep, make cheap | The feature stays. Darkroom recomputes `OutputTypes` only when the graph changes. `OutputTypes::update` reads the const kind without a `ConstValue` clone (W9, W13). |
-| D6 | Drizzle with a SIP registration? | Support it | Newton inversion of the SIP polynomial per point, with a stated tolerance (W3). |
+| D6 | Drizzle with a SIP registration? | Support it | Newton inversion of the SIP polynomial per point, with a stated tolerance and a stated failure path (W3). |
 | D7 | Palantir data types in `darkroom::core`? | Allow | The module doc names the allowed types. Core never imports `crate::gui` (W13). |
 | D8 | Calibration-master construction? | lumos presets, lens per role | `MasterRole` owns the preset table. `from_files` and `RoleStack` go; the two examples call per role (W7, W10). |
-| D9 | `lumos` public API with no non-test caller? | Keep public | `stack`, `stack_images`, `StackFrame`, `align_and_stack` and `DefectMap` stay `pub`. They get the same validation as the used paths: `FrameSet::validate` (W1), memory plan, finite-input and dimension checks (W6), and `DefectMap` without its `Option` placeholder (W7). |
+| D9 | `lumos` public API with no non-test caller? | Keep public | `stack`, `stack_images`, `StackFrame`, `align_and_stack` and `DefectMap` stay `pub`. They get the same validation as the used paths (W1, W6, W7). |
 | D10 | `Normalization::Global` estimator? | Paired photometric fit for every frame | W7 fixes the Deming inlier window first, then uses the paired fit over the common domain for all frames. |
 | D11 | `lens` dev-dependencies `common/internals` and tokio `test-util`? | Approve both | W14 adds both to `lens/Cargo.toml` `[dev-dependencies]`. |
-| D12 | `lens` processing-node port shape? | Preset picker plus optional `Config` | All six nodes take a preset and an optional `Config` port. A wired `Config` overrides the preset, and the node reports it (W10). |
+| D12 | `lens` processing-node port shape? | Preset picker plus optional `Config` | All six nodes take a preset and an optional `Config` port. The override is declared in the func, so darkroom shows it without running the graph (W9, W10). |
 | D13 | Graph panes? | Single pane | Delete the per-pane narration and the unreachable branch in `GraphUI::appearing` (W13). |
-
----|---|---|---|
-| D1 | Which submodules stay at `opt-level = 0` in dev? | Only `palantir` (you edit and debug it most; `imaginarium` does pixel work where speed matters in dev). | 1.1 |
-| D2 | `cast_sign_loss` and `cast_possible_wrap` on or off? | On. They caught a real bug in this tree. Cost: about 650 sites, most in SIMD index code. | 1.2 |
-| D3 | Thin-plate spline: delete, integrate, or keep? | Delete (option A in `lumos/.notes/lumos-review.md`). SIP is the FITS standard and is not used yet with rotation either. | W3 |
-| D4 | `imaginarium` GPU in this workspace: drop the `wgpu` feature from the workspace dependency, or wire the GPU stack into `lens`? | Drop it. Nothing uses it. The GPU code stays in `imaginarium` behind its own feature and gets its bug fixes there. `scenarium`'s `ContextType` then has no reason to exist and goes too. | W9, W12 |
-| D5 | `scenarium` wildcard outputs: remove or keep? | Remove. No production func declares one, and darkroom pays for `OutputTypes::update` every frame. | W9, W14 |
-| D6 | Drizzle with a SIP registration: support it, or refuse it with a typed error? | Support it, with a Newton inverse of the SIP polynomial per point (the method wcslib and astropy use when no inverse polynomial is stored). | W3 |
-| D7 | `darkroom::core` and palantir: allow palantir data types (`DockState`, `DockOp`, `ImageFilter`) in core, or mirror them? | Allow data types, and say so in the module doc. Core still never imports `crate::gui`. | W14 |
-| D8 | Calibration-master construction: who owns it? | `lumos` owns the role → preset table on `MasterRole`. `lens` keeps one call per role, because its cache is per role. Delete `CalibrationMasters::from_files` and `RoleStack`, and change the two examples. | W1, W11 |
-| D9 | `lumos` public API with no non-test caller (`stack`, `stack_images`, `StackFrame`, `align_and_stack`, the `pub` methods of `DefectMap`): remove or keep? | Remove from the public surface. Tests reach them through `internals`. | W7 |
-| D10 | `Normalization::Global`: which estimator for every frame? | The paired photometric fit, measured over the common domain, for all frames, after the Deming inlier window is fixed (`combine-review.md` §12). Siril and PixInsight ImageIntegration default to dispersion ratios; NSG uses photometry because dispersion is biased by gradients. Precision comes first in lumos. | W7 |
-| D11 | Approve two `lens` dev-dependency changes: `common` with `internals`, and tokio `test-util`? | Approve. The first replaces three temp-dir schemes with `TempDir`; the second makes the debounce tests exact with paused time. | W15 |
-| D12 | One port shape for `lens` processing nodes? | A preset picker plus an optional `Config` port for all six nodes. When `Config` is wired, the node reports the preset as overridden. | W11 |
-| D13 | Graph panes: keep the single graph pane and delete the per-pane narration, or implement split view? | Single pane. Delete the narration and the unreachable `appearing` case. | W14 |
 
 ---
 
-## 3. Workstreams
+## 4. Workstreams
 
-Each workstream lists the review groups it closes, the target design, the steps and the tests. "WR" is `workspace-review.md`, "TR" is `tests-review.md`.
+Each workstream lists the review groups it closes, the target design and the tests that prove it. Its first step is always the failing tests (rule 1).
 
 ### W1 — lumos: one sample domain, one frame validation
 
@@ -152,13 +159,14 @@ Closes: WR "A reloaded calibration master always fails the sample-domain check",
 
 Target design:
 
-- `SampleDomain` is the persisted fact. The FITS writer saves `LUMSCALE` (the scale, f64) and `LUMDEC` (decoder kind). The reader restores `TransferProvenance::FitsNormalized { physical_scale: LUMSCALE }` when the keywords exist. A master that was stacked from RAW darks reloads with its RAW scale.
-- One `FrameSet::validate(frames, dimensions, cancel)` runs in every `FrameCache` constructor, including `from_tiered_paths`. It checks geometry, sample domain, row order, CFA pattern and sample finiteness, in one order. Reused cache planes go through `validate_frame_quality` too. `CalibrationMasters::from_images` checks flat against flat-dark with the same function.
-- `CfaType` is the only sensor-pattern type. `SensorType` becomes `Option<CfaType>` plus the LibRaw fallback for `filters == 0 && colors == 3`. `DemosaicKind` and `DemosaicProvenance` become methods of `CfaType`. `CfaImage` holds a `CfaType`, not `Option`. `BitPix` goes; `ImageMetadata` stores `fits_well::SampleType` where the source had one.
+- `SampleDomain` is a persisted fact. The FITS writer saves its scale as the real keyword `LUMSCALE`; `BUNIT` already carries the unit. When the reader finds `LUMSCALE`, it uses divisor 1 (the samples are already normalized) and restores `TransferProvenance::FitsNormalized { physical_scale: LUMSCALE }`. A master that was stacked from RAW darks reloads with its RAW scale. The keyword is the f32 scale written through f64, so the round trip is exact; a test checks it with `to_bits`.
+- `CFA_FITS_VERSION` goes from 1 to 2, so a master written before this change fails to load with a version error, and `lens` rebuilds it (section 5).
+- One `FrameSet` validator checks geometry, sample domain, row order, CFA pattern and sample finiteness, in one fixed order, in every `FrameCache` constructor, `from_tiered_paths` included. It runs incrementally: each frame is checked against the reference frame as it loads, so the first mismatch stops the run before the rest decode. Reused cache planes also pass `validate_frame_quality`. `CalibrationMasters::from_images` checks flat against flat-dark with the same validator.
+- `CfaType` is the only sensor-pattern type. `SensorType` becomes `Option<CfaType>`. LibRaw's `filters == 0 && colors == 3` (linear DNG, sRAW, Foveon) goes to the LibRaw processed-image path for a `LinearImage` load, and fails a CFA load with "not a CFA frame". `DemosaicKind` and `DemosaicProvenance` become methods of `CfaType`. `CfaImage` holds a `CfaType`, not `Option`. `BitPix` goes; `ImageMetadata` stores `fits_well::SampleType` where the source had one.
 - Optional FITS keywords degrade to `None` on a type mismatch. Only `cfa_type`, row order and `QNTZSIG` can fail a load. `BAYERPAT = 'TRUE'` fails unless `FitsLoadOptions` gives a pattern override.
-- `fits-well` exposes the shape and stored `Bitpix` of any image HDU, so lumos deletes `compressed_shape` and its HDU-selection copies (W13 first).
+- `fits-well` exposes the shape and stored `Bitpix` of any image HDU, so lumos deletes `compressed_shape` and its HDU-selection copies (W12 first, same step per rule 7).
 
-Tests: a RAW-sourced master saved, reloaded and used to calibrate a RAW light; a `uint16` and a `float32` FITS of the same ADU rejected by every entry point; a table over entry points × mismatch kinds.
+Tests: a RAW-sourced master saved, reloaded and used to calibrate a RAW light; a version-1 master rejected with the version error; a `uint16` and a `float32` FITS of the same ADU rejected by every entry point, before the third frame decodes; a table over entry points × mismatch kinds.
 
 ### W2 — lumos: frame store, disk cache and memory plan
 
@@ -168,13 +176,17 @@ Closes: WR "The frame spill directory deletes a directory the run did not create
 
 Target design:
 
-- `SpillDirectory::create(root)` makes a new unique subdirectory `root/lumos-<pid>-<n>` with `create_dir` (not `_all`) and removes only that subdirectory. `keep_cache` keeps it. A user path is never removed.
-- `CacheKey { source: FileIdentity, decoder: DecoderKind, decode_version: u32 }` names every cached plane. `FrameSpill` owns every file name, including sidecars, and uses `FramePlane`'s `Display` for `coverage`/`confidence`. One `cache_frame()` path serves frame 0 and the rest, so frame 0 gets its sidecars and the source-change check.
+- **Two spill modes, one safety invariant.** Cross-run reuse needs a stable directory, so one unique directory per run is not enough.
+  - *Ephemeral* (`keep_cache = false`): `SpillDirectory` creates a new subdirectory `root/lumos-run-<pid>-<n>` with `create_dir` (not `_all`), writes a marker file into it, and removes it on drop.
+  - *Persistent* (`keep_cache = true`): lumos writes into `root/lumos-cache/`, which carries the marker and the cache format version. Lumos never removes this directory; it replaces only entries whose key it owns.
+  - Invariant: lumos removes a directory only when that directory carries the lumos marker. A user path given to `with_cache_dir` is never removed. A run killed before drop leaves an ephemeral directory; the next run removes such directories only when they carry the marker and their owning process no longer exists.
+- `CacheKey { source: FileIdentity, decoder: DecoderKind, decode_version: u32 }` names every cached plane. `DECODE_VERSION` is a constant, and a golden test pins the hash of the decoded planes of the RAW and FITS fixtures: when decode output changes, that test fails and its message says to bump `DECODE_VERSION`. The bump is enforced, not a comment.
+- `FrameSpill` owns every file name, including sidecars, and uses `FramePlane`'s `Display` for `coverage` and `confidence`. One `cache_frame()` path serves frame 0 and the rest, so frame 0 gets its sidecars and the source-change check.
 - `StoredImage` spills its null mask as a bit plane and restores it, so the spill tier warps with `MaskedWarp` like the RAM tier.
-- `FileIdentity { len, mtime_ns: i128 }` moves to `common::file_utils`. `lumos`, `scenarium` and `lens` use it. `lens` computes `frame_set_key` only when its cache is on.
-- `RunMemory { system: u64, user_override: Option<u64> }` is read once per run at the entry and passed down. `CacheConfig::available_memory` becomes `memory_override` and is never rewritten. `CacheCore` stores `chunk_memory: u64`, not a `OnceLock`. One tier rule (`MemoryPlan`) charges input frames and the resident output planes, for `load_tiered`, `frames_fit_in_memory` and the pipeline.
+- `FileIdentity { len, mtime_ns: i128 }` moves to `common::file_utils`; `lumos`, `scenarium` and `lens` use it. Its doc states the limit: a filesystem with coarse timestamps (FAT: 2 s) can miss an edit that keeps the length within one tick. `lens` computes `frame_set_key` only when its cache is on.
+- `RunMemory { system: u64, user_override: Option<u64> }` is read once per run at the entry and passed down. `CacheConfig::available_memory` becomes `memory_override` and is never rewritten. `CacheCore` stores `chunk_memory: u64`, not a `OnceLock`. One tier rule (`MemoryPlan`) charges input frames and the resident output planes, for `load_tiered`, `frames_fit_in_memory` and the pipeline. W4 changes the detection working-plane count; `MemoryPlan` reads that constant, and the memory tests derive their ceilings from it (TR "Memory-model constants are re-typed in tests").
 
-Tests: a `CacheConfig::with_cache_dir` pointed at a directory with a sentinel file, which survives the run; a RAW decoded as `LinearImage` then loaded as `CfaImage` with `keep_cache`, which must not reuse planes; a masked FITS light on the spill tier against the RAM tier, bit-exact.
+Tests: `with_cache_dir` pointed at a directory with a sentinel file, which survives the run and the drop; a persistent cache reused by a second run; a stale ephemeral directory with the marker removed, one without the marker kept; a RAW decoded as `LinearImage` then loaded as `CfaImage` with `keep_cache`, which must not reuse planes; a masked FITS light on the spill tier against the RAM tier, bit-exact.
 
 ### W3 — lumos: registration geometry
 
@@ -184,16 +196,17 @@ Closes: WR "SIP distortion is fitted in the target frame…", "Registration acce
 
 Target design:
 
-- `Transform::from_matrix` normalizes so that `m[8] = 1` and rejects a matrix with `m[8] ≈ 0`. Every constructor goes through it. The accessors (`rotation_angle`, `scale_factor`) then read a normalized matrix. The SIMD bilinear kernels keep `h·y + 1`, which is now correct by construction, and compute in f64 for the position, narrowing only the fraction.
-- SIP follows the FITS convention: the correction applies in the reference pixel frame, before the linear part. The fit target becomes `L⁻¹·(t − T(r))`.
+- `Transform::from_matrix` normalizes so that `m[8] = 1`. It rejects a matrix whose `|m[8]|` is too small relative to the other entries. The threshold is derived in that step from the f64 rounding that the division amplifies, and the derivation goes in the code (rule 9); the plan sets no number in advance. Non-homography types also require `m[6] = m[7] = 0`. Every constructor goes through it. The accessors (`rotation_angle`, `scale_factor`) then read a normalized matrix. The SIMD bilinear kernels keep `h·y + 1`, which is now correct by construction.
+- Warp positions are computed in f64 and split into an integer part and an f32 fraction. Only the fraction is narrowed.
+- SIP follows the FITS convention: the correction applies in the reference pixel frame, before the transform. SIP can follow any model, homography included, so the fit target uses the local Jacobian of the transform at each reference point: `J(r)⁻¹·(t − T(r))`. For an affine model `J` is the constant linear part. The fit is a first-order linearization; after it, the existing corrected-residual pass measures `T(r + c(r)) − t` in target pixels, and sigma clipping uses those residuals.
 - `register` applies `min_matches` to the final inlier count and returns `RegistrationError::TooFewInliers` below it.
 - RANSAC checks the adaptive bound on every iteration, not only on an improvement.
 - `recover_matches` stops when the match *set* is unchanged, not the count, and always refits on the returned set.
-- `DrizzleFrame` takes the registration's `WarpTransform` (reference → target) and maps input pixels with its inverse. Per **D6**, a SIP warp is inverted per point with Newton iteration to a stated tolerance. `quad_row_extent` uses the local Jacobian of the full transform.
-- Non-linear warps evaluate the transform once per pixel into a row buffer and share it between channels, quality maps and validity. SIP evaluation uses incremental powers. Homographies use row stepping (numerators and denominator are affine in x).
+- `DrizzleFrame` takes the registration's `WarpTransform` (reference → target) and maps input pixels with its inverse. Per **D6**, a SIP warp is inverted per point with Newton iteration: solve `r + c(r) = T⁻¹(t)` from the start value `T⁻¹(t)`, stop when the step is below a stated fraction of a pixel, and stop with a failure after a fixed iteration count. A point that does not converge contributes nothing, sets its coverage to 0, and is counted in the drizzle diagnostics; it is never used with an unconverged position. `quad_row_extent` uses the local Jacobian of the full transform.
+- Non-linear warps evaluate the transform once per pixel into a scratch row buffer and share it between channels, quality maps and validity. SIP evaluation uses incremental powers. Homographies use row stepping (numerators and denominator are affine in x).
 - Per **D3**, the thin-plate spline stays as it is.
 
-Tests: SIP fit and warp under a 10° and a 180° rotation, residual within the fit noise; a 3-star registration rejected; a homography stored with `m[8] = 2` against its normalized twin, bit-exact in SIMD and scalar; drizzle with a registration result, compared with the accumulator path bit for bit.
+Tests: SIP fit and warp under 10°, 180° and a homography, residual within the fit noise; a 3-star registration rejected; a homography stored with `m[8] = 2` against its normalized twin, bit-exact in SIMD and scalar; the Newton inverse against the forward map to the stated tolerance, and a forced non-convergence that leaves coverage 0; drizzle with a registration result, compared with the accumulator path bit for bit.
 
 ### W4 — lumos: star detection on a residual plane
 
@@ -203,15 +216,15 @@ Closes: WR "Star measurement rectifies sky noise into signal", "Deblending runs 
 
 Target design:
 
-- The detect stage computes the residual plane `pixels − background` once, in a pooled buffer. Threshold, labeling, both deblenders and measurement read the residual. No stage sees sky-included values.
-- Flux, core flux, peak and SNR use the signed residual sum. Only the moment seed and centroid weights clip at zero.
+- The detect stage computes the residual plane `pixels − background` once, in a pooled buffer. Threshold, labeling, both deblenders and measurement read the residual. No stage sees sky-included values. This adds one working plane per detector unless the matched-filter input buffer is reused for it; either way `DETECTION_WORKING_PLANES` states the new count and W2's `MemoryPlan` reads it.
+- Flux, core flux, peak and SNR use the signed residual sum. Only the moment seed and centroid weights clip at zero. The shot-noise term of the noise model uses `max(flux, 0)`, because a Poisson variance cannot be negative.
 - FWHM estimation seeds the stamp from `fwhm.expected` and repeats the measurement once at the radius the first estimate implies.
-- The Gaussian fit gets a rotation parameter (`[x0, y0, amp, σ_major, σ_minor, θ, bg]`, the astropy `Gaussian2D` form). One FWHM definition lives in `math::fwhm`, used by the moments path and both fits.
+- The Gaussian fit models an elliptical, rotated profile through its inverse covariance: `amp · exp(−½(a·dx² + 2b·dx·dy + c·dy²)) + bg`, with `a·c − b² > 0`. This form has no angle wrap and no degenerate angle for a round star, which a `(σx, σy, θ)` form has. Principal widths and eccentricity derive from `(a, b, c)` after the fit. One FWHM definition lives in `math::fwhm`: the geometric mean of the principal widths (the circle of equal area), used by the moments path and both fits.
 - Config: `Deblend::{LocalMaxima { min_prominence }, MultiThreshold { n_thresholds, min_contrast }}`; `FwhmMode::{Fixed(f32), Auto { fallback: f32 }}`; `BackgroundRefinement::Iterative { mask_dilation }`; `Option` instead of `0` sentinels. `validate` names match the field names.
 - Peak lists keep the brightest `MAX_PEAKS`, not the first in raster order. All per-frame buffers come from `JobScratchPool`.
 - `SATURATION_PEAK` derives from `ImageMetadata::data_max`.
 
-Tests: an empty-sky stamp with SNR ≈ 0 at r = 7, 13, 15; a star on a 0.1 sky against the same star on a 0 sky, same peaks and same split; FWHM 5…10 recovered within the fit noise; a 45° elongated star with eccentricity above the cut under `GaussianFit`.
+Tests: an empty-sky stamp with SNR ≈ 0 at r = 7, 13, 15; a star on a 0.1 sky against the same star on a 0 sky, same peaks and same split; FWHM 5…10 recovered within the fit noise; a 45° elongated star with eccentricity above the cut under `GaussianFit`; a round star whose fit converges with the same iteration count as an elongated one.
 
 ### W5 — lumos: image-op numerics
 
@@ -219,8 +232,8 @@ Closes: WR "The default gradient removal puts both auto stretches on their degen
 
 Target design:
 
-- `BackgroundMode::Subtract` writes `p − m + mean(m)`, as Siril does (`remove_gradient` in `src/algos/background_extraction.c`). `Divide` already keeps the level.
-- `solve_asinh_beta` and `StfCurve::new` return an error when the target is out of reach instead of the range limit.
+- `BackgroundMode::Subtract` writes `p − m + mean(m)`, which keeps the sky level, as Siril does (`remove_gradient` in `src/algos/background_extraction.c`). Siril adds one mean over all channels, which also neutralizes the sky colour. Lumos adds each channel's own model mean, like its `Divide` mode, because colour neutralization is a separate op (`NeutralizeBackground`).
+- `solve_asinh_beta` and `StfCurve::new` return an error when the target is out of reach, instead of the range limit.
 - RAW normalization stores the span and divides, as the FITS path does. `BlackLevel::span` returns the stored span.
 - `hdr_map` uses `math::sum::sum_f32`. GHS uses the `expm1`/`ln_1p` forms. Local contrast interpolates between LUT bins.
 - One derived constant for each of `FWHM_TO_SIGMA` (named for what it is), `MAD_TO_SIGMA`, Lanczos, Rec. 709 luma, with an f32 cast from the f64 value.
@@ -237,7 +250,7 @@ Target design:
 - `calibrate` returns `CalibrationError::AlreadyCalibrated`. Flat normalization returns `CalibrationError::NonPositiveFlat`. `duplicate_min_separation = 0` means no deduplication.
 - `CosmicRayConfig::validate` and a `TiledOnnxConfig` validation join `AlignStackConfig::validate`. `stride` must be in `1..=WINDOW`.
 - Manual weights are indexed by input frame and selected for the survivors. `AlignStackConfig::validate` checks the count before decode.
-- Lights are checked for non-finite samples at entry. Dimensions are checked at decode time. The detector pool uses `MemoryPlan`.
+- Lights are checked for non-finite samples at entry. Dimensions are checked at decode time. The detector pool uses `MemoryPlan`. Per **D9**, `align_and_stack`, `stack` and `stack_images` get the same checks.
 - The `cfa_type == None` policy for cosmic rays is one place: skip with a warning.
 
 ### W7 — lumos: combine and normalization ownership
@@ -246,13 +259,15 @@ Closes: WR "Normalization and combine: measured statistics thrown away…", "lum
 
 Target design:
 
-- Per **D10**, the paired photometric fit over the common domain is the only estimator. First fix the Deming inlier window (`combine-review.md` §12) so the stars with a photometric lever arm stay in the fit. Partial coverage then changes only where statistics are measured.
+- Per **D10**, the paired photometric fit over the common domain is the only estimator for `Normalization::Global`. First fix the Deming inlier window (`combine-review.md` §12) so the stars with a photometric lever arm stay in the fit. Partial coverage then changes only where statistics are measured. The paired fit runs chunked over the stored planes, so the spill tier reads each plane once for it. Darks and bias keep `Normalization::None` and flats keep `Multiplicative`, so the paired fit never runs on a frame without stars.
 - Per **D8**, `MasterRole` owns the role → preset table. `CalibrationMasters::from_files` and `RoleStack` go.
 - Per **D9**, `DefectMap` stays public: `dimensions` stops being an `Option`, and `correct` keeps its mask instead of rebuilding it per light.
 - `FrameCache` owns `frame_norms`. `process_chunked` reads them from `self`. `run_stacking` takes the normalization from the config only.
 - Normalization measures medians only (no unread MAD).
 - Pipeline `Error` gets `Cancelled`, one `NoFrames`, `From<FrameStoreError>`. Calibration errors leave the combine `Error`.
 - Code-contract checks on frames the pipeline produced become `debug_assert!`.
+
+Tests: a set of registered frames with a known gain and offset per frame, recovered by the paired fit; the same set with one `BLANK` pixel in one frame, which must give the same gains within the fit noise.
 
 ### W8 — common: typed ids and introspection
 
@@ -261,7 +276,7 @@ Closes: WR "Typed ids are parsed from strings at run time…", "File-source iden
 Target design:
 
 - `id_type!` gets `pub const fn literal(s: &str) -> Self`, built on `uuid::Uuid::try_parse`, which is `const fn` in uuid 1.26. A bad literal in a `const` item fails at compile time. `From<&str>` and `From<String>` go. All 57 string-literal ids in production become `const` items. `nil`, `is_nil`, `as_u128`, `as_uuid` become `const fn`.
-- The two hand-typed ids in `lens/src/image/nodes/processing.rs` get new `uuidgen` values. This changes saved graphs that use those two nodes; the workspace rules allow it.
+- The two hand-typed ids in `lens/src/image/nodes/processing.rs` stay. `AGENTS.md` says that a shipped id is the identity saved graphs bind to and never changes, and that rule is more specific than "no backward compatibility". The risk the finding names is a collision. `Library::add` already asserts that func ids are unique, and a new test asserts that every func and type id across the `lens` and `scenarium` libraries is unique. The WR item is closed as "kept: shipped ids never change".
 - `#[derive(Introspect)]` takes `#[config(type_id = "…")]` like `IntrospectEnum`. `lens`'s `NodeConfig` trait goes. Introspection metadata is `&'static str` and `&'static [..]`.
 - `serde.rs`: one `serialize_into(&T, ..)` signature, a real scratch for Bitcode, `SerdeFormat::Lz4` and `deserialize_from` removed.
 
@@ -271,16 +286,20 @@ Closes: WR "A disabled producer's stale digest keys its consumer's cache", "scen
 
 Target design:
 
-- The `Bind` arm of `node_digest` folds `InputTag::Unbound` for a producer that is not runnable, with the predicate `collect_inputs` uses.
-- `WorkerReport::{Activity(WorkerActivity), Progress { node_id, phase }, Completed(RunSummary)}`. `RunPhase::Finished` carries the outcome, so a failed node is never painted executed. Progress events reuse a buffer; no `Arc` per event.
+- The `Bind` arm of `node_digest` folds `InputTag::Unbound` for a producer that is not runnable, with the predicate `collect_inputs` uses. The digest changes, so `FORMAT_VERSION` goes from 9 to 10 and old blobs miss (section 5).
+- `WorkerReport::{Activity(WorkerActivity), Progress { node_id, phase }, Completed(RunSummary)}`. `Progress` is sent by value: it holds no heap data, so there is no `Arc` and no buffer per event. `RunPhase::Finished` carries the outcome, so a failed node is never painted executed.
 - Per **D4**, `ContextType`, `ContextStore` and the `&mut ContextStore` parameters go.
-- Per **D5**, wildcard outputs stay. `OutputTypes::update` reads the const kind without a `ConstValue` clone and reuses its tables.
+- Per **D5**, wildcard outputs stay. `OutputTypes::update` reads the const kind without a `ConstValue` clone and reuses its tables. A full recompute on a graph edit costs what today's per-frame update costs, so the worst-case frame does not get worse.
+- **Port-signature guard.** Bindings are stored by port index, and today a binding to a port the func no longer declares silently becomes unbound, while a reordered port binds the wrong input. Each func gets a signature digest over its input and output names and types. The document stores the digest per func it uses, and loading a document whose digest differs from the library fails with an error that names the node and the func. This lands before W10 changes any node's ports (**D12**), and it protects every later port change.
+- **Declared overrides (D12).** `FuncInput` can name the input it overrides (`overrides: Option<usize>`). The compiler resolves the override. Darkroom marks the overridden input from the declaration, without running the graph.
 - `FuncLambda` and `EventLambda` are required constructor arguments. `NodeState::MissingLambda` and `RunError::MissingLambda` go.
-- `DiskStore` holds the root only. Codecs move into `CompiledGraph`. Codec coverage is checked before any I/O, and the verdict is stored.
+- `DiskStore` holds the root only. Codecs move into `CompiledGraph` as a shared handle from the library. Codec coverage is checked before any I/O, and the verdict is stored.
 - `CompileError`, `RunError::Invoke` and `InvokeError::External` keep typed sources. `StampError::Io` carries the path.
 - `Graph::find` and `Library::by_id` return `None` for a nil id. `DetachedNode` gets a fallible constructor that owns the rules `attach_node` checks. `Library::types` becomes private with an idempotent `register_type`.
 - `ExecutionEngine::compiled` is a `CompiledGraph` (default empty), not an `Option`.
 - `Invocation` gets a typed accessor for required inputs, so `lens` drops 37 `.expect` calls.
+
+Tests: the golden digest of one small node and the golden bytes of one blob (W14), updated in this step with the version bump; a document saved against one func signature and loaded against a changed one, which fails with the named error.
 
 ### W10 — lens: adapters
 
@@ -288,10 +307,10 @@ Closes: WR "lens re-states lumos's presets and defaults", "lens node lambdas rep
 
 Target design:
 
-- Per **D12**, all six processing nodes take a preset picker and an optional `Config` port. A wired `Config` overrides the preset, and the node reports that.
+- Per **D12**, all six processing nodes take a preset picker and an optional `Config` port that overrides it through W9's declared override. Their signature digests change, so a document saved with the old ports fails to load with W9's error, never with a wrong binding.
 - `lens` uses the `lumos` enums directly (`StretchMethod`, `ScnrMethod`, `BackgroundMode`, `CombineMethod`). The four mirror enums, `preset_enum!` and the copied defaults go. Preset becomes a trait with an associated knob type and default methods.
 - `register_blend` compares descriptors and returns `InvokeError`. `register_transform` rejects a zero scale.
-- Stacking outputs leave planar (`Image::from(LinearImage)`). `AlignStackConfig.stack.quality` follows `demand`. The codec stores the layout it was given. `Image::take_or_copy` replaces the three copies of that match.
+- Stacking outputs leave planar (`Image::from(LinearImage)`). `AlignStackConfig.stack.quality` follows `demand`. The codec stores the layout it was given; its format byte changes, so the image codec version goes up (section 5). `Image::take_or_copy` replaces the three copies of that match.
 - The Build Masters "Sigma" description names the defect threshold. "Reference" becomes an optional input.
 
 ### W11 — imaginarium: one format type, one rounding rule
@@ -300,8 +319,8 @@ Closes: WR "Image conversion and SIMD kernels return wrong or CPU-dependent pixe
 
 Target design:
 
-- `ColorFormat` is a 9-variant enum with `channel_count()`, `channel_size()`, `channel_type()`. `validate()`, `ALL_FORMATS.contains` and the tuple `From` go. The dispatch tables match exhaustively, with no fallback arm.
-- One `Sample` trait states full scale, widening and narrowing. Every narrowing rounds half to even, on CPU, SIMD and WGSL (WGSL `round` is half-to-even). u16 → u8 is `round(v·255/65535)`. Every SIMD tail calls the scalar reference. Float → int multiplies in f64, or in an f32 form proven equal by an exhaustive sweep.
+- `ColorFormat` is a 9-variant enum with `channel_count()`, `channel_size()`, `channel_type()`. `validate()`, `ALL_FORMATS.contains` and the tuple `From` go. The dispatch tables match exhaustively, with no fallback arm. The callers in `lens`, `lumos` and `darkroom` change in the same step (rule 7).
+- One `Sample` trait states full scale, widening and narrowing. Every narrowing rounds half to even, on CPU, SIMD and WGSL (WGSL `round` is half-to-even). u16 → u8 is `round(v·255/65535)`. Every SIMD tail calls the scalar reference, so phase 2's tail fix and this rule do not conflict. Float → int multiplies in f64, or in an f32 form that an exhaustive sweep over the input range proves equal.
 - `convert_to` copies when the formats are equal. `convert_image` asserts different formats.
 - GPU (kept in `imaginarium`, dropped from the workspace per **D4**): 2-D dispatch, limits clamped to `adapter.limits()`, every GPU test compared with `apply_cpu`.
 - `Buffer2` index: `debug_assert!` on `x < width`, slice bound for the rest. Owned-data constructors reuse the allocation.
@@ -318,9 +337,11 @@ Target design:
 - One `unit.rs` resolver ("[multiplier][SI prefix]base") for angle, spectral and time units. An unknown unit is an error. `WcsAxis` stores `crval` and `cunit` in the same unit.
 - Compressed tables: the read path applies `TDIMn`/`TSCALn`/`TZEROn`/`TNULLn` to the uncompressed column only. Every VLA is compressed with its `ZCTYPn`. The read path honours the declared codec.
 - `Card` is an enum with a payload per kind. Column data is one buffer plus row ranges.
-- The `Header` forwarders go; `Wcs::from_header` and `FitsTime::from_header` are the one path. The writer has five operations, each with `header: Option<&Header>`.
+- The `Header` forwarders go; `Wcs::from_header` and `FitsTime::from_header` are the one path. The writer has five operations, each with `header: Option<&Header>`. The `lumos` callers change in the same step (rule 7).
 - The ASCII float parser builds `"{mantissa}e{exp}"` and parses once (strtod parity).
 - The examples take their file from an argument.
+
+Reference values: the WCS tests use values derived by hand from Calabretta & Greisen (2002), as the current golden headers do. An astropy cross-check would be a stronger oracle, but astropy is not installed on this host; installing it needs your approval.
 
 ### W13 — darkroom: layering and editing
 
@@ -328,14 +349,14 @@ Closes: WR "Raising a node is never a no-op…", "Esc commits the text a user tr
 
 Target design:
 
-- Undo has gesture sessions. A pointer press opens a gesture with a new `GestureId`. The open entry stays decoded on `ActionStack`. Release, Esc or any other step seals it: a no-op entry is dropped, otherwise it is encoded once. Coalescing zips the latched member lists.
+- Undo has gesture sessions. A pointer press opens a gesture with a new `GestureId`. The open entry stays decoded on `ActionStack`. Release, Esc or any other step seals it: a no-op entry is dropped, otherwise it is encoded once. Coalescing zips the latched member lists. Encoding moves from every drag frame to the release frame, so the worst-case frame gets cheaper.
 - `front_z` excludes the raised item, and a raise of the frontmost item emits no step.
 - One `DraftEdit` widget helper returns `Commit(text)`, `Cancel` or `Editing`. The value editor, the preferences path field and the inline rename use it. `EditBuffer::blur_edge` becomes `blurred = latch && !focused; latch = focused`.
 - Esc deselects only when no gesture was in flight. Group drag and preview drag honour cancel.
-- `core::edit` owns `DocumentRequest` and the layout-impact flag. `gui::Requests` wraps the document queue and the app queue. `core` never imports `gui`.
-- `Document::validate` checks that `Graph` is present and pinned and that the seed is `DOCK_SEED`. `Preferences::load` reports a parse error and does not overwrite the file.
-- Per-frame costs: the palette keeps its row buffer and re-filters on a query change; the breaker keeps a scribble bounding box; `GraphCtx` recomputes `OutputTypes` only when the graph changes (**D5**).
-- Per **D7**, the `core` module doc names the palantir data types it may use. Per **D13**, the per-pane narration and the unreachable branch in `GraphUI::appearing` go.
+- `core::edit` owns `DocumentRequest` and the layout-impact flag. `gui::Requests` wraps the document queue and the app queue. `core` never imports `gui`. Per **D7**, the `core` module doc names the palantir data types it may use.
+- `Document::validate` checks that `Graph` is present and pinned and that the seed is `DOCK_SEED`, and it runs W9's signature guard. `Preferences::load` reports a parse error and does not overwrite the file.
+- Per-frame costs: the palette keeps its row buffer and re-filters on a query change; the breaker keeps a scribble bounding box; `GraphCtx` recomputes `OutputTypes` only when the graph changes (**D5**). Darkroom marks an overridden input from W9's declaration (**D12**).
+- Per **D13**, the per-pane narration and the unreachable branch in `GraphUI::appearing` go.
 - `fmt_elapsed` and `fmt_bytes` choose the unit after rounding.
 
 ### W14 — test infrastructure
@@ -352,7 +373,7 @@ Target design:
 - **SIMD:** `assert_simd_matches_scalar` gets a tier argument and runs every tier the host supports, with `DATA_SHAPES × SWEEP_WIDTHS` including exact `.5` ties and out-of-range lanes. A missing feature is reported, not a silent pass. imaginarium conversion gets the `kernel_tiers()` sweep.
 - **GPU:** `test_gpu()` failure prints a skip line and counts; GPU tests compare with `apply_cpu`.
 - **Harness split:** `lumos/src/testing/mod.rs` splits per type (`TestRng`, CFA builders, real-data paths). `TestRng::next_f32` uses 24 bits.
-- **Golden bytes:** one node digest and one blob layout in scenarium.
+- **Golden bytes:** one node digest and one blob layout in scenarium; the lumos decode hashes for W2's `DECODE_VERSION` guard; the characterization snapshots of rule 2.
 
 The individual test items in TR (cannot-fail tests, loose tolerances, duplicates, missing tests) are done inside the workstream that owns the code under test, because they verify that workstream's changes.
 
@@ -362,24 +383,41 @@ Closes: WR "Docs that describe code that no longer exists", TR "Stale, wrong and
 
 ---
 
-## 4. Order
+## 5. Persisted formats
 
-| Phase | Content | Depends on |
-|---|---|---|
-| 0 | 1.1 dev profile, 1.2 lints | — |
-| 1 | W14 core (bench feature, real-data gate, `TempDir`, seeding, SIMD tier harness) | — |
-| 2 | Local High fixes that need no redesign, each with its test: spill directory (W2 first step), raise no-op, `DraftEdit`, RCD step 4.0 start, signed flux, background pedestal, dedup 0, `draw_circle` clamp, `convert_to` copy, SIMD tails, the six `ISSUES.md` bugs | — |
-| 3 | W8 (ids) — touches every crate, so it goes before the crate rewrites | — |
-| 4 | W12 (fits-well), W11 (imaginarium) — independent submodules, can run beside phase 5 | — |
-| 5 | W1 → W2 → W3 → W4 → W5 → W6 → W7 (lumos, in this order: domain before cache, cache before registration, geometry before detection) | — |
-| 6 | W9 (scenarium) → W10 (lens) → W13 (darkroom) | — |
-| 7 | W15 final pass; check every review file is empty | — |
+Every persisted format the plan changes, and what an old file does after the change. "Fails loudly" means an error that names the file and the reason.
 
-Verification after each step: the chain for the touched crates (`cargo fmt -p <crate> && cargo clippy -p <crate> --all-targets --all-features -- -D warnings && cargo test -p <crate> --tests --all-features`, with `--features ml,internals` for `lumos` tests). Submodules run their own chain from their own directory. A change to a public type that other crates use runs `--workspace`.
+| Format | Changed by | Version | Old file after the change |
+|---|---|---|---|
+| Lumos CFA master FITS (`LUMOSFMT`/`LUMOSVER`) | W1 (`LUMSCALE`) | `CFA_FITS_VERSION` 1 → 2 | Fails loudly; `lens` rebuilds the master from its frames. |
+| Lumos frame cache (sidecars, planes) | W2 (`CacheKey`, frame 0 sidecars, null plane) | `SIDECAR_FORMAT` 1 → 2, plus `DECODE_VERSION` in the key | Cache miss; the frame decodes again. Persistent cache entries of the old format are replaced. |
+| Lens master cache marker | W1, W2 (`FileIdentity`) | marker carries the master format version | Cache miss; rebuild. |
+| Scenarium disk blobs | W9 (digest of disabled producers) | `FORMAT_VERSION` 9 → 10 | Cache miss; recompute. |
+| Lens image codec payload | W10 (layout byte) | codec version up | Cache miss; recompute. |
+| Darkroom document (graph bindings) | W9 (signature digest), W10 (D12 ports) | document carries per-func signature digests | A document with changed ports fails loudly naming the node; one with unchanged funcs loads. |
+| Darkroom preferences | W13 (load error is reported) | none | A parse error is reported and the file is kept, not overwritten. |
+| Undo history | W13 | not persisted | — |
 
 ---
 
-## 5. Coverage
+## 6. Order
+
+| Phase | Content |
+|---|---|
+| 0 | 2.1 dev profile; 2.2 lint config and the per-crate migration for the mechanical lints |
+| 1 | W14 core: bench feature, real-data gate, `TempDir`, seeding, SIMD tier harness, golden-bytes tests, characterization snapshots (rule 2) |
+| 2 | Local High fixes that need no redesign, each test-first: spill directory (W2's two modes and marker), raise no-op, `DraftEdit`, RCD step 4.0 start, signed flux, background pedestal, dedup 0, `draw_circle` clamp, `convert_to` copy, SIMD tails, the six `ISSUES.md` bugs |
+| 3 | W8 (ids) — touches every crate, so it goes before the crate rewrites |
+| 4 | W12 (fits-well) and W11 (imaginarium), each with its workspace callers in the same step; they can run beside phase 5 |
+| 5 | W1 → W2 → W3 → W4 → W5 → W6 → W7 (lumos: domain before cache, cache before registration, geometry before detection) |
+| 6 | W9 (signature guard and declared overrides first) → W10 → W13 |
+| 7 | W15 final pass; the remaining lint crate attributes move to `[workspace.lints]`; every review file is empty |
+
+Verification after each step: the chain for the touched crates (`cargo fmt -p <crate> && cargo clippy -p <crate> --all-targets --all-features -- -D warnings && cargo test -p <crate> --tests --all-features`, with `--features ml,internals` for `lumos` tests). Submodules run their own chain from their own directory. A change to a public type that other crates use runs `--workspace`. SIMD changes add rule 8.
+
+---
+
+## 7. Coverage
 
 Every WR group maps to a workstream:
 
@@ -455,6 +493,6 @@ Every WR group maps to a workstream:
 | lumos io and support leftovers | W1 |
 | common, quickbench: small API and data-shape issues | W8, W14 |
 | Docs that describe code that no longer exists | W15 |
-| Style rules not applied | 1.2 and the owning workstream |
+| Style rules not applied | 2.2 and the owning workstream |
 
 TR sections map to W14 (harness, determinism, SIMD/GPU, placement, fixtures, test-only code) and to the owning workstream (cannot-fail tests, loose tolerances, missing tests, second sources of truth, duplicates). The six `ISSUES.md` bugs are in phase 2. The feature list in `.notes/todo.txt` is not part of this plan.
