@@ -1,7 +1,7 @@
 //! Load/decode round-trip tests on synthetic frames.
 //!
 //! `fits-well` ships a `FitsWriter`, so a synthetic FITS can be written and read back through the
-//! real `load_linear_fits` path — exercising `BitPix` selection, the unsigned-via-BZERO convention,
+//! real `load_linear_fits` path — exercising sample-type selection, the unsigned-via-BZERO convention,
 //! the division of integer samples into the `[0, 1]` domain (and the float path's exemption from
 //! it), and both halves of the null convention. The demosaic path is exercised by building mosaics
 //! from known colours and demosaicing them back.
@@ -334,6 +334,121 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
         })
     ));
     assert!(stack_paths(&[&normalized_path, &normalized_path]).is_ok());
+}
+
+/// A set whose second frame disagrees with the first — on sample domain, row order or CFA
+/// pattern — is refused by both load tiers before the third frame decodes: the third path names
+/// no file, so reaching it would report a load error instead. One worker thread keeps the order
+/// fixed.
+#[test]
+fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
+    use crate::stacking::combine::cache::FrameCache;
+    use crate::stacking::combine::cache_config::CacheConfig;
+    use crate::stacking::combine::config::Normalization;
+    use crate::stacking::combine::error::Error;
+    use crate::stacking::progress::ProgressCallback;
+
+    let dir = TempDir::new("lumos-frame-set");
+    let image = Image::new(vec![4, 1], vec![0.0f32, 0.25, 0.5, 1.0]).unwrap();
+    let linear = |name: &str, keywords: &[(&str, &str)], datamax: f64| {
+        let mut header = Header::new();
+        header.set("DATAMAX", datamax).unwrap();
+        for (keyword, value) in keywords {
+            header.set(keyword, *value).unwrap();
+        }
+        write_with_header(&dir, name, &image, &header)
+    };
+    let mosaic = |name: &str, pattern: CfaPattern| {
+        let path = dir.join(format!("{name}.fits"));
+        make_cfa(Size2us::new(4, 2), vec![0.5; 8], CfaType::Bayer(pattern))
+            .save_fits(&path)
+            .unwrap();
+        path
+    };
+    let reference = linear("reference", &[], 1.0);
+    let other_span = linear("other_span", &[], 65_535.0);
+    let mirrored = linear("mirrored", &[("ROWORDER", "BOTTOM-UP")], 1.0);
+    let rggb = mosaic("rggb", CfaPattern::Rggb);
+    let bggr = mosaic("bggr", CfaPattern::Bggr);
+    let never_decoded = dir.join("never_decoded.fits");
+
+    let single_thread = rayon::ThreadPoolBuilder::new()
+        .num_threads(1)
+        .build()
+        .unwrap();
+    for available_memory in [1 << 30, 1] {
+        let config = CacheConfig {
+            cache_dir: dir.join("cache"),
+            keep_cache: false,
+            available_memory: Some(available_memory),
+        };
+        let linear_set = |second: &Path| {
+            single_thread.install(|| {
+                FrameCache::from_paths(
+                    &[reference.as_path(), second, never_decoded.as_path()],
+                    &config,
+                    Normalization::None,
+                    ProgressCallback::default(),
+                    CancelToken::never(),
+                )
+            })
+        };
+        let tier = if available_memory == 1 {
+            "disk"
+        } else {
+            "memory"
+        };
+        assert!(
+            matches!(
+                linear_set(&other_span),
+                Err(Error::SampleDomainMismatch {
+                    index: 1,
+                    reference_index: 0,
+                    ..
+                })
+            ),
+            "{tier}"
+        );
+        assert!(
+            matches!(
+                linear_set(&mirrored),
+                Err(Error::RowOrderMismatch {
+                    index: 1,
+                    reference_index: 0,
+                    ..
+                })
+            ),
+            "{tier}"
+        );
+        let cfa_set = single_thread.install(|| {
+            FrameCache::from_cfa_paths(
+                &[rggb.as_path(), bggr.as_path(), never_decoded.as_path()],
+                &config,
+                Normalization::None,
+                ProgressCallback::default(),
+                CancelToken::never(),
+            )
+        });
+        assert!(
+            matches!(
+                cfa_set,
+                Err(Error::CfaPatternMismatch {
+                    index: 1,
+                    reference_index: 0,
+                    actual: Some(CfaType::Bayer(CfaPattern::Bggr)),
+                    expected: Some(CfaType::Bayer(CfaPattern::Rggb)),
+                })
+            ),
+            "{tier}"
+        );
+        // The same set with a matching second frame does reach the third, which fails: the disk
+        // tier reads the file's identity before decoding it, the memory tier decodes it.
+        let reached = linear_set(&reference);
+        assert!(
+            matches!(reached, Err(Error::ImageLoad(_) | Error::FrameStore(_))),
+            "{tier}: {reached:?}"
+        );
+    }
 }
 
 #[test]

@@ -25,12 +25,12 @@ pub enum CalibrationError {
     #[error("the subtracted flat has no positive mean{}", channel.map_or(String::new(), |c| format!(" in colour channel {c}")))]
     NonPositiveFlat { channel: Option<usize> },
     /// A calibration master was captured with a different sensor pattern.
-    #[error(
-        "{component} master CFA pattern {master:?} does not match light frame pattern {light:?}"
-    )]
+    /// A calibration master was captured with a different sensor pattern than the rest of the
+    /// bundle, when the set is assembled, or than the light, when one is calibrated.
+    #[error("{component} master CFA pattern {master:?} does not match {expected:?}")]
     CfaPatternMismatch {
         component: MasterRole,
-        light: CfaType,
+        expected: CfaType,
         master: CfaType,
     },
     /// A calibration master's samples cannot be expressed in the domain of the frame it calibrates.

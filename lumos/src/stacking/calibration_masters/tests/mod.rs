@@ -110,6 +110,33 @@ fn a_flat_with_no_positive_mean_is_refused() {
     }
 }
 
+/// A bundle whose masters span two sensor patterns is refused when it is assembled: the flat-dark
+/// is subtracted from the flat pixel for pixel before any light is there to compare with.
+#[test]
+fn a_bundle_spanning_two_patterns_is_refused() {
+    let images = CalibrationSet {
+        flat: Some(constant_cfa(
+            Size2us::new(2, 2),
+            0.5,
+            CfaType::Bayer(CfaPattern::Rggb),
+        )),
+        flat_dark: Some(constant_cfa(
+            Size2us::new(2, 2),
+            0.1,
+            CfaType::Bayer(CfaPattern::Bggr),
+        )),
+        ..CalibrationSet::default()
+    };
+    assert!(matches!(
+        CalibrationMasters::from_images(images, DEFAULT_SIGMA_THRESHOLD, CancelToken::never()),
+        Err(Error::Calibration(CalibrationError::CfaPatternMismatch {
+            component: MasterRole::FlatDark,
+            expected: CfaType::Bayer(CfaPattern::Rggb),
+            master: CfaType::Bayer(CfaPattern::Bggr),
+        }))
+    ));
+}
+
 fn masters_with_component(role: MasterRole, cfa_type: CfaType) -> CalibrationMasters {
     masters_with_sized_component(role, cfa_type, Size2us::new(2, 2))
 }
@@ -146,7 +173,7 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
             master: CfaType::Bayer(CfaPattern::Rggb),
             expected: CalibrationError::CfaPatternMismatch {
                 component: MasterRole::Dark,
-                light: CfaType::Mono,
+                expected: CfaType::Mono,
                 master: CfaType::Bayer(CfaPattern::Rggb),
             },
         },
@@ -156,7 +183,7 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
             master: CfaType::Bayer(CfaPattern::Bggr),
             expected: CalibrationError::CfaPatternMismatch {
                 component: MasterRole::Flat,
-                light: CfaType::Bayer(CfaPattern::Rggb),
+                expected: CfaType::Bayer(CfaPattern::Rggb),
                 master: CfaType::Bayer(CfaPattern::Bggr),
             },
         },
@@ -166,7 +193,7 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
             master: xtrans_a,
             expected: CalibrationError::CfaPatternMismatch {
                 component: MasterRole::Bias,
-                light: CfaType::Bayer(CfaPattern::Rggb),
+                expected: CfaType::Bayer(CfaPattern::Rggb),
                 master: xtrans_a,
             },
         },
@@ -176,7 +203,7 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
             master: xtrans_b,
             expected: CalibrationError::CfaPatternMismatch {
                 component: MasterRole::FlatDark,
-                light: xtrans_a,
+                expected: xtrans_a,
                 master: xtrans_b,
             },
         },

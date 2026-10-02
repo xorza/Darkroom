@@ -4,7 +4,7 @@ use crate::math::statistics;
 use crate::memory::ChunkMemoryLayout;
 use crate::stacking::combine::cache::*;
 use crate::stacking::combine::rejection::Rejection;
-use crate::stacking::frame_store::frame_quality::FramePlane;
+use crate::stacking::frame_store::frame_quality::{FramePlane, FrameQuality};
 use crate::stacking::frame_store::frame_stats::FrameStats;
 use crate::testing::cfa::make_cfa;
 use crate::testing::prelude::*;

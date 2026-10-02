@@ -123,15 +123,17 @@ pub(crate) fn compute_frame_norms(
 fn domain_factors(frames: &[StoredFrame]) -> Vec<f32> {
     let reference = frames
         .iter()
-        .find_map(|frame| frame.source_stats.domain.as_ref());
+        .find_map(|frame| frame.source_stats.facts.domain.as_ref());
     frames
         .iter()
-        .map(|frame| match (&frame.source_stats.domain, reference) {
-            (Some(domain), Some(reference)) => domain
-                .conversion_to(reference)
-                .expect("the frame set's sample domains were validated as convertible"),
-            _ => 1.0,
-        })
+        .map(
+            |frame| match (&frame.source_stats.facts.domain, reference) {
+                (Some(domain), Some(reference)) => domain
+                    .conversion_to(reference)
+                    .expect("the frame set's sample domains were validated as convertible"),
+                _ => 1.0,
+            },
+        )
         .collect()
 }
 
@@ -321,9 +323,7 @@ fn measure_common_stats(
         .map(|(frame, channels)| FrameStats {
             channels: channels.iter().copied().collect(),
             quantization_sigma: frame.source_stats.quantization_sigma,
-            domain: frame.source_stats.domain.clone(),
-            row_order: frame.source_stats.row_order,
-            cfa_type: frame.source_stats.cfa_type,
+            facts: frame.source_stats.facts.clone(),
         })
         .collect())
 }

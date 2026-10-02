@@ -1,4 +1,5 @@
 use crate::stacking::combine::normalization::*;
+use crate::stacking::frame_store::frame_facts::FrameFacts;
 use crate::stacking::frame_store::frame_quality::FrameQuality;
 use crate::testing::prelude::*;
 
@@ -10,9 +11,11 @@ fn frame_stats(median: f32, mad: f32) -> FrameStats {
     FrameStats {
         channels: [channel_stats(median, mad)].into_iter().collect(),
         quantization_sigma: None,
-        domain: None,
-        row_order: None,
-        cfa_type: None,
+        facts: FrameFacts {
+            domain: None,
+            row_order: None,
+            cfa_type: None,
+        },
     }
 }
 
@@ -35,9 +38,11 @@ fn reference_selection_uses_lowest_average_channel_noise() {
             .into_iter()
             .collect(),
             quantization_sigma: None,
-            domain: None,
-            row_order: None,
-            cfa_type: None,
+            facts: FrameFacts {
+                domain: None,
+                row_order: None,
+                cfa_type: None,
+            },
         },
         FrameStats {
             channels: [
@@ -48,9 +53,11 @@ fn reference_selection_uses_lowest_average_channel_noise() {
             .into_iter()
             .collect(),
             quantization_sigma: None,
-            domain: None,
-            row_order: None,
-            cfa_type: None,
+            facts: FrameFacts {
+                domain: None,
+                row_order: None,
+                cfa_type: None,
+            },
         },
     ];
     assert_eq!(select_reference_frame(rgb.iter()), 1);
@@ -157,9 +164,11 @@ fn global_norms_are_fitted_against_the_selected_reference() {
                 FrameStats {
                     channels: [channel_stats(0.0, mad); 3].into_iter().collect(),
                     quantization_sigma: None,
-                    domain: None,
-                    row_order: None,
-                    cfa_type: None,
+                    facts: FrameFacts {
+                        domain: None,
+                        row_order: None,
+                        cfa_type: None,
+                    },
                 },
             )
         })
@@ -229,9 +238,11 @@ fn registered_rgb_measurements_preserve_pair_order_and_honor_cancellation() {
                 FrameStats {
                     channels: [channel_stats(0.0, 1.0); 3].into_iter().collect(),
                     quantization_sigma: Some((frame_index + 1) as f32),
-                    domain: None,
-                    row_order: None,
-                    cfa_type: None,
+                    facts: FrameFacts {
+                        domain: None,
+                        row_order: None,
+                        cfa_type: None,
+                    },
                 },
             )
         })

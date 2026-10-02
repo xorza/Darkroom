@@ -22,6 +22,8 @@ fn load_test_frame(
         source_path,
         dimensions,
         frame_index,
+        // No reference: these tests are about one frame's cache files, not the set it belongs to.
+        &SetFacts::default(),
         &LoadContext::new(CancelToken::never(), u64::MAX),
     )
 }
@@ -175,6 +177,42 @@ fn load_and_cache_frame_reuse() {
             value: f32::INFINITY,
         }
     ));
+
+    // Reused quality planes are held to the pairing the combine divides by: coverage where
+    // confidence is zero is refused, naming the pixel.
+    let spill = FrameSpill::new(temp_dir.path(), base_filename);
+    let mut cache_file = OpenOptions::new()
+        .write(true)
+        .open(spill.channel_path(0))
+        .unwrap();
+    cache_file
+        .seek(SeekFrom::Start((2 * size_of::<f32>()) as u64))
+        .unwrap();
+    cache_file.write_all(&202.0f32.to_le_bytes()).unwrap();
+    drop(cache_file);
+    let plane = |values: &[f32]| {
+        values
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect::<Vec<u8>>()
+    };
+    let mut confidence = [1.0f32; 12];
+    confidence[5] = 0.0;
+    fs::write(spill.quality_path("coverage"), plane(&[1.0; 12])).unwrap();
+    fs::write(spill.quality_path("confidence"), plane(&confidence)).unwrap();
+    let error =
+        load_test_frame(temp_dir.path(), base_filename, &collided_path, dims, 1).unwrap_err();
+    assert!(
+        matches!(
+            error,
+            Error::FrameQualityPairMismatch {
+                index: 1,
+                pixel: 5,
+                ..
+            }
+        ),
+        "{error:?}"
+    );
 }
 
 #[test]
@@ -296,9 +334,11 @@ fn frame_stats_sidecar_roundtrip() {
         .into_iter()
         .collect(),
         quantization_sigma: Some(0.000_02),
-        domain: None,
-        row_order: None,
-        cfa_type: None,
+        facts: FrameFacts {
+            domain: None,
+            row_order: None,
+            cfa_type: None,
+        },
     };
     write_frame_stats(temp_dir.path(), base, &stats_1ch).unwrap();
     let read_1ch = read_frame_stats(temp_dir.path(), base).unwrap();
@@ -326,9 +366,11 @@ fn frame_stats_sidecar_roundtrip() {
         .into_iter()
         .collect(),
         quantization_sigma: None,
-        domain: None,
-        row_order: None,
-        cfa_type: None,
+        facts: FrameFacts {
+            domain: None,
+            row_order: None,
+            cfa_type: None,
+        },
     };
     write_frame_stats(temp_dir.path(), base, &stats_3ch).unwrap();
     let read_3ch = read_frame_stats(temp_dir.path(), base).unwrap();
@@ -373,9 +415,11 @@ fn frame_stats_sidecar_roundtrip() {
         let poisoned = FrameStats {
             channels: stats_1ch.channels.clone(),
             quantization_sigma: Some(sigma),
-            domain: None,
-            row_order: None,
-            cfa_type: None,
+            facts: FrameFacts {
+                domain: None,
+                row_order: None,
+                cfa_type: None,
+            },
         };
         write_frame_stats(temp_dir.path(), "poisoned.bin", &poisoned).unwrap();
         assert!(
