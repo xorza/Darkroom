@@ -2,6 +2,7 @@ use crate::io::raw::demosaic::xtrans::internals::{test_pattern, test_pattern_arr
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPatternError;
 use crate::io::raw::demosaic::xtrans::*;
 use crate::math::size2us::Size2us;
+use crate::testing::assertions::assert_close;
 
 #[test]
 fn xtrans_pattern_color_at() {
@@ -199,7 +200,7 @@ fn process_xtrans_normalization() {
 
     // (2176 − 256) / 3840 is 0.5 exactly, and averages of equal values round at most a few times.
     for &val in rgb.iter().flatten() {
-        assert!((val - 0.5).abs() < 2e-7, "Expected 0.5, got {val}");
+        assert_close!(val, 0.5, 2e-7, "Expected 0.5, got {val}");
     }
 }
 
@@ -258,7 +259,7 @@ fn process_xtrans_full_range() {
     .unwrap();
 
     for &val in rgb.iter().flatten() {
-        assert!((val - 1.0).abs() < 2e-7, "Expected 1.0, got {val}");
+        assert_close!(val, 1.0, 2e-7, "Expected 1.0, got {val}");
     }
 }
 
@@ -288,9 +289,9 @@ fn xtrans_normalization_is_per_channel_and_raw_linear() {
     let expected_red = (2000.0 - 250.0) / 3896.0;
     let expected_green = (2000.0 - 200.0) / 3896.0;
     let expected_blue = (2000.0 - 220.0) / 3896.0;
-    assert!((image.read_normalized(0, 2) - expected_red).abs() < 1e-7);
-    assert!((image.read_normalized(0, 0) - expected_green).abs() < 1e-7);
-    assert!((image.read_normalized(0, 5) - expected_blue).abs() < 1e-7);
+    assert_close!(image.read_normalized(0, 2), expected_red, 1e-7);
+    assert_close!(image.read_normalized(0, 0), expected_green, 1e-7);
+    assert_close!(image.read_normalized(0, 5), expected_blue, 1e-7);
 }
 
 #[test]
@@ -326,7 +327,7 @@ fn process_xtrans_f32_uniform() {
     .unwrap();
 
     for &val in rgb.iter().flatten() {
-        assert!((val - 0.5).abs() < 2e-7, "Expected 0.5, got {val}");
+        assert_close!(val, 0.5, 2e-7, "Expected 0.5, got {val}");
     }
 }
 
@@ -362,8 +363,10 @@ fn f32_demosaic_preserves_signed_native_samples() {
             let channel = pattern.color_at(Vec2us::new(raw_x, raw_y)) as usize;
             let expected = data[raw_y * raw_width + raw_x];
             let actual = rgb[channel][y * width + x];
-            assert!(
-                (actual - expected).abs() < 1e-6,
+            assert_close!(
+                actual,
+                expected,
+                1e-6,
                 "native channel {channel} at ({x}, {y}) changed from {expected} to {actual}"
             );
         }
@@ -477,8 +480,10 @@ fn process_xtrans_f32_matches_u16_path() {
         .zip(rgb_f32.iter().flatten())
         .enumerate()
     {
-        assert!(
-            (a - b).abs() < 1e-5,
+        assert_close!(
+            a,
+            b,
+            1e-5,
             "Pixel {i}: u16 path={a}, f32 path={b}, diff={}",
             (a - b).abs()
         );

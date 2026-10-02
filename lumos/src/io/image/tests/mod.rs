@@ -2,7 +2,6 @@
 mod real_data;
 mod synthetic;
 
-use crate::image_ops::rgb::Rgb;
 use crate::testing::prelude::*;
 use common::TempDir;
 use imaginarium::{ColorFormat, Image, ImageDesc};
@@ -10,10 +9,11 @@ use imaginarium::{ColorFormat, Image, ImageDesc};
 use crate::io::image::PREVIEW_IMAGE_EXTENSIONS;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::provenance::FitsTransferProvenance;
+use crate::testing::fits::fits_transfer;
 use fits_well::image::SampleType;
 
 use crate::io::image::image_metadata::ImageMetadata;
-use crate::io::image::image_provenance::{ColorProvenance, ImageProvenance, TransferProvenance};
+use crate::io::image::image_provenance::{ColorProvenance, ImageProvenance};
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::preview_image::PreviewImage;
 use crate::stacking::frame_store::StackableImage;
@@ -121,16 +121,12 @@ fn load_full_example_fits() {
 
     // BITPIX = 32 with BSCALE = 1, so the samples were divided by the declared span 2³² − 1 and
     // the provenance carries that span back: the physical ADU value stays recoverable.
-    let TransferProvenance::FitsNormalized(FitsTransferProvenance { physical_scale, .. }) =
-        &image.metadata.provenance.as_ref().unwrap().transfer
-    else {
-        panic!("expected FITS provenance");
-    };
+    let FitsTransferProvenance { physical_scale, .. } = fits_transfer(&image);
     assert_eq!(*physical_scale, 4_294_967_295.0);
-    let pixel = image.get_pixel_gray(Vec2us::new(5, 20));
+    let pixel = image.channel(0)[image.dimensions().size().index_of(Vec2us::new(5, 20))];
     // 152 / (2³² − 1) = 3.5390258e-8.
-    assert!((pixel - 3.539_025_8e-8).abs() < 1e-15, "{pixel}");
-    assert!((pixel * physical_scale - 152.0).abs() < 1e-3, "{pixel}");
+    assert_close!(pixel, 3.539_025_8e-8, 1e-15, "{pixel}");
+    assert_close!(pixel * physical_scale, 152.0, 1e-3, "{pixel}");
 
     // New metadata fields are None for this simple test file
     assert!(image.metadata.filter.is_none());
@@ -288,7 +284,7 @@ fn roundtrip_linear_to_image_to_linear() {
 
     assert_eq!(restored.dimensions(), gray.dimensions());
     for (a, b) in gray.channel(0).iter().zip(restored.channel(0).iter()) {
-        assert!((a - b).abs() < 1e-6);
+        assert_close!(*a, *b, 1e-6);
     }
 
     let rgb = LinearImage::from_pixels(
@@ -302,7 +298,7 @@ fn roundtrip_linear_to_image_to_linear() {
     assert_eq!(restored.dimensions(), rgb.dimensions());
     for c in 0..rgb.channels() {
         for (a, b) in rgb.channel(c).iter().zip(restored.channel(c).iter()) {
-            assert!((a - b).abs() < 1e-6);
+            assert_close!(*a, *b, 1e-6);
         }
     }
 }
@@ -317,12 +313,12 @@ fn image_rgba_to_linear_drops_alpha() {
     let linear = LinearImage::from(&image);
 
     assert_eq!(linear.channels(), 3);
-    assert!((linear.channel(0)[0] - 1.0).abs() < 1e-6);
-    assert!((linear.channel(1)[0] - 0.0).abs() < 1e-6);
-    assert!((linear.channel(2)[0] - 0.0).abs() < 1e-6);
-    assert!((linear.channel(0)[1] - 0.0).abs() < 1e-6);
-    assert!((linear.channel(1)[1] - 1.0).abs() < 1e-6);
-    assert!((linear.channel(2)[1] - 0.0).abs() < 1e-6);
+    assert_close!(linear.channel(0)[0], 1.0, 1e-6);
+    assert_close!(linear.channel(1)[0], 0.0, 1e-6);
+    assert_close!(linear.channel(2)[0], 0.0, 1e-6);
+    assert_close!(linear.channel(0)[1], 0.0, 1e-6);
+    assert_close!(linear.channel(1)[1], 1.0, 1e-6);
+    assert_close!(linear.channel(2)[1], 0.0, 1e-6);
 }
 
 #[test]
@@ -347,42 +343,18 @@ fn rgb_image_creation_and_operations() {
     assert!((image.mean() - expected_mean).abs() < f32::EPSILON);
 }
 
+/// `from_pixels` takes interleaved samples and splits them into row-major planes.
 #[test]
-fn get_pixel_gray_indexes_row_major() {
-    let image = LinearImage::from_pixels(
-        ImageDimensions::new((3, 2), 1),
-        vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-    );
-
-    assert_eq!(image.get_pixel_gray(Vec2us::new(0, 0)), 1.0);
-    assert_eq!(image.get_pixel_gray(Vec2us::new(2, 0)), 3.0);
-    assert_eq!(image.get_pixel_gray(Vec2us::new(0, 1)), 4.0);
-    assert_eq!(image.get_pixel_gray(Vec2us::new(2, 1)), 6.0);
-    assert_eq!(image.get_pixel_channel(Vec2us::new(1, 0), 0), 2.0);
-    assert_eq!(image.get_pixel_channel(Vec2us::new(1, 1), 0), 5.0);
-}
-
-#[test]
-fn get_pixel_channel_rgb() {
+fn from_pixels_splits_interleaved_samples_into_planes() {
     let image = LinearImage::from_pixels(
         ImageDimensions::new((2, 2), 3),
         vec![
             1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
         ],
     );
-
-    assert_eq!(image.get_pixel_channel(Vec2us::new(0, 0), 0), 1.0);
-    assert_eq!(image.get_pixel_channel(Vec2us::new(0, 0), 1), 2.0);
-    assert_eq!(image.get_pixel_channel(Vec2us::new(0, 0), 2), 3.0);
-    assert_eq!(image.get_pixel_channel(Vec2us::new(1, 0), 0), 4.0);
-    assert_eq!(image.get_pixel_channel(Vec2us::new(1, 0), 1), 5.0);
-    assert_eq!(image.get_pixel_channel(Vec2us::new(1, 0), 2), 6.0);
-    assert_eq!(image.get_pixel_channel(Vec2us::new(0, 1), 0), 7.0);
-    assert_eq!(image.get_pixel_channel(Vec2us::new(0, 1), 1), 8.0);
-    assert_eq!(image.get_pixel_channel(Vec2us::new(0, 1), 2), 9.0);
-    assert_eq!(image.get_pixel_channel(Vec2us::new(1, 1), 0), 10.0);
-    assert_eq!(image.get_pixel_channel(Vec2us::new(1, 1), 1), 11.0);
-    assert_eq!(image.get_pixel_channel(Vec2us::new(1, 1), 2), 12.0);
+    assert_eq!(image.channel(0).pixels(), &[1.0, 4.0, 7.0, 10.0]);
+    assert_eq!(image.channel(1).pixels(), &[2.0, 5.0, 8.0, 11.0]);
+    assert_eq!(image.channel(2).pixels(), &[3.0, 6.0, 9.0, 12.0]);
 }
 
 #[test]
@@ -465,104 +437,6 @@ fn channel_mut_writes_through_to_the_plane() {
     image.channel_mut(0)[3] = 40.0;
 
     assert_eq!(image.channel(0).pixels(), &[10.0, 2.0, 3.0, 40.0]);
-}
-
-#[test]
-fn get_pixel_rgb_gathers_the_three_planes() {
-    let image = LinearImage::from_pixels(
-        ImageDimensions::new((2, 1), 3),
-        vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-    );
-
-    assert_eq!(
-        image.get_pixel_rgb(Vec2us::new(0, 0)),
-        Rgb {
-            r: 1.0,
-            g: 2.0,
-            b: 3.0
-        }
-    );
-    assert_eq!(
-        image.get_pixel_rgb(Vec2us::new(1, 0)),
-        Rgb {
-            r: 4.0,
-            g: 5.0,
-            b: 6.0
-        }
-    );
-}
-
-#[test]
-fn set_pixel_rgb_scatters_across_the_three_planes() {
-    let mut image = LinearImage::from_pixels(
-        ImageDimensions::new((2, 1), 3),
-        vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    );
-
-    image.set_pixel_rgb(
-        Vec2us::new(0, 0),
-        Rgb {
-            r: 1.0,
-            g: 2.0,
-            b: 3.0,
-        },
-    );
-    image.set_pixel_rgb(
-        Vec2us::new(1, 0),
-        Rgb {
-            r: 4.0,
-            g: 5.0,
-            b: 6.0,
-        },
-    );
-
-    assert_eq!(
-        image.get_pixel_rgb(Vec2us::new(0, 0)),
-        Rgb {
-            r: 1.0,
-            g: 2.0,
-            b: 3.0
-        }
-    );
-    assert_eq!(
-        image.get_pixel_rgb(Vec2us::new(1, 0)),
-        Rgb {
-            r: 4.0,
-            g: 5.0,
-            b: 6.0
-        }
-    );
-}
-
-#[test]
-fn get_pixel_gray_mut_writes_where_it_reads() {
-    let mut image =
-        LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0, 2.0, 3.0, 4.0]);
-
-    *image.get_pixel_gray_mut(Vec2us::new(0, 0)) = 10.0;
-    *image.get_pixel_gray_mut(Vec2us::new(1, 1)) = 40.0;
-
-    assert_eq!(image.get_pixel_gray(Vec2us::new(0, 0)), 10.0);
-    assert_eq!(image.get_pixel_gray(Vec2us::new(1, 1)), 40.0);
-}
-
-#[test]
-fn into_interleaved_pixels_grayscale() {
-    let image = LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0, 2.0, 3.0, 4.0]);
-
-    let interleaved = image.into_interleaved_pixels();
-    assert_eq!(interleaved, vec![1.0, 2.0, 3.0, 4.0]);
-}
-
-#[test]
-fn into_interleaved_pixels_rgb() {
-    let image = LinearImage::from_planar_channels(
-        ImageDimensions::new((2, 1), 3),
-        vec![vec![1.0, 4.0], vec![2.0, 5.0], vec![3.0, 6.0]],
-    );
-
-    let interleaved = image.into_interleaved_pixels();
-    assert_eq!(interleaved, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
 }
 
 #[test]

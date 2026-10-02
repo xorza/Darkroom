@@ -4,6 +4,7 @@ use crate::io::image::image_provenance::{
 };
 use crate::io::image::sample_domain::ScaleOrigin;
 use crate::io::raw::provenance::RawTransferProvenance;
+use crate::testing::assertions::assert_close;
 use crate::testing::cfa::XTRANS_PATTERN;
 use crate::testing::cfa::make_cfa;
 use common::TempDir;
@@ -198,10 +199,10 @@ fn subtract_takes_the_dark_off_every_sample() {
 
     light.subtract(&dark, 1.0);
 
-    assert!((light.data[0] - 0.4).abs() < 1e-6);
-    assert!((light.data[1] - 0.5).abs() < 1e-6);
-    assert!((light.data[2] - 0.6).abs() < 1e-6);
-    assert!((light.data[3] - 0.7).abs() < 1e-6);
+    assert_close!(light.data[0], 0.4, 1e-6);
+    assert_close!(light.data[1], 0.5, 1e-6);
+    assert_close!(light.data[2], 0.6, 1e-6);
+    assert_close!(light.data[3], 0.7, 1e-6);
 }
 
 /// The dark is expressed in the light's domain before it is subtracted: on a span four times the

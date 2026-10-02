@@ -289,8 +289,10 @@ fn constant_colour_reconstructs_on_every_phase_and_margin() {
                     assert_eq!(planes[native][index].to_bits(), colour[native].to_bits());
                     for channel in 0..3 {
                         let value = planes[channel][index];
-                        assert!(
-                            (value - colour[channel]).abs() < 5e-6,
+                        assert_close!(
+                            value,
+                            colour[channel],
+                            5e-6,
                             "{pattern:?} {colour:?} margin {margin:?} channel {channel} at {pos:?}: {value}"
                         );
                     }
@@ -386,8 +388,10 @@ fn signed_linear_gradient_crossing_zero_is_reconstructed_without_spikes() {
                 let expected = (x as f32 - 15.5) * slope;
                 for (channel, plane) in planes.iter().enumerate() {
                     let actual = plane[y * size.width + x];
-                    assert!(
-                        (actual - expected).abs() < 2e-4,
+                    assert_close!(
+                        actual,
+                        expected,
+                        2e-4,
                         "{pattern:?} channel {channel} at ({x}, {y}): expected {expected}, got {actual}"
                     );
                 }
@@ -496,8 +500,10 @@ fn rcd_interpolates_along_an_edge() {
                     Vec2us::new(edge, along)
                 };
                 let value = green[size.index_of(pos)];
-                assert!(
-                    (value - side(edge)).abs() < 1e-5,
+                assert_close!(
+                    value,
+                    side(edge),
+                    1e-5,
                     "{name} edge, green at {pos:?}: {value}"
                 );
             }

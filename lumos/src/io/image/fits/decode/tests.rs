@@ -13,7 +13,7 @@ use crate::io::image::fits::options::{
     FitsChecksumPolicy, FitsFloatScale, FitsHduSelector, FitsLoadOptions, FitsNullPolicy,
 };
 use crate::io::image::fits::provenance::FitsTransferProvenance;
-use crate::io::image::image_provenance::TransferProvenance;
+use crate::testing::fits::{fits_transfer, write_fits};
 use common::TempDir;
 use std::fs;
 
@@ -65,14 +65,6 @@ fn compressed_header(bitpix: i64, shape: &[usize]) -> Header {
             .unwrap();
     }
     header
-}
-
-fn write_image(path: &Path, image: &Image) {
-    let mut bytes = Vec::new();
-    FitsWriter::new(&mut bytes)
-        .write_image(image, None)
-        .unwrap();
-    fs::write(path, bytes).unwrap();
 }
 
 fn write_named_multi_image(path: &Path) {
@@ -216,7 +208,7 @@ fn header_rejection_precedes_pixel_read_and_truncated_data_is_an_error() {
     let directory = TempDir::new("fits_preflight");
     let path = directory.join("truncated.fits");
     let image = Image::new([2, 2], vec![1.0f32, 2.0, 3.0, 4.0]).unwrap();
-    write_image(&path, &image);
+    write_fits(&path, &image, None);
     let mut bytes = fs::read(&path).unwrap();
     bytes.truncate(BLOCK_SIZE);
     fs::write(&path, bytes).unwrap();
@@ -235,7 +227,11 @@ fn header_rejection_precedes_pixel_read_and_truncated_data_is_an_error() {
 fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
     let directory = TempDir::new("fits_shape_and_rgb");
     let zero_path = directory.join("zero.fits");
-    write_image(&zero_path, &Image::new([0, 2], Vec::<f32>::new()).unwrap());
+    write_fits(
+        &zero_path,
+        &Image::new([0, 2], Vec::<f32>::new()).unwrap(),
+        None,
+    );
     let reason = unsupported_reason(load_linear_fits(&zero_path, &load_context()).unwrap_err());
     assert!(reason.contains("must be nonzero"));
 
@@ -243,7 +239,7 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
     let planar = vec![
         1.0f32, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0, 100.0, 200.0, 300.0, 400.0,
     ];
-    write_image(&rgb_path, &Image::new([2, 2, 3], planar).unwrap());
+    write_fits(&rgb_path, &Image::new([2, 2, 3], planar).unwrap(), None);
     let loaded = load_linear_fits(&rgb_path, &rgb_load_context()).unwrap();
     assert_eq!(loaded.dimensions(), ImageDimensions::new((2, 2), 3));
     assert_eq!(loaded.channel(0).pixels(), &[1.0, 2.0, 3.0, 4.0]);
@@ -309,11 +305,7 @@ fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
     };
     let first = load_linear_fits(&path, &first).unwrap();
     assert_eq!(first.channel(0).pixels(), &[1.0, 2.0]);
-    let TransferProvenance::FitsNormalized(FitsTransferProvenance { hdu, checksum, .. }) =
-        &first.metadata.provenance.as_ref().unwrap().transfer
-    else {
-        panic!("expected FITS provenance");
-    };
+    let FitsTransferProvenance { hdu, checksum, .. } = fits_transfer(&first);
     assert_eq!(hdu.index, 1);
     assert_eq!(hdu.extname.as_deref(), Some("SCI"));
     assert_eq!(hdu.extver, Some(1));
@@ -361,19 +353,10 @@ fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity(
     let directory = TempDir::new("fits_checksum_policy");
     let absent_path = directory.join("absent.fits");
     let image = Image::new([2, 1], vec![1.0f32, 2.0]).unwrap();
-    write_image(&absent_path, &image);
+    write_fits(&absent_path, &image, None);
 
     let verified_absent = load_linear_fits(&absent_path, &load_context()).unwrap();
-    let TransferProvenance::FitsNormalized(FitsTransferProvenance { checksum, .. }) =
-        &verified_absent
-            .metadata
-            .provenance
-            .as_ref()
-            .unwrap()
-            .transfer
-    else {
-        panic!("expected FITS provenance");
-    };
+    let FitsTransferProvenance { checksum, .. } = fits_transfer(&verified_absent);
     assert_eq!(checksum.datasum, FitsChecksumState::Absent);
     assert_eq!(checksum.checksum, FitsChecksumState::Absent);
 
@@ -393,11 +376,7 @@ fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity(
         .write_image(&image, None)
         .unwrap();
     let valid = load_linear_fits(&valid_path, &require).unwrap();
-    let TransferProvenance::FitsNormalized(FitsTransferProvenance { checksum, .. }) =
-        &valid.metadata.provenance.as_ref().unwrap().transfer
-    else {
-        panic!("expected FITS provenance");
-    };
+    let FitsTransferProvenance { checksum, .. } = fits_transfer(&valid);
     assert_eq!(checksum.datasum, FitsChecksumState::Valid);
     assert_eq!(checksum.checksum, FitsChecksumState::Valid);
 
@@ -415,11 +394,7 @@ fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity(
         ..load_context()
     };
     let ignored = load_linear_fits(&valid_path, &ignore).unwrap();
-    let TransferProvenance::FitsNormalized(FitsTransferProvenance { checksum, .. }) =
-        &ignored.metadata.provenance.as_ref().unwrap().transfer
-    else {
-        panic!("expected FITS provenance");
-    };
+    let FitsTransferProvenance { checksum, .. } = fits_transfer(&ignored);
     assert_eq!(checksum.datasum, FitsChecksumState::NotChecked);
     assert_eq!(checksum.checksum, FitsChecksumState::NotChecked);
 }
@@ -428,7 +403,7 @@ fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity(
 fn cancellation_prevents_fits_selection() {
     let directory = TempDir::new("fits_cancel");
     let path = directory.join("frame.fits");
-    write_image(&path, &Image::new([2, 1], vec![1.0f32, 2.0]).unwrap());
+    write_fits(&path, &Image::new([2, 1], vec![1.0f32, 2.0]).unwrap(), None);
     let cancel = CancelToken::new();
     cancel.cancel();
     let context = LoadContext::new(cancel, u64::MAX);
