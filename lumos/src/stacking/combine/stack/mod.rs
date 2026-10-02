@@ -24,7 +24,7 @@ use crate::stacking::combine::stack::quantization::{MaxSigma, SourceSigmas};
 use crate::stacking::frame_store::StoredFrame;
 use crate::stacking::frame_store::frame_quality::FrameQuality;
 use crate::stacking::frame_store::frame_stats::FrameStats;
-use crate::stacking::frame_store::spill::SpillDirectory;
+use crate::stacking::frame_store::spill_directory::SpillDirectory;
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::resample::WarpResult;
 use crate::stacking::stack_product::StackProduct;

@@ -235,14 +235,14 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
     let frames: Vec<StackFrame> = (0..n).map(make_frame).collect();
 
     let scratch = ScratchDirectory::new("lumos_tier_test");
-    let spill_directory = SpillDirectory::create(scratch.join("cache"), false).unwrap();
+    let spill_directory = SpillDirectory::create(&scratch.join("cache"), false).unwrap();
     let metadata = frames[0].image.metadata.clone();
     let stored = frames
         .into_iter()
         .enumerate()
         .map(|(i, f)| {
             StoredFrame::spill(
-                &spill_directory.path,
+                spill_directory.path(),
                 &format!("f{i}"),
                 &f.image,
                 &f.quality,
@@ -300,9 +300,9 @@ fn mapped_frames_reject_nonfinite_samples_before_combining() {
         [vec![1.0; 2], vec![2.0; 2], vec![3.0, f32::NEG_INFINITY]],
     );
     let scratch = ScratchDirectory::new("lumos_nonfinite_mapped_frame");
-    let spill_directory = SpillDirectory::create(scratch.join("cache"), false).unwrap();
+    let spill_directory = SpillDirectory::create(&scratch.join("cache"), false).unwrap();
     let frame = StoredFrame::spill(
-        &spill_directory.path,
+        spill_directory.path(),
         "frame",
         &invalid,
         &FrameQuality::None,

@@ -15,7 +15,7 @@ use crate::io::image::linear_pixels::LinearPixels;
 use crate::memory::ChunkMemoryLayout;
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::frame_store::StoredFrame;
-use crate::stacking::frame_store::spill::SpillDirectory;
+use crate::stacking::frame_store::spill_directory::SpillDirectory;
 use crate::stacking::frame_store::stored_plane::StoredPlane;
 use crate::stacking::progress::{ProgressCallback, StackingStage};
 use crate::stacking::stack_product::quality_planes::QualityPlanes;

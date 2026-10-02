@@ -1,5 +1,7 @@
 use crate::io::image::null_mask::NullMask;
-use crate::stacking::frame_store::spill::{CachedQuality, SpillDirectory};
+use crate::stacking::frame_store::spill::CachedQuality;
+use crate::stacking::frame_store::spill_directory::SpillDirectory;
+use crate::stacking::frame_store::spill_directory::internals::{marker, stale_run_directory};
 use crate::stacking::frame_store::*;
 use crate::testing::ScratchDirectory;
 
@@ -28,18 +30,27 @@ fn stored_image_roundtrip_overwrites_stale_pixels() {
 /// Both `StoredImage::spill` and `StoredFrame::spill` write into a directory owned here and keep no
 /// per-file guard of their own. A guard on either would delete planes the user asked to keep, and
 /// would do it the moment that frame dropped rather than at the end of the run.
+///
+/// The root is a directory the caller already uses for something else: a run must remove only the
+/// subdirectory it created there, whatever `keep_cache` says.
 #[test]
-fn spill_directory_removes_planes_unless_asked_to_keep() {
+fn spill_directory_removes_only_its_own_planes_unless_asked_to_keep() {
     let scratch = ScratchDirectory::new("frame_store_keep");
     let dimensions = ImageDimensions::new((2, 2), 1);
     let image = LinearImage::from_pixels(dimensions, vec![0.1, 0.2, 0.3, 0.4]);
 
     for (keep, should_survive) in [(false, false), (true, true)] {
         let root = scratch.join(format!("keep_{keep}"));
-        let directory = SpillDirectory::create(root.clone(), keep).unwrap();
+        std::fs::create_dir_all(&root).unwrap();
+        let sentinel = root.join("user_file.txt");
+        std::fs::write(&sentinel, b"not lumos's").unwrap();
 
-        let stored = StoredImage::spill(&directory.path, "calibrated", &image).unwrap();
-        let plane = root.join("calibrated_c0.bin");
+        let directory = SpillDirectory::create(&root, keep).unwrap();
+        assert_eq!(directory.path().parent(), Some(root.as_path()));
+        assert!(directory.path().join(marker()).is_file());
+
+        let stored = StoredImage::spill(directory.path(), "calibrated", &image).unwrap();
+        let plane = directory.path().join("calibrated_c0.bin");
         assert!(plane.exists(), "keep={keep}: plane was not written");
 
         // The frame going away must not take the file with it — only the directory decides.
@@ -49,13 +60,56 @@ fn spill_directory_removes_planes_unless_asked_to_keep() {
             "keep={keep}: dropping the frame removed its plane"
         );
 
+        let spill_path = directory.path().to_path_buf();
         drop(directory);
         assert_eq!(
             plane.exists(),
             should_survive,
             "keep={keep}: plane survival is wrong after the directory dropped"
         );
+        assert_eq!(spill_path.exists(), should_survive);
+        assert!(root.is_dir(), "keep={keep}: the caller's root was removed");
+        assert!(
+            sentinel.is_file(),
+            "keep={keep}: a file lumos did not write was removed"
+        );
     }
+}
+
+/// Two runs without `keep_cache` never share a directory, so one run's drop cannot remove the
+/// other's planes; two runs with it always share one, so the second can reuse the first's planes.
+#[test]
+fn spill_directories_are_per_run_unless_kept() {
+    let scratch = ScratchDirectory::new("frame_store_per_run");
+    let root = scratch.join("root");
+
+    let first = SpillDirectory::create(&root, false).unwrap();
+    let second = SpillDirectory::create(&root, false).unwrap();
+    assert_ne!(first.path(), second.path());
+    let second_path = second.path().to_path_buf();
+    drop(first);
+    assert!(second_path.is_dir(), "dropping one run removed another");
+    drop(second);
+
+    let first = SpillDirectory::create(&root, true).unwrap();
+    let second = SpillDirectory::create(&root, true).unwrap();
+    assert_eq!(first.path(), second.path());
+}
+
+/// A run killed before its drop leaves a marked directory behind; the next run removes it. An
+/// unmarked directory of the same shape belongs to someone else and stays.
+#[test]
+fn stale_run_directories_are_removed_only_when_marked() {
+    let scratch = ScratchDirectory::new("frame_store_stale");
+    let root = scratch.join("root");
+    let stale = stale_run_directory(&root);
+    let foreign = root.join(format!("run-{}-1", u32::MAX));
+    std::fs::create_dir_all(&foreign).unwrap();
+
+    let directory = SpillDirectory::create(&root, false).unwrap();
+    assert!(!stale.exists(), "a dead run's marked directory was kept");
+    assert!(foreign.is_dir(), "an unmarked directory was removed");
+    drop(directory);
 }
 
 #[test]

@@ -1,14 +1,14 @@
 //! Cache configuration for disk-backed stacking operations.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::memory;
 
 /// Common configuration for cache-based stacking methods (median, sigma-clipped).
 #[derive(Clone, Debug, PartialEq)]
 pub struct CacheConfig {
-    /// Directory for decoded image cache.
+    /// Root the spill files go under. A run writes only into a subdirectory it creates there, and
+    /// never removes anything it did not create — see `SpillDirectory`.
     pub cache_dir: PathBuf,
     /// Keep the spill cache after stacking, for re-processing or for inspecting what spilled.
     ///
@@ -23,19 +23,11 @@ pub struct CacheConfig {
 impl Default for CacheConfig {
     fn default() -> Self {
         Self {
-            cache_dir: unique_cache_dir(),
+            cache_dir: std::env::temp_dir().join("lumos_cache"),
             keep_cache: false,
             available_memory: None,
         }
     }
-}
-
-fn unique_cache_dir() -> PathBuf {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir()
-        .join("lumos_cache")
-        .join(format!("{}-{}", std::process::id(), id))
 }
 
 impl CacheConfig {
@@ -81,16 +73,13 @@ mod tests {
     use crate::stacking::combine::cache_config::*;
 
     #[test]
-    fn default_config_uses_unique_process_cache_directories() {
-        let first = CacheConfig::default();
-        let second = CacheConfig::default();
-
-        assert!(first.cache_dir.parent().unwrap().ends_with("lumos_cache"));
-        assert_eq!(first.cache_dir.parent(), second.cache_dir.parent());
-        assert_ne!(first.cache_dir, second.cache_dir);
+    fn default_config_spills_under_one_temp_root() {
+        // Every run shares the root; each run's own subdirectory is what keeps them apart.
+        let config = CacheConfig::default();
+        assert_eq!(config.cache_dir, std::env::temp_dir().join("lumos_cache"));
         // The spill cache is cleaned up unless a caller asks otherwise, in every build profile.
-        assert!(!first.keep_cache);
-        assert_eq!(first.available_memory, None);
+        assert!(!config.keep_cache);
+        assert_eq!(config.available_memory, None);
     }
 
     #[test]
