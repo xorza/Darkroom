@@ -6,6 +6,7 @@
 //! is the single place that tests the cancel first.
 
 use palantir::{TextEditResponse, Ui, WidgetId};
+use std::mem;
 
 /// Cross-frame state for one buffered text edit.
 #[derive(Default, Clone, Debug)]
@@ -28,7 +29,7 @@ impl EditBuffer {
         id: WidgetId,
         body: impl FnOnce(&mut Ui, &mut String) -> R,
     ) -> R {
-        let mut text = std::mem::take(&mut ui.state_or_default::<Self>(id).text);
+        let mut text = mem::take(&mut ui.state_or_default::<Self>(id).text);
         let out = body(ui, &mut text);
         ui.state_or_default::<Self>(id).text = text;
         out

@@ -7,6 +7,7 @@
 //! wrapper exists to make that drop order a property of the type rather than a
 //! comment on a field: declared after the `Worker`, so it drops after it.
 
+use std::io;
 use tokio::runtime::{Builder, Runtime};
 
 /// A dedicated background tokio runtime, held for its `Drop`. Build one with
@@ -21,7 +22,7 @@ pub(crate) struct BackgroundRuntime {
 
 impl BackgroundRuntime {
     /// Build a fresh multi-thread runtime with all drivers enabled.
-    pub(crate) fn new() -> std::io::Result<Self> {
+    pub(crate) fn new() -> io::Result<Self> {
         let runtime = Builder::new_multi_thread().enable_all().build()?;
         Ok(Self { runtime })
     }

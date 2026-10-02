@@ -9,6 +9,8 @@ use crate::{
     stacking::star_detection::config::background_config::{BackgroundConfig, BackgroundRefinement},
     stacking::star_detection::resources::DetectionResources,
 };
+use std::f32::consts::SQRT_2;
+use std::iter;
 
 #[test]
 fn uniform_background() {
@@ -442,9 +444,7 @@ fn iterative_background_with_bright_stars() {
         SyntheticStar::new(
             Vec2::new(sx as f32, sy as f32),
             0.8,
-            StarProfile::Gaussian {
-                sigma: std::f32::consts::SQRT_2,
-            },
+            StarProfile::Gaussian { sigma: SQRT_2 },
         )
         .add_to(&mut pixels);
     }
@@ -937,7 +937,7 @@ fn bicubic_two_tile_rows() {
     let data: Vec<f32> = (0..height)
         .flat_map(|y| {
             let val = if y < 32 { 50.0 } else { 150.0 };
-            std::iter::repeat_n(val, width)
+            iter::repeat_n(val, width)
         })
         .collect();
 

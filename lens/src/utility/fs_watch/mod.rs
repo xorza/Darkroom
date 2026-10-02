@@ -1,5 +1,11 @@
 //! Filesystem watcher node library and its per-node watcher state.
 
+use std::fmt;
+use std::fmt::Debug;
+use std::fmt::Formatter;
+use std::fs;
+use std::future;
+use std::io;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -7,6 +13,7 @@ use std::time::Duration;
 use notify::event::ModifyKind;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::Notify;
+use tokio::task;
 use tokio::time::timeout;
 
 use scenarium::Invocation;
@@ -44,7 +51,7 @@ enum WatchError {
     Inspect {
         path: String,
         #[source]
-        source: std::io::Error,
+        source: io::Error,
     },
     #[error("watch path is not a directory: {path:?}")]
     NotDirectory { path: String },
@@ -60,7 +67,7 @@ enum WatchError {
 
 impl WatchState {
     fn new(path: &str, recursive: bool, debounce: Duration) -> Result<Self, WatchError> {
-        let metadata = std::fs::metadata(path).map_err(|source| WatchError::Inspect {
+        let metadata = fs::metadata(path).map_err(|source| WatchError::Inspect {
             path: path.to_owned(),
             source,
         })?;
@@ -106,8 +113,8 @@ impl WatchState {
     }
 }
 
-impl std::fmt::Debug for WatchState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Debug for WatchState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("WatchState")
             .field("path", &self.path)
             .field("recursive", &self.recursive)
@@ -195,7 +202,7 @@ pub fn fs_watch_library() -> Library {
                                 {}
                             }
                             // No watcher (e.g. empty/invalid path): never fire.
-                            None => std::future::pending::<()>().await,
+                            None => future::pending::<()>().await,
                         }
                     })
                 }),
@@ -235,7 +242,7 @@ pub fn fs_watch_library() -> Library {
                             if needs_rebuild {
                                 let watch_path = path.clone();
                                 // Watch registration can block on slow or network filesystems.
-                                let replacement = tokio::task::spawn_blocking(move || {
+                                let replacement = task::spawn_blocking(move || {
                                     WatchState::new(&watch_path, recursive, debounce)
                                 })
                                 .await

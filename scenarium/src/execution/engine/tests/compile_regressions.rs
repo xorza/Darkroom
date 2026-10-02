@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::graph::func::FuncInput;
+use crate::graph::func::FuncOutput;
 use crate::graph::output_types::OutputTypes;
 use crate::{FsPathConfig, FsPathMode};
 
@@ -129,10 +131,8 @@ async fn update_with_evolved_func_recompiles_and_runs_new_lambda() {
     // v2: the same declaration gains an input and a different body.
     e.edit(|g| {
         g.edit_func("generate", |func| {
-            func.inputs.push(crate::graph::func::FuncInput::optional(
-                "Extra",
-                DataType::Int,
-            ));
+            func.inputs
+                .push(FuncInput::optional("Extra", DataType::Int));
             func.lambda = async_lambda!(move |Invocation { outputs, .. }| {
                 outputs[0] = ConstValue::Int(2).into();
                 Ok(())
@@ -196,8 +196,7 @@ async fn update_with_a_grown_output_list_retires_the_shorter_snapshot() {
     // retained snapshot had to be retired.
     e.edit(|g| {
         g.edit_func("generate", |func| {
-            func.outputs
-                .push(crate::graph::func::FuncOutput::new("W", DataType::Int));
+            func.outputs.push(FuncOutput::new("W", DataType::Int));
         });
     });
     e.run_sinks().await;

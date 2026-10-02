@@ -1,7 +1,9 @@
 use std::fmt;
+use std::mem;
 use std::sync::Arc;
 
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::task;
 use tokio_util::sync::CancellationToken;
 
 use common::CancelToken;
@@ -70,7 +72,7 @@ impl PendingRun {
         // Moved out rather than copied field by field: the batch's seeds *are*
         // the run's, and taking them leaves the intent empty for whatever the
         // rest of this batch still does.
-        let mut seeds = std::mem::take(&mut intent.seeds);
+        let mut seeds = mem::take(&mut intent.seeds);
         // Rebuilding the loop means re-initializing every event source, so the
         // bootstrap run demands them whether or not a message asked.
         seeds.event_sources |= start_event_loop;
@@ -133,7 +135,7 @@ where
     pub(crate) async fn run(mut self) {
         while self.next_intent().await.is_some() {
             self.apply_intent().await;
-            tokio::task::yield_now().await;
+            task::yield_now().await;
         }
         self.stop_event_loop().await;
     }
@@ -273,7 +275,7 @@ where
                 .await;
             self.report_flush(report, FlushReporting::Requested);
         }
-        if std::mem::take(&mut self.intent.flush_all_caches) {
+        if mem::take(&mut self.intent.flush_all_caches) {
             let report = self.engine.flush_all_caches().await;
             self.report_flush(report, FlushReporting::Sweep);
         }
@@ -329,7 +331,7 @@ where
             Ok(()) => {
                 if run.start_event_loop && !self.shutdown.is_cancelled() {
                     assert!(self.event_loop.is_none());
-                    let triggers = std::mem::take(&mut self.outcome.event_triggers);
+                    let triggers = mem::take(&mut self.outcome.event_triggers);
                     if !triggers.is_empty() {
                         self.event_loop = Some(
                             ActiveEventLoop::start(triggers, self.event_loop_pause_gate.clone())

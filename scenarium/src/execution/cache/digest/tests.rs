@@ -8,6 +8,7 @@ use crate::execution::identity::{NodeIdx, OutputAddr};
 use crate::graph::identity::FuncId;
 use crate::testing::program::node_builder::NodeBuilder;
 use crate::testing::program::{Placed, ProgramBuilder};
+use std::fs;
 
 /// A content-cacheable node of func `func`, declaring `count` `Int` outputs.
 ///
@@ -157,9 +158,9 @@ fn fs_path_folds_file_identity_and_path() {
     };
 
     let (p, single) = path_node(ConstValue::FsPath(path.clone()));
-    std::fs::write(file, b"x").unwrap(); // len 1
+    fs::write(file, b"x").unwrap(); // len 1
     let d_len1 = Digests::of(&p).at(single);
-    std::fs::write(file, b"xyz").unwrap(); // len 3 — file identity changed
+    fs::write(file, b"xyz").unwrap(); // len 3 — file identity changed
     let d_len3 = Digests::of(&p).at(single);
     assert_ne!(
         d_len1, d_len3,
@@ -167,7 +168,7 @@ fn fs_path_folds_file_identity_and_path() {
     );
 
     let unselected = TempFile::with_extension("scenarium-digest-unselected", "bin");
-    std::fs::write(unselected.path(), b"not selected").unwrap();
+    fs::write(unselected.path(), b"not selected").unwrap();
     assert_eq!(
         Digests::of(&p).at(single),
         d_len3,
@@ -175,12 +176,12 @@ fn fs_path_folds_file_identity_and_path() {
     );
 
     let second = TempFile::with_extension("scenarium-digest-second", "bin");
-    std::fs::write(second.path(), b"second").unwrap();
+    fs::write(second.path(), b"second").unwrap();
     let second_path = second.to_str();
     let (two_file_prog, both) =
         path_node(ConstValue::FsPaths(vec![path.clone(), second_path.clone()]));
     let two_files = Digests::of(&two_file_prog).at(both);
-    std::fs::write(second.path(), b"second changed").unwrap();
+    fs::write(second.path(), b"second changed").unwrap();
     let second_edited = Digests::of(&two_file_prog).at(both);
     assert_ne!(
         two_files, second_edited,
@@ -197,7 +198,7 @@ fn fs_path_folds_file_identity_and_path() {
     // A path that is not there has no identity to fold at all: the node
     // is left without a digest, and the executor fails it at its turn
     // rather than keying it on an absence.
-    std::fs::remove_file(file).unwrap();
+    fs::remove_file(file).unwrap();
     assert_eq!(
         Digests::of(&p).at(single),
         None,
@@ -227,7 +228,7 @@ fn fs_path_folds_file_identity_and_path() {
     // One unset port must not cost the *run* its batched stamping: before the
     // walk skipped it, `metadata("")` failed the whole shared pass, and which
     // of the other nodes had already landed was `HashSet` drain order.
-    std::fs::write(file, b"x").unwrap();
+    fs::write(file, b"x").unwrap();
     let mut batch = ProgramBuilder::default();
     let blank_node = pure(&mut batch, 11, 1)
         .const_input(ConstValue::FsPath(String::new()))
@@ -245,7 +246,7 @@ fn fs_path_folds_file_identity_and_path() {
         cache.node_digest(batched, real_node.node_idx).is_some(),
         "a named path still stamps when batched beside an unset one"
     );
-    std::fs::remove_file(file).unwrap();
+    fs::remove_file(file).unwrap();
 
     // The path string is folded on top of the file identity, so two nodes
     // reading equal files under different names still key apart. Planted
@@ -324,7 +325,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
     };
     let fs_path = || Some(DynamicValue::Static(ConstValue::FsPath(path.clone())));
 
-    std::fs::write(file, b"x").unwrap(); // len 1
+    fs::write(file, b"x").unwrap(); // len 1
     let DigestPair {
         typed: typed_len1,
         plain: plain_len1,
@@ -336,7 +337,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
         "an unchanged file folds identically"
     );
 
-    std::fs::write(file, b"xyz").unwrap(); // len 3 — the file identity changed
+    fs::write(file, b"xyz").unwrap(); // len 3 — the file identity changed
     let DigestPair {
         typed: typed_len3,
         plain: plain_len3,
@@ -351,7 +352,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
     );
 
     let second = TempFile::with_extension("scenarium-digest-bound-fs-second", "bin");
-    std::fs::write(second.path(), b"second").unwrap();
+    fs::write(second.path(), b"second").unwrap();
     let fs_paths = || {
         Some(DynamicValue::Static(ConstValue::FsPaths(vec![
             path.clone(),
@@ -359,13 +360,13 @@ fn bound_fs_path_folds_delivered_file_identity() {
         ])))
     };
     let typed_list = digests_with(fs_paths()).typed;
-    std::fs::write(second.path(), b"second changed").unwrap();
+    fs::write(second.path(), b"second changed").unwrap();
     assert_ne!(
         digests_with(fs_paths()).typed,
         typed_list,
         "a wired path list re-keys when any selected file changes"
     );
-    std::fs::remove_file(second.path()).unwrap();
+    fs::remove_file(second.path()).unwrap();
 
     // An unset slot keys on its *position*, which is what the marker buys over
     // skipping the slot: a Bind fold writes no authored strings alongside the
@@ -389,7 +390,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
         "where the unset slot sits is part of the key"
     );
 
-    std::fs::remove_file(file).unwrap();
+    fs::remove_file(file).unwrap();
     let DigestPair {
         typed: typed_missing,
         plain: plain_missing,

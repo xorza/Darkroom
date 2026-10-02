@@ -6,6 +6,13 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::file_format::SerdeFormat;
+use lz4_flex::block;
+use lz4_flex::block::CompressError;
+use lz4_flex::block::DecompressError;
+use ron::de;
+use ron::de::SpannedError;
+use ron::ser;
+use std::io;
 
 const LZ4_HEADER_LEN: usize = size_of::<u32>();
 const LZ4_MAX_UNCOMPRESSED_SIZE: usize = 1 << 30;
@@ -38,9 +45,9 @@ pub enum SerializeError {
     #[error("Bitcode serialization failed: {0}")]
     Bitcode(#[from] bitcode::Error),
     #[error("LZ4 compression failed: {0}")]
-    Lz4(#[from] lz4_flex::block::CompressError),
+    Lz4(#[from] CompressError),
     #[error("writing serialized bytes failed: {0}")]
-    Write(#[from] std::io::Error),
+    Write(#[from] io::Error),
     #[error(transparent)]
     Lz4Size(#[from] Lz4SizeError),
 }
@@ -48,13 +55,13 @@ pub enum SerializeError {
 #[derive(Debug, thiserror::Error)]
 pub enum DeserializeError {
     #[error("RON deserialization failed: {0}")]
-    Ron(#[from] ron::de::SpannedError),
+    Ron(#[from] SpannedError),
     #[error("Bitcode deserialization failed: {0}")]
     Bitcode(#[from] bitcode::Error),
     #[error("LZ4 decompression failed: {0}")]
-    Lz4(#[from] lz4_flex::block::DecompressError),
+    Lz4(#[from] DecompressError),
     #[error("reading serialized bytes failed: {0}")]
-    Read(#[from] std::io::Error),
+    Read(#[from] io::Error),
     #[error(transparent)]
     Lz4Size(#[from] Lz4SizeError),
     #[error("lz4 payload too short: {len} bytes")]
@@ -130,7 +137,7 @@ pub fn serialize_into<T: Serialize, W: Write>(
     match format {
         SerdeFormat::Ron => {
             let config = PrettyConfig::default();
-            ron::ser::to_writer_pretty(Utf8Writer(&mut *temp_buffer), &value, config)?;
+            ser::to_writer_pretty(Utf8Writer(&mut *temp_buffer), &value, config)?;
             writer.write_all(temp_buffer)?;
         }
         SerdeFormat::Bitcode => {
@@ -138,13 +145,13 @@ pub fn serialize_into<T: Serialize, W: Write>(
             writer.write_all(&encoded)?;
         }
         SerdeFormat::Lz4 => {
-            ron::ser::to_writer(Utf8Writer(&mut *temp_buffer), &value)?;
+            ser::to_writer(Utf8Writer(&mut *temp_buffer), &value)?;
 
             let uncompressed_size = temp_buffer.len();
             let header_size = checked_lz4_uncompressed_size(uncompressed_size)?;
             writer.write_all(&header_size.to_le_bytes())?;
 
-            let max_compressed_size = lz4_flex::block::get_maximum_output_size(uncompressed_size);
+            let max_compressed_size = block::get_maximum_output_size(uncompressed_size);
             temp_buffer.resize(uncompressed_size + max_compressed_size, 0);
 
             let (input, output) = temp_buffer.split_at_mut(uncompressed_size);
@@ -161,7 +168,7 @@ pub fn deserialize<T: DeserializeOwned>(
     format: SerdeFormat,
 ) -> Result<T, DeserializeError> {
     match format {
-        SerdeFormat::Ron => Ok(ron::de::from_bytes(serialized)?),
+        SerdeFormat::Ron => Ok(de::from_bytes(serialized)?),
         SerdeFormat::Bitcode => Ok(bitcode::deserialize(serialized)?),
         SerdeFormat::Lz4 => {
             let payload = lz4_payload(serialized)?;
@@ -169,7 +176,7 @@ pub fn deserialize<T: DeserializeOwned>(
             let decompressed_len =
                 lz4_flex::decompress_into(payload.compressed, &mut decompressed)?;
             check_lz4_decompressed_size(decompressed_len, payload.uncompressed_size)?;
-            Ok(ron::de::from_bytes(&decompressed)?)
+            Ok(de::from_bytes(&decompressed)?)
         }
     }
 }
@@ -184,7 +191,7 @@ pub fn deserialize_from<T: DeserializeOwned, R: Read>(
     temp_buffer.clear();
 
     match format {
-        SerdeFormat::Ron => Ok(ron::de::from_reader(reader)?),
+        SerdeFormat::Ron => Ok(de::from_reader(reader)?),
         SerdeFormat::Bitcode => {
             reader.read_to_end(temp_buffer)?;
             Ok(bitcode::deserialize(temp_buffer.as_slice())?)
@@ -202,7 +209,7 @@ pub fn deserialize_from<T: DeserializeOwned, R: Read>(
             let decompressed_len = lz4_flex::decompress_into(compressed, decompressed_part)?;
             check_lz4_decompressed_size(decompressed_len, uncompressed_size)?;
 
-            Ok(ron::de::from_bytes(decompressed_part)?)
+            Ok(de::from_bytes(decompressed_part)?)
         }
     }
 }
@@ -210,6 +217,7 @@ pub fn deserialize_from<T: DeserializeOwned, R: Read>(
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;
+    use std::io::ErrorKind;
 
     use super::*;
 
@@ -217,11 +225,11 @@ mod tests {
     struct FailingWriter;
 
     impl Write for FailingWriter {
-        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
-            Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+        fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+            Err(io::Error::from(ErrorKind::BrokenPipe))
         }
 
-        fn flush(&mut self) -> std::io::Result<()> {
+        fn flush(&mut self) -> io::Result<()> {
             Ok(())
         }
     }
@@ -246,7 +254,7 @@ mod tests {
         .unwrap_err();
         assert!(matches!(
             err,
-            SerializeError::Write(error) if error.kind() == std::io::ErrorKind::BrokenPipe
+            SerializeError::Write(error) if error.kind() == ErrorKind::BrokenPipe
         ));
     }
 
@@ -255,7 +263,7 @@ mod tests {
         let value: Vec<i64> = vec![1, 2, 3, 1000, -42];
         let bytes = serialize(&value, SerdeFormat::Lz4).unwrap();
         let expected_size = u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize;
-        let payload = lz4_flex::block::decompress(&bytes[4..], expected_size).unwrap();
+        let payload = block::decompress(&bytes[4..], expected_size).unwrap();
         assert_eq!(payload, br"[1,2,3,1000,-42]");
         let back: Vec<i64> = deserialize(&bytes, SerdeFormat::Lz4).unwrap();
         assert_eq!(back, value);
@@ -382,7 +390,7 @@ mod tests {
         let payload = b"1";
         let expected = payload.len() + 1;
         let mut input = (expected as u32).to_le_bytes().to_vec();
-        input.extend_from_slice(&lz4_flex::block::compress(payload));
+        input.extend_from_slice(&block::compress(payload));
         let err = deserialize::<i64>(&input, SerdeFormat::Lz4).unwrap_err();
         assert!(matches!(
             err,

@@ -1,5 +1,6 @@
 //! Cache configuration for disk-backed stacking operations.
 
+use std::env;
 use std::path::PathBuf;
 
 use crate::memory;
@@ -23,7 +24,7 @@ pub struct CacheConfig {
 impl Default for CacheConfig {
     fn default() -> Self {
         Self {
-            cache_dir: std::env::temp_dir().join("lumos_cache"),
+            cache_dir: env::temp_dir().join("lumos_cache"),
             keep_cache: false,
             available_memory: None,
         }
@@ -76,7 +77,7 @@ mod tests {
     fn default_config_spills_under_one_temp_root() {
         // Every run shares the root; each run's own subdirectory is what keeps them apart.
         let config = CacheConfig::default();
-        assert_eq!(config.cache_dir, std::env::temp_dir().join("lumos_cache"));
+        assert_eq!(config.cache_dir, env::temp_dir().join("lumos_cache"));
         // The spill cache is cleaned up unless a caller asks otherwise, in every build profile.
         assert!(!config.keep_cache);
         assert_eq!(config.available_memory, None);

@@ -1,8 +1,11 @@
 //! Testing utilities for lumos.
 
+use std::env;
 use std::f32::consts::PI;
+use std::fs;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
+use std::process;
 
 use common::file_utils;
 use imaginarium::Buffer2;
@@ -27,12 +30,12 @@ pub(crate) struct ScratchDirectory(PathBuf);
 
 impl ScratchDirectory {
     pub(crate) fn new(name: &str) -> Self {
-        let path = std::env::current_dir()
+        let path = env::current_dir()
             .unwrap()
             .join(".tmp")
-            .join(format!("{name}_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&path);
-        std::fs::create_dir_all(&path).unwrap();
+            .join(format!("{name}_{}", process::id()));
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).unwrap();
         Self(path)
     }
 }
@@ -53,7 +56,7 @@ impl AsRef<Path> for ScratchDirectory {
 
 impl Drop for ScratchDirectory {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        let _ = fs::remove_dir_all(&self.0);
     }
 }
 
@@ -215,6 +218,7 @@ pub(crate) fn calibration_image_paths(subdir: &str) -> Option<Vec<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use crate::testing::ScratchDirectory;
+    use std::fs;
 
     #[test]
     fn scratch_directory_cleans_up_on_drop() {
@@ -222,7 +226,7 @@ mod tests {
         {
             let directory = ScratchDirectory::new("scratch_directory_cleanup");
             path = directory.to_path_buf();
-            std::fs::write(directory.join("probe"), b"test").unwrap();
+            fs::write(directory.join("probe"), b"test").unwrap();
             assert!(path.join("probe").is_file());
         }
         assert!(!path.exists());

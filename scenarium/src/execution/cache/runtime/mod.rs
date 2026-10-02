@@ -13,6 +13,8 @@ pub(crate) mod cache_flush_report;
 pub(crate) mod error;
 
 use std::collections::HashSet;
+use std::iter;
+use std::mem;
 use std::ops::{Index, IndexMut};
 use std::sync::Arc;
 
@@ -39,6 +41,7 @@ use crate::graph::func::lambda::OutputDemand;
 use crate::graph::identity::NodeId;
 use crate::runtime::context::ContextStore;
 use crate::{DynamicValue, RamUsage};
+use tokio::task;
 
 /// The per-node cross-run cache plus its disk backing. `slots` is a
 /// [`Column`] aligned to the installed program, so every run-loop access is
@@ -567,8 +570,8 @@ impl RuntimeCache {
         if !self.stamp_job.is_queued() {
             return Ok(());
         }
-        let mut job = std::mem::take(&mut self.stamp_job);
-        let (job, resolved) = tokio::task::spawn_blocking(move || {
+        let mut job = mem::take(&mut self.stamp_job);
+        let (job, resolved) = task::spawn_blocking(move || {
             let resolved = job.run(&cancel);
             (job, resolved)
         })
@@ -598,8 +601,7 @@ impl RuntimeCache {
         contexts: &mut ContextStore,
         cancel: CancelToken,
     ) -> Result<ReuseOutcome, StampError> {
-        self.identify(program, std::iter::once(node_idx), cancel)
-            .await?;
+        self.identify(program, iter::once(node_idx), cancel).await?;
         self.stamp_digest(program, node_idx);
         Ok(self
             .hydrate_reuse(program, node_idx, demand, contexts)

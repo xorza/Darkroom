@@ -24,6 +24,7 @@ use crate::math::urect::URect;
 use crate::math::vec2us::Vec2us;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
+use std::mem;
 
 /// Tile grid with precomputed centers and spline coefficients for interpolation.
 #[derive(Debug)]
@@ -196,7 +197,7 @@ impl TileGrid {
             out.sigma = median_mut(&mut sigmas[..count]);
         });
 
-        std::mem::swap(&mut self.stats, scratch);
+        mem::swap(&mut self.stats, scratch);
     }
 
     /// Precompute second derivatives in Y for natural cubic spline interpolation.

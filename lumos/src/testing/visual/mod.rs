@@ -9,10 +9,15 @@ pub(crate) mod report;
 
 use image::GrayImage;
 use imaginarium::{ColorFormat, Image, ImageDesc};
+#[cfg(feature = "real-data")]
+use std::fs;
 use std::path::Path;
+use std::path::PathBuf;
 
 #[cfg(feature = "real-data")]
 use crate::bit_buffer2::BitBuffer2;
+#[cfg(feature = "real-data")]
+use crate::io::image::linear::LinearImage;
 use crate::{
     math::size2us::Size2us, stacking::star_detection::star::Star,
     testing::synthetic::observe::ObservedSource,
@@ -73,7 +78,7 @@ impl ToneMap {
 
 /// Build an output path with the configured test image extension.
 /// Takes a base path and replaces or adds the extension from `TEST_OUTPUT_IMAGE_EXT`.
-pub(crate) fn output_path(base: &Path) -> std::path::PathBuf {
+pub(crate) fn output_path(base: &Path) -> PathBuf {
     base.with_extension(TEST_OUTPUT_IMAGE_EXT)
 }
 
@@ -173,11 +178,11 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> image::Rgb<u8> {
 /// conversion. The multi-channel counterpart to [`save`], which takes one f32 plane and tone-maps
 /// it here; this one has colour to preserve and no single plane to map.
 #[cfg(feature = "real-data")]
-pub(crate) fn save_linear(image: &crate::io::image::linear::LinearImage, name: &str) {
+pub(crate) fn save_linear(image: &LinearImage, name: &str) {
     use common::internals::test_output_path;
 
     let path = test_output_path(name);
-    std::fs::create_dir_all(path.parent().unwrap()).expect("create test_output dir");
+    fs::create_dir_all(path.parent().unwrap()).expect("create test_output dir");
     Image::from(image)
         .convert(ColorFormat::RGB_U8)
         .save_file(&path)

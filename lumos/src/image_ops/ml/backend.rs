@@ -8,6 +8,7 @@
 //! running tiles concurrently (one `Session` per worker) was measured slower *and* exhausted RAM.
 //! ~60 s for a full 24 MP frame on a 10-core machine.
 
+use std::array;
 use std::path::PathBuf;
 
 use ort::session::Session;
@@ -195,7 +196,7 @@ fn accumulate(out: &[f32], tile: Vec2us, w: usize, acc: &mut [Vec<f32>; 3], weig
 /// Normalize the feather-weighted accumulation into an image matching the input's channels.
 fn build_output(rgb: bool, acc: &[Vec<f32>; 3], weight: &[f32], size: Size2us) -> LinearImage {
     if rgb {
-        LinearImage::from(std::array::from_fn::<_, 3, _>(|c| {
+        LinearImage::from(array::from_fn::<_, 3, _>(|c| {
             let px = acc[c]
                 .iter()
                 .zip(weight)
@@ -229,7 +230,7 @@ mod tests {
     fn a_tile_reads_from_its_own_origin_with_each_channel_in_its_own_model_slot() {
         // 640² so the tile origin is not forced to (0,0) and an off-by-one in the row stride shows.
         let (side, tile) = (640usize, Vec2us::new(128, 96));
-        let planar = LinearImage::from(std::array::from_fn::<_, 3, _>(|c| {
+        let planar = LinearImage::from(array::from_fn::<_, 3, _>(|c| {
             ramp(side, side, c as f32 * 0.5)
         }));
         let mut input = vec![0.0f32; WINDOW * WINDOW * 3];

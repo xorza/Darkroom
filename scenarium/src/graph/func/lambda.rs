@@ -1,3 +1,6 @@
+use std::fmt;
+use std::fmt::Debug;
+use std::fmt::Formatter;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -86,8 +89,8 @@ impl FuncLambda {
     }
 }
 
-impl std::fmt::Debug for FuncLambda {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Debug for FuncLambda {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             FuncLambda::None => f.debug_struct("FuncLambda::None").finish(),
             FuncLambda::Lambda(_) => f.debug_struct("FuncLambda::Lambda").finish(),

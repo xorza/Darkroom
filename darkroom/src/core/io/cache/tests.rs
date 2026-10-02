@@ -36,7 +36,7 @@ fn build_creates_dir_and_self_ignoring_gitignore() {
     assert!(root.is_dir(), "cache dir created beside the document");
     let gitignore = root.join(".gitignore");
     assert_eq!(
-        std::fs::read_to_string(&gitignore).unwrap(),
+        fs::read_to_string(&gitignore).unwrap(),
         "*\n",
         "the cache folder ignores its own contents"
     );

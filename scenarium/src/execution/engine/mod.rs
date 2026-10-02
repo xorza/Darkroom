@@ -4,6 +4,7 @@
 
 mod error;
 
+use std::result;
 use std::sync::Arc;
 
 use common::{CancelToken, is_debug};
@@ -215,7 +216,7 @@ impl ExecutionEngine {
     }
 
     /// Self-consistency of the installed artifact and the cache aligned to it.
-    fn validate(&self) -> std::result::Result<(), InstallValidationError> {
+    fn validate(&self) -> result::Result<(), InstallValidationError> {
         let program = self
             .compiled
             .as_deref()
@@ -257,6 +258,7 @@ impl ExecutionEngine {
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::execution::identity::NodeIdx;
+    use std::result;
 
     use crate::DynamicValue;
     use crate::execution::cache::disk_store::DiskStore;
@@ -297,7 +299,7 @@ pub(crate) mod internals {
             &mut self,
             graph: &Graph,
             library: &Library,
-        ) -> std::result::Result<(), compile::error::CompileError> {
+        ) -> result::Result<(), compile::error::CompileError> {
             self.install(compile::Compiler::default().compile(graph, library)?.into());
             Ok(())
         }

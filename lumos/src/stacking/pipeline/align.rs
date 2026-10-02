@@ -1,5 +1,6 @@
 //! Detection, registration, warping, and combination of calibrated images.
 
+use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common::CancelToken;
@@ -19,6 +20,7 @@ use crate::stacking::registration::result::RegistrationError;
 use crate::stacking::star_detection::detector::DetectionResult;
 use crate::stacking::star_detection::detector::Diagnostics;
 
+use crate::memory;
 use crate::stacking::pipeline::config::{AlignStackConfig, Reference};
 use crate::stacking::pipeline::detector_pool::DetectorPool;
 use crate::stacking::pipeline::frame::{DetectedFrame, PipelineFrame};
@@ -50,7 +52,7 @@ pub fn align_and_stack(
     config.validate()?;
 
     // One reading for the run; see `AlignStackConfig::with_resolved_memory`.
-    let config = &config.with_resolved_memory(crate::memory::available_memory());
+    let config = &config.with_resolved_memory(memory::available_memory());
     let total = lights.len();
     // The inputs are already decoded and resident, so only the warped outputs and the per-frame
     // scratch are still in question.
@@ -167,7 +169,7 @@ pub(crate) fn register_warp_and_stack(
     // The master follows the alignment anchor rather than whichever frame reaches combine first.
     let metadata = detected[reference].image.metadata().clone();
     let dimensions = detected[reference].image.dimensions();
-    let ref_stars = std::mem::take(&mut detected[reference].stars);
+    let ref_stars = mem::take(&mut detected[reference].stars);
     tracing::info!(
         reference,
         ref_stars = ref_stars.len(),

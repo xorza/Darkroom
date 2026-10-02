@@ -25,7 +25,9 @@ mod controls;
 mod glyph;
 
 use scenarium::NodeId;
+use std::fmt;
 use std::fmt::Display;
+use std::fmt::Formatter;
 
 use palantir::prelude::*;
 use palantir::widget::Shape;
@@ -444,7 +446,7 @@ struct HeaderReadout<'a> {
 }
 
 impl Display for HeaderReadout<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let DrawableImage {
             handle,
             native_size,

@@ -141,10 +141,11 @@ pub(super) unsafe fn asinh_color_preserve_avx2(
 #[cfg(test)]
 mod tests {
     use crate::image_ops::stretching::simd::avx2::*;
+    use imaginarium::cpu_features;
 
     #[test]
     fn avx2_matches_scalar_reference() {
-        if !imaginarium::cpu_features::has_avx2_fma() {
+        if !cpu_features::has_avx2_fma() {
             return;
         }
         let beta = 0.05f32;

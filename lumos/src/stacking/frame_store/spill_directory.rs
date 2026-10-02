@@ -8,6 +8,7 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use sysinfo::{Pid, ProcessesToUpdate, System};
@@ -71,7 +72,7 @@ fn create_run_directory(root: &Path) -> io::Result<PathBuf> {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     loop {
         let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let path = root.join(format!("{RUN_PREFIX}{}-{id}", std::process::id()));
+        let path = root.join(format!("{RUN_PREFIX}{}-{id}", process::id()));
         match fs::create_dir(&path) {
             Ok(()) => {
                 write_marker(&path)?;
@@ -114,7 +115,7 @@ fn remove_stale_runs(root: &Path) {
     let Ok(entries) = fs::read_dir(root) else {
         return;
     };
-    let own_pid = std::process::id();
+    let own_pid = process::id();
     let mut system = System::new();
     for entry in entries.flatten() {
         let name = entry.file_name();
@@ -139,6 +140,7 @@ fn remove_stale_runs(root: &Path) {
 
 #[cfg(test)]
 pub(crate) mod internals {
+    use std::fs;
     use std::path::{Path, PathBuf};
 
     use crate::stacking::frame_store::spill_directory::{MARKER, RUN_PREFIX, write_marker};
@@ -147,7 +149,7 @@ pub(crate) mod internals {
     /// process: Linux caps pids at 2²², and the other platforms well below `u32::MAX` too.
     pub(crate) fn stale_run_directory(root: &Path) -> PathBuf {
         let path = root.join(format!("{RUN_PREFIX}{}-0", u32::MAX));
-        std::fs::create_dir_all(&path).unwrap();
+        fs::create_dir_all(&path).unwrap();
         write_marker(&path).unwrap();
         path
     }

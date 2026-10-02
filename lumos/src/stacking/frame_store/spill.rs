@@ -6,6 +6,7 @@
 //! [`SpillDirectory`](crate::stacking::frame_store::spill_directory::SpillDirectory), which decides
 //! whether they outlive the run.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use arrayvec::ArrayVec;
@@ -103,7 +104,7 @@ impl<'a> FrameSpill<'a> {
 /// a time.
 fn plane_on_disk(path: &Path, dimensions: ImageDimensions) -> bool {
     let expected = (dimensions.pixel_count() * size_of::<f32>()) as u64;
-    std::fs::metadata(path).is_ok_and(|metadata| metadata.len() == expected)
+    fs::metadata(path).is_ok_and(|metadata| metadata.len() == expected)
 }
 
 /// What a cached frame's quality planes look like on disk.

@@ -1,5 +1,7 @@
 //! ONNX-backed denoise and star-removal nodes.
 
+use std::mem;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -30,7 +32,7 @@ pub(crate) fn replace(library: &mut Library, model_paths: &MlModelPaths) {
     register(library, model_paths);
 }
 
-fn register_denoise(library: &mut Library, model_path: &std::path::Path) {
+fn register_denoise(library: &mut Library, model_path: &Path) {
     library.add(
         Func::new(DENOISE_FUNC_ID, "ML Denoise")
             .description("Denoises a stretched image with an ONNX model (DeepSNR).")
@@ -54,7 +56,7 @@ fn register_denoise(library: &mut Library, model_path: &std::path::Path) {
                                 .expect("model input type is validated at the compile boundary"),
                         );
                         let output =
-                            runtime::run_ml(std::mem::take(&mut inputs[0]), move |mut image| {
+                            runtime::run_ml(mem::take(&mut inputs[0]), move |mut image| {
                                 MlDenoise::new(model).apply(&mut image)?;
                                 Ok(image)
                             })
@@ -67,7 +69,7 @@ fn register_denoise(library: &mut Library, model_path: &std::path::Path) {
     );
 }
 
-fn register_star_removal(library: &mut Library, model_path: &std::path::Path) {
+fn register_star_removal(library: &mut Library, model_path: &Path) {
     library.add(
         Func::new(STAR_REMOVAL_FUNC_ID, "ML Star Removal")
             .description("Removes stars with a StarNet ONNX model (starless + stars).")
@@ -100,22 +102,19 @@ fn register_star_removal(library: &mut Library, model_path: &std::path::Path) {
                                 .expect("model input type is validated at the compile boundary"),
                         );
                         if need_stars {
-                            let result =
-                                runtime::run_ml(std::mem::take(&mut inputs[0]), move |image| {
-                                    RemoveStars::new(model).split(image)
-                                })
-                                .await?;
+                            let result = runtime::run_ml(mem::take(&mut inputs[0]), move |image| {
+                                RemoveStars::new(model).split(image)
+                            })
+                            .await?;
                             outputs[0] = DynamicValue::from_custom(Image::from(result.starless));
                             outputs[1] = DynamicValue::from_custom(Image::from(result.stars));
                         } else {
-                            let starless = runtime::run_ml(
-                                std::mem::take(&mut inputs[0]),
-                                move |mut image| {
+                            let starless =
+                                runtime::run_ml(mem::take(&mut inputs[0]), move |mut image| {
                                     RemoveStars::new(model).apply(&mut image)?;
                                     Ok(image)
-                                },
-                            )
-                            .await?;
+                                })
+                                .await?;
                             outputs[0] = DynamicValue::from_custom(Image::from(starless));
                         }
                         Ok(())
@@ -129,7 +128,7 @@ fn frame_input() -> FuncInput {
     FuncInput::required("Image", IMAGE_DATA_TYPE.clone()).description("Image to process.")
 }
 
-fn model_input(name: &str, default: &std::path::Path) -> FuncInput {
+fn model_input(name: &str, default: &Path) -> FuncInput {
     FuncInput::required(
         name,
         DataType::FsPath(Arc::new(FsPathConfig::with_extensions(

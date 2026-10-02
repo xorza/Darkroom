@@ -11,6 +11,7 @@ use crate::astro::nodes::runtime;
 use crate::config_node::{ConfigValue, NodeConfig, config_data_type};
 use crate::image::IMAGE_DATA_TYPE;
 use scenarium::Invocation;
+use std::mem;
 
 pub(crate) fn register(library: &mut Library) {
     register_stretch(library);
@@ -42,7 +43,7 @@ fn register_stretch(library: &mut Library) {
                         debug_assert_eq!(inputs.len(), 2);
                         debug_assert_eq!(outputs.len(), 1);
                         let config = preset::resolve::<StretchKnobs, StretchPreset>(&inputs[1]);
-                        let value = std::mem::take(&mut inputs[0]);
+                        let value = mem::take(&mut inputs[0]);
                         outputs[0] =
                             runtime::run_frame_op(value, move |image| config.apply(image)).await?;
                         Ok(())
@@ -68,7 +69,7 @@ fn register_background(library: &mut Library) {
                 Box::pin(async move {
                     let config =
                         preset::resolve::<ExtractBackground, BackgroundModeKind>(&inputs[1]);
-                    let value = std::mem::take(&mut inputs[0]);
+                    let value = mem::take(&mut inputs[0]);
                     outputs[0] =
                         runtime::run_frame_op(value, move |image| config.apply(image)).await?;
                     Ok(())
@@ -103,7 +104,7 @@ fn register_denoise(library: &mut Library) {
                         },
                         |config| config.0,
                     );
-                    let value = std::mem::take(&mut inputs[0]);
+                    let value = mem::take(&mut inputs[0]);
                     outputs[0] =
                         runtime::run_frame_op(value, move |image| config.apply(image)).await?;
                     Ok(())
@@ -128,7 +129,7 @@ fn register_scnr(library: &mut Library) {
                   }| {
                 Box::pin(async move {
                     let method = preset::resolve::<ScnrKnobs, ScnrKind>(&inputs[1]);
-                    let value = std::mem::take(&mut inputs[0]);
+                    let value = mem::take(&mut inputs[0]);
                     outputs[0] =
                         runtime::run_frame_op(value, move |image| method.apply(image)).await?;
                     Ok(())
@@ -149,7 +150,7 @@ fn register_neutralize(library: &mut Library) {
                       inputs, outputs, ..
                   }| {
                 Box::pin(async move {
-                    let value = std::mem::take(&mut inputs[0]);
+                    let value = mem::take(&mut inputs[0]);
                     outputs[0] =
                         runtime::run_frame_op(value, |image| NeutralizeBackground.apply(image))
                             .await?;
@@ -185,7 +186,7 @@ fn register_hdr(library: &mut Library) {
                         },
                         |config| config.0,
                     );
-                    let value = std::mem::take(&mut inputs[0]);
+                    let value = mem::take(&mut inputs[0]);
                     outputs[0] =
                         runtime::run_frame_op(value, move |image| config.apply(image)).await?;
                     Ok(())
@@ -221,7 +222,7 @@ fn register_local_contrast(library: &mut Library) {
                             },
                             |config| config.0,
                         );
-                    let value = std::mem::take(&mut inputs[0]);
+                    let value = mem::take(&mut inputs[0]);
                     outputs[0] =
                         runtime::run_frame_op(value, move |image| config.apply(image)).await?;
                     Ok(())

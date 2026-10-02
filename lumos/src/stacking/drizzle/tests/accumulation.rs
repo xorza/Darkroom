@@ -1,4 +1,6 @@
 use super::*;
+use std::path::PathBuf;
+use std::ptr;
 
 #[test]
 fn drizzle_single_image() {
@@ -79,7 +81,7 @@ fn drizzle_stack_empty_paths() {
     let config = DrizzleConfig::default();
 
     let result = drizzle_stack(
-        Vec::<DrizzleFrame<std::path::PathBuf>>::new(),
+        Vec::<DrizzleFrame<PathBuf>>::new(),
         &config,
         &LoadContext::default(),
         ProgressCallback::default(),
@@ -220,7 +222,7 @@ fn drizzle_rgb_uses_shared_quality_planes() {
         (linear_variance.width(), linear_variance.height()),
         (100, 100)
     );
-    assert!(std::ptr::eq(
+    assert!(ptr::eq(
         result.weight.as_ref().unwrap().channel(0),
         result.weight.as_ref().unwrap().channel(2)
     ));

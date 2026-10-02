@@ -10,6 +10,7 @@ use palantir::prelude::*;
 
 use crate::gui::theme::inline_rename_theme::InlineRenameTheme;
 use crate::gui::widgets::edit_buffer::{DraftOutcome, EditBuffer};
+use std::mem;
 
 /// Cross-frame state for one inline-rename editor, held in palantir's
 /// `StateMap` under the editor's `WidgetId`.
@@ -222,7 +223,7 @@ impl<'a> InlineRename<'a> {
             };
         }
 
-        let mut draft = std::mem::take(&mut ui.state_or_default::<RenameState>(id).edit.text);
+        let mut draft = mem::take(&mut ui.state_or_default::<RenameState>(id).edit.text);
         // Both signals come off the editor, not off `ui`. A focused
         // `TextEdit` declares a `TEXT_FIELD` scope, which takes Enter
         // (`KeyClass::Text`) and Escape (`KeyClass::Escape`) — so polling

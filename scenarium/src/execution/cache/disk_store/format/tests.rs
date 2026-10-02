@@ -1,6 +1,8 @@
 use std::any::Any;
 use std::fmt;
+use std::io;
 use std::io::Cursor;
+use std::io::SeekFrom;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
@@ -42,7 +44,7 @@ where
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         output: &mut ReadBuf<'_>,
-    ) -> Poll<std::io::Result<()>> {
+    ) -> Poll<io::Result<()>> {
         if output.remaining() == 0 {
             return Poll::Ready(Ok(()));
         }
@@ -67,16 +69,16 @@ where
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         bytes: &[u8],
-    ) -> Poll<std::io::Result<usize>> {
+    ) -> Poll<io::Result<usize>> {
         let chunk_len = bytes.len().min(N);
         Pin::new(&mut self.get_mut().0).poll_write(cx, &bytes[..chunk_len])
     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         Pin::new(&mut self.get_mut().0).poll_flush(cx)
     }
 
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         Pin::new(&mut self.get_mut().0).poll_shutdown(cx)
     }
 }
@@ -85,11 +87,11 @@ impl<T, const N: usize> AsyncSeek for ChunkedIo<T, N>
 where
     T: AsyncSeek + Unpin,
 {
-    fn start_seek(self: Pin<&mut Self>, position: std::io::SeekFrom) -> std::io::Result<()> {
+    fn start_seek(self: Pin<&mut Self>, position: SeekFrom) -> io::Result<()> {
         Pin::new(&mut self.get_mut().0).start_seek(position)
     }
 
-    fn poll_complete(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<u64>> {
+    fn poll_complete(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<u64>> {
         Pin::new(&mut self.get_mut().0).poll_complete(cx)
     }
 }

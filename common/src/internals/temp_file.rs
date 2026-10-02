@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::internals;
+use std::fs;
 
 /// A temporary *path*, removed when the value drops — whether the test left a
 /// file there, a directory, or nothing at all.
@@ -39,8 +40,8 @@ impl TempFile {
 
 impl Drop for TempFile {
     fn drop(&mut self) {
-        if std::fs::remove_file(&self.0).is_err() {
-            std::fs::remove_dir_all(&self.0).ok();
+        if fs::remove_file(&self.0).is_err() {
+            fs::remove_dir_all(&self.0).ok();
         }
     }
 }

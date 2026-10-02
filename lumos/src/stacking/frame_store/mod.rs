@@ -7,6 +7,7 @@ pub(crate) mod spill;
 pub(crate) mod spill_directory;
 pub(crate) mod stored_plane;
 
+use std::fmt::Debug;
 use std::path::Path;
 
 use arrayvec::ArrayVec;
@@ -27,7 +28,7 @@ use crate::stacking::frame_store::spill::{FrameSpill, spill_channels, write_plan
 use crate::stacking::frame_store::stored_plane::StoredPlane;
 
 /// Image operations needed by the shared frame store.
-pub(crate) trait StackableImage: Send + Sync + std::fmt::Debug + Sized {
+pub(crate) trait StackableImage: Send + Sync + Debug + Sized {
     fn dimensions(&self) -> ImageDimensions;
     fn channel(&self, channel: usize) -> &[f32];
     fn metadata(&self) -> &ImageMetadata;

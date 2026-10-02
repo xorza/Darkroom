@@ -32,6 +32,7 @@
 //! tests are the hook). Everything downstream of the decode is exercised here on synthetic data.
 
 use crate::math::size2us::Size2us;
+use std::env;
 use std::hint::black_box;
 use std::io;
 use std::path::PathBuf;
@@ -67,7 +68,7 @@ fn pipeline_stack_budget_probe() -> io::Result<()> {
     // Default 2048 MB so the default 6000×6000 × 24 set (3.3 GB resident) overflows it → disk tier.
     let budget = parse_budget("LUMOS_PIPE_BUDGET", BudgetChoice::mb(2048));
 
-    let base = std::env::var("LUMOS_PIPE_DIR").map_or_else(
+    let base = env::var("LUMOS_PIPE_DIR").map_or_else(
         |_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tmp/lumos_pipeline_stack"),
         PathBuf::from,
     );

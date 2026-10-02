@@ -1,4 +1,5 @@
 use super::*;
+use std::fs;
 
 #[tokio::test]
 async fn explicit_cache_eviction_removes_the_downstream_ram_and_disk_cone() {
@@ -72,8 +73,8 @@ async fn explicit_cache_eviction_removes_the_downstream_ram_and_disk_cone() {
     // A blob that cannot be deleted is reported, and the rest of the cone
     // still evicts — one failure is not a reason to abandon the sweep.
     let blocked = e.blob_path("src_a");
-    std::fs::remove_file(&blocked).unwrap();
-    std::fs::create_dir(&blocked).unwrap();
+    fs::remove_file(&blocked).unwrap();
+    fs::create_dir(&blocked).unwrap();
 
     let failures = e.evict(["src_a"]).await;
     let [failure] = failures.as_slice() else {
@@ -307,8 +308,7 @@ async fn persist_node_lands_on_disk_before_its_consumer_runs() {
     g.add("watch", |n| {
         let (root, flag) = (root.clone(), Arc::clone(&blob_present));
         n.sink().input(DataType::Int).observes(move |_| {
-            let non_empty =
-                std::fs::read_dir(&root).is_ok_and(|mut entries| entries.next().is_some());
+            let non_empty = fs::read_dir(&root).is_ok_and(|mut entries| entries.next().is_some());
             flag.store(non_empty, Ordering::SeqCst);
         })
     });

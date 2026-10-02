@@ -1,3 +1,4 @@
+use std::future;
 use std::time::Duration;
 
 use crate::DataType;
@@ -9,6 +10,7 @@ use crate::graph::func::{Func, FuncInput, FuncOutput};
 use crate::graph::identity::FuncId;
 use crate::library::Library;
 use crate::runtime::shared_any_state::SharedAnyState;
+use tokio::time;
 use tokio::time::Instant;
 
 pub const FRAME_EVENT_FUNC_ID: FuncId = FuncId::from_u128(0x714dbc9a_ac0a_428b_90ee_eb13c1652c9e);
@@ -53,11 +55,11 @@ async fn wait_for_fps_event(state: SharedAnyState) {
         };
 
         let Some(delay) = delay else {
-            std::future::pending::<()>().await;
+            future::pending::<()>().await;
             return;
         };
         if !delay.is_zero() {
-            tokio::time::sleep(delay).await;
+            time::sleep(delay).await;
         }
 
         let mut state = state.lock().await;

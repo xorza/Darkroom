@@ -1,4 +1,6 @@
 use super::*;
+use crate::testing::graph::NodeSpec;
+use std::fs;
 
 /// Eviction is fire-and-forget: it happens inside the batch, before the
 /// acknowledgement, and reports nothing when it succeeds.
@@ -34,7 +36,7 @@ async fn an_eviction_failure_uses_the_general_worker_error_report() {
     let blocked = w.id("get_a");
     // A directory where the blob file belongs: removal fails on it.
     let blocked_path = dir.join(blocked.as_uuid().simple().to_string());
-    std::fs::create_dir(&blocked_path).unwrap();
+    fs::create_dir(&blocked_path).unwrap();
 
     w.settle([
         w.disk_store(dir.path()),
@@ -91,7 +93,7 @@ fn disk_cached_graph(calls: &Calls) -> TestGraph {
                 ConstValue::Int(value * value)
             })
     });
-    graph.add("print", crate::testing::graph::NodeSpec::records);
+    graph.add("print", NodeSpec::records);
     graph.wire("source", 0, "square", 0);
     graph.wire("square", 0, "print", 0);
     graph
@@ -159,7 +161,7 @@ async fn a_flush_failure_uses_the_general_worker_error_report() {
     // temporary beside it, and the publication onto the destination fails.
     let blocked = w.id("square");
     let blocked_path = dir.join(blocked.as_uuid().simple().to_string());
-    std::fs::create_dir(&blocked_path).unwrap();
+    fs::create_dir(&blocked_path).unwrap();
 
     // The sweep the host asks for once the store is attached.
     w.settle([w.disk_store(dir.path()), WorkerMessage::FlushAllCaches])

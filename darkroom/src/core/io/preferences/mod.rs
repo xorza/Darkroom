@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::PathBuf;
 
 use common::{SerdeFormat, deserialize, file_utils, serialize};
@@ -157,7 +158,7 @@ impl Preferences {
     /// file, parse error) degrades to the default rather than
     /// blocking startup — a corrupt preferences file shouldn't brick the app.
     pub(crate) fn load() -> Self {
-        match std::fs::read(Self::path()) {
+        match fs::read(Self::path()) {
             Ok(bytes) => deserialize(&bytes, SerdeFormat::Ron).unwrap_or_default(),
             Err(_) => Self::default(),
         }
@@ -177,8 +178,7 @@ impl Preferences {
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
         {
-            std::fs::create_dir_all(parent)
-                .map_err(|err| format!("preferences save failed: {err}"))?;
+            fs::create_dir_all(parent).map_err(|err| format!("preferences save failed: {err}"))?;
         }
         file_utils::publish_bytes(&path, &bytes, file_utils::PublicationMode::Durable)
             .map_err(|err| format!("preferences save failed: {err}"))

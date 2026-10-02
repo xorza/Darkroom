@@ -7,8 +7,13 @@
 pub(crate) mod error;
 
 use crate::execution::cache::resource::error::StampError;
+use std::fs;
+use std::fs::Metadata;
 use std::io;
+use std::mem;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use common::CancelToken;
 use hashbrown::HashSet;
@@ -30,8 +35,8 @@ pub(super) struct FileId {
 /// Split out from [`FileId::from_metadata`] because the pre-epoch arm is
 /// the whole point and setting a real file's mtime to 1969 needs a
 /// syscall this crate has no dependency for.
-fn epoch_offset_ns(time: std::time::SystemTime) -> i128 {
-    match time.duration_since(std::time::UNIX_EPOCH) {
+fn epoch_offset_ns(time: SystemTime) -> i128 {
+    match time.duration_since(UNIX_EPOCH) {
         Ok(after) => after.as_nanos() as i128,
         // Pre-epoch: the error carries the distance the other way.
         Err(before) => -(before.duration().as_nanos() as i128),
@@ -42,7 +47,7 @@ impl FileId {
     /// Fails when the filesystem reports no modification time. Length
     /// alone is not an identity — a same-length edit would reuse the
     /// cache — so the path is given up rather than stamped on half of it.
-    fn from_metadata(metadata: &std::fs::Metadata) -> io::Result<Self> {
+    fn from_metadata(metadata: &Metadata) -> io::Result<Self> {
         Ok(Self {
             len: metadata.len(),
             mtime_ns: epoch_offset_ns(metadata.modified()?),
@@ -154,7 +159,7 @@ impl StampJob {
     pub(super) fn run(&mut self, cancel: &CancelToken) -> Result<(), StampError> {
         // The queue steps out so the walk can borrow the rest of the job
         // while it drains, and steps back in empty, with its capacity.
-        let mut requests = std::mem::take(&mut self.requests);
+        let mut requests = mem::take(&mut self.requests);
         let mut failure = None;
         for path in requests.drain() {
             match self.stamp(&path, cancel) {
@@ -183,7 +188,7 @@ impl StampJob {
         }
         // Follows a symlinked root, unlike the walk below: the path a node
         // was handed names what it means to read.
-        let metadata = std::fs::metadata(path)?;
+        let metadata = fs::metadata(path)?;
         if metadata.is_dir() {
             self.stamp_directory(Path::new(path), cancel)
         } else {
@@ -222,7 +227,7 @@ impl StampJob {
         for rel in &self.files {
             // `symlink_metadata`, so the second pass reads a link exactly
             // as the first one classified it.
-            let metadata = std::fs::symlink_metadata(root.join(rel))?;
+            let metadata = fs::symlink_metadata(root.join(rel))?;
             hasher.write_len_prefixed(rel.as_os_str().as_encoded_bytes());
             FileId::from_metadata(&metadata)?.hash(&mut hasher);
         }
@@ -251,7 +256,7 @@ impl StampJob {
         self.pending.clear();
         self.pending.push(PathBuf::new());
         while let Some(rel_dir) = self.pending.pop() {
-            for entry in std::fs::read_dir(root.join(&rel_dir))? {
+            for entry in fs::read_dir(root.join(&rel_dir))? {
                 if cancel.is_cancelled() {
                     return Err(StampError::Cancelled);
                 }

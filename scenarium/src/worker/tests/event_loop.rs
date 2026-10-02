@@ -1,4 +1,5 @@
 use super::*;
+use std::future;
 
 /// The whole loop lifecycle end to end. The second run is the one an event
 /// *lambda* drove — it can only have come from the firing, since the
@@ -147,7 +148,7 @@ async fn one_task_panicking_stops_the_loop() {
     w.graph.edit_func("Frame Event", |func| {
         func.events[0].event_lambda =
             EventLambda::new(|_state| Box::pin(async { panic!("event loop stopped") }));
-        func.events[1].event_lambda = EventLambda::new(|_state| Box::pin(std::future::pending()));
+        func.events[1].event_lambda = EventLambda::new(|_state| Box::pin(future::pending()));
     });
     w.graph.subscribe("Frame Event", 1, "Print");
     let frame_event = w.id("Frame Event");

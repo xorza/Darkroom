@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashMap;
 
 #[test]
 fn vote_matrix_dense_mode() {
@@ -257,7 +258,7 @@ fn vote_for_correspondences_identical_triangles() {
         positions.len(),
     );
 
-    let votes: std::collections::HashMap<(usize, usize), usize> = vm
+    let votes: HashMap<(usize, usize), usize> = vm
         .nonzero_entries()
         .into_iter()
         .map(|(r, t, v)| ((r, t), v))

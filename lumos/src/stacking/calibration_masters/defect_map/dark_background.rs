@@ -16,6 +16,7 @@ use crate::math::vec2us::Vec2us;
 use crate::stacking::calibration_masters::defect_map::DARK_BACKGROUND_TILE_SIZE;
 use crate::stacking::calibration_masters::defect_map::sampling::collect_color_samples;
 use crate::stacking::combine::error::Error;
+use std::array;
 
 #[derive(Debug, Clone, Copy)]
 struct InterpolationSpan {
@@ -67,7 +68,7 @@ impl DarkBackground {
                 let x_end = (tx + 1) * width / tiles_x;
                 let y_start = ty * height / tiles_y;
                 let y_end = (ty + 1) * height / tiles_y;
-                let mut samples: [Vec<f32>; 3] = std::array::from_fn(|_| Vec::new());
+                let mut samples: [Vec<f32>; 3] = array::from_fn(|_| Vec::new());
 
                 for y in y_start..y_end {
                     for x in x_start..x_end {
@@ -86,7 +87,7 @@ impl DarkBackground {
             })
             .collect::<Result<_, Error>>()?;
 
-        let missing: [bool; 3] = std::array::from_fn(|color| {
+        let missing: [bool; 3] = array::from_fn(|color| {
             color < num_colors && tiles.iter().any(|tile| tile.values[color].is_nan())
         });
         for (color, &is_missing) in missing.iter().enumerate().take(num_colors) {

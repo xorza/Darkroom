@@ -1,3 +1,6 @@
+use std::fmt;
+use std::fmt::Debug;
+use std::fmt::Formatter;
 use std::{pin::Pin, sync::Arc};
 
 use crate::runtime::shared_any_state::SharedAnyState;
@@ -39,8 +42,8 @@ impl EventLambda {
     }
 }
 
-impl std::fmt::Debug for EventLambda {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Debug for EventLambda {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             EventLambda::None => f.debug_struct("EventLambda::None").finish(),
             EventLambda::Lambda(_) => f.debug_struct("EventLambda::Lambda").finish(),

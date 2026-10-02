@@ -8,6 +8,9 @@ pub(crate) mod nodes;
 
 use std::any::Any;
 use std::borrow::Cow;
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
 use std::sync::{Arc, LazyLock};
 
 use lumos::LinearImage;
@@ -140,8 +143,8 @@ impl CustomValue for Image {
     }
 }
 
-impl std::fmt::Display for Image {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for Image {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.desc())
     }
 }

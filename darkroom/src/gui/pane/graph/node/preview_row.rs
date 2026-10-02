@@ -8,7 +8,9 @@
 //! node body, so selection, dragging, the breaker, and the input wire all come
 //! from the node machinery unchanged.
 
+use std::fmt;
 use std::fmt::Display;
+use std::fmt::Formatter;
 
 use imaginarium::ColorFormat;
 use palantir::prelude::*;
@@ -142,7 +144,7 @@ fn info_row(ui: &mut Ui, theme: &Theme, image: &PreviewImage) {
 struct FormatLabel(ColorFormat);
 
 impl Display for FormatLabel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let bits = self.0.sample_type.bits();
         write!(f, "{} \u{b7} {bits}-bit", self.0.channel_count)
     }

@@ -156,7 +156,7 @@ inline_always = "allow"
 float_cmp = "allow"
 # Every pointer cast feeds an unaligned load (`_mm_loadu_*`).
 cast_ptr_alignment = "allow"
-absolute_paths = "allow" # pending
+absolute_paths = "warn"
 allow_attributes = "warn"
 allow_attributes_without_reason = "allow" # pending
 assigning_clones = "warn"

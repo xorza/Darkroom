@@ -38,6 +38,7 @@
 //! unavailable and the assertion is skipped.
 
 use crate::math::size2us::Size2us;
+use std::env;
 use std::io::{self, Write};
 use std::time::Instant;
 
@@ -54,7 +55,7 @@ use crate::testing::synthetic::fixtures::star_field;
 const WORKING_SET_PLANES: u64 = 12;
 
 fn preset_config() -> Config {
-    match std::env::var("LUMOS_SD_PRESET").ok().as_deref() {
+    match env::var("LUMOS_SD_PRESET").ok().as_deref() {
         None | Some("" | "default") => Config::default(),
         Some("wide") => Config::wide_field(),
         Some("high_res") => Config::high_resolution(),
@@ -86,7 +87,7 @@ fn detect_memory_probe() {
     );
     println!(
         "preset        {}",
-        std::env::var("LUMOS_SD_PRESET").unwrap_or_else(|_| "default".into())
+        env::var("LUMOS_SD_PRESET").unwrap_or_else(|_| "default".into())
     );
     println!(
         "detector      {}",

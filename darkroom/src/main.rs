@@ -18,6 +18,7 @@ mod gui;
 mod platform;
 
 use std::path::PathBuf;
+use std::process;
 
 use clap::Parser;
 use common::is_debug;
@@ -43,7 +44,7 @@ fn main() {
     let Cli { document } = Cli::parse();
     if let Err(error) = run_gui(document) {
         tracing::error!("darkroom: {error}");
-        std::process::exit(1);
+        process::exit(1);
     }
 }
 

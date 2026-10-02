@@ -4,6 +4,9 @@ use glam::DVec2;
 
 use crate::math::dmat3::DMat3;
 use crate::stacking::registration::distortion::sip::SipPolynomial;
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
 
 /// A concrete transformation model, in increasing degrees of freedom.
 ///
@@ -90,8 +93,8 @@ impl Default for Transform {
     }
 }
 
-impl std::fmt::Display for Transform {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for Transform {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let t = self.translation_components();
         let rotation_deg = self.rotation_angle().to_degrees();
         let scale = self.scale_factor();

@@ -15,6 +15,7 @@ use crate::gui::pane::graph::gesture::drag_anchor::GroupDrag;
 use crate::gui::requests::Requests;
 use palantir::{Track, Ui};
 use scenarium::NodeId;
+use std::mem;
 
 /// Owns rendering of every graph node plus the single active drag
 /// anchor — the press-frame positions are snapshotted here so each
@@ -118,7 +119,7 @@ impl NodeUI {
         // Swapped out for the sweep because each node hands the whole `NodeUI`
         // to its widget; it goes back below with its capacity, so only a graph
         // larger than every earlier one ever allocates here.
-        let mut order = std::mem::take(&mut self.paint_order);
+        let mut order = mem::take(&mut self.paint_order);
         let graph_ctx = dcx.graph_ctx();
         graph_ctx.paint_order(&mut order);
         for item in &order {

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::math::statistics::float::Float;
 use crate::math::sum::mean_f32;
+use std::iter;
 
 pub(crate) mod float;
 
@@ -230,7 +231,7 @@ impl<const N: usize> DeviationScratch for arrayvec::ArrayVec<f32, N> {
     /// `len` of it is ever used. Panics when `len > N` — a fixed buffer cannot grow.
     fn sized_to(&mut self, len: usize) -> &mut [f32] {
         self.clear();
-        self.extend(std::iter::repeat_n(0.0f32, len));
+        self.extend(iter::repeat_n(0.0f32, len));
         self.as_mut_slice()
     }
 }

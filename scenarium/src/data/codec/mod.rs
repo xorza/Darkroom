@@ -3,6 +3,7 @@
 pub(crate) mod error;
 
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::sync::Arc;
 
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -12,7 +13,7 @@ use crate::runtime::context::ContextStore;
 use crate::{CustomValue, TypeId};
 
 #[async_trait::async_trait]
-pub trait CustomValueCodec: Send + Sync + std::fmt::Debug {
+pub trait CustomValueCodec: Send + Sync + Debug {
     /// Version of this codec's persisted representation. Increment it whenever
     /// previously encoded bytes must not be decoded by the current implementation.
     fn version(&self) -> u32;

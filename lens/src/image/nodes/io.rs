@@ -1,5 +1,6 @@
 //! Standard image load and save nodes.
 
+use std::mem;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -11,6 +12,7 @@ use crate::config_node::enum_input;
 use crate::image::format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat, conversion_target};
 use crate::image::{IMAGE_DATA_TYPE, Image};
 use scenarium::Invocation;
+use tokio::task;
 
 pub(super) fn register(library: &mut Library) {
     register_load(library);
@@ -40,7 +42,7 @@ fn register_load(library: &mut Library) {
                                 .as_fs_path()
                                 .expect("path input type is validated at the compile boundary"),
                         );
-                        let image = tokio::task::spawn_blocking(move || {
+                        let image = task::spawn_blocking(move || {
                             imaginarium::Image::read_file(path).map_err(InvokeError::external)
                         })
                         .await
@@ -76,7 +78,7 @@ fn register_save(library: &mut Library) {
             .lambda(FuncLambda::new(move |Invocation { inputs, .. }| {
                 Box::pin(async move {
                     debug_assert_eq!(inputs.len(), 3);
-                    let value = std::mem::take(&mut inputs[0]);
+                    let value = mem::take(&mut inputs[0]);
                     let path = PathBuf::from(
                         inputs[1]
                             .as_fs_path()
@@ -96,7 +98,7 @@ fn register_save(library: &mut Library) {
                             .interleaved()
                             .into_owned(),
                     };
-                    tokio::task::spawn_blocking(move || {
+                    task::spawn_blocking(move || {
                         match conversion_target(&format, cpu_image.desc().color_format) {
                             Some(target) => cpu_image.convert_to(target).save_file(path),
                             None => cpu_image.save_file(path),

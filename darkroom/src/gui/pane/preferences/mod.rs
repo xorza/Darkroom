@@ -10,6 +10,7 @@
 //! return [`PrefsCommand::PickMlModel`] so `App` can open the blocking dialog
 //! after authoring has released its borrows.
 
+use std::mem;
 use std::path::{Path, PathBuf};
 
 use palantir::FontWeight;
@@ -218,7 +219,7 @@ fn model_row(ui: &mut Ui, theme: &Theme, row: ModelRow, path: &mut PathBuf, out:
     }
     let field = ui.state_or_default::<PathField>(id);
     let problem = field.problem;
-    let mut draft = std::mem::take(&mut field.text);
+    let mut draft = mem::take(&mut field.text);
     Panel::vstack()
         .id_salt(label)
         .size((Sizing::FILL, Sizing::HUG))
@@ -369,6 +370,8 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::iter;
 
     use common::{TempDir, TempFile};
     use palantir::internals::UiHarness;
@@ -388,10 +391,10 @@ mod tests {
         assert_eq!(path_problem(&missing.to_str()), Some("File not found"));
         // Real files: a wrong extension flags; `.onnx` passes in any case.
         let wrong = TempFile::with_extension("darkroom-path-wrong", "txt");
-        std::fs::write(wrong.path(), b"x").unwrap();
+        fs::write(wrong.path(), b"x").unwrap();
         assert_eq!(path_problem(&wrong.to_str()), Some("Not an .onnx file"));
         let onnx = TempFile::with_extension("darkroom-path-upper", "ONNX");
-        std::fs::write(onnx.path(), b"x").unwrap();
+        fs::write(onnx.path(), b"x").unwrap();
         assert_eq!(path_problem(&onnx.to_str()), None);
     }
 
@@ -412,7 +415,7 @@ mod tests {
         let mut frame = |h: &mut UiHarness, path: &mut PathBuf| {
             let mut out = Requests::default();
             h.frame(|ui| model_row(ui, &theme, row, path, &mut out));
-            std::iter::from_fn(|| out.pop_app())
+            iter::from_fn(|| out.pop_app())
                 .filter(|command| matches!(command, AppCommand::Prefs(PrefsCommand::Changed)))
                 .count()
         };

@@ -7,6 +7,7 @@
 //! Or with samply:
 //!   samply record -r 4999 ./`target/release/examples/profile_star_detection`
 
+use std::hint;
 use std::thread;
 use std::time::Duration;
 
@@ -73,7 +74,7 @@ fn main() {
     for i in 0..iterations {
         let stars = detector.detect(&image);
         // Prevent optimization
-        std::hint::black_box(&stars);
+        hint::black_box(&stars);
         if (i + 1) % 10 == 0 {
             eprintln!(
                 "  Completed {}/{} iterations, found {} stars",

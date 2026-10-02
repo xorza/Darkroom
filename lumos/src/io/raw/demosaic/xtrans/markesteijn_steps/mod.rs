@@ -12,6 +12,7 @@ use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
 use crate::concurrency::UnsafeSendPtr;
+use std::mem;
 
 /// Direction offsets for derivative computation.
 /// Maps direction index to (dy, dx) offset for the spatial Laplacian.
@@ -728,8 +729,8 @@ pub(crate) fn compute_derivatives(
 
                     // Slide window: prev <- center <- next, compute new next row
                     let [r0, r1, r2] = rows;
-                    std::mem::swap(r0, r1);
-                    std::mem::swap(r1, r2);
+                    mem::swap(r0, r1);
+                    mem::swap(r1, r2);
                     if y + 2 < height {
                         compute_ypbpr_row(xtrans, green_dir, colors, green_base, y + 2, r2);
                     }

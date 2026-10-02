@@ -32,6 +32,8 @@
 //! only when the edit commits.
 
 use std::borrow::Cow;
+use std::fmt;
+use std::fmt::Formatter;
 use std::fmt::{Display, Write as _};
 use std::path::Path;
 
@@ -317,7 +319,7 @@ impl<'a> PathPreview<'a> {
 }
 
 impl Display for PathPreview<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Prompt(prompt) => f.write_str(prompt),
             Self::Name(name) => f.write_str(name),

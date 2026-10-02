@@ -24,6 +24,7 @@ use std::collections::VecDeque;
 use std::ops::Range;
 
 use common::SerdeFormat;
+use common::serde;
 
 use crate::core::document::Document;
 use crate::core::edit::step::gesture_key::GestureKey;
@@ -237,14 +238,14 @@ impl ActionStack {
             "undo stack should not store empty step batches"
         );
         let start = buffer.len();
-        common::serde::serialize_into(steps, SerdeFormat::Bitcode, buffer, &mut Vec::new())
+        serde::serialize_into(steps, SerdeFormat::Bitcode, buffer, &mut Vec::new())
             .expect("bitcode serialize of in-memory undo steps is infallible");
         let end = buffer.len();
         start..end
     }
 
     fn deserialize_steps(bytes: &[u8]) -> Vec<UndoStep> {
-        common::serde::deserialize(bytes, SerdeFormat::Bitcode).unwrap()
+        serde::deserialize(bytes, SerdeFormat::Bitcode).unwrap()
     }
 
     fn slice_bytes<'a>(buffer: &'a [u8], range: &Range<usize>) -> &'a [u8] {

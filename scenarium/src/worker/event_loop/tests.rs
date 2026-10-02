@@ -1,6 +1,7 @@
 use super::*;
 
 use tokio::sync::Notify;
+use tokio::time;
 use tokio::time::{Duration, timeout};
 
 use crate::graph::func::event::EventLambda;
@@ -108,11 +109,11 @@ async fn pause_gate_blocks_event_loop_iterations() {
     let _guard = pause_gate.close();
 
     // Record count after closing gate
-    tokio::time::sleep(Duration::from_millis(20)).await;
+    time::sleep(Duration::from_millis(20)).await;
     let count_at_close = invoke_count.load(Ordering::SeqCst);
 
     // Wait and verify no new invocations while gate is closed
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    time::sleep(Duration::from_millis(100)).await;
     let count_while_closed = invoke_count.load(Ordering::SeqCst);
 
     // At most one more invocation might have slipped through
@@ -125,7 +126,7 @@ async fn pause_gate_blocks_event_loop_iterations() {
     drop(_guard);
 
     // Wait for more events to flow
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    time::sleep(Duration::from_millis(100)).await;
     let count_after_reopen = invoke_count.load(Ordering::SeqCst);
 
     assert!(

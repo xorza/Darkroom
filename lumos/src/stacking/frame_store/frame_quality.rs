@@ -9,6 +9,9 @@
 use imaginarium::Buffer2;
 
 use crate::stacking::frame_store::StackableImage;
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
 
 /// Which of a frame's planes a validation failure is about.
 ///
@@ -39,8 +42,8 @@ impl FramePlane {
     }
 }
 
-impl std::fmt::Display for FramePlane {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for FramePlane {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::Channel => "a channel",
             Self::Coverage => "coverage",

@@ -21,6 +21,7 @@ use crate::gui::pane::graph::GraphUI;
 use crate::gui::pane::graph::node::port_row::port_circle_wid;
 use crate::gui::pane::graph::node::wid;
 use crate::gui::requests::{DocumentRequest, Requests};
+use std::iter;
 
 /// Surface every canvas test records at unless it is about size. Wide enough
 /// that [`DocFixture`]'s row of nodes lands on screen uncropped.
@@ -103,7 +104,7 @@ impl CanvasHarness {
             })
             .collect();
         commands.clear();
-        commands.extend(std::iter::from_fn(|| out.pop_app()));
+        commands.extend(iter::from_fn(|| out.pop_app()));
         intents
     }
 

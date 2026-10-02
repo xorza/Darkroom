@@ -1,4 +1,5 @@
 use crate::io::image::cfa::CfaType;
+use crate::math::statistics;
 use crate::memory::ChunkMemoryLayout;
 use crate::stacking::combine::cache::*;
 use crate::stacking::combine::rejection::Rejection;
@@ -483,7 +484,7 @@ fn calibration_frames_combine_through_the_same_engine_as_lights() {
     // Median of [1, 3, 2] = 2 at every pixel.
     let cache = make_cfa_cache(vec![vec![1.0; 4], vec![3.0; 4], vec![2.0; 4]], dims);
     let median = cache.process_chunked(None, None, planes, |values, _, _| {
-        let value = crate::math::statistics::median_mut(values);
+        let value = statistics::median_mut(values);
         CombinedSample::value_only(value, values.len())
     });
     assert_eq!(median.pixels.channel_count(), 1);

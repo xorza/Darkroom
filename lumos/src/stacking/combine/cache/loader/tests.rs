@@ -128,12 +128,12 @@ fn load_and_cache_frame_reuse() {
 
     // A same-path, same-size rewrite within one second must invalidate at nanosecond precision.
     let rewritten_pixels: Vec<f32> = (200..212).map(|i| i as f32).collect();
-    let original_len = std::fs::metadata(&collided_path).unwrap().len();
+    let original_len = fs::metadata(&collided_path).unwrap().len();
     LinearImage::from_pixels(dims, rewritten_pixels.clone())
         .save(&collided_path)
         .unwrap();
     assert_eq!(
-        std::fs::metadata(&collided_path).unwrap().len(),
+        fs::metadata(&collided_path).unwrap().len(),
         original_len,
         "the timestamp, not file length, distinguishes this rewrite"
     );
@@ -204,7 +204,7 @@ fn source_meta_detects_size_and_precise_mtime_changes() {
     let temp_dir = ScratchDirectory::new("test_source_meta_validates");
 
     let source = temp_dir.join("source.fits");
-    std::fs::write(&source, b"aaaaaaaa").unwrap();
+    fs::write(&source, b"aaaaaaaa").unwrap();
     let missing = temp_dir.join("missing.fits");
     let error = source_identity(&missing).unwrap_err();
     assert!(matches!(
@@ -233,7 +233,7 @@ fn source_meta_detects_size_and_precise_mtime_changes() {
     // Now validation should pass
     assert!(validate_source_meta(&temp_dir, base, &identity));
 
-    std::fs::write(&source, b"bbbbbbbb").unwrap();
+    fs::write(&source, b"bbbbbbbb").unwrap();
     OpenOptions::new()
         .write(true)
         .open(&source)
@@ -246,7 +246,7 @@ fn source_meta_detects_size_and_precise_mtime_changes() {
     assert!(!validate_source_meta(&temp_dir, base, &precise_rewrite));
 
     write_source_meta(&temp_dir, base, &precise_rewrite).unwrap();
-    std::fs::write(&source, b"longer than eight bytes").unwrap();
+    fs::write(&source, b"longer than eight bytes").unwrap();
     OpenOptions::new()
         .write(true)
         .open(&source)
@@ -328,7 +328,7 @@ fn frame_stats_sidecar_roundtrip() {
 
     // Corrupt file returns None
     let corrupt_path = stats_path(&temp_dir, "corrupt.bin");
-    std::fs::write(&corrupt_path, b"bad").unwrap();
+    fs::write(&corrupt_path, b"bad").unwrap();
     assert!(read_frame_stats(&temp_dir, "corrupt.bin").is_none());
 
     // A sidecar carrying a different layout tag is rejected rather than decoded — bitcode is not
@@ -342,7 +342,7 @@ fn frame_stats_sidecar_roundtrip() {
         SerdeFormat::Bitcode,
     )
     .unwrap();
-    std::fs::write(stats_path(&temp_dir, "stale_format.bin"), stale).unwrap();
+    fs::write(stats_path(&temp_dir, "stale_format.bin"), stale).unwrap();
     assert!(read_frame_stats(&temp_dir, "stale_format.bin").is_none());
 
     // Decoding cleanly is not enough: a sigma that would poison every weight derived from it is
@@ -362,7 +362,7 @@ fn frame_stats_sidecar_roundtrip() {
     }
 
     let blocker = temp_dir.join("not_a_directory");
-    std::fs::write(&blocker, b"file").unwrap();
+    fs::write(&blocker, b"file").unwrap();
     let error = write_frame_stats(&blocker, base, &stats_1ch).unwrap_err();
     let expected_path = blocker.join("test_frame.stats");
     assert!(matches!(
@@ -436,7 +436,7 @@ fn missing_stats_sidecar_forces_reload() {
     // Delete only the .stats sidecar
     let sp = stats_path(&temp_dir, base_filename);
     assert!(sp.exists());
-    std::fs::remove_file(&sp).unwrap();
+    fs::remove_file(&sp).unwrap();
 
     // Second call — should reload (not panic) and recompute stats
     let reloaded_stats = load_test_frame(&temp_dir, base_filename, &source_path, dims, 0)

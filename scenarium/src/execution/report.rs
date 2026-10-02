@@ -13,6 +13,7 @@
 //! appears at most once, so nothing downstream has to reassemble it from several lists,
 //! and no consumer's fold order can change what a node's result was.
 
+use std::fmt::Debug;
 use std::time::Instant;
 
 use crate::RamUsage;
@@ -136,7 +137,7 @@ pub(crate) struct RunProgress {
 ///
 /// `Send` because the run future crosses threads; `Debug` so the structs carrying one still
 /// derive it.
-pub(crate) trait RunReporter: Send + std::fmt::Debug {
+pub(crate) trait RunReporter: Send + Debug {
     fn progress(&mut self, progress: RunProgress);
 }
 

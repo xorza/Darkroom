@@ -4,6 +4,9 @@
 //! `Display` reports which masters the bundle carries.
 
 use std::any::Any;
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
 use std::sync::{Arc, LazyLock};
 
 use lumos::CalibrationMasters;
@@ -43,8 +46,8 @@ impl CustomValue for Masters {
     }
 }
 
-impl std::fmt::Display for Masters {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for Masters {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let mut components = self.masters.components().peekable();
         if components.peek().is_none() {
             return f.write_str("no masters");

@@ -4,6 +4,7 @@
 //! gated once, at the module, instead of one `cfg` per `use` in a file that is mostly feature-free.
 
 use common::CancelToken;
+use common::file_utils;
 use common::internals::test_output_path;
 
 use crate::io::image::PREVIEW_IMAGE_EXTENSIONS;
@@ -39,7 +40,7 @@ fn load_single_raw_from_env() {
         return;
     }
 
-    let files = common::file_utils::files_with_extensions(&lights_dir, raw::RAW_EXTENSIONS)
+    let files = file_utils::files_with_extensions(&lights_dir, raw::RAW_EXTENSIONS)
         .expect("scan RAW lights directory");
     let Some(first_file) = files.first() else {
         eprintln!("No image files in Lights, skipping test");

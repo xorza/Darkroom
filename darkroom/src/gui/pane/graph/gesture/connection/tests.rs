@@ -1,5 +1,6 @@
 use palantir::internals::UiHarness;
 use scenarium::NodeId;
+use scenarium::testing::graph::NodeSpec;
 use scenarium::testing::graph::TestGraph;
 
 use super::*;
@@ -18,7 +19,7 @@ use crate::gui::pane::graph::node::port_row::port_circle_wid;
 /// needs to name both ends.
 fn fixture() -> (GraphCtxFixture, NodeId, NodeId) {
     let mut g = TestGraph::new();
-    g.add("producer", scenarium::testing::graph::NodeSpec::mult);
+    g.add("producer", NodeSpec::mult);
     g.instance("consumer", "producer");
     g.wire("producer", 0, "consumer", 0);
     let (producer, consumer) = (g.id("producer"), g.id("consumer"));

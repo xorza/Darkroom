@@ -1,3 +1,4 @@
+use scenarium::testing::graph::NodeSpec;
 use scenarium::testing::graph::TestGraph;
 use scenarium::{Binding, CacheMode, DataType, Graph, InputPort, Node, NodeKind};
 
@@ -38,7 +39,7 @@ fn only_runnable_sinks_expose_the_disable_toggle() {
     // The third node names a func the library has never held.
     let mut g = TestGraph::new();
     let plain = g.add("plain", |n| n.output(DataType::Int));
-    let sink = g.add("sink_func", scenarium::testing::graph::NodeSpec::sink);
+    let sink = g.add("sink_func", NodeSpec::sink);
     let ghost = g.graph.add(Node::new(NodeKind::Func(FuncId::unique())));
     let mut fixture = GraphCtxFixture::over(g);
     let graph_ctx = fixture.graph_ctx();

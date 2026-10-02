@@ -5,6 +5,7 @@ use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
 use common::{SerdeFormat, file_utils};
+use zip::result::ZipError;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
@@ -29,13 +30,13 @@ pub(crate) enum DocumentLoadError {
     InvalidArchive {
         path: PathBuf,
         #[source]
-        source: zip::result::ZipError,
+        source: ZipError,
     },
     #[error("failed to inspect {path}: {source}", path = .path.display())]
     InspectArchive {
         path: PathBuf,
         #[source]
-        source: zip::result::ZipError,
+        source: ZipError,
     },
     #[error("{path} contains overlapping ZIP entries", path = .path.display())]
     OverlappingEntries { path: PathBuf },
@@ -45,7 +46,7 @@ pub(crate) enum DocumentLoadError {
     OpenDocumentEntry {
         path: PathBuf,
         #[source]
-        source: zip::result::ZipError,
+        source: ZipError,
     },
     #[error("{path} contains a non-file {DOCUMENT_ENTRY} entry", path = .path.display())]
     NonFileDocumentEntry { path: PathBuf },

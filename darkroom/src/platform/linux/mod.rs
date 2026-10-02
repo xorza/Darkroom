@@ -1,5 +1,6 @@
 //! Linux. See [`crate::platform`] for the surface every OS module implements.
 
+use std::env;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::Command;
@@ -19,10 +20,7 @@ pub(super) fn url_opener() -> Command {
 pub(super) fn config_dir() -> Option<PathBuf> {
     // Flatpak points XDG_CONFIG_HOME at its per-app config directory; a
     // hardcoded ~/.config would land outside what the sandbox grants.
-    resolve_config_dir(
-        std::env::var_os("XDG_CONFIG_HOME"),
-        std::env::var_os("HOME"),
-    )
+    resolve_config_dir(env::var_os("XDG_CONFIG_HOME"), env::var_os("HOME"))
 }
 
 /// Environment passed in, so resolution is testable without `set_var`.

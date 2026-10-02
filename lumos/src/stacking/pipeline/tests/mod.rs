@@ -25,6 +25,7 @@ use crate::stacking::registration::transform::{
     Transform, TransformModel, TransformType, WarpTransform,
 };
 use crate::stacking::star_detection::config::Config as StarDetectionConfig;
+use crate::stacking::star_detection::config::detection_config::DetectionConfig;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::synthetic::fixtures::star_field;
 use crate::testing::{ScratchDirectory, make_cfa};
@@ -483,7 +484,7 @@ fn public_input_errors() {
 
     let config = AlignStackConfig {
         detection: StarDetectionConfig {
-            detection: crate::stacking::star_detection::config::detection_config::DetectionConfig {
+            detection: DetectionConfig {
                 sigma_threshold: 0.0,
                 ..Default::default()
             },

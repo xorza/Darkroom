@@ -1,3 +1,4 @@
+use std::io;
 use std::path::PathBuf;
 
 use thiserror::Error;
@@ -27,10 +28,7 @@ pub enum ImageError {
     Raw { path: PathBuf, reason: String },
 
     #[error("Failed to read file '{path}': {source}")]
-    Io {
-        path: PathBuf,
-        source: std::io::Error,
-    },
+    Io { path: PathBuf, source: io::Error },
 
     #[error("Unsupported file extension: '{extension}'")]
     UnsupportedFormat { extension: String },

@@ -256,6 +256,7 @@ impl GlyphShape {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::f32::consts::PI;
 
     #[test]
     fn enlarged_diameter_grows_by_the_outline_width_on_each_side() {
@@ -283,7 +284,7 @@ mod tests {
         let inset = (hit - size) * 0.5;
         let center = Vec2::splat(hit * 0.5);
         let apex = Vec2::new(inset + size - size * 0.0, inset + size * 0.5);
-        let turned = center + Vec2::from_angle(std::f32::consts::PI).rotate(apex - center);
+        let turned = center + Vec2::from_angle(PI).rotate(apex - center);
         // Apex sits `size/2` right of center; a half turn puts it `size/2` left.
         assert!(
             (apex.x - center.x - size * 0.5).abs() < 1e-4,

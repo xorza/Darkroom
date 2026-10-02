@@ -1,4 +1,7 @@
 use super::*;
+use std::future;
+use tokio::task;
+use tokio::time;
 
 /// `exit` drains the event tasks — dropping their futures — and publishes
 /// idle before returning, after which the worker refuses messages.
@@ -25,7 +28,7 @@ async fn exit_waits_for_active_event_cleanup_and_the_idle_report() {
             Box::pin(async move {
                 let _drop = EventFutureDrop(dropped);
                 entered.notify_one();
-                std::future::pending::<()>().await;
+                future::pending::<()>().await;
             })
         });
     });
@@ -71,7 +74,7 @@ async fn exit_cancels_active_execution_before_joining() {
                             observed_cancel.store(true, Ordering::SeqCst);
                             return Err(InvokeError::Cancelled);
                         }
-                        tokio::task::yield_now().await;
+                        task::yield_now().await;
                     }
                 })
             }))
@@ -106,7 +109,7 @@ async fn drop_without_exit_shuts_down_cleanly() {
     }
 
     let before = reports.count();
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    time::sleep(Duration::from_millis(50)).await;
     assert_eq!(
         before,
         reports.count(),

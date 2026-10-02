@@ -9,6 +9,9 @@
 //! from execution; inbound is a plain `std::sync::mpsc` because the consumer
 //! is the synchronous frame loop on the main thread.
 
+use std::fmt;
+use std::fmt::Debug;
+use std::fmt::Formatter;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
@@ -30,8 +33,8 @@ pub(crate) struct WorkerBridge {
     runtime: BackgroundRuntime,
 }
 
-impl std::fmt::Debug for WorkerBridge {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Debug for WorkerBridge {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("WorkerBridge").finish_non_exhaustive()
     }
 }
@@ -178,6 +181,7 @@ impl Drop for WorkerBridge {
 mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::thread;
     use std::time::{Duration, Instant};
 
     use scenarium::{
@@ -255,7 +259,7 @@ mod tests {
                 "only {} of {delivered} delivered reports woke the host",
                 wake_count.load(Ordering::SeqCst),
             );
-            std::thread::yield_now();
+            thread::yield_now();
         }
         assert_eq!(
             wake_count.load(Ordering::SeqCst),

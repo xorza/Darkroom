@@ -14,6 +14,7 @@
 //! [`sample`](TestGraph::sample), where a test can retarget one body without
 //! reaching every other node built from the same shape.
 
+use std::io;
 use std::sync::Arc;
 
 use hashbrown::HashMap;
@@ -342,7 +343,7 @@ impl TestGraph {
 
 /// The body both `fails` methods install, so the two cannot drift.
 fn failing_lambda(message: &'static str) -> FuncLambda {
-    async_lambda!(move |_| { Err(InvokeError::external(std::io::Error::other(message))) })
+    async_lambda!(move |_| { Err(InvokeError::external(io::Error::other(message))) })
 }
 
 /// One node's declaration under construction — [`Func`]'s builders, plus the

@@ -4,6 +4,7 @@ use crate::image_ops::internals::channel_plane as channel;
 use crate::image_ops::wavelet::atrous_smooth;
 use crate::testing::images::gray_image as gray;
 use crate::testing::prelude::*;
+use std::mem;
 
 /// A smooth radial brightness dome — bright center (~1.0), dark corners (~0.1). The large-scale
 /// brightness HDR is meant to compress.
@@ -130,7 +131,7 @@ fn reference_hdr(px: &[f32], size: Size2us, scales: usize, amount: f32) -> Vec<f
                 .map(|(&c, &n)| c - n)
                 .collect(),
         );
-        std::mem::swap(&mut c_curr, &mut c_next);
+        mem::swap(&mut c_curr, &mut c_next);
     }
     let residual = c_curr.pixels();
     let mean = residual.iter().sum::<f32>() / residual.len() as f32;

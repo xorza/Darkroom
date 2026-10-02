@@ -28,9 +28,14 @@ use crate::{
     CalibrationComponent, CalibrationMasters, CalibrationSet, DefectSummary, ImageError,
     ImageMetadata, MasterRole,
 };
+use common::internals;
 use fits_well::FitsReader;
 use fits_well::image::Bitpix;
 use fits_well::io::ChecksumStatus;
+use std::fs;
+use std::io::ErrorKind;
+use std::path::PathBuf;
+use std::process;
 
 #[test]
 fn weighted_budget_never_overcommits() {
@@ -528,7 +533,7 @@ fn every_component_round_trips_through_its_extname() {
 #[test]
 fn from_files_all_empty_yields_no_masters() {
     // Empty frame sets must produce a `None` for every master (no file I/O path).
-    let empty: Vec<std::path::PathBuf> = Vec::new();
+    let empty: Vec<PathBuf> = Vec::new();
     let masters = CalibrationMasters::from_files(
         CalibrationSet {
             dark: &empty,
@@ -1214,11 +1219,11 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     let mut expected = constant_cfa(Size2us::new(4, 4), 0.75, cfa_type.clone());
     masters.calibrate(&mut expected).unwrap();
 
-    let cache_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".tmp");
-    std::fs::create_dir_all(&cache_dir).unwrap();
+    let cache_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".tmp");
+    fs::create_dir_all(&cache_dir).unwrap();
     let path = cache_dir.join(format!(
         "calibration_masters_roundtrip_{}.fits",
-        std::process::id()
+        process::id()
     ));
     masters.save(&path).unwrap();
     assert!(matches!(
@@ -1226,7 +1231,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         Err(ImageError::FitsUnsupported { reason, .. })
             if reason.contains("CALMASTR") && reason.contains("standalone CFAIMAGE")
     ));
-    let cache_bytes = std::fs::read(&path).unwrap();
+    let cache_bytes = fs::read(&path).unwrap();
     let mut reader = FitsReader::from_bytes(&cache_bytes).unwrap();
     assert_eq!(reader.hdus().len(), 5);
     assert_eq!(reader.hdus()[0].header.naxis().unwrap(), 0);
@@ -1267,10 +1272,10 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         .rposition(u8::is_ascii_digit)
         .unwrap();
     invalid_version[version_card + version_digit] = b'0';
-    std::fs::write(&path, invalid_version).unwrap();
+    fs::write(&path, invalid_version).unwrap();
     assert_eq!(
         CalibrationMasters::load(&path).unwrap_err().kind(),
-        std::io::ErrorKind::InvalidData
+        ErrorKind::InvalidData
     );
 
     let mut invalid_data = cache_bytes.clone();
@@ -1281,12 +1286,12 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         .position(|window| window == repeated_sample)
         .unwrap();
     invalid_data[pixel_offset] ^= 0x01;
-    std::fs::write(&path, invalid_data).unwrap();
+    fs::write(&path, invalid_data).unwrap();
     assert_eq!(
         CalibrationMasters::load(&path).unwrap_err().kind(),
-        std::io::ErrorKind::InvalidData
+        ErrorKind::InvalidData
     );
-    std::fs::remove_file(path).unwrap();
+    fs::remove_file(path).unwrap();
 
     assert_eq!(
         loaded
@@ -1338,10 +1343,10 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
 
 #[test]
 fn empty_master_fits_bundle_round_trips_as_a_checksummed_primary_hdu() {
-    let path = common::internals::test_output_path("empty_calibration_masters.fits");
+    let path = internals::test_output_path("empty_calibration_masters.fits");
     CalibrationMasters::default().save(&path).unwrap();
 
-    let bytes = std::fs::read(&path).unwrap();
+    let bytes = fs::read(&path).unwrap();
     let mut reader = FitsReader::from_bytes(&bytes).unwrap();
     assert_eq!(reader.hdus().len(), 1);
     let report = reader.verify_checksum(0).unwrap();
@@ -1398,7 +1403,7 @@ fn stack_cfa_master_rejects_an_invalid_config_before_reading_anything() {
     // rejects every sample at every pixel and yields a silently black master; a negative one
     // inverts the clip band and faults on the survivor range. Both are configuration errors and
     // must be reported as such.
-    let missing = [std::path::PathBuf::from(".tmp/does-not-exist.fits")];
+    let missing = [PathBuf::from(".tmp/does-not-exist.fits")];
 
     for rejection in [Rejection::sigma_clip(f32::NAN), Rejection::sigma_clip(-1.0)] {
         let config = StackConfig {

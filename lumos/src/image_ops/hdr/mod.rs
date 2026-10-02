@@ -16,6 +16,7 @@ use crate::image_ops::wavelet::{atrous_smooth, max_scales};
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use imaginarium::Buffer2;
+use std::mem;
 
 #[cfg(test)]
 mod tests;
@@ -102,7 +103,7 @@ fn hdr_map(intensity: &Buffer2<f32>, config: &Hdr) -> Buffer2<f32> {
     let mut tmp = Buffer2::new_default(size.width, size.height);
     for j in 0..scales {
         atrous_smooth(&c_curr, &mut c_next, &mut tmp, 1 << j);
-        std::mem::swap(&mut c_curr, &mut c_next);
+        mem::swap(&mut c_curr, &mut c_next);
     }
     let mut residual = c_curr;
 

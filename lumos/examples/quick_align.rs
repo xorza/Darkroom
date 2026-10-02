@@ -19,6 +19,7 @@ use lumos::{
 };
 use std::env;
 use std::path::Path;
+use std::process;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -28,7 +29,7 @@ fn main() {
             args[0]
         );
         eprintln!("Supported formats: linear FITS and floating-point TIFF");
-        std::process::exit(1);
+        process::exit(1);
     }
 
     let ref_path = Path::new(&args[1]);

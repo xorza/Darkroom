@@ -81,8 +81,8 @@ pub enum IntegerValue {
     Unsigned(u128),
 }
 
-impl std::fmt::Display for IntegerValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for IntegerValue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Signed(value) => value.fmt(f),
             Self::Unsigned(value) => value.fmt(f),
@@ -306,6 +306,9 @@ pub trait IntrospectEnum: Sized {
 
 #[cfg(any(test, feature = "introspect-derive"))]
 pub use common_derive::{Introspect, IntrospectEnum};
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
 
 #[cfg(test)]
 mod tests;

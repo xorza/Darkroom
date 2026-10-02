@@ -18,6 +18,7 @@ use crate::image_ops::wavelet::{atrous_smooth, max_scales};
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::{mad_to_sigma, mad_with_scratch, median_mut};
+use std::mem;
 
 #[cfg(test)]
 mod tests;
@@ -234,7 +235,7 @@ fn denoise_plane(
                 *p -= strength * (w - threshold.apply(w, t));
             });
 
-        std::mem::swap(c_curr, c_next); // c_curr = c_{j+1}
+        mem::swap(c_curr, c_next); // c_curr = c_{j+1}
     }
 }
 

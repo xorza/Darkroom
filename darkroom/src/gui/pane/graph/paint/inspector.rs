@@ -21,7 +21,9 @@
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::fmt;
 use std::fmt::Display;
+use std::fmt::Formatter;
 
 use palantir::prelude::*;
 use palantir::{FontWeight, TextInput, TextWrap, ZoomFactor};
@@ -364,7 +366,7 @@ impl<'a> PortLabel<'a> {
 }
 
 impl Display for PortLabel<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_str(self.name)?;
         match &self.ty_name {
             Some(ty_name) => write!(f, " · {ty_name}"),

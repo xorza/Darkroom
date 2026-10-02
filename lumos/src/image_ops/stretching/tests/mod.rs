@@ -5,6 +5,7 @@ use crate::image_ops::internals::channel_plane as channel;
 use crate::image_ops::stretching::*;
 use crate::testing::images::{gray_image as gray, rgb_image as rgb};
 use crate::testing::prelude::*;
+use std::iter;
 
 fn median_of(v: &[f32]) -> f32 {
     let mut c = v.to_vec();
@@ -281,7 +282,7 @@ fn ghs_d_controls_strength() {
 #[test]
 fn ghs_end_to_end_lifts_background_and_stays_in_range() {
     let mut px: Vec<f32> = (0..90).map(|i| 0.04 + (i % 3) as f32 * 0.01).collect();
-    px.extend(std::iter::repeat_n(0.8f32, 10));
+    px.extend(iter::repeat_n(0.8f32, 10));
     let mut img = gray(Size2us::new(10, 10), px.clone());
     Stretch::ghs(5.0, 0.0, 0.1).apply(&mut img).unwrap();
     let out = channel(&img, 0).to_vec();
@@ -375,7 +376,7 @@ fn end_to_end_gray_auto_stf_brightens_background_to_target() {
     for i in 0..90 {
         px.push(0.04 + (i % 3) as f32 * 0.01); // {0.04, 0.05, 0.06} -> median 0.05, MAD 0.01
     }
-    px.extend(std::iter::repeat_n(0.6f32, 10));
+    px.extend(iter::repeat_n(0.6f32, 10));
     let input_median = median_of(&px);
 
     let mut img = gray(Size2us::new(10, 10), px);

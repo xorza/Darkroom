@@ -8,6 +8,8 @@ use std::io;
 use std::path::PathBuf;
 
 use common::file_utils::{AtomicFile, PublicationMode};
+use tokio::fs;
+use tokio::fs::File;
 use tokio::io::{AsyncWriteExt as _, BufWriter};
 
 use crate::DynamicValue;
@@ -54,7 +56,7 @@ impl BlobTarget {
     /// permanent and invisible; reporting it is what makes it
     /// diagnosable, since nothing here can force the unlink through.
     async fn delete(&self) {
-        if let Err(error) = tokio::fs::remove_file(&self.path).await
+        if let Err(error) = fs::remove_file(&self.path).await
             && error.kind() != io::ErrorKind::NotFound
         {
             tracing::error!(
@@ -98,7 +100,7 @@ impl DiskStore {
         let Some(path) = self.node_path(node_id) else {
             return Ok(());
         };
-        match tokio::fs::remove_file(&path).await {
+        match fs::remove_file(&path).await {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
             Err(source) => Err(RemovalError { path, source }),
@@ -112,8 +114,8 @@ impl DiskStore {
     /// target yet — while `Err` is a filesystem that would not answer. Both mean
     /// "cannot serve" to every caller; only whether that is worth reporting
     /// differs, and that is the caller's to decide.
-    async fn open_blob(&self, target: &BlobTarget) -> io::Result<Option<(tokio::fs::File, u64)>> {
-        let file = match tokio::fs::File::open(&target.path).await {
+    async fn open_blob(&self, target: &BlobTarget) -> io::Result<Option<(File, u64)>> {
+        let file = match File::open(&target.path).await {
             Ok(file) => file,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error),
@@ -206,7 +208,7 @@ impl DiskStore {
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
         {
-            tokio::fs::create_dir_all(parent)
+            fs::create_dir_all(parent)
                 .await
                 .map_err(|source| StoreError::Directory {
                     path: path(),
@@ -258,6 +260,7 @@ impl DiskStore {
 
 #[cfg(test)]
 pub(crate) mod internals {
+    use std::fs;
     use std::path::PathBuf;
 
     use crate::execution::cache::disk_store::{DiskStore, format};
@@ -278,9 +281,9 @@ pub(crate) mod internals {
             let path = self
                 .node_path(node_id)
                 .expect("a disk-backed store has a root");
-            let mut bytes = std::fs::read(&path).unwrap();
+            let mut bytes = fs::read(&path).unwrap();
             bytes[format::internals::body_offset(output_count)] = u8::MAX;
-            std::fs::write(&path, bytes).unwrap();
+            fs::write(&path, bytes).unwrap();
         }
     }
 }

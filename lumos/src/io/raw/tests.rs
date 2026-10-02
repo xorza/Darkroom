@@ -1,6 +1,7 @@
 use crate::testing::ScratchDirectory;
 
 use crate::io::raw::*;
+use std::array;
 
 #[test]
 fn load_raw_invalid_path() {
@@ -516,8 +517,8 @@ fn xtrans_direct_and_calibration_black_corrections_match() {
                 active: Size2us::new(6, 6),
                 margin: Vec2us::new(left_margin, top_margin),
             };
-            let visible_pattern = std::array::from_fn(|y| {
-                std::array::from_fn(|x| raw_pattern[(y + top_margin) % 6][(x + left_margin) % 6])
+            let visible_pattern = array::from_fn(|y| {
+                array::from_fn(|x| raw_pattern[(y + top_margin) % 6][(x + left_margin) % 6])
             });
             let active_cfa = CfaType::XTrans(visible_pattern);
             let direct = XTransImage::with_margins(

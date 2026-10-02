@@ -10,6 +10,9 @@
 //! and the comparison.
 
 use crate::testing::assertions::is_close;
+use std::fmt;
+use std::fmt::Debug;
+use std::fmt::Formatter;
 
 /// A named way of filling a row. `seed` lets a caller draw several decorrelated rows of the same
 /// shape, which is what the three-row kernels need.
@@ -18,8 +21,8 @@ pub(crate) struct DataShape {
     fill: fn(usize, usize) -> Vec<f32>,
 }
 
-impl std::fmt::Debug for DataShape {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Debug for DataShape {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("DataShape")
             .field("name", &self.name)
             .finish()

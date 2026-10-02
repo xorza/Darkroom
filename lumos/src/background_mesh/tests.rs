@@ -1,6 +1,7 @@
 use crate::background_mesh::workspace::internals::compute_grid;
 use crate::background_mesh::*;
 use crate::math::statistics::mad_to_sigma;
+use std::iter;
 
 /// Number of sigma-clipping iterations for tests.
 const TEST_SIGMA_CLIP_ITERATIONS: usize = 2;
@@ -758,7 +759,7 @@ fn y_spline_derivatives_two_rows() {
     let width = 64;
     let height = 64;
     let data: Vec<f32> = (0..height)
-        .flat_map(|y| std::iter::repeat_n(y as f32 / height as f32, width))
+        .flat_map(|y| iter::repeat_n(y as f32 / height as f32, width))
         .collect();
     let pixels = Buffer2::new(width, height, data);
     let grid = make_grid(&pixels, 32);
@@ -776,7 +777,7 @@ fn y_spline_derivatives_natural_bc() {
     let width = 64;
     let height = 128;
     let data: Vec<f32> = (0..height)
-        .flat_map(|y| std::iter::repeat_n(y as f32 / height as f32, width))
+        .flat_map(|y| iter::repeat_n(y as f32 / height as f32, width))
         .collect();
     let pixels = Buffer2::new(width, height, data);
     let grid = make_grid(&pixels, 32);
@@ -809,7 +810,7 @@ fn y_spline_derivatives_quadratic_gradient() {
     let data: Vec<f32> = (0..height)
         .flat_map(|y| {
             let val = (y as f32 / height as f32).powi(2); // [0, 1)
-            std::iter::repeat_n(val, width)
+            iter::repeat_n(val, width)
         })
         .collect();
 

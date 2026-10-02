@@ -1,3 +1,6 @@
+use std::error::Error;
+
+use ron::ser;
 use ron::value::RawValue;
 
 use crate::EventLambda;
@@ -12,8 +15,10 @@ use crate::graph::{Binding, InputPort, NodeId, OutputPort, Subscription};
 use crate::testing::graph::{NodeSpec, TestGraph};
 use crate::{ConstValue, DataType, DetachedNode};
 use common::{SerdeFormat, deserialize, serialize};
+use std::panic;
+use std::panic::AssertUnwindSafe;
 
-type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 
 /// The effective type at one of `name`'s output ports, through the graph's one
 /// resolver.
@@ -554,7 +559,7 @@ fn wiring_snapshot_round_trips_through_serde_and_restore() -> TestResult {
         let serialized = serialize(&invalid, SerdeFormat::Ron)?;
         let decoded_invalid: DetachedNode = deserialize(&serialized, SerdeFormat::Ron)?;
         let detached_graph = g.graph.clone_verbatim();
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let result = panic::catch_unwind(AssertUnwindSafe(|| {
             g.graph.attach_node(decoded_invalid);
         }));
         assert!(result.is_err());
@@ -666,10 +671,10 @@ fn loading_rejects_a_corrupt_graph() {
         subscriptions: Box<RawValue>,
     }
 
-    let encoded = ron::ser::to_string(&TestGraph::sample().graph).unwrap();
+    let encoded = ser::to_string(&TestGraph::sample().graph).unwrap();
     let mut wire: WireGraph = ron::from_str(&encoded).expect("the wire shape still matches");
     wire.bindings.push(wire.bindings[0].clone());
-    let bytes = ron::ser::to_string(&wire).unwrap().into_bytes();
+    let bytes = ser::to_string(&wire).unwrap().into_bytes();
     let error = deserialize::<Graph>(&bytes, SerdeFormat::Ron)
         .expect_err("a duplicate input port cannot decode into the binding map");
     assert!(

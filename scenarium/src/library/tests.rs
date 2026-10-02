@@ -1,4 +1,6 @@
 use crate::graph::identity::FuncId;
+use std::panic;
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -49,7 +51,7 @@ fn registration_rejects_duplicate_ids_without_replacing_entries() {
     let func_id = FuncId::unique();
     let mut library = Library::default();
     library.add(testing::with_stub_lambda(Func::new(func_id, "Before")));
-    let duplicate_func = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let duplicate_func = panic::catch_unwind(AssertUnwindSafe(|| {
         library.add(testing::with_stub_lambda(Func::new(func_id, "After")));
     }));
     assert!(duplicate_func.is_err());
@@ -57,7 +59,7 @@ fn registration_rejects_duplicate_ids_without_replacing_entries() {
 
     let type_id = TypeId::unique();
     library.register_type(type_id, TypeEntry::custom("Before"));
-    let duplicate_type = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let duplicate_type = panic::catch_unwind(AssertUnwindSafe(|| {
         library.register_type(type_id, TypeEntry::custom("After"));
     }));
     assert!(duplicate_type.is_err());
@@ -73,7 +75,7 @@ fn add_rejects_invalid_function_declarations() {
             .wildcard_output("value", 1),
         Func::new(FuncId::unique(), "missing"),
     ] {
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let result = panic::catch_unwind(AssertUnwindSafe(|| {
             Library::default().add(func);
         }));
         assert!(result.is_err(), "invalid declaration was registered");
@@ -97,7 +99,7 @@ fn an_enum_declaration_over_a_custom_registration_is_refused_either_order() {
     let type_id = TypeId::unique();
     let mut library = Library::default();
     library.register_type(type_id, TypeEntry::custom("Opaque"));
-    let func_after = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let func_after = panic::catch_unwind(AssertUnwindSafe(|| {
         library.add(modal_func(type_id, "fast"));
     }));
     assert!(
@@ -115,7 +117,7 @@ fn an_enum_declaration_over_a_custom_registration_is_refused_either_order() {
     let type_id = TypeId::unique();
     let mut library = Library::default();
     library.add(modal_func(type_id, "fast"));
-    let type_after = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let type_after = panic::catch_unwind(AssertUnwindSafe(|| {
         library.register_type(type_id, TypeEntry::custom("Opaque"));
     }));
     assert!(
@@ -197,7 +199,7 @@ fn register_type_rejecting_an_earlier_enum_default_installs_nothing() {
     let mut library = Library::default();
     library.add(modal_func(type_id, "slothful"));
 
-    let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let rejected = panic::catch_unwind(AssertUnwindSafe(|| {
         library.register_type(type_id, mode_entry());
     }));
     let message = *rejected

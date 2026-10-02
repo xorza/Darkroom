@@ -1,5 +1,6 @@
 //! Streaming disk-cache codec for [`Image`].
 
+use std::error;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -16,7 +17,7 @@ use crate::image::Image;
 const VERSION: u32 = 3;
 const HEADER_LEN: u64 = 2 + 8 + 8;
 
-type BoxError = Box<dyn std::error::Error + Send + Sync>;
+type BoxError = Box<dyn error::Error + Send + Sync>;
 
 #[derive(Debug)]
 struct ImageCodec;
