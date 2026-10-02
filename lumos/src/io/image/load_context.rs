@@ -31,9 +31,7 @@ impl LoadContext {
 
     pub(crate) fn check_cancelled(&self, path: &Path) -> Result<(), ImageError> {
         if self.cancel.is_cancelled() {
-            return Err(ImageError::Cancelled {
-                path: path.to_path_buf(),
-            });
+            return Err(ImageError::cancelled(path));
         }
         Ok(())
     }

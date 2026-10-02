@@ -1,4 +1,5 @@
 use crate::io::raw::demosaic::xtrans::internals::{test_pattern, test_pattern_array};
+use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPatternError;
 use crate::io::raw::demosaic::xtrans::*;
 
 #[test]
@@ -69,51 +70,14 @@ fn xtrans_pattern_invalid_metadata() {
         }
     );
 
-    let raw_data = vec![0u16; 12 * 12];
-    assert_eq!(
-        process_xtrans(
-            &raw_data,
-            SensorLayout {
-                raw: Size2us::new(12, 12),
-                active: Size2us::new(6, 6),
-                margin: Vec2us::new(3, 3),
-            },
-            invalid_value_pattern,
-            XTransNormalization {
-                channel_black: [0.0; 3],
-                span: 1.0,
-                black_repeat: None,
-            },
-            &CancelToken::never(),
-        )
-        .unwrap_err(),
-        DemosaicError::InvalidXTransPattern(XTransPatternError::Value {
-            row: 1,
-            column: 2,
-            value: 3,
-        })
-    );
-
-    let calibrated = vec![0.0f32; 12 * 12];
-    assert!(matches!(
-        process_xtrans_f32(
-            &calibrated,
-            SensorLayout {
-                raw: Size2us::new(12, 12),
-                active: Size2us::new(6, 6),
-                margin: Vec2us::new(3, 3),
-            },
-            invalid_value_pattern,
-            &CancelToken::never(),
-        ),
-        Err(DemosaicError::InvalidXTransPattern(
-            XTransPatternError::Value {
-                row: 1,
-                column: 2,
-                value: 3,
-            }
-        ))
-    ));
+    // Deserializing checks the layout too, so a stored pattern cannot come back invalid.
+    let stored = common::serialize(&test_pattern(), common::SerdeFormat::Ron).unwrap();
+    let restored: XTransPattern = common::deserialize(&stored, common::SerdeFormat::Ron).unwrap();
+    assert_eq!(restored, test_pattern());
+    let mut corrupted = invalid_value_pattern;
+    corrupted[1][2] = 3;
+    let stored = common::serialize(&corrupted, common::SerdeFormat::Ron).unwrap();
+    assert!(common::deserialize::<XTransPattern>(&stored, common::SerdeFormat::Ron).is_err());
 }
 
 #[test]
@@ -192,7 +156,7 @@ fn process_xtrans_output_size() {
             active: Size2us::new(6, 6),
             margin: Vec2us::new(3, 3),
         },
-        test_pattern_array(),
+        test_pattern(),
         XTransNormalization {
             channel_black: [0.0; 3],
             span: 4096.0,
@@ -222,7 +186,7 @@ fn process_xtrans_normalization() {
             active: Size2us::new(6, 6),
             margin: Vec2us::new(3, 3),
         },
-        test_pattern_array(),
+        test_pattern(),
         XTransNormalization {
             channel_black: [black; 3],
             span: range,
@@ -252,7 +216,7 @@ fn process_xtrans_clamps_below_black() {
             active: Size2us::new(6, 6),
             margin: Vec2us::new(3, 3),
         },
-        test_pattern_array(),
+        test_pattern(),
         XTransNormalization {
             channel_black: [black; 3],
             span: range,
@@ -281,7 +245,7 @@ fn process_xtrans_full_range() {
             active: Size2us::new(6, 6),
             margin: Vec2us::new(3, 3),
         },
-        test_pattern_array(),
+        test_pattern(),
         XTransNormalization {
             channel_black: [black; 3],
             span,
@@ -337,7 +301,7 @@ fn process_xtrans_f32_output_size() {
             active: Size2us::new(6, 6),
             margin: Vec2us::new(3, 3),
         },
-        test_pattern_array(),
+        test_pattern(),
         &CancelToken::never(),
     )
     .unwrap();
@@ -354,7 +318,7 @@ fn process_xtrans_f32_uniform() {
             active: Size2us::new(6, 6),
             margin: Vec2us::new(3, 3),
         },
-        test_pattern_array(),
+        test_pattern(),
         &CancelToken::never(),
     )
     .unwrap();
@@ -372,7 +336,7 @@ fn f32_demosaic_preserves_signed_native_samples() {
     let height = 18;
     let top = 6;
     let left = 6;
-    let pattern = test_pattern_array();
+    let pattern = test_pattern();
     let data: Vec<f32> = (0..raw_width * raw_height)
         .map(|index| (index % 17) as f32 * 0.25 - 2.0)
         .collect();
@@ -393,7 +357,7 @@ fn f32_demosaic_preserves_signed_native_samples() {
         for x in 0..width {
             let raw_y = y + top;
             let raw_x = x + left;
-            let channel = pattern[raw_y % 6][raw_x % 6] as usize;
+            let channel = pattern.color_at(Vec2us::new(raw_x, raw_y)) as usize;
             let expected = data[raw_y * raw_width + raw_x];
             let actual = rgb[channel][y * width + x];
             assert!(
@@ -425,7 +389,7 @@ fn f32_demosaic_is_equivariant_to_a_uniform_pedestal() {
                 active: Size2us::new(width, height),
                 margin: Vec2us::new(left, top),
             },
-            test_pattern_array(),
+            test_pattern(),
             &CancelToken::never(),
         )
         .unwrap()
@@ -479,7 +443,7 @@ fn process_xtrans_f32_matches_u16_path() {
             active: Size2us::new(width, height),
             margin: Vec2us::new(margin, margin),
         },
-        test_pattern_array(),
+        test_pattern(),
         XTransNormalization {
             channel_black: [black; 3],
             span,
@@ -495,7 +459,7 @@ fn process_xtrans_f32_matches_u16_path() {
             active: Size2us::new(width, height),
             margin: Vec2us::new(margin, margin),
         },
-        test_pattern_array(),
+        test_pattern(),
         &CancelToken::never(),
     )
     .unwrap();

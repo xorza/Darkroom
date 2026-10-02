@@ -13,6 +13,7 @@ use imaginarium::FileFormat;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::io::cancelled::Cancelled;
 use crate::io::image::cfa::same_color::SameColorMedian;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::{cfa as fits_cfa, decode as fits_decode};
@@ -24,11 +25,12 @@ use crate::io::image::load_context::LoadContext;
 use crate::io::image::null_mask::NullMask;
 use crate::io::image::standard::{FITS_EXTENSIONS, file_extension, scientific_rejection};
 use crate::io::raw;
+use crate::io::raw::demosaic::DemosaicMemory;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::bayer::rcd;
 use crate::io::raw::demosaic::sensor_layout::SensorLayout;
 use crate::io::raw::demosaic::xtrans::markesteijn;
-use crate::io::raw::demosaic::{DemosaicError, DemosaicMemory};
+use crate::io::raw::demosaic::xtrans::xtrans_pattern::{XTransPattern, XTransPatternError};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::frame_store::{FramePeek, StackableImage};
@@ -47,7 +49,7 @@ pub enum CfaType {
     /// 2x2 Bayer pattern
     Bayer(CfaPattern),
     /// 6x6 X-Trans pattern
-    XTrans([[u8; 6]; 6]),
+    XTrans(XTransPattern),
 }
 
 impl CfaType {
@@ -58,7 +60,7 @@ impl CfaType {
         match self {
             CfaType::Mono => 0,
             CfaType::Bayer(p) => p.color_at(pos) as u8,
-            CfaType::XTrans(pattern) => pattern[pos.y % 6][pos.x % 6],
+            CfaType::XTrans(pattern) => pattern.color_at(pos),
         }
     }
 
@@ -75,17 +77,22 @@ impl CfaType {
     ///
     /// `None` covers `filters == 0` with three colours — a linear DNG, sRAW or Foveon, whose
     /// samples LibRaw unpacks already per pixel and so never as a mosaic — and a filter word that
-    /// is neither X-Trans nor a 2×2 Bayer phase.
-    pub(crate) fn from_libraw(filters: u32, colors: i32, xtrans: [[u8; 6]; 6]) -> Option<Self> {
+    /// is neither X-Trans nor a 2×2 Bayer phase. An X-Trans sensor whose layout is not one is an
+    /// error: the file is corrupt, not exotic.
+    pub(crate) fn from_libraw(
+        filters: u32,
+        colors: i32,
+        xtrans: [[u8; 6]; 6],
+    ) -> Result<Option<Self>, XTransPatternError> {
         if colors == 1 {
-            return Some(Self::Mono);
+            return Ok(Some(Self::Mono));
         }
-        match filters {
+        Ok(match filters {
             0 => None,
             // LibRaw's marker for the 6×6 X-Trans layout, whose pattern it keeps apart.
-            9 => Some(Self::XTrans(xtrans)),
+            9 => Some(Self::XTrans(XTransPattern::new(xtrans)?)),
             _ => CfaPattern::from_filters(filters).map(Self::Bayer),
-        }
+        })
     }
 
     /// The memory a demosaic of a `dimensions` frame of this pattern holds at once.
@@ -139,7 +146,7 @@ impl CfaFrameInfo {
         if FITS_EXTENSIONS.contains(&extension.as_str()) {
             fits_decode::fits_cfa_frame_info(path, context)
         } else if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {
-            raw::raw_cfa_frame_info(path, &context.cancel)
+            raw::raw_cfa_frame_info(path, context)
         } else {
             Err(scientific_rejection(
                 path,
@@ -230,7 +237,7 @@ impl CfaImage {
             return fits_decode::load_cfa_fits(path, context);
         }
         if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {
-            return raw::load_raw_cfa(path, &context.cancel);
+            return raw::load_raw_cfa(path, context);
         }
         if FileFormat::from_extension(&extension).is_some() {
             return Err(scientific_rejection(
@@ -281,7 +288,7 @@ impl CfaImage {
 
     /// Demosaic this CFA image into a 3-channel `LinearImage`.
     /// Consumes self.
-    pub(crate) fn demosaic(mut self, cancel: &CancelToken) -> Result<LinearImage, DemosaicError> {
+    pub(crate) fn demosaic(mut self, cancel: &CancelToken) -> Result<LinearImage, Cancelled> {
         self.repair_nulls();
         let width = self.data.width();
         let height = self.data.height();

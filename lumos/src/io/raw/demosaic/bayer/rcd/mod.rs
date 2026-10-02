@@ -13,8 +13,9 @@ use common::CancelToken;
 use rayon::prelude::*;
 
 use crate::concurrency::UnsafeSendPtr;
+use crate::io::cancelled::Cancelled;
+use crate::io::raw::demosaic::DemosaicMemory;
 use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern};
-use crate::io::raw::demosaic::{Cancelled, DemosaicMemory};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 

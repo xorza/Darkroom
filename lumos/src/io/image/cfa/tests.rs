@@ -3,8 +3,8 @@ use crate::io::image::image_provenance::{
     DecoderProvenance, ImageProvenance, RowOrder, SourceContainer, TransferProvenance,
 };
 use crate::io::image::sample_domain::ScaleOrigin;
-use crate::io::raw::demosaic::xtrans::internals::test_pattern_array;
 use crate::io::raw::provenance::RawTransferProvenance;
+use crate::testing::cfa::XTRANS_PATTERN;
 use crate::testing::cfa::make_cfa;
 use common::TempDir;
 use std::fs;
@@ -172,7 +172,7 @@ fn master_cfa_fits_round_trips_mono_and_xtrans_patterns() {
     let dir = TempDir::new("lumos-cfa-types");
     for (name, cfa_type) in [
         ("mono", CfaType::Mono),
-        ("xtrans", CfaType::XTrans(test_pattern_array())),
+        ("xtrans", CfaType::XTrans(XTRANS_PATTERN)),
     ] {
         let image = CfaImage {
             data: Buffer2::new(2, 2, vec![0.1f32, 0.2, 0.3, 0.4]),
@@ -238,18 +238,10 @@ fn cfa_type_bayer_wrapping() {
 
 #[test]
 fn cfa_type_xtrans_color_at() {
-    let pattern = [
-        [1, 0, 1, 1, 2, 1],
-        [2, 1, 2, 0, 1, 0],
-        [1, 2, 1, 1, 0, 1],
-        [1, 2, 1, 1, 0, 1],
-        [0, 1, 0, 2, 1, 2],
-        [1, 0, 1, 1, 2, 1],
-    ];
-    let xtrans = CfaType::XTrans(pattern);
+    let xtrans = CfaType::XTrans(XTRANS_PATTERN);
     assert_eq!(xtrans.color_at(Vec2us::new(0, 0)), 1); // G
-    assert_eq!(xtrans.color_at(Vec2us::new(1, 0)), 0); // R
-    assert_eq!(xtrans.color_at(Vec2us::new(0, 1)), 2); // B
+    assert_eq!(xtrans.color_at(Vec2us::new(2, 0)), 0); // R
+    assert_eq!(xtrans.color_at(Vec2us::new(0, 2)), 2); // B
     // Wrapping
     assert_eq!(
         xtrans.color_at(Vec2us::new(6, 0)),
@@ -315,26 +307,32 @@ fn data_len() {
 /// other word is an exotic CFA that LibRaw processes too.
 #[test]
 fn from_libraw_classifies_the_sensor() {
-    let xtrans = [[1; 6]; 6];
-    assert_eq!(CfaType::from_libraw(0, 1, xtrans), Some(CfaType::Mono));
+    let xtrans = *XTRANS_PATTERN.rows();
+    let classify = |filters, colors| CfaType::from_libraw(filters, colors, xtrans).unwrap();
+    assert_eq!(classify(0, 1), Some(CfaType::Mono));
+    assert_eq!(classify(0x9494_9494, 1), Some(CfaType::Mono));
+    assert_eq!(classify(0, 3), None);
+    assert_eq!(classify(9, 3), Some(CfaType::XTrans(XTRANS_PATTERN)));
     assert_eq!(
-        CfaType::from_libraw(0x9494_9494, 1, xtrans),
-        Some(CfaType::Mono)
-    );
-    assert_eq!(CfaType::from_libraw(0, 3, xtrans), None);
-    assert_eq!(
-        CfaType::from_libraw(9, 3, xtrans),
-        Some(CfaType::XTrans(xtrans))
-    );
-    assert_eq!(
-        CfaType::from_libraw(0x9494_9494, 3, xtrans),
+        classify(0x9494_9494, 3),
         Some(CfaType::Bayer(CfaPattern::Rggb))
     );
     assert_eq!(
-        CfaType::from_libraw(0x1616_1616, 3, xtrans),
+        classify(0x1616_1616, 3),
         Some(CfaType::Bayer(CfaPattern::Bggr))
     );
-    assert_eq!(CfaType::from_libraw(0x1234_5678, 3, xtrans), None);
+    assert_eq!(classify(0x1234_5678, 3), None);
+    // An X-Trans sensor whose layout is not one is a corrupt file, refused with the reason.
+    let mut corrupt = xtrans;
+    corrupt[0][0] = 3;
+    assert!(matches!(
+        CfaType::from_libraw(9, 3, corrupt),
+        Err(XTransPatternError::Value {
+            row: 0,
+            column: 0,
+            value: 3
+        })
+    ));
 }
 
 /// Each pattern names the demosaic lumos runs on it and what its output colour means.
@@ -352,7 +350,7 @@ fn each_pattern_names_its_demosaic() {
             ColorProvenance::SensorRgb,
         ),
         (
-            CfaType::XTrans([[1; 6]; 6]),
+            CfaType::XTrans(XTRANS_PATTERN),
             DemosaicProvenance::LumosMarkesteijn,
             ColorProvenance::SensorRgb,
         ),

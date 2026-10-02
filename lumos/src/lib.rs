@@ -57,6 +57,7 @@ pub use io::image::preview_image::PreviewImage;
 pub use io::image::sample_domain::{SampleDomain, ScaleOrigin};
 pub use io::raw::RAW_EXTENSIONS;
 pub use io::raw::demosaic::bayer::CfaPattern;
+pub use io::raw::demosaic::xtrans::xtrans_pattern::{XTransPattern, XTransPatternError};
 pub use io::raw::provenance::RawTransferProvenance;
 pub use io::raw::raw_files::raw_files;
 pub use math::size2us::Size2us;

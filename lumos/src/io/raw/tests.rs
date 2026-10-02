@@ -1,5 +1,7 @@
 use common::TempDir;
 
+use crate::testing::cfa::XTRANS_PATTERN;
+
 use crate::io::raw::*;
 use std::array;
 
@@ -8,7 +10,7 @@ fn load_raw_invalid_path() {
     let path = Path::new("/nonexistent/path/to/file.raf");
     // A path that cannot be read is an `Io` error; a readable file libraw
     // refuses is a `Raw` one, pinned by `load_raw_rejects_invalid_files`.
-    let error = load_raw(path, &CancelToken::never()).unwrap_err();
+    let error = load_raw(path, &LoadContext::default()).unwrap_err();
     assert!(
         matches!(&error, ImageError::Io { path: io_path, .. } if io_path == path),
         "a missing file should read as an Io error, got: {error}",
@@ -16,16 +18,17 @@ fn load_raw_invalid_path() {
 
     let cancel = CancelToken::new();
     cancel.cancel();
+    let cancelled = LoadContext::new(cancel, u64::MAX);
     assert!(matches!(
-        load_raw(path, &cancel),
+        load_raw(path, &cancelled),
         Err(ImageError::Cancelled { path: error_path }) if error_path == path
     ));
     assert!(matches!(
-        load_raw_cfa(path, &cancel),
+        load_raw_cfa(path, &cancelled),
         Err(ImageError::Cancelled { path: error_path }) if error_path == path
     ));
     assert!(matches!(
-        raw_cfa_frame_info(path, &cancel),
+        raw_cfa_frame_info(path, &cancelled),
         Err(ImageError::Cancelled { path: error_path }) if error_path == path
     ));
 }
@@ -37,7 +40,7 @@ fn load_raw_rejects_interior_nul_path() {
     use std::os::unix::ffi::OsStrExt;
 
     let path = Path::new(OsStr::from_bytes(b"invalid\0path.raf"));
-    let error = load_raw(path, &CancelToken::never()).unwrap_err();
+    let error = load_raw(path, &LoadContext::default()).unwrap_err();
     assert!(error.to_string().contains("interior NUL byte"));
 }
 
@@ -64,7 +67,10 @@ fn load_raw_rejects_invalid_files() {
     for case in cases {
         let path = directory.join(format!("{}.raf", case.name));
         fs::write(&path, case.contents).unwrap();
-        assert!(load_raw(&path, &CancelToken::never()).is_err(), "{case:?}");
+        assert!(
+            load_raw(&path, &LoadContext::default()).is_err(),
+            "{case:?}"
+        );
 
         // The rejection happens while libraw is being opened, so the state exists and has to free
         // itself on the way out — the failure path most likely to leak the instance.
@@ -81,26 +87,6 @@ fn load_raw_rejects_invalid_files() {
             "{case:?}: {error}",
         );
     }
-}
-
-#[test]
-fn malformed_xtrans_metadata_returns_raw_image_error() {
-    use crate::io::raw::demosaic::xtrans::internals::test_pattern_array;
-
-    let path = Path::new("malformed-xtrans.raf");
-    let mut pattern = test_pattern_array();
-    pattern[1][2] = 3;
-    let error = validate_xtrans_pattern(path, pattern).unwrap_err();
-
-    assert!(matches!(
-        error,
-        ImageError::Raw {
-            path: error_path,
-            reason,
-        } if error_path == path
-            && reason
-                == "invalid X-Trans pattern value 3 at row 1, column 2; expected 0, 1, or 2"
-    ));
 }
 
 #[test]
@@ -162,7 +148,7 @@ fn load_raw_valid_file() {
 
     init_tracing();
 
-    let result = load_raw(&path, &CancelToken::never());
+    let result = load_raw(&path, &LoadContext::default());
     assert!(result.is_ok(), "Failed to load {path:?}: {result:?}");
 
     let image = result.unwrap();
@@ -196,7 +182,7 @@ fn load_raw_dimensions_match() {
 
     let path = raw_frames("Lights").swap_remove(0);
 
-    let image = load_raw(&path, &CancelToken::never()).unwrap();
+    let image = load_raw(&path, &LoadContext::default()).unwrap();
 
     // Header dimensions should match actual dimensions
     assert_eq!(image.metadata.header_dimensions.len(), 3);
@@ -488,8 +474,9 @@ fn spatial_black_repeat_uses_visible_coordinates_with_nonzero_margins() {
 
 #[test]
 fn xtrans_direct_and_calibration_black_corrections_match() {
+    use crate::io::raw::demosaic::xtrans::XTransImage;
     use crate::io::raw::demosaic::xtrans::internals::test_pattern_array;
-    use crate::io::raw::demosaic::xtrans::{XTransImage, XTransPattern};
+    use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
 
     let raw_width = 11;
     let raw_height = 11;
@@ -513,6 +500,7 @@ fn xtrans_direct_and_calibration_black_corrections_match() {
             let visible_pattern = array::from_fn(|y| {
                 array::from_fn(|x| raw_pattern[(y + top_margin) % 6][(x + left_margin) % 6])
             });
+            let visible_pattern = XTransPattern::new(visible_pattern).unwrap();
             let active_cfa = CfaType::XTrans(visible_pattern);
             let direct = XTransImage::with_margins(
                 &raw_data,
@@ -541,7 +529,7 @@ fn xtrans_direct_and_calibration_black_corrections_match() {
                     let raw_y = y + layout.margin.y;
                     let raw_x = x + layout.margin.x;
                     let raw_channel = raw_pattern[raw_y % 6][raw_x % 6] as usize;
-                    let visible_channel = visible_pattern[y % 6][x % 6] as usize;
+                    let visible_channel = visible_pattern.color_at(Vec2us::new(x, y)) as usize;
                     let active_channel = active_cfa.color_at(Vec2us::new(x, y)) as usize;
                     assert_eq!(raw_channel, visible_channel);
                     assert_eq!(raw_channel, active_channel);
@@ -566,7 +554,7 @@ fn xtrans_direct_and_calibration_black_corrections_match() {
 #[cfg(feature = "real-data")]
 #[test]
 fn real_xtrans_channel_black_matches_direct_and_calibration_paths() {
-    use crate::io::raw::demosaic::xtrans::{XTransImage, XTransPattern};
+    use crate::io::raw::demosaic::xtrans::XTransImage;
     use crate::testing::real_data::raw_frames;
 
     let paths = raw_frames("Lights");
@@ -587,11 +575,10 @@ fn real_xtrans_channel_black_matches_direct_and_calibration_paths() {
         return;
     };
     let raw_data = raw.raw_image_slice().unwrap();
-    let pattern = raw.raw_xtrans_pattern();
     let direct = XTransImage::with_margins(
         raw_data,
         raw.layout,
-        XTransPattern::new(pattern).unwrap(),
+        raw.raw_xtrans_pattern.unwrap(),
         XTransNormalization {
             channel_black: [
                 raw.black_level.per_channel[0],
@@ -632,7 +619,7 @@ fn camera_white_balance_is_canonicalized() {
         Some([2.0, 1.0, 1.5, 1.0])
     );
     assert_eq!(
-        canonical_camera_white_balance(Some(CfaType::XTrans([[1; 6]; 6])), [2.0, 1.0, 1.5, 9.0]),
+        canonical_camera_white_balance(Some(CfaType::XTrans(XTRANS_PATTERN)), [2.0, 1.0, 1.5, 9.0]),
         Some([2.0, 1.0, 1.5, 1.0])
     );
     assert_eq!(

@@ -12,7 +12,7 @@ fn raw_load(b: quickbench::Bencher) {
     let path = raw_frames("Lights").swap_remove(0);
     println!("Benchmarking load_raw on: {}", path.display());
 
-    b.bench(|| load_raw(&path, &CancelToken::never()).unwrap());
+    b.bench(|| load_raw(&path, &LoadContext::default()).unwrap());
 }
 
 /// libraw's built-in demosaic at each quality level, beside ours.
@@ -25,7 +25,7 @@ fn bench_demosaic_vs_libraw(b: quickbench::Bencher) {
     let path = raw_frames("Lights").swap_remove(0);
     println!("Benchmarking demosaic on: {}", path.display());
 
-    b.bench_labeled("ours", || load_raw(&path, &CancelToken::never()).unwrap());
+    b.bench_labeled("ours", || load_raw(&path, &LoadContext::default()).unwrap());
     for (qual, label) in [
         (0, "libraw linear"),
         (1, "libraw VNG / Markesteijn 1-pass"),

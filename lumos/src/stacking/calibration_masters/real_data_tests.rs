@@ -14,6 +14,7 @@
 //!   cargo test -p lumos --release --features real-data \
 //!     `calibration_masters::real_data_tests` -- --ignored --nocapture
 
+use crate::io::image::load_context::LoadContext;
 use crate::math::size2us::Size2us;
 use std::cmp::Ordering;
 use std::hint::black_box;
@@ -54,8 +55,8 @@ fn raw_frame_info_matches_full_decode() {
     // would be wrong.
     let paths = calibration_paths();
     let path = &paths.darks[0];
-    let peeked = raw::raw_cfa_frame_info(path, &CancelToken::never()).expect("peek frame info");
-    let loaded = raw::load_raw_cfa(path, &CancelToken::never()).expect("full decode");
+    let peeked = raw::raw_cfa_frame_info(path, &LoadContext::default()).expect("peek frame info");
+    let loaded = raw::load_raw_cfa(path, &LoadContext::default()).expect("full decode");
     assert_eq!(
         (peeked.dimensions.width(), peeked.dimensions.height()),
         (loaded.data.width(), loaded.data.height()),

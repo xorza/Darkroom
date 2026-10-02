@@ -32,11 +32,12 @@
 
 use common::CancelToken;
 
+use crate::io::cancelled::Cancelled;
+use crate::io::raw::demosaic::DemosaicMemory;
 use crate::io::raw::demosaic::xtrans::XTransImage;
 use crate::io::raw::demosaic::xtrans::hex_lookup::HexLookup;
 use crate::io::raw::demosaic::xtrans::markesteijn_steps;
 use crate::io::raw::demosaic::xtrans::markesteijn_steps::PlanarRgbMut;
-use crate::io::raw::demosaic::{Cancelled, DemosaicMemory};
 use crate::math::size2us::Size2us;
 use std::slice;
 

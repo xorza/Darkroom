@@ -1,5 +1,5 @@
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
@@ -38,4 +38,13 @@ pub enum ImageError {
 
     #[error("Failed to save image: {source}")]
     Save { source: imaginarium::Error },
+}
+
+impl ImageError {
+    /// The load of `path` stopped by its cancel token.
+    pub(crate) fn cancelled(path: &Path) -> Self {
+        Self::Cancelled {
+            path: path.to_path_buf(),
+        }
+    }
 }

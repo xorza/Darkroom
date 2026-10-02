@@ -14,26 +14,6 @@ pub(crate) struct DemosaicMemory {
     pub(crate) peak_bytes: usize,
 }
 
-/// Returned by a demosaic kernel when it observes the cancel token set
-/// between stages. A marker only — the partial buffers are dropped; the caller
-/// maps this to its own cancellation error.
-#[derive(Debug)]
-pub(crate) struct Cancelled;
-
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
-pub(crate) enum DemosaicError {
-    #[error("demosaicing cancelled")]
-    Cancelled,
-    #[error(transparent)]
-    InvalidXTransPattern(#[from] xtrans::XTransPatternError),
-}
-
-impl From<Cancelled> for DemosaicError {
-    fn from(_: Cancelled) -> Self {
-        Self::Cancelled
-    }
-}
-
 /// Re-interleave planar `[R, G, B]` demosaic output to `[R0, G0, B0, R1, ...]`.
 ///
 /// Test-only bridge: the demosaic kernels return planar channels, but their
@@ -56,6 +36,7 @@ mod memory_tests {
     use crate::io::image::cfa::CfaType;
     use crate::io::image::image_dimensions::ImageDimensions;
     use crate::io::raw::demosaic::bayer::CfaPattern;
+    use crate::testing::cfa::XTRANS_PATTERN;
 
     #[test]
     fn demosaic_memory_matches_live_allocations() {
@@ -77,7 +58,7 @@ mod memory_tests {
         assert_eq!(bayer_odd.output_bytes, 3 * 15 * 4);
         assert_eq!(bayer_odd.peak_bytes, 108 * 4);
 
-        let xtrans = CfaType::XTrans([[1; 6]; 6]).demosaic_memory(even);
+        let xtrans = CfaType::XTrans(XTRANS_PATTERN).demosaic_memory(even);
         assert_eq!(xtrans.output_bytes, 3 * 80 * 4);
         assert_eq!(xtrans.peak_bytes, 22 * 80 * 4);
     }
