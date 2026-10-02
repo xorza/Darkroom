@@ -149,7 +149,7 @@ fn test_filter_modes_differ_on_upscale() {
 }
 
 /// Every SIMD kernel this CPU dispatches to is bit-identical to the scalar
-/// reference it specializes: the vector path interpolates in the same order and
+/// reference it specializes, at every tier the CPU has: the vector path interpolates in the same order and
 /// the same native units, so there is nothing to round differently.
 ///
 /// The rotation and the non-multiple-of-4 width hit interior, edge and
@@ -162,8 +162,9 @@ fn simd_matches_scalar_reference() {
         .rotate_around(0.7, Vec2::new(18.5, 9.5))
         .filter(FilterMode::Bilinear);
 
-    for format in ALL_FORMATS {
-        let Some(kernel) = packed_kernel(format, transform.filter) else {
+    let tiers = SimdTier::ALL.into_iter().filter(|tier| tier.is_supported());
+    for (tier, format) in tiers.flat_map(|tier| ALL_FORMATS.map(|format| (tier, format))) {
+        let Some(kernel) = packed_kernel(tier, format, transform.filter) else {
             continue;
         };
         let input = create_test_image(format, 37, 19, 7);
@@ -171,12 +172,12 @@ fn simd_matches_scalar_reference() {
         let mut simd = Image::new_black(input.desc()).unwrap();
 
         apply_scalar(&transform, &input, &mut scalar);
-        // SAFETY: `packed_kernel` verified this CPU has the kernel's feature.
+        // SAFETY: only supported tiers are swept.
         unsafe { kernel(&transform, &input, &mut simd) };
 
         assert!(
             pixels_equal(&scalar, &simd),
-            "SIMD diverged from the scalar reference for {format}"
+            "{tier} diverged from the scalar reference for {format}"
         );
     }
 }
@@ -195,8 +196,30 @@ fn bilinear_rounds_ties_to_even() {
     assert_eq!(output.bytes(), &[5, 10, 11, 12]);
 }
 
+/// A zero or subnormal determinant, a non-finite coefficient, and a normal determinant whose
+/// inverse overflows are each refused; a small but representable scale is not.
 #[test]
-#[should_panic(expected = "the transform is not invertible: determinant 0")]
+fn invertibility_needs_a_normal_determinant_and_a_finite_inverse() {
+    let scaled = |x: f32, y: f32| Transform::new().scale(Vec2::new(x, y));
+    assert!(scaled(1.0, 1.0).is_invertible());
+    assert!(scaled(1e-3, 1e-3).is_invertible());
+    assert!(!scaled(0.0, 1.0).is_invertible());
+    // 1e-20 · 1e-20 = 1e-40 is below f32::MIN_POSITIVE ≈ 1.18e-38: subnormal.
+    assert!(!scaled(1e-20, 1e-20).is_invertible());
+    // The determinant 1e-39 · 1e10 = 1e-29 is normal, but the inverse's 1e10 / 1e-29 = 1e39 is
+    // past f32::MAX ≈ 3.4e38.
+    assert!(!scaled(1e-39, 1e10).is_invertible());
+    assert!(!scaled(f32::NAN, 1.0).is_invertible());
+    assert!(
+        !Transform::new()
+            .translate(Vec2::new(f32::INFINITY, 0.0))
+            .is_invertible()
+    );
+    assert!(!Transform::new().rotate(f32::NAN).is_invertible());
+}
+
+#[test]
+#[should_panic(expected = "the transform is not invertible")]
 fn a_singular_transform_is_refused() {
     let input = image_u8(2, 1, ColorFormat::L_U8, vec![1, 2]);
     let mut output = Image::new_black(input.desc()).unwrap();

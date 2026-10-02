@@ -13,29 +13,29 @@ use rayon::prelude::*;
 
 use crate::common::color_format::{ChannelCount, ColorFormat, SampleType};
 use crate::common::sample::Sample;
-#[cfg(target_arch = "x86_64")]
-use crate::cpu_features;
 use crate::image::Image;
 use crate::ops::transform::{FilterMode, Transform};
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+use crate::simd_tier::SimdTier;
 
 /// A SIMD kernel: the packed RGB/RGBA bilinear specialization of [`apply_typed`]
 /// for one storage type and channel count.
 ///
 /// # Safety
 /// The running CPU must support the feature the kernel was compiled for;
-/// [`packed_kernel`] is what establishes that.
+/// [`packed_kernel`] at a supported [`SimdTier`] is what establishes that.
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 type PackedKernel = unsafe fn(&Transform, &Image, &mut Image);
 
-/// The SIMD kernel for `format` under `filter` on this arch, or `None` when the
-/// CPU lacks the feature or the combination has no vector path — callers then
-/// take the scalar reference.
+/// The SIMD kernel `tier` has for `format` under `filter`, or `None` when the
+/// tier or the combination has no vector path — callers then take the scalar
+/// reference.
 ///
 /// RGB/RGBA bilinear vectorize and are bit-identical to the scalar reference
 /// (cross-checked). L stays scalar (gather-bound — SIMD measured slower), and
 /// nearest is a near-memcpy the scalar path already nails.
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-fn packed_kernel(format: ColorFormat, filter: FilterMode) -> Option<PackedKernel> {
+fn packed_kernel(tier: SimdTier, format: ColorFormat, filter: FilterMode) -> Option<PackedKernel> {
     #[cfg(target_arch = "aarch64")]
     use crate::ops::transform::cpu::neon as simd;
     #[cfg(target_arch = "x86_64")]
@@ -46,9 +46,11 @@ fn packed_kernel(format: ColorFormat, filter: FilterMode) -> Option<PackedKernel
     }
 
     #[cfg(target_arch = "x86_64")]
-    if !cpu_features::has_sse4_1() {
+    if tier < SimdTier::Sse41 {
         return None;
     }
+    #[cfg(target_arch = "aarch64")]
+    let SimdTier::Neon = tier;
 
     Some(match (format.sample_type, format.channel_count) {
         (_, ChannelCount::L) => return None,
@@ -80,8 +82,10 @@ pub(super) fn apply(transform: &Transform, input: &Image, output: &mut Image) {
     );
 
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    if let Some(kernel) = packed_kernel(format, transform.filter) {
-        // SAFETY: `packed_kernel` verified this CPU has the kernel's feature.
+    if let Some(kernel) =
+        SimdTier::widest().and_then(|tier| packed_kernel(tier, format, transform.filter))
+    {
+        // SAFETY: the kernel is the widest supported tier's.
         unsafe { kernel(transform, input, output) };
         return;
     }

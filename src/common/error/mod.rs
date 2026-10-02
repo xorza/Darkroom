@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::{io, result};
 
 use thiserror::Error;
@@ -6,8 +7,8 @@ use thiserror::Error;
 pub enum Error {
     #[error("IO error: {0}")]
     Io(#[from] io::Error),
-    #[error("Invalid file extension: {0}")]
-    InvalidExtension(String),
+    #[error("no image file format has the extension of '{}'", .0.display())]
+    InvalidExtension(PathBuf),
     #[error("Unsupported color type: {0}")]
     UnsupportedColorType(String),
     #[error("Unsupported format: {0}")]

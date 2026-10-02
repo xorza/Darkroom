@@ -23,9 +23,5 @@ fn only_a_wrapped_cause_is_reachable_through_source() {
         assert_eq!(error.source().unwrap().to_string(), cause);
     }
 
-    assert!(
-        Error::InvalidExtension("xyz".to_string())
-            .source()
-            .is_none()
-    );
+    assert!(Error::InvalidExtension("a.xyz".into()).source().is_none());
 }

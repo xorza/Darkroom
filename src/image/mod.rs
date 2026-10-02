@@ -1,4 +1,5 @@
 pub(crate) mod conversion;
+pub(crate) mod file_format;
 pub(crate) mod image_desc;
 pub(crate) mod image_pixels;
 mod io;
@@ -11,11 +12,9 @@ use crate::common::color_format::ColorFormat;
 use crate::common::error::{Error, Result};
 use crate::common::sample::Sample;
 use crate::image::conversion::convert_image;
+use crate::image::file_format::FileFormat;
 use crate::image::image_desc::ImageDesc;
 use crate::image::image_pixels::{ImagePixels, Stored};
-
-/// Supported image file extensions for reading and writing.
-pub const SUPPORTED_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "tiff", "tif"];
 
 /// A runtime-format image backed by tightly packed, typed interleaved pixels.
 #[derive(Clone, Debug)]
@@ -91,20 +90,18 @@ impl Image {
 
     pub fn read_file<P: AsRef<Path>>(filename: P) -> Result<Image> {
         let filename = filename.as_ref();
-        match extension(filename)?.as_str() {
-            "png" | "jpeg" | "jpg" => io::load_png_jpeg(filename),
-            "tiff" | "tif" => io::load_tiff(filename),
-            extension => Err(Error::InvalidExtension(extension.to_string())),
+        match FileFormat::from_path(filename)? {
+            FileFormat::Png | FileFormat::Jpeg => io::load_png_jpeg(filename),
+            FileFormat::Tiff => io::load_tiff(filename),
         }
     }
 
     pub fn save_file<P: AsRef<Path>>(&self, filename: P) -> Result<()> {
         let filename = filename.as_ref();
-        match extension(filename)?.as_str() {
-            "png" => io::save_png(self, filename),
-            "jpeg" | "jpg" => io::save_jpg(self, filename),
-            "tiff" | "tif" => tiff::save_tiff(self, filename),
-            extension => Err(Error::InvalidExtension(extension.to_string())),
+        match FileFormat::from_path(filename)? {
+            FileFormat::Png => io::save_png(self, filename),
+            FileFormat::Jpeg => io::save_jpg(self, filename),
+            FileFormat::Tiff => tiff::save_tiff(self, filename),
         }
     }
 
@@ -136,14 +133,6 @@ impl Image {
 }
 
 /// The lowercased extension of `filename`.
-fn extension(filename: &Path) -> Result<String> {
-    filename
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(str::to_ascii_lowercase)
-        .ok_or_else(|| Error::InvalidExtension("missing extension".to_string()))
-}
-
 impl Image {
     /// Interleaves `N` channel planes into an image of the format they spell.
     ///

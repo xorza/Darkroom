@@ -37,8 +37,7 @@ mod sse;
 
 use crate::common::color_format::ColorFormat;
 use crate::common::sample::Sample;
-#[cfg(target_arch = "x86_64")]
-use crate::cpu_features;
+use crate::simd_tier::SimdTier;
 
 /// A row conversion kernel: converts one packed source row of `width` pixels
 /// into one packed destination row.
@@ -49,100 +48,57 @@ use crate::cpu_features;
 /// one of these out.
 pub(crate) type RowConvertFn = unsafe fn(src: &[u8], dst: &mut [u8], width: usize);
 
-/// The `x86_64` and aarch64 tiers a conversion can run on. The tests sweep every tier the host
-/// supports; dispatch takes the widest.
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Tier {
-    #[cfg(target_arch = "x86_64")]
-    Sse2,
-    #[cfg(target_arch = "x86_64")]
-    Ssse3,
-    #[cfg(target_arch = "x86_64")]
-    Sse41,
-    #[cfg(target_arch = "x86_64")]
-    Avx2,
-    #[cfg(target_arch = "aarch64")]
-    Neon,
-}
-
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-impl Tier {
-    /// Every tier, narrowest first.
-    #[cfg(target_arch = "x86_64")]
-    pub(crate) const ALL: [Self; 4] = [Self::Sse2, Self::Ssse3, Self::Sse41, Self::Avx2];
-    /// Every tier.
-    #[cfg(target_arch = "aarch64")]
-    pub(crate) const ALL: [Self; 1] = [Self::Neon];
-
-    /// Whether the running CPU has this tier.
-    pub(crate) fn is_supported(self) -> bool {
-        match self {
-            #[cfg(target_arch = "x86_64")]
-            Self::Sse2 => true,
-            #[cfg(target_arch = "x86_64")]
-            Self::Ssse3 => cpu_features::get().ssse3,
-            #[cfg(target_arch = "x86_64")]
-            Self::Sse41 => cpu_features::get().sse4_1,
-            #[cfg(target_arch = "x86_64")]
-            Self::Avx2 => cpu_features::get().avx2,
-            #[cfg(target_arch = "aarch64")]
-            Self::Neon => true,
-        }
-    }
-
-    /// The widest tier the running CPU has.
-    fn widest() -> Option<Self> {
-        Self::ALL.into_iter().rev().find(|tier| tier.is_supported())
-    }
-}
-
 /// The SIMD row kernel for a format pair, or `None` when this build and CPU have
 /// no vector path for it — the caller then takes the scalar reference.
 pub(crate) fn row_converter(from: ColorFormat, to: ColorFormat) -> Option<RowConvertFn> {
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    return tier_converter(Tier::widest()?, from, to);
-
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-    {
-        let _ = (from, to);
-        None
-    }
+    tier_converter(SimdTier::widest()?, from, to)
 }
 
 /// The kernel `tier` has for a format pair, or the one the next narrower tier has — what
 /// dispatch would pick on a CPU whose widest tier is `tier`.
 ///
 /// # Safety (of the returned kernel)
-/// The caller must have checked [`Tier::is_supported`] for `tier`.
+/// The caller must have checked [`SimdTier::is_supported`] for `tier`.
 #[cfg(target_arch = "x86_64")]
 pub(crate) fn tier_converter(
-    tier: Tier,
+    tier: SimdTier,
     from: ColorFormat,
     to: ColorFormat,
 ) -> Option<RowConvertFn> {
+    // No conversion fuses a multiply-add, so the FMA tier runs the AVX2 kernels.
+    let tier = tier.min(SimdTier::Avx2);
     let kernel = match (tier, from, to) {
-        (Tier::Avx2, ColorFormat::RGBA_U8, ColorFormat::RGB_U8) => {
+        (SimdTier::Avx2, ColorFormat::RGBA_U8, ColorFormat::RGB_U8) => {
             avx::convert_rgba_to_rgb_row_avx2 as RowConvertFn
         }
-        (Tier::Ssse3 | Tier::Sse41, ColorFormat::RGBA_U8, ColorFormat::RGB_U8) => {
+        (SimdTier::Ssse3 | SimdTier::Sse41, ColorFormat::RGBA_U8, ColorFormat::RGB_U8) => {
             sse::convert_rgba_to_rgb_row_ssse3
         }
-        (Tier::Ssse3 | Tier::Sse41 | Tier::Avx2, ColorFormat::RGB_U8, ColorFormat::RGBA_U8) => {
-            sse::convert_rgb_to_rgba_row_ssse3
-        }
-        (Tier::Ssse3 | Tier::Sse41 | Tier::Avx2, ColorFormat::RGBA_U8, ColorFormat::L_U8) => {
-            sse::convert_rgba_to_l_row_ssse3
-        }
-        (Tier::Ssse3 | Tier::Sse41 | Tier::Avx2, ColorFormat::RGB_U8, ColorFormat::L_U8) => {
-            sse::convert_rgb_to_l_row_ssse3
-        }
-        (Tier::Ssse3 | Tier::Sse41 | Tier::Avx2, ColorFormat::L_U8, ColorFormat::RGBA_U8) => {
-            sse::convert_l_to_rgba_row_ssse3
-        }
-        (Tier::Ssse3 | Tier::Sse41 | Tier::Avx2, ColorFormat::L_U8, ColorFormat::RGB_U8) => {
-            sse::convert_l_to_rgb_row_ssse3
-        }
+        (
+            SimdTier::Ssse3 | SimdTier::Sse41 | SimdTier::Avx2,
+            ColorFormat::RGB_U8,
+            ColorFormat::RGBA_U8,
+        ) => sse::convert_rgb_to_rgba_row_ssse3,
+        (
+            SimdTier::Ssse3 | SimdTier::Sse41 | SimdTier::Avx2,
+            ColorFormat::RGBA_U8,
+            ColorFormat::L_U8,
+        ) => sse::convert_rgba_to_l_row_ssse3,
+        (
+            SimdTier::Ssse3 | SimdTier::Sse41 | SimdTier::Avx2,
+            ColorFormat::RGB_U8,
+            ColorFormat::L_U8,
+        ) => sse::convert_rgb_to_l_row_ssse3,
+        (
+            SimdTier::Ssse3 | SimdTier::Sse41 | SimdTier::Avx2,
+            ColorFormat::L_U8,
+            ColorFormat::RGBA_U8,
+        ) => sse::convert_l_to_rgba_row_ssse3,
+        (
+            SimdTier::Ssse3 | SimdTier::Sse41 | SimdTier::Avx2,
+            ColorFormat::L_U8,
+            ColorFormat::RGB_U8,
+        ) => sse::convert_l_to_rgb_row_ssse3,
         _ => return element_converter(tier, from, to),
     };
     Some(kernel)
@@ -151,7 +107,7 @@ pub(crate) fn tier_converter(
 /// The aarch64 table. NEON is baseline, so every pair with a kernel has it.
 #[cfg(target_arch = "aarch64")]
 pub(crate) fn tier_converter(
-    tier: Tier,
+    tier: SimdTier,
     from: ColorFormat,
     to: ColorFormat,
 ) -> Option<RowConvertFn> {
@@ -169,10 +125,20 @@ pub(crate) fn tier_converter(
     Some(kernel)
 }
 
+/// No arch kernels: [`SimdTier`] has no value here.
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+pub(crate) fn tier_converter(
+    tier: SimdTier,
+    _from: ColorFormat,
+    _to: ColorFormat,
+) -> Option<RowConvertFn> {
+    match tier {}
+}
+
 /// The kernel for an element conversion — a change of sample type at an
 /// unchanged channel count, which is per-sample and so channel-agnostic.
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-fn element_converter(tier: Tier, from: ColorFormat, to: ColorFormat) -> Option<RowConvertFn> {
+fn element_converter(tier: SimdTier, from: ColorFormat, to: ColorFormat) -> Option<RowConvertFn> {
     use crate::common::color_format::SampleType::{F32, U8, U16};
 
     if from.channel_count != to.channel_count {
@@ -180,28 +146,28 @@ fn element_converter(tier: Tier, from: ColorFormat, to: ColorFormat) -> Option<R
     }
     #[cfg(target_arch = "x86_64")]
     let kernel = match (tier, from.sample_type, to.sample_type) {
-        (Tier::Avx2, F32, U8) => avx::convert_f32_to_u8_row_avx2 as RowConvertFn,
-        (Tier::Avx2, U8, F32) => avx::convert_u8_to_f32_row_avx2,
-        (Tier::Avx2, U8, U16) => avx::convert_u8_to_u16_row_avx2,
-        (Tier::Avx2, U16, U8) => avx::convert_u16_to_u8_row_avx2,
-        (Tier::Avx2, U16, F32) => avx::convert_u16_to_f32_row_avx2,
-        (Tier::Avx2, F32, U16) => avx::convert_f32_to_u16_row_avx2,
+        (SimdTier::Avx2, F32, U8) => avx::convert_f32_to_u8_row_avx2 as RowConvertFn,
+        (SimdTier::Avx2, U8, F32) => avx::convert_u8_to_f32_row_avx2,
+        (SimdTier::Avx2, U8, U16) => avx::convert_u8_to_u16_row_avx2,
+        (SimdTier::Avx2, U16, U8) => avx::convert_u16_to_u8_row_avx2,
+        (SimdTier::Avx2, U16, F32) => avx::convert_u16_to_f32_row_avx2,
+        (SimdTier::Avx2, F32, U16) => avx::convert_f32_to_u16_row_avx2,
         (_, F32, U8) => sse::convert_f32_to_u8_row_sse2,
         (_, U8, F32) => sse::convert_u8_to_f32_row_sse2,
         (_, U8, U16) => sse::convert_u8_to_u16_row_sse2,
         (_, U16, U8) => sse::convert_u16_to_u8_row_sse2,
         (_, U16, F32) => sse::convert_u16_to_f32_row_sse2,
-        (Tier::Sse41, F32, U16) => sse::convert_f32_to_u16_row_sse41,
+        (SimdTier::Sse41, F32, U16) => sse::convert_f32_to_u16_row_sse41,
         _ => return None,
     };
     #[cfg(target_arch = "aarch64")]
     let kernel = match (tier, from.sample_type, to.sample_type) {
-        (Tier::Neon, F32, U8) => neon::convert_f32_to_u8_row_neon as RowConvertFn,
-        (Tier::Neon, U8, F32) => neon::convert_u8_to_f32_row_neon,
-        (Tier::Neon, U8, U16) => neon::convert_u8_to_u16_row_neon,
-        (Tier::Neon, U16, U8) => neon::convert_u16_to_u8_row_neon,
-        (Tier::Neon, U16, F32) => neon::convert_u16_to_f32_row_neon,
-        (Tier::Neon, F32, U16) => neon::convert_f32_to_u16_row_neon,
+        (SimdTier::Neon, F32, U8) => neon::convert_f32_to_u8_row_neon as RowConvertFn,
+        (SimdTier::Neon, U8, F32) => neon::convert_u8_to_f32_row_neon,
+        (SimdTier::Neon, U8, U16) => neon::convert_u8_to_u16_row_neon,
+        (SimdTier::Neon, U16, U8) => neon::convert_u16_to_u8_row_neon,
+        (SimdTier::Neon, U16, F32) => neon::convert_u16_to_f32_row_neon,
+        (SimdTier::Neon, F32, U16) => neon::convert_f32_to_u16_row_neon,
         _ => return None,
     };
     Some(kernel)

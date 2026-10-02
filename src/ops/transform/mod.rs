@@ -85,16 +85,25 @@ impl Transform {
         self
     }
 
+    /// Whether the transform and its inverse both map pixels to pixels: every
+    /// coefficient is finite, the determinant is normal, and the inverse is
+    /// finite. A transform built from untrusted values is checked with this
+    /// before it is applied.
+    pub fn is_invertible(&self) -> bool {
+        self.transform.is_finite()
+            && self.transform.matrix2.determinant().is_normal()
+            && self.transform.inverse().is_finite()
+    }
+
     /// The output-to-input map every backend samples through.
     ///
     /// # Panics
-    /// Unless the transform is invertible: a zero, subnormal or non-finite
-    /// determinant has no inverse that maps pixels to pixels.
+    /// Unless [`Self::is_invertible`].
     pub(crate) fn inverse(&self) -> Affine2 {
-        let determinant = self.transform.matrix2.determinant();
         assert!(
-            determinant.is_normal(),
-            "the transform is not invertible: determinant {determinant}"
+            self.is_invertible(),
+            "the transform is not invertible: {:?}",
+            self.transform
         );
         self.transform.inverse()
     }

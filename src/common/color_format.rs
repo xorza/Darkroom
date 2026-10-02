@@ -77,6 +77,22 @@ impl ColorFormat {
     pub const fn has_alpha(self) -> bool {
         matches!(self.channel_count, ChannelCount::Rgba)
     }
+
+    /// The channel layout and the sample type, as in `"RGB u8"`; the [`Display`](fmt::Display)
+    /// form, available in a `const`.
+    pub const fn name(self) -> &'static str {
+        match (self.channel_count, self.sample_type) {
+            (ChannelCount::L, SampleType::U8) => "L u8",
+            (ChannelCount::L, SampleType::U16) => "L u16",
+            (ChannelCount::L, SampleType::F32) => "L f32",
+            (ChannelCount::Rgb, SampleType::U8) => "RGB u8",
+            (ChannelCount::Rgb, SampleType::U16) => "RGB u16",
+            (ChannelCount::Rgb, SampleType::F32) => "RGB f32",
+            (ChannelCount::Rgba, SampleType::U8) => "RGBA u8",
+            (ChannelCount::Rgba, SampleType::U16) => "RGBA u16",
+            (ChannelCount::Rgba, SampleType::F32) => "RGBA f32",
+        }
+    }
 }
 
 impl fmt::Display for ChannelCount {
@@ -101,7 +117,7 @@ impl fmt::Display for SampleType {
 
 impl fmt::Display for ColorFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {}", self.channel_count, self.sample_type)
+        f.write_str(self.name())
     }
 }
 
@@ -117,3 +133,21 @@ pub const ALL_FORMATS: [ColorFormat; 9] = [
     ColorFormat::RGBA_U16,
     ColorFormat::RGBA_F32,
 ];
+
+#[cfg(test)]
+mod tests {
+    use crate::common::color_format::ALL_FORMATS;
+
+    /// Each name is the channel layout's and the sample type's own text, so no two match.
+    #[test]
+    fn name_joins_the_channel_layout_and_the_sample_type() {
+        for format in ALL_FORMATS {
+            assert_eq!(
+                format.name(),
+                format!("{} {}", format.channel_count, format.sample_type)
+            );
+            assert_eq!(format.to_string(), format.name());
+        }
+        assert_eq!(ALL_FORMATS[3].name(), "RGB u8");
+    }
+}

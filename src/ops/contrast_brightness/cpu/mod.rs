@@ -9,12 +9,12 @@ use rayon::prelude::*;
 
 use crate::common::color_format::{ColorFormat, SampleType};
 use crate::common::sample::Sample;
-#[cfg(target_arch = "x86_64")]
-use crate::cpu_features;
 use crate::image::Image;
 use crate::image::image_desc::ImageDesc;
 use crate::ops::contrast_brightness::ContrastBrightness;
 use crate::ops::contrast_brightness::channel_affine::ChannelAffine;
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+use crate::simd_tier::SimdTier;
 
 /// A SIMD row kernel applying [`ChannelAffine`] to a row in place, over `count`
 /// items: channel values for the flat kernels, whole pixels for the
@@ -22,8 +22,9 @@ use crate::ops::contrast_brightness::channel_affine::ChannelAffine;
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 type RowKernel = unsafe fn(&mut [u8], usize, ChannelAffine);
 
-/// The SIMD row kernel for `format` on this arch (SSE4.1 / NEON), or `None`
-/// when the CPU lacks the feature — callers then fall back to the scalar path.
+/// The SIMD row kernel `tier` has for `format`, or `None` below SSE4.1 —
+/// callers then fall back to the scalar path. The FMA tier runs the AVX2
+/// kernels, which fuse nothing.
 ///
 /// `L` and `RGB` have no channel to protect, so they take a flat kernel that
 /// walks the row as one contiguous channel array and never pays for pixel
@@ -33,19 +34,19 @@ type RowKernel = unsafe fn(&mut [u8], usize, ChannelAffine);
     target_arch = "aarch64",
     expect(
         clippy::unnecessary_wraps,
-        reason = "NEON is baseline; it is x86_64 that has CPUs without the kernels' features"
+        reason = "NEON is baseline; it is x86_64 that has tiers without the kernels"
     )
 )]
-fn row_kernel(format: ColorFormat) -> Option<RowKernel> {
+fn row_kernel(tier: SimdTier, format: ColorFormat) -> Option<RowKernel> {
     #[cfg(target_arch = "x86_64")]
-    let kernel = if cpu_features::has_avx2() {
-        avx2_kernel(format)
-    } else if cpu_features::has_sse4_1() {
-        sse41_kernel(format)
-    } else {
-        return None;
+    let kernel = match tier {
+        SimdTier::Avx2 | SimdTier::Avx2Fma => avx2_kernel(format),
+        SimdTier::Sse41 => sse41_kernel(format),
+        SimdTier::Sse2 | SimdTier::Ssse3 => return None,
     };
 
+    #[cfg(target_arch = "aarch64")]
+    let SimdTier::Neon = tier;
     #[cfg(target_arch = "aarch64")]
     let kernel = neon_kernel(format);
 
@@ -102,8 +103,8 @@ pub(super) fn apply(params: ContrastBrightness, image: &mut Image) {
     let format = image.desc().color_format;
 
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    if let Some(kernel) = row_kernel(format) {
-        // SAFETY: `row_kernel` verified this CPU has the kernel's feature.
+    if let Some(kernel) = SimdTier::widest().and_then(|tier| row_kernel(tier, format)) {
+        // SAFETY: the kernel is the widest supported tier's.
         unsafe { apply_kernel(kernel, params, image) };
         return;
     }

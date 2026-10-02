@@ -7,10 +7,10 @@ use rayon::prelude::*;
 
 use crate::common::color_format::{ColorFormat, SampleType};
 use crate::common::sample::Sample;
-#[cfg(target_arch = "x86_64")]
-use crate::cpu_features;
 use crate::image::Image;
 use crate::ops::blend::{Blend, BlendMode};
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+use crate::simd_tier::SimdTier;
 
 /// A SIMD row kernel blending one `src`/`dst` row pair into `out`. All three are
 /// exactly one packed row, so a kernel's pixel count is its slice length and it
@@ -18,28 +18,29 @@ use crate::ops::blend::{Blend, BlendMode};
 ///
 /// # Safety
 /// The running CPU must support the feature the kernel was compiled for;
-/// [`row_kernel`] is what establishes that.
+/// [`row_kernel`] at a supported [`SimdTier`] is what establishes that.
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 type RowKernel = unsafe fn(src: &[u8], dst: &[u8], out: &mut [u8], params: Blend);
 
-/// The SIMD row kernel for `format` on this arch, or `None` when the CPU lacks
-/// the feature or the format has no vector path — callers then take the scalar
-/// reference.
+/// The SIMD row kernel `tier` has for `format`, or `None` when the tier or the
+/// format has no vector path — callers then take the scalar reference.
 ///
 /// Only RGBA is specialized: its four channels fill a vector register exactly,
 /// which is what lets one register hold a pixel and the blend stay branch-free
 /// across channels. L and RGB fall to the scalar path.
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-fn row_kernel(format: ColorFormat) -> Option<RowKernel> {
+fn row_kernel(tier: SimdTier, format: ColorFormat) -> Option<RowKernel> {
     #[cfg(target_arch = "aarch64")]
     use crate::ops::blend::cpu::neon as simd;
     #[cfg(target_arch = "x86_64")]
     use crate::ops::blend::cpu::sse41 as simd;
 
     #[cfg(target_arch = "x86_64")]
-    if !cpu_features::has_sse4_1() {
+    if tier < SimdTier::Sse41 {
         return None;
     }
+    #[cfg(target_arch = "aarch64")]
+    let SimdTier::Neon = tier;
 
     if !format.has_alpha() {
         return None;
@@ -59,8 +60,8 @@ pub(super) fn apply(params: Blend, src: &Image, dst: &Image, output: &mut Image)
     let format = src.desc().color_format;
 
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    if let Some(kernel) = row_kernel(format) {
-        // SAFETY: `row_kernel` verified this CPU has the kernel's feature.
+    if let Some(kernel) = SimdTier::widest().and_then(|tier| row_kernel(tier, format)) {
+        // SAFETY: the kernel is the widest supported tier's.
         unsafe { apply_kernel(kernel, params, src, dst, output) };
         return;
     }

@@ -1,6 +1,7 @@
 use crate::common::color_format::{ALL_FORMATS, SampleType};
 use crate::image::conversion::scalar;
-use crate::image::conversion::simd::{Tier, tier_converter};
+use crate::image::conversion::simd::tier_converter;
+use crate::simd_tier::SimdTier;
 
 /// Every `u8` and every `u16`; for `f32`, the values on both sides of every rounding tie of both
 /// integer scales — `(k + ½) / 255` and `(k + ½) / 65535`, two ulps either way — plus the
@@ -52,9 +53,9 @@ const WIDTHS: [usize; 17] = [1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63,
 #[test]
 fn every_tier_matches_the_scalar_reference() {
     let mut tiers_run = 0;
-    for tier in Tier::ALL {
+    for tier in SimdTier::ALL {
         if !tier.is_supported() {
-            eprintln!("conversion tier {tier:?} is not supported on this CPU: not tested");
+            eprintln!("SKIPPED: this CPU has no {tier}, so its conversion kernels are not checked");
             continue;
         }
         tiers_run += 1;
@@ -109,7 +110,7 @@ fn first_difference(expected: &[u8], actual: &[u8]) -> usize {
 /// above covers exactly these. Counted per arch from the tables.
 #[test]
 fn every_vectorized_pair_has_a_kernel_at_its_tiers() {
-    let count = |tier: Tier| {
+    let count = |tier: SimdTier| {
         ALL_FORMATS
             .into_iter()
             .flat_map(|from| ALL_FORMATS.map(|to| (from, to)))
@@ -120,10 +121,10 @@ fn every_vectorized_pair_has_a_kernel_at_its_tiers() {
     // channel shuffles from SSSE3 on.
     #[cfg(target_arch = "x86_64")]
     assert_eq!(
-        Tier::ALL.map(count),
-        [15, 15 + 6, 18 + 6, 18 + 6],
-        "SSE2, SSSE3, SSE4.1, AVX2"
+        SimdTier::ALL.map(count),
+        [15, 15 + 6, 18 + 6, 18 + 6, 18 + 6],
+        "SSE2, SSSE3, SSE4.1, AVX2, AVX2+FMA"
     );
     #[cfg(target_arch = "aarch64")]
-    assert_eq!(Tier::ALL.map(count), [18 + 6]);
+    assert_eq!(SimdTier::ALL.map(count), [18 + 6]);
 }

@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::common::buffer2::Buffer2;
 use crate::common::color_format::{ALL_FORMATS, ColorFormat};
 use crate::common::error::Error;
@@ -19,11 +21,11 @@ fn lena_reads_as_packed_rgba() {
 fn read_file_dispatches_on_the_extension() {
     assert!(matches!(
         Image::read_file("/nonexistent/file.xyz"),
-        Err(Error::InvalidExtension(extension)) if extension == "xyz"
+        Err(Error::InvalidExtension(path)) if path == Path::new("/nonexistent/file.xyz")
     ));
     assert!(matches!(
         Image::read_file("/nonexistent/file"),
-        Err(Error::InvalidExtension(extension)) if extension == "missing extension"
+        Err(Error::InvalidExtension(path)) if path == Path::new("/nonexistent/file")
     ));
     assert!(matches!(
         Image::read_file("/nonexistent/does_not_exist.PNG"),

@@ -1,17 +1,12 @@
-#[cfg(target_arch = "aarch64")]
-use super::neon_kernel;
-use super::{RowKernel, apply_kernel};
-#[cfg(target_arch = "x86_64")]
-use super::{avx2_kernel, sse41_kernel};
+use super::{apply_kernel, row_kernel};
 use crate::common::color_format::{ALL_FORMATS, ColorFormat, SampleType};
 use crate::common::image_diff::{max_pixel_diff, pixels_equal};
 use crate::common::internals::create_test_image;
-#[cfg(target_arch = "x86_64")]
-use crate::cpu_features;
 use crate::image::Image;
 use crate::image::image_desc::ImageDesc;
 use crate::ops::contrast_brightness::channel_affine::ChannelAffine;
 use crate::ops::contrast_brightness::{ContrastBrightness, cpu};
+use crate::simd_tier::SimdTier;
 
 /// Builds a single-row image from raw channel bytes.
 fn image_from_channels(format: ColorFormat, width: usize, bytes: Vec<u8>) -> Image {
@@ -282,16 +277,22 @@ fn simd_matches_the_scalar_reference_bit_for_bit() {
     // exercises each kernel's tail (a width that is no vector's multiple).
     // Both paths evaluate the same fused affine in the same order, so floats
     // are held to equality here too, not an epsilon.
-    for (tier, select) in kernel_tiers() {
+    for tier in SimdTier::ALL {
+        if !tier.is_supported() {
+            eprintln!("SKIPPED: this CPU has no {tier}, so its kernels are not checked");
+            continue;
+        }
         for format in ALL_FORMATS {
-            let kernel = select(format);
+            let Some(kernel) = row_kernel(tier, format) else {
+                continue;
+            };
 
             for (contrast, brightness) in PARAM_SWEEP {
                 let input = create_test_image(format, 17, 5, 0);
                 let op = ContrastBrightness::new(contrast, brightness);
 
                 let mut actual = input.clone();
-                // SAFETY: `kernel_tiers` only yields tiers this CPU supports.
+                // SAFETY: `tier` is supported on this CPU, checked above.
                 unsafe { apply_kernel(kernel, op, &mut actual) };
 
                 let mut expected = input.clone();
@@ -311,26 +312,4 @@ fn simd_matches_the_scalar_reference_bit_for_bit() {
             }
         }
     }
-}
-
-/// A SIMD tier: its name, and the selector mapping a format to its kernel.
-type KernelTier = (&'static str, fn(ColorFormat) -> RowKernel);
-
-/// The SIMD tiers this CPU can actually execute.
-#[cfg(target_arch = "x86_64")]
-fn kernel_tiers() -> Vec<KernelTier> {
-    let mut tiers: Vec<KernelTier> = Vec::new();
-    if cpu_features::has_sse4_1() {
-        tiers.push(("sse4.1", sse41_kernel));
-    }
-    if cpu_features::has_avx2() {
-        tiers.push(("avx2", avx2_kernel));
-    }
-    assert!(!tiers.is_empty(), "x86_64 without SSE4.1 is not supported");
-    tiers
-}
-
-#[cfg(target_arch = "aarch64")]
-fn kernel_tiers() -> Vec<KernelTier> {
-    vec![("neon", neon_kernel)]
 }
