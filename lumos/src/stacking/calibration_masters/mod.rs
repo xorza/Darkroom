@@ -490,7 +490,7 @@ impl CalibrationMasters {
             None
         };
 
-        let flat = subtracted_flat.map(prepared_flat::normalize);
+        let flat = subtracted_flat.map(prepared_flat::normalize).transpose()?;
         if cancel.is_cancelled() {
             return Err(Error::Cancelled);
         }
@@ -638,11 +638,11 @@ impl CalibrationMasters {
     /// or when a master's Mono, Bayer, or X-Trans pattern differs from the light. Validation
     /// completes before the light is mutated.
     pub fn calibrate(&self, image: &mut CfaImage) -> Result<(), CalibrationError> {
-        // Double application would silently subtract the dark / divide the flat twice.
-        assert!(
-            !image.metadata.calibrated,
-            "calibrate() called on an already-calibrated frame"
-        );
+        // Double application would subtract the dark and divide the flat twice. The flag comes
+        // from the file (`LUMCAL`), so this is input to refuse, not an invariant to assert.
+        if image.metadata.calibrated {
+            return Err(CalibrationError::AlreadyCalibrated);
+        }
         self.validate_against_light(image)?;
         // 1. Dark subtraction (or bias), in the light's own domain.
         let subtracted = match (&self.masters.dark, &self.masters.bias) {

@@ -97,10 +97,6 @@ Severity: High — a wgpu validation error on any image over ~64 MiB.
 ## Untrusted data reaches code-contract asserts and panics
 Severity: High — user files and user-wired graphs crash the process or the worker instead of producing an error.
 
-- [ ] `lumos/src/io/image/fits/metadata.rs` `read_metadata` sets `calibrated` from the file's `LUMCAL` keyword; `lumos/src/stacking/calibration_masters/mod.rs` `CalibrationMasters::calibrate` begins with `assert!(!image.metadata.calibrated)`. Any FITS that `save_fits` wrote after calibration, or a hand-edited header, aborts the process when loaded as a light.
-- [ ] `lens/src/image/nodes/processing.rs` `register_blend` — the output is sized from `source.desc()` and `Blend::apply_cpu` runs unchecked; `imaginarium/src/ops/blend/cpu/mod.rs` asserts `src.desc().assert_same(dst.desc())`. Source and Destination are two arbitrary wires, so a size or format mismatch (a planar astro frame repacked to `RGB_F32` against a PNG `RGB_U8`) crashes the worker. Compare descriptors and return `InvokeError`.
-- [ ] `lumos/src/stacking/calibration_masters/prepared_flat/mod.rs` `normalize_mono` / `normalize_cfa` — a release `assert!` on "Flat frame mean is zero or negative after subtraction", a property of user-chosen flats and flat-darks (swapped roles, a bias at the wrong level), reached through `from_images`, which already returns `Result`.
-- [ ] `lumos/src/stacking/star_detection/detector/stages/filter/mod.rs` `remove_duplicate_stars` — `FilterConfig::validate` accepts `duplicate_min_separation = 0.0`; the spatial-hash path divides by `cell_size = 0.0`, every coordinate becomes `i64::MAX`, and `cell_x + dx` overflows (debug panic; release puts all stars in one cell, O(n²)). Zero separation should mean "no dedup" and return early.
 - [ ] `imaginarium/src/drawing.rs` `draw_circle` / `draw_dot` — for a shape entirely left of or above the image, `((cx + r).ceil() as i32).min(width as i32 - 1) as usize` is negative and wraps to ~2^64; the distance test rejects every pixel, so the loop runs essentially forever. Clamp in `i32` and return early on an empty box.
 
 ---

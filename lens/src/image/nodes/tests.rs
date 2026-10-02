@@ -142,3 +142,54 @@ async fn load_and_save_round_trip_exact_pixels() {
     assert_eq!(cpu.bytes(), pixels);
     fs::remove_dir_all(dir).unwrap();
 }
+
+/// Source and destination are two independent wires, so a size or format mismatch is the user's
+/// graph: the node fails with an input error naming the destination, instead of the blend kernel's
+/// assert taking the worker down.
+#[tokio::test]
+async fn blend_refuses_a_destination_of_another_size_or_format() {
+    let library = image_library();
+    let image = |width, format| {
+        DynamicValue::from_custom(Image::from(
+            imaginarium::Image::new_black(imaginarium::ImageDesc::new(width, 2, format)).unwrap(),
+        ))
+    };
+    let blend = |source: DynamicValue, destination: DynamicValue| {
+        let mut inputs = [
+            source,
+            destination,
+            ConstValue::Enum("Normal".to_owned()).into(),
+            ConstValue::Float(0.5).into(),
+        ];
+        let mut outputs = [DynamicValue::Unbound];
+        let library = &library;
+        async move {
+            func(library, "Blend")
+                .lambda
+                .invoke(Invocation {
+                    ctx: &mut ContextManager::default(),
+                    state: &mut AnyState::default(),
+                    event_state: &SharedAnyState::default(),
+                    inputs: &mut inputs,
+                    demand: &[OutputDemand::Produce],
+                    outputs: &mut outputs,
+                })
+                .await
+        }
+    };
+
+    for destination in [
+        image(3, ColorFormat::RGB_U8),
+        image(2, ColorFormat::RGBA_U8),
+    ] {
+        assert!(matches!(
+            blend(image(2, ColorFormat::RGB_U8), destination).await,
+            Err(scenarium::InvokeError::InvalidInput { index: 1, .. })
+        ));
+    }
+    assert!(
+        blend(image(2, ColorFormat::RGB_U8), image(2, ColorFormat::RGB_U8))
+            .await
+            .is_ok()
+    );
+}

@@ -14,6 +14,7 @@ fn prepare(flat: CfaImage, subtractor: Option<&CfaImage>) -> CfaImage {
         flat,
         subtractor.map(|subtractor| (subtractor, 1.0)),
     ))
+    .unwrap()
 }
 
 fn standard_xtrans() -> CfaType {

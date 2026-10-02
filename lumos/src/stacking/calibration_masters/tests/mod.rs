@@ -64,17 +64,46 @@ fn weighted_budget_never_overcommits() {
 }
 
 #[test]
-#[should_panic(expected = "already-calibrated frame")]
-fn calibrate_twice_panics() {
-    // A second calibrate() would subtract the dark / divide the flat twice — must crash, not
-    // silently corrupt.
-    let masters =
-        CalibrationMasters::from_images(CalibrationSet::default(), 5.0, CancelToken::never())
-            .unwrap();
+fn calibrating_a_calibrated_light_is_refused() {
+    // A second calibrate() would subtract the dark / divide the flat twice. The flag can come from
+    // the file (`LUMCAL`), so it is refused as input, and the light is left as it was.
+    let mut images = CalibrationSet::default();
+    *images.get_mut(MasterRole::Dark) =
+        Some(constant_cfa(Size2us::new(4, 4), 0.125, CfaType::Mono));
+    let masters = CalibrationMasters::from_images(images, 5.0, CancelToken::never()).unwrap();
     let mut light = constant_cfa(Size2us::new(4, 4), 0.5, CfaType::Mono);
     masters.calibrate(&mut light).unwrap();
     assert!(light.metadata.calibrated);
-    masters.calibrate(&mut light).unwrap();
+    assert_eq!(light.data.pixels(), &[0.375; 16]);
+    assert_eq!(
+        masters.calibrate(&mut light),
+        Err(CalibrationError::AlreadyCalibrated)
+    );
+    assert_eq!(light.data.pixels(), &[0.375; 16]);
+}
+
+/// A flat whose subtracted mean is not positive — a dark given as the flat, or a subtractor above
+/// the flat's level — is refused when the set is built, per colour for a CFA flat.
+#[test]
+fn a_flat_with_no_positive_mean_is_refused() {
+    for (cfa_type, flat, subtractor, channel) in [
+        (CfaType::Mono, 0.0f32, None, None),
+        (CfaType::Mono, 0.25, Some(0.5f32), None),
+        (CfaType::Bayer(CfaPattern::Rggb), 0.25, Some(0.5), Some(0)),
+    ] {
+        let mut images = CalibrationSet::default();
+        *images.get_mut(MasterRole::Flat) =
+            Some(constant_cfa(Size2us::new(4, 4), flat, cfa_type.clone()));
+        *images.get_mut(MasterRole::FlatDark) =
+            subtractor.map(|level| constant_cfa(Size2us::new(4, 4), level, cfa_type.clone()));
+        assert!(
+            matches!(
+                CalibrationMasters::from_images(images, 5.0, CancelToken::never()),
+                Err(Error::Calibration(CalibrationError::NonPositiveFlat { channel: c })) if c == channel
+            ),
+            "{cfa_type:?} flat {flat} minus {subtractor:?}"
+        );
+    }
 }
 
 fn masters_with_component(role: MasterRole, cfa_type: Option<CfaType>) -> CalibrationMasters {

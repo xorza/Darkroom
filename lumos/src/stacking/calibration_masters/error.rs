@@ -15,6 +15,15 @@ use crate::stacking::calibration_masters::{CalibrationComponent, MasterRole};
 /// which have no total equality.
 #[derive(Debug, thiserror::Error, Clone, PartialEq)]
 pub enum CalibrationError {
+    /// The light is already calibrated: its file says so (`LUMCAL`), or this set calibrated it.
+    /// A second pass would subtract the dark and divide the flat twice.
+    #[error("the light frame is already calibrated")]
+    AlreadyCalibrated,
+    /// The flat, once its own bias or flat-dark is subtracted, has no positive mean to normalize
+    /// by — in the given CFA colour channel, or over the whole frame (`None`). Swapped roles (a
+    /// dark given as the flat) and a subtractor at the wrong level both end here.
+    #[error("the subtracted flat has no positive mean{}", channel.map_or(String::new(), |c| format!(" in colour channel {c}")))]
+    NonPositiveFlat { channel: Option<usize> },
     /// The light frame does not identify its sensor pattern.
     #[error("light frame is missing CFA pattern metadata")]
     MissingLightCfaPattern,
