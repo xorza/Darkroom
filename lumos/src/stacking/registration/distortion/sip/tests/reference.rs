@@ -103,7 +103,10 @@ fn crpix_vs_centroid_when_points_are_off_center() {
 fn sigma_clipping_rejects_outliers() {
     let center = DVec2::new(500.0, 500.0);
     let k = 1e-7;
-    let (mut ref_points, mut target_points) = make_radial_distortion_points(center, k, 100, 1000);
+    let PointPairs {
+        reference: mut ref_points,
+        target: mut target_points,
+    } = make_radial_distortion_points(center, k, 100, 1000);
 
     let transform = Transform::identity();
     let n_clean = ref_points.len();
@@ -161,7 +164,10 @@ fn sigma_clipping_no_effect_on_clean_data() {
     // With clean data, clipping should not reject anything, so results should
     // be identical with and without clipping.
     let center = DVec2::new(500.0, 500.0);
-    let (ref_points, target_points) = make_radial_distortion_points(center, 1e-7, 100, 1000);
+    let PointPairs {
+        reference: ref_points,
+        target: target_points,
+    } = make_radial_distortion_points(center, 1e-7, 100, 1000);
 
     let transform = Transform::identity();
 

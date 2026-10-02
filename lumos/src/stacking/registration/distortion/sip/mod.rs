@@ -38,9 +38,6 @@ use crate::stacking::registration::distortion::point_normalization::PointNormali
 use crate::stacking::registration::result::RegistrationError;
 use crate::stacking::registration::transform::Transform;
 
-#[cfg(test)]
-mod tests;
-
 /// Maximum number of polynomial terms (order 5): (5+1)(5+2)/2 - 3 = 18.
 const MAX_TERMS: usize = 18;
 
@@ -568,3 +565,6 @@ fn solve_lu(a: &[f64], b: &[f64], n: usize) -> Option<ArrayVec<f64, MAX_TERMS>> 
 
     Some(ArrayVec::try_from(&x[..n]).unwrap())
 }
+
+#[cfg(test)]
+mod tests;

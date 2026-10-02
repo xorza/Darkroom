@@ -42,9 +42,6 @@ macro_rules! id_type {
             pub fn as_u128(&self) -> u128 {
                 self.0.as_u128()
             }
-            pub fn as_u64_pair(&self) -> (u64, u64) {
-                self.0.as_u64_pair()
-            }
             pub fn as_uuid(&self) -> uuid::Uuid {
                 self.0
             }

@@ -8,9 +8,16 @@ use crate::stacking::star_detection::config::detection_config::Connectivity;
 use crate::stacking::star_detection::labeling::LabelMap;
 use crate::testing::prelude::*;
 
+/// Per-pixel labels and how many components they name.
+#[derive(Debug)]
+struct Labeled {
+    labels: Vec<u32>,
+    count: usize,
+}
+
 /// Simple flood-fill reference implementation for ground truth comparison.
 /// This is intentionally naive and slow but obviously correct.
-fn reference_ccl_4conn(mask: &[bool], size: Size2us) -> (Vec<u32>, usize) {
+fn reference_ccl_4conn(mask: &[bool], size: Size2us) -> Labeled {
     let mut labels = vec![0u32; size.width * size.height];
     let mut current_label = 0u32;
 
@@ -49,11 +56,14 @@ fn reference_ccl_4conn(mask: &[bool], size: Size2us) -> (Vec<u32>, usize) {
         }
     }
 
-    (labels, current_label as usize)
+    Labeled {
+        labels,
+        count: current_label as usize,
+    }
 }
 
 /// Simple flood-fill reference implementation for 8-connectivity.
-fn reference_ccl_8conn(mask: &[bool], size: Size2us) -> (Vec<u32>, usize) {
+fn reference_ccl_8conn(mask: &[bool], size: Size2us) -> Labeled {
     let mut labels = vec![0u32; size.width * size.height];
     let mut current_label = 0u32;
 
@@ -92,7 +102,10 @@ fn reference_ccl_8conn(mask: &[bool], size: Size2us) -> (Vec<u32>, usize) {
         }
     }
 
-    (labels, current_label as usize)
+    Labeled {
+        labels,
+        count: current_label as usize,
+    }
 }
 
 /// Verify CCL invariants on any label map.
@@ -176,7 +189,10 @@ fn compare_with_reference(mask_data: &[bool], size: Size2us) {
 
     // Test 4-connectivity
     let label_map_4 = LabelMap::from_mask(&mask, Connectivity::Four);
-    let (ref_labels_4, ref_count_4) = reference_ccl_4conn(mask_data, size);
+    let Labeled {
+        labels: ref_labels_4,
+        count: ref_count_4,
+    } = reference_ccl_4conn(mask_data, size);
 
     assert_eq!(
         label_map_4.num_labels(),
@@ -193,7 +209,10 @@ fn compare_with_reference(mask_data: &[bool], size: Size2us) {
 
     // Test 8-connectivity
     let label_map_8 = LabelMap::from_mask(&mask, Connectivity::Eight);
-    let (ref_labels_8, ref_count_8) = reference_ccl_8conn(mask_data, size);
+    let Labeled {
+        labels: ref_labels_8,
+        count: ref_count_8,
+    } = reference_ccl_8conn(mask_data, size);
 
     assert_eq!(
         label_map_8.num_labels(),

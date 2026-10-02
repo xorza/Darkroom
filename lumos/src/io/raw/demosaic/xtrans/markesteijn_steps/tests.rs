@@ -168,25 +168,25 @@ fn ypbpr_conversion_white() {
 #[test]
 fn ypbpr_conversion_primary_colors() {
     // Pure red (1,0,0): Y=0.2627, Pb=-0.2627*0.56433, Pr=0.7373*0.67815
-    let (y, pb, pr) = rgb_to_ypbpr(1.0, 0.0, 0.0);
+    let YPbPr { luma: y, pb, pr } = YPbPr::from_rgb(1.0, 0.0, 0.0);
     assert!((y - 0.2627).abs() < 1e-6, "Red Y={y}");
     assert!((pb - (-0.2627 * 0.56433)).abs() < 1e-6, "Red Pb={pb}");
     assert!((pr - (0.7373 * 0.67815)).abs() < 1e-4, "Red Pr={pr}");
 
     // Pure green (0,1,0): Y=0.6780, Pb=-0.6780*0.56433, Pr=-0.6780*0.67815
-    let (y, pb, pr) = rgb_to_ypbpr(0.0, 1.0, 0.0);
+    let YPbPr { luma: y, pb, pr } = YPbPr::from_rgb(0.0, 1.0, 0.0);
     assert!((y - 0.6780).abs() < 1e-6, "Green Y={y}");
     assert!((pb - (-0.6780 * 0.56433)).abs() < 1e-6, "Green Pb={pb}");
     assert!((pr - (-0.6780 * 0.67815)).abs() < 1e-4, "Green Pr={pr}");
 
     // Pure blue (0,0,1): Y=0.0593, Pb=0.9407*0.56433, Pr=-0.0593*0.67815
-    let (y, pb, pr) = rgb_to_ypbpr(0.0, 0.0, 1.0);
+    let YPbPr { luma: y, pb, pr } = YPbPr::from_rgb(0.0, 0.0, 1.0);
     assert!((y - 0.0593).abs() < 1e-6, "Blue Y={y}");
     assert!((pb - (0.9407 * 0.56433)).abs() < 1e-4, "Blue Pb={pb}");
     assert!((pr - (-0.0593 * 0.67815)).abs() < 1e-4, "Blue Pr={pr}");
 
     // Mid-gray (0.5, 0.5, 0.5): Y=0.5, Pb=0, Pr=0
-    let (y, pb, pr) = rgb_to_ypbpr(0.5, 0.5, 0.5);
+    let YPbPr { luma: y, pb, pr } = YPbPr::from_rgb(0.5, 0.5, 0.5);
     assert!((y - 0.5).abs() < 1e-6, "Gray Y={y}");
     assert!(pb.abs() < 1e-6, "Gray Pb={pb}");
     assert!(pr.abs() < 1e-6, "Gray Pr={pr}");

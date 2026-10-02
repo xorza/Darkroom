@@ -6,16 +6,11 @@
 //! Uses f64 throughout the fitting pipeline for numerical stability,
 //! achieving ~0.01 pixel centroid accuracy.
 
-#[cfg(all(test, feature = "bench"))]
-mod bench;
-#[cfg(test)]
-mod tests;
-
 mod simd;
 
 use crate::stacking::star_detection::centroid::fit_is_plausible;
 use crate::stacking::star_detection::centroid::lm_optimizer::{
-    FitData, LMConfig, LMModel, NormalEquations,
+    FitData, LMConfig, LMModel, ModelSample, NormalEquations,
 };
 use crate::stacking::star_detection::centroid::stamp::FitNoise;
 use crate::stacking::star_detection::centroid::stamp::StampFit;
@@ -41,21 +36,7 @@ pub(super) struct GaussianFit {
     /// synthetic ground truth. Gated rather than carried and ignored, so a release build
     /// neither stores them nor runs the arithmetic that fills them.
     #[cfg(test)]
-    debug: GaussianFitDebug,
-}
-
-/// Fit diagnostics kept for tests; see [`GaussianFit::debug`].
-#[cfg(test)]
-#[derive(Debug, Clone, Copy)]
-struct GaussianFitDebug {
-    /// Amplitude of Gaussian.
-    amplitude: f32,
-    /// Background level.
-    background: f32,
-    /// RMS residual of fit.
-    rms_residual: f32,
-    /// Number of iterations used.
-    iterations: usize,
+    debug: internals::GaussianFitDebug,
 }
 
 /// 2D Gaussian model for L-M optimization (6 parameters).
@@ -76,7 +57,7 @@ impl LMModel<6> for Gaussian2D {
     }
 
     #[inline]
-    fn evaluate_and_jacobian(&self, x: f64, y: f64, params: &[f64; 6]) -> (f64, [f64; 6]) {
+    fn evaluate_and_jacobian(&self, x: f64, y: f64, params: &[f64; 6]) -> ModelSample<6> {
         let [x0, y0, amp, sigma_x, sigma_y, bg] = *params;
         let sigma_x2 = sigma_x * sigma_x;
         let sigma_y2 = sigma_y * sigma_y;
@@ -87,9 +68,9 @@ impl LMModel<6> for Gaussian2D {
         let amp_exp = amp * exp_val;
         let model_val = amp_exp + bg;
 
-        (
-            model_val,
-            [
+        ModelSample {
+            value: model_val,
+            jacobian: [
                 amp_exp * dx / sigma_x2,                  // df/dx0
                 amp_exp * dy / sigma_y2,                  // df/dy0
                 exp_val,                                  // df/damp
@@ -97,7 +78,7 @@ impl LMModel<6> for Gaussian2D {
                 amp_exp * dy * dy / (sigma_y2 * sigma_y), // df/dsigma_y
                 1.0,                                      // df/dbg
             ],
-        )
+        }
     }
 
     #[inline]
@@ -168,14 +149,27 @@ impl GaussianFit {
             sigma: Vec2::new(sigma_x as f32, sigma_y as f32),
             converged: result.converged,
             #[cfg(test)]
-            debug: GaussianFitDebug::of(&result, fit.stamp.z.len()),
+            debug: internals::GaussianFitDebug::of(&result, fit.stamp.z.len()),
         })
     }
 }
 
 #[cfg(test)]
 mod internals {
-    use crate::stacking::star_detection::centroid::gaussian_fit::{Gaussian2D, GaussianFitDebug};
+    /// Fit diagnostics kept for tests; see [`GaussianFit::debug`].
+    #[derive(Debug, Clone, Copy)]
+    pub(super) struct GaussianFitDebug {
+        /// Amplitude of Gaussian.
+        pub(super) amplitude: f32,
+        /// Background level.
+        pub(super) background: f32,
+        /// RMS residual of fit.
+        pub(super) rms_residual: f32,
+        /// Number of iterations used.
+        pub(super) iterations: usize,
+    }
+
+    use crate::stacking::star_detection::centroid::gaussian_fit::Gaussian2D;
     use crate::stacking::star_detection::centroid::lm_optimizer::LMResult;
 
     impl GaussianFitDebug {
@@ -221,3 +215,8 @@ mod internals {
         }
     }
 }
+
+#[cfg(all(test, feature = "bench"))]
+mod bench;
+#[cfg(test)]
+mod tests;

@@ -1,6 +1,13 @@
 use crate::stacking::registration::distortion::sip::*;
 use crate::stacking::registration::transform::Transform;
 
+/// Matched reference and target points.
+#[derive(Debug)]
+struct PointPairs {
+    reference: Vec<DVec2>,
+    target: Vec<DVec2>,
+}
+
 /// Generate barrel/pincushion distortion point pairs on a grid.
 ///
 /// Distortion model: target = p + (p - center) * k * |p - center|^2
@@ -11,7 +18,7 @@ fn make_radial_distortion_points(
     k: f64,
     grid_step: usize,
     extent: usize,
-) -> (Vec<DVec2>, Vec<DVec2>) {
+) -> PointPairs {
     let mut ref_points = Vec::new();
     let mut target_points = Vec::new();
     for y in (0..=extent).step_by(grid_step) {
@@ -23,7 +30,10 @@ fn make_radial_distortion_points(
             target_points.push(p + d * k * r2);
         }
     }
-    (ref_points, target_points)
+    PointPairs {
+        reference: ref_points,
+        target: target_points,
+    }
 }
 
 /// Compute RMS of a slice of residuals.

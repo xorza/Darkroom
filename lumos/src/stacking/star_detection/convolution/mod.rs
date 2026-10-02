@@ -10,11 +10,6 @@ mod simd;
 
 use simd::mirror_index;
 
-#[cfg(all(test, feature = "bench"))]
-mod bench;
-#[cfg(test)]
-mod tests;
-
 use rayon::prelude::*;
 
 use crate::math::fwhm::fwhm_to_sigma;
@@ -360,18 +355,7 @@ fn elliptical_gaussian_kernel_2d(sigma: f32, axis_ratio: f32, angle: f32) -> Gau
     }
 }
 
+#[cfg(all(test, feature = "bench"))]
+mod bench;
 #[cfg(test)]
-pub(super) mod internals {
-    use crate::stacking::star_detection::convolution;
-    use imaginarium::Buffer2;
-
-    /// Proxy for `tests`, a cousin module of `convolution` under `star_detection`.
-    pub(crate) fn gaussian_convolve(
-        pixels: &Buffer2<f32>,
-        sigma: f32,
-        output: &mut Buffer2<f32>,
-        temp: &mut Buffer2<f32>,
-    ) -> f32 {
-        convolution::gaussian_convolve(pixels, sigma, output, temp)
-    }
-}
+mod tests;

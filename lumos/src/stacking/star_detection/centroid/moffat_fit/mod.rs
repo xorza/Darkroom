@@ -10,17 +10,12 @@
 //! Uses f64 throughout the fitting pipeline for numerical stability,
 //! achieving ~0.01 pixel centroid accuracy.
 
-#[cfg(all(test, feature = "bench"))]
-mod bench;
-#[cfg(test)]
-mod tests;
-
 mod simd;
 
 use crate::math::fwhm::FWHM_TO_SIGMA;
 use crate::stacking::star_detection::centroid::fit_is_plausible;
 use crate::stacking::star_detection::centroid::lm_optimizer::{
-    FitData, LMConfig, LMModel, NormalEquations,
+    FitData, LMConfig, LMModel, ModelSample, NormalEquations,
 };
 use crate::stacking::star_detection::centroid::stamp::FitNoise;
 use crate::stacking::star_detection::centroid::stamp::StampFit;
@@ -61,21 +56,7 @@ pub(super) struct MoffatFit {
     /// synthetic ground truth. Gated rather than carried and ignored, so a release build
     /// neither stores them nor runs the arithmetic that fills them.
     #[cfg(test)]
-    debug: MoffatFitDebug,
-}
-
-/// Fit diagnostics kept for tests; see [`MoffatFit::debug`].
-#[cfg(test)]
-#[derive(Debug, Clone, Copy)]
-struct MoffatFitDebug {
-    /// Amplitude of profile.
-    amplitude: f32,
-    /// Core width parameter (alpha).
-    alpha: f32,
-    /// Background level.
-    background: f32,
-    /// Number of iterations used.
-    iterations: usize,
+    debug: internals::MoffatFitDebug,
 }
 
 /// Strategy for computing `u^(-beta)` efficiently.
@@ -176,7 +157,7 @@ impl LMModel<5> for MoffatFixedBeta {
     }
 
     #[inline]
-    fn evaluate_and_jacobian(&self, x: f64, y: f64, params: &[f64; 5]) -> (f64, [f64; 5]) {
+    fn evaluate_and_jacobian(&self, x: f64, y: f64, params: &[f64; 5]) -> ModelSample<5> {
         let [x0, y0, amp, alpha, bg] = *params;
         let alpha2 = alpha * alpha;
         let dx = x - x0;
@@ -188,16 +169,16 @@ impl LMModel<5> for MoffatFixedBeta {
         let u_neg_beta_m1 = u_neg_beta / u;
         let common = 2.0 * amp * self.beta / alpha2 * u_neg_beta_m1;
 
-        (
-            model_val,
-            [
+        ModelSample {
+            value: model_val,
+            jacobian: [
                 common * dx,         // df/dx0
                 common * dy,         // df/dy0
                 u_neg_beta,          // df/damp
                 common * r2 / alpha, // df/dalpha
                 1.0,                 // df/dbg
             ],
-        )
+        }
     }
 
     #[inline]
@@ -267,7 +248,7 @@ impl MoffatFit {
             fwhm: alpha_beta_to_fwhm(alpha as f32, config.fixed_beta),
             converged: result.converged,
             #[cfg(test)]
-            debug: MoffatFitDebug::of(&result),
+            debug: internals::MoffatFitDebug::of(&result),
         })
     }
 }
@@ -288,10 +269,21 @@ pub(super) fn fwhm_beta_to_alpha(fwhm: f32, beta: f32) -> f32 {
 
 #[cfg(test)]
 mod internals {
+    /// Fit diagnostics kept for tests; see [`MoffatFit::debug`].
+    #[derive(Debug, Clone, Copy)]
+    pub(super) struct MoffatFitDebug {
+        /// Amplitude of profile.
+        pub(super) amplitude: f32,
+        /// Core width parameter (alpha).
+        pub(super) alpha: f32,
+        /// Background level.
+        pub(super) background: f32,
+        /// Number of iterations used.
+        pub(super) iterations: usize,
+    }
+
     use crate::stacking::star_detection::centroid::lm_optimizer::LMResult;
-    use crate::stacking::star_detection::centroid::moffat_fit::{
-        MoffatFit, MoffatFitDebug, MoffatFixedBeta, fast_pow_neg,
-    };
+    use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFixedBeta, fast_pow_neg};
 
     impl MoffatFitDebug {
         /// Derive the diagnostics from the optimizer's report. Gated with the struct, so a
@@ -304,14 +296,6 @@ mod internals {
                 background: background as f32,
                 iterations: result.iterations,
             }
-        }
-    }
-
-    impl MoffatFit {
-        /// Exposes `MoffatFitDebug::alpha` to `centroid::tests`, which sits outside
-        /// `moffat_fit` and so can name neither the private `debug` field nor its type.
-        pub(crate) fn debug_alpha(&self) -> f32 {
-            self.debug.alpha
         }
     }
 
@@ -344,3 +328,8 @@ mod internals {
         }
     }
 }
+
+#[cfg(all(test, feature = "bench"))]
+mod bench;
+#[cfg(test)]
+mod tests;

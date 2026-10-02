@@ -5,8 +5,6 @@ use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
 pub(crate) mod rcd;
-#[cfg(test)]
-mod tests;
 
 /// Bayer CFA (Color Filter Array) pattern.
 /// Represents the 2x2 pattern of color filters on the sensor.
@@ -186,3 +184,6 @@ impl<'a> BayerImage<'a> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

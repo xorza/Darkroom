@@ -15,8 +15,6 @@
 
 mod geometry;
 pub(super) mod matching;
-#[cfg(test)]
-mod tests;
 pub(super) mod voting;
 
 use crate::error::InvalidConfigField;
@@ -56,3 +54,6 @@ impl Default for TriangleConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

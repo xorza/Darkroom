@@ -11,9 +11,6 @@ use crate::math::size2us::Size2us;
 use glam::Vec2;
 use imaginarium::Buffer2;
 
-#[cfg(test)]
-mod tests;
-
 // Lanczos LUT: 4096 samples/unit gives ~0.00024 precision.
 // Lanczos3 LUT: 4096 * 3 * 4 bytes = 48KB (fits in L1 cache).
 pub(super) const LANCZOS_LUT_RESOLUTION: usize = 4096;
@@ -225,3 +222,6 @@ impl LanczosLut {
 
 #[cfg(test)]
 pub(super) mod internals;
+
+#[cfg(test)]
+mod tests;

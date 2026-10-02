@@ -3,13 +3,23 @@ use crate::testing::synthetic::metrics::pixel_stats;
 use crate::testing::synthetic::observe::*;
 use crate::testing::synthetic::scene::BackgroundField;
 
-fn argmax_xy(pixels: &[f32], width: usize) -> (usize, usize) {
+/// Where the brightest pixel is.
+#[derive(Debug)]
+struct Peak {
+    x: usize,
+    y: usize,
+}
+
+fn argmax_xy(pixels: &[f32], width: usize) -> Peak {
     let (i, _) = pixels
         .iter()
         .enumerate()
         .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
         .unwrap();
-    (i % width, i / width)
+    Peak {
+        x: i % width,
+        y: i / width,
+    }
 }
 
 #[test]
@@ -44,7 +54,7 @@ fn source_lands_at_transformed_position() {
     };
     let frame = render(&scene, &Camera::ideal(3.0), &obs);
     assert_eq!(frame.truth.sources[0].pos, DVec2::new(25.0, 17.0));
-    let (px, py) = argmax_xy(frame.image.channel(0).pixels(), 64);
+    let Peak { x: px, y: py } = argmax_xy(frame.image.channel(0).pixels(), 64);
     assert_eq!((px, py), (25, 17));
 }
 
@@ -123,8 +133,8 @@ fn dither_shifts_peak() {
         };
         render(&scene, &Camera::ideal(3.0), &obs)
     };
-    let (x0, _) = argmax_xy(frame(0.0).image.channel(0).pixels(), 64);
-    let (x1, _) = argmax_xy(frame(8.0).image.channel(0).pixels(), 64);
+    let Peak { x: x0, .. } = argmax_xy(frame(0.0).image.channel(0).pixels(), 64);
+    let Peak { x: x1, .. } = argmax_xy(frame(8.0).image.channel(0).pixels(), 64);
     assert_eq!(x0, 20);
     assert_eq!(x1, 28);
 }

@@ -11,9 +11,6 @@ use crate::math::size2us::Size2us;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-#[cfg(test)]
-mod tests;
-
 /// B3-spline low-pass filter `[1, 4, 6, 4, 1] / 16` — the separable à trous smoothing kernel.
 const B3: [f32; 5] = [1.0 / 16.0, 4.0 / 16.0, 6.0 / 16.0, 4.0 / 16.0, 1.0 / 16.0];
 
@@ -144,3 +141,6 @@ pub(crate) fn max_scales(size: Size2us) -> usize {
     }
     min_dim.ilog2() as usize
 }
+
+#[cfg(test)]
+mod tests;

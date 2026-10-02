@@ -511,35 +511,15 @@ Test, internals and bench code sits where the rules say it must not, or is gated
 ### lumos — star_detection
 Short paths are relative to `lumos/src/stacking/star_detection/`.
 
-- [ ] `lumos/src/stacking/star_detection/detector/stages/detect_test_utils.rs` — an orphan file: `stages/mod.rs` never declares it, so it is never compiled. It duplicates `detect::internals::detect_stars_test`. Delete it.
-- [ ] `lumos/src/stacking/star_detection/convolution/mod.rs:363-376` — the `internals::gaussian_convolve` proxy ("for `tests`, a cousin module") has one caller, `convolution/tests/matched_filter.rs:7`. That caller descends from `convolution` and can already see the private function, as `convolution/tests/mod.rs:90` does. Delete the proxy; it also uses an inline `crate::` path.
-- [ ] `lumos/src/stacking/star_detection/threshold_mask/mod.rs:14-30` — the `internals` mod sits at the top of the production file, ahead of every production item. `centroid/gaussian_fit/mod.rs:48-59` and `centroid/moffat_fit/mod.rs:68-79` gate whole test-only structs (`GaussianFitDebug`, `MoffatFitDebug`) mid-file; only the field may be gated there, and the struct belongs in the trailing `internals`. `centroid/lm_optimizer.rs:59` keeps `chi2` and `iterations` as production fields read only by tests (`cfg_attr(not(test), allow(dead_code))`).
-- [ ] `lumos/src/stacking/star_detection/centroid/internals.rs` — an aggregator of "shared test helpers". `reference_normal_equations` reaches into `lm_optimizer::NormalEquations` and belongs in a trailing `internals` mod in `lm_optimizer.rs`. `MoffatFit::debug_alpha` (`moffat_fit/mod.rs:309`) is a `pub(crate)` accessor that exists only because `centroid/tests` cannot see the gated field.
-- [ ] Bench placement across star detection:
-  - `tests/real_data.rs:295` has a `quick_bench` outside any `bench.rs`.
-  - `detector/bench.rs:156-166` benches the filter stage's `remove_duplicate_stars`.
-  - `background/bench.rs:126-171` benches `background_mesh::MeshWorkspace::compute`, which is another module.
-  - `centroid/bench.rs` (`bench_gaussian_fit_single`, `bench_moffat_fit_single`) duplicates `gaussian_fit/bench.rs` and `moffat_fit/bench.rs`, and its three `bench_measure_star_*` bodies differ only in `CentroidMethod`.
 - [ ] Tests that belong with another owner:
   - `centroid/tests/measurement.rs:1210` (`star_is_round`) duplicates `star.rs:157`.
   - `local_maxima/tests.rs:103` tests `ComponentData::iter_pixels`, which is owned by `deblend/mod.rs`.
   - `tests/stage_effects/{detection_tests,deblend_tests}.rs` call the single-stage `detect_stars_test`, which `tests/mod.rs:8-15`'s own rule assigns to the detect stage's `tests`.
 - [ ] `lumos/src/stacking/star_detection/tests/mem_budget_probe.rs:167-292` and `tests/real_data.rs:28-293` — an `#[ignore]`d, env-var-driven measurement probe written as a test. The real-data tests are double-gated: `#[ignore]` on top of `feature = "real-data"`, so `--features real-data` alone runs none of them, which contradicts AGENTS.md. `detect_rho_opiuchi` (`:117`) asserts only `!stars.is_empty()`. The three tests copy-paste the "load rho-opiuchi" preamble (`:33-47`, `:139-151`, `:297-310`).
-- [ ] Tuple-returning test helpers, against the no-tuple-returns rule:
-  - `detect/tests.rs:8`
-  - `matched_filter.rs:131`
-  - `gaussian_fit/tests.rs:1266`
-  - `moffat_fit/tests.rs:761`
-  - `centroid/bench.rs` (`metrics_fixture`)
-  - `deblend/*/bench.rs:20`
-  - `labeling/tests/mod.rs:13,56`
-  - `threshold_mask/simd/bench.rs:10`
-  - `parallel.rs:264`
 
 ### lumos — registration
 Paths are relative to `lumos/src/stacking/registration/`.
 
-- [ ] `mod tests;` is not the last item in `mod.rs:65`, `ransac/mod.rs:16`, `triangle/mod.rs:19`, `distortion/sip/mod.rs:42`, `resample/mod.rs:20`, `resample/kernel/mod.rs:15`, `resample/plane/mod.rs:11`, `resample/quality/mod.rs:31` (it also precedes `internals` at `:430`), `resample/row/mod.rs:20` and `resample/row/simd/x86/mod.rs:13`. The pattern is crate-wide (35 of 86 files).
 - [ ] `resample/kernel/mod.rs:209-223` — a gated `impl LanczosLut` sits outside the gated `internals` module that follows it. Move it into `kernel/internals.rs`.
 - [ ] `tuning.rs:64-114` — the inline tests are 45% of the file, so it should become `tuning/{mod.rs, tests.rs}`.
 - [ ] `resample/kernel/tests.rs:51-118` — the `math::lanczos::kernel` tests belong in `math/lanczos.rs`, which has none.
@@ -547,7 +527,6 @@ Paths are relative to `lumos/src/stacking/registration/`.
 - [ ] `triangle/tests/matching.rs:462-500` — tests `Triangle::is_similar` (geometry) from the matching file, duplicating `geometry.rs:245-339`.
 - [ ] `real_data_tests.rs:248-342` — two `#[quick_bench]` benches outside `bench.rs`. `:255-257` writes into `test_data/lumos_data/registered_lights` and never cleans it up. `:344-386` tests star-detection weighting, not registration. `:128-151` re-implements `register`'s private `take(max_stars)` star selection to rebuild inlier positions, which silently mis-indexes if `register` changes.
 - [ ] `resample/bench.rs:33-162` — eight copy-pasted plane-warp benches differ only in size and method; they should be one helper. `create_test_image` (`:14`) duplicates a `testing::synthetic::patterns` builder. `:248` places `#[quick_bench]` above the doc comment.
-- [ ] `distortion/sip/tests/results.rs:297-310`, `:330-335` — builds a full `MetricsCase` with dummy expectation fields only to call `build_case`. Split fixture parameters from expectations.
 
 ### lumos — combine, drizzle
 Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
@@ -567,7 +546,6 @@ Paths are relative to the repository root.
 
 - [ ] Real-data tests are both `#[cfg(feature = "real-data")]` and `#[ignore]`, so `cargo test --features real-data` (the run AGENTS.md describes) executes none of them. Cases: `io/raw/tests.rs:158-160, 198-200`, `io/image/tests/real_data.rs:28`, `image_ops/stretching/tests/real_data.rs:31`, `image_ops/color_calibration/tests/real_data.rs:19`, `image_ops/background_extraction/tests/real_data.rs:44-45`, and `image_ops/denoise/tests/real_data.rs`. Other dataset readers have no feature gate at all: `io/raw/tests.rs:578` (`real_xtrans_channel_black…`, which `expect()`s the dataset rather than skipping), and `io/raw/bench.rs:10, 30, 91, 188, 278`, compiled into every `internals` build. Pick one gate.
 - [ ] `lumos/src/image_ops/mem_budget_probe.rs:1-16, 87, 117-131` — stale. The docs describe an "interleaved `Image`" and `crate::image_ops::error::on_planes`, which no longer exists. The ceiling `master + max(working, master)` models "the interleaved master being rebuilt", which planar `LinearImage` never does. The assertion message says "2x headroom", but the code applies 5/4. Re-derive the expected peak for the planar chain.
-- [ ] `#[cfg(test)] mod tests` (and bench mods) are declared mid-file, not as the last item, in `background_mesh/mod.rs:11`, `image_ops/wavelet/mod.rs:14`, `hdr/mod.rs:20`, `local_contrast/mod.rs:17`, `color_calibration/mod.rs:16`, `denoise/mod.rs:22`, `stretching/mod.rs:43-47`, `image_ops/mod.rs:37-40`, `io/raw/mod.rs:6-9`, `io/raw/demosaic/bayer/mod.rs:8` and `math/sum/mod.rs:20`. In `math/statistics/mod.rs:400-405` the tests mod precedes the bench mod and carries a stray doc comment ("Compute sigma-clipped median…"). Test-only free fns sit outside a gated mod at `background_mesh/tile_stats/mod.rs:251` (`reference_subsample`, which reads no privates and belongs in `tests.rs`) and `io/raw/demosaic/mod.rs:71`.
 - [ ] `lumos/src/image_ops/color_calibration/mod.rs:61` — `channel_backgrounds` is `pub(crate)` and its doc names "the colour-calibration tests/fixtures" as callers. Its only other users are the child `tests` module, which can see private items, so it should be private.
 - [ ] `lumos/src/image_ops/mod.rs:47-73` — `internals` is an aggregator of generic helpers that read no privates of `image_ops`. `channel_plane` clones a whole plane to read it, and is imported `as channel` in some files while `channel_samples` (a `Vec`) is imported `as channel` in another, so one alias name means two types. Use `image.channel(c)` directly and the harness metrics.
 - [ ] `lumos/src/math/dmat3/mod.rs:228-231`, `:224` — `as_array_mut` and `to_array` are test-only API used only by `dmat3/tests.rs` to test themselves. `IndexMut` and `From<DMat3> for [f64; 9]` already provide both. `from_rows` is used only in that file and can be a local fn there.

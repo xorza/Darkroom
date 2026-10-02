@@ -9,9 +9,6 @@ use std::ops::Range;
 use crate::simd::dispatch;
 use crate::stacking::star_detection::threshold_mask::ThresholdParams;
 
-#[cfg(all(test, feature = "bench"))]
-mod bench;
-
 #[cfg(target_arch = "x86_64")]
 mod avx2;
 
@@ -20,9 +17,6 @@ mod neon;
 
 #[cfg(target_arch = "x86_64")]
 mod sse41;
-
-#[cfg(test)]
-mod tests;
 
 /// Scalar packed threshold kernel. With `WITH_BG` the threshold is `bg + σ·noise`; otherwise it is
 /// `σ·noise` (matched-filter case — background already subtracted), and `bg` is unused and may be
@@ -91,3 +85,8 @@ pub(super) fn process_words<const WITH_BG: bool>(
         ),
     }
 }
+
+#[cfg(all(test, feature = "bench"))]
+mod bench;
+#[cfg(test)]
+mod tests;

@@ -34,11 +34,18 @@ fn max_dev(p: &[f32]) -> f64 {
         .fold(0.0f64, |acc, &v| acc.max((f64::from(v) - m).abs()))
 }
 
-fn min_max(p: &[f32]) -> (f32, f32) {
-    p.iter()
-        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &v| {
-            (lo.min(v), hi.max(v))
-        })
+/// The smallest and largest sample.
+#[derive(Debug)]
+struct Extent {
+    lo: f32,
+    hi: f32,
+}
+
+fn extent(p: &[f32]) -> Extent {
+    Extent {
+        lo: p.iter().copied().fold(f32::INFINITY, f32::min),
+        hi: p.iter().copied().fold(f32::NEG_INFINITY, f32::max),
+    }
 }
 
 /// Residual energy about the plane's mean — the kept sky level is not residual.
@@ -166,7 +173,7 @@ fn divide_corrects_quadratic_vignette() {
     .unwrap();
     // The quadratic vignette is exactly degree-2; dividing by the normalized model flattens it to a
     // constant (= signal·mean(vignette)).
-    let (lo, hi) = min_max(channel(&img, 0).pixels());
+    let Extent { lo, hi } = extent(channel(&img, 0).pixels());
     assert!(
         hi - lo < 0.01,
         "divide flattens the vignette: residual range {} (lo {lo} hi {hi})",

@@ -34,14 +34,16 @@ fn demo_scene(seed: u64) -> Scene {
     )
 }
 
+/// The noisy frames and the clean truth they share.
+#[derive(Debug)]
+struct FrameSet {
+    sims: Vec<SimFrame>,
+    clean: Buffer2<f32>,
+}
+
 /// Render `n` noisy frames of one scene with independent per-frame noise; the clean truth
 /// (the noiseless signal every frame is a noisy realization of) is identical across frames.
-fn frame_set(
-    scene: &Scene,
-    camera: &Camera,
-    n: usize,
-    base_seed: u64,
-) -> (Vec<SimFrame>, Buffer2<f32>) {
+fn frame_set(scene: &Scene, camera: &Camera, n: usize, base_seed: u64) -> FrameSet {
     let sims: Vec<SimFrame> = (0..n)
         .map(|i| {
             render(
@@ -52,7 +54,7 @@ fn frame_set(
         })
         .collect();
     let clean = sims[0].truth.clean.clone();
-    (sims, clean)
+    FrameSet { sims, clean }
 }
 
 fn stack_frames(sims: &[SimFrame], config: StackConfig) -> LinearImage {
@@ -85,7 +87,7 @@ fn mean_stack_reduces_noise_as_sqrt_n() {
     let scene = demo_scene(1);
     let camera = Camera::realistic(4.0);
     let n = 16;
-    let (sims, clean) = frame_set(&scene, &camera, n, 100);
+    let FrameSet { sims, clean } = frame_set(&scene, &camera, n, 100);
 
     // Residual RMS vs the clean truth: a single frame vs the N-frame mean.
     let single_rms = rms_diff(sims[0].image.channel(0).pixels(), clean.pixels());
@@ -107,7 +109,7 @@ fn sigma_clip_rejects_injected_outliers_where_mean_is_contaminated() {
     let scene = demo_scene(2);
     let camera = Camera::realistic(4.0);
     let n = 14;
-    let (mut sims, clean) = frame_set(&scene, &camera, n, 200);
+    let FrameSet { mut sims, clean } = frame_set(&scene, &camera, n, 200);
 
     let sites = outlier_sites();
     for &(f, x, y) in &sites {
@@ -145,7 +147,7 @@ fn all_rejection_methods_remove_outliers() {
     let scene = demo_scene(3);
     let camera = Camera::realistic(4.0);
     let n = 14;
-    let (mut sims, clean) = frame_set(&scene, &camera, n, 300);
+    let FrameSet { mut sims, clean } = frame_set(&scene, &camera, n, 300);
 
     let sites = outlier_sites();
     for &(f, x, y) in &sites {
@@ -224,7 +226,7 @@ fn rejection_methods_preserve_clean_frames() {
     // tests — rejection must not eat good pixels.
     let scene = demo_scene(5);
     let camera = Camera::realistic(4.0);
-    let (sims, clean) = frame_set(&scene, &camera, 14, 500);
+    let FrameSet { sims, clean } = frame_set(&scene, &camera, 14, 500);
     let mean_rms = rms_diff(
         stack_frames(&sims, StackConfig::mean()).channel(0).pixels(),
         clean.pixels(),

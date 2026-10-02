@@ -41,11 +41,7 @@ use crate::image_ops::error::OpError;
 use crate::io::image::linear::LinearImage;
 use crate::math::statistics::{MedianMad, median_mut};
 
-#[cfg(all(test, feature = "bench"))]
-mod bench;
 mod simd;
-#[cfg(test)]
-mod tests;
 
 /// Midtones balance is clamped away from the degenerate endpoints `0`/`1`, where the MTF
 /// collapses every interior value onto a single output.
@@ -665,3 +661,8 @@ fn apply_color_preserving_asinh(image: &mut LinearImage, c: AsinhCurve) {
         .zip(b.par_chunks_mut(SAMPLES_PER_BLOCK))
         .for_each(|((r, g), b)| simd::asinh_color_preserve(r, g, b, c));
 }
+
+#[cfg(all(test, feature = "bench"))]
+mod bench;
+#[cfg(test)]
+mod tests;

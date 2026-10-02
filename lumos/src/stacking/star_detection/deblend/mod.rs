@@ -25,9 +25,6 @@ pub(super) mod region;
 
 use region::Region;
 
-#[cfg(test)]
-mod tests;
-
 /// Maximum number of peaks/candidates per component.
 /// Components with more peaks than this will have excess peaks ignored.
 const MAX_PEAKS: usize = 8;
@@ -250,3 +247,6 @@ mod internals {
         )
     }
 }
+
+#[cfg(test)]
+mod tests;

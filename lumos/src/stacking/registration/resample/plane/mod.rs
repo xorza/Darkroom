@@ -7,9 +7,6 @@ use crate::stacking::registration::resample::{kernel, row};
 use crate::stacking::registration::transform::WarpTransform;
 use imaginarium::Buffer2;
 
-#[cfg(test)]
-mod tests;
-
 pub(super) fn warp(
     input: &Buffer2<f32>,
     output: &mut Buffer2<f32>,
@@ -54,3 +51,6 @@ fn warp_rows(
         .enumerate()
         .for_each(|(y, output_row)| warp_row(y, output_row));
 }
+
+#[cfg(test)]
+mod tests;

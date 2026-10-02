@@ -208,15 +208,7 @@ fn compact_by_mask(stars: &mut Vec<Star>, kept: &[bool]) -> usize {
 }
 
 #[cfg(all(test, feature = "bench"))]
-pub(crate) mod internals {
-    use crate::stacking::star_detection::star::Star;
-
-    /// Exposes `remove_duplicate_stars` to the detector's benchmarks; production
-    /// code only ever reaches it through `FilterOutcome::from_stars`.
-    pub(crate) fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
-        super::remove_duplicate_stars(stars, min_separation)
-    }
-}
+mod bench;
 
 #[cfg(test)]
 mod tests;

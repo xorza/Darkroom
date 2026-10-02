@@ -13,9 +13,6 @@ use crate::image_ops::error::OpError;
 use crate::io::image::linear::LinearImage;
 use crate::math::statistics::ClippedStats;
 
-#[cfg(test)]
-mod tests;
-
 /// Sigma-clip parameters for the robust per-channel background estimate (rejects stars/nebula).
 const BACKGROUND_KAPPA: f32 = 2.5;
 const BACKGROUND_ITERATIONS: usize = 5;
@@ -158,3 +155,6 @@ fn scnr_additive_mask(px: Rgb, amount: f32) -> Rgb {
         b: px.b,
     }
 }
+
+#[cfg(test)]
+mod tests;

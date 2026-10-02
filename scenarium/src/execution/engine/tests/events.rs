@@ -14,22 +14,29 @@ fn emitter(calls: &Calls) -> impl FnOnce(NodeSpec) -> NodeSpec {
     }
 }
 
+/// The graph and the counter its emitter body bumps.
+#[derive(Debug)]
+struct EventPair {
+    g: TestGraph,
+    calls: Calls,
+}
+
 /// `emit`: impure source with an output and one `tick` event, subscribed to
 /// by `recv`. `recv`: impure consumer bound to emit's output. Neither is a
 /// sink, so only event-driven execution reaches them.
-fn event_pair() -> (TestGraph, Calls) {
+fn event_pair() -> EventPair {
     let calls = Calls::default();
     let mut g = TestGraph::new();
     g.add("emit", emitter(&calls));
     g.add("recv", NodeSpec::records);
     g.subscribe("emit", 0, "recv");
     g.wire("emit", 0, "recv", 0);
-    (g, calls)
+    EventPair { g, calls }
 }
 
 #[tokio::test]
 async fn execute_events_runs_subscribers() {
-    let (g, calls) = event_pair();
+    let EventPair { g, calls } = event_pair();
     let mut e = TestEngine::over(g);
 
     let tick = e.event("emit", 0);
@@ -49,7 +56,7 @@ async fn execute_events_runs_subscribers() {
 
 #[tokio::test]
 async fn event_sources_collects_nodes_with_subscribers() {
-    let (g, calls) = event_pair();
+    let EventPair { g, calls } = event_pair();
     let mut e = TestEngine::over(g);
 
     // sinks=false, event_sources=true → emit (which owns a subscribed
@@ -66,7 +73,7 @@ async fn event_sources_collects_nodes_with_subscribers() {
 /// built even when the node's digest is unchanged.
 #[tokio::test]
 async fn bootstrap_prepares_events_and_bypasses_source_cache() {
-    let (mut g, calls) = event_pair();
+    let EventPair { mut g, calls } = event_pair();
     g.edit_func("emit", |func| func.behavior = FuncBehavior::Pure);
     g.cache("emit", CacheMode::Ram);
     let mut e = TestEngine::over(g);
@@ -81,7 +88,7 @@ async fn bootstrap_prepares_events_and_bypasses_source_cache() {
 
 #[tokio::test]
 async fn bootstrap_prepares_no_events_without_subscribers() {
-    let (mut g, _) = event_pair();
+    let EventPair { mut g, .. } = event_pair();
     // Drop the subscriber but keep emit reachable by making it a sink.
     g.unsubscribe("emit", 0, "recv");
     g.edit_func("emit", |func| func.sink = true);
@@ -98,7 +105,7 @@ async fn bootstrap_prepares_no_events_without_subscribers() {
 
 #[tokio::test]
 async fn failed_event_source_prepares_no_trigger() {
-    let (mut g, _) = event_pair();
+    let EventPair { mut g, .. } = event_pair();
     g.fails("emit", "bootstrap failed");
     let mut e = TestEngine::over(g);
 

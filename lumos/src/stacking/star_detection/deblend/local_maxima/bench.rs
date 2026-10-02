@@ -17,11 +17,15 @@ use crate::stacking::star_detection::deblend::local_maxima::{
 use crate::stacking::star_detection::labeling::LabelMap;
 use crate::testing::synthetic::fixtures::cluster_field;
 
+/// A label map and the components it labels.
+#[derive(Debug)]
+struct Components {
+    labels: LabelMap,
+    components: Vec<ComponentData>,
+}
+
 /// Create components from a pixel buffer for benchmarking.
-fn create_components_from_pixels(
-    pixels: &Buffer2<f32>,
-    threshold: f32,
-) -> (LabelMap, Vec<ComponentData>) {
+fn create_components_from_pixels(pixels: &Buffer2<f32>, threshold: f32) -> Components {
     let width = pixels.width();
     let height = pixels.height();
 
@@ -60,7 +64,7 @@ fn create_components_from_pixels(
         }
     }
 
-    (labels, components)
+    Components { labels, components }
 }
 
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
@@ -69,7 +73,7 @@ fn bench_find_local_maxima_6k_dense(b: ::quickbench::Bencher) {
         .image
         .channel(0)
         .clone();
-    let (labels, components) = create_components_from_pixels(&pixels, 0.05);
+    let Components { labels, components } = create_components_from_pixels(&pixels, 0.05);
 
     // Find the 100 largest components for benchmarking
     let mut sorted_components = components.clone();
@@ -95,7 +99,7 @@ fn bench_deblend_local_maxima_6k_dense(b: ::quickbench::Bencher) {
         .image
         .channel(0)
         .clone();
-    let (labels, components) = create_components_from_pixels(&pixels, 0.05);
+    let Components { labels, components } = create_components_from_pixels(&pixels, 0.05);
 
     b.bench(|| {
         for component in &components {
@@ -116,7 +120,7 @@ fn bench_local_maxima_4k_dense(b: ::quickbench::Bencher) {
         .image
         .channel(0)
         .clone();
-    let (labels, components) = create_components_from_pixels(&pixels, 0.05);
+    let Components { labels, components } = create_components_from_pixels(&pixels, 0.05);
 
     b.bench(|| {
         for component in &components {

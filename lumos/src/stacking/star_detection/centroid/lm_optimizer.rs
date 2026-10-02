@@ -146,7 +146,10 @@ impl<const N: usize> NormalEquations<N> {
     ) {
         for i in range {
             let w = data.weight(i);
-            let (model_val, row) = model.evaluate_and_jacobian(data.x[i], data.y[i], params);
+            let ModelSample {
+                value: model_val,
+                jacobian: row,
+            } = model.evaluate_and_jacobian(data.x[i], data.y[i], params);
             let r = data.z[i] - model_val;
             self.chi2 += w * r * r;
             for k in 0..N {
@@ -175,6 +178,13 @@ impl<const N: usize> NormalEquations<N> {
     }
 }
 
+/// The model's value at one point and its Jacobian row there.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ModelSample<const N: usize> {
+    pub(super) value: f64,
+    pub(super) jacobian: [f64; N],
+}
+
 /// Trait for models that can be fit with L-M optimization.
 pub(super) trait LMModel<const N: usize> {
     /// Evaluate the model at a point.
@@ -185,7 +195,7 @@ pub(super) trait LMModel<const N: usize> {
     /// Fused rather than split into evaluate + derivatives so the expensive shared intermediate
     /// (the `exp` for a Gaussian, the `powf` for a Moffat) is computed once. Every accumulation
     /// loop goes through this, so it is the only derivative path production code takes.
-    fn evaluate_and_jacobian(&self, x: f64, y: f64, params: &[f64; N]) -> (f64, [f64; N]);
+    fn evaluate_and_jacobian(&self, x: f64, y: f64, params: &[f64; N]) -> ModelSample<N>;
 
     /// Apply parameter constraints after an update.
     fn constrain(&self, params: &mut [f64; N]);
@@ -325,5 +335,39 @@ pub(super) trait LMModel<const N: usize> {
             converged,
             iterations,
         }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use crate::stacking::star_detection::centroid::lm_optimizer::NormalEquations;
+
+    /// Scalar reference for the normal equations: `J^T·J`, `J^T·r`, and `Σr²`, from a jacobian and
+    /// residuals computed by the caller.
+    ///
+    /// Ground truth in SIMD-vs-scalar validation tests, so it re-derives the symmetric fill instead
+    /// of calling [`NormalEquations::mirror_lower_triangle`] — sharing that step with the code under
+    /// test would let a bug in it pass unnoticed. Unweighted, matching the unweighted batch paths it
+    /// is compared against.
+    pub(crate) fn reference_normal_equations<const N: usize>(
+        jacobian: &[[f64; N]],
+        residuals: &[f64],
+    ) -> NormalEquations<N> {
+        let mut equations = NormalEquations::zeroed();
+        for (row, &r) in jacobian.iter().zip(residuals.iter()) {
+            equations.chi2 += r * r;
+            for i in 0..N {
+                equations.gradient[i] += row[i] * r;
+                for j in i..N {
+                    equations.hessian[i][j] += row[i] * row[j];
+                }
+            }
+        }
+        for i in 1..N {
+            for j in 0..i {
+                equations.hessian[i][j] = equations.hessian[j][i];
+            }
+        }
+        equations
     }
 }

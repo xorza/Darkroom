@@ -57,12 +57,8 @@ pub(crate) mod transform;
 pub(crate) mod triangle;
 mod tuning;
 
-#[cfg(all(test, feature = "bench"))]
-mod bench;
 #[cfg(all(test, feature = "real-data"))]
 mod real_data_tests;
-#[cfg(test)]
-mod tests;
 
 use crate::stacking::registration::point_pairs::PointPairs;
 use crate::stacking::registration::recovery::{RecoveredMatches, recover_matches};
@@ -425,3 +421,8 @@ fn estimate_and_refine(
 
     Ok(RegistrationResult::new(transform, sip_fit, matched_stars))
 }
+
+#[cfg(all(test, feature = "bench"))]
+mod bench;
+#[cfg(test)]
+mod tests;

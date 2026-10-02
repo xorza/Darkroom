@@ -24,12 +24,6 @@ use crate::stacking::star_detection::deblend::{
 use crate::stacking::star_detection::labeling::LabelMap;
 use imaginarium::Buffer2;
 
-#[cfg(test)]
-mod tests;
-
-#[cfg(all(test, feature = "bench"))]
-mod bench;
-
 /// Maximum children per node (same as `MAX_PEAKS` since each child becomes a candidate).
 const MAX_CHILDREN: usize = MAX_PEAKS;
 
@@ -1007,3 +1001,8 @@ fn create_single_object(data: &ComponentData, pixels: &Buffer2<f32>, labels: &La
         area: data.area,
     }
 }
+
+#[cfg(all(test, feature = "bench"))]
+mod bench;
+#[cfg(test)]
+mod tests;

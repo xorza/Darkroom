@@ -16,9 +16,6 @@ use crate::math::size2us::Size2us;
 
 mod simd;
 
-#[cfg(test)]
-mod tests;
-
 use crate::stacking::registration::config::WarpParams;
 use crate::stacking::registration::resample::kernel;
 use crate::stacking::registration::transform::WarpTransform;
@@ -244,3 +241,6 @@ fn lanczos_inner<const A: usize, const SIZE: usize>(
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -622,9 +622,9 @@ pub(crate) fn compute_derivatives(
             // once and nothing in the RAW decode path outlives a single frame, so there is
             // nowhere warm to hand them back to.
             [
-                vec![(0.0f32, 0.0f32, 0.0f32); width],
-                vec![(0.0f32, 0.0f32, 0.0f32); width],
-                vec![(0.0f32, 0.0f32, 0.0f32); width],
+                vec![YPbPr::default(); width],
+                vec![YPbPr::default(); width],
+                vec![YPbPr::default(); width],
             ]
         },
         |rows, chunk_idx| {
@@ -645,19 +645,28 @@ pub(crate) fn compute_derivatives(
 
                     let drv_off = drv_base + y * width;
                     for x in 0..width {
-                        let (yc, pbc, prc) = rows[0][x];
+                        let center = rows[0][x];
+                        let YPbPr {
+                            luma: yc,
+                            pb: pbc,
+                            pr: prc,
+                        } = center;
 
-                        let (yf, pbf, prf) = if x + 1 < width {
+                        let YPbPr {
+                            luma: yf,
+                            pb: pbf,
+                            pr: prf,
+                        } = if x + 1 < width {
                             rows[0][x + 1]
                         } else {
-                            (yc, pbc, prc)
+                            center
                         };
 
-                        let (yb, pbb, prb) = if x > 0 {
-                            rows[0][x - 1]
-                        } else {
-                            (yc, pbc, prc)
-                        };
+                        let YPbPr {
+                            luma: yb,
+                            pb: pbb,
+                            pr: prb,
+                        } = if x > 0 { rows[0][x - 1] } else { center };
 
                         let dy = 2.0 * yc - yf - yb;
                         let dpb = 2.0 * pbc - pbf - pbb;
@@ -702,20 +711,33 @@ pub(crate) fn compute_derivatives(
 
                     let drv_off = drv_base + y * width;
                     for x in 0..width {
-                        let (yc, pbc, prc) = rows[1][x];
+                        let center = rows[1][x];
+                        let YPbPr {
+                            luma: yc,
+                            pb: pbc,
+                            pr: prc,
+                        } = center;
 
                         let fx = x as i32 + dir_dx;
-                        let (yf, pbf, prf) = if has_next && fx >= 0 && (fx as usize) < width {
+                        let YPbPr {
+                            luma: yf,
+                            pb: pbf,
+                            pr: prf,
+                        } = if has_next && fx >= 0 && (fx as usize) < width {
                             rows[2][fx as usize]
                         } else {
-                            (yc, pbc, prc)
+                            center
                         };
 
                         let bx = x as i32 - dir_dx;
-                        let (yb, pbb, prb) = if has_prev && bx >= 0 && (bx as usize) < width {
+                        let YPbPr {
+                            luma: yb,
+                            pb: pbb,
+                            pr: prb,
+                        } = if has_prev && bx >= 0 && (bx as usize) < width {
                             rows[0][bx as usize]
                         } else {
-                            (yc, pbc, prc)
+                            center
                         };
 
                         let dy = 2.0 * yc - yf - yb;
@@ -748,23 +770,34 @@ fn compute_ypbpr_row(
     colors: &[[f32; 2]],
     green_base: usize,
     y: usize,
-    out: &mut [(f32, f32, f32)],
+    out: &mut [YPbPr],
 ) {
     for (x, val) in out.iter_mut().enumerate() {
         let index = green_base + y * xtrans.active.width + x;
         let [r, b] = colors[index];
         let g = green_dir[index];
-        *val = rgb_to_ypbpr(r, g, b);
+        *val = YPbPr::from_rgb(r, g, b);
     }
 }
 
-/// Convert RGB to `YPbPr`.
-#[inline(always)]
-fn rgb_to_ypbpr(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
-    let luma = 0.2627 * r + 0.6780 * g + 0.0593 * b;
-    let pb = (b - luma) * 0.56433;
-    let pr = (r - luma) * 0.67815;
-    (luma, pb, pr)
+/// One pixel in `YPbPr`, the space the homogeneity derivatives are measured in.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct YPbPr {
+    luma: f32,
+    pb: f32,
+    pr: f32,
+}
+
+impl YPbPr {
+    #[inline(always)]
+    fn from_rgb(r: f32, g: f32, b: f32) -> YPbPr {
+        let luma = 0.2627 * r + 0.6780 * g + 0.0593 * b;
+        YPbPr {
+            luma,
+            pb: (b - luma) * 0.56433,
+            pr: (r - luma) * 0.67815,
+        }
+    }
 }
 
 /// Build homogeneity maps from per-direction derivatives.

@@ -12,10 +12,17 @@ use crate::stacking::registration::transform::Transform;
 use crate::testing::synthetic::fixtures::star_field;
 use crate::{RegistrationConfig, Star, StarDetectionConfig, StarDetector, register};
 
+/// A reference catalog and a transformed copy of it.
+#[derive(Debug)]
+struct StarPair {
+    reference: Vec<Star>,
+    target: Vec<Star>,
+}
+
 /// Detect a realistic star set on a synthetic field, then build a registration target by
 /// applying a known similarity transform to those stars — a clean, deterministic correspondence
 /// set that still drives the full matching + RANSAC machinery over `num_stars` points.
-fn star_pair(num_stars: usize, seed: u64) -> (Vec<Star>, Vec<Star>) {
+fn star_pair(num_stars: usize, seed: u64) -> StarPair {
     let frame = star_field(Size2us::new(1500, 1500), num_stars, seed);
     let mut detector = StarDetector::from_config(StarDetectionConfig::default()).unwrap();
     let ref_stars = detector.detect(&frame.image).stars;
@@ -29,19 +36,28 @@ fn star_pair(num_stars: usize, seed: u64) -> (Vec<Star>, Vec<Star>) {
             moved
         })
         .collect();
-    (ref_stars, target)
+    StarPair {
+        reference: ref_stars,
+        target,
+    }
 }
 
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_register_150_stars(b: ::quickbench::Bencher) {
-    let (ref_stars, target) = star_pair(150, 7);
+    let StarPair {
+        reference: ref_stars,
+        target,
+    } = star_pair(150, 7);
     let config = RegistrationConfig::default();
     b.bench(|| black_box(register(black_box(&ref_stars), black_box(&target), &config)));
 }
 
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_register_500_stars(b: ::quickbench::Bencher) {
-    let (ref_stars, target) = star_pair(500, 9);
+    let StarPair {
+        reference: ref_stars,
+        target,
+    } = star_pair(500, 9);
     let config = RegistrationConfig::default();
     b.bench(|| black_box(register(black_box(&ref_stars), black_box(&target), &config)));
 }

@@ -14,9 +14,6 @@ use crate::error::InvalidConfigField;
 use crate::image_ops::error::OpError;
 use crate::io::image::linear::LinearImage;
 
-#[cfg(test)]
-mod tests;
-
 /// Histogram resolution for the per-tile mappings.
 const N_BINS: usize = 256;
 
@@ -217,3 +214,6 @@ fn apply_luts(
 fn bin_of(v: f32) -> usize {
     (v.clamp(0.0, 1.0) * (N_BINS as f32 - 1.0)).round() as usize
 }
+
+#[cfg(test)]
+mod tests;

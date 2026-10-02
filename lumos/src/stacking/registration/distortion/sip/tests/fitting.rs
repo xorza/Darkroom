@@ -162,7 +162,10 @@ fn max_correction_at_corners() {
     // (farthest from center).
     let center = DVec2::new(500.0, 500.0);
     let k = 1e-7;
-    let (ref_points, target_points) = make_radial_distortion_points(center, k, 100, 1000);
+    let PointPairs {
+        reference: ref_points,
+        target: target_points,
+    } = make_radial_distortion_points(center, k, 100, 1000);
 
     let transform = Transform::identity();
     let config = SipConfig {
@@ -230,7 +233,10 @@ fn max_correction_zero_distortion() {
 #[test]
 fn compute_corrected_residuals_length() {
     let center = DVec2::new(500.0, 500.0);
-    let (ref_points, target_points) = make_radial_distortion_points(center, 1e-7, 100, 1000);
+    let PointPairs {
+        reference: ref_points,
+        target: target_points,
+    } = make_radial_distortion_points(center, 1e-7, 100, 1000);
     let transform = Transform::identity();
     let config = SipConfig {
         order: 3,
@@ -248,7 +254,10 @@ fn compute_corrected_residuals_length() {
 fn compute_corrected_residuals_all_small_for_fitted_data() {
     // After fitting, every individual residual should be small (not just the mean).
     let center = DVec2::new(500.0, 500.0);
-    let (ref_points, target_points) = make_radial_distortion_points(center, 1e-7, 100, 1000);
+    let PointPairs {
+        reference: ref_points,
+        target: target_points,
+    } = make_radial_distortion_points(center, 1e-7, 100, 1000);
     let transform = Transform::identity();
     let config = SipConfig {
         order: 3,
@@ -329,8 +338,14 @@ fn different_k_values_produce_different_corrections() {
         ..Default::default()
     };
 
-    let (ref_1, tgt_1) = make_radial_distortion_points(center, 1e-7, 100, 1000);
-    let (ref_2, tgt_2) = make_radial_distortion_points(center, 5e-7, 100, 1000);
+    let PointPairs {
+        reference: ref_1,
+        target: tgt_1,
+    } = make_radial_distortion_points(center, 1e-7, 100, 1000);
+    let PointPairs {
+        reference: ref_2,
+        target: tgt_2,
+    } = make_radial_distortion_points(center, 5e-7, 100, 1000);
 
     let sip_1 = fit_sip(&ref_1, &tgt_1, &transform, &config).polynomial;
     let sip_2 = fit_sip(&ref_2, &tgt_2, &transform, &config).polynomial;

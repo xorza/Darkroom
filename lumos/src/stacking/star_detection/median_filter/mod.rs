@@ -5,9 +5,6 @@
 
 mod simd;
 
-#[cfg(test)]
-mod tests;
-
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use imaginarium::Buffer2;
@@ -196,3 +193,6 @@ fn median6(v: &mut [f32]) -> f32 {
     }
     f32::midpoint(v[2], v[3])
 }
+
+#[cfg(test)]
+mod tests;

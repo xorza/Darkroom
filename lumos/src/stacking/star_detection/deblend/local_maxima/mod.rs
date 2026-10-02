@@ -20,12 +20,6 @@ use crate::stacking::star_detection::deblend::{
 use crate::stacking::star_detection::labeling::LabelMap;
 use imaginarium::Buffer2;
 
-#[cfg(test)]
-mod tests;
-
-#[cfg(all(test, feature = "bench"))]
-mod bench;
-
 /// Deblend a component using local maxima detection.
 ///
 /// Combines `find_local_maxima` and the shared nearest-peak assignment.
@@ -157,3 +151,8 @@ fn add_or_replace_peak(peaks: &mut ArrayVec<Pixel, MAX_PEAKS>, pixel: Pixel, min
         }
     }
 }
+
+#[cfg(all(test, feature = "bench"))]
+mod bench;
+#[cfg(test)]
+mod tests;

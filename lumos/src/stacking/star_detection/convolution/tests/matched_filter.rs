@@ -4,7 +4,7 @@
 
 use crate::math::fwhm::fwhm_to_sigma;
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
-use crate::stacking::star_detection::convolution::internals::gaussian_convolve;
+use crate::stacking::star_detection::convolution::gaussian_convolve;
 use crate::stacking::star_detection::tests::Scenario;
 use crate::testing::init_tracing;
 use crate::testing::prelude::*;
@@ -113,7 +113,10 @@ fn gaussian_filter_sparse() {
 
     // Robust noise floor of the filtered image: stars are sparse, so the median and MAD
     // describe the star-free background (not the near-tautological whole-image mean).
-    let (median, robust_sigma) = robust_floor(filtered.pixels());
+    let RobustFloor {
+        median,
+        sigma: robust_sigma,
+    } = robust_floor(filtered.pixels());
     let min_star_response = star_responses.iter().copied().fold(f32::INFINITY, f32::min);
 
     println!("Mean star response: {mean_star_response:.6}");
@@ -127,14 +130,24 @@ fn gaussian_filter_sparse() {
     );
 }
 
+/// Median and MAD-derived sigma.
+#[derive(Debug)]
+struct RobustFloor {
+    median: f32,
+    sigma: f32,
+}
+
 /// Median and MAD-derived σ of a slice (robust background statistics).
-fn robust_floor(pixels: &[f32]) -> (f32, f32) {
+fn robust_floor(pixels: &[f32]) -> RobustFloor {
     let mut sorted: Vec<f32> = pixels.to_vec();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let median = sorted[sorted.len() / 2];
     let mut dev: Vec<f32> = sorted.iter().map(|&v| (v - median).abs()).collect();
     dev.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    (median, dev[dev.len() / 2] * 1.4826)
+    RobustFloor {
+        median,
+        sigma: dev[dev.len() / 2] * 1.4826,
+    }
 }
 
 /// Test Gaussian filter with different FWHM values.
@@ -196,7 +209,10 @@ fn gaussian_filter_fwhm_range() {
             })
             .collect();
         let mean_resp = responses.iter().sum::<f32>() / responses.len() as f32;
-        let (median, robust_sigma) = robust_floor(filtered.pixels());
+        let RobustFloor {
+            median,
+            sigma: robust_sigma,
+        } = robust_floor(filtered.pixels());
         (mean_resp - median) / robust_sigma
     };
 
@@ -294,7 +310,10 @@ fn gaussian_filter_noise() {
 
     // Robust noise of the filtered image: true MAD-derived σ (not the mean-abs-dev this used
     // to mislabel as MAD).
-    let (median, robust_sigma) = robust_floor(filtered.pixels());
+    let RobustFloor {
+        median,
+        sigma: robust_sigma,
+    } = robust_floor(filtered.pixels());
     let snr = (mean_star_response - median) / robust_sigma;
     println!(
         "Mean star response {mean_star_response:.6}, floor {median:.6} ± {robust_sigma:.6}, SNR {snr:.1}"

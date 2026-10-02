@@ -5,7 +5,10 @@ fn correct_at_reference_point_is_identity() {
     // At the reference point, u=0, v=0, so all monomials with p+q >= 2 are zero.
     // correction_at(ref) = (0, 0), so correct(ref) = ref.
     let center = DVec2::new(500.0, 500.0);
-    let (ref_points, target_points) = make_radial_distortion_points(center, 1e-7, 100, 1000);
+    let PointPairs {
+        reference: ref_points,
+        target: target_points,
+    } = make_radial_distortion_points(center, 1e-7, 100, 1000);
 
     let transform = Transform::identity();
     let config = SipConfig {
@@ -32,7 +35,10 @@ fn correct_barrel_at_specific_point() {
     // After SIP fit, correct(p) should produce a point that maps close to target.
     let center = DVec2::new(500.0, 500.0);
     let k = 1e-7;
-    let (ref_points, target_points) = make_radial_distortion_points(center, k, 100, 1000);
+    let PointPairs {
+        reference: ref_points,
+        target: target_points,
+    } = make_radial_distortion_points(center, k, 100, 1000);
 
     let transform = Transform::identity();
     let config = SipConfig {
@@ -115,7 +121,10 @@ fn fit_pincushion_distortion() {
     // Pincushion (k < 0): points are pulled inward toward center.
     let center = DVec2::new(512.0, 384.0);
     let k = -5e-8;
-    let (ref_points, target_points) = make_radial_distortion_points(center, k, 100, 1000);
+    let PointPairs {
+        reference: ref_points,
+        target: target_points,
+    } = make_radial_distortion_points(center, k, 100, 1000);
 
     let transform = Transform::identity();
     let config = SipConfig {
@@ -155,8 +164,14 @@ fn barrel_vs_pincushion_opposite_corrections() {
     let center = DVec2::new(500.0, 500.0);
     let transform = Transform::identity();
 
-    let (ref_b, tgt_b) = make_radial_distortion_points(center, 1e-7, 100, 1000);
-    let (ref_p, tgt_p) = make_radial_distortion_points(center, -1e-7, 100, 1000);
+    let PointPairs {
+        reference: ref_b,
+        target: tgt_b,
+    } = make_radial_distortion_points(center, 1e-7, 100, 1000);
+    let PointPairs {
+        reference: ref_p,
+        target: tgt_p,
+    } = make_radial_distortion_points(center, -1e-7, 100, 1000);
 
     let config = SipConfig {
         order: 3,

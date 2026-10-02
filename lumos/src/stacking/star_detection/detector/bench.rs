@@ -18,10 +18,7 @@ use crate::stacking::star_detection::config::measurement_config::{
     CentroidMethod, LocalBackgroundMethod, MeasurementConfig,
 };
 use crate::stacking::star_detection::detector::stages::detect::internals::collect_components;
-use crate::stacking::star_detection::detector::stages::filter::internals::remove_duplicate_stars;
 use crate::stacking::star_detection::labeling::LabelMap;
-use crate::stacking::star_detection::roundness::Roundness;
-use crate::stacking::star_detection::star::Star;
 use crate::testing::init_tracing;
 use crate::testing::synthetic::fixtures::{cluster_field, star_field};
 
@@ -118,53 +115,6 @@ fn bench_detect_1k_sparse(b: ::quickbench::Bencher) {
     b.bench(|| black_box(detector.detect(black_box(&image))));
 }
 
-/// `count` stars scattered over a `width` × `height` frame, every property randomized across the
-/// range a real detection would produce.
-fn random_stars(count: usize, width: f64, height: f64) -> Vec<Star> {
-    use rand::prelude::*;
-
-    let mut rng = StdRng::seed_from_u64(42);
-    (0..count)
-        .map(|_| {
-            Star::at(DVec2::new(
-                rng.random_range(0.0..width),
-                rng.random_range(0.0..height),
-            ))
-            .with_flux(rng.random_range(100.0..10000.0))
-            .with_fwhm(rng.random_range(2.0..6.0))
-            .with_eccentricity(rng.random_range(0.0..0.3))
-            .with_snr(rng.random_range(10.0..100.0))
-            .with_peak(rng.random_range(0.1..0.9))
-            .with_sharpness(rng.random_range(0.2..0.5))
-            .with_roundness(Roundness {
-                ground: rng.random_range(-0.1..0.1),
-                sround: rng.random_range(-0.1..0.1),
-            })
-        })
-        .collect()
-}
-
-fn bench_deduplication(b: ::quickbench::Bencher, base_stars: Vec<Star>) {
-    b.bench(|| {
-        let mut stars = base_stars.clone();
-        // Sort by flux — the algorithm's documented precondition.
-        stars.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
-        black_box(remove_duplicate_stars(&mut stars, 5.0))
-    });
-}
-
-/// Benchmark remove_duplicate_stars with varying star counts.
-/// Simulates dense star field scenario similar to rho-opiuchi detection.
-#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
-fn bench_remove_duplicate_stars_5000(b: ::quickbench::Bencher) {
-    bench_deduplication(b, random_stars(5000, 4096.0, 4096.0));
-}
-
-#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_remove_duplicate_stars_10000(b: ::quickbench::Bencher) {
-    bench_deduplication(b, random_stars(10000, 8000.0, 6000.0));
-}
-
 fn component_label_map(size: Size2us, components: usize) -> LabelMap {
     let mut labels = Buffer2::new_filled(size.width, size.height, 0u32);
     let columns = size.width / 4;
@@ -209,4 +159,24 @@ fn bench_components_4k_crossover(b: ::quickbench::Bencher) {
             black_box(collect_components(black_box(&labels)))
         });
     }
+}
+
+/// Detection with Moffat centroids on the dataset's dense `rho-opiuchi.jpg` field.
+#[cfg(feature = "real-data")]
+#[quick_bench(warmup_iters = 1, iters = 10)]
+fn bench_detect_rho_opiuchi(b: ::quickbench::Bencher) {
+    use crate::stacking::star_detection::config::measurement_config::CentroidMethod;
+    use crate::stacking::star_detection::tests::real_data::rho_opiuchi;
+
+    let linear_image = rho_opiuchi();
+    println!(
+        "Image size: {}x{}",
+        linear_image.width(),
+        linear_image.height()
+    );
+    let mut config = Config::precise_ground();
+    config.measurement.centroid_method = CentroidMethod::MoffatFit { beta: 2.5 };
+    let mut detector = StarDetector::from_config(config).unwrap();
+
+    b.bench(|| detector.detect(&linear_image));
 }
