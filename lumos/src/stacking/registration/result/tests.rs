@@ -134,10 +134,6 @@ fn registration_error_messages_include_context() {
             "Registration accuracy too low: 5.123 pixels (max: 2.000)",
         ),
         (
-            RegistrationError::StarDetection("threshold too high".to_string()),
-            "Star detection failed: threshold too high",
-        ),
-        (
             RegistrationError::SipPointCountMismatch {
                 reference: 12,
                 target: 10,
@@ -191,18 +187,7 @@ fn registration_error_messages_include_context() {
 
 #[test]
 fn ransac_failure_reason_messages_are_specific() {
-    let cases = [
-        (RansacFailureReason::NoInliersFound, "no inliers found"),
-        (
-            RansacFailureReason::DegeneratePointSet,
-            "degenerate point set",
-        ),
-        (RansacFailureReason::SingularMatrix, "singular matrix"),
-        (
-            RansacFailureReason::InsufficientInliers,
-            "insufficient inliers",
-        ),
-    ];
+    let cases = [(RansacFailureReason::NoInliersFound, "no inliers found")];
 
     for (reason, expected) in cases {
         assert_eq!(reason.to_string(), expected);

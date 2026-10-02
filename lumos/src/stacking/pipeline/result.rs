@@ -88,20 +88,3 @@ pub enum Error {
     #[error(transparent)]
     Stack(#[from] StackError),
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The box on [`Error::Load`] is the only thing holding this line. 128 is
-    /// clippy's `large-error-threshold`, which `result_large_err` measures
-    /// every `Result<_, Error>` in the pipeline against.
-    #[test]
-    fn the_error_stays_under_the_large_err_threshold() {
-        assert!(
-            size_of::<Error>() < 128,
-            "Error is {} bytes; box whichever variant grew it",
-            size_of::<Error>(),
-        );
-    }
-}

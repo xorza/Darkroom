@@ -41,21 +41,12 @@ impl Display for RegistrationCatalog {
 pub enum RansacFailureReason {
     /// No inliers found after all iterations.
     NoInliersFound,
-    /// Point set is degenerate (collinear, coincident, etc.).
-    DegeneratePointSet,
-    /// Matrix computation failed (singular matrix).
-    SingularMatrix,
-    /// Found some inliers but not enough to meet threshold.
-    InsufficientInliers,
 }
 
 impl Display for RansacFailureReason {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             RansacFailureReason::NoInliersFound => write!(f, "no inliers found"),
-            RansacFailureReason::DegeneratePointSet => write!(f, "degenerate point set"),
-            RansacFailureReason::SingularMatrix => write!(f, "singular matrix"),
-            RansacFailureReason::InsufficientInliers => write!(f, "insufficient inliers"),
         }
     }
 }
@@ -130,9 +121,6 @@ pub enum RegistrationError {
     /// Registration accuracy too low.
     #[error("Registration accuracy too low: {rms_error:.3} pixels (max: {max_allowed:.3})")]
     AccuracyTooLow { rms_error: f64, max_allowed: f64 },
-    /// Star detection failed.
-    #[error("Star detection failed: {0}")]
-    StarDetection(String),
     /// A configuration parameter is outside its valid range.
     #[error("Invalid configuration: {0}")]
     InvalidConfig(#[from] InvalidConfigField),

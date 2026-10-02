@@ -37,7 +37,7 @@ fn cosmic_ray_rejection() {
     save(
         &pixels_vec,
         Size2us::new(width, height),
-        "synthetic_starfield/stage_cr_rejection_input.png",
+        "synthetic_starfield/stage_cr_rejection_input",
         ToneMap::Clamp,
     );
 
@@ -84,7 +84,7 @@ fn cosmic_ray_rejection() {
         );
     }
 
-    save_image(img, "synthetic_starfield/stage_cr_rejection_overlay.png");
+    save_image(img, "synthetic_starfield/stage_cr_rejection_overlay");
 
     // Count how many cosmic rays were falsely detected as stars
     let mut cr_false_positives = 0;

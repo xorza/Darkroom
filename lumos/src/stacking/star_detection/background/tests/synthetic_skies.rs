@@ -51,7 +51,7 @@ fn background_uniform() {
     save(
         pixels.pixels(),
         Size2us::new(width, height),
-        "synthetic_starfield/stage_bg_uniform_input.png",
+        "synthetic_starfield/stage_bg_uniform_input",
         ToneMap::Clamp,
     );
 
@@ -59,7 +59,7 @@ fn background_uniform() {
     save(
         background.background.pixels(),
         Size2us::new(width, height),
-        "synthetic_starfield/stage_bg_uniform_background.png",
+        "synthetic_starfield/stage_bg_uniform_background",
         ToneMap::Clamp,
     );
 
@@ -72,7 +72,7 @@ fn background_uniform() {
     save(
         &subtracted,
         Size2us::new(width, height),
-        "synthetic_starfield/stage_bg_uniform_subtracted.png",
+        "synthetic_starfield/stage_bg_uniform_subtracted",
         ToneMap::Clamp,
     );
 
@@ -138,14 +138,14 @@ fn background_gradient() {
     save(
         &pixels,
         Size2us::new(width, height),
-        "synthetic_starfield/stage_bg_gradient_input.png",
+        "synthetic_starfield/stage_bg_gradient_input",
         ToneMap::Clamp,
     );
 
     save(
         background.background.pixels(),
         Size2us::new(width, height),
-        "synthetic_starfield/stage_bg_gradient_background.png",
+        "synthetic_starfield/stage_bg_gradient_background",
         ToneMap::Clamp,
     );
 
@@ -157,7 +157,7 @@ fn background_gradient() {
     save(
         &subtracted,
         Size2us::new(width, height),
-        "synthetic_starfield/stage_bg_gradient_subtracted.png",
+        "synthetic_starfield/stage_bg_gradient_subtracted",
         ToneMap::Clamp,
     );
 
@@ -223,14 +223,14 @@ fn background_vignette() {
     save(
         &pixels,
         Size2us::new(width, height),
-        "synthetic_starfield/stage_bg_vignette_input.png",
+        "synthetic_starfield/stage_bg_vignette_input",
         ToneMap::Clamp,
     );
 
     save(
         background.background.pixels(),
         Size2us::new(width, height),
-        "synthetic_starfield/stage_bg_vignette_background.png",
+        "synthetic_starfield/stage_bg_vignette_background",
         ToneMap::Clamp,
     );
 
@@ -242,7 +242,7 @@ fn background_vignette() {
     save(
         &subtracted,
         Size2us::new(width, height),
-        "synthetic_starfield/stage_bg_vignette_subtracted.png",
+        "synthetic_starfield/stage_bg_vignette_subtracted",
         ToneMap::Clamp,
     );
 
@@ -319,14 +319,14 @@ fn background_nebula() {
     save(
         &pixels,
         Size2us::new(width, height),
-        "synthetic_starfield/stage_bg_nebula_input.png",
+        "synthetic_starfield/stage_bg_nebula_input",
         ToneMap::Clamp,
     );
 
     save(
         background.background.pixels(),
         Size2us::new(width, height),
-        "synthetic_starfield/stage_bg_nebula_background.png",
+        "synthetic_starfield/stage_bg_nebula_background",
         ToneMap::Clamp,
     );
 
@@ -338,7 +338,7 @@ fn background_nebula() {
     save(
         &subtracted,
         Size2us::new(width, height),
-        "synthetic_starfield/stage_bg_nebula_subtracted.png",
+        "synthetic_starfield/stage_bg_nebula_subtracted",
         ToneMap::Clamp,
     );
 

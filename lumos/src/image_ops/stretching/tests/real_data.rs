@@ -83,7 +83,7 @@ fn stretch_stacked_light() {
         );
 
         Scnr::average_neutral().apply(&mut stretched).unwrap();
-        visual::save_linear(&stretched, &format!("stretch/stacked_light_{name}.png"));
+        visual::save_linear(&stretched, &format!("stretch/stacked_light_{name}"));
     }
 
     // Two-stage Milky-Way contrast — the realistic GHS workflow. A gentle auto-asinh first lifts the
@@ -112,5 +112,5 @@ fn stretch_stacked_light() {
         "asinh+ghs output stays in [0,1]: {out:?}"
     );
     Scnr::average_neutral().apply(&mut staged).unwrap();
-    visual::save_linear(&staged, "stretch/stacked_light_asinh_ghs.png");
+    visual::save_linear(&staged, "stretch/stacked_light_asinh_ghs");
 }

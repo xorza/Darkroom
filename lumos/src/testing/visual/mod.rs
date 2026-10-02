@@ -11,7 +11,7 @@ pub(crate) mod report;
 use common::internals;
 use image::GrayImage;
 use imaginarium::{ColorFormat, Image, ImageDesc};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[cfg(feature = "real-data")]
 use crate::bit_buffer2::BitBuffer2;
@@ -87,7 +87,15 @@ impl ToneMap {
 
 /// Where the debug image `name` goes, with the configured extension, or `None` when debug output
 /// is off ([`internals::debug_output_path`]).
+///
+/// # Panics
+/// When `name` carries an extension of its own: the configured format decides it, so one in the
+/// name would be replaced without a word.
 pub(crate) fn debug_file(name: &str) -> Option<PathBuf> {
+    assert!(
+        Path::new(name).extension().is_none(),
+        "debug image {name:?} names an extension; the output format ({TEST_OUTPUT_IMAGE_EXT}) sets it"
+    );
     internals::debug_output_path(name).map(|path| path.with_extension(TEST_OUTPUT_IMAGE_EXT))
 }
 

@@ -33,14 +33,14 @@ fn deepsnr_denoises() {
 
     // CNN denoisers want stretched display data in [0,1].
     let img = stretched_master();
-    visual::save_linear(&img, "ml_denoise/input.png");
+    visual::save_linear(&img, "ml_denoise/input");
 
     // `apply` denoises in place; the comparison below still needs the noisy original.
     let mut denoised = img.clone();
     MlDenoise::new(weights)
         .apply(&mut denoised)
         .expect("denoise succeeds");
-    visual::save_linear(&denoised, "ml_denoise/denoised.png");
+    visual::save_linear(&denoised, "ml_denoise/denoised");
 
     let in_hf = mean_adjacent_diff(&img);
     let out_hf = mean_adjacent_diff(&denoised);

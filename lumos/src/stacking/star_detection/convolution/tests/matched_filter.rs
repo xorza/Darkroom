@@ -50,7 +50,7 @@ fn gaussian_filter_sparse() {
     save(
         pixels.pixels(),
         Size2us::new(width, height),
-        "synthetic_starfield/stage_conv_sparse_input.png",
+        "synthetic_starfield/stage_conv_sparse_input",
         ToneMap::Clamp,
     );
 
@@ -72,7 +72,7 @@ fn gaussian_filter_sparse() {
     save(
         &bg_subtracted,
         Size2us::new(width, height),
-        "synthetic_starfield/stage_conv_sparse_bg_subtracted.png",
+        "synthetic_starfield/stage_conv_sparse_bg_subtracted",
         ToneMap::Clamp,
     );
 
@@ -89,7 +89,7 @@ fn gaussian_filter_sparse() {
     save(
         &filtered_display,
         Size2us::new(width, height),
-        "synthetic_starfield/stage_conv_sparse_filtered.png",
+        "synthetic_starfield/stage_conv_sparse_filtered",
         ToneMap::Clamp,
     );
 
@@ -172,7 +172,7 @@ fn gaussian_filter_fwhm_range() {
     save(
         pixels.pixels(),
         Size2us::new(width, height),
-        "synthetic_starfield/stage_conv_fwhm_range_input.png",
+        "synthetic_starfield/stage_conv_fwhm_range_input",
         ToneMap::Clamp,
     );
 
@@ -253,7 +253,7 @@ fn gaussian_filter_noise() {
     save(
         pixels.pixels(),
         Size2us::new(width, height),
-        "synthetic_starfield/stage_conv_noise_input.png",
+        "synthetic_starfield/stage_conv_noise_input",
         ToneMap::Clamp,
     );
 
@@ -275,7 +275,7 @@ fn gaussian_filter_noise() {
     save(
         &bg_subtracted,
         Size2us::new(width, height),
-        "synthetic_starfield/stage_conv_noise_bg_subtracted.png",
+        "synthetic_starfield/stage_conv_noise_bg_subtracted",
         ToneMap::Clamp,
     );
 
@@ -290,7 +290,7 @@ fn gaussian_filter_noise() {
     save(
         &filtered_display,
         Size2us::new(width, height),
-        "synthetic_starfield/stage_conv_noise_filtered.png",
+        "synthetic_starfield/stage_conv_noise_filtered",
         ToneMap::Clamp,
     );
 

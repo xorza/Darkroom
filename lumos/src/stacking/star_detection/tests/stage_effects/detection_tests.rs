@@ -60,7 +60,7 @@ fn detection_sparse() {
     save(
         pixels.pixels(),
         size,
-        "synthetic_starfield/stage_det_sparse_input.png",
+        "synthetic_starfield/stage_det_sparse_input",
         ToneMap::Clamp,
     );
 
@@ -93,7 +93,7 @@ fn detection_sparse() {
         &candidate_positions,
         &truth_positions,
     );
-    save_image(overlay, "synthetic_starfield/stage_det_sparse_overlay.png");
+    save_image(overlay, "synthetic_starfield/stage_det_sparse_overlay");
 
     // Calculate detection rate
     let match_radius = 5.0;
@@ -205,7 +205,7 @@ fn detection_thresholds() {
     save(
         pixels.pixels(),
         Size2us::new(width, height),
-        "synthetic_starfield/stage_det_thresholds_input.png",
+        "synthetic_starfield/stage_det_thresholds_input",
         ToneMap::Clamp,
     );
 
@@ -288,7 +288,7 @@ fn detection_area_filter() {
     save(
         pixels.pixels(),
         Size2us::new(width, height),
-        "synthetic_starfield/stage_det_area_filter_input.png",
+        "synthetic_starfield/stage_det_area_filter_input",
         ToneMap::Clamp,
     );
 

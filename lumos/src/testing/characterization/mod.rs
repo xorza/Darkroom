@@ -89,7 +89,7 @@ fn decode_snapshot() {
     }
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../test_resources/full_example.fits"
+        "/test_resources/full_example.fits"
     );
     let image = LinearImage::from_file(path, &LoadContext::default()).unwrap();
     let mut snapshot = Snapshot::default();
