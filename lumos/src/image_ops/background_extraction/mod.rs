@@ -33,8 +33,9 @@ const SKY_CLIP_ITERATIONS: usize = 3;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, IntrospectEnum)]
 #[config(type_id = "ed416b2d-378b-4eb1-9029-bc7a80a509aa")]
 pub enum BackgroundMode {
-    /// `out = in − model`. For **additive** gradients (light pollution, sky/moon glow) — the usual
-    /// choice. Adds no noise (a smooth surface is noiseless) and preserves real flux differences.
+    /// `out = in − (model − mean(model))`. For **additive** gradients (light pollution, sky/moon
+    /// glow) — the usual choice. Removes the variation and keeps the sky level. Adds no noise (a
+    /// smooth surface is noiseless) and preserves real flux differences.
     Subtract,
     /// `out = in / (model / mean(model))`, divisor floored. For **multiplicative** residuals
     /// (vignetting the master flat missed, differential absorption).
@@ -42,7 +43,8 @@ pub enum BackgroundMode {
 }
 
 /// Model and remove the smooth background of an image in place, **per channel**. Operates on linear
-/// data: the output background sits at ≈0 (slightly negative on noise — kept signed, not clamped).
+/// data: the output background sits at each channel's mean sky level (`Subtract`) or keeps it
+/// (`Divide`), with the gradient gone.
 #[derive(Debug, Clone, Introspect)]
 pub struct ExtractBackground {
     /// Sample-tile size in px. Each tile yields one robust sky sample. Larger → smoother, less able
@@ -167,7 +169,14 @@ fn extract_background_plane(
     let coeffs = fit_surface(&samples, &terms, config.rejection_sigma, config.iterations)?;
     let surface = Surface::new(&coeffs, &terms, Size2us::new(plane.width(), plane.height()));
     match config.mode {
-        BackgroundMode::Subtract => surface.remove(plane, |p, m| p - m),
+        BackgroundMode::Subtract => {
+            // Only the model's variation is removed; its mean stays as the sky pedestal, as Siril
+            // does. Without it the sky sits at ≈0 and the next step that measures the background
+            // against zero (an auto stretch) has nothing to place. Each channel keeps its own
+            // level, like `Divide` — neutralizing the sky colour is a separate op.
+            let pedestal = surface.mean() as f32;
+            surface.remove(plane, |p, m| p - (m - pedestal));
+        }
         BackgroundMode::Divide => {
             let mean = surface.mean();
             if mean <= 0.0 {

@@ -15,6 +15,15 @@ pub enum OpError {
         rank: usize,
         required_rank: usize,
     },
+    /// An auto stretch cannot map the measured background onto its target: the median sits at or
+    /// below zero (nothing for a brightening curve to lift), or the curve's range does not reach
+    /// the target from it.
+    #[error("{method} cannot map a background median of {median} to the target {target}")]
+    UnreachableBackground {
+        method: &'static str,
+        median: f32,
+        target: f32,
+    },
 }
 
 #[cfg(test)]

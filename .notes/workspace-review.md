@@ -110,14 +110,6 @@ Severity: High — user files and user-wired graphs crash the process or the wor
 - [ ] `lumos/src/stacking/star_detection/detector/stages/filter/mod.rs` `remove_duplicate_stars` — `FilterConfig::validate` accepts `duplicate_min_separation = 0.0`; the spatial-hash path divides by `cell_size = 0.0`, every coordinate becomes `i64::MAX`, and `cell_x + dx` overflows (debug panic; release puts all stars in one cell, O(n²)). Zero separation should mean "no dedup" and return early.
 - [ ] `imaginarium/src/drawing.rs` `draw_circle` / `draw_dot` — for a shape entirely left of or above the image, `((cx + r).ceil() as i32).min(width as i32 - 1) as usize` is negative and wraps to ~2^64; the distance test rejects every pixel, so the loop runs essentially forever. Clamp in `i32` and return early on an empty box.
 
-## The default gradient removal puts both auto stretches on their degenerate branch
-Severity: High — the standard chain (extract background, then auto-stretch) silently produces a maximal stretch that ignores its own target.
-
-- [ ] `lumos/src/image_ops/background_extraction/mod.rs` `extract_background_plane` — `BackgroundMode::Subtract` (the default) writes `p - m`, so the sky sits at ≈0; `Divide` writes `p / (m/mean)` and keeps the level. The two modes disagree on whether the background level survives, and only `Subtract` breaks the next step. Keep a pedestal (re-add the model mean), or make the stretches measure the background against the noise rather than against 0.
-- [ ] `lumos/src/image_ops/stretching/mod.rs` `solve_asinh_beta` — with target 0.2 no β in `[1e-5, 1e5]` reaches the target once the median is below ~5.7e-5; bisection walks `hi` down and returns the range limit 1e-5 without saying so. Medians 0, 1e-5 and −0.001 map to 0.0, 0.072 and −0.43 instead of 0.2, and a 1e-3 noise excursion displays at 0.434.
-- [ ] `lumos/src/image_ops/stretching/mod.rs` `StfCurve::new` — on the same input `black` clamps to 0 and `rescaled_median` ≈ 0; `mtf(target, 0) = 0` clamps to `MIDTONES_MIN = 1e-4`, so a 1e-3 noise pixel maps to ≈0.909. The median does not land on `target_background`.
-- [ ] `lumos/src/image_ops/stretching/tests/mod.rs` — every auto-stretch case uses a median ≥ 0.02; nothing covers a median at or below zero, which is what `ExtractBackground::default()` produces.
-
 ---
 
 # Medium — wrong in edge cases, duplicated truths, hot-path waste
