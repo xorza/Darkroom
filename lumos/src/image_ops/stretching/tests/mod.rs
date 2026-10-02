@@ -97,16 +97,58 @@ fn asinh_beta_controls_strength() {
     assert!((AsinhCurve::new(0.01).eval(0.1) - 0.56587).abs() < 2e-3);
 }
 
+/// Every reachable median lands on its target, down to the near-zero sky a background
+/// subtraction leaves — the solver's own check is 1e-4, so the curve evaluated here meets it too.
 #[test]
 fn solve_beta_hits_target_background() {
-    for &(median, target) in &[(0.05f32, 0.2f32), (0.1, 0.25), (0.02, 0.15)] {
-        let beta = solve_asinh_beta(median, target);
+    for &(median, target) in &[
+        (0.05f32, 0.2f32),
+        (0.1, 0.25),
+        (0.02, 0.15),
+        (1e-5, 0.2),
+        (1e-3, 0.2),
+    ] {
+        let beta = solve_asinh_beta(median, target).unwrap();
         let got = AsinhCurve::new(beta).eval(median);
         assert!(
-            (got - target).abs() < 2e-3,
+            (got - target).abs() < 1e-4,
             "median {median} -> {got}, want {target}"
         );
     }
+}
+
+/// A background at or below zero gives a brightening curve nothing to lift, and a median at or
+/// above the target cannot be brought down by one: both auto stretches report it instead of
+/// returning a curve that silently misses the target.
+#[test]
+fn auto_stretches_report_an_unreachable_background() {
+    for median in [0.0f32, -0.001, 0.25, 0.9] {
+        assert!(
+            matches!(
+                solve_asinh_beta(median, 0.2),
+                Err(OpError::UnreachableBackground { .. })
+            ),
+            "asinh: median {median}"
+        );
+    }
+    for median in [0.0f32, -0.001, 1.0] {
+        assert!(
+            matches!(
+                StfCurve::new(median, 0.001, 1.5, 0.2),
+                Err(OpError::UnreachableBackground { .. })
+            ),
+            "STF: median {median}"
+        );
+    }
+
+    // Through `apply`: the image is left as it was.
+    let original = vec![-0.001f32, 0.0, 0.001, -0.002];
+    let mut image = gray_image(Size2us::new(2, 2), original.clone());
+    assert!(matches!(
+        Stretch::auto_asinh().apply(&mut image),
+        Err(OpError::UnreachableBackground { .. })
+    ));
+    assert_eq!(image.channel(0).pixels(), original.as_slice());
 }
 
 #[test]
@@ -116,7 +158,7 @@ fn stf_params_hand_computed() {
     //   rescaled median = (0.1-0.08)/(1-0.08) = 0.0217391
     //   midtones = MTF(0.25, 0.0217391) = 0.0625
     //   eval(0.1) = MTF(0.0625, 0.0217391) = 0.25   (self-inverse: median maps to target)
-    let c = StfCurve::new(0.1, 0.02, 1.0, 0.25);
+    let c = StfCurve::new(0.1, 0.02, 1.0, 0.25).unwrap();
     assert!((c.black - 0.08).abs() < 1e-6, "black = {}", c.black);
     assert!(
         (c.inv_range - 1.0 / 0.92).abs() < 1e-5,
@@ -136,8 +178,8 @@ fn stf_params_hand_computed() {
 
 #[test]
 fn stf_shadow_sigmas_lower_the_black_point() {
-    let b1 = StfCurve::new(0.1, 0.02, 1.0, 0.25).black;
-    let b3 = StfCurve::new(0.1, 0.02, 3.0, 0.25).black;
+    let b1 = StfCurve::new(0.1, 0.02, 1.0, 0.25).unwrap().black;
+    let b3 = StfCurve::new(0.1, 0.02, 3.0, 0.25).unwrap().black;
     assert!((b1 - 0.08).abs() < 1e-6);
     assert!((b3 - 0.04).abs() < 1e-6);
     assert!(b3 < b1, "more shadow sigmas => lower black point");

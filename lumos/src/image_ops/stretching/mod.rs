@@ -31,6 +31,7 @@
 //! to its brightness and burns bright star cores toward white.
 
 use crate::image_ops::rgb::Rgb;
+use arrayvec::ArrayVec;
 use common::IntrospectEnum;
 use rayon::prelude::*;
 
@@ -152,17 +153,21 @@ impl Stretch {
     /// Apply this non-linear stretch to a stacked image in place.
     ///
     /// # Errors
-    /// [`OpError::InvalidConfig`] on out-of-range parameters.
+    /// [`OpError::InvalidConfig`] on out-of-range parameters, and
+    /// [`OpError::UnreachableBackground`] when an auto method cannot place the measured background
+    /// on its target. The image is unchanged on error.
     pub fn apply(&self, image: &mut LinearImage) -> Result<(), OpError> {
         self.validate()?;
         match self.color {
             ColorMode::ColorPreserving => {
                 // Auto methods derive the curve from the combined intensity (one curve for the image).
-                let curve = explicit_curve(self.method)
-                    .unwrap_or_else(|| build_curve(&mut subsample_intensity(image), self.method));
+                let curve = match explicit_curve(self.method) {
+                    Some(curve) => curve,
+                    None => build_curve(&mut subsample_intensity(image), self.method)?,
+                };
                 apply_color_preserving_image(image, curve);
             }
-            ColorMode::PerChannel => apply_per_channel_image(image, self.method),
+            ColorMode::PerChannel => apply_per_channel_image(image, self.method)?,
         }
         Ok(())
     }
@@ -232,13 +237,21 @@ fn ensure_target_background(t: f32) -> Result<(), InvalidConfigField> {
 /// Per-channel stretch: each channel gets its own auto curve from its own statistics (explicit
 /// methods share one curve across channels), applied to its own plane. Channels are independent, so
 /// nothing here reads a value another channel already changed.
-fn apply_per_channel_image(image: &mut LinearImage, method: StretchMethod) {
+///
+/// Every channel's curve is built before any channel is written, so a channel whose background is
+/// out of reach leaves the whole image untouched.
+fn apply_per_channel_image(image: &mut LinearImage, method: StretchMethod) -> Result<(), OpError> {
+    let mut curves = ArrayVec::<Curve, 3>::new();
     for plane in image.planes_mut() {
-        let plane = plane.pixels_mut();
-        let curve =
-            explicit_curve(method).unwrap_or_else(|| build_curve(&mut subsample(plane), method));
-        apply_curve_plane(plane, curve);
+        curves.push(match explicit_curve(method) {
+            Some(curve) => curve,
+            None => build_curve(&mut subsample(plane.pixels()), method)?,
+        });
     }
+    for (plane, curve) in image.planes_mut().zip(curves) {
+        apply_curve_plane(plane.pixels_mut(), curve);
+    }
+    Ok(())
 }
 
 /// Uniform-stride subsample of a plane, capped at `MAX_STRETCH_SAMPLES` for the curve's median/MAD.
@@ -312,22 +325,35 @@ struct StfCurve {
 }
 
 impl StfCurve {
-    fn new(median: f32, sigma: f32, shadow_sigmas: f32, target_bkg: f32) -> Self {
-        let black = (median - shadow_sigmas * sigma).clamp(0.0, 1.0);
-        let inv_range = if black < 1.0 {
-            1.0 / (1.0 - black)
-        } else {
-            1.0
+    /// The curve that puts `median` on `target_bkg`, or an error when no midtones balance in
+    /// `[MIDTONES_MIN, MIDTONES_MAX]` does: a median at or below the black point (nothing above
+    /// black to lift) or at white.
+    fn new(median: f32, sigma: f32, shadow_sigmas: f32, target_bkg: f32) -> Result<Self, OpError> {
+        let unreachable = || OpError::UnreachableBackground {
+            method: "auto STF",
+            median,
+            target: target_bkg,
         };
-        let rescaled_median = ((median - black) * inv_range).clamp(0.0, 1.0);
+        let black = (median - shadow_sigmas * sigma).clamp(0.0, 1.0);
+        if black >= 1.0 {
+            return Err(unreachable());
+        }
+        let inv_range = 1.0 / (1.0 - black);
+        let rescaled_median = (median - black) * inv_range;
+        if !(rescaled_median > 0.0 && rescaled_median < 1.0) {
+            return Err(unreachable());
+        }
         // MTF's Möbius self-inverse identity: MTF(MTF(t, x0), x0) = t, so the midtones balance
         // that maps the rescaled median onto the target background is just MTF(target, median).
-        let midtones = mtf(target_bkg, rescaled_median).clamp(MIDTONES_MIN, MIDTONES_MAX);
-        Self {
+        let midtones = mtf(target_bkg, rescaled_median);
+        if !(MIDTONES_MIN..=MIDTONES_MAX).contains(&midtones) {
+            return Err(unreachable());
+        }
+        Ok(Self {
             black,
             inv_range,
             midtones,
-        }
+        })
     }
 }
 
@@ -509,33 +535,43 @@ fn mtf(m: f32, x: f32) -> f32 {
 /// Choose the arcsinh softening `β` so a background of `median` maps to `target_background`.
 ///
 /// `g(β) = asinh(median/β) / asinh(1/β)` is monotonically decreasing in `β`, ranging from ~1 as
-/// `β → 0` (strong, log-like) to `median` as `β → ∞` (near-linear). Bisect `log₁₀ β` to hit the
-/// target, which must lie in `(median, 1)`.
-fn solve_asinh_beta(median: f32, target_background: f32) -> f32 {
-    // The reachable target lies in `(median, 1)`. Cap the lower bound at the upper one so a
-    // near-white median (not expected on a linear stack, but possible per-channel) can't invert the
-    // clamp range and panic.
-    let hi = 1.0 - 1e-4;
-    let target = target_background.clamp((median + 1e-4).min(hi), hi);
-    let (mut lo, mut hi) = (-5.0f32, 5.0f32);
-    for _ in 0..50 {
+/// `β → 0` (strong, log-like) to `median` as `β → ∞` (near-linear), so a reachable target lies in
+/// `(median, 1)`. Bisect `log₁₀ β` over `[−30, 5]` — wide enough for medians down to ~1e-20 — and
+/// then check the result, because a target past the range's end converges onto the bound rather
+/// than onto the target.
+fn solve_asinh_beta(median: f32, target_background: f32) -> Result<f32, OpError> {
+    let unreachable = || OpError::UnreachableBackground {
+        method: "auto asinh",
+        median,
+        target: target_background,
+    };
+    if !(median > 0.0 && median < target_background) {
+        return Err(unreachable());
+    }
+    let g = |beta: f32| (median / beta).asinh() / (1.0 / beta).asinh();
+    let (mut lo, mut hi) = (-30.0f32, 5.0f32);
+    for _ in 0..60 {
         let mid = f32::midpoint(lo, hi);
-        let beta = 10.0f32.powf(mid);
-        let g = (median / beta).asinh() / (1.0 / beta).asinh();
-        if g > target {
+        if g(10.0f32.powf(mid)) > target_background {
             lo = mid;
         } else {
             hi = mid;
         }
     }
-    10.0f32.powf(f32::midpoint(lo, hi))
+    let beta = 10.0f32.powf(f32::midpoint(lo, hi));
+    // A reachable target is met to the f32 accuracy of the two `asinh` evaluations (a few ulp,
+    // ~1e-6); a target past the range's end misses by far more than this.
+    if (g(beta) - target_background).abs() > 1e-4 {
+        return Err(unreachable());
+    }
+    Ok(beta)
 }
 
 /// Build a curve for a statistics-driven (auto) method from a (reorderable) sample set. The explicit
 /// methods are resolved by [`explicit_curve`] before any samples are materialized, so they never
 /// reach here.
-fn build_curve(samples: &mut [f32], method: StretchMethod) -> Curve {
-    match method {
+fn build_curve(samples: &mut [f32], method: StretchMethod) -> Result<Curve, OpError> {
+    Ok(match method {
         StretchMethod::AutoStf {
             shadow_sigmas,
             target_background,
@@ -546,16 +582,19 @@ fn build_curve(samples: &mut [f32], method: StretchMethod) -> Curve {
                 background.sigma(),
                 shadow_sigmas,
                 target_background,
-            ))
+            )?)
         }
         StretchMethod::AutoAsinh { target_background } => {
             let median = median_mut(samples);
-            Curve::Asinh(AsinhCurve::new(solve_asinh_beta(median, target_background)))
+            Curve::Asinh(AsinhCurve::new(solve_asinh_beta(
+                median,
+                target_background,
+            )?))
         }
         StretchMethod::Asinh { .. } | StretchMethod::Ghs { .. } => {
             unreachable!("explicit methods are built by explicit_curve, not build_curve")
         }
-    }
+    })
 }
 
 /// Stretch one plane. Resolves the curve type once, then runs a monomorphized loop.
