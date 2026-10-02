@@ -1,5 +1,6 @@
 use common::TempDir;
 
+use crate::testing::assertions::{assert_close, assert_close_slice};
 use crate::testing::cfa::XTRANS_PATTERN;
 
 use crate::io::raw::*;
@@ -243,21 +244,8 @@ fn normalize_active_area_crops_and_applies_bayer_deltas() {
     );
     let clamped_expected = [0.0, 0.0, 0.0, 0.0, 0.7, 0.8];
     let unclamped_expected = [-0.15, -0.2, 0.0, 0.0, 0.7, 0.9];
-    for (index, ((got_clamped, got_unclamped), (want_clamped, want_unclamped))) in clamped
-        .iter()
-        .zip(&unclamped)
-        .zip(clamped_expected.iter().zip(&unclamped_expected))
-        .enumerate()
-    {
-        assert!(
-            (got_clamped - want_clamped).abs() < 1e-6,
-            "clamped[{index}] = {got_clamped}, expected {want_clamped}"
-        );
-        assert!(
-            (got_unclamped - want_unclamped).abs() < 1e-6,
-            "unclamped[{index}] = {got_unclamped}, expected {want_unclamped}"
-        );
-    }
+    assert_close_slice!(clamped, clamped_expected, 1e-6, "clamped");
+    assert_close_slice!(unclamped, unclamped_expected, 1e-6, "unclamped");
 }
 
 #[test]
@@ -321,12 +309,16 @@ fn direct_and_calibration_normalization_share_raw_linear_color_scale() {
                     let expected = 0.5 - channel_delta[active_channel];
                     let direct_value = direct[(y + top_margin) * raw_width + x + left_margin];
                     let calibration_value = calibration[y * layout.active.width + x];
-                    assert!(
-                        (direct_value - expected).abs() < 1e-6,
+                    assert_close!(
+                        direct_value,
+                        expected,
+                        1e-6,
                         "direct margin ({top_margin}, {left_margin}), ({y}, {x})"
                     );
-                    assert!(
-                        (calibration_value - expected).abs() < 1e-6,
+                    assert_close!(
+                        calibration_value,
+                        expected,
+                        1e-6,
                         "calibration margin ({top_margin}, {left_margin}), ({y}, {x})"
                     );
                 }
@@ -348,7 +340,7 @@ fn spatial_black_repeat_uses_visible_coordinates_with_nonzero_margins() {
     assert_eq!(black.per_channel, [115.0, 125.0, 135.0, 125.0]);
     assert_eq!(black.span, 1000.0);
     for (&actual, expected) in black.channel_delta_norm.iter().zip([0.0, 0.01, 0.02, 0.01]) {
-        assert!((actual - expected).abs() < 1e-8);
+        assert_close!(actual, expected, 1e-8);
     }
     let repeat = black.repeat.as_ref().unwrap();
     assert_eq!(repeat.size, Size2us::new(3, 2));
@@ -357,7 +349,7 @@ fn spatial_black_repeat_uses_visible_coordinates_with_nonzero_margins() {
         .iter()
         .zip([0.0, 0.002, 0.004, 0.006, 0.008, 0.010])
     {
-        assert!((actual - expected).abs() < 1e-8);
+        assert_close!(actual, expected, 1e-8);
     }
 
     let layout = SensorLayout {
@@ -395,11 +387,8 @@ fn spatial_black_repeat_uses_visible_coordinates_with_nonzero_margins() {
             let direct_value =
                 direct[(y + layout.margin.y) * layout.raw.width + x + layout.margin.x];
             let calibration_value = calibration[y * layout.active.width + x];
-            assert!((direct_value - 0.2).abs() < 1e-7, "direct ({x}, {y})");
-            assert!(
-                (calibration_value - 0.2).abs() < 1e-7,
-                "calibration ({x}, {y})"
-            );
+            assert_close!(direct_value, 0.2, 1e-7, "direct ({x}, {y})");
+            assert_close!(calibration_value, 0.2, 1e-7, "calibration ({x}, {y})");
         }
     }
 }
@@ -469,12 +458,16 @@ fn xtrans_direct_and_calibration_black_corrections_match() {
                     let expected = [0.49, 0.48, 0.47][raw_channel] - repeat.at_visible(y, x);
                     let direct_value = direct.read_normalized(raw_y, raw_x);
                     let calibration_value = calibration[y * layout.active.width + x];
-                    assert!(
-                        (direct_value - expected).abs() < 1e-7,
+                    assert_close!(
+                        direct_value,
+                        expected,
+                        1e-7,
                         "direct margin ({top_margin}, {left_margin}), ({y}, {x})"
                     );
-                    assert!(
-                        (calibration_value - expected).abs() < 1e-7,
+                    assert_close!(
+                        calibration_value,
+                        expected,
+                        1e-7,
                         "calibration margin ({top_margin}, {left_margin}), ({y}, {x})"
                     );
                 }
@@ -531,7 +524,7 @@ fn real_xtrans_channel_black_matches_direct_and_calibration_paths() {
             let calibration_value = calibration[y * raw.layout.active.width + x];
             if (0.0..=1.0).contains(&calibration_value) {
                 let direct_value = direct.read_normalized(raw_y, raw_x);
-                assert!((direct_value - calibration_value).abs() < 1e-7);
+                assert_close!(direct_value, calibration_value, 1e-7);
                 compared += 1;
             }
         }
@@ -711,7 +704,7 @@ fn apply_bayer_black_corrections_identity() {
 
     // No change expected
     for &v in &data {
-        assert!((v - 0.5).abs() < 1e-6);
+        assert_close!(v, 0.5, 1e-6);
     }
 }
 
@@ -723,18 +716,10 @@ fn bayer_black_corrections_apply_a_delta_per_colour() {
 
     apply_bayer_black_corrections(&mut data, 2, Vec2us::ZERO, 0x9494_9494, &delta, None);
 
-    assert!(
-        (data[0] - 0.4).abs() < 1e-6,
-        "R: 0.5-0.1=0.4, got {}",
-        data[0]
-    );
-    assert!((data[1] - 0.5).abs() < 1e-6, "G: no delta, got {}", data[1]);
-    assert!((data[2] - 0.5).abs() < 1e-6, "G: no delta, got {}", data[2]);
-    assert!(
-        (data[3] - 0.45).abs() < 1e-6,
-        "B: 0.5-0.05=0.45, got {}",
-        data[3]
-    );
+    assert_close!(data[0], 0.4, 1e-6, "R: 0.5-0.1=0.4, got {}", data[0]);
+    assert_close!(data[1], 0.5, 1e-6, "G: no delta, got {}", data[1]);
+    assert_close!(data[2], 0.5, 1e-6, "G: no delta, got {}", data[2]);
+    assert_close!(data[3], 0.45, 1e-6, "B: 0.5-0.05=0.45, got {}", data[3]);
 }
 
 #[test]

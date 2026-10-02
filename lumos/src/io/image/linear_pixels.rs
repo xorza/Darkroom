@@ -232,28 +232,3 @@ impl From<&LinearPixels> for Image {
         }
     }
 }
-
-#[cfg(test)]
-pub(crate) mod internals {
-    use rayon::prelude::*;
-
-    use crate::io::image::linear_pixels::LinearPixels;
-
-    pub(crate) fn into_interleaved_pixels(pixels: LinearPixels) -> Vec<f32> {
-        match pixels {
-            LinearPixels::L(plane) => plane.into_vec(),
-            LinearPixels::Rgb([r, g, b]) => {
-                let mut interleaved = vec![0.0; r.len() * 3];
-                interleaved
-                    .par_chunks_mut(3)
-                    .enumerate()
-                    .for_each(|(index, rgb)| {
-                        rgb[0] = r[index];
-                        rgb[1] = g[index];
-                        rgb[2] = b[index];
-                    });
-                interleaved
-            }
-        }
-    }
-}

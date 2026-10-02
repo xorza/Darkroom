@@ -1,6 +1,7 @@
 use crate::io::raw::demosaic::sensor_layout::SensorLayout;
 use crate::io::raw::demosaic::xtrans::internals::{make_xtrans, test_pattern, to_u16};
 use crate::io::raw::demosaic::xtrans::markesteijn_steps::*;
+use crate::testing::assertions::assert_close;
 
 #[test]
 fn green_minmax_uniform() {
@@ -25,8 +26,8 @@ fn green_minmax_uniform() {
 
     // Uniform 0.5 input → gmin=gmax≈0.5 everywhere (u16 quantization: ±1e-5)
     for i in 0..w * h {
-        assert!((gmin[i] - 0.5).abs() < 1e-4, "gmin[{}] = {}", i, gmin[i]);
-        assert!((gmax[i] - 0.5).abs() < 1e-4, "gmax[{}] = {}", i, gmax[i]);
+        assert_close!(gmin[i], 0.5, 1e-4, "gmin[{}] = {}", i, gmin[i]);
+        assert_close!(gmax[i], 0.5, 1e-4, "gmax[{}] = {}", i, gmax[i]);
     }
 }
 
@@ -95,8 +96,10 @@ fn interpolate_green_uniform() {
     for d in 0..NDIR {
         for i in 0..w * h {
             let g = green_dir[d * w * h + i];
-            assert!(
-                (g - expected).abs() < 2e-7,
+            assert_close!(
+                g,
+                expected,
+                2e-7,
                 "green_dir[{d}][{i}] = {g} (expected {expected})"
             );
         }
@@ -176,8 +179,10 @@ fn ypbpr_matches_hand_values() {
             ("Pb", pb, expected[1]),
             ("Pr", pr, expected[2]),
         ] {
-            assert!(
-                (actual - expected).abs() < 4e-7,
+            assert_close!(
+                actual,
+                expected,
+                4e-7,
                 "{name} of {rgb:?}: {actual} vs {expected}"
             );
         }
@@ -612,8 +617,10 @@ fn blend_uniform_homo_produces_uniform_output() {
     // Uniform 0.5 input → output should be approximately 0.5 for all channels
     for (channel, plane) in [&r, &g, &b].into_iter().enumerate() {
         for (i, &v) in plane.iter().enumerate() {
-            assert!(
-                (v - 0.5).abs() < 0.05,
+            assert_close!(
+                v,
+                0.5,
+                0.05,
                 "channel {channel} pixel {i}: expected ~0.5, got {v}"
             );
         }

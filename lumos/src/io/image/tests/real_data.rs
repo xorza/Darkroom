@@ -4,51 +4,26 @@
 //! gated once, at the module, instead of one `cfg` per `use` in a file that is mostly feature-free.
 
 use common::CancelToken;
-
 use common::internals::debug_output_path;
 
-use crate::io::image::cfa::CfaImage;
+use crate::io::image::cfa::{CfaFrameInfo, CfaImage};
 use crate::io::image::load_context::LoadContext;
-use crate::io::raw::raw_files;
+use crate::testing::real_data::raw_frames;
 
+/// The first RAW light loads through the CFA entry point at the size its header declares, and
+/// demosaics to three channels of that size.
 #[test]
-fn load_single_raw_from_env() {
-    use crate::testing::init_tracing;
-    use crate::testing::real_data::dataset_dir;
-
-    init_tracing();
-
-    let cal_dir = dataset_dir();
-
-    let lights_dir = cal_dir.join("Lights");
-    if !lights_dir.exists() {
-        eprintln!("Lights directory not found, skipping test");
-        return;
-    }
-
-    let files = raw_files::raw_files(&lights_dir).expect("scan RAW lights directory");
-    let Some(first_file) = files.first() else {
-        eprintln!("No image files in Lights, skipping test");
-        return;
-    };
-
-    println!("Loading file: {first_file:?}");
-
-    let image = CfaImage::from_file(first_file, &LoadContext::default())
-        .expect("Failed to load CFA image")
-        .demosaic(&CancelToken::never())
-        .expect("Failed to demosaic CFA image");
-
-    println!(
-        "Loaded image: {}x{}x{}",
-        image.width(),
-        image.height(),
-        image.channels()
+fn the_first_raw_light_loads_at_its_declared_size_and_demosaics() {
+    let path = &raw_frames("Lights")[0];
+    let context = LoadContext::default();
+    let declared = CfaFrameInfo::from_file(path, &context).unwrap().dimensions;
+    let cfa = CfaImage::from_file(path, &context).unwrap();
+    assert_eq!(
+        (cfa.data.width(), cfa.data.height()),
+        (declared.width(), declared.height())
     );
-    println!("Mean: {}", image.mean());
-
-    assert!(image.width() > 0);
-    assert!(image.height() > 0);
+    let image = cfa.demosaic(&CancelToken::never()).unwrap();
+    assert_eq!(image.dimensions().size(), declared.size());
     assert_eq!(image.channels(), 3);
 
     if let Some(path) = debug_output_path("light_from_raw.tiff") {

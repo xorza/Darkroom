@@ -411,54 +411,6 @@ impl From<LinearImage> for Image {
 }
 
 #[cfg(test)]
-pub(crate) mod internals {
-    use crate::image_ops::rgb::Rgb;
-    use crate::io::image::linear::LinearImage;
-    use crate::io::image::linear_pixels;
-    use crate::math::vec2us::Vec2us;
-
-    impl LinearImage {
-        pub(crate) fn get_pixel_gray(&self, pos: Vec2us) -> f32 {
-            debug_assert!(self.is_grayscale());
-            self.channel(0)[self.dimensions().size().index_of(pos)]
-        }
-
-        pub(crate) fn get_pixel_gray_mut(&mut self, pos: Vec2us) -> &mut f32 {
-            debug_assert!(self.is_grayscale());
-            let idx = self.dimensions().size().index_of(pos);
-            &mut self.channel_mut(0)[idx]
-        }
-
-        pub(crate) fn get_pixel_channel(&self, pos: Vec2us, c: usize) -> f32 {
-            debug_assert!(c < self.channels());
-            self.channel(c)[self.dimensions().size().index_of(pos)]
-        }
-
-        pub(crate) fn get_pixel_rgb(&self, pos: Vec2us) -> Rgb {
-            debug_assert!(self.is_rgb());
-            let idx = self.dimensions().size().index_of(pos);
-            Rgb {
-                r: self.channel(0)[idx],
-                g: self.channel(1)[idx],
-                b: self.channel(2)[idx],
-            }
-        }
-
-        pub(crate) fn set_pixel_rgb(&mut self, pos: Vec2us, rgb: Rgb) {
-            debug_assert!(self.is_rgb());
-            let idx = self.dimensions().size().index_of(pos);
-            self.channel_mut(0)[idx] = rgb.r;
-            self.channel_mut(1)[idx] = rgb.g;
-            self.channel_mut(2)[idx] = rgb.b;
-        }
-
-        pub(crate) fn into_interleaved_pixels(self) -> Vec<f32> {
-            linear_pixels::internals::into_interleaved_pixels(self.pixels)
-        }
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use crate::testing::prelude::*;
 

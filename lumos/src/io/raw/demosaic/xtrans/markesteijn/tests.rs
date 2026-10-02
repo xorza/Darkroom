@@ -245,8 +245,10 @@ fn constant_colour_reconstructs_to_rounding() {
             .unwrap();
             for (channel, plane) in planes.iter().enumerate() {
                 for (index, &value) in plane.iter().enumerate() {
-                    assert!(
-                        (value - colour[channel]).abs() < 2e-7,
+                    assert_close!(
+                        value,
+                        colour[channel],
+                        2e-7,
                         "{colour:?} margin {margin} channel {channel} at {index}: {value}"
                     );
                 }

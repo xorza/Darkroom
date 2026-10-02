@@ -15,11 +15,12 @@ use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode::{load_cfa_fits, load_linear_fits};
 use crate::io::image::fits::options::{FitsFloatScale, FitsLoadOptions, FitsNullPolicy};
 use crate::io::image::load_context::LoadContext;
-use crate::io::image::sample_domain::{SampleDomain, ScaleOrigin};
+use crate::io::image::sample_domain::ScaleOrigin;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::stacking::combine::stack;
 use crate::stacking::frame_store::{FramePeek, StackableImage};
 use crate::testing::cfa::{XTRANS_PATTERN, make_cfa};
+use crate::testing::fits::write_fits;
 use crate::{CalibrationMasters, CalibrationSet, CfaImage, CfaType, PreviewImage};
 use common::TempDir;
 use fits_well::header::Header;
@@ -31,18 +32,14 @@ use imaginarium::ColorFormat;
 fn write_and_load(name: &str, image: &Image) -> Result<LinearImage, ImageError> {
     let dir = TempDir::new("lumos-fits-roundtrip");
     let path = dir.join(format!("{name}.fits"));
-    let mut writer = FitsWriter::new(File::create(&path).unwrap());
-    writer.write_image(image, None).unwrap();
-    writer.into_inner().sync_all().unwrap();
+    write_fits(&path, image, None);
     load_linear_fits(&path, &LoadContext::default())
 }
 
 /// Write `image` with `header`'s cards to `dir/name.fits`.
 fn write_with_header(dir: &TempDir, name: &str, image: &Image, header: &Header) -> PathBuf {
     let path = dir.join(format!("{name}.fits"));
-    let mut writer = FitsWriter::new(File::create(&path).unwrap());
-    writer.write_image(image, Some(header)).unwrap();
-    writer.into_inner().sync_all().unwrap();
+    write_fits(&path, image, Some(header));
     path
 }
 
@@ -130,10 +127,10 @@ fn fits_integer_samples_are_divided_by_the_span_their_header_declares() {
     let signed = Image::new(vec![4, 1], vec![-32_768i16, -3, 0, 32_767]).unwrap();
     let signed_loaded = write_and_load("int16", &signed).unwrap();
     let pixels = signed_loaded.channel(0).pixels();
-    assert!((pixels[0] - -0.500_007_6).abs() < 1e-7, "{pixels:?}");
-    assert!((pixels[1] - -4.577_636_7e-5).abs() < 1e-9, "{pixels:?}");
+    assert_close!(pixels[0], -0.500_007_6, 1e-7, "{pixels:?}");
+    assert_close!(pixels[1], -4.577_636_7e-5, 1e-9, "{pixels:?}");
     assert_eq!(pixels[2], 0.0);
-    assert!((pixels[3] - 0.499_992_37).abs() < 1e-7, "{pixels:?}");
+    assert_close!(pixels[3], 0.499_992_37, 1e-7, "{pixels:?}");
 
     // BSCALE = -2.5 widens the declared span to 2.5 × 65535 = 163837.5, and the physical values
     // 17.5, 10, 0 divide by it. A negative BSCALE scales by its magnitude: the sign already lives
@@ -152,8 +149,8 @@ fn fits_integer_samples_are_divided_by_the_span_their_header_declares() {
     let pixels = scaled_loaded.channel(0).pixels();
     // The 2.5 cancels: 17.5 / (2.5 × 65535) = 7/65535 = 1.0681315e-4, and
     // 10 / (2.5 × 65535) = 4/65535 = 6.1036087e-5.
-    assert!((pixels[0] - 1.068_131_5e-4).abs() < 1e-9, "{pixels:?}");
-    assert!((pixels[1] - 6.103_609e-5).abs() < 1e-9, "{pixels:?}");
+    assert_close!(pixels[0], 1.068_131_5e-4, 1e-9, "{pixels:?}");
+    assert_close!(pixels[1], 6.103_609e-5, 1e-9, "{pixels:?}");
     assert_eq!(pixels[2], 0.0);
 
     // The headline case: the FITS unsigned convention (BZERO = 2¹⁵) lands exactly on [0, 1].
@@ -163,16 +160,13 @@ fn fits_integer_samples_are_divided_by_the_span_their_header_declares() {
 
     let loaded = write_and_load("uint16", &image).unwrap();
     // |BSCALE| × (2¹⁶ − 1) = 65535, recorded so a later stage can ask what one sample is worth.
-    assert_eq!(domain_of(&loaded).unwrap().scale, 65_535.0);
+    assert_eq!(loaded.metadata.sample_domain().unwrap().scale, 65_535.0);
     let pixels = loaded.channel(0).pixels();
     assert_eq!(pixels[0], 0.0);
     assert_eq!(pixels[4], 1.0);
     for (index, &value) in raw.iter().enumerate() {
         let expected = f32::from(value) / 65_535.0;
-        assert!(
-            (pixels[index] - expected).abs() < 1e-7,
-            "sample {index}: {pixels:?}"
-        );
+        assert_close!(pixels[index], expected, 1e-7, "sample {index}: {pixels:?}");
     }
 }
 
@@ -209,7 +203,7 @@ fn a_float_fits_scale_can_be_declared_when_the_header_does_not() {
         declared.channel(0).pixels(),
         &[0.0, 0.250_003_8, 0.500_007_6, 1.0]
     );
-    assert_eq!(domain_of(&declared).unwrap().scale, 65_535.0);
+    assert_eq!(declared.metadata.sample_domain().unwrap().scale, 65_535.0);
 
     // `Normalized` refuses the header's evidence, for a DATAMAX that describes the sensor rather
     // than the samples.
@@ -246,7 +240,7 @@ fn fits_quantization_sigma_follows_the_samples_into_the_normalized_domain() {
     // BITPIX = 16, BSCALE = 1 → divisor 65535, so one ADU is 1/65535 and its uniform-error σ is
     // (1/√12) / 65535 = 0.28867513 / 65535 = 4.4049001e-6.
     let sigma = loaded.quantization_sigma.unwrap();
-    assert!((sigma - 4.404_9e-6).abs() < 1e-11, "{sigma}");
+    assert_close!(sigma, 4.404_9e-6, 1e-11, "{sigma}");
 
     // A declared QNTZSIG is in the file's sample units and takes the same division: 2 ADU maps to
     // 2 / 65535 = 3.05181e-5, not to 2.
@@ -256,14 +250,8 @@ fn fits_quantization_sigma_follows_the_samples_into_the_normalized_domain() {
     let declared_path = write_with_header(&dir, "cfa_uint16_declared_sigma", &image, &declared);
     let declared_loaded = load_cfa_fits(&declared_path, &LoadContext::default()).unwrap();
     let declared_sigma = declared_loaded.quantization_sigma.unwrap();
-    assert!(
-        (declared_sigma - 2.0 / 65_535.0).abs() < 1e-11,
-        "{declared_sigma}"
-    );
-    assert!(
-        (declared_sigma - 3.051_81e-5).abs() < 1e-9,
-        "{declared_sigma}"
-    );
+    assert_close!(declared_sigma, 2.0 / 65_535.0, 1e-11, "{declared_sigma}");
+    assert_close!(declared_sigma, 3.051_81e-5, 1e-9, "{declared_sigma}");
 }
 
 #[test]
@@ -296,9 +284,9 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     let adu_path = write_with_header(&dir, "float32_datamax_adu", &image, &adu_header);
     let adu = load_linear_fits(&adu_path, &LoadContext::default()).unwrap();
     let decoded = adu.channel(0).pixels();
-    assert!((decoded[0] - -7.629_511e-5).abs() < 1e-9, "{decoded:?}");
+    assert_close!(decoded[0], -7.629_511e-5, 1e-9, "{decoded:?}");
     assert_eq!(decoded[1], 0.0);
-    assert!((decoded[2] - 7.629_511e-6).abs() < 1e-10, "{decoded:?}");
+    assert_close!(decoded[2], 7.629_511e-6, 1e-10, "{decoded:?}");
     assert_eq!(decoded[3], 1.0);
     // DATAMAX follows the samples, so the round-trip is stable: saving and reloading this frame
     // sees DATAMAX = 1 and leaves it alone rather than dividing a second time.
@@ -307,8 +295,8 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     // The two frames hold the same ADU data and were divided by spans 65535 apart, which is exactly
     // the mismatch a stack has to be able to detect. The sample domain is what makes it detectable —
     // both frames otherwise present as `FitsNormalized` and compare equal on every other axis.
-    let bare_domain = domain_of(&bare).unwrap();
-    let adu_domain = domain_of(&adu).unwrap();
+    let bare_domain = bare.metadata.sample_domain().unwrap();
+    let adu_domain = adu.metadata.sample_domain().unwrap();
     assert_eq!(bare_domain.scale, 1.0);
     assert_eq!(adu_domain.scale, 65_535.0);
     assert_eq!(bare_domain.origin, ScaleOrigin::Assumed);
@@ -462,7 +450,11 @@ fn fits_bunit_travels_with_the_samples_and_separates_frames_the_span_cannot() {
         let mut header = Header::new();
         header.set("BUNIT", bunit).unwrap();
         let path = write_with_header(&dir, name, &image, &header);
-        domain_of(&load_linear_fits(&path, &LoadContext::default()).unwrap()).unwrap()
+        load_linear_fits(&path, &LoadContext::default())
+            .unwrap()
+            .metadata
+            .sample_domain()
+            .unwrap()
     };
 
     let jansky = load("float32_bunit_jy", "Jy/beam");
@@ -545,10 +537,7 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
     // applied after the same division the samples took, not before it.
     let integer_filled = integer.channel(0).pixels();
     let expected = 4.0 / 65_535.0;
-    assert!(
-        (integer_filled[2] - expected).abs() < 1e-9,
-        "{integer_filled:?}"
-    );
+    assert_close!(integer_filled[2], expected, 1e-9, "{integer_filled:?}");
 
     // And the policy that refuses them still does, naming how many and where the first one is.
     let strict = LoadContext {
@@ -632,15 +621,6 @@ fn a_wholly_null_fits_image_loads_as_zero_with_every_pixel_masked() {
     assert!((0..4).all(|index| nulls.is_null(index)));
 }
 
-/// The domain a loaded frame's decoder put its samples in, whichever decoder that was.
-fn domain_of(image: &LinearImage) -> Option<SampleDomain> {
-    image
-        .metadata
-        .provenance
-        .as_ref()
-        .and_then(|provenance| provenance.transfer.sample_domain())
-}
-
 #[test]
 fn fits_datamax_follows_the_samples_into_the_normalized_domain() {
     // DATAMAX is a saturation level in the file's sample units, so it is divided by the same span
@@ -664,15 +644,12 @@ fn fits_datamax_follows_the_samples_into_the_normalized_domain() {
     assert_eq!(pixels[1], 0.0);
     for (index, physical) in [-7.0f32, 0.0, 41.0, 300.0].into_iter().enumerate() {
         let expected = physical / 65_535.0;
-        assert!(
-            (pixels[index] - expected).abs() < 1e-9,
-            "sample {index}: {pixels:?}"
-        );
+        assert_close!(pixels[index], expected, 1e-9, "sample {index}: {pixels:?}");
     }
 
     // 100 / 65535 = 1.5259e-3; 65535 / 65535 = 1 exactly.
     let low_max = low.metadata.data_max.unwrap();
-    assert!((low_max - 1.525_902_2e-3).abs() < 1e-9, "{low_max}");
+    assert_close!(low_max, 1.525_902_2e-3, 1e-9, "{low_max}");
     assert_eq!(high.metadata.data_max, Some(1.0));
 }
 
@@ -859,8 +836,10 @@ fn demosaic_uniform_bayer_recovers_colour() {
         let mean = (sum / devs.len() as f64) as f32;
         devs.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let median_dev = devs[devs.len() / 2];
-        assert!(
-            (mean - true_c).abs() < 0.01,
+        assert_close!(
+            mean,
+            true_c,
+            0.01,
             "interior mean {mean} should recover channel colour {true_c}"
         );
         assert!(
@@ -889,8 +868,10 @@ fn calibrated_demosaic_preserves_out_of_range_samples() {
                 for y in 8..size.height - 8 {
                     for x in 8..size.width - 8 {
                         let actual = pixels[size.index_of(Vec2us::new(x, y))];
-                        assert!(
-                            (actual - expected).abs() < 1e-4,
+                        assert_close!(
+                            actual,
+                            expected,
+                            1e-4,
                             "{cfa:?} channel {channel} at ({x},{y}) changed uniform {expected} to {actual}"
                         );
                     }
