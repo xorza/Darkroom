@@ -1,7 +1,6 @@
 //! RAW calibration front end for registered stacking.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common::CancelToken;
 
@@ -21,6 +20,7 @@ use crate::stacking::pipeline::detector_pool::DetectorPool;
 use crate::stacking::pipeline::frame::DetectedFrame;
 use crate::stacking::pipeline::result::{AlignStackResult, Error};
 use crate::stacking::pipeline::tier::FrameTier;
+use crate::stacking::progress::stage_counter::StageCounter;
 use crate::stacking::progress::{ProgressCallback, StackingStage};
 
 /// Calibrate, align, and stack camera-RAW or mosaic-FITS light frames end to end.
@@ -88,7 +88,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     // step, so capping it caps the work a cancel must drain and peak demosaic memory. The
     // demosaic itself polls `cancel` between stages (see `CfaImage::demosaic`), so the heavy
     // phase stays interruptible at full core utilization within a batch.
-    let done = AtomicUsize::new(0);
+    let done = StageCounter::new(&progress, StackingStage::Preparing, total);
     let detected: Vec<DetectedFrame> = {
         let mut detectors =
             DetectorPool::from_config(&config.detection, plan.decode_concurrency.min(total))
@@ -103,9 +103,8 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
             // once (for the warp) rather than twice.
             let result = detector.detect(&image);
             let image = tier.hold(&format!("calib_{index}"), image)?;
-            let n = done.fetch_add(1, Ordering::Relaxed) + 1;
+            let n = done.complete_one();
             log_detection(n, total, &result);
-            progress.report(n, total, StackingStage::Preparing);
             Ok(DetectedFrame {
                 image,
                 stars: result.stars,

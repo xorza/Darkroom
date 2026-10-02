@@ -54,25 +54,11 @@ fn median_of_neighbors<const N: usize>(
     offsets: impl IntoIterator<Item = (i32, i32)>,
     defect_mask: Option<&BitBuffer2>,
 ) -> f32 {
-    let width = pixels.width() as i32;
-    let height = pixels.height() as i32;
+    let size = Size2us::new(pixels.width(), pixels.height());
     let mut neighbors = [0.0f32; N];
     let mut count = 0;
-
-    for (dx, dy) in offsets {
-        if count == N {
-            break;
-        }
-        let nx = pos.x as i32 + dx;
-        let ny = pos.y as i32 + dy;
-        if nx < 0 || ny < 0 || nx >= width || ny >= height {
-            continue;
-        }
-        let (nx, ny) = (nx as usize, ny as usize);
-        if defect_mask.is_some_and(|m| m.get_at(Vec2us::new(nx, ny))) {
-            continue;
-        }
-        neighbors[count] = *pixels.get(nx, ny);
+    for index in valid_neighbors(size, pos, offsets, defect_mask).take(N) {
+        neighbors[count] = pixels[index];
         count += 1;
     }
 
@@ -81,6 +67,25 @@ fn median_of_neighbors<const N: usize>(
     }
 
     median_mut(&mut neighbors[..count])
+}
+
+/// The flat indices of the neighbours at `offsets` from `pos` that lie inside `size` and are not
+/// flagged in `defect_mask`, in offset order.
+fn valid_neighbors<'a>(
+    size: Size2us,
+    pos: Vec2us,
+    offsets: impl IntoIterator<Item = (i32, i32)> + 'a,
+    defect_mask: Option<&'a BitBuffer2>,
+) -> impl Iterator<Item = usize> + 'a {
+    offsets.into_iter().filter_map(move |(dx, dy)| {
+        let x = pos.x.checked_add_signed(dx as isize)?;
+        let y = pos.y.checked_add_signed(dy as isize)?;
+        if x >= size.width || y >= size.height {
+            return None;
+        }
+        let neighbor = Vec2us::new(x, y);
+        (!defect_mask.is_some_and(|mask| mask.get_at(neighbor))).then(|| size.index_of(neighbor))
+    })
 }
 
 /// Same-color CFA neighbour median strategy, built once per master so the per-pixel scan stays
@@ -206,22 +211,11 @@ impl XTransOffsets {
     ) {
         out.clear();
         let phase = &self.per_phase[(pos.y % 6) * 6 + (pos.x % 6)];
-        let (width, height) = (size.width as i32, size.height as i32);
-        for &(dx, dy) in phase {
-            if out.len() == max {
-                break;
-            }
-            let nx = pos.x as i32 + dx;
-            let ny = pos.y as i32 + dy;
-            if nx < 0 || ny < 0 || nx >= width || ny >= height {
-                continue;
-            }
-            let (nx, ny) = (nx as usize, ny as usize);
-            if defect_mask.get(ny * size.width + nx) {
-                continue;
-            }
-            out.push(pixels[ny * size.width + nx]);
-        }
+        out.extend(
+            valid_neighbors(size, pos, phase.iter().copied(), Some(defect_mask))
+                .take(max)
+                .map(|index| pixels[index]),
+        );
     }
 }
 

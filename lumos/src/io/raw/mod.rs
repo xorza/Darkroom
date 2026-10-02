@@ -415,7 +415,6 @@ fn normalize_active_area<const CLAMP: bool>(
     repeat: Option<&BlackRepeat>,
 ) -> Vec<f32> {
     let output_size = layout.active.pixel_count();
-    // SAFETY: Every element is written by the parallel row pass below.
     let mut pixels = vec![0.0f32; output_size];
     pixels
         .par_chunks_mut(layout.active.width)

@@ -27,45 +27,36 @@ struct GoldenCase {
     samples: [GoldenSample; 4],
 }
 
+/// The regions tile the arena in the documented order — A 4P, E 8P, B 4P, C P, D P words — so
+/// each step's scratch is exactly the region its doc names, and the last ends where the arena does.
 #[test]
-fn final_blend_scratch_reuses_the_exact_dead_arena_regions() {
+fn arena_regions_tile_the_arena_in_order() {
     let width = 5;
     let height = 3;
     let pixels = width * height;
     let bytes_per_word = size_of::<f32>();
     let mut arena = DemosaicArena::new(Size2us::new(width, height));
-    arena.storage.fill(0.0);
     let arena_start = arena.storage.as_ptr() as usize;
     let arena_end = arena_start + arena.storage.len() * bytes_per_word;
 
-    let buffers = arena.final_blend_buffers();
-
-    assert_eq!(buffers.green_dir.len(), 4 * pixels);
-    assert_eq!(buffers.colors.len(), 4 * pixels);
-    assert_eq!(buffers.scores.len(), pixels);
-    assert_eq!(buffers.homo.len(), 4 * pixels);
-    assert_eq!(buffers.sat.len(), pixels);
-    assert_eq!(buffers.green_dir.as_ptr() as usize, arena_start);
-    assert_eq!(
-        buffers.colors.as_ptr().cast::<f32>() as usize,
-        arena_start + 4 * pixels * bytes_per_word
-    );
-    assert_eq!(
-        buffers.scores.as_ptr().cast::<u32>() as usize,
-        arena_start + 12 * pixels * bytes_per_word
-    );
-    assert_eq!(
-        buffers.homo.as_ptr() as usize,
-        arena_start + 16 * pixels * bytes_per_word
-    );
-    assert_eq!(
-        buffers.sat.as_ptr() as usize,
-        arena_start + 17 * pixels * bytes_per_word
-    );
-    assert_eq!(
-        buffers.sat.as_ptr().wrapping_add(pixels) as usize,
-        arena_end
-    );
+    let regions = arena.regions();
+    let mut offset = 0;
+    for (name, region, words) in [
+        ("A", &*regions.a, 4),
+        ("E", &*regions.e, 8),
+        ("B", &*regions.b, 4),
+        ("C", &*regions.c, 1),
+        ("D", &*regions.d, 1),
+    ] {
+        assert_eq!(region.len(), words * pixels, "{name}");
+        assert_eq!(
+            region.as_ptr() as usize,
+            arena_start + offset * bytes_per_word,
+            "{name}"
+        );
+        offset += words * pixels;
+    }
+    assert_eq!(arena_start + offset * bytes_per_word, arena_end);
 }
 
 fn synthetic_value(scene: SyntheticScene, channel: usize, pos: Vec2us) -> f32 {

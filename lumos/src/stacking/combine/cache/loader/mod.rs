@@ -30,6 +30,7 @@ use crate::stacking::frame_store::spill::FrameSpill;
 use crate::stacking::frame_store::spill_directory::SpillDirectory;
 use crate::stacking::frame_store::stored_plane::StoredPlane;
 use crate::stacking::frame_store::{FramePeek, StackableImage, StoredFrame};
+use crate::stacking::progress::stage_counter::StageCounter;
 use crate::stacking::progress::{ProgressCallback, StackingStage};
 
 use crate::stacking::combine::cache::CacheCore;
@@ -62,8 +63,6 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     if paths.is_empty() {
         return Err(Error::NoFrames);
     }
-
-    progress.report(0, paths.len(), StackingStage::Loading);
 
     let first_path = paths[0].as_ref();
     // One system reading for the whole load: the config is resolved against it here so the tier
@@ -195,9 +194,11 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
     // supplies the stack metadata either way, and its facts as soon as it has decoded, so a frame
     // that disagrees stops the load before the rest of the set decodes.
     let first_facts = OnceLock::new();
+    let loaded_count = StageCounter::new(progress, StackingStage::Loading, paths.len());
     let mut first_frame = None;
     if let Some(first_image) = first {
         let frame = admit_decoded(first_image, 0, dimensions, &first_facts, cancel)?;
+        loaded_count.complete_one();
         first_frame = Some(frame);
     }
     let start = usize::from(first_frame.is_some());
@@ -208,7 +209,9 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
             return Err(Error::Cancelled);
         }
         let image = load_image::<I>(path.as_ref(), context)?;
-        admit_decoded(image, idx, dimensions, &first_facts, cancel)
+        let frame = admit_decoded(image, idx, dimensions, &first_facts, cancel)?;
+        loaded_count.complete_one();
+        Ok(frame)
     })?;
 
     let mut frames = Vec::with_capacity(paths.len());
@@ -223,8 +226,6 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
         }
         frames.push(loaded_frame.frame);
     }
-
-    progress.report(paths.len(), paths.len(), StackingStage::Loading);
 
     tracing::info!("Loaded {} frames into memory", frames.len());
     Ok(LoadedTier {
@@ -295,7 +296,8 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
         first_stats,
     )
     .map_err(Error::from)?;
-    progress.report(1, paths.len(), StackingStage::Loading);
+    let cached_count = StageCounter::new(progress, StackingStage::Loading, paths.len());
+    cached_count.complete_one();
 
     // Decode is CPU-bound, so fan out to the worker count, bounded by RAM. The disk tier streams
     // each decoded frame to its own file and drops it, so nothing stays resident (`0`) — only the
@@ -324,13 +326,14 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
             &first_facts,
             context,
         )
+        .inspect(|_| {
+            cached_count.complete_one();
+        })
     })?;
 
     let mut frames = Vec::with_capacity(paths.len());
     frames.push(first_cached);
     frames.extend(remaining);
-
-    progress.report(paths.len(), paths.len(), StackingStage::Loading);
 
     tracing::info!(
         "Cached {} frames ({} channels each) to disk at {:?}",

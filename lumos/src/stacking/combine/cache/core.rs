@@ -161,9 +161,6 @@ impl CacheCore {
 
         let mut chunks: Vec<&[f32]> = Vec::with_capacity(frame_count);
 
-        self.progress
-            .report(0, total_work, StackingStage::Combining);
-
         for channel in 0..channel_count {
             for chunk_idx in 0..num_chunks {
                 let start_row = chunk_idx * chunk_rows;
