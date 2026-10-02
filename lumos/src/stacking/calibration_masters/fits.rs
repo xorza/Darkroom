@@ -285,7 +285,7 @@ fn read_defect_map(
     }
     let dimensions = read_defect_dimensions(header)?;
     let table = reader.read_table(index).map_err(fits_to_io)?;
-    let row_count = table.metadata().nrows;
+    let row_count = table.schema().nrows;
     let kinds = match table
         .column_by_name("KIND")
         .and_then(|column| column.raw())
