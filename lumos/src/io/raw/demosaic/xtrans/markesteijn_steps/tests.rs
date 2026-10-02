@@ -90,13 +90,14 @@ fn interpolate_green_uniform() {
     let mut green_dir = vec![0.0f32; NDIR * w * h];
     interpolate_green(&xtrans, &hex, &gmin, &gmax, &mut green_dir);
 
-    // All green values should be 0.5 for uniform input
+    // Every direction's green is the uniform input, to a few f32 roundings of its weighted average.
+    let expected = f32::from(to_u16(0.5)) / 65535.0;
     for d in 0..NDIR {
         for i in 0..w * h {
             let g = green_dir[d * w * h + i];
             assert!(
-                (g - 0.5).abs() < 0.05,
-                "green_dir[{d}][{i}] = {g} (expected ~0.5)"
+                (g - expected).abs() < 2e-7,
+                "green_dir[{d}][{i}] = {g} (expected {expected})"
             );
         }
     }

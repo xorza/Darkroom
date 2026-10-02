@@ -197,8 +197,9 @@ fn process_xtrans_normalization() {
     )
     .unwrap();
 
+    // (2176 − 256) / 3840 is 0.5 exactly, and averages of equal values round at most a few times.
     for &val in rgb.iter().flatten() {
-        assert!((val - 0.5).abs() < 0.01, "Expected ~0.5, got {val}");
+        assert!((val - 0.5).abs() < 2e-7, "Expected 0.5, got {val}");
     }
 }
 
@@ -257,7 +258,7 @@ fn process_xtrans_full_range() {
     .unwrap();
 
     for &val in rgb.iter().flatten() {
-        assert!((val - 1.0).abs() < 0.001, "Expected 1.0, got {val}");
+        assert!((val - 1.0).abs() < 2e-7, "Expected 1.0, got {val}");
     }
 }
 
@@ -325,7 +326,7 @@ fn process_xtrans_f32_uniform() {
     .unwrap();
 
     for &val in rgb.iter().flatten() {
-        assert!((val - 0.5).abs() < 0.01, "Expected ~0.5, got {val}");
+        assert!((val - 0.5).abs() < 2e-7, "Expected 0.5, got {val}");
     }
 }
 
