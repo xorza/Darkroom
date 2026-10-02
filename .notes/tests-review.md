@@ -509,15 +509,6 @@ Paths are relative to `lumos/src/stacking/registration/`.
 - [ ] `result/tests.rs:137`, `:193-210` — these pin the `Display` text of `RegistrationError::StarDetection` and `RansacFailureReason::{DegeneratePointSet, SingularMatrix, InsufficientInliers}`, none of which production ever constructs (grep finds them only in `result/mod.rs` and this test). The tests keep dead public variants looking covered.
 - [ ] `resample/bench.rs:231-249` — `bench_interpolate_lanczos3_single` times the test oracle `kernel::internals::interpolate_lanczos`, which does not ship.
 
-### scenarium, common
-Paths without a crate prefix are relative to `scenarium/src/`.
-
-- [ ] `scenarium/src/testing/program/node_builder.rs:23,34,152,170-176`: the `events: usize` field is always 0. No method sets it, so the `events.append(..)` in `add` is dead. `execution/schedule/tests.rs:361-365` then builds events by hand through `program_mut()`. Either add a `.events(subscribers)` builder method and use it there, or delete the field.
-- [ ] `scenarium/src/testing/func_invoker.rs:45-65`: `call_demanding` has no caller other than `call`. Inline it.
-- [ ] `scenarium/src/runtime/context.rs:160-166`: `ContextStore::insert_context` (`pub` under `internals`) has zero callers in the workspace.
-- [ ] `scenarium/src/data/type_system/mod.rs:26-31` + `data/type_system/tests.rs:3-24`: `TypeId::from_name` is `#[cfg(test)]`, and its only caller is its own test. That is test-only production code that exists to be tested. Delete both. It is also a mid-file gate.
-- [ ] `scenarium/src/execution/cache/disk_store/format/mod.rs:607-613`: `internals::body_offset` is a pass-through alias of `header_len`, kept only for visibility. Call `header_len` directly from `DiskStore::corrupt_payload`.
-
 ## Placement, gating and bench layout
 Test, internals and bench code sits where the rules say it must not, or is gated so that it never runs.
 
@@ -598,17 +589,6 @@ Paths are relative to the repository root.
 - [ ] `lumos/src/math/dmat3/mod.rs:228-231`, `:224` — `as_array_mut` and `to_array` are test-only API used only by `dmat3/tests.rs` to test themselves. `IndexMut` and `From<DMat3> for [f64; 9]` already provide both. `from_rows` is used only in that file and can be a local fn there.
 - [ ] `lumos/src/image_ops/ml/tests/mod.rs:1-9` — `#[cfg(feature = "ml")]` is repeated inside a module the parent already gates on `ml` (`image_ops/mod.rs:31`).
 - [ ] `io/raw/bench.rs:30, 91, 188, 357` hand-roll `Instant` timing loops beside `#[quick_bench]` ones. `bench_rcd_demosaic_core` (`:357`) needs no dataset and could be a quick_bench. A correctness `#[test]` lives in `bench.rs` (`:579`). `stretching/bench.rs:47, 62` clone the 72 MB master inside the timed closure, which is what `image_ops/bench.rs:57`'s pre-cloned pool exists to avoid.
-
-### scenarium, common
-Paths without a crate prefix are relative to `scenarium/src/`.
-
-- [ ] `scenarium/src/testing/graph/mod.rs:22,24,37`: `#[cfg(test)]` imports at the top of the file. `:554` has a mid-file `#[cfg(test)] impl TestGraph`. Move both into a gated block at the end, or move `compile`/`try_compile` into `testing/graph/compiled.rs`, which is already `cfg(test)`.
-- [ ] `common/src/file_format.rs:45-52`: a mid-file `#[cfg(any(test, feature = "internals"))] impl SerdeFormat`. It belongs in an end-of-file `internals` mod.
-- [ ] `common/src/file_format.rs` has 81/134 lines of inline tests (60%), and `common/src/serde.rs` has 186/395 (47%, >150 lines). Both should split into `{mod.rs, tests.rs}`. While doing so, merge `file_format`'s six `from_file_name` tests into one table, and delete `test_rhai_extension_is_unsupported` (`:118-125`). That test covers a legacy format and duplicates the `.xyz` case at `:104-111`.
-- [ ] `scenarium/src/lib.rs:29-30`: `CompiledGraphBuilder` is re-exported at the crate root under a gate. `scenarium/AGENTS.md` says test scaffolding is imported from `scenarium::testing`, so either move it there or update AGENTS.md.
-- [ ] `scenarium/src/execution/compile/compiled_graph.rs:208-226`: a second, oddly named gated module, `mod id_lookups`, sits beside `internals`. Fold it into a `#[cfg(test)]` internals block.
-- [ ] `scenarium/src/graph/tests.rs:740-760` repeats `scenarium/src/testing/graph/tests.rs:143-167` (`spec_flags_reach_the_declaration`), which checks the same sink/uncacheable/impure flags. `graph/tests.rs:778-789` (`node_events_expose_names_and_arity`) tests the `Func` builder and belongs in `graph/func/mod.rs` tests, next to `default_cache_mode_defaults_to_none_and_builder_overrides` (`graph/func/mod.rs:541`).
-- [ ] Inline `crate::` paths in expressions: `engine/tests/compile_regressions.rs:132,200`, `engine/tests/cache_persistence/cache_modes.rs:437`.
 
 ### darkroom, lens, imaginarium, quickbench, root `test_resources/`
 Paths are relative to the repository root.

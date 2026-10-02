@@ -36,20 +36,8 @@ impl FuncInvoker {
         func: &Func,
         inputs: impl IntoIterator<Item = DynamicValue>,
     ) -> InvokeResult<Vec<DynamicValue>> {
-        self.call_demanding(func, inputs, OutputDemand::Produce)
-            .await
-    }
-
-    /// [`call`](Self::call) with every output on `demand` — for a body that
-    /// reads it and produces less.
-    pub(crate) async fn call_demanding(
-        &mut self,
-        func: &Func,
-        inputs: impl IntoIterator<Item = DynamicValue>,
-        demand: OutputDemand,
-    ) -> InvokeResult<Vec<DynamicValue>> {
         let mut inputs: Vec<DynamicValue> = inputs.into_iter().collect();
-        let demand = vec![demand; func.outputs.len()];
+        let demand = vec![OutputDemand::Produce; func.outputs.len()];
         let mut outputs = vec![DynamicValue::Unbound; func.outputs.len()];
         func.lambda
             .invoke(Invocation {

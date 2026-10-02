@@ -1,4 +1,5 @@
 use super::*;
+use crate::execution::compile::Compiler;
 use crate::graph::func::FuncBehavior;
 
 /// The builder states a whole graph — declarations, wiring and bodies — and

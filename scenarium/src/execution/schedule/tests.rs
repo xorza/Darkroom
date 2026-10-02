@@ -3,7 +3,7 @@
 //! primed cache for the sweep that reads one.
 
 mod planning {
-    use crate::execution::compile::compiled_graph::{ExecutionBinding, ExecutionEvent};
+    use crate::execution::compile::compiled_graph::ExecutionBinding;
     use crate::execution::error::Error;
     use crate::execution::identity::{NodeIdx, OutputAddr, OutputIdx};
     use crate::execution::schedule::planner::Planner;
@@ -356,13 +356,8 @@ mod planning {
     #[test]
     fn event_seed_schedules_subscribers_and_rejects_missing_ports() {
         let mut prog = ProgramBuilder::default();
-        let emitter = prog.node().outputs(0).add();
         let subscriber = prog.node().outputs(0).add();
-        let events = prog.program_mut().events.append([ExecutionEvent {
-            subscribers: vec![subscriber.node_idx],
-            ..Default::default()
-        }]);
-        prog.program_mut().by_id_mut(emitter.node_id).events = events;
+        let emitter = prog.node().outputs(0).event([subscriber]).add();
 
         let event = EventPort {
             node_id: emitter.node_id,

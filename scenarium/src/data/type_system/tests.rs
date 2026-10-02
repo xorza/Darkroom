@@ -1,29 +1,6 @@
 use super::*;
 
 #[test]
-fn type_id_from_name_is_deterministic_namespaced_and_v5() {
-    let namespace_a = TypeId::from_u128(0x11);
-    let namespace_b = TypeId::from_u128(0x22);
-
-    assert_eq!(
-        TypeId::from_name(namespace_a, "Mode"),
-        TypeId::from_name(namespace_a, "Mode")
-    );
-    assert_ne!(
-        TypeId::from_name(namespace_a, "Mode"),
-        TypeId::from_name(namespace_a, "Other")
-    );
-    assert_ne!(
-        TypeId::from_name(namespace_a, "Mode"),
-        TypeId::from_name(namespace_b, "Mode")
-    );
-
-    let id = TypeId::from_name(namespace_a, "Mode");
-    assert_eq!((id.as_u128() >> 76) & 0xf, 5);
-    assert_ne!(id.as_u128() >> 64, 0);
-}
-
-#[test]
 fn compatibility_and_defaults_follow_runtime_coercions() {
     let custom = |id| DataType::Custom(TypeId::from_u128(id));
 

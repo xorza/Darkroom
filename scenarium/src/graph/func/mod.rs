@@ -446,6 +446,7 @@ mod tests {
     use std::sync::Arc;
 
     use crate::async_lambda;
+    use crate::graph::func::event::EventLambda;
     use crate::graph::func::{Func, FuncInput, FuncOutput, ValueVariant};
     use crate::graph::node::CacheMode;
     use crate::{ConstValue, DataType, FsPathConfig, FsPathMode, TypeId};
@@ -571,5 +572,18 @@ mod tests {
             let func = Func::new(FuncId::unique(), "f").default_cache_mode(mode);
             assert_eq!(func.default_cache_mode, mode, "{mode:?} is stored verbatim");
         }
+    }
+
+    #[test]
+    fn node_events_expose_names_and_arity() {
+        let emitter = Func::new(FuncId::unique(), "ticker")
+            .event("tick", EventLambda::default())
+            .event("tock", EventLambda::default());
+        assert_eq!(emitter.events.len(), 2);
+        let names: Vec<&str> = emitter.events.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, ["tick", "tock"]);
+
+        let silent = Func::new(FuncId::unique(), "silent");
+        assert!(silent.events.is_empty());
     }
 }

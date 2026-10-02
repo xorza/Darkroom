@@ -282,7 +282,7 @@ pub(crate) mod internals {
                 .node_path(node_id)
                 .expect("a disk-backed store has a root");
             let mut bytes = fs::read(&path).unwrap();
-            bytes[format::internals::body_offset(output_count)] = u8::MAX;
+            bytes[format::header_len(output_count)] = u8::MAX;
             fs::write(&path, bytes).unwrap();
         }
 

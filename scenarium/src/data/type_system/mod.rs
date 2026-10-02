@@ -23,13 +23,6 @@ impl<T: VariantNames> EnumVariants for T {
 
 id_type!(TypeId);
 
-#[cfg(test)]
-impl TypeId {
-    fn from_name(namespace: TypeId, name: &str) -> Self {
-        uuid::Uuid::new_v5(&namespace.as_uuid(), name.as_bytes()).into()
-    }
-}
-
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum FsPathMode {
     #[default]
