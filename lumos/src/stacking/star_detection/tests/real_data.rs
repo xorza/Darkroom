@@ -162,7 +162,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     visual::save(
         grayscale.pixels(),
         Size2us::new(width, height),
-        &out("01_grayscale.tiff"),
+        &out("01_grayscale"),
         visual::ToneMap::AutoRange,
     );
     println!("Saved: 01_grayscale");
@@ -172,7 +172,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     visual::save(
         background.background.pixels(),
         Size2us::new(width, height),
-        &out("02_background.tiff"),
+        &out("02_background"),
         visual::ToneMap::AutoRange,
     );
     println!("Saved: 02_background");
@@ -181,7 +181,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     visual::save(
         background.noise.pixels(),
         Size2us::new(width, height),
-        &out("03_noise.tiff"),
+        &out("03_noise"),
         visual::ToneMap::AutoRange,
     );
     println!("Saved: 03_noise");
@@ -196,7 +196,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     visual::save(
         &subtracted,
         Size2us::new(width, height),
-        &out("04_subtracted.tiff"),
+        &out("04_subtracted"),
         visual::ToneMap::AutoRange,
     );
     println!("Saved: 04_subtracted");
@@ -230,7 +230,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
         visual::save(
             &pixels,
             Size2us::new(width, height),
-            &out("05_matched_filter.tiff"),
+            &out("05_matched_filter"),
             visual::ToneMap::AutoRange,
         );
         println!("Saved: 05_matched_filter");
@@ -262,7 +262,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
         );
     }
     let pixels_above = mask.count_ones();
-    visual::save_mask(&mask, &out("06_threshold_mask.tiff"));
+    visual::save_mask(&mask, &out("06_threshold_mask"));
     println!("Saved: 06_threshold_mask ({pixels_above} pixels above threshold)");
 
     // 8. Dilated mask
@@ -270,7 +270,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     dilated.fill(false);
     dilate_mask(&mask, 1, &mut dilated);
     let dilated_count = dilated.count_ones();
-    visual::save_mask(&dilated, &out("07_dilated_mask.tiff"));
+    visual::save_mask(&dilated, &out("07_dilated_mask"));
     println!("Saved: 07_dilated_mask ({dilated_count} pixels)");
 
     // 9. Label map
@@ -278,7 +278,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     let num_labels = label_map.num_labels();
     let labels_buf = Buffer2::new(width, height, label_map.labels().to_vec());
     let labels_rgb = visual::labels_to_rgb(&labels_buf);
-    visual::save_rgb(&labels_rgb, &out("08_label_map.tiff"));
+    visual::save_rgb(&labels_rgb, &out("08_label_map"));
     println!("Saved: 08_label_map ({num_labels} components)");
 
     // Clean up

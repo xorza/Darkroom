@@ -492,17 +492,6 @@ Paths are relative to the repository root.
 ## Test-only code in production, and dead test helpers
 Production items that exist only to be tested, and harness items that nothing calls.
 
-### lumos — shared harness, calibration, pipeline, frame_store
-Paths are relative to the repository root.
-
-- [ ] `lumos/src/stacking/pipeline/result.rs:92-106` — a runtime test of a size limit that clippy's `result_large_err` already denies under `-D warnings`.
-
-### lumos — registration
-Paths are relative to `lumos/src/stacking/registration/`.
-
-- [ ] `distortion/tps/mod.rs:1-5` — TPS is not called from production (`#![cfg_attr(not(test), allow(dead_code))]`). 384 production lines and the 1030-line `tps/tests.rs` exist only to test each other, and `distortion/point_normalization.rs:31-33` (`denormalize`) is kept alive for it. The AGENTS.md scope rule is "remove it rather than carry it".
-- [ ] `result/tests.rs:137`, `:193-210` — these pin the `Display` text of `RegistrationError::StarDetection` and `RansacFailureReason::{DegeneratePointSet, SingularMatrix, InsufficientInliers}`, none of which production ever constructs (grep finds them only in `result/mod.rs` and this test). The tests keep dead public variants looking covered.
-
 ## Placement, gating and bench layout
 Test, internals and bench code sits where the rules say it must not, or is gated so that it never runs.
 
@@ -514,22 +503,6 @@ Paths are relative to `lumos/src/stacking/`, except those that start with `lumos
 
 ## Unused fixtures and stray test output
 Checked-in files that nothing reads, and files that tests write into the tree.
-
-### lumos — shared harness, calibration, pipeline, frame_store
-Paths are relative to the repository root.
-
-- [ ] `lumos/src/testing/visual/mod.rs:1-5,76-78` — "nothing here is asserted on", yet default-suite tests (`star_detection/tests/pipeline_tests`, `stage_effects/*`) write about 2.6 MB of PNGs and metrics into the shared workspace `test_output/` on every run. `output_path` silently rewrites the caller's extension, so `out("01_grayscale.tiff")` (`star_detection/tests/real_data.rs:166`) lands as `.png`. Debug image output should be opt-in.
-
-### lumos — star_detection
-Short paths are relative to `lumos/src/stacking/star_detection/`.
-
-- [ ] About 90 PNG/TXT files are written per default test run to fixed paths under the workspace `test_output/` (`pipeline_tests/mod.rs:192-227` ×22 tests, `background/tests/synthetic_skies.rs`, `convolution/tests/matched_filter.rs`, `stage_effects/{detection,cosmic_ray}_tests.rs`). Nothing cleans them up, and concurrent test binaries collide on the same paths.
-
-### darkroom, lens, imaginarium, quickbench, root `test_resources/`
-Paths are relative to the repository root.
-
-- [ ] `test_resources/calibrated_light_500x500.tiff` and `test_resources/calibrated_light_500x500_stretched.tiff` (3.0 MB each, tracked) — nothing in the repo references them. `rg` over every crate and `docs/` finds no hits. Remove them.
-- [ ] `test_resources/full_example.fits` — the only root fixture in use, by lumos (`lumos/src/io/image/tests/mod.rs:81`, `:96`). None of the four assigned crates uses anything in the root `test_resources/`.
 
 ## Stale, wrong and change-narrating comments
 Comments that describe code that no longer exists, contradict the asserted values, or narrate history.

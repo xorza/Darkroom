@@ -28,7 +28,7 @@ fn run_test(
     save(
         pixels,
         Size2us::new(width, height),
-        &format!("synthetic_starfield/{prefix}_{name}_input.png"),
+        &format!("synthetic_starfield/{prefix}_{name}_input"),
         ToneMap::Clamp,
     );
 
@@ -45,7 +45,7 @@ fn run_test(
         truth,
         &stars,
         match_radius,
-        &format!("synthetic_starfield/{prefix}_{name}_comparison.png"),
+        &format!("synthetic_starfield/{prefix}_{name}_comparison"),
     );
 
     save_metrics(

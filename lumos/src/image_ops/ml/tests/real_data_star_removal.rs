@@ -21,7 +21,7 @@ fn starnet_removes_stars() {
 
     // StarNet wants stretched display data in [0,1].
     let img = stretched_master();
-    visual::save_linear(&img, "star_removal/input.png");
+    visual::save_linear(&img, "star_removal/input");
     // Captured before `split` below consumes `img` (it repurposes the input's own
     // buffer for its `stars` output rather than allocating a fresh one).
     let input = img.intensity_plane();
@@ -37,8 +37,8 @@ fn starnet_removes_stars() {
         .expect("starless-only star removal succeeds");
 
     let result = remove.split(img).expect("star removal succeeds");
-    visual::save_linear(&result.starless, "star_removal/starless.png");
-    visual::save_linear(&result.stars, "star_removal/stars.png");
+    visual::save_linear(&result.starless, "star_removal/starless");
+    visual::save_linear(&result.stars, "star_removal/stars");
     for channel in 0..starless_only.channels() {
         assert_eq!(
             starless_only.channel(channel).pixels(),

@@ -55,7 +55,7 @@ fn extract_flattens_background_on_stretched_master() {
     NeutralizeBackground.apply(&mut img).unwrap();
     Stretch::auto_stf().apply(&mut img).unwrap();
     Scnr::average_neutral().apply(&mut img).unwrap();
-    visual::save_linear(&img, "bg_extraction/stretched.png");
+    visual::save_linear(&img, "bg_extraction/stretched");
 
     let before = corner_background_spread(&img);
 
@@ -64,7 +64,7 @@ fn extract_flattens_background_on_stretched_master() {
     let mut extracted = img.clone();
     ExtractBackground::default().apply(&mut extracted).unwrap();
     NeutralizeBackground.apply(&mut extracted).unwrap();
-    visual::save_linear(&extracted, "bg_extraction/extracted.png");
+    visual::save_linear(&extracted, "bg_extraction/extracted");
 
     let after = corner_background_spread(&extracted);
     eprintln!(

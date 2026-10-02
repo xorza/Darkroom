@@ -58,7 +58,7 @@ fn milky_way_best_pipeline() {
     NeutralizeBackground.apply(&mut img).unwrap(); // re-neutralize the now-display-domain background
     eprintln!("stretched base: median {:.3}", median(&img));
     assert_displayable(&img, "stretched base");
-    visual::save_linear(&img, "milky_way/stretched.png");
+    visual::save_linear(&img, "milky_way/stretched");
 
     // HDR: gently compress the bright star-cloud cores to reveal detail (small amount; too much
     // flattens the large-scale brightness).
@@ -81,5 +81,5 @@ fn milky_way_best_pipeline() {
 
     eprintln!("enhanced: median {:.3}", median(&img));
     assert_displayable(&img, "enhanced");
-    visual::save_linear(&img, "milky_way/enhanced.png");
+    visual::save_linear(&img, "milky_way/enhanced");
 }

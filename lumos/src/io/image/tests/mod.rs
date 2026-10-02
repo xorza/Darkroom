@@ -78,7 +78,7 @@ fn convert_to_imaginarium_image_rgb() {
 fn convert_fits_to_imaginarium_image() {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../test_resources/full_example.fits"
+        "/test_resources/full_example.fits"
     );
     let astro = LinearImage::from_file(path, &LoadContext::default()).unwrap();
     let image: Image = astro.into();
@@ -93,7 +93,7 @@ fn convert_fits_to_imaginarium_image() {
 fn load_full_example_fits() {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../test_resources/full_example.fits"
+        "/test_resources/full_example.fits"
     );
     let image = LinearImage::from_file(path, &LoadContext::default()).unwrap();
 

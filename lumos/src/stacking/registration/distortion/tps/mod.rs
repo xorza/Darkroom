@@ -1,8 +1,11 @@
-// WIP: TPS distortion modeling is not yet integrated into the registration pipeline.
-// Its own tests are the only callers, so under `cfg(test)` nothing here is dead and the
-// gate narrows to the production build. Drop it once TPS is integrated as a post-RANSAC
-// distortion correction option.
-#![cfg_attr(not(test), allow(dead_code))]
+#![cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "TPS is kept as work in progress (plan D3): its tests are its only callers until it \
+                  joins registration as a post-RANSAC distortion correction"
+    )
+)]
 
 //! Thin-Plate Spline (TPS) distortion modeling.
 //!
