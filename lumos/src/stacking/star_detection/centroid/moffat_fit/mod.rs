@@ -12,7 +12,7 @@
 
 mod simd;
 
-use crate::math::fwhm::FWHM_TO_SIGMA;
+use crate::math::fwhm::sigma_to_fwhm;
 use crate::stacking::star_detection::centroid::fit_is_plausible;
 use crate::stacking::star_detection::centroid::lm_optimizer::{
     FitData, LMConfig, LMModel, ModelSample, NormalEquations,
@@ -221,7 +221,7 @@ impl MoffatFit {
         let fit = StampFit::prepare::<5>(pixels, pos, grid, background, noise)?;
 
         // The seed is a Gaussian width; convert it to the equivalent alpha at the fixed β.
-        let fwhm_est = fit.sigma_est * FWHM_TO_SIGMA;
+        let fwhm_est = sigma_to_fwhm(fit.sigma_est);
         let initial_alpha =
             fwhm_beta_to_alpha(fwhm_est, config.fixed_beta).clamp(0.5, grid.radius as f32);
 

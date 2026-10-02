@@ -15,7 +15,7 @@
 
 mod geometry;
 pub(super) mod matching;
-pub(super) mod voting;
+pub(crate) mod voting;
 
 use crate::error::InvalidConfigField;
 

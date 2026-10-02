@@ -58,7 +58,7 @@ fn iterative_recovery_improves_on_biased_seed() {
         matches: recovered_matches,
     } = recover_matches(
         &ref_stars,
-        &target_stars,
+        &KdTree::build(target_stars.clone()).unwrap(),
         &initial_transform,
         &seed_matches,
         threshold,
@@ -105,7 +105,7 @@ fn iterative_recovery_converges() {
         matches: recovered, ..
     } = recover_matches(
         &ref_stars,
-        &target_stars,
+        &KdTree::build(target_stars.clone()).unwrap(),
         &transform,
         &seed_matches,
         3.0,
@@ -140,7 +140,7 @@ fn iterative_recovery_never_loses_matches() {
         matches: recovered, ..
     } = recover_matches(
         &ref_stars,
-        &target_stars,
+        &KdTree::build(target_stars.clone()).unwrap(),
         &transform,
         &seed_matches,
         3.0,
@@ -184,7 +184,7 @@ fn iterative_recovery_removes_outliers() {
         matches: recovered, ..
     } = recover_matches(
         &ref_stars,
-        &target_stars,
+        &KdTree::build(target_stars.clone()).unwrap(),
         &transform,
         &seed_matches,
         3.0,
@@ -237,7 +237,7 @@ fn a_pass_that_trades_one_match_for_another_still_refits() {
 
     let recovered = recover_matches(
         &reference,
-        &target,
+        &KdTree::build(target.clone()).unwrap(),
         &seed,
         &seed_matches,
         1.0,
@@ -262,22 +262,4 @@ fn a_pass_that_trades_one_match_for_another_still_refits() {
     let fitted = estimate_transform(&fit_ref, &fit_target, TransformType::Translation).unwrap();
     assert_eq!(recovered.transform.matrix(), fitted.matrix());
     assert!((recovered.transform.translation_components().x - (-0.2 / 7.0)).abs() < 1e-12);
-}
-
-/// No target stars: nothing can be recovered, and the seed comes back unchanged.
-#[test]
-fn recovery_without_target_stars_returns_the_seed() {
-    let reference = generate_random_positions(20, 200.0, 200.0, 3);
-    let seed = Transform::translation(DVec2::new(1.0, 2.0));
-    let seed_matches = identity_matches(5);
-    let recovered = recover_matches(
-        &reference,
-        &[],
-        &seed,
-        &seed_matches,
-        2.0,
-        TransformType::Translation,
-    );
-    assert_eq!(recovered.transform.matrix(), seed.matrix());
-    assert_eq!(recovered.matches, seed_matches);
 }

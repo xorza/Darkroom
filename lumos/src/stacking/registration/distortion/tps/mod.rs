@@ -23,7 +23,7 @@ use crate::math::linear_system;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::registration::distortion::SINGULAR_THRESHOLD;
-use crate::stacking::registration::distortion::point_normalization::PointNormalization;
+use crate::stacking::registration::point_normalization::PointNormalization;
 
 /// Configuration for thin-plate spline fitting.
 #[derive(Debug, Clone)]

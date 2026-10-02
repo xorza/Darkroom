@@ -1,5 +1,5 @@
 use crate::stacking::registration::distortion::sip::*;
-use crate::stacking::registration::transform::Transform;
+use crate::stacking::registration::transform::{Transform, WarpTransform};
 
 /// Matched reference and target points.
 #[derive(Debug)]
@@ -55,4 +55,3 @@ mod correction;
 mod fitting;
 mod reference;
 mod results;
-mod solvers;

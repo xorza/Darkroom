@@ -12,14 +12,14 @@ fn radius_search_indices(tree: &KdTree, query: DVec2, radius: f64) -> Vec<usize>
 
 #[test]
 fn build_empty() {
-    let tree = KdTree::build(&[]);
+    let tree = KdTree::build(Vec::new());
     assert!(tree.is_none());
 }
 
 #[test]
 fn build_single_point() {
     let points = [DVec2::new(1.0, 2.0)];
-    let tree = KdTree::build(&points).unwrap();
+    let tree = KdTree::build(points.to_vec()).unwrap();
     assert_eq!(tree.len(), 1);
     // get_point should return the original point
     let p = tree.get_point(0);
@@ -36,7 +36,7 @@ fn build_preserves_all_points() {
         DVec2::new(2.0, 2.0),
         DVec2::new(4.0, 0.0),
     ];
-    let tree = KdTree::build(&points).unwrap();
+    let tree = KdTree::build(points.to_vec()).unwrap();
     assert_eq!(tree.len(), 4);
     for (i, p) in points.iter().enumerate() {
         let stored = tree.get_point(i);
@@ -265,7 +265,7 @@ fn k_nearest_over_every_layout() {
     ];
 
     for case in cases {
-        let tree = KdTree::build(&case.points).expect("every fixture has points");
+        let tree = KdTree::build(case.points.clone()).expect("every fixture has points");
         let neighbours = tree.k_nearest(case.query, case.k);
         let name = case.name;
 
@@ -311,7 +311,7 @@ fn nearest_one_exact_match() {
         DVec2::new(10.0, 10.0),
         DVec2::new(5.0, 5.0),
     ];
-    let tree = KdTree::build(&points).unwrap();
+    let tree = KdTree::build(points.to_vec()).unwrap();
 
     let nn = tree.nearest_one(DVec2::new(5.0, 5.0)).unwrap();
     assert_eq!(nn.index, 2);
@@ -323,7 +323,7 @@ fn nearest_one_single_point() {
     // Single point at (3, 7). Query at origin.
     // dist_sq = 3^2 + 7^2 = 9 + 49 = 58
     let points = [DVec2::new(3.0, 7.0)];
-    let tree = KdTree::build(&points).unwrap();
+    let tree = KdTree::build(points.to_vec()).unwrap();
     let nn = tree.nearest_one(DVec2::new(0.0, 0.0)).unwrap();
     assert_eq!(nn.index, 0);
     assert!((nn.dist_sq - 58.0).abs() < 1e-10);
@@ -337,7 +337,7 @@ fn nearest_one_equidistant() {
     //   dist_sq to idx1: (4-5)^2 + (4.5-5)^2 = 1 + 0.25 = 1.25
     // Both equidistant — either is valid
     let points = [DVec2::new(3.0, 4.0), DVec2::new(5.0, 5.0)];
-    let tree = KdTree::build(&points).unwrap();
+    let tree = KdTree::build(points.to_vec()).unwrap();
 
     let nn = tree.nearest_one(DVec2::new(4.0, 4.5)).unwrap();
     assert!((nn.dist_sq - 1.25).abs() < 1e-10);
@@ -353,7 +353,7 @@ fn nearest_one_agrees_with_k_nearest_1() {
         DVec2::new(5.0, 5.0),
         DVec2::new(3.0, 4.0),
     ];
-    let tree = KdTree::build(&points).unwrap();
+    let tree = KdTree::build(points.to_vec()).unwrap();
 
     let query = DVec2::new(7.0, 8.0);
     // dist_sq to idx0: 49+64=113, idx1: 9+4=13, idx2: 4+9=13, idx3: 16+16=32
@@ -370,7 +370,7 @@ fn nearest_one_empty_tree_not_possible() {
     // KdTree::build returns None for empty input, so nearest_one on an empty
     // tree can't happen through the public API. This test documents that
     // build(&[]) returns None.
-    assert!(KdTree::build(&[]).is_none());
+    assert!(KdTree::build(Vec::new()).is_none());
 }
 
 #[test]
@@ -389,7 +389,7 @@ fn radius_finds_correct_points() {
         DVec2::new(5.0, 5.0),
         DVec2::new(10.0, 10.0),
     ];
-    let tree = KdTree::build(&points).unwrap();
+    let tree = KdTree::build(points.to_vec()).unwrap();
 
     let indices = radius_search_indices(&tree, DVec2::new(0.0, 0.0), 2.0);
     assert_eq!(indices, vec![0, 1, 2]);
@@ -403,7 +403,7 @@ fn radius_empty_result() {
     //   dist_sq to idx0: 25+25=50 > 1
     //   dist_sq to idx1: 25+25=50 > 1
     let points = [DVec2::new(0.0, 0.0), DVec2::new(10.0, 10.0)];
-    let tree = KdTree::build(&points).unwrap();
+    let tree = KdTree::build(points.to_vec()).unwrap();
 
     let indices = radius_search_indices(&tree, DVec2::new(5.0, 5.0), 1.0);
     assert!(indices.is_empty());
@@ -420,7 +420,7 @@ fn radius_all_points_included() {
         DVec2::new(0.0, 1.0),
         DVec2::new(1.0, 1.0),
     ];
-    let tree = KdTree::build(&points).unwrap();
+    let tree = KdTree::build(points.to_vec()).unwrap();
 
     let indices = radius_search_indices(&tree, DVec2::new(0.5, 0.5), 10.0);
     assert_eq!(indices, vec![0, 1, 2, 3]);
@@ -438,7 +438,7 @@ fn radius_boundary_inclusion() {
         DVec2::new(1.0, 0.0),
         DVec2::new(2.0, 0.0),
     ];
-    let tree = KdTree::build(&points).unwrap();
+    let tree = KdTree::build(points.to_vec()).unwrap();
 
     let indices = radius_search_indices(&tree, DVec2::new(0.0, 0.0), 1.0);
     assert_eq!(indices, vec![0, 1]);
@@ -448,7 +448,7 @@ fn radius_boundary_inclusion() {
 fn radius_zero() {
     // radius=0 means only exact matches (dist_sq=0 <= 0)
     let points = [DVec2::new(0.0, 0.0), DVec2::new(1.0, 1.0)];
-    let tree = KdTree::build(&points).unwrap();
+    let tree = KdTree::build(points.to_vec()).unwrap();
 
     let indices = radius_search_indices(&tree, DVec2::new(0.0, 0.0), 0.0);
     assert_eq!(indices, vec![0]);
@@ -466,7 +466,7 @@ fn radius_negative_coordinates() {
         DVec2::new(0.0, 0.0),
         DVec2::new(3.0, 4.0),
     ];
-    let tree = KdTree::build(&points).unwrap();
+    let tree = KdTree::build(points.to_vec()).unwrap();
 
     let indices = radius_search_indices(&tree, DVec2::new(-2.0, -3.0), 2.0);
     assert_eq!(indices, vec![0]);
@@ -479,7 +479,7 @@ fn radius_buffer_reuse_clears() {
         DVec2::new(1.0, 0.0),
         DVec2::new(10.0, 10.0),
     ];
-    let tree = KdTree::build(&points).unwrap();
+    let tree = KdTree::build(points.to_vec()).unwrap();
 
     let mut buf = Vec::new();
 
@@ -505,7 +505,7 @@ fn radius_different_radii_different_results() {
         DVec2::new(2.0, 0.0),
         DVec2::new(5.0, 0.0),
     ];
-    let tree = KdTree::build(&points).unwrap();
+    let tree = KdTree::build(points.to_vec()).unwrap();
 
     let r1 = radius_search_indices(&tree, DVec2::new(0.0, 0.0), 1.5);
     let r2 = radius_search_indices(&tree, DVec2::new(0.0, 0.0), 3.0);
@@ -523,7 +523,7 @@ fn get_point_returns_original_coordinates() {
         DVec2::new(-1.0, 42.0),
         DVec2::new(0.0, 0.0),
     ];
-    let tree = KdTree::build(&points).unwrap();
+    let tree = KdTree::build(points.to_vec()).unwrap();
 
     for (i, p) in points.iter().enumerate() {
         let stored = tree.get_point(i);
@@ -688,7 +688,7 @@ fn k_nearest_and_radius_agree() {
         DVec2::new(6.0, 0.0),
         DVec2::new(8.0, 0.0),
     ];
-    let tree = KdTree::build(&points).unwrap();
+    let tree = KdTree::build(points.to_vec()).unwrap();
     let query = DVec2::new(0.0, 0.0);
 
     let radius_result = radius_search_indices(&tree, query, 4.5);
@@ -711,7 +711,7 @@ fn horizontal_line_exact_distances() {
     let points: Vec<DVec2> = (0..10)
         .map(|i| DVec2::new(f64::from(i) * 10.0, 0.0))
         .collect();
-    let tree = KdTree::build(&points).unwrap();
+    let tree = KdTree::build(points.clone()).unwrap();
 
     let neighbors = tree.k_nearest(DVec2::new(45.0, 0.0), 2);
     assert_eq!(neighbors.len(), 2);
@@ -732,7 +732,7 @@ fn vertical_line_exact_distances() {
     let points: Vec<DVec2> = (0..10)
         .map(|i| DVec2::new(0.0, f64::from(i) * 10.0))
         .collect();
-    let tree = KdTree::build(&points).unwrap();
+    let tree = KdTree::build(points.clone()).unwrap();
 
     let neighbors = tree.k_nearest(DVec2::new(0.0, 45.0), 2);
     assert_eq!(neighbors.len(), 2);
@@ -757,7 +757,7 @@ fn large_coordinates() {
         DVec2::new(512.9, 384.2),
         DVec2::new(3072.0, 2304.5),
     ];
-    let tree = KdTree::build(&points).unwrap();
+    let tree = KdTree::build(points.to_vec()).unwrap();
 
     let neighbors = tree.k_nearest(DVec2::new(1024.5, 768.3), 2);
     assert_eq!(neighbors.len(), 2);

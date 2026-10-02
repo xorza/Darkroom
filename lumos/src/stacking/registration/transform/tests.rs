@@ -102,7 +102,8 @@ fn is_valid_rejects_degenerate_and_singular_matrices() {
     let degenerate = Transform::from_matrix(
         DMat3::from_array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]),
         TransformType::Affine,
-    );
+    )
+    .unwrap();
     assert!(!degenerate.is_valid());
 
     // The upper-left 2×2 block is nonsingular, but the complete projective
@@ -455,7 +456,7 @@ fn display_names_every_model_that_shares_the_four_component_form() {
 }
 
 #[test]
-#[should_panic(expected = "Cannot invert singular transform matrix")]
+#[should_panic(expected = "the transform is singular, or its inverse cannot be normalized")]
 fn inverse_singular_panics() {
     let degenerate = Transform::affine([0.0; 6]);
     let _ = degenerate.inverse();
@@ -464,35 +465,77 @@ fn inverse_singular_panics() {
 #[test]
 fn from_matrix_keeps_the_matrix_its_type_and_its_mapping() {
     let m = DMat3::from_array([2.0, 0.0, 5.0, 0.0, 3.0, -1.0, 0.0, 0.0, 1.0]);
-    let t = Transform::from_matrix(m, TransformType::Affine);
-    // (1, 1) -> (2*1 + 0*1 + 5, 0*1 + 3*1 + (-1)) = (7, 2)
-    let p = t.apply(DVec2::new(1.0, 1.0));
-    assert_close!(p.x, 7.0, EPSILON);
-    assert_close!(p.y, 2.0, EPSILON);
+    let t = Transform::from_matrix(m, TransformType::Affine).unwrap();
+    // (1, 1) -> (2·1 + 0·1 + 5, 0·1 + 3·1 − 1) = (7, 2), exactly.
+    assert_eq!(t.apply(DVec2::new(1.0, 1.0)), DVec2::new(7.0, 2.0));
     assert_eq!(t.transform_type(), TransformType::Affine);
     assert_eq!(t.matrix(), m.as_array());
 }
 
+/// Every matrix is stored with `m[8] = 1`. A homography of scale 2 is its normalized twin bit for
+/// bit — dividing by a power of two is exact — so every reader, the SIMD kernels' `h·y + 1` among
+/// them, sees the same matrix; and an affine `m[8]` one ulp off 1 comes back as exactly 1.
 #[test]
-#[should_panic(expected = "affine-or-simpler transforms require homogeneous bottom row [0, 0, 1]")]
-fn from_matrix_rejects_a_projective_bottom_row() {
-    let projective = DMat3::from_array([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.01, 0.0, 1.0]);
-    Transform::from_matrix(projective, TransformType::Affine);
+fn from_matrix_normalizes_the_homogeneous_scale() {
+    let twin = Transform::homography([1.1, 0.02, 30.0, -0.01, 0.95, -12.0, 1e-5, -2e-5]);
+    let doubled = DMat3::from_array(twin.matrix().map(|value| 2.0 * value));
+    let normalized = Transform::from_homography_matrix(doubled).unwrap();
+    assert_eq!(normalized.matrix(), twin.matrix());
+
+    let rounded = DMat3::from_array([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0 + f64::EPSILON]);
+    let affine = Transform::from_matrix(rounded, TransformType::Affine).unwrap();
+    assert_eq!(affine.matrix()[8], 1.0);
+    assert_eq!(affine.matrix()[0], 1.0 / (1.0 + f64::EPSILON));
+}
+
+/// `m[8]` below `MIN_HOMOGENEOUS_SCALE` of the largest entry cannot be divided out without moving
+/// a mapped point by more than the tolerance it is derived from; zero and non-finite entries
+/// cannot be divided out at all. A scale just above the floor is kept.
+#[test]
+fn from_matrix_refuses_what_it_cannot_normalize() {
+    let with_scale = |scale: f64| {
+        Transform::from_homography_matrix(DMat3::from_array([
+            1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, scale,
+        ]))
+    };
+    assert!(with_scale(MIN_HOMOGENEOUS_SCALE * 0.5).is_none());
+    assert!(with_scale(0.0).is_none());
+    assert!(with_scale(f64::NAN).is_none());
+    assert!(with_scale(MIN_HOMOGENEOUS_SCALE * 2.0).is_some());
+    let not_finite = DMat3::from_array([1.0, f64::INFINITY, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
+    assert!(Transform::from_homography_matrix(not_finite).is_none());
 }
 
 #[test]
-fn from_matrix_canonicalizes_affine_roundoff() {
-    let rounded = DMat3::from_array([
-        1.0,
-        0.0,
-        0.0,
-        0.0,
-        1.0,
-        0.0,
-        f64::EPSILON,
-        -f64::EPSILON,
-        1.0 + f64::EPSILON,
-    ]);
-    let transform = Transform::from_matrix(rounded, TransformType::Affine);
-    assert_eq!(&transform.matrix()[6..], &[0.0, 0.0, 1.0]);
+#[should_panic(expected = "a Affine transform has no perspective row")]
+fn from_matrix_rejects_a_projective_bottom_row() {
+    let projective = DMat3::from_array([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.01, 0.0, 1.0]);
+    let _ = Transform::from_matrix(projective, TransformType::Affine);
+}
+
+/// The closed-form Jacobian against a central difference. For an affine model it is the linear part
+/// exactly, wherever it is taken. For a homography the difference with step `h` has truncation error
+/// `h²/6·|T'''|`, far below 1e-12 for perspective terms of 1e-5, and rounding error `u·|T|/h`, about
+/// 3.3e-10 at `|T|` ≈ 3000; 1e-9 holds the sum.
+#[test]
+fn jacobian_is_the_derivative_of_apply() {
+    let affine = Transform::affine([1.2, -0.3, 40.0, 0.25, 0.9, -7.0]);
+    let linear = DMat2::from_cols(DVec2::new(1.2, 0.25), DVec2::new(-0.3, 0.9));
+    for p in [DVec2::ZERO, DVec2::new(1234.5, -987.25)] {
+        assert_eq!(affine.jacobian(p), linear);
+    }
+
+    let homography = Transform::homography([1.05, 0.02, 30.0, -0.01, 0.97, -12.0, 2e-5, -1e-5]);
+    let h = 1e-3;
+    for p in [DVec2::new(100.0, 200.0), DVec2::new(3000.0, 1500.0)] {
+        let jacobian = homography.jacobian(p);
+        for (axis, step) in [DVec2::new(h, 0.0), DVec2::new(0.0, h)]
+            .into_iter()
+            .enumerate()
+        {
+            let difference = (homography.apply(p + step) - homography.apply(p - step)) / (2.0 * h);
+            assert_close!(jacobian.col(axis).x, difference.x, 1e-9);
+            assert_close!(jacobian.col(axis).y, difference.y, 1e-9);
+        }
+    }
 }

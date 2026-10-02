@@ -14,7 +14,7 @@ fn centroid_undersampled_psf() {
         .stamp(Size2us::new(width, height), 0.1);
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
-    let expected_fwhm = FWHM_TO_SIGMA * sigma;
+    let expected_fwhm = sigma_to_fwhm(sigma);
     let stamp_radius = 5; // Smaller stamp for undersampled
 
     let result = refine_centroid(
@@ -51,7 +51,7 @@ fn centroid_large_psf() {
         .stamp(Size2us::new(width, height), 0.1);
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
-    let expected_fwhm = FWHM_TO_SIGMA * sigma;
+    let expected_fwhm = sigma_to_fwhm(sigma);
     let stamp_radius = MAX_STAMP_RADIUS; // Use maximum allowed
 
     let result = refine_centroid(
@@ -193,7 +193,7 @@ fn centroid_with_nearby_star() {
     );
 
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-    let expected_fwhm = FWHM_TO_SIGMA * sigma;
+    let expected_fwhm = sigma_to_fwhm(sigma);
 
     let result = refine_centroid(&pixels, &bg, primary_pos, TEST_STAMP_RADIUS, expected_fwhm);
 
@@ -229,7 +229,7 @@ fn centroid_blended_stars() {
     );
 
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-    let expected_fwhm = FWHM_TO_SIGMA * sigma;
+    let expected_fwhm = sigma_to_fwhm(sigma);
 
     let result = refine_centroid(&pixels, &bg, primary_pos, TEST_STAMP_RADIUS, expected_fwhm);
 
@@ -539,7 +539,7 @@ fn recovery_from_2pixel_offset() {
     let pixels = SyntheticStar::new(true_pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma })
         .stamp(Size2us::new(width, height), 0.1);
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-    let expected_fwhm = FWHM_TO_SIGMA * sigma;
+    let expected_fwhm = sigma_to_fwhm(sigma);
 
     // Start 2 pixels away
     let initial_guess = DVec2::new(34.0, 30.0);
@@ -576,7 +576,7 @@ fn recovery_from_3pixel_offset() {
     let pixels = SyntheticStar::new(true_pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma })
         .stamp(Size2us::new(width, height), 0.1);
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-    let expected_fwhm = FWHM_TO_SIGMA * sigma;
+    let expected_fwhm = sigma_to_fwhm(sigma);
 
     // Start 3 pixels away diagonally
     let initial_guess = DVec2::new(34.1, 34.1); // ~3 pixel offset

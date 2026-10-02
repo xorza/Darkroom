@@ -4,7 +4,8 @@
 //! exists, every unmatched reference star can be projected through it and claimed by whatever
 //! target star sits under the prediction — which finds the faint stars triangle matching passed
 //! over. Each pass refits from the enlarged set, so the transform and the match list tighten
-//! together until neither moves.
+//! together until the set stops changing; the transform returned is always the fit of the set
+//! returned.
 
 use glam::DVec2;
 
@@ -22,25 +23,26 @@ use std::mem;
 const RECOVERY_MAX_ITERATIONS: usize = 5;
 
 #[derive(Debug)]
-pub(crate) struct RecoveredMatches {
-    pub(crate) transform: Transform,
-    pub(crate) matches: Vec<MatchIndices>,
+pub(super) struct RecoveredMatches {
+    pub(super) transform: Transform,
+    pub(super) matches: Vec<MatchIndices>,
 }
 
-pub(crate) fn recover_matches(
+/// Grow `inlier_matches` by every reference star whose prediction under the current fit lands
+/// within `inlier_threshold` of an unclaimed target star, refitting a `transform_type` after each
+/// pass, until a pass leaves the set unchanged or [`RECOVERY_MAX_ITERATIONS`] passes have run.
+///
+/// The returned transform is the least-squares fit of the returned matches. When that fit fails,
+/// the last transform that did fit stands in: RANSAC's `transform` if no pass refit.
+pub(super) fn recover_matches(
     ref_stars: &[DVec2],
-    target_stars: &[DVec2],
+    target_tree: &KdTree,
     transform: &Transform,
     inlier_matches: &[MatchIndices],
     inlier_threshold: f64,
     transform_type: TransformType,
 ) -> RecoveredMatches {
-    let Some(target_tree) = KdTree::build(target_stars) else {
-        return RecoveredMatches {
-            transform: *transform,
-            matches: inlier_matches.to_vec(),
-        };
-    };
+    let target_stars = target_tree.points();
 
     let threshold_sq = inlier_threshold * inlier_threshold;
     // The pair every pass starts from: a transform and the very matches it was fitted to. A pass
@@ -114,16 +116,23 @@ pub(crate) fn recover_matches(
         mem::swap(&mut current_matches, &mut candidate);
     }
 
-    // Ensure we never return fewer matches than we started with
+    // A run of passes that ends with fewer matches than RANSAC found started from a worse place
+    // than it ended up; the inliers stand instead.
     if current_matches.len() < inlier_matches.len() {
-        return RecoveredMatches {
-            transform: *transform,
-            matches: inlier_matches.to_vec(),
-        };
+        current_matches.clear();
+        current_matches.extend_from_slice(inlier_matches);
     }
-
+    all.gather_matched(
+        current_matches
+            .iter()
+            .map(|star_match| (star_match.reference, star_match.target)),
+        ref_stars,
+        target_stars,
+    );
+    let transform = estimate_transform(&all.reference, &all.target, transform_type)
+        .unwrap_or(current_transform);
     RecoveredMatches {
-        transform: current_transform,
+        transform,
         matches: current_matches,
     }
 }

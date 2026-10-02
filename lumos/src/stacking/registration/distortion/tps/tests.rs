@@ -124,8 +124,7 @@ fn compute_normalization_square() {
     let norm = compute_normalization(&points);
     // Bounding box: [0,100] x [0,100]
     // center = (50, 50), scale = max(100, 100) / 2 = 50
-    assert_dvec2_near(norm.center, DVec2::new(50.0, 50.0), 1e-12, "center");
-    assert!((norm.scale - 50.0).abs() < 1e-12, "scale: {}", norm.scale);
+    assert_eq!(norm, PointNormalization::new(DVec2::new(50.0, 50.0), 50.0));
 
     // The box corner normalizes to the unit corner: (100 - 50) / 50 = 1.
     let corner = DVec2::new(100.0, 100.0);
@@ -160,8 +159,10 @@ fn compute_normalization_rectangle() {
     // Bounding box: [10,210] x [20,80]
     // center = ((10+210)/2, (20+80)/2) = (110, 50)
     // range = (200, 60), max = 200, scale = 100
-    assert_dvec2_near(norm.center, DVec2::new(110.0, 50.0), 1e-12, "center");
-    assert!((norm.scale - 100.0).abs() < 1e-12, "scale: {}", norm.scale);
+    assert_eq!(
+        norm,
+        PointNormalization::new(DVec2::new(110.0, 50.0), 100.0)
+    );
 
     // The short axis stays inside [-1, 1]: (20 - 50) / 100 = -0.3.
     assert_dvec2_near(
@@ -182,11 +183,7 @@ fn compute_normalization_coincident() {
     ];
     let norm = compute_normalization(&points);
     // All points identical, range = (0, 0), scale falls back to 1.0
-    assert_dvec2_near(norm.center, DVec2::new(42.0, 17.0), 1e-12, "center");
-    assert!(
-        (norm.scale - 1.0).abs() < 1e-12,
-        "degenerate scale should be 1.0"
-    );
+    assert_eq!(norm, PointNormalization::new(DVec2::new(42.0, 17.0), 1.0));
     // With scale 1 the mapping is a pure translation, so the points land on the origin.
     assert_dvec2_near(norm.normalize(points[0]), DVec2::ZERO, 1e-12, "normalized");
 }

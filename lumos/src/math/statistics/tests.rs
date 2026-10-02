@@ -1,5 +1,7 @@
 //! Tests for statistical functions.
 
+use std::f64::consts::{PI, SQRT_2};
+
 use crate::math::statistics::*;
 use crate::testing::prelude::*;
 
@@ -10,8 +12,7 @@ struct MedianCase {
 }
 
 /// The inputs too small or too flat for clipping to do anything, with the result hand-derived in
-/// each case. These were eight tests — the `_stats_` prefixed half called the same function as
-/// the other half with different constants.
+/// each case.
 #[test]
 fn sigma_clipped_degenerate_inputs() {
     struct Case {
@@ -997,4 +998,22 @@ fn chi2_99_2dof_is_the_one_percent_tail_of_the_two_dof_distribution() {
     // The rounded 9.21 this replaced is inside a ten-thousandth, which is why the two copies of it
     // could disagree for so long without any test noticing.
     assert!((CHI2_99_2DOF - 9.21).abs() < 1e-3);
+}
+
+/// `MAD_TO_SIGMA` is `1 / Φ⁻¹(3/4)`: the standard normal CDF at its reciprocal is 3/4. Φ is
+/// `½·(1 + erf(x/√2))` with erf summed from its Maclaurin series, whose terms at `x/√2` ≈ 0.477 fall
+/// below 1e-17 within twenty; the sum then carries a few ulps of rounding, and 4·ε holds them.
+#[test]
+fn mad_to_sigma_is_the_reciprocal_normal_quartile() {
+    let z = (1.0 / MAD_TO_SIGMA) / SQRT_2;
+    let mut term = z;
+    let mut erf_sum = 0.0;
+    for n in 0..30u32 {
+        erf_sum += term / f64::from(2 * n + 1);
+        term *= -z * z / f64::from(n + 1);
+    }
+    let erf = 2.0 / PI.sqrt() * erf_sum;
+    let cdf = f64::midpoint(1.0, erf);
+    assert!((cdf - 0.75).abs() <= 4.0 * f64::EPSILON, "Φ = {cdf}");
+    assert_eq!(MAD_TO_SIGMA as f32, 1.482_602_2_f32);
 }

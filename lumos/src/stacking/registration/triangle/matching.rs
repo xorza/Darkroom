@@ -4,8 +4,6 @@
 //! invariants, and hands similar pairs to the voting stage, which turns shared vertices into point
 //! correspondences.
 
-use glam::DVec2;
-
 use crate::stacking::registration::spatial::{KdTree, Neighbor};
 
 use crate::stacking::registration::triangle::TriangleConfig;
@@ -14,22 +12,10 @@ use crate::stacking::registration::triangle::voting::{
     PointMatch, build_invariant_tree, resolve_matches, vote_for_correspondences,
 };
 
-/// Form triangles using k-d tree for efficient neighbor lookup.
-///
-/// Uses k-nearest neighbors to form triangles in O(n * k²) complexity.
-///
-/// # Arguments
-/// * `positions` - Point positions
-/// * `k_neighbors` - Number of nearest neighbors to consider per point
-///
-/// # Returns
-/// Vector of triangles formed from neighboring points
-pub(super) fn form_triangles_kdtree(positions: &[DVec2], k_neighbors: usize) -> Vec<Triangle> {
-    let Some(tree) = KdTree::build(positions) else {
-        return Vec::new();
-    };
-
-    let triangle_indices = form_triangles_from_neighbors(&tree, k_neighbors);
+/// The triangles over each point's `k_neighbors` nearest neighbours in `tree`: O(n·k²).
+pub(super) fn form_triangles_kdtree(tree: &KdTree, k_neighbors: usize) -> Vec<Triangle> {
+    let positions = tree.points();
+    let triangle_indices = form_triangles_from_neighbors(tree, k_neighbors);
 
     triangle_indices
         .into_iter()
@@ -39,25 +25,17 @@ pub(super) fn form_triangles_kdtree(positions: &[DVec2], k_neighbors: usize) -> 
         .collect()
 }
 
-/// Match points between reference and target sets using triangle pattern matching.
+/// Match the points of two trees by triangle pattern: the matched pairs, with confidence scores.
 ///
-/// Uses a k-d tree for efficient triangle formation, making it suitable for
-/// large point counts (>100 points).
-///
-/// # Arguments
-/// * `ref_positions` - Reference point positions
-/// * `target_positions` - Target point positions
-/// * `config` - Triangle matching configuration
-///
-/// # Returns
-/// Vector of matched point pairs with confidence scores
+/// Takes the trees rather than the points so the caller's target tree, which match recovery
+/// queries again afterwards, is built once.
 pub(crate) fn match_triangles(
-    ref_positions: &[DVec2],
-    target_positions: &[DVec2],
+    ref_tree: &KdTree,
+    target_tree: &KdTree,
     config: &TriangleConfig,
 ) -> Vec<PointMatch> {
-    let n_ref = ref_positions.len();
-    let n_target = target_positions.len();
+    let n_ref = ref_tree.len();
+    let n_target = target_tree.len();
 
     if n_ref < 3 || n_target < 3 {
         return Vec::new();
@@ -69,8 +47,8 @@ pub(crate) fn match_triangles(
     // with diminishing returns (k=20 → C(20,2)=190, 4.2× more triangles).
     let k_neighbors = (n_ref.min(n_target) / 3).clamp(5, 10);
 
-    let ref_triangles = form_triangles_kdtree(ref_positions, k_neighbors);
-    let target_triangles = form_triangles_kdtree(target_positions, k_neighbors);
+    let ref_triangles = form_triangles_kdtree(ref_tree, k_neighbors);
+    let target_triangles = form_triangles_kdtree(target_tree, k_neighbors);
 
     if ref_triangles.is_empty() || target_triangles.is_empty() {
         return Vec::new();

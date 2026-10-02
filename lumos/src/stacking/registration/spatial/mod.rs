@@ -92,24 +92,16 @@ pub(super) struct KdTree {
 }
 
 impl KdTree {
-    /// Build a k-d tree from a list of points.
+    /// Build a k-d tree over `points`, which it keeps; `None` for no points.
     ///
-    /// Uses iterative median-split construction with `select_nth_unstable`
-    /// for O(n log n) partitioning without full sorting.
-    ///
-    /// # Arguments
-    /// * `points` - List of point coordinates
-    ///
-    /// # Returns
-    /// A new k-d tree, or None if points is empty
-    pub(super) fn build(points: &[DVec2]) -> Option<Self> {
+    /// Uses iterative median-split construction with `select_nth_unstable` for O(n log n)
+    /// partitioning without full sorting. Takes the points by value: every caller builds them for
+    /// the tree, so the tree holds that one copy rather than a second.
+    pub(super) fn build(points: Vec<DVec2>) -> Option<Self> {
         if points.is_empty() {
             return None;
         }
 
-        // Owned rather than borrowed: `build_invariant_tree` builds its invariants into a local
-        // `Vec` and returns the tree over them, so there is no slice for the tree to borrow from.
-        let points_vec: Vec<DVec2> = points.to_vec();
         let mut indices: Vec<usize> = (0..points.len()).collect();
 
         // Iterative construction using an explicit work stack.
@@ -125,8 +117,7 @@ impl KdTree {
             indices[subtree.start..subtree.end].select_nth_unstable_by(
                 subtree.len() / 2,
                 |&a, &b| {
-                    dim_value(points_vec[a], split_dim)
-                        .total_cmp(&dim_value(points_vec[b], split_dim))
+                    dim_value(points[a], split_dim).total_cmp(&dim_value(points[b], split_dim))
                 },
             );
 
@@ -140,10 +131,7 @@ impl KdTree {
             }
         }
 
-        Some(Self {
-            indices,
-            points: points_vec,
-        })
+        Some(Self { indices, points })
     }
 
     /// Find the `k` nearest neighbors to `query`, filling `out` (cleared first) instead of
@@ -240,6 +228,11 @@ impl KdTree {
     /// Get a point by index.
     pub(super) fn get_point(&self, idx: usize) -> DVec2 {
         self.points[idx]
+    }
+
+    /// The points the tree was built over, in their original order.
+    pub(super) fn points(&self) -> &[DVec2] {
+        &self.points
     }
 }
 

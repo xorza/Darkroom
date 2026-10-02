@@ -11,8 +11,6 @@ use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
 
-/// Minimum inlier count for a meaningful quality score (below this the fit is unreliable).
-const QUALITY_MIN_INLIERS: usize = 4;
 /// RMS error decay scale: `quality_error = exp(-rms / SCALE)`. At rms=2.0, factor ≈ 0.37.
 const QUALITY_ERROR_SCALE: f64 = 2.0;
 /// Inlier saturation point: `quality_count = min(inliers / SAT, 1.0)`. Full credit at 20+ inliers.
@@ -106,6 +104,10 @@ pub enum RegistrationError {
     /// No matching star patterns found.
     #[error("No matching star patterns found between images")]
     NoMatchingPatterns,
+    /// The fit, after match recovery, rests on fewer star pairs than
+    /// [`min_matches`](crate::RegistrationConfig) asks for.
+    #[error("Too few inliers: found {found}, need {required}")]
+    TooFewInliers { found: usize, required: usize },
     /// RANSAC failed to find valid transformation.
     #[error(
         "RANSAC failed: {reason} (iterations: {iterations}, best inlier count: {best_inlier_count})"
@@ -153,23 +155,9 @@ pub enum RegistrationError {
 /// Corresponding stars in the reference and target inputs with their final fit residual.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StarMatch {
-    /// Index into the reference star slice.
-    pub reference: usize,
-    /// Index into the target star slice.
-    pub target: usize,
+    pub indices: MatchIndices,
     /// Distance between the transformed reference star and target star, in pixels.
     pub residual: f64,
-}
-
-impl StarMatch {
-    /// A pair with the residual measured against a fitted transform.
-    pub(crate) fn measured(indices: MatchIndices, residual: f64) -> Self {
-        Self {
-            reference: indices.reference,
-            target: indices.target,
-            residual,
-        }
-    }
 }
 
 /// Result of image registration.
@@ -242,16 +230,12 @@ impl RegistrationResult {
             .fold(0.0, f64::max)
     }
 
-    /// Registration quality score from `0.0` to `1.0`.
+    /// Registration quality score from `0.0` to `1.0`: `exp(−rms / 2)` times the inlier count's
+    /// share of 20. A result exists only above `min_matches` inliers, so no floor is needed here.
     pub fn quality_score(&self) -> f64 {
-        let num_inliers = self.num_inliers();
-        if num_inliers < QUALITY_MIN_INLIERS {
-            0.0
-        } else {
-            let error_factor = (-self.rms_error() / QUALITY_ERROR_SCALE).exp();
-            let count_factor = (num_inliers as f64 / QUALITY_INLIER_SATURATION).min(1.0);
-            error_factor * count_factor
-        }
+        let error_factor = (-self.rms_error() / QUALITY_ERROR_SCALE).exp();
+        let count_factor = (self.num_inliers() as f64 / QUALITY_INLIER_SATURATION).min(1.0);
+        error_factor * count_factor
     }
 
     /// Registration processing time in milliseconds.

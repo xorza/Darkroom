@@ -87,12 +87,12 @@ fn register_two_lights() {
     let inlier_ref: Vec<glam::DVec2> = result
         .matched_stars()
         .iter()
-        .map(|star_match| result1.stars[star_match.reference].pos)
+        .map(|star_match| result1.stars[star_match.indices.reference].pos)
         .collect();
     let inlier_target: Vec<glam::DVec2> = result
         .matched_stars()
         .iter()
-        .map(|star_match| result2.stars[star_match.target].pos)
+        .map(|star_match| result2.stars[star_match.indices.target].pos)
         .collect();
 
     let sip_config = SipConfig {

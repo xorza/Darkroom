@@ -121,116 +121,55 @@ fn vote_matrix_dense_saturating_add() {
     assert_eq!(votes, 1000);
 }
 
-#[test]
-fn resolve_matches_one_to_one() {
-    // 3 non-conflicting matches sorted by descending votes
-    let vm = vote_matrix_from_entries(3, 3, &[(0, 0, 10), (1, 1, 8), (2, 2, 6)]);
-
-    let matches = resolve_matches(vm, 3, 3, 1);
-    assert_eq!(matches.len(), 3);
-
-    // Sorted by votes descending
-    assert_eq!(matches[0].ref_idx, 0);
-    assert_eq!(matches[0].target_idx, 0);
-    assert_eq!(matches[0].votes, 10);
-
-    assert_eq!(matches[1].ref_idx, 1);
-    assert_eq!(matches[1].target_idx, 1);
-    assert_eq!(matches[1].votes, 8);
-
-    assert_eq!(matches[2].ref_idx, 2);
-    assert_eq!(matches[2].target_idx, 2);
-    assert_eq!(matches[2].votes, 6);
-}
+/// Greedy resolution, case by case: the pairs that survive `min_votes` are taken in descending
+/// vote order, each star at most once, and each kept pair's confidence is its votes over the most
+/// any kept pair drew. Every confidence below is a correctly rounded quotient, so equality is exact.
+/// Vote entries, `min_votes`, and the resolved `(reference, target, confidence)` in output order.
+type ResolveCase = (
+    &'static [(usize, usize, usize)],
+    usize,
+    &'static [(usize, usize, f64)],
+);
 
 #[test]
-fn resolve_matches_target_conflict() {
-    // Two ref points compete for the same target:
-    // ref 0 → target 0 (10 votes), ref 1 → target 0 (5 votes), ref 1 → target 1 (3 votes)
-    // Greedy: ref 0 wins target 0, ref 1 falls back to target 1
-    let vm = vote_matrix_from_entries(3, 3, &[(0, 0, 10), (1, 0, 5), (1, 1, 3)]);
-
-    let matches = resolve_matches(vm, 3, 3, 1);
-    assert_eq!(matches.len(), 2);
-
-    let m0 = matches.iter().find(|m| m.ref_idx == 0).unwrap();
-    assert_eq!(m0.target_idx, 0);
-    assert_eq!(m0.votes, 10);
-
-    let m1 = matches.iter().find(|m| m.ref_idx == 1).unwrap();
-    assert_eq!(m1.target_idx, 1);
-    assert_eq!(m1.votes, 3);
-}
-
-#[test]
-fn resolve_matches_ref_conflict() {
-    // Two target points compete for the same ref:
-    // ref 0 → target 0 (10 votes), ref 0 → target 1 (5 votes), ref 1 → target 1 (3 votes)
-    // Greedy: ref 0 gets target 0 (highest), ref 0 → target 1 blocked (ref 0 used), ref 1 gets target 1
-    let vm = vote_matrix_from_entries(3, 3, &[(0, 0, 10), (0, 1, 5), (1, 1, 3)]);
-
-    let matches = resolve_matches(vm, 3, 3, 1);
-    assert_eq!(matches.len(), 2);
-
-    let m0 = matches.iter().find(|m| m.ref_idx == 0).unwrap();
-    assert_eq!(m0.target_idx, 0);
-    assert_eq!(m0.votes, 10);
-
-    let m1 = matches.iter().find(|m| m.ref_idx == 1).unwrap();
-    assert_eq!(m1.target_idx, 1);
-    assert_eq!(m1.votes, 3);
-}
-
-#[test]
-fn resolve_matches_min_votes_filter() {
-    // Only ref 0 → target 0 (10 votes) survives min_votes = 3
-    let vm = vote_matrix_from_entries(3, 3, &[(0, 0, 10), (1, 1, 2), (2, 2, 1)]);
-
-    let matches = resolve_matches(vm, 3, 3, 3);
-    assert_eq!(matches.len(), 1);
-    assert_eq!(matches[0].ref_idx, 0);
-    assert_eq!(matches[0].target_idx, 0);
-    assert_eq!(matches[0].votes, 10);
-}
-
-#[test]
-fn resolve_matches_empty() {
-    let vm = VoteMatrix::new(5, 5);
-    let matches = resolve_matches(vm, 5, 5, 1);
-    assert!(matches.is_empty());
-}
-
-#[test]
-fn resolve_matches_confidence_relative() {
-    // Confidence = votes / max_votes in resolved set
-    // Three matches: 20, 10, 5 votes → confidence = 1.0, 0.5, 0.25
-    let vm = vote_matrix_from_entries(5, 5, &[(0, 0, 20), (1, 1, 10), (2, 2, 5)]);
-
-    let matches = resolve_matches(vm, 5, 5, 1);
-    assert_eq!(matches.len(), 3);
-
-    // matches[0]: 20 votes → 20/20 = 1.0
-    assert_eq!(matches[0].votes, 20);
-    assert!((matches[0].confidence - 1.0).abs() < 1e-10);
-
-    // matches[1]: 10 votes → 10/20 = 0.5
-    assert_eq!(matches[1].votes, 10);
-    assert!((matches[1].confidence - 0.5).abs() < 1e-10);
-
-    // matches[2]: 5 votes → 5/20 = 0.25
-    assert_eq!(matches[2].votes, 5);
-    assert!((matches[2].confidence - 0.25).abs() < 1e-10);
-}
-
-#[test]
-fn resolve_matches_single_entry_confidence_is_1() {
-    // Single match: confidence = votes/max_votes = 10/10 = 1.0
-    let vm = vote_matrix_from_entries(5, 5, &[(0, 0, 10)]);
-
-    let matches = resolve_matches(vm, 5, 5, 1);
-    assert_eq!(matches.len(), 1);
-    assert_eq!(matches[0].votes, 10);
-    assert!((matches[0].confidence - 1.0).abs() < 1e-10);
+fn resolve_matches_claims_each_star_once_by_votes() {
+    let cases: [ResolveCase; 7] = [
+        // No conflicts: all three, 10/10, 8/10, 6/10.
+        (
+            &[(0, 0, 10), (1, 1, 8), (2, 2, 6)],
+            1,
+            &[(0, 0, 1.0), (1, 1, 0.8), (2, 2, 0.6)],
+        ),
+        // Ref 0 takes target 0 first, so ref 1 falls back to target 1 with 3 votes.
+        (
+            &[(0, 0, 10), (1, 0, 5), (1, 1, 3)],
+            1,
+            &[(0, 0, 1.0), (1, 1, 0.3)],
+        ),
+        // Ref 0 is taken by its 10-vote pair, so its 5-vote pair is dropped.
+        (
+            &[(0, 0, 10), (0, 1, 5), (1, 1, 3)],
+            1,
+            &[(0, 0, 1.0), (1, 1, 0.3)],
+        ),
+        // Only the 10-vote pair clears `min_votes = 3`.
+        (&[(0, 0, 10), (1, 1, 2), (2, 2, 1)], 3, &[(0, 0, 1.0)]),
+        (
+            &[(0, 0, 20), (1, 1, 10), (2, 2, 5)],
+            1,
+            &[(0, 0, 1.0), (1, 1, 0.5), (2, 2, 0.25)],
+        ),
+        (&[(0, 0, 10)], 1, &[(0, 0, 1.0)]),
+        (&[], 1, &[]),
+    ];
+    for (entries, min_votes, expected) in cases {
+        let matches = resolve_matches(vote_matrix_from_entries(5, 5, entries), 5, 5, min_votes);
+        let resolved: Vec<(usize, usize, f64)> = matches
+            .iter()
+            .map(|m| (m.indices.reference, m.indices.target, m.confidence))
+            .collect();
+        assert_eq!(resolved, expected, "{entries:?} with min_votes {min_votes}");
+    }
 }
 
 #[test]
@@ -244,7 +183,7 @@ fn vote_for_correspondences_identical_triangles() {
         DVec2::new(5.0, 5.0),
     ];
 
-    let triangles = form_triangles_kdtree(&positions, 4);
+    let triangles = triangles_of(&positions, 4);
     assert!(!triangles.is_empty());
     let invariant_tree = build_invariant_tree(&triangles).unwrap();
 
@@ -295,8 +234,8 @@ fn vote_for_correspondences_no_matching_triangles() {
         DVec2::new(50.0, 1.0), // very thin, ratios ≈ (0.5, 0.5)
     ];
 
-    let tri_a = form_triangles_kdtree(&positions_a, 3);
-    let tri_b = form_triangles_kdtree(&positions_b, 3);
+    let tri_a = triangles_of(&positions_a, 3);
+    let tri_b = triangles_of(&positions_b, 3);
     assert!(!tri_a.is_empty());
     assert!(!tri_b.is_empty());
 
@@ -332,8 +271,8 @@ fn vote_for_correspondences_orientation_filtering() {
     // Mirror x to flip all triangle orientations
     let mirrored: Vec<DVec2> = positions.iter().map(|p| DVec2::new(-p.x, p.y)).collect();
 
-    let ref_triangles = form_triangles_kdtree(&positions, 4);
-    let target_triangles = form_triangles_kdtree(&mirrored, 4);
+    let ref_triangles = triangles_of(&positions, 4);
+    let target_triangles = triangles_of(&mirrored, 4);
     let invariant_tree = build_invariant_tree(&ref_triangles).unwrap();
 
     // With orientation check: mirrored triangles rejected → fewer/no votes

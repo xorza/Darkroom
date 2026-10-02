@@ -32,28 +32,19 @@ const DENSE_VOTE_THRESHOLD: usize = 250_000;
 /// The bare pair, shared by everything that carries one: [`PointMatch`] adds the vote evidence
 /// that produced it, and `StarMatch` adds the residual only measurable once a transform exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct MatchIndices {
-    pub(crate) reference: usize,
-    pub(crate) target: usize,
+pub struct MatchIndices {
+    /// Index into the reference star slice.
+    pub reference: usize,
+    /// Index into the target star slice.
+    pub target: usize,
 }
 
-/// A matched point pair between reference and target.
+/// A matched point pair between reference and target, with the confidence its votes earned.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PointMatch {
-    pub(crate) ref_idx: usize,
-    pub(crate) target_idx: usize,
-    pub(crate) votes: usize,
+    pub(crate) indices: MatchIndices,
+    /// The pair's votes relative to the most-voted match of the resolved set: 1 for the best.
     pub(crate) confidence: f64,
-}
-
-impl PointMatch {
-    /// The pair alone, without the vote evidence behind it.
-    pub(crate) fn indices(self) -> MatchIndices {
-        MatchIndices {
-            reference: self.ref_idx,
-            target: self.target_idx,
-        }
-    }
 }
 
 /// Vote matrix storage - either dense (Vec) or sparse (`HashMap`).
@@ -137,7 +128,7 @@ pub(super) fn build_invariant_tree(triangles: &[Triangle]) -> Option<KdTree> {
         .iter()
         .map(|t| DVec2::new(t.ratios.0, t.ratios.1))
         .collect();
-    KdTree::build(&invariants)
+    KdTree::build(invariants)
 }
 
 /// Vote for point correspondences based on matching triangles.
@@ -205,55 +196,49 @@ pub(super) fn resolve_matches(
     n_target: usize,
     min_votes: usize,
 ) -> Vec<PointMatch> {
-    // Filter by minimum votes and collect matches
-    let mut matches: Vec<PointMatch> = Vec::new();
+    // Filter by minimum votes and collect the voted pairs.
+    let mut voted: Vec<(MatchIndices, usize)> = Vec::new();
     vote_matrix.for_each_nonzero(|pair, votes| {
         if votes >= min_votes {
-            matches.push(PointMatch {
-                ref_idx: pair.reference,
-                target_idx: pair.target,
-                votes,
-                confidence: 0.0, // Will be computed below
-            });
+            voted.push((pair, votes));
         }
     });
 
-    // Sort by votes (descending), with a total-order tiebreak on (ref_idx, target_idx) so the
-    // greedy resolution below is deterministic regardless of vote-matrix storage — the sparse
-    // HashMap iterates in randomized order, which would otherwise make tied matches resolve
-    // differently run-to-run. (Matches the dense path, which already iterates in this order.)
-    matches.sort_by(|a, b| {
-        b.votes
-            .cmp(&a.votes)
-            .then(a.ref_idx.cmp(&b.ref_idx))
-            .then(a.target_idx.cmp(&b.target_idx))
+    // Sort by votes (descending), with a total-order tiebreak on the pair so the greedy
+    // resolution below is deterministic regardless of vote-matrix storage — the sparse HashMap
+    // iterates in randomized order, which would otherwise make tied matches resolve differently
+    // run-to-run.
+    voted.sort_by(|(a, a_votes), (b, b_votes)| {
+        b_votes
+            .cmp(a_votes)
+            .then(a.reference.cmp(&b.reference))
+            .then(a.target.cmp(&b.target))
     });
 
     // Resolve one-to-many conflicts (greedy approach)
     let mut used_ref = vec![false; n_ref];
     let mut used_target = vec![false; n_target];
-    let mut resolved = Vec::new();
-
-    for m in matches {
-        if m.ref_idx < n_ref
-            && m.target_idx < n_target
-            && !used_ref[m.ref_idx]
-            && !used_target[m.target_idx]
-        {
-            used_ref[m.ref_idx] = true;
-            used_target[m.target_idx] = true;
-            resolved.push(m);
+    voted.retain(|(pair, _)| {
+        let free = pair.reference < n_ref
+            && pair.target < n_target
+            && !used_ref[pair.reference]
+            && !used_target[pair.target];
+        if free {
+            used_ref[pair.reference] = true;
+            used_target[pair.target] = true;
         }
-    }
+        free
+    });
 
-    // Compute confidence relative to maximum vote count in the resolved set.
-    // This gives a meaningful relative ranking (1.0 = best match).
-    let max_votes = resolved.iter().map(|m| m.votes).max().unwrap_or(1);
-    for m in &mut resolved {
-        m.confidence = m.votes as f64 / max_votes as f64;
-    }
-
-    resolved
+    // Confidence is relative to the most-voted resolved match — the first, after the sort.
+    let max_votes = voted.first().map_or(1, |(_, votes)| *votes);
+    voted
+        .into_iter()
+        .map(|(indices, votes)| PointMatch {
+            indices,
+            confidence: votes as f64 / max_votes as f64,
+        })
+        .collect()
 }
 
 #[cfg(test)]

@@ -23,7 +23,7 @@ pub(crate) mod stamp;
 
 use glam::DVec2;
 
-use crate::math::fwhm::{FWHM_TO_SIGMA, sigma_to_fwhm};
+use crate::math::fwhm::{fwhm_to_sigma, sigma_to_fwhm};
 use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::stacking::star_detection::centroid::covariance::{
@@ -329,8 +329,8 @@ fn refine_centroid(
     let icy = pos.y.round() as isize;
 
     // Adaptive sigma based on expected FWHM
-    // sigma ≈ FWHM / FWHM_TO_SIGMA, use 0.8× for tighter weighting to reduce noise
-    let sigma = (expected_fwhm / FWHM_TO_SIGMA * 0.8).clamp(1.0, stamp_radius as f32 * 0.5);
+    // The expected sigma, 0.8× for tighter weighting to reduce noise.
+    let sigma = (fwhm_to_sigma(expected_fwhm) * 0.8).clamp(1.0, stamp_radius as f32 * 0.5);
     let two_sigma_sq = 2.0 * f64::from(sigma) * f64::from(sigma);
 
     let mut sum_x = 0.0f64;

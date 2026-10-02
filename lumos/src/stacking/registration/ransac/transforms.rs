@@ -3,12 +3,11 @@
 //! Pure geometry / linear algebra: translation, euclidean, similarity, affine,
 //! and homography estimation from point correspondences.
 
-use std::f64::consts::SQRT_2;
-
 use glam::DVec2;
 use nalgebra::{DMatrix, SMatrix, SVD};
 
 use crate::math::dmat3::DMat3;
+use crate::stacking::registration::point_normalization::{PointNormalization, centroid};
 use crate::stacking::registration::transform::{Transform, TransformType};
 
 /// Compute adaptive iteration count for early termination.
@@ -165,8 +164,8 @@ fn estimate_affine(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<Tran
         return None;
     }
 
-    let ref_norm = point_normalization(ref_points);
-    let tar_norm = point_normalization(target_points);
+    let ref_norm = PointNormalization::hartley(ref_points);
+    let tar_norm = PointNormalization::hartley(target_points);
 
     // Solve: target = A * ref + b in normalized space
     // In matrix form: [tx] = [a b] [rx] + [e]
@@ -191,8 +190,8 @@ fn estimate_affine(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<Tran
     let mut sum_y_ty = 0.0;
 
     for (&r, &t) in ref_points.iter().zip(target_points) {
-        let r = ref_norm.apply(r);
-        let t = tar_norm.apply(t);
+        let r = ref_norm.normalize(r);
+        let t = tar_norm.normalize(t);
         sum_x += r.x;
         sum_y += r.y;
         sum_xx += r.x * r.x;
@@ -239,16 +238,13 @@ fn estimate_affine(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<Tran
     let d = m01 * sum_x_ty + m11 * sum_y_ty + m12 * sum_ty;
     let f = m02 * sum_x_ty + m12 * sum_y_ty + m22 * sum_ty;
 
-    // Denormalize: A = T_target^{-1} * A_norm * T_ref
+    // Denormalize: A = D_target · A_norm · N_ref.
     let a_norm = Transform::affine([a, b, e, c, d, f]);
-    let tar_t_inv = tar_norm.transform.inverse();
-    let transform = tar_t_inv.compose(&a_norm).compose(&ref_norm.transform);
-
-    if transform.is_valid() {
-        Some(transform)
-    } else {
-        None
-    }
+    let transform = tar_norm
+        .denormalizing_transform()
+        .compose(&a_norm)
+        .compose(&ref_norm.normalizing_transform());
+    transform.is_valid().then_some(transform)
 }
 
 /// Estimate homography using Direct Linear Transform (DLT).
@@ -257,8 +253,8 @@ fn estimate_homography(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<
         return None;
     }
 
-    let ref_norm = point_normalization(ref_points);
-    let tar_norm = point_normalization(target_points);
+    let ref_norm = PointNormalization::hartley(ref_points);
+    let tar_norm = PointNormalization::hartley(target_points);
 
     // Build the DLT matrix A where Ah = 0
     // Each point gives 2 equations:
@@ -271,8 +267,8 @@ fn estimate_homography(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<
         let mut design = SMatrix::<f64, 9, 9>::zeros();
         for i in 0..n {
             let rows = dlt_rows(
-                ref_norm.apply(ref_points[i]),
-                tar_norm.apply(target_points[i]),
+                ref_norm.normalize(ref_points[i]),
+                tar_norm.normalize(target_points[i]),
             );
             for col in 0..9 {
                 design[(2 * i, col)] = rows[0][col];
@@ -286,8 +282,8 @@ fn estimate_homography(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<
         let mut design = DMatrix::zeros(2 * n, 9);
         for i in 0..n {
             let rows = dlt_rows(
-                ref_norm.apply(ref_points[i]),
-                tar_norm.apply(target_points[i]),
+                ref_norm.normalize(ref_points[i]),
+                tar_norm.normalize(target_points[i]),
             );
             for col in 0..9 {
                 design[(2 * i, col)] = rows[0][col];
@@ -297,85 +293,14 @@ fn estimate_homography(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<
         solve_homogeneous_svd_dynamic(design)?
     };
 
-    // Denormalize: H = T_target^-1 * H_norm * T_ref
-    let h_norm = Transform::from_homography_matrix(h);
-    let tar_t_inv = tar_norm.transform.inverse(); // Normalization transforms are always invertible
-
-    let h_denorm = tar_t_inv.compose(&h_norm).compose(&ref_norm.transform);
-
-    // Normalize so h[8] = 1
-    let scale = h_denorm.matrix()[8];
-    if scale.abs() < 1e-10 {
-        return None;
-    }
-
-    let mut data = *h_denorm.matrix();
-    for d in &mut data {
-        *d /= scale;
-    }
-
-    let result = Transform::from_homography_matrix(data.into());
-
-    if result.is_valid() {
-        Some(result)
-    } else {
-        None
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(super) struct PointNormalization {
-    pub(super) transform: Transform,
-    centroid: DVec2,
-    scale: f64,
-}
-
-impl PointNormalization {
-    #[inline]
-    pub(super) fn apply(self, point: DVec2) -> DVec2 {
-        (point - self.centroid) * self.scale
-    }
-}
-
-/// Compute the Hartley normalization applied lazily by the estimators.
-pub(super) fn point_normalization(points: &[DVec2]) -> PointNormalization {
-    if points.is_empty() {
-        return PointNormalization {
-            transform: Transform::identity(),
-            centroid: DVec2::ZERO,
-            scale: 1.0,
-        };
-    }
-
-    // Compute centroid
-    let c = centroid(points);
-
-    // Compute average distance from centroid
-    let mut avg_dist = 0.0;
-    for p in points {
-        avg_dist += (*p - c).length();
-    }
-    avg_dist /= points.len() as f64;
-
-    if avg_dist < 1e-10 {
-        return PointNormalization {
-            transform: Transform::identity(),
-            centroid: DVec2::ZERO,
-            scale: 1.0,
-        };
-    }
-
-    // Scale so average distance is sqrt(2)
-    let scale = SQRT_2 / avg_dist;
-
-    // Transformation matrix: translate then scale
-    let transform = Transform::affine([scale, 0.0, -c.x * scale, 0.0, scale, -c.y * scale]);
-
-    PointNormalization {
-        transform,
-        centroid: c,
-        scale,
-    }
+    // Denormalize, H = D_target · H_norm · N_ref, on the raw matrices: the SVD's null vector has
+    // unit norm and no particular `m[8]`, so the product is normalized once, at the end.
+    let denormalized = DMat3::from_array(*tar_norm.denormalizing_transform().matrix())
+        .mul_mat(&h)
+        .mul_mat(&DMat3::from_array(
+            *ref_norm.normalizing_transform().matrix(),
+        ));
+    Transform::from_homography_matrix(denormalized).filter(Transform::is_valid)
 }
 
 #[inline]
@@ -429,17 +354,4 @@ fn solve_homogeneous_svd_dynamic(a: DMatrix<f64>) -> Option<DMat3> {
         data[i] = val;
     }
     Some(DMat3::from_array(data))
-}
-
-/// Compute centroid of points.
-pub(super) fn centroid(points: &[DVec2]) -> DVec2 {
-    if points.is_empty() {
-        return DVec2::ZERO;
-    }
-
-    let mut sum = DVec2::ZERO;
-    for p in points {
-        sum += *p;
-    }
-    sum / points.len() as f64
 }

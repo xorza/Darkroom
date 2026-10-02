@@ -1,4 +1,5 @@
 use super::*;
+use std::f64::consts::PI;
 
 #[test]
 fn insufficient_point_count_scales_with_order() {
@@ -361,4 +362,76 @@ fn different_k_values_produce_different_corrections() {
         (ratio - 5.0).abs() < 0.5,
         "Correction ratio should be ~5.0 (k ratio), got {ratio:.4}"
     );
+}
+
+/// SIP corrects reference pixels before the transform, whatever the transform's linear part. The
+/// field is a radial distortion in the reference frame, `d(r) = (r − c)·k·|r − c|²` with
+/// `|d| ≤ 35 px`, carried through `T`: `t = T(r + d(r))`. A fit that took `t − T(r)` as the
+/// correction would leave `|(J − I)·d|` — 6 px at 10°, 70 px at 180°.
+///
+/// Up to affine, the fit target `J⁻¹·(t − T(r))` is `d` exactly and order 3 holds a cubic exactly,
+/// so what remains is rounding: coordinates of order 10³ resolved to `u·10³` ≈ 1e-13, amplified by
+/// the conditioning of the normalized design, far under 1e-8 px. For the homography the target is
+/// first order: the second-order term `½·|∂²T|·|d|²`, with `|∂²T|` ≈ `2·|g|·|J|` ≈ 4e-6 per pixel,
+/// is at most 2.5e-3 px, and 1e-2 px holds it. The warp applies the same model, so it lands on the
+/// targets to the same bound.
+#[test]
+fn sip_corrects_in_the_reference_frame_under_any_linear_part() {
+    let center = DVec2::new(500.0, 500.0);
+    let k = 1e-7;
+    let mut reference = Vec::new();
+    for y in (0..=1000).step_by(50) {
+        for x in (0..=1000).step_by(50) {
+            reference.push(DVec2::new(f64::from(x), f64::from(y)));
+        }
+    }
+    let distorted = |r: DVec2| {
+        let d = r - center;
+        r + d * k * d.length_squared()
+    };
+    let cases = [
+        (
+            "10°",
+            Transform::similarity(DVec2::new(30.0, -20.0), 10f64.to_radians(), 1.02),
+            1e-8,
+        ),
+        (
+            "180°",
+            Transform::euclidean(DVec2::new(1000.0, 1000.0), PI),
+            1e-8,
+        ),
+        (
+            "homography",
+            Transform::homography([1.01, 0.02, 15.0, -0.015, 0.99, -8.0, 2e-6, -1e-6]),
+            1e-2,
+        ),
+    ];
+    for (name, transform, bound) in cases {
+        let target: Vec<DVec2> = reference
+            .iter()
+            .map(|&r| transform.apply(distorted(r)))
+            .collect();
+        // No clipping: the field is noiseless, and the homography's second-order residual is
+        // structure, not outliers, so clipping would only trim the corners it is largest at.
+        let config = SipConfig {
+            order: 3,
+            reference_point: Some(center),
+            clip_iterations: 0,
+            ..Default::default()
+        };
+        let fit = fit_sip(&reference, &target, &transform, &config);
+        assert!(
+            fit.max_residual < bound,
+            "{name}: max residual {:e}",
+            fit.max_residual
+        );
+
+        let warp = WarpTransform::with_sip(transform, fit.polynomial);
+        let worst = reference
+            .iter()
+            .zip(&target)
+            .map(|(&r, &t)| (warp.apply(r) - t).length())
+            .fold(0.0, f64::max);
+        assert!(worst < bound, "{name}: warp lands {worst:e} px off");
+    }
 }

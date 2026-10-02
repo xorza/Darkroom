@@ -8,7 +8,7 @@ fn form_triangles_from_neighbors_single_triangle() {
         DVec2::new(1.0, 0.0),
         DVec2::new(0.5, 0.866),
     ];
-    let tree = KdTree::build(&points).unwrap();
+    let tree = KdTree::build(points.clone()).unwrap();
 
     let triangles = form_triangles_from_neighbors(&tree, 3);
     assert_eq!(triangles.len(), 1);
@@ -24,7 +24,7 @@ fn form_triangles_from_neighbors_square() {
         DVec2::new(1.0, 1.0),
         DVec2::new(0.0, 1.0),
     ];
-    let tree = KdTree::build(&points).unwrap();
+    let tree = KdTree::build(points.clone()).unwrap();
 
     let triangles = form_triangles_from_neighbors(&tree, 3);
 
@@ -41,7 +41,7 @@ fn form_triangles_from_neighbors_square() {
 #[test]
 fn form_triangles_from_neighbors_too_few_points() {
     let points = vec![DVec2::new(0.0, 0.0), DVec2::new(1.0, 0.0)];
-    let tree = KdTree::build(&points).unwrap();
+    let tree = KdTree::build(points.clone()).unwrap();
     let triangles = form_triangles_from_neighbors(&tree, 3);
     assert!(triangles.is_empty());
 }
@@ -58,7 +58,7 @@ fn form_triangles_from_neighbors_k1_insufficient() {
         DVec2::new(0.0, 100.0),
         DVec2::new(100.0, 100.0),
     ];
-    let tree = KdTree::build(&points).unwrap();
+    let tree = KdTree::build(points.clone()).unwrap();
 
     // k=1: each point gets 1 neighbor. With only 1 neighbor per point,
     // we need pairs of neighbors, so can't form triangles from just 1 neighbor.
@@ -83,7 +83,7 @@ fn form_triangles_from_neighbors_no_duplicates() {
         DVec2::new(1.0, 1.0),
         DVec2::new(2.0, 1.0),
     ];
-    let tree = KdTree::build(&points).unwrap();
+    let tree = KdTree::build(points.clone()).unwrap();
 
     let triangles = form_triangles_from_neighbors(&tree, 5);
 
@@ -110,7 +110,7 @@ fn form_triangles_full_k_equals_brute_force() {
     let brute_force_count = n * (n - 1) * (n - 2) / 6;
     assert_eq!(brute_force_count, 20);
 
-    let tree = KdTree::build(&points).unwrap();
+    let tree = KdTree::build(points.clone()).unwrap();
     let triangles = form_triangles_from_neighbors(&tree, n - 1);
     assert_eq!(triangles.len(), brute_force_count);
 }
@@ -118,14 +118,14 @@ fn form_triangles_full_k_equals_brute_force() {
 #[test]
 fn form_triangles_kdtree_empty() {
     let positions: Vec<DVec2> = vec![];
-    let triangles = form_triangles_kdtree(&positions, 5);
+    let triangles = triangles_of(&positions, 5);
     assert!(triangles.is_empty());
 }
 
 #[test]
 fn form_triangles_kdtree_too_few() {
     let positions = vec![DVec2::new(0.0, 0.0), DVec2::new(1.0, 1.0)];
-    let triangles = form_triangles_kdtree(&positions, 5);
+    let triangles = triangles_of(&positions, 5);
     assert!(triangles.is_empty());
 }
 
@@ -138,7 +138,7 @@ fn form_triangles_kdtree_single_triangle() {
         DVec2::new(0.0, 4.0),
     ];
 
-    let triangles = form_triangles_kdtree(&positions, 3);
+    let triangles = triangles_of(&positions, 3);
 
     // Exactly 1 valid triangle from 3 points
     assert_eq!(triangles.len(), 1);
@@ -156,7 +156,7 @@ fn form_triangles_kdtree_all_collinear() {
         DVec2::new(2.0, 0.0),
         DVec2::new(3.0, 0.0),
     ];
-    let triangles = form_triangles_kdtree(&positions, 4);
+    let triangles = triangles_of(&positions, 4);
     assert!(triangles.is_empty());
 }
 
@@ -171,7 +171,7 @@ fn form_triangles_kdtree_ratios_in_valid_range() {
         DVec2::new(5.0, 5.0),
     ];
 
-    let triangles = form_triangles_kdtree(&positions, 4);
+    let triangles = triangles_of(&positions, 4);
 
     // Should form multiple triangles from 5 points
     assert!(triangles.len() >= 4);

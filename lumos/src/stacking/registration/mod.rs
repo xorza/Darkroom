@@ -47,6 +47,7 @@
 
 pub(crate) mod config;
 pub(crate) mod distortion;
+mod point_normalization;
 mod point_pairs;
 pub(crate) mod ransac;
 pub(crate) mod recovery;
@@ -62,13 +63,14 @@ mod real_data_tests;
 
 use crate::stacking::registration::point_pairs::PointPairs;
 use crate::stacking::registration::recovery::{RecoveredMatches, recover_matches};
+use crate::stacking::registration::spatial::KdTree;
 use config::Config;
 use distortion::sip::SipPolynomial;
 use result::{
     FailedRung, RansacFailureReason, RegistrationCatalog, RegistrationError, RegistrationResult,
     StarMatch,
 };
-use transform::{TransformModel, TransformType};
+use transform::{TransformModel, TransformType, WarpTransform};
 
 use std::time::Instant;
 
@@ -143,21 +145,24 @@ pub fn register(
     // Derive max_sigma from median FWHM for optimal noise tolerance
     let max_sigma = tuning::max_sigma_from_fwhm(median_fwhm(ref_stars, target_stars));
 
-    // Select stars for matching (take brightest N)
-    let ref_positions: Vec<DVec2> = ref_stars
-        .iter()
-        .take(config.matching.max_stars)
-        .map(|s| s.pos)
-        .collect();
-    let target_positions: Vec<DVec2> = target_stars
-        .iter()
-        .take(config.matching.max_stars)
-        .map(|s| s.pos)
-        .collect();
+    // The brightest `max_stars` of each set, as trees: triangle matching forms its triangles over
+    // both, and match recovery queries the target tree again on every rung.
+    let brightest = |stars: &[Star]| {
+        KdTree::build(
+            stars
+                .iter()
+                .take(config.matching.max_stars)
+                .map(|s| s.pos)
+                .collect(),
+        )
+        .expect("the star gates leave at least three stars in each set")
+    };
+    let ref_tree = brightest(ref_stars);
+    let target_tree = brightest(target_stars);
 
     // Triangle matching
     let t0 = Instant::now();
-    let matches = match_triangles(&ref_positions, &target_positions, &config.matching.triangle);
+    let matches = match_triangles(&ref_tree, &target_tree, &config.matching.triangle);
     let triangle_ms = t0.elapsed().as_secs_f64() * 1000.0;
     tracing::debug!(
         triangle_ms,
@@ -171,16 +176,12 @@ pub fn register(
 
     // RANSAC estimation
     let result = match config.transform_type {
-        TransformModel::Auto => auto_ladder(
-            &ref_positions,
-            &target_positions,
-            &matches,
-            max_sigma,
-            config,
-        ),
+        TransformModel::Auto => {
+            auto_ladder(ref_tree.points(), &target_tree, &matches, max_sigma, config)
+        }
         TransformModel::Fixed(transform_type) => estimate_and_refine(
-            &ref_positions,
-            &target_positions,
+            ref_tree.points(),
+            &target_tree,
             &matches,
             transform_type,
             max_sigma,
@@ -261,7 +262,7 @@ fn median_fwhm(ref_stars: &[Star], target_stars: &[Star]) -> f64 {
 /// model's inlier set — so no single rung's error stands in for the others.
 fn auto_ladder(
     ref_positions: &[DVec2],
-    target_positions: &[DVec2],
+    target_tree: &KdTree,
     matches: &[PointMatch],
     max_sigma: f64,
     config: &Config,
@@ -277,7 +278,7 @@ fn auto_ladder(
     ] {
         match estimate_and_refine(
             ref_positions,
-            target_positions,
+            target_tree,
             matches,
             model,
             max_sigma,
@@ -332,12 +333,13 @@ fn auto_ladder(
 /// the Auto resolution logic resolves to a concrete type before calling this.
 fn estimate_and_refine(
     ref_stars: &[DVec2],
-    target_stars: &[DVec2],
+    target_tree: &KdTree,
     matches: &[PointMatch],
     transform_type: TransformType,
     max_sigma: f64,
     config: &Config,
 ) -> Result<RegistrationResult, RegistrationError> {
+    let target_stars = target_tree.points();
     let t0 = Instant::now();
     let ransac = RansacEstimator::new(config.ransac.clone(), max_sigma);
     let ransac_result = ransac
@@ -352,7 +354,7 @@ fn estimate_and_refine(
     let inlier_matches: Vec<_> = ransac_result
         .inliers
         .iter()
-        .map(|&i| matches[i].indices())
+        .map(|&i| matches[i].indices)
         .collect();
 
     let t0 = Instant::now();
@@ -361,13 +363,21 @@ fn estimate_and_refine(
         matches: inlier_matches,
     } = recover_matches(
         ref_stars,
-        target_stars,
+        target_tree,
         &ransac_result.transform,
         &inlier_matches,
         tuning::recovery_radius(max_sigma),
         transform_type,
     );
     let recovery_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    // The floor the matcher was held to holds for the fit too: a transform supported by a minimal
+    // sample has a near-zero RMS by construction, so the accuracy gate alone would pass it.
+    if inlier_matches.len() < config.matching.min_matches {
+        return Err(RegistrationError::TooFewInliers {
+            found: inlier_matches.len(),
+            required: config.matching.min_matches,
+        });
+    }
 
     let t0 = Instant::now();
     let sip_fit = if let Some(sip_config) = &config.sip {
@@ -394,19 +404,18 @@ fn estimate_and_refine(
         None
     };
 
-    let sip_polynomial = sip_fit.as_ref().map(|r| &r.polynomial);
-
+    // Each pair's residual is measured where the warp will put its reference star, through the
+    // same `WarpTransform::apply` the warp evaluates.
+    let warp = WarpTransform {
+        transform,
+        sip: sip_fit.as_ref().map(|fit| fit.polynomial.clone()),
+    };
     let matched_stars: Vec<StarMatch> = inlier_matches
         .iter()
-        .map(|indices| {
-            let ref_pos = ref_stars[indices.reference];
-            let target_pos = target_stars[indices.target];
-            let corrected_r = match sip_polynomial {
-                Some(sip) => sip.correct(ref_pos),
-                None => ref_pos,
-            };
-            let p = transform.apply(corrected_r);
-            StarMatch::measured(*indices, (p - target_pos).length())
+        .map(|indices| StarMatch {
+            indices: *indices,
+            residual: (warp.apply(ref_stars[indices.reference]) - target_stars[indices.target])
+                .length(),
         })
         .collect();
 

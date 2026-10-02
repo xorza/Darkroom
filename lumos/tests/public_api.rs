@@ -10,8 +10,8 @@ use lumos::{
     FitsFloatScale, FitsHduProvenance, FitsHduSelector, FitsLoadOptions, FitsNullPolicy,
     FitsTransferProvenance, FrameStoreError, GesdConfig, ImageDimensions, ImageMetadata,
     InterpolationMethod, InvalidConfigField, LinearFitClipConfig, LinearImage, LoadContext,
-    MasterRole, NoiseModel, Normalization, PercentileClipConfig, QualityMap, QualityPlanes,
-    RansacConfig, RawTransferProvenance, RegistrationCatalog, RegistrationConfig,
+    MasterRole, MatchIndices, NoiseModel, Normalization, PercentileClipConfig, QualityMap,
+    QualityPlanes, RansacConfig, RawTransferProvenance, RegistrationCatalog, RegistrationConfig,
     RegistrationError, RegistrationMatchingConfig, Rejection, SampleDomain, ScaleOrigin,
     SigmaClipConfig, SipConfig, SmallN, StackConfig, StackConfigError, StackError, StackProduct,
     StarDetectionBackgroundConfig, StarDetectionCandidateConfig, StarDetectionConfig,
@@ -459,13 +459,14 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
     );
 
     let star_match = StarMatch {
-        reference: 4,
-        target: 9,
+        indices: MatchIndices {
+            reference: 4,
+            target: 9,
+        },
         residual: 0.125,
     };
     let StarMatch {
-        reference,
-        target,
+        indices: MatchIndices { reference, target },
         residual,
     } = star_match;
     assert_eq!(reference, 4);

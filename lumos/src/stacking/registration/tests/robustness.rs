@@ -8,9 +8,13 @@
 //! - Combined disturbances (stress tests)
 
 use crate::stacking::registration::ransac::config::RansacConfig;
+use crate::stacking::registration::spatial::KdTree;
 use crate::stacking::registration::tests::helpers::register;
 use crate::stacking::registration::transform::TransformModel;
-use crate::stacking::registration::{Config, RegistrationError, TransformType};
+use crate::stacking::registration::triangle::voting::{MatchIndices, PointMatch};
+use crate::stacking::registration::{
+    Config, RegistrationError, TransformType, estimate_and_refine,
+};
 use crate::stacking::star_detection::star::Star;
 use crate::testing::prelude::*;
 use crate::testing::synthetic::transforms::{
@@ -1040,5 +1044,63 @@ fn homography_with_noise_and_partial_overlap() {
         result.rms_error() < 3.0,
         "Homography RMS error with noise and overlap: {}",
         result.rms_error()
+    );
+}
+
+/// A fit is held to `min_matches` after recovery, not only the matcher. Twelve matches of which
+/// three agree on a translation: RANSAC fits the three exactly, the RMS is zero, and recovery has
+/// no star within reach of the others — so the fit rests on 3 pairs where 8 are asked for.
+#[test]
+fn a_fit_on_fewer_inliers_than_min_matches_is_refused() {
+    let shift = DVec2::new(4.0, -2.0);
+    let reference: Vec<DVec2> = (0..12u8)
+        .map(|i| DVec2::new(40.0 * f64::from(i % 4), 40.0 * f64::from(i / 4)))
+        .collect();
+    let target: Vec<DVec2> = reference
+        .iter()
+        .enumerate()
+        .map(|(i, &p)| {
+            if i < 3 {
+                p + shift
+            } else {
+                DVec2::new(
+                    900.0 + 37.0 * f64::from(i as u8),
+                    700.0 - 53.0 * f64::from(i as u8),
+                )
+            }
+        })
+        .collect();
+    let matches: Vec<PointMatch> = (0..12)
+        .map(|i| PointMatch {
+            indices: MatchIndices {
+                reference: i,
+                target: i,
+            },
+            confidence: 1.0,
+        })
+        .collect();
+    let mut config = Config {
+        transform_type: TransformModel::Fixed(TransformType::Translation),
+        ..Config::default()
+    };
+    config.ransac.seed = Some(1);
+    let error = estimate_and_refine(
+        &reference,
+        &KdTree::build(target).unwrap(),
+        &matches,
+        TransformType::Translation,
+        1.0,
+        &config,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            RegistrationError::TooFewInliers {
+                found: 3,
+                required: 8
+            }
+        ),
+        "{error:?}"
     );
 }
