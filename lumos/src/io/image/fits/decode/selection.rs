@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::path::Path;
 
-use fits_well::io::{ChecksumReport, ChecksumStatus, Hdu, HduKind, StreamReader};
+use fits_well::io::{ChecksumReport, ChecksumStatus, Hdu, StreamReader};
 
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::error::{fits_err, fits_unsupported};
@@ -11,19 +11,6 @@ use crate::io::image::fits::provenance::{
     FitsChecksumProvenance, FitsChecksumState, FitsHduProvenance,
 };
 use crate::io::image::load_context::LoadContext;
-
-fn hdu_is_image(path: &Path, hdu: &Hdu) -> Result<bool, ImageError> {
-    Ok(match hdu.kind {
-        HduKind::Image | HduKind::CompressedImage => true,
-        HduKind::Primary => {
-            hdu.header
-                .naxis()
-                .map_err(|source| fits_err(path, source))?
-                > 0
-        }
-        _ => false,
-    })
-}
 
 pub(super) fn selected_hdu(
     path: &Path,
@@ -61,12 +48,12 @@ pub(super) fn select_image_hdu(
 ) -> Result<FitsHduProvenance, ImageError> {
     let selected = match selector {
         FitsHduSelector::Auto => {
-            let mut images = Vec::new();
-            for (index, hdu) in hdus.iter().enumerate() {
-                if hdu_is_image(path, hdu)? {
-                    images.push(index);
-                }
-            }
+            let images: Vec<usize> = hdus
+                .iter()
+                .enumerate()
+                .filter(|(_, hdu)| hdu.is_image())
+                .map(|(index, _)| index)
+                .collect();
             match images.as_slice() {
                 [] => return Err(fits_unsupported(path, "no image HDU found")),
                 [index] => *index,
@@ -85,22 +72,10 @@ pub(super) fn select_image_hdu(
         FitsHduSelector::Name { extname, extver } => {
             let mut matches = Vec::new();
             for (index, hdu) in hdus.iter().enumerate() {
-                let Some(candidate) = hdu
-                    .header
-                    .get_text("EXTNAME")
+                if hdu
+                    .matches_extension(extname, *extver, None)
                     .map_err(|source| fits_err(path, source))?
-                else {
-                    continue;
-                };
-                if !candidate.eq_ignore_ascii_case(extname) {
-                    continue;
-                }
-                let candidate_version = hdu
-                    .header
-                    .get_integer("EXTVER")
-                    .map_err(|source| fits_err(path, source))?
-                    .unwrap_or(1);
-                if extver.is_none_or(|version| version == candidate_version) {
+                {
                     matches.push(index);
                 }
             }
@@ -129,7 +104,7 @@ pub(super) fn select_image_hdu(
         }
     };
     let selected = selected_hdu(path, hdus, selected)?;
-    if !hdu_is_image(path, &hdus[selected.index])? {
+    if !hdus[selected.index].is_image() {
         return Err(fits_unsupported(
             path,
             format!("selected HDU {} is not an image", selected.index),

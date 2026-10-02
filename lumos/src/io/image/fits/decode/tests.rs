@@ -4,7 +4,7 @@ use std::path::Path;
 
 use fits_well::FitsWriter;
 use fits_well::header::Header;
-use fits_well::image::{Compression, CompressionOptions, Image};
+use fits_well::image::{Bitpix, Compression, CompressionOptions, Image};
 use fits_well::io::{BLOCK_SIZE, HduKind};
 
 use crate::io::image::fits::decode::plan;
@@ -71,7 +71,9 @@ fn compressed_header(bitpix: i64, shape: &[usize]) -> Header {
 
 fn write_image(path: &Path, image: &Image) {
     let mut bytes = Vec::new();
-    FitsWriter::new(&mut bytes).write_image(image).unwrap();
+    FitsWriter::new(&mut bytes)
+        .write_image(image, None)
+        .unwrap();
     std::fs::write(path, bytes).unwrap();
 }
 
@@ -88,9 +90,9 @@ fn write_named_multi_image(path: &Path) {
     first_header.set("EXTNAME", "SCI").unwrap();
     first_header.set("EXTVER", 1).unwrap();
     writer
-        .write_image_with_header(
+        .write_image(
             &Image::new([2, 1], vec![1.0f32, 2.0]).unwrap(),
-            &first_header,
+            Some(&first_header),
         )
         .unwrap();
 
@@ -98,9 +100,9 @@ fn write_named_multi_image(path: &Path) {
     second_header.set("EXTNAME", "SCI").unwrap();
     second_header.set("EXTVER", 2).unwrap();
     writer
-        .write_image_with_header(
+        .write_image(
             &Image::new([2, 1, 3], vec![10.0f32, 20.0, 30.0, 40.0, 50.0, 60.0]).unwrap(),
-            &second_header,
+            Some(&second_header),
         )
         .unwrap();
 }
@@ -138,11 +140,12 @@ fn shape_validation_rejects_zero_overflow_and_unsupported_cubes_without_panickin
     );
     assert!(sample_overflow.contains("sample count overflows"));
 
-    let huge_cube = image_header(-32, &[1_000_000_000, 1_000_000_000, 4]);
+    let huge_shape = [1_000_000_000, 1_000_000_000, 4];
+    let huge_cube = image_header(-32, &huge_shape);
     let reason = unsupported_reason(
         plan::preflight_fits_image(
             path,
-            description(&huge_cube, HduKind::Primary, 0),
+            description(&huge_cube, HduKind::Primary, &huge_shape, Bitpix::F32, 0),
             FitsCubeInterpretation::Reject,
             FitsFloatScale::Auto,
             u64::MAX,
@@ -155,10 +158,11 @@ fn shape_validation_rejects_zero_overflow_and_unsupported_cubes_without_panickin
 #[test]
 fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
     let path = Path::new("budget.fits");
-    let rgb = image_header(-64, &[100, 100, 3]);
+    let rgb_shape = [100, 100, 3];
+    let rgb = image_header(-64, &rgb_shape);
     let plan = plan::preflight_fits_image(
         path,
-        description(&rgb, HduKind::Primary, 241_920),
+        description(&rgb, HduKind::Primary, &rgb_shape, Bitpix::F64, 241_920),
         FitsCubeInterpretation::Rgb,
         FitsFloatScale::Auto,
         u64::MAX,
@@ -170,7 +174,7 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
     assert_eq!(plan.rows_per_chunk, 100);
     plan::preflight_fits_image(
         path,
-        description(&rgb, HduKind::Primary, 241_920),
+        description(&rgb, HduKind::Primary, &rgb_shape, Bitpix::F64, 241_920),
         FitsCubeInterpretation::Rgb,
         FitsFloatScale::Auto,
         plan.peak_bytes,
@@ -179,7 +183,7 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
     let reason = unsupported_reason(
         plan::preflight_fits_image(
             path,
-            description(&rgb, HduKind::Primary, 241_920),
+            description(&rgb, HduKind::Primary, &rgb_shape, Bitpix::F64, 241_920),
             FitsCubeInterpretation::Rgb,
             FitsFloatScale::Auto,
             plan.peak_bytes - 1,
@@ -188,11 +192,18 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
     );
     assert!(reason.starts_with("estimated peak memory requires 320000 bytes"));
 
-    let compressed = compressed_header(-32, &[1024, 1024]);
+    let compressed_shape = [1024, 1024];
+    let compressed = compressed_header(-32, &compressed_shape);
     let reason = unsupported_reason(
         plan::preflight_fits_image(
             path,
-            description(&compressed, HduKind::CompressedImage, 2_880),
+            description(
+                &compressed,
+                HduKind::CompressedImage,
+                &compressed_shape,
+                Bitpix::F32,
+                2_880,
+            ),
             FitsCubeInterpretation::Reject,
             FitsFloatScale::Auto,
             4 * 1024 * 1024 - 1,
@@ -255,6 +266,7 @@ fn compressed_rgb_is_preflighted_and_decoded_by_final_plane() {
             &image,
             Compression::GZIP,
             &CompressionOptions::tiled([2, 2, 1]),
+            None,
         )
         .unwrap();
 
@@ -379,7 +391,7 @@ fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity(
     let valid_path = directory.join("valid.fits");
     FitsWriter::new(File::create(&valid_path).unwrap())
         .with_checksums()
-        .write_image(&image)
+        .write_image(&image, None)
         .unwrap();
     let valid = load_linear_fits(&valid_path, &require).unwrap();
     let TransferProvenance::FitsNormalized(FitsTransferProvenance { checksum, .. }) =

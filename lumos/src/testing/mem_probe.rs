@@ -215,7 +215,7 @@ fn write_fits_u16(path: &Path, size: Size2us, data: &[u16], buf: &mut Vec<u8>) -
     let image = Image::from_u16(vec![size.width, size.height], data).map_err(io::Error::other)?;
     buf.clear();
     FitsWriter::new(&mut *buf)
-        .write_image(&image)
+        .write_image(&image, None)
         .map_err(io::Error::other)?;
     std::fs::write(path, &buf)
 }
