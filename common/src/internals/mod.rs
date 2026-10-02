@@ -3,39 +3,29 @@
 
 pub(crate) mod temp_dir;
 pub(crate) mod temp_file;
+#[cfg(unix)]
+pub(crate) mod unreadable;
 
 use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::process;
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Returns the workspace root directory.
-/// Works by finding the directory containing Cargo.lock.
-fn workspace_root() -> PathBuf {
-    let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    PathBuf::from(manifest_dir).parent().unwrap().to_path_buf()
-}
+/// The environment variable that turns debug output on: any value does.
+pub const DEBUG_OUTPUT_VAR: &str = "DARKROOM_TEST_OUTPUT";
 
-/// Ensures the test output directory exists. Safe to call multiple times.
-fn ensure_test_output_dir() {
-    static INIT: OnceLock<()> = OnceLock::new();
-    INIT.get_or_init(|| {
-        fs::create_dir_all(workspace_root().join("test_output"))
-            .expect("Failed to create test_output directory");
-    });
-}
-
-/// Returns the path to a test output file.
-/// Supports subdirectories - they will be created if needed.
-pub fn test_output_path(name: &str) -> PathBuf {
-    ensure_test_output_dir();
-    let path = workspace_root().join("test_output").join(name);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).expect("Failed to create test output subdirectory");
-    }
-    path
+/// Where a test may write a file for a person to look at — `test_output/<name>` under the
+/// workspace root, with its parent directories made — or `None` when nobody asked: the output
+/// is opt-in through [`DEBUG_OUTPUT_VAR`], so an ordinary run writes nothing.
+pub fn debug_output_path(name: &str) -> Option<PathBuf> {
+    env::var_os(DEBUG_OUTPUT_VAR)?;
+    // `common` sits one level under the workspace root.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
+    let path = root.join("test_output").join(name);
+    fs::create_dir_all(path.parent().expect("a debug file has a parent directory"))
+        .expect("create a debug output directory");
+    Some(path)
 }
 
 /// A path under the OS temp directory nothing else will pick: `tag` says which

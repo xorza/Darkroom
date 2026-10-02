@@ -28,7 +28,7 @@ use crate::{
     CalibrationComponent, CalibrationMasters, CalibrationSet, DefectSummary, ImageError,
     ImageMetadata, MasterRole,
 };
-use common::internals;
+use common::TempDir;
 use fits_well::FitsReader;
 use fits_well::image::Bitpix;
 use fits_well::io::ChecksumStatus;
@@ -1343,7 +1343,8 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
 
 #[test]
 fn empty_master_fits_bundle_round_trips_as_a_checksummed_primary_hdu() {
-    let path = internals::test_output_path("empty_calibration_masters.fits");
+    let dir = TempDir::new("lumos-empty-masters");
+    let path = dir.join("masters.fits");
     CalibrationMasters::default().save(&path).unwrap();
 
     let bytes = fs::read(&path).unwrap();
@@ -1403,7 +1404,9 @@ fn stack_cfa_master_rejects_an_invalid_config_before_reading_anything() {
     // rejects every sample at every pixel and yields a silently black master; a negative one
     // inverts the clip band and faults on the survivor range. Both are configuration errors and
     // must be reported as such.
-    let missing = [PathBuf::from(".tmp/does-not-exist.fits")];
+    // A path inside a fresh empty directory names no file, wherever the test runs.
+    let dir = TempDir::new("lumos-invalid-config");
+    let missing = [dir.join("missing.fits")];
 
     for rejection in [Rejection::sigma_clip(f32::NAN), Rejection::sigma_clip(-1.0)] {
         let config = StackConfig {

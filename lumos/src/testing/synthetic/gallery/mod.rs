@@ -14,7 +14,7 @@
 use std::f32::consts::FRAC_PI_4;
 use std::path::PathBuf;
 
-use common::internals::test_output_path;
+use common::internals::{DEBUG_OUTPUT_VAR, debug_output_path};
 use glam::{DVec2, Vec2};
 
 use crate::math::size2us::Size2us;
@@ -35,9 +35,11 @@ fn save(pixels: &[f32], size: Size2us, name: &str, tone: ToneMap) -> PathBuf {
         size.pixel_count(),
         "pixel/dimension mismatch for {name}"
     );
-    let path = test_output_path(&format!("synthetic_gallery/{name}"));
-    visual::save(pixels, size, &path, tone);
-    visual::output_path(&path)
+    let name = format!("synthetic_gallery/{name}");
+    let path = visual::debug_file(&name)
+        .unwrap_or_else(|| panic!("the gallery writes images; set {DEBUG_OUTPUT_VAR}=1 to run it"));
+    visual::save(pixels, size, &name, tone);
+    path
 }
 
 /// Render a forward-model frame and save its sensor image.
@@ -484,7 +486,8 @@ fn gallery_fixtures() {
 #[test]
 #[ignore = "visual gallery; run with --ignored"]
 fn gallery_print_output_dir() {
-    let probe = test_output_path("synthetic_gallery/.probe");
+    let probe = debug_output_path("synthetic_gallery/.probe")
+        .unwrap_or_else(|| panic!("the gallery writes images; set {DEBUG_OUTPUT_VAR}=1 to run it"));
     println!(
         "synthetic gallery directory: {}",
         probe.parent().unwrap().display()

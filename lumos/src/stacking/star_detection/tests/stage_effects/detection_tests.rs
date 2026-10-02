@@ -9,7 +9,6 @@ use crate::stacking::star_detection::tests::Scenario;
 use crate::testing::init_tracing;
 use crate::testing::prelude::*;
 use crate::testing::visual::{ToneMap, gray_to_rgb, save, save_image};
-use common::internals::test_output_path;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
 
@@ -60,7 +59,7 @@ fn detection_sparse() {
     save(
         pixels.pixels(),
         size,
-        &test_output_path("synthetic_starfield/stage_det_sparse_input.png"),
+        "synthetic_starfield/stage_det_sparse_input.png",
         ToneMap::Clamp,
     );
 
@@ -93,10 +92,7 @@ fn detection_sparse() {
         &candidate_positions,
         &truth_positions,
     );
-    save_image(
-        overlay,
-        &test_output_path("synthetic_starfield/stage_det_sparse_overlay.png"),
-    );
+    save_image(overlay, "synthetic_starfield/stage_det_sparse_overlay.png");
 
     // Calculate detection rate
     let match_radius = 5.0;
@@ -208,7 +204,7 @@ fn detection_thresholds() {
     save(
         pixels.pixels(),
         Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_det_thresholds_input.png"),
+        "synthetic_starfield/stage_det_thresholds_input.png",
         ToneMap::Clamp,
     );
 
@@ -291,7 +287,7 @@ fn detection_area_filter() {
     save(
         pixels.pixels(),
         Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_det_area_filter_input.png"),
+        "synthetic_starfield/stage_det_area_filter_input.png",
         ToneMap::Clamp,
     );
 

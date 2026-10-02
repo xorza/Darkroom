@@ -8,8 +8,9 @@
 //! - Combined disturbances (stress tests)
 
 use crate::stacking::registration::ransac::config::RansacConfig;
+use crate::stacking::registration::tests::helpers::register;
 use crate::stacking::registration::transform::TransformModel;
-use crate::stacking::registration::{Config, RegistrationError, TransformType, register};
+use crate::stacking::registration::{Config, RegistrationError, TransformType};
 use crate::stacking::star_detection::star::Star;
 use crate::testing::prelude::*;
 use crate::testing::synthetic::transforms::{

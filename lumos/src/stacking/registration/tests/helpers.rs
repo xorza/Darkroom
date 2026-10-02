@@ -1,6 +1,7 @@
 //! Shared test helpers for synthetic registration tests.
 
 use crate::stacking::registration::config::RegistrationMatchingConfig;
+use crate::stacking::registration::{self, Config, RegistrationError, RegistrationResult};
 use crate::stacking::star_detection::star::Star;
 use crate::testing::prelude::*;
 
@@ -8,6 +9,21 @@ use crate::testing::prelude::*;
 pub(super) const FWHM_TIGHT: f32 = 1.34;
 /// FWHM for normal/typical stars (~`max_sigma` 1.0).
 pub(super) const FWHM_NORMAL: f32 = 2.0;
+
+/// The RANSAC seed a test that names none runs with, so a registration result is repeatable.
+const TEST_SEED: u64 = 0x5EED;
+
+/// [`registration::register`] with a seeded RANSAC: a config that names no seed gets
+/// `TEST_SEED`, one that does keeps its own.
+pub(super) fn register(
+    ref_stars: &[Star],
+    target_stars: &[Star],
+    config: &Config,
+) -> Result<RegistrationResult, RegistrationError> {
+    let mut config = config.clone();
+    config.ransac.seed.get_or_insert(TEST_SEED);
+    registration::register(ref_stars, target_stars, &config)
+}
 
 pub(super) fn matching_config(min_stars: usize, min_matches: usize) -> RegistrationMatchingConfig {
     RegistrationMatchingConfig {

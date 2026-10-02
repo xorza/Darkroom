@@ -1,17 +1,16 @@
 //! Debug image output for visual tests: PNG writers, tone mapping, and annotated overlays.
 //!
-//! These write to `test_output/` for a human to look at; nothing here is asserted on. The
+//! These write to `test_output/` for a human to look at, and only when
+//! `DARKROOM_TEST_OUTPUT` is set; nothing here is asserted on. The
 //! grading a test actually asserts lives in [`report`] and
 //! [`metrics`](crate::testing::synthetic::metrics).
 
 pub(crate) mod comparison;
 pub(crate) mod report;
 
+use common::internals;
 use image::GrayImage;
 use imaginarium::{ColorFormat, Image, ImageDesc};
-#[cfg(feature = "real-data")]
-use std::fs;
-use std::path::Path;
 use std::path::PathBuf;
 
 #[cfg(feature = "real-data")]
@@ -76,10 +75,10 @@ impl ToneMap {
     }
 }
 
-/// Build an output path with the configured test image extension.
-/// Takes a base path and replaces or adds the extension from `TEST_OUTPUT_IMAGE_EXT`.
-pub(crate) fn output_path(base: &Path) -> PathBuf {
-    base.with_extension(TEST_OUTPUT_IMAGE_EXT)
+/// Where the debug image `name` goes, with the configured extension, or `None` when debug output
+/// is off ([`internals::debug_output_path`]).
+pub(crate) fn debug_file(name: &str) -> Option<PathBuf> {
+    internals::debug_output_path(name).map(|path| path.with_extension(TEST_OUTPUT_IMAGE_EXT))
 }
 
 /// Convert an f32 grayscale plane to an imaginarium `RGB_F32` image under `tone`.
@@ -95,8 +94,10 @@ pub(crate) fn gray_to_rgb(pixels: &[f32], size: Size2us, tone: ToneMap) -> Image
 
 /// Save imaginarium Image to file using the configured test output format.
 /// Converts to `RGB_U8` if needed since some formats don't support float data.
-pub(crate) fn save_image(image: Image, path: &Path) {
-    let out = output_path(path);
+pub(crate) fn save_image(image: Image, name: &str) {
+    let Some(out) = debug_file(name) else {
+        return;
+    };
     let image_u8 = if image.desc().color_format.sample_type.is_float() {
         image.convert(ColorFormat::RGB_U8)
     } else {
@@ -179,10 +180,9 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> image::Rgb<u8> {
 /// it here; this one has colour to preserve and no single plane to map.
 #[cfg(feature = "real-data")]
 pub(crate) fn save_linear(image: &LinearImage, name: &str) {
-    use common::internals::test_output_path;
-
-    let path = test_output_path(name);
-    fs::create_dir_all(path.parent().unwrap()).expect("create test_output dir");
+    let Some(path) = debug_file(name) else {
+        return;
+    };
     Image::from(image)
         .convert(ColorFormat::RGB_U8)
         .save_file(&path)
@@ -191,17 +191,20 @@ pub(crate) fn save_linear(image: &LinearImage, name: &str) {
 }
 
 /// Write an f32 plane as an 8-bit image under `tone`, with the configured extension.
-pub(crate) fn save(pixels: &[f32], size: Size2us, path: &Path, tone: ToneMap) {
-    to_gray(pixels, size, tone)
-        .save(output_path(path))
-        .expect("write debug image");
+pub(crate) fn save(pixels: &[f32], size: Size2us, name: &str, tone: ToneMap) {
+    if let Some(path) = debug_file(name) {
+        to_gray(pixels, size, tone)
+            .save(path)
+            .expect("write debug image");
+    }
 }
 
 /// Save RGB image to file using the configured test output format.
 #[cfg(feature = "real-data")]
-pub(crate) fn save_rgb(image: &image::RgbImage, path: &Path) {
-    let out = output_path(path);
-    image.save(&out).expect("Failed to save RGB image");
+pub(crate) fn save_rgb(image: &image::RgbImage, name: &str) {
+    if let Some(out) = debug_file(name) {
+        image.save(&out).expect("Failed to save RGB image");
+    }
 }
 
 /// Save comparison image showing ground truth vs detected stars.
@@ -211,18 +214,22 @@ pub(crate) fn save_comparison(
     ground_truth: &[ObservedSource],
     detected: &[Star],
     match_radius: f32,
-    path: &Path,
+    name: &str,
 ) {
-    let image = create_comparison_image(pixels, size, ground_truth, detected, match_radius);
-    save_image(image, path);
+    if debug_file(name).is_some() {
+        let image = create_comparison_image(pixels, size, ground_truth, detected, match_radius);
+        save_image(image, name);
+    }
 }
 
 /// Save mask to file using the configured test output format.
 #[cfg(feature = "real-data")]
-pub(crate) fn save_mask(mask: &BitBuffer2, path: &Path) {
-    let out = output_path(path);
-    let img = mask_to_gray(mask);
-    img.save(&out).expect("Failed to save mask image");
+pub(crate) fn save_mask(mask: &BitBuffer2, name: &str) {
+    if let Some(out) = debug_file(name) {
+        mask_to_gray(mask)
+            .save(&out)
+            .expect("Failed to save mask image");
+    }
 }
 
 #[cfg(test)]

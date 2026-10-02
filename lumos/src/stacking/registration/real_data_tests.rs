@@ -323,11 +323,13 @@ fn weighted_fit_registration_rms() {
         let mut detector = StarDetector::from_config(config).unwrap();
         let s1 = detector.detect(&img1).stars;
         let s2 = detector.detect(&img2).stars;
-        let reg_config = RegistrationConfig {
+        let mut reg_config = RegistrationConfig {
             transform_type: TransformModel::Auto,
             sip: None,
             ..RegistrationConfig::default()
         };
+        // Seeded, so the two runs differ only in their centroids.
+        reg_config.ransac.seed = Some(0x5EED);
         let r = register(&s1, &s2, &reg_config).expect("registration should succeed");
         (r.rms_error(), r.num_inliers())
     };
@@ -339,7 +341,8 @@ fn weighted_fit_registration_rms() {
     println!("  unweighted: RMS {unweighted_rms:.4} px, {unweighted_n} matches");
     println!("  weighted:   RMS {weighted_rms:.4} px, {weighted_n} matches");
 
-    // Weighting must not meaningfully worsen registration (5% slack for noise).
+    // Weighting must not meaningfully worsen registration. The two catalogs differ, so RANSAC keeps
+    // different inlier sets; 5% is the margin "not meaningfully worse" allows on that.
     assert!(
         weighted_rms <= unweighted_rms * 1.05,
         "weighted RMS {weighted_rms:.4} should be ≤ unweighted {unweighted_rms:.4} ×1.05"

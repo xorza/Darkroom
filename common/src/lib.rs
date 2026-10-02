@@ -74,6 +74,8 @@ pub use float_ext::FloatExt;
 pub use internals::temp_dir::TempDir;
 #[cfg(any(test, feature = "internals"))]
 pub use internals::temp_file::TempFile;
+#[cfg(all(unix, any(test, feature = "internals")))]
+pub use internals::unreadable::Unreadable;
 pub use introspect::{
     FieldDesc, FieldKind, FieldValue, FloatKind, IntegerKind, IntegerValue, Introspect,
     IntrospectEnum, IntrospectError, IntrospectFloat, IntrospectInteger,

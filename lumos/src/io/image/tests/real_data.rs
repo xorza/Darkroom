@@ -5,7 +5,8 @@
 
 use common::CancelToken;
 use common::file_utils;
-use common::internals::test_output_path;
+
+use common::internals::debug_output_path;
 
 use crate::io::image::PREVIEW_IMAGE_EXTENSIONS;
 use crate::io::image::cfa::CfaImage;
@@ -66,8 +67,7 @@ fn load_single_raw_from_env() {
     assert!(image.height() > 0);
     assert_eq!(image.channels(), 3);
 
-    let image: imaginarium::Image = image.into();
-    image
-        .save_file(test_output_path("light_from_raw.tiff"))
-        .unwrap();
+    if let Some(path) = debug_output_path("light_from_raw.tiff") {
+        imaginarium::Image::from(image).save_file(path).unwrap();
+    }
 }

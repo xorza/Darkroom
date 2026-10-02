@@ -9,7 +9,6 @@ use crate::stacking::star_detection::tests::Scenario;
 use crate::testing::init_tracing;
 use crate::testing::prelude::*;
 use crate::testing::visual::{ToneMap, save};
-use common::internals::test_output_path;
 
 /// Tile size these fixtures are built around.
 ///
@@ -50,7 +49,7 @@ fn gaussian_filter_sparse() {
     save(
         pixels.pixels(),
         Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_conv_sparse_input.png"),
+        "synthetic_starfield/stage_conv_sparse_input.png",
         ToneMap::Clamp,
     );
 
@@ -72,7 +71,7 @@ fn gaussian_filter_sparse() {
     save(
         &bg_subtracted,
         Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_conv_sparse_bg_subtracted.png"),
+        "synthetic_starfield/stage_conv_sparse_bg_subtracted.png",
         ToneMap::Clamp,
     );
 
@@ -89,7 +88,7 @@ fn gaussian_filter_sparse() {
     save(
         &filtered_display,
         Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_conv_sparse_filtered.png"),
+        "synthetic_starfield/stage_conv_sparse_filtered.png",
         ToneMap::Clamp,
     );
 
@@ -159,7 +158,7 @@ fn gaussian_filter_fwhm_range() {
     save(
         pixels.pixels(),
         Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_conv_fwhm_range_input.png"),
+        "synthetic_starfield/stage_conv_fwhm_range_input.png",
         ToneMap::Clamp,
     );
 
@@ -237,7 +236,7 @@ fn gaussian_filter_noise() {
     save(
         pixels.pixels(),
         Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_conv_noise_input.png"),
+        "synthetic_starfield/stage_conv_noise_input.png",
         ToneMap::Clamp,
     );
 
@@ -259,7 +258,7 @@ fn gaussian_filter_noise() {
     save(
         &bg_subtracted,
         Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_conv_noise_bg_subtracted.png"),
+        "synthetic_starfield/stage_conv_noise_bg_subtracted.png",
         ToneMap::Clamp,
     );
 
@@ -274,7 +273,7 @@ fn gaussian_filter_noise() {
     save(
         &filtered_display,
         Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_conv_noise_filtered.png"),
+        "synthetic_starfield/stage_conv_noise_filtered.png",
         ToneMap::Clamp,
     );
 
