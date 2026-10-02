@@ -204,16 +204,11 @@ pub(crate) mod internals {
             node_idx
         }
     }
-}
-
-#[cfg(test)]
-mod id_lookups {
-    use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionNode};
-    use crate::graph::identity::NodeId;
 
     /// Id lookups for a unit test that stood a program up by hand and knows its
     /// nodes by the ids it gave them. Production paths carry `NodeIdx`, so
     /// nothing outside a test pays the search.
+    #[cfg(test)]
     impl CompiledGraph {
         pub(crate) fn by_id(&self, id: NodeId) -> &ExecutionNode {
             &self[self.node(id).expect("the fixture placed this node")]

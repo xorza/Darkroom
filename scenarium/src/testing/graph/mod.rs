@@ -20,10 +20,6 @@ use std::sync::Arc;
 use hashbrown::HashMap;
 
 use crate::async_lambda;
-#[cfg(test)]
-use crate::execution::compile::Compiler;
-#[cfg(test)]
-use crate::execution::compile::error::CompileError;
 use crate::graph::detached::DetachedNode;
 use crate::graph::func::error::InvokeError;
 use crate::graph::func::event::EventLambda;
@@ -35,8 +31,6 @@ use crate::graph::node::{CacheMode, Node, NodeKind};
 use crate::graph::{Binding, Graph};
 use crate::library::Library;
 use crate::testing::calls::Calls;
-#[cfg(test)]
-use crate::testing::graph::compiled::Compiled;
 use crate::{ConstValue, DataType, DynamicValue};
 
 /// A graph, the library it resolves against, and the names its nodes answer to.
@@ -574,24 +568,31 @@ impl NodeSpec {
 }
 
 #[cfg(test)]
-impl TestGraph {
-    /// Lower this fixture, keeping the names. Panics on a compile error —
-    /// for the tests where the refusal *is* the subject, see
-    /// [`try_compile`](Self::try_compile).
-    pub(crate) fn compile(&self) -> Compiled {
-        self.try_compile().expect("the fixture graph compiles")
-    }
-
-    pub(crate) fn try_compile(&self) -> Result<Compiled, CompileError> {
-        Ok(Compiled::new(
-            Compiler::default().compile(&self.graph, &self.library)?,
-            self.ids.clone(),
-        ))
-    }
-}
+pub(crate) mod compiled;
 
 #[cfg(test)]
-pub(crate) mod compiled;
+mod internals {
+    use crate::execution::compile::Compiler;
+    use crate::execution::compile::error::CompileError;
+    use crate::testing::graph::TestGraph;
+    use crate::testing::graph::compiled::Compiled;
+
+    impl TestGraph {
+        /// Lower this fixture, keeping the names. Panics on a compile error —
+        /// for the tests where the refusal *is* the subject, see
+        /// [`try_compile`](Self::try_compile).
+        pub(crate) fn compile(&self) -> Compiled {
+            self.try_compile().expect("the fixture graph compiles")
+        }
+
+        pub(crate) fn try_compile(&self) -> Result<Compiled, CompileError> {
+            Ok(Compiled::new(
+                Compiler::default().compile(&self.graph, &self.library)?,
+                self.ids.clone(),
+            ))
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests;

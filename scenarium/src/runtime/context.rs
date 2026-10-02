@@ -154,19 +154,8 @@ impl ContextManager {
 
 #[cfg(any(test, feature = "internals"))]
 pub(crate) mod internals {
-    use std::any::{Any, TypeId};
-
     use crate::graph::identity::NodeId;
-    use crate::runtime::context::{ContextManager, ContextStore};
-
-    impl ContextStore {
-        pub fn insert_context<T>(&mut self, value: T)
-        where
-            T: Any + Send + Sync,
-        {
-            self.store.insert(TypeId::of::<T>(), Box::new(value));
-        }
-    }
+    use crate::runtime::context::ContextManager;
 
     impl ContextManager {
         /// Stand in for the executor's per-invoke attribution, so a lambda that

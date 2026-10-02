@@ -591,7 +591,7 @@ fn require_payload_len(actual: u64, expected: u64) -> codec::error::Result<()> {
     }
 }
 
-fn header_len(output_count: usize) -> usize {
+pub(super) fn header_len(output_count: usize) -> usize {
     checked_header_len(output_count).expect("a cache header length must fit in memory")
 }
 
@@ -619,12 +619,6 @@ fn invalid_data(message: &'static str) -> io::Error {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    /// Byte offset of the first output payload: where a test corrupts a blob body while
-    /// leaving the header — and so a reuse probe's verdict — intact.
-    pub(crate) fn body_offset(output_count: usize) -> usize {
-        super::header_len(output_count)
-    }
-
     /// Rewrite `blob`'s format version to the one before the current: the header a blob from an
     /// earlier build carries, which every read refuses.
     pub(crate) fn age_format(blob: &mut [u8]) {

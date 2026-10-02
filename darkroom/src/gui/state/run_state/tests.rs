@@ -1,8 +1,8 @@
 use super::*;
 
-use scenarium::CompiledGraphBuilder;
 use scenarium::FuncId;
 use scenarium::NodeStatus;
+use scenarium::testing::compiled_graph_builder::CompiledGraphBuilder;
 
 use crate::gui::state::preview_store::StoredContent;
 

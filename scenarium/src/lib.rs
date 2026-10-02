@@ -52,8 +52,6 @@ pub use execution::cache::runtime::error::{
 pub use execution::compile::Compiler;
 pub use execution::compile::compiled_graph::CompiledGraph;
 pub use execution::compile::error::CompileError;
-#[cfg(any(test, feature = "internals"))]
-pub use execution::compile::internals::CompiledGraphBuilder;
 pub use execution::error::{Error, Result, RunError};
 pub use execution::report::{LogEntry, LogLevel};
 pub use execution::report::{NodeExecutionStatus, NodeStatus};

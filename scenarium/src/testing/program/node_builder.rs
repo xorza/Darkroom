@@ -20,7 +20,7 @@ pub(crate) struct NodeBuilder<'a> {
     e_node: ExecutionNode,
     inputs: Vec<ExecutionInput>,
     outputs: Vec<DataType>,
-    events: usize,
+    events: Vec<ExecutionEvent>,
     node_id: Option<NodeId>,
 }
 
@@ -31,7 +31,7 @@ impl<'a> NodeBuilder<'a> {
             e_node: ExecutionNode::default(),
             inputs: Vec::new(),
             outputs: Vec::new(),
-            events: 0,
+            events: Vec::new(),
             node_id: None,
         }
     }
@@ -142,6 +142,15 @@ impl<'a> NodeBuilder<'a> {
         self
     }
 
+    /// Declare one event whose subscribers are `subscribers`, in order.
+    pub(crate) fn event(mut self, subscribers: impl IntoIterator<Item = Placed>) -> Self {
+        self.events.push(ExecutionEvent {
+            subscribers: subscribers.into_iter().map(|node| node.node_idx).collect(),
+            lambda: EventLambda::default(),
+        });
+        self
+    }
+
     /// Place the node and hand back where it landed.
     pub(crate) fn add(self) -> Placed {
         let NodeBuilder {
@@ -167,13 +176,7 @@ impl<'a> NodeBuilder<'a> {
         }
         e_node.inputs = owner.program.inputs.append(inputs);
         e_node.outputs = owner.program.outputs.append(outputs);
-        e_node.events = owner
-            .program
-            .events
-            .append((0..events).map(|_| ExecutionEvent {
-                subscribers: Vec::new(),
-                lambda: EventLambda::default(),
-            }));
+        e_node.events = owner.program.events.append(events);
         let node_idx = owner.program.push(node_id, e_node);
         let placed = Placed { node_id, node_idx };
         owner.placed.push(placed);

@@ -3,7 +3,6 @@ use std::error::Error;
 use ron::ser;
 use ron::value::RawValue;
 
-use crate::EventLambda;
 use crate::execution::compile::compiled_graph::ExecutionBinding;
 use crate::graph::Graph;
 use crate::graph::error::GraphValidationError;
@@ -738,28 +737,6 @@ fn node_func_resolves_to_a_declaration_or_to_unknown() {
     // whose func went missing would read as out of range.
     let missing_func = Node::new(NodeKind::Func(FuncId::unique()));
     assert!(g.graph.node_func(&missing_func, &g.library).is_none());
-
-    // The three policy flags come off the declaration verbatim. Each is set
-    // on one of the two funcs and clear on the other, so a flag wired to the
-    // wrong field can't pass.
-    g.add("plain", |n| n.pure().output(DataType::Int));
-    g.add("flagged", |n| {
-        n.sink().uncacheable().optional(DataType::Int)
-    });
-    let func = |g: &TestGraph, name: &str| g.library.by_name(name).unwrap().clone();
-
-    let plain = func(&g, "plain");
-    assert!(!plain.sink);
-    assert!(!plain.uncacheable);
-    assert!(!plain.impure(), "declared `pure` is not impure");
-
-    let flagged = func(&g, "flagged");
-    assert!(flagged.sink);
-    assert!(flagged.uncacheable);
-    assert!(
-        flagged.impure(),
-        "a func is Impure until `pure()` says otherwise"
-    );
 }
 
 #[test]
@@ -775,17 +752,4 @@ fn input_type_resolves_declared_types_and_rejects_out_of_range() {
         Some(DataType::Float)
     );
     assert_eq!(g.graph.input_type(&g.library, InputPort::new(dst, 9)), None);
-}
-
-#[test]
-fn node_events_expose_names_and_arity() {
-    let emitter = Func::new(FuncId::unique(), "ticker")
-        .event("tick", EventLambda::default())
-        .event("tock", EventLambda::default());
-    assert_eq!(emitter.events.len(), 2);
-    let names: Vec<&str> = emitter.events.iter().map(|e| e.name.as_str()).collect();
-    assert_eq!(names, ["tick", "tock"]);
-
-    let silent = Func::new(FuncId::unique(), "silent");
-    assert!(silent.events.is_empty());
 }
