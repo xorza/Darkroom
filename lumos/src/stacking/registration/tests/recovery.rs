@@ -2,6 +2,7 @@
 
 use crate::stacking::registration::ransac::transforms::estimate_transform;
 use crate::stacking::registration::recovery::recover_matches;
+use crate::stacking::registration::transform::Transform;
 use crate::stacking::registration::triangle::voting::MatchIndices;
 use crate::stacking::registration::*;
 use crate::testing::synthetic::transforms::generate_random_positions;
@@ -205,4 +206,77 @@ fn iterative_recovery_removes_outliers() {
         "Should recover many correct matches after removing outliers, got {}",
         recovered.len()
     );
+}
+
+/// A pass that drops one match and adds another leaves the count unchanged but the set changed.
+/// The recovered transform must still be the fit of exactly the matches returned.
+///
+/// Stars 0..9 on a line; targets exist only for stars 0..5 and 9, at the reference position,
+/// except star 4's, which sits 0.2 px left. The seed is the translation (0.9, 0) over stars 0..5,
+/// with a 1 px threshold. Under it star 4 misses by 1.1 and is dropped while star 9 (0.9 away) is
+/// added: six matches before and after. Refitting on {0, 1, 2, 3, 5, 9} gives the identity, which
+/// takes star 4 back; the fit over all seven is the translation (−0.2/7, 0), under which every one
+/// is within 0.2 px, so the set is stable and that fit is what comes back.
+#[test]
+fn a_pass_that_trades_one_match_for_another_still_refits() {
+    let reference: Vec<DVec2> = (0..10).map(|i| DVec2::new(10.0 * i as f64, 5.0)).collect();
+    let mut target: Vec<DVec2> = vec![
+        reference[0],
+        reference[1],
+        reference[2],
+        reference[3],
+        reference[4] - DVec2::new(0.2, 0.0),
+        reference[5],
+        reference[9],
+    ];
+    // Stars 6..8 have no target anywhere near them.
+    target.extend([DVec2::new(500.0, 500.0), DVec2::new(600.0, 600.0)]);
+    let seed = Transform::translation(DVec2::new(0.9, 0.0));
+    let seed_matches = identity_matches(6);
+
+    let recovered = recover_matches(
+        &reference,
+        &target,
+        &seed,
+        &seed_matches,
+        1.0,
+        TransformType::Translation,
+    );
+
+    let mut matches: Vec<(usize, usize)> = recovered
+        .matches
+        .iter()
+        .map(|m| (m.reference, m.target))
+        .collect();
+    matches.sort_unstable();
+    assert_eq!(
+        matches,
+        [(0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (9, 6)]
+    );
+
+    let (fit_ref, fit_target): (Vec<DVec2>, Vec<DVec2>) = matches
+        .iter()
+        .map(|&(r, t)| (reference[r], target[t]))
+        .unzip();
+    let fitted = estimate_transform(&fit_ref, &fit_target, TransformType::Translation).unwrap();
+    assert_eq!(recovered.transform.matrix(), fitted.matrix());
+    assert!((recovered.transform.translation_components().x - (-0.2 / 7.0)).abs() < 1e-12);
+}
+
+/// No target stars: nothing can be recovered, and the seed comes back unchanged.
+#[test]
+fn recovery_without_target_stars_returns_the_seed() {
+    let reference = generate_random_positions(20, 200.0, 200.0, 3);
+    let seed = Transform::translation(DVec2::new(1.0, 2.0));
+    let seed_matches = identity_matches(5);
+    let recovered = recover_matches(
+        &reference,
+        &[],
+        &seed,
+        &seed_matches,
+        2.0,
+        TransformType::Translation,
+    );
+    assert_eq!(recovered.transform.matrix(), seed.matrix());
+    assert_eq!(recovered.matches, seed_matches);
 }

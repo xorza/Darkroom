@@ -15,7 +15,9 @@ use crate::stacking::registration::transform::{Transform, TransformType};
 use crate::stacking::registration::triangle::voting::MatchIndices;
 
 /// Maximum iterations for iterative match recovery.
-/// Convergence is typically reached in 2-3 passes; diminishing returns after that.
+/// Convergence is typically reached in 2-3 passes; diminishing returns after that. Stopping at the
+/// cap still returns a transform fitted to the matches returned — only the last pass's candidates
+/// are left unexamined.
 const RECOVERY_MAX_ITERATIONS: usize = 5;
 
 #[derive(Debug)]
@@ -43,8 +45,12 @@ pub(crate) fn recover_matches(
     };
 
     let threshold_sq = inlier_threshold * inlier_threshold;
+    // The pair every pass starts from: a transform and the very matches it was fitted to. A pass
+    // replaces both together or neither, so what comes back is always a fit of what comes back.
     let mut current_transform = *transform;
     let mut current_matches = inlier_matches.to_vec();
+    current_matches.sort_unstable_by_key(|m| (m.reference, m.target));
+    let mut candidate = Vec::with_capacity(current_matches.len());
 
     // Dense small-integer membership over [0, n) → bitmaps, not HashSets: no hashing,
     // no allocation per pass, and order-independent (deterministic).
@@ -54,11 +60,10 @@ pub(crate) fn recover_matches(
     let mut all = PointPairs::default();
 
     for _ in 0..RECOVERY_MAX_ITERATIONS {
-        let prev_count = current_matches.len();
-
+        candidate.clone_from(&current_matches);
         matched_target.fill(false);
         matched_ref.fill(false);
-        for star_match in &current_matches {
+        for star_match in &candidate {
             matched_target[star_match.target] = true;
             matched_ref[star_match.reference] = true;
         }
@@ -76,7 +81,7 @@ pub(crate) fn recover_matches(
                 && nn.dist_sq <= threshold_sq
                 && !matched_target[nn.index]
             {
-                current_matches.push(MatchIndices {
+                candidate.push(MatchIndices {
                     reference: ref_idx,
                     target: nn.index,
                 });
@@ -85,29 +90,30 @@ pub(crate) fn recover_matches(
         }
 
         // Re-validate all matches against current transform, removing outliers
-        current_matches.retain(|star_match| {
+        candidate.retain(|star_match| {
             let predicted = current_transform.apply(ref_stars[star_match.reference]);
             (predicted - target_stars[star_match.target]).length_squared() <= threshold_sq
         });
+        candidate.sort_unstable_by_key(|m| (m.reference, m.target));
 
-        // Stop if match count didn't change (converged)
-        if current_matches.len() == prev_count {
+        // Converged when the pass leaves the *set* as it was. Comparing counts would stop on a pass
+        // that dropped one match and added another, with a transform fitted to neither set.
+        if candidate == current_matches {
             break;
         }
 
-        // Refit transform with updated matches
         all.gather_matched(
-            current_matches
+            candidate
                 .iter()
                 .map(|star_match| (star_match.reference, star_match.target)),
             ref_stars,
             target_stars,
         );
-
-        match estimate_transform(&all.reference, &all.target, transform_type) {
-            Some(new_transform) => current_transform = new_transform,
-            None => break,
-        }
+        let Some(refit) = estimate_transform(&all.reference, &all.target, transform_type) else {
+            break;
+        };
+        current_transform = refit;
+        std::mem::swap(&mut current_matches, &mut candidate);
     }
 
     // Ensure we never return fewer matches than we started with
