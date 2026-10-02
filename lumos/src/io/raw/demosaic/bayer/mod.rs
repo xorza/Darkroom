@@ -24,28 +24,30 @@ pub enum CfaPattern {
 }
 
 impl CfaPattern {
-    /// Parse from FITS BAYERPAT header value (e.g. "RGGB", "BGGR", "GRBG", "GBRG").
-    ///
-    /// `"TRUE"` is not a pattern. Some writers put a boolean there — "yes, this frame is mosaiced"
-    /// — and say nothing about which of the four phases it carries. Reading it as RGGB is a guess
-    /// at the most common one, right roughly a quarter of the time and a fully mis-debayered frame
-    /// otherwise, so it is warned about rather than resolved silently. Kept because rejecting it
-    /// would leave those files unloadable with no way to state the pattern by hand.
-    pub fn from_bayerpat(s: &str) -> Option<Self> {
-        match s.trim().to_uppercase().as_str() {
-            "RGGB" => Some(CfaPattern::Rggb),
-            "TRUE" => {
-                tracing::warn!(
-                    "BAYERPAT is 'TRUE', which states that the frame is mosaiced but not in which \
-                     phase; assuming RGGB. A wrong assumption here mis-debayers the frame."
-                );
-                Some(CfaPattern::Rggb)
-            }
-            "BGGR" => Some(CfaPattern::Bggr),
-            "GRBG" => Some(CfaPattern::Grbg),
-            "GBRG" => Some(CfaPattern::Gbrg),
-            _ => None,
+    /// The four phases, in `BAYERPAT` spelling order.
+    pub const ALL: [Self; 4] = [Self::Rggb, Self::Bggr, Self::Grbg, Self::Gbrg];
+
+    /// The FITS `BAYERPAT` value for this phase.
+    pub const fn bayerpat(self) -> &'static str {
+        match self {
+            Self::Rggb => "RGGB",
+            Self::Bggr => "BGGR",
+            Self::Grbg => "GRBG",
+            Self::Gbrg => "GBRG",
         }
+    }
+
+    /// The phase a FITS `BAYERPAT` value names, in any case and with blanks around it.
+    ///
+    /// `"TRUE"` is not a phase. Some writers put a boolean there — "yes, this frame is mosaiced" —
+    /// and say nothing about which of the four phases it carries, so it is `None` like any other
+    /// value; the FITS loader then takes the phase from `FitsLoadOptions::unstated_bayer_pattern`
+    /// or refuses the frame rather than guess.
+    pub fn from_bayerpat(s: &str) -> Option<Self> {
+        let s = s.trim();
+        Self::ALL
+            .into_iter()
+            .find(|pattern| s.eq_ignore_ascii_case(pattern.bayerpat()))
     }
 
     /// Parse from LibRaw's `filters` field, which holds the colour of each position of an 8 × 2

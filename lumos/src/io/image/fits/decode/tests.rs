@@ -344,6 +344,7 @@ fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
             checksum: FitsChecksumPolicy::VerifyIfPresent,
             float_scale: FitsFloatScale::Auto,
             nulls: FitsNullPolicy::Mask,
+            unstated_bayer_pattern: None,
         },
         ..load_context()
     };

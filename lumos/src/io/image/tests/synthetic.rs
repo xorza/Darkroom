@@ -66,26 +66,38 @@ fn one_pixel_header() -> Header {
     header
 }
 
+/// An optional keyword the header gives with the wrong type or value is absent from the metadata
+/// and the frame loads; a keyword that decides how the samples are read still fails the load.
 #[test]
-fn fits_metadata_errors_survive_the_lumos_loader() {
+fn optional_metadata_degrades_and_load_deciding_keywords_fail() {
+    // An integer image, whose scale its BITPIX settles, so DATAMAX is metadata only.
     let mut mistyped = one_pixel_header();
+    mistyped.set("BITPIX", 32).unwrap();
     mistyped.set("DATAMAX", "not a real").unwrap();
+    mistyped.set("ISOSPEED", -1).unwrap();
+    let image = write_header_and_load("mistyped_metadata", &mistyped).unwrap();
+    assert_eq!(image.metadata.data_max, None);
+    assert_eq!(image.metadata.iso, None);
+
+    // A float image's DATAMAX is how its scale is decided, so there it fails the load.
+    let mut mistyped_float_scale = one_pixel_header();
+    mistyped_float_scale.set("DATAMAX", "not a real").unwrap();
     assert!(matches!(
-        write_header_and_load("mistyped_metadata", &mistyped),
+        write_header_and_load("mistyped_float_scale", &mistyped_float_scale),
         Err(ImageError::Fits {
-            source: FitsError::TypeMismatch { name, expected },
+            source: FitsError::TypeMismatch { name, .. },
             ..
-        }) if name == "DATAMAX" && expected == "real"
+        }) if name == "DATAMAX"
     ));
 
-    let mut out_of_range = one_pixel_header();
-    out_of_range.set("ISOSPEED", -1).unwrap();
+    let mut mistyped_row_order = one_pixel_header();
+    mistyped_row_order.set("ROWORDER", 1).unwrap();
     assert!(matches!(
-        write_header_and_load("out_of_range_metadata", &out_of_range),
+        write_header_and_load("mistyped_row_order", &mistyped_row_order),
         Err(ImageError::Fits {
-            source: FitsError::KeywordOutOfRange { name: "ISOSPEED" },
+            source: FitsError::TypeMismatch { name, .. },
             ..
-        })
+        }) if name == "ROWORDER"
     ));
 }
 

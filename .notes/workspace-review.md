@@ -185,13 +185,6 @@ Severity: Medium — meaningless combinations are representable, "no value" flow
 - [ ] `config/fwhm_config.rs` `FwhmConfig` — `expected = 0` means disabled, `auto_estimate` turns `expected` into a fallback, `fwhm/mod.rs` adds `DEFAULT_FWHM = 4.0` (equal to the config default), and `StarDetector::detect` passes `fwhm.value().unwrap_or(0.0)` while `DetectResult::from_image` takes the same fact as `Option<f32>`. `config/background_config.rs` `mask_dilation` belongs inside `BackgroundRefinement::Iterative`; `max_fwhm_deviation = 0` silently disables the outlier filter. `validate` error names drifted from field names (`"expected_fwhm"`, `"min_stars_for_fwhm"`, `"fwhm_estimation_sigma_factor"`, `"bg_mask_dilation"`).
 - [ ] `detector/stages/detect/mod.rs` `collect_component_data_dense` — each job allocates `vec![ComponentData; num_labels]` (together up to a full u32 plane); `extract_candidates` builds `DeblendBuffers::new()` on every rayon fold split instead of using `JobScratchPool`. `labeling/mod.rs` `label_mask` allocates `UnionFind`, the label map and per-strip run vectors per call; `mask_dilation/mod.rs` `dilate_mask` allocates two `vec![0u64; height]` per vertical task, with `chunk_size = max(64, words/threads)` giving a 6000-px frame only 2 tasks and a column walk strided by `words_per_row`.
 
-## RAW and FITS loading misclassify or reject valid files
-Severity: Medium — linear RAWs fail with a misleading error, a wrong-typed optional keyword fails the whole load, and an unstated Bayer phase is guessed.
-
-- [ ] `lumos/src/io/image/fits/metadata.rs` `read_metadata` — `?` on ~20 optional keyword reads, so a string `RA` or a text `XBINNING` (fits-well `TypeMismatch`) aborts the load; `read_ra_deg` errors on a string `RA` instead of falling through to `OBJCTRA`. Only `cfa_type`, row order and `QNTZSIG` affect pixels; the rest should degrade to `None`. `fits/decode/pixels.rs` `read_decoded_hdu` runs `read_metadata`/`read_row_order` after every plane has been decoded.
-- [ ] `fits/metadata.rs` `read_ra_deg` / `read_dec_deg` fall back to `CRVAL1`/`CRVAL2` without checking `CTYPEn`, so a galactic, axis-swapped or non-celestial WCS silently gives wrong RA/Dec; `fits_well::Header::wcs` already parses axis types.
-- [ ] `bayer/mod.rs` `CfaPattern::from_bayerpat` — maps `"TRUE"` to RGGB with a `tracing::warn!`: ~3-in-4 chance of a fully mis-debayered frame that loads successfully. The missing piece is a pattern override in `FitsLoadOptions`, not a guess.
-
 ## Normalization and image ops lose precision they claim to keep
 Severity: Medium — measurable error on every real frame where an exact or stable form is available.
 
@@ -241,7 +234,7 @@ Severity: Low — two sources for one fact; the copies already differ in precisi
 Severity: Low — lists kept in step by hand or by a test.
 
 - [ ] Image extensions: lumos `file_extension` lowercases each path's extension into a `String` that `FITS_EXTENSIONS` and `RAW_EXTENSIONS` are then searched for, while the standard formats go through `imaginarium::FileFormat::from_extension`.
-- [ ] lumos io facts spelled twice: the BAYERPAT ↔ pattern table (`fits/metadata.rs` `bayerpat` and `CfaPattern::from_bayerpat`); the `DemosaicError` → `ImageError` mapping (`raw/mod.rs` `demosaic_err` and an inline `map_err` in `load_preview_fits`); `raw::check_cancelled` vs `LoadContext::check_cancelled` (RAW entry points take `&CancelToken`, FITS ones `&LoadContext`), with two `Cancelled` marker types. `read_selected_image`, `load_cfa_fits` and `fits_cfa_frame_info` each repeat open → cancel → select → preflight, validating the CFA header in different orders; the linear/preview path never calls `validate_cfa_container_format`.
+- [ ] lumos io facts spelled twice: the `DemosaicError` → `ImageError` mapping (`raw/mod.rs` `demosaic_err` and an inline `map_err` in `load_preview_fits`); `raw::check_cancelled` vs `LoadContext::check_cancelled` (RAW entry points take `&CancelToken`, FITS ones `&LoadContext`), with two `Cancelled` marker types. `read_selected_image`, `load_cfa_fits` and `fits_cfa_frame_info` each repeat open → cancel → select → preflight, validating the CFA header in different orders; the linear/preview path never calls `validate_cfa_container_format`.
 
 ## Public API, dependencies and derives with no production user
 Severity: Low — removable surface; checked with `rg` across the workspace.

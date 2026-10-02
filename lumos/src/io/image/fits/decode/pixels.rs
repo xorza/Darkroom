@@ -62,6 +62,21 @@ pub(super) fn read_decoded_hdu(
         peak_bytes = plan.peak_bytes,
         "FITS image passed header-first memory preflight"
     );
+    // The keywords that can fail a load are read before a plane is: a frame they refuse costs no
+    // decode.
+    let cfa_type = read_cfa_from_headers(header, context.fits.unstated_bayer_pattern)
+        .map_err(|source| fits_err(path, source))?;
+    let row_order = read_row_order(header).map_err(|source| fits_err(path, source))?;
+    // The unit is half the sample domain, which decides whether frames combine. An all-blank BUNIT
+    // parses to the single significant space §4.2.1.1 requires, which states no unit rather than an
+    // empty one — left alone it would disagree with every real unit. Surrounding blanks are a
+    // writer artifact rather than part of a unit name, so both ends go, and the domain comparison
+    // downstream is then plain equality — see `SampleDomain::conversion_to` for why it stops there
+    // and does not fold case.
+    let unit = read_text(header, "BUNIT")
+        .map_err(|source| fits_err(path, source))?
+        .map(|unit| unit.trim().to_owned())
+        .filter(|unit| !unit.is_empty());
     let channel_count = if plan.dimensions.is_rgb() { 3 } else { 1 };
     let mut planes = ArrayVec::<DecodedPlane, 3>::new();
     for channel in 0..channel_count {
@@ -79,9 +94,7 @@ pub(super) fn read_decoded_hdu(
         planes.into_iter().map(|plane| plane.samples),
     );
 
-    let cfa_type = read_cfa_from_headers(header).map_err(|source| fits_err(path, source))?;
-    let mut metadata = read_metadata(header, plan.shape, plan.sample_type)
-        .map_err(|source| fits_err(path, source))?;
+    let mut metadata = read_metadata(header, plan.shape, plan.sample_type);
     // DATAMAX is a saturation level in the file's sample units, so it only stays comparable to the
     // samples if it is divided by the same span they were.
     if let Some(data_max) = &mut metadata.data_max {
@@ -95,15 +108,7 @@ pub(super) fn read_decoded_hdu(
             bzero: plan.scaling.bzero,
             physical_scale: plan.sample_scale.physical,
             scale_origin: plan.sample_scale.origin,
-            // An all-blank BUNIT parses to the single significant space §4.2.1.1 requires, which
-            // states no unit rather than an empty one — left alone it would disagree with every
-            // real unit. Surrounding blanks are a writer artifact rather than part of a unit name,
-            // so both ends go, and the domain comparison downstream is then plain equality — see
-            // `SampleDomain::conversion_to` for why it stops there and does not fold case.
-            unit: read_text(header, "BUNIT")
-                .map_err(|source| fits_err(path, source))?
-                .map(|unit| unit.trim().to_owned())
-                .filter(|unit| !unit.is_empty()),
+            unit,
             hdu,
             checksum,
         }),
@@ -119,7 +124,7 @@ pub(super) fn read_decoded_hdu(
         // Recorded, not acted on: the rows above were copied in file order whatever this says, and
         // only the Bayer phase was corrected for it. What it buys is that a set mixing the two
         // orders — which loads as mutually mirrored images — can be named as such.
-        row_order: read_row_order(header).map_err(|source| fits_err(path, source))?,
+        row_order,
     });
 
     Ok(DecodedFitsImage {
