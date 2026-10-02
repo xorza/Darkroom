@@ -1,4 +1,3 @@
-mod mem_budget;
 mod mem_budget_probe;
 
 use crate::testing::prelude::*;
@@ -624,9 +623,8 @@ fn both_front_ends_report_the_same_stages() {
 /// `PipelineFrame`, a spilled one is read back from its memory map, and the combined result has
 /// to be bit-identical either way.
 ///
-/// The always-run counterpart to `streaming_disk_tier_matches_ram_on_real_lights`, which is
-/// gated behind `real-data` *and* `#[ignore]` *and* a dataset on disk, so it never runs in the
-/// verification chain.
+/// The always-run counterpart to `streaming_disk_tier_matches_ram_on_real_lights`, which needs
+/// the `real-data` feature and its dataset.
 ///
 /// Both runs read the same mono-CFA FITS lights and differ only in `available_memory`, the input
 /// `MemoryPlan::plan` keys its tier decision on. RANSAC is seeded, removing the pipeline's only other

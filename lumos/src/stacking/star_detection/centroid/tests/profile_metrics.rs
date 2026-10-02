@@ -1,5 +1,6 @@
 use super::*;
 use crate::stacking::star_detection::centroid::stamp::StampFit;
+use crate::testing::synthetic::background_map;
 
 /// Helper: run `measure_star` on a single-star image with given centroid method.
 fn measure_single_star(

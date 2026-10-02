@@ -1,5 +1,6 @@
 use super::*;
 use crate::stacking::star_detection::centroid::stamp::{StampFit, sigma_from_moments};
+use crate::testing::synthetic::background_map;
 
 /// σ seeds now come out of `StampFit::prepare`'s single pass, so they are pinned through it.
 /// The ceiling is the stamp radius, which is 10 for these 21×21 fields.

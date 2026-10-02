@@ -1,5 +1,7 @@
 use crate::stacking::star_detection::median_filter::simd::*;
-use crate::testing::prelude::*;
+use crate::testing::simd_check::backend::Backend;
+use crate::testing::simd_check::simd_tier::SimdTier;
+use crate::testing::simd_check::{SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar};
 
 /// Every backend the host has, over every shape and width it admits, against the scalar
 /// reference. Min/max networks compute no new values, so they agree exactly. The borders carry no

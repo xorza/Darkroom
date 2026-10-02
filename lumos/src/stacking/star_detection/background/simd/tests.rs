@@ -1,5 +1,7 @@
 use crate::stacking::star_detection::background::simd::*;
-use crate::testing::prelude::*;
+use crate::testing::simd_check::backend::Backend;
+use crate::testing::simd_check::simd_tier::SimdTier;
+use crate::testing::simd_check::{SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar};
 
 #[test]
 #[should_panic(expected = "assertion")]

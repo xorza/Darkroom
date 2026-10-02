@@ -12,6 +12,7 @@ use crate::stacking::star_detection::background::background_estimate::Background
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::deblend::region::Region;
 use crate::testing::prelude::*;
+use crate::testing::synthetic::background_map;
 
 /// Default tile size for background estimation.
 const TILE_SIZE: usize = 64;

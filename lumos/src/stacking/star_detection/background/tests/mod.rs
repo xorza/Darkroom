@@ -3,6 +3,7 @@
 mod synthetic_skies;
 
 use crate::testing::prelude::*;
+use crate::testing::synthetic::background_map;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::{
     stacking::star_detection::background::background_estimate::BackgroundEstimate,

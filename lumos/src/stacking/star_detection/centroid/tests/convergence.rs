@@ -1,4 +1,5 @@
 use super::*;
+use crate::testing::synthetic::background_map;
 
 /// Verify that Phase 1 (weighted moments) reaches sub-pixel accuracy quickly.
 /// After 2 iterations the position should be within 0.1px of the final converged position.

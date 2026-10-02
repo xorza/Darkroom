@@ -17,14 +17,18 @@ use std::path::PathBuf;
 use common::internals::{DEBUG_OUTPUT_VAR, debug_output_path};
 use glam::{DVec2, Vec2};
 
+use imaginarium::Buffer2;
+
 use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
+use crate::stacking::registration::transform::Transform;
 
 use crate::testing::synthetic::artifacts::add_cosmic_rays;
 use crate::testing::synthetic::backgrounds::NebulaConfig;
 use crate::testing::synthetic::camera::{BiasField, Camera, FlatField, PsfModel, SensorDefects};
 use crate::testing::synthetic::fixtures::{cluster_field, star_field};
-use crate::testing::synthetic::observe::{Observation, observe_dithered, render};
-use crate::testing::synthetic::patterns::{checkerboard, diagonal_gradient, horizontal_gradient};
+use crate::testing::synthetic::observe::{Observation, SimFrame, render};
+use crate::testing::synthetic::patterns::diagonal_gradient;
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
 use crate::testing::visual::{self, ToneMap};
 
@@ -56,6 +60,60 @@ fn save_frame(scene: &Scene, camera: &Camera, obs: &Observation, name: &str, ton
 /// A representative populated star field over `background`.
 fn demo_field(size: Size2us, background: BackgroundField, seed: u64) -> Scene {
     Scene::random_field(size, 120, (3.0, 250.0), background, 16.0, seed)
+}
+
+/// Create a horizontal gradient from left to right.
+fn horizontal_gradient(size: Size2us, left: f32, right: f32) -> Buffer2<f32> {
+    let mut pixels = vec![0.0f32; size.pixel_count()];
+    for y in 0..size.height {
+        for x in 0..size.width {
+            let t = if size.width > 1 {
+                x as f32 / (size.width - 1) as f32
+            } else {
+                0.5
+            };
+            pixels[size.index_of(Vec2us::new(x, y))] = left + t * (right - left);
+        }
+    }
+    Buffer2::new(size.width, size.height, pixels)
+}
+
+/// Create a checkerboard pattern.
+///
+/// Useful for phase correlation and registration tests.
+fn checkerboard(size: Size2us, cell_size: usize, value_a: f32, value_b: f32) -> Buffer2<f32> {
+    let mut pixels = vec![0.0f32; size.pixel_count()];
+    for y in 0..size.height {
+        for x in 0..size.width {
+            let checker = ((x / cell_size) + (y / cell_size)) % 2;
+            pixels[size.index_of(Vec2us::new(x, y))] = if checker == 0 { value_a } else { value_b };
+        }
+    }
+    Buffer2::new(size.width, size.height, pixels)
+}
+
+/// Render one `scene` through `camera` as `dithers.len()` frames, each translated by its
+/// dither offset and given an independent noise seed derived from `base_seed`.
+fn observe_dithered(
+    scene: &Scene,
+    camera: &Camera,
+    dithers: &[DVec2],
+    exposure_s: f32,
+    base_seed: u64,
+) -> Vec<SimFrame> {
+    dithers
+        .iter()
+        .enumerate()
+        .map(|(i, &d)| {
+            let obs = Observation {
+                transform: Transform::translation(d),
+                exposure_s,
+                seeing_scale: 1.0,
+                seed: base_seed.wrapping_add(i as u64 * 7919),
+            };
+            render(scene, camera, &obs)
+        })
+        .collect()
 }
 
 #[test]

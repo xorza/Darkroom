@@ -18,7 +18,7 @@
 //!
 //! let scene = Scene::random_field(Size2us::new(512, 512), 80, (5.0, 200.0), //!     BackgroundField::Uniform { level: 0.05 }, 16.0, 42);
 //! let frame = render(&scene, &Camera::realistic(3.5), &observe::Observation::reference(1));
-//! // detect on `frame.image`, then: score_detection(&scene.positions(), &found, 2.0)
+//! // detect on `frame.image`, then grade against `scene.sources`' positions with `score_detection`
 //! ```
 //!
 //! Ready-made fields live in [`fixtures`] (`star_field` / `cluster_field`), used by the

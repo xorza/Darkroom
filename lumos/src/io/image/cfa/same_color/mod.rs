@@ -224,3 +224,6 @@ impl XTransOffsets {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
