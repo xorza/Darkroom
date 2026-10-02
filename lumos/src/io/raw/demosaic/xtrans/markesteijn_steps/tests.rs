@@ -537,8 +537,8 @@ fn reconstruction_preserves_native_samples_and_canonical_empty_directions() {
     for direction in 0..NDIR {
         for y in 3..h - 3 {
             for x in 3..w - 3 {
-                let raw_y = y + xtrans.margin.y;
-                let raw_x = x + xtrans.margin.x;
+                let raw_y = y + xtrans.layout.margin.y;
+                let raw_x = x + xtrans.layout.margin.x;
                 let native = xtrans.raw_pattern.color_at(Vec2us::new(raw_x, raw_y));
                 let [red, blue] = colors[direction * pixels + y * w + x];
                 match native {

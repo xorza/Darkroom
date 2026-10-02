@@ -22,7 +22,6 @@ use crate::io::cancelled::Cancelled;
 use crate::io::raw::BlackRepeat;
 use crate::io::raw::demosaic::sensor_layout::SensorLayout;
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
-use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
 /// The u16 path's on-the-fly normalization: per-channel black levels, the
@@ -125,12 +124,8 @@ enum PixelSource<'a> {
 pub(crate) struct XTransImage<'a> {
     /// Pixel data (u16 raw sensor values or calibrated f32)
     data: PixelSource<'a>,
-    /// Extent of the raw data buffer.
-    pub(crate) raw: Size2us,
-    /// Extent of the active/output image area.
-    pub(crate) active: Size2us,
-    /// Top-left corner of the active area within the raw buffer.
-    pub(crate) margin: Vec2us,
+    /// Where the visible window sits in the data.
+    pub(crate) layout: SensorLayout,
     /// CFA pattern anchored at the full raw buffer origin.
     pub(crate) raw_pattern: XTransPattern,
 }
@@ -144,11 +139,6 @@ impl<'a> XTransImage<'a> {
         normalization: XTransNormalization<'a>,
     ) -> Self {
         layout.validate(data.len());
-        let SensorLayout {
-            raw,
-            active,
-            margin,
-        } = layout;
         let XTransNormalization {
             channel_black,
             span,
@@ -169,9 +159,7 @@ impl<'a> XTransImage<'a> {
         };
         Self {
             data,
-            raw,
-            active,
-            margin,
+            layout,
             raw_pattern,
         }
     }
@@ -185,16 +173,9 @@ impl<'a> XTransImage<'a> {
         raw_pattern: XTransPattern,
     ) -> Self {
         layout.validate(data.len());
-        let SensorLayout {
-            raw,
-            active,
-            margin,
-        } = layout;
         Self {
             data: PixelSource::F32(data),
-            raw,
-            active,
-            margin,
+            layout,
             raw_pattern,
         }
     }
@@ -205,7 +186,7 @@ impl<'a> XTransImage<'a> {
     /// For f32 data: returns the calibrated value directly.
     #[inline(always)]
     pub(crate) fn read_normalized(&self, raw_y: usize, raw_x: usize) -> f32 {
-        let idx = raw_y * self.raw.width + raw_x;
+        let idx = raw_y * self.layout.raw.width + raw_x;
         match &self.data {
             PixelSource::U16 {
                 data,
@@ -224,7 +205,7 @@ impl<'a> XTransImage<'a> {
             } => {
                 let val = f32::from(data[idx]);
                 let ch = self.raw_pattern.color_at(Vec2us::new(raw_x, raw_y)) as usize;
-                let repeat_delta = repeat.at_raw(raw_y, raw_x, self.margin);
+                let repeat_delta = repeat.at_raw(raw_y, raw_x, self.layout.margin);
                 ((val - channel_black[ch]) / span - repeat_delta).clamp(0.0, 1.0)
             }
             PixelSource::F32(data) => data[idx],

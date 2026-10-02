@@ -1,6 +1,7 @@
 use crate::io::raw::demosaic::xtrans::internals::{test_pattern, test_pattern_array};
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPatternError;
 use crate::io::raw::demosaic::xtrans::*;
+use crate::math::size2us::Size2us;
 
 #[test]
 fn xtrans_pattern_color_at() {
@@ -98,9 +99,9 @@ fn xtrans_image_valid() {
             black_repeat: None,
         },
     );
-    assert_eq!(img.raw, Size2us::new(6, 6));
-    assert_eq!(img.active, Size2us::new(4, 4));
-    assert_eq!(img.margin, Vec2us::new(1, 1));
+    assert_eq!(img.layout.raw, Size2us::new(6, 6));
+    assert_eq!(img.layout.active, Size2us::new(4, 4));
+    assert_eq!(img.layout.margin, Vec2us::new(1, 1));
 }
 
 #[test]
