@@ -6,6 +6,7 @@ use crate::stacking::star_detection::config::background_config::BackgroundConfig
 use crate::stacking::star_detection::tests::Scenario;
 use crate::testing::init_tracing;
 use crate::testing::prelude::*;
+use crate::testing::synthetic::background_map;
 use crate::testing::synthetic::backgrounds::NebulaConfig;
 use crate::testing::synthetic::scene::BackgroundField;
 use crate::testing::visual::{ToneMap, save};

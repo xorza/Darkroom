@@ -1,4 +1,5 @@
 use super::*;
+use crate::testing::synthetic::background_map;
 
 /// Test centroiding with undersampled PSF (FWHM < 2 pixels).
 /// This is a challenging case where the star is barely resolved.

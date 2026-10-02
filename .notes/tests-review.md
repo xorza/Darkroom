@@ -508,17 +508,6 @@ Paths are relative to `lumos/src/stacking/registration/`.
 ## Placement, gating and bench layout
 Test, internals and bench code sits where the rules say it must not, or is gated so that it never runs.
 
-### lumos — shared harness, calibration, pipeline, frame_store
-Paths are relative to the repository root.
-
-- [ ] `lumos/src/testing/mod.rs` is the aggregator the rules forbid. It holds `TestRng`, `ScratchDirectory`, the CFA builders (which `images.rs`, "image and plane builders", omits), `XTRANS_PATTERN`, `init_tracing`, and ungated real-data helpers that belong in `testing/real_data/`. The two major structs each want their own file.
-- [ ] `lumos/src/testing/prelude.rs:6-8,20-21` — the doc says "domain-specific items stay out", yet it re-exports `background_map` (9 of 97 prelude users) and the SIMD cross-check items (2 users).
-- [ ] `lumos/src/stacking/calibration_masters/defect_map/tests.rs:418-458,756-837,882-914` — five tests and a brute-force reference for `io::image::cfa::same_color` (`SameColorMedian`, `XTransOffsets`) live in the defect-map tests. `io/image/cfa/same_color.rs` has no tests of its own.
-- [ ] `lumos/src/stacking/pipeline/tests/mem_budget.rs` tests `crate::memory::{MemoryPlan, PerFrameBytes}`. `memory.rs`'s own test mod has no `MemoryPlan` test, so these belong there.
-- [ ] Real-data tests are gated twice, by the `real-data` feature and by `#[ignore]` (`pipeline/tests/mod.rs:774-776,824-826`, `calibration_masters/real_data_tests.rs:59-60,88-89,245-246`, `testing/real_data/{pipeline_bench,milky_way}.rs`), so `--features real-data` (the documented opt-in) runs none of them. `visual/mod.rs` scatters six per-item `#[cfg(feature = "real-data")]` gates (14,114,123,148,175,197,217) where one gated submodule would do.
-- [ ] Helpers kept alive only by the eyeball gallery: `patterns::{horizontal_gradient, checkerboard}` (`patterns.rs:18,49`), `observe::observe_dithered` (`observe/mod.rs:164`), and `Scene::positions` (`scene.rs:197`, used only by its own test and the doc example). `patterns::uniform` (`patterns.rs:13`) wraps `Buffer2::new_filled`, which `images.rs:3-5` explicitly argues against.
-- [ ] `lumos/src/testing/synthetic/artifacts.rs:94-105` — `#[allow(dead_code)]` keeps three unused `BayerPattern` variants "for future fixtures" (the no-unused-code rule). The type also duplicates the production `CfaPattern`.
-
 ### lumos — star_detection
 Short paths are relative to `lumos/src/stacking/star_detection/`.
 
@@ -558,7 +547,6 @@ Paths are relative to `lumos/src/stacking/registration/`.
 - [ ] `triangle/tests/matching.rs:462-500` — tests `Triangle::is_similar` (geometry) from the matching file, duplicating `geometry.rs:245-339`.
 - [ ] `real_data_tests.rs:248-342` — two `#[quick_bench]` benches outside `bench.rs`. `:255-257` writes into `test_data/lumos_data/registered_lights` and never cleans it up. `:344-386` tests star-detection weighting, not registration. `:128-151` re-implements `register`'s private `take(max_stars)` star selection to rebuild inlier positions, which silently mis-indexes if `register` changes.
 - [ ] `resample/bench.rs:33-162` — eight copy-pasted plane-warp benches differ only in size and method; they should be one helper. `create_test_image` (`:14`) duplicates a `testing::synthetic::patterns` builder. `:248` places `#[quick_bench]` above the doc comment.
-- [ ] `tests/mod.rs:1-7` — the module doc lists 5 of the 8 submodules (`input`, `recovery` and `sip_distortion` are missing). `real_data_tests.rs:5` says the tests are "skipped automatically when the env var is not set"; they are feature- and `#[ignore]`-gated, and `calibration_dir()` panics when the data is missing rather than skipping.
 - [ ] `distortion/sip/tests/results.rs:297-310`, `:330-335` — builds a full `MetricsCase` with dummy expectation fields only to call `build_case`. Split fixture parameters from expectations.
 
 ### lumos — combine, drizzle

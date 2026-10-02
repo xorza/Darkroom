@@ -8,6 +8,7 @@ use crate::stacking::star_detection::convolution::internals::gaussian_convolve;
 use crate::stacking::star_detection::tests::Scenario;
 use crate::testing::init_tracing;
 use crate::testing::prelude::*;
+use crate::testing::synthetic::background_map;
 use crate::testing::visual::{ToneMap, save};
 
 /// Tile size these fixtures are built around.

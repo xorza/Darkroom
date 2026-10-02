@@ -239,7 +239,7 @@ fn lanczos_preserves_signed_constants_at_interior_and_edges() {
     ] {
         let params = config::internals::warp_params(method);
         for expected in [-1.25, 0.0, 2.5] {
-            let input = patterns::uniform(size, expected);
+            let input = Buffer2::new_filled(size.width, size.height, expected);
             for y in [0, 1, 4, 10, size.height - 1] {
                 let mut output = vec![0.0; size.width];
                 row::lanczos(&input, &mut output, y, &identity, &params);

@@ -1,4 +1,5 @@
 use super::*;
+use crate::testing::synthetic::background_map;
 
 /// Test that weighted centroid achieves claimed ~0.05 pixel accuracy
 /// by testing many random sub-pixel offsets.

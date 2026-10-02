@@ -192,11 +192,6 @@ impl Scene {
             background,
         }
     }
-
-    /// True source positions as a catalog (for matching against detector output).
-    fn positions(&self) -> Vec<DVec2> {
-        self.sources.iter().map(|s| s.pos).collect()
-    }
 }
 
 #[cfg(test)]
@@ -259,7 +254,7 @@ mod tests {
             BackgroundField::Uniform { level: 0.0 },
         );
         assert_eq!(scene.sources.len(), 1);
-        assert_eq!(scene.positions(), vec![DVec2::new(32.0, 32.0)]);
+        assert_eq!(scene.sources[0].pos, DVec2::new(32.0, 32.0));
         // Empty-sky background really is empty.
         assert_eq!(
             pixel_stats(&scene.background.render(Size2us::new(64, 64))).mean,

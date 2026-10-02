@@ -28,6 +28,7 @@ use crate::stacking::star_detection::star::Star;
 use crate::testing::cfa::make_cfa;
 use crate::testing::characterization::snapshot::Snapshot;
 use crate::testing::prelude::*;
+use crate::testing::simd_check::simd_tier::SimdTier;
 use crate::testing::synthetic::fixtures::star_field;
 
 /// Whether this host computes the pinned digests; another one reports why it skips.

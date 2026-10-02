@@ -4,6 +4,7 @@
 use crate::stacking::star_detection::centroid::compute_stamp_radius;
 use crate::stacking::star_detection::centroid::stamp::StampGrid;
 use crate::testing::prelude::*;
+use crate::testing::synthetic::background_map;
 
 use ::quickbench::quick_bench;
 use std::hint::black_box;

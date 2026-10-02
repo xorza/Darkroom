@@ -26,10 +26,11 @@ mod real_data;
 mod stage_effects;
 mod subpixel_accuracy;
 
+use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::prelude::*;
-use crate::testing::synthetic::artifacts::{BayerPattern, add_bayer_pattern, add_cosmic_rays};
+use crate::testing::synthetic::artifacts::{add_bayer_pattern, add_cosmic_rays};
 use crate::testing::synthetic::camera::{Camera, PsfModel};
 use crate::testing::synthetic::observe::{Observation, SimFrame, render};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
@@ -149,7 +150,7 @@ impl Scenario {
                 );
             }
             if self.bayer {
-                add_bayer_pattern(&mut px, self.size.width, 0.08, BayerPattern::RGGB);
+                add_bayer_pattern(&mut px, self.size.width, 0.08, CfaPattern::Rggb);
             }
             for p in &mut px {
                 *p = p.clamp(0.0, 1.0);

@@ -6,6 +6,7 @@ use crate::stacking::star_detection::config::detection_config::Connectivity;
 use crate::stacking::star_detection::mask_dilation::dilate_mask;
 use crate::stacking::star_detection::threshold_mask::{ThresholdParams, create_threshold_mask};
 use crate::testing::prelude::*;
+use crate::testing::synthetic::background_map;
 use crate::testing::synthetic::fixtures::star_field;
 use ::quickbench::quick_bench;
 use std::hint::black_box;

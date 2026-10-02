@@ -5,6 +5,7 @@
 //! (weighted-moments / Gaussian-fit / Moffat-fit) agree and the profile fits beat moments.
 
 use crate::testing::prelude::*;
+use crate::testing::synthetic::background_map;
 use crate::testing::synthetic::sky_field::{Sky, SkyField};
 use std::f32::consts::PI;
 

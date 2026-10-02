@@ -114,15 +114,17 @@ fn dither_shifts_peak() {
         5.0,
         BackgroundField::Uniform { level: 0.0 },
     );
-    let frames = observe_dithered(
-        &scene,
-        &Camera::ideal(3.0),
-        &[DVec2::new(0.0, 0.0), DVec2::new(8.0, 0.0)],
-        1.0,
-        1,
-    );
-    let (x0, _) = argmax_xy(frames[0].image.channel(0).pixels(), 64);
-    let (x1, _) = argmax_xy(frames[1].image.channel(0).pixels(), 64);
+    let frame = |dx: f64| {
+        let obs = Observation {
+            transform: Transform::translation(DVec2::new(dx, 0.0)),
+            exposure_s: 1.0,
+            seeing_scale: 1.0,
+            seed: 1,
+        };
+        render(&scene, &Camera::ideal(3.0), &obs)
+    };
+    let (x0, _) = argmax_xy(frame(0.0).image.channel(0).pixels(), 64);
+    let (x1, _) = argmax_xy(frame(8.0).image.channel(0).pixels(), 64);
     assert_eq!(x0, 20);
     assert_eq!(x1, 28);
 }

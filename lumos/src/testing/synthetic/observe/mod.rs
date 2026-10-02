@@ -166,29 +166,5 @@ pub(crate) fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFr
     }
 }
 
-/// Render one `scene` through `camera` as `dithers.len()` frames, each translated by its
-/// dither offset and given an independent noise seed derived from `base_seed`.
-pub(super) fn observe_dithered(
-    scene: &Scene,
-    camera: &Camera,
-    dithers: &[DVec2],
-    exposure_s: f32,
-    base_seed: u64,
-) -> Vec<SimFrame> {
-    dithers
-        .iter()
-        .enumerate()
-        .map(|(i, &d)| {
-            let obs = Observation {
-                transform: Transform::translation(d),
-                exposure_s,
-                seeing_scale: 1.0,
-                seed: base_seed.wrapping_add(i as u64 * 7919),
-            };
-            render(scene, camera, &obs)
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests;

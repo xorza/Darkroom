@@ -1,4 +1,5 @@
 use super::*;
+use crate::testing::synthetic::background_map;
 
 #[test]
 fn refine_centroid_centered_star() {

@@ -8,6 +8,7 @@ use crate::stacking::star_detection::detector::stages::detect::internals::detect
 use crate::stacking::star_detection::tests::Scenario;
 use crate::testing::init_tracing;
 use crate::testing::prelude::*;
+use crate::testing::synthetic::background_map;
 use crate::testing::visual::{ToneMap, gray_to_rgb, save, save_image};
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
