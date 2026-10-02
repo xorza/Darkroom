@@ -21,13 +21,6 @@ mod moffat_fit;
 mod simd;
 pub(crate) mod stamp;
 
-#[cfg(all(test, feature = "bench"))]
-mod bench;
-#[cfg(test)]
-mod internals;
-#[cfg(test)]
-mod tests;
-
 use glam::DVec2;
 
 use crate::math::fwhm::{FWHM_TO_SIGMA, sigma_to_fwhm};
@@ -622,3 +615,8 @@ fn compute_snr(flux: f32, sky_noise: f32, npix: usize, noise_model: Option<&Nois
     // non-finite variance, since it returns the other operand for NaN.
     flux / total_var.max(f32::EPSILON).sqrt()
 }
+
+#[cfg(all(test, feature = "bench"))]
+mod bench;
+#[cfg(test)]
+mod tests;

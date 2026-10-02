@@ -18,9 +18,6 @@ use crate::math::size2us::Size2us;
 use imaginarium::Buffer2;
 use std::mem;
 
-#[cfg(test)]
-mod tests;
-
 /// Multiscale dynamic-range compression of a *stretched* (display-domain) image in place.
 ///
 /// Computed on the combined intensity; color channels are rescaled hue-preservingly. Grayscale gets
@@ -116,3 +113,6 @@ fn hdr_map(intensity: &Buffer2<f32>, config: &Hdr) -> Buffer2<f32> {
         .for_each(|(r, &i)| *r = i - amount * (*r - mean));
     residual
 }
+
+#[cfg(test)]
+mod tests;

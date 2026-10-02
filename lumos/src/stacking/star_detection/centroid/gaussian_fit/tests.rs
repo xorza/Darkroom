@@ -4,9 +4,8 @@ use crate::testing::synthetic::patterns;
 
 use crate::math::fwhm::{fwhm_to_sigma, sigma_to_fwhm};
 use crate::stacking::star_detection::centroid::gaussian_fit::*;
-use crate::stacking::star_detection::centroid::internals::{
-    Perturbation, reference_normal_equations,
-};
+use crate::stacking::star_detection::centroid::lm_optimizer::internals::reference_normal_equations;
+use crate::stacking::star_detection::centroid::tests::perturbation::Perturbation;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 
 /// One recovery case: render a star of known parameters, optionally spoil the stamp or lie to
@@ -1246,8 +1245,16 @@ fn gaussian_fit_residual_distribution() {
     );
 }
 
+/// Stamp sample coordinates and values.
+#[derive(Debug)]
+struct StampData {
+    x: Vec<f64>,
+    y: Vec<f64>,
+    z: Vec<f64>,
+}
+
 /// Build stamp data arrays (x, y, z) for a Gaussian profile at given params.
-fn make_gaussian_stamp_data(size: usize, params: &[f64; 6]) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+fn make_gaussian_stamp_data(size: usize, params: &[f64; 6]) -> StampData {
     let [x0, y0, amp, sigma_x, sigma_y, bg] = *params;
     let sigma_x2 = sigma_x * sigma_x;
     let sigma_y2 = sigma_y * sigma_y;
@@ -1266,7 +1273,11 @@ fn make_gaussian_stamp_data(size: usize, params: &[f64; 6]) -> (Vec<f64>, Vec<f6
             data_z.push(z);
         }
     }
-    (data_x, data_y, data_z)
+    StampData {
+        x: data_x,
+        y: data_y,
+        z: data_z,
+    }
 }
 
 #[test]
@@ -1277,13 +1288,20 @@ fn batch_build_normal_equations_matches_scalar() {
     // Use offset params so residuals are non-trivial
     let params = [6.5, 6.5, 980.0, 2.6, 2.9, 102.0];
     let model = Gaussian2D { stamp_radius: 8.0 };
-    let (data_x, data_y, data_z) = make_gaussian_stamp_data(13, &true_params);
+    let StampData {
+        x: data_x,
+        y: data_y,
+        z: data_z,
+    } = make_gaussian_stamp_data(13, &true_params);
 
     // Scalar reference: build jacobian/residuals then compute hessian/gradient
     let mut jac_scalar = Vec::new();
     let mut res_scalar = Vec::new();
     for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
-        let (model_val, jac_row) = model.evaluate_and_jacobian(x, y, &params);
+        let ModelSample {
+            value: model_val,
+            jacobian: jac_row,
+        } = model.evaluate_and_jacobian(x, y, &params);
         jac_scalar.push(jac_row);
         res_scalar.push(z - model_val);
     }
@@ -1334,7 +1352,11 @@ fn batch_compute_chi2_matches_scalar() {
     // Use slightly off params so residuals are non-zero
     let true_params = [6.3, 6.7, 1000.0, 2.5, 3.0, 100.0];
     let test_params = [6.5, 6.5, 980.0, 2.6, 2.9, 102.0];
-    let (data_x, data_y, data_z) = make_gaussian_stamp_data(13, &true_params);
+    let StampData {
+        x: data_x,
+        y: data_y,
+        z: data_z,
+    } = make_gaussian_stamp_data(13, &true_params);
 
     // Scalar chi²
     let chi2_scalar: f64 = data_x
@@ -1369,7 +1391,11 @@ fn batch_weighted_bypasses_simd_and_applies_weights() {
     let true_params = [6.3, 6.7, 1000.0, 2.5, 3.0, 100.0];
     let params = [6.5, 6.5, 980.0, 2.6, 2.9, 102.0];
     let model = Gaussian2D { stamp_radius: 8.0 };
-    let (data_x, data_y, data_z) = make_gaussian_stamp_data(13, &true_params);
+    let StampData {
+        x: data_x,
+        y: data_y,
+        z: data_z,
+    } = make_gaussian_stamp_data(13, &true_params);
 
     let unweighted =
         model.batch_build_normal_equations(FitData::unweighted(&data_x, &data_y, &data_z), &params);
@@ -1427,13 +1453,20 @@ fn batch_build_normal_equations_various_stamp_sizes() {
 
     // Test sizes that exercise: exact multiple of 4, remainder 1, 2, 3
     for size in [3, 4, 5, 7, 9, 11, 13, 15, 17] {
-        let (data_x, data_y, data_z) = make_gaussian_stamp_data(size, &true_params);
+        let StampData {
+            x: data_x,
+            y: data_y,
+            z: data_z,
+        } = make_gaussian_stamp_data(size, &true_params);
 
         // Scalar reference
         let mut jac_scalar = Vec::new();
         let mut res_scalar = Vec::new();
         for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
-            let (model_val, jac_row) = model.evaluate_and_jacobian(x, y, &params);
+            let ModelSample {
+                value: model_val,
+                jacobian: jac_row,
+            } = model.evaluate_and_jacobian(x, y, &params);
             jac_scalar.push(jac_row);
             res_scalar.push(z - model_val);
         }
@@ -1498,7 +1531,10 @@ fn gaussian_evaluate_and_jacobian_consistency() {
         for &(x, y) in &points {
             let eval = model.evaluate(x, y, params);
             let jac = model.jacobian_row(x, y, params);
-            let (fused_eval, fused_jac) = model.evaluate_and_jacobian(x, y, params);
+            let ModelSample {
+                value: fused_eval,
+                jacobian: fused_jac,
+            } = model.evaluate_and_jacobian(x, y, params);
 
             assert!(
                 (eval - fused_eval).abs() < 1e-15,

@@ -12,9 +12,6 @@
 //! 4. Keeping the best model
 //! 5. Refining with least squares on inliers
 
-#[cfg(test)]
-mod tests;
-
 pub(crate) mod config;
 mod magsac;
 mod sampling;
@@ -534,3 +531,6 @@ fn score_hypothesis(
     // Negate so higher score = better model
     -total_loss
 }
+
+#[cfg(test)]
+mod tests;

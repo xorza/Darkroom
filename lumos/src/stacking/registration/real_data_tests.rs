@@ -31,9 +31,16 @@ fn load_light(path: &Path) -> LinearImage {
         .expect("demosaic a RAW light")
 }
 
+/// The dataset's first two lights.
+#[derive(Debug)]
+struct TwoLights {
+    first: LinearImage,
+    second: LinearImage,
+}
+
 /// The first and last RAW lights of the dataset, demosaiced: two frames of one field, offset by
 /// the drift of a night's sequence.
-fn load_two_lights() -> (LinearImage, LinearImage) {
+fn load_two_lights() -> TwoLights {
     let lights = raw_frames("Lights");
     assert!(
         lights.len() >= 2,
@@ -44,15 +51,18 @@ fn load_two_lights() -> (LinearImage, LinearImage) {
         lights[0].display(),
         lights[lights.len() - 1].display()
     );
-    (
-        load_light(&lights[0]),
-        load_light(&lights[lights.len() - 1]),
-    )
+    TwoLights {
+        first: load_light(&lights[0]),
+        second: load_light(&lights[lights.len() - 1]),
+    }
 }
 
 #[test]
 fn register_two_lights() {
-    let (img1, img2) = load_two_lights();
+    let TwoLights {
+        first: img1,
+        second: img2,
+    } = load_two_lights();
 
     println!(
         "Image 1: {}x{} ({} ch)",
@@ -205,16 +215,23 @@ fn register_two_lights() {
     );
 }
 
+/// Every light and the path it came from.
+#[derive(Debug)]
+struct Lights {
+    images: Vec<LinearImage>,
+    paths: Vec<PathBuf>,
+}
+
 /// Every RAW light of the dataset, demosaiced, with its path.
-fn load_all_lights() -> (Vec<LinearImage>, Vec<PathBuf>) {
+fn load_all_lights() -> Lights {
     let paths = raw_frames("Lights");
     let images = paths.iter().map(|path| load_light(path)).collect();
-    (images, paths)
+    Lights { images, paths }
 }
 
 #[quick_bench(warmup_iters = 0, iters = 1)]
 fn bench_register_and_warp_all(b: ::quickbench::Bencher) {
-    let (images, paths) = load_all_lights();
+    let Lights { images, paths } = load_all_lights();
     // The warped frames go to a fresh directory, never into the dataset.
     let output_dir = TempDir::new("lumos-registered-lights");
     println!(
@@ -286,7 +303,10 @@ fn bench_register_and_warp_all(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 3, iters = 30)]
 fn bench_register_stars(b: ::quickbench::Bencher) {
-    let (img1, img2) = load_two_lights();
+    let TwoLights {
+        first: img1,
+        second: img2,
+    } = load_two_lights();
 
     // Pre-detect stars (not part of the benchmark)
     let star_config = Config::default();
@@ -311,7 +331,10 @@ fn bench_register_stars(b: ::quickbench::Bencher) {
 /// `NoiseModel`, registers each, and compares.
 #[test]
 fn weighted_fit_registration_rms() {
-    let (img1, img2) = load_two_lights();
+    let TwoLights {
+        first: img1,
+        second: img2,
+    } = load_two_lights();
 
     // 30,000 e-/normalized unit is representative of physical gain × the 14-bit signal range.
     let noise_model = NoiseModel::from_normalized(30_000.0, 30.0);

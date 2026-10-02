@@ -5,8 +5,6 @@ pub(crate) mod provenance;
 
 #[cfg(all(test, feature = "bench", feature = "real-data"))]
 mod bench;
-#[cfg(test)]
-mod tests;
 
 use libraw_sys as sys;
 use std::ffi;
@@ -1216,3 +1214,6 @@ fn extract_iso(inner: *mut sys::libraw_data_t) -> Option<u32> {
         None
     }
 }
+
+#[cfg(test)]
+mod tests;

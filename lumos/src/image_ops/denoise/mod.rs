@@ -20,9 +20,6 @@ use crate::math::size2us::Size2us;
 use crate::math::statistics::{mad_to_sigma, mad_with_scratch, median_mut};
 use std::mem;
 
-#[cfg(test)]
-mod tests;
-
 /// Subsample cap for the per-scale noise estimate (uniform stride above this; exact below). A robust
 /// MAD converges far below this, matching `color_calibration`'s subsampled-background precedent.
 const MAX_NOISE_SAMPLES: usize = 500_000;
@@ -256,3 +253,6 @@ fn estimate_sigma(curr: &[f32], next: &[f32], samples: &mut Vec<f32>, dev: &mut 
     let median = median_mut(samples);
     mad_to_sigma(mad_with_scratch(samples, median, dev))
 }
+
+#[cfg(test)]
+mod tests;

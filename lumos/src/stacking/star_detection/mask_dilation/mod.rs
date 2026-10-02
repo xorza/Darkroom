@@ -3,11 +3,6 @@
 //! This module provides efficient dilation operations on bit buffers,
 //! used for connecting nearby pixels in star detection and background masking.
 
-#[cfg(all(test, feature = "bench"))]
-mod bench;
-#[cfg(test)]
-mod tests;
-
 use crate::bit_buffer2::BitBuffer2;
 use crate::concurrency::UnsafeSendPtr;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
@@ -177,3 +172,8 @@ fn dilate_word_fast(row: &[u64], word_idx: usize, radius: usize) -> u64 {
 
     result
 }
+
+#[cfg(all(test, feature = "bench"))]
+mod bench;
+#[cfg(test)]
+mod tests;

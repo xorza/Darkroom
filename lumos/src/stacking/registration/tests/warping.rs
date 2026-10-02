@@ -120,7 +120,10 @@ fn assert_roundtrip(
         let warped = do_warp(&ref_buf, &forward, method);
         let restored = do_warp(&warped, &inverse, method);
 
-        let (central_ref, central_restored) = extract_central_region(
+        let CentralRegions {
+            a: central_ref,
+            b: central_restored,
+        } = extract_central_region(
             ref_buf.pixels(),
             restored.pixels(),
             Size2us::new(width, height),
@@ -330,7 +333,10 @@ fn warp_with_detected_transform() {
 
     // Compare aligned image to reference
     let margin = 40;
-    let (central_ref, central_aligned) = extract_central_region(
+    let CentralRegions {
+        a: central_ref,
+        b: central_aligned,
+    } = extract_central_region(
         ref_pixels.pixels(),
         warped_astro.channel(0),
         Size2us::new(width, height),
@@ -364,7 +370,10 @@ fn interpolation_quality_ordering() {
         let restored = do_warp(&warped, &inverse, method);
 
         let margin = 50;
-        let (central_ref, central_restored) = extract_central_region(
+        let CentralRegions {
+            a: central_ref,
+            b: central_restored,
+        } = extract_central_region(
             ref_buf.pixels(),
             restored.pixels(),
             Size2us::new(width, height),
@@ -554,13 +563,15 @@ fn warp_preserves_output_metadata() {
     assert_eq!(warped.metadata.exposure_time, Some(120.0));
 }
 
+/// The central regions of two images, row by row.
+#[derive(Debug)]
+struct CentralRegions {
+    a: Vec<f32>,
+    b: Vec<f32>,
+}
+
 /// Extract central region of two images for comparison (avoids border artifacts).
-fn extract_central_region(
-    a: &[f32],
-    b: &[f32],
-    size: Size2us,
-    margin: usize,
-) -> (Vec<f32>, Vec<f32>) {
+fn extract_central_region(a: &[f32], b: &[f32], size: Size2us, margin: usize) -> CentralRegions {
     let inner_width = size.width - 2 * margin;
     let inner_height = size.height - 2 * margin;
 
@@ -575,7 +586,10 @@ fn extract_central_region(
         }
     }
 
-    (central_a, central_b)
+    CentralRegions {
+        a: central_a,
+        b: central_b,
+    }
 }
 
 /// Test that warp with SIP correction produces different (corrected) output

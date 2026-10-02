@@ -11,27 +11,6 @@ use rayon::prelude::*;
 
 mod simd;
 
-#[cfg(test)]
-pub(crate) mod internals {
-    use crate::stacking::star_detection::threshold_mask::ThresholdParams;
-
-    /// The σ floor this module's tests threshold with, shared by the kernel cross-checks in
-    /// [`super::simd`]. Frame-derived in production; fixed here so every case is graded on the
-    /// noise it declares, and low enough never to bind on it.
-    pub(crate) const TEST_MIN_NOISE: f32 = 1e-6;
-
-    /// [`ThresholdParams`] at `sigma` with the shared test floor.
-    pub(crate) fn test_params(sigma: f32) -> ThresholdParams {
-        ThresholdParams {
-            sigma,
-            min_noise: TEST_MIN_NOISE,
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests;
-
 use crate::bit_buffer2::BitBuffer2;
 use imaginarium::Buffer2;
 
@@ -138,3 +117,24 @@ pub(crate) fn create_threshold_mask_filtered(
             );
         });
 }
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use crate::stacking::star_detection::threshold_mask::ThresholdParams;
+
+    /// The σ floor this module's tests threshold with, shared by the kernel cross-checks in
+    /// [`super::simd`]. Frame-derived in production; fixed here so every case is graded on the
+    /// noise it declares, and low enough never to bind on it.
+    pub(crate) const TEST_MIN_NOISE: f32 = 1e-6;
+
+    /// [`ThresholdParams`] at `sigma` with the shared test floor.
+    pub(crate) fn test_params(sigma: f32) -> ThresholdParams {
+        ThresholdParams {
+            sigma,
+            min_noise: TEST_MIN_NOISE,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;

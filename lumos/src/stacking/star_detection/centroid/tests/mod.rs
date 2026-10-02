@@ -29,6 +29,7 @@ mod basic;
 mod convergence;
 mod fitting;
 mod measurement;
+pub(crate) mod perturbation;
 mod profile_metrics;
 mod robustness;
 mod stamps;

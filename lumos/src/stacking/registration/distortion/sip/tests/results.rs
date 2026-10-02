@@ -24,7 +24,10 @@ fn sip_config_validate_accepts_all_valid_orders() {
 fn norm_scale_stored_correctly() {
     // The norm_scale should be the average distance from ref_points to reference_point.
     let center = DVec2::new(0.0, 0.0);
-    let (ref_points, target_points) = make_radial_distortion_points(center, 1e-7, 100, 1000);
+    let PointPairs {
+        reference: ref_points,
+        target: target_points,
+    } = make_radial_distortion_points(center, 1e-7, 100, 1000);
 
     let transform = Transform::identity();
     let config = SipConfig {
@@ -44,10 +47,9 @@ fn norm_scale_stored_correctly() {
     );
 }
 
-/// One `fit_sip` run and the metrics it must produce.
-#[derive(Debug)]
-struct MetricsCase {
-    name: &'static str,
+/// The point field a case fits: a grid, distorted radially, with or without outliers.
+#[derive(Debug, Clone, Copy)]
+struct Distortion {
     /// Barrel coefficient in `d·k·|d|²`. Zero is an undistorted grid.
     k: f64,
     /// Additional `d·k4·|d|⁴` term, which order 3 cannot model.
@@ -55,6 +57,13 @@ struct MetricsCase {
     grid_step: usize,
     /// Append [`OUTLIERS`] after the clean grid.
     outliers: bool,
+}
+
+/// One `fit_sip` run and the metrics it must produce.
+#[derive(Debug)]
+struct MetricsCase {
+    name: &'static str,
+    distortion: Distortion,
     order: usize,
     clip_iterations: usize,
     rejected: Rejected,
@@ -95,7 +104,7 @@ const OUTLIERS: [([f64; 2], [f64; 2]); 3] = [
 /// The field centre every case distorts about, and the reference point every fit is given.
 const CENTRE: DVec2 = DVec2::new(500.0, 500.0);
 
-fn build_case(case: &MetricsCase) -> (Vec<DVec2>, Vec<DVec2>) {
+fn build_case(case: &Distortion) -> PointPairs {
     let mut ref_points = Vec::new();
     let mut target_points = Vec::new();
     for y in (0..=1000).step_by(case.grid_step) {
@@ -113,7 +122,10 @@ fn build_case(case: &MetricsCase) -> (Vec<DVec2>, Vec<DVec2>) {
             target_points.push(DVec2::from_array(target));
         }
     }
-    (ref_points, target_points)
+    PointPairs {
+        reference: ref_points,
+        target: target_points,
+    }
 }
 
 /// Every `SipFitResult` metric, across the distortion shapes and clipping settings that produce
@@ -134,10 +146,12 @@ fn fit_sip_metrics_match_every_fixture() {
     let cases = [
         MetricsCase {
             name: "undistorted",
-            k: 0.0,
-            k4: 0.0,
-            grid_step: 100,
-            outliers: false,
+            distortion: Distortion {
+                k: 0.0,
+                k4: 0.0,
+                grid_step: 100,
+                outliers: false,
+            },
             order: 2,
             clip_iterations: 3,
             rejected: Rejected::Exactly(0),
@@ -151,10 +165,12 @@ fn fit_sip_metrics_match_every_fixture() {
         },
         MetricsCase {
             name: "barrel, order 3",
-            k: 1e-7,
-            k4: 0.0,
-            grid_step: 100,
-            outliers: false,
+            distortion: Distortion {
+                k: 1e-7,
+                k4: 0.0,
+                grid_step: 100,
+                outliers: false,
+            },
             order: 3,
             clip_iterations: 3,
             rejected: Rejected::Exactly(0),
@@ -168,10 +184,12 @@ fn fit_sip_metrics_match_every_fixture() {
         },
         MetricsCase {
             name: "barrel with outliers, clipping on",
-            k: 1e-7,
-            k4: 0.0,
-            grid_step: 100,
-            outliers: true,
+            distortion: Distortion {
+                k: 1e-7,
+                k4: 0.0,
+                grid_step: 100,
+                outliers: true,
+            },
             order: 3,
             clip_iterations: 3,
             rejected: Rejected::AtLeast(3),
@@ -182,10 +200,12 @@ fn fit_sip_metrics_match_every_fixture() {
         },
         MetricsCase {
             name: "barrel with outliers, clipping off",
-            k: 1e-7,
-            k4: 0.0,
-            grid_step: 100,
-            outliers: true,
+            distortion: Distortion {
+                k: 1e-7,
+                k4: 0.0,
+                grid_step: 100,
+                outliers: true,
+            },
             order: 3,
             clip_iterations: 0,
             rejected: Rejected::Exactly(0),
@@ -196,10 +216,12 @@ fn fit_sip_metrics_match_every_fixture() {
         },
         MetricsCase {
             name: "quartic field, order 3 cannot model it",
-            k: 1e-7,
-            k4: 1e-14,
-            grid_step: 50,
-            outliers: false,
+            distortion: Distortion {
+                k: 1e-7,
+                k4: 1e-14,
+                grid_step: 50,
+                outliers: false,
+            },
             order: 3,
             clip_iterations: 0,
             rejected: Rejected::Exactly(0),
@@ -214,7 +236,10 @@ fn fit_sip_metrics_match_every_fixture() {
     ];
 
     for case in &cases {
-        let (ref_points, target_points) = build_case(case);
+        let PointPairs {
+            reference: ref_points,
+            target: target_points,
+        } = build_case(&case.distortion);
         let n = ref_points.len();
         let config = SipConfig {
             order: case.order,
@@ -294,21 +319,16 @@ fn fit_sip_quality_improves_with_order_and_with_clipping() {
     // Order 3 captures the r² term but not r⁴; order 4 adds terms that partially model it. Clipping
     // is off so both fit the same points — otherwise order 3 rejects what it cannot model and the
     // two fits are graded on different data.
-    let quartic = MetricsCase {
-        name: "quartic",
+    let quartic = Distortion {
         k: 1e-7,
         k4: 1e-14,
         grid_step: 50,
         outliers: false,
-        order: 3,
-        clip_iterations: 0,
-        rejected: Rejected::Exactly(0),
-        rms_below: f64::INFINITY,
-        rms_above: None,
-        max_residual_below: None,
-        correction: None,
     };
-    let (ref_points, target_points) = build_case(&quartic);
+    let PointPairs {
+        reference: ref_points,
+        target: target_points,
+    } = build_case(&quartic);
     let low = fit_sip(&ref_points, &target_points, &transform, &order(3, 0));
     let high = fit_sip(&ref_points, &target_points, &transform, &order(4, 0));
 
@@ -327,13 +347,16 @@ fn fit_sip_quality_improves_with_order_and_with_clipping() {
 
     // Same points, clipping on versus off. The clipped fit is graded on its survivors, so its RMS
     // is strictly lower than the unclipped fit that the outliers pull.
-    let contaminated = MetricsCase {
+    let contaminated = Distortion {
         outliers: true,
         grid_step: 100,
         k4: 0.0,
         ..quartic
     };
-    let (ref_points, target_points) = build_case(&contaminated);
+    let PointPairs {
+        reference: ref_points,
+        target: target_points,
+    } = build_case(&contaminated);
     let n = ref_points.len();
     let clipped = fit_sip(&ref_points, &target_points, &transform, &order(3, 3));
     let unclipped = fit_sip(&ref_points, &target_points, &transform, &order(3, 0));

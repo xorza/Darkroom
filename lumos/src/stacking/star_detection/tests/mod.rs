@@ -22,7 +22,7 @@ mod mem_budget_probe;
 mod metric_curves;
 mod pipeline_tests;
 #[cfg(feature = "real-data")]
-mod real_data;
+pub(crate) mod real_data;
 mod stage_effects;
 mod subpixel_accuracy;
 

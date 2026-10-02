@@ -8,13 +8,17 @@ use crate::graph::func::event::EventLambda;
 use crate::runtime::shared_any_state::SharedAnyState;
 use crate::testing::worker::PATIENCE;
 
+/// A started loop and the node its one trigger fires for.
+#[derive(Debug)]
+struct SingleLoop {
+    active: ActiveEventLoop,
+    node_id: NodeId,
+}
+
 /// Start an event loop with a single lambda as its only trigger, on a fresh
 /// `NodeId` — the shape most `start_event_loop` tests want when they only
 /// care about one lambda's behavior.
-async fn start_single_event_loop(
-    lambda: EventLambda,
-    pause_gate: PauseGate,
-) -> (ActiveEventLoop, NodeId) {
+async fn start_single_event_loop(lambda: EventLambda, pause_gate: PauseGate) -> SingleLoop {
     let node_id = NodeId::unique();
     let active = ActiveEventLoop::start(
         vec![EventTrigger {
@@ -28,13 +32,16 @@ async fn start_single_event_loop(
         pause_gate,
     )
     .await;
-    (active, node_id)
+    SingleLoop { active, node_id }
 }
 
 #[tokio::test]
 async fn start_event_loop_forwards_events() {
     let event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
-    let (mut active, node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
+    let SingleLoop {
+        mut active,
+        node_id,
+    } = start_single_event_loop(event_lambda, PauseGate::default()).await;
 
     let event = active
         .recv_event()
@@ -64,7 +71,10 @@ async fn start_event_loop_waits_for_callback() {
 
     let notify_for_callback = Arc::clone(&notify);
 
-    let (mut active, node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
+    let SingleLoop {
+        mut active,
+        node_id,
+    } = start_single_event_loop(event_lambda, PauseGate::default()).await;
 
     // `notify_one` stores a permit, so the lambda proceeds whether or not it has parked yet.
     notify_for_callback.notify_one();
@@ -107,7 +117,10 @@ async fn pause_gate_blocks_event_loop_iterations() {
         }
     });
     let pause_gate = PauseGate::default();
-    let (mut active, node_id) = start_single_event_loop(event_lambda, pause_gate.clone()).await;
+    let SingleLoop {
+        mut active,
+        node_id,
+    } = start_single_event_loop(event_lambda, pause_gate.clone()).await;
     let settle = || time::sleep(Duration::from_millis(1));
 
     settle().await;
@@ -148,7 +161,10 @@ async fn pause_gate_blocks_event_loop_iterations() {
 #[tokio::test]
 async fn lambda_panic_is_captured_not_unwound() {
     let event_lambda = EventLambda::new(|_state| Box::pin(async { panic!("boom in lambda") }));
-    let (mut active, node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
+    let SingleLoop {
+        mut active,
+        node_id,
+    } = start_single_event_loop(event_lambda, PauseGate::default()).await;
     let mut events = Vec::new();
 
     let wake = active.recv(&mut events).await;
@@ -173,7 +189,10 @@ async fn lambda_panic_is_captured_not_unwound() {
 #[tokio::test]
 async fn stopped_event_loop_channel_is_closed() {
     let event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
-    let (mut active, _node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
+    let SingleLoop {
+        mut active,
+        node_id: _node_id,
+    } = start_single_event_loop(event_lambda, PauseGate::default()).await;
 
     active.stop().await;
 

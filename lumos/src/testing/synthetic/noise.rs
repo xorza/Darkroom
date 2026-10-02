@@ -94,7 +94,14 @@ pub(super) fn add_dark_current(
 mod tests {
     use crate::testing::synthetic::noise::*;
 
-    fn mean_var(samples: &[f32]) -> (f64, f64) {
+    /// Sample mean and population variance.
+    #[derive(Debug)]
+    struct Moments {
+        mean: f64,
+        var: f64,
+    }
+
+    fn mean_var(samples: &[f32]) -> Moments {
         let n = samples.len() as f64;
         let mean = samples.iter().map(|&s| f64::from(s)).sum::<f64>() / n;
         let var = samples
@@ -102,7 +109,7 @@ mod tests {
             .map(|&s| (f64::from(s) - mean).powi(2))
             .sum::<f64>()
             / n;
-        (mean, var)
+        Moments { mean, var }
     }
 
     #[test]
@@ -111,7 +118,7 @@ mod tests {
         // error of the mean is sqrt(10/200_000) ≈ 0.0071, so ±0.1 is ~14σ — a safe bound.
         let mut rng = TestRng::new(1);
         let samples: Vec<f32> = (0..200_000).map(|_| poisson(&mut rng, 10.0)).collect();
-        let (mean, var) = mean_var(&samples);
+        let Moments { mean, var } = mean_var(&samples);
         assert!((mean - 10.0).abs() < 0.1, "mean {mean}");
         assert!((var - 10.0).abs() < 0.6, "var {var}");
         // Poisson is integer-valued.
@@ -122,7 +129,7 @@ mod tests {
     fn poisson_normal_branch_large_lambda() {
         let mut rng = TestRng::new(2);
         let samples: Vec<f32> = (0..200_000).map(|_| poisson(&mut rng, 1000.0)).collect();
-        let (mean, var) = mean_var(&samples);
+        let Moments { mean, var } = mean_var(&samples);
         assert!((mean - 1000.0).abs() < 5.0, "mean {mean}");
         assert!((var - 1000.0).abs() < 60.0, "var {var}");
     }
@@ -142,7 +149,7 @@ mod tests {
         let mut rng = TestRng::new(4);
         let mut pixels = vec![0.5f32; 100_000];
         apply_shot_noise(&mut pixels, 10_000.0, &mut rng);
-        let (mean, var) = mean_var(&pixels);
+        let Moments { mean, var } = mean_var(&pixels);
         assert!((mean - 0.5).abs() < 1e-3, "mean {mean}");
         assert!((var - 5e-5).abs() < 1e-5, "var {var}");
     }
@@ -153,7 +160,7 @@ mod tests {
         let mut rng = TestRng::new(5);
         let mut pixels = vec![0.0f32; 100_000];
         add_read_noise(&mut pixels, 5.0, 10_000.0, &mut rng);
-        let (mean, var) = mean_var(&pixels);
+        let Moments { mean, var } = mean_var(&pixels);
         assert!(mean.abs() < 1e-5, "mean {mean}");
         assert!((var.sqrt() - 5e-4).abs() < 5e-5, "std {}", var.sqrt());
     }
@@ -164,7 +171,7 @@ mod tests {
         let mut rng = TestRng::new(6);
         let mut pixels = vec![0.0f32; 100_000];
         add_dark_current(&mut pixels, 0.1, 100.0, 10_000.0, &mut rng);
-        let (mean, _) = mean_var(&pixels);
+        let Moments { mean, .. } = mean_var(&pixels);
         assert!((mean - 1e-3).abs() < 5e-5, "mean {mean}");
     }
 
@@ -181,7 +188,7 @@ mod tests {
         // Dark current's actual regime (λ≈0.05): mean tracks λ; draws are 0/1/(rare 2).
         let mut rng = TestRng::new(11);
         let samples: Vec<f32> = (0..200_000).map(|_| poisson(&mut rng, 0.05)).collect();
-        let (mean, _) = mean_var(&samples);
+        let Moments { mean, .. } = mean_var(&samples);
         assert!((mean - 0.05).abs() < 0.005, "mean {mean}");
         assert!(
             samples
@@ -196,7 +203,7 @@ mod tests {
         // λ=30 takes the Gaussian branch; mean and variance must still equal λ.
         let mut rng = TestRng::new(12);
         let samples: Vec<f32> = (0..200_000).map(|_| poisson(&mut rng, 30.0)).collect();
-        let (mean, var) = mean_var(&samples);
+        let Moments { mean, var } = mean_var(&samples);
         assert!((mean - 30.0).abs() < 0.3, "mean {mean}");
         assert!((var - 30.0).abs() < 2.5, "var {var}");
     }
@@ -210,8 +217,10 @@ mod tests {
         let mut bright = vec![0.8f32; 200_000];
         apply_shot_noise(&mut dim, well, &mut rng);
         apply_shot_noise(&mut bright, well, &mut rng);
-        let (_, var_dim) = mean_var(&dim);
-        let (_, var_bright) = mean_var(&bright);
+        let Moments { var: var_dim, .. } = mean_var(&dim);
+        let Moments {
+            var: var_bright, ..
+        } = mean_var(&bright);
         let ratio = var_bright / var_dim;
         assert!(
             (ratio - 4.0).abs() < 0.4,

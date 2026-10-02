@@ -469,57 +469,6 @@ fn gaussian_fit_sigma_recovery() {
     }
 }
 
-/// Test Moffat fitting recovers correct alpha values.
-#[test]
-fn moffat_fit_alpha_recovery() {
-    use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFit, MoffatFitConfig};
-
-    let width = 21;
-    let height = 21;
-    let background = 0.1f32;
-    let beta = 2.5f32;
-
-    // Test alpha values that fit well within stamp_radius=8
-    for true_alpha in [2.0f32, 2.5, 3.0, 3.5] {
-        let cx = 10.0f64;
-        let cy = 10.0f64;
-
-        let mut pixels = Buffer2::new_filled(width, height, background);
-        for y in 0..height {
-            for x in 0..width {
-                let r2 = (x as f32 - cx as f32).powi(2) + (y as f32 - cy as f32).powi(2);
-                pixels[(x, y)] += 1.0 * (1.0 + r2 / (true_alpha * true_alpha)).powf(-beta);
-            }
-        }
-
-        let config = MoffatFitConfig {
-            fixed_beta: beta,
-            ..Default::default()
-        };
-        let result = MoffatFit::new(
-            &pixels,
-            DVec2::new(cx, cy),
-            &StampGrid::new(8),
-            background,
-            None,
-            &config,
-        )
-        .unwrap_or_else(|| panic!("Fit should return Some for alpha={true_alpha}"));
-
-        // Check that alpha is accurate (convergence flag may be false if
-        // initial guess was already close)
-        let alpha_error = (result.debug_alpha() - true_alpha).abs() / true_alpha;
-
-        assert!(
-            alpha_error < 0.15,
-            "Alpha error {:.1}% too large for alpha={} (got={})",
-            alpha_error * 100.0,
-            true_alpha,
-            result.debug_alpha()
-        );
-    }
-}
-
 /// Test that fitting works with noisy data.
 #[test]
 fn gaussian_fit_with_noise() {

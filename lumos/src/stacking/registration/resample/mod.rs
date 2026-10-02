@@ -9,15 +9,11 @@ use crate::stacking::registration::config::WarpParams;
 use crate::stacking::registration::resample::masked_warp::MaskedWarp;
 use crate::stacking::registration::transform::WarpTransform;
 
-#[cfg(all(test, feature = "bench"))]
-mod bench;
 mod kernel;
 mod masked_warp;
 mod plane;
 mod quality;
 mod row;
-#[cfg(test)]
-mod tests;
 
 /// Output of [`warp`]: the aligned image plus per-pixel support and confidence maps.
 ///
@@ -182,3 +178,8 @@ pub(super) mod internals {
         plane::warp(input, output, transform, params);
     }
 }
+
+#[cfg(all(test, feature = "bench"))]
+mod bench;
+#[cfg(test)]
+mod tests;

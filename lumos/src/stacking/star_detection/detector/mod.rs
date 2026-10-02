@@ -5,9 +5,6 @@
 
 pub(super) mod stages;
 
-#[cfg(all(test, feature = "bench"))]
-mod bench;
-
 use serde::{Deserialize, Serialize};
 
 use crate::io::image::linear::LinearImage;
@@ -252,6 +249,9 @@ pub(super) mod internals {
         detector.resources.as_ref().map(buffer_counts)
     }
 }
+
+#[cfg(all(test, feature = "bench"))]
+mod bench;
 
 #[cfg(test)]
 mod tests {

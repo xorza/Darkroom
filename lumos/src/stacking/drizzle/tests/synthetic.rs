@@ -15,27 +15,32 @@ use crate::testing::synthetic::camera::Camera;
 use crate::testing::synthetic::observe::{Observation, render};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
 
+/// One rendered frame per dither offset, and the transform that registers each.
+#[derive(Debug)]
+struct DitheredFrames {
+    images: Vec<LinearImage>,
+    transforms: Vec<Transform>,
+}
+
 /// Render one sub-pixel-dithered frame per offset, with the drizzle transform that registers it
 /// back onto the common grid (`output = transform.apply(input)·scale`, so a frame whose star is
 /// dithered to `pos + d` uses `translation(-d)` to land it at `pos·scale`).
-fn dithered_frames(
-    scene: &Scene,
-    camera: &Camera,
-    dithers: &[DVec2],
-) -> (Vec<LinearImage>, Vec<Transform>) {
-    dithers
+fn dithered_frames(scene: &Scene, camera: &Camera, dithers: &[DVec2]) -> DitheredFrames {
+    let images = dithers
         .iter()
         .map(|&d| {
             let obs = Observation {
                 transform: Transform::translation(d),
                 ..Observation::reference(0)
             };
-            (
-                render(scene, camera, &obs).image,
-                Transform::translation(-d),
-            )
+            render(scene, camera, &obs).image
         })
-        .unzip()
+        .collect();
+    let transforms = dithers
+        .iter()
+        .map(|&d| Transform::translation(-d))
+        .collect();
+    DitheredFrames { images, transforms }
 }
 
 fn drizzle_frames(
@@ -90,7 +95,7 @@ fn drizzle_conserves_total_flux() {
         DVec2::new(0.0, 0.5),
         DVec2::new(0.5, 0.5),
     ];
-    let (images, transforms) = dithered_frames(&scene, &camera, &dithers);
+    let DitheredFrames { images, transforms } = dithered_frames(&scene, &camera, &dithers);
     let single_flux = sum(images[0].channel(0).pixels());
 
     // Drizzle preserves surface brightness, so Σ over the output ≈ scale²·Σ over an input frame.
@@ -129,7 +134,7 @@ fn drizzle_places_star_at_scaled_truth_position() {
         DVec2::new(0.4, 0.4),
         DVec2::new(-0.3, 0.2),
     ];
-    let (images, transforms) = dithered_frames(&scene, &camera, &dithers);
+    let DitheredFrames { images, transforms } = dithered_frames(&scene, &camera, &dithers);
 
     let scale = 2.0;
     let config = DrizzleConfig {
@@ -176,7 +181,7 @@ fn drizzle_dithering_recovers_resolution() {
         .iter()
         .flat_map(|&dx| offs.iter().map(move |&dy| DVec2::new(dx, dy)))
         .collect();
-    let (images, transforms) = dithered_frames(&scene, &camera, &dithers);
+    let DitheredFrames { images, transforms } = dithered_frames(&scene, &camera, &dithers);
 
     let config = DrizzleConfig {
         scale: 2.0,
@@ -229,7 +234,7 @@ fn drizzle_emits_coverage_weight_and_linear_variance_maps() {
         DVec2::new(0.0, 0.5),
         DVec2::new(0.5, 0.5),
     ];
-    let (images, transforms) = dithered_frames(&scene, &camera, &dithers);
+    let DitheredFrames { images, transforms } = dithered_frames(&scene, &camera, &dithers);
     let config = DrizzleConfig {
         scale: 1.0,
         pixfrac: 1.0,

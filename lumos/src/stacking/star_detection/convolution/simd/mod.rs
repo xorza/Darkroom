@@ -16,9 +16,6 @@ mod x86;
 #[cfg(target_arch = "aarch64")]
 mod neon;
 
-#[cfg(test)]
-mod tests;
-
 /// A borrowed square 2D convolution kernel, stored row-major.
 ///
 /// Bundles the coefficients with the side length they are laid out by, so the two
@@ -229,3 +226,6 @@ fn convolve_2d_row_scalar(
         *out_px = sum;
     }
 }
+
+#[cfg(test)]
+mod tests;

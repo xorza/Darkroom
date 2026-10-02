@@ -7,9 +7,10 @@
 //! Uses SIMD acceleration when available for statistics computation.
 
 pub(crate) mod background_estimate;
+mod simd;
+pub(crate) mod workspace;
+
 #[cfg(all(test, feature = "bench"))]
 mod bench;
-mod simd;
 #[cfg(test)]
 mod tests;
-pub(crate) mod workspace;

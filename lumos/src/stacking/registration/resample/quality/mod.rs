@@ -27,9 +27,6 @@ use crate::stacking::registration::transform::WarpTransform;
 use glam::Vec2;
 use imaginarium::Buffer2;
 
-#[cfg(test)]
-mod tests;
-
 /// The widest separable kernel here: Lanczos4's 8 taps per axis. Every method's weights share this
 /// array so the quality tail is written once rather than per kernel width.
 const MAX_TAPS: usize = 8;
@@ -461,3 +458,6 @@ pub(crate) mod internals {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

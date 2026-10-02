@@ -8,8 +8,6 @@
 //! and `background_extraction` (tile-centre samples feeding the gradient surface fit).
 
 pub(crate) mod spline;
-#[cfg(test)]
-mod tests;
 pub(crate) mod tile_stats;
 pub(crate) mod workspace;
 
@@ -242,3 +240,8 @@ impl TileGrid {
         }
     }
 }
+
+#[cfg(all(test, feature = "bench"))]
+mod bench;
+#[cfg(test)]
+mod tests;

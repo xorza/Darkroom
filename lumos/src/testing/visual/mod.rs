@@ -42,17 +42,24 @@ pub(crate) enum ToneMap {
     Asinh,
 }
 
+/// The minimum and a non-zero span.
+#[derive(Debug)]
+struct Range {
+    lo: f32,
+    span: f32,
+}
+
 impl ToneMap {
     /// Map `pixels` into `[0, 1]`.
     fn apply(self, pixels: &[f32]) -> Vec<f32> {
         match self {
             ToneMap::Clamp => pixels.iter().map(|&p| p.clamp(0.0, 1.0)).collect(),
             ToneMap::AutoRange => {
-                let (lo, span) = Self::range(pixels);
+                let Range { lo, span } = Self::range(pixels);
                 pixels.iter().map(|&p| (p - lo) / span).collect()
             }
             ToneMap::Asinh => {
-                let (lo, span) = Self::range(pixels);
+                let Range { lo, span } = Self::range(pixels);
                 // astropy-style AsinhStretch: y = asinh(x/a) / asinh(1/a), a = soft knee.
                 let a = 0.1f32;
                 let denom = (1.0 / a).asinh();
@@ -68,10 +75,13 @@ impl ToneMap {
     }
 
     /// Minimum and a non-zero span, for the two mappings that normalise against the data.
-    fn range(pixels: &[f32]) -> (f32, f32) {
+    fn range(pixels: &[f32]) -> Range {
         let lo = pixels.iter().copied().fold(f32::INFINITY, f32::min);
         let hi = pixels.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-        (lo, (hi - lo).max(1e-10))
+        Range {
+            lo,
+            span: (hi - lo).max(1e-10),
+        }
     }
 }
 

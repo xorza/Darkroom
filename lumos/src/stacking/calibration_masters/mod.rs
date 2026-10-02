@@ -6,12 +6,8 @@ pub(crate) mod error;
 mod fits;
 mod prepared_flat;
 
-#[cfg(all(test, feature = "bench"))]
-mod bench;
 #[cfg(all(test, feature = "real-data"))]
 mod real_data_tests;
-#[cfg(test)]
-mod tests;
 
 use std::fmt;
 use std::fmt::Display;
@@ -772,3 +768,8 @@ fn master_scale(
             master: master_domain,
         })
 }
+
+#[cfg(all(test, feature = "bench"))]
+mod bench;
+#[cfg(test)]
+mod tests;

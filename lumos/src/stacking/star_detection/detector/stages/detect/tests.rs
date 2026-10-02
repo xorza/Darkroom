@@ -3,8 +3,15 @@ use crate::stacking::star_detection::detector::stages::detect::*;
 use crate::testing::prelude::*;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 
+/// The rendered stars and a label map marking all of them as one component.
+#[derive(Debug)]
+struct OneComponent {
+    pixels: Buffer2<f32>,
+    labels: LabelMap,
+}
+
 /// Render Gaussian `stars` into a single connected component: every lit pixel gets label 1.
-fn one_component(size: Size2us, stars: &[SyntheticStar]) -> (Buffer2<f32>, LabelMap) {
+fn one_component(size: Size2us, stars: &[SyntheticStar]) -> OneComponent {
     let mut pixels = Buffer2::new_filled(size.width, size.height, 0.0f32);
     let mut labels = Buffer2::new_filled(size.width, size.height, 0u32);
     for &star in stars {
@@ -23,7 +30,10 @@ fn one_component(size: Size2us, stars: &[SyntheticStar]) -> (Buffer2<f32>, Label
             }
         }
     }
-    (pixels, LabelMap::from_raw(labels, 1))
+    OneComponent {
+        pixels,
+        labels: LabelMap::from_raw(labels, 1),
+    }
 }
 
 fn local_maxima_config() -> DetectionConfig {
@@ -42,7 +52,10 @@ fn local_maxima_deblended_counts_split_components_not_extra_regions() {
     // splits it into three regions, but it is ONE component that split, so
     // `deblended_components` must be 1. The previous `regions - num_components`
     // formula reported 3 - 1 = 2 here, which this pins against.
-    let (pixels, label_map) = one_component(
+    let OneComponent {
+        pixels,
+        labels: label_map,
+    } = one_component(
         Size2us::new(48, 24),
         &[
             SyntheticStar::new(
@@ -79,7 +92,10 @@ fn local_maxima_deblended_counts_split_components_not_extra_regions() {
 #[test]
 fn local_maxima_single_peak_reports_zero_deblended() {
     // A lone star: one region from one component — nothing was split.
-    let (pixels, label_map) = one_component(
+    let OneComponent {
+        pixels,
+        labels: label_map,
+    } = one_component(
         Size2us::new(32, 32),
         &[SyntheticStar::new(
             Vec2::new(16.0, 16.0),
@@ -164,7 +180,10 @@ fn edge_margin_swallowing_image_yields_no_regions_without_panicking() {
     // oddly-sized frame shouldn't abort the whole run. Covers both the exact boundary
     // (2 * 16 == 32) and a margin past the dimension itself (saturating_sub floors at 0).
     for edge_margin in [16, 32] {
-        let (pixels, label_map) = one_component(
+        let OneComponent {
+            pixels,
+            labels: label_map,
+        } = one_component(
             Size2us::new(32, 32),
             &[SyntheticStar::new(
                 Vec2::new(16.0, 16.0),

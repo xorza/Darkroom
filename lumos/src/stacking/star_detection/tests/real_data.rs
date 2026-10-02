@@ -1,26 +1,35 @@
 //! Test star detection on rho-opiuchi.jpg real image.
 //!
-//! Run with: `cargo test -p lumos --features real-data rho_opiuchi -- --ignored --nocapture`
+//! Run with: `cargo test -p lumos --features real-data rho_opiuchi -- --nocapture`; set
+//! `DARKROOM_TEST_OUTPUT` to keep the annotated images.
 
 use std::time::Instant;
 
 use common::internals::debug_output_path;
 
+use crate::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::stacking::star_detection::threshold_mask::{ThresholdParams, create_threshold_mask};
 use crate::testing::init_tracing;
-use crate::testing::real_data::dataset_dir;
-use crate::{CentroidMethod, ImageDimensions};
+use crate::testing::real_data::dataset_path;
 use glam::Vec2;
 use imaginarium::Color;
 use imaginarium::ColorFormat;
 use imaginarium::drawing::draw_circle;
+use std::path::PathBuf;
 
-fn linear_image_from_l_f32(image: &imaginarium::Image) -> LinearImage {
-    assert_eq!(image.desc().color_format, ColorFormat::L_F32);
+fn rho_opiuchi_path() -> PathBuf {
+    dataset_path("rho-opiuchi.jpg")
+}
+
+/// The dataset's `rho-opiuchi.jpg` as one luminance plane.
+pub(crate) fn rho_opiuchi() -> LinearImage {
+    let image = imaginarium::Image::read_file(rho_opiuchi_path())
+        .expect("Failed to load image")
+        .convert(ColorFormat::L_F32);
     LinearImage::from_pixels(
         ImageDimensions::new((image.desc().width, image.desc().height), 1),
         bytemuck::cast_slice(image.bytes()).to_vec(),
@@ -31,21 +40,7 @@ fn linear_image_from_l_f32(image: &imaginarium::Image) -> LinearImage {
 fn detect_rho_opiuchi() {
     init_tracing();
 
-    let cal_dir = dataset_dir();
-
-    let image_path = cal_dir.join("rho-opiuchi.jpg");
-    assert!(
-        image_path.exists(),
-        "rho-opiuchi.jpg not found in {cal_dir:?}"
-    );
-
-    println!("Loading: {image_path:?}");
-
-    let img = imaginarium::Image::read_file(&image_path)
-        .expect("Failed to load image")
-        .convert(ColorFormat::L_F32);
-
-    let linear_image = linear_image_from_l_f32(&img);
+    let linear_image = rho_opiuchi();
     println!(
         "Image size: {}x{}",
         linear_image.width(),
@@ -85,7 +80,7 @@ fn detect_rho_opiuchi() {
     }
 
     // Load original image for visualization (RGB_F32 for drawing functions)
-    let mut output_img = imaginarium::Image::read_file(&image_path)
+    let mut output_img = imaginarium::Image::read_file(rho_opiuchi_path())
         .expect("Failed to load image")
         .convert(ColorFormat::RGB_F32);
 
@@ -112,9 +107,24 @@ fn detect_rho_opiuchi() {
         println!("\nSaved detection result to: {}", output_path.display());
     }
 
+    // Invariants every detection owes, whatever the field: stars inside the frame with a finite
+    // positive width and signal, brightest first.
     assert!(
         !result.stars.is_empty(),
         "Should find stars in rho-opiuchi.jpg"
+    );
+    let (width, height) = (linear_image.width() as f64, linear_image.height() as f64);
+    for star in &result.stars {
+        assert!(
+            (0.0..width).contains(&star.pos.x) && (0.0..height).contains(&star.pos.y),
+            "{star:?} lies outside the frame"
+        );
+        assert!(star.fwhm.is_finite() && star.fwhm > 0.0, "{star:?}");
+        assert!(star.flux > 0.0 && star.snr > 0.0, "{star:?}");
+    }
+    assert!(
+        result.stars.is_sorted_by(|a, b| a.flux >= b.flux),
+        "stars are brightest first"
     );
 }
 
@@ -133,19 +143,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
 
     init_tracing();
 
-    let cal_dir = dataset_dir();
-
-    let image_path = cal_dir.join("rho-opiuchi.jpg");
-    assert!(
-        image_path.exists(),
-        "rho-opiuchi.jpg not found in {cal_dir:?}"
-    );
-
-    let img = imaginarium::Image::read_file(&image_path)
-        .expect("Failed to load image")
-        .convert(ColorFormat::L_F32);
-
-    let linear_image = linear_image_from_l_f32(&img);
+    let linear_image = rho_opiuchi();
     let width = linear_image.width();
     let height = linear_image.height();
     println!("Image size: {width}x{height}");
@@ -285,34 +283,4 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     pool.release_bit(mask);
     background.release_to_pool(&mut pool);
     pool.release_f32(grayscale);
-
-    println!("\nAll intermediate images saved to test_output/rho-opiuchi-inspect/");
-}
-
-#[quickbench::quick_bench(warmup_iters = 1, iters = 10)]
-fn quick_bench_detect_rho_opiuchi(b: quickbench::Bencher) {
-    let cal_dir = dataset_dir();
-
-    let image_path = cal_dir.join("rho-opiuchi.jpg");
-    assert!(
-        image_path.exists(),
-        "rho-opiuchi.jpg not found in {cal_dir:?}"
-    );
-
-    // Preload image outside of benchmark loop
-    let img = imaginarium::Image::read_file(&image_path)
-        .expect("Failed to load image")
-        .convert(ColorFormat::L_F32);
-
-    let linear_image = linear_image_from_l_f32(&img);
-    println!(
-        "Image size: {}x{}",
-        linear_image.width(),
-        linear_image.height()
-    );
-    let mut config = Config::precise_ground();
-    config.measurement.centroid_method = CentroidMethod::MoffatFit { beta: 2.5 };
-    let mut detector = StarDetector::from_config(config).unwrap();
-
-    b.bench(|| detector.detect(&linear_image));
 }

@@ -7,11 +7,6 @@
 //! - Lock-free union-find with atomic operations
 //! - Minimal allocations via buffer reuse
 
-#[cfg(all(test, feature = "bench"))]
-mod bench;
-#[cfg(test)]
-mod tests;
-
 mod run;
 mod union_find;
 
@@ -352,3 +347,8 @@ pub(crate) mod internals {
         }
     }
 }
+
+#[cfg(all(test, feature = "bench"))]
+mod bench;
+#[cfg(test)]
+mod tests;
