@@ -73,11 +73,10 @@ impl FromStr for ConversionFormat {
     }
 }
 
-pub(super) static CONVERSION_FORMAT_TYPE_ID: LazyLock<TypeId> =
-    LazyLock::new(|| "6d9db73e-5c92-4332-af0d-b2eb7c95acd0".into());
+pub(super) const CONVERSION_FORMAT_TYPE_ID: TypeId =
+    TypeId::literal("6d9db73e-5c92-4332-af0d-b2eb7c95acd0");
 
-pub(super) static CONVERSION_FORMAT_DATATYPE: LazyLock<DataType> =
-    LazyLock::new(|| DataType::Enum(*CONVERSION_FORMAT_TYPE_ID));
+pub(super) const CONVERSION_FORMAT_DATATYPE: DataType = DataType::Enum(CONVERSION_FORMAT_TYPE_ID);
 
 pub(super) fn conversion_target(format: &str, current: ColorFormat) -> Option<ColorFormat> {
     let target = ConversionFormat::from_str(format)

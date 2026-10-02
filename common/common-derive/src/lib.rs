@@ -1,7 +1,8 @@
 //! `#[derive(Introspect)]` — generic struct introspection (see
 //! `common::introspect`).
 //!
-//! Generates `impl common::Introspect`: `fields()` (a `common::FieldDesc` per
+//! Generates `impl common::Introspect`: the `TYPE_ID` and `DISPLAY_NAME` the type-level
+//! `#[config(type_id = "…", name = "…")]` gives, `fields()` (a `common::FieldDesc` per
 //! struct field — name, label, kind, default, required) and `from_fields()`
 //! (rebuild `Self` from neutral `common::FieldValue`s, checking numeric
 //! conversions and falling back to the field's `Default` on a
@@ -57,6 +58,11 @@ pub fn derive_introspect(input: TokenStream) -> TokenStream {
 
 fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let ident = &input.ident;
+    let identity = type_identity(input, "Introspect")?;
+    let type_id = identity.type_id;
+    let display_name = identity
+        .name
+        .unwrap_or_else(|| LitStr::new(&ident.to_string(), ident.span()));
     let Data::Struct(data) = &input.data else {
         return Err(syn::Error::new_spanned(
             ident,
@@ -82,6 +88,9 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
 
     Ok(quote! {
         impl ::common::Introspect for #ident {
+            const TYPE_ID: &'static str = #type_id;
+            const DISPLAY_NAME: &'static str = #display_name;
+
             fn fields() -> ::std::vec::Vec<::common::FieldDesc> {
                 let d = <Self as ::core::default::Default>::default();
                 ::std::vec![ #(#descriptors),* ]
@@ -117,7 +126,14 @@ pub fn derive_introspect_enum(input: TokenStream) -> TokenStream {
 
 fn expand_enum(input: &DeriveInput) -> syn::Result<TokenStream> {
     let ident = &input.ident;
-    let type_id = enum_type_id(input)?;
+    let identity = type_identity(input, "IntrospectEnum")?;
+    if let Some(name) = identity.name {
+        return Err(syn::Error::new_spanned(
+            name,
+            "IntrospectEnum takes its display name from the type",
+        ));
+    }
+    let type_id = identity.type_id;
     let Data::Enum(data) = &input.data else {
         return Err(syn::Error::new_spanned(
             ident,
@@ -144,15 +160,12 @@ fn expand_enum(input: &DeriveInput) -> syn::Result<TokenStream> {
         impl ::common::IntrospectEnum for #ident {
             const TYPE_ID: &'static str = #type_id;
             const DISPLAY_NAME: &'static str = ::core::stringify!(#ident);
+            const VARIANTS: &'static [&'static str] = &[ #(#names),* ];
 
-            fn variants() -> ::std::vec::Vec<::std::string::String> {
-                ::std::vec![ #( ::std::string::ToString::to_string(#names) ),* ]
-            }
-
-            fn to_variant(&self) -> ::std::string::String {
-                ::std::string::ToString::to_string(match self {
+            fn to_variant(&self) -> &'static str {
+                match self {
                     #( Self::#variants => #names ),*
-                })
+                }
             }
 
             fn from_variant(name: &str) -> ::std::option::Option<Self> {
@@ -247,8 +260,8 @@ fn descriptor(fname: &Ident, label: &str, kind: &Kind) -> TokenStream2 {
     let default = default_tokens(fname, kind);
     quote! {
         ::common::FieldDesc {
-            name: #name.to_string(),
-            label: #label.to_string(),
+            name: #name,
+            label: #label,
             kind: #field_kind,
             default: #default,
             required: #required,
@@ -268,14 +281,17 @@ fn kind_tokens(kind: &Kind) -> TokenStream2 {
         Kind::Str => quote!(::common::FieldKind::Str),
         Kind::Option(inner, _) => {
             let inner = kind_tokens(inner);
-            quote!(::common::FieldKind::Option(::std::boxed::Box::new(#inner)))
+            quote!(::common::FieldKind::Option({
+                const INNER: ::common::FieldKind = #inner;
+                &INNER
+            }))
         }
         Kind::Enum(ty) => {
             quote! {
                 ::common::FieldKind::Enum {
-                    type_id: <#ty as ::common::IntrospectEnum>::TYPE_ID.to_string(),
-                    display_name: <#ty as ::common::IntrospectEnum>::DISPLAY_NAME.to_string(),
-                    variants: <#ty as ::common::IntrospectEnum>::variants(),
+                    type_id: <#ty as ::common::IntrospectEnum>::TYPE_ID,
+                    display_name: <#ty as ::common::IntrospectEnum>::DISPLAY_NAME,
+                    variants: <#ty as ::common::IntrospectEnum>::VARIANTS,
                 }
             }
         }
@@ -299,7 +315,9 @@ fn default_scalar(kind: &Kind, place: &TokenStream2) -> TokenStream2 {
         Kind::Bool => quote!(::common::FieldValue::Bool(#place)),
         Kind::Str => quote!(::common::FieldValue::Str(#place.clone())),
         Kind::Enum(_) => {
-            quote!(::common::FieldValue::Enum(::common::IntrospectEnum::to_variant(&#place)))
+            quote!(::common::FieldValue::Enum(::std::string::ToString::to_string(
+                ::common::IntrospectEnum::to_variant(&#place)
+            )))
         }
         Kind::Option(..) => quote!(::common::FieldValue::Null),
     }
@@ -438,15 +456,31 @@ fn field_label(field: &Field) -> syn::Result<String> {
     Ok(label.unwrap_or_else(|| prettify(&field.ident.as_ref().expect("named field").to_string())))
 }
 
-fn enum_type_id(input: &DeriveInput) -> syn::Result<LitStr> {
+/// A type's `#[config(type_id = "…", name = "…")]`.
+struct TypeIdentity {
+    type_id: LitStr,
+    name: Option<LitStr>,
+}
+
+/// The type-level `#[config]`: a required canonical lowercase UUID `type_id`, and an
+/// optional display `name`.
+fn type_identity(input: &DeriveInput, derive: &str) -> syn::Result<TypeIdentity> {
     let mut type_id = None;
+    let mut name = None;
     for attr in &input.attrs {
         if !attr.path().is_ident("config") {
             continue;
         }
         attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("name") {
+                if name.is_some() {
+                    return Err(meta.error("duplicate `name`"));
+                }
+                name = Some(meta.value()?.parse::<LitStr>()?);
+                return Ok(());
+            }
             if !meta.path.is_ident("type_id") {
-                return Err(meta.error("expected `type_id`"));
+                return Err(meta.error("expected `type_id` or `name`"));
             }
             if type_id.is_some() {
                 return Err(meta.error("duplicate `type_id`"));
@@ -466,12 +500,13 @@ fn enum_type_id(input: &DeriveInput) -> syn::Result<LitStr> {
             Ok(())
         })?;
     }
-    type_id.ok_or_else(|| {
+    let type_id = type_id.ok_or_else(|| {
         syn::Error::new_spanned(
             &input.ident,
-            "IntrospectEnum requires `#[config(type_id = \"…\")]`",
+            format!("{derive} requires `#[config(type_id = \"…\")]`"),
         )
-    })
+    })?;
+    Ok(TypeIdentity { type_id, name })
 }
 
 /// `snake_case` → "Title Case".

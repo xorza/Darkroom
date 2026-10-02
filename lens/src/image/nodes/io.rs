@@ -1,5 +1,6 @@
 //! Standard image load and save nodes.
 
+use scenarium::FuncId;
 use std::mem;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -14,6 +15,9 @@ use crate::image::{IMAGE_DATA_TYPE, Image};
 use scenarium::Invocation;
 use tokio::task;
 
+const LOAD_IMAGE_FUNC_ID: FuncId = FuncId::literal("a4d9bf87-9d98-44f1-a162-7483c298be3d");
+const SAVE_IMAGE_FUNC_ID: FuncId = FuncId::literal("0c17bcbe-d757-43be-b184-27b429e8b434");
+
 pub(super) fn register(library: &mut Library) {
     register_load(library);
     register_save(library);
@@ -21,7 +25,7 @@ pub(super) fn register(library: &mut Library) {
 
 fn register_load(library: &mut Library) {
     library.add(
-        Func::new("a4d9bf87-9d98-44f1-a162-7483c298be3d", "Load Image")
+        Func::new(LOAD_IMAGE_FUNC_ID, "Load Image")
             .description("Loads an image from a file on disk.")
             .category("Image")
             .pure()
@@ -57,7 +61,7 @@ fn register_load(library: &mut Library) {
 
 fn register_save(library: &mut Library) {
     library.add(
-        Func::new("0c17bcbe-d757-43be-b184-27b429e8b434", "Save Image")
+        Func::new(SAVE_IMAGE_FUNC_ID, "Save Image")
             .description("Writes an image to a file on disk.")
             .category("Image")
             .sink()

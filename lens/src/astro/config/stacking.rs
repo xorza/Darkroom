@@ -14,7 +14,6 @@ use common::{Introspect, IntrospectEnum};
 use lumos::{RegistrationConfig, SipConfig, StackConfig, StarDetectionConfig};
 
 use crate::astro::config::preset::preset_enum;
-use crate::config_node::NodeConfig;
 
 const COMBINE_SIGMA: f32 = 3.0;
 
@@ -55,6 +54,10 @@ preset_enum! {
 /// The star-detection knobs the editor offers, drawn from
 /// [`StarDetectionConfig`]'s `detection`, `fwhm` and `filter` sub-configs.
 #[derive(Debug, Clone, Introspect)]
+#[config(
+    type_id = "4512544e-537c-4c1c-96ad-e596cc88d60d",
+    name = "DetectionConfig"
+)]
 pub(crate) struct DetectionKnobs {
     sigma_threshold: f32,
     expected_fwhm: f32,
@@ -96,15 +99,14 @@ impl From<DetectionKnobs> for StarDetectionConfig {
     }
 }
 
-impl NodeConfig for DetectionKnobs {
-    const TYPE_ID: &'static str = "4512544e-537c-4c1c-96ad-e596cc88d60d";
-    const NAME: &'static str = "DetectionConfig";
-}
-
 /// The registration knobs the editor offers. `sip_enabled` stands in for
 /// [`RegistrationConfig::sip`]'s whole `Option<SipConfig>`: on means the
 /// default SIP fit, off means none.
 #[derive(Debug, Clone, Introspect)]
+#[config(
+    type_id = "63cd4de9-b82f-4829-bea5-391da64e296f",
+    name = "RegistrationConfig"
+)]
 pub(crate) struct RegistrationKnobs {
     max_stars: usize,
     min_matches: usize,
@@ -146,11 +148,6 @@ impl From<RegistrationKnobs> for RegistrationConfig {
     }
 }
 
-impl NodeConfig for RegistrationKnobs {
-    const TYPE_ID: &'static str = "63cd4de9-b82f-4829-bea5-391da64e296f";
-    const NAME: &'static str = "RegistrationConfig";
-}
-
 /// Which combination [`CombineKnobs`] builds. A [`StackConfig`] carries each
 /// method's parameters in its own shape, so the editor picks the method here
 /// and supplies the one shared parameter — `sigma` — as its own field.
@@ -166,6 +163,10 @@ pub(crate) enum CombineMethodChoice {
 /// The frame-combination knobs the editor offers. `sigma` is read only by the
 /// two rejecting methods.
 #[derive(Debug, Clone, Introspect)]
+#[config(
+    type_id = "843bff16-61ec-47db-9a86-64bb53c9c1cc",
+    name = "CombineConfig"
+)]
 pub(crate) struct CombineKnobs {
     method: CombineMethodChoice,
     sigma: f32,
@@ -189,11 +190,6 @@ impl From<CombineKnobs> for StackConfig {
             CombineMethodChoice::Mean => StackConfig::mean(),
         }
     }
-}
-
-impl NodeConfig for CombineKnobs {
-    const TYPE_ID: &'static str = "843bff16-61ec-47db-9a86-64bb53c9c1cc";
-    const NAME: &'static str = "CombineConfig";
 }
 
 #[cfg(test)]

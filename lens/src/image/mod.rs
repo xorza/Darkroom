@@ -11,16 +11,14 @@ use std::borrow::Cow;
 use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use lumos::LinearImage;
 use scenarium::{CustomValue, DataType, RamUsage, TypeId};
 
-pub static IMAGE_TYPE_ID: LazyLock<TypeId> =
-    LazyLock::new(|| "a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2".into());
+pub const IMAGE_TYPE_ID: TypeId = TypeId::literal("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2");
 
-pub(crate) static IMAGE_DATA_TYPE: LazyLock<DataType> =
-    LazyLock::new(|| DataType::Custom(*IMAGE_TYPE_ID));
+pub(crate) const IMAGE_DATA_TYPE: DataType = DataType::Custom(IMAGE_TYPE_ID);
 
 /// An image on a graph edge, in whichever layout its producer had.
 ///
@@ -126,7 +124,7 @@ impl Image {
 
 impl CustomValue for Image {
     fn type_id(&self) -> TypeId {
-        *IMAGE_TYPE_ID
+        IMAGE_TYPE_ID
     }
 
     fn as_any(&self) -> &dyn Any {

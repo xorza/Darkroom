@@ -1,6 +1,6 @@
 use scenarium::testing::graph::NodeSpec;
 use scenarium::testing::graph::TestGraph;
-use scenarium::{Binding, CacheMode, DataType, Graph, InputPort, Node, NodeKind};
+use scenarium::{Binding, CacheMode, DataType, FuncId, Graph, InputPort, Node, NodeKind};
 
 use crate::core::document::PortKind;
 use crate::core::document::TabRef;
@@ -68,9 +68,9 @@ fn a_missing_func_reads_as_a_deletable_stub() {
     let mut graph = Graph::default();
     let mut known: Node = library.by_name("Add").unwrap().into();
     known.disabled = true;
-    let mut ghost = Node::new(NodeKind::Func(
-        "7a0265e1-9631-45bd-8ecd-1e923b67a58c".into(),
-    ));
+    let mut ghost = Node::new(NodeKind::Func(FuncId::literal(
+        "7a0265e1-9631-45bd-8ecd-1e923b67a58c",
+    )));
     ghost.name = "astro_to_image".into();
     let known_id = graph.add(known);
     let ghost_id = graph.add(ghost);

@@ -1,5 +1,6 @@
 //! Calibration-master node and source-aware on-disk master cache.
 
+use scenarium::FuncId;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -18,6 +19,8 @@ use scenarium::{DataType, DynamicValue, Func, FuncInput, FuncLambda, FuncOutput,
 use crate::astro::masters::{MASTERS_DATA_TYPE, Masters};
 use crate::astro::nodes::io::ASTRO_RAW_PATHS_DATA_TYPE;
 use crate::astro::nodes::runtime;
+
+const BUILD_MASTERS_FUNC_ID: FuncId = FuncId::literal("f2f6f1ff-5b10-409c-900f-d6b48750a529");
 
 const CACHE_PRESENT: &str = "present:";
 
@@ -57,7 +60,7 @@ struct RoleCachePaths {
 
 pub(crate) fn register(library: &mut Library) {
     library.add(
-        Func::new("f2f6f1ff-5b10-409c-900f-d6b48750a529", "Build Masters")
+        Func::new(BUILD_MASTERS_FUNC_ID, "Build Masters")
             .description(
                 "Stacks selected raw calibration frames (darks/flats/bias/flat-darks) into \
                  calibration masters. With `cache` on, each master is written next to its \

@@ -1,5 +1,6 @@
 //! Astro path types and image loading.
 
+use scenarium::FuncId;
 use std::sync::{Arc, LazyLock};
 
 use imaginarium::Image as RawImage;
@@ -10,6 +11,8 @@ use scenarium::{Func, FuncInput, FuncLambda, FuncOutput, Library};
 use crate::astro::nodes::runtime;
 use crate::image::{IMAGE_DATA_TYPE, Image};
 use scenarium::Invocation;
+
+const LOAD_ASTRO_IMAGE_FUNC_ID: FuncId = FuncId::literal("fbcc8899-efc3-40e0-a6fd-8743f86edbd3");
 
 pub(crate) static ASTRO_IMAGE_PATH_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| {
     DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
@@ -30,7 +33,7 @@ pub(crate) static ASTRO_RAW_PATHS_DATA_TYPE: LazyLock<DataType> = LazyLock::new(
 
 pub(crate) fn register(library: &mut Library) {
     library.add(
-        Func::new("fbcc8899-efc3-40e0-a6fd-8743f86edbd3", "Load Astro Image")
+        Func::new(LOAD_ASTRO_IMAGE_FUNC_ID, "Load Astro Image")
             .description("Loads a FITS/RAW/standard astronomical image.")
             .category("Astro")
             .pure()

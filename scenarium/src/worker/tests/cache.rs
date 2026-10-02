@@ -218,7 +218,7 @@ async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
     use crate::library::TypeEntry;
     use crate::{CustomValue, DynamicValue, TypeId};
 
-    const BLOB_TYPE: &str = "9d17a6a2-8f97-4c74-a0b7-1b2c9a9f5f60";
+    const BLOB_TYPE: TypeId = TypeId::literal("9d17a6a2-8f97-4c74-a0b7-1b2c9a9f5f60");
 
     #[derive(Debug)]
     struct Blob;
@@ -229,7 +229,7 @@ async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
     }
     impl CustomValue for Blob {
         fn type_id(&self) -> TypeId {
-            BLOB_TYPE.into()
+            BLOB_TYPE
         }
         fn as_any(&self) -> &dyn Any {
             self
@@ -250,7 +250,7 @@ async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
         node.pure()
             .sink()
             .cache(CacheMode::Both)
-            .output(DataType::Custom(BLOB_TYPE.into()))
+            .output(DataType::Custom(BLOB_TYPE))
             .lambda(async_lambda!(|Invocation { outputs, .. }| {
                 outputs[0] = DynamicValue::Custom(Arc::new(Blob));
                 Ok(())
@@ -287,8 +287,7 @@ async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
     };
     assert_eq!(skipped.node_id, w.id("make_blob"));
     assert_eq!(
-        skipped.type_id,
-        TypeId::from(BLOB_TYPE),
+        skipped.type_id, BLOB_TYPE,
         "the report names the type that cannot persist"
     );
     w.quiet();
@@ -307,7 +306,7 @@ async fn an_install_reports_the_cache_left_after_reconciling() {
     use crate::library::TypeEntry;
     use crate::{CustomValue, DynamicValue, TypeId};
 
-    const HEAVY_TYPE: &str = "c84cc23f-f313-4adb-8788-ef82c26691ae";
+    const HEAVY_TYPE: TypeId = TypeId::literal("c84cc23f-f313-4adb-8788-ef82c26691ae");
     const HEAVY_CPU: usize = 4096;
 
     #[derive(Debug)]
@@ -319,7 +318,7 @@ async fn an_install_reports_the_cache_left_after_reconciling() {
     }
     impl CustomValue for Heavy {
         fn type_id(&self) -> TypeId {
-            HEAVY_TYPE.into()
+            HEAVY_TYPE
         }
         fn as_any(&self) -> &dyn Any {
             self
@@ -343,7 +342,7 @@ async fn an_install_reports_the_cache_left_after_reconciling() {
         node.pure()
             .sink()
             .cache(CacheMode::Ram)
-            .output(DataType::Custom(HEAVY_TYPE.into()))
+            .output(DataType::Custom(HEAVY_TYPE))
             .lambda(async_lambda!(|Invocation { outputs, .. }| {
                 outputs[0] = DynamicValue::Custom(Arc::new(Heavy));
                 Ok(())

@@ -2,7 +2,11 @@
 
 use scenarium::{DynamicValue, FuncInput, ValueVariant};
 
-use crate::config_node::{ConfigValue, NodeConfig, config_data_type};
+use std::fmt;
+
+use common::Introspect;
+
+use crate::config_node::{ConfigValue, config_data_type};
 
 pub(crate) trait Preset: Sized {
     type Config;
@@ -14,7 +18,7 @@ pub(crate) trait Preset: Sized {
 
 pub(crate) fn input<T, P>(name: &str) -> FuncInput
 where
-    T: NodeConfig,
+    T: Introspect + Clone + fmt::Debug + Send + Sync + 'static,
     P: Preset,
 {
     let variants = P::picker_variants();
@@ -28,7 +32,7 @@ where
 
 pub(crate) fn resolve<T, P>(value: &DynamicValue) -> P::Config
 where
-    T: NodeConfig + Into<P::Config>,
+    T: Introspect + Clone + fmt::Debug + Send + Sync + 'static + Into<P::Config>,
     P: Preset,
 {
     value

@@ -256,9 +256,9 @@ impl Func {
     /// Start a func definition. Defaults: `Impure`, non-sink, empty
     /// category/inputs/outputs/events and a `None` lambda — set the rest with the
     /// chained builders below.
-    pub fn new(id: impl Into<FuncId>, name: impl Into<String>) -> Self {
+    pub fn new(id: FuncId, name: impl Into<String>) -> Self {
         Self {
-            id: id.into(),
+            id,
             name: name.into(),
             ..Default::default()
         }

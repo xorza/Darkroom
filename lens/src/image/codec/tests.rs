@@ -116,7 +116,7 @@ async fn decode_rejects_short_unknown_and_mismatched_payloads() {
 
 #[test]
 fn register_image_type_wires_the_codec() {
-    let id = *IMAGE_TYPE_ID;
+    let id = IMAGE_TYPE_ID;
     let mut library = Library::default();
     library.register_type(id, image_type_entry());
     assert!(library.types.contains_key(&id));

@@ -5,6 +5,7 @@ pub(crate) mod preset;
 pub(crate) mod processing;
 pub(crate) mod stacking;
 
+use scenarium::FuncId;
 use scenarium::Library;
 
 use lumos::{Denoise, ExtractBackground, Hdr, LocalContrast};
@@ -13,58 +14,75 @@ use crate::astro::config::processing::{ScnrKnobs, StretchKnobs};
 use crate::astro::config::stacking::{CombineKnobs, DetectionKnobs, RegistrationKnobs};
 use crate::config_node::add_config_builder;
 
+const BUILD_BACKGROUND_CONFIG_FUNC_ID: FuncId =
+    FuncId::literal("9cda0462-1b8e-4c50-83d6-4db470df22d9");
+const BUILD_DETECTION_CONFIG_FUNC_ID: FuncId =
+    FuncId::literal("6c6f92e7-0f74-454c-acc4-68691cb8462f");
+const BUILD_REGISTRATION_CONFIG_FUNC_ID: FuncId =
+    FuncId::literal("adf216fe-baa9-4abd-8c4a-bfb98bb60fbc");
+const BUILD_COMBINE_CONFIG_FUNC_ID: FuncId =
+    FuncId::literal("05313ceb-a3b2-4488-92af-c9e228bb1789");
+const BUILD_DENOISE_CONFIG_FUNC_ID: FuncId =
+    FuncId::literal("77693298-3531-4858-89ce-03cb347dc3f2");
+const BUILD_HDR_CONFIG_FUNC_ID: FuncId = FuncId::literal("dc82d7a9-b7a7-460b-a86d-5dc9055e0d18");
+const BUILD_LOCAL_CONTRAST_CONFIG_FUNC_ID: FuncId =
+    FuncId::literal("f9ebdedf-38e3-4a74-8c74-eb207903d327");
+const BUILD_STRETCH_CONFIG_FUNC_ID: FuncId =
+    FuncId::literal("82f271d4-d047-459a-83aa-0bf8288787cf");
+const BUILD_SCNR_CONFIG_FUNC_ID: FuncId = FuncId::literal("d07742d1-4469-4739-b2ff-78b4dcf64132");
+
 pub(crate) fn register_builders(library: &mut Library) {
     add_config_builder::<ExtractBackground>(
         library,
-        "9cda0462-1b8e-4c50-83d6-4db470df22d9",
+        BUILD_BACKGROUND_CONFIG_FUNC_ID,
         "Build Background Config",
         "Builds a detailed background-extraction config",
     );
     add_config_builder::<DetectionKnobs>(
         library,
-        "6c6f92e7-0f74-454c-acc4-68691cb8462f",
+        BUILD_DETECTION_CONFIG_FUNC_ID,
         "Build Detection Config",
         "Builds a detailed star-detection config",
     );
     add_config_builder::<RegistrationKnobs>(
         library,
-        "adf216fe-baa9-4abd-8c4a-bfb98bb60fbc",
+        BUILD_REGISTRATION_CONFIG_FUNC_ID,
         "Build Registration Config",
         "Builds a detailed registration config",
     );
     add_config_builder::<CombineKnobs>(
         library,
-        "05313ceb-a3b2-4488-92af-c9e228bb1789",
+        BUILD_COMBINE_CONFIG_FUNC_ID,
         "Build Combine Config",
         "Builds a detailed frame-combination config",
     );
     add_config_builder::<Denoise>(
         library,
-        "77693298-3531-4858-89ce-03cb347dc3f2",
+        BUILD_DENOISE_CONFIG_FUNC_ID,
         "Build Denoise Config",
         "Builds a detailed wavelet-denoise config",
     );
     add_config_builder::<Hdr>(
         library,
-        "dc82d7a9-b7a7-460b-a86d-5dc9055e0d18",
+        BUILD_HDR_CONFIG_FUNC_ID,
         "Build HDR Config",
         "Builds a detailed HDR dynamic-range-compression config",
     );
     add_config_builder::<LocalContrast>(
         library,
-        "f9ebdedf-38e3-4a74-8c74-eb207903d327",
+        BUILD_LOCAL_CONTRAST_CONFIG_FUNC_ID,
         "Build Local Contrast Config",
         "Builds a detailed local-contrast config",
     );
     add_config_builder::<StretchKnobs>(
         library,
-        "82f271d4-d047-459a-83aa-0bf8288787cf",
+        BUILD_STRETCH_CONFIG_FUNC_ID,
         "Build Stretch Config",
         "Builds a detailed display-stretch config",
     );
     add_config_builder::<ScnrKnobs>(
         library,
-        "d07742d1-4469-4739-b2ff-78b4dcf64132",
+        BUILD_SCNR_CONFIG_FUNC_ID,
         "Build SCNR Config",
         "Builds a detailed SCNR (green-removal) config",
     );

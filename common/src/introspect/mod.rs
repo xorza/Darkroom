@@ -8,7 +8,8 @@
 //! With Common's `introspect-derive` feature, derive with
 //! `#[derive(Introspect)]`. Enum-typed fields implement [`IntrospectEnum`]
 //! (variant list + string round-trip) — derive it with
-//! `#[derive(IntrospectEnum)]` plus a stable `#[config(type_id = "…")]` UUID.
+//! `#[derive(IntrospectEnum)]` plus a stable `#[config(type_id = "…")]` UUID; the
+//! struct derive takes one too, for the value it builds.
 //!
 //! Both derives are self-contained: a type describes itself with nothing but
 //! its own definition and a `Default`. That is what lets the crate that *owns*
@@ -17,6 +18,7 @@
 //!
 //! ```ignore
 //! #[derive(Default, Introspect)]
+//! #[config(type_id = "0e6f…")]
 //! struct Knobs { tile_size: usize, #[config(label = "σ")] sigma: f32 }
 //! let fields = Knobs::fields();              // [{name:"tile_size", kind:Int, ..}, ..]
 //! let knobs = Knobs::from_fields(&values)?;  // checked typed rebuild
@@ -150,7 +152,7 @@ pub enum FieldValue {
 }
 
 /// The kind of a reflected field (drives which editor widget a consumer shows).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum FieldKind {
     Int(IntegerKind),
     Float(FloatKind),
@@ -158,12 +160,12 @@ pub enum FieldKind {
     Str,
     Enum {
         /// Stable UUID identity, independent of Rust and display names.
-        type_id: String,
-        display_name: String,
-        variants: Vec<String>,
+        type_id: &'static str,
+        display_name: &'static str,
+        variants: &'static [&'static str],
     },
     /// An optional field of the inner kind (not required).
-    Option(Box<FieldKind>),
+    Option(&'static FieldKind),
 }
 
 /// A numeric field value that cannot be represented by its declared Rust type.
@@ -267,18 +269,25 @@ impl IntrospectFloat for f64 {
 #[derive(Clone, Debug)]
 pub struct FieldDesc {
     /// The Rust field name.
-    pub name: String,
+    pub name: &'static str,
     /// Human label (`#[config(label = "...")]` or the name title-cased).
-    pub label: String,
+    pub label: &'static str,
     pub kind: FieldKind,
     pub default: FieldValue,
     /// `false` only for `Option<_>` fields.
     pub required: bool,
 }
 
-/// A struct whose fields can be described and rebuilt generically.
-/// Derive with `#[derive(Introspect)]`.
+/// A struct whose fields can be described and rebuilt generically. Derive with
+/// `#[derive(Introspect)]` and a stable `#[config(type_id = "…")]` UUID, plus an
+/// optional `name = "…"` for the display name (the type's own name otherwise).
+///
+/// [`Self::TYPE_ID`] is the built value's identity on the wire and on disk, so it
+/// may not change once a document has been saved with it.
 pub trait Introspect: Default {
+    const TYPE_ID: &'static str;
+    const DISPLAY_NAME: &'static str;
+
     /// Field descriptors in declaration order.
     fn fields() -> Vec<FieldDesc>;
     /// Rebuild from per-field values (declaration order). A missing or
@@ -298,9 +307,10 @@ pub trait Introspect: Default {
 pub trait IntrospectEnum: Sized {
     const TYPE_ID: &'static str;
     const DISPLAY_NAME: &'static str;
+    /// Every variant's string, in declaration order.
+    const VARIANTS: &'static [&'static str];
 
-    fn variants() -> Vec<String>;
-    fn to_variant(&self) -> String;
+    fn to_variant(&self) -> &'static str;
     fn from_variant(name: &str) -> Option<Self>;
 }
 

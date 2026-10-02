@@ -11,7 +11,7 @@ use crate::async_lambda;
 use crate::library::TypeEntry;
 use crate::{CustomValue, TypeId};
 
-const TRACKED_TYPE: &str = "7266406a-8083-4e46-b661-de4308bcec96";
+const TRACKED_TYPE: TypeId = TypeId::literal("7266406a-8083-4e46-b661-de4308bcec96");
 
 /// Live/peak count of [`Tracked`] values resident at once during a run.
 #[derive(Debug, Default)]
@@ -54,7 +54,7 @@ impl Display for Tracked {
 
 impl CustomValue for Tracked {
     fn type_id(&self) -> TypeId {
-        TRACKED_TYPE.into()
+        TRACKED_TYPE
     }
     fn as_any(&self) -> &dyn Any {
         self
@@ -65,7 +65,7 @@ impl CustomValue for Tracked {
 }
 
 fn tracked() -> DataType {
-    DataType::Custom(TRACKED_TYPE.into())
+    DataType::Custom(TRACKED_TYPE)
 }
 
 /// A pure custom→custom node emitting a fresh [`Tracked`] on every call.

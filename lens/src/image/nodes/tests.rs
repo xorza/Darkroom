@@ -22,8 +22,8 @@ fn conversion_target_collapses_as_is_and_matching_format() {
 fn format_defaults_are_exact() {
     let library = image_library();
     let convert = library.by_name("Convert").unwrap();
-    assert_eq!(convert.inputs[0].data_type, *IMAGE_DATA_TYPE);
-    assert_eq!(convert.inputs[1].data_type, *CONVERSION_FORMAT_DATATYPE);
+    assert_eq!(convert.inputs[0].data_type, IMAGE_DATA_TYPE);
+    assert_eq!(convert.inputs[1].data_type, CONVERSION_FORMAT_DATATYPE);
     assert_eq!(
         convert.inputs[1].default_value,
         Some(ConstValue::Enum(ConversionFormat::RgbU8.label())),

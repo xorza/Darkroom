@@ -1,9 +1,12 @@
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
+use scenarium::FuncId;
 use scenarium::Invocation;
 use scenarium::{
     DataType, DynamicValue, Func, FuncInput, FuncLambda, FuncOutput, InvokeError, Library,
 };
+
+const RANDOM_FUNC_ID: FuncId = FuncId::literal("01897928-66cd-52cb-abeb-a5bfd7f3763e");
 
 fn float_input(inputs: &[DynamicValue], index: usize) -> Result<f64, InvokeError> {
     inputs[index]
@@ -16,7 +19,7 @@ fn scale_random(unit: f64, min: f64, max: f64) -> f64 {
 }
 
 fn random_func() -> Func {
-    Func::new("01897928-66cd-52cb-abeb-a5bfd7f3763e", "Random")
+    Func::new(RANDOM_FUNC_ID, "Random")
         .description("Generates a random float between min and max values.")
         .category("Math")
         .input(

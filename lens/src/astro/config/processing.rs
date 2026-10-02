@@ -4,10 +4,9 @@
 //! Most of these are simply the lumos config: it derives
 //! [`Introspect`](common::Introspect) itself, so the builder node's ports *are*
 //! its fields and adding one in lumos adds a port here with no edit on this
-//! side. All this module owes them is a [`NodeConfig`] identity for the wire
-//! they travel on: a `TYPE_ID` that ships in saved documents and so is fixed
-//! for the life of the type, and a `NAME` that is only what the editor labels
-//! that wire.
+//! side. Their wire identity — a `TYPE_ID` that ships in saved documents and so
+//! is fixed for the life of the type, and a `DISPLAY_NAME` that is only what the
+//! editor labels that wire — is declared by their own derive in lumos.
 //!
 //! A config the field model can't express — one whose enum variants carry
 //! data, which [`IntrospectEnum`](common::IntrospectEnum) does not describe —
@@ -17,13 +16,9 @@
 //! *not* track that type field-for-field.
 
 use common::{Introspect, IntrospectEnum};
-use lumos::{
-    BackgroundMode, ColorMode, Denoise, ExtractBackground, Hdr, LocalContrast, Scnr, Stretch,
-    StretchMethod,
-};
+use lumos::{BackgroundMode, ColorMode, ExtractBackground, Scnr, Stretch, StretchMethod};
 
 use crate::astro::config::preset::preset_enum;
-use crate::config_node::NodeConfig;
 
 const SCNR_ADDITIVE_AMOUNT: f32 = 0.5;
 
@@ -60,26 +55,6 @@ preset_enum! {
     }
 }
 
-impl NodeConfig for ExtractBackground {
-    const TYPE_ID: &'static str = "47a71876-5db9-45f9-a21d-cc2ce40a80f2";
-    const NAME: &'static str = "ExtractBackground";
-}
-
-impl NodeConfig for Denoise {
-    const TYPE_ID: &'static str = "ab942729-dc49-4518-aae4-9008bd33cea1";
-    const NAME: &'static str = "Denoise";
-}
-
-impl NodeConfig for Hdr {
-    const TYPE_ID: &'static str = "36babf1d-0fda-4d5d-b4c6-ed4c13ebff6b";
-    const NAME: &'static str = "Hdr";
-}
-
-impl NodeConfig for LocalContrast {
-    const TYPE_ID: &'static str = "eb0062ca-cef9-4fef-a52b-cf3e8e0fce3c";
-    const NAME: &'static str = "LocalContrast";
-}
-
 /// Which green-removal protection [`ScnrKnobs`] builds. The lumos enum carries
 /// the additive mask's blend amount in its variant, so the editor picks the
 /// method here and supplies the amount as its own field.
@@ -94,6 +69,7 @@ pub(crate) enum ScnrMethodChoice {
 /// [`ScnrMethodChoice::AdditiveMask`]; average-neutral is a full-strength clamp
 /// with nothing to tune.
 #[derive(Debug, Clone, Introspect)]
+#[config(type_id = "cb80e688-a5ed-42fd-9087-6a9639a8b056", name = "ScnrConfig")]
 pub(crate) struct ScnrKnobs {
     method: ScnrMethodChoice,
     amount: f32,
@@ -117,11 +93,6 @@ impl From<ScnrKnobs> for Scnr {
     }
 }
 
-impl NodeConfig for ScnrKnobs {
-    const TYPE_ID: &'static str = "cb80e688-a5ed-42fd-9087-6a9639a8b056";
-    const NAME: &'static str = "ScnrConfig";
-}
-
 /// Which stretch curve [`StretchKnobs`] builds — the two automatic methods.
 /// [`StretchMethod`]'s explicit curves (`Asinh`, `Ghs`) are not offered: each
 /// carries its own parameter set, which one flat knob list cannot present
@@ -137,6 +108,7 @@ pub(crate) enum StretchMethodChoice {
 /// `target_background`; `shadow_sigmas` is read only by
 /// [`StretchMethodChoice::AutoStf`].
 #[derive(Debug, Clone, Introspect)]
+#[config(type_id = "b08bb9a1-db12-43d4-aa57-fe3e3732e917", name = "Stretch")]
 pub(crate) struct StretchKnobs {
     method: StretchMethodChoice,
     target_background: f32,
@@ -177,11 +149,6 @@ impl From<StretchKnobs> for Stretch {
     }
 }
 
-impl NodeConfig for StretchKnobs {
-    const TYPE_ID: &'static str = "b08bb9a1-db12-43d4-aa57-fe3e3732e917";
-    const NAME: &'static str = "Stretch";
-}
-
 #[cfg(test)]
 mod tests {
     use common::{Introspect, IntrospectEnum};
@@ -192,7 +159,7 @@ mod tests {
 
     use crate::astro::config::processing::{StretchKnobs, StretchMethodChoice};
 
-    fn field_names<T: Introspect>() -> Vec<String> {
+    fn field_names<T: Introspect>() -> Vec<&'static str> {
         T::fields().into_iter().map(|field| field.name).collect()
     }
 
@@ -234,10 +201,10 @@ mod tests {
     /// would change what is already on disk.
     #[test]
     fn enum_ports_keep_their_stored_variant_names() {
-        assert_eq!(BackgroundMode::variants(), ["subtract", "divide"]);
-        assert_eq!(Threshold::variants(), ["hard", "soft"]);
-        assert_eq!(ColorMode::variants(), ["color_preserving", "per_channel"]);
-        assert_eq!(StretchMethodChoice::variants(), ["auto_asinh", "auto_stf"]);
+        assert_eq!(BackgroundMode::VARIANTS, ["subtract", "divide"]);
+        assert_eq!(Threshold::VARIANTS, ["hard", "soft"]);
+        assert_eq!(ColorMode::VARIANTS, ["color_preserving", "per_channel"]);
+        assert_eq!(StretchMethodChoice::VARIANTS, ["auto_asinh", "auto_stf"]);
     }
 
     #[test]

@@ -22,6 +22,7 @@ const N_BINS: usize = 256;
 /// Computed on the combined intensity; color channels are rescaled hue-preservingly. Grayscale gets
 /// the mapping directly.
 #[derive(Debug, Clone, Copy, Introspect)]
+#[config(type_id = "eb0062ca-cef9-4fef-a52b-cf3e8e0fce3c")]
 pub struct LocalContrast {
     /// Tile grid count per axis. Fewer/larger tiles = broader structure; ~8 is typical, lower for
     /// wide-field.

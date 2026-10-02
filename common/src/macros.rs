@@ -5,9 +5,8 @@
 /// dependencies**. They are not `$crate`-qualified: `common` itself does not
 /// depend on `uuid`.
 ///
-/// `FromStr` is the fallible parse; the `From<&str>`/`From<String>` impls are
-/// convenience conversions that **panic on an invalid UUID** — use them only on
-/// known-good literals, and `parse()` for untrusted input.
+/// `FromStr` is the fallible parse, for input that may be malformed. A literal id is
+/// a `const` item built with `literal`, so a malformed one fails the build.
 #[macro_export]
 macro_rules! id_type {
     ($name:ident) => {
@@ -30,19 +29,30 @@ macro_rules! id_type {
             pub fn unique() -> $name {
                 $name(uuid::Uuid::new_v4())
             }
-            pub fn nil() -> $name {
+            pub const fn nil() -> $name {
                 $name(uuid::Uuid::nil())
             }
             pub const fn from_u128(value: u128) -> $name {
                 $name(uuid::Uuid::from_u128(value))
             }
-            pub fn is_nil(&self) -> bool {
-                self.0 == uuid::Uuid::nil()
+            /// The id a UUID literal spells, for a `const` item: there a malformed
+            /// literal fails the build rather than a run.
+            ///
+            /// # Panics
+            /// When `literal` is not a UUID in a form `uuid::Uuid::try_parse` reads.
+            pub const fn literal(literal: &str) -> $name {
+                match uuid::Uuid::try_parse(literal) {
+                    Ok(uuid) => $name(uuid),
+                    Err(_) => panic!(concat!("invalid UUID literal for ", stringify!($name))),
+                }
             }
-            pub fn as_u128(&self) -> u128 {
+            pub const fn is_nil(&self) -> bool {
+                self.0.is_nil()
+            }
+            pub const fn as_u128(&self) -> u128 {
                 self.0.as_u128()
             }
-            pub fn as_uuid(&self) -> uuid::Uuid {
+            pub const fn as_uuid(&self) -> uuid::Uuid {
                 self.0
             }
         }
@@ -77,20 +87,6 @@ macro_rules! id_type {
             fn from_str(id: &str) -> std::result::Result<$name, Self::Err> {
                 let uuid = uuid::Uuid::parse_str(id)?;
                 Ok($name(uuid))
-            }
-        }
-
-        impl From<&str> for $name {
-            fn from(id: &str) -> $name {
-                let uuid = uuid::Uuid::parse_str(id)
-                    .expect(concat!("invalid UUID string for ", stringify!($name)));
-                $name(uuid)
-            }
-        }
-
-        impl From<String> for $name {
-            fn from(id: String) -> $name {
-                id.as_str().into()
             }
         }
 
