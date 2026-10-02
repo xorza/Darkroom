@@ -8,7 +8,7 @@
 //!
 //! Conversion: a normalized value `v` corresponds to `v * full_well_e` electrons.
 
-use crate::testing::TestRng;
+use crate::testing::test_rng::TestRng;
 
 /// Draw a Poisson sample with mean `lambda` using `rng`.
 ///

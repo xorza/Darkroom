@@ -4,7 +4,7 @@ mod synthetic;
 
 use crate::image_ops::rgb::Rgb;
 use crate::testing::prelude::*;
-use common::internals::test_output_path;
+use common::TempDir;
 use imaginarium::{ColorFormat, Image, ImageDesc};
 
 use crate::io::image::error::ImageError;
@@ -149,40 +149,41 @@ fn mean_averages_every_sample() {
     assert!((image.mean() - 2.5).abs() < f32::EPSILON);
 }
 
+/// A saved TIFF reloads with the same dimensions and the same f32 samples, gray and colour.
 #[test]
-fn save_grayscale_tiff() {
-    let image = LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![0.1, 0.2, 0.3, 0.4]);
-    let output_path = test_output_path("astro_save_gray.tiff");
-
-    image.save(&output_path).unwrap();
-    assert!(output_path.exists());
-
-    let loaded = LinearImage::from_file(&output_path, &LoadContext::default()).unwrap();
-    assert_eq!(loaded.width(), 2);
-    assert_eq!(loaded.height(), 2);
-    assert_eq!(loaded.channels(), 1);
-}
-
-#[test]
-fn save_rgb_tiff() {
-    let image = LinearImage::from_pixels(
-        ImageDimensions::new((2, 2), 3),
-        vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
-    );
-    let output_path = test_output_path("astro_save_rgb.tiff");
-
-    image.save(&output_path).unwrap();
-    assert!(output_path.exists());
-
-    let loaded = LinearImage::from_file(&output_path, &LoadContext::default()).unwrap();
-    assert_eq!(loaded.width(), 2);
-    assert_eq!(loaded.height(), 2);
-    assert_eq!(loaded.channels(), 3);
+fn saved_tiff_round_trips_its_samples() {
+    let dir = TempDir::new("lumos-save-tiff");
+    for (name, image) in [
+        (
+            "gray.tiff",
+            LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![0.1, 0.2, 0.3, 0.4]),
+        ),
+        (
+            "rgb.tiff",
+            LinearImage::from_pixels(
+                ImageDimensions::new((2, 2), 3),
+                vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.25],
+            ),
+        ),
+    ] {
+        let output_path = dir.join(name);
+        image.save(&output_path).unwrap();
+        let loaded = LinearImage::from_file(&output_path, &LoadContext::default()).unwrap();
+        assert_eq!(loaded.dimensions(), image.dimensions(), "{name}");
+        for channel in 0..image.channels() {
+            assert_eq!(
+                loaded.channel(channel).pixels(),
+                image.channel(channel).pixels(),
+                "{name} channel {channel}"
+            );
+        }
+    }
 }
 
 #[test]
 fn product_constructors_separate_linear_science_from_preview_rasters() {
-    let float_path = test_output_path("product_constructors/linear_float.tiff");
+    let dir = TempDir::new("lumos-io-image");
+    let float_path = dir.join("linear_float.tiff");
     let float_pixels = vec![-0.25f32, 0.5, 1.25, 3.0];
     let float_image = Image::new_with_data(
         ImageDesc::new(2, 2, ColorFormat::L_F32),
@@ -202,9 +203,9 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
         float_pixels
     );
 
-    let integer_tiff = test_output_path("product_constructors/integer.tiff");
-    let png = test_output_path("product_constructors/display.png");
-    let jpeg = test_output_path("product_constructors/lossy.jpg");
+    let integer_tiff = dir.join("integer.tiff");
+    let png = dir.join("display.png");
+    let jpeg = dir.join("lossy.jpg");
     let integer_image = Image::new_with_data(
         ImageDesc::new(2, 2, ColorFormat::L_U8),
         vec![0, 64, 128, 255],
@@ -223,7 +224,7 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
         PreviewImage::from_file(path, &LoadContext::default()).unwrap();
     }
 
-    let alpha_path = test_output_path("product_constructors/alpha.tiff");
+    let alpha_path = dir.join("alpha.tiff");
     let alpha_pixels = vec![1.0f32, 0.0, 0.0, 0.5, 0.0, 1.0, 0.0, 0.0];
     Image::new_with_data(
         ImageDesc::new(2, 1, ColorFormat::RGBA_F32),
@@ -247,17 +248,18 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
         })
     ));
 
-    let nonexistent_raw = test_output_path("product_constructors/nonexistent.dng");
+    let nonexistent_raw = dir.join("nonexistent.dng");
     assert!(matches!(
-        LinearImage::from_file(nonexistent_raw, &LoadContext::default()),
+        LinearImage::from_file(&nonexistent_raw, &LoadContext::default()),
         Err(ImageError::ScientificInputRejected { .. })
     ));
 }
 
 #[test]
 fn save_invalid_extension() {
+    let dir = TempDir::new("lumos-io-image");
     let image = LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![0.1, 0.2, 0.3, 0.4]);
-    let output_path = test_output_path("astro_save_invalid.xyz");
+    let output_path = dir.join("astro_save_invalid.xyz");
 
     let result = image.save(&output_path);
     assert!(result.is_err());

@@ -18,7 +18,6 @@ use common::internals::test_output_path;
 use glam::{DVec2, Vec2};
 
 use crate::math::size2us::Size2us;
-use imaginarium::Buffer2;
 
 use crate::testing::synthetic::artifacts::add_cosmic_rays;
 use crate::testing::synthetic::backgrounds::NebulaConfig;
@@ -490,6 +489,4 @@ fn gallery_print_output_dir() {
         "synthetic gallery directory: {}",
         probe.parent().unwrap().display()
     );
-    // Touch a buffer so the dir exists even if run alone.
-    let _ = Buffer2::<f32>::new_default(1, 1);
 }

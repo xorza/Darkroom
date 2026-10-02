@@ -8,7 +8,8 @@ use crate::testing::visual;
 use crate::image_ops::color_calibration::channel_backgrounds;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
-use crate::testing::{calibration_dir, init_tracing};
+use crate::testing::init_tracing;
+use crate::testing::real_data::dataset_dir;
 use crate::{NeutralizeBackground, Scnr, Stretch};
 
 fn spread(bg: Rgb) -> f32 {
@@ -16,12 +17,11 @@ fn spread(bg: Rgb) -> f32 {
 }
 
 #[test]
-#[ignore = "real-data image-processing test; run explicitly with --ignored"]
 fn neutralize_then_stretch_removes_green() {
     init_tracing();
 
     let image = LinearImage::from_file(
-        calibration_dir().join("stacked_light.tiff"),
+        dataset_dir().join("stacked_light.tiff"),
         &LoadContext::default(),
     )
     .expect("load");

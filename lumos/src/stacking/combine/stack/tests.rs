@@ -28,7 +28,7 @@ use crate::stacking::registration::resample;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::stacking::stack_product::quality_map::QualityMap;
 use crate::testing;
-use crate::testing::ScratchDirectory;
+use common::TempDir;
 use std::path::PathBuf;
 
 fn stack_frame(image: LinearImage, quality: FrameQuality<Buffer2<f32>>) -> StackFrame {
@@ -48,7 +48,7 @@ fn make_cfa_stack_cache(
         .into_iter()
         .zip(source_sigmas)
         .map(|(pixels, &sigma)| {
-            let mut image = testing::make_cfa(
+            let mut image = testing::cfa::make_cfa(
                 Size2us::new(dimensions.width(), dimensions.height()),
                 pixels,
                 CfaType::Mono,
@@ -231,7 +231,7 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
     .unwrap();
     let frames: Vec<StackFrame> = (0..n).map(make_frame).collect();
 
-    let scratch = ScratchDirectory::new("lumos_tier_test");
+    let scratch = TempDir::new("lumos_tier_test");
     let spill_directory = SpillDirectory::create(&scratch.join("cache"), false).unwrap();
     let metadata = frames[0].image.metadata.clone();
     let stored = frames
@@ -296,7 +296,7 @@ fn mapped_frames_reject_nonfinite_samples_before_combining() {
         dimensions,
         [vec![1.0; 2], vec![2.0; 2], vec![3.0, f32::NEG_INFINITY]],
     );
-    let scratch = ScratchDirectory::new("lumos_nonfinite_mapped_frame");
+    let scratch = TempDir::new("lumos_nonfinite_mapped_frame");
     let spill_directory = SpillDirectory::create(&scratch.join("cache"), false).unwrap();
     let frame = StoredFrame::spill(
         spill_directory.path(),
@@ -1455,8 +1455,8 @@ fn combining_a_cache_against_a_different_normalization_is_refused() {
     // next caller that does not.
     let cache = FrameCache::from_images(
         vec![
-            testing::make_cfa(Size2us::new(2, 1), vec![0.4; 2], CfaType::Mono),
-            testing::make_cfa(Size2us::new(2, 1), vec![0.2; 2], CfaType::Mono),
+            testing::cfa::make_cfa(Size2us::new(2, 1), vec![0.4; 2], CfaType::Mono),
+            testing::cfa::make_cfa(Size2us::new(2, 1), vec![0.2; 2], CfaType::Mono),
         ],
         Normalization::None,
     );
@@ -2016,7 +2016,7 @@ fn dispatch_normalized_vs_unnormalized() {
 fn disk_backed_stack_combines_via_mmap() {
     // Force the disk tier (1-byte memory budget) so the full chunked combine reads
     // memory-mapped `Plane`s: mean(10, 20, 30) = 20 at every pixel.
-    let temp_dir = ScratchDirectory::new("lumos_disk_stack_combine_test");
+    let temp_dir = TempDir::new("lumos_disk_stack_combine_test");
 
     let dims = ImageDimensions::new((4, 4), 1);
     let mut paths = Vec::new();

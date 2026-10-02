@@ -12,7 +12,7 @@ use crate::io::image::fits::options::{
 };
 use crate::io::image::fits::provenance::FitsTransferProvenance;
 use crate::io::image::image_provenance::TransferProvenance;
-use crate::testing::ScratchDirectory;
+use common::TempDir;
 use std::fs;
 
 fn load_context() -> LoadContext {
@@ -211,7 +211,7 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
 
 #[test]
 fn header_rejection_precedes_pixel_read_and_truncated_data_is_an_error() {
-    let directory = ScratchDirectory::new("fits_preflight");
+    let directory = TempDir::new("fits_preflight");
     let path = directory.join("truncated.fits");
     let image = Image::new([2, 2], vec![1.0f32, 2.0, 3.0, 4.0]).unwrap();
     write_image(&path, &image);
@@ -231,7 +231,7 @@ fn header_rejection_precedes_pixel_read_and_truncated_data_is_an_error() {
 
 #[test]
 fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
-    let directory = ScratchDirectory::new("fits_shape_and_rgb");
+    let directory = TempDir::new("fits_shape_and_rgb");
     let zero_path = directory.join("zero.fits");
     write_image(&zero_path, &Image::new([0, 2], Vec::<f32>::new()).unwrap());
     let reason = unsupported_reason(load_linear_fits(&zero_path, &load_context()).unwrap_err());
@@ -251,7 +251,7 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
 
 #[test]
 fn compressed_rgb_is_preflighted_and_decoded_by_final_plane() {
-    let directory = ScratchDirectory::new("fits_compressed_rgb");
+    let directory = TempDir::new("fits_compressed_rgb");
     let path = directory.join("rgb.fits");
     let planar = vec![
         1.0f32, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0, 100.0, 200.0, 300.0, 400.0,
@@ -275,7 +275,7 @@ fn compressed_rgb_is_preflighted_and_decoded_by_final_plane() {
 
 #[test]
 fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
-    let directory = ScratchDirectory::new("fits_hdu_selection");
+    let directory = TempDir::new("fits_hdu_selection");
     let path = directory.join("multi.fits");
     write_named_multi_image(&path);
 
@@ -355,7 +355,7 @@ fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
 
 #[test]
 fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity() {
-    let directory = ScratchDirectory::new("fits_checksum_policy");
+    let directory = TempDir::new("fits_checksum_policy");
     let absent_path = directory.join("absent.fits");
     let image = Image::new([2, 1], vec![1.0f32, 2.0]).unwrap();
     write_image(&absent_path, &image);
@@ -423,7 +423,7 @@ fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity(
 
 #[test]
 fn cancellation_prevents_fits_selection() {
-    let directory = ScratchDirectory::new("fits_cancel");
+    let directory = TempDir::new("fits_cancel");
     let path = directory.join("frame.fits");
     write_image(&path, &Image::new([2, 1], vec![1.0f32, 2.0]).unwrap());
     let cancel = CancelToken::new();

@@ -5,8 +5,9 @@
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::math::statistics::median_mut;
+use crate::testing::init_tracing;
+use crate::testing::real_data::dataset_dir;
 use crate::testing::visual;
-use crate::testing::{calibration_dir, init_tracing};
 use crate::{ColorMode, NeutralizeBackground, Scnr, Stretch, StretchMethod};
 
 #[derive(Debug)]
@@ -28,11 +29,10 @@ fn stats(pixels: &[f32]) -> Stats {
 }
 
 #[test]
-#[ignore = "real-data image-processing test; run explicitly with --ignored"]
 fn stretch_stacked_light() {
     init_tracing();
 
-    let path = calibration_dir().join("stacked_light.tiff");
+    let path = dataset_dir().join("stacked_light.tiff");
     let mut image =
         LinearImage::from_file(&path, &LoadContext::default()).expect("load stacked_light.tiff");
     assert!(image.width() > 0 && image.height() > 0);

@@ -20,9 +20,9 @@ use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::internals::test_pattern_array;
 use crate::stacking::combine::stack;
 use crate::stacking::frame_store::{FramePeek, StackableImage};
-use crate::testing::make_cfa;
+use crate::testing::cfa::make_cfa;
 use crate::{CalibrationMasters, CalibrationSet, CfaImage, CfaType, PreviewImage};
-use common::internals;
+use common::TempDir;
 use fits_well::header::Header;
 use fits_well::image::{Image, Scaling};
 use fits_well::{FitsError, FitsWriter};
@@ -30,15 +30,17 @@ use imaginarium::ColorFormat;
 
 /// Write `image` to a temp FITS file via `FitsWriter`, then load it through `load_linear_fits`.
 fn write_and_load(name: &str, image: &Image) -> Result<LinearImage, ImageError> {
-    let path = internals::test_output_path(&format!("fits_roundtrip/{name}.fits"));
+    let dir = TempDir::new("lumos-fits-roundtrip");
+    let path = dir.join(format!("{name}.fits"));
     let mut writer = FitsWriter::new(File::create(&path).unwrap());
     writer.write_image(image, None).unwrap();
     writer.into_inner().sync_all().unwrap();
     load_linear_fits(&path, &LoadContext::default())
 }
 
-fn write_with_header(name: &str, image: &Image, header: &Header) -> PathBuf {
-    let path = internals::test_output_path(&format!("fits_roundtrip/{name}.fits"));
+/// Write `image` with `header`'s cards to `dir/name.fits`.
+fn write_with_header(dir: &TempDir, name: &str, image: &Image, header: &Header) -> PathBuf {
+    let path = dir.join(format!("{name}.fits"));
     let mut writer = FitsWriter::new(File::create(&path).unwrap());
     writer.write_image(image, Some(header)).unwrap();
     writer.into_inner().sync_all().unwrap();
@@ -46,7 +48,8 @@ fn write_with_header(name: &str, image: &Image, header: &Header) -> PathBuf {
 }
 
 fn write_header_and_load(name: &str, header: &Header) -> Result<LinearImage, ImageError> {
-    let path = internals::test_output_path(&format!("fits_roundtrip/{name}.fits"));
+    let dir = TempDir::new("lumos-fits-roundtrip");
+    let path = dir.join(format!("{name}.fits"));
     let mut writer = FitsWriter::new(File::create(&path).unwrap());
     writer.write_raw_hdu(header, &0.0f32.to_be_bytes()).unwrap();
     writer.into_inner().sync_all().unwrap();
@@ -172,7 +175,8 @@ fn fits_integer_samples_are_divided_by_the_span_their_header_declares() {
 fn a_float_fits_scale_can_be_declared_when_the_header_does_not() {
     let pixels = vec![0.0f32, 16_384.0, 32_768.0, 65_535.0];
     let image = Image::new(vec![4, 1], pixels.clone()).unwrap();
-    let path = write_with_header("float32_declared_scale", &image, &Header::new());
+    let dir = TempDir::new("lumos-fits-roundtrip");
+    let path = write_with_header(&dir, "float32_declared_scale", &image, &Header::new());
 
     let with_scale = |scale| LoadContext {
         fits: FitsLoadOptions {
@@ -200,7 +204,7 @@ fn a_float_fits_scale_can_be_declared_when_the_header_does_not() {
     // than the samples.
     let mut declaring = Header::new();
     declaring.set("DATAMAX", 65_535.0).unwrap();
-    let declaring_path = write_with_header("float32_datamax_overridden", &image, &declaring);
+    let declaring_path = write_with_header(&dir, "float32_datamax_overridden", &image, &declaring);
     let forced =
         load_linear_fits(&declaring_path, &with_scale(FitsFloatScale::Normalized)).unwrap();
     assert_eq!(forced.channel(0).pixels(), &pixels[..]);
@@ -225,7 +229,8 @@ fn fits_quantization_sigma_follows_the_samples_into_the_normalized_domain() {
 
     let mut header = Header::new();
     header.set("BAYERPAT", "RGGB").unwrap();
-    let path = write_with_header("cfa_uint16_sigma", &image, &header);
+    let dir = TempDir::new("lumos-fits-roundtrip");
+    let path = write_with_header(&dir, "cfa_uint16_sigma", &image, &header);
     let loaded = load_cfa_fits(&path, &LoadContext::default()).unwrap();
     // BITPIX = 16, BSCALE = 1 → divisor 65535, so one ADU is 1/65535 and its uniform-error σ is
     // (1/√12) / 65535 = 0.28867513 / 65535 = 4.4049001e-6.
@@ -237,7 +242,7 @@ fn fits_quantization_sigma_follows_the_samples_into_the_normalized_domain() {
     let mut declared = Header::new();
     declared.set("BAYERPAT", "RGGB").unwrap();
     declared.set("QNTZSIG", 2.0).unwrap();
-    let declared_path = write_with_header("cfa_uint16_declared_sigma", &image, &declared);
+    let declared_path = write_with_header(&dir, "cfa_uint16_declared_sigma", &image, &declared);
     let declared_loaded = load_cfa_fits(&declared_path, &LoadContext::default()).unwrap();
     let declared_sigma = declared_loaded.quantization_sigma.unwrap();
     assert!(
@@ -267,7 +272,8 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     // DATAMAX ≈ 1: a normalized frame saying so. Left alone.
     let mut normalized_header = Header::new();
     normalized_header.set("DATAMAX", 1.0).unwrap();
-    let normalized_path = write_with_header("float32_datamax_1", &image, &normalized_header);
+    let dir = TempDir::new("lumos-fits-roundtrip");
+    let normalized_path = write_with_header(&dir, "float32_datamax_1", &image, &normalized_header);
     let normalized = load_linear_fits(&normalized_path, &LoadContext::default()).unwrap();
     assert_eq!(normalized.channel(0).pixels(), &pixels[..]);
     assert_eq!(normalized.metadata.data_max, Some(1.0));
@@ -276,7 +282,7 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     // the 16-bit full scale. -5/65535 = -7.629511e-5, 0.5/65535 = 7.629511e-6, 65535/65535 = 1.
     let mut adu_header = Header::new();
     adu_header.set("DATAMAX", 65_535.0).unwrap();
-    let adu_path = write_with_header("float32_datamax_adu", &image, &adu_header);
+    let adu_path = write_with_header(&dir, "float32_datamax_adu", &image, &adu_header);
     let adu = load_linear_fits(&adu_path, &LoadContext::default()).unwrap();
     let decoded = adu.channel(0).pixels();
     assert!((decoded[0] - -7.629_511e-5).abs() < 1e-9, "{decoded:?}");
@@ -325,10 +331,11 @@ fn fits_bunit_travels_with_the_samples_and_separates_frames_the_span_cannot() {
     // both are `FitsNormalized` at scale 1, so without the unit they would stack as if a surface
     // brightness and a count rate were the same measurement.
     let image = Image::new(vec![2, 1], vec![0.25f32, 0.5]).unwrap();
+    let dir = TempDir::new("lumos-fits-roundtrip");
     let load = |name: &str, bunit: &str| {
         let mut header = Header::new();
         header.set("BUNIT", bunit).unwrap();
-        let path = write_with_header(name, &image, &header);
+        let path = write_with_header(&dir, name, &image, &header);
         domain_of(&load_linear_fits(&path, &LoadContext::default()).unwrap()).unwrap()
     };
 
@@ -368,7 +375,8 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
     // undefined. Written once as float and once as uint16, they must produce the same mask.
     let float_pixels = vec![1.0f32, 2.0, f32::NAN, 4.0, 8.0, 16.0];
     let float_image = Image::new(vec![3, 2], float_pixels).unwrap();
-    let float_path = write_with_header("float32_null", &float_image, &Header::new());
+    let dir = TempDir::new("lumos-fits-roundtrip");
+    let float_path = write_with_header(&dir, "float32_null", &float_image, &Header::new());
     let float = load_linear_fits(&float_path, &LoadContext::default()).unwrap();
 
     // BITPIX = 16 with BSCALE/BZERO identity, and -32768 declared as BLANK. fits-well maps that
@@ -383,7 +391,7 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
         },
     )
     .unwrap();
-    let integer_path = write_with_header("int16_blank", &integer_image, &Header::new());
+    let integer_path = write_with_header(&dir, "int16_blank", &integer_image, &Header::new());
     let integer = load_linear_fits(&integer_path, &LoadContext::default()).unwrap();
 
     for (name, image) in [("float", &float), ("integer", &integer)] {
@@ -444,7 +452,8 @@ fn the_header_settles_whether_nulls_are_possible_without_reading_the_data() {
     header.set("CFATYPE", "MONO").unwrap();
 
     let integer = Image::from_u16(vec![2, 2], &[1u16, 2, 3, 4]).unwrap();
-    let plain = write_with_header("peek_uint16_no_blank", &integer, &header);
+    let dir = TempDir::new("lumos-fits-roundtrip");
+    let plain = write_with_header(&dir, "peek_uint16_no_blank", &integer, &header);
     assert!(
         !<CfaImage as StackableImage>::peek(&plain, &LoadContext::default())
             .unwrap()
@@ -464,7 +473,7 @@ fn the_header_settles_whether_nulls_are_possible_without_reading_the_data() {
         },
     )
     .unwrap();
-    let blanked_path = write_with_header("peek_int16_blank", &blanked, &header);
+    let blanked_path = write_with_header(&dir, "peek_int16_blank", &blanked, &header);
     assert!(
         <CfaImage as StackableImage>::peek(&blanked_path, &LoadContext::default())
             .unwrap()
@@ -474,7 +483,7 @@ fn the_header_settles_whether_nulls_are_possible_without_reading_the_data() {
     // And a float BITPIX carries its nulls in-band, so the header can never rule them out — this
     // one holds none at all and is still charged for them.
     let float = Image::new(vec![2, 2], vec![1.0f32, 2.0, 3.0, 4.0]).unwrap();
-    let float_path = write_with_header("peek_float32", &float, &header);
+    let float_path = write_with_header(&dir, "peek_float32", &float, &header);
     assert!(
         <CfaImage as StackableImage>::peek(&float_path, &LoadContext::default())
             .unwrap()
@@ -487,7 +496,8 @@ fn a_wholly_null_fits_image_loads_as_zero_with_every_pixel_masked() {
     // The degenerate end of the same rule: no finite sample to take a level from. The frame still
     // opens, and the mask — not the samples — is what says none of it is data.
     let image = Image::new(vec![2, 2], vec![f32::NAN; 4]).unwrap();
-    let path = write_with_header("float32_all_null", &image, &Header::new());
+    let dir = TempDir::new("lumos-fits-roundtrip");
+    let path = write_with_header(&dir, "float32_all_null", &image, &Header::new());
     let loaded = load_linear_fits(&path, &LoadContext::default()).unwrap();
 
     assert_eq!(loaded.channel(0).pixels(), &[0.0; 4]);
@@ -515,8 +525,9 @@ fn fits_datamax_follows_the_samples_into_the_normalized_domain() {
     low_header.set("DATAMAX", 100.0).unwrap();
     let mut high_header = Header::new();
     high_header.set("DATAMAX", 65_535.0).unwrap();
-    let low_path = write_with_header("datamax_100", &image, &low_header);
-    let high_path = write_with_header("datamax_65535", &image, &high_header);
+    let dir = TempDir::new("lumos-fits-roundtrip");
+    let low_path = write_with_header(&dir, "datamax_100", &image, &low_header);
+    let high_path = write_with_header(&dir, "datamax_65535", &image, &high_header);
 
     let low = load_linear_fits(&low_path, &LoadContext::default()).unwrap();
     let high = load_linear_fits(&high_path, &LoadContext::default()).unwrap();
@@ -555,7 +566,8 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     let image = Image::new(vec![size.width, size.height], pixels.clone()).unwrap();
     let mut header = Header::new();
     header.set("BAYERPAT", "RGGB").unwrap();
-    let path = write_with_header("bayer_cfa", &image, &header);
+    let dir = TempDir::new("lumos-fits-roundtrip");
+    let path = write_with_header(&dir, "bayer_cfa", &image, &header);
 
     assert!(matches!(
         LinearImage::from_file(&path, &LoadContext::default()),
@@ -664,7 +676,8 @@ fn fits_nulls_of_every_non_finite_kind_are_summarized_together() {
     pixels[5] = f32::INFINITY;
     pixels[10] = f32::NEG_INFINITY;
     let image = Image::new(vec![size.width, size.height], pixels).unwrap();
-    let path = write_with_header("nan_inf", &image, &Header::new());
+    let dir = TempDir::new("lumos-fits-roundtrip");
+    let path = write_with_header(&dir, "nan_inf", &image, &Header::new());
 
     let masked = load_linear_fits(&path, &LoadContext::default()).unwrap();
     let nulls = masked.nulls.as_ref().unwrap();

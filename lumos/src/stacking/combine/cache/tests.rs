@@ -5,8 +5,8 @@ use crate::stacking::combine::cache::*;
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::frame_store::frame_quality::FramePlane;
 use crate::stacking::frame_store::frame_stats::FrameStats;
-use crate::testing::ScratchDirectory;
 use crate::testing::prelude::*;
+use common::TempDir;
 
 /// Create an in-memory [`FrameCache`] from loaded images, with no coverage (test helper).
 pub(crate) fn make_test_cache(images: Vec<LinearImage>) -> FrameCache {
@@ -526,8 +526,8 @@ fn frame_count() {
 
 #[test]
 fn cleanup_removes_files() {
-    let temp_dir = ScratchDirectory::new("lumos_cleanup_test");
-    let spill_directory = SpillDirectory::create(&temp_dir, false).unwrap();
+    let temp_dir = TempDir::new("lumos_cleanup_test");
+    let spill_directory = SpillDirectory::create(temp_dir.path(), false).unwrap();
     let spill_path = spill_directory.path().to_path_buf();
 
     let dims = ImageDimensions::new((2, 2), 3);
@@ -571,7 +571,10 @@ fn cleanup_removes_files() {
         !spill_path.exists(),
         "the run's spill directory should be deleted on cleanup"
     );
-    assert!(temp_dir.is_dir(), "the cache root must survive the cleanup");
+    assert!(
+        temp_dir.path().is_dir(),
+        "the cache root must survive the cleanup"
+    );
 }
 
 #[test]
@@ -599,8 +602,8 @@ fn read_channel_chunk_in_memory() {
 
 #[test]
 fn read_channel_chunk_disk_backed() {
-    let temp_dir = ScratchDirectory::new("lumos_read_chunk_disk_test");
-    let spill_directory = SpillDirectory::create(&temp_dir, false).unwrap();
+    let temp_dir = TempDir::new("lumos_read_chunk_disk_test");
+    let spill_directory = SpillDirectory::create(temp_dir.path(), false).unwrap();
 
     let dims = ImageDimensions::new((4, 3), 1);
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
@@ -657,8 +660,8 @@ fn read_channel_chunk_disk_backed() {
 
 #[test]
 fn frame_count_disk_backed() {
-    let temp_dir = ScratchDirectory::new("lumos_frame_count_disk_test");
-    let spill_directory = SpillDirectory::create(&temp_dir, false).unwrap();
+    let temp_dir = TempDir::new("lumos_frame_count_disk_test");
+    let spill_directory = SpillDirectory::create(temp_dir.path(), false).unwrap();
 
     let dims = ImageDimensions::new((2, 2), 1);
 

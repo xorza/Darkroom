@@ -11,8 +11,8 @@
 
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use crate::testing::TestRng;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
+use crate::testing::test_rng::TestRng;
 use glam::Vec2;
 use imaginarium::Buffer2;
 

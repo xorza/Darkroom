@@ -7,13 +7,13 @@
 //! `DefectMap` detects injected hot/cold pixels exactly and repairs them.
 
 use crate::stacking::calibration_masters::defect_map::DefectMap;
+use crate::testing::cfa::{constant_cfa, make_cfa};
 use crate::testing::prelude::*;
 use crate::testing::synthetic::camera::Camera;
 use crate::testing::synthetic::metrics::{rms_diff, score_rejection};
 use crate::testing::synthetic::noise::{add_read_noise, apply_shot_noise};
 use crate::testing::synthetic::observe::{Observation, render};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
-use crate::testing::{constant_cfa, make_cfa};
 use crate::{CalibrationMasters, CalibrationSet, CfaType};
 
 /// A multiplicative radial vignette (sensor flat-field response).

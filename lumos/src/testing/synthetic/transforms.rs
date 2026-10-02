@@ -6,7 +6,8 @@
 
 use std::f64::consts::FRAC_PI_2;
 
-use crate::{stacking::star_detection::star::Star, testing::TestRng};
+use crate::stacking::star_detection::star::Star;
+use crate::testing::test_rng::TestRng;
 use glam::DVec2;
 
 /// Generate random star positions within a bounded area (default 50-px margin).

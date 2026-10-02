@@ -3,14 +3,14 @@ use common::{CancelToken, file_utils};
 use crate::stacking::combine::config::{Normalization, StackConfig};
 use crate::stacking::combine::stack::stack;
 use crate::stacking::progress::ProgressCallback;
-use crate::testing::{calibration_dir, init_tracing};
+use crate::testing::init_tracing;
+use crate::testing::real_data::dataset_dir;
 
 #[test]
-#[ignore = "real-data integration test; run explicitly with --ignored"]
 fn stack_registered_lights() {
     init_tracing();
 
-    let cal_dir = calibration_dir();
+    let cal_dir = dataset_dir();
 
     let registered_dir = cal_dir.join("registered_lights");
     assert!(

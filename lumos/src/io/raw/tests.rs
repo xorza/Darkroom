@@ -1,4 +1,4 @@
-use crate::testing::ScratchDirectory;
+use common::TempDir;
 
 use crate::io::raw::*;
 use std::array;
@@ -49,7 +49,7 @@ fn load_raw_rejects_invalid_files() {
         contents: &'static [u8],
     }
 
-    let directory = ScratchDirectory::new("invalid_raw_files");
+    let directory = TempDir::new("invalid_raw_files");
     let cases = [
         InvalidRawCase {
             name: "invalid_data",
@@ -154,14 +154,11 @@ fn demosaic_overshoots_the_light_frame_range_it_is_clamped_back_into() {
 
 #[cfg(feature = "real-data")]
 #[test]
-#[ignore = "real-data integration test; run explicitly with --ignored"]
 fn load_raw_valid_file() {
-    use crate::testing::{first_raw_file, init_tracing};
+    use crate::testing::init_tracing;
+    use crate::testing::real_data::raw_frames;
 
-    let Some(path) = first_raw_file() else {
-        eprintln!("No RAW file found for testing, skipping");
-        return;
-    };
+    let path = raw_frames("Lights").swap_remove(0);
 
     init_tracing();
 
@@ -194,14 +191,10 @@ fn load_raw_valid_file() {
 
 #[cfg(feature = "real-data")]
 #[test]
-#[ignore = "real-data integration test; run explicitly with --ignored"]
 fn load_raw_dimensions_match() {
-    use crate::testing::first_raw_file;
+    use crate::testing::real_data::raw_frames;
 
-    let Some(path) = first_raw_file() else {
-        eprintln!("No RAW file found for testing, skipping");
-        return;
-    };
+    let path = raw_frames("Lights").swap_remove(0);
 
     let image = load_raw(&path, &CancelToken::never()).unwrap();
 
@@ -570,15 +563,13 @@ fn xtrans_direct_and_calibration_black_corrections_match() {
     }
 }
 
+#[cfg(feature = "real-data")]
 #[test]
-#[ignore = "real-data integration test; run explicitly with --ignored"]
 fn real_xtrans_channel_black_matches_direct_and_calibration_paths() {
     use crate::io::raw::demosaic::xtrans::{XTransImage, XTransPattern};
-    use crate::testing::calibration_image_paths;
+    use crate::testing::real_data::raw_frames;
 
-    let paths = calibration_image_paths("Lights")
-        .or_else(|| calibration_image_paths("Flats"))
-        .expect("No calibration images found");
+    let paths = raw_frames("Lights");
     let Some(raw) = paths
         .iter()
         .filter_map(|path| open_raw(path).ok())

@@ -7,14 +7,14 @@
 //!
 //! Run: `cargo test -p lumos --release --features bench calibration_masters::bench -- --ignored --nocapture`
 
-use crate::testing::XTRANS_PATTERN;
+use crate::testing::cfa::XTRANS_PATTERN;
 use crate::testing::prelude::*;
 use quickbench::quick_bench;
 use std::hint::black_box;
 
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::stacking::calibration_masters::cosmic_ray::reject_cosmic_rays;
-use crate::testing::make_cfa;
+use crate::testing::cfa::make_cfa;
 use crate::{
     CalibrationMasters, CalibrationSet, CfaImage, CfaType, CosmicRayConfig,
     DEFAULT_SIGMA_THRESHOLD, DefectMap,

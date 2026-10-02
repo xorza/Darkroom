@@ -22,8 +22,8 @@ use crate::stacking::combine::config::{CombineMethod, StackConfig, Weighting};
 use crate::stacking::combine::error::{Error, StackConfigError};
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::progress::ProgressCallback;
+use crate::testing::cfa::{constant_cfa, make_cfa};
 use crate::testing::prelude::*;
-use crate::testing::{constant_cfa, make_cfa};
 use crate::{
     CalibrationComponent, CalibrationMasters, CalibrationSet, DefectSummary, ImageError,
     ImageMetadata, MasterRole,

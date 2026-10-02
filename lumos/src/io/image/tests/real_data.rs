@@ -26,13 +26,13 @@ fn loadable_extensions_match_decoder_policies() {
 }
 
 #[test]
-#[ignore = "real-data integration test; run explicitly with --ignored"]
 fn load_single_raw_from_env() {
-    use crate::testing::{calibration_dir, init_tracing};
+    use crate::testing::init_tracing;
+    use crate::testing::real_data::dataset_dir;
 
     init_tracing();
 
-    let cal_dir = calibration_dir();
+    let cal_dir = dataset_dir();
 
     let lights_dir = cal_dir.join("Lights");
     if !lights_dir.exists() {

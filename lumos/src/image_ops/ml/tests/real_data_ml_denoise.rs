@@ -25,7 +25,6 @@ fn mean_adjacent_diff(image: &LinearImage) -> f32 {
 /// (lumos ships no model); `DEEPSNR_ONNX` overrides the path. Skipped if absent. The full frame is
 /// hundreds of 512² tiles — ~60 s on a 10-core machine. Build/run with `--features ml,real-data`.
 #[test]
-#[ignore = "real-data ML test loads a large model; run explicitly with --ignored"]
 fn deepsnr_denoises() {
     init_tracing();
     let Some(weights) = onnx_weights("DEEPSNR_ONNX", "DeepSNR_weights_v2.onnx") else {

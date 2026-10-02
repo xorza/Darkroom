@@ -26,7 +26,7 @@ use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::normalization;
 use crate::stacking::combine::stack::stack;
 use crate::stacking::progress::ProgressCallback;
-use crate::testing::ScratchDirectory;
+use common::TempDir;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
@@ -87,7 +87,7 @@ fn write_const_fits(path: &Path, size: Size2us, value: u16) {
 /// through the loader itself, so FITS normalization can't skew the expectation.
 #[test]
 fn disk_and_memory_tiers_produce_identical_masters() {
-    let dir = ScratchDirectory::new("lumos_mem_tier_test");
+    let dir = TempDir::new("lumos_mem_tier_test");
     let size = Size2us::new(24, 24);
     let n = 6usize;
 

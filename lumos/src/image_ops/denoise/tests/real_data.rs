@@ -6,8 +6,9 @@ use crate::image_ops::internals::channel_plane;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::math::statistics::{mad_to_sigma, mad_with_scratch, median_mut};
+use crate::testing::init_tracing;
+use crate::testing::real_data::dataset_dir;
 use crate::testing::visual;
-use crate::testing::{calibration_dir, init_tracing};
 use crate::{Denoise, NeutralizeBackground, Scnr, Stretch};
 
 /// Robust high-frequency noise of a channel: the MAD-sigma of adjacent-pixel differences. Slow
@@ -32,12 +33,11 @@ fn highfreq_noise(image: &LinearImage, channel: usize) -> f32 {
 }
 
 #[test]
-#[ignore = "real-data image-processing test; run explicitly with --ignored"]
 fn denoise_reduces_linear_noise() {
     init_tracing();
 
     let mut img = LinearImage::from_file(
-        calibration_dir().join("stacked_light.tiff"),
+        dataset_dir().join("stacked_light.tiff"),
         &LoadContext::default(),
     )
     .expect("load");

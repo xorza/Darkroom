@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use common::CancelToken;
+use common::{CancelToken, TempDir};
 
 use crate::concurrency;
 use crate::io::image::cfa::CfaImage;
@@ -12,7 +12,8 @@ use crate::io::image::linear::LinearImage;
 use crate::io::raw::load_raw_cfa;
 use crate::stacking::combine::cache::FrameCache;
 use crate::stacking::combine::stack::run_stacking;
-use crate::testing::{calibration_dir, calibration_image_paths, init_tracing};
+use crate::testing::init_tracing;
+use crate::testing::real_data::raw_frames;
 use crate::{
     CalibrationComponent, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, MasterRole,
     Normalization, ProgressCallback, RegistrationConfig, StackConfig, Star, StarDetectionConfig,
@@ -20,20 +21,22 @@ use crate::{
 };
 
 #[test]
-#[ignore = "real-data pipeline benchmark; run explicitly with --ignored"]
 fn bench_full_pipeline() {
     init_tracing();
 
-    let cal_dir = calibration_dir();
+    // Every product goes to a fresh directory: the dataset stays as fetched, and the real-data
+    // tests that read it never see this run's output.
+    let output = TempDir::new("lumos-pipeline-bench");
+    println!("Writing products under {}", output.path().display());
 
     let total_start = Instant::now();
 
     println!("\n--- Step 1: Creating CFA master calibration frames ---");
     let step_start = Instant::now();
 
-    let dark_paths = calibration_image_paths("Darks").unwrap_or_default();
-    let flat_paths = calibration_image_paths("Flats").unwrap_or_default();
-    let bias_paths = calibration_image_paths("Bias").unwrap_or_default();
+    let dark_paths = raw_frames("Darks");
+    let flat_paths = raw_frames("Flats");
+    let bias_paths = raw_frames("Bias");
 
     // Time each master separately to find the bottleneck
     let stack_cfa = |name: &str, paths: &[PathBuf], config: StackConfig| -> Option<CfaImage> {
@@ -119,8 +122,7 @@ fn bench_full_pipeline() {
     println!("\n--- Step 2: Calibrating light frames ---");
     let step_start = Instant::now();
 
-    let light_paths = calibration_image_paths("Lights").unwrap();
-    assert!(!light_paths.is_empty(), "No light frames found");
+    let light_paths = raw_frames("Lights");
     println!("  Loading and calibrating {} lights...", light_paths.len());
 
     let calibrated: Vec<LinearImage> =
@@ -134,7 +136,7 @@ fn bench_full_pipeline() {
     println!("  Elapsed: {:?}", step_start.elapsed());
 
     // Save calibrated lights
-    let calibrated_dir = cal_dir.join("calibrated_lights");
+    let calibrated_dir = output.join("calibrated_lights");
     fs::create_dir_all(&calibrated_dir).expect("Failed to create calibrated_lights dir");
     for (path, img) in light_paths.iter().zip(calibrated.iter()) {
         let filename = path.file_stem().unwrap().to_string_lossy();
@@ -205,7 +207,7 @@ fn bench_full_pipeline() {
     }
 
     // Save registered lights
-    let registered_dir = cal_dir.join("registered_lights");
+    let registered_dir = output.join("registered_lights");
     fs::create_dir_all(&registered_dir).expect("Failed to create registered_lights dir");
     for (i, img) in registered.iter().enumerate() {
         let out_path = registered_dir.join(format!("registered_{i:04}.tiff"));
@@ -248,7 +250,7 @@ fn bench_full_pipeline() {
     println!("  Elapsed: {:?}", step_start.elapsed());
 
     // Save stacked result
-    let output_path = cal_dir.join("stacked_light.tiff");
+    let output_path = output.join("stacked_light.tiff");
     let img: imaginarium::Image = stacked.into();
     img.save_file(&output_path).unwrap();
     println!("  Saved: {}", output_path.display());
