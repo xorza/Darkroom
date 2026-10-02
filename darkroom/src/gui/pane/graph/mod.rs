@@ -550,6 +550,7 @@ pub(crate) mod harness;
 #[cfg(test)]
 mod tests {
     use palantir::DockOp;
+    use palantir::internals::UiHarness;
     use scenarium::{Binding, InputPort};
     use std::sync::Arc;
 
@@ -649,33 +650,33 @@ mod tests {
     /// appearance would reset a drag mid-gesture.
     #[test]
     fn appearing_is_a_frame_gap_not_a_repeat_or_a_step() {
-        let mut h = CanvasHarness::new(DocFixture::probes(1));
+        let mut h = UiHarness::arena();
         let mut graph_ui = GraphUI::default();
 
         assert!(
-            graph_ui.appearing(h.ui.ui()),
+            graph_ui.appearing(h.ui()),
             "a canvas that has never recorded is appearing"
         );
         assert!(
-            !graph_ui.appearing(h.ui.ui()),
+            !graph_ui.appearing(h.ui()),
             "a second pane on the same frame is the same appearance, not a new one"
         );
 
-        h.ui.frame(|_| {});
+        h.frame(|_| {});
         assert!(
-            !graph_ui.appearing(h.ui.ui()),
+            !graph_ui.appearing(h.ui()),
             "the next consecutive frame is the steady state"
         );
 
         // Two frames the canvas sat out — the pane was on another tab.
-        h.ui.frame(|_| {});
-        h.ui.frame(|_| {});
+        h.frame(|_| {});
+        h.frame(|_| {});
         assert!(
-            graph_ui.appearing(h.ui.ui()),
+            graph_ui.appearing(h.ui()),
             "a gap means it was away and is back"
         );
         assert!(
-            !graph_ui.appearing(h.ui.ui()),
+            !graph_ui.appearing(h.ui()),
             "and the reappearance is reported once, not per pane"
         );
     }

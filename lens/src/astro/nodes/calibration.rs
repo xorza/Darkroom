@@ -266,19 +266,14 @@ fn cache_marker_path(cache_path: &Path) -> PathBuf {
 }
 
 #[cfg(test)]
-pub(super) mod internals {
-    use std::path::PathBuf;
-
-    pub(crate) fn frame_set_key(frames: &[PathBuf]) -> Result<String, String> {
-        super::frame_set_key(frames).map_err(|error| error.to_string())
-    }
-}
-
-#[cfg(test)]
 mod tests {
+    use std::fs;
     use std::path::PathBuf;
+    use std::slice;
 
-    use crate::astro::nodes::calibration::{BuildMastersError, role_cache_paths};
+    use common::TempDir;
+
+    use crate::astro::nodes::calibration::{BuildMastersError, frame_set_key, role_cache_paths};
 
     #[test]
     fn role_cache_requires_one_source_directory() {
@@ -308,5 +303,24 @@ mod tests {
                 other
             } if first == mixed[0] && other == mixed[1]
         ));
+    }
+
+    #[test]
+    fn master_source_key_changes_with_the_frame_set() {
+        let dir = TempDir::new("lens-master-source-key");
+        let first = dir.join("a.raf");
+        let second = dir.join("b.raf");
+        fs::write(&first, b"a").unwrap();
+        let one_frame = frame_set_key(slice::from_ref(&first)).unwrap();
+        assert_eq!(frame_set_key(slice::from_ref(&first)).unwrap(), one_frame);
+
+        fs::write(&second, b"bb").unwrap();
+        let two_frames = frame_set_key(&[first.clone(), second.clone()]).unwrap();
+        assert_ne!(two_frames, one_frame);
+        fs::write(&first, b"aaa").unwrap();
+        let edited = frame_set_key(&[first.clone(), second]).unwrap();
+        assert_ne!(edited, two_frames);
+        fs::remove_file(&first).unwrap();
+        assert_ne!(frame_set_key(&[]).unwrap(), edited);
     }
 }

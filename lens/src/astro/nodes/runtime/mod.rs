@@ -68,11 +68,4 @@ where
 }
 
 #[cfg(test)]
-pub(super) mod internals {
-    use lumos::LinearImage;
-    use scenarium::DynamicValue;
-
-    pub(crate) fn image_to_planar(value: DynamicValue) -> LinearImage {
-        super::image_to_planar(value)
-    }
-}
+mod tests;

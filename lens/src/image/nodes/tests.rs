@@ -1,58 +1,12 @@
-use scenarium::Invocation;
-use std::fs;
-use std::path::PathBuf;
+use common::TempDir;
+use scenarium::testing::func_invoker::FuncInvoker;
 
-use imaginarium::{ColorFormat, ContrastBrightness};
-use scenarium::{
-    AnyState, ConstValue, ContextManager, DynamicValue, Func, OutputDemand, SharedAnyState,
-};
+use imaginarium::ColorFormat;
+use scenarium::{ConstValue, DynamicValue};
 
 use crate::image::format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat, conversion_target};
 use crate::image::nodes::image_library;
-use crate::image::nodes::processing::internals::adjust_image;
 use crate::image::{IMAGE_DATA_TYPE, Image};
-
-fn func<'a>(library: &'a scenarium::Library, name: &str) -> &'a Func {
-    library
-        .funcs()
-        .find(|function| function.name == name)
-        .unwrap_or_else(|| panic!("{name} registered"))
-}
-
-#[test]
-fn adjust_image_runs_in_place_only_for_unique_cpu_inputs() {
-    let desc = imaginarium::ImageDesc::new(9, 4, ColorFormat::RGBA_U8);
-    let op = ContrastBrightness::new(1.5, 0.1);
-    let pattern: Vec<u8> = (0..desc.size_in_bytes())
-        .map(|index| (index % 251) as u8)
-        .collect();
-    let patterned_image = || {
-        let mut image = imaginarium::Image::new_black(desc).unwrap();
-        image.bytes_mut().copy_from_slice(&pattern);
-        image
-    };
-
-    let image = patterned_image();
-    let unique_ptr = image.bytes().as_ptr();
-    let unique = DynamicValue::from_custom(Image::from(image));
-    let adjusted = adjust_image(op, unique);
-    let adjusted_cpu = adjusted.interleaved();
-    assert_eq!(adjusted_cpu.bytes().as_ptr(), unique_ptr);
-    assert_ne!(adjusted_cpu.bytes(), pattern.as_slice());
-
-    let image = patterned_image();
-    let shared_ptr = image.bytes().as_ptr();
-    let shared = DynamicValue::from_custom(Image::from(image));
-    let holder = shared.clone();
-    let adjusted_shared = adjust_image(op, shared);
-    let shared_cpu = adjusted_shared.interleaved();
-    assert_ne!(shared_cpu.bytes().as_ptr(), shared_ptr);
-    let original = holder.as_custom::<Image>().unwrap();
-    let original_cpu = original.interleaved();
-    assert_eq!(original_cpu.bytes().as_ptr(), shared_ptr);
-    assert_eq!(original_cpu.bytes(), pattern.as_slice());
-    assert_eq!(adjusted_cpu.bytes(), shared_cpu.bytes());
-}
 
 #[test]
 fn conversion_target_collapses_as_is_and_matching_format() {
@@ -67,7 +21,7 @@ fn conversion_target_collapses_as_is_and_matching_format() {
 #[test]
 fn format_defaults_are_exact() {
     let library = image_library();
-    let convert = func(&library, "Convert");
+    let convert = library.by_name("Convert").unwrap();
     assert_eq!(convert.inputs[0].data_type, *IMAGE_DATA_TYPE);
     assert_eq!(convert.inputs[1].data_type, *CONVERSION_FORMAT_DATATYPE);
     assert_eq!(
@@ -75,7 +29,7 @@ fn format_defaults_are_exact() {
         Some(ConstValue::Enum(ConversionFormat::RgbU8.label())),
     );
 
-    let save = func(&library, "Save Image");
+    let save = library.by_name("Save Image").unwrap();
     let names: Vec<&str> = save
         .inputs
         .iter()
@@ -90,57 +44,36 @@ fn format_defaults_are_exact() {
 
 #[tokio::test]
 async fn load_and_save_round_trip_exact_pixels() {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("test_output/lens/image_io");
-    if dir.exists() {
-        fs::remove_dir_all(&dir).unwrap();
-    }
-    fs::create_dir_all(&dir).unwrap();
+    let dir = TempDir::new("lens-image-io");
     let path = dir.join("roundtrip.png");
     let desc = imaginarium::ImageDesc::new(2, 1, ColorFormat::RGB_U8);
     let pixels = vec![10, 20, 30, 40, 50, 60];
     let image = imaginarium::Image::new_with_data(desc, pixels.clone()).unwrap();
     let library = image_library();
 
-    let mut save_inputs = [
-        DynamicValue::from_custom(Image::from(image)),
-        ConstValue::FsPath(path.display().to_string()).into(),
-        ConstValue::Enum(ConversionFormat::AsIs.label()).into(),
-    ];
-    func(&library, "Save Image")
-        .lambda
-        .invoke(Invocation {
-            ctx: &mut ContextManager::default(),
-            state: &mut AnyState::default(),
-            event_state: &SharedAnyState::default(),
-            inputs: &mut save_inputs,
-            demand: &[],
-            outputs: &mut [],
-        })
+    let mut invoker = FuncInvoker::default();
+    invoker
+        .call(
+            library.by_name("Save Image").unwrap(),
+            [
+                DynamicValue::from_custom(Image::from(image)),
+                ConstValue::FsPath(path.display().to_string()).into(),
+                ConstValue::Enum(ConversionFormat::AsIs.label()).into(),
+            ],
+        )
         .await
         .unwrap();
-
-    let mut load_inputs = [ConstValue::FsPath(path.display().to_string()).into()];
-    let mut outputs = [DynamicValue::Unbound];
-    func(&library, "Load Image")
-        .lambda
-        .invoke(Invocation {
-            ctx: &mut ContextManager::default(),
-            state: &mut AnyState::default(),
-            event_state: &SharedAnyState::default(),
-            inputs: &mut load_inputs,
-            demand: &[OutputDemand::Produce],
-            outputs: &mut outputs,
-        })
+    let outputs = invoker
+        .call(
+            library.by_name("Load Image").unwrap(),
+            [ConstValue::FsPath(path.display().to_string()).into()],
+        )
         .await
         .unwrap();
     let loaded = outputs[0].as_custom::<Image>().unwrap();
     let cpu = loaded.interleaved();
     assert_eq!(cpu.desc(), desc);
     assert_eq!(cpu.bytes(), pixels);
-    fs::remove_dir_all(dir).unwrap();
 }
 
 /// Source and destination are two independent wires, so a size or format mismatch is the user's
@@ -155,27 +88,14 @@ async fn blend_refuses_a_destination_of_another_size_or_format() {
         ))
     };
     let blend = |source: DynamicValue, destination: DynamicValue| {
-        let mut inputs = [
+        let inputs = [
             source,
             destination,
             ConstValue::Enum("Normal".to_owned()).into(),
             ConstValue::Float(0.5).into(),
         ];
-        let mut outputs = [DynamicValue::Unbound];
-        let library = &library;
-        async move {
-            func(library, "Blend")
-                .lambda
-                .invoke(Invocation {
-                    ctx: &mut ContextManager::default(),
-                    state: &mut AnyState::default(),
-                    event_state: &SharedAnyState::default(),
-                    inputs: &mut inputs,
-                    demand: &[OutputDemand::Produce],
-                    outputs: &mut outputs,
-                })
-                .await
-        }
+        let blend = library.by_name("Blend").unwrap();
+        async move { FuncInvoker::default().call(blend, inputs).await }
     };
 
     for destination in [

@@ -22,7 +22,7 @@ use crate::runtime::shared_any_state::SharedAnyState;
 /// two runs of one node would. A test that wants a node with no history builds
 /// a second invoker.
 #[derive(Debug, Default)]
-pub(crate) struct FuncInvoker {
+pub struct FuncInvoker {
     ctx: ContextManager,
     state: AnyState,
     event_state: SharedAnyState,
@@ -31,7 +31,7 @@ pub(crate) struct FuncInvoker {
 impl FuncInvoker {
     /// Invoke `func` on `inputs`, demanding every output it declares, and hand
     /// back what it wrote — `Unbound` for a port it left alone.
-    pub(crate) async fn call(
+    pub async fn call(
         &mut self,
         func: &Func,
         inputs: impl IntoIterator<Item = DynamicValue>,
@@ -53,14 +53,20 @@ impl FuncInvoker {
     }
 
     /// What the calls so far left in the node's own state.
-    pub(crate) fn state<T: Send + Sync + 'static>(&self) -> Option<&T> {
+    pub fn state<T: Send + Sync + 'static>(&self) -> Option<&T> {
         self.state.get::<T>()
     }
 
     /// The shared state this node's *event* lambdas read — handed out cloned,
     /// since driving an event while the body keeps being called is the whole
     /// point of the two being separate.
-    pub(crate) fn event_state(&self) -> SharedAnyState {
+    pub fn event_state(&self) -> SharedAnyState {
         self.event_state.clone()
+    }
+
+    /// The context the calls run under, for a test that installs what a body
+    /// reads from it.
+    pub fn ctx_mut(&mut self) -> &mut ContextManager {
+        &mut self.ctx
     }
 }

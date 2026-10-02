@@ -1,4 +1,5 @@
 use super::*;
+use scenarium::testing::func_invoker::FuncInvoker;
 use scenarium::{AnyState, ConstValue, ContextManager, OutputDemand, SharedAnyState};
 
 #[test]
@@ -31,6 +32,8 @@ async fn invoking_publishes_the_latest_value_per_node() {
     let func = preview_func(Arc::clone(&sink));
     let first = NodeId::default();
 
+    // Built by hand rather than through `FuncInvoker`: the test reads the
+    // input slot back after the call, which the invoker does not hand out.
     let invoke = async |value: i64| {
         let mut ctx = ContextManager::default();
         ctx.set_current_node(first);
@@ -66,16 +69,8 @@ async fn invoking_publishes_the_latest_value_per_node() {
 #[should_panic(expected = "only readable inside a lambda invoke")]
 async fn an_unattributed_invoke_is_a_bug_not_a_silent_no_op() {
     let func = preview_func(Arc::default());
-    let mut inputs = [DynamicValue::Static(ConstValue::Int(1))];
-    func.lambda
-        .invoke(Invocation {
-            ctx: &mut ContextManager::default(),
-            state: &mut AnyState::default(),
-            event_state: &SharedAnyState::default(),
-            inputs: &mut inputs,
-            demand: &[] as &[OutputDemand],
-            outputs: &mut [],
-        })
+    FuncInvoker::default()
+        .call(&func, [DynamicValue::Static(ConstValue::Int(1))])
         .await
         .unwrap();
 }

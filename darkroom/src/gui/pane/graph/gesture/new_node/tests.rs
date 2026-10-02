@@ -25,10 +25,17 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
     /// cap below is resolved from.
     const SURFACE: UVec2 = UVec2::new(1200, 900);
 
+    /// The two rects the height cap divides between, and the cap itself.
+    #[derive(Debug, Clone, Copy)]
+    struct Palette {
+        field: Rect,
+        results: Rect,
+        cap: f32,
+    }
+
     /// Records one palette open, with `restyle` applied to the live
-    /// `Ui::theme` first, and returns the two rects the height cap divides
-    /// between plus the cap itself.
-    fn open_palette(restyle: impl Fn(&mut palantir::Theme)) -> (Rect, Rect, f32) {
+    /// `Ui::theme` first.
+    fn open_palette(restyle: impl Fn(&mut palantir::Theme)) -> Palette {
         // Enough rows in one category to overflow any sane cap, so the scroll
         // is genuinely competing for the popup's height. No nodes placed: the
         // palette is what spawns them.
@@ -59,11 +66,11 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
             .theme
             .new_node_popup_max_height
             .clamp(120.0, (SURFACE.y as f32 - 16.0).max(120.0));
-        (
-            h.ui.rect(search_field_wid()).expect("field recorded"),
-            h.ui.rect(results_wid()).expect("results recorded"),
+        Palette {
+            field: h.ui.rect(search_field_wid()).expect("field recorded"),
+            results: h.ui.rect(results_wid()).expect("results recorded"),
             cap,
-        )
+        }
     }
 
     /// The field sits above the results, and the two plus the popup's own
@@ -74,8 +81,12 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
     /// chrome fit the cap with no slack the chrome doesn't account for —
     /// which catches an allowance that over-subtracts as well as one that
     /// under-subtracts.
-    fn assert_fits(rects: (Rect, Rect, f32), menu: &palantir::ContextMenuTheme, label: &str) {
-        let (field, results, cap) = rects;
+    fn assert_fits(palette: Palette, menu: &palantir::ContextMenuTheme, label: &str) {
+        let Palette {
+            field,
+            results,
+            cap,
+        } = palette;
         assert!(
             field.max().y <= results.min.y + 0.5,
             "{label}: the results overlap the search field ({field:?} vs {results:?})",
@@ -120,16 +131,16 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
     assert_fits(big, &restyled.context_menu, "bigger field and popup");
 
     assert!(
-        big.0.size.h > small.0.size.h,
+        big.field.size.h > small.field.size.h,
         "the field really did grow: {} → {}",
-        small.0.size.h,
-        big.0.size.h,
+        small.field.size.h,
+        big.field.size.h,
     );
     assert!(
-        big.1.size.h < small.1.size.h,
+        big.results.size.h < small.results.size.h,
         "and the results gave up the difference: {} → {}",
-        small.1.size.h,
-        big.1.size.h,
+        small.results.size.h,
+        big.results.size.h,
     );
 }
 
