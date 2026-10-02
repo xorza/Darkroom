@@ -20,6 +20,7 @@ use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::prefs::{MlModelKind, PrefsCommand};
 use crate::gui::requests::Requests;
 use crate::gui::theme::Theme;
+use crate::gui::widgets::edit_buffer::DraftOutcome;
 use crate::gui::widgets::support::{colored_text, muted_text, sized_text};
 use crate::platform;
 
@@ -260,8 +261,12 @@ fn model_row(ui: &mut Ui, theme: &Theme, row: ModelRow, path: &mut PathBuf, out:
                     if let Some(style) = error_style.as_ref() {
                         edit = edit.style(style);
                     }
-                    let resp = edit.show(ui);
-                    let commit = resp.submitted || resp.lost_focus;
+                    let outcome = DraftOutcome::of(&edit.show(ui));
+                    if outcome == DraftOutcome::Cancel {
+                        // Escape drops the draft: the field shows the committed path again.
+                        draft.clone_from(&ui.state_or_default::<PathField>(id).seen);
+                    }
+                    let commit = outcome == DraftOutcome::Commit;
                     // Against the mirror, not a re-read of `path`: `seen` was
                     // just synced to it, and comparing there keeps `path`
                     // unborrowed for the write on the next line.
@@ -363,6 +368,9 @@ mod tests {
     use super::*;
 
     use common::{TempDir, TempFile};
+    use glam::UVec2;
+    use palantir::Key;
+    use palantir::internals::UiHarness;
 
     #[test]
     fn path_problem_classifies_empty_missing_dir_and_extension() {
@@ -384,5 +392,58 @@ mod tests {
         let onnx = TempFile::with_extension("darkroom-path-upper", "ONNX");
         std::fs::write(onnx.path(), b"x").unwrap();
         assert_eq!(path_problem(&onnx.to_str()), None);
+    }
+
+    /// Escape in a path field drops the draft: the path and the field go back to the committed
+    /// value and nothing is queued. Enter writes the typed path and queues one change.
+    #[test]
+    fn escape_restores_the_path_and_enter_commits_it() {
+        let theme = Theme::default();
+        let row = ModelRow {
+            label: "Denoise model",
+            kind: MlModelKind::Denoise,
+            download_label: "download",
+            download_url: "https://example.invalid",
+        };
+        let id = WidgetId::from_hash(("preferences.ml_model_path", row.label));
+        let mut path = PathBuf::from("/a.onnx");
+        let mut h = UiHarness::new(UVec2::new(800, 200));
+        let mut frame = |h: &mut UiHarness, path: &mut PathBuf| {
+            let mut out = Requests::default();
+            h.frame(|ui| model_row(ui, &theme, row, path, &mut out));
+            std::iter::from_fn(|| out.pop_app())
+                .filter(|command| matches!(command, AppCommand::Prefs(PrefsCommand::Changed)))
+                .count()
+        };
+        let type_x = |h: &mut UiHarness,
+                      frame: &mut dyn FnMut(&mut UiHarness, &mut PathBuf) -> usize,
+                      path: &mut PathBuf| {
+            let center = h.rect(id).expect("path field arranged").center();
+            h.click_at(center);
+            frame(h, path);
+            h.key(Key::End);
+            frame(h, path);
+            h.key(Key::Char('x'));
+            assert_eq!(frame(h, path), 0, "typing queues nothing");
+        };
+
+        frame(&mut h, &mut path);
+        type_x(&mut h, &mut frame, &mut path);
+        h.key(Key::Escape);
+        let mut queued = 0;
+        for _ in 0..3 {
+            queued += frame(&mut h, &mut path);
+        }
+        assert_eq!(queued, 0, "Escape must queue no change");
+        assert_eq!(
+            path,
+            PathBuf::from("/a.onnx"),
+            "Escape must not write the draft"
+        );
+
+        type_x(&mut h, &mut frame, &mut path);
+        h.key(Key::Enter);
+        assert_eq!(frame(&mut h, &mut path), 1, "Enter queues one change");
+        assert_eq!(path, PathBuf::from("/a.onnxx"));
     }
 }

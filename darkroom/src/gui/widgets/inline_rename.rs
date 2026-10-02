@@ -3,23 +3,23 @@
 //! edited string, Esc cancels. Used by the node-header title
 //! (`gui::pane::graph::node::header`), which maps the returned
 //! [`RenameEvent`] onto a `RenameNode` intent. Mirrors the per-widget split of
-//! `gui::pane::graph::node::value_editor`; both share the blur-edge /
-//! buffered-text core in [`crate::gui::widgets::buffered_edit`].
+//! `gui::pane::graph::node::value_editor`; both share the buffered-text core
+//! and the commit/cancel rule in [`crate::gui::widgets::edit_buffer`].
 
 use palantir::prelude::*;
 
 use crate::gui::theme::inline_rename_theme::InlineRenameTheme;
-use crate::gui::widgets::buffered_edit::EditBuffer;
+use crate::gui::widgets::edit_buffer::{DraftOutcome, EditBuffer};
 
 /// Cross-frame state for one inline-rename editor, held in palantir's
 /// `StateMap` under the editor's `WidgetId`.
 #[derive(Default, Clone, Debug)]
 struct RenameState {
     active: bool,
-    /// The in-progress draft plus blur-edge tracking, shared with
-    /// `gui::pane::graph::node::value_editor`'s buffered fields — see
-    /// [`EditBuffer`] for why the latch needs to survive the
-    /// `set_focus` → focus-landing gap this widget opens.
+    /// The in-progress draft. Commit and cancel come from the editor's own
+    /// focus edges ([`DraftOutcome::of`]), which only report a blur once
+    /// focus has landed, so the `set_focus` → focus-landing gap this widget
+    /// opens never reads as one.
     edit: EditBuffer,
 }
 
@@ -210,7 +210,6 @@ impl<'a> InlineRename<'a> {
             if double_clicked {
                 let st = ui.state_or_default::<RenameState>(id);
                 st.active = true;
-                st.edit.reset_latch();
                 // Refilled, not replaced — the row's buffer keeps whatever
                 // capacity the last rename grew it to.
                 st.edit.text.clear();
@@ -229,7 +228,7 @@ impl<'a> InlineRename<'a> {
         // (`KeyClass::Text`) and Escape (`KeyClass::Escape`) — so polling
         // them here would see nothing, and the widget that consumed them
         // is the one that can report them anyway.
-        let (submitted, cancelled) = {
+        let outcome = {
             let edit = TextEdit::new(&mut draft)
                 .id(id)
                 .style(&theme.text_edit)
@@ -247,22 +246,15 @@ impl<'a> InlineRename<'a> {
                 .min_size((MIN_EDIT_WIDTH, line_h))
                 .text_align(text_align)
                 .show(ui);
-            (edit.submitted, edit.cancelled)
+            DraftOutcome::of(&edit)
         };
-        let focused = ui.focused_id() == Some(id);
-        let blurred = ui
-            .state_or_default::<RenameState>(id)
-            .edit
-            .blur_edge(focused);
-        // Commit on Enter or on blur; Esc wins as a cancel. Escape blurs
-        // too, so `cancelled` has to be tested first.
-        let commit = !cancelled && (submitted || blurred);
+        let commit = outcome == DraftOutcome::Commit;
         // Only a committing frame needs the draft as a value of its own;
         // every other one hands the buffer straight back, so an open rename
         // copies its text once per commit rather than once per frame.
         let committed = (commit && draft.as_str() != name).then(|| draft.clone());
         ui.state_or_default::<RenameState>(id).edit.text = draft;
-        if !(commit || cancelled) {
+        if outcome == DraftOutcome::Editing {
             return RenameEvent {
                 clicked: false,
                 committed: None,
@@ -270,7 +262,6 @@ impl<'a> InlineRename<'a> {
         }
         let st = ui.state_or_default::<RenameState>(id);
         st.active = false;
-        st.edit.reset_latch();
         ui.clear_focus();
         RenameEvent {
             clicked: false,

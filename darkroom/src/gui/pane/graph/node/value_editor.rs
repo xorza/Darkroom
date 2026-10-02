@@ -25,7 +25,7 @@
 //! Textual edit state: a `TextEdit` round-trip through `i64`/`f64`
 //! formatting would clobber partial input (typing "3." would reformat
 //! to "3" on the next frame). The buffer lives in palantir's `StateMap`
-//! keyed by the editor id ([`crate::gui::widgets::buffered_edit::EditBuffer`],
+//! keyed by the editor id ([`crate::gui::widgets::edit_buffer::EditBuffer`],
 //! shared with [`crate::gui::widgets::inline_rename`]'s renaming editor);
 //! we mirror canonical → buffer only while unfocused — skipping the blur
 //! frame, whose buffer still holds the user's text to commit — and parse
@@ -40,7 +40,7 @@ use palantir::{TextEditTheme, TextWrap};
 use scenarium::{ConstValue, DataType, FsPathMode, Library, ValueVariant};
 
 use crate::gui::theme::const_value_editor_theme::ConstValueEditorTheme;
-use crate::gui::widgets::buffered_edit::EditBuffer;
+use crate::gui::widgets::edit_buffer::{DraftOutcome, EditBuffer};
 
 /// Render the editor for `value`. Returns the new value when the user
 /// committed an edit this frame (scrub released, Enter, blur, or a
@@ -329,14 +329,14 @@ impl Display for PathPreview<'_> {
 
 /// Render a `TextEdit` whose buffer survives across frames via palantir's
 /// `StateMap`. Returns the buffer's text on the frame the edit commits (Enter,
-/// or focus left the field), `None` on every other.
+/// or focus left the field), `None` on every other — Escape included, which
+/// drops the draft and lets the next idle frame refill it.
 ///
-/// While the editor is unfocused, `mirror` refills the cleared buffer from
-/// the canonical value rather than handing back a fresh `String`, so the
-/// frames that change nothing cost no allocation. While focused, the user's
-/// in-progress text is left alone. The blur frame is detected *before* the
-/// mirror runs (via [`EditBuffer::blur_edge`]) so the user's text survives to
-/// be committed rather than being clobbered back to canonical.
+/// While the field is idle, `mirror` refills the cleared buffer from the
+/// canonical value rather than handing back a fresh `String`, so the frames
+/// that change nothing cost no allocation. While focused, and on the frame
+/// focus leaves, the user's text is left alone so it survives to be committed
+/// ([`EditBuffer::is_idle`]).
 fn buffered_text_edit<T: ?Sized>(
     ui: &mut Ui,
     editor: &TextEditTheme,
@@ -346,24 +346,26 @@ fn buffered_text_edit<T: ?Sized>(
     width: f32,
 ) -> Option<String> {
     let focused = ui.focused_id() == Some(id);
-    let blurred = ui.state_or_default::<EditBuffer>(id).blur_edge(focused);
-    EditBuffer::with_text(ui, id, |ui, text| {
-        if !focused && !blurred {
+    let idle = ui.state_or_default::<EditBuffer>(id).is_idle(focused);
+    let committed = EditBuffer::with_text(ui, id, |ui, text| {
+        if idle {
             text.clear();
             mirror(canonical, text);
         }
-        let submitted = TextEdit::new(text)
+        let response = TextEdit::new(text)
             .id(id)
             .style(editor)
             .size((Sizing::fixed(width), Sizing::FILL))
-            .show(ui)
-            .submitted;
+            .show(ui);
         // The buffer keeps the text — the editor goes on showing it until
         // the mirror re-seeds from the committed document value — so a
         // commit is the one frame that copies, at gesture rate rather than
         // frame rate.
-        (submitted || blurred).then(|| text.clone())
-    })
+        (DraftOutcome::of(&response) == DraftOutcome::Commit).then(|| text.clone())
+    });
+    let focused = ui.focused_id() == Some(id);
+    ui.state_or_default::<EditBuffer>(id).settle(focused);
+    committed
 }
 
 /// The `String` port's mirror: its literal *is* the field's text, verbatim.
@@ -442,7 +444,8 @@ fn int_speed(v: i64) -> f64 {
 mod tests {
     use super::*;
 
-    use glam::UVec2;
+    use glam::{UVec2, Vec2};
+    use palantir::Key;
     use palantir::internals::UiHarness;
 
     use crate::gui::theme::Theme;
@@ -490,6 +493,89 @@ mod tests {
             });
             assert_eq!(buffered, "42", "frame {frame}");
         }
+    }
+
+    /// Escape drops the draft: nothing commits, on the Escape frame or after, and the next idle
+    /// frame shows the document value again. Enter and a click elsewhere each commit what was
+    /// typed, once.
+    ///
+    /// Commits are collected from every record pass, not only the input-observing one: a frame
+    /// can run a second pass, and the cancelled draft used to commit there.
+    #[test]
+    fn escape_drops_the_draft_and_enter_or_blur_commits() {
+        struct Field<'a> {
+            editor: &'a TextEditTheme,
+            id: WidgetId,
+            value: ConstValue,
+        }
+        impl Field<'_> {
+            /// Every commit any pass of the frame produced, and the text the field ends with.
+            fn frame(&self, h: &mut UiHarness) -> (Vec<String>, String) {
+                let mut commits = Vec::new();
+                let mut text = String::new();
+                h.frame(|ui| {
+                    commits.extend(buffered_text_edit(
+                        ui,
+                        self.editor,
+                        self.id,
+                        &self.value,
+                        format_any,
+                        80.0,
+                    ));
+                    text.clone_from(&ui.state_or_default::<EditBuffer>(self.id).text);
+                });
+                (commits, text)
+            }
+
+            fn focus_and_type(&self, h: &mut UiHarness) {
+                let center = h.rect(self.id).expect("field arranged").center();
+                h.click_at(center);
+                assert!(self.frame(h).0.is_empty(), "focusing commits nothing");
+                h.key(Key::Char('7'));
+                assert!(self.frame(h).0.is_empty(), "typing commits nothing");
+            }
+        }
+
+        let theme = Theme::default();
+        let field = Field {
+            editor: &theme.const_value_editor.drag_value.editor,
+            id: WidgetId::from_hash("value_editor::commit_rules"),
+            value: ConstValue::Int(42),
+        };
+        let mut h = UiHarness::new(UVec2::new(200, 60));
+        field.frame(&mut h);
+
+        field.focus_and_type(&mut h);
+        h.key(Key::Escape);
+        assert_eq!(
+            field.frame(&mut h).0,
+            Vec::<String>::new(),
+            "Escape must not commit"
+        );
+        for later in 0..3 {
+            let (commits, text) = field.frame(&mut h);
+            assert!(
+                commits.is_empty(),
+                "frame {later} after Escape must not commit"
+            );
+            assert_eq!(
+                text, "42",
+                "frame {later}: the field shows the document value again"
+            );
+        }
+
+        field.focus_and_type(&mut h);
+        h.key(Key::Enter);
+        assert_eq!(
+            field.frame(&mut h).0.len(),
+            1,
+            "Enter commits the draft once"
+        );
+
+        field.focus_and_type(&mut h);
+        h.click_at(Vec2::new(190.0, 55.0));
+        let commits: Vec<String> = (0..2).flat_map(|_| field.frame(&mut h).0).collect();
+        assert_eq!(commits.len(), 1, "a click elsewhere commits the draft once");
     }
 
     #[test]
