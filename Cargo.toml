@@ -55,7 +55,6 @@ syn = { version = "3.0", default-features = false, features = [
 memmap2 = { version = "0.9" }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff"] }
 sysinfo = { version = "0.39" }
-lz4_flex = { version = "0.14", features = ["std"] }
 bitcode = { version = "0.6", features = ["serde"] }
 blake3 = { version = "1.8" }
 windows-sys = { version = "0.61" }

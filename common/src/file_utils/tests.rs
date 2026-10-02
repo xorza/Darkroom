@@ -7,19 +7,9 @@ use std::sync::{Arc, Barrier};
 use tokio::io::AsyncWriteExt as _;
 
 use crate::TempDir;
-use crate::file_utils::{
-    AtomicFile, PublicationMode, SyncAtomicFile, files_with_extensions, publish, publish_bytes,
-    publish_with_replacement, replace,
-};
+use crate::file_utils::{AtomicFile, PublicationMode, SyncAtomicFile, publish, publish_bytes};
 use std::path::Path;
 use std::thread;
-
-fn names(paths: &[PathBuf]) -> Vec<&str> {
-    paths
-        .iter()
-        .map(|path| path.file_name().unwrap().to_str().unwrap())
-        .collect()
-}
 
 fn publication_temp_files(path: &Path) -> Vec<PathBuf> {
     let parent = path.parent().unwrap();
@@ -38,55 +28,6 @@ fn publication_temp_files(path: &Path) -> Vec<PathBuf> {
                     .is_some_and(|extension| extension == "tmp")
         })
         .collect()
-}
-
-#[test]
-fn populated_directory_is_filtered_case_insensitively_and_sorted() {
-    let dir = TempDir::new("common-file-utils");
-    fs::write(dir.join("z.raf"), []).unwrap();
-    fs::write(dir.join("a.RAF"), []).unwrap();
-    fs::write(dir.join("ignored.fit"), []).unwrap();
-    fs::create_dir(dir.join("nested.raf")).unwrap();
-
-    let files = files_with_extensions(dir.path(), &["raf"]).unwrap();
-
-    assert_eq!(names(&files), ["a.RAF", "z.raf"]);
-    assert!(files.iter().all(|path| path.is_file()));
-}
-
-#[test]
-fn readable_empty_directory_is_distinct_from_scan_failure() {
-    let dir = TempDir::new("common-file-utils");
-    assert_eq!(
-        files_with_extensions(dir.path(), &["raf"]).unwrap(),
-        Vec::<PathBuf>::new()
-    );
-}
-
-#[test]
-fn missing_directory_returns_contextual_error() {
-    let dir = TempDir::new("common-file-utils");
-    fs::remove_dir(dir.path()).unwrap();
-
-    let error = files_with_extensions(dir.path(), &["raf"]).unwrap_err();
-
-    assert_eq!(error.kind(), io::ErrorKind::NotFound);
-    assert!(
-        error
-            .to_string()
-            .contains(&dir.path().display().to_string())
-    );
-}
-
-#[test]
-fn file_instead_of_directory_returns_contextual_error() {
-    let dir = TempDir::new("common-file-utils");
-    let path = dir.join("frame.raf");
-    fs::write(&path, []).unwrap();
-
-    let error = files_with_extensions(&path, &["raf"]).unwrap_err();
-
-    assert!(error.to_string().contains(&path.display().to_string()));
 }
 
 #[test]
@@ -131,29 +72,6 @@ fn publication_replaces_complete_files_and_cleans_up_failures() {
         "failed writes do not leave sibling temporary files"
     );
 
-    let error = publish_with_replacement(
-        &path,
-        PublicationMode::Cache,
-        |file| file.write_all(b"complete"),
-        |_source, _destination, _mode| {
-            Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "injected replacement failure",
-            ))
-        },
-    )
-    .unwrap_err();
-    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
-    assert_eq!(
-        fs::read(&path).unwrap(),
-        b"durable",
-        "a failed replacement preserves the prior complete file"
-    );
-    assert!(
-        publication_temp_files(&path).is_empty(),
-        "failed replacement removes the completed temporary file"
-    );
-
     let directory_target = dir.join("nonempty-directory");
     fs::create_dir_all(&directory_target).unwrap();
     fs::write(directory_target.join("keep"), b"old").unwrap();
@@ -181,7 +99,7 @@ fn publication_replaces_complete_files_and_cleans_up_failures() {
     file.write_all(b"header____body").unwrap();
     assert_eq!(file.seek(SeekFrom::Start(6)).unwrap(), 6);
     file.write_all(b"data").unwrap();
-    file.commit_with_replacement(replace).unwrap();
+    file.commit().unwrap();
     assert_eq!(fs::read(seek_target).unwrap(), b"headerdatabody");
 }
 
@@ -238,25 +156,4 @@ fn concurrent_publications_never_interleave() {
         "the final file is exactly one writer's complete payload"
     );
     assert!(publication_temp_files(&path).is_empty());
-}
-
-#[cfg(unix)]
-#[test]
-fn unreadable_directory_returns_contextual_error() {
-    use crate::Unreadable;
-
-    let dir = TempDir::new("common-file-utils");
-    let Some(unreadable) = Unreadable::new(dir.path()) else {
-        return;
-    };
-    let result = files_with_extensions(dir.path(), &["raf"]);
-    drop(unreadable);
-
-    let error = result.unwrap_err();
-    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
-    assert!(
-        error
-            .to_string()
-            .contains(&dir.path().display().to_string())
-    );
 }

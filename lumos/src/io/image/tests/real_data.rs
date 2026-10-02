@@ -4,7 +4,6 @@
 //! gated once, at the module, instead of one `cfg` per `use` in a file that is mostly feature-free.
 
 use common::CancelToken;
-use common::file_utils;
 
 use common::internals::debug_output_path;
 
@@ -13,6 +12,7 @@ use crate::io::image::cfa::CfaImage;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::standard::{FITS_EXTENSIONS, STANDARD_IMAGE_EXTENSIONS};
 use crate::io::raw;
+use crate::io::raw::raw_files;
 
 #[test]
 fn loadable_extensions_match_decoder_policies() {
@@ -41,8 +41,7 @@ fn load_single_raw_from_env() {
         return;
     }
 
-    let files = file_utils::files_with_extensions(&lights_dir, raw::RAW_EXTENSIONS)
-        .expect("scan RAW lights directory");
+    let files = raw_files::raw_files(&lights_dir).expect("scan RAW lights directory");
     let Some(first_file) = files.first() else {
         eprintln!("No image files in Lights, skipping test");
         return;

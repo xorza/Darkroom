@@ -15,10 +15,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use common::{CancelToken, file_utils};
+use common::CancelToken;
 use lumos::{
     AlignStackConfig, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD,
-    ProgressCallback, RAW_EXTENSIONS, calibrate_align_stack,
+    ProgressCallback, calibrate_align_stack,
 };
 
 /// Read a `/proc/self/status` field (e.g. `RssAnon`, `VmRSS`) in KiB.
@@ -42,8 +42,7 @@ fn main() {
     let tier = env::var("LUMOS_TIER").expect("set LUMOS_TIER (ram|disk)");
 
     let lights_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data/lumos_data/Lights");
-    let lights = file_utils::files_with_extensions(&lights_dir, RAW_EXTENSIONS)
-        .expect("scan RAW lights directory");
+    let lights = lumos::raw_files(&lights_dir).expect("scan RAW lights directory");
     let lights = &lights[..n.min(lights.len())];
 
     let empty: Vec<PathBuf> = Vec::new();

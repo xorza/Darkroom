@@ -610,7 +610,7 @@ fn add_func_node_seeds_only_the_inputs_with_defaults() {
 #[test]
 fn serialization_round_trips_a_graph_through_every_format() -> TestResult {
     let graph = TestGraph::sample().graph;
-    for format in SerdeFormat::all_formats_for_testing() {
+    for format in [SerdeFormat::Ron, SerdeFormat::Bitcode] {
         let serialized = serialize(&graph, format)?;
         let deserialized: Graph = deserialize(&serialized, format)?;
         assert_eq!(graph, deserialized, "{format:?} round-trips a graph whole");

@@ -9,16 +9,16 @@
 //! - [`CancelToken`] — cooperative cancellation, shared across worker threads.
 //! - [`serialize`] / [`deserialize`] over a [`SerdeFormat`] — the one
 //!   format-tagged codec every document and sidecar in the workspace is
-//!   written with. [`SerializeError`], [`DeserializeError`], [`Lz4SizeError`],
-//!   [`FileExtensionError`] and [`FileFormatResult`] appear in those
-//!   signatures; nothing imports them to construct one.
+//!   written with; [`serialize_into`] appends to a buffer the caller keeps.
+//!   [`SerializeError`] and [`DeserializeError`] appear in those signatures;
+//!   nothing imports them to construct one.
 //! - [`Introspect`] / [`IntrospectEnum`] and the [`FieldDesc`] … [`FieldValue`]
 //!   vocabulary — generic struct description, which is how a config struct
 //!   becomes editor UI. Under the `introspect-derive` feature the matching
 //!   derives expand to `::common::…` paths through every one of them, so
 //!   [`IntrospectInteger`], [`IntrospectFloat`] and [`IntrospectError`] are
 //!   exported for generated code to name rather than for hand-written `use`s.
-//! - [`file_utils`] — file discovery and atomic same-directory publication.
+//! - [`file_utils`] — atomic same-directory publication.
 //!
 //! [`FloatExt`], [`is_debug`] and [`id_type!`] stand on their own. `TempDir`,
 //! `TempFile` and the `internals` module are test scaffolding, gated behind
@@ -60,15 +60,13 @@ pub mod macros;
 pub mod file_utils;
 #[cfg(any(test, feature = "internals"))]
 pub mod internals;
-pub mod serde;
 
 pub(crate) mod cancel_token;
-pub(crate) mod file_format;
 pub(crate) mod float_ext;
 pub(crate) mod introspect;
+pub(crate) mod serde;
 
 pub use cancel_token::CancelToken;
-pub use file_format::{FileExtensionError, FileFormatResult, SerdeFormat};
 pub use float_ext::FloatExt;
 #[cfg(any(test, feature = "internals"))]
 pub use internals::temp_dir::TempDir;
@@ -80,7 +78,8 @@ pub use introspect::{
     FieldDesc, FieldKind, FieldValue, FloatKind, IntegerKind, IntegerValue, Introspect,
     IntrospectEnum, IntrospectError, IntrospectFloat, IntrospectInteger,
 };
-pub use serde::{DeserializeError, Lz4SizeError, SerializeError, deserialize, serialize};
+pub use serde::serde_format::SerdeFormat;
+pub use serde::{DeserializeError, SerializeError, deserialize, serialize, serialize_into};
 
 /// Whether this build has debug assertions on — the one switch every
 /// debug-only self-check in the workspace is gated on, so those checks turn

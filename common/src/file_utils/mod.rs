@@ -1,4 +1,4 @@
-//! File discovery and atomic same-directory publication.
+//! Atomic same-directory publication.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};
@@ -27,38 +27,29 @@ struct Publication {
 }
 
 impl Publication {
-    fn commit_with_replacement(
-        mut self,
-        mut file: File,
-        replacement: impl FnOnce(&Path, &Path, PublicationMode) -> io::Result<()>,
-    ) -> io::Result<()> {
-        let parent = self
-            .destination
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-            .unwrap_or_else(|| Path::new("."));
-
-        if let Err(error) = file.flush() {
-            drop(file);
-            return Err(error);
-        }
-        if let Err(error) = prepare_destination(&file, &self.destination) {
-            drop(file);
-            return Err(error);
-        }
-        if self.mode == PublicationMode::Durable
-            && let Err(error) = file.sync_all()
-        {
-            drop(file);
-            return Err(error);
-        }
-        drop(file);
-
-        replacement(&self.temporary, &self.destination, self.mode)?;
+    fn commit(mut self, file: File) -> io::Result<()> {
+        // `seal` closes the handle on every path, before a failure drops `self` and removes the
+        // temporary: Windows refuses to remove an open file.
+        Self::seal(file, &self.destination, self.mode)?;
+        replace(&self.temporary, &self.destination, self.mode)?;
         if self.mode == PublicationMode::Durable {
+            let parent = self
+                .destination
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new("."));
             sync_parent(parent)?;
         }
         self.temporary.clear();
+        Ok(())
+    }
+
+    fn seal(mut file: File, destination: &Path, mode: PublicationMode) -> io::Result<()> {
+        file.flush()?;
+        prepare_destination(&file, destination)?;
+        if mode == PublicationMode::Durable {
+            file.sync_all()?;
+        }
         Ok(())
     }
 }
@@ -83,6 +74,7 @@ struct SyncAtomicFile {
 }
 
 impl SyncAtomicFile {
+    /// Opens a new temporary beside `destination`; a name another writer holds is skipped.
     fn new(destination: &Path, mode: PublicationMode) -> io::Result<Self> {
         loop {
             let temporary = temporary_path(destination)?;
@@ -107,12 +99,9 @@ impl SyncAtomicFile {
         }
     }
 
-    fn commit_with_replacement(
-        self,
-        replacement: impl FnOnce(&Path, &Path, PublicationMode) -> io::Result<()>,
-    ) -> io::Result<()> {
+    fn commit(self) -> io::Result<()> {
         let Self { file, publication } = self;
-        publication.commit_with_replacement(file, replacement)
+        publication.commit(file)
     }
 }
 
@@ -144,28 +133,15 @@ pub struct AtomicFile {
 impl AtomicFile {
     /// Create a writable same-directory temporary file for later atomic commit.
     pub async fn new(destination: &Path, mode: PublicationMode) -> io::Result<Self> {
-        loop {
-            let temporary = temporary_path(destination)?;
-            match tokio_fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&temporary)
+        let destination = destination.to_path_buf();
+        let SyncAtomicFile { file, publication } =
+            task::spawn_blocking(move || SyncAtomicFile::new(&destination, mode))
                 .await
-            {
-                Ok(file) => {
-                    return Ok(Self {
-                        file,
-                        publication: Publication {
-                            destination: destination.to_path_buf(),
-                            temporary,
-                            mode,
-                        },
-                    });
-                }
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-                Err(error) => return Err(error),
-            }
-        }
+                .expect("atomic-file create task panicked")?;
+        Ok(Self {
+            file: tokio_fs::File::from_std(file),
+            publication,
+        })
     }
 
     /// Atomically publish the completed file at its destination.
@@ -173,7 +149,7 @@ impl AtomicFile {
         self.file.flush().await?;
         let Self { file, publication } = self;
         let file = file.into_std().await;
-        task::spawn_blocking(move || publication.commit_with_replacement(file, replace))
+        task::spawn_blocking(move || publication.commit(file))
             .await
             .expect("atomic-file commit task panicked")
     }
@@ -219,52 +195,6 @@ fn temporary_path(destination: &Path) -> io::Result<PathBuf> {
     Ok(destination.with_file_name(temp_name))
 }
 
-/// Returns sorted paths to all files in a directory matching the given extensions.
-///
-/// Extensions are matched case-insensitively. Directory, entry, and metadata
-/// errors are returned with the affected path.
-pub fn files_with_extensions(dir: &Path, extensions: &[&str]) -> io::Result<Vec<PathBuf>> {
-    let entries = fs::read_dir(dir).map_err(|error| {
-        path_error(
-            &format!("failed to read directory '{}'", dir.display()),
-            &error,
-        )
-    })?;
-    let mut files = Vec::new();
-
-    for entry in entries {
-        let entry = entry.map_err(|error| {
-            path_error(
-                &format!("failed to read entry in directory '{}'", dir.display()),
-                &error,
-            )
-        })?;
-        let path = entry.path();
-        let metadata = fs::metadata(&path).map_err(|error| {
-            path_error(
-                &format!("failed to read metadata for '{}'", path.display()),
-                &error,
-            )
-        })?;
-        if !metadata.is_file() {
-            continue;
-        }
-        let extension = path
-            .extension()
-            .and_then(|value| value.to_str())
-            .unwrap_or("");
-        if extensions
-            .iter()
-            .any(|expected| extension.eq_ignore_ascii_case(expected))
-        {
-            files.push(path);
-        }
-    }
-
-    files.sort();
-    Ok(files)
-}
-
 /// Publish bytes through a unique same-directory temporary file.
 pub fn publish_bytes(path: &Path, bytes: &[u8], mode: PublicationMode) -> io::Result<()> {
     publish(path, mode, |file| file.write_all(bytes))
@@ -281,18 +211,9 @@ pub fn publish(
     mode: PublicationMode,
     write: impl FnOnce(&mut File) -> io::Result<()>,
 ) -> io::Result<()> {
-    publish_with_replacement(path, mode, write, replace)
-}
-
-fn publish_with_replacement(
-    path: &Path,
-    mode: PublicationMode,
-    write: impl FnOnce(&mut File) -> io::Result<()>,
-    replacement: impl FnOnce(&Path, &Path, PublicationMode) -> io::Result<()>,
-) -> io::Result<()> {
     let mut file = SyncAtomicFile::new(path, mode)?;
     write(&mut file.file)?;
-    file.commit_with_replacement(replacement)
+    file.commit()
 }
 
 fn prepare_destination(file: &File, destination: &Path) -> io::Result<()> {
@@ -358,10 +279,6 @@ fn sync_parent(parent: &Path) -> io::Result<()> {
 #[cfg(not(unix))]
 fn sync_parent(_parent: &Path) -> io::Result<()> {
     Ok(())
-}
-
-fn path_error(message: &str, source: &io::Error) -> io::Error {
-    io::Error::new(source.kind(), format!("{message}: {source}"))
 }
 
 #[cfg(test)]
