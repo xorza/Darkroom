@@ -98,10 +98,7 @@ fn register_save(library: &mut Library) {
                     };
                     tokio::task::spawn_blocking(move || {
                         match conversion_target(&format, cpu_image.desc().color_format) {
-                            Some(target) => cpu_image
-                                .convert_to(target)
-                                .map_err(InvokeError::external)?
-                                .save_file(path),
+                            Some(target) => cpu_image.convert_to(target).save_file(path),
                             None => cpu_image.save_file(path),
                         }
                         .map_err(InvokeError::external)

@@ -98,15 +98,8 @@ fn register_convert(library: &mut Library) {
                             let image = value
                                 .as_custom::<Image>()
                                 .expect("image input type is validated at the compile boundary");
-                            match conversion_target(format, image.desc().color_format) {
-                                Some(target) => Some(
-                                    image
-                                        .interleaved()
-                                        .convert_to(target)
-                                        .map_err(InvokeError::external)?,
-                                ),
-                                None => None,
-                            }
+                            conversion_target(format, image.desc().color_format)
+                                .map(|target| image.interleaved().convert_to(target))
                         };
                         outputs[0] = match converted {
                             Some(image) => DynamicValue::from_custom(Image::from(image)),

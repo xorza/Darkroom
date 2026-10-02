@@ -1,4 +1,4 @@
-use imaginarium::{Buffer2, ChannelCount, Image, PlanarPixels};
+use imaginarium::{Buffer2, ChannelCount, Image};
 use rayon::prelude::*;
 
 use crate::io::image::image_dimensions::ImageDimensions;
@@ -25,11 +25,12 @@ impl LinearPixels {
             return Buffer2::new(dimensions.width(), dimensions.height(), pixels).into();
         }
 
-        let mut r = Buffer2::new_default(dimensions.width(), dimensions.height());
-        let mut g = Buffer2::new_default(dimensions.width(), dimensions.height());
-        let mut b = Buffer2::new_default(dimensions.width(), dimensions.height());
-        deinterleave_rgb(&pixels, r.pixels_mut(), g.pixels_mut(), b.pixels_mut());
-        [r, g, b].into()
+        // Keeps the allocation when its capacity is a whole number of pixels, else copies once.
+        let pixels: Vec<[f32; 3]> = bytemuck::try_cast_vec(pixels)
+            .unwrap_or_else(|(_, pixels)| bytemuck::pod_collect_to_vec(&pixels));
+        Buffer2::new(dimensions.width(), dimensions.height(), pixels)
+            .deinterleave()
+            .into()
     }
 
     pub(crate) fn from_planar_channels(
@@ -89,17 +90,16 @@ impl LinearPixels {
     pub(crate) fn from_f32_image(image: &Image) -> Self {
         match image.desc().color_format.channel_count {
             ChannelCount::L => {
-                let planar: PlanarPixels<1, f32> = image
+                let [plane]: [Buffer2<f32>; 1] = image
                     .try_into()
                     .expect("L_F32 image deinterleaves to one f32 plane");
-                let [plane] = planar.planes;
                 plane.into()
             }
             ChannelCount::Rgb => {
-                let planar: PlanarPixels<3, f32> = image
+                let planes: [Buffer2<f32>; 3] = image
                     .try_into()
                     .expect("RGB_F32 image deinterleaves to three f32 planes");
-                planar.planes.into()
+                planes.into()
             }
             ChannelCount::Rgba => panic!("RGBA image must be converted to RGB_F32 first"),
         }
@@ -230,23 +230,6 @@ impl From<&LinearPixels> for Image {
             LinearPixels::Rgb(planes) => Image::from(planes.each_ref()),
         }
     }
-}
-
-fn deinterleave_rgb(interleaved: &[f32], r: &mut [f32], g: &mut [f32], b: &mut [f32]) {
-    debug_assert_eq!(interleaved.len(), r.len() * 3);
-    debug_assert_eq!(r.len(), g.len());
-    debug_assert_eq!(g.len(), b.len());
-
-    r.par_iter_mut()
-        .zip(g.par_iter_mut())
-        .zip(b.par_iter_mut())
-        .enumerate()
-        .for_each(|(index, ((r, g), b))| {
-            let source = index * 3;
-            *r = interleaved[source];
-            *g = interleaved[source + 1];
-            *b = interleaved[source + 2];
-        });
 }
 
 #[cfg(test)]

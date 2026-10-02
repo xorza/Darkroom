@@ -1,4 +1,4 @@
-use imaginarium::{ColorFormat, Image as CpuImage, ImageDesc};
+use imaginarium::{ALL_FORMATS, ColorFormat, Image as CpuImage, ImageDesc};
 use scenarium::{ContextStore, CustomValueCodec, Library};
 
 use crate::image::codec::{HEADER_LEN, ImageCodec, image_type_entry};
@@ -23,86 +23,101 @@ fn cpu_context() -> ContextStore {
     ContextStore::default()
 }
 
+async fn round_trip(image: CpuImage) -> CpuImage {
+    let value = Image::from(image);
+    let mut bytes = Vec::new();
+    ImageCodec
+        .encode(&value, &mut bytes, &mut cpu_context())
+        .await
+        .expect("a CPU-resident image encodes");
+    let byte_len = bytes.len() as u64;
+    let decoded = ImageCodec
+        .decode(
+            &mut std::io::Cursor::new(bytes),
+            byte_len,
+            &mut cpu_context(),
+        )
+        .await
+        .expect("image decodes");
+    decoded
+        .as_any()
+        .downcast_ref::<Image>()
+        .expect("decoded back into a lens Image")
+        .interleaved()
+        .into_owned()
+}
+
+/// Every format comes back with its descriptor and bytes; the header is two format bytes and
+/// two little-endian `u64` extents.
 #[tokio::test]
-async fn cpu_image_streams_round_trip_pixel_exact() {
+async fn every_format_round_trips_pixel_exact() {
+    for format in ALL_FORMATS {
+        let desc = ImageDesc::new(3, 2, format);
+        let pixels: Vec<u8> = (0..desc.size_in_bytes())
+            .map(|i| (i * 37 % 251) as u8)
+            .collect();
+        let decoded = round_trip(CpuImage::new_with_data(desc, pixels.clone()).unwrap()).await;
+        assert_eq!(decoded.desc(), desc, "{format}");
+        assert_eq!(decoded.bytes(), pixels, "{format}");
+    }
+
     let sample = sample();
     let value = Image::from(CpuImage::new_with_data(sample.desc, sample.pixels.clone()).unwrap());
     let mut bytes = Vec::new();
     ImageCodec
         .encode(&value, &mut bytes, &mut cpu_context())
         .await
-        .expect("a CPU-resident image encodes");
-    assert_eq!(bytes.len(), sample.pixels.len() + HEADER_LEN as usize);
-
-    let byte_len = bytes.len() as u64;
-    let mut reader = std::io::Cursor::new(bytes);
-    let decoded = ImageCodec
-        .decode(&mut reader, byte_len, &mut cpu_context())
-        .await
-        .expect("image decodes");
-    let decoded = decoded
-        .as_any()
-        .downcast_ref::<Image>()
-        .expect("decoded back into a lens Image");
-    let cpu = decoded.interleaved();
-    assert_eq!(cpu.desc(), sample.desc);
-    assert_eq!(cpu.bytes(), sample.pixels);
+        .unwrap();
+    assert_eq!(
+        &bytes[..HEADER_LEN as usize],
+        &[3, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0]
+    );
+    assert_eq!(&bytes[HEADER_LEN as usize..], sample.pixels);
 }
 
+/// Each malformed payload is refused by the guard meant for it.
 #[tokio::test]
 async fn decode_rejects_short_unknown_and_mismatched_payloads() {
-    for bytes in [
-        vec![0; HEADER_LEN as usize - 1],
-        vec![0; HEADER_LEN as usize],
-    ] {
+    async fn error(bytes: Vec<u8>) -> String {
         let byte_len = bytes.len() as u64;
-        assert!(
-            ImageCodec
-                .decode(
-                    &mut std::io::Cursor::new(bytes),
-                    byte_len,
-                    &mut cpu_context()
-                )
-                .await
-                .is_err()
-        );
-    }
-
-    let sample = sample();
-    let value = Image::from(CpuImage::new_with_data(sample.desc, sample.pixels).unwrap());
-    let mut bytes = Vec::new();
-    ImageCodec
-        .encode(&value, &mut bytes, &mut cpu_context())
-        .await
-        .unwrap();
-    bytes.pop();
-    let byte_len = bytes.len() as u64;
-    assert!(
         ImageCodec
             .decode(
                 &mut std::io::Cursor::new(bytes),
                 byte_len,
-                &mut cpu_context()
-            )
-            .await
-            .is_err()
-    );
-
-    let mut overflowing = vec![0; HEADER_LEN as usize];
-    overflowing[0] = ColorFormat::RGB_U8.channel_count as u8;
-    overflowing[1] = ColorFormat::RGB_U8.channel_size as u8;
-    overflowing[2] = ColorFormat::RGB_U8.channel_type as u8;
-    overflowing[3..11].copy_from_slice(&u64::MAX.to_le_bytes());
-    overflowing[11..19].copy_from_slice(&u64::MAX.to_le_bytes());
-    assert!(
-        ImageCodec
-            .decode(
-                &mut std::io::Cursor::new(&overflowing),
-                overflowing.len() as u64,
                 &mut cpu_context(),
             )
             .await
-            .is_err()
+            .map(|_| ())
+            .expect_err("the payload is refused")
+            .to_string()
+    }
+    let header = |format: [u8; 2], width: u64, height: u64| {
+        let mut header = format.to_vec();
+        header.extend(width.to_le_bytes());
+        header.extend(height.to_le_bytes());
+        header
+    };
+
+    assert_eq!(
+        error(vec![0; HEADER_LEN as usize - 1]).await,
+        "image cache payload is only 17 bytes"
+    );
+    for format in [[0, 0], [2, 0], [3, 3]] {
+        assert_eq!(
+            error(header(format, 1, 1)).await,
+            "image cache payload names an unknown color format",
+            "{format:?}"
+        );
+    }
+    let mut short = header([3, 0], 2, 1);
+    short.extend([10, 20, 30, 40, 50]);
+    assert_eq!(
+        error(short).await,
+        "image cache payload has length 23, expected 24"
+    );
+    assert_eq!(
+        error(header([3, 0], u64::MAX, u64::MAX)).await,
+        "image cache dimensions overflow memory"
     );
 }
 

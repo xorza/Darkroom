@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use imaginarium::{ALL_FORMATS, ImageDesc};
+use imaginarium::{ChannelCount, ColorFormat, ImageDesc, SampleType};
 use scenarium::ContextStore;
 use scenarium::CustomValue;
 use scenarium::CustomValueCodec;
@@ -12,8 +12,9 @@ use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
 use crate::image::Image;
 
-const VERSION: u32 = 2;
-const HEADER_LEN: u64 = 3 + 8 + 8;
+/// 3: the format is two bytes, channel count and sample type.
+const VERSION: u32 = 3;
+const HEADER_LEN: u64 = 2 + 8 + 8;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -40,11 +41,9 @@ impl CustomValueCodec for ImageCodec {
         let desc = cpu.desc();
         let format = desc.color_format;
         let mut header = [0; HEADER_LEN as usize];
-        header[0] = format.channel_count as u8;
-        header[1] = format.channel_size as u8;
-        header[2] = format.channel_type as u8;
-        header[3..11].copy_from_slice(&(desc.width as u64).to_le_bytes());
-        header[11..19].copy_from_slice(&(desc.height as u64).to_le_bytes());
+        header[..2].copy_from_slice(&format_bytes(format));
+        header[2..10].copy_from_slice(&(desc.width as u64).to_le_bytes());
+        header[10..18].copy_from_slice(&(desc.height as u64).to_le_bytes());
         writer.write_all(&header).await?;
         writer.write_all(cpu.bytes()).await?;
         Ok(())
@@ -61,23 +60,16 @@ impl CustomValueCodec for ImageCodec {
         }
         let mut header = [0; HEADER_LEN as usize];
         reader.read_exact(&mut header).await?;
-        let color_format = ALL_FORMATS
-            .iter()
-            .copied()
-            .find(|format| {
-                format.channel_count as u8 == header[0]
-                    && format.channel_size as u8 == header[1]
-                    && format.channel_type as u8 == header[2]
-            })
+        let color_format = format_from_bytes([header[0], header[1]])
             .ok_or("image cache payload names an unknown color format")?;
-        let width = usize::try_from(u64::from_le_bytes(header[3..11].try_into().unwrap()))
+        let width = usize::try_from(u64::from_le_bytes(header[2..10].try_into().unwrap()))
             .map_err(|_| "image cache width does not fit in memory")?;
-        let height = usize::try_from(u64::from_le_bytes(header[11..19].try_into().unwrap()))
+        let height = usize::try_from(u64::from_le_bytes(header[10..18].try_into().unwrap()))
             .map_err(|_| "image cache height does not fit in memory")?;
         let desc = ImageDesc::new(width, height, color_format);
         let pixel_len = width
             .checked_mul(height)
-            .and_then(|pixel_count| pixel_count.checked_mul(color_format.byte_count() as usize))
+            .and_then(|pixel_count| pixel_count.checked_mul(color_format.byte_count()))
             .ok_or("image cache dimensions overflow memory")?;
         let expected_len = HEADER_LEN
             .checked_add(
@@ -96,6 +88,32 @@ impl CustomValueCodec for ImageCodec {
         reader.read_exact(image.bytes_mut()).await?;
         Ok(Arc::new(Image::from(image)))
     }
+}
+
+/// The two header bytes that name a format: its channel count, and its sample type as 0, 1, 2.
+fn format_bytes(format: ColorFormat) -> [u8; 2] {
+    let sample = match format.sample_type {
+        SampleType::U8 => 0,
+        SampleType::U16 => 1,
+        SampleType::F32 => 2,
+    };
+    [format.channel_count as u8, sample]
+}
+
+fn format_from_bytes(bytes: [u8; 2]) -> Option<ColorFormat> {
+    let channel_count = match bytes[0] {
+        1 => ChannelCount::L,
+        3 => ChannelCount::Rgb,
+        4 => ChannelCount::Rgba,
+        _ => return None,
+    };
+    let sample_type = match bytes[1] {
+        0 => SampleType::U8,
+        1 => SampleType::U16,
+        2 => SampleType::F32,
+        _ => return None,
+    };
+    Some(ColorFormat::new(channel_count, sample_type))
 }
 
 pub(super) fn image_type_entry() -> TypeEntry {

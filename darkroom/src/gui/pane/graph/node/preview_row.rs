@@ -143,7 +143,7 @@ struct FormatLabel(ColorFormat);
 
 impl Display for FormatLabel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let bits = u32::from(self.0.channel_size.byte_count()) * 8;
+        let bits = self.0.sample_type.bits();
         write!(f, "{} \u{b7} {bits}-bit", self.0.channel_count)
     }
 }
