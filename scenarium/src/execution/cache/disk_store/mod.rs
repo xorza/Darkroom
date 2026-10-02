@@ -285,6 +285,17 @@ pub(crate) mod internals {
             bytes[format::internals::body_offset(output_count)] = u8::MAX;
             fs::write(&path, bytes).unwrap();
         }
+
+        /// Rewrite the blob's header to the previous format version, the way a blob an
+        /// earlier build wrote looks to this one.
+        pub(crate) fn age_format(&self, node_id: NodeId) {
+            let path = self
+                .node_path(node_id)
+                .expect("a disk-backed store has a root");
+            let mut bytes = fs::read(&path).unwrap();
+            format::internals::age_format(&mut bytes);
+            fs::write(&path, bytes).unwrap();
+        }
     }
 }
 
