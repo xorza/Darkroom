@@ -187,6 +187,52 @@ fn redo_restores_the_depth_an_add_had() {
     );
 }
 
+/// Raising what already paints last changes nothing, so it records nothing: a click on the
+/// frontmost node must not cost the user an undo entry that undoes nothing. The tie case matters
+/// too: on equal depth the higher id paints last, so raising it is a no-op and raising the lower id
+/// is not.
+#[test]
+fn raising_the_frontmost_item_records_no_step() {
+    let mut fixture = DocFixture::default();
+    let first = fixture.stub_at(Vec2::ZERO);
+    let second = fixture.stub_at(Vec2::new(50.0, 0.0));
+    let mut doc = fixture.doc;
+    for key in [first, second] {
+        doc.main_view.item_placements.get_mut(&key).unwrap().z = 4;
+    }
+    let (low, high) = if first < second {
+        (first, second)
+    } else {
+        (second, first)
+    };
+
+    for _ in 0..3 {
+        assert!(
+            GraphIntent::Raise { key: high }
+                .commit(&mut doc)
+                .unwrap()
+                .is_none(),
+            "the higher id already paints last at a tied depth"
+        );
+    }
+    assert_eq!(doc.main_view.item_placements[&high].z, 4);
+
+    let step = GraphIntent::Raise { key: low }
+        .commit(&mut doc)
+        .unwrap()
+        .expect("the lower id is behind at a tied depth");
+    assert_eq!(doc.main_view.item_placements[&low].z, 5);
+    assert!(
+        GraphIntent::Raise { key: low }
+            .commit(&mut doc)
+            .unwrap()
+            .is_none(),
+        "once in front, raising again is a no-op"
+    );
+    step.revert(&mut doc);
+    assert_eq!(doc.main_view.item_placements[&low].z, 4);
+}
+
 /// `a -> b` inside the selection, `c -> b` crossing out of it: the fixture the
 /// two duplicate tests share, so the only thing that differs between them is
 /// the `include_incoming` flag. `b` also carries a Const on input 1, and `a`

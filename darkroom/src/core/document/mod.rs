@@ -253,6 +253,23 @@ impl GraphView {
             .map_or(0, |top| top.saturating_add(1))
     }
 
+    /// The depth that puts `key` in front of every *other* item, or its own depth when it already
+    /// paints last. Paint order is `(z, NodeId)`, so a tie on depth puts the higher id in front.
+    /// `None` when `key` has no placement.
+    pub(crate) fn raised_z(&self, key: NodeId) -> Option<u32> {
+        let own = self.item_placements.get(&key)?.z;
+        let top_other = self
+            .item_placements
+            .iter()
+            .filter(|(id, _)| **id != key)
+            .map(|(id, placement)| (placement.z, *id))
+            .max();
+        Some(match top_other {
+            Some((top_z, top_id)) if (top_z, top_id) > (own, key) => top_z.saturating_add(1),
+            _ => own,
+        })
+    }
+
     fn validate(&self, graph: &CoreGraph) -> Result<(), GraphViewValidationError> {
         if !self.viewport.is_valid() {
             return Err(GraphViewValidationError::InvalidViewport);
