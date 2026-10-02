@@ -287,7 +287,7 @@ pub(crate) fn fits_cfa_frame_info(
             "scientific CFA input must have exactly one image plane",
         ));
     }
-    let cfa_type = read_cfa_from_headers(&hdu.header)
+    let cfa_type = read_cfa_from_headers(&hdu.header, context.fits.unstated_bayer_pattern)
         .map_err(|source| fits_err(path, source))?
         .ok_or_else(|| {
             fits_unsupported(

@@ -1,3 +1,5 @@
+use crate::io::raw::demosaic::bayer::CfaPattern;
+
 /// Selects the image HDU decoded from a FITS container.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FitsHduSelector {
@@ -89,6 +91,9 @@ pub struct FitsLoadOptions {
     pub float_scale: FitsFloatScale,
     /// What null pixels do to the load.
     pub nulls: FitsNullPolicy,
+    /// The Bayer phase of a frame whose `BAYERPAT` says only `'TRUE'` — mosaiced, phase unstated —
+    /// given as `BAYERPAT` would give it. `None` refuses such a frame rather than guess one of four.
+    pub unstated_bayer_pattern: Option<CfaPattern>,
 }
 
 impl Default for FitsLoadOptions {
@@ -103,6 +108,7 @@ impl Default for FitsLoadOptions {
             // a float scale no header settles; a null is unambiguous, and refusing it refuses data
             // the standard defines.
             nulls: FitsNullPolicy::Mask,
+            unstated_bayer_pattern: None,
         }
     }
 }

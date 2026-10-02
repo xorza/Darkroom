@@ -46,21 +46,25 @@ fn cfa_gbrg_pattern() {
     assert_eq!(cfa.color_at(Vec2us::new(1, 1)), 1); // G
 }
 
+/// Every phase round-trips through its `BAYERPAT` spelling, in any case and with blanks around
+/// it; `TRUE`, which names no phase, is refused like any other value.
 #[test]
-fn from_bayerpat_accepts_case_whitespace_and_the_true_alias() {
-    assert_eq!(CfaPattern::from_bayerpat("RGGB"), Some(CfaPattern::Rggb));
-    assert_eq!(CfaPattern::from_bayerpat("BGGR"), Some(CfaPattern::Bggr));
-    assert_eq!(CfaPattern::from_bayerpat("GRBG"), Some(CfaPattern::Grbg));
-    assert_eq!(CfaPattern::from_bayerpat("GBRG"), Some(CfaPattern::Gbrg));
-    // Case insensitive
-    assert_eq!(CfaPattern::from_bayerpat("rggb"), Some(CfaPattern::Rggb));
-    // "TRUE" is RGGB
-    assert_eq!(CfaPattern::from_bayerpat("TRUE"), Some(CfaPattern::Rggb));
-    // Whitespace trimmed
-    assert_eq!(CfaPattern::from_bayerpat(" BGGR "), Some(CfaPattern::Bggr));
-    // Invalid
-    assert_eq!(CfaPattern::from_bayerpat("XXXX"), None);
-    assert_eq!(CfaPattern::from_bayerpat(""), None);
+fn from_bayerpat_reads_each_spelling_and_refuses_the_rest() {
+    for pattern in CfaPattern::ALL {
+        let name = pattern.bayerpat();
+        assert_eq!(CfaPattern::from_bayerpat(name), Some(pattern));
+        assert_eq!(
+            CfaPattern::from_bayerpat(&format!(" {} ", name.to_ascii_lowercase())),
+            Some(pattern)
+        );
+    }
+    assert_eq!(
+        CfaPattern::ALL.map(CfaPattern::bayerpat),
+        ["RGGB", "BGGR", "GRBG", "GBRG"]
+    );
+    for refused in ["TRUE", "XXXX", ""] {
+        assert_eq!(CfaPattern::from_bayerpat(refused), None, "{refused:?}");
+    }
 }
 
 #[test]

@@ -8,39 +8,53 @@ use crate::io::image::sample_domain::ScaleOrigin;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::XTransPattern;
 
+/// The observation keywords a FITS header gives, each one `None` when it is absent or given with
+/// a type or value it cannot have: none of them changes a sample, so a writer's odd choice for
+/// one never costs the frame.
 pub(super) fn read_metadata(
     header: &Header,
     header_dimensions: Vec<usize>,
     sample_type: SampleType,
-) -> fits_well::Result<ImageMetadata> {
-    Ok(ImageMetadata {
-        object: read_text(header, "OBJECT")?,
-        instrument: read_text(header, "INSTRUME")?,
-        telescope: read_text(header, "TELESCOP")?,
-        date_obs: read_text(header, "DATE-OBS")?,
-        exposure_time: header.get_real("EXPTIME")?,
-        iso: read_u32(header, "ISOSPEED")?,
+) -> ImageMetadata {
+    let text = |key| optional(key, read_text(header, key));
+    let real = |key| optional(key, header.get_real(key));
+    ImageMetadata {
+        object: text("OBJECT"),
+        instrument: text("INSTRUME"),
+        telescope: text("TELESCOP"),
+        date_obs: text("DATE-OBS"),
+        exposure_time: real("EXPTIME"),
+        iso: optional("ISOSPEED", read_u32(header, "ISOSPEED")),
         sample_type: Some(sample_type),
         header_dimensions,
-        camera_white_balance: read_camera_white_balance(header)?,
-        filter: read_text(header, "FILTER")?,
-        gain: header.get_real("GAIN")?,
-        egain: header.get_real("EGAIN")?,
-        ccd_temp: first_real(header, "CCD-TEMP", "CCDTEMP")?,
-        image_type: first_text(header, "IMAGETYP", "FRAME")?,
-        xbinning: read_i32(header, "XBINNING")?,
-        ybinning: read_i32(header, "YBINNING")?,
-        set_temp: header.get_real("SET-TEMP")?,
-        offset: read_i32(header, "OFFSET")?,
-        focal_length: header.get_real("FOCALLEN")?,
-        airmass: header.get_real("AIRMASS")?,
-        ra_deg: read_ra_deg(header)?,
-        dec_deg: read_dec_deg(header)?,
-        pixel_size_x: header.get_real("XPIXSZ")?,
-        pixel_size_y: header.get_real("YPIXSZ")?,
-        data_max: header.get_real("DATAMAX")?,
+        camera_white_balance: optional("LUMWB*", read_camera_white_balance(header)),
+        filter: text("FILTER"),
+        gain: real("GAIN"),
+        egain: real("EGAIN"),
+        ccd_temp: real("CCD-TEMP").or_else(|| real("CCDTEMP")),
+        image_type: text("IMAGETYP").or_else(|| text("FRAME")),
+        xbinning: optional("XBINNING", read_i32(header, "XBINNING")),
+        ybinning: optional("YBINNING", read_i32(header, "YBINNING")),
+        set_temp: real("SET-TEMP"),
+        offset: optional("OFFSET", read_i32(header, "OFFSET")),
+        focal_length: real("FOCALLEN"),
+        airmass: real("AIRMASS"),
+        ra_deg: read_ra_deg(header),
+        dec_deg: read_dec_deg(header),
+        pixel_size_x: real("XPIXSZ"),
+        pixel_size_y: real("YPIXSZ"),
+        data_max: real("DATAMAX"),
         provenance: None,
-        calibrated: header.get_logical("LUMCAL")?.unwrap_or(false),
+        calibrated: optional("LUMCAL", header.get_logical("LUMCAL")).unwrap_or(false),
+    }
+}
+
+/// An optional keyword's value, or `None` — with the reason logged — when the header gives it in
+/// a form it cannot have.
+fn optional<T>(keyword: &str, value: fits_well::Result<Option<T>>) -> Option<T> {
+    value.unwrap_or_else(|error| {
+        tracing::warn!(keyword, %error, "ignoring a FITS keyword given in a form it cannot have");
+        None
     })
 }
 
@@ -123,7 +137,7 @@ pub(super) fn write_cfa_metadata(header: &mut Header, cfa: &CfaImage) -> fits_we
         }
         CfaType::Bayer(pattern) => {
             header.set("CFATYPE", "BAYER")?;
-            header.set("BAYERPAT", bayerpat(pattern))?;
+            header.set("BAYERPAT", pattern.bayerpat())?;
         }
         CfaType::XTrans(pattern) => {
             XTransPattern::new(pattern).map_err(|_| fits_well::FitsError::TypeMismatch {
@@ -190,20 +204,16 @@ fn set_optional_integer(
     Ok(())
 }
 
-fn bayerpat(pattern: CfaPattern) -> &'static str {
-    match pattern {
-        CfaPattern::Rggb => "RGGB",
-        CfaPattern::Bggr => "BGGR",
-        CfaPattern::Grbg => "GRBG",
-        CfaPattern::Gbrg => "GBRG",
-    }
-}
-
-pub(super) fn read_cfa_from_headers(header: &Header) -> fits_well::Result<Option<CfaType>> {
+/// The mosaic pattern a header declares, or `None` for an image that is no mosaic.
+/// `unstated_bayer_pattern` stands in for a `BAYERPAT` of `'TRUE'`.
+pub(super) fn read_cfa_from_headers(
+    header: &Header,
+    unstated_bayer_pattern: Option<CfaPattern>,
+) -> fits_well::Result<Option<CfaType>> {
     match header.get_text("CFATYPE")? {
         Some(value) if value.eq_ignore_ascii_case("MONO") => return Ok(Some(CfaType::Mono)),
         Some(value) if value.eq_ignore_ascii_case("BAYER") => {
-            return read_bayer_cfa(header, true);
+            return read_bayer_cfa(header, true, unstated_bayer_pattern);
         }
         Some(value) if value.eq_ignore_ascii_case("XTRANS") => {
             return Ok(Some(CfaType::XTrans(read_xtrans_pattern(header)?)));
@@ -216,7 +226,7 @@ pub(super) fn read_cfa_from_headers(header: &Header) -> fits_well::Result<Option
         }
         None => {}
     }
-    read_bayer_cfa(header, false)
+    read_bayer_cfa(header, false, unstated_bayer_pattern)
 }
 
 /// Where a Lumos-written file records the row order its *source* had.
@@ -263,18 +273,33 @@ fn row_order_of(value: &str) -> RowOrder {
     }
 }
 
-fn read_bayer_cfa(header: &Header, required: bool) -> fits_well::Result<Option<CfaType>> {
+fn read_bayer_cfa(
+    header: &Header,
+    required: bool,
+    unstated_bayer_pattern: Option<CfaPattern>,
+) -> fits_well::Result<Option<CfaType>> {
     let Some(bayerpat) = header.get_text("BAYERPAT")? else {
         if required {
             return Err(fits_well::FitsError::MissingKeyword { name: "BAYERPAT" });
         }
         return Ok(None);
     };
-    let Some(mut pattern) = CfaPattern::from_bayerpat(bayerpat) else {
-        return Err(fits_well::FitsError::TypeMismatch {
-            name: "BAYERPAT".to_string(),
-            expected: "RGGB, BGGR, GRBG, or GBRG",
-        });
+    let stated = CfaPattern::from_bayerpat(bayerpat);
+    let unstated = bayerpat.trim().eq_ignore_ascii_case("TRUE");
+    let mut pattern = match (stated, unstated, unstated_bayer_pattern) {
+        (Some(pattern), _, _) | (None, true, Some(pattern)) => pattern,
+        (None, true, None) => {
+            return Err(fits_well::FitsError::TypeMismatch {
+                name: "BAYERPAT".to_string(),
+                expected: "a Bayer phase; 'TRUE' states none, so FitsLoadOptions::unstated_bayer_pattern must give it",
+            });
+        }
+        (None, false, _) => {
+            return Err(fits_well::FitsError::TypeMismatch {
+                name: "BAYERPAT".to_string(),
+                expected: "RGGB, BGGR, GRBG, or GBRG",
+            });
+        }
     };
 
     // `BAYERPAT` describes the top-down image and the rows are left in file order, so file row `f`
@@ -386,24 +411,39 @@ pub(super) fn read_quantization_sigma(header: &Header) -> fits_well::Result<Opti
         .transpose()
 }
 
-fn read_ra_deg(header: &Header) -> fits_well::Result<Option<f64>> {
-    if let Some(ra) = header.get_real("RA")? {
-        return Ok(Some(ra));
-    }
-    if let Some(value) = header.get_text("OBJCTRA")? {
-        return Ok(parse_sexagesimal(value).map(|hours| hours * 15.0));
-    }
-    header.get_real("CRVAL1")
+/// The pointing right ascension: `RA` in degrees, else `OBJCTRA` in sexagesimal hours, else the
+/// reference value of the WCS axis whose type is right ascension.
+fn read_ra_deg(header: &Header) -> Option<f64> {
+    optional("RA", header.get_real("RA"))
+        .or_else(|| {
+            optional("OBJCTRA", header.get_text("OBJCTRA"))
+                .and_then(parse_sexagesimal)
+                .map(|hours| hours * 15.0)
+        })
+        .or_else(|| celestial_reference(header, "RA--"))
 }
 
-fn read_dec_deg(header: &Header) -> fits_well::Result<Option<f64>> {
-    if let Some(dec) = header.get_real("DEC")? {
-        return Ok(Some(dec));
-    }
-    if let Some(value) = header.get_text("OBJCTDEC")? {
-        return Ok(parse_sexagesimal(value));
-    }
-    header.get_real("CRVAL2")
+/// The pointing declination: `DEC` in degrees, else `OBJCTDEC` in sexagesimal degrees, else the
+/// reference value of the WCS axis whose type is declination.
+fn read_dec_deg(header: &Header) -> Option<f64> {
+    optional("DEC", header.get_real("DEC"))
+        .or_else(|| optional("OBJCTDEC", header.get_text("OBJCTDEC")).and_then(parse_sexagesimal))
+        .or_else(|| celestial_reference(header, "DEC-"))
+}
+
+/// `CRVALn` of the axis whose `CTYPEn` starts with `prefix`, the four-character equatorial
+/// coordinate name of FITS WCS paper II. Galactic, ecliptic and non-celestial axes name another
+/// coordinate, so a header that has only those gives no pointing, and an axis-swapped one gives
+/// each value from its own axis.
+fn celestial_reference(header: &Header, prefix: &str) -> Option<f64> {
+    let axes = optional("NAXIS", header.get_integer("NAXIS"))?;
+    (1..=axes).find_map(|axis| {
+        let ctype = optional("CTYPE", header.get_text(&format!("CTYPE{axis}")))?;
+        if !ctype.starts_with(prefix) {
+            return None;
+        }
+        optional("CRVAL", header.get_real(&format!("CRVAL{axis}")))
+    })
 }
 
 fn parse_sexagesimal(value: &str) -> Option<f64> {
@@ -427,20 +467,6 @@ pub(super) fn read_text(header: &Header, key: &str) -> fits_well::Result<Option<
     Ok(header.get_text(key)?.map(str::to_owned))
 }
 
-fn first_text(header: &Header, first: &str, second: &str) -> fits_well::Result<Option<String>> {
-    match read_text(header, first)? {
-        Some(value) => Ok(Some(value)),
-        None => read_text(header, second),
-    }
-}
-
-fn first_real(header: &Header, first: &str, second: &str) -> fits_well::Result<Option<f64>> {
-    match header.get_real(first)? {
-        Some(value) => Ok(Some(value)),
-        None => header.get_real(second),
-    }
-}
-
 fn read_u32(header: &Header, key: &'static str) -> fits_well::Result<Option<u32>> {
     header
         .get_integer(key)?
@@ -460,198 +486,4 @@ fn read_i32(header: &Header, key: &'static str) -> fits_well::Result<Option<i32>
 }
 
 #[cfg(test)]
-mod tests {
-    use fits_well::header::Header;
-
-    use crate::io::image::cfa::CfaType;
-    use crate::io::image::fits::metadata::{
-        SOURCE_ROW_ORDER, parse_sexagesimal, read_bayer_cfa, read_declared_row_order,
-        read_row_order,
-    };
-    use crate::io::image::image_provenance::RowOrder;
-    use crate::io::raw::demosaic::bayer::CfaPattern;
-
-    /// A minimal Bayer image header, with `ROWORDER` omitted when `roworder` is `None`.
-    fn bayer_header(bayerpat: &str, roworder: Option<&str>, height: i64) -> Header {
-        let mut header = Header::new();
-        header.set("BAYERPAT", bayerpat).unwrap();
-        header.set("NAXIS2", height).unwrap();
-        if let Some(roworder) = roworder {
-            header.set("ROWORDER", roworder).unwrap();
-        }
-        header
-    }
-
-    fn pattern_of(header: &Header) -> CfaPattern {
-        match read_bayer_cfa(header, true).unwrap() {
-            Some(CfaType::Bayer(pattern)) => pattern,
-            other => panic!("expected a Bayer pattern, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn a_bottom_up_frame_flips_its_bayer_phase_only_when_its_height_is_even() {
-        // `BAYERPAT` describes the top-down image and the rows arrive in file order, so file row
-        // `f` holds the phase of displayed row `H - 1 - f`.
-        //
-        // H = 4: file row 0 is displayed row 3, which is phase 1 — the G/B row of an RGGB frame —
-        // and file row 1 is displayed row 2, phase 0. Reading the file top to bottom therefore
-        // gives GB then RG, which is GBRG.
-        assert_eq!(
-            pattern_of(&bayer_header("RGGB", Some("BOTTOM-UP"), 4)),
-            CfaPattern::Gbrg
-        );
-
-        // H = 5: file row 0 is displayed row 4, which is phase 0 again, so the file reads RG then
-        // GB and the declared pattern already describes it. Flipping here is what mis-debayered the
-        // whole frame — and odd heights are real, LibRaw reporting 4015 for the EOS 1500D.
-        assert_eq!(
-            pattern_of(&bayer_header("RGGB", Some("BOTTOM-UP"), 4015)),
-            CfaPattern::Rggb
-        );
-
-        // Top-down, and a header that declares no order at all, leave the pattern alone whatever
-        // the parity — the height only matters because reversal is what moves the phases.
-        for height in [4, 5] {
-            assert_eq!(
-                pattern_of(&bayer_header("RGGB", Some("TOP-DOWN"), height)),
-                CfaPattern::Rggb,
-                "top-down, height {height}"
-            );
-            assert_eq!(
-                pattern_of(&bayer_header("RGGB", None, height)),
-                CfaPattern::Rggb,
-                "no ROWORDER, height {height}"
-            );
-        }
-    }
-
-    #[test]
-    fn an_odd_bayer_row_offset_composes_with_the_row_order_flip() {
-        // `YBAYROFF` shifts the pattern's origin by a row, which is the same phase inversion the
-        // row-order flip applies. On an even-height bottom-up frame the two compose back to the
-        // declared pattern; on an odd-height one only the offset acts, so they no longer agree —
-        // which is exactly the composition the parity fix changes.
-        assert_eq!(
-            pattern_of(
-                bayer_header("RGGB", Some("BOTTOM-UP"), 4)
-                    .set("YBAYROFF", 1)
-                    .unwrap()
-            ),
-            CfaPattern::Rggb
-        );
-        assert_eq!(
-            pattern_of(
-                bayer_header("RGGB", Some("BOTTOM-UP"), 5)
-                    .set("YBAYROFF", 1)
-                    .unwrap()
-            ),
-            CfaPattern::Gbrg
-        );
-    }
-
-    #[test]
-    fn row_order_is_read_from_the_header_and_defaults_to_top_down() {
-        // Recorded so a set mixing the two can be named; nothing reorders rows on it.
-        let mut header = Header::new();
-        assert_eq!(read_row_order(&header).unwrap(), RowOrder::TopDown);
-
-        for declared in ["BOTTOM-UP", "bottom-up", " BOTTOM-UP "] {
-            header.set("ROWORDER", declared).unwrap();
-            assert_eq!(
-                read_row_order(&header).unwrap(),
-                RowOrder::BottomUp,
-                "{declared}"
-            );
-        }
-
-        // Anything the keyword does not spell as bottom-up is read the way a writer that omits it
-        // means — first row first.
-        for declared in ["TOP-DOWN", "top-down", "anything else"] {
-            header.set("ROWORDER", declared).unwrap();
-            assert_eq!(
-                read_row_order(&header).unwrap(),
-                RowOrder::TopDown,
-                "{declared}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_lumos_written_header_separates_the_pattern_frame_from_the_sky_orientation() {
-        // What this writer emits for a bottom-up source: the rows go out as it holds them, so
-        // `ROWORDER` says the pattern applies to them as written, and `LUMROWO` carries the fact
-        // that the sky is upside-down in them.
-        let mut header = Header::new();
-        header.set("BAYERPAT", "GBRG").unwrap();
-        header.set("NAXIS2", 4).unwrap();
-        header.set("ROWORDER", RowOrder::TopDown.keyword()).unwrap();
-        header
-            .set(SOURCE_ROW_ORDER, RowOrder::BottomUp.keyword())
-            .unwrap();
-
-        // The pattern is taken as written — flipping it again is what would mis-debayer the
-        // reloaded frame, and is what reading `LUMROWO` here instead would have done.
-        assert_eq!(read_declared_row_order(&header).unwrap(), RowOrder::TopDown);
-        assert_eq!(pattern_of(&header), CfaPattern::Gbrg);
-
-        // ...while the orientation the combine compares survives the trip, so an original and a
-        // copy of it written by this crate are not read as mirrored views of each other.
-        assert_eq!(read_row_order(&header).unwrap(), RowOrder::BottomUp);
-
-        // A file from anyone else has only `ROWORDER`, and then the two answers coincide.
-        let third_party = bayer_header("RGGB", Some(RowOrder::BottomUp.keyword()), 4);
-        assert_eq!(
-            read_declared_row_order(&third_party).unwrap(),
-            RowOrder::BottomUp
-        );
-        assert_eq!(read_row_order(&third_party).unwrap(), RowOrder::BottomUp);
-    }
-
-    #[test]
-    fn a_bottom_up_frame_without_a_height_is_rejected_rather_than_guessed() {
-        // The flip decision turns on the height's parity, so a header that declares none cannot be
-        // resolved — and assuming either parity mis-debayers every frame that has the other.
-        let mut header = Header::new();
-        header.set("BAYERPAT", "RGGB").unwrap();
-        header.set("ROWORDER", "BOTTOM-UP").unwrap();
-        assert!(matches!(
-            read_bayer_cfa(&header, true),
-            Err(fits_well::FitsError::MissingKeyword { name: "NAXIS2" })
-        ));
-
-        // Only the bottom-up branch needs it: nothing is reversed otherwise, so the parity never
-        // comes up.
-        header.set("ROWORDER", "TOP-DOWN").unwrap();
-        assert_eq!(pattern_of(&header), CfaPattern::Rggb);
-    }
-
-    #[test]
-    fn sexagesimal_hms_converts_to_ra_degrees() {
-        let expected = (5.0 + 35.0 / 60.0 + 17.3 / 3600.0) * 15.0;
-        for sample in ["05 35 17.3", "05:35:17.3"] {
-            let degrees = parse_sexagesimal(sample).unwrap() * 15.0;
-            assert!(
-                (degrees - expected).abs() < 1e-10,
-                "{sample}: got {degrees}, expected {expected}"
-            );
-        }
-        assert!((parse_sexagesimal("00 00 00.0").unwrap() * 15.0).abs() < 1e-10);
-    }
-
-    #[test]
-    fn sexagesimal_dms_preserves_sign() {
-        let negative = parse_sexagesimal("-05 23 28.0").unwrap();
-        assert!((negative - -(5.0 + 23.0 / 60.0 + 28.0 / 3600.0)).abs() < 1e-10);
-        let positive = parse_sexagesimal("+45:30:15.5").unwrap();
-        assert!((positive - (45.0 + 30.0 / 60.0 + 15.5 / 3600.0)).abs() < 1e-10);
-        assert!((parse_sexagesimal("-00 30 00.0").unwrap() - -0.5).abs() < 1e-10);
-    }
-
-    #[test]
-    fn invalid_sexagesimal_values_are_rejected() {
-        assert!(parse_sexagesimal("05 35").is_none());
-        assert!(parse_sexagesimal("").is_none());
-        assert!(parse_sexagesimal("abc def ghi").is_none());
-    }
-}
+mod tests;
