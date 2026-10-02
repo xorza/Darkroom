@@ -1,5 +1,7 @@
 use crate::testing::prelude::*;
 
+use std::fs::File;
+
 use fits_well::FitsWriter;
 use fits_well::header::Header;
 use fits_well::image::{Bitpix, Compression, CompressionOptions, Image};
@@ -8,7 +10,7 @@ use fits_well::io::{BLOCK_SIZE, HduKind};
 use crate::io::image::fits::decode::plan::internals::description;
 use crate::io::image::fits::decode::*;
 use crate::io::image::fits::options::{
-    FitsFloatScale, FitsHduSelector, FitsLoadOptions, FitsNullPolicy,
+    FitsChecksumPolicy, FitsFloatScale, FitsHduSelector, FitsLoadOptions, FitsNullPolicy,
 };
 use crate::io::image::fits::provenance::FitsTransferProvenance;
 use crate::io::image::image_provenance::TransferProvenance;
