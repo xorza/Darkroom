@@ -240,7 +240,7 @@ fn register_snapshot() {
         .f64s(result.transform().matrix())
         .count(result.num_inliers())
         .f64s(&[result.rms_error()]);
-    assert_snapshot("registration", &snapshot, "62296654082d94ea");
+    assert_snapshot("registration", &snapshot, "b4547f7a0ae61a15");
 }
 
 #[test]
@@ -254,7 +254,7 @@ fn warp_snapshot() {
     snapshot
         .f32s(result.coverage.pixels())
         .f32s(result.confidence.pixels());
-    assert_snapshot("warp", &snapshot, "2037c91308b10fe7");
+    assert_snapshot("warp", &snapshot, "0844b150fa4dea5a");
 }
 
 /// The field and two dithers of it, stacked with the default configuration.
@@ -280,7 +280,7 @@ fn combine_snapshot() {
     .unwrap();
     let mut snapshot = Snapshot::default();
     image_snapshot(&mut snapshot, &product.image);
-    assert_snapshot("combine", &snapshot, "26b15ed818941166");
+    assert_snapshot("combine", &snapshot, "b59d8cd028469c88");
 }
 
 /// Each automatic stretch on a three-channel field, so the color-preserving paths run.

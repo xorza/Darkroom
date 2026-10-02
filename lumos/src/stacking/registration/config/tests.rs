@@ -129,18 +129,6 @@ fn interpolation_method_kernel_radius() {
 }
 
 #[test]
-fn lanczos_param_is_some_only_for_the_lanczos_methods() {
-    // Non-Lanczos methods return None
-    assert_eq!(InterpolationMethod::Nearest.lanczos_param(), None);
-    assert_eq!(InterpolationMethod::Bilinear.lanczos_param(), None);
-    assert_eq!(InterpolationMethod::Bicubic.lanczos_param(), None);
-    // Lanczos methods return their parameter a
-    assert_eq!(InterpolationMethod::Lanczos2.lanczos_param(), Some(2));
-    assert_eq!(InterpolationMethod::Lanczos3.lanczos_param(), Some(3));
-    assert_eq!(InterpolationMethod::Lanczos4.lanczos_param(), Some(4));
-}
-
-#[test]
 fn interpolation_method_default() {
     let method = InterpolationMethod::default();
     assert_eq!(method, InterpolationMethod::Lanczos3);

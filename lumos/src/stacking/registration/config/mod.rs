@@ -43,17 +43,6 @@ impl InterpolationMethod {
             InterpolationMethod::Lanczos4 => 4,
         }
     }
-
-    /// Returns the Lanczos parameter `a` (kernel half-width), or `None` for non-Lanczos methods.
-    #[inline]
-    pub(crate) fn lanczos_param(&self) -> Option<usize> {
-        match self {
-            InterpolationMethod::Lanczos2 => Some(2),
-            InterpolationMethod::Lanczos3 => Some(3),
-            InterpolationMethod::Lanczos4 => Some(4),
-            _ => None,
-        }
-    }
 }
 
 /// Configuration for inverse-mapped image resampling.

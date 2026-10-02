@@ -1,11 +1,32 @@
 use crate::stacking::combine::pixel_coverage::PixelCoverage;
 use crate::stacking::registration::config::InterpolationMethod;
-use crate::stacking::registration::resample::kernel;
+use crate::stacking::registration::resample::kernel::LanczosOrder;
 use crate::stacking::registration::resample::quality;
+use crate::stacking::registration::resample::source_position::SourcePosition;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::testing::prelude::*;
 
 const TOL: f32 = 1e-5;
+const LANCZOS_ORDERS: [LanczosOrder; 3] =
+    [LanczosOrder::Two, LanczosOrder::Three, LanczosOrder::Four];
+
+/// `(x, y)` split, for a position known to be inside the source.
+fn at(x: f32, y: f32, size: Size2us) -> SourcePosition {
+    SourcePosition::within(DVec2::new(f64::from(x), f64::from(y)), size).unwrap()
+}
+
+/// The quality the maps record at `(x, y)`: the kernel's inside the source, nothing outside it.
+fn quality_of(
+    x: f32,
+    y: f32,
+    size: Size2us,
+    method: InterpolationMethod,
+) -> quality::SampleQuality {
+    SourcePosition::within(DVec2::new(f64::from(x), f64::from(y)), size)
+        .map_or_else(quality::SampleQuality::default, |position| {
+            quality::quality_at(position, size, method)
+        })
+}
 const INTERPOLATION_METHODS: [InterpolationMethod; 6] = [
     InterpolationMethod::Nearest,
     InterpolationMethod::Bilinear,
@@ -69,45 +90,38 @@ fn warp_coverage_bilinear_edge_is_partial() {
 #[test]
 fn bilinear_quality_has_hand_computed_support_and_confidence() {
     let dims = Size2us::new(8, 8);
-    let interior = quality::quality_at(Vec2::new(0.5, 4.0), dims, InterpolationMethod::Bilinear);
+    let interior = quality_of(0.5, 4.0, dims, InterpolationMethod::Bilinear);
     assert!((interior.coverage - 1.0).abs() < TOL);
     // Coefficients [0.5, 0.5] have variance gain 0.5, so inverse variance is 2.
     assert!((interior.confidence - 2.0).abs() < TOL);
 
-    let edge = quality::quality_at(Vec2::new(-0.5, 4.0), dims, InterpolationMethod::Bilinear);
+    let edge = quality_of(-0.5, 4.0, dims, InterpolationMethod::Bilinear);
     assert!((edge.coverage - 0.5).abs() < TOL);
     // Renormalization leaves the sole in-bounds coefficient equal to one.
     assert!((edge.confidence - 1.0).abs() < TOL);
 }
 
+/// The footprint's rim is inside, a hair past it is outside: there the maps record nothing, for
+/// every method.
 #[test]
 fn source_footprint_boundary_is_inclusive() {
     let dims = Size2us::new(8, 6);
-    for position in [
-        Vec2::new(-0.5, 2.0),
-        Vec2::new(7.5, 2.0),
-        Vec2::new(3.0, -0.5),
-        Vec2::new(3.0, 5.5),
-    ] {
+    for (x, y) in [(-0.5, 2.0), (7.5, 2.0), (3.0, -0.5), (3.0, 5.5)] {
         assert!(
-            kernel::source_footprint_contains(position, dims),
-            "{position:?}"
+            SourcePosition::within(DVec2::new(x, y), dims).is_some(),
+            "({x}, {y})"
         );
     }
-    for position in [
-        Vec2::new(-0.5001, 2.0),
-        Vec2::new(7.5001, 2.0),
-        Vec2::new(3.0, -0.5001),
-        Vec2::new(3.0, 5.5001),
+    for (x, y) in [
+        (-0.5001f32, 2.0),
+        (7.5001, 2.0),
+        (3.0, -0.5001),
+        (3.0, 5.5001),
     ] {
-        assert!(
-            !kernel::source_footprint_contains(position, dims),
-            "{position:?}"
-        );
         for method in INTERPOLATION_METHODS {
-            let quality = quality::quality_at(position, dims, method);
-            assert_eq!(quality.coverage, 0.0, "{method:?} at {position:?}");
-            assert_eq!(quality.confidence, 0.0, "{method:?} at {position:?}");
+            let quality = quality_of(x, y, dims, method);
+            assert_eq!(quality.coverage, 0.0, "{method:?} at ({x}, {y})");
+            assert_eq!(quality.confidence, 0.0, "{method:?} at ({x}, {y})");
         }
     }
 }
@@ -131,10 +145,8 @@ fn the_interior_fast_path_matches_clipping_bit_for_bit() {
             let mut y = 5.0;
             while y < 11.0 {
                 let taps = match method {
-                    InterpolationMethod::Bicubic => {
-                        quality::SeparableTaps::bicubic(Vec2::new(x, y))
-                    }
-                    _ => quality::SeparableTaps::bilinear(Vec2::new(x, y)),
+                    InterpolationMethod::Bicubic => quality::SeparableTaps::bicubic(at(x, y, size)),
+                    _ => quality::SeparableTaps::bilinear(at(x, y, size)),
                 };
                 assert!(
                     taps.is_interior(size),
@@ -187,15 +199,16 @@ fn the_interior_fast_path_matches_clipping_bit_for_bit() {
 fn tabulated_interior_sums_track_the_computed_ones() {
     // Measured worst across all three widths is 6.5e-4 on a per-axis sum.
     const TABULATED_TOLERANCE: f32 = 1e-3;
-    for a in [2usize, 3, 4] {
-        let table = quality::lanczos_interior_sums(a);
+    for order in LANCZOS_ORDERS {
+        let a = order.a();
+        let table = quality::lanczos_interior_sums(order);
 
         // On the table's own grid the two must agree bit for bit — anything else means the index
         // does not name the entry it was built from.
         for index in (0..=quality::LANCZOS_LUT_RESOLUTION).step_by(37) {
             let f = index as f32 / quality::LANCZOS_LUT_RESOLUTION as f32;
             let mut weights = [0.0; quality::MAX_TAPS];
-            quality::lanczos_weights(a, f, &mut weights);
+            quality::lanczos_weights(order, f, &mut weights);
             let computed = quality::AxisSums::of(&weights[..2 * a]);
             let tabulated = table[quality::fraction_index(f)];
             assert_eq!(
@@ -216,7 +229,7 @@ fn tabulated_interior_sums_track_the_computed_ones() {
         }
         for f in probes {
             let mut weights = [0.0; quality::MAX_TAPS];
-            quality::lanczos_weights(a, f, &mut weights);
+            quality::lanczos_weights(order, f, &mut weights);
             let computed = quality::AxisSums::of(&weights[..2 * a]);
             let tabulated = table[quality::fraction_index(f)];
             for (tabulated, computed) in [
@@ -253,7 +266,7 @@ fn support_and_confidence_vanish_together_across_every_border() {
         while x <= dims.width as f32 + radius {
             let mut y = -radius;
             while y <= dims.height as f32 + radius {
-                let quality = quality::quality_at(Vec2::new(x, y), dims, method);
+                let quality = quality_of(x, y, dims, method);
                 assert_eq!(
                     quality.coverage > 0.0,
                     quality.confidence > 0.0,
@@ -299,8 +312,7 @@ fn coverage_is_continuous_and_monotonic_across_left_border() {
         let radius = method.kernel_radius() as i32;
         let mut previous = 0.0;
         for integer in -radius..=radius {
-            let coverage =
-                quality::quality_at(Vec2::new(integer as f32 + 0.37, 16.0), dims, method).coverage;
+            let coverage = quality_of(integer as f32 + 0.37, 16.0, dims, method).coverage;
             assert!(
                 coverage + 1e-6 >= previous,
                 "{method:?}: coverage decreased from {previous} to {coverage} at x={integer}"
@@ -310,8 +322,8 @@ fn coverage_is_continuous_and_monotonic_across_left_border() {
         assert!((previous - 1.0).abs() < TOL, "{method:?}: {previous}");
 
         if method != InterpolationMethod::Nearest {
-            let left = quality::quality_at(Vec2::new(-1e-4, 16.0), dims, method).coverage;
-            let right = quality::quality_at(Vec2::new(1e-4, 16.0), dims, method).coverage;
+            let left = quality_of(-1e-4, 16.0, dims, method).coverage;
+            let right = quality_of(1e-4, 16.0, dims, method).coverage;
             assert!(
                 (left - right).abs() < 1e-3,
                 "{method:?}: discontinuity across x=0: {left} vs {right}"

@@ -1,6 +1,7 @@
 use crate::stacking::registration::config::{self, InterpolationMethod, WarpParams};
+use crate::stacking::registration::resample::internals::warp_plane;
 use crate::stacking::registration::resample::kernel::internals as kernel_test_support;
-use crate::stacking::registration::resample::{plane, quality};
+use crate::stacking::registration::resample::quality;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::testing::prelude::*;
 
@@ -10,7 +11,7 @@ fn warp_identity_preserves_image() {
     let input_buf = Buffer2::new(4, 4, input.clone());
 
     let mut output = Buffer2::new_default(4, 4);
-    plane::warp(
+    warp_plane(
         &input_buf,
         &mut output,
         &WarpTransform::new(Transform::identity()),
@@ -36,7 +37,7 @@ fn warp_integer_translation() {
     let transform = Transform::translation(DVec2::new(1.0, 1.0));
 
     let mut output = Buffer2::new_default(4, 4);
-    plane::warp(
+    warp_plane(
         &input_buf,
         &mut output,
         &WarpTransform::new(transform),
@@ -65,7 +66,7 @@ fn plane_warp_lanczos3_identity() {
     let input_buf = Buffer2::new(width, height, input);
 
     let mut output = Buffer2::new_filled(width, height, 0.0);
-    plane::warp(
+    warp_plane(
         &input_buf,
         &mut output,
         &WarpTransform::new(Transform::identity()),
@@ -95,7 +96,7 @@ fn plane_warp_lanczos3_integer_translation() {
     let transform = Transform::translation(DVec2::new(5.0, 3.0));
 
     let mut output = Buffer2::new_filled(width, height, 0.0);
-    plane::warp(
+    warp_plane(
         &input_buf,
         &mut output,
         &WarpTransform::new(transform),
@@ -127,7 +128,7 @@ fn plane_warp_lanczos3_matches_per_pixel() {
 
     let mut output = Buffer2::new_filled(width, height, 0.0);
     let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
-    plane::warp(
+    warp_plane(
         &input_buf,
         &mut output,
         &WarpTransform::new(transform),
@@ -137,11 +138,7 @@ fn plane_warp_lanczos3_matches_per_pixel() {
     for y in 0..height {
         for x in 0..width {
             let src = transform.apply(DVec2::new(x as f64, y as f64));
-            let expected = kernel_test_support::interpolate(
-                &input_buf,
-                Vec2::new(src.x as f32, src.y as f32),
-                &params,
-            );
+            let expected = kernel_test_support::interpolate(&input_buf, src, &params);
             let actual = output[(x, y)];
             assert!(
                 (actual - expected).abs() < 1e-4,
@@ -167,11 +164,7 @@ fn warp_per_pixel_reference(
     for y in 0..height {
         for x in 0..width {
             let src = warp_transform.apply(DVec2::new(x as f64, y as f64));
-            output[(x, y)] = kernel_test_support::interpolate(
-                input,
-                Vec2::new(src.x as f32, src.y as f32),
-                params,
-            );
+            output[(x, y)] = kernel_test_support::interpolate(input, src, params);
         }
     }
 }
@@ -193,7 +186,7 @@ fn generic_stepping_bicubic_matches_per_pixel() {
 
     let mut output_stepped = Buffer2::new_default(width, height);
     let mut output_reference = Buffer2::new_default(width, height);
-    plane::warp(&input_buf, &mut output_stepped, &wt, &params);
+    warp_plane(&input_buf, &mut output_stepped, &wt, &params);
     warp_per_pixel_reference(&input_buf, &mut output_reference, &wt, &params);
 
     for y in 0..height {
@@ -223,7 +216,7 @@ fn generic_stepping_lanczos2_matches_per_pixel() {
 
     let mut output_stepped = Buffer2::new_default(width, height);
     let mut output_reference = Buffer2::new_default(width, height);
-    plane::warp(&input_buf, &mut output_stepped, &wt, &params);
+    warp_plane(&input_buf, &mut output_stepped, &wt, &params);
     warp_per_pixel_reference(&input_buf, &mut output_reference, &wt, &params);
 
     for y in 0..height {
@@ -253,7 +246,7 @@ fn generic_stepping_lanczos4_matches_per_pixel() {
 
     let mut output_stepped = Buffer2::new_default(width, height);
     let mut output_reference = Buffer2::new_default(width, height);
-    plane::warp(&input_buf, &mut output_stepped, &wt, &params);
+    warp_plane(&input_buf, &mut output_stepped, &wt, &params);
     warp_per_pixel_reference(&input_buf, &mut output_reference, &wt, &params);
 
     for y in 0..height {
@@ -283,7 +276,7 @@ fn generic_stepping_nearest_matches_per_pixel() {
 
     let mut output_stepped = Buffer2::new_default(width, height);
     let mut output_reference = Buffer2::new_default(width, height);
-    plane::warp(&input_buf, &mut output_stepped, &wt, &params);
+    warp_plane(&input_buf, &mut output_stepped, &wt, &params);
     warp_per_pixel_reference(&input_buf, &mut output_reference, &wt, &params);
 
     for y in 0..height {
@@ -317,7 +310,7 @@ fn generic_stepping_disabled_for_homography() {
 
     let mut output_stepped = Buffer2::new_default(width, height);
     let mut output_reference = Buffer2::new_default(width, height);
-    plane::warp(&input_buf, &mut output_stepped, &wt, &params);
+    warp_plane(&input_buf, &mut output_stepped, &wt, &params);
     warp_per_pixel_reference(&input_buf, &mut output_reference, &wt, &params);
 
     for y in 0..height {
@@ -371,7 +364,7 @@ fn lanczos_homography_horizon_uses_border_and_zero_coverage() {
                 border_value: BORDER,
             };
             let mut output = Buffer2::new_default(WIDTH, HEIGHT);
-            plane::warp(&input, &mut output, &wt, &params);
+            warp_plane(&input, &mut output, &wt, &params);
             let coverage =
                 quality::internals::maps(Size2us::new(WIDTH, HEIGHT), &wt, method).coverage;
 
@@ -406,7 +399,7 @@ fn warp_tiny_image_smaller_than_lanczos4_kernel() {
     let mut output = Buffer2::new_default(size.width, size.height);
     let wt = WarpTransform::new(Transform::identity());
     let params = config::internals::warp_params(InterpolationMethod::Lanczos4);
-    plane::warp(&input, &mut output, &wt, &params);
+    warp_plane(&input, &mut output, &wt, &params);
     for &value in output.pixels() {
         assert!(
             value.is_finite(),
