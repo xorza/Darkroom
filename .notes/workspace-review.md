@@ -27,11 +27,6 @@ Severity: High — a minimal-sample transform has near-zero RMS, clears both the
 - [ ] `lumos/src/stacking/registration/mod.rs` `register` — `config.matching.min_matches` ("Minimum matched star pairs to accept") gates only the `match_triangles` output; nothing compares `num_inliers()` with a floor afterwards. RANSAC returns once `best.inliers.len() >= min_samples` (2 for Euclidean, 4 for homography), `recover_matches` guarantees only "never fewer", and the final `AccuracyTooLow` gate is on RMS, which is smallest exactly at the minimal sample size.
 - [ ] `lumos/src/stacking/registration/result/mod.rs` `RegistrationResult::quality_score` — `QUALITY_MIN_INLIERS = 4` is the only use of an inlier count; it feeds a log line in `pipeline/align.rs` and gates nothing.
 
-## Star measurement rectifies sky noise into signal
-Severity: High — every star's flux is biased up, and empty sky clears the default SNR cut at large stamps.
-
-- [ ] `lumos/src/stacking/star_detection/centroid/mod.rs` `compute_star` — `value = (px - bg).max(0.0)` feeds `flux`, `core_flux`, `peak_value` and both marginals over the whole `(2r+1)²` stamp. The clamp turns zero-mean noise into a `σ/√(2π) ≈ 0.399σ` bias per pixel, so `compute_snr` (flux / `σ·√npix`) reports `≈0.399·√npix` for an empty stamp: 6.0 at r=7, 10.8 at r=13, 12.4 at r=15 — the last two above the default `min_snr = 10`. `windowed_covariance` in the same file already uses the signed residual for this reason. Flux and SNR need the signed sum; only the moment seed and centroid weights have a reason to clip.
-
 ## Deblending runs on sky-included pixel values
 Severity: High — prominence, the threshold ladder and the contrast test change with the sky level, not with the source.
 

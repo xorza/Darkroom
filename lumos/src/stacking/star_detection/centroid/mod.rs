@@ -455,15 +455,19 @@ fn compute_star(
     let icx = pos.x.round() as isize;
     let icy = pos.y.round() as isize;
 
-    // Collect background-subtracted values and positions (f64 accumulators)
+    // Flux, core flux and peak sum the *signed* residual: sky noise is zero-mean, and clipping each
+    // pixel at zero would turn it into a positive bias of about 0.4σ per pixel. The second moments
+    // and the marginals are weights, and a weight cannot be negative, so they take the clipped
+    // residual and normalize by its own sum.
     let mut flux = 0.0f64;
+    let mut weight_sum = 0.0f64;
     let mut core_flux = 0.0f64;
     let mut sum_x2 = 0.0f64;
     let mut sum_y2 = 0.0f64;
     let mut sum_xy = 0.0f64;
     let mut noise_sum = 0.0f64;
     let mut noise_count = 0usize;
-    let mut peak_value = 0.0f64;
+    let mut peak_value = f64::NEG_INFINITY;
 
     // For roundness calculation: marginal sums
     let stamp_size = 2 * stamp_radius + 1;
@@ -484,14 +488,16 @@ fn compute_star(
                 Some(local) => local.bg,
                 None => bg_row[x],
             };
-            let value = f64::from((px_row[x] - bg).max(0.0));
+            let residual = f64::from(px_row[x] - bg);
+            let value = residual.max(0.0);
 
-            flux += value;
-            peak_value = peak_value.max(value);
+            flux += residual;
+            weight_sum += value;
+            peak_value = peak_value.max(residual);
 
             // Core flux for sharpness (3x3 region around center)
             if dx.abs() <= 1 && dy.abs() <= 1 {
-                core_flux += value;
+                core_flux += residual;
             }
 
             // Marginal distributions for roundness
@@ -519,7 +525,8 @@ fn compute_star(
         }
     }
 
-    if flux < f64::EPSILON {
+    // No net signal above the sky, or nothing positive to weight the moments with: not a star.
+    if flux < f64::EPSILON || weight_sum < f64::EPSILON {
         return None;
     }
 
@@ -528,7 +535,7 @@ fn compute_star(
     // stay unbiased. Seed the window from the plain moment; fall back to the plain
     // moments if it can't converge to a valid (positive-definite) covariance.
     // `sum_x2 + sum_y2` is Σ value·r², the radial moment the window is seeded from.
-    let seed_sigma_sq = ((sum_x2 + sum_y2) / flux / 2.0).max(MIN_SIGMA_SQ);
+    let seed_sigma_sq = ((sum_x2 + sum_y2) / weight_sum / 2.0).max(MIN_SIGMA_SQ);
     let cov = windowed_covariance(
         pixels,
         background,
@@ -538,9 +545,9 @@ fn compute_star(
         seed_sigma_sq,
     )
     .unwrap_or(Cov2 {
-        xx: sum_x2 / flux,
-        yy: sum_y2 / flux,
-        xy: sum_xy / flux,
+        xx: sum_x2 / weight_sum,
+        yy: sum_y2 / weight_sum,
+        xy: sum_xy / weight_sum,
     });
 
     let trace = cov.trace();
