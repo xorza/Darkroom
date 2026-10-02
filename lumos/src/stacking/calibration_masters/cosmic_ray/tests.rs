@@ -1,5 +1,4 @@
 use crate::bit_buffer2::BitBuffer2;
-use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::math::statistics::median_mut;
 use crate::stacking::calibration_masters::cosmic_ray::config::NoiseEstimation;
@@ -174,13 +173,7 @@ fn bayer_removes_cosmic_rays_preserves_star() {
     for &p in &crs {
         data[size.index_of(p)] = 0.95;
     }
-    let mut img = CfaImage {
-        data,
-        cfa_type: CfaType::Bayer(CfaPattern::Rggb),
-        metadata: ImageMetadata::default(),
-        quantization_sigma: None,
-        nulls: None,
-    };
+    let mut img = cfa_from_plane(data, CfaType::Bayer(CfaPattern::Rggb));
     let count = reject_cosmic_rays(&mut img, &CosmicRayConfig::default());
     let out = img.data.pixels();
     for &p in &crs {
@@ -228,13 +221,7 @@ fn bayer_tight_star_eaten_is_a_known_limitation() {
     for &p in &crs {
         data[size.index_of(p)] = 0.95;
     }
-    let mut img = CfaImage {
-        data,
-        cfa_type: CfaType::Bayer(CfaPattern::Rggb),
-        metadata: ImageMetadata::default(),
-        quantization_sigma: None,
-        nulls: None,
-    };
+    let mut img = cfa_from_plane(data, CfaType::Bayer(CfaPattern::Rggb));
     reject_cosmic_rays(&mut img, &CosmicRayConfig::default());
     let out = img.data.pixels();
     // CR rejection still works — the injected CRs are removed.
@@ -278,13 +265,7 @@ fn xtrans_removes_cosmic_ray_preserves_flat_field() {
     let cr = Vec2us::new(9, 9);
     data[size.index_of(cr)] = 0.95;
 
-    let mut img = CfaImage {
-        data: Buffer2::new(size.width, size.height, data),
-        cfa_type: cfa,
-        metadata: ImageMetadata::default(),
-        quantization_sigma: None,
-        nulls: None,
-    };
+    let mut img = cfa_from_plane(Buffer2::new(size.width, size.height, data), cfa);
     let count = reject_cosmic_rays(&mut img, &CosmicRayConfig::default());
     let out = img.data.pixels();
 

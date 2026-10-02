@@ -1,19 +1,9 @@
 use crate::testing::prelude::*;
-use std::any::Any;
 use std::mem;
 use std::panic::catch_unwind;
 
 use crate::bit_buffer2::BitBuffer2;
-
-fn panic_text(payload: Box<dyn Any + Send>) -> String {
-    if let Some(message) = payload.downcast_ref::<&str>() {
-        (*message).to_string()
-    } else if let Some(message) = payload.downcast_ref::<String>() {
-        message.clone()
-    } else {
-        "unknown panic".to_string()
-    }
-}
+use crate::testing::panic_message;
 
 #[test]
 fn construction_aligns_rows_and_preserves_fill_values() {
@@ -141,7 +131,7 @@ fn construction_rejects_every_dimension_overflow_stage() {
         let panic = catch_unwind(|| BitBuffer2::new_default(Size2us::new(width, height)))
             .expect_err("overflowing dimensions must panic");
         assert!(
-            panic_text(panic).contains(expected),
+            panic_message(&*panic).contains(expected),
             "{width}x{height} did not report {expected}"
         );
     }
@@ -151,7 +141,7 @@ fn construction_rejects_every_dimension_overflow_stage() {
 fn from_slice_rejects_a_mismatched_length() {
     let panic = catch_unwind(|| BitBuffer2::from_slice(Size2us::new(2, 2), &[true, false, true]))
         .expect_err("mismatched data length must panic");
-    assert!(panic_text(panic).contains("data length 3 does not match dimensions 2x2=4"));
+    assert!(panic_message(&*panic).contains("data length 3 does not match dimensions 2x2=4"));
 }
 
 #[cfg(debug_assertions)]

@@ -181,7 +181,7 @@ fn fits_integer_samples_are_divided_by_the_span_their_header_declares() {
 /// The one input whose domain the header may not settle. `Auto` reads `DATAMAX` and is right when
 /// the file declares one; `FullScale` is the answer for an ADU frame that does not, which no header
 /// rule can identify and which the decoder must not guess at from the pixels — a divisor read off
-/// each frame's own content differs between frames and is what the combine now rejects a set for.
+/// each frame's own content differs between frames, and the combine rejects a set for that.
 #[test]
 fn a_float_fits_scale_can_be_declared_when_the_header_does_not() {
     let pixels = vec![0.0f32, 16_384.0, 32_768.0, 65_535.0];
