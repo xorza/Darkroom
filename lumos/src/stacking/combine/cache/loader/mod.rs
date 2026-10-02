@@ -26,7 +26,7 @@ use crate::stacking::frame_store::frame_quality::FrameQuality;
 use crate::stacking::frame_store::frame_stats::FrameStats;
 use crate::stacking::frame_store::spill::CachedQuality;
 use crate::stacking::frame_store::spill::FrameSpill;
-use crate::stacking::frame_store::spill::SpillDirectory;
+use crate::stacking::frame_store::spill_directory::SpillDirectory;
 use crate::stacking::frame_store::stored_plane::StoredPlane;
 use crate::stacking::frame_store::{FramePeek, StackableImage, StoredFrame};
 use crate::stacking::progress::{ProgressCallback, StackingStage};
@@ -249,8 +249,8 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     context: &LoadContext,
 ) -> Result<LoadedTier, Error> {
     let cancel = &context.cancel;
-    let spill_directory = SpillDirectory::create(config.cache_dir.clone(), config.keep_cache)?;
-    let cache_dir = &spill_directory.path;
+    let spill_directory = SpillDirectory::create(&config.cache_dir, config.keep_cache)?;
+    let cache_dir = spill_directory.path();
 
     // Cache first image and compute stats. Frame 0 carries the stack metadata.
     validate_image_samples(&first_image, 0, cancel)?;

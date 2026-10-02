@@ -4,6 +4,7 @@ pub(crate) mod error;
 pub(crate) mod frame_quality;
 pub(crate) mod frame_stats;
 pub(crate) mod spill;
+pub(crate) mod spill_directory;
 pub(crate) mod stored_plane;
 
 use std::path::Path;

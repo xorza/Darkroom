@@ -2,8 +2,9 @@
 //!
 //! Every name the frame store writes comes from [`FrameSpill`], so the writer that produced a
 //! plane and a later run looking for it cannot disagree about where it is. The files themselves
-//! are not tracked individually: they all sit inside a [`SpillDirectory`], which removes the whole
-//! directory on drop unless `keep_cache` asked otherwise.
+//! are not tracked individually: they all sit inside a
+//! [`SpillDirectory`](crate::stacking::frame_store::spill_directory::SpillDirectory), which decides
+//! whether they outlive the run.
 
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
@@ -15,36 +16,11 @@ use crate::io::image::image_dimensions::ImageDimensions;
 use crate::stacking::frame_store::error::FrameStoreError;
 use crate::stacking::frame_store::{StackableImage, StoredPlane};
 
-/// Owns a spill directory and removes it after its mapped frames have dropped.
-#[derive(Debug)]
-pub(crate) struct SpillDirectory {
-    pub(crate) path: PathBuf,
-    keep: bool,
-}
-
-impl SpillDirectory {
-    pub(crate) fn create(path: PathBuf, keep: bool) -> Result<Self, FrameStoreError> {
-        std::fs::create_dir_all(&path).map_err(|source| FrameStoreError::CreateDirectory {
-            path: path.clone(),
-            source,
-        })?;
-        Ok(Self { path, keep })
-    }
-}
-
-impl Drop for SpillDirectory {
-    fn drop(&mut self) {
-        if !self.keep {
-            let _ = std::fs::remove_dir_all(&self.path);
-        }
-    }
-}
-
 /// Write each channel under `spill` and memory-map it back.
 ///
 /// The files are not tracked for removal here. Everything the frame store spills lives inside a
-/// [`SpillDirectory`], which removes the directory wholesale on drop unless `keep_cache` asked for
-/// it to survive — so a per-file drop guard would either duplicate that or, if it ignored the flag,
+/// [`SpillDirectory`](crate::stacking::frame_store::spill_directory::SpillDirectory), which removes
+/// the directory wholesale on drop unless `keep_cache` asked for it to survive — so a per-file drop guard would either duplicate that or, if it ignored the flag,
 /// quietly delete what the user asked to keep.
 pub(crate) fn spill_channels(
     spill: FrameSpill<'_>,

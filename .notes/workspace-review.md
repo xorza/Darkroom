@@ -15,11 +15,6 @@ Groups are named after their shared root cause and ordered by severity, then ben
 
 # High — wrong results, data loss, crashes on user data
 
-## The frame spill directory deletes a directory the run did not create
-Severity: High — data loss through the public `CacheConfig` API.
-
-- [ ] `lumos/src/stacking/frame_store/spill.rs` `SpillDirectory::create` / `Drop` — `create_dir_all` accepts an existing directory, and `Drop` runs `remove_dir_all` on it whenever `keep_cache` is false (the default). `CacheConfig::with_cache_dir(path)` is public. Pointed at an existing directory (a shared cache root, an earlier `keep_cache` run, the folder the lights live in), it wipes the whole tree after the stack. Remove only what the run created: a fresh unique subdirectory, or its own files.
-
 ## SIP distortion is fitted in the target frame and applied in the reference frame
 Severity: High — any rotation between frames corrupts the correction; a meridian flip (180°) doubles the distortion instead of removing it. The `wide_field()` presets lift the rotation limit.
 

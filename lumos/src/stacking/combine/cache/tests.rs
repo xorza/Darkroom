@@ -538,13 +538,15 @@ fn frame_count() {
 #[test]
 fn cleanup_removes_files() {
     let temp_dir = ScratchDirectory::new("lumos_cleanup_test");
+    let spill_directory = SpillDirectory::create(&temp_dir, false).unwrap();
+    let spill_path = spill_directory.path().to_path_buf();
 
     let dims = ImageDimensions::new((2, 2), 3);
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
     let image = LinearImage::from_pixels(dims, pixels);
 
     let cached_frame = StoredFrame::spill(
-        &temp_dir,
+        &spill_path,
         "cleanup_test.bin",
         &image,
         &FrameQuality::None,
@@ -552,9 +554,8 @@ fn cleanup_removes_files() {
     )
     .unwrap();
 
-    // Verify cache dir has files
-    assert!(temp_dir.exists());
-    assert!(temp_dir.read_dir().unwrap().count() > 0);
+    // Verify the run's directory has files
+    assert!(spill_path.read_dir().unwrap().count() > 0);
 
     let config = CacheConfig::default();
 
@@ -563,7 +564,7 @@ fn cleanup_removes_files() {
         frame_norms: None,
         normalization: Normalization::None,
         core: CacheCore {
-            spill_directory: Some(SpillDirectory::create(temp_dir.to_path_buf(), false).unwrap()),
+            spill_directory: Some(spill_directory),
             dimensions: dims,
             metadata: ImageMetadata::default(),
             config,
@@ -576,11 +577,12 @@ fn cleanup_removes_files() {
     // Drop the cache - should trigger cleanup via the core's Drop
     drop(cache);
 
-    // Entire cache directory should be removed
+    // The run's directory goes; the root it was created under stays.
     assert!(
-        !temp_dir.exists(),
-        "Cache directory should be deleted on cleanup"
+        !spill_path.exists(),
+        "the run's spill directory should be deleted on cleanup"
     );
+    assert!(temp_dir.is_dir(), "the cache root must survive the cleanup");
 }
 
 #[test]
@@ -609,6 +611,7 @@ fn read_channel_chunk_in_memory() {
 #[test]
 fn read_channel_chunk_disk_backed() {
     let temp_dir = ScratchDirectory::new("lumos_read_chunk_disk_test");
+    let spill_directory = SpillDirectory::create(&temp_dir, false).unwrap();
 
     let dims = ImageDimensions::new((4, 3), 1);
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
@@ -617,7 +620,7 @@ fn read_channel_chunk_disk_backed() {
     // Cache the image to disk
     let base_filename = "test_chunk.bin";
     let cached_frame = StoredFrame::spill(
-        &temp_dir,
+        spill_directory.path(),
         base_filename,
         &image,
         &FrameQuality::None,
@@ -630,7 +633,7 @@ fn read_channel_chunk_disk_backed() {
         frame_norms: None,
         normalization: Normalization::None,
         core: CacheCore {
-            spill_directory: Some(SpillDirectory::create(temp_dir.to_path_buf(), false).unwrap()),
+            spill_directory: Some(spill_directory),
             dimensions: dims,
             metadata: ImageMetadata::default(),
             config: CacheConfig {
@@ -666,6 +669,7 @@ fn read_channel_chunk_disk_backed() {
 #[test]
 fn frame_count_disk_backed() {
     let temp_dir = ScratchDirectory::new("lumos_frame_count_disk_test");
+    let spill_directory = SpillDirectory::create(&temp_dir, false).unwrap();
 
     let dims = ImageDimensions::new((2, 2), 1);
 
@@ -676,7 +680,7 @@ fn frame_count_disk_backed() {
         let image = LinearImage::from_pixels(dims, pixels);
         let base_filename = format!("frame{}.bin", i);
         let cached_frame = StoredFrame::spill(
-            &temp_dir,
+            spill_directory.path(),
             &base_filename,
             &image,
             &FrameQuality::None,
@@ -691,7 +695,7 @@ fn frame_count_disk_backed() {
         frame_norms: None,
         normalization: Normalization::None,
         core: CacheCore {
-            spill_directory: Some(SpillDirectory::create(temp_dir.to_path_buf(), false).unwrap()),
+            spill_directory: Some(spill_directory),
             dimensions: dims,
             metadata: ImageMetadata::default(),
             config: CacheConfig::default(),
