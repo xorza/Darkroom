@@ -20,6 +20,13 @@ fn fmt_elapsed_steps_through_units_within_the_reserved_width() {
         (10.0, "10.00s"),
         (99.999, "100.00s"),
         (999.994, "999.99s"),
+        // The carry side of every switch: a value that rounds up to the next unit's 1 is shown in
+        // that unit, never as "1000" of the smaller one.
+        (999.6e-6, "1.0ms"),
+        (0.999_96, "1.00s"),
+        (999.996, "1000.0s"),
+        (9_999.96, "10000s"),
+        (999_999.0, "999999s"),
     ];
     for (secs, expected) in cases {
         let got = fmt_elapsed(secs).to_string();
@@ -43,4 +50,9 @@ fn fmt_bytes_steps_through_magnitudes() {
     assert_eq!(fmt_bytes(3_145_728).to_string(), "3.0 MB"); // 3 * 1024^2
     assert_eq!(fmt_bytes(1_073_741_824).to_string(), "1.00 GB"); // 1024^3
     assert_eq!(fmt_bytes(1_610_612_736).to_string(), "1.50 GB"); // 1.5 * 1024^3
+    // One below each threshold rounds up to 1024.0 of the smaller unit, so it reads as 1 of the
+    // larger: 1_048_575 / 1024 = 1023.999…, (1024^3 − 1) / 1024^2 = 1023.999….
+    assert_eq!(fmt_bytes(1_023).to_string(), "1023 B");
+    assert_eq!(fmt_bytes(1_048_575).to_string(), "1.0 MB");
+    assert_eq!(fmt_bytes(1_073_741_823).to_string(), "1.00 GB");
 }
