@@ -267,12 +267,12 @@ impl CfaImage {
         };
         let neighbors = SameColorMedian::new(&self.cfa_type);
         let size = Size2us::new(self.data.width(), self.data.height());
-        for index in 0..size.pixel_count() {
-            if nulls.is_null(index) {
-                self.data[index] =
-                    neighbors.at(&self.data, size.point_of(index), Some(nulls.bits()));
-            }
-        }
+        let mask = nulls.bits();
+        // The mask keeps every null out of every repair, so the order of the repairs is free.
+        mask.for_each_set(|pos| {
+            let repaired = neighbors.at(&self.data, pos, Some(mask));
+            self.data[size.index_of(pos)] = repaired;
+        });
     }
 
     /// Demosaic this CFA image into a 3-channel `LinearImage`.

@@ -253,6 +253,32 @@ impl BitBuffer2 {
         }
     }
 
+    /// Call `visit` with the position of every set bit, row by row, skipping each clear word whole
+    /// — a sparse mask costs a pass over its words, not over its pixels. Row padding is masked
+    /// off, whatever it holds.
+    pub(crate) fn for_each_set(&self, mut visit: impl FnMut(Vec2us)) {
+        let words_per_row = self.words_per_row();
+        for y in 0..self.size.height {
+            let row = &self.words[y * words_per_row..(y + 1) * words_per_row];
+            for (word_in_row, &word) in row.iter().enumerate() {
+                let base = word_in_row * BITS_PER_WORD;
+                if base >= self.size.width {
+                    break;
+                }
+                let valid = self.size.width - base;
+                let mut bits = if valid < BITS_PER_WORD {
+                    word & ((1u64 << valid) - 1)
+                } else {
+                    word
+                };
+                while bits != 0 {
+                    visit(Vec2us::new(base + bits.trailing_zeros() as usize, y));
+                    bits &= bits - 1;
+                }
+            }
+        }
+    }
+
     /// Iterate over all bit values (row-major order, skipping padding).
     #[inline]
     pub(crate) fn iter(&self) -> BitIter<'_> {

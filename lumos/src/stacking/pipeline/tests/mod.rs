@@ -117,14 +117,14 @@ fn aligns_shifted_frames_into_a_sharp_stack() {
     // The pipeline's own stages reach the callback, not just the combine's. Counters come off
     // shared atomics, so the reports arrive in any order — sort before comparing.
     let reports = reports.lock().unwrap();
+    // In arrival order: the parallel stages report through one counter, so the callback sees each
+    // count once and in order, however the workers finish.
     let currents = |wanted: StackingStage| {
-        let mut seen: Vec<usize> = reports
+        reports
             .iter()
             .filter(|(stage, ..)| *stage == wanted)
             .map(|(_, current, _)| *current)
-            .collect();
-        seen.sort_unstable();
-        seen
+            .collect::<Vec<usize>>()
     };
     let totals = |wanted: StackingStage| {
         reports
@@ -139,12 +139,10 @@ fn aligns_shifted_frames_into_a_sharp_stack() {
     // Registration counts every frame but the reference, which needs none.
     assert_eq!(currents(StackingStage::Registering), [1, 2]);
     assert_eq!(totals(StackingStage::Registering), [2, 2]);
-    assert!(
-        reports
-            .iter()
-            .any(|(stage, ..)| *stage == StackingStage::Combining),
-        "the combine stage never reported"
-    );
+    // The combine counts chunk-channel pairs, from 1 to its total, with no report before work.
+    let combining = currents(StackingStage::Combining);
+    let combining_total = totals(StackingStage::Combining)[0];
+    assert_eq!(combining, (1..=combining_total).collect::<Vec<_>>());
     assert_eq!(
         currents(StackingStage::Drizzling),
         Vec::<usize>::new(),

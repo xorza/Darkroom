@@ -739,3 +739,31 @@ fn blend_one_dominant_direction() {
         assert!(v >= 0.0, "Negative at {i}");
     }
 }
+
+/// A border pixel whose clipped 3×3 window holds no sample of a colour takes that colour from the
+/// nearest window that does, never from its own sample of another colour.
+///
+/// The fixture's corner (0, 0) is green, and so are its three in-frame neighbours. The 5×5 window
+/// holds red at (2, 0) and (1, 2) and blue at (2, 1) and (0, 2); a sample is `10·y + x + 1`, so
+/// red is (3 + 22) / 2 = 12.5, blue (13 + 21) / 2 = 17, and green keeps its own 1.
+#[test]
+fn a_border_pixel_takes_a_missing_colour_from_that_colour() {
+    let size = Size2us::new(12, 12);
+    let data: Vec<f32> = (0..size.pixel_count())
+        .map(|index| (10 * (index / size.width) + index % size.width + 1) as f32)
+        .collect();
+    let xtrans = XTransImage::with_margins_f32(&data, SensorLayout::cropped(size), test_pattern());
+    let mut r = vec![0.0; size.pixel_count()];
+    let mut g = vec![0.0; size.pixel_count()];
+    let mut b = vec![0.0; size.pixel_count()];
+    demosaic_border(
+        &xtrans,
+        PlanarRgbMut {
+            r: &mut r,
+            g: &mut g,
+            b: &mut b,
+        },
+        1,
+    );
+    assert_eq!([r[0], g[0], b[0]], [12.5, 1.0, 17.0]);
+}

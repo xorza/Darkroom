@@ -13,6 +13,7 @@ use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::combine::stack::stack_stored_frames;
 use crate::stacking::frame_store::StoredFrame;
 use crate::stacking::frame_store::frame_stats::FrameStats;
+use crate::stacking::progress::stage_counter::StageCounter;
 use crate::stacking::progress::{ProgressCallback, StackingStage};
 use crate::stacking::registration::register;
 use crate::stacking::registration::resample::WarpBuffers;
@@ -65,7 +66,7 @@ pub fn align_and_stack(
     let tier = FrameTier::for_plan(&plan, &config.stack.cache)?;
 
     tracing::info!(frames = total, spilling = tier.spills(), "Detecting stars");
-    let detected_count = AtomicUsize::new(0);
+    let detected_count = StageCounter::new(&progress, StackingStage::Preparing, total);
     let detections = {
         let mut detectors =
             DetectorPool::from_config(&config.detection, total.min(rayon::current_num_threads()))
@@ -77,9 +78,8 @@ pub fn align_and_stack(
                 return Err(Error::Stack(StackError::Cancelled));
             }
             let result = detector.detect(image);
-            let n = detected_count.fetch_add(1, Ordering::Relaxed) + 1;
+            let n = detected_count.complete_one();
             log_detection(n, total, &result);
-            progress.report(n, total, StackingStage::Preparing);
             Ok(result)
         })
     }?;
@@ -178,16 +178,11 @@ pub(crate) fn register_warp_and_stack(
 
     tracing::info!(frames = total - 1, "Registering frames to the reference");
     let registered_so_far = AtomicUsize::new(0);
-    // Counted where the work ends rather than where it starts, so reports climb monotonically
-    // even though `warp_concurrency` frames are in flight and finish out of order. `registered`
-    // and `dropped` frames both count — the bar tracks attempts resolved, not survivors.
-    let resolved = AtomicUsize::new(0);
+    // Counted where the work ends rather than where it starts. `registered` and `dropped`
+    // frames both count — the bar tracks attempts resolved, not survivors.
+    let resolved = StageCounter::new(&progress, StackingStage::Registering, total - 1);
     let report_resolved = || {
-        progress.report(
-            resolved.fetch_add(1, Ordering::Relaxed) + 1,
-            total - 1,
-            StackingStage::Registering,
-        );
+        resolved.complete_one();
     };
     // One reusable set of warp output planes per in-flight worker. The spill tier hands its
     // buffers back once the frame is on disk, so a worker warps into pages it has already faulted

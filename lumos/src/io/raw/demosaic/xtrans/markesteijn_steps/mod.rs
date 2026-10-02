@@ -623,8 +623,9 @@ pub(crate) fn compute_derivatives(
 
     (0..total_chunks).into_par_iter().for_each_init(
         || {
-            // Allocate 3 row buffers once per rayon thread, reused across chunks. Allocated in
-            // the init rather than leased from a `JobScratchPool`: a demosaic pass runs this loop
+            // Three row buffers per job rayon splits off — it calls the init once per job, not once
+            // per thread — reused across that job's chunks. Allocated in the init rather than
+            // leased from a `JobScratchPool`: a demosaic pass runs this loop
             // once and nothing in the RAW decode path outlives a single frame, so there is
             // nowhere warm to hand them back to.
             [
@@ -1057,31 +1058,53 @@ fn demosaic_border(xtrans: &XTransImage<'_>, out: PlanarRgbMut<'_>, border: usiz
             let native = xtrans.raw_pattern.color_at(Vec2us::new(
                 x + xtrans.layout.margin.x,
                 y + xtrans.layout.margin.y,
-            ));
+            )) as usize;
             let raw = active_raw(xtrans, y, x);
-            if native == 1 && weights[0] == 0.0 {
-                out_r[index] = raw;
-                out_g[index] = raw;
-                out_b[index] = raw;
-                continue;
-            }
-            out_r[index] = if native == 0 || weights[0] == 0.0 {
-                raw
-            } else {
-                sums[0] / weights[0]
+            let channel = |color: usize| {
+                if color == native {
+                    raw
+                } else if weights[color] > 0.0 {
+                    sums[color] / weights[color]
+                } else {
+                    nearest_same_color_mean(xtrans, y, x, color).unwrap_or(raw)
+                }
             };
-            out_g[index] = if native == 1 || weights[1] == 0.0 {
-                raw
-            } else {
-                sums[1] / weights[1]
-            };
-            out_b[index] = if native == 2 || weights[2] == 0.0 {
-                raw
-            } else {
-                sums[2] / weights[2]
-            };
+            out_r[index] = channel(0);
+            out_g[index] = channel(1);
+            out_b[index] = channel(2);
         }
     }
+}
+
+/// The mean of `color`'s samples in the smallest square window around `(x, y)` that holds any,
+/// for a border pixel whose 3×3 neighbourhood has none. `None` only when the whole frame has no
+/// sample of `color`, where there is nothing to interpolate from and the caller keeps the pixel's
+/// own sample.
+fn nearest_same_color_mean(
+    xtrans: &XTransImage<'_>,
+    y: usize,
+    x: usize,
+    color: usize,
+) -> Option<f32> {
+    let width = xtrans.layout.active.width;
+    let height = xtrans.layout.active.height;
+    (2..width.max(height)).find_map(|radius| {
+        let mut sum = 0.0f32;
+        let mut count = 0usize;
+        for neighbor_y in y.saturating_sub(radius)..=(y + radius).min(height - 1) {
+            for neighbor_x in x.saturating_sub(radius)..=(x + radius).min(width - 1) {
+                let neighbor_color = xtrans.raw_pattern.color_at(Vec2us::new(
+                    neighbor_x + xtrans.layout.margin.x,
+                    neighbor_y + xtrans.layout.margin.y,
+                )) as usize;
+                if neighbor_color == color {
+                    sum += active_raw(xtrans, neighbor_y, neighbor_x);
+                    count += 1;
+                }
+            }
+        }
+        (count > 0).then(|| sum / count as f32)
+    })
 }
 
 #[cfg(test)]

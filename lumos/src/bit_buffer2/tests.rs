@@ -71,7 +71,25 @@ fn slice_iteration_and_conversion_preserve_row_major_order() {
     assert_eq!(iter.len(), 11);
     assert_eq!(iter.collect::<Vec<_>>(), source[1..]);
     assert_eq!(Vec::<bool>::from(&buffer), source);
-    assert_eq!(Vec::<bool>::from(buffer), source);
+    assert_eq!(Vec::<bool>::from(buffer.clone()), source);
+
+    // The set-bit walk visits exactly the true positions, in row-major order.
+    let mut visited = Vec::new();
+    buffer.for_each_set(|pos| visited.push(pos.y * 4 + pos.x));
+    let expected: Vec<usize> = (0..source.len()).filter(|&i| source[i]).collect();
+    assert_eq!(visited, expected);
+
+    // A filled buffer has its padding set too, which the walk must not report; a row past one
+    // word reaches its second.
+    let filled = BitBuffer2::new_filled(Size2us::new(70, 2), true);
+    let mut count = 0;
+    let mut last = Vec2us::ZERO;
+    filled.for_each_set(|pos| {
+        count += 1;
+        last = pos;
+    });
+    assert_eq!(count, 140);
+    assert_eq!(last, Vec2us::new(69, 1));
 }
 
 #[test]

@@ -416,7 +416,6 @@ pub(crate) fn demosaic(
     // scatter and lets the caller take the buffers zero-copy.
 
     let active = width * height;
-    // SAFETY: the per-row copy_from_slice below writes every element of each buffer.
     let mut out_r = vec![0.0f32; active];
     let mut out_g = vec![0.0f32; active];
     let mut out_b = vec![0.0f32; active];

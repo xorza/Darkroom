@@ -327,14 +327,6 @@ Severity: Low.
 - [ ] Dead configurability: `widgets/inline_rename.rs` `InlineRename` — the only caller always passes `.style(..)`, so the `style: Option` fallback (rebuilding `flattened` per frame) and the `Right`/`Center` `halign` branches are test-only; `Theme::inline_rename` docs mention "boundary port" and "graph tab" renames that don't exist. `GroupDrag::drop_if_owner_gone` runs in `advance` and again in `NodeUI::draw_all`. `paint/anchored_menu.rs` `AnchoredMenu::open_on` is a predicate sharing a name with `NodeContextMenu::open_on`/`NodeMenuUi::open_on`, which open menus.
 - [ ] `node/wid.rs` claims the node subtree's id vocabulary, but `port_row` `event_glyph_wid` (takes `(NodeId, usize)` instead of `EventRef`), `inspector` `inspect_badge_wid`/`inspect_panel_wid` and `preview_row` `preview_image_wid` use raw `WidgetId::from_hash` with ad-hoc prefixes.
 
-## lumos io and support leftovers
-Severity: Low.
-
-- [ ] `lumos/src/io/raw/demosaic/xtrans/markesteijn/mod.rs` `demosaic` reinterprets arena regions with `unsafe from_raw_parts` in steps 3–5 while `final_blend_buffers` does the same casts with `bytemuck`; the region offsets (4P, 12P, 16P, 17P) are literals at each step. `markesteijn_steps` `demosaic_border` fills a channel with no sample in its 3×3 window with the pixel's own (different-colour) raw sample, and at a green site with no red neighbour writes green into all three channels even when blue was found.
-- [ ] `same_color.rs` `median_of_neighbors` and `XTransOffsets::gather` repeat the same bounds-plus-mask neighbour walk; `CfaImage::repair_nulls` walks every pixel serially to visit a few masked ones; `compute_derivatives` claims `for_each_init` allocates "once per rayon thread" (it is once per split job).
-- [ ] `// SAFETY:` comments on safe `vec!` allocations (`normalize_active_area`, the RCD output buffers, `DemosaicArena::new`, the Markesteijn outputs).
-- [ ] `lumos/src/stacking/progress.rs` `StackingProgress::current` is documented "Current step (0-based)" but every caller reports a completed count; `Loading`/`Combining` emit an initial `0`, other stages don't; the parallel `Preparing`/`Registering` reporters call `report` after a relaxed `fetch_add`, so callbacks can see counts out of order.
-
 ## Docs that describe code that no longer exists
 Severity: Low — prose that misleads readers about behaviour.
 

@@ -1,14 +1,16 @@
 //! Progress reporting for stacking operations.
 
+pub(crate) mod stage_counter;
+
 use std::fmt;
 use std::sync::Arc;
 
 /// Progress information for stacking operations.
 #[derive(Debug, Clone)]
 pub struct StackingProgress {
-    /// Current step (0-based).
+    /// Units of the stage's work done so far, from 1; the stage's last report has `total`.
     pub current: usize,
-    /// Total number of steps.
+    /// Units of work in the stage.
     pub total: usize,
     /// Description of current operation.
     pub stage: StackingStage,
@@ -17,8 +19,8 @@ pub struct StackingProgress {
 /// The pass a [`StackingProgress`] report belongs to.
 ///
 /// One variant per pass that walks a countable set, so `current`/`total` mean one thing within a
-/// stage and a stage change is a real change of work. Each stage's counter restarts at its own
-/// total, and a run emits only the stages its route uses — but which stages those are follows from
+/// stage and a stage change is a real change of work. Each stage reports once per unit it
+/// completes, in order, and a run emits only the stages its route uses — but which stages those are follows from
 /// the work asked for, not from which function was called: both front ends report `Preparing` and
 /// `Registering`, a statistical combine reports `Loading` and `Combining` where a drizzle reports
 /// `Drizzling`.
