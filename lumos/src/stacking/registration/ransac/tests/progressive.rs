@@ -36,8 +36,8 @@ fn progressive_ransac_outlier_rejection() {
 
     // 5 outliers
     for i in 0..5 {
-        ref_points.push(DVec2::new(100.0 + i as f64 * 10.0, 100.0));
-        target_points.push(DVec2::new(200.0 + i as f64 * 5.0, 50.0));
+        ref_points.push(DVec2::new(100.0 + f64::from(i) * 10.0, 100.0));
+        target_points.push(DVec2::new(200.0 + f64::from(i) * 5.0, 50.0));
     }
 
     let mut confidences = vec![0.9; 15];
@@ -109,7 +109,7 @@ fn progressive_ransac_uses_weights() {
 
     // Verify outliers not in inliers
     for idx in 0..5 {
-        assert!(!result.inliers.contains(&idx), "Outlier {} in inliers", idx);
+        assert!(!result.inliers.contains(&idx), "Outlier {idx} in inliers");
     }
 }
 
@@ -124,8 +124,8 @@ fn progressive_ransac_finds_solution_faster() {
 
     let confidences: Vec<f64> = (0..50)
         .map(|i| {
-            let x = (i % 10) as f64;
-            let y = (i / 10) as f64;
+            let x = f64::from(i % 10);
+            let y = f64::from(i / 10);
             let dist = ((x - 4.5).powi(2) + (y - 2.0).powi(2)).sqrt();
             1.0 / (1.0 + dist * 0.1)
         })

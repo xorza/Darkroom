@@ -66,7 +66,10 @@ fn centroid_method_validate() {
 fn centroid_method_invalid_beta_returns_exact_error() {
     for beta in [0.0, 15.0, f32::INFINITY] {
         let invalid = CentroidMethod::MoffatFit { beta }.validate().unwrap_err();
-        assert_eq!((invalid.field, invalid.value), ("Moffat beta", beta as f64));
+        assert_eq!(
+            (invalid.field, invalid.value),
+            ("Moffat beta", f64::from(beta))
+        );
     }
 }
 
@@ -146,7 +149,7 @@ fn inclusive_bounds_accept_their_edges() {
         }),
         ("max_sharpness 1", |c| c.filter.max_sharpness = 1.0),
         ("max_fwhm_deviation 0", |c| {
-            c.filter.max_fwhm_deviation = 0.0
+            c.filter.max_fwhm_deviation = 0.0;
         }),
         ("duplicate_min_separation 0", |c| {
             c.filter.duplicate_min_separation = 0.0;

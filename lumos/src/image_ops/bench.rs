@@ -89,7 +89,7 @@ fn bench_stretch_asinh_explicit(b: ::quickbench::Bencher) {
             color: ColorMode::ColorPreserving,
         }
         .apply(img)
-        .unwrap()
+        .unwrap();
     });
 }
 
@@ -109,7 +109,7 @@ fn bench_denoise(b: ::quickbench::Bencher) {
 fn bench_scnr(b: ::quickbench::Bencher) {
     let master = display_master();
     bench_op(b, &master, |img| {
-        Scnr::average_neutral().apply(img).unwrap()
+        Scnr::average_neutral().apply(img).unwrap();
     });
 }
 
@@ -117,7 +117,7 @@ fn bench_scnr(b: ::quickbench::Bencher) {
 fn bench_extract_background(b: ::quickbench::Bencher) {
     let master = display_master();
     bench_op(b, &master, |img| {
-        ExtractBackground::default().apply(img).unwrap()
+        ExtractBackground::default().apply(img).unwrap();
     });
 }
 
@@ -131,6 +131,6 @@ fn bench_hdr(b: ::quickbench::Bencher) {
 fn bench_local_contrast(b: ::quickbench::Bencher) {
     let master = display_master();
     bench_op(b, &master, |img| {
-        LocalContrast::default().apply(img).unwrap()
+        LocalContrast::default().apply(img).unwrap();
     });
 }

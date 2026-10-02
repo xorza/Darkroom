@@ -100,8 +100,9 @@ fn centroid_recovers_known_subpixel_positions() {
             &StampGrid::new(compute_stamp_radius(fwhm)),
         )
         .unwrap_or_else(|| panic!("no centroid at ({true_x}, {true_y})"));
-        let error =
-            ((star.pos.x - true_x as f64).powi(2) + (star.pos.y - true_y as f64).powi(2)).sqrt();
+        let error = ((star.pos.x - f64::from(true_x)).powi(2)
+            + (star.pos.y - f64::from(true_y)).powi(2))
+        .sqrt();
         println!(
             "({true_x:.2},{true_y:.2}) -> ({:.3},{:.3}) err {error:.4}",
             star.pos.x, star.pos.y
@@ -144,7 +145,8 @@ fn centroid_accuracy_improves_with_snr() {
             &StampGrid::new(compute_stamp_radius(fwhm)),
         )
         .expect("centroid");
-        let error = ((star.pos.x - tx as f64).powi(2) + (star.pos.y - ty as f64).powi(2)).sqrt();
+        let error =
+            ((star.pos.x - f64::from(tx)).powi(2) + (star.pos.y - f64::from(ty)).powi(2)).sqrt();
         measured.push((star.snr, error));
         println!("brightness target: SNR {:.1}, error {error:.4}", star.snr);
     }
@@ -197,7 +199,8 @@ fn centroid_methods_agree_and_fits_beat_moments() {
             &StampGrid::new(compute_stamp_radius(fwhm)),
         )
         .expect("centroid");
-        let err = ((star.pos.x - tx as f64).powi(2) + (star.pos.y - ty as f64).powi(2)).sqrt();
+        let err =
+            ((star.pos.x - f64::from(tx)).powi(2) + (star.pos.y - f64::from(ty)).powi(2)).sqrt();
         (star.pos.x, err)
     };
 

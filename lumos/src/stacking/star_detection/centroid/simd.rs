@@ -1,7 +1,7 @@
 //! Lane reductions shared by the Gaussian and Moffat SIMD backends.
 //!
 //! Both profile fits accumulate their normal equations in vector lanes and reduce the whole set
-//! once per batch — 28 accumulators for Gaussian2D, 21 for MoffatFixedBeta — so these run per fit
+//! once per batch — 28 accumulators for `Gaussian2D`, 21 for `MoffatFixedBeta` — so these run per fit
 //! rather than per pixel.
 //!
 //! The reduction is all that is shared. Each of the four backends declares, updates and reduces

@@ -57,16 +57,11 @@ fn term_exponents_order_5() {
 fn term_exponents_all_satisfy_constraints() {
     for order in 2..=5 {
         let terms = term_exponents(order);
-        for &(p, q) in terms.iter() {
+        for &(p, q) in &terms {
             let total = p + q;
             assert!(
                 total >= 2 && total <= order,
-                "Order {}: term ({},{}) has p+q={} outside [2,{}]",
-                order,
-                p,
-                q,
-                total,
-                order
+                "Order {order}: term ({p},{q}) has p+q={total} outside [2,{order}]"
             );
         }
     }

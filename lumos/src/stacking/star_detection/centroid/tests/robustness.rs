@@ -35,9 +35,7 @@ fn centroid_undersampled_psf() {
     let error = ((new_pos.x - true_pos.x).powi(2) + (new_pos.y - true_pos.y).powi(2)).sqrt();
     assert!(
         error < 0.5,
-        "Centroid error {} too large for undersampled PSF (FWHM={:.2})",
-        error,
-        expected_fwhm
+        "Centroid error {error} too large for undersampled PSF (FWHM={expected_fwhm:.2})"
     );
 }
 
@@ -73,9 +71,7 @@ fn centroid_large_psf() {
     let error = ((new_pos.x - true_pos.x).powi(2) + (new_pos.y - true_pos.y).powi(2)).sqrt();
     assert!(
         error < 0.5,
-        "Centroid error {} too large for large PSF (FWHM={:.2})",
-        error,
-        expected_fwhm
+        "Centroid error {error} too large for large PSF (FWHM={expected_fwhm:.2})"
     );
 }
 
@@ -115,8 +111,7 @@ fn gaussian_fit_undersampled_psf() {
     let error = ((result.pos.x - true_cx).powi(2) + (result.pos.y - true_cy).powi(2)).sqrt();
     assert!(
         error < 0.3,
-        "Position error {} too large for undersampled PSF",
-        error
+        "Position error {error} too large for undersampled PSF"
     );
 }
 
@@ -210,8 +205,7 @@ fn centroid_with_nearby_star() {
     let error = ((new_pos.x - primary_pos.x).powi(2) + (new_pos.y - primary_pos.y).powi(2)).sqrt();
     assert!(
         error < 1.0,
-        "Centroid error {} too large with nearby contamination",
-        error
+        "Centroid error {error} too large with nearby contamination"
     );
 }
 
@@ -293,8 +287,7 @@ fn gaussian_fit_with_contamination() {
     let error = ((result.pos.x - true_cx).powi(2) + (result.pos.y - true_cy).powi(2)).sqrt();
     assert!(
         error < 0.5,
-        "Position error {} too large with wing contamination",
-        error
+        "Position error {error} too large with wing contamination"
     );
 }
 
@@ -405,8 +398,7 @@ fn centroid_rotated_ellipse_45deg() {
     let error = ((new_pos.x - true_pos.x).powi(2) + (new_pos.y - true_pos.y).powi(2)).sqrt();
     assert!(
         error < 0.6,
-        "Centroid error {} too large for 45° rotated ellipse",
-        error
+        "Centroid error {error} too large for 45° rotated ellipse"
     );
 }
 
@@ -434,17 +426,14 @@ fn centroid_various_rotation_angles() {
 
         assert!(
             result.is_some(),
-            "Should find centroid for {}° rotated ellipse",
-            angle_deg
+            "Should find centroid for {angle_deg}° rotated ellipse"
         );
         let new_pos = result.unwrap();
 
         let error = ((new_pos.x - true_pos.x).powi(2) + (new_pos.y - true_pos.y).powi(2)).sqrt();
         assert!(
             error < 0.2,
-            "Centroid error {} too large for {}° rotated ellipse",
-            error,
-            angle_deg
+            "Centroid error {error} too large for {angle_deg}° rotated ellipse"
         );
     }
 }
@@ -481,15 +470,12 @@ fn eccentricity_rotation_invariant() {
         let diff = (ecc - avg_ecc).abs() / avg_ecc;
         assert!(
             diff < 0.25,
-            "Eccentricity at {}° differs too much from average: {} vs {}",
-            angle,
-            ecc,
-            avg_ecc
+            "Eccentricity at {angle}° differs too much from average: {ecc} vs {avg_ecc}"
         );
     }
 }
 
-/// Test Gaussian fitting on rotated ellipse (fits axis-aligned sigma_x, sigma_y).
+/// Test Gaussian fitting on rotated ellipse (fits axis-aligned `sigma_x`, `sigma_y`).
 #[test]
 fn gaussian_fit_rotated_ellipse() {
     use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
@@ -527,8 +513,7 @@ fn gaussian_fit_rotated_ellipse() {
     let error = ((result.pos.x - true_cx).powi(2) + (result.pos.y - true_cy).powi(2)).sqrt();
     assert!(
         error < 0.1,
-        "Position error {} too large for rotated ellipse fit",
-        error
+        "Position error {error} too large for rotated ellipse fit"
     );
 
     // The fitted sigma values will be axis-aligned projections, not the true major/minor axes
@@ -576,8 +561,7 @@ fn recovery_from_2pixel_offset() {
     let error = ((pos.x - true_pos.x).powi(2) + (pos.y - true_pos.y).powi(2)).sqrt();
     assert!(
         error < 0.2,
-        "Should recover from 2-pixel offset, error = {}",
-        error
+        "Should recover from 2-pixel offset, error = {error}"
     );
 }
 
@@ -614,8 +598,7 @@ fn recovery_from_3pixel_offset() {
     let error = ((pos.x - true_pos.x).powi(2) + (pos.y - true_pos.y).powi(2)).sqrt();
     assert!(
         error < 0.3,
-        "Should recover from 3-pixel offset, error = {}",
-        error
+        "Should recover from 3-pixel offset, error = {error}"
     );
 }
 
@@ -657,8 +640,7 @@ fn gaussian_fit_bad_initial_guess() {
     let error = ((result.pos.x - true_cx).powi(2) + (result.pos.y - true_cy).powi(2)).sqrt();
     assert!(
         error < 0.1,
-        "Gaussian fit should recover from bad guess, error = {}",
-        error
+        "Gaussian fit should recover from bad guess, error = {error}"
     );
 }
 
@@ -708,7 +690,6 @@ fn moffat_fit_bad_initial_guess() {
     let error = ((result.pos.x - true_cx).powi(2) + (result.pos.y - true_cy).powi(2)).sqrt();
     assert!(
         error < 0.1,
-        "Moffat fit should recover from bad guess, error = {}",
-        error
+        "Moffat fit should recover from bad guess, error = {error}"
     );
 }

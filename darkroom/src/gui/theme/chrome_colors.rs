@@ -38,7 +38,7 @@ pub(crate) struct ChromeColors {
     pub(crate) badge_graph: RgbaF32,
     /// Sink chip — error red.
     pub(crate) badge_sink: RgbaF32,
-    /// RuntimeCache (persist-to-disk) chip — warning yellow.
+    /// `RuntimeCache` (persist-to-disk) chip — warning yellow.
     pub(crate) badge_cache: RgbaF32,
     /// Impure marker. A read-only descriptor (the node recomputes every run
     /// and is never cached), not an interactive toggle.

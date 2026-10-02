@@ -154,7 +154,7 @@ pub(crate) struct BayerImage<'a> {
 }
 
 impl<'a> BayerImage<'a> {
-    /// Create a BayerImage with margins (libraw style).
+    /// Create a `BayerImage` with margins (libraw style).
     ///
     /// # Panics
     /// Panics under the conditions [`SensorLayout::validate`] names.

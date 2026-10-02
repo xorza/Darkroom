@@ -169,7 +169,7 @@ fn load_raw_valid_file() {
     init_tracing();
 
     let result = load_raw(&path, &CancelToken::never());
-    assert!(result.is_ok(), "Failed to load {:?}: {:?}", path, result);
+    assert!(result.is_ok(), "Failed to load {path:?}: {result:?}");
 
     let image = result.unwrap();
 
@@ -240,7 +240,7 @@ fn normalize_maps_the_black_to_maximum_range_onto_zero_to_one() {
         20000, // Above maximum -> clamped to 1.0
     ];
 
-    let result = normalize::normalize_u16_to_f32_parallel(&input, black, inv_range);
+    let result = normalize_u16_to_f32_parallel(&input, black, inv_range);
 
     assert_eq!(result.len(), input.len());
 
@@ -276,15 +276,15 @@ fn normalize_u16_large_array() {
     let black = 0.0;
     let inv_range = 1.0 / 65535.0;
 
-    let result = normalize::normalize_u16_to_f32_parallel(&input, black, inv_range);
+    let result = normalize_u16_to_f32_parallel(&input, black, inv_range);
 
     assert_eq!(result.len(), size);
 
     // Verify no NaN or infinite values
     for (i, &v) in result.iter().enumerate() {
-        assert!(!v.is_nan(), "NaN at index {}", i);
-        assert!(v.is_finite(), "Infinite at index {}", i);
-        assert!(v >= 0.0, "Negative value at index {}", i);
+        assert!(!v.is_nan(), "NaN at index {i}");
+        assert!(v.is_finite(), "Infinite at index {i}");
+        assert!(v >= 0.0, "Negative value at index {i}");
     }
 
     // Check first and last values
@@ -381,7 +381,7 @@ fn direct_and_calibration_normalization_share_raw_linear_color_scale() {
                 }
             }
 
-            let mut direct = normalize::normalize_u16_to_f32_parallel(&raw_data, black, inv_range);
+            let mut direct = normalize_u16_to_f32_parallel(&raw_data, black, inv_range);
             apply_bayer_black_corrections(
                 &mut direct,
                 raw_width,
@@ -462,8 +462,7 @@ fn spatial_black_repeat_uses_visible_coordinates_with_nonzero_margins() {
     raw_data[layout.raw.width + 2..layout.raw.width + 5].copy_from_slice(&[315, 327, 319]);
     raw_data[2 * layout.raw.width + 2..2 * layout.raw.width + 5].copy_from_slice(&[331, 343, 335]);
 
-    let mut direct =
-        normalize::normalize_u16_to_f32_parallel(&raw_data, black.common, black.inv_range);
+    let mut direct = normalize_u16_to_f32_parallel(&raw_data, black.common, black.inv_range);
     apply_bayer_black_corrections(
         &mut direct,
         layout.raw.width,
@@ -682,14 +681,12 @@ fn normalize_below_black_clamped() {
 
     // All values below black
     let input: Vec<u16> = vec![0, 100, 200, 499];
-    let result = normalize::normalize_u16_to_f32_parallel(&input, black, inv_range);
+    let result = normalize_u16_to_f32_parallel(&input, black, inv_range);
 
     for (i, &v) in result.iter().enumerate() {
         assert!(
             v == 0.0,
-            "Value below black should be 0.0, got {} at index {}",
-            v,
-            i
+            "Value below black should be 0.0, got {v} at index {i}"
         );
     }
 }
@@ -705,8 +702,8 @@ fn normalize_unclamped_preserves_out_of_range() {
     // below black, below black, in range, above white
     let input: Vec<u16> = vec![0, 100, 499, 700, 2000];
     let mut unclamped = vec![0.0; input.len()];
-    normalize::normalize_u16_to_f32_into::<false>(&input, &mut unclamped, black, inv_range);
-    let clamped = normalize::normalize_u16_to_f32_parallel(&input, black, inv_range);
+    normalize_u16_to_f32_into::<false>(&input, &mut unclamped, black, inv_range);
+    let clamped = normalize_u16_to_f32_parallel(&input, black, inv_range);
 
     // Unclamped is the exact affine map (value - black) * inv_range; negatives
     // and >1 are retained.
@@ -729,7 +726,7 @@ fn normalize_unclamped_preserves_out_of_range() {
     }
 }
 
-/// Test process_unknown_libraw_fallback 16-bit normalization formula.
+/// Test `process_unknown_libraw_fallback` 16-bit normalization formula.
 /// We can't call the function directly (needs libraw instance), but we can
 /// verify the normalization math it uses: (v as f32) / 65535.0
 #[test]
@@ -742,30 +739,24 @@ fn fallback_16bit_normalization() {
     ];
 
     for &(input, expected) in test_cases {
-        let result = (input as f32) / 65535.0;
+        let result = f32::from(input) / 65535.0;
         assert!(
             (result - expected).abs() < 1e-6,
-            "16-bit norm({}) = {}, expected {}",
-            input,
-            result,
-            expected
+            "16-bit norm({input}) = {result}, expected {expected}"
         );
     }
 }
 
-/// Test process_unknown_libraw_fallback 8-bit normalization formula.
+/// Test `process_unknown_libraw_fallback` 8-bit normalization formula.
 #[test]
 fn fallback_8bit_normalization() {
     let test_cases: &[(u8, f32)] = &[(0, 0.0), (1, 1.0 / 255.0), (127, 127.0 / 255.0), (255, 1.0)];
 
     for &(input, expected) in test_cases {
-        let result = (input as f32) / 255.0;
+        let result = f32::from(input) / 255.0;
         assert!(
             (result - expected).abs() < 1e-6,
-            "8-bit norm({}) = {}, expected {}",
-            input,
-            result,
-            expected
+            "8-bit norm({input}) = {result}, expected {expected}"
         );
     }
 }

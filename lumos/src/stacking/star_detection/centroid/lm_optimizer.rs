@@ -56,7 +56,7 @@ impl Default for LMConfig {
 /// variable), so carrying them costs two moves, while gating them would push `#[cfg]` into the
 /// optimizer's inner loop and save nothing.
 #[derive(Debug, Clone, Copy)]
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg_attr(not(test), expect(dead_code))]
 pub(super) struct LMResult<const N: usize> {
     pub(super) params: [f64; N],
     pub(super) chi2: f64,

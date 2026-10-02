@@ -306,11 +306,11 @@ fn match_ratio_tolerance_sensitivity() {
     // Tighter tolerance → fewer matches (or same), looser → more (or same).
     let ref_positions: Vec<DVec2> = (0..25)
         .map(|i| {
-            let base_x = (i % 5) as f64 * 80.0 + 100.0;
-            let base_y = (i / 5) as f64 * 80.0 + 100.0;
+            let base_x = f64::from(i % 5) * 80.0 + 100.0;
+            let base_y = f64::from(i / 5) * 80.0 + 100.0;
             // Deterministic jitter to break grid symmetry
-            let jitter_x = ((i * 13 + 7) as f64 * 0.37).sin() * 15.0;
-            let jitter_y = ((i * 17 + 3) as f64 * 0.53).cos() * 15.0;
+            let jitter_x = (f64::from(i * 13 + 7) * 0.37).sin() * 15.0;
+            let jitter_y = (f64::from(i * 17 + 3) * 0.53).cos() * 15.0;
             DVec2::new(base_x + jitter_x, base_y + jitter_y)
         })
         .collect();
@@ -354,8 +354,8 @@ fn match_min_votes_sensitivity() {
     // Higher min_votes should produce fewer (or equal) matches
     let ref_positions: Vec<DVec2> = (0..20)
         .map(|i| {
-            let x = (i % 5) as f64 * 50.0;
-            let y = (i / 5) as f64 * 50.0;
+            let x = f64::from(i % 5) * 50.0;
+            let y = f64::from(i / 5) * 50.0;
             DVec2::new(x, y)
         })
         .collect();
@@ -420,10 +420,10 @@ fn match_with_subpixel_noise() {
     // 25 irregular positions with +-0.3 pixel noise
     let ref_positions: Vec<DVec2> = (0..25)
         .map(|i| {
-            let base_x = (i % 5) as f64 * 80.0 + 100.0;
-            let base_y = (i / 5) as f64 * 80.0 + 100.0;
-            let jitter_x = ((i * 13 + 7) as f64 * 0.37).sin() * 15.0;
-            let jitter_y = ((i * 17 + 3) as f64 * 0.53).cos() * 15.0;
+            let base_x = f64::from(i % 5) * 80.0 + 100.0;
+            let base_y = f64::from(i / 5) * 80.0 + 100.0;
+            let jitter_x = (f64::from(i * 13 + 7) * 0.37).sin() * 15.0;
+            let jitter_y = (f64::from(i * 17 + 3) * 0.53).cos() * 15.0;
             DVec2::new(base_x + jitter_x, base_y + jitter_y)
         })
         .collect();

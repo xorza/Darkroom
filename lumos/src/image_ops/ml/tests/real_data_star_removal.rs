@@ -7,7 +7,7 @@ fn max_of(p: &[f32]) -> f32 {
     p.iter().copied().fold(0.0f32, f32::max)
 }
 
-/// Prototype: run a StarNet2 ONNX over the full bundled (stretched) frame and write
+/// Prototype: run a `StarNet2` ONNX over the full bundled (stretched) frame and write
 /// input / starless / stars PNGs. Uses the gitignored, caller-supplied `StarNet2_weights.onnx` in
 /// `test_data/` (lumos ships no model); `STARNET2_ONNX` overrides the path. Skipped if absent. The
 /// full frame is hundreds of 512² tiles — ~60 s on a 10-core machine. Build/run with

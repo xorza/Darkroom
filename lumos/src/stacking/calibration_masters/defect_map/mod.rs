@@ -86,7 +86,7 @@ pub struct DefectMap {
 impl DefectMap {
     /// Resident RAM held by the map: its hot + cold flat-index lists.
     pub fn ram_bytes(&self) -> usize {
-        (self.hot_indices.len() + self.cold_indices.len()) * std::mem::size_of::<usize>()
+        (self.hot_indices.len() + self.cold_indices.len()) * size_of::<usize>()
     }
 
     /// Detect **hot** pixels from a master dark — those whose residual above a smooth per-color
@@ -342,7 +342,7 @@ fn compute_per_color_residual_stats(
         }
 
         let median = median_mut(&mut samples);
-        for v in samples.iter_mut() {
+        for v in &mut samples {
             *v = (*v - median).abs();
         }
         let mad = median_mut(&mut samples);

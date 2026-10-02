@@ -144,7 +144,7 @@ where
             self.event_buffer.clear();
             let wake = tokio::select! {
                 biased;
-                _ = self.shutdown.cancelled() => WorkerWake::Stopped,
+                () = self.shutdown.cancelled() => WorkerWake::Stopped,
                 count = self.message_rx.recv_many(&mut self.messages, usize::MAX) => match count {
                     0 => WorkerWake::Stopped,
                     _ => WorkerWake::Ready,

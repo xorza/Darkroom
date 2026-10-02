@@ -24,14 +24,12 @@
 //! `TempFile` and the `internals` module are test scaffolding, gated behind
 //! the `internals` feature so they never enter a release build.
 
+#![deny(unsafe_code)]
+
 // Type-holding modules are `pub(crate)`; their public surface is defined by the
 // crate-root `pub use`s below (one canonical path per item). Modules that are
 // free-function namespaces (or a macro home) stay `pub` and are used as
 // `common::<module>::fn`.
-
-// Lets `common-derive`'s generated `::common::…` paths resolve inside `common`
-// itself (e.g. its own `#[derive(Introspect)]` test).
-extern crate self as common;
 
 #[macro_use]
 pub mod macros;
@@ -64,3 +62,8 @@ pub use serde::{DeserializeError, Lz4SizeError, SerializeError, deserialize, ser
 pub const fn is_debug() -> bool {
     cfg!(debug_assertions)
 }
+
+// Lets `common-derive`'s generated `::common::…` paths resolve inside `common`, whose only derive
+// users are its own tests.
+#[cfg(test)]
+extern crate self as common;

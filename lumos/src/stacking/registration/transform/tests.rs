@@ -157,8 +157,8 @@ fn warp_transform_with_sip() {
     let mut tgt_pts = Vec::new();
     for gy in 0..10 {
         for gx in 0..10 {
-            let rx = 5.0 + gx as f64 * 10.0;
-            let ry = 5.0 + gy as f64 * 10.0;
+            let rx = 5.0 + f64::from(gx) * 10.0;
+            let ry = 5.0 + f64::from(gy) * 10.0;
             let dx = rx - cx;
             let dy = ry - cy;
             let r2 = dx * dx + dy * dy;
@@ -414,8 +414,7 @@ fn deviation_from_identity_is_the_frobenius_norm_of_the_difference() {
     let dev = t.deviation_from_identity();
     assert!(
         (dev - 5.0).abs() < EPSILON,
-        "Expected deviation 5.0, got {}",
-        dev
+        "Expected deviation 5.0, got {dev}"
     );
 }
 
@@ -435,14 +434,14 @@ fn homography_perspective_hand_computed() {
 #[test]
 fn display_translation() {
     let t = Transform::translation(DVec2::new(10.5, -3.2));
-    let s = format!("{}", t);
+    let s = format!("{t}");
     assert_eq!(s, "Translation(dx=10.50, dy=-3.20)");
 }
 
 #[test]
 fn display_euclidean() {
     let t = Transform::euclidean(DVec2::new(5.0, -2.0), 0.0);
-    let s = format!("{}", t);
+    let s = format!("{t}");
     // rotation_angle() = atan2(sin_a, cos_a) = atan2(0, 1) = 0
     assert_eq!(s, "Euclidean(dx=5.00, dy=-2.00, rot=0.000\u{b0})");
 }
@@ -450,7 +449,7 @@ fn display_euclidean() {
 #[test]
 fn display_similarity() {
     let t = Transform::similarity(DVec2::new(1.0, 2.0), 0.0, 1.5);
-    let s = format!("{}", t);
+    let s = format!("{t}");
     assert_eq!(
         s,
         "Similarity(dx=1.00, dy=2.00, rot=0.000\u{b0}, scale=1.5000)"

@@ -409,7 +409,9 @@ fn remove_duplicate_stars_many_duplicates() {
     // Star at x=18.0 is 8.0px from star[0] — at boundary (not removed since
     // distance must be strictly less). But star at x=17.5 is 7.5 < 8.0 → removed.
     let mut stars: Vec<Star> = (0..20)
-        .map(|i| Star::at(DVec2::new(10.0 + (i as f64 * 0.5), 10.0)).with_flux(100.0 - i as f32))
+        .map(|i| {
+            Star::at(DVec2::new(10.0 + (f64::from(i) * 0.5), 10.0)).with_flux(100.0 - i as f32)
+        })
         .collect();
 
     let removed = remove_duplicate_stars(&mut stars, 8.0);
@@ -421,8 +423,7 @@ fn remove_duplicate_stars_many_duplicates() {
     // Total: 15 + 3 = 18 removed, 2 survivors.
     assert_eq!(
         removed, 18,
-        "Should remove 18 of 20 clustered stars, removed {}",
-        removed
+        "Should remove 18 of 20 clustered stars, removed {removed}"
     );
     assert_eq!(stars.len(), 2, "Star[0] and star[16] should survive");
 }
@@ -436,8 +437,8 @@ fn remove_duplicate_stars_spatial_hash_path() {
     // Create 150 stars in a grid pattern (15x10)
     for y in 0..10 {
         for x in 0..15 {
-            let px = x as f64 * 20.0 + 10.0; // 20 pixel spacing
-            let py = y as f64 * 20.0 + 10.0;
+            let px = f64::from(x) * 20.0 + 10.0; // 20 pixel spacing
+            let py = f64::from(y) * 20.0 + 10.0;
             let flux = 1000.0 - (y * 15 + x) as f32; // Decreasing flux
             stars.push(Star::at(DVec2::new(px, py)).with_flux(flux));
         }
@@ -484,8 +485,8 @@ fn remove_duplicate_stars_spatial_hash_edge_cases() {
 
     // Create 200 stars spread across a large area
     for i in 0..200 {
-        let x = (i % 20) as f64 * 100.0 + 50.0;
-        let y = (i / 20) as f64 * 100.0 + 50.0;
+        let x = f64::from(i % 20) * 100.0 + 50.0;
+        let y = f64::from(i / 20) * 100.0 + 50.0;
         stars.push(Star::at(DVec2::new(x, y)).with_flux(1000.0 - i as f32));
     }
 
@@ -510,8 +511,8 @@ fn remove_duplicate_stars_spatial_hash_consistency() {
     // the fixture, is unchanged by the widening to DVec2.
     let base_stars: Vec<Star> = (0..500)
         .map(|i| {
-            let x = (rng.next_f32() * 1000.0) as f64;
-            let y = (rng.next_f32() * 1000.0) as f64;
+            let x = f64::from(rng.next_f32() * 1000.0);
+            let y = f64::from(rng.next_f32() * 1000.0);
             Star::at(DVec2::new(x, y)).with_flux(1000.0 - i as f32)
         })
         .collect();
@@ -529,8 +530,7 @@ fn remove_duplicate_stars_spatial_hash_consistency() {
     // Results should match
     assert_eq!(
         removed_hash, removed_simple,
-        "Spatial hash removed {} but simple removed {}",
-        removed_hash, removed_simple
+        "Spatial hash removed {removed_hash} but simple removed {removed_simple}"
     );
     assert_eq!(stars_hash.len(), stars_simple.len());
 

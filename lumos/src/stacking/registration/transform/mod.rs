@@ -298,7 +298,7 @@ impl Transform {
         Self::from_matrix(self.matrix.mul_mat(&other.matrix), transform_type)
     }
 
-    /// Extract translation components as DVec2.
+    /// Extract translation components as `DVec2`.
     pub fn translation_components(&self) -> DVec2 {
         DVec2::new(self.matrix[2], self.matrix[5])
     }

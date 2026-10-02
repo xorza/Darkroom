@@ -44,7 +44,7 @@ fn cancelling_green_estimate_blends_halfway_at_half_the_condition_limit() {
     let same_color_lpf = -(EPS + center_lpf) * (1.0 - condition) / (1.0 + condition);
     let additive = neighbor_green + (center_lpf - same_color_lpf) * 0.125;
     let canonical = canonical_green(neighbor_green, center_lpf, same_color_lpf);
-    let expected = 0.5 * (additive + canonical);
+    let expected = f32::midpoint(additive, canonical);
     let actual = estimate_green(neighbor_green, center_lpf, same_color_lpf);
 
     assert!((actual - expected).abs() < 1e-6);

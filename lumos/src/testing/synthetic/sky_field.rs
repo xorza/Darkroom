@@ -52,12 +52,12 @@ impl SkyField {
         }
         if sky.noise > 0.0 {
             let mut rng = TestRng::new(seed);
-            for p in pixels.iter_mut() {
+            for p in &mut pixels {
                 *p += rng.next_gaussian_f32() * sky.noise;
             }
         }
         if sky.clamp {
-            for p in pixels.iter_mut() {
+            for p in &mut pixels {
                 *p = p.clamp(0.0, 1.0);
             }
         }

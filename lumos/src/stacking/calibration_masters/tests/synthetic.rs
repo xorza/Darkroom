@@ -55,8 +55,8 @@ fn calibrate_removes_vignette_dark_and_bias() {
     // light = bias + dark + flat·sky  (noiseless, for an exact assertion).
     let light_px: Vec<f32> = flat.iter().map(|&f| bias + dark + f * sky).collect();
     // Vignetted before calibration: centre noticeably brighter than the corners.
-    let pre_max = light_px.iter().cloned().fold(f32::MIN, f32::max);
-    let pre_min = light_px.iter().cloned().fold(f32::MAX, f32::min);
+    let pre_max = light_px.iter().copied().fold(f32::MIN, f32::max);
+    let pre_min = light_px.iter().copied().fold(f32::MAX, f32::min);
     assert!(
         pre_max / pre_min > 1.2,
         "light should be vignetted, {pre_max}/{pre_min}"
@@ -85,8 +85,8 @@ fn calibrate_removes_vignette_dark_and_bias() {
     // Recovered = sky·mean(flat), spatially flat (vignette divided out).
     let rec = light.data.pixels();
     let rec_mean = mean(rec);
-    let rec_max = rec.iter().cloned().fold(f32::MIN, f32::max);
-    let rec_min = rec.iter().cloned().fold(f32::MAX, f32::min);
+    let rec_max = rec.iter().copied().fold(f32::MIN, f32::max);
+    let rec_min = rec.iter().copied().fold(f32::MAX, f32::min);
     assert!(
         (rec_mean - sky * mean(&flat)).abs() < 0.005,
         "recovered mean {rec_mean} vs sky·mean(flat) {}",

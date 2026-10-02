@@ -102,7 +102,7 @@ impl TestRng {
     }
 }
 
-/// Create a CfaImage from raw pixel data and CFA type.
+/// Create a `CfaImage` from raw pixel data and CFA type.
 /// The Fujifilm X-Trans colour pattern, as a 6×6 phase table of colour indices.
 ///
 /// Shared by the defect-map tests and the cosmic-ray bench so one pattern describes X-Trans across
@@ -134,7 +134,7 @@ pub(crate) fn cfa_from_plane(data: Buffer2<f32>, cfa_type: CfaType) -> CfaImage 
     }
 }
 
-/// Create a CfaImage filled with a constant value.
+/// Create a `CfaImage` filled with a constant value.
 pub(crate) fn constant_cfa(size: Size2us, value: f32, cfa_type: CfaType) -> CfaImage {
     CfaImage {
         data: Buffer2::new_filled(size.width, size.height, value),
@@ -162,7 +162,7 @@ pub(crate) fn calibration_dir() -> PathBuf {
 
 /// Initialize tracing subscriber for tests.
 /// Safe to call multiple times - will only initialize once.
-/// Respects RUST_LOG env var, defaults to "info".
+/// Respects `RUST_LOG` env var, defaults to "info".
 pub(crate) fn init_tracing() {
     use tracing_subscriber::EnvFilter;
     // `ort` (ONNX Runtime) logs its arena allocations at INFO — far too chatty; quiet it by default.

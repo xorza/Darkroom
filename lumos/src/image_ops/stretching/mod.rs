@@ -519,7 +519,7 @@ fn solve_asinh_beta(median: f32, target_background: f32) -> f32 {
     let target = target_background.clamp((median + 1e-4).min(hi), hi);
     let (mut lo, mut hi) = (-5.0f32, 5.0f32);
     for _ in 0..50 {
-        let mid = 0.5 * (lo + hi);
+        let mid = f32::midpoint(lo, hi);
         let beta = 10.0f32.powf(mid);
         let g = (median / beta).asinh() / (1.0 / beta).asinh();
         if g > target {
@@ -528,7 +528,7 @@ fn solve_asinh_beta(median: f32, target_background: f32) -> f32 {
             hi = mid;
         }
     }
-    10.0f32.powf(0.5 * (lo + hi))
+    10.0f32.powf(f32::midpoint(lo, hi))
 }
 
 /// Build a curve for a statistics-driven (auto) method from a (reorderable) sample set. The explicit
@@ -568,13 +568,11 @@ fn apply_curve_plane(plane: &mut [f32], curve: Curve) {
 }
 
 fn map_plane<C: ToneCurve>(plane: &mut [f32], curve: C) {
-    plane
-        .par_chunks_mut(crate::image_ops::SAMPLES_PER_BLOCK)
-        .for_each(|block| {
-            for value in block {
-                *value = curve.eval(*value);
-            }
-        });
+    plane.par_chunks_mut(SAMPLES_PER_BLOCK).for_each(|block| {
+        for value in block {
+            *value = curve.eval(*value);
+        }
+    });
 }
 
 /// Map one pixel under color-preserving stretch: run `curve` on the combined

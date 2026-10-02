@@ -165,7 +165,7 @@ fn build_masters_node_is_registered() {
     assert_eq!(f.inputs[4].data_type, DataType::Float);
     assert_eq!(
         f.inputs[4].default_value,
-        Some(ConstValue::Float(DEFAULT_SIGMA_THRESHOLD as f64)),
+        Some(ConstValue::Float(f64::from(DEFAULT_SIGMA_THRESHOLD))),
     );
     assert_eq!(f.inputs[5].name, "Cache");
     assert_eq!(f.inputs[5].data_type, DataType::Bool);

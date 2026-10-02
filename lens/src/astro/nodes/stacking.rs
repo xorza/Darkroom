@@ -113,8 +113,7 @@ pub(crate) fn register(library: &mut Library) {
                             let empty = CalibrationMasters::default();
                             let masters = masters_value
                                 .as_custom::<Masters>()
-                                .map(|masters| &masters.masters)
-                                .unwrap_or(&empty);
+                                .map_or(&empty, |masters| &masters.masters);
                             calibrate_align_stack(
                                 &lights,
                                 masters,

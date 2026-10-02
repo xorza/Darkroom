@@ -77,12 +77,11 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     // Dimensions drive the in-memory-vs-disk tier decision. Peek the header without a decode when
     // the format allows it (RAW), so the in-memory path can decode every frame in parallel rather
     // than decoding frame 0 serially first; otherwise decode frame 0 and reuse it below.
-    let (peek, first_image) = match I::peek(first_path, &context) {
-        Some(peek) => (peek, None),
-        None => {
-            let image = load_image::<I>(first_path, &context)?;
-            (FramePeek::of_decoded(&image), Some(image))
-        }
+    let (peek, first_image) = if let Some(peek) = I::peek(first_path, &context) {
+        (peek, None)
+    } else {
+        let image = load_image::<I>(first_path, &context)?;
+        (FramePeek::of_decoded(&image), Some(image))
     };
     let dimensions = peek.dimensions;
     // Frames of a set share a source, so frame 0 stands for all of them — including whether they
@@ -191,7 +190,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
     // When the header couldn't be peeked the caller pre-loaded frame 0, so the batch starts at
     // frame 1 and reuses it; otherwise every frame (frame 0 included) decodes in parallel. Frame 0
     // supplies the stack metadata either way.
-    let start = if first.is_some() { 1 } else { 0 };
+    let start = usize::from(first.is_some());
     let loaded = concurrency::try_par_map_limited(&paths[start..], concurrency, |offset, path| {
         let idx = offset + start;
         // Cancelled: stop decoding further frames (the slow phase).

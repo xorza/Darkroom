@@ -74,7 +74,7 @@ pub(crate) fn register(library: &mut Library) {
             .input(
                 FuncInput::required("Sigma", DataType::Float)
                     .description("Sigma-clipping rejection threshold when stacking.")
-                    .default(DEFAULT_SIGMA_THRESHOLD as f64),
+                    .default(f64::from(DEFAULT_SIGMA_THRESHOLD)),
             )
             .input(
                 FuncInput::required("Cache", DataType::Bool)
@@ -247,8 +247,7 @@ fn frame_set_key(frames: &[PathBuf]) -> Result<String, FrameSetKeyError> {
             .modified()
             .ok()
             .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-            .map(|duration| duration.as_nanos())
-            .unwrap_or(0);
+            .map_or(0, |duration| duration.as_nanos());
         hasher.update(&(name.len() as u64).to_le_bytes());
         hasher.update(name);
         hasher.update(&metadata.len().to_le_bytes());

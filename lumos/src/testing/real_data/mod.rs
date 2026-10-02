@@ -32,13 +32,14 @@ pub(crate) mod ml_support {
     /// Returns `None` (after a skip message) when absent — lumos ships no models, so the tests skip
     /// rather than fail when the gitignored weights aren't present.
     pub(crate) fn onnx_weights(env_var: &str, default_file: &str) -> Option<PathBuf> {
-        let path = std::env::var_os(env_var)
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
+        let path = std::env::var_os(env_var).map_or_else(
+            || {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                     .join("test_data")
                     .join(default_file)
-            });
+            },
+            PathBuf::from,
+        );
         if path.exists() {
             Some(path)
         } else {

@@ -96,10 +96,10 @@ mod tests {
 
     fn mean_var(samples: &[f32]) -> (f64, f64) {
         let n = samples.len() as f64;
-        let mean = samples.iter().map(|&s| s as f64).sum::<f64>() / n;
+        let mean = samples.iter().map(|&s| f64::from(s)).sum::<f64>() / n;
         let var = samples
             .iter()
-            .map(|&s| (s as f64 - mean).powi(2))
+            .map(|&s| (f64::from(s) - mean).powi(2))
             .sum::<f64>()
             / n;
         (mean, var)

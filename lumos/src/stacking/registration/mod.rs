@@ -233,7 +233,7 @@ fn median_fwhm(ref_stars: &[Star], target_stars: &[Star]) -> f64 {
         .map(|s| s.fwhm)
         .collect();
 
-    median_mut(&mut fwhms) as f64
+    f64::from(median_mut(&mut fwhms))
 }
 
 /// `Auto` model selection: estimate transforms from fewest to most degrees of freedom and accept

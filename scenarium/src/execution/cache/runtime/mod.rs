@@ -237,7 +237,7 @@ impl RuntimeCache {
                 node_usage += usage;
                 let counts_toward_total = match value {
                     DynamicValue::Custom(arc) => {
-                        self.ram_seen.insert(Arc::as_ptr(arc) as *const () as usize)
+                        self.ram_seen.insert(Arc::as_ptr(arc).cast::<()>() as usize)
                     }
                     _ => true,
                 };

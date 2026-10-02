@@ -1,4 +1,4 @@
-//! Tests for threshold mask creation (packed BitBuffer2 version).
+//! Tests for threshold mask creation (packed `BitBuffer2` version).
 //!
 //! Test organization:
 //! - Basic threshold tests: Core functionality for standard thresholding
@@ -330,7 +330,7 @@ fn various_lengths() {
         let noise = vec![10.0f32; width * height];
         let mask =
             create_threshold_mask_test(&pixels, &bg, &noise, 3.0, Size2us::new(width, height));
-        assert!(mask.iter().all(|v| v), "failed for len={}", len);
+        assert!(mask.iter().all(|v| v), "failed for len={len}");
     }
 }
 
@@ -353,10 +353,7 @@ fn remainder_handling() {
             assert_eq!(
                 mask.get(i),
                 expected,
-                "Index {} should be {} for size {}",
-                i,
-                expected,
-                size
+                "Index {i} should be {expected} for size {size}"
             );
         }
     }
@@ -383,7 +380,7 @@ fn large_image() {
     // Verify the expected pixels are set
     for i in 0..size {
         let expected = i % 100 == 0;
-        assert_eq!(mask.get(i), expected, "Index {} should be {}", i, expected);
+        assert_eq!(mask.get(i), expected, "Index {i} should be {expected}");
     }
 }
 
@@ -396,7 +393,7 @@ fn tiny_image_1xn() {
         let noise = vec![0.1f32; width];
 
         let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, Size2us::new(width, 1));
-        assert!(mask.iter().all(|v| v), "Failed for 1x{}", width);
+        assert!(mask.iter().all(|v| v), "Failed for 1x{width}");
     }
 }
 
@@ -409,7 +406,7 @@ fn tiny_image_nx1() {
         let noise = vec![0.1f32; height];
 
         let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, Size2us::new(1, height));
-        assert!(mask.iter().all(|v| v), "Failed for {}x1", height);
+        assert!(mask.iter().all(|v| v), "Failed for {height}x1");
     }
 }
 
@@ -541,9 +538,7 @@ fn multirow_checkerboard_pattern() {
             assert_eq!(
                 mask.get(y * width + x),
                 expected,
-                "Checkerboard mismatch at ({}, {})",
-                x,
-                y
+                "Checkerboard mismatch at ({x}, {y})"
             );
         }
     }
@@ -577,9 +572,7 @@ fn multirow_horizontal_stripes() {
             assert_eq!(
                 mask.get(y * width + x),
                 expected,
-                "Stripe mismatch at ({}, {})",
-                x,
-                y
+                "Stripe mismatch at ({x}, {y})"
             );
         }
     }
@@ -613,9 +606,7 @@ fn multirow_vertical_stripes() {
             assert_eq!(
                 mask.get(y * width + x),
                 expected,
-                "Vertical stripe mismatch at ({}, {})",
-                x,
-                y
+                "Vertical stripe mismatch at ({x}, {y})"
             );
         }
     }
@@ -702,10 +693,7 @@ fn filtered_remainder_handling() {
             assert_eq!(
                 mask.get(i),
                 expected,
-                "Filtered remainder: index {} should be {} for size {}",
-                i,
-                expected,
-                size
+                "Filtered remainder: index {i} should be {expected} for size {size}"
             );
         }
     }
@@ -734,9 +722,7 @@ fn filtered_large_image() {
             assert_eq!(
                 mask.get(y * width + x),
                 expected,
-                "Filtered diagonal at ({}, {})",
-                x,
-                y
+                "Filtered diagonal at ({x}, {y})"
             );
         }
     }

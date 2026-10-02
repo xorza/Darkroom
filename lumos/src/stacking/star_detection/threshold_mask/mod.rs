@@ -50,11 +50,11 @@ pub(crate) struct ThresholdParams {
     pub(crate) min_noise: f32,
 }
 
-/// Create binary mask of pixels above threshold into a BitBuffer2.
+/// Create binary mask of pixels above threshold into a `BitBuffer2`.
 ///
 /// Sets bit `i` to 1 where `pixels[i] > background[i] + sigma * noise[i]`.
 ///
-/// Uses SIMD acceleration when available (AVX2/SSE4.1 on x86_64, NEON on aarch64).
+/// Uses SIMD acceleration when available (AVX2/SSE4.1 on `x86_64`, NEON on aarch64).
 /// Writes directly to packed u64 words for better memory efficiency.
 ///
 /// Note: All input buffers must have the same dimensions as the mask.

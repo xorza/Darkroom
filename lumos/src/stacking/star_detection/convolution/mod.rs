@@ -4,7 +4,7 @@
 //! where k is the kernel size. This is the key technique used by DAOFIND and
 //! SExtractor to boost SNR for faint star detection.
 //!
-//! Uses SIMD acceleration when available (AVX2/SSE on x86_64, NEON on aarch64).
+//! Uses SIMD acceleration when available (AVX2/SSE on `x86_64`, NEON on aarch64).
 
 mod simd;
 
@@ -21,7 +21,7 @@ use crate::math::fwhm::fwhm_to_sigma;
 use crate::math::size2us::Size2us;
 use imaginarium::Buffer2;
 
-/// Maximum deviation of axis_ratio from 1.0 to use the faster separable
+/// Maximum deviation of `axis_ratio` from 1.0 to use the faster separable
 /// (circular) kernel path instead of full 2D elliptical convolution.
 const CIRCULAR_KERNEL_THRESHOLD: f32 = 0.01;
 

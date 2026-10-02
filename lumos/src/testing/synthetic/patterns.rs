@@ -83,7 +83,7 @@ mod tests {
         let img = uniform(Size2us::new(10, 10), 0.5);
         assert_eq!(img.width(), 10);
         assert_eq!(img.height(), 10);
-        for &p in img.iter() {
+        for &p in &img {
             assert!((p - 0.5).abs() < 1e-6);
         }
     }

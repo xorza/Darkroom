@@ -61,12 +61,12 @@ impl DetectionResources {
         self.floats.release(buffer, self.dimensions);
     }
 
-    /// Acquire a BitBuffer2 from the pool, or allocate a new one.
+    /// Acquire a `BitBuffer2` from the pool, or allocate a new one.
     pub(crate) fn acquire_bit(&mut self) -> BitBuffer2 {
         self.bitmasks.acquire(self.dimensions)
     }
 
-    /// Return a BitBuffer2 to the pool for reuse. It must have the pool's dimensions.
+    /// Return a `BitBuffer2` to the pool for reuse. It must have the pool's dimensions.
     pub(crate) fn release_bit(&mut self, buffer: BitBuffer2) {
         self.bitmasks.release(buffer, self.dimensions);
     }

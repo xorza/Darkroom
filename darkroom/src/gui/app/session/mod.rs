@@ -185,7 +185,7 @@ impl Session {
     ///
     /// Document file ops are **global** — they fire regardless of
     /// focus, so Ctrl+S still saves while a node's value editor is
-    /// focused (TextEdit doesn't bind S/O/N, so nothing is stolen).
+    /// focused (`TextEdit` doesn't bind S/O/N, so nothing is stolen).
     /// Every chord is sampled with `key_pressed` each frame so all
     /// stay subscribed for palantir's wake-gate (sampling them all up
     /// front, not short-circuited, so one chord firing doesn't drop

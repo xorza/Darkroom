@@ -2,7 +2,7 @@
 //! the disk tier should be ~flat in the frame count, the RAM tier ~linear.
 //!
 //! Run one config per process (peak RSS is a per-process high-water mark):
-//!   LUMOS_TIER=disk LUMOS_N=8 cargo run -p lumos --release --example mem_probe
+//!   `LUMOS_TIER=disk` `LUMOS_N=8` cargo run -p lumos --release --example `mem_probe`
 //! Uses **empty** calibration masters (identity calibration) so the high-water mark reflects the
 //! align+stack work, not a masters build.
 

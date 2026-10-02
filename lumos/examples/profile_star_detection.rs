@@ -1,11 +1,11 @@
 //! Simple profiling binary for star detection.
 //!
 //! Run with:
-//!   cargo build --release -p lumos --example profile_star_detection
-//!   cargo flamegraph --example profile_star_detection -p lumos -- -F 4999
+//!   cargo build --release -p lumos --example `profile_star_detection`
+//!   cargo flamegraph --example `profile_star_detection` -p lumos -- -F 4999
 //!
 //! Or with samply:
-//!   samply record -r 4999 ./target/release/examples/profile_star_detection
+//!   samply record -r 4999 ./`target/release/examples/profile_star_detection`
 
 use std::thread;
 use std::time::Duration;
@@ -60,15 +60,12 @@ fn main() {
     let num_stars = 3000;
     let iterations = 50;
 
-    eprintln!(
-        "Generating {}x{} image with {} stars...",
-        width, height, num_stars
-    );
+    eprintln!("Generating {width}x{height} image with {num_stars} stars...");
     let image = generate_synthetic_image(width, height, num_stars);
 
     let mut detector = StarDetector::default();
 
-    eprintln!("Running {} iterations (attach profiler now)...", iterations);
+    eprintln!("Running {iterations} iterations (attach profiler now)...");
 
     // Small delay to allow attaching profiler
     thread::sleep(Duration::from_secs(1));

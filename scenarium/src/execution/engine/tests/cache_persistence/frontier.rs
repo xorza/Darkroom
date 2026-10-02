@@ -307,9 +307,8 @@ async fn persist_node_lands_on_disk_before_its_consumer_runs() {
     g.add("watch", |n| {
         let (root, flag) = (root.clone(), Arc::clone(&blob_present));
         n.sink().input(DataType::Int).observes(move |_| {
-            let non_empty = std::fs::read_dir(&root)
-                .map(|mut entries| entries.next().is_some())
-                .unwrap_or(false);
+            let non_empty =
+                std::fs::read_dir(&root).is_ok_and(|mut entries| entries.next().is_some());
             flag.store(non_empty, Ordering::SeqCst);
         })
     });
@@ -329,13 +328,13 @@ async fn persist_node_lands_on_disk_before_its_consumer_runs() {
 
 /// A flush must not write a value under a digest it wasn't produced under.
 /// After an input change recompiles the program, a node's resident value is
-/// stale w.r.t. its new digest; flushing it stamped with D_B would overwrite
-/// the node's blob with bytes a later run at D_B would load as a false hit.
+/// stale w.r.t. its new digest; flushing it stamped with `D_B` would overwrite
+/// the node's blob with bytes a later run at `D_B` would load as a false hit.
 ///
 /// `Both`, so the value is still resident when the flush reaches it, and a
 /// plan between the edit and the flush, so the slot's *current* digest really
-/// has moved to D_B — under `Disk` there would be no resident value to
-/// mis-stamp, and with no plan the slot would still be carrying D_A, either of
+/// has moved to `D_B` — under `Disk` there would be no resident value to
+/// mis-stamp, and with no plan the slot would still be carrying `D_A`, either of
 /// which leaves the flush nothing to get wrong.
 #[tokio::test]
 async fn flush_skips_a_value_stale_for_the_current_digest() {

@@ -30,7 +30,7 @@ use rayon::prelude::*;
 pub(crate) struct TileGrid {
     pub(crate) stats: Buffer2<TileStats>,
     /// Second derivatives in Y for the natural cubic spline, both planes per tile.
-    /// Layout: tiles_x * tiles_y, row-major (same as stats).
+    /// Layout: `tiles_x` * `tiles_y`, row-major (same as stats).
     d2y: Vec<TileD2y>,
     /// Precomputed X-coordinates of tile centers (one per tile column).
     pub(crate) centers_x: Vec<f32>,
@@ -40,7 +40,7 @@ pub(crate) struct TileGrid {
 }
 
 impl TileGrid {
-    /// Create an uninitialized TileGrid with preallocated buffers.
+    /// Create an uninitialized `TileGrid` with preallocated buffers.
     ///
     /// `tile_size` is clamped to the image dimensions rather than panicking on a small image:
     /// a sub-tile_size image yields a coarse (possibly single-tile) grid, which the spline

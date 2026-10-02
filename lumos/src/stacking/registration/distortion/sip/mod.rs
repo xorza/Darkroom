@@ -492,7 +492,6 @@ fn build_normal_equations(
 /// symmetric positive definite by construction, and Cholesky exploits that for roughly half the
 /// arithmetic of elimination and a better-conditioned solve. [`solve_lu`] is what catches the cases
 /// that break the assumption — a non-positive diagonal, or a condition estimate past ~1e10.
-#[allow(clippy::needless_range_loop)]
 fn solve_cholesky(a: &[f64], b: &[f64], n: usize) -> Option<ArrayVec<f64, MAX_TERMS>> {
     let mut l = [0.0; MAX_ATA];
 

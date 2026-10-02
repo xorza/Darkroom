@@ -123,9 +123,7 @@ async fn pause_gate_blocks_event_loop_iterations() {
     // At most one more invocation might have slipped through
     assert!(
         count_while_closed <= count_at_close + 1,
-        "Event loop should pause when gate is closed. Count at close: {}, count while closed: {}",
-        count_at_close,
-        count_while_closed
+        "Event loop should pause when gate is closed. Count at close: {count_at_close}, count while closed: {count_while_closed}"
     );
 
     // Drop guard to reopen gate
@@ -137,9 +135,7 @@ async fn pause_gate_blocks_event_loop_iterations() {
 
     assert!(
         count_after_reopen > count_while_closed,
-        "Event loop should resume after gate reopens. Count while closed: {}, count after reopen: {}",
-        count_while_closed,
-        count_after_reopen
+        "Event loop should resume after gate reopens. Count while closed: {count_while_closed}, count after reopen: {count_after_reopen}"
     );
 
     active.stop().await;

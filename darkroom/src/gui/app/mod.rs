@@ -103,7 +103,10 @@ enum PendingTransition {
     OpenPicked,
     // Only `platform::macos` hands a path in; the other two OSes get theirs
     // through argv at launch, before an `App` exists to guard.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    #[cfg_attr(
+        all(not(target_os = "macos"), not(test)),
+        expect(dead_code, reason = "only the macOS open-file handler constructs it")
+    )]
     OpenAt(PathBuf),
 }
 
@@ -236,7 +239,10 @@ impl App {
     /// today, one Finder handed us, which makes this macOS-only: see
     /// [`crate::platform::route_opened_documents`] for why no other OS has a
     /// caller.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    #[cfg_attr(
+        not(target_os = "macos"),
+        expect(dead_code, reason = "only the macOS open-file handler calls it")
+    )]
     pub(crate) fn open_document_at(&mut self, path: PathBuf) {
         self.guard_discard(PendingTransition::OpenAt(path));
     }

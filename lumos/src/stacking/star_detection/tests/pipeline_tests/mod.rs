@@ -29,10 +29,7 @@ fn run_test(
     save(
         pixels,
         Size2us::new(width, height),
-        &test_output_path(&format!(
-            "synthetic_starfield/{}_{}_input.png",
-            prefix, name
-        )),
+        &test_output_path(&format!("synthetic_starfield/{prefix}_{name}_input.png")),
         ToneMap::Clamp,
     );
 
@@ -50,21 +47,17 @@ fn run_test(
         &stars,
         match_radius,
         &test_output_path(&format!(
-            "synthetic_starfield/{}_{}_comparison.png",
-            prefix, name
+            "synthetic_starfield/{prefix}_{name}_comparison.png"
         )),
     );
 
     save_metrics(
         &metrics,
-        &test_output_path(&format!(
-            "synthetic_starfield/{}_{}_metrics.txt",
-            prefix, name
-        )),
+        &test_output_path(&format!("synthetic_starfield/{prefix}_{name}_metrics.txt")),
     );
 
-    println!("\n{} results:", name);
-    println!("{}", metrics);
+    println!("\n{name} results:");
+    println!("{metrics}");
 
     metrics
 }

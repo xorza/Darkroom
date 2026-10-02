@@ -30,7 +30,7 @@ use crate::simd::dispatch;
 /// Length at which AVX2 [`sum_f32`] overtakes its fallback — measured, not structural.
 ///
 /// Every other gate here is the lane minimum, because below one full vector there is nothing to
-/// widen. This one cannot be, because on x86_64 the fallback is not a scalar loop: SSE2 is baseline,
+/// widen. This one cannot be, because on `x86_64` the fallback is not a scalar loop: SSE2 is baseline,
 /// so LLVM auto-vectorizes [`scalar::sum_f32`] into a 4-wide f64 accumulation and the AVX2 kernel
 /// has to beat *that*. One vector's worth of work does not amortize the reduction — at the 8-lane
 /// minimum the kernel runs 0.80x its fallback, breaks even at 10, and only pulls clear at 16

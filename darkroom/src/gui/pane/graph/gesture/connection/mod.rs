@@ -470,7 +470,7 @@ fn port_data_type(graph_ctx: GraphCtx<'_>, port: PortRef) -> Option<DataType> {
     Some(ty)
 }
 
-/// Convert a snapped `(start, end)` PortRef pair (one `Input`, one
+/// Convert a snapped `(start, end)` `PortRef` pair (one `Input`, one
 /// `Output` — caller-guaranteed by [`scan_snap_target`]) into an
 /// `GraphIntent::SetInput` binding. A cycle-forming pair never reaches here —
 /// [`scan_snap_target`] refuses to snap one, and `GraphIntent::into_step`

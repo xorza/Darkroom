@@ -259,9 +259,7 @@ fn strip_boundary_run_overlap() {
             assert_eq!(
                 label_map[y * width + x],
                 label,
-                "All pixels should have same label at ({}, {})",
-                x,
-                y
+                "All pixels should have same label at ({x}, {y})"
             );
         }
     }

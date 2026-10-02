@@ -56,10 +56,7 @@ fn correct_barrel_at_specific_point() {
     let error = (mapped - expected_target).length();
     assert!(
         error < 0.01,
-        "At (700,300): mapped={:?}, expected_target={:?}, error={:.6}",
-        mapped,
-        expected_target,
-        error
+        "At (700,300): mapped={mapped:?}, expected_target={expected_target:?}, error={error:.6}"
     );
 
     // Also verify the correction direction is outward (barrel pushes outward)
@@ -88,7 +85,7 @@ fn fit_barrel_distortion_with_translation() {
 
     for y in (100..=900).step_by(100) {
         for x in (100..=900).step_by(100) {
-            let p = DVec2::new(x as f64, y as f64);
+            let p = DVec2::new(f64::from(x), f64::from(y));
             ref_points.push(p);
             let d = p - center;
             let r2 = d.length_squared();
@@ -109,8 +106,7 @@ fn fit_barrel_distortion_with_translation() {
     let r = rms(&residuals);
     assert!(
         r < 0.01,
-        "RMS after SIP correction with translation: {:.6}",
-        r
+        "RMS after SIP correction with translation: {r:.6}"
     );
 }
 
@@ -132,7 +128,7 @@ fn fit_pincushion_distortion() {
 
     let residuals = sip.compute_corrected_residuals(&ref_points, &target_points, &transform);
     let r = rms(&residuals);
-    assert!(r < 0.01, "Pincushion RMS: {:.6}", r);
+    assert!(r < 0.01, "Pincushion RMS: {r:.6}");
 
     // Verify sign: pincushion correction at corner should pull inward
     // Point (900, 700): d = (388, 316), correction should be in negative d direction
@@ -149,9 +145,7 @@ fn fit_pincushion_distortion() {
     let dot = correction.x * d.x + correction.y * d.y;
     assert!(
         dot < 0.0,
-        "Pincushion correction should be inward (toward center): correction={:?}, d={:?}",
-        correction,
-        d
+        "Pincushion correction should be inward (toward center): correction={correction:?}, d={d:?}"
     );
 }
 
@@ -182,10 +176,7 @@ fn barrel_vs_pincushion_opposite_corrections() {
     let dot = corr_barrel.x * corr_pincushion.x + corr_barrel.y * corr_pincushion.y;
     assert!(
         dot < 0.0,
-        "Barrel and pincushion corrections should be opposite: barrel={:?}, pincushion={:?}, dot={:.6}",
-        corr_barrel,
-        corr_pincushion,
-        dot
+        "Barrel and pincushion corrections should be opposite: barrel={corr_barrel:?}, pincushion={corr_pincushion:?}, dot={dot:.6}"
     );
 
     // Magnitudes should be similar (same |k|)
@@ -193,8 +184,6 @@ fn barrel_vs_pincushion_opposite_corrections() {
     let mag_pincushion = corr_pincushion.length();
     assert!(
         (mag_barrel - mag_pincushion).abs() / mag_barrel < 0.01,
-        "Magnitudes should be similar: barrel={:.4}, pincushion={:.4}",
-        mag_barrel,
-        mag_pincushion
+        "Magnitudes should be similar: barrel={mag_barrel:.4}, pincushion={mag_pincushion:.4}"
     );
 }

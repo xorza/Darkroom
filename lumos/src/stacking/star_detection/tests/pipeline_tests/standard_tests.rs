@@ -29,7 +29,7 @@ fn pipeline_sparse_field() {
     let metrics = run_test("sparse_field", "pipeline", &frame, &detection_config());
 
     if let Err(failures) = check_pass(&metrics, &standard_criteria()) {
-        panic!("Sparse field test failed: {:?}", failures);
+        panic!("Sparse field test failed: {failures:?}");
     }
 }
 
@@ -89,7 +89,7 @@ fn pipeline_moffat_profile() {
         max_fwhm_error: 0.20,
     };
     if let Err(failures) = check_pass(&metrics, &criteria) {
-        panic!("Moffat profile test failed: {:?}", failures);
+        panic!("Moffat profile test failed: {failures:?}");
     }
 }
 
@@ -114,7 +114,7 @@ fn pipeline_fwhm_range() {
         max_fwhm_error: 0.30,
     };
     if let Err(failures) = check_pass(&metrics, &criteria) {
-        panic!("FWHM range test failed: {:?}", failures);
+        panic!("FWHM range test failed: {failures:?}");
     }
 }
 
@@ -171,6 +171,6 @@ fn pipeline_low_noise() {
         max_fwhm_error: 0.10,
     };
     if let Err(failures) = check_pass(&metrics, &criteria) {
-        panic!("Low noise test failed: {:?}", failures);
+        panic!("Low noise test failed: {failures:?}");
     }
 }

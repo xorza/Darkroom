@@ -69,7 +69,7 @@ impl FromStr for ConversionFormat {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         ConversionFormat::iter()
             .find(|f| f.label() == s)
-            .ok_or_else(|| format!("Unknown conversion format: {}", s))
+            .ok_or_else(|| format!("Unknown conversion format: {s}"))
     }
 }
 

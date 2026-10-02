@@ -24,7 +24,7 @@ const MARK_INFO_BORDER: usize = 8;
 
 /// Compute green min/max bounds at each non-green pixel.
 ///
-/// For green pixels, gmin=gmax=raw_value.
+/// For green pixels, `gmin=gmax=raw_value`.
 /// For non-green pixels, scans the first 6 hex neighbors to find
 /// the range of nearby green values. This constrains green interpolation.
 pub(crate) fn compute_green_minmax(
@@ -89,7 +89,7 @@ pub(crate) fn compute_green_minmax(
 /// using Markesteijn's weighted formulas, clamped to [gmin, gmax].
 /// For green pixels, all 4 directions get the raw value.
 ///
-/// The green_dir buffer is laid out as [dir * pixels + y * width + x].
+/// The `green_dir` buffer is laid out as [dir * pixels + y * width + x].
 pub(crate) fn interpolate_green(
     xtrans: &XTransImage,
     hex: &HexLookup,
@@ -122,7 +122,7 @@ pub(crate) fn interpolate_green(
         let raw_y = y + xtrans.margin.y;
         let row_off = y * width;
         // librtprocess stores the alternating-row candidates in the opposite direction slots.
-        let flip = ((raw_y as i64 - hex.sgrow as i64).rem_euclid(3) == 0) as usize;
+        let flip = usize::from((raw_y as i64 - hex.sgrow as i64).rem_euclid(3) == 0);
 
         for x in 0..width {
             let raw_x = x + xtrans.margin.x;
@@ -587,7 +587,7 @@ pub(crate) fn reconstruct_colors(
         });
 }
 
-/// Compute YPbPr spatial derivatives from the materialized directional candidates.
+/// Compute `YPbPr` spatial derivatives from the materialized directional candidates.
 ///
 /// For each direction, computes a Laplacian in that direction's offset,
 /// storing the squared derivative magnitude per pixel.
@@ -736,7 +736,7 @@ pub(crate) fn compute_derivatives(
     );
 }
 
-/// Pre-compute YPbPr values for an entire row, storing results in `out`.
+/// Pre-compute `YPbPr` values for an entire row, storing results in `out`.
 #[inline(always)]
 fn compute_ypbpr_row(
     xtrans: &XTransImage,
@@ -754,7 +754,7 @@ fn compute_ypbpr_row(
     }
 }
 
-/// Convert RGB to YPbPr.
+/// Convert RGB to `YPbPr`.
 #[inline(always)]
 fn rgb_to_ypbpr(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     let luma = 0.2627 * r + 0.6780 * g + 0.0593 * b;
@@ -839,7 +839,7 @@ fn build_summed_area_table(data: &[u8], size: Size2us, sat: &mut [u32]) {
     for y in 0..size.height {
         let mut row_sum = 0u32;
         for x in 0..size.width {
-            row_sum += data[y * size.width + x] as u32;
+            row_sum += u32::from(data[y * size.width + x]);
             let above = if y == 0 {
                 0
             } else {

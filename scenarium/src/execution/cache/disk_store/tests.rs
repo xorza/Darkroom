@@ -110,7 +110,7 @@ impl CustomValueCodec for VersionedCodec {
         value: &dyn CustomValue,
         writer: &mut (dyn AsyncWrite + Unpin + Send),
         _ctx: &mut ContextStore,
-    ) -> std::result::Result<(), CodecError> {
+    ) -> Result<(), CodecError> {
         let blob = value
             .as_any()
             .downcast_ref::<Blob>()
@@ -127,7 +127,7 @@ impl CustomValueCodec for VersionedCodec {
         reader: &mut (dyn AsyncRead + Unpin + Send),
         byte_len: u64,
         _ctx: &mut ContextStore,
-    ) -> std::result::Result<Arc<dyn CustomValue>, CodecError> {
+    ) -> Result<Arc<dyn CustomValue>, CodecError> {
         let mut bytes = Vec::with_capacity(usize::try_from(byte_len)?);
         reader.read_to_end(&mut bytes).await?;
         self.decode_calls.fetch_add(1, Ordering::SeqCst);

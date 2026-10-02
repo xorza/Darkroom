@@ -218,7 +218,7 @@ impl TestWorker {
 
     /// The next finished run, or the error that ended it — skipping everything
     /// a run publishes on the way there.
-    pub(crate) async fn finished(&mut self) -> std::result::Result<RunOutcome, Error> {
+    pub(crate) async fn finished(&mut self) -> Result<RunOutcome, Error> {
         loop {
             match self.report().await {
                 WorkerReport::Status(status)
@@ -258,7 +258,7 @@ impl TestWorker {
         while let Ok(report) = self.reports.try_recv() {
             match &report {
                 WorkerReport::Installed { compiled, .. } => {
-                    self.installed = Some(Arc::clone(compiled))
+                    self.installed = Some(Arc::clone(compiled));
                 }
                 WorkerReport::Cleared => self.installed = None,
                 WorkerReport::Status(_) | WorkerReport::Error(_) => {}

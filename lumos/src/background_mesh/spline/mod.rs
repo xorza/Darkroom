@@ -9,7 +9,7 @@
 ///
 /// Standard cubic spline formula (Numerical Recipes, SEP/SExtractor):
 ///   f(t) = (1-t)*f0 + t*f1 + ((1-t)³ - (1-t))*a + (t³ - t)*b
-/// where a = h²/6 * d2_0, b = h²/6 * d2_1.
+/// where a = h²/6 * `d2_0`, b = h²/6 * `d2_1`.
 ///
 /// Factored form (since (ct³-ct) = -t*ct*(2-t) and (t³-t) = -t*ct*(1+t)):
 ///   f(t) = (1-t)*f0 + t*f1 - t*(1-t)*((2-t)*a + (1+t)*b)

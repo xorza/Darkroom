@@ -120,10 +120,7 @@ fn bilinear_translation() {
             let expected = input[(src_x as usize, src_y as usize)];
             assert!(
                 (output_val - expected).abs() < 0.01,
-                "Mismatch at x={}: {} vs {}",
-                x,
-                output_val,
-                expected
+                "Mismatch at x={x}: {output_val} vs {expected}"
             );
         }
     }

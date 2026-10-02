@@ -225,11 +225,10 @@ impl Library {
             DataType::Bool => Cow::Borrowed("bool"),
             DataType::String => Cow::Borrowed("string"),
             DataType::FsPath(_) => Cow::Borrowed("path"),
-            DataType::Custom(id) | DataType::Enum(id) => self
-                .types
-                .get(id)
-                .map(|entry| Cow::Borrowed(entry.display_name()))
-                .unwrap_or_else(|| Cow::Owned(id.to_string())),
+            DataType::Custom(id) | DataType::Enum(id) => self.types.get(id).map_or_else(
+                || Cow::Owned(id.to_string()),
+                |entry| Cow::Borrowed(entry.display_name()),
+            ),
         }
     }
 

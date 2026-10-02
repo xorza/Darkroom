@@ -252,10 +252,10 @@ fn interpolate_row(
     let cy0 = grid.centers_y[ty0];
     let cy1 = grid.centers_y[ty1];
     let hy = cy1 - cy0;
-    let ty = if ty1 != ty0 {
-        ((fy - cy0) / hy).clamp(0.0, 1.0)
-    } else {
+    let ty = if ty1 == ty0 {
         0.0
+    } else {
+        ((fy - cy0) / hy).clamp(0.0, 1.0)
     };
 
     // Evaluate Y cubic spline at each tile column
@@ -308,7 +308,11 @@ fn interpolate_row(
         let cx0 = centers_x[tx0];
         let cx1 = centers_x[tx1];
 
-        if tx1 != tx0 {
+        if tx1 == tx0 {
+            // Single tile column — constant fill
+            bg_segment.fill(node_bg[tx0]);
+            noise_segment.fill(node_noise[tx0]);
+        } else {
             let hx = cx1 - cx0;
             let hx2_6 = hx * hx / 6.0;
             let inv_hx = 1.0 / hx;
@@ -333,10 +337,6 @@ fn interpolate_row(
                     step: inv_hx,
                 },
             );
-        } else {
-            // Single tile column — constant fill
-            bg_segment.fill(node_bg[tx0]);
-            noise_segment.fill(node_noise[tx0]);
         }
 
         x = segment_end;

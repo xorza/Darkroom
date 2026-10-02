@@ -244,11 +244,11 @@ impl MoffatFit {
             fit.local_pos.x,
             fit.local_pos.y,
             fit.amplitude_seed(background),
-            initial_alpha as f64,
-            background as f64,
+            f64::from(initial_alpha),
+            f64::from(background),
         ];
 
-        let model = MoffatFixedBeta::new(grid.radius as f64, config.fixed_beta as f64);
+        let model = MoffatFixedBeta::new(grid.radius as f64, f64::from(config.fixed_beta));
         let result = model.fit(fit.data(grid), initial_params, &config.lm);
 
         let [x0, y0, _, alpha, _] = result.params;

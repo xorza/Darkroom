@@ -29,8 +29,7 @@ impl ImageDimensions {
         assert!(size.height > 0, "Height must be positive");
         assert!(
             channels == 1 || channels == 3,
-            "Only 1 (grayscale) or 3 (RGB) channels supported, got {}",
-            channels
+            "Only 1 (grayscale) or 3 (RGB) channels supported, got {channels}"
         );
         size.pixel_count()
             .checked_mul(channels)

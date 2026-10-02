@@ -254,9 +254,9 @@ where
             .checked_add(descriptor.payload_len)
             .ok_or_else(|| invalid_data("cache payload lengths overflow u64"))?;
         if let OutputKind::Custom { type_id, version } = descriptor.kind
-            && !codecs
+            && codecs
                 .get(type_id)
-                .is_some_and(|codec| codec.version() == version)
+                .is_none_or(|codec| codec.version() != version)
         {
             return Ok(None);
         }

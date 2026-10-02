@@ -87,7 +87,7 @@ fn lo_ransac_vs_standard_with_noisy_data() {
 #[test]
 fn final_refit_does_not_degrade_robust_score() {
     let ref_points: Vec<DVec2> = (0..10)
-        .map(|index| DVec2::new(index as f64 * 10.0, 0.0))
+        .map(|index| DVec2::new(f64::from(index) * 10.0, 0.0))
         .collect();
     let mut target_points = ref_points.clone();
     for point in &mut target_points[8..] {

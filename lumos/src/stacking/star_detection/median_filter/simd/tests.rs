@@ -62,13 +62,13 @@ fn median9_scalar_known_values() {
     // Sorted: 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9
     // Median should be 0.5 (index 4)
     let result = median9_scalar(0.5, 0.1, 0.9, 0.2, 0.8, 0.3, 0.7, 0.4, 0.6);
-    assert!((result - 0.5).abs() < 1e-6, "Expected 0.5, got {}", result);
+    assert!((result - 0.5).abs() < 1e-6, "Expected 0.5, got {result}");
 }
 
 #[test]
 fn median9_scalar_all_same() {
     let result = median9_scalar(0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5);
-    assert!((result - 0.5).abs() < 1e-6, "Expected 0.5, got {}", result);
+    assert!((result - 0.5).abs() < 1e-6, "Expected 0.5, got {result}");
 }
 
 #[test]
@@ -92,10 +92,7 @@ fn median9_scalar_various_orderings() {
         );
         assert!(
             (result - expected_median).abs() < 1e-6,
-            "Ordering {}: expected {}, got {}",
-            idx,
-            expected_median,
-            result
+            "Ordering {idx}: expected {expected_median}, got {result}"
         );
     }
 }
@@ -107,8 +104,7 @@ fn median9_scalar_with_duplicates() {
     // Sorted: 0.1, 0.1, 0.3, 0.5, 0.5, 0.5, 0.7, 0.9, 0.9 -> median is 0.5
     assert!(
         (result - 0.5).abs() < 1e-6,
-        "Duplicates test: expected 0.5, got {}",
-        result
+        "Duplicates test: expected 0.5, got {result}"
     );
 }
 
@@ -119,7 +115,6 @@ fn median9_scalar_extreme_values() {
     // Sorted: MIN, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, MAX -> median is 3.0
     assert!(
         (result - 3.0).abs() < 1e-6,
-        "Extreme values test: expected 3.0, got {}",
-        result
+        "Extreme values test: expected 3.0, got {result}"
     );
 }

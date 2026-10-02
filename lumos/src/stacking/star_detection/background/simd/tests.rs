@@ -208,10 +208,7 @@ fn cubic_segment_simd_linear_when_no_correction() {
         let expected = (1.0 - t) * f0 + t * f1;
         assert!(
             (b - expected).abs() < 1e-3,
-            "i={}: expected linear {}, got {}",
-            i,
-            expected,
-            b
+            "i={i}: expected linear {expected}, got {b}"
         );
     }
 }

@@ -191,7 +191,7 @@ fn convolve_row_simd_matches_scalar_over_every_width_and_radius() {
 
     for case in &cases {
         for &radius in &case.radii {
-            let kernel: Vec<f32> = (0..2 * radius + 1)
+            let kernel: Vec<f32> = (0..=(2 * radius))
                 .map(|i| (i as f32 + 1.0) * 0.05)
                 .collect();
             for &width in &case.widths {
@@ -313,11 +313,7 @@ fn mirror_index_far_out_of_bounds() {
         let result = mirror_index(i, len);
         assert!(
             result < len,
-            "mirror_index({}, {}) = {} should be < {}",
-            i,
-            len,
-            result,
-            len
+            "mirror_index({i}, {len}) = {result} should be < {len}"
         );
     }
 }
@@ -381,9 +377,7 @@ fn convolve_cols_uniform_input() {
     for (i, &v) in output.iter().enumerate() {
         assert!(
             (v - 42.0).abs() < 1e-5,
-            "Uniform input should stay uniform at {}: {}",
-            i,
-            v
+            "Uniform input should stay uniform at {i}: {v}"
         );
     }
 }
@@ -428,9 +422,7 @@ fn convolve_cols_impulse_response() {
             for y in 0..height {
                 assert!(
                     output[y * width + x].abs() < 1e-6,
-                    "Non-impulse column should be zero at ({}, {})",
-                    x,
-                    y
+                    "Non-impulse column should be zero at ({x}, {y})"
                 );
             }
         }
@@ -539,10 +531,7 @@ fn convolve_2d_row_uniform() {
         for (x, &v) in output.iter().enumerate() {
             assert!(
                 (v - 42.0).abs() < 1e-4,
-                "Uniform input should stay uniform at row {} x {}: {}",
-                y,
-                x,
-                v
+                "Uniform input should stay uniform at row {y} x {x}: {v}"
             );
         }
     }

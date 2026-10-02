@@ -19,8 +19,8 @@ const TILE_SIZE: usize = 64;
 
 /// Normalize filtered output for visualization (handle negative values).
 fn normalize_for_display(pixels: &[f32]) -> Vec<f32> {
-    let min_val = pixels.iter().cloned().fold(f32::INFINITY, f32::min);
-    let max_val = pixels.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let min_val = pixels.iter().copied().fold(f32::INFINITY, f32::min);
+    let max_val = pixels.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     let range = (max_val - min_val).max(1e-10);
 
     pixels.iter().map(|&p| (p - min_val) / range).collect()
@@ -95,7 +95,7 @@ fn gaussian_filter_sparse() {
 
     // Verify stars are enhanced
     println!("Ground truth stars: {}", ground_truth.len());
-    println!("Sigma: {:.2}", sigma);
+    println!("Sigma: {sigma:.2}");
 
     // Check that star positions have high filtered values
     let mut star_responses: Vec<f32> = Vec::new();
@@ -114,7 +114,7 @@ fn gaussian_filter_sparse() {
     // Robust noise floor of the filtered image: stars are sparse, so the median and MAD
     // describe the star-free background (not the near-tautological whole-image mean).
     let (median, robust_sigma) = robust_floor(filtered.pixels());
-    let min_star_response = star_responses.iter().cloned().fold(f32::INFINITY, f32::min);
+    let min_star_response = star_responses.iter().copied().fold(f32::INFINITY, f32::min);
 
     println!("Mean star response: {mean_star_response:.6}");
     println!("Filtered floor: median {median:.6}, sigma {robust_sigma:.6}");

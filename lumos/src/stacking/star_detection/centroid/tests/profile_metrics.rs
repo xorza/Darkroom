@@ -3,7 +3,7 @@ use crate::stacking::star_detection::centroid::compute_stamp_radius;
 use crate::stacking::star_detection::centroid::stamp::StampFit;
 use crate::stacking::star_detection::centroid::stamp::StampGrid;
 
-/// Helper: run measure_star on a single-star image with given centroid method.
+/// Helper: run `measure_star` on a single-star image with given centroid method.
 fn measure_single_star(
     pixels: &Buffer2<f32>,
     bg_value: f32,
@@ -44,7 +44,7 @@ fn measure_single_star(
     .expect("measure_star should succeed")
 }
 
-/// GaussianFit: FWHM should come from fit sigma, not moments.
+/// `GaussianFit`: FWHM should come from fit sigma, not moments.
 ///
 /// Circular Gaussian with sigma=2.0. True FWHM = 2.35482 * 2.0 = 4.70964.
 /// The fit recovers sigma accurately; moments are biased by the finite stamp.
@@ -79,10 +79,10 @@ fn gaussian_fit_fwhm_from_fit_params() {
     );
 }
 
-/// GaussianFit: eccentricity should come from fit sigma_x/sigma_y ratio.
+/// `GaussianFit`: eccentricity should come from fit `sigma_x/sigma_y` ratio.
 ///
-/// Elongated Gaussian with sigma_x=2.0, sigma_y=4.0.
-/// True eccentricity = sqrt(1 - (sigma_min/sigma_max)^2) = sqrt(1 - (2/4)^2) = sqrt(0.75) ≈ 0.8660.
+/// Elongated Gaussian with `sigma_x=2.0`, `sigma_y=4.0`.
+/// True eccentricity = sqrt(1 - (`sigma_min/sigma_max)^2`) = sqrt(1 - (2/4)^2) = sqrt(0.75) ≈ 0.8660.
 #[test]
 fn gaussian_fit_eccentricity_from_fit_params() {
     let sigma_x = 2.0f32;
@@ -114,10 +114,10 @@ fn gaussian_fit_eccentricity_from_fit_params() {
     );
 }
 
-/// GaussianFit: FWHM from fit is more accurate than from moments.
+/// `GaussianFit`: FWHM from fit is more accurate than from moments.
 ///
 /// Moments-based FWHM is biased because:
-/// 1. Finite stamp includes wings that bias sum_r2 upward
+/// 1. Finite stamp includes wings that bias `sum_r2` upward
 /// 2. Background subtraction imperfections
 ///
 /// The fit models the Gaussian directly, recovering sigma more accurately.
@@ -157,7 +157,7 @@ fn gaussian_fit_fwhm_more_accurate_than_moments() {
     );
 }
 
-/// MoffatFit: FWHM should come from alpha_beta_to_fwhm(), not moments.
+/// `MoffatFit`: FWHM should come from `alpha_beta_to_fwhm()`, not moments.
 ///
 /// Moffat star with alpha=3.0, beta=2.5.
 /// True FWHM = 2 * alpha * sqrt(2^(1/beta) - 1)
@@ -167,7 +167,7 @@ fn gaussian_fit_fwhm_more_accurate_than_moments() {
 ///           = 6.0 * 0.56525 ≈ 3.3915
 ///
 /// Moments-based FWHM is severely biased for Moffat profiles because
-/// the extended wings contribute disproportionately to sum_r2.
+/// the extended wings contribute disproportionately to `sum_r2`.
 #[test]
 fn moffat_fit_fwhm_from_fit_params() {
     let alpha = 3.0f32;
@@ -176,8 +176,7 @@ fn moffat_fit_fwhm_from_fit_params() {
     // Verify: 2 * 3.0 * sqrt(2^0.4 - 1) ≈ 3.3915
     assert!(
         (true_fwhm - 3.3915).abs() < 0.001,
-        "FWHM formula check: {}",
-        true_fwhm
+        "FWHM formula check: {true_fwhm}"
     );
 
     let pos = DVec2::new(64.0, 64.0);
@@ -196,7 +195,7 @@ fn moffat_fit_fwhm_from_fit_params() {
     );
 }
 
-/// MoffatFit: eccentricity stays moment-based (Moffat is circular).
+/// `MoffatFit`: eccentricity stays moment-based (Moffat is circular).
 ///
 /// For a circular Moffat profile, eccentricity should be near zero
 /// regardless of whether it comes from fit or moments.
@@ -218,7 +217,7 @@ fn moffat_fit_eccentricity_stays_moment_based() {
     );
 }
 
-/// WeightedMoments: FWHM should be unchanged (no regression).
+/// `WeightedMoments`: FWHM should be unchanged (no regression).
 ///
 /// Circular Gaussian with sigma=2.5. True FWHM = 2.35482 * 2.5 = 5.887.
 /// Moments-based FWHM is biased upward by finite stamp size — the pre-existing
@@ -254,7 +253,7 @@ fn moments_only_fwhm_unchanged() {
     );
 }
 
-/// MoffatFit: FWHM from fit is more accurate than moments for Moffat profiles.
+/// `MoffatFit`: FWHM from fit is more accurate than moments for Moffat profiles.
 ///
 /// Moffat profiles have heavy wings that heavily bias moment-based FWHM upward.
 /// The fit directly recovers alpha, giving accurate FWHM.
@@ -298,10 +297,10 @@ fn windowed_covariance_recovers_gaussian_sigma() {
         SyntheticStar::new(pos.as_vec2(), 1.0, StarProfile::Gaussian { sigma }).stamp(size, 0.0);
     let bg = background_map::uniform(size, 0.0, 1.0);
 
-    let cov = windowed_covariance(&pixels, &bg, None, pos, 12, (sigma * sigma) as f64)
+    let cov = windowed_covariance(&pixels, &bg, None, pos, 12, f64::from(sigma * sigma))
         .expect("clean Gaussian should converge");
 
-    let expected = (sigma * sigma) as f64; // σ² per axis
+    let expected = f64::from(sigma * sigma); // σ² per axis
     assert!(
         (cov.xx - expected).abs() < 0.1 * expected,
         "cxx {} vs expected {expected}",
@@ -339,25 +338,25 @@ fn windowed_covariance_recovers_elliptical_axes() {
     .stamp(size, 0.0);
     let bg = background_map::uniform(size, 0.0, 1.0);
 
-    let seed = ((sx * sx + sy * sy) / 2.0) as f64;
+    let seed = f64::from(f32::midpoint(sx * sx, sy * sy));
     let cov = windowed_covariance(&pixels, &bg, None, pos, 14, seed)
         .expect("clean elliptical Gaussian should converge");
 
     assert!(
-        (cov.xx - (sx * sx) as f64).abs() < 0.12 * (sx * sx) as f64,
+        (cov.xx - f64::from(sx * sx)).abs() < 0.12 * f64::from(sx * sx),
         "cxx {} vs {}",
         cov.xx,
         sx * sx
     );
     assert!(
-        (cov.yy - (sy * sy) as f64).abs() < 0.12 * (sy * sy) as f64,
+        (cov.yy - f64::from(sy * sy)).abs() < 0.12 * f64::from(sy * sy),
         "cyy {} vs {}",
         cov.yy,
         sy * sy
     );
     // Recovered axis ratio tracks the input (not washed toward 1).
     let ratio = (cov.yy / cov.xx).sqrt();
-    let expected_ratio = (sy / sx) as f64;
+    let expected_ratio = f64::from(sy / sx);
     assert!(
         (ratio - expected_ratio).abs() < 0.08,
         "axis ratio {ratio} vs expected {expected_ratio}"
@@ -377,7 +376,7 @@ fn windowed_covariance_resists_wing_noise() {
     patterns::add_gaussian_noise(pixels.pixels_mut(), 0.03, 12345);
     let bg = background_map::uniform(size, 0.1, 1.0);
 
-    let cov = windowed_covariance(&pixels, &bg, None, pos, 12, (sigma * sigma) as f64)
+    let cov = windowed_covariance(&pixels, &bg, None, pos, 12, f64::from(sigma * sigma))
         .expect("noisy Gaussian should still converge");
 
     let ratio = (cov.yy / cov.xx).sqrt();

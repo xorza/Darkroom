@@ -1,10 +1,10 @@
 //! Optimized row-warping implementations.
 //!
 //! Runtime dispatch to the best available implementation:
-//! - **Bilinear**: AVX2/SSE4.1 on x86_64, NEON on aarch64, scalar with incremental stepping
+//! - **Bilinear**: AVX2/SSE4.1 on `x86_64`, NEON on aarch64, scalar with incremental stepping
 //!   elsewhere
 //! - **Lanczos2/3/4**: incremental stepping, fast-path interior bounds skipping, and a SIMD
-//!   interior kernel — x86_64 AVX2/FMA and aarch64 NEON. On x86 the Lanczos3/4 (SIZE=6/8) kernel
+//!   interior kernel — `x86_64` AVX2/FMA and aarch64 NEON. On x86 the Lanczos3/4 (SIZE=6/8) kernel
 //!   is 256-bit (one `__m256` load/accumulate per row) and the per-pixel tap weights come from a
 //!   vector `i32gather` of the LUT; SIZE=4 and aarch64 use the 128-bit kernel and scalar weight
 //!   lookups.
@@ -88,7 +88,7 @@ pub(super) fn sample(
 
 /// Warp a row of pixels using bilinear interpolation.
 ///
-/// Uses AVX2/SSE4.1 on x86_64, NEON on aarch64, scalar with incremental stepping elsewhere.
+/// Uses AVX2/SSE4.1 on `x86_64`, NEON on aarch64, scalar with incremental stepping elsewhere.
 /// When SIP is active, falls back to scalar (SIP is nonlinear).
 #[inline]
 pub(super) fn bilinear(
@@ -133,7 +133,7 @@ fn bilinear_scalar(
 /// 1. Incremental source coordinate stepping (avoid per-pixel matrix multiply)
 /// 2. Fast-path for interior pixels (skip bounds checks, use direct row pointers)
 /// 3. SIMD tap-weight computation: x86 gathers the LUT for Lanczos3/4; otherwise scalar lookups
-/// 4. SIMD interior fast path: x86_64 AVX2/FMA (256-bit for Lanczos3/4, 128-bit for Lanczos2),
+/// 4. SIMD interior fast path: `x86_64` AVX2/FMA (256-bit for Lanczos3/4, 128-bit for Lanczos2),
 ///    aarch64 NEON (128-bit, all sizes)
 pub(super) fn lanczos(
     input: &Buffer2<f32>,

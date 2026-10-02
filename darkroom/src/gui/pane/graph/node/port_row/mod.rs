@@ -280,7 +280,10 @@ fn input_label_cell(
         .show(ui, |ui| {
             // A const-only input can't be wired, so it has no connection anchor
             // — render just the label (+ its inline const editor).
-            if !input.const_only() {
+            if input.const_only() {
+                port_label(ui, theme, input.name(), tip);
+                PortGlyphResponse::default()
+            } else {
                 let mut circle = PortGlyph::circle(wid, diameter)
                     .fill(fill)
                     .margin(margin)
@@ -291,9 +294,6 @@ fn input_label_cell(
                 let glyph = circle.show(ui);
                 port_label(ui, theme, input.name(), tip);
                 glyph
-            } else {
-                port_label(ui, theme, input.name(), tip);
-                PortGlyphResponse::default()
             }
         });
     // Open on right-click anywhere on the cell — circle or label. Pulled into

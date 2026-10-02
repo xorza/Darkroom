@@ -369,8 +369,7 @@ fn moffat_fit_low_snr() {
     let pos_error = ((result.pos.x - true_cx).powi(2) + (result.pos.y - true_cy).powi(2)).sqrt();
     assert!(
         pos_error < 0.5,
-        "Low-SNR position error {:.3} should be < 0.5 px",
-        pos_error
+        "Low-SNR position error {pos_error:.3} should be < 0.5 px"
     );
     assert!(
         (result.debug.alpha - true_alpha).abs() < 1.0,
@@ -414,13 +413,9 @@ fn moffat_fit_various_beta_values() {
             &config,
         );
 
-        assert!(result.is_some(), "Failed for beta={}", true_beta);
+        assert!(result.is_some(), "Failed for beta={true_beta}");
         let result = result.unwrap();
-        assert!(
-            result.converged,
-            "Failed to converge for beta={}",
-            true_beta
-        );
+        assert!(result.converged, "Failed to converge for beta={true_beta}");
         assert!(
             (result.pos.x - true_cx).abs() < 0.1,
             "beta={}: x error={}",

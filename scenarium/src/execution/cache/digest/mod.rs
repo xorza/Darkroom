@@ -89,7 +89,7 @@ impl DigestPod for f64 {
 }
 impl DigestPod for bool {
     fn write_le(self, hasher: &mut DigestHasher) {
-        hasher.write_bytes(&[self as u8]);
+        hasher.write_bytes(&[u8::from(self)]);
     }
 }
 

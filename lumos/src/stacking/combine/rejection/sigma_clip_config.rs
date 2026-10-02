@@ -155,8 +155,8 @@ impl SigmaClipConfig {
         let mut min1 = f32::MAX;
         let mut max1 = f32::MIN;
         for &v in values {
-            sum += v as f64;
-            sum_sq += (v as f64) * (v as f64);
+            sum += f64::from(v);
+            sum_sq += f64::from(v) * f64::from(v);
             if v < min1 {
                 min1 = v;
             }
@@ -164,7 +164,7 @@ impl SigmaClipConfig {
                 max1 = v;
             }
         }
-        let (min1, max1) = (min1 as f64, max1 as f64);
+        let (min1, max1) = (f64::from(min1), f64::from(max1));
 
         // Trimmed mean and variance: exclude the single most extreme min and max
         let trimmed_n = (n - 2) as f64;
@@ -174,7 +174,7 @@ impl SigmaClipConfig {
         // Var = E[X²] - E[X]² with Bessel's correction
         let variance = (trimmed_sum_sq - trimmed_sum * trimmed_sum / trimmed_n) / (trimmed_n - 1.0);
 
-        if variance < f32::EPSILON as f64 {
+        if variance < f64::from(f32::EPSILON) {
             // Trimmed data is constant. The full path would compute MAD=0, sigma=0
             // and break without rejecting. Early exit matches that behavior.
             return true;
@@ -184,6 +184,6 @@ impl SigmaClipConfig {
 
         // Check: can any value exceed the threshold from the trimmed center?
         let max_dev = (max1 - trimmed_mean).abs().max((min1 - trimmed_mean).abs());
-        max_dev <= min_sigma_k as f64 * stddev
+        max_dev <= f64::from(min_sigma_k) * stddev
     }
 }

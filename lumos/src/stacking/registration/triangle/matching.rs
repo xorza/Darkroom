@@ -134,7 +134,7 @@ pub(super) fn form_triangles_from_neighbors(tree: &KdTree, k: usize) -> Vec<[usi
 
                 // Normalize triangle indices to avoid duplicates
                 let mut tri = [i, n1.index, n2.index];
-                tri.sort();
+                tri.sort_unstable();
                 triangles.push(tri);
             }
         }

@@ -1,4 +1,4 @@
-//! AVX2 backends for the sum operations (x86_64).
+//! AVX2 backends for the sum operations (`x86_64`).
 
 use std::arch::x86_64::*;
 

@@ -11,7 +11,7 @@ use crate::stacking::registration::triangle::voting::{
 };
 use crate::testing::prelude::*;
 
-/// Build a dense VoteMatrix from (ref_idx, target_idx, votes) entries.
+/// Build a dense `VoteMatrix` from (`ref_idx`, `target_idx`, votes) entries.
 fn vote_matrix_from_entries(
     n_ref: usize,
     n_target: usize,

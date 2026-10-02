@@ -148,7 +148,7 @@ fn median4(v: &mut [f32]) -> f32 {
     if v[1] > v[2] {
         v.swap(1, 2);
     }
-    (v[1] + v[2]) * 0.5
+    f32::midpoint(v[1], v[2])
 }
 
 /// Median of 6 elements (average of middle two).
@@ -194,5 +194,5 @@ fn median6(v: &mut [f32]) -> f32 {
     if v[2] > v[3] {
         v.swap(2, 3);
     }
-    (v[2] + v[3]) * 0.5
+    f32::midpoint(v[2], v[3])
 }

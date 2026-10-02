@@ -91,7 +91,7 @@ impl Drop for LibrawState {
     }
 }
 
-/// RAII guard for libraw_processed_image_t to ensure proper cleanup.
+/// RAII guard for `libraw_processed_image_t` to ensure proper cleanup.
 #[derive(Debug)]
 struct ProcessedImageGuard(*mut sys::libraw_processed_image_t);
 
@@ -362,9 +362,9 @@ fn raw_filter_color(visible_filters: u32, raw_row: usize, raw_col: usize, margin
     )
 }
 
-#[allow(clippy::unnecessary_cast)]
+/// `c_char` is `i8` on some targets and `u8` on others; the byte value is what LibRaw stores.
 fn xtrans_pattern_from_libraw(pattern: [[std::ffi::c_char; 6]; 6]) -> [[u8; 6]; 6] {
-    pattern.map(|row| row.map(|color| color as u8))
+    pattern.map(|row| row.map(|color| u8::from_ne_bytes(color.to_ne_bytes())))
 }
 
 pub(crate) fn raw_err(path: &Path, reason: impl Into<String>) -> ImageError {
@@ -677,7 +677,7 @@ impl UnpackedRaw {
         if ret != 0 {
             return Err(raw_err(
                 &self.path,
-                format!("libraw: dcraw_process failed, error code: {}", ret),
+                format!("libraw: dcraw_process failed, error code: {ret}"),
             ));
         }
 
@@ -685,11 +685,11 @@ impl UnpackedRaw {
         // SAFETY: the libraw instance is valid and dcraw_process succeeded
         let mut errc: i32 = 0;
         let processed_ptr =
-            unsafe { sys::libraw_dcraw_make_mem_image(self.libraw.as_ptr(), &mut errc) };
+            unsafe { sys::libraw_dcraw_make_mem_image(self.libraw.as_ptr(), &raw mut errc) };
         if processed_ptr.is_null() || errc != 0 {
             return Err(raw_err(
                 &self.path,
-                format!("libraw: dcraw_make_mem_image failed, error code: {}", errc),
+                format!("libraw: dcraw_make_mem_image failed, error code: {errc}"),
             ));
         }
 
@@ -742,26 +742,22 @@ impl UnpackedRaw {
                 .expect("libraw: expected_size overflow");
             assert!(
                 data_size >= expected_size,
-                "libraw: data_size {} < expected {}",
-                data_size,
-                expected_size
+                "libraw: data_size {data_size} < expected {expected_size}"
             );
 
             // SAFETY: data_ptr points to valid u16 data of the calculated size
-            let data_u16 = unsafe { slice::from_raw_parts(data_ptr as *const u16, pixel_count) };
+            let data_u16 = unsafe { slice::from_raw_parts(data_ptr.cast::<u16>(), pixel_count) };
 
             // Normalize to 0.0-1.0
             data_u16
                 .iter()
-                .map(|&v| (v as f32) / 65535.0)
+                .map(|&v| f32::from(v) / 65535.0)
                 .collect::<Vec<f32>>()
         } else {
             // 8-bit data
             assert!(
                 data_size >= pixel_count,
-                "libraw: data_size {} < expected {}",
-                data_size,
-                pixel_count
+                "libraw: data_size {data_size} < expected {pixel_count}"
             );
 
             // SAFETY: data_ptr points to valid u8 data of the calculated size
@@ -770,7 +766,7 @@ impl UnpackedRaw {
             // Normalize to 0.0-1.0
             data_u8
                 .iter()
-                .map(|&v| (v as f32) / 255.0)
+                .map(|&v| f32::from(v) / 255.0)
                 .collect::<Vec<f32>>()
         };
 
@@ -814,7 +810,7 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
     if ret != 0 {
         return Err(raw_err(
             path,
-            format!("libraw: Failed to unpack, error code: {}", ret),
+            format!("libraw: Failed to unpack, error code: {ret}"),
         ));
     }
 
@@ -830,24 +826,20 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
     if raw_width == 0 || raw_height == 0 {
         return Err(raw_err(
             path,
-            format!(
-                "libraw: Invalid raw dimensions: {}x{}",
-                raw_width, raw_height
-            ),
+            format!("libraw: Invalid raw dimensions: {raw_width}x{raw_height}"),
         ));
     }
     if width == 0 || height == 0 {
         return Err(raw_err(
             path,
-            format!("libraw: Invalid output dimensions: {}x{}", width, height),
+            format!("libraw: Invalid output dimensions: {width}x{height}"),
         ));
     }
     if top_margin + height > raw_height || left_margin + width > raw_width {
         return Err(raw_err(
             path,
             format!(
-                "libraw: Margins exceed raw dimensions: margins ({}, {}) + size ({}, {}) > raw ({}, {})",
-                top_margin, left_margin, width, height, raw_width, raw_height
+                "libraw: Margins exceed raw dimensions: margins ({top_margin}, {left_margin}) + size ({width}, {height}) > raw ({raw_width}, {raw_height})"
             ),
         ));
     }

@@ -678,7 +678,7 @@ fn frame_count_disk_backed() {
     for i in 0..3 {
         let pixels: Vec<f32> = vec![i as f32; 4];
         let image = LinearImage::from_pixels(dims, pixels);
-        let base_filename = format!("frame{}.bin", i);
+        let base_filename = format!("frame{i}.bin");
         let cached_frame = StoredFrame::spill(
             spill_directory.path(),
             &base_filename,

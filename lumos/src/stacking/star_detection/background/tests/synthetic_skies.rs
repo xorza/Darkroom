@@ -79,8 +79,8 @@ fn background_uniform() {
     // Verify background level is approximately correct
     let mean_bg: f32 =
         background.background.iter().sum::<f32>() / background.background.len() as f32;
-    println!("Expected background: {:.4}", bg_level);
-    println!("Estimated mean background: {:.4}", mean_bg);
+    println!("Expected background: {bg_level:.4}");
+    println!("Estimated mean background: {mean_bg:.4}");
 
     // A flat sky must be recovered to well under 1% (the tiled mode estimator is exact here).
     assert!(
@@ -166,8 +166,8 @@ fn background_gradient() {
     let right_idx = (width - 50) + (height / 2) * width;
     let left_bg = background.background[left_idx];
     let right_bg = background.background[right_idx];
-    println!("Left background: {:.4}", left_bg);
-    println!("Right background: {:.4}", right_bg);
+    println!("Left background: {left_bg:.4}");
+    println!("Right background: {right_bg:.4}");
 
     // The estimate must track the injected linear sky `start + (end-start)·x/(width-1)`:
     // at x=50 → 0.089, at x=206 → 0.212 (the stars are masked out by the tiled estimator).
@@ -252,8 +252,8 @@ fn background_vignette() {
     let corner_idx = 25 + 25 * width;
     let center_bg = background.background[center_idx];
     let corner_bg = background.background[corner_idx];
-    println!("Center background: {:.4}", center_bg);
-    println!("Corner background: {:.4}", corner_bg);
+    println!("Center background: {center_bg:.4}");
+    println!("Corner background: {corner_bg:.4}");
 
     // The estimator must be *unbiased* on a vignette: its mean tracks the true sky mean despite
     // the radial structure and the embedded stars. (It smooths the central peak rather than

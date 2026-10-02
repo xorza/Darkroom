@@ -11,9 +11,7 @@ fn uniform_image() {
     for (i, &val) in output.iter().enumerate() {
         assert!(
             (val - 0.5).abs() < 1e-6,
-            "Pixel {} should be 0.5, got {}",
-            i,
-            val
+            "Pixel {i} should be 0.5, got {val}"
         );
     }
 }
@@ -274,9 +272,7 @@ fn non_square_image() {
     for (i, &val) in output.iter().enumerate() {
         assert!(
             (val - 0.5).abs() < 1e-6,
-            "Pixel {} should be 0.5, got {}",
-            i,
-            val
+            "Pixel {i} should be 0.5, got {val}"
         );
     }
 }
@@ -521,7 +517,7 @@ fn wide_image() {
     median_filter_3x3(&pixels, &mut output);
 
     assert_eq!(output.len(), width * height);
-    for &val in output.iter() {
+    for &val in &output {
         assert!((val - 0.5).abs() < 1e-6);
     }
 }
@@ -537,7 +533,7 @@ fn tall_image() {
     median_filter_3x3(&pixels, &mut output);
 
     assert_eq!(output.len(), width * height);
-    for &val in output.iter() {
+    for &val in &output {
         assert!((val - 0.5).abs() < 1e-6);
     }
 }
@@ -567,10 +563,7 @@ fn chunk_boundary() {
         for (i, &val) in output.iter().enumerate() {
             assert!(
                 (val - 0.5).abs() < 1e-6,
-                "Height {}: Pixel {} should be 0.5, got {}",
-                height,
-                i,
-                val
+                "Height {height}: Pixel {i} should be 0.5, got {val}"
             );
         }
     }

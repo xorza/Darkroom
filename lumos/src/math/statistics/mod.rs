@@ -294,7 +294,7 @@ enum ClipResult {
     TooFew,
 }
 
-/// Core sigma-clipping iteration logic shared between Vec and ArrayVec versions.
+/// Core sigma-clipping iteration logic shared between Vec and `ArrayVec` versions.
 #[inline]
 fn sigma_clip_iteration(
     values: &mut [f32],

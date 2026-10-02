@@ -31,10 +31,7 @@ fn uniform_background() {
             let val = bg.background[(x, y)];
             assert!(
                 (val - 0.5).abs() < 1e-4,
-                "Background at ({}, {}) = {}, expected 0.5",
-                x,
-                y,
-                val
+                "Background at ({x}, {y}) = {val}, expected 0.5"
             );
         }
     }
@@ -110,8 +107,7 @@ fn background_with_stars() {
     let center_bg = bg.background[(64, 64)];
     assert!(
         (center_bg - 0.1).abs() < 0.05,
-        "Background at star = {}, expected ~0.1",
-        center_bg
+        "Background at star = {center_bg}, expected ~0.1"
     );
 }
 
@@ -133,8 +129,7 @@ fn noise_estimation() {
     let noise = bg.noise[(64, 64)];
     assert!(
         noise < 1e-4,
-        "Noise = {}, expected ~0 for uniform image",
-        noise
+        "Noise = {noise}, expected ~0 for uniform image"
     );
 }
 
@@ -180,8 +175,7 @@ fn sigma_clipping_rejects_outliers() {
     let bg_val = bg.background[(32, 32)];
     assert!(
         (bg_val - 0.2).abs() < 0.05,
-        "Background = {}, expected ~0.2",
-        bg_val
+        "Background = {bg_val}, expected ~0.2"
     );
 }
 
@@ -211,13 +205,10 @@ fn interpolation_produces_valid_values() {
     for y in (0..height).step_by(4) {
         for x in (0..width).step_by(4) {
             let val = bg.background[(x, y)];
-            assert!(val.is_finite(), "NaN/Inf at ({},{})", x, y);
+            assert!(val.is_finite(), "NaN/Inf at ({x},{y})");
             assert!(
                 (0.0..=1.0).contains(&val),
-                "Out of range at ({},{}): {}",
-                x,
-                y,
-                val
+                "Out of range at ({x},{y}): {val}"
             );
         }
     }
@@ -260,8 +251,7 @@ fn different_tile_sizes() {
         );
         assert!(
             (bg.background[(64, 64)] - 0.5).abs() < 0.01,
-            "Failed for tile_size={}",
-            tile_size
+            "Failed for tile_size={tile_size}"
         );
     }
 }
@@ -338,10 +328,7 @@ fn single_tile_image() {
             let val = bg.background[(x, y)];
             assert!(
                 (val - 0.42).abs() < 1e-4,
-                "Background at ({}, {}) = {}, expected 0.42",
-                x,
-                y,
-                val
+                "Background at ({x}, {y}) = {val}, expected 0.42"
             );
         }
     }
@@ -371,13 +358,11 @@ fn noise_estimation_with_actual_noise() {
     let noise = bg.noise[(64, 64)];
     assert!(
         noise > 0.01,
-        "Noise = {}, expected > 0.01 for noisy image",
-        noise
+        "Noise = {noise}, expected > 0.01 for noisy image"
     );
     assert!(
         noise < 0.15,
-        "Noise = {}, expected < 0.15 (not too high)",
-        noise
+        "Noise = {noise}, expected < 0.15 (not too high)"
     );
 }
 
@@ -411,19 +396,11 @@ fn interpolation_smooth_at_tile_boundaries() {
 
             assert!(
                 (val - val_left).abs() < max_jump,
-                "Discontinuity at ({}, {}): {} vs {} (left)",
-                x,
-                y,
-                val,
-                val_left
+                "Discontinuity at ({x}, {y}): {val} vs {val_left} (left)"
             );
             assert!(
                 (val - val_up).abs() < max_jump,
-                "Discontinuity at ({}, {}): {} vs {} (up)",
-                x,
-                y,
-                val,
-                val_up
+                "Discontinuity at ({x}, {y}): {val} vs {val_up} (up)"
             );
         }
     }
@@ -448,10 +425,7 @@ fn iterative_background_uniform() {
             let val = bg.background[(x, y)];
             assert!(
                 (val - 0.5).abs() < 0.01,
-                "Background at ({}, {}) = {}, expected ~0.5",
-                x,
-                y,
-                val
+                "Background at ({x}, {y}) = {val}, expected ~0.5"
             );
         }
     }
@@ -504,14 +478,11 @@ fn iterative_background_with_bright_stars() {
     // Both should be close to 0.1, but iterative should be at least as good
     assert!(
         (iter_bg - 0.1).abs() < 0.05,
-        "Iterative background {} should be close to 0.1",
-        iter_bg
+        "Iterative background {iter_bg} should be close to 0.1"
     );
     assert!(
         (iter_bg - 0.1).abs() <= (simple_bg - 0.1).abs() + 0.01,
-        "Iterative {} should be at least as good as simple {} at estimating 0.1 background",
-        iter_bg,
-        simple_bg
+        "Iterative {iter_bg} should be at least as good as simple {simple_bg} at estimating 0.1 background"
     );
 }
 
@@ -543,9 +514,7 @@ fn iterative_background_preserves_gradient() {
     let corner_end = bg.background[(63, 63)];
     assert!(
         corner_end > corner_00,
-        "Gradient not preserved: corner_00={}, corner_end={}",
-        corner_00,
-        corner_end
+        "Gradient not preserved: corner_00={corner_00}, corner_end={corner_end}"
     );
 }
 
@@ -570,11 +539,7 @@ fn iterative_background_no_dilation() {
 
     // Background away from star should be close to 0.2
     let val = bg.background[(16, 16)];
-    assert!(
-        (val - 0.2).abs() < 0.05,
-        "Background {} should be ~0.2",
-        val
-    );
+    assert!((val - 0.2).abs() < 0.05, "Background {val} should be ~0.2");
 }
 
 #[test]
@@ -600,11 +565,7 @@ fn iterative_background_no_refinement() {
     let bg = background_map::estimate(&pixels, &config);
 
     let val = bg.background[(32, 32)];
-    assert!(
-        (val - 0.3).abs() < 0.01,
-        "Background {} should be ~0.3",
-        val
-    );
+    assert!((val - 0.3).abs() < 0.01, "Background {val} should be ~0.3");
 }
 
 #[test]
@@ -638,23 +599,17 @@ fn bicubic_reproduces_linear_gradient() {
 
     assert!(
         corner_end > corner_00,
-        "Gradient not monotonically increasing: ({:.4}) vs ({:.4})",
-        corner_00,
-        corner_end
+        "Gradient not monotonically increasing: ({corner_00:.4}) vs ({corner_end:.4})"
     );
 
     // Both endpoints should be in the right ballpark (within tile-level precision)
     assert!(
         (corner_00 - expected_00).abs() < 0.1,
-        "Interior point (32,32): expected ~{:.4}, got {:.4}",
-        expected_00,
-        corner_00
+        "Interior point (32,32): expected ~{expected_00:.4}, got {corner_00:.4}"
     );
     assert!(
         (corner_end - expected_end).abs() < 0.1,
-        "Interior point (96,96): expected ~{:.4}, got {:.4}",
-        expected_end,
-        corner_end
+        "Interior point (96,96): expected ~{expected_end:.4}, got {corner_end:.4}"
     );
 
     // Key test: adjacent pixels should have very small differences (C2 smooth)
@@ -668,8 +623,7 @@ fn bicubic_reproduces_linear_gradient() {
     }
     assert!(
         max_jump < 0.01,
-        "Max pixel-to-pixel jump {:.6} too large for smooth bicubic",
-        max_jump
+        "Max pixel-to-pixel jump {max_jump:.6} too large for smooth bicubic"
     );
 }
 
@@ -719,8 +673,7 @@ fn bicubic_c1_continuity_at_tile_boundaries() {
     // With C2 bicubic spline, the second derivative jump should be very small
     assert!(
         max_d2_jump < 0.001,
-        "Max second derivative jump at tile boundary: {:.6} (should be < 0.001 for C2 spline)",
-        max_d2_jump
+        "Max second derivative jump at tile boundary: {max_d2_jump:.6} (should be < 0.001 for C2 spline)"
     );
 }
 
@@ -759,8 +712,7 @@ fn bicubic_smoother_than_bilinear_would_be() {
     // With bicubic spline on a linear gradient, second derivative should be near zero
     assert!(
         max_d2 < 0.005,
-        "Max second derivative {:.6} too large for C2 spline on linear gradient",
-        max_d2
+        "Max second derivative {max_d2:.6} too large for C2 spline on linear gradient"
     );
 }
 
@@ -808,8 +760,7 @@ fn bicubic_c2_continuity_y_direction() {
     // With C2 bicubic spline, the second derivative jump should be very small
     assert!(
         max_d2_jump < 0.001,
-        "Max Y-direction second derivative jump at tile boundary: {:.6} (should be < 0.001 for C2 spline)",
-        max_d2_jump
+        "Max Y-direction second derivative jump at tile boundary: {max_d2_jump:.6} (should be < 0.001 for C2 spline)"
     );
 }
 
@@ -848,9 +799,7 @@ fn noise_map_bicubic_interpolation() {
     let noise_right = bg.noise[(112, 64)];
     assert!(
         noise_right > noise_left,
-        "Noise should increase left→right: left={}, right={}",
-        noise_left,
-        noise_right
+        "Noise should increase left→right: left={noise_left}, right={noise_right}"
     );
 
     // Noise should be smoothly interpolated (no discontinuities)
@@ -864,8 +813,7 @@ fn noise_map_bicubic_interpolation() {
     }
     assert!(
         max_jump < 0.01,
-        "Noise map max pixel-to-pixel jump {:.6} too large for smooth bicubic",
-        max_jump
+        "Noise map max pixel-to-pixel jump {max_jump:.6} too large for smooth bicubic"
     );
 
     // Noise values should all be finite. Small negatives are possible from
@@ -873,8 +821,8 @@ fn noise_map_bicubic_interpolation() {
     for y in (0..height).step_by(4) {
         for x in (0..width).step_by(4) {
             let n = bg.noise[(x, y)];
-            assert!(n.is_finite(), "NaN/Inf noise at ({},{})", x, y);
-            assert!(n > -0.01, "Large negative noise at ({},{}): {}", x, y, n);
+            assert!(n.is_finite(), "NaN/Inf noise at ({x},{y})");
+            assert!(n > -0.01, "Large negative noise at ({x},{y}): {n}");
         }
     }
 }
@@ -900,10 +848,7 @@ fn bicubic_single_tile_column() {
             let val = bg.background[(x, y)];
             assert!(
                 (val - 0.42).abs() < 1e-3,
-                "Single tile column: bg({},{}) = {}, expected 0.42",
-                x,
-                y,
-                val
+                "Single tile column: bg({x},{y}) = {val}, expected 0.42"
             );
         }
     }
@@ -939,27 +884,21 @@ fn bicubic_two_tile_columns() {
 
     assert!(
         (left - 100.0).abs() < 5.0,
-        "Left center: expected ~100, got {}",
-        left
+        "Left center: expected ~100, got {left}"
     );
     assert!(
         (right - 200.0).abs() < 5.0,
-        "Right center: expected ~200, got {}",
-        right
+        "Right center: expected ~200, got {right}"
     );
     // With only 2 tiles, natural spline = linear, so midpoint = average
     assert!(
         (mid - 150.0).abs() < 10.0,
-        "Midpoint: expected ~150 (linear), got {}",
-        mid
+        "Midpoint: expected ~150 (linear), got {mid}"
     );
     // Verify monotonicity
     assert!(
         right > mid && mid > left,
-        "Should be monotonic: left={}, mid={}, right={}",
-        left,
-        mid,
-        right
+        "Should be monotonic: left={left}, mid={mid}, right={right}"
     );
 }
 
@@ -983,10 +922,7 @@ fn bicubic_single_tile_row() {
             let val = bg.background[(x, y)];
             assert!(
                 (val - 0.77).abs() < 1e-3,
-                "Single tile row: bg({},{}) = {}, expected 0.77",
-                x,
-                y,
-                val
+                "Single tile row: bg({x},{y}) = {val}, expected 0.77"
             );
         }
     }
@@ -1024,24 +960,18 @@ fn bicubic_two_tile_rows() {
 
     assert!(
         (top - 50.0).abs() < 5.0,
-        "Top center: expected ~50, got {}",
-        top
+        "Top center: expected ~50, got {top}"
     );
     assert!(
         (bot - 150.0).abs() < 5.0,
-        "Bottom center: expected ~150, got {}",
-        bot
+        "Bottom center: expected ~150, got {bot}"
     );
     assert!(
         (mid - 100.0).abs() < 10.0,
-        "Midpoint: expected ~100 (linear), got {}",
-        mid
+        "Midpoint: expected ~100 (linear), got {mid}"
     );
     assert!(
         bot > mid && mid > top,
-        "Should be monotonic: top={}, mid={}, bot={}",
-        top,
-        mid,
-        bot
+        "Should be monotonic: top={top}, mid={mid}, bot={bot}"
     );
 }

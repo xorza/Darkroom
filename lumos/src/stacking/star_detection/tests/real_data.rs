@@ -33,11 +33,12 @@ fn detect_rho_opiuchi() {
     let cal_dir = calibration_dir();
 
     let image_path = cal_dir.join("rho-opiuchi.jpg");
-    if !image_path.exists() {
-        panic!("rho-opiuchi.jpg not found in {:?}", cal_dir);
-    }
+    assert!(
+        image_path.exists(),
+        "rho-opiuchi.jpg not found in {cal_dir:?}"
+    );
 
-    println!("Loading: {:?}", image_path);
+    println!("Loading: {image_path:?}");
 
     let img = imaginarium::Image::read_file(&image_path)
         .expect("Failed to load image")
@@ -57,7 +58,7 @@ fn detect_rho_opiuchi() {
     let result = detector.detect(&linear_image);
     let elapsed = start.elapsed();
 
-    println!("Detection time: {:?}", elapsed);
+    println!("Detection time: {elapsed:?}");
     println!("Stars found: {}", result.stars.len());
 
     if !result.stars.is_empty() {
@@ -67,8 +68,8 @@ fn detect_rho_opiuchi() {
             result.stars.iter().map(|s| s.snr).sum::<f32>() / result.stars.len() as f32;
 
         println!("\nStatistics:");
-        println!("  Average FWHM: {:.2} px", avg_fwhm);
-        println!("  Average SNR: {:.1}", avg_snr);
+        println!("  Average FWHM: {avg_fwhm:.2} px");
+        println!("  Average SNR: {avg_snr:.1}");
 
         println!("\nTop 10 brightest stars:");
         println!(
@@ -90,7 +91,7 @@ fn detect_rho_opiuchi() {
         .expect("Failed to convert to RGB_F32");
 
     // Draw circles around all detected stars
-    for star in result.stars.iter() {
+    for star in &result.stars {
         let radius = (star.fwhm * 1.5).max(3.0);
         draw_circle(
             &mut output_img,
@@ -112,7 +113,7 @@ fn detect_rho_opiuchi() {
     output_img
         .save_file(&output_path)
         .expect("Failed to save output image");
-    println!("\nSaved detection result to: {:?}", output_path);
+    println!("\nSaved detection result to: {output_path:?}");
 
     assert!(
         !result.stars.is_empty(),
@@ -139,9 +140,10 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     let cal_dir = calibration_dir();
 
     let image_path = cal_dir.join("rho-opiuchi.jpg");
-    if !image_path.exists() {
-        panic!("rho-opiuchi.jpg not found in {:?}", cal_dir);
-    }
+    assert!(
+        image_path.exists(),
+        "rho-opiuchi.jpg not found in {cal_dir:?}"
+    );
 
     let img = imaginarium::Image::read_file(&image_path)
         .expect("Failed to load image")
@@ -297,9 +299,10 @@ fn quick_bench_detect_rho_opiuchi(b: quickbench::Bencher) {
     let cal_dir = calibration_dir();
 
     let image_path = cal_dir.join("rho-opiuchi.jpg");
-    if !image_path.exists() {
-        panic!("rho-opiuchi.jpg not found in {:?}", cal_dir);
-    }
+    assert!(
+        image_path.exists(),
+        "rho-opiuchi.jpg not found in {cal_dir:?}"
+    );
 
     // Preload image outside of benchmark loop
     let img = imaginarium::Image::read_file(&image_path)

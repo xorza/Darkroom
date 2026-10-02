@@ -183,9 +183,7 @@ mod tests {
 
         assert!(
             center > corner,
-            "Center {} should be > corner {}",
-            center,
-            corner
+            "Center {center} should be > corner {corner}"
         );
     }
 }

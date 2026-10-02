@@ -32,7 +32,7 @@ fn final_blend_scratch_reuses_the_exact_dead_arena_regions() {
     let width = 5;
     let height = 3;
     let pixels = width * height;
-    let bytes_per_word = std::mem::size_of::<f32>();
+    let bytes_per_word = size_of::<f32>();
     let mut arena = DemosaicArena::new(Size2us::new(width, height));
     arena.storage.fill(0.0);
     let arena_start = arena.storage.as_ptr() as usize;
@@ -104,7 +104,7 @@ fn synthetic_value(scene: SyntheticScene, channel: usize, pos: Vec2us) -> f32 {
 }
 
 #[test]
-#[allow(clippy::excessive_precision)]
+#[expect(clippy::excessive_precision)]
 fn markesteijn_matches_librtprocess_reference_scenes() {
     const WIDTH: usize = 96;
     const HEIGHT: usize = 96;
@@ -268,12 +268,7 @@ fn markesteijn_uniform_input() {
 
     // Uniform input should produce approximately uniform output
     for (i, &v) in rgb.iter().enumerate() {
-        assert!(
-            (v - 0.5).abs() < 0.05,
-            "Pixel {} = {} (expected ~0.5)",
-            i,
-            v
-        );
+        assert!((v - 0.5).abs() < 0.05, "Pixel {i} = {v} (expected ~0.5)");
     }
 }
 
@@ -298,7 +293,7 @@ fn markesteijn_no_nan() {
     let rgb = interleave_planes(demosaic(&xtrans, &CancelToken::never()).unwrap());
 
     for (i, &v) in rgb.iter().enumerate() {
-        assert!(v.is_finite(), "NaN/Inf at pixel {}", i);
+        assert!(v.is_finite(), "NaN/Inf at pixel {i}");
     }
 }
 
@@ -360,10 +355,7 @@ fn markesteijn_preserves_green_at_green_pixel() {
                 let g = rgb[(y * w + x) * 3 + 1];
                 assert!(
                     (g - 0.5).abs() < 0.001,
-                    "Green at ({},{}) = {} (expected ~0.5)",
-                    y,
-                    x,
-                    g
+                    "Green at ({y},{x}) = {g} (expected ~0.5)"
                 );
             }
         }

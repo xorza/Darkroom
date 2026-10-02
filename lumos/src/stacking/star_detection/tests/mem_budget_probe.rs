@@ -55,7 +55,7 @@ const WORKING_SET_PLANES: u64 = 12;
 
 fn preset_config() -> Config {
     match std::env::var("LUMOS_SD_PRESET").ok().as_deref() {
-        None | Some("") | Some("default") => Config::default(),
+        None | Some("" | "default") => Config::default(),
         Some("wide") => Config::wide_field(),
         Some("high_res") => Config::high_resolution(),
         Some("crowded") => Config::crowded_field(),
@@ -78,7 +78,7 @@ fn detect_memory_probe() {
     let reuse = env_parse("LUMOS_SD_REUSE", 1) != 0;
     let config = preset_config();
 
-    let plane_bytes = (width * height * std::mem::size_of::<f32>()) as u64;
+    let plane_bytes = (width * height * size_of::<f32>()) as u64;
 
     println!("=== lumos star-detection memory probe ===");
     println!(

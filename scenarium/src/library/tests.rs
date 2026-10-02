@@ -30,7 +30,7 @@ impl CustomValueCodec for StubCodec {
         _value: &dyn CustomValue,
         _writer: &mut (dyn AsyncWrite + Unpin + Send),
         _ctx: &mut ContextStore,
-    ) -> std::result::Result<(), CodecError> {
+    ) -> Result<(), CodecError> {
         unreachable!()
     }
 
@@ -39,7 +39,7 @@ impl CustomValueCodec for StubCodec {
         _reader: &mut (dyn AsyncRead + Unpin + Send),
         _byte_len: u64,
         _ctx: &mut ContextStore,
-    ) -> std::result::Result<Arc<dyn CustomValue>, CodecError> {
+    ) -> Result<Arc<dyn CustomValue>, CodecError> {
         unreachable!()
     }
 }

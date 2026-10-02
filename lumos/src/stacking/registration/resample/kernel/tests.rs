@@ -61,7 +61,7 @@ fn lanczos_kernel_at_integers() {
     // sinc(n) = sin(n*pi) / (n*pi) = 0 for all nonzero integers
     // So L(n, a) = 0 for integer n != 0
     for a in [2.0, 3.0, 4.0] {
-        for n in 1..=(a as i32 - 1) {
+        for n in 1..(a as i32) {
             let val = lanczos::kernel(n as f32, a);
             assert!(val.abs() < TOL, "L({n}, {a}) should be 0, got {val}");
             let val_neg = lanczos::kernel(-(n as f32), a);

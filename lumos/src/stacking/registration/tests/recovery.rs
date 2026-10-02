@@ -81,8 +81,7 @@ fn iterative_recovery_improves_on_biased_seed() {
     }
     assert!(
         max_error < threshold,
-        "All recovered matches should be within threshold, max_error={}",
-        max_error
+        "All recovered matches should be within threshold, max_error={max_error}"
     );
 }
 

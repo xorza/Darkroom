@@ -11,7 +11,7 @@ fn reference_point_none_uses_centroid() {
     let mut target_points = Vec::new();
     for y in (200..=800).step_by(100) {
         for x in (200..=800).step_by(100) {
-            let p = DVec2::new(x as f64, y as f64);
+            let p = DVec2::new(f64::from(x), f64::from(y));
             ref_points.push(p);
             let d = p - center;
             target_points.push(p + d * k * d.length_squared());
@@ -32,8 +32,7 @@ fn reference_point_none_uses_centroid() {
     let r = rms(&residuals);
     assert!(
         r < 0.01,
-        "Centroid reference should produce good fit: RMS={:.6}",
-        r
+        "Centroid reference should produce good fit: RMS={r:.6}"
     );
 
     // The internal reference_point should be the centroid = (500, 500)
@@ -60,7 +59,7 @@ fn crpix_vs_centroid_when_points_are_off_center() {
     // Points in lower-left quadrant only
     for y in (100..=350).step_by(50) {
         for x in (100..=450).step_by(50) {
-            let p = DVec2::new(x as f64, y as f64);
+            let p = DVec2::new(f64::from(x), f64::from(y));
             ref_points.push(p);
             let d = p - image_center;
             target_points.push(p + d * k * d.length_squared());
@@ -92,14 +91,11 @@ fn crpix_vs_centroid_when_points_are_off_center() {
     // CRPIX should fit better since distortion originates from image_center
     assert!(
         rms_crpix < rms_centroid,
-        "CRPIX RMS ({:.6}) should be less than centroid RMS ({:.6})",
-        rms_crpix,
-        rms_centroid
+        "CRPIX RMS ({rms_crpix:.6}) should be less than centroid RMS ({rms_centroid:.6})"
     );
     assert!(
         rms_crpix < 0.01,
-        "CRPIX RMS should be very small: {:.6}",
-        rms_crpix
+        "CRPIX RMS should be very small: {rms_crpix:.6}"
     );
 }
 
@@ -150,16 +146,13 @@ fn sigma_clipping_rejects_outliers() {
     // Clipped fit should be significantly better on clean points
     assert!(
         rms_clipped < rms_no_clip * 0.5,
-        "Clipped RMS ({:.6}) should be much less than unclipped RMS ({:.6})",
-        rms_clipped,
-        rms_no_clip
+        "Clipped RMS ({rms_clipped:.6}) should be much less than unclipped RMS ({rms_no_clip:.6})"
     );
 
     // Clipped fit should recover near-perfect results
     assert!(
         rms_clipped < 0.01,
-        "Clipped RMS should be near-zero: {:.6}",
-        rms_clipped
+        "Clipped RMS should be near-zero: {rms_clipped:.6}"
     );
 }
 
@@ -196,10 +189,7 @@ fn sigma_clipping_no_effect_on_clean_data() {
     {
         assert!(
             (a - b).abs() < 1e-14,
-            "coeffs_u[{}]: clipped={:.e}, no_clip={:.e}",
-            i,
-            a,
-            b
+            "coeffs_u[{i}]: clipped={a:.e}, no_clip={b:.e}"
         );
     }
     for (i, (&a, &b)) in sip_clipped
@@ -210,10 +200,7 @@ fn sigma_clipping_no_effect_on_clean_data() {
     {
         assert!(
             (a - b).abs() < 1e-14,
-            "coeffs_v[{}]: clipped={:.e}, no_clip={:.e}",
-            i,
-            a,
-            b
+            "coeffs_v[{i}]: clipped={a:.e}, no_clip={b:.e}"
         );
     }
 }
@@ -230,7 +217,7 @@ fn ill_conditioned_falls_back_to_lu() {
     let mut target_points = Vec::new();
     for y in (450..=550).step_by(10) {
         for x in (0..=1000).step_by(20) {
-            let p = DVec2::new(x as f64, y as f64);
+            let p = DVec2::new(f64::from(x), f64::from(y));
             ref_points.push(p);
             let d = p - center;
             target_points.push(p + d * k * d.length_squared());
@@ -249,7 +236,7 @@ fn ill_conditioned_falls_back_to_lu() {
 
     // Verify corrections are reasonable within the data region (y=500 strip)
     for x_val in (0..=1000).step_by(100) {
-        let p = DVec2::new(x_val as f64, 500.0);
+        let p = DVec2::new(f64::from(x_val), 500.0);
         let corrected = sip.correct(p);
         let d = p - center;
         let r2 = d.length_squared();
@@ -257,9 +244,7 @@ fn ill_conditioned_falls_back_to_lu() {
         let error = (transform.apply(corrected) - expected_target).length();
         assert!(
             error < 1.0,
-            "Ill-conditioned fit error at x={}: {:.4} pixels",
-            x_val,
-            error
+            "Ill-conditioned fit error at x={x_val}: {error:.4} pixels"
         );
     }
 }

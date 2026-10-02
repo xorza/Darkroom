@@ -45,7 +45,7 @@ fn reference_apply(light: &mut CfaImage, flat: &CfaImage, subtractor: Option<&Cf
             for x in 0..width {
                 let color = cfa_type.color_at(Vec2us::new(x, y)) as usize;
                 let value = subtractor_row.map_or(flat_row[x], |row| flat_row[x] - row[x]);
-                sums[color] += value as f64;
+                sums[color] += f64::from(value);
                 counts[color] += 1;
             }
             (sums, counts)
@@ -84,9 +84,9 @@ fn reference_apply_mono(light: &mut CfaImage, flat: &CfaImage, subtractor: Optio
             .data
             .par_iter()
             .zip(subtractor.data.par_iter())
-            .map(|(flat, subtractor)| (flat - subtractor) as f64)
+            .map(|(flat, subtractor)| f64::from(flat - subtractor))
             .sum::<f64>(),
-        None => flat.data.par_iter().map(|&value| value as f64).sum(),
+        None => flat.data.par_iter().map(|&value| f64::from(value)).sum(),
     };
     let inv_mean = 1.0 / (sum / flat.data.len() as f64) as f32;
     light

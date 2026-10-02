@@ -367,7 +367,7 @@ impl ImageViewer {
                     for (mode, key, tip) in BACKDROPS {
                         let selected = prefs.background == mode;
                         if Chip::new(control_wid(node_id, key), tip).show(ui, theme, |ui, s, _| {
-                            glyph::draw_swatch(ui, s, theme, mode, selected)
+                            glyph::draw_swatch(ui, s, theme, mode, selected);
                         }) && !selected
                         {
                             prefs.background = mode;

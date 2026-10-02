@@ -147,10 +147,10 @@ pub(super) fn pixel_stats(pixels: &[f32]) -> PixelStats {
             std: 0.0,
         };
     }
-    let mean = pixels.iter().map(|&p| p as f64).sum::<f64>() / n as f64;
+    let mean = pixels.iter().map(|&p| f64::from(p)).sum::<f64>() / n as f64;
     let var = pixels
         .iter()
-        .map(|&p| (p as f64 - mean).powi(2))
+        .map(|&p| (f64::from(p) - mean).powi(2))
         .sum::<f64>()
         / n as f64;
     PixelStats {
@@ -168,7 +168,7 @@ pub(crate) fn rms_diff(a: &[f32], b: &[f32]) -> f64 {
     let s: f64 = a
         .iter()
         .zip(b)
-        .map(|(x, y)| (*x as f64 - *y as f64).powi(2))
+        .map(|(x, y)| (f64::from(*x) - f64::from(*y)).powi(2))
         .sum();
     (s / a.len() as f64).sqrt()
 }

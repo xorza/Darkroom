@@ -1,7 +1,7 @@
-//! AVX2+FMA SIMD implementation for MoffatFixedBeta batch operations.
+//! AVX2+FMA SIMD implementation for `MoffatFixedBeta` batch operations.
 //!
 //! Processes 4 f64 pixels per AVX2 iteration for `evaluate_and_jacobian`
-//! and `compute_chi2`. Supports HalfInt, Int, and General PowStrategy variants.
+//! and `compute_chi2`. Supports `HalfInt`, Int, and General `PowStrategy` variants.
 
 use crate::stacking::star_detection::centroid::lm_optimizer::{FitData, LMModel, NormalEquations};
 use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFixedBeta, PowStrategy};
@@ -76,7 +76,7 @@ unsafe fn simd_fast_pow_neg(u: __m256d, strategy: PowStrategy) -> __m256d {
 /// Fuses model evaluation, Jacobian, and Hessian/gradient accumulation
 /// to avoid storing intermediate jacobian/residuals arrays.
 ///
-/// For N=5 (MoffatFixedBeta), accumulates 15 upper-triangle hessian elements,
+/// For N=5 (`MoffatFixedBeta`), accumulates 15 upper-triangle hessian elements,
 /// 5 gradient elements, and chi² directly in AVX2 registers.
 ///
 /// # Safety

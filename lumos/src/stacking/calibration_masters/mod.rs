@@ -433,7 +433,7 @@ impl CalibrationMasters {
         fits::load(path)
     }
 
-    /// Create CalibrationMasters from pre-built CFA images.
+    /// Create `CalibrationMasters` from pre-built CFA images.
     ///
     /// Generates defect map from the CFA dark if provided.
     /// `images.flat_dark` is a dark frame taken at the flat's exposure time — used
@@ -520,7 +520,7 @@ impl CalibrationMasters {
         Ok(())
     }
 
-    /// Create CalibrationMasters by stacking raw CFA files.
+    /// Create `CalibrationMasters` by stacking raw CFA files.
     ///
     /// Each role stacks under its own preset, through the full pipeline (rejection, normalization,
     /// chunked processing): darks, biases and flat-darks are a Winsorized mean at any frame count,

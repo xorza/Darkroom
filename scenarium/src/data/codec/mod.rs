@@ -22,14 +22,14 @@ pub trait CustomValueCodec: Send + Sync + std::fmt::Debug {
         value: &dyn CustomValue,
         writer: &mut (dyn AsyncWrite + Unpin + Send),
         ctx: &mut ContextStore,
-    ) -> std::result::Result<(), CodecError>;
+    ) -> Result<(), CodecError>;
 
     async fn decode(
         &self,
         reader: &mut (dyn AsyncRead + Unpin + Send),
         byte_len: u64,
         ctx: &mut ContextStore,
-    ) -> std::result::Result<Arc<dyn CustomValue>, CodecError>;
+    ) -> Result<Arc<dyn CustomValue>, CodecError>;
 }
 
 /// The codec registry the disk store retains: `TypeId → codec`, extracted from

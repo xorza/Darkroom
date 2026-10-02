@@ -116,15 +116,88 @@ opt-level = 0
 opt-level = 0
 
 
+# Warn, not deny: the verification chain runs clippy with `-D warnings`, and a build in the
+# middle of an edit keeps working. Every suppression in code is `#[expect(.., reason = "..")]`.
+#
+# "pending" marks a lint that is part of the set but still has hits; it moves to "warn" when its
+# sweep lands (plan 2.2).
 [workspace.lints.rust]
-missing_debug_implementations = "deny"
-unreachable_pub = "deny"
+rust_2018_idioms = { level = "warn", priority = -1 }
+elided_lifetimes_in_paths = "allow" # pending
+missing_debug_implementations = "warn"
+redundant_imports = "allow" # pending
+trivial_numeric_casts = "allow" # pending
+unreachable_pub = "warn"
+unused_lifetimes = "warn"
+unused_macro_rules = "allow" # pending
+unused_qualifications = "warn"
 
 [workspace.lints.clippy]
-clone_on_ref_ptr = "deny"
-items_after_test_module = "deny"
+pedantic = { level = "warn", priority = -1 }
+# Documentation is reviewed, not linted, for these.
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+# `assert!(x.is_empty())` reads plainer than a comparison with an empty array.
+assert_is_empty = "allow"
+# `usize -> f32/f64` in numeric code: a hit says nothing unless the value passes 2^24, and the
+# code cannot show that.
+cast_precision_loss = "allow"
+# `f64 -> f32` narrowing is the design of the f32 pipelines.
+cast_possible_truncation = "allow"
+# Math code names things `x`, `y`, `dx`, `dy`, `cx`.
+similar_names = "allow"
+many_single_char_names = "allow"
+# Size is a review question, not a lint.
+too_many_lines = "allow"
+# `#[inline(always)]` on `#[target_feature]` SIMD helpers is deliberate.
+inline_always = "allow"
+# Exact comparison is deliberate: sample-domain scales, sentinels, tests of exact values.
+float_cmp = "allow"
+# Every pointer cast feeds an unaligned load (`_mm_loadu_*`).
+cast_ptr_alignment = "allow"
+absolute_paths = "allow" # pending
+allow_attributes = "warn"
+allow_attributes_without_reason = "allow" # pending
+assigning_clones = "allow" # pending
+cast_lossless = "allow" # pending
+cast_possible_wrap = "allow" # pending
+cast_sign_loss = "allow" # pending
+clone_on_ref_ptr = "warn"
+dbg_macro = "warn"
+decimal_bitwise_operands = "allow" # pending
+default_trait_access = "allow" # pending
+ignore_without_reason = "allow" # pending
+items_after_statements = "allow" # pending
+items_after_test_module = "warn"
+large_stack_arrays = "allow" # pending
+large_types_passed_by_value = "allow" # pending
+let_underscore_must_use = "allow" # pending
+manual_let_else = "allow" # pending
+map_err_ignore = "allow" # pending
+map_unwrap_or = "allow" # pending
+match_same_arms = "allow" # pending
+match_wildcard_for_single_variants = "allow" # pending
+missing_fields_in_debug = "allow" # pending
+needless_pass_by_value = "allow" # pending
+print_stderr = "allow" # pending
+print_stdout = "allow" # pending
+redundant_closure_for_method_calls = "allow" # pending
+return_self_not_must_use = "allow" # pending
+self_named_module_files = "warn"
+semicolon_if_nothing_returned = "allow" # pending
+should_panic_without_expect = "allow" # pending
+struct_field_names = "allow" # pending
+todo = "warn"
+trivially_copy_pass_by_ref = "allow" # pending
+unnecessary_debug_formatting = "allow" # pending
+unnecessary_wraps = "allow" # pending
+unreadable_literal = "allow" # pending
+unused_result_ok = "allow" # pending
+unused_self = "allow" # pending
+used_underscore_binding = "allow" # pending
 
 [workspace.lints.rustdoc]
-broken_intra_doc_links = "deny"
-private_intra_doc_links = "deny"
-redundant_explicit_links = "deny"
+broken_intra_doc_links = "warn"
+private_intra_doc_links = "warn"
+redundant_explicit_links = "warn"

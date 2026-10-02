@@ -383,7 +383,7 @@ fn tps_barrel_distortion() {
 
     for y in (0..=1000).step_by(100) {
         for x in (0..=1000).step_by(100) {
-            let s = DVec2::new(x as f64, y as f64);
+            let s = DVec2::new(f64::from(x), f64::from(y));
             source.push(s);
             // r' = r(1 + k*r^2)
             let d = s - center;
@@ -397,7 +397,7 @@ fn tps_barrel_distortion() {
 
     // All control-point residuals should be < 1e-5
     let residuals = tps.compute_residuals(&target);
-    let max_residual = residuals.iter().cloned().fold(0.0f64, f64::max);
+    let max_residual = residuals.iter().copied().fold(0.0f64, f64::max);
     assert!(max_residual < 1e-5, "Max residual: {max_residual}");
 
     // Specific control point (400, 600):
@@ -468,7 +468,7 @@ fn tps_regularization_energy_vs_residuals() {
     // Exact interpolation (lambda=0)
     let tps_exact = fit_default(&source, &target);
     let residuals_exact = tps_exact.compute_residuals(&target);
-    let max_res_exact = residuals_exact.iter().cloned().fold(0.0f64, f64::max);
+    let max_res_exact = residuals_exact.iter().copied().fold(0.0f64, f64::max);
 
     // Regularized (lambda=100)
     let config_reg = TpsConfig {
@@ -476,7 +476,7 @@ fn tps_regularization_energy_vs_residuals() {
     };
     let tps_reg = ThinPlateSpline::fit(&source, &target, config_reg).unwrap();
     let residuals_reg = tps_reg.compute_residuals(&target);
-    let max_res_reg = residuals_reg.iter().cloned().fold(0.0f64, f64::max);
+    let max_res_reg = residuals_reg.iter().copied().fold(0.0f64, f64::max);
 
     // Exact should have near-zero residuals
     assert!(max_res_exact < 1e-6, "Exact max residual: {max_res_exact}");
@@ -651,7 +651,7 @@ fn tps_extreme_coordinates() {
 
     // Control points should be exact
     let residuals = tps.compute_residuals(&target);
-    let max_residual = residuals.iter().cloned().fold(0.0f64, f64::max);
+    let max_residual = residuals.iter().copied().fold(0.0f64, f64::max);
     assert!(max_residual < 1e-5, "Max residual: {max_residual}");
 
     // Verify a specific control point by hand:
@@ -737,7 +737,7 @@ fn tps_transform_points_consistency_and_correctness() {
     }
 }
 
-/// transform_points on empty slice returns empty vec.
+/// `transform_points` on empty slice returns empty vec.
 #[test]
 fn tps_transform_points_empty() {
     let source = square_source_4();
@@ -787,7 +787,7 @@ fn tps_many_points() {
 
     for y in (0..=500).step_by(50) {
         for x in (0..=500).step_by(50) {
-            let s = DVec2::new(x as f64, y as f64);
+            let s = DVec2::new(f64::from(x), f64::from(y));
             source.push(s);
             // Deterministic perturbation: dx = 2*sin(x/100), dy = 2*cos(y/100)
             let dx = (s.x * 0.01).sin() * 2.0;
@@ -801,7 +801,7 @@ fn tps_many_points() {
 
     // All residuals should be small
     let residuals = tps.compute_residuals(&target);
-    let max_residual = residuals.iter().cloned().fold(0.0f64, f64::max);
+    let max_residual = residuals.iter().copied().fold(0.0f64, f64::max);
     assert!(max_residual < 1e-4, "Max residual: {max_residual}");
 
     // Spot-check a specific control point: (200, 300)
@@ -829,7 +829,7 @@ fn tps_many_points() {
     let _ = idx; // used for documentation
 }
 
-/// DistortionMap from pure translation: grid dimensions, vectors, and statistics.
+/// `DistortionMap` from pure translation: grid dimensions, vectors, and statistics.
 #[test]
 fn distortion_map_translation() {
     let source = square_source_4();
@@ -869,7 +869,7 @@ fn distortion_map_translation() {
     );
 }
 
-/// DistortionMap::get returns None for out-of-bounds indices.
+/// `DistortionMap::get` returns None for out-of-bounds indices.
 #[test]
 fn distortion_map_get_out_of_bounds() {
     let source = square_source_4();
@@ -890,7 +890,7 @@ fn distortion_map_get_out_of_bounds() {
     assert!(map.get(Vec2us::new(1000, 1000)).is_none());
 }
 
-/// DistortionMap::interpolate with bilinear on translation: exact at grid and mid-points.
+/// `DistortionMap::interpolate` with bilinear on translation: exact at grid and mid-points.
 #[test]
 fn distortion_map_interpolation() {
     let source = square_source_4();
@@ -910,7 +910,7 @@ fn distortion_map_interpolation() {
     assert_dvec2_near(d_mid, shift, 0.5, "interp at midpoint");
 }
 
-/// DistortionMap with non-uniform distortion: verify gradient.
+/// `DistortionMap` with non-uniform distortion: verify gradient.
 #[test]
 fn distortion_map_non_uniform_gradient() {
     let mut source = Vec::new();
@@ -918,7 +918,7 @@ fn distortion_map_non_uniform_gradient() {
 
     for y in (0..=200).step_by(50) {
         for x in (0..=200).step_by(50) {
-            let s = DVec2::new(x as f64, y as f64);
+            let s = DVec2::new(f64::from(x), f64::from(y));
             source.push(s);
             // Distortion: dx = 0.05*x, dy = 0.02*y
             // At x=0: dx=0. At x=200: dx=10.

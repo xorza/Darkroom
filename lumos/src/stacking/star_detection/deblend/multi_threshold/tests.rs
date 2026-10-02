@@ -304,7 +304,7 @@ fn three_stars_deblend() {
     );
 
     let mut peaks: Vec<_> = result.iter().map(|o| o.peak.x).collect();
-    peaks.sort();
+    peaks.sort_unstable();
     assert!((peaks[0] as i32 - 30).abs() <= 2);
     assert!((peaks[1] as i32 - 75).abs() <= 2);
     assert!((peaks[2] as i32 - 120).abs() <= 2);
@@ -417,7 +417,7 @@ fn equal_brightness_stars() {
     );
 
     let area_diff = (result[0].area as i32 - result[1].area as i32).abs();
-    let avg_area = (result[0].area + result[1].area) / 2;
+    let avg_area = usize::midpoint(result[0].area, result[1].area);
     assert!(
         area_diff < (avg_area as i32 / 2),
         "Equal stars should have similar areas"
@@ -514,7 +514,7 @@ fn vertical_star_pair() {
     assert_eq!(result.len(), 2, "Vertically separated stars should deblend");
 
     let mut peaks: Vec<_> = result.iter().map(|o| o.peak.y).collect();
-    peaks.sort();
+    peaks.sort_unstable();
     assert!((peaks[0] as i32 - 30).abs() <= 2);
     assert!((peaks[1] as i32 - 70).abs() <= 2);
 }
@@ -927,7 +927,7 @@ fn connected_regions_complex_shape() {
 
     // Peaks should be at expected positions
     let mut peak_xs: Vec<_> = result.iter().map(|c| c.peak.x).collect();
-    peak_xs.sort();
+    peak_xs.sort_unstable();
     assert!((peak_xs[0] as i32 - 20).abs() <= 1);
     assert!((peak_xs[1] as i32 - 80).abs() <= 1);
 }
@@ -1583,24 +1583,18 @@ fn pixel_grid_repeated_resets_same_positions() {
         let mut scratch = RegionScratch::new();
         find_connected_regions_grid(&pixels, &mut regions, &mut scratch, NO_REGION_LIMIT);
 
-        assert_eq!(regions.len(), 1, "Round {}: should find 1 region", round);
+        assert_eq!(regions.len(), 1, "Round {round}: should find 1 region");
         assert_eq!(
             regions[0].len(),
             2,
-            "Round {}: should find exactly 2 pixels",
-            round
+            "Round {round}: should find exactly 2 pixels"
         );
 
         // Verify values match current round, not stale from previous
         let mut values: Vec<f32> = regions[0].iter().map(|p| p.value).collect();
         values.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        assert_eq!(values[0], round as f32, "Round {}: wrong value", round);
-        assert_eq!(
-            values[1],
-            round as f32 + 0.5,
-            "Round {}: wrong value",
-            round
-        );
+        assert_eq!(values[0], round as f32, "Round {round}: wrong value");
+        assert_eq!(values[1], round as f32 + 0.5, "Round {round}: wrong value");
     }
 }
 
@@ -1635,7 +1629,7 @@ fn connected_regions_pixels_at_coordinate_zero() {
     // Verify absolute coordinates are preserved correctly
     let mut positions: Vec<(usize, usize)> =
         regions[0].iter().map(|p| (p.pos.x, p.pos.y)).collect();
-    positions.sort();
+    positions.sort_unstable();
     assert_eq!(positions, vec![(0, 0), (0, 1), (1, 0)]);
 }
 

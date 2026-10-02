@@ -216,7 +216,7 @@ fn bayer_image_valid() {
     assert_eq!(bayer.margin, Vec2us::new(1, 1));
 }
 
-/// Helper: create a BayerImage from a flat CFA array with no margins.
+/// Helper: create a `BayerImage` from a flat CFA array with no margins.
 fn make_bayer(data: &[f32], size: Size2us, cfa: CfaPattern) -> BayerImage<'_> {
     BayerImage::with_margins(data, SensorLayout::cropped(size), cfa)
 }

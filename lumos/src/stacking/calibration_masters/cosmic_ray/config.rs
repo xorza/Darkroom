@@ -3,9 +3,9 @@
 /// Laplacian-edge cosmic-ray detection parameters. Defaults match ccdproc/astroscrappy.
 #[derive(Debug, Clone)]
 pub struct CosmicRayConfig {
-    /// σ_lim: Laplacian-to-noise significance threshold (lower → more sensitive). Default 4.5.
+    /// `σ_lim`: Laplacian-to-noise significance threshold (lower → more sensitive). Default 4.5.
     pub sigclip: f32,
-    /// f_lim: minimum CR-to-fine-structure contrast separating CRs from PSF-broadened stars.
+    /// `f_lim`: minimum CR-to-fine-structure contrast separating CRs from PSF-broadened stars.
     /// Default 5.0.
     pub objlim: f32,
     /// Fraction of `sigclip` used when growing the mask onto a flagged CR's fainter wings. Default 0.3.

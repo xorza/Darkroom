@@ -39,10 +39,10 @@ pub(crate) fn demosaic_memory(raw: Size2us, active: Size2us) -> DemosaicMemory {
     DemosaicMemory {
         output_bytes: active_pixels
             .saturating_mul(3)
-            .saturating_mul(std::mem::size_of::<f32>()),
+            .saturating_mul(size_of::<f32>()),
         peak_bytes: directional_peak
             .max(output_peak)
-            .saturating_mul(std::mem::size_of::<f32>()),
+            .saturating_mul(size_of::<f32>()),
     }
 }
 

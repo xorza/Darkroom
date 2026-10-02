@@ -114,8 +114,7 @@ fn load_and_cache_frame_reuse() {
     LinearImage::from_pixels(dims, collided_pixels.clone())
         .save(&collided_path)
         .unwrap();
-    let first_timestamp =
-        UNIX_EPOCH + Duration::from_secs(1_800_000_000) + Duration::from_nanos(100);
+    let first_timestamp = UNIX_EPOCH + Duration::from_hours(500000) + Duration::from_nanos(100);
     OpenOptions::new()
         .write(true)
         .open(&collided_path)
@@ -140,8 +139,7 @@ fn load_and_cache_frame_reuse() {
         original_len,
         "the timestamp, not file length, distinguishes this rewrite"
     );
-    let second_timestamp =
-        UNIX_EPOCH + Duration::from_secs(1_800_000_000) + Duration::from_nanos(200);
+    let second_timestamp = UNIX_EPOCH + Duration::from_hours(500000) + Duration::from_nanos(200);
     OpenOptions::new()
         .write(true)
         .open(&collided_path)
@@ -158,7 +156,7 @@ fn load_and_cache_frame_reuse() {
     let cache_path = FrameSpill::new(&temp_dir, base_filename).channel_path(0);
     let mut cache_file = OpenOptions::new().write(true).open(cache_path).unwrap();
     cache_file
-        .seek(SeekFrom::Start((2 * std::mem::size_of::<f32>()) as u64))
+        .seek(SeekFrom::Start((2 * size_of::<f32>()) as u64))
         .unwrap();
     cache_file.write_all(&f32::INFINITY.to_le_bytes()).unwrap();
     drop(cache_file);

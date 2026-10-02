@@ -126,7 +126,7 @@ fn dirties_document_splits_edits_from_navigation() {
         subscription(node_id, NodeId::unique(), false, true),
     ];
     for step in &content {
-        assert!(step.dirties_document(), "content step must dirty: {step:?}",);
+        assert!(step.dirties_document(), "content step must dirty: {step:?}");
     }
 }
 

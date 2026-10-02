@@ -1,7 +1,7 @@
 //! Image interpolation for sub-pixel resampling.
 //!
 //! Provides Lanczos, bicubic, bilinear, and nearest-neighbor interpolation.
-//! Bilinear and Lanczos3 have optimized row-warping paths (AVX2/SSE4.1 on x86_64,
+//! Bilinear and Lanczos3 have optimized row-warping paths (AVX2/SSE4.1 on `x86_64`,
 //! scalar with incremental stepping on aarch64).
 
 use std::sync::OnceLock;
@@ -98,7 +98,7 @@ pub(super) fn bicubic_weights(f: f32) -> [f32; 4] {
 #[inline(always)]
 pub(super) fn fast_floor_i32(x: f32) -> i32 {
     let i = x as i32;
-    i - (x < i as f32) as i32
+    i - i32::from(x < i as f32)
 }
 
 #[inline]

@@ -560,7 +560,7 @@ impl TestGraph {
         self.try_compile().expect("the fixture graph compiles")
     }
 
-    pub(crate) fn try_compile(&self) -> std::result::Result<Compiled, CompileError> {
+    pub(crate) fn try_compile(&self) -> Result<Compiled, CompileError> {
         Ok(Compiled::new(
             Compiler::default().compile(&self.graph, &self.library)?,
             self.ids.clone(),

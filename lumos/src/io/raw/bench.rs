@@ -49,7 +49,7 @@ fn bench_load_raw_libraw_demosaic() {
     ];
 
     for (qual, label) in &qualities {
-        println!("--- user_qual={} ({}) ---", qual, label);
+        println!("--- user_qual={qual} ({label}) ---");
 
         // Warmup
         let _ = load_raw_libraw_demosaic(path, *qual).unwrap();
@@ -79,7 +79,7 @@ fn bench_load_raw_libraw_demosaic() {
             .map(|t| t.as_secs_f64())
             .fold(f64::MAX, f64::min)
             * 1000.0;
-        println!("  Average: {:.1}ms, Best: {:.1}ms\n", avg_ms, min_ms);
+        println!("  Average: {avg_ms:.1}ms, Best: {min_ms:.1}ms\n");
     }
 }
 
@@ -184,7 +184,7 @@ fn bench_markesteijn_quality_vs_libraw() {
 /// Benchmark our RCD Bayer demosaic against libraw's built-in algorithms.
 ///
 /// Compares: RCD (ours) vs PPG, AHD, DHT (libraw).
-/// Requires a Bayer raw file in test_data/raw_samples/.
+/// Requires a Bayer raw file in `test_data/raw_samples`/.
 #[test]
 #[ignore]
 fn bench_bayer_rcd_demosaic() {
@@ -231,7 +231,7 @@ fn bench_bayer_rcd_demosaic() {
         .map(|t| t.as_secs_f64())
         .fold(f64::MAX, f64::min)
         * 1000.0;
-    println!("  Average: {:.1}ms, Best: {:.1}ms\n", rcd_avg, rcd_best);
+    println!("  Average: {rcd_avg:.1}ms, Best: {rcd_best:.1}ms\n");
 
     let _img = image.unwrap();
 
@@ -478,8 +478,8 @@ fn compare_color_structure(
             for channel in 0..3 {
                 let transform = &transforms[channel];
                 predicted[channel] =
-                    a.channel(channel)[index] as f64 * transform.scale + transform.offset;
-                actual[channel] = b.channel(channel)[index] as f64;
+                    f64::from(a.channel(channel)[index]) * transform.scale + transform.offset;
+                actual[channel] = f64::from(b.channel(channel)[index]);
             }
             let red_green = (predicted[0] - predicted[1]) - (actual[0] - actual[1]);
             let blue_green = (predicted[2] - predicted[1]) - (actual[2] - actual[1]);
@@ -498,8 +498,8 @@ fn compare_color_structure(
 
 /// Compare two channels using linear regression to remove scale/offset differences.
 fn compare_channels(
-    a: &imaginarium::Buffer2<f32>,
-    b: &imaginarium::Buffer2<f32>,
+    a: &Buffer2<f32>,
+    b: &Buffer2<f32>,
     size: Size2us,
     border: usize,
 ) -> ChannelCompareStats {
@@ -514,8 +514,8 @@ fn compare_channels(
     for y in border..(size.height - border) {
         for x in border..(size.width - border) {
             let idx = size.index_of(Vec2us::new(x, y));
-            let av = a[idx] as f64;
-            let bv = b[idx] as f64;
+            let av = f64::from(a[idx]);
+            let bv = f64::from(b[idx]);
             sum_a += av;
             sum_b += bv;
             sum_a2 += av * av;
@@ -544,8 +544,8 @@ fn compare_channels(
     for y in border..(size.height - border) {
         for x in border..(size.width - border) {
             let idx = size.index_of(Vec2us::new(x, y));
-            let predicted = (a[idx] as f64) * scale + offset;
-            let actual = b[idx] as f64;
+            let predicted = f64::from(a[idx]) * scale + offset;
+            let actual = f64::from(b[idx]);
             let diff = predicted - actual;
             let abs = diff.abs();
             sum_abs_err += abs;
@@ -578,8 +578,8 @@ fn compare_channels(
 
 #[test]
 fn quality_comparison_removes_affine_color_and_measures_chroma_residuals() {
-    let source = imaginarium::Buffer2::new(3, 1, vec![0.0, 1.0, 2.0]);
-    let reference = imaginarium::Buffer2::new(3, 1, vec![1.0, 3.0, 5.0]);
+    let source = Buffer2::new(3, 1, vec![0.0, 1.0, 2.0]);
+    let reference = Buffer2::new(3, 1, vec![1.0, 3.0, 5.0]);
     let channel = compare_channels(&source, &reference, Size2us::new(3, 1), 0);
     assert!((channel.scale - 2.0).abs() < 1e-12);
     assert!((channel.offset - 1.0).abs() < 1e-12);

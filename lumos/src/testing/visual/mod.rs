@@ -77,7 +77,7 @@ pub(crate) fn output_path(base: &Path) -> std::path::PathBuf {
     base.with_extension(TEST_OUTPUT_IMAGE_EXT)
 }
 
-/// Convert an f32 grayscale plane to an imaginarium RGB_F32 image under `tone`.
+/// Convert an f32 grayscale plane to an imaginarium `RGB_F32` image under `tone`.
 pub(crate) fn gray_to_rgb(pixels: &[f32], size: Size2us, tone: ToneMap) -> Image {
     let desc = ImageDesc::new(size.width, size.height, ColorFormat::RGB_F32);
     let rgb: Vec<f32> = tone
@@ -89,7 +89,7 @@ pub(crate) fn gray_to_rgb(pixels: &[f32], size: Size2us, tone: ToneMap) -> Image
 }
 
 /// Save imaginarium Image to file using the configured test output format.
-/// Converts to RGB_U8 if needed since some formats don't support float data.
+/// Converts to `RGB_U8` if needed since some formats don't support float data.
 pub(crate) fn save_image(image: Image, path: &Path) {
     let out = output_path(path);
     let image_u8 = if image.desc().color_format.channel_type == imaginarium::ChannelType::Float {
@@ -178,7 +178,7 @@ pub(crate) fn save_linear(image: &crate::io::image::linear::LinearImage, name: &
 
     let path = test_output_path(name);
     std::fs::create_dir_all(path.parent().unwrap()).expect("create test_output dir");
-    imaginarium::Image::from(image)
+    Image::from(image)
         .convert(ColorFormat::RGB_U8)
         .expect("convert to RGB_U8")
         .save_file(&path)

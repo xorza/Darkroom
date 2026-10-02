@@ -280,8 +280,7 @@ fn enforce_fits_budget(
         return Err(fits_unsupported(
             path,
             format!(
-                "{name} requires {required} bytes, exceeding the FITS load budget of {} bytes",
-                memory_limit_bytes
+                "{name} requires {required} bytes, exceeding the FITS load budget of {memory_limit_bytes} bytes"
             ),
         ));
     }

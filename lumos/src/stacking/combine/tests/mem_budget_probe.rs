@@ -88,11 +88,10 @@ fn master_stack_memory_probe() -> io::Result<()> {
     let keep = env_parse("LUMOS_KEEP", 0) != 0;
     let budget = parse_budget("LUMOS_BUDGET", BudgetChoice::auto());
 
-    let base = std::env::var("LUMOS_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tmp/lumos_master_stack")
-        });
+    let base = std::env::var("LUMOS_DIR").map_or_else(
+        |_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tmp/lumos_master_stack"),
+        PathBuf::from,
+    );
     let frames_dir = base.join(format!("{}x{}_n{n}_s{seed}", size.width, size.height));
     let cache_dir = base.join("cache");
 
@@ -122,7 +121,7 @@ fn master_stack_memory_probe() -> io::Result<()> {
     );
     if let Some(avail) = budget.available_memory {
         // Mirror of the internal tier rule: usable = 75% of the budget; spill if the set exceeds it.
-        let usable = (avail as u128 * 75 / 100) as u64;
+        let usable = (u128::from(avail) * 75 / 100) as u64;
         let tier = if resident_if_ram <= usable {
             "in-memory (resident)"
         } else {

@@ -120,7 +120,7 @@ fn plane_warp_lanczos3_matches_per_pixel() {
     let width = 32;
     let height = 32;
     let input: Vec<f32> = (0..width * height)
-        .map(|i| ((i as f32 * 0.037).sin() + 1.0) * 0.5)
+        .map(|i| f32::midpoint((i as f32 * 0.037).sin(), 1.0))
         .collect();
     let input_buf = Buffer2::new(width, height, input);
     let transform = Transform::similarity(DVec2::new(16.0, 16.0), 0.03, 1.02);
@@ -183,7 +183,7 @@ fn generic_stepping_bicubic_matches_per_pixel() {
     let width = 64;
     let height = 64;
     let input: Vec<f32> = (0..width * height)
-        .map(|i| ((i as f32 * 0.037).sin() + 1.0) * 0.5)
+        .map(|i| f32::midpoint((i as f32 * 0.037).sin(), 1.0))
         .collect();
     let input_buf = Buffer2::new(width, height, input);
     let transform = Transform::similarity(DVec2::new(3.0, 2.0), 0.05, 1.02);
@@ -213,7 +213,7 @@ fn generic_stepping_lanczos2_matches_per_pixel() {
     let width = 64;
     let height = 64;
     let input: Vec<f32> = (0..width * height)
-        .map(|i| ((i as f32 * 0.023).sin() + 1.0) * 0.5)
+        .map(|i| f32::midpoint((i as f32 * 0.023).sin(), 1.0))
         .collect();
     let input_buf = Buffer2::new(width, height, input);
     let transform = Transform::similarity(DVec2::new(5.0, -1.0), 0.03, 0.98);
@@ -243,7 +243,7 @@ fn generic_stepping_lanczos4_matches_per_pixel() {
     let width = 64;
     let height = 64;
     let input: Vec<f32> = (0..width * height)
-        .map(|i| ((i as f32 * 0.041).sin() + 1.0) * 0.5)
+        .map(|i| f32::midpoint((i as f32 * 0.041).sin(), 1.0))
         .collect();
     let input_buf = Buffer2::new(width, height, input);
     let transform = Transform::similarity(DVec2::new(2.0, 3.0), -0.02, 1.01);
@@ -273,7 +273,7 @@ fn generic_stepping_nearest_matches_per_pixel() {
     let width = 64;
     let height = 64;
     let input: Vec<f32> = (0..width * height)
-        .map(|i| ((i as f32 * 0.013).sin() + 1.0) * 0.5)
+        .map(|i| f32::midpoint((i as f32 * 0.013).sin(), 1.0))
         .collect();
     let input_buf = Buffer2::new(width, height, input);
     let transform = Transform::similarity(DVec2::new(1.0, 2.0), 0.01, 1.0);
@@ -306,7 +306,7 @@ fn generic_stepping_disabled_for_homography() {
     let width = 32;
     let height = 32;
     let input: Vec<f32> = (0..width * height)
-        .map(|i| ((i as f32 * 0.029).sin() + 1.0) * 0.5)
+        .map(|i| f32::midpoint((i as f32 * 0.029).sin(), 1.0))
         .collect();
     let input_buf = Buffer2::new(width, height, input);
     // Homography with small perspective component
@@ -357,7 +357,7 @@ fn lanczos_homography_horizon_uses_border_and_zero_coverage() {
             assert!(!horizon.is_finite());
         } else {
             assert!(horizon.is_finite());
-            assert!(horizon.x > i32::MAX as f64);
+            assert!(horizon.x > f64::from(i32::MAX));
         }
 
         for method in [

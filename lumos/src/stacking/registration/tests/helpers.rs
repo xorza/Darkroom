@@ -4,9 +4,9 @@ use crate::stacking::registration::config::RegistrationMatchingConfig;
 use crate::stacking::star_detection::star::Star;
 use crate::testing::prelude::*;
 
-/// FWHM for tight/compact stars (~max_sigma 0.67).
+/// FWHM for tight/compact stars (~`max_sigma` 0.67).
 pub(super) const FWHM_TIGHT: f32 = 1.34;
-/// FWHM for normal/typical stars (~max_sigma 1.0).
+/// FWHM for normal/typical stars (~`max_sigma` 1.0).
 pub(super) const FWHM_NORMAL: f32 = 2.0;
 
 pub(super) fn matching_config(min_stars: usize, min_matches: usize) -> RegistrationMatchingConfig {

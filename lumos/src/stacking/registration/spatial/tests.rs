@@ -6,7 +6,7 @@ use crate::stacking::registration::spatial::*;
 fn radius_search_indices(tree: &KdTree, query: DVec2, radius: f64) -> Vec<usize> {
     let mut buf = Vec::new();
     tree.radius_indices_into(query, radius, &mut buf);
-    buf.sort();
+    buf.sort_unstable();
     buf
 }
 
@@ -101,7 +101,7 @@ fn k_nearest_over_every_layout() {
         (0..10)
             .map(|i| {
                 let base = if i < 5 { 0.0 } else { separation };
-                let step = (i % 5) as f64 * 0.1;
+                let step = f64::from(i % 5) * 0.1;
                 DVec2::new(base + step, base + step)
             })
             .collect()
@@ -485,7 +485,7 @@ fn radius_buffer_reuse_clears() {
 
     // First query near origin: should find idx 0 and 1
     tree.radius_indices_into(DVec2::new(0.0, 0.0), 2.0, &mut buf);
-    buf.sort();
+    buf.sort_unstable();
     assert_eq!(buf, vec![0, 1]);
 
     // Second query near (10,10): should find only idx 2 (buffer cleared)
@@ -593,12 +593,12 @@ fn heap_small_push_and_eviction() {
     heap.write_into(&mut result);
     assert_eq!(result.len(), 3);
     let mut dist_sqs: Vec<u64> = result.iter().map(|n| n.dist_sq.to_bits()).collect();
-    dist_sqs.sort();
+    dist_sqs.sort_unstable();
     let expected: Vec<u64> = [2.0_f64, 5.0, 10.0].iter().map(|d| d.to_bits()).collect();
     assert_eq!(dist_sqs, expected);
 
     let mut indices: Vec<usize> = result.iter().map(|n| n.index).collect();
-    indices.sort();
+    indices.sort_unstable();
     assert_eq!(indices, vec![0, 1, 3]);
 }
 
@@ -696,7 +696,7 @@ fn k_nearest_and_radius_agree() {
 
     let knn_result = tree.k_nearest(query, 3);
     let mut knn_indices: Vec<usize> = knn_result.iter().map(|n| n.index).collect();
-    knn_indices.sort();
+    knn_indices.sort_unstable();
     assert_eq!(knn_indices, vec![0, 1, 2]);
 }
 
@@ -708,7 +708,9 @@ fn horizontal_line_exact_distances() {
     //   dist_sq to idx5 (50,0): (45-50)^2 = 25
     //   dist_sq to idx3 (30,0): (45-30)^2 = 225
     // k=2: idx4 and idx5, both at dist_sq=25
-    let points: Vec<DVec2> = (0..10).map(|i| DVec2::new(i as f64 * 10.0, 0.0)).collect();
+    let points: Vec<DVec2> = (0..10)
+        .map(|i| DVec2::new(f64::from(i) * 10.0, 0.0))
+        .collect();
     let tree = KdTree::build(&points).unwrap();
 
     let neighbors = tree.k_nearest(DVec2::new(45.0, 0.0), 2);
@@ -716,7 +718,7 @@ fn horizontal_line_exact_distances() {
     assert!((neighbors[0].dist_sq - 25.0).abs() < 1e-10);
     assert!((neighbors[1].dist_sq - 25.0).abs() < 1e-10);
     let mut indices: Vec<usize> = neighbors.iter().map(|n| n.index).collect();
-    indices.sort();
+    indices.sort_unstable();
     assert_eq!(indices, vec![4, 5]);
 }
 
@@ -727,7 +729,9 @@ fn vertical_line_exact_distances() {
     //   dist_sq to idx4 (0,40): (45-40)^2 = 25
     //   dist_sq to idx5 (0,50): (45-50)^2 = 25
     // k=2: idx4 and idx5, both at dist_sq=25
-    let points: Vec<DVec2> = (0..10).map(|i| DVec2::new(0.0, i as f64 * 10.0)).collect();
+    let points: Vec<DVec2> = (0..10)
+        .map(|i| DVec2::new(0.0, f64::from(i) * 10.0))
+        .collect();
     let tree = KdTree::build(&points).unwrap();
 
     let neighbors = tree.k_nearest(DVec2::new(0.0, 45.0), 2);
@@ -735,7 +739,7 @@ fn vertical_line_exact_distances() {
     assert!((neighbors[0].dist_sq - 25.0).abs() < 1e-10);
     assert!((neighbors[1].dist_sq - 25.0).abs() < 1e-10);
     let mut indices: Vec<usize> = neighbors.iter().map(|n| n.index).collect();
-    indices.sort();
+    indices.sort_unstable();
     assert_eq!(indices, vec![4, 5]);
 }
 

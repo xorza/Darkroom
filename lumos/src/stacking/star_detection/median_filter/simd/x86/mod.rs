@@ -150,7 +150,7 @@ pub(super) unsafe fn median_filter_row_sse41(
 // Nine sibling lane values feeding a fixed comparator network, not a group with a name:
 // an array or struct would replace the network's named registers with indices and hand LLVM
 // an aggregate to promote back into exactly those registers.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 unsafe fn median9_avx2(
     mut v0: __m256,
     mut v1: __m256,
@@ -172,7 +172,7 @@ unsafe fn median9_avx2(
 // Nine sibling lane values feeding a fixed comparator network, not a group with a name:
 // an array or struct would replace the network's named registers with indices and hand LLVM
 // an aggregate to promote back into exactly those registers.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 unsafe fn median9_sse41(
     mut v0: __m128,
     mut v1: __m128,

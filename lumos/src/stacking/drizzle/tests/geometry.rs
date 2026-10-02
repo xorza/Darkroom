@@ -58,17 +58,17 @@ fn drizzle_accumulator_rejects_invalid_frame_inputs() {
 #[test]
 fn sgarea_horizontal_midpoint() {
     let area = sgarea(DVec2::new(0.0, 0.5), DVec2::new(1.0, 0.5));
-    assert!((area - 0.5).abs() < 1e-12, "Expected 0.5, got {}", area);
+    assert!((area - 0.5).abs() < 1e-12, "Expected 0.5, got {area}");
 }
 
 /// Test sgarea with reversed direction: (1,0.5) to (0,0.5).
 ///
 /// Same segment but right-to-left → negative sign.
-/// sgn_dx = -1, trapezoid = -0.5 * (1-0) * (0.5+0.5) = -0.5
+/// `sgn_dx` = -1, trapezoid = -0.5 * (1-0) * (0.5+0.5) = -0.5
 #[test]
 fn sgarea_horizontal_reversed() {
     let area = sgarea(DVec2::new(1.0, 0.5), DVec2::new(0.0, 0.5));
-    assert!((area - (-0.5)).abs() < 1e-12, "Expected -0.5, got {}", area);
+    assert!((area - (-0.5)).abs() < 1e-12, "Expected -0.5, got {area}");
 }
 
 /// Test sgarea with a vertical segment (dx=0) → area = 0.
@@ -77,8 +77,7 @@ fn sgarea_vertical() {
     let area = sgarea(DVec2::new(0.5, 0.0), DVec2::new(0.5, 1.0));
     assert!(
         area.abs() < 1e-12,
-        "Vertical segment should have area 0, got {}",
-        area
+        "Vertical segment should have area 0, got {area}"
     );
 }
 
@@ -92,16 +91,14 @@ fn sgarea_near_vertical() {
     let area = sgarea(DVec2::new(0.5, 0.0), DVec2::new(0.5 + 1e-16, 1.0));
     assert!(
         area.abs() < 1e-12,
-        "Near-vertical segment should have area ~0, got {}",
-        area
+        "Near-vertical segment should have area ~0, got {area}"
     );
 
     // Negative near-zero dx
     let area = sgarea(DVec2::new(0.5, 0.0), DVec2::new(0.5 - 1e-16, 1.0));
     assert!(
         area.abs() < 1e-12,
-        "Near-vertical segment (negative dx) should have area ~0, got {}",
-        area
+        "Near-vertical segment (negative dx) should have area ~0, got {area}"
     );
 }
 
@@ -111,8 +108,7 @@ fn sgarea_outside_right() {
     let area = sgarea(DVec2::new(1.5, 0.0), DVec2::new(2.5, 1.0));
     assert!(
         area.abs() < 1e-12,
-        "Outside segment should have area 0, got {}",
-        area
+        "Outside segment should have area 0, got {area}"
     );
 }
 
@@ -122,21 +118,19 @@ fn sgarea_below_axis() {
     let area = sgarea(DVec2::new(0.0, -1.0), DVec2::new(1.0, -0.5));
     assert!(
         area.abs() < 1e-12,
-        "Below-axis segment should have area 0, got {}",
-        area
+        "Below-axis segment should have area 0, got {area}"
     );
 }
 
 /// Test sgarea with segment entirely above y=1.
 ///
-/// Both y >= 1 → full rectangle: sgn_dx * (xhi - xlo) = 1.0 * (1-0) = 1.0
+/// Both y >= 1 → full rectangle: `sgn_dx` * (xhi - xlo) = 1.0 * (1-0) = 1.0
 #[test]
 fn sgarea_above_top() {
     let area = sgarea(DVec2::new(0.0, 1.5), DVec2::new(1.0, 2.0));
     assert!(
         (area - 1.0).abs() < 1e-12,
-        "Above-top segment should give 1.0, got {}",
-        area
+        "Above-top segment should give 1.0, got {area}"
     );
 }
 
@@ -147,7 +141,7 @@ fn sgarea_above_top() {
 #[test]
 fn sgarea_case_a_diagonal() {
     let area = sgarea(DVec2::new(0.0, 0.0), DVec2::new(1.0, 1.0));
-    assert!((area - 0.5).abs() < 1e-12, "Expected 0.5, got {}", area);
+    assert!((area - 0.5).abs() < 1e-12, "Expected 0.5, got {area}");
 }
 
 /// Test sgarea Case B: segment enters inside, exits above y=1.
@@ -157,14 +151,14 @@ fn sgarea_case_a_diagonal() {
 /// ylo <= 1.0, yhi > 1.0 → Case B.
 /// det = 0*1.5 - 0.5*1 = -0.5
 /// xtop = (dx + det) / dy = (1 + (-0.5)) / 1 = 0.5
-/// area = sgn_dx * (0.5*(xtop-xlo)*(1+ylo) + xhi-xtop)
+/// area = `sgn_dx` * (0.5*(xtop-xlo)*(1+ylo) + xhi-xtop)
 ///       = 1 * (0.5*(0.5-0)*(1+0.5) + 1-0.5)
 ///       = 0.5*0.5*1.5 + 0.5
 ///       = 0.375 + 0.5 = 0.875
 #[test]
 fn sgarea_case_b() {
     let area = sgarea(DVec2::new(0.0, 0.5), DVec2::new(1.0, 1.5));
-    assert!((area - 0.875).abs() < 1e-12, "Expected 0.875, got {}", area);
+    assert!((area - 0.875).abs() < 1e-12, "Expected 0.875, got {area}");
 }
 
 /// Test sgarea Case C: segment enters above y=1, exits inside.
@@ -174,27 +168,27 @@ fn sgarea_case_b() {
 /// ylo > 1.0 → Case C.
 /// det = 0*0.5 - 1.5*1 = -1.5
 /// xtop = (dx + det) / dy = (1 + (-1.5)) / (-1) = (-0.5)/(-1) = 0.5
-/// area = sgn_dx * (0.5*(xhi-xtop)*(1+yhi) + xtop-xlo)
+/// area = `sgn_dx` * (0.5*(xhi-xtop)*(1+yhi) + xtop-xlo)
 ///       = 1 * (0.5*(1-0.5)*(1+0.5) + 0.5-0)
 ///       = 0.5*0.5*1.5 + 0.5
 ///       = 0.375 + 0.5 = 0.875
 #[test]
 fn sgarea_case_c() {
     let area = sgarea(DVec2::new(0.0, 1.5), DVec2::new(1.0, 0.5));
-    assert!((area - 0.875).abs() < 1e-12, "Expected 0.875, got {}", area);
+    assert!((area - 0.875).abs() < 1e-12, "Expected 0.875, got {area}");
 }
 
 /// Test sgarea with segment crossing y=0 (clip to y >= 0).
 ///
 /// Segment from (0, -0.5) to (1, 0.5). Slope = 1.
 /// Clipped x: [0, 1]. ylo = -0.5, yhi = 0.5.
-/// ylo < 0 → clip: det = 0*0.5 - (-0.5)*1 = 0.5, xlo_new = det/dy = 0.5/1 = 0.5, ylo=0.
+/// ylo < 0 → clip: det = 0*0.5 - (-0.5)*1 = 0.5, `xlo_new` = det/dy = 0.5/1 = 0.5, ylo=0.
 /// Now xlo=0.5, ylo=0, xhi=1, yhi=0.5. Case A:
 /// 0.5*(1-0.5)*(0.5+0) = 0.5*0.5*0.5 = 0.125
 #[test]
 fn sgarea_crosses_y_zero() {
     let area = sgarea(DVec2::new(0.0, -0.5), DVec2::new(1.0, 0.5));
-    assert!((area - 0.125).abs() < 1e-12, "Expected 0.125, got {}", area);
+    assert!((area - 0.125).abs() < 1e-12, "Expected 0.125, got {area}");
 }
 
 /// Test boxer: quadrilateral exactly overlapping output pixel → area = 1.0.
@@ -212,8 +206,7 @@ fn boxer_exact_overlap() {
     let area = boxer(DVec2::new(0.0, 0.0), &quad);
     assert!(
         (area - 1.0).abs() < 1e-12,
-        "Exact overlap should give area 1.0, got {}",
-        area
+        "Exact overlap should give area 1.0, got {area}"
     );
 }
 
@@ -232,8 +225,7 @@ fn boxer_half_overlap_x() {
     let area = boxer(DVec2::new(0.0, 0.0), &quad);
     assert!(
         (area - 0.5).abs() < 1e-12,
-        "Half x-overlap should give area 0.5, got {}",
-        area
+        "Half x-overlap should give area 0.5, got {area}"
     );
 }
 
@@ -252,8 +244,7 @@ fn boxer_quarter_overlap() {
     let area = boxer(DVec2::new(0.0, 0.0), &quad);
     assert!(
         (area - 0.25).abs() < 1e-12,
-        "Quarter overlap should give area 0.25, got {}",
-        area
+        "Quarter overlap should give area 0.25, got {area}"
     );
 }
 
@@ -272,8 +263,7 @@ fn boxer_nonzero_pixel() {
     let area = boxer(DVec2::new(3.0, 5.0), &quad);
     assert!(
         (area - 1.0).abs() < 1e-12,
-        "Exact overlap at (3,5) should give area 1.0, got {}",
-        area
+        "Exact overlap at (3,5) should give area 1.0, got {area}"
     );
 }
 
@@ -289,8 +279,7 @@ fn boxer_no_overlap() {
     let area = boxer(DVec2::new(0.0, 0.0), &quad);
     assert!(
         area.abs() < 1e-12,
-        "No overlap should give area 0, got {}",
-        area
+        "No overlap should give area 0, got {area}"
     );
 }
 
@@ -310,7 +299,6 @@ fn boxer_rotated_diamond() {
     let area = boxer(DVec2::new(0.0, 0.0), &quad);
     assert!(
         (area - 0.5).abs() < 1e-12,
-        "Diamond inscribed in unit square should have area 0.5, got {}",
-        area
+        "Diamond inscribed in unit square should have area 0.5, got {area}"
     );
 }

@@ -213,7 +213,7 @@ impl DrizzleAccumulator {
                 for index in 0..span.weight.len() {
                     let weight = span.weight[index];
                     let covered = weight >= threshold;
-                    for plane in span.data.iter_mut() {
+                    for plane in &mut span.data {
                         plane[index] = if covered {
                             let value = plane[index] / weight;
                             if needs_clamping {

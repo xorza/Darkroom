@@ -121,8 +121,7 @@ fn inverse_roundtrip() {
     let product = m.mul_mat(&inv);
     assert!(
         mat_approx_eq(&product, &DMat3::identity()),
-        "M * M^-1 should be identity, got {:?}",
-        product
+        "M * M^-1 should be identity, got {product:?}"
     );
 }
 

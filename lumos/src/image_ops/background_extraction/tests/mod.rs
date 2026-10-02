@@ -33,7 +33,7 @@ fn min_max(p: &[f32]) -> (f32, f32) {
 }
 
 fn energy(p: &[f32]) -> f64 {
-    p.iter().map(|&v| (v as f64) * (v as f64)).sum()
+    p.iter().map(|&v| f64::from(v) * f64::from(v)).sum()
 }
 
 #[test]

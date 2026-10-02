@@ -144,7 +144,7 @@ impl Scnr {
 fn scnr_average_neutral(px: Rgb) -> Rgb {
     Rgb {
         r: px.r,
-        g: px.g.min(0.5 * (px.r + px.b)),
+        g: px.g.min(f32::midpoint(px.r, px.b)),
         b: px.b,
     }
 }

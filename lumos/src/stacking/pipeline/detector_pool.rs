@@ -76,7 +76,7 @@ mod tests {
             .try_map(&[0, 1, 2, 3, 4], |detector, _index, &item| {
                 Ok::<_, ()>(DetectorUse {
                     item,
-                    detector_address: (detector as *const StarDetector).addr(),
+                    detector_address: std::ptr::from_ref::<StarDetector>(detector).addr(),
                 })
             })
             .unwrap();

@@ -4,8 +4,8 @@
 //! and then aligning it back produces images that match.
 //!
 //! Tests cover:
-//! - All TransformType variants (Translation, Euclidean, Similarity, Affine, Homography)
-//! - All InterpolationMethod variants (Nearest, Bilinear, Bicubic, Lanczos2/3/4)
+//! - All `TransformType` variants (Translation, Euclidean, Similarity, Affine, Homography)
+//! - All `InterpolationMethod` variants (Nearest, Bilinear, Bicubic, Lanczos2/3/4)
 
 use crate::ImageDimensions;
 use crate::stacking::registration::config::{self, InterpolationMethod, WarpParams};
@@ -42,7 +42,7 @@ fn compute_mse(a: &[f32], b: &[f32]) -> f64 {
     let sum: f64 = a
         .iter()
         .zip(b.iter())
-        .map(|(x, y)| (*x as f64 - *y as f64).powi(2))
+        .map(|(x, y)| (f64::from(*x) - f64::from(*y)).powi(2))
         .sum();
     sum / a.len() as f64
 }
@@ -54,23 +54,23 @@ fn compute_psnr(a: &[f32], b: &[f32], max_val: f32) -> f64 {
     if mse < 1e-10 {
         return f64::INFINITY;
     }
-    10.0 * ((max_val as f64).powi(2) / mse).log10()
+    10.0 * (f64::from(max_val).powi(2) / mse).log10()
 }
 
 /// Compute normalized cross-correlation between two images.
 /// Returns value in [-1, 1], where 1 means perfect correlation.
 fn compute_ncc(a: &[f32], b: &[f32]) -> f64 {
     let n = a.len() as f64;
-    let mean_a: f64 = a.iter().map(|&x| x as f64).sum::<f64>() / n;
-    let mean_b: f64 = b.iter().map(|&x| x as f64).sum::<f64>() / n;
+    let mean_a: f64 = a.iter().map(|&x| f64::from(x)).sum::<f64>() / n;
+    let mean_b: f64 = b.iter().map(|&x| f64::from(x)).sum::<f64>() / n;
 
     let mut cov = 0.0;
     let mut var_a = 0.0;
     let mut var_b = 0.0;
 
     for (&x, &y) in a.iter().zip(b.iter()) {
-        let dx = x as f64 - mean_a;
-        let dy = y as f64 - mean_b;
+        let dx = f64::from(x) - mean_a;
+        let dy = f64::from(y) - mean_b;
         cov += dx * dy;
         var_a += dx * dx;
         var_b += dy * dy;
@@ -133,10 +133,9 @@ fn assert_roundtrip(
 
         assert!(
             psnr > min_psnr,
-            "{label} {:?}: PSNR {psnr} < {min_psnr} dB",
-            method,
+            "{label} {method:?}: PSNR {psnr} < {min_psnr} dB",
         );
-        assert!(ncc > min_ncc, "{label} {:?}: NCC {ncc} < {min_ncc}", method,);
+        assert!(ncc > min_ncc, "{label} {method:?}: NCC {ncc} < {min_ncc}");
     }
 }
 
@@ -160,23 +159,17 @@ fn warp_identity_all_methods() {
         if method == InterpolationMethod::Nearest {
             assert!(
                 psnr > 100.0 || psnr.is_infinite(),
-                "{:?}: PSNR should be very high for identity, got {}",
-                method,
-                psnr
+                "{method:?}: PSNR should be very high for identity, got {psnr}"
             );
         } else {
             assert!(
                 psnr > 40.0,
-                "{:?}: PSNR should be > 40 dB for identity, got {}",
-                method,
-                psnr
+                "{method:?}: PSNR should be > 40 dB for identity, got {psnr}"
             );
         }
         assert!(
             ncc > 0.999,
-            "{:?}: NCC should be > 0.999 for identity, got {}",
-            method,
-            ncc
+            "{method:?}: NCC should be > 0.999 for identity, got {ncc}"
         );
     }
 }
@@ -347,8 +340,8 @@ fn warp_with_detected_transform() {
     let psnr = compute_psnr(&central_ref, &central_aligned, 1.0);
     let ncc = compute_ncc(&central_ref, &central_aligned);
 
-    assert!(psnr > 25.0, "End-to-end alignment PSNR {} < 25 dB", psnr);
-    assert!(ncc > 0.90, "End-to-end alignment NCC {} < 0.90", ncc);
+    assert!(psnr > 25.0, "End-to-end alignment PSNR {psnr} < 25 dB");
+    assert!(ncc > 0.90, "End-to-end alignment NCC {ncc} < 0.90");
 }
 
 #[test]
@@ -384,7 +377,7 @@ fn interpolation_quality_ordering() {
 
     // Print results for debugging
     for (method, psnr) in &results {
-        println!("{:?}: {:.2} dB", method, psnr);
+        println!("{method:?}: {psnr:.2} dB");
     }
 
     // For interpolating methods (not Nearest), quality generally increases:
@@ -412,15 +405,11 @@ fn interpolation_quality_ordering() {
     // Bicubic and Lanczos should be at least as good as bilinear
     assert!(
         bicubic_psnr >= bilinear_psnr - 2.0,
-        "Bicubic ({:.1}) should be at least as good as Bilinear ({:.1})",
-        bicubic_psnr,
-        bilinear_psnr
+        "Bicubic ({bicubic_psnr:.1}) should be at least as good as Bilinear ({bilinear_psnr:.1})"
     );
     assert!(
         lanczos3_psnr >= bilinear_psnr - 2.0,
-        "Lanczos3 ({:.1}) should be at least as good as Bilinear ({:.1})",
-        lanczos3_psnr,
-        bilinear_psnr
+        "Lanczos3 ({lanczos3_psnr:.1}) should be at least as good as Bilinear ({bilinear_psnr:.1})"
     );
 }
 
@@ -469,9 +458,7 @@ fn warp_grayscale_translation() {
     // 30 stars with ~5px radius gives ~2300 affected pixels minimum.
     assert!(
         diff_count > 1000,
-        "Expected some differing pixels after translation, got {}/{}",
-        diff_count,
-        total_central
+        "Expected some differing pixels after translation, got {diff_count}/{total_central}"
     );
 }
 
@@ -532,9 +519,7 @@ fn warp_rgb() {
     let total_inner = (height - 2 * margin) * (width - 2 * margin);
     assert!(
         differ_count > total_inner / 2,
-        "Channels should differ after warping (independent processing), only {}/{} differ",
-        differ_count,
-        total_inner
+        "Channels should differ after warping (independent processing), only {differ_count}/{total_inner} differ"
     );
 }
 
@@ -615,8 +600,8 @@ fn warp_with_sip_correction() {
 
     for gy in 0..16 {
         for gx in 0..16 {
-            let rx = 16.0 + gx as f64 * 14.0;
-            let ry = 16.0 + gy as f64 * 14.0;
+            let rx = 16.0 + f64::from(gx) * 14.0;
+            let ry = 16.0 + f64::from(gy) * 14.0;
             let ref_pos = DVec2::new(rx, ry);
 
             // Apply barrel distortion: r' = r + k*r^3
@@ -648,8 +633,7 @@ fn warp_with_sip_correction() {
     let max_correction = sip.max_correction(Size2us::new(width, height), 10.0);
     assert!(
         max_correction > 0.1,
-        "SIP correction should be significant, got {}",
-        max_correction
+        "SIP correction should be significant, got {max_correction}"
     );
 
     // Create a test image with a gradient pattern
@@ -692,13 +676,11 @@ fn warp_with_sip_correction() {
 
     assert!(
         diff_count > 100,
-        "SIP should produce different pixel values, only {} pixels differ",
-        diff_count
+        "SIP should produce different pixel values, only {diff_count} pixels differ"
     );
     assert!(
         max_diff > 0.001,
-        "Max pixel difference too small: {}",
-        max_diff
+        "Max pixel difference too small: {max_diff}"
     );
 }
 
@@ -720,8 +702,8 @@ fn warp_api_with_sip() {
 
     for gy in 0..10 {
         for gx in 0..10 {
-            let rx = 10.0 + gx as f64 * 11.0;
-            let ry = 10.0 + gy as f64 * 11.0;
+            let rx = 10.0 + f64::from(gx) * 11.0;
+            let ry = 10.0 + f64::from(gy) * 11.0;
             let ref_pos = DVec2::new(rx, ry);
 
             let dx = rx - cx;
@@ -780,8 +762,7 @@ fn warp_api_with_sip() {
 
     assert!(
         diff_count > 50,
-        "SIP should produce different warp output, only {} pixels differ",
-        diff_count
+        "SIP should produce different warp output, only {diff_count} pixels differ"
     );
 }
 

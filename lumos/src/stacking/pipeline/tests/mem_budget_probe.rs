@@ -67,14 +67,13 @@ fn pipeline_stack_budget_probe() -> io::Result<()> {
     // Default 2048 MB so the default 6000×6000 × 24 set (3.3 GB resident) overflows it → disk tier.
     let budget = parse_budget("LUMOS_PIPE_BUDGET", BudgetChoice::mb(2048));
 
-    let base = std::env::var("LUMOS_PIPE_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tmp/lumos_pipeline_stack")
-        });
+    let base = std::env::var("LUMOS_PIPE_DIR").map_or_else(
+        |_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tmp/lumos_pipeline_stack"),
+        PathBuf::from,
+    );
     let frames_dir = base.join(format!("{}x{}_n{n}_s{seed}", size.width, size.height));
 
-    let frame_bytes = (size.pixel_count() * std::mem::size_of::<f32>()) as u64;
+    let frame_bytes = (size.pixel_count() * size_of::<f32>()) as u64;
     let resident_if_ram = frame_bytes * n as u64;
 
     // The pipeline's stacking sequence: three calibration masters + the final light combine. The same
@@ -96,7 +95,7 @@ fn pipeline_stack_budget_probe() -> io::Result<()> {
         resident_if_ram as f64 / 1e9
     );
     if let Some(avail) = budget.available_memory {
-        let usable = (avail as u128 * 75 / 100) as u64;
+        let usable = (u128::from(avail) * 75 / 100) as u64;
         let tier = if resident_if_ram <= usable {
             "in-memory (resident)"
         } else {
@@ -203,7 +202,7 @@ fn align_stack_memory_probe() {
     let stars: usize = env_parse("LUMOS_ALIGN_STARS", 800);
     let seed: u64 = env_parse("LUMOS_ALIGN_SEED", 1);
 
-    let frame_bytes = (size.pixel_count() * std::mem::size_of::<f32>()) as u64;
+    let frame_bytes = (size.pixel_count() * size_of::<f32>()) as u64;
 
     println!("=== lumos align+stack memory probe (detect → register → warp → combine) ===");
     println!(

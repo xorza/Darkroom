@@ -123,7 +123,7 @@ impl std::fmt::Debug for WatchState {
 /// catch-alls. The one carve-out is metadata-only `Modify`s (access/write time,
 /// permissions, ownership, xattrs) — that's where an access-time bump lands, so
 /// it's filtered too. `Modify(Any)` is still kept: some backends (macOS
-/// FSEvents) report a real write that coarsely, and dropping it would swallow
+/// `FSEvents`) report a real write that coarsely, and dropping it would swallow
 /// genuine changes.
 fn is_content_change(kind: &EventKind) -> bool {
     match kind {
@@ -220,7 +220,12 @@ pub fn fs_watch_library() -> Library {
                                 .max(0) as u64,
                         );
 
-                        if !path.is_empty() {
+                        if path.is_empty() {
+                            // Cleared path: tear the previous watcher down, or the old
+                            // directory keeps firing `Changed` (and holding its OS watch)
+                            // while the node outputs an empty path.
+                            event_state.lock().await.clear();
+                        } else {
                             let needs_rebuild = event_state
                                 .lock()
                                 .await
@@ -247,11 +252,6 @@ pub fn fs_watch_library() -> Library {
                                     .unwrap()
                                     .debounce = debounce;
                             }
-                        } else {
-                            // Cleared path: tear the previous watcher down, or the old
-                            // directory keeps firing `Changed` (and holding its OS watch)
-                            // while the node outputs an empty path.
-                            event_state.lock().await.clear();
                         }
 
                         outputs[0] = ConstValue::FsPath(path).into();

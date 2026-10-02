@@ -277,7 +277,7 @@ mod tests {
     #[test]
     fn error_is_debug() {
         let err = Error::NoFrames;
-        let debug_str = format!("{:?}", err);
+        let debug_str = format!("{err:?}");
         assert!(debug_str.contains("NoFrames"));
     }
 }

@@ -463,8 +463,7 @@ impl GraphUI {
                         let canvas_origin = ui
                             .response_for(inner_canvas_widget_id())
                             .layout_rect
-                            .map(|r| r.min)
-                            .unwrap_or(Vec2::ZERO);
+                            .map_or(Vec2::ZERO, |r| r.min);
                         let cull = CullRegion::from_canvas(
                             ui.response_for(outer_canvas_widget_id()).layout_rect,
                             canvas_origin,
