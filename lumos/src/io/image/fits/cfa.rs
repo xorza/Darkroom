@@ -11,7 +11,9 @@ use crate::io::image::fits::error::{fits_err, fits_to_io, fits_unsupported};
 use crate::io::image::fits::metadata::{write_cfa_metadata, write_image_metadata};
 
 pub(crate) const CFA_FITS_FORMAT: &str = "CFAIMAGE";
-pub(crate) const CFA_FITS_VERSION: i64 = 1;
+/// 2: the sample scale is recorded (`LUMSCALE`); a version-1 master would reload with an assumed
+/// scale of 1 and is rebuilt instead.
+pub(crate) const CFA_FITS_VERSION: i64 = 2;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CfaFitsHduMetadata<'a> {

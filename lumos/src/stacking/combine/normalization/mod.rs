@@ -68,18 +68,79 @@ struct ReferenceFit {
 
 const PHOTOMETRIC_SAMPLE_LIMIT: usize = 65_536;
 
+/// The per-frame affine every frame is combined through, or `None` when every frame is taken as
+/// it stands.
+///
+/// Expressed in the domain of the first frame that declares one — the domain the stacked product
+/// records. With no normalization each frame is only converted into it (gain `scale_i /
+/// scale_ref`); a fitted normalization maps every frame onto its reference frame, so its gains and
+/// offsets are then converted from the reference frame's domain the same way. Frames whose
+/// domains agree get exactly the norms they had before conversion existed.
 pub(crate) fn compute_frame_norms(
     frames: &[StoredFrame],
     dimensions: ImageDimensions,
     normalization: Normalization,
     cancel: &CancelToken,
 ) -> Result<Option<Vec<FrameNorm>>, Error> {
+    let to_domain = domain_factors(frames);
     if normalization == Normalization::None {
-        return Ok(None);
+        return Ok(to_domain.iter().any(|&factor| factor != 1.0).then(|| {
+            frames
+                .iter()
+                .zip(&to_domain)
+                .map(|(frame, &factor)| FrameNorm {
+                    channels: (0..frame.source_stats.channels.len())
+                        .map(|_| ChannelNorm {
+                            gain: factor,
+                            offset: 0.0,
+                        })
+                        .collect(),
+                })
+                .collect()
+        }));
     }
     check_cancel(cancel)?;
-
     let reference = select_reference_frame(frames.iter().map(|frame| &frame.source_stats));
+    let mut norms = fitted_frame_norms(frames, dimensions, normalization, reference, cancel)?;
+    let factor = to_domain[reference];
+    if factor != 1.0 {
+        for channel in norms.iter_mut().flat_map(|norm| norm.channels.iter_mut()) {
+            channel.gain *= factor;
+            channel.offset *= factor;
+        }
+    }
+    Ok(Some(norms))
+}
+
+/// The factor that expresses each frame in the domain of the first frame declaring one; `1.0`
+/// for a frame that declares none, or when none does.
+///
+/// The combine's constructors validate the set first ([`validate_sample_domains`]), so every
+/// declared domain converts.
+///
+/// [`validate_sample_domains`]: crate::stacking::combine::cache::validation::validate_sample_domains
+fn domain_factors(frames: &[StoredFrame]) -> Vec<f32> {
+    let reference = frames
+        .iter()
+        .find_map(|frame| frame.source_stats.domain.as_ref());
+    frames
+        .iter()
+        .map(|frame| match (&frame.source_stats.domain, reference) {
+            (Some(domain), Some(reference)) => domain
+                .conversion_to(reference)
+                .expect("the frame set's sample domains were validated as convertible"),
+            _ => 1.0,
+        })
+        .collect()
+}
+
+fn fitted_frame_norms(
+    frames: &[StoredFrame],
+    dimensions: ImageDimensions,
+    normalization: Normalization,
+    reference: usize,
+    cancel: &CancelToken,
+) -> Result<Vec<FrameNorm>, Error> {
     // Whether any frame contributes at only some pixels, which decides what the fit may be measured
     // over. When every frame covers every pixel, the statistics measured on the sources at load are
     // already comparable. When one does not, they are not — each was measured over a different set
@@ -96,16 +157,16 @@ pub(crate) fn compute_frame_norms(
             reference,
         );
         check_cancel(cancel)?;
-        return Ok(Some(norms));
+        return Ok(norms);
     }
 
     match measure_registered_frames(frames, dimensions, normalization, reference, cancel)? {
-        RegisteredMeasurements::GlobalNorms(norms) => Ok(Some(norms)),
-        RegisteredMeasurements::CommonStats(stats) => Ok(Some(compute_frame_norms_with_reference(
+        RegisteredMeasurements::GlobalNorms(norms) => Ok(norms),
+        RegisteredMeasurements::CommonStats(stats) => Ok(compute_frame_norms_with_reference(
             stats.iter(),
             normalization,
             reference,
-        ))),
+        )),
     }
 }
 

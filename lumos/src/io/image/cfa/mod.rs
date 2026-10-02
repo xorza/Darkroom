@@ -305,13 +305,16 @@ impl CfaImage {
         })
     }
 
-    /// Subtract another `CfaImage` pixel-by-pixel (dark subtraction).
+    /// Subtract another `CfaImage` pixel-by-pixel (dark subtraction), each of its samples first
+    /// multiplied by `dark_scale` — the factor that expresses it in this frame's domain
+    /// ([`SampleDomain::conversion_to`](crate::SampleDomain::conversion_to)). A factor of exactly
+    /// one subtracts the samples as they are.
     ///
     /// May produce negative pixel values when dark noise exceeds signal.
     /// This is intentional: the f32 pipeline preserves negatives, and stacking
     /// averages them out correctly. Clamping to zero would introduce a positive
     /// bias in the stacked result.
-    pub fn subtract(&mut self, dark: &CfaImage) {
+    pub fn subtract(&mut self, dark: &CfaImage, dark_scale: f32) {
         assert!(
             self.data.width() == dark.data.width() && self.data.height() == dark.data.height(),
             "CfaImage dimensions mismatch: {}x{} vs {}x{}",
@@ -320,22 +323,29 @@ impl CfaImage {
             dark.data.width(),
             dark.data.height()
         );
-        // An invariant the caller upholds, not bad input: `CalibrationMasters` rejects a
-        // domain-mismatched master before reaching here, and every other caller pairs frames it
-        // decoded itself. Only checked when both declare a domain — a synthesized frame has none.
+        // An invariant the caller upholds, not bad input: `CalibrationMasters` derives the factor
+        // from the two domains and refuses a pair with none. Only checked when both declare a
+        // domain — a synthesized frame has none.
         debug_assert!(
             match (self.metadata.sample_domain(), dark.metadata.sample_domain()) {
-                (Some(light), Some(dark)) => light.commensurate_with(&dark),
+                (Some(light), Some(dark)) => dark.conversion_to(&light) == Some(dark_scale),
                 _ => true,
             },
-            "CfaImage sample domain mismatch: {:?} vs {:?}",
-            self.metadata.sample_domain(),
-            dark.metadata.sample_domain()
+            "dark_scale {dark_scale} does not convert {:?} into {:?}",
+            dark.metadata.sample_domain(),
+            self.metadata.sample_domain()
         );
-        self.data
-            .par_iter_mut()
-            .zip(dark.data.par_iter())
-            .for_each(|(l, d)| *l -= d);
+        if dark_scale == 1.0 {
+            self.data
+                .par_iter_mut()
+                .zip(dark.data.par_iter())
+                .for_each(|(l, d)| *l -= d);
+        } else {
+            self.data
+                .par_iter_mut()
+                .zip(dark.data.par_iter())
+                .for_each(|(l, d)| *l -= d * dark_scale);
+        }
     }
 }
 

@@ -10,12 +10,12 @@ pub(super) unsafe fn normalize_chunk_sse2<const CLAMP: bool>(
     input: &[u16],
     output: &mut [f32],
     black: f32,
-    inv_range: f32,
+    span: f32,
 ) {
     // SAFETY: All operations require SSE2, guaranteed by target_feature
     unsafe {
         let black_vec = _mm_set1_ps(black);
-        let inv_range_vec = _mm_set1_ps(inv_range);
+        let span_vec = _mm_set1_ps(span);
 
         let chunks = input.len() / 4;
         let remainder = input.len() % 4;
@@ -36,7 +36,7 @@ pub(super) unsafe fn normalize_chunk_sse2<const CLAMP: bool>(
             } else {
                 subtracted
             };
-            let normalized = _mm_mul_ps(floored, inv_range_vec);
+            let normalized = _mm_div_ps(floored, span_vec);
             let result = if CLAMP {
                 _mm_min_ps(normalized, _mm_set1_ps(1.0))
             } else {
@@ -51,7 +51,7 @@ pub(super) unsafe fn normalize_chunk_sse2<const CLAMP: bool>(
         let start = chunks * 4;
         for i in 0..remainder {
             let idx = start + i;
-            output[idx] = normalize_one::<CLAMP>(input[idx], black, inv_range);
+            output[idx] = normalize_one::<CLAMP>(input[idx], black, span);
         }
     }
 }

@@ -30,19 +30,19 @@ pub enum CalibrationError {
         light: CfaType,
         master: CfaType,
     },
-    /// A calibration master was decoded into a different sample domain than the light.
+    /// A calibration master's samples cannot be expressed in the domain of the frame it calibrates.
     ///
-    /// Subtracting a master divided by one span from a light divided by another is not a small
+    /// Subtracting a master divided by one span from a frame divided by another is not a small
     /// error, it is a no-op that reports success — a `[0, 1]` master against an unnormalized light
-    /// removes ~0.01 from ~3000 — and `calibrate` then marks the light calibrated. A master whose
-    /// `BUNIT` names a different quantity is the same failure with no span to give it away.
+    /// removes ~0.01 from ~3000. Two declared spans in one unit relate by their exact ratio and are
+    /// converted; what is refused is a different unit, or a span the decoder had to assume.
     #[error(
-        "{component} master was decoded into sample domain {master}, but the light used {light}; \
-         a master and its light must come from the same domain"
+        "{component} master was decoded into sample domain {master}, which cannot be converted to \
+         the {frame} of the frame it calibrates"
     )]
     SampleDomainMismatch {
         component: MasterRole,
-        light: SampleDomain,
+        frame: SampleDomain,
         master: SampleDomain,
     },
     /// A calibration master covers a different sensor area than the frame it has to line up with:

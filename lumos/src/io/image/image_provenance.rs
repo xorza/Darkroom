@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::io::image::fits::provenance::FitsTransferProvenance;
-use crate::io::image::sample_domain::SampleDomain;
+use crate::io::image::sample_domain::{SampleDomain, ScaleOrigin};
 use crate::io::raw::provenance::RawTransferProvenance;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,19 +57,24 @@ impl TransferProvenance {
         match self {
             TransferProvenance::FitsNormalized(transfer) => Some(SampleDomain {
                 scale: transfer.physical_scale,
+                origin: transfer.scale_origin,
                 unit: transfer.unit.clone(),
             }),
             TransferProvenance::RawNormalized(transfer) => Some(SampleDomain {
                 scale: transfer.physical_scale,
+                // `maximum − black` from the file itself.
+                origin: ScaleOrigin::Declared,
                 // Sensor counts above black. No RAW format states a unit for them, and inventing
                 // one here would make a RAW frame disagree with a FITS frame that spells the same
                 // thing differently.
                 unit: None,
             }),
             // A float raster declared linear is taken as it stands, so one sample is one unit of
-            // whatever the file already held — which it does not name.
+            // whatever the file already held — which it does not name, and whose span it does not
+            // state either.
             TransferProvenance::DeclaredLinearRaster => Some(SampleDomain {
                 scale: 1.0,
+                origin: ScaleOrigin::Assumed,
                 unit: None,
             }),
             TransferProvenance::UnspecifiedRaster => None,

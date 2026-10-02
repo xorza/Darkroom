@@ -1,7 +1,7 @@
 //! Decoding a FITS image HDU into the pipeline's linear `[0, 1]` domain.
 //!
 //! FITS stores physical values, not normalized ones, so an integer HDU is divided by the span its
-//! own header declares — see [`plan::FitsDecodePlan::sample_divisor`]. That is what puts a FITS
+//! own header declares — see [`plan::FitsDecodePlan::sample_scale`]. That is what puts a FITS
 //! frame in the same numeric domain as a RAW one, which every stage after `load` assumes without
 //! being able to check. A floating-point HDU declares no span, so its `DATAMAX` decides: a
 //! saturation level well above unity means ADU and is divided by the 16-bit full scale, and

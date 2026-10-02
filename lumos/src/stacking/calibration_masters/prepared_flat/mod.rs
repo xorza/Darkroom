@@ -14,21 +14,11 @@ use crate::math::vec2us::Vec2us;
 // Bounds amplification at dead/near-zero photosites while keeping every pixel calibrated.
 const MIN_NORMALIZED_FLAT: f32 = 0.1;
 
-pub(super) fn subtract(mut flat: CfaImage, subtractor: Option<&CfaImage>) -> CfaImage {
-    if let Some(subtractor) = subtractor {
-        assert!(
-            subtractor.data.width() == flat.data.width()
-                && subtractor.data.height() == flat.data.height(),
-            "Flat subtractor dimensions mismatch: {}x{} vs {}x{}",
-            subtractor.data.width(),
-            subtractor.data.height(),
-            flat.data.width(),
-            flat.data.height()
-        );
-        flat.data
-            .par_iter_mut()
-            .zip(subtractor.data.par_iter())
-            .for_each(|(flat, subtractor)| *flat -= subtractor);
+/// Subtract the flat's own bias or flat-dark, given with the factor that expresses its samples in
+/// the flat's domain.
+pub(super) fn subtract(mut flat: CfaImage, subtractor: Option<(&CfaImage, f32)>) -> CfaImage {
+    if let Some((subtractor, scale)) = subtractor {
+        flat.subtract(subtractor, scale);
     }
 
     flat

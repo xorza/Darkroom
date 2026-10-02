@@ -10,7 +10,10 @@ use crate::stacking::calibration_masters::prepared_flat::{
 use crate::testing::make_cfa;
 
 fn prepare(flat: CfaImage, subtractor: Option<&CfaImage>) -> CfaImage {
-    normalize(subtract(flat, subtractor))
+    normalize(subtract(
+        flat,
+        subtractor.map(|subtractor| (subtractor, 1.0)),
+    ))
 }
 
 fn standard_xtrans() -> CfaType {
@@ -220,7 +223,7 @@ fn prepared_flat_matches_previous_per_light_equation_bit_exactly() {
 }
 
 #[test]
-#[should_panic(expected = "Flat subtractor dimensions mismatch")]
+#[should_panic(expected = "CfaImage dimensions mismatch")]
 fn preparation_rejects_mismatched_subtractor_dimensions() {
     let flat = make_cfa(Size2us::new(2, 2), vec![1.0; 4], CfaType::Mono);
     let subtractor = make_cfa(Size2us::new(3, 2), vec![0.1; 6], CfaType::Mono);

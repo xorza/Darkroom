@@ -7,9 +7,11 @@ use fits_well::io::{BLOCK_SIZE, Hdu, HduKind};
 
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::error::{fits_err, fits_unsupported};
+use crate::io::image::fits::metadata::SAMPLE_SCALE_KEYWORD;
 use crate::io::image::fits::options::{FitsCubeInterpretation, FitsFloatScale};
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::BitPix;
+use crate::io::image::sample_domain::ScaleOrigin;
 
 const FITS_DECODE_CHUNK_BYTES: usize = 4 * 1024 * 1024;
 
@@ -46,9 +48,8 @@ pub(super) struct FitsDecodePlan {
     pub(super) dimensions: ImageDimensions,
     pub(super) bitpix: BitPix,
     pub(super) scaling: fits_well::image::Scaling,
-    /// Divide a physical sample by this to reach the pipeline's `[0, 1]` domain; multiply a
-    /// decoded sample by it to recover the physical value. See [`sample_divisor`].
-    pub(super) sample_divisor: f32,
+    /// How the stored samples reach the pipeline's `[0, 1]` domain. See [`sample_scale`].
+    pub(super) sample_scale: SampleScale,
     pub(super) source_bytes: u64,
     pub(super) decoded_bytes: u64,
     pub(super) peak_bytes: u64,
@@ -95,21 +96,46 @@ impl FitsDecodePlan {
 /// [`crate::stacking::combine`] now rejects a frame set for. An unnormalized float FITS carrying no
 /// `DATAMAX` therefore reaches the pipeline as it stands; the display stage measures its own range
 /// rather than the decoder guessing one.
-fn sample_divisor(
+fn sample_scale(
     path: &Path,
     header: &Header,
     stored: FitsBitpix,
     scaling: &fits_well::image::Scaling,
     float_scale: FitsFloatScale,
-) -> Result<f32, ImageError> {
+) -> Result<SampleScale, ImageError> {
+    let divided_by = |divisor: f32, origin| SampleScale {
+        divisor,
+        physical: divisor,
+        origin,
+    };
     let steps = match stored {
         FitsBitpix::U8 => f64::from(u8::MAX),
         FitsBitpix::I16 => f64::from(u16::MAX),
         FitsBitpix::I32 => f64::from(u32::MAX),
         FitsBitpix::I64 => u64::MAX as f64,
         FitsBitpix::F32 | FitsBitpix::F64 => {
+            // A lumos-written file stores its samples already normalized and records the scale
+            // they were normalized by; that record beats every guess below.
+            if let Some(recorded) = header
+                .get_real(SAMPLE_SCALE_KEYWORD)
+                .map_err(|source| fits_err(path, source))?
+            {
+                if !recorded.is_finite() || recorded <= 0.0 {
+                    return Err(fits_unsupported(
+                        path,
+                        format!("{SAMPLE_SCALE_KEYWORD} {recorded} must be finite and positive"),
+                    ));
+                }
+                return Ok(SampleScale {
+                    divisor: 1.0,
+                    physical: recorded as f32,
+                    origin: ScaleOrigin::Declared,
+                });
+            }
             return match float_scale {
-                FitsFloatScale::Normalized => Ok(1.0),
+                // "Already normalized" says where the samples sit, not what a unit of them is
+                // worth in the source's own terms, so the scale stays a guess.
+                FitsFloatScale::Normalized => Ok(divided_by(1.0, ScaleOrigin::Assumed)),
                 FitsFloatScale::FullScale(scale) => {
                     // The caller's own figure, so it is checked here rather than trusted: a
                     // non-positive one would invert or erase the samples.
@@ -119,16 +145,17 @@ fn sample_divisor(
                             format!("declared floating-point full scale {scale} must be positive"),
                         ));
                     }
-                    Ok(scale)
+                    Ok(divided_by(scale, ScaleOrigin::Declared))
                 }
                 FitsFloatScale::Auto => {
                     let data_max = header
                         .get_real("DATAMAX")
                         .map_err(|source| fits_err(path, source))?;
-                    Ok(match data_max {
+                    let divisor = match data_max {
                         Some(max) if max > FLOAT_ADU_DATAMAX_MIN => FLOAT_ADU_DIVISOR,
                         _ => 1.0,
-                    })
+                    };
+                    Ok(divided_by(divisor, ScaleOrigin::Assumed))
                 }
             };
         }
@@ -149,7 +176,19 @@ fn sample_divisor(
             format!("BSCALE {bscale} overflows the normalization scale for {stored:?} samples"),
         ));
     }
-    Ok(divisor as f32)
+    Ok(divided_by(divisor as f32, ScaleOrigin::Declared))
+}
+
+/// How one HDU's stored samples reach the pipeline's `[0, 1]` domain, and what a decoded unit is
+/// worth.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct SampleScale {
+    /// The decoder divides every stored (physical) sample by this.
+    pub(super) divisor: f32,
+    /// Multiply a decoded sample by this to recover the file's physical value. Equal to `divisor`
+    /// except for a lumos-written file, whose samples were stored already divided.
+    pub(super) physical: f32,
+    pub(super) origin: ScaleOrigin,
 }
 
 pub(super) fn preflight_fits_image(
@@ -189,7 +228,7 @@ pub(super) fn preflight_fits_image(
         .scaling()
         .map_err(|source| fits_err(path, source))?;
     let bitpix = map_bitpix(SampleType::from_scaling(stored_bitpix, &scaling));
-    let sample_divisor = sample_divisor(path, hdu.header, stored_bitpix, &scaling, float_scale)?;
+    let sample_scale = sample_scale(path, hdu.header, stored_bitpix, &scaling, float_scale)?;
     let decoded_bytes = checked_size_bytes(
         path,
         dimensions.sample_count(),
@@ -250,7 +289,7 @@ pub(super) fn preflight_fits_image(
         dimensions,
         bitpix,
         scaling,
-        sample_divisor,
+        sample_scale,
         source_bytes: hdu.source_bytes,
         decoded_bytes,
         peak_bytes,

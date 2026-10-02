@@ -20,13 +20,13 @@ pub(super) fn normalize_chunk<const CLAMP: bool>(
     input: &[u16],
     output: &mut [f32],
     black: f32,
-    inv_range: f32,
+    span: f32,
 ) {
     dispatch! {
-        x86: sse4_1 => sse41::normalize_chunk_sse41::<CLAMP>(input, output, black, inv_range),
-        x86: sse2 => sse2::normalize_chunk_sse2::<CLAMP>(input, output, black, inv_range),
-        aarch64 => neon::normalize_chunk_neon::<CLAMP>(input, output, black, inv_range),
-        scalar => normalize_chunk_scalar::<CLAMP>(input, output, black, inv_range),
+        x86: sse4_1 => sse41::normalize_chunk_sse41::<CLAMP>(input, output, black, span),
+        x86: sse2 => sse2::normalize_chunk_sse2::<CLAMP>(input, output, black, span),
+        aarch64 => neon::normalize_chunk_neon::<CLAMP>(input, output, black, span),
+        scalar => normalize_chunk_scalar::<CLAMP>(input, output, black, span),
     }
 }
 
@@ -36,9 +36,9 @@ fn normalize_chunk_scalar<const CLAMP: bool>(
     input: &[u16],
     output: &mut [f32],
     black: f32,
-    inv_range: f32,
+    span: f32,
 ) {
     for (out, &val) in output.iter_mut().zip(input.iter()) {
-        *out = normalize_one::<CLAMP>(val, black, inv_range);
+        *out = normalize_one::<CLAMP>(val, black, span);
     }
 }

@@ -84,7 +84,7 @@ fn xtrans_pattern_invalid_metadata() {
             invalid_value_pattern,
             XTransNormalization {
                 channel_black: [0.0; 3],
-                inv_range: 1.0,
+                span: 1.0,
                 black_repeat: None,
             },
             &CancelToken::never(),
@@ -133,7 +133,7 @@ fn xtrans_image_valid() {
         pattern,
         XTransNormalization {
             channel_black: [0.0; 3],
-            inv_range: 1.0 / 65535.0,
+            span: 65535.0,
             black_repeat: None,
         },
     );
@@ -157,7 +157,7 @@ fn xtrans_image_zero_width() {
         pattern,
         XTransNormalization {
             channel_black: [0.0; 3],
-            inv_range: 1.0 / 65535.0,
+            span: 65535.0,
             black_repeat: None,
         },
     );
@@ -179,7 +179,7 @@ fn xtrans_image_wrong_data_length() {
         pattern,
         XTransNormalization {
             channel_black: [0.0; 3],
-            inv_range: 1.0 / 65535.0,
+            span: 65535.0,
             black_repeat: None,
         },
     );
@@ -198,7 +198,7 @@ fn process_xtrans_output_size() {
         test_pattern_array(),
         XTransNormalization {
             channel_black: [0.0; 3],
-            inv_range: 1.0 / 4096.0,
+            span: 4096.0,
             black_repeat: None,
         },
         &CancelToken::never(),
@@ -213,7 +213,6 @@ fn process_xtrans_normalization() {
     let black = 256.0;
     let maximum = 4096.0;
     let range = maximum - black;
-    let inv_range = 1.0 / range;
 
     // All values equal black + range/2 = 2176 → normalizes to 0.5
     let mid_value = (black + range / 2.0) as u16;
@@ -229,7 +228,7 @@ fn process_xtrans_normalization() {
         test_pattern_array(),
         XTransNormalization {
             channel_black: [black; 3],
-            inv_range,
+            span: range,
             black_repeat: None,
         },
         &CancelToken::never(),
@@ -245,7 +244,6 @@ fn process_xtrans_normalization() {
 fn process_xtrans_clamps_below_black() {
     let black = 256.0;
     let range = 4096.0 - black;
-    let inv_range = 1.0 / range;
 
     // All values below black level
     let raw_data: Vec<u16> = vec![100; 12 * 12];
@@ -260,7 +258,7 @@ fn process_xtrans_clamps_below_black() {
         test_pattern_array(),
         XTransNormalization {
             channel_black: [black; 3],
-            inv_range,
+            span: range,
             black_repeat: None,
         },
         &CancelToken::never(),
@@ -275,7 +273,7 @@ fn process_xtrans_clamps_below_black() {
 #[test]
 fn process_xtrans_full_range() {
     let black = 0.0;
-    let inv_range = 1.0 / 65535.0;
+    let span = 65535.0;
 
     let raw_data: Vec<u16> = vec![65535; 12 * 12];
 
@@ -289,7 +287,7 @@ fn process_xtrans_full_range() {
         test_pattern_array(),
         XTransNormalization {
             channel_black: [black; 3],
-            inv_range,
+            span,
             black_repeat: None,
         },
         &CancelToken::never(),
@@ -305,7 +303,7 @@ fn process_xtrans_full_range() {
 fn xtrans_normalization_is_per_channel_and_raw_linear() {
     let common_black = 200.0;
     let maximum = 4096.0;
-    let inv_range = 1.0 / (maximum - common_black);
+    let span = maximum - common_black;
     let raw_val = 2000u16;
     let raw_data = vec![raw_val; 6 * 6];
     let size = Size2us::new(6, 6);
@@ -319,7 +317,7 @@ fn xtrans_normalization_is_per_channel_and_raw_linear() {
         test_pattern(),
         XTransNormalization {
             channel_black: [250.0, common_black, 220.0],
-            inv_range,
+            span,
             black_repeat: None,
         },
     );
@@ -455,7 +453,7 @@ fn f32_demosaic_is_equivariant_to_a_uniform_pedestal() {
 #[test]
 fn process_xtrans_f32_matches_u16_path() {
     let black = 0.0_f32;
-    let inv_range = 1.0 / 65535.0_f32;
+    let span = 65535.0_f32;
     let raw_width = 30;
     let raw_height = 30;
     let width = 18;
@@ -474,7 +472,7 @@ fn process_xtrans_f32_matches_u16_path() {
         .collect();
     let raw_f32: Vec<f32> = raw_u16
         .iter()
-        .map(|&v| (f32::from(v) - black).max(0.0) * inv_range)
+        .map(|&v| (f32::from(v) - black).max(0.0) / span)
         .collect();
 
     let rgb_u16 = process_xtrans(
@@ -487,7 +485,7 @@ fn process_xtrans_f32_matches_u16_path() {
         test_pattern_array(),
         XTransNormalization {
             channel_black: [black; 3],
-            inv_range,
+            span,
             black_repeat: None,
         },
         &CancelToken::never(),

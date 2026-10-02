@@ -132,7 +132,8 @@ impl BlackRepeat {
 struct BlackLevel {
     per_channel: [f32; 4],
     common: f32,
-    inv_range: f32,
+    /// `maximum − black` in ADU: what samples are divided by. An integer, so exact in f32.
+    span: f32,
     channel_delta_norm: [f32; 4],
     repeat: Option<BlackRepeat>,
 }
@@ -140,10 +141,11 @@ struct BlackLevel {
 impl BlackLevel {
     /// The span the samples are divided by: `maximum − black`, in ADU.
     ///
-    /// What one normalized unit is worth for this file, and so what makes two RAW frames
-    /// commensurate — libraw reads `maximum` per camera and per ISO, so it is not a constant.
+    /// What one normalized unit is worth for this file. It differs between frames — libraw reads
+    /// `maximum` per camera and per ISO, and `black` per frame — so two frames convert by the ratio
+    /// of their spans (`SampleDomain::conversion_to`).
     fn span(&self) -> f32 {
-        1.0 / self.inv_range
+        self.span
     }
 }
 
@@ -258,10 +260,10 @@ fn consolidate_black_levels(
             maximum: maximum_raw,
         });
     }
-    let inv_range = 1.0 / effective_max;
+    let span = effective_max;
     let mut channel_delta_norm = [0f32; 4];
     for c in 0..4 {
-        channel_delta_norm[c] = (per_channel[c] - common) * inv_range;
+        channel_delta_norm[c] = (per_channel[c] - common) / span;
     }
     let repeat = if cblack[4] > 0 && cblack[5] > 0 {
         let height = cblack[4] as usize;
@@ -271,7 +273,7 @@ fn consolidate_black_levels(
             size,
             delta_norm: cblack[6..6 + size.pixel_count()]
                 .iter()
-                .map(|&delta| delta as f32 * inv_range)
+                .map(|&delta| delta as f32 / span)
                 .collect(),
         })
     } else {
@@ -280,7 +282,7 @@ fn consolidate_black_levels(
 
     tracing::debug!(
         "Black levels: common={common}, per_channel={per_channel:?}, \
-         delta_norm={channel_delta_norm:?}, repeat={}x{}, inv_range={inv_range}",
+         delta_norm={channel_delta_norm:?}, repeat={}x{}, span={span}",
         repeat.as_ref().map_or(0, |pattern| pattern.size.width),
         repeat.as_ref().map_or(0, |pattern| pattern.size.height)
     );
@@ -288,7 +290,7 @@ fn consolidate_black_levels(
     Ok(BlackLevel {
         per_channel,
         common,
-        inv_range,
+        span,
         channel_delta_norm,
         repeat,
     })
@@ -429,7 +431,7 @@ fn normalize_active_area<const CLAMP: bool>(
     raw_data: &[u16],
     layout: SensorLayout,
     black: f32,
-    inv_range: f32,
+    span: f32,
     channel_delta: Option<ChannelBlackDelta>,
     repeat: Option<&BlackRepeat>,
 ) -> Vec<f32> {
@@ -443,7 +445,7 @@ fn normalize_active_area<const CLAMP: bool>(
             let raw_y = layout.margin.y + y;
             let src_start = raw_y * layout.raw.width + layout.margin.x;
             let source = &raw_data[src_start..src_start + layout.active.width];
-            normalize_u16_to_f32_into::<CLAMP>(source, row, black, inv_range);
+            normalize_u16_to_f32_into::<CLAMP>(source, row, black, span);
 
             if channel_delta.is_some() || repeat.is_some() {
                 for (x, pixel) in row.iter_mut().enumerate() {
@@ -532,7 +534,7 @@ impl UnpackedRaw {
             raw_data,
             self.layout,
             self.black_level.common,
-            self.black_level.inv_range,
+            self.black_level.span,
             channel_delta,
             self.black_level.repeat.as_ref(),
         ))
@@ -548,11 +550,8 @@ impl UnpackedRaw {
         let raw_data = self.raw_image_slice()?;
 
         // Pass 1: SIMD normalize with common black level
-        let mut normalized_data = normalize_u16_to_f32_parallel(
-            raw_data,
-            self.black_level.common,
-            self.black_level.inv_range,
-        );
+        let mut normalized_data =
+            normalize_u16_to_f32_parallel(raw_data, self.black_level.common, self.black_level.span);
 
         apply_bayer_black_corrections(
             &mut normalized_data,
@@ -634,7 +633,7 @@ impl UnpackedRaw {
             raw_pattern,
             XTransNormalization {
                 channel_black,
-                inv_range: black_level.inv_range,
+                span: black_level.span,
                 black_repeat: black_level.repeat.as_ref(),
             },
             cancel,
@@ -1199,7 +1198,7 @@ pub(crate) fn load_raw_cfa(path: &Path, cancel: &CancelToken) -> Result<CfaImage
     Ok(CfaImage {
         data: Buffer2::new(raw.layout.active.width, raw.layout.active.height, pixels),
         metadata,
-        quantization_sigma: Some(raw.black_level.inv_range * QUANTIZATION_SIGMA_PER_STEP),
+        quantization_sigma: Some(QUANTIZATION_SIGMA_PER_STEP / raw.black_level.span),
         // A sensor reports a value for every photosite; no RAW format has an undefined-sample
         // convention to decode.
         nulls: None,
