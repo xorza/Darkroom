@@ -474,6 +474,81 @@ fn signed_linear_gradient_crossing_zero_is_reconstructed_without_spikes() {
     }
 }
 
+/// RCD is translation invariant: a Bayer phase is the RGGB mosaic shifted by a column, a row, or
+/// both, so demosaicing the shifted crop under its own pattern must reproduce the RGGB result at
+/// every pixel away from the borders, bit for bit.
+///
+/// The scene has diagonal structure, so the P/Q (diagonal) direction choice matters at every
+/// red and blue site; a flat field or a horizontal ramp would make P and Q equal and hide a
+/// direction filter computed at the wrong sites.
+#[test]
+fn rcd_is_the_same_on_every_bayer_phase() {
+    let (w, h) = (48, 40);
+    let scene = |x: usize, y: usize, c: usize| -> f32 {
+        let (x, y) = (x as f32, y as f32);
+        let diagonal = if x + y > 40.0 { 0.35 } else { 0.0 };
+        let anti = if x - y > 6.0 { 0.2 } else { 0.0 };
+        match c {
+            0 => 0.2 + diagonal + 0.15 * (0.7 * x + 0.3 * y).sin(),
+            1 => 0.3 + anti + 0.15 * (0.5 * x - 0.6 * y).sin(),
+            _ => 0.25 + diagonal - anti + 0.1 * (0.4 * x + 0.9 * y).cos(),
+        }
+    };
+    let mosaic = |pattern: CfaPattern, dx: usize, dy: usize| -> Vec<f32> {
+        let (cw, ch) = (w - dx, h - dy);
+        (0..cw * ch)
+            .map(|i| {
+                let (x, y) = (i % cw, i / cw);
+                scene(x + dx, y + dy, pattern.color_at(Vec2us::new(x, y)))
+            })
+            .collect()
+    };
+
+    let base_data = mosaic(CfaPattern::Rggb, 0, 0);
+    let base = rcd::demosaic(
+        &make_bayer(&base_data, Size2us::new(w, h), CfaPattern::Rggb),
+        &CancelToken::never(),
+    )
+    .unwrap();
+
+    // Each image computes its core from its own column and row 4 (`BORDER`), so a shifted crop
+    // starts that region one pixel later than the base and fills the strip between with zeros;
+    // step 4.3 reads up to three pixels out and carries that strip about four pixels inward.
+    // Past this margin both images see only computed values.
+    const MARGIN: usize = 12;
+    for (pattern, dx, dy) in [
+        (CfaPattern::Grbg, 1, 0),
+        (CfaPattern::Gbrg, 0, 1),
+        (CfaPattern::Bggr, 1, 1),
+    ] {
+        assert_eq!(
+            pattern.color_at(Vec2us::new(0, 0)),
+            CfaPattern::Rggb.color_at(Vec2us::new(dx, dy)),
+            "{pattern:?} is RGGB shifted by ({dx}, {dy})"
+        );
+        let (cw, ch) = (w - dx, h - dy);
+        let data = mosaic(pattern, dx, dy);
+        let shifted = rcd::demosaic(
+            &make_bayer(&data, Size2us::new(cw, ch), pattern),
+            &CancelToken::never(),
+        )
+        .unwrap();
+        for y in MARGIN..ch - MARGIN {
+            for x in MARGIN..cw - MARGIN {
+                for channel in 0..3 {
+                    let got = shifted[channel][y * cw + x];
+                    let want = base[channel][(y + dy) * w + x + dx];
+                    assert_eq!(
+                        got.to_bits(),
+                        want.to_bits(),
+                        "{pattern:?} channel {channel} at ({x}, {y}): {got} vs RGGB {want}"
+                    );
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn rcd_with_margins() {
     let raw_w = 26;

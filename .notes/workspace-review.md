@@ -115,11 +115,6 @@ Severity: High — user files and user-wired graphs crash the process or the wor
 - [ ] `lumos/src/stacking/star_detection/detector/stages/filter/mod.rs` `remove_duplicate_stars` — `FilterConfig::validate` accepts `duplicate_min_separation = 0.0`; the spatial-hash path divides by `cell_size = 0.0`, every coordinate becomes `i64::MAX`, and `cell_x + dx` overflows (debug panic; release puts all stars in one cell, O(n²)). Zero separation should mean "no dedup" and return early.
 - [ ] `imaginarium/src/drawing.rs` `draw_circle` / `draw_dot` — for a shape entirely left of or above the image, `((cx + r).ceil() as i32).min(width as i32 - 1) as usize` is negative and wraps to ~2^64; the distance test rejects every pixel, so the loop runs essentially forever. Clamp in `i32` and return early on an empty box.
 
-## RCD demosaic reads the wrong pixels on GRBG/GBRG patterns
-Severity: High — the diagonal direction is decided from high-pass samples at the wrong sites on half of all Bayer phases.
-
-- [ ] `lumos/src/io/raw/demosaic/bayer/rcd/mod.rs` `demosaic`, step 4.0 vs step 4.1 — step 4.0 fills `p_hpf`/`q_hpf` at `rx = 3 + ((ry + 1) & 1) + 2k`, a fixed even-`rx + ry` checkerboard that ignores the pattern; step 4.1 reads `rx/2`, `(rx-1)/2`, `rx.div_ceil(2)` at the pattern's real non-green sites (`rx = BORDER + (color_at(0, ry) & 1)`). They agree only for RGGB/BGGR; an index simulation over 20×20 gives 0 misaligned reads for those and 360 for GRBG/GBRG. These patterns arrive from native sensors, from `at_raw_origin` with an odd margin, and from a FITS `BOTTOM-UP` flip. The pattern tests use flat fields and horizontal ramps, where P and Q estimates are equal. Start step 4.0 at `3 + (pattern.color_at(0, ry) & 1)`.
-
 ## The default gradient removal puts both auto stretches on their degenerate branch
 Severity: High — the standard chain (extract background, then auto-stretch) silently produces a maximal stretch that ignores its own target.
 
