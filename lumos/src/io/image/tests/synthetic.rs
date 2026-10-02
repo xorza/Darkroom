@@ -28,7 +28,7 @@ use imaginarium::ColorFormat;
 fn write_and_load(name: &str, image: &Image) -> Result<LinearImage, ImageError> {
     let path = common::internals::test_output_path(&format!("fits_roundtrip/{name}.fits"));
     let mut writer = FitsWriter::new(File::create(&path).unwrap());
-    writer.write_image(image).unwrap();
+    writer.write_image(image, None).unwrap();
     writer.into_inner().sync_all().unwrap();
     load_linear_fits(&path, &LoadContext::default())
 }
@@ -36,7 +36,7 @@ fn write_and_load(name: &str, image: &Image) -> Result<LinearImage, ImageError> 
 fn write_with_header(name: &str, image: &Image, header: &Header) -> std::path::PathBuf {
     let path = common::internals::test_output_path(&format!("fits_roundtrip/{name}.fits"));
     let mut writer = FitsWriter::new(File::create(&path).unwrap());
-    writer.write_image_with_header(image, header).unwrap();
+    writer.write_image(image, Some(header)).unwrap();
     writer.into_inner().sync_all().unwrap();
     path
 }

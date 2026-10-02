@@ -79,7 +79,7 @@ pub(crate) fn save_cfa_fits(path: &Path, image: &CfaImage) -> std::io::Result<()
     file_utils::publish(path, file_utils::PublicationMode::Durable, |file| {
         FitsWriter::new(&mut *file)
             .with_checksums()
-            .write_image_with_header(&encoded.image, &encoded.header)
+            .write_image(&encoded.image, Some(&encoded.header))
             .map_err(fits_to_io)
     })
 }

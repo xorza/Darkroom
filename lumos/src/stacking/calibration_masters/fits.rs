@@ -60,14 +60,14 @@ pub(super) fn save(path: &Path, masters: &CalibrationMasters) -> std::io::Result
                 },
             )?;
             writer
-                .write_image_with_header(&encoded.image, &encoded.header)
+                .write_image(&encoded.image, Some(&encoded.header))
                 .map_err(fits_to_io)?;
         }
 
         if let Some(defect_map) = &masters.defect_map {
             let encoded = encode_defect_map(defect_map)?;
             writer
-                .write_table_with_header(&encoded.table, &encoded.header)
+                .write_table(&encoded.table, Some(&encoded.header))
                 .map_err(fits_to_io)?;
         }
         Ok(())

@@ -1,8 +1,9 @@
 use std::mem::size_of;
 use std::path::Path;
 
+use fits_well::FitsError;
 use fits_well::header::Header;
-use fits_well::image::{Bitpix as FitsBitpix, SampleType};
+use fits_well::image::{Bitpix as FitsBitpix, ImageMetadata, SampleType};
 use fits_well::io::{BLOCK_SIZE, Hdu, HduKind};
 
 use crate::io::image::error::ImageError;
@@ -28,16 +29,21 @@ const FLOAT_ADU_DIVISOR: f32 = 65_535.0;
 pub(super) struct FitsHduDescription<'a> {
     header: &'a Header,
     kind: HduKind,
+    image: ImageMetadata<'a>,
     source_bytes: u64,
 }
 
 impl<'a> FitsHduDescription<'a> {
     pub(super) fn from_hdu(path: &Path, hdu: &'a Hdu) -> Result<Self, ImageError> {
-        let source_bytes = padded_data_bytes(path, hdu.data_bytes)?;
+        let image = hdu.image().map_err(|source| match source {
+            FitsError::NotAnImage => fits_unsupported(path, "selected HDU is not an image"),
+            source => fits_err(path, source),
+        })?;
         Ok(Self {
             header: &hdu.header,
             kind: hdu.kind,
-            source_bytes,
+            image,
+            source_bytes: padded_data_bytes(path, hdu.data_bytes)?,
         })
     }
 }
@@ -198,35 +204,9 @@ pub(super) fn preflight_fits_image(
     float_scale: FitsFloatScale,
     memory_limit_bytes: u64,
 ) -> Result<FitsDecodePlan, ImageError> {
-    if !matches!(
-        hdu.kind,
-        HduKind::Primary | HduKind::Image | HduKind::CompressedImage
-    ) {
-        return Err(fits_unsupported(path, "selected HDU is not an image"));
-    }
-
-    let shape = if hdu.kind == HduKind::CompressedImage {
-        compressed_shape(hdu.header).map_err(|source| fits_err(path, source))?
-    } else {
-        hdu.header.axes().map_err(|source| fits_err(path, source))?
-    };
-    let dimensions = dimensions_from_shape(path, &shape, cube)?;
-    let stored_bitpix = if hdu.kind == HduKind::CompressedImage {
-        let code = hdu
-            .header
-            .get_integer("ZBITPIX")
-            .map_err(|source| fits_err(path, source))?
-            .ok_or_else(|| fits_unsupported(path, "compressed image is missing ZBITPIX"))?;
-        FitsBitpix::from_code(code).map_err(|source| fits_err(path, source))?
-    } else {
-        hdu.header
-            .bitpix()
-            .map_err(|source| fits_err(path, source))?
-    };
-    let scaling = hdu
-        .header
-        .scaling()
-        .map_err(|source| fits_err(path, source))?;
+    let dimensions = dimensions_from_shape(path, hdu.image.shape, cube)?;
+    let stored_bitpix = hdu.image.bitpix;
+    let scaling = hdu.image.scaling;
     let bitpix = map_bitpix(SampleType::from_scaling(stored_bitpix, &scaling));
     let sample_scale = sample_scale(path, hdu.header, stored_bitpix, &scaling, float_scale)?;
     let decoded_bytes = checked_size_bytes(
@@ -285,7 +265,7 @@ pub(super) fn preflight_fits_image(
     )?;
 
     Ok(FitsDecodePlan {
-        shape,
+        shape: hdu.image.shape.to_vec(),
         dimensions,
         bitpix,
         scaling,
@@ -334,26 +314,6 @@ fn padded_data_bytes(path: &Path, bytes: u64) -> Result<u64, ImageError> {
         .checked_add(BLOCK_SIZE as u64 - 1)
         .map(|padded| padded / BLOCK_SIZE as u64 * BLOCK_SIZE as u64)
         .ok_or_else(|| fits_unsupported(path, "FITS padded data-unit size overflows u64"))
-}
-
-fn compressed_shape(header: &Header) -> fits_well::Result<Vec<usize>> {
-    let rank = header
-        .get_integer("ZNAXIS")?
-        .ok_or(fits_well::FitsError::MissingKeyword { name: "ZNAXIS" })?;
-    let rank = usize::try_from(rank)
-        .ok()
-        .filter(|rank| *rank <= 999)
-        .ok_or(fits_well::FitsError::KeywordOutOfRange { name: "ZNAXIS" })?;
-    (1..=rank)
-        .map(|axis| {
-            let key = format!("ZNAXIS{axis}");
-            let value = header
-                .get_integer(&key)?
-                .ok_or(fits_well::FitsError::MissingKeyword { name: "ZNAXISn" })?;
-            usize::try_from(value)
-                .map_err(|_| fits_well::FitsError::KeywordOutOfRange { name: "ZNAXISn" })
-        })
-        .collect()
 }
 
 pub(super) fn dimensions_from_shape(
@@ -411,18 +371,28 @@ fn map_bitpix(sample_type: SampleType) -> BitPix {
 #[cfg(test)]
 pub(super) mod internals {
     use fits_well::header::Header;
+    use fits_well::image::{Bitpix, ImageMetadata};
     use fits_well::io::HduKind;
 
     use crate::io::image::fits::decode::plan::FitsHduDescription;
 
-    pub(crate) fn description(
-        header: &Header,
+    /// An HDU of `kind` whose image is `shape` samples of `bitpix`, scaled as `header`
+    /// declares.
+    pub(crate) fn description<'a>(
+        header: &'a Header,
         kind: HduKind,
+        shape: &'a [usize],
+        bitpix: Bitpix,
         source_bytes: u64,
-    ) -> FitsHduDescription<'_> {
+    ) -> FitsHduDescription<'a> {
         FitsHduDescription {
             header,
             kind,
+            image: ImageMetadata {
+                shape,
+                bitpix,
+                scaling: header.scaling().unwrap(),
+            },
             source_bytes,
         }
     }
