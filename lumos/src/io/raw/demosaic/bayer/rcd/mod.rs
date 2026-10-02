@@ -25,6 +25,12 @@ const EPSSQ: f32 = 1e-10;
 const MIN_SIGNED_DENOMINATOR_RATIO: f32 = 0.25;
 /// Border size required by the algorithm (pixels on each side).
 const BORDER: usize = 4;
+/// The band bilinear interpolation fills. RCD's stages chain stencils — the direction maps and
+/// low-pass filter reach 4 pixels, and the colour steps read values earlier steps computed up to 3
+/// pixels further out — so a pixel nearer an edge than this reads values no stage computed. A
+/// test pins the reach: from this distance in, a frame demosaics bit for bit as it does inside a
+/// larger one. `RawTherapee`'s RCD interpolates a 9-pixel border for the same reason.
+pub(crate) const INTERPOLATED_BORDER: usize = 10;
 
 pub(crate) fn demosaic_memory(raw: Size2us, active: Size2us) -> DemosaicMemory {
     let raw_pixels = raw.width.saturating_mul(raw.height);
@@ -637,7 +643,7 @@ fn step4_3_rb_at_green(
         });
 }
 
-/// Simple bilinear border interpolation for pixels within `border` pixels of the edge.
+/// Bilinear interpolation of the pixels within [`INTERPOLATED_BORDER`] of the raw buffer's edge.
 fn border_interpolate(
     rgb_r: &mut [f32],
     rgb_b: &mut [f32],
@@ -651,7 +657,7 @@ fn border_interpolate(
         rh: height,
         ..
     } = s;
-    let border = BORDER;
+    let border = INTERPOLATED_BORDER;
     let rgb_channels: [&mut [f32]; 3] = [rgb_r, rgb_g, rgb_b];
 
     for (ic, rgb_ch) in rgb_channels.into_iter().enumerate() {

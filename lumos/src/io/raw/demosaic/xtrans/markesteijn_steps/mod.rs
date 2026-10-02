@@ -21,7 +21,10 @@ use std::mem;
 const DIR_OFFSETS: [(i32, i32); NDIR] = [(0, 1), (1, 0), (1, 1), (1, -1)];
 const GREEN_BLOCK_DIRECTIONS: usize = 2;
 
-const MARK_INFO_BORDER: usize = 8;
+/// The band the border fill writes, from the active area's edge. The colour and homogeneity steps
+/// chain stencils, so a pixel nearer an edge than this reads values no step computed; a test pins
+/// the reach: from this distance in, a frame demosaics bit for bit as it does inside a larger one.
+pub(crate) const MARK_INFO_BORDER: usize = 9;
 
 /// Compute green min/max bounds at each non-green pixel.
 ///

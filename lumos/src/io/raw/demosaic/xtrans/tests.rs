@@ -416,10 +416,11 @@ fn f32_demosaic_is_equivariant_to_a_uniform_pedestal() {
 fn process_xtrans_f32_matches_u16_path() {
     let black = 0.0_f32;
     let span = 65535.0_f32;
-    let raw_width = 30;
-    let raw_height = 30;
-    let width = 18;
-    let height = 18;
+    // Wide enough that the interior past the 9-pixel border fill is Markesteijn's own output.
+    let raw_width = 42;
+    let raw_height = 42;
+    let width = 30;
+    let height = 30;
     let margin = 6;
     let raw_u16: Vec<u16> = (0..raw_width * raw_height)
         .map(|index| {
