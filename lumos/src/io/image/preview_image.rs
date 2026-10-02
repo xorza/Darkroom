@@ -37,7 +37,7 @@ impl PreviewImage {
         }
 
         if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {
-            return raw::load_raw(path, &context.cancel).map(Into::into);
+            return raw::load_raw(path, context).map(Into::into);
         }
 
         if let Some(format) = FileFormat::from_extension(&extension) {

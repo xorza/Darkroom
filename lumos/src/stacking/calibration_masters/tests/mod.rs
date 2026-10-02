@@ -12,6 +12,7 @@ use crate::io::image::image_provenance::{
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::sample_domain::{SampleDomain, ScaleOrigin};
 use crate::io::raw::demosaic::bayer::CfaPattern;
+use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
 use crate::io::raw::provenance::RawTransferProvenance;
 use crate::stacking::calibration_masters::DEFAULT_SIGMA_THRESHOLD;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
@@ -22,6 +23,7 @@ use crate::stacking::combine::config::{CombineMethod, StackConfig, Weighting};
 use crate::stacking::combine::error::{Error, StackConfigError};
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::progress::ProgressCallback;
+use crate::testing::cfa::XTRANS_PATTERN;
 use crate::testing::cfa::{constant_cfa, make_cfa};
 use crate::testing::prelude::*;
 use crate::{
@@ -162,10 +164,11 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
         expected: CalibrationError,
     }
 
-    let xtrans_a = CfaType::XTrans([[0; 6]; 6]);
-    let mut xtrans_b_pattern = [[0; 6]; 6];
-    xtrans_b_pattern[0][0] = 1;
-    let xtrans_b = CfaType::XTrans(xtrans_b_pattern);
+    // The same layout one row down is a different X-Trans phase.
+    let xtrans_a = CfaType::XTrans(XTRANS_PATTERN);
+    let mut shifted = *XTRANS_PATTERN.rows();
+    shifted.rotate_left(1);
+    let xtrans_b = CfaType::XTrans(XTransPattern::new(shifted).unwrap());
     let cases = [
         Case {
             role: MasterRole::Dark,

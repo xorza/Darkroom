@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::slice;
 use std::time::Instant;
 
+use crate::io::cancelled::Cancelled;
 use crate::io::image::error::ImageError;
 use crate::io::raw::error::BlackLevelError;
 use crate::math::size2us::Size2us;
@@ -30,11 +31,12 @@ use crate::io::image::image_provenance::{
     SourceContainer, TransferProvenance,
 };
 use crate::io::image::linear::LinearImage;
+use crate::io::image::load_context::LoadContext;
 use crate::io::raw::demosaic::sensor_layout::SensorLayout;
 use crate::io::raw::demosaic::xtrans::XTransNormalization;
+use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
 use crate::io::raw::provenance::RawTransferProvenance;
 use common::CancelToken;
-use demosaic::DemosaicError;
 use demosaic::bayer::{BayerImage, CfaPattern, rcd};
 use demosaic::xtrans;
 use imaginarium::Buffer2;
@@ -376,29 +378,6 @@ pub(crate) fn raw_err(path: &Path, reason: impl Into<String>) -> ImageError {
     }
 }
 
-fn check_cancelled(path: &Path, cancel: &CancelToken) -> Result<(), ImageError> {
-    if cancel.is_cancelled() {
-        return Err(ImageError::Cancelled {
-            path: path.to_path_buf(),
-        });
-    }
-    Ok(())
-}
-
-fn demosaic_err(path: &Path, source: DemosaicError) -> ImageError {
-    match source {
-        DemosaicError::Cancelled => ImageError::Cancelled {
-            path: path.to_path_buf(),
-        },
-        DemosaicError::InvalidXTransPattern(source) => raw_err(path, source.to_string()),
-    }
-}
-
-fn validate_xtrans_pattern(path: &Path, pattern: [[u8; 6]; 6]) -> Result<(), ImageError> {
-    xtrans::XTransPattern::new(pattern).map_err(|source| raw_err(path, source.to_string()))?;
-    Ok(())
-}
-
 #[derive(Debug, Clone, Copy)]
 enum ChannelBlackDelta {
     LibRawFilter {
@@ -406,7 +385,7 @@ enum ChannelBlackDelta {
         values: [f32; 4],
     },
     XTrans {
-        visible_pattern: [[u8; 6]; 6],
+        visible_pattern: XTransPattern,
         values: [f32; 3],
     },
 }
@@ -422,7 +401,7 @@ impl ChannelBlackDelta {
             ChannelBlackDelta::XTrans {
                 visible_pattern,
                 values,
-            } => values[visible_pattern[row % 6][col % 6] as usize],
+            } => values[visible_pattern.color_at(Vec2us::new(col, row)) as usize],
         }
     }
 }
@@ -475,6 +454,9 @@ struct UnpackedRaw {
     visible_filters: u32,
     /// The mosaic lumos demosaics itself, or `None` when LibRaw has to process the image.
     cfa_type: Option<CfaType>,
+    /// An X-Trans sensor's layout anchored at the full raw buffer's origin rather than the
+    /// visible area's, which is what `cfa_type` holds.
+    raw_xtrans_pattern: Option<XTransPattern>,
     camera_white_balance: Option<[f32; 4]>,
     iso: Option<u32>,
 }
@@ -569,8 +551,8 @@ impl UnpackedRaw {
         let bayer = BayerImage::with_margins(&normalized_data, self.layout, raw_cfa_pattern);
 
         let demosaic_start = Instant::now();
-        let mut rgb_pixels = rcd::demosaic(&bayer, cancel)
-            .map_err(|source| demosaic_err(&self.path, source.into()))?;
+        let mut rgb_pixels =
+            rcd::demosaic(&bayer, cancel).map_err(|Cancelled| ImageError::cancelled(&self.path))?;
         let demosaic_elapsed = demosaic_start.elapsed();
 
         tracing::info!(
@@ -584,13 +566,6 @@ impl UnpackedRaw {
         Ok(rgb_pixels)
     }
 
-    /// Extract LibRaw's absolute X-Trans pattern for full-raw-buffer consumers.
-    fn raw_xtrans_pattern(&self) -> [[u8; 6]; 6] {
-        // SAFETY: the libraw instance is valid and xtrans_abs is populated for X-Trans sensors.
-        let pattern = unsafe { (*self.libraw.as_ptr()).idata.xtrans_abs };
-        xtrans_pattern_from_libraw(pattern)
-    }
-
     /// Process X-Trans sensor data using our Markesteijn demosaic. Returns planar `[R, G, B]`
     /// channels.
     ///
@@ -599,7 +574,7 @@ impl UnpackedRaw {
     /// the caller, is what stops anything reaching a libraw instance this has already freed.
     fn demosaic_xtrans(
         self,
-        raw_pattern: [[u8; 6]; 6],
+        raw_pattern: XTransPattern,
         cancel: &CancelToken,
     ) -> Result<[Vec<f32>; 3], ImageError> {
         // Copy raw u16 data so we can drop libraw before demosaicing.
@@ -633,7 +608,7 @@ impl UnpackedRaw {
             },
             cancel,
         )
-        .map_err(|source| demosaic_err(&path, source))?;
+        .map_err(|Cancelled| ImageError::cancelled(&path))?;
 
         clamp_interpolated(&mut pixels);
         Ok(pixels)
@@ -845,13 +820,18 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
     // Get sensor info from libraw metadata
     // SAFETY: inner is valid, idata struct is initialized after unpack.
     let visible_filters = unsafe { (*inner).idata.filters };
-    let cfa_type = sensor_cfa_type(&libraw);
-    if let Some(CfaType::XTrans(visible_pattern)) = cfa_type {
-        validate_xtrans_pattern(path, visible_pattern)?;
-        // SAFETY: inner is valid and LibRaw populates both patterns for X-Trans sensors.
-        let raw_pattern = unsafe { (*inner).idata.xtrans_abs };
-        validate_xtrans_pattern(path, xtrans_pattern_from_libraw(raw_pattern))?;
-    }
+    let cfa_type = sensor_cfa_type(&libraw, path)?;
+    let raw_xtrans_pattern = match cfa_type {
+        Some(CfaType::XTrans(_)) => {
+            // SAFETY: inner is valid and LibRaw populates both patterns for X-Trans sensors.
+            let raw_pattern = unsafe { (*inner).idata.xtrans_abs };
+            Some(
+                XTransPattern::new(xtrans_pattern_from_libraw(raw_pattern))
+                    .map_err(|source| raw_err(path, source.to_string()))?,
+            )
+        }
+        _ => None,
+    };
 
     tracing::debug!(
         "libraw: filters=0x{:08x}, cfa_type={:?}",
@@ -882,13 +862,14 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
         black_level,
         visible_filters,
         cfa_type,
+        raw_xtrans_pattern,
         camera_white_balance,
         iso,
     })
 }
 
 /// The mosaic an opened file's sensor delivers — see [`CfaType::from_libraw`].
-fn sensor_cfa_type(libraw: &LibrawState) -> Option<CfaType> {
+fn sensor_cfa_type(libraw: &LibrawState, path: &Path) -> Result<Option<CfaType>, ImageError> {
     // SAFETY: the file is open, so LibRaw's image metadata, X-Trans pattern included, is set.
     let idata = unsafe { &(*libraw.as_ptr()).idata };
     CfaType::from_libraw(
@@ -896,6 +877,7 @@ fn sensor_cfa_type(libraw: &LibrawState) -> Option<CfaType> {
         idata.colors,
         xtrans_pattern_from_libraw(idata.xtrans),
     )
+    .map_err(|source| raw_err(path, source.to_string()))
 }
 
 /// What a refused libraw open means, for whichever call this host makes.
@@ -1002,10 +984,10 @@ fn clamp_interpolated(planes: &mut [Vec<f32>; 3]) {
 /// - Known Bayer patterns (RGGB, BGGR, GRBG, GBRG): our RCD demosaic
 /// - X-Trans: our Markesteijn demosaic
 /// - Anything else — a linear DNG, sRAW or Foveon, or an exotic CFA: LibRaw's own processing
-pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage, ImageError> {
-    check_cancelled(path, cancel)?;
+pub(crate) fn load_raw(path: &Path, context: &LoadContext) -> Result<LinearImage, ImageError> {
+    context.check_cancelled(path)?;
     let raw = open_raw(path)?;
-    check_cancelled(path, cancel)?;
+    context.check_cancelled(path)?;
 
     // Read before the match: the X-Trans arm consumes `raw` to free libraw ahead of its demosaic.
     let active = raw.layout.active;
@@ -1027,7 +1009,7 @@ pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage,
         }
         Some(cfa_type @ CfaType::Bayer(cfa_pattern)) => {
             tracing::debug!("Detected Bayer CFA pattern: {:?}", cfa_pattern);
-            let planes = raw.demosaic_bayer(cfa_pattern, cancel)?;
+            let planes = raw.demosaic_bayer(cfa_pattern, &context.cancel)?;
             DecodedRawPreview {
                 pixels: DemosaicedPixels::Planar(planes),
                 dimensions: ImageDimensions::new(active, 3),
@@ -1037,8 +1019,10 @@ pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage,
         }
         Some(cfa_type @ CfaType::XTrans(_)) => {
             tracing::info!("X-Trans sensor detected, using X-Trans demosaic");
-            let raw_pattern = raw.raw_xtrans_pattern();
-            let planes = raw.demosaic_xtrans(raw_pattern, cancel)?;
+            let raw_pattern = raw
+                .raw_xtrans_pattern
+                .expect("an X-Trans sensor's raw-origin layout is read when its file opens");
+            let planes = raw.demosaic_xtrans(raw_pattern, &context.cancel)?;
             DecodedRawPreview {
                 pixels: DemosaicedPixels::Planar(planes),
                 dimensions: ImageDimensions::new(active, 3),
@@ -1049,7 +1033,7 @@ pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage,
         None => {
             tracing::info!("no mosaic lumos demosaics; LibRaw processes the image");
             let demosaiced = raw.demosaic_libraw_fallback()?;
-            check_cancelled(path, cancel)?;
+            context.check_cancelled(path)?;
             DecodedRawPreview {
                 pixels: DemosaicedPixels::Flat(demosaiced.pixels),
                 dimensions: demosaiced.dimensions,
@@ -1105,12 +1089,12 @@ pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage,
 /// Read output dimensions and sensor layout without the expensive `libraw_unpack`.
 pub(crate) fn raw_cfa_frame_info(
     path: &Path,
-    cancel: &CancelToken,
+    context: &LoadContext,
 ) -> Result<CfaFrameInfo, ImageError> {
-    check_cancelled(path, cancel)?;
+    context.check_cancelled(path)?;
     // Frees libraw, and the file bytes it parses in place, on every return path.
     let libraw = LibrawState::open(path)?;
-    check_cancelled(path, cancel)?;
+    context.check_cancelled(path)?;
 
     // SAFETY: opening succeeded, so the sizes struct is initialized.
     let width = unsafe { (*libraw.as_ptr()).sizes.width } as usize;
@@ -1121,7 +1105,7 @@ pub(crate) fn raw_cfa_frame_info(
             format!("libraw: Invalid output dimensions: {width}x{height}"),
         ));
     }
-    let cfa_type = sensor_cfa_type(&libraw).ok_or_else(|| not_a_cfa_frame(path))?;
+    let cfa_type = sensor_cfa_type(&libraw, path)?.ok_or_else(|| not_a_cfa_frame(path))?;
     Ok(CfaFrameInfo {
         dimensions: ImageDimensions::new((width, height), 1),
         cfa_type,
@@ -1131,10 +1115,10 @@ pub(crate) fn raw_cfa_frame_info(
     })
 }
 
-pub(crate) fn load_raw_cfa(path: &Path, cancel: &CancelToken) -> Result<CfaImage, ImageError> {
-    check_cancelled(path, cancel)?;
+pub(crate) fn load_raw_cfa(path: &Path, context: &LoadContext) -> Result<CfaImage, ImageError> {
+    context.check_cancelled(path)?;
     let raw = open_raw(path)?;
-    check_cancelled(path, cancel)?;
+    context.check_cancelled(path)?;
 
     let cfa_type = raw.cfa_type.ok_or_else(|| not_a_cfa_frame(path))?;
 

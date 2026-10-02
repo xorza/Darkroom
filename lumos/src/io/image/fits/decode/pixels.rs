@@ -9,6 +9,7 @@ use rayon::prelude::*;
 
 use common::CancelToken;
 
+use crate::io::cancelled::Cancelled;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode::DecodedFitsImage;
 use crate::io::image::fits::decode::plan::FitsDecodePlan;
@@ -341,10 +342,6 @@ impl NullSummary {
     }
 }
 
-/// The only way the pass below fails, now that a null is data rather than an error.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Cancelled;
-
 /// Divide a decode chunk into the pipeline's `[0, 1]` domain and locate the FITS nulls it carries,
 /// in one pass over the samples.
 ///
@@ -430,8 +427,9 @@ fn summarize_nulls(chunk: &[f32], chunk_start: usize) -> NullSummary {
 mod tests {
     use common::CancelToken;
 
+    use crate::io::cancelled::Cancelled;
     use crate::io::image::fits::decode::pixels::{
-        Cancelled, FILL_MEDIAN_SAMPLES, NullSummary, fill_nulls, normalize_and_locate_nulls,
+        FILL_MEDIAN_SAMPLES, NullSummary, fill_nulls, normalize_and_locate_nulls,
     };
 
     #[test]

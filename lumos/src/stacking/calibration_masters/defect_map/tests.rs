@@ -286,15 +286,7 @@ fn correct_clustered_defect_uses_only_good_neighbors() {
 #[test]
 fn xtrans_hot_pixel_correction_uses_same_color() {
     // X-Trans hot pixels must be repaired from SAME-COLOR neighbours, not the global mean.
-    let pattern = [
-        [1, 0, 1, 1, 2, 1],
-        [2, 1, 2, 0, 1, 0],
-        [1, 2, 1, 1, 0, 1],
-        [1, 2, 1, 1, 0, 1],
-        [0, 1, 0, 2, 1, 2],
-        [1, 0, 1, 1, 2, 1],
-    ];
-    let cfa = CfaType::XTrans(pattern);
+    let cfa = CfaType::XTrans(XTRANS_PATTERN);
     let size = Size2us::new(12usize, 12usize);
     // Distinct per-color baselines so a wrong-color repair is detectable.
     let color_val = |c: u8| match c {
@@ -315,8 +307,8 @@ fn xtrans_hot_pixel_correction_uses_same_color() {
         make_cfa(size, px, cfa)
     };
 
-    let r_hot = (1usize, 0usize); // pattern[0][1] = 0 → R
-    let b_hot = (0usize, 1usize); // pattern[1][0] = 2 → B
+    let r_hot = (2usize, 0usize); // rows[0][2] = 0 → R
+    let b_hot = (0usize, 2usize); // rows[2][0] = 2 → B
     assert_eq!(cfa.color_at(Vec2us::new(r_hot.0, r_hot.1)), 0);
     assert_eq!(cfa.color_at(Vec2us::new(b_hot.0, b_hot.1)), 2);
 

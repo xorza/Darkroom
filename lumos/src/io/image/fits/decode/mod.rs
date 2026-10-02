@@ -23,6 +23,7 @@ use std::path::Path;
 use fits_well::FitsReader;
 use fits_well::io::SliceReader;
 
+use crate::io::cancelled::Cancelled;
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::cfa::{validate_cfa_container_format, validate_cfa_image_header};
@@ -38,7 +39,6 @@ use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::null_mask::NullMask;
 use crate::io::image::standard::scientific_rejection;
-use crate::io::raw::demosaic::DemosaicError;
 
 mod pixels;
 mod plan;
@@ -142,14 +142,7 @@ pub(crate) fn load_preview_fits(
         Ok(decoded
             .into_cfa(path, None)?
             .demosaic(&context.cancel)
-            .map_err(|source| match source {
-                DemosaicError::Cancelled => ImageError::Cancelled {
-                    path: path.to_path_buf(),
-                },
-                DemosaicError::InvalidXTransPattern(source) => {
-                    fits_unsupported(path, source.to_string())
-                }
-            })?)
+            .map_err(|Cancelled| ImageError::cancelled(path))?)
     } else {
         decoded.into_linear(path)
     }

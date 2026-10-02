@@ -9,6 +9,7 @@ use common::{CancelToken, TempDir};
 use crate::concurrency;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::linear::LinearImage;
+use crate::io::image::load_context::LoadContext;
 use crate::io::raw::load_raw_cfa;
 use crate::stacking::combine::cache::FrameCache;
 use crate::stacking::combine::stack::run_stacking;
@@ -127,7 +128,7 @@ fn bench_full_pipeline() {
 
     let calibrated: Vec<LinearImage> =
         concurrency::try_par_map_limited(&light_paths, 3, |_index, p| {
-            let mut cfa = load_raw_cfa(p, &CancelToken::never()).unwrap();
+            let mut cfa = load_raw_cfa(p, &LoadContext::default()).unwrap();
             masters.calibrate(&mut cfa).unwrap();
             Ok::<_, ()>(cfa.demosaic(&CancelToken::never()).unwrap())
         })

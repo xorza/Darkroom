@@ -5,12 +5,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common::CancelToken;
 
+use crate::io::cancelled::Cancelled;
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage};
 use crate::io::image::error::ImageError;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
-use crate::io::raw;
-use crate::io::raw::demosaic::DemosaicError;
 use crate::memory;
 use crate::memory::MemoryPlan;
 use crate::stacking::calibration_masters::CalibrationMasters;
@@ -154,11 +153,5 @@ fn decode_calibrate_demosaic(
     }
     // Demosaic is the other heavy step; it polls `cancel` internally and bails mid-pass.
     cfa.demosaic(&context.cancel)
-        .map_err(|source| match source {
-            DemosaicError::Cancelled => Error::Stack(StackError::Cancelled),
-            DemosaicError::InvalidXTransPattern(source) => Error::Load {
-                path: path.to_path_buf(),
-                source: Box::new(raw::raw_err(path, source.to_string())),
-            },
-        })
+        .map_err(|Cancelled| Error::Stack(StackError::Cancelled))
 }

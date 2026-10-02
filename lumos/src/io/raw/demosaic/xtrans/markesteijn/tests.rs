@@ -336,7 +336,7 @@ fn markesteijn_preserves_green_at_green_pixel() {
             active: Size2us::new(w, h),
             margin: Vec2us::new(left, top),
         },
-        pattern.clone(),
+        pattern,
         XTransNormalization {
             channel_black: [0.0; 3],
             span: TEST_SPAN,

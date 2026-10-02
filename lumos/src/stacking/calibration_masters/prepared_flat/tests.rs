@@ -1,3 +1,4 @@
+use crate::testing::cfa::XTRANS_PATTERN;
 use crate::testing::prelude::*;
 use rayon::prelude::*;
 
@@ -19,14 +20,7 @@ fn prepare(flat: CfaImage, subtractor: Option<&CfaImage>) -> CfaImage {
 }
 
 fn standard_xtrans() -> CfaType {
-    CfaType::XTrans([
-        [1, 0, 1, 1, 2, 1],
-        [2, 1, 2, 0, 1, 0],
-        [1, 2, 1, 1, 0, 1],
-        [1, 2, 1, 1, 0, 1],
-        [0, 1, 0, 2, 1, 2],
-        [1, 0, 1, 1, 2, 1],
-    ])
+    CfaType::XTrans(XTRANS_PATTERN)
 }
 
 fn reference_apply(light: &mut CfaImage, flat: &CfaImage, subtractor: Option<&CfaImage>) {

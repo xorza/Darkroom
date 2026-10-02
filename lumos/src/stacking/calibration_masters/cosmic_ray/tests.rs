@@ -5,6 +5,7 @@ use crate::math::statistics::median_mut;
 use crate::stacking::calibration_masters::cosmic_ray::config::NoiseEstimation;
 use crate::stacking::calibration_masters::cosmic_ray::mono::replace_flagged;
 use crate::stacking::calibration_masters::cosmic_ray::*;
+use crate::testing::cfa::XTRANS_PATTERN;
 use crate::testing::cfa::cfa_from_plane;
 use crate::testing::prelude::*;
 use crate::testing::synthetic::sky_field::{Sky, SkyField};
@@ -259,15 +260,7 @@ fn bayer_tight_star_eaten_is_a_known_limitation() {
 fn xtrans_removes_cosmic_ray_preserves_flat_field() {
     // X-Trans same-color path: per-color baselines + tiny noise + one bright CR. The CR is
     // replaced from same-color neighbors (≈ its color's baseline); flat pixels stay put.
-    let pattern = [
-        [1, 0, 1, 1, 2, 1],
-        [2, 1, 2, 0, 1, 0],
-        [1, 2, 1, 1, 0, 1],
-        [1, 2, 1, 1, 0, 1],
-        [0, 1, 0, 2, 1, 2],
-        [1, 0, 1, 1, 2, 1],
-    ];
-    let cfa = CfaType::XTrans(pattern);
+    let cfa = CfaType::XTrans(XTRANS_PATTERN);
     let size = Size2us::new(18, 18);
     let color_val = |c: u8| match c {
         0 => 0.10, // R

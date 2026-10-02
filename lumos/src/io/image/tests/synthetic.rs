@@ -17,10 +17,9 @@ use crate::io::image::fits::options::{FitsFloatScale, FitsLoadOptions, FitsNullP
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::sample_domain::{SampleDomain, ScaleOrigin};
 use crate::io::raw::demosaic::bayer::CfaPattern;
-use crate::io::raw::demosaic::xtrans::internals::test_pattern_array;
 use crate::stacking::combine::stack;
 use crate::stacking::frame_store::{FramePeek, StackableImage};
-use crate::testing::cfa::make_cfa;
+use crate::testing::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::{CalibrationMasters, CalibrationSet, CfaImage, CfaType, PreviewImage};
 use common::TempDir;
 use fits_well::header::Header;
@@ -877,7 +876,7 @@ fn calibrated_demosaic_preserves_out_of_range_samples() {
 
     for cfa in [
         CfaType::Bayer(CfaPattern::Rggb),
-        CfaType::XTrans(test_pattern_array()),
+        CfaType::XTrans(XTRANS_PATTERN),
     ] {
         for expected in [-0.25f32, 1.25] {
             let image = make_cfa(size, vec![expected; size.pixel_count()], cfa)

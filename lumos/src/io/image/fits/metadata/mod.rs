@@ -6,7 +6,7 @@ use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::RowOrder;
 use crate::io::image::sample_domain::ScaleOrigin;
 use crate::io::raw::demosaic::bayer::CfaPattern;
-use crate::io::raw::demosaic::xtrans::XTransPattern;
+use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
 
 /// The observation keywords a FITS header gives, each one `None` when it is absent or given with
 /// a type or value it cannot have: none of them changes a sample, so a writer's odd choice for
@@ -140,12 +140,8 @@ pub(super) fn write_cfa_metadata(header: &mut Header, cfa: &CfaImage) -> fits_we
             header.set("BAYERPAT", pattern.bayerpat())?;
         }
         CfaType::XTrans(pattern) => {
-            XTransPattern::new(pattern).map_err(|_| fits_well::FitsError::TypeMismatch {
-                name: "CFATYPE".to_string(),
-                expected: "valid X-Trans pattern",
-            })?;
             header.set("CFATYPE", "XTRANS")?;
-            for (row, values) in pattern.iter().enumerate() {
+            for (row, values) in pattern.rows().iter().enumerate() {
                 let keyword = format!("XTRNROW{row}");
                 let value = values
                     .iter()
@@ -337,7 +333,7 @@ fn read_bayer_cfa(
     Ok(Some(CfaType::Bayer(pattern)))
 }
 
-fn read_xtrans_pattern(header: &Header) -> fits_well::Result<[[u8; 6]; 6]> {
+fn read_xtrans_pattern(header: &Header) -> fits_well::Result<XTransPattern> {
     let mut pattern = [[0u8; 6]; 6];
     for (row, values) in pattern.iter_mut().enumerate() {
         let keyword = format!("XTRNROW{row}");
@@ -369,8 +365,7 @@ fn read_xtrans_pattern(header: &Header) -> fits_well::Result<[[u8; 6]; 6]> {
     XTransPattern::new(pattern).map_err(|_| fits_well::FitsError::TypeMismatch {
         name: "CFATYPE".to_string(),
         expected: "valid X-Trans pattern",
-    })?;
-    Ok(pattern)
+    })
 }
 
 fn read_camera_white_balance(header: &Header) -> fits_well::Result<Option<[f32; 4]>> {

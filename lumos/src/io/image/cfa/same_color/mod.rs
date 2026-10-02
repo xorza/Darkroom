@@ -11,6 +11,7 @@ use imaginarium::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::cfa::CfaType;
+use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mut;
 use crate::math::vec2us::Vec2us;
@@ -97,8 +98,6 @@ pub(crate) enum SameColorMedian {
 }
 
 impl SameColorMedian {
-    /// Takes a resolved pattern — a frame that declares none is Mono, which
-    /// [`CfaType::or_mono`] decides once for every reader of a pattern rather than here.
     pub(crate) fn new(cfa: &CfaType) -> Self {
         match cfa {
             CfaType::Mono => Self::Mono,
@@ -145,7 +144,8 @@ pub(crate) struct XTransOffsets {
 }
 
 impl XTransOffsets {
-    pub(crate) fn new(pattern: &[[u8; 6]; 6]) -> Self {
+    pub(crate) fn new(pattern: &XTransPattern) -> Self {
+        let pattern = pattern.rows();
         let per_phase = array::from_fn(|phase| {
             let px = (phase % 6) as i32;
             let py = (phase / 6) as i32;

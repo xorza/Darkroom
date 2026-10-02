@@ -12,13 +12,13 @@ use imaginarium::Buffer2;
 
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
+use crate::io::image::load_context::LoadContext;
 use crate::io::raw::internals::load_raw_libraw_demosaic;
 use crate::io::raw::load_raw;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::testing::init_tracing;
 use crate::testing::real_data::raw_frames;
-use common::CancelToken;
 
 /// Pixels this far from an edge are left out: both demosaics extrapolate there.
 const BORDER: usize = 6;
@@ -33,7 +33,7 @@ fn markesteijn_quality_vs_libraw() {
     let path = raw_frames("Lights").swap_remove(0);
     println!("Quality comparison on: {}\n", path.display());
 
-    let ours = load_raw(&path, &CancelToken::never()).unwrap();
+    let ours = load_raw(&path, &LoadContext::default()).unwrap();
     let one_pass = load_raw_libraw_demosaic(&path, 1).unwrap();
     let three_pass = load_raw_libraw_demosaic(&path, 3).unwrap();
     assert_eq!(ours.dimensions(), one_pass.dimensions());
@@ -83,7 +83,7 @@ fn bayer_rcd_quality_vs_libraw() {
         .expect("No Bayer test file found in test_data/raw_samples/");
     println!("Bayer quality comparison on: {}\n", path.display());
 
-    let ours = load_raw(&path, &CancelToken::never()).unwrap();
+    let ours = load_raw(&path, &LoadContext::default()).unwrap();
     let size = Size2us::new(ours.width(), ours.height());
     for (qual, label) in [(3, "AHD"), (2, "PPG"), (11, "DHT")] {
         let reference = load_raw_libraw_demosaic(&path, qual).unwrap();

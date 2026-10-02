@@ -278,7 +278,7 @@ fn raw_decode_snapshot() {
         return;
     }
     let path = &raw_frames("Lights")[0];
-    let cfa = load_raw_cfa(path, &CancelToken::never()).unwrap();
+    let cfa = load_raw_cfa(path, &LoadContext::default()).unwrap();
     let mut snapshot = Snapshot::default();
     snapshot.f32s(cfa.data.pixels());
     assert_snapshot("RAW decode", &snapshot, "b6144af28244502b");
