@@ -133,17 +133,19 @@ impl SessionHarness {
                 process_memory: *process_memory,
             },
         );
-        // Drained *inside* the pass, as `App::record` does — it is the
-        // per-pass entry point in production. Draining after `frame_value`
-        // would read the queue pass B left, and pass B clears what pass A
-        // raised.
-        ui.frame_value(|recorder: &mut Ui| {
+        // Drained *inside* every pass, as `App::record` does — it is the
+        // per-pass entry point in production, and executes what each pass
+        // raised. That includes the frames the harness runs first to deliver
+        // held input, which is where a chord pressed before a click lands.
+        let mut commands = Vec::new();
+        ui.frame(|recorder: &mut Ui| {
             // Deliberately dropped: production hands this to `App::frame`,
             // which owns the app's one `request_relayout`. This harness
             // asserts on commands and documents, not on layout passes.
             let _needs_relayout = session.frame(recorder, ctx, preferences, requests);
-            iter::from_fn(|| requests.pop_app()).collect()
-        })
+            commands.extend(iter::from_fn(|| requests.pop_app()));
+        });
+        commands
     }
 
     /// `n` frames whose commands are discarded — the editor equivalent of
