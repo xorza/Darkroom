@@ -142,7 +142,7 @@ impl CacheCore {
     ) -> LinearPixels
     where
         Channels: for<'a> Fn(&'a F) -> &'a [StoredPlane] + Copy,
-        Process: FnMut(&mut [f32], ChunkContext),
+        Process: FnMut(&mut [f32], ChunkContext<'_>),
     {
         let dims = self.dimensions;
         let frame_count = frames.len();

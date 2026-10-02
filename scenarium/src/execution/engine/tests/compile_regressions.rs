@@ -119,7 +119,7 @@ async fn update_with_evolved_func_recompiles_and_runs_new_lambda() {
 
     let mut g = TestGraph::new();
     g.add("generate", |n| n.pure().output(DataType::Int).returns(1i64));
-    g.add("print", |n| n.records());
+    g.add("print", NodeSpec::records);
     g.wire("generate", 0, "print", 0);
 
     let mut e = TestEngine::over(g);
@@ -186,7 +186,7 @@ async fn update_with_a_grown_output_list_retires_the_shorter_snapshot() {
             .output(DataType::Int)
             .lambda(body())
     });
-    g.add("print", |n| n.records());
+    g.add("print", NodeSpec::records);
     g.wire("generate", 0, "print", 0);
 
     let mut e = TestEngine::over(g);

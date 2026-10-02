@@ -3,7 +3,6 @@ use scenarium::NodeId;
 use std::collections::BTreeSet;
 
 use super::*;
-use crate::core::document::Document;
 use crate::core::document::harness::DocFixture;
 use crate::core::edit::graph_intent::GraphIntent;
 

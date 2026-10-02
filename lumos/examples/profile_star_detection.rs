@@ -18,16 +18,16 @@ fn generate_synthetic_image(width: usize, height: usize, num_stars: usize) -> Li
 
     // Add deterministic noise
     for (i, p) in pixels.iter_mut().enumerate() {
-        let hash = ((i as u32).wrapping_mul(2654435761)) as f32 / u32::MAX as f32;
+        let hash = ((i as u32).wrapping_mul(2_654_435_761)) as f32 / u32::MAX as f32;
         *p += (hash - 0.5) * 0.02;
     }
 
     // Add synthetic stars
     for star_idx in 0..num_stars {
-        let hash1 = ((star_idx as u32).wrapping_mul(2654435761)) as usize;
-        let hash2 = ((star_idx as u32).wrapping_mul(1597334677)) as usize;
-        let hash3 = ((star_idx as u32).wrapping_mul(805306457)) as usize;
-        let hash4 = ((star_idx as u32).wrapping_mul(402653189)) as usize;
+        let hash1 = ((star_idx as u32).wrapping_mul(2_654_435_761)) as usize;
+        let hash2 = ((star_idx as u32).wrapping_mul(1_597_334_677)) as usize;
+        let hash3 = ((star_idx as u32).wrapping_mul(805_306_457)) as usize;
+        let hash4 = ((star_idx as u32).wrapping_mul(402_653_189)) as usize;
 
         let cx = 20 + (hash1 % (width - 40));
         let cy = 20 + (hash2 % (height - 40));

@@ -15,7 +15,8 @@ use scenarium::{
     EventLambda, Func, FuncId, FuncInput, FuncLambda, FuncOutput, InvokeError, Library,
 };
 
-const WATCH_DIRECTORY_FUNC_ID: FuncId = FuncId::from_u128(0x1318c24c2ac74a9aa454281bdbdc4ffc);
+const WATCH_DIRECTORY_FUNC_ID: FuncId =
+    FuncId::from_u128(0x1318_c24c_2ac7_4a9a_a454_281b_dbdc_4ffc);
 
 /// Per-node state shared between the func lambda (which builds the OS watcher)
 /// and the `changed` event lambda (which awaits the next notification).

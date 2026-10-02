@@ -3,7 +3,6 @@
 
 use std::cmp::Ordering;
 
-use glam::Vec2;
 use palantir::CloseHandle;
 use palantir::prelude::*;
 use scenarium::Func;

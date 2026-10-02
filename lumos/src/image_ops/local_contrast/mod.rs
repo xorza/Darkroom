@@ -48,18 +48,21 @@ impl Default for LocalContrast {
 
 impl LocalContrast {
     /// Set the tile grid count per axis.
+    #[must_use]
     pub fn tiles(mut self, tiles: usize) -> Self {
         self.tiles = tiles;
         self
     }
 
     /// Set the histogram clip limit (`≥ 1`).
+    #[must_use]
     pub fn clip_limit(mut self, clip_limit: f32) -> Self {
         self.clip_limit = clip_limit;
         self
     }
 
     /// Set the CLAHE/original blend in `[0, 1]`.
+    #[must_use]
     pub fn strength(mut self, strength: f32) -> Self {
         self.strength = strength;
         self

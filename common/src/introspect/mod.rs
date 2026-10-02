@@ -95,7 +95,7 @@ macro_rules! impl_integer_value {
         $(
             impl From<$ty> for IntegerValue {
                 fn from(value: $ty) -> Self {
-                    Self::Signed(value as i128)
+                    Self::Signed(i128::try_from(value).expect("i128 holds every signed primitive"))
                 }
             }
 
@@ -115,7 +115,7 @@ macro_rules! impl_integer_value {
         $(
             impl From<$ty> for IntegerValue {
                 fn from(value: $ty) -> Self {
-                    Self::Unsigned(value as u128)
+                    Self::Unsigned(u128::try_from(value).expect("u128 holds every unsigned primitive"))
                 }
             }
 

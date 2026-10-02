@@ -66,13 +66,25 @@ fn from_bayerpat_accepts_case_whitespace_and_the_true_alias() {
 #[test]
 fn from_filters_decodes_the_libraw_word_and_rejects_the_rest() {
     // Standard LibRaw encodings: two bits per position, the 2x2 block repeated across the word.
-    assert_eq!(CfaPattern::from_filters(0x94949494), Some(CfaPattern::Rggb));
-    assert_eq!(CfaPattern::from_filters(0x16161616), Some(CfaPattern::Bggr));
-    assert_eq!(CfaPattern::from_filters(0x61616161), Some(CfaPattern::Grbg));
-    assert_eq!(CfaPattern::from_filters(0x49494949), Some(CfaPattern::Gbrg));
+    assert_eq!(
+        CfaPattern::from_filters(0x9494_9494),
+        Some(CfaPattern::Rggb)
+    );
+    assert_eq!(
+        CfaPattern::from_filters(0x1616_1616),
+        Some(CfaPattern::Bggr)
+    );
+    assert_eq!(
+        CfaPattern::from_filters(0x6161_6161),
+        Some(CfaPattern::Grbg)
+    );
+    assert_eq!(
+        CfaPattern::from_filters(0x4949_4949),
+        Some(CfaPattern::Gbrg)
+    );
     // filters == 0 is monochrome / no CFA; exotic patterns match nothing either.
     assert_eq!(CfaPattern::from_filters(0), None);
-    assert_eq!(CfaPattern::from_filters(0x12345678), None);
+    assert_eq!(CfaPattern::from_filters(0x1234_5678), None);
 }
 
 #[test]

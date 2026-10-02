@@ -24,7 +24,7 @@ fn linear_master() -> LinearImage {
         for x in 0..W {
             let idx = y * W + x;
             let sky = 0.02 + (y as f32 / H as f32) * 0.03;
-            let hash = (idx as u32).wrapping_mul(2654435761) as f32 / u32::MAX as f32;
+            let hash = (idx as u32).wrapping_mul(2_654_435_761) as f32 / u32::MAX as f32;
             let noise = (hash - 0.5) * 0.004;
             r[idx] = sky + noise;
             g[idx] = sky * 0.9 + noise;
@@ -32,7 +32,7 @@ fn linear_master() -> LinearImage {
         }
     }
     for s in 0..400 {
-        let sx = (s as u32).wrapping_mul(2654435761) as usize % W;
+        let sx = (s as u32).wrapping_mul(2_654_435_761) as usize % W;
         let sy = (s as u32).wrapping_mul(40503) as usize % H;
         let idx = sy * W + sx;
         let bright = 0.5 + (s % 50) as f32 * 0.05;
@@ -85,7 +85,7 @@ fn bench_stretch_asinh_kernel_single_thread(b: ::quickbench::Bencher) {
         let scale = 1.0 - 0.1 * channel as f32;
         (0..n_px)
             .map(|i| {
-                let hash = (i as u32).wrapping_mul(2654435761) as f32 / u32::MAX as f32;
+                let hash = (i as u32).wrapping_mul(2_654_435_761) as f32 / u32::MAX as f32;
                 // background-to-star spread, some channels above 1
                 (0.03 + hash * 0.5) * scale
             })

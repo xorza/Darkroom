@@ -8,8 +8,6 @@ pub(crate) mod bayer;
 pub(crate) mod sensor_layout;
 pub(crate) mod xtrans;
 
-use std::mem::size_of;
-
 use crate::io::image::image_dimensions::ImageDimensions;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

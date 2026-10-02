@@ -37,6 +37,7 @@ impl RemoveStars {
     }
 
     /// Tile stride in px; overlap is `WINDOW − stride`.
+    #[must_use]
     pub fn stride(mut self, stride: usize) -> Self {
         self.onnx.stride = stride;
         self

@@ -191,7 +191,7 @@ async fn vanished_frontier_blob_recomputes_instead_of_panicking() {
     let mut g = TestGraph::new();
     g.add("src", |n| n.counted(7i64, &calls));
     g.add("sum", |n| n.sum().cache(CacheMode::Disk));
-    g.add("print", |n| n.records());
+    g.add("print", NodeSpec::records);
     g.wire("src", 0, "sum", 0);
     g.wire("src", 0, "sum", 1);
     g.wire("sum", 0, "print", 0);
@@ -240,7 +240,7 @@ async fn a_both_mode_node_whose_store_failed_republishes_without_recomputing() {
 
     let mut g = TestGraph::new();
     g.add("src", |n| n.counted(7i64, &calls).cache(CacheMode::Both));
-    g.add("print", |n| n.records());
+    g.add("print", NodeSpec::records);
     g.wire("src", 0, "print", 0);
 
     let mut e = TestEngine::over(g).with_disk_store(dir.path());

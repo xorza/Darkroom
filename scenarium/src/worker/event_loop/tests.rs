@@ -1,15 +1,10 @@
 use super::*;
 
-use std::sync::Arc;
-
 use tokio::sync::Notify;
 use tokio::time::{Duration, timeout};
 
-use crate::execution::report::EventTrigger;
 use crate::graph::func::event::EventLambda;
-use crate::graph::identity::{EventPort, NodeId};
 use crate::runtime::shared_any_state::SharedAnyState;
-use crate::worker::pause_gate::PauseGate;
 
 /// Start an event loop with a single lambda as its only trigger, on a fresh
 /// `NodeId` — the shape most `start_event_loop` tests want when they only

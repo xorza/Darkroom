@@ -6,7 +6,6 @@
 //! [`SpillDirectory`](crate::stacking::frame_store::spill_directory::SpillDirectory), which decides
 //! whether they outlive the run.
 
-use std::mem::size_of;
 use std::path::{Path, PathBuf};
 
 use arrayvec::ArrayVec;

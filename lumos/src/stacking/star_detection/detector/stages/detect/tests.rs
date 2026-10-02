@@ -1,6 +1,5 @@
 use crate::math::urect::URect;
 use crate::stacking::star_detection::detector::stages::detect::*;
-use crate::stacking::star_detection::labeling::LabelMap;
 use crate::testing::prelude::*;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 

@@ -998,8 +998,8 @@ fn homography_with_noise_and_partial_overlap() {
     let ref_stars = generate_random_stars(150, 2000.0, 2000.0, 40003, FWHM_LOOSE);
 
     let dx = 600.0; // 30% shift = 70% overlap
-    let h6 = 0.000015;
-    let h7 = 0.000008;
+    let h6 = 0.000_015;
+    let h7 = 0.000_008;
 
     let homography_params = [1.0, 0.0, dx, 0.0, 1.0, 0.0, h6, h7];
     let target_stars = apply_homography(&ref_stars, homography_params);

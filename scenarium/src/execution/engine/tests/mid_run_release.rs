@@ -1,7 +1,6 @@
 use super::*;
 
 use std::any::Any;
-use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 
 use crate::async_lambda;

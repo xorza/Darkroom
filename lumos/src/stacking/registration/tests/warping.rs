@@ -7,7 +7,6 @@
 //! - All `TransformType` variants (Translation, Euclidean, Similarity, Affine, Homography)
 //! - All `InterpolationMethod` variants (Nearest, Bilinear, Bicubic, Lanczos2/3/4)
 
-use crate::ImageDimensions;
 use crate::stacking::registration::config::{self, InterpolationMethod, WarpParams};
 use crate::stacking::registration::resample::{self, internals};
 use crate::stacking::registration::tests::helpers;

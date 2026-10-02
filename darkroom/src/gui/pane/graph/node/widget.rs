@@ -1,6 +1,5 @@
 //! One node's body: the widget that records it, and what recording it reports.
 
-use glam::Vec2;
 use palantir::prelude::*;
 
 use crate::core::edit::graph_intent::GraphIntent;

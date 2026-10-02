@@ -1,11 +1,9 @@
 //! Tests for multi-threshold deblending.
 
-use crate::math::urect::URect;
 use crate::stacking::star_detection::deblend::internals::{
     TestComponent, deblend_multi_threshold_test, make_test_component,
 };
 use crate::stacking::star_detection::deblend::multi_threshold::*;
-use crate::stacking::star_detection::labeling::LabelMap;
 use crate::testing::prelude::*;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 

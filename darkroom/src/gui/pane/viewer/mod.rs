@@ -27,7 +27,6 @@ mod glyph;
 use scenarium::NodeId;
 use std::fmt::Display;
 
-use glam::{UVec2, Vec2};
 use palantir::prelude::*;
 use palantir::widget::Shape;
 use palantir::{ImageDownsample, ImageFilter, ImageFit, ImageHandle, ZoomFactor};
@@ -500,14 +499,13 @@ fn pane_wid(node_id: NodeId) -> WidgetId {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     use imaginarium::ColorFormat;
     use palantir::internals::UiHarness;
 
     use crate::core::document::harness::DocFixture;
     use crate::core::preview::preview_func;
-    use crate::gui::state::preview_store::PreviewStore;
-    use crate::gui::state::preview_store::error::PreviewImageError;
     use crate::gui::state::preview_store::internals::opaque_image_value;
 
     /// The header line: the fixed head, then the two clauses that come and go
@@ -637,7 +635,7 @@ mod tests {
     fn the_frame_that_first_draws_a_viewer_uploads_and_frames_it() {
         let mut h = UiHarness::arena();
         let mut fixture = DocFixture::default();
-        let node = fixture.add(&preview_func(Default::default()));
+        let node = fixture.add(&preview_func(Arc::default()));
         let mut store = PreviewStore::default();
         // 2×1 (see `opaque_image_value`) — the full texture keeps the source's
         // own dimensions, so the assertion can name them.

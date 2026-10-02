@@ -140,7 +140,7 @@ impl<const N: usize> NormalEquations<N> {
     pub(super) fn accumulate(
         &mut self,
         model: &(impl LMModel<N> + ?Sized),
-        data: FitData,
+        data: FitData<'_>,
         params: &[f64; N],
         range: Range<usize>,
     ) {
@@ -165,7 +165,7 @@ impl<const N: usize> NormalEquations<N> {
     /// SIMD overrides fall back to when no backend applies or the fit is weighted.
     pub(super) fn from_scalar_pass(
         model: &(impl LMModel<N> + ?Sized),
-        data: FitData,
+        data: FitData<'_>,
         params: &[f64; N],
     ) -> Self {
         let mut equations = Self::zeroed();
@@ -194,7 +194,7 @@ pub(super) trait LMModel<const N: usize> {
     /// Companion to [`NormalEquations::accumulate`] for the gradient-free chi²-only
     /// batch path — see that method's doc for why this is shared rather than
     /// duplicated per model/backend.
-    fn accumulate_chi2(&self, data: FitData, params: &[f64; N], range: Range<usize>) -> f64 {
+    fn accumulate_chi2(&self, data: FitData<'_>, params: &[f64; N], range: Range<usize>) -> f64 {
         let mut chi2 = 0.0f64;
         for i in range {
             let w = data.weight(i);
@@ -219,19 +219,23 @@ pub(super) trait LMModel<const N: usize> {
     /// only under their own `target_arch`, and the sole way to share them is a macro — which
     /// buys ~15 lines at the cost of making an `unsafe` call site expand from something a reader
     /// cannot see.
-    fn batch_build_normal_equations(&self, data: FitData, params: &[f64; N]) -> NormalEquations<N> {
+    fn batch_build_normal_equations(
+        &self,
+        data: FitData<'_>,
+        params: &[f64; N],
+    ) -> NormalEquations<N> {
         NormalEquations::from_scalar_pass(self, data, params)
     }
 
     /// Batch compute chi² — the (weighted) sum of squared residuals.
     /// Default implementation calls `evaluate` per pixel. Override with SIMD under the same
     /// weighted-delegation rule as [`Self::batch_build_normal_equations`].
-    fn batch_compute_chi2(&self, data: FitData, params: &[f64; N]) -> f64 {
+    fn batch_compute_chi2(&self, data: FitData<'_>, params: &[f64; N]) -> f64 {
         self.accumulate_chi2(data, params, 0..data.len())
     }
 
     /// Fit this model to `data` by Levenberg-Marquardt, starting from `initial_params`.
-    fn fit(&self, data: FitData, initial_params: [f64; N], config: &LMConfig) -> LMResult<N> {
+    fn fit(&self, data: FitData<'_>, initial_params: [f64; N], config: &LMConfig) -> LMResult<N> {
         let mut params = initial_params;
         let mut lambda = config.initial_lambda;
         let mut converged = false;

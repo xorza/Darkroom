@@ -379,7 +379,7 @@ fn tps_barrel_distortion() {
     let mut source = Vec::new();
     let mut target = Vec::new();
     let center = DVec2::new(500.0, 500.0);
-    let k = 0.000001; // barrel coefficient
+    let k = 0.000_001; // barrel coefficient
 
     for y in (0..=1000).step_by(100) {
         for x in (0..=1000).step_by(100) {
@@ -659,7 +659,7 @@ fn tps_extreme_coordinates() {
     // target[0] = (100000, 100000) + (-50, -50)*0.05 + (3, -2) = (99997.5 + 3, 99997.5 - 2) = (100000.5, 99995.5)
     // Wait, d*(k*r2) = (-50,-50)*(0.00001*5000) = (-50,-50)*0.05 = (-2.5, -2.5)
     // target[0] = (100000 - 2.5 + 3, 100000 - 2.5 - 2) = (100000.5, 99995.5)
-    let expected_0 = DVec2::new(100000.5, 99995.5);
+    let expected_0 = DVec2::new(100_000.5, 99995.5);
     assert_dvec2_near(target[0], expected_0, 1e-6, "hand-check target[0]");
     let t0 = tps.transform(source[0]);
     assert_dvec2_near(t0, expected_0, 1e-4, "extreme coord point 0");

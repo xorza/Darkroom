@@ -2,7 +2,7 @@ use super::*;
 
 use scenarium::CompiledGraphBuilder;
 use scenarium::FuncId;
-use scenarium::{LogLevel, NodeStatus};
+use scenarium::NodeStatus;
 
 use crate::gui::state::preview_store::StoredContent;
 

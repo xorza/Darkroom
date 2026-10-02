@@ -144,10 +144,10 @@ fn the_split_gate_window_is_where_the_two_entry_points_diverge() {
     );
 
     let values = [1e7f32, 0.001, -1e7, 0.0003, 1e7, 0.001, -1e7, 0.0003];
-    assert_eq!(mean_f32(&values).to_bits(), 967468226);
+    assert_eq!(mean_f32(&values).to_bits(), 967_468_226);
     assert_eq!(
         weighted_mean_f32(&values, &[1.0f32; 8]).to_bits(),
-        967468224
+        967_468_224
     );
 }
 
@@ -156,7 +156,13 @@ fn the_split_gate_window_is_where_the_two_entry_points_diverge() {
 /// 0.472673506 (bits 1056047683).
 #[test]
 fn mean_f32_rounds_once_not_twice() {
-    let values = [0.98646706f32, 0.68272305, 0.3804413, 0.23075151, 0.08298469];
+    let values = [
+        0.986_467_06_f32,
+        0.682_723_05,
+        0.380_441_3,
+        0.230_751_51,
+        0.082_984_69,
+    ];
     let once = mean_f32(&values);
     let twice = (sum_f32(&values) as f32) / values.len() as f32;
     assert_ne!(

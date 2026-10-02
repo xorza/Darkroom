@@ -282,8 +282,6 @@ fn label_wid(id: WidgetId) -> WidgetId {
 mod tests {
     use super::*;
     use crate::gui::theme::Theme;
-    use glam::UVec2;
-    use palantir::Key;
     use palantir::internals::UiHarness;
 
     impl InlineRename<'_> {

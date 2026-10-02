@@ -327,7 +327,7 @@ fn compute_per_color_residual_stats(
     background: &DarkBackground,
     sigma_floor: f32,
 ) -> ArrayVec<ColorStats, 3> {
-    let num_colors = cfa_type.map_or(1, |c| c.num_colors());
+    let num_colors = cfa_type.map_or(1, CfaType::num_colors);
     let mut stats = ArrayVec::new();
 
     for color in 0..num_colors as u8 {

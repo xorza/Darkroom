@@ -354,7 +354,7 @@ fn input_const_only(graph_ctx: GraphCtx<'_>, port: PortRef) -> bool {
     graph_ctx
         .node(port.node_id)
         .and_then(|n| n.input(port.port_idx))
-        .is_some_and(|i| i.const_only())
+        .is_some_and(crate::gui::graph_ctx::input_ctx::InputCtx::const_only)
 }
 
 /// Port currently under the pointer that is a compatible target for `start` —

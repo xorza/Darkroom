@@ -47,7 +47,7 @@ async fn a_replacement_queued_mid_run_is_installed_after_the_running_program() {
             ConstValue::Int(7)
         })
     });
-    graph.add("sink", |node| node.records());
+    graph.add("sink", crate::testing::graph::NodeSpec::records);
     graph.wire("source", 0, "sink", 0);
 
     let mut w = TestWorker::over(graph);

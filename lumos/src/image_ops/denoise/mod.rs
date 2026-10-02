@@ -96,24 +96,28 @@ impl Default for Denoise {
 
 impl Denoise {
     /// Set the wavelet scale count `J`.
+    #[must_use]
     pub fn scales(mut self, scales: usize) -> Self {
         self.scales = scales;
         self
     }
 
     /// Set the threshold in per-scale noise σ.
+    #[must_use]
     pub fn k(mut self, k: f32) -> Self {
         self.k = k;
         self
     }
 
     /// Set hard or soft thresholding.
+    #[must_use]
     pub fn threshold(mut self, threshold: Threshold) -> Self {
         self.threshold = threshold;
         self
     }
 
     /// Set the denoise/original blend in `[0, 1]`.
+    #[must_use]
     pub fn strength(mut self, strength: f32) -> Self {
         self.strength = strength;
         self

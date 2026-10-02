@@ -416,7 +416,7 @@ impl Document {
             .find(node_id)
             .is_some_and(|node| match node.kind {
                 NodeKind::Func(func_id) => preview::is_preview(func_id),
-                _ => false,
+                NodeKind::Special(_) => false,
             })
     }
 
@@ -479,6 +479,7 @@ pub(crate) mod harness;
 mod tests {
     use common::SerdeFormat;
     use scenarium::Node;
+    use std::sync::Arc;
 
     use super::*;
     use crate::core::document::harness::DocFixture;
@@ -495,7 +496,7 @@ mod tests {
     #[test]
     fn node_liveness_is_one_rule_with_two_declared_narrowings() {
         let mut fixture = DocFixture::default();
-        let preview_func = preview::preview_func(Default::default());
+        let preview_func = preview::preview_func(Arc::default());
         fixture.library.add(preview_func.clone());
         let preview = fixture.doc.graph.add(Node::from(&preview_func));
         let plain = fixture.stub_at(Vec2::ZERO);

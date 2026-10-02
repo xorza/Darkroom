@@ -1,5 +1,4 @@
 //! Tests for 2D Gaussian fitting.
-use crate::stacking::star_detection::centroid::stamp::StampGrid;
 use crate::testing::prelude::*;
 use crate::testing::synthetic::patterns;
 

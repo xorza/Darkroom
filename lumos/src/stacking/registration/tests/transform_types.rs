@@ -489,7 +489,7 @@ fn registration_homography_mild_perspective() {
     // Mild perspective: small h6, h7 values
     // Start with identity-like homography and add small perspective
     let h6 = 0.00001;
-    let h7 = 0.000005;
+    let h7 = 0.000_005;
     let dx = 25.0;
     let dy = -18.0;
 
@@ -539,8 +539,8 @@ fn registration_homography_with_rotation() {
     let sin_a = angle_rad.sin();
     let dx = 35.0;
     let dy = -25.0;
-    let h6 = 0.000008;
-    let h7 = 0.000003;
+    let h6 = 0.000_008;
+    let h7 = 0.000_003;
 
     let homography_params = [cos_a, -sin_a, dx, sin_a, cos_a, dy, h6, h7];
     let target_stars = apply_homography(&ref_stars, homography_params);
@@ -652,7 +652,7 @@ fn affine_recovers_from_similarity_data() {
 fn auto_ladder_selects_simplest_adequate_model() {
     // `Auto` must accept the fewest-DOF transform within 0.5 px RMS, not overfit. Each ground
     // truth is built so every simpler model genuinely exceeds the threshold.
-    let ref_stars = generate_random_stars(90, 2000.0, 2000.0, 101010, FWHM_TIGHT);
+    let ref_stars = generate_random_stars(90, 2000.0, 2000.0, 101_010, FWHM_TIGHT);
     let config = Config {
         transform_type: TransformModel::Auto,
         matching: helpers::matching_config(8, 6),
@@ -724,7 +724,7 @@ fn auto_ladder_selects_simplest_adequate_model() {
 fn a_tight_accuracy_gate_climbs_the_ladder_instead_of_failing_on_a_rung() {
     // Anisotropy of 1.2e-3 across a 2000 px field puts Euclidean at ~0.47 px RMS — under the
     // ladder's 0.5 px bar, over a 0.4 px gate — while Affine fits the same set exactly.
-    let ref_stars = generate_random_stars(90, 2000.0, 2000.0, 101010, FWHM_TIGHT);
+    let ref_stars = generate_random_stars(90, 2000.0, 2000.0, 101_010, FWHM_TIGHT);
     let target = apply_affine(&ref_stars, [1.0006, 0.0, 20.0, 0.0, 0.9994, -15.0]);
     let config = Config {
         transform_type: TransformModel::Auto,

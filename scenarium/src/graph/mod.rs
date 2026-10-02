@@ -228,7 +228,7 @@ impl Graph {
             .iter()
             .filter_map(|(dst, binding)| match binding {
                 Binding::Bind(src) => Some((*dst, *src)),
-                _ => None,
+                Binding::Const(_) => None,
             })
     }
     /// Whether binding an output of `producer` into an input on `consumer`

@@ -1,7 +1,7 @@
 use super::*;
 
 use crate::execution::error::RunError;
-use crate::execution::report::{LogEntry, LogLevel, NodeExecutionStatus, NodeStatus};
+use crate::execution::report::LogLevel;
 use crate::graph::identity::{FuncId, NodeId};
 
 /// Publishing a completed run is a move, not a reduction: the rows the run produced

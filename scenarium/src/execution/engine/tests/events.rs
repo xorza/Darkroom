@@ -21,7 +21,7 @@ fn event_pair() -> (TestGraph, Calls) {
     let calls = Calls::default();
     let mut g = TestGraph::new();
     g.add("emit", emitter(&calls));
-    g.add("recv", |n| n.records());
+    g.add("recv", NodeSpec::records);
     g.subscribe("emit", 0, "recv");
     g.wire("emit", 0, "recv", 0);
     (g, calls)
@@ -120,7 +120,7 @@ async fn run_sinks_node_runs_all_sinks_on_event() {
     let mut g = TestGraph::new();
     g.add("emit", emitter(&Calls::default()));
     g.add("source", emitter(&source_calls));
-    g.add("sink", |n| n.records());
+    g.add("sink", NodeSpec::records);
     g.add_special("trigger", SpecialNode::RunSinks);
     // The sink's cone (source → sink) is wholly independent of emit.
     g.wire("source", 0, "sink", 0);

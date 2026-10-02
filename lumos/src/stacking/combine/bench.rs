@@ -21,12 +21,12 @@ fn synth_frame(size: Size2us, frame: u32) -> LinearImage {
     let gain = 1.0 + (frame as f32) * 0.01;
     let mut px = vec![0.0f32; n];
     for (i, p) in px.iter_mut().enumerate() {
-        let hash = (i as u32).wrapping_mul(2654435761) ^ frame.wrapping_mul(40503);
+        let hash = (i as u32).wrapping_mul(2_654_435_761) ^ frame.wrapping_mul(40503);
         let noise = (hash as f32 / u32::MAX as f32 - 0.5) * 0.02;
         *p = (0.2 + noise) * gain + offset;
     }
     for k in 0..(n / 500) {
-        let idx = ((k as u32).wrapping_mul(2246822519) ^ frame) as usize % n;
+        let idx = ((k as u32).wrapping_mul(2_246_822_519) ^ frame) as usize % n;
         px[idx] = 0.95;
     }
     LinearImage::from_planar_channels(ImageDimensions::new(size, 1), [px])

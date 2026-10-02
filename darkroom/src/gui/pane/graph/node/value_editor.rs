@@ -444,8 +444,6 @@ fn int_speed(v: i64) -> f64 {
 mod tests {
     use super::*;
 
-    use glam::{UVec2, Vec2};
-    use palantir::Key;
     use palantir::internals::UiHarness;
 
     use crate::gui::theme::Theme;

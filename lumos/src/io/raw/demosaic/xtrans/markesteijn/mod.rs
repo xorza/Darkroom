@@ -126,7 +126,7 @@ impl DemosaicArena {
 ///
 /// Returns unclipped planar channels `[R, G, B]`, each `width * height`.
 pub(crate) fn demosaic(
-    xtrans: &XTransImage,
+    xtrans: &XTransImage<'_>,
     cancel: &CancelToken,
 ) -> Result<[Vec<f32>; 3], Cancelled> {
     use std::time::Instant;

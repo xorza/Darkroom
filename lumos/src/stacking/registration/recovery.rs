@@ -34,14 +34,11 @@ pub(crate) fn recover_matches(
     inlier_threshold: f64,
     transform_type: TransformType,
 ) -> RecoveredMatches {
-    let target_tree = match KdTree::build(target_stars) {
-        Some(tree) => tree,
-        None => {
-            return RecoveredMatches {
-                transform: *transform,
-                matches: inlier_matches.to_vec(),
-            };
-        }
+    let Some(target_tree) = KdTree::build(target_stars) else {
+        return RecoveredMatches {
+            transform: *transform,
+            matches: inlier_matches.to_vec(),
+        };
     };
 
     let threshold_sq = inlier_threshold * inlier_threshold;

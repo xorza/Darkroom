@@ -263,18 +263,18 @@ mod tests {
     fn theme_roundtrips_through_ron() {
         let mut theme = Theme::default();
         theme.card.min_width = 137.5;
-        theme.colors.text_muted = RgbaF32::hex(0x123456);
-        theme.palantir_theme.window_clear = RgbaF32::hex(0xabcdef);
+        theme.colors.text_muted = RgbaF32::hex(0x0012_3456);
+        theme.palantir_theme.window_clear = RgbaF32::hex(0x00ab_cdef);
 
         let bytes = common::serialize(&theme, SerdeFormat::Ron).expect("serialize theme");
         let back: Theme = common::deserialize(&bytes, SerdeFormat::Ron)
             .expect("theme should deserialize from its own RON output");
 
         assert_eq!(back.card.min_width, 137.5);
-        assert_eq!(back.colors.text_muted, RgbaF32::hex(0x123456));
+        assert_eq!(back.colors.text_muted, RgbaF32::hex(0x0012_3456));
         assert_eq!(back.canvas.bg, theme.canvas.bg);
         // Nested palantir palette round-trips too.
-        assert_eq!(back.palantir_theme.window_clear, RgbaF32::hex(0xabcdef));
+        assert_eq!(back.palantir_theme.window_clear, RgbaF32::hex(0x00ab_cdef));
         // The infinite tooltip-height axis survives `Size`'s serde.
         assert!(back.palantir_theme.tooltip.max_size.h.is_infinite());
         assert_eq!(back.palantir_theme.tooltip.max_size.w, 280.0);

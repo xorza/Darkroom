@@ -74,7 +74,10 @@ impl NodeMenuUi {
             // "Run to this node" shows only when the clicked node can be a
             // run seed (same rule as the header play chip). The body only
             // runs while the menu is open.
-            if graph_ctx.node(node_id).is_some_and(|n| n.runnable()) {
+            if graph_ctx
+                .node(node_id)
+                .is_some_and(crate::gui::graph_ctx::node_ctx::NodeCtx::runnable)
+            {
                 if MenuItem::new("Run to this node")
                     .show(ui, popup)
                     .left

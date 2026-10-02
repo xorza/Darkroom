@@ -1,21 +1,9 @@
-use std::sync::OnceLock;
-
-use crate::io::image::cfa::{CfaImage, CfaType};
+use crate::io::image::cfa::CfaType;
 use crate::memory::ChunkMemoryLayout;
-use crate::stacking::combine::cache::core::{
-    coverage_chunk_memory_layout, weighted_chunk_memory_layout,
-};
-use crate::stacking::combine::cache::sample::CombinedSample;
 use crate::stacking::combine::cache::*;
-use crate::stacking::combine::config::Normalization;
-use crate::stacking::combine::pixel_coverage::PixelCoverage;
 use crate::stacking::combine::rejection::Rejection;
-use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
-use crate::stacking::frame_store::StoredFrame;
 use crate::stacking::frame_store::frame_quality::FramePlane;
 use crate::stacking::frame_store::frame_stats::FrameStats;
-use crate::stacking::stack_product::coverage::Coverage;
-use crate::stacking::stack_product::quality_planes::QualityPlanes;
 use crate::testing::ScratchDirectory;
 use crate::testing::prelude::*;
 

@@ -154,7 +154,7 @@ fn decode_calibrate_demosaic(
             let removed = reject_cosmic_rays(&mut cfa, cr);
             tracing::info!(removed, "rejected cosmic rays");
         } else {
-            tracing::warn!("frame has no CFA pattern; skipping cosmic-ray rejection")
+            tracing::warn!("frame has no CFA pattern; skipping cosmic-ray rejection");
         }
     }
     // Demosaic is the other heavy step; it polls `cancel` internally and bails mid-pass.

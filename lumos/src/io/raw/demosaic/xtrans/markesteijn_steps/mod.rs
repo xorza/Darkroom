@@ -28,7 +28,7 @@ const MARK_INFO_BORDER: usize = 8;
 /// For non-green pixels, scans the first 6 hex neighbors to find
 /// the range of nearby green values. This constrains green interpolation.
 pub(crate) fn compute_green_minmax(
-    xtrans: &XTransImage,
+    xtrans: &XTransImage<'_>,
     hex: &HexLookup,
     gmin: &mut [f32],
     gmax: &mut [f32],
@@ -91,7 +91,7 @@ pub(crate) fn compute_green_minmax(
 ///
 /// The `green_dir` buffer is laid out as [dir * pixels + y * width + x].
 pub(crate) fn interpolate_green(
-    xtrans: &XTransImage,
+    xtrans: &XTransImage<'_>,
     hex: &HexLookup,
     gmin: &[f32],
     gmax: &[f32],
@@ -160,27 +160,30 @@ pub(crate) fn interpolate_green(
                 let n1 = read(h[1].dy, h[1].dx);
                 let n0_2 = read(2 * h[0].dy, 2 * h[0].dx);
                 let n1_2 = read(2 * h[1].dy, 2 * h[1].dx);
-                let color_a = 0.6796875 * (n0 + n1) - 0.1796875 * (n0_2 + n1_2);
+                let color_a = 0.679_687_5 * (n0 + n1) - 0.179_687_5 * (n0_2 + n1_2);
 
                 let n2 = read(h[2].dy, h[2].dx);
                 let n3 = read(h[3].dy, h[3].dx);
                 let same_color_neighbor = read(-h[2].dy, -h[2].dx);
-                let color_b =
-                    0.87109375 * n3 + 0.12890625 * n2 + 0.359375 * (raw_val - same_color_neighbor);
+                let color_b = 0.871_093_75 * n3
+                    + 0.128_906_25 * n2
+                    + 0.359_375 * (raw_val - same_color_neighbor);
 
                 let n4 = read(h[4].dy, h[4].dx);
                 let n4_m2 = read(-2 * h[4].dy, -2 * h[4].dx);
                 let n4_p3 = read(3 * h[4].dy, 3 * h[4].dx);
                 let n4_m3 = read(-3 * h[4].dy, -3 * h[4].dx);
-                let color_c0 =
-                    0.640625 * n4 + 0.359375 * n4_m2 + 0.12890625 * (2.0 * raw_val - n4_p3 - n4_m3);
+                let color_c0 = 0.640_625 * n4
+                    + 0.359_375 * n4_m2
+                    + 0.128_906_25 * (2.0 * raw_val - n4_p3 - n4_m3);
 
                 let n5 = read(h[5].dy, h[5].dx);
                 let n5_m2 = read(-2 * h[5].dy, -2 * h[5].dx);
                 let n5_p3 = read(3 * h[5].dy, 3 * h[5].dx);
                 let n5_m3 = read(-3 * h[5].dy, -3 * h[5].dx);
-                let color_c1 =
-                    0.640625 * n5 + 0.359375 * n5_m2 + 0.12890625 * (2.0 * raw_val - n5_p3 - n5_m3);
+                let color_c1 = 0.640_625 * n5
+                    + 0.359_375 * n5_m2
+                    + 0.128_906_25 * (2.0 * raw_val - n5_p3 - n5_m3);
 
                 let colors = [color_a, color_b, color_c0, color_c1];
                 for (c, &val) in colors.iter().enumerate() {
@@ -206,7 +209,7 @@ fn is_solitary_green(hex: &HexLookup, raw_y: usize, raw_x: usize) -> bool {
 }
 
 #[inline(always)]
-fn active_raw(xtrans: &XTransImage, y: usize, x: usize) -> f32 {
+fn active_raw(xtrans: &XTransImage<'_>, y: usize, x: usize) -> f32 {
     xtrans.read_normalized(y + xtrans.margin.y, x + xtrans.margin.x)
 }
 
@@ -223,7 +226,7 @@ struct SolitaryGreenCandidate {
 
 #[inline(always)]
 fn solitary_green_candidate(
-    xtrans: &XTransImage,
+    xtrans: &XTransImage<'_>,
     green_dir: &[f32],
     green_base: usize,
     y: usize,
@@ -288,7 +291,7 @@ fn solitary_green_candidate(
 
 #[inline(always)]
 fn solitary_green_colors(
-    xtrans: &XTransImage,
+    xtrans: &XTransImage<'_>,
     green_dir: &[f32],
     green_base: usize,
     y: usize,
@@ -487,7 +490,7 @@ fn green_block_colors(
 
 /// Reconstruct directional red/blue candidates in Markesteijn's three geometry stages.
 pub(crate) fn reconstruct_colors(
-    xtrans: &XTransImage,
+    xtrans: &XTransImage<'_>,
     hex: &HexLookup,
     green_dir: &[f32],
     colors: &mut [[f32; 2]],
@@ -592,7 +595,7 @@ pub(crate) fn reconstruct_colors(
 /// For each direction, computes a Laplacian in that direction's offset,
 /// storing the squared derivative magnitude per pixel.
 pub(crate) fn compute_derivatives(
-    xtrans: &XTransImage,
+    xtrans: &XTransImage<'_>,
     green_dir: &[f32],
     colors: &[[f32; 2]],
     drv: &mut [f32],
@@ -739,7 +742,7 @@ pub(crate) fn compute_derivatives(
 /// Pre-compute `YPbPr` values for an entire row, storing results in `out`.
 #[inline(always)]
 fn compute_ypbpr_row(
-    xtrans: &XTransImage,
+    xtrans: &XTransImage<'_>,
     green_dir: &[f32],
     colors: &[[f32; 2]],
     green_base: usize,
@@ -914,7 +917,7 @@ pub(super) struct PlanarRgbMut<'a> {
 /// `out` holds preallocated planar channels, each `active.pixel_count()` long, that the
 /// final RGB is written into.
 pub(crate) fn blend_final(
-    xtrans: &XTransImage,
+    xtrans: &XTransImage<'_>,
     buffers: FinalBlendBuffers<'_>,
     out: PlanarRgbMut<'_>,
 ) {
@@ -974,7 +977,7 @@ pub(crate) fn blend_final(
     demosaic_border(xtrans, out, MARK_INFO_BORDER);
 }
 
-fn demosaic_border(xtrans: &XTransImage, out: PlanarRgbMut<'_>, border: usize) {
+fn demosaic_border(xtrans: &XTransImage<'_>, out: PlanarRgbMut<'_>, border: usize) {
     let PlanarRgbMut {
         r: out_r,
         g: out_g,

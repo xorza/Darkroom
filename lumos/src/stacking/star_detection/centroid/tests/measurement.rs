@@ -1,6 +1,4 @@
 use super::*;
-use crate::stacking::star_detection::centroid::compute_stamp_radius;
-use crate::stacking::star_detection::centroid::stamp::StampGrid;
 
 #[test]
 fn refine_centroid_centered_star() {

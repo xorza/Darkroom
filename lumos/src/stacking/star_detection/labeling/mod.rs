@@ -270,10 +270,10 @@ fn label_strip(
 
         // Store boundary rows
         if y == y_start {
-            result.first_row_runs = curr_runs.clone();
+            result.first_row_runs.clone_from(&curr_runs);
         }
         if y == y_end - 1 {
-            result.last_row_runs = curr_runs.clone();
+            result.last_row_runs.clone_from(&curr_runs);
         }
 
         std::mem::swap(&mut prev_runs, &mut curr_runs);

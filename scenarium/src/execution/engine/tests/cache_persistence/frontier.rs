@@ -16,7 +16,7 @@ async fn explicit_cache_eviction_removes_the_downstream_ram_and_disk_cone() {
     });
     g.add("sum", |n| n.sum().cache(CacheMode::Both));
     g.add("mult", |n| n.mult().cache(CacheMode::Both));
-    g.add("print", |n| n.records());
+    g.add("print", NodeSpec::records);
     g.wire("src_a", 0, "sum", 0);
     g.wire("src_b", 0, "sum", 1);
     g.wire("sum", 0, "mult", 0);
@@ -113,7 +113,7 @@ async fn shared_producer_read_by_a_running_consumer_is_not_cut() {
     let mut g = TestGraph::new();
     g.add("src", |n| n.counted(7i64, &calls));
     g.add("mult", |n| n.mult().cache(CacheMode::Disk));
-    g.add("print_mult", |n| n.records());
+    g.add("print_mult", NodeSpec::records);
     g.instance("print_direct", "print_mult");
     g.wire("src", 0, "mult", 0);
     g.wire("src", 0, "mult", 1);
@@ -159,7 +159,7 @@ async fn chained_disk_cache_hydrates_only_the_live_frontier() {
     g.add("src", |n| n.counted(7i64, &calls));
     g.add("sum", |n| n.sum().cache(CacheMode::Both));
     g.add("mult", |n| n.mult().cache(CacheMode::Both));
-    g.add("print", |n| n.records());
+    g.add("print", NodeSpec::records);
     g.wire("src", 0, "sum", 0);
     g.wire("src", 0, "sum", 1);
     g.wire("sum", 0, "mult", 0);
@@ -240,7 +240,7 @@ async fn stale_ram_value_does_not_mask_a_valid_disk_blob() {
     // function of the two consts.
     let mut g = TestGraph::new();
     g.add("mult", |n| n.mult().cache(CacheMode::Disk));
-    g.add("print", |n| n.records());
+    g.add("print", NodeSpec::records);
     g.constant("mult", 0, 2i64);
     g.constant("mult", 1, 3i64);
     g.wire("mult", 0, "print", 0);
@@ -342,7 +342,7 @@ async fn flush_skips_a_value_stale_for_the_current_digest() {
 
     let mut g = TestGraph::new();
     g.add("mult", |n| n.mult().cache(CacheMode::Both));
-    g.add("print", |n| n.records());
+    g.add("print", NodeSpec::records);
     g.constant("mult", 0, 2i64);
     g.constant("mult", 1, 3i64);
     g.wire("mult", 0, "print", 0);

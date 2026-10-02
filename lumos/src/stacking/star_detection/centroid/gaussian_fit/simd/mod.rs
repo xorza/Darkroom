@@ -24,7 +24,7 @@ mod neon;
 /// unweighted-only.
 pub(super) fn batch_build_normal_equations(
     model: &Gaussian2D,
-    data: FitData,
+    data: FitData<'_>,
     params: &[f64; 6],
 ) -> Option<NormalEquations<6>> {
     if data.weights.is_some() {
@@ -45,7 +45,7 @@ pub(super) fn batch_build_normal_equations(
 /// [`batch_build_normal_equations`].
 pub(super) fn batch_compute_chi2(
     model: &Gaussian2D,
-    data: FitData,
+    data: FitData<'_>,
     params: &[f64; 6],
 ) -> Option<f64> {
     if data.weights.is_some() {

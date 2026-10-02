@@ -1,4 +1,3 @@
-use crate::io::image::null_mask::NullMask;
 use crate::stacking::frame_store::spill::CachedQuality;
 use crate::stacking::frame_store::spill_directory::SpillDirectory;
 use crate::stacking::frame_store::spill_directory::internals::{marker, stale_run_directory};

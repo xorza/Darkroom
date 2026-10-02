@@ -14,7 +14,7 @@ async fn both_value_stays_resident_outside_the_active_frontier() {
     g.add("src", |n| n.counted(1i64, &calls).cache(CacheMode::Ram));
     g.add("sum", |n| n.sum().cache(CacheMode::Both));
     g.add("mult", |n| n.mult().cache(CacheMode::Both));
-    g.add("print", |n| n.records());
+    g.add("print", NodeSpec::records);
     g.wire("src", 0, "sum", 0);
     g.wire("src", 0, "sum", 1);
     g.wire("sum", 0, "mult", 0);
@@ -183,7 +183,7 @@ async fn none_upstream_does_not_disable_downstream_disk_cache() {
     g.add("src", |n| n.counted(1i64, &calls));
     g.add("a", |n| n.sum().cache(CacheMode::None));
     g.add("b", |n| n.mult().cache(CacheMode::Disk));
-    g.add("print", |n| n.records());
+    g.add("print", NodeSpec::records);
     g.wire("src", 0, "a", 0);
     g.wire("src", 0, "a", 1);
     g.wire("a", 0, "b", 0);
@@ -225,7 +225,7 @@ async fn disabling_ram_retention_releases_resident_value_on_install() {
         let dir = TempDir::new(&format!("ram-downgrade-{mode:?}"));
         let mut g = TestGraph::new();
         g.add("mult", |n| n.mult().cache(CacheMode::Ram));
-        g.add("print", |n| n.records());
+        g.add("print", NodeSpec::records);
         g.constant("mult", 0, 2i64);
         g.constant("mult", 1, 3i64);
         g.wire("mult", 0, "print", 0);
@@ -259,7 +259,7 @@ async fn enabling_disk_persists_the_resident_value_without_a_run() {
     let mut g = TestGraph::new();
     g.add("sum", |n| n.sum().cache(CacheMode::Ram));
     g.add("mult", |n| n.mult().cache(CacheMode::Ram));
-    g.add("print", |n| n.records());
+    g.add("print", NodeSpec::records);
     g.constant("sum", 0, 2i64);
     g.constant("sum", 1, 3i64);
     g.wire("sum", 0, "mult", 0);

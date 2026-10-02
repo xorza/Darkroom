@@ -1,7 +1,7 @@
 use crate::testing::synthetic::camera::{BiasField, FlatField, SensorDefects};
 use crate::testing::synthetic::metrics::pixel_stats;
 use crate::testing::synthetic::observe::*;
-use crate::testing::synthetic::scene::{BackgroundField, Scene};
+use crate::testing::synthetic::scene::BackgroundField;
 
 fn argmax_xy(pixels: &[f32], width: usize) -> (usize, usize) {
     let (i, _) = pixels

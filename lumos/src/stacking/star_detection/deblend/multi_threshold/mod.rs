@@ -653,9 +653,8 @@ fn process_higher_level(
     for region in regions.iter() {
         // Find the single parent node for this region
         // (all pixels in a connected region should come from same parent)
-        let parent_idx = match find_single_parent_grid(region, pixel_to_node) {
-            Some(idx) => idx,
-            None => continue, // Skip if no parent or multiple parents
+        let Some(parent_idx) = find_single_parent_grid(region, pixel_to_node) else {
+            continue;
         };
 
         // Rescanning per region rather than bucketing every parent's count in one pass before the

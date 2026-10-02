@@ -143,7 +143,7 @@ fn median_and_mad_odd() {
     assert!((stats.median - 3.0).abs() < 1e-6);
     assert!((stats.mad - 1.0).abs() < 1e-6);
     // 1.4826 × 1.0, the Gaussian rescale MedianMad::sigma applies.
-    assert!((stats.sigma() - 1.4826022).abs() < 1e-6);
+    assert!((stats.sigma() - 1.482_602_2).abs() < 1e-6);
 }
 
 #[test]
@@ -706,7 +706,7 @@ fn absolute_deviation_truth_table() {
 #[test]
 fn mad_to_sigma_known_value() {
     assert_eq!(mad_to_sigma(1.0), MAD_TO_SIGMA as f32);
-    assert_eq!(mad_to_sigma(1.0), 1.4826022f32);
+    assert_eq!(mad_to_sigma(1.0), 1.482_602_2_f32);
 }
 
 /// Stack scratch must give the same answer as heap scratch — the property the separate `ArrayVec`

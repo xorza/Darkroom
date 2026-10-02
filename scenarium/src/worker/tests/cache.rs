@@ -91,7 +91,7 @@ fn disk_cached_graph(calls: &Calls) -> TestGraph {
                 ConstValue::Int(value * value)
             })
     });
-    graph.add("print", |node| node.records());
+    graph.add("print", crate::testing::graph::NodeSpec::records);
     graph.wire("source", 0, "square", 0);
     graph.wire("square", 0, "print", 0);
     graph

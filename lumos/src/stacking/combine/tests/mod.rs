@@ -11,7 +11,6 @@ mod mem_budget_probe;
 #[cfg(feature = "real-data")]
 mod real_data;
 
-use crate::ImageDimensions;
 use crate::stacking::combine::config::{StackConfig, Weighting};
 use crate::stacking::combine::stack::{StackFrame, stack_images};
 use crate::stacking::progress::ProgressCallback;

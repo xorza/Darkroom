@@ -5,11 +5,9 @@ mod matched_filter;
 use crate::testing::prelude::*;
 use std::f32::consts::FRAC_PI_2;
 
+use crate::math::fwhm::FWHM_TO_SIGMA;
 use crate::stacking::star_detection::convolution::*;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use crate::{
-    math::fwhm::FWHM_TO_SIGMA, stacking::star_detection::convolution::elliptical_gaussian_kernel_2d,
-};
 
 #[test]
 fn gaussian_kernel_1d_normalization() {

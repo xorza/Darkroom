@@ -102,7 +102,7 @@ mod tests {
         assert!(!is_close(f64::NAN, 0.0, 1.0));
         // Zero tolerance still admits exact equality.
         assert!(is_close(2.5, 2.5, 0.0));
-        assert!(!is_close(2.5, 2.5000001, 0.0));
+        assert!(!is_close(2.5, 2.500_000_1, 0.0));
     }
 
     #[test]

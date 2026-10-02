@@ -79,36 +79,42 @@ impl Default for ExtractBackground {
 
 impl ExtractBackground {
     /// Set the sample-tile size in px.
+    #[must_use]
     pub fn tile_size(mut self, tile_size: usize) -> Self {
         self.tile_size = tile_size;
         self
     }
 
     /// Set the polynomial degree (1–4).
+    #[must_use]
     pub fn degree(mut self, degree: usize) -> Self {
         self.degree = degree;
         self
     }
 
     /// Set subtract-vs-divide removal.
+    #[must_use]
     pub fn mode(mut self, mode: BackgroundMode) -> Self {
         self.mode = mode;
         self
     }
 
     /// Set the tile-rejection sigma.
+    #[must_use]
     pub fn rejection_sigma(mut self, rejection_sigma: f32) -> Self {
         self.rejection_sigma = rejection_sigma;
         self
     }
 
     /// Set the refit-pass count.
+    #[must_use]
     pub fn iterations(mut self, iterations: usize) -> Self {
         self.iterations = iterations;
         self
     }
 
     /// Set the minimum normalized divisor for [`BackgroundMode::Divide`].
+    #[must_use]
     pub fn divide_floor(mut self, divide_floor: f32) -> Self {
         self.divide_floor = divide_floor;
         self

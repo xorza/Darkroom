@@ -197,7 +197,7 @@ pub(super) fn convolve_2d_row(
     output_row: &mut [f32],
     size: Size2us,
     y: usize,
-    kernel: Kernel2d,
+    kernel: Kernel2d<'_>,
 ) {
     dispatch! {
         x86: avx2_fma => x86::convolve_2d_row_avx2(input, output_row, size, y, kernel),
@@ -214,7 +214,7 @@ fn convolve_2d_row_scalar(
     output_row: &mut [f32],
     size: Size2us,
     y: usize,
-    kernel: Kernel2d,
+    kernel: Kernel2d<'_>,
 ) {
     let radius = kernel.radius() as isize;
     for (x, out_px) in output_row.iter_mut().enumerate() {

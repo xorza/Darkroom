@@ -31,7 +31,7 @@ fn triangle_equilateral_ratios() {
             DVec2::new(0.0, 0.0),
             DVec2::new(10.0, 0.0),
             // height = 10 * sqrt(3)/2 = 8.6602540378...
-            DVec2::new(5.0, 8.660254037844386),
+            DVec2::new(5.0, 8.660_254_037_844_386),
         ],
     )
     .unwrap();
@@ -325,7 +325,7 @@ fn is_similar_with_exact_tolerance_boundary() {
         [
             DVec2::new(0.0, 0.0),
             DVec2::new(10.0, 0.0),
-            DVec2::new(5.0, 8.660254037844386),
+            DVec2::new(5.0, 8.660_254_037_844_386),
         ],
     )
     .unwrap();

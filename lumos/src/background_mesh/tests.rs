@@ -1,4 +1,3 @@
-use crate::background_mesh::tile_stats::TileComponent;
 use crate::background_mesh::workspace::internals::compute_grid;
 use crate::background_mesh::*;
 use crate::math::statistics::mad_to_sigma;
@@ -880,7 +879,7 @@ fn photutils_sextractor_comparison() {
     // Generate pseudo-random noise using deterministic pattern
     let data: Vec<f32> = (0..width * height)
         .map(|i| {
-            let noise = ((i * 7919 + 104729) % 1000) as f32 / 100.0 - 5.0; // -5 to +5
+            let noise = ((i * 7919 + 104_729) % 1000) as f32 / 100.0 - 5.0; // -5 to +5
             1000.0 + noise * 2.0 // background 1000, noise ~10
         })
         .collect();

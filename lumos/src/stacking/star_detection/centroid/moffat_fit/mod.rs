@@ -206,12 +206,16 @@ impl LMModel<5> for MoffatFixedBeta {
         params[3] = params[3].clamp(0.5, self.stamp_radius); // Alpha
     }
 
-    fn batch_build_normal_equations(&self, data: FitData, params: &[f64; 5]) -> NormalEquations<5> {
+    fn batch_build_normal_equations(
+        &self,
+        data: FitData<'_>,
+        params: &[f64; 5],
+    ) -> NormalEquations<5> {
         simd::batch_build_normal_equations(self, data, params)
             .unwrap_or_else(|| NormalEquations::from_scalar_pass(self, data, params))
     }
 
-    fn batch_compute_chi2(&self, data: FitData, params: &[f64; 5]) -> f64 {
+    fn batch_compute_chi2(&self, data: FitData<'_>, params: &[f64; 5]) -> f64 {
         simd::batch_compute_chi2(self, data, params)
             .unwrap_or_else(|| self.accumulate_chi2(data, params, 0..data.len()))
     }

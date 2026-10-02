@@ -7,8 +7,6 @@
 //! wrapper exists to make that drop order a property of the type rather than a
 //! comment on a field: declared after the `Worker`, so it drops after it.
 
-use std::future::Future;
-
 use tokio::runtime::{Builder, Runtime};
 
 /// A dedicated background tokio runtime, held for its `Drop`. Build one with

@@ -5,8 +5,6 @@
 
 use std::fmt::Display;
 
-use glam::Vec2;
-
 use palantir::prelude::*;
 use palantir::widget::Shape;
 use palantir::{FontFamily, ResponseSnapshot, TextInput};

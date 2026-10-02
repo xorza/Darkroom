@@ -231,6 +231,7 @@ mod tests {
     use glam::Vec2;
     use palantir::{DockOp, Key, Modifiers};
     use scenarium::{Func, FuncId, Node, NodeId, NodeKind, testing};
+    use std::sync::Arc;
 
     use crate::alloc_audit;
     use crate::core::document::TabRef;
@@ -275,7 +276,7 @@ mod tests {
     #[test]
     fn a_settled_frame_records_without_allocating() {
         let mut fixture = DocFixture::probes(6);
-        let node = fixture.add(&preview_func(Default::default()));
+        let node = fixture.add(&preview_func(Arc::default()));
         let mut test = SessionHarness::new(fixture);
         test.run_state
             .previews
@@ -304,7 +305,7 @@ mod tests {
     #[test]
     fn a_viewer_opened_by_click_shows_its_image_in_that_same_frame() {
         let mut fixture = DocFixture::default();
-        let node = fixture.add(&preview_func(Default::default()));
+        let node = fixture.add(&preview_func(Arc::default()));
         let mut test = SessionHarness::new(fixture);
         test.run_state
             .previews

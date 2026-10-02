@@ -25,9 +25,8 @@ use crate::stacking::registration::triangle::voting::{
 /// # Returns
 /// Vector of triangles formed from neighboring points
 pub(super) fn form_triangles_kdtree(positions: &[DVec2], k_neighbors: usize) -> Vec<Triangle> {
-    let tree = match KdTree::build(positions) {
-        Some(t) => t,
-        None => return Vec::new(),
+    let Some(tree) = KdTree::build(positions) else {
+        return Vec::new();
     };
 
     let triangle_indices = form_triangles_from_neighbors(&tree, k_neighbors);
@@ -78,9 +77,8 @@ pub(crate) fn match_triangles(
     }
 
     // Build k-d tree on reference triangle invariants for fast lookup
-    let invariant_tree = match build_invariant_tree(&ref_triangles) {
-        Some(t) => t,
-        None => return Vec::new(),
+    let Some(invariant_tree) = build_invariant_tree(&ref_triangles) else {
+        return Vec::new();
     };
 
     // Vote for point correspondences and resolve conflicts

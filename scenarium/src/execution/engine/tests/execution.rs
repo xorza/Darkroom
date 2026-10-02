@@ -22,7 +22,7 @@ async fn simple_compute() {
     g.add("b", shifting_source(Arc::clone(&b)));
     g.add("sum", |n| n.sum().cache(CacheMode::Ram));
     g.add("mult", |n| n.mult().cache(CacheMode::Ram));
-    g.add("print", |n| n.records());
+    g.add("print", NodeSpec::records);
     g.wire("a", 0, "sum", 0);
     g.wire("b", 0, "sum", 1);
     g.wire("sum", 0, "mult", 0);

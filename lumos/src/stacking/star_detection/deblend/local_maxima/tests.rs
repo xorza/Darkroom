@@ -1,14 +1,10 @@
 //! Tests for local maxima deblending.
 
 use crate::math::urect::URect;
-use crate::stacking::star_detection::deblend::assign_to_nearest_peak;
 use crate::stacking::star_detection::deblend::internals::{TestComponent, make_test_component};
 use crate::stacking::star_detection::deblend::local_maxima::*;
-use crate::stacking::star_detection::labeling::LabelMap;
 use crate::testing::prelude::*;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
-
-use crate::stacking::star_detection::deblend::local_maxima::is_local_maximum;
 
 const DEFAULT_MIN_SEPARATION: usize = 3;
 const DEFAULT_MIN_PROMINENCE: f32 = 0.3;

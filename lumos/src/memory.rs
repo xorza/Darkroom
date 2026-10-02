@@ -28,7 +28,7 @@ pub(crate) fn available_memory() -> u64 {
     // `System` behind it is a cache of OS counters with no invariant to corrupt.
     let mut system = SYSTEM
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     system.refresh_memory();
     let available = system.available_memory();
 
