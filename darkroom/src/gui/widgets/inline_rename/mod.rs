@@ -56,7 +56,6 @@ pub(crate) struct InlineRename<'a> {
     name: &'a str,
     style: Option<&'a InlineRenameTheme>,
     max_chars: usize,
-    halign: HAlign,
 }
 
 impl<'a> InlineRename<'a> {
@@ -76,7 +75,6 @@ impl<'a> InlineRename<'a> {
             name,
             style: None,
             max_chars: DEFAULT_MAX_CHARS,
-            halign: HAlign::Left,
         }
     }
 
@@ -116,7 +114,6 @@ impl<'a> InlineRename<'a> {
             name,
             style,
             max_chars,
-            halign,
         } = self;
         // Bound outside the `match` so the flattened fallback outlives
         // the borrow, and built only when the caller supplied no bundle
@@ -129,18 +126,11 @@ impl<'a> InlineRename<'a> {
             &ambient
         };
         // The label sits inside a `MIN_EDIT_WIDTH` panel so short names
-        // still present a clickable target; the parent's main-axis
-        // distribution (`justify`) decides which side the text hugs.
-        let justify = match halign {
-            HAlign::Right => Justify::End,
-            HAlign::Center => Justify::Center,
-            _ => Justify::Start,
-        };
-        // Pin both axes explicitly — TextEdit's single-line default
-        // (`Align::LEFT` = HAlign::Left + VAlign::Center) is sticky in
-        // edit mode, but we also need vertical centering in idle so
+        // still present a clickable target, with the text flush left. Both
+        // axes are pinned — TextEdit's single-line default (`Align::LEFT`)
+        // is sticky in edit mode, but idle needs vertical centering too so
         // the swap doesn't snap glyphs vertically.
-        let text_align = Align::new(halign, VAlign::Center);
+        let text_align = Align::new(HAlign::Left, VAlign::Center);
         // The label's text style: the bundle's resting slot, or ambient
         // when it declines to pin one — `TextEdit` resolves its own the
         // same way, so the two agree across the swap by construction.
@@ -159,22 +149,11 @@ impl<'a> InlineRename<'a> {
         let caret_room = theme.text_edit.caret_width.max(0.0);
         // TextEdit's Hug single-line floor sets `min_size.w = text +
         // padding_horiz + 2 * caret_room` (see palantir
-        // `text_edit/mod.rs::show`), reserving caret slack on *both*
-        // sides so the end-of-line caret never clips on horizontal
-        // scroll. We mirror the same total width on the idle Panel,
-        // but the side that holds the slack has to match where
-        // TextEdit's `align_offset` actually places the glyphs — i.e.
-        // *opposite* the text's leading edge:
-        //   - Left  halign: TE puts text flush at `TE.left + 0`, with
-        //     2·caret_room slack on the right → idle: padding on right.
-        //   - Right halign: TE puts text flush at `TE.right - caret_room`,
-        //     so slack is split caret_room/caret_room → idle: symmetric.
-        // Same total width either way, so the surrounding row doesn't
-        // reshape; the glyph baseline stays put across the swap.
-        let idle_padding = match halign {
-            HAlign::Right | HAlign::Center => Spacing::xy(caret_room, 0.0),
-            _ => Spacing::new(0.0, 0.0, 2.0 * caret_room, 0.0),
-        };
+        // `text_edit/mod.rs::show`) and puts left-aligned text flush at its
+        // left edge, so all of that slack sits on the right. The idle panel
+        // reserves the same, on the same side, so the row keeps its width and
+        // the glyphs stay put across the swap.
+        let idle_padding = Spacing::new(0.0, 0.0, 2.0 * caret_room, 0.0);
         if !ui.state_or_default::<RenameState>(id).active {
             // `DRAG` as well as `CLICK`: the label captures the press
             // (so it can register clicks / double-click-to-edit), but
@@ -189,7 +168,6 @@ impl<'a> InlineRename<'a> {
                 .size((Sizing::HUG, Sizing::HUG))
                 .min_size((MIN_EDIT_WIDTH, line_h))
                 .padding(idle_padding)
-                .justify(justify)
                 // Match TextEdit's single-line vertical centering so
                 // the swap to edit mode doesn't shift the glyph row.
                 .child_align(Align::v(VAlign::Center))
@@ -280,166 +258,4 @@ fn label_wid(id: WidgetId) -> WidgetId {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::gui::theme::Theme;
-    use palantir::internals::UiHarness;
-
-    impl InlineRename<'_> {
-        /// Which edge the name hugs, in both the idle label and the active
-        /// editor. Defaults to [`HAlign::Left`].
-        ///
-        /// The idle label mirrors `TextEdit`'s caret-room reservation on
-        /// whichever side the glyphs *aren't* flush against, so the text
-        /// doesn't shift by a pixel or two on the swap into edit mode — see
-        /// the `idle_padding` derivation in [`InlineRename::show`].
-        ///
-        /// Test-only until a caller wants a non-`Left` rename: `show` has
-        /// always carried the geometry, and the trailing edge is what a
-        /// right-aligned output-port rename needs. Move it back beside the
-        /// other builders when one exists.
-        fn halign(mut self, halign: HAlign) -> Self {
-            self.halign = halign;
-            self
-        }
-    }
-
-    /// `halign` puts the glyphs against the requested edge, and every
-    /// setting leaves the label the same width.
-    ///
-    /// The width half is the anti-twitch contract `idle_padding` exists
-    /// for: the idle label reserves `2 * caret_width` of horizontal slack
-    /// either way, split to match where `TextEdit` will actually put the
-    /// glyphs, so opening the editor can't reflow the row or slide the
-    /// text sideways. Asserted on the panel⇄label pair rather than by eye
-    /// because the offsets are 1.5 px.
-    ///
-    /// `pixel_snap(false)` keeps the arithmetic exact — snapping would
-    /// round the 1.5 px caret slack to a whole pixel and hide which side
-    /// it landed on. Text width never enters the math (only the distance
-    /// from the label's edge to the panel's does), so the mono fallback
-    /// `UiHarness::new` gives is fine.
-    #[test]
-    fn halign_places_the_name_without_changing_the_labels_width() {
-        let theme = Theme::default();
-        // Padding is derived from this, so a zero would make all three
-        // cases identical and the assertions vacuous.
-        let caret = theme.inline_rename.text_edit.caret_width;
-        assert_eq!(caret, 1.5, "the padding math below is written for 1.5");
-
-        // Left  → padding (0, 0, 2*caret, 0), Justify::Start  → flush left.
-        // Right → padding (caret, 0, caret, 0), Justify::End  → right edge
-        //         sits `caret` inside the panel.
-        // Center→ padding (caret, 0, caret, 0), Justify::Center → centered,
-        //         since the padding is symmetric.
-        let mut widths = Vec::new();
-        for (i, halign) in [HAlign::Left, HAlign::Right, HAlign::Center]
-            .into_iter()
-            .enumerate()
-        {
-            let id = WidgetId::from_hash(("rename-halign", i));
-            let mut h = UiHarness::new(UVec2::new(300, 100)).pixel_snap(false);
-            h.frame(|ui| {
-                InlineRename::new("Ab")
-                    .id(id)
-                    .style(&theme.inline_rename)
-                    .halign(halign)
-                    .show(ui);
-            });
-
-            let panel = h.rect(id).expect("label panel arranged");
-            let label = h.rect(label_wid(id)).expect("name text arranged");
-            match halign {
-                HAlign::Left => assert_eq!(
-                    label.min.x, panel.min.x,
-                    "left-aligned name starts at the panel's leading edge",
-                ),
-                HAlign::Right => assert_eq!(
-                    label.max().x,
-                    panel.max().x - caret,
-                    "right-aligned name stops one caret-width short of the \
-                     trailing edge, where TextEdit will draw it",
-                ),
-                HAlign::Center => assert_eq!(
-                    label.center().x,
-                    panel.center().x,
-                    "centred name sits on the panel's midline",
-                ),
-                _ => unreachable!(),
-            }
-            widths.push(panel.size.w);
-        }
-
-        // The three cases differ in *where* the text sits, never in how
-        // much room the label takes — that is what keeps a node header
-        // from reflowing when its title's alignment changes.
-        assert_eq!(
-            widths,
-            vec![widths[0]; 3],
-            "every alignment reserves the same 2 * caret_width of slack",
-        );
-    }
-
-    /// Entering rename selects the whole draft, so the first keystroke
-    /// replaces the name instead of appending to it.
-    ///
-    /// Asserted through the committed value rather than the editor's
-    /// selection range — that's the behaviour the caller sees, and the
-    /// range is palantir-internal anyway. Without `select_all_on_focus`
-    /// the caret sits where the double-click landed and this commits
-    /// some splice of the old name and the new character.
-    #[test]
-    fn entering_edit_mode_selects_the_whole_name() {
-        fn render(ui: &mut Ui, id: WidgetId, theme: &Theme) -> RenameEvent {
-            InlineRename::new("Alpha")
-                .id(id)
-                .style(&theme.inline_rename)
-                .show(ui)
-        }
-
-        let theme = Theme::default();
-        let id = WidgetId::from_hash("rename-select-all");
-        let mut h = UiHarness::new(UVec2::new(300, 100));
-
-        // Lay the label out, then double-click it to open the editor.
-        h.frame(|ui| {
-            render(ui, id, &theme);
-        });
-        let hit = h.rect(id).expect("label arranged").center();
-        h.click_at(hit);
-        h.frame(|ui| {
-            render(ui, id, &theme);
-        });
-        h.click_at(hit);
-        h.frame(|ui| {
-            render(ui, id, &theme);
-        });
-
-        // The editor's first frame: focus lands and the draft selects.
-        h.frame(|ui| {
-            render(ui, id, &theme);
-        });
-
-        // One character replaces the selection outright; the next appends,
-        // which only holds if the draft survived the frame between them —
-        // `show` hands its buffer back to the state row every frame rather
-        // than copying it out.
-        h.key(Key::Char('X'));
-        h.frame(|ui| {
-            render(ui, id, &theme);
-        });
-        h.key(Key::Char('Y'));
-        h.frame(|ui| {
-            render(ui, id, &theme);
-        });
-
-        h.key(Key::Enter);
-        let committed = h.frame_value(|ui| render(ui, id, &theme).committed);
-        assert_eq!(
-            committed.as_deref(),
-            Some("XY"),
-            "the first keystroke must replace the whole name, not splice into \
-             it — and the draft must carry across frames from there",
-        );
-    }
-}
+mod tests;

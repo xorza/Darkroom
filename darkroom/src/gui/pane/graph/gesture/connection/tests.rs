@@ -17,14 +17,25 @@ use crate::gui::pane::graph::node::port_row::port_circle_wid;
 /// Returned beside the fixture rather than looked up out of it: the snap
 /// filter reads the authoring graph to answer its cycle question, so a test
 /// needs to name both ends.
-fn fixture() -> (GraphCtxFixture, NodeId, NodeId) {
+#[derive(Debug)]
+struct Wired {
+    fixture: GraphCtxFixture,
+    producer: NodeId,
+    consumer: NodeId,
+}
+
+fn fixture() -> Wired {
     let mut g = TestGraph::new();
     g.add("producer", NodeSpec::mult);
     g.instance("consumer", "producer");
     g.wire("producer", 0, "consumer", 0);
     let (producer, consumer) = (g.id("producer"), g.id("consumer"));
 
-    (GraphCtxFixture::over(g), producer, consumer)
+    Wired {
+        fixture: GraphCtxFixture::over(g),
+        producer,
+        consumer,
+    }
 }
 
 #[test]
@@ -34,7 +45,9 @@ fn committing_a_same_kind_pair_is_a_broken_invariant_not_a_silent_drop() {
     // same-kind pair reaching the commit means that broke upstream. Dropping
     // it silently would show up as a wire that simply refuses to land, with
     // nothing anywhere saying why.
-    let (_fixture, producer, consumer) = fixture();
+    let Wired {
+        producer, consumer, ..
+    } = fixture();
     let mut out = Requests::default();
     commit_connection(
         PortRef::input(consumer, 0),
@@ -77,7 +90,11 @@ fn a_wire_drops_when_its_start_node_leaves_the_scene() {
     // untyped, which `scan_snap_target` reads as "compatible with
     // anything" — so a stranded wire would snap onto ports it should
     // never accept.
-    let (mut f, producer, _consumer) = fixture();
+    let Wired {
+        fixture: mut f,
+        producer,
+        ..
+    } = fixture();
     let live = PortRef::output(producer, 0);
     assert!(
         prepass_with_wire_from(&mut f, live).is_some(),

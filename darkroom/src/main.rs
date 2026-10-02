@@ -31,12 +31,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![deny(unsafe_code)]
 
-#[cfg(test)]
-#[expect(
-    unsafe_code,
-    reason = "a `GlobalAlloc` is an `unsafe` trait; the audit counts allocations"
-)]
-mod alloc_audit;
 mod core;
 mod gui;
 mod platform;
@@ -144,17 +138,20 @@ fn init_tracing() {
 }
 
 #[cfg(test)]
+#[expect(
+    unsafe_code,
+    reason = "a `GlobalAlloc` is an `unsafe` trait; the audit counts allocations"
+)]
+mod alloc_audit;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn load_icon_decodes_embedded_png() {
-        let rgba = image::load_from_memory(include_bytes!("../assets/icons/darkroom-256.png"))
-            .unwrap()
-            .to_rgba8();
-        assert_eq!(rgba.dimensions(), (256, 256));
-        assert_eq!(rgba.as_raw().len(), 256 * 256 * 4);
-        assert!(load_icon().is_some());
+        let icon = load_icon().expect("the embedded icon decodes");
+        assert_eq!(icon.size(), UVec2::new(256, 256));
     }
 
     #[test]

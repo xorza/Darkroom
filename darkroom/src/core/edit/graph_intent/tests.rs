@@ -237,7 +237,15 @@ fn raising_the_frontmost_item_records_no_step() {
 /// two duplicate tests share, so the only thing that differs between them is
 /// the `include_incoming` flag. `b` also carries a Const on input 1, and `a`
 /// emits to `b`.
-fn crossing_wire() -> (Document, NodeId, NodeId, NodeId) {
+#[derive(Debug)]
+struct CrossingWire {
+    doc: Document,
+    a: NodeId,
+    b: NodeId,
+    c: NodeId,
+}
+
+fn crossing_wire() -> CrossingWire {
     let mut fixture = DocFixture::default();
     let a = fixture.stub_at(Vec2::new(0.0, 0.0));
     let b = fixture.stub_at(Vec2::new(100.0, 0.0));
@@ -251,7 +259,7 @@ fn crossing_wire() -> (Document, NodeId, NodeId, NodeId) {
         .set_input_binding(InputPort::new(b, 2), Binding::bind(c, 0));
     doc.graph.subscribe(a, 0, b);
     doc.main_view.selected = [a, b].into_iter().collect();
-    (doc, a, b, c)
+    CrossingWire { doc, a, b, c }
 }
 
 /// The clone of `b` in a document whose only unselected node is `c`.
@@ -273,7 +281,7 @@ fn clone_of(doc: &Document, origin: Vec2, originals: &BTreeSet<NodeId>) -> NodeI
 /// other edit and undoes as one batch.
 #[test]
 fn duplicate_clones_wiring_and_selects_the_copies() {
-    let (mut doc, a, b, c) = crossing_wire();
+    let CrossingWire { mut doc, a, b, c } = crossing_wire();
     let originals: BTreeSet<NodeId> = [a, b, c].into_iter().collect();
 
     let intents = GraphIntent::duplicate(&doc, false);
@@ -346,7 +354,7 @@ fn duplicate_clones_wiring_and_selects_the_copies() {
 /// difference from the case above, where the same edge is dropped.
 #[test]
 fn duplicate_keeps_external_producers_on_request() {
-    let (mut doc, a, b, c) = crossing_wire();
+    let CrossingWire { mut doc, a, b, c } = crossing_wire();
     let originals: BTreeSet<NodeId> = [a, b, c].into_iter().collect();
 
     let intents = GraphIntent::duplicate(&doc, true);

@@ -22,7 +22,7 @@ use crate::gui::widgets::toolbar::{BUTTON_GAP, Chip, TOOLBAR_MARGIN, pill};
 
 /// The toolbar's chip ids. One graph pane, so each is a fixed hash rather than
 /// keyed by the pane it sits on.
-fn run_button_wid() -> WidgetId {
+pub(crate) fn run_button_wid() -> WidgetId {
     WidgetId::from_hash("darkroom.graph.run_button")
 }
 
@@ -202,14 +202,4 @@ fn draw_show_selected(ui: &mut Ui, s: f32, color: RgbaF32) {
     let inner = s * 0.24;
     let o = (s - inner) * 0.5;
     filled_rect(ui, Rect::new(o, o, inner, inner), s * 0.04, color);
-}
-
-#[cfg(test)]
-pub(crate) mod internals {
-    use super::*;
-
-    /// The run/cancel chip, for the tests that click it.
-    pub(crate) fn run_chip_wid() -> WidgetId {
-        run_button_wid()
-    }
 }

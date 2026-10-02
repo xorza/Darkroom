@@ -15,8 +15,7 @@ pub mod calls;
 pub mod compiled_graph_builder;
 #[cfg(test)]
 pub(crate) mod engine;
-#[cfg(test)]
-pub(crate) mod func_invoker;
+pub mod func_invoker;
 pub mod graph;
 #[cfg(test)]
 pub(crate) mod program;

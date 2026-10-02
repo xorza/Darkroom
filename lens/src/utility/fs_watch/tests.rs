@@ -1,54 +1,55 @@
 use common::TempDir;
 
 use crate::utility::fs_watch::{WATCH_DIRECTORY_FUNC_ID, WatchState, fs_watch_library};
-use scenarium::ConstValue;
-use scenarium::{AnyState, ContextManager, FuncBehavior, FuncLambda};
-use scenarium::{DynamicValue, Invocation, InvokeError, OutputDemand, SharedAnyState};
+use scenarium::testing::func_invoker::FuncInvoker;
+use scenarium::{ConstValue, DynamicValue, Func, FuncBehavior, InvokeError, SharedAnyState};
 use std::fs;
 use std::sync::Arc;
 use tokio::sync::Notify;
 use tokio::task;
 use tokio::time::{Duration, Instant, sleep, timeout};
 
-async fn try_invoke_watch(
-    lambda: &FuncLambda,
-    ctx: &mut ContextManager,
-    state: &mut AnyState,
-    event_state: &SharedAnyState,
-    path: &str,
-    recursive: bool,
-) -> Result<DynamicValue, InvokeError> {
-    let mut inputs = [
-        ConstValue::FsPath(path.to_string()).into(),
-        ConstValue::Bool(recursive).into(),
-        ConstValue::Int(250).into(),
-    ];
-    let demand = [OutputDemand::Produce];
-    let mut outputs = [DynamicValue::Unbound];
-    lambda
-        .invoke(Invocation {
-            ctx,
-            state,
-            event_state,
-            inputs: &mut inputs,
-            demand: &demand,
-            outputs: &mut outputs,
-        })
-        .await?;
-    Ok(outputs[0].clone())
+/// One Watch Directory node, called again and again the way a node runs across
+/// graph runs: its state persists between calls.
+#[derive(Debug)]
+struct WatchNode {
+    func: Func,
+    invoker: FuncInvoker,
 }
 
-async fn invoke_watch(
-    lambda: &FuncLambda,
-    ctx: &mut ContextManager,
-    state: &mut AnyState,
-    event_state: &SharedAnyState,
-    path: &str,
-    recursive: bool,
-) -> DynamicValue {
-    try_invoke_watch(lambda, ctx, state, event_state, path, recursive)
-        .await
-        .unwrap()
+impl WatchNode {
+    fn new() -> WatchNode {
+        WatchNode {
+            func: fs_watch_library()
+                .by_name("Watch Directory")
+                .unwrap()
+                .clone(),
+            invoker: FuncInvoker::default(),
+        }
+    }
+
+    async fn try_call(
+        &mut self,
+        path: &str,
+        recursive: bool,
+        debounce_ms: i64,
+    ) -> Result<DynamicValue, InvokeError> {
+        let inputs = [
+            ConstValue::FsPath(path.to_string()).into(),
+            ConstValue::Bool(recursive).into(),
+            ConstValue::Int(debounce_ms).into(),
+        ];
+        let mut outputs = self.invoker.call(&self.func, inputs).await?;
+        Ok(outputs.remove(0))
+    }
+
+    async fn call(&mut self, path: &str, recursive: bool) -> DynamicValue {
+        self.try_call(path, recursive, 250).await.unwrap()
+    }
+
+    fn event_state(&self) -> SharedAnyState {
+        self.invoker.event_state()
+    }
 }
 
 async fn stored_signal(event_state: &SharedAnyState) -> Option<Arc<Notify>> {
@@ -116,22 +117,10 @@ fn classifies_filesystem_event_kinds() {
 async fn passes_directory_through_and_seeds_watcher() {
     let dir = TempDir::new("lens-watch");
     let dir_str = dir.path().to_str().unwrap();
-    let lib = fs_watch_library();
-    let func = lib.by_name("Watch Directory").unwrap();
+    let mut node = WatchNode::new();
+    let event_state = node.event_state();
 
-    let mut ctx = ContextManager::default();
-    let mut state = AnyState::default();
-    let event_state = SharedAnyState::default();
-
-    let out = invoke_watch(
-        &func.lambda,
-        &mut ctx,
-        &mut state,
-        &event_state,
-        dir_str,
-        true,
-    )
-    .await;
+    let out = node.call(dir_str, true).await;
     assert_eq!(out.as_fs_path(), Some(dir_str));
 
     let guard = event_state.lock().await;
@@ -144,34 +133,14 @@ async fn passes_directory_through_and_seeds_watcher() {
 async fn reuses_watcher_until_params_change() {
     let dir = TempDir::new("lens-watch");
     let dir_str = dir.path().to_str().unwrap();
-    let lib = fs_watch_library();
-    let func = lib.by_name("Watch Directory").unwrap();
+    let mut node = WatchNode::new();
+    let event_state = node.event_state();
 
-    let mut ctx = ContextManager::default();
-    let mut state = AnyState::default();
-    let event_state = SharedAnyState::default();
-
-    invoke_watch(
-        &func.lambda,
-        &mut ctx,
-        &mut state,
-        &event_state,
-        dir_str,
-        true,
-    )
-    .await;
+    node.call(dir_str, true).await;
     let sig1 = stored_signal(&event_state).await.unwrap();
 
     // Same params on re-run: the watcher must be kept, not rebuilt.
-    invoke_watch(
-        &func.lambda,
-        &mut ctx,
-        &mut state,
-        &event_state,
-        dir_str,
-        true,
-    )
-    .await;
+    node.call(dir_str, true).await;
     let sig2 = stored_signal(&event_state).await.unwrap();
     assert!(
         Arc::ptr_eq(&sig1, &sig2),
@@ -179,15 +148,7 @@ async fn reuses_watcher_until_params_change() {
     );
 
     // Flipping `recursive` must rebuild the watcher with the new mode.
-    invoke_watch(
-        &func.lambda,
-        &mut ctx,
-        &mut state,
-        &event_state,
-        dir_str,
-        false,
-    )
-    .await;
+    node.call(dir_str, false).await;
     let sig3 = stored_signal(&event_state).await.unwrap();
     assert!(
         !Arc::ptr_eq(&sig2, &sig3),
@@ -199,23 +160,50 @@ async fn reuses_watcher_until_params_change() {
     drop(guard);
 }
 
+/// The debounce input reaches the watcher, and changing it alone retunes the
+/// live watcher in place rather than rebuilding its OS watch. A negative
+/// debounce is none.
+#[tokio::test]
+async fn debounce_input_retunes_the_live_watcher() {
+    let dir = TempDir::new("lens-watch");
+    let dir_str = dir.path().to_str().unwrap();
+    let mut node = WatchNode::new();
+    let event_state = node.event_state();
+    let debounce = || async {
+        let guard = event_state.lock().await;
+        let watch = guard.get::<WatchState>().unwrap();
+        (Arc::clone(&watch.signal), watch.debounce)
+    };
+
+    node.try_call(dir_str, true, 250).await.unwrap();
+    let (first, at_250) = debounce().await;
+    assert_eq!(at_250, Duration::from_millis(250));
+
+    node.try_call(dir_str, true, 40).await.unwrap();
+    let (second, at_40) = debounce().await;
+    assert_eq!(at_40, Duration::from_millis(40));
+    assert!(
+        Arc::ptr_eq(&first, &second),
+        "a debounce change keeps the watcher"
+    );
+
+    node.try_call(dir_str, true, -5).await.unwrap();
+    assert_eq!(debounce().await.1, Duration::ZERO);
+}
+
 #[tokio::test(start_paused = true)]
 async fn empty_path_skips_watcher_and_event_parks() {
-    let lib = fs_watch_library();
-    let func = lib.by_name("Watch Directory").unwrap();
+    let mut node = WatchNode::new();
+    let event_state = node.event_state();
 
-    let mut ctx = ContextManager::default();
-    let mut state = AnyState::default();
-    let event_state = SharedAnyState::default();
-
-    let out = invoke_watch(&func.lambda, &mut ctx, &mut state, &event_state, "", true).await;
+    let out = node.call("", true).await;
     assert_eq!(out.as_fs_path(), Some(""));
     assert!(event_state.lock().await.get::<WatchState>().is_none());
 
     // Without a watcher the `changed` event must park forever, not panic.
     let fired = timeout(
         Duration::from_millis(200),
-        func.events[0].event_lambda.invoke(event_state.clone()),
+        node.func.events[0].event_lambda.invoke(event_state.clone()),
     )
     .await;
     assert!(fired.is_err(), "event must not fire without a watcher");
@@ -228,25 +216,13 @@ async fn empty_path_skips_watcher_and_event_parks() {
 async fn clearing_path_tears_down_previous_watcher() {
     let dir = TempDir::new("lens-watch");
     let dir_str = dir.path().to_str().unwrap();
-    let lib = fs_watch_library();
-    let func = lib.by_name("Watch Directory").unwrap();
+    let mut node = WatchNode::new();
+    let event_state = node.event_state();
 
-    let mut ctx = ContextManager::default();
-    let mut state = AnyState::default();
-    let event_state = SharedAnyState::default();
-
-    invoke_watch(
-        &func.lambda,
-        &mut ctx,
-        &mut state,
-        &event_state,
-        dir_str,
-        true,
-    )
-    .await;
+    node.call(dir_str, true).await;
     assert!(event_state.lock().await.get::<WatchState>().is_some());
 
-    invoke_watch(&func.lambda, &mut ctx, &mut state, &event_state, "", true).await;
+    node.call("", true).await;
     assert!(
         event_state.lock().await.get::<WatchState>().is_none(),
         "the stale watcher must be dropped with its OS watch"
@@ -256,57 +232,26 @@ async fn clearing_path_tears_down_previous_watcher() {
 #[tokio::test]
 async fn invalid_replacement_drops_previous_watcher() {
     let dir = TempDir::new("lens-watch");
-    let lib = fs_watch_library();
-    let func = lib.by_name("Watch Directory").unwrap();
-    let mut ctx = ContextManager::default();
-    let mut state = AnyState::default();
-    let event_state = SharedAnyState::default();
+    let mut node = WatchNode::new();
+    let event_state = node.event_state();
 
-    invoke_watch(
-        &func.lambda,
-        &mut ctx,
-        &mut state,
-        &event_state,
-        dir.path().to_str().unwrap(),
-        true,
-    )
-    .await;
+    node.call(dir.path().to_str().unwrap(), true).await;
 
     let file = dir.join("not-a-directory.txt");
     fs::write(&file, b"content").unwrap();
-    let error = try_invoke_watch(
-        &func.lambda,
-        &mut ctx,
-        &mut state,
-        &event_state,
-        file.to_str().unwrap(),
-        false,
-    )
-    .await
-    .unwrap_err();
+    let error = node
+        .try_call(file.to_str().unwrap(), false, 250)
+        .await
+        .unwrap_err();
     assert!(error.to_string().contains("watch path is not a directory"));
     assert!(event_state.lock().await.get::<WatchState>().is_none());
 
-    invoke_watch(
-        &func.lambda,
-        &mut ctx,
-        &mut state,
-        &event_state,
-        dir.path().to_str().unwrap(),
-        true,
-    )
-    .await;
+    node.call(dir.path().to_str().unwrap(), true).await;
     let missing = dir.join("missing");
-    let error = try_invoke_watch(
-        &func.lambda,
-        &mut ctx,
-        &mut state,
-        &event_state,
-        missing.to_str().unwrap(),
-        false,
-    )
-    .await
-    .unwrap_err();
+    let error = node
+        .try_call(missing.to_str().unwrap(), false, 250)
+        .await
+        .unwrap_err();
     assert!(
         error
             .to_string()

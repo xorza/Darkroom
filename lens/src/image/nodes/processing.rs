@@ -272,13 +272,45 @@ fn adjust_image(op: ContrastBrightness, value: DynamicValue) -> Image {
 }
 
 #[cfg(test)]
-pub(super) mod internals {
-    use imaginarium::ContrastBrightness;
+mod tests {
+    use imaginarium::{ColorFormat, ContrastBrightness};
     use scenarium::DynamicValue;
 
     use crate::image::Image;
+    use crate::image::nodes::processing::adjust_image;
 
-    pub(crate) fn adjust_image(op: ContrastBrightness, value: DynamicValue) -> Image {
-        super::adjust_image(op, value)
+    #[test]
+    fn adjust_image_runs_in_place_only_for_unique_cpu_inputs() {
+        let desc = imaginarium::ImageDesc::new(9, 4, ColorFormat::RGBA_U8);
+        let op = ContrastBrightness::new(1.5, 0.1);
+        let pattern: Vec<u8> = (0..desc.size_in_bytes())
+            .map(|index| (index % 251) as u8)
+            .collect();
+        let patterned_image = || {
+            let mut image = imaginarium::Image::new_black(desc).unwrap();
+            image.bytes_mut().copy_from_slice(&pattern);
+            image
+        };
+
+        let image = patterned_image();
+        let unique_ptr = image.bytes().as_ptr();
+        let unique = DynamicValue::from_custom(Image::from(image));
+        let adjusted = adjust_image(op, unique);
+        let adjusted_cpu = adjusted.interleaved();
+        assert_eq!(adjusted_cpu.bytes().as_ptr(), unique_ptr);
+        assert_ne!(adjusted_cpu.bytes(), pattern.as_slice());
+
+        let image = patterned_image();
+        let shared_ptr = image.bytes().as_ptr();
+        let shared = DynamicValue::from_custom(Image::from(image));
+        let holder = shared.clone();
+        let adjusted_shared = adjust_image(op, shared);
+        let shared_cpu = adjusted_shared.interleaved();
+        assert_ne!(shared_cpu.bytes().as_ptr(), shared_ptr);
+        let original = holder.as_custom::<Image>().unwrap();
+        let original_cpu = original.interleaved();
+        assert_eq!(original_cpu.bytes().as_ptr(), shared_ptr);
+        assert_eq!(original_cpu.bytes(), pattern.as_slice());
+        assert_eq!(adjusted_cpu.bytes(), shared_cpu.bytes());
     }
 }
