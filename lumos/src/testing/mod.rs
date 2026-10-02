@@ -2,6 +2,7 @@
 
 pub(crate) mod assertions;
 pub(crate) mod cfa;
+mod characterization;
 pub(crate) mod images;
 pub(crate) mod mem_probe;
 pub(crate) mod prelude;
