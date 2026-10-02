@@ -26,13 +26,16 @@ pub(super) unsafe fn interpolate_segment_cubic_neon(
         let one = vdupq_n_f32(1.0);
         let two = vdupq_n_f32(2.0);
         let zero = vdupq_n_f32(0.0);
-        let step4 = vdupq_n_f32(ramp.step * 4.0);
-
-        let offsets: [f32; 4] = [0.0, ramp.step, 2.0 * ramp.step, 3.0 * ramp.step];
-        let mut t_v = vaddq_f32(vdupq_n_f32(ramp.start), vld1q_f32(offsets.as_ptr()));
+        let start = vdupq_n_f32(ramp.start);
+        let step = vdupq_n_f32(ramp.step);
+        let lane_offsets: [f32; 4] = [0.0, 1.0, 2.0, 3.0];
+        let lanes = vld1q_f32(lane_offsets.as_ptr());
 
         let mut i = 0;
         while i + 4 <= len {
+            // `start + i·step` per lane, as `SegmentRamp::t_at` rounds it (see the AVX2 kernel).
+            let index = vaddq_f32(vdupq_n_f32(i as f32), lanes);
+            let t_v = vaddq_f32(start, vmulq_f32(index, step));
             let t = vminq_f32(vmaxq_f32(t_v, zero), one);
             let ct = vsubq_f32(one, t);
 
@@ -51,7 +54,6 @@ pub(super) unsafe fn interpolate_segment_cubic_neon(
             let n_result = vsubq_f32(n_linear, vmulq_f32(t_ct, n_cubic));
             vst1q_f32(noise_out.as_mut_ptr().add(i), n_result);
 
-            t_v = vaddq_f32(t_v, step4);
             i += 4;
         }
 

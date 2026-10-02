@@ -57,49 +57,6 @@ pub(crate) fn normalize_u16_to_f32_into<const CLAMP: bool>(
 mod tests {
     use crate::io::raw::normalize::*;
 
-    /// Pure-scalar reference for cross-checking the SIMD kernels.
-    fn scalar_ref<const CLAMP: bool>(data: &[u16], black: f32, span: f32) -> Vec<f32> {
-        data.iter()
-            .map(|&v| normalize_one::<CLAMP>(v, black, span))
-            .collect()
-    }
-
-    #[test]
-    fn simd_matches_scalar() {
-        // The dispatched kernel (NEON on aarch64, SSE4.1/SSE2 on x86) uses the same IEEE ops as
-        // the scalar form, so results must be bit-identical for both the clamped (light) and
-        // unclamped (calibration) paths. Values span zero, below-black, at-black, mid, max, and
-        // above-max; the length is deliberately not a multiple of 4 so the remainder path runs.
-        let black = 512.0;
-        let span = 16383.0 - 512.0;
-        let mut data: Vec<u16> = vec![
-            0, 1, 256, 511, 512, 513, 1000, 8191, 16383, 16384, 60000, 65535,
-        ];
-        for i in 0..39u16 {
-            data.push(i.wrapping_mul(421));
-        }
-        assert!(
-            !data.len().is_multiple_of(4),
-            "length must exercise the SIMD remainder path"
-        );
-
-        let mut simd_clamped = vec![0.0f32; data.len()];
-        normalize_u16_to_f32_into::<true>(&data, &mut simd_clamped, black, span);
-        assert_eq!(
-            simd_clamped,
-            scalar_ref::<true>(&data, black, span),
-            "clamped SIMD must match scalar"
-        );
-
-        let mut simd_unclamped = vec![0.0f32; data.len()];
-        normalize_u16_to_f32_into::<false>(&data, &mut simd_unclamped, black, span);
-        assert_eq!(
-            simd_unclamped,
-            scalar_ref::<false>(&data, black, span),
-            "unclamped SIMD must match scalar"
-        );
-    }
-
     /// Every 14-bit sample normalizes to the correctly rounded quotient `(value − black) / span`:
     /// the f64 quotient of two integers below 2^24, rounded once to f32. Multiplying by an f32
     /// `1 / span` instead rounds twice; for black 1023 and span 15360 that misses the quotient on

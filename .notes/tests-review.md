@@ -133,46 +133,8 @@ Paths are relative to the repository root.
 - [ ] `darkroom/src/gui/pane/viewer/camera.rs:83-90`, `:106-111` — the "on a 2x display … physical px" cases never pass a scale factor, because `fit_viewport` and `zoom_about_pane_center` take none. These are the same logical-space computation on a smaller image, labelled as DPI coverage. Rewrite the comments to say what is computed, or test the scale path where it actually lives.
 - [ ] `darkroom/src/gui/pane/graph/gesture/new_node/tests.rs:69-76` — the same doc paragraph appears twice on `assert_fits`.
 
-## The test harness breaks its own contracts
-A harness helper does something other than what its doc promises. Every test built on it inherits the wrong result.
-
-### lumos — shared harness, calibration, pipeline, frame_store
-Paths are relative to the repository root.
-
-- [ ] `lumos/src/testing/mod.rs:84-86` — `TestRng::next_f32` is documented `[0, 1)` but can return exactly `1.0`. `(next_u64() >> 33) as f32` rounds any value above `2^31 − 64` up to `2^31`, so ~63 of 2^31 states give `1.0` (checked: `f32(2^31−63)/2^31 == 1.0`). `lumos/src/testing/synthetic/artifacts.rs:29` hides this behind an `if x < width && y < height` guard that can only fail for this reason, and it silently drops the cosmic ray, so `positions.len() < count`. Fix: `(next_u64() >> 40) as f32 * 2^-24`, then delete the guard.
-- [ ] `lumos/src/testing/mod.rs:153-161,198-210` — `calibration_image_paths` returns `Option` for a missing subdirectory, but it first calls `calibration_dir()`, which asserts that the dataset exists. It is also not gated on `real-data`. Its only non-`real-data` caller, `lumos/src/io/raw/bench.rs:16-20`, has a "No calibration images found, skipping" branch that can never run: without the dataset it panics. `lumos/src/stacking/calibration_masters/real_data_tests.rs:40-57` makes the same false promise ("`None` if the dataset directory is absent"). Fix: one real-data path API under `testing/real_data/`, gated, with one stated contract (skip or panic).
-- [ ] `lumos/src/testing/real_data/pipeline_bench.rs:136-143,207-213,249-253` — the `bench_full_pipeline` "benchmark" writes `calibrated_lights/` and `registered_lights/` into `test_data/lumos_data` and overwrites `stacked_light.tiff`. Eight real-data tests and benches read that file as their input fixture (`image_ops/{background_extraction,color_calibration,denoise,stretching}/tests/real_data.rs`, `image_ops/bench.rs`, `stacking/combine/tests/real_data.rs`, `testing/real_data/milky_way.rs`, `testing/real_data/mod.rs:57`). So their fixture is whatever the last bench run produced from whatever code was checked out. Fix: the bench writes to a temp or `test_output` dir; the fixture stays immutable dataset content.
-- [ ] `lumos/scripts/fetch-test-data.sh:32-39` vs `lumos/src/testing/real_data/mod.rs:38-40` — `onnx_weights` defaults to `test_data/<file>.onnx`, and the script treats any non-empty `test_data/` as "already populated". If a user drops the weights in first, the dataset is never fetched. `--force` does `rm -rf test_data`, which deletes the user's weights. Fix: check for `test_data/lumos_data`, not `test_data/`, and scope `--force` to it.
-- [ ] `lumos/src/testing/synthetic/observe/mod.rs:131-135` vs `lumos/src/testing/synthetic/camera/mod.rs:138` — the doc says dead pixels are "forced to ~zero response", but `render` sets `raw = 0.0` *after* the bias is added. A dead pixel therefore reads below the bias pedestal, and is negative after bias subtraction. `observe/tests.rs:333-334` pins that behaviour ("applied after bias"). Zero response means the pixel reads `bias (+ read noise)`. Also, the documented layer order (`observe/mod.rs:4-6`: "dark current → bias → read noise") does not match the code (read noise at step "5+6+8", then bias at step "7"; step 10 is missing).
-- [ ] `lumos/src/testing/synthetic/gallery/mod.rs:493-494` — "Touch a buffer so the dir exists" allocates a 1×1 `Buffer2` and creates no directory. `test_output_path` already made the parent. It is a dead line with a false comment.
-
 ## Nondeterministic and environment-dependent tests
 Unseeded randomness, wall-clock waits, fixed shared paths and host-specific state make a result unrepeatable or let a broken path pass.
-
-## SIMD and GPU backends without an exact cross-check on the host that runs the tests
-The tests compare only the dispatched backend, or nothing at all. On an AVX2 host the SSE kernels, and without a GPU every GPU test, never run against the scalar reference.
-
-### lumos — shared harness, calibration, pipeline, frame_store
-Paths are relative to the repository root.
-
-- [ ] `lumos/src/testing/simd_check.rs:7-10,36-37` — it claims "Adding one here covers every kernel at once" and names the background interpolator and resample as clients. Only `convolution/simd/tests.rs` and `median_filter/simd/tests.rs` call `assert_simd_matches_scalar`. `background/simd/tests.rs`, `registration/resample/row/simd/x86/tests.rs`, `convolution/simd/x86/tests.rs` and `median_filter/simd/x86/tests.rs` each roll their own scalar-vs-SIMD loop.
-
-### lumos — star_detection
-Short paths are relative to `lumos/src/stacking/star_detection/`.
-
-- [ ] `lumos/src/stacking/star_detection/background/simd/mod.rs:79` (`sse41::interpolate_segment_cubic_sse`) and `convolution/simd/mod.rs:204` (`x86::convolve_2d_row_sse41`) — on any AVX2 host (every dev and CI machine) these are never executed. The tests compare only the dispatched entry point against scalar (`background/simd/tests.rs:34`, `convolution/simd/tests.rs:480-663`). `threshold_mask/simd/tests.rs:108-126` and `convolution/simd/x86/tests.rs` show the per-backend pattern to copy.
-- [ ] SIMD cross-checks that bypass `assert_simd_matches_scalar` and `DATA_SHAPES`/`SWEEP_WIDTHS`: `background/simd/tests.rs:34` (one parameter set, absolute 1e-4 on values of 100-200; the harness doc names "the background interpolator" as its intended caller), the column and 2D tests in `convolution/simd/tests.rs:326-663` and `x86/tests.rs`, and `median_filter/simd/x86/tests.rs`. `centroid/gaussian_fit/simd/avx2.rs:351,386`, `convolution/simd/x86/tests.rs:8,41,74,129`, `threshold_mask/simd/tests.rs:111,121` and `median_filter/simd/x86/tests.rs:11,71,125,157` also `return` silently when a feature is missing, so they report a pass.
-
-### lumos — registration
-Paths are relative to `lumos/src/stacking/registration/`.
-
-- [ ] `resample/row/tests.rs:171-210`, `x86/tests.rs`, `simd/neon.rs:183-279` — these tests hand-roll width lists and a single `diagonal_gradient` input. `testing/simd_check.rs` already provides `SWEEP_WIDTHS`, `DATA_SHAPES` and `assert_simd_matches_scalar`, and its module doc names resample as an intended caller; registration does not use it.
-
-### lumos — io, math, image_ops, background_mesh, bit_buffer2
-Paths are relative to the repository root.
-
-- [ ] `lumos/src/io/raw/normalize/mod.rs:65` — `simd_matches_scalar` checks only the dispatched backend. On every SSE4.1 host, `sse2::normalize_chunk_sse2` (`normalize/simd/sse2.rs`) is never executed. Call each x86 backend directly (SSE2 is baseline on x86_64), at several lengths below and around the 4-lane boundary.
-- [ ] `lumos/src/image_ops/stretching/simd/avx2.rs:141` and `neon.rs:139` — the 19-pixel fixture and comparison loop are copied verbatim, and they cover a single width. Write one cross-check in `simd/mod.rs` comparing `asinh_color_preserve` against `asinh_color_preserve_scalar` through `testing::simd_check::assert_simd_matches_scalar`, which supplies `DATA_SHAPES × SWEEP_WIDTHS`: widths below 8, exact multiples, tails.
 
 ## Loose tolerances where the exact answer is known
 Deterministic, often noiseless fixtures are asserted with bands that have no stated reason. A regression of the size of the band passes. In some cases the band hides a production bug.

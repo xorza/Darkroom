@@ -42,3 +42,6 @@ fn normalize_chunk_scalar<const CLAMP: bool>(
         *out = normalize_one::<CLAMP>(val, black, span);
     }
 }
+
+#[cfg(test)]
+mod tests;

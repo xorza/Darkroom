@@ -9,9 +9,6 @@ use std::arch::x86_64::*;
 use crate::stacking::registration::resample::kernel;
 use crate::stacking::registration::transform::Transform;
 
-#[cfg(test)]
-mod tests;
-
 /// Warp a row using AVX2 SIMD with bilinear interpolation.
 ///
 /// Processes 8 output pixels at a time.

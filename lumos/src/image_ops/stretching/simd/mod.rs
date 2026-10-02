@@ -74,3 +74,6 @@ fn asinh_color_preserve_scalar(
         *b = out.b;
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -364,7 +364,7 @@ mod tests {
     #[test]
     fn simd_exp_fast_gaussian_range() {
         for i in 0..1000 {
-            let x = -(i as f64) * 0.5;
+            let x = -f64::from(i) * 0.5;
             let result = unsafe {
                 let v = vdupq_n_f64(x);
                 let r = simd_exp_fast(v);

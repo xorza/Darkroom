@@ -376,6 +376,3 @@ pub(super) unsafe fn convolve_2d_row_sse41(
         }
     }
 }
-
-#[cfg(test)]
-mod tests;
