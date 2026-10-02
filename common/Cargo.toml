@@ -20,7 +20,6 @@ thiserror = { workspace = true }
 serde = { workspace = true }
 ron = { workspace = true }
 bitcode = { workspace = true }
-lz4_flex = { workspace = true }
 tokio = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]

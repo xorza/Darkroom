@@ -16,12 +16,12 @@
 
 use std::path::{Path, PathBuf};
 
-use common::{CancelToken, file_utils};
+use common::CancelToken;
 
 use crate::io::image::linear::LinearImage;
 use crate::io::raw::load_raw_cfa;
 
-use crate::io::raw::RAW_EXTENSIONS;
+use crate::io::raw::raw_files;
 
 mod milky_way;
 mod pipeline_bench;
@@ -49,8 +49,8 @@ pub(crate) fn dataset_path(name: &str) -> PathBuf {
 /// The camera-RAW frames of a dataset subdirectory (`Lights`, `Darks`, `Flats`, `Bias`), at
 /// least one, in name order.
 pub(crate) fn raw_frames(subdir: &str) -> Vec<PathBuf> {
-    let frames = file_utils::files_with_extensions(&dataset_path(subdir), RAW_EXTENSIONS)
-        .expect("scan a real-data RAW directory");
+    let frames =
+        raw_files::raw_files(&dataset_path(subdir)).expect("scan a real-data RAW directory");
     assert!(
         !frames.is_empty(),
         "real-data {subdir}/ holds no RAW frames"

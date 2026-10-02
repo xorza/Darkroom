@@ -2,6 +2,7 @@ pub(crate) mod demosaic;
 mod error;
 mod normalize;
 pub(crate) mod provenance;
+pub(crate) mod raw_files;
 
 use libraw_sys as sys;
 use std::ffi;

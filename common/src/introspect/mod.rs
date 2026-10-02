@@ -24,6 +24,14 @@
 //! let knobs = Knobs::from_fields(&values)?;  // checked typed rebuild
 //! ```
 
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::num::TryFromIntError;
+
+#[cfg(any(test, feature = "introspect-derive"))]
+pub use common_derive::{Introspect, IntrospectEnum};
+
 /// The exact integer type represented by an introspected field.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IntegerKind {
@@ -102,13 +110,14 @@ macro_rules! impl_integer_value {
             }
 
             impl TryFrom<IntegerValue> for $ty {
-                type Error = ();
+                type Error = TryFromIntError;
 
                 fn try_from(value: IntegerValue) -> Result<Self, Self::Error> {
-                    match value {
-                        IntegerValue::Signed(value) => Self::try_from(value).map_err(|_| ()),
-                        IntegerValue::Unsigned(value) => Self::try_from(value).map_err(|_| ()),
-                    }
+                    // `?` lifts the `Infallible` of the same-width conversion.
+                    Ok(match value {
+                        IntegerValue::Signed(value) => Self::try_from(value)?,
+                        IntegerValue::Unsigned(value) => Self::try_from(value)?,
+                    })
                 }
             }
         )+
@@ -122,13 +131,14 @@ macro_rules! impl_integer_value {
             }
 
             impl TryFrom<IntegerValue> for $ty {
-                type Error = ();
+                type Error = TryFromIntError;
 
                 fn try_from(value: IntegerValue) -> Result<Self, Self::Error> {
-                    match value {
-                        IntegerValue::Signed(value) => Self::try_from(value).map_err(|_| ()),
-                        IntegerValue::Unsigned(value) => Self::try_from(value).map_err(|_| ()),
-                    }
+                    // `?` lifts the `Infallible` of the same-width conversion.
+                    Ok(match value {
+                        IntegerValue::Signed(value) => Self::try_from(value)?,
+                        IntegerValue::Unsigned(value) => Self::try_from(value)?,
+                    })
                 }
             }
         )+
@@ -196,11 +206,17 @@ impl IntrospectError {
 }
 
 #[doc(hidden)]
-pub trait IntrospectInteger: Copy + Into<IntegerValue> + TryFrom<IntegerValue, Error = ()> {
+pub trait IntrospectInteger:
+    Copy + Into<IntegerValue> + TryFrom<IntegerValue, Error = TryFromIntError>
+{
     const KIND: IntegerKind;
 
+    #[expect(
+        clippy::map_err_ignore,
+        reason = "a `TryFromIntError` says only that the value does not fit, which the error it becomes states with the field, value and type"
+    )]
     fn from_field_value(field: &'static str, value: IntegerValue) -> Result<Self, IntrospectError> {
-        Self::try_from(value).map_err(|()| IntrospectError::integer(field, value, Self::KIND))
+        Self::try_from(value).map_err(|_| IntrospectError::integer(field, value, Self::KIND))
     }
 }
 
@@ -313,12 +329,6 @@ pub trait IntrospectEnum: Sized {
     fn to_variant(&self) -> &'static str;
     fn from_variant(name: &str) -> Option<Self>;
 }
-
-#[cfg(any(test, feature = "introspect-derive"))]
-pub use common_derive::{Introspect, IntrospectEnum};
-use std::fmt;
-use std::fmt::Display;
-use std::fmt::Formatter;
 
 #[cfg(test)]
 mod tests;
