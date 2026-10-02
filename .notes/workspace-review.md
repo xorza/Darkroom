@@ -231,7 +231,6 @@ Severity: Low — two sources for one fact; the copies already differ in precisi
 Severity: Low — lists kept in step by hand or by a test.
 
 - [ ] Image extensions: lumos `file_extension` lowercases each path's extension into a `String` that `FITS_EXTENSIONS` and `RAW_EXTENSIONS` are then searched for, while the standard formats go through `imaginarium::FileFormat::from_extension`.
-- [ ] lumos io facts spelled twice: `read_selected_image`, `load_cfa_fits` and `fits_cfa_frame_info` each repeat open → cancel → select → preflight, validating the CFA header in different orders; the linear/preview path never calls `validate_cfa_container_format`.
 
 ## Public API, dependencies and derives with no production user
 Severity: Low — removable surface; checked with `rg` across the workspace.

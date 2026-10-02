@@ -17,20 +17,18 @@
 //! single frame in any unit is a legitimate load, and it is combining frames from two of them that
 //! is not.
 
-use std::fs::File;
 use std::path::Path;
 
-use fits_well::FitsReader;
 use fits_well::io::SliceReader;
 
 use crate::io::cancelled::Cancelled;
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
 use crate::io::image::error::ImageError;
-use crate::io::image::fits::cfa::{validate_cfa_container_format, validate_cfa_image_header};
 use crate::io::image::fits::decode::plan::FitsHduDescription;
+use crate::io::image::fits::decode::selected_fits::SelectedFits;
 use crate::io::image::fits::error::{fits_err, fits_unsupported};
 use crate::io::image::fits::metadata::{read_cfa_from_headers, read_quantization_sigma};
-use crate::io::image::fits::options::{FitsChecksumPolicy, FitsCubeInterpretation};
+use crate::io::image::fits::options::FitsCubeInterpretation;
 use crate::io::image::fits::provenance::{FitsChecksumProvenance, FitsChecksumState};
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::ColorProvenance;
@@ -42,6 +40,7 @@ use crate::io::image::standard::scientific_rejection;
 
 mod pixels;
 mod plan;
+mod selected_fits;
 mod selection;
 
 #[derive(Debug)]
@@ -149,68 +148,15 @@ pub(crate) fn load_preview_fits(
 }
 
 fn read_selected_image(path: &Path, context: &LoadContext) -> Result<DecodedFitsImage, ImageError> {
-    context.check_cancelled(path)?;
-    let file = File::open(path).map_err(|source| ImageError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let mut reader = FitsReader::open(file).map_err(|source| fits_err(path, source))?;
-    context.check_cancelled(path)?;
-
-    let selected = selection::select_image_hdu(path, reader.hdus(), &context.fits.hdu)?;
-    let hdu = &reader.hdus()[selected.index];
-    let plan = plan::preflight_fits_image(
-        path,
-        FitsHduDescription::from_hdu(path, hdu)?,
-        context.fits.cube,
-        context.fits.float_scale,
-        context.memory_limit_bytes,
-    )?;
-    let checksum = selection::verify_selected_checksum(
-        &mut reader,
-        selected.index,
-        path,
-        context.fits.checksum,
-        context,
-    )?;
-
-    pixels::read_stream_hdu(&mut reader, selected, checksum, path, plan, context)
+    SelectedFits::open(path, context)?.read(path, context)
 }
 
 pub(crate) fn load_cfa_fits(path: &Path, context: &LoadContext) -> Result<CfaImage, ImageError> {
-    context.check_cancelled(path)?;
-    let file = File::open(path).map_err(|source| ImageError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let mut reader = FitsReader::open(file).map_err(|source| fits_err(path, source))?;
-    context.check_cancelled(path)?;
-    validate_cfa_container_format(path, reader.hdus().first().map(|hdu| &hdu.header))?;
-    let selected = selection::select_image_hdu(path, reader.hdus(), &context.fits.hdu)?;
-    let hdu = &reader.hdus()[selected.index];
-    let plan = plan::preflight_fits_image(
-        path,
-        FitsHduDescription::from_hdu(path, hdu)?,
-        context.fits.cube,
-        context.fits.float_scale,
-        context.memory_limit_bytes,
-    )?;
-    let is_lumos_cfa = validate_cfa_image_header(path, &reader.hdus()[selected.index].header)?;
-    let checksum_policy = if is_lumos_cfa {
-        FitsChecksumPolicy::RequireValid
-    } else {
-        context.fits.checksum
-    };
-    let checksum = selection::verify_selected_checksum(
-        &mut reader,
-        selected.index,
-        path,
-        checksum_policy,
-        context,
-    )?;
-    let quantization_sigma = read_quantization_sigma(&reader.hdus()[selected.index].header)
-        .map_err(|source| fits_err(path, source))?;
-    pixels::read_stream_hdu(&mut reader, selected, checksum, path, plan, context)?
+    let selected = SelectedFits::open(path, context)?;
+    let quantization_sigma =
+        read_quantization_sigma(selected.header()).map_err(|source| fits_err(path, source))?;
+    selected
+        .read(path, context)?
         .into_cfa(path, quantization_sigma)
 }
 
@@ -255,32 +201,15 @@ pub(crate) fn fits_cfa_frame_info(
     path: &Path,
     context: &LoadContext,
 ) -> Result<CfaFrameInfo, ImageError> {
-    context.check_cancelled(path)?;
-    let file = File::open(path).map_err(|source| ImageError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let reader = FitsReader::open(file).map_err(|source| fits_err(path, source))?;
-    context.check_cancelled(path)?;
-    validate_cfa_container_format(path, reader.hdus().first().map(|hdu| &hdu.header))?;
-    let selected = selection::select_image_hdu(path, reader.hdus(), &context.fits.hdu)?;
-    let hdu = &reader.hdus()[selected.index];
-    validate_cfa_image_header(path, &hdu.header)?;
-    let plan = plan::preflight_fits_image(
-        path,
-        FitsHduDescription::from_hdu(path, hdu)?,
-        context.fits.cube,
-        context.fits.float_scale,
-        context.memory_limit_bytes,
-    )?;
-    let dimensions = plan.dimensions;
+    let selected = SelectedFits::open(path, context)?;
+    let dimensions = selected.plan.dimensions;
     if !dimensions.is_grayscale() {
         return Err(fits_unsupported(
             path,
             "scientific CFA input must have exactly one image plane",
         ));
     }
-    let cfa_type = read_cfa_from_headers(&hdu.header, context.fits.unstated_bayer_pattern)
+    let cfa_type = read_cfa_from_headers(selected.header(), context.fits.unstated_bayer_pattern)
         .map_err(|source| fits_err(path, source))?
         .ok_or_else(|| {
             fits_unsupported(
@@ -291,7 +220,7 @@ pub(crate) fn fits_cfa_frame_info(
     Ok(CfaFrameInfo {
         dimensions,
         cfa_type,
-        may_carry_nulls: plan.may_carry_nulls(),
+        may_carry_nulls: selected.plan.may_carry_nulls(),
     })
 }
 

@@ -10,6 +10,7 @@ use crate::io::image::image_provenance::{
     SourceContainer, TransferProvenance,
 };
 use crate::io::image::load_context::LoadContext;
+use crate::io::image::preview_image::PreviewImage;
 use crate::io::image::sample_domain::{SampleDomain, ScaleOrigin};
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
@@ -1218,11 +1219,18 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         process::id()
     ));
     masters.save(&path).unwrap();
-    assert!(matches!(
-        CfaImage::from_file(&path, &LoadContext::default()),
-        Err(ImageError::FitsUnsupported { reason, .. })
-            if reason.contains("CALMASTR") && reason.contains("standalone CFAIMAGE")
-    ));
+    // A bundle is no single image, whichever loader is pointed at it.
+    let refused = |result: Result<(), ImageError>| {
+        matches!(
+            result,
+            Err(ImageError::FitsUnsupported { reason, .. })
+                if reason.contains("CALMASTR") && reason.contains("standalone CFAIMAGE")
+        )
+    };
+    let context = LoadContext::default();
+    assert!(refused(CfaImage::from_file(&path, &context).map(drop)));
+    assert!(refused(LinearImage::from_file(&path, &context).map(drop)));
+    assert!(refused(PreviewImage::from_file(&path, &context).map(drop)));
     let cache_bytes = fs::read(&path).unwrap();
     let mut reader = FitsReader::from_bytes(&cache_bytes).unwrap();
     assert_eq!(reader.hdus().len(), 5);
