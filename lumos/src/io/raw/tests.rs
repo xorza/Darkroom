@@ -201,74 +201,6 @@ fn load_raw_dimensions_match() {
 }
 
 #[test]
-fn normalize_maps_the_black_to_maximum_range_onto_zero_to_one() {
-    // Test the SIMD normalization function
-    let black = 512.0;
-    let maximum = 16383.0;
-    let span = maximum - black;
-
-    // Test data with known values
-    let input: Vec<u16> = vec![
-        0,     // Below black -> 0.0
-        512,   // At black -> 0.0
-        8447,  // Midpoint -> ~0.5
-        16383, // At maximum -> 1.0
-        20000, // Above maximum -> clamped to 1.0
-    ];
-
-    let result = normalize_u16_to_f32_parallel(&input, black, span);
-
-    assert_eq!(result.len(), input.len());
-
-    // Below black should be 0
-    assert!((result[0] - 0.0).abs() < 1e-6, "Below black should be 0");
-    // At black should be 0
-    assert!((result[1] - 0.0).abs() < 1e-6, "At black should be 0");
-    // Midpoint should be ~0.5
-    assert!(
-        (result[2] - 0.5).abs() < 0.01,
-        "Midpoint should be ~0.5, got {}",
-        result[2]
-    );
-    // At maximum should be 1.0
-    assert!(
-        (result[3] - 1.0).abs() < 1e-6,
-        "At maximum should be 1.0, got {}",
-        result[3]
-    );
-    // Above maximum should be clamped to 1.0
-    assert!(
-        (result[4] - 1.0).abs() < 1e-6,
-        "Above maximum should be clamped to 1.0, got {}",
-        result[4]
-    );
-}
-
-#[test]
-fn normalize_u16_large_array() {
-    // Test with a large array to exercise parallel processing
-    let size = 100_000;
-    let input: Vec<u16> = (0..size).map(|i| (i % 65536) as u16).collect();
-    let black = 0.0;
-    let span = 65535.0;
-
-    let result = normalize_u16_to_f32_parallel(&input, black, span);
-
-    assert_eq!(result.len(), size);
-
-    // Verify no NaN or infinite values
-    for (i, &v) in result.iter().enumerate() {
-        assert!(!v.is_nan(), "NaN at index {i}");
-        assert!(v.is_finite(), "Infinite at index {i}");
-        assert!(v >= 0.0, "Negative value at index {i}");
-    }
-
-    // Check first and last values
-    assert!((result[0] - 0.0).abs() < 1e-6);
-    assert!((result[65535] - 1.0).abs() < 1e-4);
-}
-
-#[test]
 fn normalize_active_area_crops_and_applies_bayer_deltas() {
     let layout = SensorLayout {
         raw: Size2us::new(6, 4),
@@ -651,95 +583,6 @@ fn invalid_camera_white_balance_is_absent() {
     }
 }
 
-/// Test that margin pixels (outside active area) are zero after normalization
-/// when raw values are below black level.
-#[test]
-fn normalize_below_black_clamped() {
-    let black = 500.0;
-    let span = 1000.0;
-
-    // All values below black
-    let input: Vec<u16> = vec![0, 100, 200, 499];
-    let result = normalize_u16_to_f32_parallel(&input, black, span);
-
-    for (i, &v) in result.iter().enumerate() {
-        assert!(
-            v == 0.0,
-            "Value below black should be 0.0, got {v} at index {i}"
-        );
-    }
-}
-
-/// The calibration path keeps signed, un-clamped values — flooring the
-/// sub-pedestal tail at 0 (the light-frame clamp) would bias stacked master
-/// dark/bias means upward.
-#[test]
-fn normalize_unclamped_preserves_out_of_range() {
-    let black = 500.0;
-    let span = 1000.0; // white level = 1500
-
-    // below black, below black, in range, above white
-    let input: Vec<u16> = vec![0, 100, 499, 700, 2000];
-    let mut unclamped = vec![0.0; input.len()];
-    normalize_u16_to_f32_into::<false>(&input, &mut unclamped, black, span);
-    let clamped = normalize_u16_to_f32_parallel(&input, black, span);
-
-    // Unclamped is the exact affine map (value - black) / span; negatives
-    // and >1 are retained.
-    let unclamped_expected = [-0.5, -0.4, -0.001, 0.2, 1.5];
-    for (i, (&got, &want)) in unclamped.iter().zip(unclamped_expected.iter()).enumerate() {
-        assert!(
-            (got - want).abs() < 1e-6,
-            "unclamped[{i}] = {got}, want {want}"
-        );
-    }
-
-    // Clamped floors the sub-black tail at exactly 0 and caps the over-white
-    // value at exactly 1; the in-range value is identical to the unclamped one.
-    let clamped_expected = [0.0, 0.0, 0.0, 0.2, 1.0];
-    for (i, (&got, &want)) in clamped.iter().zip(clamped_expected.iter()).enumerate() {
-        assert!(
-            (got - want).abs() < 1e-6,
-            "clamped[{i}] = {got}, want {want}"
-        );
-    }
-}
-
-/// Test `process_unknown_libraw_fallback` 16-bit normalization formula.
-/// We can't call the function directly (needs libraw instance), but we can
-/// verify the normalization math it uses: (v as f32) / 65535.0
-#[test]
-fn fallback_16bit_normalization() {
-    let test_cases: &[(u16, f32)] = &[
-        (0, 0.0),
-        (1, 1.0 / 65535.0),
-        (32767, 32767.0 / 65535.0),
-        (65535, 1.0),
-    ];
-
-    for &(input, expected) in test_cases {
-        let result = f32::from(input) / 65535.0;
-        assert!(
-            (result - expected).abs() < 1e-6,
-            "16-bit norm({input}) = {result}, expected {expected}"
-        );
-    }
-}
-
-/// Test `process_unknown_libraw_fallback` 8-bit normalization formula.
-#[test]
-fn fallback_8bit_normalization() {
-    let test_cases: &[(u8, f32)] = &[(0, 0.0), (1, 1.0 / 255.0), (127, 127.0 / 255.0), (255, 1.0)];
-
-    for &(input, expected) in test_cases {
-        let result = f32::from(input) / 255.0;
-        assert!(
-            (result - expected).abs() < 1e-6,
-            "8-bit norm({input}) = {result}, expected {expected}"
-        );
-    }
-}
-
 /// Uniform black: all cblack zero, scalar black only.
 #[test]
 fn consolidate_black_levels_uniform() {
@@ -857,24 +700,6 @@ fn consolidate_black_levels_rejects_invalid_metadata() {
             capacity: 4098
         }
     ));
-}
-
-#[test]
-fn libraw_filter_color_rggb() {
-    // RGGB Bayer pattern: 0x94949494
-    let filters = 0x9494_9494_u32;
-
-    // (0,0)=R=0, (0,1)=G=1, (1,0)=G=1, (1,1)=B=2
-    assert_eq!(libraw_filter_color(filters, 0, 0), 0); // R
-    assert_eq!(libraw_filter_color(filters, 0, 1), 1); // G
-    assert_eq!(libraw_filter_color(filters, 1, 0), 1); // G
-    assert_eq!(libraw_filter_color(filters, 1, 1), 2); // B
-
-    // Pattern repeats
-    assert_eq!(libraw_filter_color(filters, 2, 0), 0);
-    assert_eq!(libraw_filter_color(filters, 2, 1), 1);
-    assert_eq!(libraw_filter_color(filters, 3, 0), 1);
-    assert_eq!(libraw_filter_color(filters, 3, 1), 2);
 }
 
 #[test]

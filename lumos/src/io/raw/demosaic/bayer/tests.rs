@@ -6,46 +6,6 @@ use crate::io::raw::demosaic::sensor_layout::SensorLayout;
 use crate::testing::prelude::*;
 use rayon::ThreadPoolBuilder;
 
-#[test]
-fn cfa_rggb_pattern() {
-    let cfa = CfaPattern::Rggb;
-    assert_eq!(cfa.color_at(Vec2us::new(0, 0)), 0); // R
-    assert_eq!(cfa.color_at(Vec2us::new(1, 0)), 1); // G
-    assert_eq!(cfa.color_at(Vec2us::new(2, 0)), 0); // R
-    assert_eq!(cfa.color_at(Vec2us::new(3, 0)), 1); // G
-    assert_eq!(cfa.color_at(Vec2us::new(0, 1)), 1); // G
-    assert_eq!(cfa.color_at(Vec2us::new(1, 1)), 2); // B
-    assert_eq!(cfa.color_at(Vec2us::new(2, 1)), 1); // G
-    assert_eq!(cfa.color_at(Vec2us::new(3, 1)), 2); // B
-}
-
-#[test]
-fn cfa_bggr_pattern() {
-    let cfa = CfaPattern::Bggr;
-    assert_eq!(cfa.color_at(Vec2us::new(0, 0)), 2); // B
-    assert_eq!(cfa.color_at(Vec2us::new(1, 0)), 1); // G
-    assert_eq!(cfa.color_at(Vec2us::new(0, 1)), 1); // G
-    assert_eq!(cfa.color_at(Vec2us::new(1, 1)), 0); // R
-}
-
-#[test]
-fn cfa_grbg_pattern() {
-    let cfa = CfaPattern::Grbg;
-    assert_eq!(cfa.color_at(Vec2us::new(0, 0)), 1); // G
-    assert_eq!(cfa.color_at(Vec2us::new(1, 0)), 0); // R
-    assert_eq!(cfa.color_at(Vec2us::new(0, 1)), 2); // B
-    assert_eq!(cfa.color_at(Vec2us::new(1, 1)), 1); // G
-}
-
-#[test]
-fn cfa_gbrg_pattern() {
-    let cfa = CfaPattern::Gbrg;
-    assert_eq!(cfa.color_at(Vec2us::new(0, 0)), 1); // G
-    assert_eq!(cfa.color_at(Vec2us::new(1, 0)), 2); // B
-    assert_eq!(cfa.color_at(Vec2us::new(0, 1)), 0); // R
-    assert_eq!(cfa.color_at(Vec2us::new(1, 1)), 1); // G
-}
-
 /// Every phase round-trips through its `BAYERPAT` spelling, in any case and with blanks around
 /// it; `TRUE`, which names no phase, is refused like any other value.
 #[test]

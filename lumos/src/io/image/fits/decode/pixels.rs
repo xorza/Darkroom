@@ -491,7 +491,7 @@ mod tests {
     }
 
     #[test]
-    fn non_finite_pixels_return_exact_summary_for_every_sample_type() {
+    fn nan_and_both_infinities_are_counted_after_the_divide() {
         // Nulls survive the divide, which is what lets the test run after it rather than before:
         // a NaN or ±inf divided by any span is still one, and is still counted here.
         let mut pixels = [0.0, f32::NAN, 5.0, f32::INFINITY, f32::NEG_INFINITY];

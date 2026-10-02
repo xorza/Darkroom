@@ -80,4 +80,47 @@ mod tests {
             "the double rounding this replaced"
         );
     }
+
+    /// The light path floors below black at 0 and caps above the maximum at 1, and between them
+    /// is the correctly rounded quotient above; the calibration path keeps both tails. The
+    /// parallel driver works in 16 384-sample chunks, so 100 000 samples cross six chunk joins,
+    /// and it matches one call over the whole input bit for bit.
+    #[test]
+    fn light_path_clamps_and_calibration_path_keeps_the_tails() {
+        let (black, span) = (512.0f32, 15_871.0f32);
+        let quotient = |value: u16| ((f64::from(value) - 512.0) / 15_871.0) as f32;
+        for (value, light, calibration) in [
+            (0u16, 0.0, quotient(0)),
+            (511, 0.0, quotient(511)),
+            (512, 0.0, 0.0),
+            (8447, quotient(8447), quotient(8447)),
+            (16_383, 1.0, 1.0),
+            (20_000, 1.0, quotient(20_000)),
+        ] {
+            let mut clamped = [0.0];
+            normalize_u16_to_f32_into::<true>(&[value], &mut clamped, black, span);
+            let mut unclamped = [0.0];
+            normalize_u16_to_f32_into::<false>(&[value], &mut unclamped, black, span);
+            assert_eq!(clamped[0].to_bits(), light.to_bits(), "light {value}");
+            assert_eq!(
+                unclamped[0].to_bits(),
+                calibration.to_bits(),
+                "calibration {value}"
+            );
+        }
+        assert!(quotient(0) < 0.0 && quotient(20_000) > 1.0);
+
+        let data: Vec<u16> = (0..100_000u32)
+            .map(|index| (index * 7 % 65_536) as u16)
+            .collect();
+        let parallel = normalize_u16_to_f32_parallel(&data, black, span);
+        let mut single = vec![0.0; data.len()];
+        normalize_u16_to_f32_into::<true>(&data, &mut single, black, span);
+        assert!(
+            parallel
+                .iter()
+                .zip(&single)
+                .all(|(a, b)| a.to_bits() == b.to_bits())
+        );
+    }
 }

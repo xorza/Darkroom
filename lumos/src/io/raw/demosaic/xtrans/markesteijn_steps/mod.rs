@@ -787,6 +787,12 @@ fn compute_ypbpr_row(
     }
 }
 
+/// The luma weights (BT.2020) and chroma scales of the space dcraw's `xtrans_interpolate`, and
+/// librtprocess after it, measures homogeneity in.
+const LUMA_WEIGHTS: [f32; 3] = [0.2627, 0.6780, 0.0593];
+const PB_SCALE: f32 = 0.56433;
+const PR_SCALE: f32 = 0.67815;
+
 /// One pixel in `YPbPr`, the space the homogeneity derivatives are measured in.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 struct YPbPr {
@@ -798,11 +804,12 @@ struct YPbPr {
 impl YPbPr {
     #[inline(always)]
     fn from_rgb(r: f32, g: f32, b: f32) -> YPbPr {
-        let luma = 0.2627 * r + 0.6780 * g + 0.0593 * b;
+        let [weight_r, weight_g, weight_b] = LUMA_WEIGHTS;
+        let luma = weight_r * r + weight_g * g + weight_b * b;
         YPbPr {
             luma,
-            pb: (b - luma) * 0.56433,
-            pr: (r - luma) * 0.67815,
+            pb: (b - luma) * PB_SCALE,
+            pr: (r - luma) * PR_SCALE,
         }
     }
 }
