@@ -43,7 +43,7 @@ fn load_astro_image_node_is_registered() {
     assert_eq!(f.inputs.len(), 1);
     assert_eq!(f.outputs.len(), 1);
     assert_eq!(f.inputs[0].data_type, *ASTRO_IMAGE_PATH_DATA_TYPE);
-    assert_eq!(f.outputs[0].ty.declared(), *IMAGE_DATA_TYPE);
+    assert_eq!(f.outputs[0].ty.declared(), IMAGE_DATA_TYPE);
 }
 
 #[test]
@@ -54,7 +54,7 @@ fn build_masters_node_is_registered() {
     // Pure: the digest folds each selected calibration file's identity.
     assert_eq!(f.behavior, FuncBehavior::Pure);
     assert_eq!(f.outputs.len(), 1);
-    assert_eq!(f.outputs[0].ty.declared(), *MASTERS_DATA_TYPE);
+    assert_eq!(f.outputs[0].ty.declared(), MASTERS_DATA_TYPE);
 
     // Four optional calibration-frame sets, then sigma and cache.
     assert_eq!(f.inputs.len(), 6);
@@ -100,7 +100,7 @@ fn stack_lights_node_is_registered() {
     );
     assert_eq!(f.inputs[0].data_type, *ASTRO_RAW_PATHS_DATA_TYPE);
     assert!(f.inputs[0].required, "light frames are required");
-    assert_eq!(f.inputs[1].data_type, *MASTERS_DATA_TYPE);
+    assert_eq!(f.inputs[1].data_type, MASTERS_DATA_TYPE);
     assert!(!f.inputs[1].required, "masters are genuinely optional");
     // Each stage is one config-typed input (so a build_*_config wires in),
     // with the presets offered via value_variants + seeded to the first.
@@ -153,7 +153,7 @@ fn stack_lights_node_is_registered() {
     let out_names: Vec<&str> = f.outputs.iter().map(|o| o.name.as_str()).collect();
     assert_eq!(out_names, ["Image", "Coverage", "Weight"]);
     for out in &f.outputs {
-        assert_eq!(out.ty.declared(), *IMAGE_DATA_TYPE);
+        assert_eq!(out.ty.declared(), IMAGE_DATA_TYPE);
     }
 }
 
@@ -164,7 +164,7 @@ fn auto_stretch_node_is_registered() {
     assert_eq!(f.category, "Astro");
     assert_eq!(f.inputs.len(), 2);
     assert_eq!(f.inputs[0].name, "Image");
-    assert_eq!(f.inputs[0].data_type, *IMAGE_DATA_TYPE);
+    assert_eq!(f.inputs[0].data_type, IMAGE_DATA_TYPE);
     assert!(f.inputs[0].required);
     // `method` is a config-typed input with the presets as value_variants
     // (seeded to the first), overridable by build_stretch_config.
@@ -181,7 +181,7 @@ fn auto_stretch_node_is_registered() {
         Some(ConstValue::Enum("auto_asinh".to_string())),
     );
     assert_eq!(f.outputs.len(), 1);
-    assert_eq!(f.outputs[0].ty.declared(), *IMAGE_DATA_TYPE);
+    assert_eq!(f.outputs[0].ty.declared(), IMAGE_DATA_TYPE);
 }
 
 #[test]
@@ -199,12 +199,12 @@ fn processing_nodes_are_registered() {
         let f = lib.by_name(name).unwrap();
         assert_eq!(f.category, "Astro", "{name} category");
         assert_eq!(f.inputs[0].name, "Image", "{name} first input");
-        assert_eq!(f.inputs[0].data_type, *IMAGE_DATA_TYPE, "{name} in type");
+        assert_eq!(f.inputs[0].data_type, IMAGE_DATA_TYPE, "{name} in type");
         assert!(f.inputs[0].required, "{name} image required");
         assert_eq!(f.outputs.len(), 1, "{name} one output");
         assert_eq!(
             f.outputs[0].ty.declared(),
-            *IMAGE_DATA_TYPE,
+            IMAGE_DATA_TYPE,
             "{name} out type"
         );
     }
@@ -364,7 +364,7 @@ fn ml_denoise_node_is_registered() {
     assert_eq!(f.category, "Astro");
     let names: Vec<&str> = f.inputs.iter().map(|i| i.name.as_str()).collect();
     assert_eq!(names, ["Image", "Model"]);
-    assert_eq!(f.inputs[0].data_type, *IMAGE_DATA_TYPE);
+    assert_eq!(f.inputs[0].data_type, IMAGE_DATA_TYPE);
     let DataType::FsPath(model) = &f.inputs[1].data_type else {
         panic!("model is a file path");
     };
@@ -376,7 +376,7 @@ fn ml_denoise_node_is_registered() {
     );
     assert_eq!(f.outputs.len(), 1);
     assert_eq!(f.outputs[0].name, "Image");
-    assert_eq!(f.outputs[0].ty.declared(), *IMAGE_DATA_TYPE);
+    assert_eq!(f.outputs[0].ty.declared(), IMAGE_DATA_TYPE);
 }
 
 #[test]
@@ -386,7 +386,7 @@ fn remove_stars_node_has_starless_and_stars_outputs() {
     assert_eq!(f.category, "Astro");
     let names: Vec<&str> = f.inputs.iter().map(|i| i.name.as_str()).collect();
     assert_eq!(names, ["Image", "Model"]);
-    assert_eq!(f.inputs[0].data_type, *IMAGE_DATA_TYPE);
+    assert_eq!(f.inputs[0].data_type, IMAGE_DATA_TYPE);
     assert_eq!(
         f.inputs[1].default_value,
         Some(ConstValue::FsPath("StarNet2_weights.onnx".to_string()))
@@ -394,7 +394,7 @@ fn remove_stars_node_has_starless_and_stars_outputs() {
     let out_names: Vec<&str> = f.outputs.iter().map(|o| o.name.as_str()).collect();
     assert_eq!(out_names, ["Starless", "Stars"]);
     for o in &f.outputs {
-        assert_eq!(o.ty.declared(), *IMAGE_DATA_TYPE);
+        assert_eq!(o.ty.declared(), IMAGE_DATA_TYPE);
     }
 }
 

@@ -13,16 +13,13 @@ impl IntrospectEnum for Mode {
     const TYPE_ID: &'static str = "8254c974-43ba-4bd4-9521-6dd749aab5ea";
     const DISPLAY_NAME: &'static str = "Mode";
 
-    fn variants() -> Vec<String> {
-        vec!["fast".to_string(), "slow".to_string()]
-    }
+    const VARIANTS: &'static [&'static str] = &["fast", "slow"];
 
-    fn to_variant(&self) -> String {
+    fn to_variant(&self) -> &'static str {
         match self {
             Mode::Fast => "fast",
             Mode::Slow => "slow",
         }
-        .to_string()
     }
 
     fn from_variant(name: &str) -> Option<Self> {
@@ -49,11 +46,11 @@ enum Speed {
 fn derived_introspect_enum_renders_and_parses_its_own_variant_names() {
     assert_ne!(Speed::TYPE_ID, Mode::TYPE_ID);
     assert_eq!(Speed::DISPLAY_NAME, "Speed");
-    assert_eq!(Speed::variants(), ["fast", "slow", "very_fast"]);
+    assert_eq!(Speed::VARIANTS, ["fast", "slow", "very_fast"]);
     assert_eq!(Speed::Slow.to_variant(), "slow");
     assert_eq!(Speed::VeryFast.to_variant(), "very_fast");
     // Every rendered name parses back to the variant it came from.
-    for (name, variant) in Speed::variants()
+    for (name, variant) in Speed::VARIANTS
         .iter()
         .zip([Speed::Fast, Speed::Slow, Speed::VeryFast])
     {
@@ -68,6 +65,7 @@ fn derived_introspect_enum_renders_and_parses_its_own_variant_names() {
 }
 
 #[derive(Debug, Clone, PartialEq, Introspect)]
+#[config(type_id = "ea74f1cf-8e8f-4940-a6b9-1cbf4ed60202", name = "KnobSet")]
 struct Knobs {
     tile_size: u32,
     #[config(label = "Custom Label")]
@@ -90,6 +88,7 @@ impl Default for Knobs {
 }
 
 #[derive(Debug, Clone, PartialEq, Introspect)]
+#[config(type_id = "0c155c3a-ee37-48a8-9ec3-3b27dea7a6c3")]
 struct OptionalDefaults {
     default_none: Option<u32>,
     default_some: Option<u32>,
@@ -105,6 +104,7 @@ impl Default for OptionalDefaults {
 }
 
 #[derive(Debug, PartialEq, Introspect)]
+#[config(type_id = "782a6afe-249d-4090-907e-5a836aab2e51")]
 struct WideDefaults {
     signed: i128,
     unsigned: u128,
@@ -126,6 +126,7 @@ impl Default for WideDefaults {
 }
 
 #[derive(Debug, Default, Introspect)]
+#[config(type_id = "c0fd3b3b-20e5-44c8-847f-b1f531af635b")]
 struct NumericKinds {
     i8: i8,
     i16: i16,
@@ -145,8 +146,19 @@ struct NumericKinds {
 
 #[test]
 fn fields_carry_labels_concrete_kinds_required_and_defaults() {
+    assert_eq!(
+        Knobs::DISPLAY_NAME,
+        "KnobSet",
+        "the `name` attribute sets it"
+    );
+    assert_eq!(
+        OptionalDefaults::DISPLAY_NAME,
+        "OptionalDefaults",
+        "the type name otherwise"
+    );
+    assert_ne!(Knobs::TYPE_ID, OptionalDefaults::TYPE_ID);
     let fields = Knobs::fields();
-    let labels: Vec<&str> = fields.iter().map(|f| f.label.as_str()).collect();
+    let labels: Vec<&str> = fields.iter().map(|f| f.label).collect();
     assert_eq!(
         labels,
         ["Tile Size", "Custom Label", "Mode", "Enabled", "Limit"]
@@ -157,15 +169,15 @@ fn fields_carry_labels_concrete_kinds_required_and_defaults() {
     assert_eq!(
         fields[2].kind,
         FieldKind::Enum {
-            type_id: Mode::TYPE_ID.to_string(),
-            display_name: "Mode".to_string(),
-            variants: vec!["fast".to_string(), "slow".to_string()],
+            type_id: Mode::TYPE_ID,
+            display_name: "Mode",
+            variants: &["fast", "slow"],
         }
     );
     assert_eq!(fields[3].kind, FieldKind::Bool);
     assert_eq!(
         fields[4].kind,
-        FieldKind::Option(Box::new(FieldKind::Int(IntegerKind::U32)))
+        FieldKind::Option(&FieldKind::Int(IntegerKind::U32))
     );
 
     assert!(fields[..4].iter().all(|f| f.required));
@@ -429,13 +441,11 @@ mod other {
         const TYPE_ID: &'static str = "b3ee5042-6965-4d47-a8ca-bcd979dd5491";
         const DISPLAY_NAME: &'static str = "Mode";
 
-        fn variants() -> Vec<String> {
-            vec!["only".to_string()]
-        }
+        const VARIANTS: &'static [&'static str] = &["only"];
 
-        fn to_variant(&self) -> String {
+        fn to_variant(&self) -> &'static str {
             match self {
-                Mode::Only => "only".to_string(),
+                Mode::Only => "only",
             }
         }
 
@@ -449,5 +459,5 @@ mod other {
 fn same_named_enums_in_different_modules_have_distinct_identities() {
     assert_eq!(Mode::DISPLAY_NAME, other::Mode::DISPLAY_NAME);
     assert_ne!(Mode::TYPE_ID, other::Mode::TYPE_ID);
-    assert_eq!(other::Mode::variants(), ["only"]);
+    assert_eq!(other::Mode::VARIANTS, ["only"]);
 }

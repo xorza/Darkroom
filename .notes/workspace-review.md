@@ -60,15 +60,6 @@ Severity: High — a quietly wrong cache hit: a value computed with an input the
 
 # Medium — wrong in edge cases, duplicated truths, hot-path waste
 
-## Typed ids are parsed from strings at run time through a conversion that panics
-Severity: Medium — per-frame UUID parsing on hot paths, a `From` impl that panics on bad input, and ids that bypass the `uuidgen` rule.
-
-- [ ] `common/src/macros.rs` `id_type!` — `From<&str>` / `From<String>` panic on an invalid UUID. `From` is the infallible conversion; `FromStr` already exists for the fallible one, and `const fn from_u128` exists for literals. Remove the two `From` impls so every literal becomes a `const` and every parse a `parse()`.
-- [ ] `darkroom/src/core/preview/mod.rs` `is_preview` — `func_id == PREVIEW_FUNC_ID.into()` runs `Uuid::parse_str` on each call; callers are per node per frame (`NodeCtx::preview`, twice in `gui/pane/graph/node/widget.rs`, once in `gui/pane/graph/mod.rs`) and per stored preview per frame (`Document::holds_preview_node` via `PreviewStore::reconcile`). `registered` scans `library.funcs()` and parses once per func where `Library::by_id` is a hash lookup.
-- [ ] `lens/src/image/mod.rs` `IMAGE_TYPE_ID`, `lens/src/astro/masters.rs` `MASTERS_TYPE_ID`, `lens/src/image/format.rs` `CONVERSION_FORMAT_TYPE_ID`, `lens/src/image/nodes/mod.rs` `BLENDMODE_TYPE_ID` (and their `_DATA_TYPE`s) — `LazyLock<TypeId>` over a string parse, while `ml.rs` / `fs_watch` already use `FuncId::from_u128` consts. `lens/src/config_node.rs` `NodeConfig::TYPE_ID: &str` is re-parsed on every `CustomValue::type_id()` / `config_data_type()` call. darkroom derefs `*lens::IMAGE_TYPE_ID`.
-- [ ] `lens/src/image/nodes/processing.rs` `register_brightness` (`"b8c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e"`) and `register_transform` (`"d3e4f5a6-b7c8-4d9e-0f1a-2b3c4d5e6f7a"`) — sequential hex runs, hand-typed rather than `uuidgen` output (AGENTS.md); the second also has an invalid RFC 4122 variant nibble.
-- [ ] `lens/src/config_node.rs` `NodeConfig` (impls in `lens/src/astro/config/processing.rs`) — `IntrospectEnum` carries `TYPE_ID` on the owning type, `Introspect` structs do not, so lens adds a second trait to give `ExtractBackground`, `Denoise`, `Hdr`, `LocalContrast` their wire ids from outside; `BLENDMODE_TYPE_ID` is a lens-owned id for imaginarium's `BlendMode`. A `#[config(type_id)]` on `Introspect` lets owners carry their ids.
-
 ## Undo coalescing has no gesture identity and re-encodes the tail every frame
 Severity: Medium — separate gestures merge into one entry, merges leave phantom entries, and a held drag allocates about six times per frame.
 

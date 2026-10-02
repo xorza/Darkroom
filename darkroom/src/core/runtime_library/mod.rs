@@ -77,3 +77,42 @@ fn compose(model_paths: &MlModelPaths, previews: &Arc<PreviewSink>) -> Scenarium
     library.merge(astro_library(model_paths));
     library
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use lens::{MlModelPaths, astro_library, fs_watch_library, image_library, random_library};
+    use scenarium::{math_library, system_library, worker_events_library};
+
+    use crate::core::runtime_library::compose;
+
+    /// Every shipped func and type id is distinct across all the libraries the editor
+    /// merges: `merge` refuses a repeated id, so composing them all is the check, and the
+    /// counts show no library was dropped along the way. The ids are hand-assigned
+    /// constants that saved graphs bind to, so a collision would make one node load as
+    /// another.
+    #[test]
+    fn every_func_and_type_id_is_unique_across_the_libraries() {
+        let paths = MlModelPaths::default();
+        let parts = [
+            math_library(),
+            system_library(),
+            worker_events_library(),
+            fs_watch_library(),
+            random_library(),
+            image_library(),
+            astro_library(&paths),
+        ];
+        let library = compose(&paths, &Arc::default());
+        let preview = 1;
+        assert_eq!(
+            library.funcs().count(),
+            preview + parts.iter().map(|part| part.funcs().count()).sum::<usize>()
+        );
+        assert_eq!(
+            library.types.len(),
+            parts.iter().map(|part| part.types.len()).sum::<usize>()
+        );
+    }
+}

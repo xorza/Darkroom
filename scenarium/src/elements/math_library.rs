@@ -4,7 +4,22 @@ use crate::async_lambda;
 use crate::graph::func::error::InvokeError;
 use crate::graph::func::lambda::Invocation;
 use crate::graph::func::{Func, FuncInput, FuncOutput};
+use crate::graph::identity::FuncId;
 use crate::library::Library;
+
+const ADD_FUNC_ID: FuncId = FuncId::literal("01897c4c-ac6a-84c0-d0b7-17d49e1ae2ee");
+const SUBTRACT_FUNC_ID: FuncId = FuncId::literal("01897c50-229e-f5e4-1c60-7f1e14531da2");
+const MULTIPLY_FUNC_ID: FuncId = FuncId::literal("01897c50-d510-55bf-8cb9-545a62cc76cc");
+const POWER_FUNC_ID: FuncId = FuncId::literal("01897c52-ac50-733e-aeeb-7018fd84c264");
+const SQUARE_ROOT_FUNC_ID: FuncId = FuncId::literal("01897c53-a3d7-e716-b80a-0ba98661413a");
+const LOGARITHM_FUNC_ID: FuncId = FuncId::literal("01897c56-8dde-c5f3-a389-f326fdf81b3a");
+const SINE_FUNC_ID: FuncId = FuncId::literal("01897c54-8671-5d7c-db4c-aca72865a5a6");
+const COSINE_FUNC_ID: FuncId = FuncId::literal("01897c54-ceb5-e603-ebde-c6904a8ef6e5");
+const TANGENT_FUNC_ID: FuncId = FuncId::literal("01897c55-1fda-2837-f4bd-75bea812a70e");
+const ARCSINE_FUNC_ID: FuncId = FuncId::literal("01897c55-6920-1641-593c-5a1d91c033cb");
+const ARCCOSINE_FUNC_ID: FuncId = FuncId::literal("01897c55-a3ef-681e-6fbb-5133c96f720c");
+const ARCTANGENT_FUNC_ID: FuncId = FuncId::literal("01897c55-e6f4-726c-5d4e-a2f90c4fc43b");
+const DIVIDE_FUNC_ID: FuncId = FuncId::literal("01897c50-2b4e-4f0e-8f0a-5b0b8b2b4b4b");
 
 #[derive(Debug, Clone, Copy)]
 struct FloatInputSpec {
@@ -36,7 +51,7 @@ fn declared_output(spec: FloatOutputSpec) -> FuncOutput {
 }
 
 fn unary_float_func(
-    id: &'static str,
+    id: FuncId,
     name: &'static str,
     description: &'static str,
     input: FloatInputSpec,
@@ -60,7 +75,7 @@ fn unary_float_func(
 }
 
 fn binary_float_func(
-    id: &'static str,
+    id: FuncId,
     name: &'static str,
     description: &'static str,
     inputs: [FloatInputSpec; 2],
@@ -88,7 +103,7 @@ pub fn math_library() -> Library {
     let mut library = Library::default();
 
     library.add(binary_float_func(
-        "01897c4c-ac6a-84c0-d0b7-17d49e1ae2ee",
+        ADD_FUNC_ID,
         "Add",
         "Adds two float values (A + B).",
         [
@@ -110,7 +125,7 @@ pub fn math_library() -> Library {
         |a, b| a + b,
     ));
     library.add(binary_float_func(
-        "01897c50-229e-f5e4-1c60-7f1e14531da2",
+        SUBTRACT_FUNC_ID,
         "Subtract",
         "Subtracts the second value from the first (A − B).",
         [
@@ -132,7 +147,7 @@ pub fn math_library() -> Library {
         |a, b| a - b,
     ));
     library.add(binary_float_func(
-        "01897c50-d510-55bf-8cb9-545a62cc76cc",
+        MULTIPLY_FUNC_ID,
         "Multiply",
         "Multiplies two float values (A × B).",
         [
@@ -155,7 +170,7 @@ pub fn math_library() -> Library {
     ));
     library.add(divide_func());
     library.add(binary_float_func(
-        "01897c52-ac50-733e-aeeb-7018fd84c264",
+        POWER_FUNC_ID,
         "Power",
         "Raises the first value to the power of the second (Base^Exponent).",
         [
@@ -177,7 +192,7 @@ pub fn math_library() -> Library {
         f64::powf,
     ));
     library.add(unary_float_func(
-        "01897c53-a3d7-e716-b80a-0ba98661413a",
+        SQUARE_ROOT_FUNC_ID,
         "Square Root",
         "Calculates the square root of a value.",
         FloatInputSpec {
@@ -197,7 +212,7 @@ pub fn math_library() -> Library {
     }
 
     library.add(binary_float_func(
-        "01897c56-8dde-c5f3-a389-f326fdf81b3a",
+        LOGARITHM_FUNC_ID,
         "Logarithm",
         "Calculates the logarithm of a value with the given base.",
         [
@@ -225,7 +240,7 @@ pub fn math_library() -> Library {
 fn trigonometry_funcs() -> [Func; 6] {
     [
         unary_float_func(
-            "01897c54-8671-5d7c-db4c-aca72865a5a6",
+            SINE_FUNC_ID,
             "Sine",
             "Calculates the sine of an angle in radians.",
             FloatInputSpec {
@@ -240,7 +255,7 @@ fn trigonometry_funcs() -> [Func; 6] {
             f64::sin,
         ),
         unary_float_func(
-            "01897c54-ceb5-e603-ebde-c6904a8ef6e5",
+            COSINE_FUNC_ID,
             "Cosine",
             "Calculates the cosine of an angle in radians.",
             FloatInputSpec {
@@ -255,7 +270,7 @@ fn trigonometry_funcs() -> [Func; 6] {
             f64::cos,
         ),
         unary_float_func(
-            "01897c55-1fda-2837-f4bd-75bea812a70e",
+            TANGENT_FUNC_ID,
             "Tangent",
             "Calculates the tangent of an angle in radians.",
             FloatInputSpec {
@@ -270,7 +285,7 @@ fn trigonometry_funcs() -> [Func; 6] {
             f64::tan,
         ),
         unary_float_func(
-            "01897c55-6920-1641-593c-5a1d91c033cb",
+            ARCSINE_FUNC_ID,
             "Arcsine",
             "Calculates the arc sine (inverse sine), returns angle in radians.",
             FloatInputSpec {
@@ -285,7 +300,7 @@ fn trigonometry_funcs() -> [Func; 6] {
             f64::asin,
         ),
         unary_float_func(
-            "01897c55-a3ef-681e-6fbb-5133c96f720c",
+            ARCCOSINE_FUNC_ID,
             "Arccosine",
             "Calculates the arc cosine (inverse cosine), returns angle in radians.",
             FloatInputSpec {
@@ -300,7 +315,7 @@ fn trigonometry_funcs() -> [Func; 6] {
             f64::acos,
         ),
         unary_float_func(
-            "01897c55-e6f4-726c-5d4e-a2f90c4fc43b",
+            ARCTANGENT_FUNC_ID,
             "Arctangent",
             "Calculates the arc tangent (inverse tangent), returns angle in radians.",
             FloatInputSpec {
@@ -318,7 +333,7 @@ fn trigonometry_funcs() -> [Func; 6] {
 }
 
 fn divide_func() -> Func {
-    Func::new("01897c50-2b4e-4f0e-8f0a-5b0b8b2b4b4b", "Divide")
+    Func::new(DIVIDE_FUNC_ID, "Divide")
         .description("Divides the first value by the second, outputs both quotient and remainder.")
         .category("Math")
         .pure()

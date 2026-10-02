@@ -1,6 +1,7 @@
 //! Per-frame astronomical processing nodes.
 
 use lumos::{Denoise, ExtractBackground, Hdr, LocalContrast, NeutralizeBackground};
+use scenarium::FuncId;
 use scenarium::{DataType, Func, FuncInput, FuncLambda, FuncOutput, Library};
 
 use crate::astro::config::preset;
@@ -8,10 +9,21 @@ use crate::astro::config::processing::{
     BackgroundModeKind, ScnrKind, ScnrKnobs, StretchKnobs, StretchPreset,
 };
 use crate::astro::nodes::runtime;
-use crate::config_node::{ConfigValue, NodeConfig, config_data_type};
+use common::Introspect;
+
+use crate::config_node::{ConfigValue, config_data_type};
 use crate::image::IMAGE_DATA_TYPE;
 use scenarium::Invocation;
 use std::mem;
+
+const AUTO_STRETCH_FUNC_ID: FuncId = FuncId::literal("c15248e0-006a-4a4a-9aae-b1fc7886dea1");
+const EXTRACT_BACKGROUND_FUNC_ID: FuncId = FuncId::literal("e27c2a02-ec2a-4c6d-afea-60d1276ff8e1");
+const DENOISE_FUNC_ID: FuncId = FuncId::literal("61c17dfa-8369-446b-b6e7-d91d62d344ee");
+const SCNR_FUNC_ID: FuncId = FuncId::literal("ef0c2661-8553-4302-9251-95b2d383af19");
+const NEUTRALIZE_BACKGROUND_FUNC_ID: FuncId =
+    FuncId::literal("5a8c9043-61ca-4a5a-8e55-ce27c804e84b");
+const HDR_COMPRESSION_FUNC_ID: FuncId = FuncId::literal("300a2ec5-0ccd-47ec-b282-030eea41441c");
+const LOCAL_CONTRAST_FUNC_ID: FuncId = FuncId::literal("6a28b732-2704-454b-8afd-0a91d385458a");
 
 pub(crate) fn register(library: &mut Library) {
     register_stretch(library);
@@ -25,7 +37,7 @@ pub(crate) fn register(library: &mut Library) {
 
 fn register_stretch(library: &mut Library) {
     library.add(
-        Func::new("c15248e0-006a-4a4a-9aae-b1fc7886dea1", "Auto Stretch")
+        Func::new(AUTO_STRETCH_FUNC_ID, "Auto Stretch")
             .description("Auto-stretches a linear frame to a viewable image (display tone curve).")
             .category("Astro")
             .pure()
@@ -55,7 +67,7 @@ fn register_stretch(library: &mut Library) {
 
 fn register_background(library: &mut Library) {
     library.add(processing_func(
-        "e27c2a02-ec2a-4c6d-afea-60d1276ff8e1",
+        EXTRACT_BACKGROUND_FUNC_ID,
         "Extract Background",
         "Fits and removes a smooth sky-background gradient.",
         vec![
@@ -81,7 +93,7 @@ fn register_background(library: &mut Library) {
 
 fn register_denoise(library: &mut Library) {
     library.add(processing_func(
-        "61c17dfa-8369-446b-b6e7-d91d62d344ee",
+        DENOISE_FUNC_ID,
         "Denoise",
         "Wavelet denoise (starlet coefficient thresholding).",
         vec![
@@ -116,7 +128,7 @@ fn register_denoise(library: &mut Library) {
 
 fn register_scnr(library: &mut Library) {
     library.add(processing_func(
-        "ef0c2661-8553-4302-9251-95b2d383af19",
+        SCNR_FUNC_ID,
         "SCNR",
         "Removes the residual green cast (SCNR).",
         vec![
@@ -141,7 +153,7 @@ fn register_scnr(library: &mut Library) {
 
 fn register_neutralize(library: &mut Library) {
     library.add(processing_func(
-        "5a8c9043-61ca-4a5a-8e55-ce27c804e84b",
+        NEUTRALIZE_BACKGROUND_FUNC_ID,
         "Neutralize Background",
         "Shifts each channel so the background reads neutral gray.",
         vec![frame_input("Image")],
@@ -163,7 +175,7 @@ fn register_neutralize(library: &mut Library) {
 
 fn register_hdr(library: &mut Library) {
     library.add(processing_func(
-        "300a2ec5-0ccd-47ec-b282-030eea41441c",
+        HDR_COMPRESSION_FUNC_ID,
         "HDR Compression",
         "Compresses large-scale dynamic range (multiscale HDR).",
         vec![
@@ -198,7 +210,7 @@ fn register_hdr(library: &mut Library) {
 
 fn register_local_contrast(library: &mut Library) {
     library.add(processing_func(
-        "6a28b732-2704-454b-8afd-0a91d385458a",
+        LOCAL_CONTRAST_FUNC_ID,
         "Local Contrast",
         "Local contrast enhancement (CLAHE).",
         vec![
@@ -232,7 +244,7 @@ fn register_local_contrast(library: &mut Library) {
     ));
 }
 
-fn config_override_input<T: NodeConfig>() -> FuncInput {
+fn config_override_input<T: Introspect>() -> FuncInput {
     FuncInput::optional("Config", config_data_type::<T>())
         .description("Optional detailed config; overrides the inline knob when wired.")
 }
@@ -248,7 +260,7 @@ fn float_input(name: &str, default: f32, description: &str) -> FuncInput {
 }
 
 fn processing_func(
-    id: &str,
+    id: FuncId,
     name: &str,
     description: &str,
     inputs: Vec<FuncInput>,

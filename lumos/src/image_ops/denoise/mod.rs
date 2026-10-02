@@ -66,6 +66,7 @@ impl Threshold {
 /// Run on linear data, after color calibration and before the stretch. No-op-safe on any size (the
 /// scale count is clamped to what the dimensions support).
 #[derive(Debug, Clone, Copy, Introspect)]
+#[config(type_id = "ab942729-dc49-4518-aae4-9008bd33cea1")]
 pub struct Denoise {
     /// Number of wavelet scales `J`. Each scale `j` targets structure ~`2^j` px wide; more scales
     /// reach larger noise (mottle) at the cost of touching more real extended signal. Clamped to

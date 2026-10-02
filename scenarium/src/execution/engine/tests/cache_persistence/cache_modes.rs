@@ -359,7 +359,7 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
     }
     const DECODE_PROBE: ContextType<DecodeProbe> = ContextType::new(DecodeProbe::default);
 
-    const BLOB_TYPE: &str = "50be7976-6d55-4567-8389-13107b1698ba";
+    const BLOB_TYPE: TypeId = TypeId::literal("50be7976-6d55-4567-8389-13107b1698ba");
 
     #[derive(Debug)]
     struct Blob(Vec<u8>);
@@ -370,7 +370,7 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
     }
     impl CustomValue for Blob {
         fn type_id(&self) -> TypeId {
-            BLOB_TYPE.into()
+            BLOB_TYPE
         }
         fn as_any(&self) -> &dyn Any {
             self
@@ -433,7 +433,7 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
             n.pure()
                 .sink()
                 .cache(CacheMode::Disk)
-                .output(DataType::Custom(BLOB_TYPE.into()))
+                .output(DataType::Custom(BLOB_TYPE))
                 .lambda(crate::async_lambda!(
                     move |Invocation { outputs, .. }| { counter = recompute.clone() } => {
                         counter.bump();

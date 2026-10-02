@@ -1,5 +1,6 @@
 //! Light-frame calibration, registration, and stacking node.
 
+use scenarium::FuncId;
 use std::path::PathBuf;
 
 use imaginarium::Image as RawImage;
@@ -20,6 +21,8 @@ use crate::astro::nodes::runtime;
 use crate::image::{IMAGE_DATA_TYPE, Image};
 use scenarium::Invocation;
 
+const STACK_LIGHTS_FUNC_ID: FuncId = FuncId::literal("b02f5c42-7bda-48f6-81dd-81338efbb126");
+
 #[derive(Debug, thiserror::Error)]
 enum LightFramesError {
     #[error("no light frames selected")]
@@ -36,7 +39,7 @@ fn light_frames(paths: &[String]) -> Result<Vec<PathBuf>, LightFramesError> {
 
 pub(crate) fn register(library: &mut Library) {
     library.add(
-        Func::new("b02f5c42-7bda-48f6-81dd-81338efbb126", "Stack Lights")
+        Func::new(STACK_LIGHTS_FUNC_ID, "Stack Lights")
             .description("Calibrates, aligns, and stacks selected light frames into one image.")
             .category("Astro")
             .pure()

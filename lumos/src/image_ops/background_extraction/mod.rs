@@ -46,6 +46,7 @@ pub enum BackgroundMode {
 /// data: the output background sits at each channel's mean sky level (`Subtract`) or keeps it
 /// (`Divide`), with the gradient gone.
 #[derive(Debug, Clone, Introspect)]
+#[config(type_id = "47a71876-5db9-45f9-a21d-cc2ce40a80f2")]
 pub struct ExtractBackground {
     /// Sample-tile size in px. Each tile yields one robust sky sample. Larger → smoother, less able
     /// to absorb extended real signal; should be far larger than stars and smaller than the gradient.

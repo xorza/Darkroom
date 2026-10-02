@@ -7,7 +7,7 @@ use super::*;
 fn before_execution_reports_no_values() {
     let e = TestEngine::over(TestGraph::sample());
 
-    let nonexistent: NodeId = "00000000-0000-0000-0000-000000000000".into();
+    let nonexistent = NodeId::nil();
     assert!(e.engine.get_argument_values(&nonexistent).is_none());
 
     let inputs = e.inputs("sum");

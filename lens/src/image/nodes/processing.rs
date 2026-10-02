@@ -1,6 +1,7 @@
 //! In-memory image adjustment, conversion, blending, and transform nodes.
 
 use imaginarium::{Blend, BlendMode, ContrastBrightness, Transform, Vec2};
+use scenarium::FuncId;
 use scenarium::Invocation;
 use scenarium::{ConstValue, DataType, DynamicValue, InvokeError};
 use scenarium::{Func, FuncInput, FuncLambda, FuncOutput, Library};
@@ -11,6 +12,11 @@ use crate::image::nodes::BLENDMODE_DATATYPE;
 use crate::image::{IMAGE_DATA_TYPE, Image};
 use std::mem;
 
+const BRIGHTNESS_CONTRAST_FUNC_ID: FuncId = FuncId::literal("b8c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e");
+const CONVERT_FUNC_ID: FuncId = FuncId::literal("80aa1ee7-3b75-4200-b480-b9db913bd6eb");
+const BLEND_FUNC_ID: FuncId = FuncId::literal("975cc74b-8412-4293-b2cb-ef8d41fdd9b3");
+const TRANSFORM_FUNC_ID: FuncId = FuncId::literal("d3e4f5a6-b7c8-4d9e-0f1a-2b3c4d5e6f7a");
+
 pub(super) fn register(library: &mut Library) {
     register_brightness(library);
     register_convert(library);
@@ -20,55 +26,56 @@ pub(super) fn register(library: &mut Library) {
 
 fn register_brightness(library: &mut Library) {
     library.add(
-        Func::new(
-            "b8c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
-            "Brightness / Contrast",
-        )
-        .description("Adjusts the brightness and contrast of an image.")
-        .category("Image")
-        .pure()
-        .input(
-            FuncInput::required("Image", IMAGE_DATA_TYPE.clone()).description("Image to adjust."),
-        )
-        .input(
-            FuncInput::required("Brightness", DataType::Float)
-                .description("Brightness offset in [−1, 1]. 0 leaves it unchanged.")
-                .default(0.0),
-        )
-        .input(
-            FuncInput::required("Contrast", DataType::Float)
-                .description("Contrast multiplier. 1 leaves it unchanged.")
-                .default(1.0),
-        )
-        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Adjusted image."))
-        .lambda(FuncLambda::new(
-            move |Invocation {
-                      inputs, outputs, ..
-                  }| {
-                Box::pin(async move {
-                    debug_assert_eq!(inputs.len(), 3);
-                    debug_assert_eq!(outputs.len(), 1);
-                    let value = mem::take(&mut inputs[0]);
-                    let brightness = inputs[1]
-                        .as_f64()
-                        .expect("brightness input type is validated at the compile boundary")
-                        as f32;
-                    let contrast = inputs[2]
-                        .as_f64()
-                        .expect("contrast input type is validated at the compile boundary")
-                        as f32;
-                    let image = adjust_image(ContrastBrightness::new(contrast, brightness), value);
-                    outputs[0] = DynamicValue::from_custom(image);
-                    Ok(())
-                })
-            },
-        )),
+        Func::new(BRIGHTNESS_CONTRAST_FUNC_ID, "Brightness / Contrast")
+            .description("Adjusts the brightness and contrast of an image.")
+            .category("Image")
+            .pure()
+            .input(
+                FuncInput::required("Image", IMAGE_DATA_TYPE.clone())
+                    .description("Image to adjust."),
+            )
+            .input(
+                FuncInput::required("Brightness", DataType::Float)
+                    .description("Brightness offset in [−1, 1]. 0 leaves it unchanged.")
+                    .default(0.0),
+            )
+            .input(
+                FuncInput::required("Contrast", DataType::Float)
+                    .description("Contrast multiplier. 1 leaves it unchanged.")
+                    .default(1.0),
+            )
+            .output(
+                FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Adjusted image."),
+            )
+            .lambda(FuncLambda::new(
+                move |Invocation {
+                          inputs, outputs, ..
+                      }| {
+                    Box::pin(async move {
+                        debug_assert_eq!(inputs.len(), 3);
+                        debug_assert_eq!(outputs.len(), 1);
+                        let value = mem::take(&mut inputs[0]);
+                        let brightness = inputs[1]
+                            .as_f64()
+                            .expect("brightness input type is validated at the compile boundary")
+                            as f32;
+                        let contrast = inputs[2]
+                            .as_f64()
+                            .expect("contrast input type is validated at the compile boundary")
+                            as f32;
+                        let image =
+                            adjust_image(ContrastBrightness::new(contrast, brightness), value);
+                        outputs[0] = DynamicValue::from_custom(image);
+                        Ok(())
+                    })
+                },
+            )),
     );
 }
 
 fn register_convert(library: &mut Library) {
     library.add(
-        Func::new("80aa1ee7-3b75-4200-b480-b9db913bd6eb", "Convert")
+        Func::new(CONVERT_FUNC_ID, "Convert")
             .description("Converts an image to a different color format.")
             .category("Image")
             .pure()
@@ -115,7 +122,7 @@ fn register_convert(library: &mut Library) {
 
 fn register_blend(library: &mut Library) {
     library.add(
-        Func::new("975cc74b-8412-4293-b2cb-ef8d41fdd9b3", "Blend")
+        Func::new(BLEND_FUNC_ID, "Blend")
             .description("Blends two images using the selected blend mode.")
             .category("Image")
             .pure()
@@ -182,7 +189,7 @@ fn register_blend(library: &mut Library) {
 
 fn register_transform(library: &mut Library) {
     library.add(
-        Func::new("d3e4f5a6-b7c8-4d9e-0f1a-2b3c4d5e6f7a", "Transform")
+        Func::new(TRANSFORM_FUNC_ID, "Transform")
             .description("Applies scale, rotation, and translation to an image.")
             .category("Image")
             .pure()

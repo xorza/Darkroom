@@ -7,16 +7,14 @@ use std::any::Any;
 use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use lumos::CalibrationMasters;
 use scenarium::{CustomValue, DataType, RamUsage, TypeId};
 
-pub(crate) static MASTERS_TYPE_ID: LazyLock<TypeId> =
-    LazyLock::new(|| "db1bc978-1d0b-4ffc-9a74-6220eff8908e".into());
+pub(crate) const MASTERS_TYPE_ID: TypeId = TypeId::literal("db1bc978-1d0b-4ffc-9a74-6220eff8908e");
 
-pub(crate) static MASTERS_DATA_TYPE: LazyLock<DataType> =
-    LazyLock::new(|| DataType::Custom(*MASTERS_TYPE_ID));
+pub(crate) const MASTERS_DATA_TYPE: DataType = DataType::Custom(MASTERS_TYPE_ID);
 
 /// Calibration masters carried through the node graph.
 #[derive(Debug)]
@@ -26,7 +24,7 @@ pub(crate) struct Masters {
 
 impl CustomValue for Masters {
     fn type_id(&self) -> TypeId {
-        *MASTERS_TYPE_ID
+        MASTERS_TYPE_ID
     }
 
     fn as_any(&self) -> &dyn Any {

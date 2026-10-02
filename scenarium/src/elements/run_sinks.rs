@@ -18,10 +18,11 @@ use std::sync::OnceLock;
 
 use crate::async_lambda;
 use crate::graph::func::Func;
+use crate::graph::identity::FuncId;
 
 /// Stable `FuncId` standing in for the run-sinks node in the lowered
 /// program (outcome attribution). Not registered in any `Library`.
-const RUN_SINKS_FUNC_ID: &str = "edec890e-5c23-49fb-a131-aaef3844d7c7";
+const RUN_SINKS_FUNC_ID: FuncId = FuncId::literal("edec890e-5c23-49fb-a131-aaef3844d7c7");
 
 /// The hardcoded interface for `RunSinks`, built once. No inputs, outputs,
 /// or events, and a no-op lambda: the node is a pure event-driven trigger whose

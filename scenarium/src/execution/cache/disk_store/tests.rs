@@ -68,7 +68,7 @@ fn publication_temp_files(path: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-const BLOB_TYPE: &str = "78391861-24da-4368-a3a5-2a6b7a47f112";
+const BLOB_TYPE: TypeId = TypeId::literal("78391861-24da-4368-a3a5-2a6b7a47f112");
 
 #[derive(Debug, PartialEq, Eq)]
 struct Blob(Vec<u8>);
@@ -81,7 +81,7 @@ impl fmt::Display for Blob {
 
 impl CustomValue for Blob {
     fn type_id(&self) -> TypeId {
-        BLOB_TYPE.into()
+        BLOB_TYPE
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -328,9 +328,7 @@ async fn unregistered_custom_value_is_reported_unsupported_not_failed() {
         &target(file.path(), Digest([1; 32])),
         &snapshot,
         StorePolicy::KnownMiss,
-        StoreOutcome::Unsupported {
-            type_id: BLOB_TYPE.into(),
-        },
+        StoreOutcome::Unsupported { type_id: BLOB_TYPE },
     )
     .await;
     assert!(!file.exists());

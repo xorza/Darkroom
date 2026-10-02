@@ -21,7 +21,7 @@ use scenarium::{
 
 /// Stable `FuncId` for the preview node. Persisted in every document that holds
 /// one, so it must never change.
-const PREVIEW_FUNC_ID: &str = "7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe";
+const PREVIEW_FUNC_ID: FuncId = FuncId::literal("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe");
 
 /// Where a preview node's value waits between the worker thread that produced
 /// it and the frame that draws it.
@@ -85,13 +85,13 @@ pub(crate) fn preview_func(sink: Arc<PreviewSink>) -> Func {
 /// document's library has lost it — the editor's "add a preview here" action
 /// builds its node from this rather than re-declaring the interface.
 pub(crate) fn registered(library: &Library) -> Option<&Func> {
-    library.funcs().find(|func| is_preview(func.id))
+    library.by_id(PREVIEW_FUNC_ID)
 }
 
 /// Whether `func_id` is the preview func — what the scene projection asks to
 /// decide a node draws a value card instead of the usual body.
 pub(crate) fn is_preview(func_id: FuncId) -> bool {
-    func_id == PREVIEW_FUNC_ID.into()
+    func_id == PREVIEW_FUNC_ID
 }
 
 #[cfg(test)]

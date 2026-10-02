@@ -84,7 +84,7 @@ fn custom_types_keyed_by_type_id() {
     // The lens image type bypasses the ramp for its owned hue, which no
     // ramp entry may duplicate — a hash pick must never impersonate the
     // image color.
-    let image_ty = DataType::Custom(*lens::IMAGE_TYPE_ID);
+    let image_ty = DataType::Custom(lens::IMAGE_TYPE_ID);
     assert_eq!(
         port_color(&t, &image_ty, PortKind::Input, false),
         t.type_colors.image

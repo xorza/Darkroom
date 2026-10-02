@@ -2,7 +2,12 @@ use crate::DataType;
 use crate::async_lambda;
 use crate::graph::func::lambda::Invocation;
 use crate::graph::func::{Func, FuncInput, FuncOutput};
+use crate::graph::identity::FuncId;
 use crate::library::Library;
+
+const PRINT_FUNC_ID: FuncId = FuncId::literal("06b169d2-d3d8-43fb-ba80-c566fcffea44");
+const TO_STRING_FUNC_ID: FuncId = FuncId::literal("9731dfca-061b-421c-a193-4aa9a61d89b5");
+const CONCAT_FUNC_ID: FuncId = FuncId::literal("8854cccc-81d3-4e26-8b4f-e33d62e3117b");
 
 /// The built-in system / utility nodes: logging and value-to-text conversion.
 pub fn system_library() -> Library {
@@ -11,7 +16,7 @@ pub fn system_library() -> Library {
     // print: log the input value to the node log (info level), read
     // back by the editor. Sugar over `ContextManager::log`.
     library.add(
-        Func::new("06b169d2-d3d8-43fb-ba80-c566fcffea44", "Print")
+        Func::new(PRINT_FUNC_ID, "Print")
             .description("Logs any value to the node log.")
             .category("System")
             .sink()
@@ -27,7 +32,7 @@ pub fn system_library() -> Library {
     );
 
     library.add(
-        Func::new("9731dfca-061b-421c-a193-4aa9a61d89b5", "To String")
+        Func::new(TO_STRING_FUNC_ID, "To String")
             .description("Converts any value to its string representation.")
             .category("System")
             .pure()
@@ -50,7 +55,7 @@ pub fn system_library() -> Library {
     );
 
     library.add(
-        Func::new("8854cccc-81d3-4e26-8b4f-e33d62e3117b", "Concat")
+        Func::new(CONCAT_FUNC_ID, "Concat")
             .description(
                 "Converts two values of any type to text and joins them (A followed by B).",
             )

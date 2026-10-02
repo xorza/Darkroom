@@ -63,7 +63,7 @@ fn type_hue(t: &TypeColors, ty: &DataType) -> RgbaF32 {
         // Image is the dominant type on a darkroom canvas — it owns a fixed
         // hue instead of a hash pick, so its wires read as one deliberate
         // color (and can't land next to Float or the status purples).
-        DataType::Custom(id) if *id == *lens::IMAGE_TYPE_ID => t.image,
+        DataType::Custom(id) if *id == lens::IMAGE_TYPE_ID => t.image,
         DataType::Custom(id) | DataType::Enum(id) => ramp_pick(&t.ramp, id.as_u128()),
         DataType::Any => unreachable!("Any handled by fallback in port_color"),
     }
