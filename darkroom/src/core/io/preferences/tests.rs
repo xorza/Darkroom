@@ -1,4 +1,7 @@
+use std::env;
+use std::ffi::OsStr;
 use std::path::PathBuf;
+use std::str;
 
 use common::{SerdeFormat, deserialize, serialize};
 use glam::{IVec2, UVec2};
@@ -7,6 +10,7 @@ use palantir::ImageFilter;
 use crate::core::io::preferences::{
     MlModelPreferences, Preferences, ViewerBackground, ViewerPreferences, WindowState,
 };
+use crate::platform;
 
 /// The file sits in the OS's configuration directory — not beside the
 /// executable, which every packaged install puts somewhere unwritable, and not
@@ -14,11 +18,11 @@ use crate::core::io::preferences::{
 #[test]
 fn the_preferences_file_resolves_inside_the_platform_config_dir() {
     let path = Preferences::path();
-    let config_dir = crate::platform::config_dir().expect("the test host has a home directory");
+    let config_dir = platform::config_dir().expect("the test host has a home directory");
 
     assert_eq!(
         path.file_name(),
-        Some(std::ffi::OsStr::new("darkroom.preferences.ron"))
+        Some(OsStr::new("darkroom.preferences.ron"))
     );
     assert_eq!(path.parent(), Some(config_dir.as_path()));
     // A real absolute location, not the empty prefix the no-home fallback
@@ -27,7 +31,7 @@ fn the_preferences_file_resolves_inside_the_platform_config_dir() {
     // The executable's directory is exactly what this no longer tracks: under
     // cargo that is `target/`, and the flatpak's read-only `/app/bin` is what
     // made resolving there fail outright.
-    let exe = std::env::current_exe().expect("the test binary can locate itself");
+    let exe = env::current_exe().expect("the test binary can locate itself");
     assert_ne!(path.parent(), exe.parent());
 }
 
@@ -59,7 +63,7 @@ fn populated_preferences_roundtrips() {
         },
     };
     let bytes = serialize(&cfg, SerdeFormat::Ron).expect("preferences RON serializes");
-    let text = std::str::from_utf8(&bytes).expect("preferences RON is UTF-8");
+    let text = str::from_utf8(&bytes).expect("preferences RON is UTF-8");
     assert!(text.contains("mag_filter: linear"));
     let back = roundtrip(&cfg);
     assert_eq!(

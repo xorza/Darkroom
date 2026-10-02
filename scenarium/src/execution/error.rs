@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::graph::identity::{EventPort, FuncId, NodeId};
+use std::result;
 
 /// An **operation-level** failure that aborts a whole plan / run: the schedule has a
 /// cycle ([`CycleDetected`](Error::CycleDetected)), a node seed had no occurrence
@@ -65,4 +66,4 @@ pub enum RunError {
     Cancelled { func_id: FuncId },
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = result::Result<T, Error>;

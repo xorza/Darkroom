@@ -3,6 +3,7 @@ use scenarium::{ContextStore, CustomValueCodec, Library};
 
 use crate::image::codec::{HEADER_LEN, ImageCodec, image_type_entry};
 use crate::image::{IMAGE_TYPE_ID, Image};
+use std::io::Cursor;
 
 #[derive(Debug)]
 struct Sample {
@@ -32,11 +33,7 @@ async fn round_trip(image: CpuImage) -> CpuImage {
         .expect("a CPU-resident image encodes");
     let byte_len = bytes.len() as u64;
     let decoded = ImageCodec
-        .decode(
-            &mut std::io::Cursor::new(bytes),
-            byte_len,
-            &mut cpu_context(),
-        )
+        .decode(&mut Cursor::new(bytes), byte_len, &mut cpu_context())
         .await
         .expect("image decodes");
     decoded
@@ -81,11 +78,7 @@ async fn decode_rejects_short_unknown_and_mismatched_payloads() {
     async fn error(bytes: Vec<u8>) -> String {
         let byte_len = bytes.len() as u64;
         ImageCodec
-            .decode(
-                &mut std::io::Cursor::new(bytes),
-                byte_len,
-                &mut cpu_context(),
-            )
+            .decode(&mut Cursor::new(bytes), byte_len, &mut cpu_context())
             .await
             .map(|_| ())
             .expect_err("the payload is refused")

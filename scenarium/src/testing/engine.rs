@@ -11,7 +11,9 @@
 //! the run ends, so a test can hold two runs side by side and compare them, and
 //! nothing it asserts is invalidated by the next `run_*` call.
 
+use std::fs;
 use std::path::PathBuf;
+use std::result;
 
 use hashbrown::HashMap;
 
@@ -92,7 +94,7 @@ impl TestEngine {
         self.try_reinstall().expect("the fixture graph compiles");
     }
 
-    pub(crate) fn try_reinstall(&mut self) -> std::result::Result<(), CompileError> {
+    pub(crate) fn try_reinstall(&mut self) -> result::Result<(), CompileError> {
         self.engine.update(&self.graph.graph, &self.graph.library)
     }
 
@@ -131,8 +133,7 @@ impl TestEngine {
     /// The bytes of `name`'s blob. Panics if the store holds none.
     pub(crate) fn blob(&self, name: &str) -> Vec<u8> {
         let path = self.blob_path(name);
-        std::fs::read(&path)
-            .unwrap_or_else(|error| panic!("no blob at {}: {error}", path.display()))
+        fs::read(&path).unwrap_or_else(|error| panic!("no blob at {}: {error}", path.display()))
     }
 
     /// Run to these exact nodes — the "run to this node" / preview trigger.

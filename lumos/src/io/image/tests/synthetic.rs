@@ -8,6 +8,8 @@
 
 use crate::testing::prelude::*;
 use std::fs::File;
+use std::path::Path;
+use std::path::PathBuf;
 
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode::{load_cfa_fits, load_linear_fits};
@@ -16,9 +18,11 @@ use crate::io::image::load_context::LoadContext;
 use crate::io::image::sample_domain::{SampleDomain, ScaleOrigin};
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::internals::test_pattern_array;
+use crate::stacking::combine::stack;
 use crate::stacking::frame_store::{FramePeek, StackableImage};
 use crate::testing::make_cfa;
 use crate::{CalibrationMasters, CalibrationSet, CfaImage, CfaType, PreviewImage};
+use common::internals;
 use fits_well::header::Header;
 use fits_well::image::{Image, Scaling};
 use fits_well::{FitsError, FitsWriter};
@@ -26,15 +30,15 @@ use imaginarium::ColorFormat;
 
 /// Write `image` to a temp FITS file via `FitsWriter`, then load it through `load_linear_fits`.
 fn write_and_load(name: &str, image: &Image) -> Result<LinearImage, ImageError> {
-    let path = common::internals::test_output_path(&format!("fits_roundtrip/{name}.fits"));
+    let path = internals::test_output_path(&format!("fits_roundtrip/{name}.fits"));
     let mut writer = FitsWriter::new(File::create(&path).unwrap());
     writer.write_image(image, None).unwrap();
     writer.into_inner().sync_all().unwrap();
     load_linear_fits(&path, &LoadContext::default())
 }
 
-fn write_with_header(name: &str, image: &Image, header: &Header) -> std::path::PathBuf {
-    let path = common::internals::test_output_path(&format!("fits_roundtrip/{name}.fits"));
+fn write_with_header(name: &str, image: &Image, header: &Header) -> PathBuf {
+    let path = internals::test_output_path(&format!("fits_roundtrip/{name}.fits"));
     let mut writer = FitsWriter::new(File::create(&path).unwrap());
     writer.write_image(image, Some(header)).unwrap();
     writer.into_inner().sync_all().unwrap();
@@ -42,7 +46,7 @@ fn write_with_header(name: &str, image: &Image, header: &Header) -> std::path::P
 }
 
 fn write_header_and_load(name: &str, header: &Header) -> Result<LinearImage, ImageError> {
-    let path = common::internals::test_output_path(&format!("fits_roundtrip/{name}.fits"));
+    let path = internals::test_output_path(&format!("fits_roundtrip/{name}.fits"));
     let mut writer = FitsWriter::new(File::create(&path).unwrap());
     writer.write_raw_hdu(header, &0.0f32.to_be_bytes()).unwrap();
     writer.into_inner().sync_all().unwrap();
@@ -295,8 +299,8 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
 
     // The path loaders refuse the set too, before combining a byte; the same two files on one
     // span stack. (`stack` from paths used to skip this check entirely.)
-    let stack_paths = |paths: &[&std::path::Path]| {
-        crate::stacking::combine::stack::stack(
+    let stack_paths = |paths: &[&Path]| {
+        stack::stack(
             paths,
             crate::StackConfig::default(),
             crate::ProgressCallback::default(),

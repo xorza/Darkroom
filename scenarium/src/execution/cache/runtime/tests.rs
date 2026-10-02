@@ -1,4 +1,5 @@
 use crate::graph::identity::{FuncId, NodeId};
+use std::panic;
 use std::sync::Arc;
 
 use crate::execution::cache::digest::Digest;
@@ -434,7 +435,7 @@ fn resident_hit_derives_coverage_from_values() {
         [DynamicValue::Unbound, DynamicValue::Unbound]
     ));
 
-    let missing_invocation = std::panic::catch_unwind(|| {
+    let missing_invocation = panic::catch_unwind(|| {
         RuntimeSlot::default().stamp_produced();
     });
     assert!(

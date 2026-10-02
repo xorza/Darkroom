@@ -8,6 +8,7 @@ use crate::stacking::calibration_masters::prepared_flat::{
     MIN_NORMALIZED_FLAT, apply, normalize, subtract,
 };
 use crate::testing::make_cfa;
+use std::array;
 
 fn prepare(flat: CfaImage, subtractor: Option<&CfaImage>) -> CfaImage {
     normalize(subtract(
@@ -65,7 +66,7 @@ fn reference_apply(light: &mut CfaImage, flat: &CfaImage, subtractor: Option<&Cf
             },
         );
     let inv_means: [f32; 3] =
-        std::array::from_fn(|color| 1.0 / (sums[color] / counts[color] as f64) as f32);
+        array::from_fn(|color| 1.0 / (sums[color] / counts[color] as f64) as f32);
 
     light
         .data

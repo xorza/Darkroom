@@ -1,3 +1,4 @@
+use std::io;
 use std::path::Path;
 
 use common::file_utils;
@@ -67,7 +68,7 @@ pub(super) fn validate_cfa_image_header(path: &Path, image: &Header) -> Result<b
     Ok(is_lumos_cfa)
 }
 
-pub(crate) fn save_cfa_fits(path: &Path, image: &CfaImage) -> std::io::Result<()> {
+pub(crate) fn save_cfa_fits(path: &Path, image: &CfaImage) -> io::Result<()> {
     let encoded = CfaFitsHdu::encode(
         image,
         CfaFitsHduMetadata {
@@ -86,10 +87,7 @@ pub(crate) fn save_cfa_fits(path: &Path, image: &CfaImage) -> std::io::Result<()
 
 impl CfaFitsHdu {
     /// Build the image and header a CFA HDU writes, from `cfa` plus the per-HDU metadata.
-    pub(crate) fn encode(
-        cfa: &CfaImage,
-        hdu_metadata: CfaFitsHduMetadata<'_>,
-    ) -> std::io::Result<Self> {
+    pub(crate) fn encode(cfa: &CfaImage, hdu_metadata: CfaFitsHduMetadata<'_>) -> io::Result<Self> {
         let mut header = Header::new();
         header
             .set("LUMOSFMT", CFA_FITS_FORMAT)

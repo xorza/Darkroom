@@ -1,4 +1,5 @@
 use super::*;
+use std::fs;
 
 /// A disk-persisted node's output survives a fresh engine (reopen), its
 /// sole-consumer upstream is pruned on the hit, and an input change
@@ -146,7 +147,7 @@ async fn corrupt_blob_recomputes_and_is_replaced_in_the_same_run() {
     let output_count = u32::from_le_bytes(bytes[36..40].try_into().unwrap()) as usize;
     bytes.truncate(40 + output_count);
     bytes.extend_from_slice(b"garbage");
-    std::fs::write(&blob, &bytes).unwrap();
+    fs::write(&blob, &bytes).unwrap();
 
     // Reopen: the corrupt blob still carries the current digest in its
     // header. Body verification fails before the resolver cuts the producer
@@ -202,7 +203,7 @@ async fn vanished_frontier_blob_recomputes_instead_of_panicking() {
 
     // Reopen, then remove sum's blob before the run reaches it.
     let mut e = e.reopen();
-    std::fs::remove_file(e.blob_path("sum")).unwrap();
+    fs::remove_file(e.blob_path("sum")).unwrap();
     let run = e.run_sinks().await;
 
     // The run completes — no panic: the missing blob just misses.
@@ -247,14 +248,14 @@ async fn a_both_mode_node_whose_store_failed_republishes_without_recomputing() {
 
     // A directory where src's blob belongs: the publication cannot land.
     let blob = e.blob_path("src");
-    std::fs::create_dir_all(&blob).unwrap();
+    fs::create_dir_all(&blob).unwrap();
     e.run_sinks().await;
     assert_eq!(calls.count(), 1, "the cold run computes");
     assert!(blob.is_dir(), "the blocked path is still what it was");
 
     // Clear the blockage. The value is still resident, so the node does not
     // recompute — but the blob it owes is now written.
-    std::fs::remove_dir(&blob).unwrap();
+    fs::remove_dir(&blob).unwrap();
     let run = e.run_sinks().await;
     assert_eq!(
         calls.count(),
@@ -269,23 +270,23 @@ async fn a_both_mode_node_whose_store_failed_republishes_without_recomputing() {
         blob.is_file(),
         "the owed blob was published on the next run"
     );
-    let published = std::fs::read(&blob).unwrap();
+    let published = fs::read(&blob).unwrap();
 
     // The debt is now settled, and settled means remembered: overwrite the blob
     // with bytes no coverage probe would accept. A third run leaves them alone,
     // which it could only do without reading the file.
-    std::fs::write(&blob, b"not a blob").unwrap();
+    fs::write(&blob, b"not a blob").unwrap();
     e.run_sinks().await;
     assert_eq!(calls.count(), 1);
     assert_eq!(
-        std::fs::read(&blob).unwrap(),
+        fs::read(&blob).unwrap(),
         b"not a blob",
         "a settled debt costs no further disk reads"
     );
 
     // And the blob that was published is a real one: a fresh engine over the
     // same store serves it without computing.
-    std::fs::write(&blob, published).unwrap();
+    fs::write(&blob, published).unwrap();
     let mut e = e.reopen();
     let run = e.run_sinks().await;
     assert_eq!(calls.count(), 1, "the republished blob is served on reopen");

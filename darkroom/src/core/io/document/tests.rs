@@ -3,6 +3,8 @@ use scenarium::{Binding, ConstValue, InputPort, NodeId};
 
 use super::*;
 use crate::core::document::harness::DocFixture;
+use ron::ser;
+use std::fs;
 
 #[test]
 fn document_round_trips_as_one_ron_entry() {
@@ -74,7 +76,7 @@ fn save_refuses_an_invalid_document_and_leaves_the_file_alone() {
     let path = dir.join("refused.darkroom");
     let good = Document::default();
     save(&good, &path).expect("a valid document saves");
-    let on_disk = std::fs::read(&path).unwrap();
+    let on_disk = fs::read(&path).unwrap();
 
     // A binding whose consumer node isn't in the graph — structurally
     // invalid without tripping an insertion assert.
@@ -92,7 +94,7 @@ fn save_refuses_an_invalid_document_and_leaves_the_file_alone() {
         "the refusal names the path and the reason"
     );
     assert_eq!(
-        std::fs::read(&path).unwrap(),
+        fs::read(&path).unwrap(),
         on_disk,
         "the previously saved document is still intact"
     );
@@ -103,7 +105,7 @@ fn save_refuses_an_invalid_document_and_leaves_the_file_alone() {
 fn load_rejects_invalid_archives_and_missing_or_invalid_documents() {
     let dir = TempDir::new("darkroom-document-rejects");
     let corrupt = dir.join("corrupt.darkroom");
-    std::fs::write(&corrupt, b"not a zip archive").unwrap();
+    fs::write(&corrupt, b"not a zip archive").unwrap();
     assert!(
         matches!(
             load(&corrupt).unwrap_err(),
@@ -138,7 +140,7 @@ fn load_rejects_invalid_archives_and_missing_or_invalid_documents() {
         InputPort::new(NodeId::unique(), 0),
         Binding::Const(ConstValue::Int(1)),
     );
-    let encoded = ron::ser::to_string(&document).unwrap();
+    let encoded = ser::to_string(&document).unwrap();
     write_test_archive(&invalid, DOCUMENT_ENTRY, encoded.as_bytes());
     assert!(
         matches!(

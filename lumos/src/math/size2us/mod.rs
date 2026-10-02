@@ -1,6 +1,9 @@
 //! Pixel extent of a 2D grid.
 
 use crate::math::vec2us::Vec2us;
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
 
 /// How many columns and rows a 2D grid has.
 ///
@@ -61,8 +64,8 @@ impl Size2us {
     }
 }
 
-impl std::fmt::Display for Size2us {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for Size2us {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         write!(formatter, "{}x{}", self.width, self.height)
     }
 }

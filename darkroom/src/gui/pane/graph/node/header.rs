@@ -431,6 +431,7 @@ fn title(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
 #[cfg(test)]
 mod tests {
     use scenarium::{CacheMode, NodeId};
+    use std::mem;
 
     use crate::core::document::harness::DocFixture;
     use crate::core::edit::graph_intent::GraphIntent;
@@ -462,7 +463,7 @@ mod tests {
         ChipClick {
             node_id,
             intents,
-            commands: std::mem::take(&mut h.commands),
+            commands: mem::take(&mut h.commands),
         }
     }
 

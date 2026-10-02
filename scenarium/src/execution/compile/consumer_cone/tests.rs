@@ -1,6 +1,7 @@
 use super::*;
 use crate::DataType;
 use crate::graph::identity::NodeId;
+use crate::testing::graph::NodeSpec;
 use crate::testing::graph::TestGraph;
 use crate::testing::graph::compiled::Compiled;
 
@@ -113,7 +114,7 @@ fn a_reused_cone_answers_each_program_from_scratch() {
     // reach only itself.
     let mut unwired = TestGraph::new();
     unwired.add("source", |n| n.pure().output(DataType::Int));
-    unwired.add("sink", crate::testing::graph::NodeSpec::records);
+    unwired.add("sink", NodeSpec::records);
     let unwired = unwired.compile();
     assert_eq!(reached(cone, &unwired, &["source"]), ["source"]);
 

@@ -3,6 +3,7 @@
 use crate::stacking::star_detection::threshold_mask::internals::{TEST_MIN_NOISE, test_params};
 use crate::stacking::star_detection::threshold_mask::simd::process_words_scalar;
 use crate::testing::simd_check::{DATA_SHAPES, SWEEP_WIDTHS};
+use imaginarium::cpu_features;
 
 /// The shared sweep plus widths spanning whole 64-pixel words. Every backend vectorizes full words
 /// and hands whatever is left to `process_words_scalar`, so a word exactly filled, a word and a
@@ -108,7 +109,7 @@ macro_rules! assert_backend_matches_scalar {
 #[cfg(target_arch = "x86_64")]
 #[test]
 fn avx2_matches_scalar_packed() {
-    if !imaginarium::cpu_features::has_avx2() {
+    if !cpu_features::has_avx2() {
         return; // backend not present on this host
     }
     use crate::stacking::star_detection::threshold_mask::simd::avx2::process_words_avx2;
@@ -118,7 +119,7 @@ fn avx2_matches_scalar_packed() {
 #[cfg(target_arch = "x86_64")]
 #[test]
 fn sse41_matches_scalar_packed() {
-    if !imaginarium::cpu_features::has_sse4_1() {
+    if !cpu_features::has_sse4_1() {
         return; // backend not present on this host
     }
     use crate::stacking::star_detection::threshold_mask::simd::sse41::process_words_sse;

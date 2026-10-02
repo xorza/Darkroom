@@ -27,6 +27,7 @@ use crate::stacking::registration::config::{self, InterpolationMethod};
 use crate::stacking::registration::resample;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::stacking::stack_product::quality_map::QualityMap;
+use crate::testing;
 use crate::testing::ScratchDirectory;
 use std::path::PathBuf;
 
@@ -47,7 +48,7 @@ fn make_cfa_stack_cache(
         .into_iter()
         .zip(source_sigmas)
         .map(|(pixels, &sigma)| {
-            let mut image = crate::testing::make_cfa(
+            let mut image = testing::make_cfa(
                 Size2us::new(dimensions.width(), dimensions.height()),
                 pixels,
                 CfaType::Mono,
@@ -1454,8 +1455,8 @@ fn combining_a_cache_against_a_different_normalization_is_refused() {
     // next caller that does not.
     let cache = FrameCache::from_images(
         vec![
-            crate::testing::make_cfa(Size2us::new(2, 1), vec![0.4; 2], CfaType::Mono),
-            crate::testing::make_cfa(Size2us::new(2, 1), vec![0.2; 2], CfaType::Mono),
+            testing::make_cfa(Size2us::new(2, 1), vec![0.4; 2], CfaType::Mono),
+            testing::make_cfa(Size2us::new(2, 1), vec![0.2; 2], CfaType::Mono),
         ],
         Normalization::None,
     );

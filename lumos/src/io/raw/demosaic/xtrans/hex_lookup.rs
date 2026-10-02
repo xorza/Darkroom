@@ -150,6 +150,7 @@ impl HexLookup {
 #[cfg(test)]
 mod tests {
     use crate::io::raw::demosaic::xtrans::hex_lookup::*;
+    use std::ptr;
 
     fn test_pattern() -> XTransPattern {
         XTransPattern::new([
@@ -262,13 +263,13 @@ mod tests {
 
         // get() should wrap via % 3
         assert_eq!(
-            std::ptr::from_ref(hex.get(0, 0)),
-            std::ptr::from_ref(hex.get(3, 3)),
+            ptr::from_ref(hex.get(0, 0)),
+            ptr::from_ref(hex.get(3, 3)),
             "get(0,0) should equal get(3,3)"
         );
         assert_eq!(
-            std::ptr::from_ref(hex.get(1, 2)),
-            std::ptr::from_ref(hex.get(4, 5)),
+            ptr::from_ref(hex.get(1, 2)),
+            ptr::from_ref(hex.get(4, 5)),
             "get(1,2) should equal get(4,5)"
         );
     }

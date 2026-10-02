@@ -17,6 +17,7 @@ use crate::stacking::star_detection::config::background_config::BackgroundConfig
 use crate::stacking::star_detection::mask_dilation::dilate_mask;
 use crate::stacking::star_detection::resources::DetectionResources;
 use crate::stacking::star_detection::threshold_mask::{ThresholdParams, create_threshold_mask};
+use std::mem;
 
 /// Per-pixel background and noise estimates for an image.
 ///
@@ -223,7 +224,7 @@ fn create_object_mask(
     // Dilate mask to cover object wings
     if dilation_radius > 0 {
         dilate_mask(output, dilation_radius, scratch);
-        std::mem::swap(output, scratch);
+        mem::swap(output, scratch);
     }
 }
 

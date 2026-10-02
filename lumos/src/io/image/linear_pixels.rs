@@ -3,6 +3,8 @@ use rayon::prelude::*;
 
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::math::sum;
+use std::array;
+use std::slice;
 
 /// Planar floating-point pixels for a monochrome or RGB image.
 #[derive(Debug, Clone)]
@@ -82,8 +84,7 @@ impl LinearPixels {
         if dimensions.is_grayscale() {
             Buffer2::new_default(dimensions.width(), dimensions.height()).into()
         } else {
-            std::array::from_fn(|_| Buffer2::new_default(dimensions.width(), dimensions.height()))
-                .into()
+            array::from_fn(|_| Buffer2::new_default(dimensions.width(), dimensions.height())).into()
         }
     }
 
@@ -139,7 +140,7 @@ impl LinearPixels {
 
     pub(crate) fn planes_mut(&mut self) -> impl Iterator<Item = &mut Buffer2<f32>> {
         match self {
-            LinearPixels::L(plane) => std::slice::from_mut(plane).iter_mut(),
+            LinearPixels::L(plane) => slice::from_mut(plane).iter_mut(),
             LinearPixels::Rgb(planes) => planes.iter_mut(),
         }
     }

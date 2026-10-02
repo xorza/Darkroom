@@ -2,6 +2,7 @@
 
 use std::sync::OnceLock;
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -316,16 +317,14 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
 }
 
 fn source_identity(path: &Path) -> Result<SourceIdentity, FrameStoreError> {
-    let canonical =
-        std::fs::canonicalize(path).map_err(|source| FrameStoreError::ReadMetadata {
-            path: path.to_path_buf(),
-            source,
-        })?;
-    let metadata =
-        std::fs::metadata(&canonical).map_err(|source| FrameStoreError::ReadMetadata {
-            path: path.to_path_buf(),
-            source,
-        })?;
+    let canonical = fs::canonicalize(path).map_err(|source| FrameStoreError::ReadMetadata {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let metadata = fs::metadata(&canonical).map_err(|source| FrameStoreError::ReadMetadata {
+        path: path.to_path_buf(),
+        source,
+    })?;
     let modified = metadata
         .modified()
         .map_err(|source| FrameStoreError::ReadMetadata {
@@ -372,7 +371,7 @@ fn write_sidecar_value<T: Serialize>(path: PathBuf, value: &T) -> Result<(), Fra
 
 /// Read a sidecar back, or `None` if it is absent, unreadable, or not this layout.
 fn read_sidecar_value<T: DeserializeOwned>(path: &Path) -> Option<T> {
-    let bytes = std::fs::read(path).ok()?;
+    let bytes = fs::read(path).ok()?;
     let sidecar: Sidecar<T> = common::deserialize(&bytes, SerdeFormat::Bitcode).ok()?;
     (sidecar.format == SIDECAR_FORMAT).then_some(sidecar.value)
 }

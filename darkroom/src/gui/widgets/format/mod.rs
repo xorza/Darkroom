@@ -3,6 +3,12 @@
 //! inspector's status line, a preview card's info strip — formats through here, so
 //! the same number never renders two ways.
 
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::io::Cursor;
+use std::str;
+
 /// Compact run-time label: seconds → `s` / `ms` / `µs` at the scale that keeps
 /// 2–3 significant digits. The elapsed-time sibling of [`fmt_bytes`], read by
 /// the node header's live timer and the inspector's status line.
@@ -24,8 +30,8 @@ pub(crate) fn fmt_elapsed(secs: f64) -> Elapsed {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Elapsed(f64);
 
-impl std::fmt::Display for Elapsed {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for Elapsed {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let secs = self.0;
         // Each unit is chosen by what it would print, not by the raw value: 0.99996 s is shown as
         // "1.00s", never as "1000.0ms".
@@ -50,7 +56,7 @@ impl std::fmt::Display for Elapsed {
 fn printed_integer_part(value: f64, precision: usize) -> u64 {
     use std::io::Write as _;
     let mut buffer = [0u8; 48];
-    let mut cursor = std::io::Cursor::new(&mut buffer[..]);
+    let mut cursor = Cursor::new(&mut buffer[..]);
     write!(cursor, "{value:.precision$}").expect("48 bytes hold every magnitude formatted here");
     let len = usize::try_from(cursor.position()).expect("the cursor sits inside the buffer");
     let printed = &buffer[..len];
@@ -58,7 +64,7 @@ fn printed_integer_part(value: f64, precision: usize) -> u64 {
         .split(|&byte| byte == b'.')
         .next()
         .unwrap_or(printed);
-    std::str::from_utf8(integer)
+    str::from_utf8(integer)
         .ok()
         .and_then(|digits| digits.parse().ok())
         .unwrap_or(u64::MAX)
@@ -81,8 +87,8 @@ pub(crate) fn fmt_bytes(bytes: u64) -> Bytes {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Bytes(u64);
 
-impl std::fmt::Display for Bytes {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for Bytes {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         const KB: f64 = 1024.0;
         const MB: f64 = KB * KB;
         const GB: f64 = KB * KB * KB;

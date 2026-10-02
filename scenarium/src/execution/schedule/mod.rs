@@ -49,6 +49,7 @@ use crate::execution::schedule::error::RunScheduleValidationError;
 use crate::execution::seeds::RunSeeds;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::node::special::SpecialNode;
+use std::result;
 
 pub(crate) mod error;
 pub(crate) mod planner;
@@ -416,7 +417,7 @@ impl RunSchedule {
     pub(crate) fn validate(
         &self,
         program: &CompiledGraph,
-    ) -> std::result::Result<(), RunScheduleValidationError> {
+    ) -> result::Result<(), RunScheduleValidationError> {
         if self.process_order.len() > program.e_nodes.len() {
             return Err(RunScheduleValidationError::OrderTooLong);
         }

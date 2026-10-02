@@ -4,10 +4,13 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::process;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::task::{Context, Poll};
 
+use tokio::fs as tokio_fs;
 use tokio::io::{AsyncSeek, AsyncWrite, AsyncWriteExt as _};
+use tokio::task;
 
 /// Whether publishing a file must survive an abrupt system shutdown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,7 +133,7 @@ impl Seek for SyncAtomicFile {
 #[derive(Debug)]
 pub struct AtomicFile {
     // The handle must close before `Publication` removes the path on Windows.
-    file: tokio::fs::File,
+    file: tokio_fs::File,
     publication: Publication,
 }
 
@@ -139,7 +142,7 @@ impl AtomicFile {
     pub async fn new(destination: &Path, mode: PublicationMode) -> io::Result<Self> {
         loop {
             let temporary = temporary_path(destination)?;
-            match tokio::fs::OpenOptions::new()
+            match tokio_fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
                 .open(&temporary)
@@ -166,7 +169,7 @@ impl AtomicFile {
         self.file.flush().await?;
         let Self { file, publication } = self;
         let file = file.into_std().await;
-        tokio::task::spawn_blocking(move || publication.commit_with_replacement(file, replace))
+        task::spawn_blocking(move || publication.commit_with_replacement(file, replace))
             .await
             .expect("atomic-file commit task panicked")
     }
@@ -208,7 +211,7 @@ fn temporary_path(destination: &Path) -> io::Result<PathBuf> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?;
     let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
     let mut temp_name = file_name.to_os_string();
-    temp_name.push(format!(".{}.{sequence}.tmp", std::process::id()));
+    temp_name.push(format!(".{}.{sequence}.tmp", process::id()));
     Ok(destination.with_file_name(temp_name))
 }
 

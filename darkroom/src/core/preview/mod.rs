@@ -12,6 +12,7 @@
 //! like any consumer, and nothing about it is special to the engine.
 
 use std::collections::HashMap;
+use std::mem;
 use std::sync::{Arc, Mutex};
 
 use scenarium::{
@@ -74,7 +75,7 @@ pub(crate) fn preview_func(sink: Arc<PreviewSink>) -> Func {
             move |Invocation { ctx, inputs, .. }| { sink = Arc::clone(&sink) } => {
                 // `current_node` is the only thing in the invocation that says
                 // *which* preview this is — the editor routes on it.
-                sink.publish(ctx.current_node(), std::mem::take(&mut inputs[0]));
+                sink.publish(ctx.current_node(), mem::take(&mut inputs[0]));
                 Ok(())
             }
         ))

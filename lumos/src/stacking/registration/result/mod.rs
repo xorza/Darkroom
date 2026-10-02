@@ -7,6 +7,9 @@ use glam::DVec2;
 use crate::error::InvalidConfigField;
 use crate::stacking::registration::distortion::sip::SipFitResult;
 use crate::stacking::registration::transform::{Transform, TransformType, WarpTransform};
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
 
 /// Minimum inlier count for a meaningful quality score (below this the fit is unreliable).
 const QUALITY_MIN_INLIERS: usize = 4;
@@ -24,8 +27,8 @@ pub enum RegistrationCatalog {
     Target,
 }
 
-impl std::fmt::Display for RegistrationCatalog {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for RegistrationCatalog {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             RegistrationCatalog::Reference => f.write_str("reference"),
             RegistrationCatalog::Target => f.write_str("target"),
@@ -46,8 +49,8 @@ pub enum RansacFailureReason {
     InsufficientInliers,
 }
 
-impl std::fmt::Display for RansacFailureReason {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for RansacFailureReason {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             RansacFailureReason::NoInliersFound => write!(f, "no inliers found"),
             RansacFailureReason::DegeneratePointSet => write!(f, "degenerate point set"),
@@ -69,8 +72,8 @@ pub struct FailedRung {
     pub error: Box<RegistrationError>,
 }
 
-impl std::fmt::Display for FailedRung {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for FailedRung {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}: {}", self.model, self.error)
     }
 }

@@ -1,8 +1,10 @@
+use std::any::Any;
 use std::sync::Arc;
 
 use hashbrown::HashMap;
 use tokio::sync::Barrier;
 use tokio::sync::mpsc::{Receiver, channel};
+use tokio::task;
 use tokio::task::{Id, JoinSet};
 
 use crate::execution::report::EventTrigger;
@@ -64,7 +66,7 @@ impl ActiveEventLoop {
                             return;
                         }
                         pause_gate.wait().await;
-                        tokio::task::yield_now().await;
+                        task::yield_now().await;
                     }
                 }
             });
@@ -73,7 +75,7 @@ impl ActiveEventLoop {
         }
 
         ready.wait().await;
-        tokio::task::yield_now().await;
+        task::yield_now().await;
 
         Self {
             tasks,
@@ -151,7 +153,7 @@ impl ActiveEventLoop {
     }
 }
 
-fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+fn panic_message(payload: Box<dyn Any + Send>) -> String {
     if let Some(message) = payload.downcast_ref::<&str>() {
         (*message).to_string()
     } else if let Some(message) = payload.downcast_ref::<String>() {

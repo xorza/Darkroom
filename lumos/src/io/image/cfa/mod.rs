@@ -6,6 +6,7 @@
 
 pub(crate) mod same_color;
 
+use std::io;
 use std::path::Path;
 
 use rayon::prelude::*;
@@ -210,7 +211,7 @@ impl CfaImage {
     }
 
     /// Save this sensor-domain image as a checksummed floating-point FITS file.
-    pub fn save_fits(&self, path: &Path) -> std::io::Result<()> {
+    pub fn save_fits(&self, path: &Path) -> io::Result<()> {
         fits_cfa::save_cfa_fits(path, self)
     }
 

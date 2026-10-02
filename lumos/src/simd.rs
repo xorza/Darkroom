@@ -108,6 +108,7 @@ pub(crate) use dispatch;
 
 #[cfg(test)]
 mod tests {
+    use imaginarium::cpu_features;
     /// Every arm returns the tag of the backend it stands for, so a test can name which rung the
     /// ladder took on the machine it is running on without any SIMD in the picture.
     fn taken(force_scalar: bool) -> &'static str {
@@ -143,9 +144,9 @@ mod tests {
 
         let expected = if cfg!(target_arch = "aarch64") {
             "neon"
-        } else if cfg!(target_arch = "x86_64") && imaginarium::cpu_features::has_avx2_fma() {
+        } else if cfg!(target_arch = "x86_64") && cpu_features::has_avx2_fma() {
             "avx2_fma"
-        } else if cfg!(target_arch = "x86_64") && imaginarium::cpu_features::has_sse4_1() {
+        } else if cfg!(target_arch = "x86_64") && cpu_features::has_sse4_1() {
             "sse4_1"
         } else {
             "scalar"
@@ -167,7 +168,7 @@ mod tests {
         }
 
         #[cfg(target_arch = "x86_64")]
-        if imaginarium::cpu_features::has_sse4_1() {
+        if cpu_features::has_sse4_1() {
             assert_eq!(skip_first(true), "sse4_1");
         }
         #[cfg(target_arch = "aarch64")]

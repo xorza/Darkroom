@@ -4,6 +4,7 @@ use imaginarium::Buffer2;
 
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
+use std::ops::Index;
 
 /// The share of frames that reached each pixel, in `[0, 1]`.
 ///
@@ -57,7 +58,7 @@ impl Coverage {
 
 /// Indexes like the plane it stands for, by flat sample or by `(x, y)` — a uniform coverage
 /// answers with its constant rather than materializing anything.
-impl std::ops::Index<usize> for Coverage {
+impl Index<usize> for Coverage {
     type Output = f32;
 
     fn index(&self, index: usize) -> &f32 {
@@ -71,7 +72,7 @@ impl std::ops::Index<usize> for Coverage {
     }
 }
 
-impl std::ops::Index<(usize, usize)> for Coverage {
+impl Index<(usize, usize)> for Coverage {
     type Output = f32;
 
     fn index(&self, (x, y): (usize, usize)) -> &f32 {

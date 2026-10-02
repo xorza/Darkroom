@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 use crate::io::image::fits::provenance::FitsTransferProvenance;
 use crate::io::image::sample_domain::{SampleDomain, ScaleOrigin};
 use crate::io::raw::provenance::RawTransferProvenance;
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceContainer {
@@ -132,8 +135,8 @@ impl RowOrder {
     }
 }
 
-impl std::fmt::Display for RowOrder {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for RowOrder {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.keyword())
     }
 }

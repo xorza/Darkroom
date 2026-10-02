@@ -1,4 +1,7 @@
+use std::fmt;
 use std::fmt::Display;
+use std::fmt::Formatter;
+use std::slice;
 
 use serde::{Deserialize, Serialize};
 
@@ -111,7 +114,7 @@ impl ConstValue {
     /// selection never has to special-case the singular form.
     pub fn as_fs_paths(&self) -> Option<&[String]> {
         match self {
-            ConstValue::FsPath(path) => Some(std::slice::from_ref(path)),
+            ConstValue::FsPath(path) => Some(slice::from_ref(path)),
             ConstValue::FsPaths(paths) => Some(paths),
             _ => None,
         }
@@ -138,7 +141,7 @@ impl ConstValue {
 pub struct ValueText<'a>(&'a ConstValue);
 
 impl Display for ValueText<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self.0 {
             ConstValue::Null => f.write_str("null"),
             ConstValue::Float(value) => write!(f, "{value}"),
@@ -162,7 +165,7 @@ impl Display for ValueText<'_> {
 }
 
 impl Display for ConstValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             ConstValue::Null => write!(f, "null"),
             ConstValue::Float(value) => write!(f, "{value:.4}"),

@@ -9,6 +9,7 @@
 
 use crate::execution::cache::runtime::error::{CacheFlushUnsupported, CacheNodeFailure};
 use crate::execution::error::Error;
+use std::fmt::Display;
 
 #[derive(Debug, thiserror::Error)]
 pub enum WorkerError {
@@ -43,7 +44,7 @@ pub enum WorkerError {
 
 /// The `details` rendering both cache variants share: one entry per node, in
 /// the order the sweep met them.
-fn join(entries: &[impl std::fmt::Display]) -> String {
+fn join(entries: &[impl Display]) -> String {
     entries
         .iter()
         .map(ToString::to_string)

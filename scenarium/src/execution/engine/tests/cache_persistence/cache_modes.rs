@@ -393,7 +393,7 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
             value: &dyn CustomValue,
             writer: &mut (dyn AsyncWrite + Unpin + Send),
             _ctx: &mut ContextStore,
-        ) -> std::result::Result<(), CodecError> {
+        ) -> result::Result<(), CodecError> {
             writer
                 .write_all(&value.as_any().downcast_ref::<Blob>().unwrap().0)
                 .await?;
@@ -405,7 +405,7 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
             reader: &mut (dyn AsyncRead + Unpin + Send),
             byte_len: u64,
             ctx: &mut ContextStore,
-        ) -> std::result::Result<Arc<dyn CustomValue>, CodecError> {
+        ) -> result::Result<Arc<dyn CustomValue>, CodecError> {
             ctx.get(DECODE_PROBE).decodes += 1;
             let mut bytes = Vec::with_capacity(usize::try_from(byte_len)?);
             reader.read_to_end(&mut bytes).await?;

@@ -1,5 +1,6 @@
 use super::*;
 
+use std::fs;
 use std::sync::Mutex as StdMutex;
 
 use common::{TempDir, TempFile};
@@ -45,7 +46,7 @@ fn loader(observed: Observed) -> impl FnOnce(NodeSpec) -> NodeSpec {
                 move |Invocation { inputs, outputs, .. }| { loads = observed.loads.clone() } => {
                     loads.bump();
                     let path = inputs[0].as_fs_path().unwrap().to_string();
-                    let text = std::fs::read_to_string(&path).map_err(InvokeError::external)?;
+                    let text = fs::read_to_string(&path).map_err(InvokeError::external)?;
                     outputs[0] = ConstValue::String(text).into();
                     Ok(())
                 }
@@ -122,9 +123,9 @@ async fn an_unidentifiable_path_runs_the_node_uncached() {
 
     let dir = TempDir::new("locked");
     let data = dir.join("data.txt");
-    std::fs::write(&data, "v1").unwrap();
+    fs::write(&data, "v1").unwrap();
     let data_path = data.to_string_lossy().into_owned();
-    let lock = |mode| std::fs::set_permissions(dir.path(), Permissions::from_mode(mode)).unwrap();
+    let lock = |mode| fs::set_permissions(dir.path(), Permissions::from_mode(mode)).unwrap();
     let warned = |run: &RunOutcome| {
         run.logs()
             .iter()
@@ -218,7 +219,7 @@ async fn an_unidentifiable_path_runs_the_node_uncached() {
 #[tokio::test]
 async fn wired_path_rekeys_loader_on_file_change() {
     let data = TempFile::new("ram");
-    std::fs::write(data.path(), "v1").unwrap();
+    fs::write(data.path(), "v1").unwrap();
     let observed = Observed::default();
     let mut e = TestEngine::over(path_graph(&data.to_str(), CacheMode::Ram, observed.clone()));
 
@@ -248,7 +249,7 @@ async fn wired_path_rekeys_loader_on_file_change() {
     // Edit the file (different length ⇒ unambiguous identity change). The
     // loader re-keys off the delivered value's file identity and the change
     // propagates downstream — while the structural upstream stays a hit.
-    std::fs::write(data.path(), "v2-longer").unwrap();
+    fs::write(data.path(), "v2-longer").unwrap();
     let run = e.run_sinks().await;
     assert_eq!(
         observed.loads(),
@@ -284,7 +285,7 @@ async fn wired_path_rekeys_loader_on_file_change() {
 async fn wired_path_disk_reuse_survives_reopen_until_file_changes() {
     let dir = TempDir::new("disk");
     let data = TempFile::new("disk-data");
-    std::fs::write(data.path(), "v1").unwrap();
+    fs::write(data.path(), "v1").unwrap();
     let observed = Observed::default();
     let path = data.to_str();
 
@@ -319,7 +320,7 @@ async fn wired_path_disk_reuse_survives_reopen_until_file_changes() {
     // Reopen after an edit: the loader's key moved ⇒ recompute, propagating
     // downstream; the path producer's own digest is unchanged, so it stays a
     // disk hit feeding the recompute.
-    std::fs::write(data.path(), "v2-longer").unwrap();
+    fs::write(data.path(), "v2-longer").unwrap();
     let mut e = e.reopen();
     let run = e.run_sinks().await;
     assert_eq!(

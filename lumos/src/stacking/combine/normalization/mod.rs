@@ -32,6 +32,7 @@ use crate::stacking::combine::normalization::photometric_gain::{
 use crate::stacking::frame_store::StoredFrame;
 use crate::stacking::frame_store::frame_stats::FrameStats;
 use crate::stacking::frame_store::stored_plane::StoredPlane;
+use std::iter;
 
 /// Per-channel affine normalization applied as `normalized = raw * gain + offset`.
 #[derive(Debug, Clone, Copy)]
@@ -259,7 +260,7 @@ fn compute_frame_norms_with_reference<'a>(
 
 fn identity_norm(channel_count: usize) -> FrameNorm {
     let mut channels = ArrayVec::new();
-    channels.extend(std::iter::repeat_n(ChannelNorm::IDENTITY, channel_count));
+    channels.extend(iter::repeat_n(ChannelNorm::IDENTITY, channel_count));
     FrameNorm { channels }
 }
 

@@ -8,7 +8,9 @@
 //! terminates a wire on — circle, event triangle, hit-box growth — is the
 //! shared [`PortGlyph`] widget's.
 
+use std::fmt;
 use std::fmt::Display;
+use std::fmt::Formatter;
 use std::sync::Arc;
 
 use palantir::prelude::*;
@@ -595,7 +597,7 @@ struct TypeLabel<'a> {
 }
 
 impl Display for TypeLabel<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let DataType::FsPath(cfg) = self.ty else {
             // Borrowed for every type the library knows; only an id with no
             // entry behind it builds a string, and that one is scenarium's.

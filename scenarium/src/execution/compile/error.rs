@@ -15,6 +15,9 @@ use thiserror::Error;
 
 use crate::execution::identity::{NodeIdx, OutputAddr};
 use crate::graph::identity::{FuncId, NodeId};
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
 
 /// The graph won't compile against the library: a document can be stale
 /// against an evolved library (a dropped func, a shrunk port list, a
@@ -65,9 +68,9 @@ pub(crate) enum PortPool {
     Event,
 }
 
-impl std::fmt::Display for PortPool {
+impl Display for PortPool {
     /// Lowercase, so it reads inside the sentences above.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             PortPool::Input => "input",
             PortPool::Output => "output",

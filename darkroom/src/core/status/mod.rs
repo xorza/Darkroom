@@ -20,6 +20,10 @@ pub(crate) struct StatusLog {
     /// `cfg`'d field rather than a gated wrapper because it cannot move: it is
     /// the one piece of `StatusLog` that only tests observe.
     #[cfg(test)]
+    #[expect(
+        clippy::absolute_paths,
+        reason = "an import for a test-only field would be unused in the build without tests"
+    )]
     lines: std::collections::VecDeque<String>,
 }
 

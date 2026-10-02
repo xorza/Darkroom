@@ -1,5 +1,7 @@
 //! Full pipeline benchmark: CFA master creation -> calibration -> registration -> stacking.
 
+use std::fs;
+use std::path::PathBuf;
 use std::time::Instant;
 
 use common::CancelToken;
@@ -34,43 +36,42 @@ fn bench_full_pipeline() {
     let bias_paths = calibration_image_paths("Bias").unwrap_or_default();
 
     // Time each master separately to find the bottleneck
-    let stack_cfa =
-        |name: &str, paths: &[std::path::PathBuf], config: StackConfig| -> Option<CfaImage> {
-            if paths.is_empty() {
-                println!("  {name}: no frames, skipping");
-                return None;
+    let stack_cfa = |name: &str, paths: &[PathBuf], config: StackConfig| -> Option<CfaImage> {
+        if paths.is_empty() {
+            println!("  {name}: no frames, skipping");
+            return None;
+        }
+        let config = if paths.len() < 8 {
+            StackConfig {
+                normalization: config.normalization,
+                ..StackConfig::median()
             }
-            let config = if paths.len() < 8 {
-                StackConfig {
-                    normalization: config.normalization,
-                    ..StackConfig::median()
-                }
-            } else {
-                config
-            };
-
-            let t0 = Instant::now();
-            let cache = FrameCache::from_cfa_paths(
-                paths,
-                &config.cache,
-                config.normalization,
-                ProgressCallback::default(),
-                CancelToken::never(),
-            )
-            .unwrap();
-            let load_ms = t0.elapsed().as_secs_f64() * 1000.0;
-
-            let t1 = Instant::now();
-            let result = run_stacking(&cache, &config).expect("this cache is never cancelled");
-            let stack_ms = t1.elapsed().as_secs_f64() * 1000.0;
-
-            println!(
-                "  {name}: {} frames, load={load_ms:.0}ms, stack={stack_ms:.0}ms, total={:.0}ms",
-                paths.len(),
-                t0.elapsed().as_secs_f64() * 1000.0
-            );
-            Some(result.into_cfa_master())
+        } else {
+            config
         };
+
+        let t0 = Instant::now();
+        let cache = FrameCache::from_cfa_paths(
+            paths,
+            &config.cache,
+            config.normalization,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap();
+        let load_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+        let t1 = Instant::now();
+        let result = run_stacking(&cache, &config).expect("this cache is never cancelled");
+        let stack_ms = t1.elapsed().as_secs_f64() * 1000.0;
+
+        println!(
+            "  {name}: {} frames, load={load_ms:.0}ms, stack={stack_ms:.0}ms, total={:.0}ms",
+            paths.len(),
+            t0.elapsed().as_secs_f64() * 1000.0
+        );
+        Some(result.into_cfa_master())
+    };
 
     let dark = stack_cfa("Dark", &dark_paths, StackConfig::dark());
     let flat = stack_cfa("Flat", &flat_paths, StackConfig::flat());
@@ -134,7 +135,7 @@ fn bench_full_pipeline() {
 
     // Save calibrated lights
     let calibrated_dir = cal_dir.join("calibrated_lights");
-    std::fs::create_dir_all(&calibrated_dir).expect("Failed to create calibrated_lights dir");
+    fs::create_dir_all(&calibrated_dir).expect("Failed to create calibrated_lights dir");
     for (path, img) in light_paths.iter().zip(calibrated.iter()) {
         let filename = path.file_stem().unwrap().to_string_lossy();
         let out_path = calibrated_dir.join(format!("{filename}_calibrated.tiff"));
@@ -205,7 +206,7 @@ fn bench_full_pipeline() {
 
     // Save registered lights
     let registered_dir = cal_dir.join("registered_lights");
-    std::fs::create_dir_all(&registered_dir).expect("Failed to create registered_lights dir");
+    fs::create_dir_all(&registered_dir).expect("Failed to create registered_lights dir");
     for (i, img) in registered.iter().enumerate() {
         let out_path = registered_dir.join(format!("registered_{i:04}.tiff"));
         img.save(&out_path)

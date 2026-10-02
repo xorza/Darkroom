@@ -168,6 +168,7 @@ pub(crate) fn fwhm_to_moffat_alpha(fwhm: f32, beta: f32) -> f32 {
 mod tests {
     use crate::math::fwhm::{fwhm_to_sigma, sigma_to_fwhm};
     use crate::testing::synthetic::star_profiles::*;
+    use std::f32::consts::FRAC_PI_2;
 
     const GAUSSIAN_2: StarProfile = StarProfile::Gaussian { sigma: 2.0 };
 
@@ -241,7 +242,7 @@ mod tests {
             StarProfile::Elliptical {
                 sigma_x: 4.0,
                 sigma_y: 2.0,
-                angle: std::f32::consts::FRAC_PI_2,
+                angle: FRAC_PI_2,
             },
         );
         assert!(turned.value_at(32.0, 38.0) > turned.value_at(38.0, 32.0));

@@ -14,6 +14,7 @@ use crate::io::image::cfa::CfaType;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mut;
 use crate::math::vec2us::Vec2us;
+use std::array;
 
 /// Mono: 8-connected neighbours, every one of which is the same "colour".
 const MONO_OFFSETS: [(i32, i32); 8] = [
@@ -145,7 +146,7 @@ pub(crate) struct XTransOffsets {
 
 impl XTransOffsets {
     pub(crate) fn new(pattern: &[[u8; 6]; 6]) -> Self {
-        let per_phase = std::array::from_fn(|phase| {
+        let per_phase = array::from_fn(|phase| {
             let px = (phase % 6) as i32;
             let py = (phase / 6) as i32;
             let my_color = pattern[py as usize][px as usize];

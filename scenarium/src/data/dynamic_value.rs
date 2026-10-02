@@ -1,5 +1,10 @@
 use std::any::Any;
+use std::fmt;
+use std::fmt::Debug;
 use std::fmt::Display;
+use std::fmt::Formatter;
+use std::ops::Add;
+use std::ops::AddAssign;
 use std::sync::Arc;
 
 use crate::{ConstValue, TypeId};
@@ -16,7 +21,7 @@ impl RamUsage {
     }
 }
 
-impl std::ops::Add for RamUsage {
+impl Add for RamUsage {
     type Output = RamUsage;
 
     fn add(self, rhs: RamUsage) -> Self::Output {
@@ -27,7 +32,7 @@ impl std::ops::Add for RamUsage {
     }
 }
 
-impl std::ops::AddAssign for RamUsage {
+impl AddAssign for RamUsage {
     fn add_assign(&mut self, rhs: RamUsage) {
         self.cpu += rhs.cpu;
         self.gpu += rhs.gpu;
@@ -52,8 +57,8 @@ pub enum DynamicValue {
     Custom(Arc<dyn CustomValue>),
 }
 
-impl std::fmt::Debug for DynamicValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Debug for DynamicValue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             DynamicValue::Unbound => write!(f, "Unbound"),
             DynamicValue::Static(value) => write!(f, "{value:?}"),
@@ -143,7 +148,7 @@ impl DynamicValue {
 }
 
 impl Display for DynamicValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             DynamicValue::Unbound => write!(f, "-"),
             DynamicValue::Static(value) => write!(f, "{value}"),
@@ -192,7 +197,7 @@ mod tests {
     struct Tag(&'static str);
 
     impl Display for Tag {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
             write!(f, "tag:{}", self.0)
         }
     }

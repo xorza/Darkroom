@@ -55,6 +55,8 @@ impl DetectorPool {
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
+    use std::hint;
+    use std::ptr;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use parking_lot::Mutex;
@@ -76,7 +78,7 @@ mod tests {
             .try_map(&[0, 1, 2, 3, 4], |detector, _index, &item| {
                 Ok::<_, ()>(DetectorUse {
                     item,
-                    detector_address: std::ptr::from_ref::<StarDetector>(detector).addr(),
+                    detector_address: ptr::from_ref::<StarDetector>(detector).addr(),
                 })
             })
             .unwrap();
@@ -117,7 +119,7 @@ mod tests {
                     if failed.load(Ordering::SeqCst) {
                         break;
                     }
-                    std::hint::spin_loop();
+                    hint::spin_loop();
                 }
                 Ok(item)
             })

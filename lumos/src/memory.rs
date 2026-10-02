@@ -8,6 +8,7 @@
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::raw::demosaic::DemosaicMemory;
 use crate::math::size2us::Size2us;
+use std::sync::PoisonError;
 
 /// Share of available RAM the pipeline will commit, leaving the rest as headroom for allocator
 /// slack, the OS page cache, and whatever else the machine is doing.
@@ -26,9 +27,7 @@ pub(crate) fn available_memory() -> u64 {
 
     // Recover rather than propagate: a poisoned lock means some earlier caller panicked, but the
     // `System` behind it is a cache of OS counters with no invariant to corrupt.
-    let mut system = SYSTEM
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut system = SYSTEM.lock().unwrap_or_else(PoisonError::into_inner);
     system.refresh_memory();
     let available = system.available_memory();
 

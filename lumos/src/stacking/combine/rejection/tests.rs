@@ -8,6 +8,7 @@ use crate::stacking::combine::rejection::winsorized_clip_config::{
     WinsorizedEstimate, winsorized_stddev,
 };
 use crate::stacking::combine::rejection::*;
+use std::f64::consts::TAU;
 
 /// Every rejection config's documented defaults in one place. These were six one-assertion tests
 /// whose only difference was which type they named.
@@ -699,7 +700,7 @@ fn gesd_gaussian_false_positive_rate_matches_alpha() {
 fn standard_normal(rng: &mut ChaCha8Rng) -> f32 {
     let u1 = rng.random::<f64>().max(f64::MIN_POSITIVE);
     let u2 = rng.random::<f64>();
-    ((-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()) as f32
+    ((-2.0 * u1.ln()).sqrt() * (TAU * u2).cos()) as f32
 }
 
 #[test]

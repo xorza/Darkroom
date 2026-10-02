@@ -12,6 +12,7 @@ use crate::bit_buffer2::BitBuffer2;
 use crate::concurrency::UnsafeSendPtr;
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use rayon::slice::ParallelSliceMut;
+use std::slice;
 
 /// Dilate a binary mask by the given radius (morphological dilation).
 ///
@@ -76,7 +77,7 @@ pub(crate) fn dilate_mask(mask: &BitBuffer2, radius: usize, output: &mut BitBuff
 
             // SAFETY: Each thread accesses disjoint word indices (non-overlapping chunk ranges).
             let p = out_ptr;
-            let output_words = unsafe { std::slice::from_raw_parts_mut(p.get(), num_words) };
+            let output_words = unsafe { slice::from_raw_parts_mut(p.get(), num_words) };
 
             let mut column_data = vec![0u64; height];
             let mut dilated = vec![0u64; height];

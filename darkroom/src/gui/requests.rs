@@ -112,6 +112,7 @@ impl Requests {
 #[cfg(test)]
 mod tests {
     use scenarium::NodeId;
+    use std::iter;
 
     use super::*;
     use crate::gui::app::commands::run::RunCommand;
@@ -161,7 +162,7 @@ mod tests {
         // nothing left of its own and still leaves the app tier alone.
         assert_eq!(out.drain_document().count(), 0);
 
-        let commands: Vec<AppCommand> = std::iter::from_fn(|| out.pop_app()).collect();
+        let commands: Vec<AppCommand> = iter::from_fn(|| out.pop_app()).collect();
         assert!(
             matches!(
                 commands[..],

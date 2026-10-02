@@ -6,6 +6,9 @@
 //! Uses **empty** calibration masters (identity calibration) so the high-water mark reflects the
 //! align+stack work, not a masters build.
 
+use std::env;
+use std::fs;
+use std::hint;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -20,7 +23,7 @@ use lumos::{
 
 /// Read a `/proc/self/status` field (e.g. `RssAnon`, `VmRSS`) in KiB.
 fn status_kb(field: &str) -> u64 {
-    let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    let status = fs::read_to_string("/proc/self/status").unwrap_or_default();
     for line in status.lines() {
         if let Some(rest) = line.strip_prefix(field).and_then(|r| r.strip_prefix(':')) {
             return rest
@@ -35,11 +38,8 @@ fn status_kb(field: &str) -> u64 {
 }
 
 fn main() {
-    let n: usize = std::env::var("LUMOS_N")
-        .expect("set LUMOS_N")
-        .parse()
-        .unwrap();
-    let tier = std::env::var("LUMOS_TIER").expect("set LUMOS_TIER (ram|disk)");
+    let n: usize = env::var("LUMOS_N").expect("set LUMOS_N").parse().unwrap();
+    let tier = env::var("LUMOS_TIER").expect("set LUMOS_TIER (ram|disk)");
 
     let lights_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_data/lumos_data/Lights");
     let lights = file_utils::files_with_extensions(&lights_dir, RAW_EXTENSIONS)
@@ -104,5 +104,5 @@ fn main() {
         peak_anon.load(Ordering::Relaxed) / 1024,
         peak_total.load(Ordering::Relaxed) / 1024,
     );
-    std::hint::black_box(&result);
+    hint::black_box(&result);
 }

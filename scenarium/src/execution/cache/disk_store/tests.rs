@@ -1,5 +1,6 @@
 use std::any::Any;
 use std::fmt;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -57,7 +58,7 @@ async fn store_expecting(
 
 fn publication_temp_files(path: &Path) -> Vec<PathBuf> {
     let prefix = format!("{}.", path.file_name().unwrap().to_string_lossy());
-    std::fs::read_dir(path.parent().unwrap())
+    fs::read_dir(path.parent().unwrap())
         .unwrap()
         .map(|entry| entry.unwrap().path())
         .filter(|candidate| {
@@ -245,7 +246,7 @@ async fn broader_same_digest_blob_is_preserved() {
         StoreOutcome::Published,
     )
     .await;
-    let complete_bytes = std::fs::read(file.path()).unwrap();
+    let complete_bytes = fs::read(file.path()).unwrap();
 
     store_expecting(
         &store,
@@ -255,7 +256,7 @@ async fn broader_same_digest_blob_is_preserved() {
         StoreOutcome::AlreadyCovered,
     )
     .await;
-    assert_eq!(std::fs::read(file.path()).unwrap(), complete_bytes);
+    assert_eq!(fs::read(file.path()).unwrap(), complete_bytes);
     assert!(store.covers(&target, complete.values()).await);
     assert!(store.covers(&target, partial.values()).await);
     let restored = read_snapshot(&store, &target, 2).await.unwrap();
@@ -349,7 +350,7 @@ async fn failed_streaming_encode_preserves_previous_blob() {
         StoreOutcome::Published,
     )
     .await;
-    let original = std::fs::read(file.path()).unwrap();
+    let original = fs::read(file.path()).unwrap();
 
     let failing_store = DiskStore::new(
         &versioned_library(1, Arc::new(AtomicU64::new(0)), true),
@@ -373,7 +374,7 @@ async fn failed_streaming_encode_preserves_previous_blob() {
         source.to_string().contains("injected encode failure"),
         "the codec's own message survives: {source}"
     );
-    assert_eq!(std::fs::read(file.path()).unwrap(), original);
+    assert_eq!(fs::read(file.path()).unwrap(), original);
     assert!(publication_temp_files(file.path()).is_empty());
     assert!(
         read_snapshot(&good_store, &original_target, 1)
@@ -387,9 +388,9 @@ async fn failed_streaming_encode_preserves_previous_blob() {
 #[tokio::test]
 async fn a_failed_publication_disturbs_nothing_around_it() {
     let file = TempFile::new("publication-failure");
-    std::fs::create_dir_all(file.path()).unwrap();
+    fs::create_dir_all(file.path()).unwrap();
     let survivor = file.path().join("survivor");
-    std::fs::write(&survivor, b"old").unwrap();
+    fs::write(&survivor, b"old").unwrap();
     let store = DiskStore::default();
     let failed = store
         .store(
@@ -407,7 +408,7 @@ async fn a_failed_publication_disturbs_nothing_around_it() {
         panic!("a blocked destination must fail at publication, got {failed:?}");
     };
     assert_eq!(path, file.path());
-    assert_eq!(std::fs::read(survivor).unwrap(), b"old");
+    assert_eq!(fs::read(survivor).unwrap(), b"old");
     assert!(publication_temp_files(file.path()).is_empty());
 }
 
@@ -426,9 +427,9 @@ async fn truncated_blob_is_rejected_by_header_check_and_read() {
         StoreOutcome::Published,
     )
     .await;
-    let mut bytes = std::fs::read(file.path()).unwrap();
+    let mut bytes = fs::read(file.path()).unwrap();
     bytes.pop();
-    std::fs::write(file.path(), bytes).unwrap();
+    fs::write(file.path(), bytes).unwrap();
     let expected = [DynamicValue::Static(ConstValue::String("payload".into()))];
     assert!(!store.covers(&target, &expected).await);
     assert!(read_snapshot(&store, &target, 1).await.is_none());

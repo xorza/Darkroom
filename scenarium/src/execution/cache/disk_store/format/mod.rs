@@ -2,6 +2,7 @@
 
 use std::io::{self, SeekFrom};
 
+use tokio::io::Take;
 use tokio::io::{
     AsyncRead, AsyncReadExt as _, AsyncSeek, AsyncSeekExt as _, AsyncWrite, AsyncWriteExt as _,
 };
@@ -558,7 +559,7 @@ async fn read_array<const N: usize>(reader: &mut (impl AsyncRead + Unpin)) -> io
     Ok(bytes)
 }
 
-fn require_consumed<R: AsyncRead>(reader: &tokio::io::Take<R>) -> codec::error::Result<()> {
+fn require_consumed<R: AsyncRead>(reader: &Take<R>) -> codec::error::Result<()> {
     if reader.limit() == 0 {
         Ok(())
     } else {

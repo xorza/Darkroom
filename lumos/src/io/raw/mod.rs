@@ -9,6 +9,7 @@ mod bench;
 mod tests;
 
 use libraw_sys as sys;
+use std::ffi;
 #[cfg(unix)]
 use std::ffi::CString;
 use std::fs;
@@ -365,7 +366,7 @@ fn raw_filter_color(visible_filters: u32, raw_row: usize, raw_col: usize, margin
 }
 
 /// `c_char` is `i8` on some targets and `u8` on others; the byte value is what LibRaw stores.
-fn xtrans_pattern_from_libraw(pattern: [[std::ffi::c_char; 6]; 6]) -> [[u8; 6]; 6] {
+fn xtrans_pattern_from_libraw(pattern: [[ffi::c_char; 6]; 6]) -> [[u8; 6]; 6] {
     pattern.map(|row| row.map(|color| u8::from_ne_bytes(color.to_ne_bytes())))
 }
 

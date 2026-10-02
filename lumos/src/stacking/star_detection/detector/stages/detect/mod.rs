@@ -369,8 +369,14 @@ pub(crate) mod internals {
     use crate::math::size2us::Size2us;
     use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
     use crate::stacking::star_detection::config::detection_config::DetectionConfig;
+    #[cfg(feature = "bench")]
+    use crate::stacking::star_detection::deblend::ComponentData;
     use crate::stacking::star_detection::deblend::region::Region;
+    #[cfg(feature = "bench")]
+    use crate::stacking::star_detection::detector::stages::detect;
     use crate::stacking::star_detection::detector::stages::detect::DetectResult;
+    #[cfg(feature = "bench")]
+    use crate::stacking::star_detection::labeling::LabelMap;
     use crate::stacking::star_detection::resources::DetectionResources;
     use imaginarium::Buffer2;
 
@@ -390,10 +396,8 @@ pub(crate) mod internals {
     /// tests both go through `DetectResult::from_image`. Narrower gate than the module because
     /// only the benches want it.
     #[cfg(feature = "bench")]
-    pub(crate) fn collect_components(
-        label_map: &crate::stacking::star_detection::labeling::LabelMap,
-    ) -> Vec<crate::stacking::star_detection::deblend::ComponentData> {
-        crate::stacking::star_detection::detector::stages::detect::collect_component_data(label_map)
+    pub(crate) fn collect_components(label_map: &LabelMap) -> Vec<ComponentData> {
+        detect::collect_component_data(label_map)
     }
 }
 

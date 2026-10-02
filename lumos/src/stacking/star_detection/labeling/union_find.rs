@@ -1,5 +1,9 @@
 //! The disjoint-set structure that resolves provisional run labels into components.
 
+use std::fmt;
+use std::fmt::Debug;
+use std::fmt::Formatter;
+use std::mem;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Lock-free union-find over provisional run labels.
@@ -10,8 +14,8 @@ pub(super) struct UnionFind {
     next_label: AtomicU32,
 }
 
-impl std::fmt::Debug for UnionFind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Debug for UnionFind {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("UnionFind")
             .field("len", &self.parent.len())
             .field("next_label", &self.next_label.load(Ordering::Relaxed))
@@ -72,7 +76,7 @@ impl UnionFind {
 
         while root_a != root_b {
             if root_a > root_b {
-                std::mem::swap(&mut root_a, &mut root_b);
+                mem::swap(&mut root_a, &mut root_b);
             }
 
             let idx_b = (root_b - 1) as usize;

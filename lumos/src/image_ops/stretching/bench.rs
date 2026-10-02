@@ -4,6 +4,7 @@
 
 use crate::testing::prelude::*;
 use quickbench::quick_bench;
+use std::array;
 use std::hint::black_box;
 
 use crate::Stretch;
@@ -81,7 +82,7 @@ fn bench_stretch_asinh_kernel_single_thread(b: ::quickbench::Bencher) {
     let n_px = W * H;
     // Per channel, so the three planes get the same value scaled — matching what the interleaved
     // fixture wrote per pixel.
-    let planes: [Vec<f32>; 3] = std::array::from_fn(|channel| {
+    let planes: [Vec<f32>; 3] = array::from_fn(|channel| {
         let scale = 1.0 - 0.1 * channel as f32;
         (0..n_px)
             .map(|i| {

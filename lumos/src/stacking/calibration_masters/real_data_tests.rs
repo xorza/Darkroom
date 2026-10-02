@@ -15,6 +15,7 @@
 //!     `calibration_masters::real_data_tests` -- --ignored --nocapture
 
 use crate::math::size2us::Size2us;
+use std::cmp::Ordering;
 use std::hint::black_box;
 use std::path::PathBuf;
 
@@ -230,13 +231,13 @@ fn sorted_intersection_count(left: &[usize], right: &[usize]) -> usize {
     let mut count = 0;
     while left_index < left.len() && right_index < right.len() {
         match left[left_index].cmp(&right[right_index]) {
-            std::cmp::Ordering::Less => left_index += 1,
-            std::cmp::Ordering::Equal => {
+            Ordering::Less => left_index += 1,
+            Ordering::Equal => {
                 count += 1;
                 left_index += 1;
                 right_index += 1;
             }
-            std::cmp::Ordering::Greater => right_index += 1,
+            Ordering::Greater => right_index += 1,
         }
     }
     count

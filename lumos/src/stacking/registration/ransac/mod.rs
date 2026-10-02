@@ -24,6 +24,7 @@ use magsac::MagsacScorer;
 use transforms::{adaptive_iterations, estimate_transform};
 
 use std::cmp::Ordering;
+use std::mem;
 
 use glam::DVec2;
 
@@ -205,7 +206,7 @@ impl RansacEstimator {
 
             // Update if improved
             current_transform = refined;
-            std::mem::swap(&mut buffers.inlier_buf, &mut scratch_inliers);
+            mem::swap(&mut buffers.inlier_buf, &mut scratch_inliers);
             current_score = new_score;
         }
 
@@ -217,7 +218,7 @@ impl RansacEstimator {
         if current_score > hypothesis.score && self.is_plausible(&current_transform) {
             hypothesis.transform = current_transform;
             hypothesis.score = current_score;
-            std::mem::swap(&mut hypothesis.inliers, &mut buffers.inlier_buf);
+            mem::swap(&mut hypothesis.inliers, &mut buffers.inlier_buf);
         }
     }
 
@@ -302,7 +303,7 @@ impl RansacEstimator {
             // Update best if improved. The swap hands `current` the old best's inlier buffer,
             // which the next iteration's scoring refills.
             if current.score > best.score {
-                std::mem::swap(&mut best, &mut current);
+                mem::swap(&mut best, &mut current);
 
                 // Adaptive iteration count based on inlier ratio
                 let inlier_ratio = best.inliers.len() as f64 / n as f64;

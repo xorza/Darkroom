@@ -4,6 +4,7 @@
 //! run star detection, and register them to verify the pipeline end-to-end.
 //! Skipped automatically when the env var is not set.
 
+use std::fs;
 use std::hint::black_box;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -252,7 +253,7 @@ fn bench_register_and_warp_all(b: ::quickbench::Bencher) {
 
     let cal_dir = calibration_dir();
     let output_dir = cal_dir.join("registered_lights");
-    std::fs::create_dir_all(&output_dir).expect("Failed to create registered_lights directory");
+    fs::create_dir_all(&output_dir).expect("Failed to create registered_lights directory");
 
     println!("Loaded {} calibrated lights", images.len());
 

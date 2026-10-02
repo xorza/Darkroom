@@ -1,5 +1,6 @@
 use crate::image_ops::wavelet::{atrous_smooth, max_scales, reflect};
 use crate::testing::prelude::*;
+use std::mem;
 
 fn pattern(size: Size2us) -> Buffer2<f32> {
     let px = (0..size.pixel_count())
@@ -78,7 +79,7 @@ fn starlet_details_telescope_exactly() {
         {
             *s += c - n;
         }
-        std::mem::swap(&mut c_curr, &mut c_next);
+        mem::swap(&mut c_curr, &mut c_next);
     }
     for ((&orig, &residual), &details) in img.pixels().iter().zip(c_curr.pixels()).zip(&details_sum)
     {

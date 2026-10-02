@@ -6,6 +6,8 @@ use crate::io::image::sample_domain::ScaleOrigin;
 use crate::io::raw::demosaic::xtrans::internals::test_pattern_array;
 use crate::io::raw::provenance::RawTransferProvenance;
 use crate::testing::make_cfa;
+use common::internals;
+use std::fs;
 
 #[test]
 fn a_null_is_repaired_from_its_same_colour_neighbours_before_demosaic() {
@@ -44,7 +46,7 @@ fn a_masters_nulls_survive_the_fits_round_trip() {
         quantization_sigma: None,
         nulls: NullMask::of_non_finite(Size2us::new(2usize, 2usize), &[&[0.0, f32::NAN, 0.0, 0.0]]),
     };
-    let path = common::internals::test_output_path("cfa_master_nulls_roundtrip.fits");
+    let path = internals::test_output_path("cfa_master_nulls_roundtrip.fits");
     cfa.save_fits(&path).unwrap();
 
     let loaded = CfaImage::from_file(&path, &LoadContext::default()).unwrap();
@@ -113,7 +115,7 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
         quantization_sigma: Some(0.000_01),
         nulls: None,
     };
-    let path = common::internals::test_output_path("cfa_master_roundtrip.fits");
+    let path = internals::test_output_path("cfa_master_roundtrip.fits");
     cfa.save_fits(&path).unwrap();
     let info = CfaFrameInfo::from_file(&path, &LoadContext::default()).unwrap();
     assert_eq!(info.dimensions, ImageDimensions::new((2, 2), 1));
@@ -132,7 +134,7 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
     );
     assert_eq!(loaded.quantization_sigma, Some(0.000_01));
 
-    let original = std::fs::read(&path).unwrap();
+    let original = fs::read(&path).unwrap();
     let mut invalid_version = original.clone();
     let version_card = invalid_version
         .windows(8)
@@ -143,7 +145,7 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
         .rposition(u8::is_ascii_digit)
         .unwrap();
     invalid_version[version_card + version_digit] = b'0';
-    std::fs::write(&path, invalid_version).unwrap();
+    fs::write(&path, invalid_version).unwrap();
     assert!(matches!(
         CfaImage::from_file(&path, &LoadContext::default()),
         Err(ImageError::FitsUnsupported { reason, .. }) if reason.contains("version")
@@ -156,7 +158,7 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
         .position(|window| window == sample)
         .unwrap();
     corrupted[offset] ^= 0x01;
-    std::fs::write(&path, corrupted).unwrap();
+    fs::write(&path, corrupted).unwrap();
     let error = CfaImage::from_file(&path, &LoadContext::default()).unwrap_err();
     assert!(
         matches!(
@@ -166,7 +168,7 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
         ),
         "{error:?}"
     );
-    std::fs::write(path, original).unwrap();
+    fs::write(path, original).unwrap();
 }
 
 #[test]
@@ -184,7 +186,7 @@ fn master_cfa_fits_round_trips_mono_and_xtrans_patterns() {
             quantization_sigma: None,
             nulls: None,
         };
-        let path = common::internals::test_output_path(&format!("cfa_master_{name}.fits"));
+        let path = internals::test_output_path(&format!("cfa_master_{name}.fits"));
 
         image.save_fits(&path).unwrap();
         let loaded = CfaImage::from_file(path, &LoadContext::default()).unwrap();

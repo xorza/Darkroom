@@ -2,6 +2,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
+use tokio::sync::Notify;
+use tokio::task;
 use tokio::time::timeout;
 
 use crate::worker::pause_gate::PauseGate;
@@ -38,7 +40,7 @@ async fn waiters_block_until_the_gate_reopens() {
         }));
     }
 
-    tokio::task::yield_now().await;
+    task::yield_now().await;
     assert_eq!(completed.load(Ordering::Relaxed), 0);
     drop(guard);
 
@@ -79,7 +81,7 @@ async fn overlapping_guards_from_clones_reopen_only_after_the_last_drop() {
 async fn close_does_not_revoke_a_waiter_that_already_passed() {
     let gate = PauseGate::default();
     let passed = Arc::new(AtomicBool::new(false));
-    let release = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(Notify::new());
     let handle = tokio::spawn({
         let gate = gate.clone();
         let passed = Arc::clone(&passed);
@@ -92,7 +94,7 @@ async fn close_does_not_revoke_a_waiter_that_already_passed() {
     });
 
     while !passed.load(Ordering::Acquire) {
-        tokio::task::yield_now().await;
+        task::yield_now().await;
     }
     let _guard = gate.close();
     release.notify_one();
@@ -117,7 +119,7 @@ async fn repeated_close_and_reopen_never_strands_waiters() {
                 completed.fetch_add(1, Ordering::Relaxed);
             }
         });
-        tokio::task::yield_now().await;
+        task::yield_now().await;
         drop(guard);
         timeout(Duration::from_millis(100), handle)
             .await

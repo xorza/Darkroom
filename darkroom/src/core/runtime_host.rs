@@ -3,6 +3,7 @@
 //! top, so worker construction and the drain/run primitives live here rather
 //! than in the shell.
 
+use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -150,7 +151,7 @@ impl RuntimeHost {
     /// What the worker is told is [`CacheRootChange`]'s to decide — see there
     /// for why only one of the transitions owes a flush.
     pub(crate) fn set_document_cache(&mut self, doc_path: Option<&Path>) {
-        let previous = std::mem::replace(
+        let previous = mem::replace(
             &mut self.disk_root,
             doc_path.map(prepare_document_cache_root),
         );

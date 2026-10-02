@@ -1,5 +1,6 @@
 use crate::math::urect::URect;
 use crate::testing::prelude::*;
+use std::panic;
 
 #[test]
 fn urect_accumulation_uses_exclusive_max_and_const_union() {
@@ -29,7 +30,7 @@ fn urect_accumulation_uses_exclusive_max_and_const_union() {
     assert!(LEFT.contains(Vec2us::new(5, 8)));
     assert!(!LEFT.contains(Vec2us::new(6, 8)));
     assert!(!LEFT.contains(Vec2us::new(5, 9)));
-    assert!(std::panic::catch_unwind(|| URect::new(Vec2us::new(1, 1), Vec2us::ZERO)).is_err());
+    assert!(panic::catch_unwind(|| URect::new(Vec2us::new(1, 1), Vec2us::ZERO)).is_err());
 
     let mut bounds = URect::empty();
     bounds.include(Vec2us::new(5, 3));

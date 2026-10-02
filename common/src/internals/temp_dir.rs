@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::internals;
+use std::fs;
 
 /// A temporary directory, created empty and removed with everything under it
 /// when the value drops.
@@ -16,7 +17,7 @@ impl TempDir {
     /// left behind by a killed run says what it was for.
     pub fn new(tag: &str) -> Self {
         let path = internals::unique_temp_path(tag);
-        std::fs::create_dir_all(&path).expect("a test temp directory is creatable");
+        fs::create_dir_all(&path).expect("a test temp directory is creatable");
         Self(path)
     }
 
@@ -31,7 +32,7 @@ impl TempDir {
     /// The entries directly under it — how a fixture counts what a store wrote
     /// without naming any of it.
     pub fn entry_count(&self) -> usize {
-        std::fs::read_dir(&self.0)
+        fs::read_dir(&self.0)
             .expect("a live temp directory lists")
             .flatten()
             .count()
@@ -39,7 +40,7 @@ impl TempDir {
 
     /// The entries directly under it, in a stable order.
     pub fn entries(&self) -> Vec<PathBuf> {
-        let mut entries: Vec<PathBuf> = std::fs::read_dir(&self.0)
+        let mut entries: Vec<PathBuf> = fs::read_dir(&self.0)
             .expect("a live temp directory lists")
             .flatten()
             .map(|entry| entry.path())
@@ -53,6 +54,6 @@ impl Drop for TempDir {
     fn drop(&mut self) {
         // Best effort: a test that deliberately made an entry unremovable — to
         // watch an eviction fail on it — must not then fail in teardown.
-        std::fs::remove_dir_all(&self.0).ok();
+        fs::remove_dir_all(&self.0).ok();
     }
 }

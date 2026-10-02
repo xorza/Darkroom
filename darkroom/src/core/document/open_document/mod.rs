@@ -9,6 +9,7 @@
 
 pub(crate) mod replay_outcome;
 
+use std::path;
 use std::path::{Path, PathBuf};
 
 use crate::core::document::Document;
@@ -258,7 +259,7 @@ impl OpenDocument {
         // Made absolute up front: the argument is relative to the shell's
         // working directory, which the file dialogs' anchor and the worker's
         // disk cache both outlive.
-        let path = std::path::absolute(&path).unwrap_or(path);
+        let path = path::absolute(&path).unwrap_or(path);
         Self::load(path).unwrap_or_else(|error| {
             status.error(format!("load failed: {error:#}"));
             Self::default()

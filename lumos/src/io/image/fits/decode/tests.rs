@@ -13,6 +13,7 @@ use crate::io::image::fits::options::{
 use crate::io::image::fits::provenance::FitsTransferProvenance;
 use crate::io::image::image_provenance::TransferProvenance;
 use crate::testing::ScratchDirectory;
+use std::fs;
 
 fn load_context() -> LoadContext {
     LoadContext::new(CancelToken::never(), u64::MAX)
@@ -69,7 +70,7 @@ fn write_image(path: &Path, image: &Image) {
     FitsWriter::new(&mut bytes)
         .write_image(image, None)
         .unwrap();
-    std::fs::write(path, bytes).unwrap();
+    fs::write(path, bytes).unwrap();
 }
 
 fn write_named_multi_image(path: &Path) {
@@ -214,9 +215,9 @@ fn header_rejection_precedes_pixel_read_and_truncated_data_is_an_error() {
     let path = directory.join("truncated.fits");
     let image = Image::new([2, 2], vec![1.0f32, 2.0, 3.0, 4.0]).unwrap();
     write_image(&path, &image);
-    let mut bytes = std::fs::read(&path).unwrap();
+    let mut bytes = fs::read(&path).unwrap();
     bytes.truncate(BLOCK_SIZE);
-    std::fs::write(&path, bytes).unwrap();
+    fs::write(&path, bytes).unwrap();
 
     let reason = unsupported_reason(
         read_selected_image(&path, &LoadContext::new(CancelToken::never(), 1)).unwrap_err(),
@@ -397,9 +398,9 @@ fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity(
     assert_eq!(checksum.datasum, FitsChecksumState::Valid);
     assert_eq!(checksum.checksum, FitsChecksumState::Valid);
 
-    let mut corrupt = std::fs::read(&valid_path).unwrap();
+    let mut corrupt = fs::read(&valid_path).unwrap();
     corrupt[BLOCK_SIZE] ^= 0x80;
-    std::fs::write(&valid_path, corrupt).unwrap();
+    fs::write(&valid_path, corrupt).unwrap();
     let reason = unsupported_reason(load_linear_fits(&valid_path, &load_context()).unwrap_err());
     assert!(reason.contains("invalid FITS checksum"));
 

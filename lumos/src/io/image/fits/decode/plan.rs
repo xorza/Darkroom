@@ -2,6 +2,7 @@ use std::path::Path;
 
 use fits_well::FitsError;
 use fits_well::header::Header;
+use fits_well::image::Scaling;
 use fits_well::image::{Bitpix as FitsBitpix, ImageMetadata, SampleType};
 use fits_well::io::{BLOCK_SIZE, Hdu, HduKind};
 
@@ -52,7 +53,7 @@ pub(super) struct FitsDecodePlan {
     pub(super) shape: Vec<usize>,
     pub(super) dimensions: ImageDimensions,
     pub(super) bitpix: BitPix,
-    pub(super) scaling: fits_well::image::Scaling,
+    pub(super) scaling: Scaling,
     /// How the stored samples reach the pipeline's `[0, 1]` domain. See [`sample_scale`].
     pub(super) sample_scale: SampleScale,
     pub(super) source_bytes: u64,
@@ -105,7 +106,7 @@ fn sample_scale(
     path: &Path,
     header: &Header,
     stored: FitsBitpix,
-    scaling: &fits_well::image::Scaling,
+    scaling: &Scaling,
     float_scale: FitsFloatScale,
 ) -> Result<SampleScale, ImageError> {
     let divided_by = |divisor: f32, origin| SampleScale {

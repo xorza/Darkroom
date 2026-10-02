@@ -7,7 +7,9 @@
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
+use crate::math::sum::avx2;
 use crate::math::sum::{scalar, sum_f32, weighted_mean_f32};
+use imaginarium::cpu_features;
 
 const BENCH_SIZE: usize = 10_000;
 /// The 6/10/12/24 rungs are what make `AVX2_SUM_F32_CROSSOVER` reproducible: stepping 4, 8, 16
@@ -40,9 +42,9 @@ fn bench_sum_f32(b: ::quickbench::Bencher) {
     });
 
     #[cfg(target_arch = "x86_64")]
-    if imaginarium::cpu_features::has_avx2() {
+    if cpu_features::has_avx2() {
         b.bench_labeled("avx2", || unsafe {
-            black_box(crate::math::sum::avx2::sum_f32(black_box(&data)))
+            black_box(avx2::sum_f32(black_box(&data)))
         });
     }
 
@@ -67,12 +69,9 @@ fn bench_weighted_mean_f32(b: ::quickbench::Bencher) {
     });
 
     #[cfg(target_arch = "x86_64")]
-    if imaginarium::cpu_features::has_avx2() {
+    if cpu_features::has_avx2() {
         b.bench_labeled("avx2", || unsafe {
-            black_box(crate::math::sum::avx2::weighted_sums(
-                black_box(&data),
-                black_box(&weights),
-            ))
+            black_box(avx2::weighted_sums(black_box(&data), black_box(&weights)))
         });
     }
 
@@ -101,10 +100,10 @@ fn bench_sum_f32_crossover(b: ::quickbench::Bencher) {
         });
 
         #[cfg(target_arch = "x86_64")]
-        if imaginarium::cpu_features::has_avx2() {
+        if cpu_features::has_avx2() {
             b.bench_labeled(&format!("avx2_{len}"), || {
                 for _ in 0..calls {
-                    black_box(unsafe { crate::math::sum::avx2::sum_f32(black_box(&data)) });
+                    black_box(unsafe { avx2::sum_f32(black_box(&data)) });
                 }
             });
         }
@@ -134,11 +133,11 @@ fn bench_weighted_sums_crossover(b: ::quickbench::Bencher) {
         });
 
         #[cfg(target_arch = "x86_64")]
-        if imaginarium::cpu_features::has_avx2() {
+        if cpu_features::has_avx2() {
             b.bench_labeled(&format!("avx2_{len}"), || {
                 for _ in 0..calls {
                     black_box(unsafe {
-                        crate::math::sum::avx2::weighted_sums(black_box(&data), black_box(&weights))
+                        avx2::weighted_sums(black_box(&data), black_box(&weights))
                     });
                 }
             });

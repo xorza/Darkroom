@@ -13,6 +13,7 @@ use crate::stacking::registration::ransac::transforms::estimate_transform;
 use crate::stacking::registration::spatial::KdTree;
 use crate::stacking::registration::transform::{Transform, TransformType};
 use crate::stacking::registration::triangle::voting::MatchIndices;
+use std::mem;
 
 /// Maximum iterations for iterative match recovery.
 /// Convergence is typically reached in 2-3 passes; diminishing returns after that. Stopping at the
@@ -110,7 +111,7 @@ pub(crate) fn recover_matches(
             break;
         };
         current_transform = refit;
-        std::mem::swap(&mut current_matches, &mut candidate);
+        mem::swap(&mut current_matches, &mut candidate);
     }
 
     // Ensure we never return fewer matches than we started with

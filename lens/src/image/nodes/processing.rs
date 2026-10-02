@@ -9,6 +9,7 @@ use crate::config_node::enum_input;
 use crate::image::format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat, conversion_target};
 use crate::image::nodes::BLENDMODE_DATATYPE;
 use crate::image::{IMAGE_DATA_TYPE, Image};
+use std::mem;
 
 pub(super) fn register(library: &mut Library) {
     register_brightness(library);
@@ -47,7 +48,7 @@ fn register_brightness(library: &mut Library) {
                 Box::pin(async move {
                     debug_assert_eq!(inputs.len(), 3);
                     debug_assert_eq!(outputs.len(), 1);
-                    let value = std::mem::take(&mut inputs[0]);
+                    let value = mem::take(&mut inputs[0]);
                     let brightness = inputs[1]
                         .as_f64()
                         .expect("brightness input type is validated at the compile boundary")
@@ -90,7 +91,7 @@ fn register_convert(library: &mut Library) {
                     Box::pin(async move {
                         debug_assert_eq!(inputs.len(), 2);
                         debug_assert_eq!(outputs.len(), 1);
-                        let value = std::mem::take(&mut inputs[0]);
+                        let value = mem::take(&mut inputs[0]);
                         let format = inputs[1]
                             .as_enum()
                             .expect("format input type is validated at the compile boundary");

@@ -40,6 +40,8 @@
 //! (common for `/tmp`), the "disk" tier's mmap pages live in RAM and the measurement is a lie. The
 //! default (`<repo>/.tmp`) is disk-backed.
 
+use std::env;
+use std::hint;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -84,11 +86,11 @@ fn master_stack_memory_probe() -> io::Result<()> {
     let n: usize = env_parse("LUMOS_FRAMES", 24);
     let size = Size2us::new(env_parse("LUMOS_W", 6000), env_parse("LUMOS_H", 6000));
     let seed: u64 = env_parse("LUMOS_SEED", 1);
-    let method = std::env::var("LUMOS_METHOD").unwrap_or_else(|_| "sigma".into());
+    let method = env::var("LUMOS_METHOD").unwrap_or_else(|_| "sigma".into());
     let keep = env_parse("LUMOS_KEEP", 0) != 0;
     let budget = parse_budget("LUMOS_BUDGET", BudgetChoice::auto());
 
-    let base = std::env::var("LUMOS_DIR").map_or_else(
+    let base = env::var("LUMOS_DIR").map_or_else(
         |_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tmp/lumos_master_stack"),
         PathBuf::from,
     );
@@ -247,6 +249,6 @@ fn master_stack_memory_probe() -> io::Result<()> {
         println!("budget check  OK: peak heap {anon_mb} MB ≤ {budget_mb} MB budget");
     }
 
-    std::hint::black_box(&result);
+    hint::black_box(&result);
     Ok(())
 }

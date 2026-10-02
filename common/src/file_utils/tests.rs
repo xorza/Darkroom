@@ -11,6 +11,8 @@ use crate::file_utils::{
     publish_with_replacement, replace,
 };
 use crate::internals::test_output_path;
+use std::path::Path;
+use std::thread;
 
 fn fixture_dir(name: &str) -> PathBuf {
     let dir = test_output_path(&format!("common/file_utils/{name}"));
@@ -28,7 +30,7 @@ fn names(paths: &[PathBuf]) -> Vec<&str> {
         .collect()
 }
 
-fn publication_temp_files(path: &std::path::Path) -> Vec<PathBuf> {
+fn publication_temp_files(path: &Path) -> Vec<PathBuf> {
     let parent = path.parent().unwrap();
     let prefix = format!("{}.", path.file_name().unwrap().to_string_lossy());
     fs::read_dir(parent)
@@ -225,7 +227,7 @@ fn concurrent_publications_never_interleave() {
         .map(|payload| {
             let path = path.clone();
             let barrier = Arc::clone(&barrier);
-            std::thread::spawn(move || {
+            thread::spawn(move || {
                 barrier.wait();
                 publish_bytes(&path, &payload, PublicationMode::Cache).unwrap();
             })

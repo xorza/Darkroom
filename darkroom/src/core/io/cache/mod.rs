@@ -4,6 +4,7 @@
 //! polluting a machine-global directory. An unsaved document has no path, so it
 //! stays memory-only until first save.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use common::file_utils;
@@ -33,7 +34,7 @@ pub(crate) fn prepare_document_cache_root(doc_path: &Path) -> PathBuf {
 /// A failure just means no `.gitignore` yet — the cache still works, since blob
 /// writes recreate the dir.
 fn ensure_gitignore(root: &Path) {
-    if std::fs::create_dir_all(root).is_err() {
+    if fs::create_dir_all(root).is_err() {
         return;
     }
     let gitignore = root.join(".gitignore");

@@ -6,6 +6,7 @@ use glam::Vec2;
 use palantir::DockState;
 use scenarium::{DetachedNode, Graph as CoreGraph, InputPort, NodeId, NodeKind, OutputPort};
 use std::collections::{BTreeMap, BTreeSet};
+use std::mem;
 
 use crate::core::document::error::DocumentValidationError;
 use crate::core::document::error::GraphViewValidationError;
@@ -440,7 +441,7 @@ impl Document {
         // layout out for the call splits them: the predicate borrows a
         // `Document` whose layout is a placeholder, and it never asks about
         // one. Cold path only — the fast path above already returned.
-        let mut layout = std::mem::replace(&mut self.layout, Self::new_layout());
+        let mut layout = mem::replace(&mut self.layout, Self::new_layout());
         layout.retain_tabs(|tab| self.holds_tab(tab));
         self.layout = layout;
     }

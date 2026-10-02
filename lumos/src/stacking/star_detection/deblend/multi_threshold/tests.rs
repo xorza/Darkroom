@@ -6,6 +6,7 @@ use crate::stacking::star_detection::deblend::internals::{
 use crate::stacking::star_detection::deblend::multi_threshold::*;
 use crate::testing::prelude::*;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
+use std::collections::HashSet;
 
 /// Build a `RegionSet` from separate regions, as a BFS would have appended them.
 fn region_set(regions: &[&[Pixel]]) -> RegionSet {
@@ -1091,7 +1092,7 @@ fn pixel_grid_connected_regions() {
     assert_eq!(regions[0].len(), 3);
 
     // Verify the values were preserved
-    let values: std::collections::HashSet<_> = regions[0].iter().map(|p| p.value as i32).collect();
+    let values: HashSet<_> = regions[0].iter().map(|p| p.value as i32).collect();
     assert!(values.contains(&1));
     assert!(values.contains(&2));
     assert!(values.contains(&3));

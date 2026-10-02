@@ -1,6 +1,10 @@
 use super::*;
 
 use std::any::Any;
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::mem;
 use std::sync::Mutex as StdMutex;
 
 use crate::async_lambda;
@@ -42,8 +46,8 @@ impl Drop for Tracked {
     }
 }
 
-impl std::fmt::Display for Tracked {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for Tracked {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "Tracked")
     }
 }
@@ -160,7 +164,7 @@ async fn probe_run(relay_mode: CacheMode, probes: usize) -> ProbeRun {
         g.add(&format!("probe{probe}"), move |n: NodeSpec| {
             n.sink().input(tracked()).lambda(async_lambda!(
                 move |Invocation { inputs, .. }| { reads = Arc::clone(&reads) } => {
-                    let value = std::mem::take(&mut inputs[0]);
+                    let value = mem::take(&mut inputs[0]);
                     reads.lock().unwrap().push(value.into_custom::<Tracked>().is_ok());
                     Ok(())
                 }

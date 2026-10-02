@@ -27,6 +27,8 @@ use crate::stacking::star_detection::labeling::run::{
     Run, extract_runs_from_row, merge_runs_with_prev, runs_connected,
 };
 use crate::stacking::star_detection::labeling::union_find::UnionFind;
+use std::mem;
+use std::ops::Index;
 
 /// Rows a strip must cover to be worth splitting off, so an image is not cut into bands whose
 /// per-strip overhead and boundary stitching outweigh the labeling. An image under this height
@@ -120,7 +122,7 @@ impl LabelMap {
     }
 }
 
-impl std::ops::Index<usize> for LabelMap {
+impl Index<usize> for LabelMap {
     type Output = u32;
 
     #[inline]
@@ -276,7 +278,7 @@ fn label_strip(
             result.last_row_runs.clone_from(&curr_runs);
         }
 
-        std::mem::swap(&mut prev_runs, &mut curr_runs);
+        mem::swap(&mut prev_runs, &mut curr_runs);
     }
 
     result

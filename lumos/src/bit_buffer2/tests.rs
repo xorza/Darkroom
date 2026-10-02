@@ -1,5 +1,6 @@
 use crate::testing::prelude::*;
 use std::any::Any;
+use std::mem;
 use std::panic::catch_unwind;
 
 use crate::bit_buffer2::BitBuffer2;
@@ -107,7 +108,7 @@ fn fill_count_copy_and_swap_ignore_padding() {
     assert_eq!(Vec::<bool>::from(&copy), Vec::<bool>::from(&first));
 
     let mut clear = BitBuffer2::new_default(Size2us::new(7, 2));
-    std::mem::swap(&mut copy.words, &mut clear.words);
+    mem::swap(&mut copy.words, &mut clear.words);
     assert_eq!(copy.count_ones(), 0);
     assert_eq!(clear.count_ones(), 13);
 }

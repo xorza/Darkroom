@@ -4,6 +4,9 @@ use crate::elements::worker_events_library::{FRAME_EVENT_FUNC_ID, worker_events_
 use crate::graph::func::Func;
 use crate::graph::func::error::{InvokeError, InvokeResult};
 use crate::testing::func_invoker::FuncInvoker;
+use tokio::task;
+use tokio::task::JoinHandle;
+use tokio::time;
 
 #[derive(Debug)]
 struct FrameOutputs {
@@ -42,7 +45,7 @@ impl FrameSource {
 
     /// A task awaiting the FPS event, over the state this source's executions
     /// write.
-    fn fps_event(&self) -> tokio::task::JoinHandle<()> {
+    fn fps_event(&self) -> JoinHandle<()> {
         let event = self.func.events[1].event_lambda.clone();
         let state = self.node.event_state();
         tokio::spawn(async move { event.invoke(state).await })
@@ -59,14 +62,14 @@ async fn fps_event_throttles_without_source_reexecution_and_preserves_delta_cloc
 
     for _ in 0..2 {
         let tick = source.fps_event();
-        tokio::task::yield_now().await;
+        task::yield_now().await;
         assert!(!tick.is_finished());
 
-        tokio::time::advance(Duration::from_millis(499)).await;
-        tokio::task::yield_now().await;
+        time::advance(Duration::from_millis(499)).await;
+        task::yield_now().await;
         assert!(!tick.is_finished());
 
-        tokio::time::advance(Duration::from_millis(1)).await;
+        time::advance(Duration::from_millis(1)).await;
         tick.await.unwrap();
     }
 
@@ -93,14 +96,14 @@ async fn source_reexecution_does_not_postpone_a_waiting_fps_event() {
     source.tick(2.0).await.unwrap();
 
     let tick = source.fps_event();
-    tokio::task::yield_now().await;
+    task::yield_now().await;
     assert!(!tick.is_finished());
 
     // Re-execute the source twice while the event is still waiting.
     for (step, at) in [(250u64, 250u64), (150, 400)] {
-        tokio::time::advance(Duration::from_millis(step)).await;
+        time::advance(Duration::from_millis(step)).await;
         source.tick(2.0).await.unwrap();
-        tokio::task::yield_now().await;
+        task::yield_now().await;
         assert!(!tick.is_finished(), "the event is not due yet at t={at}ms");
     }
 
@@ -110,9 +113,9 @@ async fn source_reexecution_does_not_postpone_a_waiting_fps_event() {
     // postponed event still fires eventually and only the exact deadline
     // tells the two apart. Yielding (rather than sleeping) keeps the main
     // task runnable, which is what holds the auto-advance off.
-    tokio::time::advance(Duration::from_millis(100)).await;
+    time::advance(Duration::from_millis(100)).await;
     for _ in 0..8 {
-        tokio::task::yield_now().await;
+        task::yield_now().await;
     }
     assert!(
         tick.is_finished(),
@@ -129,9 +132,9 @@ async fn zero_frequency_disables_fps_event_and_starts_with_zero_delta() {
     assert_eq!(initial.frame_no, 1);
 
     let tick = source.fps_event();
-    tokio::task::yield_now().await;
-    tokio::time::advance(Duration::from_secs(1)).await;
-    tokio::task::yield_now().await;
+    task::yield_now().await;
+    time::advance(Duration::from_secs(1)).await;
+    task::yield_now().await;
     assert!(!tick.is_finished());
 
     tick.abort();

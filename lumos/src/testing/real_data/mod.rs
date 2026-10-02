@@ -21,6 +21,7 @@ mod pipeline_bench;
 /// resolving caller-supplied weights and building the stretched display-domain master.
 #[cfg(feature = "ml")]
 pub(crate) mod ml_support {
+    use std::env;
     use std::path::PathBuf;
 
     use crate::io::image::linear::LinearImage;
@@ -32,7 +33,7 @@ pub(crate) mod ml_support {
     /// Returns `None` (after a skip message) when absent — lumos ships no models, so the tests skip
     /// rather than fail when the gitignored weights aren't present.
     pub(crate) fn onnx_weights(env_var: &str, default_file: &str) -> Option<PathBuf> {
-        let path = std::env::var_os(env_var).map_or_else(
+        let path = env::var_os(env_var).map_or_else(
             || {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                     .join("test_data")

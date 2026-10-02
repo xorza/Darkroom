@@ -1,6 +1,10 @@
 //! Tests for sum operations.
 
+use crate::math::sum::AVX2_SUM_F32_CROSSOVER;
 use crate::math::sum::{mean_f32, scalar, sum_f32, weighted_mean_f32};
+use crate::simd::AVX2_F32_LANES;
+use imaginarium::cpu_features;
+use std::iter;
 
 /// Lengths that straddle every gate and its remainder: under the 4-lane NEON minimum, under the
 /// 8-lane one `weighted_sums` uses on x86, under `sum_f32`'s measured crossover at 16, exactly on
@@ -58,7 +62,7 @@ fn sum_f32_stays_within_reassociation_error_of_a_sequential_reference() {
 #[test]
 fn sum_f32_recovers_values_a_narrow_accumulator_would_lose() {
     let mut values = vec![1e6f32];
-    values.extend(std::iter::repeat_n(0.1f32, 10_000));
+    values.extend(iter::repeat_n(0.1f32, 10_000));
     values.push(-1e6f32);
 
     // 10_000 × the f32 nearest 0.1, summed exactly in f64.
@@ -111,9 +115,7 @@ fn mean_agrees_bit_for_bit_with_the_unit_weighted_mean() {
 fn gates_differ(len: usize) -> bool {
     #[cfg(target_arch = "x86_64")]
     {
-        imaginarium::cpu_features::has_avx2()
-            && (crate::simd::AVX2_F32_LANES..crate::math::sum::AVX2_SUM_F32_CROSSOVER)
-                .contains(&len)
+        cpu_features::has_avx2() && (AVX2_F32_LANES..AVX2_SUM_F32_CROSSOVER).contains(&len)
     }
     #[cfg(not(target_arch = "x86_64"))]
     {
@@ -134,7 +136,7 @@ fn gates_differ(len: usize) -> bool {
 #[test]
 #[cfg(target_arch = "x86_64")]
 fn the_split_gate_window_is_where_the_two_entry_points_diverge() {
-    if !imaginarium::cpu_features::has_avx2() {
+    if !cpu_features::has_avx2() {
         return;
     }
 

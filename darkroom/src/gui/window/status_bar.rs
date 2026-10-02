@@ -15,6 +15,9 @@ use scenarium::RamUsage;
 use crate::gui::app::ctx::AppCtx;
 use crate::gui::widgets::format::fmt_bytes;
 use crate::gui::widgets::support::{colored_text, hspacer, muted_text};
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
 
 const PAD_X: f32 = 8.0;
 const PAD_Y: f32 = 3.0;
@@ -82,8 +85,8 @@ impl MemoryLabel {
     }
 }
 
-impl std::fmt::Display for MemoryLabel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for MemoryLabel {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "MEM {}", fmt_bytes(self.process))?;
         if self.cached > 0 {
             write!(f, " · Cache {}", fmt_bytes(self.cached))?;

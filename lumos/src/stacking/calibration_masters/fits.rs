@@ -5,6 +5,8 @@
 //! [`CalibrationComponent::extname`], which is also what the reader recognizes it by, and every
 //! HDU carries a checksum the loader verifies before trusting a byte of it.
 
+use std::fs;
+use std::io;
 use std::io::{Error as IoError, ErrorKind};
 use std::path::Path;
 
@@ -38,7 +40,7 @@ struct BundleIndices {
     defects: Option<usize>,
 }
 
-pub(super) fn save(path: &Path, masters: &CalibrationMasters) -> std::io::Result<()> {
+pub(super) fn save(path: &Path, masters: &CalibrationMasters) -> io::Result<()> {
     file_utils::publish(path, file_utils::PublicationMode::Durable, |file| {
         let mut writer = FitsWriter::new(&mut *file).with_checksums();
         writer
@@ -74,8 +76,8 @@ pub(super) fn save(path: &Path, masters: &CalibrationMasters) -> std::io::Result
     })
 }
 
-pub(super) fn load(path: &Path) -> std::io::Result<CalibrationMasters> {
-    let bytes = std::fs::read(path)?;
+pub(super) fn load(path: &Path) -> io::Result<CalibrationMasters> {
+    let bytes = fs::read(path)?;
     let mut reader = FitsReader::from_bytes(&bytes).map_err(fits_to_io)?;
     validate_primary(&reader)?;
     verify_checksums(&mut reader)?;
@@ -95,7 +97,7 @@ pub(super) fn load(path: &Path) -> std::io::Result<CalibrationMasters> {
     Ok(masters)
 }
 
-fn bundle_primary_header() -> std::io::Result<Header> {
+fn bundle_primary_header() -> io::Result<Header> {
     let mut header = Header::new();
     header
         .set("SIMPLE", true)
@@ -108,7 +110,7 @@ fn bundle_primary_header() -> std::io::Result<Header> {
     Ok(header)
 }
 
-fn validate_primary(reader: &SliceReader<'_>) -> std::io::Result<()> {
+fn validate_primary(reader: &SliceReader<'_>) -> io::Result<()> {
     let Some(primary) = reader.hdus().first() else {
         return Err(invalid_data("calibration-master FITS has no primary HDU"));
     };
@@ -133,7 +135,7 @@ fn validate_primary(reader: &SliceReader<'_>) -> std::io::Result<()> {
     Ok(())
 }
 
-fn verify_checksums(reader: &mut SliceReader<'_>) -> std::io::Result<()> {
+fn verify_checksums(reader: &mut SliceReader<'_>) -> io::Result<()> {
     for index in 0..reader.hdus().len() {
         let report = reader.verify_checksum(index).map_err(fits_to_io)?;
         if report.datasum != ChecksumStatus::Valid || report.checksum != ChecksumStatus::Valid {
@@ -145,7 +147,7 @@ fn verify_checksums(reader: &mut SliceReader<'_>) -> std::io::Result<()> {
     Ok(())
 }
 
-fn bundle_indices(reader: &SliceReader<'_>) -> std::io::Result<BundleIndices> {
+fn bundle_indices(reader: &SliceReader<'_>) -> io::Result<BundleIndices> {
     let mut indices = BundleIndices::default();
     for (index, hdu) in reader.hdus().iter().enumerate().skip(1) {
         let extname = hdu
@@ -168,7 +170,7 @@ fn bundle_indices(reader: &SliceReader<'_>) -> std::io::Result<BundleIndices> {
     Ok(indices)
 }
 
-fn record_index(slot: &mut Option<usize>, index: usize, extname: &str) -> std::io::Result<()> {
+fn record_index(slot: &mut Option<usize>, index: usize, extname: &str) -> io::Result<()> {
     if slot.replace(index).is_some() {
         return Err(invalid_data(format!(
             "duplicate calibration-master FITS extension {extname:?}"
@@ -182,7 +184,7 @@ fn read_master(
     index: Option<usize>,
     role: MasterRole,
     path: &Path,
-) -> std::io::Result<Option<CfaImage>> {
+) -> io::Result<Option<CfaImage>> {
     let Some(index) = index else {
         return Ok(None);
     };
@@ -222,7 +224,7 @@ struct EncodedDefectMap {
     header: Header,
 }
 
-fn encode_defect_map(map: &DefectMap) -> std::io::Result<EncodedDefectMap> {
+fn encode_defect_map(map: &DefectMap) -> io::Result<EncodedDefectMap> {
     let mut kinds = Vec::with_capacity(map.hot_indices.len() + map.cold_indices.len());
     kinds.resize(map.hot_indices.len(), 0);
     kinds.resize(kinds.len() + map.cold_indices.len(), 1);
@@ -234,7 +236,7 @@ fn encode_defect_map(map: &DefectMap) -> std::io::Result<EncodedDefectMap> {
             i64::try_from(index)
                 .map_err(|_| invalid_data("defect index exceeds the FITS signed-64 range"))
         })
-        .collect::<std::io::Result<Vec<_>>>()?;
+        .collect::<io::Result<Vec<_>>>()?;
     let table = TableBuilder::explicit(
         kinds.len(),
         [
@@ -272,7 +274,7 @@ fn encode_defect_map(map: &DefectMap) -> std::io::Result<EncodedDefectMap> {
 fn read_defect_map(
     reader: &mut SliceReader<'_>,
     index: Option<usize>,
-) -> std::io::Result<Option<DefectMap>> {
+) -> io::Result<Option<DefectMap>> {
     let Some(index) = index else {
         return Ok(None);
     };
@@ -335,7 +337,7 @@ fn read_defect_map(
     }))
 }
 
-fn read_defect_dimensions(header: &Header) -> std::io::Result<Option<Size2us>> {
+fn read_defect_dimensions(header: &Header) -> io::Result<Option<Size2us>> {
     let width = header.get_integer("LUMWID").map_err(fits_to_io)?;
     let height = header.get_integer("LUMHEI").map_err(fits_to_io)?;
     match (width, height) {
@@ -360,7 +362,7 @@ fn read_defect_dimensions(header: &Header) -> std::io::Result<Option<Size2us>> {
     }
 }
 
-fn validate_sorted(indices: &[usize], kind: &str) -> std::io::Result<()> {
+fn validate_sorted(indices: &[usize], kind: &str) -> io::Result<()> {
     if indices.windows(2).any(|pair| pair[0] >= pair[1]) {
         return Err(invalid_data(format!(
             "DEFECT_MAP {kind} indices must be strictly ascending"

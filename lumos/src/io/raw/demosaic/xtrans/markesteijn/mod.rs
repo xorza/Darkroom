@@ -38,6 +38,7 @@ use crate::io::raw::demosaic::xtrans::markesteijn_steps;
 use crate::io::raw::demosaic::xtrans::markesteijn_steps::PlanarRgbMut;
 use crate::io::raw::demosaic::{Cancelled, DemosaicMemory};
 use crate::math::size2us::Size2us;
+use std::slice;
 
 /// Number of interpolation directions (4 for 1-pass: H, V, D1, D2).
 pub(crate) const NDIR: usize = 4;
@@ -181,7 +182,7 @@ pub(crate) fn demosaic(
         let region_e = &mut rest[..8 * pixels];
         // SAFETY: `[f32; 2]` has the same alignment as f32 and exactly covers Region E.
         let colors = unsafe {
-            std::slice::from_raw_parts_mut(region_e.as_mut_ptr().cast::<[f32; 2]>(), NDIR * pixels)
+            slice::from_raw_parts_mut(region_e.as_mut_ptr().cast::<[f32; 2]>(), NDIR * pixels)
         };
         markesteijn_steps::reconstruct_colors(xtrans, &hex, region_a, colors);
     }
@@ -201,9 +202,8 @@ pub(crate) fn demosaic(
         let (region_e, rest) = rest.split_at_mut(8 * pixels);
         let region_b = &mut rest[..4 * pixels];
         // SAFETY: Region E was fully initialized as `[f32; 2]` in Step 3.
-        let colors = unsafe {
-            std::slice::from_raw_parts(region_e.as_ptr().cast::<[f32; 2]>(), NDIR * pixels)
-        };
+        let colors =
+            unsafe { slice::from_raw_parts(region_e.as_ptr().cast::<[f32; 2]>(), NDIR * pixels) };
         markesteijn_steps::compute_derivatives(xtrans, region_a, colors, region_b);
     }
     tracing::debug!(
@@ -223,9 +223,8 @@ pub(crate) fn demosaic(
         let drv = &before_c[12 * pixels..];
         // SAFETY: Region C (f32 at [16P..17P]) reinterpreted as u8 for homo.
         // gmin data is dead after Step 2. f32 alignment (4) satisfies u8 alignment (1).
-        let homo = unsafe {
-            std::slice::from_raw_parts_mut(region_c.as_mut_ptr().cast::<u8>(), pixels * 4)
-        };
+        let homo =
+            unsafe { slice::from_raw_parts_mut(region_c.as_mut_ptr().cast::<u8>(), pixels * 4) };
         markesteijn_steps::compute_homogeneity(drv, xtrans.active, homo, region_d);
     }
     tracing::debug!(

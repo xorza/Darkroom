@@ -2,16 +2,22 @@ use crate::utility::fs_watch::{WATCH_DIRECTORY_FUNC_ID, WatchState, fs_watch_lib
 use scenarium::ConstValue;
 use scenarium::{AnyState, ContextManager, FuncBehavior, FuncLambda};
 use scenarium::{DynamicValue, Invocation, InvokeError, OutputDemand, SharedAnyState};
+use std::env;
+use std::fs;
+use std::path::PathBuf;
+use std::process;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Instant;
+use tokio::sync::Notify;
+use tokio::task;
 use tokio::time::{Duration, sleep, timeout};
 
-fn unique_temp_dir() -> std::path::PathBuf {
+fn unique_temp_dir() -> PathBuf {
     static COUNTER: AtomicU32 = AtomicU32::new(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("lens-watch-test-{}-{}", std::process::id(), n));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = env::temp_dir().join(format!("lens-watch-test-{}-{}", process::id(), n));
+    fs::create_dir_all(&dir).unwrap();
     dir
 }
 
@@ -56,7 +62,7 @@ async fn invoke_watch(
         .unwrap()
 }
 
-async fn stored_signal(event_state: &SharedAnyState) -> Option<Arc<tokio::sync::Notify>> {
+async fn stored_signal(event_state: &SharedAnyState) -> Option<Arc<Notify>> {
     event_state
         .lock()
         .await
@@ -144,7 +150,7 @@ async fn passes_directory_through_and_seeds_watcher() {
     assert_eq!(ws.path, dir_str);
     assert!(ws.recursive);
 
-    let _ = std::fs::remove_dir_all(&dir);
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[tokio::test]
@@ -205,7 +211,7 @@ async fn reuses_watcher_until_params_change() {
     assert!(!guard.get::<WatchState>().unwrap().recursive);
     drop(guard);
 
-    let _ = std::fs::remove_dir_all(&dir);
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[tokio::test]
@@ -261,7 +267,7 @@ async fn clearing_path_tears_down_previous_watcher() {
         "the stale watcher must be dropped with its OS watch"
     );
 
-    let _ = std::fs::remove_dir_all(&dir);
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[tokio::test]
@@ -284,7 +290,7 @@ async fn invalid_replacement_drops_previous_watcher() {
     .await;
 
     let file = dir.join("not-a-directory.txt");
-    std::fs::write(&file, b"content").unwrap();
+    fs::write(&file, b"content").unwrap();
     let error = try_invoke_watch(
         &func.lambda,
         &mut ctx,
@@ -325,7 +331,7 @@ async fn invalid_replacement_drops_previous_watcher() {
     );
     assert!(event_state.lock().await.get::<WatchState>().is_none());
 
-    let _ = std::fs::remove_dir_all(&dir);
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[tokio::test]
@@ -338,14 +344,14 @@ async fn watcher_signals_on_content_change() {
     // assertion below measures the file write specifically.
     let _ = timeout(Duration::from_millis(300), signal.notified()).await;
 
-    std::fs::write(dir.join("new.txt"), b"hello").unwrap();
+    fs::write(dir.join("new.txt"), b"hello").unwrap();
 
     timeout(Duration::from_secs(5), signal.notified())
         .await
         .expect("creating a file in the watched dir must fire the watcher");
 
     drop(ws);
-    let _ = std::fs::remove_dir_all(&dir);
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[tokio::test]
@@ -365,7 +371,7 @@ async fn debounce_collapses_burst_into_one_fire() {
     let es = event_state.clone();
     let start = Instant::now();
     let handle = tokio::spawn(async move { lambda.invoke(es).await });
-    tokio::task::yield_now().await;
+    task::yield_now().await;
 
     // Two pulses 50ms apart — both inside the 200ms window.
     signal.notify_one();
@@ -386,5 +392,5 @@ async fn debounce_collapses_burst_into_one_fire() {
         start.elapsed()
     );
 
-    let _ = std::fs::remove_dir_all(&dir);
+    let _ = fs::remove_dir_all(&dir);
 }

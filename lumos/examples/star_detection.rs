@@ -13,6 +13,7 @@
 
 use std::env;
 use std::path::Path;
+use std::process;
 
 use lumos::{LinearImage, LoadContext, StarDetectionConfig, StarDetector};
 
@@ -22,7 +23,7 @@ fn main() {
     if args.len() < 2 {
         eprintln!("Usage: {} <image_path>", args[0]);
         eprintln!("Supported formats: linear FITS and floating-point TIFF");
-        std::process::exit(1);
+        process::exit(1);
     }
     let image_path = Path::new(&args[1]);
 

@@ -12,6 +12,7 @@
 //! cargo run --release --example full_pipeline
 //! ```
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -75,7 +76,7 @@ fn main() {
         .parent()
         .unwrap()
         .join("test_output/stacked_result.tiff");
-    std::fs::create_dir_all(output.parent().unwrap()).expect("create output directory");
+    fs::create_dir_all(output.parent().unwrap()).expect("create output directory");
     let image: imaginarium::Image = result.product.image.into();
     image.save_file(&output).expect("save stacked master");
     tracing::info!(path = %output.display(), "Saved stacked master");

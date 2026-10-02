@@ -1,4 +1,5 @@
 use super::*;
+use std::iter;
 
 #[tokio::test]
 async fn clear_resets_the_execution_graph() {
@@ -40,7 +41,7 @@ async fn update_then_clear_in_one_batch_leaves_the_graph_cleared() {
 async fn an_empty_batch_is_a_noop() {
     let w = TestWorker::over(TestGraph::new());
 
-    w.send_many(std::iter::empty::<WorkerMessage>());
+    w.send_many(iter::empty::<WorkerMessage>());
 
     // A subsequent Sync still fires, so the worker is alive.
     w.sync().await;

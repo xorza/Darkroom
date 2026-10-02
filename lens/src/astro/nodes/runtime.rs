@@ -5,13 +5,15 @@ use lumos::{LinearImage, MlError, OpError};
 use scenarium::{DynamicValue, InvokeError, InvokeResult};
 
 use crate::image::Image;
+use std::error;
+use tokio::task;
 
 pub(crate) async fn run_frame_op<F>(value: DynamicValue, op: F) -> InvokeResult<DynamicValue>
 where
     F: FnOnce(&mut LinearImage) -> Result<(), OpError> + Send + 'static,
 {
     let planar = image_to_planar(value);
-    let out = tokio::task::spawn_blocking(move || {
+    let out = task::spawn_blocking(move || {
         let mut planar = planar;
         op(&mut planar)?;
         Ok::<_, OpError>(planar)
@@ -28,7 +30,7 @@ where
     R: Send + 'static,
 {
     let planar = image_to_planar(value);
-    tokio::task::spawn_blocking(move || op(planar))
+    task::spawn_blocking(move || op(planar))
         .await
         .map_err(InvokeError::external)?
         .map_err(InvokeError::external)
@@ -50,12 +52,12 @@ fn image_to_planar(value: DynamicValue) -> LinearImage {
 
 pub(crate) async fn run_cancellable<T, E, F>(cancel: CancelToken, op: F) -> InvokeResult<T>
 where
-    E: std::error::Error + Send + Sync + 'static,
+    E: error::Error + Send + Sync + 'static,
     F: FnOnce(CancelToken) -> Result<T, E> + Send + 'static,
     T: Send + 'static,
 {
     let cancel_for_op = cancel.clone();
-    match tokio::task::spawn_blocking(move || op(cancel_for_op))
+    match task::spawn_blocking(move || op(cancel_for_op))
         .await
         .map_err(InvokeError::external)?
     {

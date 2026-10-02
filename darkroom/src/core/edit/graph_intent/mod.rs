@@ -19,6 +19,7 @@
 //! has to carry state it will not read.
 
 use std::collections::{BTreeSet, HashMap};
+use std::iter;
 
 use glam::Vec2;
 use scenarium::{Binding, DetachedNode, InputPort, Node, NodeId, Subscription};
@@ -141,7 +142,7 @@ impl GraphIntent {
         key: NodeId,
     ) -> impl Iterator<Item = Self> {
         let deselecting = shift && selected.contains(&key);
-        std::iter::once(Self::select_click(shift, selected, key))
+        iter::once(Self::select_click(shift, selected, key))
             .chain((!deselecting).then_some(Self::Raise { key }))
     }
 

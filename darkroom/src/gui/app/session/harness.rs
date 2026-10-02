@@ -32,6 +32,7 @@ use crate::gui::relayout::Relayout;
 use crate::gui::requests::Requests;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
+use std::iter;
 
 /// Surface every editor test frames at unless it resizes. Wide enough
 /// that the dock strip lays its chips out unwrapped.
@@ -141,7 +142,7 @@ impl SessionHarness {
             // which owns the app's one `request_relayout`. This harness
             // asserts on commands and documents, not on layout passes.
             let _needs_relayout = session.frame(recorder, ctx, preferences, requests);
-            std::iter::from_fn(|| requests.pop_app()).collect()
+            iter::from_fn(|| requests.pop_app()).collect()
         })
     }
 

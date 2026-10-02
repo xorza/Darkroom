@@ -3,6 +3,7 @@ use crate::stacking::frame_store::spill_directory::SpillDirectory;
 use crate::stacking::frame_store::spill_directory::internals::{marker, stale_run_directory};
 use crate::stacking::frame_store::*;
 use crate::testing::ScratchDirectory;
+use std::fs;
 
 #[test]
 fn stored_image_roundtrip_overwrites_stale_pixels() {
@@ -40,9 +41,9 @@ fn spill_directory_removes_only_its_own_planes_unless_asked_to_keep() {
 
     for (keep, should_survive) in [(false, false), (true, true)] {
         let root = scratch.join(format!("keep_{keep}"));
-        std::fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&root).unwrap();
         let sentinel = root.join("user_file.txt");
-        std::fs::write(&sentinel, b"not lumos's").unwrap();
+        fs::write(&sentinel, b"not lumos's").unwrap();
 
         let directory = SpillDirectory::create(&root, keep).unwrap();
         assert_eq!(directory.path().parent(), Some(root.as_path()));
@@ -103,7 +104,7 @@ fn stale_run_directories_are_removed_only_when_marked() {
     let root = scratch.join("root");
     let stale = stale_run_directory(&root);
     let foreign = root.join(format!("run-{}-1", u32::MAX));
-    std::fs::create_dir_all(&foreign).unwrap();
+    fs::create_dir_all(&foreign).unwrap();
 
     let directory = SpillDirectory::create(&root, false).unwrap();
     assert!(!stale.exists(), "a dead run's marked directory was kept");
@@ -244,7 +245,7 @@ fn a_spilled_frames_quality_planes_survive_the_cache_round_trip() {
 
     // One plane without the other is neither state, and must not be read as either: the cache is
     // rebuilt instead.
-    std::fs::remove_file(spill.quality_path("confidence")).unwrap();
+    fs::remove_file(spill.quality_path("confidence")).unwrap();
     assert_eq!(spill.cached_quality(dimensions), CachedQuality::Torn);
 }
 

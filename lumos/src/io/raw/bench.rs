@@ -3,6 +3,8 @@ use quickbench::quick_bench;
 use crate::testing::init_tracing;
 
 use crate::io::raw::*;
+use std::array;
+use std::time::Duration;
 
 #[quick_bench(warmup_iters = 1, iters = 5)]
 fn raw_load(b: quickbench::Bencher) {
@@ -69,15 +71,11 @@ fn bench_load_raw_libraw_demosaic() {
             );
         }
 
-        let avg_ms = times
-            .iter()
-            .map(std::time::Duration::as_secs_f64)
-            .sum::<f64>()
-            / iterations as f64
-            * 1000.0;
+        let avg_ms =
+            times.iter().map(Duration::as_secs_f64).sum::<f64>() / iterations as f64 * 1000.0;
         let min_ms = times
             .iter()
-            .map(std::time::Duration::as_secs_f64)
+            .map(Duration::as_secs_f64)
             .fold(f64::MAX, f64::min)
             * 1000.0;
         println!("  Average: {avg_ms:.1}ms, Best: {min_ms:.1}ms\n");
@@ -226,15 +224,10 @@ fn bench_bayer_rcd_demosaic() {
         );
         image = Some(img);
     }
-    let rcd_avg = times
-        .iter()
-        .map(std::time::Duration::as_secs_f64)
-        .sum::<f64>()
-        / iterations as f64
-        * 1000.0;
+    let rcd_avg = times.iter().map(Duration::as_secs_f64).sum::<f64>() / iterations as f64 * 1000.0;
     let rcd_best = times
         .iter()
-        .map(std::time::Duration::as_secs_f64)
+        .map(Duration::as_secs_f64)
         .fold(f64::MAX, f64::min)
         * 1000.0;
     println!("  Average: {rcd_avg:.1}ms, Best: {rcd_best:.1}ms\n");
@@ -262,15 +255,10 @@ fn bench_bayer_rcd_demosaic() {
                 img.dimensions().channels(),
             );
         }
-        let avg = times
-            .iter()
-            .map(std::time::Duration::as_secs_f64)
-            .sum::<f64>()
-            / 3.0
-            * 1000.0;
+        let avg = times.iter().map(Duration::as_secs_f64).sum::<f64>() / 3.0 * 1000.0;
         let best = times
             .iter()
-            .map(std::time::Duration::as_secs_f64)
+            .map(Duration::as_secs_f64)
             .fold(f64::MAX, f64::min)
             * 1000.0;
         println!(
@@ -394,15 +382,11 @@ fn bench_rcd_demosaic_core() {
             times.push(elapsed);
         }
 
-        let avg_ms = times
-            .iter()
-            .map(std::time::Duration::as_secs_f64)
-            .sum::<f64>()
-            / iterations as f64
-            * 1000.0;
+        let avg_ms =
+            times.iter().map(Duration::as_secs_f64).sum::<f64>() / iterations as f64 * 1000.0;
         let best_ms = times
             .iter()
-            .map(std::time::Duration::as_secs_f64)
+            .map(Duration::as_secs_f64)
             .fold(f64::MAX, f64::min)
             * 1000.0;
         let mpix = (w * h) as f64 / 1e6;
@@ -461,7 +445,7 @@ fn compare_images(
     size: Size2us,
     border: usize,
 ) -> ImageCompareStats {
-    let channels = std::array::from_fn(|channel| {
+    let channels = array::from_fn(|channel| {
         compare_channels(a.channel(channel), b.channel(channel), size, border)
     });
     let average_mae = channels.iter().map(|stats| stats.mae).sum::<f64>() / 3.0;
@@ -605,7 +589,7 @@ fn quality_comparison_removes_affine_color_and_measures_chroma_residuals() {
     let dimensions = ImageDimensions::new((1, 1), 3);
     let black = LinearImage::from_pixels(dimensions, vec![0.0; 3]);
     let colored = LinearImage::from_pixels(dimensions, vec![3.0, 1.0, 5.0]);
-    let transforms = std::array::from_fn(|_| ChannelCompareStats {
+    let transforms = array::from_fn(|_| ChannelCompareStats {
         mae: 0.0,
         max_abs: 0.0,
         psnr: f64::INFINITY,

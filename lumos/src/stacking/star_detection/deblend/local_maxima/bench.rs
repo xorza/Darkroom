@@ -4,6 +4,7 @@
 
 use crate::testing::prelude::*;
 use ::quickbench::quick_bench;
+use std::cmp::Reverse;
 use std::hint::black_box;
 
 use crate::bit_buffer2::BitBuffer2;
@@ -72,7 +73,7 @@ fn bench_find_local_maxima_6k_dense(b: ::quickbench::Bencher) {
 
     // Find the 100 largest components for benchmarking
     let mut sorted_components = components.clone();
-    sorted_components.sort_by_key(|c| std::cmp::Reverse(c.area));
+    sorted_components.sort_by_key(|c| Reverse(c.area));
     let large_components: Vec<_> = sorted_components.into_iter().take(100).collect();
 
     b.bench(|| {

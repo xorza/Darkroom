@@ -3,6 +3,7 @@
 use scenarium::Invocation;
 use std::fs;
 use std::path::PathBuf;
+use std::slice;
 
 use imaginarium::Image as RawImage;
 use lumos::{
@@ -115,11 +116,8 @@ fn master_source_key_changes_with_the_frame_set() {
     let first = dir.join("a.raf");
     let second = dir.join("b.raf");
     fs::write(&first, b"a").unwrap();
-    let one_frame = frame_set_key(std::slice::from_ref(&first)).unwrap();
-    assert_eq!(
-        frame_set_key(std::slice::from_ref(&first)).unwrap(),
-        one_frame
-    );
+    let one_frame = frame_set_key(slice::from_ref(&first)).unwrap();
+    assert_eq!(frame_set_key(slice::from_ref(&first)).unwrap(), one_frame);
 
     fs::write(&second, b"bb").unwrap();
     let two_frames = frame_set_key(&[first.clone(), second.clone()]).unwrap();

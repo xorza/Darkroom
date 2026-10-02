@@ -27,6 +27,7 @@ use crate::graph::identity::NodeId;
 use crate::graph::node::CacheMode;
 use crate::graph::node::special::SpecialNode;
 use crate::{ConstValue, DataType};
+use std::ops::Index;
 
 #[derive(Clone, Debug, Default)]
 pub(crate) enum ExecutionBinding {
@@ -120,7 +121,7 @@ pub struct CompiledGraph {
     pub(crate) outputs: Column<OutputIdx, DataType>,
 }
 
-impl std::ops::Index<NodeIdx> for CompiledGraph {
+impl Index<NodeIdx> for CompiledGraph {
     type Output = ExecutionNode;
 
     fn index(&self, index: NodeIdx) -> &ExecutionNode {

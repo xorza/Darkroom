@@ -27,6 +27,9 @@ use crate::stacking::combine::normalization;
 use crate::stacking::combine::stack::stack;
 use crate::stacking::progress::ProgressCallback;
 use crate::testing::ScratchDirectory;
+use std::fs;
+use std::path::Path;
+use std::path::PathBuf;
 
 /// The tiered loader's core guarantee, as an invariant sweep: for any (frame size, count, budget),
 /// the chosen concurrency must not let peak *load* heap exceed the usable budget. Project that peak
@@ -66,7 +69,7 @@ fn load_budget_is_respected_across_configs() {
 }
 
 /// Write a spatially-uniform 16-bit FITS frame (`value` in every pixel) to `path`.
-fn write_const_fits(path: &std::path::Path, size: Size2us, value: u16) {
+fn write_const_fits(path: &Path, size: Size2us, value: u16) {
     let image = Image::from_u16(
         vec![size.width, size.height],
         &vec![value; size.pixel_count()],
@@ -76,7 +79,7 @@ fn write_const_fits(path: &std::path::Path, size: Size2us, value: u16) {
     FitsWriter::new(&mut buf)
         .write_image(&image, None)
         .expect("encode fits");
-    std::fs::write(path, &buf).expect("write fits");
+    fs::write(path, &buf).expect("write fits");
 }
 
 /// The spill tier (`available_memory = 1`) and the resident tier (`u64::MAX`) must combine the same
@@ -91,7 +94,7 @@ fn disk_and_memory_tiers_produce_identical_masters() {
     // Distinct per-frame constant → a spatially-uniform master bracketed by the frame values, so a
     // per-frame or per-tier bug shows up as a non-uniform or mis-averaged plane.
     let values: Vec<u16> = (0..n).map(|i| 10_000 + i as u16 * 5_000).collect();
-    let paths: Vec<std::path::PathBuf> = values
+    let paths: Vec<PathBuf> = values
         .iter()
         .enumerate()
         .map(|(i, &v)| {

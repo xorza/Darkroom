@@ -11,10 +11,14 @@
 
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
+use std::env;
+use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::thread;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -32,8 +36,8 @@ pub(crate) const MB: u64 = 1024 * 1024;
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(2);
 
 /// Parse env var `key` as `T`, falling back to `default` when it is unset or unparseable.
-pub(crate) fn env_parse<T: std::str::FromStr>(key: &str, default: T) -> T {
-    std::env::var(key)
+pub(crate) fn env_parse<T: FromStr>(key: &str, default: T) -> T {
+    env::var(key)
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(default)
@@ -42,7 +46,7 @@ pub(crate) fn env_parse<T: std::str::FromStr>(key: &str, default: T) -> T {
 /// Read a `/proc/self/status` field (`RssAnon`, `VmRSS`, …) in KiB. Linux-only; returns 0 elsewhere,
 /// so off Linux every sampled peak is 0 and probes skip their numeric assertion.
 fn status_kb(field: &str) -> u64 {
-    let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    let status = fs::read_to_string("/proc/self/status").unwrap_or_default();
     for line in status.lines() {
         if let Some(rest) = line.strip_prefix(field).and_then(|r| r.strip_prefix(':')) {
             return rest
@@ -115,7 +119,7 @@ impl RssSampler {
                 Arc::clone(&peak_gated),
                 Arc::clone(&peak_ungated),
             );
-            std::thread::spawn(move || {
+            thread::spawn(move || {
                 while !stop.load(Ordering::Relaxed) {
                     let anon = status_kb("RssAnon");
                     peak_anon.fetch_max(anon, Ordering::Relaxed);
@@ -125,7 +129,7 @@ impl RssSampler {
                     } else {
                         peak_ungated.fetch_max(anon, Ordering::Relaxed);
                     }
-                    std::thread::sleep(SAMPLE_INTERVAL);
+                    thread::sleep(SAMPLE_INTERVAL);
                 }
             })
         };
@@ -217,7 +221,7 @@ fn write_fits_u16(path: &Path, size: Size2us, data: &[u16], buf: &mut Vec<u8>) -
     FitsWriter::new(&mut *buf)
         .write_image(&image, None)
         .map_err(io::Error::other)?;
-    std::fs::write(path, &buf)
+    fs::write(path, &buf)
 }
 
 /// A generated synthetic frame set: paths plus what it cost to materialize the missing ones.
@@ -239,7 +243,7 @@ pub(crate) fn ensure_frames(
     size: Size2us,
     seed: u64,
 ) -> io::Result<FrameSet> {
-    std::fs::create_dir_all(dir)?;
+    fs::create_dir_all(dir)?;
     let paths: Vec<PathBuf> = (0..n)
         .map(|i| dir.join(format!("{prefix}_{i:04}.fits")))
         .collect();
@@ -305,7 +309,7 @@ impl BudgetChoice {
 /// spill, `1` byte), `auto` (query the system), or unset → `default`. Shared by the combine and
 /// pipeline probes so budget semantics never drift between them.
 pub(crate) fn parse_budget(env_key: &str, default: BudgetChoice) -> BudgetChoice {
-    match std::env::var(env_key).ok().as_deref() {
+    match env::var(env_key).ok().as_deref() {
         None | Some("") => default,
         Some("auto") => BudgetChoice::auto(),
         // u64::MAX ⇒ everything fits ⇒ in-memory tier. 1 byte ⇒ nothing fits ⇒ spill tier.

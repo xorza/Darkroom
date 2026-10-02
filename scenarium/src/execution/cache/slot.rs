@@ -6,6 +6,7 @@ use crate::graph::func::lambda::OutputDemand;
 use crate::graph::identity::FuncId;
 use crate::runtime::any_state::AnyState;
 use crate::runtime::shared_any_state::SharedAnyState;
+use std::mem;
 
 #[derive(Debug)]
 pub(crate) struct OutputSnapshot {
@@ -203,7 +204,7 @@ impl RuntimeSlot {
         };
         let value = &mut snapshot.values[port_idx as usize];
         Some(if take {
-            std::mem::take(value)
+            mem::take(value)
         } else {
             value.clone()
         })

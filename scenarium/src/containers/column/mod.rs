@@ -13,6 +13,8 @@
 
 use std::marker::PhantomData;
 use std::ops::{Index, IndexMut, Range};
+use std::slice::Iter;
+use std::vec::Drain;
 
 /// A scalar position in one dense space.
 ///
@@ -203,11 +205,11 @@ impl<I, T> Column<I, T> {
         self.values.clear();
     }
 
-    pub(crate) fn iter(&self) -> std::slice::Iter<'_, T> {
+    pub(crate) fn iter(&self) -> Iter<'_, T> {
         self.values.iter()
     }
 
-    pub(crate) fn drain(&mut self) -> std::vec::Drain<'_, T> {
+    pub(crate) fn drain(&mut self) -> Drain<'_, T> {
         self.values.drain(..)
     }
 }

@@ -1,5 +1,8 @@
+use std::any;
 use std::any::{Any, TypeId};
+use std::fmt;
 use std::fmt::Debug;
+use std::fmt::Formatter;
 
 use common::CancelToken;
 use hashbrown::HashMap;
@@ -24,8 +27,8 @@ impl<T> Clone for ContextType<T> {
 impl<T> Copy for ContextType<T> {}
 
 impl<T> Debug for ContextType<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ContextType<{}>", std::any::type_name::<T>())
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "ContextType<{}>", any::type_name::<T>())
     }
 }
 

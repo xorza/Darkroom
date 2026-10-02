@@ -13,6 +13,10 @@ mod real_data_tests;
 #[cfg(test)]
 mod tests;
 
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::io;
 use std::path::Path;
 
 use common::CancelToken;
@@ -199,8 +203,8 @@ impl MasterRole {
     }
 }
 
-impl std::fmt::Display for MasterRole {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for MasterRole {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::Dark => "dark",
             Self::Flat => "flat",
@@ -245,8 +249,8 @@ impl From<MasterRole> for CalibrationComponent {
     }
 }
 
-impl std::fmt::Display for CalibrationComponent {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for CalibrationComponent {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Master(role) => role.fmt(f),
             Self::Defects => f.write_str("defects"),
@@ -424,12 +428,12 @@ impl CalibrationMasters {
     ///
     /// The flat is already bias/flat-dark subtracted, per-color normalized, and clamped in this
     /// representation. Loading the bundle does not repeat flat preparation or defect detection.
-    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+    pub fn save(&self, path: &Path) -> io::Result<()> {
         fits::save(path, self)
     }
 
     /// Load a bundle written by [`Self::save`] without rebuilding its prepared flat or defect map.
-    pub fn load(path: &Path) -> std::io::Result<Self> {
+    pub fn load(path: &Path) -> io::Result<Self> {
         fits::load(path)
     }
 

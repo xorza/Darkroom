@@ -4,7 +4,10 @@
 pub(crate) mod temp_dir;
 pub(crate) mod temp_file;
 
+use std::env;
+use std::fs;
 use std::path::PathBuf;
+use std::process;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -19,7 +22,7 @@ fn workspace_root() -> PathBuf {
 fn ensure_test_output_dir() {
     static INIT: OnceLock<()> = OnceLock::new();
     INIT.get_or_init(|| {
-        std::fs::create_dir_all(workspace_root().join("test_output"))
+        fs::create_dir_all(workspace_root().join("test_output"))
             .expect("Failed to create test_output directory");
     });
 }
@@ -30,7 +33,7 @@ pub fn test_output_path(name: &str) -> PathBuf {
     ensure_test_output_dir();
     let path = workspace_root().join("test_output").join(name);
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).expect("Failed to create test output subdirectory");
+        fs::create_dir_all(parent).expect("Failed to create test output subdirectory");
     }
     path
 }
@@ -44,5 +47,5 @@ pub fn test_output_path(name: &str) -> PathBuf {
 fn unique_temp_path(tag: &str) -> PathBuf {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("{tag}-{}-{sequence}", std::process::id()))
+    env::temp_dir().join(format!("{tag}-{}-{sequence}", process::id()))
 }
