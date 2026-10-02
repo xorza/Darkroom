@@ -20,14 +20,14 @@ use std::hint::black_box;
 use std::path::PathBuf;
 
 use common::CancelToken;
-use common::file_utils;
 use quickbench::quick_bench;
 
 use crate::io::raw;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
 use crate::stacking::calibration_masters::stack_cfa_master;
 use crate::stacking::progress::ProgressCallback;
-use crate::testing::{calibration_dir, init_tracing};
+use crate::testing::init_tracing;
+use crate::testing::real_data::raw_frames;
 use crate::{CalibrationMasters, CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD, StackConfig};
 
 /// Bundled calibration frame paths grouped by role (no flat-darks in this set).
@@ -38,34 +38,21 @@ struct CalibrationPaths {
     bias: Vec<PathBuf>,
 }
 
-/// Collect the RAF frame paths for each calibration role, or `None` if the dataset
-/// directory is absent (so a bench/test without the `real-data` bundle skips cleanly).
-fn calibration_paths() -> Option<CalibrationPaths> {
-    let dir = calibration_dir();
-    let raw = |sub: &str| {
-        file_utils::files_with_extensions(&dir.join(sub), raw::RAW_EXTENSIONS)
-            .expect("scan RAW calibration directory")
-    };
-    let paths = CalibrationPaths {
-        darks: raw("Darks"),
-        flats: raw("Flats"),
-        bias: raw("Bias"),
-    };
-    if paths.darks.is_empty() || paths.flats.is_empty() || paths.bias.is_empty() {
-        return None;
+/// The RAW frame paths of each calibration role.
+fn calibration_paths() -> CalibrationPaths {
+    CalibrationPaths {
+        darks: raw_frames("Darks"),
+        flats: raw_frames("Flats"),
+        bias: raw_frames("Bias"),
     }
-    Some(paths)
 }
 
 #[test]
-#[ignore = "real-data integration test; run explicitly with --ignored"]
 fn raw_frame_info_matches_full_decode() {
     // `from_files` sizes its in-memory-vs-disk decision from `raw_cfa_frame_info` (a header peek, no
     // decode). That peek must report exactly the dims a full decode produces, or the memory budget
     // would be wrong.
-    let Some(paths) = calibration_paths() else {
-        panic!("calibration frames missing — run scripts/fetch-test-data.sh");
-    };
+    let paths = calibration_paths();
     let path = &paths.darks[0];
     let peeked = raw::raw_cfa_frame_info(path, &CancelToken::never()).expect("peek frame info");
     let loaded = raw::load_raw_cfa(path, &CancelToken::never()).expect("full decode");
@@ -87,12 +74,9 @@ fn raw_frame_info_matches_full_decode() {
 }
 
 #[test]
-#[ignore = "real-data integration test; run explicitly with --ignored"]
 fn builds_full_master_set() {
     init_tracing();
-    let Some(paths) = calibration_paths() else {
-        panic!("calibration frames missing — run scripts/fetch-test-data.sh");
-    };
+    let paths = calibration_paths();
 
     let masters = CalibrationMasters::from_files(
         CalibrationSet {
@@ -244,11 +228,8 @@ fn sorted_intersection_count(left: &[usize], right: &[usize]) -> usize {
 }
 
 #[test]
-#[ignore = "real-data integration test; run explicitly with --ignored"]
 fn hot_mask_spatial_distribution_and_repeatability() {
-    let Some(paths) = calibration_paths() else {
-        panic!("calibration frames missing — run scripts/fetch-test-data.sh");
-    };
+    let paths = calibration_paths();
     let first_paths: Vec<_> = paths
         .darks
         .iter()
@@ -316,10 +297,7 @@ fn hot_mask_spatial_distribution_and_repeatability() {
 
 #[quick_bench(warmup_iters = 0, iters = 1)]
 fn bench_build_masters_from_files(b: ::quickbench::Bencher) {
-    let Some(paths) = calibration_paths() else {
-        eprintln!("No calibration data available, skipping benchmark");
-        return;
-    };
+    let paths = calibration_paths();
     println!(
         "Building full master set: {} darks + {} flats + {} bias",
         paths.darks.len(),
@@ -345,10 +323,7 @@ fn bench_build_masters_from_files(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 0, iters = 1)]
 fn bench_stack_master_dark(b: ::quickbench::Bencher) {
-    let Some(paths) = calibration_paths() else {
-        eprintln!("No calibration data available, skipping benchmark");
-        return;
-    };
+    let paths = calibration_paths();
     println!("Stacking master dark from {} frames", paths.darks.len());
     b.bench(|| {
         black_box(
@@ -365,10 +340,7 @@ fn bench_stack_master_dark(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 0, iters = 1)]
 fn bench_stack_master_flat(b: ::quickbench::Bencher) {
-    let Some(paths) = calibration_paths() else {
-        eprintln!("No calibration data available, skipping benchmark");
-        return;
-    };
+    let paths = calibration_paths();
     println!("Stacking master flat from {} frames", paths.flats.len());
     b.bench(|| {
         black_box(
@@ -385,10 +357,7 @@ fn bench_stack_master_flat(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 0, iters = 1)]
 fn bench_stack_master_bias(b: ::quickbench::Bencher) {
-    let Some(paths) = calibration_paths() else {
-        eprintln!("No calibration data available, skipping benchmark");
-        return;
-    };
+    let paths = calibration_paths();
     println!("Stacking master bias from {} frames", paths.bias.len());
     b.bench(|| {
         black_box(

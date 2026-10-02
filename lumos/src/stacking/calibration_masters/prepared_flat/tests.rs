@@ -7,7 +7,7 @@ use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::stacking::calibration_masters::prepared_flat::{
     MIN_NORMALIZED_FLAT, apply, normalize, subtract,
 };
-use crate::testing::make_cfa;
+use crate::testing::cfa::make_cfa;
 use std::array;
 
 fn prepare(flat: CfaImage, subtractor: Option<&CfaImage>) -> CfaImage {

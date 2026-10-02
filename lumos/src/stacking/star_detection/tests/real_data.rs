@@ -9,7 +9,8 @@ use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::stacking::star_detection::threshold_mask::{ThresholdParams, create_threshold_mask};
-use crate::testing::{calibration_dir, init_tracing};
+use crate::testing::init_tracing;
+use crate::testing::real_data::dataset_dir;
 use crate::{CentroidMethod, ImageDimensions};
 use common::internals::test_output_path;
 use glam::Vec2;
@@ -26,11 +27,10 @@ fn linear_image_from_l_f32(image: &imaginarium::Image) -> LinearImage {
 }
 
 #[test]
-#[ignore = "real-data integration test; run explicitly with --ignored"]
 fn detect_rho_opiuchi() {
     init_tracing();
 
-    let cal_dir = calibration_dir();
+    let cal_dir = dataset_dir();
 
     let image_path = cal_dir.join("rho-opiuchi.jpg");
     assert!(
@@ -118,7 +118,6 @@ fn detect_rho_opiuchi() {
 }
 
 #[test]
-#[ignore = "real-data inspection test; run explicitly with --ignored"]
 fn inspect_pipeline_intermediates_rho_opiuchi() {
     use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
     use crate::stacking::star_detection::convolution::{MatchedFilterBuffers, matched_filter};
@@ -133,7 +132,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
 
     init_tracing();
 
-    let cal_dir = calibration_dir();
+    let cal_dir = dataset_dir();
 
     let image_path = cal_dir.join("rho-opiuchi.jpg");
     assert!(
@@ -291,7 +290,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
 
 #[quickbench::quick_bench(warmup_iters = 1, iters = 10)]
 fn quick_bench_detect_rho_opiuchi(b: quickbench::Bencher) {
-    let cal_dir = calibration_dir();
+    let cal_dir = dataset_dir();
 
     let image_path = cal_dir.join("rho-opiuchi.jpg");
     assert!(

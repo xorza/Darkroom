@@ -3,7 +3,7 @@ mod error;
 mod normalize;
 pub(crate) mod provenance;
 
-#[cfg(all(test, feature = "bench"))]
+#[cfg(all(test, feature = "bench", feature = "real-data"))]
 mod bench;
 #[cfg(test)]
 mod tests;

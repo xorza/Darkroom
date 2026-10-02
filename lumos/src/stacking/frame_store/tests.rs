@@ -2,19 +2,19 @@ use crate::stacking::frame_store::spill::CachedQuality;
 use crate::stacking::frame_store::spill_directory::SpillDirectory;
 use crate::stacking::frame_store::spill_directory::internals::{marker, stale_run_directory};
 use crate::stacking::frame_store::*;
-use crate::testing::ScratchDirectory;
+use common::TempDir;
 use std::fs;
 
 #[test]
 fn stored_image_roundtrip_overwrites_stale_pixels() {
-    let directory = ScratchDirectory::new("frame_store_image");
+    let directory = TempDir::new("frame_store_image");
     let dimensions = ImageDimensions::new((2, 2), 1);
     let mut image = LinearImage::from_pixels(dimensions, vec![0.1, 0.2, 0.3, 0.4]);
     image.metadata.exposure_time = Some(30.0);
     let path = directory.join("calibrated_c0.bin");
     write_plane(&path, &[9.0; 4]).unwrap();
 
-    let stored = StoredImage::spill(&directory, "calibrated", &image).unwrap();
+    let stored = StoredImage::spill(directory.path(), "calibrated", &image).unwrap();
     let loaded = stored.load();
     assert_eq!(loaded.channel(0).pixels(), &[0.1, 0.2, 0.3, 0.4]);
     assert_eq!(loaded.metadata.exposure_time, Some(30.0));
@@ -35,7 +35,7 @@ fn stored_image_roundtrip_overwrites_stale_pixels() {
 /// subdirectory it created there, whatever `keep_cache` says.
 #[test]
 fn spill_directory_removes_only_its_own_planes_unless_asked_to_keep() {
-    let scratch = ScratchDirectory::new("frame_store_keep");
+    let scratch = TempDir::new("frame_store_keep");
     let dimensions = ImageDimensions::new((2, 2), 1);
     let image = LinearImage::from_pixels(dimensions, vec![0.1, 0.2, 0.3, 0.4]);
 
@@ -80,7 +80,7 @@ fn spill_directory_removes_only_its_own_planes_unless_asked_to_keep() {
 /// other's planes; two runs with it always share one, so the second can reuse the first's planes.
 #[test]
 fn spill_directories_are_per_run_unless_kept() {
-    let scratch = ScratchDirectory::new("frame_store_per_run");
+    let scratch = TempDir::new("frame_store_per_run");
     let root = scratch.join("root");
 
     let first = SpillDirectory::create(&root, false).unwrap();
@@ -100,7 +100,7 @@ fn spill_directories_are_per_run_unless_kept() {
 /// unmarked directory of the same shape belongs to someone else and stays.
 #[test]
 fn stale_run_directories_are_removed_only_when_marked() {
-    let scratch = ScratchDirectory::new("frame_store_stale");
+    let scratch = TempDir::new("frame_store_stale");
     let root = scratch.join("root");
     let stale = stale_run_directory(&root);
     let foreign = root.join(format!("run-{}-1", u32::MAX));
@@ -202,16 +202,16 @@ fn an_unwarped_frames_nulls_become_the_pair_the_combine_gates_on() {
 fn a_spilled_frames_quality_planes_survive_the_cache_round_trip() {
     // The warm-cache case: reusing a frame's channels without its quality planes would put the
     // fill under its nulls back into the stack as data on every run after the first.
-    let directory = ScratchDirectory::new("frame_store_cached_quality");
+    let directory = TempDir::new("frame_store_cached_quality");
     let dimensions = ImageDimensions::new((2, 2), 1);
     let mut image = LinearImage::from_pixels(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
     image.nulls = NullMask::of_non_finite(dimensions.size(), &[&[1.0, 2.0, f32::NAN, 4.0]]);
     let quality = FrameQuality::for_unwarped(&image);
     let stats = FrameStats::measure(&image);
-    let frame = StoredFrame::spill(&directory, "frame.bin", &image, &quality, stats).unwrap();
+    let frame = StoredFrame::spill(directory.path(), "frame.bin", &image, &quality, stats).unwrap();
     drop(frame);
 
-    let spill = FrameSpill::new(&directory, "frame.bin");
+    let spill = FrameSpill::new(directory.path(), "frame.bin");
     assert_eq!(spill.cached_quality(dimensions), CachedQuality::Present);
     let reread =
         FrameQuality::read_spilled(|kind| StoredPlane::map(spill.quality_path(kind))).unwrap();
@@ -230,7 +230,7 @@ fn a_spilled_frames_quality_planes_survive_the_cache_round_trip() {
     let plain = LinearImage::from_pixels(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
     let stats = FrameStats::measure(&plain);
     let frame = StoredFrame::spill(
-        &directory,
+        directory.path(),
         "plain.bin",
         &plain,
         &FrameQuality::for_unwarped(&plain),
@@ -239,7 +239,7 @@ fn a_spilled_frames_quality_planes_survive_the_cache_round_trip() {
     .unwrap();
     drop(frame);
     assert_eq!(
-        FrameSpill::new(&directory, "plain.bin").cached_quality(dimensions),
+        FrameSpill::new(directory.path(), "plain.bin").cached_quality(dimensions),
         CachedQuality::Absent
     );
 
@@ -251,7 +251,7 @@ fn a_spilled_frames_quality_planes_survive_the_cache_round_trip() {
 
 #[test]
 fn plane_persistence_roundtrips_pixels() {
-    let directory = ScratchDirectory::new("frame_store_plane");
+    let directory = TempDir::new("frame_store_plane");
     let path = directory.join("plane.bin");
     let pixels: Vec<f32> = (0..12).map(|value| value as f32).collect();
     write_plane(&path, &pixels).unwrap();
@@ -305,9 +305,9 @@ fn spill_names_are_stable_path_specific_and_share_one_stem() {
 
 #[test]
 fn channels_reusable_requires_every_plane_at_the_expected_size() {
-    let directory = ScratchDirectory::new("frame_store_reuse");
+    let directory = TempDir::new("frame_store_reuse");
     let dimensions = ImageDimensions::new((4, 3), 3);
-    let spill = FrameSpill::new(&directory, "reuse");
+    let spill = FrameSpill::new(directory.path(), "reuse");
 
     // 4×3 f32 = 48 bytes per plane, three planes. Nothing on disk yet.
     assert!(!spill.channels_reusable(dimensions));

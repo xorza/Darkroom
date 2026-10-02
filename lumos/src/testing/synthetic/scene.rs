@@ -8,11 +8,11 @@
 use std::f64::consts::PI;
 
 use crate::math::size2us::Size2us;
-use crate::testing::TestRng;
 use crate::testing::synthetic::backgrounds::{
     NebulaConfig, add_gradient_background, add_nebula_background, add_uniform_background,
     add_vignette_background,
 };
+use crate::testing::test_rng::TestRng;
 use glam::DVec2;
 
 /// A true point source (star) in sky coordinates. Its on-sensor shape comes entirely from

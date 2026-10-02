@@ -7,7 +7,7 @@ use crate::math::statistics::MedianMad;
 use crate::stacking::combine::cache::FrameCache;
 use crate::stacking::combine::cache::loader::*;
 use crate::stacking::combine::config::Normalization;
-use crate::testing::ScratchDirectory;
+use common::TempDir;
 
 fn load_test_frame(
     cache_dir: &Path,
@@ -51,7 +51,7 @@ fn from_paths_reports_empty_and_missing_sources() {
 
 #[test]
 fn load_and_cache_frame_fresh() {
-    let temp_dir = ScratchDirectory::new("lumos_load_cache_fresh_test");
+    let temp_dir = TempDir::new("lumos_load_cache_fresh_test");
 
     let dims = ImageDimensions::new((4, 3), 1);
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
@@ -64,7 +64,8 @@ fn load_and_cache_frame_fresh() {
     let base_filename = "cached_frame.bin";
 
     // First call should load and cache
-    let cached_frame = load_test_frame(&temp_dir, base_filename, &source_path, dims, 0).unwrap();
+    let cached_frame =
+        load_test_frame(temp_dir.path(), base_filename, &source_path, dims, 0).unwrap();
 
     assert_eq!(cached_frame.channels.len(), 1);
 
@@ -78,7 +79,7 @@ fn load_and_cache_frame_fresh() {
 
 #[test]
 fn load_and_cache_frame_reuse() {
-    let temp_dir = ScratchDirectory::new("lumos_load_cache_reuse_test");
+    let temp_dir = TempDir::new("lumos_load_cache_reuse_test");
 
     let dims = ImageDimensions::new((4, 3), 1);
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
@@ -91,10 +92,12 @@ fn load_and_cache_frame_reuse() {
     let base_filename = "cached_frame.bin";
 
     // First call - creates cache
-    let first_frame = load_test_frame(&temp_dir, base_filename, &source_path, dims, 0).unwrap();
+    let first_frame =
+        load_test_frame(temp_dir.path(), base_filename, &source_path, dims, 0).unwrap();
 
     // Second call - should reuse cache
-    let second_frame = load_test_frame(&temp_dir, base_filename, &source_path, dims, 0).unwrap();
+    let second_frame =
+        load_test_frame(temp_dir.path(), base_filename, &source_path, dims, 0).unwrap();
 
     // Both should have same data
     let n = dims.pixel_count();
@@ -119,7 +122,8 @@ fn load_and_cache_frame_reuse() {
         .unwrap()
         .set_modified(first_timestamp)
         .unwrap();
-    let collided = load_test_frame(&temp_dir, base_filename, &collided_path, dims, 1).unwrap();
+    let collided =
+        load_test_frame(temp_dir.path(), base_filename, &collided_path, dims, 1).unwrap();
     assert_eq!(
         collided.channels[0].chunk(0, dims.pixel_count()),
         collided_pixels
@@ -144,14 +148,15 @@ fn load_and_cache_frame_reuse() {
         .unwrap()
         .set_modified(second_timestamp)
         .unwrap();
-    let rewritten = load_test_frame(&temp_dir, base_filename, &collided_path, dims, 1).unwrap();
+    let rewritten =
+        load_test_frame(temp_dir.path(), base_filename, &collided_path, dims, 1).unwrap();
     assert_eq!(
         rewritten.channels[0].chunk(0, dims.pixel_count()),
         rewritten_pixels
     );
     drop(rewritten);
 
-    let cache_path = FrameSpill::new(&temp_dir, base_filename).channel_path(0);
+    let cache_path = FrameSpill::new(temp_dir.path(), base_filename).channel_path(0);
     let mut cache_file = OpenOptions::new().write(true).open(cache_path).unwrap();
     cache_file
         .seek(SeekFrom::Start((2 * size_of::<f32>()) as u64))
@@ -159,7 +164,8 @@ fn load_and_cache_frame_reuse() {
     cache_file.write_all(&f32::INFINITY.to_le_bytes()).unwrap();
     drop(cache_file);
 
-    let error = load_test_frame(&temp_dir, base_filename, &collided_path, dims, 1).unwrap_err();
+    let error =
+        load_test_frame(temp_dir.path(), base_filename, &collided_path, dims, 1).unwrap_err();
     assert!(matches!(
         error,
         Error::NonFiniteImageSample {
@@ -173,7 +179,7 @@ fn load_and_cache_frame_reuse() {
 
 #[test]
 fn load_and_cache_frame_dimension_mismatch() {
-    let temp_dir = ScratchDirectory::new("lumos_load_cache_mismatch_test");
+    let temp_dir = TempDir::new("lumos_load_cache_mismatch_test");
 
     // Create image with different dimensions than expected
     let actual_dims = ImageDimensions::new((4, 3), 1);
@@ -185,7 +191,13 @@ fn load_and_cache_frame_dimension_mismatch() {
 
     // Try to load with wrong expected dimensions
     let expected_dims = ImageDimensions::new((8, 6), 1);
-    let result = load_test_frame(&temp_dir, "cached.bin", &source_path, expected_dims, 5);
+    let result = load_test_frame(
+        temp_dir.path(),
+        "cached.bin",
+        &source_path,
+        expected_dims,
+        5,
+    );
 
     assert!(matches!(
         result.unwrap_err(),
@@ -201,7 +213,7 @@ fn load_and_cache_frame_dimension_mismatch() {
 
 #[test]
 fn source_meta_detects_size_and_precise_mtime_changes() {
-    let temp_dir = ScratchDirectory::new("test_source_meta_validates");
+    let temp_dir = TempDir::new("test_source_meta_validates");
 
     let source = temp_dir.join("source.fits");
     fs::write(&source, b"aaaaaaaa").unwrap();
@@ -216,7 +228,11 @@ fn source_meta_detects_size_and_precise_mtime_changes() {
 
     // No meta file yet — validation should fail
     let initial_identity = source_identity(&source).unwrap();
-    assert!(!validate_source_meta(&temp_dir, base, &initial_identity));
+    assert!(!validate_source_meta(
+        temp_dir.path(),
+        base,
+        &initial_identity
+    ));
 
     // Write meta for current source
     let first_timestamp =
@@ -228,10 +244,10 @@ fn source_meta_detects_size_and_precise_mtime_changes() {
         .set_modified(first_timestamp)
         .unwrap();
     let identity = source_identity(&source).unwrap();
-    write_source_meta(&temp_dir, base, &identity).unwrap();
+    write_source_meta(temp_dir.path(), base, &identity).unwrap();
 
     // Now validation should pass
-    assert!(validate_source_meta(&temp_dir, base, &identity));
+    assert!(validate_source_meta(temp_dir.path(), base, &identity));
 
     fs::write(&source, b"bbbbbbbb").unwrap();
     OpenOptions::new()
@@ -243,9 +259,13 @@ fn source_meta_detects_size_and_precise_mtime_changes() {
     let precise_rewrite = source_identity(&source).unwrap();
     assert_eq!(precise_rewrite.byte_len, identity.byte_len);
     assert_ne!(precise_rewrite.modified_nanos, identity.modified_nanos);
-    assert!(!validate_source_meta(&temp_dir, base, &precise_rewrite));
+    assert!(!validate_source_meta(
+        temp_dir.path(),
+        base,
+        &precise_rewrite
+    ));
 
-    write_source_meta(&temp_dir, base, &precise_rewrite).unwrap();
+    write_source_meta(temp_dir.path(), base, &precise_rewrite).unwrap();
     fs::write(&source, b"longer than eight bytes").unwrap();
     OpenOptions::new()
         .write(true)
@@ -256,14 +276,14 @@ fn source_meta_detects_size_and_precise_mtime_changes() {
     let resized = source_identity(&source).unwrap();
     assert_eq!(resized.modified_nanos, precise_rewrite.modified_nanos);
     assert_ne!(resized.byte_len, precise_rewrite.byte_len);
-    assert!(!validate_source_meta(&temp_dir, base, &resized));
+    assert!(!validate_source_meta(temp_dir.path(), base, &resized));
 
     // Cleanup
 }
 
 #[test]
 fn frame_stats_sidecar_roundtrip() {
-    let temp_dir = ScratchDirectory::new("lumos_stats_roundtrip_test");
+    let temp_dir = TempDir::new("lumos_stats_roundtrip_test");
 
     let base = "test_frame.bin";
 
@@ -279,8 +299,8 @@ fn frame_stats_sidecar_roundtrip() {
         domain: None,
         row_order: None,
     };
-    write_frame_stats(&temp_dir, base, &stats_1ch).unwrap();
-    let read_1ch = read_frame_stats(&temp_dir, base).unwrap();
+    write_frame_stats(temp_dir.path(), base, &stats_1ch).unwrap();
+    let read_1ch = read_frame_stats(temp_dir.path(), base).unwrap();
     assert_eq!(read_1ch.channels.len(), 1);
     assert_eq!(read_1ch.channels[0].median, 42.5);
     assert_eq!(read_1ch.channels[0].mad, 3.25);
@@ -308,8 +328,8 @@ fn frame_stats_sidecar_roundtrip() {
         domain: None,
         row_order: None,
     };
-    write_frame_stats(&temp_dir, base, &stats_3ch).unwrap();
-    let read_3ch = read_frame_stats(&temp_dir, base).unwrap();
+    write_frame_stats(temp_dir.path(), base, &stats_3ch).unwrap();
+    let read_3ch = read_frame_stats(temp_dir.path(), base).unwrap();
     assert_eq!(read_3ch.channels.len(), 3);
     assert_eq!(read_3ch.quantization_sigma, None);
     // Verify exact f32 roundtrip for each channel
@@ -324,12 +344,12 @@ fn frame_stats_sidecar_roundtrip() {
     }
 
     // Missing file returns None
-    assert!(read_frame_stats(&temp_dir, "nonexistent.bin").is_none());
+    assert!(read_frame_stats(temp_dir.path(), "nonexistent.bin").is_none());
 
     // Corrupt file returns None
-    let corrupt_path = stats_path(&temp_dir, "corrupt.bin");
+    let corrupt_path = stats_path(temp_dir.path(), "corrupt.bin");
     fs::write(&corrupt_path, b"bad").unwrap();
-    assert!(read_frame_stats(&temp_dir, "corrupt.bin").is_none());
+    assert!(read_frame_stats(temp_dir.path(), "corrupt.bin").is_none());
 
     // A sidecar carrying a different layout tag is rejected rather than decoded — bitcode is not
     // self-describing, so without the tag a cache from a build with different structs would come
@@ -342,8 +362,8 @@ fn frame_stats_sidecar_roundtrip() {
         SerdeFormat::Bitcode,
     )
     .unwrap();
-    fs::write(stats_path(&temp_dir, "stale_format.bin"), stale).unwrap();
-    assert!(read_frame_stats(&temp_dir, "stale_format.bin").is_none());
+    fs::write(stats_path(temp_dir.path(), "stale_format.bin"), stale).unwrap();
+    assert!(read_frame_stats(temp_dir.path(), "stale_format.bin").is_none());
 
     // Decoding cleanly is not enough: a sigma that would poison every weight derived from it is
     // rejected too, which costs a re-decode rather than a silently wrong stack.
@@ -354,9 +374,9 @@ fn frame_stats_sidecar_roundtrip() {
             domain: None,
             row_order: None,
         };
-        write_frame_stats(&temp_dir, "poisoned.bin", &poisoned).unwrap();
+        write_frame_stats(temp_dir.path(), "poisoned.bin", &poisoned).unwrap();
         assert!(
-            read_frame_stats(&temp_dir, "poisoned.bin").is_none(),
+            read_frame_stats(temp_dir.path(), "poisoned.bin").is_none(),
             "a cached sigma of {sigma} must not be reused"
         );
     }
@@ -376,7 +396,7 @@ fn frame_stats_sidecar_roundtrip() {
 #[test]
 fn load_and_cache_frame_reuse_preserves_stats() {
     // Verify that stats computed on first load match stats read from sidecar on reuse.
-    let temp_dir = ScratchDirectory::new("lumos_cache_reuse_stats_test");
+    let temp_dir = TempDir::new("lumos_cache_reuse_stats_test");
 
     // Non-uniform data so median and MAD are non-trivial
     let dims = ImageDimensions::new((4, 3), 1);
@@ -390,7 +410,7 @@ fn load_and_cache_frame_reuse_preserves_stats() {
     let base_filename = "stats_test.bin";
 
     // First call — loads image, computes stats, writes sidecar
-    let first = load_test_frame(&temp_dir, base_filename, &source_path, dims, 0).unwrap();
+    let first = load_test_frame(temp_dir.path(), base_filename, &source_path, dims, 0).unwrap();
     let first_stats = first.source_stats;
 
     assert_eq!(first_stats.channels.len(), 1);
@@ -398,7 +418,7 @@ fn load_and_cache_frame_reuse_preserves_stats() {
     assert_eq!(first_stats.channels[0].mad, 3.0);
 
     // Second call — reuses cache, reads stats from sidecar
-    let reused_stats = load_test_frame(&temp_dir, base_filename, &source_path, dims, 0)
+    let reused_stats = load_test_frame(temp_dir.path(), base_filename, &source_path, dims, 0)
         .unwrap()
         .source_stats;
 
@@ -417,7 +437,7 @@ fn load_and_cache_frame_reuse_preserves_stats() {
 fn missing_stats_sidecar_forces_reload() {
     // If the .stats file is deleted but .meta and .bin remain,
     // load_and_cache_frame should NOT reuse cache (can_reuse = false).
-    let temp_dir = ScratchDirectory::new("lumos_missing_stats_test");
+    let temp_dir = TempDir::new("lumos_missing_stats_test");
 
     let dims = ImageDimensions::new((4, 3), 1);
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
@@ -429,17 +449,17 @@ fn missing_stats_sidecar_forces_reload() {
     let base_filename = "missing_stats.bin";
 
     // First call — creates cache + sidecars
-    let first_stats = load_test_frame(&temp_dir, base_filename, &source_path, dims, 0)
+    let first_stats = load_test_frame(temp_dir.path(), base_filename, &source_path, dims, 0)
         .unwrap()
         .source_stats;
 
     // Delete only the .stats sidecar
-    let sp = stats_path(&temp_dir, base_filename);
+    let sp = stats_path(temp_dir.path(), base_filename);
     assert!(sp.exists());
     fs::remove_file(&sp).unwrap();
 
     // Second call — should reload (not panic) and recompute stats
-    let reloaded_stats = load_test_frame(&temp_dir, base_filename, &source_path, dims, 0)
+    let reloaded_stats = load_test_frame(temp_dir.path(), base_filename, &source_path, dims, 0)
         .unwrap()
         .source_stats;
 

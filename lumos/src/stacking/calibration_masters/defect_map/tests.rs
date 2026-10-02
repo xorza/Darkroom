@@ -4,13 +4,13 @@ use crate::stacking::calibration_masters::defect_map::*;
 use crate::stacking::combine::cache::FrameCache;
 use crate::stacking::combine::config::{Normalization, StackConfig};
 use crate::stacking::combine::stack::run_stacking;
-use crate::testing::XTRANS_PATTERN;
+use crate::testing::cfa::XTRANS_PATTERN;
 
 use crate::io::image::cfa::same_color::{XTRANS_NEIGHBORS, XTRANS_RADIUS, XTransOffsets};
 use crate::stacking::calibration_masters::defect_map::sampling::{
     collect_color_sample_indices, collect_color_samples,
 };
-use crate::{io::raw::demosaic::bayer::CfaPattern, testing::make_cfa};
+use crate::{io::raw::demosaic::bayer::CfaPattern, testing::cfa::make_cfa};
 
 #[derive(Debug, PartialEq)]
 struct MedianMad {

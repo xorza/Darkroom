@@ -5,8 +5,8 @@ use crate::io::image::image_provenance::{
 use crate::io::image::sample_domain::ScaleOrigin;
 use crate::io::raw::demosaic::xtrans::internals::test_pattern_array;
 use crate::io::raw::provenance::RawTransferProvenance;
-use crate::testing::make_cfa;
-use common::internals;
+use crate::testing::cfa::make_cfa;
+use common::TempDir;
 use std::fs;
 
 #[test]
@@ -46,7 +46,8 @@ fn a_masters_nulls_survive_the_fits_round_trip() {
         quantization_sigma: None,
         nulls: NullMask::of_non_finite(Size2us::new(2usize, 2usize), &[&[0.0, f32::NAN, 0.0, 0.0]]),
     };
-    let path = internals::test_output_path("cfa_master_nulls_roundtrip.fits");
+    let dir = TempDir::new("lumos-cfa-nulls");
+    let path = dir.join("master.fits");
     cfa.save_fits(&path).unwrap();
 
     let loaded = CfaImage::from_file(&path, &LoadContext::default()).unwrap();
@@ -67,7 +68,7 @@ fn a_masters_nulls_survive_the_fits_round_trip() {
 /// assumed scale of 1 and every light is refused.
 #[test]
 fn a_masters_declared_sample_domain_survives_the_fits_round_trip() {
-    let directory = common::TempDir::new("lumos-cfa-domain");
+    let directory = TempDir::new("lumos-cfa-domain");
     for span in [15_360.0f32, 1_234.567_8] {
         let mut master = make_cfa(Size2us::new(2, 2), vec![0.25; 4], CfaType::Mono);
         master.metadata.provenance = Some(ImageProvenance {
@@ -115,7 +116,8 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
         quantization_sigma: Some(0.000_01),
         nulls: None,
     };
-    let path = internals::test_output_path("cfa_master_roundtrip.fits");
+    let dir = TempDir::new("lumos-cfa-roundtrip");
+    let path = dir.join("master.fits");
     cfa.save_fits(&path).unwrap();
     let info = CfaFrameInfo::from_file(&path, &LoadContext::default()).unwrap();
     assert_eq!(info.dimensions, ImageDimensions::new((2, 2), 1));
@@ -151,7 +153,7 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
         Err(ImageError::FitsUnsupported { reason, .. }) if reason.contains("version")
     ));
 
-    let mut corrupted = original.clone();
+    let mut corrupted = original;
     let sample = 0.1f32.to_be_bytes();
     let offset = corrupted
         .windows(sample.len())
@@ -168,11 +170,11 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
         ),
         "{error:?}"
     );
-    fs::write(path, original).unwrap();
 }
 
 #[test]
 fn master_cfa_fits_round_trips_mono_and_xtrans_patterns() {
+    let dir = TempDir::new("lumos-cfa-types");
     for (name, cfa_type) in [
         ("mono", CfaType::Mono),
         ("xtrans", CfaType::XTrans(test_pattern_array())),
@@ -186,7 +188,7 @@ fn master_cfa_fits_round_trips_mono_and_xtrans_patterns() {
             quantization_sigma: None,
             nulls: None,
         };
-        let path = internals::test_output_path(&format!("cfa_master_{name}.fits"));
+        let path = dir.join(format!("master_{name}.fits"));
 
         image.save_fits(&path).unwrap();
         let loaded = CfaImage::from_file(path, &LoadContext::default()).unwrap();

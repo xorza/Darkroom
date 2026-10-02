@@ -28,7 +28,9 @@ use crate::stacking::star_detection::config::Config as StarDetectionConfig;
 use crate::stacking::star_detection::config::detection_config::DetectionConfig;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::synthetic::fixtures::star_field;
-use crate::testing::{ScratchDirectory, make_cfa};
+use common::TempDir;
+
+use crate::testing::cfa::make_cfa;
 
 #[derive(Debug)]
 struct BaseField {
@@ -539,7 +541,7 @@ fn write_mono_cfa_light(directory: &Path, index: usize, image: &LinearImage) -> 
 /// in the run and a consumer had to know the route to line them up.
 #[test]
 fn both_front_ends_report_the_same_stages() {
-    let scratch = ScratchDirectory::new("lumos_stage_parity");
+    let scratch = TempDir::new("lumos_stage_parity");
     let BaseField {
         image: base,
         registration: reg,
@@ -583,7 +585,7 @@ fn both_front_ends_report_the_same_stages() {
     let paths: Vec<PathBuf> = frames
         .iter()
         .enumerate()
-        .map(|(index, frame)| write_mono_cfa_light(&scratch, index, frame))
+        .map(|(index, frame)| write_mono_cfa_light(scratch.path(), index, frame))
         .collect();
     calibrate_align_stack(
         &paths,
@@ -631,7 +633,7 @@ fn both_front_ends_report_the_same_stages() {
 /// source of nondeterminism, so any difference the assertions find is a real divergence.
 #[test]
 fn ram_and_streaming_tiers_produce_identical_stacks() {
-    let scratch = ScratchDirectory::new("lumos_tier_equivalence");
+    let scratch = TempDir::new("lumos_tier_equivalence");
     let BaseField {
         image: base,
         registration: reg,
@@ -656,7 +658,7 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
     let paths: Vec<PathBuf> = frames
         .iter()
         .enumerate()
-        .map(|(index, frame)| write_mono_cfa_light(&scratch, index, frame))
+        .map(|(index, frame)| write_mono_cfa_light(scratch.path(), index, frame))
         .collect();
 
     let mut config = AlignStackConfig::default();
@@ -774,16 +776,15 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
 
 #[cfg(feature = "real-data")]
 #[test]
-#[ignore = "real-data integration test; run explicitly with --ignored"]
 fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
     use crate::stacking::calibration_masters::CalibrationMasters;
     use crate::stacking::pipeline::calibrate::calibrate_align_stack;
-    use crate::testing::calibration_image_paths;
+    use crate::testing::real_data::raw_frames;
     use crate::{CalibrationSet, DEFAULT_SIGMA_THRESHOLD};
 
-    let dark_paths = calibration_image_paths("Darks").unwrap_or_default();
-    let bias_paths = calibration_image_paths("Bias").unwrap_or_default();
-    let flat_paths = calibration_image_paths("Flats").unwrap_or_default();
+    let dark_paths = raw_frames("Darks");
+    let bias_paths = raw_frames("Bias");
+    let flat_paths = raw_frames("Flats");
     let empty: Vec<PathBuf> = Vec::new();
     let masters = CalibrationMasters::from_files(
         CalibrationSet {
@@ -797,7 +798,7 @@ fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
     )
     .expect("build calibration masters");
 
-    let all = calibration_image_paths("Lights").expect("Lights subdirectory");
+    let all = raw_frames("Lights");
     let lights = &all[..all.len().min(3)];
     assert!(lights.len() >= 2, "need ≥2 lights to exercise registration");
 
@@ -824,16 +825,15 @@ fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
 
 #[cfg(feature = "real-data")]
 #[test]
-#[ignore = "real-data integration test; run explicitly with --ignored"]
 fn streaming_disk_tier_matches_ram_on_real_lights() {
     use crate::stacking::calibration_masters::CalibrationMasters;
     use crate::stacking::pipeline::calibrate::calibrate_align_stack;
-    use crate::testing::calibration_image_paths;
+    use crate::testing::real_data::raw_frames;
     use crate::{CalibrationSet, DEFAULT_SIGMA_THRESHOLD};
 
-    let dark_paths = calibration_image_paths("Darks").unwrap_or_default();
-    let bias_paths = calibration_image_paths("Bias").unwrap_or_default();
-    let flat_paths = calibration_image_paths("Flats").unwrap_or_default();
+    let dark_paths = raw_frames("Darks");
+    let bias_paths = raw_frames("Bias");
+    let flat_paths = raw_frames("Flats");
     let empty: Vec<PathBuf> = Vec::new();
     let masters = CalibrationMasters::from_files(
         CalibrationSet {
@@ -847,7 +847,7 @@ fn streaming_disk_tier_matches_ram_on_real_lights() {
     )
     .expect("build calibration masters");
 
-    let all = calibration_image_paths("Lights").expect("Lights subdirectory");
+    let all = raw_frames("Lights");
     let lights = &all[..all.len().min(3)];
     assert!(lights.len() >= 2, "need ≥2 lights to exercise registration");
 

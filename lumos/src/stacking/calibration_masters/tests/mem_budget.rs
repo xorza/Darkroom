@@ -16,7 +16,7 @@ use crate::stacking::calibration_masters::cosmic_ray::mono::internals::{
     MONO_SCRATCH_PLANES, mono_scratch_floats,
 };
 use crate::stacking::calibration_masters::cosmic_ray::reject_cosmic_rays;
-use crate::testing::cfa_from_plane;
+use crate::testing::cfa::cfa_from_plane;
 
 /// Cosmic-ray detection holds three full-frame masks at its peak, one bit per pixel each.
 ///

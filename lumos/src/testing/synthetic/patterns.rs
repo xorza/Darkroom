@@ -7,7 +7,7 @@ use imaginarium::Buffer2;
 
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use crate::testing::TestRng;
+use crate::testing::test_rng::TestRng;
 
 /// Create a uniform image filled with a single value.
 pub(crate) fn uniform(size: Size2us, value: f32) -> Buffer2<f32> {

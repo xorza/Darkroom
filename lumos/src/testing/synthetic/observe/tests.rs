@@ -132,7 +132,7 @@ fn bias_and_defects_applied() {
     let scene = Scene {
         size: Size2us::new(32, 32),
         sources: vec![],
-        background: BackgroundField::Uniform { level: 0.0 },
+        background: BackgroundField::Uniform { level: 0.2 },
     };
     let camera = Camera {
         bias: BiasField {
@@ -147,12 +147,11 @@ fn bias_and_defects_applied() {
     };
     let frame = render(&scene, &camera, &Observation::reference(1));
     let px = frame.image.channel(0).pixels();
-    // Ordinary pixel = bias only.
-    assert!((px[0] - 0.05).abs() < 1e-6);
-    // Hot pixel = bias + excess.
-    assert!((px[10 * 32 + 10] - 0.55).abs() < 1e-6);
-    // Dead pixel forced low (applied after bias).
-    assert_eq!(px[5 * 32 + 5], 0.0);
+    // Ordinary pixel = signal + bias; hot pixel adds its excess; a dead pixel has no signal, so it
+    // reads the bias alone. The ideal camera's flat is 1, so each sum is these f32 additions.
+    assert_eq!(px[0], 0.2 + 0.05);
+    assert_eq!(px[10 * 32 + 10], 0.2 + 0.05 + 0.5);
+    assert_eq!(px[5 * 32 + 5], 0.05);
 }
 
 #[test]

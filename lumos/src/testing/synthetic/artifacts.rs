@@ -4,7 +4,7 @@
 //! - Cosmic rays
 //! - CFA (Bayer) pattern artifacts
 
-use crate::testing::TestRng;
+use crate::testing::test_rng::TestRng;
 
 /// Add random cosmic ray hits to the image.
 ///
@@ -26,23 +26,21 @@ pub(crate) fn add_cosmic_rays(
         let y = (rng.next_f32() * height as f32) as usize;
         let amp = amplitude_range.0 + rng.next_f32() * (amplitude_range.1 - amplitude_range.0);
 
-        if x < width && y < height {
-            // Single pixel hit (most cosmic rays)
-            pixels[y * width + x] += amp;
+        // Single pixel hit (most cosmic rays)
+        pixels[y * width + x] += amp;
 
-            // Some cosmic rays have slight bleeding
-            if rng.next_f32() > 0.7 {
-                let bleed = amp * 0.15;
-                if x > 0 {
-                    pixels[y * width + x - 1] += bleed;
-                }
-                if x < width - 1 {
-                    pixels[y * width + x + 1] += bleed;
-                }
+        // Some cosmic rays have slight bleeding
+        if rng.next_f32() > 0.7 {
+            let bleed = amp * 0.15;
+            if x > 0 {
+                pixels[y * width + x - 1] += bleed;
             }
-
-            positions.push((x, y));
+            if x < width - 1 {
+                pixels[y * width + x + 1] += bleed;
+            }
         }
+
+        positions.push((x, y));
     }
 
     positions

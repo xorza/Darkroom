@@ -19,7 +19,7 @@ use quickbench::quick_bench;
 use std::hint::black_box;
 
 use crate::io::image::load_context::LoadContext;
-use crate::testing::calibration_dir;
+use crate::testing::real_data::dataset_dir;
 use crate::{
     ColorMode, Denoise, ExtractBackground, Hdr, LocalContrast, NeutralizeBackground, Scnr, Stretch,
     StretchMethod,
@@ -35,7 +35,7 @@ const ITERS: usize = 5;
 /// converts layout even at setup.
 fn linear_master() -> LinearImage {
     LinearImage::from_file(
-        calibration_dir().join("stacked_light.tiff"),
+        dataset_dir().join("stacked_light.tiff"),
         &LoadContext::default(),
     )
     .expect("load stacked_light.tiff")

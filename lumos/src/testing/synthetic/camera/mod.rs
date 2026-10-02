@@ -129,13 +129,14 @@ impl FlatField {
     }
 }
 
-/// Sensor defects baked into a frame: hot pixels (additive spikes) and dead pixels
-/// (forced to zero). Coordinates are `(x, y)`.
+/// Sensor defects baked into a frame: hot pixels (additive spikes) and dead pixels (no
+/// response to light or dark current; they read the bias and the read noise). Coordinates are
+/// `(x, y)`.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SensorDefects {
     /// `(x, y, excess)` — hot pixels add `excess` normalized counts.
     pub(crate) hot: Vec<(usize, usize, f32)>,
-    /// `(x, y)` — dead pixels forced to ~zero response.
+    /// `(x, y)` — dead pixels, with no response.
     pub(crate) dead: Vec<(usize, usize)>,
 }
 

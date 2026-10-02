@@ -1,19 +1,17 @@
 //! Real data registration tests.
 //!
-//! These tests load calibrated light frames from `test_data/lumos_data/calibrated_lights/`,
-//! run star detection, and register them to verify the pipeline end-to-end.
-//! Skipped automatically when the env var is not set.
+//! These tests load the RAW light frames of the bundled dataset, run star detection, and
+//! register them to verify the pipeline end to end.
 
-use std::fs;
 use std::hint::black_box;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use ::quickbench::quick_bench;
-use common::file_utils;
+use common::{CancelToken, TempDir};
 
 use crate::io::image::linear::LinearImage;
-use crate::io::image::load_context::LoadContext;
+use crate::io::raw::load_raw_cfa;
 use crate::math::size2us::Size2us;
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
@@ -23,46 +21,38 @@ use crate::stacking::registration::transform::TransformModel;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::config::measurement_config::{CentroidMethod, NoiseModel};
 use crate::stacking::star_detection::detector::StarDetector;
-use crate::testing::calibration_dir;
+use crate::testing::real_data::raw_frames;
 
-/// Load the first and last calibrated light frames from the sample data directory.
-/// Returns None if there are fewer than 2 lights.
-fn load_two_calibrated_lights() -> Option<(LinearImage, LinearImage)> {
-    let cal_dir = calibration_dir();
-    let lights_dir = cal_dir.join("calibrated_lights");
-    if !lights_dir.exists() {
-        eprintln!("calibrated_lights directory not found, skipping test");
-        return None;
-    }
+/// A RAW light, demosaiced without calibration: registration needs its stars, not its noise floor.
+fn load_light(path: &Path) -> LinearImage {
+    load_raw_cfa(path, &CancelToken::never())
+        .expect("load a RAW light")
+        .demosaic(&CancelToken::never())
+        .expect("demosaic a RAW light")
+}
 
-    let files = file_utils::files_with_extensions(&lights_dir, &["fits", "fit", "tiff", "tif"])
-        .expect("scan calibrated light directory");
-    if files.len() < 2 {
-        eprintln!(
-            "Need at least 2 calibrated lights, found {}, skipping test",
-            files.len()
-        );
-        return None;
-    }
-
-    let first = &files[0];
-    let last = &files[files.len() - 1];
-
-    println!("Loading first: {}", first.display());
-    let img1 = LinearImage::from_file(first, &LoadContext::default())
-        .expect("Failed to load first light frame");
-    println!("Loading last:  {}", last.display());
-    let img2 = LinearImage::from_file(last, &LoadContext::default())
-        .expect("Failed to load last light frame");
-    Some((img1, img2))
+/// The first and last RAW lights of the dataset, demosaiced: two frames of one field, offset by
+/// the drift of a night's sequence.
+fn load_two_lights() -> (LinearImage, LinearImage) {
+    let lights = raw_frames("Lights");
+    assert!(
+        lights.len() >= 2,
+        "real-data Lights/ needs two frames to register"
+    );
+    println!(
+        "Loading {} and {}",
+        lights[0].display(),
+        lights[lights.len() - 1].display()
+    );
+    (
+        load_light(&lights[0]),
+        load_light(&lights[lights.len() - 1]),
+    )
 }
 
 #[test]
-#[ignore = "real-data integration test; run explicitly with --ignored"]
-fn register_two_calibrated_lights() {
-    let Some((img1, img2)) = load_two_calibrated_lights() else {
-        return;
-    };
+fn register_two_lights() {
+    let (img1, img2) = load_two_lights();
 
     println!(
         "Image 1: {}x{} ({} ch)",
@@ -215,47 +205,23 @@ fn register_two_calibrated_lights() {
     );
 }
 
-/// Load all calibrated light frames and their file paths.
-/// Returns None if there are fewer than 2 lights.
-fn load_all_calibrated_lights() -> Option<(Vec<LinearImage>, Vec<PathBuf>)> {
-    let cal_dir = calibration_dir();
-    let lights_dir = cal_dir.join("calibrated_lights");
-    if !lights_dir.exists() {
-        eprintln!("calibrated_lights directory not found, skipping");
-        return None;
-    }
-
-    let files = file_utils::files_with_extensions(&lights_dir, &["fits", "fit", "tiff", "tif"])
-        .expect("scan calibrated light directory");
-    if files.len() < 2 {
-        eprintln!(
-            "Need at least 2 calibrated lights, found {}, skipping",
-            files.len()
-        );
-        return None;
-    }
-
-    let images: Vec<LinearImage> = files
-        .iter()
-        .map(|p| {
-            LinearImage::from_file(p, &LoadContext::default()).expect("Failed to load light frame")
-        })
-        .collect();
-    Some((images, files))
+/// Every RAW light of the dataset, demosaiced, with its path.
+fn load_all_lights() -> (Vec<LinearImage>, Vec<PathBuf>) {
+    let paths = raw_frames("Lights");
+    let images = paths.iter().map(|path| load_light(path)).collect();
+    (images, paths)
 }
 
 #[quick_bench(warmup_iters = 0, iters = 1)]
 fn bench_register_and_warp_all(b: ::quickbench::Bencher) {
-    let Some((images, paths)) = load_all_calibrated_lights() else {
-        eprintln!("No calibration data available, skipping benchmark");
-        return;
-    };
-
-    let cal_dir = calibration_dir();
-    let output_dir = cal_dir.join("registered_lights");
-    fs::create_dir_all(&output_dir).expect("Failed to create registered_lights directory");
-
-    println!("Loaded {} calibrated lights", images.len());
+    let (images, paths) = load_all_lights();
+    // The warped frames go to a fresh directory, never into the dataset.
+    let output_dir = TempDir::new("lumos-registered-lights");
+    println!(
+        "Loaded {} lights; writing under {}",
+        images.len(),
+        output_dir.path().display()
+    );
 
     b.bench(|| {
         let star_config = Config::precise_ground();
@@ -274,7 +240,9 @@ fn bench_register_and_warp_all(b: ::quickbench::Bencher) {
         );
 
         // Save reference frame as-is
-        let ref_output = output_dir.join(paths[0].file_name().unwrap());
+        let tiff_name =
+            |path: &PathBuf| format!("{}.tiff", path.file_stem().unwrap().to_string_lossy());
+        let ref_output = output_dir.join(tiff_name(&paths[0]));
         images[0]
             .save(&ref_output)
             .expect("Failed to save reference frame");
@@ -302,7 +270,7 @@ fn bench_register_and_warp_all(b: ::quickbench::Bencher) {
 
             let warped = warp(&images[i], &result.warp_transform(), &reg_config.warp).image;
 
-            let output_path = output_dir.join(name);
+            let output_path = output_dir.join(tiff_name(&paths[i]));
             warped
                 .save(&output_path)
                 .expect("Failed to save warped frame");
@@ -318,10 +286,7 @@ fn bench_register_and_warp_all(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 3, iters = 30)]
 fn bench_register_stars(b: ::quickbench::Bencher) {
-    let Some((img1, img2)) = load_two_calibrated_lights() else {
-        eprintln!("No calibration data available, skipping benchmark");
-        return;
-    };
+    let (img1, img2) = load_two_lights();
 
     // Pre-detect stars (not part of the benchmark)
     let star_config = Config::default();
@@ -342,14 +307,11 @@ fn bench_register_stars(b: ::quickbench::Bencher) {
 
 /// PR1 validation: inverse-variance-weighted PSF fitting should not worsen (and ideally
 /// improves) registration RMS vs unweighted, by producing lower-variance sub-pixel
-/// centroids. Runs the calibrated pair through `GaussianFit` with and without a
+/// centroids. Runs the pair of lights through `GaussianFit` with and without a
 /// `NoiseModel`, registers each, and compares.
 #[test]
-#[ignore = "real-data integration test; run explicitly with --ignored"]
 fn weighted_fit_registration_rms() {
-    let Some((img1, img2)) = load_two_calibrated_lights() else {
-        return;
-    };
+    let (img1, img2) = load_two_lights();
 
     // 30,000 e-/normalized unit is representative of physical gain × the 14-bit signal range.
     let noise_model = NoiseModel::from_normalized(30_000.0, 30.0);

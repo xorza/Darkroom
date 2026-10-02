@@ -8,16 +8,11 @@ use std::time::Duration;
 
 #[quick_bench(warmup_iters = 1, iters = 5)]
 fn raw_load(b: quickbench::Bencher) {
-    use crate::testing::calibration_image_paths;
+    use crate::testing::real_data::raw_frames;
 
     init_tracing();
 
-    let paths = calibration_image_paths("Lights").or_else(|| calibration_image_paths("Flats"));
-    let Some(paths) = paths else {
-        eprintln!("No calibration images found, skipping");
-        return;
-    };
-    let path = paths[0].clone();
+    let path = raw_frames("Lights").swap_remove(0);
     println!("Benchmarking load_raw on: {}", path.display());
 
     b.bench(|| load_raw(&path, &CancelToken::never()).unwrap());
@@ -27,15 +22,13 @@ fn raw_load(b: quickbench::Bencher) {
 /// For X-Trans: qual <= 2 -> Markesteijn 1-pass, qual >= 3 -> Markesteijn 3-pass.
 /// For Bayer: 0=linear, 1=VNG, 2=PPG, 3=AHD, 11=DHT, 12=AAHD.
 #[test]
-#[ignore]
+#[ignore = "a hand-run bench; run it with --ignored"]
 fn bench_load_raw_libraw_demosaic() {
-    use crate::testing::calibration_image_paths;
+    use crate::testing::real_data::raw_frames;
 
     init_tracing();
 
-    let paths = calibration_image_paths("Lights")
-        .or_else(|| calibration_image_paths("Flats"))
-        .expect("No calibration images found");
+    let paths = raw_frames("Lights");
     let path = &paths[0];
     println!("Benchmarking libraw demosaic on: {}\n", path.display());
 
@@ -88,15 +81,13 @@ fn bench_load_raw_libraw_demosaic() {
 /// regression per channel to remove scale/offset differences before comparison.
 /// This isolates pure demosaic quality from color pipeline differences.
 #[test]
-#[ignore]
+#[ignore = "a hand-run bench; run it with --ignored"]
 fn bench_markesteijn_quality_vs_libraw() {
-    use crate::testing::calibration_image_paths;
+    use crate::testing::real_data::raw_frames;
 
     init_tracing();
 
-    let paths = calibration_image_paths("Lights")
-        .or_else(|| calibration_image_paths("Flats"))
-        .expect("No calibration images found");
+    let paths = raw_frames("Lights");
     let path = &paths[0];
     println!("Quality comparison on: {}\n", path.display());
 
@@ -185,7 +176,7 @@ fn bench_markesteijn_quality_vs_libraw() {
 /// Compares: RCD (ours) vs PPG, AHD, DHT (libraw).
 /// Requires a Bayer raw file in `test_data/raw_samples`/.
 #[test]
-#[ignore]
+#[ignore = "a hand-run bench; run it with --ignored"]
 fn bench_bayer_rcd_demosaic() {
     init_tracing();
 
@@ -275,7 +266,7 @@ fn bench_bayer_rcd_demosaic() {
 /// Uses linear regression per channel to remove WB/scale differences,
 /// then computes MAE, PSNR, and Pearson correlation.
 #[test]
-#[ignore]
+#[ignore = "a hand-run bench; run it with --ignored"]
 fn bench_bayer_rcd_quality_vs_libraw() {
     init_tracing();
 
@@ -352,7 +343,7 @@ fn bench_bayer_rcd_quality_vs_libraw() {
 ///
 /// Uses a synthetic Bayer image to isolate demosaic performance.
 #[test]
-#[ignore]
+#[ignore = "a hand-run bench; run it with --ignored"]
 fn bench_rcd_demosaic_core() {
     use demosaic::bayer::{BayerImage, CfaPattern, rcd};
 

@@ -5,7 +5,7 @@ use crate::math::statistics::median_mut;
 use crate::stacking::calibration_masters::cosmic_ray::config::NoiseEstimation;
 use crate::stacking::calibration_masters::cosmic_ray::mono::replace_flagged;
 use crate::stacking::calibration_masters::cosmic_ray::*;
-use crate::testing::cfa_from_plane;
+use crate::testing::cfa::cfa_from_plane;
 use crate::testing::prelude::*;
 use crate::testing::synthetic::sky_field::{Sky, SkyField};
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
