@@ -1,4 +1,3 @@
-use std::env;
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::str;
@@ -10,29 +9,15 @@ use palantir::ImageFilter;
 use crate::core::io::preferences::{
     MlModelPreferences, Preferences, ViewerBackground, ViewerPreferences, WindowState,
 };
-use crate::platform;
 
-/// The file sits in the OS's configuration directory — not beside the
-/// executable, which every packaged install puts somewhere unwritable, and not
-/// in whatever directory the process was started from.
+/// The file is named for the app, and lies in the OS's configuration directory
+/// (`platform/*` `resolve_config_dir` tests cover that resolution).
 #[test]
-fn the_preferences_file_resolves_inside_the_platform_config_dir() {
-    let path = Preferences::path();
-    let config_dir = platform::config_dir().expect("the test host has a home directory");
-
+fn the_preferences_file_is_named_for_the_app() {
     assert_eq!(
-        path.file_name(),
+        Preferences::path().file_name(),
         Some(OsStr::new("darkroom.preferences.ron"))
     );
-    assert_eq!(path.parent(), Some(config_dir.as_path()));
-    // A real absolute location, not the empty prefix the no-home fallback
-    // leaves — which is what a working-directory resolution would look like.
-    assert!(path.is_absolute(), "{path:?} is not an absolute path");
-    // The executable's directory is exactly what this no longer tracks: under
-    // cargo that is `target/`, and the flatpak's read-only `/app/bin` is what
-    // made resolving there fail outright.
-    let exe = env::current_exe().expect("the test binary can locate itself");
-    assert_ne!(path.parent(), exe.parent());
 }
 
 fn roundtrip(cfg: &Preferences) -> Preferences {
@@ -40,11 +25,12 @@ fn roundtrip(cfg: &Preferences) -> Preferences {
     deserialize(&bytes, SerdeFormat::Ron).expect("preferences RON round-trips")
 }
 
+/// A populated file and the default both read back equal, field for field.
 #[test]
-fn populated_preferences_roundtrips() {
-    let cfg = Preferences {
+fn preferences_roundtrip() {
+    let populated = Preferences {
         document_path: Some(PathBuf::from("/tmp/graph.darkroom")),
-        // Non-defaults (defaults are `true`) so the round-trip is meaningful.
+        // Every field off its default, so a field the round trip drops fails.
         load_last_document: false,
         confirm_unsaved_changes: false,
         window: Some(WindowState {
@@ -52,7 +38,6 @@ fn populated_preferences_roundtrips() {
             maximized: true,
             position: Some(IVec2::new(120, -40)),
         }),
-        // Non-defaults (defaults are Theme + Nearest).
         viewer: ViewerPreferences {
             background: ViewerBackground::Checker,
             mag_filter: ImageFilter::Linear,
@@ -62,71 +47,47 @@ fn populated_preferences_roundtrips() {
             star_removal: PathBuf::from("/models/s.onnx"),
         },
     };
-    let bytes = serialize(&cfg, SerdeFormat::Ron).expect("preferences RON serializes");
+    let bytes = serialize(&populated, SerdeFormat::Ron).expect("preferences RON serializes");
     let text = str::from_utf8(&bytes).expect("preferences RON is UTF-8");
     assert!(text.contains("mag_filter: linear"));
-    let back = roundtrip(&cfg);
+
+    for cfg in [populated, Preferences::default()] {
+        assert_eq!(roundtrip(&cfg), cfg);
+    }
+}
+
+/// `#[serde(default)]` fills every absent key, so a hand-trimmed file loads.
+#[test]
+fn partial_preferences_fill_defaults() {
+    let empty: Preferences = deserialize(b"()", SerdeFormat::Ron).expect("empty preferences");
+    assert_eq!(empty, Preferences::default());
+
+    let partial = b"(confirm_unsaved_changes: false)";
+    let cfg: Preferences =
+        deserialize(partial, SerdeFormat::Ron).expect("partial preferences deserializes");
     assert_eq!(
-        back.document_path,
-        Some(PathBuf::from("/tmp/graph.darkroom"))
-    );
-    assert_eq!(back.ml_models.denoise, PathBuf::from("/models/d.onnx"));
-    assert_eq!(back.ml_models.star_removal, PathBuf::from("/models/s.onnx"));
-    assert!(!back.load_last_document);
-    assert!(!back.confirm_unsaved_changes);
-    assert_eq!(
-        back.window,
-        Some(WindowState {
-            size: UVec2::new(1440, 900),
-            maximized: true,
-            position: Some(IVec2::new(120, -40)),
-        })
-    );
-    assert_eq!(
-        back.viewer,
-        ViewerPreferences {
-            background: ViewerBackground::Checker,
-            mag_filter: ImageFilter::Linear,
+        cfg,
+        Preferences {
+            confirm_unsaved_changes: false,
+            ..Preferences::default()
         }
     );
 }
 
+/// The default reopens the last document and asks before it discards changes,
+/// remembers no window, and shows the theme backdrop with nearest sampling.
 #[test]
-fn default_preferences_roundtrips() {
-    // `#[serde(default)]` must restore every absent key rather than erroring,
-    // which is what lets a hand-trimmed preferences file still load.
-    let back = roundtrip(&Preferences::default());
-    assert_eq!(back.document_path, None);
-    // Defaults to reopening the last document (historical behavior).
-    assert!(back.load_last_document);
-    // Defaults to prompting before quitting with unsaved changes.
-    assert!(back.confirm_unsaved_changes);
-    // No remembered window geometry until a session saves one.
-    assert_eq!(back.window, None);
-    // Viewer toolbar defaults: theme backdrop, nearest sampling.
-    assert_eq!(back.viewer, ViewerPreferences::default());
-    assert_eq!(back.viewer.background, ViewerBackground::Theme);
-    assert_eq!(back.viewer.mag_filter, ImageFilter::Nearest);
-    assert_eq!(
-        back.ml_models.denoise,
-        lens::MlModelPaths::default().denoise
-    );
-    assert_eq!(
-        back.ml_models.star_removal,
-        lens::MlModelPaths::default().star_removal
-    );
-}
-
-#[test]
-fn partial_preferences_fill_defaults() {
-    let partial = b"(confirm_unsaved_changes: false)";
-    let cfg: Preferences =
-        deserialize(partial, SerdeFormat::Ron).expect("partial preferences deserializes");
-    assert!(!cfg.confirm_unsaved_changes);
-    assert_eq!(cfg.document_path, None);
-    // A preferences file predating this key still defaults to reopening the document.
-    assert!(cfg.load_last_document);
-    assert_eq!(cfg.ml_models.denoise, lens::MlModelPaths::default().denoise);
+fn default_preferences() {
+    let defaults = Preferences::default();
+    assert_eq!(defaults.document_path, None);
+    assert!(defaults.load_last_document);
+    assert!(defaults.confirm_unsaved_changes);
+    assert_eq!(defaults.window, None);
+    assert_eq!(defaults.viewer.background, ViewerBackground::Theme);
+    assert_eq!(defaults.viewer.mag_filter, ImageFilter::Nearest);
+    let models = lens::MlModelPaths::default();
+    assert_eq!(defaults.ml_models.denoise, models.denoise);
+    assert_eq!(defaults.ml_models.star_removal, models.star_removal);
 }
 
 #[test]

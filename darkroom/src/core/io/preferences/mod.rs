@@ -17,7 +17,7 @@ const PREFERENCES_FILE: &str = "darkroom.preferences.ron";
 /// Reloaded on startup so darkroom reopens where the user left off.
 /// Missing / unreadable preferences fall back to `default()`.
 /// `#[serde(default)]` so a partial preferences file still deserializes.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub(crate) struct Preferences {
     /// Document to reopen on launch. `None` starts with an empty doc.
@@ -107,7 +107,7 @@ impl Default for Preferences {
     }
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub(crate) struct MlModelPreferences {
     pub(crate) denoise: PathBuf,

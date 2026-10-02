@@ -131,7 +131,6 @@ Paths are relative to the repository root.
 - [ ] `lens/src/astro/nodes/tests.rs:130-131` — after `fs::remove_file(&first)` the test calls `frame_set_key(&[])`, the empty set, so the removal plays no part in it. The `FrameSetKeyError::Metadata` path (`calibration.rs:242`) is never exercised. Assert that `frame_set_key(&[first])` is `Err` naming the path. Separately, pin the order dependence of the key: `[a,b]` vs `[b,a]`.
 - [ ] `darkroom/src/gui/pane/graph/gesture/breaker/tests.rs:60`, `.../connection/tests.rs:127`, `.../preview_drag/tests.rs:54` — "The harness carries the pane assertion: … commits against the pane …". `CanvasHarness::frame` (`gui/pane/graph/harness.rs:163-186`) asserts nothing about panes, and `DocumentRequest` (`gui/requests.rs:30-33`) carries no pane at all. These comments describe a check that no longer exists, so pane routing is not tested here. Delete the comments, or restore the assertion if routing still exists somewhere.
 - [ ] `darkroom/src/gui/pane/viewer/camera.rs:83-90`, `:106-111` — the "on a 2x display … physical px" cases never pass a scale factor, because `fit_viewport` and `zoom_about_pane_center` take none. These are the same logical-space computation on a smaller image, labelled as DPI coverage. Rewrite the comments to say what is computed, or test the scale path where it actually lives.
-- [ ] `darkroom/src/core/io/preferences/tests.rs:90-93` — the comment says the test proves `#[serde(default)]` restores absent keys, but it serializes a full `Preferences` first, so every key is present. The absent-key path is `partial_preferences_fill_defaults` (`:116`). Fix the comment, or fold this into that test.
 - [ ] `darkroom/src/gui/pane/graph/gesture/new_node/tests.rs:69-76` — the same doc paragraph appears twice on `assert_fits`.
 
 ## The test harness breaks its own contracts
@@ -149,16 +148,6 @@ Paths are relative to the repository root.
 
 ## Nondeterministic and environment-dependent tests
 Unseeded randomness, wall-clock waits, fixed shared paths and host-specific state make a result unrepeatable or let a broken path pass.
-
-### lumos — shared harness, calibration, pipeline, frame_store
-Paths are relative to the repository root.
-
-- [ ] `lumos/src/stacking/calibration_masters/tests/mod.rs:1329-1336` — `stack_cfa_master_rejects…` relies on a cwd-relative `.tmp/does-not-exist.fits`.
-
-### darkroom, lens, imaginarium, quickbench, root `test_resources/`
-Paths are relative to the repository root.
-
-- [ ] `darkroom/src/core/io/preferences/tests.rs:14-32` — `expect("the test host has a home directory")` fails on a container without `HOME`/`XDG_CONFIG_HOME`. The equality also compares `Preferences::path()` with `platform::config_dir()`, the same function, so it is a tautology. The real resolution is already covered without the environment by `platform/{linux,macos,windows}` `resolve_config_dir` tests. Drop this test or reduce it to the file-name check.
 
 ## SIMD and GPU backends without an exact cross-check on the host that runs the tests
 The tests compare only the dispatched backend, or nothing at all. On an AVX2 host the SSE kernels, and without a GPU every GPU test, never run against the scalar reference.
@@ -431,7 +420,7 @@ Paths are relative to the repository root.
 - [ ] `darkroom/src/core/edit/step/tests.rs:266-271` — the `5e-5` and `2e-4` probes retype `VIEWPORT_EPS` (`step/set_viewport.rs:14`). Derive them as `EPS / 2` and `EPS * 2`.
 - [ ] `darkroom/src/gui/pane/graph/gesture/pan_zoom/tests.rs:59-66`, `:94-98` — the expected value is `SCROLL_ZOOM_BASE.powf(18.0)`, the production formula, under a 1e-6 tolerance; the comment's hand value (≈1.04604) is never asserted. `:169-172` and `:187-190` compare a clamped zoom with a `1e-5` tolerance, but `clamp` returns the bound exactly, so use `assert_eq!`. Their comment also claims that pivot invariance holds at the clamp, and nothing asserts it. The tolerances at `:122`, `:199`, `:210`, `:213` give no reason.
 - [ ] `darkroom/src/gui/pane/graph/gesture/breaker/tests.rs:116-126` — the comment says the point lands "at exactly (2000, 0)", while the assert allows 1e-4. Either make it exact or state why it cannot be: `3000·(2000/3000)` in f32 is not exact.
-- [ ] `darkroom/src/core/io/preferences/tests.rs:39-88` — the round trip compares fields one by one because `Preferences` lacks `PartialEq` (`preferences/mod.rs:19`). A field added later goes unchecked; `viewer` and `ml_models` were both added after the test. Derive `PartialEq` and assert `back == cfg`. `gui/theme/mod.rs:259-279` (`theme_roundtrips_through_ron`) has the same problem.
+- [ ] `darkroom/src/gui/theme/mod.rs:259-279` (`theme_roundtrips_through_ron`) compares fields one by one because `Theme` and `palantir::Theme` lack `PartialEq`. A field added later goes unchecked.
 
 ## Duplicate tests and fixtures that should be one table or one helper
 The same fixture or property is written many times, with different ad-hoc tolerances. Each copy drifts, and one fix has to be made in many places.
@@ -797,9 +786,8 @@ Paths without a crate prefix are relative to `scenarium/src/`.
 ### darkroom, lens, imaginarium, quickbench, root `test_resources/`
 Paths are relative to the repository root.
 
-- [ ] Change narration in test comments: `darkroom/src/gui/graph_ctx/tests.rs:9` ("no longer asks"), `darkroom/src/core/document/mod.rs:475-477` ("they were four separate spellings … before"), `darkroom/src/core/io/document/tests.rs:71-72` ("Before this, save only asserted"), `darkroom/src/core/io/preferences/tests.rs:27-29`, `:123`, `darkroom/src/gui/app/session/mod.rs:263-264`, `:439-441` ("The single-slot arbitration this replaced"), `darkroom/src/gui/app/session/harness.rs:168`, `darkroom/src/gui/pane/graph/gesture/breaker/tests.rs:80-85`, `darkroom/src/gui/pane/graph/gesture/new_node/tests.rs:16-19`, `:140-143`, `darkroom/src/gui/pane/graph/gesture/selection/tests.rs:14`, `darkroom/src/gui/pane/graph/node/port_color/tests.rs:47`, `darkroom/src/gui/pane/graph/paint/inspector.rs:448-449`, `darkroom/src/gui/requests.rs:134`, `darkroom/src/gui/pane/viewer/mod.rs:651-652`, `darkroom/src/gui/state/preview_store/tests.rs:21-23`, `darkroom/src/gui/app/discard_dialog.rs:163-166`, `lens/src/image/codec/tests.rs:20-21` ("no longer reads"), `lens/src/astro/config/processing.rs` (`builder_ports_follow…`: "live in another crate now").
+- [ ] Change narration in test comments: `darkroom/src/gui/graph_ctx/tests.rs:9` ("no longer asks"), `darkroom/src/core/document/mod.rs:475-477` ("they were four separate spellings … before"), `darkroom/src/core/io/document/tests.rs:71-72` ("Before this, save only asserted"), `darkroom/src/gui/app/session/mod.rs:263-264`, `:439-441` ("The single-slot arbitration this replaced"), `darkroom/src/gui/app/session/harness.rs:168`, `darkroom/src/gui/pane/graph/gesture/breaker/tests.rs:80-85`, `darkroom/src/gui/pane/graph/gesture/new_node/tests.rs:16-19`, `:140-143`, `darkroom/src/gui/pane/graph/gesture/selection/tests.rs:14`, `darkroom/src/gui/pane/graph/node/port_color/tests.rs:47`, `darkroom/src/gui/pane/graph/paint/inspector.rs:448-449`, `darkroom/src/gui/requests.rs:134`, `darkroom/src/gui/pane/viewer/mod.rs:651-652`, `darkroom/src/gui/state/preview_store/tests.rs:21-23`, `darkroom/src/gui/app/discard_dialog.rs:163-166`, `lens/src/image/codec/tests.rs:20-21` ("no longer reads"), `lens/src/astro/config/processing.rs` (`builder_ports_follow…`: "live in another crate now").
 - [ ] Stale or wrong descriptions:
   - `lens/src/astro/nodes/tests.rs:1` says "Registration tests", but the file also covers the domain boundary, the frame-set key and invocation.
   - `darkroom/src/core/edit/graph_intent/tests.rs:211` says "The clone of `b`", but the helper also finds `a`'s clone.
   - `darkroom/src/gui/pane/graph/gesture/selection/tests.rs:21-23` says the row assigns "by map iteration order", but `DocFixture::add` places by slot count, deterministically.
-  - `darkroom/src/core/io/preferences/tests.rs:123` gives a legacy-file rationale ("a preferences file predating this key"). Under the no-backward-compat rule, the reason for `serde(default)` is hand-trimmed files, as `:92-93` says.
