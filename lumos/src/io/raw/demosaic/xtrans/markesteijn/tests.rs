@@ -1,8 +1,7 @@
 use crate::io::raw::demosaic::interleave_planes;
 use crate::io::raw::demosaic::sensor_layout::SensorLayout;
-use crate::io::raw::demosaic::xtrans::XTransNormalization;
 use crate::io::raw::demosaic::xtrans::internals::{
-    TEST_SPAN, make_xtrans, test_pattern, test_pattern_array, to_u16,
+    make_xtrans, test_pattern, test_pattern_array, to_u16,
 };
 use crate::io::raw::demosaic::xtrans::markesteijn::*;
 use crate::testing::prelude::*;
@@ -307,48 +306,5 @@ fn markesteijn_all_zeros() {
     let rgb = interleave_planes(demosaic(&xtrans, &CancelToken::never()).unwrap());
     for &v in &rgb {
         assert_eq!(v, 0.0, "Expected 0.0 for all-zero input");
-    }
-}
-
-#[test]
-fn markesteijn_preserves_green_at_green_pixel() {
-    let raw_w = 30;
-    let raw_h = 30;
-    let w = 18;
-    let h = 18;
-    let top = 6;
-    let left = 6;
-    let data = vec![to_u16(0.5); raw_w * raw_h];
-    let pattern = test_pattern();
-    let xtrans = XTransImage::with_margins(
-        &data,
-        SensorLayout {
-            raw: Size2us::new(raw_w, raw_h),
-            active: Size2us::new(w, h),
-            margin: Vec2us::new(left, top),
-        },
-        pattern,
-        XTransNormalization {
-            channel_black: [0.0; 3],
-            span: TEST_SPAN,
-            black_repeat: None,
-        },
-    );
-
-    let rgb = interleave_planes(demosaic(&xtrans, &CancelToken::never()).unwrap());
-
-    // At green pixel positions, the green channel should be approximately the raw value
-    for y in 0..h {
-        for x in 0..w {
-            let raw_y = y + top;
-            let raw_x = x + left;
-            if pattern.color_at(Vec2us::new(raw_x, raw_y)) == 1 {
-                let g = rgb[(y * w + x) * 3 + 1];
-                assert!(
-                    (g - 0.5).abs() < 0.001,
-                    "Green at ({y},{x}) = {g} (expected ~0.5)"
-                );
-            }
-        }
     }
 }

@@ -87,6 +87,7 @@ impl fmt::Display for ImageDimensions {
 #[cfg(test)]
 mod tests {
     use crate::io::image::image_dimensions::ImageDimensions;
+    use crate::testing::panic_message;
     use std::panic::catch_unwind;
 
     #[test]
@@ -94,7 +95,12 @@ mod tests {
         for channels in [1, 3] {
             ImageDimensions::validate((4, 3), channels);
             let dimensions = ImageDimensions::new((4, 3), channels);
+            assert_eq!(dimensions.size(), (4, 3).into());
+            assert_eq!(dimensions.channels(), channels);
+            assert_eq!(dimensions.pixel_count(), 12);
             assert_eq!(dimensions.sample_count(), 12 * channels);
+            assert_eq!(dimensions.is_grayscale(), channels == 1);
+            assert_eq!(dimensions.is_rgb(), channels == 3);
         }
 
         for (width, height, channels, expected) in [
@@ -103,16 +109,14 @@ mod tests {
             (4, 3, 0, "channels supported, got 0"),
             (4, 3, 2, "channels supported, got 2"),
             (4, 3, 4, "channels supported, got 4"),
+            // usize::MAX × 2 pixels overflows the pixel count, which `Size2us` owns.
+            (usize::MAX, 2, 1, "grid pixel count must fit in usize"),
             // 3 channels × (usize::MAX / 2) pixels overflows the sample count.
             (usize::MAX / 2, 1, 3, "Image sample count must fit in usize"),
         ] {
             let panic = catch_unwind(|| ImageDimensions::validate((width, height), channels))
                 .expect_err("must be rejected");
-            let message = panic
-                .downcast_ref::<String>()
-                .cloned()
-                .or_else(|| panic.downcast_ref::<&str>().map(|s| (*s).to_string()))
-                .unwrap_or_default();
+            let message = panic_message(&*panic);
             assert!(
                 message.contains(expected),
                 "{width}x{height}x{channels} reported {message:?}, wanted {expected:?}"

@@ -1,5 +1,7 @@
 //! Testing utilities for lumos.
 
+use std::any::Any;
+
 pub(crate) mod assertions;
 pub(crate) mod cfa;
 mod characterization;
@@ -12,6 +14,15 @@ pub(crate) mod simd_check;
 pub(crate) mod synthetic;
 pub(crate) mod test_rng;
 pub(crate) mod visual;
+
+/// The text a caught panic carried: its `&str` or `String` payload, the two `panic!` produces.
+pub(crate) fn panic_message(payload: &(dyn Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|message| (*message).to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .expect("panic! carries a &str or a String")
+}
 
 /// Initialize tracing subscriber for tests.
 /// Safe to call multiple times - will only initialize once.

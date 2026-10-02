@@ -25,6 +25,7 @@ use crate::stacking::combine::error::{Error, StackConfigError};
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::progress::ProgressCallback;
 use crate::testing::cfa::XTRANS_PATTERN;
+use crate::testing::cfa::cfa_from_plane;
 use crate::testing::cfa::{constant_cfa, make_cfa};
 use crate::testing::prelude::*;
 use crate::{
@@ -789,13 +790,7 @@ fn calibrate_flat_correction() {
     // normalized = [0.667, 1.333, 1.333, 0.667]
     // light = [0.3, 0.3, 0.3, 0.3]
     // result = light / normalized
-    let flat = CfaImage {
-        data: Buffer2::new(2, 2, vec![0.4, 0.8, 0.8, 0.4]),
-        cfa_type: CfaType::Mono,
-        metadata: ImageMetadata::default(),
-        quantization_sigma: None,
-        nulls: None,
-    };
+    let flat = cfa_from_plane(Buffer2::new(2, 2, vec![0.4, 0.8, 0.8, 0.4]), CfaType::Mono);
 
     let masters = CalibrationMasters::from_images(
         CalibrationSet {
@@ -842,13 +837,7 @@ fn calibrate_full_pipeline() {
     let flat_pixels: Vec<f32> = vignetting.iter().map(|v| k * v + bias_val).collect();
 
     let dark = constant_cfa(Size2us::new(2, 1), dark_val, CfaType::Mono);
-    let flat = CfaImage {
-        data: Buffer2::new(2, 1, flat_pixels),
-        cfa_type: CfaType::Mono,
-        metadata: ImageMetadata::default(),
-        quantization_sigma: None,
-        nulls: None,
-    };
+    let flat = cfa_from_plane(Buffer2::new(2, 1, flat_pixels), CfaType::Mono);
     let bias = constant_cfa(Size2us::new(2, 1), bias_val, CfaType::Mono);
 
     let masters = CalibrationMasters::from_images(
@@ -863,13 +852,7 @@ fn calibrate_full_pipeline() {
     )
     .unwrap();
 
-    let mut light = CfaImage {
-        data: Buffer2::new(2, 1, light_pixels),
-        cfa_type: CfaType::Mono,
-        metadata: ImageMetadata::default(),
-        quantization_sigma: None,
-        nulls: None,
-    };
+    let mut light = cfa_from_plane(Buffer2::new(2, 1, light_pixels), CfaType::Mono);
     masters.calibrate(&mut light).unwrap();
 
     // After dark subtraction: signal * vignetting
@@ -907,18 +890,8 @@ fn sigma_threshold_affects_detection() {
         .collect();
     pixels[15] = 400.0; // index 15 is odd → was 110
 
-    let dark_strict = constant_cfa(Size2us::new(6, 6), 0.0, CfaType::Mono);
-    let dark_loose = constant_cfa(Size2us::new(6, 6), 0.0, CfaType::Mono);
-
-    // Build actual CfaImages with our pixel data
-    let dark_strict = CfaImage {
-        data: Buffer2::new(6, 6, pixels.clone()),
-        ..dark_strict
-    };
-    let dark_loose = CfaImage {
-        data: Buffer2::new(6, 6, pixels),
-        ..dark_loose
-    };
+    let dark_strict = make_cfa(Size2us::new(6, 6), pixels.clone(), CfaType::Mono);
+    let dark_loose = make_cfa(Size2us::new(6, 6), pixels, CfaType::Mono);
 
     let masters_strict = CalibrationMasters::from_images(
         CalibrationSet {
@@ -996,13 +969,7 @@ fn calibrate_hot_pixel_correction() {
     let mut dark_pixels = Buffer2::new_filled(w, h, 0.01_f32);
     dark_pixels[(2, 2)] = 0.9; // hot pixel at (2,2)
 
-    let dark = CfaImage {
-        data: dark_pixels,
-        cfa_type: pattern,
-        metadata: ImageMetadata::default(),
-        quantization_sigma: None,
-        nulls: None,
-    };
+    let dark = cfa_from_plane(dark_pixels, pattern);
 
     let masters = CalibrationMasters::from_images(
         CalibrationSet {
@@ -1027,13 +994,7 @@ fn calibrate_hot_pixel_correction() {
     let mut light_pixels = Buffer2::new_filled(w, h, 0.5_f32);
     light_pixels[(2, 2)] = 0.99; // corrupted value at hot pixel location
 
-    let mut light = CfaImage {
-        data: light_pixels,
-        cfa_type: pattern,
-        metadata: ImageMetadata::default(),
-        quantization_sigma: None,
-        nulls: None,
-    };
+    let mut light = cfa_from_plane(light_pixels, pattern);
     masters.calibrate(&mut light).unwrap();
 
     // After dark subtraction: normal pixels become ~0.49, hot pixel stays high
@@ -1070,13 +1031,7 @@ fn calibrate_flat_dark() {
     let flat_pixels: Vec<f32> = vignetting.iter().map(|v| k * v + flat_dark_val).collect();
 
     let dark = constant_cfa(Size2us::new(2, 1), dark_val, CfaType::Mono);
-    let flat = CfaImage {
-        data: Buffer2::new(2, 1, flat_pixels),
-        cfa_type: CfaType::Mono,
-        metadata: ImageMetadata::default(),
-        quantization_sigma: None,
-        nulls: None,
-    };
+    let flat = cfa_from_plane(Buffer2::new(2, 1, flat_pixels), CfaType::Mono);
     let flat_dark = constant_cfa(Size2us::new(2, 1), flat_dark_val, CfaType::Mono);
 
     let masters = CalibrationMasters::from_images(
@@ -1091,13 +1046,7 @@ fn calibrate_flat_dark() {
     )
     .unwrap();
 
-    let mut light = CfaImage {
-        data: Buffer2::new(2, 1, light_pixels),
-        cfa_type: CfaType::Mono,
-        metadata: ImageMetadata::default(),
-        quantization_sigma: None,
-        nulls: None,
-    };
+    let mut light = cfa_from_plane(Buffer2::new(2, 1, light_pixels), CfaType::Mono);
     masters.calibrate(&mut light).unwrap();
 
     // After dark subtraction: signal * vignetting = [0.24, 0.60]
@@ -1124,13 +1073,7 @@ fn calibrate_flat_dark() {
 fn flat_dark_takes_priority_over_bias() {
     // When both flat dark and bias exist, flat dark is used for flat normalization
     let flat_pixels = vec![0.8_f32, 0.6, 0.6, 0.8];
-    let flat = CfaImage {
-        data: Buffer2::new(2, 2, flat_pixels),
-        cfa_type: CfaType::Mono,
-        metadata: ImageMetadata::default(),
-        quantization_sigma: None,
-        nulls: None,
-    };
+    let flat = cfa_from_plane(Buffer2::new(2, 2, flat_pixels), CfaType::Mono);
     let bias = constant_cfa(Size2us::new(2, 2), 0.05, CfaType::Mono);
     let flat_dark = constant_cfa(Size2us::new(2, 2), 0.10, CfaType::Mono);
 
