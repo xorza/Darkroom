@@ -496,3 +496,13 @@ Every WR group maps to a workstream:
 | Style rules not applied | 2.2 and the owning workstream |
 
 TR sections map to W14 (harness, determinism, SIMD/GPU, placement, fixtures, test-only code) and to the owning workstream (cannot-fail tests, loose tolerances, missing tests, second sources of truth, duplicates). The six `ISSUES.md` bugs are in phase 2. The feature list in `.notes/todo.txt` is not part of this plan.
+
+---
+
+## 8. Progress log
+
+Decisions taken during implementation that the plan did not foresee, newest last.
+
+- **Sample domains convert instead of matching exactly (W1, done early).** The real dataset failed calibration: each RAW frame is normalized by its own `maximum − black`, the black level moves between frames (1019, 1023, 1024), and the domain check demanded equal spans — so the real-data pipeline had failed since 2026-08-12. `SampleDomain` now records whether its scale was declared or assumed; two declared scales in one unit convert by their exact ratio, an assumed one must match. `FitsFloatScale::Normalized` counts as assumed: "already in [0, 1]" says nothing about ADU, and declaring it would convert a Siril-normalized frame against 16-bit ADU by 65 535. Masters record `LUMSCALE`; CFA FITS version 2.
+- **RAW normalization divides by an exact span (W5 item, done with W1).** The f32 reciprocal rounded twice and made the span read back as 15359.999.
+- **Real-data fixture.** `stacked_light.tiff` is produced by `bench_full_pipeline` (TR item still open). It was regenerated once so the real-data tests could run; 22 of 24 pass. The two failures are logged in `ISSUES.md`.
