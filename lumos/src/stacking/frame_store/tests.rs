@@ -162,6 +162,52 @@ fn light_frame_keeps_quality_with_its_planes() {
     assert_eq!(frame.source_stats.channels[0].mad, 1.0);
 }
 
+/// One median and MAD per channel, each over that channel alone. Hand-computed:
+/// - `[1..=9]`: median 5, absolute deviations 4,3,2,1,0,1,2,3,4 → MAD 2.
+/// - `[10,10,10,20,20,20,30,30,30]`: median 20, deviations six 10s and three 0s → MAD 10.
+/// - `[1,3,5,7]`: median (3+5)/2 = 4, deviations 3,1,1,3 → MAD (1+3)/2 = 2.
+/// - `[0,0,100,100]`: median 50, every deviation 50 → MAD 50.
+/// - `[1,2,3,4]`: median 2.5, deviations 1.5,0.5,0.5,1.5 → MAD 1.
+#[test]
+fn frame_statistics_are_a_median_and_mad_per_channel() {
+    let gray = ImageDimensions::new((3, 3), 1);
+    let rgb = ImageDimensions::new((2, 2), 3);
+    let cases: [(LinearImage, &[(f32, f32)]); 4] = [
+        (LinearImage::from_pixels(gray, vec![5.0; 9]), &[(5.0, 0.0)]),
+        (
+            LinearImage::from_pixels(gray, (1..=9).map(|i| i as f32).collect()),
+            &[(5.0, 2.0)],
+        ),
+        (
+            LinearImage::from_pixels(
+                gray,
+                vec![10.0, 10.0, 10.0, 20.0, 20.0, 20.0, 30.0, 30.0, 30.0],
+            ),
+            &[(20.0, 10.0)],
+        ),
+        (
+            LinearImage::from_planar_channels(
+                rgb,
+                [
+                    vec![1.0, 3.0, 5.0, 7.0],
+                    vec![0.0, 0.0, 100.0, 100.0],
+                    vec![1.0, 2.0, 3.0, 4.0],
+                ],
+            ),
+            &[(4.0, 2.0), (50.0, 50.0), (2.5, 1.0)],
+        ),
+    ];
+    for (image, expected) in cases {
+        let stats = FrameStats::measure(&image);
+        let measured: Vec<(f32, f32)> = stats
+            .channels
+            .iter()
+            .map(|channel| (channel.median, channel.mad))
+            .collect();
+        assert_eq!(measured, expected);
+    }
+}
+
 #[test]
 fn frame_statistics_are_measured_over_the_pixels_that_hold_a_measurement() {
     // Eight pixels: four real samples and four the source declared null, which the decoder filled

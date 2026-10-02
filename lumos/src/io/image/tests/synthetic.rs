@@ -17,6 +17,8 @@ use crate::io::image::fits::options::{FitsFloatScale, FitsLoadOptions, FitsNullP
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::sample_domain::ScaleOrigin;
 use crate::io::raw::demosaic::bayer::CfaPattern;
+use crate::memory::run_memory::RunMemory;
+use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::stack;
 use crate::stacking::frame_store::{FramePeek, StackableImage};
 use crate::testing::cfa::{XTRANS_PATTERN, make_cfa};
@@ -307,7 +309,7 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     let stack_paths = |paths: &[&Path]| {
         stack::stack(
             paths,
-            crate::StackConfig::default(),
+            StackConfig::default(),
             crate::ProgressCallback::default(),
             CancelToken::never(),
         )
@@ -364,17 +366,18 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
         .build()
         .unwrap();
     for available_memory in [1 << 30, 1] {
-        let config = CacheConfig {
-            cache_dir: dir.join("cache"),
-            keep_cache: false,
-            available_memory: Some(available_memory),
+        let config = StackConfig {
+            cache: CacheConfig::with_cache_dir(dir.join("cache")),
+            normalization: Normalization::None,
+            ..StackConfig::default()
         };
+        let memory = RunMemory::new(1 << 30, Some(available_memory));
         let linear_set = |second: &Path| {
             single_thread.install(|| {
                 FrameCache::from_paths(
                     &[reference.as_path(), second, never_decoded.as_path()],
                     &config,
-                    Normalization::None,
+                    memory,
                     ProgressCallback::default(),
                     CancelToken::never(),
                 )
@@ -411,7 +414,7 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
             FrameCache::from_cfa_paths(
                 &[rggb.as_path(), bggr.as_path(), never_decoded.as_path()],
                 &config,
-                Normalization::None,
+                memory,
                 ProgressCallback::default(),
                 CancelToken::never(),
             )

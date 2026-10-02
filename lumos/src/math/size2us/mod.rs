@@ -26,7 +26,7 @@ impl Size2us {
     /// Pixels the grid holds. Panics rather than wrapping: a count that overflows `usize` means
     /// the dimensions are nonsense, and every buffer sized from it would be too small.
     #[inline]
-    pub fn pixel_count(self) -> usize {
+    pub const fn pixel_count(self) -> usize {
         self.width
             .checked_mul(self.height)
             .expect("grid pixel count must fit in usize")

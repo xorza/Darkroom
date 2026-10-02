@@ -14,6 +14,8 @@ use common::CancelToken;
 use imaginarium::Buffer2;
 
 use crate::math;
+use crate::memory::run_memory::RunMemory;
+use crate::stacking::combine::cache::core::CacheTier;
 use crate::stacking::combine::cache::sample::CombinedSample;
 use crate::stacking::combine::cache::{CombineOutput, FrameCache, FrameCacheParams};
 use crate::stacking::combine::config::{CombineMethod, StackConfig, Weighting};
@@ -24,7 +26,6 @@ use crate::stacking::combine::stack::quantization::{MaxSigma, SourceSigmas};
 use crate::stacking::frame_store::StoredFrame;
 use crate::stacking::frame_store::frame_quality::FrameQuality;
 use crate::stacking::frame_store::frame_stats::FrameStats;
-use crate::stacking::frame_store::spill_directory::SpillDirectory;
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::resample::WarpResult;
 use crate::stacking::stack_product::StackProduct;
@@ -115,7 +116,8 @@ pub fn stack<P: AsRef<Path> + Sync>(
     // Files on disk carry no coverage, so the combine treats every pixel as fully covered.
     // `cancel` rides on the cache from construction, so the load loop polls it too.
     combine_cached(&config, paths.len(), "paths", || {
-        FrameCache::from_paths(paths, &config.cache, config.normalization, progress, cancel)
+        let memory = RunMemory::read(config.cache.memory_override);
+        FrameCache::from_paths(paths, &config, memory, progress, cancel)
     })
 }
 
@@ -141,20 +143,14 @@ pub fn stack_images(
 ) -> Result<StackProduct, Error> {
     let frame_count = frames.len();
     combine_cached(&config, frame_count, "memory", || {
-        FrameCache::from_stack_frames(
-            frames,
-            &config.cache,
-            config.normalization,
-            progress,
-            cancel,
-        )
+        FrameCache::from_stack_frames(frames, config.normalization, progress, cancel)
     })
 }
 
 /// Combine frames produced by the shared frame store.
 pub(crate) fn stack_stored_frames(
     frames: Vec<StoredFrame>,
-    spill_directory: Option<SpillDirectory>,
+    tier: CacheTier,
     dimensions: ImageDimensions,
     metadata: ImageMetadata,
     config: StackConfig,
@@ -166,10 +162,9 @@ pub(crate) fn stack_stored_frames(
         FrameCache::from_stored_frames(
             frames,
             FrameCacheParams {
-                spill_directory,
+                tier,
                 dimensions,
                 metadata,
-                config: config.cache.clone(),
                 normalization: config.normalization,
                 progress,
                 cancel,
@@ -210,7 +205,7 @@ pub(crate) fn combine_cached(
         method = ?config.method,
         weighting = ?config.weighting,
         normalization = ?config.normalization,
-        disk_tier = cache.core.spill_directory.is_some(),
+        disk_tier = cache.core.tier.spills(),
         // Not "warped": a frame carries these when a warp produced them *or* when its source
         // declared pixels with no measurement.
         frame_quality = cache

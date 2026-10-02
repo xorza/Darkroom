@@ -4,8 +4,8 @@ pub(crate) mod cache_key;
 pub(crate) mod error;
 pub(crate) mod frame_facts;
 pub(crate) mod frame_quality;
+pub(crate) mod frame_spill;
 pub(crate) mod frame_stats;
-pub(crate) mod spill;
 pub(crate) mod spill_directory;
 pub(crate) mod stored_plane;
 
@@ -28,8 +28,8 @@ use crate::stacking::frame_store::cache_key::CacheKey;
 use crate::stacking::frame_store::cache_key::DecoderKind;
 use crate::stacking::frame_store::error::FrameStoreError;
 use crate::stacking::frame_store::frame_quality::FrameQuality;
+use crate::stacking::frame_store::frame_spill::{Committed, FrameSpill, write_file, write_plane};
 use crate::stacking::frame_store::frame_stats::FrameStats;
-use crate::stacking::frame_store::spill::{Committed, FrameSpill, write_file, write_plane};
 use crate::stacking::frame_store::stored_plane::StoredPlane;
 
 /// Image operations needed by the shared frame store.
@@ -232,7 +232,7 @@ impl StoredImage {
             .map(|nulls| {
                 let path = spill.nulls_path();
                 write_file(&path, bytemuck::cast_slice(nulls.bits().words.as_slice()))?;
-                spill::map_file(&path)
+                frame_spill::map_file(&path)
             })
             .transpose()?;
         Ok(Self {

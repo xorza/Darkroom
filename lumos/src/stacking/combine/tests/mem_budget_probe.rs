@@ -51,6 +51,7 @@ use std::time::Instant;
 use common::CancelToken;
 
 use crate::math::size2us::Size2us;
+use crate::memory::memory_budget;
 use crate::stacking::combine::config::{CombineMethod, StackConfig};
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::combine::stack::stack;
@@ -61,7 +62,7 @@ use crate::testing::mem_probe::{
 
 fn build_config(
     method: &str,
-    available_memory: Option<u64>,
+    memory_override: Option<u64>,
     cache_dir: PathBuf,
     keep: bool,
 ) -> StackConfig {
@@ -74,7 +75,7 @@ fn build_config(
         "sigma" => StackConfig::sigma_clipped(3.0),
         other => panic!("LUMOS_METHOD: expected sigma|median|mean, got {other:?}"),
     };
-    config.cache.available_memory = available_memory;
+    config.cache.memory_override = memory_override;
     config.cache.cache_dir = cache_dir;
     config.cache.keep_cache = keep;
     config
@@ -121,9 +122,9 @@ fn master_stack_memory_probe() -> io::Result<()> {
         "resident set  {:.2} GB if fully in-memory (Σ frames as f32)",
         resident_if_ram as f64 / 1e9
     );
-    if let Some(avail) = budget.available_memory {
+    if let Some(avail) = budget.memory_override {
         // Mirror of the internal tier rule: usable = 75% of the budget; spill if the set exceeds it.
-        let usable = (u128::from(avail) * 75 / 100) as u64;
+        let usable = memory_budget(avail);
         let tier = if resident_if_ram <= usable {
             "in-memory (resident)"
         } else {
@@ -149,7 +150,7 @@ fn master_stack_memory_probe() -> io::Result<()> {
         }
     );
 
-    let config = build_config(&method, budget.available_memory, cache_dir, keep);
+    let config = build_config(&method, budget.memory_override, cache_dir, keep);
 
     // Sample peak heap (RssAnon — the OOM-relevant, non-reclaimable metric) and total resident
     // (VmRSS, which includes reclaimable mmap'd spill pages) for the duration of the stack only.

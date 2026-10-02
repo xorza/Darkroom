@@ -14,19 +14,22 @@ use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::load_context::LoadContext;
 use crate::memory;
+use crate::memory::run_memory::RunMemory;
+use crate::memory::{MemoryPlan, RunShape};
 use crate::stacking::combine::cache_config::CacheConfig;
+use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::error::Error;
 use crate::stacking::frame_store::cache_key::CacheKey;
 use crate::stacking::frame_store::error::FrameStoreError;
 use crate::stacking::frame_store::frame_quality::FrameQuality;
+use crate::stacking::frame_store::frame_spill::FrameSpill;
 use crate::stacking::frame_store::frame_stats::FrameStats;
-use crate::stacking::frame_store::spill::FrameSpill;
 use crate::stacking::frame_store::spill_directory::SpillDirectory;
 use crate::stacking::frame_store::{FramePeek, StackableImage, StoredFrame};
 use crate::stacking::progress::stage_counter::StageCounter;
 use crate::stacking::progress::{ProgressCallback, StackingStage};
 
-use crate::stacking::combine::cache::CacheCore;
+use crate::stacking::combine::cache::core::{CacheCore, CacheTier};
 use crate::stacking::combine::cache::set_facts::SetFacts;
 use crate::stacking::combine::cache::validation::{
     validate_image_samples, validate_stored_quality, validate_stored_samples,
@@ -49,7 +52,8 @@ pub(super) struct LoadedCache {
 
 pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     paths: &[P],
-    config: &CacheConfig,
+    config: &StackConfig,
+    memory: RunMemory,
     progress: ProgressCallback,
     cancel: CancelToken,
 ) -> Result<LoadedCache, Error> {
@@ -58,16 +62,7 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     }
 
     let first_path = paths[0].as_ref();
-    // One system reading for the whole load: the config is resolved against it here so the tier
-    // decision below, the cache the frames end up in, and the decode ceiling the context carries all
-    // size against the same figure. Sampling again downstream — as an unresolved config or
-    // `LoadContext::default()` would — could answer a different number. The planning override
-    // deliberately does not reach the context: it says how to tier, not how much one file may
-    // allocate.
-    let system_available = memory::available_memory();
-    let config = &config.resolved_with(system_available);
-    let available_memory = config.planning_memory();
-    let context = LoadContext::new(cancel.clone(), memory::memory_budget(system_available));
+    let context = memory.load_context(cancel.clone());
 
     // Dimensions drive the in-memory-vs-disk tier decision. Peek the header without a decode when
     // the format allows it (RAW), so the in-memory path can decode every frame in parallel rather
@@ -86,14 +81,22 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     // Frames of a set share a source, so frame 0 stands for all of them — including whether they
     // carry the two quality planes a masked frame does, which `FramePeek::resident_bytes` charges
     // for.
-    let use_in_memory =
-        memory::fits_in_memory(peek.resident_bytes(), paths.len(), available_memory);
+    let plan = MemoryPlan::plan(
+        RunShape::decoded_stack(
+            paths.len(),
+            peek.resident_bytes(),
+            memory::frame_bytes(dimensions),
+            config.quality.resident_bytes(dimensions),
+        ),
+        rayon::current_num_threads(),
+        memory.planning(),
+    );
 
     tracing::info!(
         frame_count = paths.len(),
         sample_count = dimensions.sample_count(),
-        available_mb = available_memory / (1024 * 1024),
-        use_in_memory,
+        planning_mb = memory.planning() / (1024 * 1024),
+        use_in_memory = plan.fits_in_ram,
         "Image cache storage decision"
     );
 
@@ -101,23 +104,23 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
         frames,
         spill_directory,
         metadata,
-    } = if use_in_memory {
+    } = if plan.fits_in_ram {
         load_in_memory::<I, P>(
             paths,
             &progress,
             dimensions,
             early.map(|early| early.image),
-            available_memory,
+            plan.decode_concurrency,
             &context,
         )?
     } else {
         load_to_disk::<I, P>(
             paths,
-            config,
+            &config.cache,
             &progress,
             dimensions,
             early,
-            available_memory,
+            plan.decode_concurrency,
             &context,
         )?
     };
@@ -125,13 +128,11 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     Ok(LoadedCache {
         frames,
         core: CacheCore {
-            spill_directory,
+            tier: CacheTier::of(spill_directory, memory),
             dimensions,
             metadata,
-            config: config.clone(),
             progress,
             cancel,
-            chunk_memory: OnceLock::new(),
         },
     })
 }
@@ -226,20 +227,10 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
     progress: &ProgressCallback,
     dimensions: ImageDimensions,
     first: Option<I>,
-    available_memory: u64,
+    concurrency: usize,
     context: &LoadContext,
 ) -> Result<LoadedTier, Error> {
     let cancel = &context.cancel;
-    // Decode is CPU-bound, so fan out to the worker count, bounded by RAM headroom — every frame
-    // stays resident in this tier, so only the budget left over feeds in-flight decode transients,
-    // each charged its true ~2× footprint (`decode_transient_bytes`) so the load doesn't overshoot.
-    let concurrency = memory::load_concurrency(
-        memory::frame_bytes(dimensions),
-        memory::decode_transient_bytes(dimensions),
-        paths.len(),
-        available_memory,
-        rayon::current_num_threads(),
-    );
 
     // When the header couldn't be peeked the caller pre-loaded frame 0, so the batch starts at
     // frame 1 and reuses it; otherwise every frame (frame 0 included) decodes in parallel. Frame 0
@@ -319,7 +310,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     progress: &ProgressCallback,
     dimensions: ImageDimensions,
     early: Option<EarlyDecode<I>>,
-    available_memory: u64,
+    concurrency: usize,
     context: &LoadContext,
 ) -> Result<LoadedTier, Error> {
     let spill_directory = SpillDirectory::create(&config.cache_dir, config.keep_cache)?;
@@ -355,17 +346,6 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     let cached_count = StageCounter::new(progress, StackingStage::Loading, paths.len());
     cached_count.complete_one();
 
-    // Decode is CPU-bound, so fan out to the worker count, bounded by RAM. The disk tier streams
-    // each decoded frame to its own file and drops it, so nothing stays resident (`0`) — only the
-    // in-flight decodes occupy memory, each its true ~2× transient. Each frame writes unique files,
-    // so there's no contention.
-    let concurrency = memory::load_concurrency(
-        memory::frame_bytes(dimensions),
-        memory::decode_transient_bytes(dimensions),
-        0,
-        available_memory,
-        rayon::current_num_threads(),
-    );
     let remaining = concurrency::try_par_map_limited(&paths[1..], concurrency, |offset, path| {
         // Cancelled: stop decoding further frames (the slow phase).
         if context.cancel.is_cancelled() {

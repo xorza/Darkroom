@@ -3,7 +3,10 @@
 //! One budget ([`memory_budget`]) and everything derived from it: per-frame footprints, the row
 //! chunk a combine reads at a time, how many frames may decode or warp concurrently, and the
 //! resident-vs-spilled tier decision. Every caller sizes its work against this file rather than
-//! against `available_memory` directly.
+//! against `available_memory` directly, through the one [`RunMemory`](run_memory::RunMemory) its
+//! run read at the entry.
+
+pub(crate) mod run_memory;
 
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::raw::demosaic::DemosaicMemory;
@@ -49,12 +52,7 @@ pub(crate) fn frame_bytes(dimensions: ImageDimensions) -> usize {
 }
 
 /// Statistics hold a full-frame scratch buffer beside the decoded pixels.
-const DECODE_TRANSIENT_FACTOR: usize = 2;
-
-/// Peak bytes one in-flight decode holds, pixels plus its transient scratch.
-pub(crate) fn decode_transient_bytes(dimensions: ImageDimensions) -> usize {
-    DECODE_TRANSIENT_FACTOR * frame_bytes(dimensions)
-}
+pub(crate) const DECODE_TRANSIENT_FACTOR: usize = 2;
 
 const MIN_CHUNK_ROWS: usize = 64;
 
@@ -107,17 +105,6 @@ pub(crate) fn load_concurrency(
     ((headroom / transient).max(1) as usize).min(max_workers.max(1))
 }
 
-/// Whether `frame_count` images of `bytes_per_image` fit the budget all at once.
-pub(crate) fn fits_in_memory(
-    bytes_per_image: usize,
-    frame_count: usize,
-    available_memory: u64,
-) -> bool {
-    bytes_per_image
-        .checked_mul(frame_count)
-        .is_some_and(|bytes| bytes as u64 <= memory_budget(available_memory))
-}
-
 /// Quality planes a frame carries beside its image: `coverage` and `confidence`, one image-sized
 /// plane each. A warp emits them, and so does a decoder that found pixels the source declared no
 /// measurement for — see `registration::resample::WarpResult` and `frame_store::FrameQuality`.
@@ -167,88 +154,100 @@ impl PerFrameBytes {
     }
 }
 
-/// The tier decision for one run, plus the concurrency each stage may use under it.
+/// What one run's frames cost, stage by stage: the input to [`MemoryPlan::plan`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RunShape {
+    pub(crate) frame_count: usize,
+    /// One frame's decode: what it leaves resident, and its peak on the way there.
+    pub(crate) decode: DemosaicMemory,
+    /// What one frame costs the detect-register-warp stage; `None` for a run that combines its
+    /// frames as they decoded.
+    pub(crate) warp: Option<PerFrameBytes>,
+    /// What the combine holds resident beside its frames — see
+    /// [`QualityPlanes::resident_bytes`](crate::QualityPlanes::resident_bytes).
+    pub(crate) output_bytes: usize,
+}
+
+impl RunShape {
+    /// A stack of frames decoded straight into the combine, with no warp: each one's resident
+    /// bytes (its pixels, and its quality planes if it may carry them) plus the statistics
+    /// scratch its decode holds beside them.
+    pub(crate) fn decoded_stack(
+        frame_count: usize,
+        resident_bytes: usize,
+        frame_bytes: usize,
+        output_bytes: usize,
+    ) -> Self {
+        Self {
+            frame_count,
+            decode: DemosaicMemory {
+                output_bytes: resident_bytes,
+                peak_bytes: resident_bytes
+                    .saturating_add((DECODE_TRANSIENT_FACTOR - 1).saturating_mul(frame_bytes)),
+            },
+            warp: None,
+            output_bytes,
+        }
+    }
+}
+
+/// The tier decision for one run, plus the concurrency each stage may use under it — the one rule
+/// every stacking entry decides with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct MemoryPlan {
     pub(crate) fits_in_ram: bool,
     pub(crate) decode_concurrency: usize,
+    /// For a run with no warp stage, the worker count: nothing to bound.
     pub(crate) warp_concurrency: usize,
 }
 
 impl MemoryPlan {
-    /// The plan for a run handed frames that are already decoded and resident.
-    ///
-    /// [`Self::plan`] models a run that decodes its own frames, and charges the decode both an
-    /// output and a transient peak. There is no decode here, so the frame's own bytes are the whole
-    /// of it and the transient arena is nothing — which is what this expresses, rather than leaving
-    /// each caller to encode "already decoded" as a [`DemosaicMemory`] whose two halves happen to
-    /// be equal. `decode_concurrency` has no meaning under that and the callers do not read it.
-    pub(crate) fn for_decoded_frames(
-        dimensions: ImageDimensions,
-        frame_count: usize,
-        threads: usize,
-        available: u64,
-    ) -> Self {
-        let decoded = frame_bytes(dimensions);
-        Self::plan(
-            dimensions.pixel_count() * size_of::<f32>(),
-            DemosaicMemory {
-                output_bytes: decoded,
-                peak_bytes: decoded,
-            },
-            frame_count,
-            threads,
-            available,
-        )
-    }
-
     /// Decide whether a run stays resident or spills, and how wide decode and warp may fan out.
     ///
-    /// The run fits in RAM only when both peaks do: decoding every frame (plus the demosaic's own
-    /// transient) and holding every warped frame while `workers` of them are being worked on.
-    pub(crate) fn plan(
-        plane_bytes: usize,
-        demosaic: DemosaicMemory,
-        frame_count: usize,
-        threads: usize,
-        available: u64,
-    ) -> Self {
+    /// The run fits in RAM only when each of its peaks does: decoding every frame (plus one
+    /// decode's transient), holding every warped frame while `workers` of them are being worked
+    /// on, and holding every frame beside the combine's resident output planes.
+    pub(crate) fn plan(shape: RunShape, threads: usize, available: u64) -> Self {
+        let RunShape {
+            frame_count,
+            decode,
+            warp,
+            output_bytes,
+        } = shape;
         assert!(
             frame_count > 0,
             "memory planning requires at least one frame"
         );
         let workers = frame_count.min(threads.max(1));
-        let per_frame = PerFrameBytes::new(plane_bytes, demosaic);
-        let decode_extra = demosaic.peak_bytes.saturating_sub(demosaic.output_bytes);
+        let (warped, working) = warp.map_or((decode.output_bytes, 0), |per_frame| {
+            (per_frame.warped, per_frame.working)
+        });
+        let decode_extra = decode.peak_bytes.saturating_sub(decode.output_bytes);
         let usable = memory_budget(available);
 
-        let decoded_resident = (demosaic.output_bytes as u64).saturating_mul(frame_count as u64);
+        let decoded_resident = (decode.output_bytes as u64).saturating_mul(frame_count as u64);
         let decode_minimum = decoded_resident.saturating_add(decode_extra as u64);
-        let warped_resident = (per_frame.warped as u64).saturating_mul(frame_count as u64);
-        let working_peak = warped_resident
-            .saturating_add((per_frame.working as u64).saturating_mul(workers as u64));
-        let fits_in_ram = decode_minimum.max(working_peak) <= usable;
+        let warped_resident = (warped as u64).saturating_mul(frame_count as u64);
+        let working_peak =
+            warped_resident.saturating_add((working as u64).saturating_mul(workers as u64));
+        let combine_peak = warped_resident.saturating_add(output_bytes as u64);
+        let fits_in_ram = decode_minimum.max(working_peak).max(combine_peak) <= usable;
 
         let (decode_resident_frames, decode_bytes) = if fits_in_ram {
             (frame_count, decode_extra)
         } else {
-            (0, demosaic.peak_bytes.max(per_frame.working))
+            (0, decode.peak_bytes.max(working))
         };
         let warp_resident_frames = usize::from(fits_in_ram) * frame_count;
         let decode_concurrency = load_concurrency(
-            demosaic.output_bytes,
+            decode.output_bytes,
             decode_bytes,
             decode_resident_frames,
             available,
             workers,
         );
-        let warp_concurrency = load_concurrency(
-            per_frame.warped,
-            per_frame.working,
-            warp_resident_frames,
-            available,
-            workers,
-        );
+        let warp_concurrency =
+            load_concurrency(warped, working, warp_resident_frames, available, workers);
         Self {
             fits_in_ram,
             decode_concurrency,

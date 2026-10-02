@@ -37,19 +37,19 @@ impl ImageDimensions {
     }
 
     /// Pixel extent, without the channel count.
-    pub fn size(&self) -> Size2us {
+    pub const fn size(&self) -> Size2us {
         self.size
     }
 
-    pub fn width(&self) -> usize {
+    pub const fn width(&self) -> usize {
         self.size.width
     }
 
-    pub fn height(&self) -> usize {
+    pub const fn height(&self) -> usize {
         self.size.height
     }
 
-    pub fn channels(&self) -> usize {
+    pub const fn channels(&self) -> usize {
         self.channels
     }
 
@@ -63,15 +63,15 @@ impl ImageDimensions {
 
     /// Number of pixels: `width * height`.
     /// For a 100x100 RGB image, returns 10000.
-    pub fn pixel_count(&self) -> usize {
+    pub const fn pixel_count(&self) -> usize {
         self.size.pixel_count()
     }
 
-    pub fn is_grayscale(&self) -> bool {
+    pub const fn is_grayscale(&self) -> bool {
         self.channels == 1
     }
 
-    pub fn is_rgb(&self) -> bool {
+    pub const fn is_rgb(&self) -> bool {
         self.channels == 3
     }
 }

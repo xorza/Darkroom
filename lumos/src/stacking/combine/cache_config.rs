@@ -3,8 +3,6 @@
 use std::env;
 use std::path::PathBuf;
 
-use crate::memory;
-
 /// Common configuration for cache-based stacking methods (median, sigma-clipped).
 #[derive(Clone, Debug, PartialEq)]
 pub struct CacheConfig {
@@ -17,8 +15,10 @@ pub struct CacheConfig {
     /// behind costs the whole stack's worth of disk per run. Opt in when you mean to reuse or
     /// examine them, and delete the directory yourself.
     pub keep_cache: bool,
-    /// Available memory override in bytes. If None, queries system for available memory.
-    pub available_memory: Option<u64>,
+    /// Plan the tiers as if the machine had this many bytes available, instead of what the system
+    /// reports. It never raises what one file's decode may allocate, which stays bound by the
+    /// system reading.
+    pub memory_override: Option<u64>,
 }
 
 impl Default for CacheConfig {
@@ -26,7 +26,7 @@ impl Default for CacheConfig {
         Self {
             cache_dir: env::temp_dir().join("lumos_cache"),
             keep_cache: false,
-            available_memory: None,
+            memory_override: None,
         }
     }
 }
@@ -38,34 +38,6 @@ impl CacheConfig {
             cache_dir,
             ..Default::default()
         }
-    }
-
-    /// This config with its planning figure pinned to `system_available` — the one way to settle
-    /// what the run plans against.
-    ///
-    /// A run takes a single system reading at its entry and hands the resolved config to every
-    /// stage, so the tier decision and every chunk sizing size against the same figure: a plan
-    /// built from one reading can disagree with chunking built from another, and each reading costs
-    /// a syscall. A config that already carries an override keeps it — [`Self::available_memory`] is
-    /// a *planning* override ("size the tiers as if the machine had this much") and resolution never
-    /// overrides an override.
-    pub(crate) fn resolved_with(&self, system_available: u64) -> Self {
-        Self {
-            available_memory: Some(self.available_memory.unwrap_or(system_available)),
-            ..self.clone()
-        }
-    }
-
-    /// What to plan against: the pinned figure, or a fresh system reading if nobody pinned one.
-    ///
-    /// The counterpart to [`Self::resolved_with`] and the only reader — every in-tree path resolves
-    /// before the config reaches the cache, so the fallback is what keeps a hand-built config
-    /// usable rather than something a caller has to think about ordering around. It deliberately
-    /// does not govern what a decoder may allocate for one file; that budget comes from the system
-    /// reading directly.
-    pub(crate) fn planning_memory(&self) -> u64 {
-        self.available_memory
-            .unwrap_or_else(memory::available_memory)
     }
 }
 
@@ -80,7 +52,7 @@ mod tests {
         assert_eq!(config.cache_dir, env::temp_dir().join("lumos_cache"));
         // The spill cache is cleaned up unless a caller asks otherwise, in every build profile.
         assert!(!config.keep_cache);
-        assert_eq!(config.available_memory, None);
+        assert_eq!(config.memory_override, None);
     }
 
     #[test]
@@ -90,16 +62,6 @@ mod tests {
 
         assert_eq!(config.cache_dir, directory);
         assert!(!config.keep_cache);
-        assert_eq!(config.available_memory, None);
-    }
-
-    #[test]
-    fn available_memory_override_takes_precedence() {
-        let config = CacheConfig {
-            available_memory: Some(123_456),
-            ..Default::default()
-        };
-
-        assert_eq!(config.planning_memory(), 123_456);
+        assert_eq!(config.memory_override, None);
     }
 }
