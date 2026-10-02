@@ -24,8 +24,6 @@ async fn every_seed_is_a_silent_noop() {
     for batch in batches {
         let mut w = TestWorker::over(TestGraph::new());
 
-        w.settle(batch).await;
-
-        w.nothing_runs_within(QUIET).await;
+        w.settle_without_run(batch).await;
     }
 }

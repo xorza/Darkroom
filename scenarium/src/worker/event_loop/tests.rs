@@ -6,6 +6,7 @@ use tokio::time::{Duration, timeout};
 
 use crate::graph::func::event::EventLambda;
 use crate::runtime::shared_any_state::SharedAnyState;
+use crate::testing::worker::PATIENCE;
 
 /// Start an event loop with a single lambda as its only trigger, on a fresh
 /// `NodeId` — the shape most `start_event_loop` tests want when they only
@@ -65,9 +66,10 @@ async fn start_event_loop_waits_for_callback() {
 
     let (mut active, node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
 
-    notify_for_callback.notify_waiters();
+    // `notify_one` stores a permit, so the lambda proceeds whether or not it has parked yet.
+    notify_for_callback.notify_one();
 
-    let event = timeout(Duration::from_millis(200), active.recv_event())
+    let event = timeout(PATIENCE, active.recv_event())
         .await
         .expect("Expected event")
         .expect("Event channel closed");
@@ -82,56 +84,62 @@ async fn start_event_loop_waits_for_callback() {
     active.stop().await;
 }
 
-#[tokio::test]
+/// The loop checks the gate after each event, so a closed gate stops the next invocation and
+/// reopening it resumes the loop. The lambda parks on `proceed` inside every invocation, so the
+/// test steps it one invocation at a time; under paused time, a sleep returns only once every
+/// task has run to its next block point, which makes each count exact.
+#[tokio::test(start_paused = true)]
 async fn pause_gate_blocks_event_loop_iterations() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    let invoke_count = Arc::new(AtomicUsize::new(0));
-    let invoke_count_clone = Arc::clone(&invoke_count);
-
-    let event_lambda = EventLambda::new(move |_state| {
-        let invoke_count = Arc::clone(&invoke_count_clone);
-        Box::pin(async move {
-            invoke_count.fetch_add(1, Ordering::SeqCst);
-        })
+    let invocations = Arc::new(AtomicUsize::new(0));
+    let proceed = Arc::new(Notify::new());
+    let event_lambda = EventLambda::new({
+        let invocations = Arc::clone(&invocations);
+        let proceed = Arc::clone(&proceed);
+        move |_state| {
+            let invocations = Arc::clone(&invocations);
+            let proceed = Arc::clone(&proceed);
+            Box::pin(async move {
+                invocations.fetch_add(1, Ordering::SeqCst);
+                proceed.notified().await;
+            })
+        }
     });
-
     let pause_gate = PauseGate::default();
+    let (mut active, node_id) = start_single_event_loop(event_lambda, pause_gate.clone()).await;
+    let settle = || time::sleep(Duration::from_millis(1));
 
-    let (mut active, _node_id) = start_single_event_loop(event_lambda, pause_gate.clone()).await;
-
-    // Wait for first event to arrive
-    let _ = timeout(Duration::from_millis(100), active.recv_event())
-        .await
-        .expect("Expected first event");
-
-    // Close the gate - event loop should pause
-    let guard = pause_gate.close();
-
-    // Record count after closing gate
-    time::sleep(Duration::from_millis(20)).await;
-    let count_at_close = invoke_count.load(Ordering::SeqCst);
-
-    // Wait and verify no new invocations while gate is closed
-    time::sleep(Duration::from_millis(100)).await;
-    let count_while_closed = invoke_count.load(Ordering::SeqCst);
-
-    // At most one more invocation might have slipped through
-    assert!(
-        count_while_closed <= count_at_close + 1,
-        "Event loop should pause when gate is closed. Count at close: {count_at_close}, count while closed: {count_while_closed}"
+    settle().await;
+    assert_eq!(
+        invocations.load(Ordering::SeqCst),
+        1,
+        "the first invocation runs"
     );
 
-    // Drop guard to reopen gate
+    // Closed, the gate lets the running invocation finish and send, then holds the next.
+    let guard = pause_gate.close();
+    proceed.notify_one();
+    settle().await;
+    assert_eq!(
+        active.recv_event().await,
+        Some(EventPort {
+            node_id,
+            event_idx: 0
+        })
+    );
+    assert_eq!(
+        invocations.load(Ordering::SeqCst),
+        1,
+        "a closed gate holds the loop"
+    );
+
     drop(guard);
-
-    // Wait for more events to flow
-    time::sleep(Duration::from_millis(100)).await;
-    let count_after_reopen = invoke_count.load(Ordering::SeqCst);
-
-    assert!(
-        count_after_reopen > count_while_closed,
-        "Event loop should resume after gate reopens. Count while closed: {count_while_closed}, count after reopen: {count_after_reopen}"
+    settle().await;
+    assert_eq!(
+        invocations.load(Ordering::SeqCst),
+        2,
+        "a reopened gate resumes it"
     );
 
     active.stop().await;
@@ -174,7 +182,7 @@ async fn stopped_event_loop_channel_is_closed() {
     // bounded per-recv timeout so a regression that stops closing
     // the channel fails fast instead of wedging the test.
     loop {
-        let item = timeout(Duration::from_millis(500), active.recv_event())
+        let item = timeout(PATIENCE, active.recv_event())
             .await
             .expect("recv must complete — channel must eventually close after handle.stop()");
         if item.is_none() {

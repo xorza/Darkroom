@@ -27,7 +27,7 @@ fn event_pair() -> (TestGraph, Calls) {
     (g, calls)
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn execute_events_runs_subscribers() {
     let (g, calls) = event_pair();
     let mut e = TestEngine::over(g);
@@ -47,7 +47,7 @@ async fn execute_events_runs_subscribers() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn event_sources_collects_nodes_with_subscribers() {
     let (g, calls) = event_pair();
     let mut e = TestEngine::over(g);
@@ -64,7 +64,7 @@ async fn event_sources_collects_nodes_with_subscribers() {
 /// The bootstrap run re-initializes its event sources every time, bypassing
 /// the cache — the shared state its event lambdas read has to be freshly
 /// built even when the node's digest is unchanged.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn bootstrap_prepares_events_and_bypasses_source_cache() {
     let (mut g, calls) = event_pair();
     g.edit_func("emit", |func| func.behavior = FuncBehavior::Pure);
@@ -79,7 +79,7 @@ async fn bootstrap_prepares_events_and_bypasses_source_cache() {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn bootstrap_prepares_no_events_without_subscribers() {
     let (mut g, _) = event_pair();
     // Drop the subscriber but keep emit reachable by making it a sink.
@@ -96,7 +96,7 @@ async fn bootstrap_prepares_no_events_without_subscribers() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn failed_event_source_prepares_no_trigger() {
     let (mut g, _) = event_pair();
     g.fails("emit", "bootstrap failed");
@@ -113,7 +113,7 @@ async fn failed_event_source_prepares_no_trigger() {
 /// as pressing "Run" would. Here `emit`'s tick reaches only the `RunSinks`
 /// sink, yet the independent `source → sink` cone runs, while `emit`
 /// (neither a sink nor in that cone) does not.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn run_sinks_node_runs_all_sinks_on_event() {
     let source_calls = Calls::default();
 
@@ -142,7 +142,7 @@ async fn run_sinks_node_runs_all_sinks_on_event() {
 
 /// Without the `RunSinks` sink, firing `emit`'s tick reaches no subscriber,
 /// so the same sink cone is left untouched — isolating the sink as the cause.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn event_without_run_sinks_sink_runs_nothing() {
     let source_calls = Calls::default();
 

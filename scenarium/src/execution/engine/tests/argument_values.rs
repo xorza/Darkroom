@@ -16,7 +16,7 @@ fn before_execution_reports_no_values() {
     assert!(e.outputs("sum").is_empty());
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn with_bound_outputs() {
     let mut e = TestEngine::over(TestGraph::sample_values(2, 5));
 
@@ -46,7 +46,7 @@ async fn with_bound_outputs() {
     assert!(e.outputs("Print").is_empty());
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn with_none_binding() {
     let mut e = TestEngine::over(TestGraph::sample());
     e.edit(|g| {

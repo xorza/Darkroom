@@ -2,7 +2,7 @@ use super::*;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn execute_emits_started_then_finished_progress_per_node() {
     use crate::execution::report::RunPhase;
 
@@ -36,7 +36,7 @@ async fn execute_emits_started_then_finished_progress_per_node() {
     assert_eq!(started.len(), run.ran_node_count);
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn execute_honors_cancel_flag_and_marks_cancelled() {
     let mut e = TestEngine::over(TestGraph::sample());
 
@@ -62,7 +62,7 @@ async fn execute_honors_cancel_flag_and_marks_cancelled() {
 /// output — otherwise the next run treats it as already computed. Models
 /// "start a run, immediately cancel it": the in-flight node bails with `Ok`
 /// but its result is bogus.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn cancel_mid_invoke_drops_in_flight_node_and_reruns() {
     use crate::async_lambda;
 
@@ -119,7 +119,7 @@ async fn cancel_mid_invoke_drops_in_flight_node_and_reruns() {
 /// executed set — the truthful lambda-level signal, distinct from the
 /// executor's flag-check fallback covered above (asserted here without
 /// touching the flag, so only the error mapping can produce the verdict).
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn lambda_cancelled_error_maps_to_error_cancelled() {
     use crate::async_lambda;
 
@@ -157,7 +157,7 @@ async fn impure_node_always_invoked() {
     assert_eq!(plan.scheduled(), ["get_b", "get_a", "sum", "mult", "Print"]);
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn impure_output_is_released_after_run() {
     let mut e = TestEngine::over(TestGraph::sample());
     e.edit(|g| g.edit_func("get_b", |func| func.behavior = FuncBehavior::Impure));

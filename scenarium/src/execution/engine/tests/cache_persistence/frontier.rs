@@ -232,7 +232,7 @@ async fn chained_disk_cache_hydrates_only_the_live_frontier() {
 ///
 /// The intervening run uses `Ram` mode so it can't overwrite the node's one
 /// disk blob (a `Disk`-mode run would — the blob is keyed by node id).
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn stale_ram_value_does_not_mask_a_valid_disk_blob() {
     let dir = TempDir::new("flip_back");
 
@@ -295,7 +295,7 @@ async fn stale_ram_value_does_not_mask_a_valid_disk_blob() {
 /// a downstream node executes. The sink checks the store dir is non-empty
 /// when it runs; that holds only because `mult` was persisted right after it
 /// finished. Batched-at-the-end storing would leave the dir empty here.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn persist_node_lands_on_disk_before_its_consumer_runs() {
     let dir = TempDir::new("per_node_store");
     let root = dir.path().to_path_buf();

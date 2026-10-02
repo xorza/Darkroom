@@ -103,9 +103,10 @@ fn validation_rejects_a_binding_that_does_not_name_a_real_output() {
 /// nodes are authored in says nothing about the order they are adopted in — the
 /// id column is the authored set, sorted, and nothing else.
 ///
-/// The one fixture that mints its own ids: `TestGraph` numbers nodes in
+/// The one fixture that picks its own ids: `TestGraph` numbers nodes in
 /// declaration order, which would make "sorted" and "authored" the same list
-/// and leave the sort unproven.
+/// and leave the sort unproven. Here they descend, so declaration order is the
+/// reverse of id order.
 #[test]
 fn dense_order_is_id_order() {
     let mut fixture = TestGraph::new();
@@ -113,19 +114,17 @@ fn dense_order_is_id_order() {
     let func = fixture.library.by_name("src").unwrap().clone();
 
     let mut graph = Graph::default();
-    let authored: Vec<NodeId> = (0..8).map(|_| graph.add(Node::from(&func))).collect();
+    let authored: Vec<NodeId> = (0..8u128).map(|i| NodeId::from_u128(8 - i)).collect();
+    for &node_id in &authored {
+        graph.insert(node_id, Node::from(&func));
+    }
     let compiled = Compiler::default()
         .compile(&graph, &fixture.library)
         .unwrap();
 
     let node_ids: Vec<_> = compiled.node_ids.iter().copied().collect();
-    let mut expected = authored.clone();
-    expected.sort();
+    let expected: Vec<NodeId> = (1..=8u128).map(NodeId::from_u128).collect();
     assert_eq!(node_ids, expected, "nodes are adopted in id order");
-    assert_ne!(
-        node_ids, authored,
-        "eight random uuids do not land in declaration order, so the sort is the reason"
-    );
     for node_id in authored {
         assert!(compiled.contains(node_id));
     }

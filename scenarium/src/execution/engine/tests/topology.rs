@@ -1,6 +1,6 @@
 use super::*;
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn removing_node_rebuilds_id_keyed_edges() {
     let mut e = TestEngine::over(TestGraph::sample_values(2, 5));
     assert_eq!(e.engine.compiled().e_nodes.len(), 5);
@@ -24,7 +24,7 @@ async fn removing_node_rebuilds_id_keyed_edges() {
     assert_eq!(e.output_i64("mult", 0), Some(2));
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn empty_graph_executes_cleanly() {
     let mut e = TestEngine::over(TestGraph::new());
     assert!(e.engine.is_empty());
@@ -40,7 +40,7 @@ async fn empty_graph_executes_cleanly() {
 /// Two independent chains (`a → print_a`, `b → print_b`) both execute, and
 /// both sources are Pure, so their outputs are cached across runs. Removing
 /// one chain must preserve the survivor's id-keyed slot.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn cached_output_survives_node_removal() {
     let (calls_a, calls_b) = (Calls::default(), Calls::default());
     let mut g = TestGraph::new();
@@ -75,7 +75,7 @@ async fn cached_output_survives_node_removal() {
     assert_eq!(e.output_i64("a", 0), Some(2));
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn repeated_structural_churn_stays_correct() {
     // Grow→shrink the graph repeatedly on ONE engine, re-executing each
     // step. Stresses the packed pools and the id-keyed rebuild across many
