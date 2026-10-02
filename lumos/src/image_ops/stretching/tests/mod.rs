@@ -1,10 +1,8 @@
 #[cfg(feature = "real-data")]
 mod real_data;
 
-use crate::image_ops::error::OpError;
 use crate::image_ops::internals::channel_plane as channel;
 use crate::image_ops::stretching::*;
-use crate::math::statistics::median_mut;
 use crate::testing::images::{gray_image as gray, rgb_image as rgb};
 use crate::testing::prelude::*;
 
@@ -217,13 +215,13 @@ fn ghs_exponential_b0_hand_computed() {
     let c = GhsCurve::new(2.0, 0.0, 0.0, 0.0, 1.0);
     // f(0.5) = (1 - e^-1)/(1 - e^-2) = 0.632121/0.864665 = 0.731060.
     assert!(
-        (c.eval(0.5) - 0.731060).abs() < 1e-4,
+        (c.eval(0.5) - 0.731_060).abs() < 1e-4,
         "f(0.5) = {}",
         c.eval(0.5)
     );
     // f(0.25) = (1 - e^-0.5)/(1 - e^-2) = 0.393469/0.864665 = 0.455056.
     assert!(
-        (c.eval(0.25) - 0.455056).abs() < 1e-4,
+        (c.eval(0.25) - 0.455_056).abs() < 1e-4,
         "f(0.25) = {}",
         c.eval(0.25)
     );

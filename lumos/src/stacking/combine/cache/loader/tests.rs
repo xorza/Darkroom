@@ -1,10 +1,8 @@
 use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::Duration;
 
 use crate::io::image::linear::LinearImage;
-use crate::io::image::load_context::LoadContext;
 use crate::math::statistics::MedianMad;
 use crate::stacking::combine::cache::FrameCache;
 use crate::stacking::combine::cache::loader::*;
@@ -114,7 +112,7 @@ fn load_and_cache_frame_reuse() {
     LinearImage::from_pixels(dims, collided_pixels.clone())
         .save(&collided_path)
         .unwrap();
-    let first_timestamp = UNIX_EPOCH + Duration::from_hours(500000) + Duration::from_nanos(100);
+    let first_timestamp = UNIX_EPOCH + Duration::from_hours(500_000) + Duration::from_nanos(100);
     OpenOptions::new()
         .write(true)
         .open(&collided_path)
@@ -139,7 +137,7 @@ fn load_and_cache_frame_reuse() {
         original_len,
         "the timestamp, not file length, distinguishes this rewrite"
     );
-    let second_timestamp = UNIX_EPOCH + Duration::from_hours(500000) + Duration::from_nanos(200);
+    let second_timestamp = UNIX_EPOCH + Duration::from_hours(500_000) + Duration::from_nanos(200);
     OpenOptions::new()
         .write(true)
         .open(&collided_path)

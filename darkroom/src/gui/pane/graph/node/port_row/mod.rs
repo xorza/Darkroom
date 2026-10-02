@@ -11,7 +11,6 @@
 use std::fmt::Display;
 use std::sync::Arc;
 
-use glam::Vec2;
 use palantir::prelude::*;
 use palantir::{CloseHandle, InternedStr};
 use scenarium::Binding;
@@ -675,7 +674,7 @@ mod tests {
     /// the node and its wire.
     #[test]
     fn add_preview_spawns_a_node_already_wired_to_the_port() {
-        let func = preview_func(Default::default());
+        let func = preview_func(Arc::default());
         let producer = NodeId::unique();
         let port = PortRef::output(producer, 2);
         let center = Vec2::new(100.0, 40.0);

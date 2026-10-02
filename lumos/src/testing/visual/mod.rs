@@ -222,7 +222,6 @@ pub(crate) fn save_mask(mask: &BitBuffer2, path: &Path) {
 
 #[cfg(test)]
 mod tests {
-    use crate::math::size2us::Size2us;
     use crate::testing::visual::*;
 
     /// Each mapping over the same plane, so the three rules are pinned against one another.

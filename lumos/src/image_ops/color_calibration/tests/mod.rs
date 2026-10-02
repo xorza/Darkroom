@@ -2,7 +2,6 @@
 mod real_data;
 
 use crate::image_ops::color_calibration::*;
-use crate::image_ops::error::OpError;
 use crate::image_ops::internals::channel_samples as channel;
 use crate::testing::images::{gray_image as gray, rgb_image as rgb};
 use crate::testing::prelude::*;

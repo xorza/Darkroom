@@ -235,14 +235,14 @@ macro_rules! assert_signed_boundaries {
             assert_eq!(
                 <$ty as IntrospectInteger>::from_field_value(
                     "value",
-                    IntegerValue::Signed(<$ty>::MIN as i128),
+                    IntegerValue::Signed(i128::try_from(<$ty>::MIN).unwrap()),
                 ),
                 Ok(<$ty>::MIN),
             );
             assert_eq!(
                 <$ty as IntrospectInteger>::from_field_value(
                     "value",
-                    IntegerValue::Signed(<$ty>::MAX as i128),
+                    IntegerValue::Signed(i128::try_from(<$ty>::MAX).unwrap()),
                 ),
                 Ok(<$ty>::MAX),
             );
@@ -271,7 +271,7 @@ macro_rules! assert_unsigned_boundaries {
             assert_eq!(
                 <$ty as IntrospectInteger>::from_field_value(
                     "value",
-                    IntegerValue::Unsigned(<$ty>::MAX as u128),
+                    IntegerValue::Unsigned(u128::try_from(<$ty>::MAX).unwrap()),
                 ),
                 Ok(<$ty>::MAX),
             );

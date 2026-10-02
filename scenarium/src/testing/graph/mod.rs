@@ -122,7 +122,7 @@ impl TestGraph {
     /// than registered.
     pub fn add_special(&mut self, name: &str, special: SpecialNode) -> NodeId {
         let mut node = Node::new(NodeKind::Special(special));
-        node.name = name.to_owned();
+        name.clone_into(&mut node.name);
         let node_id = NodeId::from_u128(self.mint());
         self.graph.insert(node_id, node);
         self.bind_name(name, node_id);
@@ -188,7 +188,7 @@ impl TestGraph {
     pub fn source_sink_loose() -> Self {
         let mut g = Self::new();
         g.add("source", |n| n.pure().output(DataType::Int));
-        g.add("sink", |n| n.records());
+        g.add("sink", NodeSpec::records);
         g.add("loose", |n| n.pure().output(DataType::Int));
         g.wire("source", 0, "sink", 0);
         g
@@ -364,27 +364,32 @@ impl NodeSpec {
         }
     }
 
+    #[must_use]
     pub fn pure(mut self) -> Self {
         self.func = self.func.pure();
         self
     }
 
+    #[must_use]
     pub fn sink(mut self) -> Self {
         self.func = self.func.sink();
         self
     }
 
+    #[must_use]
     pub fn uncacheable(mut self) -> Self {
         self.func = self.func.uncacheable();
         self
     }
 
     /// The [`CacheMode`] nodes of this func start at.
+    #[must_use]
     pub fn cache(mut self, mode: CacheMode) -> Self {
         self.func = self.func.default_cache_mode(mode);
         self
     }
 
+    #[must_use]
     pub fn input(mut self, data_type: DataType) -> Self {
         let name = format!("in{}", self.func.inputs.len());
         self.func = self.func.input(FuncInput::required(name, data_type));
@@ -393,6 +398,7 @@ impl NodeSpec {
 
     /// A required input that may only hold a literal — wiring an upstream
     /// output into it is what graph validation rejects.
+    #[must_use]
     pub fn const_only(mut self) -> Self {
         let last = self
             .func
@@ -403,6 +409,7 @@ impl NodeSpec {
         self
     }
 
+    #[must_use]
     pub fn optional(mut self, data_type: DataType) -> Self {
         let name = format!("in{}", self.func.inputs.len());
         self.func = self.func.input(FuncInput::optional(name, data_type));
@@ -411,6 +418,7 @@ impl NodeSpec {
 
     /// An optional input carrying a declared default, so a fresh node of this
     /// func starts with that literal already bound.
+    #[must_use]
     pub fn defaulted(mut self, data_type: DataType, value: impl Into<ConstValue>) -> Self {
         let name = format!("in{}", self.func.inputs.len());
         self.func = self
@@ -419,6 +427,7 @@ impl NodeSpec {
         self
     }
 
+    #[must_use]
     pub fn output(mut self, data_type: DataType) -> Self {
         let name = format!("out{}", self.func.outputs.len());
         self.func = self.func.output(FuncOutput::new(name, data_type));
@@ -426,17 +435,20 @@ impl NodeSpec {
     }
 
     /// An output mirroring input `mirrors` — a passthrough / reroute port.
+    #[must_use]
     pub fn wildcard(mut self, mirrors: usize) -> Self {
         let name = format!("out{}", self.func.outputs.len());
         self.func = self.func.wildcard_output(name, mirrors);
         self
     }
 
+    #[must_use]
     pub fn event(mut self, name: &str, lambda: EventLambda) -> Self {
         self.func = self.func.event(name, lambda);
         self
     }
 
+    #[must_use]
     pub fn lambda(mut self, lambda: FuncLambda) -> Self {
         self.func = self.func.lambda(lambda);
         self
@@ -447,6 +459,7 @@ impl NodeSpec {
     /// Declare the ports first — this supplies only the implementation, and
     /// panics at run time if the node declares no output to write.
     /// [`observes`](Self::observes) is the form for a node with none.
+    #[must_use]
     pub fn compute(
         self,
         body: impl Fn(&[DynamicValue]) -> ConstValue + Send + Sync + 'static,
@@ -465,6 +478,7 @@ impl NodeSpec {
     /// For a sink whose effect is recorded outside the graph. Unlike
     /// [`compute`](Self::compute) it declares and writes no output, so it fits
     /// a node that has none.
+    #[must_use]
     pub fn observes(self, body: impl Fn(&[DynamicValue]) + Send + Sync + 'static) -> Self {
         let body = Arc::new(body);
         self.lambda(async_lambda!(
@@ -478,6 +492,7 @@ impl NodeSpec {
     /// A pure source of one constant: declares the output too, typed from the
     /// literal (`Any` for a literal that names no type of its own — a path, an
     /// enum variant, `Null`).
+    #[must_use]
     pub fn returns(self, value: impl Into<ConstValue>) -> Self {
         let value = value.into();
         let data_type = DataType::Any.or_const_type(&value);
@@ -489,6 +504,7 @@ impl NodeSpec {
     /// [`returns`](Self::returns), counting each call — the source every "did
     /// the upstream recompute" fixture is built on, since `calls` says both
     /// whether the node ran and how often.
+    #[must_use]
     pub fn counted(self, value: impl Into<ConstValue>, calls: &Calls) -> Self {
         let value = value.into();
         let data_type = DataType::Any.or_const_type(&value);
@@ -503,6 +519,7 @@ impl NodeSpec {
     /// The second input is **optional and defaults to `identity`**, so a
     /// fixture may leave it unbound or const-bind it to move the node's digest
     /// without touching its producers.
+    #[must_use]
     pub fn arith(self, identity: i64, op: fn(i64, i64) -> i64) -> Self {
         self.pure()
             .input(DataType::Int)
@@ -516,11 +533,13 @@ impl NodeSpec {
     }
 
     /// [`arith`](Self::arith) adding its inputs, identity `0`.
+    #[must_use]
     pub fn sum(self) -> Self {
         self.arith(0, |a, b| a + b)
     }
 
     /// [`arith`](Self::arith) multiplying its inputs, identity `1`.
+    #[must_use]
     pub fn mult(self) -> Self {
         self.arith(1, |a, b| a * b)
     }
@@ -530,6 +549,7 @@ impl NodeSpec {
     ///
     /// [`TestGraph::fails`] is the same body installed on a declaration the
     /// fixture did not spec itself.
+    #[must_use]
     pub fn fails(self, message: &'static str) -> Self {
         self.lambda(failing_lambda(message))
     }
@@ -541,6 +561,7 @@ impl NodeSpec {
     /// **Declares its own port**: one required `Any` input, which is the one it
     /// logs. Adding another input before this leaves that port unfed, which
     /// blocks the node rather than logging anything.
+    #[must_use]
     pub fn records(self) -> Self {
         self.sink().input(DataType::Any).lambda(async_lambda!(
             move |Invocation { ctx, inputs, .. }| {

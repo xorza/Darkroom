@@ -1,7 +1,6 @@
 //! The small sensing glyph a wire terminates on: a filled circle or a
 //! rounded triangle in a generously grown hit box, with a hover tooltip.
 
-use glam::Vec2;
 use palantir::TextInput;
 use palantir::prelude::*;
 use palantir::widget::Shape;

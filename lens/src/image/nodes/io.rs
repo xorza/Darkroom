@@ -116,7 +116,7 @@ fn image_fs_path(mode: FsPathMode) -> DataType {
         mode,
         SUPPORTED_EXTENSIONS
             .iter()
-            .map(|extension| extension.to_string())
+            .map(ToString::to_string)
             .collect(),
     )))
 }

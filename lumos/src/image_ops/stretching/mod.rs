@@ -145,6 +145,7 @@ impl Stretch {
     }
 
     /// Set how the curve is applied across color channels.
+    #[must_use]
     pub fn color(mut self, color: ColorMode) -> Self {
         self.color = color;
         self

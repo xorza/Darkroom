@@ -92,7 +92,7 @@ impl From<Coverage> for LinearImage {
     fn from(coverage: Coverage) -> Self {
         match coverage {
             Coverage::PerPixel(plane) => plane.into(),
-            uniform => uniform.to_plane().into(),
+            uniform @ Coverage::Uniform { .. } => uniform.to_plane().into(),
         }
     }
 }

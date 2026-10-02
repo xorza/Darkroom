@@ -1,7 +1,6 @@
 use super::*;
 use common::TempFile;
 
-use crate::ConstValue;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::compile::compiled_graph::ExecutionBinding;

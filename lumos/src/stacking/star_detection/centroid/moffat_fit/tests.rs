@@ -1,5 +1,4 @@
 //! Tests for Moffat profile fitting.
-use crate::stacking::star_detection::centroid::stamp::StampGrid;
 use crate::testing::prelude::*;
 
 use std::f64::consts::PI;
@@ -7,7 +6,6 @@ use std::f64::consts::PI;
 use crate::stacking::star_detection::centroid::internals::{
     Perturbation, reference_normal_equations,
 };
-use crate::stacking::star_detection::centroid::lm_optimizer::LMConfig;
 use crate::stacking::star_detection::centroid::moffat_fit::*;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 

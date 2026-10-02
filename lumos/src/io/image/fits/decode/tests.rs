@@ -1,22 +1,17 @@
 use crate::testing::prelude::*;
-use std::fs::File;
-use std::path::Path;
 
 use fits_well::FitsWriter;
 use fits_well::header::Header;
 use fits_well::image::{Bitpix, Compression, CompressionOptions, Image};
 use fits_well::io::{BLOCK_SIZE, HduKind};
 
-use crate::io::image::fits::decode::plan;
 use crate::io::image::fits::decode::plan::internals::description;
 use crate::io::image::fits::decode::*;
 use crate::io::image::fits::options::{
-    FitsChecksumPolicy, FitsCubeInterpretation, FitsFloatScale, FitsHduSelector, FitsLoadOptions,
-    FitsNullPolicy,
+    FitsFloatScale, FitsHduSelector, FitsLoadOptions, FitsNullPolicy,
 };
-use crate::io::image::fits::provenance::{FitsChecksumState, FitsTransferProvenance};
+use crate::io::image::fits::provenance::FitsTransferProvenance;
 use crate::io::image::image_provenance::TransferProvenance;
-use crate::io::image::load_context::LoadContext;
 use crate::testing::ScratchDirectory;
 
 fn load_context() -> LoadContext {

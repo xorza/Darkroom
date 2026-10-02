@@ -62,7 +62,10 @@ impl ProcessMemory {
                 false,
                 ProcessRefreshKind::nothing().with_memory(),
             );
-            self.bytes = self.system.process(self.pid).map_or(0, |p| p.memory());
+            self.bytes = self
+                .system
+                .process(self.pid)
+                .map_or(0, sysinfo::Process::memory);
         }
         self.bytes
     }

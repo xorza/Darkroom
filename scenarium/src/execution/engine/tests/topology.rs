@@ -1,7 +1,5 @@
 use super::*;
 
-use common::FloatExt;
-
 #[tokio::test(flavor = "multi_thread")]
 async fn removing_node_rebuilds_id_keyed_edges() {
     let mut e = TestEngine::over(TestGraph::sample_values(2, 5));
@@ -48,7 +46,7 @@ async fn cached_output_survives_node_removal() {
     let mut g = TestGraph::new();
     g.add("a", |n| n.counted(2i64, &calls_a).cache(CacheMode::Ram));
     g.add("b", |n| n.counted(5i64, &calls_b).cache(CacheMode::Ram));
-    g.add("print_a", |n| n.records());
+    g.add("print_a", NodeSpec::records);
     g.instance("print_b", "print_a");
     g.wire("a", 0, "print_a", 0);
     g.wire("b", 0, "print_b", 0);
@@ -84,7 +82,7 @@ async fn repeated_structural_churn_stays_correct() {
     // updates (pools grow 2→4 then shrink 4→2 each round).
     let mut g = TestGraph::new();
     g.add("a", |n| n.returns(2i64));
-    g.add("print_a", |n| n.records());
+    g.add("print_a", NodeSpec::records);
     g.wire("a", 0, "print_a", 0);
 
     let mut e = TestEngine::over(g);

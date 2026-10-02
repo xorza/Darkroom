@@ -34,7 +34,7 @@ fn cfa_pixels(base: f32, amp: f32, defect: f32, salt: u32) -> Vec<f32> {
     let n = W * H;
     let mut px = vec![0.0f32; n];
     for (i, p) in px.iter_mut().enumerate() {
-        let hash = (i as u32).wrapping_mul(2654435761) ^ salt;
+        let hash = (i as u32).wrapping_mul(2_654_435_761) ^ salt;
         *p = base + (hash as f32 / u32::MAX as f32 - 0.5) * 2.0 * amp;
     }
     for k in 0..(n / 1000) {
@@ -140,11 +140,11 @@ fn cosmic_ray_frame(cfa: CfaType) -> CfaImage {
     let n = CR_W * CR_H;
     let mut px = vec![0.0f32; n];
     for (i, p) in px.iter_mut().enumerate() {
-        let hash = (i as u32).wrapping_mul(2654435761);
+        let hash = (i as u32).wrapping_mul(2_654_435_761);
         *p = 0.1 + (hash as f32 / u32::MAX as f32 - 0.5) * 0.01;
     }
     for k in 0..300 {
-        let idx = (k as u32).wrapping_mul(2246822519) as usize % n;
+        let idx = (k as u32).wrapping_mul(2_246_822_519) as usize % n;
         px[idx] = 0.95;
     }
     make_cfa(Size2us::new(CR_W, CR_H), px, cfa)

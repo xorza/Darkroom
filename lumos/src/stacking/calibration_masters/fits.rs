@@ -286,21 +286,19 @@ fn read_defect_map(
     let dimensions = read_defect_dimensions(header)?;
     let table = reader.read_table(index).map_err(fits_to_io)?;
     let row_count = table.schema().nrows;
-    let kinds = match table
+    let ColumnData::Bytes(kinds) = table
         .column_by_name("KIND")
         .and_then(|column| column.raw())
         .map_err(fits_to_io)?
-    {
-        ColumnData::Bytes(values) => values,
-        _ => return Err(invalid_data("DEFECT_MAP KIND must be a byte column")),
+    else {
+        return Err(invalid_data("DEFECT_MAP KIND must be a byte column"));
     };
-    let indices = match table
+    let ColumnData::I64(indices) = table
         .column_by_name("INDEX")
         .and_then(|column| column.raw())
         .map_err(fits_to_io)?
-    {
-        ColumnData::I64(values) => values,
-        _ => return Err(invalid_data("DEFECT_MAP INDEX must be an int64 column")),
+    else {
+        return Err(invalid_data("DEFECT_MAP INDEX must be an int64 column"));
     };
     if kinds.len() != row_count || indices.len() != row_count {
         return Err(invalid_data(

@@ -122,7 +122,7 @@ impl<'a> OutputBand<'a> {
     }
 
     /// Scatter one frame into this band.
-    pub(super) fn distribute(&mut self, source: &FrameSource, plan: KernelPlan) {
+    pub(super) fn distribute(&mut self, source: &FrameSource<'_>, plan: KernelPlan) {
         if self.planes.counts.is_some() {
             // Here rather than where the band is built: this runs on a worker, so the zeroing of one
             // output-grid bitset per frame is spread across the pool instead of paid serially
@@ -155,7 +155,7 @@ impl<'a> OutputBand<'a> {
     /// The one place the input is scanned: the kernels differ in the shape they give a drop, not in
     /// how they find the pixels that make one.
     #[inline]
-    fn scan<F>(&mut self, source: &FrameSource, margin: f64, mut visit: F)
+    fn scan<F>(&mut self, source: &FrameSource<'_>, margin: f64, mut visit: F)
     where
         F: FnMut(&mut Self, InputPixel),
     {
@@ -176,7 +176,7 @@ impl<'a> OutputBand<'a> {
     }
 
     /// Turbo kernel: an axis-aligned rectangular drop.
-    fn distribute_turbo(&mut self, source: &FrameSource, half_drop: f64, inv_area: f64) {
+    fn distribute_turbo(&mut self, source: &FrameSource<'_>, half_drop: f64, inv_area: f64) {
         self.scan(source, half_drop + ROW_ROUNDING_SLACK, |band, pixel| {
             let Some(drop) = source.droplet(pixel) else {
                 return;
@@ -226,7 +226,7 @@ impl<'a> OutputBand<'a> {
     /// overlap via `boxer()`.
     ///
     /// Reference: `STScI` cdrizzlebox.c `do_kernel_square`.
-    fn distribute_square(&mut self, source: &FrameSource, half_drop: f64) {
+    fn distribute_square(&mut self, source: &FrameSource<'_>, half_drop: f64) {
         let margin = source.quad_row_extent(half_drop) + ROW_ROUNDING_SLACK;
         self.scan(source, margin, |band, pixel| {
             let Some(drop) = source.quad(pixel, half_drop) else {
@@ -268,7 +268,7 @@ impl<'a> OutputBand<'a> {
     }
 
     /// Point kernel: fastest, needs good dithering.
-    fn distribute_point(&mut self, source: &FrameSource) {
+    fn distribute_point(&mut self, source: &FrameSource<'_>) {
         self.scan(source, ROW_ROUNDING_SLACK, |band, pixel| {
             let Some(drop) = source.droplet(pixel) else {
                 return;
@@ -301,7 +301,7 @@ impl<'a> OutputBand<'a> {
     /// what leaves an edge pixel's weight recording how little of the drop actually landed.
     fn distribute_radial(
         &mut self,
-        source: &FrameSource,
+        source: &FrameSource<'_>,
         radius: isize,
         kernel: impl Fn(f32, f32) -> f32,
     ) {

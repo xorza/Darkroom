@@ -2,12 +2,10 @@
 mod real_data;
 
 use crate::image_ops::background_extraction::*;
-use crate::image_ops::error::OpError;
 use crate::image_ops::internals::channel_plane as channel;
 use crate::image_ops::stretching::Stretch;
 use crate::math::statistics::median_mut;
-use crate::testing::TestRng;
-use crate::testing::images::{gray_image, rgb_image as rgb};
+use crate::testing::images::rgb_image as rgb;
 use crate::testing::prelude::*;
 
 fn fill(size: Size2us, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {

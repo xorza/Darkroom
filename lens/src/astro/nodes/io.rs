@@ -16,7 +16,7 @@ pub(crate) static ASTRO_IMAGE_PATH_DATA_TYPE: LazyLock<DataType> = LazyLock::new
         FsPathMode::ExistingFile,
         PREVIEW_IMAGE_EXTENSIONS
             .iter()
-            .map(|extension| extension.to_string())
+            .map(ToString::to_string)
             .collect(),
     )))
 });
@@ -24,10 +24,7 @@ pub(crate) static ASTRO_IMAGE_PATH_DATA_TYPE: LazyLock<DataType> = LazyLock::new
 pub(crate) static ASTRO_RAW_PATHS_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| {
     DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
         FsPathMode::ExistingFiles,
-        RAW_EXTENSIONS
-            .iter()
-            .map(|extension| extension.to_string())
-            .collect(),
+        RAW_EXTENSIONS.iter().map(ToString::to_string).collect(),
     )))
 });
 

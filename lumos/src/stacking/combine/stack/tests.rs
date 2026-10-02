@@ -20,18 +20,13 @@ use crate::stacking::combine::cache::tests::make_test_cache;
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::config::{Normalization, SmallN};
 use crate::stacking::combine::normalization;
-use crate::stacking::combine::normalization::{ChannelNorm, FrameNorm};
-use crate::stacking::combine::rejection::Rejection;
+use crate::stacking::combine::normalization::ChannelNorm;
 use crate::stacking::combine::rejection::percentile_clip_config::PercentileClipConfig;
-use crate::stacking::combine::stack::quantization::SourceSigmas;
 use crate::stacking::combine::stack::*;
-use crate::stacking::frame_store::frame_quality::FrameQuality;
-use crate::stacking::frame_store::frame_stats::FrameStats;
 use crate::stacking::registration::config::{self, InterpolationMethod};
 use crate::stacking::registration::resample;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::stacking::stack_product::quality_map::QualityMap;
-use crate::stacking::stack_product::quality_planes::QualityPlanes;
 use crate::testing::ScratchDirectory;
 use std::path::PathBuf;
 
@@ -207,7 +202,7 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
     let make_frame = |f: usize| -> StackFrame {
         let mut px = vec![0.0f32; w * h];
         for (i, p) in px.iter_mut().enumerate() {
-            let hash = (i as u32).wrapping_mul(2654435761) ^ (f as u32).wrapping_mul(40503);
+            let hash = (i as u32).wrapping_mul(2_654_435_761) ^ (f as u32).wrapping_mul(40503);
             *p = 0.2 + (f as f32) * 0.01 + (hash as f32 / u32::MAX as f32 - 0.5) * 0.02;
         }
         px[(f * 7) % (w * h)] = 0.95; // an outlier so rejection actually fires

@@ -60,7 +60,7 @@ fn compatibility_and_defaults_follow_runtime_coercions() {
 /// which is the property that lets one table serve both gates.
 #[test]
 fn strictness_changes_the_scalar_and_enum_arms_and_nothing_else() {
-    let mode = TypeId::from_u128(0x5ca1ab1e);
+    let mode = TypeId::from_u128(0x5ca1_ab1e);
     let known = |_: TypeId, name: &str| name == "fast";
     let declared =
         |ty: &DataType, v: &ConstValue| ty.accepts_const(v, Strictness::Declared, |_, _| true);

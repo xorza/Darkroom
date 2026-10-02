@@ -1,6 +1,3 @@
-use std::path::Path;
-use std::time::Instant;
-
 use quickbench::quick_bench;
 
 use crate::testing::init_tracing;
@@ -72,11 +69,15 @@ fn bench_load_raw_libraw_demosaic() {
             );
         }
 
-        let avg_ms =
-            times.iter().map(|t| t.as_secs_f64()).sum::<f64>() / iterations as f64 * 1000.0;
+        let avg_ms = times
+            .iter()
+            .map(std::time::Duration::as_secs_f64)
+            .sum::<f64>()
+            / iterations as f64
+            * 1000.0;
         let min_ms = times
             .iter()
-            .map(|t| t.as_secs_f64())
+            .map(std::time::Duration::as_secs_f64)
             .fold(f64::MAX, f64::min)
             * 1000.0;
         println!("  Average: {avg_ms:.1}ms, Best: {min_ms:.1}ms\n");
@@ -225,10 +226,15 @@ fn bench_bayer_rcd_demosaic() {
         );
         image = Some(img);
     }
-    let rcd_avg = times.iter().map(|t| t.as_secs_f64()).sum::<f64>() / iterations as f64 * 1000.0;
+    let rcd_avg = times
+        .iter()
+        .map(std::time::Duration::as_secs_f64)
+        .sum::<f64>()
+        / iterations as f64
+        * 1000.0;
     let rcd_best = times
         .iter()
-        .map(|t| t.as_secs_f64())
+        .map(std::time::Duration::as_secs_f64)
         .fold(f64::MAX, f64::min)
         * 1000.0;
     println!("  Average: {rcd_avg:.1}ms, Best: {rcd_best:.1}ms\n");
@@ -256,10 +262,15 @@ fn bench_bayer_rcd_demosaic() {
                 img.dimensions().channels(),
             );
         }
-        let avg = times.iter().map(|t| t.as_secs_f64()).sum::<f64>() / 3.0 * 1000.0;
+        let avg = times
+            .iter()
+            .map(std::time::Duration::as_secs_f64)
+            .sum::<f64>()
+            / 3.0
+            * 1000.0;
         let best = times
             .iter()
-            .map(|t| t.as_secs_f64())
+            .map(std::time::Duration::as_secs_f64)
             .fold(f64::MAX, f64::min)
             * 1000.0;
         println!(
@@ -383,11 +394,15 @@ fn bench_rcd_demosaic_core() {
             times.push(elapsed);
         }
 
-        let avg_ms =
-            times.iter().map(|t| t.as_secs_f64()).sum::<f64>() / iterations as f64 * 1000.0;
+        let avg_ms = times
+            .iter()
+            .map(std::time::Duration::as_secs_f64)
+            .sum::<f64>()
+            / iterations as f64
+            * 1000.0;
         let best_ms = times
             .iter()
-            .map(|t| t.as_secs_f64())
+            .map(std::time::Duration::as_secs_f64)
             .fold(f64::MAX, f64::min)
             * 1000.0;
         let mpix = (w * h) as f64 / 1e6;

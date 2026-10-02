@@ -1,8 +1,6 @@
 use crate::io::raw::demosaic::interleave_planes;
 use crate::io::raw::demosaic::sensor_layout::SensorLayout;
-use crate::io::raw::demosaic::xtrans::hex_lookup::HexLookup;
 use crate::io::raw::demosaic::xtrans::internals::{make_xtrans, test_pattern, to_u16};
-use crate::io::raw::demosaic::xtrans::markesteijn::FinalBlendBuffers;
 use crate::io::raw::demosaic::xtrans::markesteijn_steps::*;
 
 #[test]

@@ -107,12 +107,16 @@ impl LMModel<6> for Gaussian2D {
         params[4] = params[4].clamp(0.5, self.stamp_radius); // Sigma_y
     }
 
-    fn batch_build_normal_equations(&self, data: FitData, params: &[f64; 6]) -> NormalEquations<6> {
+    fn batch_build_normal_equations(
+        &self,
+        data: FitData<'_>,
+        params: &[f64; 6],
+    ) -> NormalEquations<6> {
         simd::batch_build_normal_equations(self, data, params)
             .unwrap_or_else(|| NormalEquations::from_scalar_pass(self, data, params))
     }
 
-    fn batch_compute_chi2(&self, data: FitData, params: &[f64; 6]) -> f64 {
+    fn batch_compute_chi2(&self, data: FitData<'_>, params: &[f64; 6]) -> f64 {
         simd::batch_compute_chi2(self, data, params)
             .unwrap_or_else(|| self.accumulate_chi2(data, params, 0..data.len()))
     }

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use glam::{UVec2, Vec2};
+use glam::UVec2;
 use scenarium::{Func, FuncId, Graph, Library, testing};
 
 use super::*;

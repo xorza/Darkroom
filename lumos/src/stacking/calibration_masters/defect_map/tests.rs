@@ -6,10 +6,7 @@ use crate::stacking::combine::config::{Normalization, StackConfig};
 use crate::stacking::combine::stack::run_stacking;
 use crate::testing::XTRANS_PATTERN;
 
-use crate::io::image::cfa::same_color::{
-    SameColorMedian, XTRANS_NEIGHBORS, XTRANS_RADIUS, XTransOffsets,
-};
-use crate::stacking::calibration_masters::defect_map::dark_background::DarkBackground;
+use crate::io::image::cfa::same_color::{XTRANS_NEIGHBORS, XTRANS_RADIUS, XTransOffsets};
 use crate::stacking::calibration_masters::defect_map::sampling::{
     collect_color_sample_indices, collect_color_samples,
 };
@@ -462,7 +459,7 @@ fn cfa_hot_pixel_detection_large() {
     let pixel_count = size * size;
     let mut pixels = vec![100.0; pixel_count];
 
-    let hot_positions = [0, 500, 5000, 50000, 100000, 200000, 249999];
+    let hot_positions = [0, 500, 5000, 50000, 100_000, 200_000, 249_999];
     for &idx in &hot_positions {
         pixels[idx] = 10000.0;
     }

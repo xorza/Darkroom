@@ -110,7 +110,7 @@ fn avg4_diag(buf: &[f32], idx: usize, w1: usize) -> f32 {
 /// Input: Bayer data and margin info. Calibrated samples may be outside `[0, 1]`.
 /// Output: planar RGB f32 channels for the active area (width × height).
 pub(crate) fn demosaic(
-    bayer: &BayerImage,
+    bayer: &BayerImage<'_>,
     cancel: &CancelToken,
 ) -> Result<[Vec<f32>; 3], Cancelled> {
     let width = bayer.active.width;

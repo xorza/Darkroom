@@ -23,7 +23,6 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::Display;
 
-use glam::Vec2;
 use palantir::prelude::*;
 use palantir::{FontWeight, TextInput, TextWrap, ZoomFactor};
 use scenarium::DataType;

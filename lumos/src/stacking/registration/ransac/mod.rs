@@ -180,13 +180,12 @@ impl RansacEstimator {
                 .points
                 .gather(&buffers.inlier_buf, ref_points, target_points);
 
-            let refined = match estimate_transform(
+            let Some(refined) = estimate_transform(
                 &buffers.points.reference,
                 &buffers.points.target,
                 transform_type,
-            ) {
-                Some(t) => t,
-                None => break,
+            ) else {
+                break;
             };
 
             // Score with refined transform
@@ -264,11 +263,11 @@ impl RansacEstimator {
             }
 
             // Estimate transformation from sample
-            let transform =
-                match estimate_transform(&sample.reference, &sample.target, transform_type) {
-                    Some(t) => t,
-                    None => continue,
-                };
+            let Some(transform) =
+                estimate_transform(&sample.reference, &sample.target, transform_type)
+            else {
+                continue;
+            };
 
             // Reject physically implausible hypotheses early (before expensive scoring)
             if !self.is_plausible(&transform) {

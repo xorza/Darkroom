@@ -256,10 +256,7 @@ impl RunState {
     }
 
     pub(crate) fn logs(&self, id: NodeId) -> &[NodeLog] {
-        self.nodes
-            .get(&id)
-            .map(|n| n.logs.as_slice())
-            .unwrap_or(&[])
+        self.nodes.get(&id).map_or(&[], |n| n.logs.as_slice())
     }
 
     /// This run's failure message for a node. `None` unless it errored.
@@ -279,8 +276,7 @@ impl RunState {
     pub(crate) fn missing_inputs(&self, id: NodeId) -> &[usize] {
         self.nodes
             .get(&id)
-            .map(|n| n.missing_inputs.as_slice())
-            .unwrap_or(&[])
+            .map_or(&[], |n| n.missing_inputs.as_slice())
     }
 
     pub(crate) fn apply_worker_status(&mut self, update: &WorkerStatus) {

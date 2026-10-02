@@ -49,7 +49,7 @@ fn bench_median_filter_dispatch_vs_scalar(b: ::quickbench::Bencher) {
         // Unsorted, non-monotonic values: the sorting network is data-independent but the scalar
         // remainder around it is not.
         let input: Vec<f32> = (0..width * rows)
-            .map(|i| ((i * 2654435761usize) % 65521) as f32 * 1.5e-5)
+            .map(|i| ((i * 2_654_435_761_usize) % 65521) as f32 * 1.5e-5)
             .collect();
         let mut output = vec![0.0f32; width * rows];
 

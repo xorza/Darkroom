@@ -49,7 +49,7 @@ impl CfaPattern {
 
     /// Parse from LibRaw's `filters` field, which encodes the color at each position of a
     /// repeating pattern — 2x2 for Bayer sensors — two bits per position:
-    /// `color_index = (filters >> (((row << 1 & 14) | (col & 1)) << 1)) & 3`
+    /// `color_index = (filters >> (((row << 1 & 0xE) | (col & 1)) << 1)) & 3`
     ///
     /// Color indices: 0=Red, 1=Green, 2=Blue, 3=Green2.
     ///
@@ -57,7 +57,7 @@ impl CfaPattern {
     /// other exotic sensors all land here.
     pub(crate) fn from_filters(filters: u32) -> Option<Self> {
         let color_at =
-            |row: u32, col: u32| -> u32 { (filters >> (((row << 1 & 14) | (col & 1)) << 1)) & 3 };
+            |row: u32, col: u32| -> u32 { (filters >> (((row << 1 & 0xE) | (col & 1)) << 1)) & 3 };
 
         let c00 = color_at(0, 0);
         let c01 = color_at(0, 1);
@@ -91,6 +91,7 @@ impl CfaPattern {
     /// image, and reversing an even number of rows lands every row on the opposite phase. An odd
     /// height leaves the phases where they were, so the caller must not flip there — see
     /// `read_bayer_cfa`, which is where that parity is checked.
+    #[must_use]
     pub fn flip_vertical(self) -> Self {
         match self {
             CfaPattern::Rggb => CfaPattern::Gbrg,
@@ -102,6 +103,7 @@ impl CfaPattern {
 
     /// Flip the pattern horizontally (swap columns).
     /// Used when XBAYROFF is odd.
+    #[must_use]
     pub fn flip_horizontal(self) -> Self {
         match self {
             CfaPattern::Rggb => CfaPattern::Grbg,

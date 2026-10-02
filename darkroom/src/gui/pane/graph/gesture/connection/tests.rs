@@ -7,7 +7,6 @@ use crate::core::document::harness::DocFixture;
 use crate::gui::graph_ctx::harness::GraphCtxFixture;
 use crate::gui::pane::graph::harness::CanvasHarness;
 use crate::gui::pane::graph::node::port_row::port_circle_wid;
-use crate::gui::requests::Requests;
 
 /// Two two-in/one-out nodes wired producer → consumer — enough graph for a
 /// wire to be in flight over, and enough wiring for the snap filter to have a
@@ -19,7 +18,7 @@ use crate::gui::requests::Requests;
 /// needs to name both ends.
 fn fixture() -> (GraphCtxFixture, NodeId, NodeId) {
     let mut g = TestGraph::new();
-    g.add("producer", |n| n.mult());
+    g.add("producer", scenarium::testing::graph::NodeSpec::mult);
     g.instance("consumer", "producer");
     g.wire("producer", 0, "consumer", 0);
     let (producer, consumer) = (g.id("producer"), g.id("consumer"));

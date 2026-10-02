@@ -250,7 +250,7 @@ impl GraphIntent {
                         None if include_incoming => bindings.push((input, Binding::Bind(*source))),
                         None => {}
                     },
-                    other => bindings.push((input, other.clone())),
+                    other @ Binding::Const(_) => bindings.push((input, other.clone())),
                 }
             }
             intents.push(Self::AddNode {

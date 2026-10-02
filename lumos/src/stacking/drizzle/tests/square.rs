@@ -329,7 +329,7 @@ fn boxer_rotated_partial_clip() {
     //   Edge 2→3: sgarea(DVec2::new(0.6830, 1.1830), DVec2::new(-0.1830, 0.6830)) = -0.644338
     //   Edge 3→0: sgarea(DVec2::new(-0.1830, 0.6830), DVec2::new(0.3170, -0.1830)) = 0.038675
     //   Sum = -0.845299, abs = 0.845299
-    let expected = 0.845299;
+    let expected = 0.845_299;
     assert!(
         (area - expected).abs() < 1e-4,
         "Expected overlap ~{expected:.6}, got {area:.6}"

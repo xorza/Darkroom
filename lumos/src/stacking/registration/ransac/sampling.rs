@@ -22,7 +22,6 @@ pub(super) const PHASE_WEIGHTED: [bool; 3] = [true, true, false];
 /// When `seed` is `None`, seeds from `thread_rng()` for non-deterministic behavior.
 /// Always using `ChaCha8Rng` avoids enum dispatch overhead on every RNG call.
 pub(super) fn make_rng(seed: Option<u64>) -> rand_chacha::ChaCha8Rng {
-    use rand_chacha::rand_core::SeedableRng;
     match seed {
         Some(s) => rand_chacha::ChaCha8Rng::seed_from_u64(s),
         None => rand_chacha::ChaCha8Rng::seed_from_u64(rand::rng().next_u64()),

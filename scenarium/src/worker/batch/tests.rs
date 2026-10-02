@@ -1,10 +1,8 @@
 use super::*;
 
 use crate::execution::compile::Compiler;
-use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::graph::Graph;
 use crate::library::Library;
-use crate::worker::protocol::WorkerMessage;
 
 fn batch_intent(msgs: impl IntoIterator<Item = WorkerMessage>) -> BatchIntent {
     let mut intent = BatchIntent::default();

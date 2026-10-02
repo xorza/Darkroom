@@ -1,12 +1,8 @@
 use crate::io::image::cfa::*;
-use crate::io::image::error::ImageError;
 use crate::io::image::image_provenance::{
-    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
-    SourceContainer, TransferProvenance,
+    DecoderProvenance, ImageProvenance, RowOrder, SourceContainer, TransferProvenance,
 };
-use crate::io::image::load_context::LoadContext;
 use crate::io::image::sample_domain::ScaleOrigin;
-use crate::io::raw::demosaic::DemosaicKind;
 use crate::io::raw::demosaic::xtrans::internals::test_pattern_array;
 use crate::io::raw::provenance::RawTransferProvenance;
 use crate::testing::make_cfa;

@@ -80,7 +80,9 @@ pub(crate) const DATA_SHAPES: &[DataShape] = &[
             let mut state = 0x2545_F491_4F6C_DD1Du64 ^ (s as u64).wrapping_mul(0x9E37_79B9);
             (0..w)
                 .map(|_| {
-                    state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                    state = state
+                        .wrapping_mul(6_364_136_223_846_793_005)
+                        .wrapping_add(1);
                     (state >> 33) as f32 / (1u64 << 31) as f32
                 })
                 .collect()

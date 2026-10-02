@@ -69,8 +69,8 @@ async fn a_disabled_producer_on_an_optional_input_delivers_unbound() {
             .output(DataType::Int)
             .compute(|inputs| inputs[0].as_i64().unwrap_or_default().into())
     });
-    g.add("mult", |n| n.mult());
-    g.add("print", |n| n.records());
+    g.add("mult", NodeSpec::mult);
+    g.add("print", NodeSpec::records);
     g.wire("src", 0, "disabled", 0);
     g.wire("src", 0, "mult", 0);
     g.wire("disabled", 0, "mult", 1);

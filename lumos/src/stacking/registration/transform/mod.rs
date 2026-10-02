@@ -282,6 +282,7 @@ impl Transform {
     ///
     /// # Panics
     /// Panics if the matrix is singular (determinant near zero).
+    #[must_use]
     pub fn inverse(&self) -> Self {
         let inv = self
             .matrix
@@ -291,6 +292,7 @@ impl Transform {
     }
 
     /// Compose two transforms: self * other (apply other first, then self).
+    #[must_use]
     pub fn compose(&self, other: &Self) -> Self {
         // Result type is the more complex of the two
         let transform_type = self.transform_type.max(other.transform_type);

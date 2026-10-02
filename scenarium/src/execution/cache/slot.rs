@@ -184,7 +184,7 @@ impl RuntimeSlot {
     pub(crate) fn output_values(&self) -> Option<&[DynamicValue]> {
         match &self.value {
             ValueState::Resident { snapshot, .. } => Some(&snapshot.values),
-            _ => None,
+            ValueState::Empty => None,
         }
     }
 
@@ -255,7 +255,7 @@ impl RuntimeSlot {
     pub(crate) fn invoke_slot(&mut self, output_count: usize) -> InvokeSlot<'_> {
         match &mut self.value {
             ValueState::Resident { snapshot, .. } => snapshot.reset(output_count),
-            _ => {
+            ValueState::Empty => {
                 self.value = ValueState::Resident {
                     snapshot: OutputSnapshot::empty(output_count),
                     produced_under: None,

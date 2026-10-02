@@ -7,15 +7,13 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::containers::column::{Column, Idx};
-use crate::execution::identity::OutputIdx;
-use crate::execution::schedule::NodeState;
+use crate::containers::column::Idx;
+use crate::graph::func::lambda::FuncLambda;
 use crate::graph::func::lambda::internals;
-use crate::graph::func::lambda::{FuncLambda, Invocation};
 use crate::graph::identity::NodeId;
 use crate::graph::node::CacheMode;
 use crate::testing::program::ProgramBuilder;
-use crate::{ConstValue, DynamicValue, async_lambda};
+use crate::{ConstValue, async_lambda};
 
 fn value(value: i64) -> DynamicValue {
     DynamicValue::Static(ConstValue::Int(value))

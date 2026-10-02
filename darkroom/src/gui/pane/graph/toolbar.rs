@@ -9,7 +9,6 @@
 //! and map to an [`AppCommand`], while the framing buttons emit an
 //! `GraphIntent::SetViewport` directly.
 
-use glam::Vec2;
 use palantir::prelude::*;
 use palantir::widget::Shape;
 

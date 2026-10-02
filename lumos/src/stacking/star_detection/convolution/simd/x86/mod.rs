@@ -240,7 +240,7 @@ pub(super) unsafe fn convolve_2d_row_avx2(
     output_row: &mut [f32],
     size: Size2us,
     y: usize,
-    kernel: Kernel2d,
+    kernel: Kernel2d<'_>,
 ) {
     unsafe {
         use crate::stacking::star_detection::convolution::simd::mirror_index;
@@ -315,7 +315,7 @@ pub(super) unsafe fn convolve_2d_row_sse41(
     output_row: &mut [f32],
     size: Size2us,
     y: usize,
-    kernel: Kernel2d,
+    kernel: Kernel2d<'_>,
 ) {
     unsafe {
         use crate::stacking::star_detection::convolution::simd::mirror_index;

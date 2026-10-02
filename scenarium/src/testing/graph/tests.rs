@@ -1,5 +1,4 @@
 use super::*;
-use crate::execution::compile::Compiler;
 use crate::graph::func::FuncBehavior;
 
 /// The builder states a whole graph — declarations, wiring and bodies — and
@@ -14,7 +13,7 @@ fn a_named_graph_compiles_to_one_node_per_name() {
             .output(DataType::Int)
             .compute(|inputs| (inputs[0].as_i64().unwrap() * 2).into())
     });
-    g.add("print", |n| n.records());
+    g.add("print", NodeSpec::records);
     g.wire("src", 0, "double", 0);
     g.wire("double", 0, "print", 0);
 

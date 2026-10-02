@@ -52,7 +52,7 @@ mod tests {
         assert_eq!(SensorType::from_libraw(0, 3), SensorType::Monochrome);
         // colors == 1 also indicates monochrome
         assert_eq!(
-            SensorType::from_libraw(0x94949494, 1),
+            SensorType::from_libraw(0x9494_9494, 1),
             SensorType::Monochrome
         );
     }
@@ -60,11 +60,11 @@ mod tests {
     #[test]
     fn from_libraw_bayer() {
         assert_eq!(
-            SensorType::from_libraw(0x94949494, 3),
+            SensorType::from_libraw(0x9494_9494, 3),
             SensorType::Bayer(CfaPattern::Rggb)
         );
         assert_eq!(
-            SensorType::from_libraw(0x16161616, 3),
+            SensorType::from_libraw(0x1616_1616, 3),
             SensorType::Bayer(CfaPattern::Bggr)
         );
     }
@@ -78,6 +78,6 @@ mod tests {
     #[test]
     fn from_libraw_unknown() {
         // Other exotic patterns
-        assert_eq!(SensorType::from_libraw(0x12345678, 3), SensorType::Unknown);
+        assert_eq!(SensorType::from_libraw(0x1234_5678, 3), SensorType::Unknown);
     }
 }

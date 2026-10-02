@@ -47,6 +47,7 @@ impl ValueVariant {
     }
 
     /// Override the dropdown label (leaving `name`/`value` untouched).
+    #[must_use]
     pub fn display(mut self, display_name: impl Into<String>) -> Self {
         self.display_name = display_name.into();
         self
@@ -103,12 +104,14 @@ impl FuncInput {
     }
 
     /// Seed this input's const default value.
+    #[must_use]
     pub fn default(mut self, value: impl Into<ConstValue>) -> Self {
         self.default_value = Some(value.into());
         self
     }
 
     /// Attach the port's hover-tooltip text. See [`FuncInput::description`].
+    #[must_use]
     pub fn description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
         self
@@ -116,12 +119,14 @@ impl FuncInput {
 
     /// Restrict this input to a `Const` literal — no upstream `Bind`. See
     /// [`FuncInput::const_only`].
+    #[must_use]
     pub fn const_only(mut self) -> Self {
         self.const_only = true;
         self
     }
 
     /// Attach the editor picker variants (`ValueVariant`s).
+    #[must_use]
     pub fn variants(mut self, variants: Vec<ValueVariant>) -> Self {
         self.value_variants = variants;
         self
@@ -206,6 +211,7 @@ impl FuncOutput {
     }
 
     /// Attach the port's hover-tooltip text. See [`FuncOutput::description`].
+    #[must_use]
     pub fn description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
         self
@@ -258,22 +264,26 @@ impl Func {
         }
     }
 
+    #[must_use]
     pub fn category(mut self, category: impl Into<String>) -> Self {
         self.category = category.into();
         self
     }
 
+    #[must_use]
     pub fn description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
         self
     }
 
     /// Mark the func `Pure` (same inputs → same outputs; cacheable).
+    #[must_use]
     pub fn pure(mut self) -> Self {
         self.behavior = FuncBehavior::Pure;
         self
     }
 
+    #[must_use]
     pub fn sink(mut self) -> Self {
         self.sink = true;
         self
@@ -281,6 +291,7 @@ impl Func {
 
     /// Hide the editor's disk-cache (persist) toggle for this node — for nodes
     /// that cache their output themselves. See [`Func::uncacheable`].
+    #[must_use]
     pub fn uncacheable(mut self) -> Self {
         self.uncacheable = true;
         self
@@ -289,16 +300,19 @@ impl Func {
     /// Set the [`CacheMode`] that new nodes of this func adopt (see
     /// [`Func::default_cache_mode`]). Defaults to [`CacheMode::None`]; raise it
     /// for funcs whose output is worth caching by default.
+    #[must_use]
     pub fn default_cache_mode(mut self, mode: CacheMode) -> Self {
         self.default_cache_mode = mode;
         self
     }
 
+    #[must_use]
     pub fn input(mut self, input: FuncInput) -> Self {
         self.inputs.push(input);
         self
     }
 
+    #[must_use]
     pub fn inputs(mut self, inputs: impl IntoIterator<Item = FuncInput>) -> Self {
         self.inputs.extend(inputs);
         self
@@ -307,6 +321,7 @@ impl Func {
     /// Add an output port. Build it with [`FuncOutput::new`], optionally chaining
     /// [`FuncOutput::description`] — mirrors the [`Func::input`] +
     /// [`FuncInput`] builder pattern.
+    #[must_use]
     pub fn output(mut self, output: FuncOutput) -> Self {
         self.outputs.push(output);
         self
@@ -315,6 +330,7 @@ impl Func {
     /// Add a *wildcard* output that mirrors input `mirrors_input`'s resolved
     /// type — a polymorphic passthrough / reroute port. See
     /// [`OutputType::Wildcard`].
+    #[must_use]
     pub fn wildcard_output(mut self, name: impl Into<String>, mirrors_input: usize) -> Self {
         self.outputs.push(FuncOutput {
             name: name.into(),
@@ -326,6 +342,7 @@ impl Func {
         self
     }
 
+    #[must_use]
     pub fn event(mut self, name: impl Into<String>, event_lambda: EventLambda) -> Self {
         self.events.push(FuncEvent {
             name: name.into(),
@@ -334,6 +351,7 @@ impl Func {
         self
     }
 
+    #[must_use]
     pub fn lambda(mut self, lambda: FuncLambda) -> Self {
         self.lambda = lambda;
         self

@@ -1,7 +1,3 @@
-use std::fs;
-
-use crate::io::image::cfa::CfaType;
-use crate::io::image::error::ImageError;
 use crate::testing::ScratchDirectory;
 
 use crate::io::raw::*;
@@ -301,7 +297,7 @@ fn normalize_active_area_crops_and_applies_bayer_deltas() {
     };
     let black = 100.0;
     let span = 1000.0;
-    let filters = 0x94949494;
+    let filters = 0x9494_9494;
     let channel_delta = [0.1, 0.2, 0.3, 0.4];
     let mut raw_data = vec![65_535; layout.raw.width * 4];
     raw_data[layout.raw.width + 2..layout.raw.width + 5].copy_from_slice(&[50, 100, 200]);
@@ -358,7 +354,7 @@ fn direct_and_calibration_normalization_share_raw_linear_color_scale() {
     let raw_data = [600; 9];
     let black = 100.0;
     let span = 1000.0;
-    let filters = 0x94949494;
+    let filters = 0x9494_9494;
     let channel_delta = [0.1, 0.02, 0.03, 0.04];
     let visible_pattern = CfaPattern::Rggb;
     let active_cfa = CfaType::Bayer(visible_pattern);
@@ -434,7 +430,7 @@ fn spatial_black_repeat_uses_visible_coordinates_with_nonzero_margins() {
     cblack[4] = 2;
     cblack[5] = 3;
     cblack[6..12].copy_from_slice(&[5, 7, 9, 11, 13, 15]);
-    let black = consolidate_black_levels(&cblack, 100, 1115, 0x94949494).unwrap();
+    let black = consolidate_black_levels(&cblack, 100, 1115, 0x9494_9494).unwrap();
 
     assert_eq!(black.common, 115.0);
     assert_eq!(black.per_channel, [115.0, 125.0, 135.0, 125.0]);
@@ -466,7 +462,7 @@ fn spatial_black_repeat_uses_visible_coordinates_with_nonzero_margins() {
         &mut direct,
         layout.raw.width,
         layout.margin,
-        0x94949494,
+        0x9494_9494,
         &black.channel_delta_norm,
         black.repeat.as_ref(),
     );
@@ -476,7 +472,7 @@ fn spatial_black_repeat_uses_visible_coordinates_with_nonzero_margins() {
         black.common,
         black.span,
         Some(ChannelBlackDelta::LibRawFilter {
-            visible_filters: 0x94949494,
+            visible_filters: 0x9494_9494,
             values: black.channel_delta_norm,
         }),
         black.repeat.as_ref(),
@@ -765,7 +761,7 @@ fn fallback_8bit_normalization() {
 fn consolidate_black_levels_uniform() {
     let cblack = [0u32; 4104];
     // No per-channel, no spatial pattern
-    let bl = consolidate_black_levels(&cblack, 512, 16383, 0x94949494).unwrap();
+    let bl = consolidate_black_levels(&cblack, 512, 16383, 0x9494_9494).unwrap();
 
     assert_eq!(bl.common, 512.0);
     assert_eq!(bl.per_channel, [512.0; 4]);
@@ -783,7 +779,7 @@ fn consolidate_black_levels_per_channel() {
     cblack[3] = 5; // G2
     // No spatial pattern (cblack[4]==0, cblack[5]==0)
 
-    let bl = consolidate_black_levels(&cblack, 100, 4096, 0x94949494).unwrap();
+    let bl = consolidate_black_levels(&cblack, 100, 4096, 0x9494_9494).unwrap();
 
     // Common minimum across channels is 5, moved to black: 100+5=105
     assert_eq!(bl.common, 105.0);
@@ -819,7 +815,7 @@ fn consolidate_black_levels_bayer_2x2_fold() {
     // Folding: cblack[0]+=4(R), cblack[1]+=8(G1), cblack[3]+=12(G2), cblack[2]+=16(B)
     // After fold: cblack = [4, 8, 16, 12]
     // Common min = 4, subtract: cblack = [0, 4, 12, 8], black = 200+4 = 204
-    let filters = 0x94949494u32;
+    let filters = 0x9494_9494_u32;
     let bl = consolidate_black_levels(&cblack, 200, 16383, filters).unwrap();
 
     assert_eq!(bl.common, 204.0);
@@ -856,7 +852,7 @@ fn consolidate_black_levels_xtrans_1x1_fold() {
 #[test]
 fn consolidate_black_levels_rejects_invalid_metadata() {
     let cblack = [0u32; 4104];
-    let error = consolidate_black_levels(&cblack, 512, 512, 0x94949494).unwrap_err();
+    let error = consolidate_black_levels(&cblack, 512, 512, 0x9494_9494).unwrap_err();
     assert!(matches!(
         error,
         BlackLevelError::BlackExceedsMaximum {
@@ -868,7 +864,7 @@ fn consolidate_black_levels_rejects_invalid_metadata() {
     let mut oversized = [0u32; 4104];
     oversized[4] = 64;
     oversized[5] = 65;
-    let error = consolidate_black_levels(&oversized, 0, 4096, 0x94949494).unwrap_err();
+    let error = consolidate_black_levels(&oversized, 0, 4096, 0x9494_9494).unwrap_err();
     assert!(matches!(
         error,
         BlackLevelError::SpatialPatternTooLarge {
@@ -882,7 +878,7 @@ fn consolidate_black_levels_rejects_invalid_metadata() {
 #[test]
 fn libraw_filter_color_rggb() {
     // RGGB Bayer pattern: 0x94949494
-    let filters = 0x94949494u32;
+    let filters = 0x9494_9494_u32;
 
     // (0,0)=R=0, (0,1)=G=1, (1,0)=G=1, (1,1)=B=2
     assert_eq!(libraw_filter_color(filters, 0, 0), 0); // R
@@ -902,7 +898,7 @@ fn apply_bayer_black_corrections_identity() {
     let mut data = vec![0.5f32; 4];
     let delta = [0.0; 4];
 
-    apply_bayer_black_corrections(&mut data, 2, Vec2us::ZERO, 0x94949494, &delta, None);
+    apply_bayer_black_corrections(&mut data, 2, Vec2us::ZERO, 0x9494_9494, &delta, None);
 
     // No change expected
     for &v in &data {
@@ -916,7 +912,7 @@ fn bayer_black_corrections_apply_a_delta_per_colour() {
     let mut data = vec![0.5f32; 4];
     let delta = [0.1, 0.0, 0.05, 0.0]; // R has delta=0.1, B has delta=0.05
 
-    apply_bayer_black_corrections(&mut data, 2, Vec2us::ZERO, 0x94949494, &delta, None);
+    apply_bayer_black_corrections(&mut data, 2, Vec2us::ZERO, 0x9494_9494, &delta, None);
 
     assert!(
         (data[0] - 0.4).abs() < 1e-6,
@@ -937,7 +933,7 @@ fn apply_bayer_black_corrections_clamp_negative() {
     let mut data = vec![0.05f32; 4];
     let delta = [0.1, 0.0, 0.0, 0.0]; // R delta bigger than value
 
-    apply_bayer_black_corrections(&mut data, 2, Vec2us::ZERO, 0x94949494, &delta, None);
+    apply_bayer_black_corrections(&mut data, 2, Vec2us::ZERO, 0x9494_9494, &delta, None);
 
     // R at (0,0): (0.05 - 0.1).max(0.0) = 0.0
     assert_eq!(data[0], 0.0, "Should clamp to 0.0");

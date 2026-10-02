@@ -165,7 +165,7 @@ impl RuntimeHost {
                 // land in the batch *before* the store it is for, writing into
                 // the root being left behind.
                 self.sync_worker_disk_store();
-                self.dispatch(|worker| worker.flush_all_caches());
+                self.dispatch(WorkerBridge::flush_all_caches);
             }
         }
     }

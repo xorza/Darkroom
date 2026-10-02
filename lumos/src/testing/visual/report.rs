@@ -364,8 +364,6 @@ pub(crate) fn check_pass(
 
 #[cfg(test)]
 mod tests {
-    use crate::stacking::star_detection::star::Star;
-    use crate::testing::synthetic::observe::ObservedSource;
     use crate::testing::visual::report::*;
 
     fn make_truth(x: f64, y: f64) -> ObservedSource {

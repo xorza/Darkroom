@@ -189,7 +189,7 @@ impl<'a> NodeCtx<'a> {
     /// content digest, so no cache mode is ever honored; the header paints
     /// the `~` marker off this. Declared, like [`Self::sink`].
     pub(crate) fn impure(self) -> bool {
-        self.func.is_some_and(|f| f.impure())
+        self.func.is_some_and(Func::impure)
     }
 
     /// A preview node: its body shows the value wired into it instead of the

@@ -12,8 +12,8 @@ use crate::astro::nodes::runtime;
 use crate::image::{IMAGE_DATA_TYPE, Image};
 use scenarium::Invocation;
 
-const DENOISE_FUNC_ID: FuncId = FuncId::from_u128(0xace786f98a024ed193a0ad67bf0680f8);
-const STAR_REMOVAL_FUNC_ID: FuncId = FuncId::from_u128(0x60c31a76eed4467c9ba35c89d294a91b);
+const DENOISE_FUNC_ID: FuncId = FuncId::from_u128(0xace7_86f9_8a02_4ed1_93a0_ad67_bf06_80f8);
+const STAR_REMOVAL_FUNC_ID: FuncId = FuncId::from_u128(0x60c3_1a76_eed4_467c_9ba3_5c89_d294_a91b);
 
 pub(crate) fn register(library: &mut Library, model_paths: &MlModelPaths) {
     register_denoise(library, &model_paths.denoise);

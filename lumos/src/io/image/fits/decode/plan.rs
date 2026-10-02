@@ -1,4 +1,3 @@
-use std::mem::size_of;
 use std::path::Path;
 
 use fits_well::FitsError;

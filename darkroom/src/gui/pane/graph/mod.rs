@@ -22,7 +22,6 @@ pub(crate) mod node;
 pub(crate) mod paint;
 pub(crate) mod toolbar;
 
-use glam::Vec2;
 use palantir::TranslateScale;
 use palantir::prelude::*;
 
@@ -552,6 +551,7 @@ pub(crate) mod harness;
 mod tests {
     use palantir::DockOp;
     use scenarium::{Binding, InputPort};
+    use std::sync::Arc;
 
     use super::*;
     use crate::core::document::harness::DocFixture;
@@ -568,7 +568,7 @@ mod tests {
     #[test]
     fn clicking_a_preview_card_asks_for_its_viewer_tab() {
         let mut fixture = DocFixture::default();
-        let node = fixture.add(&preview_func(Default::default()));
+        let node = fixture.add(&preview_func(Arc::default()));
         let mut h = CanvasHarness::new(fixture);
         // The run projection `App` would have filled from a completed run:
         // without a value the card records `Sense::NONE` and swallows the click.

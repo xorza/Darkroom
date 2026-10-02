@@ -137,7 +137,7 @@ struct CfaScene<'a> {
 impl XtransScratch {
     /// Compute `L⁺`, `F`, and the signal estimate per pixel from same-color medians at two scales
     /// (one gather per pixel: nearest-`XTRANS_LARGE`, with the nearest-`XTRANS_SMALL` subset).
-    fn fill_structure(&mut self, scene: &CfaScene, offsets: &XTransOffsets) {
+    fn fill_structure(&mut self, scene: &CfaScene<'_>, offsets: &XTransOffsets) {
         let (w, n) = (scene.size.width, scene.size.pixel_count());
         // Every element is written below, so only the length matters.
         self.lplus.resize(n, 0.0);
@@ -185,7 +185,7 @@ impl XtransScratch {
     /// Empirical uses **per-color** background+σ (R/G/B sit at different sky levels after
     /// flat-fielding, so a whole-mosaic MAD would be inflated); parametric is color-independent
     /// (sensor gain), reusing the Poisson+read model on the same-color signal.
-    fn fill_noise(&mut self, scene: &CfaScene, noise: &NoiseEstimation) {
+    fn fill_noise(&mut self, scene: &CfaScene<'_>, noise: &NoiseEstimation) {
         let Self {
             signal,
             noise: out,

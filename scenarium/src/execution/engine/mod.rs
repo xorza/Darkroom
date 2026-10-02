@@ -402,7 +402,7 @@ pub(crate) mod internals {
 
             let outputs = self.cache[self.node_idx(node_id)]
                 .output_values()
-                .map(|outputs| outputs.to_vec())
+                .map(<[DynamicValue]>::to_vec)
                 .unwrap_or_default();
 
             ArgumentValues { inputs, outputs }

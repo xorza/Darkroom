@@ -1,19 +1,15 @@
 use std::collections::HashSet;
 
 use super::*;
+use crate::ConstValue;
 use crate::containers::column::Idx;
-use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::compile::error::{CompiledGraphValidationError, PortPool};
-use crate::execution::identity::NodeIdx;
-use crate::execution::identity::OutputAddr;
 use crate::graph::func::event::EventLambda;
-use crate::graph::identity::{FuncId, InputPort, NodeId, OutputPort};
+use crate::graph::identity::FuncId;
 use crate::graph::node::Node;
-use crate::graph::output_types::OutputTypes;
 use crate::testing::graph::TestGraph;
 use crate::testing::graph::compiled::Compiled;
 use crate::testing::program::ProgramBuilder;
-use crate::{ConstValue, DataType};
 
 /// The walk wires a subscription to the emitter's own event slot, and the
 /// artifact carries a range backstop under it — kept because the subscriber
@@ -22,7 +18,7 @@ use crate::{ConstValue, DataType};
 fn subscription_wiring_rejects_an_endpoint_outside_the_program() {
     let mut g = TestGraph::new();
     g.add("ticker", |n| n.sink().event("tick", EventLambda::default()));
-    g.add("listener", |n| n.sink());
+    g.add("listener", crate::testing::graph::NodeSpec::sink);
     g.subscribe("ticker", 0, "listener");
 
     let mut compiled = g.compile();
@@ -477,7 +473,7 @@ fn wires_each_event_with_the_subscribers_resolved_for_it() {
         n.event("quiet", EventLambda::default())
             .event("subscribed", EventLambda::default())
     });
-    g.add("listener", |n| n.sink());
+    g.add("listener", crate::testing::graph::NodeSpec::sink);
     g.subscribe("emitter", 1, "listener");
 
     let compiled = g.compile();
@@ -509,7 +505,7 @@ fn drops_subscriptions_that_cannot_fire() {
             }
             n
         });
-        g.add("listener", |n| n.sink());
+        g.add("listener", crate::testing::graph::NodeSpec::sink);
         // Authored against a two-event declaration; `events == 1` is the library
         // having since dropped the port this names.
         g.subscribe("emitter", 1, "listener");

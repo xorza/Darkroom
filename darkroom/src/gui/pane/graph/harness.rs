@@ -7,7 +7,6 @@
 //! through it differs. A test that skipped a phase would be exercising a
 //! frame the app never performs.
 
-use glam::{UVec2, Vec2};
 use palantir::DockOp;
 use palantir::internals::UiHarness;
 use palantir::prelude::*;

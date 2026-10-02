@@ -13,7 +13,7 @@ fn source_mult_print(mode: CacheMode, value: i64, calls: &Calls) -> TestGraph {
     let mut g = TestGraph::new();
     g.add("src", |n| n.counted(value, calls));
     g.add("mult", |n| n.mult().cache(mode));
-    g.add("print", |n| n.records());
+    g.add("print", NodeSpec::records);
     g.wire("src", 0, "mult", 0);
     g.wire("src", 0, "mult", 1);
     g.wire("mult", 0, "print", 0);

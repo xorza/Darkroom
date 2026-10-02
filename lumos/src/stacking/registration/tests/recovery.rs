@@ -1,7 +1,6 @@
 //! Match recovery after an initial transform estimate.
 
 use crate::stacking::registration::ransac::transforms::estimate_transform;
-use crate::stacking::registration::recovery::recover_matches;
 use crate::stacking::registration::transform::Transform;
 use crate::stacking::registration::triangle::voting::MatchIndices;
 use crate::stacking::registration::*;
@@ -219,7 +218,9 @@ fn iterative_recovery_removes_outliers() {
 /// is within 0.2 px, so the set is stable and that fit is what comes back.
 #[test]
 fn a_pass_that_trades_one_match_for_another_still_refits() {
-    let reference: Vec<DVec2> = (0..10).map(|i| DVec2::new(10.0 * i as f64, 5.0)).collect();
+    let reference: Vec<DVec2> = (0..10)
+        .map(|i| DVec2::new(10.0 * f64::from(i), 5.0))
+        .collect();
     let mut target: Vec<DVec2> = vec![
         reference[0],
         reference[1],

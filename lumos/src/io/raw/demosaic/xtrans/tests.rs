@@ -1,6 +1,3 @@
-use crate::io::raw::demosaic::DemosaicError;
-use crate::io::raw::demosaic::sensor_layout::SensorLayout;
-use crate::io::raw::demosaic::xtrans::XTransNormalization;
 use crate::io::raw::demosaic::xtrans::internals::{test_pattern, test_pattern_array};
 use crate::io::raw::demosaic::xtrans::*;
 
@@ -205,7 +202,7 @@ fn process_xtrans_output_size() {
     )
     .unwrap();
 
-    assert_eq!(rgb.iter().map(|c| c.len()).sum::<usize>(), 6 * 6 * 3);
+    assert_eq!(rgb.iter().map(Vec::len).sum::<usize>(), 6 * 6 * 3);
 }
 
 #[test]
@@ -344,7 +341,7 @@ fn process_xtrans_f32_output_size() {
         &CancelToken::never(),
     )
     .unwrap();
-    assert_eq!(rgb.iter().map(|c| c.len()).sum::<usize>(), 6 * 6 * 3);
+    assert_eq!(rgb.iter().map(Vec::len).sum::<usize>(), 6 * 6 * 3);
 }
 
 #[test]

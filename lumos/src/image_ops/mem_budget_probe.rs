@@ -60,7 +60,7 @@ fn linear_master(dimensions: ImageDimensions) -> LinearImage {
         for x in 0..width {
             let index = y * width + x;
             let sky = 0.02 + (y as f32 / height as f32) * 0.03;
-            let hash = (index as u32).wrapping_mul(2654435761) as f32 / u32::MAX as f32;
+            let hash = (index as u32).wrapping_mul(2_654_435_761) as f32 / u32::MAX as f32;
             let noise = (hash - 0.5) * 0.004;
             // Every 9973rd pixel (a prime, so the cores don't align to a row) is a star core.
             let core = if index % 9973 == 0 { 1.5 } else { 0.0 };

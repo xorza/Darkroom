@@ -5,11 +5,9 @@ mod synthetic_skies;
 use crate::testing::prelude::*;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::{
-    math::size2us::Size2us,
     stacking::star_detection::background::background_estimate::BackgroundEstimate,
     stacking::star_detection::config::background_config::{BackgroundConfig, BackgroundRefinement},
     stacking::star_detection::resources::DetectionResources,
-    testing::synthetic::background_map,
 };
 
 #[test]
@@ -779,7 +777,7 @@ fn noise_map_bicubic_interpolation() {
                 // Deterministic pseudo-noise that increases with x
                 let base = 0.5;
                 let noise_amp = if x < 64 { 0.001 } else { 0.05 };
-                let noise = ((x * 7919 + y * 104729) % 1000) as f32 / 1000.0 - 0.5;
+                let noise = ((x * 7919 + y * 104_729) % 1000) as f32 / 1000.0 - 0.5;
                 base + noise * noise_amp
             })
         })

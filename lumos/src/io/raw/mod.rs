@@ -352,7 +352,7 @@ fn apply_bayer_black_corrections(
 /// Libraw FC macro: determine color channel at (row, col) from filters bitmask.
 #[inline(always)]
 fn libraw_filter_color(filters: u32, row: usize, col: usize) -> usize {
-    ((filters >> (((row << 1 & 14) | (col & 1)) << 1)) & 3) as usize
+    ((filters >> (((row << 1 & 0xE) | (col & 1)) << 1)) & 3) as usize
 }
 
 #[inline(always)]

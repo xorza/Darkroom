@@ -1,7 +1,6 @@
 use super::*;
 
 use crate::async_lambda;
-use crate::graph::func::lambda::OutputDemand;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn unused_output_marked_skip() {

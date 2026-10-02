@@ -1,5 +1,6 @@
 use super::*;
 use palantir::internals::UiHarness;
+use std::sync::Arc;
 
 use imaginarium::{Image as RawImage, ImageDesc};
 use scenarium::{ConstValue, Node, NodeKind, SpecialNode};
@@ -23,7 +24,7 @@ fn image_value(width: usize, height: usize, format: ColorFormat) -> DynamicValue
 /// full-resolution upload became the pane's own on-demand ask.
 fn document_with_preview(node: NodeId) -> Document {
     let mut fixture = DocFixture::default();
-    let func = preview_func(Default::default());
+    let func = preview_func(Arc::default());
     fixture.library.add(func.clone());
     fixture.doc.graph.insert(node, Node::from(&func));
     fixture.doc

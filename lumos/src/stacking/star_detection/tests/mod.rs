@@ -26,7 +26,6 @@ mod real_data;
 mod stage_effects;
 mod subpixel_accuracy;
 
-use crate::ImageDimensions;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::prelude::*;

@@ -5,7 +5,6 @@
 //! [`StoredPlane::chunk`] either way.
 
 use std::fs::File;
-use std::mem::size_of;
 use std::path::PathBuf;
 
 use imaginarium::Buffer2;

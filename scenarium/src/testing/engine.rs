@@ -584,13 +584,13 @@ impl PlanOutcome {
 
     /// Names the planner cleared to run, sorted.
     pub(crate) fn runnable(&self) -> Vec<&str> {
-        self.where_state(|state| state.is_runnable())
+        self.where_state(NodeState::is_runnable)
     }
 
     /// Names blocked for want of a required input — the verdict that
     /// propagates to consumers.
     pub(crate) fn missing_inputs(&self) -> Vec<&str> {
-        self.where_state(|state| state.missing_required_inputs())
+        self.where_state(NodeState::missing_required_inputs)
     }
 
     pub(crate) fn state(&self, name: &str) -> NodeState {

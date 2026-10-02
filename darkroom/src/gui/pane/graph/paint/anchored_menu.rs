@@ -1,4 +1,3 @@
-use glam::Vec2;
 use palantir::prelude::*;
 use palantir::{Anchor, ClickOutside, CloseHandle};
 use scenarium::NodeId;

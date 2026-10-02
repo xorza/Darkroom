@@ -38,7 +38,7 @@ fn only_runnable_sinks_expose_the_disable_toggle() {
     // The third node names a func the library has never held.
     let mut g = TestGraph::new();
     let plain = g.add("plain", |n| n.output(DataType::Int));
-    let sink = g.add("sink_func", |n| n.sink());
+    let sink = g.add("sink_func", scenarium::testing::graph::NodeSpec::sink);
     let ghost = g.graph.add(Node::new(NodeKind::Func(FuncId::unique())));
     let mut fixture = GraphCtxFixture::over(g);
     let graph_ctx = fixture.graph_ctx();
@@ -131,7 +131,10 @@ fn func_events_read_in_order_alongside_outputs() {
     assert_eq!(event_names, ["Always", "FPS"], "events read in order");
     assert_eq!(n.event_refs().count(), 2, "one ref per declared event");
 
-    let output_names: Vec<&str> = n.outputs().map(|o| o.name()).collect();
+    let output_names: Vec<&str> = n
+        .outputs()
+        .map(super::output_ctx::OutputCtx::name)
+        .collect();
     assert_eq!(
         output_names,
         ["Delta", "Frame #"],
