@@ -1,4 +1,4 @@
-//! Loading the non-FITS image formats, and the file-extension tables that route to them.
+//! Loading the non-FITS image formats.
 //!
 //! FITS and RAW have their own decoders under `fits/` and `io/raw/`; what is left — TIFF, PNG,
 //! JPEG — is read through imaginarium in one call, so it needs only these few helpers rather than
@@ -9,15 +9,6 @@ use std::path::Path;
 use imaginarium::{ChannelCount, ColorFormat, Image};
 
 use crate::io::image::error::ImageError;
-
-pub(crate) const FITS_EXTENSIONS: &[&str] = &["fits", "fit"];
-
-pub(crate) fn file_extension(path: &Path) -> String {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase()
-}
 
 pub(crate) fn scientific_rejection(path: &Path, reason: impl Into<String>) -> ImageError {
     ImageError::ScientificInputRejected {

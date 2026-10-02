@@ -15,13 +15,11 @@ use crate::io::image::image_provenance::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
     SourceContainer, TransferProvenance,
 };
+use crate::io::image::input_format::InputFormat;
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::null_mask::NullMask;
-use crate::io::image::standard::{
-    FITS_EXTENSIONS, f32_target_format, file_extension, read_standard_image, scientific_rejection,
-};
-use crate::io::raw;
+use crate::io::image::standard::{f32_target_format, read_standard_image, scientific_rejection};
 use crate::stacking::frame_store::StackableImage;
 
 /// A one- or three-channel floating-point image in a linear numeric domain.
@@ -39,69 +37,62 @@ impl LinearImage {
     ///
     /// Supported formats:
     /// - FITS without CFA metadata: .fit, .fits
-    /// - Explicitly declared linear, floating-point TIFF: .tiff, .tif
+    /// - Floating-point TIFF, taken as linear: .tiff, .tif
     ///
     /// Camera RAW, mosaic FITS, integer TIFF, alpha TIFF, PNG, and JPEG are rejected. Use
     /// [`crate::CfaImage::from_file`] or [`crate::PreviewImage::from_file`] for those products.
     pub fn from_file<P: AsRef<Path>>(path: P, context: &LoadContext) -> Result<Self, ImageError> {
         let path = path.as_ref();
         context.check_cancelled(path)?;
-        let extension = file_extension(path);
-
-        if FITS_EXTENSIONS.contains(&extension.as_str()) {
-            return fits_decode::load_linear_fits(path, context);
-        }
-
-        if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {
+        let format = match InputFormat::of(path)? {
+            InputFormat::Fits => return fits_decode::load_linear_fits(path, context),
+            InputFormat::CameraRaw => {
+                return Err(scientific_rejection(
+                    path,
+                    "camera RAW must be loaded as CfaImage and calibrated before demosaicing",
+                ));
+            }
+            InputFormat::Raster(format) => format,
+        };
+        if format != FileFormat::Tiff {
             return Err(scientific_rejection(
                 path,
-                "camera RAW must be loaded as CfaImage and calibrated before demosaicing",
+                "PNG and JPEG are preview-only because their transfer and color transforms are not decoded",
             ));
         }
 
-        if let Some(format) = FileFormat::from_extension(&extension) {
-            if format != FileFormat::Tiff {
-                return Err(scientific_rejection(
-                    path,
-                    "PNG and JPEG are preview-only because their transfer and color transforms are not decoded",
-                ));
-            }
-
-            let decoded = read_standard_image(path)?;
-            context.check_cancelled(path)?;
-            if !decoded.desc().color_format.sample_type.is_float() {
-                return Err(scientific_rejection(
-                    path,
-                    "scientific raster input must be an explicitly declared floating-point TIFF",
-                ));
-            }
-            if decoded.desc().color_format.channel_count == ChannelCount::Rgba {
-                return Err(scientific_rejection(
-                    path,
-                    "scientific raster input must not contain an alpha channel",
-                ));
-            }
-
-            let color = if decoded.desc().color_format.channel_count == ChannelCount::L {
-                ColorProvenance::Monochrome
-            } else {
-                ColorProvenance::Unspecified
-            };
-            let mut image = LinearImage::from(&decoded);
-            image.metadata.provenance = Some(ImageProvenance {
-                container: SourceContainer::from(format),
-                decoder: DecoderProvenance::Imaginarium,
-                transfer: TransferProvenance::DeclaredLinearRaster,
-                color,
-                clipped: false,
-                demosaic: DemosaicProvenance::None,
-                // Every raster format this path reads stores its first row at the top.
-                row_order: RowOrder::TopDown,
-            });
-            return Ok(image);
+        let decoded = read_standard_image(path)?;
+        context.check_cancelled(path)?;
+        if !decoded.desc().color_format.sample_type.is_float() {
+            return Err(scientific_rejection(
+                path,
+                "scientific raster input must be a floating-point TIFF",
+            ));
+        }
+        if decoded.desc().color_format.channel_count == ChannelCount::Rgba {
+            return Err(scientific_rejection(
+                path,
+                "scientific raster input must not contain an alpha channel",
+            ));
         }
 
-        Err(ImageError::UnsupportedFormat { extension })
+        let color = if decoded.desc().color_format.channel_count == ChannelCount::L {
+            ColorProvenance::Monochrome
+        } else {
+            ColorProvenance::Unspecified
+        };
+        let mut image = LinearImage::from(&decoded);
+        image.metadata.provenance = Some(ImageProvenance {
+            container: SourceContainer::from(format),
+            decoder: DecoderProvenance::Imaginarium,
+            transfer: TransferProvenance::FloatRaster,
+            color,
+            clipped: false,
+            demosaic: DemosaicProvenance::None,
+            // Every raster format this path reads stores its first row at the top.
+            row_order: RowOrder::TopDown,
+        });
+        Ok(image)
     }
 
     /// Create from dimensions and interleaved pixel data (RGBRGBRGB...).

@@ -9,7 +9,6 @@ pub(crate) mod same_color;
 use std::io;
 use std::path::Path;
 
-use imaginarium::FileFormat;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -20,10 +19,11 @@ use crate::io::image::fits::{cfa as fits_cfa, decode as fits_decode};
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::{ColorProvenance, DemosaicProvenance};
+use crate::io::image::input_format::InputFormat;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::null_mask::NullMask;
-use crate::io::image::standard::{FITS_EXTENSIONS, file_extension, scientific_rejection};
+use crate::io::image::standard::scientific_rejection;
 use crate::io::raw;
 use crate::io::raw::demosaic::DemosaicMemory;
 use crate::io::raw::demosaic::bayer::CfaPattern;
@@ -142,16 +142,13 @@ pub(crate) struct CfaFrameInfo {
 
 impl CfaFrameInfo {
     pub(crate) fn from_file(path: &Path, context: &LoadContext) -> Result<Self, ImageError> {
-        let extension = file_extension(path);
-        if FITS_EXTENSIONS.contains(&extension.as_str()) {
-            fits_decode::fits_cfa_frame_info(path, context)
-        } else if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {
-            raw::raw_cfa_frame_info(path, context)
-        } else {
-            Err(scientific_rejection(
+        match InputFormat::of(path)? {
+            InputFormat::Fits => fits_decode::fits_cfa_frame_info(path, context),
+            InputFormat::CameraRaw => raw::raw_cfa_frame_info(path, context),
+            InputFormat::Raster(_) => Err(scientific_rejection(
                 path,
                 "scientific CFA input must be camera RAW or FITS",
-            ))
+            )),
         }
     }
 }
@@ -231,22 +228,14 @@ impl CfaImage {
     pub fn from_file<P: AsRef<Path>>(path: P, context: &LoadContext) -> Result<Self, ImageError> {
         let path = path.as_ref();
         context.check_cancelled(path)?;
-        let extension = file_extension(path);
-
-        if FITS_EXTENSIONS.contains(&extension.as_str()) {
-            return fits_decode::load_cfa_fits(path, context);
-        }
-        if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {
-            return raw::load_raw_cfa(path, context);
-        }
-        if FileFormat::from_extension(&extension).is_some() {
-            return Err(scientific_rejection(
+        match InputFormat::of(path)? {
+            InputFormat::Fits => fits_decode::load_cfa_fits(path, context),
+            InputFormat::CameraRaw => raw::load_raw_cfa(path, context),
+            InputFormat::Raster(_) => Err(scientific_rejection(
                 path,
                 "generic raster decoders do not establish a scientific CFA contract",
-            ));
+            )),
         }
-
-        Err(ImageError::UnsupportedFormat { extension })
     }
 
     /// Resident RAM held by this frame: its single f32 CFA plane's pixel bytes.
