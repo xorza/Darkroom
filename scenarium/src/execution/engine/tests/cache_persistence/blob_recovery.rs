@@ -120,15 +120,16 @@ async fn a_probed_blob_that_stops_decoding_fails_its_node_and_self_heals() {
     assert_eq!(dir.entry_count(), 1);
 }
 
-/// A corrupt / incompatible cache blob must be *deleted* on a failed load so
-/// the same run recomputes and writes a fresh one. Without the delete,
-/// `store_node`'s skip-if-exists keeps the broken file and the node
-/// recomputes on *every* run — the regression being an old-format blob
-/// rejected by the outer format version and never replaced. Each session is
-/// a fresh engine, so the disk cache is the only source.
+/// A blob whose header the store refuses — here one an earlier build wrote, under the
+/// previous format version — must be *deleted* when the reuse probe rejects it, so the same
+/// run recomputes and writes a fresh one. Without the delete, `store_node`'s
+/// skip-if-exists keeps the old file and the node recomputes on *every* run. Each session
+/// is a fresh engine, so the disk cache is the only source. (A blob whose header passes and
+/// whose body fails to decode takes the other path, in
+/// `a_probed_blob_that_stops_decoding_fails_its_node_and_self_heals`.)
 #[tokio::test]
-async fn corrupt_blob_recomputes_and_is_replaced_in_the_same_run() {
-    let dir = TempDir::new("corrupt_replace");
+async fn an_older_format_blob_recomputes_and_is_replaced_in_the_same_run() {
+    let dir = TempDir::new("older_format_replace");
     let calls = Calls::default();
 
     // Cold run: mult computes and stores its blob.
@@ -138,31 +139,22 @@ async fn corrupt_blob_recomputes_and_is_replaced_in_the_same_run() {
     assert!(run.ran().contains(&"mult"), "the cold run computes mult");
     assert_eq!(calls.count(), 1);
 
-    // Corrupt mult's blob *body* — a torn write, or an old
-    // version-mismatched format — while keeping the leading 32-byte digest
-    // header intact: a garbled header would already fail the presence probe
-    // and never reach the body verification this test is about.
     let blob = e.blob_path("mult");
-    let mut bytes = e.blob("mult");
-    let output_count = u32::from_le_bytes(bytes[36..40].try_into().unwrap()) as usize;
-    bytes.truncate(40 + output_count);
-    bytes.extend_from_slice(b"garbage");
-    fs::write(&blob, &bytes).unwrap();
+    e.engine.disk_store().age_format(e.id("mult"));
 
-    // Reopen: the corrupt blob still carries the current digest in its
-    // header. Body verification fails before the resolver cuts the producer
-    // cone, so the blob is deleted and mult recomputes in this same run.
+    // Reopen: the probe refuses the older version before the resolver cuts the
+    // producer cone, so the blob is deleted and mult recomputes in this same run.
     let mut e = e.reopen();
     let run = e.run_sinks().await;
     assert!(
         run.ran().contains(&"mult"),
-        "the corrupt cache is a same-run miss"
+        "the refused blob is a same-run miss"
     );
     assert!(run.errored().is_empty(), "the recomputed run succeeds");
     assert_eq!(calls.count(), 2);
     assert!(
         blob.exists(),
-        "the corrupt blob is replaced by the same run"
+        "the refused blob is replaced by the same run"
     );
 
     // Reopen: mult's fresh blob is a clean hit → reused, not recomputed.

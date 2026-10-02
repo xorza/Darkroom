@@ -624,6 +624,13 @@ pub(crate) mod internals {
     pub(crate) fn body_offset(output_count: usize) -> usize {
         super::header_len(output_count)
     }
+
+    /// Rewrite `blob`'s format version to the one before the current: the header a blob from an
+    /// earlier build carries, which every read refuses.
+    pub(crate) fn age_format(blob: &mut [u8]) {
+        let older = super::FORMAT_VERSION - 1;
+        blob[8..12].copy_from_slice(&older.to_le_bytes());
+    }
 }
 
 #[cfg(test)]

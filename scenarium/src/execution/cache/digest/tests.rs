@@ -79,6 +79,27 @@ fn deterministic_and_per_function_distinct() {
     assert_ne!(first.at(b), first.at(c));
     assert_ne!(first.at(a), first.at(c));
 
+    // Move only when the node encoding changes on purpose — read the new numbers off the
+    // failure and update them here, with the cache format version. Any other failure is
+    // accidental drift, which silently invalidates every persisted cache blob. `b` pins a
+    // bound input's fold (its producer's digest), `c` a const input's.
+    assert_eq!(
+        first.at(b),
+        Some(Digest([
+            53, 69, 189, 102, 111, 172, 24, 129, 255, 170, 245, 82, 11, 210, 206, 13, 11, 183, 72,
+            154, 72, 115, 155, 184, 130, 217, 195, 156, 199, 32, 25, 141
+        ])),
+        "bound-input node digest"
+    );
+    assert_eq!(
+        first.at(c),
+        Some(Digest([
+            58, 119, 99, 187, 180, 27, 225, 87, 60, 24, 69, 201, 1, 173, 77, 66, 17, 150, 151, 11,
+            233, 74, 204, 197, 208, 36, 101, 69, 15, 74, 49, 130
+        ])),
+        "const-input node digest"
+    );
+
     p.program_mut().by_id_mut(a.node_id).func_id = FuncId::from_u128(11);
     let refunced = Digests::of(&p);
     assert_ne!(
@@ -556,8 +577,8 @@ fn impure_node_and_its_dependents_are_none() {
     );
 }
 
-/// The [`DigestHasher`] builder is deterministic, encodes PODs little-endian and
-/// width-typed, length-prefixes strings so concatenations can't collide, and folds a
+/// The [`DigestHasher`] builder is deterministic, encodes PODs as exactly their little-endian
+/// bytes, length-prefixes strings so concatenations can't collide, and folds a
 /// nested digest as its raw bytes.
 #[test]
 fn digest_hasher_encodes_deterministically_and_without_collisions() {
@@ -613,6 +634,45 @@ fn digest_hasher_encodes_deterministically_and_without_collisions() {
             h.write_pod(false);
         }),
         "a bool flip changes the digest"
+    );
+
+    // Each POD folds exactly its little-endian bytes, and a string its u64 length then its
+    // bytes: the same digest as writing those bytes by hand.
+    let bytes = |raw: &[&[u8]]| {
+        hash_with(&|h| {
+            for part in raw {
+                h.write_bytes(part);
+            }
+        })
+    };
+    assert_eq!(u64_1, bytes(&[&1u64.to_le_bytes()]), "u64 is 8 LE bytes");
+    assert_eq!(
+        hash_with(&|h| {
+            h.write_pod(0x0102_0304u32);
+        }),
+        bytes(&[&[4, 3, 2, 1]]),
+        "u32 is 4 LE bytes"
+    );
+    assert_eq!(
+        hash_with(&|h| {
+            h.write_pod(-1.5f64);
+        }),
+        bytes(&[&(-1.5f64).to_bits().to_le_bytes()]),
+        "f64 is its bit pattern's 8 LE bytes"
+    );
+    assert_eq!(
+        hash_with(&|h| {
+            h.write_pod(true);
+        }),
+        bytes(&[&[1]]),
+        "bool is one byte"
+    );
+    assert_eq!(
+        hash_with(&|h| {
+            h.write_str("ab");
+        }),
+        bytes(&[&2u64.to_le_bytes(), b"ab"]),
+        "a string is its u64 length then its bytes"
     );
 
     // write_digest folds the nested digest's raw 32 bytes — same as write_bytes(&inner.0).

@@ -4,8 +4,8 @@ use std::io;
 use std::io::Cursor;
 use std::io::SeekFrom;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, LazyLock};
 use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncSeek, AsyncWrite, AsyncWriteExt as _, ReadBuf};
@@ -13,15 +13,16 @@ use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncSeek, AsyncWrite, AsyncWriteE
 use crate::data::codec::error::CodecFormatError;
 use crate::execution::cache::digest::Digest;
 use crate::execution::cache::disk_store::format::{
-    BODY_LEN_OFFSET, DESCRIPTOR_LEN, FIXED_LEN, FORMAT_VERSION, MAGIC, PAYLOAD_LEN_OFFSET,
-    covers_outputs, header_len, read, write,
+    BODY_LEN_OFFSET, DESCRIPTOR_LEN, FIXED_LEN, FORMAT_VERSION, PAYLOAD_LEN_OFFSET, covers_outputs,
+    header_len, read, write,
 };
 use crate::graph::func::lambda::OutputDemand;
 use crate::library::{Library, TypeEntry};
 use crate::runtime::context::ContextStore;
 use crate::{CodecError, ConstValue, CustomValue, CustomValueCodec, DynamicValue, TypeId};
 
-static BLOB_TYPE: LazyLock<TypeId> = LazyLock::new(TypeId::unique);
+/// Fixed, so a blob that names it has known bytes.
+const BLOB_TYPE: TypeId = TypeId::from_u128(0x0011_2233_4455_6677_8899_aabb_ccdd_eeff);
 
 /// A demand mask over `output_count` outputs with `produced` marked demanded and the rest
 /// skipped — the shape the run loop hands the decoder.
@@ -107,7 +108,7 @@ impl fmt::Display for Blob {
 
 impl CustomValue for Blob {
     fn type_id(&self) -> TypeId {
-        *BLOB_TYPE
+        BLOB_TYPE
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -170,7 +171,7 @@ impl CustomValueCodec for BlobCodec {
 fn library(version: u32, behavior: DecodeBehavior, decode_calls: Arc<AtomicU64>) -> Library {
     let mut library = Library::default();
     library.register_type(
-        *BLOB_TYPE,
+        BLOB_TYPE,
         TypeEntry::custom_with_codec(
             "Blob",
             Arc::new(BlobCodec {
@@ -195,6 +196,49 @@ async fn encoded(digest: Digest, outputs: &[DynamicValue], library: &Library) ->
     .await
     .unwrap();
     writer.0.into_inner()
+}
+
+/// One small blob's exact bytes, written out by hand from the layout rather than from the
+/// format's own constants. They move only when the layout changes on purpose, which must also
+/// bump `FORMAT_VERSION`; any other failure here is accidental drift, which would make every
+/// blob on disk unreadable or, worse, read with the wrong meaning.
+#[tokio::test]
+async fn a_small_blob_has_the_pinned_layout() {
+    let library = library(7, DecodeBehavior::ReadAll, Arc::default());
+    let outputs = [
+        DynamicValue::Unbound,
+        DynamicValue::Static(ConstValue::Int(-2)),
+        DynamicValue::Static(ConstValue::String("ab".into())),
+        DynamicValue::from_custom(Blob(vec![10, 11])),
+    ];
+    let bytes = encoded(Digest([0xab; 32]), &outputs, &library).await;
+
+    #[rustfmt::skip]
+    let expected: Vec<u8> = [
+        // Magic, format version 9, the digest, four outputs.
+        &b"SCENBLOB"[..],
+        &[9, 0, 0, 0],
+        &[0xab; 32],
+        &[4, 0, 0, 0],
+        // Body length: 9 (Int) + 11 (String) + 2 (Blob).
+        &[22, 0, 0, 0, 0, 0, 0, 0],
+        // One descriptor per output: tag, three zero bytes, the custom type id (16, little-endian),
+        // its codec version (4), the payload length (8).
+        &[0; 32],
+        &[1, 0, 0, 0], &[0; 16], &[0; 4], &[9, 0, 0, 0, 0, 0, 0, 0],
+        &[1, 0, 0, 0], &[0; 16], &[0; 4], &[11, 0, 0, 0, 0, 0, 0, 0],
+        &[2, 0, 0, 0],
+        &[0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x00],
+        &[7, 0, 0, 0], &[2, 0, 0, 0, 0, 0, 0, 0],
+        // Int: tag 2, -2 as little-endian two's complement.
+        &[2, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
+        // String: tag 4, its byte length, its bytes.
+        &[4, 2, 0, 0, 0, 0, 0, 0, 0, b'a', b'b'],
+        // The custom payload, as the codec wrote it.
+        &[10, 11],
+    ]
+    .concat();
+    assert_eq!(bytes, expected);
 }
 
 #[tokio::test]
@@ -230,15 +274,6 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
     ];
     let bytes = encoded(digest, &outputs, &library).await;
     let header_len = header_len(outputs.len());
-    assert_eq!(&bytes[..8], MAGIC);
-    assert_eq!(
-        u32::from_le_bytes(bytes[8..12].try_into().unwrap()),
-        FORMAT_VERSION
-    );
-    assert_eq!(
-        u64::from_le_bytes(bytes[48..56].try_into().unwrap()) as usize,
-        bytes.len() - header_len
-    );
 
     let mut header_only = Cursor::new(&bytes[..header_len]);
     assert!(
