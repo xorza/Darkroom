@@ -1,4 +1,3 @@
-use crate::io::raw::demosaic::interleave_planes;
 use crate::io::raw::demosaic::sensor_layout::SensorLayout;
 use crate::io::raw::demosaic::xtrans::internals::{make_xtrans, test_pattern, to_u16};
 use crate::io::raw::demosaic::xtrans::markesteijn_steps::*;
@@ -610,19 +609,23 @@ fn blend_uniform_homo_produces_uniform_output() {
     );
 
     // Uniform 0.5 input → output should be approximately 0.5 for all channels
-    let output = interleave_planes([r, g, b]);
-    for (i, &v) in output.iter().enumerate() {
-        assert!((v - 0.5).abs() < 0.05, "Pixel {i}: expected ~0.5, got {v}");
+    for (channel, plane) in [&r, &g, &b].into_iter().enumerate() {
+        for (i, &v) in plane.iter().enumerate() {
+            assert!(
+                (v - 0.5).abs() < 0.05,
+                "channel {channel} pixel {i}: expected ~0.5, got {v}"
+            );
+        }
     }
 }
 
 #[test]
 fn blend_one_dominant_direction() {
     // With one dominant direction, output should match that direction's RGB
-    let raw_w = 30;
-    let raw_h = 30;
-    let w = 18;
-    let h = 18;
+    let raw_w = 42;
+    let raw_h = 42;
+    let w = 30;
+    let h = 30;
     let pixels = w * h;
     let data = vec![to_u16(0.5); raw_w * raw_h];
     let xtrans = make_xtrans(
@@ -668,7 +671,6 @@ fn blend_one_dominant_direction() {
             b: &mut b_one,
         },
     );
-    let output_one = interleave_planes([r_one, g_one, b_one]);
 
     // All directions equally good
     let homo_all = vec![9u8; NDIR * pixels];
@@ -690,7 +692,6 @@ fn blend_one_dominant_direction() {
             b: &mut b_all,
         },
     );
-    let output_all = interleave_planes([r_all, g_all, b_all]);
 
     let mut changed = false;
     for y in MARK_INFO_BORDER..h - MARK_INFO_BORDER {
@@ -698,17 +699,15 @@ fn blend_one_dominant_direction() {
             let pixel = y * w + x;
             let [expected_r, expected_b] = colors[pixel];
             let expected_g = green_dir[pixel];
-            assert_eq!(
-                &output_one[pixel * 3..pixel * 3 + 3],
-                &[expected_r, expected_g, expected_b]
-            );
-            changed |= output_one[pixel * 3..pixel * 3 + 3] != output_all[pixel * 3..pixel * 3 + 3];
+            let one = [r_one[pixel], g_one[pixel], b_one[pixel]];
+            assert_eq!(one, [expected_r, expected_g, expected_b]);
+            changed |= one != [r_all[pixel], g_all[pixel], b_all[pixel]];
         }
     }
     assert!(changed);
 
     // Output should have no NaN or negative values
-    for (i, &v) in output_one.iter().enumerate() {
+    for (i, &v) in [&r_one, &g_one, &b_one].into_iter().flatten().enumerate() {
         assert!(v.is_finite(), "NaN at {i}");
         assert!(v >= 0.0, "Negative at {i}");
     }

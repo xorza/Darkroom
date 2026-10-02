@@ -1,9 +1,9 @@
-use crate::io::raw::demosaic::interleave_planes;
 use crate::io::raw::demosaic::sensor_layout::SensorLayout;
 use crate::io::raw::demosaic::xtrans::internals::{
     make_xtrans, test_pattern, test_pattern_array, to_u16,
 };
 use crate::io::raw::demosaic::xtrans::markesteijn::*;
+use crate::io::raw::demosaic::xtrans::markesteijn_steps::MARK_INFO_BORDER;
 use crate::testing::prelude::*;
 
 #[derive(Clone, Copy, Debug)]
@@ -219,26 +219,6 @@ fn markesteijn_matches_librtprocess_reference_scenes() {
 }
 
 #[test]
-fn markesteijn_output_size() {
-    let raw_w = 24;
-    let raw_h = 24;
-    let w = 12;
-    let h = 12;
-    let data = vec![to_u16(0.5); raw_w * raw_h];
-    let xtrans = make_xtrans(
-        &data,
-        SensorLayout {
-            raw: Size2us::new(raw_w, raw_h),
-            active: Size2us::new(w, h),
-            margin: Vec2us::new(6, 6),
-        },
-    );
-
-    let rgb = interleave_planes(demosaic(&xtrans, &CancelToken::never()).unwrap());
-    assert_eq!(rgb.len(), w * h * 3);
-}
-
-#[test]
 fn markesteijn_uniform_input() {
     let raw_w = 30;
     let raw_h = 30;
@@ -254,10 +234,10 @@ fn markesteijn_uniform_input() {
         },
     );
 
-    let rgb = interleave_planes(demosaic(&xtrans, &CancelToken::never()).unwrap());
+    let planes = demosaic(&xtrans, &CancelToken::never()).unwrap();
 
     // Uniform input should produce approximately uniform output
-    for (i, &v) in rgb.iter().enumerate() {
+    for (i, &v) in planes.iter().flatten().enumerate() {
         assert!((v - 0.5).abs() < 0.05, "Pixel {i} = {v} (expected ~0.5)");
     }
 }
@@ -280,9 +260,9 @@ fn markesteijn_no_nan() {
         },
     );
 
-    let rgb = interleave_planes(demosaic(&xtrans, &CancelToken::never()).unwrap());
+    let planes = demosaic(&xtrans, &CancelToken::never()).unwrap();
 
-    for (i, &v) in rgb.iter().enumerate() {
+    for (i, &v) in planes.iter().flatten().enumerate() {
         assert!(v.is_finite(), "NaN/Inf at pixel {i}");
     }
 }
@@ -303,8 +283,54 @@ fn markesteijn_all_zeros() {
         },
     );
 
-    let rgb = interleave_planes(demosaic(&xtrans, &CancelToken::never()).unwrap());
-    for &v in &rgb {
+    let planes = demosaic(&xtrans, &CancelToken::never()).unwrap();
+    for &v in planes.iter().flatten() {
         assert_eq!(v, 0.0, "Expected 0.0 for all-zero input");
+    }
+}
+
+/// From the border fill in, a frame demosaics bit for bit as the same pixels inside a larger
+/// frame: no stage reads a value it did not compute from the frame's own samples. Random samples,
+/// so no stencil can hide behind equal neighbours; an offset of 12 keeps the 6×6 layout's phase.
+#[test]
+fn markesteijn_beyond_the_border_matches_a_larger_frame() {
+    let large = Size2us::new(96, 96);
+    let offset = 12;
+    let mut rng = TestRng::new(7);
+    let samples: Vec<f32> = (0..large.pixel_count())
+        .map(|_| 0.1 + 0.8 * rng.next_f32())
+        .collect();
+    let small = Size2us::new(60, 60);
+    let crop: Vec<f32> = (0..small.pixel_count())
+        .map(|index| {
+            let pos = small.point_of(index);
+            samples[large.index_of(Vec2us::new(pos.x + offset, pos.y + offset))]
+        })
+        .collect();
+    let run = |data: &[f32], size| {
+        let xtrans =
+            XTransImage::with_margins_f32(data, SensorLayout::cropped(size), test_pattern());
+        demosaic(&xtrans, &CancelToken::never()).unwrap()
+    };
+    let whole = run(&samples, large);
+    let part = run(&crop, small);
+    for (channel, (part_plane, whole_plane)) in part.iter().zip(&whole).enumerate() {
+        for (index, value) in part_plane.iter().enumerate() {
+            let pos = small.point_of(index);
+            let distance = pos
+                .x
+                .min(pos.y)
+                .min(small.width - 1 - pos.x)
+                .min(small.height - 1 - pos.y);
+            if distance < MARK_INFO_BORDER {
+                continue;
+            }
+            let outer = large.index_of(Vec2us::new(pos.x + offset, pos.y + offset));
+            assert_eq!(
+                value.to_bits(),
+                whole_plane[outer].to_bits(),
+                "channel {channel} at {pos:?}"
+            );
+        }
     }
 }
