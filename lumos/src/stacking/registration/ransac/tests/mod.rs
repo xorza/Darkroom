@@ -1,10 +1,9 @@
 //! Tests for RANSAC module.
 
-use crate::stacking::registration::ransac::transforms::{centroid, point_normalization};
 use crate::stacking::registration::ransac::*;
-use crate::stacking::registration::triangle::voting::PointMatch;
+use crate::stacking::registration::triangle::voting::{MatchIndices, PointMatch};
 use crate::testing::prelude::*;
-use std::f64::consts::{PI, SQRT_2};
+use std::f64::consts::PI;
 
 use rand::rngs::SmallRng;
 
@@ -26,9 +25,10 @@ fn estimator_with_max_sigma(max_sigma: f64, mut config: RansacConfig) -> RansacE
 fn make_matches(n: usize) -> Vec<PointMatch> {
     (0..n)
         .map(|i| PointMatch {
-            ref_idx: i,
-            target_idx: i,
-            votes: 1,
+            indices: MatchIndices {
+                reference: i,
+                target: i,
+            },
             confidence: 1.0,
         })
         .collect()
@@ -40,9 +40,10 @@ fn make_matches_with_confidence(confidences: &[f64]) -> Vec<PointMatch> {
         .iter()
         .enumerate()
         .map(|(i, &c)| PointMatch {
-            ref_idx: i,
-            target_idx: i,
-            votes: 1,
+            indices: MatchIndices {
+                reference: i,
+                target: i,
+            },
             confidence: c,
         })
         .collect()

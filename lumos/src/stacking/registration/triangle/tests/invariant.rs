@@ -14,7 +14,7 @@ fn invariant_tree_build_and_size() {
         DVec2::new(3.0, 0.0),
         DVec2::new(0.0, 4.0),
     ];
-    let triangles = form_triangles_kdtree(&positions, 3);
+    let triangles = triangles_of(&positions, 3);
     assert_eq!(triangles.len(), 1);
 
     let tree = build_invariant_tree(&triangles).unwrap();
@@ -29,7 +29,7 @@ fn invariant_tree_lookup_finds_self() {
         DVec2::new(3.0, 0.0),
         DVec2::new(0.0, 4.0),
     ];
-    let triangles = form_triangles_kdtree(&positions, 3);
+    let triangles = triangles_of(&positions, 3);
     let tree = build_invariant_tree(&triangles).unwrap();
 
     // Query with the triangle's own ratios (0.6, 0.8)
@@ -80,7 +80,7 @@ fn invariant_search_zero_tolerance() {
         DVec2::new(3.0, 0.0),
         DVec2::new(0.0, 4.0),
     ];
-    let triangles = form_triangles_kdtree(&positions, 3);
+    let triangles = triangles_of(&positions, 3);
     let tree = build_invariant_tree(&triangles).unwrap();
 
     // Zero tolerance should still find exact match (distance = 0 <= 0)
@@ -99,7 +99,7 @@ fn invariant_search_large_tolerance_finds_all() {
         DVec2::new(10.0, 10.0),
         DVec2::new(5.0, 5.0),
     ];
-    let triangles = form_triangles_kdtree(&positions, 4);
+    let triangles = triangles_of(&positions, 4);
     let n_triangles = triangles.len();
     assert!(n_triangles > 0);
 
@@ -120,7 +120,7 @@ fn invariant_search_clears_buffer() {
         DVec2::new(0.0, 10.0),
         DVec2::new(10.0, 10.0),
     ];
-    let triangles = form_triangles_kdtree(&positions, 4);
+    let triangles = triangles_of(&positions, 4);
     let tree = build_invariant_tree(&triangles).unwrap();
 
     let mut candidates = vec![999, 888, 777]; // Pre-filled garbage

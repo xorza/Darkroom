@@ -39,10 +39,10 @@ fn reference_point_none_uses_centroid() {
     // Verify: sum of ref_points / count:
     // x values: 200,300,...,800 (7 values), mean = (200+800)/2 = 500
     // y values: same. So centroid = (500, 500).
-    assert!(
-        (sip.norm.center - center).length() < 1e-10,
-        "Reference point should be centroid (500,500), got {:?}",
-        sip.norm.center
+    assert_eq!(
+        sip.norm,
+        PointNormalization::around(&ref_points, center),
+        "the reference point is the centroid (500, 500)"
     );
 }
 
@@ -211,11 +211,13 @@ fn sigma_clipping_no_effect_on_clean_data() {
     }
 }
 
+/// A narrow strip — x over 1000 px, y over 100 — makes the v-dependent monomials tiny beside the
+/// u-dependent ones, and its normal equations would square that conditioning. The SVD solve on the
+/// design matrix keeps it, so the exact cubic field is recovered to rounding inside the strip:
+/// coordinates of order 10³ resolved to `u·10³` ≈ 1e-13, under 1e-9 px with the design's
+/// conditioning on top.
 #[test]
-fn ill_conditioned_falls_back_to_lu() {
-    // Narrow strip: y spans only 100px (450..550), x spans 1000px.
-    // The 10:1 aspect ratio makes v-dependent monomials tiny relative to
-    // u-dependent ones, creating near-singular A^T*A.
+fn a_narrow_strip_is_fitted_to_rounding() {
     let center = DVec2::new(500.0, 500.0);
     let k = 1e-7;
 
@@ -229,7 +231,7 @@ fn ill_conditioned_falls_back_to_lu() {
             target_points.push(p + d * k * d.length_squared());
         }
     }
-    // 11 y-values * 51 x-values = 561 points, order 5 needs 3*18=54 minimum
+    // 11 y-values × 51 x-values = 561 points; order 5 needs 3 × 18 = 54.
 
     let transform = Transform::identity();
     let config = SipConfig {
@@ -237,20 +239,74 @@ fn ill_conditioned_falls_back_to_lu() {
         reference_point: Some(center),
         ..Default::default()
     };
-
     let sip = fit_sip(&ref_points, &target_points, &transform, &config).polynomial;
 
-    // Verify corrections are reasonable within the data region (y=500 strip)
     for x_val in (0..=1000).step_by(100) {
         let p = DVec2::new(f64::from(x_val), 500.0);
-        let corrected = sip.correct(p);
         let d = p - center;
-        let r2 = d.length_squared();
-        let expected_target = p + d * k * r2;
-        let error = (transform.apply(corrected) - expected_target).length();
-        assert!(
-            error < 1.0,
-            "Ill-conditioned fit error at x={x_val}: {error:.4} pixels"
-        );
+        let expected_target = p + d * k * d.length_squared();
+        let error = (transform.apply(sip.correct(p)) - expected_target).length();
+        assert!(error < 1e-9, "strip fit error at x={x_val}: {error:e} px");
     }
+}
+
+/// Clipping never refits on fewer points than the fit itself demands. Order 2 needs 3 × 3 = 9
+/// points; nine points with one gross outlier would clip to eight, so the first fit stands, with
+/// every point counted as used, rather than a refit on fewer points than the floor allows.
+#[test]
+fn clipping_keeps_the_previous_fit_below_the_point_floor() {
+    let center = DVec2::new(500.0, 500.0);
+    let mut ref_points: Vec<DVec2> = (0..8)
+        .map(|i| {
+            DVec2::new(
+                100.0 + 100.0 * f64::from(i),
+                200.0 + 70.0 * f64::from(i % 3),
+            )
+        })
+        .collect();
+    let mut target_points: Vec<DVec2> = ref_points
+        .iter()
+        .map(|&p| {
+            let d = p - center;
+            p + d * 1e-7 * d.length_squared()
+        })
+        .collect();
+    ref_points.push(DVec2::new(300.0, 800.0));
+    target_points.push(DVec2::new(340.0, 760.0));
+
+    let config = SipConfig {
+        order: 2,
+        reference_point: Some(center),
+        ..Default::default()
+    };
+    let fit = fit_sip(&ref_points, &target_points, &Transform::identity(), &config);
+    assert_eq!(fit.points_used, 9);
+    assert_eq!(fit.points_rejected, 0);
+}
+
+/// Points on one line through the reference point have `v = 0`, so every term in `v` is a zero
+/// column and the system has no unique solution: the fit is refused, not solved by a pseudo-inverse
+/// that would pick one of infinitely many.
+#[test]
+fn a_rank_deficient_layout_is_refused() {
+    let center = DVec2::new(500.0, 500.0);
+    let reference: Vec<DVec2> = (0..=100)
+        .map(|i| DVec2::new(10.0 * f64::from(i), 500.0))
+        .collect();
+    let target: Vec<DVec2> = reference
+        .iter()
+        .map(|&p| p + DVec2::new(0.5, 0.0))
+        .collect();
+    let config = SipConfig {
+        order: 3,
+        reference_point: Some(center),
+        ..Default::default()
+    };
+    let error =
+        SipPolynomial::fit_from_transform(&reference, &target, &Transform::identity(), &config)
+            .unwrap_err();
+    assert!(
+        matches!(error, RegistrationError::SingularSipSystem),
+        "{error:?}"
+    );
 }

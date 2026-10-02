@@ -83,7 +83,7 @@ fn refine_centroid_adaptive_sigma_small_fwhm() {
     let height = 64;
     let true_pos = DVec2::new(32.3, 32.7);
     let sigma = 1.5f32; // Small sigma
-    let expected_fwhm = FWHM_TO_SIGMA * sigma;
+    let expected_fwhm = sigma_to_fwhm(sigma);
 
     let pixels = SyntheticStar::new(true_pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma })
         .stamp(Size2us::new(width, height), 0.1);
@@ -115,7 +115,7 @@ fn refine_centroid_adaptive_sigma_large_fwhm() {
     let height = 64;
     let true_pos = DVec2::new(32.3, 32.7);
     let sigma = 4.0f32; // Large sigma
-    let expected_fwhm = FWHM_TO_SIGMA * sigma;
+    let expected_fwhm = sigma_to_fwhm(sigma);
 
     let pixels = SyntheticStar::new(true_pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma })
         .stamp(Size2us::new(width, height), 0.1);

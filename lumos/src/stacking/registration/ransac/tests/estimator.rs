@@ -233,7 +233,6 @@ fn ransac_deterministic_with_seed() {
     .unwrap();
 
     assert_eq!(result1.inliers, result2.inliers);
-    assert_eq!(result1.iterations, result2.iterations);
 
     let t1 = result1.transform.translation_components();
     let t2 = result2.transform.translation_components();
@@ -241,43 +240,51 @@ fn ransac_deterministic_with_seed() {
     assert!((t1.y - t2.y).abs() < TOL);
 }
 
+/// The adaptive bound stops the loop on every iteration, not only on an improvement. Half the 50
+/// matches are a translation's inliers and half sit far from it, and every sample is the inlier at
+/// index 0: the first hypothesis finds the 25 inliers, nothing later beats it, and
+/// `adaptive_iterations(0.5, 1, 0.999)` = ⌈ln 0.001 / ln 0.5⌉ = ⌈9.97⌉ = 10 is the iteration count
+/// — where a bound read only on improvement ran to the 10 000 cap.
 #[test]
-fn ransac_early_termination() {
-    // All 50 perfect inliers. With 100% inlier ratio and conf=0.999,
-    // adaptive_iterations(1.0, 1, 0.999) = 1, so it should terminate very early.
-    let ref_points = make_grid(10, 5, 10.0);
-    let transform = Transform::translation(DVec2::new(7.0, 3.0));
-    let target_points = apply_all(&transform, &ref_points);
+fn ransac_stops_at_the_adaptive_bound_without_a_later_improvement() {
+    let shift = Transform::translation(DVec2::new(7.0, 3.0));
+    let inliers = make_grid(5, 5, 10.0);
+    let mut ref_points = inliers.clone();
+    let mut target_points = apply_all(&shift, &inliers);
+    for (i, &p) in make_grid(5, 5, 10.0).iter().enumerate() {
+        ref_points.push(p + DVec2::new(1000.0, 0.0));
+        target_points.push(p + DVec2::new(-500.0, 300.0 + i as f64));
+    }
 
     let estimator = estimator_with_max_sigma(
         0.33,
         RansacConfig {
-            max_iterations: 10000,
+            max_iterations: 10_000,
             confidence: 0.999,
             ..Default::default()
         },
     );
-
-    let result = estimate_uniform(
-        &estimator,
-        &ref_points,
-        &target_points,
-        TransformType::Translation,
-    )
-    .unwrap();
-
-    // All 50 points should be inliers
-    assert_eq!(result.inliers.len(), 50);
-    // Should have terminated early (much fewer than 10000 iterations)
-    assert!(
-        result.iterations < 100,
-        "Expected early termination, got {} iterations",
-        result.iterations
+    let mut samples = 0;
+    let result = estimator
+        .ransac_loop(
+            &ref_points,
+            &target_points,
+            ref_points.len(),
+            1,
+            TransformType::Translation,
+            |_, _, sample| {
+                samples += 1;
+                sample.clear();
+                sample.push(0);
+            },
+        )
+        .unwrap();
+    assert_eq!(samples, 10);
+    assert_eq!(result.inliers, (0..25).collect::<Vec<_>>());
+    assert_eq!(
+        result.transform.translation_components(),
+        DVec2::new(7.0, 3.0)
     );
-
-    let t = result.transform.translation_components();
-    assert!((t.x - 7.0).abs() < 0.01);
-    assert!((t.y - 3.0).abs() < 0.01);
 }
 
 #[test]

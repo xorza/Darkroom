@@ -38,13 +38,7 @@ fn norm_scale_stored_correctly() {
 
     let sip = fit_sip(&ref_points, &target_points, &transform, &config).polynomial;
 
-    let expected_norm_scale = avg_distance(&ref_points, center);
-    assert!(
-        (sip.norm.scale - expected_norm_scale).abs() < 1e-10,
-        "norm scale: got {:.6}, expected {:.6}",
-        sip.norm.scale,
-        expected_norm_scale
-    );
+    assert_eq!(sip.norm, PointNormalization::around(&ref_points, center));
 }
 
 /// The point field a case fits: a grid, distorted radially, with or without outliers.
@@ -316,9 +310,10 @@ fn fit_sip_quality_improves_with_order_and_with_clipping() {
         ..Default::default()
     };
 
-    // Order 3 captures the r² term but not r⁴; order 4 adds terms that partially model it. Clipping
-    // is off so both fit the same points — otherwise order 3 rejects what it cannot model and the
-    // two fits are graded on different data.
+    // Order 3 captures the r²·d term but not r⁴·d, a degree-5 field, which order 5 holds exactly.
+    // Order 4 would not do: on a grid symmetric about the centre its added even terms are
+    // orthogonal to an odd field and buy nothing. Clipping is off so both fit the same points —
+    // otherwise order 3 rejects what it cannot model and the two fits are graded on different data.
     let quartic = Distortion {
         k: 1e-7,
         k4: 1e-14,
@@ -330,17 +325,17 @@ fn fit_sip_quality_improves_with_order_and_with_clipping() {
         target: target_points,
     } = build_case(&quartic);
     let low = fit_sip(&ref_points, &target_points, &transform, &order(3, 0));
-    let high = fit_sip(&ref_points, &target_points, &transform, &order(4, 0));
+    let high = fit_sip(&ref_points, &target_points, &transform, &order(5, 0));
 
     assert!(
         high.rms_residual < low.rms_residual,
-        "order 4 rms {:.6e} should beat order 3 rms {:.6e}",
+        "order 5 rms {:.6e} should beat order 3 rms {:.6e}",
         high.rms_residual,
         low.rms_residual
     );
     assert!(
         high.max_residual <= low.max_residual,
-        "order 4 max {:.6e} should be no worse than order 3 max {:.6e}",
+        "order 5 max {:.6e} should be no worse than order 3 max {:.6e}",
         high.max_residual,
         low.max_residual
     );

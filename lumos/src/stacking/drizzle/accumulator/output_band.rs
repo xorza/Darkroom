@@ -4,6 +4,7 @@ use std::ops::Range;
 
 use glam::DVec2;
 
+use crate::math::fwhm::FWHM_PER_SIGMA;
 use crate::math::lanczos;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::drizzle::accumulator::PlaneSpan;
@@ -17,8 +18,6 @@ use crate::stacking::drizzle::geometry::boxer;
 const ROW_ROUNDING_SLACK: f64 = 0.5;
 /// A drop whose kernel taps sum to less than this has no normalizer worth dividing by.
 const KERNEL_WEIGHT_MIN: f32 = 1e-10;
-/// Per `STScI` the Gaussian's FWHM is the drop size, and `σ = FWHM / (2·√(2·ln 2))`.
-const GAUSSIAN_FWHM_PER_SIGMA: f64 = 2.3548;
 /// Where the Gaussian is truncated, in σ — it has fallen to ~1% of its peak by there.
 const GAUSSIAN_RADIUS_SIGMAS: f64 = 3.0;
 /// Lanczos-3: support radius 3, kernel defined on [-3, 3].
@@ -98,7 +97,8 @@ impl KernelPlan {
             },
             DrizzleKernel::Point => Self::Point,
             DrizzleKernel::Gaussian => {
-                let sigma = drop_size / GAUSSIAN_FWHM_PER_SIGMA;
+                // Per `STScI` the Gaussian's FWHM is the drop size.
+                let sigma = drop_size / FWHM_PER_SIGMA;
                 Self::Gaussian {
                     radius: (GAUSSIAN_RADIUS_SIGMAS * sigma).ceil() as isize,
                     inv_2sigma_sq: (1.0 / (2.0 * sigma * sigma)) as f32,

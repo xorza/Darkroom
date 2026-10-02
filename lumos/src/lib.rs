@@ -106,6 +106,7 @@ pub use stacking::registration::transform::{
     Transform, TransformModel, TransformType, WarpTransform,
 };
 pub use stacking::registration::triangle::TriangleConfig;
+pub use stacking::registration::triangle::voting::MatchIndices;
 
 pub use stacking::combine::cache_config::CacheConfig;
 pub use stacking::combine::config::{CombineMethod, Normalization, SmallN, StackConfig, Weighting};

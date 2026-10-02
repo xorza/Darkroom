@@ -168,9 +168,10 @@ fn estimate_with_varying_confidence() {
 
     let matches: Vec<PointMatch> = (0..ref_stars.len())
         .map(|i| PointMatch {
-            ref_idx: i,
-            target_idx: i,
-            votes: 10 - i,
+            indices: MatchIndices {
+                reference: i,
+                target: i,
+            },
             confidence: 1.0 - (i as f64 * 0.1),
         })
         .collect();
@@ -209,9 +210,10 @@ fn estimate_rejects_outlier_with_low_confidence() {
 
     let matches: Vec<PointMatch> = (0..5)
         .map(|i| PointMatch {
-            ref_idx: i,
-            target_idx: i,
-            votes: if i == 4 { 1 } else { 10 },
+            indices: MatchIndices {
+                reference: i,
+                target: i,
+            },
             confidence: if i == 4 { 0.01 } else { 0.9 },
         })
         .collect();

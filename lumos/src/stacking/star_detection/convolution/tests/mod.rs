@@ -5,7 +5,7 @@ mod matched_filter;
 use crate::testing::prelude::*;
 use std::f32::consts::FRAC_PI_2;
 
-use crate::math::fwhm::FWHM_TO_SIGMA;
+use crate::math::fwhm::sigma_to_fwhm;
 use crate::stacking::star_detection::convolution::*;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 
@@ -378,7 +378,7 @@ fn matched_filter_boosts_snr() {
         *p += ((i * 17) % 100) as f32 * 0.001 - 0.05;
     }
 
-    let fwhm = sigma * FWHM_TO_SIGMA;
+    let fwhm = sigma_to_fwhm(sigma);
     let mut result = Buffer2::new_default(width, height);
     let mut scratch = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);

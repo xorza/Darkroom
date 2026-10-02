@@ -542,11 +542,11 @@ fn snr_decreases_with_higher_noise() {
 
 #[test]
 fn fwhm_formula_for_known_gaussian() {
-    // For a Gaussian with known sigma, verify FWHM ≈ FWHM_TO_SIGMA * sigma
+    // For a Gaussian with known sigma, verify FWHM ≈ sigma_to_fwhm(sigma)
     let width = 128;
     let height = 128;
     let sigma = 3.0f32;
-    let expected_fwhm = FWHM_TO_SIGMA * sigma;
+    let expected_fwhm = sigma_to_fwhm(sigma);
 
     let pixels = SyntheticStar::new(Vec2::splat(64.0), 0.8, StarProfile::Gaussian { sigma })
         .stamp(Size2us::new(width, height), 0.1);

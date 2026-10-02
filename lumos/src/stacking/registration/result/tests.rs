@@ -3,6 +3,7 @@ use crate::stacking::registration::result::{
     RansacFailureReason, RegistrationCatalog, RegistrationError, RegistrationResult, StarMatch,
 };
 use crate::stacking::registration::transform::Transform;
+use crate::stacking::registration::triangle::voting::MatchIndices;
 use crate::testing::prelude::*;
 
 fn identity_matches(residuals: &[f64]) -> Vec<StarMatch> {
@@ -10,8 +11,10 @@ fn identity_matches(residuals: &[f64]) -> Vec<StarMatch> {
         .iter()
         .enumerate()
         .map(|(index, &residual)| StarMatch {
-            reference: index,
-            target: index,
+            indices: MatchIndices {
+                reference: index,
+                target: index,
+            },
             residual,
         })
         .collect()
@@ -22,18 +25,24 @@ fn result_keeps_matches_and_derives_diagnostics() {
     let transform = Transform::translation(DVec2::new(1.0, 2.0));
     let matches = vec![
         StarMatch {
-            reference: 0,
-            target: 2,
+            indices: MatchIndices {
+                reference: 0,
+                target: 2,
+            },
             residual: 0.1,
         },
         StarMatch {
-            reference: 1,
-            target: 4,
+            indices: MatchIndices {
+                reference: 1,
+                target: 4,
+            },
             residual: 0.2,
         },
         StarMatch {
-            reference: 3,
-            target: 5,
+            indices: MatchIndices {
+                reference: 3,
+                target: 5,
+            },
             residual: 0.15,
         },
     ];
@@ -49,7 +58,11 @@ fn result_keeps_matches_and_derives_diagnostics() {
     let expected_rms = (0.0725_f64 / 3.0).sqrt();
     assert_eq!(result.rms_error().to_bits(), expected_rms.to_bits());
     assert_eq!(result.max_error().to_bits(), 0.2_f64.to_bits());
-    assert_eq!(result.quality_score(), 0.0);
+    // exp(−rms / 2) · 3 / 20, the same operations in the same order.
+    assert_eq!(
+        result.quality_score(),
+        (-expected_rms / 2.0).exp() * (3.0 / 20.0)
+    );
 }
 
 #[test]

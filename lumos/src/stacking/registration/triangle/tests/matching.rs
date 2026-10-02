@@ -10,9 +10,9 @@ fn match_triangles_too_few_points() {
     ];
 
     // Both sides need >= 3 points
-    assert!(match_triangles(&two, &three, &TriangleConfig::default()).is_empty());
-    assert!(match_triangles(&three, &two, &TriangleConfig::default()).is_empty());
-    assert!(match_triangles(&two, &two, &TriangleConfig::default()).is_empty());
+    assert!(match_points(&two, &three, &TriangleConfig::default()).is_empty());
+    assert!(match_points(&three, &two, &TriangleConfig::default()).is_empty());
+    assert!(match_points(&two, &two, &TriangleConfig::default()).is_empty());
 }
 
 #[test]
@@ -23,8 +23,8 @@ fn match_triangles_empty_inputs() {
         DVec2::new(1.0, 0.0),
         DVec2::new(0.0, 1.0),
     ];
-    assert!(match_triangles(&empty, &three, &TriangleConfig::default()).is_empty());
-    assert!(match_triangles(&three, &empty, &TriangleConfig::default()).is_empty());
+    assert!(match_points(&empty, &three, &TriangleConfig::default()).is_empty());
+    assert!(match_points(&three, &empty, &TriangleConfig::default()).is_empty());
 }
 
 #[test]
@@ -38,11 +38,11 @@ fn match_identical_star_lists() {
         DVec2::new(5.0, 5.0),
     ];
 
-    let matches = match_triangles(&positions, &positions, &TriangleConfig::default());
+    let matches = match_points(&positions, &positions, &TriangleConfig::default());
 
     assert_eq!(matches.len(), 5);
     for m in &matches {
-        assert_eq!(m.ref_idx, m.target_idx);
+        assert_eq!(m.indices.reference, m.indices.target);
     }
 }
 
@@ -60,7 +60,7 @@ fn match_translated_stars() {
     let offset = DVec2::new(100.0, 50.0);
     let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p + offset).collect();
 
-    let matches = match_triangles(
+    let matches = match_points(
         &ref_positions,
         &target_positions,
         &TriangleConfig::default(),
@@ -68,7 +68,7 @@ fn match_translated_stars() {
 
     assert_eq!(matches.len(), 5);
     for m in &matches {
-        assert_eq!(m.ref_idx, m.target_idx);
+        assert_eq!(m.indices.reference, m.indices.target);
     }
 }
 
@@ -85,7 +85,7 @@ fn match_scaled_stars() {
 
     let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p * 2.0).collect();
 
-    let matches = match_triangles(
+    let matches = match_points(
         &ref_positions,
         &target_positions,
         &TriangleConfig::default(),
@@ -93,7 +93,7 @@ fn match_scaled_stars() {
 
     assert_eq!(matches.len(), 5);
     for m in &matches {
-        assert_eq!(m.ref_idx, m.target_idx);
+        assert_eq!(m.indices.reference, m.indices.target);
     }
 }
 
@@ -119,7 +119,7 @@ fn match_rotated_stars() {
         ..Default::default()
     };
 
-    let matches = match_triangles(&ref_positions, &target_positions, &config);
+    let matches = match_points(&ref_positions, &target_positions, &config);
     assert_eq!(matches.len(), 5);
 }
 
@@ -141,7 +141,7 @@ fn match_with_missing_stars() {
         DVec2::new(10.0, 10.0),
     ];
 
-    let matches = match_triangles(
+    let matches = match_points(
         &ref_positions,
         &target_positions,
         &TriangleConfig::default(),
@@ -149,7 +149,7 @@ fn match_with_missing_stars() {
 
     assert_eq!(matches.len(), 4);
     for m in &matches {
-        assert_eq!(m.ref_idx, m.target_idx);
+        assert_eq!(m.indices.reference, m.indices.target);
     }
 }
 
@@ -172,7 +172,7 @@ fn match_with_extra_stars() {
         DVec2::new(15.0, 15.0),
     ];
 
-    let matches = match_triangles(
+    let matches = match_points(
         &ref_positions,
         &target_positions,
         &TriangleConfig::default(),
@@ -180,7 +180,7 @@ fn match_with_extra_stars() {
 
     assert_eq!(matches.len(), 4);
     for m in &matches {
-        assert_eq!(m.ref_idx, m.target_idx);
+        assert_eq!(m.indices.reference, m.indices.target);
     }
 }
 
@@ -206,14 +206,14 @@ fn match_mirrored_image_orientation_effect() {
         min_votes: 1,
         ..Default::default()
     };
-    let matches_with = match_triangles(&ref_positions, &target_positions, &config_with);
+    let matches_with = match_points(&ref_positions, &target_positions, &config_with);
 
     let config_without = TriangleConfig {
         check_orientation: false,
         min_votes: 1,
         ..Default::default()
     };
-    let matches_without = match_triangles(&ref_positions, &target_positions, &config_without);
+    let matches_without = match_points(&ref_positions, &target_positions, &config_without);
 
     assert!(
         matches_without.len() >= matches_with.len(),
@@ -246,7 +246,7 @@ fn match_with_outliers() {
         ..Default::default()
     };
 
-    let matches = match_triangles(&ref_positions, &target_positions, &config);
+    let matches = match_points(&ref_positions, &target_positions, &config);
 
     // Should match at least 4 of the 6 real stars
     assert!(
@@ -257,8 +257,8 @@ fn match_with_outliers() {
 
     // All matches among the 6 real stars should be correct (same index)
     for m in &matches {
-        if m.ref_idx < 6 && m.target_idx < 6 {
-            assert_eq!(m.ref_idx, m.target_idx);
+        if m.indices.reference < 6 && m.indices.target < 6 {
+            assert_eq!(m.indices.reference, m.indices.target);
         }
     }
 }
@@ -282,7 +282,7 @@ fn match_permuted_indices() {
         ..Default::default()
     };
 
-    let matches = match_triangles(&points, &target_points, &config);
+    let matches = match_points(&points, &target_points, &config);
 
     assert!(
         matches.len() >= 4,
@@ -291,11 +291,11 @@ fn match_permuted_indices() {
     );
 
     for m in &matches {
-        let expected_target = 4 - m.ref_idx;
+        let expected_target = 4 - m.indices.reference;
         assert_eq!(
-            m.target_idx, expected_target,
+            m.indices.target, expected_target,
             "ref {} should match target {} (same geometric point), got target {}",
-            m.ref_idx, expected_target, m.target_idx
+            m.indices.reference, expected_target, m.indices.target
         );
     }
 }
@@ -337,8 +337,8 @@ fn match_ratio_tolerance_sensitivity() {
         ..Default::default()
     };
 
-    let matches_tight = match_triangles(&ref_positions, &target_positions, &tight);
-    let matches_loose = match_triangles(&ref_positions, &target_positions, &loose);
+    let matches_tight = match_points(&ref_positions, &target_positions, &tight);
+    let matches_loose = match_points(&ref_positions, &target_positions, &loose);
 
     // Loose tolerance should find at least as many matches
     assert!(
@@ -371,8 +371,8 @@ fn match_min_votes_sensitivity() {
         ..Default::default()
     };
 
-    let matches_low = match_triangles(&ref_positions, &target_positions, &low_min);
-    let matches_high = match_triangles(&ref_positions, &target_positions, &high_min);
+    let matches_low = match_points(&ref_positions, &target_positions, &low_min);
+    let matches_high = match_points(&ref_positions, &target_positions, &high_min);
 
     assert!(
         matches_low.len() >= matches_high.len(),
@@ -406,12 +406,12 @@ fn match_sparse_field_10_stars() {
         ..Default::default()
     };
 
-    let matches = match_triangles(&ref_positions, &target_positions, &config);
+    let matches = match_points(&ref_positions, &target_positions, &config);
 
     // Translation-invariant matching should find all 10 stars
     assert_eq!(matches.len(), 10);
     for m in &matches {
-        assert_eq!(m.ref_idx, m.target_idx);
+        assert_eq!(m.indices.reference, m.indices.target);
     }
 }
 
@@ -439,7 +439,7 @@ fn match_with_subpixel_noise() {
         .collect();
 
     let config = TriangleConfig::default();
-    let matches = match_triangles(&ref_positions, &target_positions, &config);
+    let matches = match_points(&ref_positions, &target_positions, &config);
 
     // With 80-pixel spacing and 0.3-pixel noise, ratios change by < 0.01 tolerance
     // Should match most of the 25 stars
@@ -452,9 +452,9 @@ fn match_with_subpixel_noise() {
     // All matches should be correct (noise is small relative to spacing)
     for m in &matches {
         assert_eq!(
-            m.ref_idx, m.target_idx,
+            m.indices.reference, m.indices.target,
             "Incorrect noisy match: ref {} != target {}",
-            m.ref_idx, m.target_idx
+            m.indices.reference, m.indices.target
         );
     }
 }

@@ -299,7 +299,7 @@ fn prefit_moments_iterations_sufficient() {
         let pixels = SyntheticStar::new(true_pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma })
             .stamp(Size2us::new(width, height), 0.1);
         let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-        let expected_fwhm = sigma / FWHM_TO_SIGMA;
+        let expected_fwhm = fwhm_to_sigma(sigma);
         let stamp_radius = 7;
 
         // Start from peak position (slightly off from true position)
@@ -409,7 +409,7 @@ fn prefit_moments_iterations_sufficient_moffat() {
     let pixels = SyntheticStar::new(true_pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma })
         .stamp(Size2us::new(width, height), 0.1);
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-    let expected_fwhm = sigma / FWHM_TO_SIGMA;
+    let expected_fwhm = fwhm_to_sigma(sigma);
     let stamp_radius = 7;
 
     let peak_pos = DVec2::new(true_pos.x.round(), true_pos.y.round());

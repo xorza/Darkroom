@@ -50,8 +50,8 @@ fn measure_single_star(
 #[test]
 fn gaussian_fit_fwhm_from_fit_params() {
     let sigma = 2.0f32;
-    // True FWHM = FWHM_TO_SIGMA * sigma = 2.35482 * 2.0 = 4.70964
-    let true_fwhm = FWHM_TO_SIGMA * sigma;
+    // True FWHM = sigma_to_fwhm(sigma) = 2.35482 * 2.0 = 4.70964
+    let true_fwhm = sigma_to_fwhm(sigma);
 
     let pos = DVec2::new(64.0, 64.0);
     let pixels = SyntheticStar::new(
@@ -123,7 +123,7 @@ fn gaussian_fit_eccentricity_from_fit_params() {
 #[test]
 fn gaussian_fit_fwhm_more_accurate_than_moments() {
     let sigma = 2.5f32;
-    let true_fwhm = FWHM_TO_SIGMA * sigma;
+    let true_fwhm = sigma_to_fwhm(sigma);
 
     let pos = DVec2::new(64.0, 64.0);
     let pixels = SyntheticStar::new(
@@ -224,7 +224,7 @@ fn moffat_fit_eccentricity_stays_moment_based() {
 #[test]
 fn moments_only_fwhm_unchanged() {
     let sigma = 2.5f32;
-    let true_fwhm = FWHM_TO_SIGMA * sigma;
+    let true_fwhm = sigma_to_fwhm(sigma);
 
     let pos = DVec2::new(64.0, 64.0);
     let pixels = SyntheticStar::new(

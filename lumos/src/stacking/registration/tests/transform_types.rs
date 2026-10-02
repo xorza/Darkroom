@@ -86,8 +86,8 @@ fn registration_translation_only() {
         .matched_stars()
         .iter()
         .map(|star_match| {
-            let expected = (transform.apply(ref_stars[star_match.reference].pos)
-                - target_stars[star_match.target].pos)
+            let expected = (transform.apply(ref_stars[star_match.indices.reference].pos)
+                - target_stars[star_match.indices.target].pos)
                 .length();
             assert_eq!(star_match.residual.to_bits(), expected.to_bits());
             expected * expected

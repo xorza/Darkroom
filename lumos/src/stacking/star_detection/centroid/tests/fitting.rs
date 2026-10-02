@@ -206,7 +206,7 @@ fn fwhm_estimation_accuracy() {
 
     // Test various sigma values
     for sigma in [1.5f32, 2.0, 2.5, 3.0, 3.5, 4.0] {
-        let expected_fwhm = FWHM_TO_SIGMA * sigma;
+        let expected_fwhm = sigma_to_fwhm(sigma);
         let pixels = SyntheticStar::new(Vec2::splat(64.0), 1.0, StarProfile::Gaussian { sigma })
             .stamp(Size2us::new(width, height), 0.1);
 

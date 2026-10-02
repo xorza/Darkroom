@@ -58,14 +58,12 @@ pub(crate) fn abs_deviation_inplace<F: Float>(values: &mut [F], median: F) {
 /// MAD (Median Absolute Deviation) to standard deviation conversion factor.
 ///
 /// For a normal distribution σ ≈ 1.4826 × MAD; the factor is `1 / Φ⁻¹(3/4)`, where Φ⁻¹ is the
-/// inverse normal CDF. Carried to the eight significant digits it has always had rather than the
-/// full double-precision 1.482602218505602 — the two agree to within an `f32` ulp, so extending it
-/// would move nothing single-precision, only the SIP clip threshold.
+/// inverse normal CDF, carried to full double precision. A test holds it to the normal CDF.
 ///
 /// `f64` is the canonical form, with [`MAD_TO_SIGMA_F32`] cast from it so the two precisions cannot
 /// round apart. Reaching the `f64` users through `f64::from` on the `f32` constant instead would
 /// spend an `f32` round-trip inside an `f64` computation for nothing.
-pub(crate) const MAD_TO_SIGMA: f64 = 1.482_602_2;
+pub(crate) const MAD_TO_SIGMA: f64 = 1.482_602_218_505_602;
 
 /// [`MAD_TO_SIGMA`] in the precision the `f32` paths multiply in.
 ///
