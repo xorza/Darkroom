@@ -218,27 +218,40 @@ fn markesteijn_matches_librtprocess_reference_scenes() {
     }
 }
 
+/// A constant colour per channel — uniform grey and two distinct (R, G, B) — comes back as itself
+/// at every pixel, border included, with and without masked margins. Every stage averages or
+/// blends equal values, so each output is the input to a few f32 roundings: under 2e-7, where one
+/// rounding of a value below 1 is up to 6e-8.
 #[test]
-fn markesteijn_uniform_input() {
-    let raw_w = 30;
-    let raw_h = 30;
-    let w = 18;
-    let h = 18;
-    let data = vec![to_u16(0.5); raw_w * raw_h];
-    let xtrans = make_xtrans(
-        &data,
-        SensorLayout {
-            raw: Size2us::new(raw_w, raw_h),
-            active: Size2us::new(w, h),
-            margin: Vec2us::new(6, 6),
-        },
-    );
-
-    let planes = demosaic(&xtrans, &CancelToken::never()).unwrap();
-
-    // Uniform input should produce approximately uniform output
-    for (i, &v) in planes.iter().flatten().enumerate() {
-        assert!((v - 0.5).abs() < 0.05, "Pixel {i} = {v} (expected ~0.5)");
+fn constant_colour_reconstructs_to_rounding() {
+    let active = Size2us::new(36, 36);
+    let pattern = test_pattern();
+    for colour in [[0.5f32; 3], [0.8, 0.5, 0.2], [0.1, 0.9, 0.4]] {
+        // Margins of 6 keep the 6×6 layout's phase at the raw origin.
+        for margin in [0, 6] {
+            let raw = Size2us::new(active.width + 2 * margin, active.height + 2 * margin);
+            let data: Vec<f32> = (0..raw.pixel_count())
+                .map(|index| colour[pattern.color_at(raw.point_of(index)) as usize])
+                .collect();
+            let layout = SensorLayout {
+                raw,
+                active,
+                margin: Vec2us::new(margin, margin),
+            };
+            let planes = demosaic(
+                &XTransImage::with_margins_f32(&data, layout, pattern),
+                &CancelToken::never(),
+            )
+            .unwrap();
+            for (channel, plane) in planes.iter().enumerate() {
+                for (index, &value) in plane.iter().enumerate() {
+                    assert!(
+                        (value - colour[channel]).abs() < 2e-7,
+                        "{colour:?} margin {margin} channel {channel} at {index}: {value}"
+                    );
+                }
+            }
+        }
     }
 }
 
