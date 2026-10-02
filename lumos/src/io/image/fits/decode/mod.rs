@@ -23,7 +23,7 @@ use std::path::Path;
 use fits_well::FitsReader;
 use fits_well::io::SliceReader;
 
-use crate::io::image::cfa::{CfaFrameInfo, CfaImage, QUANTIZATION_SIGMA_PER_STEP};
+use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::cfa::{validate_cfa_container_format, validate_cfa_image_header};
 use crate::io::image::fits::decode::plan::FitsHduDescription;
@@ -47,6 +47,8 @@ mod selection;
 #[derive(Debug)]
 struct DecodedFitsImage {
     metadata: ImageMetadata,
+    /// The pattern the header declares, which makes the image a mosaic to load as a `CfaImage`.
+    cfa_type: Option<CfaType>,
     pixels: LinearPixels,
     /// Where the HDU declared no measurement, or `None` when it declared none anywhere. Absent
     /// whenever [`FitsNullPolicy::Reject`](crate::FitsNullPolicy) is in force, which fails the load
@@ -56,7 +58,7 @@ struct DecodedFitsImage {
 
 impl DecodedFitsImage {
     fn into_linear(self, path: &Path) -> Result<LinearImage, ImageError> {
-        if self.metadata.cfa_type.is_some() {
+        if self.cfa_type.is_some() {
             return Err(scientific_rejection(
                 path,
                 "mosaic FITS must be loaded as CfaImage and calibrated before demosaicing",
@@ -81,12 +83,12 @@ impl DecodedFitsImage {
                 "scientific CFA input must have exactly one image plane",
             ));
         }
-        if self.metadata.cfa_type.is_none() {
+        let Some(cfa_type) = self.cfa_type else {
             return Err(fits_unsupported(
                 path,
                 "scientific CFA FITS input is missing validated CFA pattern metadata",
             ));
-        }
+        };
 
         // A declared QNTZSIG and a BSCALE-derived ADC step are both in the file's sample units, so
         // both follow the samples through the division the decoder already applied.
@@ -100,7 +102,7 @@ impl DecodedFitsImage {
             .map(|sigma| sigma / physical_scale)
             .or_else(|| {
                 let transfer = fits_transfer?;
-                self.metadata.bitpix.is_integer().then(|| {
+                self.metadata.sample_type?.is_integer().then(|| {
                     transfer.bscale.abs() as f32 / physical_scale * QUANTIZATION_SIGMA_PER_STEP
                 })
             });
@@ -108,12 +110,14 @@ impl DecodedFitsImage {
             mut metadata,
             pixels,
             nulls,
+            ..
         } = self;
         if let Some(provenance) = &mut metadata.provenance {
             provenance.color = ColorProvenance::SensorCfa;
         }
         Ok(CfaImage {
             data: pixels.into_l(),
+            cfa_type,
             metadata,
             quantization_sigma,
             nulls,
@@ -134,7 +138,7 @@ pub(crate) fn load_preview_fits(
     context: &LoadContext,
 ) -> Result<LinearImage, ImageError> {
     let decoded = read_selected_image(path, context)?;
-    if decoded.metadata.cfa_type.is_some() {
+    if decoded.cfa_type.is_some() {
         Ok(decoded
             .into_cfa(path, None)?
             .demosaic(&context.cancel)
@@ -293,7 +297,7 @@ pub(crate) fn fits_cfa_frame_info(
         })?;
     Ok(CfaFrameInfo {
         dimensions,
-        demosaic: cfa_type.demosaic_kind(),
+        cfa_type,
         may_carry_nulls: plan.may_carry_nulls(),
     })
 }

@@ -11,6 +11,7 @@ use std::path::Path;
 
 use imaginarium::FileFormat;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::io::image::cfa::same_color::SameColorMedian;
 use crate::io::image::error::ImageError;
@@ -24,8 +25,10 @@ use crate::io::image::null_mask::NullMask;
 use crate::io::image::standard::{FITS_EXTENSIONS, file_extension, scientific_rejection};
 use crate::io::raw;
 use crate::io::raw::demosaic::bayer::CfaPattern;
+use crate::io::raw::demosaic::bayer::rcd;
 use crate::io::raw::demosaic::sensor_layout::SensorLayout;
-use crate::io::raw::demosaic::{DemosaicError, DemosaicKind};
+use crate::io::raw::demosaic::xtrans::markesteijn;
+use crate::io::raw::demosaic::{DemosaicError, DemosaicMemory};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::frame_store::{FramePeek, StackableImage};
@@ -35,8 +38,9 @@ use imaginarium::Buffer2;
 /// Standard deviation of uniform error spanning one ADC step: `1 / √12`.
 pub(crate) const QUANTIZATION_SIGMA_PER_STEP: f32 = 0.288_675_13;
 
-/// CFA pattern anchored at the origin of the image data it accompanies.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The colour filter over a sensor's photosites, anchored at the origin of the image data it
+/// accompanies. The one sensor-pattern type: a frame with no filter is [`CfaType::Mono`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CfaType {
     /// No CFA pattern (monochrome sensor)
     Mono,
@@ -66,22 +70,55 @@ impl CfaType {
         }
     }
 
-    /// The pattern to treat a frame as carrying: its own, or Mono when it declares none.
+    /// The mosaic a camera-RAW sensor delivers, from LibRaw's `filters` and `colors` and its
+    /// visible-origin X-Trans pattern, or `None` when LibRaw has to produce the image itself.
     ///
-    /// A frame without CFA metadata is a single-colour mosaic, and [`CfaType::Mono`] describes that
-    /// exactly — `color_at` answers 0 everywhere, its period is 1, and every pixel is its own
-    /// colour's neighbour. Resolving the `Option` here once is what keeps "absent means mono" out of
-    /// the per-pixel colour lookup, the phase-period match, and the same-colour neighbour
-    /// strategy, none of which has to spell it out for itself.
-    pub(crate) fn or_mono(cfa_type: Option<&Self>) -> &Self {
-        cfa_type.unwrap_or(&CfaType::Mono)
+    /// `None` covers `filters == 0` with three colours — a linear DNG, sRAW or Foveon, whose
+    /// samples LibRaw unpacks already per pixel and so never as a mosaic — and a filter word that
+    /// is neither X-Trans nor a 2×2 Bayer phase.
+    pub(crate) fn from_libraw(filters: u32, colors: i32, xtrans: [[u8; 6]; 6]) -> Option<Self> {
+        if colors == 1 {
+            return Some(Self::Mono);
+        }
+        match filters {
+            0 => None,
+            // LibRaw's marker for the 6×6 X-Trans layout, whose pattern it keeps apart.
+            9 => Some(Self::XTrans(xtrans)),
+            _ => CfaPattern::from_filters(filters).map(Self::Bayer),
+        }
     }
 
-    pub(crate) fn demosaic_kind(&self) -> DemosaicKind {
+    /// The memory a demosaic of a `dimensions` frame of this pattern holds at once.
+    pub(crate) fn demosaic_memory(self, dimensions: ImageDimensions) -> DemosaicMemory {
         match self {
-            Self::Mono => DemosaicKind::Mono,
-            Self::Bayer(_) => DemosaicKind::BayerRcd,
-            Self::XTrans(_) => DemosaicKind::XTransMarkesteijn,
+            Self::Mono => {
+                let bytes = dimensions.pixel_count().saturating_mul(size_of::<f32>());
+                DemosaicMemory {
+                    output_bytes: bytes,
+                    peak_bytes: bytes,
+                }
+            }
+            // Raw and active extents coincide here: the caller has already cropped to the
+            // visible area, so the margins the RCD arena would need are gone.
+            Self::Bayer(_) => rcd::demosaic_memory(dimensions.size(), dimensions.size()),
+            Self::XTrans(_) => markesteijn::demosaic_memory(dimensions.size()),
+        }
+    }
+
+    /// The demosaic lumos runs for this pattern.
+    pub(crate) const fn demosaic_provenance(self) -> DemosaicProvenance {
+        match self {
+            Self::Mono => DemosaicProvenance::None,
+            Self::Bayer(_) => DemosaicProvenance::LumosRcd,
+            Self::XTrans(_) => DemosaicProvenance::LumosMarkesteijn,
+        }
+    }
+
+    /// What the colour of a demosaiced frame of this pattern means.
+    pub(crate) const fn demosaiced_color(self) -> ColorProvenance {
+        match self {
+            Self::Mono => ColorProvenance::Monochrome,
+            Self::Bayer(_) | Self::XTrans(_) => ColorProvenance::SensorRgb,
         }
     }
 }
@@ -89,7 +126,7 @@ impl CfaType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct CfaFrameInfo {
     pub(crate) dimensions: ImageDimensions,
-    pub(crate) demosaic: DemosaicKind,
+    pub(crate) cfa_type: CfaType,
     /// Whether decoding could produce pixels with no measurement, which a frame pays two quality
     /// planes for beside its own. Answered from the header alone, so it is conservative where the
     /// header cannot settle it — see `FitsDecodePlan::may_carry_nulls`.
@@ -119,6 +156,7 @@ pub struct CfaImage {
     /// Single-channel linear samples; calibration may put values outside `[0, 1]`.
     /// Layout: row-major, width * height pixels.
     pub data: Buffer2<f32>,
+    pub cfa_type: CfaType,
     pub metadata: ImageMetadata,
     /// Source-quantization uncertainty in the current CFA sample units.
     pub(crate) quantization_sigma: Option<f32>,
@@ -145,6 +183,10 @@ impl StackableImage for CfaImage {
         &self.metadata
     }
 
+    fn cfa_type(&self) -> Option<CfaType> {
+        Some(self.cfa_type)
+    }
+
     fn quantization_sigma(&self) -> Option<f32> {
         self.quantization_sigma
     }
@@ -168,13 +210,10 @@ impl StackableImage for CfaImage {
 
 impl CfaImage {
     /// Create an in-memory sensor image whose CFA classification is supplied by the caller.
-    pub fn from_plane(data: Buffer2<f32>, metadata: ImageMetadata) -> Self {
-        assert!(
-            metadata.cfa_type.is_some(),
-            "CfaImage metadata must identify a monochrome or CFA sensor"
-        );
+    pub fn from_plane(data: Buffer2<f32>, cfa_type: CfaType, metadata: ImageMetadata) -> Self {
         Self {
             data,
+            cfa_type,
             metadata,
             quantization_sigma: None,
             nulls: None,
@@ -230,8 +269,7 @@ impl CfaImage {
         let Some(nulls) = self.nulls.as_ref() else {
             return;
         };
-        let cfa_type = CfaType::or_mono(self.metadata.cfa_type.as_ref());
-        let neighbors = SameColorMedian::new(cfa_type);
+        let neighbors = SameColorMedian::new(&self.cfa_type);
         let size = Size2us::new(self.data.width(), self.data.height());
         for index in 0..size.pixel_count() {
             if nulls.is_null(index) {
@@ -248,28 +286,17 @@ impl CfaImage {
         let width = self.data.width();
         let height = self.data.height();
         let mut metadata = self.metadata;
-        let cfa_type = metadata
-            .cfa_type
-            .clone()
-            .expect("CfaImage missing cfa_type: set metadata.cfa_type before calling demosaic()");
+        let cfa_type = self.cfa_type;
         if let Some(provenance) = &mut metadata.provenance {
-            let (color, demosaic) = match &cfa_type {
-                CfaType::Mono => (ColorProvenance::Monochrome, DemosaicProvenance::None),
-                CfaType::Bayer(_) => (ColorProvenance::SensorRgb, DemosaicProvenance::LumosRcd),
-                CfaType::XTrans(_) => (
-                    ColorProvenance::SensorRgb,
-                    DemosaicProvenance::LumosMarkesteijn,
-                ),
-            };
-            provenance.color = color;
-            provenance.demosaic = demosaic;
+            provenance.color = cfa_type.demosaiced_color();
+            provenance.demosaic = cfa_type.demosaic_provenance();
         }
         let pixels = self.data.into_vec();
         // The mask travels at its own extent, which `repair_nulls` above is what makes honest: these
         // pixels were reconstructed rather than measured, and the combine still has to know that.
         let nulls = self.nulls;
 
-        Ok(match &cfa_type {
+        Ok(match cfa_type {
             CfaType::Mono => {
                 // No demosaicing needed - convert 1-channel to 1-channel LinearImage
                 let dims = ImageDimensions::new((width, height), 1);
@@ -279,10 +306,10 @@ impl CfaImage {
                 image
             }
             CfaType::Bayer(cfa_pattern) => {
-                use crate::io::raw::demosaic::bayer::{BayerImage, rcd};
+                use crate::io::raw::demosaic::bayer::BayerImage;
 
                 let layout = SensorLayout::cropped(Size2us::new(width, height));
-                let bayer = BayerImage::with_margins(&pixels, layout, *cfa_pattern);
+                let bayer = BayerImage::with_margins(&pixels, layout, cfa_pattern);
                 let planes = rcd::demosaic(&bayer, cancel)?;
                 let dims = ImageDimensions::new((width, height), 3);
                 let mut image = LinearImage::from_planar_channels(dims, planes);
@@ -294,7 +321,7 @@ impl CfaImage {
                 use crate::io::raw::demosaic::xtrans::process_xtrans_f32;
 
                 let layout = SensorLayout::cropped(Size2us::new(width, height));
-                let planes = process_xtrans_f32(&pixels, layout, *pattern, cancel)?;
+                let planes = process_xtrans_f32(&pixels, layout, pattern, cancel)?;
 
                 let dims = ImageDimensions::new((width, height), 3);
                 let mut image = LinearImage::from_planar_channels(dims, planes);

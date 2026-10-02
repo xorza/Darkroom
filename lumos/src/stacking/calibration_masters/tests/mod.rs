@@ -97,10 +97,9 @@ fn a_flat_with_no_positive_mean_is_refused() {
         (CfaType::Bayer(CfaPattern::Rggb), 0.25, Some(0.5), Some(0)),
     ] {
         let mut images = CalibrationSet::default();
-        *images.get_mut(MasterRole::Flat) =
-            Some(constant_cfa(Size2us::new(4, 4), flat, cfa_type.clone()));
+        *images.get_mut(MasterRole::Flat) = Some(constant_cfa(Size2us::new(4, 4), flat, cfa_type));
         *images.get_mut(MasterRole::FlatDark) =
-            subtractor.map(|level| constant_cfa(Size2us::new(4, 4), level, cfa_type.clone()));
+            subtractor.map(|level| constant_cfa(Size2us::new(4, 4), level, cfa_type));
         assert!(
             matches!(
                 CalibrationMasters::from_images(images, 5.0, CancelToken::never()),
@@ -111,29 +110,28 @@ fn a_flat_with_no_positive_mean_is_refused() {
     }
 }
 
-fn masters_with_component(role: MasterRole, cfa_type: Option<CfaType>) -> CalibrationMasters {
+fn masters_with_component(role: MasterRole, cfa_type: CfaType) -> CalibrationMasters {
     masters_with_sized_component(role, cfa_type, Size2us::new(2, 2))
 }
 
 fn masters_with_sized_component(
     role: MasterRole,
-    cfa_type: Option<CfaType>,
+    cfa_type: CfaType,
     size: Size2us,
 ) -> CalibrationMasters {
-    let mut master = constant_cfa(size, 1.0, CfaType::Mono);
-    master.metadata.cfa_type = cfa_type;
+    let master = constant_cfa(size, 1.0, cfa_type);
     let mut images = CalibrationSet::default();
     *images.get_mut(role) = Some(master);
     CalibrationMasters::from_images(images, DEFAULT_SIGMA_THRESHOLD, CancelToken::never()).unwrap()
 }
 
 #[test]
-fn calibrate_rejects_missing_and_mismatched_cfa_before_mutation() {
+fn calibrate_rejects_mismatched_cfa_before_mutation() {
     #[derive(Debug)]
     struct Case {
         role: MasterRole,
-        light: Option<CfaType>,
-        master: Option<CfaType>,
+        light: CfaType,
+        master: CfaType,
         expected: CalibrationError,
     }
 
@@ -143,23 +141,9 @@ fn calibrate_rejects_missing_and_mismatched_cfa_before_mutation() {
     let xtrans_b = CfaType::XTrans(xtrans_b_pattern);
     let cases = [
         Case {
-            role: MasterRole::Flat,
-            light: None,
-            master: Some(CfaType::Mono),
-            expected: CalibrationError::MissingLightCfaPattern,
-        },
-        Case {
-            role: MasterRole::Flat,
-            light: Some(CfaType::Mono),
-            master: None,
-            expected: CalibrationError::MissingMasterCfaPattern {
-                component: MasterRole::Flat,
-            },
-        },
-        Case {
             role: MasterRole::Dark,
-            light: Some(CfaType::Mono),
-            master: Some(CfaType::Bayer(CfaPattern::Rggb)),
+            light: CfaType::Mono,
+            master: CfaType::Bayer(CfaPattern::Rggb),
             expected: CalibrationError::CfaPatternMismatch {
                 component: MasterRole::Dark,
                 light: CfaType::Mono,
@@ -168,8 +152,8 @@ fn calibrate_rejects_missing_and_mismatched_cfa_before_mutation() {
         },
         Case {
             role: MasterRole::Flat,
-            light: Some(CfaType::Bayer(CfaPattern::Rggb)),
-            master: Some(CfaType::Bayer(CfaPattern::Bggr)),
+            light: CfaType::Bayer(CfaPattern::Rggb),
+            master: CfaType::Bayer(CfaPattern::Bggr),
             expected: CalibrationError::CfaPatternMismatch {
                 component: MasterRole::Flat,
                 light: CfaType::Bayer(CfaPattern::Rggb),
@@ -178,18 +162,18 @@ fn calibrate_rejects_missing_and_mismatched_cfa_before_mutation() {
         },
         Case {
             role: MasterRole::Bias,
-            light: Some(CfaType::Bayer(CfaPattern::Rggb)),
-            master: Some(xtrans_a.clone()),
+            light: CfaType::Bayer(CfaPattern::Rggb),
+            master: xtrans_a,
             expected: CalibrationError::CfaPatternMismatch {
                 component: MasterRole::Bias,
                 light: CfaType::Bayer(CfaPattern::Rggb),
-                master: xtrans_a.clone(),
+                master: xtrans_a,
             },
         },
         Case {
             role: MasterRole::FlatDark,
-            light: Some(xtrans_a.clone()),
-            master: Some(xtrans_b.clone()),
+            light: xtrans_a,
+            master: xtrans_b,
             expected: CalibrationError::CfaPatternMismatch {
                 component: MasterRole::FlatDark,
                 light: xtrans_a,
@@ -200,13 +184,11 @@ fn calibrate_rejects_missing_and_mismatched_cfa_before_mutation() {
 
     for case in cases {
         let masters = masters_with_component(case.role, case.master);
-        let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
-        light.metadata.cfa_type = case.light.clone();
+        let mut light = constant_cfa(Size2us::new(2, 2), 0.5, case.light);
         let original_data = light.data.to_vec();
 
         assert_eq!(masters.calibrate(&mut light), Err(case.expected));
         assert_eq!(light.data.pixels(), original_data);
-        assert_eq!(light.metadata.cfa_type, case.light);
         assert!(!light.metadata.calibrated);
     }
 
@@ -214,8 +196,7 @@ fn calibrate_rejects_missing_and_mismatched_cfa_before_mutation() {
     // reach `CfaImage::subtract`'s assert, which is not a report a caller can act on. Every role
     // is covered because each is applied by a different operation.
     for component in MasterRole::ALL {
-        let masters =
-            masters_with_sized_component(component, Some(CfaType::Mono), Size2us::new(4, 4));
+        let masters = masters_with_sized_component(component, CfaType::Mono, Size2us::new(4, 4));
         let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
         let original_data = light.data.to_vec();
 
@@ -346,8 +327,7 @@ fn calibrate_rejects_missing_and_mismatched_cfa_before_mutation() {
     // ...and a set that does match still calibrates, so the extent check is not rejecting on
     // sheer presence. The dark also carries a defect map detected at its own size, which the
     // same pass checks against the light.
-    let masters =
-        masters_with_sized_component(MasterRole::Dark, Some(CfaType::Mono), Size2us::new(4, 4));
+    let masters = masters_with_sized_component(MasterRole::Dark, CfaType::Mono, Size2us::new(4, 4));
     let mut light = constant_cfa(Size2us::new(4, 4), 0.5, CfaType::Mono);
     assert_eq!(masters.calibrate(&mut light), Ok(()));
 
@@ -780,10 +760,8 @@ fn calibrate_flat_correction() {
     // result = light / normalized
     let flat = CfaImage {
         data: Buffer2::new(2, 2, vec![0.4, 0.8, 0.8, 0.4]),
-        metadata: ImageMetadata {
-            cfa_type: Some(CfaType::Mono),
-            ..Default::default()
-        },
+        cfa_type: CfaType::Mono,
+        metadata: ImageMetadata::default(),
         quantization_sigma: None,
         nulls: None,
     };
@@ -835,10 +813,8 @@ fn calibrate_full_pipeline() {
     let dark = constant_cfa(Size2us::new(2, 1), dark_val, CfaType::Mono);
     let flat = CfaImage {
         data: Buffer2::new(2, 1, flat_pixels),
-        metadata: ImageMetadata {
-            cfa_type: Some(CfaType::Mono),
-            ..Default::default()
-        },
+        cfa_type: CfaType::Mono,
+        metadata: ImageMetadata::default(),
         quantization_sigma: None,
         nulls: None,
     };
@@ -858,10 +834,8 @@ fn calibrate_full_pipeline() {
 
     let mut light = CfaImage {
         data: Buffer2::new(2, 1, light_pixels),
-        metadata: ImageMetadata {
-            cfa_type: Some(CfaType::Mono),
-            ..Default::default()
-        },
+        cfa_type: CfaType::Mono,
+        metadata: ImageMetadata::default(),
         quantization_sigma: None,
         nulls: None,
     };
@@ -956,10 +930,8 @@ fn defect_detection_zero_median_no_false_positives() {
 
     let dark = CfaImage {
         data: Buffer2::new(10, 10, data),
-        metadata: ImageMetadata {
-            cfa_type: Some(CfaType::Mono),
-            ..Default::default()
-        },
+        cfa_type: CfaType::Mono,
+        metadata: ImageMetadata::default(),
         quantization_sigma: Some(QUANTIZATION_SIGMA_PER_STEP / 4095.0),
         nulls: None,
     };
@@ -995,10 +967,8 @@ fn calibrate_hot_pixel_correction() {
 
     let dark = CfaImage {
         data: dark_pixels,
-        metadata: ImageMetadata {
-            cfa_type: Some(pattern.clone()),
-            ..Default::default()
-        },
+        cfa_type: pattern,
+        metadata: ImageMetadata::default(),
         quantization_sigma: None,
         nulls: None,
     };
@@ -1028,10 +998,8 @@ fn calibrate_hot_pixel_correction() {
 
     let mut light = CfaImage {
         data: light_pixels,
-        metadata: ImageMetadata {
-            cfa_type: Some(pattern),
-            ..Default::default()
-        },
+        cfa_type: pattern,
+        metadata: ImageMetadata::default(),
         quantization_sigma: None,
         nulls: None,
     };
@@ -1073,10 +1041,8 @@ fn calibrate_flat_dark() {
     let dark = constant_cfa(Size2us::new(2, 1), dark_val, CfaType::Mono);
     let flat = CfaImage {
         data: Buffer2::new(2, 1, flat_pixels),
-        metadata: ImageMetadata {
-            cfa_type: Some(CfaType::Mono),
-            ..Default::default()
-        },
+        cfa_type: CfaType::Mono,
+        metadata: ImageMetadata::default(),
         quantization_sigma: None,
         nulls: None,
     };
@@ -1096,10 +1062,8 @@ fn calibrate_flat_dark() {
 
     let mut light = CfaImage {
         data: Buffer2::new(2, 1, light_pixels),
-        metadata: ImageMetadata {
-            cfa_type: Some(CfaType::Mono),
-            ..Default::default()
-        },
+        cfa_type: CfaType::Mono,
+        metadata: ImageMetadata::default(),
         quantization_sigma: None,
         nulls: None,
     };
@@ -1131,10 +1095,8 @@ fn flat_dark_takes_priority_over_bias() {
     let flat_pixels = vec![0.8_f32, 0.6, 0.6, 0.8];
     let flat = CfaImage {
         data: Buffer2::new(2, 2, flat_pixels),
-        metadata: ImageMetadata {
-            cfa_type: Some(CfaType::Mono),
-            ..Default::default()
-        },
+        cfa_type: CfaType::Mono,
+        metadata: ImageMetadata::default(),
         quantization_sigma: None,
         nulls: None,
     };
@@ -1186,8 +1148,8 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
                 0.5, 0.7, 0.9, 0.7, 0.7, 0.4, 0.7, 0.4, 0.9, 0.7, 0.5, 0.7, 0.7, 0.4, 0.7, 0.4,
             ],
         ),
+        cfa_type,
         metadata: ImageMetadata {
-            cfa_type: Some(cfa_type.clone()),
             camera_white_balance: Some([2.0, 1.0, 1.5, 1.0]),
             ..Default::default()
         },
@@ -1196,9 +1158,9 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     };
     let mut masters = CalibrationMasters::from_images(
         CalibrationSet {
-            dark: Some(constant_cfa(Size2us::new(4, 4), 0.05, cfa_type.clone())),
+            dark: Some(constant_cfa(Size2us::new(4, 4), 0.05, cfa_type)),
             flat: Some(flat),
-            bias: Some(constant_cfa(Size2us::new(4, 4), 0.1, cfa_type.clone())),
+            bias: Some(constant_cfa(Size2us::new(4, 4), 0.1, cfa_type)),
             flat_dark: None,
         },
         DEFAULT_SIGMA_THRESHOLD,
@@ -1216,7 +1178,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         .map(|value| value.to_bits())
         .collect::<Vec<_>>();
 
-    let mut expected = constant_cfa(Size2us::new(4, 4), 0.75, cfa_type.clone());
+    let mut expected = constant_cfa(Size2us::new(4, 4), 0.75, cfa_type);
     masters.calibrate(&mut expected).unwrap();
 
     let cache_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".tmp");

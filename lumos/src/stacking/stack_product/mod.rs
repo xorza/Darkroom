@@ -5,7 +5,7 @@ pub(crate) mod coverage;
 pub(crate) mod quality_map;
 pub(crate) mod quality_planes;
 
-use crate::io::image::cfa::CfaImage;
+use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::linear::LinearImage;
 use crate::stacking::stack_product::coverage::Coverage;
 use crate::stacking::stack_product::quality_map::QualityMap;
@@ -60,6 +60,9 @@ pub struct StackProduct {
     /// is what lets a surviving sample be traced back to the frame whose sigma and normalization
     /// gain it inherited. `None` otherwise.
     pub quantization_sigma: Option<f32>,
+    /// The mosaic pattern every frame shared, for a stack of undemosaiced sensor frames; `None`
+    /// for any other stack.
+    pub cfa_type: Option<CfaType>,
 }
 
 impl StackProduct {
@@ -67,9 +70,9 @@ impl StackProduct {
     ///
     /// # Panics
     ///
-    /// If the product has more than one channel. A CFA frame is a single mosaic plane, so a
-    /// stack of them is too — `CfaImage` has nowhere to put a second channel and no loader
-    /// produces one.
+    /// If the product has more than one channel, or is not a stack of mosaic frames. A CFA frame
+    /// is a single mosaic plane, so a stack of them is too — `CfaImage` has nowhere to put a
+    /// second channel and no loader produces one.
     pub(crate) fn into_cfa_master(self) -> CfaImage {
         assert_eq!(
             self.image.channels(),
@@ -79,6 +82,9 @@ impl StackProduct {
         );
         CfaImage {
             data: self.image.pixels.into_l(),
+            cfa_type: self
+                .cfa_type
+                .expect("a CFA master is stacked from mosaic frames"),
             metadata: self.image.metadata,
             quantization_sigma: self.quantization_sigma,
             nulls: self.image.nulls,

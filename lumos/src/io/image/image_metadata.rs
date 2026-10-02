@@ -1,47 +1,9 @@
 //! Observation metadata carried by every image product.
-//!
-//! [`BitPix`] lives here rather than in its own file: it is only ever reached as
-//! [`ImageMetadata::bitpix`], the pixel type the FITS header declared.
 
-use crate::io::image::cfa;
+use fits_well::image::SampleType;
+
 use crate::io::image::image_provenance::{DemosaicProvenance, ImageProvenance, RowOrder};
 use crate::io::image::sample_domain::SampleDomain;
-
-/// FITS BITPIX values representing pixel data types.
-///
-/// FITS natively supports only signed integers. Unsigned integers use the
-/// BZERO convention (e.g., BITPIX=16 + BZERO=32768 for unsigned 16-bit).
-/// fits-well's `SampleType` resolves this and reports the effective type.
-/// The unsigned variants here preserve the distinction for correct normalization.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum BitPix {
-    #[default]
-    UInt8,
-    Int16,
-    UInt16,
-    Int32,
-    UInt32,
-    Int64,
-    Float32,
-    Float64,
-}
-
-impl BitPix {
-    /// Whether samples are stored as integers rather than IEEE floats.
-    ///
-    /// The distinction two decode decisions turn on, which is why it is named once rather than
-    /// spelled as a six-variant match at each: an integer `BITPIX` has an exact ADC step to derive a
-    /// quantization sigma from, and it carries its undefined samples as a declared `BLANK` value
-    /// instead of in-band NaN. A variant added later cannot then be missed by one and not the other.
-    pub(crate) fn is_integer(self) -> bool {
-        match self {
-            Self::UInt8 | Self::Int16 | Self::UInt16 | Self::Int32 | Self::UInt32 | Self::Int64 => {
-                true
-            }
-            Self::Float32 | Self::Float64 => false,
-        }
-    }
-}
 
 /// Metadata and provenance shared by sensor, linear, and preview image products.
 #[derive(Debug, Clone, Default)]
@@ -52,11 +14,10 @@ pub struct ImageMetadata {
     pub date_obs: Option<String>,
     pub exposure_time: Option<f64>,
     pub iso: Option<u32>,
-    pub bitpix: BitPix,
+    /// The type a FITS source stored its samples as, after its unsigned-offset convention;
+    /// `None` for a source with no such declaration.
+    pub sample_type: Option<SampleType>,
     pub header_dimensions: Vec<usize>,
-    /// CFA sensor type, if the image originated from a raw sensor.
-    /// `None` for non-CFA sources (FITS, monochrome sensors).
-    pub cfa_type: Option<cfa::CfaType>,
     /// Camera-recorded white-balance multipliers `[R, G1, B, G2]`, normalized so the smallest
     /// multiplier is `1.0`. X-Trans and RAW metadata without a second green duplicate `G1`.
     ///
@@ -125,10 +86,8 @@ impl ImageMetadata {
             .map(|provenance| provenance.row_order)
     }
 
-    /// Whether these samples came out of a demosaic, and so carry its interpolation artifacts.
-    ///
-    /// Not `cfa_type.is_some()`: that records which sensor pattern the frame came from and stays
-    /// set on a monochrome frame, which is copied straight through with nothing interpolated.
+    /// Whether these samples came out of a demosaic, and so carry its interpolation artifacts. A
+    /// monochrome sensor's frame is copied straight through, with nothing interpolated.
     pub(crate) fn is_demosaiced(&self) -> bool {
         self.provenance
             .as_ref()

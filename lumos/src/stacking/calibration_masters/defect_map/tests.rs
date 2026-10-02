@@ -69,11 +69,8 @@ fn capped_color_sampling_spans_sensor_and_cfa_phases() {
                 }
             }
 
-            let indices = collect_color_sample_indices(
-                Size2us::new(width, height),
-                Some(&cfa_type),
-                target_color,
-            );
+            let indices =
+                collect_color_sample_indices(Size2us::new(width, height), cfa_type, target_color);
             assert_eq!(
                 indices.len(),
                 population.min(MAX_MEDIAN_SAMPLES),
@@ -135,7 +132,7 @@ fn capped_color_sampling_matches_exact_row_and_column_statistics() {
                     .map(|index| data[index])
                     .collect(),
             );
-            let sampled = median_mad(collect_color_samples(&data, Some(&cfa_type), 0));
+            let sampled = median_mad(collect_color_samples(&data, cfa_type, 0));
             let level_count = if row_pattern { height / 2 } else { width / 2 };
             let pattern_name = if row_pattern { "row" } else { "column" };
             let expected = MedianMad {
@@ -265,7 +262,7 @@ fn correct_clustered_defect_uses_only_good_neighbors() {
     for &(x, y) in &hot {
         px[size.index_of(Vec2us::new(x, y))] = 0.95;
     }
-    let dark = make_cfa(size, px, cfa.clone());
+    let dark = make_cfa(size, px, cfa);
     let defect_map = DefectMap::default()
         .detect_hot(&dark, 5.0, &CancelToken::never())
         .unwrap();
@@ -315,7 +312,7 @@ fn xtrans_hot_pixel_correction_uses_same_color() {
         for &(x, y) in corrupt {
             px[size.index_of(Vec2us::new(x, y))] = 0.9;
         }
-        make_cfa(size, px, cfa.clone())
+        make_cfa(size, px, cfa)
     };
 
     let r_hot = (1usize, 0usize); // pattern[0][1] = 0 → R
@@ -462,7 +459,7 @@ fn per_channel_detection_bayer() {
     // Make one red pixel hot
     pixels[0] = 500.0; // (0,0) = R
 
-    let dark = make_cfa(Size2us::new(8, 8), pixels, pattern.clone());
+    let dark = make_cfa(Size2us::new(8, 8), pixels, pattern);
     let defect_map = DefectMap::default()
         .detect_hot(&dark, 3.0, &CancelToken::never())
         .unwrap();
@@ -489,8 +486,7 @@ fn dark_background_reconstructs_affine_mono_signal_through_image_edges() {
         })
         .collect();
     let data = Buffer2::new(size.width, size.height, pixels);
-    let background =
-        DarkBackground::fit(&data, Some(&CfaType::Mono), &CancelToken::never()).unwrap();
+    let background = DarkBackground::fit(&data, CfaType::Mono, &CancelToken::never()).unwrap();
 
     for y in 0..size.height {
         for x in 0..size.width {

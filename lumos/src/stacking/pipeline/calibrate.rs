@@ -71,7 +71,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
         })?;
     let plan = MemoryPlan::plan(
         frame_info.dimensions.pixel_count() * size_of::<f32>(),
-        frame_info.demosaic.memory(frame_info.dimensions),
+        frame_info.cfa_type.demosaic_memory(frame_info.dimensions),
         total,
         rayon::current_num_threads(),
         available,
@@ -148,14 +148,9 @@ fn decode_calibrate_demosaic(
     masters.calibrate(&mut cfa)?;
     if let Some(cr) = &config.cosmic_ray {
         // Dispatched per CFA type inside `reject_cosmic_rays` (mono / Bayer-deinterleave /
-        // X-Trans same-color). Only an unlabeled frame is skipped — its pattern is unknown, so any
-        // same-color/Laplacian stencil could corrupt a mislabeled mosaic.
-        if cfa.metadata.cfa_type.is_some() {
-            let removed = reject_cosmic_rays(&mut cfa, cr);
-            tracing::info!(removed, "rejected cosmic rays");
-        } else {
-            tracing::warn!("frame has no CFA pattern; skipping cosmic-ray rejection");
-        }
+        // X-Trans same-color).
+        let removed = reject_cosmic_rays(&mut cfa, cr);
+        tracing::info!(removed, "rejected cosmic rays");
     }
     // Demosaic is the other heavy step; it polls `cancel` internally and bails mid-pass.
     cfa.demosaic(&context.cancel)

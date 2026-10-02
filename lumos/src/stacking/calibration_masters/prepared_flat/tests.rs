@@ -30,10 +30,7 @@ fn standard_xtrans() -> CfaType {
 }
 
 fn reference_apply(light: &mut CfaImage, flat: &CfaImage, subtractor: Option<&CfaImage>) {
-    let Some(cfa_type) = flat.metadata.cfa_type.as_ref() else {
-        reference_apply_mono(light, flat, subtractor);
-        return;
-    };
+    let cfa_type = &flat.cfa_type;
     if cfa_type.num_colors() == 1 {
         reference_apply_mono(light, flat, subtractor);
         return;
@@ -145,8 +142,8 @@ fn prepared_flat_is_bit_exact_for_bayer_and_xtrans_with_subtraction() {
             }
         }
 
-        let flat = make_cfa(size, flat_pixels, cfa_type.clone());
-        let subtractor = make_cfa(size, vec![0.125; size.pixel_count()], cfa_type.clone());
+        let flat = make_cfa(size, flat_pixels, cfa_type);
+        let subtractor = make_cfa(size, vec![0.125; size.pixel_count()], cfa_type);
         let prepared = prepare(flat, Some(&subtractor));
         assert_eq!(
             prepared
@@ -190,12 +187,8 @@ fn prepared_flat_matches_previous_per_light_equation_bit_exactly() {
         let subtractor_pixels = (0..width * height)
             .map(|index| 0.02 + (index.wrapping_mul(11) % 17) as f32 * 0.0005)
             .collect::<Vec<_>>();
-        let flat = make_cfa(Size2us::new(width, height), pixels, cfa_type.clone());
-        let subtractor = make_cfa(
-            Size2us::new(width, height),
-            subtractor_pixels,
-            cfa_type.clone(),
-        );
+        let flat = make_cfa(Size2us::new(width, height), pixels, cfa_type);
+        let subtractor = make_cfa(Size2us::new(width, height), subtractor_pixels, cfa_type);
         let light = make_cfa(
             Size2us::new(width, height),
             (0..width * height)

@@ -85,6 +85,8 @@ fn from_filters_decodes_the_libraw_word_and_rejects_the_rest() {
     // filters == 0 is monochrome / no CFA; exotic patterns match nothing either.
     assert_eq!(CfaPattern::from_filters(0), None);
     assert_eq!(CfaPattern::from_filters(0x1234_5678), None);
+    // RGGB in rows 0–5 but BGGR in rows 6–7: not 2-row periodic, whatever the first block says.
+    assert_eq!(CfaPattern::from_filters(0x1694_9494), None);
 }
 
 #[test]

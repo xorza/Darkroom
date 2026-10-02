@@ -10,7 +10,9 @@ use imaginarium::{ColorFormat, Image, ImageDesc};
 use crate::io::image::PREVIEW_IMAGE_EXTENSIONS;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::provenance::FitsTransferProvenance;
-use crate::io::image::image_metadata::{BitPix, ImageMetadata};
+use fits_well::image::SampleType;
+
+use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::{ColorProvenance, ImageProvenance, TransferProvenance};
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::preview_image::PreviewImage;
@@ -114,7 +116,7 @@ fn load_full_example_fits() {
     assert_eq!(image.channels(), 1);
     assert!(image.is_grayscale());
     assert_eq!(image.pixel_count(), 10000);
-    assert_eq!(image.metadata.bitpix, BitPix::Int32);
+    assert_eq!(image.metadata.sample_type, Some(SampleType::I32));
     assert_eq!(image.metadata.header_dimensions, vec![100, 100]);
 
     // BITPIX = 32 with BSCALE = 1, so the samples were divided by the declared span 2³² − 1 and
@@ -129,9 +131,6 @@ fn load_full_example_fits() {
     // 152 / (2³² − 1) = 3.5390258e-8.
     assert!((pixel - 3.539_025_8e-8).abs() < 1e-15, "{pixel}");
     assert!((pixel * physical_scale - 152.0).abs() < 1e-3, "{pixel}");
-
-    // No BAYERPAT header → cfa_type is None
-    assert!(image.metadata.cfa_type.is_none());
 
     // New metadata fields are None for this simple test file
     assert!(image.metadata.filter.is_none());

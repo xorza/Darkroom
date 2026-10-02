@@ -6,6 +6,7 @@ use rayon::prelude::*;
 
 use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::image_ops::rgb::Rgb;
+use crate::io::image::cfa::CfaType;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode as fits_decode;
 use crate::io::image::image_dimensions::ImageDimensions;
@@ -332,6 +333,10 @@ impl StackableImage for LinearImage {
 
     fn metadata(&self) -> &ImageMetadata {
         &self.metadata
+    }
+
+    fn cfa_type(&self) -> Option<CfaType> {
+        None
     }
 
     fn load(path: &Path, context: &LoadContext) -> Result<Self, ImageError> {

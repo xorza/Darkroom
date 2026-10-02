@@ -25,8 +25,8 @@ use crate::stacking::combine::cache::core::{
 use crate::stacking::combine::cache::loader::LoadedCache;
 use crate::stacking::combine::cache::sample::{CombineScratch, CombinedSample};
 use crate::stacking::combine::cache::validation::{
-    validate_frame_quality, validate_image_samples, validate_row_orders, validate_sample_domains,
-    validate_stored_geometry, validate_stored_samples,
+    validate_cfa_types, validate_frame_quality, validate_image_samples, validate_row_orders,
+    validate_sample_domains, validate_stored_geometry, validate_stored_samples,
 };
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::config::Normalization;
@@ -110,6 +110,7 @@ impl FrameCache {
         // same measurement, and every check below would pass on them.
         validate_sample_domains(&frames)?;
         validate_row_orders(&frames)?;
+        validate_cfa_types(&frames)?;
         for (index, frame) in frames.iter().enumerate() {
             // Geometry before contents: every read below and in the combine slices a plane to
             // `pixel_count`, so a short plane would panic out of a slice index rather than
@@ -201,6 +202,7 @@ impl FrameCache {
             .collect::<Vec<_>>();
         validate_sample_domains(&stored)?;
         validate_row_orders(&stored)?;
+        validate_cfa_types(&stored)?;
         let frame_norms = compute_frame_norms(&stored, dimensions, normalization, &cancel)?;
 
         Ok(Self {
@@ -232,6 +234,8 @@ impl FrameCache {
             linear_variance: linear_variance_pixels,
         } = combined;
         let dimensions = self.core.dimensions;
+        // Every frame carries the first one's pattern: `validate_cfa_types` held them to it.
+        let cfa_type = self.frames[0].source_stats.cfa_type;
         let image = LinearImage {
             metadata: self.core.metadata.clone(),
             pixels,
@@ -258,6 +262,7 @@ impl FrameCache {
                 weight,
                 linear_variance,
                 quantization_sigma,
+                cfa_type,
             };
         }
 
@@ -320,6 +325,7 @@ impl FrameCache {
             weight,
             linear_variance,
             quantization_sigma,
+            cfa_type,
         }
     }
 

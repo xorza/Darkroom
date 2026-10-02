@@ -558,7 +558,6 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     let dark_value = 0.1f32;
     let pixels: Vec<f32> = (0..size.height)
         .flat_map(|y| {
-            let pattern = pattern.clone();
             (0..size.width)
                 .map(move |x| target[pattern.color_at(Vec2us::new(x, y)) as usize] + dark_value)
         })
@@ -575,10 +574,10 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     ));
     let mut loaded = CfaImage::from_file(&path, &LoadContext::default()).unwrap();
     assert_eq!(loaded.data.pixels(), pixels);
-    assert_eq!(loaded.metadata.cfa_type, Some(pattern.clone()));
+    assert_eq!(loaded.cfa_type, pattern);
     let cache_loaded = <CfaImage as StackableImage>::load(&path, &LoadContext::default()).unwrap();
     assert_eq!(cache_loaded.data, loaded.data);
-    assert_eq!(cache_loaded.metadata.cfa_type, loaded.metadata.cfa_type);
+    assert_eq!(cache_loaded.cfa_type, loaded.cfa_type);
     // A Lumos-written CFA master is float32, whose nulls are IEEE NaN in the data, so the header
     // cannot rule them out and the peek reserves for them rather than guessing they are absent.
     assert_eq!(
@@ -611,7 +610,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
         }
     }
 
-    let dark = make_cfa(size, vec![dark_value; size.pixel_count()], pattern.clone());
+    let dark = make_cfa(size, vec![dark_value; size.pixel_count()], pattern);
     let masters = CalibrationMasters::from_images(
         CalibrationSet {
             dark: Some(dark),
@@ -623,7 +622,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
         CancelToken::never(),
     )
     .unwrap();
-    let mut equivalent = make_cfa(size, pixels, pattern.clone());
+    let mut equivalent = make_cfa(size, pixels, pattern);
     masters.calibrate(&mut loaded).unwrap();
     masters.calibrate(&mut equivalent).unwrap();
     assert_eq!(loaded.data, equivalent.data);
@@ -754,7 +753,7 @@ fn calibrated_demosaic_preserves_out_of_range_samples() {
         CfaType::XTrans(test_pattern_array()),
     ] {
         for expected in [-0.25f32, 1.25] {
-            let image = make_cfa(size, vec![expected; size.pixel_count()], cfa.clone())
+            let image = make_cfa(size, vec![expected; size.pixel_count()], cfa)
                 .demosaic(&CancelToken::never())
                 .unwrap();
 

@@ -298,6 +298,7 @@ fn frame_stats_sidecar_roundtrip() {
         quantization_sigma: Some(0.000_02),
         domain: None,
         row_order: None,
+        cfa_type: None,
     };
     write_frame_stats(temp_dir.path(), base, &stats_1ch).unwrap();
     let read_1ch = read_frame_stats(temp_dir.path(), base).unwrap();
@@ -327,6 +328,7 @@ fn frame_stats_sidecar_roundtrip() {
         quantization_sigma: None,
         domain: None,
         row_order: None,
+        cfa_type: None,
     };
     write_frame_stats(temp_dir.path(), base, &stats_3ch).unwrap();
     let read_3ch = read_frame_stats(temp_dir.path(), base).unwrap();
@@ -373,6 +375,7 @@ fn frame_stats_sidecar_roundtrip() {
             quantization_sigma: Some(sigma),
             domain: None,
             row_order: None,
+            cfa_type: None,
         };
         write_frame_stats(temp_dir.path(), "poisoned.bin", &poisoned).unwrap();
         assert!(

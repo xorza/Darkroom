@@ -320,11 +320,11 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
         "invalid star-detection configuration: sigma_threshold must be finite and positive, got 0"
     );
 
-    let calibration_error = CalibrationError::MissingLightCfaPattern;
+    let calibration_error = CalibrationError::AlreadyCalibrated;
     let pipeline_error: AlignStackError = calibration_error.into();
     assert!(matches!(
         pipeline_error,
-        AlignStackError::Calibration(CalibrationError::MissingLightCfaPattern)
+        AlignStackError::Calibration(CalibrationError::AlreadyCalibrated)
     ));
 
     let registration_error = RegistrationError::InvalidStarFwhm {
@@ -388,6 +388,7 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
         weight: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![2.0, 1.0]))),
         linear_variance: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![0.5, 1.0]))),
         quantization_sigma: Some(0.001),
+        cfa_type: None,
     };
     let result = AlignStackResult {
         product,

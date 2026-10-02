@@ -1,10 +1,12 @@
 use crate::io::image::cfa::CfaType;
+use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::math::statistics;
 use crate::memory::ChunkMemoryLayout;
 use crate::stacking::combine::cache::*;
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::frame_store::frame_quality::FramePlane;
 use crate::stacking::frame_store::frame_stats::FrameStats;
+use crate::testing::cfa::make_cfa;
 use crate::testing::prelude::*;
 use common::TempDir;
 
@@ -131,6 +133,61 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
 
     // A correctly shaped set still builds.
     assert!(FrameCache::from_stored_frames(vec![frame(8), frame(8)], params()).is_ok());
+}
+
+/// Every frame must carry the first frame's mosaic pattern, or, like it, none: the same pixel is a
+/// different colour under another pattern, and a demosaiced frame is no mosaic at all.
+#[test]
+fn stored_frames_must_share_one_cfa_pattern() {
+    let size = Size2us::new(4, 2);
+    let dimensions = ImageDimensions::new(size, 1);
+    let params = || FrameCacheParams {
+        spill_directory: None,
+        dimensions,
+        metadata: ImageMetadata::default(),
+        config: CacheConfig::default(),
+        normalization: Normalization::None,
+        progress: ProgressCallback::default(),
+        cancel: CancelToken::never(),
+    };
+    let mosaic = |cfa_type: CfaType| {
+        let image = make_cfa(size, vec![1.0; size.pixel_count()], cfa_type);
+        let stats = FrameStats::measure(&image);
+        StoredFrame::from_memory(image, FrameQuality::None, stats)
+    };
+    let linear = || {
+        let image = LinearImage::from_pixels(dimensions, vec![1.0; size.pixel_count()]);
+        let stats = FrameStats::measure(&image);
+        StoredFrame::from_memory(image, FrameQuality::None, stats)
+    };
+    let rggb = CfaType::Bayer(CfaPattern::Rggb);
+    let bggr = CfaType::Bayer(CfaPattern::Bggr);
+
+    for (frames, actual, expected) in [
+        (vec![mosaic(rggb), mosaic(bggr)], Some(bggr), Some(rggb)),
+        (vec![mosaic(rggb), linear()], None, Some(rggb)),
+        (
+            vec![linear(), mosaic(CfaType::Mono)],
+            Some(CfaType::Mono),
+            None,
+        ),
+    ] {
+        let error = FrameCache::from_stored_frames(frames, params()).unwrap_err();
+        assert!(
+            matches!(
+                error,
+                Error::CfaPatternMismatch {
+                    index: 1,
+                    actual: a,
+                    reference_index: 0,
+                    expected: e,
+                } if a == actual && e == expected
+            ),
+            "{error:?}"
+        );
+    }
+    assert!(FrameCache::from_stored_frames(vec![mosaic(rggb), mosaic(rggb)], params()).is_ok());
+    assert!(FrameCache::from_stored_frames(vec![linear(), linear()], params()).is_ok());
 }
 
 /// Frames arriving through the frame store are held to the same pairing as caller-supplied ones
@@ -370,10 +427,8 @@ fn make_cfa_cache(frames_pixels: Vec<Vec<f32>>, dims: ImageDimensions) -> FrameC
         .into_iter()
         .map(|pixels| CfaImage {
             data: Buffer2::new(dims.width(), dims.height(), pixels),
-            metadata: ImageMetadata {
-                cfa_type: Some(CfaType::Mono),
-                ..Default::default()
-            },
+            cfa_type: CfaType::Mono,
+            metadata: ImageMetadata::default(),
             quantization_sigma: None,
             nulls: None,
         })

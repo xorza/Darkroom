@@ -167,12 +167,7 @@ impl DefectMap {
             return;
         }
 
-        let cfa_type = image
-            .metadata
-            .cfa_type
-            .as_ref()
-            .expect("image must have CFA type for defect correction");
-        let neighbors = SameColorMedian::new(cfa_type);
+        let neighbors = SameColorMedian::new(&image.cfa_type);
 
         // Mask every defect so each repair draws only on GOOD neighbours. Without it, a clustered
         // defect (hot column, adjacent same-color pixels) pulls a neighbour's bad/half-corrected
@@ -226,7 +221,7 @@ fn detect_hot_pixels(
     let data = &image.data;
     let size = Size2us::new(data.width(), data.height());
     let total = size.pixel_count();
-    let cfa_type = image.metadata.cfa_type.as_ref();
+    let cfa_type = image.cfa_type;
     let background = DarkBackground::fit(data, cfa_type, cancel)?;
     let sigma_floor = residual_sigma_floor(image);
     let stats = compute_per_color_residual_stats(data, cfa_type, &background, sigma_floor);
@@ -241,7 +236,7 @@ fn detect_hot_pixels(
                 return false;
             }
             let point = size.point_of(i);
-            let color = CfaType::or_mono(cfa_type).color_at(point) as usize;
+            let color = cfa_type.color_at(point) as usize;
             let ColorStats { median, sigma } = stats[color];
             data[i] - background.at(point, color) > median + sigma_threshold * sigma
         })
@@ -286,7 +281,7 @@ fn detect_cold_pixels(
     let data = &image.data;
     let size = Size2us::new(data.width(), data.height());
     let total = size.pixel_count();
-    let neighbors = SameColorMedian::new(CfaType::or_mono(image.metadata.cfa_type.as_ref()));
+    let neighbors = SameColorMedian::new(&image.cfa_type);
 
     let indices = (0..total)
         .into_par_iter()
@@ -323,11 +318,11 @@ struct ColorStats {
 /// deviation into a defect. A color with no samples gets `sigma = ∞` so it never flags.
 fn compute_per_color_residual_stats(
     data: &Buffer2<f32>,
-    cfa_type: Option<&CfaType>,
+    cfa_type: CfaType,
     background: &DarkBackground,
     sigma_floor: f32,
 ) -> ArrayVec<ColorStats, 3> {
-    let num_colors = cfa_type.map_or(1, CfaType::num_colors);
+    let num_colors = cfa_type.num_colors();
     let mut stats = ArrayVec::new();
 
     for color in 0..num_colors as u8 {

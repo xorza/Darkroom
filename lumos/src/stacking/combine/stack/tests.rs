@@ -1103,6 +1103,7 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
                 quantization_sigma: None,
                 domain: None,
                 row_order: None,
+                cfa_type: None,
             };
             frame
         })
@@ -2197,6 +2198,7 @@ fn noise_weighting_folds_normalization_gain() {
             quantization_sigma: None,
             domain: None,
             row_order: None,
+            cfa_type: None,
         }
     };
     let frame_norm = |gain: f32| {

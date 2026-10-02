@@ -141,6 +141,26 @@ pub(crate) fn validate_row_orders(frames: &[StoredFrame]) -> Result<(), Error> {
     Ok(())
 }
 
+/// Check that every frame carries the first frame's mosaic pattern, or, like it, none.
+pub(crate) fn validate_cfa_types(frames: &[StoredFrame]) -> Result<(), Error> {
+    let Some(reference) = frames.first() else {
+        return Ok(());
+    };
+    let expected = reference.source_stats.cfa_type;
+    for (index, frame) in frames.iter().enumerate().skip(1) {
+        let actual = frame.source_stats.cfa_type;
+        if actual != expected {
+            return Err(Error::CfaPatternMismatch {
+                index,
+                actual,
+                reference_index: 0,
+                expected,
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Check a stored frame's shape against the geometry the cache was built for.
 ///
 /// The counterpart to the dimension checks [`FrameCache::from_stack_frames`](super::FrameCache::from_stack_frames) makes on

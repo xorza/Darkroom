@@ -44,15 +44,14 @@ const FINE_STRUCTURE_SIGMA_FLOOR: f32 = 0.01;
 /// type (mono / Bayer / X-Trans). Returns the number of CR pixels corrected.
 pub(crate) fn reject_cosmic_rays(image: &mut CfaImage, config: &CosmicRayConfig) -> usize {
     let size = Size2us::new(image.data.width(), image.data.height());
-    // Disjoint fields: the pixels go in by `&mut`, the CFA type is read from the metadata beside it.
+    // Disjoint fields: the pixels go in by `&mut`, the CFA type is read beside them.
     let pixels = image.data.pixels_mut();
-    match &image.metadata.cfa_type {
+    match &image.cfa_type {
         // Bayer is 2×2-periodic → four dense same-color planes; reuse the mono detector per plane.
-        Some(CfaType::Bayer(_)) => BayerDetector::new(config).reject(pixels, size),
+        CfaType::Bayer(_) => BayerDetector::new(config).reject(pixels, size),
         // X-Trans has no dense same-color sub-lattice → same-color stencils on the mosaic.
-        Some(c @ CfaType::XTrans(_)) => XtransDetector::new(config, c).reject(pixels, size),
-        // Mono (or an unlabeled frame): the dense Laplacian path.
-        _ => MonoDetector::new(config).reject(pixels, size),
+        c @ CfaType::XTrans(_) => XtransDetector::new(config, c).reject(pixels, size),
+        CfaType::Mono => MonoDetector::new(config).reject(pixels, size),
     }
 }
 

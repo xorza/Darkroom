@@ -5,6 +5,7 @@ use thiserror::Error;
 use common::CancelToken;
 
 use crate::error::{FrameDimensionMismatch, InvalidConfigField};
+use crate::io::image::cfa::CfaType;
 use crate::io::image::error::ImageError;
 use crate::io::image::image_provenance::RowOrder;
 use crate::io::image::sample_domain::SampleDomain;
@@ -117,6 +118,18 @@ pub enum Error {
         actual: RowOrder,
         reference_index: usize,
         expected: RowOrder,
+    },
+
+    /// Two frames carry different mosaic patterns, or one is a mosaic and the other is not, so
+    /// the same pixel is a different colour in each.
+    #[error(
+        "frame {index} has CFA pattern {actual:?}, but frame {reference_index} has {expected:?}"
+    )]
+    CfaPatternMismatch {
+        index: usize,
+        actual: Option<CfaType>,
+        reference_index: usize,
+        expected: Option<CfaType>,
     },
 
     #[error("frame {index}, channel {channel}, pixel {pixel} has non-finite image value {value}")]

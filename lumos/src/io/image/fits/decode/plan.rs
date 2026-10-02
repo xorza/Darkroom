@@ -11,7 +11,6 @@ use crate::io::image::fits::error::{fits_err, fits_unsupported};
 use crate::io::image::fits::metadata::SAMPLE_SCALE_KEYWORD;
 use crate::io::image::fits::options::{FitsCubeInterpretation, FitsFloatScale};
 use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::image_metadata::BitPix;
 use crate::io::image::sample_domain::ScaleOrigin;
 
 const FITS_DECODE_CHUNK_BYTES: usize = 4 * 1024 * 1024;
@@ -52,7 +51,7 @@ impl<'a> FitsHduDescription<'a> {
 pub(super) struct FitsDecodePlan {
     pub(super) shape: Vec<usize>,
     pub(super) dimensions: ImageDimensions,
-    pub(super) bitpix: BitPix,
+    pub(super) sample_type: SampleType,
     pub(super) scaling: Scaling,
     /// How the stored samples reach the pipeline's `[0, 1]` domain. See [`sample_scale`].
     pub(super) sample_scale: SampleScale,
@@ -74,7 +73,7 @@ impl FitsDecodePlan {
     /// announce them, so it answers `true` whether or not any are actually there. Wrong only in the
     /// direction that over-reserves.
     pub(super) fn may_carry_nulls(&self) -> bool {
-        !self.bitpix.is_integer() || self.scaling.blank.is_some()
+        !self.sample_type.is_integer() || self.scaling.blank.is_some()
     }
 }
 
@@ -207,7 +206,7 @@ pub(super) fn preflight_fits_image(
     let dimensions = dimensions_from_shape(path, hdu.image.shape, cube)?;
     let stored_bitpix = hdu.image.bitpix;
     let scaling = hdu.image.scaling;
-    let bitpix = map_bitpix(SampleType::from_scaling(stored_bitpix, &scaling));
+    let sample_type = SampleType::from_scaling(stored_bitpix, &scaling);
     let sample_scale = sample_scale(path, hdu.header, stored_bitpix, &scaling, float_scale)?;
     let decoded_bytes = checked_size_bytes(
         path,
@@ -267,7 +266,7 @@ pub(super) fn preflight_fits_image(
     Ok(FitsDecodePlan {
         shape: hdu.image.shape.to_vec(),
         dimensions,
-        bitpix,
+        sample_type,
         scaling,
         sample_scale,
         source_bytes: hdu.source_bytes,
@@ -353,19 +352,6 @@ pub(super) fn dimensions_from_shape(
         .checked_mul(channels)
         .ok_or_else(|| fits_unsupported(path, format!("FITS sample count overflows: {shape:?}")))?;
     Ok(ImageDimensions::new((width, height), channels))
-}
-
-fn map_bitpix(sample_type: SampleType) -> BitPix {
-    match sample_type {
-        SampleType::I8 | SampleType::U8 => BitPix::UInt8,
-        SampleType::I16 => BitPix::Int16,
-        SampleType::U16 => BitPix::UInt16,
-        SampleType::I32 => BitPix::Int32,
-        SampleType::U32 => BitPix::UInt32,
-        SampleType::I64 | SampleType::U64 => BitPix::Int64,
-        SampleType::F32 => BitPix::Float32,
-        SampleType::F64 => BitPix::Float64,
-    }
 }
 
 #[cfg(test)]
