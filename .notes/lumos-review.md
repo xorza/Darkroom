@@ -294,11 +294,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
   - astroscrappy grows twice (at `sigclip`, then at `sigcliplow`) with no objlim test. lumos grows one ring and applies objlim, so the wings of bright hits stay. `[C]` deviation, `[P]` impact.
 - [ ] `18.2` **The hot-pixel σ estimator breaks down above ≈1% defect density** — `calibration_masters/defect_map/mod.rs:396-405`
   - p99(|r|) falls inside the warm population on uncooled DSLR darks. `[P]`
-- [ ] `18.5` **A fully or heavily masked background tile still produces a sky value** — `background_mesh/tile_stats/mod.rs:179-192,305-354`
-  - photutils `exclude_percentile` and SExtractor bad meshes interpolate those tiles from good neighbours instead. `[C]` behaviour.
-- [ ] `18.6` **The last `MeshAxis` tile can be a 1–5 px sliver** — `background_mesh/mesh_axis.rs:14-18`, `calibration_masters/defect_map/dark_background.rs:55-56,93-110`
-  - A sliver can lack a CFA colour, which gives false hot pixels at the edge. `[C]`, low.
-
 ## 19. Display-domain operations: colour and tone errors
 
 - [ ] `19.1` **The colour-preserving stretch computes ratios on data that still holds the sky pedestal** — `image_ops/stretching/mod.rs:604-606`, `image_ops/rgb/mod.rs:237-254`, `image_ops/stretching/simd/mod.rs:140-157`

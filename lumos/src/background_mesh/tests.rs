@@ -30,18 +30,19 @@ fn new_uninit_zero_dimension_panics() {
 }
 
 /// The grid's shape, and a flat image's statistics on it. A tile size past the image clamps to
-/// its shorter side — 10 × 8 at 64 takes 8, so `10.div_ceil(8)` = 2 tiles by 1, never a 0-tile
-/// grid — and a remainder makes one short tile. A flat tile has no spread: σ = 0 sends the sky to
-/// the median, which is the value itself, negative or not.
+/// its shorter side — 10 × 8 at 64 takes 8, whose remainder of 2 joins the one tile, never a 0-tile
+/// grid — and a remainder under half a tile joins the tile before it, as 100 × 70 at 32 shows. A
+/// flat tile has no spread: σ = 0 sends the sky to the median, which is the value itself, negative
+/// or not.
 #[test]
 fn grid_shape_and_flat_skies() {
     for (size, tile_size, columns, rows, value) in [
         (Size2us::new(128, 64), 32, 4, 2, 0.3f32),
-        (Size2us::new(100, 70), 32, 4, 3, 0.5),
+        (Size2us::new(100, 70), 32, 3, 2, 0.5),
         (Size2us::new(100, 50), 200, 2, 1, 0.3),
         (Size2us::new(1000, 10), 64, 100, 1, 0.5),
         (Size2us::new(10, 1000), 64, 1, 100, 0.5),
-        (Size2us::new(10, 8), 64, 2, 1, 0.5),
+        (Size2us::new(10, 8), 64, 1, 1, 0.5),
         (Size2us::new(64, 64), 32, 2, 2, -0.5),
         (Size2us::new(64, 64), 64, 1, 1, 100.0),
     ] {
@@ -86,10 +87,11 @@ fn skewed_tile_sky_sits_below_median() {
     );
 }
 
-/// Masked pixels never reach a tile's statistics, however few pixels are left. Tile (0,0) keeps
-/// two unmasked rows at 0.2 under 30 masked rows at 0.9 — read whole it would answer 0.9 — and
-/// tile (1,0) keeps 0.4 around a masked 16 × 16 block at 5.0. The other two tiles hold no mask.
-/// Each tile left is flat, so its sky is its value exactly. A 2 × 2 grid is not median-filtered.
+/// Masked pixels never reach a tile's statistics. Tile (1,0) keeps 0.4 around a masked 16 × 16
+/// block at 5.0, three quarters of it left, so it reads 0.4 exactly. Tile (0,0) keeps two
+/// unmasked rows of 32 at 0.2 under 30 masked rows at 0.9 — read whole it would answer 0.9 — which
+/// is under half of it: a bad tile, it takes the median of its good ring, 0.4, 0.6 and 0.8, so
+/// 0.6 (review 18.5). A 2 × 2 grid is not median-filtered.
 #[test]
 fn masked_pixels_never_reach_the_statistics() {
     let mut pixels = Buffer2::new(
@@ -113,7 +115,7 @@ fn masked_pixels_never_reach_the_statistics() {
         }
     }
     let grid = make_grid_with_mask(&pixels, 32, &mask);
-    for (tile, sky) in [((0, 0), 0.2), ((1, 0), 0.4), ((0, 1), 0.6), ((1, 1), 0.8)] {
+    for (tile, sky) in [((0, 0), 0.6), ((1, 0), 0.4), ((0, 1), 0.6), ((1, 1), 0.8)] {
         assert_eq!(grid.stats[tile].sky, sky, "tile {tile:?}");
     }
     assert_eq!(make_grid(&pixels, 32).stats[(0, 0)].sky, 0.9, "unmasked");
@@ -181,8 +183,8 @@ fn clipping_rejects_outliers_from_a_sky_with_spread() {
 }
 
 /// A tile's centre is the mean index of the pixels it holds, `(start + end − 1) / 2`: 32-wide tiles
-/// sit at 15.5 + 32k, the 4-wide remainder of 100 at (96 + 99) / 2, and a tile clamped to a 20-px
-/// image at 9.5. Both axes from one rule.
+/// sit at 15.5 + 32k, the third tile of 100, which took the remainder of 4, at (64 + 99) / 2, and a
+/// tile clamped to a 20-px image at 9.5. Both axes from one rule.
 #[test]
 fn tile_centres_are_the_mean_pixel_index() {
     struct Case {
@@ -202,7 +204,7 @@ fn tile_centres_are_the_mean_pixel_index() {
             size: Size2us::new(64, 100),
             tile_size: 32,
             centers_x: &[15.5, 47.5],
-            centers_y: &[15.5, 47.5, 79.5, 97.5],
+            centers_y: &[15.5, 47.5, 81.5],
         },
         Case {
             size: Size2us::new(32, 32),
@@ -303,10 +305,11 @@ fn find_lower_tile_y_is_the_last_centre_at_or_before() {
     }
 }
 
-/// A tile masked whole reads every pixel instead: on the ramp `x/64` its sky is the ramp at the
-/// tile's centre column, 15.5/64 (dyadic, exact), where an unmasked neighbour reads its own.
+/// A tile masked whole takes its neighbour's sky: on the ramp `x/64`, tile (1, 0) reads the ramp at
+/// its centre column, 47.5/64 (dyadic, exact), and the masked tile (0, 0) takes it. A mask over
+/// every tile leaves no sky to take, and each tile reads all its pixels: 15.5/64 and 47.5/64.
 #[test]
-fn a_wholly_masked_tile_reads_all_its_pixels() {
+fn a_masked_tile_takes_its_neighbours_sky() {
     let pixels = Buffer2::new(
         64,
         32,
@@ -319,8 +322,31 @@ fn a_wholly_masked_tile_reads_all_its_pixels() {
         }
     }
     let grid = make_grid_with_mask(&pixels, 32, &mask);
+    assert_eq!(grid.stats[(0, 0)].sky, 47.5 / 64.0);
+    assert_eq!(grid.stats[(1, 0)].sky, 47.5 / 64.0);
+
+    let everything = BitBuffer2::new_filled(Size2us::new(64, 32), true);
+    let grid = make_grid_with_mask(&pixels, 32, &everything);
     assert_eq!(grid.stats[(0, 0)].sky, 15.5 / 64.0);
     assert_eq!(grid.stats[(1, 0)].sky, 47.5 / 64.0);
+
+    // Four tiles of the ramp x/128, the first three masked: each searches outward ring by ring
+    // past the bad ones, and all three take tile 3's 111.5/128.
+    let wide = Buffer2::new(
+        128,
+        32,
+        (0..128 * 32).map(|i| (i % 128) as f32 / 128.0).collect(),
+    );
+    let mut first_three = BitBuffer2::new_filled(Size2us::new(128, 32), false);
+    for y in 0..32 {
+        for x in 0..96 {
+            first_three.set_at(Vec2us::new(x, y), true);
+        }
+    }
+    let grid = make_grid_with_mask(&wide, 32, &first_three);
+    for tile in 0..4 {
+        assert_eq!(grid.stats[(tile, 0)].sky, 111.5 / 128.0, "tile {tile}");
+    }
 }
 
 /// Under three tiles on an axis the 3×3 median does not run: a 2×2 grid of distinct flat tiles

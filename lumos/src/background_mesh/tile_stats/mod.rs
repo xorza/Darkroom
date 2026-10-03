@@ -142,12 +142,14 @@ impl TileStats {
         }
     }
 
-    /// Compute the sky, about the tile's own plane, and the raw clipped σ of the pixels of `tile`.
+    /// Compute the sky, about the tile's own plane, and the raw clipped σ of the pixels of `tile`,
+    /// or `None` for a bad tile: one whose mask leaves less than half of it.
     ///
-    /// When a mask is provided, only unmasked pixels are used. If all pixels
-    /// are masked, falls back to sampling all pixels (including masked) as a
-    /// last resort. A noisy estimate from few background pixels is far better
-    /// than a biased estimate contaminated by star flux.
+    /// When a mask is provided, only unmasked pixels are used. Below half the tile, the unmasked
+    /// pixels are the margins of whatever the mask covers, and they no longer span the tile the
+    /// plane fit and the sky's position assume; the grid takes such a tile from its good neighbours
+    /// instead, as photutils excludes boxes past `exclude_percentile` and SExtractor flags bad
+    /// meshes.
     ///
     /// The sky reads the samples less a plane fitted to the clip survivors — the departure from
     /// SExtractor, photutils and `NoiseChisel`, which take it from the raw pixels and leave the
@@ -166,7 +168,7 @@ impl TileStats {
         tile: URect,
         sigma_clip_iterations: usize,
         scratch: &mut TileScratch,
-    ) -> Self {
+    ) -> Option<Self> {
         let TileScratch {
             values,
             offsets,
@@ -178,18 +180,14 @@ impl TileStats {
 
         match mask {
             Some(m) => {
-                collect_unmasked_pixels(pixels, m, tile, values, offsets);
-                if values.is_empty() {
-                    // All pixels masked — no choice but to use all pixels
-                    collect_tile_pixels(pixels, tile, values, offsets);
+                if 2 * count_unmasked_pixels(m, tile) < tile.area() {
+                    return None;
                 }
+                collect_unmasked_pixels(pixels, m, tile, values, offsets);
             }
             None => collect_tile_pixels(pixels, tile, values, offsets),
         }
-
-        if values.is_empty() {
-            return Self::default();
-        }
+        debug_assert!(!values.is_empty(), "a tile holds at least one pixel");
 
         let clipped = |slope: TileSlope, detrended: &mut Vec<f32>, deviations: &mut Vec<f32>| {
             detrended.clear();
@@ -214,10 +212,10 @@ impl TileStats {
             stats = clipped(slope, detrended, deviations);
         }
 
-        Self {
+        Some(Self {
             sky: sextractor_sky(&stats),
             sigma: raw.sigma,
-        }
+        })
     }
 }
 
