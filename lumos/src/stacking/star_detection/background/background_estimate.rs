@@ -217,6 +217,7 @@ fn interpolate_from_grid(
 ) {
     let width = background.width();
     let tiles_x = grid.stats.width();
+    let sigma_range = grid.sigma_range();
 
     background
         .pixels_mut()
@@ -228,6 +229,13 @@ fn interpolate_from_grid(
             |scratch, (y, (bg_row, noise_row))| {
                 scratch.resize(tiles_x);
                 interpolate_row(bg_row, noise_row, y, grid, scratch);
+                // The spline overshoots its nodes, and past the outer tiles it extrapolates: on a
+                // field whose σ changes fast it reaches below zero. photutils clips its maps to
+                // the mesh's range for that reason. Only the noise is clipped here: the sky's
+                // extrapolation is what follows a gradient past the outer tiles.
+                for sigma in noise_row.iter_mut() {
+                    *sigma = sigma.clamp(*sigma_range.start(), *sigma_range.end());
+                }
             },
         );
 }

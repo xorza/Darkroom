@@ -25,6 +25,7 @@ use crate::math::vec2us::Vec2us;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 use std::mem;
+use std::ops::RangeInclusive;
 
 /// Tile grid with precomputed centers and spline coefficients for interpolation.
 #[derive(Debug)]
@@ -85,6 +86,20 @@ impl TileGrid {
 
     /// Find the tile index whose center is at or before the given Y position.
     #[inline]
+    /// The least and the greatest tile σ.
+    pub(crate) fn sigma_range(&self) -> RangeInclusive<f32> {
+        let stats = self.stats.pixels();
+        let low = stats
+            .iter()
+            .map(|tile| tile.sigma)
+            .fold(f32::INFINITY, f32::min);
+        let high = stats
+            .iter()
+            .map(|tile| tile.sigma)
+            .fold(f32::NEG_INFINITY, f32::max);
+        low..=high
+    }
+
     pub(crate) fn find_lower_tile_y(&self, pos: f32) -> usize {
         // tiles_y >= 1 always (the grid is built from an image with at least one tile row).
         let tiles_y = self.stats.height();
@@ -121,7 +136,6 @@ impl TileGrid {
             .for_each_init(
                 || tile_scratch.acquire(),
                 |scratch, (idx, out)| {
-                    let TileScratch { values, deviations } = &mut **scratch;
                     let tx = idx % tiles_x;
                     let ty = idx / tiles_x;
 
@@ -130,14 +144,7 @@ impl TileGrid {
                         Vec2us::new(columns.end(tx), rows.end(ty)),
                     );
 
-                    *out = TileStats::compute(
-                        pixels,
-                        mask,
-                        tile,
-                        sigma_clip_iterations,
-                        values,
-                        deviations,
-                    );
+                    *out = TileStats::compute(pixels, mask, tile, sigma_clip_iterations, scratch);
                 },
             );
     }

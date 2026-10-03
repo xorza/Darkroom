@@ -150,7 +150,7 @@ fn vignette_background() {
         "challenging",
         &frame,
         &Config::default(),
-        1,
+        0,
     );
 }
 

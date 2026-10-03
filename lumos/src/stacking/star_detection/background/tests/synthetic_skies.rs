@@ -11,19 +11,21 @@ use crate::testing::synthetic::backgrounds::{NebulaConfig, Vignette};
 use crate::testing::synthetic::scene::BackgroundField;
 use crate::testing::visual::{ToneMap, save};
 
-/// Each sky against the truth it was rendered from, in two parts.
+/// Each sky against the truth it was rendered from, in three parts.
 ///
 /// The estimate of the bare sky — no stars, no noise — differs from the truth only by what the
 /// tile mesh cannot follow: nothing on a plane (to 8ε of the largest value), and on a curved sky
 /// the smoothing of its curvature at the 64-px tile scale, pinned at its measured size (vignette
-/// 0.0464, nebula 0.2151) so that a change in it shows.
+/// 0.04995, nebula 0.2006) so that a change in it shows.
 ///
 /// Camera noise then moves the estimate from the bare sky's by the sampling scatter of each tile's
 /// sky: the Pearson mode `2.5·median − 1.5·mean` of N Gaussian samples of spread σ scatters by
 /// `√(6.25·π/2 + 2.25 − 7.5)·σ/√N` = 2.14σ/√N, with N = 1024 samples and σ the estimate's own map
 /// (which carries the sky's spread across each tile as well as the noise). Five of those bound the
-/// largest move. That is checked on the noise without the stars: what a bright star does to a
-/// tile whose σ the sky's own spread inflated is an open issue, not a bound.
+/// largest move.
+///
+/// The stars then move it once more, by what the clip about each tile's plane leaves of their
+/// wings: pinned at its measured size on each sky.
 #[test]
 fn rendered_skies_are_recovered() {
     init_tracing();
@@ -33,6 +35,7 @@ fn rendered_skies_are_recovered() {
         num_stars: usize,
         /// `None` on a plane, held to rounding.
         model_error: Option<f32>,
+        star_move: f32,
     }
     let cases = [
         Case {
@@ -40,6 +43,7 @@ fn rendered_skies_are_recovered() {
             sky: BackgroundField::Uniform { level: 0.15 },
             num_stars: 30,
             model_error: None,
+            star_move: 0.000_272,
         },
         Case {
             name: "gradient",
@@ -50,6 +54,7 @@ fn rendered_skies_are_recovered() {
             },
             num_stars: 30,
             model_error: None,
+            star_move: 0.000_157,
         },
         Case {
             name: "vignette",
@@ -59,7 +64,8 @@ fn rendered_skies_are_recovered() {
                 falloff: 2.0,
             }),
             num_stars: 30,
-            model_error: Some(0.0465),
+            model_error: Some(0.049_95),
+            star_move: 0.000_349,
         },
         Case {
             name: "nebula",
@@ -72,7 +78,8 @@ fn rendered_skies_are_recovered() {
                 angle: 0.3,
             }),
             num_stars: 40,
-            model_error: Some(0.2152),
+            model_error: Some(0.2006),
+            star_move: 0.004_73,
         },
     ];
     let config = BackgroundConfig::default();
@@ -153,6 +160,20 @@ fn rendered_skies_are_recovered() {
             scatter <= scatter_bound,
             "{}: noise moves the sky by {scatter}, past {scatter_bound}",
             case.name
+        );
+
+        let star_move = largest(
+            &mut background
+                .background
+                .iter()
+                .zip(noisy.background.iter())
+                .map(|(a, b)| (a - b).abs()),
+        );
+        assert!(
+            star_move <= case.star_move,
+            "{}: the stars move the sky by {star_move}, past {}",
+            case.name,
+            case.star_move
         );
     }
 }
