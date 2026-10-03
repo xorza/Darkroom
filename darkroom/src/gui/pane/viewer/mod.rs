@@ -31,11 +31,12 @@ use std::fmt::Formatter;
 
 use palantir::prelude::*;
 use palantir::widget::Shape;
-use palantir::{ImageDownsample, ImageFilter, ImageFit, ImageHandle, ZoomFactor};
+use palantir::{ImageDownsample, ImageFilter, ImageFit, ImageHandle};
 
 use crate::core::document::{Document, Viewport};
 use crate::core::io::preferences::{ViewerBackground, ViewerPreferences};
-use crate::gui::pane::graph::gesture::pan_zoom::fold_scroll_zoom;
+use crate::gui::pane::graph::gesture::pan_zoom;
+use crate::gui::pane::graph::gesture::slot::GestureSlot;
 use crate::gui::pane::viewer::camera::{
     VIEWER_MAX_ZOOM, VIEWER_MIN_ZOOM, draw_rect, fit_viewport, zoom_about_pane_center,
 };
@@ -66,7 +67,7 @@ pub(crate) struct ImageViewer {
     /// Pan-drag bookkeeping: the viewport pan at drag start. A bare
     /// `Option` — one viewer is one surface, so there is no pane to key
     /// it by the way the canvas has to.
-    pan_anchor: Option<Vec2>,
+    pan_anchor: GestureSlot<Vec2>,
     /// Lazily registered checkerboard tile for the `Checker` backdrop.
     /// The backdrop choice and magnification filter live in
     /// [`ViewerPreferences`] — one persisted setting shared by every
@@ -144,14 +145,14 @@ impl ImageViewer {
             node_id,
             source_size: None,
             view: None,
-            pan_anchor: None,
+            pan_anchor: GestureSlot::default(),
             checker: None,
         }
     }
 
     fn reset_framing(&mut self) {
         self.view = None;
-        self.pan_anchor = None;
+        self.pan_anchor.clear();
     }
 
     /// The framing to draw with: the user's explicit viewport, else the
@@ -395,11 +396,8 @@ impl ImageViewer {
             self.reset_framing();
             return;
         }
-        let adjusting = resp.left.drag.started()
-            || resp.middle.drag.started()
-            || resp.scroll.pixels != Vec2::ZERO
-            || resp.scroll.lines.y != 0.0
-            || resp.scroll.zoom != ZoomFactor::ONE;
+        let adjusting =
+            resp.left.drag.started() || resp.middle.drag.started() || pan_zoom::scrolled(&resp);
         if self.view.is_none() && !adjusting {
             return;
         }
@@ -408,19 +406,11 @@ impl ImageViewer {
         };
 
         if resp.left.drag.started() || resp.middle.drag.started() {
-            self.pan_anchor = Some(v.pan);
+            self.pan_anchor.latch(v.pan);
         }
         let drag = resp.left.drag.delta().or_else(|| resp.middle.drag.delta());
-        // Measured from the latch, not integrated per frame, so a pan
-        // lands where the pointer says however many frames it took; a
-        // missing delta after a latch is the release edge.
-        if let Some(start) = self.pan_anchor {
-            match drag {
-                Some(d) => v.pan = start + d,
-                None => self.pan_anchor = None,
-            }
-        }
-        fold_scroll_zoom(&mut v, ui, &resp, VIEWER_MIN_ZOOM, VIEWER_MAX_ZOOM);
+        pan_zoom::fold_pan_drag(&mut self.pan_anchor, |&start| start, drag, &mut v.pan);
+        pan_zoom::fold_scroll_zoom(&mut v, ui, &resp, VIEWER_MIN_ZOOM, VIEWER_MAX_ZOOM);
         self.view = Some(v);
     }
 }

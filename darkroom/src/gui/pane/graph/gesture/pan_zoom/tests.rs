@@ -280,3 +280,26 @@ fn zoom_about_ignores_non_positive_or_non_finite_factor() {
         assert_eq!(zoom, zoom0, "zoom moved on bad factor {bad}");
     }
 }
+
+/// A frame scrolls when any of the three scroll channels carries input, and
+/// a frame with none of them does not.
+#[test]
+fn a_frame_scrolls_on_any_scroll_channel() {
+    let idle = ResponseState::default();
+    assert!(!scrolled(&idle));
+
+    let mut pixels = idle;
+    pixels.scroll.pixels = Vec2::new(0.0, 3.0);
+    let mut lines = idle;
+    lines.scroll.lines.y = -1.0;
+    let mut pinch = idle;
+    pinch.scroll.zoom = ZoomFactor::new(1.1).unwrap();
+    for resp in [pixels, lines, pinch] {
+        assert!(scrolled(&resp), "{:?}", resp.scroll);
+    }
+
+    // A horizontal wheel delta drives nothing here, so it is no scroll.
+    let mut sideways = idle;
+    sideways.scroll.lines.x = 1.0;
+    assert!(!scrolled(&sideways));
+}

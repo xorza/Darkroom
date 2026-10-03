@@ -22,7 +22,6 @@ Groups are named after their shared root cause and ordered by severity, then ben
 ## darkroom GUI repeats per-frame lookups and theme values
 Severity: Low.
 
-- [ ] Pan/zoom spelled per surface: `gesture/shortcuts.rs` Ctrl+0 sets zoom 1.0 and keeps the pan (zooms about the top-left) while the toolbar's `Framing::Reset` centres and every other zoom anchors on cursor or centre; `viewer/mod.rs` `ImageViewer::apply_gestures` re-implements `pan_zoom::fold_pan_drag` with a bare `Option<Vec2>`; "did the scroll move" is written three ways (`fold_scroll_zoom` `abs() > EPSILON` without reason, `!= 0.0`, `!= Vec2::ZERO`); `scroll_to_zoom_factor`'s doc says it is shared with the viewer, which never calls it.
 - [ ] Dead configurability: `widgets/inline_rename.rs` `InlineRename` — the only caller always passes `.style(..)`, so the `style: Option` fallback (rebuilding `flattened` per frame) and the `Right`/`Center` `halign` branches are test-only; `Theme::inline_rename` docs mention "boundary port" and "graph tab" renames that don't exist.
 - [ ] `node/wid.rs` claims the node subtree's id vocabulary, but `port_row` `event_glyph_wid` (takes `(NodeId, usize)` instead of `EventRef`), `inspector` `inspect_badge_wid`/`inspect_panel_wid` and `preview_row` `preview_image_wid` use raw `WidgetId::from_hash` with ad-hoc prefixes.
 
