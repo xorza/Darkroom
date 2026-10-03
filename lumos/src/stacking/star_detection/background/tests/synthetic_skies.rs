@@ -7,7 +7,7 @@ use crate::stacking::star_detection::tests::Scenario;
 use crate::testing::init_tracing;
 use crate::testing::prelude::*;
 use crate::testing::synthetic::background_map;
-use crate::testing::synthetic::backgrounds::NebulaConfig;
+use crate::testing::synthetic::backgrounds::{NebulaConfig, Vignette};
 use crate::testing::synthetic::scene::BackgroundField;
 use crate::testing::visual::{ToneMap, save};
 
@@ -53,11 +53,11 @@ fn rendered_skies_are_recovered() {
         },
         Case {
             name: "vignette",
-            sky: BackgroundField::Vignette {
+            sky: BackgroundField::Vignette(Vignette {
                 center: 0.2,
                 edge: 0.05,
                 falloff: 2.0,
-            },
+            }),
             num_stars: 30,
             model_error: Some(0.0465),
         },

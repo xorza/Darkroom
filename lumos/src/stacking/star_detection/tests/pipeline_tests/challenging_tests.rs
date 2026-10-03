@@ -6,7 +6,7 @@ use crate::stacking::star_detection::tests::pipeline_tests::run_test;
 use crate::stacking::star_detection::tests::{Placement, Scenario};
 use crate::testing::init_tracing;
 use crate::testing::prelude::*;
-use crate::testing::synthetic::backgrounds::NebulaConfig;
+use crate::testing::synthetic::backgrounds::{NebulaConfig, Vignette};
 use crate::testing::synthetic::camera::PsfModel;
 use crate::testing::synthetic::scene::BackgroundField;
 
@@ -137,11 +137,11 @@ fn vignette_background() {
     init_tracing();
     let frame = Scenario {
         num_stars: 25,
-        background: BackgroundField::Vignette {
+        background: BackgroundField::Vignette(Vignette {
             center: 0.2,
             edge: 0.05,
             falloff: 2.0,
-        },
+        }),
         ..Default::default()
     }
     .frame();

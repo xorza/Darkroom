@@ -2,9 +2,9 @@
 //!
 //! lumos pixels are normalized flux in `[0, 1]` where `1.0` == sensor full well. Real
 //! sensors accumulate discrete photo-electrons, so the noise is Poisson shot noise on the
-//! collected charge plus Gaussian read noise — not the constant-σ Gaussian the older
-//! generators used. Modeling it physically (and converting back to normalized units) is
-//! what makes a source's SNR mean what the detector's thresholds assume.
+//! collected charge plus Gaussian read noise. Modeling it physically (and converting back to
+//! normalized units) is what makes a source's SNR mean what the detector's thresholds assume.
+//! A fixture that wants one constant σ instead uses `patterns::add_gaussian_noise`.
 //!
 //! Conversion: a normalized value `v` corresponds to `v * full_well_e` electrons.
 
@@ -92,46 +92,34 @@ pub(super) fn add_dark_current(
 
 #[cfg(test)]
 mod tests {
+    use crate::testing::synthetic::metrics::pixel_stats;
     use crate::testing::synthetic::noise::*;
 
-    /// Sample mean and population variance.
-    #[derive(Debug)]
-    struct Moments {
-        mean: f64,
-        var: f64,
-    }
-
-    fn mean_var(samples: &[f32]) -> Moments {
-        let n = samples.len() as f64;
-        let mean = samples.iter().map(|&s| f64::from(s)).sum::<f64>() / n;
-        let var = samples
-            .iter()
-            .map(|&s| (f64::from(s) - mean).powi(2))
-            .sum::<f64>()
-            / n;
-        Moments { mean, var }
-    }
-
+    /// For Poisson(λ), E = Var = λ. Over N = 200 000 draws the mean's standard error is
+    /// √(λ/N) = 0.0071 and the variance's is √((μ₄ − λ²)/N) with μ₄ = λ(1 + 3λ): √(210/N) = 0.032.
+    /// Both bounds are about 6 standard errors.
     #[test]
     fn poisson_mean_and_variance_small_lambda() {
-        // Knuth branch. For Poisson(λ), E=λ and Var=λ. With N=200_000 draws the standard
-        // error of the mean is sqrt(10/200_000) ≈ 0.0071, so ±0.1 is ~14σ — a safe bound.
         let mut rng = TestRng::new(1);
         let samples: Vec<f32> = (0..200_000).map(|_| poisson(&mut rng, 10.0)).collect();
-        let Moments { mean, var } = mean_var(&samples);
-        assert!((mean - 10.0).abs() < 0.1, "mean {mean}");
-        assert!((var - 10.0).abs() < 0.6, "var {var}");
+        let stats = pixel_stats(&samples);
+        let (mean, var) = (stats.mean, stats.std * stats.std);
+        assert!((mean - 10.0).abs() < 0.045, "mean {mean}");
+        assert!((var - 10.0).abs() < 0.2, "var {var}");
         // Poisson is integer-valued.
         assert!(samples.iter().all(|&s| s == s.round()));
     }
 
+    /// The normal branch at λ = 1000: standard errors √(λ/N) = 0.071 for the mean and
+    /// √(2λ²/N) = 3.2 for the variance of the near-Gaussian draws; both bounds are about 6 of them.
     #[test]
     fn poisson_normal_branch_large_lambda() {
         let mut rng = TestRng::new(2);
         let samples: Vec<f32> = (0..200_000).map(|_| poisson(&mut rng, 1000.0)).collect();
-        let Moments { mean, var } = mean_var(&samples);
-        assert!((mean - 1000.0).abs() < 5.0, "mean {mean}");
-        assert!((var - 1000.0).abs() < 60.0, "var {var}");
+        let stats = pixel_stats(&samples);
+        let (mean, var) = (stats.mean, stats.std * stats.std);
+        assert!((mean - 1000.0).abs() < 0.45, "mean {mean}");
+        assert!((var - 1000.0).abs() < 19.0, "var {var}");
     }
 
     #[test]
@@ -149,7 +137,8 @@ mod tests {
         let mut rng = TestRng::new(4);
         let mut pixels = vec![0.5f32; 100_000];
         apply_shot_noise(&mut pixels, 10_000.0, &mut rng);
-        let Moments { mean, var } = mean_var(&pixels);
+        let stats = pixel_stats(&pixels);
+        let (mean, var) = (stats.mean, stats.std * stats.std);
         assert!((mean - 0.5).abs() < 1e-3, "mean {mean}");
         assert!((var - 5e-5).abs() < 1e-5, "var {var}");
     }
@@ -160,7 +149,8 @@ mod tests {
         let mut rng = TestRng::new(5);
         let mut pixels = vec![0.0f32; 100_000];
         add_read_noise(&mut pixels, 5.0, 10_000.0, &mut rng);
-        let Moments { mean, var } = mean_var(&pixels);
+        let stats = pixel_stats(&pixels);
+        let (mean, var) = (stats.mean, stats.std * stats.std);
         assert!(mean.abs() < 1e-5, "mean {mean}");
         assert!((var.sqrt() - 5e-4).abs() < 5e-5, "std {}", var.sqrt());
     }
@@ -171,7 +161,7 @@ mod tests {
         let mut rng = TestRng::new(6);
         let mut pixels = vec![0.0f32; 100_000];
         add_dark_current(&mut pixels, 0.1, 100.0, 10_000.0, &mut rng);
-        let Moments { mean, .. } = mean_var(&pixels);
+        let mean = pixel_stats(&pixels).mean;
         assert!((mean - 1e-3).abs() < 5e-5, "mean {mean}");
     }
 
@@ -188,7 +178,7 @@ mod tests {
         // Dark current's actual regime (λ≈0.05): mean tracks λ; draws are 0/1/(rare 2).
         let mut rng = TestRng::new(11);
         let samples: Vec<f32> = (0..200_000).map(|_| poisson(&mut rng, 0.05)).collect();
-        let Moments { mean, .. } = mean_var(&samples);
+        let mean = pixel_stats(&samples).mean;
         assert!((mean - 0.05).abs() < 0.005, "mean {mean}");
         assert!(
             samples
@@ -203,7 +193,8 @@ mod tests {
         // λ=30 takes the Gaussian branch; mean and variance must still equal λ.
         let mut rng = TestRng::new(12);
         let samples: Vec<f32> = (0..200_000).map(|_| poisson(&mut rng, 30.0)).collect();
-        let Moments { mean, var } = mean_var(&samples);
+        let stats = pixel_stats(&samples);
+        let (mean, var) = (stats.mean, stats.std * stats.std);
         assert!((mean - 30.0).abs() < 0.3, "mean {mean}");
         assert!((var - 30.0).abs() < 2.5, "var {var}");
     }
@@ -217,11 +208,7 @@ mod tests {
         let mut bright = vec![0.8f32; 200_000];
         apply_shot_noise(&mut dim, well, &mut rng);
         apply_shot_noise(&mut bright, well, &mut rng);
-        let Moments { var: var_dim, .. } = mean_var(&dim);
-        let Moments {
-            var: var_bright, ..
-        } = mean_var(&bright);
-        let ratio = var_bright / var_dim;
+        let ratio = (pixel_stats(&bright).std / pixel_stats(&dim).std).powi(2);
         assert!(
             (ratio - 4.0).abs() < 0.4,
             "shot-noise variance must scale with signal: ratio {ratio:.2}"

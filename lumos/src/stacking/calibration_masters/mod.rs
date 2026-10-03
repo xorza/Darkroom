@@ -9,9 +9,6 @@ mod fits;
 pub(crate) mod master_role;
 mod prepared_flat;
 
-#[cfg(all(test, feature = "real-data"))]
-mod real_data_tests;
-
 use std::io;
 use std::path::Path;
 
@@ -378,7 +375,7 @@ fn master_scale(
         })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "real-data"))]
 pub(crate) mod internals {
     use std::path::Path;
 

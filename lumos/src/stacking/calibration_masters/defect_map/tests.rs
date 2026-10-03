@@ -15,14 +15,6 @@ fn median_mad(mut samples: Vec<f32>) -> MedianMad {
     MedianMad::of_mut(&mut samples)
 }
 
-fn is_hot(defect_map: &DefectMap, pixel_idx: usize) -> bool {
-    defect_map.hot_indices().binary_search(&pixel_idx).is_ok()
-}
-
-fn is_cold(defect_map: &DefectMap, pixel_idx: usize) -> bool {
-    defect_map.cold_indices().binary_search(&pixel_idx).is_ok()
-}
-
 #[test]
 fn capped_color_sampling_spans_sensor_and_cfa_phases() {
     let cases = [
@@ -254,9 +246,11 @@ fn correct_clustered_defect_uses_only_good_neighbors() {
     let defect_map = DefectMap::new(dark.size())
         .detect_hot(&dark, 5.0, &CancelToken::never())
         .unwrap();
+    let mut expected: Vec<usize> = hot.iter().map(|&(x, y)| y * size.width + x).collect();
+    expected.sort_unstable();
     assert_eq!(
-        defect_map.hot_indices().len(),
-        6,
+        defect_map.hot_indices(),
+        expected,
         "all six 0.95 red pixels are hot"
     );
 
@@ -268,11 +262,7 @@ fn correct_clustered_defect_uses_only_good_neighbors() {
 
     // (6,6)'s only good red neighbours (4,8),(8,4),(8,8) are all 0.5 → median 0.5, despite the
     // five hot neighbours that would otherwise dominate.
-    let corrected = light.data[6 * size.width + 6];
-    assert!(
-        (corrected - 0.5).abs() < 1e-4,
-        "clustered defect repaired from good neighbours → expected 0.5, got {corrected}"
-    );
+    assert_eq!(light.data[6 * size.width + 6], 0.5);
 }
 
 #[test]
@@ -308,24 +298,18 @@ fn xtrans_hot_pixel_correction_uses_same_color() {
     let defect_map = DefectMap::new(dark.size())
         .detect_hot(&dark, 5.0, &CancelToken::never())
         .unwrap();
-    assert_eq!(
-        defect_map.hot_indices().len(),
-        2,
-        "one R and one B hot pixel"
-    );
+    // One R and one B, ascending: (0, 2) is index 24, (2, 0) is index 2.
+    assert_eq!(defect_map.hot_indices(), [2, 24]);
 
     let mut light = build(&[r_hot, b_hot]);
     defect_map.correct(&mut light);
 
     let r_val = light.data[r_hot.1 * size.width + r_hot.0];
     let b_val = light.data[b_hot.1 * size.width + b_hot.0];
-    assert!(
-        (r_val - 0.1).abs() < 1e-4,
-        "R hot repaired from R neighbours → expected 0.1, got {r_val}"
-    );
-    assert!(
-        (b_val - 0.3).abs() < 1e-4,
-        "B hot repaired from B neighbours → expected 0.3, got {b_val}"
+    assert_eq!(
+        (r_val, b_val),
+        (0.1, 0.3),
+        "each repaired from its own colour"
     );
 }
 
@@ -342,32 +326,25 @@ fn cfa_hot_pixel_detection() {
         .detect_hot(&dark, 5.0, &CancelToken::never())
         .unwrap();
 
-    assert_eq!(defect_map.hot_indices().len(), 3);
-    assert!(is_hot(&defect_map, 0));
-    assert!(is_hot(&defect_map, 14));
-    assert!(is_hot(&defect_map, 35));
-    assert!(!is_hot(&defect_map, 1)); // not hot
+    assert_eq!(defect_map.hot_indices(), [0, 14, 35]);
 }
 
+/// A Bayer repair reads its own colour: with red, green and blue at 100, 200 and 50, the hot red
+/// at (2, 2) comes back as exactly 100 — any green or blue neighbour in its median would move it.
 #[test]
 fn cfa_hot_pixel_correction_bayer() {
-    // 6x6 Bayer RGGB pattern
-    // Hot pixel at (2,2) = R. Same-color (R) neighbors at stride 2.
-    let mut pixels = vec![100.0; 36];
-    pixels[2 * 6 + 2] = 10000.0; // hot at (2,2)
-
-    let mut image = make_cfa(Size2us::new(6, 6), pixels, CfaType::Bayer(CfaPattern::Rggb));
-
-    let defect_map = DefectMap::from_indices(Size2us::new(6, 6), vec![2 * 6 + 2], vec![]).unwrap();
-
-    defect_map.correct(&mut image);
-
-    // Should be replaced with median of same-color neighbors (all 100.0)
-    assert!(
-        (image.data[2 * 6 + 2] - 100.0).abs() < f32::EPSILON,
-        "Expected 100.0, got {}",
-        image.data[2 * 6 + 2]
-    );
+    let pattern = CfaType::Bayer(CfaPattern::Rggb);
+    let size = Size2us::new(6, 6);
+    let baseline = [100.0f32, 200.0, 50.0];
+    let mut pixels: Vec<f32> = (0..size.pixel_count())
+        .map(|i| baseline[pattern.color_at(size.point_of(i)) as usize])
+        .collect();
+    pixels[2 * 6 + 2] = 10000.0;
+    let mut image = make_cfa(size, pixels, pattern);
+    DefectMap::from_indices(size, vec![2 * 6 + 2], vec![])
+        .unwrap()
+        .correct(&mut image);
+    assert_eq!(image.data[2 * 6 + 2], 100.0);
 }
 
 #[test]
@@ -381,11 +358,7 @@ fn cfa_hot_pixel_correction_mono() {
     defect_map.correct(&mut image);
 
     // Median of [10, 20, 30, 40, 50, 60, 70, 80] = 45
-    assert!(
-        (image.data[4] - 45.0).abs() < f32::EPSILON,
-        "Expected 45.0, got {}",
-        image.data[4]
-    );
+    assert_eq!(image.data[4], 45.0);
 }
 
 #[test]
@@ -409,10 +382,7 @@ fn cfa_hot_pixel_detection_large() {
         .detect_hot(&dark, 5.0, &CancelToken::never())
         .unwrap();
 
-    assert_eq!(defect_map.hot_indices().len(), hot_positions.len());
-    for &idx in &hot_positions {
-        assert!(is_hot(&defect_map, idx), "Hot pixel at {idx} not detected");
-    }
+    assert_eq!(defect_map.hot_indices(), hot_positions);
 }
 
 #[test]
@@ -444,15 +414,9 @@ fn per_channel_detection_bayer() {
         .detect_hot(&dark, 3.0, &CancelToken::never())
         .unwrap();
 
-    // The hot red pixel should be detected
-    assert!(
-        is_hot(&defect_map, 0),
-        "Hot red pixel at (0,0) not detected"
-    );
-
-    // Green and blue pixels should not be flagged
-    assert!(!is_hot(&defect_map, 1)); // G at (1,0)
-    assert!(!is_hot(&defect_map, 9)); // B at (1,1)
+    // The hot red is the only defect: nothing green or blue, at 200 or 50, is flagged against
+    // the red statistics.
+    assert_eq!(defect_map.hot_indices(), [0]);
 }
 
 #[test]
@@ -539,7 +503,7 @@ fn cfa_no_defective_pixels() {
     let defect_map = DefectMap::new(dark.size())
         .detect_hot(&dark, 5.0, &CancelToken::never())
         .unwrap();
-    assert_eq!(defect_map.hot_indices().len(), 0);
+    assert_eq!(defect_map.hot_indices(), []);
     assert_eq!(defect_map.count(), 0);
 }
 
@@ -563,20 +527,11 @@ fn near_zero_median_dark_flags_only_hot_pixels() {
         .detect_hot(&dark, 5.0, &CancelToken::never())
         .unwrap();
 
-    // Exactly the hot pixels — the ~half-the-frame sub-zero pixels are not "cold defects".
-    assert_eq!(
-        defect_map.count(),
-        3,
-        "only the hot pixels should be flagged"
-    );
-    assert!(is_hot(&defect_map, 100));
-    assert!(is_hot(&defect_map, 2000));
-    assert!(is_hot(&defect_map, 4000));
-    assert!(
-        defect_map.percentage() < 1.0,
-        "defects should be ≪1%, got {:.2}%",
-        defect_map.percentage()
-    );
+    // Exactly the hot pixels — the ~half-the-frame sub-zero pixels are not "cold defects" — and
+    // so 3 of 4096 pixels: 0.0732%.
+    assert_eq!(defect_map.hot_indices(), [100, 2000, 4000]);
+    assert_eq!(defect_map.count(), 3);
+    assert_eq!(defect_map.percentage(), 100.0 * 3.0 / 4096.0);
 }
 
 /// Cold/dead pixels come from the *flat* (illuminated), where a dead pixel is a dark spot.
@@ -593,14 +548,8 @@ fn cold_pixels_detected_from_flat() {
 
     // The dead pixel (0.0) reads below half its uniform 0.4 neighbourhood (0.5·0.4 = 0.2);
     // every normal pixel reads its full 0.4. A flat yields no hot pixels.
-    assert_eq!(defect_map.cold_indices().len(), 1, "the dead pixel is cold");
-    assert_eq!(
-        defect_map.hot_indices().len(),
-        0,
-        "a flat yields no hot pixels"
-    );
-    assert!(is_cold(&defect_map, 5));
-    assert!(!is_cold(&defect_map, 0)); // a normal illuminated pixel
+    assert_eq!(defect_map.cold_indices(), [5]);
+    assert_eq!(defect_map.hot_indices(), [], "a flat yields no hot pixels");
 }
 
 /// A clean (uniform) flat must not flag its own pixels as cold — every pixel equals its
@@ -638,33 +587,9 @@ fn cold_detection_survives_vignetting_gradient() {
         .detect_cold(&flat, &CancelToken::never())
         .unwrap();
 
-    assert_eq!(
-        defect_map.cold_indices().len(),
-        1,
-        "only the dead pixel is cold"
-    );
-    assert_eq!(
-        defect_map.hot_indices().len(),
-        0,
-        "a flat yields no hot pixels"
-    );
-    assert!(is_cold(&defect_map, dead));
-    assert!(
-        !is_cold(&defect_map, 8 * size.width),
-        "dim edge (0.2) is vignetting, not dead"
-    );
-    assert!(
-        !is_cold(&defect_map, 8 * size.width + 15),
-        "bright edge (0.8) is fine"
-    );
-    for y in 6..10 {
-        for x in 2..6 {
-            assert!(
-                !is_cold(&defect_map, size.index_of(Vec2us::new(x, y))),
-                "dust shadow ({x}, {y}) is attenuated, not dead"
-            );
-        }
-    }
+    // Only the dead pixel: not the dim edge (vignetting), not the bright one, not the dust shadow.
+    assert_eq!(defect_map.cold_indices(), [dead]);
+    assert_eq!(defect_map.hot_indices(), [], "a flat yields no hot pixels");
 }
 
 /// `detect_hot` + `detect_cold` combine hot pixels (from the dark) and cold pixels (from the
@@ -686,11 +611,9 @@ fn detect_hot_and_cold_combine() {
         .detect_cold(&flat, &CancelToken::never())
         .unwrap();
 
-    assert_eq!(defect_map.hot_indices().len(), 1);
-    assert_eq!(defect_map.cold_indices().len(), 1);
+    assert_eq!(defect_map.hot_indices(), [0]);
+    assert_eq!(defect_map.cold_indices(), [5]);
     assert_eq!(defect_map.count(), 2);
-    assert!(is_hot(&defect_map, 0));
-    assert!(is_cold(&defect_map, 5));
 }
 
 /// X-Trans cold detection: a dead pixel reads below half its same-color neighbourhood and is the
@@ -712,19 +635,14 @@ fn xtrans_cold_pixel_detected() {
         .detect_cold(&flat, &CancelToken::never())
         .unwrap();
 
+    // Only the dead pixel: one dead neighbour cannot drag a normal pixel's 24-sample median below
+    // half of it.
+    assert_eq!(defect_map.cold_indices(), [dead]);
     assert_eq!(
-        defect_map.cold_indices().len(),
-        1,
-        "only the dead pixel is cold"
-    );
-    assert_eq!(
-        defect_map.hot_indices().len(),
-        0,
+        defect_map.hot_indices(),
+        [],
         "detect_cold sets no hot pixels"
     );
-    assert!(is_cold(&defect_map, dead));
-    // A normal R neighbour: one dead neighbour can't drag its 24-sample median below half.
-    assert!(!is_cold(&defect_map, 12 * size.width + 13));
 }
 
 #[test]

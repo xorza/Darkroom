@@ -1,5 +1,5 @@
 //! Shared primitives for the `#[ignore]`d live memory probes (`mem_budget_probe` in
-//! `stacking::combine` and `stacking::star_detection`).
+//! `stacking::combine`, `stacking::star_detection`, `stacking::pipeline` and `image_ops`).
 //!
 //! Those probes run a pipeline at scale and *watch* peak resident memory to prove it stays bounded.
 //! The reusable parts live here — the MiB unit, env-var config parsing, and the background peak-RSS
@@ -12,6 +12,8 @@
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::memory::DECODE_TRANSIENT_FACTOR;
+use crate::testing::synthetic::backgrounds::Vignette;
+use crate::testing::test_rng::TestRng;
 use std::env;
 use std::fs;
 use std::io::{self, Write};
@@ -25,8 +27,6 @@ use std::time::{Duration, Instant};
 
 use fits_well::FitsWriter;
 use fits_well::image::Image;
-use rand::{RngExt, SeedableRng};
-use rand_chacha::ChaCha8Rng;
 use rayon::prelude::*;
 
 /// Bytes per MiB — probes report and budget in MiB.
@@ -167,47 +167,39 @@ impl RssSampler {
 /// handful of bright per-frame outliers (cosmic-ray stand-ins). The outliers differ every frame, so
 /// sigma-clipping and median combine actually have something to reject — a mean combine would keep
 /// them. Deterministic in `(seed, frame_idx)`; rows are generated in parallel with per-row RNGs.
-fn synth_frame_u16(size: Size2us, frame_idx: usize, seed: u64) -> Vec<u16> {
+pub(crate) fn synth_frame_u16(size: Size2us, frame_idx: usize, seed: u64) -> Vec<u16> {
     const PEDESTAL: f32 = 0.08;
-    const READ_NOISE: f32 = 0.012;
+    const READ_NOISE: f32 = 0.007;
 
-    let cx = size.width as f32 / 2.0;
-    let cy = size.height as f32 / 2.0;
-    let max_r2 = cx * cx + cy * cy;
-
+    let vignette = Vignette {
+        center: 1.0,
+        edge: 0.75,
+        falloff: 2.0,
+    };
     let mut data = vec![0u16; size.pixel_count()];
     let frame_mix = seed ^ (frame_idx as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
 
     data.par_chunks_mut(size.width)
         .enumerate()
         .for_each(|(y, row)| {
-            let mut rng = ChaCha8Rng::seed_from_u64(
-                frame_mix ^ (y as u64).wrapping_mul(0x0000_0100_0000_0001),
-            );
-            let dy = y as f32 - cy;
+            let mut rng = TestRng::new(frame_mix ^ (y as u64).wrapping_mul(0x0000_0100_0000_0001));
             for (x, px) in row.iter_mut().enumerate() {
-                let dx = x as f32 - cx;
-                // Radial vignette in ~[0.75, 1.0] and a mild diagonal gradient give the field structure.
-                let vignette = 1.0 - 0.25 * (dx * dx + dy * dy) / max_r2;
+                // A radial vignette and a mild diagonal gradient give the field structure.
                 let gradient =
                     0.03 * (x as f32 / size.width as f32 + y as f32 / size.height as f32);
-                // Irwin–Hall (four uniforms) ≈ zero-mean Gaussian read noise.
-                let g: f32 = rng.random::<f32>()
-                    + rng.random::<f32>()
-                    + rng.random::<f32>()
-                    + rng.random::<f32>()
-                    - 2.0;
-                let v = PEDESTAL * vignette + gradient + READ_NOISE * g;
+                let v = PEDESTAL * vignette.at(size, x, y)
+                    + gradient
+                    + READ_NOISE * rng.next_gaussian_f32();
                 *px = (v.clamp(0.0, 1.0) * 65535.0) as u16;
             }
         });
 
     let n_outliers = (size.pixel_count() / 50_000).max(4);
-    let mut rng = ChaCha8Rng::seed_from_u64(frame_mix.rotate_left(17));
+    let mut rng = TestRng::new(frame_mix.rotate_left(17));
     for _ in 0..n_outliers {
-        let x = rng.random_range(0..size.width);
-        let y = rng.random_range(0..size.height);
-        let level = rng.random_range(0.85f32..1.0);
+        let x = (rng.next_f64() * size.width as f64) as usize;
+        let y = (rng.next_f64() * size.height as f64) as usize;
+        let level = 0.85 + 0.15 * rng.next_f32();
         data[size.index_of(Vec2us::new(x, y))] = (level * 65535.0) as u16;
     }
     data

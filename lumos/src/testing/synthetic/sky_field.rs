@@ -11,8 +11,8 @@
 
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
+use crate::testing::synthetic::patterns;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use crate::testing::test_rng::TestRng;
 use glam::Vec2;
 use imaginarium::Buffer2;
 
@@ -51,10 +51,7 @@ impl SkyField {
             SyntheticStar::new(center, peak, StarProfile::Gaussian { sigma }).add_to(&mut pixels);
         }
         if sky.noise > 0.0 {
-            let mut rng = TestRng::new(seed);
-            for p in &mut pixels {
-                *p += rng.next_gaussian_f32() * sky.noise;
-            }
+            patterns::add_gaussian_noise(pixels.pixels_mut(), sky.noise, seed);
         }
         if sky.clamp {
             for p in &mut pixels {

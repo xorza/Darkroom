@@ -1,6 +1,6 @@
 //! Benchmarks for the registration *solve* — triangle matching → RANSAC/MAGSAC → optional
 //! SIP — on synthetic star fields. The image warp it feeds is benched separately in
-//! `resample::bench`; real-data register/warp timing lives in `registration::real_data_tests`.
+//! `resample::bench`; real-data register/warp timing lives in `registration::tests::real_data`.
 //!
 //! Run: `cargo test -p lumos --release --features bench registration::bench -- --ignored --nocapture`
 

@@ -1,18 +1,17 @@
-//! Real-data calibration-master benchmarks + a build smoke test over the bundled
+//! Real-data calibration-master benchmarks and checks over the bundled
 //! `test_data/lumos_data/{Bias,Darks,Flats}` Fuji X-Trans RAF set.
 //!
-//! These drive the **canonical** master-build API — `CalibrationMasters::from_files`
-//! → `stack_cfa_master` → `FrameCache`/`run_stacking` + defect-map derivation — the same
-//! path `lens` calls, including the libraw RAW decode of every calibration frame. That
-//! decode dominates the wall time, so these measure the real end-to-end cost of producing
-//! masters, not the isolated combine kernel.
+//! These drive the master-build path `lens` calls — `stack_cfa_master` per role, then
+//! `CalibrationMasters::from_images` and its defect-map derivation — including the libraw RAW
+//! decode of every calibration frame. That decode dominates the wall time, so these measure the
+//! real end-to-end cost of producing masters, not the isolated combine kernel.
 //!
 //! Gated behind the `real-data` feature (the dataset is gitignored; fetch it with
 //! `scripts/fetch-test-data.sh`). The `#[quick_bench]` fns are also `#[ignore]`.
 //!
 //! Run:
 //!   cargo test -p lumos --release --features real-data \
-//!     `calibration_masters::real_data_tests` -- --ignored --nocapture
+//!     `calibration_masters::tests::real_data` -- --ignored --nocapture
 
 use crate::io::image::load_context::LoadContext;
 use crate::math::size2us::Size2us;
@@ -29,32 +28,15 @@ use crate::stacking::calibration_masters::internals::masters_from_files;
 use crate::stacking::calibration_masters::stack_cfa_master;
 use crate::stacking::progress::ProgressCallback;
 use crate::testing::init_tracing;
-use crate::testing::real_data::raw_frames;
+use crate::testing::real_data;
 use crate::{CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD, StackConfig};
-
-/// Bundled calibration frame paths grouped by role (no flat-darks in this set).
-#[derive(Debug)]
-struct CalibrationPaths {
-    darks: Vec<PathBuf>,
-    flats: Vec<PathBuf>,
-    bias: Vec<PathBuf>,
-}
-
-/// The RAW frame paths of each calibration role.
-fn calibration_paths() -> CalibrationPaths {
-    CalibrationPaths {
-        darks: raw_frames("Darks"),
-        flats: raw_frames("Flats"),
-        bias: raw_frames("Bias"),
-    }
-}
 
 #[test]
 fn raw_frame_info_matches_full_decode() {
     // `from_files` sizes its in-memory-vs-disk decision from `raw_cfa_frame_info` (a header peek, no
     // decode). That peek must report exactly the dims a full decode produces, or the memory budget
     // would be wrong.
-    let paths = calibration_paths();
+    let paths = real_data::calibration_frames();
     let path = &paths.darks[0];
     let peeked = raw::raw_cfa_frame_info(path, &LoadContext::default()).expect("peek frame info");
     let loaded = raw::load_raw_cfa(path, &LoadContext::default()).expect("full decode");
@@ -72,7 +54,7 @@ fn raw_frame_info_matches_full_decode() {
 #[test]
 fn builds_full_master_set() {
     init_tracing();
-    let paths = calibration_paths();
+    let paths = real_data::calibration_frames();
 
     let masters = masters_from_files(
         CalibrationSet {
@@ -123,7 +105,7 @@ fn builds_full_master_set() {
     // pixels dip just below it. Hard invariants: every pixel finite (the combine reducers
     // assume it), each master non-degenerate (real variation, not a flat buffer), and all
     // values within a sane normalized envelope.
-    let mean_of = |m: &CfaImage, name: &str| -> f32 {
+    let check_master = |m: &CfaImage, name: &str| {
         let px = m.data.pixels();
         assert!(
             px.iter().all(|v| v.is_finite()),
@@ -139,10 +121,9 @@ fn builds_full_master_set() {
             (-0.5..=2.0).contains(&min) && (-0.5..=2.0).contains(&max),
             "{name} master values outside sane envelope [{min}, {max}]"
         );
-        mean
     };
-    mean_of(dark, "dark");
-    mean_of(bias, "bias");
+    check_master(dark, "dark");
+    check_master(bias, "bias");
 
     let flat_pixels = flat.data.pixels();
     assert!(flat_pixels.iter().all(|value| value.is_finite()));
@@ -223,7 +204,7 @@ fn sorted_intersection_count(left: &[usize], right: &[usize]) -> usize {
 
 #[test]
 fn hot_mask_spatial_distribution_and_repeatability() {
-    let paths = calibration_paths();
+    let paths = real_data::calibration_frames();
     let first_paths: Vec<_> = paths
         .darks
         .iter()
@@ -277,21 +258,36 @@ fn hot_mask_spatial_distribution_and_repeatability() {
     println!("  second spatial metrics: {second_metrics:?}");
     println!("  full spatial metrics: {full_metrics:?}");
 
-    assert_eq!(first_metrics.hot_count, 51_074);
-    assert_eq!(first_metrics.edge_count, 18_912);
-    assert_eq!(first_metrics.max_bin_count, 888);
-    assert_eq!(second_metrics.hot_count, 50_147);
-    assert_eq!(second_metrics.edge_count, 18_544);
-    assert_eq!(second_metrics.max_bin_count, 865);
-    assert_eq!(full_metrics.hot_count, 51_409);
-    assert_eq!(full_metrics.edge_count, 19_026);
-    assert_eq!(full_metrics.max_bin_count, 891);
-    assert_eq!(intersection, 45_562);
+    // Hot pixels are a property of the sensor, so the masks of two disjoint halves of the darks
+    // agree: four in five of the pixels either flags, the other flags too.
+    assert!(jaccard >= 0.8, "halves disagree: Jaccard {jaccard}");
+    // And they sit across the frame as the sensor's defects do, uniformly: the band within a
+    // tenth of each edge, 36% of the area, holds its share of them to within 5 points — amp glow
+    // or an edge gradient leaking into the mask would load the band — and no 1/64 cell holds
+    // more than 1.25 times the mean, which a gradient or a cluster of false positives would.
+    let band_share = 1.0 - 0.8 * 0.8;
+    for (name, metrics) in [
+        ("first", &first_metrics),
+        ("second", &second_metrics),
+        ("full", &full_metrics),
+    ] {
+        let edge_share = metrics.edge_count as f64 / metrics.hot_count as f64;
+        assert!(
+            (edge_share - band_share).abs() <= 0.05,
+            "{name}: {edge_share:.3} of the hot pixels in the edge band"
+        );
+        let mean_bin = metrics.hot_count as f64 / 64.0;
+        assert!(
+            metrics.max_bin_count as f64 <= 1.25 * mean_bin,
+            "{name}: busiest cell {} against a mean {mean_bin:.0}",
+            metrics.max_bin_count
+        );
+    }
 }
 
 #[quick_bench(warmup_iters = 0, iters = 1)]
 fn bench_build_masters_from_files(b: ::quickbench::Bencher) {
-    let paths = calibration_paths();
+    let paths = real_data::calibration_frames();
     println!(
         "Building full master set: {} darks + {} flats + {} bias",
         paths.darks.len(),
@@ -313,7 +309,7 @@ fn bench_build_masters_from_files(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 0, iters = 1)]
 fn bench_stack_master_dark(b: ::quickbench::Bencher) {
-    let paths = calibration_paths();
+    let paths = real_data::calibration_frames();
     println!("Stacking master dark from {} frames", paths.darks.len());
     b.bench(|| {
         black_box(
@@ -330,7 +326,7 @@ fn bench_stack_master_dark(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 0, iters = 1)]
 fn bench_stack_master_flat(b: ::quickbench::Bencher) {
-    let paths = calibration_paths();
+    let paths = real_data::calibration_frames();
     println!("Stacking master flat from {} frames", paths.flats.len());
     b.bench(|| {
         black_box(
@@ -347,7 +343,7 @@ fn bench_stack_master_flat(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 0, iters = 1)]
 fn bench_stack_master_bias(b: ::quickbench::Bencher) {
-    let paths = calibration_paths();
+    let paths = real_data::calibration_frames();
     println!("Stacking master bias from {} frames", paths.bias.len());
     b.bench(|| {
         black_box(

@@ -1,3 +1,4 @@
+use crate::testing::synthetic::backgrounds::Vignette;
 use crate::testing::synthetic::camera::{BiasField, FlatField, SensorDefects};
 use crate::testing::synthetic::metrics::pixel_stats;
 use crate::testing::synthetic::observe::*;
@@ -81,7 +82,11 @@ fn flat_applied_to_clean_truth() {
     };
     let camera = Camera {
         flat: FlatField {
-            vignette: Some((1.0, 0.5, 2.0)),
+            vignette: Some(Vignette {
+                center: 1.0,
+                edge: 0.5,
+                falloff: 2.0,
+            }),
             channel_gain: [1.0; 3],
         },
         ..Camera::ideal(3.0)

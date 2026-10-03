@@ -1,33 +1,23 @@
-//! One vocabulary for approximate float comparison in tests.
-//!
-//! Replaces four hand-rolled `approx_eq` helpers that disagreed on both signature and semantics:
-//! two took a fixed tolerance, one took it as an argument, and only one handled near-zero values.
-//!
-//! The comparison here accepts either an absolute or a relative miss. A plain `|a - b| < tol`
-//! fails for large magnitudes, where the tolerance sits below the values' own f64 resolution
-//! — `1e-10` against values near `1e6` is already at the edge of what f64 can represent. A plain
-//! relative test divides by zero when both sides are. Taking whichever passes keeps both ends
-//! usable with one tolerance number.
+//! One vocabulary for approximate float comparison in tests: an absolute bound, which the call
+//! states. A bound relative to the expected value is that value times the relative bound, written
+//! at the call — one meaning per number, so a tolerance cannot quietly loosen as values grow.
 
-/// Whether `a` and `b` agree to `tol`, absolutely or relatively.
+/// Whether `a` and `b` agree to the absolute bound `tol`.
 ///
 /// Exact equality short-circuits, which is what makes `±inf` compare equal to itself — the
 /// difference below would be `NaN` there, and every comparison against `NaN` is false. A `NaN`
 /// operand is deliberately never close to anything, including another `NaN`.
 pub(crate) fn is_close(a: f64, b: f64, tol: f64) -> bool {
-    if a == b {
-        return true;
-    }
-    let diff = (a - b).abs();
-    // A non-finite gap is never close, and has to be rejected before the relative branch: that
-    // one compares `inf <= tol * inf`, which is true, so opposite infinities would slip through.
-    if !diff.is_finite() {
-        return false;
-    }
-    diff <= tol || diff <= tol * a.abs().max(b.abs())
+    a == b || (a - b).abs() <= tol
 }
 
-/// Assert two floats agree to `tol`, absolutely or relatively. Takes `f32` or `f64` on either
+/// The bit patterns of `values`, for comparing two float sequences exactly: `-0.0` and `0.0`
+/// differ and NaN equals itself, as no tolerance-based comparison allows.
+pub(crate) fn bits(values: &[f32]) -> Vec<u32> {
+    values.iter().map(|value| value.to_bits()).collect()
+}
+
+/// Assert two floats agree to the absolute bound `tol`. Takes `f32` or `f64` on either
 /// side. An optional trailing `format!` message is appended to the default one.
 macro_rules! assert_close {
     ($a:expr, $b:expr, $tol:expr $(,)?) => {{
@@ -77,19 +67,13 @@ pub(crate) use assert_close_slice;
 mod tests {
     use crate::testing::assertions::is_close;
 
+    /// The bound is absolute at every magnitude: at 1e6 a miss of 1e-5 fails a 1e-10 bound.
     #[test]
-    fn absolute_and_relative_are_both_accepted() {
-        // Absolute: the relative miss is 1.0, far outside tol, but the absolute one is at it.
+    fn the_bound_is_absolute() {
         assert!(is_close(0.0, 1e-10, 1e-10));
         assert!(!is_close(0.0, 1.1e-10, 1e-10));
-
-        // Relative: 1e6 vs 1e6+1e-5 misses absolutely by 1e-5 but relatively by 1e-11.
-        assert!(is_close(1e6, 1e6 + 1e-5, 1e-10));
-        assert!(!is_close(1e6, 1e6 + 1e-3, 1e-10));
-
-        // The absolute-only form the four old helpers used would reject that first relative case,
-        // and it is the one f64 cannot actually resolve: 1e6's own ulp is ~1.2e-10.
-        assert!((1e6f64 - (1e6 + 1e-5)).abs() > 1e-10);
+        assert!(!is_close(1e6, 1e6 + 1e-5, 1e-10));
+        assert!(is_close(1e6, 1e6 + 1e-5, 1e-5));
     }
 
     #[test]

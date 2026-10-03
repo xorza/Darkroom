@@ -12,13 +12,20 @@
 //! [`Camera::ideal`](camera::Camera::ideal) collapses the render to its own ground truth.
 //!
 //! ```rust,ignore
-//! use lumos::testing::synthetic::{camera::Camera, observe::render,
-//!     scene::{BackgroundField, Scene}, metrics::score_detection};
-//! use glam::DVec2;
+//! use crate::testing::synthetic::camera::Camera;
+//! use crate::testing::synthetic::observe::{Observation, render};
+//! use crate::testing::synthetic::scene::{BackgroundField, Scene};
 //!
-//! let scene = Scene::random_field(Size2us::new(512, 512), 80, (5.0, 200.0), //!     BackgroundField::Uniform { level: 0.05 }, 16.0, 42);
-//! let frame = render(&scene, &Camera::realistic(3.5), &observe::Observation::reference(1));
-//! // detect on `frame.image`, then grade against `scene.sources`' positions with `score_detection`
+//! let scene = Scene::random_field(
+//!     Size2us::new(512, 512),
+//!     80,
+//!     (5.0, 200.0),
+//!     BackgroundField::Uniform { level: 0.05 },
+//!     16.0,
+//!     42,
+//! );
+//! let frame = render(&scene, &Camera::realistic(3.5), &Observation::reference(1));
+//! // Detect on `frame.image`, then grade against `frame.truth.sources` with `metrics`.
 //! ```
 //!
 //! Ready-made fields live in [`fixtures`] (`star_field` / `cluster_field`), used by the

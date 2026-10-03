@@ -62,31 +62,32 @@ fn seeing_scale_widens_and_lowers_peak() {
     assert!((s_sum - b_sum).abs() < 2.0);
 }
 
-#[test]
-fn flat_field_default_is_unit() {
-    let flat = FlatField::default().render(Size2us::new(8, 8), 0);
-    assert!(flat.iter().all(|&f| (f - 1.0).abs() < 1e-6));
-}
-
+/// The default flat is 1 everywhere, a channel gain scales the whole map, and a vignette reads
+/// its centre level at the centre pixel (32, 32) and its edge level at the corner (0, 0), which
+/// sits at the corner radius: `1 + (0.5 − 1)·1`, exact in f32. Times the gain 1.25, also exact.
 #[test]
 fn flat_field_channel_gain_and_vignette() {
-    // Per-channel gain scales the whole map.
+    let flat = FlatField::default().render(Size2us::new(8, 8), 0);
+    assert!(flat.iter().all(|&f| f == 1.0));
+
     let ff = FlatField {
         vignette: None,
-        channel_gain: [0.9, 1.0, 1.1],
+        channel_gain: [0.9, 1.0, 1.25],
     };
-    assert!((ff.render(Size2us::new(4, 4), 2)[0] - 1.1).abs() < 1e-6);
+    assert!(ff.render(Size2us::new(4, 4), 2).iter().all(|&f| f == 1.25));
 
-    // Vignette: center brighter than corner.
     let vig = FlatField {
-        vignette: Some((1.0, 0.5, 2.0)),
-        channel_gain: [1.0; 3],
+        vignette: Some(Vignette {
+            center: 1.0,
+            edge: 0.5,
+            falloff: 2.0,
+        }),
+        channel_gain: [1.0, 1.0, 1.25],
     };
-    let map = vig.render(Size2us::new(64, 64), 0);
-    let center = map[32 * 64 + 32];
-    let corner = map[0];
-    assert!(center > corner, "center {center} corner {corner}");
-    assert!((center - 1.0).abs() < 0.05);
+    for (channel, gain) in [(0, 1.0), (2, 1.25)] {
+        let map = vig.render(Size2us::new(64, 64), channel);
+        assert_eq!((map[32 * 64 + 32], map[0]), (gain, 0.5 * gain));
+    }
 }
 
 #[test]

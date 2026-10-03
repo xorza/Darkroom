@@ -51,7 +51,7 @@ fn neutralize_then_stretch_removes_green() {
     );
 
     // Neutralized → stretch → save (compare against the un-neutralized green stretch from
-    // `stretching::real_data_tests`).
+    // `stretching::tests::real_data`).
     Stretch::auto_stf().apply(&mut img).unwrap();
     visual::save_linear(&img, "color/stacked_light_neutralized_stf");
 

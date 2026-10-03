@@ -28,18 +28,16 @@ fn bayer() -> CfaType {
     CfaType::Bayer(CfaPattern::Rggb)
 }
 
-/// Deterministic pseudo-noise in `[base − amp, base + amp]`, plus ~0.1% `defect`-valued
-/// outliers so hot/cold detection has something to flag.
-fn cfa_pixels(base: f32, amp: f32, defect: f32, salt: u32) -> Vec<f32> {
+/// Seeded uniform noise in `[base − amp, base + amp]`, plus ~0.1% `defect`-valued outliers so
+/// hot/cold detection has something to flag.
+fn cfa_pixels(base: f32, amp: f32, defect: f32, seed: u64) -> Vec<f32> {
     let n = W * H;
-    let mut px = vec![0.0f32; n];
-    for (i, p) in px.iter_mut().enumerate() {
-        let hash = (i as u32).wrapping_mul(2_654_435_761) ^ salt;
-        *p = base + (hash as f32 / u32::MAX as f32 - 0.5) * 2.0 * amp;
-    }
-    for k in 0..(n / 1000) {
-        let idx = ((k as u32).wrapping_mul(40503) ^ salt) as usize % n;
-        px[idx] = defect;
+    let mut rng = TestRng::new(seed);
+    let mut px: Vec<f32> = (0..n)
+        .map(|_| base + (rng.next_f32() - 0.5) * 2.0 * amp)
+        .collect();
+    for _ in 0..(n / 1000) {
+        px[(rng.next_f64() * n as f64) as usize] = defect;
     }
     px
 }
@@ -138,14 +136,12 @@ fn cosmic_ray_frame(cfa: CfaType) -> CfaImage {
     const CR_W: usize = 1024;
     const CR_H: usize = 1024;
     let n = CR_W * CR_H;
-    let mut px = vec![0.0f32; n];
-    for (i, p) in px.iter_mut().enumerate() {
-        let hash = (i as u32).wrapping_mul(2_654_435_761);
-        *p = 0.1 + (hash as f32 / u32::MAX as f32 - 0.5) * 0.01;
-    }
-    for k in 0..300 {
-        let idx = (k as u32).wrapping_mul(2_246_822_519) as usize % n;
-        px[idx] = 0.95;
+    let mut rng = TestRng::new(1);
+    let mut px: Vec<f32> = (0..n)
+        .map(|_| 0.1 + (rng.next_f32() - 0.5) * 0.01)
+        .collect();
+    for _ in 0..300 {
+        px[(rng.next_f64() * n as f64) as usize] = 0.95;
     }
     make_cfa(Size2us::new(CR_W, CR_H), px, cfa)
 }
