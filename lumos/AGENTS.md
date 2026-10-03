@@ -19,6 +19,9 @@ planes (coverage, weight, variance/noise) that let a downstream tool
   they stay low-complexity and ride on data the pipeline already computes.
   Machinery that serves neither the image nor its measurability is out of
   scope — remove it rather than carry it.
+- **Thin-plate-spline distortion (`registration/distortion/tps/`) and drizzle
+  (`drizzle/`) stay.** Both are in scope even without a production caller —
+  do not propose removing them.
 - **Precision and correctness outrank speed.** When they conflict, the
   numerically-correct choice wins; never trade accuracy of the stacked result
   for throughput.
