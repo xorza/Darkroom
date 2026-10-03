@@ -5,10 +5,12 @@
 //! electron count at that level and sets the Poisson shot-noise scale (see
 //! [`noise`](crate::testing::synthetic::noise)).
 
+use crate::math::fwhm::fwhm_beta_to_alpha;
 use crate::math::fwhm::fwhm_to_sigma;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar, fwhm_to_moffat_alpha};
+use crate::testing::synthetic::backgrounds::Vignette;
+use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use glam::Vec2;
 use imaginarium::Buffer2;
 use std::f32::consts::PI;
@@ -33,9 +35,9 @@ impl PsfModel {
     /// The round-equivalent FWHM (in pixels) a detector should recover.
     pub(crate) fn fwhm(&self) -> f32 {
         match self {
-            PsfModel::Gaussian { fwhm } => *fwhm,
-            PsfModel::Moffat { fwhm, .. } => *fwhm,
-            PsfModel::Elliptical { fwhm, .. } => *fwhm,
+            PsfModel::Gaussian { fwhm }
+            | PsfModel::Moffat { fwhm, .. }
+            | PsfModel::Elliptical { fwhm, .. } => *fwhm,
         }
     }
 
@@ -59,7 +61,7 @@ impl PsfModel {
                 )
             }
             PsfModel::Moffat { fwhm, beta } => {
-                let alpha = fwhm_to_moffat_alpha(fwhm * seeing_scale, beta);
+                let alpha = fwhm_beta_to_alpha(fwhm * seeing_scale, beta);
                 (
                     StarProfile::Moffat { alpha, beta },
                     flux * (beta - 1.0) / (PI * alpha * alpha),
@@ -92,8 +94,8 @@ impl PsfModel {
 /// A multiplicative flat field (sensor response): optional radial vignette × per-channel gain.
 #[derive(Debug, Clone)]
 pub(crate) struct FlatField {
-    /// `(center, edge, falloff)` radial vignette multiplier, or `None` for a flat 1.0 response.
-    pub(crate) vignette: Option<(f32, f32, f32)>,
+    /// Radial vignette multiplier, or `None` for a flat 1.0 response.
+    pub(crate) vignette: Option<Vignette>,
     /// Per-RGB-channel multiplicative gain (1.0 == no shift). Mono uses index 0.
     pub(crate) channel_gain: [f32; 3],
 }
@@ -112,16 +114,10 @@ impl FlatField {
     pub(crate) fn render(&self, size: Size2us, channel: usize) -> Vec<f32> {
         let gain = self.channel_gain[channel];
         let mut flat = vec![gain; size.pixel_count()];
-        if let Some((center, edge, falloff)) = self.vignette {
-            let cx = size.width as f32 / 2.0;
-            let cy = size.height as f32 / 2.0;
-            let max_r = (cx * cx + cy * cy).sqrt().max(1.0);
+        if let Some(vignette) = self.vignette {
             for y in 0..size.height {
                 for x in 0..size.width {
-                    let dx = x as f32 - cx;
-                    let dy = y as f32 - cy;
-                    let t = ((dx * dx + dy * dy).sqrt() / max_r).powf(falloff);
-                    flat[size.index_of(Vec2us::new(x, y))] = gain * (center + (edge - center) * t);
+                    flat[size.index_of(Vec2us::new(x, y))] = gain * vignette.at(size, x, y);
                 }
             }
         }
@@ -129,13 +125,14 @@ impl FlatField {
     }
 }
 
-/// Sensor defects baked into a frame: hot pixels (additive spikes) and dead pixels
-/// (forced to zero). Coordinates are `(x, y)`.
+/// Sensor defects baked into a frame: hot pixels (additive spikes) and dead pixels (no
+/// response to light or dark current; they read the bias and the read noise). Coordinates are
+/// `(x, y)`.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SensorDefects {
     /// `(x, y, excess)` — hot pixels add `excess` normalized counts.
     pub(crate) hot: Vec<(usize, usize, f32)>,
-    /// `(x, y)` — dead pixels forced to ~zero response.
+    /// `(x, y)` — dead pixels, with no response.
     pub(crate) dead: Vec<(usize, usize)>,
 }
 

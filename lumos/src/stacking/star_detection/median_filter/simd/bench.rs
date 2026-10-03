@@ -21,7 +21,7 @@ use crate::stacking::star_detection::median_filter::simd::{
 const IMAGE_WIDTHS: [usize; 5] = [16, 64, 256, 1024, 4096];
 
 /// Rows per image, chosen with the widths above to keep each sample near a megapixel of work.
-fn rows_for(width: usize) -> usize {
+const fn rows_for(width: usize) -> usize {
     (1 << 20) / width
 }
 
@@ -49,7 +49,7 @@ fn bench_median_filter_dispatch_vs_scalar(b: ::quickbench::Bencher) {
         // Unsorted, non-monotonic values: the sorting network is data-independent but the scalar
         // remainder around it is not.
         let input: Vec<f32> = (0..width * rows)
-            .map(|i| ((i * 2654435761usize) % 65521) as f32 * 1.5e-5)
+            .map(|i| ((i * 2_654_435_761_usize) % 65521) as f32 * 1.5e-5)
             .collect();
         let mut output = vec![0.0f32; width * rows];
 

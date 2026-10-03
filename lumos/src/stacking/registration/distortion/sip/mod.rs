@@ -27,25 +27,26 @@
 //! | 5     | 18            | Full SIP (HST-level) |
 
 use arrayvec::ArrayVec;
-use glam::DVec2;
+use glam::{DMat2, DVec2};
+
+use nalgebra::DMatrix;
 
 use crate::error::InvalidConfigField;
-use crate::math::linear_system;
-use crate::math::size2us::Size2us;
 use crate::math::statistics::{MAD_TO_SIGMA, mad_fast, median_fast};
-use crate::stacking::registration::distortion::SINGULAR_THRESHOLD;
-use crate::stacking::registration::distortion::point_normalization::PointNormalization;
+use crate::stacking::registration::point_normalization::{PointNormalization, centroid};
 use crate::stacking::registration::result::RegistrationError;
 use crate::stacking::registration::transform::Transform;
 
-#[cfg(test)]
-mod tests;
+/// The highest polynomial order [`SipConfig::order`] accepts.
+const MAX_ORDER: usize = 5;
 
 /// Maximum number of polynomial terms (order 5): (5+1)(5+2)/2 - 3 = 18.
 const MAX_TERMS: usize = 18;
 
-/// Maximum size of the A^T*A matrix (flattened).
-const MAX_ATA: usize = MAX_TERMS * MAX_TERMS;
+/// The corrected-residual scale below which clipping stops: a mapped coordinate up to 2²⁰ px is
+/// resolved to `u·2²⁰` ≈ 1.2e-10 px in f64, and a corrected residual takes a handful of operations
+/// at that scale, so a spread under 1e-9 px is rounding rather than outliers.
+const RESIDUAL_RESOLUTION_PX: f64 = 1e-9;
 
 /// Configuration for SIP polynomial fitting.
 #[derive(Debug, Clone)]
@@ -81,7 +82,7 @@ impl Default for SipConfig {
 impl SipConfig {
     pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
         InvalidConfigField::check(
-            (2..=5).contains(&self.order),
+            (2..=MAX_ORDER).contains(&self.order),
             "SIP order",
             "between 2 and 5",
             self.order as f64,
@@ -134,15 +135,20 @@ pub struct SipFitResult {
 }
 
 impl SipPolynomial {
-    /// Fit SIP polynomial directly from matched point pairs and a transform.
+    /// Fit a SIP polynomial to matched point pairs under `transform`.
     ///
-    /// Given matched inlier positions and a homography, fits a polynomial
-    /// correction to minimize residual errors.
+    /// The SIP convention corrects reference pixels before the linear transform: a target is
+    /// predicted at `T(r + c(r))`. Each fit target is therefore the reference-frame correction that
+    /// carries `r` onto its target, `J(r)⁻¹·(t − T(r))` with `J` the Jacobian of `T` at `r` — exact
+    /// for every model up to affine, whose `J` is the constant linear part, and a first-order
+    /// linearization for a homography. The corrected residuals `|T(r + c(r)) − t|` are then
+    /// measured through `T` itself, in target pixels, and sigma clipping and the reported metrics
+    /// both use them.
     ///
     /// # Errors
     ///
-    /// Returns an error if `config` fails validation, the point counts differ,
-    /// there are too few points for a stable fit, or the polynomial system is
+    /// Returns an error if `config` fails validation, the point counts differ, there are too few
+    /// points for a stable fit, `T` is singular at a reference point, or the polynomial system is
     /// singular.
     pub fn fit_from_transform(
         ref_points: &[DVec2],
@@ -161,7 +167,8 @@ impl SipPolynomial {
         let n = ref_points.len();
         let terms = term_exponents(config.order);
         // Require at least 3x as many points as polynomial terms to prevent overfitting.
-        // Astrometry.net practice: order 4 (12 terms) needs ~36 points minimum.
+        // Astrometry.net practice: order 4 (12 terms) needs ~36 points minimum. Held after every
+        // clipping pass too, which keeps the previous fit rather than refit on fewer.
         let required_points = 3 * terms.len();
         if n < required_points {
             return Err(RegistrationError::InsufficientSipPoints {
@@ -170,144 +177,137 @@ impl SipPolynomial {
             });
         }
 
-        let ref_pt = config.reference_point.unwrap_or_else(|| {
-            let sum: DVec2 = ref_points.iter().sum();
-            sum / n as f64
-        });
-        let norm = PointNormalization::new(ref_pt, avg_distance(ref_points, ref_pt));
+        let ref_pt = config
+            .reference_point
+            .unwrap_or_else(|| centroid(ref_points));
+        let norm = PointNormalization::around(ref_points, ref_pt);
 
-        // Compute target residuals in normalized space (constant across iterations)
-        let targets: Vec<DVec2> = ref_points
-            .iter()
-            .zip(target_points.iter())
-            .map(|(&r, &t)| norm.normalize_delta(t - transform.apply(r)))
-            .collect();
-        let targets_u: Vec<f64> = targets.iter().map(|d| d.x).collect();
-        let targets_v: Vec<f64> = targets.iter().map(|d| d.y).collect();
+        let mut targets = Vec::with_capacity(n);
+        for (&r, &t) in ref_points.iter().zip(target_points) {
+            let jacobian = transform.jacobian(r);
+            let determinant = jacobian.determinant();
+            if determinant == 0.0 || !determinant.is_finite() {
+                return Err(RegistrationError::SingularSipSystem);
+            }
+            targets.push(norm.normalize_delta(jacobian.inverse() * (t - transform.apply(r))));
+        }
 
-        // Initial fit on all points
         let mut mask = vec![true; n];
-        let Some(SipCoefficients {
-            u: mut coeffs_u,
-            v: mut coeffs_v,
-        }) = solve_masked(ref_points, &targets_u, &targets_v, &mask, norm, &terms)
-        else {
-            return Err(RegistrationError::SingularSipSystem);
-        };
+        let mut polynomial = Self::solve(ref_points, &targets, &mask, norm, &terms)
+            .ok_or(RegistrationError::SingularSipSystem)?;
+        let mut residuals = Vec::with_capacity(n);
+        polynomial.residuals_into(ref_points, target_points, transform, &mut residuals);
 
-        // Iterative sigma-clipping. The three buffers live outside the loop and are refilled from
-        // empty each pass, so the iteration allocates nothing.
-        let mut residuals: Vec<f64> = Vec::with_capacity(n);
+        // Iterative sigma clipping on the corrected residuals. The buffers live outside the loop
+        // and are refilled each pass, so the iteration allocates nothing but the refit.
         let mut active: Vec<f64> = Vec::with_capacity(n);
         let mut deviations: Vec<f64> = Vec::with_capacity(n);
+        let mut candidate_mask = mask.clone();
         for _ in 0..config.clip_iterations {
-            // Compute per-point residual magnitudes in normalized space
-            residuals.clear();
-            for i in 0..n {
-                if !mask[i] {
-                    residuals.push(f64::INFINITY);
-                    continue;
-                }
-                let uv = norm.normalize(ref_points[i]);
-
-                let mut basis = [0.0; MAX_TERMS];
-                evaluate_basis(uv, &terms, &mut basis[..terms.len()]);
-
-                let mut pred_u = 0.0;
-                let mut pred_v = 0.0;
-                for j in 0..terms.len() {
-                    pred_u += coeffs_u[j] * basis[j];
-                    pred_v += coeffs_v[j] * basis[j];
-                }
-
-                let du = pred_u - targets_u[i];
-                let dv = pred_v - targets_v[i];
-                residuals.push((du * du + dv * dv).sqrt());
-            }
-
             active.clear();
             active.extend(
                 residuals
                     .iter()
-                    .zip(mask.iter())
-                    .filter(|(_, m)| **m)
-                    .map(|(r, _)| *r),
+                    .zip(&mask)
+                    .filter(|(_, kept)| **kept)
+                    .map(|(residual, _)| *residual),
             );
-
-            if active.len() < terms.len() {
-                break; // Not enough points to re-fit
-            }
-
             let median = median_fast(&mut active);
             let mad = mad_fast(&active, median, &mut deviations);
             let threshold = config.clip_sigma * mad * MAD_TO_SIGMA;
-
-            if threshold < 1e-15 {
-                break; // Residuals are essentially zero
+            if threshold < RESIDUAL_RESOLUTION_PX {
+                break;
             }
 
-            // Reject outliers
-            let mut any_rejected = false;
-            for i in 0..n {
-                if mask[i] && residuals[i] > median + threshold {
-                    mask[i] = false;
-                    any_rejected = true;
-                }
+            for ((candidate, &kept), &residual) in
+                candidate_mask.iter_mut().zip(&mask).zip(&residuals)
+            {
+                *candidate = kept && residual <= median + threshold;
             }
-
-            if !any_rejected {
-                break; // Converged
+            let survivors = candidate_mask.iter().filter(|&&kept| kept).count();
+            if candidate_mask == mask || survivors < required_points {
+                break;
             }
-
-            // Re-fit on surviving points
-            let Some(refit) = solve_masked(ref_points, &targets_u, &targets_v, &mask, norm, &terms)
+            let Some(refit) = Self::solve(ref_points, &targets, &candidate_mask, norm, &terms)
             else {
-                return Err(RegistrationError::SingularSipSystem);
+                break;
             };
-            coeffs_u = refit.u;
-            coeffs_v = refit.v;
+            polynomial = refit;
+            mask.copy_from_slice(&candidate_mask);
+            polynomial.residuals_into(ref_points, target_points, transform, &mut residuals);
         }
 
-        let polynomial = Self {
-            norm,
-            terms,
-            coeffs_u,
-            coeffs_v,
-        };
-
-        // Compute quality metrics from final fit
-        let points_used = mask.iter().filter(|&&m| m).count();
-        let points_rejected = n - points_used;
-
+        let points_used = mask.iter().filter(|&&kept| kept).count();
         let mut sum_sq = 0.0;
         let mut max_residual = 0.0f64;
         let mut max_correction = 0.0f64;
-        for i in 0..n {
-            if !mask[i] {
-                continue;
-            }
-            let corrected = polynomial.correct(ref_points[i]);
-            let mapped = transform.apply(corrected);
-            let residual = (mapped - target_points[i]).length();
+        for ((&r, &residual), _) in ref_points
+            .iter()
+            .zip(&residuals)
+            .zip(&mask)
+            .filter(|(_, kept)| **kept)
+        {
             sum_sq += residual * residual;
             max_residual = max_residual.max(residual);
-
-            let correction = polynomial.correction_at(ref_points[i]).length();
-            max_correction = max_correction.max(correction);
+            max_correction = max_correction.max(polynomial.correction_at(r).length());
         }
-        let rms_residual = if points_used > 0 {
-            (sum_sq / points_used as f64).sqrt()
-        } else {
-            0.0
-        };
 
         Ok(SipFitResult {
             polynomial,
-            rms_residual,
+            rms_residual: (sum_sq / points_used as f64).sqrt(),
             max_residual,
             points_used,
-            points_rejected,
+            points_rejected: n - points_used,
             max_correction,
+        })
+    }
+
+    /// The least-squares polynomial through the masked-in fit targets, or `None` when the design
+    /// matrix is rank-deficient.
+    ///
+    /// Solved on the rectangular design matrix by SVD rather than through its normal equations,
+    /// whose condition number is the square of the matrix's. The rank test is the usual numerical
+    /// one: a singular value at or below `max(rows, columns)·ε·σ_max` is indistinguishable from
+    /// zero in f64.
+    fn solve(
+        points: &[DVec2],
+        targets: &[DVec2],
+        mask: &[bool],
+        norm: PointNormalization,
+        terms: &ArrayVec<(usize, usize), MAX_TERMS>,
+    ) -> Option<Self> {
+        let n_terms = terms.len();
+        let rows = mask.iter().filter(|&&kept| kept).count();
+        let mut design = DMatrix::zeros(rows, n_terms);
+        let mut rhs = DMatrix::zeros(rows, 2);
+        let mut basis = [0.0; MAX_TERMS];
+        let kept = points
+            .iter()
+            .zip(targets)
+            .zip(mask)
+            .filter(|(_, kept)| **kept);
+        for (row, ((&point, &target), _)) in kept.enumerate() {
+            evaluate_basis(norm.normalize(point), terms, &mut basis[..n_terms]);
+            for (column, &value) in basis[..n_terms].iter().enumerate() {
+                design[(row, column)] = value;
+            }
+            rhs[(row, 0)] = target.x;
+            rhs[(row, 1)] = target.y;
+        }
+
+        let svd = design.svd(true, true);
+        let rank_tolerance = rows.max(n_terms) as f64 * f64::EPSILON * svd.singular_values.max();
+        if svd.singular_values.min() <= rank_tolerance {
+            return None;
+        }
+        let solution = svd
+            .solve(&rhs, rank_tolerance)
+            .expect("an SVD computed with both singular-vector sets can solve");
+        Some(Self {
+            norm,
+            terms: terms.clone(),
+            coeffs_u: solution.column(0).iter().copied().collect(),
+            coeffs_v: solution.column(1).iter().copied().collect(),
         })
     }
 
@@ -316,53 +316,53 @@ impl SipPolynomial {
         p + self.correction_at(p)
     }
 
-    /// Compute residuals after applying SIP correction.
-    ///
-    /// For each point, computes `|transform(sip_correct(ref)) - target|`.
-    pub fn compute_corrected_residuals(
+    /// The corrected residual of each pair, `|T(r + c(r)) − t|` in target pixels, into a caller's
+    /// buffer.
+    fn residuals_into(
         &self,
         ref_points: &[DVec2],
         target_points: &[DVec2],
         transform: &Transform,
-    ) -> Vec<f64> {
-        ref_points
-            .iter()
-            .zip(target_points.iter())
-            .map(|(&r, &t)| {
-                let corrected = self.correct(r);
-                let mapped = transform.apply(corrected);
-                (mapped - t).length()
-            })
-            .collect()
+        residuals: &mut Vec<f64>,
+    ) {
+        residuals.clear();
+        residuals.extend(
+            ref_points
+                .iter()
+                .zip(target_points)
+                .map(|(&r, &t)| (transform.apply(self.correct(r)) - t).length()),
+        );
     }
 
-    /// Get the maximum correction magnitude across a grid of points.
-    pub fn max_correction(&self, size: Size2us, grid_spacing: f64) -> f64 {
-        assert!(
-            grid_spacing > 0.0,
-            "grid_spacing must be positive, got {grid_spacing}"
-        );
-        // Integer-stepped to avoid float accumulation drift skipping the boundary band.
-        let nx = (size.width as f64 / grid_spacing).floor() as usize;
-        let ny = (size.height as f64 / grid_spacing).floor() as usize;
-        let mut max_mag = 0.0f64;
-        for iy in 0..=ny {
-            let y = iy as f64 * grid_spacing;
-            for ix in 0..=nx {
-                let x = ix as f64 * grid_spacing;
-                let correction = self.correction_at(DVec2::new(x, y));
-                max_mag = max_mag.max(correction.length());
+    /// The Jacobian of [`Self::correct`] at `p`: the identity plus the polynomial's derivative.
+    ///
+    /// The correction is `s·P((p − p₀)/s)` in the normalized coordinates the polynomial is held in,
+    /// so the scale cancels and its derivative is `P`'s: `∂(uᵖvᵠ)/∂u = p·uᵖ⁻¹vᵠ`, from the same
+    /// [`MonomialPowers`] [`evaluate_basis`] reads. Columns are the images of the x and y steps.
+    pub fn jacobian(&self, p: DVec2) -> DMat2 {
+        let powers = MonomialPowers::at(self.norm.normalize(p));
+        let mut d_du = DVec2::ZERO;
+        let mut d_dv = DVec2::ZERO;
+        for (i, &(pu, pv)) in self.terms.iter().enumerate() {
+            let coefficients = DVec2::new(self.coeffs_u[i], self.coeffs_v[i]);
+            if pu > 0 {
+                d_du += coefficients * (pu as f64 * powers.u[pu - 1] * powers.v[pv]);
+            }
+            if pv > 0 {
+                d_dv += coefficients * (pv as f64 * powers.u[pu] * powers.v[pv - 1]);
             }
         }
-        max_mag
+        DMat2::from_cols(DVec2::X + d_du, DVec2::Y + d_dv)
     }
 
     /// Compute the correction vector at a point (without applying it).
     fn correction_at(&self, p: DVec2) -> DVec2 {
-        let uv = self.norm.normalize(p);
-
         let mut basis = [0.0; MAX_TERMS];
-        evaluate_basis(uv, &self.terms, &mut basis[..self.terms.len()]);
+        evaluate_basis(
+            self.norm.normalize(p),
+            &self.terms,
+            &mut basis[..self.terms.len()],
+        );
 
         let mut du = 0.0;
         let mut dv = 0.0;
@@ -388,184 +388,81 @@ fn term_exponents(order: usize) -> ArrayVec<(usize, usize), MAX_TERMS> {
     terms
 }
 
-/// Evaluate a monomial u^p * v^q on a normalized point.
-#[inline]
-fn monomial(uv: DVec2, p: usize, q: usize) -> f64 {
-    uv.x.powi(p as i32) * uv.y.powi(q as i32)
+/// The powers `u⁰..u^MAX_ORDER` and `v⁰..v^MAX_ORDER` of one normalized point, built by repeated
+/// multiplication: two multiplies per order.
+#[derive(Debug, Clone, Copy)]
+struct MonomialPowers {
+    u: [f64; MAX_ORDER + 1],
+    v: [f64; MAX_ORDER + 1],
 }
 
-/// Evaluate all monomial basis functions for a normalized point.
+impl MonomialPowers {
+    #[inline]
+    fn at(uv: DVec2) -> Self {
+        let mut powers = Self {
+            u: [1.0; MAX_ORDER + 1],
+            v: [1.0; MAX_ORDER + 1],
+        };
+        for k in 1..=MAX_ORDER {
+            powers.u[k] = powers.u[k - 1] * uv.x;
+            powers.v[k] = powers.v[k - 1] * uv.y;
+        }
+        powers
+    }
+}
+
+/// Every monomial `u^p·v^q` of `terms` at a normalized point, one multiply per term over its
+/// [`MonomialPowers`].
 #[inline]
 fn evaluate_basis(uv: DVec2, terms: &[(usize, usize)], basis: &mut [f64]) {
-    for (j, &(p, q)) in terms.iter().enumerate() {
-        basis[j] = monomial(uv, p, q);
+    let powers = MonomialPowers::at(uv);
+    for (value, &(p, q)) in basis.iter_mut().zip(terms) {
+        *value = powers.u[p] * powers.v[q];
     }
 }
 
-/// Compute average distance from a set of points to a reference point.
-fn avg_distance(points: &[DVec2], ref_pt: DVec2) -> f64 {
-    let sum: f64 = points.iter().map(|p| (*p - ref_pt).length()).sum();
-    let avg = sum / points.len() as f64;
-    if avg > 1e-10 { avg } else { 1.0 }
-}
+#[cfg(test)]
+pub(crate) mod internals {
+    use glam::DVec2;
 
-/// One SIP fit: the polynomial coefficients for each output axis.
-///
-/// The two axes share a design matrix and differ only in their target values, so they are
-/// always solved and consumed together.
-#[derive(Debug)]
-struct SipCoefficients {
-    u: ArrayVec<f64, MAX_TERMS>,
-    v: ArrayVec<f64, MAX_TERMS>,
-}
+    use crate::math::size2us::Size2us;
+    use crate::stacking::registration::distortion::sip::SipPolynomial;
+    use crate::stacking::registration::transform::Transform;
 
-/// The normal equations for one SIP fit: `A^T·A` shared by both axes, and one `A^T·b` per axis.
-///
-/// `ata` is `n_terms × n_terms` row-major in a fixed-capacity buffer, so it carries no dimension
-/// of its own — the caller's `terms.len()` is the order.
-#[derive(Debug)]
-struct SipNormalEquations {
-    ata: [f64; MAX_ATA],
-    atb_u: [f64; MAX_TERMS],
-    atb_v: [f64; MAX_TERMS],
-}
-
-/// Solve the SIP normal equations using only the masked-in points.
-fn solve_masked(
-    points: &[DVec2],
-    targets_u: &[f64],
-    targets_v: &[f64],
-    mask: &[bool],
-    norm: PointNormalization,
-    terms: &[(usize, usize)],
-) -> Option<SipCoefficients> {
-    let equations = build_normal_equations(points, targets_u, targets_v, mask, norm, terms);
-    let n_terms = terms.len();
-    Some(SipCoefficients {
-        u: solve_cholesky(&equations.ata, &equations.atb_u, n_terms)?,
-        v: solve_cholesky(&equations.ata, &equations.atb_v, n_terms)?,
-    })
-}
-
-/// Build normal equations A^T*A and A^T*b from point/target pairs (masked).
-fn build_normal_equations(
-    points: &[DVec2],
-    targets_u: &[f64],
-    targets_v: &[f64],
-    mask: &[bool],
-    norm: PointNormalization,
-    terms: &[(usize, usize)],
-) -> SipNormalEquations {
-    let n_terms = terms.len();
-    let mut ata = [0.0; MAX_ATA];
-    let mut atb_u = [0.0; MAX_TERMS];
-    let mut atb_v = [0.0; MAX_TERMS];
-    let mut basis = [0.0; MAX_TERMS];
-
-    for (i, point) in points.iter().enumerate() {
-        if !mask[i] {
-            continue;
+    impl SipPolynomial {
+        /// The corrected residual of each pair: `|T(r + c(r)) − t|`, in target pixels.
+        pub(crate) fn corrected_residuals(
+            &self,
+            ref_points: &[DVec2],
+            target_points: &[DVec2],
+            transform: &Transform,
+        ) -> Vec<f64> {
+            let mut residuals = Vec::with_capacity(ref_points.len());
+            self.residuals_into(ref_points, target_points, transform, &mut residuals);
+            residuals
         }
-        evaluate_basis(norm.normalize(*point), terms, &mut basis[..n_terms]);
 
-        // Accumulate A^T*A and A^T*b
-        for j in 0..n_terms {
-            for k in j..n_terms {
-                let val = basis[j] * basis[k];
-                ata[j * n_terms + k] += val;
-                if k != j {
-                    ata[k * n_terms + j] += val;
+        /// The largest correction over a grid of `grid_spacing` across `size`, its far edges
+        /// included.
+        #[expect(
+            clippy::cast_sign_loss,
+            reason = "a size over a positive grid spacing is non-negative"
+        )]
+        pub(crate) fn max_grid_correction(&self, size: Size2us, grid_spacing: f64) -> f64 {
+            // Integer-stepped to avoid float accumulation drift skipping the boundary band.
+            let nx = (size.width as f64 / grid_spacing).floor() as usize;
+            let ny = (size.height as f64 / grid_spacing).floor() as usize;
+            let mut max_mag = 0.0f64;
+            for iy in 0..=ny {
+                for ix in 0..=nx {
+                    let point = DVec2::new(ix as f64 * grid_spacing, iy as f64 * grid_spacing);
+                    max_mag = max_mag.max(self.correction_at(point).length());
                 }
             }
-            atb_u[j] += basis[j] * targets_u[i];
-            atb_v[j] += basis[j] * targets_v[i];
+            max_mag
         }
     }
-
-    SipNormalEquations { ata, atb_u, atb_v }
 }
 
-/// Solve a symmetric positive definite system Ax = b using Cholesky decomposition.
-/// Falls back to LU decomposition if the matrix is not positive definite.
-///
-/// A second factorization rather than a duplicate of one: the normal equations `A^T·A` are
-/// symmetric positive definite by construction, and Cholesky exploits that for roughly half the
-/// arithmetic of elimination and a better-conditioned solve. [`solve_lu`] is what catches the cases
-/// that break the assumption — a non-positive diagonal, or a condition estimate past ~1e10.
-#[allow(clippy::needless_range_loop)]
-fn solve_cholesky(a: &[f64], b: &[f64], n: usize) -> Option<ArrayVec<f64, MAX_TERMS>> {
-    let mut l = [0.0; MAX_ATA];
-
-    // Cholesky factorization: A = L * L^T
-    for i in 0..n {
-        for j in 0..=i {
-            let mut sum = 0.0;
-            for k in 0..j {
-                sum += l[i * n + k] * l[j * n + k];
-            }
-
-            if i == j {
-                let diag = a[i * n + i] - sum;
-                if diag <= 0.0 {
-                    // Not positive definite, fall back to LU
-                    return solve_lu(a, b, n);
-                }
-                l[i * n + j] = diag.sqrt();
-            } else {
-                l[i * n + j] = (a[i * n + j] - sum) / l[j * n + j];
-            }
-        }
-    }
-
-    // Condition number estimate: cond(A) ≈ (max(diag(L)) / min(diag(L)))^2.
-    // If this exceeds ~1e10 the solution is unreliable; fall back to LU with pivoting.
-    let mut diag_min = f64::MAX;
-    let mut diag_max = 0.0f64;
-    for i in 0..n {
-        let d = l[i * n + i];
-        diag_min = diag_min.min(d);
-        diag_max = diag_max.max(d);
-    }
-    if diag_min < SINGULAR_THRESHOLD || (diag_max / diag_min) > 1e5 {
-        // cond(A) ≈ (1e5)^2 = 1e10, unreliable — fall back to LU
-        return solve_lu(a, b, n);
-    }
-
-    // Forward substitution: L * y = b
-    let mut y = [0.0; MAX_TERMS];
-    for i in 0..n {
-        let mut sum = 0.0;
-        for j in 0..i {
-            sum += l[i * n + j] * y[j];
-        }
-        y[i] = (b[i] - sum) / l[i * n + i];
-    }
-
-    // Back substitution: L^T * x = y
-    let mut x = [0.0; MAX_TERMS];
-    for i in (0..n).rev() {
-        let mut sum = 0.0;
-        for j in (i + 1)..n {
-            sum += l[j * n + i] * x[j];
-        }
-        x[i] = (y[i] - sum) / l[i * n + i];
-    }
-
-    Some(ArrayVec::try_from(&x[..n]).unwrap())
-}
-
-/// Gaussian elimination with partial pivoting — the fallback for normal equations that aren't
-/// positive definite, where [`solve_cholesky`] cannot go.
-///
-/// `a` is row-major `n × n` and both operands are left intact: the caller solves twice against the
-/// same `A^T·A`, once per axis, so the working copies are made here.
-fn solve_lu(a: &[f64], b: &[f64], n: usize) -> Option<ArrayVec<f64, MAX_TERMS>> {
-    let mut matrix = [0.0; MAX_ATA];
-    matrix[..n * n].copy_from_slice(&a[..n * n]);
-    let mut x = [0.0; MAX_TERMS];
-    x[..n].copy_from_slice(&b[..n]);
-
-    linear_system::solve_in_place(&mut matrix[..n * n], &mut x[..n], SINGULAR_THRESHOLD)?;
-
-    Some(ArrayVec::try_from(&x[..n]).unwrap())
-}
+#[cfg(test)]
+mod tests;

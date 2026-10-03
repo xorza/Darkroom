@@ -41,7 +41,7 @@ impl NodeState {
     }
 
     fn restore(&self, doc: &mut Document) {
-        let node_id = self.detached.node_id;
+        let node_id = self.detached.node_id();
         doc.graph.attach_node(self.detached.clone());
         doc.main_view
             .item_placements
@@ -74,9 +74,9 @@ impl NodePresence {
     ///
     /// Unselected: adding a node leaves the selection alone, and a caller that
     /// wants the new node selected raises that as its own edit.
-    pub(crate) fn insertion(detached: DetachedNode, placement: ItemPlacement) -> Self {
+    pub(crate) const fn insertion(detached: DetachedNode, placement: ItemPlacement) -> Self {
         Self {
-            node_id: detached.node_id,
+            node_id: detached.node_id(),
             state: Change {
                 from: None,
                 to: Some(NodeState {
@@ -89,9 +89,9 @@ impl NodePresence {
     }
 
     /// Take `state`'s node out of the document; undo puts it back whole.
-    pub(crate) fn removal(state: NodeState) -> Self {
+    pub(crate) const fn removal(state: NodeState) -> Self {
         Self {
-            node_id: state.detached.node_id,
+            node_id: state.detached.node_id(),
             state: Change {
                 from: Some(state),
                 to: None,
@@ -141,6 +141,10 @@ impl Reversible for NodePresence {
     /// nothing to anchor to until it has recorded once — and a removal is
     /// true for its *revert*, which is exactly that arrival.
     fn invalidates_cached_geometry(&self) -> bool {
+        true
+    }
+
+    fn retypes_outputs(&self) -> bool {
         true
     }
 }

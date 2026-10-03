@@ -3,7 +3,7 @@
 //! primed cache for the sweep that reads one.
 
 mod planning {
-    use crate::execution::compile::compiled_graph::{ExecutionBinding, ExecutionEvent};
+    use crate::execution::compile::compiled_graph::ExecutionBinding;
     use crate::execution::error::Error;
     use crate::execution::identity::{NodeIdx, OutputAddr, OutputIdx};
     use crate::execution::schedule::planner::Planner;
@@ -122,7 +122,7 @@ mod planning {
         p.process_order.push(dropped);
 
         // The validator reports corruption rather than faulting on it: a binding
-        // target past the last node used to index `seen_in_order` out of range.
+        // target past the last node must not index `seen_in_order` out of range.
         let past_the_end = NodeIdx(prog.program_mut().e_nodes.len() as u32);
         let b_input = prog.program()[b.node_idx].inputs.nth(0);
         prog.program_mut().inputs[b_input].binding = ExecutionBinding::Bind(OutputAddr {
@@ -160,7 +160,10 @@ mod planning {
         let consumer_input = &prog.program().inputs[prog.program()[consumer.node_idx].inputs][0];
 
         assert!(
-            catch_unwind(AssertUnwindSafe(|| schedule.input_missing(consumer_input))).is_err(),
+            catch_unwind(AssertUnwindSafe(
+                || schedule.input_missing(prog.program(), consumer_input)
+            ))
+            .is_err(),
             "an unvisited producer is a broken schedule, not an unsatisfied input"
         );
     }
@@ -261,11 +264,10 @@ mod planning {
         prog.node().sink().input(at(1)).outputs(1).add();
         prog.node().input(at(0)).outputs(1).add();
 
-        let mut planner = Planner::default();
-        let mut plan = RunSchedule::default();
-        let seeds = RunSeeds::sinks();
-        let result = planner.plan(prog.program(), &seeds, &mut plan);
-        assert!(matches!(result, Err(Error::CycleDetected { .. })));
+        assert!(matches!(
+            prog.try_plan(&RunSeeds::sinks()),
+            Err(Error::CycleDetected { .. })
+        ));
     }
 
     #[test]
@@ -279,11 +281,12 @@ mod planning {
         let b = prog.node().input(a.out(0)).outputs(1).add();
         let c = prog.node().sink().input(b.out(0)).outputs(1).add();
 
+        // One planner and one schedule across the calls below: each plan has
+        // to start from nothing, whatever the last one left.
         let mut planner = Planner::default();
         let mut p = RunSchedule::default();
-        let seeds = RunSeeds::nodes(vec![b.node_id]);
         planner
-            .plan(prog.program(), &seeds, &mut p)
+            .plan(prog.program(), &RunSeeds::nodes(vec![b.node_id]), &mut p)
             .expect("no cycle");
 
         assert_eq!(
@@ -356,13 +359,8 @@ mod planning {
     #[test]
     fn event_seed_schedules_subscribers_and_rejects_missing_ports() {
         let mut prog = ProgramBuilder::default();
-        let emitter = prog.node().outputs(0).add();
         let subscriber = prog.node().outputs(0).add();
-        let events = prog.program_mut().events.append([ExecutionEvent {
-            subscribers: vec![subscriber.node_idx],
-            ..Default::default()
-        }]);
-        prog.program_mut().by_id_mut(emitter.node_id).events = events;
+        let emitter = prog.node().outputs(0).event([subscriber]).add();
 
         let event = EventPort {
             node_id: emitter.node_id,
@@ -431,25 +429,21 @@ mod planning {
 }
 
 mod resolving {
+    use crate::DynamicValue;
     use crate::execution::compile::compiled_graph::ExecutionBinding;
     use crate::execution::schedule::NodeState;
-    use crate::graph::func::lambda::{FuncLambda, OutputDemand};
+    use crate::graph::func::lambda::OutputDemand;
     use crate::testing::program::ProgramBuilder;
-    use crate::{ConstValue, DynamicValue};
-
-    fn value(value: i64) -> DynamicValue {
-        DynamicValue::Static(ConstValue::Int(value))
-    }
 
     #[tokio::test]
     async fn exact_demand_accepts_narrow_producer_cache_and_ignores_reused_reader() {
         let mut prog = ProgramBuilder::default();
-        let source = prog.node().reusable().outputs(2).add();
-        let cached = prog.node().reusable().input(source.out(1)).outputs(1).add();
-        let live = prog.node().reusable().input(source.out(0)).outputs(1).add();
+        let source = prog.node().pure().outputs(2).add();
+        let cached = prog.node().pure().input(source.out(1)).outputs(1).add();
+        let live = prog.node().pure().input(source.out(0)).outputs(1).add();
         let sink = prog
             .node()
-            .reusable()
+            .pure()
             .input(cached.out(0))
             .input(live.out(0))
             .outputs(0)
@@ -458,8 +452,8 @@ mod resolving {
         let run = prog
             .sweep()
             .root(sink)
-            .cached(source, [value(7), DynamicValue::Unbound])
-            .cached(cached, [value(8)])
+            .cached(source, [ProgramBuilder::value(7), DynamicValue::Unbound])
+            .cached(cached, [ProgramBuilder::value(8)])
             .run()
             .await;
 
@@ -477,10 +471,10 @@ mod resolving {
     #[tokio::test]
     async fn missing_input_stops_liveness_before_its_producer() {
         let mut prog = ProgramBuilder::default();
-        let source = prog.node().reusable().outputs(1).add();
+        let source = prog.node().pure().outputs(1).add();
         let blocked = prog
             .node()
-            .reusable()
+            .pure()
             .input(source.out(0))
             .required(ExecutionBinding::None)
             .outputs(0)
@@ -499,50 +493,14 @@ mod resolving {
         assert_eq!(run.readers(source), &[0]);
     }
 
-    #[tokio::test]
-    async fn missing_lambda_stops_liveness_before_its_producer() {
-        let mut prog = ProgramBuilder::default();
-        let source = prog.node().reusable().outputs(1).add();
-        let missing = prog.node().reusable().input(source.out(0)).outputs(1).add();
-        prog.program_mut().by_id_mut(missing.node_id).lambda = FuncLambda::None;
-        let sink = prog
-            .node()
-            .reusable()
-            .input(missing.out(0))
-            .outputs(0)
-            .add();
-
-        let run = prog
-            .sweep()
-            .root(sink)
-            .cached(missing, [value(9)])
-            .run()
-            .await;
-
-        assert_eq!(run.state(source), NodeState::Cut);
-        assert_eq!(
-            run.state(missing),
-            NodeState::MissingLambda,
-            "a matching cache cannot hide a reached missing implementation"
-        );
-        assert_eq!(run.state(sink), NodeState::Run);
-        assert_eq!(run.demand(source), &[OutputDemand::Skip]);
-        assert_eq!(run.readers(source), &[0]);
-        assert_eq!(
-            run.readers(missing),
-            &[1],
-            "the downstream skip still owns one read to retire"
-        );
-    }
-
     /// A node seed demands every output it has, without any consumer reading them —
     /// the "run to this node" semantic, distinct from demand arriving through a
     /// binding.
     #[tokio::test]
     async fn a_node_seed_demands_every_output_without_readers() {
         let mut prog = ProgramBuilder::default();
-        let unseeded = prog.node().reusable().outputs(2).add();
-        let seeded = prog.node().reusable().outputs(2).add();
+        let unseeded = prog.node().pure().outputs(2).add();
+        let seeded = prog.node().pure().outputs(2).add();
 
         let run = prog
             .sweep()
@@ -573,15 +531,15 @@ mod resolving {
     #[tokio::test]
     async fn cone_reachable_only_through_a_reuse_hit_is_fully_pruned() {
         let mut prog = ProgramBuilder::default();
-        let deep = prog.node().reusable().outputs(1).add();
-        let source = prog.node().reusable().input(deep.out(0)).outputs(1).add();
-        let cached = prog.node().reusable().input(source.out(0)).outputs(1).add();
-        let sink = prog.node().reusable().input(cached.out(0)).outputs(0).add();
+        let deep = prog.node().pure().outputs(1).add();
+        let source = prog.node().pure().input(deep.out(0)).outputs(1).add();
+        let cached = prog.node().pure().input(source.out(0)).outputs(1).add();
+        let sink = prog.node().pure().input(cached.out(0)).outputs(0).add();
 
         let run = prog
             .sweep()
             .root(sink)
-            .cached(cached, [value(1)])
+            .cached(cached, [ProgramBuilder::value(1)])
             .run()
             .await;
 

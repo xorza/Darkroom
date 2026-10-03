@@ -11,7 +11,7 @@ use crate::math::statistics::{MedianMad, mad_floored};
 use crate::stacking::star_detection::config::filter_config::FilterConfig;
 use crate::stacking::star_detection::detector::QualityFilterDiagnostics;
 use crate::stacking::star_detection::detector::stages::FWHM_MAD_FLOOR_FRACTION;
-use crate::stacking::star_detection::star::{SATURATION_PEAK, Star};
+use crate::stacking::star_detection::star::Star;
 
 /// Below this star count, dedup with the O(n²) brute force instead of the sparse spatial hash.
 /// For a handful of stars the brute force is trivial and skips the hash's per-call allocation; the
@@ -26,6 +26,38 @@ pub(crate) struct FilterOutcome {
     pub(crate) diagnostics: QualityFilterDiagnostics,
 }
 
+/// Why a star fails the quality filter, by the test that caught it, in the order they run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Rejection {
+    Saturated,
+    LowSnr,
+    Eccentric,
+    CosmicRay,
+    NotRound,
+}
+
+impl Rejection {
+    /// The first quality test `star` fails under `config`, or `None` when it passes them all.
+    ///
+    /// The one statement of the per-star criteria: the filter stage counts by it, and FWHM
+    /// estimation measures only the stars it passes.
+    pub(crate) fn of(star: &Star, config: &FilterConfig) -> Option<Self> {
+        if star.saturated {
+            Some(Self::Saturated)
+        } else if star.snr < config.min_snr {
+            Some(Self::LowSnr)
+        } else if star.eccentricity > config.max_eccentricity {
+            Some(Self::Eccentric)
+        } else if star.is_cosmic_ray(config.max_sharpness) {
+            Some(Self::CosmicRay)
+        } else if !star.is_round(config.max_roundness) {
+            Some(Self::NotRound)
+        } else {
+            None
+        }
+    }
+}
+
 impl FilterOutcome {
     /// Filter stars by quality metrics, remove duplicates, and sort by flux.
     ///
@@ -34,33 +66,27 @@ impl FilterOutcome {
     pub(crate) fn from_stars(mut stars: Vec<Star>, config: &FilterConfig) -> Self {
         let mut diagnostics = QualityFilterDiagnostics::default();
 
-        // Apply quality filters
         stars.retain(|star| {
-            if star.is_saturated(SATURATION_PEAK) {
-                diagnostics.saturated += 1;
-                false
-            } else if star.snr < config.min_snr {
-                diagnostics.low_snr += 1;
-                false
-            } else if star.eccentricity > config.max_eccentricity {
-                diagnostics.high_eccentricity += 1;
-                false
-            } else if star.is_cosmic_ray(config.max_sharpness) {
-                diagnostics.cosmic_rays += 1;
-                false
-            } else if !star.is_round(config.max_roundness) {
-                diagnostics.roundness += 1;
-                false
-            } else {
-                true
-            }
+            let Some(rejection) = Rejection::of(star, config) else {
+                return true;
+            };
+            *match rejection {
+                Rejection::Saturated => &mut diagnostics.saturated,
+                Rejection::LowSnr => &mut diagnostics.low_snr,
+                Rejection::Eccentric => &mut diagnostics.high_eccentricity,
+                Rejection::CosmicRay => &mut diagnostics.cosmic_rays,
+                Rejection::NotRound => &mut diagnostics.roundness,
+            } += 1;
+            false
         });
 
         // Sort by flux (brightest first)
         sort_by_flux(&mut stars);
 
         // Filter FWHM outliers
-        diagnostics.fwhm_outliers = filter_fwhm_outliers(&mut stars, config.max_fwhm_deviation);
+        if let Some(max_deviation) = config.max_fwhm_deviation {
+            diagnostics.fwhm_outliers = filter_fwhm_outliers(&mut stars, max_deviation);
+        }
 
         // Remove duplicates
         diagnostics.duplicates =
@@ -77,7 +103,11 @@ fn sort_by_flux(stars: &mut [Star]) {
 
 /// Filter stars by FWHM using MAD-based outlier detection.
 fn filter_fwhm_outliers(stars: &mut Vec<Star>, max_deviation: f32) -> usize {
-    if max_deviation <= 0.0 || stars.len() < 5 {
+    debug_assert!(
+        max_deviation > 0.0,
+        "validated positive; `None` skips the call"
+    );
+    if stars.len() < 5 {
         return 0;
     }
 
@@ -110,16 +140,25 @@ fn filter_fwhm_outliers(stars: &mut Vec<Star>, max_deviation: f32) -> usize {
 /// filter, at the cost of an O(n log n) build and n radius queries whose results are mostly
 /// discarded, in place of a structure built as the single pass goes.
 fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
-    if stars.len() < 2 {
+    // Both paths count a pair as duplicate only when strictly closer than `min_separation`, so a
+    // separation of zero removes nothing. Said here rather than reached: the spatial hash would
+    // divide by it.
+    if stars.len() < 2 || min_separation == 0.0 {
         return 0;
     }
 
     if stars.len() < SPATIAL_HASH_CROSSOVER {
-        return remove_duplicate_stars_simple(stars, min_separation);
+        remove_duplicate_stars_simple(stars, min_separation)
+    } else {
+        remove_duplicate_stars_hashed(stars, min_separation)
     }
+}
 
-    let min_sep_sq = (min_separation * min_separation) as f64;
-    let cell_size = min_separation as f64;
+/// The spatial-hash path of [`remove_duplicate_stars`]: the same answer in O(stars).
+fn remove_duplicate_stars_hashed(stars: &mut Vec<Star>, min_separation: f32) -> usize {
+    debug_assert!(min_separation > 0.0, "the cell size is the separation");
+    let min_sep_sq = f64::from(min_separation * min_separation);
+    let cell_size = f64::from(min_separation);
 
     // Sparse spatial hash keyed by integer cell coordinate: only cells that actually hold a star
     // are allocated, so memory and time are O(stars). A dense grid is O(field_area / min_sep²) —
@@ -164,7 +203,7 @@ fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
 
 /// Simple O(n²) duplicate removal for small star counts.
 fn remove_duplicate_stars_simple(stars: &mut Vec<Star>, min_separation: f32) -> usize {
-    let min_sep_sq = (min_separation * min_separation) as f64;
+    let min_sep_sq = f64::from(min_separation * min_separation);
     let mut kept = vec![true; stars.len()];
 
     for i in 0..stars.len() {
@@ -204,16 +243,8 @@ fn compact_by_mask(stars: &mut Vec<Star>, kept: &[bool]) -> usize {
     removed_count
 }
 
-#[cfg(all(test, feature = "internals"))]
-pub(crate) mod internals {
-    use crate::stacking::star_detection::star::Star;
-
-    /// Exposes `remove_duplicate_stars` to the detector's benchmarks; production
-    /// code only ever reaches it through `FilterOutcome::from_stars`.
-    pub(crate) fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
-        super::remove_duplicate_stars(stars, min_separation)
-    }
-}
+#[cfg(all(test, feature = "bench"))]
+mod bench;
 
 #[cfg(test)]
 mod tests;

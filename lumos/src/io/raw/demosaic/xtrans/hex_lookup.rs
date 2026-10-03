@@ -10,7 +10,7 @@
 //!
 //! Reference: Frank Markesteijn's algorithm as implemented in dcraw/libraw.
 
-use crate::io::raw::demosaic::xtrans::XTransPattern;
+use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
 use crate::math::vec2us::Vec2us;
 
 /// Number of hex neighbor entries per pattern position.
@@ -19,11 +19,11 @@ const HEX_ENTRIES: usize = 8;
 /// Orthogonal direction vectors, cycled for rotation.
 /// Each pair `(orth[d], orth[d+1])` and `(orth[d+2], orth[d+3])` form a
 /// direction basis for hex neighbor computation.
-const ORTH: [i32; 12] = [1, 0, 0, 1, -1, 0, 0, -1, 1, 0, 0, 1];
+const ORTH: [isize; 12] = [1, 0, 0, 1, -1, 0, 0, -1, 1, 0, 0, 1];
 
 /// Pattern coefficients for hex neighbor offset computation.
 /// `patt[0]` is for non-green pixels, `patt[1]` is for green pixels.
-const PATT: [[i32; 16]; 2] = [
+const PATT: [[isize; 16]; 2] = [
     [0, 1, 0, -1, 2, 0, -1, 0, 1, 1, 1, -1, 0, 0, 0, 0],
     [0, 1, 0, -2, 1, 0, -2, 0, 1, 1, -2, -2, 1, -1, -1, 1],
 ];
@@ -45,8 +45,8 @@ pub(crate) struct HexLookup {
 /// A single hex neighbor offset.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct HexOffset {
-    pub dy: i32,
-    pub dx: i32,
+    pub dy: isize,
+    pub dx: isize,
 }
 
 impl HexLookup {
@@ -66,8 +66,8 @@ impl HexLookup {
             for col_offsets in row_offsets.iter_mut() {
                 for entry in col_offsets.iter_mut() {
                     *entry = HexOffset {
-                        dy: i32::MAX,
-                        dx: i32::MAX,
+                        dy: isize::MAX,
+                        dx: isize::MAX,
                     };
                 }
             }
@@ -75,21 +75,22 @@ impl HexLookup {
 
         for (row, row_offsets) in offsets.iter_mut().enumerate() {
             for (col, col_offsets) in row_offsets.iter_mut().enumerate() {
-                let mut ng: i32 = 0;
+                let mut ng = 0usize;
                 // Iterate through 5 orthogonal directions (d=0,2,4,6,8)
                 // d indexes into ORTH to get direction vectors
                 let mut d = 0;
                 while d < 10 {
-                    let g = if pattern.color_at(Vec2us::new(col, row)) == 1 {
-                        1i32
-                    } else {
-                        0i32
-                    };
+                    let g = usize::from(pattern.color_at(Vec2us::new(col, row)) == 1);
 
-                    // Check if neighbor in this direction is green
-                    // Add 6 before converting to usize so negative offsets wrap correctly
-                    let nr = (row as i32 + ORTH[d] + 6) as usize;
-                    let nc = (col as i32 + ORTH[d + 2] + 6) as usize;
+                    // Check if neighbor in this direction is green. The pattern repeats every 6,
+                    // so stepping from `row + 6` reads the same colour as from `row` and stays
+                    // unsigned.
+                    let nr = (row + 6)
+                        .checked_add_signed(ORTH[d])
+                        .expect("a unit step back from 6 or more");
+                    let nc = (col + 6)
+                        .checked_add_signed(ORTH[d + 2])
+                        .expect("a unit step back from 6 or more");
                     if pattern.color_at(Vec2us::new(nc, nr)) == 1 {
                         ng = 0;
                     } else {
@@ -108,14 +109,12 @@ impl HexLookup {
                     // For green pixels (g=1): trigger at ng==2
                     if ng == g + 1 {
                         for c in 0..HEX_ENTRIES {
-                            let v = ORTH[d] * PATT[g as usize][c * 2]
-                                + ORTH[d + 1] * PATT[g as usize][c * 2 + 1];
-                            let h = ORTH[d + 2] * PATT[g as usize][c * 2]
-                                + ORTH[d + 3] * PATT[g as usize][c * 2 + 1];
+                            let v = ORTH[d] * PATT[g][c * 2] + ORTH[d + 1] * PATT[g][c * 2 + 1];
+                            let h = ORTH[d + 2] * PATT[g][c * 2] + ORTH[d + 3] * PATT[g][c * 2 + 1];
 
                             // The XOR with (g*2 & d) rotates the entry index
                             // to maintain consistent hex geometry across directions
-                            let idx = c ^ ((g * 2) as usize & d);
+                            let idx = c ^ ((g * 2) & d);
                             col_offsets[idx] = HexOffset { dy: v, dx: h };
                         }
                     }
@@ -130,7 +129,7 @@ impl HexLookup {
             for (c, col_offsets) in row_offsets.iter().enumerate() {
                 for (e, entry) in col_offsets.iter().enumerate() {
                     assert!(
-                        entry.dy != i32::MAX,
+                        entry.dy != isize::MAX,
                         "Unfilled hex entry at [{r}][{c}][{e}]"
                     );
                 }
@@ -146,7 +145,7 @@ impl HexLookup {
 
     /// Get hex offsets for a given (row, col) position.
     #[inline(always)]
-    pub(crate) fn get(&self, row: usize, col: usize) -> &[HexOffset; HEX_ENTRIES] {
+    pub(crate) const fn get(&self, row: usize, col: usize) -> &[HexOffset; HEX_ENTRIES] {
         &self.offsets[row % 3][col % 3]
     }
 }
@@ -154,41 +153,12 @@ impl HexLookup {
 #[cfg(test)]
 mod tests {
     use crate::io::raw::demosaic::xtrans::hex_lookup::*;
-
-    fn test_pattern() -> XTransPattern {
-        XTransPattern::new([
-            [1, 1, 0, 1, 1, 2],
-            [1, 1, 2, 1, 1, 0],
-            [2, 0, 1, 0, 2, 1],
-            [1, 1, 2, 1, 1, 0],
-            [1, 1, 0, 1, 1, 2],
-            [0, 2, 1, 2, 0, 1],
-        ])
-        .unwrap()
-    }
-
-    #[test]
-    fn hex_lookup_construction() {
-        let pattern = test_pattern();
-        let hex = HexLookup::new(&pattern);
-
-        // All entries should be filled (no sentinel values)
-        for r in 0..3 {
-            for c in 0..3 {
-                for e in 0..HEX_ENTRIES {
-                    let off = &hex.offsets[r][c][e];
-                    assert!(
-                        off.dy != i32::MAX && off.dx != i32::MAX,
-                        "Unfilled entry [{r}][{c}][{e}]"
-                    );
-                }
-            }
-        }
-    }
+    use crate::testing::cfa::XTRANS_PATTERN;
+    use std::ptr;
 
     #[test]
     fn hex_lookup_offsets_in_range() {
-        let pattern = test_pattern();
+        let pattern = XTRANS_PATTERN;
         let hex = HexLookup::new(&pattern);
 
         // All offsets should be within a reasonable range (±3 pixels)
@@ -209,7 +179,7 @@ mod tests {
 
     #[test]
     fn hex_lookup_solitary_green_phase() {
-        let pattern = test_pattern();
+        let pattern = XTRANS_PATTERN;
         let hex = HexLookup::new(&pattern);
 
         assert!(hex.sgrow < 3);
@@ -217,8 +187,8 @@ mod tests {
         assert_eq!(pattern.color_at(Vec2us::new(hex.sgcol, hex.sgrow)), 1);
         for (dy, dx) in [(0, 1), (1, 0), (0, -1), (-1, 0)] {
             let color = pattern.color_at(Vec2us::new(
-                (hex.sgcol as i32 + dx + 6) as usize,
-                (hex.sgrow as i32 + dy + 6) as usize,
+                (hex.sgcol + 6).checked_add_signed(dx).unwrap(),
+                (hex.sgrow + 6).checked_add_signed(dy).unwrap(),
             ));
             assert_ne!(color, 1);
         }
@@ -226,7 +196,7 @@ mod tests {
 
     #[test]
     fn hex_lookup_has_green_neighbors() {
-        let pattern = test_pattern();
+        let pattern = XTRANS_PATTERN;
         let hex = HexLookup::new(&pattern);
 
         // For non-green pixels, hex neighbors should include green positions
@@ -236,14 +206,15 @@ mod tests {
                     let offsets = hex.get(r, c);
                     // First two hex neighbors (indices 0,1) are used for
                     // green interpolation — they should point to green pixels
-                    let n0_color = pattern.color_at(Vec2us::new(
-                        (c as i32 + offsets[0].dx) as usize,
-                        (r as i32 + offsets[0].dy) as usize,
-                    ));
-                    let n1_color = pattern.color_at(Vec2us::new(
-                        (c as i32 + offsets[1].dx) as usize,
-                        (r as i32 + offsets[1].dy) as usize,
-                    ));
+                    // From `c + 6`, `r + 6`: the same phase, and a step back stays unsigned.
+                    let neighbour_color = |offset: &HexOffset| {
+                        pattern.color_at(Vec2us::new(
+                            (c + 6).checked_add_signed(offset.dx).unwrap(),
+                            (r + 6).checked_add_signed(offset.dy).unwrap(),
+                        ))
+                    };
+                    let n0_color = neighbour_color(&offsets[0]);
+                    let n1_color = neighbour_color(&offsets[1]);
                     assert_eq!(
                         n0_color, 1,
                         "Hex[{r}][{c}][0] at ({},{}) should be green",
@@ -261,18 +232,18 @@ mod tests {
 
     #[test]
     fn hex_lookup_mod3_wrapping() {
-        let pattern = test_pattern();
+        let pattern = XTRANS_PATTERN;
         let hex = HexLookup::new(&pattern);
 
         // get() should wrap via % 3
         assert_eq!(
-            hex.get(0, 0) as *const _,
-            hex.get(3, 3) as *const _,
+            ptr::from_ref(hex.get(0, 0)),
+            ptr::from_ref(hex.get(3, 3)),
             "get(0,0) should equal get(3,3)"
         );
         assert_eq!(
-            hex.get(1, 2) as *const _,
-            hex.get(4, 5) as *const _,
+            ptr::from_ref(hex.get(1, 2)),
+            ptr::from_ref(hex.get(4, 5)),
             "get(1,2) should equal get(4,5)"
         );
     }

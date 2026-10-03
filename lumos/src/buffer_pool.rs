@@ -66,7 +66,11 @@ impl<B: PooledBuffer> BufferPool<B> {
     pub(crate) fn acquire(&mut self, dimensions: Size2us) -> B {
         match self.free.pop() {
             Some(buffer) => {
-                assert_eq!(buffer.dimensions(), dimensions);
+                assert_eq!(
+                    buffer.dimensions(),
+                    dimensions,
+                    "pooled buffer acquired at new dimensions without clearing the pool"
+                );
                 buffer
             }
             None => B::allocate(dimensions),
@@ -80,7 +84,11 @@ impl<B: PooledBuffer> BufferPool<B> {
     /// — out-of-bounds UB, not a wrong pixel. The check is O(1) per acquire/release, not "too
     /// expensive for release".
     pub(crate) fn release(&mut self, buffer: B, dimensions: Size2us) {
-        assert_eq!(buffer.dimensions(), dimensions);
+        assert_eq!(
+            buffer.dimensions(),
+            dimensions,
+            "buffer released at dimensions other than the pool's"
+        );
         self.free.push(buffer);
     }
 
@@ -136,7 +144,7 @@ mod tests {
     /// The size the pool was previously used at must not leak through to a caller asking for a
     /// different one — downstream SIMD kernels index off the dimensions they asked for.
     #[test]
-    #[should_panic(expected = "assertion `left == right` failed")]
+    #[should_panic(expected = "acquired at new dimensions without clearing")]
     fn acquiring_at_new_dimensions_without_clearing_panics() {
         let mut pool: BufferPool<Buffer2<f32>> = BufferPool::default();
 
@@ -144,6 +152,15 @@ mod tests {
         pool.release(small, SMALL);
 
         let _stale = pool.acquire(LARGE);
+    }
+
+    /// A holder that resized its buffer must not hand it back as the pool's size.
+    #[test]
+    #[should_panic(expected = "released at dimensions other than the pool's")]
+    fn releasing_a_buffer_of_other_dimensions_panics() {
+        let mut pool: BufferPool<Buffer2<f32>> = BufferPool::default();
+        let _small = pool.acquire(SMALL);
+        pool.release(Buffer2::new_default(LARGE.width, LARGE.height), SMALL);
     }
 
     /// `clear` is what makes a size change legal, and is what `DetectionResources::reset` calls.

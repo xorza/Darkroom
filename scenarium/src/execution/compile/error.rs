@@ -14,7 +14,11 @@
 use thiserror::Error;
 
 use crate::execution::identity::{NodeIdx, OutputAddr};
+use crate::graph::error::GraphValidationError;
 use crate::graph::identity::{FuncId, NodeId};
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
 
 /// The graph won't compile against the library: a document can be stale
 /// against an evolved library (a dropped func, a shrunk port list, a
@@ -23,9 +27,10 @@ use crate::graph::identity::{FuncId, NodeId};
 /// [`Error`](crate::execution::error::Error) — the two can't be confused at the type
 /// level, and only `compile` produces it.
 #[derive(Debug, Error)]
-#[error("invalid graph: {message}")]
+#[error("invalid graph: {source}")]
 pub struct CompileError {
-    pub message: String,
+    #[source]
+    pub source: GraphValidationError,
 }
 
 /// Self-consistency checks for the compile artifact. Each fallible `validate` has an
@@ -52,6 +57,10 @@ pub(crate) enum CompiledGraphValidationError {
     MissingBindingTarget { node_id: NodeId, target: OutputAddr },
     #[error("execution node {node_id:?} binds to out-of-range output {target:?}")]
     BindingOutputOutOfRange { node_id: NodeId, target: OutputAddr },
+    #[error("execution node {node_id:?} input {port_idx} is overridden from outside the node")]
+    OverrideOutsideNode { node_id: NodeId, port_idx: usize },
+    #[error("execution node {node_id:?} input {port_idx} is overridden but wired")]
+    OverriddenBind { node_id: NodeId, port_idx: usize },
 }
 
 /// Which of a node's three packed port pools a fault names.
@@ -65,9 +74,9 @@ pub(crate) enum PortPool {
     Event,
 }
 
-impl std::fmt::Display for PortPool {
+impl Display for PortPool {
     /// Lowercase, so it reads inside the sentences above.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             PortPool::Input => "input",
             PortPool::Output => "output",

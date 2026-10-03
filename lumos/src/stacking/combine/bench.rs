@@ -1,9 +1,10 @@
 //! Benchmarks for the in-memory combine engine (`stack_images`), isolated from RAW decode.
 //!
-//! Builds a synthetic light-frame set in memory and stacks it, so the measured time is the combine
-//! hot path: normalization, weight resolution, per-pixel rejection, and weighted accumulation.
+//! Builds a synthetic light-frame set in memory once and stacks copies of it, so the measured time
+//! is the combine hot path — normalization, weight resolution, per-pixel rejection and weighted
+//! accumulation — plus a clone of the set, which a separate row reports.
 //!
-//! Run: `cargo test -p lumos --release combine::bench -- --ignored --nocapture`
+//! Run: `cargo test -p lumos --release --features bench combine::bench -- --ignored --nocapture`
 
 use crate::testing::prelude::*;
 use quickbench::quick_bench;
@@ -15,19 +16,20 @@ use crate::stacking::progress::ProgressCallback;
 
 /// A 1 MP mono frame: smooth background + per-frame offset/gain (so normalization has work to do) +
 /// ~0.2% bright outliers (so rejection has something to clip).
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "synthetic fixtures are small images with non-negative coordinates"
+)]
 fn synth_frame(size: Size2us, frame: u32) -> LinearImage {
     let n = size.pixel_count();
     let offset = 0.05 + (frame as f32) * 0.002;
     let gain = 1.0 + (frame as f32) * 0.01;
-    let mut px = vec![0.0f32; n];
-    for (i, p) in px.iter_mut().enumerate() {
-        let hash = (i as u32).wrapping_mul(2654435761) ^ frame.wrapping_mul(40503);
-        let noise = (hash as f32 / u32::MAX as f32 - 0.5) * 0.02;
-        *p = (0.2 + noise) * gain + offset;
-    }
-    for k in 0..(n / 500) {
-        let idx = ((k as u32).wrapping_mul(2246822519) ^ frame) as usize % n;
-        px[idx] = 0.95;
+    let mut rng = TestRng::new(u64::from(frame));
+    let mut px: Vec<f32> = (0..n)
+        .map(|_| (0.2 + (rng.next_f32() - 0.5) * 0.02) * gain + offset)
+        .collect();
+    for _ in 0..(n / 500) {
+        px[(rng.next_f64() * n as f64) as usize] = 0.95;
     }
     LinearImage::from_planar_channels(ImageDimensions::new(size, 1), [px])
 }
@@ -35,35 +37,30 @@ fn synth_frame(size: Size2us, frame: u32) -> LinearImage {
 const SIZE: Size2us = Size2us::new(1024, 1024);
 const FRAMES: u32 = 30;
 
-fn frames() -> Vec<StackFrame> {
-    (0..FRAMES).map(|f| synth_frame(SIZE, f).into()).collect()
-}
-
-fn run(config: StackConfig) {
-    let result = stack_images(
-        frames(),
-        config,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .unwrap();
-    black_box(result);
-}
-
-/// Science default: σ-clipped mean (2.5σ) + noise weighting + global normalization.
+/// Every combine configuration on one 30-frame set, plus the clone each iteration pays:
+/// `stack_images` consumes its frames, so every iteration hands it a fresh copy of a set built
+/// once, and the `frame-clone` row is what that copy costs.
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_stack_light_30(b: ::quickbench::Bencher) {
-    b.bench(|| run(StackConfig::light()));
-}
-
-/// Median combine — the rejection-free baseline (per-pixel quickselect, no iteration).
-#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_stack_median_30(b: ::quickbench::Bencher) {
-    b.bench(|| run(StackConfig::median()));
-}
-
-/// Winsorized σ-clip — the small-stack-stable rejection used by dark/bias masters.
-#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_stack_winsorized_30(b: ::quickbench::Bencher) {
-    b.bench(|| run(StackConfig::winsorized(3.0)));
+fn bench_stack_30(b: ::quickbench::Bencher) {
+    let frames: Vec<StackFrame> = (0..FRAMES).map(|f| synth_frame(SIZE, f).into()).collect();
+    b.bench_labeled("frame-clone", || black_box(frames.clone()));
+    // σ-clipped mean (2.5σ) with noise weighting and global normalization, the science default;
+    // median, the rejection-free baseline; winsorized σ-clip, the dark and bias masters' rejection.
+    for (label, config) in [
+        ("light", StackConfig::light()),
+        ("median", StackConfig::median()),
+        ("winsorized", StackConfig::winsorized(3.0)),
+    ] {
+        b.bench_labeled(label, || {
+            black_box(
+                stack_images(
+                    frames.clone(),
+                    &config.clone(),
+                    ProgressCallback::default(),
+                    CancelToken::never(),
+                )
+                .unwrap(),
+            )
+        });
+    }
 }

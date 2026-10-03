@@ -1,7 +1,8 @@
 //! `#[derive(Introspect)]` — generic struct introspection (see
 //! `common::introspect`).
 //!
-//! Generates `impl common::Introspect`: `fields()` (a `common::FieldDesc` per
+//! Generates `impl common::Introspect`: the `TYPE_ID` and `DISPLAY_NAME` the type-level
+//! `#[config(type_id = "…", name = "…")]` gives, `fields()` (a `common::FieldDesc` per
 //! struct field — name, label, kind, default, required) and `from_fields()`
 //! (rebuild `Self` from neutral `common::FieldValue`s, checking numeric
 //! conversions and falling back to the field's `Default` on a
@@ -11,7 +12,8 @@
 //! `Float`, `bool` → `Bool`, `String` → `Str`, `Option<T>` → `T` but not
 //! required, anything else → an enum (the type must impl
 //! `common::IntrospectEnum`). Field attribute `#[config(label = "…")]` overrides
-//! the auto label (the field name title-cased). Enum derive requires a stable
+//! the auto label (the field name title-cased), and so does the same attribute
+//! on an enum variant (the variant's words title-cased). Enum derive requires a stable
 //! `#[config(type_id = "…")]` UUID, and owns the variant strings itself — no
 //! `Display`/`FromStr` and no derive crate beyond this one, so any crate that
 //! already depends on `common` can describe its own config types.
@@ -20,18 +22,23 @@ use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::quote;
 use syn::{
-    Data, DeriveInput, Field, Fields, GenericArgument, Ident, LitStr, PathArguments, Type,
-    parse_macro_input,
+    Attribute, Data, DeriveInput, Field, Fields, GenericArgument, Ident, LitStr, PathArguments,
+    Type, parse_macro_input,
 };
 
 #[proc_macro_derive(Introspect, attributes(config))]
 pub fn derive_introspect(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    expand(input).unwrap_or_else(|err| err.to_compile_error().into())
+    expand(&input).unwrap_or_else(|err| err.to_compile_error().into())
 }
 
-fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
+fn expand(input: &DeriveInput) -> syn::Result<TokenStream> {
     let ident = &input.ident;
+    let identity = type_identity(input, "Introspect")?;
+    let type_id = identity.type_id;
+    let display_name = identity
+        .name
+        .unwrap_or_else(|| LitStr::new(&ident.to_string(), ident.span()));
     let Data::Struct(data) = &input.data else {
         return Err(syn::Error::new_spanned(
             ident,
@@ -57,6 +64,9 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
 
     Ok(quote! {
         impl ::common::Introspect for #ident {
+            const TYPE_ID: &'static str = #type_id;
+            const DISPLAY_NAME: &'static str = #display_name;
+
             fn fields() -> ::std::vec::Vec<::common::FieldDesc> {
                 let d = <Self as ::core::default::Default>::default();
                 ::std::vec![ #(#descriptors),* ]
@@ -87,12 +97,19 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
 #[proc_macro_derive(IntrospectEnum, attributes(config))]
 pub fn derive_introspect_enum(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    expand_enum(input).unwrap_or_else(|err| err.to_compile_error().into())
+    expand_enum(&input).unwrap_or_else(|err| err.to_compile_error().into())
 }
 
-fn expand_enum(input: DeriveInput) -> syn::Result<TokenStream> {
+fn expand_enum(input: &DeriveInput) -> syn::Result<TokenStream> {
     let ident = &input.ident;
-    let type_id = enum_type_id(&input)?;
+    let identity = type_identity(input, "IntrospectEnum")?;
+    if let Some(name) = identity.name {
+        return Err(syn::Error::new_spanned(
+            name,
+            "IntrospectEnum takes its display name from the type",
+        ));
+    }
+    let type_id = identity.type_id;
     let Data::Enum(data) = &input.data else {
         return Err(syn::Error::new_spanned(
             ident,
@@ -101,6 +118,7 @@ fn expand_enum(input: DeriveInput) -> syn::Result<TokenStream> {
     };
     let mut variants = Vec::new();
     let mut names = Vec::new();
+    let mut labels = Vec::new();
     for variant in &data.variants {
         if !matches!(variant.fields, Fields::Unit) {
             return Err(syn::Error::new_spanned(
@@ -108,26 +126,24 @@ fn expand_enum(input: DeriveInput) -> syn::Result<TokenStream> {
                 "IntrospectEnum requires fieldless (unit) variants",
             ));
         }
+        let name = snake_case(&variant.ident.to_string());
+        let label = config_label(&variant.attrs)?.unwrap_or_else(|| prettify(&name));
         variants.push(&variant.ident);
-        names.push(LitStr::new(
-            &snake_case(&variant.ident.to_string()),
-            variant.ident.span(),
-        ));
+        names.push(LitStr::new(&name, variant.ident.span()));
+        labels.push(LitStr::new(&label, variant.ident.span()));
     }
 
     Ok(quote! {
         impl ::common::IntrospectEnum for #ident {
             const TYPE_ID: &'static str = #type_id;
             const DISPLAY_NAME: &'static str = ::core::stringify!(#ident);
+            const VARIANTS: &'static [&'static str] = &[ #(#names),* ];
+            const LABELS: &'static [&'static str] = &[ #(#labels),* ];
 
-            fn variants() -> ::std::vec::Vec<::std::string::String> {
-                ::std::vec![ #( ::std::string::ToString::to_string(#names) ),* ]
-            }
-
-            fn to_variant(&self) -> ::std::string::String {
-                ::std::string::ToString::to_string(match self {
+            fn to_variant(&self) -> &'static str {
+                match self {
                     #( Self::#variants => #names ),*
-                })
+                }
             }
 
             fn from_variant(name: &str) -> ::std::option::Option<Self> {
@@ -139,6 +155,27 @@ fn expand_enum(input: DeriveInput) -> syn::Result<TokenStream> {
         }
     }
     .into())
+}
+
+/// The `#[config(label = "…")]` among a field's or a variant's attributes, if it has one.
+fn config_label(attrs: &[Attribute]) -> syn::Result<Option<String>> {
+    let mut label = None;
+    for attr in attrs {
+        if !attr.path().is_ident("config") {
+            continue;
+        }
+        attr.parse_nested_meta(|meta| {
+            if !meta.path.is_ident("label") {
+                return Err(meta.error("expected `label`"));
+            }
+            if label.is_some() {
+                return Err(meta.error("duplicate `label`"));
+            }
+            label = Some(meta.value()?.parse::<LitStr>()?.value());
+            Ok(())
+        })?;
+    }
+    Ok(label)
 }
 
 /// A variant name in the `snake_case` the persisted string uses: an underscore
@@ -222,8 +259,8 @@ fn descriptor(fname: &Ident, label: &str, kind: &Kind) -> TokenStream2 {
     let default = default_tokens(fname, kind);
     quote! {
         ::common::FieldDesc {
-            name: #name.to_string(),
-            label: #label.to_string(),
+            name: #name,
+            label: #label,
             kind: #field_kind,
             default: #default,
             required: #required,
@@ -243,14 +280,17 @@ fn kind_tokens(kind: &Kind) -> TokenStream2 {
         Kind::Str => quote!(::common::FieldKind::Str),
         Kind::Option(inner, _) => {
             let inner = kind_tokens(inner);
-            quote!(::common::FieldKind::Option(::std::boxed::Box::new(#inner)))
+            quote!(::common::FieldKind::Option({
+                const INNER: ::common::FieldKind = #inner;
+                &INNER
+            }))
         }
         Kind::Enum(ty) => {
             quote! {
                 ::common::FieldKind::Enum {
-                    type_id: <#ty as ::common::IntrospectEnum>::TYPE_ID.to_string(),
-                    display_name: <#ty as ::common::IntrospectEnum>::DISPLAY_NAME.to_string(),
-                    variants: <#ty as ::common::IntrospectEnum>::variants(),
+                    type_id: <#ty as ::common::IntrospectEnum>::TYPE_ID,
+                    display_name: <#ty as ::common::IntrospectEnum>::DISPLAY_NAME,
+                    variants: <#ty as ::common::IntrospectEnum>::VARIANTS,
                 }
             }
         }
@@ -259,7 +299,7 @@ fn kind_tokens(kind: &Kind) -> TokenStream2 {
 
 /// The default `FieldValue` for `place` (e.g. `d.field`, or `(*v)` for an
 /// `Option`'s payload).
-fn default_scalar(kind: &Kind, place: TokenStream2) -> TokenStream2 {
+fn default_scalar(kind: &Kind, place: &TokenStream2) -> TokenStream2 {
     match kind {
         Kind::Int(ty) => quote! {
             ::common::FieldValue::Int(
@@ -274,7 +314,9 @@ fn default_scalar(kind: &Kind, place: TokenStream2) -> TokenStream2 {
         Kind::Bool => quote!(::common::FieldValue::Bool(#place)),
         Kind::Str => quote!(::common::FieldValue::Str(#place.clone())),
         Kind::Enum(_) => {
-            quote!(::common::FieldValue::Enum(::common::IntrospectEnum::to_variant(&#place)))
+            quote!(::common::FieldValue::Enum(::std::string::ToString::to_string(
+                ::common::IntrospectEnum::to_variant(&#place)
+            )))
         }
         Kind::Option(..) => quote!(::common::FieldValue::Null),
     }
@@ -282,9 +324,9 @@ fn default_scalar(kind: &Kind, place: TokenStream2) -> TokenStream2 {
 
 fn default_tokens(fname: &Ident, kind: &Kind) -> TokenStream2 {
     let Kind::Option(inner, _) = kind else {
-        return default_scalar(kind, quote!(d.#fname));
+        return default_scalar(kind, &quote!(d.#fname));
     };
-    let some = default_scalar(inner, quote!((*v)));
+    let some = default_scalar(inner, &quote!((*v)));
     quote! {
         match &d.#fname {
             ::core::option::Option::None => ::common::FieldValue::Null,
@@ -396,32 +438,35 @@ fn option_read(get: &TokenStream2, fname: &Ident, inner: &Kind, inner_ty: &Type)
 
 /// `#[config(label = "...")]` on a field, else its name title-cased.
 fn field_label(field: &Field) -> syn::Result<String> {
-    let mut label = None;
-    for attr in &field.attrs {
-        if !attr.path().is_ident("config") {
-            continue;
-        }
-        attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("label") {
-                label = Some(meta.value()?.parse::<LitStr>()?.value());
-                Ok(())
-            } else {
-                Err(meta.error("expected `label`"))
-            }
-        })?;
-    }
-    Ok(label.unwrap_or_else(|| prettify(&field.ident.as_ref().expect("named field").to_string())))
+    Ok(config_label(&field.attrs)?
+        .unwrap_or_else(|| prettify(&field.ident.as_ref().expect("named field").to_string())))
 }
 
-fn enum_type_id(input: &DeriveInput) -> syn::Result<LitStr> {
+/// A type's `#[config(type_id = "…", name = "…")]`.
+struct TypeIdentity {
+    type_id: LitStr,
+    name: Option<LitStr>,
+}
+
+/// The type-level `#[config]`: a required canonical lowercase UUID `type_id`, and an
+/// optional display `name`.
+fn type_identity(input: &DeriveInput, derive: &str) -> syn::Result<TypeIdentity> {
     let mut type_id = None;
+    let mut name = None;
     for attr in &input.attrs {
         if !attr.path().is_ident("config") {
             continue;
         }
         attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("name") {
+                if name.is_some() {
+                    return Err(meta.error("duplicate `name`"));
+                }
+                name = Some(meta.value()?.parse::<LitStr>()?);
+                return Ok(());
+            }
             if !meta.path.is_ident("type_id") {
-                return Err(meta.error("expected `type_id`"));
+                return Err(meta.error("expected `type_id` or `name`"));
             }
             if type_id.is_some() {
                 return Err(meta.error("duplicate `type_id`"));
@@ -441,12 +486,13 @@ fn enum_type_id(input: &DeriveInput) -> syn::Result<LitStr> {
             Ok(())
         })?;
     }
-    type_id.ok_or_else(|| {
+    let type_id = type_id.ok_or_else(|| {
         syn::Error::new_spanned(
             &input.ident,
-            "IntrospectEnum requires `#[config(type_id = \"…\")]`",
+            format!("{derive} requires `#[config(type_id = \"…\")]`"),
         )
-    })
+    })?;
+    Ok(TypeIdentity { type_id, name })
 }
 
 /// `snake_case` → "Title Case".
@@ -460,4 +506,111 @@ fn prettify(name: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use syn::{DeriveInput, parse_quote};
+
+    use crate::{config_label, prettify, type_identity};
+
+    /// Each malformed type-level `#[config]` is refused with the message for
+    /// its rule; a well-formed one yields its id and name.
+    #[test]
+    fn type_identity_refuses_each_malformed_attribute() {
+        let refusals: [(DeriveInput, &str); 6] = [
+            (
+                parse_quote! { enum Mode { A } },
+                "IntrospectEnum requires `#[config(type_id = \"…\")]`",
+            ),
+            (
+                parse_quote! { #[config(type_id = "not-a-uuid")] enum Mode { A } },
+                "`type_id` must be a UUID",
+            ),
+            (
+                parse_quote! {
+                    #[config(type_id = "3EFFBD19-D4A8-4A9B-A931-78FD0E4F8ADB")]
+                    enum Mode { A }
+                },
+                "`type_id` must be a canonical lowercase UUID",
+            ),
+            (
+                parse_quote! {
+                    #[config(type_id = "3effbd19-d4a8-4a9b-a931-78fd0e4f8adb")]
+                    #[config(type_id = "3effbd19-d4a8-4a9b-a931-78fd0e4f8adb")]
+                    enum Mode { A }
+                },
+                "duplicate `type_id`",
+            ),
+            (
+                parse_quote! {
+                    #[config(type_id = "3effbd19-d4a8-4a9b-a931-78fd0e4f8adb", name = "A", name = "B")]
+                    enum Mode { A }
+                },
+                "duplicate `name`",
+            ),
+            (
+                parse_quote! { #[config(label = "x")] enum Mode { A } },
+                "expected `type_id` or `name`",
+            ),
+        ];
+        for (input, message) in refusals {
+            let error = type_identity(&input, "IntrospectEnum")
+                .err()
+                .expect("the attribute is refused");
+            assert_eq!(error.to_string(), message);
+        }
+
+        let input: DeriveInput = parse_quote! {
+            #[config(type_id = "3effbd19-d4a8-4a9b-a931-78fd0e4f8adb", name = "Speed")]
+            enum Mode { A }
+        };
+        let identity = type_identity(&input, "IntrospectEnum").unwrap();
+        assert_eq!(
+            identity.type_id.value(),
+            "3effbd19-d4a8-4a9b-a931-78fd0e4f8adb"
+        );
+        assert_eq!(
+            identity.name.map(|name| name.value()).as_deref(),
+            Some("Speed")
+        );
+    }
+
+    /// A variant names its label once, with `label` and nothing else.
+    #[test]
+    fn config_label_reads_one_label() {
+        let variant = |input: DeriveInput| match input.data {
+            syn::Data::Enum(data) => data.variants.into_iter().next().unwrap(),
+            _ => unreachable!("the fixtures are enums"),
+        };
+        let labelled =
+            variant(parse_quote! { enum Mode { #[config(label = "Auto STF")] AutoStf } });
+        assert_eq!(
+            config_label(&labelled.attrs).unwrap().as_deref(),
+            Some("Auto STF")
+        );
+        let plain = variant(parse_quote! { enum Mode { AutoStf } });
+        assert_eq!(config_label(&plain.attrs).unwrap(), None);
+        for (input, message) in [
+            (
+                parse_quote! { enum Mode { #[config(name = "x")] A } },
+                "expected `label`",
+            ),
+            (
+                parse_quote! { enum Mode { #[config(label = "x", label = "y")] A } },
+                "duplicate `label`",
+            ),
+        ] {
+            let error = config_label(&variant(input).attrs).unwrap_err();
+            assert_eq!(error.to_string(), message);
+        }
+    }
+
+    #[test]
+    fn prettify_title_cases_each_word() {
+        assert_eq!(prettify("tile_size"), "Tile Size");
+        assert_eq!(prettify("limit"), "Limit");
+        assert_eq!(prettify("a__b_"), "A B");
+        assert_eq!(prettify(""), "");
+    }
 }

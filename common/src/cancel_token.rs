@@ -38,7 +38,7 @@ impl CancelToken {
     }
 
     /// A token that never cancels (zero-cost opt-out; same as `default()`).
-    pub fn never() -> Self {
+    pub const fn never() -> Self {
         Self(State::Never)
     }
 

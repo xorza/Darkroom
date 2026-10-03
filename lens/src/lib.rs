@@ -3,6 +3,8 @@
 //! processing. `config_node` is the shared `common::Introspect` →
 //! config-builder bridge.
 
+#![forbid(unsafe_code)]
+
 mod astro;
 mod config_node;
 mod image;
@@ -10,7 +12,7 @@ mod utility;
 
 // Published surface — only what darkroom consumes. Everything else (config
 // projections, presets, datatypes, the config bridge) stays crate-internal.
-pub use astro::nodes::{MlModelPaths, astro_library, configure_ml_model_defaults};
+pub use astro::nodes::{MlModelPaths, astro_library};
 pub use image::nodes::image_library;
 pub use image::{IMAGE_TYPE_ID, Image};
 pub use utility::fs_watch::fs_watch_library;

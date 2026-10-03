@@ -5,6 +5,8 @@
 //! [`CalibrationComponent::extname`], which is also what the reader recognizes it by, and every
 //! HDU carries a checksum the loader verifies before trusting a byte of it.
 
+use std::fs;
+use std::io;
 use std::io::{Error as IoError, ErrorKind};
 use std::path::Path;
 
@@ -23,9 +25,10 @@ use crate::io::image::fits::decode::read_cfa_hdu;
 use crate::io::image::fits::error::fits_to_io;
 use crate::math::size2us::Size2us;
 use crate::stacking::calibration_masters::CalibrationMasters;
-use crate::stacking::calibration_masters::CalibrationSet;
+use crate::stacking::calibration_masters::calibration_component::CalibrationComponent;
+use crate::stacking::calibration_masters::calibration_set::CalibrationSet;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
-use crate::stacking::calibration_masters::{CalibrationComponent, MasterRole};
+use crate::stacking::calibration_masters::master_role::MasterRole;
 
 const BUNDLE_FORMAT: &str = "CALMASTR";
 const DEFECT_FORMAT: &str = "DEFMAP";
@@ -38,7 +41,7 @@ struct BundleIndices {
     defects: Option<usize>,
 }
 
-pub(super) fn save(path: &Path, masters: &CalibrationMasters) -> std::io::Result<()> {
+pub(super) fn save(path: &Path, masters: &CalibrationMasters) -> io::Result<()> {
     file_utils::publish(path, file_utils::PublicationMode::Durable, |file| {
         let mut writer = FitsWriter::new(&mut *file).with_checksums();
         writer
@@ -49,7 +52,8 @@ pub(super) fn save(path: &Path, masters: &CalibrationMasters) -> std::io::Result
             let Some(image) = master.as_ref() else {
                 continue;
             };
-            // The `IMAGETYP` a role's HDU carries is its `EXTNAME` in words, so the two cannot drift.
+            // The `IMAGETYP` a role's HDU carries is its `EXTNAME` in words, so the two cannot
+            // drift.
             let image_type = role.extname().replace('_', " ");
             let encoded = CfaFitsHdu::encode(
                 image,
@@ -60,22 +64,22 @@ pub(super) fn save(path: &Path, masters: &CalibrationMasters) -> std::io::Result
                 },
             )?;
             writer
-                .write_image_with_header(&encoded.image, &encoded.header)
+                .write_image(&encoded.image, Some(&encoded.header))
                 .map_err(fits_to_io)?;
         }
 
         if let Some(defect_map) = &masters.defect_map {
             let encoded = encode_defect_map(defect_map)?;
             writer
-                .write_table_with_header(&encoded.table, &encoded.header)
+                .write_table(&encoded.table, Some(&encoded.header))
                 .map_err(fits_to_io)?;
         }
         Ok(())
     })
 }
 
-pub(super) fn load(path: &Path) -> std::io::Result<CalibrationMasters> {
-    let bytes = std::fs::read(path)?;
+pub(super) fn load(path: &Path) -> io::Result<CalibrationMasters> {
+    let bytes = fs::read(path)?;
     let mut reader = FitsReader::from_bytes(&bytes).map_err(fits_to_io)?;
     validate_primary(&reader)?;
     verify_checksums(&mut reader)?;
@@ -91,11 +95,11 @@ pub(super) fn load(path: &Path) -> std::io::Result<CalibrationMasters> {
     // trustworthy as one just built — and neither can exist in a state the other would reject.
     masters
         .validate_dimensions()
-        .map_err(|source| invalid_data(source.to_string()))?;
+        .map_err(|source| IoError::new(ErrorKind::InvalidData, source))?;
     Ok(masters)
 }
 
-fn bundle_primary_header() -> std::io::Result<Header> {
+fn bundle_primary_header() -> io::Result<Header> {
     let mut header = Header::new();
     header
         .set("SIMPLE", true)
@@ -108,7 +112,7 @@ fn bundle_primary_header() -> std::io::Result<Header> {
     Ok(header)
 }
 
-fn validate_primary(reader: &SliceReader<'_>) -> std::io::Result<()> {
+fn validate_primary(reader: &SliceReader<'_>) -> io::Result<()> {
     let Some(primary) = reader.hdus().first() else {
         return Err(invalid_data("calibration-master FITS has no primary HDU"));
     };
@@ -133,7 +137,7 @@ fn validate_primary(reader: &SliceReader<'_>) -> std::io::Result<()> {
     Ok(())
 }
 
-fn verify_checksums(reader: &mut SliceReader<'_>) -> std::io::Result<()> {
+fn verify_checksums(reader: &mut SliceReader<'_>) -> io::Result<()> {
     for index in 0..reader.hdus().len() {
         let report = reader.verify_checksum(index).map_err(fits_to_io)?;
         if report.datasum != ChecksumStatus::Valid || report.checksum != ChecksumStatus::Valid {
@@ -145,7 +149,7 @@ fn verify_checksums(reader: &mut SliceReader<'_>) -> std::io::Result<()> {
     Ok(())
 }
 
-fn bundle_indices(reader: &SliceReader<'_>) -> std::io::Result<BundleIndices> {
+fn bundle_indices(reader: &SliceReader<'_>) -> io::Result<BundleIndices> {
     let mut indices = BundleIndices::default();
     for (index, hdu) in reader.hdus().iter().enumerate().skip(1) {
         let extname = hdu
@@ -168,7 +172,7 @@ fn bundle_indices(reader: &SliceReader<'_>) -> std::io::Result<BundleIndices> {
     Ok(indices)
 }
 
-fn record_index(slot: &mut Option<usize>, index: usize, extname: &str) -> std::io::Result<()> {
+fn record_index(slot: &mut Option<usize>, index: usize, extname: &str) -> io::Result<()> {
     if slot.replace(index).is_some() {
         return Err(invalid_data(format!(
             "duplicate calibration-master FITS extension {extname:?}"
@@ -182,7 +186,7 @@ fn read_master(
     index: Option<usize>,
     role: MasterRole,
     path: &Path,
-) -> std::io::Result<Option<CfaImage>> {
+) -> io::Result<Option<CfaImage>> {
     let Some(index) = index else {
         return Ok(None);
     };
@@ -222,19 +226,19 @@ struct EncodedDefectMap {
     header: Header,
 }
 
-fn encode_defect_map(map: &DefectMap) -> std::io::Result<EncodedDefectMap> {
-    let mut kinds = Vec::with_capacity(map.hot_indices.len() + map.cold_indices.len());
-    kinds.resize(map.hot_indices.len(), 0);
-    kinds.resize(kinds.len() + map.cold_indices.len(), 1);
-    let indices = map
-        .hot_indices
+fn encode_defect_map(map: &DefectMap) -> io::Result<EncodedDefectMap> {
+    let (hot, cold) = (map.hot_indices(), map.cold_indices());
+    let mut kinds = Vec::with_capacity(hot.len() + cold.len());
+    kinds.resize(hot.len(), 0);
+    kinds.resize(kinds.len() + cold.len(), 1);
+    let indices = hot
         .iter()
-        .chain(&map.cold_indices)
+        .chain(cold)
         .map(|&index| {
             i64::try_from(index)
                 .map_err(|_| invalid_data("defect index exceeds the FITS signed-64 range"))
         })
-        .collect::<std::io::Result<Vec<_>>>()?;
+        .collect::<io::Result<Vec<_>>>()?;
     let table = TableBuilder::explicit(
         kinds.len(),
         [
@@ -249,30 +253,29 @@ fn encode_defect_map(map: &DefectMap) -> std::io::Result<EncodedDefectMap> {
         .and_then(|header| header.set("LUMOSFMT", DEFECT_FORMAT))
         .and_then(|header| header.set("LUMOSVER", BUNDLE_VERSION))
         .map_err(fits_to_io)?;
-    if let Some(dimensions) = map.dimensions {
-        header
-            .set(
-                "LUMWID",
-                i64::try_from(dimensions.width).map_err(|_| {
-                    invalid_data("defect-map width exceeds the FITS signed-64 range")
-                })?,
-            )
-            .and_then(|header| {
-                header.set(
-                    "LUMHEI",
-                    i64::try_from(dimensions.height)
-                        .map_err(|_| fits_well::FitsError::KeywordOutOfRange { name: "LUMHEI" })?,
-                )
-            })
-            .map_err(fits_to_io)?;
-    }
+    let dimensions = map.dimensions();
+    let extent = |extent: usize, name: &str| {
+        i64::try_from(extent).map_err(|_| {
+            invalid_data(format!(
+                "defect-map {name} exceeds the FITS signed-64 range"
+            ))
+        })
+    };
+    let (width, height) = (
+        extent(dimensions.width, "width")?,
+        extent(dimensions.height, "height")?,
+    );
+    header
+        .set("LUMWID", width)
+        .and_then(|header| header.set("LUMHEI", height))
+        .map_err(fits_to_io)?;
     Ok(EncodedDefectMap { table, header })
 }
 
 fn read_defect_map(
     reader: &mut SliceReader<'_>,
     index: Option<usize>,
-) -> std::io::Result<Option<DefectMap>> {
+) -> io::Result<Option<DefectMap>> {
     let Some(index) = index else {
         return Ok(None);
     };
@@ -285,90 +288,56 @@ fn read_defect_map(
     }
     let dimensions = read_defect_dimensions(header)?;
     let table = reader.read_table(index).map_err(fits_to_io)?;
-    let row_count = table.metadata().nrows;
-    let kinds = match table
+    let row_count = table.schema().nrows;
+    let ColumnData::Bytes(kinds) = table
         .column_by_name("KIND")
         .and_then(|column| column.raw())
         .map_err(fits_to_io)?
-    {
-        ColumnData::Bytes(values) => values,
-        _ => return Err(invalid_data("DEFECT_MAP KIND must be a byte column")),
+    else {
+        return Err(invalid_data("DEFECT_MAP KIND must be a byte column"));
     };
-    let indices = match table
+    let ColumnData::I64(indices) = table
         .column_by_name("INDEX")
         .and_then(|column| column.raw())
         .map_err(fits_to_io)?
-    {
-        ColumnData::I64(values) => values,
-        _ => return Err(invalid_data("DEFECT_MAP INDEX must be an int64 column")),
+    else {
+        return Err(invalid_data("DEFECT_MAP INDEX must be an int64 column"));
     };
     if kinds.len() != row_count || indices.len() != row_count {
         return Err(invalid_data(
             "DEFECT_MAP column lengths do not match NAXIS2",
         ));
     }
-    if dimensions.is_none() && !indices.is_empty() {
-        return Err(invalid_data("non-empty DEFECT_MAP is missing dimensions"));
-    }
-
-    let pixel_count = dimensions.map(Size2us::pixel_count);
     let mut hot_indices = Vec::new();
     let mut cold_indices = Vec::new();
     for (kind, index) in kinds.into_iter().zip(indices) {
         let index = usize::try_from(index)
             .map_err(|_| invalid_data("DEFECT_MAP contains a negative or oversized index"))?;
-        if pixel_count.is_some_and(|count| index >= count) {
-            return Err(invalid_data(
-                "DEFECT_MAP index lies outside its sensor dimensions",
-            ));
-        }
         match kind {
             0 => hot_indices.push(index),
             1 => cold_indices.push(index),
             _ => return Err(invalid_data("DEFECT_MAP KIND must be 0 or 1")),
         }
     }
-    validate_sorted(&hot_indices, "hot")?;
-    validate_sorted(&cold_indices, "cold")?;
-    Ok(Some(DefectMap {
-        hot_indices,
-        cold_indices,
-        dimensions,
-    }))
+    DefectMap::from_indices(dimensions, hot_indices, cold_indices)
+        .map(Some)
+        .ok_or_else(|| invalid_data("DEFECT_MAP index lies outside its sensor dimensions"))
 }
 
-fn read_defect_dimensions(header: &Header) -> std::io::Result<Option<Size2us>> {
-    let width = header.get_integer("LUMWID").map_err(fits_to_io)?;
-    let height = header.get_integer("LUMHEI").map_err(fits_to_io)?;
-    match (width, height) {
-        (None, None) => Ok(None),
-        (Some(width), Some(height)) => {
-            let width = usize::try_from(width)
-                .ok()
-                .filter(|value| *value > 0)
-                .ok_or_else(|| invalid_data("DEFECT_MAP has an invalid width"))?;
-            let height = usize::try_from(height)
-                .ok()
-                .filter(|value| *value > 0)
-                .ok_or_else(|| invalid_data("DEFECT_MAP has an invalid height"))?;
-            width
-                .checked_mul(height)
-                .ok_or_else(|| invalid_data("DEFECT_MAP dimensions overflow"))?;
-            Ok(Some(Size2us::new(width, height)))
-        }
-        _ => Err(invalid_data(
-            "DEFECT_MAP must declare both LUMWID and LUMHEI or neither",
-        )),
-    }
-}
-
-fn validate_sorted(indices: &[usize], kind: &str) -> std::io::Result<()> {
-    if indices.windows(2).any(|pair| pair[0] >= pair[1]) {
-        return Err(invalid_data(format!(
-            "DEFECT_MAP {kind} indices must be strictly ascending"
-        )));
-    }
-    Ok(())
+fn read_defect_dimensions(header: &Header) -> io::Result<Size2us> {
+    let extent = |name: &str| -> io::Result<usize> {
+        header
+            .get_integer(name)
+            .map_err(fits_to_io)?
+            .and_then(|value| usize::try_from(value).ok())
+            .filter(|&value| value > 0)
+            .ok_or_else(|| invalid_data(format!("DEFECT_MAP has no valid {name}")))
+    };
+    let (width, height) = (extent("LUMWID")?, extent("LUMHEI")?);
+    width
+        .checked_mul(height)
+        .ok_or_else(|| invalid_data("DEFECT_MAP dimensions overflow"))?;
+    Ok(Size2us::new(width, height))
 }
 
 fn invalid_data(message: impl Into<String>) -> IoError {

@@ -1,17 +1,13 @@
 use crate::testing::prelude::*;
-use std::any::Any;
+use std::mem;
 use std::panic::catch_unwind;
 
 use crate::bit_buffer2::BitBuffer2;
+use crate::testing::panic_message;
 
-fn panic_text(payload: Box<dyn Any + Send>) -> String {
-    if let Some(message) = payload.downcast_ref::<&str>() {
-        (*message).to_string()
-    } else if let Some(message) = payload.downcast_ref::<String>() {
-        message.clone()
-    } else {
-        "unknown panic".to_string()
-    }
+/// Every bit of `buffer` in row-major order.
+fn iter_bits(buffer: &BitBuffer2) -> Vec<bool> {
+    buffer.iter().collect()
 }
 
 #[test]
@@ -26,7 +22,7 @@ fn construction_aligns_rows_and_preserves_fill_values() {
         assert_eq!(clear.stride, expected_stride);
         assert_eq!(clear.words_per_row(), expected_words_per_row);
         assert_eq!(clear.words.len(), expected_words_per_row * 3);
-        assert_eq!(clear.len, width * 3);
+        assert_eq!(clear.size.pixel_count(), width * 3);
         assert_eq!(clear.count_ones(), 0);
         assert_eq!(filled.count_ones(), width * 3);
     }
@@ -42,7 +38,7 @@ fn linear_coordinate_and_index_access_agree() {
 
     let expected = [0, 63, 64, 65, 129, 134, 194];
     assert_eq!(buffer.count_ones(), expected.len());
-    for index in 0..buffer.len {
+    for index in 0..buffer.size.pixel_count() {
         assert_eq!(
             buffer.get(index),
             expected.contains(&index),
@@ -50,7 +46,7 @@ fn linear_coordinate_and_index_access_agree() {
         );
         assert_eq!(buffer[index], buffer.get(index));
     }
-    assert!(buffer[(4, 2)]);
+    assert!(buffer.get_at(Vec2us::new(4, 2)));
 
     buffer.set_at(Vec2us::new(4, 2), false);
     assert!(!buffer.get(134));
@@ -58,19 +54,30 @@ fn linear_coordinate_and_index_access_agree() {
 }
 
 #[test]
-fn slice_iteration_and_conversion_preserve_row_major_order() {
+fn slice_and_iteration_preserve_row_major_order() {
     let source = [
         true, false, true, false, false, true, false, true, true, false, false, true,
     ];
     let buffer = BitBuffer2::from_slice(Size2us::new(4, 3), &source);
-    let mut iter = buffer.iter();
+    assert_eq!(iter_bits(&buffer), source);
 
-    assert_eq!(iter.len(), 12);
-    assert_eq!(iter.next(), Some(true));
-    assert_eq!(iter.len(), 11);
-    assert_eq!(iter.collect::<Vec<_>>(), source[1..]);
-    assert_eq!(Vec::<bool>::from(&buffer), source);
-    assert_eq!(Vec::<bool>::from(buffer), source);
+    // The set-bit walk visits exactly the true positions, in row-major order.
+    let mut visited = Vec::new();
+    buffer.for_each_set(|pos| visited.push(pos.y * 4 + pos.x));
+    let expected: Vec<usize> = (0..source.len()).filter(|&i| source[i]).collect();
+    assert_eq!(visited, expected);
+
+    // A filled buffer has its padding set too, which the walk must not report; a row past one
+    // word reaches its second.
+    let filled = BitBuffer2::new_filled(Size2us::new(70, 2), true);
+    let mut count = 0;
+    let mut last = Vec2us::ZERO;
+    filled.for_each_set(|pos| {
+        count += 1;
+        last = pos;
+    });
+    assert_eq!(count, 140);
+    assert_eq!(last, Vec2us::new(69, 1));
 }
 
 #[test]
@@ -82,11 +89,9 @@ fn every_zero_dimension_is_empty_and_iterates_to_nothing() {
         assert_eq!(buffer.size, Size2us::new(width, height));
         assert_eq!(buffer.stride, 0);
         assert!(buffer.words.is_empty());
-        assert_eq!(buffer.len, 0);
+        assert_eq!(buffer.size.pixel_count(), 0);
         assert_eq!(buffer.count_ones(), 0);
-        assert_eq!(buffer.iter().len(), 0);
-        assert_eq!(buffer.iter().next(), None);
-        assert_eq!(Vec::<bool>::from(&buffer), Vec::<bool>::new());
+        assert_eq!(iter_bits(&buffer), Vec::<bool>::new());
     }
 }
 
@@ -95,7 +100,7 @@ fn fill_count_copy_and_swap_ignore_padding() {
     let mut first = BitBuffer2::new_default(Size2us::new(7, 2));
     first.words[0] |= 1 << 7;
     assert_eq!(first.count_ones(), 0);
-    assert!(first.iter().all(|value| !value));
+    assert!(iter_bits(&first).iter().all(|&value| !value));
 
     first.fill(true);
     assert_eq!(first.count_ones(), 14);
@@ -104,10 +109,10 @@ fn fill_count_copy_and_swap_ignore_padding() {
 
     let mut copy = BitBuffer2::new_default(Size2us::new(7, 2));
     copy.copy_from(&first);
-    assert_eq!(Vec::<bool>::from(&copy), Vec::<bool>::from(&first));
+    assert_eq!(iter_bits(&copy), iter_bits(&first));
 
     let mut clear = BitBuffer2::new_default(Size2us::new(7, 2));
-    std::mem::swap(&mut copy.words, &mut clear.words);
+    mem::swap(&mut copy.words, &mut clear.words);
     assert_eq!(copy.count_ones(), 0);
     assert_eq!(clear.count_ones(), 13);
 }
@@ -122,7 +127,7 @@ fn construction_rejects_every_dimension_overflow_stage() {
         let panic = catch_unwind(|| BitBuffer2::new_default(Size2us::new(width, height)))
             .expect_err("overflowing dimensions must panic");
         assert!(
-            panic_text(panic).contains(expected),
+            panic_message(&*panic).contains(expected),
             "{width}x{height} did not report {expected}"
         );
     }
@@ -132,7 +137,7 @@ fn construction_rejects_every_dimension_overflow_stage() {
 fn from_slice_rejects_a_mismatched_length() {
     let panic = catch_unwind(|| BitBuffer2::from_slice(Size2us::new(2, 2), &[true, false, true]))
         .expect_err("mismatched data length must panic");
-    assert!(panic_text(panic).contains("data length 3 does not match dimensions 2x2=4"));
+    assert!(panic_message(&*panic).contains("data length 3 does not match dimensions 2x2=4"));
 }
 
 #[cfg(debug_assertions)]
@@ -170,7 +175,7 @@ fn fill_from_predicate_matches_bit_by_bit_setting() {
     let built = from_predicate(RAGGED, pattern);
 
     let mut by_hand = BitBuffer2::new_default(RAGGED);
-    for i in 0..by_hand.len {
+    for i in 0..by_hand.size.pixel_count() {
         by_hand.set(i, pattern(i));
     }
     assert_eq!(built.words, by_hand.words, "packing differs");
@@ -185,7 +190,7 @@ fn fill_from_predicate_handles_exact_word_and_empty_sizes() {
 
     let empty = from_predicate(Size2us::new(0, 0), |_| true);
     assert_eq!(empty.count_ones(), 0);
-    assert_eq!(empty.len, 0);
+    assert_eq!(empty.size.pixel_count(), 0);
 }
 
 #[test]
@@ -203,7 +208,7 @@ fn padding_bits_never_reach_the_count() {
         "a filled buffer has dirty padding"
     );
 
-    for i in 0..mask.len {
+    for i in 0..mask.size.pixel_count() {
         mask.set(i, false);
     }
     assert_eq!(mask.count_ones(), 0);
@@ -237,7 +242,7 @@ fn padding_is_clear_separates_word_wise_from_position_wise_writes() {
         );
 
         let mut poked = BitBuffer2::new_default(size);
-        for i in 0..poked.len {
+        for i in 0..poked.size.pixel_count() {
             poked.set(i, true);
         }
         assert_eq!(poked.words, built.words, "{width}");
@@ -263,7 +268,8 @@ fn padding_is_clear_separates_word_wise_from_position_wise_writes() {
     }
 
     // The one input that separates the two clauses: at 60 wide the trailing word is pure padding,
-    // so dirtying it leaves the partial word's own 4 padding bits clean. Only the tail scan sees it.
+    // so dirtying it leaves the partial word's own 4 padding bits clean. Only the tail scan sees
+    // it.
     let mut tail_only = BitBuffer2::new_default(Size2us::new(60, 3));
     tail_only.words[1] = !0;
     assert!(

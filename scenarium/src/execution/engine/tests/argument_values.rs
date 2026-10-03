@@ -7,8 +7,8 @@ use super::*;
 fn before_execution_reports_no_values() {
     let e = TestEngine::over(TestGraph::sample());
 
-    let nonexistent: NodeId = "00000000-0000-0000-0000-000000000000".into();
-    assert!(e.engine.get_argument_values(&nonexistent).is_none());
+    let nonexistent = NodeId::nil();
+    assert!(e.engine.argument_values(nonexistent).is_none());
 
     let inputs = e.inputs("sum");
     assert_eq!(inputs.len(), 2);
@@ -16,7 +16,7 @@ fn before_execution_reports_no_values() {
     assert!(e.outputs("sum").is_empty());
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn with_bound_outputs() {
     let mut e = TestEngine::over(TestGraph::sample_values(2, 5));
 
@@ -27,18 +27,18 @@ async fn with_bound_outputs() {
     // so the variant is worth pinning, not just the number.
     assert!(matches!(
         e.inputs("sum")[0],
-        Some(DynamicValue::Static(ConstValue::Float(v))) if v.approximately_eq(2.0)
+        Some(DynamicValue::Static(ConstValue::Float(v))) if v == 2.0
     ));
     assert!(matches!(
         e.inputs("sum")[1],
-        Some(DynamicValue::Static(ConstValue::Float(v))) if v.approximately_eq(5.0)
+        Some(DynamicValue::Static(ConstValue::Float(v))) if v == 5.0
     ));
     assert_eq!(e.output_i64("sum", 0), Some(7), "2 + 5");
 
     assert_eq!(e.input_i64("mult", 0), Some(7));
     assert!(matches!(
         e.inputs("mult")[1],
-        Some(DynamicValue::Static(ConstValue::Float(v))) if v.approximately_eq(5.0)
+        Some(DynamicValue::Static(ConstValue::Float(v))) if v == 5.0
     ));
     assert_eq!(e.output_i64("mult", 0), Some(35), "7 * 5");
 
@@ -46,7 +46,7 @@ async fn with_bound_outputs() {
     assert!(e.outputs("Print").is_empty());
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn with_none_binding() {
     let mut e = TestEngine::over(TestGraph::sample());
     e.edit(|g| {

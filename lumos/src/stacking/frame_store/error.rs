@@ -1,5 +1,6 @@
 //! Failures from the disk-backed frame store.
 
+use std::io;
 use std::path::PathBuf;
 
 /// Failure while creating or accessing disk-backed frame storage.
@@ -9,25 +10,25 @@ pub enum FrameStoreError {
     CreateDirectory {
         path: PathBuf,
         #[source]
-        source: std::io::Error,
+        source: io::Error,
     },
     #[error("failed to write frame-store file '{path}': {source}")]
     WriteFile {
         path: PathBuf,
         #[source]
-        source: std::io::Error,
+        source: io::Error,
     },
     #[error("failed to open frame-store file '{path}': {source}")]
     OpenFile {
         path: PathBuf,
         #[source]
-        source: std::io::Error,
+        source: io::Error,
     },
     #[error("failed to read metadata for frame-store source '{path}': {source}")]
     ReadMetadata {
         path: PathBuf,
         #[source]
-        source: std::io::Error,
+        source: io::Error,
     },
     #[error("frame-store source changed while it was being read: '{path}'")]
     SourceChanged { path: PathBuf },
@@ -35,6 +36,6 @@ pub enum FrameStoreError {
     MemoryMap {
         path: PathBuf,
         #[source]
-        source: std::io::Error,
+        source: io::Error,
     },
 }

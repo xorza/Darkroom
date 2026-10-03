@@ -22,12 +22,12 @@ pub(crate) mod node;
 pub(crate) mod paint;
 pub(crate) mod toolbar;
 
-use glam::Vec2;
 use palantir::TranslateScale;
 use palantir::prelude::*;
 
 use crate::core::document::Document;
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::edit::relayout::Relayout;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::background::CanvasBackground;
 use crate::gui::pane::graph::canvas::{inner_canvas_widget_id, outer_canvas_widget_id};
@@ -39,50 +39,43 @@ use crate::gui::pane::graph::gesture::canvas_gesture::{CanvasGesture, classify_c
 use crate::gui::pane::graph::gesture::connection::ConnectionUI;
 use crate::gui::pane::graph::gesture::new_node::NewNodeUi;
 use crate::gui::pane::graph::gesture::node_menu::NodeMenuUi;
+use crate::gui::pane::graph::gesture::pan_zoom::camera_gesture::CameraGesture;
 use crate::gui::pane::graph::gesture::preview_drag::PreviewDrag;
 use crate::gui::pane::graph::gesture::selection::SelectionUI;
-use crate::gui::pane::graph::gesture::slot::GestureSlot;
 use crate::gui::pane::graph::gesture::subscription::SubscriptionUI;
 use crate::gui::pane::graph::gesture::{connection, pan_zoom, shortcuts, subscription};
 use crate::gui::pane::graph::node::{NodeDrawOutcome, NodeUI};
 use crate::gui::pane::graph::paint::inspector::Inspectors;
 use crate::gui::pane::graph::paint::wire::{WireEmphasis, WirePass};
-use crate::gui::relayout::Relayout;
 use crate::gui::requests::Requests;
 
-/// Canvas-level UI state, shared by **every** graph pane on screen: the
-/// port-widget-id cache, the `NodeUI` that renders graph nodes, the
-/// inspection panels, and the in-flight gesture controllers.
+/// The graph pane's UI state: the cross-frame geometry, the `NodeUI` that
+/// renders graph nodes, the inspection panels, and the in-flight gesture
+/// controllers.
 ///
-/// One instance drives N canvases rather than one per pane, because
-/// everything here is either keyed by a document-unique id (geometry,
-/// inspectors) or inherently singular (there is one pointer, so one drag,
-/// one rubber band, one open popup). What *is* per-pane — the canvas
-/// widget ids, the viewport, the paint stack — comes from the [`GraphCtx`]
-/// each entry point is handed.
+/// The document has one graph tab, so one pane shows it and one instance
+/// drives it: there is one pointer, so one drag, one rubber band, one open
+/// popup. The canvas widget ids are fixed for the same reason.
 ///
-/// Nothing here builds that context: `MainWindow` composes one per frame phase
-/// and threads it down, so this type never needs to name a theme, a library
-/// or a run state — the context answers for all three — and the "is a graph
-/// pane up" question is settled once at the tab dispatch rather than
-/// re-derived by every pass.
+/// Nothing here builds the [`GraphCtx`] it reads: `MainWindow` composes one
+/// per frame phase and threads it down, so this type never needs to name a
+/// theme, a library or a run state — the context answers for all three — and
+/// the "is the graph pane up" question is settled once at the tab dispatch
+/// rather than re-derived by every pass.
 ///
-/// The frame splits accordingly:
-/// - [`Self::prepass`] runs **once** over the whole scene, with a small
-///   per-pane loop inside for the viewport-dependent parts.
-/// - [`Self::draw`] runs **once per visible graph pane**, from the dock's
-///   content closure.
+/// The frame splits accordingly: [`Self::prepass`] turns this frame's input
+/// into intents before the record, and [`Self::draw`] records the pane from
+/// the dock's content closure.
 ///
-/// **Bare-canvas gesture arbitration.** [`classify_canvas_gesture`] reads
-/// one pane's outer-canvas response
-/// ([`outer_canvas_widget_id`]) +
-/// modifiers and resolves which gesture latches this frame into a single
-/// [`CanvasGesture`]. `prepass` resolves it once per frame and parks the
-/// winner (with its pane) in [`Self::gesture`]; each sub-controller is
-/// handed that classification and consumes only its own variant, so
-/// there's no hand-kept disjointness across files — the precedence lives
-/// in one match. Wheel/pinch zoom isn't a latch gesture (it coexists), so
-/// it stays inside `emit_pan_zoom` regardless of the classification.
+/// **Bare-canvas gesture arbitration.** [`classify_canvas_gesture`] reads the
+/// outer canvas's response ([`outer_canvas_widget_id`]) + modifiers and
+/// resolves which gesture latches this frame into a single [`CanvasGesture`].
+/// `prepass` resolves it once per frame and parks it in [`Self::gesture`];
+/// each sub-controller is handed that classification and consumes only its
+/// own variant, so there's no hand-kept disjointness across files — the
+/// precedence lives in one match. Wheel/pinch zoom isn't a latch gesture (it
+/// coexists), so it stays inside `emit_pan_zoom` regardless of the
+/// classification.
 ///
 /// Node panels and port circles live in the *inner* canvas and hit-test
 /// first, so a gesture only reaches the bare canvas (and this
@@ -120,9 +113,8 @@ pub(crate) struct GraphUI {
     /// node, not gesture state; panels only paint for nodes in the active
     /// scene, so off-tab ones hide and reappear.
     inspectors: Inspectors,
-    /// This frame's bare-canvas gesture and the pane it latched on,
-    /// resolved once in [`Self::prepass`] and read back by [`Self::draw`].
-    /// At most one pane can own a press, so one slot is enough.
+    /// This frame's bare-canvas gesture, resolved once in [`Self::prepass`]
+    /// and read back by [`Self::draw`].
     gesture: Option<CanvasGesture>,
     /// Whether this frame cancels whatever gesture is in flight (Esc).
     ///
@@ -148,13 +140,9 @@ pub(crate) struct GraphUI {
     new_node_ui: NewNodeUi,
     node_menu: NodeMenuUi,
     selection_ui: SelectionUI,
-    /// Viewport pan snapshot captured at the frame the active pan-drag
-    /// latched, keyed by the pane that latched it. While the drag is
-    /// active, that pane's `viewport.pan = anchor + drag_delta`. Input
-    /// bookkeeping (lifetime = one gesture), not viewport state — and
-    /// keyed because `emit_pan_zoom` runs once per visible pane, so the
-    /// idle ones must not consume the live one's release edge.
-    pan_anchor: GestureSlot<Vec2>,
+    /// The camera's input in flight: a pan drag's latch, and the run of
+    /// wheel or pinch input. Input bookkeeping, not viewport state.
+    camera: CameraGesture,
 }
 
 impl GraphUI {
@@ -195,7 +183,7 @@ impl GraphUI {
             new_node_ui,
             node_menu,
             selection_ui,
-            pan_anchor,
+            camera,
             // Survivors: caches and panels that outlive the scene on purpose,
             // and the frame-local facts `prepass` rewrites before anything
             // reads them.
@@ -214,11 +202,45 @@ impl GraphUI {
         new_node_ui.reset();
         node_menu.reset();
         selection_ui.reset();
-        pan_anchor.clear();
+        camera.reset();
     }
 
-    /// Take note of whether a pane is showing this canvas, and report whether
-    /// that *changed* since last frame.
+    /// Whether a gesture, a menu or the palette is in flight — what Esc
+    /// cancels before it would deselect.
+    ///
+    /// Destructured like [`Self::reset_gestures`], so a new controller does not
+    /// compile until it is asked here too.
+    const fn in_flight(&self) -> bool {
+        let Self {
+            node_ui,
+            breaker_ui,
+            connection_ui,
+            preview_drag,
+            subscription_ui,
+            new_node_ui,
+            node_menu,
+            selection_ui,
+            camera,
+            background: _,
+            geometry: _,
+            inspectors: _,
+            last_prepass_frame: _,
+            gesture: _,
+            cancelled: _,
+        } = self;
+        node_ui.in_flight()
+            || breaker_ui.in_flight()
+            || connection_ui.in_flight()
+            || preview_drag.in_flight()
+            || subscription_ui.is_dragging()
+            || new_node_ui.in_flight()
+            || node_menu.in_flight()
+            || selection_ui.in_flight()
+            || camera.in_flight()
+    }
+
+    /// Take note of whether the pane is showing this canvas, and report
+    /// whether that *changed* since last frame.
     ///
     /// Crossing the edge drops all in-flight gesture state: a drag left
     /// latched while the canvas was away would otherwise resume when it
@@ -236,10 +258,9 @@ impl GraphUI {
     /// Reads the frame stamp rather than a visibility flag, so nothing has to
     /// run while the canvas is off screen for it to notice coming back. Two
     /// cases both mean *still here* and must not read as an appearance: the
-    /// previous frame (the ordinary steady state) and *this* frame — a split
-    /// view showing the graph in two panes runs this once per pane, since
-    /// `DockState::active_tabs` yields one tab per group and never dedupes.
-    /// Only a gap wider than that is an absence.
+    /// previous frame (the ordinary steady state) and *this* frame — a frame
+    /// that owes a relayout records twice, and both passes read the same
+    /// [`Ui::frame_id`]. Only a gap wider than that is an absence.
     fn appearing(&mut self, ui: &Ui) -> bool {
         let frame = ui.frame_id();
         let appearing = self
@@ -275,12 +296,14 @@ impl GraphUI {
         // state slot unconditionally and lets its existing "no gesture"
         // path do the rest.
         self.cancelled = ui.escape_pressed();
+        // Esc cancels what is in flight, and deselects only when nothing was.
+        let deselect = self.cancelled && !self.in_flight();
         let gesture = classify_canvas_gesture(ui);
         self.gesture = gesture;
-        pan_zoom::emit_pan_zoom(&mut self.pan_anchor, ui, graph_ctx, gesture, out);
-        self.node_ui.prepass(ui, graph_ctx, out);
-        // One walk, filling the geometry caches and the whole hit digest off
-        // the same per-node and per-port responses.
+        pan_zoom::emit_pan_zoom(&mut self.camera, ui, graph_ctx, gesture, out);
+        self.node_ui.prepass(ui, graph_ctx, self.cancelled, out);
+        // One walk, filling the geometry caches off the per-node and per-port
+        // responses.
         self.geometry.rebuild(ui, graph_ctx);
         // Everything below reads the settled geometry, so from here the canvas
         // has a context of its own.
@@ -307,7 +330,7 @@ impl GraphUI {
         self.subscription_ui.bake_snap_hover(&mut self.geometry);
         // The keyboard half of the same phase. Last, so a chord reads the
         // document the pointer gestures above were raised against.
-        shortcuts::emit(ui, graph_ctx, out);
+        shortcuts::emit(ui, graph_ctx, &self.geometry, deselect, out);
         Relayout::needed_if(appearing)
     }
 
@@ -376,7 +399,7 @@ impl GraphUI {
         self.breaker_ui.apply(ui, cx, out);
         // A connection released over empty canvas (detected in `prepass`)
         // opens the new-node popup; picking a node re-floats the wire. Only
-        // the pane holding the dropped wire's source claims it.
+        // the connection controller holds the dropped wire's source.
         let pending_connection = self.connection_ui.take_pending_connection();
         // A right-click that just ended a floating wire shouldn't also open
         // the palette — suppress the `NewNode` gesture for this frame, by
@@ -405,7 +428,7 @@ impl GraphUI {
         let viewport = graph_ctx.viewport();
         let (pan_val, zoom_val) = (viewport.pan, viewport.zoom);
         // Effective selection to paint: the live rubber-band preview while
-        // a band is in flight over *this* pane, else its committed set.
+        // a band is in flight, else the committed set.
         // The preview is kept out of the document, so a band in flight
         // changes what paints without recording an edit.
         let selected = self
@@ -422,8 +445,7 @@ impl GraphUI {
         // background, owns the input routing for empty-canvas
         //  Senses:
         // - `DRAG`: middle-button canvas pan (graph-editor
-        //   convention; left-drag is reserved for rubber-band
-        //   selection once that lands). Pulled via
+        //   convention; left-drag is the rubber-band selection). Pulled via
         //   `Ui::drag_delta_by(.., PointerButton::Middle)`, since the
         //   left-only `ResponseState::drag_delta` doesn't carry middle.
         // - `SCROLL`: mouse wheel / touchpad swipe = zoom-about-cursor.
@@ -463,8 +485,7 @@ impl GraphUI {
                         let canvas_origin = ui
                             .response_for(inner_canvas_widget_id())
                             .layout_rect
-                            .map(|r| r.min)
-                            .unwrap_or(Vec2::ZERO);
+                            .map_or(Vec2::ZERO, |r| r.min);
                         let cull = CullRegion::from_canvas(
                             ui.response_for(outer_canvas_widget_id()).layout_rect,
                             canvas_origin,
@@ -473,7 +494,7 @@ impl GraphUI {
                         // Painted first so it sits beneath the
                         // connections and node bodies.
                         self.selection_ui.draw(ui, theme);
-                        // One bundle for everything this pane records: the
+                        // One bundle for everything the canvas records: the
                         // node bodies below, and the inspection
                         // panels after them. Built out here rather than inside
                         // the probe scope so both passes read the same refs.
@@ -483,9 +504,6 @@ impl GraphUI {
                             // One emphasis resolution for both wire families:
                             // any wire gesture — either drag controller or an
                             // active breaker scribble — fades the standing set.
-                            // All three are scoped to this pane, so a gesture
-                            // running on a neighbouring canvas leaves these
-                            // wires at full strength.
                             let fading = self.connection_ui.is_dragging()
                                 || self.subscription_ui.is_dragging()
                                 || probe.is_active();
@@ -552,7 +570,9 @@ pub(crate) mod harness;
 #[cfg(test)]
 mod tests {
     use palantir::DockOp;
+    use palantir::internals::UiHarness;
     use scenarium::{Binding, InputPort};
+    use std::sync::Arc;
 
     use super::*;
     use crate::core::document::harness::DocFixture;
@@ -564,12 +584,11 @@ mod tests {
     use crate::gui::state::preview_store::internals::opaque_image_value;
 
     /// Clicking a preview card's image asks the dock for that node's viewer
-    /// tab — the canvas's one view-tier request, raised from the prepass off
-    /// the hit digest the geometry rebuild fills.
+    /// tab — the canvas's one view-tier request.
     #[test]
     fn clicking_a_preview_card_asks_for_its_viewer_tab() {
         let mut fixture = DocFixture::default();
-        let node = fixture.add(&preview_func(Default::default()));
+        let node = fixture.add(&preview_func(Arc::default()));
         let mut h = CanvasHarness::new(fixture);
         // The run projection `App` would have filled from a completed run:
         // without a value the card records `Sense::NONE` and swallows the click.
@@ -640,44 +659,43 @@ mod tests {
         );
     }
 
-    /// The prepass runs once per pane showing the graph, so the frame stamp —
-    /// not a visibility flag — is what tells the canvas it was away.
+    /// The prepass runs only while the pane shows the graph, so the frame
+    /// stamp — not a visibility flag — is what tells the canvas it was away.
     ///
     /// Three cases must read as *still here*, and only a gap as an
-    /// appearance. The split-view one is the trap: `DockState::active_tabs`
-    /// yields one tab per group with no dedup, so two panes on the graph run
-    /// this twice in a single frame, and a second call reading as an
+    /// appearance. The repeat is the trap: a frame that owes a relayout
+    /// records twice under one frame id, and a second call reading as an
     /// appearance would reset a drag mid-gesture.
     #[test]
     fn appearing_is_a_frame_gap_not_a_repeat_or_a_step() {
-        let mut h = CanvasHarness::new(DocFixture::probes(1));
+        let mut h = UiHarness::arena();
         let mut graph_ui = GraphUI::default();
 
         assert!(
-            graph_ui.appearing(h.ui.ui()),
+            graph_ui.appearing(h.ui()),
             "a canvas that has never recorded is appearing"
         );
         assert!(
-            !graph_ui.appearing(h.ui.ui()),
-            "a second pane on the same frame is the same appearance, not a new one"
+            !graph_ui.appearing(h.ui()),
+            "a second pass of the same frame is the same appearance, not a new one"
         );
 
-        h.ui.frame(|_| {});
+        h.frame(|_| {});
         assert!(
-            !graph_ui.appearing(h.ui.ui()),
+            !graph_ui.appearing(h.ui()),
             "the next consecutive frame is the steady state"
         );
 
-        // Two frames the canvas sat out — the pane was on another tab.
-        h.ui.frame(|_| {});
-        h.ui.frame(|_| {});
+        // Two frames the canvas sat out — the dock showed another tab.
+        h.frame(|_| {});
+        h.frame(|_| {});
         assert!(
-            graph_ui.appearing(h.ui.ui()),
+            graph_ui.appearing(h.ui()),
             "a gap means it was away and is back"
         );
         assert!(
-            !graph_ui.appearing(h.ui.ui()),
-            "and the reappearance is reported once, not per pane"
+            !graph_ui.appearing(h.ui()),
+            "and the reappearance is reported once, not per pass"
         );
     }
 }

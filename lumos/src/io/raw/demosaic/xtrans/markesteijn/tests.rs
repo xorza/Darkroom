@@ -1,10 +1,9 @@
-use crate::io::raw::demosaic::interleave_planes;
 use crate::io::raw::demosaic::sensor_layout::SensorLayout;
-use crate::io::raw::demosaic::xtrans::XTransNormalization;
 use crate::io::raw::demosaic::xtrans::internals::{
-    TEST_INV_RANGE, make_xtrans, test_pattern, test_pattern_array, to_u16,
+    make_xtrans, test_pattern, test_pattern_array, to_u16,
 };
 use crate::io::raw::demosaic::xtrans::markesteijn::*;
+use crate::io::raw::demosaic::xtrans::markesteijn_steps::MARK_INFO_BORDER;
 use crate::testing::prelude::*;
 
 #[derive(Clone, Copy, Debug)]
@@ -27,45 +26,36 @@ struct GoldenCase {
     samples: [GoldenSample; 4],
 }
 
+/// The regions tile the arena in the documented order — A 4P, E 8P, B 4P, C P, D P words — so
+/// each step's scratch is exactly the region its doc names, and the last ends where the arena does.
 #[test]
-fn final_blend_scratch_reuses_the_exact_dead_arena_regions() {
+fn arena_regions_tile_the_arena_in_order() {
     let width = 5;
     let height = 3;
     let pixels = width * height;
-    let bytes_per_word = std::mem::size_of::<f32>();
+    let bytes_per_word = size_of::<f32>();
     let mut arena = DemosaicArena::new(Size2us::new(width, height));
-    arena.storage.fill(0.0);
     let arena_start = arena.storage.as_ptr() as usize;
     let arena_end = arena_start + arena.storage.len() * bytes_per_word;
 
-    let buffers = arena.final_blend_buffers();
-
-    assert_eq!(buffers.green_dir.len(), 4 * pixels);
-    assert_eq!(buffers.colors.len(), 4 * pixels);
-    assert_eq!(buffers.scores.len(), pixels);
-    assert_eq!(buffers.homo.len(), 4 * pixels);
-    assert_eq!(buffers.sat.len(), pixels);
-    assert_eq!(buffers.green_dir.as_ptr() as usize, arena_start);
-    assert_eq!(
-        buffers.colors.as_ptr().cast::<f32>() as usize,
-        arena_start + 4 * pixels * bytes_per_word
-    );
-    assert_eq!(
-        buffers.scores.as_ptr().cast::<u32>() as usize,
-        arena_start + 12 * pixels * bytes_per_word
-    );
-    assert_eq!(
-        buffers.homo.as_ptr() as usize,
-        arena_start + 16 * pixels * bytes_per_word
-    );
-    assert_eq!(
-        buffers.sat.as_ptr() as usize,
-        arena_start + 17 * pixels * bytes_per_word
-    );
-    assert_eq!(
-        buffers.sat.as_ptr().wrapping_add(pixels) as usize,
-        arena_end
-    );
+    let regions = arena.regions();
+    let mut offset = 0;
+    for (name, region, words) in [
+        ("A", &*regions.a, 4),
+        ("E", &*regions.e, 8),
+        ("B", &*regions.b, 4),
+        ("C", &*regions.c, 1),
+        ("D", &*regions.d, 1),
+    ] {
+        assert_eq!(region.len(), words * pixels, "{name}");
+        assert_eq!(
+            region.as_ptr() as usize,
+            arena_start + offset * bytes_per_word,
+            "{name}"
+        );
+        offset += words * pixels;
+    }
+    assert_eq!(arena_start + offset * bytes_per_word, arena_end);
 }
 
 fn synthetic_value(scene: SyntheticScene, channel: usize, pos: Vec2us) -> f32 {
@@ -104,7 +94,10 @@ fn synthetic_value(scene: SyntheticScene, channel: usize, pos: Vec2us) -> f32 {
 }
 
 #[test]
-#[allow(clippy::excessive_precision)]
+#[expect(
+    clippy::excessive_precision,
+    reason = "the reference values are pasted as librtprocess printed them"
+)]
 fn markesteijn_matches_librtprocess_reference_scenes() {
     const WIDTH: usize = 96;
     const HEIGHT: usize = 96;
@@ -228,52 +221,42 @@ fn markesteijn_matches_librtprocess_reference_scenes() {
     }
 }
 
+/// A constant colour per channel — uniform grey and two distinct (R, G, B) — comes back as itself
+/// at every pixel, border included, with and without masked margins. Every stage averages or
+/// blends equal values, so each output is the input to a few f32 roundings: under 2e-7, where one
+/// rounding of a value below 1 is up to 6e-8.
 #[test]
-fn markesteijn_output_size() {
-    let raw_w = 24;
-    let raw_h = 24;
-    let w = 12;
-    let h = 12;
-    let data = vec![to_u16(0.5); raw_w * raw_h];
-    let xtrans = make_xtrans(
-        &data,
-        SensorLayout {
-            raw: Size2us::new(raw_w, raw_h),
-            active: Size2us::new(w, h),
-            margin: Vec2us::new(6, 6),
-        },
-    );
-
-    let rgb = interleave_planes(demosaic(&xtrans, &CancelToken::never()).unwrap());
-    assert_eq!(rgb.len(), w * h * 3);
-}
-
-#[test]
-fn markesteijn_uniform_input() {
-    let raw_w = 30;
-    let raw_h = 30;
-    let w = 18;
-    let h = 18;
-    let data = vec![to_u16(0.5); raw_w * raw_h];
-    let xtrans = make_xtrans(
-        &data,
-        SensorLayout {
-            raw: Size2us::new(raw_w, raw_h),
-            active: Size2us::new(w, h),
-            margin: Vec2us::new(6, 6),
-        },
-    );
-
-    let rgb = interleave_planes(demosaic(&xtrans, &CancelToken::never()).unwrap());
-
-    // Uniform input should produce approximately uniform output
-    for (i, &v) in rgb.iter().enumerate() {
-        assert!(
-            (v - 0.5).abs() < 0.05,
-            "Pixel {} = {} (expected ~0.5)",
-            i,
-            v
-        );
+fn constant_colour_reconstructs_to_rounding() {
+    let active = Size2us::new(36, 36);
+    let pattern = test_pattern();
+    for colour in [[0.5f32; 3], [0.8, 0.5, 0.2], [0.1, 0.9, 0.4]] {
+        // Margins of 6 keep the 6×6 layout's phase at the raw origin.
+        for margin in [0, 6] {
+            let raw = Size2us::new(active.width + 2 * margin, active.height + 2 * margin);
+            let data: Vec<f32> = (0..raw.pixel_count())
+                .map(|index| colour[pattern.color_at(raw.point_of(index)) as usize])
+                .collect();
+            let layout = SensorLayout {
+                raw,
+                active,
+                margin: Vec2us::new(margin, margin),
+            };
+            let planes = demosaic(
+                &XTransImage::with_margins_f32(&data, layout, pattern),
+                &CancelToken::never(),
+            )
+            .unwrap();
+            for (channel, plane) in planes.iter().enumerate() {
+                for (index, &value) in plane.iter().enumerate() {
+                    assert_close!(
+                        value,
+                        colour[channel],
+                        2e-7,
+                        "{colour:?} margin {margin} channel {channel} at {index}: {value}"
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -295,10 +278,10 @@ fn markesteijn_no_nan() {
         },
     );
 
-    let rgb = interleave_planes(demosaic(&xtrans, &CancelToken::never()).unwrap());
+    let planes = demosaic(&xtrans, &CancelToken::never()).unwrap();
 
-    for (i, &v) in rgb.iter().enumerate() {
-        assert!(v.is_finite(), "NaN/Inf at pixel {}", i);
+    for (i, &v) in planes.iter().flatten().enumerate() {
+        assert!(v.is_finite(), "NaN/Inf at pixel {i}");
     }
 }
 
@@ -318,54 +301,54 @@ fn markesteijn_all_zeros() {
         },
     );
 
-    let rgb = interleave_planes(demosaic(&xtrans, &CancelToken::never()).unwrap());
-    for &v in &rgb {
+    let planes = demosaic(&xtrans, &CancelToken::never()).unwrap();
+    for &v in planes.iter().flatten() {
         assert_eq!(v, 0.0, "Expected 0.0 for all-zero input");
     }
 }
 
+/// From the border fill in, a frame demosaics bit for bit as the same pixels inside a larger
+/// frame: no stage reads a value it did not compute from the frame's own samples. Random samples,
+/// so no stencil can hide behind equal neighbours; an offset of 12 keeps the 6×6 layout's phase.
 #[test]
-fn markesteijn_preserves_green_at_green_pixel() {
-    let raw_w = 30;
-    let raw_h = 30;
-    let w = 18;
-    let h = 18;
-    let top = 6;
-    let left = 6;
-    let data = vec![to_u16(0.5); raw_w * raw_h];
-    let pattern = test_pattern();
-    let xtrans = XTransImage::with_margins(
-        &data,
-        SensorLayout {
-            raw: Size2us::new(raw_w, raw_h),
-            active: Size2us::new(w, h),
-            margin: Vec2us::new(left, top),
-        },
-        pattern.clone(),
-        XTransNormalization {
-            channel_black: [0.0; 3],
-            inv_range: TEST_INV_RANGE,
-            black_repeat: None,
-        },
-    );
-
-    let rgb = interleave_planes(demosaic(&xtrans, &CancelToken::never()).unwrap());
-
-    // At green pixel positions, the green channel should be approximately the raw value
-    for y in 0..h {
-        for x in 0..w {
-            let raw_y = y + top;
-            let raw_x = x + left;
-            if pattern.color_at(Vec2us::new(raw_x, raw_y)) == 1 {
-                let g = rgb[(y * w + x) * 3 + 1];
-                assert!(
-                    (g - 0.5).abs() < 0.001,
-                    "Green at ({},{}) = {} (expected ~0.5)",
-                    y,
-                    x,
-                    g
-                );
+fn markesteijn_beyond_the_border_matches_a_larger_frame() {
+    let large = Size2us::new(96, 96);
+    let offset = 12;
+    let mut rng = TestRng::new(7);
+    let samples: Vec<f32> = (0..large.pixel_count())
+        .map(|_| 0.1 + 0.8 * rng.next_f32())
+        .collect();
+    let small = Size2us::new(60, 60);
+    let crop: Vec<f32> = (0..small.pixel_count())
+        .map(|index| {
+            let pos = small.point_of(index);
+            samples[large.index_of(Vec2us::new(pos.x + offset, pos.y + offset))]
+        })
+        .collect();
+    let run = |data: &[f32], size| {
+        let xtrans =
+            XTransImage::with_margins_f32(data, SensorLayout::cropped(size), test_pattern());
+        demosaic(&xtrans, &CancelToken::never()).unwrap()
+    };
+    let whole = run(&samples, large);
+    let part = run(&crop, small);
+    for (channel, (part_plane, whole_plane)) in part.iter().zip(&whole).enumerate() {
+        for (index, value) in part_plane.iter().enumerate() {
+            let pos = small.point_of(index);
+            let distance = pos
+                .x
+                .min(pos.y)
+                .min(small.width - 1 - pos.x)
+                .min(small.height - 1 - pos.y);
+            if distance < MARK_INFO_BORDER {
+                continue;
             }
+            let outer = large.index_of(Vec2us::new(pos.x + offset, pos.y + offset));
+            assert_eq!(
+                value.to_bits(),
+                whole_plane[outer].to_bits(),
+                "channel {channel} at {pos:?}"
+            );
         }
     }
 }

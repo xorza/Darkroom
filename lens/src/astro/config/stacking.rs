@@ -11,50 +11,67 @@
 //! carry.
 
 use common::{Introspect, IntrospectEnum};
-use lumos::{RegistrationConfig, SipConfig, StackConfig, StarDetectionConfig};
+use lumos::{FwhmMode, RegistrationConfig, SipConfig, StackConfig, StarDetectionConfig};
 
-use crate::astro::config::preset::preset_enum;
-use crate::config_node::NodeConfig;
+use crate::astro::config::preset::Preset;
 
-const COMBINE_SIGMA: f32 = 3.0;
+/// Lumos's star-detection presets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IntrospectEnum)]
+#[config(type_id = "5f3563ab-f65d-4ed2-99ad-c63b9d3377ba")]
+pub(crate) enum DetectionPreset {
+    WideField,
+    HighResolution,
+    CrowdedField,
+    PreciseGround,
+}
 
-preset_enum! {
-    DetectionPreset => StarDetectionConfig,
-    display: "DetectionPreset",
-    variants: {
-        WideField = "wide_field" @ "Wide Field" => StarDetectionConfig::wide_field(),
-        HighResolution = "high_resolution" @ "High Resolution" => StarDetectionConfig::high_resolution(),
-        CrowdedField = "crowded_field" @ "Crowded Field" => StarDetectionConfig::crowded_field(),
-        PreciseGround = "precise_ground" @ "Precise Ground" => StarDetectionConfig::precise_ground(),
+impl Preset for DetectionPreset {
+    type Knobs = DetectionKnobs;
+    type Config = StarDetectionConfig;
+
+    fn config(self) -> StarDetectionConfig {
+        match self {
+            Self::WideField => StarDetectionConfig::wide_field(),
+            Self::HighResolution => StarDetectionConfig::high_resolution(),
+            Self::CrowdedField => StarDetectionConfig::crowded_field(),
+            Self::PreciseGround => StarDetectionConfig::precise_ground(),
+        }
     }
 }
 
-preset_enum! {
-    RegistrationPreset => RegistrationConfig,
-    display: "RegistrationPreset",
-    variants: {
-        Default = "default" @ "Default" => RegistrationConfig::default(),
-        Fast = "fast" @ "Fast" => RegistrationConfig::fast(),
-        Precise = "precise" @ "Precise" => RegistrationConfig::precise(),
-        WideField = "wide_field" @ "Wide Field" => RegistrationConfig::wide_field(),
-        Mosaic = "mosaic" @ "Mosaic" => RegistrationConfig::mosaic(),
-    }
+/// Lumos's registration presets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IntrospectEnum)]
+#[config(type_id = "7f6cfead-d076-4529-9a11-5f4da539168d")]
+pub(crate) enum RegistrationPreset {
+    Default,
+    Fast,
+    Precise,
+    WideField,
+    Mosaic,
 }
 
-preset_enum! {
-    CombinePreset => StackConfig,
-    display: "CombinePreset",
-    variants: {
-        SigmaClipped = "sigma_clipped" @ "Sigma Clipped" => StackConfig::sigma_clipped(COMBINE_SIGMA),
-        Winsorized = "winsorized" @ "Winsorized" => StackConfig::winsorized(COMBINE_SIGMA),
-        Median = "median" @ "Median" => StackConfig::median(),
-        Mean = "mean" @ "Mean" => StackConfig::mean(),
+impl Preset for RegistrationPreset {
+    type Knobs = RegistrationKnobs;
+    type Config = RegistrationConfig;
+
+    fn config(self) -> RegistrationConfig {
+        match self {
+            Self::Default => RegistrationConfig::default(),
+            Self::Fast => RegistrationConfig::fast(),
+            Self::Precise => RegistrationConfig::precise(),
+            Self::WideField => RegistrationConfig::wide_field(),
+            Self::Mosaic => RegistrationConfig::mosaic(),
+        }
     }
 }
 
 /// The star-detection knobs the editor offers, drawn from
 /// [`StarDetectionConfig`]'s `detection`, `fwhm` and `filter` sub-configs.
 #[derive(Debug, Clone, Introspect)]
+#[config(
+    type_id = "4512544e-537c-4c1c-96ad-e596cc88d60d",
+    name = "DetectionConfig"
+)]
 pub(crate) struct DetectionKnobs {
     sigma_threshold: f32,
     expected_fwhm: f32,
@@ -74,7 +91,12 @@ impl From<StarDetectionConfig> for DetectionKnobs {
     fn from(config: StarDetectionConfig) -> Self {
         Self {
             sigma_threshold: config.detection.sigma_threshold,
-            expected_fwhm: config.fwhm.expected,
+            expected_fwhm: config
+                .fwhm
+                .mode
+                .or(StarDetectionConfig::default().fwhm.mode)
+                .expect("the default config runs a matched filter")
+                .seed(),
             min_area: config.detection.min_area,
             max_area: config.detection.max_area,
             min_snr: config.filter.min_snr,
@@ -87,7 +109,7 @@ impl From<DetectionKnobs> for StarDetectionConfig {
     fn from(knobs: DetectionKnobs) -> Self {
         let mut config = StarDetectionConfig::default();
         config.detection.sigma_threshold = knobs.sigma_threshold;
-        config.fwhm.expected = knobs.expected_fwhm;
+        config.fwhm.mode = Some(FwhmMode::Fixed(knobs.expected_fwhm));
         config.detection.min_area = knobs.min_area;
         config.detection.max_area = knobs.max_area;
         config.filter.min_snr = knobs.min_snr;
@@ -96,15 +118,14 @@ impl From<DetectionKnobs> for StarDetectionConfig {
     }
 }
 
-impl NodeConfig for DetectionKnobs {
-    const TYPE_ID: &'static str = "4512544e-537c-4c1c-96ad-e596cc88d60d";
-    const NAME: &'static str = "DetectionConfig";
-}
-
 /// The registration knobs the editor offers. `sip_enabled` stands in for
 /// [`RegistrationConfig::sip`]'s whole `Option<SipConfig>`: on means the
 /// default SIP fit, off means none.
 #[derive(Debug, Clone, Introspect)]
+#[config(
+    type_id = "63cd4de9-b82f-4829-bea5-391da64e296f",
+    name = "RegistrationConfig"
+)]
 pub(crate) struct RegistrationKnobs {
     max_stars: usize,
     min_matches: usize,
@@ -146,11 +167,6 @@ impl From<RegistrationKnobs> for RegistrationConfig {
     }
 }
 
-impl NodeConfig for RegistrationKnobs {
-    const TYPE_ID: &'static str = "63cd4de9-b82f-4829-bea5-391da64e296f";
-    const NAME: &'static str = "RegistrationConfig";
-}
-
 /// Which combination [`CombineKnobs`] builds. A [`StackConfig`] carries each
 /// method's parameters in its own shape, so the editor picks the method here
 /// and supplies the one shared parameter — `sigma` — as its own field.
@@ -163,19 +179,37 @@ pub(crate) enum CombineMethodChoice {
     Mean,
 }
 
+impl Preset for CombineMethodChoice {
+    type Knobs = CombineKnobs;
+    type Config = StackConfig;
+
+    fn config(self) -> StackConfig {
+        CombineKnobs {
+            method: self,
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
 /// The frame-combination knobs the editor offers. `sigma` is read only by the
 /// two rejecting methods.
 #[derive(Debug, Clone, Introspect)]
+#[config(
+    type_id = "843bff16-61ec-47db-9a86-64bb53c9c1cc",
+    name = "CombineConfig"
+)]
 pub(crate) struct CombineKnobs {
     method: CombineMethodChoice,
     sigma: f32,
 }
 
 impl Default for CombineKnobs {
+    /// Sigma-clipped at 3σ, should a rejecting method be picked.
     fn default() -> Self {
         Self {
             method: CombineMethodChoice::SigmaClipped,
-            sigma: COMBINE_SIGMA,
+            sigma: 3.0,
         }
     }
 }
@@ -191,14 +225,9 @@ impl From<CombineKnobs> for StackConfig {
     }
 }
 
-impl NodeConfig for CombineKnobs {
-    const TYPE_ID: &'static str = "843bff16-61ec-47db-9a86-64bb53c9c1cc";
-    const NAME: &'static str = "CombineConfig";
-}
-
 #[cfg(test)]
 mod tests {
-    use lumos::{RegistrationConfig, SipConfig, StackConfig, StarDetectionConfig};
+    use lumos::{FwhmMode, RegistrationConfig, SipConfig, StackConfig, StarDetectionConfig};
 
     use crate::astro::config::stacking::{
         CombineKnobs, CombineMethodChoice, DetectionKnobs, RegistrationKnobs,
@@ -214,7 +243,7 @@ mod tests {
         config.detection.sigma_threshold = 4.5;
         config.detection.min_area = 7;
         config.detection.max_area = 900;
-        config.fwhm.expected = 3.25;
+        config.fwhm.mode = Some(FwhmMode::Fixed(3.25));
         config.filter.min_snr = 12.5;
         config.filter.max_eccentricity = 0.75;
 
@@ -222,7 +251,7 @@ mod tests {
         assert_eq!(restored.detection.sigma_threshold, 4.5);
         assert_eq!(restored.detection.min_area, 7);
         assert_eq!(restored.detection.max_area, 900);
-        assert_eq!(restored.fwhm.expected, 3.25);
+        assert_eq!(restored.fwhm.mode, Some(FwhmMode::Fixed(3.25)));
         assert_eq!(restored.filter.min_snr, 12.5);
         assert_eq!(restored.filter.max_eccentricity, 0.75);
     }

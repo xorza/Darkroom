@@ -50,7 +50,11 @@ pub(super) fn create_comparison_image(
     // Match detected stars to ground truth
     let truth_positions: Vec<glam::DVec2> = ground_truth.iter().map(|s| s.pos).collect();
     let detected_positions: Vec<glam::DVec2> = detected.iter().map(|s| s.pos).collect();
-    let pairs = match_catalogs(&truth_positions, &detected_positions, match_radius as f64);
+    let pairs = match_catalogs(
+        &truth_positions,
+        &detected_positions,
+        f64::from(match_radius),
+    );
     let matched_truth: Vec<usize> = pairs.iter().map(|&(ti, _)| ti).collect();
     let matched_detected: Vec<usize> = pairs.iter().map(|&(_, di)| di).collect();
 

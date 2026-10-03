@@ -1,211 +1,120 @@
-//! Cosmic ray rejection stage tests.
-//!
-//! Tests the cosmic ray detection via sharpness filtering.
+//! Cosmic-ray rejection through the whole detector, against the truth that rendered the frame.
 
-use crate::ImageDimensions;
-use crate::testing::prelude::*;
+#![expect(
+    clippy::cast_sign_loss,
+    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
+)]
 
 use crate::stacking::star_detection::config::Config;
+use crate::stacking::star_detection::config::filter_config::FilterConfig;
 use crate::stacking::star_detection::detector::StarDetector;
-use crate::stacking::star_detection::tests::Scenario;
+use crate::stacking::star_detection::detector::internals::saturation_level_of;
+use crate::stacking::star_detection::tests::{Scenario, isolated, near, synthetic_config};
 use crate::testing::init_tracing;
-use crate::testing::synthetic::artifacts::add_cosmic_rays;
-use crate::testing::visual::{ToneMap, gray_to_rgb, save, save_image};
-use common::internals::test_output_path;
+use crate::testing::prelude::*;
+use crate::testing::visual::{ToneMap, gray_to_rgb, save_image};
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
 
-/// Test cosmic ray rejection on star field.
+/// The sharpness cut rejects a cosmic ray on its own. A ray is one pixel, or one with 15% bled to
+/// each side: its peak holds ≥ 1/1.3 = 0.77 of its 3×3 core, past the 0.7 cut, where a 4-px-FWHM
+/// star holds ≤ 0.14. With every other cut that can drop a ray opened — the area floor at 1, the
+/// eccentricity and roundness bars at 1, the FWHM-outlier cut off — the default sharpness cut
+/// leaves no isolated ray, and a cut opened to 1.0 keeps every isolated ray below the saturation
+/// level (a saturated peak is rejected as such). With the defaults, no isolated ray survives
+/// either. Every isolated star survives all three.
 #[test]
-
-fn cosmic_ray_rejection() {
+fn sharpness_rejects_isolated_cosmic_rays() {
     init_tracing();
-
-    let width = 256;
-    let height = 256;
-
-    // Clean star field; cosmic rays are added manually below so we know their positions.
     let frame = Scenario {
         num_stars: 30,
+        cosmic_rays: 15,
         ..Default::default()
     }
     .frame();
-    let ground_truth = frame.truth.sources.clone();
-    let mut pixels_vec = frame.image.channel(0).pixels().to_vec();
-
-    // Add cosmic rays manually so we know their positions
-    let cr_positions = add_cosmic_rays(&mut pixels_vec, width, 15, (0.5, 1.0), 123);
-
-    save(
-        &pixels_vec,
-        Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_cr_rejection_input.png"),
-        ToneMap::Clamp,
+    let stars: Vec<DVec2> = frame.truth.sources.iter().map(|s| s.pos).collect();
+    let rays: Vec<DVec2> = frame
+        .truth
+        .cosmic_rays
+        .iter()
+        .map(|ray| DVec2::new(ray.x as f64, ray.y as f64))
+        .collect();
+    let pixels = frame.image.channel(0);
+    let size = Size2us::new(pixels.width(), pixels.height());
+    let (lone_stars, lone_rays) = (isolated(&stars, &rays, size), isolated(&rays, &stars, size));
+    let saturation = saturation_level_of(&frame.image);
+    let unsaturated = |ray: &DVec2| pixels[(ray.x as usize, ray.y as usize)] < saturation;
+    assert!(
+        lone_stars.len() >= 15,
+        "{} isolated stars",
+        lone_stars.len()
+    );
+    assert!(
+        lone_rays.iter().filter(|ray| unsaturated(ray)).count() >= 5,
+        "{} isolated rays, too few unsaturated",
+        lone_rays.len()
     );
 
-    // Run detection - disable CFA filter and matched filter for synthetic images
-    let mut detection_config = Config::default();
-    detection_config.fwhm.expected = 0.0;
-
-    let image =
-        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), pixels_vec.clone());
-    let mut detector = StarDetector::from_config(detection_config.clone()).unwrap();
-    let result = detector.detect(&image);
-    let stars = result.stars;
-
-    // Create overlay
-    let mut img = gray_to_rgb(&pixels_vec, Size2us::new(width, height), ToneMap::AutoRange);
-
-    // Draw cosmic ray positions in red
-    let red = Color::rgb(1.0, 0.2, 0.2);
-    for (x, y) in &cr_positions {
-        draw_cross(&mut img, Vec2::new(*x as f32, *y as f32), 3.0, red, 1.0);
-    }
-
-    // Draw true star positions in blue
-    let blue = Color::rgb(0.3, 0.3, 1.0);
-    for star in &ground_truth {
-        draw_circle(
-            &mut img,
-            Vec2::new(star.pos.x as f32, star.pos.y as f32),
-            8.0,
-            blue,
-            1.0,
-        );
-    }
-
-    // Draw detected stars in green
-    let green = Color::GREEN;
-    for star in &stars {
-        draw_circle(
-            &mut img,
-            Vec2::new(star.pos.x as f32, star.pos.y as f32),
-            5.0,
-            green,
-            1.0,
-        );
-    }
-
-    save_image(
-        img,
-        &test_output_path("synthetic_starfield/stage_cr_rejection_overlay.png"),
-    );
-
-    // Count how many cosmic rays were falsely detected as stars
-    let mut cr_false_positives = 0;
-    for (cr_x, cr_y) in &cr_positions {
-        for star in &stars {
-            let dx = star.pos.x as f32 - *cr_x as f32;
-            let dy = star.pos.y as f32 - *cr_y as f32;
-            let dist = (dx * dx + dy * dy).sqrt();
-            if dist < 3.0 {
-                cr_false_positives += 1;
-                break;
+    let detect = |config: Config| -> Vec<DVec2> {
+        StarDetector::from_config(config)
+            .unwrap()
+            .detect(&frame.image)
+            .stars
+            .iter()
+            .map(|star| star.pos)
+            .collect()
+    };
+    let opened = |max_sharpness| {
+        let mut config = synthetic_config();
+        config.detection.min_area = 1;
+        config.filter.max_eccentricity = 1.0;
+        config.filter.max_roundness = 1.0;
+        config.filter.max_fwhm_deviation = None;
+        config.filter.max_sharpness = max_sharpness;
+        config
+    };
+    let legs = [
+        (
+            "sharpness cut alone",
+            opened(FilterConfig::default().max_sharpness),
+            false,
+        ),
+        ("no cut", opened(1.0), true),
+        ("defaults", synthetic_config(), false),
+    ];
+    for (leg, config, rays_kept) in legs {
+        let found = detect(config);
+        if leg == "defaults" {
+            let mut overlay = gray_to_rgb(pixels.pixels(), size, ToneMap::AutoRange);
+            for ray in &rays {
+                draw_cross(
+                    &mut overlay,
+                    ray.as_vec2(),
+                    3.0,
+                    Color::rgb(1.0, 0.2, 0.2),
+                    1.0,
+                );
             }
-        }
-    }
-
-    // Count how many true stars were detected
-    let mut true_detections = 0;
-    for truth in &ground_truth {
-        for star in &stars {
-            let dx = star.pos.x - truth.pos.x;
-            let dy = star.pos.y - truth.pos.y;
-            let dist = (dx * dx + dy * dy).sqrt();
-            if dist < 5.0 {
-                true_detections += 1;
-                break;
+            for star in &stars {
+                draw_circle(
+                    &mut overlay,
+                    star.as_vec2(),
+                    8.0,
+                    Color::rgb(0.3, 0.3, 1.0),
+                    1.0,
+                );
             }
+            for star in &found {
+                draw_circle(&mut overlay, star.as_vec2(), 5.0, Color::GREEN, 1.0);
+            }
+            save_image(overlay, "synthetic_starfield/stage_cr_rejection_overlay");
+        }
+        for ray in &lone_rays {
+            let expected = usize::from(rays_kept && unsaturated(ray));
+            assert_eq!(near(*ray, &found, 1.0), expected, "{leg}: ray at {ray}");
+        }
+        for star in &lone_stars {
+            assert_eq!(near(*star, &found, 1.0), 1, "{leg}: star at {star}");
         }
     }
-
-    let cr_rejection_rate = 1.0 - (cr_false_positives as f32 / cr_positions.len() as f32);
-    let detection_rate = true_detections as f32 / ground_truth.len() as f32;
-
-    println!("\nCosmic Ray Rejection Results:");
-    println!("  True stars: {}", ground_truth.len());
-    println!("  Cosmic rays: {}", cr_positions.len());
-    println!("  Detected stars: {}", stars.len());
-    println!("  True detections: {}", true_detections);
-    println!("  CR false positives: {}", cr_false_positives);
-    println!("  CR rejection rate: {:.1}%", cr_rejection_rate * 100.0);
-    println!("  Star detection rate: {:.1}%", detection_rate * 100.0);
-
-    // Most cosmic rays should be rejected
-    assert!(
-        cr_rejection_rate > 0.7,
-        "CR rejection rate {:.1}% should be > 70%",
-        cr_rejection_rate * 100.0
-    );
-
-    // Most stars should still be detected
-    assert!(
-        detection_rate > 0.9,
-        "Star detection rate {:.1}% should be > 90%",
-        detection_rate * 100.0
-    );
-}
-
-/// Sharpness discriminates real PSF stars (low sharpness) from cosmic-ray spikes (high
-/// sharpness): real stars must read below the CR threshold, and almost no CR survives as a star.
-#[test]
-fn detected_real_stars_have_low_sharpness() {
-    init_tracing();
-
-    let width = 256;
-    let height = 256;
-
-    let frame = Scenario {
-        num_stars: 10,
-        ..Default::default()
-    }
-    .frame();
-    let ground_truth = frame.truth.sources.clone();
-    let mut pixels_vec = frame.image.channel(0).pixels().to_vec();
-    let cr_positions = add_cosmic_rays(&mut pixels_vec, width, 10, (0.6, 0.9), 456);
-
-    let mut detection_config = Config::default();
-    detection_config.fwhm.expected = 0.0;
-    let image = LinearImage::from_pixels(ImageDimensions::new((width, height), 1), pixels_vec);
-    let stars = StarDetector::from_config(detection_config)
-        .unwrap()
-        .detect(&image)
-        .stars;
-
-    let mut real = 0;
-    let mut cr_as_star = 0;
-    for star in &stars {
-        let is_real = ground_truth.iter().any(|t| {
-            let dx = t.pos.x - star.pos.x;
-            let dy = t.pos.y - star.pos.y;
-            (dx * dx + dy * dy).sqrt() < 5.0
-        });
-        let is_cr = cr_positions.iter().any(|&(cx, cy)| {
-            let dx = star.pos.x - cx as f64;
-            let dy = star.pos.y - cy as f64;
-            (dx * dx + dy * dy).sqrt() < 3.0
-        });
-        if is_real {
-            real += 1;
-            // The discriminator treats sharpness > 0.7 as a cosmic ray; a true PSF star must
-            // sit well below that.
-            assert!(
-                star.sharpness < 0.7,
-                "real star at ({:.1},{:.1}) has CR-like sharpness {:.3}",
-                star.pos.x,
-                star.pos.y,
-                star.sharpness
-            );
-        } else if is_cr {
-            cr_as_star += 1;
-        }
-    }
-    assert!(
-        real >= 8,
-        "should detect most of the 10 true stars, got {real}"
-    );
-    assert!(
-        cr_as_star <= 2,
-        "cosmic rays should be rejected, {cr_as_star} survived as stars"
-    );
 }

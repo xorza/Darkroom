@@ -1,7 +1,8 @@
 //! Configuration for registered stacking pipelines.
 
 use crate::stacking::calibration_masters::cosmic_ray::config::CosmicRayConfig;
-use crate::stacking::combine::config::StackConfig;
+use crate::stacking::combine::config::{StackConfig, Weighting};
+use crate::stacking::combine::error::StackConfigError;
 use crate::stacking::pipeline::result::Error;
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::star_detection::config::Config as StarDetectionConfig;
@@ -28,26 +29,15 @@ pub struct AlignStackConfig {
 }
 
 impl AlignStackConfig {
-    /// This config with the stack's planning figure pinned to `system_available`, for a run to
-    /// take at its entry and pass to every stage. See `CacheConfig::resolved_with`.
-    pub(super) fn with_resolved_memory(&self, system_available: u64) -> Self {
-        Self {
-            stack: StackConfig {
-                cache: self.stack.cache.resolved_with(system_available),
-                ..self.stack.clone()
-            },
-            ..self.clone()
-        }
-    }
-
-    /// Validate every stage's configuration.
+    /// Validate every stage's configuration for a run over `frame_count` lights.
     ///
     /// Each stage validates its own config where it runs, but by then the run has paid for
     /// everything upstream — and the registration stage cannot report a config problem at all,
     /// because it returns the same error type for "this config is invalid" and "these two star
-    /// catalogs don't match", and the pipeline reads the latter as a frame to drop. Checking all
-    /// three here means a bad config is reported as one, before any frame is decoded.
-    pub(super) fn validate(&self) -> Result<(), Error> {
+    /// catalogs don't match", and the pipeline reads the latter as a frame to drop. Checking every
+    /// stage here means a bad config is reported as one, before any frame is decoded. Manual
+    /// weights are given one per input light, so their count is checked against the lights too.
+    pub(super) fn validate(&self, frame_count: usize) -> Result<(), Error> {
         self.detection.validate().map_err(Error::DetectionConfig)?;
         self.registration
             .validate()
@@ -55,6 +45,20 @@ impl AlignStackConfig {
         self.stack
             .validate()
             .map_err(|source| Error::Stack(source.into()))?;
+        if let Weighting::Manual(weights) = &self.stack.weighting
+            && weights.len() != frame_count
+        {
+            return Err(Error::Stack(
+                StackConfigError::ManualWeightCountMismatch {
+                    expected: frame_count,
+                    actual: weights.len(),
+                }
+                .into(),
+            ));
+        }
+        if let Some(cosmic_ray) = &self.cosmic_ray {
+            cosmic_ray.validate().map_err(Error::CosmicRayConfig)?;
+        }
         Ok(())
     }
 }

@@ -6,7 +6,7 @@ use crate::gui::theme::palette::Palette;
 
 /// The graph canvas itself — the ground everything else sits on, and the
 /// dotted grid ruled across it.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub(crate) struct CanvasTheme {
     /// Ground fill behind the whole graph.
     pub(crate) bg: RgbaF32,
@@ -21,7 +21,7 @@ pub(crate) struct CanvasTheme {
 }
 
 impl CanvasTheme {
-    pub(super) fn from_palette(p: &Palette) -> Self {
+    pub(super) const fn from_palette(p: &Palette) -> Self {
         Self {
             bg: p.canvas_bg,
             dot: p.canvas_dot,

@@ -18,14 +18,22 @@
 //! layout around it. Neither can be mistaken for the other, so no code path
 //! has to carry state it will not read.
 
+pub(crate) mod drag_start;
+
 use std::collections::{BTreeSet, HashMap};
+use std::iter;
+use std::sync::Arc;
 
 use glam::Vec2;
-use scenarium::{Binding, DetachedNode, InputPort, Node, NodeId, Subscription};
+use scenarium::{
+    Binding, BindingEntry, DetachedNode, InputPort, Library, Node, NodeId, Subscription,
+};
 
 use crate::core::document::PortRef;
 use crate::core::document::{Document, ItemPlacement, Viewport};
 use crate::core::edit::error::MalformedIntent;
+use crate::core::edit::gesture_id::GestureId;
+use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::core::edit::step::change::Change;
 use crate::core::edit::step::move_selection::{Move, MoveSelection};
 use crate::core::edit::step::node_presence::{NodePresence, NodeState};
@@ -68,20 +76,21 @@ pub(crate) enum GraphIntent {
         /// removes node + seeds together. They must be the new node's own
         /// inputs; wiring *into* an existing node is a separate
         /// [`Self::SetInput`].
-        bindings: Vec<(InputPort, Binding)>,
+        bindings: Vec<BindingEntry>,
     },
     RemoveNode {
         node_id: NodeId,
     },
-    /// Drag-move one or more selected node bodies in canvas-world
-    /// coordinates. A multi-select drag moves the whole group as a single
-    /// undo entry; a plain drag carries just the one grabbed item. `grabbed`
-    /// is whichever member the pointer latched — it keys the drag gesture so
-    /// consecutive frames coalesce.
+    /// One frame of a drag of one or more node bodies, in canvas-world
+    /// coordinates: every member of `members` moves to its start plus
+    /// `offset`. A multi-select drag moves the whole group; a plain drag
+    /// carries just the grabbed item. The frames of one `gesture` fold into
+    /// one undo entry.
     MoveSelection {
-        grabbed: NodeId,
-        /// `(item, target position)` per moved member.
-        moves: Vec<(NodeId, Vec2)>,
+        gesture: GestureId,
+        /// Shared with the drag that latched them, so a frame copies no list.
+        members: Arc<[DragStart]>,
+        offset: Vec2,
     },
     RenameNode {
         node_id: NodeId,
@@ -112,8 +121,11 @@ pub(crate) enum GraphIntent {
         node_id: NodeId,
         to: NodeProperty,
     },
+    /// Move the graph camera. A frame of a held gesture names it, so its
+    /// frames fold into one undo entry; a one-shot jump names none.
     SetViewport {
         to: Viewport,
+        gesture: Option<GestureId>,
     },
     /// Add (`subscribe = true`) or remove (`false`) an event subscription: an
     /// event wire dropped on, or severed from, a subscription pin.
@@ -141,7 +153,7 @@ impl GraphIntent {
         key: NodeId,
     ) -> impl Iterator<Item = Self> {
         let deselecting = shift && selected.contains(&key);
-        std::iter::once(Self::select_click(shift, selected, key))
+        iter::once(Self::select_click(shift, selected, key))
             .chain((!deselecting).then_some(Self::Raise { key }))
     }
 
@@ -165,7 +177,7 @@ impl GraphIntent {
     /// Drop the whole selection. Named rather than spelled `SetSelection`
     /// with an empty set at each call, so a reader sees the intent and not
     /// the mechanism.
-    pub(crate) fn clear_selection() -> Self {
+    pub(crate) const fn clear_selection() -> Self {
         Self::SetSelection {
             to: BTreeSet::new(),
         }
@@ -230,16 +242,8 @@ impl GraphIntent {
                 .expect("the view places every node the graph holds")
                 .pos
                 + DUPLICATE_OFFSET;
-            // This node's *own* inputs. `bindings_touching` would also hand
-            // back every binding that *reads* the node — cloned into a fresh
-            // `Vec`, then discarded. `InputPort` orders by `(node_id,
-            // port_idx)`, so a node's inputs sit contiguously.
-            let own_inputs = graph
-                .bindings
-                .range(InputPort::new(old_id, 0)..)
-                .take_while(|(port, _)| port.node_id == old_id);
             let mut bindings = Vec::new();
-            for (port, binding) in own_inputs {
+            for (port, binding) in graph.input_bindings(old_id) {
                 let input = InputPort::new(new_id, port.port_idx);
                 match binding {
                     Binding::Bind(source) => match clones.get(&source.node_id) {
@@ -247,10 +251,16 @@ impl GraphIntent {
                             input,
                             to: Some(Binding::bind(new_source, source.port_idx)),
                         }),
-                        None if include_incoming => bindings.push((input, Binding::Bind(*source))),
+                        None if include_incoming => bindings.push(BindingEntry {
+                            port: input,
+                            binding: Binding::Bind(*source),
+                        }),
                         None => {}
                     },
-                    other => bindings.push((input, other.clone())),
+                    other @ Binding::Const(_) => bindings.push(BindingEntry {
+                        port: input,
+                        binding: other.clone(),
+                    }),
                 }
             }
             intents.push(Self::AddNode {
@@ -299,7 +309,11 @@ impl GraphIntent {
     /// the payload could never have applied. ([`Self::MoveSelection`] and
     /// [`Self::SetSelection`] instead drop vanished members individually
     /// rather than refusing the whole intent.)
-    pub(crate) fn into_step(self, doc: &Document) -> Result<Option<UndoStep>, MalformedIntent> {
+    pub(crate) fn into_step(
+        self,
+        doc: &Document,
+        library: &Library,
+    ) -> Result<Option<UndoStep>, MalformedIntent> {
         let (graph, view) = (&doc.graph, &doc.main_view);
         let step = match self {
             Self::AddNode {
@@ -311,7 +325,7 @@ impl GraphIntent {
                 validate::fresh_node_id(graph, node_id)?;
                 validate::finite_position(pos, "AddNode")?;
                 validate::insertable_kind(&node)?;
-                let bindings = validate::seed_bindings(graph, node_id, bindings)?;
+                validate::seed_bindings(graph, library, node_id, &node, &bindings)?;
                 // The depth is fixed here rather than at write time, so a redo
                 // puts the node back at the depth the original add gave it
                 // instead of jumping it in front of whatever arrived since.
@@ -319,44 +333,37 @@ impl GraphIntent {
                     pos,
                     z: view.front_z(),
                 };
-                UndoStep::NodePresence(NodePresence::insertion(
-                    DetachedNode {
-                        node_id,
-                        node,
-                        bindings,
-                        subscriptions: Vec::new(),
-                    },
-                    placement,
-                ))
+                let detached = DetachedNode::new(node_id, node, bindings, Vec::new())?;
+                UndoStep::NodePresence(Box::new(NodePresence::insertion(detached, placement)))
             }
             Self::RemoveNode { node_id } => {
                 validate::non_nil_node(node_id, "RemoveNode")?;
                 let Some(state) = NodeState::capture(doc, node_id) else {
                     return Ok(None);
                 };
-                UndoStep::NodePresence(NodePresence::removal(state))
+                UndoStep::NodePresence(Box::new(NodePresence::removal(state)))
             }
-            Self::MoveSelection { grabbed, moves } => {
-                let mut placed = Vec::with_capacity(moves.len());
-                for (key, to) in moves {
+            Self::MoveSelection {
+                members, offset, ..
+            } => {
+                let mut moves = Vec::with_capacity(members.len());
+                for member in members.iter() {
+                    let to = member.pos + offset;
                     validate::finite_position(to, "MoveSelection")?;
                     // Drag-sourced (spans frames): a member whose item
                     // vanished mid-gesture (node removed) drops quietly.
-                    let Some(placement) = view.item_placements.get(&key) else {
+                    let Some(placement) = view.item_placements.get(&member.node) else {
                         continue;
                     };
-                    placed.push(Move {
-                        key,
+                    moves.push(Move {
+                        key: member.node,
                         pos: Change {
                             from: placement.pos,
                             to,
                         },
                     });
                 }
-                UndoStep::MoveSelection(MoveSelection {
-                    grabbed,
-                    moves: placed,
-                })
+                UndoStep::MoveSelection(MoveSelection { moves })
             }
             Self::RenameNode { node_id, to } => {
                 let Some(node) = validate::live_node(graph, node_id, "RenameNode")? else {
@@ -375,6 +382,7 @@ impl GraphIntent {
                     return Ok(None);
                 }
                 if let Some(Binding::Bind(source)) = &to {
+                    validate::wirable(graph, library, input)?;
                     // A wire held across frames can outlive its producer, and
                     // the bind would leave the graph with a dangling edge.
                     if validate::live_node(graph, source.node_id, "SetInput producer")?.is_none() {
@@ -383,9 +391,9 @@ impl GraphIntent {
                     // Reject a bind that would close a data cycle: the planner
                     // rejects a cyclic graph outright (`Error::CycleDetected`),
                     // so the edit must never land. The GUI snap filter normally
-                    // stops this earlier; this is the authoritative guard
-                    // covering every binding path, including any that bypass
-                    // the canvas.
+                    // stops this earlier; this, with `wirable` above, is the
+                    // authoritative guard covering every binding path,
+                    // including any that bypass the canvas.
                     if graph.produces_cycle(source.node_id, input.node_id) {
                         return Ok(None);
                     }
@@ -412,14 +420,16 @@ impl GraphIntent {
                 },
             }),
             Self::Raise { key } => {
-                let Some(placement) = view.item_placements.get(&key) else {
+                let (Some(placement), Some(to)) =
+                    (view.item_placements.get(&key), view.raised_z(key))
+                else {
                     return Ok(None);
                 };
                 UndoStep::Raise(Raise {
                     key,
                     z: Change {
                         from: placement.z,
-                        to: view.front_z(),
+                        to,
                     },
                 })
             }
@@ -438,7 +448,7 @@ impl GraphIntent {
                     property: Change { from, to },
                 })
             }
-            Self::SetViewport { to } => {
+            Self::SetViewport { to, .. } => {
                 if !to.is_valid() {
                     return Err(MalformedIntent::InvalidViewport);
                 }
@@ -481,6 +491,15 @@ impl GraphIntent {
         Ok(Some(step))
     }
 
+    /// The held gesture this intent is a frame of, if any.
+    pub(crate) const fn gesture(&self) -> Option<GestureId> {
+        match self {
+            Self::MoveSelection { gesture, .. } => Some(*gesture),
+            Self::SetViewport { gesture, .. } => *gesture,
+            _ => None,
+        }
+    }
+
     /// Build, no-op-filter, and apply one intent against `doc` in a single
     /// call — the entry every frontend drives its per-intent loop through. A
     /// `SetInput` that retypes wildcard outputs severs nothing: type
@@ -497,8 +516,12 @@ impl GraphIntent {
     /// [`Self::into_step`] and [`UndoStep::apply`] stay separate for the
     /// undo-stack redo path, which applies a stored step without rebuilding it
     /// (a redo replays already-valid history).
-    pub(crate) fn commit(self, doc: &mut Document) -> Result<Option<UndoStep>, MalformedIntent> {
-        let Some(step) = self.into_step(doc)? else {
+    pub(crate) fn commit(
+        self,
+        doc: &mut Document,
+        library: &Library,
+    ) -> Result<Option<UndoStep>, MalformedIntent> {
+        let Some(step) = self.into_step(doc, library)? else {
             return Ok(None);
         };
         if step.is_noop() {
@@ -506,6 +529,26 @@ impl GraphIntent {
         }
         step.apply(doc);
         Ok(Some(step))
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use glam::Vec2;
+    use scenarium::{Node, NodeId};
+
+    use crate::core::edit::graph_intent::GraphIntent;
+
+    impl GraphIntent {
+        /// An `AddNode` of `node` at `pos` under `node_id`, seeding no binding.
+        pub(crate) const fn add_node(pos: Vec2, node_id: NodeId, node: Node) -> Self {
+            Self::AddNode {
+                pos,
+                node_id,
+                node,
+                bindings: Vec::new(),
+            }
+        }
     }
 }
 

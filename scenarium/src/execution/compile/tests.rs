@@ -1,19 +1,15 @@
 use std::collections::HashSet;
 
 use super::*;
-use crate::containers::column::Idx;
-use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
+use crate::ConstValue;
 use crate::execution::compile::error::{CompiledGraphValidationError, PortPool};
-use crate::execution::identity::NodeIdx;
-use crate::execution::identity::OutputAddr;
-use crate::graph::func::event::EventLambda;
-use crate::graph::identity::{FuncId, InputPort, NodeId, OutputPort};
+use crate::graph::identity::FuncId;
 use crate::graph::node::Node;
-use crate::graph::output_types::OutputTypes;
+use crate::testing;
+use crate::testing::graph::NodeSpec;
 use crate::testing::graph::TestGraph;
 use crate::testing::graph::compiled::Compiled;
 use crate::testing::program::ProgramBuilder;
-use crate::{ConstValue, DataType};
 
 /// The walk wires a subscription to the emitter's own event slot, and the
 /// artifact carries a range backstop under it — kept because the subscriber
@@ -21,8 +17,8 @@ use crate::{ConstValue, DataType};
 #[test]
 fn subscription_wiring_rejects_an_endpoint_outside_the_program() {
     let mut g = TestGraph::new();
-    g.add("ticker", |n| n.sink().event("tick", EventLambda::default()));
-    g.add("listener", |n| n.sink());
+    g.add("ticker", |n| n.sink().event("tick", testing::stub_event()));
+    g.add("listener", NodeSpec::sink);
     g.subscribe("ticker", 0, "listener");
 
     let mut compiled = g.compile();
@@ -37,7 +33,8 @@ fn subscription_wiring_rejects_an_endpoint_outside_the_program() {
     // covers exactly the graph's nodes — so it is corrupted here by hand.
     let past_the_end = NodeIdx(compiled.program.e_nodes.len() as u32);
     let events = compiled.node("ticker").events;
-    compiled.program.events[events][0].subscribers[0] = past_the_end;
+    let subscriber = compiled.program.events[events][0].subscribers.nth(0);
+    compiled.program.subscribers[subscriber] = past_the_end;
     assert!(
         matches!(
             validate::validate(&compiled.program, &g.library),
@@ -100,15 +97,38 @@ fn validation_rejects_a_binding_that_does_not_name_a_real_output() {
         ),
         "a bind past the producer's last port is out of range"
     );
+
+    // The override backstops: a set-aside input must be overridden from its
+    // own node, and must not be wired, since no read is planned for it.
+    let mut compiled = g.compile();
+    let input = bound_input(&compiled);
+    compiled.program.inputs[input].overridden_by = Some(input);
+    assert!(
+        matches!(
+            validate::validate(&compiled.program, &g.library),
+            Err(CompiledGraphValidationError::OverriddenBind { port_idx: 0, .. })
+        ),
+        "an overridden input that is wired is refused"
+    );
+    let outside = InputIdx(compiled.program.inputs.len() as u32);
+    compiled.program.inputs[input].overridden_by = Some(outside);
+    assert!(
+        matches!(
+            validate::validate(&compiled.program, &g.library),
+            Err(CompiledGraphValidationError::OverrideOutsideNode { port_idx: 0, .. })
+        ),
+        "an override from past the node's inputs is refused"
+    );
 }
 
 /// One sort settles the program's dense node order. Ids are uuids, so the order
 /// nodes are authored in says nothing about the order they are adopted in — the
 /// id column is the authored set, sorted, and nothing else.
 ///
-/// The one fixture that mints its own ids: `TestGraph` numbers nodes in
+/// The one fixture that picks its own ids: `TestGraph` numbers nodes in
 /// declaration order, which would make "sorted" and "authored" the same list
-/// and leave the sort unproven.
+/// and leave the sort unproven. Here they descend, so declaration order is the
+/// reverse of id order.
 #[test]
 fn dense_order_is_id_order() {
     let mut fixture = TestGraph::new();
@@ -116,19 +136,17 @@ fn dense_order_is_id_order() {
     let func = fixture.library.by_name("src").unwrap().clone();
 
     let mut graph = Graph::default();
-    let authored: Vec<NodeId> = (0..8).map(|_| graph.add(Node::from(&func))).collect();
+    let authored: Vec<NodeId> = (0..8u128).map(|i| NodeId::from_u128(8 - i)).collect();
+    for &node_id in &authored {
+        graph.insert(node_id, Node::from(&func));
+    }
     let compiled = Compiler::default()
         .compile(&graph, &fixture.library)
         .unwrap();
 
     let node_ids: Vec<_> = compiled.node_ids.iter().copied().collect();
-    let mut expected = authored.clone();
-    expected.sort();
+    let expected: Vec<NodeId> = (1..=8u128).map(NodeId::from_u128).collect();
     assert_eq!(node_ids, expected, "nodes are adopted in id order");
-    assert_ne!(
-        node_ids, authored,
-        "eight random uuids do not land in declaration order, so the sort is the reason"
-    );
     for node_id in authored {
         assert!(compiled.contains(node_id));
     }
@@ -154,8 +172,8 @@ fn validation_returns_compiled_mismatches() {
 }
 
 /// The arity and range faults carry the pool they found rather than naming one
-/// variant each, so the six messages that used to be six variants have to still
-/// come out six distinct sentences.
+/// variant each, so each of the six faults has to come out a distinct
+/// sentence.
 #[test]
 fn a_pool_fault_names_the_pool_it_found() {
     let node_id = NodeId::from_u128(1);
@@ -216,8 +234,7 @@ fn summary(compiled: &CompiledGraph, authored: &[NodeId]) -> Vec<String> {
             out.push(format!("  out {output:?}"));
         }
         for event in &compiled.events[e_node.events] {
-            let subscribers: Vec<_> = event
-                .subscribers
+            let subscribers: Vec<_> = compiled.subscribers[event.subscribers]
                 .iter()
                 .map(|&idx| compiled.node_ids[idx])
                 .collect();
@@ -247,7 +264,7 @@ fn a_reused_compiler_produces_what_a_fresh_one_does() {
         n.pure()
             .output(DataType::String)
             .output(DataType::Float)
-            .event("tick", EventLambda::default())
+            .event("tick", testing::stub_event())
     });
     warmup.add("consumer", |n| {
         n.sink().input(DataType::String).input(DataType::Float)
@@ -457,7 +474,7 @@ fn carries_the_disabled_flag_without_dropping_the_node() {
 fn stamps_each_output_with_the_resolved_type() {
     let mut g = TestGraph::new();
     g.add("producer", |n| n.pure().output(DataType::String));
-    g.add("pass", |n| n.pure().input(DataType::Any).wildcard(0));
+    g.add("pass", |n| n.pure().passthrough());
     g.wire("producer", 0, "pass", 0);
 
     assert_eq!(
@@ -474,10 +491,10 @@ fn stamps_each_output_with_the_resolved_type() {
 fn wires_each_event_with_the_subscribers_resolved_for_it() {
     let mut g = TestGraph::new();
     g.add("emitter", |n| {
-        n.event("quiet", EventLambda::default())
-            .event("subscribed", EventLambda::default())
+        n.event("quiet", testing::stub_event())
+            .event("subscribed", testing::stub_event())
     });
-    g.add("listener", |n| n.sink());
+    g.add("listener", NodeSpec::sink);
     g.subscribe("emitter", 1, "listener");
 
     let compiled = g.compile();
@@ -487,6 +504,11 @@ fn wires_each_event_with_the_subscribers_resolved_for_it() {
         "the unsubscribed port carries no subscriber"
     );
     assert_eq!(compiled.subscribers("emitter", 1), ["listener"]);
+    assert_eq!(
+        compiled.program.subscribers.len(),
+        1,
+        "one column holds every event's subscribers"
+    );
 }
 
 /// A subscription whose emitter or subscriber is disabled wires nothing, and
@@ -505,11 +527,11 @@ fn drops_subscriptions_that_cannot_fire() {
         let mut g = TestGraph::new();
         g.add("emitter", move |mut n| {
             for i in 0..events {
-                n = n.event(&format!("e{i}"), EventLambda::default());
+                n = n.event(&format!("e{i}"), testing::stub_event());
             }
             n
         });
-        g.add("listener", |n| n.sink());
+        g.add("listener", NodeSpec::sink);
         // Authored against a two-event declaration; `events == 1` is the library
         // having since dropped the port this names.
         g.subscribe("emitter", 1, "listener");
@@ -558,7 +580,7 @@ fn drops_subscriptions_that_cannot_fire() {
 fn a_wildcard_chain_does_not_make_a_dropped_port_bindable() {
     let mut g = TestGraph::new();
     g.add("producer", |n| n.pure().output(DataType::Int));
-    g.add("pass", |n| n.pure().input(DataType::Any).wildcard(0));
+    g.add("pass", |n| n.pure().passthrough());
     // Port 99 does not exist: the library shrank under a saved document.
     let dropped = OutputPort::new(g.id("producer"), 99);
     g.wire("producer", 99, "pass", 0);

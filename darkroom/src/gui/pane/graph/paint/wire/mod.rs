@@ -8,24 +8,22 @@
 //! call off the per-frame inputs both renderers need — so they stay visually
 //! identical apart from paint and handle shape, and can't drift.
 //!
-//! **The gesture.** [`GlyphDrag`] is one drag from a latched glyph to whatever
-//! compatible glyph the pointer is over, generic over the two
-//! [`PortLayer`] key domains it spans: a data connection drags
-//! `PortRef → PortRef`, an event wire drags `EventRef → NodeId` or — started
-//! from the other end — `NodeId → EventRef`. Latching, the release edge, which
-//! pane owns the gesture, and where the preview's free end sits are stated once
-//! here; each family still owns which glyphs are candidates and what a release
-//! commits.
+//! **The gesture.** [`GlyphDrag`](glyph_drag::GlyphDrag) is one drag from a latched glyph to
+//! whatever compatible glyph the pointer is over, generic over the two
+//! [`PortLayer`](crate::gui::pane::graph::frame::geometry::PortLayer) key domains it spans: a data
+//! connection drags `PortRef → PortRef`, an event wire drags `EventRef → NodeId` or — started from
+//! the other end — `NodeId → EventRef`. Latching, the release edge, the fixed end's node, and where
+//! the preview's free end sits are stated once here; each family still owns which glyphs are
+//! candidates and what a release commits.
+
+pub(crate) mod glyph_drag;
 
 use glam::Vec2;
 use palantir::widget::{LineCap, Shape};
 use palantir::{ColorRamp, Rect, RgbaF32, Size, Stroke, Ui};
-use scenarium::NodeId;
 
-use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::ctx::DrawCtx;
-use crate::gui::pane::graph::frame::geometry::{GlyphKey, PortLayer};
-use crate::gui::pane::graph::gesture::breaker::BreakerProbe;
+use crate::gui::pane::graph::gesture::breaker::breaker_probe::BreakerProbe;
 use crate::gui::theme::color::toward;
 
 /// Minimum length of a wire's bezier control handles, so a short or backward
@@ -152,79 +150,14 @@ impl From<RgbaF32> for WirePaint {
     }
 }
 
-/// One in-flight wire drag: the glyph the press latched (`from`, a key in
-/// layer `A`) and the compatible glyph currently under the pointer (`snap`, a
-/// key in layer `B`).
-///
-/// Identity-only — both ends resolve their position out of `CanvasGeometry`
-/// every frame, so a drag survives node moves and relayouts. The direction of
-/// an event drag flips the two domains, which is why `A` and `B` are separate
-/// parameters rather than one: a subscriber-started drag is a
-/// `GlyphDrag<NodeId, EventRef>` and an emitter-started one the reverse.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct GlyphDrag<A, B> {
-    /// The glyph the press latched. Fixed for the drag's whole life.
-    pub(crate) from: A,
-    /// Compatible glyph currently under the pointer — the preview's snap end,
-    /// the forced hover highlight, and what a release commits against.
-    pub(crate) snap: Option<B>,
-}
-
-impl<A: GlyphKey, B: GlyphKey> GlyphDrag<A, B> {
-    /// A drag off `from` with nothing snapped yet.
-    pub(crate) fn new(from: A) -> Self {
-        Self { from, snap: None }
-    }
-
-    /// Latch on the first of `keys` whose glyph began a drag this frame, or
-    /// `None` when no press landed on one. Candidate order is the caller's
-    /// tie-break — the topmost recorded glyph comes first.
-    pub(crate) fn latch(layer: &PortLayer<A>, keys: impl Iterator<Item = A>) -> Option<Self> {
-        layer.first_drag_started(keys).map(Self::new)
-    }
-
-    /// The node the fixed end hangs off: the pane that owns the gesture, and
-    /// the node whose disappearance (undo, a breaker swipe) ends it.
-    pub(crate) fn node(self) -> NodeId {
-        self.from.node()
-    }
-
-    /// Whether the press that latched this drag is still held.
-    /// `PortLayer::dragging` rolls up `drag_delta().is_some() ||
-    /// drag_started()`, so its transition to `false` is the release edge.
-    pub(crate) fn held(self, layer: &PortLayer<A>) -> bool {
-        layer.dragging(self.from)
-    }
-
-    /// The moving end of the preview curve: the snapped glyph's center once
-    /// the drag has a target, else the bare pointer in canvas-world coords.
-    /// `None` on a frame where neither resolves (pointer off-window, or a snap
-    /// target that hasn't measured yet) — the preview simply doesn't paint
-    /// that frame. `canvas_origin` is the inner canvas's pre-transform origin.
-    pub(crate) fn free_end(
-        self,
-        ui: &mut Ui,
-        graph_ctx: GraphCtx<'_>,
-        canvas_origin: Vec2,
-        layer: &PortLayer<B>,
-    ) -> Option<Vec2> {
-        match self.snap {
-            Some(key) => layer.center(key),
-            None => ui
-                .pointer_pos()
-                .map(|p| graph_ctx.viewport().to_world(p - canvas_origin)),
-        }
-    }
-}
-
 /// The per-frame inputs both wire renderers need, bundled so each `draw` takes
 /// one argument instead of six. Built once in
 /// [`crate::gui::pane::graph::GraphUI::record_canvas`] and passed by `&mut`, so the
 /// breaker probe reborrows into each renderer in turn.
 ///
-/// The pane-wide half is [`DrawCtx`] itself, not a re-declaration of its
+/// The canvas-wide half is [`DrawCtx`] itself, not a re-declaration of its
 /// fields: the wires record in the same pass as the node bodies they run
-/// between, off the same theme, pane, geometry and cull, and `WirePass` was
+/// between, off the same theme, graph, geometry and cull, and `WirePass` was
 /// built two lines from a live `DrawCtx`. What's left here is what only a
 /// wire pass has — the breaker probe it marks hits against, and this frame's
 /// emphasis tier.
@@ -286,14 +219,14 @@ pub(crate) struct WireTint {
 
 impl WireTint {
     /// Distinct colors per end, which lower to a gradient along the curve.
-    pub(crate) fn new(start: RgbaF32, end: RgbaF32) -> Self {
+    pub(crate) const fn new(start: RgbaF32, end: RgbaF32) -> Self {
         Self { start, end }
     }
 
     /// One color for the whole curve — an event wire (events carry no data
     /// type), or a data wire whose type mismatch paints it all in the warning
     /// color.
-    pub(crate) fn flat(color: RgbaF32) -> Self {
+    pub(crate) const fn flat(color: RgbaF32) -> Self {
         Self {
             start: color,
             end: color,
@@ -337,7 +270,7 @@ impl WireEmphasis {
     /// Resolve this frame's emphasis inputs. `fading` is "any wire gesture
     /// is active" — the callers OR together the two drag controllers and
     /// the breaker.
-    pub(crate) fn resolve(canvas_bg: RgbaF32, fading: bool) -> Self {
+    pub(crate) const fn resolve(canvas_bg: RgbaF32, fading: bool) -> Self {
         Self { fading, canvas_bg }
     }
 
@@ -349,7 +282,7 @@ impl WireEmphasis {
         let hovered = !broken && self.hovered(endpoint_hover);
         WireStroke {
             hovered,
-            width: self.width(base_width, hovered || broken),
+            width: Self::width(base_width, hovered || broken),
         }
     }
 
@@ -372,7 +305,7 @@ impl WireEmphasis {
     /// Whether this wire is hover-emphasized: an endpoint glyph is
     /// hovered. Never while a gesture fades the set — the snap target's
     /// forced endpoint hover must not re-emphasize a faded wire.
-    fn hovered(&self, endpoint_hovered: bool) -> bool {
+    const fn hovered(&self, endpoint_hovered: bool) -> bool {
         !self.fading && endpoint_hovered
     }
 
@@ -389,7 +322,7 @@ impl WireEmphasis {
 
     /// The tiered stroke width. Broken-alarm wires pass `emphasized: true`
     /// too: full width against the faded rest of the set is the alarm.
-    fn width(&self, base: f32, emphasized: bool) -> f32 {
+    fn width(base: f32, emphasized: bool) -> f32 {
         if emphasized {
             base * WIRE_HOVER_WIDTH
         } else {

@@ -1,5 +1,4 @@
 use super::*;
-use crate::execution::compile::Compiler;
 use crate::graph::func::FuncBehavior;
 
 /// The builder states a whole graph — declarations, wiring and bodies — and
@@ -14,7 +13,7 @@ fn a_named_graph_compiles_to_one_node_per_name() {
             .output(DataType::Int)
             .compute(|inputs| (inputs[0].as_i64().unwrap() * 2).into())
     });
-    g.add("print", |n| n.records());
+    g.add("print", NodeSpec::records);
     g.wire("src", 0, "double", 0);
     g.wire("double", 0, "print", 0);
 
@@ -25,11 +24,7 @@ fn a_named_graph_compiles_to_one_node_per_name() {
         Binding::bind(g.id("src"), 0)
     );
     // `returns` declared the output its literal implies.
-    let compiled = Compiler::default()
-        .compile(&g.graph, &g.library)
-        .expect("the fixture compiles");
-    assert!(compiled.contains(g.id("src")));
-    assert_eq!(compiled.node_ids.len(), 3);
+    assert_eq!(g.compile().output_types("src"), [DataType::Int]);
 }
 
 /// One func per node by default: editing one node's declaration leaves
@@ -46,7 +41,7 @@ fn declarations_are_per_node_unless_a_test_shares_one() {
 
     let required = |g: &TestGraph, name: &str| {
         let node = g.graph.find(g.id(name)).unwrap();
-        g.graph.node_func(node, &g.library).unwrap().inputs[0].required
+        node.func(&g.library).unwrap().inputs[0].required
     };
     assert!(!required(&g, "a"), "the edited declaration went optional");
     assert!(!required(&g, "a2"), "and its other instance shares it");
@@ -144,24 +139,20 @@ fn spec_flags_reach_the_declaration() {
     let mut g = TestGraph::new();
     g.add("plain", |n| n.output(DataType::Int));
     g.add("flagged", |n| {
-        n.pure()
-            .sink()
-            .uncacheable()
-            .cache(CacheMode::Both)
-            .output(DataType::Int)
+        n.pure().sink().cache(CacheMode::Both).output(DataType::Int)
     });
 
     let func = |g: &TestGraph, name: &str| {
         let node = g.graph.find(g.id(name)).unwrap();
-        g.graph.node_func(node, &g.library).unwrap().clone()
+        node.func(&g.library).unwrap().clone()
     };
     let plain = func(&g, "plain");
     assert_eq!(plain.behavior, FuncBehavior::Impure);
-    assert!(!plain.sink && !plain.uncacheable);
+    assert!(!plain.sink);
     assert_eq!(plain.default_cache_mode, CacheMode::None);
 
     let flagged = func(&g, "flagged");
     assert_eq!(flagged.behavior, FuncBehavior::Pure);
-    assert!(flagged.sink && flagged.uncacheable);
+    assert!(flagged.sink);
     assert_eq!(flagged.default_cache_mode, CacheMode::Both);
 }

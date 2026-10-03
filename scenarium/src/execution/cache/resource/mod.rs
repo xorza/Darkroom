@@ -7,56 +7,18 @@
 pub(crate) mod error;
 
 use crate::execution::cache::resource::error::StampError;
-use std::io;
+use std::fs;
+use std::mem;
 use std::path::{Path, PathBuf};
 
-use common::CancelToken;
+use common::{CancelToken, FileIdentity};
 use hashbrown::HashSet;
 
 use crate::execution::cache::digest::{Digest, DigestHasher};
 
-/// Metadata identity of one filesystem entry.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct FileId {
-    len: u64,
-    /// Nanoseconds from the Unix epoch, **negative before it**. Signed
-    /// because `duration_since(..).ok().unwrap_or(0)` gave every pre-1970
-    /// mtime the same `0` as the epoch itself.
-    mtime_ns: i128,
-}
-
-/// Signed nanoseconds between `time` and the Unix epoch.
-///
-/// Split out from [`FileId::from_metadata`] because the pre-epoch arm is
-/// the whole point and setting a real file's mtime to 1969 needs a
-/// syscall this crate has no dependency for.
-fn epoch_offset_ns(time: std::time::SystemTime) -> i128 {
-    match time.duration_since(std::time::UNIX_EPOCH) {
-        Ok(after) => after.as_nanos() as i128,
-        // Pre-epoch: the error carries the distance the other way.
-        Err(before) => -(before.duration().as_nanos() as i128),
-    }
-}
-
-impl FileId {
-    /// Fails when the filesystem reports no modification time. Length
-    /// alone is not an identity — a same-length edit would reuse the
-    /// cache — so the path is given up rather than stamped on half of it.
-    fn from_metadata(metadata: &std::fs::Metadata) -> io::Result<Self> {
-        Ok(Self {
-            len: metadata.len(),
-            mtime_ns: epoch_offset_ns(metadata.modified()?),
-        })
-    }
-
-    fn hash(&self, hasher: &mut DigestHasher) {
-        hasher.write_pod(self.len).write_pod(self.mtime_ns);
-    }
-}
-
 #[derive(Clone, Copy, Debug)]
 pub(super) enum FsPathId {
-    File(FileId),
+    File(FileIdentity),
     /// Every file beneath the root, folded in relative-path order.
     Directory(Digest),
 }
@@ -65,8 +27,10 @@ impl FsPathId {
     pub(super) fn hash(&self, hasher: &mut DigestHasher) {
         match self {
             Self::File(file) => {
-                hasher.write_bytes(&[0]);
-                file.hash(hasher);
+                hasher
+                    .write_bytes(&[0])
+                    .write_pod(file.len)
+                    .write_pod(file.mtime_ns);
             }
             Self::Directory(digest) => {
                 hasher.write_bytes(&[1]).write_bytes(&digest.0);
@@ -107,11 +71,16 @@ pub(super) struct StampJob {
 }
 
 impl StampJob {
-    /// Queue `path` for the next pass, unless it is already queued.
-    pub(super) fn request(&mut self, path: &str) {
-        if !self.requests.contains(path) {
-            self.requests.insert(path.to_string());
-        }
+    /// Queue `path` for the next pass. The caller owns the key, so a path
+    /// it identified before is queued without a copy.
+    pub(super) fn request(&mut self, path: String) {
+        debug_assert!(!self.requests.contains(&path), "{path} is already queued");
+        self.requests.insert(path);
+    }
+
+    /// Whether `path` waits in the queue.
+    pub(super) fn is_requested(&self, path: &str) -> bool {
+        self.requests.contains(path)
     }
 
     /// Whether [`run`](Self::run) has anything to do — the check that keeps an
@@ -154,7 +123,7 @@ impl StampJob {
     pub(super) fn run(&mut self, cancel: &CancelToken) -> Result<(), StampError> {
         // The queue steps out so the walk can borrow the rest of the job
         // while it drains, and steps back in empty, with its capacity.
-        let mut requests = std::mem::take(&mut self.requests);
+        let mut requests = mem::take(&mut self.requests);
         let mut failure = None;
         for path in requests.drain() {
             match self.stamp(&path, cancel) {
@@ -183,11 +152,13 @@ impl StampJob {
         }
         // Follows a symlinked root, unlike the walk below: the path a node
         // was handed names what it means to read.
-        let metadata = std::fs::metadata(path)?;
+        let path = Path::new(path);
+        let metadata = fs::metadata(path).map_err(StampError::io(path))?;
         if metadata.is_dir() {
-            self.stamp_directory(Path::new(path), cancel)
+            self.stamp_directory(path, cancel)
         } else {
-            Ok(FsPathId::File(FileId::from_metadata(&metadata)?))
+            let file = FileIdentity::from_metadata(&metadata).map_err(StampError::io(path))?;
+            Ok(FsPathId::File(file))
         }
     }
 
@@ -222,9 +193,11 @@ impl StampJob {
         for rel in &self.files {
             // `symlink_metadata`, so the second pass reads a link exactly
             // as the first one classified it.
-            let metadata = std::fs::symlink_metadata(root.join(rel))?;
+            let path = root.join(rel);
+            let metadata = fs::symlink_metadata(&path).map_err(StampError::io(&path))?;
             hasher.write_len_prefixed(rel.as_os_str().as_encoded_bytes());
-            FileId::from_metadata(&metadata)?.hash(&mut hasher);
+            let file = FileIdentity::from_metadata(&metadata).map_err(StampError::io(&path))?;
+            hasher.write_pod(file.len).write_pod(file.mtime_ns);
         }
         Ok(FsPathId::Directory(hasher.finish()))
     }
@@ -232,9 +205,8 @@ impl StampJob {
     /// Walk **the whole subtree** under `root`, listing every file beneath
     /// it rather than only its immediate children: a pure function handed
     /// a directory consumes it recursively, so the recursive contents are
-    /// what its output is a function of. Stamping one level deep let
-    /// `root/sub/file` change freely while `root`'s fingerprint — and
-    /// every cache key folding it — stood still.
+    /// what its output is a function of, and `root/sub/file` changing has to
+    /// move `root`'s fingerprint.
     ///
     /// **Symlinks are listed, never followed.** `DirEntry::file_type`
     /// does not traverse them, so a link to a directory is a leaf here:
@@ -251,13 +223,17 @@ impl StampJob {
         self.pending.clear();
         self.pending.push(PathBuf::new());
         while let Some(rel_dir) = self.pending.pop() {
-            for entry in std::fs::read_dir(root.join(&rel_dir))? {
+            let dir = root.join(&rel_dir);
+            for entry in fs::read_dir(&dir).map_err(StampError::io(&dir))? {
                 if cancel.is_cancelled() {
                     return Err(StampError::Cancelled);
                 }
-                let entry = entry?;
+                let entry = entry.map_err(StampError::io(&dir))?;
                 let rel = rel_dir.join(entry.file_name());
-                if entry.file_type()?.is_dir() {
+                let file_type = entry
+                    .file_type()
+                    .map_err(StampError::io(&root.join(&rel)))?;
+                if file_type.is_dir() {
                     self.pending.push(rel);
                 } else {
                     self.files.push(rel);
@@ -270,14 +246,16 @@ impl StampJob {
 
 #[cfg(test)]
 pub(super) mod internals {
-    use crate::execution::cache::resource::{FileId, FsPathId};
+    use common::FileIdentity;
+
+    use crate::execution::cache::resource::FsPathId;
 
     impl FsPathId {
         /// A file identity without a filesystem behind it, so a digest that
         /// folds a path can be pinned to a constant — no test controls a
         /// real file's mtime.
         pub(crate) fn file(len: u64, mtime_ns: i128) -> Self {
-            FsPathId::File(FileId { len, mtime_ns })
+            FsPathId::File(FileIdentity { len, mtime_ns })
         }
     }
 }

@@ -4,7 +4,8 @@
 //! exists, every unmatched reference star can be projected through it and claimed by whatever
 //! target star sits under the prediction — which finds the faint stars triangle matching passed
 //! over. Each pass refits from the enlarged set, so the transform and the match list tighten
-//! together until neither moves.
+//! together until the set stops changing; the transform returned is always the fit of the set
+//! returned.
 
 use glam::DVec2;
 
@@ -13,38 +14,43 @@ use crate::stacking::registration::ransac::transforms::estimate_transform;
 use crate::stacking::registration::spatial::KdTree;
 use crate::stacking::registration::transform::{Transform, TransformType};
 use crate::stacking::registration::triangle::voting::MatchIndices;
+use std::mem;
 
 /// Maximum iterations for iterative match recovery.
-/// Convergence is typically reached in 2-3 passes; diminishing returns after that.
+/// Convergence is typically reached in 2-3 passes; diminishing returns after that. Stopping at the
+/// cap still returns a transform fitted to the matches returned — only the last pass's candidates
+/// are left unexamined.
 const RECOVERY_MAX_ITERATIONS: usize = 5;
 
 #[derive(Debug)]
-pub(crate) struct RecoveredMatches {
-    pub(crate) transform: Transform,
-    pub(crate) matches: Vec<MatchIndices>,
+pub(super) struct RecoveredMatches {
+    pub(super) transform: Transform,
+    pub(super) matches: Vec<MatchIndices>,
 }
 
-pub(crate) fn recover_matches(
+/// Grow `inlier_matches` by every reference star whose prediction under the current fit lands
+/// within `inlier_threshold` of an unclaimed target star, refitting a `transform_type` after each
+/// pass, until a pass leaves the set unchanged or [`RECOVERY_MAX_ITERATIONS`] passes have run.
+///
+/// The returned transform is the least-squares fit of the returned matches. When that fit fails,
+/// the last transform that did fit stands in: RANSAC's `transform` if no pass refit.
+pub(super) fn recover_matches(
     ref_stars: &[DVec2],
-    target_stars: &[DVec2],
+    target_tree: &KdTree,
     transform: &Transform,
     inlier_matches: &[MatchIndices],
     inlier_threshold: f64,
     transform_type: TransformType,
 ) -> RecoveredMatches {
-    let target_tree = match KdTree::build(target_stars) {
-        Some(tree) => tree,
-        None => {
-            return RecoveredMatches {
-                transform: *transform,
-                matches: inlier_matches.to_vec(),
-            };
-        }
-    };
+    let target_stars = target_tree.points();
 
     let threshold_sq = inlier_threshold * inlier_threshold;
+    // The pair every pass starts from: a transform and the very matches it was fitted to. A pass
+    // replaces both together or neither, so what comes back is always a fit of what comes back.
     let mut current_transform = *transform;
     let mut current_matches = inlier_matches.to_vec();
+    current_matches.sort_unstable_by_key(|m| (m.reference, m.target));
+    let mut candidate = Vec::with_capacity(current_matches.len());
 
     // Dense small-integer membership over [0, n) → bitmaps, not HashSets: no hashing,
     // no allocation per pass, and order-independent (deterministic).
@@ -54,11 +60,10 @@ pub(crate) fn recover_matches(
     let mut all = PointPairs::default();
 
     for _ in 0..RECOVERY_MAX_ITERATIONS {
-        let prev_count = current_matches.len();
-
+        candidate.clone_from(&current_matches);
         matched_target.fill(false);
         matched_ref.fill(false);
-        for star_match in &current_matches {
+        for star_match in &candidate {
             matched_target[star_match.target] = true;
             matched_ref[star_match.reference] = true;
         }
@@ -76,7 +81,7 @@ pub(crate) fn recover_matches(
                 && nn.dist_sq <= threshold_sq
                 && !matched_target[nn.index]
             {
-                current_matches.push(MatchIndices {
+                candidate.push(MatchIndices {
                     reference: ref_idx,
                     target: nn.index,
                 });
@@ -85,41 +90,49 @@ pub(crate) fn recover_matches(
         }
 
         // Re-validate all matches against current transform, removing outliers
-        current_matches.retain(|star_match| {
+        candidate.retain(|star_match| {
             let predicted = current_transform.apply(ref_stars[star_match.reference]);
             (predicted - target_stars[star_match.target]).length_squared() <= threshold_sq
         });
+        candidate.sort_unstable_by_key(|m| (m.reference, m.target));
 
-        // Stop if match count didn't change (converged)
-        if current_matches.len() == prev_count {
+        // Converged when the pass leaves the *set* as it was. Comparing counts would stop on a pass
+        // that dropped one match and added another, with a transform fitted to neither set.
+        if candidate == current_matches {
             break;
         }
 
-        // Refit transform with updated matches
         all.gather_matched(
-            current_matches
+            candidate
                 .iter()
                 .map(|star_match| (star_match.reference, star_match.target)),
             ref_stars,
             target_stars,
         );
-
-        match estimate_transform(&all.reference, &all.target, transform_type) {
-            Some(new_transform) => current_transform = new_transform,
-            None => break,
-        }
-    }
-
-    // Ensure we never return fewer matches than we started with
-    if current_matches.len() < inlier_matches.len() {
-        return RecoveredMatches {
-            transform: *transform,
-            matches: inlier_matches.to_vec(),
+        let Some(refit) = estimate_transform(&all.reference, &all.target, transform_type) else {
+            break;
         };
+        current_transform = refit;
+        mem::swap(&mut current_matches, &mut candidate);
     }
 
+    // A run of passes that ends with fewer matches than RANSAC found started from a worse place
+    // than it ended up; the inliers stand instead.
+    if current_matches.len() < inlier_matches.len() {
+        current_matches.clear();
+        current_matches.extend_from_slice(inlier_matches);
+    }
+    all.gather_matched(
+        current_matches
+            .iter()
+            .map(|star_match| (star_match.reference, star_match.target)),
+        ref_stars,
+        target_stars,
+    );
+    let transform = estimate_transform(&all.reference, &all.target, transform_type)
+        .unwrap_or(current_transform);
     RecoveredMatches {
-        transform: current_transform,
+        transform,
         matches: current_matches,
     }
 }

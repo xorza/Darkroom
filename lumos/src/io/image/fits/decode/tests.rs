@@ -1,23 +1,26 @@
+#![expect(
+    clippy::cast_possible_wrap,
+    reason = "test axis lengths are far below i64::MAX"
+)]
+
 use crate::testing::prelude::*;
+
 use std::fs::File;
-use std::path::Path;
 
 use fits_well::FitsWriter;
 use fits_well::header::Header;
-use fits_well::image::{Compression, CompressionOptions, Image};
+use fits_well::image::{Bitpix, Compression, CompressionOptions, Image};
 use fits_well::io::{BLOCK_SIZE, HduKind};
 
-use crate::io::image::fits::decode::plan;
 use crate::io::image::fits::decode::plan::internals::description;
 use crate::io::image::fits::decode::*;
 use crate::io::image::fits::options::{
-    FitsChecksumPolicy, FitsCubeInterpretation, FitsFloatScale, FitsHduSelector, FitsLoadOptions,
-    FitsNullPolicy,
+    FitsChecksumPolicy, FitsFloatScale, FitsHduSelector, FitsLoadOptions, FitsNullPolicy,
 };
-use crate::io::image::fits::provenance::{FitsChecksumState, FitsTransferProvenance};
-use crate::io::image::image_provenance::TransferProvenance;
-use crate::io::image::load_context::LoadContext;
-use crate::testing::ScratchDirectory;
+use crate::io::image::fits::provenance::FitsTransferProvenance;
+use crate::testing::fits::{fits_transfer, write_fits};
+use common::TempDir;
+use std::fs;
 
 fn load_context() -> LoadContext {
     LoadContext::new(CancelToken::never(), u64::MAX)
@@ -69,12 +72,6 @@ fn compressed_header(bitpix: i64, shape: &[usize]) -> Header {
     header
 }
 
-fn write_image(path: &Path, image: &Image) {
-    let mut bytes = Vec::new();
-    FitsWriter::new(&mut bytes).write_image(image).unwrap();
-    std::fs::write(path, bytes).unwrap();
-}
-
 fn write_named_multi_image(path: &Path) {
     let mut writer = FitsWriter::new(File::create(path).unwrap());
     let mut primary = Header::new();
@@ -88,9 +85,9 @@ fn write_named_multi_image(path: &Path) {
     first_header.set("EXTNAME", "SCI").unwrap();
     first_header.set("EXTVER", 1).unwrap();
     writer
-        .write_image_with_header(
+        .write_image(
             &Image::new([2, 1], vec![1.0f32, 2.0]).unwrap(),
-            &first_header,
+            Some(&first_header),
         )
         .unwrap();
 
@@ -98,9 +95,9 @@ fn write_named_multi_image(path: &Path) {
     second_header.set("EXTNAME", "SCI").unwrap();
     second_header.set("EXTVER", 2).unwrap();
     writer
-        .write_image_with_header(
+        .write_image(
             &Image::new([2, 1, 3], vec![10.0f32, 20.0, 30.0, 40.0, 50.0, 60.0]).unwrap(),
-            &second_header,
+            Some(&second_header),
         )
         .unwrap();
 }
@@ -122,27 +119,31 @@ fn shape_validation_rejects_zero_overflow_and_unsupported_cubes_without_panickin
         assert!(reason.contains("must be nonzero"), "{reason}");
     }
 
-    let pixel_overflow = unsupported_reason(
-        plan::dimensions_from_shape(path, &[usize::MAX, 2], FitsCubeInterpretation::Reject)
-            .unwrap_err(),
+    // A side past the limit is refused before any count is formed from it; at the limit it is
+    // accepted.
+    let side = ImageDimensions::MAX_SIDE;
+    for shape in [[side + 1, 2], [2, side + 1], [usize::MAX, 2]] {
+        let reason = unsupported_reason(
+            plan::dimensions_from_shape(path, &shape, FitsCubeInterpretation::Reject).unwrap_err(),
+        );
+        assert!(
+            reason.contains("has a side past 1073741824 px"),
+            "{shape:?}: {reason}"
+        );
+    }
+    assert_eq!(
+        plan::dimensions_from_shape(path, &[side, 1], FitsCubeInterpretation::Reject)
+            .unwrap()
+            .size(),
+        (side, 1).into()
     );
-    assert!(pixel_overflow.contains("pixel count overflows"));
 
-    let sample_overflow = unsupported_reason(
-        plan::dimensions_from_shape(
-            path,
-            &[usize::MAX / 2 + 1, 1, 3],
-            FitsCubeInterpretation::Rgb,
-        )
-        .unwrap_err(),
-    );
-    assert!(sample_overflow.contains("sample count overflows"));
-
-    let huge_cube = image_header(-32, &[1_000_000_000, 1_000_000_000, 4]);
+    let huge_shape = [1_000_000_000, 1_000_000_000, 4];
+    let huge_cube = image_header(-32, &huge_shape);
     let reason = unsupported_reason(
         plan::preflight_fits_image(
             path,
-            description(&huge_cube, HduKind::Primary, 0),
+            description(&huge_cube, HduKind::Primary, &huge_shape, Bitpix::F32, 0),
             FitsCubeInterpretation::Reject,
             FitsFloatScale::Auto,
             u64::MAX,
@@ -155,10 +156,11 @@ fn shape_validation_rejects_zero_overflow_and_unsupported_cubes_without_panickin
 #[test]
 fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
     let path = Path::new("budget.fits");
-    let rgb = image_header(-64, &[100, 100, 3]);
+    let rgb_shape = [100, 100, 3];
+    let rgb = image_header(-64, &rgb_shape);
     let plan = plan::preflight_fits_image(
         path,
-        description(&rgb, HduKind::Primary, 241_920),
+        description(&rgb, HduKind::Primary, &rgb_shape, Bitpix::F64, 241_920),
         FitsCubeInterpretation::Rgb,
         FitsFloatScale::Auto,
         u64::MAX,
@@ -170,7 +172,7 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
     assert_eq!(plan.rows_per_chunk, 100);
     plan::preflight_fits_image(
         path,
-        description(&rgb, HduKind::Primary, 241_920),
+        description(&rgb, HduKind::Primary, &rgb_shape, Bitpix::F64, 241_920),
         FitsCubeInterpretation::Rgb,
         FitsFloatScale::Auto,
         plan.peak_bytes,
@@ -179,7 +181,7 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
     let reason = unsupported_reason(
         plan::preflight_fits_image(
             path,
-            description(&rgb, HduKind::Primary, 241_920),
+            description(&rgb, HduKind::Primary, &rgb_shape, Bitpix::F64, 241_920),
             FitsCubeInterpretation::Rgb,
             FitsFloatScale::Auto,
             plan.peak_bytes - 1,
@@ -188,11 +190,18 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
     );
     assert!(reason.starts_with("estimated peak memory requires 320000 bytes"));
 
-    let compressed = compressed_header(-32, &[1024, 1024]);
+    let compressed_shape = [1024, 1024];
+    let compressed = compressed_header(-32, &compressed_shape);
     let reason = unsupported_reason(
         plan::preflight_fits_image(
             path,
-            description(&compressed, HduKind::CompressedImage, 2_880),
+            description(
+                &compressed,
+                HduKind::CompressedImage,
+                &compressed_shape,
+                Bitpix::F32,
+                2_880,
+            ),
             FitsCubeInterpretation::Reject,
             FitsFloatScale::Auto,
             4 * 1024 * 1024 - 1,
@@ -204,13 +213,13 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
 
 #[test]
 fn header_rejection_precedes_pixel_read_and_truncated_data_is_an_error() {
-    let directory = ScratchDirectory::new("fits_preflight");
+    let directory = TempDir::new("fits_preflight");
     let path = directory.join("truncated.fits");
     let image = Image::new([2, 2], vec![1.0f32, 2.0, 3.0, 4.0]).unwrap();
-    write_image(&path, &image);
-    let mut bytes = std::fs::read(&path).unwrap();
+    write_fits(&path, &image, None);
+    let mut bytes = fs::read(&path).unwrap();
     bytes.truncate(BLOCK_SIZE);
-    std::fs::write(&path, bytes).unwrap();
+    fs::write(&path, bytes).unwrap();
 
     let reason = unsupported_reason(
         read_selected_image(&path, &LoadContext::new(CancelToken::never(), 1)).unwrap_err(),
@@ -224,9 +233,13 @@ fn header_rejection_precedes_pixel_read_and_truncated_data_is_an_error() {
 
 #[test]
 fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
-    let directory = ScratchDirectory::new("fits_shape_and_rgb");
+    let directory = TempDir::new("fits_shape_and_rgb");
     let zero_path = directory.join("zero.fits");
-    write_image(&zero_path, &Image::new([0, 2], Vec::<f32>::new()).unwrap());
+    write_fits(
+        &zero_path,
+        &Image::new([0, 2], Vec::<f32>::new()).unwrap(),
+        None,
+    );
     let reason = unsupported_reason(load_linear_fits(&zero_path, &load_context()).unwrap_err());
     assert!(reason.contains("must be nonzero"));
 
@@ -234,7 +247,7 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
     let planar = vec![
         1.0f32, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0, 100.0, 200.0, 300.0, 400.0,
     ];
-    write_image(&rgb_path, &Image::new([2, 2, 3], planar).unwrap());
+    write_fits(&rgb_path, &Image::new([2, 2, 3], planar).unwrap(), None);
     let loaded = load_linear_fits(&rgb_path, &rgb_load_context()).unwrap();
     assert_eq!(loaded.dimensions(), ImageDimensions::new((2, 2), 3));
     assert_eq!(loaded.channel(0).pixels(), &[1.0, 2.0, 3.0, 4.0]);
@@ -244,7 +257,7 @@ fn zero_axis_file_returns_error_and_rgb_planes_load_without_repacking() {
 
 #[test]
 fn compressed_rgb_is_preflighted_and_decoded_by_final_plane() {
-    let directory = ScratchDirectory::new("fits_compressed_rgb");
+    let directory = TempDir::new("fits_compressed_rgb");
     let path = directory.join("rgb.fits");
     let planar = vec![
         1.0f32, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0, 100.0, 200.0, 300.0, 400.0,
@@ -255,6 +268,7 @@ fn compressed_rgb_is_preflighted_and_decoded_by_final_plane() {
             &image,
             Compression::GZIP,
             &CompressionOptions::tiled([2, 2, 1]),
+            None,
         )
         .unwrap();
 
@@ -267,7 +281,7 @@ fn compressed_rgb_is_preflighted_and_decoded_by_final_plane() {
 
 #[test]
 fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
-    let directory = ScratchDirectory::new("fits_hdu_selection");
+    let directory = TempDir::new("fits_hdu_selection");
     let path = directory.join("multi.fits");
     write_named_multi_image(&path);
 
@@ -299,11 +313,7 @@ fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
     };
     let first = load_linear_fits(&path, &first).unwrap();
     assert_eq!(first.channel(0).pixels(), &[1.0, 2.0]);
-    let TransferProvenance::FitsNormalized(FitsTransferProvenance { hdu, checksum, .. }) =
-        &first.metadata.provenance.as_ref().unwrap().transfer
-    else {
-        panic!("expected FITS provenance");
-    };
+    let FitsTransferProvenance { hdu, checksum, .. } = fits_transfer(&first);
     assert_eq!(hdu.index, 1);
     assert_eq!(hdu.extname.as_deref(), Some("SCI"));
     assert_eq!(hdu.extver, Some(1));
@@ -336,6 +346,7 @@ fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
             checksum: FitsChecksumPolicy::VerifyIfPresent,
             float_scale: FitsFloatScale::Auto,
             nulls: FitsNullPolicy::Mask,
+            unstated_bayer_pattern: None,
         },
         ..load_context()
     };
@@ -347,22 +358,13 @@ fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
 
 #[test]
 fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity() {
-    let directory = ScratchDirectory::new("fits_checksum_policy");
+    let directory = TempDir::new("fits_checksum_policy");
     let absent_path = directory.join("absent.fits");
     let image = Image::new([2, 1], vec![1.0f32, 2.0]).unwrap();
-    write_image(&absent_path, &image);
+    write_fits(&absent_path, &image, None);
 
     let verified_absent = load_linear_fits(&absent_path, &load_context()).unwrap();
-    let TransferProvenance::FitsNormalized(FitsTransferProvenance { checksum, .. }) =
-        &verified_absent
-            .metadata
-            .provenance
-            .as_ref()
-            .unwrap()
-            .transfer
-    else {
-        panic!("expected FITS provenance");
-    };
+    let FitsTransferProvenance { checksum, .. } = fits_transfer(&verified_absent);
     assert_eq!(checksum.datasum, FitsChecksumState::Absent);
     assert_eq!(checksum.checksum, FitsChecksumState::Absent);
 
@@ -379,20 +381,16 @@ fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity(
     let valid_path = directory.join("valid.fits");
     FitsWriter::new(File::create(&valid_path).unwrap())
         .with_checksums()
-        .write_image(&image)
+        .write_image(&image, None)
         .unwrap();
     let valid = load_linear_fits(&valid_path, &require).unwrap();
-    let TransferProvenance::FitsNormalized(FitsTransferProvenance { checksum, .. }) =
-        &valid.metadata.provenance.as_ref().unwrap().transfer
-    else {
-        panic!("expected FITS provenance");
-    };
+    let FitsTransferProvenance { checksum, .. } = fits_transfer(&valid);
     assert_eq!(checksum.datasum, FitsChecksumState::Valid);
     assert_eq!(checksum.checksum, FitsChecksumState::Valid);
 
-    let mut corrupt = std::fs::read(&valid_path).unwrap();
+    let mut corrupt = fs::read(&valid_path).unwrap();
     corrupt[BLOCK_SIZE] ^= 0x80;
-    std::fs::write(&valid_path, corrupt).unwrap();
+    fs::write(&valid_path, corrupt).unwrap();
     let reason = unsupported_reason(load_linear_fits(&valid_path, &load_context()).unwrap_err());
     assert!(reason.contains("invalid FITS checksum"));
 
@@ -404,20 +402,16 @@ fn checksum_policies_accept_absence_ignore_corruption_or_require_exact_validity(
         ..load_context()
     };
     let ignored = load_linear_fits(&valid_path, &ignore).unwrap();
-    let TransferProvenance::FitsNormalized(FitsTransferProvenance { checksum, .. }) =
-        &ignored.metadata.provenance.as_ref().unwrap().transfer
-    else {
-        panic!("expected FITS provenance");
-    };
+    let FitsTransferProvenance { checksum, .. } = fits_transfer(&ignored);
     assert_eq!(checksum.datasum, FitsChecksumState::NotChecked);
     assert_eq!(checksum.checksum, FitsChecksumState::NotChecked);
 }
 
 #[test]
 fn cancellation_prevents_fits_selection() {
-    let directory = ScratchDirectory::new("fits_cancel");
+    let directory = TempDir::new("fits_cancel");
     let path = directory.join("frame.fits");
-    write_image(&path, &Image::new([2, 1], vec![1.0f32, 2.0]).unwrap());
+    write_fits(&path, &Image::new([2, 1], vec![1.0f32, 2.0]).unwrap(), None);
     let cancel = CancelToken::new();
     cancel.cancel();
     let context = LoadContext::new(cancel, u64::MAX);

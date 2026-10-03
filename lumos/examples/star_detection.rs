@@ -11,8 +11,15 @@
 //! cargo run --release --example star_detection -- /path/to/image.fits
 //! ```
 
+#![expect(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "an example reports to the terminal"
+)]
+
 use std::env;
 use std::path::Path;
+use std::process;
 
 use lumos::{LinearImage, LoadContext, StarDetectionConfig, StarDetector};
 
@@ -22,7 +29,7 @@ fn main() {
     if args.len() < 2 {
         eprintln!("Usage: {} <image_path>", args[0]);
         eprintln!("Supported formats: linear FITS and floating-point TIFF");
-        std::process::exit(1);
+        process::exit(1);
     }
     let image_path = Path::new(&args[1]);
 
@@ -94,8 +101,13 @@ fn main() {
 }
 
 fn print_diagnostics(diag: &lumos::StarDetectionDiagnostics) {
-    println!("  Median FWHM: {:.2} px", diag.median_fwhm);
-    println!("  Median SNR: {:.1}", diag.median_snr);
+    match (diag.median_fwhm, diag.median_snr) {
+        (Some(fwhm), Some(snr)) => {
+            println!("  Median FWHM: {fwhm:.2} px");
+            println!("  Median SNR: {snr:.1}");
+        }
+        _ => println!("  No stars measured"),
+    }
     println!("  Pipeline:");
     println!(
         "    Pixels above threshold: {}",

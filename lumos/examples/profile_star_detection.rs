@@ -1,33 +1,41 @@
 //! Simple profiling binary for star detection.
 //!
 //! Run with:
-//!   cargo build --release -p lumos --example profile_star_detection
-//!   cargo flamegraph --example profile_star_detection -p lumos -- -F 4999
+//!   cargo build --release -p lumos --example `profile_star_detection`
+//!   cargo flamegraph --example `profile_star_detection` -p lumos -- -F 4999
 //!
 //! Or with samply:
-//!   samply record -r 4999 ./target/release/examples/profile_star_detection
+//!   samply record -r 4999 ./`target/release/examples/profile_star_detection`
 
+#![expect(clippy::print_stderr, reason = "an example reports to the terminal")]
+
+use std::hint;
 use std::thread;
 use std::time::Duration;
 
 use lumos::{ImageDimensions, LinearImage, StarDetector};
 
+#[expect(
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "synthetic fixtures are small images with non-negative coordinates"
+)]
 fn generate_synthetic_image(width: usize, height: usize, num_stars: usize) -> LinearImage {
     let background = 0.1f32;
     let mut pixels = vec![background; width * height];
 
     // Add deterministic noise
     for (i, p) in pixels.iter_mut().enumerate() {
-        let hash = ((i as u32).wrapping_mul(2654435761)) as f32 / u32::MAX as f32;
+        let hash = ((i as u32).wrapping_mul(2_654_435_761)) as f32 / u32::MAX as f32;
         *p += (hash - 0.5) * 0.02;
     }
 
     // Add synthetic stars
     for star_idx in 0..num_stars {
-        let hash1 = ((star_idx as u32).wrapping_mul(2654435761)) as usize;
-        let hash2 = ((star_idx as u32).wrapping_mul(1597334677)) as usize;
-        let hash3 = ((star_idx as u32).wrapping_mul(805306457)) as usize;
-        let hash4 = ((star_idx as u32).wrapping_mul(402653189)) as usize;
+        let hash1 = ((star_idx as u32).wrapping_mul(2_654_435_761)) as usize;
+        let hash2 = ((star_idx as u32).wrapping_mul(1_597_334_677)) as usize;
+        let hash3 = ((star_idx as u32).wrapping_mul(805_306_457)) as usize;
+        let hash4 = ((star_idx as u32).wrapping_mul(402_653_189)) as usize;
 
         let cx = 20 + (hash1 % (width - 40));
         let cy = 20 + (hash2 % (height - 40));
@@ -60,15 +68,12 @@ fn main() {
     let num_stars = 3000;
     let iterations = 50;
 
-    eprintln!(
-        "Generating {}x{} image with {} stars...",
-        width, height, num_stars
-    );
+    eprintln!("Generating {width}x{height} image with {num_stars} stars...");
     let image = generate_synthetic_image(width, height, num_stars);
 
     let mut detector = StarDetector::default();
 
-    eprintln!("Running {} iterations (attach profiler now)...", iterations);
+    eprintln!("Running {iterations} iterations (attach profiler now)...");
 
     // Small delay to allow attaching profiler
     thread::sleep(Duration::from_secs(1));
@@ -76,7 +81,7 @@ fn main() {
     for i in 0..iterations {
         let stars = detector.detect(&image);
         // Prevent optimization
-        std::hint::black_box(&stars);
+        hint::black_box(&stars);
         if (i + 1) % 10 == 0 {
             eprintln!(
                 "  Completed {}/{} iterations, found {} stars",

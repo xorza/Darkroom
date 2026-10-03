@@ -12,6 +12,13 @@ pub struct ImageDimensions {
 }
 
 impl ImageDimensions {
+    /// The longest side an image may have, 2³⁰ px — some 7000 times a large sensor's.
+    ///
+    /// Pixel addressing in the resampler and the detector runs in `i32` lanes, and a side this far
+    /// under `i32::MAX` leaves every coordinate, and a kernel's reach past either edge, inside that
+    /// range. The decoders refuse a larger image before it gets here.
+    pub const MAX_SIDE: usize = 1 << 30;
+
     pub fn new(size: impl Into<Size2us>, channels: usize) -> Self {
         let size = size.into();
         Self::validate(size, channels);
@@ -28,9 +35,14 @@ impl ImageDimensions {
         assert!(size.width > 0, "Width must be positive");
         assert!(size.height > 0, "Height must be positive");
         assert!(
+            size.width <= Self::MAX_SIDE && size.height <= Self::MAX_SIDE,
+            "{}x{} has a side past MAX_SIDE",
+            size.width,
+            size.height
+        );
+        assert!(
             channels == 1 || channels == 3,
-            "Only 1 (grayscale) or 3 (RGB) channels supported, got {}",
-            channels
+            "Only 1 (grayscale) or 3 (RGB) channels supported, got {channels}"
         );
         size.pixel_count()
             .checked_mul(channels)
@@ -38,25 +50,25 @@ impl ImageDimensions {
     }
 
     /// Pixel extent, without the channel count.
-    pub fn size(&self) -> Size2us {
+    pub const fn size(&self) -> Size2us {
         self.size
     }
 
-    pub fn width(&self) -> usize {
+    pub const fn width(&self) -> usize {
         self.size.width
     }
 
-    pub fn height(&self) -> usize {
+    pub const fn height(&self) -> usize {
         self.size.height
     }
 
-    pub fn channels(&self) -> usize {
+    pub const fn channels(&self) -> usize {
         self.channels
     }
 
     /// Total number of f32 samples: `width * height * channels`.
     /// For a 100x100 RGB image, returns 30000.
-    pub fn sample_count(&self) -> usize {
+    pub const fn sample_count(&self) -> usize {
         self.pixel_count()
             .checked_mul(self.channels)
             .expect("ImageDimensions validates sample count during construction")
@@ -64,15 +76,15 @@ impl ImageDimensions {
 
     /// Number of pixels: `width * height`.
     /// For a 100x100 RGB image, returns 10000.
-    pub fn pixel_count(&self) -> usize {
+    pub const fn pixel_count(&self) -> usize {
         self.size.pixel_count()
     }
 
-    pub fn is_grayscale(&self) -> bool {
+    pub const fn is_grayscale(&self) -> bool {
         self.channels == 1
     }
 
-    pub fn is_rgb(&self) -> bool {
+    pub const fn is_rgb(&self) -> bool {
         self.channels == 3
     }
 }
@@ -88,6 +100,7 @@ impl fmt::Display for ImageDimensions {
 #[cfg(test)]
 mod tests {
     use crate::io::image::image_dimensions::ImageDimensions;
+    use crate::testing::panic_message;
     use std::panic::catch_unwind;
 
     #[test]
@@ -95,7 +108,12 @@ mod tests {
         for channels in [1, 3] {
             ImageDimensions::validate((4, 3), channels);
             let dimensions = ImageDimensions::new((4, 3), channels);
+            assert_eq!(dimensions.size(), (4, 3).into());
+            assert_eq!(dimensions.channels(), channels);
+            assert_eq!(dimensions.pixel_count(), 12);
             assert_eq!(dimensions.sample_count(), 12 * channels);
+            assert_eq!(dimensions.is_grayscale(), channels == 1);
+            assert_eq!(dimensions.is_rgb(), channels == 3);
         }
 
         for (width, height, channels, expected) in [
@@ -104,16 +122,22 @@ mod tests {
             (4, 3, 0, "channels supported, got 0"),
             (4, 3, 2, "channels supported, got 2"),
             (4, 3, 4, "channels supported, got 4"),
-            // 3 channels × (usize::MAX / 2) pixels overflows the sample count.
-            (usize::MAX / 2, 1, 3, "Image sample count must fit in usize"),
+            (
+                ImageDimensions::MAX_SIDE + 1,
+                1,
+                1,
+                "has a side past MAX_SIDE",
+            ),
+            (
+                1,
+                ImageDimensions::MAX_SIDE + 1,
+                1,
+                "has a side past MAX_SIDE",
+            ),
         ] {
             let panic = catch_unwind(|| ImageDimensions::validate((width, height), channels))
                 .expect_err("must be rejected");
-            let message = panic
-                .downcast_ref::<String>()
-                .cloned()
-                .or_else(|| panic.downcast_ref::<&str>().map(|s| (*s).to_string()))
-                .unwrap_or_default();
+            let message = panic_message(&*panic);
             assert!(
                 message.contains(expected),
                 "{width}x{height}x{channels} reported {message:?}, wanted {expected:?}"

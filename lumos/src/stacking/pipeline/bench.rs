@@ -1,6 +1,7 @@
 use crate::testing::prelude::*;
 use std::convert::Infallible;
 use std::hint::black_box;
+use std::iter;
 
 use quickbench::quick_bench;
 use rayon::prelude::*;
@@ -17,7 +18,7 @@ fn bench_detector_batch_reuse_1k(b: quickbench::Bencher) {
         .channel(0)
         .clone();
     let image = LinearImage::from_pixels(ImageDimensions::new((1024, 1024), 1), pixels.into_vec());
-    let images: Vec<&LinearImage> = std::iter::repeat_n(&image, 16).collect();
+    let images: Vec<&LinearImage> = iter::repeat_n(&image, 16).collect();
     let config = Config::default();
     let concurrency = rayon::current_num_threads().min(images.len());
     let mut detectors = DetectorPool::from_config(&config, concurrency).unwrap();

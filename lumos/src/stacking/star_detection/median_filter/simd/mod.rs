@@ -1,7 +1,7 @@
 //! SIMD-accelerated 3x3 median filter.
 //!
 //! This module provides runtime dispatch to the best available SIMD implementation:
-//! - AVX2/SSE4.1 on x86_64
+//! - AVX2/SSE4.1 on `x86_64`
 //! - NEON on aarch64
 //! - Scalar fallback on other platforms
 //!
@@ -24,6 +24,7 @@ macro_rules! median9_simd_sort {
     ($min:path, $max:path;
      $v0:ident, $v1:ident, $v2:ident, $v3:ident, $v4:ident, $v5:ident, $v6:ident, $v7:ident, $v8:ident) => {{
         // Each step: (a, b) => a = min(a, b), b = max(a, b), via a temp so `a` isn't read twice.
+        // A step whose other output the median never reads keeps only the half it needs.
         let t = $v0;
         $v0 = $min($v0, $v1);
         $v1 = $max(t, $v1);
@@ -51,58 +52,33 @@ macro_rules! median9_simd_sort {
         let t = $v6;
         $v6 = $min($v6, $v7);
         $v7 = $max(t, $v7);
-        let t = $v0;
-        $v0 = $min($v0, $v3);
-        $v3 = $max(t, $v3);
-        let t = $v3;
-        $v3 = $min($v3, $v6);
-        $v6 = $max(t, $v6);
-        let t = $v0;
-        $v0 = $min($v0, $v3);
-        $v3 = $max(t, $v3);
+        $v3 = $max($v0, $v3);
+        $v6 = $max($v3, $v6);
         let t = $v1;
         $v1 = $min($v1, $v4);
         $v4 = $max(t, $v4);
         let t = $v4;
         $v4 = $min($v4, $v7);
         $v7 = $max(t, $v7);
-        let t = $v1;
-        $v1 = $min($v1, $v4);
-        $v4 = $max(t, $v4);
+        $v4 = $max($v1, $v4);
         let t = $v2;
         $v2 = $min($v2, $v5);
         $v5 = $max(t, $v5);
-        let t = $v5;
         $v5 = $min($v5, $v8);
-        $v8 = $max(t, $v8);
         let t = $v2;
         $v2 = $min($v2, $v5);
         $v5 = $max(t, $v5);
-        let t = $v1;
-        $v1 = $min($v1, $v3);
-        $v3 = $max(t, $v3);
-        let t = $v5;
         $v5 = $min($v5, $v7);
-        $v7 = $max(t, $v7);
         let t = $v2;
         $v2 = $min($v2, $v6);
         $v6 = $max(t, $v6);
-        let t = $v4;
         $v4 = $min($v4, $v6);
-        $v6 = $max(t, $v6);
-        let t = $v2;
-        $v2 = $min($v2, $v4);
-        $v4 = $max(t, $v4);
-        let t = $v2;
-        $v2 = $min($v2, $v3);
-        $v3 = $max(t, $v3);
-        let t = $v4;
+        $v4 = $max($v2, $v4);
         $v4 = $min($v4, $v5);
-        $v5 = $max(t, $v5);
     }};
 }
 
-#[cfg(all(test, feature = "internals"))]
+#[cfg(all(test, feature = "bench"))]
 mod bench;
 
 #[cfg(target_arch = "x86_64")]
@@ -185,10 +161,12 @@ fn median_filter_row_scalar(
 
 /// Scalar median of 9 elements using sorting network.
 #[inline]
-// Nine sibling lane values feeding a fixed comparator network, not a group with a name:
-// an array or struct would replace the network's named registers with indices and hand LLVM
-// an aggregate to promote back into exactly those registers.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "nine sibling lane values feeding a fixed comparator network, not a group with a \
+              name: an array or struct would replace the network's named registers with indices \
+              and hand LLVM an aggregate to promote back into exactly those registers"
+)]
 fn median9_scalar(
     mut v0: f32,
     mut v1: f32,

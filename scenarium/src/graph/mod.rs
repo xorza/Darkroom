@@ -22,6 +22,7 @@ use crate::DataType;
 use crate::graph::detached::DetachedNode;
 use crate::graph::error::GraphValidationError;
 use crate::graph::error::ValidationResult;
+use crate::graph::func::signature::FuncSignature;
 use crate::graph::func::{Func, FuncInput, FuncOutput, OutputType};
 use crate::graph::identity::NodeId;
 use crate::graph::identity::{InputPort, OutputPort};
@@ -88,7 +89,7 @@ pub struct Graph {
 }
 
 /// One event-subscription edge: `subscriber` fires when `emitter`'s event
-/// `event_idx` triggers. Ordered (emitter, event_idx, subscriber) so the
+/// `event_idx` triggers. Ordered (emitter, `event_idx`, subscriber) so the
 /// `BTreeSet` holding these dedups and iterates deterministically — which is
 /// what lets a compile wire each emitter's subscriber lists in a fixed order.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -155,24 +156,40 @@ impl Graph {
             .map(|(id, node)| NodeRef { id: *id, node })
     }
 
-    /// The node with `id`, or `None` if this graph has none.
+    /// The node with `id`, or `None` if this graph has none — which is the
+    /// answer for the nil id, as no graph holds it.
     ///
     /// A bare `&Node` rather than a [`NodeRef`]: the caller supplied the id, so
     /// there is nothing to attach.
     pub fn find(&self, id: NodeId) -> Option<&Node> {
-        assert!(!id.is_nil());
         self.nodes.get(&id)
     }
-    /// The declaration a node instantiates — a library entry, or a special
-    /// node's hardcoded spec. `None` for a `Func` kind the library no longer
-    /// holds: the caller decides whether that is drift to tolerate (the
-    /// editor renders a stub) or a node to skip (lowering).
+    /// The bindings on `node_id`'s own inputs, in port order: one contiguous
+    /// range, as `InputPort` orders by node before port.
+    pub fn input_bindings(&self, node_id: NodeId) -> impl Iterator<Item = (InputPort, &Binding)> {
+        self.bindings
+            .range(InputPort::new(node_id, 0)..)
+            .take_while(move |(port, _)| port.node_id == node_id)
+            .map(|(port, binding)| (*port, binding))
+    }
+    /// Whether input `port` of a node instantiating `func` is set aside by the
+    /// input `func` declares to override it — the editor's reading of the
+    /// rule a run applies, taken from the graph alone.
     ///
-    /// The one place the per-kind lookup happens, so no caller repeats it.
-    pub fn node_func<'a>(&'a self, node: &'a Node, library: &'a Library) -> Option<&'a Func> {
-        match &node.kind {
-            NodeKind::Func(func_id) => library.by_id(*func_id),
-            NodeKind::Special(special) => Some(special.func()),
+    /// The overriding input sets `port` aside when it holds a constant other
+    /// than `Null`, or is wired to an enabled node. A run also reads `port`
+    /// when that node cannot run for a missing input of its own, which only a
+    /// run knows.
+    pub fn overridden(&self, port: InputPort, func: &Func) -> bool {
+        let Some(by) = func.overrider_of(port.port_idx) else {
+            return false;
+        };
+        match self.bindings.get(&InputPort::new(port.node_id, by)) {
+            None | Some(Binding::Const(ConstValue::Null)) => false,
+            Some(Binding::Const(_)) => true,
+            Some(Binding::Bind(source)) => self
+                .find(source.node_id)
+                .is_some_and(|producer| !producer.disabled),
         }
     }
     /// The declared type of input `port`, or `None` when it can't be resolved
@@ -186,7 +203,7 @@ impl Graph {
     /// mirrors [`Self::input_type`].
     fn input_spec<'a>(&'a self, library: &'a Library, port: InputPort) -> Option<&'a FuncInput> {
         let node = self.find(port.node_id)?;
-        self.node_func(node, library)?.inputs.get(port.port_idx)
+        node.func(library)?.inputs.get(port.port_idx)
     }
     /// What settles one output port's type, one hop at a time: its own
     /// declaration, or — for a *wildcard* (a reroute or passthrough) — the
@@ -207,10 +224,11 @@ impl Graph {
         let mirror = InputPort::new(port.node_id, *mirrors);
         match self.bindings.get(&mirror) {
             Some(Binding::Bind(source)) => OutputTypeSource::Bind(*source),
-            Some(Binding::Const(value)) => OutputTypeSource::Const {
-                declared: self.input_type(library, mirror).unwrap_or_default(),
-                value: value.clone(),
-            },
+            Some(Binding::Const(value)) => OutputTypeSource::Fixed(
+                self.input_type(library, mirror)
+                    .unwrap_or_default()
+                    .or_const_type(value),
+            ),
             None => OutputTypeSource::Unresolved,
         }
     }
@@ -219,7 +237,7 @@ impl Graph {
     /// of [`Self::input_spec`].
     fn output_spec<'a>(&'a self, library: &'a Library, port: OutputPort) -> Option<&'a FuncOutput> {
         let node = self.find(port.node_id)?;
-        self.node_func(node, library)?.outputs.get(port.port_idx)
+        node.func(library)?.outputs.get(port.port_idx)
     }
     /// Every data edge as (consumer input ← producer output). Const bindings
     /// are not edges and are skipped.
@@ -228,7 +246,7 @@ impl Graph {
             .iter()
             .filter_map(|(dst, binding)| match binding {
                 Binding::Bind(src) => Some((*dst, *src)),
-                _ => None,
+                Binding::Const(_) => None,
             })
     }
     /// Whether binding an output of `producer` into an input on `consumer`
@@ -257,10 +275,7 @@ impl Graph {
         let mut stack = vec![producer];
         let mut seen: HashSet<NodeId> = HashSet::from_iter([producer]);
         while let Some(node) = stack.pop() {
-            for (port, binding) in self.bindings.range(InputPort::new(node, 0)..) {
-                if port.node_id != node {
-                    break;
-                }
+            for (_, binding) in self.input_bindings(node) {
                 let Binding::Bind(source) = binding else {
                     continue;
                 };
@@ -295,7 +310,7 @@ impl Graph {
             subscriber,
         })
     }
-    pub fn bindings_touching(&self, node_id: NodeId) -> Vec<BindingEntry> {
+    fn bindings_touching(&self, node_id: NodeId) -> Vec<BindingEntry> {
         self.bindings
             .iter()
             .filter(|(port, binding)| binding.touches(**port, node_id))
@@ -305,7 +320,7 @@ impl Graph {
             })
             .collect()
     }
-    pub fn subscriptions(&self) -> impl Iterator<Item = Subscription> + '_ {
+    pub fn subscriptions(&self) -> impl ExactSizeIterator<Item = Subscription> + '_ {
         self.subscriptions.iter().copied()
     }
 
@@ -329,7 +344,6 @@ impl Graph {
 
     /// Mutable counterpart of [`Self::find`].
     pub fn find_mut(&mut self, id: NodeId) -> Option<&mut Node> {
-        assert!(!id.is_nil());
         self.nodes.get_mut(&id)
     }
 
@@ -337,12 +351,14 @@ impl Graph {
     /// Returns the new node id.
     pub fn add_func_node(&mut self, func: &Func) -> NodeId {
         let node_id = self.add(Node::from(func));
-        self.bindings.extend(func.default_bindings(node_id));
+        self.bindings.extend(
+            func.default_bindings(node_id)
+                .map(|entry| (entry.port, entry.binding)),
+        );
         node_id
     }
 
     pub fn detach_node(&mut self, node_id: NodeId) -> DetachedNode {
-        assert!(!node_id.is_nil());
         let detached = self
             .snapshot_node(node_id)
             .expect("cannot detach a node that is not in the graph");
@@ -354,7 +370,6 @@ impl Graph {
         detached
     }
     pub fn attach_node(&mut self, detached: DetachedNode) {
-        detached.assert_valid();
         assert!(
             !self.nodes.contains_key(&detached.node_id),
             "cannot attach a node that is already in the graph"
@@ -495,18 +510,20 @@ impl Graph {
         self.validate_references(library)
     }
 
-    /// Everything in this graph that names a declaration: every func resolves,
-    /// and a `Bind` does not sit on a `const_only` input.
+    /// Everything in this graph that names a declaration: every func resolves
+    /// with the ports its node was authored against, and a `Bind` does not sit
+    /// on a `const_only` input.
     fn validate_references(&self, library: &Library) -> ValidationResult<()> {
         for (node_id, node) in &self.nodes {
             match &node.kind {
                 NodeKind::Func(func_id) => {
-                    if library.by_id(*func_id).is_none() {
+                    let Some(func) = library.by_id(*func_id) else {
                         return Err(GraphValidationError::MissingFunc {
                             node_id: *node_id,
                             func_id: *func_id,
                         });
-                    }
+                    };
+                    Self::check_signature(*node_id, node, func)?;
                 }
                 NodeKind::Special(_) => {}
             }
@@ -524,11 +541,43 @@ impl Graph {
 
         Ok(())
     }
+
+    /// Hold every func node to the ports it was authored against: a node whose recorded
+    /// signature differs from its func's in `library` is refused by name, and a node with none —
+    /// one saved before signatures were recorded, or built without its declaration in hand —
+    /// adopts the library's. A func the library lacks is left alone, as the stub it renders as.
+    pub fn reconcile_signatures(&mut self, library: &Library) -> ValidationResult<()> {
+        for (node_id, node) in &mut self.nodes {
+            let NodeKind::Func(func_id) = node.kind else {
+                continue;
+            };
+            let Some(func) = library.by_id(func_id) else {
+                continue;
+            };
+            Self::check_signature(*node_id, node, func)?;
+            node.signature
+                .get_or_insert_with(|| FuncSignature::of(func));
+        }
+        Ok(())
+    }
+
+    fn check_signature(node_id: NodeId, node: &Node, func: &Func) -> ValidationResult<()> {
+        match node.signature {
+            Some(signature) if signature != FuncSignature::of(func) => {
+                Err(GraphValidationError::SignatureMismatch {
+                    node_id,
+                    func_id: func.id,
+                    func_name: func.name.clone(),
+                })
+            }
+            _ => Ok(()),
+        }
+    }
 }
 
 impl Binding {
     /// A data binding wired to producer `node_id`'s output port `port_idx`.
-    pub fn bind(node_id: NodeId, port_idx: usize) -> Self {
+    pub const fn bind(node_id: NodeId, port_idx: usize) -> Self {
         Binding::Bind(OutputPort::new(node_id, port_idx))
     }
 

@@ -2,7 +2,7 @@ use crate::DataType;
 use crate::graph::Graph;
 use crate::graph::identity::OutputPort;
 use crate::graph::output_types::OutputTypes;
-use crate::testing::graph::TestGraph;
+use crate::testing::graph::{NodeSpec, TestGraph};
 
 /// `src` (declared `Int`) → `p1` → `p2`, both passthroughs declaring a
 /// wildcard output over an `Any` input, plus a second producer wired to
@@ -10,7 +10,7 @@ use crate::testing::graph::TestGraph;
 fn chain() -> TestGraph {
     let mut g = TestGraph::new();
     g.add("src", |n| n.pure().output(DataType::Int));
-    g.add("p1", |n| n.input(DataType::Any).wildcard(0));
+    g.add("p1", NodeSpec::passthrough);
     g.instance("p2", "p1");
     g.instance("isolated", "src");
     g.wire("src", 0, "p1", 0);

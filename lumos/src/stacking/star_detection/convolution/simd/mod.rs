@@ -1,7 +1,7 @@
 //! SIMD-accelerated convolution implementations.
 //!
 //! This module provides runtime dispatch to the best available SIMD implementation:
-//! - AVX2/SSE on x86_64
+//! - AVX2/SSE on `x86_64`
 //! - NEON on aarch64
 //! - Scalar fallback on other platforms
 
@@ -15,9 +15,6 @@ mod x86;
 
 #[cfg(target_arch = "aarch64")]
 mod neon;
-
-#[cfg(test)]
-mod tests;
 
 /// A borrowed square 2D convolution kernel, stored row-major.
 ///
@@ -44,18 +41,18 @@ impl<'a> Kernel2d<'a> {
 
     /// Side length in taps.
     #[inline]
-    pub(super) fn size(self) -> usize {
+    pub(super) const fn size(self) -> usize {
         self.size
     }
 
     /// Offset from the kernel's first tap to its centre.
     #[inline]
-    pub(super) fn radius(self) -> usize {
+    pub(super) const fn radius(self) -> usize {
         self.size / 2
     }
 
     #[inline]
-    pub(super) fn at(self, ky: usize, kx: usize) -> f32 {
+    pub(super) const fn at(self, ky: usize, kx: usize) -> f32 {
         self.weights[ky * self.size + kx]
     }
 }
@@ -71,21 +68,19 @@ impl<'a> Kernel2d<'a> {
 pub(super) fn mirror_index(i: isize, len: usize) -> usize {
     debug_assert!(len > 0, "mirror_index requires len > 0");
 
-    if i < 0 {
-        let reflected = (-i) as usize;
-        // Clamp to valid range if reflected index is still out of bounds
-        reflected.min(len - 1)
-    } else if i >= len as isize {
-        let reflected = (2 * len).saturating_sub(2).saturating_sub(i as usize);
-        // Clamp to valid range
-        reflected.min(len - 1)
-    } else {
-        i as usize
+    match usize::try_from(i) {
+        Err(_) => i.unsigned_abs().min(len - 1),
+        Ok(i) if i >= len => (2 * len).saturating_sub(2).saturating_sub(i).min(len - 1),
+        Ok(i) => i,
     }
 }
 
 /// Scalar convolution for a single pixel with mirror boundary handling.
 #[inline]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "pixel coordinates and kernel taps index a slice, whose length Rust caps at isize::MAX"
+)]
 fn convolve_pixel_scalar(
     input: &[f32],
     kernel: &[f32],
@@ -110,7 +105,7 @@ fn convolve_pixel_scalar(
 #[inline]
 pub(super) fn convolve_row(input: &[f32], output: &mut [f32], kernel: &[f32], radius: usize) {
     dispatch! {
-        x86: avx2_fma => x86::convolve_row_avx2(input, output, kernel, radius),
+        x86: avx2 => x86::convolve_row_avx2(input, output, kernel, radius),
         x86: sse4_1 => x86::convolve_row_sse41(input, output, kernel, radius),
         aarch64 => neon::convolve_row_neon(input, output, kernel, radius),
         scalar => convolve_row_scalar(input, output, kernel, radius),
@@ -161,7 +156,7 @@ fn convolve_cols_row(
     radius: usize,
 ) {
     dispatch! {
-        x86: avx2_fma => x86::convolve_cols_row_avx2(input, out_row, size, y, kernel, radius),
+        x86: avx2 => x86::convolve_cols_row_avx2(input, out_row, size, y, kernel, radius),
         x86: sse4_1 => x86::convolve_cols_row_sse41(input, out_row, size, y, kernel, radius),
         aarch64 => neon::convolve_cols_row_neon(input, out_row, size, y, kernel, radius),
         scalar => convolve_cols_row_scalar(input, out_row, size, y, kernel, radius),
@@ -170,6 +165,10 @@ fn convolve_cols_row(
 
 /// Scalar single column-row convolution.
 #[inline]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "pixel coordinates and kernel taps index a slice, whose length Rust caps at isize::MAX"
+)]
 fn convolve_cols_row_scalar(
     input: &[f32],
     out_row: &mut [f32],
@@ -197,10 +196,10 @@ pub(super) fn convolve_2d_row(
     output_row: &mut [f32],
     size: Size2us,
     y: usize,
-    kernel: Kernel2d,
+    kernel: Kernel2d<'_>,
 ) {
     dispatch! {
-        x86: avx2_fma => x86::convolve_2d_row_avx2(input, output_row, size, y, kernel),
+        x86: avx2 => x86::convolve_2d_row_avx2(input, output_row, size, y, kernel),
         x86: sse4_1 => x86::convolve_2d_row_sse41(input, output_row, size, y, kernel),
         aarch64 => neon::convolve_2d_row_neon(input, output_row, size, y, kernel),
         scalar => convolve_2d_row_scalar(input, output_row, size, y, kernel),
@@ -209,12 +208,16 @@ pub(super) fn convolve_2d_row(
 
 /// Scalar implementation of single-row 2D convolution.
 #[inline]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "pixel coordinates and kernel taps index a slice, whose length Rust caps at isize::MAX"
+)]
 fn convolve_2d_row_scalar(
     input: &[f32],
     output_row: &mut [f32],
     size: Size2us,
     y: usize,
-    kernel: Kernel2d,
+    kernel: Kernel2d<'_>,
 ) {
     let radius = kernel.radius() as isize;
     for (x, out_px) in output_row.iter_mut().enumerate() {
@@ -229,3 +232,6 @@ fn convolve_2d_row_scalar(
         *out_px = sum;
     }
 }
+
+#[cfg(test)]
+mod tests;

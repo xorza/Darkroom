@@ -3,32 +3,27 @@
 //! The two maps are emitted together and agree pixel for pixel: `coverage == 0` exactly where
 //! `confidence == 0`. Outside the source footprint both are zero. Inside it, coverage vanishes only
 //! where some axis has no in-bounds tap magnitude, which zeroes that axis's signed sum and with it
-//! the confidence numerator — and no partial-support subset of these kernels cancels that sum on its
-//! own, since each one keeps a centre tap outweighing its negative lobes.
+//! the confidence numerator — and no partial-support subset of these kernels cancels that sum on
+//! its own, since each one keeps a centre tap outweighing its negative lobes.
 //!
 //! `combine` depends on that rather than re-deriving it: it gates a sample on coverage alone and
 //! multiplies the weight by confidence, so a covered pixel at zero confidence would enter the
-//! statistics weightless. See `PixelCoverage`, and `validate_frame_quality`, which holds
+//! statistics weightless. See `PixelCoverage`, and `FrameCheck::quality_pair`, which holds
 //! caller-supplied planes to the same pairing.
 //!
 //! Every pixel whose tap window lies wholly inside the source — all but a `kernel_radius`-wide band
-//! at the frame's edge — takes [`SeparableTaps::interior_quality`], which is where nearly all of the
-//! grid is and nearly all of the time goes. The clipping arithmetic runs only in that band.
+//! at the frame's edge — takes [`SeparableTaps::interior_quality`], which is where nearly all of
+//! the grid is and nearly all of the time goes. The clipping arithmetic runs only in that band.
 
 use std::sync::OnceLock;
 
-use rayon::prelude::*;
+use glam::IVec2;
 
 use crate::math::size2us::Size2us;
 use crate::stacking::registration::config::InterpolationMethod;
-use crate::stacking::registration::resample::kernel::LANCZOS_LUT_RESOLUTION;
-use crate::stacking::registration::resample::{kernel, row};
-use crate::stacking::registration::transform::WarpTransform;
-use glam::Vec2;
-use imaginarium::Buffer2;
-
-#[cfg(test)]
-mod tests;
+use crate::stacking::registration::resample::kernel;
+use crate::stacking::registration::resample::kernel::{LANCZOS_LUT_RESOLUTION, LanczosOrder};
+use crate::stacking::registration::resample::source_position::{SourcePosition, window_inside};
 
 /// The widest separable kernel here: Lanczos4's 8 taps per axis. Every method's weights share this
 /// array so the quality tail is written once rather than per kernel width.
@@ -80,51 +75,38 @@ struct SampleQuality {
 /// from the window alone is what lets that path skip the `2a` LUT reads per axis entirely.
 #[derive(Debug, Clone, Copy)]
 struct LanczosWindow {
-    pos: Vec2,
-    start_x: i32,
-    start_y: i32,
-    taps: usize,
-    fx: f32,
-    fy: f32,
+    pos: SourcePosition,
+    order: LanczosOrder,
+    origin: IVec2,
 }
 
 impl LanczosWindow {
-    fn new(pos: Vec2, a: usize) -> Self {
-        let x0 = pos.x.floor() as i32;
-        let y0 = pos.y.floor() as i32;
+    const fn new(pos: SourcePosition, order: LanczosOrder) -> Self {
         Self {
             pos,
-            start_x: x0 - a as i32 + 1,
-            start_y: y0 - a as i32 + 1,
-            taps: 2 * a,
-            fx: pos.x - x0 as f32,
-            fy: pos.y - y0 as f32,
+            order,
+            origin: pos.window_origin(order.taps_before()),
         }
     }
 
-    fn is_interior(&self, size: Size2us) -> bool {
-        let taps = self.taps as i32;
-        self.start_x >= 0
-            && self.start_y >= 0
-            && self.start_x + taps <= size.width as i32
-            && self.start_y + taps <= size.height as i32
+    const fn taps(&self) -> usize {
+        2 * self.order.a()
+    }
+
+    const fn is_interior(&self, size: Size2us) -> bool {
+        window_inside(self.origin, self.taps(), size)
     }
 }
 
-/// The `2a` Lanczos tap weights for fractional offset `f`, into the first `2a` slots of `weights`.
-///
-/// `row`'s distance convention, so the two cannot disagree about which coefficient a tap carries:
-/// `(a-1-i) + f` below the centre and `(i+1-a) - f` above it, both non-negative, which is what lets
-/// the lookup skip its sign handling.
-fn lanczos_weights(a: usize, f: f32, weights: &mut [f32; MAX_TAPS]) {
-    let lut = kernel::get_lanczos_lut(a);
-    for (i, weight) in weights.iter_mut().take(2 * a).enumerate() {
-        let distance = if i < a {
-            (a - 1 - i) as f32 + f
-        } else {
-            (i + 1 - a) as f32 - f
-        };
-        *weight = lut.lookup_positive(distance);
+/// The `2a` Lanczos tap weights for fractional offset `f`, into the first `2a` slots of `weights`:
+/// the table's own [`LanczosLut::weights`](kernel::LanczosLut::weights), so the row warp and these
+/// maps cannot disagree about which coefficient a tap carries.
+fn lanczos_weights(order: LanczosOrder, f: f32, weights: &mut [f32; MAX_TAPS]) {
+    let lut = order.lut();
+    match order {
+        LanczosOrder::Two => weights[..4].copy_from_slice(&lut.weights::<4>(f)),
+        LanczosOrder::Three => weights[..6].copy_from_slice(&lut.weights::<6>(f)),
+        LanczosOrder::Four => weights.copy_from_slice(&lut.weights::<8>(f)),
     }
 }
 
@@ -143,19 +125,19 @@ fn lanczos_weights(a: usize, f: f32, weights: &mut [f32; MAX_TAPS]) {
 /// weights are already quantized to. `tabulated_interior_sums_track_the_computed_ones` holds it
 /// there. Confidence scales a sample's weight and is never compared against a threshold, so an
 /// error three parts in ten thousand moves no decision.
-fn lanczos_interior_sums(a: usize) -> &'static [AxisSums] {
+fn lanczos_interior_sums(order: LanczosOrder) -> &'static [AxisSums] {
     static SUMS: [OnceLock<Vec<AxisSums>>; 3] = [OnceLock::new(), OnceLock::new(), OnceLock::new()];
-    let slot = &SUMS[a - 2];
+    let slot = &SUMS[order.a() - 2];
     slot.get_or_init(|| {
         (0..=LANCZOS_LUT_RESOLUTION)
             .map(|index| {
                 let mut weights = [0.0; MAX_TAPS];
                 lanczos_weights(
-                    a,
+                    order,
                     index as f32 / LANCZOS_LUT_RESOLUTION as f32,
                     &mut weights,
                 );
-                AxisSums::of(&weights[..2 * a])
+                AxisSums::of(&weights[..2 * order.a()])
             })
             .collect()
     })
@@ -163,6 +145,7 @@ fn lanczos_interior_sums(a: usize) -> &'static [AxisSums] {
 
 /// The entry of [`lanczos_interior_sums`] a fractional offset selects — the same rounding the tap
 /// lookups apply, so the sums come from the weights the border path would have computed.
+#[expect(clippy::cast_sign_loss, reason = "a fraction lies in [0, 1]")]
 fn fraction_index(f: f32) -> usize {
     debug_assert!((0.0..=1.0).contains(&f));
     (f * LANCZOS_LUT_RESOLUTION as f32 + 0.5) as usize
@@ -179,7 +162,7 @@ enum BorderConfidence {
     /// truncated, so what is left still describes what the sampler reads there.
     OwnCoefficients,
     /// Edge-extended bilinear at the clamped position. Truncating a signed Lanczos kernel can leave
-    /// arbitrarily little weight, so [`row::lanczos`] samples that instead — and the confidence has
+    /// arbitrarily little weight, so the row warp samples that instead — and the confidence has
     /// to describe what was actually sampled, not the kernel that was abandoned.
     ClampedBilinear,
 }
@@ -193,9 +176,8 @@ enum BorderConfidence {
 /// pair a kernel's taps with another's border rule.
 #[derive(Debug)]
 struct SeparableTaps {
-    pos: Vec2,
-    start_x: i32,
-    start_y: i32,
+    pos: SourcePosition,
+    origin: IVec2,
     taps: usize,
     wx: [f32; MAX_TAPS],
     wy: [f32; MAX_TAPS],
@@ -204,49 +186,41 @@ struct SeparableTaps {
 
 impl SeparableTaps {
     /// The 2×2 window, whose weights are the fractional distances themselves.
-    fn bilinear(pos: Vec2) -> Self {
-        let x0 = pos.x.floor() as i32;
-        let y0 = pos.y.floor() as i32;
-        let fx = pos.x - x0 as f32;
-        let fy = pos.y - y0 as f32;
-        let mut taps = Self::empty(pos, x0, y0, 2, BorderConfidence::OwnCoefficients);
-        taps.wx[..2].copy_from_slice(&[1.0 - fx, fx]);
-        taps.wy[..2].copy_from_slice(&[1.0 - fy, fy]);
+    fn bilinear(pos: SourcePosition) -> Self {
+        let mut taps = Self::empty(pos, 0, 2, BorderConfidence::OwnCoefficients);
+        taps.wx[..2].copy_from_slice(&[1.0 - pos.fx, pos.fx]);
+        taps.wy[..2].copy_from_slice(&[1.0 - pos.fy, pos.fy]);
         taps
     }
 
     /// The 4×4 Catmull-Rom window, starting one pixel before the sample.
-    fn bicubic(pos: Vec2) -> Self {
-        let x0 = pos.x.floor() as i32;
-        let y0 = pos.y.floor() as i32;
-        let fx = pos.x - x0 as f32;
-        let fy = pos.y - y0 as f32;
-        let mut taps = Self::empty(pos, x0 - 1, y0 - 1, 4, BorderConfidence::OwnCoefficients);
-        taps.wx[..4].copy_from_slice(&kernel::bicubic_weights(fx));
-        taps.wy[..4].copy_from_slice(&kernel::bicubic_weights(fy));
+    fn bicubic(pos: SourcePosition) -> Self {
+        let mut taps = Self::empty(pos, 1, 4, BorderConfidence::OwnCoefficients);
+        taps.wx[..4].copy_from_slice(&kernel::bicubic_weights(pos.fx));
+        taps.wy[..4].copy_from_slice(&kernel::bicubic_weights(pos.fy));
         taps
     }
 
     /// The `2a`×`2a` Lanczos window, read from the same LUT the row warp samples through.
-    fn lanczos(window: LanczosWindow, a: usize) -> Self {
+    fn lanczos(window: LanczosWindow) -> Self {
         let mut taps = Self::empty(
             window.pos,
-            window.start_x,
-            window.start_y,
-            2 * a,
+            window.order.taps_before(),
+            window.taps(),
             BorderConfidence::ClampedBilinear,
         );
-        lanczos_weights(a, window.fx, &mut taps.wx);
-        lanczos_weights(a, window.fy, &mut taps.wy);
+        lanczos_weights(window.order, window.pos.fx, &mut taps.wx);
+        lanczos_weights(window.order, window.pos.fy, &mut taps.wy);
         taps
     }
 
-    fn empty(pos: Vec2, start_x: i32, start_y: i32, taps: usize, border: BorderConfidence) -> Self {
+    /// A `taps`-wide window reaching `before` taps back from the sample's cell, with no weights
+    /// yet.
+    fn empty(pos: SourcePosition, before: i32, taps: usize, border: BorderConfidence) -> Self {
         debug_assert!(taps <= MAX_TAPS);
         Self {
             pos,
-            start_x,
-            start_y,
+            origin: pos.window_origin(before),
             taps,
             wx: [0.0; MAX_TAPS],
             wy: [0.0; MAX_TAPS],
@@ -263,12 +237,8 @@ impl SeparableTaps {
     }
 
     /// Whether every tap on both axes lands inside the source.
-    fn is_interior(&self, size: Size2us) -> bool {
-        let taps = self.taps as i32;
-        self.start_x >= 0
-            && self.start_y >= 0
-            && self.start_x + taps <= size.width as i32
-            && self.start_y + taps <= size.height as i32
+    const fn is_interior(&self, size: Size2us) -> bool {
+        window_inside(self.origin, self.taps, size)
     }
 
     /// Quality for a window with real data behind every tap.
@@ -287,11 +257,11 @@ impl SeparableTaps {
     }
 
     fn clipped_x(&self, size: Size2us) -> AxisWeightStats {
-        axis_weight_stats(self.start_x, self.x_weights(), size.width)
+        axis_weight_stats(self.origin.x, self.x_weights(), size.width)
     }
 
     fn clipped_y(&self, size: Size2us) -> AxisWeightStats {
-        axis_weight_stats(self.start_y, self.y_weights(), size.height)
+        axis_weight_stats(self.origin.y, self.y_weights(), size.height)
     }
 
     /// Support and confidence at this position: the interior shortcut where the window is wholly
@@ -312,7 +282,7 @@ impl SeparableTaps {
             BorderConfidence::ClampedBilinear if coverage == 0.0 => 0.0,
             // `bilinear` answers to `OwnCoefficients`, so this recurs exactly once.
             BorderConfidence::ClampedBilinear => {
-                Self::bilinear(kernel::clamp_to_pixel_centers(self.pos, size))
+                Self::bilinear(self.pos.clamped_to_centers(size))
                     .quality(size)
                     .confidence
             }
@@ -326,11 +296,10 @@ impl SeparableTaps {
 
 fn axis_weight_stats(start: i32, weights: &[f32], length: usize) -> AxisWeightStats {
     let mut stats = AxisWeightStats::default();
-    for (i, &weight) in weights.iter().enumerate() {
+    for (coordinate, &weight) in (start..).zip(weights) {
         let magnitude = weight.abs();
         stats.magnitude += magnitude;
-        let coordinate = start + i as i32;
-        if coordinate >= 0 && (coordinate as usize) < length {
+        if usize::try_from(coordinate).is_ok_and(|coordinate| coordinate < length) {
             stats.in_sums.signed += weight;
             stats.in_magnitude += magnitude;
             stats.in_sums.square += weight * weight;
@@ -358,10 +327,7 @@ fn separable_confidence(x: AxisSums, y: AxisSums) -> f32 {
     }
 }
 
-fn quality_at(pos: Vec2, size: Size2us, method: InterpolationMethod) -> SampleQuality {
-    if !kernel::source_footprint_contains(pos, size) {
-        return SampleQuality::default();
-    }
+fn quality_at(pos: SourcePosition, size: Size2us, method: InterpolationMethod) -> SampleQuality {
     match method {
         InterpolationMethod::Nearest => SampleQuality {
             coverage: 1.0,
@@ -372,68 +338,58 @@ fn quality_at(pos: Vec2, size: Size2us, method: InterpolationMethod) -> SampleQu
         InterpolationMethod::Lanczos2
         | InterpolationMethod::Lanczos3
         | InterpolationMethod::Lanczos4 => {
-            let a = method.lanczos_param().unwrap();
-            let window = LanczosWindow::new(pos, a);
+            let order = LanczosOrder::of(method).expect("a Lanczos method has an order");
+            let window = LanczosWindow::new(pos, order);
             if window.is_interior(size) {
                 // Every tap has data behind it, so coverage is exactly 1 and the sums are the
                 // whole kernel's — which is a table lookup per axis rather than `2a` LUT reads
                 // and their summation. This is all but a border band of the grid.
-                let sums = lanczos_interior_sums(a);
+                let sums = lanczos_interior_sums(order);
                 return SampleQuality {
                     coverage: 1.0,
                     confidence: separable_confidence(
-                        sums[fraction_index(window.fx)],
-                        sums[fraction_index(window.fy)],
+                        sums[fraction_index(pos.fx)],
+                        sums[fraction_index(pos.fy)],
                     ),
                 };
             }
-            SeparableTaps::lanczos(window, a).quality(size)
+            SeparableTaps::lanczos(window).quality(size)
         }
     }
 }
 
-/// Fill `coverage` and `confidence` for every output pixel.
+/// Fill one row of `coverage` and `confidence` from the row's source positions; both are zero where
+/// a position falls outside the source.
 ///
 /// Writes both in full, so the buffers may arrive holding anything — which is what lets the warp
 /// stage hand the same pair back for the next frame instead of allocating a set whose every page
 /// then faults on first write.
-pub(super) fn write_maps(
-    coverage: &mut Buffer2<f32>,
-    confidence: &mut Buffer2<f32>,
+pub(super) fn write_row(
+    positions: &[Option<SourcePosition>],
     size: Size2us,
-    transform: &WarpTransform,
     method: InterpolationMethod,
+    coverage_row: &mut [f32],
+    confidence_row: &mut [f32],
 ) {
-    debug_assert_eq!(
-        (coverage.width(), coverage.height()),
-        (size.width, size.height)
-    );
-    debug_assert_eq!(
-        (confidence.width(), confidence.height()),
-        (size.width, size.height)
-    );
-    coverage
-        .pixels_mut()
-        .par_chunks_mut(size.width)
-        .zip(confidence.pixels_mut().par_chunks_mut(size.width))
-        .enumerate()
-        .for_each(|(y, (coverage_row, confidence_row))| {
-            row::for_each_source_position(y, transform, size.width, |x, pos| {
-                let quality =
-                    pos.map_or_else(SampleQuality::default, |pos| quality_at(pos, size, method));
-                coverage_row[x] = quality.coverage;
-                confidence_row[x] = quality.confidence;
-            });
+    for ((position, coverage), confidence) in positions.iter().zip(coverage_row).zip(confidence_row)
+    {
+        let quality = position.map_or_else(SampleQuality::default, |position| {
+            quality_at(position, size, method)
         });
+        *coverage = quality.coverage;
+        *confidence = quality.confidence;
+    }
 }
 
 #[cfg(test)]
 pub(crate) mod internals {
     use imaginarium::Buffer2;
+    use rayon::prelude::*;
 
     use crate::math::size2us::Size2us;
     use crate::stacking::registration::config::InterpolationMethod;
-    use crate::stacking::registration::resample::quality::write_maps;
+    use crate::stacking::registration::resample::quality::write_row;
+    use crate::stacking::registration::resample::row_positions::RowPositions;
     use crate::stacking::registration::transform::WarpTransform;
 
     /// The two maps as an owned pair.
@@ -454,10 +410,30 @@ pub(crate) mod internals {
     ) -> Maps {
         let mut coverage = Buffer2::new_default(size.width, size.height);
         let mut confidence = Buffer2::new_default(size.width, size.height);
-        write_maps(&mut coverage, &mut confidence, size, transform, method);
+        coverage
+            .pixels_mut()
+            .par_chunks_mut(size.width)
+            .zip(confidence.pixels_mut().par_chunks_mut(size.width))
+            .enumerate()
+            .for_each_init(
+                RowPositions::default,
+                |positions, (y, (coverage_row, confidence_row))| {
+                    positions.fill(y, size.width, transform, size);
+                    write_row(
+                        positions.positions(),
+                        size,
+                        method,
+                        coverage_row,
+                        confidence_row,
+                    );
+                },
+            );
         Maps {
             coverage,
             confidence,
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

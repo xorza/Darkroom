@@ -1,3 +1,8 @@
+#![expect(
+    clippy::cast_possible_wrap,
+    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
+)]
+
 use super::*;
 
 #[test]
@@ -57,90 +62,38 @@ fn term_exponents_order_5() {
 fn term_exponents_all_satisfy_constraints() {
     for order in 2..=5 {
         let terms = term_exponents(order);
-        for &(p, q) in terms.iter() {
+        for &(p, q) in &terms {
             let total = p + q;
             assert!(
                 total >= 2 && total <= order,
-                "Order {}: term ({},{}) has p+q={} outside [2,{}]",
-                order,
-                p,
-                q,
-                total,
-                order
+                "Order {order}: term ({p},{q}) has p+q={total} outside [2,{order}]"
             );
         }
     }
 }
 
+/// Every monomial of the order-5 table at `(u, v) = (−2, 3)` against `u^p·v^q` written out:
+/// `(−2)³·3 = −24`, `(−2)²·3² = 36`, and so on. Integers this small multiply exactly, so the powers
+/// table and the direct products agree bit for bit — and at the origin only `u⁰v⁰` would be 1,
+/// which no SIP term is.
 #[test]
-fn monomial_hand_computed() {
-    // u^2 * v^0 = u^2
-    // u=3.0, v=5.0: 3^2 * 5^0 = 9.0 * 1.0 = 9.0
-    assert_eq!(monomial(DVec2::new(3.0, 5.0), 2, 0), 9.0);
+fn basis_is_every_term_at_the_point() {
+    let terms = term_exponents(5);
+    let mut basis = [0.0; MAX_TERMS];
+    evaluate_basis(DVec2::new(-2.0, 3.0), &terms, &mut basis[..terms.len()]);
+    for (&(p, q), &value) in terms.iter().zip(&basis) {
+        let expected = (-2.0f64).powi(p as i32) * 3.0f64.powi(q as i32);
+        assert_eq!(value, expected, "u^{p}·v^{q}");
+    }
+    assert_eq!(
+        basis[terms.iter().position(|&t| t == (3, 1)).unwrap()],
+        -24.0
+    );
+    assert_eq!(
+        basis[terms.iter().position(|&t| t == (2, 2)).unwrap()],
+        36.0
+    );
 
-    // u^0 * v^3 = v^3
-    // u=3.0, v=2.0: 3^0 * 2^3 = 1.0 * 8.0 = 8.0
-    assert_eq!(monomial(DVec2::new(3.0, 2.0), 0, 3), 8.0);
-
-    // u^1 * v^1 = u*v
-    // u=4.0, v=7.0: 4 * 7 = 28.0
-    assert_eq!(monomial(DVec2::new(4.0, 7.0), 1, 1), 28.0);
-
-    // u^3 * v^2
-    // u=2.0, v=3.0: 8.0 * 9.0 = 72.0
-    assert_eq!(monomial(DVec2::new(2.0, 3.0), 3, 2), 72.0);
-
-    // u^0 * v^0 = 1.0 for any (u, v)
-    assert_eq!(monomial(DVec2::new(42.0, 99.0), 0, 0), 1.0);
-}
-
-#[test]
-fn monomial_zero_input() {
-    // u=0, v=0: u^p * v^q = 0 for any p>0 or q>0
-    assert_eq!(monomial(DVec2::ZERO, 2, 0), 0.0);
-    assert_eq!(monomial(DVec2::ZERO, 0, 2), 0.0);
-    assert_eq!(monomial(DVec2::ZERO, 1, 1), 0.0);
-    // u^0 * v^0 = 1.0 even at origin
-    assert_eq!(monomial(DVec2::ZERO, 0, 0), 1.0);
-}
-
-#[test]
-fn monomial_negative_input() {
-    // u=-2.0, v=3.0, p=3, q=1
-    // (-2)^3 * 3^1 = -8 * 3 = -24.0
-    assert_eq!(monomial(DVec2::new(-2.0, 3.0), 3, 1), -24.0);
-
-    // u=-2.0, v=-3.0, p=2, q=2
-    // (-2)^2 * (-3)^2 = 4 * 9 = 36.0
-    assert_eq!(monomial(DVec2::new(-2.0, -3.0), 2, 2), 36.0);
-}
-
-#[test]
-fn avg_distance_hand_computed() {
-    let ref_pt = DVec2::new(0.0, 0.0);
-    let points = [
-        DVec2::new(3.0, 4.0),  // distance = sqrt(9+16) = 5.0
-        DVec2::new(0.0, 10.0), // distance = 10.0
-        DVec2::new(5.0, 0.0),  // distance = 5.0
-    ];
-    // avg = (5 + 10 + 5) / 3 = 20/3 = 6.666...
-    let avg = avg_distance(&points, ref_pt);
-    assert!((avg - 20.0 / 3.0).abs() < 1e-12);
-}
-
-#[test]
-fn avg_distance_all_at_ref_returns_one() {
-    // When all points coincide with reference, avg distance = 0 -> clamp to 1.0
-    let ref_pt = DVec2::new(5.0, 5.0);
-    let points = [ref_pt, ref_pt, ref_pt];
-    assert_eq!(avg_distance(&points, ref_pt), 1.0);
-}
-
-#[test]
-fn avg_distance_single_point() {
-    // Single point at (6, 8) from origin (0,0): distance = sqrt(36+64) = 10.0
-    // avg = 10.0 / 1 = 10.0
-    let ref_pt = DVec2::ZERO;
-    let points = [DVec2::new(6.0, 8.0)];
-    assert!((avg_distance(&points, ref_pt) - 10.0).abs() < 1e-12);
+    evaluate_basis(DVec2::ZERO, &terms, &mut basis[..terms.len()]);
+    assert!(basis[..terms.len()].iter().all(|&value| value == 0.0));
 }

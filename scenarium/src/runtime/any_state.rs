@@ -1,3 +1,4 @@
+use std::any;
 use std::any::Any;
 
 #[derive(Debug, Default)]
@@ -85,7 +86,7 @@ impl AnyState {
             Some(boxed) => assert!(
                 boxed.is::<T>(),
                 "AnyState holds another type; requested {}",
-                std::any::type_name::<T>(),
+                any::type_name::<T>(),
             ),
             None => self.boxed = Some(Box::new(make())),
         }

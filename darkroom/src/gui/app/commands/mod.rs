@@ -11,8 +11,8 @@
 //! dialogs), so the methods it calls belong to `App` rather than any one
 //! owner; only the dispatch splits by concern.
 
+use crate::core::edit::relayout::Relayout;
 use crate::gui::app::App;
-use crate::gui::relayout::Relayout;
 
 pub(crate) mod edit;
 pub(crate) mod file;
@@ -53,7 +53,7 @@ impl AppCommand {
     ///
     /// Returns whether the command stranded the canvas's cached geometry.
     /// Only an edit can — the rest touch state no canvas measures against —
-    /// but it is reported rather than requested here so that `App::frame`
+    /// but it is reported rather than requested here so that `App::record`
     /// stays the one place in the app that asks for a relayout.
     #[must_use]
     pub(super) fn apply(self, app: &mut App) -> Relayout {

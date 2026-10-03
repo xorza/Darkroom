@@ -1,7 +1,7 @@
 //! ML-based filters via an ONNX Runtime backend (`ort`), gated behind the `ml` feature.
 //!
 //! These wrap a pre-trained convolutional network that the **caller supplies** — lumos bundles **no
-//! model weights**. The best astro star-removal / denoise models (StarNet2, the *XTerminator*
+//! model weights**. The best astro star-removal / denoise models (`StarNet2`, the *`XTerminator`*
 //! suite) are proprietary and non-redistributable, so the backend is generic and the user points it
 //! at their own legally-obtained `.onnx` file.
 //!

@@ -4,24 +4,18 @@ use arrayvec::ArrayVec;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::io::image::image_provenance::RowOrder;
-use crate::io::image::sample_domain::SampleDomain;
-use crate::math::statistics::{MedianMad, mad_with_scratch, median_mut};
-use crate::stacking::frame_store::StackableImage;
+use crate::math::statistics::MedianMad;
+use crate::math::vec2us::Vec2us;
+use crate::stacking::frame_store::frame_facts::FrameFacts;
+use crate::stacking::frame_store::stackable_image::StackableImage;
 
 /// Per-frame statistics: one median/MAD pair per channel.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct FrameStats {
     pub(crate) channels: ArrayVec<MedianMad, 3>,
     pub(crate) quantization_sigma: Option<f32>,
-    /// What the frame's decoder said one sample is worth — see
-    /// [`ImageMetadata::sample_domain`](crate::ImageMetadata::sample_domain). Carried beside the
-    /// statistics because it is what makes two frames' statistics comparable at all.
-    pub(crate) domain: Option<SampleDomain>,
-    /// Which end of the image the frame's first stored row belongs to — see
-    /// [`RowOrder`]. Carried here for the same reason as the domain: the metadata
-    /// it comes from is dropped for every frame but the first, and this is what travels instead.
-    pub(crate) row_order: Option<RowOrder>,
+    /// What the decoder said the samples are; what makes two frames' statistics comparable at all.
+    pub(crate) facts: FrameFacts,
 }
 
 impl FrameStats {
@@ -32,48 +26,45 @@ impl FrameStats {
     /// sample, and a frame with a large masked region would report a spread far below its real
     /// noise — which is the figure weighting divides by.
     ///
-    /// The other stages that measure a whole plane need no such exclusion, and the fill is why. Star
-    /// detection looks for peaks above a local background and a patch sitting *at* the background
-    /// produces none; the defect detectors look for outliers against a median the fill by
-    /// construction is; and normalization already re-measures over the pixels every frame shares
+    /// The other stages that measure a whole plane need no such exclusion, and the fill is why.
+    /// Star detection looks for peaks above a local background and a patch sitting *at* the
+    /// background produces none; the defect detectors look for outliers against a median the fill
+    /// by construction is; and normalization already re-measures over the pixels every frame shares
     /// once any frame is partially covering.
     pub(crate) fn measure(image: &impl StackableImage) -> Self {
         let dimensions = image.dimensions();
         let quantization_sigma = image.quantization_sigma();
-        let domain = image.metadata().sample_domain();
-        let row_order = image.metadata().row_order();
+        let facts = FrameFacts::of(image);
         let nulls = image.nulls();
         let channels = (0..dimensions.channels())
             .into_par_iter()
             .map(|channel| {
-                // Gathered only for a frame that has a mask; without one the plane itself is what
-                // gets measured, and the single copy below is the scratch the median sorts in
-                // place — the same one allocation this cost before nulls existed.
-                let measured = nulls.map(|nulls| {
-                    image
-                        .channel(channel)
-                        .iter()
+                // One copy per channel, the measured samples, which the median and the MAD then
+                // sort in place.
+                let plane = image.channel(channel);
+                let mut measured: Vec<f32> = match nulls {
+                    Some(nulls) => plane
+                        .chunks(dimensions.width())
                         .enumerate()
-                        .filter(|(index, _)| !nulls.is_null(*index))
-                        .map(|(_, &sample)| sample)
-                        .collect::<Vec<f32>>()
-                });
-                let data = measured
-                    .as_deref()
-                    .unwrap_or_else(|| image.channel(channel));
+                        .flat_map(|(y, row)| {
+                            row.iter()
+                                .enumerate()
+                                .filter(move |&(x, _)| !nulls.is_null_at(Vec2us::new(x, y)))
+                                .map(|(_, &sample)| sample)
+                        })
+                        .collect(),
+                    None => plane.to_vec(),
+                };
                 // A frame with nothing measured anywhere has no statistics to report. It also
                 // contributes at no pixel, so what goes here is never read — but it has to be
                 // something, and the median of nothing would panic.
-                if data.is_empty() {
+                if measured.is_empty() {
                     return MedianMad {
                         median: 0.0,
                         mad: 0.0,
                     };
                 }
-                let mut scratch = data.to_vec();
-                let median = median_mut(&mut scratch);
-                let mad = mad_with_scratch(data, median, &mut scratch);
-                MedianMad { median, mad }
+                MedianMad::of_mut(&mut measured)
             })
             .collect::<Vec<_>>()
             .into_iter()
@@ -81,8 +72,7 @@ impl FrameStats {
         Self {
             channels,
             quantization_sigma,
-            domain,
-            row_order,
+            facts,
         }
     }
 }

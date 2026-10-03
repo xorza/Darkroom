@@ -23,12 +23,12 @@ fn make_tile_data_with_outliers() -> Vec<f32> {
     // Realistic tile: mostly uniform with ~2% outliers (stars)
     let mut data: Vec<f32> = vec![100.0; TILE_SIZE - 80];
     // Add some realistic star pixels (high outliers)
-    data.extend(std::iter::repeat_n(500.0, 40));
-    data.extend(std::iter::repeat_n(1000.0, 20));
-    data.extend(std::iter::repeat_n(2000.0, 10));
-    data.extend(std::iter::repeat_n(5000.0, 5));
+    data.extend(iter::repeat_n(500.0, 40));
+    data.extend(iter::repeat_n(1000.0, 20));
+    data.extend(iter::repeat_n(2000.0, 10));
+    data.extend(iter::repeat_n(5000.0, 5));
     // Add some noise (low outliers)
-    data.extend(std::iter::repeat_n(50.0, 5));
+    data.extend(iter::repeat_n(50.0, 5));
     data
 }
 

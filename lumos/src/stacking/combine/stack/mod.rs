@@ -14,30 +14,33 @@ use common::CancelToken;
 use imaginarium::Buffer2;
 
 use crate::math;
+use crate::memory::run_memory::RunMemory;
+use crate::stacking::combine::cache::core::{CacheCore, CacheTier};
 use crate::stacking::combine::cache::sample::CombinedSample;
-use crate::stacking::combine::cache::{CombineOutput, FrameCache, FrameCacheParams};
+use crate::stacking::combine::cache::{CombineOutput, FrameCache};
 use crate::stacking::combine::config::{CombineMethod, StackConfig, Weighting};
 use crate::stacking::combine::error::{Error, StackConfigError};
 use crate::stacking::combine::normalization::FrameNorm;
 use crate::stacking::combine::rejection::Rejection;
+use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::stacking::combine::stack::quantization::{MaxSigma, SourceSigmas};
-use crate::stacking::frame_store::StoredFrame;
 use crate::stacking::frame_store::frame_quality::FrameQuality;
 use crate::stacking::frame_store::frame_stats::FrameStats;
-use crate::stacking::frame_store::spill::SpillDirectory;
+use crate::stacking::frame_store::stored_frame::StoredFrame;
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::resample::WarpResult;
 use crate::stacking::stack_product::StackProduct;
 use crate::stacking::stack_product::quality_planes::QualityPlanes;
 
-/// One input frame for [`stack_images`], with the per-pixel frame quality a registered frame carries.
+/// One input frame for [`stack_images`], with the per-pixel frame quality a registered frame
+/// carries.
 ///
 /// Its coverage plane gates whether a warped sample has meaningful source support; its confidence
 /// plane is an independent inverse-variance multiplier. A frame with no frame quality has full
 /// support at unit confidence throughout. Plain `LinearImage`s convert with `.into()`; registered
 /// frames must use [`StackFrame::registered`] so source-domain noise is captured before
 /// interpolation.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StackFrame {
     pub(crate) image: LinearImage,
     pub(crate) quality: FrameQuality<Buffer2<f32>>,
@@ -108,14 +111,15 @@ impl From<LinearImage> for StackFrame {
 /// ```
 pub fn stack<P: AsRef<Path> + Sync>(
     paths: &[P],
-    config: StackConfig,
+    config: &StackConfig,
     progress: ProgressCallback,
     cancel: CancelToken,
 ) -> Result<StackProduct, Error> {
     // Files on disk carry no coverage, so the combine treats every pixel as fully covered.
     // `cancel` rides on the cache from construction, so the load loop polls it too.
-    combine_cached(&config, paths.len(), "paths", || {
-        FrameCache::from_paths(paths, &config.cache, config.normalization, progress, cancel)
+    combine_cached(config, paths.len(), "paths", || {
+        let memory = RunMemory::read(config.cache.memory_override);
+        FrameCache::from_paths(paths, config, memory, progress, cancel)
     })
 }
 
@@ -135,45 +139,38 @@ pub fn stack<P: AsRef<Path> + Sync>(
 /// normalization is requested for registered frames with no common valid support.
 pub fn stack_images(
     frames: Vec<StackFrame>,
-    config: StackConfig,
+    config: &StackConfig,
     progress: ProgressCallback,
     cancel: CancelToken,
 ) -> Result<StackProduct, Error> {
     let frame_count = frames.len();
-    combine_cached(&config, frame_count, "memory", || {
-        FrameCache::from_stack_frames(
-            frames,
-            &config.cache,
-            config.normalization,
-            progress,
-            cancel,
-        )
+    combine_cached(config, frame_count, "memory", || {
+        FrameCache::from_stack_frames(frames, config.normalization, progress, cancel)
     })
 }
 
 /// Combine frames produced by the shared frame store.
 pub(crate) fn stack_stored_frames(
     frames: Vec<StoredFrame>,
-    spill_directory: Option<SpillDirectory>,
+    tier: CacheTier,
     dimensions: ImageDimensions,
     metadata: ImageMetadata,
-    config: StackConfig,
+    config: &StackConfig,
     progress: ProgressCallback,
     cancel: CancelToken,
 ) -> Result<StackProduct, Error> {
     let frame_count = frames.len();
-    combine_cached(&config, frame_count, "frame store", || {
+    combine_cached(config, frame_count, "frame store", || {
         FrameCache::from_stored_frames(
             frames,
-            FrameCacheParams {
-                spill_directory,
+            CacheCore {
+                tier,
                 dimensions,
                 metadata,
-                config: config.cache.clone(),
-                normalization: config.normalization,
                 progress,
                 cancel,
             },
+            config.normalization,
         )
     })
 }
@@ -210,7 +207,7 @@ pub(crate) fn combine_cached(
         method = ?config.method,
         weighting = ?config.weighting,
         normalization = ?config.normalization,
-        disk_tier = cache.core.spill_directory.is_some(),
+        disk_tier = cache.core.tier.spills(),
         // Not "warped": a frame carries these when a warp produced them *or* when its source
         // declared pixels with no measurement.
         frame_quality = cache
@@ -266,7 +263,7 @@ fn resolve_weights<'a>(
     }
 }
 
-fn validate_manual_weights(
+const fn validate_manual_weights(
     config: &StackConfig,
     frame_count: usize,
 ) -> Result<(), StackConfigError> {
@@ -293,7 +290,8 @@ fn normalize_weights(weights: &[f32]) -> Option<Vec<f32>> {
 
 /// Warn when frame weighting was requested but the resolved combine is a median, which has no
 /// weighted form here — the weights would be silently dropped. Fires both for an explicit `Median`
-/// and for a method downgraded to its small-N fallback (see [`SmallN::resolve`](crate::stacking::combine::config::SmallN::resolve)).
+/// and for a method downgraded to its small-N fallback (see
+/// [`SmallN::resolve`](crate::stacking::combine::config::SmallN::resolve)).
 fn warn_if_weights_ignored(method: CombineMethod, weighting: &Weighting) {
     if matches!(method, CombineMethod::Median) && *weighting != Weighting::Equal {
         tracing::warn!(
@@ -321,15 +319,6 @@ pub(crate) fn run_stacking(
     cache: &FrameCache,
     config: &StackConfig,
 ) -> Result<StackProduct, Error> {
-    // Normalization parameters are measured once, when the cache is built, and the combine reads
-    // them from the cache rather than from `config`. Running a cache against a config that asks
-    // for a different normalization would silently apply the one it was built with, so require
-    // the two to agree instead.
-    assert_eq!(
-        cache.normalization, config.normalization,
-        "cache was normalized as {:?} but the combine config asks for {:?}",
-        cache.normalization, config.normalization
-    );
     let stats = || cache.frames.iter().map(|frame| &frame.source_stats);
     let frame_count = cache.frames.len();
     let method = config.small_n.resolve(config.method, frame_count);
@@ -360,7 +349,7 @@ pub(crate) fn run_stacking(
     let (combined, quantization_sigma) = match method {
         CombineMethod::Median => {
             let sigma = sigmas.and_then(|sigmas| sigmas.combined_median(norms));
-            let combined = cache.process_chunked(None, norms, planes, |values, w, _| {
+            let combined = cache.process_chunked(None, planes, |values, w, _| {
                 let value = math::statistics::median_mut(values);
                 if measure_quality {
                     CombinedSample::from_all(value, w)
@@ -370,53 +359,48 @@ pub(crate) fn run_stacking(
             });
             (combined, sigma)
         }
-        // Winsorization replaces samples with order statistics, so it has no fixed linear
-        // coefficient set from which to propagate quantization variance.
-        CombineMethod::Mean(rejection @ Rejection::Winsorized(_)) => {
-            let sigma = sigmas.and_then(|sigmas| sigmas.conservative(norms));
-            let combined = cache.process_chunked(
-                weights.as_deref(),
-                norms,
-                planes,
-                move |values, w, scratch| {
-                    rejection.combine_mean(values, w, scratch, measure_quality)
-                },
-            );
-            (combined, sigma)
-        }
         CombineMethod::Mean(rejection) => {
-            let Some(sigmas) = sigmas else {
-                let combined = cache.process_chunked(
-                    weights.as_deref(),
-                    norms,
-                    planes,
-                    move |values, w, scratch| {
-                        rejection.combine_mean(values, w, scratch, measure_quality)
-                    },
-                );
-                return finish_unless_cancelled(cache, combined, planes, None);
+            let reduce = move |values: &mut [f32], w: &[f32], scratch: &mut ScratchBuffers| {
+                rejection.combine_mean(values, w, scratch, measure_quality)
             };
-            // Rejection keeps a different survivor set at every pixel, so the master's floor is
-            // the least-reduced pixel: seed with "nothing rejected" and raise it wherever a
-            // pixel lost frames.
-            let all_survivors = sigmas
-                .combined_mean(weights.as_deref(), norms, 0..frame_count)
-                .expect("a validated stack has positive total weight");
-            let max_sigma = MaxSigma::seeded(all_survivors);
-            let frame_weights = weights.as_deref();
-            let combined =
-                cache.process_chunked(weights.as_deref(), norms, planes, |values, w, scratch| {
-                    let sample = rejection.combine_mean(values, w, scratch, measure_quality);
-                    if sample.survivor_count != frame_count {
-                        max_sigma.record(sigmas.combined_mean(
-                            frame_weights,
-                            norms,
-                            scratch.indices[..sample.survivor_count].iter().copied(),
-                        ));
-                    }
-                    sample
-                });
-            (combined, max_sigma.get())
+            // Winsorization replaces samples with order statistics, so it has no fixed linear
+            // coefficient set to propagate quantization variance through: it takes the
+            // conservative bound instead of tracking survivors.
+            let winsorized = matches!(rejection, Rejection::Winsorized(_));
+            match sigmas {
+                Some(sigmas) if !winsorized => {
+                    // Rejection keeps a different survivor set at every pixel, so the master's
+                    // floor is the least-reduced pixel: seed with "nothing rejected" and raise it
+                    // wherever a pixel lost frames.
+                    let all_survivors = sigmas
+                        .combined_mean(weights.as_deref(), norms, 0..frame_count)
+                        .expect("a validated stack has positive total weight");
+                    let max_sigma = MaxSigma::seeded(all_survivors);
+                    let frame_weights = weights.as_deref();
+                    let combined =
+                        cache.process_chunked(weights.as_deref(), planes, |values, w, scratch| {
+                            let sample = reduce(values, w, scratch);
+                            if sample.survivor_count != frame_count {
+                                max_sigma.record(sigmas.combined_mean(
+                                    frame_weights,
+                                    norms,
+                                    scratch.indices[..sample.survivor_count].iter().copied(),
+                                ));
+                            }
+                            sample
+                        });
+                    (combined, max_sigma.get())
+                }
+                sigmas => {
+                    let sigma = sigmas
+                        .filter(|_| winsorized)
+                        .and_then(|sigmas| sigmas.conservative(norms));
+                    (
+                        cache.process_chunked(weights.as_deref(), planes, reduce),
+                        sigma,
+                    )
+                }
+            }
         }
     };
 

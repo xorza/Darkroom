@@ -1,10 +1,23 @@
 use crate::DataType;
-use crate::DynamicValue;
 use crate::async_lambda;
-use crate::graph::func::error::InvokeError;
 use crate::graph::func::lambda::Invocation;
 use crate::graph::func::{Func, FuncInput, FuncOutput};
+use crate::graph::identity::FuncId;
 use crate::library::Library;
+
+const ADD_FUNC_ID: FuncId = FuncId::literal("01897c4c-ac6a-84c0-d0b7-17d49e1ae2ee");
+const SUBTRACT_FUNC_ID: FuncId = FuncId::literal("01897c50-229e-f5e4-1c60-7f1e14531da2");
+const MULTIPLY_FUNC_ID: FuncId = FuncId::literal("01897c50-d510-55bf-8cb9-545a62cc76cc");
+const POWER_FUNC_ID: FuncId = FuncId::literal("01897c52-ac50-733e-aeeb-7018fd84c264");
+const SQUARE_ROOT_FUNC_ID: FuncId = FuncId::literal("01897c53-a3d7-e716-b80a-0ba98661413a");
+const LOGARITHM_FUNC_ID: FuncId = FuncId::literal("01897c56-8dde-c5f3-a389-f326fdf81b3a");
+const SINE_FUNC_ID: FuncId = FuncId::literal("01897c54-8671-5d7c-db4c-aca72865a5a6");
+const COSINE_FUNC_ID: FuncId = FuncId::literal("01897c54-ceb5-e603-ebde-c6904a8ef6e5");
+const TANGENT_FUNC_ID: FuncId = FuncId::literal("01897c55-1fda-2837-f4bd-75bea812a70e");
+const ARCSINE_FUNC_ID: FuncId = FuncId::literal("01897c55-6920-1641-593c-5a1d91c033cb");
+const ARCCOSINE_FUNC_ID: FuncId = FuncId::literal("01897c55-a3ef-681e-6fbb-5133c96f720c");
+const ARCTANGENT_FUNC_ID: FuncId = FuncId::literal("01897c55-e6f4-726c-5d4e-a2f90c4fc43b");
+const DIVIDE_FUNC_ID: FuncId = FuncId::literal("01897c50-2b4e-4f0e-8f0a-5b0b8b2b4b4b");
 
 #[derive(Debug, Clone, Copy)]
 struct FloatInputSpec {
@@ -19,12 +32,6 @@ struct FloatOutputSpec {
     description: &'static str,
 }
 
-fn float_input(inputs: &[DynamicValue], idx: usize) -> Result<f64, InvokeError> {
-    inputs[idx]
-        .as_f64()
-        .ok_or_else(|| InvokeError::invalid_input(idx, "a number", &inputs[idx]))
-}
-
 fn declared_input(spec: FloatInputSpec) -> FuncInput {
     FuncInput::required(spec.name, DataType::Float)
         .description(spec.description)
@@ -36,59 +43,65 @@ fn declared_output(spec: FloatOutputSpec) -> FuncOutput {
 }
 
 fn unary_float_func(
-    id: &'static str,
+    id: FuncId,
     name: &'static str,
     description: &'static str,
     input: FloatInputSpec,
     output: FloatOutputSpec,
     operation: fn(f64) -> f64,
 ) -> Func {
-    Func::new(id, name)
-        .description(description)
-        .category("Math")
-        .pure()
-        .input(declared_input(input))
-        .output(declared_output(output))
-        .lambda(async_lambda!(move |Invocation {
-                                        inputs, outputs, ..
-                                    }| {
+    Func::new(
+        id,
+        name,
+        async_lambda!(move |Invocation {
+                                inputs, outputs, ..
+                            }| {
             assert_eq!(inputs.len(), 1);
             assert_eq!(outputs.len(), 1);
-            outputs[0] = operation(float_input(inputs, 0)?).into();
+            outputs[0] = operation(inputs[0].required_f64()).into();
             Ok(())
-        }))
+        }),
+    )
+    .description(description)
+    .category("Math")
+    .pure()
+    .input(declared_input(input))
+    .output(declared_output(output))
 }
 
 fn binary_float_func(
-    id: &'static str,
+    id: FuncId,
     name: &'static str,
     description: &'static str,
     inputs: [FloatInputSpec; 2],
     output: FloatOutputSpec,
     operation: fn(f64, f64) -> f64,
 ) -> Func {
-    Func::new(id, name)
-        .description(description)
-        .category("Math")
-        .pure()
-        .input(declared_input(inputs[0]))
-        .input(declared_input(inputs[1]))
-        .output(declared_output(output))
-        .lambda(async_lambda!(move |Invocation {
-                                        inputs, outputs, ..
-                                    }| {
+    Func::new(
+        id,
+        name,
+        async_lambda!(move |Invocation {
+                                inputs, outputs, ..
+                            }| {
             assert_eq!(inputs.len(), 2);
             assert_eq!(outputs.len(), 1);
-            outputs[0] = operation(float_input(inputs, 0)?, float_input(inputs, 1)?).into();
+            outputs[0] = operation(inputs[0].required_f64(), inputs[1].required_f64()).into();
             Ok(())
-        }))
+        }),
+    )
+    .description(description)
+    .category("Math")
+    .pure()
+    .input(declared_input(inputs[0]))
+    .input(declared_input(inputs[1]))
+    .output(declared_output(output))
 }
 
 pub fn math_library() -> Library {
     let mut library = Library::default();
 
     library.add(binary_float_func(
-        "01897c4c-ac6a-84c0-d0b7-17d49e1ae2ee",
+        ADD_FUNC_ID,
         "Add",
         "Adds two float values (A + B).",
         [
@@ -110,7 +123,7 @@ pub fn math_library() -> Library {
         |a, b| a + b,
     ));
     library.add(binary_float_func(
-        "01897c50-229e-f5e4-1c60-7f1e14531da2",
+        SUBTRACT_FUNC_ID,
         "Subtract",
         "Subtracts the second value from the first (A − B).",
         [
@@ -132,7 +145,7 @@ pub fn math_library() -> Library {
         |a, b| a - b,
     ));
     library.add(binary_float_func(
-        "01897c50-d510-55bf-8cb9-545a62cc76cc",
+        MULTIPLY_FUNC_ID,
         "Multiply",
         "Multiplies two float values (A × B).",
         [
@@ -155,7 +168,7 @@ pub fn math_library() -> Library {
     ));
     library.add(divide_func());
     library.add(binary_float_func(
-        "01897c52-ac50-733e-aeeb-7018fd84c264",
+        POWER_FUNC_ID,
         "Power",
         "Raises the first value to the power of the second (Base^Exponent).",
         [
@@ -177,7 +190,7 @@ pub fn math_library() -> Library {
         f64::powf,
     ));
     library.add(unary_float_func(
-        "01897c53-a3d7-e716-b80a-0ba98661413a",
+        SQUARE_ROOT_FUNC_ID,
         "Square Root",
         "Calculates the square root of a value.",
         FloatInputSpec {
@@ -197,7 +210,7 @@ pub fn math_library() -> Library {
     }
 
     library.add(binary_float_func(
-        "01897c56-8dde-c5f3-a389-f326fdf81b3a",
+        LOGARITHM_FUNC_ID,
         "Logarithm",
         "Calculates the logarithm of a value with the given base.",
         [
@@ -225,7 +238,7 @@ pub fn math_library() -> Library {
 fn trigonometry_funcs() -> [Func; 6] {
     [
         unary_float_func(
-            "01897c54-8671-5d7c-db4c-aca72865a5a6",
+            SINE_FUNC_ID,
             "Sine",
             "Calculates the sine of an angle in radians.",
             FloatInputSpec {
@@ -240,7 +253,7 @@ fn trigonometry_funcs() -> [Func; 6] {
             f64::sin,
         ),
         unary_float_func(
-            "01897c54-ceb5-e603-ebde-c6904a8ef6e5",
+            COSINE_FUNC_ID,
             "Cosine",
             "Calculates the cosine of an angle in radians.",
             FloatInputSpec {
@@ -255,7 +268,7 @@ fn trigonometry_funcs() -> [Func; 6] {
             f64::cos,
         ),
         unary_float_func(
-            "01897c55-1fda-2837-f4bd-75bea812a70e",
+            TANGENT_FUNC_ID,
             "Tangent",
             "Calculates the tangent of an angle in radians.",
             FloatInputSpec {
@@ -270,7 +283,7 @@ fn trigonometry_funcs() -> [Func; 6] {
             f64::tan,
         ),
         unary_float_func(
-            "01897c55-6920-1641-593c-5a1d91c033cb",
+            ARCSINE_FUNC_ID,
             "Arcsine",
             "Calculates the arc sine (inverse sine), returns angle in radians.",
             FloatInputSpec {
@@ -285,7 +298,7 @@ fn trigonometry_funcs() -> [Func; 6] {
             f64::asin,
         ),
         unary_float_func(
-            "01897c55-a3ef-681e-6fbb-5133c96f720c",
+            ARCCOSINE_FUNC_ID,
             "Arccosine",
             "Calculates the arc cosine (inverse cosine), returns angle in radians.",
             FloatInputSpec {
@@ -300,7 +313,7 @@ fn trigonometry_funcs() -> [Func; 6] {
             f64::acos,
         ),
         unary_float_func(
-            "01897c55-e6f4-726c-5d4e-a2f90c4fc43b",
+            ARCTANGENT_FUNC_ID,
             "Arctangent",
             "Calculates the arc tangent (inverse tangent), returns angle in radians.",
             FloatInputSpec {
@@ -318,44 +331,48 @@ fn trigonometry_funcs() -> [Func; 6] {
 }
 
 fn divide_func() -> Func {
-    Func::new("01897c50-2b4e-4f0e-8f0a-5b0b8b2b4b4b", "Divide")
-        .description("Divides the first value by the second, outputs both quotient and remainder.")
-        .category("Math")
-        .pure()
-        .input(declared_input(FloatInputSpec {
-            name: "A",
-            description: "Dividend.",
-            default: 0.0,
-        }))
-        .input(declared_input(FloatInputSpec {
-            name: "B",
-            description: "Divisor.",
-            default: 1.0,
-        }))
-        .output(declared_output(FloatOutputSpec {
-            name: "Quotient",
-            description: "A ÷ B.",
-        }))
-        .output(declared_output(FloatOutputSpec {
-            name: "Remainder",
-            description: "A mod B.",
-        }))
-        .lambda(async_lambda!(move |Invocation {
-                                        inputs, outputs, ..
-                                    }| {
+    Func::new(
+        DIVIDE_FUNC_ID,
+        "Divide",
+        async_lambda!(move |Invocation {
+                                inputs, outputs, ..
+                            }| {
             assert_eq!(inputs.len(), 2);
             assert_eq!(outputs.len(), 2);
-            let dividend = float_input(inputs, 0)?;
-            let divisor = float_input(inputs, 1)?;
+            let dividend = inputs[0].required_f64();
+            let divisor = inputs[1].required_f64();
             outputs[0] = (dividend / divisor).into();
             outputs[1] = (dividend % divisor).into();
             Ok(())
-        }))
+        }),
+    )
+    .description("Divides the first value by the second, outputs both quotient and remainder.")
+    .category("Math")
+    .pure()
+    .input(declared_input(FloatInputSpec {
+        name: "A",
+        description: "Dividend.",
+        default: 0.0,
+    }))
+    .input(declared_input(FloatInputSpec {
+        name: "B",
+        description: "Divisor.",
+        default: 1.0,
+    }))
+    .output(declared_output(FloatOutputSpec {
+        name: "Quotient",
+        description: "A ÷ B.",
+    }))
+    .output(declared_output(FloatOutputSpec {
+        name: "Remainder",
+        description: "A mod B.",
+    }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::func::error::InvokeError;
     use crate::testing::func_invoker::FuncInvoker;
     use crate::{ConstValue, DynamicValue};
 
@@ -365,12 +382,14 @@ mod tests {
         FuncInvoker::default().call(func, values.to_vec()).await
     }
 
+    type Kernel = fn(f64) -> f64;
+
     fn float(value: f64) -> DynamicValue {
         ConstValue::Float(value).into()
     }
 
     #[tokio::test]
-    async fn operations_compute_exact_results_and_reject_text() {
+    async fn operations_compute_exact_results() {
         for (name, expected) in [
             ("Add", 5.0),
             ("Subtract", -1.0),
@@ -386,9 +405,27 @@ mod tests {
         assert_eq!(divide[0].as_f64(), Some(7.0 / 3.0));
         assert_eq!(divide[1].as_f64(), Some(1.0));
 
-        let text = DynamicValue::Static(ConstValue::String("not a number".into()));
-        assert!(invoke("Add", &[text.clone(), float(3.0)]).await.is_err());
-        assert!(invoke("Add", &[float(2.0), text.clone()]).await.is_err());
-        assert!(invoke("Sine", &[text]).await.is_err());
+        // One input at which the seven functions all differ, so a func wired
+        // to another's kernel fails its row.
+        let unary: [(&str, Kernel); 7] = [
+            ("Square Root", f64::sqrt),
+            ("Sine", f64::sin),
+            ("Cosine", f64::cos),
+            ("Tangent", f64::tan),
+            ("Arcsine", f64::asin),
+            ("Arccosine", f64::acos),
+            ("Arctangent", f64::atan),
+        ];
+        for (name, kernel) in unary {
+            let outputs = invoke(name, &[float(0.5)]).await.unwrap();
+            assert_eq!(outputs[0].as_f64(), Some(kernel(0.5)), "{name}(0.5)");
+        }
+        let at_half: Vec<f64> = unary.iter().map(|(_, kernel)| kernel(0.5)).collect();
+        for (i, value) in at_half.iter().enumerate() {
+            assert!(
+                !at_half[i + 1..].contains(value),
+                "the fixture tells the ops apart"
+            );
+        }
     }
 }

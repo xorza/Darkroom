@@ -11,16 +11,16 @@ use crate::gui::pane::graph::harness::CanvasHarness;
 /// The cancel is resolved once per frame by the canvas and handed to each
 /// controller, so this also covers the wiring — a band that kept running
 /// after Esc would commit on release. The second band is the half that
-/// would break silently: `base` lives inside `RubberBand` now, and a
-/// cancel that left it behind would union the abandoned drag's selection
-/// into the next one.
+/// would break silently: `base` lives inside `RubberBand`, and a cancel
+/// that left it behind would union the abandoned drag's selection into the
+/// next one.
 #[test]
 fn escape_cancels_a_rubber_band_and_leaves_no_residue() {
     use palantir::Key;
 
     // Placed by id rather than left on the fixture's row: this case cares
-    // *which* node the second band reaches, and the row assigns by map
-    // iteration order.
+    // *which* node the second band reaches, and wants its two nodes far
+    // enough apart that a band can hold one without the other.
     let fixture = DocFixture::probes(2);
     let (a, b) = (fixture.node(0), fixture.node(1));
     let mut h = CanvasHarness::new(

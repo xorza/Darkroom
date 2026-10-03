@@ -14,18 +14,21 @@
 use std::f32::consts::FRAC_PI_4;
 use std::path::PathBuf;
 
-use common::internals::test_output_path;
+use common::internals::{DEBUG_OUTPUT_VAR, debug_output_path};
 use glam::{DVec2, Vec2};
 
-use crate::math::size2us::Size2us;
 use imaginarium::Buffer2;
 
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
+use crate::stacking::registration::transform::Transform;
+
 use crate::testing::synthetic::artifacts::add_cosmic_rays;
-use crate::testing::synthetic::backgrounds::NebulaConfig;
+use crate::testing::synthetic::backgrounds::{NebulaConfig, Vignette};
 use crate::testing::synthetic::camera::{BiasField, Camera, FlatField, PsfModel, SensorDefects};
 use crate::testing::synthetic::fixtures::{cluster_field, star_field};
-use crate::testing::synthetic::observe::{Observation, observe_dithered, render};
-use crate::testing::synthetic::patterns::{checkerboard, diagonal_gradient, horizontal_gradient};
+use crate::testing::synthetic::observe::{Observation, SimFrame, render};
+use crate::testing::synthetic::patterns;
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
 use crate::testing::visual::{self, ToneMap};
 
@@ -36,9 +39,11 @@ fn save(pixels: &[f32], size: Size2us, name: &str, tone: ToneMap) -> PathBuf {
         size.pixel_count(),
         "pixel/dimension mismatch for {name}"
     );
-    let path = test_output_path(&format!("synthetic_gallery/{name}"));
-    visual::save(pixels, size, &path, tone);
-    visual::output_path(&path)
+    let name = format!("synthetic_gallery/{name}");
+    let path = visual::debug_file(&name)
+        .unwrap_or_else(|| panic!("the gallery writes images; set {DEBUG_OUTPUT_VAR}=1 to run it"));
+    visual::save(pixels, size, &name, tone);
+    path
 }
 
 /// Render a forward-model frame and save its sensor image.
@@ -55,6 +60,44 @@ fn save_frame(scene: &Scene, camera: &Camera, obs: &Observation, name: &str, ton
 /// A representative populated star field over `background`.
 fn demo_field(size: Size2us, background: BackgroundField, seed: u64) -> Scene {
     Scene::random_field(size, 120, (3.0, 250.0), background, 16.0, seed)
+}
+
+/// Create a checkerboard pattern.
+///
+/// Useful for phase correlation and registration tests.
+fn checkerboard(size: Size2us, cell_size: usize, value_a: f32, value_b: f32) -> Buffer2<f32> {
+    let mut pixels = vec![0.0f32; size.pixel_count()];
+    for y in 0..size.height {
+        for x in 0..size.width {
+            let checker = ((x / cell_size) + (y / cell_size)) % 2;
+            pixels[size.index_of(Vec2us::new(x, y))] = if checker == 0 { value_a } else { value_b };
+        }
+    }
+    Buffer2::new(size.width, size.height, pixels)
+}
+
+/// Render one `scene` through `camera` as `dithers.len()` frames, each translated by its
+/// dither offset and given an independent noise seed derived from `base_seed`.
+fn observe_dithered(
+    scene: &Scene,
+    camera: &Camera,
+    dithers: &[DVec2],
+    exposure_s: f32,
+    base_seed: u64,
+) -> Vec<SimFrame> {
+    dithers
+        .iter()
+        .enumerate()
+        .map(|(i, &d)| {
+            let obs = Observation {
+                transform: Transform::translation(d),
+                exposure_s,
+                seeing_scale: 1.0,
+                seed: base_seed.wrapping_add(i as u64 * 7919),
+            };
+            render(scene, camera, &obs)
+        })
+        .collect()
 }
 
 #[test]
@@ -87,11 +130,11 @@ fn gallery_backgrounds() {
         ),
         (
             "backgrounds/vignette",
-            BackgroundField::Vignette {
+            BackgroundField::Vignette(Vignette {
                 center: 0.3,
                 edge: 0.05,
                 falloff: 2.0,
-            },
+            }),
             ToneMap::Clamp,
         ),
         (
@@ -241,7 +284,11 @@ fn gallery_sensor() {
     let size = Size2us::new(256, 256);
     // The multiplicative flat map itself.
     let vignette_flat = FlatField {
-        vignette: Some((1.0, 0.4, 2.5)),
+        vignette: Some(Vignette {
+            center: 1.0,
+            edge: 0.4,
+            falloff: 2.5,
+        }),
         channel_gain: [1.0; 3],
     };
     save(
@@ -379,6 +426,10 @@ fn gallery_scenes() {
 
 #[test]
 #[ignore = "visual gallery; run with --ignored"]
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "synthetic fixtures are small images with non-negative coordinates"
+)]
 fn gallery_seeing() {
     let size = Size2us::new(256, 256);
     let field = demo_field(size, BackgroundField::Uniform { level: 0.05 }, 11);
@@ -424,13 +475,13 @@ fn gallery_patterns() {
         ToneMap::Clamp,
     );
     save(
-        horizontal_gradient(size, 0.0, 1.0).pixels(),
+        patterns::horizontal_gradient(size, 0.0, 1.0).pixels(),
         size,
         "patterns/horizontal_gradient",
         ToneMap::Clamp,
     );
     save(
-        diagonal_gradient(size).pixels(),
+        patterns::diagonal_gradient(size).pixels(),
         size,
         "patterns/diagonal_gradient",
         ToneMap::Clamp,
@@ -485,11 +536,10 @@ fn gallery_fixtures() {
 #[test]
 #[ignore = "visual gallery; run with --ignored"]
 fn gallery_print_output_dir() {
-    let probe = test_output_path("synthetic_gallery/.probe");
+    let probe = debug_output_path("synthetic_gallery/.probe")
+        .unwrap_or_else(|| panic!("the gallery writes images; set {DEBUG_OUTPUT_VAR}=1 to run it"));
     println!(
         "synthetic gallery directory: {}",
         probe.parent().unwrap().display()
     );
-    // Touch a buffer so the dir exists even if run alone.
-    let _ = Buffer2::<f32>::new_default(1, 1);
 }

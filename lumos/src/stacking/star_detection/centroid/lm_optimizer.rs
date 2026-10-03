@@ -27,12 +27,6 @@ pub(super) struct LMConfig {
     pub(super) lambda_up: f64,
     /// Factor to decrease lambda on successful step.
     pub(super) lambda_down: f64,
-    /// Early termination when position parameters (first 2) converge to this threshold.
-    /// The optimizer stops once both x0 and y0 deltas are below this value,
-    /// even if other parameters (amplitude, sigma, background) are still changing.
-    /// Default is 0 (disabled). Set to 0.0001 for sub-pixel astrometric precision
-    /// in centroid-only use cases where non-position parameters don't matter.
-    pub(super) position_convergence_threshold: f64,
 }
 
 impl Default for LMConfig {
@@ -43,7 +37,6 @@ impl Default for LMConfig {
             initial_lambda: 0.001,
             lambda_up: 10.0,
             lambda_down: 0.1,
-            position_convergence_threshold: 0.0,
         }
     }
 }
@@ -56,7 +49,13 @@ impl Default for LMConfig {
 /// variable), so carrying them costs two moves, while gating them would push `#[cfg]` into the
 /// optimizer's inner loop and save nothing.
 #[derive(Debug, Clone, Copy)]
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "a release build reads neither `chi2` nor `iterations`"
+    )
+)]
 pub(super) struct LMResult<const N: usize> {
     pub(super) params: [f64; N],
     pub(super) chi2: f64,
@@ -75,7 +74,7 @@ pub(super) struct FitData<'a> {
 }
 
 impl<'a> FitData<'a> {
-    pub(super) fn new(
+    pub(super) const fn new(
         x: &'a [f64],
         y: &'a [f64],
         z: &'a [f64],
@@ -84,13 +83,13 @@ impl<'a> FitData<'a> {
         Self { x, y, z, weights }
     }
 
-    pub(super) fn unweighted(x: &'a [f64], y: &'a [f64], z: &'a [f64]) -> Self {
+    pub(super) const fn unweighted(x: &'a [f64], y: &'a [f64], z: &'a [f64]) -> Self {
         Self::new(x, y, z, None)
     }
 
     /// Sample count — the three coordinate slices are indexed in lockstep, so any of them.
     #[inline]
-    pub(super) fn len(&self) -> usize {
+    pub(super) const fn len(&self) -> usize {
         self.x.len()
     }
 
@@ -112,7 +111,7 @@ pub(super) struct NormalEquations<const N: usize> {
 }
 
 impl<const N: usize> NormalEquations<N> {
-    pub(super) fn zeroed() -> Self {
+    pub(super) const fn zeroed() -> Self {
         Self {
             hessian: [[0.0f64; N]; N],
             gradient: [0.0f64; N],
@@ -140,13 +139,16 @@ impl<const N: usize> NormalEquations<N> {
     pub(super) fn accumulate(
         &mut self,
         model: &(impl LMModel<N> + ?Sized),
-        data: FitData,
+        data: FitData<'_>,
         params: &[f64; N],
         range: Range<usize>,
     ) {
         for i in range {
             let w = data.weight(i);
-            let (model_val, row) = model.evaluate_and_jacobian(data.x[i], data.y[i], params);
+            let ModelSample {
+                value: model_val,
+                jacobian: row,
+            } = model.evaluate_and_jacobian(data.x[i], data.y[i], params);
             let r = data.z[i] - model_val;
             self.chi2 += w * r * r;
             for k in 0..N {
@@ -165,7 +167,7 @@ impl<const N: usize> NormalEquations<N> {
     /// SIMD overrides fall back to when no backend applies or the fit is weighted.
     pub(super) fn from_scalar_pass(
         model: &(impl LMModel<N> + ?Sized),
-        data: FitData,
+        data: FitData<'_>,
         params: &[f64; N],
     ) -> Self {
         let mut equations = Self::zeroed();
@@ -173,6 +175,13 @@ impl<const N: usize> NormalEquations<N> {
         equations.mirror_lower_triangle();
         equations
     }
+}
+
+/// The model's value at one point and its Jacobian row there.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ModelSample<const N: usize> {
+    pub(super) value: f64,
+    pub(super) jacobian: [f64; N],
 }
 
 /// Trait for models that can be fit with L-M optimization.
@@ -185,7 +194,7 @@ pub(super) trait LMModel<const N: usize> {
     /// Fused rather than split into evaluate + derivatives so the expensive shared intermediate
     /// (the `exp` for a Gaussian, the `powf` for a Moffat) is computed once. Every accumulation
     /// loop goes through this, so it is the only derivative path production code takes.
-    fn evaluate_and_jacobian(&self, x: f64, y: f64, params: &[f64; N]) -> (f64, [f64; N]);
+    fn evaluate_and_jacobian(&self, x: f64, y: f64, params: &[f64; N]) -> ModelSample<N>;
 
     /// Apply parameter constraints after an update.
     fn constrain(&self, params: &mut [f64; N]);
@@ -194,7 +203,7 @@ pub(super) trait LMModel<const N: usize> {
     /// Companion to [`NormalEquations::accumulate`] for the gradient-free chi²-only
     /// batch path — see that method's doc for why this is shared rather than
     /// duplicated per model/backend.
-    fn accumulate_chi2(&self, data: FitData, params: &[f64; N], range: Range<usize>) -> f64 {
+    fn accumulate_chi2(&self, data: FitData<'_>, params: &[f64; N], range: Range<usize>) -> f64 {
         let mut chi2 = 0.0f64;
         for i in range {
             let w = data.weight(i);
@@ -219,19 +228,23 @@ pub(super) trait LMModel<const N: usize> {
     /// only under their own `target_arch`, and the sole way to share them is a macro — which
     /// buys ~15 lines at the cost of making an `unsafe` call site expand from something a reader
     /// cannot see.
-    fn batch_build_normal_equations(&self, data: FitData, params: &[f64; N]) -> NormalEquations<N> {
+    fn batch_build_normal_equations(
+        &self,
+        data: FitData<'_>,
+        params: &[f64; N],
+    ) -> NormalEquations<N> {
         NormalEquations::from_scalar_pass(self, data, params)
     }
 
     /// Batch compute chi² — the (weighted) sum of squared residuals.
     /// Default implementation calls `evaluate` per pixel. Override with SIMD under the same
     /// weighted-delegation rule as [`Self::batch_build_normal_equations`].
-    fn batch_compute_chi2(&self, data: FitData, params: &[f64; N]) -> f64 {
+    fn batch_compute_chi2(&self, data: FitData<'_>, params: &[f64; N]) -> f64 {
         self.accumulate_chi2(data, params, 0..data.len())
     }
 
     /// Fit this model to `data` by Levenberg-Marquardt, starting from `initial_params`.
-    fn fit(&self, data: FitData, initial_params: [f64; N], config: &LMConfig) -> LMResult<N> {
+    fn fit(&self, data: FitData<'_>, initial_params: [f64; N], config: &LMConfig) -> LMResult<N> {
         let mut params = initial_params;
         let mut lambda = config.initial_lambda;
         let mut converged = false;
@@ -285,13 +298,6 @@ pub(super) trait LMModel<const N: usize> {
                     converged = true;
                     break;
                 }
-                // Early exit when only position accuracy matters
-                if delta[0].abs() < config.position_convergence_threshold
-                    && delta[1].abs() < config.position_convergence_threshold
-                {
-                    converged = true;
-                    break;
-                }
 
                 // `params` moved → refresh the normal equations for the next iteration.
                 equations = self.batch_build_normal_equations(data, &params);
@@ -320,6 +326,195 @@ pub(super) trait LMModel<const N: usize> {
             chi2: prev_chi2,
             converged,
             iterations,
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use crate::stacking::star_detection::centroid::lm_optimizer::{
+        FitData, LMModel, ModelSample, NormalEquations,
+    };
+
+    /// Scalar reference for the normal equations: `J^T·J`, `J^T·r`, and `Σr²`, from a jacobian and
+    /// residuals computed by the caller.
+    ///
+    /// Ground truth in SIMD-vs-scalar validation tests, so it re-derives the symmetric fill instead
+    /// of calling [`NormalEquations::mirror_lower_triangle`] — sharing that step with the code
+    /// under test would let a bug in it pass unnoticed. Unweighted, matching the unweighted batch
+    /// paths it is compared against.
+    pub(crate) fn reference_normal_equations<const N: usize>(
+        jacobian: &[[f64; N]],
+        residuals: &[f64],
+    ) -> NormalEquations<N> {
+        let mut equations = NormalEquations::zeroed();
+        for (row, &r) in jacobian.iter().zip(residuals.iter()) {
+            equations.chi2 += r * r;
+            for i in 0..N {
+                equations.gradient[i] += row[i] * r;
+                for j in i..N {
+                    equations.hessian[i][j] += row[i] * row[j];
+                }
+            }
+        }
+        for i in 1..N {
+            for j in 0..i {
+                equations.hessian[i][j] = equations.hessian[j][i];
+            }
+        }
+        equations
+    }
+
+    /// A model's own values on a `size × size` grid of integer coordinates from 0: data the model
+    /// fits exactly at the parameters that made it.
+    #[derive(Debug)]
+    pub(crate) struct ModelStamp {
+        x: Vec<f64>,
+        y: Vec<f64>,
+        z: Vec<f64>,
+    }
+
+    impl ModelStamp {
+        pub(crate) fn of<M: LMModel<N>, const N: usize>(
+            model: &M,
+            size: usize,
+            params: &[f64; N],
+        ) -> Self {
+            let mut stamp = Self {
+                x: Vec::new(),
+                y: Vec::new(),
+                z: Vec::new(),
+            };
+            for iy in 0..size {
+                for ix in 0..size {
+                    let (x, y) = (ix as f64, iy as f64);
+                    stamp.x.push(x);
+                    stamp.y.push(y);
+                    stamp.z.push(model.evaluate(x, y, params));
+                }
+            }
+            stamp
+        }
+
+        pub(crate) fn data(&self) -> FitData<'_> {
+            FitData::unweighted(&self.x, &self.y, &self.z)
+        }
+    }
+
+    /// `model`'s batch normal equations and χ² over `stamp` at `params`, against
+    /// [`reference_normal_equations`].
+    ///
+    /// The batch path may sum in another order (vector lanes, then the lanes together). Two orders
+    /// of one sum of k terms differ by at most `2·γₖ·Σ|tᵢ|` with `γₖ = k·u / (1 − k·u)` (Higham,
+    /// *Accuracy and Stability of Numerical Algorithms*, §3.1), so each entry is held to that,
+    /// with `Σ|tᵢ|` the same equations built from `|J|` and `|r|`. Uniform weights `w` must give
+    /// `w` times the unweighted equations, through the weighted path, which bypasses the vectors.
+    pub(crate) fn assert_batch_matches_reference<M: LMModel<N>, const N: usize>(
+        model: &M,
+        stamp: &ModelStamp,
+        params: &[f64; N],
+    ) {
+        let mut jacobian = Vec::new();
+        let mut residuals = Vec::new();
+        for ((&x, &y), &z) in stamp.x.iter().zip(&stamp.y).zip(&stamp.z) {
+            let ModelSample {
+                value,
+                jacobian: row,
+            } = model.evaluate_and_jacobian(x, y, params);
+            jacobian.push(row);
+            residuals.push(z - value);
+        }
+        let reference = reference_normal_equations(&jacobian, &residuals);
+        let magnitude = reference_normal_equations(
+            &jacobian
+                .iter()
+                .map(|row| row.map(f64::abs))
+                .collect::<Vec<_>>(),
+            &residuals.iter().map(|r| r.abs()).collect::<Vec<_>>(),
+        );
+        let k = (stamp.x.len() + 2) as f64 * f64::EPSILON / 2.0;
+        let gamma = k / (1.0 - k);
+        let within = |what: &str, got: f64, want: f64, magnitude: f64| {
+            assert!(
+                (got - want).abs() <= 2.0 * gamma * magnitude,
+                "{what}: {got} vs {want} (bound {})",
+                2.0 * gamma * magnitude
+            );
+        };
+        let compare = |label: &str, batch: &NormalEquations<N>, scale: f64| {
+            within(
+                &format!("{label} χ²"),
+                batch.chi2,
+                scale * reference.chi2,
+                scale * magnitude.chi2,
+            );
+            for i in 0..N {
+                within(
+                    &format!("{label} gradient[{i}]"),
+                    batch.gradient[i],
+                    scale * reference.gradient[i],
+                    scale * magnitude.gradient[i],
+                );
+                for j in 0..N {
+                    within(
+                        &format!("{label} hessian[{i}][{j}]"),
+                        batch.hessian[i][j],
+                        scale * reference.hessian[i][j],
+                        scale * magnitude.hessian[i][j],
+                    );
+                }
+            }
+        };
+
+        compare(
+            "batch",
+            &model.batch_build_normal_equations(stamp.data(), params),
+            1.0,
+        );
+        within(
+            "batch χ² alone",
+            model.batch_compute_chi2(stamp.data(), params),
+            reference.chi2,
+            magnitude.chi2,
+        );
+        for w in [1.0, 2.0] {
+            let weights = vec![w; stamp.x.len()];
+            let weighted = FitData::new(&stamp.x, &stamp.y, &stamp.z, Some(&weights));
+            compare(
+                &format!("weight {w}"),
+                &model.batch_build_normal_equations(weighted, params),
+                w,
+            );
+        }
+    }
+
+    /// The fused Jacobian of `model` against central differences of its `evaluate`, at each of
+    /// `points`: a check independent of how either derivative was written.
+    ///
+    /// Each step is `h = ε^⅓·max(1, |p|)`, which balances the difference's truncation, `h²·|f‴|/6`,
+    /// against its rounding, `ε·|f|/h`: both come to about `ε^⅔ ≈ 4e-11` of the scale. `1e-6` of
+    /// `max(1, |f|, |J|)` leaves that four orders of magnitude.
+    pub(crate) fn assert_jacobian_matches_differences<M: LMModel<N>, const N: usize>(
+        model: &M,
+        params: &[f64; N],
+        points: &[(f64, f64)],
+    ) {
+        for &(x, y) in points {
+            let ModelSample { value, jacobian } = model.evaluate_and_jacobian(x, y, params);
+            for i in 0..N {
+                let h = f64::EPSILON.cbrt() * params[i].abs().max(1.0);
+                let (mut up, mut down) = (*params, *params);
+                up[i] += h;
+                down[i] -= h;
+                let difference =
+                    (model.evaluate(x, y, &up) - model.evaluate(x, y, &down)) / (up[i] - down[i]);
+                let scale = 1f64.max(value.abs()).max(jacobian[i].abs());
+                assert!(
+                    (difference - jacobian[i]).abs() <= 1e-6 * scale,
+                    "∂f/∂p{i} at ({x}, {y}): fused {} vs difference {difference}",
+                    jacobian[i]
+                );
+            }
         }
     }
 }

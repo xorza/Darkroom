@@ -1,7 +1,5 @@
 //! NEON SIMD implementation for 3x3 median filter on aarch64.
 
-#![allow(clippy::needless_range_loop)]
-
 use std::arch::aarch64::*;
 
 use crate::stacking::star_detection::median_filter::simd::median9_scalar;
@@ -76,7 +74,10 @@ pub(super) unsafe fn median_filter_row_neon(
 // Nine sibling lane values feeding a fixed comparator network, not a group with a name:
 // an array or struct would replace the network's named registers with indices and hand LLVM
 // an aggregate to promote back into exactly those registers.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "nine lane registers feed one comparator network"
+)]
 unsafe fn median9_neon(
     mut v0: float32x4_t,
     mut v1: float32x4_t,
@@ -93,40 +94,5 @@ unsafe fn median9_neon(
         // Only v4 (the median) is needed; the network writes the rest but they go unused.
         let _ = (v0, v1, v2, v3, v5, v6, v7, v8);
         v4
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[allow(unused_imports)]
-    use crate::stacking::star_detection::median_filter::simd::neon::*;
-
-    #[test]
-    fn neon_median_filter_row() {
-        use crate::stacking::star_detection::median_filter::simd::median_filter_row_scalar;
-
-        let width = 20;
-        let row_above: Vec<f32> = (0..width).map(|i| ((i * 3) % 100) as f32 * 0.01).collect();
-        let row_curr: Vec<f32> = (0..width).map(|i| ((i * 7) % 100) as f32 * 0.01).collect();
-        let row_below: Vec<f32> = (0..width).map(|i| ((i * 11) % 100) as f32 * 0.01).collect();
-
-        let mut output_scalar = vec![0.0f32; width];
-        let mut output_simd = vec![0.0f32; width];
-
-        median_filter_row_scalar(&row_above, &row_curr, &row_below, &mut output_scalar, width);
-
-        unsafe {
-            median_filter_row_neon(&row_above, &row_curr, &row_below, &mut output_simd, width);
-        }
-
-        for x in 1..width - 1 {
-            assert!(
-                (output_simd[x] - output_scalar[x]).abs() < 1e-5,
-                "NEON mismatch at x={}: {} vs {}",
-                x,
-                output_simd[x],
-                output_scalar[x]
-            );
-        }
     }
 }

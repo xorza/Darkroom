@@ -1,27 +1,33 @@
 //! RAW calibration front end for registered stacking.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common::CancelToken;
 
+use crate::error::FrameDimensionMismatch;
+use crate::io::cancelled::Cancelled;
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage};
 use crate::io::image::error::ImageError;
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
-use crate::io::raw;
-use crate::io::raw::demosaic::DemosaicError;
-use crate::memory;
-use crate::memory::MemoryPlan;
+use crate::memory::run_memory::RunMemory;
+use crate::memory::{
+    DECODE_TRANSIENT_FACTOR, DETECTION_WORKING_PLANES, MemoryPlan, PerFrameBytes, RunShape,
+};
 use crate::stacking::calibration_masters::CalibrationMasters;
+use crate::stacking::calibration_masters::cosmic_ray;
+use crate::stacking::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::stacking::calibration_masters::cosmic_ray::reject_cosmic_rays;
 use crate::stacking::combine::error::Error as StackError;
+use crate::stacking::frame_store::frame_stats::FrameStats;
 use crate::stacking::pipeline::align::{log_detection, register_warp_and_stack};
 use crate::stacking::pipeline::config::AlignStackConfig;
 use crate::stacking::pipeline::detector_pool::DetectorPool;
 use crate::stacking::pipeline::frame::DetectedFrame;
 use crate::stacking::pipeline::result::{AlignStackResult, Error};
-use crate::stacking::pipeline::tier::FrameTier;
+use crate::stacking::pipeline::tier::StagePlan;
+use crate::stacking::progress::stage_counter::StageCounter;
 use crate::stacking::progress::{ProgressCallback, StackingStage};
 
 /// Calibrate, align, and stack camera-RAW or mosaic-FITS light frames end to end.
@@ -49,17 +55,12 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     if light_paths.is_empty() {
         return Err(Error::NoFrames);
     }
-    config.validate()?;
+    config.validate(light_paths.len())?;
     let total = light_paths.len();
-    // Sample the machine once, here, and hand the resolved config to every stage below, so the
-    // tier decision and the decode budget are derived from the same figure. An unresolved config
-    // samples lazily and `LoadContext::default()` samples again, which can disagree.
-    let system_available = memory::available_memory();
-    let config = &config.with_resolved_memory(system_available);
-    let available = config.stack.cache.planning_memory();
-    // From the system reading, not `available`: the config's figure is a tier-planning override
-    // and must not shrink what a single FITS decode may allocate.
-    let load_context = LoadContext::new(cancel.clone(), memory::memory_budget(system_available));
+    // Sample the machine once, here, and hand the reading to every stage below, so the tier
+    // decision, the chunk sizes and the decode ceiling are derived from the same figure.
+    let memory = RunMemory::read(config.stack.cache.memory_override);
+    let load_context = memory.load_context(cancel.clone());
 
     // Peek the sensor dimensions (no decode) so the tier is decided before any frame is read.
     let frame_info =
@@ -69,27 +70,45 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
                 source: Box::new(source),
             }
         })?;
-    let plan = MemoryPlan::plan(
-        frame_info.dimensions.pixel_count() * size_of::<f32>(),
-        frame_info.demosaic.memory(frame_info.dimensions),
-        total,
-        rayon::current_num_threads(),
-        available,
+    let plane_bytes = frame_info.dimensions.pixel_count() * size_of::<f32>();
+    let demosaic = frame_info.cfa_type.demosaic_memory(frame_info.dimensions);
+    let output = ImageDimensions::new(
+        frame_info.dimensions.size(),
+        frame_info.cfa_type.num_colors(),
     );
-    let tier = FrameTier::for_plan(&plan, &config.stack.cache)?;
+    // One frame's pass peaks at the largest of: the demosaic, the cosmic-ray pass over the mosaic,
+    // and the statistics — a copy of every channel beside the demosaiced frame.
+    let cosmic_ray = config.cosmic_ray.as_ref().map_or(0, |_| {
+        plane_bytes + cosmic_ray::heap_bytes(&frame_info.cfa_type, frame_info.dimensions.size())
+    });
+    let decode = demosaic
+        .with_peak_at_least(cosmic_ray)
+        .with_peak_at_least(DECODE_TRANSIENT_FACTOR * demosaic.output_bytes);
+    let plan = MemoryPlan::plan(
+        RunShape {
+            frame_count: total,
+            decode,
+            detection_bytes: DETECTION_WORKING_PLANES * plane_bytes,
+            warp: Some(PerFrameBytes::new(plane_bytes, demosaic.output_bytes)),
+            output_bytes: config.stack.quality.resident_bytes(output),
+        },
+        rayon::current_num_threads(),
+        memory.planning(),
+    );
+    let stage = StagePlan::new(&plan, &config.stack.cache, memory)?;
 
     tracing::info!(
         frames = total,
-        available_mb = available / (1024 * 1024),
+        planning_mb = memory.planning() / (1024 * 1024),
         concurrency = plan.decode_concurrency,
-        spilling = tier.spills(),
+        spilling = stage.tier.spills(),
         "Loading, calibrating and demosaicing raw lights (RAW decode — the slow phase)"
     );
     // Bound how many frames are in flight: the RAW decode (libraw) is the one uninterruptible
     // step, so capping it caps the work a cancel must drain and peak demosaic memory. The
     // demosaic itself polls `cancel` between stages (see `CfaImage::demosaic`), so the heavy
     // phase stays interruptible at full core utilization within a batch.
-    let done = AtomicUsize::new(0);
+    let done = StageCounter::new(&progress, StackingStage::Preparing, total);
     let detected: Vec<DetectedFrame> = {
         let mut detectors =
             DetectorPool::from_config(&config.detection, plan.decode_concurrency.min(total))
@@ -97,32 +116,38 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
         detectors.try_map(light_paths, |detector, index, path| {
             // Skip launching the RAW decode (the slow uninterruptible step) once cancelled.
             if cancel.is_cancelled() {
-                return Err(Error::Stack(StackError::Cancelled));
+                return Err(Error::Cancelled);
             }
-            let image = decode_calibrate_demosaic(path.as_ref(), masters, config, &load_context)?;
+            let image = decode_calibrate_demosaic(
+                path.as_ref(),
+                masters,
+                config.cosmic_ray.as_ref(),
+                &load_context,
+            )?;
+            // Checked here, at decode, rather than after every frame has been detected: a frame
+            // from another sensor fails the run before the rest are paid for.
+            FrameDimensionMismatch::check(index, output, image.dimensions())
+                .map_err(|mismatch| Error::from(StackError::from(mismatch)))?;
             // Detect while the decoded frame is still in hand, so the spilled tier reads it back
             // once (for the warp) rather than twice.
             let result = detector.detect(&image);
-            let image = tier.hold(&format!("calib_{index}"), image)?;
-            let n = done.fetch_add(1, Ordering::Relaxed) + 1;
+            // Measured here, before interpolation correlates neighbouring pixels and would
+            // understate the frame's noise, and while the frame is in hand: a spilled frame would
+            // otherwise be read back for it.
+            let stats = FrameStats::measure(&image);
+            let image = stage.tier.hold(&format!("calib_{index}"), image)?;
+            let n = done.complete_one();
             log_detection(n, total, &result);
-            progress.report(n, total, StackingStage::Preparing);
             Ok(DetectedFrame {
                 image,
                 stars: result.stars,
                 diagnostics: result.diagnostics,
+                stats,
             })
         })
     }?;
 
-    register_warp_and_stack(
-        detected,
-        config,
-        tier,
-        plan.warp_concurrency,
-        progress,
-        cancel,
-    )
+    register_warp_and_stack(detected, config, stage, progress, cancel)
 }
 
 /// Load one raw light, apply the calibration masters, optionally reject cosmic rays, and
@@ -130,13 +155,13 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
 fn decode_calibrate_demosaic(
     path: &Path,
     masters: &CalibrationMasters,
-    config: &AlignStackConfig,
+    cosmic_ray: Option<&CosmicRayConfig>,
     context: &LoadContext,
 ) -> Result<LinearImage, Error> {
     let mut cfa = match CfaImage::from_file(path, context) {
         Ok(image) => image,
         Err(ImageError::Cancelled { .. }) => {
-            return Err(Error::Stack(StackError::Cancelled));
+            return Err(Error::Cancelled);
         }
         Err(source) => {
             return Err(Error::Load {
@@ -146,25 +171,17 @@ fn decode_calibrate_demosaic(
         }
     };
     masters.calibrate(&mut cfa)?;
-    if let Some(cr) = &config.cosmic_ray {
+    if let Some(cosmic_ray) = cosmic_ray {
         // Dispatched per CFA type inside `reject_cosmic_rays` (mono / Bayer-deinterleave /
-        // X-Trans same-color). Only an unlabeled frame is skipped — its pattern is unknown, so any
-        // same-color/Laplacian stencil could corrupt a mislabeled mosaic.
-        match &cfa.metadata.cfa_type {
-            Some(_) => {
-                let removed = reject_cosmic_rays(&mut cfa, cr);
-                tracing::info!(removed, "rejected cosmic rays");
-            }
-            None => tracing::warn!("frame has no CFA pattern; skipping cosmic-ray rejection"),
-        }
+        // X-Trans same-color).
+        let removed =
+            reject_cosmic_rays(&mut cfa, cosmic_ray).map_err(|source| Error::CosmicRay {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        tracing::info!(removed, "rejected cosmic rays");
     }
     // Demosaic is the other heavy step; it polls `cancel` internally and bails mid-pass.
     cfa.demosaic(&context.cancel)
-        .map_err(|source| match source {
-            DemosaicError::Cancelled => Error::Stack(StackError::Cancelled),
-            DemosaicError::InvalidXTransPattern(source) => Error::Load {
-                path: path.to_path_buf(),
-                source: Box::new(raw::raw_err(path, source.to_string())),
-            },
-        })
+        .map_err(|Cancelled| Error::Cancelled)
 }

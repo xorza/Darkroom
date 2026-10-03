@@ -1,12 +1,12 @@
 //! Live peak-RSS memory probe for the star-detection pipeline — the manual, at-scale counterpart to
-//! the deterministic guard in `mem_budget_tests`.
+//! the deterministic guard in `mem_budget`.
 //!
 //! Detects stars across a stream of synthetic frames through one reused [`StarDetector`] and
 //! *watches* peak heap. The point it demonstrates: because the detector recycles its image-sized
-//! scratch through a [`DetectionResources`], peak heap is bounded by *one* detection's working set plus the
-//! few frames kept resident — **flat in the frame count**, not linear. It holds only a small ring of
-//! frames in RAM and detects them round-robin, so if a stage leaked a buffer per frame, peak heap
-//! would climb with the frame count and blow the ceiling this test asserts.
+//! scratch through a [`DetectionResources`], peak heap is bounded by *one* detection's working set
+//! plus the few frames kept resident — **flat in the frame count**, not linear. It holds only a
+//! small ring of frames in RAM and detects them round-robin, so if a stage leaked a buffer per
+//! frame, peak heap would climb with the frame count and blow the ceiling this test asserts.
 //!
 //! `#[ignore]`d because it's heavy and measurement-only: peak RSS is a per-process high-water mark,
 //! so run **one config per process** with a filter, exactly like the benches:
@@ -38,24 +38,20 @@
 //! unavailable and the assertion is skipped.
 
 use crate::math::size2us::Size2us;
+use std::env;
 use std::io::{self, Write};
 use std::time::Instant;
 
 use crate::io::image::linear::LinearImage;
+use crate::memory::DETECTION_WORKING_PLANES;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::mem_probe::{MB, RssSampler, env_parse, measured, two_x_ceiling_mb};
 use crate::testing::synthetic::fixtures::star_field;
 
-/// Generous upper bound on the detector's per-detection working set, in image-sized f32 planes:
-/// the pooled f32 scratch, plus the bitmasks and label map counted as their f32-equivalent, plus
-/// slack for transient (non-pooled) allocations. Used only to size the peak-heap ceiling; the exact
-/// pool footprint is pinned in `mem_budget_tests`.
-const WORKING_SET_PLANES: u64 = 12;
-
 fn preset_config() -> Config {
-    match std::env::var("LUMOS_SD_PRESET").ok().as_deref() {
-        None | Some("") | Some("default") => Config::default(),
+    match env::var("LUMOS_SD_PRESET").ok().as_deref() {
+        None | Some("" | "default") => Config::default(),
         Some("wide") => Config::wide_field(),
         Some("high_res") => Config::high_resolution(),
         Some("crowded") => Config::crowded_field(),
@@ -78,7 +74,7 @@ fn detect_memory_probe() {
     let reuse = env_parse("LUMOS_SD_REUSE", 1) != 0;
     let config = preset_config();
 
-    let plane_bytes = (width * height * std::mem::size_of::<f32>()) as u64;
+    let plane_bytes = (width * height * size_of::<f32>()) as u64;
 
     println!("=== lumos star-detection memory probe ===");
     println!(
@@ -86,7 +82,7 @@ fn detect_memory_probe() {
     );
     println!(
         "preset        {}",
-        std::env::var("LUMOS_SD_PRESET").unwrap_or_else(|_| "default".into())
+        env::var("LUMOS_SD_PRESET").unwrap_or_else(|_| "default".into())
     );
     println!(
         "detector      {}",
@@ -101,8 +97,8 @@ fn detect_memory_probe() {
         plane_bytes as f64 / MB as f64
     );
 
-    // Render the resident ring once. These are the only frames held in RAM for the whole run, so the
-    // resident-set contribution to peak heap is `ring` frames — independent of `n`.
+    // Render the resident ring once. These are the only frames held in RAM for the whole run, so
+    // the resident-set contribution to peak heap is `ring` frames — independent of `n`.
     let gen_start = Instant::now();
     let frames: Vec<LinearImage> = (0..ring)
         .map(|i| star_field(Size2us::new(width, height), stars, seed ^ i as u64).image)
@@ -145,14 +141,18 @@ fn detect_memory_probe() {
             i + 1,
             (i + 1) as f64 / secs.max(1e-3)
         );
+        #[expect(
+            clippy::unused_result_ok,
+            reason = "a progress line that fails to flush costs the probe nothing"
+        )]
         io::stdout().flush().ok();
     }
     let total_secs = start.elapsed().as_secs_f64();
 
     let peak = sampler.finish();
-    let anon_mb = peak.anon_mb;
-    let steady_mb = peak.gated_anon_mb;
-    let total_mb = peak.total_mb;
+    let anon_mb = peak.anon;
+    let steady_mb = peak.gated_anon;
+    let total_mb = peak.total;
     let mpix = (width * height * n) as f64 / 1e6;
 
     println!("\n");
@@ -177,7 +177,8 @@ fn detect_memory_probe() {
     // plus a fixed baseline for the process (allocator, rendered ring is already in `resident`). If
     // detection leaked a buffer per frame, peak heap would scale with `n` and overrun this. A
     // generous 2× headroom absorbs allocator fragmentation and the sampler's coarse 2 ms cadence.
-    let working_set_bytes = WORKING_SET_PLANES * plane_bytes;
+    // The planner's charge for one detection's pool; the 2× headroom covers its transients.
+    let working_set_bytes = DETECTION_WORKING_PLANES as u64 * plane_bytes;
     let ceiling_mb = two_x_ceiling_mb(resident_bytes, working_set_bytes);
 
     if measured(anon_mb, "ceiling check") {

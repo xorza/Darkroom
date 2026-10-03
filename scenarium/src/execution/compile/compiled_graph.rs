@@ -7,19 +7,25 @@
 //! Mutable state is split between the per-run schedule/executor and the
 //! cross-run runtime cache.
 //!
-//! Self-contained: everything a run needs was copied out of the [`Library`](crate::library::Library)
-//! at compile, so nothing here refers to one.
+//! Self-contained: everything a run needs was copied out of the
+//! [`Library`](crate::library::Library) at compile, so nothing here refers to one.
 //!
 //! **One authored node, one execution node, one [`NodeId`].** Nothing splits or
 //! merges on the way in, so resolving an authored id against the artifact is a
 //! search of the id column it already carries rather than a lookup through a
 //! table beside it.
 
+use std::sync::Arc;
+
+use crate::data::codec::Codecs;
 use crate::graph::identity::FuncId;
 
 use crate::containers::column::{Column, Span};
 use crate::execution::compile::consumer_cone::ConsumerCone;
-use crate::execution::identity::{EventIdx, InputIdx, NodeIdx, OutputAddr, OutputIdx};
+use crate::execution::identity::{
+    EventIdx, InputIdx, NodeIdx, OutputAddr, OutputIdx, SubscriberIdx,
+};
+use crate::execution::schedule::NodeState;
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::lambda::FuncLambda;
@@ -27,6 +33,7 @@ use crate::graph::identity::NodeId;
 use crate::graph::node::CacheMode;
 use crate::graph::node::special::SpecialNode;
 use crate::{ConstValue, DataType};
+use std::ops::Index;
 
 #[derive(Clone, Debug, Default)]
 pub(crate) enum ExecutionBinding {
@@ -42,11 +49,28 @@ pub(crate) struct ExecutionInput {
     /// Whether a bound value's filesystem referent contributes to this input's digest.
     pub stamps_fs_path: bool,
     pub binding: ExecutionBinding,
+    /// The input of the same node declared to override this one
+    /// ([`FuncInput::overrides`](crate::FuncInput::overrides)), resolved to its
+    /// place in the input column.
+    pub overridden_by: Option<InputIdx>,
 }
 
-#[derive(Default, Debug)]
+impl ExecutionInput {
+    /// Whether this input hands its node a value this run: a constant other
+    /// than the explicit `Null`, or a bind to a producer that runs.
+    pub(crate) fn delivers(&self, states: &Column<NodeIdx, NodeState>) -> bool {
+        match &self.binding {
+            ExecutionBinding::None | ExecutionBinding::Const(ConstValue::Null) => false,
+            ExecutionBinding::Const(_) => true,
+            ExecutionBinding::Bind(addr) => states[addr.node_idx].is_runnable(),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub(crate) struct ExecutionEvent {
-    pub subscribers: Vec<NodeIdx>,
+    /// This event's run in [`CompiledGraph::subscribers`].
+    pub subscribers: Span<SubscriberIdx>,
     pub lambda: EventLambda,
 }
 
@@ -58,7 +82,7 @@ pub(crate) struct ExecutionEvent {
 /// id sort settled before it. Everything here is `Copy` but the lambda, and that
 /// is an `Arc`, so taking one off a declaration is a refcount bump and the
 /// library stays readable behind it — which is what `Clone` is for.
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub(crate) struct ExecutionNode {
     pub sink: bool,
     /// The authoring node is disabled. Ambient planning excludes it; an
@@ -111,6 +135,8 @@ pub struct CompiledGraph {
     pub(crate) node_ids: Column<NodeIdx, NodeId>,
     pub(crate) inputs: Column<InputIdx, ExecutionInput>,
     pub(crate) events: Column<EventIdx, ExecutionEvent>,
+    /// Every event's subscribers, one event's run after another.
+    pub(crate) subscribers: Column<SubscriberIdx, NodeIdx>,
     /// Each node's resolved declared output types (wildcards followed), packed
     /// in the same index space as the plan's output columns. Resolved by the
     /// lowering walk and copied here slot for slot, so the artifact is
@@ -118,9 +144,12 @@ pub struct CompiledGraph {
     /// (an output-signature change re-keys). An unresolved wildcard port is
     /// `DataType::Any`. Its length is the artifact's total output count.
     pub(crate) outputs: Column<OutputIdx, DataType>,
+    /// The library's disk codecs when this was compiled, which the cache
+    /// encodes and decodes this program's values with.
+    pub(crate) codecs: Arc<Codecs>,
 }
 
-impl std::ops::Index<NodeIdx> for CompiledGraph {
+impl Index<NodeIdx> for CompiledGraph {
     type Output = ExecutionNode;
 
     fn index(&self, index: NodeIdx) -> &ExecutionNode {
@@ -173,6 +202,18 @@ impl CompiledGraph {
             .collect()
     }
 
+    /// Whether `input` is set aside this run because the input that overrides
+    /// it delivers. A set-aside input is delivered and digested as unbound.
+    pub(crate) fn overridden(
+        &self,
+        input: &ExecutionInput,
+        states: &Column<NodeIdx, NodeState>,
+    ) -> bool {
+        input
+            .overridden_by
+            .is_some_and(|by| self.inputs[by].delivers(states))
+    }
+
     pub(crate) fn output_idx(&self, address: OutputAddr) -> OutputIdx {
         self[address.node_idx].outputs.nth(address.port_idx)
     }
@@ -180,9 +221,32 @@ impl CompiledGraph {
 
 #[cfg(any(test, feature = "internals"))]
 pub(crate) mod internals {
+    use crate::containers::column::Span;
     use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionNode};
     use crate::execution::identity::NodeIdx;
-    use crate::graph::identity::NodeId;
+    use crate::graph::func::FuncBehavior;
+    use crate::graph::func::lambda::FuncLambda;
+    use crate::graph::identity::{FuncId, NodeId};
+    use crate::graph::node::CacheMode;
+
+    impl ExecutionNode {
+        /// An enabled, impure, uncached node with no ports, no func id yet and
+        /// a body that does nothing — what a hand-built fixture starts from.
+        pub(crate) fn bare() -> Self {
+            Self {
+                sink: false,
+                disabled: false,
+                behavior: FuncBehavior::Impure,
+                cache: CacheMode::None,
+                special: None,
+                inputs: Span::default(),
+                outputs: Span::default(),
+                events: Span::default(),
+                func_id: FuncId::nil(),
+                lambda: FuncLambda::stub(),
+            }
+        }
+    }
 
     impl CompiledGraph {
         /// Append one node, assigning the next dense index — the fixture form
@@ -202,17 +266,25 @@ pub(crate) mod internals {
             self.e_nodes.push(e_node);
             node_idx
         }
-    }
-}
 
-#[cfg(test)]
-mod id_lookups {
-    use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionNode};
-    use crate::graph::identity::NodeId;
+        /// A program of portless nodes under `node_ids` — enough for a host
+        /// test that only resolves authored ids against a program. Sorted on
+        /// the way in, like the real walk.
+        pub fn bare(node_ids: impl IntoIterator<Item = NodeId>) -> CompiledGraph {
+            let mut node_ids: Vec<NodeId> = node_ids.into_iter().collect();
+            node_ids.sort_unstable();
+            let mut compiled = CompiledGraph::default();
+            for node_id in node_ids {
+                compiled.push(node_id, ExecutionNode::bare());
+            }
+            compiled
+        }
+    }
 
     /// Id lookups for a unit test that stood a program up by hand and knows its
     /// nodes by the ids it gave them. Production paths carry `NodeIdx`, so
     /// nothing outside a test pays the search.
+    #[cfg(test)]
     impl CompiledGraph {
         pub(crate) fn by_id(&self, id: NodeId) -> &ExecutionNode {
             &self[self.node(id).expect("the fixture placed this node")]

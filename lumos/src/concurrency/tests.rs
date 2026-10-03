@@ -1,3 +1,5 @@
+use std::hint;
+use std::mem;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier};
 
@@ -57,7 +59,7 @@ fn wait_for_failure(failed: &AtomicBool) {
         if failed.load(Ordering::SeqCst) {
             return;
         }
-        std::hint::spin_loop();
+        hint::spin_loop();
     }
 }
 
@@ -97,7 +99,7 @@ fn limited_map_accepts_empty_input() {
 #[test]
 #[should_panic(expected = "max_concurrent must be positive")]
 fn limited_map_rejects_zero_concurrency() {
-    let _ = try_par_map_limited(&[1], 0, |_index, value| Ok::<_, ()>(*value));
+    let _refused = try_par_map_limited(&[1], 0, |_index, value| Ok::<_, ()>(*value));
 }
 
 #[test]
@@ -110,7 +112,7 @@ fn owned_map_indexes_by_input_position_and_carries_a_slot_between_items() {
     let result = try_par_map_bounded_owned(items, &mut slots, |slot, index, value| {
         // The slot arrives holding whatever this worker last left in it, which is the whole point:
         // it outlives the item, unlike anything the closure could build per call.
-        let carried = std::mem::replace(slot, value.clone());
+        let carried = mem::replace(slot, value.clone());
         Ok::<_, ()>(format!("{index}:{value}:{carried}"))
     });
 

@@ -11,7 +11,6 @@
 
 use std::f32::consts::{FRAC_PI_4, PI};
 
-use palantir::FontFamily;
 use palantir::prelude::*;
 use scenarium::{CacheMode, NodeId};
 
@@ -28,19 +27,20 @@ use crate::gui::pane::graph::paint::inspector::{InspectMode, inspect_badge_wid};
 use crate::gui::requests::Requests;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
-use crate::gui::widgets::badge::{BADGE_FONT, BADGE_SIZE, Badge};
+use crate::gui::widgets::badge::{BADGE_SIZE, Badge};
 use crate::gui::widgets::format::fmt_elapsed;
 use crate::gui::widgets::inline_rename::InlineRename;
 use crate::gui::widgets::port_glyph::PortGlyph;
 use crate::gui::widgets::support::{
-    CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y, header_background, hspacer, play_triangle,
+    CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y, ROW_GAP, header_background, hspacer, mono_text,
+    play_triangle,
 };
 
 /// Character cap for a node title in the inline rename editor.
 const NODE_NAME_MAX_CHARS: usize = 32;
 
-/// Width floor for the run-time label, ~7 mono glyphs at [`BADGE_FONT`]. The
-/// range this covers is pinned by `format::tests`.
+/// Width floor for the run-time label, ~7 mono glyphs at the label tier. The
+/// range this covers is pinned by `every_run_time_fits_the_reserved_width`.
 ///
 /// The node is `Hug` above a min width, so anything that changes the
 /// header's measured width moves the node's right edge — and with it the
@@ -50,15 +50,27 @@ const NODE_NAME_MAX_CHARS: usize = 32;
 /// changes (`9.99s` → `10.00s`, `999.9ms` → `1.00s`). That is not an
 /// `UndoStep`, so nothing requests the settle pass that would hide it.
 ///
-/// A floor rather than a fixed width: every value up to `999.99s` fits
+/// A floor rather than a fixed width: every value up to `999999s` fits
 /// inside it and measures identically, and the rare longer one still
 /// renders rather than clipping. Generous on purpose — costing a few px
 /// of header is cheaper than being one glyph short of the common case.
 const RUN_TIME_MIN_WIDTH: f32 = 52.0;
 
+/// The run-time label's style: label-tier mono, in the status colour.
+fn run_time_style(ui: &Ui, theme: &Theme, color: RgbaF32) -> TextStyle {
+    TextStyle {
+        color,
+        ..mono_text(ui, theme.text.label)
+    }
+}
+
+/// The status row's bottom padding: tight, so the row reads as part of the
+/// header block rather than of the port rows below it.
+const STATUS_ROW_PAD_BOTTOM: f32 = 2.0;
+
 /// One whole-node event-subscription pin: an event-colored triangle behind
 /// the node's top-left corner, its apex pointing up-left toward the
-/// incoming wire. Recorded by `NodeUI::draw_one` immediately *before* its
+/// incoming wire. Recorded by `NodeWidget::show` immediately *before* its
 /// node's body, so it peeks out from behind the corner while keeping the
 /// node stack's paint order (above lower nodes, below raised ones) and the
 /// cull decision. The `port_glyph::HIT_SCALE`-grown box is centered on the corner
@@ -75,14 +87,17 @@ pub(super) fn subscription_pin(ui: &mut Ui, theme: &Theme, node: NodeCtx<'_>, ho
     // left — plus a quarter, aiming it up-left along the wire arriving from
     // there. Placed by its grown box's center rather than in flow, so it
     // straddles the node's top-left corner.
-    PortGlyph::arrow(subscription_glyph_wid(node.id), theme.ports.size)
-        .turn(PI + FRAC_PI_4)
-        .fill(event_color(theme, hovered))
-        .centered_on(node.pos)
-        .tip(Some(
-            "Event subscription — drag to an emitter, or drop an event wire here",
-        ))
-        .show(ui);
+    PortGlyph::arrow(
+        subscription_glyph_wid(node.id),
+        theme.ports.size,
+        event_color(theme, hovered),
+    )
+    .turn(PI + FRAC_PI_4)
+    .centered_on(node.pos)
+    .tip(Some(
+        "Event subscription — drag to an emitter, or drop an event wire here",
+    ))
+    .show(ui);
 }
 
 /// Stable id for a node's event-subscription pin. Keyed on the node (a
@@ -107,13 +122,13 @@ pub(super) fn header(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut 
     // The header sits inside the body's border stroke (the layout folds
     // the stroke width into the body's padding), so it must round to the
     // stroke's *inner* radius, not the card's outer `corner_radius` —
-    // see `Theme::card_inner_radius`.
+    // see `CardTheme::inner_radius`.
     let r = theme.card.inner_radius();
     Panel::hstack()
         .id_salt("header")
         .size((Sizing::FILL, Sizing::HUG))
         .padding(Spacing::xy(CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y))
-        .gap(4.0)
+        .gap(ROW_GAP)
         .child_align(Align::v(VAlign::Center))
         .background(header_background(theme, r))
         .show(ui, |ui| {
@@ -181,10 +196,15 @@ pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
     Panel::hstack()
         .id_salt("status_row")
         .size((Sizing::FILL, Sizing::HUG))
-        // Extra top padding sets the controls off from the header bar (the body
-        // vstack has no gap between rows). Order: left, top, right, bottom.
-        .padding(Spacing::new(8.0, 7.0, 8.0, 2.0))
-        .gap(4.0)
+        // The header's padding, so the row's edges line up with the title's;
+        // the bottom stays tight against the port rows below.
+        .padding(Spacing::new(
+            CARD_HEADER_PAD_X,
+            CARD_HEADER_PAD_Y,
+            CARD_HEADER_PAD_X,
+            STATUS_ROW_PAD_BOTTOM,
+        ))
+        .gap(ROW_GAP)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
             // Last-run time leads the row, tied to the node's status color —
@@ -202,18 +222,13 @@ pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
                 // so glow + spin + ticking time read as one "running" cue.
                 if matches!(node.exec_status(), ExecStatus::Running(_)) {
                     Spinner::new()
-                        .diameter(BADGE_FONT)
+                        .diameter(theme.text.label)
                         .color(color)
                         .show(ui);
                 }
                 let elapsed = fmt!(ui, "{}", fmt_elapsed(secs));
                 Text::new(elapsed)
-                    .style(&TextStyle {
-                        color,
-                        font_size_px: BADGE_FONT,
-                        family: FontFamily::MONO,
-                        ..ui.theme().text
-                    })
+                    .style(&run_time_style(ui, theme, color))
                     .min_size((RUN_TIME_MIN_WIDTH, 0.0))
                     .show(ui);
             }
@@ -371,9 +386,8 @@ fn property_chip(
 /// hover-lifted tint), but the glyph is the SDF play triangle rather than
 /// a font glyph, echoing the ports' triangle vocabulary and staying
 /// optically centered at any zoom. Quiet at rest — muted ink like the
-/// other idle controls — and takes the palette's success green
-/// (`exec_executed_glow`) on hover: "go", pointing at the outcome the
-/// click delivers.
+/// other idle controls — and takes the success green (`status.success`) on
+/// hover: "go", pointing at the outcome the click delivers.
 ///
 /// Reports its own click, like every other chip in this file: the widget is
 /// built here, so its response is read here rather than rediscovered by a
@@ -412,9 +426,8 @@ fn title(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
     // Borrowed straight off the node: an interned handle is only valid
     // within the record pass that minted it, and the widget reads the
     // name back on the label⇄editor swap to seed the draft.
-    let ev = InlineRename::new(node.name())
+    let ev = InlineRename::new(node.name(), &ncx.theme().inline_rename_title)
         .id(id)
-        .style(&ncx.theme().inline_rename_title)
         .max_chars(NODE_NAME_MAX_CHARS)
         .show(ui);
     if ev.clicked {
@@ -431,6 +444,7 @@ fn title(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
 #[cfg(test)]
 mod tests {
     use scenarium::{CacheMode, NodeId};
+    use std::mem;
 
     use crate::core::document::harness::DocFixture;
     use crate::core::edit::graph_intent::GraphIntent;
@@ -439,6 +453,44 @@ mod tests {
     use crate::gui::app::commands::run::RunCommand;
     use crate::gui::pane::graph::harness::CanvasHarness;
     use crate::gui::pane::graph::node::wid;
+    use crate::gui::theme::Theme;
+    use crate::gui::widgets::format::fmt_elapsed;
+
+    /// Every run time `fmt_elapsed` writes, from each unit's smallest to its
+    /// widest, fits the floor the label reserves — measured with real shaping
+    /// in the label's own style, so neither side can drift alone.
+    #[test]
+    fn every_run_time_fits_the_reserved_width() {
+        use glam::UVec2;
+        use palantir::internals::UiHarness;
+        use palantir::{Configure, RgbaF32, Text, WidgetId};
+
+        use crate::gui::pane::graph::node::header::{RUN_TIME_MIN_WIDTH, run_time_style};
+
+        let secs = [
+            0.0, 999.4e-6, 999.94e-3, 9.994, 99.999, 999.994, 999.996, 9_999.96, 999_999.0,
+        ];
+        let theme = Theme::default();
+        let mut h = UiHarness::with_text(UVec2::new(800, 200));
+        let id = |i: usize| WidgetId::from_hash(("run_time", i));
+        h.frame(|ui| {
+            for (i, &s) in secs.iter().enumerate() {
+                let style = run_time_style(ui, &theme, RgbaF32::WHITE);
+                Text::new(fmt_elapsed(s).to_string())
+                    .id(id(i))
+                    .style(&style)
+                    .show(ui);
+            }
+        });
+        for (i, &s) in secs.iter().enumerate() {
+            let width = h.rect(id(i)).expect("label arranged").size.w;
+            assert!(
+                width <= RUN_TIME_MIN_WIDTH,
+                "{} is {width} px wide, past the {RUN_TIME_MIN_WIDTH} px floor",
+                fmt_elapsed(s),
+            );
+        }
+    }
 
     /// What one click on a chip raised, in the two tiers it can reach.
     #[derive(Debug)]
@@ -462,7 +514,7 @@ mod tests {
         ChipClick {
             node_id,
             intents,
-            commands: std::mem::take(&mut h.commands),
+            commands: mem::take(&mut h.commands),
         }
     }
 

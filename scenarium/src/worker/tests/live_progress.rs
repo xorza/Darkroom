@@ -1,12 +1,12 @@
 use super::*;
 
 /// A run's progress reaches the host as it happens: the install first, then
-/// the switch to `Executing`, then one `Running` and one `Executed` patch
-/// for the node, and only then the completion.
-#[tokio::test(flavor = "multi_thread")]
+/// the switch to `Executing`, then the node's start and its success, and only
+/// then the completion.
+#[tokio::test]
 async fn node_patches_stream_before_completion() {
     let mut w = TestWorker::printing("hi");
-    let compiled = w.compile();
+    let compiled = w.graph.program();
     let print = w.id("Print");
     w.send_many([
         WorkerMessage::Update {
@@ -34,37 +34,28 @@ async fn node_patches_stream_before_completion() {
                 );
                 installed = true;
             }
-            WorkerReport::Status(status)
-                if status.kind == WorkerStatusKind::Activity
-                    && status.activity == WorkerActivity::Executing =>
-            {
+            WorkerReport::Activity(WorkerActivity::Executing) => {
                 assert!(installed, "execution started before installation");
                 assert!(!execution_started, "execution started more than once");
                 execution_started = true;
             }
-            WorkerReport::Status(status) if status.kind == WorkerStatusKind::Patch => {
-                assert!(execution_started, "node patch arrived before execution");
-                assert_eq!(status.activity, WorkerActivity::Executing);
-                for node in &status.nodes {
-                    assert_eq!(node.node_id, print, "status maps to the node");
-                    assert!(compiled.contains(node.node_id));
-                    match node.status {
-                        Some(NodeExecutionStatus::Running { .. }) => started += 1,
-                        Some(NodeExecutionStatus::Executed { .. }) => node_finished += 1,
-                        ref unexpected => panic!("unexpected live node status: {unexpected:?}"),
-                    }
+            WorkerReport::Progress { node_id, phase } => {
+                assert!(execution_started, "node progress arrived before execution");
+                assert_eq!(node_id, print, "progress names the node");
+                match phase {
+                    RunPhase::Started { .. } => started += 1,
+                    RunPhase::Succeeded { .. } => node_finished += 1,
+                    RunPhase::Failed { .. } => panic!("the node failed"),
                 }
             }
-            WorkerReport::Status(status)
-                if matches!(status.kind, WorkerStatusKind::Completed { .. }) =>
-            {
+            WorkerReport::Completed(summary) => {
                 assert!(installed, "completion arrived before installation");
-                assert_eq!(status.activity, WorkerActivity::Idle);
-                assert_eq!(started, 1, "one running update before completion");
-                assert_eq!(node_finished, 1, "one executed update before completion");
+                assert_eq!(summary.activity, WorkerActivity::Idle);
+                assert_eq!(started, 1, "one start before completion");
+                assert_eq!(node_finished, 1, "one success before completion");
                 break;
             }
-            WorkerReport::Status(status) => panic!("unexpected worker status: {status:?}"),
+            WorkerReport::Activity(activity) => panic!("unexpected activity: {activity:?}"),
             WorkerReport::Cleared => panic!("unexpected clear"),
             WorkerReport::Error(error) => panic!("unexpected worker error: {error}"),
         }
@@ -76,13 +67,13 @@ async fn node_patches_stream_before_completion() {
 
 /// A → B with trivial sync lambdas, which give the run future no suspension
 /// point of their own: nothing but direct reporting can get their progress
-/// out mid-run. B records how many node-status patch entries the host
-/// callback has already seen — A's `Running` and `Executed` *and* B's own
-/// `Running` must all have reached the host by the time B's lambda runs.
+/// out mid-run. B records how many progress reports the host callback has
+/// already seen — A's start and success *and* B's own start must all have
+/// reached the host by the time B's lambda runs.
 ///
 /// The callback itself is the subject here, so this one wires a raw
 /// [`Worker`] rather than going through the harness.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn live_patches_reach_the_host_before_downstream_nodes_run() {
     let patch_entries = Arc::new(AtomicU64::new(0));
     let seen_by_second = Arc::new(AtomicU64::new(u64::MAX));
@@ -105,16 +96,18 @@ async fn live_patches_reach_the_host_before_downstream_nodes_run() {
             }))
     });
     graph.wire("first", 0, "second", 0);
-    let compiled = TestWorker::over(graph).compile();
+    let compiled = graph.program();
 
     let entries = Arc::clone(&patch_entries);
     let (tx, mut rx) = mpsc::unbounded_channel::<WorkerReport>();
     let worker = Worker::new(move |report| {
-        if let WorkerReport::Status(status) = &report
-            && status.kind == WorkerStatusKind::Patch
-        {
-            entries.fetch_add(status.nodes.len() as u64, Ordering::SeqCst);
+        if let WorkerReport::Progress { .. } = &report {
+            entries.fetch_add(1, Ordering::SeqCst);
         }
+        #[expect(
+            clippy::unused_result_ok,
+            reason = "a report sent during teardown has no reader"
+        )]
         tx.send(report).ok();
     });
     worker
@@ -126,17 +119,15 @@ async fn live_patches_reach_the_host_before_downstream_nodes_run() {
             .await
             .expect("worker timed out")
             .expect("worker channel closed");
-        if let WorkerReport::Status(status) = report
-            && matches!(status.kind, WorkerStatusKind::Completed { .. })
-        {
+        if let WorkerReport::Completed(_) = report {
             break;
         }
     }
     assert_eq!(
         seen_by_second.load(Ordering::SeqCst),
         3,
-        "the first node's Running and Executed patches, and the second's own Running, must \
-         reach the host before the second node's lambda runs"
+        "the first node's start and success, and the second's own start, must reach the host \
+         before the second node's lambda runs"
     );
 }
 
@@ -148,9 +139,9 @@ async fn activity_is_reported_absolutely_and_in_order() {
 
     let mut activities = Vec::new();
     while activities.last() != Some(&WorkerActivity::EventLoop) {
-        let status = w.status().await;
-        if activities.last() != Some(&status.activity) {
-            activities.push(status.activity);
+        let activity = w.activity().await;
+        if activities.last() != Some(&activity) {
+            activities.push(activity);
         }
     }
     assert_eq!(
@@ -159,10 +150,5 @@ async fn activity_is_reported_absolutely_and_in_order() {
     );
 
     w.settle([WorkerMessage::StopEventLoop]).await;
-    loop {
-        let status = w.status().await;
-        if status.kind == WorkerStatusKind::Activity && status.activity == WorkerActivity::Idle {
-            break;
-        }
-    }
+    while w.activity().await != WorkerActivity::Idle {}
 }

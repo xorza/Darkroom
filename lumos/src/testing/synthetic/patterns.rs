@@ -1,34 +1,12 @@
-//! Simple test patterns for benchmarks and tests.
-//!
-//! Provides basic image patterns like gradients, uniform fills, and checkerboards
-//! that are commonly needed in benchmarks and tests.
+//! Simple test patterns for benchmarks and tests: gradients, noise, and a synthetic linear master.
 
 use imaginarium::Buffer2;
 
+use crate::io::image::image_dimensions::ImageDimensions;
+use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use crate::testing::TestRng;
-
-/// Create a uniform image filled with a single value.
-pub(crate) fn uniform(size: Size2us, value: f32) -> Buffer2<f32> {
-    Buffer2::new_filled(size.width, size.height, value)
-}
-
-/// Create a horizontal gradient from left to right.
-pub(super) fn horizontal_gradient(size: Size2us, left: f32, right: f32) -> Buffer2<f32> {
-    let mut pixels = vec![0.0f32; size.pixel_count()];
-    for y in 0..size.height {
-        for x in 0..size.width {
-            let t = if size.width > 1 {
-                x as f32 / (size.width - 1) as f32
-            } else {
-                0.5
-            };
-            pixels[size.index_of(Vec2us::new(x, y))] = left + t * (right - left);
-        }
-    }
-    Buffer2::new(size.width, size.height, pixels)
-}
+use crate::testing::test_rng::TestRng;
 
 /// Create a diagonal gradient for interpolation testing.
 ///
@@ -43,30 +21,26 @@ pub(crate) fn diagonal_gradient(size: Size2us) -> Buffer2<f32> {
     Buffer2::new(size.width, size.height, pixels)
 }
 
-/// Create a checkerboard pattern.
-///
-/// Useful for phase correlation and registration tests.
-pub(super) fn checkerboard(
-    size: Size2us,
-    cell_size: usize,
-    value_a: f32,
-    value_b: f32,
-) -> Buffer2<f32> {
+/// A horizontal gradient from `left` at the first column to `right` at the last.
+pub(crate) fn horizontal_gradient(size: Size2us, left: f32, right: f32) -> Buffer2<f32> {
     let mut pixels = vec![0.0f32; size.pixel_count()];
     for y in 0..size.height {
         for x in 0..size.width {
-            let checker = ((x / cell_size) + (y / cell_size)) % 2;
-            pixels[size.index_of(Vec2us::new(x, y))] = if checker == 0 { value_a } else { value_b };
+            let t = if size.width > 1 {
+                x as f32 / (size.width - 1) as f32
+            } else {
+                0.5
+            };
+            pixels[size.index_of(Vec2us::new(x, y))] = left + t * (right - left);
         }
     }
     Buffer2::new(size.width, size.height, pixels)
 }
 
-/// Add deterministic Gaussian noise to a pixel slice.
+/// Add seeded Gaussian noise of a constant `sigma` to a pixel slice — for a fixture that wants one
+/// fixed noise level. The sensor's own signal-dependent noise is [`render`]'s, through `noise`.
 ///
-/// Uses Box-Muller transform via `TestRng::next_gaussian_f32()`.
-/// This is the canonical noise helper — all test code should use this
-/// instead of reimplementing Gaussian noise locally.
+/// [`render`]: crate::testing::synthetic::observe::render
 pub(crate) fn add_gaussian_noise(pixels: &mut [f32], sigma: f32, seed: u64) {
     let mut rng = TestRng::new(seed);
     for p in pixels.iter_mut() {
@@ -74,35 +48,29 @@ pub(crate) fn add_gaussian_noise(pixels: &mut [f32], sigma: f32, seed: u64) {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::testing::synthetic::patterns::*;
-
-    #[test]
-    fn uniform_fills_every_pixel() {
-        let img = uniform(Size2us::new(10, 10), 0.5);
-        assert_eq!(img.width(), 10);
-        assert_eq!(img.height(), 10);
-        for &p in img.iter() {
-            assert!((p - 0.5).abs() < 1e-6);
+/// A synthetic linear RGB master: a sky gradient down the frame plus a hashed dither, channels
+/// scaled 1, 0.9, 0.8, and every 9973rd pixel — a prime, so the cores do not align to a row — a
+/// star core 1.5 above it, past 1.0 as a real stack's are. Representative enough that no image op
+/// short-circuits on it.
+pub(crate) fn linear_rgb_master(dimensions: ImageDimensions) -> LinearImage {
+    let (width, height) = (dimensions.width(), dimensions.height());
+    let count = width * height;
+    let mut channels = [
+        vec![0.0f32; count],
+        vec![0.0f32; count],
+        vec![0.0f32; count],
+    ];
+    for y in 0..height {
+        for x in 0..width {
+            let index = y * width + x;
+            let sky = 0.02 + (y as f32 / height as f32) * 0.03;
+            let hash = (index as u32).wrapping_mul(2_654_435_761) as f32 / u32::MAX as f32;
+            let noise = (hash - 0.5) * 0.004;
+            let core = if index % 9973 == 0 { 1.5 } else { 0.0 };
+            for (channel, plane) in channels.iter_mut().enumerate() {
+                plane[index] = sky * (1.0 - 0.1 * channel as f32) + noise + core;
+            }
         }
     }
-
-    #[test]
-    fn horizontal_gradient_spans_the_range_across_the_width() {
-        let img = horizontal_gradient(Size2us::new(100, 10), 0.0, 1.0);
-        assert!((img[(0, 0)] - 0.0).abs() < 1e-6);
-        assert!((img[(99, 0)] - 1.0).abs() < 1e-6);
-        // Middle should be ~0.5
-        assert!((img[(50, 5)] - 0.505).abs() < 0.01);
-    }
-
-    #[test]
-    fn checkerboard_alternates_every_cell() {
-        let img = checkerboard(Size2us::new(16, 16), 4, 0.0, 1.0);
-        assert!((img[(0, 0)] - 0.0).abs() < 1e-6);
-        assert!((img[(4, 0)] - 1.0).abs() < 1e-6);
-        assert!((img[(0, 4)] - 1.0).abs() < 1e-6);
-        assert!((img[(4, 4)] - 0.0).abs() < 1e-6);
-    }
+    LinearImage::from_planar_channels(dimensions, channels)
 }

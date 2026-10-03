@@ -49,6 +49,7 @@ use crate::execution::schedule::error::RunScheduleValidationError;
 use crate::execution::seeds::RunSeeds;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::node::special::SpecialNode;
+use std::result;
 
 pub(crate) mod error;
 pub(crate) mod planner;
@@ -59,7 +60,7 @@ pub(crate) mod planner;
 /// and `Cut`, its positive verdict. The cache-aware sweep
 /// ([`RunSchedule::resolve`])
 /// then refines only the runnable ones, promoting what a running consumer
-/// reads to `Run`, `Reuse`, or `MissingLambda` and leaving the rest where the
+/// reads to `Run` or `Reuse` and leaving the rest where the
 /// planner put them. That is why "the planner cleared it" and "the cut pruned
 /// it" are one state rather than two: a node that could run and that nothing
 /// this run reads *is* a cut node, and holding the two apart meant a column
@@ -93,9 +94,6 @@ pub(crate) enum NodeState {
     /// digest-matched blob the run loop decodes when it reaches the node. Serve it without
     /// running the lambda.
     Reuse,
-    /// Reached, but its func has no implementation. Report the error without probing its cache
-    /// or keeping its input cone alive.
-    MissingLambda,
     /// The node must run and owns one pending read for each bound input.
     Run,
 }
@@ -244,22 +242,22 @@ impl RootFlags {
     /// bypass cache reuse for the event-loop bootstrap run.
     pub(crate) const EVENT_SOURCE: Self = Self(Self::PLAIN.0 | 1 << 2);
 
-    pub(crate) fn is_root(self) -> bool {
+    pub(crate) const fn is_root(self) -> bool {
         self.0 & Self::PLAIN.0 != 0
     }
 
-    pub(crate) fn is_seeded(self) -> bool {
+    pub(crate) const fn is_seeded(self) -> bool {
         self.0 & Self::SEEDED.0 == Self::SEEDED.0
     }
 
-    pub(crate) fn is_event_source(self) -> bool {
+    pub(crate) const fn is_event_source(self) -> bool {
         self.0 & Self::EVENT_SOURCE.0 == Self::EVENT_SOURCE.0
     }
 
     /// Both sets of properties. A node reached twice by
     /// [`collect_roots`](RunSchedule::collect_roots) — a sink that also owns a
     /// subscribed event — keeps what each pass gave it.
-    fn union(self, other: Self) -> Self {
+    const fn union(self, other: Self) -> Self {
         Self(self.0 | other.0)
     }
 }
@@ -272,7 +270,13 @@ impl RunSchedule {
     /// post-order forward pass guarantees. Shared by that pass and the executor's
     /// outcome so the two can't drift — and it reads the same in both, since every
     /// state the sweep writes is one that delivers a value.
-    pub(crate) fn input_missing(&self, input: &ExecutionInput) -> bool {
+    ///
+    /// An input set aside by its override is never missing: the node reads the
+    /// overriding input instead.
+    pub(crate) fn input_missing(&self, program: &CompiledGraph, input: &ExecutionInput) -> bool {
+        if program.overridden(input, &self.states) {
+            return false;
+        }
         match &input.binding {
             ExecutionBinding::None => input.required,
             ExecutionBinding::Const(_) => false,
@@ -286,9 +290,7 @@ impl RunSchedule {
                 }
                 NodeState::Disabled => input.required,
                 NodeState::MissingInputs => true,
-                NodeState::Cut | NodeState::Reuse | NodeState::MissingLambda | NodeState::Run => {
-                    false
-                }
+                NodeState::Cut | NodeState::Reuse | NodeState::Run => false,
             },
         }
     }
@@ -372,8 +374,7 @@ impl RunSchedule {
             else {
                 return Err(Error::EventSeedNotFound { event });
             };
-            let subs = &e_event.subscribers;
-            for &sub_idx in subs {
+            for &sub_idx in &program.subscribers[e_event.subscribers] {
                 if program[sub_idx].special == Some(SpecialNode::RunSinks) {
                     run_sinks = true;
                 } else {
@@ -403,10 +404,9 @@ impl RunSchedule {
                 self.add_root(node_idx, RootFlags::EVENT_SOURCE);
             }
         }
-        // Ascending, which is the order the previous bitset yielded and so the
-        // order `process_order` was built in — a root list in the order the seeds
-        // happened to name would make an unchanged graph plan differently run to
-        // run. Deduplicated already, by `add_root` pushing once per node.
+        // Ascending, so an unchanged graph plans the same `process_order` run
+        // to run, whatever order the seeds named the roots in. Deduplicated
+        // already, by `add_root` pushing once per node.
         self.roots.sort_unstable();
         Ok(())
     }
@@ -416,7 +416,7 @@ impl RunSchedule {
     pub(crate) fn validate(
         &self,
         program: &CompiledGraph,
-    ) -> std::result::Result<(), RunScheduleValidationError> {
+    ) -> result::Result<(), RunScheduleValidationError> {
         if self.process_order.len() > program.e_nodes.len() {
             return Err(RunScheduleValidationError::OrderTooLong);
         }
@@ -546,7 +546,7 @@ impl RunSchedule {
     pub(crate) async fn resolve(&mut self, program: &CompiledGraph, cache: &mut RuntimeCache) {
         // The cache holds no program of its own, so every question below names
         // the one `program` this schedule was planned against.
-        cache.stamp_digests(program, self.executing());
+        cache.stamp_digests(program, &self.states, self.executing());
         // The sweep *accumulates* demand and readers, so it starts from zero of
         // its own accord rather than trusting whoever opened the schedule.
         self.outputs.reset(program.outputs.len());
@@ -580,10 +580,6 @@ impl RunSchedule {
                 continue;
             }
             let e_node = &program[node_idx];
-            if e_node.lambda.is_none() {
-                states[node_idx] = NodeState::MissingLambda;
-                continue;
-            }
 
             let flags = root_flags[node_idx];
             let demand = &mut outputs.demand[e_node.outputs];
@@ -603,14 +599,9 @@ impl RunSchedule {
                 };
                 // Only a producer the plan will actually run can deliver a
                 // value. A **disabled** producer feeding an *optional* input
-                // leaves the consumer perfectly schedulable — `input_missing`
-                // treats an optional port fed by a disabled producer as
-                // satisfied — but the producer itself never enters
-                // `process_order`. Marking it live here put a node the schedule
-                // does not contain into the run, and the consumer's read then
-                // demanded an output nothing would ever produce: a panic on a
-                // cold cache, and on a warm one the value from before it was
-                // disabled, served as if it were this run's.
+                // leaves the consumer schedulable — `input_missing` treats
+                // that port as satisfied — but never enters `process_order`,
+                // so it is not promoted and the consumer plans no read of it.
                 if states[addr.node_idx].promote_to_run() {
                     outputs.add_reader(program.output_idx(*addr));
                 }
@@ -625,18 +616,11 @@ impl RunSchedule {
 pub(crate) mod internals {
     use super::*;
 
-    /// Root inspection and the one re-rooting a fixture needs. Production writes
-    /// roots only through [`collect_roots`](RunSchedule::collect_roots) and reads
-    /// them only as a list plus per-node flags, so these exist for the tests that
-    /// assert on one property at a time.
+    /// Root inspection. Production writes roots only through
+    /// [`collect_roots`](RunSchedule::collect_roots) and reads them only as a
+    /// list plus per-node flags, so these exist for the tests that assert on
+    /// one property at a time.
     impl RunSchedule {
-        /// Drop every root, so a fixture built by another helper can name its own.
-        pub(crate) fn clear_roots(&mut self) {
-            self.roots.clear();
-            self.root_flags
-                .reset(self.states.len(), RootFlags::default());
-        }
-
         /// The node-seeded roots, ascending.
         pub(crate) fn seeded_roots(&self) -> Vec<NodeIdx> {
             self.roots_where(RootFlags::is_seeded)

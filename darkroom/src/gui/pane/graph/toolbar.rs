@@ -1,28 +1,27 @@
 //! The floating toolbar pinned to the graph view's top-left corner: a
 //! run/cancel toggle and an event-loop start/stop toggle side by side on one
-//! chrome pill — drawn only on the main graph's pane, since both act on the
-//! whole document — with three view-framing buttons (reset view, show all,
-//! show selected) stacked beneath on a second pill that every pane carries.
+//! chrome pill, with three view-framing buttons (reset view, show all, show
+//! selected) stacked beneath on a second pill.
 //! The frosted pills keep the toolbar legible over both the canvas and any
 //! node under it; the buttons are opaque chips raised off the pill. All carry
 //! hover tooltips; the toggles paint "toggled" while their action is in flight
 //! and map to an [`AppCommand`], while the framing buttons emit an
 //! `GraphIntent::SetViewport` directly.
 
-use glam::Vec2;
 use palantir::prelude::*;
-use palantir::widget::Shape;
 
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
 use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::gesture::pan_zoom::{self, Framing};
 use crate::gui::requests::Requests;
-use crate::gui::widgets::support::{dot, filled_rect, frame, play_triangle, stroked_rect};
-use crate::gui::widgets::toolbar::{BUTTON_GAP, Chip, TOOLBAR_MARGIN, pill};
+use crate::gui::widgets::chip::Chip;
+use crate::gui::widgets::support::{
+    dot, filled_rect, frame, play_triangle, play_triangle_at, stroked_rect,
+};
+use crate::gui::widgets::toolbar::{BUTTON_GAP, TOOLBAR_MARGIN, pill};
 
-/// The toolbar's chip ids. One graph pane, so each is a fixed hash rather than
-/// keyed by the pane it sits on.
+/// The toolbar's chip ids. One graph pane, so each is a fixed hash.
 fn run_button_wid() -> WidgetId {
     WidgetId::from_hash("darkroom.graph.run_button")
 }
@@ -160,15 +159,8 @@ fn draw_play_bar(ui: &mut Ui, s: f32, color: RgbaF32) {
         1.0,
         color,
     );
-    // The play triangle, just to its right.
-    ui.add_shape(
-        Shape::triangle(
-            Vec2::new(s * 0.46, s * 0.30),
-            Vec2::new(s * 0.46, s * 0.70),
-            Vec2::new(s * 0.74, s * 0.50),
-        )
-        .fill(color),
-    );
+    // The play triangle, just to its right, as tall as the bar.
+    play_triangle_at(ui, s, Vec2::new(s * 0.58, s * 0.5), 0.40, color);
 }
 
 /// How much of a toolbar button the play mark spans. Smaller than the node

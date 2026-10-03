@@ -1,4 +1,5 @@
 use super::*;
+use crate::testing::graph::NodeSpec;
 
 /// A run seeded with an event the *replacing* program no longer holds is
 /// refused, and the worker carries on with the new program.
@@ -6,13 +7,13 @@ use super::*;
 async fn a_stale_event_seed_is_rejected_without_stopping_the_worker() {
     let mut w = TestWorker::frames();
     w.settle([w.update()]).await;
-    let stale = w.event("Frame Event", 0);
+    let stale = w.graph.event("Frame Event", 0);
 
     w.graph = TestWorker::print_graph("replacement");
     w.send_many([
         w.update(),
-        WorkerMessage::Run {
-            seeds: RunSeeds::events(vec![stale]),
+        WorkerMessage::FireEvents {
+            events: vec![stale],
         },
     ]);
 
@@ -47,13 +48,13 @@ async fn a_replacement_queued_mid_run_is_installed_after_the_running_program() {
             ConstValue::Int(7)
         })
     });
-    graph.add("sink", |node| node.records());
+    graph.add("sink", NodeSpec::records);
     graph.wire("source", 0, "sink", 0);
 
     let mut w = TestWorker::over(graph);
     let source = w.id("source");
     let sink = w.id("sink");
-    let running = w.compile();
+    let running = w.graph.program();
     w.send_many([
         WorkerMessage::Update {
             compiled: Arc::clone(&running),
@@ -65,7 +66,7 @@ async fn a_replacement_queued_mid_run_is_installed_after_the_running_program() {
         .expect("the run did not start");
 
     w.graph = TestWorker::print_graph("next");
-    let replacement = w.compile();
+    let replacement = w.graph.program();
     let replacement_node = w.id("Print");
     w.send(WorkerMessage::Update {
         compiled: Arc::clone(&replacement),

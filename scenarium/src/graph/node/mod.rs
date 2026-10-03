@@ -17,8 +17,10 @@
 pub(crate) mod special;
 
 use crate::graph::func::Func;
+use crate::graph::func::signature::FuncSignature;
 use crate::graph::identity::FuncId;
 use crate::graph::node::special::SpecialNode;
+use crate::library::Library;
 use ::serde::{Deserialize, Serialize};
 
 /// Where a node's computed output is cached — the two orthogonal storage bits
@@ -52,20 +54,20 @@ pub enum CacheMode {
 impl CacheMode {
     /// Whether a current reproducible value is retained in RAM and reused across runs
     /// (`Ram`/`Both`). The other modes drop the RAM copy after each run.
-    pub fn caches_in_ram(self) -> bool {
+    pub const fn caches_in_ram(self) -> bool {
         matches!(self, CacheMode::Ram | CacheMode::Both)
     }
 
     /// Whether the node's value is persisted to the disk store
     /// (`Disk`/`Both`), so it survives a reload.
-    pub fn persists_to_disk(self) -> bool {
+    pub const fn persists_to_disk(self) -> bool {
         matches!(self, CacheMode::Disk | CacheMode::Both)
     }
 
     /// Compose a mode from the two storage bits — the inverse of
     /// [`caches_in_ram`](Self::caches_in_ram)/[`persists_to_disk`](Self::persists_to_disk),
     /// used by the editor's two independent cache toggles.
-    pub fn from_bits(ram: bool, disk: bool) -> Self {
+    pub const fn from_bits(ram: bool, disk: bool) -> Self {
         match (ram, disk) {
             (false, false) => CacheMode::None,
             (true, false) => CacheMode::Ram,
@@ -102,9 +104,34 @@ pub struct Node {
     /// excludes them. A binding from one behaves like an unbound input unless
     /// the disabled producer is explicitly included in that run's node seeds.
     pub disabled: bool,
+    /// The port signature of the func this node was authored against, which its bindings and
+    /// subscriptions are indexed by. `None` for a special node, whose declaration is built in,
+    /// and for a func node no declaration was in hand for — until
+    /// [`Graph::reconcile_signatures`](crate::Graph::reconcile_signatures) adopts the library's.
+    #[serde(default)]
+    pub signature: Option<FuncSignature>,
 }
 
 impl Node {
+    /// The declaration this node instantiates — a library entry, or a special
+    /// node's hardcoded spec. `None` for a `Func` kind the library no longer
+    /// holds: the caller decides whether that is drift to tolerate (the editor
+    /// renders a stub) or a node to skip (lowering).
+    pub fn func<'a>(&self, library: &'a Library) -> Option<&'a Func> {
+        match &self.kind {
+            NodeKind::Func(func_id) => library.by_id(*func_id),
+            NodeKind::Special(special) => Some(special.func()),
+        }
+    }
+
+    /// The built-in this node is, if it is one.
+    pub const fn special(&self) -> Option<SpecialNode> {
+        match self.kind {
+            NodeKind::Special(special) => Some(special),
+            NodeKind::Func(_) => None,
+        }
+    }
+
     /// A fresh node of the given kind with no wiring. Callers fill that in, or
     /// use `From<&Func>` for a node shaped from its declaration.
     ///
@@ -131,6 +158,7 @@ impl Node {
             name,
             cache,
             disabled: false,
+            signature: None,
         }
     }
 }
@@ -144,6 +172,7 @@ impl From<&Func> for Node {
             name: func.name.clone(),
             cache: func.default_cache_mode,
             disabled: false,
+            signature: Some(FuncSignature::of(func)),
         }
     }
 }

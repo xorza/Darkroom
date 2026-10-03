@@ -1,5 +1,5 @@
-//! The canvas's two contexts: one graph pane for the whole frame, and the
-//! narrower one its *drawing* half records against.
+//! The canvas's two contexts: one for the whole frame, and the narrower one
+//! its *drawing* half records against.
 
 use std::collections::BTreeSet;
 
@@ -12,16 +12,14 @@ use crate::gui::pane::graph::gesture::canvas_gesture::CanvasGesture;
 use crate::gui::pane::graph::paint::inspector::Inspectors;
 use crate::gui::theme::Theme;
 
-/// One graph pane's canvas for this frame: the pane itself, plus the four
-/// facts [`GraphUI::prepass`](crate::gui::pane::graph::GraphUI::prepass) resolves
-/// once and every controller then reads —
-/// last frame's port geometry, this frame's swept node hits, the bare-canvas
-/// gesture that latched, and whether Esc cancelled it.
+/// The graph canvas for this frame: the graph, plus the three facts
+/// [`GraphUI::prepass`](crate::gui::pane::graph::GraphUI::prepass) resolves
+/// once and every controller then reads — the port and node geometry, the
+/// bare-canvas gesture that latched, and whether Esc cancelled it.
 ///
-/// The canvas level of the context chain, derived from the pane's
-/// [`GraphCtx`] and answering everything that one does. Before it, each
-/// controller took those four as parameters and the compiler had no way to
-/// say they all described the same frame.
+/// The canvas level of the context chain, derived from the [`GraphCtx`] and
+/// answering everything that one does, so the compiler holds the three facts
+/// to one frame.
 ///
 /// **It exists only once the geometry is settled.** The table is borrowed
 /// shared for the context's whole life, so the two prepass steps that run
@@ -39,7 +37,7 @@ pub(crate) struct CanvasCtx<'a> {
 }
 
 impl<'a> CanvasCtx<'a> {
-    pub(super) fn new(
+    pub(super) const fn new(
         graph_ctx: GraphCtx<'a>,
         geometry: &'a CanvasGeometry,
         gesture: Option<CanvasGesture>,
@@ -53,28 +51,28 @@ impl<'a> CanvasCtx<'a> {
         }
     }
 
-    pub(crate) fn graph_ctx(self) -> GraphCtx<'a> {
+    pub(crate) const fn graph_ctx(self) -> GraphCtx<'a> {
         self.graph_ctx
     }
 
-    pub(crate) fn theme(self) -> &'a Theme {
+    pub(crate) const fn theme(self) -> &'a Theme {
         self.graph_ctx.theme()
     }
 
     /// Last frame's port centers and node rects.
-    pub(crate) fn geometry(self) -> &'a CanvasGeometry {
+    pub(crate) const fn geometry(self) -> &'a CanvasGeometry {
         self.geometry
     }
 
     /// Which bare-canvas gesture latched this frame, if any. Canvas-private:
     /// the classification is this module's arbitration, and no reader outside
     /// it has a use for the answer.
-    pub(super) fn gesture(self) -> Option<CanvasGesture> {
+    pub(super) const fn gesture(self) -> Option<CanvasGesture> {
         self.gesture
     }
 
     /// Whether this frame's Esc cancels whatever gesture is in flight.
-    pub(super) fn cancelled(self) -> bool {
+    pub(super) const fn cancelled(self) -> bool {
         self.cancelled
     }
 
@@ -83,7 +81,7 @@ impl<'a> CanvasCtx<'a> {
     /// ended a floating wire must not also open the palette). A derived
     /// context rather than a `gesture` parameter beside this one, so there is
     /// still exactly one answer in scope at the call site.
-    pub(super) fn without_gesture(self) -> Self {
+    pub(super) const fn without_gesture(self) -> Self {
         Self {
             gesture: None,
             ..self
@@ -91,27 +89,26 @@ impl<'a> CanvasCtx<'a> {
     }
 }
 
-/// Read-only context threaded top to bottom through everything one graph
-/// pane records. `Copy` (a canvas context plus three shared refs), so it's
+/// Read-only context threaded top to bottom through everything the graph
+/// canvas records. `Copy` (a canvas context plus three shared refs), so it's
 /// passed by value — copying it while a borrow of the scene's node pool is
 /// live is fine, which keeps `draw_all`'s node loop borrow-clean. The mutable
 /// sinks (`out`, `actions`) and the breaker `probe` stay separate params.
 ///
-/// The draw level of the context chain: derived from the pane's
-/// [`CanvasCtx`], and answering everything that one does — theme, geometry,
-/// hits, the pane itself — so the node subtree names no other context. What
-/// it adds is what only the *paint* pass knows: which nodes read as selected
-/// this frame, which panels are open, and what the viewport keeps. The
-/// canvas-level draws that sit in the same pass and want the same refs — the
-/// inspection panels ([`crate::gui::pane::graph::paint::inspector`]) — take it too,
-/// rather than each growing its own near-identical bundle.
+/// The draw level of the context chain: derived from the [`CanvasCtx`], and
+/// answering everything that one does — theme, geometry, graph — so the node
+/// subtree names no other context. What it adds is what only the *paint* pass
+/// knows: which nodes read as selected this frame, which panels are open, and
+/// what the viewport keeps. The canvas-level draws that sit in the same pass
+/// and want the same refs — the inspection panels
+/// ([`crate::gui::pane::graph::paint::inspector`]) — take it too, rather than
+/// each growing its own near-identical bundle.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct DrawCtx<'a> {
-    /// The one canvas this record pass is drawing, and how the pass reaches
-    /// the theme, the geometry, the pane and its library and run: all of it
-    /// is already inside, so holding any of it again beside this would be two
-    /// paths to one ref. Every other pane on screen gets its own `DrawCtx`,
-    /// so nothing here can reach across.
+    /// The canvas this record pass is drawing, and how the pass reaches the
+    /// theme, the geometry, the graph and its library and run: all of it is
+    /// already inside, so holding any of it again beside this would be two
+    /// paths to one ref.
     canvas: CanvasCtx<'a>,
     /// Effective selection to paint: the graph's committed set or,
     /// mid-rubber-band, the live sweep — one type, so the draw substitutes
@@ -121,14 +118,14 @@ pub(crate) struct DrawCtx<'a> {
     /// Open inspection panels, so the header chip can render its
     /// open/pinned state.
     inspectors: &'a Inspectors,
-    /// What this pane's viewport keeps. Carried here rather than passed
-    /// beside the context because every reader of one is a reader of the
+    /// What the viewport keeps. Carried here rather than passed beside the
+    /// context because every reader of one is a reader of the
     /// other: a pass that records nodes decides per node whether to.
     cull: CullRegion,
 }
 
 impl<'a> DrawCtx<'a> {
-    pub(super) fn new(
+    pub(super) const fn new(
         canvas: CanvasCtx<'a>,
         selected: Selection<'a>,
         inspectors: &'a Inspectors,
@@ -143,23 +140,23 @@ impl<'a> DrawCtx<'a> {
     }
 
     /// The palette and metrics this pass paints from, off the pane's context.
-    pub(crate) fn theme(self) -> &'a Theme {
+    pub(crate) const fn theme(self) -> &'a Theme {
         self.canvas.theme()
     }
 
-    pub(crate) fn graph_ctx(self) -> GraphCtx<'a> {
+    pub(crate) const fn graph_ctx(self) -> GraphCtx<'a> {
         self.canvas.graph_ctx()
     }
 
-    pub(crate) fn geometry(self) -> &'a CanvasGeometry {
+    pub(crate) const fn geometry(self) -> &'a CanvasGeometry {
         self.canvas.geometry()
     }
 
-    pub(crate) fn inspectors(self) -> &'a Inspectors {
+    pub(crate) const fn inspectors(self) -> &'a Inspectors {
         self.inspectors
     }
 
-    pub(crate) fn cull(self) -> CullRegion {
+    pub(crate) const fn cull(self) -> CullRegion {
         self.cull
     }
 
@@ -169,8 +166,8 @@ impl<'a> DrawCtx<'a> {
     }
 }
 
-/// What reads as selected while a pane records: the document's committed set,
-/// or a rubber band's live sweep.
+/// What reads as selected while the canvas records: the document's committed
+/// set, or a rubber band's live sweep.
 ///
 /// Two representations because the two halves want different things. The
 /// document keeps a `BTreeSet` — it is persisted, diffed by undo, and handed
@@ -194,8 +191,8 @@ impl<'a> Selection<'a> {
     /// The precondition is checked here rather than trusted: [`Self::contains`]
     /// binary-searches, so an unsorted slice answers *wrong* rather than
     /// merely slowly — a node would silently stop painting selected. Debug
-    /// only, and once per pane per frame rather than per node, so the release
-    /// build pays nothing for it.
+    /// only, and once per frame rather than per node, so the release build
+    /// pays nothing for it.
     pub(crate) fn swept(sorted: &'a [NodeId]) -> Self {
         debug_assert!(
             sorted.windows(2).all(|w| w[0] < w[1]),

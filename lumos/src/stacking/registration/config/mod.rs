@@ -7,12 +7,6 @@ use crate::stacking::registration::transform::{TransformModel, TransformType};
 use crate::stacking::registration::triangle::TriangleConfig;
 
 /// Interpolation method for image resampling.
-///
-/// Adding one means editing four `match`es — this enum's two accessors, `plane::warp`'s dispatch,
-/// and `quality_at`'s — which is deliberate rather than an oversight waiting to be unified. The
-/// warp's dispatch selects between `lanczos_inner::<A, SIZE>` monomorphizations and per-method SIMD
-/// kernels; routing it through one shared tap-weight abstraction would erase exactly the constants
-/// those kernels are specialized on.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub enum InterpolationMethod {
     /// Nearest neighbor - fastest, lowest quality
@@ -31,29 +25,15 @@ pub enum InterpolationMethod {
 }
 
 impl InterpolationMethod {
-    /// Returns the kernel radius for this interpolation method.
-    #[inline]
-    pub fn kernel_radius(&self) -> usize {
-        match self {
-            InterpolationMethod::Nearest => 1,
-            InterpolationMethod::Bilinear => 1,
-            InterpolationMethod::Bicubic => 2,
-            InterpolationMethod::Lanczos2 => 2,
-            InterpolationMethod::Lanczos3 => 3,
-            InterpolationMethod::Lanczos4 => 4,
-        }
-    }
-
-    /// Returns the Lanczos parameter `a` (kernel half-width), or `None` for non-Lanczos methods.
-    #[inline]
-    pub(crate) fn lanczos_param(&self) -> Option<usize> {
-        match self {
-            InterpolationMethod::Lanczos2 => Some(2),
-            InterpolationMethod::Lanczos3 => Some(3),
-            InterpolationMethod::Lanczos4 => Some(4),
-            _ => None,
-        }
-    }
+    /// Every method, from the cheapest to the widest kernel.
+    pub const ALL: [Self; 6] = [
+        Self::Nearest,
+        Self::Bilinear,
+        Self::Bicubic,
+        Self::Lanczos2,
+        Self::Lanczos3,
+        Self::Lanczos4,
+    ];
 }
 
 /// Configuration for inverse-mapped image resampling.
@@ -78,7 +58,7 @@ impl Default for WarpParams {
 }
 
 impl WarpParams {
-    fn validate(&self) -> Result<(), InvalidConfigField> {
+    fn validate(self) -> Result<(), InvalidConfigField> {
         InvalidConfigField::finite_only("warp border_value", self.border_value)
     }
 }

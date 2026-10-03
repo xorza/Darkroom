@@ -11,7 +11,7 @@
 
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use crate::testing::TestRng;
+use crate::testing::synthetic::patterns;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use glam::Vec2;
 use imaginarium::Buffer2;
@@ -39,6 +39,10 @@ pub(crate) struct SkyField {
 
 impl SkyField {
     /// Draw `stars`, each `(centre, peak above the sky)`, as round Gaussians of width `sigma`.
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "synthetic fixtures are small images with non-negative coordinates"
+    )]
     pub(crate) fn render(
         size: Size2us,
         sky: Sky,
@@ -51,13 +55,10 @@ impl SkyField {
             SyntheticStar::new(center, peak, StarProfile::Gaussian { sigma }).add_to(&mut pixels);
         }
         if sky.noise > 0.0 {
-            let mut rng = TestRng::new(seed);
-            for p in pixels.iter_mut() {
-                *p += rng.next_gaussian_f32() * sky.noise;
-            }
+            patterns::add_gaussian_noise(pixels.pixels_mut(), sky.noise, seed);
         }
         if sky.clamp {
-            for p in pixels.iter_mut() {
+            for p in &mut pixels {
                 *p = p.clamp(0.0, 1.0);
             }
         }

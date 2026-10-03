@@ -1,19 +1,19 @@
 use crate::image_ops::ml::star_removal::RemoveStars;
 use crate::testing::init_tracing;
-use crate::testing::real_data::ml_support::{onnx_weights, stretched_master};
+use crate::testing::real_data;
+use crate::testing::real_data::ml_support::onnx_weights;
 use crate::testing::visual;
 
 fn max_of(p: &[f32]) -> f32 {
     p.iter().copied().fold(0.0f32, f32::max)
 }
 
-/// Prototype: run a StarNet2 ONNX over the full bundled (stretched) frame and write
+/// Prototype: run a `StarNet2` ONNX over the full bundled (stretched) frame and write
 /// input / starless / stars PNGs. Uses the gitignored, caller-supplied `StarNet2_weights.onnx` in
 /// `test_data/` (lumos ships no model); `STARNET2_ONNX` overrides the path. Skipped if absent. The
 /// full frame is hundreds of 512² tiles — ~60 s on a 10-core machine. Build/run with
 /// `--features ml,real-data`.
 #[test]
-#[ignore = "real-data ML test loads a large model; run explicitly with --ignored"]
 fn starnet_removes_stars() {
     init_tracing();
     let Some(weights) = onnx_weights("STARNET2_ONNX", "StarNet2_weights.onnx") else {
@@ -21,8 +21,8 @@ fn starnet_removes_stars() {
     };
 
     // StarNet wants stretched display data in [0,1].
-    let img = stretched_master();
-    visual::save_linear(&img, "star_removal/input.png");
+    let img = real_data::display_master();
+    visual::save_linear(&img, "star_removal/input");
     // Captured before `split` below consumes `img` (it repurposes the input's own
     // buffer for its `stars` output rather than allocating a fresh one).
     let input = img.intensity_plane();
@@ -38,8 +38,8 @@ fn starnet_removes_stars() {
         .expect("starless-only star removal succeeds");
 
     let result = remove.split(img).expect("star removal succeeds");
-    visual::save_linear(&result.starless, "star_removal/starless.png");
-    visual::save_linear(&result.stars, "star_removal/stars.png");
+    visual::save_linear(&result.starless, "star_removal/starless");
+    visual::save_linear(&result.stars, "star_removal/stars");
     for channel in 0..starless_only.channels() {
         assert_eq!(
             starless_only.channel(channel).pixels(),

@@ -9,6 +9,7 @@ use crate::graph::{Binding, Graph};
 use common::{SerdeFormat, deserialize, serialize};
 
 use super::{deserialize_bindings, deserialize_nodes};
+use ron::ser;
 
 #[derive(Debug, Serialize)]
 #[serde(transparent)]
@@ -35,7 +36,7 @@ fn duplicate_ports_fail_in_every_binding_format() {
         (port, Binding::Const(2i64.into())),
     ]);
 
-    for format in [SerdeFormat::Ron, SerdeFormat::Bitcode] {
+    for format in SerdeFormat::ALL {
         let bytes = serialize(&bindings, format).unwrap();
         let error = deserialize::<CheckedBindings>(&bytes, format)
             .expect_err("a repeated input port does not decode")
@@ -70,11 +71,11 @@ impl<'de> Deserialize<'de> for CheckedNodes {
 #[test]
 fn a_repeated_node_id_is_refused_rather_than_collapsed() {
     let node_id = NodeId::unique();
-    let key = ron::ser::to_string(&node_id).expect("a node id is a string");
-    let first = ron::ser::to_string(&Node::new(NodeKind::Func(FuncId::unique())))
-        .expect("a node serializes");
-    let second = ron::ser::to_string(&Node::new(NodeKind::Func(FuncId::unique())))
-        .expect("a node serializes");
+    let key = ser::to_string(&node_id).expect("a node id is a string");
+    let first =
+        ser::to_string(&Node::new(NodeKind::Func(FuncId::unique()))).expect("a node serializes");
+    let second =
+        ser::to_string(&Node::new(NodeKind::Func(FuncId::unique()))).expect("a node serializes");
 
     // The derived `HashMap` decode keeps the last entry and reports success;
     // pinning that here is what makes the refusal below a behaviour rather

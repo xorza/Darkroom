@@ -1,7 +1,7 @@
 //! Why an intent could never have applied.
 
 use glam::Vec2;
-use scenarium::{InputPort, NodeId};
+use scenarium::{DetachedNodeError, InputPort, NodeId};
 use thiserror::Error;
 
 /// A payload no widget could legitimately have raised: a nil or colliding
@@ -20,8 +20,8 @@ use thiserror::Error;
 /// allocating a message on a path that is supposed to be unreachable.
 #[derive(Debug, Error)]
 pub(crate) enum MalformedIntent {
-    /// A nil id where the intent must name something. Checked before any
-    /// lookup: `Graph::find` asserts on a nil id.
+    /// A nil id where the intent must name something: never stale, as no
+    /// document holds it.
     #[error("{role} node id is nil")]
     NilNodeId { role: &'static str },
     /// A new id the document already holds. Scenarium requires node ids to be
@@ -42,16 +42,20 @@ pub(crate) enum MalformedIntent {
     /// graph would author fine and then never run.
     #[error("seed binding on {port:?} reads the node it is being added to")]
     CyclicSeedBinding { port: InputPort },
+    /// A wire onto an input its func declares const-only. The canvas never
+    /// offers one, and a graph holding it fails every compile.
+    #[error("input {port:?} is const-only and cannot take a wire")]
+    WiredConstOnly { port: InputPort },
     /// A seed binding landing somewhere other than the node being inserted.
     /// An insertion restores exactly the wiring it recorded, so it may only
     /// author its own node's inputs — anything else would be an edit of a
     /// node the step does not carry.
     #[error("seed binding on {port:?} does not belong to the inserted node")]
     ForeignSeedBinding { port: InputPort },
-    /// Two seed bindings claiming the same input port. Only one could survive
-    /// the insertion, and the record would then disagree with the graph.
-    #[error("input {port:?} is seeded twice by one insertion")]
-    DuplicateSeedBinding { port: InputPort },
+    /// The insertion's record is not one a graph could hold — a port seeded
+    /// twice, of which only one could survive.
+    #[error("the inserted node's record is malformed: {0}")]
+    InsertionRecord(#[from] DetachedNodeError),
     /// Positions reach the view verbatim, and a non-finite one fails
     /// `GraphView::validate` — which runs only on save and load, so an
     /// unchecked NaN surfaces as a document that won't reopen.

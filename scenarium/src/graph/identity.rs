@@ -35,7 +35,7 @@ pub struct OutputPort {
 }
 
 impl OutputPort {
-    pub fn new(node_id: NodeId, port_idx: usize) -> Self {
+    pub const fn new(node_id: NodeId, port_idx: usize) -> Self {
         Self { node_id, port_idx }
     }
 }
@@ -47,16 +47,14 @@ impl OutputPort {
 /// Lives here rather than in the execution internals because it names the
 /// same thing on both sides: a node in a compiled program *is* the authored
 /// node, and its event ports are the func's.
-#[derive(
-    Clone, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
-)]
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EventPort {
     pub node_id: NodeId,
     pub event_idx: usize,
 }
 
 impl EventPort {
-    pub fn new(node_id: NodeId, event_idx: usize) -> Self {
+    pub const fn new(node_id: NodeId, event_idx: usize) -> Self {
         Self { node_id, event_idx }
     }
 }
@@ -74,7 +72,7 @@ pub struct InputPort {
 }
 
 impl InputPort {
-    pub fn new(node_id: NodeId, port_idx: usize) -> Self {
+    pub const fn new(node_id: NodeId, port_idx: usize) -> Self {
         Self { node_id, port_idx }
     }
 }

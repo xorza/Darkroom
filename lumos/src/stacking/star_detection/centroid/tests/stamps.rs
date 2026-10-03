@@ -1,151 +1,131 @@
+#![expect(
+    clippy::cast_possible_wrap,
+    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
+)]
+
 use super::*;
-use crate::stacking::star_detection::centroid::compute_stamp_radius;
-use crate::stacking::star_detection::centroid::stamp::StampGrid;
 use crate::stacking::star_detection::centroid::stamp::{StampFit, sigma_from_moments};
 
-/// σ seeds now come out of `StampFit::prepare`'s single pass, so they are pinned through it.
-/// The ceiling is the stamp radius, which is 10 for these 21×21 fields.
+/// The σ seed is the stamp's second moment about the centre, `σ² = Σw·r² / Σw / 2`: on a centred
+/// Gaussian truncated to the stamp's ±10 px it is S₂ / S with S = Σᵢ g(i), S₂ = Σᵢ i²·g(i) — the
+/// truncation under-reports σ, the more the wider the star — and a wider star seeds wider.
+///
+/// Each f32 sample is off by at most ε of its value ≤ 1.1 (the profile, then the add onto the
+/// sky); over 441 samples with |r²/2 − σ²| ≤ 100 that moves σ² by ≤ 441 · ε · 100 / Σw, and σ by
+/// half that over σ.
 #[test]
-fn sigma_seed_recovers_a_known_gaussian() {
-    let side = 21;
-    let background = 0.1f32;
-    let true_sigma = 2.5f32;
-
-    let pixels = SyntheticStar::new(
-        Vec2::splat(10.0),
-        1.0,
-        StarProfile::Gaussian { sigma: true_sigma },
-    )
-    .stamp(Size2us::new(side, side), background);
-
-    let fit = StampFit::prepare::<6>(
-        &pixels,
-        DVec2::splat(10.0),
-        &StampGrid::new(10),
-        background,
-        None,
-    )
-    .expect("21x21 stamp at its centre");
-
-    // Second moments of a truncated Gaussian under-report σ; 20% is the tolerance the seed needs.
-    let error = (fit.sigma_est - true_sigma).abs() / true_sigma;
-    assert!(
-        error < 0.2,
-        "sigma seed error {:.1}% too large (expected={true_sigma}, got={})",
-        error * 100.0,
-        fit.sigma_est
-    );
-}
-
-#[test]
-fn sigma_seed_tracks_the_true_width() {
-    let side = 21;
-    let background = 0.1f32;
-    let mut seeds = Vec::new();
-
-    for true_sigma in [1.5f32, 2.0, 2.5, 3.0, 4.0] {
-        let pixels = SyntheticStar::new(
-            Vec2::splat(10.0),
-            1.0,
-            StarProfile::Gaussian { sigma: true_sigma },
-        )
-        .stamp(Size2us::new(side, side), background);
-
+fn sigma_seed_is_the_truncated_second_moment() {
+    const SKY: f32 = 0.1;
+    let radius = 10;
+    for sigma in [1.5f32, 2.0, 2.5, 3.0, 4.0] {
+        let pixels = SyntheticStar::new(Vec2::splat(10.0), 1.0, StarProfile::Gaussian { sigma })
+            .stamp(Size2us::new(21, 21), SKY);
         let fit = StampFit::prepare::<6>(
             &pixels,
             DVec2::splat(10.0),
-            &StampGrid::new(10),
-            background,
+            &StampGrid::new(radius),
+            SKY,
             None,
         )
         .expect("21x21 stamp at its centre");
 
-        let error = (fit.sigma_est - true_sigma).abs() / true_sigma;
+        let two_sigma_sq = 2.0 * f64::from(sigma).powi(2);
+        let g = |i: i32| (-f64::from(i * i) / two_sigma_sq).exp();
+        let arms = -(radius as i32)..=radius as i32;
+        let sum: f64 = arms.clone().map(g).sum();
+        let second: f64 = arms.map(|i| f64::from(i * i) * g(i)).sum();
+        let expected = (second / sum).sqrt();
+        let rounding = 441.0 * f64::from(f32::EPSILON) * 100.0 / sum.powi(2) / (2.0 * expected);
+        let seed = f64::from(fit.sigma_est);
         assert!(
-            error < 0.25,
-            "sigma={true_sigma}: seed error {:.1}% too large (got={})",
-            error * 100.0,
-            fit.sigma_est
+            (seed - expected).abs() <= rounding,
+            "σ {sigma}: seed {seed}, expected {expected} ± {rounding}"
         );
-        seeds.push(fit.sigma_est);
+        assert!(
+            expected < f64::from(sigma),
+            "σ {sigma}: truncation under-reports"
+        );
     }
-
-    // A wider star must seed wider — the estimate has to respond to the input, not just land
-    // inside a tolerance band.
-    assert!(
-        seeds.windows(2).all(|w| w[1] > w[0]),
-        "seeds must increase with true sigma, got {seeds:?}"
-    );
 }
 
+/// One moments step contracts the error by `c = σ² / (σ² + σ_w²)`, with the window `σ_w = 0.8 ·
+/// σ(expected FWHM)` held to [1, r / 2]: the window follows the FWHM it is told, at each clamp too.
+/// The truth is 0.76 px from the start, (32, 32) to (32.3, 32.7).
+///
+/// The weighted star is a Gaussian of `σ_p² = σ²σ_w² / (σ² + σ_w²)`, and every stamp here keeps ≥
+/// 4.3 `σ_p` of it on each side: what the stamp cuts moves the ratio by ≤ 1.3e-4 (measured, the r /
+/// 2 case), under the 2e-4 asserted.
 #[test]
-fn refine_centroid_adaptive_sigma_small_fwhm() {
-    let width = 64;
-    let height = 64;
-    let true_pos = DVec2::new(32.3, 32.7);
-    let sigma = 1.5f32; // Small sigma
-    let expected_fwhm = FWHM_TO_SIGMA * sigma;
-
-    let pixels = SyntheticStar::new(true_pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma })
-        .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    // Use small expected FWHM
-    let result = refine_centroid(
-        &pixels,
-        &bg,
-        DVec2::splat(32.0),
-        TEST_STAMP_RADIUS,
-        expected_fwhm,
-    );
-
-    assert!(result.is_some());
-    let new_pos = result.unwrap();
-
-    // Should converge towards true position
-    let error = ((new_pos.x - true_pos.x).powi(2) + (new_pos.y - true_pos.y).powi(2)).sqrt();
-    assert!(
-        error < 0.5,
-        "Centroid error {} too large for small FWHM",
-        error
-    );
+fn refine_centroid_window_follows_the_expected_fwhm() {
+    struct Case {
+        name: &'static str,
+        sigma: f32,
+        expected_fwhm: f32,
+        radius: usize,
+        window_sigma: f64,
+    }
+    let cases = [
+        Case {
+            name: "matched narrow",
+            sigma: 1.5,
+            expected_fwhm: sigma_to_fwhm(1.5),
+            radius: TEST_STAMP_RADIUS,
+            window_sigma: 1.2,
+        },
+        Case {
+            name: "matched wide",
+            sigma: 4.0,
+            expected_fwhm: sigma_to_fwhm(4.0),
+            radius: TEST_STAMP_RADIUS,
+            window_sigma: 3.2,
+        },
+        Case {
+            name: "wide star, narrow window",
+            sigma: 4.0,
+            expected_fwhm: sigma_to_fwhm(1.5),
+            radius: TEST_STAMP_RADIUS,
+            window_sigma: 1.2,
+        },
+        Case {
+            name: "held to 1 px",
+            sigma: 1.5,
+            expected_fwhm: 1.0,
+            radius: TEST_STAMP_RADIUS,
+            window_sigma: 1.0,
+        },
+        Case {
+            name: "held to r / 2",
+            sigma: 1.5,
+            expected_fwhm: sigma_to_fwhm(4.0),
+            radius: 6,
+            window_sigma: 3.0,
+        },
+    ];
+    let truth = Vec2::new(32.3, 32.7).as_dvec2();
+    let start = DVec2::splat(32.0);
+    for case in cases {
+        let pixels = SyntheticStar::new(
+            truth.as_vec2(),
+            0.8,
+            StarProfile::Gaussian { sigma: case.sigma },
+        )
+        .stamp(Size2us::new(64, 64), 0.1);
+        let measured = Measured::flat(&pixels, 0.1, 0.01);
+        let step = refine_centroid(&measured.residual, start, case.radius, case.expected_fwhm)
+            .expect("one step lands");
+        let sigma_sq = f64::from(case.sigma).powi(2);
+        let contraction = sigma_sq / (sigma_sq + case.window_sigma.powi(2));
+        let ratio = (step - truth).length() / (start - truth).length();
+        assert!(
+            (ratio - contraction).abs() <= 2e-4 * contraction,
+            "{}: step ratio {ratio}, expected {contraction}",
+            case.name
+        );
+    }
 }
 
-#[test]
-fn refine_centroid_adaptive_sigma_large_fwhm() {
-    let width = 64;
-    let height = 64;
-    let true_pos = DVec2::new(32.3, 32.7);
-    let sigma = 4.0f32; // Large sigma
-    let expected_fwhm = FWHM_TO_SIGMA * sigma;
-
-    let pixels = SyntheticStar::new(true_pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma })
-        .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    // Use large expected FWHM
-    let result = refine_centroid(
-        &pixels,
-        &bg,
-        DVec2::splat(32.0),
-        TEST_STAMP_RADIUS,
-        expected_fwhm,
-    );
-
-    assert!(result.is_some());
-    let new_pos = result.unwrap();
-
-    // Should converge towards true position
-    let error = ((new_pos.x - true_pos.x).powi(2) + (new_pos.y - true_pos.y).powi(2)).sqrt();
-    assert!(
-        error < 0.5,
-        "Centroid error {} too large for large FWHM",
-        error
-    );
-}
-
-/// Extraction is no longer its own function — `StampFit::prepare` walks the stamp once and fills
-/// everything — so its behaviour is pinned through the constructor that does it.
+/// `StampFit::prepare` walks the stamp once and fills every field, so its extraction is pinned
+/// through the constructor.
 fn extract(pixels: &Buffer2<f32>, pos: DVec2, radius: usize) -> Option<StampFit> {
     StampFit::prepare::<6>(pixels, pos, &StampGrid::new(radius), 0.0, None)
 }
@@ -172,7 +152,6 @@ fn extract_stamp_valid_center() {
 fn extract_stamp_edge_invalid() {
     let pixels = Buffer2::new_filled(64, 64, 0.5f32);
 
-    // Too close to edges
     assert!(extract(&pixels, DVec2::new(3.0, 32.0), 5).is_none());
     assert!(extract(&pixels, DVec2::new(32.0, 3.0), 5).is_none());
     assert!(extract(&pixels, DVec2::new(61.0, 32.0), 5).is_none());
@@ -182,7 +161,6 @@ fn extract_stamp_edge_invalid() {
 #[test]
 fn extract_stamp_peak_value() {
     let mut pixels = Buffer2::new_filled(64, 64, 0.1f32);
-    // Add bright pixel at center
     pixels[(32, 32)] = 0.9;
 
     let fit = extract(&pixels, DVec2::splat(32.0), 5).expect("stamp at centre");
@@ -193,8 +171,8 @@ fn extract_stamp_peak_value() {
 fn extract_stamp_coordinates() {
     let pixels = Buffer2::new_filled(64, 64, 0.5f32);
 
-    // For radius=2, stamp is 5x5 centred at (32,32), so it spans image x,y 30..=34 — expressed
-    // now as an origin at (30,30) plus the grid's own 0..4.
+    // A radius-2 stamp about (32, 32) spans x, y 30..=34: its origin at (30, 30) plus the grid's
+    // own 0..=4.
     let fit = extract(&pixels, DVec2::splat(32.0), 2).expect("stamp at centre");
     assert_eq!(fit.stamp.z.len(), 25);
     assert_eq!(fit.stamp.origin, DVec2::new(30.0, 30.0));
@@ -215,176 +193,103 @@ fn extract_stamp_fractional_position() {
 fn stamp_too_small_for_the_parameter_count_is_rejected() {
     let pixels = Buffer2::new_filled(64, 64, 0.5f32);
     let grid = StampGrid::new(1);
-    // A radius-1 stamp is 9 pixels: enough to constrain Moffat's 5, not Gaussian's 6 with the
-    // strict inequality a least-squares fit needs... but 9 > 6, so both pass. Radius 0 is 1 pixel.
+    // A least-squares fit needs strictly more samples than parameters: a radius-1 stamp holds 9 >
+    // 6, a radius-0 stamp 1.
     assert!(StampFit::prepare::<6>(&pixels, DVec2::splat(32.0), &grid, 0.0, None).is_some());
     let point = StampGrid::new(0);
     assert!(StampFit::prepare::<6>(&pixels, DVec2::splat(32.0), &point, 0.0, None).is_none());
 }
 
+/// A sky the map left in the residual — a flat pedestal Δ — stays in the flux under `GlobalMap` and
+/// comes out under `LocalAnnulus`, while the moments position, which neither mode touches, is the
+/// same bit for bit.
+///
+/// The star is σ = 1.5 on a matched stamp, r = 7, and its annulus runs from 7 to 11 px about the
+/// rounded centre, which the star sits 0.5 px from: there it adds at most A · e^(−6.5² / 2σ²) =
+/// 6.7e-5 to Δ, so the annulus median is Δ to within that and the annulus flux the true flux to
+/// within npix times it. The pedestal adds exactly npix · Δ to the
+/// map's flux, to the f32 rounding of each sample (≤ ε of A + Δ) and of the sum.
 #[test]
-fn local_annulus_background_uniform() {
-    use crate::stacking::star_detection::config::measurement_config::LocalBackgroundMethod;
-
-    let width = 128;
-    let height = 128;
-    let background_value = 0.2f32;
-
-    // Create uniform background with a star
-    let mut pixels = Buffer2::new_filled(width, height, background_value);
-    // Add star at center
-    SyntheticStar::new(Vec2::splat(64.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
-        .add_to(&mut pixels);
-
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-    let config = Config {
-        measurement: MeasurementConfig {
-            local_background: LocalBackgroundMethod::LocalAnnulus,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let candidates = detect_stars_test(&pixels, &bg, &config.detection);
-
-    assert!(!candidates.is_empty(), "Should detect star");
-
-    let star = measure_star(
-        &pixels,
-        &bg,
-        &candidates[0],
-        &config.measurement,
-        config.fwhm.expected,
-        &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
-    );
-    assert!(star.is_some(), "Should compute centroid with LocalAnnulus");
-
-    let star = star.unwrap();
-    // SNR should be computed correctly
-    assert!(star.snr > 0.0, "SNR should be positive");
-    assert!(star.flux > 0.0, "Flux should be positive");
-}
-
-#[test]
-fn local_annulus_vs_global_map() {
-    use crate::stacking::star_detection::config::measurement_config::LocalBackgroundMethod;
-
-    let width = 128;
-    let height = 128;
-
-    // Create star on uniform background
-    let pixels = SyntheticStar::new(Vec2::splat(64.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
-        .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-
-    // Detect with GlobalMap
-    let config_global = Config {
-        measurement: MeasurementConfig {
-            local_background: LocalBackgroundMethod::GlobalMap,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let candidates = detect_stars_test(&pixels, &bg, &config_global.detection);
-    let star_global = measure_star(
-        &pixels,
-        &bg,
-        &candidates[0],
-        &config_global.measurement,
-        config_global.fwhm.expected,
-        &StampGrid::new(compute_stamp_radius(config_global.fwhm.expected)),
+fn local_annulus_removes_a_sky_the_map_left() {
+    const AMPLITUDE: f32 = 0.8;
+    const PEDESTAL: f32 = 0.02;
+    let sigma = 1.5f32;
+    let fwhm = sigma_to_fwhm(sigma);
+    let radius = compute_stamp_radius(fwhm);
+    assert_eq!(radius, 7);
+    let pixels = SyntheticStar::new(
+        Vec2::new(64.3, 63.6),
+        AMPLITUDE,
+        StarProfile::Gaussian { sigma },
     )
-    .expect("global centroid");
-
-    // Detect with LocalAnnulus
-    let config_annulus = Config {
-        measurement: MeasurementConfig {
-            local_background: LocalBackgroundMethod::LocalAnnulus,
+    .stamp(Size2us::new(128, 128), 0.1);
+    let truth = Measured::flat(&pixels, 0.1, 0.01);
+    let offset = Measured::flat(&pixels, 0.1 - PEDESTAL, 0.01);
+    let region = truth.region_at(DVec2::new(64.3, 63.6));
+    let measure = |measured: &Measured, local_background| {
+        let config = MeasurementConfig {
+            local_background,
             ..Default::default()
-        },
-        ..Default::default()
+        };
+        measured
+            .measure(&region, &config, fwhm)
+            .expect("the star measures")
     };
-    let star_annulus = measure_star(
-        &pixels,
-        &bg,
-        &candidates[0],
-        &config_annulus.measurement,
-        config_annulus.fwhm.expected,
-        &StampGrid::new(compute_stamp_radius(config_annulus.fwhm.expected)),
-    )
-    .expect("annulus centroid");
+    let exact = measure(&truth, LocalBackgroundMethod::GlobalMap);
+    let global = measure(&offset, LocalBackgroundMethod::GlobalMap);
+    let annulus = measure(&offset, LocalBackgroundMethod::LocalAnnulus);
 
-    // Both should give similar position (within 0.5 pixels)
-    let pos_diff = ((star_global.pos.x - star_annulus.pos.x).powi(2)
-        + (star_global.pos.y - star_annulus.pos.y).powi(2))
-    .sqrt();
+    assert_eq!(global.pos, annulus.pos);
+    let npix = ((2 * radius + 1) * (2 * radius + 1)) as f64;
+    let flux = f64::from(exact.flux);
+    let rounding = npix * f64::from(f32::EPSILON) * f64::from(AMPLITUDE + PEDESTAL) * 2.0;
+    let added = f64::from(global.flux) - flux;
     assert!(
-        pos_diff < 0.5,
-        "GlobalMap and LocalAnnulus should give similar positions: diff={}",
-        pos_diff
+        (added - npix * f64::from(PEDESTAL)).abs() <= rounding,
+        "the map keeps {added}, expected {}",
+        npix * f64::from(PEDESTAL)
     );
-
-    // Both should have positive flux and SNR
-    assert!(star_global.flux > 0.0 && star_annulus.flux > 0.0);
-    assert!(star_global.snr > 0.0 && star_annulus.snr > 0.0);
+    let tail = f64::from(AMPLITUDE) * (-6.5f64.powi(2) / (2.0 * f64::from(sigma).powi(2))).exp();
+    let removed = f64::from(annulus.flux) - flux;
+    assert!(
+        removed.abs() <= npix * tail + rounding,
+        "the annulus leaves {removed} of the pedestal, bound {}",
+        npix * tail + rounding
+    );
 }
 
+/// The annulus is `None` below 10 in-frame pixels. A ring of r² ∈ [1, 4] holds 12: (±1, 0),
+/// (0, ±1), (±1, ±1), (±2, 0), (0, ±2). About (1, 1), (−2, 0) and (0, −2) fall off the frame, and
+/// (2, 0) past a frame 3 wide: 9 are left. A frame 4 wide keeps (2, 0): 10, and the flat
+/// residual's median and σ come back exactly.
 #[test]
-fn local_annulus_near_edge_fallback() {
-    use crate::stacking::star_detection::config::measurement_config::LocalBackgroundMethod;
-
-    let width = 64;
-    let height = 64;
-
-    // Create star near edge where annulus might be partially outside
-    let pos = DVec2::new(20.0, 32.0);
-    let pixels = SyntheticStar::new(pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma: 2.0 })
-        .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-
-    let config = Config {
-        measurement: MeasurementConfig {
-            local_background: LocalBackgroundMethod::LocalAnnulus,
-            ..Default::default()
-        },
-        detection: DetectionConfig {
-            edge_margin: 15,
-            ..Default::default()
-        },
-        ..Default::default()
+fn local_annulus_needs_ten_pixels_in_the_frame() {
+    let annulus = |width| {
+        let residual = Buffer2::new_filled(width, 5, 0.25f32);
+        compute_annulus_background(&residual, DVec2::splat(1.0), 1, 2)
     };
-    let candidates = detect_stars_test(&pixels, &bg, &config.detection);
+    assert!(annulus(3).is_none());
+    let sky = annulus(4).expect("ten pixels are enough");
+    assert_eq!(sky.offset, 0.25);
+    assert_eq!(sky.noise, 0.0);
+}
 
-    if !candidates.is_empty() {
-        // Should still work (falls back to global if annulus doesn't have enough pixels)
-        let star = measure_star(
-            &pixels,
-            &bg,
-            &candidates[0],
-            &config.measurement,
-            config.fwhm.expected,
-            &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
+/// A stamp inside the frame keeps the whole square ring at distance r in the annulus — every
+/// (±r, dy) and (dx, ±r) with r² ≤ dx² + dy² ≤ 2r² ≤ (1.5r)² — so at least 8r ≥ 32 pixels, far
+/// above the 10 the annulus needs: `measure_star` never falls back to the map for want of them.
+#[test]
+fn local_annulus_fills_at_the_tightest_stamp() {
+    for radius in MIN_STAMP_RADIUS..=MAX_STAMP_RADIUS {
+        let side = 2 * radius + 1;
+        let residual = Buffer2::new_filled(side, side, 0.25f32);
+        let corner = DVec2::splat(radius as f64);
+        assert_eq!(
+            stamp_centre(corner, Size2us::new(side, side), radius),
+            Some(Vec2us::new(radius, radius))
         );
-        if let Some(s) = star {
-            assert!(s.flux > 0.0, "Flux should be positive");
-        }
+        let sky =
+            compute_annulus_background(&residual, corner, radius, annulus_outer_radius(radius));
+        assert!(sky.is_some(), "radius {radius}");
     }
 }
 
@@ -406,7 +311,7 @@ fn sigma_seed_honours_its_ceiling() {
     );
 
     // The tightest ceiling the detector ever uses is MIN_STAMP_RADIUS; the same data has to seed
-    // inside it rather than at the old fixed 10.0.
+    // inside it rather than at a fixed 10.0.
     let narrow = sigma_from_moments(sum_r2, sum_w, 4.0);
     assert_eq!(narrow, 4.0);
     assert_ne!(narrow, wide, "the ceiling has to change the answer");

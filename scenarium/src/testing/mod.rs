@@ -11,21 +11,29 @@
 //! port has to state its own [`Func`] — and `Library::add` rejects one with no
 //! implementation.
 
+#[cfg(test)]
+pub(crate) mod blob;
 pub mod calls;
 #[cfg(test)]
 pub(crate) mod engine;
-#[cfg(test)]
-pub(crate) mod func_invoker;
+pub mod func_invoker;
 pub mod graph;
 #[cfg(test)]
 pub(crate) mod program;
 #[cfg(test)]
 pub(crate) mod worker;
 
-use crate::async_lambda;
 use crate::graph::func::Func;
+use crate::graph::func::event::EventLambda;
+use crate::graph::func::lambda::FuncLambda;
+use crate::graph::identity::FuncId;
 
-/// `func` with a body that does nothing, so a library will hold it.
-pub fn with_stub_lambda(func: Func) -> Func {
-    func.lambda(async_lambda!(|_| { Ok(()) }))
+/// A func whose body does nothing, for a fixture that never runs it.
+pub fn stub_func(id: FuncId, name: impl Into<String>) -> Func {
+    Func::new(id, name, FuncLambda::stub())
+}
+
+/// An event body that does nothing, for a fixture that never fires it.
+pub fn stub_event() -> EventLambda {
+    EventLambda::new(|_| Box::pin(async {}))
 }

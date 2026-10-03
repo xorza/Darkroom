@@ -26,10 +26,10 @@ const MIN_FRAMES_FOR_REJECTION: usize = 5;
 const MIN_FRAMES_FOR_GESD: usize = 15;
 
 /// Small-stack fallback policy for [`StackConfig`]. When a stack has fewer than `min_frames` frames
-/// the configured [`StackConfig::method`]'s rejection statistics are unreliable, so the combine uses
-/// `fallback` instead. This makes the fallback an explicit, inspectable part of the config rather
-/// than a runtime transformation. `fallback` must be rejection-free (`Median` or `Mean(None)`) so it
-/// never needs a fallback of its own.
+/// the configured [`StackConfig::method`]'s rejection statistics are unreliable, so the combine
+/// uses `fallback` instead. This makes the fallback an explicit, inspectable part of the config
+/// rather than a runtime transformation. `fallback` must be rejection-free (`Median` or
+/// `Mean(None)`) so it never needs a fallback of its own.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SmallN {
     /// Frames below which `fallback` replaces the configured method.
@@ -41,7 +41,7 @@ pub struct SmallN {
 impl SmallN {
     /// No fallback — the method is reliable at any frame count (Winsorized, Percentile, Median,
     /// plain mean).
-    pub fn none() -> Self {
+    pub const fn none() -> Self {
         Self {
             min_frames: 0,
             fallback: CombineMethod::Median,
@@ -49,20 +49,20 @@ impl SmallN {
     }
 
     /// Fall back to the median below `min_frames` frames.
-    pub fn median_below(min_frames: usize) -> Self {
+    pub const fn median_below(min_frames: usize) -> Self {
         Self {
             min_frames,
             fallback: CombineMethod::Median,
         }
     }
 
-    /// The combine method to use for `frame_count` frames: `fallback` when there are too few for the
-    /// configured `method`, else `method`. Warns on a real downgrade.
+    /// The combine method to use for `frame_count` frames: `fallback` when there are too few for
+    /// the configured `method`, else `method`. Warns on a real downgrade.
     pub(crate) fn resolve(&self, method: CombineMethod, frame_count: usize) -> CombineMethod {
-        // A plain mean (no rejection) has nothing to fall back *from* — only a `Mean` with an actual
-        // rejection method is downgraded. (An explicit `Median` is excluded by `!= self.fallback`.)
-        // This keeps a method override inherited with a default `min_frames` from spuriously
-        // turning a plain mean into a median at small N.
+        // A plain mean (no rejection) has nothing to fall back *from* — only a `Mean` with an
+        // actual rejection method is downgraded. (An explicit `Median` is excluded by `!=
+        // self.fallback`.) This keeps a method override inherited with a default `min_frames` from
+        // spuriously turning a plain mean into a median at small N.
         let does_rejection = !matches!(method, CombineMethod::Mean(Rejection::None));
         if does_rejection && frame_count < self.min_frames && method != self.fallback {
             tracing::warn!(
@@ -173,6 +173,22 @@ impl Default for StackConfig {
 }
 
 impl StackConfig {
+    /// This configuration for the frames left once the input frames at `dropped` (ascending)
+    /// are gone: manual weights, given one per input frame, follow their frames; every other
+    /// setting applies unchanged.
+    pub(crate) fn for_survivors(&self, dropped: &[usize]) -> Self {
+        let mut config = self.clone();
+        if let Weighting::Manual(weights) = &mut config.weighting {
+            let mut index = 0;
+            weights.retain(|_| {
+                let kept = dropped.binary_search(&index).is_err();
+                index += 1;
+                kept
+            });
+        }
+        config
+    }
+
     /// Preset: sigma-clipped mean (most common for light frames).
     pub fn sigma_clipped(sigma: f32) -> Self {
         Self {
@@ -267,14 +283,14 @@ impl StackConfig {
 
     /// Preset for flat frames: σ-clip σ=3.0, multiplicative normalization.
     pub fn flat() -> Self {
-        // σ=3.0 matches the dark/bias preset and ccdproc's `combine` default (3σ low/high); flats are
-        // smooth, so a permissive cut just trims clear outliers (dust shadows move between flats).
+        // σ=3.0 matches the dark/bias preset and ccdproc's `combine` default (3σ low/high); flats
+        // are smooth, so a permissive cut just trims clear outliers (dust shadows move between
+        // flats).
         Self {
             method: CombineMethod::Mean(Rejection::sigma_clip(3.0)),
             normalization: Normalization::Multiplicative,
-            // Stricter than the other presets, which keep σ-clip at any frame count: a master flat
-            // from < 8 frames uses the median, since σ-clip statistics on so few smooth flats
-            // aren't worth the noise.
+            // Stricter than the default floor: a master flat from fewer than 8 frames uses the
+            // median, since σ-clip statistics on so few smooth flats aren't worth the noise.
             small_n: SmallN::median_below(8),
             ..Default::default()
         }

@@ -20,7 +20,7 @@ mod neon;
 /// unweighted-only.
 pub(super) fn batch_build_normal_equations(
     model: &MoffatFixedBeta,
-    data: FitData,
+    data: FitData<'_>,
     params: &[f64; 5],
 ) -> Option<NormalEquations<5>> {
     if data.weights.is_some() {
@@ -41,7 +41,7 @@ pub(super) fn batch_build_normal_equations(
 /// [`batch_build_normal_equations`].
 pub(super) fn batch_compute_chi2(
     model: &MoffatFixedBeta,
-    data: FitData,
+    data: FitData<'_>,
     params: &[f64; 5],
 ) -> Option<f64> {
     if data.weights.is_some() {

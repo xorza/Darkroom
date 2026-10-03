@@ -90,11 +90,25 @@ fn compact_within(
     write
 }
 
+/// Median of an **ascending-sorted** slice: the middle element, or the mean of the two middle ones
+/// for an even count. The rejection centre; the upper-middle element alone sits high by up to half
+/// the gap between the two middles, which makes a symmetric band clip the low side harder.
+fn sorted_median(sorted: &[f32]) -> f32 {
+    let m = sorted.len();
+    debug_assert!(m > 0);
+    if m % 2 == 1 {
+        sorted[m / 2]
+    } else {
+        f32::midpoint(sorted[m / 2 - 1], sorted[m / 2])
+    }
+}
+
 /// MAD (median absolute deviation from `center`) of an **ascending-sorted** slice, without a
 /// scratch buffer or quickselect. The absolute deviations split into two ascending runs — the
 /// elements below `center` read backwards, and those at/above `center` read forwards — so a
-/// two-pointer merge yields them in global ascending order. Advancing to rank `len/2` reproduces
-/// `median_fast` of the deviations exactly (the same upper-middle order statistic).
+/// two-pointer merge yields them in global ascending order up to rank `len / 2`; for an even
+/// count the MAD is the mean of the deviations at ranks `len / 2 − 1` and `len / 2`, the same
+/// median [`median_fast`](crate::math::statistics::median_fast) takes.
 fn sorted_mad(sorted: &[f32], center: f32) -> f32 {
     let m = sorted.len();
     debug_assert!(m > 0);
@@ -102,31 +116,33 @@ fn sorted_mad(sorted: &[f32], center: f32) -> f32 {
     let mut l = split; // left run consumes sorted[l - 1] going down
     let mut r = split; // right run consumes sorted[r] going up
     let target = m / 2;
+    let mut previous = 0.0f32;
     let mut dev = 0.0f32;
     for _ in 0..=target {
         let left = (l > 0).then(|| center - sorted[l - 1]);
         let right = (r < m).then(|| sorted[r] - center);
+        previous = dev;
         dev = match (left, right) {
             (Some(ld), Some(rd)) if ld <= rd => {
                 l -= 1;
                 ld
             }
-            (Some(_), Some(rd)) => {
-                r += 1;
-                rd
-            }
             (Some(ld), None) => {
                 l -= 1;
                 ld
             }
-            (None, Some(rd)) => {
+            (_, Some(rd)) => {
                 r += 1;
                 rd
             }
             (None, None) => break,
         };
     }
-    dev
+    if m.is_multiple_of(2) {
+        f32::midpoint(previous, dev)
+    } else {
+        dev
+    }
 }
 
 /// Pixel rejection algorithm applied before combining.
@@ -154,27 +170,27 @@ impl Default for Rejection {
 
 impl Rejection {
     /// Create sigma clipping with default iterations.
-    pub fn sigma_clip(sigma: f32) -> Self {
+    pub const fn sigma_clip(sigma: f32) -> Self {
         Self::SigmaClip(SigmaClipConfig::new(sigma, 3))
     }
 
     /// Create asymmetric sigma clipping.
-    pub fn sigma_clip_asymmetric(sigma_low: f32, sigma_high: f32) -> Self {
+    pub const fn sigma_clip_asymmetric(sigma_low: f32, sigma_high: f32) -> Self {
         Self::SigmaClip(SigmaClipConfig::new_asymmetric(sigma_low, sigma_high, 3))
     }
 
     /// Create winsorized sigma clipping.
-    pub fn winsorized(sigma: f32) -> Self {
+    pub const fn winsorized(sigma: f32) -> Self {
         Self::Winsorized(WinsorizedClipConfig::new(sigma))
     }
 
     /// Create linear fit clipping with symmetric thresholds.
-    pub fn linear_fit(sigma: f32) -> Self {
+    pub const fn linear_fit(sigma: f32) -> Self {
         Self::LinearFit(LinearFitClipConfig::new(sigma, sigma, 3))
     }
 
     /// Create percentile clipping with symmetric bounds.
-    pub fn percentile(percent: f32) -> Self {
+    pub const fn percentile(percent: f32) -> Self {
         Self::Percentile(PercentileClipConfig::new(percent, percent))
     }
 
@@ -221,7 +237,7 @@ impl Rejection {
     /// than by position.
     ///
     /// Only the mean is weighted; [`Self::reject`] decides survivors from the values alone. That
-    /// is deliberate, and matches what ImageIntegration, Siril and DSS all do: rejection asks
+    /// is deliberate, and matches what `ImageIntegration`, Siril and DSS all do: rejection asks
     /// which samples disagree with their neighbours, which is a question about the normalized
     /// values, not about how much each frame is trusted. It is also what keeps GESD available —
     /// its critical values come from the t-distribution for `n` iid observations, and there is no

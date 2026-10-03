@@ -11,7 +11,9 @@ workspace = true
 [features]
 real-data = []
 ml = ["dep:ort"]
-internals = []
+# Compiles the colocated `bench.rs` drivers (quickbench `#[test] #[ignore]` benches) and the
+# helpers only they reach. Not part of the supported surface.
+bench = []
 
 [dependencies]
 common = { workspace = true, features = ["introspect-derive"] }

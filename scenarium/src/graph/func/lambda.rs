@@ -1,7 +1,8 @@
+use std::fmt;
+use std::fmt::Debug;
+use std::fmt::Formatter;
 use std::pin::Pin;
 use std::sync::Arc;
-
-use serde::{Deserialize, Serialize};
 
 use crate::graph::func::error::InvokeResult;
 use crate::{
@@ -10,8 +11,8 @@ use crate::{
 };
 
 /// Whether a node output must be produced for this run. The planner marks an output
-/// demanded when a downstream binding reads it or the host requested it through a pin.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// demanded when a node that runs reads it, or when the host seeded the node itself.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum OutputDemand {
     #[default]
     Skip,
@@ -19,7 +20,7 @@ pub enum OutputDemand {
 }
 
 impl OutputDemand {
-    pub fn is_skip(self) -> bool {
+    pub const fn is_skip(self) -> bool {
         matches!(self, OutputDemand::Skip)
     }
 }
@@ -57,63 +58,47 @@ impl<T> AsyncLambdaFn for T where
 
 pub type AsyncLambda = dyn AsyncLambdaFn;
 
-#[derive(Clone, Default)]
-pub enum FuncLambda {
-    #[default]
-    None,
-    Lambda(Arc<AsyncLambda>),
-}
+/// A func's implementation. Every func has one: it is an argument of
+/// [`Func::new`](crate::Func::new), so no declaration can lack it.
+#[derive(Clone)]
+pub struct FuncLambda(Arc<AsyncLambda>);
 
 impl FuncLambda {
     pub fn new<F>(lambda: F) -> Self
     where
         F: AsyncLambdaFn,
     {
-        Self::Lambda(Arc::new(lambda))
-    }
-
-    pub fn is_none(&self) -> bool {
-        matches!(self, Self::None)
+        Self(Arc::new(lambda))
     }
 
     pub async fn invoke(&self, invocation: Invocation<'_>) -> InvokeResult<()> {
-        match self {
-            FuncLambda::None => {
-                panic!("Func missing lambda");
-            }
-            FuncLambda::Lambda(inner) => (inner)(invocation).await,
-        }
+        (self.0)(invocation).await
     }
 }
 
-impl std::fmt::Debug for FuncLambda {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FuncLambda::None => f.debug_struct("FuncLambda::None").finish(),
-            FuncLambda::Lambda(_) => f.debug_struct("FuncLambda::Lambda").finish(),
-        }
+impl Debug for FuncLambda {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str("FuncLambda")
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "internals"))]
 pub(crate) mod internals {
-    use std::error;
-    use std::fmt;
+    use std::io;
 
+    use crate::async_lambda;
     use crate::graph::func::error::InvokeError;
+    use crate::graph::func::lambda::FuncLambda;
 
-    #[derive(Debug)]
-    struct TestInvokeError(String);
-
-    impl fmt::Display for TestInvokeError {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str(&self.0)
+    impl FuncLambda {
+        /// A body that does nothing, for a fixture that never runs it.
+        pub(crate) fn stub() -> Self {
+            async_lambda!(|_| { Ok(()) })
         }
     }
 
-    impl error::Error for TestInvokeError {}
-
+    /// A lambda's failure, carrying `message`.
     pub(crate) fn failure(message: impl Into<String>) -> InvokeError {
-        InvokeError::external(TestInvokeError(message.into()))
+        InvokeError::external(io::Error::other(message.into()))
     }
 }

@@ -9,10 +9,11 @@
 //! event source armed.
 //!
 //! [`NodeStatus`] is the row the executor emits *and* the row the host consumes —
-//! [`WorkerStatus`](crate::worker::status::WorkerStatus) publishes it verbatim. A node
+//! [`RunSummary`](crate::worker::run_summary::RunSummary) publishes it verbatim. A node
 //! appears at most once, so nothing downstream has to reassemble it from several lists,
 //! and no consumer's fold order can change what a node's result was.
 
+use std::fmt::Debug;
 use std::time::Instant;
 
 use crate::RamUsage;
@@ -32,7 +33,7 @@ pub enum LogLevel {
 /// One node-attributed log record.
 /// [`ContextManager::log`](crate::runtime::context::ContextManager::log) writes
 /// these while a lambda runs; the outcome below carries them out, and
-/// [`WorkerStatus`](crate::worker::status::WorkerStatus) republishes them.
+/// [`RunSummary`](crate::worker::run_summary::RunSummary) republishes them.
 #[derive(Debug, Clone)]
 pub struct LogEntry {
     pub node_id: NodeId,
@@ -55,10 +56,6 @@ pub(crate) struct EventTrigger {
 /// executor's private per-node verdict.
 #[derive(Clone, Debug)]
 pub enum NodeExecutionStatus {
-    /// Live only: the node's lambda is running, since `at`.
-    Running {
-        at: Instant,
-    },
     /// Served from a cache, or left resident by the pre-run cut — available, not recomputed.
     Cached,
     Executed {
@@ -69,11 +66,9 @@ pub enum NodeExecutionStatus {
     MissingInputs {
         ports: Vec<usize>,
     },
-    /// `elapsed_secs` is `Some` when the lambda ran and failed, timing the attempt, and
-    /// `None` when the node never ran at all — an errored dependency, a func with no
-    /// implementation, or a cached output that no longer loads.
+    /// The lambda ran and failed, or the node never ran at all — an errored dependency, a func
+    /// with no implementation, or a cached output that no longer loads.
     Errored {
-        elapsed_secs: Option<f64>,
         error: RunError,
     },
 }
@@ -90,15 +85,13 @@ pub struct NodeStatus {
 
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionOutcome {
-    pub(crate) elapsed_secs: f64,
     /// One row per node with something to report — a status, retained RAM, or both.
-    /// CompiledGraph order, so a node cannot appear twice.
+    /// `CompiledGraph` order, so a node cannot appear twice.
     pub(crate) nodes: Vec<NodeStatus>,
     /// How many nodes invoked their lambda, successes and failures alike. Counted while
     /// the rows are built rather than derived from them, since a failed node's row no
     /// longer says "executed" separately.
     pub(crate) ran_node_count: usize,
-    pub(crate) triggered_events: Vec<EventPort>,
     pub(crate) event_triggers: Vec<EventTrigger>,
     pub(crate) logs: Vec<LogEntry>,
     pub(crate) cancelled: bool,
@@ -107,10 +100,8 @@ pub(crate) struct ExecutionOutcome {
 
 impl ExecutionOutcome {
     pub(crate) fn clear(&mut self) {
-        self.elapsed_secs = 0.0;
         self.nodes.clear();
         self.ran_node_count = 0;
-        self.triggered_events.clear();
         self.event_triggers.clear();
         self.logs.clear();
         self.cancelled = false;
@@ -118,16 +109,13 @@ impl ExecutionOutcome {
     }
 }
 
+/// Where one node's lambda is, live: started at `at`, or finished after `elapsed_secs` with or
+/// without its outputs. A cancelled lambda reports no finish — it did not complete.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum RunPhase {
+pub enum RunPhase {
     Started { at: Instant },
-    Finished { elapsed_secs: f64 },
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct RunProgress {
-    pub(crate) node_id: NodeId,
-    pub(crate) phase: RunPhase,
+    Succeeded { elapsed_secs: f64 },
+    Failed { elapsed_secs: f64 },
 }
 
 /// Where a run's live feedback goes: node progress before and after each lambda. The run
@@ -136,8 +124,8 @@ pub(crate) struct RunProgress {
 ///
 /// `Send` because the run future crosses threads; `Debug` so the structs carrying one still
 /// derive it.
-pub(crate) trait RunReporter: Send + std::fmt::Debug {
-    fn progress(&mut self, progress: RunProgress);
+pub(crate) trait RunReporter: Send + Debug {
+    fn progress(&mut self, node_id: NodeId, phase: RunPhase);
 }
 
 #[cfg(test)]
@@ -178,7 +166,7 @@ pub(crate) mod internals {
         }
     }
 
-    use crate::execution::report::{RunProgress, RunReporter};
+    use crate::execution::report::{RunPhase, RunReporter};
 
     /// Discards a run's live feedback, for the tests that only assert on the final outcome.
     /// Production always has a host listening, so this stays test-only.
@@ -186,18 +174,18 @@ pub(crate) mod internals {
     pub(crate) struct DiscardedReports;
 
     impl RunReporter for DiscardedReports {
-        fn progress(&mut self, _progress: RunProgress) {}
+        fn progress(&mut self, _node_id: NodeId, _phase: RunPhase) {}
     }
 
     /// Records everything a run reports, in order, for tests that assert on live feedback.
     #[derive(Debug, Default)]
     pub(crate) struct CollectingReporter {
-        pub(crate) progress: Vec<RunProgress>,
+        pub(crate) progress: Vec<(NodeId, RunPhase)>,
     }
 
     impl RunReporter for CollectingReporter {
-        fn progress(&mut self, progress: RunProgress) {
-            self.progress.push(progress);
+        fn progress(&mut self, node_id: NodeId, phase: RunPhase) {
+            self.progress.push((node_id, phase));
         }
     }
 }

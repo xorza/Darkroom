@@ -8,6 +8,8 @@
 //! - [`drizzle`] — Fruchter & Hook variable-pixel reconstruction (dithered/super-resolution sets).
 //! - [`pipeline`] — end-to-end orchestration (`align_and_stack`, `calibrate_align_stack`).
 //! - [`progress`] — progress reporting shared by stacking stages.
+//! - [`frame_store`] — memory planning and the RAM/mmap frame storage the stages share.
+//! - [`stack_product`] — the combined image and the per-pixel planes beside it.
 
 pub(crate) mod calibration_masters;
 pub(crate) mod combine;

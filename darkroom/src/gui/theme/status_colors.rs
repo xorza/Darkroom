@@ -13,7 +13,7 @@ use crate::gui::theme::palette::Palette;
 /// outline in preferences, the status-bar message and `LogLevel::Error`.
 /// `warning` is `LogLevel::Warn` and an unconnected required port.
 /// `success` is the toolbar's run glyph.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub(crate) struct StatusColors {
     /// It worked / it ran — green.
     pub(crate) success: RgbaF32,
@@ -28,7 +28,7 @@ pub(crate) struct StatusColors {
 }
 
 impl StatusColors {
-    pub(super) fn from_palette(p: &Palette) -> Self {
+    pub(super) const fn from_palette(p: &Palette) -> Self {
         Self {
             success: p.status_success,
             info: p.status_info,

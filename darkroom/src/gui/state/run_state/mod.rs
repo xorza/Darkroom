@@ -16,19 +16,19 @@
 //! the next completed run. See the field docs for why a run record is not a
 //! node-keyed cache.
 //!
-//! A run's node statuses are keyed by execution id.
-//! [`RunState::apply_worker_status`] resolves each through the
-//! worker-confirmed [`CompiledGraph`] to the authoring node it came from —
-//! exactly one, and a report naming an id this install never emitted is a
-//! protocol violation rather than a node to skip. Logs attribute the same way.
+//! A run's node statuses are keyed by execution id, and every report resolves
+//! each through the worker-confirmed [`CompiledGraph`] to the authoring node it
+//! came from — exactly one, and a report naming an id this install never
+//! emitted is a protocol violation rather than a node to skip. Logs attribute
+//! the same way.
 //!
 //! One execution node per authored node and one report row per execution node,
 //! so a status is *assigned*, never folded: every write here is the last word
-//! on that node for that report. The two report kinds still differ in scope —
-//! the **completed** snapshot clears the previous run before writing, while
-//! live **patches** overwrite in place, so a node's displayed status is
+//! on that node for that report. The two run reports still differ in scope —
+//! a **completed** summary clears the previous run before writing, while live
+//! **progress** overwrites one node in place, so a node's displayed status is
 //! whichever report most recently mentioned it. Progress is a liveness cue and
-//! the completed snapshot is the authority that corrects it at the end.
+//! the completed summary is the authority that corrects it at the end.
 //!
 //! [`App`]: crate::gui::app::App
 
@@ -40,16 +40,16 @@ use palantir::Ui;
 
 use crate::core::document::Document;
 use crate::core::runtime_host::RuntimeHost;
-use crate::core::status::StatusLog;
+use crate::core::status::{StatusFamily, StatusLog};
 use scenarium::CompiledGraph;
+use scenarium::DynamicValue;
 use scenarium::LogLevel;
 use scenarium::NodeExecutionStatus;
 use scenarium::NodeId;
 use scenarium::RamUsage;
 use scenarium::RunError;
 use scenarium::WorkerActivity;
-use scenarium::WorkerStatus;
-use scenarium::WorkerStatusKind;
+use scenarium::{RunPhase, RunSummary};
 use scenarium::{WorkerError, WorkerReport};
 
 use crate::gui::state::preview_store::PreviewStore;
@@ -81,7 +81,7 @@ pub(crate) enum ExecStatus {
 
 /// Everything the editor knows about one node from the last run.
 #[derive(Default, Debug)]
-struct NodeRunState {
+pub(crate) struct NodeRunState {
     status: ExecStatus,
     logs: Vec<NodeLog>,
     /// Human-readable message for this run's failure. `None` unless the node
@@ -95,6 +95,20 @@ struct NodeRunState {
     /// Input ports the last run could not satisfy, by index on this node — the run's
     /// own verdict, so a port bound to a disabled or missing producer counts too.
     missing_inputs: Vec<usize>,
+}
+
+impl NodeRunState {
+    pub(crate) const fn status(&self) -> ExecStatus {
+        self.status
+    }
+
+    pub(crate) const fn ram(&self) -> RamUsage {
+        self.ram
+    }
+
+    pub(crate) fn missing_inputs(&self) -> &[usize] {
+        &self.missing_inputs
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -144,6 +158,10 @@ pub(crate) struct RunState {
     /// Explicit eviction clears this projection until the next
     /// run because successful eviction is fire-and-forget.
     pub(crate) cache_ram: RamUsage,
+    /// The values preview nodes published since the last frame, swapped in
+    /// from the worker's side and emptied into [`Self::previews`]. Kept so the
+    /// swap reuses its capacity.
+    published: HashMap<NodeId, DynamicValue>,
 }
 
 impl RunState {
@@ -164,7 +182,7 @@ impl RunState {
     /// the status and log projections it reads reflect the latest run.
     pub(crate) fn sync(
         &mut self,
-        runtime: &mut RuntimeHost,
+        runtime: &RuntimeHost,
         status: &mut StatusLog,
         ui: &Ui,
         document: &Document,
@@ -192,11 +210,8 @@ impl RunState {
     /// Reports only — a published *value* needs a texture allocated for it and
     /// is taken by [`Self::sync_previews`], so this stays a pure fold and names
     /// no `Ui`.
-    fn drain_reports(&mut self, runtime: &mut RuntimeHost, status: &mut StatusLog) {
-        // Owned, so the channel borrow is gone before the loop below needs
-        // `runtime` again.
-        let events = runtime.drain_worker();
-        for report in events {
+    fn drain_reports(&mut self, runtime: &RuntimeHost, status: &mut StatusLog) {
+        for report in runtime.drain_worker() {
             self.apply_report(report, status);
         }
     }
@@ -227,39 +242,34 @@ impl RunState {
                 if matches!(&error, WorkerError::Execution { .. }) {
                     self.clear();
                 }
-                status.error(error.to_string());
+                status.error(StatusFamily::Run, error.to_string());
             }
-            // Bound as `run` so it cannot shadow the `status` log this
-            // arm also writes — the two are unrelated and both want the
-            // obvious name.
-            WorkerReport::Status(run) => {
-                if let WorkerStatusKind::Completed {
-                    executed_node_count,
-                    cancelled,
-                    ..
-                } = run.kind
-                {
-                    if cancelled {
-                        tracing::info!("run cancelled after {executed_node_count} node(s)");
-                    }
-                    // A completed run supersedes any lingering failure message
-                    // from an earlier event-loop tick.
-                    status.error = None;
+            WorkerReport::Activity(activity) => self.activity = activity,
+            WorkerReport::Progress { node_id, phase } => self.apply_progress(node_id, phase),
+            WorkerReport::Completed(summary) => {
+                if summary.cancelled {
+                    tracing::info!(
+                        "run cancelled after {} node(s)",
+                        summary.executed_node_count
+                    );
                 }
-                self.apply_worker_status(&run);
+                // A completed run supersedes any lingering failure message
+                // from an earlier event-loop tick.
+                status.succeeded(StatusFamily::Run);
+                self.activity = summary.activity;
+                self.replace_results(&summary);
             }
         }
     }
 
-    pub(crate) fn status(&self, id: NodeId) -> ExecStatus {
-        self.nodes.get(&id).map(|n| n.status).unwrap_or_default()
+    /// Everything the last run said about `id`, or `None` when it said
+    /// nothing — one lookup for a reader that asks several things.
+    pub(crate) fn node(&self, id: NodeId) -> Option<&NodeRunState> {
+        self.nodes.get(&id)
     }
 
     pub(crate) fn logs(&self, id: NodeId) -> &[NodeLog] {
-        self.nodes
-            .get(&id)
-            .map(|n| n.logs.as_slice())
-            .unwrap_or(&[])
+        self.nodes.get(&id).map_or(&[], |n| n.logs.as_slice())
     }
 
     /// This run's failure message for a node. `None` unless it errored.
@@ -267,67 +277,25 @@ impl RunState {
         self.nodes.get(&id)?.error.as_deref()
     }
 
-    /// RAM this node's cached output currently holds (zero if it holds nothing).
-    /// Read into the scene each rebuild to drive the node body's memory readout.
-    pub(crate) fn ram(&self, id: NodeId) -> RamUsage {
-        self.nodes.get(&id).map(|n| n.ram).unwrap_or_default()
+    /// Live progress: assign the node's status as it arrives, overwriting
+    /// whatever the last report said — a node's newest status is its status,
+    /// and `Running` has to be replaceable by the finish that follows it. A
+    /// failure's message arrives with the completed summary.
+    fn apply_progress(&mut self, node_id: NodeId, phase: RunPhase) {
+        let compiled = self
+            .compiled
+            .as_ref()
+            .expect("worker reported node progress before installing a compiled graph");
+        assert_reported(compiled, node_id);
+        self.nodes.entry(node_id).or_default().status = match phase {
+            RunPhase::Started { at } => ExecStatus::Running(at),
+            RunPhase::Succeeded { elapsed_secs } => ExecStatus::Executed(elapsed_secs),
+            RunPhase::Failed { .. } => ExecStatus::Errored,
+        };
     }
 
-    /// The input ports the last run reported unsatisfied on this node. Read into the
-    /// scene each rebuild so only the ports that actually went unfed glow, rather than
-    /// every required one on a node the run flagged.
-    pub(crate) fn missing_inputs(&self, id: NodeId) -> &[usize] {
-        self.nodes
-            .get(&id)
-            .map(|n| n.missing_inputs.as_slice())
-            .unwrap_or(&[])
-    }
-
-    pub(crate) fn apply_worker_status(&mut self, update: &WorkerStatus) {
-        self.activity = update.activity;
-        match update.kind {
-            WorkerStatusKind::Activity => {}
-            WorkerStatusKind::Patch => self.apply_node_patch(update),
-            WorkerStatusKind::Completed { .. } => self.replace_results(update),
-        }
-    }
-
-    /// Live progress: assign each row's status to its authored node as it
-    /// arrives, overwriting whatever the last report said — a node's newest
-    /// status is its status, and `Running` has to be replaceable by the
-    /// `Executed` that follows it.
-    fn apply_node_patch(&mut self, update: &WorkerStatus) {
-        let compiled = Arc::clone(
-            self.compiled
-                .as_ref()
-                .expect("worker reported node status before installing a compiled graph"),
-        );
-        for node in &update.nodes {
-            let Some(status) = &node.status else {
-                continue;
-            };
-            let status = match status {
-                NodeExecutionStatus::Running { at } => ExecStatus::Running(*at),
-                NodeExecutionStatus::Cached => ExecStatus::Cached,
-                NodeExecutionStatus::Executed { elapsed_secs } => {
-                    ExecStatus::Executed(*elapsed_secs)
-                }
-                // Progress only ever reports a node's lambda starting or finishing, so a
-                // live patch never carries the planner's missing-input verdict; the ports
-                // arrive with the completed snapshot.
-                NodeExecutionStatus::MissingInputs { .. } => ExecStatus::MissingInputs,
-                NodeExecutionStatus::Errored { error, .. } => {
-                    self.record_error(&compiled, node.node_id, error);
-                    ExecStatus::Errored
-                }
-            };
-            assert_reported(&compiled, node.node_id);
-            self.nodes.entry(node.node_id).or_default().status = status;
-        }
-    }
-
-    /// Replace the last completed run with the worker's authoritative snapshot.
-    fn replace_results(&mut self, update: &WorkerStatus) {
+    /// Replace the last completed run with the worker's authoritative summary.
+    fn replace_results(&mut self, update: &RunSummary) {
         let compiled = Arc::clone(
             self.compiled
                 .as_ref()
@@ -342,29 +310,25 @@ impl RunState {
             node.missing_inputs.clear();
         }
         for node in &update.nodes {
+            assert_reported(&compiled, node.node_id);
             if let Some(status) = &node.status {
                 let status = match status {
-                    NodeExecutionStatus::Running { .. } => {
-                        panic!("completed worker status contains a running node")
-                    }
                     NodeExecutionStatus::Cached => ExecStatus::Cached,
                     NodeExecutionStatus::Executed { elapsed_secs } => {
                         ExecStatus::Executed(*elapsed_secs)
                     }
                     NodeExecutionStatus::MissingInputs { ports } => {
-                        self.record_missing_inputs(&compiled, node.node_id, ports);
+                        self.record_missing_inputs(node.node_id, ports);
                         ExecStatus::MissingInputs
                     }
-                    NodeExecutionStatus::Errored { error, .. } => {
-                        self.record_error(&compiled, node.node_id, error);
+                    NodeExecutionStatus::Errored { error } => {
+                        self.record_error(node.node_id, error);
                         ExecStatus::Errored
                     }
                 };
-                assert_reported(&compiled, node.node_id);
                 self.nodes.entry(node.node_id).or_default().status = status;
             }
             if node.ram.total() > 0 {
-                assert_reported(&compiled, node.node_id);
                 self.nodes.entry(node.node_id).or_default().ram = node.ram;
             }
         }
@@ -424,13 +388,7 @@ impl RunState {
 
     /// Record the ports one node went unfed on. The run's own verdict is the
     /// whole list, so it replaces rather than unions.
-    fn record_missing_inputs(
-        &mut self,
-        compiled: &CompiledGraph,
-        node_id: NodeId,
-        ports: &[usize],
-    ) {
-        assert_reported(compiled, node_id);
+    fn record_missing_inputs(&mut self, node_id: NodeId, ports: &[usize]) {
         let slot = self.nodes.entry(node_id).or_default();
         slot.missing_inputs.clear();
         slot.missing_inputs.extend_from_slice(ports);
@@ -438,8 +396,7 @@ impl RunState {
 
     /// Record one run error's message against the node that failed, so the
     /// inspector can show the actual cause instead of a bare "errored".
-    fn record_error(&mut self, compiled: &CompiledGraph, node_id: NodeId, error: &RunError) {
-        assert_reported(compiled, node_id);
+    fn record_error(&mut self, node_id: NodeId, error: &RunError) {
         self.nodes.entry(node_id).or_default().error = Some(error.to_string());
     }
 
@@ -452,14 +409,14 @@ impl RunState {
     /// what to upload, or it is taken in and immediately reconsidered against
     /// a document that has already been walked.
     ///
-    /// Nothing to resolve on the way in, unlike the old pinned push: a preview
-    /// is entry-only, so its execution id attributes to exactly one authored
-    /// node and that node is the widget. A value whose id belongs to an
-    /// earlier compile is dropped — the node it named may not exist any more,
-    /// and a preview only ever shows the current run's value anyway.
-    ///
+    /// Nothing to resolve on the way in: a preview is entry-only, so its
+    /// execution id attributes to exactly one authored node and that node is
+    /// the widget. A value whose id belongs to an earlier compile is dropped —
+    /// the node it named may not exist any more, and a preview only ever shows
+    /// the current run's value anyway.
     fn sync_previews(&mut self, runtime: &RuntimeHost, ui: &Ui, document: &Document) {
-        for (node_id, value) in runtime.drain_previews() {
+        runtime.drain_previews(&mut self.published);
+        for (node_id, value) in self.published.drain() {
             // The gate's borrow ends with the condition, so the store can be
             // written in the body without cloning the compile to release it.
             if self
@@ -483,6 +440,23 @@ impl RunState {
     pub(crate) fn clear(&mut self) {
         self.nodes.clear();
         self.previews.entries.clear();
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use scenarium::{NodeId, RamUsage};
+
+    use crate::gui::state::run_state::{ExecStatus, NodeRunState, RunState};
+
+    impl RunState {
+        pub(crate) fn status(&self, id: NodeId) -> ExecStatus {
+            self.node(id).map(NodeRunState::status).unwrap_or_default()
+        }
+
+        pub(crate) fn ram(&self, id: NodeId) -> RamUsage {
+            self.node(id).map(NodeRunState::ram).unwrap_or_default()
+        }
     }
 }
 

@@ -1,34 +1,29 @@
-//! NEON color-preserving arcsinh stretch (aarch64). The aarch64 counterpart of
-//! [`crate::image_ops::stretching::simd::avx2`]: the default `auto_asinh` stretch spends ~30% of its
-//! time in a per-pixel libm `asinhf` (one call per pixel on the combined intensity). This vectorizes
-//! the whole color-preserving pixel op — intensity, `asinh` curve, channel scale, highlight cap —
-//! four pixels at a time, in place, with `asinh(x) = logf(x + √(x²+1))` over a Cephes single-precision
-//! `logf` (≈1–2 ULP, i.e. f32-exact). The channels are contiguous planes, so loads and stores are
-//! plain `vld1q_f32`/`vst1q_f32`. Note this is the one place planar storage bought aarch64 nothing:
-//! on interleaved data `vld3q_f32`/`vst3q_f32` deinterleaved in hardware, one instruction each,
-//! where AVX2 needed three gathers and a 24-store scalar loop. NEON is mandatory on aarch64, so the
-//! caller dispatches on `cfg(target_arch)` with no runtime feature check.
+//! NEON arcsinh stretch (aarch64), four samples at a time: the plane curve, and the whole
+//! color-preserving pixel op — intensity, curve, channel scale, highlight cap. NEON is mandatory on
+//! aarch64, so the caller dispatches on `cfg(target_arch)` with no runtime feature check.
 
 use std::arch::aarch64::*;
 
 use crate::image_ops::rgb::Rgb;
 
 use crate::image_ops::stretching::simd::{
-    LOG_P0, LOG_P1, LOG_P2, LOG_P3, LOG_P4, LOG_P5, LOG_P6, LOG_P7, LOG_P8, LOG_Q1, LOG_Q2, SQRTHF,
+    ASINH_LOG_FROM, LOG_P0, LOG_P1, LOG_P2, LOG_P3, LOG_P4, LOG_P5, LOG_P6, LOG_P7, LOG_P8, LOG_Q1,
+    LOG_Q2, SQRTHF,
 };
-use crate::image_ops::stretching::{AsinhCurve, color_preserve_pixel};
+use crate::image_ops::stretching::{AsinhCurve, ToneCurve, color_preserve_pixel};
+use std::f32::consts::LN_2;
 
-/// Vectorized single-precision `logf` for 4 lanes (Cephes). Valid for `x > 0`; callers here only
-/// ever pass `x = arg + √(arg²+1) ≥ 1`.
+/// Vectorized single-precision `logf` for 4 lanes (Cephes), ~1 ULP. Valid for `x > 0`; other lanes
+/// give a value [`asinh_neon`] discards.
 #[inline]
 unsafe fn logf_neon(x: float32x4_t) -> float32x4_t {
     unsafe {
-        // frexp: split x = m · 2^e with the mantissa m in [0.5, 1). x ≥ 1 so the sign bit is clear,
-        // making the arithmetic shift of the exponent field equivalent to a logical one.
+        // frexp: split x = m · 2^e with the mantissa m in [0.5, 1). For x > 0 the sign bit is
+        // clear, making the arithmetic shift of the exponent field equivalent to a logical one.
         let xi = vreinterpretq_s32_f32(x);
         let e = vcvtq_f32_s32(vsubq_s32(vshrq_n_s32::<23>(xi), vdupq_n_s32(126)));
         let m = vreinterpretq_f32_s32(vorrq_s32(
-            vandq_s32(xi, vdupq_n_s32(0x807f_ffffu32 as i32)),
+            vandq_s32(xi, vdupq_n_s32(0x807f_ffff_u32.cast_signed())),
             vdupq_n_s32(0x3f00_0000),
         ));
 
@@ -59,13 +54,54 @@ unsafe fn logf_neon(x: float32x4_t) -> float32x4_t {
     }
 }
 
-/// Vectorized `asinh(x) = logf(x + √(x²+1))`, exact for all real x (the argument to logf is always
-/// positive).
+/// Vectorized `asinh(x)` for `x ≥ 0`, to a few ULP relative at every magnitude — the steps the
+/// tests' `asinh_pos_scalar` spells out one lane at a time. Negative `x` gives a non-positive value
+/// or NaN, both of which the callers' clamp to `[0, 1]` turns to 0.
 #[inline]
 unsafe fn asinh_neon(x: float32x4_t) -> float32x4_t {
     unsafe {
-        let root = vsqrtq_f32(vfmaq_f32(vdupq_n_f32(1.0), x, x));
-        logf_neon(vaddq_f32(x, root))
+        let one = vdupq_n_f32(1.0);
+        let s = vmulq_f32(x, x);
+        let u = vaddq_f32(
+            x,
+            vdivq_f32(s, vaddq_f32(one, vsqrtq_f32(vaddq_f32(one, s)))),
+        );
+        let w = vaddq_f32(one, u);
+        let dw = vsubq_f32(w, one);
+        // One `logf` serves both forms: of `1 + u` below the switch, of `x` past it.
+        let large = vcgtq_f32(x, vdupq_n_f32(ASINH_LOG_FROM));
+        let log = logf_neon(vbslq_f32(large, x, w));
+        let log1p = vbslq_f32(
+            vceqq_f32(dw, vdupq_n_f32(0.0)),
+            u,
+            vmulq_f32(log, vdivq_f32(u, dw)),
+        );
+        vbslq_f32(large, vaddq_f32(log, vdupq_n_f32(LN_2)), log1p)
+    }
+}
+
+/// The arcsinh plane curve over one band, in place: `clamp(asinh(v / β) / norm, 0, 1)`. Four
+/// samples per iteration; [`AsinhCurve::eval`] finishes the tail.
+///
+/// # Safety
+/// Caller must be on aarch64 (NEON is always available there).
+pub(super) unsafe fn asinh_plane_neon(plane: &mut [f32], inv_beta: f32, inv_norm: f32) {
+    unsafe {
+        let (vib, vin) = (vdupq_n_f32(inv_beta), vdupq_n_f32(inv_norm));
+        let (zero, one) = (vdupq_n_f32(0.0), vdupq_n_f32(1.0));
+        let mut p = 0;
+        while p + 4 <= plane.len() {
+            let v = vld1q_f32(plane.as_ptr().add(p));
+            let curved = vmulq_f32(asinh_neon(vmulq_f32(v, vib)), vin);
+            // The `nm` forms return the number for a NaN lane: it becomes black.
+            let out = vminnmq_f32(vmaxnmq_f32(curved, zero), one);
+            vst1q_f32(plane.as_mut_ptr().add(p), out);
+            p += 4;
+        }
+        let curve = AsinhCurve { inv_beta, inv_norm };
+        for value in &mut plane[p..] {
+            *value = curve.eval(*value);
+        }
     }
 }
 
@@ -100,7 +136,7 @@ pub(super) unsafe fn asinh_color_preserve_neon(
 
             let intensity = vmulq_f32(vaddq_f32(vaddq_f32(r, g), b), third);
             let curved = asinh_neon(vmulq_f32(intensity, vib));
-            let e = vminq_f32(vmaxq_f32(vmulq_f32(curved, vin), zero), one);
+            let e = vminnmq_f32(vmaxnmq_f32(vmulq_f32(curved, vin), zero), one);
             // scale = eval/intensity where intensity > 0, else 0 (sub-background pixels → black).
             let pos = vcgtq_f32(intensity, zero);
             let scale = vbslq_f32(pos, vdivq_f32(e, intensity), zero);
@@ -112,9 +148,11 @@ pub(super) unsafe fn asinh_color_preserve_neon(
             let maxc = vmaxq_f32(vmaxq_f32(nr, ng), nb);
             let cap = vbslq_f32(vcgtq_f32(maxc, one), vdivq_f32(one, maxc), one);
 
-            vst1q_f32(red.as_mut_ptr().add(p), vmulq_f32(nr, cap));
-            vst1q_f32(green.as_mut_ptr().add(p), vmulq_f32(ng, cap));
-            vst1q_f32(blue.as_mut_ptr().add(p), vmulq_f32(nb, cap));
+            // A channel below black, possible beside a positive intensity, clamps to 0.
+            let out = |v| vmaxq_f32(vmulq_f32(v, cap), zero);
+            vst1q_f32(red.as_mut_ptr().add(p), out(nr));
+            vst1q_f32(green.as_mut_ptr().add(p), out(ng));
+            vst1q_f32(blue.as_mut_ptr().add(p), out(nb));
             p += 4;
         }
 
@@ -132,69 +170,6 @@ pub(super) unsafe fn asinh_color_preserve_neon(
             green[p] = out.g;
             blue[p] = out.b;
             p += 1;
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::image_ops::stretching::simd::neon::*;
-
-    #[test]
-    fn neon_matches_scalar_reference() {
-        let beta = 0.05f32;
-        let inv_beta = 1.0 / beta;
-        let inv_norm = 1.0 / inv_beta.asinh();
-
-        // 19 pixels per plane (not a multiple of 4 → exercises the SIMD body and the scalar tail), spanning
-        // background, midtones, above-unity stars, exact zero, a tiny value, and a sub-background
-        // pixel whose channels sum to ≤ 0 (must map to black).
-        let pixels: Vec<[f32; 3]> = vec![
-            [0.02, 0.018, 0.021],
-            [0.05, 0.04, 0.045],
-            [0.2, 0.1, 0.1],
-            [0.9, 0.45, 0.45],
-            [3.0, 2.0, 1.0],
-            [1.5, 1.5, 1.5],
-            [0.0, 0.0, 0.0],
-            [1e-5, 1e-5, 1e-5],
-            [0.3, 0.0, 0.0],
-            [-0.05, -0.05, -0.05],
-            [0.12, 0.34, 0.07],
-            [0.01, 0.5, 0.9],
-            [5.0, 0.01, 0.01],
-            [0.04, 0.04, 0.04],
-            [0.6, 0.6, 0.59],
-            [0.15, 0.15, 0.16],
-            [0.08, 0.02, 0.5],
-            [2.5, 2.4, 2.6],
-            [0.07, 0.06, 0.08],
-        ];
-        // Planes, not interleaved samples — the kernel now takes one slice per channel.
-        let mut r: Vec<f32> = pixels.iter().map(|px| px[0]).collect();
-        let mut g: Vec<f32> = pixels.iter().map(|px| px[1]).collect();
-        let mut b: Vec<f32> = pixels.iter().map(|px| px[2]).collect();
-        unsafe { asinh_color_preserve_neon(&mut r, &mut g, &mut b, inv_beta, inv_norm) };
-
-        // Reference: the production scalar path (`color_preserve_pixel` ∘ `AsinhCurve`), so the SIMD
-        // body is pinned to exactly what the non-NEON path produces.
-        let curve = AsinhCurve { inv_beta, inv_norm };
-        for (i, px) in pixels.iter().enumerate() {
-            let exp = color_preserve_pixel(
-                Rgb {
-                    r: px[0],
-                    g: px[1],
-                    b: px[2],
-                },
-                &curve,
-            );
-            let got = [r[i], g[i], b[i]];
-            for (g, e) in got.iter().zip([exp.r, exp.g, exp.b]) {
-                assert!(
-                    (g - e).abs() < 1e-5,
-                    "pixel {i} {px:?}: simd {g} vs scalar {e}"
-                );
-            }
         }
     }
 }

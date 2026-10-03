@@ -1,6 +1,7 @@
 //! Benchmarks for full star detection pipeline.
 //!
-//! Run with: `cargo test -p lumos --release bench_star_detection -- --ignored --nocapture`
+//! Run with: `cargo test -p lumos --release --features bench bench_star_detection -- --ignored
+//! --nocapture`
 
 use crate::testing::prelude::*;
 use ::quickbench::quick_bench;
@@ -11,17 +12,14 @@ use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::config::background_config::{
     BackgroundConfig, BackgroundRefinement,
 };
-use crate::stacking::star_detection::config::detection_config::{Connectivity, DetectionConfig};
+use crate::stacking::star_detection::config::detection_config::{
+    Connectivity, Deblend, DetectionConfig,
+};
 use crate::stacking::star_detection::config::filter_config::FilterConfig;
-use crate::stacking::star_detection::config::fwhm_config::FwhmConfig;
+use crate::stacking::star_detection::config::fwhm_config::{FwhmConfig, FwhmMode};
 use crate::stacking::star_detection::config::measurement_config::{
     CentroidMethod, LocalBackgroundMethod, MeasurementConfig,
 };
-use crate::stacking::star_detection::detector::stages::detect::internals::collect_components;
-use crate::stacking::star_detection::detector::stages::filter::internals::remove_duplicate_stars;
-use crate::stacking::star_detection::labeling::LabelMap;
-use crate::stacking::star_detection::roundness::Roundness;
-use crate::stacking::star_detection::star::Star;
 use crate::testing::init_tracing;
 use crate::testing::synthetic::fixtures::{cluster_field, star_field};
 
@@ -30,39 +28,34 @@ fn bench_detect_6k_globular_cluster(b: ::quickbench::Bencher) {
     init_tracing();
 
     // 6K globular cluster with 50000 stars - extreme crowding
-    let pixels = cluster_field(Size2us::new(6144, 6144), 50000, 42)
-        .image
-        .channel(0)
-        .clone();
-    let image = LinearImage::from_pixels(
-        ImageDimensions::new((pixels.width(), pixels.height()), 1),
-        pixels.into_vec(),
-    );
+    let image = cluster_field(Size2us::new(6144, 6144), 50000, 42).image;
 
     // Fully expanded config - adjust values here to experiment
     let config = Config {
         background: BackgroundConfig {
             tile_size: 64,
             sigma_clip_iterations: 5,
-            refinement: BackgroundRefinement::Iterative { iterations: 2 },
-            mask_dilation: 3,
+            refinement: BackgroundRefinement::Iterative {
+                iterations: 2,
+                mask_dilation: 3,
+            },
         },
         detection: DetectionConfig {
             sigma_threshold: 4.0,
             connectivity: Connectivity::Eight,
             psf_axis_ratio: 1.0,
             psf_angle: 0.0,
+            deblend: Deblend::MultiThreshold {
+                n_thresholds: 32,
+                min_contrast: 0.005,
+            },
             deblend_min_separation: 2,
-            deblend_min_prominence: 0.3,
-            deblend_n_thresholds: 32,
-            deblend_min_contrast: 0.005,
             min_area: 5,
             max_area: 500,
             edge_margin: 10,
         },
         fwhm: FwhmConfig {
-            expected: 4.0,
-            auto_estimate: false,
+            mode: Some(FwhmMode::Fixed(4.0)),
             min_stars: 10,
             estimation_sigma_factor: 2.0,
         },
@@ -76,7 +69,7 @@ fn bench_detect_6k_globular_cluster(b: ::quickbench::Bencher) {
             max_eccentricity: 0.6,
             max_sharpness: 0.7,
             max_roundness: 1.0,
-            max_fwhm_deviation: 3.0,
+            max_fwhm_deviation: Some(3.0),
             duplicate_min_separation: 8.0,
         },
     };
@@ -89,14 +82,7 @@ fn bench_detect_6k_globular_cluster(b: ::quickbench::Bencher) {
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_detect_4k_dense(b: ::quickbench::Bencher) {
     // 4K image with 2000 stars
-    let pixels = star_field(Size2us::new(4096, 4096), 2000, 42)
-        .image
-        .channel(0)
-        .clone();
-    let image = LinearImage::from_pixels(
-        ImageDimensions::new((pixels.width(), pixels.height()), 1),
-        pixels.into_vec(),
-    );
+    let image = star_field(Size2us::new(4096, 4096), 2000, 42).image;
     let mut detector = StarDetector::default();
 
     b.bench(|| black_box(detector.detect(black_box(&image))));
@@ -105,108 +91,8 @@ fn bench_detect_4k_dense(b: ::quickbench::Bencher) {
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_detect_1k_sparse(b: ::quickbench::Bencher) {
     // 1K image with 100 stars (sparse field)
-    let pixels = star_field(Size2us::new(1024, 1024), 100, 42)
-        .image
-        .channel(0)
-        .clone();
-    let image = LinearImage::from_pixels(
-        ImageDimensions::new((pixels.width(), pixels.height()), 1),
-        pixels.into_vec(),
-    );
+    let image = star_field(Size2us::new(1024, 1024), 100, 42).image;
     let mut detector = StarDetector::default();
 
     b.bench(|| black_box(detector.detect(black_box(&image))));
-}
-
-/// `count` stars scattered over a `width` × `height` frame, every property randomized across the
-/// range a real detection would produce.
-fn random_stars(count: usize, width: f64, height: f64) -> Vec<Star> {
-    use rand::prelude::*;
-
-    let mut rng = StdRng::seed_from_u64(42);
-    (0..count)
-        .map(|_| {
-            Star::at(DVec2::new(
-                rng.random_range(0.0..width),
-                rng.random_range(0.0..height),
-            ))
-            .with_flux(rng.random_range(100.0..10000.0))
-            .with_fwhm(rng.random_range(2.0..6.0))
-            .with_eccentricity(rng.random_range(0.0..0.3))
-            .with_snr(rng.random_range(10.0..100.0))
-            .with_peak(rng.random_range(0.1..0.9))
-            .with_sharpness(rng.random_range(0.2..0.5))
-            .with_roundness(Roundness {
-                ground: rng.random_range(-0.1..0.1),
-                sround: rng.random_range(-0.1..0.1),
-            })
-        })
-        .collect()
-}
-
-fn bench_deduplication(b: ::quickbench::Bencher, base_stars: Vec<Star>) {
-    b.bench(|| {
-        let mut stars = base_stars.clone();
-        // Sort by flux — the algorithm's documented precondition.
-        stars.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
-        black_box(remove_duplicate_stars(&mut stars, 5.0))
-    });
-}
-
-/// Benchmark remove_duplicate_stars with varying star counts.
-/// Simulates dense star field scenario similar to rho-opiuchi detection.
-#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
-fn bench_remove_duplicate_stars_5000(b: ::quickbench::Bencher) {
-    bench_deduplication(b, random_stars(5000, 4096.0, 4096.0));
-}
-
-#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_remove_duplicate_stars_10000(b: ::quickbench::Bencher) {
-    bench_deduplication(b, random_stars(10000, 8000.0, 6000.0));
-}
-
-fn component_label_map(size: Size2us, components: usize) -> LabelMap {
-    let mut labels = Buffer2::new_filled(size.width, size.height, 0u32);
-    let columns = size.width / 4;
-    let capacity = columns * (size.height / 4);
-    assert!((1..=capacity).contains(&components));
-    for component in 0..components {
-        let slot = component * capacity / components;
-        let base_x = slot % columns * 4;
-        let base_y = slot / columns * 4;
-        for y in base_y..base_y + 3 {
-            for x in base_x..base_x + 3 {
-                labels[(x, y)] = (component + 1) as u32;
-            }
-        }
-    }
-    LabelMap::from_raw(labels, components)
-}
-
-#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
-fn bench_components_4k_sparse(b: ::quickbench::Bencher) {
-    let labels = component_label_map(Size2us::new(4096, 4096), 2_000);
-    b.bench(|| black_box(collect_components(black_box(&labels))));
-}
-
-#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_components_6k_crowded(b: ::quickbench::Bencher) {
-    let labels = component_label_map(Size2us::new(6144, 6144), 50_000);
-    b.bench(|| black_box(collect_components(black_box(&labels))));
-}
-
-#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_components_2k_low_threshold(b: ::quickbench::Bencher) {
-    let labels = component_label_map(Size2us::new(2048, 2048), 100_000);
-    b.bench(|| black_box(collect_components(black_box(&labels))));
-}
-
-#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
-fn bench_components_4k_crossover(b: ::quickbench::Bencher) {
-    for components in [100, 500, 2_000, 10_000, 25_000, 50_000, 100_000] {
-        let labels = component_label_map(Size2us::new(4096, 4096), components);
-        b.bench_labeled(&components.to_string(), || {
-            black_box(collect_components(black_box(&labels)))
-        });
-    }
 }

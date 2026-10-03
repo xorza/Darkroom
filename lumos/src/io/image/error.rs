@@ -1,4 +1,5 @@
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
@@ -27,17 +28,23 @@ pub enum ImageError {
     Raw { path: PathBuf, reason: String },
 
     #[error("Failed to read file '{path}': {source}")]
-    Io {
-        path: PathBuf,
-        source: std::io::Error,
-    },
+    Io { path: PathBuf, source: io::Error },
 
-    #[error("Unsupported file extension: '{extension}'")]
-    UnsupportedFormat { extension: String },
+    #[error("No decoder reads the extension of '{path}'")]
+    UnsupportedFormat { path: PathBuf },
 
     #[error("Scientific image input '{path}' was rejected: {reason}")]
     ScientificInputRejected { path: PathBuf, reason: String },
 
     #[error("Failed to save image: {source}")]
     Save { source: imaginarium::Error },
+}
+
+impl ImageError {
+    /// The load of `path` stopped by its cancel token.
+    pub(crate) fn cancelled(path: &Path) -> Self {
+        Self::Cancelled {
+            path: path.to_path_buf(),
+        }
+    }
 }

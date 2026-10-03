@@ -1,6 +1,9 @@
 //! Pixel extent of a 2D grid.
 
 use crate::math::vec2us::Vec2us;
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
 
 /// How many columns and rows a 2D grid has.
 ///
@@ -23,7 +26,7 @@ impl Size2us {
     /// Pixels the grid holds. Panics rather than wrapping: a count that overflows `usize` means
     /// the dimensions are nonsense, and every buffer sized from it would be too small.
     #[inline]
-    pub fn pixel_count(self) -> usize {
+    pub const fn pixel_count(self) -> usize {
         self.width
             .checked_mul(self.height)
             .expect("grid pixel count must fit in usize")
@@ -61,8 +64,8 @@ impl Size2us {
     }
 }
 
-impl std::fmt::Display for Size2us {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for Size2us {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         write!(formatter, "{}x{}", self.width, self.height)
     }
 }

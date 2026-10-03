@@ -1,8 +1,8 @@
-use imaginarium::{Buffer2, ChannelCount, Image, PlanarPixels};
-use rayon::prelude::*;
+use imaginarium::{Buffer2, ChannelCount, Image};
 
 use crate::io::image::image_dimensions::ImageDimensions;
-use crate::math::sum;
+use std::array;
+use std::slice;
 
 /// Planar floating-point pixels for a monochrome or RGB image.
 #[derive(Debug, Clone)]
@@ -25,11 +25,12 @@ impl LinearPixels {
             return Buffer2::new(dimensions.width(), dimensions.height(), pixels).into();
         }
 
-        let mut r = Buffer2::new_default(dimensions.width(), dimensions.height());
-        let mut g = Buffer2::new_default(dimensions.width(), dimensions.height());
-        let mut b = Buffer2::new_default(dimensions.width(), dimensions.height());
-        deinterleave_rgb(&pixels, r.pixels_mut(), g.pixels_mut(), b.pixels_mut());
-        [r, g, b].into()
+        // Keeps the allocation when its capacity is a whole number of pixels, else copies once.
+        let pixels: Vec<[f32; 3]> = bytemuck::try_cast_vec(pixels)
+            .unwrap_or_else(|(_, pixels)| bytemuck::pod_collect_to_vec(&pixels));
+        Buffer2::new(dimensions.width(), dimensions.height(), pixels)
+            .deinterleave()
+            .into()
     }
 
     pub(crate) fn from_planar_channels(
@@ -81,25 +82,23 @@ impl LinearPixels {
         if dimensions.is_grayscale() {
             Buffer2::new_default(dimensions.width(), dimensions.height()).into()
         } else {
-            std::array::from_fn(|_| Buffer2::new_default(dimensions.width(), dimensions.height()))
-                .into()
+            array::from_fn(|_| Buffer2::new_default(dimensions.width(), dimensions.height())).into()
         }
     }
 
     pub(crate) fn from_f32_image(image: &Image) -> Self {
         match image.desc().color_format.channel_count {
             ChannelCount::L => {
-                let planar: PlanarPixels<1, f32> = image
+                let [plane]: [Buffer2<f32>; 1] = image
                     .try_into()
                     .expect("L_F32 image deinterleaves to one f32 plane");
-                let [plane] = planar.planes;
                 plane.into()
             }
             ChannelCount::Rgb => {
-                let planar: PlanarPixels<3, f32> = image
+                let planes: [Buffer2<f32>; 3] = image
                     .try_into()
                     .expect("RGB_F32 image deinterleaves to three f32 planes");
-                planar.planes.into()
+                planes.into()
             }
             ChannelCount::Rgba => panic!("RGBA image must be converted to RGB_F32 first"),
         }
@@ -139,7 +138,7 @@ impl LinearPixels {
 
     pub(crate) fn planes_mut(&mut self) -> impl Iterator<Item = &mut Buffer2<f32>> {
         match self {
-            LinearPixels::L(plane) => std::slice::from_mut(plane).iter_mut(),
+            LinearPixels::L(plane) => slice::from_mut(plane).iter_mut(),
             LinearPixels::Rgb(planes) => planes.iter_mut(),
         }
     }
@@ -156,7 +155,7 @@ impl LinearPixels {
         }
     }
 
-    pub(crate) fn channel_count(&self) -> usize {
+    pub(crate) const fn channel_count(&self) -> usize {
         match self {
             LinearPixels::L(_) => 1,
             LinearPixels::Rgb(_) => 3,
@@ -166,26 +165,6 @@ impl LinearPixels {
     pub(crate) fn dimensions(&self) -> ImageDimensions {
         let plane = self.channel(0);
         ImageDimensions::new((plane.width(), plane.height()), self.channel_count())
-    }
-
-    pub(crate) fn mean(&self) -> f32 {
-        // The partial sums combine in f64 and nothing rounds until the end. Rounding each chunk to
-        // f32 first would put one narrow rounding per 8192 pixels between a plane and its mean —
-        // ~2900 of them on a 24MP frame — which is the error the f64 accumulator exists to avoid.
-        fn parallel_sum(values: &[f32]) -> f64 {
-            values.par_chunks(8192).map(sum::sum_f32).sum()
-        }
-
-        match self {
-            LinearPixels::L(plane) => {
-                debug_assert!(!plane.is_empty());
-                (parallel_sum(plane) / plane.len() as f64) as f32
-            }
-            LinearPixels::Rgb([r, g, b]) => {
-                let total = parallel_sum(r) + parallel_sum(g) + parallel_sum(b);
-                (total / (r.len() + g.len() + b.len()) as f64) as f32
-            }
-        }
     }
 
     pub(crate) fn into_l(self) -> Buffer2<f32> {
@@ -228,48 +207,6 @@ impl From<&LinearPixels> for Image {
         match pixels {
             LinearPixels::L(plane) => Image::from([plane]),
             LinearPixels::Rgb(planes) => Image::from(planes.each_ref()),
-        }
-    }
-}
-
-fn deinterleave_rgb(interleaved: &[f32], r: &mut [f32], g: &mut [f32], b: &mut [f32]) {
-    debug_assert_eq!(interleaved.len(), r.len() * 3);
-    debug_assert_eq!(r.len(), g.len());
-    debug_assert_eq!(g.len(), b.len());
-
-    r.par_iter_mut()
-        .zip(g.par_iter_mut())
-        .zip(b.par_iter_mut())
-        .enumerate()
-        .for_each(|(index, ((r, g), b))| {
-            let source = index * 3;
-            *r = interleaved[source];
-            *g = interleaved[source + 1];
-            *b = interleaved[source + 2];
-        });
-}
-
-#[cfg(test)]
-pub(crate) mod internals {
-    use rayon::prelude::*;
-
-    use crate::io::image::linear_pixels::LinearPixels;
-
-    pub(crate) fn into_interleaved_pixels(pixels: LinearPixels) -> Vec<f32> {
-        match pixels {
-            LinearPixels::L(plane) => plane.into_vec(),
-            LinearPixels::Rgb([r, g, b]) => {
-                let mut interleaved = vec![0.0; r.len() * 3];
-                interleaved
-                    .par_chunks_mut(3)
-                    .enumerate()
-                    .for_each(|(index, rgb)| {
-                        rgb[0] = r[index];
-                        rgb[1] = g[index];
-                        rgb[2] = b[index];
-                    });
-                interleaved
-            }
         }
     }
 }

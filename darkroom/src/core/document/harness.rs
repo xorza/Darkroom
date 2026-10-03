@@ -85,31 +85,13 @@ impl DocFixture {
     /// badges, both port columns, the const editor on the unbound input), and
     /// a port index means the same thing on every one of them.
     pub(crate) fn probes(n: usize) -> Self {
-        let probe = testing::with_stub_lambda(
-            Func::new(FuncId::unique(), "probe")
-                .pure()
-                .input(FuncInput::optional("a", DataType::Int))
-                .output(FuncOutput::new("out", DataType::Int)),
-        );
+        let probe = testing::stub_func(FuncId::unique(), "probe")
+            .pure()
+            .input(FuncInput::optional("a", DataType::Int))
+            .output(FuncOutput::new("out", DataType::Int));
         let mut fixture = Self::default();
         for _ in 0..n {
             fixture.add(&probe);
-        }
-        fixture
-    }
-
-    /// Nodes at caller-chosen ids and exact positions, each from a func no
-    /// library holds — so they resolve as portless stubs. Enough for the tests
-    /// that read only a node's identity and where it sits, and that need to
-    /// name the ids before the document exists.
-    pub(crate) fn stubs(nodes: impl IntoIterator<Item = (NodeId, Vec2)>) -> Self {
-        let mut fixture = Self::default();
-        for (node_id, pos) in nodes {
-            fixture
-                .doc
-                .graph
-                .insert(node_id, Node::new(NodeKind::Func(FuncId::unique())));
-            place(&mut fixture.doc.main_view, node_id, pos);
         }
         fixture
     }
@@ -131,12 +113,15 @@ impl DocFixture {
     /// holds — a portless stub, for the tests that read only a node's identity
     /// and where it sits.
     pub(crate) fn stub_at(&mut self, pos: Vec2) -> NodeId {
-        let node_id = self
-            .doc
-            .graph
-            .add(Node::new(NodeKind::Func(FuncId::unique())));
+        let node_id = self.doc.graph.add(Self::stub_node());
         place(&mut self.doc.main_view, node_id, pos);
         node_id
+    }
+
+    /// A `Func`-kind node naming a func no library holds — what
+    /// [`Self::stub_at`] places, for a test that adds it itself.
+    pub(crate) fn stub_node() -> Node {
+        Node::new(NodeKind::Func(FuncId::unique()))
     }
 
     /// The `i`th node in placement order — the order the constructors add in,

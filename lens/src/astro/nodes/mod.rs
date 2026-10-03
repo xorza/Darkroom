@@ -14,7 +14,10 @@ use scenarium::{Library, TypeEntry};
 use crate::astro::config;
 use crate::astro::masters::MASTERS_TYPE_ID;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The ONNX files the ML nodes load. Serializable so a frontend can persist
+/// it as it stands; a missing field reads as its default.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct MlModelPaths {
     pub denoise: PathBuf,
     pub star_removal: PathBuf,
@@ -31,7 +34,7 @@ impl Default for MlModelPaths {
 
 pub fn astro_library(model_paths: &MlModelPaths) -> Library {
     let mut library = Library::default();
-    library.register_type(*MASTERS_TYPE_ID, TypeEntry::custom("Masters"));
+    library.register_type(MASTERS_TYPE_ID, TypeEntry::custom("Masters"));
     config::register_builders(&mut library);
     io::register(&mut library);
     calibration::register(&mut library);
@@ -39,10 +42,6 @@ pub fn astro_library(model_paths: &MlModelPaths) -> Library {
     processing::register(&mut library);
     ml::register(&mut library, model_paths);
     library
-}
-
-pub fn configure_ml_model_defaults(library: &mut Library, model_paths: &MlModelPaths) {
-    ml::replace(library, model_paths);
 }
 
 #[cfg(test)]

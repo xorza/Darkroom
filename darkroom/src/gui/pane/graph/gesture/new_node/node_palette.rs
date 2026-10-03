@@ -1,9 +1,6 @@
 //! [`NodePalette`]: everything one new-node popup lists, and the rows and
 //! columns it records.
 
-use std::cmp::Ordering;
-
-use glam::Vec2;
 use palantir::CloseHandle;
 use palantir::prelude::*;
 use scenarium::Func;
@@ -13,6 +10,7 @@ use scenarium::{SPECIAL_NODES, SpecialNode};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
+use crate::gui::pane::graph::gesture::new_node::palette_rows::{PaletteRow, PaletteRows};
 use crate::gui::pane::graph::gesture::new_node::{
     SEARCH_ROW_GAP, Search, results_wid, search_field_wid,
 };
@@ -21,7 +19,7 @@ use crate::gui::pane::graph::gesture::new_node::{
 /// special node. Collecting them into one type lets every source sort
 /// into one list, which is what makes a category a run inside it.
 #[derive(Clone, Copy, Debug)]
-enum PaletteEntry<'a> {
+pub(super) enum PaletteEntry<'a> {
     Func(&'a Func),
     Special(SpecialNode),
 }
@@ -29,47 +27,26 @@ enum PaletteEntry<'a> {
 impl<'a> PaletteEntry<'a> {
     /// Borrowed from the palette's sources rather than from `self`, so a
     /// name outlives any borrow of the row that yielded it.
-    fn name(&self) -> &'a str {
-        match *self {
+    pub(super) fn name(self) -> &'a str {
+        match self {
             PaletteEntry::Func(f) => &f.name,
             PaletteEntry::Special(s) => &s.func().name,
         }
     }
 
-    fn category(&self) -> &'a str {
-        match *self {
+    pub(super) fn category(self) -> &'a str {
+        match self {
             PaletteEntry::Func(f) => &f.category,
             PaletteEntry::Special(s) => &s.func().category,
         }
     }
 
-    /// The rows `query_lc` matches, category-major then name — so a
-    /// category's rows are the contiguous run [`PaletteColumn::runs`] reads.
-    ///
-    /// One `Vec` rather than a map of per-category ones: the palette rebuilds
-    /// this every frame it is up, and grouping through a map spent the map's
-    /// allocation plus one per category on each of those frames. Sorting by
-    /// the category first puts the same rows in the same groups for a single
-    /// allocation, taken from `entries`' own upper bound so the fill never
-    /// grows it.
-    ///
-    /// A matching *category* name reveals that whole column; otherwise a row
-    /// is filtered by its own name. Asked per row, which is what drops the
-    /// grouping pass the map needed before it could ask per category.
-    fn matching(entries: impl Iterator<Item = Self>, query_lc: &str) -> Vec<Self> {
-        let mut rows: Vec<Self> = Vec::with_capacity(entries.size_hint().1.unwrap_or_default());
-        rows.extend(entries.filter(|entry| {
-            name_matches(entry.category(), query_lc) || name_matches(entry.name(), query_lc)
-        }));
-        // Case-insensitive by comparison, not by key: `sort_by_cached_key` with
-        // a `to_lowercase()` key allocated one `String` per row per frame to
-        // answer a question `char`-wise folding answers in place. The raw-order
-        // fallback keeps two categories that fold alike in runs of their own.
-        rows.sort_by(|a, b| {
-            lowercase_cmp(a.category(), b.category())
-                .then_with(|| lowercase_cmp(a.name(), b.name()))
-        });
-        rows
+    /// The identity [`PaletteRows`] keeps for this entry.
+    pub(super) const fn row(self) -> PaletteRow {
+        match self {
+            PaletteEntry::Func(f) => PaletteRow::Func(f.id),
+            PaletteEntry::Special(s) => PaletteRow::Special(s),
+        }
     }
 }
 
@@ -84,22 +61,22 @@ pub(super) struct NodePalette<'a> {
     pos: Vec2,
 }
 
-/// One category's rows, ready to record: a run inside the buffer
-/// [`PaletteEntry::matching`] sorted, not a list of its own.
+/// One category's rows, ready to record: a run inside [`PaletteRows`], not a
+/// list of its own.
 #[derive(Debug)]
 struct PaletteColumn<'a> {
     category: &'a str,
-    entries: &'a [PaletteEntry<'a>],
+    rows: &'a [PaletteRow],
 }
 
 impl<'a> NodePalette<'a> {
-    pub(super) fn new(graph_ctx: GraphCtx<'a>, pos: Vec2) -> Self {
+    pub(super) const fn new(graph_ctx: GraphCtx<'a>, pos: Vec2) -> Self {
         Self { graph_ctx, pos }
     }
 
     /// Every row the palette can list, in no particular order: the library's
     /// funcs, then the built-in specials.
-    fn entries(&'a self) -> impl Iterator<Item = PaletteEntry<'a>> {
+    fn entries(&self) -> impl Iterator<Item = PaletteEntry<'a>> {
         self.graph_ctx
             .library()
             .funcs()
@@ -108,18 +85,7 @@ impl<'a> NodePalette<'a> {
     }
 }
 
-impl<'a> PaletteColumn<'a> {
-    /// The category runs of `rows`, in order. Requires the category-major
-    /// ordering [`PaletteEntry::matching`] leaves — an unsorted buffer
-    /// splits one category into as many columns as it has stretches.
-    fn runs(rows: &'a [PaletteEntry<'a>]) -> impl Iterator<Item = Self> {
-        rows.chunk_by(|a, b| a.category() == b.category())
-            .map(|entries| Self {
-                category: entries[0].category(),
-                entries,
-            })
-    }
-
+impl PaletteColumn<'_> {
     /// Record this column: its category name above its rows.
     fn show(
         self,
@@ -128,6 +94,7 @@ impl<'a> PaletteColumn<'a> {
         palette: &NodePalette<'_>,
     ) -> Option<GraphIntent> {
         let category = self.category;
+        let library = palette.graph_ctx.library();
         let mut chosen = None;
         Panel::vstack()
             .id_salt(("new_node_col", category))
@@ -142,7 +109,7 @@ impl<'a> PaletteColumn<'a> {
                     .size((Sizing::HUG, Sizing::HUG))
                     .gap(2.0)
                     .show(ui, |ui| {
-                        for &entry in self.entries {
+                        for entry in self.rows.iter().filter_map(|row| row.entry(library)) {
                             if let Some(picked) = entry.show(ui, popup, palette) {
                                 chosen = Some(picked);
                             }
@@ -154,13 +121,17 @@ impl<'a> PaletteColumn<'a> {
 }
 
 impl NodePalette<'_> {
+    /// Record the search field and the rows it matches. `opened` is the
+    /// frame the palette opened: it takes the focus, and filters the rows
+    /// afresh against the library as it is now.
     pub(super) fn body(
         &self,
         ui: &mut Ui,
         popup: &CloseHandle,
         search: &mut Search,
+        rows: &mut PaletteRows,
         scroll_cap: f32,
-        focus: bool,
+        opened: bool,
     ) -> Option<GraphIntent> {
         let mut chosen: Option<GraphIntent> = None;
 
@@ -177,12 +148,14 @@ impl NodePalette<'_> {
             .min_size((200.0, 0.0))
             .margin(Spacing::new(0.0, 0.0, 0.0, SEARCH_ROW_GAP))
             .show(ui);
-        if focus {
+        if opened {
             ui.set_focus(search_id);
         }
         // Folded after the field records, so it reflects this frame's typing.
-        search.fold();
-        let rows = PaletteEntry::matching(self.entries(), &search.folded);
+        if search.fold() || opened {
+            rows.refilter(self.graph_ctx.library(), self.entries(), &search.folded);
+        }
+        let library = self.graph_ctx.library();
 
         Scroll::vertical()
             .id(results_wid())
@@ -194,7 +167,16 @@ impl NodePalette<'_> {
                     .size((Sizing::HUG, Sizing::HUG))
                     .gap(12.0)
                     .show(ui, |ui| {
-                        for column in PaletteColumn::runs(&rows) {
+                        for rows in rows.columns() {
+                            // A column whose funcs all left the library since
+                            // the filtering has nothing to record.
+                            let Some(first) = rows.iter().find_map(|row| row.entry(library)) else {
+                                continue;
+                            };
+                            let column = PaletteColumn {
+                                category: first.category(),
+                                rows,
+                            };
                             if let Some(picked) = column.show(ui, popup, self) {
                                 chosen = Some(picked);
                             }
@@ -203,41 +185,6 @@ impl NodePalette<'_> {
             });
         chosen
     }
-}
-
-/// Case-insensitive ordering of two palette row names, without materializing
-/// a folded copy of either. Falls back to the raw order for names that fold
-/// to the same thing, so the sort stays total.
-fn lowercase_cmp(a: &str, b: &str) -> Ordering {
-    let folded = a
-        .chars()
-        .flat_map(char::to_lowercase)
-        .cmp(b.chars().flat_map(char::to_lowercase));
-    folded.then_with(|| a.cmp(b))
-}
-
-/// Case-insensitive substring match used by the palette search. An empty
-/// (already-lowercased) query matches everything.
-///
-/// ASCII names — every built-in one — compare in place; a name carrying
-/// non-ASCII falls back to a folded copy, so the match stays Unicode-correct
-/// for a graph the user named themselves.
-fn name_matches(name: &str, query_lc: &str) -> bool {
-    if query_lc.is_empty() {
-        return true;
-    }
-    if !name.is_ascii() {
-        return name.to_lowercase().contains(query_lc);
-    }
-    // Only the name folds. Folding the query here too would quietly accept a
-    // caller that forgot to, and the non-ASCII branch above can't.
-    let (name, query) = (name.as_bytes(), query_lc.as_bytes());
-    name.windows(query.len()).any(|window| {
-        window
-            .iter()
-            .zip(query)
-            .all(|(byte, folded)| byte.to_ascii_lowercase() == *folded)
-    })
 }
 
 impl PaletteEntry<'_> {
@@ -303,108 +250,4 @@ fn menu_row(ui: &mut Ui, popup: &CloseHandle, func: &Func) -> bool {
         Tooltip::on(&resp.snapshot()).label(desc).show(ui);
     }
     clicked
-}
-
-#[cfg(test)]
-mod tests {
-    use scenarium::{Func, FuncId};
-
-    use crate::gui::pane::graph::gesture::new_node::node_palette::{
-        PaletteColumn, PaletteEntry, name_matches,
-    };
-
-    /// Four rows over three categories, deliberately out of order and mixing
-    /// case so the fold and the raw-order fallback both have to fire.
-    fn funcs() -> Vec<Func> {
-        ["Zoom/crop", "blur/Sharpen", "Blur/gaussian", "blur/box"]
-            .into_iter()
-            .map(|spec| {
-                let (category, name) = spec.split_once('/').unwrap();
-                Func::new(FuncId::unique(), name).category(category)
-            })
-            .collect()
-    }
-
-    fn rows<'a>(funcs: &'a [Func], query_lc: &str) -> Vec<PaletteEntry<'a>> {
-        PaletteEntry::matching(funcs.iter().map(PaletteEntry::Func), query_lc)
-    }
-
-    fn shape<'a>(rows: &'a [PaletteEntry<'a>]) -> Vec<(&'a str, Vec<&'a str>)> {
-        PaletteColumn::runs(rows)
-            .map(|column| {
-                (
-                    column.category,
-                    column.entries.iter().map(PaletteEntry::name).collect(),
-                )
-            })
-            .collect()
-    }
-
-    /// The palette groups by sorting, so the buffer's order *is* the column
-    /// layout: categories folded-alphabetically, rows the same inside each,
-    /// and every category one contiguous run.
-    #[test]
-    fn rows_sort_into_one_contiguous_run_per_category() {
-        let funcs = funcs();
-
-        // "Blur" and "blur" fold alike, so they sort adjacently — and stay
-        // two runs, because the fallback orders them by the raw name.
-        assert_eq!(
-            shape(&rows(&funcs, "")),
-            [
-                ("Blur", vec!["gaussian"]),
-                ("blur", vec!["box", "Sharpen"]),
-                ("Zoom", vec!["crop"]),
-            ],
-            "no query lists every row, category-major then name",
-        );
-
-        // A query the *category* carries reveals both blur columns whole,
-        // including the row whose own name holds no "blur".
-        assert_eq!(
-            shape(&rows(&funcs, "blur")),
-            [("Blur", vec!["gaussian"]), ("blur", vec!["box", "Sharpen"])],
-            "a category match keeps its rows whatever they are named",
-        );
-
-        // A query only a row name carries takes that row and drops the rest
-        // of its category with it.
-        assert_eq!(
-            shape(&rows(&funcs, "box")),
-            [("blur", vec!["box"])],
-            "a name match keeps the row alone",
-        );
-
-        assert!(
-            shape(&rows(&funcs, "nothing")).is_empty(),
-            "a query nothing carries lists no column at all",
-        );
-    }
-
-    #[test]
-    fn name_matches_is_case_insensitive_substring_with_empty_query_wildcard() {
-        // Empty query is the "show everything" wildcard.
-        assert!(name_matches("Gaussian Blur", ""));
-        assert!(name_matches("", ""));
-        // Case-insensitive substring anywhere in the name. Caller passes an
-        // already-lowercased query, so only the name is folded here.
-        assert!(name_matches("Gaussian Blur", "blur"));
-        assert!(name_matches("Gaussian Blur", "gauss"));
-        assert!(name_matches("Gaussian Blur", "an bl"));
-        // Non-substring and wrong-fragment queries reject.
-        assert!(!name_matches("Gaussian Blur", "sharpen"));
-        assert!(!name_matches("Blur", "blurry"));
-        // A non-lowercased query never matches a lowercased name — the
-        // contract is "query already lowercased", so this documents that a
-        // caller who forgets to fold gets no false positives. It holds on
-        // both sides of the ASCII fast path.
-        assert!(!name_matches("blur", "BLUR"));
-        assert!(!name_matches("Grün", "GRÜN"));
-        // Non-ASCII names fold by the Unicode rules, not byte-wise.
-        assert!(name_matches("Grün", "grün"));
-        assert!(name_matches("Ölfilter", "ölfil"));
-        assert!(!name_matches("Grün", "grun"));
-        // An ASCII name never matches a non-ASCII query.
-        assert!(!name_matches("Blur", "blür"));
-    }
 }

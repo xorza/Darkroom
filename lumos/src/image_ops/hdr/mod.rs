@@ -2,8 +2,8 @@
 //!
 //! Reveal detail in an overexposed bright region (galaxy/nebula cores, Milky-Way star clouds) by
 //! compressing the **large-scale** brightness while preserving fine detail: à trous starlet
-//! decomposition, attenuate the coarse residual toward its mean, leave the detail layers, recombine.
-//! A **display-domain** (post-stretch) operation, streaming
+//! decomposition, attenuate the coarse residual toward its mean, leave the detail layers,
+//! recombine. A **display-domain** (post-stretch) operation, streaming
 //! [`crate::image_ops::wavelet::atrous_smooth`] — see [`hdr_map`] for why the layer pyramid is
 //! never materialized.
 
@@ -11,23 +11,24 @@ use common::Introspect;
 use rayon::prelude::*;
 
 use crate::error::InvalidConfigField;
+use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::image_ops::error::OpError;
 use crate::image_ops::wavelet::{atrous_smooth, max_scales};
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
+use crate::math::sum;
 use imaginarium::Buffer2;
-
-#[cfg(test)]
-mod tests;
+use std::mem;
 
 /// Multiscale dynamic-range compression of a *stretched* (display-domain) image in place.
 ///
 /// Computed on the combined intensity; color channels are rescaled hue-preservingly. Grayscale gets
 /// the compressed intensity directly.
 #[derive(Debug, Clone, Copy, Introspect)]
+#[config(type_id = "36babf1d-0fda-4d5d-b4c6-ed4c13ebff6b")]
 pub struct Hdr {
-    /// Number of wavelet scales. Structures coarser than ~`2^scales` px live in the residual and get
-    /// compressed; finer detail is preserved. *More* scales → only the very largest structures
+    /// Number of wavelet scales. Structures coarser than ~`2^scales` px live in the residual and
+    /// get compressed; finer detail is preserved. *More* scales → only the very largest structures
     /// compress. Clamped to what the image size supports.
     pub scales: usize,
     /// Compression strength in `[0, 1]`: `0` = no-op, `1` = the large-scale brightness is flattened
@@ -45,18 +46,6 @@ impl Default for Hdr {
 }
 
 impl Hdr {
-    /// Set the wavelet scale count.
-    pub fn scales(mut self, scales: usize) -> Self {
-        self.scales = scales;
-        self
-    }
-
-    /// Set the compression strength in `[0, 1]`.
-    pub fn amount(mut self, amount: f32) -> Self {
-        self.amount = amount;
-        self
-    }
-
     /// Compress the dynamic range of `image` in place.
     ///
     /// # Errors
@@ -100,16 +89,24 @@ fn hdr_map(intensity: &Buffer2<f32>, config: &Hdr) -> Buffer2<f32> {
     let mut tmp = Buffer2::new_default(size.width, size.height);
     for j in 0..scales {
         atrous_smooth(&c_curr, &mut c_next, &mut tmp, 1 << j);
-        std::mem::swap(&mut c_curr, &mut c_next);
+        mem::swap(&mut c_curr, &mut c_next);
     }
     let mut residual = c_curr;
 
-    let mean = residual.pixels().iter().sum::<f32>() / residual.len() as f32;
+    // Accumulated in f64: a sequential f32 fold over a 24 MP plane drifts by percents.
+    let mean = sum::mean_f32(residual.pixels());
     let amount = config.amount;
     residual
         .pixels_mut()
-        .par_iter_mut()
-        .zip(intensity.pixels().par_iter())
-        .for_each(|(r, &i)| *r = i - amount * (*r - mean));
+        .par_chunks_mut(SAMPLES_PER_BLOCK)
+        .zip(intensity.pixels().par_chunks(SAMPLES_PER_BLOCK))
+        .for_each(|(residual, intensity)| {
+            for (r, &i) in residual.iter_mut().zip(intensity) {
+                *r = i - amount * (*r - mean);
+            }
+        });
     residual
 }
+
+#[cfg(test)]
+mod tests;

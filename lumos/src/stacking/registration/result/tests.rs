@@ -3,6 +3,7 @@ use crate::stacking::registration::result::{
     RansacFailureReason, RegistrationCatalog, RegistrationError, RegistrationResult, StarMatch,
 };
 use crate::stacking::registration::transform::Transform;
+use crate::stacking::registration::triangle::voting::MatchIndices;
 use crate::testing::prelude::*;
 
 fn identity_matches(residuals: &[f64]) -> Vec<StarMatch> {
@@ -10,8 +11,10 @@ fn identity_matches(residuals: &[f64]) -> Vec<StarMatch> {
         .iter()
         .enumerate()
         .map(|(index, &residual)| StarMatch {
-            reference: index,
-            target: index,
+            indices: MatchIndices {
+                reference: index,
+                target: index,
+            },
             residual,
         })
         .collect()
@@ -22,18 +25,24 @@ fn result_keeps_matches_and_derives_diagnostics() {
     let transform = Transform::translation(DVec2::new(1.0, 2.0));
     let matches = vec![
         StarMatch {
-            reference: 0,
-            target: 2,
+            indices: MatchIndices {
+                reference: 0,
+                target: 2,
+            },
             residual: 0.1,
         },
         StarMatch {
-            reference: 1,
-            target: 4,
+            indices: MatchIndices {
+                reference: 1,
+                target: 4,
+            },
             residual: 0.2,
         },
         StarMatch {
-            reference: 3,
-            target: 5,
+            indices: MatchIndices {
+                reference: 3,
+                target: 5,
+            },
             residual: 0.15,
         },
     ];
@@ -41,15 +50,18 @@ fn result_keeps_matches_and_derives_diagnostics() {
     let result = RegistrationResult::new(transform, None, matches.clone());
 
     assert_eq!(result.transform().matrix(), transform.matrix());
-    assert!(result.sip_fit().is_none());
+    assert!(result.sip().is_none());
     assert_eq!(result.matched_stars(), matches);
     assert_eq!(result.num_inliers(), 3);
 
     // sqrt((0.1² + 0.2² + 0.15²) / 3) = sqrt(0.0725 / 3).
     let expected_rms = (0.0725_f64 / 3.0).sqrt();
     assert_eq!(result.rms_error().to_bits(), expected_rms.to_bits());
-    assert_eq!(result.max_error().to_bits(), 0.2_f64.to_bits());
-    assert_eq!(result.quality_score(), 0.0);
+    // exp(−rms / 2) · 3 / 20, the same operations in the same order.
+    assert_eq!(
+        result.quality_score(),
+        (-expected_rms / 2.0).exp() * (3.0 / 20.0)
+    );
 }
 
 #[test]
@@ -59,7 +71,6 @@ fn empty_result_has_zero_diagnostics() {
     assert!(result.matched_stars().is_empty());
     assert_eq!(result.num_inliers(), 0);
     assert_eq!(result.rms_error(), 0.0);
-    assert_eq!(result.max_error(), 0.0);
     assert_eq!(result.quality_score(), 0.0);
 }
 
@@ -76,7 +87,6 @@ fn quality_score_uses_error_and_saturating_inlier_factors() {
     let expected_rms = (0.075_f64 / 4.0).sqrt();
     let expected_quality = (-expected_rms / 2.0).exp() * (4.0 / 20.0);
     assert!((four.rms_error() - expected_rms).abs() < f64::EPSILON);
-    assert_eq!(four.max_error().to_bits(), 0.2_f64.to_bits());
     assert!((four.quality_score() - expected_quality).abs() < f64::EPSILON);
 
     let twenty_five =
@@ -134,10 +144,6 @@ fn registration_error_messages_include_context() {
             "Registration accuracy too low: 5.123 pixels (max: 2.000)",
         ),
         (
-            RegistrationError::StarDetection("threshold too high".to_string()),
-            "Star detection failed: threshold too high",
-        ),
-        (
             RegistrationError::SipPointCountMismatch {
                 reference: 12,
                 target: 10,
@@ -191,18 +197,7 @@ fn registration_error_messages_include_context() {
 
 #[test]
 fn ransac_failure_reason_messages_are_specific() {
-    let cases = [
-        (RansacFailureReason::NoInliersFound, "no inliers found"),
-        (
-            RansacFailureReason::DegeneratePointSet,
-            "degenerate point set",
-        ),
-        (RansacFailureReason::SingularMatrix, "singular matrix"),
-        (
-            RansacFailureReason::InsufficientInliers,
-            "insufficient inliers",
-        ),
-    ];
+    let cases = [(RansacFailureReason::NoInliersFound, "no inliers found")];
 
     for (reason, expected) in cases {
         assert_eq!(reason.to_string(), expected);

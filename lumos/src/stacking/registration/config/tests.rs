@@ -24,19 +24,20 @@ fn config_default_values() {
         20
     );
     assert_eq!(config.matching.min_matches, 8);
-    assert!((config.matching.triangle.ratio_tolerance - 0.01).abs() < 1e-10);
+    assert_eq!(config.matching.triangle.ratio_tolerance, 0.01);
     assert_eq!(config.matching.triangle.min_votes, 3);
     assert!(config.matching.triangle.check_orientation);
     assert_eq!(config.ransac.max_iterations, 2000);
-    assert!((config.ransac.confidence - 0.995).abs() < 1e-10);
-    assert!((config.ransac.min_inlier_ratio - 0.3).abs() < 1e-10);
+    assert_eq!(config.ransac.confidence, 0.995);
+    assert_eq!(config.ransac.min_inlier_ratio, 0.3);
     assert!(config.ransac.seed.is_none());
     assert!(config.ransac.local_optimization);
     assert_eq!(config.ransac.lo_iterations, 10);
-    assert!((config.max_rms_error - 2.0).abs() < 1e-10);
+    assert_eq!(config.max_rms_error, 2.0);
     assert!(config.sip.is_none());
     assert_eq!(config.warp.method, InterpolationMethod::Lanczos3);
-    assert!((config.warp.border_value - 0.0).abs() < 1e-10);
+    assert_eq!(config.warp.border_value, 0.0);
+    config.validate().unwrap();
 }
 
 #[test]
@@ -53,9 +54,9 @@ fn config_fast_preset() {
 fn config_precise_preset() {
     let config = Config::precise();
     assert_eq!(config.ransac.max_iterations, 5000);
-    assert!((config.ransac.confidence - 0.999).abs() < 1e-10);
+    assert_eq!(config.ransac.confidence, 0.999);
     assert!(config.sip.is_some());
-    assert!((config.max_rms_error - 1.0).abs() < 1e-10);
+    assert_eq!(config.max_rms_error, 1.0);
     config.validate().unwrap();
 }
 
@@ -81,11 +82,11 @@ fn config_precise_wide_field_preset() {
     );
     assert_eq!(config.matching.max_stars, 500);
     assert_eq!(config.matching.min_matches, 20);
-    assert!((config.matching.triangle.ratio_tolerance - 0.02).abs() < 1e-10);
+    assert_eq!(config.matching.triangle.ratio_tolerance, 0.02);
     assert_eq!(config.ransac.max_iterations, 5000);
-    assert!((config.ransac.confidence - 0.9999).abs() < 1e-10);
+    assert_eq!(config.ransac.confidence, 0.9999);
     assert!(config.sip.is_some());
-    assert!((config.max_rms_error - 1.0).abs() < 1e-10);
+    assert_eq!(config.max_rms_error, 1.0);
     // Inherits unlimited rotation/scale from wide_field()
     assert!(config.ransac.max_rotation.is_none());
     assert!(config.ransac.scale_range.is_none());
@@ -98,52 +99,6 @@ fn config_mosaic_preset() {
     assert!(config.ransac.max_rotation.is_none());
     assert_eq!(config.ransac.scale_range, Some((0.5, 2.0)));
     config.validate().unwrap();
-}
-
-#[test]
-fn config_custom() {
-    let config = Config {
-        transform_type: TransformModel::Fixed(TransformType::Similarity),
-        ransac: RansacConfig {
-            max_iterations: 1000,
-            ..Default::default()
-        },
-        ..Config::default()
-    };
-    assert_eq!(
-        config.transform_type,
-        TransformModel::Fixed(TransformType::Similarity)
-    );
-    assert_eq!(config.ransac.max_iterations, 1000);
-    config.validate().unwrap();
-}
-
-#[test]
-fn interpolation_method_kernel_radius() {
-    assert_eq!(InterpolationMethod::Nearest.kernel_radius(), 1);
-    assert_eq!(InterpolationMethod::Bilinear.kernel_radius(), 1);
-    assert_eq!(InterpolationMethod::Bicubic.kernel_radius(), 2);
-    assert_eq!(InterpolationMethod::Lanczos2.kernel_radius(), 2);
-    assert_eq!(InterpolationMethod::Lanczos3.kernel_radius(), 3);
-    assert_eq!(InterpolationMethod::Lanczos4.kernel_radius(), 4);
-}
-
-#[test]
-fn lanczos_param_is_some_only_for_the_lanczos_methods() {
-    // Non-Lanczos methods return None
-    assert_eq!(InterpolationMethod::Nearest.lanczos_param(), None);
-    assert_eq!(InterpolationMethod::Bilinear.lanczos_param(), None);
-    assert_eq!(InterpolationMethod::Bicubic.lanczos_param(), None);
-    // Lanczos methods return their parameter a
-    assert_eq!(InterpolationMethod::Lanczos2.lanczos_param(), Some(2));
-    assert_eq!(InterpolationMethod::Lanczos3.lanczos_param(), Some(3));
-    assert_eq!(InterpolationMethod::Lanczos4.lanczos_param(), Some(4));
-}
-
-#[test]
-fn interpolation_method_default() {
-    let method = InterpolationMethod::default();
-    assert_eq!(method, InterpolationMethod::Lanczos3);
 }
 
 #[test]
@@ -393,32 +348,4 @@ fn config_lo_iterations_zero_ok_when_lo_disabled() {
         ..Config::default()
     };
     assert!(config.validate().is_ok());
-}
-
-#[test]
-fn config_presets_differ() {
-    // Verify presets produce different configs (parameter sensitivity)
-    let default = Config::default();
-    let fast = Config::fast();
-    let precise = Config::precise();
-
-    // fast has fewer iterations than default
-    assert!(fast.ransac.max_iterations < default.ransac.max_iterations);
-    // precise has more iterations than default
-    assert!(precise.ransac.max_iterations > default.ransac.max_iterations);
-    // precise has tighter RMS tolerance
-    assert!(precise.max_rms_error < default.max_rms_error);
-    // fast disables LO, default enables it
-    assert!(!fast.ransac.local_optimization);
-    assert!(default.ransac.local_optimization);
-}
-
-#[test]
-fn config_all_presets_validate() {
-    Config::default().validate().unwrap();
-    Config::fast().validate().unwrap();
-    Config::precise().validate().unwrap();
-    Config::wide_field().validate().unwrap();
-    Config::precise_wide_field().validate().unwrap();
-    Config::mosaic().validate().unwrap();
 }

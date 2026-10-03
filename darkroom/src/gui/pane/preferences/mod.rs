@@ -10,8 +10,10 @@
 //! return [`PrefsCommand::PickMlModel`] so `App` can open the blocking dialog
 //! after authoring has released its borrows.
 
+use std::mem;
 use std::path::{Path, PathBuf};
 
+use lens::MlModelPaths;
 use palantir::FontWeight;
 use palantir::prelude::*;
 
@@ -20,6 +22,7 @@ use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::prefs::{MlModelKind, PrefsCommand};
 use crate::gui::requests::Requests;
 use crate::gui::theme::Theme;
+use crate::gui::widgets::edit_buffer::DraftOutcome;
 use crate::gui::widgets::support::{colored_text, muted_text, sized_text};
 use crate::platform;
 
@@ -82,7 +85,7 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences, out: &mu
                                 download_label: "Download DeepSNR CLI \u{2197}",
                                 download_url: "https://starnetastro.com/cli-tools/deepsnr/",
                             },
-                            &mut prefs.ml_models.denoise,
+                            &mut prefs.ml_models,
                             out,
                         );
                         model_row(
@@ -94,7 +97,7 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences, out: &mu
                                 download_label: "Download StarNet CLI \u{2197}",
                                 download_url: "https://starnetastro.com/cli-tools/starnet/",
                             },
-                            &mut prefs.ml_models.star_removal,
+                            &mut prefs.ml_models,
                             out,
                         );
                     });
@@ -178,19 +181,27 @@ struct PathField {
 }
 
 /// One model-path row: a fixed-width label, an **editable** path field (type
-/// or paste a path; Enter or click-away commits into `path`), a "Browse…"
-/// button, and — beneath, indented under the field — an error line when the
-/// committed path is broken, then a download hint (a browser link to the CLI
-/// tool plus unzip/point-at-the-`.onnx` guidance).
-/// Writes `path` in place and queues [`PrefsCommand::Changed`] on an
-/// edited path, or [`PrefsCommand::PickMlModel`] when Browse is clicked.
-fn model_row(ui: &mut Ui, theme: &Theme, row: ModelRow, path: &mut PathBuf, out: &mut Requests) {
+/// or paste a path; Enter or click-away commits it, Escape drops it), a
+/// "Browse…" button, and — beneath, indented under the field — an error line
+/// when the committed path is broken, then a download hint (a browser link to
+/// the CLI tool plus unzip/point-at-the-`.onnx` guidance).
+/// Writes the path `kind` names in `paths` in place and queues
+/// [`PrefsCommand::Changed`] on an edited path, or
+/// [`PrefsCommand::PickMlModel`] when Browse is clicked.
+fn model_row(
+    ui: &mut Ui,
+    theme: &Theme,
+    row: ModelRow,
+    paths: &mut MlModelPaths,
+    out: &mut Requests,
+) {
     let ModelRow {
         label,
         kind,
         download_label,
         download_url,
     } = row;
+    let path = kind.path_mut(paths);
     let id = WidgetId::from_hash(("preferences.ml_model_path", label));
     // Refresh the draft from `path` only when `path` changed *externally*
     // (initial load, a Browse pick, or last frame's commit) — never on
@@ -217,7 +228,7 @@ fn model_row(ui: &mut Ui, theme: &Theme, row: ModelRow, path: &mut PathBuf, out:
     }
     let field = ui.state_or_default::<PathField>(id);
     let problem = field.problem;
-    let mut draft = std::mem::take(&mut field.text);
+    let mut draft = mem::take(&mut field.text);
     Panel::vstack()
         .id_salt(label)
         .size((Sizing::FILL, Sizing::HUG))
@@ -245,23 +256,15 @@ fn model_row(ui: &mut Ui, theme: &Theme, row: ModelRow, path: &mut PathBuf, out:
                         .placeholder("/path/to/model.onnx");
                     // A broken committed path recolors the field's chrome to
                     // the error tint (message under the row says what's wrong).
-                    let error_style = problem.is_some().then(|| {
-                        let mut style = ui.theme().text_edit.clone();
-                        for look in [
-                            &mut style.looks.normal,
-                            &mut style.looks.hovered,
-                            &mut style.looks.active,
-                        ] {
-                            let bg = &mut look.background;
-                            bg.border = Stroke::new(theme.status.error, bg.border.width);
-                        }
-                        style
-                    });
-                    if let Some(style) = error_style.as_ref() {
-                        edit = edit.style(style);
+                    if problem.is_some() {
+                        edit = edit.style(&theme.path_field_error);
                     }
-                    let resp = edit.show(ui);
-                    let commit = resp.submitted || resp.lost_focus;
+                    let outcome = DraftOutcome::of(&edit.show(ui));
+                    if outcome == DraftOutcome::Cancel {
+                        // Escape drops the draft: the field shows the committed path again.
+                        draft.clone_from(&ui.state_or_default::<PathField>(id).seen);
+                    }
+                    let commit = outcome == DraftOutcome::Commit;
                     // Against the mirror, not a re-read of `path`: `seen` was
                     // just synced to it, and comparing there keeps `path`
                     // unborrowed for the write on the next line.
@@ -331,9 +334,9 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
     // Last frame's hover drives the brighten — this frame's response isn't
     // known until after `show`.
     let link_color = if ui.response_for(id).hovered() {
-        theme.colors.badge_graph.lerp(RgbaF32::hex(0xffffff), 0.5)
+        theme.colors.link_hovered
     } else {
-        theme.colors.badge_graph
+        theme.colors.link
     };
     indented_line(ui, "hint", |ui| {
         let link = Panel::hstack()
@@ -361,8 +364,11 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::iter;
 
     use common::{TempDir, TempFile};
+    use palantir::internals::UiHarness;
 
     #[test]
     fn path_problem_classifies_empty_missing_dir_and_extension() {
@@ -379,10 +385,71 @@ mod tests {
         assert_eq!(path_problem(&missing.to_str()), Some("File not found"));
         // Real files: a wrong extension flags; `.onnx` passes in any case.
         let wrong = TempFile::with_extension("darkroom-path-wrong", "txt");
-        std::fs::write(wrong.path(), b"x").unwrap();
+        fs::write(wrong.path(), b"x").unwrap();
         assert_eq!(path_problem(&wrong.to_str()), Some("Not an .onnx file"));
         let onnx = TempFile::with_extension("darkroom-path-upper", "ONNX");
-        std::fs::write(onnx.path(), b"x").unwrap();
+        fs::write(onnx.path(), b"x").unwrap();
         assert_eq!(path_problem(&onnx.to_str()), None);
+    }
+
+    /// Escape in a path field drops the draft: the path and the field go back to the committed
+    /// value and nothing is queued. Enter writes the typed path and queues one change.
+    #[test]
+    fn escape_restores_the_path_and_enter_commits_it() {
+        let theme = Theme::default();
+        let row = ModelRow {
+            label: "Denoise model",
+            kind: MlModelKind::Denoise,
+            download_label: "download",
+            download_url: "https://example.invalid",
+        };
+        let id = WidgetId::from_hash(("preferences.ml_model_path", row.label));
+        let mut paths = MlModelPaths {
+            denoise: PathBuf::from("/a.onnx"),
+            ..MlModelPaths::default()
+        };
+        let mut h = UiHarness::new(UVec2::new(800, 200));
+        let mut frame = |h: &mut UiHarness, paths: &mut MlModelPaths| {
+            let mut out = Requests::default();
+            h.frame(|ui| model_row(ui, &theme, row, paths, &mut out));
+            iter::from_fn(|| out.pop_app())
+                .filter(|command| matches!(command, AppCommand::Prefs(PrefsCommand::Changed)))
+                .count()
+        };
+        let type_x = |h: &mut UiHarness,
+                      frame: &mut dyn FnMut(&mut UiHarness, &mut MlModelPaths) -> usize,
+                      paths: &mut MlModelPaths| {
+            let center = h.rect(id).expect("path field arranged").center();
+            h.click_at(center);
+            frame(h, paths);
+            h.key(Key::End);
+            frame(h, paths);
+            h.key(Key::Char('x'));
+            assert_eq!(frame(h, paths), 0, "typing queues nothing");
+        };
+
+        frame(&mut h, &mut paths);
+        type_x(&mut h, &mut frame, &mut paths);
+        h.key(Key::Escape);
+        let mut queued = 0;
+        for _ in 0..3 {
+            queued += frame(&mut h, &mut paths);
+        }
+        assert_eq!(queued, 0, "Escape must queue no change");
+        assert_eq!(
+            paths.denoise,
+            PathBuf::from("/a.onnx"),
+            "Escape must not write the draft"
+        );
+
+        type_x(&mut h, &mut frame, &mut paths);
+        h.key(Key::Enter);
+        assert_eq!(frame(&mut h, &mut paths), 1, "Enter queues one change");
+        assert_eq!(paths.denoise, PathBuf::from("/a.onnxx"));
+        assert_eq!(
+            paths.star_removal,
+            MlModelPaths::default().star_removal,
+            "the row writes only the path its kind names"
+        );
     }
 }

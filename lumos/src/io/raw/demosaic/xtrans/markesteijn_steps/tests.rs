@@ -1,9 +1,7 @@
-use crate::io::raw::demosaic::interleave_planes;
 use crate::io::raw::demosaic::sensor_layout::SensorLayout;
-use crate::io::raw::demosaic::xtrans::hex_lookup::HexLookup;
 use crate::io::raw::demosaic::xtrans::internals::{make_xtrans, test_pattern, to_u16};
-use crate::io::raw::demosaic::xtrans::markesteijn::FinalBlendBuffers;
 use crate::io::raw::demosaic::xtrans::markesteijn_steps::*;
+use crate::testing::assertions::assert_close;
 
 #[test]
 fn green_minmax_uniform() {
@@ -28,8 +26,8 @@ fn green_minmax_uniform() {
 
     // Uniform 0.5 input → gmin=gmax≈0.5 everywhere (u16 quantization: ±1e-5)
     for i in 0..w * h {
-        assert!((gmin[i] - 0.5).abs() < 1e-4, "gmin[{}] = {}", i, gmin[i]);
-        assert!((gmax[i] - 0.5).abs() < 1e-4, "gmax[{}] = {}", i, gmax[i]);
+        assert_close!(gmin[i], 0.5, 1e-4, "gmin[{}] = {}", i, gmin[i]);
+        assert_close!(gmax[i], 0.5, 1e-4, "gmax[{}] = {}", i, gmax[i]);
     }
 }
 
@@ -93,16 +91,16 @@ fn interpolate_green_uniform() {
     let mut green_dir = vec![0.0f32; NDIR * w * h];
     interpolate_green(&xtrans, &hex, &gmin, &gmax, &mut green_dir);
 
-    // All green values should be 0.5 for uniform input
+    // Every direction's green is the uniform input, to a few f32 roundings of its weighted average.
+    let expected = f32::from(to_u16(0.5)) / 65535.0;
     for d in 0..NDIR {
         for i in 0..w * h {
             let g = green_dir[d * w * h + i];
-            assert!(
-                (g - 0.5).abs() < 0.05,
-                "green_dir[{}][{}] = {} (expected ~0.5)",
-                d,
-                i,
-                g
+            assert_close!(
+                g,
+                expected,
+                2e-7,
+                "green_dir[{d}][{i}] = {g} (expected {expected})"
             );
         }
     }
@@ -128,12 +126,12 @@ fn homogeneity_uniform_derivatives() {
             let h1 = homo[pixels + idx];
             let h2 = homo[2 * pixels + idx];
             let h3 = homo[3 * pixels + idx];
-            assert_eq!(h0, h1, "Homogeneity mismatch at ({},{})", y, x);
-            assert_eq!(h1, h2, "Homogeneity mismatch at ({},{})", y, x);
-            assert_eq!(h2, h3, "Homogeneity mismatch at ({},{})", y, x);
+            assert_eq!(h0, h1, "Homogeneity mismatch at ({y},{x})");
+            assert_eq!(h1, h2, "Homogeneity mismatch at ({y},{x})");
+            assert_eq!(h2, h3, "Homogeneity mismatch at ({y},{x})");
             // With uniform drv=1.0, threshold = 8.0, all drv <= threshold
             // so count should be 9 (full 3×3 window)
-            assert_eq!(h0, 9, "Expected 9 at ({},{}), got {}", y, x, h0);
+            assert_eq!(h0, 9, "Expected 9 at ({y},{x}), got {h0}");
         }
     }
 }
@@ -159,98 +157,74 @@ fn homogeneity_uses_the_center_threshold_for_the_entire_window() {
     assert_eq!(homo[center], 9);
 }
 
+/// `YPbPr::from_rgb` against hand values: luma is `0.2627 R + 0.6780 G + 0.0593 B`, Pb is
+/// `(B − Y) · 0.56433` and Pr is `(R − Y) · 0.67815`, computed in decimal and written to f32's
+/// seven digits. The function rounds each of its three to five f32 operations once, on values
+/// below 1, so with the rounding of the decimals it agrees to within 5 · 2⁻²⁴ + 5e-8 < 4e-7;
+/// neutral greys have no chroma.
 #[test]
-fn ypbpr_conversion_white() {
-    // White (1,1,1) → Y=1, Pb=0, Pr=0
-    let y: f32 = 0.2627 * 1.0 + 0.6780 * 1.0 + 0.0593 * 1.0;
-    let pb: f32 = (1.0 - y) * 0.56433;
-    let pr: f32 = (1.0 - y) * 0.67815;
-    assert!((y - 1.0).abs() < 1e-4, "Y={}", y);
-    assert!(pb.abs() < 1e-4, "Pb={}", pb);
-    assert!(pr.abs() < 1e-4, "Pr={}", pr);
+fn ypbpr_matches_hand_values() {
+    for (rgb, expected) in [
+        ([1.0, 0.0, 0.0], [0.2627, -0.148_249_5, 0.5]),
+        ([0.0, 1.0, 0.0], [0.678, -0.382_615_7, -0.459_785_7]),
+        ([0.0, 0.0, 1.0], [0.0593, 0.530_865_2, -0.040_214_3]),
+        ([1.0, 1.0, 1.0], [1.0, 0.0, 0.0]),
+        ([0.5, 0.5, 0.5], [0.5, 0.0, 0.0]),
+        ([0.0, 0.0, 0.0], [0.0, 0.0, 0.0]),
+    ] {
+        let [r, g, b] = rgb;
+        let YPbPr { luma, pb, pr } = YPbPr::from_rgb(r, g, b);
+        for (name, actual, expected) in [
+            ("Y", luma, expected[0]),
+            ("Pb", pb, expected[1]),
+            ("Pr", pr, expected[2]),
+        ] {
+            assert_close!(
+                actual,
+                expected,
+                4e-7,
+                "{name} of {rgb:?}: {actual} vs {expected}"
+            );
+        }
+    }
 }
 
+/// Uniform input has no structure: away from the border the reconstruction leaves unfilled, the
+/// horizontal and vertical candidates are the input everywhere, so their derivatives are zero to
+/// the rounding of the luma weights (three products and two sums of values below 1, under 1e-6).
+/// The diagonal candidates are left empty at 2×2-green sites by design (see
+/// `reconstruction_preserves_native_samples_and_canonical_empty_directions`), so their derivatives
+/// are not.
 #[test]
-fn ypbpr_conversion_primary_colors() {
-    // Pure red (1,0,0): Y=0.2627, Pb=-0.2627*0.56433, Pr=0.7373*0.67815
-    let (y, pb, pr) = rgb_to_ypbpr(1.0, 0.0, 0.0);
-    assert!((y - 0.2627).abs() < 1e-6, "Red Y={y}");
-    assert!((pb - (-0.2627 * 0.56433)).abs() < 1e-6, "Red Pb={pb}");
-    assert!((pr - (0.7373 * 0.67815)).abs() < 1e-4, "Red Pr={pr}");
-
-    // Pure green (0,1,0): Y=0.6780, Pb=-0.6780*0.56433, Pr=-0.6780*0.67815
-    let (y, pb, pr) = rgb_to_ypbpr(0.0, 1.0, 0.0);
-    assert!((y - 0.6780).abs() < 1e-6, "Green Y={y}");
-    assert!((pb - (-0.6780 * 0.56433)).abs() < 1e-6, "Green Pb={pb}");
-    assert!((pr - (-0.6780 * 0.67815)).abs() < 1e-4, "Green Pr={pr}");
-
-    // Pure blue (0,0,1): Y=0.0593, Pb=0.9407*0.56433, Pr=-0.0593*0.67815
-    let (y, pb, pr) = rgb_to_ypbpr(0.0, 0.0, 1.0);
-    assert!((y - 0.0593).abs() < 1e-6, "Blue Y={y}");
-    assert!((pb - (0.9407 * 0.56433)).abs() < 1e-4, "Blue Pb={pb}");
-    assert!((pr - (-0.0593 * 0.67815)).abs() < 1e-4, "Blue Pr={pr}");
-
-    // Mid-gray (0.5, 0.5, 0.5): Y=0.5, Pb=0, Pr=0
-    let (y, pb, pr) = rgb_to_ypbpr(0.5, 0.5, 0.5);
-    assert!((y - 0.5).abs() < 1e-6, "Gray Y={y}");
-    assert!(pb.abs() < 1e-6, "Gray Pb={pb}");
-    assert!(pr.abs() < 1e-6, "Gray Pr={pr}");
-}
-
-#[test]
-fn ypbpr_conversion_black() {
-    // Black (0,0,0) → Y=0, Pb=0, Pr=0
-    let y: f32 = 0.2627 * 0.0 + 0.6780 * 0.0 + 0.0593 * 0.0;
-    let pb: f32 = (0.0 - y) * 0.56433;
-    let pr: f32 = (0.0 - y) * 0.67815;
-    assert_eq!(y, 0.0);
-    assert_eq!(pb, 0.0);
-    assert_eq!(pr, 0.0);
-}
-
-#[test]
-fn derivatives_of_uniform_input_are_finite_and_expose_directional_candidates() {
-    let raw_w = 24;
-    let raw_h = 24;
-    let w = 12;
-    let h = 12;
-    let pixels = w * h;
-    let data = vec![to_u16(0.5); raw_w * raw_h];
-    let xtrans = make_xtrans(
-        &data,
-        SensorLayout {
-            raw: Size2us::new(raw_w, raw_h),
-            active: Size2us::new(w, h),
-            margin: Vec2us::new(6, 6),
-        },
-    );
+fn derivatives_of_uniform_input_vanish_inside_the_border() {
+    let size = Size2us::new(24, 24);
+    let (w, h) = (size.width, size.height);
+    let pixels = size.pixel_count();
+    let data = vec![to_u16(0.5); pixels];
+    let xtrans = make_xtrans(&data, SensorLayout::cropped(size));
     let hex = HexLookup::new(&xtrans.raw_pattern);
 
     let mut gmin = vec![0.0f32; pixels];
     let mut gmax = vec![1.0f32; pixels];
     compute_green_minmax(&xtrans, &hex, &mut gmin, &mut gmax);
-
     let mut green_dir = vec![0.0f32; NDIR * pixels];
     interpolate_green(&xtrans, &hex, &gmin, &gmax, &mut green_dir);
-
     let mut colors = vec![[0.0; 2]; NDIR * pixels];
     reconstruct_colors(&xtrans, &hex, &green_dir, &mut colors);
     let mut drv = vec![f32::NAN; NDIR * pixels];
     compute_derivatives(&xtrans, &green_dir, &colors, &mut drv);
 
-    let mut nonzero = [0usize; NDIR];
-    for d in 0..NDIR {
-        for y in 2..h - 2 {
-            for x in 2..w - 2 {
-                let val = drv[d * pixels + y * w + x];
-                assert!(val.is_finite(), "NaN derivative at d={d} y={y} x={x}");
-                assert!(val >= 0.0, "Negative derivative at d={d} y={y} x={x}");
-                nonzero[d] += usize::from(val > 1e-6);
+    for d in 0..2 {
+        for y in 6..h - 6 {
+            for x in 6..w - 6 {
+                let value = drv[d * pixels + y * w + x];
+                assert!(
+                    (0.0..1e-6).contains(&value),
+                    "direction {d} at ({x}, {y}): {value}"
+                );
             }
         }
     }
-    assert!(nonzero[0] > 0);
-    assert_ne!(nonzero[0], nonzero[2]);
 }
 
 #[test]
@@ -420,7 +394,8 @@ fn homogeneity_scores_match_direct_five_by_five_windows() {
                 let mut expected = 0u32;
                 for sample_y in y.saturating_sub(2)..=(y + 2).min(height - 1) {
                     for sample_x in x.saturating_sub(2)..=(x + 2).min(width - 1) {
-                        expected += homo[direction * pixels + sample_y * width + sample_x] as u32;
+                        expected +=
+                            u32::from(homo[direction * pixels + sample_y * width + sample_x]);
                     }
                 }
                 assert_eq!(scores[y * width + x][direction], expected);
@@ -541,8 +516,8 @@ fn reconstruction_preserves_native_samples_and_canonical_empty_directions() {
     for direction in 0..NDIR {
         for y in 3..h - 3 {
             for x in 3..w - 3 {
-                let raw_y = y + xtrans.margin.y;
-                let raw_x = x + xtrans.margin.x;
+                let raw_y = y + xtrans.layout.margin.y;
+                let raw_x = x + xtrans.layout.margin.x;
                 let native = xtrans.raw_pattern.color_at(Vec2us::new(raw_x, raw_y));
                 let [red, blue] = colors[direction * pixels + y * w + x];
                 match native {
@@ -573,8 +548,8 @@ fn reconstruction_geometry_dependencies_are_completed_by_earlier_stages() {
             if native == 1 && !is_solitary_green(&hex, y, x) {
                 let offsets = hex.get(y, x);
                 for offset in &offsets[..4] {
-                    let neighbor_y = y.wrapping_add_signed(offset.dy as isize);
-                    let neighbor_x = x.wrapping_add_signed(offset.dx as isize);
+                    let neighbor_y = y.wrapping_add_signed(offset.dy);
+                    let neighbor_x = x.wrapping_add_signed(offset.dx);
                     let neighbor = pattern.color_at(Vec2us::new(neighbor_x, neighbor_y));
                     assert!(
                         neighbor != 1 || is_solitary_green(&hex, neighbor_y, neighbor_x),
@@ -640,19 +615,25 @@ fn blend_uniform_homo_produces_uniform_output() {
     );
 
     // Uniform 0.5 input → output should be approximately 0.5 for all channels
-    let output = interleave_planes([r, g, b]);
-    for (i, &v) in output.iter().enumerate() {
-        assert!((v - 0.5).abs() < 0.05, "Pixel {i}: expected ~0.5, got {v}");
+    for (channel, plane) in [&r, &g, &b].into_iter().enumerate() {
+        for (i, &v) in plane.iter().enumerate() {
+            assert_close!(
+                v,
+                0.5,
+                0.05,
+                "channel {channel} pixel {i}: expected ~0.5, got {v}"
+            );
+        }
     }
 }
 
 #[test]
 fn blend_one_dominant_direction() {
     // With one dominant direction, output should match that direction's RGB
-    let raw_w = 30;
-    let raw_h = 30;
-    let w = 18;
-    let h = 18;
+    let raw_w = 42;
+    let raw_h = 42;
+    let w = 30;
+    let h = 30;
     let pixels = w * h;
     let data = vec![to_u16(0.5); raw_w * raw_h];
     let xtrans = make_xtrans(
@@ -698,7 +679,6 @@ fn blend_one_dominant_direction() {
             b: &mut b_one,
         },
     );
-    let output_one = interleave_planes([r_one, g_one, b_one]);
 
     // All directions equally good
     let homo_all = vec![9u8; NDIR * pixels];
@@ -720,7 +700,6 @@ fn blend_one_dominant_direction() {
             b: &mut b_all,
         },
     );
-    let output_all = interleave_planes([r_all, g_all, b_all]);
 
     let mut changed = false;
     for y in MARK_INFO_BORDER..h - MARK_INFO_BORDER {
@@ -728,18 +707,44 @@ fn blend_one_dominant_direction() {
             let pixel = y * w + x;
             let [expected_r, expected_b] = colors[pixel];
             let expected_g = green_dir[pixel];
-            assert_eq!(
-                &output_one[pixel * 3..pixel * 3 + 3],
-                &[expected_r, expected_g, expected_b]
-            );
-            changed |= output_one[pixel * 3..pixel * 3 + 3] != output_all[pixel * 3..pixel * 3 + 3];
+            let one = [r_one[pixel], g_one[pixel], b_one[pixel]];
+            assert_eq!(one, [expected_r, expected_g, expected_b]);
+            changed |= one != [r_all[pixel], g_all[pixel], b_all[pixel]];
         }
     }
     assert!(changed);
 
     // Output should have no NaN or negative values
-    for (i, &v) in output_one.iter().enumerate() {
+    for (i, &v) in [&r_one, &g_one, &b_one].into_iter().flatten().enumerate() {
         assert!(v.is_finite(), "NaN at {i}");
         assert!(v >= 0.0, "Negative at {i}");
     }
+}
+
+/// A border pixel whose clipped 3×3 window holds no sample of a colour takes that colour from the
+/// nearest window that does, never from its own sample of another colour.
+///
+/// The fixture's corner (0, 0) is green, and so are its three in-frame neighbours. The 5×5 window
+/// holds red at (2, 0) and (1, 2) and blue at (2, 1) and (0, 2); a sample is `10·y + x + 1`, so
+/// red is (3 + 22) / 2 = 12.5, blue (13 + 21) / 2 = 17, and green keeps its own 1.
+#[test]
+fn a_border_pixel_takes_a_missing_colour_from_that_colour() {
+    let size = Size2us::new(12, 12);
+    let data: Vec<f32> = (0..size.pixel_count())
+        .map(|index| (10 * (index / size.width) + index % size.width + 1) as f32)
+        .collect();
+    let xtrans = XTransImage::with_margins_f32(&data, SensorLayout::cropped(size), test_pattern());
+    let mut r = vec![0.0; size.pixel_count()];
+    let mut g = vec![0.0; size.pixel_count()];
+    let mut b = vec![0.0; size.pixel_count()];
+    demosaic_border(
+        &xtrans,
+        PlanarRgbMut {
+            r: &mut r,
+            g: &mut g,
+            b: &mut b,
+        },
+        1,
+    );
+    assert_eq!([r[0], g[0], b[0]], [12.5, 1.0, 17.0]);
 }

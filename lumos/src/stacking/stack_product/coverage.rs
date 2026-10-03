@@ -27,22 +27,6 @@ pub enum Coverage {
 }
 
 impl Coverage {
-    /// Pixel extent of the coverage this describes.
-    pub fn size(&self) -> Size2us {
-        match self {
-            Coverage::Uniform { size, .. } => *size,
-            Coverage::PerPixel(plane) => Size2us::new(plane.width(), plane.height()),
-        }
-    }
-
-    /// The measured plane, or `None` when coverage is uniform and no plane exists.
-    pub fn per_pixel(&self) -> Option<&Buffer2<f32>> {
-        match self {
-            Coverage::Uniform { .. } => None,
-            Coverage::PerPixel(plane) => Some(plane),
-        }
-    }
-
     /// Materialize as a plane. Allocates for [`Coverage::Uniform`] — the cost this type exists to
     /// let a caller avoid, so only reach for it when a plane is genuinely what is wanted.
     pub fn to_plane(&self) -> Buffer2<f32> {
@@ -55,44 +39,54 @@ impl Coverage {
     }
 }
 
-/// Indexes like the plane it stands for, by flat sample or by `(x, y)` — a uniform coverage
-/// answers with its constant rather than materializing anything.
-impl std::ops::Index<usize> for Coverage {
-    type Output = f32;
-
-    fn index(&self, index: usize) -> &f32 {
-        match self {
-            Coverage::Uniform { value, size } => {
-                debug_assert!(index < size.pixel_count(), "coverage index out of range");
-                value
-            }
-            Coverage::PerPixel(plane) => &plane[index],
-        }
-    }
-}
-
-impl std::ops::Index<(usize, usize)> for Coverage {
-    type Output = f32;
-
-    fn index(&self, (x, y): (usize, usize)) -> &f32 {
-        match self {
-            Coverage::Uniform { value, size } => {
-                debug_assert!(
-                    x < size.width && y < size.height,
-                    "coverage index out of range"
-                );
-                value
-            }
-            Coverage::PerPixel(plane) => &plane[(x, y)],
-        }
-    }
-}
-
 impl From<Coverage> for LinearImage {
     fn from(coverage: Coverage) -> Self {
         match coverage {
             Coverage::PerPixel(plane) => plane.into(),
-            uniform => uniform.to_plane().into(),
+            uniform @ Coverage::Uniform { .. } => uniform.to_plane().into(),
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use std::ops::Index;
+
+    use imaginarium::Buffer2;
+
+    use crate::stacking::stack_product::coverage::Coverage;
+
+    impl Coverage {
+        /// The measured plane, or `None` when coverage is uniform and no plane exists.
+        pub(crate) fn per_pixel(&self) -> Option<&Buffer2<f32>> {
+            match self {
+                Coverage::Uniform { .. } => None,
+                Coverage::PerPixel(plane) => Some(plane),
+            }
+        }
+    }
+
+    /// Indexes like the plane it stands for, by flat sample or by `(x, y)` — a uniform coverage
+    /// answers with its constant rather than materializing anything.
+    impl Index<usize> for Coverage {
+        type Output = f32;
+
+        fn index(&self, index: usize) -> &f32 {
+            match self {
+                Coverage::Uniform { value, .. } => value,
+                Coverage::PerPixel(plane) => &plane[index],
+            }
+        }
+    }
+
+    impl Index<(usize, usize)> for Coverage {
+        type Output = f32;
+
+        fn index(&self, (x, y): (usize, usize)) -> &f32 {
+            match self {
+                Coverage::Uniform { value, .. } => value,
+                Coverage::PerPixel(plane) => &plane[(x, y)],
+            }
         }
     }
 }

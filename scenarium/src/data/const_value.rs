@@ -1,4 +1,7 @@
+use std::fmt;
 use std::fmt::Display;
+use std::fmt::Formatter;
+use std::slice;
 
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +19,10 @@ pub enum ConstValue {
 }
 
 impl PartialEq for ConstValue {
+    #[expect(
+        clippy::match_same_arms,
+        reason = "each variant pair binds its own payload type, so the arms cannot merge"
+    )]
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (ConstValue::Null, ConstValue::Null) => true,
@@ -42,7 +49,7 @@ impl ConstValue {
     /// on the type side, and
     /// [`DataType::accepts_const`](crate::DataType) reads this one to hold a
     /// literal to exactly what a runtime read of it would accept.
-    pub(crate) fn is_numeric_scalar(&self) -> bool {
+    pub(crate) const fn is_numeric_scalar(&self) -> bool {
         matches!(
             self,
             ConstValue::Float(_) | ConstValue::Int(_) | ConstValue::Bool(_)
@@ -53,7 +60,7 @@ impl ConstValue {
         match self {
             ConstValue::Float(value) => Some(*value),
             ConstValue::Int(value) => Some(*value as f64),
-            ConstValue::Bool(value) => Some(*value as i64 as f64),
+            ConstValue::Bool(value) => Some(i64::from(*value) as f64),
             _ => None,
         }
     }
@@ -62,7 +69,7 @@ impl ConstValue {
         match self {
             ConstValue::Int(value) => Some(*value),
             ConstValue::Float(value) => Some(*value as i64),
-            ConstValue::Bool(value) => Some(*value as i64),
+            ConstValue::Bool(value) => Some(i64::from(*value)),
             _ => None,
         }
     }
@@ -111,7 +118,7 @@ impl ConstValue {
     /// selection never has to special-case the singular form.
     pub fn as_fs_paths(&self) -> Option<&[String]> {
         match self {
-            ConstValue::FsPath(path) => Some(std::slice::from_ref(path)),
+            ConstValue::FsPath(path) => Some(slice::from_ref(path)),
             ConstValue::FsPaths(paths) => Some(paths),
             _ => None,
         }
@@ -124,7 +131,7 @@ impl ConstValue {
     /// A renderer rather than a `String` so a per-frame reader can write it
     /// into a buffer it already holds — `write!(buf, "{}", v.value_text())` —
     /// instead of taking one it would only copy out of and drop.
-    pub fn value_text(&self) -> ValueText<'_> {
+    pub const fn value_text(&self) -> ValueText<'_> {
         ValueText(self)
     }
 
@@ -138,7 +145,7 @@ impl ConstValue {
 pub struct ValueText<'a>(&'a ConstValue);
 
 impl Display for ValueText<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self.0 {
             ConstValue::Null => f.write_str("null"),
             ConstValue::Float(value) => write!(f, "{value}"),
@@ -162,7 +169,7 @@ impl Display for ValueText<'_> {
 }
 
 impl Display for ConstValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             ConstValue::Null => write!(f, "null"),
             ConstValue::Float(value) => write!(f, "{value:.4}"),
@@ -184,13 +191,13 @@ impl From<i64> for ConstValue {
 
 impl From<i32> for ConstValue {
     fn from(value: i32) -> Self {
-        ConstValue::Int(value as i64)
+        ConstValue::Int(i64::from(value))
     }
 }
 
 impl From<f32> for ConstValue {
     fn from(value: f32) -> Self {
-        ConstValue::Float(value as f64)
+        ConstValue::Float(f64::from(value))
     }
 }
 

@@ -15,7 +15,7 @@ pub(crate) struct OutputCtx<'a> {
 }
 
 impl<'a> OutputCtx<'a> {
-    pub(super) fn new(node: NodeCtx<'a>, port_idx: usize, declared: &'a FuncOutput) -> Self {
+    pub(super) const fn new(node: NodeCtx<'a>, port_idx: usize, declared: &'a FuncOutput) -> Self {
         Self {
             node,
             port_idx,
@@ -24,12 +24,12 @@ impl<'a> OutputCtx<'a> {
     }
 
     /// This port's address in the graph.
-    pub(crate) fn port(self) -> OutputPort {
+    pub(crate) const fn port(self) -> OutputPort {
         OutputPort::new(self.node.id, self.port_idx)
     }
 
     /// This port's address in the canvas's glyph domains.
-    pub(crate) fn port_ref(self) -> PortRef {
+    pub(crate) const fn port_ref(self) -> PortRef {
         PortRef::output(self.node.id, self.port_idx)
     }
 
@@ -64,15 +64,14 @@ impl<'a> OutputCtx<'a> {
     /// unresolvable chain — both of those are *present* and `Any`. It means
     /// the table was resolved against a different graph or library than the
     /// scope carries, since a port only reaches here off a func the same
-    /// `node_func` lookup resolved, at an index that func declares. Degrading
+    /// `Node::func` lookup resolved, at an index that func declares. Degrading
     /// to `Any` would paint a stale port a plausible colour and let a scope
     /// composed without a refresh go unnoticed.
-    pub(crate) fn ty(self) -> DataType {
+    pub(crate) fn ty(self) -> &'a DataType {
         self.node
             .graph_ctx
             .output_types()
             .get(self.port())
             .expect("the scope's table is resolved against the graph it carries")
-            .clone()
     }
 }

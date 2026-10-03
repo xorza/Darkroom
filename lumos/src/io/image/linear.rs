@@ -1,28 +1,26 @@
-use std::ops::SubAssign;
 use std::path::Path;
 
-use imaginarium::{Buffer2, ChannelCount, ChannelType, Image};
+use imaginarium::{Buffer2, ChannelCount, ColorFormat, FileFormat, Image};
 use rayon::prelude::*;
 
 use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::image_ops::rgb::Rgb;
+use crate::io::image::cfa::CfaType;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode as fits_decode;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
-    TransferProvenance,
+    SourceContainer, TransferProvenance,
 };
+use crate::io::image::input_format::InputFormat;
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::null_mask::NullMask;
-use crate::io::image::standard::{
-    FITS_EXTENSIONS, STANDARD_IMAGE_EXTENSIONS, f32_target_format, file_extension,
-    read_standard_image, scientific_rejection, standard_container,
-};
-use crate::io::raw;
-use crate::stacking::frame_store::StackableImage;
+use crate::io::image::standard::{f32_target_format, read_standard_image, scientific_rejection};
+use crate::stacking::frame_store::cache_key::DecoderKind;
+use crate::stacking::frame_store::stackable_image::StackableImage;
 
 /// A one- or three-channel floating-point image in a linear numeric domain.
 #[derive(Debug, Clone)]
@@ -39,69 +37,74 @@ impl LinearImage {
     ///
     /// Supported formats:
     /// - FITS without CFA metadata: .fit, .fits
-    /// - Explicitly declared linear, floating-point TIFF: .tiff, .tif
+    /// - Floating-point TIFF, taken as linear: .tiff, .tif
     ///
     /// Camera RAW, mosaic FITS, integer TIFF, alpha TIFF, PNG, and JPEG are rejected. Use
     /// [`crate::CfaImage::from_file`] or [`crate::PreviewImage::from_file`] for those products.
     pub fn from_file<P: AsRef<Path>>(path: P, context: &LoadContext) -> Result<Self, ImageError> {
         let path = path.as_ref();
         context.check_cancelled(path)?;
-        let extension = file_extension(path);
-
-        if FITS_EXTENSIONS.contains(&extension.as_str()) {
-            return fits_decode::load_linear_fits(path, context);
-        }
-
-        if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {
+        let format = match InputFormat::of(path)? {
+            InputFormat::Fits => return fits_decode::load_linear_fits(path, context),
+            InputFormat::CameraRaw => {
+                return Err(scientific_rejection(
+                    path,
+                    "camera RAW must be loaded as CfaImage and calibrated before demosaicing",
+                ));
+            }
+            InputFormat::Raster(format) => format,
+        };
+        if format != FileFormat::Tiff {
             return Err(scientific_rejection(
                 path,
-                "camera RAW must be loaded as CfaImage and calibrated before demosaicing",
+                "PNG and JPEG are preview-only because their transfer and color transforms are not decoded",
             ));
         }
 
-        if STANDARD_IMAGE_EXTENSIONS.contains(&extension.as_str()) {
-            if !matches!(extension.as_str(), "tiff" | "tif") {
-                return Err(scientific_rejection(
-                    path,
-                    "PNG and JPEG are preview-only because their transfer and color transforms are not decoded",
-                ));
-            }
-
-            let decoded = read_standard_image(path)?;
-            context.check_cancelled(path)?;
-            if decoded.desc().color_format.channel_type != ChannelType::Float {
-                return Err(scientific_rejection(
-                    path,
-                    "scientific raster input must be an explicitly declared floating-point TIFF",
-                ));
-            }
-            if decoded.desc().color_format.channel_count == ChannelCount::Rgba {
-                return Err(scientific_rejection(
-                    path,
-                    "scientific raster input must not contain an alpha channel",
-                ));
-            }
-
-            let color = if decoded.desc().color_format.channel_count == ChannelCount::L {
-                ColorProvenance::Monochrome
-            } else {
-                ColorProvenance::Unspecified
-            };
-            let mut image = LinearImage::from(&decoded);
-            image.metadata.provenance = Some(ImageProvenance {
-                container: standard_container(&extension),
-                decoder: DecoderProvenance::Imaginarium,
-                transfer: TransferProvenance::DeclaredLinearRaster,
-                color,
-                clipped: false,
-                demosaic: DemosaicProvenance::None,
-                // Every raster format this path reads stores its first row at the top.
-                row_order: RowOrder::TopDown,
-            });
-            return Ok(image);
+        let decoded = read_standard_image(path)?;
+        context.check_cancelled(path)?;
+        let desc = decoded.desc();
+        if desc.width > ImageDimensions::MAX_SIDE || desc.height > ImageDimensions::MAX_SIDE {
+            return Err(scientific_rejection(
+                path,
+                format!(
+                    "{}x{} has a side past {} px",
+                    desc.width,
+                    desc.height,
+                    ImageDimensions::MAX_SIDE
+                ),
+            ));
+        }
+        if !decoded.desc().color_format.sample_type.is_float() {
+            return Err(scientific_rejection(
+                path,
+                "scientific raster input must be a floating-point TIFF",
+            ));
+        }
+        if decoded.desc().color_format.channel_count == ChannelCount::Rgba {
+            return Err(scientific_rejection(
+                path,
+                "scientific raster input must not contain an alpha channel",
+            ));
         }
 
-        Err(ImageError::UnsupportedFormat { extension })
+        let color = if decoded.desc().color_format.channel_count == ChannelCount::L {
+            ColorProvenance::Monochrome
+        } else {
+            ColorProvenance::Unspecified
+        };
+        let mut image = LinearImage::from(&decoded);
+        image.metadata.provenance = Some(ImageProvenance {
+            container: SourceContainer::from(format),
+            decoder: DecoderProvenance::Imaginarium,
+            transfer: TransferProvenance::FloatRaster,
+            color,
+            clipped: false,
+            demosaic: DemosaicProvenance::None,
+            // Every raster format this path reads stores its first row at the top.
+            row_order: RowOrder::TopDown,
+        });
+        Ok(image)
     }
 
     /// Create from dimensions and interleaved pixel data (RGBRGBRGB...).
@@ -133,7 +136,7 @@ impl LinearImage {
         self.pixels.channel(0).height()
     }
 
-    pub fn channels(&self) -> usize {
+    pub const fn channels(&self) -> usize {
         self.pixels.channel_count()
     }
 
@@ -149,12 +152,21 @@ impl LinearImage {
         self.pixel_count() * self.channels()
     }
 
-    pub fn is_grayscale(&self) -> bool {
+    pub const fn is_grayscale(&self) -> bool {
         matches!(self.pixels, LinearPixels::L(_))
     }
 
-    pub fn is_rgb(&self) -> bool {
+    pub const fn is_rgb(&self) -> bool {
         matches!(self.pixels, LinearPixels::Rgb(_))
+    }
+
+    /// The interleaved format these planes repack to: `RGB_F32` or `L_F32`.
+    pub const fn color_format(&self) -> ColorFormat {
+        if self.is_rgb() {
+            ColorFormat::RGB_F32
+        } else {
+            ColorFormat::L_F32
+        }
     }
 
     /// Get channel as Buffer2 reference (0=L or R, 1=G, 2=B).
@@ -191,27 +203,6 @@ impl LinearImage {
             metadata: ImageMetadata::default(),
             pixels: LinearPixels::from_f32_image(image),
             nulls: None,
-        }
-    }
-
-    /// Calculate mean pixel value across all channels.
-    pub fn mean(&self) -> f32 {
-        self.pixels.mean()
-    }
-
-    /// Per-sample parallel in-place map over every plane. For work that treats each sample alike
-    /// whatever channel it belongs to; [`Self::map_rgb`] is the form for work that needs the whole
-    /// pixel.
-    pub(crate) fn map_samples(&mut self, sample: impl Fn(f32) -> f32 + Sync) {
-        for plane in self.planes_mut() {
-            plane
-                .pixels_mut()
-                .par_chunks_mut(SAMPLES_PER_BLOCK)
-                .for_each(|block| {
-                    for value in block {
-                        *value = sample(*value);
-                    }
-                });
         }
     }
 
@@ -253,59 +244,55 @@ impl LinearImage {
         );
         let mut intensity = vec![0.0f32; self.pixel_count()];
         intensity
-            .par_iter_mut()
-            .zip(r.par_iter())
-            .zip(g.par_iter())
-            .zip(b.par_iter())
-            .for_each(|(((out, &r), &g), &b)| *out = Rgb { r, g, b }.intensity());
+            .par_chunks_mut(SAMPLES_PER_BLOCK)
+            .zip(r.par_chunks(SAMPLES_PER_BLOCK))
+            .zip(g.par_chunks(SAMPLES_PER_BLOCK))
+            .zip(b.par_chunks(SAMPLES_PER_BLOCK))
+            .for_each(|(((out, r), g), b)| {
+                for (((out, &r), &g), &b) in out.iter_mut().zip(r).zip(g).zip(b) {
+                    *out = Rgb { r, g, b }.intensity();
+                }
+            });
         Buffer2::new(self.width(), self.height(), intensity)
     }
 
     /// Enhance in the intensity (luminance) domain: take the combined intensity, transform it with
-    /// `map`, then rescale every channel hue-preservingly so the new intensity matches. The shape
-    /// shared by the display enhancers ([`crate::image_ops::hdr`],
-    /// [`crate::image_ops::local_contrast`]).
+    /// `map`, then move every pixel to its new intensity with its hue kept
+    /// ([`Rgb::with_intensity`]); L takes the new intensity clamped to `[0, 1]`. The shape shared
+    /// by the display enhancers ([`crate::image_ops::hdr`], [`crate::image_ops::local_contrast`]).
     pub(crate) fn remap_intensity(&mut self, map: impl FnOnce(&Buffer2<f32>) -> Buffer2<f32>) {
-        let intensity = self.intensity_plane();
-        let mapped = map(&intensity);
-        self.apply_intensity_remap(&intensity, &mapped);
-    }
-
-    /// Hue-preserving intensity remap: scale each pixel's channels by `mapped/intensity`
-    /// (with a highlight cap so a channel can't clip past white and shift hue); L takes
-    /// `mapped` directly. Output clamped to `[0, 1]`. `intensity`/`mapped` must match the
-    /// image's dimensions.
-    fn apply_intensity_remap(&mut self, intensity: &Buffer2<f32>, mapped: &Buffer2<f32>) {
+        let mapped = map(&self.intensity_plane());
         if !self.is_rgb() {
             self.channel_mut(0)
                 .pixels_mut()
-                .par_iter_mut()
-                .zip(mapped.pixels().par_iter())
-                .for_each(|(p, &m)| *p = m.clamp(0.0, 1.0));
+                .par_chunks_mut(SAMPLES_PER_BLOCK)
+                .zip(mapped.pixels().par_chunks(SAMPLES_PER_BLOCK))
+                .for_each(|(out, mapped)| {
+                    for (out, &m) in out.iter_mut().zip(mapped) {
+                        *out = m.clamp(0.0, 1.0);
+                    }
+                });
             return;
         }
         let [r, g, b] = self.rgb_planes_mut();
-        r.par_iter_mut()
-            .zip(g.par_iter_mut())
-            .zip(b.par_iter_mut())
-            .zip(intensity.pixels().par_iter())
-            .zip(mapped.pixels().par_iter())
-            .for_each(|((((r, g), b), &i), &m)| {
-                if i <= 0.0 {
-                    return;
+        r.par_chunks_mut(SAMPLES_PER_BLOCK)
+            .zip(g.par_chunks_mut(SAMPLES_PER_BLOCK))
+            .zip(b.par_chunks_mut(SAMPLES_PER_BLOCK))
+            .zip(mapped.pixels().par_chunks(SAMPLES_PER_BLOCK))
+            .for_each(|(((r, g), b), mapped)| {
+                for (((r, g), b), &m) in
+                    r.iter_mut().zip(g.iter_mut()).zip(b.iter_mut()).zip(mapped)
+                {
+                    let out = Rgb {
+                        r: *r,
+                        g: *g,
+                        b: *b,
+                    }
+                    .with_intensity(m);
+                    *r = out.r;
+                    *g = out.g;
+                    *b = out.b;
                 }
-                let gain = m / i;
-                let (mut nr, mut ng, mut nb) = (*r * gain, *g * gain, *b * gain);
-                let maxc = nr.max(ng).max(nb);
-                if maxc > 1.0 {
-                    let s = 1.0 / maxc;
-                    nr *= s;
-                    ng *= s;
-                    nb *= s;
-                }
-                *r = nr.max(0.0);
-                *g = ng.max(0.0);
-                *b = nb.max(0.0);
             });
     }
 
@@ -319,6 +306,8 @@ impl LinearImage {
 }
 
 impl StackableImage for LinearImage {
+    const DECODER: DecoderKind = DecoderKind::Linear;
+
     fn dimensions(&self) -> ImageDimensions {
         self.dimensions()
     }
@@ -335,34 +324,16 @@ impl StackableImage for LinearImage {
         &self.metadata
     }
 
+    fn cfa_type(&self) -> Option<CfaType> {
+        None
+    }
+
     fn load(path: &Path, context: &LoadContext) -> Result<Self, ImageError> {
         LinearImage::from_file(path, context)
     }
 
     fn into_planes(self) -> arrayvec::ArrayVec<Buffer2<f32>, 3> {
         self.pixels.into_planes()
-    }
-}
-
-impl SubAssign<&LinearImage> for LinearImage {
-    fn sub_assign(&mut self, rhs: &LinearImage) {
-        assert_eq!(
-            self.dimensions(),
-            rhs.dimensions(),
-            "Image dimensions mismatch"
-        );
-        let w = self.width();
-        for c in 0..self.channels() {
-            let dst = self.channel_mut(c).pixels_mut();
-            let src = rhs.channel(c).pixels();
-            dst.par_chunks_mut(w)
-                .zip(src.par_chunks(w))
-                .for_each(|(d_row, s_row)| {
-                    for (d, s) in d_row.iter_mut().zip(s_row.iter()) {
-                        *d -= s;
-                    }
-                });
-        }
     }
 }
 
@@ -404,10 +375,7 @@ impl From<&Image> for LinearImage {
         if image.desc().color_format == target {
             Self::from_f32_image(image)
         } else {
-            let converted = image
-                .convert_to(target)
-                .expect("image converts to its f32 channel format");
-            Self::from_f32_image(&converted)
+            Self::from_f32_image(&image.convert_to(target))
         }
     }
 }
@@ -415,54 +383,6 @@ impl From<&Image> for LinearImage {
 impl From<LinearImage> for Image {
     fn from(linear: LinearImage) -> Self {
         Image::from(&linear)
-    }
-}
-
-#[cfg(test)]
-pub(crate) mod internals {
-    use crate::image_ops::rgb::Rgb;
-    use crate::io::image::linear::LinearImage;
-    use crate::io::image::linear_pixels;
-    use crate::math::vec2us::Vec2us;
-
-    impl LinearImage {
-        pub(crate) fn get_pixel_gray(&self, pos: Vec2us) -> f32 {
-            debug_assert!(self.is_grayscale());
-            self.channel(0)[self.dimensions().size().index_of(pos)]
-        }
-
-        pub(crate) fn get_pixel_gray_mut(&mut self, pos: Vec2us) -> &mut f32 {
-            debug_assert!(self.is_grayscale());
-            let idx = self.dimensions().size().index_of(pos);
-            &mut self.channel_mut(0)[idx]
-        }
-
-        pub(crate) fn get_pixel_channel(&self, pos: Vec2us, c: usize) -> f32 {
-            debug_assert!(c < self.channels());
-            self.channel(c)[self.dimensions().size().index_of(pos)]
-        }
-
-        pub(crate) fn get_pixel_rgb(&self, pos: Vec2us) -> Rgb {
-            debug_assert!(self.is_rgb());
-            let idx = self.dimensions().size().index_of(pos);
-            Rgb {
-                r: self.channel(0)[idx],
-                g: self.channel(1)[idx],
-                b: self.channel(2)[idx],
-            }
-        }
-
-        pub(crate) fn set_pixel_rgb(&mut self, pos: Vec2us, rgb: Rgb) {
-            debug_assert!(self.is_rgb());
-            let idx = self.dimensions().size().index_of(pos);
-            self.channel_mut(0)[idx] = rgb.r;
-            self.channel_mut(1)[idx] = rgb.g;
-            self.channel_mut(2)[idx] = rgb.b;
-        }
-
-        pub(crate) fn into_interleaved_pixels(self) -> Vec<f32> {
-            linear_pixels::internals::into_interleaved_pixels(self.pixels)
-        }
     }
 }
 
@@ -492,24 +412,6 @@ mod tests {
     }
 
     #[test]
-    fn map_samples_maps_every_plane() {
-        let mut image = rgb_image(
-            Size2us::new(2, 1),
-            vec![0.1, 0.4],
-            vec![0.2, 0.5],
-            vec![0.3, 0.6],
-        );
-        image.map_samples(|v| v + 1.0);
-        assert_eq!(image.channel(0).pixels(), &[1.1, 1.4]);
-        assert_eq!(image.channel(1).pixels(), &[1.2, 1.5]);
-        assert_eq!(image.channel(2).pixels(), &[1.3, 1.6]);
-
-        let mut gray = gray_image(Size2us::new(3, 1), vec![0.0, 0.25, 0.5]);
-        gray.map_samples(|v| v + 0.25);
-        assert_eq!(gray.channel(0).pixels(), &[0.25, 0.5, 0.75]);
-    }
-
-    #[test]
     fn intensity_plane_is_channel_mean_for_rgb_and_identity_for_l() {
         // RGB: (0.3,0,0) → 0.1, (0.6,0.6,0.6) → 0.6 (mean; approx for the /3 rounding).
         let rgb = rgb_image(
@@ -525,16 +427,20 @@ mod tests {
         assert_eq!(l.intensity_plane().pixels(), &[0.2, 0.7]);
     }
 
+    /// Doubling the intensity doubles every channel, `2I / I` being 2 exactly; a mono plane takes
+    /// the mapped intensity itself, clamped to `[0, 1]`.
     #[test]
-    fn apply_intensity_remap_scales_rgb_hue_preservingly() {
-        // One pixel (0.2,0.1,0.1), I = 0.4/3; double the mapped intensity → gain 2.
+    fn remap_intensity_moves_pixels_with_their_hue() {
         let mut image = rgb_image(Size2us::new(1, 1), vec![0.2], vec![0.1], vec![0.1]);
-        let intensity = image.intensity_plane();
-        let mapped = Buffer2::new(1, 1, vec![intensity.pixels()[0] * 2.0]);
-        image.apply_intensity_remap(&intensity, &mapped);
-        // each channel x2, none exceeds 1 → no cap
+        image.remap_intensity(|intensity| {
+            Buffer2::new(1, 1, intensity.pixels().iter().map(|&i| 2.0 * i).collect())
+        });
         assert_eq!(image.channel(0).pixels(), &[0.4]);
         assert_eq!(image.channel(1).pixels(), &[0.2]);
         assert_eq!(image.channel(2).pixels(), &[0.2]);
+
+        let mut gray = gray_image(Size2us::new(3, 1), vec![0.2, 0.5, 0.7]);
+        gray.remap_intensity(|_| Buffer2::new(3, 1, vec![-0.5, 0.25, 1.5]));
+        assert_eq!(gray.channel(0).pixels(), &[0.0, 0.25, 1.0]);
     }
 }

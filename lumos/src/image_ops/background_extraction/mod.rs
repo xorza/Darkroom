@@ -7,9 +7,10 @@
 //! then removed per channel. Low order is *why* it can't eat large nebulosity — a degree ≤ 4
 //! surface physically cannot represent small-scale structure, only the broad gradient.
 //!
-//! Distinct from background *neutralization* (`color_calibration::neutralize_background`, which only
-//! equalizes per-channel offsets): this removes a **spatial surface**, per channel (light pollution
-//! is coloured), and runs on the linear master *before* colour calibration and the stretch.
+//! Distinct from background *neutralization* (`color_calibration::neutralize_background`, which
+//! only equalizes per-channel offsets): this removes a **spatial surface**, per channel (light
+//! pollution is coloured), and runs on the linear master *before* colour calibration and the
+//! stretch.
 
 use common::{Introspect, IntrospectEnum};
 use imaginarium::Buffer2;
@@ -22,9 +23,7 @@ use crate::image_ops::error::OpError;
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::robust_sigma_f64;
-
-/// Sigma-clip passes for the per-tile sky estimate (matches the detector's tiled-background default).
-const SKY_CLIP_ITERATIONS: usize = 3;
+use crate::stacking::star_detection::config::background_config::DEFAULT_SIGMA_CLIP_ITERATIONS;
 
 /// How the modeled background is removed from the image.
 ///
@@ -33,8 +32,9 @@ const SKY_CLIP_ITERATIONS: usize = 3;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, IntrospectEnum)]
 #[config(type_id = "ed416b2d-378b-4eb1-9029-bc7a80a509aa")]
 pub enum BackgroundMode {
-    /// `out = in − model`. For **additive** gradients (light pollution, sky/moon glow) — the usual
-    /// choice. Adds no noise (a smooth surface is noiseless) and preserves real flux differences.
+    /// `out = in − (model − mean(model))`. For **additive** gradients (light pollution, sky/moon
+    /// glow) — the usual choice. Removes the variation and keeps the sky level. Adds no noise (a
+    /// smooth surface is noiseless) and preserves real flux differences.
     Subtract,
     /// `out = in / (model / mean(model))`, divisor floored. For **multiplicative** residuals
     /// (vignetting the master flat missed, differential absorption).
@@ -42,11 +42,14 @@ pub enum BackgroundMode {
 }
 
 /// Model and remove the smooth background of an image in place, **per channel**. Operates on linear
-/// data: the output background sits at ≈0 (slightly negative on noise — kept signed, not clamped).
+/// data: the output background sits at each channel's mean sky level (`Subtract`) or keeps it
+/// (`Divide`), with the gradient gone.
 #[derive(Debug, Clone, Introspect)]
+#[config(type_id = "47a71876-5db9-45f9-a21d-cc2ce40a80f2")]
 pub struct ExtractBackground {
     /// Sample-tile size in px. Each tile yields one robust sky sample. Larger → smoother, less able
-    /// to absorb extended real signal; should be far larger than stars and smaller than the gradient.
+    /// to absorb extended real signal; should be far larger than stars and smaller than the
+    /// gradient.
     pub tile_size: usize,
     /// Polynomial degree (1–4). Capped at 4 (Siril: beyond 4 the fit is unstable). Low order is the
     /// primary guard against subtracting nebulosity.
@@ -76,42 +79,6 @@ impl Default for ExtractBackground {
 }
 
 impl ExtractBackground {
-    /// Set the sample-tile size in px.
-    pub fn tile_size(mut self, tile_size: usize) -> Self {
-        self.tile_size = tile_size;
-        self
-    }
-
-    /// Set the polynomial degree (1–4).
-    pub fn degree(mut self, degree: usize) -> Self {
-        self.degree = degree;
-        self
-    }
-
-    /// Set subtract-vs-divide removal.
-    pub fn mode(mut self, mode: BackgroundMode) -> Self {
-        self.mode = mode;
-        self
-    }
-
-    /// Set the tile-rejection sigma.
-    pub fn rejection_sigma(mut self, rejection_sigma: f32) -> Self {
-        self.rejection_sigma = rejection_sigma;
-        self
-    }
-
-    /// Set the refit-pass count.
-    pub fn iterations(mut self, iterations: usize) -> Self {
-        self.iterations = iterations;
-        self
-    }
-
-    /// Set the minimum normalized divisor for [`BackgroundMode::Divide`].
-    pub fn divide_floor(mut self, divide_floor: f32) -> Self {
-        self.divide_floor = divide_floor;
-        self
-    }
-
     /// Model and remove the smooth background of `image` in place, per channel.
     ///
     /// # Errors
@@ -167,7 +134,14 @@ fn extract_background_plane(
     let coeffs = fit_surface(&samples, &terms, config.rejection_sigma, config.iterations)?;
     let surface = Surface::new(&coeffs, &terms, Size2us::new(plane.width(), plane.height()));
     match config.mode {
-        BackgroundMode::Subtract => surface.remove(plane, |p, m| p - m),
+        BackgroundMode::Subtract => {
+            // Only the model's variation is removed; its mean stays as the sky pedestal, as Siril
+            // does. Without it the sky sits at ≈0 and the next step that measures the background
+            // against zero (an auto stretch) has nothing to place. Each channel keeps its own
+            // level, like `Divide` — neutralizing the sky colour is a separate op.
+            let pedestal = surface.mean() as f32;
+            surface.remove(plane, |p, m| p - (m - pedestal));
+        }
         BackgroundMode::Divide => {
             let mean = surface.mean();
             if mean <= 0.0 {
@@ -188,36 +162,37 @@ struct Sample {
     z: f64,
 }
 
-/// One robust sky sample per tile — the tile centre with coordinates normalized to `[-1, 1]` and the
-/// shared [`crate::background_mesh::TileGrid`] SExtractor-style sky estimate (per-tile ±σ-clip →
-/// Pearson mode). Reuses the
-/// exact estimator star detection uses, so the gradient fit and the detector see the same sky. The
-/// grid 3×3 median filter is **off** (it would bias a real gradient's boundary tiles; outlier tiles
-/// are instead rejected by the surface fit's residual clip). A `None` object mask for now — a
-/// star/bright-signal mask from the star detector belongs in that slot.
+/// One robust sky sample per tile — the tile centre with coordinates normalized to `[-1, 1]` and
+/// the shared [`crate::background_mesh::TileGrid`] SExtractor-style sky estimate (per-tile ±σ-clip
+/// → Pearson mode). Reuses the exact estimator star detection uses, so the gradient fit and the
+/// detector see the same sky. The grid 3×3 median filter is **off** (it would bias a real
+/// gradient's boundary tiles; outlier tiles are instead rejected by the surface fit's residual
+/// clip). A `None` object mask for now — a star/bright-signal mask from the star detector belongs
+/// in that slot.
 fn collect_samples(
     channel: &Buffer2<f32>,
     tile: usize,
     workspace: &mut MeshWorkspace,
 ) -> Vec<Sample> {
     let size = Size2us::new(channel.width(), channel.height());
-    let grid = workspace.compute(channel, None, tile, SKY_CLIP_ITERATIONS, false);
+    let grid = workspace.tile_stats(channel, None, tile, DEFAULT_SIGMA_CLIP_ITERATIONS, false);
 
     let mut samples = Vec::with_capacity(grid.stats.width() * grid.stats.height());
     for ty in 0..grid.stats.height() {
-        let y = norm(grid.centers_y[ty] as f64, size.height);
+        let y = norm(f64::from(grid.centers_y[ty]), size.height);
         for (tx, &cx) in grid.centers_x.iter().enumerate() {
             samples.push(Sample {
-                x: norm(cx as f64, size.width),
+                x: norm(f64::from(cx), size.width),
                 y,
-                z: grid.stats[(tx, ty)].sky as f64,
+                z: f64::from(grid.stats[(tx, ty)].sky),
             });
         }
     }
     samples
 }
 
-/// Largest degree whose term count `(d+1)(d+2)/2` fits within `n` samples (so the fit is determined).
+/// Largest degree whose term count `(d+1)(d+2)/2` fits within `n` samples (so the fit is
+/// determined).
 fn effective_degree(n: usize, requested: usize) -> usize {
     let mut d = requested.min(4);
     while d > 0 && (d + 1) * (d + 2) / 2 > n {
@@ -227,9 +202,9 @@ fn effective_degree(n: usize, requested: usize) -> usize {
 }
 
 /// Exponent pairs `(i, j)` for every monomial `x^i·y^j` with `i + j ≤ degree`.
-fn poly_terms(degree: usize) -> Vec<(u32, u32)> {
+fn poly_terms(degree: usize) -> Vec<(u8, u8)> {
     let mut terms = Vec::new();
-    for total in 0..=degree as u32 {
+    for total in 0..=u8::try_from(degree).expect("the degree is at most 4") {
         for i in 0..=total {
             terms.push((i, total - i));
         }
@@ -247,20 +222,20 @@ fn norm(c: f64, n: usize) -> f64 {
 }
 
 /// Evaluate the polynomial at normalized `(x, y)`.
-fn eval(coeffs: &DVector<f64>, terms: &[(u32, u32)], x: f64, y: f64) -> f64 {
+fn eval(coeffs: &DVector<f64>, terms: &[(u8, u8)], x: f64, y: f64) -> f64 {
     terms
         .iter()
         .zip(coeffs.iter())
-        .map(|(&(i, j), &c)| c * x.powi(i as i32) * y.powi(j as i32))
+        .map(|(&(i, j), &c)| c * x.powi(i32::from(i)) * y.powi(i32::from(j)))
         .sum()
 }
 
 /// Least-squares solve of the original design matrix using SVD.
-fn solve_ls(samples: &[Sample], terms: &[(u32, u32)]) -> Result<DVector<f64>, OpError> {
+fn solve_ls(samples: &[Sample], terms: &[(u8, u8)]) -> Result<DVector<f64>, OpError> {
     let (m, k) = (samples.len(), terms.len());
     let a = DMatrix::from_fn(m, k, |r, c| {
         let (i, j) = terms[c];
-        samples[r].x.powi(i as i32) * samples[r].y.powi(j as i32)
+        samples[r].x.powi(i32::from(i)) * samples[r].y.powi(i32::from(j))
     });
     let z = DVector::from_fn(m, |r, _| samples[r].z);
     let svd = a.svd(true, true);
@@ -283,7 +258,7 @@ fn solve_ls(samples: &[Sample], terms: &[(u32, u32)]) -> Result<DVector<f64>, Op
 /// (σ = MAD-scaled residual spread). Rejects tiles sitting on nebulosity or unrejected stars.
 fn fit_surface(
     samples: &[Sample],
-    terms: &[(u32, u32)],
+    terms: &[(u8, u8)],
     kappa: f32,
     iterations: usize,
 ) -> Result<DVector<f64>, OpError> {
@@ -300,7 +275,7 @@ fn fit_surface(
         if sigma <= 0.0 {
             break;
         }
-        let thresh = kappa as f64 * sigma;
+        let thresh = f64::from(kappa) * sigma;
         let kept: Vec<Sample> = active
             .iter()
             .zip(&residuals)
@@ -320,8 +295,9 @@ fn fit_surface(
 ///
 /// Rather than re-evaluate the bivariate polynomial per pixel (a `powi` per term), the coefficients
 /// are packed into a `(degree+1)²` matrix `C[i][j]`. For each row `y` the powers `y^j` collapse `C`
-/// into a 1-D polynomial in `x` (`b[i] = Σ_j C[i][j]·y^j`), which every pixel in the row evaluates by
-/// Horner — `degree` fused multiply-adds, no `powi`, and no full-resolution model plane.
+/// into a 1-D polynomial in `x` (`b[i] = Σ_j C[i][j]·y^j`), which every pixel in the row evaluates
+/// by Horner — `degree` fused multiply-adds, no `powi`, and no full-resolution model plane.
+#[derive(Debug)]
 struct Surface {
     /// Row-major `C[i*d1 + j]` for the monomials `x^i·y^j`; `(degree+1)² ≤ 25`.
     c_mat: [f64; 25],
@@ -330,10 +306,10 @@ struct Surface {
 }
 
 impl Surface {
-    fn new(coeffs: &DVector<f64>, terms: &[(u32, u32)], size: Size2us) -> Self {
+    fn new(coeffs: &DVector<f64>, terms: &[(u8, u8)], size: Size2us) -> Self {
         let degree = terms
             .iter()
-            .map(|&(i, j)| (i + j) as usize)
+            .map(|&(i, j)| usize::from(i + j))
             .max()
             .unwrap_or(0);
         // `effective_degree` caps the surface at 4, so `degree + 1 ≤ 5` fits fixed buffers.
@@ -341,7 +317,7 @@ impl Surface {
         let d1 = degree + 1;
         let mut c_mat = [0.0f64; 25];
         for (&(i, j), &c) in terms.iter().zip(coeffs.iter()) {
-            c_mat[i as usize * d1 + j as usize] = c;
+            c_mat[usize::from(i) * d1 + usize::from(j)] = c;
         }
         Self {
             c_mat,
@@ -410,7 +386,7 @@ fn axis_moments(n: usize, d1: usize) -> [f64; 5] {
     for k in 0..n {
         let t = norm(k as f64, n);
         let mut p = 1.0;
-        for moment in moments[..d1].iter_mut() {
+        for moment in &mut moments[..d1] {
             *moment += p;
             p *= t;
         }

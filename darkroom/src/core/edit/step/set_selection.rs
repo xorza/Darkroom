@@ -19,7 +19,7 @@ pub(crate) struct SetSelection {
 
 impl Reversible for SetSelection {
     fn write(&self, doc: &mut Document, dir: Direction) {
-        doc.main_view.selected = self.selection.half(dir).clone();
+        doc.main_view.selected.clone_from(self.selection.half(dir));
     }
 
     fn is_noop(&self) -> bool {
@@ -32,6 +32,10 @@ impl Reversible for SetSelection {
     }
 
     fn invalidates_cached_geometry(&self) -> bool {
+        false
+    }
+
+    fn retypes_outputs(&self) -> bool {
         false
     }
 }

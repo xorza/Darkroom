@@ -1,5 +1,6 @@
 use palantir::internals::UiHarness;
 use scenarium::NodeId;
+use scenarium::testing::graph::NodeSpec;
 use scenarium::testing::graph::TestGraph;
 
 use super::*;
@@ -7,7 +8,6 @@ use crate::core::document::harness::DocFixture;
 use crate::gui::graph_ctx::harness::GraphCtxFixture;
 use crate::gui::pane::graph::harness::CanvasHarness;
 use crate::gui::pane::graph::node::port_row::port_circle_wid;
-use crate::gui::requests::Requests;
 
 /// Two two-in/one-out nodes wired producer → consumer — enough graph for a
 /// wire to be in flight over, and enough wiring for the snap filter to have a
@@ -17,14 +17,25 @@ use crate::gui::requests::Requests;
 /// Returned beside the fixture rather than looked up out of it: the snap
 /// filter reads the authoring graph to answer its cycle question, so a test
 /// needs to name both ends.
-fn fixture() -> (GraphCtxFixture, NodeId, NodeId) {
+#[derive(Debug)]
+struct Wired {
+    fixture: GraphCtxFixture,
+    producer: NodeId,
+    consumer: NodeId,
+}
+
+fn fixture() -> Wired {
     let mut g = TestGraph::new();
-    g.add("producer", |n| n.mult());
+    g.add("producer", NodeSpec::mult);
     g.instance("consumer", "producer");
     g.wire("producer", 0, "consumer", 0);
     let (producer, consumer) = (g.id("producer"), g.id("consumer"));
 
-    (GraphCtxFixture::over(g), producer, consumer)
+    Wired {
+        fixture: GraphCtxFixture::over(g),
+        producer,
+        consumer,
+    }
 }
 
 #[test]
@@ -34,7 +45,9 @@ fn committing_a_same_kind_pair_is_a_broken_invariant_not_a_silent_drop() {
     // same-kind pair reaching the commit means that broke upstream. Dropping
     // it silently would show up as a wire that simply refuses to land, with
     // nothing anywhere saying why.
-    let (_fixture, producer, consumer) = fixture();
+    let Wired {
+        producer, consumer, ..
+    } = fixture();
     let mut out = Requests::default();
     commit_connection(
         PortRef::input(consumer, 0),
@@ -64,7 +77,10 @@ fn prepass_with_wire_from(fixture: &mut GraphCtxFixture, start: PortRef) -> Opti
     let geometry = CanvasGeometry::default();
     let ctx = CanvasCtx::new(fixture.graph_ctx(), &geometry, None, false);
     connections.apply(arena.ui(), ctx, None, &mut out);
-    assert!(out.is_empty(), "an untouched prepass emits nothing");
+    assert!(
+        out.document().is_empty(),
+        "an untouched prepass emits nothing"
+    );
     connections.state.get().copied()
 }
 
@@ -73,11 +89,15 @@ fn a_wire_drops_when_its_start_node_leaves_the_scene() {
     // Undo runs before the canvas prepass, so the node a wire grew out
     // of can vanish mid-drag. The gesture has to let go: a commit
     // against a dead producer is refused at the edit boundary anyway
-    // (silently), and until then `port_data_type` reports the start as
+    // (silently), and until then `GraphCtx::port_type` reports the start as
     // untyped, which `scan_snap_target` reads as "compatible with
     // anything" — so a stranded wire would snap onto ports it should
     // never accept.
-    let (mut f, producer, _consumer) = fixture();
+    let Wired {
+        fixture: mut f,
+        producer,
+        ..
+    } = fixture();
     let live = PortRef::output(producer, 0);
     assert!(
         prepass_with_wire_from(&mut f, live).is_some(),
@@ -124,8 +144,6 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     );
 
     h.ui.release_button(PointerButton::Left);
-    // The harness carries the pane assertion: a wire commits against the pane
-    // holding its start node, never the focused one.
     let released = h.frame();
     assert!(
         matches!(

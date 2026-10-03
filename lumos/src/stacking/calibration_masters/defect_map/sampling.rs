@@ -27,7 +27,7 @@ struct CfaSamplePhase {
 
 pub(super) fn collect_color_residual_samples(
     data: &Buffer2<f32>,
-    cfa_type: Option<&CfaType>,
+    cfa_type: CfaType,
     target_color: u8,
     background: &DarkBackground,
 ) -> Vec<f32> {
@@ -43,7 +43,7 @@ pub(super) fn collect_color_residual_samples(
 /// Large channels are stratified across CFA phases, rows, and columns.
 pub(super) fn collect_color_samples(
     data: &Buffer2<f32>,
-    cfa_type: Option<&CfaType>,
+    cfa_type: CfaType,
     target_color: u8,
 ) -> Vec<f32> {
     collect_color_sample_indices(
@@ -58,7 +58,7 @@ pub(super) fn collect_color_samples(
 
 pub(super) fn collect_color_sample_indices(
     size: Size2us,
-    cfa_type: Option<&CfaType>,
+    cfa_type: CfaType,
     target_color: u8,
 ) -> Vec<usize> {
     assert!(
@@ -66,7 +66,7 @@ pub(super) fn collect_color_sample_indices(
         "color sampling needs non-zero dimensions"
     );
 
-    let pattern = CfaType::or_mono(cfa_type);
+    let pattern = cfa_type;
     let period = match pattern {
         CfaType::Mono => 1,
         CfaType::Bayer(_) => 2,
@@ -146,10 +146,10 @@ pub(super) fn collect_color_sample_indices(
     indices
 }
 
-fn scaled_partition(part: usize, part_count: usize, length: usize) -> usize {
+const fn scaled_partition(part: usize, part_count: usize, length: usize) -> usize {
     (part as u128 * length as u128 / part_count as u128) as usize
 }
 
-fn stratified_center(part: usize, part_count: usize, length: usize) -> usize {
+const fn stratified_center(part: usize, part_count: usize, length: usize) -> usize {
     ((2 * part as u128 + 1) * length as u128 / (2 * part_count as u128)) as usize
 }

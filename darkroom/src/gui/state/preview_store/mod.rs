@@ -46,7 +46,7 @@ impl StoredContent {
     /// for a value that failed to prepare. The single downcast both readers —
     /// the preview card and the image viewer — go through, so a new variant can't
     /// be handled by one and silently fall through the other.
-    pub(crate) fn image(&self) -> Option<&PreviewImage> {
+    pub(crate) const fn image(&self) -> Option<&PreviewImage> {
         match self {
             StoredContent::Image(image) => Some(image),
             StoredContent::Text(_) | StoredContent::Error(_) => None,
@@ -57,7 +57,7 @@ impl StoredContent {
     /// itself, or the reason it isn't renderable. `None` when [`Self::image`]
     /// answered — the two are complementary, so a caller that renders the
     /// image never also has a message to show.
-    pub(crate) fn message(&self) -> Option<PreviewMessage<'_>> {
+    pub(crate) const fn message(&self) -> Option<PreviewMessage<'_>> {
         match self {
             StoredContent::Text(text) => Some(PreviewMessage::Text(text.as_str())),
             StoredContent::Error(error) => Some(PreviewMessage::Failure(error)),
@@ -133,9 +133,9 @@ impl PreviewStore {
     /// Store one preview node's freshly published value, replacing whatever it
     /// was showing.
     ///
-    /// No retention filter on the way in, unlike [`Self::ingest_preview`]: a value
-    /// arrives keyed by the node that published it, and a node that published
-    /// exists. `reconcile` still drops it once that stops being true.
+    /// No retention filter on the way in: a value arrives keyed by the node
+    /// that published it, and a node that published exists. `reconcile`
+    /// drops it once that stops being true.
     pub(crate) fn ingest_preview(&mut self, ui: &Ui, node_id: NodeId, value: DynamicValue) {
         self.entries.insert(node_id, prepare_content(ui, value));
     }
@@ -278,6 +278,10 @@ fn rgba8_raster(cpu: &CpuImage, target: UVec2) -> Raster {
 /// `native` scaled to fit `max_dim` on its longest edge — aspect preserved,
 /// never upscaled. `None` is no ceiling, and answers the source's own
 /// dimensions.
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "each edge is rounded and clamped to at least 1 before the cast"
+)]
 fn capped_target(native: UVec2, max_dim: Option<NonZeroU32>) -> UVec2 {
     let Some(max_dim) = max_dim else {
         return native;
@@ -305,15 +309,20 @@ pub(crate) mod internals {
         }
     }
 
-    /// The smallest opaque image a preview card will render — 2×1 RGBA8.
+    /// A black `width`×`height` image in `format`, as a node would publish it.
+    pub(crate) fn image_value(width: usize, height: usize, format: ColorFormat) -> DynamicValue {
+        let raw = RawImage::new_black(ImageDesc::new(width, height, format)).unwrap();
+        DynamicValue::from_custom(LensImage::from(raw))
+    }
+
+    /// The smallest opaque image a preview card will render — 2×1 RGB8, which
+    /// has no alpha channel to be transparent with.
     ///
     /// Publishing a value is what makes a card clickable at all (it records
     /// `Sense::NONE` without one), so every test about that chip, or about the
     /// viewer tab it opens, starts by ingesting this.
     pub(crate) fn opaque_image_value() -> DynamicValue {
-        let desc = ImageDesc::new(2, 1, ColorFormat::RGBA_U8);
-        let raw = RawImage::new_with_data(desc, vec![255; desc.row_bytes()]).unwrap();
-        DynamicValue::from_custom(LensImage::from(raw))
+        image_value(2, 1, ColorFormat::RGB_U8)
     }
 }
 

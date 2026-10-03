@@ -1,305 +1,142 @@
-//! Convolution/filtering stage tests.
+//! Matched-filter stage tests: the production filter on the residual of a rendered star field.
 //!
-//! Tests the Gaussian filtering for star enhancement.
+//! The filter's output is in units of the input noise, so a star's response over the robust floor
+//! of the filtered image is its detection SNR.
 
-use crate::math::fwhm::fwhm_to_sigma;
+#![expect(
+    clippy::cast_sign_loss,
+    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
+)]
+
+use crate::math::statistics::MedianMad;
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
-use crate::stacking::star_detection::convolution::internals::gaussian_convolve;
+use crate::stacking::star_detection::convolution::{MatchedFilterBuffers, matched_filter};
 use crate::stacking::star_detection::tests::Scenario;
-use crate::testing::init_tracing;
 use crate::testing::prelude::*;
+use crate::testing::synthetic::background_map;
 use crate::testing::visual::{ToneMap, save};
-use common::internals::test_output_path;
 
-/// Tile size these fixtures are built around.
-///
-/// Carried here rather than borrowed from the star-detection stage tests: this file exercises one
-/// stage's API, so it should not depend on that module's scaffolding.
-const TILE_SIZE: usize = 64;
-
-/// Normalize filtered output for visualization (handle negative values).
-fn normalize_for_display(pixels: &[f32]) -> Vec<f32> {
-    let min_val = pixels.iter().cloned().fold(f32::INFINITY, f32::min);
-    let max_val = pixels.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-    let range = (max_val - min_val).max(1e-10);
-
-    pixels.iter().map(|&p| (p - min_val) / range).collect()
+/// One rendered field, matched-filtered at `kernel_fwhm`: each true star's response, inside a
+/// 10 px border, and the robust floor of the whole filtered image — stars are sparse, so its
+/// median and MAD describe the star-free sky.
+#[derive(Debug)]
+struct Filtered {
+    responses: Vec<f32>,
+    floor: MedianMad,
 }
 
-/// Test Gaussian filter response on sparse star field.
-#[test]
+impl Filtered {
+    fn of(frame: &Scenario, kernel_fwhm: f32, name: Option<&str>) -> Self {
+        let frame = frame.frame();
+        let pixels = frame.image.channel(0).clone();
+        let (width, height) = (pixels.width(), pixels.height());
+        let residual =
+            background_map::estimate(&pixels, &BackgroundConfig::default()).residual_of(&pixels);
 
-fn gaussian_filter_sparse() {
-    init_tracing();
-
-    let width = 256;
-    let height = 256;
-    let fwhm = 3.5;
-
-    // Sparse star field.
-    let frame = Scenario {
-        num_stars: 25,
-        fwhm,
-        ..Default::default()
-    }
-    .frame();
-    let pixels = frame.image.channel(0).clone();
-    let ground_truth = frame.truth.sources.clone();
-
-    // Save input
-    save(
-        pixels.pixels(),
-        Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_conv_sparse_input.png"),
-        ToneMap::Clamp,
-    );
-
-    // Estimate and subtract background
-    let background = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: TILE_SIZE,
-            ..Default::default()
-        },
-    );
-
-    let bg_subtracted: Vec<f32> = pixels
-        .iter()
-        .zip(background.background.iter())
-        .map(|(&p, &bg)| (p - bg).max(0.0))
-        .collect();
-
-    save(
-        &bg_subtracted,
-        Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_conv_sparse_bg_subtracted.png"),
-        ToneMap::Clamp,
-    );
-
-    // Apply Gaussian filter (matched filter for star detection)
-    let sigma = fwhm_to_sigma(fwhm);
-    let bg_subtracted_buf = Buffer2::new(width, height, bg_subtracted);
-    let mut filtered = Buffer2::new_default(width, height);
-    let mut temp = Buffer2::new_default(width, height);
-    gaussian_convolve(&bg_subtracted_buf, sigma, &mut filtered, &mut temp);
-
-    // Normalize for display
-    let filtered_display = normalize_for_display(filtered.pixels());
-
-    save(
-        &filtered_display,
-        Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_conv_sparse_filtered.png"),
-        ToneMap::Clamp,
-    );
-
-    // Verify stars are enhanced
-    println!("Ground truth stars: {}", ground_truth.len());
-    println!("Sigma: {:.2}", sigma);
-
-    // Check that star positions have high filtered values
-    let mut star_responses: Vec<f32> = Vec::new();
-    for star in &ground_truth {
-        let x = star.pos.x.round() as usize;
-        let y = star.pos.y.round() as usize;
-        if x > 10 && x < width - 10 && y > 10 && y < height - 10 {
-            let response = filtered[y * width + x];
-            star_responses.push(response);
-        }
-    }
-
-    let mean_star_response: f32 =
-        star_responses.iter().sum::<f32>() / star_responses.len().max(1) as f32;
-
-    // Robust noise floor of the filtered image: stars are sparse, so the median and MAD
-    // describe the star-free background (not the near-tautological whole-image mean).
-    let (median, robust_sigma) = robust_floor(filtered.pixels());
-    let min_star_response = star_responses.iter().cloned().fold(f32::INFINITY, f32::min);
-
-    println!("Mean star response: {mean_star_response:.6}");
-    println!("Filtered floor: median {median:.6}, sigma {robust_sigma:.6}");
-
-    // Matched filtering must lift every detected star far above the noise floor.
-    assert!(
-        min_star_response > median + 5.0 * robust_sigma,
-        "faintest star response {min_star_response:.6} should clear floor {median:.6} + 5σ ({:.6})",
-        5.0 * robust_sigma
-    );
-}
-
-/// Median and MAD-derived σ of a slice (robust background statistics).
-fn robust_floor(pixels: &[f32]) -> (f32, f32) {
-    let mut sorted: Vec<f32> = pixels.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let median = sorted[sorted.len() / 2];
-    let mut dev: Vec<f32> = sorted.iter().map(|&v| (v - median).abs()).collect();
-    dev.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    (median, dev[dev.len() / 2] * 1.4826)
-}
-
-/// Test Gaussian filter with different FWHM values.
-#[test]
-
-fn gaussian_filter_fwhm_range() {
-    init_tracing();
-
-    let width = 256;
-    let height = 256;
-
-    // Stars at the instrument FWHM (legacy varied per-star).
-    let frame = Scenario {
-        num_stars: 30,
-        ..Default::default()
-    }
-    .frame();
-    let pixels = frame.image.channel(0).clone();
-    let ground_truth = frame.truth.sources.clone();
-
-    // Save input
-    save(
-        pixels.pixels(),
-        Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_conv_fwhm_range_input.png"),
-        ToneMap::Clamp,
-    );
-
-    // Background subtraction
-    let background = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: TILE_SIZE,
-            ..Default::default()
-        },
-    );
-
-    let bg_subtracted: Vec<f32> = pixels
-        .iter()
-        .zip(background.background.iter())
-        .map(|(&p, &bg)| (p - bg).max(0.0))
-        .collect();
-
-    // The matched-filter property: a Gaussian kernel matched to the source FWHM (the Scenario
-    // default, 4.0) maximises detection *SNR* — not raw peak response, which rises monotonically
-    // for narrower kernels. SNR = mean star response above the filtered noise floor, in σ.
-    let snr = |target_fwhm: f32| -> f32 {
-        let sigma = fwhm_to_sigma(target_fwhm);
-        let bg_buf = Buffer2::new(width, height, bg_subtracted.clone());
-        let mut filtered = Buffer2::new_default(width, height);
+        let mut output = Buffer2::new_default(width, height);
         let mut temp = Buffer2::new_default(width, height);
-        gaussian_convolve(&bg_buf, sigma, &mut filtered, &mut temp);
-        let responses: Vec<f32> = ground_truth
+        matched_filter(
+            &residual,
+            kernel_fwhm,
+            1.0,
+            0.0,
+            &mut MatchedFilterBuffers {
+                output: &mut output,
+                temp: &mut temp,
+            },
+        );
+        if let Some(name) = name {
+            save(
+                output.pixels(),
+                Size2us::new(width, height),
+                &format!("synthetic_starfield/stage_conv_{name}_filtered"),
+                ToneMap::AutoRange,
+            );
+        }
+
+        let responses = frame
+            .truth
+            .sources
             .iter()
             .filter_map(|s| {
                 let (x, y) = (s.pos.x.round() as usize, s.pos.y.round() as usize);
-                (x > 10 && x < width - 10 && y > 10 && y < height - 10)
-                    .then(|| filtered[y * width + x])
+                (x > 10 && x < width - 10 && y > 10 && y < height - 10).then(|| output[(x, y)])
             })
             .collect();
-        let mean_resp = responses.iter().sum::<f32>() / responses.len() as f32;
-        let (median, robust_sigma) = robust_floor(filtered.pixels());
-        (mean_resp - median) / robust_sigma
-    };
+        let floor = MedianMad::of_mut(&mut output.pixels().to_vec());
+        Self { responses, floor }
+    }
 
-    let narrow = snr(2.5);
-    let matched = snr(4.0);
-    let wide = snr(5.5);
-    println!("matched-filter SNR — narrow {narrow:.2}, matched {matched:.2}, wide {wide:.2}");
+    /// A response's height over the floor, in the floor's σ.
+    fn snr(&self, response: f32) -> f32 {
+        (response - self.floor.median) / self.floor.sigma()
+    }
 
+    fn mean_snr(&self) -> f32 {
+        let mean = self.responses.iter().sum::<f32>() / self.responses.len() as f32;
+        self.snr(mean)
+    }
+}
+
+/// Every star of a sparse field clears the filtered floor by 5σ.
+#[test]
+fn matched_filter_lifts_every_star() {
+    let filtered = Filtered::of(
+        &Scenario {
+            num_stars: 25,
+            fwhm: 3.5,
+            ..Default::default()
+        },
+        3.5,
+        Some("sparse"),
+    );
+    assert!(!filtered.responses.is_empty());
+    let faintest = filtered
+        .responses
+        .iter()
+        .copied()
+        .fold(f32::INFINITY, f32::min);
     assert!(
-        matched > narrow && matched > wide,
-        "kernel matched to source FWHM should maximise SNR: narrow {narrow:.2}, matched {matched:.2}, wide {wide:.2}"
+        filtered.snr(faintest) > 5.0,
+        "faintest star at {:.1}σ over the floor",
+        filtered.snr(faintest)
     );
 }
 
-/// Test Gaussian filter noise rejection.
+/// The kernel matched to the stars' 4 px FWHM gives a higher SNR than a narrower or a wider one —
+/// the matched-filter property. (Raw response rises without bound as the kernel narrows; SNR does
+/// not.)
 #[test]
-
-fn gaussian_filter_noise() {
-    init_tracing();
-
-    let width = 256;
-    let height = 256;
-    let fwhm = 3.5;
-
-    // Star field with elevated noise (shallow well + high read noise).
+fn matched_kernel_maximises_snr() {
     let frame = Scenario {
-        num_stars: 20,
-        fwhm,
-        full_well_e: 4_000.0,
-        read_noise_e: 150.0,
+        num_stars: 30,
         ..Default::default()
-    }
-    .frame();
-    let pixels = frame.image.channel(0).clone();
-    let ground_truth = frame.truth.sources.clone();
-
-    // Save input
-    save(
-        pixels.pixels(),
-        Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_conv_noise_input.png"),
-        ToneMap::Clamp,
+    };
+    let snr = |kernel_fwhm: f32| Filtered::of(&frame, kernel_fwhm, None).mean_snr();
+    let (narrow, matched, wide) = (snr(2.5), snr(4.0), snr(5.5));
+    assert!(
+        matched > narrow && matched > wide,
+        "narrow {narrow:.2}, matched {matched:.2}, wide {wide:.2}"
     );
+}
 
-    // Background subtraction
-    let background = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: TILE_SIZE,
+/// With a shallow well and a high read noise, matched-filtered stars stay well detectable.
+#[test]
+fn matched_filter_keeps_noisy_stars_detectable() {
+    let filtered = Filtered::of(
+        &Scenario {
+            num_stars: 20,
+            fwhm: 3.5,
+            full_well_e: 4_000.0,
+            read_noise_e: 150.0,
             ..Default::default()
         },
+        3.5,
+        Some("noise"),
     );
-
-    let bg_subtracted: Vec<f32> = pixels
-        .iter()
-        .zip(background.background.iter())
-        .map(|(&p, &bg)| (p - bg).max(0.0))
-        .collect();
-
-    save(
-        &bg_subtracted,
-        Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_conv_noise_bg_subtracted.png"),
-        ToneMap::Clamp,
+    assert!(
+        filtered.mean_snr() > 3.0,
+        "mean star SNR {:.1}",
+        filtered.mean_snr()
     );
-
-    // Apply Gaussian filter
-    let sigma = fwhm_to_sigma(fwhm);
-    let bg_subtracted_buf = Buffer2::new(width, height, bg_subtracted);
-    let mut filtered = Buffer2::new_default(width, height);
-    let mut temp = Buffer2::new_default(width, height);
-    gaussian_convolve(&bg_subtracted_buf, sigma, &mut filtered, &mut temp);
-    let filtered_display = normalize_for_display(filtered.pixels());
-
-    save(
-        &filtered_display,
-        Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_conv_noise_filtered.png"),
-        ToneMap::Clamp,
-    );
-
-    // Check star detectability even with noise
-    let mut star_responses: Vec<f32> = Vec::new();
-    for star in &ground_truth {
-        let x = star.pos.x.round() as usize;
-        let y = star.pos.y.round() as usize;
-        if x > 10 && x < width - 10 && y > 10 && y < height - 10 {
-            let response = filtered[y * width + x];
-            star_responses.push(response);
-        }
-    }
-
-    let mean_star_response: f32 =
-        star_responses.iter().sum::<f32>() / star_responses.len().max(1) as f32;
-
-    // Robust noise of the filtered image: true MAD-derived σ (not the mean-abs-dev this used
-    // to mislabel as MAD).
-    let (median, robust_sigma) = robust_floor(filtered.pixels());
-    let snr = (mean_star_response - median) / robust_sigma;
-    println!(
-        "Mean star response {mean_star_response:.6}, floor {median:.6} ± {robust_sigma:.6}, SNR {snr:.1}"
-    );
-
-    // Even with a shallow well + high read noise, matched-filtered stars stay detectable.
-    assert!(snr > 3.0, "filtered star SNR {snr:.1} should exceed 3");
 }

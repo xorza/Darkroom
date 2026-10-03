@@ -7,9 +7,11 @@
 //! Uses SIMD acceleration when available for statistics computation.
 
 pub(crate) mod background_estimate;
-#[cfg(all(test, feature = "internals"))]
-mod bench;
 mod simd;
+pub(crate) mod sky_noise;
+pub(crate) mod workspace;
+
+#[cfg(all(test, feature = "bench"))]
+mod bench;
 #[cfg(test)]
 mod tests;
-pub(crate) mod workspace;

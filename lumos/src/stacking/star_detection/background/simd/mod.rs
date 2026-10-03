@@ -1,10 +1,11 @@
 //! SIMD-accelerated background estimation utilities.
 //!
 //! This module provides runtime dispatch to the best available SIMD implementation:
-//! - AVX2/SSE on x86_64
+//! - AVX2/SSE on `x86_64`
 //! - NEON on aarch64
 //! - Scalar fallback on other platforms
 
+use crate::background_mesh::spline::spline_segment::SplineSegment;
 use crate::simd::dispatch;
 
 #[cfg(target_arch = "x86_64")]
@@ -16,32 +17,6 @@ mod neon;
 #[cfg(target_arch = "x86_64")]
 mod sse41;
 
-/// Natural cubic spline coefficients for one channel over a segment between two tile centers.
-#[derive(Debug, Clone, Copy)]
-pub(super) struct SplineSegment {
-    /// Value at the left tile center (t = 0).
-    pub(super) f0: f32,
-    /// Value at the right tile center (t = 1).
-    pub(super) f1: f32,
-    /// Correction term h²/6 · d2 at the left center.
-    pub(super) a: f32,
-    /// Correction term h²/6 · d2 at the right center.
-    pub(super) b: f32,
-}
-
-impl SplineSegment {
-    /// Evaluates f(t) = (1-t)*f0 + t*f1 - t*(1-t)*((2-t)*a + (1+t)*b).
-    ///
-    /// Same polynomial as `background_mesh::spline::cubic_spline_eval`, but takes the
-    /// precomputed `a, b = h²/6·d2` instead of raw second derivatives — keep the two in sync.
-    #[inline]
-    fn eval(self, t: f32) -> f32 {
-        let ct = 1.0 - t;
-        let t_ct = t * ct;
-        ct * self.f0 + t * self.f1 - t_ct * ((2.0 - t) * self.a + (1.0 + t) * self.b)
-    }
-}
-
 /// The spline parameter ramp across a segment: t(i) = `start` + i · `step`.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct SegmentRamp {
@@ -52,10 +27,11 @@ pub(super) struct SegmentRamp {
 }
 
 impl SegmentRamp {
-    /// The clamped spline parameter at output pixel `i`.
+    /// The spline parameter at output pixel `i`: outside [0, 1] past the segment's knots, where
+    /// the end segments extrapolate.
     #[inline]
     fn t_at(self, i: usize) -> f32 {
-        (self.start + i as f32 * self.step).clamp(0.0, 1.0)
+        self.start + i as f32 * self.step
     }
 }
 

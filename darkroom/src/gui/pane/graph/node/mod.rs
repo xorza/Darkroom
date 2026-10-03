@@ -10,11 +10,12 @@ pub(super) mod widget;
 use crate::core::document::StackedItem;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::ctx::DrawCtx;
-use crate::gui::pane::graph::gesture::breaker::BreakerProbe;
-use crate::gui::pane::graph::gesture::drag_anchor::GroupDrag;
+use crate::gui::pane::graph::gesture::breaker::breaker_probe::BreakerProbe;
+use crate::gui::pane::graph::gesture::group_drag::GroupDrag;
 use crate::gui::requests::Requests;
 use palantir::{Track, Ui};
 use scenarium::NodeId;
+use std::mem;
 
 /// Owns rendering of every graph node plus the single active drag
 /// anchor — the press-frame positions are snapshotted here so each
@@ -80,15 +81,19 @@ impl NodeUI {
         self.focus_kept_last = None;
     }
 
-    /// Record the widget tree of every scene node retained by `cull`
-    /// (plus the focus-owning node — see the loop comment),
-    /// skipping off-screen ones entirely. Emits selection/raise intents
-    /// for body clicks and latches the drag anchor for a body/title drag
-    /// (port circles capture their own presses via `Sense::CLICK`, so
-    /// drags don't latch off the port grabs); `prepass` converts the
-    /// anchor into `GraphIntent::MoveSelection` on later frames.
-    /// Record every node the cull keeps, and report what the draw saw but
-    /// could not act on — see [`NodeDrawOutcome`].
+    /// Whether a node drag is latched.
+    pub(super) const fn in_flight(&self) -> bool {
+        self.drag.in_flight()
+    }
+
+    /// Record the widget tree of every scene node retained by `cull` (plus
+    /// the focus-owning node — see the loop comment), skipping off-screen ones
+    /// entirely, and report what the draw saw but could not act on — see
+    /// [`NodeDrawOutcome`]. Emits selection/raise intents for body clicks and
+    /// latches the drag anchor for a body/title drag (port circles capture
+    /// their own presses via `Sense::CLICK`, so drags don't latch off the port
+    /// grabs); `prepass` converts the anchor into `GraphIntent::MoveSelection`
+    /// on later frames.
     pub(super) fn draw_all(
         &mut self,
         ui: &mut Ui,
@@ -118,7 +123,7 @@ impl NodeUI {
         // Swapped out for the sweep because each node hands the whole `NodeUI`
         // to its widget; it goes back below with its capacity, so only a graph
         // larger than every earlier one ever allocates here.
-        let mut order = std::mem::take(&mut self.paint_order);
+        let mut order = mem::take(&mut self.paint_order);
         let graph_ctx = dcx.graph_ctx();
         graph_ctx.paint_order(&mut order);
         for item in &order {
@@ -149,9 +154,6 @@ impl NodeUI {
         }
         self.paint_order = order;
         self.focus_kept_last = focus_kept;
-        // Belt-and-braces against a node deleted mid-drag; `prepass` makes
-        // the same check before it can emit anything against it.
-        self.drag.drop_if_owner_gone(dcx.graph_ctx());
         outcome
     }
 
@@ -161,7 +163,13 @@ impl NodeUI {
     /// from these intents (notably drag-driven `MoveSelection`) lands in
     /// `Document` before recording — Pass A's arrange already reflects the
     /// cursor; no Pass B relayout retry.
-    pub(super) fn prepass(&mut self, ui: &Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
-        self.drag.advance(ui, graph_ctx, out);
+    pub(super) fn prepass(
+        &mut self,
+        ui: &Ui,
+        graph_ctx: GraphCtx<'_>,
+        cancelled: bool,
+        out: &mut Requests,
+    ) {
+        self.drag.advance(ui, graph_ctx, cancelled, out);
     }
 }

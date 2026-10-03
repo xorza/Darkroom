@@ -12,13 +12,20 @@
 //! [`Camera::ideal`](camera::Camera::ideal) collapses the render to its own ground truth.
 //!
 //! ```rust,ignore
-//! use lumos::testing::synthetic::{camera::Camera, observe::render,
-//!     scene::{BackgroundField, Scene}, metrics::score_detection};
-//! use glam::DVec2;
+//! use crate::testing::synthetic::camera::Camera;
+//! use crate::testing::synthetic::observe::{Observation, render};
+//! use crate::testing::synthetic::scene::{BackgroundField, Scene};
 //!
-//! let scene = Scene::random_field(Size2us::new(512, 512), 80, (5.0, 200.0), //!     BackgroundField::Uniform { level: 0.05 }, 16.0, 42);
-//! let frame = render(&scene, &Camera::realistic(3.5), &observe::Observation::reference(1));
-//! // detect on `frame.image`, then: score_detection(&scene.positions(), &found, 2.0)
+//! let scene = Scene::random_field(
+//!     Size2us::new(512, 512),
+//!     80,
+//!     (5.0, 200.0),
+//!     BackgroundField::Uniform { level: 0.05 },
+//!     16.0,
+//!     42,
+//! );
+//! let frame = render(&scene, &Camera::realistic(3.5), &Observation::reference(1));
+//! // Detect on `frame.image`, then grade against `frame.truth.sources` with `metrics`.
 //! ```
 //!
 //! Ready-made fields live in [`fixtures`] (`star_field` / `cluster_field`), used by the
@@ -31,14 +38,15 @@
 //! (ready-made field builders), [`metrics`] (graders).
 //!
 //! Building blocks: [`star_profiles`] (PSF kernels), [`backgrounds`] (background fields),
-//! [`artifacts`] (cosmic rays, Bayer pattern), [`transforms`] (star-position transforms for
-//! registration), [`patterns`] (warp/interpolation fixtures), [`background_map`]
-//! (`BackgroundEstimate` fixtures).
+//! [`artifacts`] (cosmic rays, Bayer pattern), [`transforms`] (random star fields for
+//! registration), [`distortion`] (radial lens fields for SIP), [`patterns`] (warp/interpolation
+//! fixtures), [`background_map`] (`BackgroundEstimate` fixtures).
 
 pub(crate) mod artifacts;
 pub(crate) mod background_map;
 pub(crate) mod backgrounds;
 pub(crate) mod camera;
+pub(crate) mod distortion;
 pub(crate) mod fixtures;
 /// Eyeball-verification tool, not dead code: `#[ignore]`d generators that render every synthetic
 /// combination to PNG. Nothing calls into it — that is the point, it is run by hand. See its

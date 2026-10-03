@@ -11,37 +11,38 @@
 use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::deblend::region::Region;
+use crate::stacking::star_detection::tests::near;
 use crate::testing::prelude::*;
-
-/// Default tile size for background estimation.
-const TILE_SIZE: usize = 64;
+use crate::testing::synthetic::background_map;
 
 mod cosmic_ray_tests;
 mod deblend_tests;
 mod detection_tests;
 
-/// Estimate the background of `pixels` with the stage tests' default tile size.
+/// Estimate the background of `pixels` at the default tile size.
 fn background_estimate(pixels: &Buffer2<f32>) -> BackgroundEstimate {
-    background_map::estimate(
-        pixels,
-        &BackgroundConfig {
-            tile_size: TILE_SIZE,
-            ..Default::default()
-        },
-    )
+    background_map::estimate(pixels, &BackgroundConfig::default())
 }
 
-/// Count how many of `truths` `(x, y)` have a candidate peak within `radius` px (each truth at
-/// most once).
+/// The pixel positions of `regions`' peaks.
+fn peaks(regions: &[Region]) -> Vec<DVec2> {
+    regions
+        .iter()
+        .map(|region| DVec2::new(region.peak.x as f64, region.peak.y as f64))
+        .collect()
+}
+
+/// How many of `truths` have a candidate peak within `radius` px.
 fn matched_truths(candidates: &[Region], truths: &[(f32, f32)], radius: f32) -> usize {
+    let found = peaks(candidates);
     truths
         .iter()
-        .filter(|&&(tx, ty)| {
-            candidates.iter().any(|c| {
-                let dx = c.peak.x as f32 - tx;
-                let dy = c.peak.y as f32 - ty;
-                (dx * dx + dy * dy).sqrt() < radius
-            })
+        .filter(|&&(x, y)| {
+            near(
+                DVec2::new(f64::from(x), f64::from(y)),
+                &found,
+                f64::from(radius),
+            ) > 0
         })
         .count()
 }

@@ -1,4 +1,5 @@
 use super::*;
+use std::fs;
 
 /// A disk-persisted node's output survives a fresh engine (reopen), its
 /// sole-consumer upstream is pruned on the hit, and an input change
@@ -25,9 +26,12 @@ async fn persist_output_survives_reopen_and_invalidates_on_digest_change() {
         1,
         "the cut prunes the memory-only source upstream of a disk hit"
     );
-    assert!(!run.ran().contains(&"src"), "src was cut, not executed");
-    assert!(run.cached().contains(&"mult"), "mult reused from disk");
-    assert!(!run.ran().contains(&"mult"), "mult did not recompute");
+    assert_eq!(
+        run.ran(),
+        ["print"],
+        "src was cut and mult did not recompute"
+    );
+    assert_eq!(run.cached(), ["mult"], "mult reused from disk");
     assert!(
         !e.holds_output("mult"),
         "a full run does not retain a Disk node after the run"
@@ -36,7 +40,7 @@ async fn persist_output_survives_reopen_and_invalidates_on_digest_change() {
     // A targeted run on `mult` hydrates the disk hit, but targeting must not
     // turn it into an implicit RAM cache.
     let run = e.run_nodes(["mult"]).await;
-    assert!(run.cached().contains(&"mult"));
+    assert_eq!(run.cached(), ["mult"]);
     assert!(
         !e.holds_output("mult"),
         "a targeted run releases the hydrated Disk value"
@@ -53,7 +57,7 @@ async fn persist_output_survives_reopen_and_invalidates_on_digest_change() {
         "an input change makes mult miss and recompute from src"
     );
     assert!(
-        !run.cached().contains(&"mult"),
+        run.cached().is_empty(),
         "mult should not be cached after a digest change"
     );
     // The blob is keyed by node id, so the recompute replaced the superseded
@@ -98,14 +102,14 @@ async fn a_probed_blob_that_stops_decoding_fails_its_node_and_self_heals() {
         "the reuse verdict already pruned the producer, so nothing recomputes"
     );
     assert!(
-        matches!(run.error("mult"), Some(RunError::CacheLoadFailed { .. })),
+        matches!(run.error("mult"), Some(RunError::CacheLoadFailed)),
         "the node whose cache stopped loading fails, rather than serving nothing"
     );
     assert!(
-        matches!(run.error("print"), Some(RunError::SkippedUpstream { .. })),
+        matches!(run.error("print"), Some(RunError::SkippedUpstream)),
         "its consumer skips as errored-upstream"
     );
-    assert!(!run.cached().contains(&"mult"));
+    assert!(run.cached().is_empty());
     assert_eq!(
         dir.entry_count(),
         0,
@@ -119,58 +123,52 @@ async fn a_probed_blob_that_stops_decoding_fails_its_node_and_self_heals() {
     assert_eq!(dir.entry_count(), 1);
 }
 
-/// A corrupt / incompatible cache blob must be *deleted* on a failed load so
-/// the same run recomputes and writes a fresh one. Without the delete,
-/// `store_node`'s skip-if-exists keeps the broken file and the node
-/// recomputes on *every* run — the regression being an old-format blob
-/// rejected by the outer format version and never replaced. Each session is
-/// a fresh engine, so the disk cache is the only source.
+/// A blob whose header the store refuses — here one an earlier build wrote, under the
+/// previous format version — must be *deleted* when the reuse probe rejects it, so the same
+/// run recomputes and writes a fresh one. Without the delete, `store_node`'s
+/// skip-if-exists keeps the old file and the node recomputes on *every* run. Each session
+/// is a fresh engine, so the disk cache is the only source. (A blob whose header passes and
+/// whose body fails to decode takes the other path, in
+/// `a_probed_blob_that_stops_decoding_fails_its_node_and_self_heals`.)
 #[tokio::test]
-async fn corrupt_blob_recomputes_and_is_replaced_in_the_same_run() {
-    let dir = TempDir::new("corrupt_replace");
+async fn an_older_format_blob_recomputes_and_is_replaced_in_the_same_run() {
+    let dir = TempDir::new("older_format_replace");
     let calls = Calls::default();
 
     // Cold run: mult computes and stores its blob.
     let mut e =
         TestEngine::over(source_mult_print(CacheMode::Disk, 1, &calls)).with_disk_store(dir.path());
     let run = e.run_sinks().await;
-    assert!(run.ran().contains(&"mult"), "the cold run computes mult");
+    assert_eq!(
+        run.ran(),
+        ["src", "mult", "print"],
+        "the cold run computes mult"
+    );
     assert_eq!(calls.count(), 1);
 
-    // Corrupt mult's blob *body* — a torn write, or an old
-    // version-mismatched format — while keeping the leading 32-byte digest
-    // header intact: a garbled header would already fail the presence probe
-    // and never reach the body verification this test is about.
     let blob = e.blob_path("mult");
-    let mut bytes = e.blob("mult");
-    let output_count = u32::from_le_bytes(bytes[36..40].try_into().unwrap()) as usize;
-    bytes.truncate(40 + output_count);
-    bytes.extend_from_slice(b"garbage");
-    std::fs::write(&blob, &bytes).unwrap();
+    e.engine.disk_store().age_format(e.id("mult"));
 
-    // Reopen: the corrupt blob still carries the current digest in its
-    // header. Body verification fails before the resolver cuts the producer
-    // cone, so the blob is deleted and mult recomputes in this same run.
+    // Reopen: the probe refuses the older version before the resolver cuts the
+    // producer cone, so the blob is deleted and mult recomputes in this same run.
     let mut e = e.reopen();
     let run = e.run_sinks().await;
-    assert!(
-        run.ran().contains(&"mult"),
-        "the corrupt cache is a same-run miss"
+    assert_eq!(
+        run.ran(),
+        ["src", "mult", "print"],
+        "the refused blob is a same-run miss"
     );
     assert!(run.errored().is_empty(), "the recomputed run succeeds");
     assert_eq!(calls.count(), 2);
     assert!(
         blob.exists(),
-        "the corrupt blob is replaced by the same run"
+        "the refused blob is replaced by the same run"
     );
 
     // Reopen: mult's fresh blob is a clean hit → reused, not recomputed.
     let mut e = e.reopen();
     let run = e.run_sinks().await;
-    assert!(
-        !run.ran().contains(&"mult"),
-        "the replaced blob is a clean hit"
-    );
+    assert_eq!(run.ran(), ["print"], "the replaced blob is a clean hit");
     assert_eq!(
         calls.count(),
         2,
@@ -191,33 +189,31 @@ async fn vanished_frontier_blob_recomputes_instead_of_panicking() {
     let mut g = TestGraph::new();
     g.add("src", |n| n.counted(7i64, &calls));
     g.add("sum", |n| n.sum().cache(CacheMode::Disk));
-    g.add("print", |n| n.records());
+    g.add("print", NodeSpec::records);
     g.wire("src", 0, "sum", 0);
     g.wire("src", 0, "sum", 1);
     g.wire("sum", 0, "print", 0);
 
     let mut e = TestEngine::over(g).with_disk_store(dir.path());
     e.run_sinks().await;
-    let after_run1 = calls.count();
+    assert_eq!(calls.count(), 1);
 
     // Reopen, then remove sum's blob before the run reaches it.
     let mut e = e.reopen();
-    std::fs::remove_file(e.blob_path("sum")).unwrap();
+    fs::remove_file(e.blob_path("sum")).unwrap();
     let run = e.run_sinks().await;
 
     // The run completes — no panic: the missing blob just misses.
-    assert!(
-        run.ran().contains(&"sum"),
+    assert_eq!(
+        run.ran(),
+        ["src", "sum", "print"],
         "sum recomputes when its blob is gone"
     );
     assert!(
-        !run.cached().contains(&"sum"),
+        run.cached().is_empty(),
         "a vanished blob is not served as a cache hit"
     );
-    assert!(
-        calls.count() > after_run1,
-        "src re-ran to feed sum's recompute"
-    );
+    assert_eq!(calls.count(), 2, "src re-ran to feed sum's recompute");
 }
 
 /// A `Both`-mode node whose store failed owes a blob, and pays it on the next
@@ -240,56 +236,57 @@ async fn a_both_mode_node_whose_store_failed_republishes_without_recomputing() {
 
     let mut g = TestGraph::new();
     g.add("src", |n| n.counted(7i64, &calls).cache(CacheMode::Both));
-    g.add("print", |n| n.records());
+    g.add("print", NodeSpec::records);
     g.wire("src", 0, "print", 0);
 
     let mut e = TestEngine::over(g).with_disk_store(dir.path());
 
     // A directory where src's blob belongs: the publication cannot land.
     let blob = e.blob_path("src");
-    std::fs::create_dir_all(&blob).unwrap();
+    fs::create_dir_all(&blob).unwrap();
     e.run_sinks().await;
     assert_eq!(calls.count(), 1, "the cold run computes");
     assert!(blob.is_dir(), "the blocked path is still what it was");
 
     // Clear the blockage. The value is still resident, so the node does not
     // recompute — but the blob it owes is now written.
-    std::fs::remove_dir(&blob).unwrap();
+    fs::remove_dir(&blob).unwrap();
     let run = e.run_sinks().await;
     assert_eq!(
         calls.count(),
         1,
         "a resident value is still served from RAM"
     );
-    assert!(
-        !run.ran().contains(&"src"),
+    assert_eq!(
+        run.ran(),
+        ["print"],
         "settling the debt must not re-run the node"
     );
     assert!(
         blob.is_file(),
         "the owed blob was published on the next run"
     );
-    let published = std::fs::read(&blob).unwrap();
+    let published = fs::read(&blob).unwrap();
 
     // The debt is now settled, and settled means remembered: overwrite the blob
     // with bytes no coverage probe would accept. A third run leaves them alone,
     // which it could only do without reading the file.
-    std::fs::write(&blob, b"not a blob").unwrap();
+    fs::write(&blob, b"not a blob").unwrap();
     e.run_sinks().await;
     assert_eq!(calls.count(), 1);
     assert_eq!(
-        std::fs::read(&blob).unwrap(),
+        fs::read(&blob).unwrap(),
         b"not a blob",
         "a settled debt costs no further disk reads"
     );
 
     // And the blob that was published is a real one: a fresh engine over the
     // same store serves it without computing.
-    std::fs::write(&blob, published).unwrap();
+    fs::write(&blob, published).unwrap();
     let mut e = e.reopen();
     let run = e.run_sinks().await;
     assert_eq!(calls.count(), 1, "the republished blob is served on reopen");
-    assert!(run.cached().contains(&"src"));
+    assert_eq!(run.cached(), ["src"]);
 }
 
 /// A redefined output type can't serve a stale blob: `produce`'s func is
@@ -301,12 +298,12 @@ async fn a_both_mode_node_whose_store_failed_republishes_without_recomputing() {
 async fn redefined_output_type_rekeys_and_recomputes() {
     let dir = TempDir::new("wrong-type");
     let runs = Calls::default();
-    let received = Arc::new(StdMutex::new(f64::NAN));
+    let received = Arc::new(Mutex::new(f64::NAN));
 
     // `produce` is a pure, Disk-persisted source whose declared output type
     // and value are `Int` or `Float`. Its id and inputs stay unchanged,
     // isolating output-signature invalidation.
-    let build = |as_float: bool, runs: &Calls, received: &Arc<StdMutex<f64>>| {
+    let build = |as_float: bool, runs: &Calls, received: &Arc<Mutex<f64>>| {
         let received = Arc::clone(received);
         let value = if as_float {
             ConstValue::Float(1.5)

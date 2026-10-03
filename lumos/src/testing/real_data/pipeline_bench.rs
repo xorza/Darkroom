@@ -1,16 +1,21 @@
 //! Full pipeline benchmark: CFA master creation -> calibration -> registration -> stacking.
 
+use std::fs;
+use std::path::PathBuf;
 use std::time::Instant;
 
-use common::CancelToken;
+use common::{CancelToken, TempDir};
 
 use crate::concurrency;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::linear::LinearImage;
+use crate::io::image::load_context::LoadContext;
 use crate::io::raw::load_raw_cfa;
+use crate::memory::run_memory::RunMemory;
 use crate::stacking::combine::cache::FrameCache;
 use crate::stacking::combine::stack::run_stacking;
-use crate::testing::{calibration_dir, calibration_image_paths, init_tracing};
+use crate::testing::init_tracing;
+use crate::testing::real_data::raw_frames;
 use crate::{
     CalibrationComponent, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, MasterRole,
     Normalization, ProgressCallback, RegistrationConfig, StackConfig, Star, StarDetectionConfig,
@@ -18,59 +23,60 @@ use crate::{
 };
 
 #[test]
-#[ignore = "real-data pipeline benchmark; run explicitly with --ignored"]
 fn bench_full_pipeline() {
     init_tracing();
 
-    let cal_dir = calibration_dir();
+    // Every product goes to a fresh directory: the dataset stays as fetched, and the real-data
+    // tests that read it never see this run's output.
+    let output = TempDir::new("lumos-pipeline-bench");
+    println!("Writing products under {}", output.path().display());
 
     let total_start = Instant::now();
 
     println!("\n--- Step 1: Creating CFA master calibration frames ---");
     let step_start = Instant::now();
 
-    let dark_paths = calibration_image_paths("Darks").unwrap_or_default();
-    let flat_paths = calibration_image_paths("Flats").unwrap_or_default();
-    let bias_paths = calibration_image_paths("Bias").unwrap_or_default();
+    let dark_paths = raw_frames("Darks");
+    let flat_paths = raw_frames("Flats");
+    let bias_paths = raw_frames("Bias");
 
     // Time each master separately to find the bottleneck
-    let stack_cfa =
-        |name: &str, paths: &[std::path::PathBuf], config: StackConfig| -> Option<CfaImage> {
-            if paths.is_empty() {
-                println!("  {name}: no frames, skipping");
-                return None;
+    let stack_cfa = |name: &str, paths: &[PathBuf], config: StackConfig| -> Option<CfaImage> {
+        if paths.is_empty() {
+            println!("  {name}: no frames, skipping");
+            return None;
+        }
+        let config = if paths.len() < 8 {
+            StackConfig {
+                normalization: config.normalization,
+                ..StackConfig::median()
             }
-            let config = if paths.len() < 8 {
-                StackConfig {
-                    normalization: config.normalization,
-                    ..StackConfig::median()
-                }
-            } else {
-                config
-            };
-
-            let t0 = Instant::now();
-            let cache = FrameCache::from_cfa_paths(
-                paths,
-                &config.cache,
-                config.normalization,
-                ProgressCallback::default(),
-                CancelToken::never(),
-            )
-            .unwrap();
-            let load_ms = t0.elapsed().as_secs_f64() * 1000.0;
-
-            let t1 = Instant::now();
-            let result = run_stacking(&cache, &config).expect("this cache is never cancelled");
-            let stack_ms = t1.elapsed().as_secs_f64() * 1000.0;
-
-            println!(
-                "  {name}: {} frames, load={load_ms:.0}ms, stack={stack_ms:.0}ms, total={:.0}ms",
-                paths.len(),
-                t0.elapsed().as_secs_f64() * 1000.0
-            );
-            Some(result.into_cfa_master())
+        } else {
+            config
         };
+
+        let t0 = Instant::now();
+        let cache = FrameCache::from_cfa_paths(
+            paths,
+            &config,
+            RunMemory::read(config.cache.memory_override),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap();
+        let load_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+        let t1 = Instant::now();
+        let result = run_stacking(&cache, &config).expect("this cache is never cancelled");
+        let stack_ms = t1.elapsed().as_secs_f64() * 1000.0;
+
+        println!(
+            "  {name}: {} frames, load={load_ms:.0}ms, stack={stack_ms:.0}ms, total={:.0}ms",
+            paths.len(),
+            t0.elapsed().as_secs_f64() * 1000.0
+        );
+        Some(result.into_cfa_master())
+    };
 
     let dark = stack_cfa("Dark", &dark_paths, StackConfig::dark());
     let flat = stack_cfa("Flat", &flat_paths, StackConfig::flat());
@@ -85,7 +91,7 @@ fn bench_full_pipeline() {
             flat_dark: None,
         },
         DEFAULT_SIGMA_THRESHOLD,
-        CancelToken::never(),
+        &CancelToken::never(),
     )
     .unwrap();
     println!(
@@ -118,13 +124,12 @@ fn bench_full_pipeline() {
     println!("\n--- Step 2: Calibrating light frames ---");
     let step_start = Instant::now();
 
-    let light_paths = calibration_image_paths("Lights").unwrap();
-    assert!(!light_paths.is_empty(), "No light frames found");
+    let light_paths = raw_frames("Lights");
     println!("  Loading and calibrating {} lights...", light_paths.len());
 
     let calibrated: Vec<LinearImage> =
         concurrency::try_par_map_limited(&light_paths, 3, |_index, p| {
-            let mut cfa = load_raw_cfa(p, &CancelToken::never()).unwrap();
+            let mut cfa = load_raw_cfa(p, &LoadContext::default()).unwrap();
             masters.calibrate(&mut cfa).unwrap();
             Ok::<_, ()>(cfa.demosaic(&CancelToken::never()).unwrap())
         })
@@ -133,11 +138,11 @@ fn bench_full_pipeline() {
     println!("  Elapsed: {:?}", step_start.elapsed());
 
     // Save calibrated lights
-    let calibrated_dir = cal_dir.join("calibrated_lights");
-    std::fs::create_dir_all(&calibrated_dir).expect("Failed to create calibrated_lights dir");
+    let calibrated_dir = output.join("calibrated_lights");
+    fs::create_dir_all(&calibrated_dir).expect("Failed to create calibrated_lights dir");
     for (path, img) in light_paths.iter().zip(calibrated.iter()) {
         let filename = path.file_stem().unwrap().to_string_lossy();
-        let out_path = calibrated_dir.join(format!("{}_calibrated.tiff", filename));
+        let out_path = calibrated_dir.join(format!("{filename}_calibrated.tiff"));
         img.save(&out_path)
             .expect("Failed to save calibrated light");
     }
@@ -181,7 +186,7 @@ fn bench_full_pipeline() {
             let result = register(ref_stars, stars, &reg_config)
                 .unwrap_or_else(|e| panic!("Registration failed: {e}"));
             let warp_start = Instant::now();
-            let warped = warp(img, &result.warp_transform(), &reg_config.warp).image;
+            let warped = warp(img, &result.warp_transform(), reg_config.warp).image;
             let warp_ms = warp_start.elapsed().as_secs_f64() * 1000.0;
             println!(
                 "  {} inliers, RMS={:.3}px, reg={:.1}ms, warp={:.1}ms",
@@ -204,10 +209,10 @@ fn bench_full_pipeline() {
     }
 
     // Save registered lights
-    let registered_dir = cal_dir.join("registered_lights");
-    std::fs::create_dir_all(&registered_dir).expect("Failed to create registered_lights dir");
+    let registered_dir = output.join("registered_lights");
+    fs::create_dir_all(&registered_dir).expect("Failed to create registered_lights dir");
     for (i, img) in registered.iter().enumerate() {
-        let out_path = registered_dir.join(format!("registered_{:04}.tiff", i));
+        let out_path = registered_dir.join(format!("registered_{i:04}.tiff"));
         img.save(&out_path)
             .expect("Failed to save registered light");
     }
@@ -221,7 +226,7 @@ fn bench_full_pipeline() {
     let step_start = Instant::now();
 
     let registered_paths: Vec<_> = (0..registered.len())
-        .map(|i| registered_dir.join(format!("registered_{:04}.tiff", i)))
+        .map(|i| registered_dir.join(format!("registered_{i:04}.tiff")))
         .collect();
 
     let stack_config = StackConfig {
@@ -231,7 +236,7 @@ fn bench_full_pipeline() {
 
     let stacked = stack(
         &registered_paths,
-        stack_config,
+        &stack_config,
         ProgressCallback::default(),
         CancelToken::never(),
     )
@@ -247,7 +252,7 @@ fn bench_full_pipeline() {
     println!("  Elapsed: {:?}", step_start.elapsed());
 
     // Save stacked result
-    let output_path = cal_dir.join("stacked_light.tiff");
+    let output_path = output.join("stacked_light.tiff");
     let img: imaginarium::Image = stacked.into();
     img.save_file(&output_path).unwrap();
     println!("  Saved: {}", output_path.display());

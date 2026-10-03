@@ -11,9 +11,11 @@ use scenarium::NodeId;
 
 use crate::core::document::open_document::OpenDocument;
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::edit::relayout::Relayout;
+use crate::core::io::preferences::error::PreferencesLoadError;
 use crate::core::io::preferences::{Preferences, WindowState};
 use crate::core::runtime_host::RuntimeHost;
-use crate::core::status::StatusLog;
+use crate::core::status::{StatusFamily, StatusLog};
 use crate::core::wake::Wake;
 use crate::gui::HostHandle;
 use crate::gui::MAIN_WINDOW;
@@ -22,7 +24,6 @@ use crate::gui::app::ctx::{AppCtx, StatusInputs};
 use crate::gui::app::discard_dialog::{DiscardChoice, DiscardOutcome};
 use crate::gui::dialogs;
 use crate::gui::pane::graph::node::port_row::PathPick;
-use crate::gui::relayout::Relayout;
 use crate::gui::requests::Requests;
 use crate::gui::state::process_memory::ProcessMemory;
 use crate::gui::state::run_state::RunState;
@@ -39,7 +40,7 @@ use session::Session;
 /// evaluating it, and lends the document to the [`Session`] that authors each
 /// frame. `App` also owns preferences, dialogs, theme, and exit policy.
 /// `update` drains external queues once, while replayable `record` runs
-/// `Editor::frame` and handles actions only in the pass that receives input.
+/// `Session::frame` and handles actions only in the pass that receives input.
 #[derive(Debug)]
 pub(crate) struct App {
     /// The document being edited and the UI showing it — replaced as a unit
@@ -64,10 +65,15 @@ pub(crate) struct App {
     status: StatusLog,
     theme: Theme,
     host_handle: HostHandle,
-    /// Persisted session state (active theme name + last document).
-    /// Written on every doc/theme change so the next launch reopens
-    /// where the user left off.
+    /// Persisted session state: the last document, the window, the viewer
+    /// and model choices. Written on every change through
+    /// [`Self::save_preferences`], so the next launch reopens where the user
+    /// left off.
     preferences: Preferences,
+    /// False when the preferences file existed but could not be read: the
+    /// file stays as the user has it, and this session's changes stay in
+    /// memory.
+    preferences_writable: bool,
     /// The document-replacing transition waiting on the unsaved-changes
     /// prompt, and thus whether that prompt is up at all. Raised by
     /// [`Self::guard_discard`]; cleared when the user answers.
@@ -103,13 +109,16 @@ enum PendingTransition {
     OpenPicked,
     // Only `platform::macos` hands a path in; the other two OSes get theirs
     // through argv at launch, before an `App` exists to guard.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    #[cfg_attr(
+        all(not(target_os = "macos"), not(test)),
+        expect(dead_code, reason = "only the macOS open-file handler constructs it")
+    )]
     OpenAt(PathBuf),
 }
 
 impl PendingTransition {
     /// How the prompt finishes "Save changes to X before …?".
-    fn prompt_tail(&self) -> &'static str {
+    const fn prompt_tail(&self) -> &'static str {
         match self {
             Self::Quit => "quitting",
             Self::New => "closing it",
@@ -130,7 +139,7 @@ impl App {
     pub(crate) fn new(
         ui: &mut Ui,
         handle: HostHandle,
-        mut preferences: Preferences,
+        preferences: Result<Preferences, PreferencesLoadError>,
         document: Option<PathBuf>,
     ) -> Self {
         // The worker wakes the winit loop via the host handle (see
@@ -141,11 +150,25 @@ impl App {
         };
         // `preferences` is loaded in `run_gui` before the window exists, so
         // its saved geometry can size the window at creation.
-        let mut runtime = RuntimeHost::new(wake, &preferences);
         let mut status = StatusLog::default();
-        let open = OpenDocument::open_at_launch(document, &mut preferences, &mut status);
+        let preferences_writable = preferences.is_ok();
+        let mut preferences = preferences.unwrap_or_else(|error| {
+            status.error(
+                StatusFamily::Preferences,
+                format!("{error}; this session's settings are not saved"),
+            );
+            Preferences::default()
+        });
+        let mut runtime = RuntimeHost::new(wake, &preferences);
+        let remembered = preferences.document_path.clone();
+        let open = OpenDocument::open_at_launch(
+            document,
+            &mut preferences,
+            &mut status,
+            runtime.library.current(),
+        );
         runtime.set_document_cache(open.path.as_deref());
-        let app = Self {
+        let mut app = Self {
             session: Session::new(open),
             runtime,
             run_state: RunState::default(),
@@ -153,13 +176,18 @@ impl App {
             theme: Theme::default(),
             host_handle: handle,
             preferences,
+            preferences_writable,
             confirm_discard: None,
             process_memory: ProcessMemory::new(),
             requests: Requests::default(),
         };
         // Onto the Ui before frame 1, so palantir's own widgets paint right.
-        ui.set_theme(app.theme.palantir_theme.clone());
-        // ui.debug_overlay.damage_rect = true;
+        ui.set_theme(app.theme.palantir.clone());
+        // A remembered document that failed to load was forgotten; persist
+        // that, so the next launch does not fail on it again.
+        if app.preferences.document_path != remembered {
+            app.save_preferences();
+        }
         app
     }
 
@@ -202,7 +230,7 @@ impl App {
     /// Whether a destructive transition has to prompt before proceeding:
     /// unsaved changes and the confirm preference both hold. The single
     /// predicate behind every path that replaces or discards the document.
-    fn needs_discard_confirmation(&self) -> bool {
+    const fn needs_discard_confirmation(&self) -> bool {
         self.session.open.dirty && self.preferences.confirm_unsaved_changes
     }
 
@@ -219,7 +247,7 @@ impl App {
         }
     }
 
-    /// Run a transition the guard cleared. `Load` picks its file here
+    /// Run a transition the guard cleared. `OpenPicked` picks its file here
     /// rather than before the prompt, so a cancelled prompt doesn't leave
     /// the user having chosen a file for nothing.
     fn perform(&mut self, transition: PendingTransition) {
@@ -236,7 +264,10 @@ impl App {
     /// today, one Finder handed us, which makes this macOS-only: see
     /// [`crate::platform::route_opened_documents`] for why no other OS has a
     /// caller.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    #[cfg_attr(
+        not(target_os = "macos"),
+        expect(dead_code, reason = "only the macOS open-file handler calls it")
+    )]
     pub(crate) fn open_document_at(&mut self, path: PathBuf) {
         self.guard_discard(PendingTransition::OpenAt(path));
     }
@@ -303,14 +334,14 @@ impl App {
 
     /// Open a file dialog for a node's `FsPath` const input and, if the
     /// user makes a selection, apply the chosen paths as a `SetInput` edit. Runs after
-    /// authoring, so it goes through `Editor::apply_edit` rather than the
-    /// frame's intent drain.
+    /// authoring, so it goes through `OpenDocument::apply_edit` rather than
+    /// the frame's intent drain.
     ///
     /// Reports the edit's relayout need rather than acting on it — this runs
-    /// after `Editor::frame` has handed its own back, and `App::frame` spends
-    /// both together.
+    /// after `Session::frame` has handed its own back, and `App::record`
+    /// spends both together.
     #[must_use]
-    fn pick_input_path(&mut self, pick: PathPick) -> Relayout {
+    fn pick_input_path(&mut self, pick: &PathPick) -> Relayout {
         let extensions: Vec<&str> = pick.config.extensions.iter().map(String::as_str).collect();
         let value = match pick.config.mode {
             FsPathMode::ExistingFile => dialogs::pick_existing_file(&extensions)
@@ -331,10 +362,13 @@ impl App {
         let Some(value) = value else {
             return Relayout::NotNeeded;
         };
-        self.session.open.apply_edit(GraphIntent::SetInput {
-            input: pick.port,
-            to: Some(Binding::Const(value)),
-        })
+        self.session.open.apply_edit(
+            GraphIntent::SetInput {
+                input: pick.port,
+                to: Some(Binding::Const(value)),
+            },
+            self.runtime.library.current(),
+        )
     }
 
     /// Prompt for a project file and load it. The
@@ -388,15 +422,16 @@ impl App {
     /// Load `path` into a fresh editor. A missing or corrupt file leaves the
     /// open document intact and surfaces its reason in the status bar.
     pub(crate) fn load_document(&mut self, path: &Path) {
-        let open = match OpenDocument::load(path.to_path_buf()) {
+        let open = match OpenDocument::load(path.to_path_buf(), self.runtime.library.current()) {
             Ok(open) => open,
             Err(err) => {
-                self.status.error(format!("load failed: {err:#}"));
+                self.status
+                    .error(StatusFamily::Document, format!("load failed: {err:#}"));
                 return;
             }
         };
         self.adopt_document(open);
-        self.status.error = None;
+        self.status.succeeded(StatusFamily::Document);
     }
 
     /// Cmd+S: overwrite the current file if there is one, else fall
@@ -424,9 +459,11 @@ impl App {
                 self.runtime
                     .set_document_cache(self.session.open.path.as_deref());
                 self.remember_document_path();
-                self.status.error = None;
+                self.status.succeeded(StatusFamily::Document);
             }
-            Err(err) => self.status.error(format!("save failed: {err:#}")),
+            Err(err) => self
+                .status
+                .error(StatusFamily::Document, format!("save failed: {err:#}")),
         }
     }
 
@@ -449,8 +486,12 @@ impl App {
     /// bar — the one save path every caller routes through, so a broken
     /// preferences file can't fail silently.
     pub(crate) fn save_preferences(&mut self) {
-        if let Err(err) = self.preferences.save() {
-            self.status.error(err);
+        if !self.preferences_writable {
+            return;
+        }
+        match self.preferences.save() {
+            Ok(()) => self.status.succeeded(StatusFamily::Preferences),
+            Err(err) => self.status.error(StatusFamily::Preferences, err),
         }
     }
 
@@ -461,12 +502,8 @@ impl App {
     }
 
     fn set_ml_model_path(&mut self, kind: MlModelKind, path: PathBuf) {
-        match kind {
-            MlModelKind::Denoise => self.preferences.ml_models.denoise = path,
-            MlModelKind::StarRemoval => self.preferences.ml_models.star_removal = path,
-        }
-        self.runtime.configure_ml_model_defaults(&self.preferences);
-        self.save_preferences();
+        *kind.path_mut(&mut self.preferences.ml_models) = path;
+        self.apply_preferences();
     }
 
     /// Persist whether discarding unsaved changes prompts to save.
@@ -489,19 +526,10 @@ impl App {
 
     /// Like [`Self::run_graph`], but seeds the run at one node: only its
     /// upstream cone executes and its outputs are delivered.
+    ///
+    /// The id was read frames ago, so the node may be gone by now; the
+    /// runtime reports that as nothing to run.
     fn run_node(&mut self, node_id: NodeId) {
-        // A node inside a local definition has no enclosing instance path,
-        // so no execution seed resolves. The UI gates the play chip and the
-        // menu action on `NodeCtx::runnable`, which is false there —
-        // reaching this is a gating bug, not user input, so refuse rather
-        // than kill the editor from a live command handler. Tested against
-        // the *node's* graph, not the focused pane's: with several graph
-        // panes open, a root node's chip stays valid while focus sits
-        // elsewhere.
-        if self.session.graph().find(node_id).is_none() {
-            debug_assert!(false, "run-node reached for a node outside the root graph");
-            return;
-        }
         self.runtime
             .run_node(self.session.graph(), node_id, &mut self.status);
     }
@@ -566,7 +594,7 @@ impl palantir::App for App {
         // `draw_panels` skips a panel whose node is gone — so the lag costs
         // memory and nothing else.
         self.run_state.sync(
-            &mut self.runtime,
+            &self.runtime,
             &mut self.status,
             ui,
             &self.session.open.document,
@@ -586,7 +614,7 @@ impl palantir::App for App {
 
         // One library snapshot for this record pass (a cheap Arc clone).
         // A command that publishes below is visible to pass B or the next frame.
-        let library = self.runtime.library.published.load();
+        let library = Arc::clone(self.runtime.library.current());
         // The frame's read-only world, composed once here: everything below
         // derives its own context from this one rather than taking the refs
         // again.
@@ -595,7 +623,7 @@ impl palantir::App for App {
             &library,
             &self.run_state,
             StatusInputs {
-                error: self.status.error.as_deref(),
+                error: self.status.current(),
                 process_memory: self.process_memory.sample(Instant::now()),
             },
         );

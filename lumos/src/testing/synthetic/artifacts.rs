@@ -4,18 +4,24 @@
 //! - Cosmic rays
 //! - CFA (Bayer) pattern artifacts
 
-use crate::testing::TestRng;
+use crate::io::raw::demosaic::bayer::CfaPattern;
+use crate::math::vec2us::Vec2us;
+use crate::testing::test_rng::TestRng;
 
 /// Add random cosmic ray hits to the image.
 ///
 /// Returns the positions of added cosmic rays for verification.
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "synthetic fixtures are small images with non-negative coordinates"
+)]
 pub(crate) fn add_cosmic_rays(
     pixels: &mut [f32],
     width: usize,
     count: usize,
     amplitude_range: (f32, f32),
     seed: u64,
-) -> Vec<(usize, usize)> {
+) -> Vec<Vec2us> {
     let height = pixels.len() / width;
     let mut positions = Vec::with_capacity(count);
 
@@ -26,23 +32,21 @@ pub(crate) fn add_cosmic_rays(
         let y = (rng.next_f32() * height as f32) as usize;
         let amp = amplitude_range.0 + rng.next_f32() * (amplitude_range.1 - amplitude_range.0);
 
-        if x < width && y < height {
-            // Single pixel hit (most cosmic rays)
-            pixels[y * width + x] += amp;
+        // Single pixel hit (most cosmic rays)
+        pixels[y * width + x] += amp;
 
-            // Some cosmic rays have slight bleeding
-            if rng.next_f32() > 0.7 {
-                let bleed = amp * 0.15;
-                if x > 0 {
-                    pixels[y * width + x - 1] += bleed;
-                }
-                if x < width - 1 {
-                    pixels[y * width + x + 1] += bleed;
-                }
+        // Some cosmic rays have slight bleeding
+        if rng.next_f32() > 0.7 {
+            let bleed = amp * 0.15;
+            if x > 0 {
+                pixels[y * width + x - 1] += bleed;
             }
-
-            positions.push((x, y));
+            if x < width - 1 {
+                pixels[y * width + x + 1] += bleed;
+            }
         }
+
+        positions.push(Vec2us::new(x, y));
     }
 
     positions
@@ -56,17 +60,9 @@ pub(crate) fn add_bayer_pattern(
     pixels: &mut [f32],
     width: usize,
     strength: f32,
-    pattern: BayerPattern,
+    pattern: CfaPattern,
 ) {
     let height = pixels.len() / width;
-
-    // Pattern offsets for RGGB, GRBG, etc.
-    let (r_offset, _g1_offset, _g2_offset, b_offset) = match pattern {
-        BayerPattern::RGGB => ((0, 0), (1, 0), (0, 1), (1, 1)),
-        BayerPattern::GRBG => ((1, 0), (0, 0), (1, 1), (0, 1)),
-        BayerPattern::GBRG => ((0, 1), (0, 0), (1, 1), (1, 0)),
-        BayerPattern::BGGR => ((1, 1), (1, 0), (0, 1), (0, 0)),
-    };
 
     // Apply slight variations to simulate different color channel gains
     let r_factor = 1.0 + strength * 0.5;
@@ -74,34 +70,16 @@ pub(crate) fn add_bayer_pattern(
 
     for y in 0..height {
         for x in 0..width {
-            let phase_x = x % 2;
-            let phase_y = y % 2;
-
-            let factor = if (phase_x, phase_y) == r_offset {
-                r_factor
-            } else if (phase_x, phase_y) == b_offset {
-                b_factor
-            } else {
-                1.0
+            let factor = match pattern.color_at(Vec2us::new(x, y)) {
+                0 => r_factor,
+                2 => b_factor,
+                _ => 1.0,
             };
 
             let idx = y * width + x;
             pixels[idx] *= factor;
         }
     }
-}
-
-/// Bayer pattern types.
-// Only RGGB is exercised today; the others stay available for future synthetic fixtures
-// needing a non-default CFA layout.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(clippy::upper_case_acronyms)]
-pub(crate) enum BayerPattern {
-    RGGB,
-    GRBG,
-    GBRG,
-    BGGR,
 }
 
 #[cfg(test)]

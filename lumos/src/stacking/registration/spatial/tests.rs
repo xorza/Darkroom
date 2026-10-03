@@ -1,47 +1,25 @@
 //! Tests for the spatial module (k-d tree).
 
 use crate::stacking::registration::spatial::*;
+use crate::testing::test_rng::TestRng;
 
-/// Helper: collect radius search indices into a sorted Vec.
-fn radius_search_indices(tree: &KdTree, query: DVec2, radius: f64) -> Vec<usize> {
-    let mut buf = Vec::new();
-    tree.radius_indices_into(query, radius, &mut buf);
-    buf.sort();
-    buf
-}
-
+/// A tree holds every point at its original index whatever order it sorts them into, and has
+/// nothing to hold for an empty set.
 #[test]
-fn build_empty() {
-    let tree = KdTree::build(&[]);
-    assert!(tree.is_none());
-}
-
-#[test]
-fn build_single_point() {
-    let points = [DVec2::new(1.0, 2.0)];
-    let tree = KdTree::build(&points).unwrap();
-    assert_eq!(tree.len(), 1);
-    // get_point should return the original point
-    let p = tree.get_point(0);
-    assert_eq!(p.x, 1.0);
-    assert_eq!(p.y, 2.0);
-}
-
-#[test]
-fn build_preserves_all_points() {
-    // Points are stored by original index regardless of internal permutation.
+fn build_stores_every_point_by_its_index() {
+    assert!(KdTree::build(Vec::new()).is_none());
     let points = [
         DVec2::new(3.0, 1.0),
         DVec2::new(1.0, 3.0),
         DVec2::new(2.0, 2.0),
         DVec2::new(4.0, 0.0),
+        DVec2::new(-1.0, 42.0),
     ];
-    let tree = KdTree::build(&points).unwrap();
-    assert_eq!(tree.len(), 4);
-    for (i, p) in points.iter().enumerate() {
-        let stored = tree.get_point(i);
-        assert_eq!(stored.x, p.x);
-        assert_eq!(stored.y, p.y);
+    let tree = KdTree::build(points.to_vec()).unwrap();
+    assert_eq!(tree.len(), 5);
+    assert_eq!(tree.points(), &points);
+    for (i, &p) in points.iter().enumerate() {
+        assert_eq!(tree.get_point(i), p);
     }
 }
 
@@ -69,9 +47,7 @@ struct KNearestCase {
 
 /// `k_nearest` over every layout that mattered, as one table.
 ///
-/// Each row pins the whole result — every rank's index and squared distance, in order — where
-/// several of the thirteen tests this replaces spot-checked a few ranks and left the rest
-/// unasserted. `clustered_points` in particular checked ranks 0, 1 and 4 of its second query.
+/// Each row pins the whole result: every rank's index and squared distance, in order.
 ///
 /// Distances are squared and hand-computed in each row's comment. They are compared to a relative
 /// 1e-9, which is far above the few ulps these arithmetic sums carry and far below the gap any
@@ -101,7 +77,7 @@ fn k_nearest_over_every_layout() {
         (0..10)
             .map(|i| {
                 let base = if i < 5 { 0.0 } else { separation };
-                let step = (i % 5) as f64 * 0.1;
+                let step = f64::from(i % 5) * 0.1;
                 DVec2::new(base + step, base + step)
             })
             .collect()
@@ -265,7 +241,7 @@ fn k_nearest_over_every_layout() {
     ];
 
     for case in cases {
-        let tree = KdTree::build(&case.points).expect("every fixture has points");
+        let tree = KdTree::build(case.points.clone()).expect("every fixture has points");
         let neighbours = tree.k_nearest(case.query, case.k);
         let name = case.name;
 
@@ -304,231 +280,142 @@ fn k_nearest_over_every_layout() {
     }
 }
 
+/// The nearest point and its squared distance, hand-computed: an exact hit, a lone point at
+/// `3² + 7²` = 58, and a tie at 1.25 that either point may win.
 #[test]
-fn nearest_one_exact_match() {
-    let points = [
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
-    let tree = KdTree::build(&points).unwrap();
-
-    let nn = tree.nearest_one(DVec2::new(5.0, 5.0)).unwrap();
-    assert_eq!(nn.index, 2);
-    assert_eq!(nn.dist_sq, 0.0);
+fn nearest_one_hand_cases() {
+    let p = DVec2::new;
+    for (points, query, indices, dist_sq) in [
+        (
+            &[p(0.0, 0.0), p(10.0, 10.0), p(5.0, 5.0)][..],
+            p(5.0, 5.0),
+            &[2][..],
+            0.0,
+        ),
+        (&[p(3.0, 7.0)][..], p(0.0, 0.0), &[0][..], 58.0),
+        (
+            &[p(3.0, 4.0), p(5.0, 5.0)][..],
+            p(4.0, 4.5),
+            &[0, 1][..],
+            1.25,
+        ),
+    ] {
+        let nearest = KdTree::build(points.to_vec())
+            .unwrap()
+            .nearest_one(query)
+            .unwrap();
+        assert!(
+            indices.contains(&nearest.index),
+            "{query:?}: {}",
+            nearest.index
+        );
+        assert_eq!(nearest.dist_sq, dist_sq, "{query:?}");
+    }
 }
 
+/// A radius search keeps every point with `dist² ≤ r²` — the boundary included — and only those,
+/// into a buffer it clears first. Points (0, 0), (1, 0), (2, 0), (0, 1), (5, 0), (−3, −4) and
+/// (10, 10), every distance a hand sum of squares.
 #[test]
-fn nearest_one_single_point() {
-    // Single point at (3, 7). Query at origin.
-    // dist_sq = 3^2 + 7^2 = 9 + 49 = 58
-    let points = [DVec2::new(3.0, 7.0)];
-    let tree = KdTree::build(&points).unwrap();
-    let nn = tree.nearest_one(DVec2::new(0.0, 0.0)).unwrap();
-    assert_eq!(nn.index, 0);
-    assert!((nn.dist_sq - 58.0).abs() < 1e-10);
-}
-
-#[test]
-fn nearest_one_equidistant() {
-    // idx 0: (3,4), idx 1: (5,5)
-    // Query: (4, 4.5)
-    //   dist_sq to idx0: (4-3)^2 + (4.5-4)^2 = 1 + 0.25 = 1.25
-    //   dist_sq to idx1: (4-5)^2 + (4.5-5)^2 = 1 + 0.25 = 1.25
-    // Both equidistant — either is valid
-    let points = [DVec2::new(3.0, 4.0), DVec2::new(5.0, 5.0)];
-    let tree = KdTree::build(&points).unwrap();
-
-    let nn = tree.nearest_one(DVec2::new(4.0, 4.5)).unwrap();
-    assert!((nn.dist_sq - 1.25).abs() < 1e-10);
-    assert!(nn.index == 0 || nn.index == 1);
-}
-
-#[test]
-fn nearest_one_agrees_with_k_nearest_1() {
-    // Verify nearest_one returns the same result as k_nearest(q, 1)
-    let points = [
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-        DVec2::new(3.0, 4.0),
-    ];
-    let tree = KdTree::build(&points).unwrap();
-
-    let query = DVec2::new(7.0, 8.0);
-    // dist_sq to idx0: 49+64=113, idx1: 9+4=13, idx2: 4+9=13, idx3: 16+16=32
-    // idx1 and idx2 tie at 13; nearest_one and k_nearest should agree
-    let nn = tree.nearest_one(query).unwrap();
-    let kn = tree.k_nearest(query, 1);
-    assert_eq!(nn.index, kn[0].index);
-    assert!((nn.dist_sq - kn[0].dist_sq).abs() < 1e-10);
-    assert!((nn.dist_sq - 13.0).abs() < 1e-10);
-}
-
-#[test]
-fn nearest_one_empty_tree_not_possible() {
-    // KdTree::build returns None for empty input, so nearest_one on an empty
-    // tree can't happen through the public API. This test documents that
-    // build(&[]) returns None.
-    assert!(KdTree::build(&[]).is_none());
-}
-
-#[test]
-fn radius_finds_correct_points() {
-    // idx 0: (0,0), idx 1: (1,0), idx 2: (0,1), idx 3: (5,5), idx 4: (10,10)
-    // Query: (0,0), radius: 2.0, radius_sq = 4.0
-    //   dist_sq to idx0: 0 <= 4 => included
-    //   dist_sq to idx1: 1 <= 4 => included
-    //   dist_sq to idx2: 1 <= 4 => included
-    //   dist_sq to idx3: 50 > 4 => excluded
-    //   dist_sq to idx4: 200 > 4 => excluded
-    let points = [
-        DVec2::new(0.0, 0.0),
-        DVec2::new(1.0, 0.0),
-        DVec2::new(0.0, 1.0),
-        DVec2::new(5.0, 5.0),
-        DVec2::new(10.0, 10.0),
-    ];
-    let tree = KdTree::build(&points).unwrap();
-
-    let indices = radius_search_indices(&tree, DVec2::new(0.0, 0.0), 2.0);
-    assert_eq!(indices, vec![0, 1, 2]);
-}
-
-#[test]
-fn radius_empty_result() {
-    // All points far from query
-    // idx 0: (0,0), idx 1: (10,10)
-    // Query: (5, 5), radius: 1.0, radius_sq = 1.0
-    //   dist_sq to idx0: 25+25=50 > 1
-    //   dist_sq to idx1: 25+25=50 > 1
-    let points = [DVec2::new(0.0, 0.0), DVec2::new(10.0, 10.0)];
-    let tree = KdTree::build(&points).unwrap();
-
-    let indices = radius_search_indices(&tree, DVec2::new(5.0, 5.0), 1.0);
-    assert!(indices.is_empty());
-}
-
-#[test]
-fn radius_all_points_included() {
-    // idx 0: (0,0), idx 1: (1,0), idx 2: (0,1), idx 3: (1,1)
-    // Query: (0.5, 0.5), radius: 10.0
-    // All within radius
-    let points = [
-        DVec2::new(0.0, 0.0),
-        DVec2::new(1.0, 0.0),
-        DVec2::new(0.0, 1.0),
-        DVec2::new(1.0, 1.0),
-    ];
-    let tree = KdTree::build(&points).unwrap();
-
-    let indices = radius_search_indices(&tree, DVec2::new(0.5, 0.5), 10.0);
-    assert_eq!(indices, vec![0, 1, 2, 3]);
-}
-
-#[test]
-fn radius_boundary_inclusion() {
-    // idx 0: (0,0), idx 1: (1,0), idx 2: (2,0)
-    // Query: (0, 0), radius: 1.0, radius_sq = 1.0
-    //   dist_sq to idx0: 0 <= 1 => included
-    //   dist_sq to idx1: 1 <= 1 => included (boundary: dist_sq == radius_sq)
-    //   dist_sq to idx2: 4 > 1 => excluded
+fn radius_search_hand_cases() {
     let points = [
         DVec2::new(0.0, 0.0),
         DVec2::new(1.0, 0.0),
         DVec2::new(2.0, 0.0),
-    ];
-    let tree = KdTree::build(&points).unwrap();
-
-    let indices = radius_search_indices(&tree, DVec2::new(0.0, 0.0), 1.0);
-    assert_eq!(indices, vec![0, 1]);
-}
-
-#[test]
-fn radius_zero() {
-    // radius=0 means only exact matches (dist_sq=0 <= 0)
-    let points = [DVec2::new(0.0, 0.0), DVec2::new(1.0, 1.0)];
-    let tree = KdTree::build(&points).unwrap();
-
-    let indices = radius_search_indices(&tree, DVec2::new(0.0, 0.0), 0.0);
-    assert_eq!(indices, vec![0]);
-}
-
-#[test]
-fn radius_negative_coordinates() {
-    // idx 0: (-3, -4), idx 1: (0, 0), idx 2: (3, 4)
-    // Query: (-2, -3), radius: 2.0, radius_sq = 4.0
-    //   dist_sq to idx0: (-2+3)^2 + (-3+4)^2 = 1+1 = 2 <= 4 => included
-    //   dist_sq to idx1: 4+9 = 13 > 4 => excluded
-    //   dist_sq to idx2: 25+49 = 74 > 4 => excluded
-    let points = [
-        DVec2::new(-3.0, -4.0),
-        DVec2::new(0.0, 0.0),
-        DVec2::new(3.0, 4.0),
-    ];
-    let tree = KdTree::build(&points).unwrap();
-
-    let indices = radius_search_indices(&tree, DVec2::new(-2.0, -3.0), 2.0);
-    assert_eq!(indices, vec![0]);
-}
-
-#[test]
-fn radius_buffer_reuse_clears() {
-    let points = [
-        DVec2::new(0.0, 0.0),
-        DVec2::new(1.0, 0.0),
-        DVec2::new(10.0, 10.0),
-    ];
-    let tree = KdTree::build(&points).unwrap();
-
-    let mut buf = Vec::new();
-
-    // First query near origin: should find idx 0 and 1
-    tree.radius_indices_into(DVec2::new(0.0, 0.0), 2.0, &mut buf);
-    buf.sort();
-    assert_eq!(buf, vec![0, 1]);
-
-    // Second query near (10,10): should find only idx 2 (buffer cleared)
-    tree.radius_indices_into(DVec2::new(10.0, 10.0), 0.5, &mut buf);
-    assert_eq!(buf, vec![2]);
-}
-
-#[test]
-fn radius_different_radii_different_results() {
-    // idx 0: (0,0), idx 1: (2,0), idx 2: (5,0)
-    // Query: (0,0)
-    //   radius=1.5: radius_sq=2.25 → only idx0 (dist_sq=0)
-    //   radius=3.0: radius_sq=9.0  → idx0 (0) + idx1 (4)
-    //   radius=6.0: radius_sq=36.0 → all three: idx0 (0), idx1 (4), idx2 (25)
-    let points = [
-        DVec2::new(0.0, 0.0),
-        DVec2::new(2.0, 0.0),
+        DVec2::new(0.0, 1.0),
         DVec2::new(5.0, 0.0),
+        DVec2::new(-3.0, -4.0),
+        DVec2::new(10.0, 10.0),
     ];
-    let tree = KdTree::build(&points).unwrap();
-
-    let r1 = radius_search_indices(&tree, DVec2::new(0.0, 0.0), 1.5);
-    let r2 = radius_search_indices(&tree, DVec2::new(0.0, 0.0), 3.0);
-    let r3 = radius_search_indices(&tree, DVec2::new(0.0, 0.0), 6.0);
-
-    assert_eq!(r1, vec![0]);
-    assert_eq!(r2, vec![0, 1]);
-    assert_eq!(r3, vec![0, 1, 2]);
+    let tree = KdTree::build(points.to_vec()).unwrap();
+    let mut found = vec![999, 888];
+    for (query, radius, expected, why) in [
+        (DVec2::ZERO, 0.0, &[0][..], "radius 0: the exact hit only"),
+        (
+            DVec2::ZERO,
+            1.0,
+            &[0, 1, 3][..],
+            "dist² 1 on the boundary is kept",
+        ),
+        (DVec2::ZERO, 1.5, &[0, 1, 3][..], "dist² 4 is past 2.25"),
+        (
+            DVec2::ZERO,
+            3.0,
+            &[0, 1, 2, 3][..],
+            "dist² 4 inside 9, 25 past it",
+        ),
+        (
+            DVec2::ZERO,
+            5.0,
+            &[0, 1, 2, 3, 4, 5][..],
+            "dist² 25 on the boundary, twice",
+        ),
+        (DVec2::new(-2.0, -3.0), 2.0, &[5][..], "(−3, −4) at dist² 2"),
+        (
+            DVec2::new(5.0, 5.0),
+            1.0,
+            &[][..],
+            "nothing within 1 of (5, 5)",
+        ),
+        (
+            DVec2::new(5.0, 5.0),
+            100.0,
+            &[0, 1, 2, 3, 4, 5, 6][..],
+            "everything",
+        ),
+    ] {
+        tree.radius_indices_into(query, radius, &mut found);
+        found.sort_unstable();
+        assert_eq!(found, expected, "{why}");
+    }
 }
 
+/// Every query against a brute-force scan, on seeded random sets of a few hundred points — where a
+/// tree has the depth for pruning to go wrong. The k nearest are the brute force's first k
+/// distances, the nearest is the least distance, and a radius search is exactly the points within
+/// it. Ties are kept apart by the random coordinates, so the indices match too.
 #[test]
-fn get_point_returns_original_coordinates() {
-    let points = [
-        DVec2::new(3.125, 2.71),
-        DVec2::new(-1.0, 42.0),
-        DVec2::new(0.0, 0.0),
-    ];
-    let tree = KdTree::build(&points).unwrap();
+fn queries_agree_with_a_brute_force_scan() {
+    let mut rng = TestRng::new(17);
+    for count in [300, 700] {
+        let points: Vec<DVec2> = (0..count)
+            .map(|_| DVec2::new(rng.next_f64() * 1000.0, rng.next_f64() * 600.0))
+            .collect();
+        let tree = KdTree::build(points.clone()).unwrap();
+        let mut neighbours = Vec::new();
+        let mut within = Vec::new();
+        for _ in 0..60 {
+            let query = DVec2::new(
+                rng.next_f64() * 1100.0 - 50.0,
+                rng.next_f64() * 700.0 - 50.0,
+            );
+            let mut brute: Vec<(f64, usize)> = points
+                .iter()
+                .enumerate()
+                .map(|(i, &p)| ((query - p).length_squared(), i))
+                .collect();
+            brute.sort_by(|a, b| a.0.total_cmp(&b.0));
 
-    for (i, p) in points.iter().enumerate() {
-        let stored = tree.get_point(i);
-        assert_eq!(stored.x, p.x);
-        assert_eq!(stored.y, p.y);
+            for k in [1, 5, 17] {
+                tree.k_nearest_into(query, k, &mut neighbours);
+                let found: Vec<(f64, usize)> =
+                    neighbours.iter().map(|n| (n.dist_sq, n.index)).collect();
+                assert_eq!(found, brute[..k], "k = {k} at {query:?}");
+            }
+            let nearest = tree.nearest_one(query).unwrap();
+            assert_eq!((nearest.dist_sq, nearest.index), brute[0]);
+            for radius in [0.0, 15.5, 100.0, 500.0] {
+                tree.radius_indices_into(query, radius, &mut within);
+                within.sort_unstable();
+                let mut expected: Vec<usize> = brute
+                    .iter()
+                    .take_while(|(d, _)| *d <= radius * radius)
+                    .map(|&(_, i)| i)
+                    .collect();
+                expected.sort_unstable();
+                assert_eq!(within, expected, "radius {radius} at {query:?}");
+            }
+        }
     }
 }
 
@@ -593,12 +480,12 @@ fn heap_small_push_and_eviction() {
     heap.write_into(&mut result);
     assert_eq!(result.len(), 3);
     let mut dist_sqs: Vec<u64> = result.iter().map(|n| n.dist_sq.to_bits()).collect();
-    dist_sqs.sort();
+    dist_sqs.sort_unstable();
     let expected: Vec<u64> = [2.0_f64, 5.0, 10.0].iter().map(|d| d.to_bits()).collect();
     assert_eq!(dist_sqs, expected);
 
     let mut indices: Vec<usize> = result.iter().map(|n| n.index).collect();
-    indices.sort();
+    indices.sort_unstable();
     assert_eq!(indices, vec![0, 1, 3]);
 }
 
@@ -672,97 +559,4 @@ fn heap_capacity_one() {
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].index, 1);
     assert!((result[0].dist_sq - 3.0).abs() < 1e-10);
-}
-
-#[test]
-fn k_nearest_and_radius_agree() {
-    // 5 points on x-axis. Query at origin, radius=4.5 (radius_sq=20.25).
-    // idx 0: (0,0) dist_sq=0, idx 1: (2,0) dist_sq=4, idx 2: (4,0) dist_sq=16,
-    // idx 3: (6,0) dist_sq=36, idx 4: (8,0) dist_sq=64
-    // Radius should find: idx 0 (0), idx 1 (4), idx 2 (16) — all <= 20.25
-    // k_nearest(3) from origin should find the same three
-    let points = [
-        DVec2::new(0.0, 0.0),
-        DVec2::new(2.0, 0.0),
-        DVec2::new(4.0, 0.0),
-        DVec2::new(6.0, 0.0),
-        DVec2::new(8.0, 0.0),
-    ];
-    let tree = KdTree::build(&points).unwrap();
-    let query = DVec2::new(0.0, 0.0);
-
-    let radius_result = radius_search_indices(&tree, query, 4.5);
-    assert_eq!(radius_result, vec![0, 1, 2]);
-
-    let knn_result = tree.k_nearest(query, 3);
-    let mut knn_indices: Vec<usize> = knn_result.iter().map(|n| n.index).collect();
-    knn_indices.sort();
-    assert_eq!(knn_indices, vec![0, 1, 2]);
-}
-
-#[test]
-fn horizontal_line_exact_distances() {
-    // 10 points on x-axis: idx i at (10*i, 0), i=0..10
-    // Query: (45, 0)
-    //   dist_sq to idx4 (40,0): (45-40)^2 = 25
-    //   dist_sq to idx5 (50,0): (45-50)^2 = 25
-    //   dist_sq to idx3 (30,0): (45-30)^2 = 225
-    // k=2: idx4 and idx5, both at dist_sq=25
-    let points: Vec<DVec2> = (0..10).map(|i| DVec2::new(i as f64 * 10.0, 0.0)).collect();
-    let tree = KdTree::build(&points).unwrap();
-
-    let neighbors = tree.k_nearest(DVec2::new(45.0, 0.0), 2);
-    assert_eq!(neighbors.len(), 2);
-    assert!((neighbors[0].dist_sq - 25.0).abs() < 1e-10);
-    assert!((neighbors[1].dist_sq - 25.0).abs() < 1e-10);
-    let mut indices: Vec<usize> = neighbors.iter().map(|n| n.index).collect();
-    indices.sort();
-    assert_eq!(indices, vec![4, 5]);
-}
-
-#[test]
-fn vertical_line_exact_distances() {
-    // 10 points on y-axis: idx i at (0, 10*i), i=0..10
-    // Query: (0, 45)
-    //   dist_sq to idx4 (0,40): (45-40)^2 = 25
-    //   dist_sq to idx5 (0,50): (45-50)^2 = 25
-    // k=2: idx4 and idx5, both at dist_sq=25
-    let points: Vec<DVec2> = (0..10).map(|i| DVec2::new(0.0, i as f64 * 10.0)).collect();
-    let tree = KdTree::build(&points).unwrap();
-
-    let neighbors = tree.k_nearest(DVec2::new(0.0, 45.0), 2);
-    assert_eq!(neighbors.len(), 2);
-    assert!((neighbors[0].dist_sq - 25.0).abs() < 1e-10);
-    assert!((neighbors[1].dist_sq - 25.0).abs() < 1e-10);
-    let mut indices: Vec<usize> = neighbors.iter().map(|n| n.index).collect();
-    indices.sort();
-    assert_eq!(indices, vec![4, 5]);
-}
-
-#[test]
-fn large_coordinates() {
-    // idx 0: (1024.5, 768.3), idx 1: (2048.1, 1536.7), idx 2: (512.9, 384.2), idx 3: (3072.0, 2304.5)
-    // Query: (1024.5, 768.3) — exact match with idx 0
-    // k=2: idx 0 (dist_sq=0), next closest:
-    //   dist_sq to idx1: (1024.5-2048.1)^2 + (768.3-1536.7)^2 = 1047564.96 + 590790.76 = 1638355.72
-    //   dist_sq to idx2: (1024.5-512.9)^2 + (768.3-384.2)^2 = 261793.56 + 147464.81 = 409258.37  (closest)
-    //   dist_sq to idx3: (1024.5-3072)^2 + (768.3-2304.5)^2 = 4197556.25 + 2361564.84 = 6559121.09
-    let points = [
-        DVec2::new(1024.5, 768.3),
-        DVec2::new(2048.1, 1536.7),
-        DVec2::new(512.9, 384.2),
-        DVec2::new(3072.0, 2304.5),
-    ];
-    let tree = KdTree::build(&points).unwrap();
-
-    let neighbors = tree.k_nearest(DVec2::new(1024.5, 768.3), 2);
-    assert_eq!(neighbors.len(), 2);
-    assert_eq!(neighbors[0].index, 0);
-    assert_eq!(neighbors[0].dist_sq, 0.0);
-    assert_eq!(neighbors[1].index, 2);
-    // (1024.5-512.9)^2 + (768.3-384.2)^2 = 511.6^2 + 384.1^2 = 261734.56 + 147532.81 = 409267.37
-    let dx = 1024.5 - 512.9;
-    let dy = 768.3 - 384.2;
-    let expected = dx * dx + dy * dy;
-    assert!((neighbors[1].dist_sq - expected).abs() < 1e-6);
 }

@@ -2,8 +2,8 @@
 //!
 //! Star detection has no explicit budget knob like the combine (`stacking::combine`) does; its
 //! memory-safety guarantee is structural — a reused [`StarDetector`] recycles a fixed set of
-//! image-sized scratch buffers through its [`DetectionResources`], so detecting an unbounded number of
-//! same-size frames costs a *constant* working set, not one that grows per frame. This is the
+//! image-sized scratch buffers through its [`DetectionResources`], so detecting an unbounded number
+//! of same-size frames costs a *constant* working set, not one that grows per frame. This is the
 //! detector's analogue of the combine's "peak heap flat in the frame count": the pool footprint is
 //! the ceiling, and every further frame must fit inside it.
 //!
@@ -22,15 +22,14 @@ use crate::stacking::star_detection::detector::internals::buffer_counts_for;
 use crate::stacking::star_detection::resources::internals::BufferCounts;
 use crate::testing::synthetic::fixtures::star_field;
 
-/// The detection working set at its high-water mark, for the default config: the buffers the pool
-/// holds at rest once every stage has run and returned its scratch. Because buffers are recycled
-/// across stages, this is the *peak concurrent* demand, not the sum of all acquisitions — at most 6
-/// image-sized f32 planes live at once (grayscale + background/noise + detect-stage scratch), one
-/// threshold bitmask, and the single label map. Pinned exactly so any change to the pipeline's
-/// concurrent buffer demand surfaces here for review rather than silently growing peak heap.
-const DEFAULT_WORKING_SET: BufferCounts = BufferCounts {
-    floats: 6,
-    bitmasks: 1,
+/// The detection working set at its high-water mark over every preset: the buffers the pool holds
+/// at rest once every stage has run and returned its scratch. Because buffers are recycled across
+/// stages, this is the *peak concurrent* demand, not the sum of all acquisitions. Pinned exactly so
+/// any change to the pipeline's concurrent buffer demand surfaces here for review rather than
+/// silently growing peak heap.
+const WORKING_SET: BufferCounts = BufferCounts {
+    floats: 4,
+    bitmasks: 2,
     labels: 1,
 };
 
@@ -38,17 +37,17 @@ const DEFAULT_WORKING_SET: BufferCounts = BufferCounts {
 /// detection, which only means anything while that matches what the pool actually holds. Tying the
 /// two together here is what stops the planner's figure from being a number nobody can check: a
 /// stage that grows its scratch fails [`buffer_working_set_stays_flat_in_frame_count`] first, and
-/// raising `DEFAULT_WORKING_SET` to match then fails this until the planner is raised too.
+/// raising `WORKING_SET` to match then fails this until the planner is raised too.
 #[test]
 fn pinned_working_set_matches_what_the_memory_planner_charges() {
     let BufferCounts {
         floats,
         bitmasks,
         labels,
-    } = DEFAULT_WORKING_SET;
+    } = WORKING_SET;
 
-    // The label map is u32, the same width as an f32 plane. The bitmask is one bit per pixel
-    // against those 32, and the planner rounds it up to a whole plane rather than model a
+    // The label map is u32, the same width as an f32 plane. A bitmask is one bit per pixel
+    // against those 32, and the planner rounds each up to a whole plane rather than model a
     // fraction — so a plain sum is the figure it should carry.
     assert_eq!(floats + labels + bitmasks, DETECTION_WORKING_PLANES);
 }
@@ -57,6 +56,9 @@ fn pinned_working_set_matches_what_the_memory_planner_charges() {
 /// pool never grows past its warmed high-water mark, and that mark is a small, image-bounded
 /// constant. A per-frame buffer leak (a stage acquiring scratch it never releases) would push the
 /// counts up without bound, making peak heap linear in the frame count — this catches it.
+///
+/// Every preset runs, because they differ in the stages that hold planes: the iterative background
+/// refinement, the FWHM estimate's extra detection, the multi-threshold deblender.
 #[test]
 fn buffer_working_set_stays_flat_in_frame_count() {
     let size = Size2us::new(128, 128);
@@ -67,32 +69,53 @@ fn buffer_working_set_stays_flat_in_frame_count() {
         .map(|s| star_field(size, 60, 4200 + s).image)
         .collect();
 
-    let mut detector = StarDetector::from_config(Config::default()).unwrap();
+    let mut peak = BufferCounts {
+        floats: 0,
+        bitmasks: 0,
+        labels: 0,
+    };
+    for (name, config) in [
+        ("default", Config::default()),
+        ("wide_field", Config::wide_field()),
+        ("high_resolution", Config::high_resolution()),
+        ("crowded_field", Config::crowded_field()),
+        ("precise_ground", Config::precise_ground()),
+    ] {
+        let mut detector = StarDetector::from_config(config).unwrap();
 
-    // Warm up across every distinct field: after this the pool holds its full steady-state scratch.
-    for frame in &frames {
-        detector.detect(frame);
+        // Warm up across every distinct field: after this the pool holds its full steady-state
+        // scratch.
+        for frame in &frames {
+            detector.detect(frame);
+        }
+        let baseline =
+            buffer_counts_for(&detector).expect("resources are populated after the first detect");
+        peak = BufferCounts {
+            floats: peak.floats.max(baseline.floats),
+            bitmasks: peak.bitmasks.max(baseline.bitmasks),
+            labels: peak.labels.max(baseline.labels),
+        };
+
+        // No matter how many more same-size frames we detect, the pool never grows past the
+        // warmed working set. Acquire/release is balanced per stage, so a growing count means a
+        // leak.
+        for i in 0..16 {
+            detector.detect(&frames[i % frames.len()]);
+            let c = buffer_counts_for(&detector).unwrap();
+            assert!(
+                c.floats <= baseline.floats
+                    && c.bitmasks <= baseline.bitmasks
+                    && c.labels <= baseline.labels,
+                "{name}: pool grew on detection {i}: {c:?} exceeds the warmed baseline \
+                 {baseline:?} — a scratch buffer leaked per frame, so star detection's memory \
+                 would scale with the frame count"
+            );
+        }
     }
-    let baseline =
-        buffer_counts_for(&detector).expect("resources are populated after the first detect");
     assert_eq!(
-        baseline, DEFAULT_WORKING_SET,
+        peak, WORKING_SET,
         "warmed pool footprint changed from the pinned working set — if this is an intentional \
-         pipeline change, update DEFAULT_WORKING_SET; otherwise a stage's concurrent buffer demand \
-         grew, raising peak heap"
+         pipeline change, update WORKING_SET; otherwise a stage's concurrent buffer demand grew, \
+         raising peak heap"
     );
-
-    // The guarantee: no matter how many more same-size frames we detect, the pool never grows past
-    // the warmed working set. Acquire/release is balanced per stage, so a growing count means a leak.
-    for i in 0..64 {
-        detector.detect(&frames[i % frames.len()]);
-        let c = buffer_counts_for(&detector).unwrap();
-        assert!(
-            c.floats <= baseline.floats
-                && c.bitmasks <= baseline.bitmasks
-                && c.labels <= baseline.labels,
-            "pool grew on detection {i}: {c:?} exceeds the warmed baseline {baseline:?} — a scratch \
-             buffer leaked per frame, so star detection's memory would scale with the frame count"
-        );
-    }
 }

@@ -7,6 +7,7 @@ use crate::math::statistics::MedianMad;
 use crate::stacking::star_detection::median_filter::median_filter_3x3;
 use crate::stacking::star_detection::resources::DetectionResources;
 use imaginarium::Buffer2;
+use std::mem;
 
 /// Reduce an input image to a single-channel detection plane, applying CFA
 /// median filtering if needed.
@@ -38,7 +39,7 @@ pub(crate) fn prepare(image: &LinearImage, pool: &mut DetectionResources) -> Buf
     if image.metadata.is_demosaiced() {
         let mut scratch = pool.acquire_f32();
         median_filter_3x3(&pixels, &mut scratch);
-        std::mem::swap(&mut pixels, &mut scratch);
+        mem::swap(&mut pixels, &mut scratch);
         pool.release_f32(scratch);
     }
 

@@ -8,7 +8,8 @@ use crate::gui::app::commands::run::RunCommand;
 use scenarium::NodeId;
 
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::pane::graph::paint::anchored_menu::NodeContextMenu;
+use crate::gui::graph_ctx::node_ctx::NodeCtx;
+use crate::gui::pane::graph::paint::node_context_menu::NodeContextMenu;
 use crate::gui::requests::Requests;
 
 /// Right-click on a node body → a small popup with actions on the node.
@@ -41,11 +42,11 @@ impl NodeMenuUi {
         self.menu.reset();
     }
 
-    /// Record the menu and resolve this frame's pick onto `out` — a run as
-    /// the [`AppCommand`] it means, the structural picks as ordinary intents.
-    ///
-    /// Opening is [`Self::open_on`]'s, called after the node draw that saw the
-    /// right-click; this only ever shows a menu already latched.
+    /// Whether the menu is open.
+    pub(crate) const fn in_flight(&self) -> bool {
+        self.menu.is_open()
+    }
+
     /// Open the menu on `node`, which the record pass just saw right-clicked,
     /// and select it if it isn't already part of the selection — so the chosen
     /// action always targets a coherent set ("select then act"). A pick lands
@@ -68,13 +69,18 @@ impl NodeMenuUi {
         }
     }
 
+    /// Record the menu and resolve this frame's pick onto `out` — a run as
+    /// the [`AppCommand`] it means, the structural picks as ordinary intents.
+    ///
+    /// Opening is [`Self::open_on`]'s, called after the node draw that saw the
+    /// right-click; this only ever shows a menu already latched.
     pub(crate) fn apply(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
         let pick = self.menu.show(ui, "node_body_menu", |ui, popup, node_id| {
             let mut chosen = None;
             // "Run to this node" shows only when the clicked node can be a
             // run seed (same rule as the header play chip). The body only
             // runs while the menu is open.
-            if graph_ctx.node(node_id).is_some_and(|n| n.runnable()) {
+            if graph_ctx.node(node_id).is_some_and(NodeCtx::runnable) {
                 if MenuItem::new("Run to this node")
                     .show(ui, popup)
                     .left
@@ -103,8 +109,6 @@ impl NodeMenuUi {
         let Some(pick) = pick else {
             return;
         };
-        // `NodeContextMenu::show` answers `Some` only for the pane that opened
-        // the menu, so everything below is scoped to that pane.
         match pick.choice {
             MenuChoice::Run => out.push_app(AppCommand::Run(RunCommand::Node(pick.node_id))),
             MenuChoice::Duplicate { incoming } => {

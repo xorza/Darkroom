@@ -3,15 +3,16 @@
 use std::ops::Range;
 
 use std::arch::x86_64::*;
+use std::slice;
 
 use crate::stacking::star_detection::threshold_mask::ThresholdParams;
 use crate::stacking::star_detection::threshold_mask::simd::process_words_scalar;
 
 /// AVX2 packed threshold kernel: 8 floats/group × 8 groups = exactly one 64-pixel word, with the
-/// 8-bit `_mm256_movemask_ps` result packed directly (half the SSE iterations, no per-lane extract).
-/// Uses unfused mul+add (not FMA) to stay bit-exact with the scalar / SSE backends at the
-/// `px == threshold` boundary. `WITH_BG` selects `bg + σ·noise` vs `σ·noise`; `bg` may be empty when
-/// false. See `process_words_scalar`.
+/// 8-bit `_mm256_movemask_ps` result packed directly (half the SSE iterations, no per-lane
+/// extract). Uses unfused mul+add (not FMA) to stay bit-exact with the scalar / SSE backends at the
+/// `px == threshold` boundary. `WITH_BG` selects `bg + σ·noise` vs `σ·noise`; `bg` may be empty
+/// when false. See `process_words_scalar`.
 #[target_feature(enable = "avx2")]
 pub(super) unsafe fn process_words_avx2<const WITH_BG: bool>(
     pixels: &[f32],
@@ -52,7 +53,7 @@ pub(super) unsafe fn process_words_avx2<const WITH_BG: bool>(
                     };
 
                     let cmp = _mm256_cmp_ps::<_CMP_GT_OQ>(px_vec, threshold_vec);
-                    let mask = _mm256_movemask_ps(cmp) as u64;
+                    let mask = u64::from(_mm256_movemask_ps(cmp).cast_unsigned());
 
                     bits |= mask << (group * 8);
                 }
@@ -65,7 +66,7 @@ pub(super) unsafe fn process_words_avx2<const WITH_BG: bool>(
                     bg,
                     noise,
                     threshold,
-                    std::slice::from_mut(word),
+                    slice::from_mut(word),
                     base_pixel..pixel_span.end,
                 );
             }

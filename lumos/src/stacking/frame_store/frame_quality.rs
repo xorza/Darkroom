@@ -8,7 +8,10 @@
 
 use imaginarium::Buffer2;
 
-use crate::stacking::frame_store::StackableImage;
+use crate::stacking::frame_store::stackable_image::StackableImage;
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
 
 /// Which of a frame's planes a validation failure is about.
 ///
@@ -39,8 +42,8 @@ impl FramePlane {
     }
 }
 
-impl std::fmt::Display for FramePlane {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for FramePlane {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::Channel => "a channel",
             Self::Coverage => "coverage",
@@ -61,12 +64,12 @@ impl std::fmt::Display for FramePlane {
 /// The two planes agree pixel by pixel as well: `coverage == 0` exactly where `confidence == 0`.
 /// `registration::resample::quality::quality_at` establishes that — outside the source footprint
 /// both are zero, and inside it every branch gives a positive confidence wherever there is support
-/// — and [`validate_frame_quality`] holds caller-supplied planes to it, because the combine leans on
-/// it: a sample that clears the coverage floor is guaranteed a positive confidence to weight it by,
-/// and `source_noise_variance` a non-zero one to divide by.
+/// — and [`FrameCheck::quality_pair`] holds caller-supplied planes to it, because the combine leans
+/// on it: a sample that clears the coverage floor is guaranteed a positive confidence to weight it
+/// by, and `source_noise_variance` a non-zero one to divide by.
 ///
-/// [`validate_frame_quality`]: crate::stacking::combine::cache::validation::validate_frame_quality
-#[derive(Debug)]
+/// [`FrameCheck::quality_pair`]: crate::stacking::combine::cache::frame_check::FrameCheck::quality_pair
+#[derive(Debug, Clone)]
 pub(crate) enum FrameQuality<P> {
     /// No quality planes at all — a frame that was never warped and whose source declared every
     /// pixel measured, which is the overwhelming majority of them.
@@ -101,7 +104,7 @@ impl FrameQuality<Buffer2<f32>> {
 
 impl<P> FrameQuality<P> {
     /// The frame's per-pixel warp support, or `None` for a frame that carries no frame quality.
-    pub(crate) fn coverage(&self) -> Option<&P> {
+    pub(crate) const fn coverage(&self) -> Option<&P> {
         match self {
             Self::None => None,
             Self::Planes { coverage, .. } => Some(coverage),
@@ -109,7 +112,7 @@ impl<P> FrameQuality<P> {
     }
 
     /// The frame's per-pixel interpolation confidence, or `None` as in [`Self::coverage`].
-    pub(crate) fn confidence(&self) -> Option<&P> {
+    pub(crate) const fn confidence(&self) -> Option<&P> {
         match self {
             Self::None => None,
             Self::Planes { confidence, .. } => Some(confidence),
@@ -151,20 +154,19 @@ impl<P> FrameQuality<P> {
     }
 
     /// Whether the frame carries no frame quality at all.
-    pub(crate) fn is_none(&self) -> bool {
+    pub(crate) const fn is_none(&self) -> bool {
         matches!(self, Self::None)
     }
 
-    /// Convert each plane by reference, tagging it with the name its spill file carries. Which
-    /// plane answers to which name is stated here alone, so a writer and a later reader cannot
-    /// disagree.
+    /// Convert each plane by reference, tagging it with the [`FramePlane`] it is. Which plane is
+    /// which is stated here alone, so a writer and a later reader cannot disagree.
     ///
     /// Borrows rather than consumes because its one caller writes the planes to disk and maps them
     /// back — it never needed to own them, and leaving them with the caller is what lets a warped
     /// frame's buffers be reused for the next frame instead of being freed and faulted in again.
     pub(crate) fn try_map<Q, E>(
         &self,
-        mut convert: impl FnMut(&'static str, &P) -> Result<Q, E>,
+        mut convert: impl FnMut(FramePlane, &P) -> Result<Q, E>,
     ) -> Result<FrameQuality<Q>, E> {
         match self {
             Self::None => Ok(FrameQuality::None),
@@ -172,24 +174,24 @@ impl<P> FrameQuality<P> {
                 coverage,
                 confidence,
             } => Ok(FrameQuality::Planes {
-                coverage: convert("coverage", coverage)?,
-                confidence: convert("confidence", confidence)?,
+                coverage: convert(FramePlane::Coverage, coverage)?,
+                confidence: convert(FramePlane::Confidence, confidence)?,
             }),
         }
     }
 
-    /// Read a pair back from the spill names [`Self::try_map`] wrote it under.
+    /// Read a pair back by the [`FramePlane`]s [`Self::try_map`] wrote it under.
     ///
-    /// Its inverse, and here for the same reason: which plane answers to which name is decided in
-    /// this file alone, so a writer and a later reader cannot disagree. The caller establishes that
-    /// both are there — see [`CachedQuality`](crate::stacking::frame_store::spill::CachedQuality) —
+    /// Its inverse, and here for the same reason: which plane is which is decided in this file
+    /// alone, so a writer and a later reader cannot disagree. The caller establishes that both are
+    /// there — see [`CachedQuality`](crate::stacking::frame_store::frame_spill::CachedQuality) —
     /// which is why this reads a plane rather than looking for one.
     pub(crate) fn read_spilled<E>(
-        mut read: impl FnMut(&'static str) -> Result<P, E>,
+        mut read: impl FnMut(FramePlane) -> Result<P, E>,
     ) -> Result<Self, E> {
         Ok(Self::Planes {
-            coverage: read("coverage")?,
-            confidence: read("confidence")?,
+            coverage: read(FramePlane::Coverage)?,
+            confidence: read(FramePlane::Confidence)?,
         })
     }
 }

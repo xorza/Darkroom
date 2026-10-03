@@ -99,53 +99,89 @@ pub(super) fn draw_swatch(
     mode: ViewerBackground,
     selected: bool,
 ) {
-    let d = s * 0.54;
+    let d = s * SWATCH_SHARE;
     let o = (s - d) * 0.5;
     let rect = Rect::new(o, o, d, d);
-    // One arm per mode, so the match stays exhaustive over the enum itself
-    // rather than over a flat-fill subset plus a wildcard that has to
-    // re-reject the one mode it already handled.
-    match mode {
-        ViewerBackground::Theme => filled_rect(ui, rect, 2.0, theme.canvas.bg),
-        ViewerBackground::Black => filled_rect(ui, rect, 2.0, RgbaF32::BLACK),
-        ViewerBackground::White => filled_rect(ui, rect, 2.0, RgbaF32::WHITE),
-        ViewerBackground::Checker => {
-            let light = RgbaF32::from_srgba(SrgbaU8::rgb(
-                CHECKER_LIGHT_U8,
-                CHECKER_LIGHT_U8,
-                CHECKER_LIGHT_U8,
-            ));
-            let dark = RgbaF32::from_srgba(SrgbaU8::rgb(
-                CHECKER_DARK_U8,
-                CHECKER_DARK_U8,
-                CHECKER_DARK_U8,
-            ));
-            filled_rect(ui, rect, 2.0, dark);
-            // Two light quads on the diagonal make the 2×2 mini checker.
-            let h = d * 0.5;
-            for cell in [Rect::new(o, o, h, h), Rect::new(o + h, o + h, h, h)] {
-                filled_rect(ui, cell, 0.0, light);
-            }
+    if let Some(fill) = flat_fill(theme, mode) {
+        filled_rect(ui, rect, SWATCH_RADIUS, fill);
+    } else {
+        let light = RgbaF32::from_srgba(SrgbaU8::rgb(
+            CHECKER_LIGHT_U8,
+            CHECKER_LIGHT_U8,
+            CHECKER_LIGHT_U8,
+        ));
+        let dark = RgbaF32::from_srgba(SrgbaU8::rgb(
+            CHECKER_DARK_U8,
+            CHECKER_DARK_U8,
+            CHECKER_DARK_U8,
+        ));
+        filled_rect(ui, rect, SWATCH_RADIUS, dark);
+        // Two light quads on the diagonal make the 2×2 mini checker.
+        let h = d * 0.5;
+        for cell in [Rect::new(o, o, h, h), Rect::new(o + h, o + h, h, h)] {
+            filled_rect(ui, cell, 0.0, light);
         }
     }
     // Ring on top so the checker quads can't cover it.
     let (ring, width) = if selected {
-        (theme.colors.selection_rect, 2.0)
+        (theme.colors.selection_rect, theme.card.border_width_total())
     } else {
-        (theme.colors.text_muted.with_alpha(0.4), 1.0)
+        (
+            theme.colors.text_muted.with_alpha(SWATCH_RING_ALPHA),
+            theme.card.border_width,
+        )
     };
-    stroked_rect(ui, rect, 2.0, ring, width);
+    stroked_rect(ui, rect, SWATCH_RADIUS, ring, width);
 }
+
+/// The single colour `mode` paints, or `None` for the checker, which is a
+/// pattern. The one mapping the swatch and the viewer's backdrop both read.
+pub(super) const fn flat_fill(theme: &Theme, mode: ViewerBackground) -> Option<RgbaF32> {
+    match mode {
+        ViewerBackground::Theme => Some(theme.canvas.bg),
+        ViewerBackground::Black => Some(RgbaF32::BLACK),
+        ViewerBackground::White => Some(RgbaF32::WHITE),
+        ViewerBackground::Checker => None,
+    }
+}
+
+/// How much of its button a backdrop swatch fills, leaving room for the ring.
+const SWATCH_SHARE: f32 = 0.54;
+/// The swatch's corner radius: a softened square, so it reads as a colour
+/// chip rather than a pixel.
+const SWATCH_RADIUS: f32 = 2.0;
+/// The resting ring's alpha: visible on every backdrop, louder on none.
+const SWATCH_RING_ALPHA: f32 = 0.4;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Every flat backdrop maps to its one colour, and the checker, a
+    /// pattern, to none.
+    #[test]
+    fn each_flat_backdrop_has_one_fill_and_the_checker_none() {
+        let theme = Theme::default();
+        assert_eq!(
+            flat_fill(&theme, ViewerBackground::Theme),
+            Some(theme.canvas.bg)
+        );
+        assert_eq!(
+            flat_fill(&theme, ViewerBackground::Black),
+            Some(RgbaF32::BLACK)
+        );
+        assert_eq!(
+            flat_fill(&theme, ViewerBackground::White),
+            Some(RgbaF32::WHITE)
+        );
+        assert_eq!(flat_fill(&theme, ViewerBackground::Checker), None);
+    }
+
     #[test]
     fn checker_image_is_one_2x2_period() {
-        let img = checker_image();
         const L: u8 = CHECKER_LIGHT_U8;
         const D: u8 = CHECKER_DARK_U8;
+        let img = checker_image();
         // Row-major light/dark, dark/light — one full checker period.
         #[rustfmt::skip]
         let expected = [

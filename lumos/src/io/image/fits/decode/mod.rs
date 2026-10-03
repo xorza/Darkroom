@@ -1,7 +1,7 @@
 //! Decoding a FITS image HDU into the pipeline's linear `[0, 1]` domain.
 //!
 //! FITS stores physical values, not normalized ones, so an integer HDU is divided by the span its
-//! own header declares — see [`plan::FitsDecodePlan::sample_divisor`]. That is what puts a FITS
+//! own header declares — see [`plan::FitsDecodePlan::sample_scale`]. That is what puts a FITS
 //! frame in the same numeric domain as a RAW one, which every stage after `load` assumes without
 //! being able to check. A floating-point HDU declares no span, so its `DATAMAX` decides: a
 //! saturation level well above unity means ADU and is divided by the 16-bit full scale, and
@@ -17,19 +17,18 @@
 //! single frame in any unit is a legitimate load, and it is combining frames from two of them that
 //! is not.
 
-use std::fs::File;
 use std::path::Path;
 
-use fits_well::FitsReader;
 use fits_well::io::SliceReader;
 
-use crate::io::image::cfa::{CfaFrameInfo, CfaImage, QUANTIZATION_SIGMA_PER_STEP};
+use crate::io::cancelled::Cancelled;
+use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
 use crate::io::image::error::ImageError;
-use crate::io::image::fits::cfa::{validate_cfa_container_format, validate_cfa_image_header};
 use crate::io::image::fits::decode::plan::FitsHduDescription;
+use crate::io::image::fits::decode::selected_fits::SelectedFits;
 use crate::io::image::fits::error::{fits_err, fits_unsupported};
 use crate::io::image::fits::metadata::{read_cfa_from_headers, read_quantization_sigma};
-use crate::io::image::fits::options::{FitsChecksumPolicy, FitsCubeInterpretation};
+use crate::io::image::fits::options::FitsCubeInterpretation;
 use crate::io::image::fits::provenance::{FitsChecksumProvenance, FitsChecksumState};
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::ColorProvenance;
@@ -38,15 +37,17 @@ use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::null_mask::NullMask;
 use crate::io::image::standard::scientific_rejection;
-use crate::io::raw::demosaic::DemosaicError;
 
 mod pixels;
 mod plan;
+mod selected_fits;
 mod selection;
 
 #[derive(Debug)]
 struct DecodedFitsImage {
     metadata: ImageMetadata,
+    /// The pattern the header declares, which makes the image a mosaic to load as a `CfaImage`.
+    cfa_type: Option<CfaType>,
     pixels: LinearPixels,
     /// Where the HDU declared no measurement, or `None` when it declared none anywhere. Absent
     /// whenever [`FitsNullPolicy::Reject`](crate::FitsNullPolicy) is in force, which fails the load
@@ -56,7 +57,7 @@ struct DecodedFitsImage {
 
 impl DecodedFitsImage {
     fn into_linear(self, path: &Path) -> Result<LinearImage, ImageError> {
-        if self.metadata.cfa_type.is_some() {
+        if self.cfa_type.is_some() {
             return Err(scientific_rejection(
                 path,
                 "mosaic FITS must be loaded as CfaImage and calibrated before demosaicing",
@@ -81,12 +82,12 @@ impl DecodedFitsImage {
                 "scientific CFA input must have exactly one image plane",
             ));
         }
-        if self.metadata.cfa_type.is_none() {
+        let Some(cfa_type) = self.cfa_type else {
             return Err(fits_unsupported(
                 path,
                 "scientific CFA FITS input is missing validated CFA pattern metadata",
             ));
-        }
+        };
 
         // A declared QNTZSIG and a BSCALE-derived ADC step are both in the file's sample units, so
         // both follow the samples through the division the decoder already applied.
@@ -100,7 +101,7 @@ impl DecodedFitsImage {
             .map(|sigma| sigma / physical_scale)
             .or_else(|| {
                 let transfer = fits_transfer?;
-                self.metadata.bitpix.is_integer().then(|| {
+                self.metadata.sample_type?.is_integer().then(|| {
                     transfer.bscale.abs() as f32 / physical_scale * QUANTIZATION_SIGMA_PER_STEP
                 })
             });
@@ -108,12 +109,14 @@ impl DecodedFitsImage {
             mut metadata,
             pixels,
             nulls,
+            ..
         } = self;
         if let Some(provenance) = &mut metadata.provenance {
             provenance.color = ColorProvenance::SensorCfa;
         }
         Ok(CfaImage {
             data: pixels.into_l(),
+            cfa_type,
             metadata,
             quantization_sigma,
             nulls,
@@ -134,86 +137,26 @@ pub(crate) fn load_preview_fits(
     context: &LoadContext,
 ) -> Result<LinearImage, ImageError> {
     let decoded = read_selected_image(path, context)?;
-    if decoded.metadata.cfa_type.is_some() {
+    if decoded.cfa_type.is_some() {
         Ok(decoded
             .into_cfa(path, None)?
             .demosaic(&context.cancel)
-            .map_err(|source| match source {
-                DemosaicError::Cancelled => ImageError::Cancelled {
-                    path: path.to_path_buf(),
-                },
-                DemosaicError::InvalidXTransPattern(source) => {
-                    fits_unsupported(path, source.to_string())
-                }
-            })?)
+            .map_err(|Cancelled| ImageError::cancelled(path))?)
     } else {
         decoded.into_linear(path)
     }
 }
 
 fn read_selected_image(path: &Path, context: &LoadContext) -> Result<DecodedFitsImage, ImageError> {
-    context.check_cancelled(path)?;
-    let file = File::open(path).map_err(|source| ImageError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let mut reader = FitsReader::open(file).map_err(|source| fits_err(path, source))?;
-    context.check_cancelled(path)?;
-
-    let selected = selection::select_image_hdu(path, reader.hdus(), &context.fits.hdu)?;
-    let hdu = &reader.hdus()[selected.index];
-    let plan = plan::preflight_fits_image(
-        path,
-        FitsHduDescription::from_hdu(path, hdu)?,
-        context.fits.cube,
-        context.fits.float_scale,
-        context.memory_limit_bytes,
-    )?;
-    let checksum = selection::verify_selected_checksum(
-        &mut reader,
-        selected.index,
-        path,
-        context.fits.checksum,
-        context,
-    )?;
-
-    pixels::read_stream_hdu(&mut reader, selected, checksum, path, plan, context)
+    SelectedFits::open(path, context)?.read(path, context)
 }
 
 pub(crate) fn load_cfa_fits(path: &Path, context: &LoadContext) -> Result<CfaImage, ImageError> {
-    context.check_cancelled(path)?;
-    let file = File::open(path).map_err(|source| ImageError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let mut reader = FitsReader::open(file).map_err(|source| fits_err(path, source))?;
-    context.check_cancelled(path)?;
-    validate_cfa_container_format(path, reader.hdus().first().map(|hdu| &hdu.header))?;
-    let selected = selection::select_image_hdu(path, reader.hdus(), &context.fits.hdu)?;
-    let hdu = &reader.hdus()[selected.index];
-    let plan = plan::preflight_fits_image(
-        path,
-        FitsHduDescription::from_hdu(path, hdu)?,
-        context.fits.cube,
-        context.fits.float_scale,
-        context.memory_limit_bytes,
-    )?;
-    let is_lumos_cfa = validate_cfa_image_header(path, &reader.hdus()[selected.index].header)?;
-    let checksum_policy = if is_lumos_cfa {
-        FitsChecksumPolicy::RequireValid
-    } else {
-        context.fits.checksum
-    };
-    let checksum = selection::verify_selected_checksum(
-        &mut reader,
-        selected.index,
-        path,
-        checksum_policy,
-        context,
-    )?;
-    let quantization_sigma = read_quantization_sigma(&reader.hdus()[selected.index].header)
-        .map_err(|source| fits_err(path, source))?;
-    pixels::read_stream_hdu(&mut reader, selected, checksum, path, plan, context)?
+    let selected = SelectedFits::open(path, context)?;
+    let quantization_sigma =
+        read_quantization_sigma(selected.header()).map_err(|source| fits_err(path, source))?;
+    selected
+        .read(path, context)?
         .into_cfa(path, quantization_sigma)
 }
 
@@ -258,32 +201,15 @@ pub(crate) fn fits_cfa_frame_info(
     path: &Path,
     context: &LoadContext,
 ) -> Result<CfaFrameInfo, ImageError> {
-    context.check_cancelled(path)?;
-    let file = File::open(path).map_err(|source| ImageError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let reader = FitsReader::open(file).map_err(|source| fits_err(path, source))?;
-    context.check_cancelled(path)?;
-    validate_cfa_container_format(path, reader.hdus().first().map(|hdu| &hdu.header))?;
-    let selected = selection::select_image_hdu(path, reader.hdus(), &context.fits.hdu)?;
-    let hdu = &reader.hdus()[selected.index];
-    validate_cfa_image_header(path, &hdu.header)?;
-    let plan = plan::preflight_fits_image(
-        path,
-        FitsHduDescription::from_hdu(path, hdu)?,
-        context.fits.cube,
-        context.fits.float_scale,
-        context.memory_limit_bytes,
-    )?;
-    let dimensions = plan.dimensions;
+    let selected = SelectedFits::open(path, context)?;
+    let dimensions = selected.plan.dimensions;
     if !dimensions.is_grayscale() {
         return Err(fits_unsupported(
             path,
             "scientific CFA input must have exactly one image plane",
         ));
     }
-    let cfa_type = read_cfa_from_headers(&hdu.header)
+    let cfa_type = read_cfa_from_headers(selected.header(), context.fits.unstated_bayer_pattern)
         .map_err(|source| fits_err(path, source))?
         .ok_or_else(|| {
             fits_unsupported(
@@ -293,8 +219,8 @@ pub(crate) fn fits_cfa_frame_info(
         })?;
     Ok(CfaFrameInfo {
         dimensions,
-        demosaic: cfa_type.demosaic_kind(),
-        may_carry_nulls: plan.may_carry_nulls(),
+        cfa_type,
+        may_carry_nulls: selected.plan.may_carry_nulls(),
     })
 }
 

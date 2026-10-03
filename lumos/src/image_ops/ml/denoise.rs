@@ -1,9 +1,9 @@
 //! Image denoising via a caller-supplied ONNX model (e.g. DeepSNR).
 //!
-//! Runs the model through the shared `ort` [`backend`](crate::image_ops::ml::backend) (overlapping 512² tiles,
-//! feather-blended). A **display-domain** operation: these CNN denoisers are trained on stretched
-//! data, so feed the stretched `[0,1]` image — mirroring how NoiseXTerminator / GraXpert AI denoise
-//! are applied (after the stretch / channel combination).
+//! Runs the model through the shared `ort` [`backend`](crate::image_ops::ml::backend) (overlapping
+//! 512² tiles, feather-blended). A **display-domain** operation: these CNN denoisers are trained on
+//! stretched data, so feed the stretched `[0,1]` image — mirroring how `NoiseXTerminator` /
+//! GraXpert AI denoise are applied (after the stretch / channel combination).
 
 use std::path::PathBuf;
 
@@ -25,12 +25,6 @@ impl MlDenoise {
         Self {
             onnx: TiledOnnxConfig::new(weights),
         }
-    }
-
-    /// Tile stride in px; overlap is `WINDOW − stride`.
-    pub fn stride(mut self, stride: usize) -> Self {
-        self.onnx.stride = stride;
-        self
     }
 
     pub fn apply(&self, image: &mut LinearImage) -> Result<(), MlError> {

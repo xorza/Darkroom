@@ -6,7 +6,7 @@ use super::*;
 /// values are pinned alongside the schedule: a const binding must reach the
 /// lambda as the authored number, and a re-key must recompute from the new
 /// one rather than replay the old product.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn const_binding_invokes_only_once() {
     let mut g = TestGraph::sample();
     // A const-fed graph never reaches its sources.
@@ -31,7 +31,7 @@ async fn const_binding_invokes_only_once() {
     e.edit(|g| g.constant("mult", 0, 3i64));
     let run = e.run_sinks().await;
     assert_eq!(run.ran(), ["Print"], "mult did not recompute");
-    assert!(run.cached().contains(&"mult"), "mult reused");
+    assert_eq!(run.cached(), ["mult"], "mult reused");
 
     // Different const value: mult's digest changes ⇒ cache miss ⇒ re-execute.
     e.edit(|g| g.constant("mult", 0, 4i64));
@@ -44,7 +44,7 @@ async fn const_binding_invokes_only_once() {
 
 /// A const on an input drops the producer that fed it out of the run, and
 /// switching back to a bind puts it back — each edit re-keying the consumer.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn const_excludes_upstream_node_and_rebinding_restores_it() {
     let mut e = TestEngine::over(TestGraph::sample());
     // Replace sum[0] (get_a) with a const — get_a is no longer needed.
@@ -69,7 +69,7 @@ async fn const_excludes_upstream_node_and_rebinding_restores_it() {
 /// Changing which *kind* of binding an input carries re-keys the consumer
 /// each time: bind → const/none re-executes it, as does const → bind. A
 /// producer that has already been computed feeds the recompute from cache.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn input_binding_change_recomputes_and_reuses_cached_upstream() {
     let mut e = TestEngine::over(TestGraph::sample());
     e.run_sinks().await;

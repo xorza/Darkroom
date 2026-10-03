@@ -12,8 +12,12 @@ use crate::math::size2us::Size2us;
 use crate::math::statistics::{mad_fast, mad_to_sigma, median_mut};
 use crate::math::vec2us::Vec2us;
 
-use crate::stacking::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
+use crate::stacking::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::stacking::calibration_masters::cosmic_ray::masks::CrMasks;
+use crate::stacking::calibration_masters::cosmic_ray::noise_model::NoiseModel;
+
+/// Frame-sized `f32` planes the mono detector holds, however many iterations it runs.
+pub(crate) const MONO_SCRATCH_PLANES: usize = 5;
 
 /// The mono detector's frame-sized `f32` working set, allocated on the first iteration and reused
 /// by every one after it.
@@ -43,9 +47,6 @@ struct MonoScratch {
     frame: Vec<f32>,
 }
 
-/// Monochrome L.A.Cosmic on one plane (also each deinterleaved Bayer plane). Subsample ×2 → clipped
-/// Laplacian → resample → significance `S = L⁺/(2N)` → `S' = S − median₅(S)` → fine structure `F`
-/// → flag → grow → in-paint → iterate. Returns the CR pixel count.
 /// The mono cosmic-ray detector: its configuration, and the working set it reuses.
 ///
 /// Owning both is what lets one detector clean every Bayer phase plane with a single allocation —
@@ -54,15 +55,26 @@ struct MonoScratch {
 #[derive(Debug)]
 pub(super) struct MonoDetector<'a> {
     config: &'a CosmicRayConfig,
+    noise: NoiseModel,
     scratch: MonoScratch,
 }
 
 impl<'a> MonoDetector<'a> {
-    pub(super) fn new(config: &'a CosmicRayConfig) -> Self {
+    pub(super) fn new(config: &'a CosmicRayConfig, noise: NoiseModel) -> Self {
         Self {
             config,
+            noise,
             scratch: MonoScratch::default(),
         }
+    }
+
+    /// The bytes a detection on a `size` plane allocates beside it: the scratch planes and the
+    /// masks, or nothing on a plane too small to scan.
+    pub(super) fn heap_bytes(size: Size2us) -> usize {
+        if size.width < 3 || size.height < 3 {
+            return 0;
+        }
+        MONO_SCRATCH_PLANES * size.pixel_count() * size_of::<f32>() + CrMasks::heap_bytes(size)
     }
 
     /// Detect and in-paint cosmic rays in one dense plane, in place, returning the CR pixel count.
@@ -89,9 +101,9 @@ impl<'a> MonoDetector<'a> {
             // L⁺: clipped Laplacian of the ×2-subsampled frame, averaged back to native resolution.
             laplacian_plus_into(pix, size, significance);
 
-            // Object fine structure F = median₃(I) − median₇(median₃(I)); large for real sources, ~0 at
-            // a CR (median₃ already erased the spike). The difference is elementwise, so it lands back
-            // over median₃ in `fine` rather than in a buffer of its own.
+            // Object fine structure F = median₃(I) − median₇(median₃(I)); large for real sources,
+            // ~0 at a CR (median₃ already erased the spike). The difference is elementwise, so it
+            // lands back over median₃ in `fine` rather than in a buffer of its own.
             median_window_into(pix, size, 1, fine);
             median_window_into(fine, size, 3, median);
             // Clamped non-negative and no further: the only consumer divides by the noise and
@@ -103,11 +115,11 @@ impl<'a> MonoDetector<'a> {
                 *a = (*a - b).max(0.0);
             }
 
-            // Significance S = L⁺/(2N), then S' = S − median₅(S) to strip smooth large-scale structure.
-            // Both steps are elementwise over the same extent, so they run in place down the Laplacian
-            // buffer instead of allocating a frame each.
+            // Significance S = L⁺/(2N), then S' = S − median₅(S) to strip smooth large-scale
+            // structure. Both steps are elementwise over the same extent, so they run in place down
+            // the Laplacian buffer instead of allocating a frame each.
             median_window_into(pix, size, 2, median);
-            noise_map_into(pix, median, &self.config.noise, noise, frame);
+            noise_map_into(pix, median, self.noise, noise, frame);
             for (l, &nz) in significance.iter_mut().zip(&*noise) {
                 *l /= 2.0 * nz;
             }
@@ -184,8 +196,6 @@ fn laplacian_plus_into(data: &[f32], size: Size2us, out: &mut Vec<f32>) {
 /// one of the four windows below (areas 9, 49, 25, 25), and an `r == 1` fast path would have to
 /// be proven bit-identical to this general one or the detection changes.
 fn median_window_into(data: &[f32], size: Size2us, r: usize, out: &mut Vec<f32>) {
-    let ri = r as isize;
-    let (wi, hi) = (size.width as isize, size.height as isize);
     // Every element is written below, so only the length matters.
     out.resize(size.pixel_count(), 0.0);
     out.par_chunks_mut(size.width).enumerate().for_each_init(
@@ -193,10 +203,11 @@ fn median_window_into(data: &[f32], size: Size2us, r: usize, out: &mut Vec<f32>)
         |buf, (y, row)| {
             for (x, o) in row.iter_mut().enumerate() {
                 buf.clear();
-                for dy in -ri..=ri {
-                    let yy = (y as isize + dy).clamp(0, hi - 1) as usize;
-                    for dx in -ri..=ri {
-                        let xx = (x as isize + dx).clamp(0, wi - 1) as usize;
+                // `y + dy − r` for dy in `0..=2r`, replicated into the frame at both edges.
+                for dy in 0..=2 * r {
+                    let yy = (y + dy).saturating_sub(r).min(size.height - 1);
+                    for dx in 0..=2 * r {
+                        let xx = (x + dx).saturating_sub(r).min(size.width - 1);
                         buf.push(data[size.index_of(Vec2us::new(xx, yy))]);
                     }
                 }
@@ -213,12 +224,12 @@ fn median_window_into(data: &[f32], size: Size2us, r: usize, out: &mut Vec<f32>)
 fn noise_map_into(
     data: &[f32],
     m5: &[f32],
-    noise: &NoiseEstimation,
+    noise: NoiseModel,
     out: &mut Vec<f32>,
     scratch: &mut Vec<f32>,
 ) {
-    match *noise {
-        NoiseEstimation::Empirical => {
+    match noise {
+        NoiseModel::Empirical => {
             scratch.clear();
             scratch.extend_from_slice(data);
             let bg = median_mut(scratch);
@@ -226,7 +237,7 @@ fn noise_map_into(
             out.clear();
             out.extend(m5.iter().map(|&s| empirical_noise(s, bg, sigma_bg)));
         }
-        NoiseEstimation::Parametric {
+        NoiseModel::Parametric {
             gain,
             read_noise,
             full_scale,
@@ -303,7 +314,6 @@ pub(super) fn replace_flagged(
     snapshot.clear();
     snapshot.extend_from_slice(data);
     let src: &[f32] = snapshot;
-    let (wi, hi) = (size.width as isize, size.height as isize);
     data.par_chunks_mut(size.width).enumerate().for_each_init(
         || Vec::<f32>::with_capacity(25),
         |buf, (y, row)| {
@@ -312,10 +322,11 @@ pub(super) fn replace_flagged(
                     continue;
                 }
                 buf.clear();
-                for dy in -2..=2 {
-                    let yy = (y as isize + dy).clamp(0, hi - 1) as usize;
-                    for dx in -2..=2 {
-                        let xx = (x as isize + dx).clamp(0, wi - 1) as usize;
+                // The 5×5 window about `(x, y)`, replicated into the frame at both edges.
+                for dy in 0..=4 {
+                    let yy = (y + dy).saturating_sub(2).min(size.height - 1);
+                    for dx in 0..=4 {
+                        let xx = (x + dx).saturating_sub(2).min(size.width - 1);
                         let j = size.index_of(Vec2us::new(xx, yy));
                         if !mask.get(j) {
                             buf.push(src[j]);
@@ -335,12 +346,11 @@ pub(crate) mod internals {
     use crate::math::size2us::Size2us;
     use crate::stacking::calibration_masters::cosmic_ray::config::CosmicRayConfig;
     use crate::stacking::calibration_masters::cosmic_ray::mono::{MonoDetector, MonoScratch};
-
-    /// Frame-sized `f32` planes the mono detector holds, however many iterations it runs.
-    pub(crate) const MONO_SCRATCH_PLANES: usize = 5;
+    use crate::stacking::calibration_masters::cosmic_ray::noise_model::NoiseModel;
 
     /// Total capacity, in floats, of the mono detector's working set after a run on `data` — what
-    /// `mem_budget` weighs against [`MONO_SCRATCH_PLANES`].
+    /// `mem_budget` weighs against
+    /// [`MONO_SCRATCH_PLANES`](crate::stacking::calibration_masters::cosmic_ray::mono::MONO_SCRATCH_PLANES).
     ///
     /// Destructured rather than summed through a helper, so a plane added to or dropped from
     /// [`MonoScratch`] fails to compile here instead of silently drifting from the constant.
@@ -349,7 +359,7 @@ pub(crate) mod internals {
         size: Size2us,
         config: &CosmicRayConfig,
     ) -> usize {
-        let mut detector = MonoDetector::new(config);
+        let mut detector = MonoDetector::new(config, NoiseModel::Empirical);
         detector.reject(data, size);
         let MonoScratch {
             significance,

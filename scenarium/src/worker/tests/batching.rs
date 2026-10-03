@@ -1,4 +1,5 @@
 use super::*;
+use std::iter;
 
 #[tokio::test]
 async fn clear_resets_the_execution_graph() {
@@ -6,10 +7,9 @@ async fn clear_resets_the_execution_graph() {
     w.send_many([w.update(), w.fire("Frame Event", 0)]);
     assert_eq!(w.run().await.logs(), ["1"]);
 
-    w.send_many([WorkerMessage::Clear, w.fire("Frame Event", 0)]);
-
     // After Clear the frame event has no subscribers, so nothing runs.
-    w.nothing_runs_within(QUIET).await;
+    let fire = w.fire("Frame Event", 0);
+    w.settle_without_run([WorkerMessage::Clear, fire]).await;
 }
 
 /// Scan-then-commit ordering: `Clear` zeroes the execution graph, `Update`
@@ -30,9 +30,8 @@ async fn clear_then_update_in_one_batch_applies_the_update() {
 async fn update_then_clear_in_one_batch_leaves_the_graph_cleared() {
     let mut w = TestWorker::frames();
 
-    w.send_many([w.update(), WorkerMessage::Clear, w.fire("Frame Event", 0)]);
-
-    w.nothing_runs_within(QUIET).await;
+    let batch = [w.update(), WorkerMessage::Clear, w.fire("Frame Event", 0)];
+    w.settle_without_run(batch).await;
 }
 
 /// An empty batch must not panic, hang, or desynchronize the worker.
@@ -40,7 +39,7 @@ async fn update_then_clear_in_one_batch_leaves_the_graph_cleared() {
 async fn an_empty_batch_is_a_noop() {
     let w = TestWorker::over(TestGraph::new());
 
-    w.send_many(std::iter::empty::<WorkerMessage>());
+    w.send_many(iter::empty::<WorkerMessage>());
 
     // A subsequent Sync still fires, so the worker is alive.
     w.sync().await;
@@ -58,7 +57,7 @@ async fn every_sync_in_a_batch_fires() {
     ]);
 
     for (ack, which) in [(ack_a, "first"), (ack_b, "second")] {
-        timeout(Duration::from_millis(500), ack)
+        timeout(PATIENCE, ack)
             .await
             .unwrap_or_else(|_| panic!("the {which} Sync never fired"))
             .unwrap_or_else(|_| panic!("the {which} sender was dropped"));
@@ -70,14 +69,14 @@ async fn every_sync_in_a_batch_fires() {
 #[tokio::test(flavor = "current_thread")]
 async fn messages_ready_at_one_wake_reduce_together() {
     let mut w = TestWorker::printing("first");
-    let first = w.compile();
+    let first = w.graph.program();
     w.send(WorkerMessage::Update {
         compiled: Arc::clone(&first),
     });
     w.send(TestWorker::sinks());
 
     w.graph = TestWorker::print_graph("second");
-    let second = w.compile();
+    let second = w.graph.program();
     let second_print = w.id("Print");
     w.send(WorkerMessage::Update {
         compiled: Arc::clone(&second),
@@ -89,5 +88,5 @@ async fn messages_ready_at_one_wake_reduce_together() {
     assert!(Arc::ptr_eq(w.installed(), &second));
     assert!(w.installed().contains(second_print));
     assert_eq!(run.logs(), ["second"]);
-    w.nothing_runs_within(QUIET).await;
+    w.assert_no_run().await;
 }

@@ -1,7 +1,6 @@
 //! The small sensing glyph a wire terminates on: a filled circle or a
 //! rounded triangle in a generously grown hit box, with a hover tooltip.
 
-use glam::Vec2;
 use palantir::TextInput;
 use palantir::prelude::*;
 use palantir::widget::Shape;
@@ -88,22 +87,23 @@ pub(crate) struct PortGlyphResponse {
 }
 
 impl<'a> PortGlyph<'a> {
-    /// A data port's circle, `diameter` across.
-    pub(crate) fn circle(wid: WidgetId, diameter: f32) -> Self {
-        Self::new(wid, diameter, GlyphShape::Circle { outline: None })
+    /// A data port's circle, `diameter` across, inked `fill`.
+    pub(crate) const fn circle(wid: WidgetId, diameter: f32, fill: RgbaF32) -> Self {
+        Self::new(wid, diameter, GlyphShape::Circle { outline: None }, fill)
     }
 
-    /// An emitter event's triangle, apex pointing right (the emit direction).
-    pub(crate) fn arrow(wid: WidgetId, size: f32) -> Self {
-        Self::new(wid, size, GlyphShape::Arrow { turn: 0.0 })
+    /// An emitter event's triangle, apex pointing right (the emit direction),
+    /// inked `fill`.
+    pub(crate) const fn arrow(wid: WidgetId, size: f32, fill: RgbaF32) -> Self {
+        Self::new(wid, size, GlyphShape::Arrow { turn: 0.0 }, fill)
     }
 
-    fn new(wid: WidgetId, size: f32, shape: GlyphShape) -> Self {
+    const fn new(wid: WidgetId, size: f32, shape: GlyphShape, fill: RgbaF32) -> Self {
         Self {
             wid,
             size,
             shape,
-            fill: RgbaF32::WHITE,
+            fill,
             placement: Placement::Margin(Spacing::ZERO),
             tip: None,
         }
@@ -120,15 +120,9 @@ impl<'a> PortGlyph<'a> {
         }
     }
 
-    /// Ink of the painted shape. Defaults to white — every caller sets it.
-    pub(crate) fn fill(mut self, color: RgbaF32) -> Self {
-        self.fill = color;
-        self
-    }
-
     /// Ring a circle with an annulus strictly outside its fill. Ignored by
     /// [`arrow`](Self::arrow). Default: no ring.
-    pub(crate) fn outline(mut self, color: RgbaF32) -> Self {
+    pub(crate) const fn outline(mut self, color: RgbaF32) -> Self {
         if let GlyphShape::Circle { outline } = &mut self.shape {
             *outline = Some(color);
         }
@@ -137,7 +131,7 @@ impl<'a> PortGlyph<'a> {
 
     /// Rotate an arrow's apex by `radians` about the box center. Ignored by
     /// [`circle`](Self::circle). Default: none (apex points right).
-    pub(crate) fn turn(mut self, radians: f32) -> Self {
+    pub(crate) const fn turn(mut self, radians: f32) -> Self {
         if let GlyphShape::Arrow { turn } = &mut self.shape {
             *turn = radians;
         }
@@ -147,7 +141,7 @@ impl<'a> PortGlyph<'a> {
     /// Lay the glyph out in flow with `margin`. The hit-box growth is folded
     /// back out of it, so node layout and the glyph's own position are
     /// unchanged and only the hover/grab area grows. Default: no margin.
-    pub(crate) fn margin(mut self, margin: Spacing) -> Self {
+    pub(crate) const fn margin(mut self, margin: Spacing) -> Self {
         self.placement = Placement::Margin(margin);
         self
     }
@@ -155,7 +149,7 @@ impl<'a> PortGlyph<'a> {
     /// Place the glyph out of flow, its *grown* box centered on `point` in the
     /// parent's coordinate space — for one that hangs off a corner rather than
     /// sitting in a row.
-    pub(crate) fn centered_on(mut self, point: Vec2) -> Self {
+    pub(crate) const fn centered_on(mut self, point: Vec2) -> Self {
         self.placement = Placement::CenteredOn(point);
         self
     }
@@ -257,6 +251,7 @@ impl GlyphShape {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::f32::consts::PI;
 
     #[test]
     fn enlarged_diameter_grows_by_the_outline_width_on_each_side() {
@@ -284,7 +279,7 @@ mod tests {
         let inset = (hit - size) * 0.5;
         let center = Vec2::splat(hit * 0.5);
         let apex = Vec2::new(inset + size - size * 0.0, inset + size * 0.5);
-        let turned = center + Vec2::from_angle(std::f32::consts::PI).rotate(apex - center);
+        let turned = center + Vec2::from_angle(PI).rotate(apex - center);
         // Apex sits `size/2` right of center; a half turn puts it `size/2` left.
         assert!(
             (apex.x - center.x - size * 0.5).abs() < 1e-4,

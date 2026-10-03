@@ -18,6 +18,10 @@ use crate::gui::widgets::support::tooltip_after;
 pub(crate) const BADGE_SIZE: f32 = 18.0;
 pub(crate) const BADGE_FONT: f32 = 12.0;
 
+/// A marker badge's side padding, so its glyph does not touch the pill's
+/// rounded ends.
+const MARKER_PAD_X: f32 = 5.0;
+
 /// Shared chip tint opacity: a marker's fill and a hollow control's hover-lift
 /// both paint their color at this alpha, so the two families feel like one system.
 const CHIP_TINT_ALPHA: f32 = 0.20;
@@ -75,7 +79,7 @@ pub(crate) struct Badge {
 
 impl Badge {
     /// An interactive chip (`filled` = its "on" state; `wid` makes it clickable).
-    pub(crate) fn control(
+    pub(crate) const fn control(
         glyph: &'static str,
         color: RgbaF32,
         filled: bool,
@@ -111,14 +115,13 @@ impl Badge {
     }
 
     /// Swap the chip's ink to `color` while the pointer is over it.
-    pub(crate) fn hover_color(mut self, color: RgbaF32) -> Self {
+    pub(crate) const fn hover_color(mut self, color: RgbaF32) -> Self {
         self.hover_color = Some(color);
         self
     }
 
     /// A read-only descriptor pill. `salt` is its stable id for the tooltip.
-    #[allow(clippy::self_named_constructors)]
-    pub(crate) fn marker(
+    pub(crate) const fn marker(
         salt: &'static str,
         glyph: &'static str,
         color: RgbaF32,
@@ -172,7 +175,7 @@ impl Badge {
                 ))
                 .id_salt(salt)
                 .sense(Sense::HOVER)
-                .padding(Spacing::xy(5.0, 0.0)),
+                .padding(Spacing::xy(MARKER_PAD_X, 0.0)),
             BadgeKind::Control { wid, filled } => {
                 // Last-frame hover (`response_for`) lifts the fill so the chip
                 // reads as pressable — the same trick the tab-strip chips use.

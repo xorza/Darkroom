@@ -4,19 +4,24 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::document::{Document, Viewport};
 use crate::core::edit::step::change::{Change, Direction};
-use crate::core::edit::step::gesture_key::GestureKey;
 use crate::core::edit::step::reversible::Reversible;
-use crate::core::edit::step::undo_step::UndoStep;
 
-/// 1e-4 is the threshold below which two pan/scale samples are considered the
-/// same camera — it keeps idle pan/zoom from polluting the undo stack with
-/// sub-pixel deltas.
-const VIEWPORT_EPS: f32 = 1e-4;
+/// The distance below which two pan/zoom samples are the same camera — it
+/// keeps idle pan/zoom from polluting the undo stack with sub-pixel deltas.
+pub(super) const VIEWPORT_EPS: f32 = 1e-4;
 
 /// The graph camera, before and after.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct SetViewport {
     pub(crate) viewport: Change<Viewport>,
+}
+
+impl SetViewport {
+    /// Fold `next`, a later frame of the same gesture, into this step: keep
+    /// the camera it started from and adopt the latest.
+    pub(crate) const fn absorb(&mut self, next: &Self) {
+        self.viewport.to = next.viewport.to;
+    }
 }
 
 impl Reversible for SetViewport {
@@ -44,19 +49,7 @@ impl Reversible for SetViewport {
         false
     }
 
-    fn gesture_key(&self) -> Option<GestureKey> {
-        Some(GestureKey::Viewport)
-    }
-
-    fn coalesce(&self, next: &UndoStep) -> Option<UndoStep> {
-        let UndoStep::SetViewport(next) = next else {
-            return None;
-        };
-        Some(UndoStep::SetViewport(Self {
-            viewport: Change {
-                from: self.viewport.from,
-                to: next.viewport.to,
-            },
-        }))
+    fn retypes_outputs(&self) -> bool {
+        false
     }
 }

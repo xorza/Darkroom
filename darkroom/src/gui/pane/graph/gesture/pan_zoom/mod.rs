@@ -4,6 +4,8 @@
 //! viewport algebra. The gesture emits `GraphIntent::SetViewport`, so pan/zoom
 //! rides the same undo path as every other edit.
 
+pub(crate) mod camera_gesture;
+
 use common::FloatExt;
 use glam::Vec2;
 use palantir::{Rect, ResponseState, Size, Ui, ZoomFactor};
@@ -11,27 +13,44 @@ use palantir::{Rect, ResponseState, Size, Ui, ZoomFactor};
 use crate::core::document::Viewport;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
+use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
 use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
+use crate::gui::pane::graph::gesture::canvas_gesture::CanvasGesture;
+use crate::gui::pane::graph::gesture::pan_zoom::camera_gesture::CameraGesture;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
-use crate::gui::pane::graph::{CanvasGesture, outer_canvas_widget_id};
 use crate::gui::requests::Requests;
 
-/// Fold a live pan drag into `pan`: `anchor + delta` while the drag is
-/// held; a missing delta after a latch is the release edge and drops the
-/// anchor. A call before anything latched does nothing at all — neither
-/// panning nor releasing.
+/// Fold a live pan drag into `pan`: the latch's start (read by `start`)
+/// plus `delta` while the drag is held, and a missing delta after a latch is
+/// the release edge that drops it. Returns the latch while it is held; a call
+/// before anything latched does nothing at all. Shared by the canvas and the
+/// image viewer.
 ///
-/// Measured from the latch rather than integrated per frame, so a pan
-/// lands exactly where the pointer says however many frames it took (no
-/// per-frame rounding drift).
-pub(super) fn fold_pan_drag(anchor: &mut GestureSlot<Vec2>, delta: Option<Vec2>, pan: &mut Vec2) {
-    let Some(&start) = anchor.get() else {
-        return;
+/// Measured from the latch rather than integrated per frame, so a pan lands
+/// exactly where the pointer says however many frames it took (no per-frame
+/// rounding drift).
+pub(crate) fn fold_pan_drag<'s, T>(
+    slot: &'s mut GestureSlot<T>,
+    start: impl FnOnce(&T) -> Vec2,
+    delta: Option<Vec2>,
+    pan: &mut Vec2,
+) -> Option<&'s T> {
+    let Some(delta) = delta else {
+        slot.clear();
+        return None;
     };
-    match delta {
-        Some(d) => *pan = start + d,
-        None => anchor.clear(),
-    }
+    let latched = slot.get()?;
+    *pan = start(latched) + delta;
+    Some(latched)
+}
+
+/// Whether `resp` carries any scroll, touchpad or pinch input this frame.
+/// Palantir reports exactly zero, and a unit zoom, for none, so the tests are
+/// exact.
+pub(crate) fn scrolled(resp: &ResponseState) -> bool {
+    resp.scroll.pixels != Vec2::ZERO
+        || resp.scroll.lines.y != 0.0
+        || resp.scroll.zoom != ZoomFactor::ONE
 }
 
 /// Fold one frame's scroll/pinch deltas from `resp` into `v` — the
@@ -50,7 +69,7 @@ pub(crate) fn fold_scroll_zoom(
     if resp.scroll.pixels != Vec2::ZERO {
         v.pan -= resp.scroll.pixels;
     }
-    if resp.scroll.lines.y.abs() > f32::EPSILON
+    if resp.scroll.lines.y != 0.0
         && let Some(pivot) = resp.pointer_local
     {
         let text = &ui.theme().text;
@@ -98,30 +117,25 @@ const CANVAS_MAX_ZOOM: f32 = 5.0;
 /// zoom, higher → snappier but jumps badly on touchpad.
 const SCROLL_ZOOM_BASE: f32 = 1.0025;
 
-/// Read the outer canvas's current-frame response, compute the
-/// target viewport, and emit an `GraphIntent::SetViewport` when it
-/// changed. The intent (not a direct write) is the only thing that
-/// mutates the document's viewport — so pan/zoom rides the same
-/// undo path as every other edit, and the undo stack coalesces a
-/// continuous gesture into one entry via `GestureKey::Viewport`.
-/// `pan_anchor` is the caller's drag-anchor slot (input bookkeeping,
-/// one gesture's lifetime). Three independent sources:
+/// Read the outer canvas's current-frame response, compute the target
+/// viewport, and emit a `GraphIntent::SetViewport` when it changed. The
+/// intent (not a direct write) is the only thing that mutates the document's
+/// viewport — so pan/zoom rides the same undo path as every other edit, and
+/// each of `camera`'s gestures folds into one undo entry. Three independent
+/// sources:
 ///
-/// - **Middle-button drag** (`Sense::DRAG` +
-///   `Ui::drag_delta_by`): canvas pan. Anchor on `drag_started_by`,
-///   then `pan = anchor + delta` until release. Left-drag is
-///   intentionally NOT routed to pan so it stays free for future
+/// - **Middle-button drag** (`Sense::DRAG` + `Ui::drag_delta_by`): canvas
+///   pan, `anchor + delta` from the latch until release. Left-drag stays with
 ///   rubber-band selection.
-/// - **Scroll** (`Sense::SCROLL`): mouse wheel / touchpad swipe →
-///   zoom-about-cursor (graph-editor convention: Figma / Blender
-///   node editor / ComfyUI). Vertical delta only; horizontal is
-///   ignored. Palantir ingests the scroll delta already-negated
-///   so `+y` means "scroll content down" → zoom out, `-y` (wheel
-///   up) → zoom in.
-/// - **Pinch** (`Sense::PINCH`): zoom-about-cursor using the
+/// - **Scroll** (`Sense::SCROLL`): a two-finger touchpad swipe pans, and a
+///   mouse wheel zooms about the cursor (graph-editor convention: Figma /
+///   Blender node editor / `ComfyUI`). Palantir ingests the scroll delta
+///   already negated, so `+y` means "scroll content down" → zoom out, and
+///   `-y` (wheel up) → zoom in.
+/// - **Pinch** (`Sense::PINCH`): zoom about the cursor, with the
 ///   `Response::pointer_local` pivot.
 pub(crate) fn emit_pan_zoom(
-    pan_anchor: &mut GestureSlot<Vec2>,
+    camera: &mut CameraGesture,
     ui: &Ui,
     graph_ctx: GraphCtx<'_>,
     gesture: Option<CanvasGesture>,
@@ -133,21 +147,25 @@ pub(crate) fn emit_pan_zoom(
     // Pan latch comes from the central classification; continuation and
     // wheel/pinch zoom below read the response directly (not arbitration).
     if gesture == Some(CanvasGesture::Pan) {
-        pan_anchor.latch(viewport.pan);
+        camera.latch_pan(viewport.pan, out);
     }
-    fold_pan_drag(pan_anchor, resp.middle.drag.delta(), &mut v.pan);
+    let held = camera.fold_pan(resp.middle.drag.delta(), &mut v.pan);
     fold_scroll_zoom(&mut v, ui, &resp, CANVAS_MIN_ZOOM, CANVAS_MAX_ZOOM);
     // Only emit when the gesture actually moved the viewport (approx
     // compare — exact float `!=` would emit on the last-bit noise the
     // zoom-about-cursor algebra leaves behind, which `approximately_eq`
     // reads at the pan's own magnitude rather than against a fixed
-    // epsilon a four-digit pan would swamp). The `SetViewport` undo step
-    // is also `is_noop`-filtered in `drain_requests`; this just skips the
-    // build on idle frames.
+    // epsilon a four-digit pan would swamp).
     let unchanged = v.pan.approximately_eq(viewport.pan) && v.zoom.approximately_eq(viewport.zoom);
-    if !unchanged {
-        out.push_graph(GraphIntent::SetViewport { to: v });
+    if unchanged {
+        return;
     }
+    // A frame that both pans and scrolls belongs to the held pan.
+    let gesture = held.unwrap_or_else(|| camera.scroll_frame(ui.now(), out));
+    out.push_graph(GraphIntent::SetViewport {
+        to: v,
+        gesture: Some(gesture),
+    });
 }
 
 /// Multiply `zoom` by `factor` while holding the pre-transform point
@@ -182,8 +200,9 @@ pub(crate) fn zoom_about(
 /// down) to a multiplicative zoom factor. Negative `delta_y` (wheel
 /// up) zooms in (`factor > 1`); positive (wheel down) zooms out
 /// (`factor < 1`). Pure function so it can be unit-tested without
-/// spinning up a UI. Shared with [`crate::gui::pane::viewer`].
-pub(super) fn scroll_to_zoom_factor(delta_y: f32) -> f32 {
+/// spinning up a UI. [`fold_scroll_zoom`] is its one reader, for the canvas
+/// and the viewer alike.
+fn scroll_to_zoom_factor(delta_y: f32) -> f32 {
     SCROLL_ZOOM_BASE.powf(-delta_y)
 }
 
@@ -192,9 +211,9 @@ pub(super) fn scroll_to_zoom_factor(delta_y: f32) -> f32 {
 const FIT_MARGIN: f32 = 40.0;
 
 /// One of the graph toolbar's one-shot framings. A descriptor resolved at
-/// its call site into an `GraphIntent::SetViewport`, never queued itself, so
-/// a reframe rides the same undo path as a manual pan/zoom (and coalesces
-/// with it).
+/// its call site into a `GraphIntent::SetViewport`, never queued itself, so
+/// a reframe rides the same undo path as a manual pan/zoom, as an undo entry
+/// of its own.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Framing {
     /// Reset to 1:1 zoom, centered on all nodes (world origin when empty).
@@ -229,7 +248,7 @@ pub(crate) fn framing_intent(
             fit_target(node_bounds(geometry, graph_ctx, true)?, pane)
         }
     };
-    Some(GraphIntent::SetViewport { to })
+    Some(GraphIntent::SetViewport { to, gesture: None })
 }
 
 /// 1:1 zoom, centered on all content (world origin when the graph is empty).

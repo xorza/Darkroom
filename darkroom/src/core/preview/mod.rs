@@ -12,6 +12,7 @@
 //! like any consumer, and nothing about it is special to the engine.
 
 use std::collections::HashMap;
+use std::mem;
 use std::sync::{Arc, Mutex};
 
 use scenarium::{
@@ -20,7 +21,7 @@ use scenarium::{
 
 /// Stable `FuncId` for the preview node. Persisted in every document that holds
 /// one, so it must never change.
-const PREVIEW_FUNC_ID: &str = "7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe";
+const PREVIEW_FUNC_ID: FuncId = FuncId::literal("7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe");
 
 /// Where a preview node's value waits between the worker thread that produced
 /// it and the frame that draws it.
@@ -42,55 +43,58 @@ impl PreviewSink {
         self.latest.lock().unwrap().insert(node_id, value);
     }
 
-    /// GUI side: take everything published since the last drain. Empty on an
-    /// idle frame, which is the common case.
-    pub(crate) fn drain(&self) -> Vec<(NodeId, DynamicValue)> {
-        let mut latest = self.latest.lock().unwrap();
-        latest.drain().collect()
+    /// GUI side: swap everything published since the last drain into the
+    /// empty `buffer`. The two maps trade places, so each keeps its capacity
+    /// and a drain allocates nothing; the lock is held only for the swap.
+    pub(crate) fn drain_into(&self, buffer: &mut HashMap<NodeId, DynamicValue>) {
+        debug_assert!(buffer.is_empty(), "the last drain's values were not taken");
+        mem::swap(&mut *self.latest.lock().unwrap(), buffer);
     }
 }
 
 /// The preview func, bound to the sink its lambda publishes into.
 ///
 /// `sink()` so an ambient sinks run reaches it — that is what makes a preview
-/// refresh without the editor naming it as a seed. `uncacheable()` because it
-/// has no output to persist, and it stays `Impure` (the default) because
-/// `Func::validate` refuses an outputless func that claims to be pure.
+/// refresh without the editor naming it as a seed. It stays `Impure` (the
+/// default) because `Func::validate` refuses an outputless func that claims to
+/// be pure.
 pub(crate) fn preview_func(sink: Arc<PreviewSink>) -> Func {
-    Func::new(PREVIEW_FUNC_ID, "Preview")
-        .category("System")
-        .sink()
-        .uncacheable()
-        .description(
-            "Shows the value wired into it. The value goes to the editor \
-             rather than to a consumer, so watching one never changes what the \
-             rest of the graph computes.",
-        )
-        .input(
-            FuncInput::optional("Value", DataType::Any)
-                .description("The value to show. Anything can be wired here."),
-        )
-        .lambda(async_lambda!(
+    Func::new(
+        PREVIEW_FUNC_ID,
+        "Preview",
+        async_lambda!(
             move |Invocation { ctx, inputs, .. }| { sink = Arc::clone(&sink) } => {
                 // `current_node` is the only thing in the invocation that says
                 // *which* preview this is — the editor routes on it.
-                sink.publish(ctx.current_node(), std::mem::take(&mut inputs[0]));
+                sink.publish(ctx.current_node(), mem::take(&mut inputs[0]));
                 Ok(())
             }
-        ))
+        ),
+    )
+    .category("System")
+    .sink()
+    .description(
+        "Shows the value wired into it. The value goes to the editor \
+         rather than to a consumer, so watching one never changes what the \
+         rest of the graph computes.",
+    )
+    .input(
+        FuncInput::optional("Value", DataType::Any)
+            .description("The value to show. Anything can be wired here."),
+    )
 }
 
 /// The preview func as the current library registered it, or `None` when the
 /// document's library has lost it — the editor's "add a preview here" action
 /// builds its node from this rather than re-declaring the interface.
 pub(crate) fn registered(library: &Library) -> Option<&Func> {
-    library.funcs().find(|func| is_preview(func.id))
+    library.by_id(PREVIEW_FUNC_ID)
 }
 
 /// Whether `func_id` is the preview func — what the scene projection asks to
 /// decide a node draws a value card instead of the usual body.
 pub(crate) fn is_preview(func_id: FuncId) -> bool {
-    func_id == PREVIEW_FUNC_ID.into()
+    func_id == PREVIEW_FUNC_ID
 }
 
 #[cfg(test)]

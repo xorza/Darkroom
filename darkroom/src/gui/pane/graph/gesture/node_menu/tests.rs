@@ -143,8 +143,14 @@ fn remove_pick_removes_every_selected_node() {
 /// it pointed at the original `c`.
 #[test]
 fn duplicate_picks_differ_by_whether_incoming_wires_survive() {
-    // The bindings the `row`th pick's clones are seeded with, and the `c` they
-    // may point at.
+    /// How many bindings the `row`th pick's clones are seeded with, the first
+    /// of them, and the `c` it may point at.
+    #[derive(Debug)]
+    struct Seeded {
+        count: usize,
+        first: Option<Binding>,
+        c: NodeId,
+    }
     let duplicate_via = |row: usize| {
         let mut h = CanvasHarness::shaping_text(DocFixture::probes(3), SURFACE);
         let (a, b, c) = (h.node(0), h.node(1), h.node(2));
@@ -165,7 +171,7 @@ fn duplicate_picks_differ_by_whether_incoming_wires_survive() {
                 GraphIntent::AddNode { bindings, .. } => Some(bindings),
                 _ => None,
             })
-            .flat_map(|bindings| bindings.iter().map(|(_, binding)| binding.clone()))
+            .flat_map(|bindings| bindings.iter().map(|entry| entry.binding.clone()))
             .collect();
         assert_eq!(
             intents
@@ -179,14 +185,18 @@ fn duplicate_picks_differ_by_whether_incoming_wires_survive() {
             matches!(intents.last(), Some(GraphIntent::SetSelection { .. })),
             "and the copies end up selected: {intents:?}"
         );
-        (seeded.len(), seeded.into_iter().next(), c)
+        Seeded {
+            count: seeded.len(),
+            first: seeded.into_iter().next(),
+            c,
+        }
     };
 
-    let (dropped, _, _) = duplicate_via(DUPLICATE);
-    let (kept, binding, c) = duplicate_via(DUPLICATE_WITH_INCOMING);
-    assert_eq!(dropped, 0, "the external wire is dropped");
-    assert_eq!(kept, 1, "the external wire is kept");
-    match binding {
+    let dropped = duplicate_via(DUPLICATE);
+    let Seeded { count, first, c } = duplicate_via(DUPLICATE_WITH_INCOMING);
+    assert_eq!(dropped.count, 0, "the external wire is dropped");
+    assert_eq!(count, 1, "the external wire is kept");
+    match first {
         Some(Binding::Bind(src)) => {
             assert_eq!(src.node_id, c, "still fed by the original producer");
             assert_eq!(src.port_idx, 0);

@@ -1,6 +1,7 @@
-//! Tests for the dense solver, gathered from the three implementations it replaced.
+//! Tests for the dense solver.
 
 use crate::math::linear_system::solve_in_place;
+use crate::testing::assertions::assert_close;
 
 /// The distortion solvers' threshold.
 const COARSE: f64 = 1e-12;
@@ -51,21 +52,21 @@ fn known_systems_are_solved_exactly() {
     );
 
     // A zero at [0][0] forces a row swap before elimination can start; the swap has to carry the
-    // right-hand side with it, so a solver that swapped only `a` would return [1, 2] here.
+    // right-hand side with it, so a solver that swapped only `a` would return [2, 1] here.
     let swapped = [[0.0, 1.0], [1.0, 0.0]];
     assert_eq!(solved(swapped, [2.0, 1.0], COARSE).unwrap(), [1.0, 2.0]);
 
-    // 2×2 with a hand-derived answer: 2x + y = 5, x + 3y = 10 → x = 1, y = 3.
+    // 2×2 with a hand-derived answer: 2x + y = 5, x + 3y = 10 → x = 1, y = 3. The factor ½ and
+    // every step after it are exact: 3 − ½ = 2.5, 10 − 2.5 = 7.5, 7.5/2.5 = 3, (5 − 3)/2 = 1.
     let dense2 = [[2.0, 1.0], [1.0, 3.0]];
-    let x = solved(dense2, [5.0, 10.0], COARSE).unwrap();
-    assert!(
-        (x[0] - 1.0).abs() < 1e-12 && (x[1] - 3.0).abs() < 1e-12,
-        "{x:?}"
-    );
+    assert_eq!(solved(dense2, [5.0, 10.0], COARSE).unwrap(), [1.0, 3.0]);
 }
 
 /// A dense symmetric system at each size, checked by recovering the `x` its `b` was built from —
-/// the shape the LM step actually feeds in (a damped Hessian).
+/// the shape the LM step actually feeds in (a damped Hessian). By Gershgorin each matrix is
+/// diagonally dominant with eigenvalues in [1.5, 13.9], [1.6, 11.2] and [2, 6], so condition
+/// numbers under 10; elimination with partial pivoting is backward stable to about `3n·ε`, so
+/// each `x` is good to `10 · 18ε · 6` ≈ 2.4e-13, and the residual `A·x − b` likewise: 1e-12.
 #[test]
 fn a_dense_symmetric_system_recovers_the_x_its_b_was_built_from() {
     let hessian6 = [
@@ -79,7 +80,7 @@ fn a_dense_symmetric_system_recovers_the_x_its_b_was_built_from() {
     let expected = [1.0f64, 2.0, 3.0, 4.0, 5.0, 6.0];
     let solution = solved(hessian6, multiply(&hessian6, &expected), FINE).unwrap();
     for (got, want) in solution.iter().zip(&expected) {
-        assert!((got - want).abs() < 1e-10, "{solution:?} vs {expected:?}");
+        assert_close!(*got, *want, 1e-12, "{solution:?} vs {expected:?}");
     }
 
     let hessian5 = [
@@ -92,7 +93,7 @@ fn a_dense_symmetric_system_recovers_the_x_its_b_was_built_from() {
     let expected = [1.0f64, 2.0, 3.0, 4.0, 5.0];
     let solution = solved(hessian5, multiply(&hessian5, &expected), FINE).unwrap();
     for (got, want) in solution.iter().zip(&expected) {
-        assert!((got - want).abs() < 1e-10, "{solution:?} vs {expected:?}");
+        assert_close!(*got, *want, 1e-12, "{solution:?} vs {expected:?}");
     }
 
     // Tridiagonal, checked the other way round: substitute the solution back and compare to `b`.
@@ -107,7 +108,7 @@ fn a_dense_symmetric_system_recovers_the_x_its_b_was_built_from() {
     let b = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
     let residual = multiply(&tridiagonal, &solved(tridiagonal, b, COARSE).unwrap());
     for (got, want) in residual.iter().zip(&b) {
-        assert!((got - want).abs() < 1e-10, "A·x = {residual:?}, b = {b:?}");
+        assert_close!(*got, *want, 1e-12, "A·x = {residual:?}, b = {b:?}");
     }
 }
 
@@ -147,14 +148,17 @@ fn the_pivot_threshold_decides_which_systems_are_singular() {
     assert!(solved(nearly, b, COARSE).is_none());
 }
 
-/// The solution lands in `b` and the matrix is spent — the contract that lets the caller own the
-/// storage.
+/// The solution lands in `b`, and `a` holds the elimination's upper triangle — the contract that
+/// lets the caller own the storage. `[1 2; 2 2]·x = [3, 4]` swaps its rows for the larger pivot,
+/// eliminates `[1 2] − ½·[2 2] = [·, 1]` with `3 − ½·4 = 1`, and so solves `x = [1, 1]`; the strict
+/// lower triangle keeps the 1 the swap moved there, never read again.
 #[test]
 fn both_operands_are_consumed() {
-    let mut a = [2.0, 0.0, 0.0, 4.0];
-    let mut b = [6.0, 8.0];
+    let mut a = [1.0, 2.0, 2.0, 2.0];
+    let mut b = [3.0, 4.0];
     solve_in_place(&mut a, &mut b, FINE).unwrap();
-    assert_eq!(b, [3.0, 2.0], "x = [6/2, 8/4]");
+    assert_eq!(b, [1.0, 1.0]);
+    assert_eq!(a, [2.0, 2.0, 1.0, 1.0]);
 
     // 1×1 is the degenerate case the loops have to survive: no elimination, one division.
     let mut a = [4.0];

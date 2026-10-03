@@ -1,5 +1,6 @@
 //! Detection, registration, warping, and combination of calibrated images.
 
+use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common::CancelToken;
@@ -7,11 +8,17 @@ use common::CancelToken;
 use crate::concurrency;
 use crate::error::FrameDimensionMismatch;
 use crate::io::image::linear::LinearImage;
-use crate::memory::MemoryPlan;
+use crate::io::raw::demosaic::DemosaicMemory;
+use crate::memory::run_memory::RunMemory;
+use crate::memory::{
+    DECODE_TRANSIENT_FACTOR, DETECTION_WORKING_PLANES, MemoryPlan, PerFrameBytes, RunShape,
+};
+use crate::stacking::combine::cache::frame_check::FrameCheck;
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::combine::stack::stack_stored_frames;
-use crate::stacking::frame_store::StoredFrame;
 use crate::stacking::frame_store::frame_stats::FrameStats;
+use crate::stacking::frame_store::stored_frame::StoredFrame;
+use crate::stacking::progress::stage_counter::StageCounter;
 use crate::stacking::progress::{ProgressCallback, StackingStage};
 use crate::stacking::registration::register;
 use crate::stacking::registration::resample::WarpBuffers;
@@ -19,11 +26,12 @@ use crate::stacking::registration::result::RegistrationError;
 use crate::stacking::star_detection::detector::DetectionResult;
 use crate::stacking::star_detection::detector::Diagnostics;
 
+use crate::memory;
 use crate::stacking::pipeline::config::{AlignStackConfig, Reference};
 use crate::stacking::pipeline::detector_pool::DetectorPool;
 use crate::stacking::pipeline::frame::{DetectedFrame, PipelineFrame};
 use crate::stacking::pipeline::result::{AlignStackResult, Error};
-use crate::stacking::pipeline::tier::FrameTier;
+use crate::stacking::pipeline::tier::StagePlan;
 
 /// Detect → register → warp → stack a set of light frames into one aligned, combined image.
 ///
@@ -32,6 +40,10 @@ use crate::stacking::pipeline::tier::FrameTier;
 /// register (too few stars, RANSAC failure, accuracy gate) are dropped and listed in
 /// [`AlignmentSummary::dropped`](crate::stacking::pipeline::result::AlignmentSummary::dropped);
 /// the stack proceeds with whatever aligned. A single input frame is returned as its own "stack".
+///
+/// Every light must share the first one's dimensions and hold only finite samples; both are
+/// checked before any work, so a bad input is reported as one instead of surfacing from the
+/// combine after a warp has spread it.
 ///
 /// The frames arrive decoded and resident, so the inputs are committed before this is called —
 /// but the warped outputs are a second full set, and those spill to the frame store when they
@@ -47,38 +59,67 @@ pub fn align_and_stack(
     if lights.is_empty() {
         return Err(Error::NoFrames);
     }
-    config.validate()?;
+    config.validate(lights.len())?;
+    let dimensions = lights[0].dimensions();
+    for (index, light) in lights.iter().enumerate() {
+        FrameDimensionMismatch::check(index, dimensions, light.dimensions())
+            .map_err(|mismatch| Error::from(StackError::from(mismatch)))?;
+        FrameCheck {
+            index,
+            cancel: &cancel,
+        }
+        .samples(light)?;
+    }
 
-    // One reading for the run; see `AlignStackConfig::with_resolved_memory`.
-    let config = &config.with_resolved_memory(crate::memory::available_memory());
+    // One reading for the run, for the tier decision and the combine's chunk sizes alike.
+    let memory = RunMemory::read(config.stack.cache.memory_override);
     let total = lights.len();
-    // The inputs are already decoded and resident, so only the warped outputs and the per-frame
-    // scratch are still in question.
-    let plan = MemoryPlan::for_decoded_frames(
-        lights[0].dimensions(),
-        total,
+    // The inputs are already decoded and resident: what the preparing pass adds to each is the
+    // copy its statistics sort, beside the detector. On the spill tier that charges the input
+    // itself as well, which the caller already holds — one frame of slack per worker.
+    let frame_bytes = memory::frame_bytes(dimensions);
+    let plane_bytes = dimensions.pixel_count() * size_of::<f32>();
+    let plan = MemoryPlan::plan(
+        RunShape {
+            frame_count: total,
+            decode: DemosaicMemory {
+                output_bytes: frame_bytes,
+                peak_bytes: DECODE_TRANSIENT_FACTOR * frame_bytes,
+            },
+            detection_bytes: DETECTION_WORKING_PLANES * plane_bytes,
+            warp: Some(PerFrameBytes::new(plane_bytes, frame_bytes)),
+            output_bytes: config.stack.quality.resident_bytes(dimensions),
+        },
         rayon::current_num_threads(),
-        config.stack.cache.planning_memory(),
+        memory.planning(),
     );
-    let tier = FrameTier::for_plan(&plan, &config.stack.cache)?;
+    let stage = StagePlan::new(&plan, &config.stack.cache, memory)?;
 
-    tracing::info!(frames = total, spilling = tier.spills(), "Detecting stars");
-    let detected_count = AtomicUsize::new(0);
+    tracing::info!(
+        frames = total,
+        spilling = stage.tier.spills(),
+        "Detecting stars"
+    );
+    let detected_count = StageCounter::new(&progress, StackingStage::Preparing, total);
     let detections = {
+        // Bounded like the calibrated entry's: the plan charges each in-flight frame the
+        // detector's whole working set.
         let mut detectors =
-            DetectorPool::from_config(&config.detection, total.min(rayon::current_num_threads()))
+            DetectorPool::from_config(&config.detection, plan.decode_concurrency.min(total))
                 .map_err(Error::DetectionConfig)?;
         detectors.try_map(&lights, |detector, _index, image| {
             // Cancelled: abort the batch rather than spend the rest of the budget detecting
             // frames the run will discard.
             if cancel.is_cancelled() {
-                return Err(Error::Stack(StackError::Cancelled));
+                return Err(Error::Cancelled);
             }
             let result = detector.detect(image);
-            let n = detected_count.fetch_add(1, Ordering::Relaxed) + 1;
+            // Measured before interpolation, which correlates neighbouring pixels and would
+            // otherwise understate the frame's noise.
+            let stats = FrameStats::measure(image);
+            let n = detected_count.complete_one();
             log_detection(n, total, &result);
-            progress.report(n, total, StackingStage::Preparing);
-            Ok(result)
+            Ok((result, stats))
         })
     }?;
 
@@ -88,21 +129,15 @@ pub fn align_and_stack(
     let detected: Vec<DetectedFrame> = lights
         .into_iter()
         .zip(detections)
-        .map(|(image, result)| DetectedFrame {
+        .map(|(image, (result, stats))| DetectedFrame {
             image: PipelineFrame::Resident(image),
             stars: result.stars,
             diagnostics: result.diagnostics,
+            stats,
         })
         .collect();
 
-    register_warp_and_stack(
-        detected,
-        config,
-        tier,
-        plan.warp_concurrency,
-        progress,
-        cancel,
-    )
+    register_warp_and_stack(detected, config, stage, progress, cancel)
 }
 
 /// The detection funnel — candidates → deblended → centroided → kept — shows how confidently
@@ -123,36 +158,40 @@ pub(crate) fn log_detection(frame: usize, total: usize, result: &DetectionResult
 /// Register every frame to the chosen reference, warp it, and combine the survivors.
 ///
 /// The single body behind both entry points. The front ends differ only in how a frame becomes
-/// a [`DetectedFrame`] — already decoded, or decoded and calibrated from a path — and `tier`
+/// a [`DetectedFrame`] — already decoded, or decoded and calibrated from a path — and `stage`
 /// decides whether a warped output stays resident or goes to the frame store. Everything from
 /// reference selection onward is the same work either way.
+///
+/// Both entries checked every frame's dimensions against the first before detection: `warp`
+/// reprojects into the *source* frame's grid, so a mismatch here would reach the combine as
+/// differently-sized planes.
 pub(crate) fn register_warp_and_stack(
     mut detected: Vec<DetectedFrame>,
     config: &AlignStackConfig,
-    tier: FrameTier,
-    warp_concurrency: usize,
+    stage: StagePlan,
     progress: ProgressCallback,
     cancel: CancelToken,
 ) -> Result<AlignStackResult, Error> {
+    let StagePlan {
+        tier,
+        warp_concurrency,
+    } = stage;
     let total = detected.len();
     if cancel.is_cancelled() {
-        return Err(Error::Stack(StackError::Cancelled));
+        return Err(Error::Cancelled);
     }
-
-    // Fail before spending any registration work on a set that can't combine. `warp` reprojects
-    // into the *source* frame's grid, not the reference's, so mismatched inputs would otherwise
-    // reach the combine as differently-sized planes rather than as an error.
-    let expected = detected[0].image.dimensions();
-    for (index, frame) in detected.iter().enumerate() {
-        FrameDimensionMismatch::check(index, expected, frame.image.dimensions())
-            .map_err(|mismatch| Error::Stack(mismatch.into()))?;
-    }
+    debug_assert!(
+        detected
+            .iter()
+            .all(|frame| frame.image.dimensions() == detected[0].image.dimensions()),
+        "both entries check the dimensions before detection"
+    );
 
     // Taken before the frames are consumed below, so the funnel survives into the result in input
     // order — including for frames registration goes on to drop.
     let detection: Vec<Diagnostics> = detected
-        .iter()
-        .map(|frame| frame.diagnostics.clone())
+        .iter_mut()
+        .map(|frame| mem::take(&mut frame.diagnostics))
         .collect();
 
     let star_counts: Vec<usize> = detected.iter().map(|frame| frame.stars.len()).collect();
@@ -167,7 +206,7 @@ pub(crate) fn register_warp_and_stack(
     // The master follows the alignment anchor rather than whichever frame reaches combine first.
     let metadata = detected[reference].image.metadata().clone();
     let dimensions = detected[reference].image.dimensions();
-    let ref_stars = std::mem::take(&mut detected[reference].stars);
+    let ref_stars = mem::take(&mut detected[reference].stars);
     tracing::info!(
         reference,
         ref_stars = ref_stars.len(),
@@ -176,16 +215,11 @@ pub(crate) fn register_warp_and_stack(
 
     tracing::info!(frames = total - 1, "Registering frames to the reference");
     let registered_so_far = AtomicUsize::new(0);
-    // Counted where the work ends rather than where it starts, so reports climb monotonically
-    // even though `warp_concurrency` frames are in flight and finish out of order. `registered`
-    // and `dropped` frames both count — the bar tracks attempts resolved, not survivors.
-    let resolved = AtomicUsize::new(0);
+    // Counted where the work ends rather than where it starts. `registered` and `dropped`
+    // frames both count — the bar tracks attempts resolved, not survivors.
+    let resolved = StageCounter::new(&progress, StackingStage::Registering, total - 1);
     let report_resolved = || {
-        progress.report(
-            resolved.fetch_add(1, Ordering::Relaxed) + 1,
-            total - 1,
-            StackingStage::Registering,
-        );
+        resolved.complete_one();
     };
     // One reusable set of warp output planes per in-flight worker. The spill tier hands its
     // buffers back once the frame is on disk, so a worker warps into pages it has already faulted
@@ -204,18 +238,15 @@ pub(crate) fn register_warp_and_stack(
                 return Ok(None);
             }
             let name = format!("warped_{index}");
+            let source_stats = detected.stats;
             if index == reference {
                 // The unwarped reference has full support and unit interpolation confidence.
                 let image = detected.image.into_image();
-                let source_stats = FrameStats::measure(&image);
                 return tier.store_reference(&name, image, source_stats).map(Some);
             }
 
             let n = registered_so_far.fetch_add(1, Ordering::Relaxed) + 1;
             let source = detected.image.into_image();
-            // Measured before interpolation, which correlates neighbouring pixels and would
-            // otherwise understate the frame's noise.
-            let source_stats = FrameStats::measure(&source);
             let registration = match register(&ref_stars, &detected.stars, &config.registration) {
                 Ok(registration) => registration,
                 // A pair that did not match is a frame to drop. An invalid config is not: it
@@ -245,7 +276,7 @@ pub(crate) fn register_warp_and_stack(
             warped.warp_into(
                 &source,
                 &registration.warp_transform(),
-                &config.registration.warp,
+                config.registration.warp,
             );
             let metadata = source.metadata.clone();
             drop(source);
@@ -256,7 +287,7 @@ pub(crate) fn register_warp_and_stack(
         },
     )?;
     if cancel.is_cancelled() {
-        return Err(Error::Stack(StackError::Cancelled));
+        return Err(Error::Cancelled);
     }
 
     let mut frames = Vec::with_capacity(outcomes.len());
@@ -285,10 +316,10 @@ pub(crate) fn register_warp_and_stack(
     tracing::info!(frames = registered, "Stacking aligned frames");
     let stacked = stack_stored_frames(
         frames,
-        tier.into_spill_directory(),
+        tier.into_cache_tier(),
         dimensions,
         metadata,
-        config.stack.clone(),
+        &config.stack.for_survivors(&dropped),
         progress,
         cancel,
     )?;

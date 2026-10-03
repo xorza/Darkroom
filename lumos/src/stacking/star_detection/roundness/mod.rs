@@ -26,11 +26,8 @@ impl Roundness {
         let ground = safe_ratio(hx - hy, hx + hy);
 
         let center = marginal_x.len() / 2;
-        let (sum_left, sum_right) = split_sums(marginal_x, center);
-        let (sum_top, sum_bottom) = split_sums(marginal_y, center);
-
-        let asym_x = safe_ratio(sum_right - sum_left, sum_left + sum_right);
-        let asym_y = safe_ratio(sum_bottom - sum_top, sum_top + sum_bottom);
+        let asym_x = asymmetry(marginal_x, center);
+        let asym_y = asymmetry(marginal_y, center);
 
         Self {
             ground: (ground as f32).clamp(-1.0, 1.0),
@@ -39,12 +36,13 @@ impl Roundness {
     }
 }
 
-/// Compute sums of left and right halves of a slice (excluding center).
+/// `(after − before) / (after + before)` over the halves of `slice` either side of `center`,
+/// which is excluded.
 #[inline]
-fn split_sums(slice: &[f64], center: usize) -> (f64, f64) {
-    let left: f64 = slice[..center].iter().sum();
-    let right: f64 = slice[center + 1..].iter().sum();
-    (left, right)
+fn asymmetry(slice: &[f64], center: usize) -> f64 {
+    let before: f64 = slice[..center].iter().sum();
+    let after: f64 = slice[center + 1..].iter().sum();
+    safe_ratio(after - before, before + after)
 }
 
 /// Safe division returning 0.0 when denominator is near zero.

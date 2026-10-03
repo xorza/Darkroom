@@ -16,9 +16,10 @@ use palantir::{Ui, WidgetId};
 use scenarium::NodeId;
 
 use crate::core::document::PortRef;
+use crate::gui::event_ref::EventRef;
 
 /// A node-keyed widget id under `tag`.
-pub(super) fn node(tag: &'static str, node_id: NodeId) -> WidgetId {
+pub(crate) fn node(tag: &'static str, node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("graph.node", tag, node_id))
 }
 
@@ -32,6 +33,12 @@ pub(super) fn port(tag: &'static str, port: PortRef) -> WidgetId {
         port.kind as u8,
         port.port_idx,
     ))
+}
+
+/// An event-keyed widget id — [`node`] for the per-event widgets, keyed by
+/// the event's index as well.
+pub(super) fn event(tag: &'static str, event: EventRef) -> WidgetId {
+    WidgetId::from_hash(("graph.node", tag, event.node_id, event.event_idx))
 }
 
 /// The node's outer body panel — probed by the connection breaker and the

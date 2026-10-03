@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::hash::Hash;
 
 use glam::Vec2;
 use palantir::{Rect, ResponseState, Size, Ui};
 use scenarium::NodeId;
 
+use crate::core::document::node_key::NodeKey;
 use crate::core::document::{PortKind, PortRef};
-use crate::gui::EventRef;
+use crate::gui::event_ref::EventRef;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph::node::header::subscription_glyph_wid;
@@ -79,35 +79,6 @@ pub(crate) struct CanvasGeometry {
     node_screen: HashMap<NodeId, Rect>,
 }
 
-/// A glyph key that names the node its glyph hangs off — how a [`PortLayer`]
-/// evicts a deleted node's entries, and how a wire drag resolves the pane it
-/// belongs to (`GraphCtx::contains`) and notices the node disappearing
-/// under it.
-/// Every glyph domain the canvas keys on has one: a data port and an emitter
-/// event belong to their node, and a subscription pin *is* its node (a
-/// subscription is whole-node, so its layer is keyed by `NodeId` directly).
-pub(crate) trait GlyphKey: Copy + Eq + Hash + Debug {
-    fn node(self) -> NodeId;
-}
-
-impl GlyphKey for PortRef {
-    fn node(self) -> NodeId {
-        self.node_id
-    }
-}
-
-impl GlyphKey for EventRef {
-    fn node(self) -> NodeId {
-        self.node_id
-    }
-}
-
-impl GlyphKey for NodeId {
-    fn node(self) -> NodeId {
-        self
-    }
-}
-
 /// One key-domain's port snapshot, split into two tiers by lifetime:
 ///
 /// - `live` is cleared and rebuilt every frame from last frame's responses.
@@ -124,6 +95,10 @@ impl GlyphKey for NodeId {
 pub(crate) struct PortLayer<K> {
     live: HashMap<K, PortInfo>,
     offsets: HashMap<K, Vec2>,
+    /// The glyph a drag started on this frame, noted as the walk records it.
+    /// One press starts at most one drag, so the controllers latching off it
+    /// read it here instead of probing every candidate glyph.
+    started_drag: Option<K>,
 }
 
 impl<K> Default for PortLayer<K> {
@@ -131,15 +106,25 @@ impl<K> Default for PortLayer<K> {
         Self {
             live: HashMap::new(),
             offsets: HashMap::new(),
+            started_drag: None,
         }
     }
 }
 
-impl<K: GlyphKey> PortLayer<K> {
+impl<K: NodeKey> PortLayer<K> {
     /// Snapshot one widget into `live`, refreshing its persistent offset.
-    fn record(&mut self, key: K, r: ResponseState, node_min: Option<Vec2>, node_pos: Vec2) {
+    fn record(&mut self, key: K, r: ResponseState, node_min: Vec2, node_pos: Vec2) {
         let info = snapshot(r, node_min, node_pos, key, &mut self.offsets);
+        if info.drag_started && self.started_drag.is_none() {
+            self.started_drag = Some(key);
+        }
         self.live.insert(key, info);
+    }
+
+    /// Forget last frame's snapshots, keeping the offsets and the capacity.
+    fn begin_frame(&mut self) {
+        self.live.clear();
+        self.started_drag = None;
     }
 
     /// The entry for a glyph whose node didn't record: its center from the
@@ -178,7 +163,7 @@ impl<K: GlyphKey> PortLayer<K> {
     /// sequence it feeds in and whatever acceptance test it then applies to
     /// the winner. Geometrically at most one glyph sits under the pointer, so
     /// a rejected winner means "no snap", not "keep looking". Sibling of
-    /// [`Self::first_drag_started`].
+    /// [`Self::started_drag`].
     ///
     /// Tests the post-transform/clip rect, so it sees through palantir's
     /// drag-capture hover suppression.
@@ -195,13 +180,11 @@ impl<K: GlyphKey> PortLayer<K> {
         })
     }
 
-    /// First key in `keys` whose drag started this frame, or `None` — the
-    /// "which glyph did a fresh drag just latch onto" scan every drag-source
-    /// controller (connection/pin/event/subscription) needs, differing only
-    /// in the key sequence it feeds in (a node's ports, its events, or its
-    /// subscription pin).
-    pub(crate) fn first_drag_started(&self, mut keys: impl Iterator<Item = K>) -> Option<K> {
-        keys.find(|k| self.live.get(k).is_some_and(|i| i.drag_started))
+    /// The glyph a drag started on this frame, or `None` — what every
+    /// drag-source controller (connection, preview spawn, event wire) latches
+    /// on, each keeping only the kinds of glyph it starts from.
+    pub(crate) const fn started_drag(&self) -> Option<K> {
+        self.started_drag
     }
 
     /// `true` while a drag started on this widget is still live.
@@ -297,19 +280,17 @@ impl CanvasGeometry {
         self.node_sizes.retain(|id, _| keep(*id));
     }
 
-    /// Fills `hits` on the way through — see the type docs for why the polls
-    /// live here. This walk and that digest want the same response for every
-    /// node and every port, so they share one: the body poll below is at once
-    /// the node's cached size, its screen rect, the cull test, and its click,
-    /// right-click and drag edges.
+    /// One walk over every node and port — see the type docs for why the
+    /// polls live here: the body poll below is at once the node's cached size
+    /// and its screen rect.
     ///
-    /// Runs in [`crate::gui::pane::graph::GraphUI::prepass`], and is the
-    /// digest's only writer — it clears and refills it whole, so nothing
-    /// carries over from the frame before.
+    /// Runs in [`crate::gui::pane::graph::GraphUI::prepass`]. It clears and
+    /// refills the per-frame snapshots whole, so nothing carries over from the
+    /// frame before.
     pub(crate) fn rebuild(&mut self, ui: &Ui, graph_ctx: GraphCtx<'_>) {
-        self.ports.live.clear();
-        self.events.live.clear();
-        self.subs.live.clear();
+        self.ports.begin_frame();
+        self.events.begin_frame();
+        self.subs.begin_frame();
         self.node_screen.clear();
         for n in graph_ctx.nodes() {
             // Port offsets within a node are stable; the node's
@@ -341,19 +322,19 @@ impl CanvasGeometry {
             for kind in [PortKind::Input, PortKind::Output] {
                 for port in n.ports(kind) {
                     let r = ui.response_for(port_circle_wid(port));
-                    self.ports.record(port, r, Some(node_min), n.pos);
+                    self.ports.record(port, r, node_min, n.pos);
                 }
             }
             // Emitter event glyphs, drag sources for subscription wires.
             for ev in n.event_refs() {
-                let r = ui.response_for(event_glyph_wid(n.id, ev.event_idx));
-                self.events.record(ev, r, Some(node_min), n.pos);
+                let r = ui.response_for(event_glyph_wid(ev));
+                self.events.record(ev, r, node_min, n.pos);
             }
             // The subscription pin only exists on sink nodes (only they
             // render one — see `header::subscription_glyph`).
             if n.sink() {
                 let r = ui.response_for(subscription_glyph_wid(n.id));
-                self.subs.record(n.id, r, Some(node_min), n.pos);
+                self.subs.record(n.id, r, node_min, n.pos);
             }
         }
     }
@@ -383,17 +364,14 @@ impl CanvasGeometry {
 /// back to the cached offset so a just-shown graph still anchors. The center
 /// is `node_pos + offset` so a moved node's glyph tracks its current
 /// position. Shared by data ports, event glyphs, and subscription pins.
-fn snapshot<K: GlyphKey>(
+fn snapshot<K: NodeKey>(
     r: ResponseState,
-    node_min: Option<Vec2>,
+    node_min: Vec2,
     node_pos: Vec2,
     key: K,
     offsets: &mut HashMap<K, Vec2>,
 ) -> PortInfo {
-    let fresh_offset = match (r.layout_rect, node_min) {
-        (Some(rect), Some(node_min)) => Some(rect.center() - node_min),
-        _ => None,
-    };
+    let fresh_offset = r.layout_rect.map(|rect| rect.center() - node_min);
     if let Some(offset) = fresh_offset {
         offsets.insert(key, offset);
     }
@@ -418,6 +396,11 @@ pub(crate) mod internals {
         /// past frame's record of the node.
         pub(crate) fn seed_node_size(&mut self, id: NodeId, size: Size) {
             self.node_sizes.insert(id, size);
+        }
+
+        /// Whether the cross-frame size cache holds `id`.
+        pub(crate) fn caches_node(&self, id: NodeId) -> bool {
+            self.node_sizes.contains_key(&id)
         }
     }
 }

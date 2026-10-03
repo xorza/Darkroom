@@ -1,370 +1,128 @@
+use std::ops::RangeInclusive;
+
+use crate::math::fwhm::FWHM_PER_SIGMA;
+
 use super::*;
 
-// Strategy: Two frames contribute to the same output pixel with different
-// local Jacobians. Frame A uses identity (jaco=1), Frame B uses scale-2x
-// transform (jaco=4). Both have frame_weight=1.
-//
-// For Point kernel at scale=1:
-//   Frame A pixel (5,5) → center (5.5, 5.5) → output (5,5), jaco_A = 1.
-//   Frame B pixel (2,2) → center (2.5, 2.5) → transformed (5.0, 5.0) → output (5,5), jaco_B = 4.
-//   Weight_A = 1/jaco_A = 1.0
-//   Weight_B = 1/jaco_B = 0.25
-//   output = (val_A * 1.0 + val_B * 0.25) / (1.0 + 0.25) = (val_A + 0.25 * val_B) / 1.25
-//
-// With val_A=10, val_B=0: output = 10/1.25 = 8.0  (with Jacobian)
-//   vs output = (10+0)/2 = 5.0 if both had equal weight (no Jacobian).
-
-/// Build a scale-2x transform: maps (x,y) → (2x, 2y).
-fn make_scale2x_transform() -> Transform {
-    Transform::scale(DVec2::splat(2.0))
-}
-
+/// Two uniform frames meet at output pixel (4, 4), at scale 1 and pixfrac 1: A of 10 unscaled, and
+/// B of 2 or 0 with its pixels twice as far apart — a frame at half A's image scale, so every B
+/// pixel covers four of the reference's. A drop's weight is divided by the area its warp magnifies
+/// by, so B's pixel (2, 2), landing on (4, 4), weighs a quarter of A's, and the pixel reads
+/// `(10·1 + b·¼) / 1¼` — 8.4 for b = 2 and 8 for b = 0 — rather than the equal-weight mean. With
+/// B unscaled instead it reads the equal-weight `(10 + b)/2`.
+///
+/// That holds for every kernel whose drop at (4, 4) is one B pixel's: Turbo's 1×1 box and the point
+/// kernel take B's pixel (2, 2) alone; the square kernel's quadrilateral, `[3, 5]²`, holds the cell
+/// whole at a quarter share; Lanczos's taps at the even distances 2 and 4 from B's neighbours are
+/// its rounding residue. The Gaussian's taps reach B's neighbours at distance 2, where
+/// `g(2) = exp(−2²/(2σ²))` with σ = 1/2.3548: per axis B delivers `(1 + 2g(2))/S` of a pixel's
+/// weight, where `S = Σ g(d)` over its five taps, against A's whole `S/S` — so B weighs
+/// `¼·((1 + 2g(2))/S)²`.
+///
+/// A pixel sums at most 25 + 9 deposits of values up to 10.
 #[test]
-fn point_jacobian_two_frame_weighted_mean() {
-    // Frame A: identity, val=10. Pixel(5,5) → output(5,5), jaco=1, w=1.
-    // Frame B: scale-2x, val=0. Pixel(2,2) → (5,5) → output(5,5), jaco=4, w=0.25.
-    // Expected output(5,5) = (10 * 1 + 0 * 0.25) / (1 + 0.25) = 8.0
-    let w = 12;
-    let h = 12;
-    let mut pixels_a = vec![0.0f32; w * h];
-    pixels_a[4 * w + 4] = 10.0;
-    let image_a = mono_image(Size2us::new(w, h), pixels_a);
-
-    let mut pixels_b = vec![0.0f32; w * h];
-    pixels_b[2 * w + 2] = 0.0; // explicitly zero
-    let image_b = mono_image(Size2us::new(w, h), pixels_b);
-
-    let config = DrizzleConfig {
-        scale: 1.0,
-        pixfrac: 1.0,
-        kernel: DrizzleKernel::Point,
-        ..Default::default()
-    };
-
-    let mut acc = accumulator(ImageDimensions::new((w, h), 1), config);
-    acc.add_image(image_a, &Transform::identity(), 1.0, None);
-    acc.add_image(image_b, &make_scale2x_transform(), 1.0, None);
-    let result = acc.finalize();
-
-    // output(5,5) = (10*1 + 0*0.25) / (1+0.25) = 8.0
-    let out = result.image.channel(0);
-    let val = out[4 * w + 4];
-    assert!(
-        (val - 8.0).abs() < 0.01,
-        "Point Jacobian: pixel (5,5) = {val}, expected 8.0"
-    );
-}
-
-#[test]
-fn point_jacobian_two_frame_both_nonzero() {
-    // Frame A: identity, val=10. Pixel(5,5) → output(5,5), jaco=1, w=1.
-    // Frame B: scale-2x, val=2. Pixel(2,2) → output(5,5), jaco=4, w=0.25.
-    // Expected = (10*1 + 2*0.25) / (1+0.25) = 10.5/1.25 = 8.4
-    let w = 12;
-    let h = 12;
-    let mut pixels_a = vec![0.0f32; w * h];
-    pixels_a[4 * w + 4] = 10.0;
-    let image_a = mono_image(Size2us::new(w, h), pixels_a);
-
-    let mut pixels_b = vec![0.0f32; w * h];
-    pixels_b[2 * w + 2] = 2.0;
-    let image_b = mono_image(Size2us::new(w, h), pixels_b);
-
-    let config = DrizzleConfig {
-        scale: 1.0,
-        pixfrac: 1.0,
-        kernel: DrizzleKernel::Point,
-        ..Default::default()
-    };
-
-    let mut acc = accumulator(ImageDimensions::new((w, h), 1), config);
-    acc.add_image(image_a, &Transform::identity(), 1.0, None);
-    acc.add_image(image_b, &make_scale2x_transform(), 1.0, None);
-    let result = acc.finalize();
-
-    // output(5,5) = (10*1 + 2*0.25) / (1+0.25) = 10.5/1.25 = 8.4
-    let out = result.image.channel(0);
-    let val = out[4 * w + 4];
-    assert!(
-        (val - 8.4).abs() < 0.01,
-        "Point Jacobian: pixel (5,5) = {val}, expected 8.4"
-    );
-}
-
-#[test]
-fn turbo_jacobian_two_frame_weighted_mean() {
-    // Turbo kernel, pixfrac=1, scale=1. Drop size = 1×1.
-    // Frame A: identity, val=10. Pixel(5,5) center→(5.5,5.5). Drop covers output(5,5) fully.
-    //   overlap=1.0, inv_area=1.0, jaco=1. Weight = 1*1*1/1 = 1.0
-    // Frame B: scale-2x, val=2. Pixel(2,2) center→(5.0,5.0). Drop [4.5,5.5]×[4.5,5.5].
-    //   overlap with output(5,5)=[5,6]: min(5.5,6)-max(4.5,5)=0.5 in x, same in y → 0.25.
-    //   inv_area=1.0, jaco=4. Weight = 1*0.25*1/4 = 0.0625
-    // output(5,5) = (10*1.0 + 2*0.0625) / (1.0+0.0625) = 10.125/1.0625 = 9.5294...
-    let w = 12;
-    let h = 12;
-    let mut pixels_a = vec![0.0f32; w * h];
-    pixels_a[4 * w + 4] = 10.0;
-    let image_a = mono_image(Size2us::new(w, h), pixels_a);
-
-    let mut pixels_b = vec![0.0f32; w * h];
-    pixels_b[2 * w + 2] = 2.0;
-    let image_b = mono_image(Size2us::new(w, h), pixels_b);
-
-    let config = DrizzleConfig {
-        scale: 1.0,
-        pixfrac: 1.0,
-        kernel: DrizzleKernel::Turbo,
-        ..Default::default()
-    };
-
-    let mut acc = accumulator(ImageDimensions::new((w, h), 1), config);
-    acc.add_image(image_a, &Transform::identity(), 1.0, None);
-    acc.add_image(image_b, &make_scale2x_transform(), 1.0, None);
-    let result = acc.finalize();
-
-    // Integer-center: Frame B drop (centered (4,4), drop_size 1) fully covers output (4,4),
-    // so overlap = 1.0 (not the old 0.25). data = 10*1.0 + 2*0.25 = 10.5,
-    // weight = 1.0 + 0.25 = 1.25, output = 10.5/1.25 = 8.4.
-    let expected = 10.5 / 1.25;
-    let out = result.image.channel(0);
-    let val = out[4 * w + 4];
-    assert!(
-        (val - expected as f32).abs() < 0.02,
-        "Turbo Jacobian: pixel (4,4) = {val}, expected {expected:.4}"
-    );
-}
-
-#[test]
-fn turbo_matches_square_affine_with_jacobian() {
-    // For affine transforms (constant Jacobian), Turbo with Jacobian and Square
-    // should produce identical output on a gradient image (non-trivial content).
-    // Using a translation of (0.3, 0.7) — axis-aligned, so Turbo drop = true quad.
-    let w = 16;
-    let h = 16;
-    // Gradient: val = x + y*0.5
-    let pixels: Vec<f32> = (0..w * h)
-        .map(|i| {
-            let x = (i % w) as f32;
-            let y = (i / w) as f32;
-            x + y * 0.5
-        })
-        .collect();
-
-    let transform = Transform::translation(DVec2::new(0.3, 0.7));
-
-    let config_turbo = DrizzleConfig {
-        scale: 1.0,
-        pixfrac: 0.8,
-        kernel: DrizzleKernel::Turbo,
-        ..Default::default()
-    };
-    let config_square = DrizzleConfig {
-        scale: 1.0,
-        pixfrac: 0.8,
-        kernel: DrizzleKernel::Square,
-        ..Default::default()
-    };
-
-    let image_turbo = mono_image(Size2us::new(w, h), pixels.clone());
-    let image_square = mono_image(Size2us::new(w, h), pixels);
-
-    let mut acc_turbo = accumulator(ImageDimensions::new((w, h), 1), config_turbo);
-    acc_turbo.add_image(image_turbo, &transform, 1.0, None);
-    let result_turbo = acc_turbo.finalize();
-
-    let mut acc_square = accumulator(ImageDimensions::new((w, h), 1), config_square);
-    acc_square.add_image(image_square, &transform, 1.0, None);
-    let result_square = acc_square.finalize();
-
-    let out_turbo = result_turbo.image.channel(0);
-    let out_square = result_square.image.channel(0);
-    let ow = result_turbo.image.width();
-
-    // Check interior pixels where both kernels have full coverage
-    let mut max_diff = 0.0f32;
-    let mut checked = 0;
-    for y in 2..14 {
-        for x in 2..14 {
-            let vt = out_turbo[y * ow + x];
-            let vs = out_square[y * ow + x];
-            if vt > 0.0 && vs > 0.0 {
-                let diff = (vt - vs).abs();
-                max_diff = max_diff.max(diff);
-                checked += 1;
+fn a_magnified_frame_weighs_less_per_output_pixel() {
+    let size = Size2us::new(12, 12);
+    let gaussian = |d: f64| (-d * d * FWHM_PER_SIGMA * FWHM_PER_SIGMA / 2.0).exp();
+    let s: f64 = (-2..=2).map(|d| gaussian(f64::from(d))).sum();
+    let gaussian_share = 0.25 * ((1.0 + 2.0 * gaussian(2.0)) / s).powi(2);
+    let bound = (2.0 * 34.0 + 1.0) * f64::from(f32::EPSILON) * 10.0;
+    for kernel in DrizzleKernel::ALL {
+        let share = if kernel == DrizzleKernel::Gaussian {
+            gaussian_share
+        } else {
+            0.25
+        };
+        for b in [2.0, 0.0] {
+            for (transform, b_weight) in [
+                (Transform::scale(DVec2::splat(2.0)), share),
+                (Transform::identity(), 1.0),
+            ] {
+                let mut acc = accumulator(
+                    ImageDimensions::new(size, 1),
+                    kernel_config(kernel, 1.0, 1.0),
+                );
+                acc.add_image(
+                    constant_image(size, 10.0),
+                    &Transform::identity(),
+                    1.0,
+                    None,
+                );
+                acc.add_image(constant_image(size, b as f32), &transform, 1.0, None);
+                let actual = f64::from(acc.finalize().product.image.channel(0)[(4, 4)]);
+                let expected = (10.0 + b * b_weight) / (1.0 + b_weight);
+                assert!(
+                    (actual - expected).abs() <= bound,
+                    "{kernel:?} b = {b}, B weight {b_weight}: {actual}, expected {expected}"
+                );
             }
         }
     }
-    assert!(
-        checked > 50,
-        "Need sufficient interior pixels, got {checked}"
-    );
-    assert!(
-        max_diff < 1e-3,
-        "Turbo vs Square (affine translation): max_diff={max_diff:.6}, expected <1e-3"
-    );
 }
 
+/// On a linear ramp the reconstruction is the ramp at each output pixel's preimage — a check that
+/// sees a dropped or wrong Jacobian term.
+///
+/// A quarter-pixel shift along x and 0.15 along y, at scale 1 and pixfrac 1: output pixel `o`
+/// takes ¾ of input pixel `o` and ¼ of `o − 1` along x, 0.85 and 0.15 along y, so it reads the ramp
+/// at `o − (0.25, 0.15)` — for Turbo and the square kernel, whose shares those are.
+///
+/// Halving the image scale as well — input pixel `i` at `i/2 + ¼` — magnifies by ¼, and still
+/// reads the ramp at the preimage `2(o − ¼)` for every kernel. The square kernel's quarter-size
+/// quadrilaterals `[i/2, i/2 + ½]` tile each cell with two whole ones; Turbo's unit boxes overlap
+/// a cell with shares ¼, ¾, ¾, ¼ at centres `o ∓ ¾`, `o ∓ ¼`; the point kernel puts the pixels at
+/// `o ∓ ¼` on it; and the radial kernels' taps are symmetric about `o` on a lattice symmetric about
+/// it. A symmetric weighting of a linear function is its value at the centre.
+///
+/// A pixel sums at most 144 deposits — 12 Lanczos centres per axis in reach at spacing ½ — of
+/// values up to 4.5, through lobes summing to 1.7 times the weight, and each Lanczos tap is within
+/// 1e-6 of its true value (see `math::lanczos`'s tests), 12 per axis, which moves a window whose
+/// values differ from the centre by at most 3.5·0.15 per axis.
 #[test]
-fn gaussian_jacobian_two_frame_weighted_mean() {
-    // Two uniform frames combined at output (4,4): A=10 (identity), B=2. Frame B's transform
-    // sets its local Jacobian, which must down-weight a magnified frame. Isolate that effect
-    // by combining B two ways — scale-2x (jaco=4, magnified → down-weighted) vs identity
-    // (jaco=1, full weight). The Jacobian pulls the magnified-B result toward A's 10, so it
-    // must read higher than the identity-B run.
-    let w = 12;
-    let h = 12;
-    let config = DrizzleConfig {
-        scale: 1.0,
-        pixfrac: 1.0,
-        kernel: DrizzleKernel::Gaussian,
-        ..Default::default()
-    };
-    let combine = |b_transform: &Transform| -> f32 {
-        let image_a = constant_mono_image(Size2us::new(w, h), 10.0);
-        let image_b = constant_mono_image(Size2us::new(w, h), 2.0);
-        let mut acc = accumulator(ImageDimensions::new((w, h), 1), config.clone());
-        acc.add_image(image_a, &Transform::identity(), 1.0, None);
-        acc.add_image(image_b, b_transform, 1.0, None);
-        let r = acc.finalize();
-        r.image.channel(0)[4 * w + 4]
-    };
-
-    let magnified_b = combine(&make_scale2x_transform());
-    let identity_b = combine(&Transform::identity());
-
-    // Identity B (equal density, equal Jacobian) → simple mean (10 + 2) / 2 = 6.0.
-    assert!(
-        (identity_b - 6.0).abs() < 0.1,
-        "identity B → simple mean ~6.0: {identity_b}"
+fn a_linear_ramp_reads_back_at_each_preimage() {
+    let size = Size2us::new(24, 24);
+    let ramp = |x: f64, y: f64| 1.0 + 0.1 * x + 0.05 * y;
+    let image = gray_image(
+        size,
+        (0..size.pixel_count())
+            .map(|i| ramp((i % 24) as f64, (i / 24) as f64) as f32)
+            .collect(),
     );
-    // The Jacobian down-weights the magnified frame B, pulling the result toward A's 10.
-    assert!(
-        (2.0..=10.0).contains(&magnified_b),
-        "weighted mean in [2,10]: {magnified_b}"
-    );
-    assert!(
-        magnified_b > identity_b + 1.0,
-        "Jacobian must down-weight magnified B: {magnified_b} vs {identity_b}"
-    );
-}
+    let bound =
+        (2.0 * 144.0 + 1.0) * f64::from(f32::EPSILON) * 4.5 * 1.7 + 2.0 * 12.0 * 1e-6 * 3.5 * 0.15;
 
-#[test]
-fn lanczos_jacobian_two_frame_weighted_mean() {
-    // Same setup as the Gaussian test, Lanczos-3 kernel: combine uniform B=2 two ways and
-    // confirm the Jacobian down-weights the magnified (scale-2x) frame relative to identity.
-    let w = 12;
-    let h = 12;
-    let config = DrizzleConfig {
-        scale: 1.0,
-        pixfrac: 1.0,
-        kernel: DrizzleKernel::Lanczos,
-        ..Default::default()
-    };
-    let combine = |b_transform: &Transform| -> f32 {
-        let image_a = constant_mono_image(Size2us::new(w, h), 10.0);
-        let image_b = constant_mono_image(Size2us::new(w, h), 2.0);
-        let mut acc = accumulator(ImageDimensions::new((w, h), 1), config.clone());
-        acc.add_image(image_a, &Transform::identity(), 1.0, None);
-        acc.add_image(image_b, b_transform, 1.0, None);
-        let r = acc.finalize();
-        r.image.channel(0)[4 * w + 4]
-    };
-
-    let magnified_b = combine(&make_scale2x_transform());
-    let identity_b = combine(&Transform::identity());
-
-    // Identity B (equal density, equal Jacobian) → simple mean (10 + 2) / 2 = 6.0.
-    assert!(
-        (identity_b - 6.0).abs() < 0.1,
-        "identity B → simple mean ~6.0: {identity_b}"
-    );
-    assert!(
-        (2.0..=10.0).contains(&magnified_b),
-        "weighted mean in [2,10]: {magnified_b}"
-    );
-    assert!(
-        magnified_b > identity_b + 1.0,
-        "Jacobian must down-weight magnified B: {magnified_b} vs {identity_b}"
-    );
-}
-
-#[test]
-fn all_kernels_jacobian_matches_square_affine() {
-    // For a pure translation (affine, constant Jacobian=1), all kernels with
-    // pixfrac=1, scale=1 should produce similar output to Square on a gradient
-    // image. This tests that Jacobian correction doesn't break normal operation.
-    let w = 20;
-    let h = 20;
-    let pixels: Vec<f32> = (0..w * h)
-        .map(|i| {
-            let x = (i % w) as f32;
-            let y = (i / w) as f32;
-            1.0 + x * 0.1 + y * 0.05
-        })
-        .collect();
-
-    // Small sub-pixel shift
-    let transform = Transform::translation(DVec2::new(0.25, 0.15));
-
-    // Square kernel as reference
-    let config_sq = DrizzleConfig {
-        scale: 1.0,
-        pixfrac: 1.0,
-        kernel: DrizzleKernel::Square,
-        ..Default::default()
-    };
-    let image_sq = mono_image(Size2us::new(w, h), pixels.clone());
-    let mut acc_sq = accumulator(ImageDimensions::new((w, h), 1), config_sq);
-    acc_sq.add_image(image_sq, &transform, 1.0, None);
-    let result_sq = acc_sq.finalize();
-    assert_product_finite(&result_sq);
-    let out_sq = result_sq.image.channel(0);
-
-    for kernel in [
-        DrizzleKernel::Turbo,
-        DrizzleKernel::Point,
-        DrizzleKernel::Gaussian,
-        DrizzleKernel::Lanczos,
-    ] {
-        let config = DrizzleConfig {
-            scale: 1.0,
-            pixfrac: 1.0,
-            kernel,
-            ..Default::default()
-        };
-        let image = mono_image(Size2us::new(w, h), pixels.clone());
-        let mut acc = accumulator(ImageDimensions::new((w, h), 1), config);
-        acc.add_image(image, &transform, 1.0, None);
-        let result = acc.finalize();
-        assert_product_finite(&result);
-        let out = result.image.channel(0);
-        let ow = result.image.width();
-
-        // Check interior pixels, allowing different interpolation effects per kernel
-        let mut max_diff = 0.0f32;
-        let mut checked = 0;
-        for y in 5..15 {
-            for x in 5..15 {
-                let idx = y * ow + x;
-                let vs = out_sq[idx];
-                let vk = out[idx];
-                if vs > 0.0 && vk > 0.0 {
-                    let diff = (vs - vk).abs();
-                    max_diff = max_diff.max(diff);
-                    checked += 1;
+    let shifted = Transform::translation(DVec2::new(0.25, 0.15));
+    let halved = Transform::affine([0.5, 0.0, 0.25, 0.0, 0.5, 0.25]);
+    let cases: [(&str, Transform, &[DrizzleKernel], RangeInclusive<usize>); 2] = [
+        (
+            "shifted",
+            shifted,
+            &[DrizzleKernel::Turbo, DrizzleKernel::Square],
+            2..=20,
+        ),
+        ("halved", halved, &DrizzleKernel::ALL, 4..=7),
+    ];
+    for (name, transform, kernels, interior) in cases {
+        let preimage = transform.inverse();
+        for &kernel in kernels {
+            let product = drizzle_one(
+                size,
+                kernel_config(kernel, 1.0, 1.0),
+                image.clone(),
+                &transform,
+                None,
+            );
+            for y in interior.clone() {
+                for x in interior.clone() {
+                    let source = preimage.apply(DVec2::new(x as f64, y as f64));
+                    let expected = ramp(source.x, source.y);
+                    let actual = f64::from(product.image.channel(0)[(x, y)]);
+                    assert!(
+                        (actual - expected).abs() <= bound,
+                        "{name} {kernel:?} ({x}, {y}): {actual}, expected {expected}"
+                    );
                 }
             }
         }
-        assert!(
-            checked > 50,
-            "{kernel:?}: not enough covered pixels ({checked})"
-        );
-        // Different kernels interpolate differently, but on a smooth gradient with
-        // sub-pixel shift, they should all be within ~0.15 of Square kernel.
-        // The important thing is Jacobian doesn't introduce large systematic errors.
-        assert!(
-            max_diff < 0.2,
-            "{kernel:?} vs Square: max_diff={max_diff:.4}, expected < 0.2"
-        );
     }
 }

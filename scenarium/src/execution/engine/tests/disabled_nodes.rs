@@ -69,8 +69,8 @@ async fn a_disabled_producer_on_an_optional_input_delivers_unbound() {
             .output(DataType::Int)
             .compute(|inputs| inputs[0].as_i64().unwrap_or_default().into())
     });
-    g.add("mult", |n| n.mult());
-    g.add("print", |n| n.records());
+    g.add("mult", NodeSpec::mult);
+    g.add("print", NodeSpec::records);
     g.wire("src", 0, "disabled", 0);
     g.wire("src", 0, "mult", 0);
     g.wire("disabled", 0, "mult", 1);
@@ -92,4 +92,42 @@ async fn a_disabled_producer_on_an_optional_input_delivers_unbound() {
         "the optional input read as unbound, so `mult` multiplied by its \
          own identity of 1 rather than reading a value nothing wrote",
     );
+}
+
+/// The warm counterpart: a consumer that cached its value while the producer ran must not serve it
+/// once the producer is disabled. Its optional input now reads unbound, so its key has to be the
+/// unbound one — `mult` held in RAM at 7·7 = 49 must recompute to 7·1 = 7, and a digest that still
+/// folded the disabled producer's last stamp would serve the 49.
+#[tokio::test]
+async fn disabling_a_producer_rekeys_its_cached_consumer() {
+    let mut g = TestGraph::new();
+    g.add("src", |n| n.pure().returns(7i64));
+    g.add("feed", |n| {
+        n.pure()
+            .input(DataType::Int)
+            .output(DataType::Int)
+            .compute(|inputs| inputs[0].as_i64().unwrap_or_default().into())
+    });
+    g.add("mult", |n| n.mult().cache(CacheMode::Ram));
+    g.add("print", NodeSpec::records);
+    g.wire("src", 0, "feed", 0);
+    g.wire("src", 0, "mult", 0);
+    g.wire("feed", 0, "mult", 1);
+    g.wire("mult", 0, "print", 0);
+
+    let mut e = TestEngine::over(g);
+    assert_eq!(e.run_sinks().await.logs(), ["49"]);
+
+    e.edit(|g| g.disable("feed"));
+    let run = e.run_sinks().await;
+    assert_eq!(
+        run.logs(),
+        ["7"],
+        "the cached 49 was keyed on the live producer"
+    );
+    assert_eq!(run.ran(), ["src", "mult", "print"]);
+
+    // Enabled again, the producer's key comes back, and so does the value cached under it.
+    e.edit(|g| g.enable("feed"));
+    assert_eq!(e.run_sinks().await.logs(), ["49"]);
 }

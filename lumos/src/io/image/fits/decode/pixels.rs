@@ -9,11 +9,14 @@ use rayon::prelude::*;
 
 use common::CancelToken;
 
+use crate::io::cancelled::Cancelled;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode::DecodedFitsImage;
 use crate::io::image::fits::decode::plan::FitsDecodePlan;
 use crate::io::image::fits::error::{fits_err, fits_unsupported};
-use crate::io::image::fits::metadata::{read_metadata, read_row_order, read_text};
+use crate::io::image::fits::metadata::{
+    read_cfa_from_headers, read_metadata, read_row_order, read_text,
+};
 use crate::io::image::fits::options::FitsNullPolicy;
 use crate::io::image::fits::provenance::{
     FitsChecksumProvenance, FitsHduProvenance, FitsTransferProvenance,
@@ -27,6 +30,7 @@ use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::null_mask::NullMask;
 use crate::math::statistics::median_mut;
+use crate::math::statistics::subsample::Subsample;
 
 pub(super) fn read_stream_hdu(
     reader: &mut StreamReader<File>,
@@ -60,6 +64,21 @@ pub(super) fn read_decoded_hdu(
         peak_bytes = plan.peak_bytes,
         "FITS image passed header-first memory preflight"
     );
+    // The keywords that can fail a load are read before a plane is: a frame they refuse costs no
+    // decode.
+    let cfa_type = read_cfa_from_headers(header, context.fits.unstated_bayer_pattern)
+        .map_err(|source| fits_err(path, source))?;
+    let row_order = read_row_order(header).map_err(|source| fits_err(path, source))?;
+    // The unit is half the sample domain, which decides whether frames combine. An all-blank BUNIT
+    // parses to the single significant space §4.2.1.1 requires, which states no unit rather than an
+    // empty one — left alone it would disagree with every real unit. Surrounding blanks are a
+    // writer artifact rather than part of a unit name, so both ends go, and the domain comparison
+    // downstream is then plain equality — see `SampleDomain::conversion_to` for why it stops there
+    // and does not fold case.
+    let unit = read_text(header, "BUNIT")
+        .map_err(|source| fits_err(path, source))?
+        .map(|unit| unit.trim().to_owned())
+        .filter(|unit| !unit.is_empty());
     let channel_count = if plan.dimensions.is_rgb() { 3 } else { 1 };
     let mut planes = ArrayVec::<DecodedPlane, 3>::new();
     for channel in 0..channel_count {
@@ -77,12 +96,11 @@ pub(super) fn read_decoded_hdu(
         planes.into_iter().map(|plane| plane.samples),
     );
 
-    let mut metadata =
-        read_metadata(header, plan.shape, plan.bitpix).map_err(|source| fits_err(path, source))?;
+    let mut metadata = read_metadata(header, plan.shape, plan.sample_type);
     // DATAMAX is a saturation level in the file's sample units, so it only stays comparable to the
     // samples if it is divided by the same span they were.
     if let Some(data_max) = &mut metadata.data_max {
-        *data_max /= f64::from(plan.sample_divisor);
+        *data_max /= f64::from(plan.sample_scale.divisor);
     }
     metadata.provenance = Some(ImageProvenance {
         container: SourceContainer::Fits,
@@ -90,20 +108,13 @@ pub(super) fn read_decoded_hdu(
         transfer: TransferProvenance::FitsNormalized(FitsTransferProvenance {
             bscale: plan.scaling.bscale,
             bzero: plan.scaling.bzero,
-            physical_scale: plan.sample_divisor,
-            // An all-blank BUNIT parses to the single significant space §4.2.1.1 requires, which
-            // states no unit rather than an empty one — left alone it would disagree with every
-            // real unit. Surrounding blanks are a writer artifact rather than part of a unit name,
-            // so both ends go, and the domain comparison downstream is then plain equality — see
-            // `SampleDomain::commensurate_with` for why it stops there and does not fold case.
-            unit: read_text(header, "BUNIT")
-                .map_err(|source| fits_err(path, source))?
-                .map(|unit| unit.trim().to_owned())
-                .filter(|unit| !unit.is_empty()),
+            physical_scale: plan.sample_scale.physical,
+            scale_origin: plan.sample_scale.origin,
+            unit,
             hdu,
             checksum,
         }),
-        color: if metadata.cfa_type.is_some() {
+        color: if cfa_type.is_some() {
             ColorProvenance::SensorCfa
         } else if plan.dimensions.is_grayscale() {
             ColorProvenance::Monochrome
@@ -115,11 +126,12 @@ pub(super) fn read_decoded_hdu(
         // Recorded, not acted on: the rows above were copied in file order whatever this says, and
         // only the Bayer phase was corrected for it. What it buys is that a set mixing the two
         // orders — which loads as mutually mirrored images — can be named as such.
-        row_order: read_row_order(header).map_err(|source| fits_err(path, source))?,
+        row_order,
     });
 
     Ok(DecodedFitsImage {
         metadata,
+        cfa_type,
         pixels,
         nulls,
     })
@@ -214,22 +226,21 @@ const FILL_MEDIAN_SAMPLES: usize = 100_000;
 /// What sits under a null is not data and [`NullMask`] says so, but the stages that measure a whole
 /// plane mostly do not consult the mask, so this value is what they see. The median is the frame's
 /// own background level, which leaves a masked region a flat patch instead of the hard-edged hole a
-/// zero fill would cut — and a hard edge is what manufactures star detections and drags a background
-/// estimate. A deliberate stand-in, not a correction.
+/// zero fill would cut — and a hard edge is what manufactures star detections and drags a
+/// background estimate. A deliberate stand-in, not a correction.
 fn fill_nulls(samples: &mut [f32], null_count: usize) {
     debug_assert!(null_count > 0 && null_count <= samples.len());
     // Every `stride`-th *finite* sample rather than every `stride`-th sample: nulls arrive in
     // regions — a mosaic edge, a coverage gap — so striding the plane itself would draw its whole
     // quota from one side of a frame that is masked down the other.
-    let valid = samples.len() - null_count;
-    let stride = valid.div_ceil(FILL_MEDIAN_SAMPLES).max(1);
-    let mut finite = Vec::with_capacity(valid.div_ceil(stride));
+    let sample = Subsample::new(samples.len() - null_count, FILL_MEDIAN_SAMPLES);
+    let mut finite = Vec::with_capacity(sample.count());
     finite.extend(
         samples
             .iter()
             .copied()
             .filter(|value| value.is_finite())
-            .step_by(stride),
+            .step_by(sample.stride()),
     );
     // A wholly-null plane has no level of its own to borrow, and no guess is better than any
     // other. The mask says every pixel of it is missing, which is the part that has to survive.
@@ -280,11 +291,10 @@ fn read_fits_plane(
             ));
         }
         let chunk_nulls =
-            normalize_and_locate_nulls(&mut pixels, plan.sample_divisor, &context.cancel).map_err(
-                |Cancelled| ImageError::Cancelled {
+            normalize_and_locate_nulls(&mut pixels, plan.sample_scale.divisor, &context.cancel)
+                .map_err(|Cancelled| ImageError::Cancelled {
                     path: path.to_path_buf(),
-                },
-            )?;
+                })?;
         // Each chunk locates its nulls in its own index space; the plane's is what a caller can act
         // on, so the offset is applied here rather than threaded into the pass.
         if let Some(chunk_nulls) = chunk_nulls {
@@ -316,7 +326,7 @@ struct NullSummary {
 
 impl NullSummary {
     /// Restate this summary in an index space `by` samples earlier — a chunk's, in its plane's.
-    fn offset_by(self, by: usize) -> Self {
+    const fn offset_by(self, by: usize) -> Self {
         Self {
             count: self.count,
             first_index: self.first_index + by,
@@ -332,10 +342,6 @@ impl NullSummary {
     }
 }
 
-/// The only way the pass below fails, now that a null is data rather than an error.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Cancelled;
-
 /// Divide a decode chunk into the pipeline's `[0, 1]` domain and locate the FITS nulls it carries,
 /// in one pass over the samples.
 ///
@@ -350,9 +356,9 @@ struct Cancelled;
 /// than reaching the image.
 ///
 /// Divides rather than multiplying by a precomputed reciprocal: the reciprocal of a span like 65535
-/// is inexact in `f32`, and precision outranks throughput here. The `divisor == 1.0` test is hoisted
-/// out of the loop rather than left in it — dividing by one is exact but not free, and it is the
-/// common case for a floating-point HDU.
+/// is inexact in `f32`, and precision outranks throughput here. The `divisor == 1.0` test is
+/// hoisted out of the loop rather than left in it — dividing by one is exact but not free, and it
+/// is the common case for a floating-point HDU.
 ///
 /// Locating the offending samples is a second scan that only a chunk holding one pays for, so a
 /// frame with no nulls — every frame from a sensor — never runs it at all.
@@ -421,8 +427,9 @@ fn summarize_nulls(chunk: &[f32], chunk_start: usize) -> NullSummary {
 mod tests {
     use common::CancelToken;
 
+    use crate::io::cancelled::Cancelled;
     use crate::io::image::fits::decode::pixels::{
-        Cancelled, FILL_MEDIAN_SAMPLES, NullSummary, fill_nulls, normalize_and_locate_nulls,
+        FILL_MEDIAN_SAMPLES, NullSummary, fill_nulls, normalize_and_locate_nulls,
     };
 
     #[test]
@@ -484,7 +491,7 @@ mod tests {
     }
 
     #[test]
-    fn non_finite_pixels_return_exact_summary_for_every_sample_type() {
+    fn nan_and_both_infinities_are_counted_after_the_divide() {
         // Nulls survive the divide, which is what lets the test run after it rather than before:
         // a NaN or ±inf divided by any span is still one, and is still counted here.
         let mut pixels = [0.0, f32::NAN, 5.0, f32::INFINITY, f32::NEG_INFINITY];
@@ -553,9 +560,9 @@ mod tests {
         fill_nulls(&mut samples, 1);
         assert_eq!(samples[VALID], 99_999.0);
 
-        // The stride runs over the finite samples, not over plane positions: masking the whole first
-        // half would otherwise spend that half of the quota on pixels that are dropped anyway, and
-        // draw the median from the tail alone.
+        // The stride runs over the finite samples, not over plane positions: masking the whole
+        // first half would otherwise spend that half of the quota on pixels that are dropped
+        // anyway, and draw the median from the tail alone.
         let mut lopsided: Vec<f32> = (0..VALID)
             .map(|index| {
                 if index < VALID / 2 {

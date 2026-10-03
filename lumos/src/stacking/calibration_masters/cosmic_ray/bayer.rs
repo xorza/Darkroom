@@ -10,6 +10,7 @@ use rayon::prelude::*;
 use crate::math::size2us::Size2us;
 use crate::stacking::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::stacking::calibration_masters::cosmic_ray::mono::MonoDetector;
+use crate::stacking::calibration_masters::cosmic_ray::noise_model::NoiseModel;
 
 /// The Bayer detector: a mono detector, plus the buffer each phase is deinterleaved into.
 ///
@@ -22,10 +23,20 @@ pub(super) struct BayerDetector<'a> {
 }
 
 impl<'a> BayerDetector<'a> {
-    pub(super) fn new(config: &'a CosmicRayConfig) -> Self {
+    pub(super) fn new(config: &'a CosmicRayConfig, noise: NoiseModel) -> Self {
         Self {
-            mono: MonoDetector::new(config),
+            mono: MonoDetector::new(config, noise),
             plane: Vec::new(),
+        }
+    }
+
+    /// The bytes a detection on a `size` mosaic allocates beside it: the largest phase plane and
+    /// the mono detector's scratch over it, or nothing when even that phase is too small to scan.
+    pub(super) fn heap_bytes(size: Size2us) -> usize {
+        let phase = Size2us::new(size.width.div_ceil(2), size.height.div_ceil(2));
+        match MonoDetector::heap_bytes(phase) {
+            0 => 0,
+            mono => phase.pixel_count() * size_of::<f32>() + mono,
         }
     }
 
@@ -46,8 +57,8 @@ impl<'a> BayerDetector<'a> {
                     continue;
                 }
 
-                // Deinterleave: plane row j is mosaic row 2j+b, every second pixel from column a. Every
-                // element is written, so `resize` only has to get the length right.
+                // Deinterleave: plane row j is mosaic row 2j+b, every second pixel from column a.
+                // Every element is written, so `resize` only has to get the length right.
                 plane.resize(pw * ph, 0.0);
                 let mosaic = &*data;
                 plane.par_chunks_mut(pw).enumerate().for_each(|(j, row)| {

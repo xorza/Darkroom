@@ -1,40 +1,23 @@
+use std::error::Error;
+
+use ron::ser;
 use ron::value::RawValue;
 
-use crate::EventLambda;
 use crate::execution::compile::compiled_graph::ExecutionBinding;
 use crate::graph::Graph;
-use crate::graph::error::GraphValidationError;
+use crate::graph::error::{DetachedNodeError, GraphValidationError};
 use crate::graph::func::Func;
 use crate::graph::identity::FuncId;
 use crate::graph::node::{CacheMode, Node, NodeKind};
-use crate::graph::output_types::OutputTypes;
-use crate::graph::{Binding, InputPort, NodeId, OutputPort, Subscription};
+use crate::graph::{Binding, BindingEntry, InputPort, NodeId, OutputPort, Subscription};
+use crate::testing;
 use crate::testing::graph::{NodeSpec, TestGraph};
 use crate::{ConstValue, DataType, DetachedNode};
 use common::{SerdeFormat, deserialize, serialize};
+use std::panic;
+use std::panic::AssertUnwindSafe;
 
-type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-
-/// The effective type at one of `name`'s output ports, through the graph's one
-/// resolver.
-///
-/// Every case below names a port a resolvable node declares, so the table
-/// covers it. A miss is the fixture naming a port that is not there — not an
-/// `Any` to assert on, which is what an unresolvable *chain* gives.
-fn output_type(g: &TestGraph, name: &str, port: usize) -> DataType {
-    let mut types = OutputTypes::default();
-    types.update(&g.graph, &g.library);
-    types
-        .get(OutputPort::new(g.id(name), port))
-        .expect("the fixture names a declared output port")
-        .clone()
-}
-
-/// A passthrough node — one `Any` input, one wildcard output mirroring it. The
-/// generic hop for testing wildcard type resolution through a node.
-fn passthrough(n: NodeSpec) -> NodeSpec {
-    n.input(DataType::Any).wildcard(0)
-}
+type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 
 #[test]
 fn validate_passes_for_valid_graph() {
@@ -59,9 +42,6 @@ fn cache_mode_bits_and_from_bits_round_trip() {
             "from_bits({ram},{disk})"
         );
     }
-    // Distinct modes must not share a bit pattern (guards a botched refactor).
-    assert_ne!(CacheMode::Ram, CacheMode::Disk);
-    assert_ne!(CacheMode::None, CacheMode::Both);
 }
 
 #[test]
@@ -78,7 +58,7 @@ fn cache_mode_round_trips() {
         g.add("src", |n| n.pure().output(DataType::Int));
         g.cache("src", mode);
 
-        for format in [SerdeFormat::Ron, SerdeFormat::Bitcode] {
+        for format in SerdeFormat::ALL {
             let bytes = serialize(&g.graph, format).unwrap();
             let back: Graph = deserialize(&bytes, format).unwrap();
             assert_eq!(
@@ -96,14 +76,14 @@ fn a_new_node_takes_what_its_declaration_says() {
 
     // A fresh func node inherits its func's `default_cache_mode` — the out-of-box
     // `None`, or whatever the func's builder raised it to.
-    let plain = Func::new(FuncId::unique(), "plain");
+    let plain = testing::stub_func(FuncId::unique(), "plain");
     assert_eq!(
         Node::from(&plain).cache,
         CacheMode::None,
         "default func → no caching"
     );
 
-    let hot = Func::new(FuncId::unique(), "hot").default_cache_mode(CacheMode::Both);
+    let hot = testing::stub_func(FuncId::unique(), "hot").default_cache_mode(CacheMode::Both);
     assert_eq!(
         Node::from(&hot).cache,
         CacheMode::Both,
@@ -240,30 +220,30 @@ fn resolve_output_type_follows_passthrough_chain() {
     // (wildcard) output, but the resolved type must be the producer's `Int`.
     let mut g = TestGraph::new();
     g.add("src", |n| n.pure().output(DataType::Int));
-    g.add("pass1", passthrough);
+    g.add("pass1", NodeSpec::passthrough);
     g.instance("pass2", "pass1");
     g.wire("src", 0, "pass1", 0);
     g.wire("pass1", 0, "pass2", 0);
 
     // The producer reports its own declared type.
-    assert_eq!(output_type(&g, "src", 0), DataType::Int);
+    assert_eq!(g.output_type("src", 0), DataType::Int);
     // Each passthrough mirrors what flows through, transitively.
-    assert_eq!(output_type(&g, "pass1", 0), DataType::Int);
-    assert_eq!(output_type(&g, "pass2", 0), DataType::Int);
+    assert_eq!(g.output_type("pass1", 0), DataType::Int);
+    assert_eq!(g.output_type("pass2", 0), DataType::Int);
 
     // An unbound value input leaves the passthrough polymorphic (`Any`),
     // so its output accepts any consumer again.
     g.unbind("pass1", 0);
-    assert_eq!(output_type(&g, "pass1", 0), DataType::Any);
+    assert_eq!(g.output_type("pass1", 0), DataType::Any);
     // The taint flows downstream: pass2 now reads pass1's `Any`.
-    assert_eq!(output_type(&g, "pass2", 0), DataType::Any);
+    assert_eq!(g.output_type("pass2", 0), DataType::Any);
 
     // A scalar const carries its type, so the output resolves to it (and
     // propagates downstream) — a const isn't "no type".
     g.constant("pass1", 0, ConstValue::Bool(true));
-    assert_eq!(output_type(&g, "pass1", 0), DataType::Bool);
+    assert_eq!(g.output_type("pass1", 0), DataType::Bool);
     assert_eq!(
-        output_type(&g, "pass2", 0),
+        g.output_type("pass2", 0),
         DataType::Bool,
         "the const's type propagates through the second passthrough too"
     );
@@ -272,7 +252,7 @@ fn resolve_output_type_follows_passthrough_chain() {
     // enum literal on an `Any` (wildcard) input — stays polymorphic rather
     // than panicking. (The passthrough's value input is `Any`-declared.)
     g.constant("pass1", 0, ConstValue::Enum("X".into()));
-    assert_eq!(output_type(&g, "pass1", 0), DataType::Any);
+    assert_eq!(g.output_type("pass1", 0), DataType::Any);
 }
 
 #[test]
@@ -294,8 +274,8 @@ fn resolve_output_type_uses_declared_type_for_typed_const_input() {
     // bare `ConstValue` lacks.
     g.constant("reroute", 0, ConstValue::FsPath("/tmp/x".into()));
     g.constant("reroute", 1, ConstValue::Enum("A".into()));
-    assert_eq!(output_type(&g, "reroute", 0), fs_ty);
-    assert_eq!(output_type(&g, "reroute", 1), enum_ty);
+    assert_eq!(g.output_type("reroute", 0), fs_ty);
+    assert_eq!(g.output_type("reroute", 1), enum_ty);
 }
 
 #[test]
@@ -303,7 +283,7 @@ fn type_mismatched_wiring_lowers_as_unbound_through_wildcard_chains() {
     let mut g = TestGraph::new();
     g.add("float_src", |n| n.pure().output(DataType::Float));
     g.add("str_src", |n| n.pure().output(DataType::String));
-    g.add("pass1", passthrough);
+    g.add("pass1", NodeSpec::passthrough);
     g.instance("pass2", "pass1");
     g.add("sink", |n| n.sink().input(DataType::Float));
     g.wire("float_src", 0, "pass1", 0);
@@ -332,16 +312,9 @@ fn type_mismatched_wiring_lowers_as_unbound_through_wildcard_chains() {
 }
 
 #[test]
-fn node_remove_test() -> TestResult {
+fn removing_a_node_drops_it_and_every_edge_touching_it() {
     let mut g = TestGraph::sample();
-
     let sum = g.id("sum");
-    g.cache("sum", CacheMode::Ram);
-    assert_eq!(g.graph.find_by_name("sum").unwrap().cache, CacheMode::Ram);
-    for node in g.graph.nodes.values_mut() {
-        node.disabled = true;
-    }
-    assert!(g.graph.iter().all(|node| node.disabled));
 
     g.remove("sum");
 
@@ -353,8 +326,6 @@ fn node_remove_test() -> TestResult {
         assert_ne!(dst.node_id, sum);
         assert_ne!(src.node_id, sum);
     }
-
-    Ok(())
 }
 
 /// The rule the editor applies before it lets a wire land: a back-edge closes
@@ -366,7 +337,7 @@ fn produces_cycle_detects_direct_and_transitive_loops() {
     // A passthrough is both consumer and producer, so it can chain:
     // a → b → c, with d left unconnected.
     let mut g = TestGraph::new();
-    g.add("a", passthrough);
+    g.add("a", NodeSpec::passthrough);
     g.instance("b", "a");
     g.instance("c", "a");
     g.instance("d", "a");
@@ -392,7 +363,7 @@ fn produces_cycle_detects_direct_and_transitive_loops() {
 #[test]
 fn produces_cycle_reaches_a_producer_past_a_const_and_an_unbound_port() {
     let mut g = TestGraph::new();
-    g.add("a", passthrough);
+    g.add("a", NodeSpec::passthrough);
     g.instance("b", "a");
     g.add("wide", |n| {
         n.input(DataType::Any)
@@ -419,16 +390,6 @@ fn produces_cycle_reaches_a_producer_past_a_const_and_an_unbound_port() {
     // const on port 0 is not an edge anything can be reached through.
     assert!(!closes("a", "wide"), "a reads from nothing");
     assert!(!closes("b", "wide"), "b reads only from a");
-}
-
-#[test]
-fn typed_id_from_str_preserves_uuid_error() {
-    let input = "not-a-uuid";
-    let error: uuid::Error = input.parse::<FuncId>().unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        uuid::Uuid::parse_str(input).unwrap_err().to_string()
-    );
 }
 
 #[test]
@@ -525,50 +486,115 @@ fn subscribe_unsubscribe_is_subscribed() {
     assert_eq!(g.graph.subscriptions().count(), 0);
 }
 
+/// A detached node carries exactly the wiring that touched it, and attaching it
+/// restores the graph. `DetachedNode::new` puts a record from outside in the
+/// graph's order and refuses one that could not have come out of a graph; a
+/// record that could has to meet a graph it fits, or the attach panics with the
+/// graph untouched. A nil id is simply absent from every lookup.
 #[test]
-fn wiring_snapshot_round_trips_through_serde_and_restore() -> TestResult {
+fn a_detached_node_restores_its_wiring_and_malformed_records_are_refused() {
     let mut g = TestGraph::sample();
+    assert!(g.graph.find(NodeId::nil()).is_none());
+    assert!(g.library.by_id(FuncId::nil()).is_none());
     let sum = g.id("sum");
-    // Add a subscription that touches `sum` so both arms are exercised.
-    g.subscribe("get_a", 0, "sum");
     let get_a = g.id("get_a");
-
-    let bindings = g.graph.bindings_touching(sum);
-    assert_eq!(bindings.len(), 3);
+    let mult = g.id("mult");
+    // A subscription that touches `sum`, so both kinds of wiring travel.
+    g.subscribe("get_a", 0, "sum");
+    // Its own two inputs, in port order; the binding that reads it is not one.
+    assert_eq!(
+        g.graph
+            .input_bindings(sum)
+            .map(|(port, _)| port)
+            .collect::<Vec<_>>(),
+        [InputPort::new(sum, 0), InputPort::new(sum, 1)]
+    );
 
     let before = g.graph.clone_verbatim();
     let edges_before = g.graph.edges().count();
     let detached = g.remove("sum");
     assert_eq!(g.graph.edges().count(), edges_before - 3);
     assert!(!g.graph.is_subscribed(get_a, 0, sum));
+    assert_eq!(detached.bindings().len(), 3);
+    assert_eq!(detached.subscriptions().len(), 1);
 
-    let serialized = serialize(&detached, SerdeFormat::Bitcode)?;
-    let decoded: DetachedNode = deserialize(&serialized, SerdeFormat::Bitcode)?;
-    assert_eq!(decoded, detached);
+    let rebuild = |bindings: Vec<BindingEntry>, subscriptions: Vec<Subscription>| {
+        DetachedNode::new(sum, detached.node().clone(), bindings, subscriptions)
+    };
+    let mut reversed = detached.bindings().to_vec();
+    reversed.reverse();
+    assert_eq!(
+        rebuild(reversed, detached.subscriptions().to_vec()),
+        Ok(detached.clone()),
+        "a record from outside is put in the graph's order"
+    );
 
-    let mut nil_id = detached.clone();
-    nil_id.node_id = NodeId::nil();
-    let mut mismatched = detached.clone();
-    mismatched.node_id = NodeId::unique();
-    for invalid in [nil_id, mismatched] {
-        let serialized = serialize(&invalid, SerdeFormat::Ron)?;
-        let decoded_invalid: DetachedNode = deserialize(&serialized, SerdeFormat::Ron)?;
-        let detached_graph = g.graph.clone_verbatim();
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            g.graph.attach_node(decoded_invalid);
-        }));
-        assert!(result.is_err());
-        assert_eq!(
-            g.graph, detached_graph,
-            "failed attachment mutated the graph"
-        );
+    let foreign_port = InputPort::new(mult, 1);
+    let foreign = BindingEntry {
+        port: foreign_port,
+        binding: Binding::Const(1i64.into()),
+    };
+    let first = detached.bindings()[0].clone();
+    let elsewhere = Subscription {
+        emitter: get_a,
+        event_idx: 0,
+        subscriber: mult,
+    };
+    let own = detached.subscriptions()[0];
+    let refusals = [
+        (
+            DetachedNode::new(
+                NodeId::nil(),
+                detached.node().clone(),
+                Vec::new(),
+                Vec::new(),
+            ),
+            DetachedNodeError::NilNodeId,
+        ),
+        (
+            rebuild(vec![foreign], Vec::new()),
+            DetachedNodeError::ForeignBinding { port: foreign_port },
+        ),
+        (
+            rebuild(vec![first.clone(), first.clone()], Vec::new()),
+            DetachedNodeError::DuplicateBinding { port: first.port },
+        ),
+        (
+            rebuild(Vec::new(), vec![elsewhere]),
+            DetachedNodeError::ForeignSubscription {
+                subscription: elsewhere,
+            },
+        ),
+        (
+            rebuild(Vec::new(), vec![own, own]),
+            DetachedNodeError::DuplicateSubscription { subscription: own },
+        ),
+    ];
+    for (result, error) in refusals {
+        assert_eq!(result, Err(error));
     }
 
-    g.graph.attach_node(decoded);
+    // Serialized, a record round-trips; deserializing goes through the same
+    // refusals, so a record edited into a nil id fails to decode.
+    let bytes = serialize(&detached, SerdeFormat::Bitcode).unwrap();
+    let decoded: DetachedNode = deserialize(&bytes, SerdeFormat::Bitcode).unwrap();
+    assert_eq!(decoded, detached);
+    let text = String::from_utf8(serialize(&detached, SerdeFormat::Ron).unwrap()).unwrap();
+    let nil = text.replace(&sum.to_string(), &NodeId::nil().to_string());
+    assert_ne!(nil, text, "the id is spelled in the text");
+    assert!(deserialize::<DetachedNode>(nil.as_bytes(), SerdeFormat::Ron).is_err());
 
+    g.graph.attach_node(detached.clone());
     assert_eq!(g.graph, before);
-
-    Ok(())
+    let attached = g.graph.clone_verbatim();
+    let twice = panic::catch_unwind(AssertUnwindSafe(|| {
+        g.graph.attach_node(detached);
+    }));
+    assert!(
+        twice.is_err(),
+        "a node already in the graph is not attached again"
+    );
+    assert_eq!(g.graph, attached, "a refused attach leaves the graph alone");
 }
 
 /// Placing a node seeds a const binding for every input its declaration gave a
@@ -608,7 +634,7 @@ fn add_func_node_seeds_only_the_inputs_with_defaults() {
 #[test]
 fn serialization_round_trips_a_graph_through_every_format() -> TestResult {
     let graph = TestGraph::sample().graph;
-    for format in SerdeFormat::all_formats_for_testing() {
+    for format in SerdeFormat::ALL {
         let serialized = serialize(&graph, format)?;
         let deserialized: Graph = deserialize(&serialized, format)?;
         assert_eq!(graph, deserialized, "{format:?} round-trips a graph whole");
@@ -622,6 +648,16 @@ fn serialization_round_trips_a_graph_through_every_format() -> TestResult {
 /// graph's own mutations *assert* gets **checked** instead.
 #[test]
 fn loading_rejects_a_corrupt_graph() {
+    // A mirror of `Graph`'s wire shape. `RawValue` keeps every field's exact text,
+    // so the duplicated entry below is the only thing authored. The mirror names
+    // every field, so a new one on `Graph` fails its decode, which points here.
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct WireGraph {
+        nodes: Box<RawValue>,
+        bindings: Vec<Box<RawValue>>,
+        subscriptions: Box<RawValue>,
+    }
+
     let mut g = TestGraph::sample();
     g.graph.set_input_binding(
         InputPort::new(g.id("sum"), 0),
@@ -655,21 +691,10 @@ fn loading_rejects_a_corrupt_graph() {
 
     // Bindings decode from a sequence into a map, so a repeated input port is
     // caught during decode rather than by validation after it.
-    // `RawValue` keeps every field's exact text, so the duplicated entry is
-    // the only thing authored here. The mirror has to name every field, so a
-    // new one on `Graph` fails this decode — which points here, not at the
-    // assertion below.
-    #[derive(serde::Serialize, serde::Deserialize)]
-    struct WireGraph {
-        nodes: Box<RawValue>,
-        bindings: Vec<Box<RawValue>>,
-        subscriptions: Box<RawValue>,
-    }
-
-    let encoded = ron::ser::to_string(&TestGraph::sample().graph).unwrap();
+    let encoded = ser::to_string(&TestGraph::sample().graph).unwrap();
     let mut wire: WireGraph = ron::from_str(&encoded).expect("the wire shape still matches");
     wire.bindings.push(wire.bindings[0].clone());
-    let bytes = ron::ser::to_string(&wire).unwrap().into_bytes();
+    let bytes = ser::to_string(&wire).unwrap().into_bytes();
     let error = deserialize::<Graph>(&bytes, SerdeFormat::Ron)
         .expect_err("a duplicate input port cannot decode into the binding map");
     assert!(
@@ -716,7 +741,7 @@ fn validate_tolerates_library_range_drift() {
 /// the drift guards do `is_some_and(|p| idx >= p.len())`, so the two decide
 /// opposite ways.
 #[test]
-fn node_func_resolves_to_a_declaration_or_to_unknown() {
+fn a_node_resolves_its_declaration_or_reads_unknown() {
     let mut g = TestGraph::new();
     g.add("sum", |n| {
         n.pure()
@@ -727,7 +752,7 @@ fn node_func_resolves_to_a_declaration_or_to_unknown() {
 
     let declared = g.library.by_name("sum").unwrap().clone();
     let node = g.graph.find(g.id("sum")).unwrap();
-    let ports = g.graph.node_func(node, &g.library).unwrap();
+    let ports = node.func(&g.library).unwrap();
     assert_eq!(ports.name, "sum");
     assert_eq!(ports.inputs.len(), declared.inputs.len());
     assert_eq!(ports.id, declared.id);
@@ -735,29 +760,7 @@ fn node_func_resolves_to_a_declaration_or_to_unknown() {
     // Library drift is unknown, not empty — otherwise every port on a node
     // whose func went missing would read as out of range.
     let missing_func = Node::new(NodeKind::Func(FuncId::unique()));
-    assert!(g.graph.node_func(&missing_func, &g.library).is_none());
-
-    // The three policy flags come off the declaration verbatim. Each is set
-    // on one of the two funcs and clear on the other, so a flag wired to the
-    // wrong field can't pass.
-    g.add("plain", |n| n.pure().output(DataType::Int));
-    g.add("flagged", |n| {
-        n.sink().uncacheable().optional(DataType::Int)
-    });
-    let func = |g: &TestGraph, name: &str| g.library.by_name(name).unwrap().clone();
-
-    let plain = func(&g, "plain");
-    assert!(!plain.sink);
-    assert!(!plain.uncacheable);
-    assert!(!plain.impure(), "declared `pure` is not impure");
-
-    let flagged = func(&g, "flagged");
-    assert!(flagged.sink);
-    assert!(flagged.uncacheable);
-    assert!(
-        flagged.impure(),
-        "a func is Impure until `pure()` says otherwise"
-    );
+    assert!(missing_func.func(&g.library).is_none());
 }
 
 #[test]
@@ -775,15 +778,141 @@ fn input_type_resolves_declared_types_and_rejects_out_of_range() {
     assert_eq!(g.graph.input_type(&g.library, InputPort::new(dst, 9)), None);
 }
 
-#[test]
-fn node_events_expose_names_and_arity() {
-    let emitter = Func::new(FuncId::unique(), "ticker")
-        .event("tick", EventLambda::default())
-        .event("tock", EventLambda::default());
-    assert_eq!(emitter.events.len(), 2);
-    let names: Vec<&str> = emitter.events.iter().map(|e| e.name.as_str()).collect();
-    assert_eq!(names, ["tick", "tock"]);
+/// A named edit of a func's declaration.
+type FuncEdit = (&'static str, fn(&mut Func));
 
-    let silent = Func::new(FuncId::unique(), "silent");
-    assert!(silent.events.is_empty());
+/// A two-input, one-output, one-event func to hold a signature against.
+fn signed_func() -> Func {
+    use crate::graph::func::{FuncEvent, FuncInput, FuncOutput};
+    Func {
+        inputs: vec![
+            FuncInput::required("a", DataType::Int),
+            FuncInput::optional("b", DataType::String),
+        ],
+        outputs: vec![FuncOutput::new("out", DataType::Float)],
+        events: vec![FuncEvent {
+            name: "tick".into(),
+            event_lambda: testing::stub_event(),
+        }],
+        ..testing::stub_func(FuncId::from_u128(7), "signed")
+    }
+}
+
+/// A signature covers what a document's wiring is indexed by — the ports' names, types and
+/// order, and the events' names — and nothing a binding does not land by.
+#[test]
+fn a_signature_covers_the_ports_and_nothing_else() {
+    use crate::graph::func::OutputType;
+    use crate::graph::func::signature::FuncSignature;
+    use crate::{FsPathConfig, FsPathMode};
+    use std::sync::Arc;
+
+    let signature = FuncSignature::of(&signed_func());
+    let edited = |edit: fn(&mut Func)| {
+        let mut func = signed_func();
+        edit(&mut func);
+        FuncSignature::of(&func)
+    };
+    let moves: [FuncEdit; 7] = [
+        ("an input renamed", |f| f.inputs[0].name = "x".into()),
+        ("an input retyped", |f| {
+            f.inputs[0].data_type = DataType::Float;
+        }),
+        ("the inputs reordered", |f| f.inputs.swap(0, 1)),
+        ("an output dropped", |f| f.outputs.clear()),
+        ("an output made a wildcard", |f| {
+            f.outputs[0].ty = OutputType::Wildcard { mirrors: 0 };
+        }),
+        ("an event renamed", |f| f.events[0].name = "tock".into()),
+        ("a custom type swapped", |f| {
+            f.inputs[1].data_type = DataType::Custom(crate::TypeId::from_u128(1));
+        }),
+    ];
+    for (what, edit) in moves {
+        assert_ne!(edited(edit), signature, "{what}");
+    }
+    let keeps: [FuncEdit; 4] = [
+        ("the func renamed", |f| f.name = "other".into()),
+        ("an input made optional", |f| f.inputs[0].required = false),
+        ("a description added", |f| {
+            f.inputs[0].description = Some("explained".into());
+        }),
+        ("a default value set", |f| {
+            f.inputs[0].default_value = Some(ConstValue::Int(3));
+        }),
+    ];
+    for (what, edit) in keeps {
+        assert_eq!(edited(edit), signature, "{what}");
+    }
+    // A path picker's mode decides what it offers, not where its binding lands.
+    let path = |mode| {
+        let mut func = signed_func();
+        func.inputs[1].data_type = DataType::FsPath(Arc::new(FsPathConfig::new(mode)));
+        FuncSignature::of(&func)
+    };
+    assert_eq!(path(FsPathMode::Directory), path(FsPathMode::NewFile));
+}
+
+/// A node holds the signature of the func it was made from. Once the library's func moves its
+/// ports, validation and reconciling both refuse the node by name; a node that recorded none
+/// adopts the library's; and a func the library lacks is left to render as a stub.
+#[test]
+fn a_node_authored_against_other_ports_is_refused_by_name() {
+    use crate::graph::func::signature::FuncSignature;
+
+    let mut g = TestGraph::new();
+    g.add("f", |n| n.pure().input(DataType::Int).output(DataType::Int));
+    let id = g.id("f");
+    let func_id = match g.graph.find(id).unwrap().kind {
+        NodeKind::Func(func_id) => func_id,
+        NodeKind::Special(_) => unreachable!("the fixture adds a func node"),
+    };
+    let current = FuncSignature::of(g.library.by_id(func_id).unwrap());
+    assert_eq!(g.graph.find(id).unwrap().signature, Some(current));
+    assert!(g.graph.reconcile_signatures(&g.library).is_ok());
+
+    g.edit_func("f", |func| func.inputs[0].data_type = DataType::String);
+    for error in [
+        g.graph.validate_with(&g.library).unwrap_err(),
+        g.graph.reconcile_signatures(&g.library).unwrap_err(),
+    ] {
+        assert!(
+            matches!(&error, GraphValidationError::SignatureMismatch { node_id, func_id: f, .. }
+                if *node_id == id && *f == func_id),
+            "{error}"
+        );
+    }
+
+    g.graph.find_mut(id).unwrap().signature = None;
+    g.graph.reconcile_signatures(&g.library).unwrap();
+    assert_eq!(
+        g.graph.find(id).unwrap().signature,
+        Some(FuncSignature::of(g.library.by_id(func_id).unwrap()))
+    );
+
+    let stub = g
+        .graph
+        .add(Node::new(NodeKind::Func(FuncId::from_u128(99))));
+    assert!(g.graph.reconcile_signatures(&g.library).is_ok());
+    assert_eq!(g.graph.find(stub).unwrap().signature, None);
+}
+
+/// A node's signature survives the document round trip, and a document saved before
+/// signatures were recorded loads with none — for reconciling to adopt.
+#[test]
+fn a_signature_round_trips_and_an_older_document_has_none() -> TestResult {
+    let node = Node::from(&signed_func());
+    let encoded = serialize(&node, SerdeFormat::Ron)?;
+    let decoded: Node = deserialize(&encoded, SerdeFormat::Ron)?;
+    assert_eq!(decoded, node);
+
+    let older: String = String::from_utf8(encoded)?
+        .lines()
+        .filter(|line| !line.contains("signature:"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!older.contains("signature"), "the older form has no field");
+    let decoded: Node = deserialize(older.as_bytes(), SerdeFormat::Ron)?;
+    assert_eq!(decoded.signature, None);
+    Ok(())
 }

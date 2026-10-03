@@ -3,7 +3,6 @@
 
 use crate::DynamicValue;
 use crate::execution::cache::runtime::RuntimeCache;
-use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::schedule::{NodeState, RootFlags, RunSchedule};
 use crate::graph::func::lambda::OutputDemand;
@@ -82,12 +81,9 @@ impl<'a> Sweep<'a> {
 
         let mut cache = RuntimeCache::default();
         cache.install_for_test(program);
-        cache.stamp_digests(program, schedule.executing());
+        cache.stamp_digests(program, &schedule.states, schedule.executing());
         for (node, values) in cached {
-            let digest = cache[node.node_idx]
-                .current_digest
-                .expect("a cached fixture node is reproducible, so it has a digest");
-            cache[node.node_idx].load_output(OutputSnapshot::new(values), Some(digest));
+            cache.prime_hit(node.node_idx, values);
         }
 
         schedule.resolve(program, &mut cache).await;

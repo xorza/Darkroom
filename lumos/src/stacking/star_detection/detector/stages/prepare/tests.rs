@@ -1,9 +1,7 @@
-use crate::io::image::cfa::CfaType;
 use crate::io::image::image_provenance::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
     SourceContainer, TransferProvenance,
 };
-use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::provenance::RawTransferProvenance;
 use crate::stacking::star_detection::detector::stages::prepare::*;
 use crate::testing::prelude::*;
@@ -51,11 +49,10 @@ fn prepare_with_star() {
 }
 
 #[test]
-fn the_median_filter_follows_interpolation_not_the_sensor_pattern() {
+fn the_median_filter_follows_interpolation() {
     #[derive(Debug)]
     struct Case {
         demosaic: Option<DemosaicProvenance>,
-        cfa_type: Option<CfaType>,
         /// The spike after `prepare`: background once the median has erased it, else untouched.
         peak: f32,
     }
@@ -71,33 +68,28 @@ fn the_median_filter_follows_interpolation_not_the_sensor_pattern() {
         // Interpolated: the artifacts the filter exists for are present.
         Case {
             demosaic: Some(DemosaicProvenance::LumosRcd),
-            cfa_type: Some(CfaType::Bayer(CfaPattern::Rggb)),
             peak: 0.1,
         },
-        // libraw's fallback interpolates too, and no longer names a pattern to prove it.
+        // libraw's own processing interpolates too.
         Case {
             demosaic: Some(DemosaicProvenance::LibRaw),
-            cfa_type: None,
             peak: 0.1,
         },
-        // A monochrome sensor's plane is measured, not interpolated — its CFA tag must not
-        // smooth the PSF that FWHM and flux are read off.
+        // A monochrome sensor's plane is measured, not interpolated — nothing may smooth the PSF
+        // that FWHM and flux are read off.
         Case {
             demosaic: Some(DemosaicProvenance::None),
-            cfa_type: Some(CfaType::Mono),
             peak: 0.9,
         },
         // No provenance at all: nothing claims an interpolation, so nothing is suppressed.
         Case {
             demosaic: None,
-            cfa_type: Some(CfaType::Mono),
             peak: 0.9,
         },
     ];
 
     for case in cases {
         let mut image = LinearImage::from_pixels(ImageDimensions::new(size, 1), data.clone());
-        image.metadata.cfa_type = case.cfa_type.clone();
         image.metadata.provenance = case.demosaic.map(|demosaic| ImageProvenance {
             container: SourceContainer::CameraRaw,
             decoder: DecoderProvenance::LibRaw,
@@ -218,6 +210,12 @@ fn prepare_rgb_red_star_survives() {
     let mut pool = DetectionResources::new(Size2us::new(4, 4));
     let out = prepare(&image, &mut pool);
 
-    // Background ~0.10; star pixel should be well above it (~0.10*2/3 + 0.90/3 ≈ 0.37).
-    assert!(out[5] > 0.30, "red star should survive, got {}", out[5]);
+    // Every channel's MAD is 0.01 — R's spread is 8 zeros and 7 of 0.02 about its median 0.11,
+    // the star's 0.79 above the middle — so the weights are equal and the star pixel is the mean
+    // (0.90 + 0.09 + 0.09)/3 = 0.36, to the rounding of three products and two sums (4ε).
+    assert!(
+        (out[5] - 0.36).abs() <= 4.0 * f32::EPSILON * 0.36,
+        "red star pixel {}",
+        out[5]
+    );
 }

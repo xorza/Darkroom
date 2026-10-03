@@ -5,12 +5,13 @@
 //!
 //! # Where a star-detection test goes
 //!
-//! One question decides it: **does the test call the detector, or one stage's function?**
+//! One question decides it: **does the test call several stages together, or one function?**
 //!
-//! - One stage's function — `background_map::estimate`, `gaussian_convolve`, `measure_star` — goes
-//!   in that module's own `tests/`, beside the unit tests for the same code. It does not belong
-//!   here however realistic its fixture is.
-//! - The detector — `detect_stars_test` or `StarDetector::detect` — goes here, in
+//! - One function — `background_map::estimate`, `gaussian_convolve`, `measure_star` — goes in that
+//!   module's own `tests/`, beside the unit tests for the same code. It does not belong here
+//!   however realistic its fixture is.
+//! - Several stages — `detect_stars_test`, which runs thresholding, labeling and deblending as the
+//!   detect stage does, or the whole `StarDetector::detect` — goes here, in
 //!   [`stage_effects`] when the field is built to stress one stage's contribution, or in
 //!   [`pipeline_tests`] when it grades overall detection quality on a kind of field.
 //!
@@ -22,24 +23,65 @@ mod mem_budget_probe;
 mod metric_curves;
 mod pipeline_tests;
 #[cfg(feature = "real-data")]
-mod real_data;
+pub(crate) mod real_data;
 mod stage_effects;
 mod subpixel_accuracy;
 
-use crate::ImageDimensions;
+use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::prelude::*;
-use crate::testing::synthetic::artifacts::{BayerPattern, add_bayer_pattern, add_cosmic_rays};
+use crate::testing::synthetic::artifacts::{add_bayer_pattern, add_cosmic_rays};
 use crate::testing::synthetic::camera::{Camera, PsfModel};
+use crate::testing::synthetic::fixtures::{
+    STAR_FIELD_FLUX, STAR_FIELD_FWHM, STAR_FIELD_MARGIN, STAR_FIELD_SKY, star_field,
+};
 use crate::testing::synthetic::observe::{Observation, SimFrame, render};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
+
+/// How near a detection must lie to a source to be that source's: one FWHM of the scenarios' 4-px
+/// PSF, past which a centroid is not a measurement of the source.
+const MATCH_RADIUS: f64 = 4.0;
+
+/// How far a source must stand from every other one, and from the frame's edge, for the stage tests
+/// to hold the detector to an exact count around it: 3 FWHM at the scenarios' 4 px, where a star
+/// has fallen to 2⁻³⁶ of its peak and a neighbour can neither blend with it nor share its region.
+const ISOLATION: f64 = 12.0;
+
+/// The `points` at least [`ISOLATION`] from each other, from every one of `others`, and from the
+/// edge of a `size` frame.
+fn isolated(points: &[DVec2], others: &[DVec2], size: Size2us) -> Vec<DVec2> {
+    let far = |a: DVec2, b: DVec2| a.distance(b) >= ISOLATION;
+    let inside = |p: DVec2| {
+        p.min_element() >= ISOLATION
+            && p.x <= size.width as f64 - 1.0 - ISOLATION
+            && p.y <= size.height as f64 - 1.0 - ISOLATION
+    };
+    points
+        .iter()
+        .enumerate()
+        .filter(|&(i, &p)| {
+            inside(p)
+                && points.iter().enumerate().all(|(j, &q)| i == j || far(p, q))
+                && others.iter().all(|&q| far(p, q))
+        })
+        .map(|(_, &p)| p)
+        .collect()
+}
+
+/// How many of `positions` lie within `radius` of `at`.
+fn near(at: DVec2, positions: &[DVec2], radius: f64) -> usize {
+    positions
+        .iter()
+        .filter(|&&p| p.distance(at) <= radius)
+        .count()
+}
 
 /// Detection config for synthetic (already-linear) frames: the CFA matched filter is disabled
 /// so the measured FWHM stays accurate.
 fn synthetic_config() -> Config {
     let mut config = Config::default();
-    config.fwhm.expected = 0.0;
+    config.fwhm.mode = None;
     config.filter.min_snr = 5.0;
     config
 }
@@ -90,19 +132,24 @@ pub(super) struct Scenario {
     pub(super) seed: u64,
 }
 
+/// The scenario of no override is [`star_field`]'s field: its flux, sky, margin and camera.
 impl Default for Scenario {
     fn default() -> Self {
+        let camera = Camera::realistic(STAR_FIELD_FWHM);
         Self {
             size: Size2us::new(256, 256),
             num_stars: 30,
-            // A flux-14 star peaks ~0.6 (fwhm 4): bright but clear of the saturation cut.
-            flux: (5.0, 14.0),
-            fwhm: 4.0,
+            flux: STAR_FIELD_FLUX,
+            fwhm: STAR_FIELD_FWHM,
             psf: None,
-            background: BackgroundField::Uniform { level: 0.1 },
-            full_well_e: 50_000.0,
-            read_noise_e: 3.0,
-            placement: Placement::Uniform { margin: 16.0 },
+            background: BackgroundField::Uniform {
+                level: STAR_FIELD_SKY,
+            },
+            full_well_e: camera.full_well_e,
+            read_noise_e: camera.read_noise_e,
+            placement: Placement::Uniform {
+                margin: STAR_FIELD_MARGIN,
+            },
             cosmic_rays: 0,
             bayer: false,
             seed: 42,
@@ -137,11 +184,12 @@ impl Scenario {
         };
         let mut frame = render(&scene, &camera, &Observation::reference(self.seed));
 
-        // Artifacts off the light path: applied to the pixels post-render, truth unchanged.
+        // Artifacts off the light path, applied to the pixels post-render; the truth records where
+        // the cosmic rays landed.
         if self.cosmic_rays > 0 || self.bayer {
             let mut px = frame.image.channel(0).pixels().to_vec();
             if self.cosmic_rays > 0 {
-                add_cosmic_rays(
+                frame.truth.cosmic_rays = add_cosmic_rays(
                     &mut px,
                     self.size.width,
                     self.cosmic_rays,
@@ -150,7 +198,7 @@ impl Scenario {
                 );
             }
             if self.bayer {
-                add_bayer_pattern(&mut px, self.size.width, 0.08, BayerPattern::RGGB);
+                add_bayer_pattern(&mut px, self.size.width, 0.08, CfaPattern::Rggb);
             }
             for p in &mut px {
                 *p = p.clamp(0.0, 1.0);
@@ -160,4 +208,17 @@ impl Scenario {
         }
         frame
     }
+}
+
+/// The default scenario renders exactly [`star_field`]: one field definition for the tests and
+/// the benches.
+#[test]
+fn the_default_scenario_is_the_star_field() {
+    let scenario = Scenario::default();
+    let frame = scenario.frame();
+    let field = star_field(scenario.size, scenario.num_stars, scenario.seed);
+    assert_eq!(
+        frame.image.channel(0).pixels(),
+        field.image.channel(0).pixels()
+    );
 }

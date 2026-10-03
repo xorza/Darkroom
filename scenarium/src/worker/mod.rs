@@ -8,12 +8,13 @@ use crate::worker::error::WorkerExited;
 use crate::worker::protocol::{WorkerMessage, WorkerReport};
 use crate::worker::task::WorkerTask;
 
+pub(crate) mod activity;
 pub(crate) mod batch;
 pub(crate) mod error;
 pub(crate) mod event_loop;
 pub(crate) mod pause_gate;
 pub(crate) mod protocol;
-pub(crate) mod status;
+pub(crate) mod run_summary;
 mod task;
 
 #[derive(Debug)]
@@ -47,14 +48,14 @@ impl Worker {
         self.run_cancel.cancel();
     }
 
-    pub fn send(&self, msg: WorkerMessage) -> std::result::Result<(), WorkerExited> {
+    pub fn send(&self, msg: WorkerMessage) -> Result<(), WorkerExited> {
         self.tx.send(msg).map_err(|_| WorkerExited)
     }
 
     pub fn send_many<T: IntoIterator<Item = WorkerMessage>>(
         &self,
         msgs: T,
-    ) -> std::result::Result<(), WorkerExited> {
+    ) -> Result<(), WorkerExited> {
         for msg in msgs {
             self.send(msg)?;
         }
@@ -62,7 +63,7 @@ impl Worker {
     }
 
     /// Cancel active work, drain event tasks, and wait for the worker task to finish.
-    pub async fn exit(&mut self) -> std::result::Result<(), JoinError> {
+    pub async fn exit(&mut self) -> Result<(), JoinError> {
         self.request_exit();
         let result = match self.task.as_mut() {
             Some(task) => task.await,
