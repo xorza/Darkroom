@@ -519,44 +519,25 @@ impl FrameCache {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use common::CancelToken;
-
-    use crate::io::image::linear::LinearImage;
     use crate::stacking::combine::cache::FrameCache;
     use crate::stacking::combine::cache::core::{CacheCore, CacheTier};
     use crate::stacking::combine::config::Normalization;
-    use crate::stacking::combine::normalization::FrameNorm;
-    use crate::stacking::combine::stack::StackFrame;
     use crate::stacking::frame_store::frame_quality::FrameQuality;
     use crate::stacking::frame_store::frame_stats::FrameStats;
     use crate::stacking::frame_store::stackable_image::StackableImage;
-
     use crate::stacking::frame_store::stored_frame::StoredFrame;
-    use crate::stacking::progress::ProgressCallback;
-
-    /// Create an in-memory [`FrameCache`] from loaded images, with no coverage (test helper).
-    pub(crate) fn make_test_cache(images: Vec<LinearImage>) -> FrameCache {
-        let frames = images.into_iter().map(StackFrame::from).collect();
-        FrameCache::from_stack_frames(
-            frames,
-            Normalization::None,
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
-        .expect("test images must be non-empty and dimension-consistent")
-    }
 
     impl FrameCache {
-        /// An in-memory cache over already-decoded frames — the shape `from_paths` builds, without
-        /// the file round-trip. Nothing here was warped, so a frame carries quality planes only
-        /// when its source declared pixels with no measurement.
+        /// A resident cache over already-decoded frames — the shape `from_paths` builds, without
+        /// the file round-trip, through the same validation. Nothing here was warped, so a frame
+        /// carries quality planes only when its source declared pixels with no measurement.
         pub(crate) fn from_images<I: StackableImage>(
             images: Vec<I>,
             normalization: Normalization,
         ) -> Self {
-            let dimensions = images[0].dimensions();
-            let metadata = images[0].metadata().clone();
-            let frames: Vec<StoredFrame> = images
+            let mut core = CacheCore::plain(CacheTier::Resident, images[0].dimensions());
+            core.metadata = images[0].metadata().clone();
+            let frames = images
                 .into_iter()
                 .map(|image| {
                     let source_stats = FrameStats::measure(&image);
@@ -564,20 +545,8 @@ pub(crate) mod internals {
                     StoredFrame::from_memory(image, quality, source_stats)
                 })
                 .collect();
-            let core = CacheCore {
-                tier: CacheTier::Resident,
-                dimensions,
-                metadata,
-                progress: ProgressCallback::default(),
-                cancel: CancelToken::never(),
-            };
-            let frame_norms = FrameNorm::measure(&frames, dimensions, normalization, &core.cancel)
-                .expect("frames without coverage have no failing normalization path");
-            Self {
-                frames,
-                frame_norms,
-                core,
-            }
+            Self::from_stored_frames(frames, core, normalization)
+                .expect("test images must be non-empty, dimension-consistent and coverable")
         }
     }
 }

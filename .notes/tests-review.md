@@ -10,29 +10,10 @@ The production bugs that these tests hid are in `.notes/ISSUES.md`. The items he
 
 No test is slow. Each suite runs in less than 3.5 s, and the slowest single test takes 0.77 s (`registration::tests::transform_types::a_rung_that_fit_survives_a_later_rung_failing`). In scenarium, approximately 85% of the serial suite time is wall-clock waiting (see Nondeterministic tests).
 
-One decision applies to all of lumos, and several items below depend on it:
-
-- Real-data tests are gated on the `real-data` feature and also on `#[ignore]`. Thus `--features real-data` alone runs none of them. Some dataset readers have no gate at all.
-
 Two items need a manifest change, which needs your approval: `common` with `internals` in the `lens` dev-dependencies, and tokio `test-util` in the `lens` dev-dependencies.
 
 ## Tests that cannot fail, or do not run the code their name claims
 The fixture, the tolerance or the call path makes the assertion true whatever production does. These tests report coverage that does not exist, so they come first.
-
-### lumos — combine, drizzle
-Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
-
-- [ ] `combine/tests/mod.rs:162`, `:236` — the `("gesd", StackConfig::gesd())` rows stack 14 frames, but `StackConfig::gesd()` sets `small_n: SmallN::median_below(15)` (`combine/config/mod.rs:243`) and `run_stacking` resolves it against the frame count (`combine/stack/mod.rs:335`). Both "GESD" rows therefore run a median. That makes them duplicates of the `median` row, and GESD is never exercised end-to-end. Use ≥15 frames or `small_n: SmallN::none()`, and assert the resolved method.
-- [ ] `combine/stack/tests.rs:2177` `noise_weighting_with_rejection` — three frames with the default `small_n` (`median_below(5)`) downgrade to a median. The median of (99.9, 90, 999) is 99.9, which passes the `±10.0` check. Neither sigma clipping nor noise weights run. Use `SmallN::none()` and assert the exact weighted survivor mean.
-- [ ] `combine/rejection/tests.rs:933` `winsorized_correction_factor_applied` — the 0.5 tolerance is larger than the effect of the factor. With the 1.134 correction removed, `robust_estimate` returns 2.98 against the asserted 3.43, a difference of 0.45, so the test still passes. The expected value is also built about centre 5.5, but the estimator's centre is `working[len/2] = 6.0` (`winsorized_clip_config.rs:83`). Assert the exact value: σ about 6 = √(85/9) × 1.134 = 3.48499, with no clamp on the first pass.
-- [ ] `combine/rejection/tests.rs:910` `winsorized_robust_estimate_uses_stddev_not_mad` — it asserts only `0 < σ < 2` and centre ±0.2. A MAD-based σ (≈0.74) passes as well, so the property in the name is never checked. Assert the exact stddev-based value.
-- [ ] `combine/tests/mem_budget.rs:39` `load_budget_is_respected_across_configs` — the test passes its own `transient = 2 * frame` (`:44`) into `load_concurrency`. The loader's call sites (`combine/cache/loader/mod.rs:183-185`, `:275-277`) are never involved, so the "divisor reverts to the resident frame size" regression named in the doc comment cannot be detected. The invariant `resident + c·transient ≤ usable || c == 1` is also true by construction of `load_concurrency` (`src/memory.rs:99-111`), and `src/memory.rs:323` already pins the same function with exact cases. Either test the loader's chosen concurrency, or delete this test.
-- [ ] `combine/stack/tests.rs:1316` `registered_global_normalization_uses_paired_signal_samples` — the second frame is the first one shifted by a constant (bilinear on a linear ramp). The MAD ratio of a constant shift is exactly 1, so a plain MAD-ratio gain passes the `±1e-3` check too. The test cannot tell the paired fit from what it replaced. Use frames that differ in scale and in noise.
-- [ ] `combine/normalization/tests.rs:73` `paired_gain_recovers_scale_after_residual_clipping` — on noiseless collinear data Deming returns the true slope for any noise ratio, so the `1.0, 4.0` noise variances have no effect. This is the only caller of `paired_photometric_gain`, so `deming_gain`'s noise-ratio term and its fallbacks (`photometric_gain.rs:172-194`) are untested. Add a noisy case with a hand-computed Deming slope for two noise ratios A→X and B→Y, and assert X ≠ Y.
-- [ ] `combine/rejection/tests.rs:1328` `no_outliers_possible_clean_data_skips_quickselect` — uniform data returns 100 survivors with or without the early exit, so the "skip" in the name is unobservable. It also duplicates `no_outliers_possible_tight_cluster` (`:1235`).
-- [ ] `combine/rejection/tests.rs:1038` `linear_fit_sigma_is_mean_abs_dev` — it asserts only that a perfect line loses nothing. The mean-abs-dev σ is never checked, and the test is a near-copy of `linear_fit_preserves_trend` (`:1050`).
-- [ ] `combine/rejection/tests.rs:782` `linear_fit_tighter_than_sigma_clip` — `lf_remaining <= sc_remaining` passes when the two are equal, so "tighter" is never shown. Assert the exact survivor counts for both methods.
-- [ ] `combine/stack/tests.rs:2144` `noise_weighting_equal_noise_gives_equal_weights` — it asserts `None` (the zero-MAD fallback), not equal weights. The name describes a different behavior, and `:2156` is the real equal-weights test.
 
 ### scenarium, common
 Paths without a crate prefix are relative to `scenarium/src/`.
@@ -60,15 +41,6 @@ Paths are relative to the repository root.
 ## Loose tolerances where the exact answer is known
 Deterministic, often noiseless fixtures are asserted with bands that have no stated reason. A regression of the size of the band passes. In some cases the band hides a production bug.
 
-### lumos — combine, drizzle
-Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
-
-- [ ] `combine/stack/tests.rs:1820-1861` — gain ±0.1 and offset ±1.0 where the exact values are 1 and −100, and gain 0.5 ± 0.15 (30%) where MAD ratio = 0.5. Also `:1864-1931`, `:1934-1958`, `:1961-1988` (±1.0/±2.0 on uniform frames where MAD = 0 gives gain 1 and offset exactly ref−frame), `:2084-2107` (±2.0), `:2110-2141` (`> 10×` where the exact 1/σ² weights follow from the asserted MADs), and `:1628` (`dark < 0.05` where the mean is exactly 0.2/5 = 0.04).
-- [ ] `combine/stack/tests.rs:2031-2081` `norm_uses_lowest_noise_reference` — the non-reference frames are checked with a negative "not identity" OR-condition. The expected gain is MAD₁/MAD₀ and the offset follows from it. This also duplicates `combine/normalization/tests.rs:27`.
-- [ ] `combine/rejection/tests.rs:100-123`, `:126-144`, `:237-262`, `:497-603`, `:732-762`, `:1063-1075` — `mean < 10.0`, `remaining < 8`, `>= 9`, `< 2.5`, `< 1.1`, `±0.25`. Every fixture is ≤10 hand-written values, so the survivor set and the mean are exact. `:378` checks percentile with `r >= 1`. `:420-439` states the survivors are indices 3, 2, 4 but asserts only that 0 and 1 are excluded.
-- [ ] `combine/tests/mod.rs:100` (20% on √N, with no stated reason; the RMS estimate over 16384 px has ~0.6% sampling error), `:134-139`, `:171`, `:215` (`ratio > 1.5` where inverse-variance weighting of 6+6 frames predicts ≈ the noise ratio), `:243` (`1.5×` the mean RMS).
-- [ ] Throughout scope — 231 hand-rolled `assert!((a - b).abs() < tol, ...)` sites and zero uses of `assert_close!`/`assert_close_slice!`, which are in `crate::testing::prelude` and glob-imported by both modules. Exact-integer cases (for example `cache/tests.rs:455-461`, `:787-836`, `stack/tests.rs:498`, `:1093`, `:1536`, `:1565`) should be `assert_eq!`.
-
 ### scenarium, common
 Paths without a crate prefix are relative to `scenarium/src/`.
 
@@ -81,13 +53,6 @@ Paths without a crate prefix are relative to `scenarium/src/`.
 
 ## Risky behavior with no test
 Branches with real failure modes that no test reaches.
-
-### lumos — combine, drizzle
-Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
-
-- [ ] `combine/normalization/mod.rs:380-402` — `stratified_valid_indices` subsampling above `PHOTOMETRIC_SAMPLE_LIMIT` (65 536) never runs. The largest Global-normalization fixture is 64×48 (`stack/tests.rs:1317`). `source_noise_variance` with real confidence (`:419-446`) is also never exercised, because every fixture uses `from_coverage`, which sets confidence to 1.
-- [ ] `combine/stack/quantization.rs:28-38`, `:61-92`, `:95-130` — no test covers `SourceSigmas::measure` rejecting non-finite or zero σ, `combined_median` with norms (the conservative branch), the `gain.abs()` in `conservative`, or `MaxSigma` (the bit-ordering `fetch_max`, and `get()` returning `None` on 0 bits).
-- [ ] `stack_product/mod.rs:73-87` — the single-channel `assert_eq!` in `into_cfa_master` has no `#[should_panic]` test. `stack_product/` has no tests of its own; its conversions are covered only in `lumos/tests/public_api.rs:384-441`.
 
 ### scenarium, common
 Paths without a crate prefix are relative to `scenarium/src/`.
@@ -109,12 +74,6 @@ Paths are relative to the repository root.
 
 ## Second sources of truth: tests and harness re-implement production or each other
 A copy of a formula, a constant or a pipeline step changes with the code it copies, or drifts away from it. Either way it cannot catch the bug it exists for.
-
-### lumos — combine, drizzle
-Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
-
-- [ ] In-memory `FrameCache` builders: `make_test_cache` (`combine/cache/tests.rs:23`, via `from_stack_frames`), `FrameCache::from_images` (`combine/cache/mod.rs:554`, a hand-built `CacheCore` that skips validation), `make_cfa_cache` (`combine/cache/tests.rs:390`, which hand-builds `CfaImage` instead of using `crate::testing::make_cfa`), `make_cfa_stack_cache` (`combine/stack/tests.rs:43`), and three `FrameCache { core: CacheCore { … } }` literals (`combine/cache/tests.rs:561`, `:628`, `:689`). Keep one builder in `cache/mod.rs`'s existing `internals` (plus a spilled variant). `FrameCacheParams` is also built by identical closures at `:101` and `:164`.
-- [ ] `combine/tests/mem_budget.rs:44` re-types `DECODE_TRANSIENT_FACTOR` as `2 * frame` (`src/memory.rs:53`; `decode_transient_bytes` exists). `combine/tests/mem_budget_probe.rs:302` re-types the 75% budget rule (`src/memory.rs:14`) instead of calling `memory_budget`/`fits_in_memory`.
 
 ### scenarium, common
 Paths without a crate prefix are relative to `scenarium/src/`.
@@ -157,17 +116,6 @@ Paths are relative to the repository root.
 ## Duplicate tests and fixtures that should be one table or one helper
 The same fixture or property is written many times, with different ad-hoc tolerances. Each copy drifts, and one fix has to be made in many places.
 
-### lumos — combine, drizzle
-Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
-
-- [ ] `combine/rejection/tests.rs` — the fixture `[1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0]` appears in 8 tests (`:101`, `:117`, `:148`, `:194`, `:238`, `:387`, `:498`, `:546`). Exact pairs: `:188` ≡ `:386` (sigma-clip survivor indices), `:257` ≡ `:403` (linear-fit outlier), `:109` ≡ `:442`. `:1189-1232` is four `reset_indices` tests and `:1235-1307` is six `no_outliers_possible` tests, each a natural table. `:18`, `:40`, `:459`, `:722` assert constructors and defaults through `abs() < EPSILON` on literals, although the configs derive `PartialEq`; one `assert_eq!` table would do.
-- [ ] `combine/config/tests.rs:32-246` — seven preset tests each assert one or two fields through `matches!` with `abs() < f32::EPSILON` (sigma_low only, never sigma_high or iterations). Make one table comparing `method`/`weighting`/`normalization`/`small_n` with `==`. `:66` `struct_update_syntax` tests the language. `combine/stack/tests.rs:2272` `light_preset_uses_noise_weighting` repeats `config/tests.rs:227`.
-- [ ] `combine/stack/tests.rs:1063` ≡ `:1635` — the same 10/20 frames with coverage [1,1]/[1,0]: one asserts the image, the other the planes. Merge them, and fold in `:1510` and `:1542`.
-- [ ] `combine/stack/tests.rs:1864`, `:1920`, `:1961` plus `:1880` — four tests over `make_uniform_frames(16, &[100, 200])`.
-- [ ] `combine/normalization/tests.rs:129-170` and `:205-241` build the identical 3-frame × 3-channel fixture twice; extract one builder. `:28-60` repeats the 4-line `FrameStats { …, quantization_sigma: None, domain: None, row_order: None }` literal that `frame_stats()` (`:17`) exists to hide.
-- [ ] `combine/cache/tests.rs:407-486` vs `:489-522` — the calibration test repeats the median-of-[1,3,2] and 17.5 weighted-mean cases with a different cache builder; make one sweep over both builders.
-- [ ] `combine/stack/tests.rs` — `stack_images(frames, config, ProgressCallback::default(), CancelToken::never())` is spelled out 40 times; a two-argument local helper removes ~250 lines.
-
 ### scenarium, common
 Paths without a crate prefix are relative to `scenarium/src/`.
 
@@ -188,22 +136,8 @@ Paths are relative to the repository root.
 - [ ] `darkroom/src/gui/pane/graph/gesture/pan_zoom/tests.rs:45-99`, `:101-151` — the four `scroll_to_zoom_factor` tests and the two pivot-invariance tests should each be one table.
 - [ ] `darkroom/src/gui/pane/graph/gesture/breaker/tests.rs:132-173` — the three `intersects_cubic_*` cases should be one table.
 
-## Placement, gating and bench layout
-Test, internals and bench code sits where the rules say it must not, or is gated so that it never runs.
-
-### lumos — combine, drizzle
-Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
-
-- [ ] `combine/stack/tests.rs:1807-2107` (`norm_*`, `global_norm_*`, `multiplicative_*`, `normalized_stacking_rgb`, `dispatch_*`) tests `normalization::compute_frame_norms`, so normalization coverage is split across two files. Move it to `combine/normalization/tests.rs`.
-
 ## Stale, wrong and change-narrating comments
 Comments that describe code that no longer exists, contradict the asserted values, or narrate history.
-
-### lumos — combine, drizzle
-Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
-
-- [ ] Comments that narrate a change: `combine/rejection/tests.rs:16-17` ("These were six one-assertion tests"), `:191-193`, `:1020`, `:1052`, `:882-884`; `combine/cache/tests.rs:37-40`; `combine/error.rs:221-223`; `combine/stack/tests.rs:1574`.
-- [ ] Empty or narrating comments: `// Cleanup` with nothing after it at `combine/cache/loader/tests.rs:77`, `:203`, `:265`, `:377`, `:417`, `:460`; `combine/cache/tests.rs:408`, `:434`.
 
 ### scenarium, common
 Paths without a crate prefix are relative to `scenarium/src/`.

@@ -288,9 +288,8 @@ impl StackConfig {
         Self {
             method: CombineMethod::Mean(Rejection::sigma_clip(3.0)),
             normalization: Normalization::Multiplicative,
-            // Stricter than the other presets, which keep σ-clip at any frame count: a master flat
-            // from < 8 frames uses the median, since σ-clip statistics on so few smooth flats
-            // aren't worth the noise.
+            // Stricter than the default floor: a master flat from fewer than 8 frames uses the
+            // median, since σ-clip statistics on so few smooth flats aren't worth the noise.
             small_n: SmallN::median_below(8),
             ..Default::default()
         }

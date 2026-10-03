@@ -1,6 +1,5 @@
 use crate::math::urect::URect;
 use crate::testing::prelude::*;
-use std::panic;
 
 #[test]
 fn urect_accumulation_uses_exclusive_max() {
@@ -14,7 +13,6 @@ fn urect_accumulation_uses_exclusive_max() {
     assert!(LEFT.contains(Vec2us::new(5, 8)));
     assert!(!LEFT.contains(Vec2us::new(6, 8)));
     assert!(!LEFT.contains(Vec2us::new(5, 9)));
-    assert!(panic::catch_unwind(|| URect::new(Vec2us::new(1, 1), Vec2us::ZERO)).is_err());
 
     let mut bounds = URect::empty();
     bounds.include(Vec2us::new(5, 3));
@@ -31,4 +29,12 @@ fn urect_accumulation_uses_exclusive_max() {
     assert_eq!(covered.last(), Some(&Vec2us::new(8, 7)));
     assert_eq!(covered.len(), 7 * 7);
     assert_eq!(bounds.area(), covered.len());
+}
+
+/// Inverted bounds are a caller's logic error, checked in debug builds.
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "invalid rectangle bounds")]
+fn inverted_bounds_panic_in_debug_builds() {
+    URect::new(Vec2us::new(1, 1), Vec2us::ZERO);
 }

@@ -165,3 +165,27 @@ impl CacheCore {
         output
     }
 }
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use common::CancelToken;
+
+    use crate::io::image::image_dimensions::ImageDimensions;
+    use crate::io::image::image_metadata::ImageMetadata;
+    use crate::stacking::combine::cache::core::{CacheCore, CacheTier};
+    use crate::stacking::progress::ProgressCallback;
+
+    impl CacheCore {
+        /// A core over frames of `dimensions` on `tier`, with default metadata, no progress
+        /// reported and no cancel.
+        pub(crate) fn plain(tier: CacheTier, dimensions: ImageDimensions) -> Self {
+            Self {
+                tier,
+                dimensions,
+                metadata: ImageMetadata::default(),
+                progress: ProgressCallback::default(),
+                cancel: CancelToken::never(),
+            }
+        }
+    }
+}

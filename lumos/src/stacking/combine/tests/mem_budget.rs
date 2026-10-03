@@ -102,9 +102,10 @@ fn disk_and_memory_tiers_produce_identical_masters() {
                 .pixels()[0]
         })
         .collect();
-    let expected = per_frame.iter().sum::<f32>() / n as f32;
-    assert!(
-        (first - expected).abs() < 1e-6,
-        "master mean {first} != mean-of-frames {expected}"
+    // The combine sums in f64 and rounds once: the f64 mean of the six f32 samples, rounded.
+    let expected = per_frame.iter().map(|&value| f64::from(value)).sum::<f64>() / n as f64;
+    assert_eq!(
+        first, expected as f32,
+        "master mean against the mean of frames"
     );
 }
