@@ -978,12 +978,6 @@ Closes group 16 except 16.12, and 17.4 to 17.7 (17.1 to 17.3 close in phase 0). 
 
 Each phase builds and passes the verification chain on its own. A phase closes its items, and those items are then deleted from this file, together with the phase. Phase order follows the dependencies. Each phase adds its stage to the S9 harness.
 
-## Phase 1. Test kit and run report (S8, S9)
-
-- Add `RunReport` to `StackProduct` and `AlignStackResult`. Add the invariance harness and the reference-fixture directory with its scripts.
-- **Tests:** the harness fails on a stage that is known to break scale invariance today (the sigma-clip shortcut at a scale of 2e-5). That proves the harness can fail.
-- **Closes:** none. Every later phase uses it.
-
 ## Phase 2. Sample contract and noise record (S2)
 
 1. Make `SampleDomain` and `FrameNoise` stored metadata, with their update methods. Fill them in every decoder.
@@ -1000,8 +994,9 @@ Each phase builds and passes the verification chain on its own. A phase closes i
   - `CcdNoise` with background 0.01, signal 0.5 above sky and 1000 e⁻ per unit: 1e-4 + 0.5/1000 = 6e-4.
 - **Closes:** 4.4, 5.1 to 5.5.
 
-## Phase 3. Pixel flags (S1)
+## Phase 3. Pixel flags and run report (S1, S8)
 
+0. Add `RunReport` to `StackProduct` and `AlignStackResult`. Its first entries are the flag counts of this phase.
 1. Add `PixelFlags`. Move `NullMask` into it as `NO_DATA`. Add `zero_is_bad`.
 2. Set `SATURATED` in the RAW and FITS decoders.
 3. Carry the flags through calibration, the demosaic, the warp, spills and FITS.
