@@ -77,7 +77,10 @@ fn prepass_with_wire_from(fixture: &mut GraphCtxFixture, start: PortRef) -> Opti
     let geometry = CanvasGeometry::default();
     let ctx = CanvasCtx::new(fixture.graph_ctx(), &geometry, None, false);
     connections.apply(arena.ui(), ctx, None, &mut out);
-    assert!(out.is_empty(), "an untouched prepass emits nothing");
+    assert!(
+        out.document().is_empty(),
+        "an untouched prepass emits nothing"
+    );
     connections.state.get().copied()
 }
 

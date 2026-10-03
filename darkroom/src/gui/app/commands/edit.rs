@@ -2,9 +2,9 @@
 //! inline `FsPath` const-input picker. The dialog opens after UI authoring,
 //! then the chosen paths land as an ordinary undoable `SetInput` edit.
 
+use crate::core::edit::relayout::Relayout;
 use crate::gui::app::App;
 use crate::gui::pane::graph::node::port_row::PathPick;
-use crate::gui::relayout::Relayout;
 
 /// Node edits that need a dialog before applying. Applied by
 /// [`EditCommand::apply`].

@@ -1,14 +1,13 @@
-//! Whether a frame owes palantir a second layout pass.
+//! Whether a frame owes the frontend's layout engine a second pass.
 
 use std::ops::{BitOr, BitOrAssign};
 
-/// Whether anything a pass did stranded `CanvasGeometry`'s cross-frame caches,
-/// so the frame owes a relayout.
+/// Whether anything a pass did stranded the canvas's cross-frame geometry
+/// caches, so the frame owes a relayout.
 ///
 /// Named rather than a `bool` because this travels a long way: every phase of
-/// [`Session::frame`](crate::gui::app::session::Session::frame) reports one
-/// upward, each document mutation produces one, and `App` spends the total on
-/// a single `request_relayout`. At a `-> bool` signature there is nothing to
+/// the frontend's frame reports one upward, each document mutation produces
+/// one, and the frontend spends the total on a single relayout request. At a `-> bool` signature there is nothing to
 /// say whether `true` means "did something", "succeeded", or "needs a pass" —
 /// and neighbouring methods on the same types already return the first two.
 ///

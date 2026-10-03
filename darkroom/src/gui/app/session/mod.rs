@@ -16,11 +16,11 @@
 //! [`App`]: crate::gui::app::App
 
 use crate::core::document::open_document::OpenDocument;
+use crate::core::edit::relayout::Relayout;
 use crate::core::io::preferences::Preferences;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::file::FileCommand;
 use crate::gui::app::commands::run::RunCommand;
-use crate::gui::relayout::Relayout;
 use crate::gui::requests::Requests;
 use crate::gui::window::MainWindow;
 use crate::gui::window::ctx::WindowCtx;
@@ -117,7 +117,7 @@ impl Session {
         let mut needs_relayout = self.apply_undo_redo(ui);
         self.main_window
             .scan_navigation(ui, WindowCtx::new(ctx, &self.open), requests);
-        needs_relayout |= self.open.drain_requests(requests);
+        needs_relayout |= self.open.drain_requests(requests.document());
 
         // 2. PREPASS — reconcile pane visibility, rebuild the canvas's
         //    projection, then emit the input-derived graph mutations (drag,
@@ -130,7 +130,7 @@ impl Session {
         needs_relayout |= self
             .main_window
             .prepass(ui, WindowCtx::new(ctx, &self.open), requests);
-        needs_relayout |= self.open.drain_requests(requests);
+        needs_relayout |= self.open.drain_requests(requests.document());
 
         // 3. RECORD — author the widget tree. The file/run/quit chords are
         //    read just ahead of it: unlike undo/redo they only queue an
@@ -141,7 +141,7 @@ impl Session {
             .frame(ui, WindowCtx::new(ctx, &self.open), preferences, requests);
         // Graph edits the record surfaced (node select, cache toggle, const
         // edit), plus the tab strip's dock ops.
-        needs_relayout |= self.open.drain_requests(requests);
+        needs_relayout |= self.open.drain_requests(requests.document());
 
         // Resizes driven by something other than an `UndoStep` — the header's
         // elapsed-time label growing as a run reports — are not covered: they

@@ -11,8 +11,8 @@
 //! dialogs), so the methods it calls belong to `App` rather than any one
 //! owner; only the dispatch splits by concern.
 
+use crate::core::edit::relayout::Relayout;
 use crate::gui::app::App;
-use crate::gui::relayout::Relayout;
 
 pub(crate) mod edit;
 pub(crate) mod file;
