@@ -280,38 +280,3 @@ fn zoom_about_ignores_non_positive_or_non_finite_factor() {
         assert_eq!(zoom, zoom0, "zoom moved on bad factor {bad}");
     }
 }
-
-/// The pan gesture's three edges: an unlatched slot ignores everything, a
-/// latched one measures from the latch rather than integrating, and a
-/// `None` delta is the release that ends it.
-#[test]
-fn a_pan_drag_measures_from_its_latch_and_releases_once() {
-    let mut anchor: GestureSlot<Vec2> = GestureSlot::default();
-
-    // Before any latch, a delta drives nothing — `emit_pan_zoom` calls in
-    // every frame, most of them with no gesture in flight.
-    let mut unlatched = Vec2::ZERO;
-    fold_pan_drag(&mut anchor, Some(Vec2::new(99.0, 99.0)), &mut unlatched);
-    assert_eq!(unlatched, Vec2::ZERO, "an idle slot cannot pan");
-
-    let start = Vec2::new(100.0, 40.0);
-    anchor.latch(start);
-    let mut pan = start;
-
-    // Frame 1: start + delta.
-    fold_pan_drag(&mut anchor, Some(Vec2::new(10.0, -5.0)), &mut pan);
-    assert_eq!(pan, Vec2::new(110.0, 35.0), "start + delta");
-
-    // Frame 2, larger travel: measured from the *latch*, so this is
-    // start + the new total (130, 28), not frame 1's result + the new
-    // delta (140, 23) that integrating would give.
-    fold_pan_drag(&mut anchor, Some(Vec2::new(30.0, -12.0)), &mut pan);
-    assert_eq!(pan, Vec2::new(130.0, 28.0), "start + total, not integrated");
-
-    // Release, then a stray delta: the anchor is gone, so nothing moves.
-    fold_pan_drag(&mut anchor, None, &mut pan);
-    assert!(anchor.is_idle(), "a None delta ends the gesture");
-    let mut after = pan;
-    fold_pan_drag(&mut anchor, Some(Vec2::new(5.0, 5.0)), &mut after);
-    assert_eq!(after, pan, "a released anchor drives nothing");
-}

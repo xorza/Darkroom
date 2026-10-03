@@ -1,9 +1,17 @@
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use common::TempDir;
+use glam::Vec2;
 
 use crate::core::document::Document;
+use crate::core::document::harness::DocFixture;
 use crate::core::document::open_document::OpenDocument;
+use crate::core::edit::document_queue::DocumentQueue;
+use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::edit::graph_intent::drag_start::DragStart;
+use crate::core::edit::relayout::Relayout;
 use crate::core::io::document::{self, DocumentLoadError};
 use crate::core::io::preferences::Preferences;
 use crate::core::status::StatusLog;
@@ -186,4 +194,70 @@ fn a_node_authored_against_other_ports_fails_the_load_by_name() {
             Some(expected)
         );
     }
+}
+
+/// A drained batch whose one step is a frame of a held gesture folds into
+/// that gesture's entry. A frame that shares its batch with another edit is
+/// recorded with it as a plain entry, which seals the gesture before it.
+#[test]
+fn only_a_one_step_batch_is_a_gesture_frame() {
+    let fixture = DocFixture::sample();
+    let (node, other) = (fixture.node(0), fixture.node(1));
+    let mut open = OpenDocument {
+        document: fixture.doc,
+        ..OpenDocument::default()
+    };
+    let start = open.document.main_view.item_placements[&node].pos;
+    let mut queue = DocumentQueue::default();
+    let gesture = queue.open_gesture();
+    let members: Arc<[DragStart]> = Arc::from([DragStart { node, pos: start }]);
+    let frame = |x: f32| GraphIntent::MoveSelection {
+        gesture,
+        members: Arc::clone(&members),
+        offset: Vec2::new(x, 0.0),
+    };
+    let mut drain = |open: &mut OpenDocument, intents: Vec<GraphIntent>| {
+        queue.extend_graph(intents);
+        assert_eq!(
+            open.drain_requests(&mut queue),
+            Relayout::NotNeeded,
+            "moving and selecting remeasure nothing"
+        );
+    };
+
+    drain(&mut open, vec![frame(5.0)]);
+    drain(&mut open, vec![frame(9.0)]);
+    drain(
+        &mut open,
+        vec![
+            frame(12.0),
+            GraphIntent::SetSelection {
+                to: BTreeSet::from([other]),
+            },
+        ],
+    );
+    drain(&mut open, vec![frame(20.0)]);
+
+    let pos = |open: &OpenDocument| open.document.main_view.item_placements[&node].pos - start;
+    assert_eq!(pos(&open), Vec2::new(20.0, 0.0));
+    assert!(open.undo().took);
+    assert_eq!(
+        pos(&open),
+        Vec2::new(12.0, 0.0),
+        "the frame after the batch"
+    );
+    assert!(open.undo().took);
+    assert_eq!(
+        pos(&open),
+        Vec2::new(9.0, 0.0),
+        "the shared batch, as one entry"
+    );
+    assert!(open.document.main_view.selected.is_empty());
+    assert!(open.undo().took);
+    assert_eq!(
+        pos(&open),
+        Vec2::ZERO,
+        "the two frames before it, as one entry"
+    );
+    assert!(!open.undo().took);
 }

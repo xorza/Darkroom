@@ -9,8 +9,23 @@ use scenarium::{
 use super::{DUPLICATE_OFFSET, GraphIntent};
 use crate::core::document::harness::DocFixture;
 use crate::core::document::{Document, Viewport};
+use crate::core::edit::gesture_id::GestureId;
+use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::core::edit::step::set_node_property::NodeProperty;
 use crate::core::edit::step::undo_step::UndoStep;
+
+fn member(node: NodeId, pos: Vec2) -> DragStart {
+    DragStart { node, pos }
+}
+
+/// One frame of a drag: every member moves to its start plus `offset`.
+fn drag(members: &[DragStart], offset: Vec2) -> GraphIntent {
+    GraphIntent::MoveSelection {
+        gesture: GestureId::default().next(),
+        members: members.into(),
+        offset,
+    }
+}
 
 /// Commit a whole list of intents the way one frame's drain does — each built
 /// against the document the one before it left — and hand back the steps in
@@ -412,7 +427,9 @@ fn invalid_viewports_are_dropped_before_mutation() {
     ];
     for to in invalid {
         assert!(
-            GraphIntent::SetViewport { to }.commit(&mut doc).is_err(),
+            GraphIntent::SetViewport { to, gesture: None }
+                .commit(&mut doc)
+                .is_err(),
             "invalid viewport {to:?} must be dropped"
         );
         assert_eq!(
@@ -426,10 +443,13 @@ fn invalid_viewports_are_dropped_before_mutation() {
         zoom: 2.0,
     };
     assert!(
-        GraphIntent::SetViewport { to: valid }
-            .commit(&mut doc)
-            .unwrap()
-            .is_some(),
+        GraphIntent::SetViewport {
+            to: valid,
+            gesture: None,
+        }
+        .commit(&mut doc)
+        .unwrap()
+        .is_some(),
         "a finite positive viewport must commit"
     );
     assert_eq!(doc.main_view.viewport, valid);
@@ -519,10 +539,6 @@ fn set_node_property_commits_and_reverts() {
         assert!(
             !step.invalidates_cached_geometry(),
             "a node-property toggle does not remeasure"
-        );
-        assert!(
-            step.gesture_key().is_none(),
-            "each toggle is its own undo entry"
         );
         step.revert(&mut doc);
         let node = doc.graph.find(id).unwrap();
@@ -730,10 +746,7 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
         ),
         (
             "MoveSelection to a non-finite position",
-            GraphIntent::MoveSelection {
-                grabbed: live,
-                moves: vec![(live, nan)],
-            },
+            drag(&[member(live, nan)], Vec2::ZERO),
         ),
         (
             "SetSubscription carrying a nil id",
@@ -800,10 +813,7 @@ fn stale_references_still_refuse_quietly() {
             // A drag outliving its target: every member is filtered out, and
             // the empty batch is a no-op, not an error.
             "MoveSelection of an item whose node vanished",
-            GraphIntent::MoveSelection {
-                grabbed: gone,
-                moves: vec![(gone, Vec2::ZERO)],
-            },
+            drag(&[member(gone, Vec2::ZERO)], Vec2::ZERO),
         ),
     ];
     for (what, intent) in cases {
@@ -841,10 +851,12 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
     );
     assert_eq!(doc.main_view.selected, step.selection.to);
 
-    let step = GraphIntent::MoveSelection {
-        grabbed: live,
-        moves: vec![(live, Vec2::new(5.0, 6.0)), (gone, Vec2::new(7.0, 8.0))],
-    }
+    // `live` latched at (1, 2) and sits at the origin now: the step moves it
+    // from where it sits to (1, 2) + (4, 4) = (5, 6).
+    let step = drag(
+        &[member(live, Vec2::new(1.0, 2.0)), member(gone, Vec2::ZERO)],
+        Vec2::new(4.0, 4.0),
+    )
     .commit(&mut doc)
     .unwrap()
     .expect("a move with one live member commits");

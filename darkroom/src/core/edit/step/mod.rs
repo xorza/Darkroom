@@ -8,14 +8,13 @@
 //! payload.
 //!
 //! Each kind is one file, holding its payload and its
-//! [`Reversible`](reversible::Reversible) impl — how it writes, what it costs
-//! the frame, whether it merges with the step before it. The trait is the
-//! checklist: a kind that leaves a question unanswered does not compile, and
-//! [`UndoStep`](undo_step::UndoStep) itself is nothing but a variant per kind
-//! and one match that hands out the payload behind it.
+//! [`Reversible`](reversible::Reversible) impl — how it writes and what it
+//! costs the frame. The trait is the checklist: a kind that leaves a question
+//! unanswered does not compile, and [`UndoStep`](undo_step::UndoStep) itself
+//! is a variant per kind, one match that hands out the payload behind it, and
+//! the fold a held gesture's frames take.
 
 pub(crate) mod change;
-pub(crate) mod gesture_key;
 pub(crate) mod move_selection;
 pub(crate) mod node_presence;
 pub(crate) mod raise;

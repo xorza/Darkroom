@@ -1,10 +1,14 @@
+use std::collections::BTreeSet;
+use std::sync::Arc;
+
 use glam::Vec2;
 use scenarium::NodeId;
-use std::collections::BTreeSet;
 
 use super::*;
-use crate::core::document::harness::DocFixture;
+use crate::core::document::Viewport;
+use crate::core::document::harness::{self, DocFixture};
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::edit::graph_intent::drag_start::DragStart;
 
 /// A document and the history over it, edited only through the real
 /// build/apply path — the pair every test below drives, so neither has to be
@@ -13,6 +17,15 @@ use crate::core::edit::graph_intent::GraphIntent;
 struct History {
     doc: Document,
     stack: ActionStack,
+    /// The last gesture id minted.
+    gestures: GestureId,
+}
+
+/// A latched drag: its gesture, and its members where they started.
+#[derive(Debug)]
+struct Drag {
+    gesture: GestureId,
+    members: Arc<[DragStart]>,
 }
 
 impl History {
@@ -27,17 +40,13 @@ impl History {
         Self {
             doc: DocFixture::sample().doc,
             stack: ActionStack::new(max_bytes),
+            gestures: GestureId::default(),
         }
     }
 
-    /// The `i`th node of the graph, in insertion order.
+    /// The `i`th node of the sample, in its paint order.
     fn node(&self, i: usize) -> NodeId {
-        self.doc
-            .graph
-            .iter()
-            .nth(i)
-            .expect("the sample holds that many nodes")
-            .id
+        harness::nth_in_paint_order(&self.doc.main_view, i)
     }
 
     fn pos(&self, node_id: NodeId) -> Vec2 {
@@ -53,24 +62,56 @@ impl History {
     /// document and applied before the next is built, exactly as
     /// `drain_requests` does with a frame's worth.
     fn batch(&mut self, intents: impl IntoIterator<Item = GraphIntent>) {
-        let steps: Vec<UndoStep> = intents
-            .into_iter()
-            .map(|intent| {
-                let step = intent
-                    .into_step(&self.doc)
-                    .unwrap()
-                    .expect("a test batch commits every intent");
-                step.apply(&mut self.doc);
-                step
-            })
-            .collect();
-        self.stack.push_current(&steps);
+        let mut steps: Vec<UndoStep> = intents.into_iter().map(|i| self.apply(i)).collect();
+        self.stack.push(&mut steps, None);
+        assert!(steps.is_empty(), "the stack takes the whole batch");
     }
 
-    /// One frame of a drag: `grabbed` names the node under the pointer, which
-    /// is what the gesture key coalesces on.
-    fn drag(&mut self, grabbed: NodeId, moves: Vec<(NodeId, Vec2)>) {
-        self.edit(GraphIntent::MoveSelection { grabbed, moves });
+    /// One frame of the held gesture `intent` names.
+    fn frame(&mut self, intent: GraphIntent) {
+        let gesture = intent.gesture();
+        assert!(gesture.is_some(), "a frame names its gesture");
+        let step = self.apply(intent);
+        self.stack.push(&mut vec![step], gesture);
+    }
+
+    fn apply(&mut self, intent: GraphIntent) -> UndoStep {
+        let step = intent
+            .into_step(&self.doc)
+            .unwrap()
+            .expect("a test commits every intent");
+        step.apply(&mut self.doc);
+        step
+    }
+
+    /// A drag gesture of `members`, latched where they sit now.
+    fn latch(&mut self, members: &[NodeId]) -> Drag {
+        self.gestures = self.gestures.next();
+        Drag {
+            gesture: self.gestures,
+            members: members
+                .iter()
+                .map(|&node| DragStart {
+                    node,
+                    pos: self.pos(node),
+                })
+                .collect(),
+        }
+    }
+
+    /// One frame of `drag`, every member at its start plus `offset`.
+    fn drag(&mut self, drag: &Drag, offset: Vec2) {
+        self.frame(GraphIntent::MoveSelection {
+            gesture: drag.gesture,
+            members: Arc::clone(&drag.members),
+            offset,
+        });
+    }
+
+    /// A fresh gesture id, as a press mints one.
+    fn gesture(&mut self) -> GestureId {
+        self.gestures = self.gestures.next();
+        self.gestures
     }
 
     fn select(&mut self, to: impl IntoIterator<Item = NodeId>) {
@@ -90,61 +131,125 @@ impl History {
     }
 }
 
+/// The frames of one drag fold into one entry: one undo restores where the
+/// drag started (the first `from`), and redo replays to its last `to`. Until
+/// the drag is sealed nothing is packed, so a drag frame encodes nothing.
 #[test]
-fn consecutive_moves_coalesce_keeping_first_from() {
-    let mut h = History::sample();
-    let key = h.node(0);
-    let start = h.pos(key);
-
-    h.drag(key, vec![(key, Vec2::new(10.0, 10.0))]);
-    h.drag(key, vec![(key, Vec2::new(20.0, 20.0))]);
-
-    // Both moves of the same node collapsed into one entry: a single
-    // undo restores the *original* position (the first `from`)...
-    assert!(h.undo());
-    assert_eq!(h.pos(key), start, "one undo reverts the whole drag");
-    assert!(!h.undo(), "the drag collapsed to exactly one entry");
-    // ...and redo replays to the last `to`.
-    assert!(h.redo());
-    assert_eq!(h.pos(key), Vec2::new(20.0, 20.0));
-}
-
-#[test]
-fn moves_of_different_nodes_do_not_coalesce() {
+fn the_frames_of_one_drag_are_one_entry() {
     let mut h = History::sample();
     let (a, b) = (h.node(0), h.node(1));
+    let (a0, b0) = (h.pos(a), h.pos(b));
 
-    h.drag(a, vec![(a, Vec2::new(5.0, 5.0))]);
-    h.drag(b, vec![(b, Vec2::new(6.0, 6.0))]);
+    let drag = h.latch(&[a, b]);
+    let last = Vec2::new(25.0, 5.0);
+    for offset in [Vec2::new(10.0, 0.0), last] {
+        h.drag(&drag, offset);
+    }
+    assert_eq!((h.pos(a), h.pos(b)), (a0 + last, b0 + last));
+    assert!(h.stack.actions.is_empty(), "an open drag packs nothing");
 
-    // Different grabbed nodes ⇒ different `SelectionDrag` keys ⇒ two entries.
     assert!(h.undo());
-    assert!(
-        h.undo(),
-        "moves of distinct nodes stay separate undo entries"
-    );
+    assert_eq!((h.pos(a), h.pos(b)), (a0, b0), "one undo reverts the drag");
+    assert!(!h.undo(), "the drag is exactly one entry");
+    assert!(h.redo());
+    assert_eq!((h.pos(a), h.pos(b)), (a0 + last, b0 + last));
 }
 
+/// Two drags of the same node are two gestures, so two entries, even with no
+/// edit between them.
 #[test]
-fn group_drag_moves_all_and_undoes_as_one() {
+fn two_drags_of_one_node_stay_two_entries() {
     let mut h = History::sample();
-    let (ka, kb) = (h.node(0), h.node(1));
-    let (a0, b0) = (h.pos(ka), h.pos(kb));
+    let a = h.node(0);
+    let a0 = h.pos(a);
 
-    // Two frames of a group drag (grabbed = a), each frame moving both nodes
-    // by the running offset. Same grabbed ⇒ one coalesced entry.
-    let last = Vec2::new(25.0, 5.0);
-    for off in [Vec2::new(10.0, 0.0), last] {
-        h.drag(ka, vec![(ka, a0 + off), (kb, b0 + off)]);
-    }
-    assert_eq!(h.pos(ka), a0 + last, "both ended at origin + last offset");
-    assert_eq!(h.pos(kb), b0 + last);
+    let first = h.latch(&[a]);
+    h.drag(&first, Vec2::new(5.0, 0.0));
+    let second = h.latch(&[a]);
+    h.drag(&second, Vec2::new(0.0, 7.0));
+    assert_eq!(h.pos(a), a0 + Vec2::new(5.0, 7.0));
 
-    // One undo restores both to their pre-drag positions (first `from`).
     assert!(h.undo());
-    assert_eq!(h.pos(ka), a0);
-    assert_eq!(h.pos(kb), b0);
-    assert!(!h.undo(), "the group drag collapsed to exactly one entry");
+    assert_eq!(h.pos(a), a0 + Vec2::new(5.0, 0.0), "the second drag undone");
+    assert!(h.undo());
+    assert_eq!(h.pos(a), a0, "the first drag undone");
+    assert!(!h.undo());
+}
+
+/// A drag that ends where it started — an Esc cancel puts every member back —
+/// records nothing.
+#[test]
+fn a_drag_back_to_its_start_records_nothing() {
+    let mut h = History::sample();
+    let (a, b) = (h.node(0), h.node(1));
+    let a0 = h.pos(a);
+    h.select([b]);
+
+    let drag = h.latch(&[a]);
+    h.drag(&drag, Vec2::new(30.0, 30.0));
+    h.drag(&drag, Vec2::ZERO);
+    assert_eq!(h.pos(a), a0);
+
+    assert!(h.undo(), "the selection is the one entry left");
+    assert!(h.doc.main_view.selected.is_empty());
+    assert!(!h.undo(), "the cancelled drag recorded nothing");
+}
+
+/// Another edit seals the open gesture: frames of the same drag after it
+/// start a new entry, from where the edit left the document.
+#[test]
+fn another_edit_seals_the_open_gesture() {
+    let mut h = History::sample();
+    let (a, b) = (h.node(0), h.node(1));
+    let a0 = h.pos(a);
+
+    let drag = h.latch(&[a]);
+    h.drag(&drag, Vec2::new(4.0, 0.0));
+    h.select([b]);
+    h.drag(&drag, Vec2::new(9.0, 0.0));
+
+    assert!(h.undo());
+    assert_eq!(
+        h.pos(a),
+        a0 + Vec2::new(4.0, 0.0),
+        "the frames after the edit"
+    );
+    assert_eq!(h.doc.main_view.selected, BTreeSet::from([b]));
+    assert!(h.undo());
+    assert!(h.doc.main_view.selected.is_empty(), "the edit");
+    assert!(h.undo());
+    assert_eq!(h.pos(a), a0, "the frames before it");
+    assert!(!h.undo());
+}
+
+/// A pan's frames are one entry, and a one-shot camera jump after it — a
+/// toolbar fit, Ctrl+0 — is its own.
+#[test]
+fn a_camera_jump_does_not_fold_into_the_pan_before_it() {
+    let mut h = History::sample();
+    let start = h.doc.main_view.viewport;
+    let at = |x: f32, zoom| Viewport {
+        pan: Vec2::new(x, 0.0),
+        zoom,
+    };
+
+    let pan = h.gesture();
+    for x in [10.0, 20.0] {
+        h.frame(GraphIntent::SetViewport {
+            to: at(x, start.zoom),
+            gesture: Some(pan),
+        });
+    }
+    h.edit(GraphIntent::SetViewport {
+        to: at(20.0, 2.0),
+        gesture: None,
+    });
+
+    assert!(h.undo());
+    assert_eq!(h.doc.main_view.viewport, at(20.0, start.zoom), "the jump");
+    assert!(h.undo());
+    assert_eq!(h.doc.main_view.viewport, start, "the whole pan");
+    assert!(!h.undo());
 }
 
 #[test]
@@ -190,43 +295,55 @@ fn new_edit_discards_the_redo_tail() {
     assert!(!h.redo(), "a new edit invalidates the redoable tail");
 }
 
+/// The history keeps the newest entries that fit the byte budget, evicts
+/// the oldest by advancing `head`, and reclaims the dead prefix only once it
+/// outgrows the budget.
+///
+/// Every entry here is one selection toggle — `{} → {n}` or `{n} → {}`,
+/// one empty set and one single-member set either way — so all have one size
+/// `e`, and the stack must keep exactly `floor(256 / e)` of them. The model
+/// below follows `head` and the physical length byte for byte.
 #[test]
 fn history_bounded_by_byte_budget() {
-    // Tiny budget so a handful of small entries overflow it.
-    let mut h = History::bounded(256);
+    const BUDGET: usize = 256;
+    let mut h = History::bounded(BUDGET);
     let node = h.node(0);
 
-    // Many distinct, non-coalescing selection edits (toggle one node
-    // in/out — `from != to` each time, gesture key `None`).
-    for i in 0..200 {
-        let to: BTreeSet<NodeId> = if i % 2 == 0 {
-            [node].into_iter().collect()
+    let toggle = |i: usize| -> BTreeSet<NodeId> {
+        if i.is_multiple_of(2) {
+            BTreeSet::from([node])
         } else {
             BTreeSet::new()
-        };
-        h.select(to);
-        // The *live* region stays within budget (entries are far
-        // smaller than 256 B, so no single-entry overflow)...
-        let live = h.stack.actions.len() - h.stack.head;
-        assert!(
-            live <= h.stack.max_bytes,
-            "live {live} exceeded budget {} after push {i}",
-            h.stack.max_bytes,
-        );
-        // ...and the dead-prefix reclaim keeps the physical buffer
-        // bounded (lazy compaction fires at head > budget).
-        assert!(
-            h.stack.actions.len() <= 2 * h.stack.max_bytes,
-            "physical buffer {} exceeded 2× budget after push {i}",
+        }
+    };
+    h.select(toggle(0));
+    let e = h.stack.entries[0].len();
+    let kept = BUDGET / e;
+    assert!(kept >= 2, "the budget holds several entries of {e} bytes");
+
+    let (mut live, mut head) = (1, 0);
+    for i in 1..200 {
+        h.select(toggle(i));
+        live += 1;
+        if live * e > BUDGET {
+            live -= 1;
+            head += e;
+            if head > BUDGET {
+                head = 0;
+            }
+        }
+        assert_eq!(h.stack.entries.len(), live, "entries after push {i}");
+        assert_eq!(h.stack.head, head, "head after push {i}");
+        assert_eq!(
             h.stack.actions.len(),
+            head + live * e,
+            "bytes after push {i}"
         );
     }
+    assert_eq!(live, kept);
 
-    // Old entries were dropped (not all 200 kept) and the newest is
-    // still undoable.
-    assert!(
-        h.stack.entries.len() < 200,
-        "oldest entries should have been trimmed"
-    );
-    assert!(h.undo(), "the most recent edit stays undoable");
+    for _ in 0..kept {
+        assert!(h.undo());
+    }
+    assert!(!h.undo(), "exactly the newest {kept} entries were kept");
 }

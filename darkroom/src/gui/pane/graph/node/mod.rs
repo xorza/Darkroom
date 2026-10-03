@@ -150,9 +150,6 @@ impl NodeUI {
         }
         self.paint_order = order;
         self.focus_kept_last = focus_kept;
-        // Belt-and-braces against a node deleted mid-drag; `prepass` makes
-        // the same check before it can emit anything against it.
-        self.drag.drop_if_owner_gone(dcx.graph_ctx());
         outcome
     }
 
@@ -162,7 +159,13 @@ impl NodeUI {
     /// from these intents (notably drag-driven `MoveSelection`) lands in
     /// `Document` before recording — Pass A's arrange already reflects the
     /// cursor; no Pass B relayout retry.
-    pub(super) fn prepass(&mut self, ui: &Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
-        self.drag.advance(ui, graph_ctx, out);
+    pub(super) fn prepass(
+        &mut self,
+        ui: &Ui,
+        graph_ctx: GraphCtx<'_>,
+        cancelled: bool,
+        out: &mut Requests,
+    ) {
+        self.drag.advance(ui, graph_ctx, cancelled, out);
     }
 }

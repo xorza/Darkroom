@@ -1,42 +1,41 @@
 //! Bitcode-packed undo/redo history in one byte buffer.
 //!
 //! Every entry — undoable *and* redoable — lives packed back-to-back in a
-//! single `actions: Vec<u8>`, with a parallel `entries` table of
-//! `(range, gesture_key, scope)`. A `cursor` splits the applied entries
-//! (`entries[..cursor]`, undoable) from the undone ones
-//! (`entries[cursor..]`, redoable). Undo/redo are just a cursor step plus
-//! one deserialize — no second buffer, no copying bytes between buffers.
-//! A fresh edit discards the redoable tail (truncate from the end),
-//! appends, and trims the oldest entries off the front to honor a byte
-//! budget.
+//! single `actions: Vec<u8>`, with a parallel `entries` table of byte ranges.
+//! A `cursor` splits the applied entries (`entries[..cursor]`, undoable) from
+//! the undone ones (`entries[cursor..]`, redoable). Undo/redo are just a
+//! cursor step plus one deserialize — no second buffer, no copying bytes
+//! between buffers. A fresh edit discards the redoable tail (truncate from
+//! the end), appends, and trims the oldest entries off the front to honor a
+//! byte budget.
 //!
-//! Front eviction is O(1): a `head` marks the first live byte, so
-//! dropping the oldest entry just advances `head` (and pops the front of
-//! the `VecDeque` metadata) — no memmove. The dead `[0, head)` prefix is
-//! reclaimed lazily by a `drain` once it grows past the budget, so that
-//! one memmove amortizes over a whole budget of evictions. The history is
-//! still one contiguous `actions` allocation plus a single ring buffer of
-//! fixed-size metadata — no per-entry / per-field churn (the naive
-//! `VecDeque<Vec<UndoStep>>` form re-allocated a removal's `Node` + captured
-//! wiring on every entry).
+//! Front eviction is O(1): a `head` marks the first live byte, so dropping
+//! the oldest entry just advances `head` (and pops the front of the
+//! `VecDeque` of ranges) — no memmove. The dead `[0, head)` prefix is
+//! reclaimed lazily by a `drain` once it grows past the budget, so that one
+//! memmove amortizes over a whole budget of evictions.
+//!
+//! A held gesture is the one entry not packed yet. Its frames fold into one
+//! decoded step in place, and the step is packed once, when the gesture is
+//! sealed: by the next edit, an undo or a redo. A drag frame therefore
+//! encodes nothing, and a gesture that ends where it started records nothing.
 
 use std::collections::VecDeque;
 use std::ops::Range;
+use std::slice;
 
 use common::SerdeFormat;
 
 use crate::core::document::Document;
-use crate::core::edit::step::gesture_key::GestureKey;
+use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::step::undo_step::UndoStep;
 
+/// The newest entry, while its gesture is still held: decoded, so each frame
+/// folds into it in place.
 #[derive(Debug)]
-struct Entry {
-    /// Byte range of this entry's serialized steps in `actions`.
-    range: Range<usize>,
-    /// Cached so gesture-merge can reject without deserializing the
-    /// entry. Only set for single-step batches that identify as a
-    /// gesture.
-    gesture_key: Option<GestureKey>,
+struct OpenGesture {
+    id: GestureId,
+    step: UndoStep,
 }
 
 #[derive(Debug)]
@@ -48,13 +47,16 @@ pub(crate) struct ActionStack {
     /// First live byte of `actions`. Advanced on eviction (O(1)),
     /// reclaimed by `trim_to_limit`'s lazy compaction.
     head: usize,
-    /// Per-entry metadata, parallel to the packed entries in `actions`.
+    /// Byte range of each packed entry's serialized steps in `actions`.
     /// A `VecDeque` so front eviction (`pop_front`) is O(1) too.
-    entries: VecDeque<Entry>,
+    entries: VecDeque<Range<usize>>,
     /// Boundary between applied (`entries[..cursor]`) and undone
     /// (`entries[cursor..]`) entries. Undo decrements, redo increments, a
     /// new edit truncates the undone tail then appends.
     cursor: usize,
+    /// The held gesture's entry, applied and newer than every packed one.
+    /// While it is open there is no undone tail: opening it discarded that.
+    open: Option<OpenGesture>,
     /// Live-byte budget (`len - head`). When a push overflows it the
     /// oldest entries are dropped off the front; the just-pushed entry
     /// always survives, even when it alone exceeds the budget. Bounds
@@ -72,51 +74,53 @@ impl ActionStack {
             head: 0,
             entries: VecDeque::new(),
             cursor: 0,
+            open: None,
             max_bytes,
         }
     }
 
-    /// Push a batch of just-applied steps that mutated `scope`. `steps`
-    /// is a single undo entry — undoing/redoing replays the whole batch
-    pub(crate) fn push_current(&mut self, steps: &[UndoStep]) {
+    /// Record a batch of just-applied steps as one undo entry — undoing or
+    /// redoing replays the whole batch — and leave `steps` empty, its
+    /// capacity kept for the next frame.
+    ///
+    /// `gesture` names the held gesture a one-step batch is a frame of. A
+    /// frame of the open gesture folds into its entry; any other batch seals
+    /// that entry first.
+    pub(crate) fn push(&mut self, steps: &mut Vec<UndoStep>, gesture: Option<GestureId>) {
         if steps.is_empty() {
             return;
         }
-        // A fresh edit makes the undone tail unreachable; drop it.
-        self.discard_redo();
-
-        // A gesture key only exists for single-step batches; a multi-step
-        // batch (e.g. a breaker swipe) is never coalesced.
-        let gesture_key = match steps {
-            [step] => step.gesture_key(),
-            _ => None,
-        };
-
-        // Gesture coalescing: if this push matches the previous entry's
-        // cached key, merge in place — keep the existing "from" half,
-        // replace the "to" half. Cross-frame zoom/pan collapses to one
-        // undo step.
-        if let Some(key) = gesture_key
-            && self.try_merge_with_last(&steps[0], key)
-        {
+        if let Some(id) = gesture {
+            debug_assert_eq!(steps.len(), 1, "a gesture frame is one step");
+            let step = steps.pop().unwrap();
+            if let Some(open) = &mut self.open
+                && open.id == id
+            {
+                open.step.absorb(&step);
+                return;
+            }
+            self.seal();
+            // A fresh edit makes the undone tail unreachable; drop it.
+            self.discard_redo();
+            self.open = Some(OpenGesture { id, step });
             return;
         }
-
-        let range = Self::append_steps(&mut self.actions, steps);
-        self.entries.push_back(Entry { range, gesture_key });
-        self.cursor = self.entries.len();
-        self.trim_to_limit();
+        self.seal();
+        self.discard_redo();
+        self.pack(steps);
+        steps.clear();
     }
 
     pub(crate) fn undo(&mut self, doc: &mut Document, on_step: &mut dyn FnMut(&UndoStep)) -> bool {
+        self.seal();
         if self.cursor == 0 {
             return false;
         }
         self.cursor -= 1;
-        // no-ops if it's gone (graph deleted). The entry stays in the
-        // buffer — it just moved into the redoable region.
-        let entry = &self.entries[self.cursor];
-        let steps = Self::deserialize_steps(Self::slice_bytes(&self.actions, &entry.range));
+        // The entry stays in the buffer — it just moved into the redoable
+        // region.
+        let range = &self.entries[self.cursor];
+        let steps = Self::deserialize_steps(Self::slice_bytes(&self.actions, range));
         for step in steps.iter().rev() {
             step.revert(doc);
             on_step(step);
@@ -125,11 +129,12 @@ impl ActionStack {
     }
 
     pub(crate) fn redo(&mut self, doc: &mut Document, on_step: &mut dyn FnMut(&UndoStep)) -> bool {
+        self.seal();
         if self.cursor == self.entries.len() {
             return false;
         }
-        let entry = &self.entries[self.cursor];
-        let steps = Self::deserialize_steps(Self::slice_bytes(&self.actions, &entry.range));
+        let range = &self.entries[self.cursor];
+        let steps = Self::deserialize_steps(Self::slice_bytes(&self.actions, range));
         for step in &steps {
             step.apply(doc);
             on_step(step);
@@ -144,7 +149,7 @@ impl ActionStack {
     /// fresh edit), reclaim the dead prefix too.
     fn discard_redo(&mut self) {
         if self.cursor < self.entries.len() {
-            let cut = self.entries[self.cursor].range.start;
+            let cut = self.entries[self.cursor].start;
             self.actions.truncate(cut);
             self.entries.truncate(self.cursor);
             if self.entries.is_empty() {
@@ -168,7 +173,7 @@ impl ActionStack {
         // Always keep the last (just-pushed) entry.
         while self.entries.len() > 1 && self.actions.len() - self.head > self.max_bytes {
             let removed = self.entries.pop_front().unwrap();
-            self.head = removed.range.end;
+            self.head = removed.end;
             self.cursor -= 1;
         }
         // Reclaim the dead prefix lazily, once it has grown past the
@@ -176,9 +181,9 @@ impl ActionStack {
         // and physical `actions` stays ~2× the budget.
         if self.head > self.max_bytes {
             self.actions.drain(0..self.head);
-            for entry in &mut self.entries {
-                entry.range.start -= self.head;
-                entry.range.end -= self.head;
+            for range in &mut self.entries {
+                range.start -= self.head;
+                range.end -= self.head;
             }
             self.head = 0;
         }
@@ -187,48 +192,28 @@ impl ActionStack {
         debug_assert!(
             self.entries
                 .front()
-                .map_or(self.head == 0, |e| e.range.start == self.head),
+                .map_or(self.head == 0, |range| range.start == self.head),
             "head must mark the oldest live entry's start"
         );
     }
 
-    fn try_merge_with_last(&mut self, new_step: &UndoStep, key: GestureKey) -> bool {
-        // `discard_redo` ran first, so the last entry is the last applied
-        // one and its bytes are the buffer tail.
-        let Some(last) = self.entries.back() else {
-            return false;
+    /// Pack the open gesture's entry, if one is open: it is over. A gesture
+    /// that ended where it started records nothing.
+    fn seal(&mut self) {
+        let Some(open) = self.open.take() else {
+            return;
         };
-        if last.gesture_key != Some(key) {
-            return false;
+        if !open.step.is_noop() {
+            self.pack(slice::from_ref(&open.step));
         }
-        let last_range = last.range.clone();
-        let last_bytes = Self::slice_bytes(&self.actions, &last_range);
-        let last_steps = Self::deserialize_steps(last_bytes);
-        assert_eq!(
-            last_steps.len(),
-            1,
-            "gesture-keyed entry must hold a single step"
-        );
+    }
 
-        // Fold the existing entry's "from" half with the incoming step's
-        // "to" half. The step kind owns that logic; the
-        // `gesture_key == Some(key)` gate above already guarantees a
-        // matching variant (and same grabbed member, for `SelectionDrag`).
-        let Some(merged) = last_steps[0].coalesce(new_step) else {
-            return false;
-        };
-
-        // The last entry is the buffer tail — truncate it off and
-        // re-append the merged step in place.
-        self.actions.truncate(last_range.start);
-        self.entries.pop_back();
-        let range = Self::append_steps(&mut self.actions, &[merged]);
-        self.entries.push_back(Entry {
-            range,
-            gesture_key: Some(key),
-        });
+    /// Append `steps` as the newest applied entry, then trim to the budget.
+    fn pack(&mut self, steps: &[UndoStep]) {
+        let range = Self::append_steps(&mut self.actions, steps);
+        self.entries.push_back(range);
         self.cursor = self.entries.len();
-        true
+        self.trim_to_limit();
     }
 
     fn append_steps(buffer: &mut Vec<u8>, steps: &[UndoStep]) -> Range<usize> {

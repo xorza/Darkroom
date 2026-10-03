@@ -1,7 +1,9 @@
 use glam::Vec2;
+use palantir::Key;
 
 use crate::core::document::harness::DocFixture;
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::gui::pane::graph::harness::CanvasHarness;
 
 /// A drag on a node body moves that node, by the pointer's travel.
@@ -30,24 +32,51 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
 
     // Next frame, `NodeUI::prepass` advances the anchor the record latched.
     let intents = h.frame();
-    let moves = intents
-        .iter()
-        .find_map(|intent| match intent {
-            GraphIntent::MoveSelection { grabbed, moves } => Some((*grabbed, moves)),
-            _ => None,
-        })
+    let (members, offset) = moved(&intents)
         .unwrap_or_else(|| panic!("a body drag must emit a MoveSelection: {intents:?}"));
-    assert_eq!(moves.0, dragged, "the grabbed node is the one pressed");
     // Target = press-frame position + cumulative travel, so the node lands
     // exactly where the pointer took it — and the untouched node stays out
     // of the batch, since the grab selected only the node under it.
     assert_eq!(
-        moves.1.as_slice(),
-        &[(dragged, start + travel)],
-        "the drag moves only the grabbed node, to its start plus the travel"
+        (members, offset),
+        (
+            &[DragStart {
+                node: dragged,
+                pos: start
+            }][..],
+            travel
+        ),
+        "the drag moves only the grabbed node, from its start by the travel"
     );
     assert!(
-        !moves.1.iter().any(|(id, _)| *id == bystander),
+        !members.iter().any(|member| member.node == bystander),
         "an unselected neighbour is not dragged along"
     );
+
+    // Esc puts the node back where the drag latched it and ends the drag:
+    // the pointer still held moves nothing after.
+    h.ui.key(Key::Escape);
+    let cancelled = h.frame();
+    assert_eq!(
+        moved(&cancelled).map(|(_, offset)| offset),
+        Some(Vec2::ZERO),
+        "a cancel returns the members to their start: {cancelled:?}"
+    );
+    h.ui.drag_to(grab + travel * 2.0);
+    let after = h.frame();
+    assert_eq!(
+        moved(&after),
+        None,
+        "a cancelled drag moves nothing: {after:?}"
+    );
+}
+
+/// The members and offset of the frame's one `MoveSelection`, if it has one.
+fn moved(intents: &[GraphIntent]) -> Option<(&[DragStart], Vec2)> {
+    intents.iter().find_map(|intent| match intent {
+        GraphIntent::MoveSelection {
+            members, offset, ..
+        } => Some((&members[..], *offset)),
+        _ => None,
+    })
 }

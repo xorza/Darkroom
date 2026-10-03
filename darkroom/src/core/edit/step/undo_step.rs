@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
 use crate::core::edit::step::change::Direction;
-use crate::core::edit::step::gesture_key::GestureKey;
 use crate::core::edit::step::move_selection::MoveSelection;
 use crate::core::edit::step::node_presence::NodePresence;
 use crate::core::edit::step::raise::Raise;
@@ -70,22 +69,27 @@ impl UndoStep {
         self.kind().invalidates_cached_geometry()
     }
 
-    pub(crate) fn gesture_key(&self) -> Option<GestureKey> {
-        self.kind().gesture_key()
-    }
-
-    /// Fold a consecutive step of the same gesture into this one — see
-    /// [`Reversible::coalesce`].
-    pub(crate) fn coalesce(&self, next: &Self) -> Option<Self> {
-        self.kind().coalesce(next)
+    /// Fold `next`, a later frame of the same held gesture, into this step:
+    /// keep this step's "from" half and adopt `next`'s "to" half, in place.
+    ///
+    /// # Panics
+    ///
+    /// If the two are not the same kind of gesture step. A gesture emits one
+    /// kind of intent for its whole life, so a mismatch is the caller's bug.
+    pub(crate) fn absorb(&mut self, next: &Self) {
+        match (self, next) {
+            (Self::MoveSelection(open), Self::MoveSelection(next)) => open.absorb(next),
+            (Self::SetViewport(open), Self::SetViewport(next)) => open.absorb(next),
+            (open, next) => panic!("a gesture cannot fold {next:?} into {open:?}"),
+        }
     }
 
     /// The payload behind the variant, as the behaviour it implements.
     ///
-    /// The single exhaustive match over this enum, and the reason there is
-    /// only one: everything else the pipeline asks a step is answered by the
-    /// kind's own `impl`, so a new variant adds a line here and a file of its
-    /// own rather than an arm in each of six matches.
+    /// The one match that hands out a payload: everything the pipeline asks a
+    /// single step is answered by the kind's own `impl`, so a new variant adds
+    /// a line here and a file of its own rather than an arm in each of five
+    /// matches. [`Self::absorb`] matches too, as it pairs two payloads.
     fn kind(&self) -> &dyn Reversible {
         match self {
             Self::NodePresence(step) => step.as_ref(),

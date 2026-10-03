@@ -6,9 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::document::Document;
 use crate::core::edit::step::change::{Change, Direction};
-use crate::core::edit::step::gesture_key::GestureKey;
 use crate::core::edit::step::reversible::Reversible;
-use crate::core::edit::step::undo_step::UndoStep;
 
 /// One dragged member: where it sat, and where the drag put it.
 #[derive(Debug, Serialize, Deserialize)]
@@ -20,17 +18,37 @@ pub(crate) struct Move {
 /// A drag of one or more node bodies in canvas-world coordinates.
 ///
 /// A multi-select drag moves the whole group as a single undo entry; a plain
-/// drag carries just the one grabbed body. `grabbed` is whichever member the
-/// pointer latched — it keys the gesture, so consecutive frames of one drag
-/// coalesce while two different grabbed nodes stay separate entries.
+/// drag carries just the one grabbed body.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct MoveSelection {
-    pub(crate) grabbed: NodeId,
     /// One entry per member that still had a placement when the step was
-    /// built. A member whose node vanished mid-drag is dropped rather than
-    /// refusing the whole move, so this can be shorter than the intent that
-    /// produced it — and empty, which [`Self::is_noop`] then filters out.
+    /// built, in the drag's member order. A member whose node vanished
+    /// mid-drag is dropped rather than refusing the whole move, so this can be
+    /// shorter than the intent that produced it — and empty, which
+    /// [`Reversible::is_noop`] then filters out.
     pub(crate) moves: Vec<Move>,
+}
+
+impl MoveSelection {
+    /// Fold `next`, a later frame of the same drag, into this step: keep each
+    /// member's `from` and adopt its latest `to`.
+    ///
+    /// Both frames list their members in the drag's order, and `next` lists a
+    /// subset — a member can vanish mid-drag but never join — so one walk
+    /// pairs them. A member `next` no longer carries keeps the position this
+    /// step last gave it.
+    pub(crate) fn absorb(&mut self, next: &Self) {
+        let mut later = next.moves.iter().peekable();
+        for moved in &mut self.moves {
+            if let Some(update) = later.next_if(|update| update.key == moved.key) {
+                moved.pos.to = update.pos.to;
+            }
+        }
+        debug_assert!(
+            later.next().is_none(),
+            "a later frame of a drag moved a member the drag did not start with"
+        );
+    }
 }
 
 impl Reversible for MoveSelection {
@@ -58,38 +76,5 @@ impl Reversible for MoveSelection {
     /// already arranges at the cursor.
     fn invalidates_cached_geometry(&self) -> bool {
         false
-    }
-
-    fn gesture_key(&self) -> Option<GestureKey> {
-        Some(GestureKey::SelectionDrag(self.grabbed))
-    }
-
-    fn coalesce(&self, next: &UndoStep) -> Option<UndoStep> {
-        let UndoStep::MoveSelection(next) = next else {
-            return None;
-        };
-        // A matched `SelectionDrag` key means the same grabbed member and so
-        // the same group: keep each member's original `from` and adopt its
-        // latest `to`. A member `next` no longer carries — it vanished
-        // mid-drag — keeps the position this step last gave it.
-        let moves = self
-            .moves
-            .iter()
-            .map(|moved| Move {
-                key: moved.key,
-                pos: Change {
-                    from: moved.pos.from,
-                    to: next
-                        .moves
-                        .iter()
-                        .find(|later| later.key == moved.key)
-                        .map_or(moved.pos.to, |later| later.pos.to),
-                },
-            })
-            .collect();
-        Some(UndoStep::MoveSelection(Self {
-            grabbed: self.grabbed,
-            moves,
-        }))
     }
 }

@@ -10,10 +10,13 @@
 //! from its own latch candidates under the same modifier
 //! ([`preview_drag_modifier`]), so exactly one controller claims the press.
 
+use std::sync::Arc;
+
 use palantir::Ui;
 use scenarium::NodeId;
 
 use crate::core::document::{PortKind, PortRef};
+use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::core::preview;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::ctx::CanvasCtx;
@@ -42,7 +45,7 @@ impl PreviewDrag {
         let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
         // A live drag owns the frame; only once it ends does the latch scan
         // below get a look at this frame's presses.
-        if self.drag.advance(ui, graph_ctx, out) || !preview_drag_modifier(ui) {
+        if self.drag.advance(ui, graph_ctx, cx.cancelled(), out) || !preview_drag_modifier(ui) {
             return;
         }
         let Some(port) = scan_output_drag_start(geometry, graph_ctx) else {
@@ -70,8 +73,12 @@ impl PreviewDrag {
         // A brand-new node is in no selection yet, so it drags alone. The
         // anchor is the port circle — the widget that owns this press; the node
         // itself has not been recorded yet and has no response to poll.
+        let members = Arc::from([DragStart {
+            node: node_id,
+            pos: center,
+        }]);
         self.drag
-            .latch(node_id, vec![(node_id, center)], port_circle_wid(port));
+            .latch(node_id, members, port_circle_wid(port), out);
     }
 }
 
