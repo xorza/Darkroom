@@ -25,7 +25,8 @@ use crate::gui::state::preview_store::{PreviewImage, StoredContent};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::format::fmt_bytes;
 use crate::gui::widgets::support::{
-    CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, bare_value, footer_background, labeled_value, sized_text,
+    CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, ROW_GAP, bare_value, footer_background, labeled_value,
+    sized_text,
 };
 
 /// Minimum body width for a preview node, canvas-world units. Wider than a
@@ -127,7 +128,7 @@ fn info_row(ui: &mut Ui, theme: &Theme, image: &PreviewImage) {
             Panel::hstack()
                 .id_salt("preview_info_size")
                 .size((Sizing::HUG, Sizing::HUG))
-                .gap(4.0)
+                .gap(ROW_GAP)
                 .child_align(Align::v(VAlign::Center))
                 .show(ui, |ui| {
                     labeled_value(ui, theme, "Source", fmt_bytes(image.source_bytes as u64));

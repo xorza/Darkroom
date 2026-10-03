@@ -215,11 +215,8 @@ impl ImageViewer {
         self.sync_source(source.image().map(|image| image.handle.size()));
         self.apply_gestures(ui, source.image(), pane);
 
-        let fill = match prefs.background {
-            ViewerBackground::Theme | ViewerBackground::Checker => theme.canvas.bg,
-            ViewerBackground::Black => RgbaF32::BLACK,
-            ViewerBackground::White => RgbaF32::WHITE,
-        };
+        // The checker draws over the theme's backdrop.
+        let fill = glyph::flat_fill(theme, prefs.background).unwrap_or(theme.canvas.bg);
         let mut prefs_changed = false;
         Panel::zstack()
             .id(pane_wid(self.node_id))

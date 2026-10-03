@@ -88,6 +88,10 @@ pub(super) fn palantir_for(p: &palantir::Palette, r: BridgeRoles<'_>) -> palanti
     theme
 }
 
+/// The corner radius of the lift behind a hovered tab-close button: a small
+/// glyph's chip, rounder than a square and flatter than a pill.
+const CLOSE_LIFT_RADIUS: f32 = 3.0;
+
 /// Darkroom's own tab chips over palantir's recipe.
 ///
 /// Palantir derives its strip from the palette alone, which lands the
@@ -112,7 +116,7 @@ fn tab_roles(theme: &mut palantir::Theme, p: &palantir::Palette, r: BridgeRoles<
     tabs.inactive.disabled.background = chip(p.elem);
     // The chrome lift behind a hovered close button is the same header
     // band a node's title wears.
-    let lift = Background::rounded(r.header_fill, Corners::all(3.0));
+    let lift = Background::rounded(r.header_fill, Corners::all(CLOSE_LIFT_RADIUS));
     tabs.close.hovered.background = lift.clone();
     tabs.close.active.background = lift;
     // Chips at the menu scale, like every other chrome label.

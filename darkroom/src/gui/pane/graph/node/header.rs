@@ -11,7 +11,6 @@
 
 use std::f32::consts::{FRAC_PI_4, PI};
 
-use palantir::FontFamily;
 use palantir::prelude::*;
 use scenarium::{CacheMode, NodeId};
 
@@ -28,12 +27,13 @@ use crate::gui::pane::graph::paint::inspector::{InspectMode, inspect_badge_wid};
 use crate::gui::requests::Requests;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
-use crate::gui::widgets::badge::{BADGE_FONT, BADGE_SIZE, Badge};
+use crate::gui::widgets::badge::{BADGE_SIZE, Badge};
 use crate::gui::widgets::format::fmt_elapsed;
 use crate::gui::widgets::inline_rename::InlineRename;
 use crate::gui::widgets::port_glyph::PortGlyph;
 use crate::gui::widgets::support::{
-    CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y, header_background, hspacer, play_triangle,
+    CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y, ROW_GAP, header_background, hspacer, mono_text,
+    play_triangle,
 };
 
 /// Character cap for a node title in the inline rename editor.
@@ -55,6 +55,10 @@ const NODE_NAME_MAX_CHARS: usize = 32;
 /// renders rather than clipping. Generous on purpose — costing a few px
 /// of header is cheaper than being one glyph short of the common case.
 const RUN_TIME_MIN_WIDTH: f32 = 52.0;
+
+/// The status row's bottom padding: tight, so the row reads as part of the
+/// header block rather than of the port rows below it.
+const STATUS_ROW_PAD_BOTTOM: f32 = 2.0;
 
 /// One whole-node event-subscription pin: an event-colored triangle behind
 /// the node's top-left corner, its apex pointing up-left toward the
@@ -116,7 +120,7 @@ pub(super) fn header(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut 
         .id_salt("header")
         .size((Sizing::FILL, Sizing::HUG))
         .padding(Spacing::xy(CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y))
-        .gap(4.0)
+        .gap(ROW_GAP)
         .child_align(Align::v(VAlign::Center))
         .background(header_background(theme, r))
         .show(ui, |ui| {
@@ -184,10 +188,15 @@ pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
     Panel::hstack()
         .id_salt("status_row")
         .size((Sizing::FILL, Sizing::HUG))
-        // Extra top padding sets the controls off from the header bar (the body
-        // vstack has no gap between rows). Order: left, top, right, bottom.
-        .padding(Spacing::new(8.0, 7.0, 8.0, 2.0))
-        .gap(4.0)
+        // The header's padding, so the row's edges line up with the title's;
+        // the bottom stays tight against the port rows below.
+        .padding(Spacing::new(
+            CARD_HEADER_PAD_X,
+            CARD_HEADER_PAD_Y,
+            CARD_HEADER_PAD_X,
+            STATUS_ROW_PAD_BOTTOM,
+        ))
+        .gap(ROW_GAP)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
             // Last-run time leads the row, tied to the node's status color —
@@ -205,7 +214,7 @@ pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
                 // so glow + spin + ticking time read as one "running" cue.
                 if matches!(node.exec_status(), ExecStatus::Running(_)) {
                     Spinner::new()
-                        .diameter(BADGE_FONT)
+                        .diameter(theme.text.label)
                         .color(color)
                         .show(ui);
                 }
@@ -213,9 +222,7 @@ pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
                 Text::new(elapsed)
                     .style(&TextStyle {
                         color,
-                        font_size_px: BADGE_FONT,
-                        family: FontFamily::MONO,
-                        ..ui.theme().text
+                        ..mono_text(ui, theme.text.label)
                     })
                     .min_size((RUN_TIME_MIN_WIDTH, 0.0))
                     .show(ui);

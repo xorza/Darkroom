@@ -66,6 +66,10 @@ pub(crate) struct Inspectors {
     modes: BTreeMap<NodeId, InspectMode>,
 }
 
+/// The panel's shadow blur: a node body's is the status glow's, and the panel
+/// floats above the bodies, so it casts the softer shadow of a higher surface.
+const PANEL_SHADOW_BLUR: f32 = 12.0;
+
 /// Fixed panel width in canvas (pre-transform) units.
 const PANEL_WIDTH: f32 = 280.0;
 /// Most recent log lines shown per node, so the panel stays bounded.
@@ -174,14 +178,10 @@ impl Inspectors {
             InspectMode::Open => RgbaF32::TRANSPARENT,
         };
         let chrome = Background::rounded(theme.card.fill, Corners::all(theme.card.corner_radius))
-            .with_border(Stroke::new(border, 1.0))
+            .with_border(Stroke::new(border, theme.card.border_width))
             // Same elevation swatch as the node bodies, so every floating
             // surface casts one kind of shadow (bigger blur — the panel sits higher).
-            .with_shadow(Shadow::drop(
-                theme.card.ambient_shadow,
-                Vec2::new(0.0, 3.0),
-                12.0,
-            ));
+            .with_shadow(theme.card.elevation_shadow(PANEL_SHADOW_BLUR));
         Panel::vstack()
             .id(inspect_panel_wid(node.id))
             .position(pos)
@@ -278,7 +278,7 @@ impl Inspectors {
 /// reuses the missing-inputs glow (orange), error the errored glow (red).
 fn log_color(theme: &Theme, ui: &Ui, level: LogLevel) -> RgbaF32 {
     match level {
-        LogLevel::Info => ui.theme().text.color.with_alpha(0.85),
+        LogLevel::Info => ui.theme().text.color,
         LogLevel::Warn => theme.status.warning,
         LogLevel::Error => theme.status.error,
     }

@@ -9,14 +9,15 @@
 //! `GraphIntent::SetViewport` directly.
 
 use palantir::prelude::*;
-use palantir::widget::Shape;
 
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
 use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::gesture::pan_zoom::{self, Framing};
 use crate::gui::requests::Requests;
-use crate::gui::widgets::support::{dot, filled_rect, frame, play_triangle, stroked_rect};
+use crate::gui::widgets::support::{
+    dot, filled_rect, frame, play_triangle, play_triangle_at, stroked_rect,
+};
 use crate::gui::widgets::toolbar::{BUTTON_GAP, Chip, TOOLBAR_MARGIN, pill};
 
 /// The toolbar's chip ids. One graph pane, so each is a fixed hash.
@@ -157,15 +158,8 @@ fn draw_play_bar(ui: &mut Ui, s: f32, color: RgbaF32) {
         1.0,
         color,
     );
-    // The play triangle, just to its right.
-    ui.add_shape(
-        Shape::triangle(
-            Vec2::new(s * 0.46, s * 0.30),
-            Vec2::new(s * 0.46, s * 0.70),
-            Vec2::new(s * 0.74, s * 0.50),
-        )
-        .fill(color),
-    );
+    // The play triangle, just to its right, as tall as the bar.
+    play_triangle_at(ui, s, Vec2::new(s * 0.58, s * 0.5), 0.40, color);
 }
 
 /// How much of a toolbar button the play mark spans. Smaller than the node
