@@ -3,10 +3,14 @@ use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
 use std::time::{Duration, UNIX_EPOCH};
 
+use common::CancelToken;
+
 use crate::combine::cache::loader::*;
+use crate::error::FrameDimensionMismatch;
 use crate::frame_store::cache_key::DecoderKind;
 use crate::frame_store::frame_spill::Carries;
 use crate::io::image::cfa::CfaImage;
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use common::TempDir;
 
@@ -16,17 +20,15 @@ fn cache_test_frame<I: StackableImage>(
     dimensions: ImageDimensions,
     index: usize,
 ) -> Result<StoredFrame, Error> {
-    cache_frame::<I>(
-        cache_dir,
-        source,
-        index,
-        dimensions,
-        // No reference: these tests are about one frame's cache files, not the set it belongs to.
-        None,
-        &LoadContext::new(CancelToken::never(), u64::MAX),
-        None,
-        None,
-    )
+    // No frame 0 admitted: these tests are about one frame's cache files, not the set it belongs to.
+    let cancel = CancelToken::never();
+    FrameDiskCache::<I> {
+        directory: cache_dir,
+        admission: &FrameAdmission::new(dimensions, &cancel),
+        context: &LoadContext::new(CancelToken::never(), u64::MAX),
+        step: None,
+    }
+    .frame(source, index, None)
 }
 
 fn spill_of<'a, I: StackableImage>(cache_dir: &'a Path, source: &Path) -> FrameSpill<'a> {

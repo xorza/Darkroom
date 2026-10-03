@@ -143,6 +143,47 @@ fn a_warped_run_charges_the_combine_output() {
     assert!(!MemoryPlan::plan(shape(0), 1, quarters(69) - 2).fits_in_ram);
 }
 
+/// 30 RGB frames of 24 MP that the caller holds, eight workers: planes of 96 MB, frames of 288 MB.
+/// The reading already left the 30 × 288 MB = 8.64 GB of inputs out. A warped frame is 288 + 2 ×
+/// 96 + 24 = 504 MB, less the 288 MB source it frees: 30 × 216 MB = 6.48 GB, plus the eight
+/// sources in flight, 8 × 288 MB, is the warp's 8.784 GB peak. The decode pass adds the statistics
+/// copy and the detector, 288 + 672 = 960 MB, and eight of those fit beside nothing resident. The
+/// run stays resident at a budget of exactly 8.784 GB and spills a byte below it. Charged as frames
+/// the run decodes, the warp needs 30 × 504 MB + 2.304 GB = 17.424 GB and spills at the same budget.
+#[test]
+fn held_frames_are_charged_only_what_the_run_adds() {
+    const MB: usize = 1_000_000;
+    let (plane_bytes, frame_bytes) = (96 * MB, 288 * MB);
+    let shape = |held_bytes| RunShape {
+        frame_count: 30,
+        decode: DemosaicMemory {
+            output_bytes: frame_bytes,
+            peak_bytes: DECODE_TRANSIENT_FACTOR * frame_bytes,
+        },
+        held_bytes,
+        detection_bytes: DETECTION_WORKING_PLANES * plane_bytes,
+        warp: Some(PerFrameBytes::new(plane_bytes, frame_bytes)),
+        output_bytes: 0,
+    };
+    assert_eq!(
+        PerFrameBytes::new(plane_bytes, frame_bytes).warped,
+        504 * MB
+    );
+    let peak = 8_784 * MB as u64;
+    let held = MemoryPlan::plan(shape(frame_bytes), 8, available_for_usable(peak));
+    assert_eq!(
+        held,
+        MemoryPlan {
+            fits_in_ram: true,
+            decode_concurrency: 8,
+            warp_concurrency: 8,
+        }
+    );
+    assert!(!MemoryPlan::plan(shape(frame_bytes), 8, available_for_usable(peak - 1)).fits_in_ram);
+    assert!(!MemoryPlan::plan(shape(0), 8, available_for_usable(peak)).fits_in_ram);
+    assert!(MemoryPlan::plan(shape(0), 8, available_for_usable(17_424 * MB as u64)).fits_in_ram);
+}
+
 /// Rows per chunk by hand: the usable budget over the bytes a row of every input plane costs,
 /// after the resident planes, floored at `MIN_CHUNK_ROWS`.
 /// - 6000 px × 60 planes (3 channels × 20 frames) × 4 B = 1 440 000 B a row: 6 GiB usable of 8 is
@@ -235,6 +276,7 @@ fn pipeline_shape(
     RunShape {
         frame_count: frames,
         decode: demosaic.with_peak_at_least(DECODE_TRANSIENT_FACTOR * demosaic.output_bytes),
+        held_bytes: 0,
         detection_bytes: DETECTION_WORKING_PLANES * plane_bytes,
         warp: Some(PerFrameBytes::new(plane_bytes, demosaic.output_bytes)),
         output_bytes,

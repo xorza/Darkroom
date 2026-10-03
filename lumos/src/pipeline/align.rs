@@ -1,23 +1,16 @@
 //! Detection, registration, warping, and combination of calibrated images.
 
 use std::mem;
+use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common::CancelToken;
 
-use crate::combine::cache::frame_check::FrameCheck;
-use crate::combine::error::Error as StackError;
 use crate::combine::stack::stack_stored_frames;
 use crate::concurrency;
-use crate::error::FrameDimensionMismatch;
-use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::linear::LinearImage;
-use crate::io::raw::demosaic::DemosaicMemory;
-use crate::memory::{
-    DECODE_TRANSIENT_FACTOR, DETECTION_WORKING_PLANES, MemoryPlan, PerFrameBytes, RunShape,
-};
 use crate::progress::stage_counter::StageCounter;
 use crate::progress::{ProgressCallback, StackingStage};
 use crate::registration::register;
@@ -26,10 +19,9 @@ use crate::registration::result::RegistrationError;
 use crate::star_detection::detector::DetectionResult;
 use crate::star_detection::detector::Diagnostics;
 
-use crate::memory;
 use crate::pipeline::config::{AlignStackConfig, Reference};
-use crate::pipeline::detector_pool::DetectorPool;
-use crate::pipeline::frame::{DetectedFrame, PipelineFrame};
+use crate::pipeline::frame::DetectedFrame;
+use crate::pipeline::light_source::LightSource;
 use crate::pipeline::result::{AlignStackResult, Error};
 use crate::pipeline::tier::StagePlan;
 
@@ -41,8 +33,8 @@ use crate::pipeline::tier::StagePlan;
 /// [`AlignmentSummary::dropped`](crate::pipeline::result::AlignmentSummary::dropped);
 /// the stack proceeds with whatever aligned. A single input frame is returned as its own "stack".
 ///
-/// Every light must share the first one's dimensions and hold only finite samples; both are
-/// checked before any work, so a bad input is reported as one instead of surfacing from the
+/// Every light must share the first one's dimensions and hold only finite samples; each is checked
+/// before its stars are detected, so a bad input is reported as one instead of surfacing from the
 /// combine after a warp has spread it.
 ///
 /// The frames arrive decoded and resident, so the inputs are committed before this is called —
@@ -60,84 +52,9 @@ pub fn align_and_stack(
         return Err(Error::NoFrames);
     }
     config.validate(lights.len())?;
-    let dimensions = lights[0].dimensions();
-    for (index, light) in lights.iter().enumerate() {
-        FrameDimensionMismatch::check(index, dimensions, light.dimensions())
-            .map_err(|mismatch| Error::from(StackError::from(mismatch)))?;
-        FrameCheck {
-            index,
-            cancel: &cancel,
-        }
-        .samples(light)?;
-    }
-
-    // One reading for the run, for the tier decision and the combine's chunk sizes alike.
-    let memory = IngestRun::new(&config.stack.ingest, cancel.clone()).memory;
-    let total = lights.len();
-    // The inputs are already decoded and resident: what the preparing pass adds to each is the
-    // copy its statistics sort, beside the detector. On the spill tier that charges the input
-    // itself as well, which the caller already holds — one frame of slack per worker.
-    let frame_bytes = memory::frame_bytes(dimensions);
-    let plane_bytes = dimensions.pixel_count() * size_of::<f32>();
-    let plan = MemoryPlan::plan(
-        RunShape {
-            frame_count: total,
-            decode: DemosaicMemory {
-                output_bytes: frame_bytes,
-                peak_bytes: DECODE_TRANSIENT_FACTOR * frame_bytes,
-            },
-            detection_bytes: DETECTION_WORKING_PLANES * plane_bytes,
-            warp: Some(PerFrameBytes::new(plane_bytes, frame_bytes)),
-            output_bytes: config.stack.quality.resident_bytes(dimensions),
-        },
-        rayon::current_num_threads(),
-        memory.planning(),
-    );
-    let stage = StagePlan::new(&plan, &config.stack.ingest, memory)?;
-
-    tracing::info!(
-        frames = total,
-        spilling = stage.tier.spills(),
-        "Detecting stars"
-    );
-    let detected_count = StageCounter::new(&progress, StackingStage::Preparing, total);
-    let detections = {
-        // Bounded like the calibrated entry's: the plan charges each in-flight frame the
-        // detector's whole working set.
-        let mut detectors =
-            DetectorPool::from_config(&config.detection, plan.decode_concurrency.min(total))
-                .map_err(Error::DetectionConfig)?;
-        detectors.try_map(&lights, |detector, _index, image| {
-            // Cancelled: abort the batch rather than spend the rest of the budget detecting
-            // frames the run will discard.
-            if cancel.is_cancelled() {
-                return Err(Error::Cancelled);
-            }
-            let result = detector.detect(image);
-            // Measured before interpolation, which correlates neighbouring pixels and would
-            // otherwise understate the frame's noise.
-            let stats = FrameStats::measure(image);
-            let n = detected_count.complete_one();
-            log_detection(n, total, &result);
-            Ok((result, stats))
-        })
-    }?;
-
-    // Resident whatever the tier: these frames are already in RAM, and spilling them here would
-    // be a write and a read-back for nothing. The tier governs the *warped* set below, which is
-    // the one that would otherwise double the footprint.
-    let detected: Vec<DetectedFrame> = lights
-        .into_iter()
-        .zip(detections)
-        .map(|(image, (result, stats))| DetectedFrame {
-            image: PipelineFrame::Resident(image),
-            stars: result.stars,
-            diagnostics: result.diagnostics,
-            stats,
-        })
-        .collect();
-
-    register_warp_and_stack(detected, config, stage, progress, cancel)
+    let run = IngestRun::new(&config.stack.ingest, cancel.clone());
+    let detected = LightSource::<&Path>::Held(lights).detect(config, &run, &progress)?;
+    register_warp_and_stack(detected.frames, config, detected.stage, progress, cancel)
 }
 
 /// The detection funnel — candidates → deblended → centroided → kept — shows how confidently

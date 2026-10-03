@@ -167,6 +167,11 @@ pub(crate) struct RunShape {
     pub(crate) frame_count: usize,
     /// One frame's decode: what it leaves resident, and its peak on the way there.
     pub(crate) decode: DemosaicMemory,
+    /// What of each frame the caller held before the run read the machine: the whole decoded frame
+    /// for frames handed over in memory, zero for frames decoded from files. The reading already
+    /// left those bytes out, so every figure that holds the frame is charged net of them, and the
+    /// run frees them as it warps each frame.
+    pub(crate) held_bytes: usize,
     /// What each concurrent decode holds beside it for the whole pass: the star detector's
     /// scratch pool, kept from frame to frame. Zero for a run that detects nothing.
     pub(crate) detection_bytes: usize,
@@ -195,6 +200,7 @@ impl RunShape {
                 peak_bytes: resident_bytes
                     .saturating_add((DECODE_TRANSIENT_FACTOR - 1).saturating_mul(frame_bytes)),
             },
+            held_bytes: 0,
             detection_bytes: 0,
             warp: None,
             output_bytes,
@@ -225,10 +231,15 @@ impl MemoryPlan {
         let RunShape {
             frame_count,
             decode,
+            held_bytes,
             detection_bytes,
             warp,
             output_bytes,
         } = shape;
+        debug_assert!(
+            held_bytes <= decode.output_bytes,
+            "a held frame is at most the decoded frame"
+        );
         assert!(
             frame_count > 0,
             "memory planning requires at least one frame"
@@ -238,15 +249,20 @@ impl MemoryPlan {
             (per_frame.warped, per_frame.working)
         });
         let usable = memory_budget(available);
+        // What each frame adds once decoded and once warped, beyond what the caller held.
+        let decoded = decode.output_bytes - held_bytes;
+        let warped_added = warped - held_bytes;
         let resident_decode = decode
             .peak_bytes
             .saturating_sub(decode.output_bytes)
             .saturating_add(detection_bytes);
+        // The source a worker warps stays alive beside the warped set until the warp ends, held or
+        // not.
         let resident_warp = working.saturating_sub(warped);
 
-        let decoded_resident = (decode.output_bytes as u64).saturating_mul(frame_count as u64);
+        let decoded_resident = (decoded as u64).saturating_mul(frame_count as u64);
         let decode_minimum = decoded_resident.saturating_add(resident_decode as u64);
-        let warped_resident = (warped as u64).saturating_mul(frame_count as u64);
+        let warped_resident = (warped_added as u64).saturating_mul(frame_count as u64);
         let working_peak =
             warped_resident.saturating_add((resident_warp as u64).saturating_mul(workers as u64));
         let combine_peak = warped_resident.saturating_add(output_bytes as u64);
@@ -257,19 +273,22 @@ impl MemoryPlan {
         } else {
             (
                 0,
-                decode.peak_bytes.saturating_add(detection_bytes),
-                working,
+                decode
+                    .peak_bytes
+                    .saturating_add(detection_bytes)
+                    .saturating_sub(held_bytes),
+                working.saturating_sub(held_bytes),
             )
         };
-        let decode_concurrency = load_concurrency(
-            decode.output_bytes,
-            decode_bytes,
+        let decode_concurrency =
+            load_concurrency(decoded, decode_bytes, resident_frames, available, workers);
+        let warp_concurrency = load_concurrency(
+            warped_added,
+            warp_bytes,
             resident_frames,
             available,
             workers,
         );
-        let warp_concurrency =
-            load_concurrency(warped, warp_bytes, resident_frames, available, workers);
         Self {
             fits_in_ram,
             decode_concurrency,

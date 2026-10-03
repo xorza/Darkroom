@@ -9,6 +9,7 @@ pub(crate) mod error;
 mod fits;
 pub(crate) mod master_dark;
 pub(crate) mod master_role;
+pub(crate) mod master_subtraction;
 pub(crate) mod prepared_flat;
 
 use std::io;
@@ -18,11 +19,12 @@ use common::CancelToken;
 
 use crate::calibration_masters::defect_map::DefectMap;
 use crate::calibration_masters::error::CalibrationError;
+use crate::calibration_masters::master_subtraction::MasterSubtraction;
 use crate::combine::cache::FrameCache;
-use crate::combine::cache::loader::Prepare;
 use crate::combine::config::StackConfig;
 use crate::combine::error::Error;
 use crate::combine::stack::combine_cached;
+use crate::ingest::frame_step::FrameStep;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::sample_domain::{DomainMap, Pedestal};
@@ -110,36 +112,12 @@ pub fn stack_cfa_master(
         quality: QualityPlanes::IMAGE_ONLY,
         ..config
     };
-    // `cancel` rides on the cache from construction, so the RAW-decode load loop
-    // polls it too (not just the combine).
-    let prepare = |index: usize, frame: &mut CfaImage| -> Result<(), Error> {
-        let Some(master) = subtract else {
-            return Ok(());
-        };
-        if master.cfa_type != frame.cfa_type || master.size() != frame.size() {
-            return Err(Error::SubtractorShape {
-                index,
-                frame: frame.size(),
-                subtractor: master.size(),
-            });
-        }
-        let map = match (&frame.metadata.domain, &master.metadata.domain) {
-            (Some(frame_domain), Some(master_domain)) => master_domain
-                .conversion_to(frame_domain)
-                .ok_or_else(|| Error::SubtractorDomain {
-                    index,
-                    frame: Box::new(frame_domain.clone()),
-                    subtractor: Box::new(master_domain.clone()),
-                })?,
-            _ => DomainMap::IDENTITY,
-        };
-        frame.subtract(master, map);
-        frame.metadata.calibrated = true;
-        Ok(())
-    };
-    let prepare = subtract.map(|_| &prepare as &Prepare<'_, CfaImage>);
+    let subtraction = subtract.map(|master| MasterSubtraction { master });
+    let step = subtraction
+        .as_ref()
+        .map(|step| step as &dyn FrameStep<CfaImage>);
     let product = combine_cached(&config, paths.len(), "cfa paths", || {
-        FrameCache::from_cfa_paths(paths, &config, run, prepare, progress)
+        FrameCache::from_cfa_paths(paths, &config, run, step, progress)
     })?;
 
     Ok(Some(product.into_cfa_master()))

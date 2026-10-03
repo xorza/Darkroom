@@ -33,22 +33,19 @@ impl DetectorPool {
         Ok(Self { detectors })
     }
 
-    /// Map `f` over `items` with one detector per concurrent slot, passing each item's index.
+    /// Map `f` over the indices `0..len` with one detector per concurrent slot.
     ///
     /// The detectors *are* the slots of [`concurrency::try_par_map_bounded`], so concurrency is
     /// capped at the pool size and each detector carries its warmed buffers from one frame to
     /// the next it happens to pick up. Which frames a given detector sees is not fixed: a
     /// detector takes whatever is next when it frees up.
-    pub(crate) fn try_map<T, R, E, F>(&mut self, items: &[T], f: F) -> Result<Vec<R>, E>
+    pub(crate) fn try_map<R, E, F>(&mut self, len: usize, f: F) -> Result<Vec<R>, E>
     where
-        T: Sync,
         R: Send,
         E: Send,
-        F: Fn(&mut StarDetector, usize, &T) -> Result<R, E> + Sync,
+        F: Fn(&mut StarDetector, usize) -> Result<R, E> + Sync,
     {
-        concurrency::try_par_map_bounded(items.len(), &mut self.detectors, |detector, index| {
-            f(detector, index, &items[index])
-        })
+        concurrency::try_par_map_bounded(len, &mut self.detectors, f)
     }
 }
 
@@ -75,7 +72,7 @@ mod tests {
     fn results_stay_ordered_and_never_use_more_detectors_than_slots() {
         let mut pool = DetectorPool::from_config(&Config::default(), 2).unwrap();
         let uses = pool
-            .try_map(&[0, 1, 2, 3, 4], |detector, _index, &item| {
+            .try_map(5, |detector, item| {
                 Ok::<_, ()>(DetectorUse {
                     item,
                     detector_address: ptr::from_ref::<StarDetector>(detector).addr(),
@@ -101,7 +98,6 @@ mod tests {
     fn an_error_stops_the_pool_taking_further_items() {
         const SLOTS: usize = 2;
         let mut pool = DetectorPool::from_config(&Config::default(), SLOTS).unwrap();
-        let items: Vec<usize> = (0..1000).collect();
 
         // Each slot is held on its first item until the failure is recorded, so this measures
         // "no further items are taken once the failure is visible" rather than how fast the flag
@@ -109,7 +105,7 @@ mod tests {
         let attempted = Mutex::new(Vec::new());
         let failed = AtomicBool::new(false);
         let error = pool
-            .try_map(&items, |_, _index, &item| {
+            .try_map(1000, |_, item| {
                 attempted.lock().push(item);
                 if item == 0 {
                     failed.store(true, Ordering::SeqCst);
