@@ -1,5 +1,6 @@
 //! Concurrency helpers for Rayon work and reusable per-job resources.
 
+use std::mem::ManuallyDrop;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -58,7 +59,7 @@ impl<T: Default> JobScratchPool<T> {
     pub(crate) fn acquire(&self) -> JobScratchLease<'_, T> {
         let value = self.values.lock().pop().unwrap_or_default();
         JobScratchLease {
-            value: Some(value),
+            value: ManuallyDrop::new(value),
             pool: &self.values,
         }
     }
@@ -67,7 +68,9 @@ impl<T: Default> JobScratchPool<T> {
 /// A value on loan from a [`JobScratchPool`], returned to it when dropped.
 #[derive(Debug)]
 pub(crate) struct JobScratchLease<'a, T> {
-    value: Option<T>,
+    /// Held for the lease's whole life and moved back into the pool by `drop`, which is why it is
+    /// not dropped in place.
+    value: ManuallyDrop<T>,
     pool: &'a Mutex<Vec<T>>,
 }
 
@@ -75,19 +78,21 @@ impl<T> Deref for JobScratchLease<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        self.value.as_ref().unwrap()
+        &self.value
     }
 }
 
 impl<T> DerefMut for JobScratchLease<'_, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.value.as_mut().unwrap()
+        &mut self.value
     }
 }
 
 impl<T> Drop for JobScratchLease<'_, T> {
     fn drop(&mut self) {
-        self.pool.lock().push(self.value.take().unwrap());
+        // SAFETY: `value` is taken exactly once, here, and the lease is never read after its drop.
+        let value = unsafe { ManuallyDrop::take(&mut self.value) };
+        self.pool.lock().push(value);
     }
 }
 

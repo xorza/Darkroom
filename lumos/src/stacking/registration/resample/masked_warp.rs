@@ -22,6 +22,7 @@ use rayon::prelude::*;
 
 use crate::io::image::linear::LinearImage;
 use crate::io::image::null_mask::NullMask;
+use crate::math::vec2us::Vec2us;
 use crate::stacking::combine::pixel_coverage::PixelCoverage;
 use crate::stacking::registration::config::WarpParams;
 use crate::stacking::registration::resample::row;
@@ -44,13 +45,20 @@ impl MaskedSources {
             .map(|channel| {
                 let source = image.channel(channel);
                 let mut zeroed = Buffer2::new_default(source.width(), source.height());
+                let width = source.width();
                 zeroed
                     .pixels_mut()
-                    .par_iter_mut()
-                    .zip(source.pixels().par_iter())
+                    .par_chunks_mut(width)
+                    .zip(source.pixels().par_chunks(width))
                     .enumerate()
-                    .for_each(|(index, (value, &sample))| {
-                        *value = if nulls.is_null(index) { 0.0 } else { sample };
+                    .for_each(|(y, (row, source_row))| {
+                        for (x, (value, &sample)) in row.iter_mut().zip(source_row).enumerate() {
+                            *value = if nulls.is_null_at(Vec2us::new(x, y)) {
+                                0.0
+                            } else {
+                                sample
+                            };
+                        }
                     });
                 zeroed
             })

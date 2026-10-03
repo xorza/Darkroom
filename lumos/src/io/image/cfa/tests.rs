@@ -29,7 +29,7 @@ fn a_null_is_repaired_from_its_same_colour_neighbours_before_demosaic() {
     assert_eq!(demosaiced.channel(0).pixels()[5], 0.5);
     // The mask stays at its own extent: this pixel was reconstructed, not measured, and the combine
     // still has to gate on that.
-    assert!(demosaiced.nulls.as_ref().unwrap().is_null(5));
+    assert!(demosaiced.nulls.as_ref().unwrap().bits().get(5));
     assert_eq!(demosaiced.nulls.as_ref().unwrap().count(), 1);
 }
 
@@ -53,7 +53,7 @@ fn a_masters_nulls_survive_the_fits_round_trip() {
     let nulls = loaded.nulls.as_ref().expect("the mask must come back");
     assert_eq!(nulls.count(), 1);
     for index in 0..4 {
-        assert_eq!(nulls.is_null(index), index == 1, "index {index}");
+        assert_eq!(nulls.bits().get(index), index == 1, "index {index}");
     }
     // The measured samples are untouched by the trip; only the null's own value is not what was
     // written, because what was written for it was "no measurement".

@@ -377,7 +377,7 @@ fn estimate_and_refine(
     }
 
     let t0 = Instant::now();
-    let sip_fit = if let Some(sip_config) = &config.sip {
+    let sip = if let Some(sip_config) = &config.sip {
         // Materialized rather than indexed through `inlier_matches`: the fitter takes paired
         // position slices and knows nothing about match indices, which is the layering that keeps
         // `distortion` independent of how the matches were found. Only the SIP path pays for it,
@@ -391,12 +391,15 @@ fn estimate_and_refine(
             target_stars,
         );
 
-        Some(SipPolynomial::fit_from_transform(
-            &inliers.reference,
-            &inliers.target,
-            &transform,
-            sip_config,
-        )?)
+        Some(
+            SipPolynomial::fit_from_transform(
+                &inliers.reference,
+                &inliers.target,
+                &transform,
+                sip_config,
+            )?
+            .polynomial,
+        )
     } else {
         None
     };
@@ -405,7 +408,7 @@ fn estimate_and_refine(
     // same `WarpTransform::apply` the warp evaluates.
     let warp = WarpTransform {
         transform,
-        sip: sip_fit.as_ref().map(|fit| fit.polynomial.clone()),
+        sip: sip.clone(),
     };
     let matched_stars: Vec<StarMatch> = inlier_matches
         .iter()
@@ -425,7 +428,7 @@ fn estimate_and_refine(
         "Registration sub-step timing"
     );
 
-    Ok(RegistrationResult::new(transform, sip_fit, matched_stars))
+    Ok(RegistrationResult::new(transform, sip, matched_stars))
 }
 
 #[cfg(all(test, feature = "bench"))]

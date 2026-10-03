@@ -15,14 +15,6 @@ pub enum QualityMap {
 }
 
 impl QualityMap {
-    /// Resolve the quality plane applicable to an image channel.
-    pub fn channel(&self, channel: usize) -> &Buffer2<f32> {
-        match self {
-            Self::Shared(plane) => plane,
-            Self::PerChannel(planes) => &planes[channel],
-        }
-    }
-
     pub(crate) fn from_pixels(pixels: LinearPixels) -> Self {
         match pixels {
             LinearPixels::L(plane) => Self::Shared(plane),
@@ -36,6 +28,23 @@ impl From<QualityMap> for LinearImage {
         match map {
             QualityMap::Shared(plane) => plane.into(),
             QualityMap::PerChannel(planes) => planes.into(),
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use imaginarium::Buffer2;
+
+    use crate::stacking::stack_product::quality_map::QualityMap;
+
+    impl QualityMap {
+        /// The quality plane applicable to an image channel.
+        pub(crate) fn channel(&self, channel: usize) -> &Buffer2<f32> {
+            match self {
+                Self::Shared(plane) => plane,
+                Self::PerChannel(planes) => &planes[channel],
+            }
         }
     }
 }

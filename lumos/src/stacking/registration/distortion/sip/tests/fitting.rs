@@ -1,4 +1,5 @@
 use super::*;
+use crate::math::size2us::Size2us;
 use std::f64::consts::PI;
 
 #[test]
@@ -122,7 +123,7 @@ fn max_correction_is_the_corner_correction() {
     let size = Size2us::new(1000, 1000);
     let barrel = fit_field(&barrel(), 3, 3).polynomial;
     let corner = 25.0 * 2f64.sqrt();
-    assert!((barrel.max_correction(size, 50.0) - corner).abs() <= EXACT_FIT_PX);
+    assert!((barrel.max_grid_correction(size, 50.0) - corner).abs() <= EXACT_FIT_PX);
     let flat = fit_field(
         &RadialField {
             k: 0.0,
@@ -132,7 +133,7 @@ fn max_correction_is_the_corner_correction() {
         3,
     )
     .polynomial;
-    assert_eq!(flat.max_correction(size, 50.0), 0.0);
+    assert_eq!(flat.max_grid_correction(size, 50.0), 0.0);
     assert!(
         flat.coeffs_u
             .iter()

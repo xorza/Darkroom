@@ -1,4 +1,3 @@
-use std::ops::SubAssign;
 use std::path::Path;
 
 use imaginarium::{Buffer2, ChannelCount, FileFormat, Image};
@@ -186,11 +185,6 @@ impl LinearImage {
         }
     }
 
-    /// Calculate mean pixel value across all channels.
-    pub fn mean(&self) -> f32 {
-        self.pixels.mean()
-    }
-
     /// Per-pixel parallel in-place map that needs all three channels at once. A no-op on a
     /// grayscale image, which has no cross-channel relationship for `rgb` to act on — every caller
     /// (SCNR, background neutralization, the colour-preserving stretch) is meaningless in mono and
@@ -319,28 +313,6 @@ impl StackableImage for LinearImage {
 
     fn into_planes(self) -> arrayvec::ArrayVec<Buffer2<f32>, 3> {
         self.pixels.into_planes()
-    }
-}
-
-impl SubAssign<&LinearImage> for LinearImage {
-    fn sub_assign(&mut self, rhs: &LinearImage) {
-        assert_eq!(
-            self.dimensions(),
-            rhs.dimensions(),
-            "Image dimensions mismatch"
-        );
-        let w = self.width();
-        for c in 0..self.channels() {
-            let dst = self.channel_mut(c).pixels_mut();
-            let src = rhs.channel(c).pixels();
-            dst.par_chunks_mut(w)
-                .zip(src.par_chunks(w))
-                .for_each(|(d_row, s_row)| {
-                    for (d, s) in d_row.iter_mut().zip(s_row.iter()) {
-                        *d -= s;
-                    }
-                });
-        }
     }
 }
 

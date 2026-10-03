@@ -319,7 +319,7 @@ fn the_public_warp_samples_through_the_sip_correction() {
         SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &sip_config)
             .unwrap()
             .polynomial;
-    assert!(sip.max_correction(size, 10.0) > 0.1);
+    assert!(sip.max_grid_correction(size, 10.0) > 0.1);
     let warp_transform = WarpTransform::with_sip(transform, sip);
 
     let pixels = star_field(size, 20, 12321).image.channel(0).clone();

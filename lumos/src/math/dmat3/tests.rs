@@ -15,11 +15,8 @@ fn every_constructor_and_accessor_round_trips() {
     for m in [
         DMat3::from_array(DATA),
         from_rows([1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]),
-        DATA.into(),
     ] {
         assert_eq!(*m.as_array(), DATA);
-        let out: [f64; 9] = m.into();
-        assert_eq!(out, DATA);
         // Indexing is row-major over the same flat storage.
         for (i, expected) in DATA.iter().enumerate() {
             assert_eq!(m[i], *expected, "index {i}");
@@ -43,7 +40,7 @@ fn mutable_accessors_write_through() {
 /// sum is exact in f64 and every result compares with `assert_eq!`.
 const M: [f64; 9] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
 
-/// `identity` is the multiplicative identity on both sides, and `default` is `identity`.
+/// `identity` is the multiplicative identity on both sides.
 #[test]
 fn identity_is_the_multiplicative_identity_and_the_default() {
     let identity = DMat3::identity();
@@ -51,9 +48,8 @@ fn identity_is_the_multiplicative_identity_and_the_default() {
         *identity.as_array(),
         [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
     );
-    assert_eq!(DMat3::default(), identity);
     let m = DMat3::from_array(M);
-    assert_eq!(m * identity, m);
+    assert_eq!(m.mul_mat(&identity), m);
     assert_eq!(identity.mul_mat(&m), m);
 }
 
@@ -111,7 +107,7 @@ fn inverse_on_both_sides_of_the_threshold() {
     ] {
         assert_eq!(m.inverse(), Some(inverse), "{m:?}");
     }
-    assert_eq!(m * m.inverse().unwrap(), DMat3::identity());
+    assert_eq!(m.mul_mat(&m.inverse().unwrap()), DMat3::identity());
 
     // Rank-deficient, with elements large enough (scale³ = 1e9) that a threshold not capped
     // from below would wave it through.
@@ -123,7 +119,7 @@ fn inverse_on_both_sides_of_the_threshold() {
     }
 }
 
-/// `mul_mat` and `*` are one product, row by column: row 0 of the first pair is
+/// The product, row by column: row 0 of the first pair is
 /// [1·1 + 2·0, 1·0 + 2·1, 1·3 + 2·4 + 0·1] = [1, 2, 11]. A shear and its transpose do not commute.
 #[test]
 fn product_hand_computed() {
@@ -140,11 +136,10 @@ fn product_hand_computed() {
         ),
     ] {
         assert_eq!(a.mul_mat(&b), product);
-        assert_eq!(a * b, product);
     }
     let a = from_rows([1.0, 2.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
     let b = from_rows([1.0, 0.0, 0.0], [2.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
-    assert_ne!(a * b, b * a);
+    assert_ne!(a.mul_mat(&b), b.mul_mat(&a));
 }
 
 /// Points through the identity, a translation, and a perspective row: `w = 0.25·4 + 1 = 2` halves
@@ -188,15 +183,4 @@ fn transform_point_at_infinity_returns_infinity() {
     assert!(p.x.is_infinite() && p.y.is_infinite());
     // inf saturates to i32::MAX (out of bounds), unlike NaN which casts to 0.
     assert_eq!(p.x as i32, i32::MAX);
-}
-
-/// A scalar scales every element, from either side.
-#[test]
-fn scalar_product_scales_every_element() {
-    let m = DMat3::from_array(M);
-    for k in [0.0, 1.0, 2.0, 3.0] {
-        let scaled = m * k;
-        assert_eq!(*scaled.as_array(), M.map(|v| k * v), "k = {k}");
-        assert_eq!(k * m, scaled, "k = {k}");
-    }
 }

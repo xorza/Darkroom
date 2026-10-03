@@ -150,12 +150,6 @@ fn from_image_no_stride_padding() {
     assert_eq!(linear.channel(0).pixels(), &pixels[..]);
 }
 
-#[test]
-fn mean_averages_every_sample() {
-    let image = LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0, 2.0, 3.0, 4.0]);
-    assert!((image.mean() - 2.5).abs() < f32::EPSILON);
-}
-
 /// A saved TIFF reloads with the same dimensions and the same f32 samples, gray and colour.
 #[test]
 fn saved_tiff_round_trips_its_samples() {
@@ -336,11 +330,6 @@ fn rgb_image_creation_and_operations() {
     assert!(!image.is_grayscale());
     assert_eq!(image.pixel_count(), 4);
     assert_eq!(image.sample_count(), 12);
-
-    let expected_mean: f32 =
-        (10.0 + 20.0 + 30.0 + 40.0 + 50.0 + 60.0 + 70.0 + 80.0 + 90.0 + 100.0 + 110.0 + 120.0)
-            / 12.0;
-    assert!((image.mean() - expected_mean).abs() < f32::EPSILON);
 }
 
 /// `from_pixels` takes interleaved samples and splits them into row-major planes.
@@ -437,22 +426,4 @@ fn channel_mut_writes_through_to_the_plane() {
     image.channel_mut(0)[3] = 40.0;
 
     assert_eq!(image.channel(0).pixels(), &[10.0, 2.0, 3.0, 40.0]);
-}
-
-#[test]
-fn sub_assign() {
-    let mut image = LinearImage::from_pixels(
-        ImageDimensions::new((2, 1), 3),
-        vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-    );
-    let source = LinearImage::from_pixels(
-        ImageDimensions::new((2, 1), 3),
-        vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0],
-    );
-
-    image -= &source;
-
-    assert_eq!(image.channel(0).pixels(), &[-9.0, -36.0]);
-    assert_eq!(image.channel(1).pixels(), &[-18.0, -45.0]);
-    assert_eq!(image.channel(2).pixels(), &[-27.0, -54.0]);
 }

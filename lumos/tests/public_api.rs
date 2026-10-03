@@ -413,20 +413,14 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
             .pixels(),
         &[1.0, 0.5]
     );
-    assert_eq!(
-        result.product.weight.as_ref().unwrap().channel(0).pixels(),
-        &[2.0, 1.0]
-    );
-    assert_eq!(
-        result
-            .product
-            .linear_variance
-            .as_ref()
-            .unwrap()
-            .channel(0)
-            .pixels(),
-        &[0.5, 1.0]
-    );
+    let Some(QualityMap::Shared(weight)) = &result.product.weight else {
+        panic!("a mono stack has one weight plane");
+    };
+    let Some(QualityMap::Shared(variance)) = &result.product.linear_variance else {
+        panic!("a mono stack has one variance plane");
+    };
+    assert_eq!(weight.pixels(), &[2.0, 1.0]);
+    assert_eq!(variance.pixels(), &[0.5, 1.0]);
     assert_eq!(result.alignment.reference, 1);
     assert_eq!(result.alignment.registered, 2);
     assert_eq!(result.alignment.dropped, vec![0, 3]);

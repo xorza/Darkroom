@@ -5,6 +5,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::math::statistics::MedianMad;
+use crate::math::vec2us::Vec2us;
 use crate::stacking::frame_store::StackableImage;
 use crate::stacking::frame_store::frame_facts::FrameFacts;
 
@@ -43,10 +44,14 @@ impl FrameStats {
                 let plane = image.channel(channel);
                 let mut measured: Vec<f32> = match nulls {
                     Some(nulls) => plane
-                        .iter()
+                        .chunks(dimensions.width())
                         .enumerate()
-                        .filter(|(index, _)| !nulls.is_null(*index))
-                        .map(|(_, &sample)| sample)
+                        .flat_map(|(y, row)| {
+                            row.iter()
+                                .enumerate()
+                                .filter(move |&(x, _)| !nulls.is_null_at(Vec2us::new(x, y)))
+                                .map(|(_, &sample)| sample)
+                        })
                         .collect(),
                     None => plane.to_vec(),
                 };

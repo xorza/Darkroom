@@ -5,7 +5,7 @@ use crate::stacking::registration::triangle::voting::MatchIndices;
 use glam::DVec2;
 
 use crate::error::InvalidConfigField;
-use crate::stacking::registration::distortion::sip::SipFitResult;
+use crate::stacking::registration::distortion::sip::SipPolynomial;
 use crate::stacking::registration::transform::{Transform, TransformType, WarpTransform};
 use std::fmt;
 use std::fmt::Display;
@@ -167,7 +167,7 @@ pub struct StarMatch {
 #[derive(Debug, Clone)]
 pub struct RegistrationResult {
     transform: Transform,
-    sip_fit: Option<SipFitResult>,
+    sip: Option<SipPolynomial>,
     matched_stars: Vec<StarMatch>,
     elapsed_ms: f64,
 }
@@ -175,7 +175,7 @@ pub struct RegistrationResult {
 impl RegistrationResult {
     pub(crate) fn new(
         transform: Transform,
-        sip_fit: Option<SipFitResult>,
+        sip: Option<SipPolynomial>,
         matched_stars: Vec<StarMatch>,
     ) -> Self {
         debug_assert!(
@@ -185,7 +185,7 @@ impl RegistrationResult {
         );
         Self {
             transform,
-            sip_fit,
+            sip,
             matched_stars,
             elapsed_ms: 0.0,
         }
@@ -196,9 +196,9 @@ impl RegistrationResult {
         self.transform
     }
 
-    /// SIP fit and its diagnostics, when nonlinear distortion correction was requested.
-    pub fn sip_fit(&self) -> Option<&SipFitResult> {
-        self.sip_fit.as_ref()
+    /// The SIP distortion correction, when one was requested.
+    pub fn sip(&self) -> Option<&SipPolynomial> {
+        self.sip.as_ref()
     }
 
     /// Corresponding stars and their residuals under the final fitted transform.
@@ -225,14 +225,6 @@ impl RegistrationResult {
         }
     }
 
-    /// Maximum residual error in pixels.
-    pub fn max_error(&self) -> f64 {
-        self.matched_stars
-            .iter()
-            .map(|star_match| star_match.residual)
-            .fold(0.0, f64::max)
-    }
-
     /// Registration quality score from `0.0` to `1.0`: `exp(−rms / 2)` times the inlier count's
     /// share of 20. A result exists only above `min_matches` inliers, so no floor is needed here.
     pub fn quality_score(&self) -> f64 {
@@ -250,7 +242,7 @@ impl RegistrationResult {
     pub fn warp_transform(&self) -> WarpTransform {
         WarpTransform {
             transform: self.transform,
-            sip: self.sip_fit.as_ref().map(|r| r.polynomial.clone()),
+            sip: self.sip.clone(),
         }
     }
 

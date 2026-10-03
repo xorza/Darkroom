@@ -14,9 +14,7 @@ use crate::memory::ChunkMemoryLayout;
 use crate::memory::run_memory::RunMemory;
 use crate::stacking::frame_store::StoredFrame;
 use crate::stacking::frame_store::spill_directory::SpillDirectory;
-use crate::stacking::frame_store::stored_plane::StoredPlane;
 use crate::stacking::progress::{ProgressCallback, StackingStage};
-use crate::stacking::stack_product::quality_planes::QualityPlanes;
 
 /// Shared cache context + combine engine — everything that doesn't depend on the frame type.
 /// Owned by composition inside [`FrameCache`](super::FrameCache); all frames share one tier.
@@ -90,53 +88,6 @@ pub(super) struct ChunkContext<'a> {
     /// Global pixel index of this chunk's first pixel — for indexing full-frame,
     /// channel-independent maps such as coverage.
     pub(super) pixel_offset: usize,
-}
-
-/// Each frame's slice of one frame-quality plane over `[start, end)`, `None` where the frame
-/// carries no such plane.
-///
-/// `plane` picks which of the two a frame's slot is — the combine and the coverage pass both
-/// gather them the same way and differ only in that choice.
-pub(crate) fn quality_plane_chunks(
-    frames: &[StoredFrame],
-    plane: fn(&StoredFrame) -> Option<&StoredPlane>,
-    start: usize,
-    end: usize,
-) -> Vec<Option<&[f32]>> {
-    frames
-        .iter()
-        .map(|frame| plane(frame).map(|plane| plane.chunk(start, end)))
-        .collect()
-}
-
-/// What the combine pass holds: one input plane per frame channel, plus one more for each of that
-/// frame's coverage and confidence planes, against the resident output planes.
-pub(crate) fn weighted_chunk_memory_layout(
-    frames: &[StoredFrame],
-    output_channels: usize,
-    planes: QualityPlanes,
-) -> ChunkMemoryLayout {
-    ChunkMemoryLayout {
-        input_planes: frames.iter().map(|frame| 1 + frame.quality.count()).sum(),
-        resident_planes: output_channels * planes.resident_planes_per_channel(),
-    }
-}
-
-/// What the coverage pass holds: one input plane per frame that carries frame quality, against the
-/// combine's residents — which are all still alive at that point — plus the single coverage plane
-/// being accumulated.
-pub(crate) fn coverage_chunk_memory_layout(
-    frames: &[StoredFrame],
-    output_channels: usize,
-    planes: QualityPlanes,
-) -> ChunkMemoryLayout {
-    ChunkMemoryLayout {
-        input_planes: frames
-            .iter()
-            .filter(|frame| !frame.quality.is_none())
-            .count(),
-        resident_planes: output_channels * planes.resident_planes_per_channel() + 1,
-    }
 }
 
 impl CacheCore {

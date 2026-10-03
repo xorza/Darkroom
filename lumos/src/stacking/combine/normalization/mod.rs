@@ -54,6 +54,52 @@ pub(crate) struct FrameNorm {
     pub(crate) channels: ArrayVec<ChannelNorm, 3>,
 }
 
+impl FrameNorm {
+    /// The per-frame affine every frame is combined through, or `None` when every frame is taken as
+    /// it stands.
+    ///
+    /// Expressed in the domain of the first frame that declares one — the domain the stacked product
+    /// records. With no normalization each frame is only converted into it (gain `scale_i /
+    /// scale_ref`); a fitted normalization maps every frame onto its reference frame, so its gains and
+    /// offsets are then converted from the reference frame's domain the same way. Frames whose
+    /// domains agree get exactly the norms they had before conversion existed.
+    pub(crate) fn measure(
+        frames: &[StoredFrame],
+        dimensions: ImageDimensions,
+        normalization: Normalization,
+        cancel: &CancelToken,
+    ) -> Result<Option<Vec<Self>>, Error> {
+        let to_domain = domain_factors(frames);
+        if normalization == Normalization::None {
+            return Ok(to_domain.iter().any(|&factor| factor != 1.0).then(|| {
+                frames
+                    .iter()
+                    .zip(&to_domain)
+                    .map(|(frame, &factor)| FrameNorm {
+                        channels: (0..frame.source_stats.channels.len())
+                            .map(|_| ChannelNorm {
+                                gain: factor,
+                                offset: 0.0,
+                            })
+                            .collect(),
+                    })
+                    .collect()
+            }));
+        }
+        check_cancel(cancel)?;
+        let reference = select_reference_frame(frames.iter().map(|frame| &frame.source_stats));
+        let mut norms = fitted_frame_norms(frames, dimensions, normalization, reference, cancel)?;
+        let factor = to_domain[reference];
+        if factor != 1.0 {
+            for channel in norms.iter_mut().flat_map(|norm| norm.channels.iter_mut()) {
+                channel.gain *= factor;
+                channel.offset *= factor;
+            }
+        }
+        Ok(Some(norms))
+    }
+}
+
 /// One channel of the reference frame, measured once and paired against every other frame.
 #[derive(Debug)]
 struct ReferenceChannel {
@@ -81,57 +127,13 @@ const _: () = assert!(
     "a gather chunk starts on a mask word"
 );
 
-/// The per-frame affine every frame is combined through, or `None` when every frame is taken as
-/// it stands.
-///
-/// Expressed in the domain of the first frame that declares one — the domain the stacked product
-/// records. With no normalization each frame is only converted into it (gain `scale_i /
-/// scale_ref`); a fitted normalization maps every frame onto its reference frame, so its gains and
-/// offsets are then converted from the reference frame's domain the same way. Frames whose
-/// domains agree get exactly the norms they had before conversion existed.
-pub(crate) fn compute_frame_norms(
-    frames: &[StoredFrame],
-    dimensions: ImageDimensions,
-    normalization: Normalization,
-    cancel: &CancelToken,
-) -> Result<Option<Vec<FrameNorm>>, Error> {
-    let to_domain = domain_factors(frames);
-    if normalization == Normalization::None {
-        return Ok(to_domain.iter().any(|&factor| factor != 1.0).then(|| {
-            frames
-                .iter()
-                .zip(&to_domain)
-                .map(|(frame, &factor)| FrameNorm {
-                    channels: (0..frame.source_stats.channels.len())
-                        .map(|_| ChannelNorm {
-                            gain: factor,
-                            offset: 0.0,
-                        })
-                        .collect(),
-                })
-                .collect()
-        }));
-    }
-    check_cancel(cancel)?;
-    let reference = select_reference_frame(frames.iter().map(|frame| &frame.source_stats));
-    let mut norms = fitted_frame_norms(frames, dimensions, normalization, reference, cancel)?;
-    let factor = to_domain[reference];
-    if factor != 1.0 {
-        for channel in norms.iter_mut().flat_map(|norm| norm.channels.iter_mut()) {
-            channel.gain *= factor;
-            channel.offset *= factor;
-        }
-    }
-    Ok(Some(norms))
-}
-
 /// The factor that expresses each frame in the domain of the first frame declaring one; `1.0`
 /// for a frame that declares none, or when none does.
 ///
-/// The combine's constructors validate the set first ([`validate_sample_domains`]), so every
-/// declared domain converts.
+/// The combine's constructors admit the set's facts first ([`SetFacts`]), so every declared domain
+/// converts.
 ///
-/// [`validate_sample_domains`]: crate::stacking::combine::cache::validation::validate_sample_domains
+/// [`SetFacts`]: crate::stacking::combine::cache::set_facts::SetFacts
 fn domain_factors(frames: &[StoredFrame]) -> Vec<f32> {
     let reference = frames
         .iter()

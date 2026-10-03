@@ -105,11 +105,6 @@ impl FwhmSource {
             FwhmSource::Estimated { fwhm, .. } => Some(*fwhm),
         }
     }
-
-    /// Whether the FWHM was measured from this frame rather than supplied.
-    pub fn was_estimated(&self) -> bool {
-        matches!(self, FwhmSource::Estimated { .. })
-    }
 }
 
 /// A pixel at this fraction of the data's ceiling counts as saturated: a clipped star's flat top
@@ -154,11 +149,6 @@ impl StarDetector {
             config,
             resources: None,
         })
-    }
-
-    /// Get reference to the underlying configuration.
-    pub fn config(&self) -> &Config {
-        &self.config
     }
 
     /// Detect stars in a single image.
@@ -305,15 +295,6 @@ mod tests {
             Some(3.5)
         );
         assert_eq!(FwhmSource::Disabled.value(), None);
-        assert!(!FwhmSource::Configured(3.5).was_estimated());
-        assert!(
-            FwhmSource::Estimated {
-                fwhm: 3.5,
-                stars_used: 12
-            }
-            .was_estimated()
-        );
-        assert!(!FwhmSource::Disabled.was_estimated());
         // A default-constructed `Diagnostics` reports no FWHM rather than a bogus 0.0.
         assert_eq!(Diagnostics::default().fwhm, FwhmSource::Disabled);
     }
@@ -356,7 +337,10 @@ mod tests {
             let result = StarDetector::from_config(config)
                 .unwrap()
                 .detect(&frame.image);
-            assert!(result.diagnostics.fwhm.was_estimated(), "FWHM {fwhm}");
+            assert!(
+                matches!(result.diagnostics.fwhm, FwhmSource::Estimated { .. }),
+                "FWHM {fwhm}"
+            );
             let estimate = result.diagnostics.fwhm.value().unwrap();
             assert!(
                 (estimate - fwhm).abs() < 0.01 * fwhm,
@@ -393,7 +377,7 @@ mod tests {
                 .unwrap()
                 .detect(&frame.image);
             assert!(
-                auto_result.diagnostics.fwhm.was_estimated(),
+                matches!(auto_result.diagnostics.fwhm, FwhmSource::Estimated { .. }),
                 "FWHM {actual_fwhm} fixture must produce a genuine estimate"
             );
             let effective_fwhm = auto_result

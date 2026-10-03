@@ -34,19 +34,6 @@ impl InterpolationMethod {
         Self::Lanczos3,
         Self::Lanczos4,
     ];
-
-    /// Returns the kernel radius for this interpolation method.
-    #[inline]
-    pub fn kernel_radius(&self) -> usize {
-        match self {
-            InterpolationMethod::Nearest => 1,
-            InterpolationMethod::Bilinear => 1,
-            InterpolationMethod::Bicubic => 2,
-            InterpolationMethod::Lanczos2 => 2,
-            InterpolationMethod::Lanczos3 => 3,
-            InterpolationMethod::Lanczos4 => 4,
-        }
-    }
 }
 
 /// Configuration for inverse-mapped image resampling.

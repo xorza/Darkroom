@@ -21,7 +21,6 @@ use crate::math::statistics::MedianMad;
 use crate::stacking::combine::cache::internals::make_test_cache;
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::config::{Normalization, SmallN};
-use crate::stacking::combine::normalization;
 use crate::stacking::combine::normalization::ChannelNorm;
 use crate::stacking::combine::rejection::percentile_clip_config::PercentileClipConfig;
 use crate::stacking::combine::stack::*;
@@ -242,7 +241,7 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
 }
 
 fn norm_params_for(cache: &FrameCache, normalization: Normalization) -> Option<Vec<FrameNorm>> {
-    normalization::compute_frame_norms(
+    FrameNorm::measure(
         &cache.frames,
         cache.core.dimensions,
         normalization,

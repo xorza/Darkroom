@@ -126,7 +126,7 @@ impl<'a> FrameSpill<'a> {
         let mut planes = ArrayVec::new();
         for channel in 0..image.dimensions().channels() {
             let path = self.channel_path(channel);
-            write_plane(&path, image.channel(channel))?;
+            StoredPlane::write(&path, image.channel(channel))?;
             planes.push(StoredPlane::map(path)?);
         }
         Ok(planes)
@@ -200,10 +200,6 @@ pub(crate) struct Committed {
 fn plane_on_disk(path: &Path, dimensions: ImageDimensions) -> bool {
     let expected = (dimensions.pixel_count() * size_of::<f32>()) as u64;
     fs::metadata(path).is_ok_and(|metadata| metadata.len() == expected)
-}
-
-pub(crate) fn write_plane(path: &Path, pixels: &[f32]) -> Result<(), FrameStoreError> {
-    write_file(path, bytemuck::cast_slice(pixels))
 }
 
 pub(crate) fn write_file(path: &Path, bytes: &[u8]) -> Result<(), FrameStoreError> {

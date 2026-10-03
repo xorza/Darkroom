@@ -181,7 +181,7 @@ fn global_norms_are_fitted_against_the_selected_reference() {
         "the fixture must not select frame 0, or it proves nothing"
     );
 
-    let norms = compute_frame_norms(
+    let norms = FrameNorm::measure(
         &frames,
         dimensions,
         Normalization::Global,
@@ -254,7 +254,7 @@ fn common_domain_norms_preserve_pair_order_and_honor_cancellation() {
         })
         .collect::<Vec<_>>();
     let norms = |normalization| {
-        compute_frame_norms(&frames, dimensions, normalization, &CancelToken::never())
+        FrameNorm::measure(&frames, dimensions, normalization, &CancelToken::never())
             .unwrap()
             .unwrap()
     };
@@ -292,7 +292,7 @@ fn common_domain_norms_preserve_pair_order_and_honor_cancellation() {
     let cancel = CancelToken::new();
     cancel.cancel();
     let error =
-        compute_frame_norms(&frames, dimensions, Normalization::Global, &cancel).unwrap_err();
+        FrameNorm::measure(&frames, dimensions, Normalization::Global, &cancel).unwrap_err();
     assert!(matches!(error, Error::Cancelled));
 }
 
@@ -365,7 +365,7 @@ fn global_gains_are_recovered_from_a_star_field_and_one_blank_pixel_does_not_mov
             .collect()
     };
     let gains = |frames: &[StoredFrame]| -> Vec<f32> {
-        compute_frame_norms(
+        FrameNorm::measure(
             frames,
             dimensions,
             Normalization::Global,

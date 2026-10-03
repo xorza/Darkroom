@@ -55,7 +55,19 @@ fn stretch_stacked_light() {
         ("asinh", Stretch::auto_asinh()),
         // GHS applied cold to linear data: the background sits at ~0, so the symmetry point is at 0
         // and the strength D must be large (the b=-1 logarithmic family lifts the faint signal).
-        ("ghs", Stretch::ghs(5000.0, -1.0, 0.0)),
+        (
+            "ghs",
+            Stretch {
+                method: StretchMethod::Ghs {
+                    d: 5000.0,
+                    b: -1.0,
+                    sp: 0.0,
+                    lp: 0.0,
+                    hp: 1.0,
+                },
+                color: ColorMode::ColorPreserving,
+            },
+        ),
     ] {
         let mut stretched = image.clone();
         config.apply(&mut stretched).unwrap();

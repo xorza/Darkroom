@@ -15,7 +15,7 @@ fn stored_image_roundtrip_overwrites_stale_pixels() {
     image.metadata.exposure_time = Some(30.0);
     let spill = FrameSpill::new(directory.path(), "calibrated");
     let path = spill.channel_path(0);
-    write_plane(&path, &[9.0; 6]).unwrap();
+    StoredPlane::write(&path, &[9.0; 6]).unwrap();
 
     let stored = StoredImage::spill(&spill, &image).unwrap();
     let loaded = stored.load();
@@ -39,7 +39,9 @@ fn stored_image_roundtrip_overwrites_stale_pixels() {
     let nulls = loaded.nulls.expect("the mask is spilled with the planes");
     assert_eq!(nulls.count(), 2);
     assert_eq!(
-        (0..6).map(|index| nulls.is_null(index)).collect::<Vec<_>>(),
+        (0..6)
+            .map(|index| nulls.bits().get(index))
+            .collect::<Vec<_>>(),
         [false, true, false, false, false, true]
     );
 }
@@ -364,7 +366,7 @@ fn plane_persistence_roundtrips_pixels() {
     let directory = TempDir::new("frame_store_plane");
     let path = directory.join("plane.bin");
     let pixels: Vec<f32> = (0..12).map(|value| value as f32).collect();
-    write_plane(&path, &pixels).unwrap();
+    StoredPlane::write(&path, &pixels).unwrap();
 
     let mapped = StoredPlane::map(path.clone()).unwrap();
     assert_eq!(mapped.chunk(0, pixels.len()), pixels);
@@ -430,14 +432,14 @@ fn channels_on_disk_requires_every_plane_at_the_expected_size() {
     // 4×3 f32 = 48 bytes per plane, three planes. Nothing on disk yet.
     assert!(!spill.channels_on_disk(dimensions));
 
-    write_plane(&spill.channel_path(0), &[0.0f32; 12]).unwrap();
-    write_plane(&spill.channel_path(1), &[0.0f32; 12]).unwrap();
+    StoredPlane::write(&spill.channel_path(0), &[0.0f32; 12]).unwrap();
+    StoredPlane::write(&spill.channel_path(1), &[0.0f32; 12]).unwrap();
     assert!(
         !spill.channels_on_disk(dimensions),
         "two of three channels present is not reusable"
     );
 
-    write_plane(&spill.channel_path(2), &[0.0f32; 12]).unwrap();
+    StoredPlane::write(&spill.channel_path(2), &[0.0f32; 12]).unwrap();
     assert!(spill.channels_on_disk(dimensions));
 
     // Same files, geometry that implies 8×3 = 24 pixels = 96 bytes: stale, not reusable.

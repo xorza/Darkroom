@@ -41,15 +41,15 @@ const MIN_HOMOGENEOUS_SCALE: f64 = UNIT_ROUNDOFF * COORDINATE_RANGE / NORMALIZAT
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TransformType {
     /// Translation only (2 DOF: dx, dy)
-    Translation = 0,
+    Translation,
     /// Translation + Rotation (3 DOF: dx, dy, angle)
-    Euclidean = 1,
+    Euclidean,
     /// Translation + Rotation + Uniform Scale (4 DOF)
-    Similarity = 2,
+    Similarity,
     /// Full affine (6 DOF: handles differential scaling and shear)
-    Affine = 3,
+    Affine,
     /// Projective/Homography (8 DOF: handles perspective)
-    Homography = 4,
+    Homography,
 }
 
 impl TransformType {
@@ -274,7 +274,7 @@ impl Transform {
     ///
     /// Given a transform T estimated from `register_stars(ref_stars, target_stars)`:
     /// - `T.apply(ref_point)` gives the corresponding target point
-    /// - `T.apply_inverse(target_point)` gives the corresponding reference point
+    /// - `T.inverse().apply(target_point)` gives the corresponding reference point
     ///
     /// # Image Warping
     ///
@@ -300,22 +300,12 @@ impl Transform {
     /// let target_pos = transform.apply(ref_pos);
     ///
     /// // And back again
-    /// let round_tripped = transform.apply_inverse(target_pos);
+    /// let round_tripped = transform.inverse().apply(target_pos);
     /// # Ok(())
     /// # }
     /// ```
     pub fn apply(&self, p: DVec2) -> DVec2 {
         self.matrix.transform_point(p)
-    }
-
-    /// Apply inverse transform to map a point from TARGET coordinates to REFERENCE coordinates.
-    ///
-    /// This is the inverse of `apply()`. Given a point in the target image,
-    /// it returns the corresponding point in the reference image.
-    ///
-    /// See [`apply`](Self::apply) for more details on transform direction.
-    pub fn apply_inverse(&self, p: DVec2) -> DVec2 {
-        self.inverse().apply(p)
     }
 
     /// The inverse transform, or `None` when the matrix is singular or, for a homography, its
@@ -344,9 +334,16 @@ impl Transform {
     /// When the product is a homography that sends the origin too far out to be normalized.
     #[must_use]
     pub fn compose(&self, other: &Self) -> Self {
+        self.try_compose(other)
+            .expect("the product of two transforms cannot be normalized")
+    }
+
+    /// [`Self::compose`], or `None` when the product cannot be normalized — a fit from a
+    /// near-degenerate sample can carry entries so large that its homogeneous scale vanishes
+    /// beside them.
+    pub(crate) fn try_compose(&self, other: &Self) -> Option<Self> {
         let transform_type = self.transform_type.max(other.transform_type);
         Self::from_matrix(self.matrix.mul_mat(&other.matrix), transform_type)
-            .expect("the product of two transforms cannot be normalized")
     }
 
     /// The Jacobian of [`Self::apply`] at `p`: how a small step at `p` moves its image.

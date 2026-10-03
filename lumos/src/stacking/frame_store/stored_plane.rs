@@ -4,7 +4,7 @@
 //! either a `Buffer2` in RAM or a memory map over a file, and every read goes through the same
 //! [`StoredPlane::chunk`] either way.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use imaginarium::Buffer2;
 use memmap2::Mmap;
@@ -20,6 +20,11 @@ pub(crate) enum StoredPlane {
 }
 
 impl StoredPlane {
+    /// Write `pixels` to `path` as the plane file [`Self::map`] reads back.
+    pub(crate) fn write(path: &Path, pixels: &[f32]) -> Result<(), FrameStoreError> {
+        frame_spill::write_file(path, bytemuck::cast_slice(pixels))
+    }
+
     /// Memory-map a spilled plane file.
     pub(crate) fn map(path: PathBuf) -> Result<Self, FrameStoreError> {
         let mmap = frame_spill::map_file(&path)?;

@@ -109,11 +109,9 @@ fn register_two_lights() {
     )
     .unwrap();
 
-    let corrected_residuals = sip.polynomial.compute_corrected_residuals(
-        &inlier_ref,
-        &inlier_target,
-        &result.transform(),
-    );
+    let corrected_residuals =
+        sip.polynomial
+            .corrected_residuals(&inlier_ref, &inlier_target, &result.transform());
     let sip_rms = (corrected_residuals.iter().map(|r| r * r).sum::<f64>()
         / corrected_residuals.len() as f64)
         .sqrt();
@@ -127,7 +125,7 @@ fn register_two_lights() {
     println!(
         "  Max SIP correction: {:.4} pixels",
         sip.polynomial
-            .max_correction(Size2us::new(img1.width(), img1.height()), 50.0)
+            .max_grid_correction(Size2us::new(img1.width(), img1.height()), 50.0)
     );
 
     assert!(

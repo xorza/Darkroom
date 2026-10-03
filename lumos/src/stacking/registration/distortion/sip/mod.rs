@@ -32,7 +32,6 @@ use glam::{DMat2, DVec2};
 use nalgebra::DMatrix;
 
 use crate::error::InvalidConfigField;
-use crate::math::size2us::Size2us;
 use crate::math::statistics::{MAD_TO_SIGMA, mad_fast, median_fast};
 use crate::stacking::registration::point_normalization::{PointNormalization, centroid};
 use crate::stacking::registration::result::RegistrationError;
@@ -317,19 +316,8 @@ impl SipPolynomial {
         p + self.correction_at(p)
     }
 
-    /// The corrected residual of each pair: `|T(r + c(r)) − t|`, in target pixels.
-    pub fn compute_corrected_residuals(
-        &self,
-        ref_points: &[DVec2],
-        target_points: &[DVec2],
-        transform: &Transform,
-    ) -> Vec<f64> {
-        let mut residuals = Vec::with_capacity(ref_points.len());
-        self.residuals_into(ref_points, target_points, transform, &mut residuals);
-        residuals
-    }
-
-    /// [`Self::compute_corrected_residuals`] into a caller's buffer.
+    /// The corrected residual of each pair, `|T(r + c(r)) − t|` in target pixels, into a caller's
+    /// buffer.
     fn residuals_into(
         &self,
         ref_points: &[DVec2],
@@ -344,27 +332,6 @@ impl SipPolynomial {
                 .zip(target_points)
                 .map(|(&r, &t)| (transform.apply(self.correct(r)) - t).length()),
         );
-    }
-
-    /// Get the maximum correction magnitude across a grid of points.
-    pub fn max_correction(&self, size: Size2us, grid_spacing: f64) -> f64 {
-        assert!(
-            grid_spacing > 0.0,
-            "grid_spacing must be positive, got {grid_spacing}"
-        );
-        // Integer-stepped to avoid float accumulation drift skipping the boundary band.
-        let nx = (size.width as f64 / grid_spacing).floor() as usize;
-        let ny = (size.height as f64 / grid_spacing).floor() as usize;
-        let mut max_mag = 0.0f64;
-        for iy in 0..=ny {
-            let y = iy as f64 * grid_spacing;
-            for ix in 0..=nx {
-                let x = ix as f64 * grid_spacing;
-                let correction = self.correction_at(DVec2::new(x, y));
-                max_mag = max_mag.max(correction.length());
-            }
-        }
-        max_mag
     }
 
     /// The Jacobian of [`Self::correct`] at `p`: the identity plus the polynomial's derivative.
@@ -439,6 +406,45 @@ fn evaluate_basis(uv: DVec2, terms: &[(usize, usize)], basis: &mut [f64]) {
     }
     for (value, &(p, q)) in basis.iter_mut().zip(terms) {
         *value = powers_u[p] * powers_v[q];
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use glam::DVec2;
+
+    use crate::math::size2us::Size2us;
+    use crate::stacking::registration::distortion::sip::SipPolynomial;
+    use crate::stacking::registration::transform::Transform;
+
+    impl SipPolynomial {
+        /// The corrected residual of each pair: `|T(r + c(r)) − t|`, in target pixels.
+        pub(crate) fn corrected_residuals(
+            &self,
+            ref_points: &[DVec2],
+            target_points: &[DVec2],
+            transform: &Transform,
+        ) -> Vec<f64> {
+            let mut residuals = Vec::with_capacity(ref_points.len());
+            self.residuals_into(ref_points, target_points, transform, &mut residuals);
+            residuals
+        }
+
+        /// The largest correction over a grid of `grid_spacing` across `size`, its far edges
+        /// included.
+        pub(crate) fn max_grid_correction(&self, size: Size2us, grid_spacing: f64) -> f64 {
+            // Integer-stepped to avoid float accumulation drift skipping the boundary band.
+            let nx = (size.width as f64 / grid_spacing).floor() as usize;
+            let ny = (size.height as f64 / grid_spacing).floor() as usize;
+            let mut max_mag = 0.0f64;
+            for iy in 0..=ny {
+                for ix in 0..=nx {
+                    let point = DVec2::new(ix as f64 * grid_spacing, iy as f64 * grid_spacing);
+                    max_mag = max_mag.max(self.correction_at(point).length());
+                }
+            }
+            max_mag
+        }
     }
 }
 

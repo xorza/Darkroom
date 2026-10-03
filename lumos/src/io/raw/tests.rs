@@ -4,6 +4,7 @@ use crate::testing::assertions::{assert_close, assert_close_slice};
 use crate::testing::cfa::XTRANS_PATTERN;
 
 use crate::io::raw::*;
+use crate::testing::synthetic::metrics::pixel_stats;
 use std::array;
 
 #[test]
@@ -171,7 +172,10 @@ fn load_raw_valid_file() {
     }
 
     // Check mean is reasonable (not all zeros or all ones)
-    let mean = image.mean();
+    let mean = (0..image.channels())
+        .map(|channel| pixel_stats(image.channel(channel)).mean)
+        .sum::<f64>()
+        / image.channels() as f64;
     assert!(mean > 0.0, "Mean is zero, image may be all black");
     assert!(mean < 1.0, "Mean is >= 1.0, image may be overexposed");
 }

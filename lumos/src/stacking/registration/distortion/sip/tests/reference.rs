@@ -20,7 +20,7 @@ fn reference_point_none_uses_centroid() {
         sip.norm,
         PointNormalization::around(&reference, field.centre)
     );
-    let residuals = sip.compute_corrected_residuals(&reference, &target, &Transform::identity());
+    let residuals = sip.corrected_residuals(&reference, &target, &Transform::identity());
     assert!(rms(&residuals) <= EXACT_FIT_PX);
 }
 
@@ -45,7 +45,7 @@ fn a_radial_field_is_exact_only_about_its_centre() {
             ..Default::default()
         };
         let sip = fit_sip(&reference, &target, &Transform::identity(), &config).polynomial;
-        rms(&sip.compute_corrected_residuals(&reference, &target, &Transform::identity()))
+        rms(&sip.corrected_residuals(&reference, &target, &Transform::identity()))
     };
     let centred = rms_about(Some(field.centre));
     let centroid = rms_about(None);
@@ -80,7 +80,7 @@ fn sigma_clipping_drops_outliers_and_leaves_clean_data_alone() {
             ..Default::default()
         };
         let sip = fit_sip(&reference, &target, &Transform::identity(), &config).polynomial;
-        rms(&sip.compute_corrected_residuals(
+        rms(&sip.corrected_residuals(
             &reference[..clean],
             &target[..clean],
             &Transform::identity(),
