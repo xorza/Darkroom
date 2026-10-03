@@ -117,7 +117,7 @@ impl FrameTier {
             metadata,
             pixels,
             // Warped output; see `resample::warp` for why the source's mask does not come with it.
-            nulls: None,
+            flags: None,
         };
         match self {
             Self::Ram => Ok(StoredWarp {

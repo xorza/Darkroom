@@ -1,5 +1,5 @@
 use crate::internals::prelude::*;
-use crate::io::image::null_mask::NullMask;
+use crate::io::image::pixel_flags::PixelFlags;
 use crate::registration::config::{InterpolationMethod, WarpParams};
 use crate::registration::resample;
 use crate::registration::resample::WarpBuffers;
@@ -97,7 +97,7 @@ impl NullFixture {
         nulls[null_index] = f32::NAN;
 
         let mut declared = LinearImage::from_pixels(dimensions, pixels.clone());
-        declared.nulls = NullMask::of_non_finite(dimensions.size(), &[&nulls]);
+        declared.flags = PixelFlags::of_non_finite(dimensions.size(), &[&nulls]);
         Self {
             declared,
             undeclared: LinearImage::from_pixels(dimensions, pixels),
@@ -227,7 +227,7 @@ fn a_block_of_nulls_wider_than_the_kernel_leaves_no_support_at_all() {
         }
     }
     let mut image = LinearImage::from_pixels(dimensions, vec![3.25; dimensions.pixel_count()]);
-    image.nulls = NullMask::of_non_finite(dimensions.size(), &[&nulls]);
+    image.flags = PixelFlags::of_non_finite(dimensions.size(), &[&nulls]);
 
     let result = resample::warp(
         &image,
@@ -286,7 +286,7 @@ fn warp_into_overwrites_dirty_buffers_completely() {
         let dimensions = ImageDimensions::new((size.width, size.height), channels);
         let plain = LinearImage::from_pixels(dimensions, signed_pixels(size, channels));
         let mut masked = plain.clone();
-        masked.nulls = NullMask::of_non_finite(size, &[&nulls]);
+        masked.flags = PixelFlags::of_non_finite(size, &[&nulls]);
         let previous = LinearImage::from_pixels(
             dimensions,
             signed_pixels(size, channels)

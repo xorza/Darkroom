@@ -85,8 +85,8 @@ impl<'a> FrameSpill<'a> {
     }
 
     /// Path of the null mask's bit plane.
-    pub(crate) fn nulls_path(&self) -> PathBuf {
-        self.file("_nulls.bin")
+    pub(crate) fn flags_path(&self) -> PathBuf {
+        self.file("_flags.bin")
     }
 
     /// Path of the [`Commit`] sidecar.

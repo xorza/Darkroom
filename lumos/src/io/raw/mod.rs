@@ -31,6 +31,7 @@ use crate::io::image::image_provenance::{
 };
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
+use crate::io::image::pixel_flags::{Flags, PixelFlags};
 use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::io::raw::demosaic::sensor_layout::SensorLayout;
 use crate::io::raw::demosaic::xtrans::XTransNormalization;
@@ -462,6 +463,9 @@ struct UnpackedRaw {
     raw_xtrans_pattern: Option<XTransPattern>,
     camera_white_balance: Option<[f32; 4]>,
     iso: Option<u32>,
+    /// Whether LibRaw reads a raw zero as a dead photosite: its `zero_is_bad`, set for Panasonic
+    /// and some cameras its size table identifies.
+    zero_is_bad: bool,
     /// Whether LibRaw's linearization curve is the identity up to `maximum`. A compressed format
     /// (Sony cRAW, Nikon lossy NEF, Canon C-RAW) maps its codes through a curve whose steps grow
     /// to several ADU in the highlights, so one ADU is no longer the quantization step.
@@ -479,6 +483,28 @@ impl UnpackedRaw {
             // RAW frame disagree with a FITS frame that spells the same thing differently.
             unit: None,
         }
+    }
+
+    /// The active-area photosites a `zero_is_bad` camera reports as zero, flagged
+    /// [`Flags::NO_DATA`]; `None` when the camera has no such convention or no photosite is zero.
+    ///
+    /// LibRaw's own processing replaces them with a same-colour mean (`remove_zeroes`); lumos reads
+    /// the raw buffer itself, so without this a dead photosite would normalize to `−black / span`
+    /// and enter every stage as a measurement.
+    fn zero_flags(&self) -> Result<Option<PixelFlags>, ImageError> {
+        if !self.zero_is_bad {
+            return Ok(None);
+        }
+        let raw = self.raw_image_slice()?;
+        let SensorLayout {
+            raw: raw_size,
+            active,
+            margin,
+        } = self.layout;
+        Ok(PixelFlags::where_true(active, Flags::NO_DATA, |index| {
+            let (x, y) = (index % active.width, index / active.width);
+            raw[(y + margin.y) * raw_size.width + x + margin.x] == 0
+        }))
     }
 
     /// One ADU's uniform-error σ in the normalized domain, or `None` when a compressed curve makes
@@ -797,7 +823,11 @@ struct LibrawDemosaiced {
 /// Performs: libraw init, file open, unpack, dimension/color
 /// validation, sensor type detection, and ISO extraction.
 fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
-    let libraw = LibrawState::open(path)?;
+    unpack(LibrawState::open(path)?, path)
+}
+
+/// Unpack an opened file and read what lumos needs of it.
+fn unpack(libraw: LibrawState, path: &Path) -> Result<UnpackedRaw, ImageError> {
     // Valid for the whole function: `libraw` owns it and outlives every use below.
     let inner = libraw.as_ptr();
 
@@ -876,6 +906,8 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
     let cam_mul = unsafe { (*inner).color.cam_mul };
     let camera_white_balance = canonical_camera_white_balance(cfa_type, cam_mul);
     let iso = extract_iso(inner);
+    // SAFETY: inner is valid and the file is open, so LibRaw has identified the camera.
+    let zero_is_bad = unsafe { sys::libraw_lumos_zero_is_bad(inner) } != 0;
     // SAFETY: inner is valid, and color.curve is initialized after unpack.
     let curve = unsafe { &(*inner).color.curve };
     let last_code = (maximum_raw as usize).min(curve.len() - 1);
@@ -898,6 +930,7 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
         raw_xtrans_pattern,
         camera_white_balance,
         iso,
+        zero_is_bad,
         linear_curve,
     })
 }
@@ -1138,9 +1171,10 @@ pub(crate) fn raw_cfa_frame_info(
     Ok(CfaFrameInfo {
         dimensions: ImageDimensions::new((width, height), 1),
         cfa_type,
-        // A sensor reports a value for every photosite; no RAW format has an undefined-sample
-        // convention to decode, so this is settled rather than conservative.
-        may_carry_nulls: false,
+        // Only a `zero_is_bad` camera reports photosites with no measurement, and the identified
+        // camera settles that before a pixel is read.
+        // SAFETY: opening succeeded, so LibRaw has identified the camera.
+        may_carry_nulls: unsafe { sys::libraw_lumos_zero_is_bad(libraw.as_ptr()) } != 0,
     })
 }
 
@@ -1182,9 +1216,7 @@ pub(crate) fn load_raw_cfa(path: &Path, context: &LoadContext) -> Result<CfaImag
         data: Buffer2::new(raw.layout.active.width, raw.layout.active.height, pixels),
         cfa_type,
         metadata,
-        // A sensor reports a value for every photosite; no RAW format has an undefined-sample
-        // convention to decode.
-        nulls: None,
+        flags: raw.zero_flags()?,
     })
 }
 

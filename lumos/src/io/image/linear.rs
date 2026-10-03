@@ -19,7 +19,7 @@ use crate::io::image::image_provenance::{
 use crate::io::image::input_format::InputFormat;
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::load_context::LoadContext;
-use crate::io::image::null_mask::NullMask;
+use crate::io::image::pixel_flags::PixelFlags;
 use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::io::image::standard::{f32_target_format, read_standard_image, scientific_rejection};
 
@@ -28,9 +28,9 @@ use crate::io::image::standard::{f32_target_format, read_standard_image, scienti
 pub struct LinearImage {
     pub metadata: ImageMetadata,
     pub(crate) pixels: LinearPixels,
-    /// Which pixels carry no measurement, for a source that declared any. The samples at those
-    /// positions are a finite fill, not data — see [`NullMask`].
-    pub(crate) nulls: Option<NullMask>,
+    /// The data-quality flags of the pixels that carry any — see [`PixelFlags`]. The samples under
+    /// [`Flags::NO_DATA`] are a finite fill, not data.
+    pub(crate) flags: Option<PixelFlags>,
 }
 
 impl LinearImage {
@@ -121,7 +121,7 @@ impl LinearImage {
         LinearImage {
             metadata: ImageMetadata::default(),
             pixels: LinearPixels::from_interleaved(dimensions, pixels),
-            nulls: None,
+            flags: None,
         }
     }
 
@@ -133,7 +133,7 @@ impl LinearImage {
         LinearImage {
             metadata: ImageMetadata::default(),
             pixels: LinearPixels::from_planar_channels(dimensions, channels),
-            nulls: None,
+            flags: None,
         }
     }
 
@@ -211,7 +211,7 @@ impl LinearImage {
         LinearImage {
             metadata: ImageMetadata::default(),
             pixels: LinearPixels::from_f32_image(image),
-            nulls: None,
+            flags: None,
         }
     }
 
@@ -321,8 +321,8 @@ impl StackableImage for LinearImage {
         self.dimensions()
     }
 
-    fn nulls(&self) -> Option<&NullMask> {
-        self.nulls.as_ref()
+    fn flags(&self) -> Option<&PixelFlags> {
+        self.flags.as_ref()
     }
 
     fn channel(&self, c: usize) -> &[f32] {
@@ -351,7 +351,7 @@ impl From<Buffer2<f32>> for LinearImage {
         Self {
             metadata: ImageMetadata::default(),
             pixels: plane.into(),
-            nulls: None,
+            flags: None,
         }
     }
 }
@@ -361,7 +361,7 @@ impl From<[Buffer2<f32>; 3]> for LinearImage {
         Self {
             metadata: ImageMetadata::default(),
             pixels: planes.into(),
-            nulls: None,
+            flags: None,
         }
     }
 }

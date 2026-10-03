@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::frame_store::frame_facts::FrameFacts;
 use crate::frame_store::stackable_image::StackableImage;
+use crate::io::image::pixel_flags::Flags;
 use crate::math::statistics::MedianMad;
 use crate::math::vec2us::Vec2us;
 
@@ -35,7 +36,7 @@ impl FrameStats {
         let dimensions = image.dimensions();
         let quantization_sigma = image.metadata().quantization_sigma;
         let facts = FrameFacts::of(image);
-        let nulls = image.nulls();
+        let nulls = image.flags().filter(|flags| flags.contains(Flags::NO_DATA));
         let channels = (0..dimensions.channels())
             .into_par_iter()
             .map(|channel| {
@@ -49,7 +50,9 @@ impl FrameStats {
                         .flat_map(|(y, row)| {
                             row.iter()
                                 .enumerate()
-                                .filter(move |&(x, _)| !nulls.is_null_at(Vec2us::new(x, y)))
+                                .filter(move |&(x, _)| {
+                                    !nulls.at_pos(Vec2us::new(x, y)).intersects(Flags::NO_DATA)
+                                })
                                 .map(|(_, &sample)| sample)
                         })
                         .collect(),

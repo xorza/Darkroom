@@ -10,7 +10,8 @@ use crate::frame_store::stored_image::StoredImage;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::null_mask::NullMask;
+use crate::io::image::pixel_flags::Flags;
+use crate::io::image::pixel_flags::PixelFlags;
 use common::{FileIdentity, TempDir};
 use imaginarium::Buffer2;
 use std::fs;
@@ -32,8 +33,8 @@ fn stored_image_roundtrip_overwrites_stale_pixels() {
     let loaded = stored.load();
     assert_eq!(loaded.channel(0).pixels(), &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
     assert_eq!(loaded.metadata.exposure_time, Some(30.0));
-    assert!(loaded.nulls.is_none());
-    assert!(!spill.nulls_path().exists());
+    assert!(loaded.flags.is_none());
+    assert!(!spill.flags_path().exists());
 
     // Dropping the image does not remove its planes: the spill directory owns that decision, so
     // that `keep_cache` can hold them. See `spill_directory_removes_planes_unless_asked_to_keep`.
@@ -42,16 +43,16 @@ fn stored_image_roundtrip_overwrites_stale_pixels() {
 
     // Pixels 1 and 5 null: the spill tier warps under the same mask as the RAM tier.
     let masked_spill = FrameSpill::new(directory.path(), "masked");
-    image.nulls = NullMask::of_non_finite(
+    image.flags = PixelFlags::of_non_finite(
         dimensions.size(),
         &[&[0.0, f32::NAN, 0.0, 0.0, 0.0, f32::NAN]],
     );
     let loaded = StoredImage::spill(&masked_spill, &image).unwrap().load();
-    let nulls = loaded.nulls.expect("the mask is spilled with the planes");
-    assert_eq!(nulls.count(), 2);
+    let nulls = loaded.flags.expect("the mask is spilled with the planes");
+    assert_eq!(nulls.count(Flags::NO_DATA), 2);
     assert_eq!(
         (0..6)
-            .map(|index| nulls.bits().get(index))
+            .map(|index| nulls.mask_of(Flags::NO_DATA).get(index))
             .collect::<Vec<_>>(),
         [false, true, false, false, false, true]
     );
@@ -233,7 +234,7 @@ fn frame_statistics_are_measured_over_the_pixels_that_hold_a_measurement() {
     let dimensions = ImageDimensions::new((8, 1), 1);
     let samples = vec![1.0f32, 3.0, 5.0, 7.0, 4.0, 4.0, 4.0, 4.0];
     let mut masked = LinearImage::from_pixels(dimensions, samples.clone());
-    masked.nulls = NullMask::of_non_finite(
+    masked.flags = PixelFlags::of_non_finite(
         dimensions.size(),
         &[&[0.0, 0.0, 0.0, 0.0, f32::NAN, f32::NAN, f32::NAN, f32::NAN]],
     );
@@ -250,7 +251,7 @@ fn frame_statistics_are_measured_over_the_pixels_that_hold_a_measurement() {
     // Nothing measured anywhere has no statistics to report, and asking for the median of an empty
     // set would panic rather than say so.
     let mut all_null = LinearImage::from_pixels(dimensions, vec![4.0; 8]);
-    all_null.nulls = NullMask::of_non_finite(dimensions.size(), &[&[f32::NAN; 8]]);
+    all_null.flags = PixelFlags::of_non_finite(dimensions.size(), &[&[f32::NAN; 8]]);
     let empty = FrameStats::measure(&all_null);
     assert_eq!(empty.channels[0].median, 0.0);
     assert_eq!(empty.channels[0].mad, 0.0);
@@ -268,7 +269,7 @@ fn an_unwarped_frames_nulls_become_the_pair_the_combine_gates_on() {
     // Declaring pixel 2 null turns it into zero coverage there and full coverage elsewhere, with
     // confidence matching bit for bit: nothing was interpolated, so every sample that exists is a
     // whole one, and `coverage == 0` exactly where `confidence == 0` as the pairing requires.
-    image.nulls = NullMask::of_non_finite(dimensions.size(), &[&[1.0, 2.0, f32::NAN, 4.0]]);
+    image.flags = PixelFlags::of_non_finite(dimensions.size(), &[&[1.0, 2.0, f32::NAN, 4.0]]);
     let quality = FrameQuality::for_unwarped(&image);
     assert_eq!(quality.coverage().unwrap().pixels(), &[1.0, 1.0, 0.0, 1.0]);
     assert_eq!(
@@ -293,7 +294,7 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
         DecoderKind::Linear,
     );
     let mut image = LinearImage::from_pixels(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
-    image.nulls = NullMask::of_non_finite(dimensions.size(), &[&[1.0, 2.0, f32::NAN, 4.0]]);
+    image.flags = PixelFlags::of_non_finite(dimensions.size(), &[&[1.0, 2.0, f32::NAN, 4.0]]);
     let cache = |name, image: &LinearImage| {
         let spill = FrameSpill::new(directory.path(), name);
         let quality = FrameQuality::for_unwarped(image);
@@ -431,7 +432,7 @@ fn spill_names_are_stable_per_source_and_decoder_and_share_one_stem() {
         plain.quality_path(FramePlane::Confidence),
         cache_dir.join("frame_confidence.bin")
     );
-    assert_eq!(plain.nulls_path(), cache_dir.join("frame_nulls.bin"));
+    assert_eq!(plain.flags_path(), cache_dir.join("frame_flags.bin"));
 }
 
 #[test]

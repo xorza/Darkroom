@@ -21,7 +21,7 @@ use crate::io::image::image_provenance::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
     SourceContainer, TransferProvenance,
 };
-use crate::io::image::null_mask::NullMask;
+use crate::io::image::pixel_flags::PixelFlags;
 use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::math::statistics::MedianMad;
 use crate::registration::config::{self, InterpolationMethod};
@@ -352,7 +352,7 @@ fn a_frames_null_pixels_are_excluded_from_the_stack_at_those_pixels_alone() {
         if let Some(index) = null_at {
             let mut samples = vec![0.0f32; 4];
             samples[index] = f32::NAN;
-            image.nulls = NullMask::of_non_finite(dims.size(), &[&samples]);
+            image.flags = PixelFlags::of_non_finite(dims.size(), &[&samples]);
         }
         StackFrame::from(image)
     };
@@ -378,7 +378,7 @@ fn a_frames_null_pixels_are_excluded_from_the_stack_at_those_pixels_alone() {
     // A frame null everywhere contributes nowhere, so the stack is the other two throughout —
     // (2 + 3) / 2 = 2.5 — rather than a division by a zero contributor count.
     let mut all_null = LinearImage::from_pixels(dims, vec![1.0; 4]);
-    all_null.nulls = NullMask::of_non_finite(dims.size(), &[&[f32::NAN; 4]]);
+    all_null.flags = PixelFlags::of_non_finite(dims.size(), &[&[f32::NAN; 4]]);
     let stacked = combine(
         vec![
             StackFrame::from(all_null),
@@ -415,9 +415,11 @@ fn normalization_fits_a_masked_set_over_the_pixels_they_all_reached() {
     // produces it: 3.5/35 rounds to the f32 0.1, and 30 … 60 times that round back to 3 … 6.
     let dims = ImageDimensions::new((6, 1), 1);
     let mut low = LinearImage::from_pixels(dims, vec![1.0, 2.0, 3.0, 4.0, 900.0, 900.0]);
-    low.nulls = NullMask::of_non_finite(dims.size(), &[&[0.0, 0.0, 0.0, 0.0, f32::NAN, f32::NAN]]);
+    low.flags =
+        PixelFlags::of_non_finite(dims.size(), &[&[0.0, 0.0, 0.0, 0.0, f32::NAN, f32::NAN]]);
     let mut high = LinearImage::from_pixels(dims, vec![900.0, 900.0, 30.0, 40.0, 50.0, 60.0]);
-    high.nulls = NullMask::of_non_finite(dims.size(), &[&[f32::NAN, f32::NAN, 0.0, 0.0, 0.0, 0.0]]);
+    high.flags =
+        PixelFlags::of_non_finite(dims.size(), &[&[f32::NAN, f32::NAN, 0.0, 0.0, 0.0, 0.0]]);
     let config = StackConfig {
         method: CombineMethod::Mean(Rejection::None),
         normalization: Normalization::Multiplicative,
@@ -437,7 +439,7 @@ fn normalization_fits_a_masked_set_over_the_pixels_they_all_reached() {
     // With no pixel that every frame reached there is nothing to fit on, which is named rather
     // than divided by: one frame null everywhere leaves the intersection empty.
     let mut all_null = LinearImage::from_pixels(dims, vec![10.0; 6]);
-    all_null.nulls = NullMask::of_non_finite(dims.size(), &[&[f32::NAN; 6]]);
+    all_null.flags = PixelFlags::of_non_finite(dims.size(), &[&[f32::NAN; 6]]);
     assert!(matches!(
         combine(
             vec![

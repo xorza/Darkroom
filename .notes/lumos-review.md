@@ -166,16 +166,9 @@ AGENTS.md promises photometry-grade error bars. These planes cannot give them.
 
 ## 8. Missing-data masks are dropped after decode
 
-- [ ] `8.1` **Drizzle never reads `LinearImage::nulls`** — `drizzle/accumulator/frame_source.rs:384-390` (`deposit_weight`), `drizzle/accumulator/mod.rs:175-181`
-  - The decoder fills null pixels with the frame median. Drizzle deposits those values at full weight and counts them as coverage.
-  - NaN borders and `BLANK` pixels pull the output toward the sky level.
-  - `deposit_weight` should return `None` for a null pixel. `[C]`
 - [ ] `8.2` **Star detection never reads `nulls`** — `star_detection/` (no reference)
   - A null region becomes a flat patch with zero noise. A wholly-null tile gets σ = 0, so the threshold falls to `σ·noise_floor`, and the pixels next to the gap merge into one huge component.
   - Pass `nulls` as the mesh mask, clear them from the threshold mask, and handle them in stamps. `[C]` path, `[P]` magnitude.
-- [ ] `8.3` **RAW `zero_is_bad` is ignored** — `io/raw/mod.rs:1110-1112`, `:1155-1157`
-  - LibRaw sets the flag for Panasonic and for some table cameras. lumos normalizes such a 0 to −black/span and declares `may_carry_nulls: false`.
-  - Map zeros into a `NullMask`. This is needed before RW2 is accepted (group 17). `[C]`
 
 ## 9. Star detection measures and splits on the wrong plane
 
@@ -959,7 +952,7 @@ Each phase builds and passes the verification chain on its own. A phase closes i
 ## Phase 3. Pixel flags and run report (S1, S8)
 
 0. Add `RunReport` to `StackProduct` and `AlignStackResult`. Its first entries are the flag counts of this phase.
-1. Add `PixelFlags`. Move `NullMask` into it as `NO_DATA`. Add `zero_is_bad`.
+1. Done: `PixelFlags` replaced `NullMask` (`NO_DATA`), drizzle skips flagged pixels, and RAW `zero_is_bad` zeros are flagged through a `libraw-sys` shim.
 2. Set `SATURATED` in the RAW and FITS decoders.
 3. Carry the flags through calibration, the demosaic, the warp, spills and FITS.
 4. Read them in the combine (exclusion and survivor floor) and in drizzle. Remove the f32 planes of `for_unwarped`.
@@ -968,7 +961,7 @@ Each phase builds and passes the verification chain on its own. A phase closes i
   - One flagged pixel in a Lanczos-3 warp with a shift of (0.5, 0.5) flags exactly 6 × 6 = 36 output pixels. At half-pixel phase none of the 6 taps per axis is zero.
   - 10 frames, 3 of them saturated at a pixel: the output is the mean of the other 7. All 10 saturated: the output pixel is flagged `SATURATED`.
   - A frame with a NaN border drizzles to the same output as the frame cropped. A Panasonic zero is `NO_DATA`, not `−black/span`.
-- **Closes:** 8.1, 8.3, 9.3.
+- **Closes:** 9.3 (8.1 and 8.3 are closed).
 
 ## Phase 4. Spread, sorted window and rejection driver (S3, S4, C1 gather)
 

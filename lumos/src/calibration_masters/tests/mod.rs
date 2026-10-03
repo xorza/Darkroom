@@ -800,7 +800,7 @@ fn defect_detection_zero_median_no_false_positives() {
             quantization_sigma: Some(QUANTIZATION_SIGMA_PER_STEP / 4095.0),
             ..ImageMetadata::default()
         },
-        nulls: None,
+        flags: None,
     };
 
     let defect_map = DefectMap::new(dark.size())
@@ -863,7 +863,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
             camera_white_balance: Some([2.0, 1.0, 1.5, 1.0]),
             ..Default::default()
         },
-        nulls: None,
+        flags: None,
     };
     let mut masters = bundle(CalibrationSet {
         dark: Some(constant_cfa(Size2us::new(4, 4), 0.05, cfa_type)),

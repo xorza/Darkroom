@@ -13,6 +13,7 @@ fn main() {
     generate_bindings(root);
 
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=shim");
     for dir in ["src", "libraw", "internal"] {
         println!("cargo:rerun-if-changed={}", root.join(dir).display());
     }
@@ -27,6 +28,9 @@ fn compile(root: &Path) {
         root.display()
     );
     sources.sort();
+    // Not part of LibRaw: the accessors for state its C API does not expose. Compiled with it, so
+    // it sees the same headers and defines.
+    sources.push(PathBuf::from("shim/internal.cpp"));
 
     let mut build = cc::Build::new();
     build
