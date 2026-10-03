@@ -515,3 +515,17 @@ fn rejection_bounds_and_precedence() {
         assert_eq!(Rejection::of(&star, &config), expected, "{star:?}");
     }
 }
+
+/// A NaN flux sorts last, and the finite ones go brightest first. The old comparator called NaN
+/// equal to everything, which is not an order.
+#[test]
+fn sort_by_flux_puts_nan_last() {
+    let mut stars: Vec<Star> = [3.0, f32::NAN, 7.0, -1.0, f32::NAN, 5.0]
+        .into_iter()
+        .map(|flux| Star::at(DVec2::ZERO).with_flux(flux))
+        .collect();
+    sort_by_flux(&mut stars);
+    let fluxes: Vec<f32> = stars.iter().map(|star| star.flux).collect();
+    assert_eq!(&fluxes[..4], &[7.0, 5.0, 3.0, -1.0]);
+    assert!(fluxes[4].is_nan() && fluxes[5].is_nan());
+}

@@ -57,7 +57,12 @@ struct DecodedFitsImage {
 
 impl DecodedFitsImage {
     fn into_linear(self, path: &Path) -> Result<LinearImage, ImageError> {
-        if self.cfa_type.is_some() {
+        // A mono sensor frame has no mosaic to demosaic, so it is linear data like any other
+        // single-plane image.
+        if self
+            .cfa_type
+            .is_some_and(|cfa_type| cfa_type != CfaType::Mono)
+        {
             return Err(scientific_rejection(
                 path,
                 "mosaic FITS must be loaded as CfaImage and calibrated before demosaicing",
@@ -209,14 +214,18 @@ pub(crate) fn fits_cfa_frame_info(
             "scientific CFA input must have exactly one image plane",
         ));
     }
-    let cfa_type = read_cfa_from_headers(selected.header(), context.fits.unstated_bayer_pattern)
-        .map_err(|source| fits_err(path, source))?
-        .ok_or_else(|| {
-            fits_unsupported(
-                path,
-                "scientific CFA FITS input is missing validated CFA pattern metadata",
-            )
-        })?;
+    let cfa_type = read_cfa_from_headers(
+        selected.header(),
+        dimensions.height(),
+        context.fits.unstated_bayer_pattern,
+    )
+    .map_err(|source| fits_err(path, source))?
+    .ok_or_else(|| {
+        fits_unsupported(
+            path,
+            "scientific CFA FITS input is missing validated CFA pattern metadata",
+        )
+    })?;
     Ok(CfaFrameInfo {
         dimensions,
         cfa_type,

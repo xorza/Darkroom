@@ -204,12 +204,13 @@ fn set_optional_integer(
 /// `unstated_bayer_pattern` stands in for a `BAYERPAT` of `'TRUE'`.
 pub(super) fn read_cfa_from_headers(
     header: &Header,
+    height: usize,
     unstated_bayer_pattern: Option<CfaPattern>,
 ) -> fits_well::Result<Option<CfaType>> {
     match header.get_text("CFATYPE")? {
         Some(value) if value.eq_ignore_ascii_case("MONO") => return Ok(Some(CfaType::Mono)),
         Some(value) if value.eq_ignore_ascii_case("BAYER") => {
-            return read_bayer_cfa(header, true, unstated_bayer_pattern);
+            return read_bayer_cfa(header, height, true, unstated_bayer_pattern);
         }
         Some(value) if value.eq_ignore_ascii_case("XTRANS") => {
             return Ok(Some(CfaType::XTrans(read_xtrans_pattern(header)?)));
@@ -222,7 +223,7 @@ pub(super) fn read_cfa_from_headers(
         }
         None => {}
     }
-    read_bayer_cfa(header, false, unstated_bayer_pattern)
+    read_bayer_cfa(header, height, false, unstated_bayer_pattern)
 }
 
 /// Where a Lumos-written file records the row order its *source* had.
@@ -269,8 +270,13 @@ fn row_order_of(value: &str) -> RowOrder {
     }
 }
 
+/// The Bayer type `header` declares for an image of `height` decoded rows.
+///
+/// The height is the decoded image's, not `NAXIS2`: a tile-compressed HDU is a binary table whose
+/// `NAXIS2` counts tile rows.
 fn read_bayer_cfa(
     header: &Header,
+    height: usize,
     required: bool,
     unstated_bayer_pattern: Option<CfaPattern>,
 ) -> fits_well::Result<Option<CfaType>> {
@@ -306,15 +312,8 @@ fn read_bayer_cfa(
     // EOS 1500D.
     // `ROWORDER` rather than the resolved order: the pattern is expressed against the rows as this
     // file stores them, and a Lumos-written file separates that from which way up the sky is.
-    if read_declared_row_order(header)? == RowOrder::BottomUp {
-        // The decision needs the height, and a Bayer image HDU that declares none is malformed.
-        // Assuming either parity mis-debayers every file that has the other.
-        let height = header
-            .get_integer("NAXIS2")?
-            .ok_or(fits_well::FitsError::MissingKeyword { name: "NAXIS2" })?;
-        if height % 2 == 0 {
-            pattern = pattern.flip_vertical();
-        }
+    if read_declared_row_order(header)? == RowOrder::BottomUp && height.is_multiple_of(2) {
+        pattern = pattern.flip_vertical();
     }
 
     // The offsets are in the stored image's own coordinates — where the pattern starts within the

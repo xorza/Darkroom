@@ -7,24 +7,35 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use parking_lot::Mutex;
 
-/// Wrapper to send raw pointers across thread boundaries in Rayon closures.
+/// A raw pointer that may cross into Rayon closures, for writes the caller keeps disjoint.
+///
+/// Only a raw pointer: wrapping any `Copy` value would make a `&Cell<_>` `Sync` from safe code.
+/// `T: Send` because the writes move `T` values onto other threads.
 ///
 /// SAFETY: Caller must ensure disjoint access from each thread.
 ///
 /// Access the inner value via `.get()` — never `.0` — so that Edition 2024
 /// closures capture `&UnsafeSendPtr` (which is Sync) rather than the inner
 /// pointer field.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct UnsafeSendPtr<T: Copy>(T);
-unsafe impl<T: Copy> Send for UnsafeSendPtr<T> {}
-unsafe impl<T: Copy> Sync for UnsafeSendPtr<T> {}
+#[derive(Debug)]
+pub(crate) struct UnsafeSendPtr<T>(*mut T);
+unsafe impl<T: Send> Send for UnsafeSendPtr<T> {}
+unsafe impl<T: Send> Sync for UnsafeSendPtr<T> {}
 
-impl<T: Copy> UnsafeSendPtr<T> {
-    pub(crate) const fn new(ptr: T) -> Self {
+impl<T> Clone for UnsafeSendPtr<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for UnsafeSendPtr<T> {}
+
+impl<T> UnsafeSendPtr<T> {
+    pub(crate) const fn new(ptr: *mut T) -> Self {
         Self(ptr)
     }
 
-    pub(crate) const fn get(&self) -> T {
+    pub(crate) const fn get(&self) -> *mut T {
         self.0
     }
 }

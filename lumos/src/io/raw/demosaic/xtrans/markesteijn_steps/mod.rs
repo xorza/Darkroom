@@ -110,16 +110,16 @@ pub(crate) fn interpolate_green(
         let (dir0, rest) = green_dir.split_at_mut(pixels);
         let (dir1, rest) = rest.split_at_mut(pixels);
         let (dir2, dir3) = rest.split_at_mut(pixels);
-        UnsafeSendPtr::new([
-            dir0.as_mut_ptr(),
-            dir1.as_mut_ptr(),
-            dir2.as_mut_ptr(),
-            dir3.as_mut_ptr(),
-        ])
+        [
+            UnsafeSendPtr::new(dir0.as_mut_ptr()),
+            UnsafeSendPtr::new(dir1.as_mut_ptr()),
+            UnsafeSendPtr::new(dir2.as_mut_ptr()),
+            UnsafeSendPtr::new(dir3.as_mut_ptr()),
+        ]
     };
 
     (0..height).into_par_iter().for_each(|y| {
-        let dir_ptrs = dir_send.get();
+        let dir_ptrs = dir_send.map(|ptr| ptr.get());
         let raw_y = y + xtrans.layout.margin.y;
         let row_off = y * width;
         // librtprocess stores the alternating-row candidates in the opposite direction slots.

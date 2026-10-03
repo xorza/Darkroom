@@ -53,17 +53,26 @@ impl UnionFind {
     pub(super) fn find(&self, label: u32) -> u32 {
         let mut current = label;
         loop {
-            let idx = (current - 1) as usize;
-            if idx >= self.parent.len() {
-                return current;
-            }
             // Relaxed: find is idempotent — stale reads just cause extra
             // iterations, union's CAS provides the synchronization.
-            let parent = self.parent[idx].load(Ordering::Relaxed);
-            if parent == current || parent == 0 {
+            let parent = self.parent_of(current).load(Ordering::Relaxed);
+            if parent == current {
                 return current;
             }
-            current = parent;
+            let grandparent = self.parent_of(parent).load(Ordering::Relaxed);
+            // Path halving. The grandparent is an ancestor of `current` whatever other threads did
+            // in between, so the shortcut keeps `current` in its component and keeps
+            // `parent <= label`; only non-roots are rewritten, so it never races `union`'s CAS on a
+            // root. A lost exchange leaves the longer path, which is still correct.
+            if grandparent != parent {
+                let _ = self.parent_of(current).compare_exchange_weak(
+                    parent,
+                    grandparent,
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                );
+            }
+            current = grandparent;
         }
     }
 
@@ -76,14 +85,9 @@ impl UnionFind {
                 mem::swap(&mut root_a, &mut root_b);
             }
 
-            let idx_b = (root_b - 1) as usize;
-            if idx_b >= self.parent.len() {
-                break;
-            }
-
             // AcqRel: acquire sees prior unions, release publishes this union.
             // Relaxed on failure: we re-find roots anyway.
-            match self.parent[idx_b].compare_exchange_weak(
+            match self.parent_of(root_b).compare_exchange_weak(
                 root_b,
                 root_a,
                 Ordering::AcqRel,
@@ -98,6 +102,19 @@ impl UnionFind {
         }
     }
 
+    /// The parent slot of a label `make_set` handed out. Every label a caller holds came from
+    /// `make_set`, which wrote its slot first, so an unwritten (zero) slot is a broken invariant.
+    #[inline]
+    fn parent_of(&self, label: u32) -> &AtomicU32 {
+        let slot = &self.parent[label as usize - 1];
+        debug_assert_ne!(
+            slot.load(Ordering::Relaxed),
+            0,
+            "label {label} was never made a set"
+        );
+        slot
+    }
+
     #[inline]
     pub(super) fn label_count(&self) -> usize {
         (self.next_label.load(Ordering::Relaxed) - 1) as usize
@@ -110,16 +127,33 @@ impl UnionFind {
     /// caller that walks its runs in raster order gets labels independent of how the provisional
     /// ones were handed out across threads. Every provisional label must appear in `provisional`.
     pub(super) fn build_label_map(
-        &self,
+        &mut self,
         provisional: impl Iterator<Item = u32>,
         map: &mut Vec<u32>,
     ) -> usize {
+        let label_count = self.label_count();
+        // `union` links the larger root under the smaller and `make_set` makes a label its own
+        // parent, so `parent[l] <= l` throughout: one ascending pass points every label straight at
+        // its root, since its parent's entry is already final. The lookups below are then O(1),
+        // where walking each chain would be quadratic on a comb-shaped mask.
+        let parent = &mut self.parent[..label_count];
+        for index in 0..label_count {
+            let direct = *parent[index].get_mut() as usize;
+            debug_assert!(
+                (1..=index + 1).contains(&direct),
+                "parent {direct} of label {}",
+                index + 1
+            );
+            let root = *parent[direct - 1].get_mut();
+            *parent[index].get_mut() = root;
+        }
+
         map.clear();
-        map.resize(self.label_count() + 1, 0);
+        map.resize(label_count + 1, 0);
         let mut count = 0u32;
 
         for label in provisional {
-            let root = self.find(label) as usize;
+            let root = *parent[label as usize - 1].get_mut() as usize;
             if map[root] == 0 {
                 count += 1;
                 map[root] = count;
@@ -128,5 +162,49 @@ impl UnionFind {
         }
 
         count as usize
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Unions in descending order build the longest chain the linking rule allows: label `l`
+    /// under `l − 1`, down to 1. Every label is then one component, numbered 1 by the first label
+    /// the walk reaches.
+    #[test]
+    fn a_descending_chain_resolves_to_one_component() {
+        const LABELS: u32 = 1000;
+        let mut union_find = UnionFind::default();
+        union_find.reset(LABELS as usize);
+        for expected in 1..=LABELS {
+            assert_eq!(union_find.make_set(), expected);
+        }
+        for label in (1..LABELS).rev() {
+            union_find.union(label + 1, label);
+        }
+        assert_eq!(union_find.find(LABELS), 1);
+
+        let mut map = Vec::new();
+        let count = union_find.build_label_map((1..=LABELS).rev(), &mut map);
+        assert_eq!(count, 1);
+        assert!(map[1..].iter().all(|&label| label == 1));
+    }
+
+    /// Two chains stay two components, numbered in the order the walk first reaches them.
+    #[test]
+    fn components_are_numbered_by_first_appearance() {
+        let mut union_find = UnionFind::default();
+        union_find.reset(4);
+        for _ in 0..4 {
+            union_find.make_set();
+        }
+        union_find.union(2, 1);
+        union_find.union(4, 3);
+
+        let mut map = Vec::new();
+        let count = union_find.build_label_map([3, 1, 4, 2].into_iter(), &mut map);
+        assert_eq!(count, 2);
+        assert_eq!(&map[1..], &[2, 2, 1, 1]);
     }
 }

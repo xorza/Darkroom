@@ -7,16 +7,16 @@ use crate::stack_product::quality_planes::QualityPlanes;
 /// Drizzle kernel type for distributing flux.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DrizzleKernel {
-    /// Square kernel: true polygon clipping via Sutherland-Hodgman / Green's theorem.
-    /// Transforms all 4 corners of each input pixel drop, computes exact quadrilateral-
-    /// to-output-pixel overlap area. Correct for any transform including rotation and shear.
+    /// Square kernel: the exact overlap area of each drop's transformed quadrilateral with every
+    /// output pixel, by STScI's `boxer` / `sgarea` edge integration. Correct for any transform,
+    /// rotation and shear included. Default, as in DrizzlePac, PixInsight and Siril.
     /// Reference: `STScI` cdrizzlebox.c `do_kernel_square` / `boxer` / `sgarea`.
+    #[default]
     Square,
     /// Turbo kernel: axis-aligned rectangular drop centered on the transformed pixel center.
     /// Approximation of true square kernel — always aligned with output X/Y axes regardless
-    /// of rotation. Fast and adequate when rotation between frames is small. Default.
+    /// of rotation, so it is exact only at rotations of 0°, 90° and 180°.
     /// (Named "turbo" in `STScI` `DrizzlePac`; "square" there uses full polygon clipping.)
-    #[default]
     Turbo,
     /// Point kernel - single pixel contribution.
     /// Fastest but requires very good dithering.
@@ -80,7 +80,7 @@ impl Default for DrizzleConfig {
         Self {
             scale: 2.0,
             pixfrac: 0.8,
-            kernel: DrizzleKernel::Turbo,
+            kernel: DrizzleKernel::Square,
             fill_value: 0.0,
             min_weight_fraction: 0.1,
             quality: QualityPlanes::ALL,

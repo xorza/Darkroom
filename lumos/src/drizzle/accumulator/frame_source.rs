@@ -282,8 +282,9 @@ impl<'a> FrameSource<'a> {
     /// The input rows whose drops can reach output `rows`: a drop reaching `output_margin` output
     /// rows, or `input_margin` input rows, from its pixel's centre.
     ///
-    /// The output rows widened by `output_margin`, taken back to the input, and the input rows
-    /// they span widened by `input_margin`. Exact rather than estimated: a drop that reaches the
+    /// The output rows widened by `output_margin` — and the columns too, since a rotated drop
+    /// reaches the band from beside the grid as well as from above and below it — taken back to
+    /// the input, and the input rows they span widened by `input_margin`. Exact rather than estimated: a drop that reaches the
     /// band has a point inside it, and that point's input row lies within `input_margin` of its
     /// pixel's, or its output row within `output_margin` of the band. Deliberately generous at the
     /// row level — over-scanning costs one transform and a rejected row test per pixel, measured at
@@ -301,8 +302,9 @@ impl<'a> FrameSource<'a> {
     ) -> Range<usize> {
         let low = rows.start as f64 - output_margin;
         let high = rows.end as f64 - 1.0 + output_margin;
-        let right = output_width as f64 - 1.0;
-        let Some(extent) = self.input_row_extent(low, high, right) else {
+        let left = -output_margin;
+        let right = output_width as f64 - 1.0 + output_margin;
+        let Some(extent) = self.input_row_extent(low, high, left, right) else {
             return 0..self.size.height;
         };
 
@@ -314,19 +316,19 @@ impl<'a> FrameSource<'a> {
         start..end.min(height).max(start)
     }
 
-    /// The lowest and highest input row the output rectangle `[0, right] × [low, high]` maps onto,
-    /// or `None` when no bound exists and the whole frame has to be scanned.
+    /// The lowest and highest input row the output rectangle `[left, right] × [low, high]` maps
+    /// onto, or `None` when no bound exists and the whole frame has to be scanned.
     #[expect(
         clippy::cast_sign_loss,
-        reason = "an output rectangle's right edge and height are non-negative, and an empty one saturates to 0"
+        reason = "an output rectangle's width and height are non-negative, and an empty one saturates to 0"
     )]
-    fn input_row_extent(&self, low: f64, high: f64, right: f64) -> Option<RowExtent> {
+    fn input_row_extent(&self, low: f64, high: f64, left: f64, right: f64) -> Option<RowExtent> {
         match &self.map {
             InputMap::Transform { to_input, .. } => {
                 let corners = [
-                    DVec2::new(0.0, low),
+                    DVec2::new(left, low),
                     DVec2::new(right, low),
-                    DVec2::new(0.0, high),
+                    DVec2::new(left, high),
                     DVec2::new(right, high),
                 ];
                 // The corner hull bounds the interior only while the inverse's homogeneous divisor
@@ -354,9 +356,9 @@ impl<'a> FrameSource<'a> {
                 // region for any map without folds, which a converging inverse guarantees here.
                 let from_grid = sip.grid.inverse();
                 let back = |p: DVec2| sip.warp.apply(from_grid.apply(p)).y;
-                let columns = (0..=right as usize)
+                let columns = (0..=(right - left).ceil() as usize)
                     .step_by(SIP_BOUNDARY_STRIDE)
-                    .map(|x| x as f64)
+                    .map(|dx| (left + dx as f64).min(right))
                     .chain([right]);
                 let rows = (0..=(high - low).ceil() as usize)
                     .step_by(SIP_BOUNDARY_STRIDE)
@@ -365,7 +367,7 @@ impl<'a> FrameSource<'a> {
                 let horizontal =
                     columns.flat_map(|x| [back(DVec2::new(x, low)), back(DVec2::new(x, high))]);
                 let vertical =
-                    rows.flat_map(|y| [back(DVec2::new(0.0, y)), back(DVec2::new(right, y))]);
+                    rows.flat_map(|y| [back(DVec2::new(left, y)), back(DVec2::new(right, y))]);
                 let extent = RowExtent::of(horizontal.chain(vertical));
                 Some(RowExtent {
                     first: extent.first - 1.0,

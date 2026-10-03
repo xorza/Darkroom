@@ -176,22 +176,31 @@ fn divide_floor_caps_the_gain() {
     assert!(floored > 0);
 }
 
-/// A model with no positive mean has no level to normalize by: `Divide` leaves the channel as it
-/// was rather than flip or blow it up.
+/// A model with no positive mean has no level to normalize by, so `Divide` refuses it. The model
+/// of `−0.25 + x/1024` over columns 0 to 63 averages `−0.25 + 31.5/1024`. Every channel is fitted
+/// before any is changed, so the red channel, which divides cleanly, is left as it was when green
+/// fails.
 #[test]
-fn divide_leaves_a_sky_with_no_positive_mean_untouched() {
+fn divide_refuses_a_sky_with_no_positive_mean_and_changes_nothing() {
     let size = Size2us::new(64, 64);
-    let sky = fill(size, |x, _| -0.25 + x as f32 / 1024.0);
-    let mut img = gray_image(size, sky.clone());
-    ExtractBackground {
+    let negative = fill(size, |x, _| -0.25 + x as f32 / 1024.0);
+    let positive = fill(size, |x, _| 0.25 + x as f32 / 1024.0);
+    let mut img = rgb(size, positive.clone(), negative.clone(), positive.clone());
+    let error = ExtractBackground {
         degree: 1,
         tile_size: 16,
         mode: BackgroundMode::Divide,
         ..Default::default()
     }
     .apply(&mut img)
-    .unwrap();
-    assert_eq!(img.channel(0).pixels(), sky.as_slice());
+    .unwrap_err();
+    // The tolerance absorbs the least-squares fit's rounding in f64.
+    assert!(
+        matches!(error, OpError::NonPositiveBackground { mean } if (mean - (-0.25 + 31.5 / 1024.0)).abs() < 1e-9),
+        "{error:?}"
+    );
+    assert_eq!(img.channel(0).pixels(), positive.as_slice());
+    assert_eq!(img.channel(1).pixels(), negative.as_slice());
 }
 
 /// A bright blob over four whole tiles of a 8 × 6 grid would pull the fit toward it. The residual

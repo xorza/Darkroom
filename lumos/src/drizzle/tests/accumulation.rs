@@ -28,18 +28,34 @@ fn a_flat_frame_at_scale_2_covers_every_cell() {
     assert!(weight_plane(&product).pixels().iter().all(|&w| w == 0.25));
 }
 
+/// No frames is `NoFrames`, and an invalid config is refused before the first frame is decoded:
+/// the path here does not exist, so a decode would have reported `ImageLoad` instead.
 #[test]
-fn drizzle_stack_empty_paths() {
-    let config = DrizzleConfig::default();
-
+fn drizzle_stack_refuses_before_decoding() {
     let result = drizzle_stack(
         Vec::<DrizzleFrame<PathBuf>>::new(),
-        &config,
+        &DrizzleConfig::default(),
         &LoadContext::default(),
         &ProgressCallback::default(),
         &CancelToken::never(),
     );
     assert!(matches!(result.unwrap_err(), DrizzleError::NoFrames));
+
+    let invalid = DrizzleConfig {
+        pixfrac: 0.0,
+        ..DrizzleConfig::default()
+    };
+    let result = drizzle_stack(
+        vec![DrizzleFrame::new(
+            PathBuf::from("does-not-exist.tiff"),
+            warp_of(Transform::identity()),
+        )],
+        &invalid,
+        &LoadContext::default(),
+        &ProgressCallback::default(),
+        &CancelToken::never(),
+    );
+    assert!(matches!(result.unwrap_err(), DrizzleError::Config(_)));
 }
 
 /// From paths, a drizzle gives what the same frames give in memory once loaded; a file that does
@@ -593,14 +609,15 @@ fn band_count_does_not_change_the_result() {
     }
 }
 
-/// A band straddling the transform's vanishing line scans the whole frame.
+/// The input-row estimate covers every drop that can reach the band, and a band straddling the
+/// transform's vanishing line scans the whole frame.
 ///
 /// `input_rows` bounds the input by inverse-mapping the band's four corners, which encloses the
 /// interior only while the homogeneous divisor keeps one sign across the band. Where it changes
 /// sign the mapped region is unbounded and four corners bound nothing, so the estimate has to widen
 /// to the frame — a tight answer there drops flux with no diagnostic.
 #[test]
-fn input_row_estimate_widens_to_the_frame_across_the_vanishing_line() {
+fn input_row_estimate_covers_every_reaching_drop() {
     let image = constant_image(Size2us::new(16, 12), 1.0);
 
     // Inverse divisor `1 − 0.01·x`, which is zero at output column 100 and so takes both signs over
@@ -628,6 +645,20 @@ fn input_row_estimate_widens_to_the_frame_across_the_vanishing_line() {
     let shifted = WarpTransform::new(Transform::translation(DVec2::new(0.0, -2.0)));
     assert_eq!(input_rows(&image, &shifted, 1.0, 0..4, 200, 0.5, 0.0), 0..3);
     assert_eq!(input_rows(&image, &shifted, 1.0, 0..4, 200, 0.5, 1.5), 0..4);
+
+    // A quarter turn sends output column x to input row x − 2.25, so the input rows come from the
+    // band's horizontal extent. A Lanczos-3 drop reaches 3.5 output pixels, so the columns widen to
+    // [−3.5, 8.5] on a 6-wide grid and the rows to [−5.75, 6.25]: rows 0 to 7. Without the column
+    // margin they stop at [−2.25, 2.75], rows 0 to 3, and the drops centred just right of the
+    // grid's last column lose the taps that land inside it.
+    let quarter_turn = WarpTransform::new(Transform::euclidean(
+        DVec2::new(0.0, -2.25),
+        std::f64::consts::FRAC_PI_2,
+    ));
+    assert_eq!(
+        input_rows(&image, &quarter_turn, 1.0, 0..4, 6, 3.5, 0.0),
+        0..8
+    );
 }
 
 #[test]
