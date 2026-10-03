@@ -122,10 +122,14 @@ fn load_full_example_fits() {
     // BITPIX = 32 with BSCALE = 1, so the samples were divided by the declared span 2³² − 1 and
     // the provenance carries that span back: the physical ADU value stays recoverable.
     let FitsTransferProvenance { physical_scale, .. } = fits_transfer(&image);
-    assert_eq!(*physical_scale, 4_294_967_295.0);
+    assert_eq!(*physical_scale, 4_294_967_295.0_f64 as f32);
     let pixel = image.channel(0)[image.dimensions().size().index_of(Vec2us::new(5, 20))];
-    // 152 / (2³² − 1) = 3.5390258e-8.
-    assert_close!(pixel, 3.539_025_8e-8, 1e-15, "{pixel}");
+    assert_close!(
+        pixel,
+        (152.0 / 4_294_967_295.0_f64) as f32,
+        1e-15,
+        "{pixel}"
+    );
     assert_close!(pixel * physical_scale, 152.0, 1e-3, "{pixel}");
 
     // New metadata fields are None for this simple test file

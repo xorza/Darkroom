@@ -268,7 +268,7 @@ mod tests {
         let central = scene
             .sources
             .iter()
-            .filter(|s| ((s.pos.x - cx).powi(2) + (s.pos.y - cy).powi(2)).sqrt() < r)
+            .filter(|s| (s.pos.x - cx).hypot(s.pos.y - cy) < r)
             .count();
         // A uniform field would put only ~π r² / (size.width·size.height) ≈ 4.5% in that disk;
         // clustering must pack far more (the 80% core inside ~1σ ⇒ well over a third).
