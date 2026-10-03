@@ -16,7 +16,9 @@ use crate::combine::stack;
 use crate::frame_store::frame_peek::FramePeek;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode::{load_cfa_fits, load_linear_fits};
-use crate::io::image::fits::options::{FitsFloatScale, FitsLoadOptions, FitsNullPolicy};
+use crate::io::image::fits::options::{
+    FitsCubeInterpretation, FitsFloatScale, FitsLoadOptions, FitsNullPolicy,
+};
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::sample_domain::ScaleOrigin;
 use crate::io::raw::demosaic::bayer::CfaPattern;
@@ -25,7 +27,10 @@ use crate::memory::run_memory::RunMemory;
 use crate::frame_store::stackable_image::StackableImage;
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::fits::write_fits;
-use crate::{CalibrationMasters, CalibrationSet, CfaImage, CfaType, PreviewImage, PreviewPixels};
+use crate::{
+    CalibrationMasters, CalibrationSet, CfaImage, CfaType, ColorProvenance, PreviewImage,
+    PreviewPixels,
+};
 use common::TempDir;
 use fits_well::header::Header;
 use fits_well::image::{Image, Scaling};
@@ -658,6 +663,44 @@ fn fits_datamax_follows_the_samples_into_the_normalized_domain() {
     assert_eq!(high.metadata.data_max, Some(1.0));
 }
 
+/// A mono sensor frame (`CFATYPE = 'MONO'`, which this crate writes) has no mosaic, so it loads as
+/// linear data. A three-plane cube keeps the `BAYERPAT` of the sensor it was demosaiced from,
+/// which describes none of its planes, so it loads too.
+#[test]
+fn mono_sensor_frames_and_stale_cube_patterns_load_as_linear() {
+    let dir = TempDir::new("lumos-fits-roundtrip");
+    let mut mono_header = Header::new();
+    mono_header.set("CFATYPE", "MONO").unwrap();
+    let mono = Image::new(vec![2, 2], vec![0.125f32, 0.25, 0.375, 0.5]).unwrap();
+    let path = write_with_header(&dir, "mono_sensor", &mono, &mono_header);
+    let loaded = LinearImage::from_file(&path, &LoadContext::default()).unwrap();
+    assert_eq!(loaded.channel(0).pixels(), &[0.125, 0.25, 0.375, 0.5]);
+    assert_eq!(
+        loaded.metadata.provenance.unwrap().color,
+        ColorProvenance::Monochrome
+    );
+
+    let mut stale = Header::new();
+    stale.set("BAYERPAT", "RGGB").unwrap();
+    let samples: Vec<f32> = (0..12).map(|i| i as f32 / 16.0).collect();
+    let cube = Image::new(vec![2, 2, 3], samples.clone()).unwrap();
+    let path = write_with_header(&dir, "stale_cube", &cube, &stale);
+    let context = LoadContext {
+        fits: FitsLoadOptions {
+            cube: FitsCubeInterpretation::Rgb,
+            ..FitsLoadOptions::default()
+        },
+        ..LoadContext::default()
+    };
+    let loaded = LinearImage::from_file(&path, &context).unwrap();
+    for channel in 0..3 {
+        assert_eq!(
+            loaded.channel(channel).pixels(),
+            &samples[channel * 4..(channel + 1) * 4]
+        );
+    }
+}
+
 #[test]
 fn mosaic_fits_uses_the_cfa_calibration_route() {
     let size = Size2us::new(32usize, 32usize);
@@ -700,7 +743,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     assert!(matches!(
         &preview.metadata.provenance,
         Some(crate::ImageProvenance {
-            color: crate::ColorProvenance::SensorRgb,
+            color: ColorProvenance::SensorRgb,
             demosaic: crate::DemosaicProvenance::LumosRcd,
             ..
         })
@@ -764,7 +807,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
                 physical_scale: 1.0,
                 ..
             },),
-            color: crate::ColorProvenance::SensorRgb,
+            color: ColorProvenance::SensorRgb,
             demosaic: crate::DemosaicProvenance::LumosRcd,
             clipped: false,
             ..

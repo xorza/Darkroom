@@ -129,9 +129,11 @@ fn accumulate(
     if frame_count == 0 {
         return Err(DrizzleError::NoFrames);
     }
+    // Before the first frame is pulled: for the path entry that is a full decode, spent on a run
+    // the config already dooms. The accumulator checks again, for callers that build one directly.
+    config.validate()?;
 
-    // The accumulator is sized from the first frame, so it has to be in hand before the loop. It
-    // validates the config as it is built, which is the only place that check belongs.
+    // The accumulator is sized from the first frame, so it has to be in hand before the loop.
     let first = frames.next().expect("frame_count is non-zero")?;
     let input_dims = first.source.dimensions();
     tracing::info!(

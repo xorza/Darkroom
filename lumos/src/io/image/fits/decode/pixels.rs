@@ -10,6 +10,7 @@ use rayon::prelude::*;
 use common::CancelToken;
 
 use crate::io::cancelled::Cancelled;
+use crate::io::image::cfa::CfaType;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode::DecodedFitsImage;
 use crate::io::image::fits::decode::plan::FitsDecodePlan;
@@ -66,8 +67,18 @@ pub(super) fn read_decoded_hdu(
     );
     // The keywords that can fail a load are read before a plane is: a frame they refuse costs no
     // decode.
-    let cfa_type = read_cfa_from_headers(header, context.fits.unstated_bayer_pattern)
-        .map_err(|source| fits_err(path, source))?;
+    // A sensor frame is one plane. A cube's mosaic keywords describe the frame before someone
+    // else's demosaic, so they say nothing about the planes decoded here.
+    let cfa_type = if plan.dimensions.is_grayscale() {
+        read_cfa_from_headers(
+            header,
+            plan.dimensions.height(),
+            context.fits.unstated_bayer_pattern,
+        )
+        .map_err(|source| fits_err(path, source))?
+    } else {
+        None
+    };
     let row_order = read_row_order(header).map_err(|source| fits_err(path, source))?;
     // The unit is half the sample domain, which decides whether frames combine. An all-blank BUNIT
     // parses to the single significant space §4.2.1.1 requires, which states no unit rather than an
@@ -114,7 +125,7 @@ pub(super) fn read_decoded_hdu(
             hdu,
             checksum,
         }),
-        color: if cfa_type.is_some() {
+        color: if cfa_type.is_some_and(|cfa_type| cfa_type != CfaType::Mono) {
             ColorProvenance::SensorCfa
         } else if plan.dimensions.is_grayscale() {
             ColorProvenance::Monochrome

@@ -2,7 +2,6 @@
 //!
 //! Applies quality filters, removes duplicates, and sorts by flux.
 
-use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use smallvec::SmallVec;
@@ -96,9 +95,17 @@ impl FilterOutcome {
     }
 }
 
-/// Sort stars by flux (brightest first).
+/// Sort stars by flux, brightest first, with any NaN flux last.
+///
+/// A total order: a comparator that calls NaN equal to everything is not transitive, and the
+/// standard sorts may panic on one.
 fn sort_by_flux(stars: &mut [Star]) {
-    stars.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap_or(Ordering::Equal));
+    stars.sort_by(|a, b| {
+        a.flux
+            .is_nan()
+            .cmp(&b.flux.is_nan())
+            .then_with(|| b.flux.total_cmp(&a.flux))
+    });
 }
 
 /// Filter stars by FWHM using MAD-based outlier detection.
