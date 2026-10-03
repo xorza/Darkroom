@@ -3,26 +3,22 @@
 
 use hashbrown::HashMap;
 
+use crate::DataType;
 use crate::graph::Graph;
 use crate::graph::identity::OutputPort;
 use crate::library::Library;
-use crate::{ConstValue, DataType};
 
 /// What decides one output port's type, as the graph reports it. The single hop
 /// the walk below takes, named so the reading of a declaration stays a `Graph`
 /// query ([`Graph::output_source`]) and the walking of it stays here.
 #[derive(Debug)]
 pub(super) enum OutputTypeSource {
-    /// Settled by the declaration itself.
+    /// Settled where it stands: by the declaration itself, or — for a wildcard
+    /// mirroring an input bound to a constant — by that input's declared type,
+    /// or the constant's own where the declaration is `Any`.
     Fixed(DataType),
     /// A wildcard mirroring an input bound to this producer port.
     Bind(OutputPort),
-    /// A wildcard mirroring an input bound to a constant, with the type declared
-    /// for that input beside it.
-    Const {
-        declared: DataType,
-        value: ConstValue,
-    },
     /// Nothing to go on — an unbound mirror, or a missing func.
     Unresolved,
 }
@@ -98,7 +94,9 @@ impl OutputTypes {
     /// Iterative, not recursive: the chain length is a user-authored reroute
     /// count, which must not decide the stack depth. A port already in the table
     /// ends the walk immediately, which is what makes covering a whole graph cost
-    /// one walk per chain rather than one per port.
+    /// one walk per chain rather than one per port. Only a hop is marked in
+    /// progress, since only a hop can close a cycle: a port settled where it
+    /// stands is written once.
     fn resolve(&mut self, graph: &Graph, library: &Library, port: OutputPort) -> DataType {
         self.path.clear();
         let mut current = port;
@@ -109,13 +107,12 @@ impl OutputTypes {
                 Some(Some(data_type)) => break data_type.clone(),
                 None => {}
             }
-            self.resolved.insert(current, None);
             self.path.push(current);
             match graph.output_source(library, current) {
                 OutputTypeSource::Fixed(data_type) => break data_type,
-                OutputTypeSource::Bind(producer) => current = producer,
-                OutputTypeSource::Const { declared, value } => {
-                    break declared.or_const_type(&value);
+                OutputTypeSource::Bind(producer) => {
+                    self.resolved.insert(current, None);
+                    current = producer;
                 }
                 OutputTypeSource::Unresolved => break DataType::Any,
             }
