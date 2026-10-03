@@ -5,29 +5,32 @@
 //! problem back into four mono detections, whose dense neighbours really are same-colour in the
 //! mosaic. Pattern-independent: phase alone fixes the colour, so no `CfaPattern` is needed.
 
-use rayon::prelude::*;
-
 use crate::bit_buffer2::BitBuffer2;
 use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::calibration_masters::cosmic_ray::mono::MonoDetector;
 use crate::calibration_masters::cosmic_ray::noise_model::NoiseModel;
+use crate::io::image::cfa::CfaType;
+use crate::io::image::cfa::cfa_lattice::CfaLattice;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
-/// The Bayer detector: a mono detector, plus the buffer each phase is deinterleaved into.
+/// The Bayer detector: a mono detector, the lattice that deinterleaves the phases, and the buffer
+/// each phase is deinterleaved into.
 ///
-/// Both are reused across all four phases. `(0, 0)` is the largest phase and runs first, so no
-/// later one grows either allocation.
+/// The detector and the buffer are reused across all four phases. `(0, 0)` is the largest phase
+/// and runs first, so no later one grows either allocation.
 #[derive(Debug)]
 pub(super) struct BayerDetector<'a> {
     mono: MonoDetector<'a>,
+    lattice: CfaLattice,
     plane: Vec<f32>,
 }
 
 impl<'a> BayerDetector<'a> {
-    pub(super) fn new(config: &'a CosmicRayConfig, noise: NoiseModel) -> Self {
+    pub(super) fn new(config: &'a CosmicRayConfig, noise: NoiseModel, cfa: &CfaType) -> Self {
         Self {
             mono: MonoDetector::new(config, noise),
+            lattice: CfaLattice::new(cfa),
             plane: Vec::new(),
         }
     }
@@ -35,7 +38,7 @@ impl<'a> BayerDetector<'a> {
     /// The bytes a detection on a `size` mosaic allocates beside it: the largest phase plane and
     /// the mono detector's scratch over it, or nothing when even that phase is too small to scan.
     pub(super) fn heap_bytes(size: Size2us) -> usize {
-        let phase = Size2us::new(size.width.div_ceil(2), size.height.div_ceil(2));
+        let phase = CfaLattice::phase_size(size, Vec2us::ZERO);
         match MonoDetector::heap_bytes(phase) {
             0 => 0,
             mono => phase.pixel_count() * size_of::<f32>() + mono,
@@ -44,56 +47,32 @@ impl<'a> BayerDetector<'a> {
 
     /// Clean every phase in place, marking every in-painted photosite in `found` (the mosaic's
     /// size) and returning the total across the four.
-    ///
-    /// Deinterleave and re-interleave are row-parallel like the detection between them. They are
-    /// only a few percent of a frame today, but they are the whole of its *serial* fraction — the
-    /// one part that would not shrink as thread count rises.
     pub(super) fn reject(
         &mut self,
         data: &mut [f32],
         size: Size2us,
         found: &mut BitBuffer2,
     ) -> usize {
-        let (w, h) = (size.width, size.height);
-        let Self { mono, plane } = self;
+        let Self {
+            mono,
+            lattice,
+            plane,
+        } = self;
         let mut total = 0;
         for b in 0..2 {
             for a in 0..2 {
-                let pw = if a == 0 { w.div_ceil(2) } else { w / 2 };
-                let ph = if b == 0 { h.div_ceil(2) } else { h / 2 };
-                if pw < 3 || ph < 3 {
+                let phase = Vec2us::new(a, b);
+                let plane_size = CfaLattice::phase_size(size, phase);
+                if plane_size.width < 3 || plane_size.height < 3 {
                     continue;
                 }
-
-                // Deinterleave: plane row j is mosaic row 2j+b, every second pixel from column a.
-                // Every element is written, so `resize` only has to get the length right.
-                plane.resize(pw * ph, 0.0);
-                let mosaic = &*data;
-                plane.par_chunks_mut(pw).enumerate().for_each(|(j, row)| {
-                    let src = &mosaic[(j * 2 + b) * w..][..w];
-                    for (i, o) in row.iter_mut().enumerate() {
-                        *o = src[i * 2 + a];
-                    }
-                });
-
-                let plane_size = Size2us::new(pw, ph);
+                lattice.deinterleave(data, size, phase, plane);
                 let mut plane_found = BitBuffer2::new_default(plane_size);
                 total += mono.reject(plane, plane_size, &mut plane_found);
                 plane_found.for_each_set(|pos| {
                     found.set_at(Vec2us::new(pos.x * 2 + a, pos.y * 2 + b), true);
                 });
-
-                // Re-interleave the cleaned plane. Chunking the mosaic by row keeps each thread's
-                // writes to one row, so the phase's rows can be picked out of the full sweep.
-                let cleaned = &plane[..];
-                data.par_chunks_mut(w)
-                    .enumerate()
-                    .filter(|(y, _)| y % 2 == b)
-                    .for_each(|(y, row)| {
-                        for (i, &v) in cleaned[(y / 2) * pw..][..pw].iter().enumerate() {
-                            row[i * 2 + a] = v;
-                        }
-                    });
+                lattice.interleave(plane, size, phase, data);
             }
         }
         total
