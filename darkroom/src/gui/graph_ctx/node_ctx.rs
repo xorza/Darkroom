@@ -80,15 +80,22 @@ pub(crate) struct NodeCtx<'a> {
 }
 
 impl<'a> NodeCtx<'a> {
-    /// Resolve `node_id` against the graph, or `None` when the graph does not
-    /// hold it — a placement left behind by a delete.
-    pub(super) fn resolve(graph_ctx: GraphCtx<'a>, node_id: NodeId, pos: Vec2) -> Option<Self> {
-        let node = graph_ctx.body().find(node_id)?;
+    /// Resolve the placed `node_id` against the graph.
+    ///
+    /// # Panics
+    ///
+    /// If the graph holds no `node_id`: callers resolve placements, and the
+    /// document holds a placement exactly for every node.
+    pub(super) fn resolve(graph_ctx: GraphCtx<'a>, node_id: NodeId, pos: Vec2) -> Self {
+        let node = graph_ctx
+            .body()
+            .find(node_id)
+            .expect("every placement names a node the graph holds");
         // `None` has exactly one meaning: a `NodeKind::Func` whose id the
         // library no longer holds. A special node's declaration is hardcoded,
         // so `Node::func` resolves it unconditionally.
         let func = node.func(graph_ctx.library());
-        Some(Self {
+        Self {
             graph_ctx,
             id: node_id,
             pos,
@@ -96,7 +103,7 @@ impl<'a> NodeCtx<'a> {
             func,
             missing_inputs: graph_ctx.run_state().missing_inputs(node_id),
             hovered: false,
-        })
+        }
     }
 
     /// This node with the pointer-over question answered, resolved once by the
