@@ -464,6 +464,10 @@ struct UnpackedRaw {
     raw_xtrans_pattern: Option<XTransPattern>,
     camera_white_balance: Option<[f32; 4]>,
     iso: Option<u32>,
+    /// The shutter time in seconds, when LibRaw read one.
+    exposure_time: Option<f64>,
+    /// The sensor temperature in °C its makernotes state, for the cameras that record one.
+    ccd_temp: Option<f64>,
     /// Whether LibRaw reads a raw zero as a dead photosite: its `zero_is_bad`, set for Panasonic
     /// and some cameras its size table identifies.
     zero_is_bad: bool,
@@ -930,6 +934,13 @@ fn unpack(libraw: LibrawState, path: &Path) -> Result<UnpackedRaw, ImageError> {
     let cam_mul = unsafe { (*inner).color.cam_mul };
     let camera_white_balance = canonical_camera_white_balance(cfa_type, cam_mul);
     let iso = extract_iso(inner);
+    // SAFETY: inner is valid after unpack.
+    let shutter = unsafe { (*inner).other.shutter };
+    let exposure_time = (shutter > 0.0).then_some(f64::from(shutter));
+    // SAFETY: inner is valid after unpack. LibRaw leaves -1000 where the makernotes state no sensor
+    // temperature.
+    let sensor_temperature = unsafe { (*inner).makernotes.common.SensorTemperature };
+    let ccd_temp = (sensor_temperature > -273.15).then_some(f64::from(sensor_temperature));
     // SAFETY: inner is valid and the file is open, so LibRaw has identified the camera.
     let zero_is_bad = unsafe { sys::libraw_lumos_zero_is_bad(inner) } != 0;
     // SAFETY: inner is valid, and color.linear_max is initialized after unpack.
@@ -964,6 +975,8 @@ fn unpack(libraw: LibrawState, path: &Path) -> Result<UnpackedRaw, ImageError> {
         raw_xtrans_pattern,
         camera_white_balance,
         iso,
+        exposure_time,
+        ccd_temp,
         zero_is_bad,
         saturation,
         linear_curve,
@@ -1233,6 +1246,8 @@ pub(crate) fn load_raw_cfa(path: &Path, context: &LoadContext) -> Result<CfaImag
         quantization_sigma: raw.quantization_sigma(),
         saturation_flagged: true,
         iso: raw.iso,
+        exposure_time: raw.exposure_time,
+        ccd_temp: raw.ccd_temp,
         header_dimensions: vec![raw.layout.active.height, raw.layout.active.width, 1],
         camera_white_balance: raw.camera_white_balance,
         provenance: Some(ImageProvenance {

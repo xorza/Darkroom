@@ -60,6 +60,7 @@ fn bench_full_pipeline() {
             paths,
             &config,
             RunMemory::read(config.cache.memory_override),
+            None,
             ProgressCallback::default(),
             CancelToken::never(),
         )

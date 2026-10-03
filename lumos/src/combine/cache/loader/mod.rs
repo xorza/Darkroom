@@ -38,6 +38,10 @@ use crate::combine::cache::frame_check::FrameCheck;
 use crate::combine::cache::set_facts::SetFacts;
 use crate::frame_store::frame_facts::FrameFacts;
 
+/// A step each decoded frame takes before its checks and statistics, given the frame's index: the
+/// subtraction of a calibration master, for one.
+pub(crate) type Prepare<'a, I> = dyn Fn(usize, &mut I) -> Result<(), Error> + Sync + 'a;
+
 #[derive(Debug)]
 struct LoadedTier {
     frames: Vec<StoredFrame>,
@@ -52,10 +56,16 @@ pub(super) struct LoadedCache {
     pub(super) core: CacheCore,
 }
 
+/// Load every frame into the tier its set fits, each through `prepare` when given.
+///
+/// A prepared frame is not what its source decodes to, so on the disk tier it is spilled for this
+/// run alone, never committed to the kept cache nor read back from it: a later run with another
+/// step, or none, would otherwise reuse it.
 pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     paths: &[P],
     config: &StackConfig,
     memory: RunMemory,
+    prepare: Option<&Prepare<'_, I>>,
     progress: ProgressCallback,
     cancel: CancelToken,
 ) -> Result<LoadedCache, Error> {
@@ -73,7 +83,10 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
         (peek, None)
     } else {
         let source = CachedSource::of(first_path);
-        let image = load_image::<I>(first_path, &context)?;
+        let mut image = load_image::<I>(first_path, &context)?;
+        if let Some(prepare) = prepare {
+            prepare(0, &mut image)?;
+        }
         (
             FramePeek::of_decoded(&image),
             Some(EarlyDecode { image, source }),
@@ -114,6 +127,7 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
             early.map(|early| early.image),
             plan.decode_concurrency,
             &context,
+            prepare,
         )?
     } else {
         load_to_disk::<I, P>(
@@ -124,6 +138,7 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
             early,
             plan.decode_concurrency,
             &context,
+            prepare,
         )?
     };
 
@@ -231,6 +246,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
     first: Option<I>,
     concurrency: usize,
     context: &LoadContext,
+    prepare: Option<&Prepare<'_, I>>,
 ) -> Result<LoadedTier, Error> {
     let cancel = &context.cancel;
 
@@ -253,7 +269,10 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
         if cancel.is_cancelled() {
             return Err(Error::Cancelled);
         }
-        let image = load_image::<I>(path.as_ref(), context)?;
+        let mut image = load_image::<I>(path.as_ref(), context)?;
+        if let Some(prepare) = prepare {
+            prepare(idx, &mut image)?;
+        }
         let frame = admit_decoded(image, idx, dimensions, &first_facts, cancel)?;
         loaded_count.complete_one();
         Ok(frame)
@@ -304,6 +323,10 @@ fn admit_decoded<I: StackableImage>(
 }
 
 /// Load images to disk cache with memory-mapped access.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the disk tier's seven inputs and the per-frame step; the ingest stage replaces this"
+)]
 /// Each channel is stored in a separate file for efficient planar access.
 /// Images are loaded and cached in parallel for better throughput.
 fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
@@ -314,6 +337,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     early: Option<EarlyDecode<I>>,
     concurrency: usize,
     context: &LoadContext,
+    prepare: Option<&Prepare<'_, I>>,
 ) -> Result<LoadedTier, Error> {
     let spill_directory = SpillDirectory::create(&config.cache_dir, config.keep_cache)?;
     let cache_dir = spill_directory.path();
@@ -329,10 +353,11 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
         }
     } else {
         let source = CachedSource::of(first_path)?;
-        Decoded {
-            image: load_image::<I>(first_path, context)?,
-            source,
+        let mut image = load_image::<I>(first_path, context)?;
+        if let Some(prepare) = prepare {
+            prepare(0, &mut image)?;
         }
+        Decoded { image, source }
     };
     let metadata = first.image.metadata().clone();
     let first = cache_frame::<I>(
@@ -342,6 +367,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
         dimensions,
         None,
         context,
+        prepare,
         Some(first),
     )?;
     let first_facts = SetFacts::of_first(&first.source_stats.facts);
@@ -360,6 +386,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
             dimensions,
             Some(&first_facts),
             context,
+            prepare,
             None,
         )?;
         cached_count.complete_one();
@@ -391,6 +418,12 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
 /// lookup would save is already spent. The source's identity is read before the decode and again
 /// after it, and a frame whose source changed in between is refused rather than cached under the
 /// identity it had before.
+///
+/// A frame through `prepare` is spilled for this run alone, under its index.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each is a distinct input of one frame's load; the step joins the decode's own six"
+)]
 fn cache_frame<I: StackableImage>(
     cache_dir: &Path,
     path: &Path,
@@ -398,9 +431,23 @@ fn cache_frame<I: StackableImage>(
     dimensions: ImageDimensions,
     facts: Option<&SetFacts>,
     context: &LoadContext,
+    prepare: Option<&Prepare<'_, I>>,
     decoded: Option<Decoded<I>>,
 ) -> Result<StoredFrame, Error> {
     let cancel = &context.cancel;
+    if let Some(prepare) = prepare {
+        let image = if let Some(Decoded { image, .. }) = decoded {
+            image
+        } else {
+            let mut image = load_image::<I>(path, context)?;
+            prepare(index, &mut image)?;
+            image
+        };
+        let checked = check_decoded(image, index, dimensions, facts, cancel)?;
+        let spill = FrameSpill::new(cache_dir, &format!("prepared_{index}"));
+        return StoredFrame::spill(&spill, &checked.image, &checked.quality, checked.stats)
+            .map_err(Error::from);
+    }
     let (source, decoded_image) = match decoded {
         Some(Decoded { image, source }) => (source, Some(image)),
         None => (CachedSource::of(path)?, None),

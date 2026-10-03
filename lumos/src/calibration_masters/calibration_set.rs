@@ -50,32 +50,6 @@ impl<T> CalibrationSet<T> {
             .into_iter()
             .map(|role| (role, self.get(role)))
     }
-
-    /// The four roles by value, in [`MasterRole::ALL`] order: the one place the field-to-role
-    /// correspondence is written. [`Self::try_map`] rebuilds a set from it by position, and
-    /// `roles_round_trip_in_master_order` pins the order.
-    pub(crate) fn into_roles(self) -> [(MasterRole, T); 4] {
-        [
-            (MasterRole::Dark, self.dark),
-            (MasterRole::Flat, self.flat),
-            (MasterRole::Bias, self.bias),
-            (MasterRole::FlatDark, self.flat_dark),
-        ]
-    }
-
-    /// Convert every role, in calibration order, stopping at the first failure.
-    pub(crate) fn try_map<U, E>(
-        self,
-        mut convert: impl FnMut(MasterRole, T) -> Result<U, E>,
-    ) -> Result<CalibrationSet<U>, E> {
-        let [dark, flat, bias, flat_dark] = self.into_roles();
-        Ok(CalibrationSet {
-            dark: convert(dark.0, dark.1)?,
-            flat: convert(flat.0, flat.1)?,
-            bias: convert(bias.0, bias.1)?,
-            flat_dark: convert(flat_dark.0, flat_dark.1)?,
-        })
-    }
 }
 
 impl CalibrationSet<Option<CfaImage>> {

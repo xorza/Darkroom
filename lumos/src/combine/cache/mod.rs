@@ -3,7 +3,7 @@
 pub(crate) mod core;
 pub(crate) mod frame_check;
 pub(crate) mod frame_weights;
-mod loader;
+pub(crate) mod loader;
 pub(crate) mod sample;
 pub(crate) mod sample_noise;
 pub(crate) mod set_facts;
@@ -16,7 +16,7 @@ use rayon::prelude::*;
 use crate::combine::cache::core::{CacheCore, CacheTier, ChunkContext};
 use crate::combine::cache::frame_check::FrameCheck;
 use crate::combine::cache::frame_weights::FrameWeights;
-use crate::combine::cache::loader::LoadedCache;
+use crate::combine::cache::loader::{LoadedCache, Prepare};
 use crate::combine::cache::sample::{
     CombineScratch, CombinedSample, GatheredSamples, PixelSamples,
 };
@@ -569,6 +569,7 @@ impl FrameCache {
                 kept_flagged_samples: kept_flagged.totals(),
                 variance_background_only: planes.variance
                     && noise.is_some_and(|noise| !noise.every_gain_known()),
+                ..RunReport::default()
             },
         }
     }
@@ -628,11 +629,12 @@ impl FrameCache {
         paths: &[P],
         config: &StackConfig,
         memory: RunMemory,
+        prepare: Option<&Prepare<'_, CfaImage>>,
         progress: ProgressCallback,
         cancel: CancelToken,
     ) -> Result<Self, Error> {
         Self::from_tiered_paths(
-            loader::load_tiered::<CfaImage, P>(paths, config, memory, progress, cancel)?,
+            loader::load_tiered::<CfaImage, P>(paths, config, memory, prepare, progress, cancel)?,
             config.normalization,
         )
     }
@@ -648,7 +650,7 @@ impl FrameCache {
         cancel: CancelToken,
     ) -> Result<Self, Error> {
         Self::from_tiered_paths(
-            loader::load_tiered::<LinearImage, P>(paths, config, memory, progress, cancel)?,
+            loader::load_tiered::<LinearImage, P>(paths, config, memory, None, progress, cancel)?,
             config.normalization,
         )
     }

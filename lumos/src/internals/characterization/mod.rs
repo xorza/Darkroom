@@ -189,12 +189,12 @@ fn calibrate_snapshot() {
     masters.calibrate(&mut light).unwrap();
     let mut snapshot = Snapshot::default();
     snapshot.f32s(light.data.pixels());
-    assert_snapshot("calibration", &snapshot, "e212992a5afc36b5");
+    assert_snapshot("calibration", &snapshot, "e9c6a645b893b888");
 
     let demosaiced = light.demosaic(&CancelToken::never()).unwrap();
     let mut snapshot = Snapshot::default();
     image_snapshot(&mut snapshot, &demosaiced);
-    assert_snapshot("demosaic", &snapshot, "5ea526df45f87c4e");
+    assert_snapshot("demosaic", &snapshot, "3471527411dfe1f8");
 }
 
 #[test]

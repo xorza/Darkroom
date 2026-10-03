@@ -40,23 +40,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
   - Alt-az mounts (smart telescopes) pass 10° of field rotation in one session.
   - Siril, PixInsight and DSS register across a flip by default. `[C]`
 
-## 4. Calibration does not reconcile offsets and exposures
-
-- [ ] `4.1` **Flats are scaled by a median ratio before the bias or flat-dark is subtracted** — `calibration_masters/mod.rs:68-92` with `combine/config/mod.rs:285-297` (`Normalization::Multiplicative`), subtraction at `calibration_masters/mod.rs:174-185`
-  - Each raw flat is scaled while it still contains its offset. The subtraction runs once, on the finished master. The residual is b·(mean gain − 1).
-  - Example: offset 0.02, flats at 0.5·f and 0.25·f. The corner/centre ratio is 0.509 instead of 0.500, a ≈2% vignetting residual. It also skews rejection between frames.
-  - RAW frames lose the black level at decode, so on RAW only dark current leaks. FITS cameras keep `OFFSET` in the data.
-  - PixInsight WBPP and Siril calibrate each flat before they integrate it multiplicatively. `[C]`
-- [ ] `4.2` **A flat or a light with no additive subtractor is accepted silently** — `calibration_masters/mod.rs:174-185` (`_ => None`), `:263-279`
-  - A light with a flat but no dark or bias gives (S + b)/flat, which adds an inverse-vignetting pattern. `[C]`
-- [ ] `4.3` **Darks are never matched to the light** — `calibration_masters/mod.rs:263-274`, `validate_against_light` at `:295-350`
-  - Only the pattern, size and sample domain are checked. `exposure_time`, `ccd_temp` and `iso` are never read.
-  - A 120 s dark on 300 s lights removes 40% of the thermal signal and amp glow, and calibration still reports success.
-  - There is no dark scaling or optimization (PixInsight "Optimize", Siril `-opt`). Scaling also needs a bias-free dark, but the masters store the dark with its bias.
-  - The RAW CFA loader does not record exposure (`io/raw/mod.rs:1131-1148`), so a check has nothing to compare. `[C]`
-- [ ] `4.5` **The flat floor `MIN_NORMALIZED_FLAT = 0.1` is applied without a report** — `calibration_masters/prepared_flat/mod.rs:16,69,114`
-  - It is applied with no count and no warning. Deep smooth vignetting is under-corrected. `[C]`
-
 ## 8. Missing-data masks are dropped after decode
 
 - [ ] `8.2` **Star detection never reads `nulls`** — `star_detection/` (no reference)
@@ -382,10 +365,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 
 ## 26. One fact in two places, wide signatures, and style deviations
 
-- [ ] `26.1` **The bundle keeps masters it never reads again** — `calibration_masters/mod.rs:208-215`
-  - `flat_dark` (and `bias` when a dark is present) stay resident (≈96–240 MB each) and are saved. Keep only what `calibrate` reads, and record the inputs as provenance. `[C]`
-- [ ] `26.2` **The prepared flat is not its own type** — `calibration_masters/calibration_set.rs`, `calibration_masters/master_role.rs:110-112`, `calibration_masters/fits.rs:208-217`, `calibration_masters/prepared_flat/mod.rs`
-  - A `PreparedFlat` struct makes the invariant a type. It also removes the forwarding `subtract` and turns 3 free fns into methods. `[C]`
 - [ ] `26.4` **`StackConfig::bias()` and `dark()` are identical** — `combine/config/mod.rs:265-282` `[C]`
 - [ ] `26.6` **`measure_star` takes `expected_fwhm` and a grid built from it, then asserts that they agree** — `star_detection/centroid/mod.rs:168-173`
   - The grid can carry the window σ and the annulus radius, which removes arguments from `moments_centroid`, `refine_centroid`, `compute_star` and `windowed_covariance`. `[C]`
@@ -719,17 +698,18 @@ Closes group 7, 2.2 and 6.1 to 6.3. It uses S1 to S4.
 - An optional `dispersion` plane gives the weighted scatter of the survivors. It costs one Welford pass over data the rejection already holds, and it checks the model variance without a model.
 - Drizzle uses the same formula with drop weights. Flagged and gated pixels get zero weight, zero variance and zero coverage (7.3). A zero-weight deposit marks no coverage (7.4). The docs state that drizzle noise is correlated between output pixels (Fruchter & Hook 2002), and that the plane is the per-pixel variance only.
 
-## C2. Calibration as a typed plan
+## C2. Calibration as typed masters
 
-Closes 4.2, 4.3, 4.5, 26.1 and 26.2. 4.1 closes through S7. It uses S1, S2, S7 and S8.
+Built in phase 6. As built:
 
-- Typed masters replace `CalibrationSet<Option<CfaImage>>`: `MasterBias`, `MasterDark { thermal, exposure, temperature, bias: Included | Removed }`, and `PreparedFlat` with its divisor and its floored-pixel count (26.2). Each master carries its `FrameNoise`, so the subtraction adds its variance (S2).
-- `CalibrationPlan::new(masters, light_facts)` checks the plan before any light is touched:
-  - A flat without an additive subtractor is an error (4.2).
-  - A dark must match the light's exposure. It must also match the temperature when both frames declare one. A bias-removed dark with a bias may be scaled by `t_light / t_dark`. Any other mismatch is an error (4.3).
-  - A fact that one side does not declare cannot be compared. It is the same rule as `SampleDomain::units_agree`. The plan then records "unverified" for that fact in `RunReport`. It does not refuse, because a DSLR declares no temperature, and it does not pass the fact silently.
-- `CalibrationMasters` keeps only what `calibrate` reads: one subtractor, one `PreparedFlat` and one `DefectMap` (26.1).
-- Defect repair sets `DEFECT | REPAIRED`, and the flat floor sets `FLAT_FLOOR`. Both counts go into `RunReport` (4.5).
+- `CalibrationMasters` holds `bias: Option<CfaImage>`, `dark: Option<MasterDark>`, `flat: Option<PreparedFlat>` and the `DefectMap`. `MasterDark` records `DarkBias::Included` or `DarkBias::Removed`. `PreparedFlat` owns the divisor and the count of pixels raised to the floor. The flat-dark is spent on the flats and is not kept.
+- `calibrate` checks the masters against the light before it changes a pixel. A check that fails is an error, and a fact that one side does not declare is counted as unverified:
+  - A flat or a light with no subtractor is an error, unless the light holds no offset: a removed pedestal, or a synthetic frame with no domain.
+  - A dark must match the light's exposure within 1%, and the temperature within 1 °C when both frames declare one. A bias-removed dark with a bias is scaled by `t_light / t_dark` and is not refused. Any other mismatch is an error.
+  - `calibrate` returns a `CalibrationOutcome`. The pipeline adds the outcomes into `RunReport`: unverified exposures and temperatures, scaled darks, and floored flat pixels.
+- `stack_cfa_master` takes the subtractor and removes it from each frame before the normalization. The prepared frames spill to the run's cache and are never cached between runs.
+
+Still open, after S1 and S2: each master carries its noise, so the subtraction adds its variance. Defect repair sets `DEFECT | REPAIRED`, and the flat floor sets `FLAT_FLOOR`.
 
 ## C3. Detection: one plane to threshold, one plane to measure
 
@@ -827,16 +807,13 @@ The combine bench (30 frames, `combine::bench`, release, one machine, same sessi
 
 ## Phase 6. Ingest and calibration plan (S7, C2)
 
-1. Write the ingest stage with `FrameSource`, `FrameOp` and `FrameRecord`. Move the four entry points onto it, one at a time. Each move is a refactor, so its output must be bit-identical to the output before it, on the existing fixtures.
-2. Add the typed masters and `CalibrationPlan`, and record the RAW exposure.
-3. Build flat masters with `Subtract`. Reduce `CalibrationMasters`, and update the bundle format.
-4. Add the `Reference::Index` single-write path.
+Steps 2 and 3 are done. The masters are typed: `MasterDark` records whether its bias is in it, and `PreparedFlat` owns the divisor and the count of floored pixels. `calibrate` matches a dark to the light by exposure (1%) and temperature (1 °C), scales a bias-removed dark by the exposure ratio, and returns a `CalibrationOutcome` that the run report counts. The RAW loader records the exposure and the sensor temperature. `stack_cfa_master` subtracts the flat-dark or the bias from each flat before the flats are normalized. The bundle (version 2) keeps only what `calibrate` reads. Items 4.1 to 4.3, 4.5, 26.1 and 26.2 are closed.
+
+1. Write the ingest stage with `FrameSource`, `FrameOp` and `FrameRecord`. Move the four entry points onto it, one at a time. Each move is a refactor, so its output must be bit-identical to the output before it, on the existing fixtures. The per-frame `prepare` step of the loader becomes a `FrameOp`.
+2. Add the `Reference::Index` single-write path.
 - **Tests:**
-  - Review example 4.1: offset 0.02, flats at 0.5·f and 0.25·f. The corner/centre ratio of the master is 0.500 exactly. Today it is 0.509.
-  - A flat with no subtractor is refused. A 120 s dark on 300 s lights is refused without a bias, and it is scaled by 2.5 when it is bias-removed.
-  - A DSLR light and dark with no temperature: the plan runs, and the report holds one "unverified temperature".
   - A plan for 30 resident RGB 24 MP frames on a machine with room for them stays in RAM.
-- **Closes:** 4.1 to 4.3, 4.5, 15.3, 21.2, 21.3, 26.1, 26.2, 26.14, 26.15, 26.21.
+- **Closes:** 15.3, 21.2, 21.3, 26.14, 26.15, 26.21.
 
 ## Phase 7. Detection planes (C3)
 

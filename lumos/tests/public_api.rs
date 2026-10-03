@@ -316,6 +316,7 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
             },
             kept_flagged_samples: FlagCounts::default(),
             variance_background_only: true,
+            ..RunReport::default()
         },
     };
     let _: AlignStackResult = AlignStackResult {

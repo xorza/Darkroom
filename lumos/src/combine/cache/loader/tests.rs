@@ -24,6 +24,7 @@ fn cache_test_frame<I: StackableImage>(
         None,
         &LoadContext::new(CancelToken::never(), u64::MAX),
         None,
+        None,
     )
 }
 
@@ -215,6 +216,7 @@ fn a_kept_disk_cache_is_reused_by_the_next_run() {
             &paths,
             &config,
             RunMemory::new(1 << 30, Some(1)),
+            None,
             ProgressCallback::default(),
             CancelToken::never(),
         )
