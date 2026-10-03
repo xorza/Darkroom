@@ -1,26 +1,115 @@
-//! End-to-end registration tests using synthetic star field images.
-//!
-//! These tests generate actual pixel images with synthetic stars,
-//! run star detection on both images, and verify that registration
-//! correctly recovers the applied transformation.
+//! Registration end to end on rendered images: one scene seen twice through the camera model, the
+//! second time under a known transform, detected, registered, and graded against the transform the
+//! render used.
 
-use crate::testing::prelude::*;
-
-use crate::stacking::registration::config::{self, InterpolationMethod};
-use crate::stacking::registration::resample::internals;
-use crate::stacking::registration::tests::helpers;
-use crate::stacking::registration::tests::helpers::register;
-use crate::stacking::registration::transform::TransformModel;
-use crate::stacking::registration::transform::{Transform, WarpTransform};
+use crate::stacking::registration::tests::helpers::{self, max_deviation, register};
+use crate::stacking::registration::transform::{Transform, TransformModel};
 use crate::stacking::registration::{Config, TransformType};
 use crate::stacking::star_detection::config::Config as DetConfig;
 use crate::stacking::star_detection::detector::StarDetector;
+use crate::stacking::star_detection::star::Star;
+use crate::testing::prelude::*;
 use crate::testing::synthetic::camera::Camera;
-use crate::testing::synthetic::fixtures::star_field;
-use crate::testing::synthetic::observe::{Observation, render};
+use crate::testing::synthetic::metrics;
+use crate::testing::synthetic::observe::{Observation, SimFrame, render};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
 
-/// Default star detector for synthetic images.
+/// A scene of `stars` over `size`, its reference frame and the frame `truth` maps it to.
+#[derive(Debug)]
+struct Rendered {
+    name: &'static str,
+    size: Size2us,
+    stars: usize,
+    seed: u64,
+    truth: Transform,
+    model: TransformType,
+    camera: Camera,
+    min_matches: usize,
+}
+
+impl Rendered {
+    fn new(name: &'static str, truth: Transform, model: TransformType) -> Self {
+        Self {
+            name,
+            size: Size2us::new(256, 256),
+            stars: 60,
+            seed: 1,
+            truth,
+            model,
+            camera: Camera::realistic(4.0),
+            min_matches: 4,
+        }
+    }
+
+    /// Detect, register, and hold the fit to the truth.
+    ///
+    /// The fit's error comes from the centroids, measured here against the render's own truth: `σ`
+    /// per axis over both frames' detections. A pair's offset then carries `σ√2` per axis, and a
+    /// least-squares fit on `n` pairs spread over the frame errs at a point by that times `√h`,
+    /// with leverage `h ≤ 7/n` inside the box the stars span (see `robustness::Scenario::check`).
+    /// Five of those, √2 for the distance. Every matched pair is a true one: its offset from the
+    /// truth is within the same five σ.
+    fn check(&self) {
+        let scene = Scene::random_field(
+            self.size,
+            self.stars,
+            (6.0, 16.0),
+            BackgroundField::Uniform { level: 0.1 },
+            16.0,
+            self.seed,
+        );
+        let reference = render(&scene, &self.camera, &Observation::reference(self.seed));
+        let target = render(
+            &scene,
+            &self.camera,
+            &Observation {
+                transform: self.truth,
+                ..Observation::reference(self.seed + 1)
+            },
+        );
+        let mut detector = detector();
+        let reference_stars = detector.detect(&reference.image).stars;
+        let target_stars = detector.detect(&target.image).stars;
+
+        let config = Config {
+            transform_type: TransformModel::Fixed(self.model),
+            matching: helpers::matching_config(6, self.min_matches),
+            ..Default::default()
+        };
+        let result = register(&reference_stars, &target_stars, &config)
+            .unwrap_or_else(|error| panic!("{}: {error}", self.name));
+
+        let sigma = centroid_sigma(&[(&reference, &reference_stars), (&target, &target_stars)]);
+        let n = result.num_inliers() as f64;
+        let pair_sigma = sigma * 2f64.sqrt();
+        let bound = 5.0 * pair_sigma * (2.0 * 7.0 / n).sqrt();
+        let (low, high) = result.matched_stars().iter().fold(
+            (DVec2::splat(f64::INFINITY), DVec2::splat(f64::NEG_INFINITY)),
+            |(low, high), m| {
+                let p = reference_stars[m.indices.reference].pos;
+                (low.min(p), high.max(p))
+            },
+        );
+        let deviation = max_deviation(&result.transform(), &self.truth, low, high);
+        assert!(
+            deviation <= bound,
+            "{}: the fit strays {deviation} px from the truth over {n} pairs, bound {bound} (σ {sigma})",
+            self.name
+        );
+        for m in result.matched_stars() {
+            let r = reference_stars[m.indices.reference].pos;
+            let t = target_stars[m.indices.target].pos;
+            assert!(
+                self.truth.apply(r).distance(t) <= 5.0 * pair_sigma * 2f64.sqrt(),
+                "{}: pair {:?} is not a true one",
+                self.name,
+                m.indices
+            );
+        }
+    }
+}
+
+/// A detector for the synthetic frames: no FWHM prior, a 5 SNR floor and a 3σ threshold.
 fn detector() -> StarDetector {
     let mut config = DetConfig::default();
     config.fwhm.expected = 0.0;
@@ -29,410 +118,80 @@ fn detector() -> StarDetector {
     StarDetector::from_config(config).unwrap()
 }
 
-/// Apply a similarity transform to an image.
-/// Creates a target where stars are visually shifted/rotated/scaled by the given parameters.
-/// Passes the inverse to the plane warp since it uses output→input coordinate mapping.
-fn transform_image(
-    src_pixels: &[f32],
-    size: Size2us,
-    dx: f64,
-    dy: f64,
-    angle_rad: f64,
-    scale: f64,
-) -> Vec<f32> {
-    let transform = Transform::similarity(DVec2::new(dx, dy), angle_rad, scale);
-    let inverse = transform.inverse();
-    let src_buf = Buffer2::new(size.width, size.height, src_pixels.to_vec());
-    let mut output = Buffer2::new_default(size.width, size.height);
-    internals::warp_plane(
-        &src_buf,
-        &mut output,
-        &WarpTransform::new(inverse),
-        &config::internals::warp_params(InterpolationMethod::Bilinear),
-    );
-    output.into_vec()
-}
-
-/// Apply a translation to an image.
-/// Creates a target where stars are visually shifted by (dx, dy).
-/// Passes the inverse to the plane warp since it uses output→input coordinate mapping.
-fn translate_image(src_pixels: &[f32], size: Size2us, dx: f64, dy: f64) -> Vec<f32> {
-    let transform = Transform::translation(DVec2::new(dx, dy));
-    let inverse = transform.inverse();
-    let src_buf = Buffer2::new(size.width, size.height, src_pixels.to_vec());
-    let mut output = Buffer2::new_default(size.width, size.height);
-    internals::warp_plane(
-        &src_buf,
-        &mut output,
-        &WarpTransform::new(inverse),
-        &config::internals::warp_params(InterpolationMethod::Bilinear),
-    );
-    output.into_vec()
+/// The RMS centroid error per axis of `frames`' detections against their renders' truth, over the
+/// detections within 1.5 px of a true source.
+fn centroid_sigma(frames: &[(&SimFrame, &Vec<Star>)]) -> f64 {
+    let mut sum = 0.0;
+    let mut count = 0;
+    for (frame, stars) in frames {
+        let truth: Vec<DVec2> = frame.truth.sources.iter().map(|s| s.pos).collect();
+        let found: Vec<DVec2> = stars.iter().map(|s| s.pos).collect();
+        for (t, f) in metrics::match_catalogs(&truth, &found, 1.5) {
+            sum += truth[t].distance_squared(found[f]);
+            count += 2;
+        }
+    }
+    assert!(count > 0, "no detection matched a source");
+    (sum / f64::from(count)).sqrt()
 }
 
 #[test]
-fn image_registration_translation() {
-    // Reference star field image (forward model).
-    let size = Size2us::new(256, 256);
-    let ref_pixels_vec = star_field(size, 50, 42).image.channel(0).pixels().to_vec();
-
-    // Apply a known translation to create target image
-    let dx = 15.5;
-    let dy = -12.3;
-    let target_pixels = translate_image(&ref_pixels_vec, size, dx, dy);
-
-    // Create AstroImages
-    let ref_image = LinearImage::from_pixels(
-        ImageDimensions::new((size.width, size.height), 1),
-        ref_pixels_vec,
-    );
-    let target_image = LinearImage::from_pixels(
-        ImageDimensions::new((size.width, size.height), 1),
-        target_pixels,
-    );
-
-    // Detect stars in both images
-    let mut det = detector();
-    let ref_result = det.detect(&ref_image);
-    let target_result = det.detect(&target_image);
-
-    assert!(
-        ref_result.stars.len() >= 20,
-        "Not enough stars detected in reference: {}",
-        ref_result.stars.len()
-    );
-    assert!(
-        target_result.stars.len() >= 20,
-        "Not enough stars detected in target: {}",
-        target_result.stars.len()
-    );
-
-    // Register the images using detected stars directly
-    let reg_config = Config {
-        transform_type: TransformModel::Fixed(TransformType::Translation),
-        matching: helpers::matching_config(6, 4),
-        max_rms_error: 3.0,
-        ..Default::default()
+fn rendered_frames_register_to_the_transform_they_were_rendered_under() {
+    use TransformType::*;
+    let similarity = |dx, dy, angle_deg: f64, scale| {
+        Transform::similarity(DVec2::new(dx, dy), angle_deg.to_radians(), scale)
     };
-
-    let result = register(&ref_result.stars, &target_result.stars, &reg_config)
-        .expect("Registration should succeed");
-
-    // Verify the recovered translation
-    let recovered = result.transform().translation_components();
-    let recovered_dx = recovered.x;
-    let recovered_dy = recovered.y;
-
-    let dx_error = (recovered_dx - dx).abs();
-    let dy_error = (recovered_dy - dy).abs();
-
-    // Noiseless fixture: recovery is limited only by centroid scatter, so the gate is sub-pixel.
-    assert!(
-        dx_error < 0.3,
-        "X translation error too large: expected {dx}, got {recovered_dx}, error {dx_error}"
-    );
-    assert!(
-        dy_error < 0.3,
-        "Y translation error too large: expected {dy}, got {recovered_dy}, error {dy_error}"
-    );
-
-    assert!(
-        result.rms_error() < 0.5,
-        "RMS error too large: {}",
-        result.rms_error()
-    );
-}
-
-#[test]
-fn image_registration_rotation() {
-    let size = Size2us::new(256, 256);
-    let ref_pixels_vec = star_field(size, 60, 123).image.channel(0).pixels().to_vec();
-
-    // Apply rotation + small translation
-    let dx = 5.0;
-    let dy = -3.0;
-    let angle_deg: f64 = 1.0;
-    let angle_rad = angle_deg.to_radians();
-
-    let target_pixels = transform_image(&ref_pixels_vec, size, dx, dy, angle_rad, 1.0);
-
-    let ref_image = LinearImage::from_pixels(
-        ImageDimensions::new((size.width, size.height), 1),
-        ref_pixels_vec,
-    );
-    let target_image = LinearImage::from_pixels(
-        ImageDimensions::new((size.width, size.height), 1),
-        target_pixels,
-    );
-
-    let mut det = detector();
-    let ref_result = det.detect(&ref_image);
-    let target_result = det.detect(&target_image);
-
-    let reg_config = Config {
-        transform_type: TransformModel::Fixed(TransformType::Euclidean),
-        matching: helpers::matching_config(6, 4),
-        max_rms_error: 3.0,
-        ..Default::default()
-    };
-
-    let result = register(&ref_result.stars, &target_result.stars, &reg_config)
-        .expect("Registration should succeed");
-
-    // Verify rotation recovery
-    let recovered_angle = result.transform().rotation_angle();
-    let rotation_error = (recovered_angle - angle_rad).abs();
-
-    assert!(
-        rotation_error < 0.02,
-        "Rotation error too large: expected {angle_rad} rad, got {recovered_angle} rad, error {rotation_error}"
-    );
-
-    assert!(
-        result.rms_error() < 0.5,
-        "RMS error too large: {}",
-        result.rms_error()
-    );
-}
-
-#[test]
-fn image_registration_similarity() {
-    let size = Size2us::new(256, 256);
-    let ref_pixels_vec = star_field(size, 70, 456).image.channel(0).pixels().to_vec();
-
-    // Apply similarity transform (translation + rotation + scale)
-    let dx = 8.0;
-    let dy = -6.0;
-    let angle_deg: f64 = 0.8;
-    let angle_rad = angle_deg.to_radians();
-    let scale = 1.005;
-
-    let target_pixels = transform_image(&ref_pixels_vec, size, dx, dy, angle_rad, scale);
-
-    let ref_image = LinearImage::from_pixels(
-        ImageDimensions::new((size.width, size.height), 1),
-        ref_pixels_vec,
-    );
-    let target_image = LinearImage::from_pixels(
-        ImageDimensions::new((size.width, size.height), 1),
-        target_pixels,
-    );
-
-    let mut det = detector();
-    let ref_result = det.detect(&ref_image);
-    let target_result = det.detect(&target_image);
-
-    let reg_config = Config {
-        transform_type: TransformModel::Fixed(TransformType::Similarity),
-        matching: helpers::matching_config(6, 4),
-        max_rms_error: 3.0,
-        ..Default::default()
-    };
-
-    let result = register(&ref_result.stars, &target_result.stars, &reg_config)
-        .expect("Registration should succeed");
-
-    // Verify scale and rotation recovery
-    let recovered_scale = result.transform().scale_factor();
-    let scale_error = (recovered_scale - scale).abs();
-
-    assert!(
-        scale_error < 0.005,
-        "Scale error too large: expected {scale}, got {recovered_scale}, error {scale_error}"
-    );
-
-    let recovered_angle = result.transform().rotation_angle();
-    let rotation_error = (recovered_angle - angle_rad).abs();
-
-    assert!(
-        rotation_error < 0.02,
-        "Rotation error too large: expected {angle_rad} rad, got {recovered_angle} rad"
-    );
-
-    assert!(
-        result.rms_error() < 2.0,
-        "RMS error too large: {}",
-        result.rms_error()
-    );
-}
-
-#[test]
-fn image_registration_with_noise() {
-    // Higher noise level: a shallow well + extra read noise stresses registration.
-    let size = Size2us::new(256, 256);
-    let scene = Scene::random_field(
-        size,
-        80,
-        (6.0, 16.0),
-        BackgroundField::Uniform { level: 0.1 },
-        16.0,
-        789,
-    );
-    let noisy = Camera {
-        full_well_e: 3000.0,
-        read_noise_e: 15.0,
-        ..Camera::realistic(4.0)
-    };
-    let ref_pixels_vec = render(&scene, &noisy, &Observation::reference(789))
-        .image
-        .channel(0)
-        .pixels()
-        .to_vec();
-
-    // Apply translation
-    let dx = 20.0;
-    let dy = -15.0;
-    let target_pixels = translate_image(&ref_pixels_vec, size, dx, dy);
-
-    let ref_image = LinearImage::from_pixels(
-        ImageDimensions::new((size.width, size.height), 1),
-        ref_pixels_vec,
-    );
-    let target_image = LinearImage::from_pixels(
-        ImageDimensions::new((size.width, size.height), 1),
-        target_pixels,
-    );
-
-    let mut detection_config = DetConfig::default();
-    detection_config.fwhm.expected = 0.0;
-    detection_config.filter.min_snr = 8.0;
-    detection_config.detection.sigma_threshold = 4.0;
-    let mut det = StarDetector::from_config(detection_config).unwrap();
-
-    let ref_result = det.detect(&ref_image);
-    let target_result = det.detect(&target_image);
-
-    let reg_config = Config {
-        transform_type: TransformModel::Fixed(TransformType::Translation),
-        matching: helpers::matching_config(6, 4),
-        max_rms_error: 5.0, // Allow more error due to noise
-        ..Default::default()
-    };
-
-    let result = register(&ref_result.stars, &target_result.stars, &reg_config)
-        .expect("Registration should succeed");
-
-    let recovered = result.transform().translation_components();
-    let recovered_dx = recovered.x;
-    let recovered_dy = recovered.y;
-
-    // Allow more tolerance due to noise
-    let dx_error = (recovered_dx - dx).abs();
-    let dy_error = (recovered_dy - dy).abs();
-
-    assert!(
-        dx_error < 2.0,
-        "X translation error too large: expected {dx}, got {recovered_dx}"
-    );
-    assert!(
-        dy_error < 2.0,
-        "Y translation error too large: expected {dy}, got {recovered_dy}"
-    );
-}
-
-#[test]
-fn image_registration_dense_field() {
-    // Dense star field.
-    let size = Size2us::new(256, 256);
-    let ref_pixels_vec = star_field(size, 200, 999)
-        .image
-        .channel(0)
-        .pixels()
-        .to_vec();
-
-    let dx = 10.0;
-    let dy = 8.0;
-    let angle_rad = 0.5_f64.to_radians();
-
-    let target_pixels = transform_image(&ref_pixels_vec, size, dx, dy, angle_rad, 1.0);
-
-    let ref_image = LinearImage::from_pixels(
-        ImageDimensions::new((size.width, size.height), 1),
-        ref_pixels_vec,
-    );
-    let target_image = LinearImage::from_pixels(
-        ImageDimensions::new((size.width, size.height), 1),
-        target_pixels,
-    );
-
-    let mut det = detector();
-    let ref_result = det.detect(&ref_image);
-    let target_result = det.detect(&target_image);
-
-    assert!(
-        ref_result.stars.len() >= 50,
-        "Expected many stars in dense field, got {}",
-        ref_result.stars.len()
-    );
-
-    let reg_config = Config {
-        transform_type: TransformModel::Fixed(TransformType::Euclidean),
-        matching: helpers::matching_config(10, 8),
-        max_rms_error: 3.0,
-        ..Default::default()
-    };
-
-    let result = register(&ref_result.stars, &target_result.stars, &reg_config)
-        .expect("Registration should succeed");
-
-    // Should have many matched stars in a dense field
-    assert!(
-        result.num_inliers() >= 20,
-        "Expected many inliers in dense field, got {}",
-        result.num_inliers()
-    );
-
-    assert!(
-        result.rms_error() < 2.0,
-        "RMS error too large: {}",
-        result.rms_error()
-    );
-}
-
-#[test]
-fn image_registration_large_image() {
-    let size = Size2us::new(1024, 1024);
-    let ref_pixels_vec = star_field(size, 100, 111)
-        .image
-        .channel(0)
-        .pixels()
-        .to_vec();
-
-    // Larger translation for larger image
-    let dx = 50.0;
-    let dy = -35.0;
-    let target_pixels = translate_image(&ref_pixels_vec, size, dx, dy);
-
-    let ref_image = LinearImage::from_pixels(
-        ImageDimensions::new((size.width, size.height), 1),
-        ref_pixels_vec,
-    );
-    let target_image = LinearImage::from_pixels(
-        ImageDimensions::new((size.width, size.height), 1),
-        target_pixels,
-    );
-
-    let mut det = detector();
-    let ref_result = det.detect(&ref_image);
-    let target_result = det.detect(&target_image);
-
-    let reg_config = Config {
-        transform_type: TransformModel::Fixed(TransformType::Translation),
-        matching: helpers::matching_config(6, 4),
-        max_rms_error: 3.0,
-        ..Default::default()
-    };
-
-    let result = register(&ref_result.stars, &target_result.stars, &reg_config)
-        .expect("Registration should succeed");
-
-    let recovered = result.transform().translation_components();
-    let recovered_dx = recovered.x;
-    let recovered_dy = recovered.y;
-
-    let dx_error = (recovered_dx - dx).abs();
-    let dy_error = (recovered_dy - dy).abs();
-
-    assert!(dx_error < 1.0, "X translation error too large: {dx_error}");
-    assert!(dy_error < 1.0, "Y translation error too large: {dy_error}");
+    let cases = [
+        Rendered {
+            stars: 50,
+            seed: 42,
+            ..Rendered::new(
+                "translation",
+                Transform::translation(DVec2::new(15.5, -12.3)),
+                Translation,
+            )
+        },
+        Rendered {
+            seed: 123,
+            ..Rendered::new("rotation", similarity(5.0, -3.0, 1.0, 1.0), Euclidean)
+        },
+        Rendered {
+            stars: 70,
+            seed: 456,
+            ..Rendered::new("similarity", similarity(8.0, -6.0, 0.8, 1.005), Similarity)
+        },
+        Rendered {
+            stars: 80,
+            seed: 789,
+            camera: Camera {
+                full_well_e: 3000.0,
+                read_noise_e: 15.0,
+                ..Camera::realistic(4.0)
+            },
+            ..Rendered::new(
+                "noisy camera",
+                Transform::translation(DVec2::new(20.0, -15.0)),
+                Translation,
+            )
+        },
+        Rendered {
+            stars: 200,
+            seed: 999,
+            min_matches: 8,
+            ..Rendered::new("dense field", similarity(10.0, 8.0, 0.5, 1.0), Euclidean)
+        },
+        Rendered {
+            size: Size2us::new(1024, 1024),
+            stars: 100,
+            seed: 111,
+            ..Rendered::new(
+                "large image",
+                Transform::translation(DVec2::new(50.0, -35.0)),
+                Translation,
+            )
+        },
+    ];
+    for case in &cases {
+        case.check();
+    }
 }

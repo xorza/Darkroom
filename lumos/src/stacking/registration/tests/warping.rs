@@ -1,12 +1,9 @@
 //! Warps of synthetic star fields: roundtrips through every `TransformType`, the quality order of
-//! the kernels, a warp by a detected transform, SIP, and the quality maps at the border.
+//! the kernels, SIP, and the quality maps at the border.
 
 use crate::stacking::registration::config::{self, InterpolationMethod, WarpParams};
 use crate::stacking::registration::resample::{self, internals};
-use crate::stacking::registration::tests::helpers;
-use crate::stacking::registration::transform::TransformModel;
 use crate::stacking::registration::transform::{Transform, TransformType, WarpTransform};
-use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::prelude::*;
 use crate::testing::synthetic::fixtures::star_field;
 use crate::testing::synthetic::metrics;
@@ -198,88 +195,6 @@ fn warp_homography_roundtrip() {
             (InterpolationMethod::Lanczos3, 24.0, 0.80),
         ],
     );
-}
-
-#[test]
-fn warp_with_detected_transform() {
-    use crate::stacking::registration::Config as RegConfig;
-    use crate::stacking::registration::tests::helpers::register;
-    use crate::stacking::star_detection::config::Config as StarConfig;
-
-    let width = 256;
-    let height = 256;
-    let ref_pixels = star_field(Size2us::new(width, height), 40, 66666)
-        .image
-        .channel(0)
-        .clone();
-
-    // Apply a known transform
-    let dx = 12.0;
-    let dy = -8.0;
-    let angle_rad = 0.8_f64.to_radians();
-
-    let true_transform = Transform::euclidean(DVec2::new(dx, dy), angle_rad);
-
-    // Create target by warping reference
-    let target_pixels = do_warp(&ref_pixels, &true_transform, InterpolationMethod::Lanczos3);
-
-    // Detect stars in both images
-    let mut detection_config = StarConfig::default();
-    detection_config.fwhm.expected = 0.0;
-    detection_config.filter.min_snr = 5.0;
-    detection_config.detection.sigma_threshold = 3.0;
-    let mut det = StarDetector::from_config(detection_config).unwrap();
-
-    let ref_image = LinearImage::from_pixels(
-        ImageDimensions::new((width, height), 1),
-        ref_pixels.to_vec(),
-    );
-    let target_image = LinearImage::from_pixels(
-        ImageDimensions::new((width, height), 1),
-        target_pixels.to_vec(),
-    );
-
-    let ref_result = det.detect(&ref_image);
-    let target_result = det.detect(&target_image);
-
-    // Register to find transform using detected stars directly
-    let reg_config = RegConfig {
-        transform_type: TransformModel::Fixed(TransformType::Euclidean),
-        matching: helpers::matching_config(6, 4),
-        ..Default::default()
-    };
-
-    let result = register(&ref_result.stars, &target_result.stars, &reg_config)
-        .expect("Registration should succeed");
-
-    // Use warp to align target back to reference frame
-    let target_astro = LinearImage::from_pixels(
-        ImageDimensions::new((width, height), 1),
-        target_pixels.into_vec(),
-    );
-    let warp_config = WarpParams {
-        method: InterpolationMethod::Lanczos3,
-        ..Default::default()
-    };
-    let warped_astro = resample::warp(&target_astro, &result.warp_transform(), &warp_config).image;
-
-    // Compare aligned image to reference
-    let margin = 40;
-    let CentralRegions {
-        a: central_ref,
-        b: central_aligned,
-    } = extract_central_region(
-        ref_pixels.pixels(),
-        warped_astro.channel(0),
-        Size2us::new(width, height),
-        margin,
-    );
-
-    let psnr = compute_psnr(&central_ref, &central_aligned, 1.0);
-    let ncc = compute_ncc(&central_ref, &central_aligned);
-
-    assert!(psnr > 25.0, "End-to-end alignment PSNR {psnr} < 25 dB");
-    assert!(ncc > 0.90, "End-to-end alignment NCC {ncc} < 0.90");
 }
 
 /// A wider kernel restores a sub-pixel roundtrip better: bilinear below Catmull-Rom, and each

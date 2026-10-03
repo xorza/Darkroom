@@ -1,10 +1,5 @@
-//! Transform utilities for synthetic star fields.
-//!
-//! Provides functions to apply geometric transforms (translation, rotation, scale)
-//! to `Star` positions for testing registration algorithms, plus helpers to
-//! synthesize random fields.
-
-use std::f64::consts::FRAC_PI_2;
+//! Random star fields for registration tests, and the noise, false detections and positions they
+//! are disturbed by.
 
 use crate::stacking::star_detection::star::Star;
 use crate::testing::test_rng::TestRng;
@@ -60,41 +55,6 @@ pub(crate) fn generate_random_stars(
     positions_to_stars(&positions, fwhm)
 }
 
-/// Apply a translation transform to Stars.
-pub(crate) fn translate_star_list(stars: &[Star], dx: f64, dy: f64) -> Vec<Star> {
-    let offset = DVec2::new(dx, dy);
-    stars.iter().map(|s| s.with_pos(s.pos + offset)).collect()
-}
-
-/// Apply a similarity transform (translation + rotation + scale) to Stars.
-///
-/// The transform is applied around a center point: translate to origin relative to
-/// center, rotate + scale, translate back, then apply the translation offset.
-pub(crate) fn transform_star_list(
-    stars: &[Star],
-    dx: f64,
-    dy: f64,
-    angle_rad: f64,
-    scale: f64,
-    center_x: f64,
-    center_y: f64,
-) -> Vec<Star> {
-    let cos_a = angle_rad.cos() * scale;
-    let sin_a = angle_rad.sin() * scale;
-    let center = DVec2::new(center_x, center_y);
-    let offset = DVec2::new(dx, dy);
-
-    stars
-        .iter()
-        .map(|s| {
-            let r = s.pos - center;
-            let new_x = cos_a * r.x - sin_a * r.y + center.x + offset.x;
-            let new_y = sin_a * r.x + cos_a * r.y + center.y + offset.y;
-            s.with_pos(DVec2::new(new_x, new_y))
-        })
-        .collect()
-}
-
 /// Add positional noise to Stars.
 pub(crate) fn add_star_noise(stars: &[Star], noise_amplitude: f64, seed: u64) -> Vec<Star> {
     let mut rng = TestRng::new(seed);
@@ -107,20 +67,6 @@ pub(crate) fn add_star_noise(stars: &[Star], noise_amplitude: f64, seed: u64) ->
             );
             s.with_pos(s.pos + noise)
         })
-        .collect()
-}
-
-/// Remove random stars from a list (simulate missed detections).
-pub(crate) fn remove_random_star_list(stars: &[Star], fraction: f64, seed: u64) -> Vec<Star> {
-    assert!(
-        (0.0..=1.0).contains(&fraction),
-        "fraction must be between 0.0 and 1.0"
-    );
-    let mut rng = TestRng::new(seed);
-    stars
-        .iter()
-        .filter(|_| rng.next_f64() >= fraction)
-        .copied()
         .collect()
 }
 
@@ -154,43 +100,6 @@ pub(crate) fn add_spurious_star_list(
     result
 }
 
-/// Filter Stars to a bounding box (simulate partial overlap).
-pub(crate) fn filter_stars_to_bounds(
-    stars: &[Star],
-    min_x: f64,
-    max_x: f64,
-    min_y: f64,
-    max_y: f64,
-) -> Vec<Star> {
-    stars
-        .iter()
-        .filter(|s| s.pos.x >= min_x && s.pos.x <= max_x && s.pos.y >= min_y && s.pos.y <= max_y)
-        .copied()
-        .collect()
-}
-
-/// Translate Stars and keep only those that remain within the margin (partial overlap).
-pub(crate) fn translate_stars_with_overlap(
-    stars: &[Star],
-    dx: f64,
-    dy: f64,
-    width: f64,
-    height: f64,
-    margin: f64,
-) -> Vec<Star> {
-    let offset = DVec2::new(dx, dy);
-    stars
-        .iter()
-        .map(|s| s.with_pos(s.pos + offset))
-        .filter(|s| {
-            s.pos.x >= margin
-                && s.pos.x <= width - margin
-                && s.pos.y >= margin
-                && s.pos.y <= height - margin
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use crate::testing::synthetic::transforms::*;
@@ -212,46 +121,6 @@ mod tests {
     }
 
     #[test]
-    fn translating_moves_positions_and_preserves_other_fields() {
-        let stars = positions_to_stars(&[DVec2::new(100.0, 200.0), DVec2::new(300.0, 400.0)], 3.0);
-        let translated = translate_star_list(&stars, 10.0, -20.0);
-
-        assert_eq!(translated[0].pos, DVec2::new(110.0, 180.0));
-        assert_eq!(translated[1].pos, DVec2::new(310.0, 380.0));
-        // Non-position fields are preserved.
-        assert_eq!(translated[0].flux, stars[0].flux);
-    }
-
-    #[test]
-    fn transform_identity() {
-        let stars = positions_to_stars(&[DVec2::new(100.0, 200.0)], 3.0);
-        let transformed = transform_star_list(&stars, 0.0, 0.0, 0.0, 1.0, 500.0, 500.0);
-
-        assert!((transformed[0].pos.x - 100.0).abs() < 1e-10);
-        assert!((transformed[0].pos.y - 200.0).abs() < 1e-10);
-    }
-
-    #[test]
-    fn transform_rotate_90_degrees() {
-        // 100 px right of center → 100 px above center after a 90° rotation.
-        let stars = positions_to_stars(&[DVec2::new(600.0, 500.0)], 3.0);
-        let rotated = transform_star_list(&stars, 0.0, 0.0, FRAC_PI_2, 1.0, 500.0, 500.0);
-
-        assert!((rotated[0].pos.x - 500.0).abs() < 1e-10);
-        assert!((rotated[0].pos.y - 600.0).abs() < 1e-10);
-    }
-
-    #[test]
-    fn transform_scale() {
-        // 100 px right of center → 200 px right of center at 2× scale.
-        let stars = positions_to_stars(&[DVec2::new(600.0, 500.0)], 3.0);
-        let scaled = transform_star_list(&stars, 0.0, 0.0, 0.0, 2.0, 500.0, 500.0);
-
-        assert!((scaled[0].pos.x - 700.0).abs() < 1e-10);
-        assert!((scaled[0].pos.y - 500.0).abs() < 1e-10);
-    }
-
-    #[test]
     fn star_noise_moves_positions_within_its_amplitude() {
         let stars = positions_to_stars(&vec![DVec2::new(500.0, 500.0); 100], 3.0);
         let noisy = add_star_noise(&stars, 1.0, 12345);
@@ -267,15 +136,5 @@ mod tests {
             assert!((orig.pos.y - noisy.pos.y).abs() <= 1.0);
         }
         assert!(has_different);
-    }
-
-    #[test]
-    fn removing_stars_is_seed_stable_and_drops_part_of_the_list() {
-        let stars = positions_to_stars(&vec![DVec2::splat(1.0); 100], 3.0);
-        // Same seed → same survivors; ~30% removed.
-        let a = remove_random_star_list(&stars, 0.3, 99);
-        let b = remove_random_star_list(&stars, 0.3, 99);
-        assert_eq!(a.len(), b.len());
-        assert!(a.len() < 100 && a.len() > 50);
     }
 }

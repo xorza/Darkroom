@@ -1,13 +1,14 @@
 //! Shared test helpers for synthetic registration tests.
 
 use crate::stacking::registration::config::RegistrationMatchingConfig;
+use crate::stacking::registration::transform::Transform;
 use crate::stacking::registration::{self, Config, RegistrationError, RegistrationResult};
 use crate::stacking::star_detection::star::Star;
 use crate::testing::prelude::*;
 
-/// FWHM for tight/compact stars (~`max_sigma` 0.67).
+/// FWHM for tight stars: `max_sigma_from_fwhm` gives `σ_max` = 0.67 px, above its 0.5 px floor.
 pub(super) const FWHM_TIGHT: f32 = 1.34;
-/// FWHM for normal/typical stars (~`max_sigma` 1.0).
+/// FWHM for typical stars: `σ_max` = 1.0 px, a recovery radius of `√χ²₀.₉₉(2)` = 3.03 px.
 pub(super) const FWHM_NORMAL: f32 = 2.0;
 
 /// The RANSAC seed a test that names none runs with, so a registration result is repeatable.
@@ -33,35 +34,21 @@ pub(super) fn matching_config(min_stars: usize, min_matches: usize) -> Registrat
     }
 }
 
-/// Apply an affine transform to star positions.
-/// Affine: [a, b, tx, c, d, ty] where the transform is:
-/// x' = a*x + b*y + tx
-/// y' = c*x + d*y + ty
-pub(super) fn apply_affine(stars: &[Star], params: [f64; 6]) -> Vec<Star> {
-    let [a, b, tx, c, d, ty] = params;
+/// `stars` moved by `transform`, every other field kept.
+pub(super) fn map_stars(stars: &[Star], transform: &Transform) -> Vec<Star> {
     stars
         .iter()
-        .map(|s| {
-            s.with_pos(DVec2::new(
-                a * s.pos.x + b * s.pos.y + tx,
-                c * s.pos.x + d * s.pos.y + ty,
-            ))
-        })
+        .map(|star| star.with_pos(transform.apply(star.pos)))
         .collect()
 }
 
-/// Apply a homography (projective transform) to star positions.
-/// H = [h0, h1, h2, h3, h4, h5, h6, h7, 1.0]
-/// x' = (h0*x + h1*y + h2) / (h6*x + h7*y + 1)
-/// y' = (h3*x + h4*y + h5) / (h6*x + h7*y + 1)
-pub(super) fn apply_homography(stars: &[Star], params: [f64; 8]) -> Vec<Star> {
-    stars
-        .iter()
-        .map(|s| {
-            let w = params[6] * s.pos.x + params[7] * s.pos.y + 1.0;
-            let x_prime = (params[0] * s.pos.x + params[1] * s.pos.y + params[2]) / w;
-            let y_prime = (params[3] * s.pos.x + params[4] * s.pos.y + params[5]) / w;
-            s.with_pos(DVec2::new(x_prime, y_prime))
-        })
-        .collect()
+/// The largest distance between where `found` and `truth` put a point of the box `[low, high]`,
+/// over a 9×9 grid spanning it: a fit's error where it is used, corners included, rather than in
+/// parameters whose units differ.
+pub(super) fn max_deviation(found: &Transform, truth: &Transform, low: DVec2, high: DVec2) -> f64 {
+    (0..9)
+        .flat_map(|j| (0..9).map(move |i| DVec2::new(f64::from(i), f64::from(j)) / 8.0))
+        .map(|t| low + (high - low) * t)
+        .map(|p| found.apply(p).distance(truth.apply(p)))
+        .fold(0.0, f64::max)
 }
