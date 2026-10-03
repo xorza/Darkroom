@@ -55,6 +55,10 @@ pub(crate) enum CompiledGraphValidationError {
     MissingBindingTarget { node_id: NodeId, target: OutputAddr },
     #[error("execution node {node_id:?} binds to out-of-range output {target:?}")]
     BindingOutputOutOfRange { node_id: NodeId, target: OutputAddr },
+    #[error("execution node {node_id:?} input {port_idx} is overridden from outside the node")]
+    OverrideOutsideNode { node_id: NodeId, port_idx: usize },
+    #[error("execution node {node_id:?} input {port_idx} is overridden but wired")]
+    OverriddenBind { node_id: NodeId, port_idx: usize },
 }
 
 /// Which of a node's three packed port pools a fault names.

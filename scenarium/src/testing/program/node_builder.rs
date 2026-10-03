@@ -96,6 +96,7 @@ impl<'a> NodeBuilder<'a> {
             required: false,
             stamps_fs_path: false,
             binding,
+            overridden_by: None,
         })
     }
 
@@ -106,6 +107,7 @@ impl<'a> NodeBuilder<'a> {
             required: true,
             stamps_fs_path: false,
             binding,
+            overridden_by: None,
         })
     }
 
@@ -122,6 +124,7 @@ impl<'a> NodeBuilder<'a> {
             required: false,
             stamps_fs_path: true,
             binding,
+            overridden_by: None,
         })
     }
 

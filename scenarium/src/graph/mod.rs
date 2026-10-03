@@ -176,6 +176,30 @@ impl Graph {
             NodeKind::Special(special) => Some(special.func()),
         }
     }
+    /// Whether input `port` of a node instantiating `func` is set aside by the
+    /// input `func` declares to override it — the editor's reading of the
+    /// rule a run applies, taken from the graph alone.
+    ///
+    /// The overriding input sets `port` aside when it holds a constant other
+    /// than `Null`, or is wired to an enabled node. A run also reads `port`
+    /// when that node cannot run for a missing input of its own, which only a
+    /// run knows.
+    pub fn overridden(&self, port: InputPort, func: &Func) -> bool {
+        let Some(by) = func
+            .inputs
+            .iter()
+            .position(|input| input.overrides == Some(port.port_idx))
+        else {
+            return false;
+        };
+        match self.bindings.get(&InputPort::new(port.node_id, by)) {
+            None | Some(Binding::Const(ConstValue::Null)) => false,
+            Some(Binding::Const(_)) => true,
+            Some(Binding::Bind(source)) => self
+                .find(source.node_id)
+                .is_some_and(|producer| !producer.disabled),
+        }
+    }
     /// The declared type of input `port`, or `None` when it can't be resolved
     /// — a missing node or an unresolved func. The caller treats `None` as the
     /// polymorphic `Any`.

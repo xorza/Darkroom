@@ -293,7 +293,7 @@ impl Executor {
         let ports: Vec<usize> = program.inputs[program[node_idx].inputs]
             .iter()
             .enumerate()
-            .filter(|(_, input)| schedule.input_missing(input))
+            .filter(|(_, input)| schedule.input_missing(program, input))
             .map(|(port_idx, _)| port_idx)
             .collect();
         debug_assert!(
@@ -636,6 +636,8 @@ impl ExecutionFrame<'_, '_> {
         for input in &self.program.inputs[self.program[node_idx].inputs] {
             let binding = &input.binding;
             let value = match binding {
+                // A const-only target, so no read was planned for it.
+                _ if self.program.overridden(input, &self.schedule.states) => DynamicValue::Unbound,
                 ExecutionBinding::None => DynamicValue::Unbound,
                 ExecutionBinding::Const(value) => value.into(),
                 ExecutionBinding::Bind(addr) if !self.producer_runs(*addr) => {

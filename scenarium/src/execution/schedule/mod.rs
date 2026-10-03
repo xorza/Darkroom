@@ -273,7 +273,13 @@ impl RunSchedule {
     /// post-order forward pass guarantees. Shared by that pass and the executor's
     /// outcome so the two can't drift — and it reads the same in both, since every
     /// state the sweep writes is one that delivers a value.
-    pub(crate) fn input_missing(&self, input: &ExecutionInput) -> bool {
+    ///
+    /// An input set aside by its override is never missing: the node reads the
+    /// overriding input instead.
+    pub(crate) fn input_missing(&self, program: &CompiledGraph, input: &ExecutionInput) -> bool {
+        if program.overridden(input, &self.states) {
+            return false;
+        }
         match &input.binding {
             ExecutionBinding::None => input.required,
             ExecutionBinding::Const(_) => false,

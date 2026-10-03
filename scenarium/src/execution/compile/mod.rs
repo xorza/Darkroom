@@ -34,12 +34,12 @@ pub(crate) mod error;
 mod validate;
 
 use crate::DataType;
-use crate::containers::column::Column;
+use crate::containers::column::{Column, Idx};
 use crate::execution::compile::compiled_graph::{
     CompiledGraph, ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode,
 };
 use crate::execution::compile::error::CompileError;
-use crate::execution::identity::{NodeIdx, OutputAddr};
+use crate::execution::identity::{InputIdx, NodeIdx, OutputAddr};
 use crate::graph::func::{Func, FuncInput};
 use crate::graph::identity::{InputPort, NodeId, OutputPort};
 use crate::graph::node::NodeKind;
@@ -190,15 +190,23 @@ impl Compiler {
             //
             // Each input is resolved as it is appended, so it is whole the moment
             // it enters the pool rather than being revisited by index afterwards.
+            let base = compiled.inputs.len();
             let node_inputs = compiled.inputs.append(func.inputs.iter().enumerate().map(
-                |(port_idx, func_input)| ExecutionInput {
-                    required: func_input.required,
-                    stamps_fs_path: matches!(&func_input.data_type, DataType::FsPath(_)),
-                    binding: self.typed_binding(
-                        library,
-                        func_input,
-                        graph.bindings.get(&InputPort::new(node_id, port_idx)),
-                    ),
+                |(port_idx, func_input)| {
+                    ExecutionInput {
+                        required: func_input.required,
+                        stamps_fs_path: matches!(&func_input.data_type, DataType::FsPath(_)),
+                        binding: self.typed_binding(
+                            library,
+                            func_input,
+                            graph.bindings.get(&InputPort::new(node_id, port_idx)),
+                        ),
+                        overridden_by: func
+                            .inputs
+                            .iter()
+                            .position(|input| input.overrides == Some(port_idx))
+                            .map(|by| InputIdx::from_idx(base + by)),
+                    }
                 },
             ));
 

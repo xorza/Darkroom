@@ -96,7 +96,7 @@ impl Planner {
                     // reused from cache is decided at execution, not here.
                     let missing = program.inputs[program[node_idx].inputs]
                         .iter()
-                        .any(|e_input| schedule.input_missing(e_input));
+                        .any(|e_input| schedule.input_missing(program, e_input));
                     // `Cut` is the planner's *positive* verdict — runnable, and
                     // nothing has claimed it yet. The cache-aware sweep promotes
                     // the ones a running consumer reads and leaves the rest here.

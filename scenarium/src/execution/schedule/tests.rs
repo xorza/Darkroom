@@ -160,7 +160,10 @@ mod planning {
         let consumer_input = &prog.program().inputs[prog.program()[consumer.node_idx].inputs][0];
 
         assert!(
-            catch_unwind(AssertUnwindSafe(|| schedule.input_missing(consumer_input))).is_err(),
+            catch_unwind(AssertUnwindSafe(
+                || schedule.input_missing(prog.program(), consumer_input)
+            ))
+            .is_err(),
             "an unvisited producer is a broken schedule, not an unsatisfied input"
         );
     }
