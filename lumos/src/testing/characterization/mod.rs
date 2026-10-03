@@ -13,9 +13,8 @@ use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::fits::cfa::save_cfa_fits;
 use crate::io::image::load_context::LoadContext;
 use crate::io::raw::demosaic::bayer::CfaPattern;
-use crate::stacking::calibration_masters::{
-    CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD,
-};
+use crate::stacking::calibration_masters::calibration_set::CalibrationSet;
+use crate::stacking::calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::stack::{StackFrame, stack_images};
 use crate::stacking::frame_store::cache_key::DECODE_PINS;

@@ -8,7 +8,7 @@
 
 use imaginarium::Buffer2;
 
-use crate::stacking::frame_store::StackableImage;
+use crate::stacking::frame_store::stackable_image::StackableImage;
 use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;

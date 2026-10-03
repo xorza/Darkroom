@@ -20,7 +20,9 @@ use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::memory::run_memory::RunMemory;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::stack;
-use crate::stacking::frame_store::{FramePeek, StackableImage};
+use crate::stacking::frame_store::frame_peek::FramePeek;
+
+use crate::stacking::frame_store::stackable_image::StackableImage;
 use crate::testing::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::testing::fits::write_fits;
 use crate::{CalibrationMasters, CalibrationSet, CfaImage, CfaType, PreviewImage};

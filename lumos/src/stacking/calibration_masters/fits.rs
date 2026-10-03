@@ -25,9 +25,10 @@ use crate::io::image::fits::decode::read_cfa_hdu;
 use crate::io::image::fits::error::fits_to_io;
 use crate::math::size2us::Size2us;
 use crate::stacking::calibration_masters::CalibrationMasters;
-use crate::stacking::calibration_masters::CalibrationSet;
+use crate::stacking::calibration_masters::calibration_component::CalibrationComponent;
+use crate::stacking::calibration_masters::calibration_set::CalibrationSet;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
-use crate::stacking::calibration_masters::{CalibrationComponent, MasterRole};
+use crate::stacking::calibration_masters::master_role::MasterRole;
 
 const BUNDLE_FORMAT: &str = "CALMASTR";
 const DEFECT_FORMAT: &str = "DEFMAP";

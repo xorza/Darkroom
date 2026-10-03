@@ -34,7 +34,9 @@ use crate::io::raw::demosaic::xtrans::xtrans_pattern::{XTransPattern, XTransPatt
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::frame_store::cache_key::DecoderKind;
-use crate::stacking::frame_store::{FramePeek, StackableImage};
+use crate::stacking::frame_store::frame_peek::FramePeek;
+
+use crate::stacking::frame_store::stackable_image::StackableImage;
 use common::CancelToken;
 use imaginarium::Buffer2;
 

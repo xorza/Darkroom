@@ -13,8 +13,10 @@ use crate::stacking::combine::cache::set_facts::SetFacts;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::error::check_cancel;
 use crate::stacking::frame_store::frame_quality::{FramePlane, FrameQuality};
+use crate::stacking::frame_store::stackable_image::StackableImage;
 use crate::stacking::frame_store::stored_plane::StoredPlane;
-use crate::stacking::frame_store::{StackableImage, StoredFrame};
+
+use crate::stacking::frame_store::stored_frame::StoredFrame;
 
 /// The checks one frame of a set must pass, reporting their failures against its `index` and
 /// polling `cancel` once per chunk.

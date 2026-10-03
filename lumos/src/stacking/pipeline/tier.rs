@@ -10,7 +10,9 @@ use crate::stacking::frame_store::frame_quality::FrameQuality;
 use crate::stacking::frame_store::frame_spill::FrameSpill;
 use crate::stacking::frame_store::frame_stats::FrameStats;
 use crate::stacking::frame_store::spill_directory::SpillDirectory;
-use crate::stacking::frame_store::{StoredFrame, StoredImage};
+use crate::stacking::frame_store::stored_frame::StoredFrame;
+
+use crate::stacking::frame_store::stored_image::StoredImage;
 use crate::stacking::pipeline::frame::PipelineFrame;
 use crate::stacking::pipeline::result::Error;
 use crate::stacking::registration::resample::WarpBuffers;

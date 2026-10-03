@@ -29,7 +29,7 @@ use crate::stacking::combine::normalization::FrameNorm;
 use crate::stacking::combine::pixel_coverage::PixelCoverage;
 use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::stacking::combine::stack::StackFrame;
-use crate::stacking::frame_store::StoredFrame;
+use crate::stacking::frame_store::stored_frame::StoredFrame;
 use crate::stacking::frame_store::stored_plane::StoredPlane;
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::stack_product::StackProduct;
@@ -529,7 +529,9 @@ pub(crate) mod internals {
     use crate::stacking::combine::stack::StackFrame;
     use crate::stacking::frame_store::frame_quality::FrameQuality;
     use crate::stacking::frame_store::frame_stats::FrameStats;
-    use crate::stacking::frame_store::{StackableImage, StoredFrame};
+    use crate::stacking::frame_store::stackable_image::StackableImage;
+
+    use crate::stacking::frame_store::stored_frame::StoredFrame;
     use crate::stacking::progress::ProgressCallback;
 
     /// Create an in-memory [`FrameCache`] from loaded images, with no coverage (test helper).

@@ -1,25 +1,26 @@
 //! Calibration master frame creation and management.
 
+pub(crate) mod calibration_component;
+pub(crate) mod calibration_set;
 pub(crate) mod cosmic_ray;
 pub(crate) mod defect_map;
 pub(crate) mod error;
 mod fits;
+pub(crate) mod master_role;
 mod prepared_flat;
 
 #[cfg(all(test, feature = "real-data"))]
 mod real_data_tests;
 
-use std::fmt;
-use std::fmt::Display;
-use std::fmt::Formatter;
 use std::io;
 use std::path::Path;
 
 use common::CancelToken;
 
-use crate::io::image::cfa::{CfaImage, CfaType};
+use crate::io::image::cfa::CfaImage;
 use crate::math::size2us::Size2us;
 use crate::memory::run_memory::RunMemory;
+use crate::stacking::calibration_masters::defect_map::DefectMap;
 use crate::stacking::calibration_masters::error::CalibrationError;
 use crate::stacking::combine::cache::FrameCache;
 use crate::stacking::combine::config::StackConfig;
@@ -27,237 +28,16 @@ use crate::stacking::combine::error::Error;
 use crate::stacking::combine::stack::combine_cached;
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::stack_product::quality_planes::QualityPlanes;
-use defect_map::DefectMap;
 
+use crate::stacking::calibration_masters::calibration_component::CalibrationComponent;
+use crate::stacking::calibration_masters::calibration_set::CalibrationSet;
+use crate::stacking::calibration_masters::master_role::MasterRole;
 /// Default sigma threshold for defect detection.
 ///
 /// A pixel is flagged as defective if it exceeds the per-color residual median by more than
 /// `sigma_threshold × σ`, where robust bulk statistics and source resolution determine σ.
 /// PixInsight uses 3.0; 5.0 is more conservative (fewer false positives).
 pub const DEFAULT_SIGMA_THRESHOLD: f32 = 5.0;
-
-/// Four calibration roles carrying values of one common type.
-///
-/// Named fields prevent swapping roles when `T` is the same for all four. Raw inputs use path
-/// slices, while prebuilt inputs use optional CFA images.
-#[derive(Debug, Default)]
-pub struct CalibrationSet<T> {
-    /// Thermal-noise calibration data.
-    pub dark: T,
-    /// Vignetting and dust correction data.
-    pub flat: T,
-    /// Read-noise calibration data.
-    pub bias: T,
-    /// Dark calibration data taken at the flat exposure time.
-    pub flat_dark: T,
-}
-
-impl<T> CalibrationSet<T> {
-    /// The value for `role`. Total, because a set holds one of everything [`MasterRole`] names.
-    pub fn get(&self, role: MasterRole) -> &T {
-        match role {
-            MasterRole::Dark => &self.dark,
-            MasterRole::Flat => &self.flat,
-            MasterRole::Bias => &self.bias,
-            MasterRole::FlatDark => &self.flat_dark,
-        }
-    }
-
-    /// [`Self::get`] by unique reference, for filling a set one role at a time.
-    pub(crate) fn get_mut(&mut self, role: MasterRole) -> &mut T {
-        match role {
-            MasterRole::Dark => &mut self.dark,
-            MasterRole::Flat => &mut self.flat,
-            MasterRole::Bias => &mut self.bias,
-            MasterRole::FlatDark => &mut self.flat_dark,
-        }
-    }
-
-    /// The four roles in calibration order, each with the component that names it. The single
-    /// place that decides what "all the roles" means — a caller that iterates cannot miss one,
-    /// and adding a fifth is a compile error here rather than a silent omission elsewhere.
-    pub fn iter(&self) -> impl Iterator<Item = (MasterRole, &T)> {
-        MasterRole::ALL
-            .into_iter()
-            .map(|role| (role, self.get(role)))
-    }
-
-    /// The four roles by value, in [`MasterRole::ALL`] order.
-    ///
-    /// An array rather than an iterator because the concurrent half of
-    /// [`CalibrationMasters::from_files`] hands it straight to rayon, which parallelizes `[T; N]`
-    /// but not an array iterator. [`Self::from_roles`] is its inverse; the two are the only place
-    /// the field-to-role correspondence is written, and `roles_round_trip_in_master_order` pins it.
-    pub(crate) fn into_roles(self) -> [(MasterRole, T); 4] {
-        [
-            (MasterRole::Dark, self.dark),
-            (MasterRole::Flat, self.flat),
-            (MasterRole::Bias, self.bias),
-            (MasterRole::FlatDark, self.flat_dark),
-        ]
-    }
-
-    /// Convert every role, in calibration order, stopping at the first failure.
-    pub(crate) fn try_map<U, E>(
-        self,
-        mut convert: impl FnMut(MasterRole, T) -> Result<U, E>,
-    ) -> Result<CalibrationSet<U>, E> {
-        let [dark, flat, bias, flat_dark] = self.into_roles();
-        Ok(CalibrationSet {
-            dark: convert(dark.0, dark.1)?,
-            flat: convert(flat.0, flat.1)?,
-            bias: convert(bias.0, bias.1)?,
-            flat_dark: convert(flat_dark.0, flat_dark.1)?,
-        })
-    }
-}
-
-impl CalibrationSet<Option<CfaImage>> {
-    /// The sensor extent every present master shares, or `None` when the set is empty; they must
-    /// share one CFA pattern too.
-    ///
-    /// The masters are combined pixel-for-pixel by flat index — dark subtracted from flat,
-    /// defects detected on one and corrected on another — so a set that spans two sensors has no
-    /// coherent interpretation. Reported as an error rather than left to the individual
-    /// operations, which each assert on only the pair they touch and cover the set unevenly: a
-    /// bias in a set with no flat is never anyone's operand.
-    fn common_dimensions(&self) -> Result<Option<Size2us>, CalibrationError> {
-        let mut expected: Option<(Size2us, CfaType)> = None;
-        for (role, master) in self
-            .iter()
-            .filter_map(|(role, master)| master.as_ref().map(|master| (role, master)))
-        {
-            let size = Size2us::new(master.data.width(), master.data.height());
-            let Some((expected_size, expected_pattern)) = expected else {
-                expected = Some((size, master.cfa_type));
-                continue;
-            };
-            if size != expected_size {
-                return Err(CalibrationError::DimensionMismatch {
-                    component: role.into(),
-                    expected: expected_size,
-                    master: size,
-                });
-            }
-            if master.cfa_type != expected_pattern {
-                return Err(CalibrationError::CfaPatternMismatch {
-                    component: role,
-                    expected: expected_pattern,
-                    master: master.cfa_type,
-                });
-            }
-        }
-        Ok(expected.map(|(size, _)| size))
-    }
-}
-
-/// One of the four master frames a bundle can carry.
-///
-/// Split from [`CalibrationComponent`] so that everything indexed by role — every
-/// [`CalibrationSet`] accessor — is total. The defect map is a component of a bundle but not a
-/// master, and folding it in here made each of those return an `Option` for a case that could
-/// never arise.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MasterRole {
-    /// Master dark frame.
-    Dark,
-    /// Master flat frame.
-    Flat,
-    /// Master bias frame.
-    Bias,
-    /// Master dark frame taken at the flat exposure time.
-    FlatDark,
-}
-
-impl MasterRole {
-    /// The four roles, in calibration order. Adding a fifth is a compile error in
-    /// [`CalibrationSet`] rather than a silent omission wherever roles are walked.
-    pub const ALL: [Self; 4] = [Self::Dark, Self::Flat, Self::Bias, Self::FlatDark];
-
-    /// The role's `EXTNAME` in a saved bundle — the name a writer stamps on its HDU and a reader
-    /// recognizes it by, so the two cannot disagree about where a role lives.
-    pub(crate) fn extname(self) -> &'static str {
-        match self {
-            Self::Dark => "MASTER_DARK",
-            Self::Flat => "MASTER_FLAT",
-            Self::Bias => "MASTER_BIAS",
-            Self::FlatDark => "MASTER_FLAT_DARK",
-        }
-    }
-
-    /// Whether this role is stored already prepared — bias/flat-dark subtracted, per-colour
-    /// normalized and clamped. Only the flat is; the others are stored as stacked.
-    pub(crate) fn prepared(self) -> bool {
-        matches!(self, Self::Flat)
-    }
-
-    /// The preset this role's frames stack under — the one role → preset table. Darks, biases
-    /// and flat-darks (a flat-dark is a dark taken at the flat's exposure time) are a Winsorized
-    /// mean at any frame count; flats a σ-clipped mean that falls back to the median below 8
-    /// frames. Each preset carries its own small-frame fallback (`StackConfig::small_n`).
-    pub fn stack_config(self) -> StackConfig {
-        match self {
-            Self::Dark | Self::FlatDark => StackConfig::dark(),
-            Self::Flat => StackConfig::flat(),
-            Self::Bias => StackConfig::bias(),
-        }
-    }
-}
-
-impl Display for MasterRole {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Dark => "dark",
-            Self::Flat => "flat",
-            Self::Bias => "bias",
-            Self::FlatDark => "flat-dark",
-        })
-    }
-}
-
-/// Anything a [`CalibrationMasters`] bundle can carry: one of the master frames, or the defect
-/// map derived from them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CalibrationComponent {
-    /// One of the four stacked master frames.
-    Master(MasterRole),
-    /// Defect map derived from a dark, flat, or both.
-    Defects,
-}
-
-impl CalibrationComponent {
-    /// The component's `EXTNAME` in a saved bundle.
-    pub(crate) fn extname(self) -> &'static str {
-        match self {
-            Self::Master(role) => role.extname(),
-            Self::Defects => "DEFECT_MAP",
-        }
-    }
-
-    /// The component an `EXTNAME` names, or `None` for an extension this format does not define.
-    pub(crate) fn from_extname(extname: &str) -> Option<Self> {
-        MasterRole::ALL
-            .into_iter()
-            .map(Self::Master)
-            .chain([Self::Defects])
-            .find(|component| component.extname() == extname)
-    }
-}
-
-impl From<MasterRole> for CalibrationComponent {
-    fn from(role: MasterRole) -> Self {
-        Self::Master(role)
-    }
-}
-
-impl Display for CalibrationComponent {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Master(role) => role.fmt(f),
-            Self::Defects => f.write_str("defects"),
-        }
-    }
-}
 
 /// Read-only defect statistics derived from a calibration bundle.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -604,9 +384,11 @@ pub(crate) mod internals {
 
     use common::CancelToken;
 
-    use crate::stacking::calibration_masters::{
-        CalibrationMasters, CalibrationSet, MasterRole, stack_cfa_master,
-    };
+    use crate::stacking::calibration_masters::calibration_set::CalibrationSet;
+
+    use crate::stacking::calibration_masters::master_role::MasterRole;
+
+    use crate::stacking::calibration_masters::{CalibrationMasters, stack_cfa_master};
     use crate::stacking::progress::ProgressCallback;
 
     /// Every role stacked under its preset, then the set assembled — what a caller does role by

@@ -21,11 +21,15 @@ use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::error::Error;
 use crate::stacking::frame_store::cache_key::CacheKey;
 use crate::stacking::frame_store::error::FrameStoreError;
+use crate::stacking::frame_store::frame_peek::FramePeek;
 use crate::stacking::frame_store::frame_quality::FrameQuality;
 use crate::stacking::frame_store::frame_spill::FrameSpill;
 use crate::stacking::frame_store::frame_stats::FrameStats;
 use crate::stacking::frame_store::spill_directory::SpillDirectory;
-use crate::stacking::frame_store::{FramePeek, StackableImage, StoredFrame};
+
+use crate::stacking::frame_store::stackable_image::StackableImage;
+
+use crate::stacking::frame_store::stored_frame::StoredFrame;
 use crate::stacking::progress::stage_counter::StageCounter;
 use crate::stacking::progress::{ProgressCallback, StackingStage};
 

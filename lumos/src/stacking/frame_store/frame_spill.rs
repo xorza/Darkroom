@@ -22,7 +22,9 @@ use crate::stacking::frame_store::cache_key::{self, CacheKey, DecoderKind};
 use crate::stacking::frame_store::error::FrameStoreError;
 use crate::stacking::frame_store::frame_quality::FramePlane;
 use crate::stacking::frame_store::frame_stats::FrameStats;
-use crate::stacking::frame_store::{StackableImage, StoredPlane};
+use crate::stacking::frame_store::stackable_image::StackableImage;
+
+use crate::stacking::frame_store::stored_plane::StoredPlane;
 
 /// The sidecar layout pin: the digest of a fixed [`Commit`] and [`FrameStats`] as bitcode, which
 /// `sidecar_layout_is_pinned` checks. Bitcode is not self-describing, so a file written with another

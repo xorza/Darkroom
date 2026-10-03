@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::math::statistics::MedianMad;
 use crate::math::vec2us::Vec2us;
-use crate::stacking::frame_store::StackableImage;
 use crate::stacking::frame_store::frame_facts::FrameFacts;
+use crate::stacking::frame_store::stackable_image::StackableImage;
 
 /// Per-frame statistics: one median/MAD pair per channel.
 #[derive(Debug, Clone, Serialize, Deserialize)]

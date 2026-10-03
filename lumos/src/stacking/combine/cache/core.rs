@@ -12,8 +12,8 @@ use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::memory::ChunkMemoryLayout;
 use crate::memory::run_memory::RunMemory;
-use crate::stacking::frame_store::StoredFrame;
 use crate::stacking::frame_store::spill_directory::SpillDirectory;
+use crate::stacking::frame_store::stored_frame::StoredFrame;
 use crate::stacking::progress::{ProgressCallback, StackingStage};
 
 /// Shared cache context + combine engine — everything that doesn't depend on the frame type.
