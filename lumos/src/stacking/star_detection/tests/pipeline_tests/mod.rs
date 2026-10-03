@@ -1,6 +1,11 @@
 //! Full pipeline tests: `StarDetector::detect` on whole forward-model fields, held to the truth
 //! that rendered them.
 
+#![expect(
+    clippy::cast_sign_loss,
+    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
+)]
+
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::config::fwhm_config::FwhmMode;
 use crate::stacking::star_detection::convolution::{MatchedFilterBuffers, matched_filter};

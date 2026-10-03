@@ -50,19 +50,15 @@ pub(super) fn lanczos_accumulate<const SIZE: usize>(
     wx: &[f32; SIZE],
     wy: &[f32; SIZE],
 ) -> Option<f32> {
-    let simd_cols: i32 = if SIZE > 4 { 8 } else { SIZE as i32 };
-    if kx0 < 0
-        || ky0 < 0
-        || kx0 + simd_cols > input.width() as i32
-        || ky0 + SIZE as i32 > input.height() as i32
-    {
+    let simd_cols = if SIZE > 4 { 8 } else { SIZE };
+    let (Ok(kx), Ok(ky)) = (usize::try_from(kx0), usize::try_from(ky0)) else {
+        return None;
+    };
+    let width = input.width();
+    if kx + simd_cols > width || ky + SIZE > input.height() {
         return None;
     }
-
     let pixels = input.pixels();
-    let width = input.width();
-    let kx = kx0 as usize;
-    let ky = ky0 as usize;
 
     dispatch! {
         x86: avx2_fma => Some(x86::lanczos_kernel_fma::<SIZE>(pixels, width, kx, ky, wx, wy)),

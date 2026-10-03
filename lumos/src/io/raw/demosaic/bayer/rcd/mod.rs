@@ -670,37 +670,37 @@ fn border_interpolate(
                 rgb_ch[idx] = cfa[idx];
                 return;
             }
+            // The pixel `(dy, dx)` away, when it lies inside the buffer.
+            let neighbour = |dy: isize, dx: isize| {
+                ry.checked_add_signed(dy)
+                    .zip(rx.checked_add_signed(dx))
+                    .filter(|&(ny, nx)| ny < height && nx < width)
+            };
             let mut sum = 0.0f32;
             let mut count = 0u32;
-            for dy in -1i32..=1 {
-                for dx in -1i32..=1 {
+            for dy in -1isize..=1 {
+                for dx in -1isize..=1 {
                     if dy == 0 && dx == 0 {
                         continue;
                     }
-                    let ny = ry as i32 + dy;
-                    let nx = rx as i32 + dx;
-                    if ny >= 0 && ny < height as i32 && nx >= 0 && nx < width as i32 {
-                        let nidx = ny as usize * width + nx as usize;
-                        if pattern.color_at(Vec2us::new(nx as usize, ny as usize)) == ic {
-                            sum += cfa[nidx];
-                            count += 1;
-                        }
+                    if let Some((ny, nx)) = neighbour(dy, dx)
+                        && pattern.color_at(Vec2us::new(nx, ny)) == ic
+                    {
+                        sum += cfa[ny * width + nx];
+                        count += 1;
                     }
                 }
             }
             if count > 0 {
                 rgb_ch[idx] = sum / count as f32;
             } else {
-                for dy in -2i32..=2 {
-                    for dx in -2i32..=2 {
-                        let ny = ry as i32 + dy;
-                        let nx = rx as i32 + dx;
-                        if ny >= 0 && ny < height as i32 && nx >= 0 && nx < width as i32 {
-                            let nidx = ny as usize * width + nx as usize;
-                            if pattern.color_at(Vec2us::new(nx as usize, ny as usize)) == ic {
-                                sum += cfa[nidx];
-                                count += 1;
-                            }
+                for dy in -2isize..=2 {
+                    for dx in -2isize..=2 {
+                        if let Some((ny, nx)) = neighbour(dy, dx)
+                            && pattern.color_at(Vec2us::new(nx, ny)) == ic
+                        {
+                            sum += cfa[ny * width + nx];
+                            count += 1;
                         }
                     }
                 }

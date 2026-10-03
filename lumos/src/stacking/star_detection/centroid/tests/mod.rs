@@ -1,5 +1,10 @@
 //! Tests for centroid computation.
 
+#![expect(
+    clippy::cast_sign_loss,
+    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
+)]
+
 use crate::testing::prelude::*;
 use std::f32::consts::FRAC_PI_4;
 

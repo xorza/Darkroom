@@ -63,6 +63,18 @@ impl LinearImage {
 
         let decoded = read_standard_image(path)?;
         context.check_cancelled(path)?;
+        let desc = decoded.desc();
+        if desc.width > ImageDimensions::MAX_SIDE || desc.height > ImageDimensions::MAX_SIDE {
+            return Err(scientific_rejection(
+                path,
+                format!(
+                    "{}x{} has a side past {} px",
+                    desc.width,
+                    desc.height,
+                    ImageDimensions::MAX_SIDE
+                ),
+            ));
+        }
         if !decoded.desc().color_format.sample_type.is_float() {
             return Err(scientific_rejection(
                 path,

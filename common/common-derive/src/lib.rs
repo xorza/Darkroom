@@ -18,10 +18,6 @@
 //! `Display`/`FromStr` and no derive crate beyond this one, so any crate that
 //! already depends on `common` can describe its own config types.
 
-// Lints of the workspace set that stay `allow` there until lumos is swept (plan 2.2);
-// this crate is clean for them, so they warn here.
-#![warn(clippy::cast_possible_wrap, clippy::cast_sign_loss)]
-
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::quote;

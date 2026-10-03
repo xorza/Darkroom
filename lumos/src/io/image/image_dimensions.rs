@@ -12,6 +12,13 @@ pub struct ImageDimensions {
 }
 
 impl ImageDimensions {
+    /// The longest side an image may have, 2³⁰ px — some 7000 times a large sensor's.
+    ///
+    /// Pixel addressing in the resampler and the detector runs in `i32` lanes, and a side this far
+    /// under `i32::MAX` leaves every coordinate, and a kernel's reach past either edge, inside that
+    /// range. The decoders refuse a larger image before it gets here.
+    pub const MAX_SIDE: usize = 1 << 30;
+
     pub fn new(size: impl Into<Size2us>, channels: usize) -> Self {
         let size = size.into();
         Self::validate(size, channels);
@@ -27,6 +34,12 @@ impl ImageDimensions {
         let size = size.into();
         assert!(size.width > 0, "Width must be positive");
         assert!(size.height > 0, "Height must be positive");
+        assert!(
+            size.width <= Self::MAX_SIDE && size.height <= Self::MAX_SIDE,
+            "{}x{} has a side past MAX_SIDE",
+            size.width,
+            size.height
+        );
         assert!(
             channels == 1 || channels == 3,
             "Only 1 (grayscale) or 3 (RGB) channels supported, got {channels}"
@@ -109,10 +122,18 @@ mod tests {
             (4, 3, 0, "channels supported, got 0"),
             (4, 3, 2, "channels supported, got 2"),
             (4, 3, 4, "channels supported, got 4"),
-            // usize::MAX × 2 pixels overflows the pixel count, which `Size2us` owns.
-            (usize::MAX, 2, 1, "grid pixel count must fit in usize"),
-            // 3 channels × (usize::MAX / 2) pixels overflows the sample count.
-            (usize::MAX / 2, 1, 3, "Image sample count must fit in usize"),
+            (
+                ImageDimensions::MAX_SIDE + 1,
+                1,
+                1,
+                "has a side past MAX_SIDE",
+            ),
+            (
+                1,
+                ImageDimensions::MAX_SIDE + 1,
+                1,
+                "has a side past MAX_SIDE",
+            ),
         ] {
             let panic = catch_unwind(|| ImageDimensions::validate((width, height), channels))
                 .expect_err("must be rejected");

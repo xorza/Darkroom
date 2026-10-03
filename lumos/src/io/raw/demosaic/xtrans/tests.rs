@@ -1,3 +1,8 @@
+#![expect(
+    clippy::cast_sign_loss,
+    reason = "test samples lie inside the sensor's non-negative range"
+)]
+
 use crate::io::raw::demosaic::xtrans::internals::{test_pattern, test_pattern_array};
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPatternError;
 use crate::io::raw::demosaic::xtrans::*;

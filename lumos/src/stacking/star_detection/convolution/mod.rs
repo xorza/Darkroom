@@ -167,6 +167,10 @@ fn convolve_2d(pixels: &Buffer2<f32>, kernel: &GaussianKernel2d, output: &mut Bu
 }
 
 /// Compute 1D Gaussian kernel (normalized to sum to 1.0).
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "σ derives from a validated, positive FWHM"
+)]
 fn gaussian_kernel_1d(sigma: f32) -> Vec<f32> {
     assert!(sigma > 0.0, "Sigma must be positive");
 
@@ -214,6 +218,10 @@ fn convolve_cols(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kernel: &[f32]
 }
 
 /// Compute 2D elliptical Gaussian kernel (normalized to sum to 1.0).
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "σ derives from a validated, positive FWHM"
+)]
 fn elliptical_gaussian_kernel_2d(sigma: f32, axis_ratio: f32, angle: f32) -> GaussianKernel2d {
     assert!(sigma > 0.0, "Sigma must be positive");
     assert!(

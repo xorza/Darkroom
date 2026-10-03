@@ -196,8 +196,6 @@ fn laplacian_plus_into(data: &[f32], size: Size2us, out: &mut Vec<f32>) {
 /// one of the four windows below (areas 9, 49, 25, 25), and an `r == 1` fast path would have to
 /// be proven bit-identical to this general one or the detection changes.
 fn median_window_into(data: &[f32], size: Size2us, r: usize, out: &mut Vec<f32>) {
-    let ri = r as isize;
-    let (wi, hi) = (size.width as isize, size.height as isize);
     // Every element is written below, so only the length matters.
     out.resize(size.pixel_count(), 0.0);
     out.par_chunks_mut(size.width).enumerate().for_each_init(
@@ -205,10 +203,11 @@ fn median_window_into(data: &[f32], size: Size2us, r: usize, out: &mut Vec<f32>)
         |buf, (y, row)| {
             for (x, o) in row.iter_mut().enumerate() {
                 buf.clear();
-                for dy in -ri..=ri {
-                    let yy = (y as isize + dy).clamp(0, hi - 1) as usize;
-                    for dx in -ri..=ri {
-                        let xx = (x as isize + dx).clamp(0, wi - 1) as usize;
+                // `y + dy − r` for dy in `0..=2r`, replicated into the frame at both edges.
+                for dy in 0..=2 * r {
+                    let yy = (y + dy).saturating_sub(r).min(size.height - 1);
+                    for dx in 0..=2 * r {
+                        let xx = (x + dx).saturating_sub(r).min(size.width - 1);
                         buf.push(data[size.index_of(Vec2us::new(xx, yy))]);
                     }
                 }
@@ -315,7 +314,6 @@ pub(super) fn replace_flagged(
     snapshot.clear();
     snapshot.extend_from_slice(data);
     let src: &[f32] = snapshot;
-    let (wi, hi) = (size.width as isize, size.height as isize);
     data.par_chunks_mut(size.width).enumerate().for_each_init(
         || Vec::<f32>::with_capacity(25),
         |buf, (y, row)| {
@@ -324,10 +322,11 @@ pub(super) fn replace_flagged(
                     continue;
                 }
                 buf.clear();
-                for dy in -2..=2 {
-                    let yy = (y as isize + dy).clamp(0, hi - 1) as usize;
-                    for dx in -2..=2 {
-                        let xx = (x as isize + dx).clamp(0, wi - 1) as usize;
+                // The 5×5 window about `(x, y)`, replicated into the frame at both edges.
+                for dy in 0..=4 {
+                    let yy = (y + dy).saturating_sub(2).min(size.height - 1);
+                    for dx in 0..=4 {
+                        let xx = (x + dx).saturating_sub(2).min(size.width - 1);
                         let j = size.index_of(Vec2us::new(xx, yy));
                         if !mask.get(j) {
                             buf.push(src[j]);

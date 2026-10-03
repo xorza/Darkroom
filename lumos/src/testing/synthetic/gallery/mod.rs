@@ -426,6 +426,10 @@ fn gallery_scenes() {
 
 #[test]
 #[ignore = "visual gallery; run with --ignored"]
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "synthetic fixtures are small images with non-negative coordinates"
+)]
 fn gallery_seeing() {
     let size = Size2us::new(256, 256);
     let field = demo_field(size, BackgroundField::Uniform { level: 0.05 }, 11);

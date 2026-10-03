@@ -1,6 +1,11 @@
 //! Tests of the shared component data, and comparisons of `local_maxima` with
 //! `multi_threshold`.
 
+#![expect(
+    clippy::cast_possible_wrap,
+    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
+)]
+
 use crate::stacking::star_detection::config::detection_config::{Deblend, DetectionConfig};
 use crate::stacking::star_detection::deblend::component::Component;
 use crate::stacking::star_detection::deblend::deblend_buffers::DeblendBuffers;

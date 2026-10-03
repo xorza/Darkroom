@@ -68,21 +68,19 @@ impl<'a> Kernel2d<'a> {
 pub(super) fn mirror_index(i: isize, len: usize) -> usize {
     debug_assert!(len > 0, "mirror_index requires len > 0");
 
-    if i < 0 {
-        let reflected = (-i) as usize;
-        // Clamp to valid range if reflected index is still out of bounds
-        reflected.min(len - 1)
-    } else if i >= len as isize {
-        let reflected = (2 * len).saturating_sub(2).saturating_sub(i as usize);
-        // Clamp to valid range
-        reflected.min(len - 1)
-    } else {
-        i as usize
+    match usize::try_from(i) {
+        Err(_) => i.unsigned_abs().min(len - 1),
+        Ok(i) if i >= len => (2 * len).saturating_sub(2).saturating_sub(i).min(len - 1),
+        Ok(i) => i,
     }
 }
 
 /// Scalar convolution for a single pixel with mirror boundary handling.
 #[inline]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "pixel coordinates and kernel taps index a slice, whose length Rust caps at isize::MAX"
+)]
 fn convolve_pixel_scalar(
     input: &[f32],
     kernel: &[f32],
@@ -167,6 +165,10 @@ fn convolve_cols_row(
 
 /// Scalar single column-row convolution.
 #[inline]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "pixel coordinates and kernel taps index a slice, whose length Rust caps at isize::MAX"
+)]
 fn convolve_cols_row_scalar(
     input: &[f32],
     out_row: &mut [f32],
@@ -206,6 +208,10 @@ pub(super) fn convolve_2d_row(
 
 /// Scalar implementation of single-row 2D convolution.
 #[inline]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "pixel coordinates and kernel taps index a slice, whose length Rust caps at isize::MAX"
+)]
 fn convolve_2d_row_scalar(
     input: &[f32],
     output_row: &mut [f32],

@@ -23,7 +23,7 @@ unsafe fn logf_neon(x: float32x4_t) -> float32x4_t {
         let xi = vreinterpretq_s32_f32(x);
         let e = vcvtq_f32_s32(vsubq_s32(vshrq_n_s32::<23>(xi), vdupq_n_s32(126)));
         let m = vreinterpretq_f32_s32(vorrq_s32(
-            vandq_s32(xi, vdupq_n_s32(0x807f_ffffu32 as i32)),
+            vandq_s32(xi, vdupq_n_s32(0x807f_ffff_u32.cast_signed())),
             vdupq_n_s32(0x3f00_0000),
         ));
 

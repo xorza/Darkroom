@@ -117,9 +117,6 @@ opt-level = 0
 
 # Warn, not deny: the verification chain runs clippy with `-D warnings`, and a build in the
 # middle of an edit keeps working. Every suppression in code is `#[expect(.., reason = "..")]`.
-#
-# "pending" marks a lint that is part of the set but still has hits; it moves to "warn" when its
-# sweep lands (plan 2.2).
 [workspace.lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }
 elided_lifetimes_in_paths = "warn"
@@ -160,8 +157,8 @@ allow_attributes = "warn"
 allow_attributes_without_reason = "warn"
 assigning_clones = "warn"
 cast_lossless = "warn"
-cast_possible_wrap = "allow" # pending
-cast_sign_loss = "allow" # pending
+cast_possible_wrap = "warn"
+cast_sign_loss = "warn"
 clone_on_ref_ptr = "warn"
 dbg_macro = "warn"
 decimal_bitwise_operands = "warn"

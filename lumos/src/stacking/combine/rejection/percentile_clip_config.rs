@@ -63,6 +63,10 @@ impl PercentileClipConfig {
     /// Returns the half-open range of elements to keep after clipping
     /// the lowest `low_percentile`% and highest `high_percentile`%.
     /// Guarantees at least one element survives.
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "validate holds both percentiles in [0, 50]"
+    )]
     pub fn surviving_range(&self, n: usize) -> Range<usize> {
         let low_count = ((self.low_percentile / 100.0) * n as f32).floor() as usize;
         let high_count = ((self.high_percentile / 100.0) * n as f32).floor() as usize;

@@ -199,9 +199,9 @@ fn effective_degree(n: usize, requested: usize) -> usize {
 }
 
 /// Exponent pairs `(i, j)` for every monomial `x^i·y^j` with `i + j ≤ degree`.
-fn poly_terms(degree: usize) -> Vec<(u32, u32)> {
+fn poly_terms(degree: usize) -> Vec<(u8, u8)> {
     let mut terms = Vec::new();
-    for total in 0..=degree as u32 {
+    for total in 0..=u8::try_from(degree).expect("the degree is at most 4") {
         for i in 0..=total {
             terms.push((i, total - i));
         }
@@ -219,20 +219,20 @@ fn norm(c: f64, n: usize) -> f64 {
 }
 
 /// Evaluate the polynomial at normalized `(x, y)`.
-fn eval(coeffs: &DVector<f64>, terms: &[(u32, u32)], x: f64, y: f64) -> f64 {
+fn eval(coeffs: &DVector<f64>, terms: &[(u8, u8)], x: f64, y: f64) -> f64 {
     terms
         .iter()
         .zip(coeffs.iter())
-        .map(|(&(i, j), &c)| c * x.powi(i as i32) * y.powi(j as i32))
+        .map(|(&(i, j), &c)| c * x.powi(i32::from(i)) * y.powi(i32::from(j)))
         .sum()
 }
 
 /// Least-squares solve of the original design matrix using SVD.
-fn solve_ls(samples: &[Sample], terms: &[(u32, u32)]) -> Result<DVector<f64>, OpError> {
+fn solve_ls(samples: &[Sample], terms: &[(u8, u8)]) -> Result<DVector<f64>, OpError> {
     let (m, k) = (samples.len(), terms.len());
     let a = DMatrix::from_fn(m, k, |r, c| {
         let (i, j) = terms[c];
-        samples[r].x.powi(i as i32) * samples[r].y.powi(j as i32)
+        samples[r].x.powi(i32::from(i)) * samples[r].y.powi(i32::from(j))
     });
     let z = DVector::from_fn(m, |r, _| samples[r].z);
     let svd = a.svd(true, true);
@@ -255,7 +255,7 @@ fn solve_ls(samples: &[Sample], terms: &[(u32, u32)]) -> Result<DVector<f64>, Op
 /// (σ = MAD-scaled residual spread). Rejects tiles sitting on nebulosity or unrejected stars.
 fn fit_surface(
     samples: &[Sample],
-    terms: &[(u32, u32)],
+    terms: &[(u8, u8)],
     kappa: f32,
     iterations: usize,
 ) -> Result<DVector<f64>, OpError> {
@@ -303,10 +303,10 @@ struct Surface {
 }
 
 impl Surface {
-    fn new(coeffs: &DVector<f64>, terms: &[(u32, u32)], size: Size2us) -> Self {
+    fn new(coeffs: &DVector<f64>, terms: &[(u8, u8)], size: Size2us) -> Self {
         let degree = terms
             .iter()
-            .map(|&(i, j)| (i + j) as usize)
+            .map(|&(i, j)| usize::from(i + j))
             .max()
             .unwrap_or(0);
         // `effective_degree` caps the surface at 4, so `degree + 1 ≤ 5` fits fixed buffers.
@@ -314,7 +314,7 @@ impl Surface {
         let d1 = degree + 1;
         let mut c_mat = [0.0f64; 25];
         for (&(i, j), &c) in terms.iter().zip(coeffs.iter()) {
-            c_mat[i as usize * d1 + j as usize] = c;
+            c_mat[usize::from(i) * d1 + usize::from(j)] = c;
         }
         Self {
             c_mat,

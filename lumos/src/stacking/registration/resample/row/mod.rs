@@ -71,6 +71,11 @@ pub(super) fn sample_row(
 ///
 /// An interior window is divided by its tap-weight total, which for a full Lanczos window lies
 /// within a few per cent of 1 at every fraction, so it needs no guard.
+#[expect(
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "the order A is at most 4, and a window window_inside accepted starts at a non-negative tap"
+)]
 fn lanczos<const A: usize, const SIZE: usize>(
     order: LanczosOrder,
     input: &Buffer2<f32>,

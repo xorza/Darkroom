@@ -432,6 +432,10 @@ pub(crate) mod internals {
 
         /// The largest correction over a grid of `grid_spacing` across `size`, its far edges
         /// included.
+        #[expect(
+            clippy::cast_sign_loss,
+            reason = "a size over a positive grid spacing is non-negative"
+        )]
         pub(crate) fn max_grid_correction(&self, size: Size2us, grid_spacing: f64) -> f64 {
             // Integer-stepped to avoid float accumulation drift skipping the boundary band.
             let nx = (size.width as f64 / grid_spacing).floor() as usize;

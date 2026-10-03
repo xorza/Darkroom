@@ -1,5 +1,11 @@
 //! Tests for multi-threshold deblending.
 
+#![expect(
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
+)]
+
 use crate::stacking::star_detection::deblend::internals::{
     TestComponent, deblend_multi_threshold_floored, deblend_multi_threshold_test,
     make_test_component, separated_pair,

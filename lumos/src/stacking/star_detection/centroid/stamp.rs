@@ -14,7 +14,7 @@ use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::centroid::lm_optimizer::{
     FitData, LMConfig, LMModel, LMResult,
 };
-use crate::stacking::star_detection::centroid::{MAX_STAMP_PIXELS, is_valid_stamp_position};
+use crate::stacking::star_detection::centroid::{MAX_STAMP_PIXELS, stamp_centre};
 use crate::stacking::star_detection::config::measurement_config::NoiseModel;
 
 /// The stamp's own pixel coordinates, `0..2r` on each axis, flattened row-major.
@@ -136,21 +136,18 @@ impl StampFit {
         noise: Option<FitNoise>,
     ) -> Option<Self> {
         let radius = grid.radius;
-        if !is_valid_stamp_position(pos, Size2us::new(pixels.width(), pixels.height()), radius) {
-            return None;
-        }
+        let centre = stamp_centre(pos, Size2us::new(pixels.width(), pixels.height()), radius)?;
         let stamp_size = 2 * radius + 1;
         if stamp_size * stamp_size <= N {
             return None;
         }
 
-        let icx = pos.x.round() as isize;
-        let icy = pos.y.round() as isize;
-        // Moment arms measured from the rounded centre: at column `dx` the offset from the true
-        // centre is `dx - frac_x`, which is the shared grid's coordinate minus `local_pos` without
-        // going through either array.
-        let frac_x = pos.x - icx as f64;
-        let frac_y = pos.y - icy as f64;
+        // Moment arms measured from the rounded centre: at column `dx` from it the offset from the
+        // true centre is `dx - frac_x`, which is the shared grid's coordinate minus `local_pos`
+        // without going through either array.
+        let frac_x = pos.x - centre.x as f64;
+        let frac_y = pos.y - centre.y as f64;
+        let reach = radius as f64;
         let sky = f64::from(background);
 
         let mut z = ArrayVec::new();
@@ -161,22 +158,20 @@ impl StampFit {
         let mut sum_r2 = 0.0f64;
         let mut sum_w = 0.0f64;
 
-        let radius_i32 = radius as i32;
-        for dy in -radius_i32..=radius_i32 {
-            let y = (icy + dy as isize) as usize;
+        let (x0, y0) = (centre.x - radius, centre.y - radius);
+        for (my, y) in (y0..y0 + stamp_size).enumerate() {
             // One bounds check per row rather than per pixel — the guard above has already
             // established the whole stamp is inside the frame.
-            let row = pixels.row(y);
-            let ddy = f64::from(dy) - frac_y;
+            let row = &pixels.row(y)[x0..x0 + stamp_size];
+            let ddy = my as f64 - reach - frac_y;
 
-            for dx in -radius_i32..=radius_i32 {
-                let value = row[(icx + dx as isize) as usize];
+            for (mx, &value) in row.iter().enumerate() {
                 let value64 = f64::from(value);
                 z.push(value64);
                 peak = peak.max(value);
 
                 let signal = (value64 - sky).max(0.0);
-                let ddx = f64::from(dx) - frac_x;
+                let ddx = mx as f64 - reach - frac_x;
                 sum_r2 += signal * (ddx * ddx + ddy * ddy);
                 sum_w += signal;
 
@@ -186,10 +181,7 @@ impl StampFit {
             }
         }
 
-        let origin = DVec2::new(
-            (icx - radius as isize) as f64,
-            (icy - radius as isize) as f64,
-        );
+        let origin = DVec2::new(x0 as f64, y0 as f64);
         Some(Self {
             stamp: StampData { z, peak, origin },
             // Fit in the stamp's own frame: the models are translation-invariant, so this is the

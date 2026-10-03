@@ -153,6 +153,10 @@ pub(super) unsafe fn convolve_row_sse41(
 /// # Safety
 /// Caller must ensure AVX2 is available.
 #[target_feature(enable = "avx2")]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "pixel coordinates and kernel taps index a slice, whose length Rust caps at isize::MAX"
+)]
 pub(super) unsafe fn convolve_cols_row_avx2(
     input: &[f32],
     out_row: &mut [f32],
@@ -194,6 +198,10 @@ pub(super) unsafe fn convolve_cols_row_avx2(
 /// # Safety
 /// Caller must ensure SSE4.1 is available.
 #[target_feature(enable = "sse4.1")]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "pixel coordinates and kernel taps index a slice, whose length Rust caps at isize::MAX"
+)]
 pub(super) unsafe fn convolve_cols_row_sse41(
     input: &[f32],
     out_row: &mut [f32],
@@ -236,6 +244,10 @@ pub(super) unsafe fn convolve_cols_row_sse41(
 /// # Safety
 /// Caller must ensure AVX2 is available.
 #[target_feature(enable = "avx2")]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "pixel coordinates and kernel taps index a slice, whose length Rust caps at isize::MAX"
+)]
 pub(super) unsafe fn convolve_2d_row_avx2(
     input: &[f32],
     output_row: &mut [f32],
@@ -263,10 +275,10 @@ pub(super) unsafe fn convolve_2d_row_avx2(
                     let kv = _mm256_set1_ps(kval);
                     let base_sx = x as isize + kx as isize - radius;
 
-                    if base_sx >= 0 && base_sx + 8 <= size.width as isize {
-                        let vals = _mm256_loadu_ps(
-                            input.as_ptr().add(input_row_offset + base_sx as usize),
-                        );
+                    if let Ok(start) = usize::try_from(base_sx)
+                        && start + 8 <= size.width
+                    {
+                        let vals = _mm256_loadu_ps(input.as_ptr().add(input_row_offset + start));
                         sum = _mm256_add_ps(sum, _mm256_mul_ps(vals, kv));
                     } else {
                         let mut vals = [0.0f32; 8];
@@ -308,6 +320,10 @@ pub(super) unsafe fn convolve_2d_row_avx2(
 /// # Safety
 /// Caller must ensure SSE4.1 is available.
 #[target_feature(enable = "sse4.1")]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "pixel coordinates and kernel taps index a slice, whose length Rust caps at isize::MAX"
+)]
 pub(super) unsafe fn convolve_2d_row_sse41(
     input: &[f32],
     output_row: &mut [f32],
@@ -335,9 +351,10 @@ pub(super) unsafe fn convolve_2d_row_sse41(
                     let kv = _mm_set1_ps(kval);
                     let base_sx = x as isize + kx as isize - radius;
 
-                    if base_sx >= 0 && base_sx + 4 <= size.width as isize {
-                        let vals =
-                            _mm_loadu_ps(input.as_ptr().add(input_row_offset + base_sx as usize));
+                    if let Ok(start) = usize::try_from(base_sx)
+                        && start + 4 <= size.width
+                    {
+                        let vals = _mm_loadu_ps(input.as_ptr().add(input_row_offset + start));
                         sum = _mm_add_ps(sum, _mm_mul_ps(vals, kv));
                     } else {
                         let mut vals = [0.0f32; 4];

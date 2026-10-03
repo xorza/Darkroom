@@ -27,6 +27,10 @@ pub(crate) fn atrous_smooth(
 }
 
 /// Horizontal B3-spline convolution with taps at `x ± step` and `x ± 2·step` (mirror boundary).
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "pixel coordinates and tap steps index a slice, whose length Rust caps at isize::MAX"
+)]
 fn convolve_horizontal(src: &Buffer2<f32>, dst: &mut Buffer2<f32>, step: usize) {
     let width = src.width();
     let wi = width as isize;
@@ -73,6 +77,10 @@ fn convolve_horizontal(src: &Buffer2<f32>, dst: &mut Buffer2<f32>, step: usize) 
 }
 
 /// Vertical B3-spline convolution with taps at `y ± step` and `y ± 2·step` (mirror boundary).
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "pixel coordinates and tap steps index a slice, whose length Rust caps at isize::MAX"
+)]
 fn convolve_vertical(src: &Buffer2<f32>, dst: &mut Buffer2<f32>, step: usize) {
     let width = src.width();
     let height = src.height();
@@ -122,14 +130,8 @@ fn reflect(i: isize, n: isize) -> usize {
         return 0;
     }
     let period = 2 * (n - 1);
-    let mut m = i % period;
-    if m < 0 {
-        m += period;
-    }
-    if m >= n {
-        m = period - m;
-    }
-    m as usize
+    let m = i.rem_euclid(period);
+    if m >= n { period - m } else { m }.unsigned_abs()
 }
 
 /// Largest scale count for which the coarsest hole step stays within the image: `2^J ≤ min(w, h)`.

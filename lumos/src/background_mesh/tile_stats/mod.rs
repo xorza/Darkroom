@@ -265,10 +265,14 @@ const fn sample_count(candidates: usize) -> usize {
 
 /// The offset of pixel `(x, y)` from the centre of `tile`, doubled: an integer on a tile of any
 /// parity, so the plane fit's position moments are exact.
-const fn centred(tile: URect, x: usize, y: usize) -> [i32; 2] {
+fn centred(tile: URect, x: usize, y: usize) -> [i32; 2] {
+    let axis = |at: usize, min: usize, side: usize| {
+        let doubled = i32::try_from(2 * (at - min)).expect("a tile side is below 2^30");
+        doubled - i32::try_from(side - 1).expect("a tile side is below 2^30")
+    };
     [
-        (2 * (x - tile.min.x)) as i32 - (tile.width() - 1) as i32,
-        (2 * (y - tile.min.y)) as i32 - (tile.height() - 1) as i32,
+        axis(x, tile.min.x, tile.width()),
+        axis(y, tile.min.y, tile.height()),
     ]
 }
 

@@ -230,6 +230,10 @@ pub(crate) mod internals {
         XTRANS_PATTERN
     }
 
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "a test sample lies in [0, 1], which scales into u16's range"
+    )]
     pub(crate) fn to_u16(value: f32) -> u16 {
         (value * 65535.0).round() as u16
     }

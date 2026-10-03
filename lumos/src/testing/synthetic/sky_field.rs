@@ -39,6 +39,10 @@ pub(crate) struct SkyField {
 
 impl SkyField {
     /// Draw `stars`, each `(centre, peak above the sky)`, as round Gaussians of width `sigma`.
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "synthetic fixtures are small images with non-negative coordinates"
+    )]
     pub(crate) fn render(
         size: Size2us,
         sky: Sky,

@@ -4,9 +4,6 @@
 //! config-builder bridge.
 
 #![forbid(unsafe_code)]
-// Lints of the workspace set that stay `allow` there until lumos is swept (plan 2.2);
-// this crate is clean for them, so they warn here.
-#![warn(clippy::cast_possible_wrap, clippy::cast_sign_loss)]
 
 mod astro;
 mod config_node;

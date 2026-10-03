@@ -26,6 +26,7 @@ use glam::DVec2;
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::fwhm::fwhm_to_sigma;
 use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::background::sky_noise::SkyNoise;
 use crate::stacking::star_detection::centroid::covariance::{
     Cov2, MIN_SIGMA_SQ, windowed_covariance,
@@ -95,6 +96,10 @@ const CONVERGENCE_THRESHOLD_SQ: f64 =
 
 /// Compute stamp radius from expected FWHM.
 #[inline]
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "a non-positive FWHM saturates to 0 and takes the minimum radius"
+)]
 pub(super) const fn compute_stamp_radius(expected_fwhm: f32) -> usize {
     let radius = (expected_fwhm * STAMP_RADIUS_FWHM_FACTOR).ceil() as usize;
     if radius < MIN_STAMP_RADIUS {
@@ -106,19 +111,23 @@ pub(super) const fn compute_stamp_radius(expected_fwhm: f32) -> usize {
     }
 }
 
-/// Check if position is within valid bounds for stamp extraction.
+/// The pixel nearest `pos`, when a stamp of `stamp_radius` around it lies wholly inside `size`.
+///
+/// Compared in f64, where `x + r < width` cannot underflow as `x < width − r` would in usize, and a
+/// NaN fails every comparison.
 #[inline]
-pub(super) const fn is_valid_stamp_position(
-    pos: DVec2,
-    size: Size2us,
-    stamp_radius: usize,
-) -> bool {
-    let icx = pos.x.round() as isize;
-    let icy = pos.y.round() as isize;
-    icx >= stamp_radius as isize
-        && icy >= stamp_radius as isize
-        && icx < (size.width - stamp_radius) as isize
-        && icy < (size.height - stamp_radius) as isize
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "both coordinates are checked to be at least the radius before the cast"
+)]
+pub(super) fn stamp_centre(pos: DVec2, size: Size2us, stamp_radius: usize) -> Option<Vec2us> {
+    let (x, y) = (pos.x.round(), pos.y.round());
+    let radius = stamp_radius as f64;
+    let inside = x >= radius
+        && y >= radius
+        && x + radius < size.width as f64
+        && y + radius < size.height as f64;
+    inside.then(|| Vec2us::new(x as usize, y as usize))
 }
 
 /// Whether a profile fit's centre landed somewhere its caller can use: finite, and within
@@ -149,6 +158,10 @@ fn fit_is_plausible(result_pos: DVec2, input_pos: DVec2, stamp_radius: usize) ->
 /// - `WeightedMoments`: Iterative weighted centroid (~0.05 pixel accuracy, fast)
 /// - `GaussianFit`: 2D Gaussian fitting (~0.01 pixel accuracy, slower)
 /// - `MoffatFit`: 2D Moffat fitting (~0.01 pixel accuracy, best for atmospheric seeing)
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "a refined centroid moves at most a quarter stamp from a stamp centre inside the frame, so it stays positive"
+)]
 pub(super) fn measure_star(
     residual: &Buffer2<f32>,
     sky: &SkyNoise,
@@ -316,12 +329,7 @@ fn refine_centroid(
     expected_fwhm: f32,
 ) -> Option<DVec2> {
     let size = Size2us::new(residual.width(), residual.height());
-    if !is_valid_stamp_position(pos, size, stamp_radius) {
-        return None;
-    }
-
-    let icx = pos.x.round() as isize;
-    let icy = pos.y.round() as isize;
+    let centre = stamp_centre(pos, size, stamp_radius)?;
 
     // 0.8 of the expected σ: a tighter window weights the noisy wings less.
     let sigma = (fwhm_to_sigma(expected_fwhm) * 0.8).clamp(1.0, stamp_radius as f32 * 0.5);
@@ -334,9 +342,8 @@ fn refine_centroid(
     let pos_x = pos.x;
     let pos_y = pos.y;
 
-    let stamp_radius_i32 = stamp_radius as i32;
     let stamp_size = 2 * stamp_radius + 1;
-    let x0 = icx as usize - stamp_radius;
+    let x0 = centre.x - stamp_radius;
 
     // The weight is a circular Gaussian, so it factors per axis:
     // `exp(-(dx² + dy²)/2σ²) = exp(-dx²/2σ²) · exp(-dy²/2σ²)`. Filling one column vector here and
@@ -355,9 +362,8 @@ fn refine_centroid(
         column_moments[column] = column as f64 * weight;
     }
 
-    for dy in -stamp_radius_i32..=stamp_radius_i32 {
-        let y = (icy + dy as isize) as usize;
-        // One bounds check per row rather than per pixel — `is_valid_stamp_position` above has
+    for y in centre.y - stamp_radius..=centre.y + stamp_radius {
+        // One bounds check per row rather than per pixel — `stamp_centre` above has
         // already established the whole stamp is inside the frame.
         let px_row = &residual.row(y)[x0..x0 + stamp_size];
 
@@ -431,12 +437,7 @@ fn compute_star(
     let height = residual.height();
     let offset = local.map_or(0.0, |local| local.offset);
 
-    if !is_valid_stamp_position(pos, Size2us::new(width, height), stamp_radius) {
-        return None;
-    }
-
-    let icx = pos.x.round() as isize;
-    let icy = pos.y.round() as isize;
+    let centre = stamp_centre(pos, Size2us::new(width, height), stamp_radius)?;
 
     // Flux, core flux and peak sum the *signed* residual: sky noise is zero-mean, and clipping each
     // pixel at zero would turn it into a positive bias of about 0.4σ per pixel. The second moments
@@ -456,14 +457,14 @@ fn compute_star(
     let mut marginal_x = [0.0f64; MAX_STAMP_SIZE];
     let mut marginal_y = [0.0f64; MAX_STAMP_SIZE];
 
-    let stamp_radius_i32 = stamp_radius as i32;
-    let outer_ring_threshold = (stamp_radius_i32 - 2) * (stamp_radius_i32 - 2);
-    for dy in -stamp_radius_i32..=stamp_radius_i32 {
-        let y = (icy + dy as isize) as usize;
+    // `my`, `mx` index the stamp from its corner; `ady`, `adx` are the distances from its centre.
+    let outer_ring_threshold = stamp_radius.saturating_sub(2).pow(2);
+    for (my, y) in (centre.y - stamp_radius..=centre.y + stamp_radius).enumerate() {
         let px_row = residual.row(y);
         let noise_row = sky.noise.row(y);
-        for dx in -stamp_radius_i32..=stamp_radius_i32 {
-            let x = (icx + dx as isize) as usize;
+        let ady = my.abs_diff(stamp_radius);
+        for (mx, x) in (centre.x - stamp_radius..=centre.x + stamp_radius).enumerate() {
+            let adx = mx.abs_diff(stamp_radius);
 
             let signal = f64::from(px_row[x] - offset);
             let value = signal.max(0.0);
@@ -472,14 +473,12 @@ fn compute_star(
             weight_sum += value;
             peak_value = peak_value.max(signal);
 
-            if dx.abs() <= 1 && dy.abs() <= 1 {
+            if adx <= 1 && ady <= 1 {
                 core_flux += signal;
             }
 
-            let mx_idx = (dx + stamp_radius_i32) as usize;
-            let my_idx = (dy + stamp_radius_i32) as usize;
-            marginal_x[mx_idx] += value;
-            marginal_y[my_idx] += value;
+            marginal_x[mx] += value;
+            marginal_y[my] += value;
 
             // Weighted second moments for FWHM and eccentricity. Kept in this loop rather than
             // recomputed on the rare `windowed_covariance` failure below: a second traversal there
@@ -491,7 +490,7 @@ fn compute_star(
             sum_y2 += value * fy * fy;
             sum_xy += value * fx * fy;
 
-            let r2 = dx * dx + dy * dy;
+            let r2 = adx * adx + ady * ady;
             if local.is_none() && r2 > outer_ring_threshold {
                 noise_sum += f64::from(noise_row[x]);
                 noise_count += 1;
@@ -523,7 +522,7 @@ fn compute_star(
     let avg_noise = match local {
         Some(local) => local.noise,
         None if noise_count > 0 => (noise_sum / noise_count as f64) as f32,
-        None => sky.noise.row(icy as usize)[icx as usize],
+        None => sky.noise.row(centre.y)[centre.x],
     };
 
     let npix = (2 * stamp_radius + 1).pow(2);

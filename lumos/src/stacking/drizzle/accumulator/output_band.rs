@@ -425,19 +425,24 @@ impl<'a> OutputBand<'a> {
                 let normalizer = (drop.weight / f64::from(total)) as f32;
                 for (oy, &row_value) in offsets.clone().map(|dy| centre_row + dy).zip(&scratch.rows)
                 {
-                    if oy < 0 || !rows.contains(&(oy as usize)) {
+                    let Ok(oy) = usize::try_from(oy) else {
+                        continue;
+                    };
+                    if !rows.contains(&oy) {
                         continue;
                     }
-                    let base = band.row_base(oy as usize);
+                    let base = band.row_base(oy);
                     for (ox, &column_value) in offsets
                         .clone()
                         .map(|dx| centre_col + dx)
                         .zip(&scratch.columns)
                     {
-                        if (0..band.width as isize).contains(&ox) {
+                        if let Ok(ox) = usize::try_from(ox)
+                            && ox < band.width
+                        {
                             band.accumulate(
                                 &fluxes,
-                                base + ox as usize,
+                                base + ox,
                                 column_value * row_value * normalizer,
                             );
                         }
@@ -450,6 +455,10 @@ impl<'a> OutputBand<'a> {
     /// The rows of a drop spanning `[first, last]` output rows that this band owns, or `None` when it
     /// owns none — the early skip that keeps a band's cost proportional to what reaches it.
     #[inline]
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "each bound is held at 0 or above first, and the cast saturates at the top"
+    )]
     fn deposit_rows(&self, first: f64, last: f64) -> Option<Range<usize>> {
         let start = (first.round().max(0.0) as usize).max(self.rows.start);
         let end = ((last.round() + 1.0).max(0.0) as usize).min(self.rows.end);
@@ -459,6 +468,10 @@ impl<'a> OutputBand<'a> {
     /// The columns of a drop spanning `[first, last]` output columns. A band spans the full output
     /// width, so clamping to the band is clamping to the grid.
     #[inline]
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "each bound is held at 0 or above first, and the cast saturates at the top"
+    )]
     fn deposit_cols(&self, first: f64, last: f64) -> Range<usize> {
         let start = (first.round().max(0.0) as usize).min(self.width);
         let end = ((last.round() + 1.0).max(0.0) as usize).min(self.width);

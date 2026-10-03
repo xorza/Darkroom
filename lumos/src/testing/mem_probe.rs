@@ -169,6 +169,10 @@ impl RssSampler {
 /// handful of bright per-frame outliers (cosmic-ray stand-ins). The outliers differ every frame, so
 /// sigma-clipping and median combine actually have something to reject — a mean combine would keep
 /// them. Deterministic in `(seed, frame_idx)`; rows are generated in parallel with per-row RNGs.
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "synthetic fixtures are small images with non-negative coordinates, and samples in u16's range"
+)]
 pub(crate) fn synth_frame_u16(size: Size2us, frame_idx: usize, seed: u64) -> Vec<u16> {
     const PEDESTAL: f32 = 0.08;
     const READ_NOISE: f32 = 0.007;

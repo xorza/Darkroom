@@ -50,7 +50,7 @@ pub(super) unsafe fn process_words_sse<const WITH_BG: bool>(
                     };
 
                     let cmp = _mm_cmpgt_ps(px_vec, threshold_vec);
-                    let mask = _mm_movemask_ps(cmp) as u64;
+                    let mask = u64::from(_mm_movemask_ps(cmp).cast_unsigned());
 
                     bits |= mask << (group * 4);
                 }

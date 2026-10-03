@@ -1,6 +1,3 @@
-// Lints of the workspace set that stay `allow` there until lumos is swept (plan 2.2);
-// this crate is clean for them, so they warn here.
-#![warn(clippy::cast_possible_wrap, clippy::cast_sign_loss)]
 // Release builds link as a Windows GUI binary, so double-clicking the .exe in
 // Explorer opens the window alone instead of trailing a console behind it.
 // Dev builds keep the console subsystem — that is where `init_tracing`'s

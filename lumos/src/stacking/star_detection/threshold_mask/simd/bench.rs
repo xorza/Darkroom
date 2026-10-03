@@ -15,6 +15,10 @@ struct BenchData {
     noise: Buffer2<f32>,
 }
 
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "synthetic fixtures are small images with non-negative coordinates"
+)]
 fn create_bench_data(size: usize) -> BenchData {
     let mut pixels_data = vec![0.0f32; size];
     let mut bg_data = vec![1.0f32; size];

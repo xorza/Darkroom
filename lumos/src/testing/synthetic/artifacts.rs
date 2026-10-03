@@ -11,6 +11,10 @@ use crate::testing::test_rng::TestRng;
 /// Add random cosmic ray hits to the image.
 ///
 /// Returns the positions of added cosmic rays for verification.
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "synthetic fixtures are small images with non-negative coordinates"
+)]
 pub(crate) fn add_cosmic_rays(
     pixels: &mut [f32],
     width: usize,

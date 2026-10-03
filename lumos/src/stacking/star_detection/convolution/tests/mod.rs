@@ -1,5 +1,10 @@
 //! Tests for Gaussian convolution.
 
+#![expect(
+    clippy::cast_sign_loss,
+    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
+)]
+
 mod matched_filter;
 
 use crate::testing::prelude::*;

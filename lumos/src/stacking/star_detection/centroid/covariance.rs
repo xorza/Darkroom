@@ -9,7 +9,7 @@ use imaginarium::Buffer2;
 
 use crate::math::fwhm::equal_area_fwhm;
 use crate::math::size2us::Size2us;
-use crate::stacking::star_detection::centroid::{MAX_STAMP_SIZE, is_valid_stamp_position};
+use crate::stacking::star_detection::centroid::{MAX_STAMP_SIZE, stamp_centre};
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Cov2 {
@@ -81,8 +81,8 @@ pub(super) const MAX_SIGMA_SQ: f64 = 100.0;
 /// [`compute_star`](super::compute_star) — both must subtract the same one or FWHM/eccentricity and
 /// flux/SNR would come from different sky conventions.
 ///
-/// The whole stamp must lie inside the frame; this indexes rows and columns unchecked, so a
-/// position nearer the edge than `stamp_radius` underflows the column arithmetic.
+/// The whole stamp must lie inside the frame: a position nearer the edge than `stamp_radius` is the
+/// caller's bug, and panics.
 pub(super) fn windowed_covariance(
     residual: &Buffer2<f32>,
     offset: f32,
@@ -93,20 +93,15 @@ pub(super) fn windowed_covariance(
     const MAX_ITERS: usize = 4;
 
     // Caller's contract, not data validation: `compute_star` has already rejected edge positions.
-    debug_assert!(
-        is_valid_stamp_position(
-            pos,
-            Size2us::new(residual.width(), residual.height()),
-            stamp_radius
-        ),
-        "windowed_covariance needs the whole stamp in frame: pos {pos}, radius {stamp_radius}"
-    );
-
-    let icx = pos.x.round() as isize;
-    let icy = pos.y.round() as isize;
+    let centre = stamp_centre(
+        pos,
+        Size2us::new(residual.width(), residual.height()),
+        stamp_radius,
+    )
+    .expect("windowed_covariance needs the whole stamp in frame");
+    let (x0, y0) = (centre.x - stamp_radius, centre.y - stamp_radius);
     let pos_x = pos.x;
     let pos_y = pos.y;
-    let sr = stamp_radius as i32;
 
     let mut sigma_w_sq = seed_sigma_sq.clamp(MIN_SIGMA_SQ, MAX_SIGMA_SQ);
     let mut best: Option<Cov2> = None;
@@ -116,7 +111,7 @@ pub(super) fn windowed_covariance(
     // is re-derived from the matched window each pass.
     let mut column_offsets = [0.0f64; MAX_STAMP_SIZE];
     for (column, offset) in column_offsets[..stamp_size].iter_mut().enumerate() {
-        *offset = (icx + column as isize - stamp_radius as isize) as f64 - pos_x;
+        *offset = (x0 + column) as f64 - pos_x;
     }
 
     for _ in 0..MAX_ITERS {
@@ -136,8 +131,7 @@ pub(super) fn windowed_covariance(
             *weight = (-fx * fx * inv_two_sw).exp();
         }
 
-        for dy in -sr..=sr {
-            let y = (icy + dy as isize) as usize;
+        for y in y0..y0 + stamp_size {
             let px_row = residual.row(y);
 
             let fy = y as f64 - pos_y;
@@ -148,7 +142,7 @@ pub(super) fn windowed_covariance(
                 .zip(&column_weights[..stamp_size])
                 .enumerate()
             {
-                let x = icx as usize + column - stamp_radius;
+                let x = x0 + column;
                 let wv = column_weight * row_weight * f64::from(px_row[x] - offset);
                 w_sum += wv;
                 mxx += wv * fx * fx;

@@ -30,6 +30,10 @@ const fn bayer() -> CfaType {
 
 /// Seeded uniform noise in `[base − amp, base + amp]`, plus ~0.1% `defect`-valued outliers so
 /// hot/cold detection has something to flag.
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "synthetic fixtures are small images with non-negative coordinates"
+)]
 fn cfa_pixels(base: f32, amp: f32, defect: f32, seed: u64) -> Vec<f32> {
     let n = W * H;
     let mut rng = TestRng::new(seed);
@@ -132,6 +136,10 @@ fn bench_defect_map_build_bayer(b: ::quickbench::Bencher) {
 }
 
 /// A 1 MP faint-sky frame seeded with sharp single-pixel "cosmic-ray" spikes for L.A.Cosmic.
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "synthetic fixtures are small images with non-negative coordinates"
+)]
 fn cosmic_ray_frame(cfa: CfaType) -> CfaImage {
     const CR_W: usize = 1024;
     const CR_H: usize = 1024;

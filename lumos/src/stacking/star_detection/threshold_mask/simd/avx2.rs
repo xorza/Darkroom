@@ -53,7 +53,7 @@ pub(super) unsafe fn process_words_avx2<const WITH_BG: bool>(
                     };
 
                     let cmp = _mm256_cmp_ps::<_CMP_GT_OQ>(px_vec, threshold_vec);
-                    let mask = _mm256_movemask_ps(cmp) as u64;
+                    let mask = u64::from(_mm256_movemask_ps(cmp).cast_unsigned());
 
                     bits |= mask << (group * 8);
                 }

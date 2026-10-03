@@ -344,6 +344,15 @@ pub(super) fn dimensions_from_shape(
             ));
         }
     };
+    if width > ImageDimensions::MAX_SIDE || height > ImageDimensions::MAX_SIDE {
+        return Err(fits_unsupported(
+            path,
+            format!(
+                "FITS image {width}x{height} has a side past {} px",
+                ImageDimensions::MAX_SIDE
+            ),
+        ));
+    }
     let pixel_count = width
         .checked_mul(height)
         .ok_or_else(|| fits_unsupported(path, format!("FITS pixel count overflows: {shape:?}")))?;
