@@ -38,6 +38,11 @@ impl PreviewDrag {
         self.drag.reset();
     }
 
+    /// Whether a spawned preview is being dragged.
+    pub(crate) fn in_flight(&self) -> bool {
+        self.drag.in_flight()
+    }
+
     /// Swept once per frame over the whole scene: only one pointer drag can be
     /// in flight, and `PortRef` is document-unique, so the pane comes from the
     /// port's own node rather than from the caller.

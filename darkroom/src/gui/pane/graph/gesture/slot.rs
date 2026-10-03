@@ -29,7 +29,7 @@ impl<S> GestureSlot<S> {
 
     /// Whether nothing is held — the guard a latch opens with, since a
     /// controller only starts a gesture when it has none.
-    pub(super) fn is_idle(&self) -> bool {
+    pub(crate) fn is_idle(&self) -> bool {
         self.held.is_none()
     }
 

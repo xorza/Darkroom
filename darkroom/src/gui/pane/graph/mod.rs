@@ -212,6 +212,40 @@ impl GraphUI {
         camera.reset();
     }
 
+    /// Whether a gesture, a menu or the palette is in flight — what Esc
+    /// cancels before it would deselect.
+    ///
+    /// Destructured like [`Self::reset_gestures`], so a new controller does not
+    /// compile until it is asked here too.
+    fn in_flight(&self) -> bool {
+        let Self {
+            node_ui,
+            breaker_ui,
+            connection_ui,
+            preview_drag,
+            subscription_ui,
+            new_node_ui,
+            node_menu,
+            selection_ui,
+            camera,
+            background: _,
+            geometry: _,
+            inspectors: _,
+            last_prepass_frame: _,
+            gesture: _,
+            cancelled: _,
+        } = self;
+        node_ui.in_flight()
+            || breaker_ui.in_flight()
+            || connection_ui.in_flight()
+            || preview_drag.in_flight()
+            || subscription_ui.is_dragging()
+            || new_node_ui.in_flight()
+            || node_menu.in_flight()
+            || selection_ui.in_flight()
+            || camera.in_flight()
+    }
+
     /// Take note of whether a pane is showing this canvas, and report whether
     /// that *changed* since last frame.
     ///
@@ -270,6 +304,8 @@ impl GraphUI {
         // state slot unconditionally and lets its existing "no gesture"
         // path do the rest.
         self.cancelled = ui.escape_pressed();
+        // Esc cancels what is in flight, and deselects only when nothing was.
+        let deselect = self.cancelled && !self.in_flight();
         let gesture = classify_canvas_gesture(ui);
         self.gesture = gesture;
         pan_zoom::emit_pan_zoom(&mut self.camera, ui, graph_ctx, gesture, out);
@@ -302,7 +338,7 @@ impl GraphUI {
         self.subscription_ui.bake_snap_hover(&mut self.geometry);
         // The keyboard half of the same phase. Last, so a chord reads the
         // document the pointer gestures above were raised against.
-        shortcuts::emit(ui, graph_ctx, out);
+        shortcuts::emit(ui, graph_ctx, deselect, out);
         Relayout::needed_if(appearing)
     }
 

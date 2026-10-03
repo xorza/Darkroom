@@ -24,17 +24,20 @@ const DUPLICATE_SHORTCUT: Shortcut = Shortcut::ctrl('D');
 /// the undo history; the `is_noop` filter in `drain_requests` drops them when
 /// they'd change nothing. Every chord is sampled up front rather than
 /// short-circuited, so one firing doesn't drop the others' subscription for
-/// palantir's wake gate. The `Edit`- and `Escape`-class ones stand down on
-/// their own while a text field holds focus, and Ctrl+0 / Ctrl+D are `Accel`
-/// so they keep firing mid-edit.
-pub(crate) fn emit(ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
+/// palantir's wake gate. The `Edit`-class ones stand down on their own while a
+/// text field holds focus, and Ctrl+0 / Ctrl+D are `Accel` so they keep firing
+/// mid-edit.
+///
+/// `deselect` is this frame's Esc when nothing was in flight. The canvas
+/// decides it, since only the canvas knows whether the Esc cancelled a
+/// gesture instead.
+pub(crate) fn emit(ui: &mut Ui, graph_ctx: GraphCtx<'_>, deselect: bool, out: &mut Requests) {
     let reset_zoom = ui.key_pressed(RESET_ZOOM_SHORTCUT);
-    let escape = ui.escape_pressed();
     let duplicate = ui.key_pressed(DUPLICATE_SHORTCUT);
     let delete =
         ui.key_pressed(Shortcut::key(Key::Delete)) || ui.key_pressed(Shortcut::key(Key::Backspace));
     let view = graph_ctx.view();
-    if escape && !view.selected.is_empty() {
+    if deselect && !view.selected.is_empty() {
         out.push_graph(GraphIntent::clear_selection());
     }
     if reset_zoom {

@@ -67,6 +67,11 @@ impl ConnectionUI {
         self.ended_on_secondary = false;
     }
 
+    /// Whether a wire is in flight, or its palette is about to open.
+    pub(crate) fn in_flight(&self) -> bool {
+        !self.state.is_idle() || !self.pending_open.is_idle()
+    }
+
     /// Drive the in-flight wire: latch a fresh drag, track the snap
     /// target, and resolve on the active mode's terminating input.
     ///
