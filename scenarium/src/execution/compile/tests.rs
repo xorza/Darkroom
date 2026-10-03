@@ -172,8 +172,8 @@ fn validation_returns_compiled_mismatches() {
 }
 
 /// The arity and range faults carry the pool they found rather than naming one
-/// variant each, so the six messages that used to be six variants have to still
-/// come out six distinct sentences.
+/// variant each, so each of the six faults has to come out a distinct
+/// sentence.
 #[test]
 fn a_pool_fault_names_the_pool_it_found() {
     let node_id = NodeId::from_u128(1);

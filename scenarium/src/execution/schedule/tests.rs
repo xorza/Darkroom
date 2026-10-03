@@ -122,7 +122,7 @@ mod planning {
         p.process_order.push(dropped);
 
         // The validator reports corruption rather than faulting on it: a binding
-        // target past the last node used to index `seen_in_order` out of range.
+        // target past the last node must not index `seen_in_order` out of range.
         let past_the_end = NodeIdx(prog.program_mut().e_nodes.len() as u32);
         let b_input = prog.program()[b.node_idx].inputs.nth(0);
         prog.program_mut().inputs[b_input].binding = ExecutionBinding::Bind(OutputAddr {

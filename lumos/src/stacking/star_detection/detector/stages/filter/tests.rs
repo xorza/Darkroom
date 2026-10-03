@@ -433,7 +433,7 @@ fn remove_duplicate_stars_over_every_geometry() {
 }
 
 /// `duplicate_min_separation = 0` passes validation and means "no deduplication" on both paths —
-/// the spatial-hash one too, which used to divide every coordinate by the zero cell size.
+/// the spatial-hash one too, which must not divide every coordinate by a zero cell size.
 #[test]
 fn zero_separation_removes_nothing_on_either_path() {
     for count in [10, SPATIAL_HASH_CROSSOVER + 50] {

@@ -657,8 +657,8 @@ fn the_raw_front_end_checks_each_light_at_decode() {
 ///
 /// This is what `StackingStage::Preparing` is for: the raw path decodes and detects in one pass
 /// over the frames, the already-decoded path only detects, and both report that pass once per
-/// frame under the same name. Before it, the two emitted different variants for the same position
-/// in the run and a consumer had to know the route to line them up.
+/// frame under the same name. With a variant per route, a consumer would have to know the route
+/// to line the two streams up.
 #[test]
 fn both_front_ends_report_the_same_stages() {
     let scratch = TempDir::new("lumos_stage_parity");

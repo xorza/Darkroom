@@ -307,7 +307,7 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     assert_eq!(bare_domain.conversion_to(&adu_domain), None);
 
     // The path loaders refuse the set too, before combining a byte; the same two files on one
-    // span stack. (`stack` from paths used to skip this check entirely.)
+    // span stack.
     let stack_paths = |paths: &[&Path]| {
         stack::stack(
             paths,

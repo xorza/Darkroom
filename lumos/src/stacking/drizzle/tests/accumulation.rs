@@ -463,7 +463,7 @@ fn declined_quality_planes_are_absent_and_do_not_disturb_the_image() {
 /// Drizzle reports coverage as the share of *frames* that reached a pixel — the same quantity the
 /// statistical combine reports, so a `StackProduct` means one thing whichever produced it.
 ///
-/// The fixture separates that from the accumulated weight it used to be normalized against: two
+/// The fixture tells that apart from the share of the accumulated weight: two
 /// frames overlapping on part of the grid, the second carrying three times the frame weight of the
 /// first. In the band only the first frame reaches, one of two frames contributed — coverage 0.5 —
 /// while the weight there is a quarter of the deepest pixel's, which a coverage of

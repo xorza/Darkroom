@@ -355,8 +355,8 @@ fn rank_deficient_sample_grid_is_reported_without_mutating_the_image() {
 }
 
 /// The standard chain: remove the gradient, then auto-stretch. Each auto stretch must put the
-/// background median on its 0.2 target. With the sky subtracted to ≈0 both used to fall onto a
-/// degenerate branch and miss it.
+/// background median on its 0.2 target, from a sky subtracted to ≈0 — the input that sends a
+/// stretch whose target depends on the median onto a degenerate branch.
 ///
 /// 129×129 is an odd count, so the median is one pixel and a monotone curve maps it exactly;
 /// 1e-4 is the asinh solver's own acceptance, and STF's closed form is tighter.

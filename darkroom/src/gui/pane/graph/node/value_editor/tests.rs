@@ -54,7 +54,7 @@ fn the_unfocused_mirror_refills_its_buffer_instead_of_appending() {
 /// typed, once.
 ///
 /// Commits are collected from every record pass, not only the input-observing one: a frame
-/// can run a second pass, and the cancelled draft used to commit there.
+/// can run a second pass, and the cancelled draft must not commit there.
 #[test]
 fn escape_drops_the_draft_and_enter_or_blur_commits() {
     #[derive(Debug)]

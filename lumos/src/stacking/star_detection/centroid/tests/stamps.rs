@@ -311,7 +311,7 @@ fn sigma_seed_honours_its_ceiling() {
     );
 
     // The tightest ceiling the detector ever uses is MIN_STAMP_RADIUS; the same data has to seed
-    // inside it rather than at the old fixed 10.0.
+    // inside it rather than at a fixed 10.0.
     let narrow = sigma_from_moments(sum_r2, sum_w, 4.0);
     assert_eq!(narrow, 4.0);
     assert_ne!(narrow, wide, "the ceiling has to change the answer");

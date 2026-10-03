@@ -163,7 +163,7 @@ fn snr_uses_normalized_noise_units() {
 }
 
 /// A vanishing sky variance must not make SNR jump. The floor is on the variance, so both sides
-/// of it divide by a square root; flooring the *quotient* instead put a 2896× step here.
+/// of it divide by a square root; flooring the *quotient* instead would put a 2896× step here.
 #[test]
 fn snr_stays_continuous_as_sky_noise_vanishes() {
     // Four pixels, so total variance is 4σ² and the f32::EPSILON floor bites at
@@ -182,7 +182,7 @@ fn snr_stays_continuous_as_sky_noise_vanishes() {
         "everything under the floor lands on the same SNR"
     );
 
-    // The step across the floor is a factor of 1.16, not the 2896 the old branch produced.
+    // The step across the floor is a factor of 1.16, not 2896.
     assert!(below / above < 1.2, "discontinuous: {above} -> {below}");
 }
 

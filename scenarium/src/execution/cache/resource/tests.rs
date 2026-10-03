@@ -163,9 +163,9 @@ fn one_unreadable_path_does_not_cost_the_pass() {
 }
 
 /// A pure function handed a directory consumes it recursively, so its
-/// identity has to be the whole subtree. Stamping one level deep let
-/// everything below the first level change under a fingerprint that
-/// never moved, and the node reused output built from the old contents.
+/// identity has to be the whole subtree. Stamping one level deep would let
+/// everything below the first level change under a fingerprint that never
+/// moved, and the node would reuse output built from the old contents.
 #[test]
 fn directory_identity_tracks_nested_changes() {
     let dir = TempDir::new("nested");

@@ -199,8 +199,8 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
         assert!(!light.metadata.calibrated);
     }
 
-    // A master whose pattern matches but whose extent does not is bad input too — it used to
-    // reach `CfaImage::subtract`'s assert, which is not a report a caller can act on. Every role
+    // A master whose pattern matches but whose extent does not is bad input too — unchecked, it
+    // would reach `CfaImage::subtract`'s assert, which is not a report a caller can act on. Every role
     // is covered because each is applied by a different operation.
     for component in MasterRole::ALL {
         let masters = masters_with_sized_component(component, CfaType::Mono, Size2us::new(4, 4));
@@ -402,8 +402,8 @@ fn fits_provenance(
 
 #[test]
 fn a_set_that_cannot_be_loaded_cannot_be_built() {
-    // Masters that describe different sensors: with no flat present, nothing used to compare them,
-    // so `from_images` accepted the set, `save` wrote it, and only `load` rejected it.
+    // Masters that describe different sensors: with no flat present nothing else compares them,
+    // so `from_images` has to refuse a set that `save` would write and only `load` reject.
     let mismatched = CalibrationSet {
         dark: Some(constant_cfa(Size2us::new(4, 4), 0.01, CfaType::Mono)),
         flat: None,
