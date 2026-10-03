@@ -98,44 +98,6 @@ fn tile_grid_uniform_image() {
 }
 
 #[test]
-fn center_x_full_tiles() {
-    let pixels = Buffer2::new_filled(128, 64, 0.5);
-    let grid = make_grid(&pixels, 32);
-
-    assert!((grid.centers_x[0] - 16.0).abs() < 0.01);
-    assert!((grid.centers_x[1] - 48.0).abs() < 0.01);
-    assert!((grid.centers_x[2] - 80.0).abs() < 0.01);
-    assert!((grid.centers_x[3] - 112.0).abs() < 0.01);
-}
-
-#[test]
-fn center_x_partial_tile() {
-    let pixels = Buffer2::new_filled(100, 64, 0.5);
-    let grid = make_grid(&pixels, 32);
-
-    assert!((grid.centers_x[3] - 98.0).abs() < 0.01);
-}
-
-#[test]
-fn center_y_full_tiles() {
-    let pixels = Buffer2::new_filled(64, 128, 0.5);
-    let grid = make_grid(&pixels, 32);
-
-    assert!((grid.centers_y[0] - 16.0).abs() < 0.01);
-    assert!((grid.centers_y[1] - 48.0).abs() < 0.01);
-    assert!((grid.centers_y[2] - 80.0).abs() < 0.01);
-    assert!((grid.centers_y[3] - 112.0).abs() < 0.01);
-}
-
-#[test]
-fn center_y_partial_tile() {
-    let pixels = Buffer2::new_filled(64, 100, 0.5);
-    let grid = make_grid(&pixels, 32);
-
-    assert!((grid.centers_y[3] - 98.0).abs() < 0.01);
-}
-
-#[test]
 fn find_lower_tile_y_exact_center() {
     let pixels = Buffer2::new_filled(64, 128, 0.5);
     let grid = make_grid(&pixels, 32);
@@ -264,37 +226,6 @@ fn all_pixels_masked_fallback() {
 }
 
 #[test]
-fn median_filter_uniform_unchanged() {
-    let pixels = Buffer2::new_filled(128, 128, 0.4);
-    let grid = make_grid(&pixels, 32);
-
-    for ty in 0..grid.stats.height() {
-        for tx in 0..grid.stats.width() {
-            let stats = grid.stats[(tx, ty)];
-            assert!((stats.sky - 0.4).abs() < 0.01);
-        }
-    }
-}
-
-#[test]
-fn median_filter_rejects_outlier_tile() {
-    let width = 128;
-    let height = 128;
-    let mut pixels = Buffer2::new_filled(width, height, 0.3);
-
-    for y in 32..64 {
-        for x in 32..64 {
-            pixels[(x, y)] = 0.9;
-        }
-    }
-
-    let grid = make_grid(&pixels, 32);
-
-    let center_stats = grid.stats[(1, 1)];
-    assert!((center_stats.sky - 0.3).abs() < 0.1);
-}
-
-#[test]
 fn median_filter_skipped_for_small_grid() {
     let pixels = Buffer2::new_filled(64, 64, 0.5);
     let grid = make_grid(&pixels, 32);
@@ -304,20 +235,6 @@ fn median_filter_skipped_for_small_grid() {
 
     let stats = grid.stats[(0, 0)];
     assert!((stats.sky - 0.5).abs() < 0.01);
-}
-
-#[test]
-fn single_tile_image() {
-    let pixels = Buffer2::new_filled(32, 32, 0.6);
-    let grid = make_grid(&pixels, 32);
-
-    assert_eq!(grid.stats.width(), 1);
-    assert_eq!(grid.stats.height(), 1);
-
-    let stats = grid.stats[(0, 0)];
-    assert!((stats.sky - 0.6).abs() < 0.01);
-    assert!((grid.centers_x[0] - 16.0).abs() < 0.01);
-    assert!((grid.centers_y[0] - 16.0).abs() < 0.01);
 }
 
 #[test]
@@ -343,20 +260,6 @@ fn debug_impl() {
 
     let debug_str = format!("{grid:?}");
     assert!(debug_str.contains("TileGrid"));
-}
-
-#[test]
-fn image_smaller_than_tile() {
-    let pixels = Buffer2::new_filled(20, 20, 0.7);
-    let grid = make_grid(&pixels, 64);
-
-    assert_eq!(grid.stats.width(), 1);
-    assert_eq!(grid.stats.height(), 1);
-
-    let stats = grid.stats[(0, 0)];
-    assert!((stats.sky - 0.7).abs() < 0.01);
-    assert!((grid.centers_x[0] - 10.0).abs() < 0.01);
-    assert!((grid.centers_y[0] - 10.0).abs() < 0.01);
 }
 
 #[test]
@@ -436,20 +339,6 @@ fn tile_stats_sigma_nonzero_for_varied_data() {
 
     let stats = grid.stats[(0, 0)];
     assert!(stats.sigma > 0.0);
-}
-
-#[test]
-fn median_filter_corner_tiles() {
-    // Test that corner tiles (with fewer neighbors) are handled correctly
-    let pixels = Buffer2::new_filled(128, 128, 0.5);
-    let grid = make_grid(&pixels, 32);
-
-    // Corner tiles should still have valid stats
-    let corners = [(0, 0), (3, 0), (0, 3), (3, 3)];
-    for (tx, ty) in corners {
-        let stats = grid.stats[(tx, ty)];
-        assert!((stats.sky - 0.5).abs() < 0.01);
-    }
 }
 
 #[test]
@@ -557,32 +446,6 @@ fn sigma_sigma_clipping_rejects_outliers() {
         (stats.sky - 100.0).abs() < 5.0,
         "Median should be ~100 after clipping outliers, got {}",
         stats.sky
-    );
-}
-
-#[test]
-fn median_filter_3x3_correctness() {
-    // Create 5x5 grid of tiles where center tile has outlier value
-    // After 3x3 median filter, center should match neighbors
-    let width = 160; // 5 tiles of 32 pixels
-    let height = 160;
-    let mut pixels = Buffer2::new_filled(width, height, 50.0);
-
-    // Make center tile (tile 2,2) have value 200
-    for y in 64..96 {
-        for x in 64..96 {
-            pixels[(x, y)] = 200.0;
-        }
-    }
-
-    let grid = make_grid(&pixels, 32);
-
-    // Center tile should be filtered to ~50 (median of 8x50 + 1x200 = 50)
-    let center = grid.stats[(2, 2)];
-    assert!(
-        (center.sky - 50.0).abs() < 10.0,
-        "Center tile should be ~50 after median filter, got {}",
-        center.sky
     );
 }
 
@@ -909,5 +772,104 @@ fn photutils_sextractor_comparison() {
                 stats.sigma
             );
         }
+    }
+}
+
+/// A tile's centre is the mean index of the pixels it holds, `(start + end − 1) / 2`: 32-wide tiles
+/// sit at 15.5 + 32k, the 4-wide remainder of 100 at (96 + 99) / 2, and a tile clamped to a 20-px
+/// image at 9.5. Both axes from one rule.
+#[test]
+fn tile_centres_are_the_mean_pixel_index() {
+    struct Case {
+        size: Size2us,
+        tile_size: usize,
+        centers_x: &'static [f32],
+        centers_y: &'static [f32],
+    }
+    let cases = [
+        Case {
+            size: Size2us::new(128, 64),
+            tile_size: 32,
+            centers_x: &[15.5, 47.5, 79.5, 111.5],
+            centers_y: &[15.5, 47.5],
+        },
+        Case {
+            size: Size2us::new(64, 100),
+            tile_size: 32,
+            centers_x: &[15.5, 47.5],
+            centers_y: &[15.5, 47.5, 79.5, 97.5],
+        },
+        Case {
+            size: Size2us::new(32, 32),
+            tile_size: 32,
+            centers_x: &[15.5],
+            centers_y: &[15.5],
+        },
+        Case {
+            size: Size2us::new(20, 20),
+            tile_size: 64,
+            centers_x: &[9.5],
+            centers_y: &[9.5],
+        },
+    ];
+    for case in cases {
+        let grid = make_grid(
+            &Buffer2::new_filled(case.size.width, case.size.height, 0.5),
+            case.tile_size,
+        );
+        assert_eq!(grid.centers_x, case.centers_x, "{:?}", case.size);
+        assert_eq!(grid.centers_y, case.centers_y, "{:?}", case.size);
+    }
+}
+
+/// The 3×3 median keeps a plane sky exactly at every tile, the edges and corners included, where a
+/// window cut at the grid edge would pull each edge tile half a tile toward the interior. And it
+/// drops spoiled tiles — one at a corner, one on an edge, one inside — to the sky around them:
+/// none of the windows holds more than 4 spoiled values of 9, reflections counted.
+///
+/// The plane's 32×32 tiles are read whole and point-symmetric about their centres, so their
+/// median and mean, and the Pearson mode from them, are the plane at the centre to a few f32
+/// roundings of a value ≤ 1: 8ε bounds them.
+#[test]
+fn median_filter_keeps_a_plane_and_drops_spoiled_tiles() {
+    let size = 160;
+    let plane = |x: f32, y: f32| 0.1 + 1e-3 * x + 2e-3 * y;
+    let pixels = Buffer2::new(
+        size,
+        size,
+        (0..size * size)
+            .map(|i| plane((i % size) as f32, (i / size) as f32))
+            .collect(),
+    );
+    let grid = make_grid(&pixels, 32);
+    let sigma = grid.stats[(2, 2)].sigma;
+    for ty in 0..5 {
+        for tx in 0..5 {
+            let stats = grid.stats[(tx, ty)];
+            let expected = plane(grid.centers_x[tx], grid.centers_y[ty]);
+            assert!(
+                (stats.sky - expected).abs() <= 8.0 * f32::EPSILON,
+                "tile ({tx}, {ty}): sky {} vs {expected}",
+                stats.sky
+            );
+            assert!(
+                (stats.sigma - sigma).abs() <= 8.0 * f32::EPSILON,
+                "tile ({tx}, {ty}): σ {} vs {sigma}",
+                stats.sigma
+            );
+        }
+    }
+
+    let mut pixels = Buffer2::new_filled(size, size, 50.0f32);
+    for (tx, ty) in [(0, 0), (2, 0), (2, 2)] {
+        for y in 32 * ty..32 * (ty + 1) {
+            for x in 32 * tx..32 * (tx + 1) {
+                pixels[(x, y)] = 200.0;
+            }
+        }
+    }
+    let grid = make_grid(&pixels, 32);
+    for (tile, stats) in grid.stats.pixels().iter().enumerate() {
+        assert_eq!(stats.sky, 50.0, "tile {tile}");
     }
 }

@@ -58,21 +58,8 @@ impl TileGrid {
         let tiles_y = dimensions.height.div_ceil(tile_size);
         let n = tiles_x * tiles_y;
 
-        // Precompute tile center X-coordinates (invariant across rows)
-        let centers_x: Vec<f32> = (0..tiles_x)
-            .map(|tx| {
-                let x_start = tx * tile_size;
-                let x_end = (x_start + tile_size).min(dimensions.width);
-                (x_start + x_end) as f32 * 0.5
-            })
-            .collect();
-        let centers_y: Vec<f32> = (0..tiles_y)
-            .map(|ty| {
-                let y_start = ty * tile_size;
-                let y_end = (y_start + tile_size).min(dimensions.height);
-                (y_start + y_end) as f32 * 0.5
-            })
-            .collect();
+        let centers_x = tile_centers(tiles_x, tile_size, dimensions.width);
+        let centers_y = tile_centers(tiles_y, tile_size, dimensions.height);
         Self {
             stats: Buffer2::new_default(tiles_x, tiles_y),
             d2y: vec![TileD2y::default(); n],
@@ -158,6 +145,14 @@ impl TileGrid {
             );
     }
 
+    /// The 3×3 median of every tile, to reject tiles a bright object spoiled.
+    ///
+    /// Past the grid's edge the window reads the grid point-reflected through the nearest edge
+    /// tile, `2·v(edge) − v(mirror)`: the linear continuation of the sky there. A window cut at the
+    /// edge instead — SExtractor's — is lopsided, so its median pulls every edge tile half a tile
+    /// toward the interior on any sky gradient; the reflected window is symmetric about its centre
+    /// on a plane, whose median is then the centre exactly, at the corners too. One spoiled edge
+    /// tile still loses the vote: at a corner it and its reflections make 4 of the 9 values.
     fn apply_median_filter(&mut self, scratch: &mut Buffer2<TileStats>) {
         let tiles_x = self.stats.width();
         let tiles_y = self.stats.height();
@@ -166,33 +161,37 @@ impl TileGrid {
             return;
         }
 
-        let src = self.stats.pixels();
+        let src = &self.stats;
         let dst = scratch.pixels_mut();
+        let last = Vec2us::new(tiles_x - 1, tiles_y - 1);
 
         dst.par_iter_mut().enumerate().for_each(|(idx, out)| {
-            let tx = idx % tiles_x;
-            let ty = idx / tiles_x;
+            let tile = Vec2us::new(idx % tiles_x, idx / tiles_x);
 
             let mut skies = [0.0f32; 9];
             let mut sigmas = [0.0f32; 9];
             let mut count = 0;
 
-            for dy in -1i32..=1 {
-                for dx in -1i32..=1 {
-                    let nx = tx as i32 + dx;
-                    let ny = ty as i32 + dy;
-
-                    if nx >= 0 && nx < tiles_x as i32 && ny >= 0 && ny < tiles_y as i32 {
-                        let neighbor = src[ny as usize * tiles_x + nx as usize];
-                        skies[count] = neighbor.sky;
-                        sigmas[count] = neighbor.sigma;
-                        count += 1;
-                    }
+            for dy in -1isize..=1 {
+                for dx in -1isize..=1 {
+                    let (pivot_x, mirror_x) = reflect(tile.x, dx, last.x);
+                    let (pivot_y, mirror_y) = reflect(tile.y, dy, last.y);
+                    let edge = src[(pivot_x, pivot_y)];
+                    let (sky, sigma) = if (pivot_x, pivot_y) == (mirror_x, mirror_y) {
+                        (edge.sky, edge.sigma)
+                    } else {
+                        let inner = src[(mirror_x, mirror_y)];
+                        (2.0 * edge.sky - inner.sky, 2.0 * edge.sigma - inner.sigma)
+                    };
+                    skies[count] = sky;
+                    sigmas[count] = sigma;
+                    count += 1;
                 }
             }
 
-            out.sky = median_mut(&mut skies[..count]);
-            out.sigma = median_mut(&mut sigmas[..count]);
+            out.sky = median_mut(&mut skies);
+            // A steep σ gradient can reflect below zero, which no noise level is.
+            out.sigma = median_mut(&mut sigmas).max(0.0);
         });
 
         mem::swap(&mut self.stats, scratch);
@@ -239,6 +238,30 @@ impl TileGrid {
             }
         }
     }
+}
+
+/// The tile a window offset `delta` from `index` reads, as `(pivot, mirror)`: both the neighbour
+/// itself inside `0..=last`, else the edge tile it reflects through and that tile's inner
+/// neighbour, whose difference continues the grid linearly. `last` ≥ 1.
+const fn reflect(index: usize, delta: isize, last: usize) -> (usize, usize) {
+    match index.checked_add_signed(delta) {
+        Some(neighbour) if neighbour <= last => (neighbour, neighbour),
+        Some(_) => (last, last - 1),
+        None => (0, 1),
+    }
+}
+
+/// The centre of each of `tiles` tiles of `tile_size` along an axis of `extent` pixels, in the
+/// pixel-index coordinates the maps are evaluated at: the mean index of the pixels the tile holds,
+/// so a plane's tile median sits exactly at its centre.
+fn tile_centers(tiles: usize, tile_size: usize, extent: usize) -> Vec<f32> {
+    (0..tiles)
+        .map(|tile| {
+            let start = tile * tile_size;
+            let end = (start + tile_size).min(extent);
+            (start + end - 1) as f32 * 0.5
+        })
+        .collect()
 }
 
 #[cfg(all(test, feature = "bench"))]

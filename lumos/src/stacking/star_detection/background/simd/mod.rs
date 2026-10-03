@@ -30,7 +30,8 @@ pub(super) struct SplineSegment {
 }
 
 impl SplineSegment {
-    /// Evaluates f(t) = (1-t)*f0 + t*f1 - t*(1-t)*((2-t)*a + (1+t)*b).
+    /// Evaluates f(t) = f0 + t*(f1-f0) - t*(1-t)*((2-t)*a + (1+t)*b): the linear part as a rise
+    /// from `f0`, so equal nodes with no curvature return `f0` exactly, wherever `t` lies.
     ///
     /// Same polynomial as `background_mesh::spline::cubic_spline_eval`, but takes the
     /// precomputed `a, b = h²/6·d2` instead of raw second derivatives — keep the two in sync.
@@ -38,7 +39,7 @@ impl SplineSegment {
     fn eval(self, t: f32) -> f32 {
         let ct = 1.0 - t;
         let t_ct = t * ct;
-        ct * self.f0 + t * self.f1 - t_ct * ((2.0 - t) * self.a + (1.0 + t) * self.b)
+        self.f0 + t * (self.f1 - self.f0) - t_ct * ((2.0 - t) * self.a + (1.0 + t) * self.b)
     }
 }
 
@@ -52,10 +53,11 @@ pub(super) struct SegmentRamp {
 }
 
 impl SegmentRamp {
-    /// The clamped spline parameter at output pixel `i`.
+    /// The spline parameter at output pixel `i`: outside [0, 1] past the segment's knots, where
+    /// the end segments extrapolate.
     #[inline]
     fn t_at(self, i: usize) -> f32 {
-        (self.start + i as f32 * self.step).clamp(0.0, 1.0)
+        self.start + i as f32 * self.step
     }
 }
 

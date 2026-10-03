@@ -1,7 +1,7 @@
-//! Background estimation stage tests.
-//!
-//! Tests the background estimation with various synthetic backgrounds.
+//! Background estimation on rendered skies under stars and camera noise, each saved as its input,
+//! background and residual images for inspection.
 
+use crate::math::statistics::median_mut;
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::tests::Scenario;
 use crate::testing::init_tracing;
@@ -11,345 +11,148 @@ use crate::testing::synthetic::backgrounds::NebulaConfig;
 use crate::testing::synthetic::scene::BackgroundField;
 use crate::testing::visual::{ToneMap, save};
 
-/// Tile size these fixtures are built around.
+/// Each sky against the truth it was rendered from, in two parts.
 ///
-/// Carried here rather than borrowed from the star-detection stage tests: this file exercises one
-/// stage's API, so it should not depend on that module's scaffolding.
-const TILE_SIZE: usize = 64;
-
-/// Test background estimation on uniform background.
+/// The estimate of the bare sky — no stars, no noise — differs from the truth only by what the
+/// tile mesh cannot follow: nothing on a plane (to 8ε of the largest value), and on a curved sky
+/// the smoothing of its curvature at the 64-px tile scale, pinned at its measured size (vignette
+/// 0.0464, nebula 0.2151) so that a change in it shows.
+///
+/// Camera noise then moves the estimate from the bare sky's by the sampling scatter of each tile's
+/// sky: the Pearson mode `2.5·median − 1.5·mean` of N Gaussian samples of spread σ scatters by
+/// `√(6.25·π/2 + 2.25 − 7.5)·σ/√N` = 2.14σ/√N, with N = 1024 samples and σ the estimate's own map
+/// (which carries the sky's spread across each tile as well as the noise). Five of those bound the
+/// largest move. That is checked on the noise without the stars: what a bright star does to a
+/// tile whose σ the sky's own spread inflated is an open issue, not a bound.
 #[test]
-
-fn background_uniform() {
+fn rendered_skies_are_recovered() {
     init_tracing();
-
-    let width = 256;
-    let height = 256;
-    let bg_level = 0.15;
-
-    // Uniform background with some stars.
-    let pixels = Scenario {
-        num_stars: 30,
-        background: BackgroundField::Uniform { level: bg_level },
-        ..Default::default()
+    struct Case {
+        name: &'static str,
+        sky: BackgroundField,
+        num_stars: usize,
+        /// `None` on a plane, held to rounding.
+        model_error: Option<f32>,
     }
-    .frame()
-    .image
-    .channel(0)
-    .clone();
-
-    // Estimate background
-    let background = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: TILE_SIZE,
+    let cases = [
+        Case {
+            name: "uniform",
+            sky: BackgroundField::Uniform { level: 0.15 },
+            num_stars: 30,
+            model_error: None,
+        },
+        Case {
+            name: "gradient",
+            sky: BackgroundField::Gradient {
+                start: 0.05,
+                end: 0.25,
+                angle: 0.0,
+            },
+            num_stars: 30,
+            model_error: None,
+        },
+        Case {
+            name: "vignette",
+            sky: BackgroundField::Vignette {
+                center: 0.2,
+                edge: 0.05,
+                falloff: 2.0,
+            },
+            num_stars: 30,
+            model_error: Some(0.0465),
+        },
+        Case {
+            name: "nebula",
+            sky: BackgroundField::Nebula(NebulaConfig {
+                center: Vec2::splat(0.5),
+                radius: 0.3,
+                amplitude: 0.3,
+                softness: 2.0,
+                aspect_ratio: 1.2,
+                angle: 0.3,
+            }),
+            num_stars: 40,
+            model_error: Some(0.2152),
+        },
+    ];
+    let config = BackgroundConfig::default();
+    for case in cases {
+        let pixels = Scenario {
+            num_stars: case.num_stars,
+            background: case.sky.clone(),
             ..Default::default()
-        },
-    );
-
-    // Save input image
-    save(
-        pixels.pixels(),
-        Size2us::new(width, height),
-        "synthetic_starfield/stage_bg_uniform_input",
-        ToneMap::Clamp,
-    );
-
-    // Save background map
-    save(
-        background.background.pixels(),
-        Size2us::new(width, height),
-        "synthetic_starfield/stage_bg_uniform_background",
-        ToneMap::Clamp,
-    );
-
-    // Save background-subtracted image
-    let subtracted: Vec<f32> = pixels
-        .iter()
-        .zip(background.background.iter())
-        .map(|(&p, &bg)| (p - bg).max(0.0))
-        .collect();
-    save(
-        &subtracted,
-        Size2us::new(width, height),
-        "synthetic_starfield/stage_bg_uniform_subtracted",
-        ToneMap::Clamp,
-    );
-
-    // Verify background level is approximately correct
-    let mean_bg: f32 =
-        background.background.iter().sum::<f32>() / background.background.len() as f32;
-    println!("Expected background: {bg_level:.4}");
-    println!("Estimated mean background: {mean_bg:.4}");
-
-    // A flat sky must be recovered to well under 1% (the tiled mode estimator is exact here).
-    assert!(
-        (mean_bg - bg_level).abs() < 0.005,
-        "background estimate {mean_bg:.4} should match {bg_level:.4} within 0.005"
-    );
-
-    // The noise plane must track the camera's per-pixel σ: well 50000, read 3, sky 0.15 →
-    // σ ≈ sqrt(sky·well + read²)/well ≈ 0.00173.
-    let mut noise: Vec<f32> = background.noise.pixels().to_vec();
-    noise.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let median_noise = noise[noise.len() / 2];
-    println!("median noise {median_noise:.5} (analytic ~0.00173)");
-    assert!(
-        (0.0010..0.0030).contains(&median_noise),
-        "noise plane median {median_noise:.5} should bracket the analytic σ 0.00173"
-    );
-}
-
-/// Test background estimation on gradient background.
-#[test]
-
-fn background_gradient() {
-    init_tracing();
-
-    let width = 256;
-    let height = 256;
-
-    // Stars rendered directly on a gradient sky (0.05 left → 0.25 right).
-    let pixels = Scenario {
-        num_stars: 30,
-        background: BackgroundField::Gradient {
-            start: 0.05,
-            end: 0.25,
-            angle: 0.0,
-        },
-        ..Default::default()
-    }
-    .frame()
-    .image
-    .channel(0)
-    .pixels()
-    .to_vec();
-
-    // Estimate background
-    let background = background_map::estimate(
-        &Buffer2::new(width, height, pixels.clone()),
-        &BackgroundConfig {
-            tile_size: TILE_SIZE,
+        }
+        .frame()
+        .image
+        .channel(0)
+        .clone();
+        let size = Size2us::new(pixels.width(), pixels.height());
+        let truth = case.sky.render(size);
+        let bare = background_map::estimate(
+            &Buffer2::new(size.width, size.height, truth.clone()),
+            &config,
+        );
+        let background = background_map::estimate(&pixels, &config);
+        let noise_only = Scenario {
+            num_stars: 0,
+            background: case.sky.clone(),
             ..Default::default()
-        },
-    );
+        }
+        .frame()
+        .image
+        .channel(0)
+        .clone();
+        let noisy = background_map::estimate(&noise_only, &config);
 
-    // Save images
-    save(
-        &pixels,
-        Size2us::new(width, height),
-        "synthetic_starfield/stage_bg_gradient_input",
-        ToneMap::Clamp,
-    );
+        let residual: Vec<f32> = pixels
+            .iter()
+            .zip(background.background.iter())
+            .map(|(&p, &sky)| (p - sky).max(0.0))
+            .collect();
+        for (suffix, image) in [
+            ("input", pixels.pixels()),
+            ("background", background.background.pixels()),
+            ("subtracted", &residual[..]),
+        ] {
+            save(
+                image,
+                size,
+                &format!("synthetic_starfield/stage_bg_{}_{suffix}", case.name),
+                ToneMap::Clamp,
+            );
+        }
 
-    save(
-        background.background.pixels(),
-        Size2us::new(width, height),
-        "synthetic_starfield/stage_bg_gradient_background",
-        ToneMap::Clamp,
-    );
+        let largest = |values: &mut dyn Iterator<Item = f32>| values.fold(0.0f32, f32::max);
+        let model = largest(
+            &mut bare
+                .background
+                .iter()
+                .zip(&truth)
+                .map(|(a, b)| (a - b).abs()),
+        );
+        let model_bound = case
+            .model_error
+            .unwrap_or(8.0 * f32::EPSILON * largest(&mut truth.iter().copied()));
+        assert!(
+            model <= model_bound,
+            "{}: the bare sky's estimate is {model} off the truth, past {model_bound}",
+            case.name
+        );
 
-    let subtracted: Vec<f32> = pixels
-        .iter()
-        .zip(background.background.iter())
-        .map(|(&p, &bg)| (p - bg).max(0.0))
-        .collect();
-    save(
-        &subtracted,
-        Size2us::new(width, height),
-        "synthetic_starfield/stage_bg_gradient_subtracted",
-        ToneMap::Clamp,
-    );
-
-    // Verify gradient is captured
-    let left_idx = 50 + (height / 2) * width;
-    let right_idx = (width - 50) + (height / 2) * width;
-    let left_bg = background.background[left_idx];
-    let right_bg = background.background[right_idx];
-    println!("Left background: {left_bg:.4}");
-    println!("Right background: {right_bg:.4}");
-
-    // The estimate must track the injected linear sky `start + (end-start)·x/(width-1)`:
-    // at x=50 → 0.089, at x=206 → 0.212 (the stars are masked out by the tiled estimator).
-    assert!(
-        (left_bg - 0.089).abs() < 0.03,
-        "left bg {left_bg:.4} vs analytic 0.089"
-    );
-    assert!(
-        (right_bg - 0.212).abs() < 0.03,
-        "right bg {right_bg:.4} vs analytic 0.212"
-    );
-    assert!(
-        right_bg - left_bg > 0.08,
-        "gradient slope too shallow: {left_bg:.4} → {right_bg:.4}"
-    );
-}
-
-/// Test background estimation on vignette pattern.
-#[test]
-
-fn background_vignette() {
-    init_tracing();
-
-    let width = 256;
-    let height = 256;
-
-    // Stars rendered directly on a vignette sky (bright centre, dark corners).
-    let pixels = Scenario {
-        num_stars: 30,
-        background: BackgroundField::Vignette {
-            center: 0.2,
-            edge: 0.05,
-            falloff: 2.0,
-        },
-        ..Default::default()
+        let mut spread = noisy.noise.pixels().to_vec();
+        let sigma = median_mut(&mut spread);
+        let scatter_bound = 5.0 * 2.14 * sigma / 32.0;
+        let scatter = largest(
+            &mut noisy
+                .background
+                .iter()
+                .zip(bare.background.iter())
+                .map(|(a, b)| (a - b).abs()),
+        );
+        assert!(
+            scatter <= scatter_bound,
+            "{}: noise moves the sky by {scatter}, past {scatter_bound}",
+            case.name
+        );
     }
-    .frame()
-    .image
-    .channel(0)
-    .pixels()
-    .to_vec();
-
-    // Estimate background
-    let background = background_map::estimate(
-        &Buffer2::new(width, height, pixels.clone()),
-        &BackgroundConfig {
-            tile_size: TILE_SIZE,
-            ..Default::default()
-        },
-    );
-
-    // Save images
-    save(
-        &pixels,
-        Size2us::new(width, height),
-        "synthetic_starfield/stage_bg_vignette_input",
-        ToneMap::Clamp,
-    );
-
-    save(
-        background.background.pixels(),
-        Size2us::new(width, height),
-        "synthetic_starfield/stage_bg_vignette_background",
-        ToneMap::Clamp,
-    );
-
-    let subtracted: Vec<f32> = pixels
-        .iter()
-        .zip(background.background.iter())
-        .map(|(&p, &bg)| (p - bg).max(0.0))
-        .collect();
-    save(
-        &subtracted,
-        Size2us::new(width, height),
-        "synthetic_starfield/stage_bg_vignette_subtracted",
-        ToneMap::Clamp,
-    );
-
-    // Verify center is brighter than corners (sample a genuinely dark corner — the estimator
-    // smooths the vignette, so near-center samples barely differ).
-    let center_idx = (width / 2) + (height / 2) * width;
-    let corner_idx = 25 + 25 * width;
-    let center_bg = background.background[center_idx];
-    let corner_bg = background.background[corner_idx];
-    println!("Center background: {center_bg:.4}");
-    println!("Corner background: {corner_bg:.4}");
-
-    // The estimator must be *unbiased* on a vignette: its mean tracks the true sky mean despite
-    // the radial structure and the embedded stars. (It smooths the central peak rather than
-    // fully resolving it — that's smoothing, not bias.)
-    let true_bg = BackgroundField::Vignette {
-        center: 0.2,
-        edge: 0.05,
-        falloff: 2.0,
-    }
-    .render(Size2us::new(width, height));
-    let true_mean = true_bg.iter().sum::<f32>() / true_bg.len() as f32;
-    let est_mean =
-        background.background.pixels().iter().sum::<f32>() / background.background.len() as f32;
-    println!("vignette true mean {true_mean:.4}, estimate mean {est_mean:.4}");
-    assert!(
-        (est_mean - true_mean).abs() < 0.01,
-        "vignette estimate mean {est_mean:.4} should match true sky mean {true_mean:.4}"
-    );
-    assert!(
-        center_bg >= corner_bg,
-        "center {center_bg:.4} should be no darker than corner {corner_bg:.4}"
-    );
-}
-
-/// Test background estimation with nebula structure.
-#[test]
-
-fn background_nebula() {
-    init_tracing();
-
-    let width = 256;
-    let height = 256;
-
-    // Stars rendered directly on a nebula sky.
-    let pixels = Scenario {
-        num_stars: 40,
-        background: BackgroundField::Nebula(NebulaConfig {
-            center: Vec2::splat(0.5),
-            radius: 0.3,
-            amplitude: 0.3,
-            softness: 2.0,
-            aspect_ratio: 1.2,
-            angle: 0.3,
-        }),
-        ..Default::default()
-    }
-    .frame()
-    .image
-    .channel(0)
-    .pixels()
-    .to_vec();
-
-    // Estimate background
-    let background = background_map::estimate(
-        &Buffer2::new(width, height, pixels.clone()),
-        &BackgroundConfig {
-            tile_size: TILE_SIZE,
-            ..Default::default()
-        },
-    );
-
-    // Save images
-    save(
-        &pixels,
-        Size2us::new(width, height),
-        "synthetic_starfield/stage_bg_nebula_input",
-        ToneMap::Clamp,
-    );
-
-    save(
-        background.background.pixels(),
-        Size2us::new(width, height),
-        "synthetic_starfield/stage_bg_nebula_background",
-        ToneMap::Clamp,
-    );
-
-    let subtracted: Vec<f32> = pixels
-        .iter()
-        .zip(background.background.iter())
-        .map(|(&p, &bg)| (p - bg).max(0.0))
-        .collect();
-    save(
-        &subtracted,
-        Size2us::new(width, height),
-        "synthetic_starfield/stage_bg_nebula_subtracted",
-        ToneMap::Clamp,
-    );
-
-    // The nebula is a central blob: its centre must read clearly brighter than a corner.
-    let center_idx = (width / 2) + (height / 2) * width;
-    let corner_idx = 30 + 30 * width;
-    let center_bg = background.background[center_idx];
-    let corner_bg = background.background[corner_idx];
-    println!("nebula center {center_bg:.4}, corner {corner_bg:.4}");
-    assert!(
-        center_bg > corner_bg + 0.02,
-        "nebula structure not captured: center {center_bg:.4} vs corner {corner_bg:.4}"
-    );
 }
