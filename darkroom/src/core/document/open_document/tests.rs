@@ -182,7 +182,8 @@ fn a_node_authored_against_other_ports_fails_the_load_by_name() {
 fn only_a_one_step_batch_is_a_gesture_frame() {
     let fixture = DocFixture::sample();
     let (node, other) = (fixture.node(0), fixture.node(1));
-    let mut open = OpenDocument::over(fixture.doc);
+    let DocFixture { doc, library } = fixture;
+    let mut open = OpenDocument::over(doc);
     let start = open.document.main_view.item_placements[&node].pos;
     let mut queue = DocumentQueue::default();
     let gesture = queue.open_gesture();
@@ -195,7 +196,7 @@ fn only_a_one_step_batch_is_a_gesture_frame() {
     let mut drain = |open: &mut OpenDocument, intents: Vec<GraphIntent>| {
         queue.extend_graph(intents);
         assert_eq!(
-            open.drain_requests(&mut queue),
+            open.drain_requests(&mut queue, &library),
             Relayout::NotNeeded,
             "moving and selecting remeasure nothing"
         );

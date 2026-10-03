@@ -25,7 +25,9 @@ use std::iter;
 use std::sync::Arc;
 
 use glam::Vec2;
-use scenarium::{Binding, BindingEntry, DetachedNode, InputPort, Node, NodeId, Subscription};
+use scenarium::{
+    Binding, BindingEntry, DetachedNode, InputPort, Library, Node, NodeId, Subscription,
+};
 
 use crate::core::document::PortRef;
 use crate::core::document::{Document, ItemPlacement, Viewport};
@@ -307,7 +309,11 @@ impl GraphIntent {
     /// the payload could never have applied. ([`Self::MoveSelection`] and
     /// [`Self::SetSelection`] instead drop vanished members individually
     /// rather than refusing the whole intent.)
-    pub(crate) fn into_step(self, doc: &Document) -> Result<Option<UndoStep>, MalformedIntent> {
+    pub(crate) fn into_step(
+        self,
+        doc: &Document,
+        library: &Library,
+    ) -> Result<Option<UndoStep>, MalformedIntent> {
         let (graph, view) = (&doc.graph, &doc.main_view);
         let step = match self {
             Self::AddNode {
@@ -319,7 +325,7 @@ impl GraphIntent {
                 validate::fresh_node_id(graph, node_id)?;
                 validate::finite_position(pos, "AddNode")?;
                 validate::insertable_kind(&node)?;
-                validate::seed_bindings(graph, node_id, &bindings)?;
+                validate::seed_bindings(graph, library, node_id, &node, &bindings)?;
                 // The depth is fixed here rather than at write time, so a redo
                 // puts the node back at the depth the original add gave it
                 // instead of jumping it in front of whatever arrived since.
@@ -376,6 +382,7 @@ impl GraphIntent {
                     return Ok(None);
                 }
                 if let Some(Binding::Bind(source)) = &to {
+                    validate::wirable(graph, library, input)?;
                     // A wire held across frames can outlive its producer, and
                     // the bind would leave the graph with a dangling edge.
                     if validate::live_node(graph, source.node_id, "SetInput producer")?.is_none() {
@@ -384,9 +391,9 @@ impl GraphIntent {
                     // Reject a bind that would close a data cycle: the planner
                     // rejects a cyclic graph outright (`Error::CycleDetected`),
                     // so the edit must never land. The GUI snap filter normally
-                    // stops this earlier; this is the authoritative guard
-                    // covering every binding path, including any that bypass
-                    // the canvas.
+                    // stops this earlier; this, with `wirable` above, is the
+                    // authoritative guard covering every binding path,
+                    // including any that bypass the canvas.
                     if graph.produces_cycle(source.node_id, input.node_id) {
                         return Ok(None);
                     }
@@ -509,8 +516,12 @@ impl GraphIntent {
     /// [`Self::into_step`] and [`UndoStep::apply`] stay separate for the
     /// undo-stack redo path, which applies a stored step without rebuilding it
     /// (a redo replays already-valid history).
-    pub(crate) fn commit(self, doc: &mut Document) -> Result<Option<UndoStep>, MalformedIntent> {
-        let Some(step) = self.into_step(doc)? else {
+    pub(crate) fn commit(
+        self,
+        doc: &mut Document,
+        library: &Library,
+    ) -> Result<Option<UndoStep>, MalformedIntent> {
+        let Some(step) = self.into_step(doc, library)? else {
             return Ok(None);
         };
         if step.is_noop() {

@@ -362,10 +362,13 @@ impl App {
         let Some(value) = value else {
             return Relayout::NotNeeded;
         };
-        self.session.open.apply_edit(GraphIntent::SetInput {
-            input: pick.port,
-            to: Some(Binding::Const(value)),
-        })
+        self.session.open.apply_edit(
+            GraphIntent::SetInput {
+                input: pick.port,
+                to: Some(Binding::Const(value)),
+            },
+            self.runtime.library.current(),
+        )
     }
 
     /// Prompt for a project file and load it. The

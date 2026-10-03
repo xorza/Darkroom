@@ -20,7 +20,7 @@
 //! reopen.
 
 use glam::Vec2;
-use scenarium::{Binding, BindingEntry, Graph, Node, NodeId, NodeKind};
+use scenarium::{Binding, BindingEntry, Graph, InputPort, Library, Node, NodeId, NodeKind};
 
 use crate::core::edit::error::MalformedIntent;
 
@@ -62,8 +62,9 @@ pub(super) fn fresh_node_id(graph: &Graph, node_id: NodeId) -> Result<(), Malfor
     Ok(())
 }
 
-/// A newly inserted node's kind has to name state the document already holds:
-/// a func the library resolves, or a built-in special.
+/// A newly inserted node's kind has to name something: a non-nil func id, or
+/// a built-in special. The func need not resolve — a duplicated stub stays a
+/// stub, as a loaded one does.
 pub(super) fn insertable_kind(node: &Node) -> Result<(), MalformedIntent> {
     match &node.kind {
         NodeKind::Func(func_id) => {
@@ -84,7 +85,9 @@ pub(super) fn insertable_kind(node: &Node) -> Result<(), MalformedIntent> {
 /// these next.
 pub(super) fn seed_bindings(
     graph: &Graph,
+    library: &Library,
     node_id: NodeId,
+    node: &Node,
     bindings: &[BindingEntry],
 ) -> Result<(), MalformedIntent> {
     for BindingEntry { port, binding } in bindings {
@@ -93,6 +96,9 @@ pub(super) fn seed_bindings(
             return Err(MalformedIntent::ForeignSeedBinding { port });
         }
         if let Binding::Bind(source) = binding {
+            if declares_const_only(node, library, port.port_idx) {
+                return Err(MalformedIntent::WiredConstOnly { port });
+            }
             // The one cycle an insertion can author: nothing reads the new
             // node yet, so the only loop it can close is through itself.
             if source.node_id == node_id {
@@ -104,6 +110,32 @@ pub(super) fn seed_bindings(
         }
     }
     Ok(())
+}
+
+/// An input a wire may land on: not one its func declares const-only. The
+/// canvas's snap filter keeps a wire off such an input, so a bind here is a
+/// widget's bug — and it would fail every compile (`ConstOnlyBinding`).
+/// A node whose func the library lacks declares nothing, so it refuses
+/// nothing either.
+pub(super) fn wirable(
+    graph: &Graph,
+    library: &Library,
+    port: InputPort,
+) -> Result<(), MalformedIntent> {
+    let refuses = graph
+        .find(port.node_id)
+        .is_some_and(|node| declares_const_only(node, library, port.port_idx));
+    if refuses {
+        return Err(MalformedIntent::WiredConstOnly { port });
+    }
+    Ok(())
+}
+
+/// Whether `node`'s func declares input `port_idx` const-only.
+fn declares_const_only(node: &Node, library: &Library, port_idx: usize) -> bool {
+    node.func(library)
+        .and_then(|func| func.inputs.get(port_idx))
+        .is_some_and(|input| input.const_only)
 }
 
 /// A node an insertion's wiring points at. Unlike [`live_node`] a miss is
