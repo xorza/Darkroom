@@ -253,13 +253,9 @@ fn register_transform(library: &mut Library) {
 fn adjust_image(op: ContrastBrightness, value: DynamicValue) -> Image {
     // Contrast/brightness works in place, so an owned input is adjusted where it stands — no output
     // image to allocate. Only a value still shared with other consumers has to be copied first.
-    let mut image = match value.into_custom::<Image>() {
-        Ok(image) => image,
-        Err(value) => Image::from(value.required_custom::<Image>().interleaved().into_owned()),
-    };
-
-    op.apply_cpu(image.interleaved_mut());
-    image
+    let mut image = Image::take_interleaved(value);
+    op.apply_cpu(&mut image);
+    Image::from(image)
 }
 
 #[cfg(test)]
