@@ -47,14 +47,24 @@ pub(super) fn memory_row(ui: &mut Ui, ncx: NodeCtx<'_>) {
                 .child_align(Align::v(VAlign::Center))
                 .show(ui, |ui| {
                     if ram.cpu > 0 {
-                        meter(ui, theme, theme.colors.badge_cache, "RAM", ram.cpu);
+                        meter(ui, theme, ram_hue(theme), "RAM", ram.cpu);
                     }
                     if ram.gpu > 0 {
-                        meter(ui, theme, theme.colors.badge_graph, "VRAM", ram.gpu);
+                        meter(ui, theme, vram_hue(theme), "VRAM", ram.gpu);
                     }
                 });
             proportion_bar(ui, theme, ram);
         });
+}
+
+/// The system-RAM pool's hue: the cache badge's, as a cache is what holds it.
+fn ram_hue(theme: &Theme) -> RgbaF32 {
+    theme.colors.badge_cache
+}
+
+/// The GPU-memory pool's hue: the accent the graph badge wears.
+fn vram_hue(theme: &Theme) -> RgbaF32 {
+    theme.colors.badge_graph
 }
 
 /// One pool: a colored dot, an uppercase micro-label, and the byte figure. The
@@ -91,10 +101,10 @@ fn proportion_bar(ui: &mut Ui, theme: &Theme, ram: RamUsage) {
         .size((Sizing::FILL, Sizing::fixed(BAR_H)))
         .show(ui, |ui| {
             if ram.cpu > 0 {
-                bar_segment(ui, "ram", theme.colors.badge_cache, ram.cpu as f32);
+                bar_segment(ui, "ram", ram_hue(theme), ram.cpu as f32);
             }
             if ram.gpu > 0 {
-                bar_segment(ui, "vram", theme.colors.badge_graph, ram.gpu as f32);
+                bar_segment(ui, "vram", vram_hue(theme), ram.gpu as f32);
             }
         });
 }

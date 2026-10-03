@@ -39,7 +39,7 @@ use crate::gui::requests::Requests;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::port_glyph::{PortGlyph, PortGlyphResponse};
-use crate::gui::widgets::support::tooltip_after;
+use crate::gui::widgets::support::{ROW_GAP, tooltip_after};
 
 /// Grid columns: inputs (hug), input values (hug, capped at `max_width` — so
 /// wide editors fit but a very long one ellipsizes; the numeric `DragValue`
@@ -163,16 +163,8 @@ fn tip_for(
 /// each row's strong element, not the label — and fainter still for an input
 /// another sets aside (`set_aside`).
 fn port_label(ui: &mut Ui, theme: &Theme, name: &str, tip: Option<InternedStr>, set_aside: bool) {
-    let color = if set_aside {
-        theme.colors.text_muted
-    } else {
-        theme.ports.label
-    };
     let snapshot = Text::new(name)
-        .style(&TextStyle {
-            color,
-            ..ui.theme().text
-        })
+        .style(&label_style(ui, theme, set_aside))
         .sense(Sense::HOVER)
         .show(ui)
         .snapshot();
@@ -244,6 +236,20 @@ fn open_port_context_menu(ui: &mut Ui, menu_id: WidgetId, secondary: bool) {
     }
 }
 
+/// The ink a port or event label wears: the ports' muted label ink, fainter
+/// still for an input another sets aside.
+fn label_style(ui: &Ui, theme: &Theme, set_aside: bool) -> TextStyle {
+    let color = if set_aside {
+        theme.colors.text_muted
+    } else {
+        theme.ports.label
+    };
+    TextStyle {
+        color,
+        ..ui.theme().text
+    }
+}
+
 /// Column 0: the input port circle + label, plus the right-click binding
 /// menu (anchored here, so right-clicking the circle or label opens it).
 /// The circle's `WidgetId` is the deterministic `port_circle_wid(port)`, so
@@ -297,7 +303,7 @@ fn input_label_cell(
         .align(Align::new(HAlign::Left, VAlign::Center))
         .size((Sizing::HUG, Sizing::HUG))
         .sense(Sense::CLICK)
-        .gap(4.0)
+        .gap(ROW_GAP)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
             // A const-only input can't be wired, so it has no connection anchor
@@ -458,7 +464,7 @@ fn output_cell(
         .align(Align::new(HAlign::Right, VAlign::Center))
         .size((Sizing::HUG, Sizing::HUG))
         .sense(Sense::CLICK)
-        .gap(4.0)
+        .gap(ROW_GAP)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
             port_label(ui, theme, output.name(), tip, false);
@@ -574,15 +580,12 @@ fn event_cell(
         .grid_cell((row as u16, COL_OUTPUT))
         .align(Align::new(HAlign::Right, VAlign::Center))
         .size((Sizing::HUG, Sizing::HUG))
-        .gap(4.0)
+        .gap(ROW_GAP)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            // Muted like the data-port labels (see `port_label`).
+            // Muted like the data-port labels.
             Text::new(event.name.as_str())
-                .style(&TextStyle {
-                    color: theme.ports.label,
-                    ..ui.theme().text
-                })
+                .style(&label_style(ui, theme, false))
                 .show(ui);
             PortGlyph::arrow(wid, theme.ports.size, fill)
                 .margin(Spacing::new(0.0, 0.0, -overhang, 0.0))

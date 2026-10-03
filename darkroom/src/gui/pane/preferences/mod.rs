@@ -333,12 +333,9 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
     // Last frame's hover drives the brighten — this frame's response isn't
     // known until after `show`.
     let link_color = if ui.response_for(id).hovered() {
-        theme
-            .colors
-            .badge_graph
-            .lerp(RgbaF32::hex(0x00ff_ffff), 0.5)
+        theme.colors.link_hovered
     } else {
-        theme.colors.badge_graph
+        theme.colors.link
     };
     indented_line(ui, "hint", |ui| {
         let link = Panel::hstack()

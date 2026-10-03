@@ -35,6 +35,10 @@ pub(crate) struct ChromeColors {
     /// Accent cyan: the inspect chip, the pinned-inspector outline, and the
     /// VRAM half of a memory readout.
     pub(crate) badge_graph: RgbaF32,
+    /// A text link at rest (the accent), and lifted halfway to white under
+    /// the pointer.
+    pub(crate) link: RgbaF32,
+    pub(crate) link_hovered: RgbaF32,
     /// Sink chip — error red.
     pub(crate) badge_sink: RgbaF32,
     /// `RuntimeCache` (persist-to-disk) chip — warning yellow.
@@ -54,6 +58,8 @@ impl ChromeColors {
             chrome_fill: p.chrome_fill,
             tab_inactive: p.tab_inactive,
             badge_graph: p.badge_graph,
+            link: p.badge_graph,
+            link_hovered: p.badge_graph.lerp(RgbaF32::WHITE, 0.5),
             badge_sink: p.badge_sink,
             badge_cache: p.badge_cache,
             badge_impure: p.badge_impure,
