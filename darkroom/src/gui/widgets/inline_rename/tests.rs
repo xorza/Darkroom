@@ -11,9 +11,8 @@ fn the_idle_name_sits_on_the_panels_leading_edge() {
     let id = WidgetId::from_hash("rename-leading-edge");
     let mut h = UiHarness::new(UVec2::new(300, 100)).pixel_snap(false);
     h.frame(|ui| {
-        InlineRename::new("Ab")
+        InlineRename::new("Ab", &theme.inline_rename)
             .id(id)
-            .style(&theme.inline_rename)
             .show(ui);
     });
     let panel = h.rect(id).expect("label panel arranged");
@@ -32,9 +31,8 @@ fn the_idle_name_sits_on_the_panels_leading_edge() {
 #[test]
 fn entering_edit_mode_selects_the_whole_name() {
     fn render(ui: &mut Ui, id: WidgetId, theme: &Theme) -> RenameEvent {
-        InlineRename::new("Alpha")
+        InlineRename::new("Alpha", &theme.inline_rename)
             .id(id)
-            .style(&theme.inline_rename)
             .show(ui)
     }
 

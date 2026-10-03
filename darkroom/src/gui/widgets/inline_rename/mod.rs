@@ -47,19 +47,24 @@ const DEFAULT_MAX_CHARS: usize = 64;
 /// double-click swaps in a `max_chars`-capped `TextEdit` that hugs its
 /// text width (grows as you type). Enter or blur commits, Esc cancels.
 ///
-/// Shaped like a palantir widget: the name is the only positional
-/// argument, and identity ([`Self::id`]) and look ([`Self::style`]) are
-/// optional overrides over a call-site id and the ambient theme.
+/// Shaped like a palantir widget: the name and the look are positional, and
+/// identity ([`Self::id`]) is an optional override over a call-site id.
 #[derive(Debug)]
 pub(crate) struct InlineRename<'a> {
     id: WidgetId,
     name: &'a str,
-    style: Option<&'a InlineRenameTheme>,
+    style: &'a InlineRenameTheme,
     max_chars: usize,
 }
 
 impl<'a> InlineRename<'a> {
-    /// A rename label for `name`, identified by its call site.
+    /// A rename label for `name` in the look `style`, identified by its call
+    /// site.
+    ///
+    /// Font, colour and leading ride along inside the bundle's per-state
+    /// `text` slots, as they do for every palantir widget — to bold a title,
+    /// hand over a bundle built with [`InlineRenameTheme::with_text`]. A slot
+    /// left `None` inherits ambient `palantir::Theme::text`.
     ///
     /// Unlike a palantir widget's auto id, this one is *not* scoped to
     /// the enclosing node and *cannot* be disambiguated by occurrence:
@@ -69,11 +74,11 @@ impl<'a> InlineRename<'a> {
     /// one call site therefore share a draft — set [`Self::id`] from the
     /// domain item whenever this is built in a loop.
     #[track_caller]
-    pub(crate) fn new(name: &'a str) -> Self {
+    pub(crate) fn new(name: &'a str, style: &'a InlineRenameTheme) -> Self {
         Self {
             id: WidgetId::auto_stable(),
             name,
-            style: None,
+            style,
             max_chars: DEFAULT_MAX_CHARS,
         }
     }
@@ -87,21 +92,6 @@ impl<'a> InlineRename<'a> {
         self
     }
 
-    /// Borrow a whole inline-rename theme override — all-or-nothing.
-    /// `None` flattens ambient [`palantir::Theme::text_edit`] the same
-    /// way the darkroom theme's own slot is built, so an unstyled rename
-    /// still matches whatever text-edit palette is installed.
-    ///
-    /// Font, colour and leading ride along inside the bundle's per-state
-    /// `text` slots, as they do for every palantir widget — to bold a
-    /// title, hand over a bundle built with
-    /// [`InlineRenameTheme::with_text`] rather than restyling here. A
-    /// slot left `None` inherits ambient `palantir::Theme::text`.
-    pub(crate) fn style(mut self, style: &'a InlineRenameTheme) -> Self {
-        self.style = Some(style);
-        self
-    }
-
     /// Override the character cap applied to the active `TextEdit`.
     pub(crate) fn max_chars(mut self, n: usize) -> Self {
         self.max_chars = n;
@@ -112,19 +102,9 @@ impl<'a> InlineRename<'a> {
         let Self {
             id,
             name,
-            style,
+            style: theme,
             max_chars,
         } = self;
-        // Bound outside the `match` so the flattened fallback outlives
-        // the borrow, and built only when the caller supplied no bundle
-        // — the styled path costs nothing for having this here.
-        let ambient;
-        let theme = if let Some(theme) = style {
-            theme
-        } else {
-            ambient = InlineRenameTheme::flattened(&ui.theme().text_edit);
-            &ambient
-        };
         // The label sits inside a `MIN_EDIT_WIDTH` panel so short names
         // still present a clickable target, with the text flush left. Both
         // axes are pinned — TextEdit's single-line default (`Align::LEFT`)

@@ -422,9 +422,8 @@ fn title(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
     // Borrowed straight off the node: an interned handle is only valid
     // within the record pass that minted it, and the widget reads the
     // name back on the label⇄editor swap to seed the draft.
-    let ev = InlineRename::new(node.name())
+    let ev = InlineRename::new(node.name(), &ncx.theme().inline_rename_title)
         .id(id)
-        .style(&ncx.theme().inline_rename_title)
         .max_chars(NODE_NAME_MAX_CHARS)
         .show(ui);
     if ev.clicked {
