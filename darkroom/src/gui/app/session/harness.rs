@@ -96,7 +96,9 @@ impl SessionHarness {
 
     /// Take back the last undoable entry. Reports whether there was one.
     pub(crate) fn undo(&mut self) -> bool {
-        self.session.open.undo().took
+        let took = self.session.open.can_undo();
+        let _relayout = self.session.open.undo();
+        took
     }
 
     /// One editor frame. Returns the commands the **first** record pass

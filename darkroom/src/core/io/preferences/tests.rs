@@ -1,11 +1,13 @@
 use std::ffi::OsStr;
+use std::fs;
 use std::path::PathBuf;
 use std::str;
 
-use common::{SerdeFormat, deserialize, serialize};
+use common::{SerdeFormat, TempDir, deserialize, serialize};
 use glam::{IVec2, UVec2};
 use palantir::ImageFilter;
 
+use crate::core::io::preferences::error::PreferencesLoadError;
 use crate::core::io::preferences::{
     MlModelPreferences, Preferences, ViewerBackground, ViewerPreferences, WindowState,
 };
@@ -106,4 +108,40 @@ fn partial_window_entry_fills_missing_fields_and_omits_position() {
             position: None,
         })
     );
+}
+
+/// A missing file is a first run and reads as the defaults; a file that is
+/// there but unreadable or unparsable is an error naming it, so the caller can
+/// report it rather than overwrite it with defaults.
+#[test]
+fn only_a_missing_file_reads_as_the_defaults() {
+    let dir = TempDir::new("darkroom-preferences-load");
+    let path = dir.join("darkroom.preferences.ron");
+
+    assert_eq!(
+        Preferences::load_from(&path).unwrap(),
+        Preferences::default()
+    );
+
+    fs::write(&path, b"(confirm_unsaved_changes: false)").unwrap();
+    assert_eq!(
+        Preferences::load_from(&path).unwrap(),
+        Preferences {
+            confirm_unsaved_changes: false,
+            ..Preferences::default()
+        }
+    );
+
+    fs::write(&path, b"(confirm_unsaved_changes: maybe)").unwrap();
+    assert!(matches!(
+        Preferences::load_from(&path),
+        Err(PreferencesLoadError::Parse { path: failed, .. }) if failed == path
+    ));
+
+    fs::remove_file(&path).unwrap();
+    fs::create_dir(&path).unwrap();
+    assert!(matches!(
+        Preferences::load_from(&path),
+        Err(PreferencesLoadError::Read { path: failed, .. }) if failed == path
+    ));
 }

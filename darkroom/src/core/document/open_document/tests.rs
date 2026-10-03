@@ -49,47 +49,28 @@ fn preferred_document_reopens_and_a_failed_load_forgets_the_path() {
     let mut status = StatusLog::default();
 
     // A remembered path with reopening on comes back as the open document.
-    let open = OpenDocument::open_at_launch_with(
-        None,
-        &mut preferences,
-        &mut status,
-        &Library::default(),
-        |_| Ok(()),
-    );
+    let open =
+        OpenDocument::open_at_launch(None, &mut preferences, &mut status, &Library::default());
     assert_eq!(open.path, Some(path.clone()));
 
     // Reopening off: empty document, but the path stays remembered.
     preferences.load_last_document = false;
-    let open = OpenDocument::open_at_launch_with(
-        None,
-        &mut preferences,
-        &mut status,
-        &Library::default(),
-        |_| Ok(()),
-    );
+    let open =
+        OpenDocument::open_at_launch(None, &mut preferences, &mut status, &Library::default());
     assert!(open.path.is_none());
     assert_eq!(preferences.document_path, Some(path));
     assert_eq!(status.lines().count(), 0, "neither path reports a failure");
 
-    // An unloadable path degrades to an empty document and is forgotten;
-    // a failing preferences write is reported on top of the load failure.
+    // An unloadable path degrades to an empty document and is forgotten.
     preferences.load_last_document = true;
     preferences.document_path = Some("invalid.json".into());
-    let open = OpenDocument::open_at_launch_with(
-        None,
-        &mut preferences,
-        &mut status,
-        &Library::default(),
-        |_| Err("preferences save failed: disk unavailable".into()),
-    );
+    let open =
+        OpenDocument::open_at_launch(None, &mut preferences, &mut status, &Library::default());
     assert!(open.path.is_none());
     assert_eq!(preferences.document_path, None);
     assert_eq!(
         status.lines().collect::<Vec<_>>(),
-        [
-            "load failed: invalid.json must use the .darkroom extension",
-            "preferences save failed: disk unavailable"
-        ]
+        ["load failed: invalid.json must use the .darkroom extension"]
     );
 }
 
@@ -119,12 +100,11 @@ fn a_command_line_document_outranks_the_remembered_one_and_leaves_it_alone() {
         named.as_os_str(),
         "the fixture has to differ before the load"
     );
-    let open = OpenDocument::open_at_launch_with(
+    let open = OpenDocument::open_at_launch(
         Some(argument),
         &mut preferences,
         &mut status,
         &Library::default(),
-        |_| panic!("a command-line document writes no preferences"),
     );
     assert_eq!(
         open.path.as_deref().map(Path::as_os_str),
@@ -137,12 +117,11 @@ fn a_command_line_document_outranks_the_remembered_one_and_leaves_it_alone() {
     // remembered one, and still leaves the remembered path standing — it is
     // not what failed.
     let missing = dir.join("missing.darkroom");
-    let open = OpenDocument::open_at_launch_with(
+    let open = OpenDocument::open_at_launch(
         Some(missing.clone()),
         &mut preferences,
         &mut status,
         &Library::default(),
-        |_| panic!("a command-line document writes no preferences"),
     );
     assert!(open.path.is_none());
     assert_eq!(preferences.document_path, Some(remembered));
@@ -203,10 +182,7 @@ fn a_node_authored_against_other_ports_fails_the_load_by_name() {
 fn only_a_one_step_batch_is_a_gesture_frame() {
     let fixture = DocFixture::sample();
     let (node, other) = (fixture.node(0), fixture.node(1));
-    let mut open = OpenDocument {
-        document: fixture.doc,
-        ..OpenDocument::default()
-    };
+    let mut open = OpenDocument::over(fixture.doc);
     let start = open.document.main_view.item_placements[&node].pos;
     let mut queue = DocumentQueue::default();
     let gesture = queue.open_gesture();
@@ -240,24 +216,27 @@ fn only_a_one_step_batch_is_a_gesture_frame() {
 
     let pos = |open: &OpenDocument| open.document.main_view.item_placements[&node].pos - start;
     assert_eq!(pos(&open), Vec2::new(20.0, 0.0));
-    assert!(open.undo().took);
+    assert!(open.can_undo());
+    assert_eq!(open.undo(), Relayout::NotNeeded);
     assert_eq!(
         pos(&open),
         Vec2::new(12.0, 0.0),
         "the frame after the batch"
     );
-    assert!(open.undo().took);
+    assert!(open.can_undo());
+    assert_eq!(open.undo(), Relayout::NotNeeded);
     assert_eq!(
         pos(&open),
         Vec2::new(9.0, 0.0),
         "the shared batch, as one entry"
     );
     assert!(open.document.main_view.selected.is_empty());
-    assert!(open.undo().took);
+    assert!(open.can_undo());
+    assert_eq!(open.undo(), Relayout::NotNeeded);
     assert_eq!(
         pos(&open),
         Vec2::ZERO,
         "the two frames before it, as one entry"
     );
-    assert!(!open.undo().took);
+    assert!(!open.can_undo());
 }

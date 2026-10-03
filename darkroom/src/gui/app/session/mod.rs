@@ -169,9 +169,9 @@ impl Session {
         // The document owns its history and what a replay means; this layer
         // only says which direction the chord asked for.
         if undo {
-            self.open.undo().relayout
+            self.open.undo()
         } else if redo {
-            self.open.redo().relayout
+            self.open.redo()
         } else {
             Relayout::NotNeeded
         }

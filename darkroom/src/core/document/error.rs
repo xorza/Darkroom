@@ -29,4 +29,12 @@ pub(crate) enum DocumentValidationError {
     },
     #[error("open tab references a missing target {tab:?}")]
     MissingTab { tab: TabRef },
+    /// The graph tab is the one that refuses to close, which is what keeps
+    /// it reachable; a layout pinning another tab can lose it for good.
+    #[error("the layout pins {tab:?} instead of the graph")]
+    PinnedTab { tab: TabRef },
+    /// The layout was saved by a dock with another seed, so none of its
+    /// widget ids would be this editor's.
+    #[error("the layout belongs to another dock")]
+    ForeignDock,
 }
