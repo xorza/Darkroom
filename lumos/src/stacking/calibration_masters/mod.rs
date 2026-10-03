@@ -156,7 +156,7 @@ impl CalibrationMasters {
     pub fn from_images(
         images: CalibrationSet<Option<CfaImage>>,
         sigma_threshold: f32,
-        cancel: CancelToken,
+        cancel: &CancelToken,
     ) -> Result<Self, CalibrationError> {
         if cancel.is_cancelled() {
             return Err(CalibrationError::Cancelled);
@@ -190,10 +190,10 @@ impl CalibrationMasters {
             let mut map =
                 DefectMap::new(dimensions.expect("a present master gives the set its dimensions"));
             if let Some(dark) = dark.as_ref() {
-                map = map.detect_hot(dark, sigma_threshold, &cancel)?;
+                map = map.detect_hot(dark, sigma_threshold, cancel)?;
             }
             if let Some(flat) = subtracted_flat.as_ref() {
-                map = map.detect_cold(flat, &cancel)?;
+                map = map.detect_cold(flat, cancel)?;
             }
             Some(map)
         } else {
@@ -411,7 +411,7 @@ pub(crate) mod internals {
                 flat_dark: stack(frames.flat_dark, MasterRole::FlatDark),
             },
             sigma_threshold,
-            CancelToken::never(),
+            &CancelToken::never(),
         )
         .expect("assemble calibration masters")
     }

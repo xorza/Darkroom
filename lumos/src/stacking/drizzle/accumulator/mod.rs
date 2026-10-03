@@ -157,8 +157,8 @@ impl DrizzleAccumulator {
     ///
     /// Returns an error when image dimensions differ from the accumulator, or when frame or pixel
     /// weights are negative or non-finite. The accumulator is unchanged on error.
-    pub fn add_frame(&mut self, frame: DrizzleFrame<LinearImage>) -> Result<(), DrizzleError> {
-        self.validate(&frame)?;
+    pub fn add_frame(&mut self, frame: &DrizzleFrame<LinearImage>) -> Result<(), DrizzleError> {
+        self.validate(frame)?;
         self.frames_added += 1;
         // A frame carrying no weight deposits nothing anywhere, and the coverage plane must not
         // claim it reached the pixels it would have touched — the same reading a zero *pixel* weight
@@ -458,7 +458,7 @@ pub(crate) mod internals {
             weight: f32,
             pixel_weights: Option<&Buffer2<f32>>,
         ) {
-            self.add_frame(DrizzleFrame {
+            self.add_frame(&DrizzleFrame {
                 source: image,
                 warp: WarpTransform::new(transform.inverse()),
                 weight,
@@ -483,7 +483,7 @@ pub(crate) mod internals {
         /// [`DrizzleAccumulator::add_frame`] with the output band height pinned.
         pub(crate) fn add_frame_with_band_rows(
             &mut self,
-            frame: DrizzleFrame<LinearImage>,
+            frame: &DrizzleFrame<LinearImage>,
             band_rows: usize,
         ) {
             self.band_rows_override = Some(band_rows);

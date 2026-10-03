@@ -123,7 +123,7 @@ impl Scnr {
         Ok(())
     }
 
-    fn validate(&self) -> Result<(), InvalidConfigField> {
+    fn validate(self) -> Result<(), InvalidConfigField> {
         if let ScnrMethod::AdditiveMask { amount } = self.method {
             InvalidConfigField::finite("SCNR amount", "finite and in [0, 1]", amount, |value| {
                 (0.0..=1.0).contains(&value)

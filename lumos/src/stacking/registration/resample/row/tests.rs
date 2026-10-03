@@ -108,7 +108,7 @@ fn sample_row_matches_the_single_point_oracle() {
                     let row = warp_row(&input, y, transform, method, params.border_value);
                     for (x, &actual) in row.iter().enumerate() {
                         let source = transform.apply(DVec2::new(x as f64, y as f64));
-                        let expected = internals::interpolate(&input, source, &params);
+                        let expected = internals::interpolate(&input, source, params);
                         let taps = match method {
                             InterpolationMethod::Lanczos2 => 16,
                             InterpolationMethod::Lanczos3 => 36,
@@ -187,7 +187,7 @@ fn a_column_of_ones_samples_to_hand_values() {
         let oracle = f64::from(internals::interpolate(
             &input,
             shift.apply(DVec2::new(4.0, 4.0)),
-            &params,
+            params,
         ));
         assert!(
             (oracle - expected).abs() <= tolerance,

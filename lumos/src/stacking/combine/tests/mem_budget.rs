@@ -66,7 +66,7 @@ fn disk_and_memory_tiers_produce_identical_masters() {
         config.cache.cache_dir = dir.join(format!("cache_{tag}"));
         stack(
             &paths,
-            config,
+            &config,
             ProgressCallback::default(),
             CancelToken::never(),
         )

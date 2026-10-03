@@ -9,7 +9,7 @@ use crate::stacking::calibration_masters::master_role::MasterRole;
 ///
 /// Named fields prevent swapping roles when `T` is the same for all four. Raw inputs use path
 /// slices, while prebuilt inputs use optional CFA images.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct CalibrationSet<T> {
     /// Thermal-noise calibration data.
     pub dark: T,

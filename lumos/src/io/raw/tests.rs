@@ -142,6 +142,9 @@ fn demosaic_overshoots_the_light_frame_range_it_is_clamped_back_into() {
 #[cfg(feature = "real-data")]
 #[test]
 fn load_raw_valid_file() {
+    // Check mean is reasonable (not all zeros or all ones)
+    use crate::testing::synthetic::metrics::pixel_stats;
+
     use crate::testing::init_tracing;
     use crate::testing::real_data::raw_frames;
 
@@ -170,8 +173,6 @@ fn load_raw_valid_file() {
         }
     }
 
-    // Check mean is reasonable (not all zeros or all ones)
-    use crate::testing::synthetic::metrics::pixel_stats;
     let mean = (0..image.channels())
         .map(|channel| pixel_stats(image.channel(channel)).mean)
         .sum::<f64>()
@@ -333,7 +334,7 @@ fn direct_and_calibration_normalization_share_raw_linear_color_scale() {
 
 #[test]
 fn spatial_black_repeat_uses_visible_coordinates_with_nonzero_margins() {
-    let mut cblack = [0u32; 4104];
+    let mut cblack = no_black();
     cblack[..4].copy_from_slice(&[10, 20, 30, 20]);
     cblack[4] = 2;
     cblack[5] = 3;
@@ -583,7 +584,7 @@ fn invalid_camera_white_balance_is_absent() {
 /// Uniform black: all cblack zero, scalar black only.
 #[test]
 fn consolidate_black_levels_uniform() {
-    let cblack = [0u32; 4104];
+    let cblack = no_black();
     // No per-channel, no spatial pattern
     let bl = consolidate_black_levels(&cblack, 512, 16383, 0x9494_9494).unwrap();
 
@@ -596,7 +597,7 @@ fn consolidate_black_levels_uniform() {
 /// Per-channel cblack[0..3] nonzero, no spatial pattern.
 #[test]
 fn consolidate_black_levels_per_channel() {
-    let mut cblack = [0u32; 4104];
+    let mut cblack = no_black();
     cblack[0] = 10; // R
     cblack[1] = 5; // G1
     cblack[2] = 15; // B
@@ -624,7 +625,7 @@ fn consolidate_black_levels_per_channel() {
 /// Bayer 2x2 spatial pattern folded into per-channel values.
 #[test]
 fn consolidate_black_levels_bayer_2x2_fold() {
-    let mut cblack = [0u32; 4104];
+    let mut cblack = no_black();
     // 2x2 spatial pattern
     cblack[4] = 2;
     cblack[5] = 2;
@@ -658,7 +659,7 @@ fn consolidate_black_levels_bayer_2x2_fold() {
 /// X-Trans 1x1 spatial pattern folded into all channels.
 #[test]
 fn consolidate_black_levels_xtrans_1x1_fold() {
-    let mut cblack = [0u32; 4104];
+    let mut cblack = no_black();
     cblack[4] = 1;
     cblack[5] = 1;
     cblack[6] = 20; // Added to all channels
@@ -675,7 +676,7 @@ fn consolidate_black_levels_xtrans_1x1_fold() {
 
 #[test]
 fn consolidate_black_levels_rejects_invalid_metadata() {
-    let cblack = [0u32; 4104];
+    let cblack = no_black();
     let error = consolidate_black_levels(&cblack, 512, 512, 0x9494_9494).unwrap_err();
     assert!(matches!(
         error,
@@ -685,7 +686,7 @@ fn consolidate_black_levels_rejects_invalid_metadata() {
         }
     ));
 
-    let mut oversized = [0u32; 4104];
+    let mut oversized = no_black();
     oversized[4] = 64;
     oversized[5] = 65;
     let error = consolidate_black_levels(&oversized, 0, 4096, 0x9494_9494).unwrap_err();
@@ -735,4 +736,12 @@ fn apply_bayer_black_corrections_clamp_negative() {
 
     // R at (0,0): (0.05 - 0.1).max(0.0) = 0.0
     assert_eq!(data[0], 0.0, "Should clamp to 0.0");
+}
+
+/// libraw's `color.cblack`, every entry zero, on the heap: 16 KiB is too large for the stack.
+fn no_black() -> Box<[u32; 4104]> {
+    vec![0; 4104]
+        .into_boxed_slice()
+        .try_into()
+        .expect("4104 entries")
 }

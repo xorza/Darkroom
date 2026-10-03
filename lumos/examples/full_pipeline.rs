@@ -12,6 +12,8 @@
 //! cargo run --release --example full_pipeline
 //! ```
 
+#![expect(clippy::print_stdout, reason = "an example reports to the terminal")]
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -130,7 +132,7 @@ fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
             flat_dark: None,
         },
         DEFAULT_SIGMA_THRESHOLD,
-        CancelToken::never(),
+        &CancelToken::never(),
     )
     .expect("failed to build calibration masters");
 
@@ -146,5 +148,9 @@ fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
 
 fn init_tracing() {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "a subscriber already installed keeps logging; the example needs no second"
+    )]
     let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
 }

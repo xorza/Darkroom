@@ -256,10 +256,11 @@ fn tabulated_interior_sums_track_the_computed_ones() {
 /// `source_noise_variance`'s divisor — hence the floor asserted on them.
 #[test]
 fn support_and_confidence_vanish_together_across_every_border() {
-    let dims = Size2us::new(24, 18);
     // Stepping by an awkward fraction sweeps sub-pixel phase instead of landing on pixel centres,
     // and the span reaches a full kernel radius past both borders on each axis.
     const STEP: f32 = 0.157;
+
+    let dims = Size2us::new(24, 18);
     for method in InterpolationMethod::ALL {
         let radius = kernel_radius(method) as f32 + 1.0;
         let mut lowest_survivor = f32::INFINITY;

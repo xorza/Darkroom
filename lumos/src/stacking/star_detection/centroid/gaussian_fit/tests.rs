@@ -630,7 +630,7 @@ fn gaussian_evaluate_and_jacobian_consistency() {
     for params in params_list {
         for &(x, y) in &points {
             let eval = model.evaluate(x, y, params);
-            let jac = model.jacobian_row(x, y, params);
+            let jac = Gaussian2D::jacobian_row(x, y, params);
             let ModelSample {
                 value: fused_eval,
                 jacobian: fused_jac,

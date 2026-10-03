@@ -176,7 +176,7 @@ fn pipeline_budget_probe() -> io::Result<()> {
             flat_dark: None,
         },
         DEFAULT_SIGMA_THRESHOLD,
-        CancelToken::never(),
+        &CancelToken::never(),
     )
     .expect("assemble the masters");
 
@@ -202,7 +202,7 @@ fn pipeline_budget_probe() -> io::Result<()> {
     let total_secs = start.elapsed().as_secs_f64();
 
     let peak = sampler.finish();
-    let anon_mb = peak.anon_mb;
+    let anon_mb = peak.anon;
     let held_mb = masters.ram_bytes() as u64 / MB;
 
     println!("\n=== result ===");
@@ -210,7 +210,7 @@ fn pipeline_budget_probe() -> io::Result<()> {
     println!("peak RssAnon  {anon_mb} MB   (heap — the OOM-relevant figure, across ALL stages)");
     println!(
         "peak VmRSS    {} MB   (total resident, incl. mmap'd spill)",
-        peak.total_mb
+        peak.total
     );
     println!("masters held  {held_mb} MB");
 
@@ -254,6 +254,10 @@ fn ensure_cfa_frames(
         let cfa = make_cfa(size, frame(i), CfaType::Mono);
         save_cfa_fits(path, &cfa)?;
         print!("\r  generating {}… {}/{n}", dir.display(), i + 1);
+        #[expect(
+            clippy::unused_result_ok,
+            reason = "a progress line that fails to flush costs the probe nothing"
+        )]
         io::stdout().flush().ok();
     }
     Ok(paths)
@@ -293,7 +297,7 @@ fn align_stack_memory_probe() {
         let dx = ((i * 37 % 11) as f64 - 5.0) * 1.7;
         let dy = ((i * 53 % 11) as f64 - 5.0) * 1.7;
         let t = Transform::translation(DVec2::new(dx, dy));
-        frames.push(warp(&base, &WarpTransform::new(t), &reg.warp).image);
+        frames.push(warp(&base, &WarpTransform::new(t), reg.warp).image);
     }
     drop(base); // redundant with frames[0]; free it so only the `n` inputs are resident.
     println!(
@@ -322,7 +326,7 @@ fn align_stack_memory_probe() {
     let total_secs = start.elapsed().as_secs_f64();
 
     let peak = sampler.finish();
-    let anon_mb = peak.anon_mb;
+    let anon_mb = peak.anon;
     let mpix = (size.pixel_count() * n) as f64 / 1e6;
 
     println!("=== result ===");
@@ -339,7 +343,7 @@ fn align_stack_memory_probe() {
         mpix / total_secs.max(1e-3)
     );
     println!("peak RssAnon  {anon_mb} MB   (heap — the OOM-relevant figure)");
-    println!("peak VmRSS    {} MB   (total resident)", peak.total_mb);
+    println!("peak VmRSS    {} MB   (total resident)", peak.total);
     println!(
         "amortized     {:.2} MB heap per frame over {n} frames",
         anon_mb as f64 / n as f64
@@ -417,7 +421,7 @@ fn raw_lights_memory_probe() {
     .expect("calibrate_align_stack");
     let total_secs = start.elapsed().as_secs_f64();
     let peak = sampler.finish();
-    let anon_mb = peak.anon_mb;
+    let anon_mb = peak.anon;
 
     let image = &result.product.image;
     let frame_bytes = (image.dimensions().sample_count() * size_of::<f32>()) as u64;
@@ -432,15 +436,15 @@ fn raw_lights_memory_probe() {
     println!("peak RssAnon  {anon_mb} MB   (heap — the OOM-relevant figure)");
     println!(
         "  ├ prepare   {} MB   (decode, demosaic, detect)",
-        peak.ungated_anon_mb
+        peak.ungated_anon
     );
     println!(
         "  └ align     {} MB   (register, warp, combine)",
-        peak.gated_anon_mb
+        peak.gated_anon
     );
     println!(
         "peak VmRSS    {} MB   (total resident, incl. mmap'd spill)",
-        peak.total_mb
+        peak.total
     );
     black_box(&result);
 

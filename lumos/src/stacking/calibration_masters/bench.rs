@@ -64,7 +64,7 @@ fn make_masters() -> CalibrationMasters {
             flat_dark: None,
         },
         DEFAULT_SIGMA_THRESHOLD,
-        CancelToken::never(),
+        &CancelToken::never(),
     )
     .unwrap()
 }

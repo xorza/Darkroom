@@ -90,7 +90,7 @@ mod tests {
                 ..CalibrationSet::default()
             },
             5.0,
-            CancelToken::never(),
+            &CancelToken::never(),
         )
         .unwrap()
     }

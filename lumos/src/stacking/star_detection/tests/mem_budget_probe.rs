@@ -141,14 +141,18 @@ fn detect_memory_probe() {
             i + 1,
             (i + 1) as f64 / secs.max(1e-3)
         );
+        #[expect(
+            clippy::unused_result_ok,
+            reason = "a progress line that fails to flush costs the probe nothing"
+        )]
         io::stdout().flush().ok();
     }
     let total_secs = start.elapsed().as_secs_f64();
 
     let peak = sampler.finish();
-    let anon_mb = peak.anon_mb;
-    let steady_mb = peak.gated_anon_mb;
-    let total_mb = peak.total_mb;
+    let anon_mb = peak.anon;
+    let steady_mb = peak.gated_anon;
+    let total_mb = peak.total;
     let mpix = (width * height * n) as f64 / 1e6;
 
     println!("\n");

@@ -4,7 +4,7 @@
 //! either a `Buffer2` in RAM or a memory map over a file, and every read goes through the same
 //! [`StoredPlane::chunk`] either way.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use imaginarium::Buffer2;
 use memmap2::Mmap;
@@ -26,11 +26,15 @@ impl StoredPlane {
     }
 
     /// Memory-map a spilled plane file.
-    pub(crate) fn map(path: PathBuf) -> Result<Self, FrameStoreError> {
-        let mmap = frame_spill::map_file(&path)?;
+    pub(crate) fn map(path: &Path) -> Result<Self, FrameStoreError> {
+        let mmap = frame_spill::map_file(path)?;
         #[cfg(unix)]
         {
             use memmap2::Advice;
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "read-ahead advice is a hint: a kernel that refuses it reads the plane all the same"
+            )]
             let _ = mmap.advise(Advice::Sequential);
         }
         Ok(Self::Mapped(mmap))

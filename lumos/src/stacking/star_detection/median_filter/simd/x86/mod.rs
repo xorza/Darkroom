@@ -3,9 +3,6 @@
 //! Uses vectorized min/max operations to implement the sorting network.
 //! Each SIMD register processes multiple independent median computations.
 
-#![allow(clippy::needless_range_loop)]
-#![allow(unused_assignments)] // Sorting network leaves some values unused
-
 use std::arch::x86_64::*;
 
 use crate::stacking::star_detection::median_filter::simd;
@@ -147,10 +144,12 @@ pub(super) unsafe fn median_filter_row_sse41(
 /// that places the median in position 4. Based on Batcher's odd-even merge sort.
 #[target_feature(enable = "avx2")]
 #[inline]
-// Nine sibling lane values feeding a fixed comparator network, not a group with a name:
-// an array or struct would replace the network's named registers with indices and hand LLVM
-// an aggregate to promote back into exactly those registers.
-#[expect(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "nine sibling lane values feeding a fixed comparator network, not a group with a \
+              name: an array or struct would replace the network's named registers with indices \
+              and hand LLVM an aggregate to promote back into exactly those registers"
+)]
 unsafe fn median9_avx2(
     mut v0: __m256,
     mut v1: __m256,
@@ -169,10 +168,12 @@ unsafe fn median9_avx2(
 /// Vectorized median of 9 elements using SSE4.1.
 #[target_feature(enable = "sse4.1")]
 #[inline]
-// Nine sibling lane values feeding a fixed comparator network, not a group with a name:
-// an array or struct would replace the network's named registers with indices and hand LLVM
-// an aggregate to promote back into exactly those registers.
-#[expect(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "nine sibling lane values feeding a fixed comparator network, not a group with a \
+              name: an array or struct would replace the network's named registers with indices \
+              and hand LLVM an aggregate to promote back into exactly those registers"
+)]
 unsafe fn median9_sse41(
     mut v0: __m128,
     mut v1: __m128,

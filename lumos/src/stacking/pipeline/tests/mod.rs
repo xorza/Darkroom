@@ -44,7 +44,7 @@ fn shifted(base: &LinearImage, dx: f64, dy: f64) -> LinearImage {
     warp(
         base,
         &WarpTransform::new(t),
-        &RegistrationConfig::default().warp,
+        RegistrationConfig::default().warp,
     )
     .image
 }

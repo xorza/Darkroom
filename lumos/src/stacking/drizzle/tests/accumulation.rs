@@ -31,8 +31,8 @@ fn drizzle_stack_empty_paths() {
         Vec::<DrizzleFrame<PathBuf>>::new(),
         &config,
         &LoadContext::default(),
-        ProgressCallback::default(),
-        CancelToken::never(),
+        &ProgressCallback::default(),
+        &CancelToken::never(),
     );
     assert!(matches!(result.unwrap_err(), DrizzleError::NoFrames));
 }
@@ -78,8 +78,8 @@ fn drizzle_stack_loads_its_frames_under_the_run_token() {
     let in_memory = drizzle_images(
         drizzle_frames(loaded, &transforms),
         &config,
-        ProgressCallback::default(),
-        CancelToken::never(),
+        &ProgressCallback::default(),
+        &CancelToken::never(),
     )
     .unwrap()
     .product;
@@ -93,8 +93,8 @@ fn drizzle_stack_loads_its_frames_under_the_run_token() {
         frames(&paths),
         &config,
         &cancelled_context,
-        ProgressCallback::default(),
-        CancelToken::never(),
+        &ProgressCallback::default(),
+        &CancelToken::never(),
     )
     .unwrap()
     .product;
@@ -109,8 +109,8 @@ fn drizzle_stack_loads_its_frames_under_the_run_token() {
             frames(&missing),
             &config,
             &LoadContext::default(),
-            ProgressCallback::default(),
-            CancelToken::never(),
+            &ProgressCallback::default(),
+            &CancelToken::never(),
         ),
         Err(DrizzleError::ImageLoad(_))
     ));
@@ -119,8 +119,8 @@ fn drizzle_stack_loads_its_frames_under_the_run_token() {
             frames(&paths),
             &config,
             &LoadContext::default(),
-            ProgressCallback::default(),
-            cancelled,
+            &ProgressCallback::default(),
+            &cancelled,
         ),
         Err(DrizzleError::Cancelled)
     ));
@@ -131,8 +131,8 @@ fn drizzle_images_empty() {
     let result = drizzle_images(
         Vec::new(),
         &DrizzleConfig::default(),
-        ProgressCallback::default(),
-        CancelToken::never(),
+        &ProgressCallback::default(),
+        &CancelToken::never(),
     );
     assert!(matches!(result.unwrap_err(), DrizzleError::NoFrames));
 }
@@ -155,8 +155,8 @@ fn drizzle_stops_between_frames_when_cancelled() {
     let result = drizzle_images(
         frames,
         &DrizzleConfig::default(),
-        ProgressCallback::default(),
-        cancel,
+        &ProgressCallback::default(),
+        &cancel,
     );
     assert!(
         matches!(result.unwrap_err(), DrizzleError::Cancelled),
@@ -176,8 +176,8 @@ fn drizzle_stops_between_frames_when_cancelled() {
         drizzle_images(
             frames,
             &DrizzleConfig::default(),
-            ProgressCallback::default(),
-            CancelToken::never(),
+            &ProgressCallback::default(),
+            &CancelToken::never(),
         )
         .is_ok()
     );
@@ -230,12 +230,12 @@ fn a_sip_warp_drizzles_through_its_inverse() {
     let from_images = drizzle_images(
         vec![DrizzleFrame::new(image.clone(), warp.clone())],
         &config,
-        ProgressCallback::default(),
-        CancelToken::never(),
+        &ProgressCallback::default(),
+        &CancelToken::never(),
     )
     .unwrap();
     let mut acc = accumulator(ImageDimensions::new(size, 1), config);
-    acc.add_frame(DrizzleFrame::new(image, warp.clone()))
+    acc.add_frame(&DrizzleFrame::new(image, warp.clone()))
         .unwrap();
     let from_accumulator = acc.finalize();
     assert_eq!(from_images.unconverged_points, 0);
@@ -255,7 +255,7 @@ fn a_sip_warp_drizzles_through_its_inverse() {
     pixels[size.index_of(t)] = 1.0;
     let point = kernel_config(DrizzleKernel::Point, 1.0, 1.0);
     let mut acc = accumulator(ImageDimensions::new(size, 1), point);
-    acc.add_frame(DrizzleFrame::new(gray_image(size, pixels), warp.clone()))
+    acc.add_frame(&DrizzleFrame::new(gray_image(size, pixels), warp.clone()))
         .unwrap();
     let out = acc.finalize().product;
     let r = warp
@@ -295,7 +295,7 @@ fn pixels_past_a_fold_are_counted_once_and_deposit_nothing() {
         ImageDimensions::new(size, 1),
         kernel_config(DrizzleKernel::Turbo, 1.0, 1.0),
     );
-    acc.add_frame_with_band_rows(DrizzleFrame::new(constant_image(size, 1.0), warp), 4);
+    acc.add_frame_with_band_rows(&DrizzleFrame::new(constant_image(size, 1.0), warp), 4);
     let result = acc.finalize();
     assert_eq!(result.unconverged_points, failing);
     // No position was guessed for a failing pixel: every covered output pixel holds the constant
@@ -317,8 +317,8 @@ fn drizzle_images_dimension_mismatch() {
     let result = drizzle_images(
         drizzle_frames(vec![a, b], &[Transform::identity(), Transform::identity()]),
         &DrizzleConfig::default(),
-        ProgressCallback::default(),
-        CancelToken::never(),
+        &ProgressCallback::default(),
+        &CancelToken::never(),
     );
     assert!(matches!(
         result.unwrap_err(),
@@ -634,7 +634,7 @@ fn drizzle_accumulator_rejects_invalid_frame_inputs() {
         WarpTransform::new(Transform::identity()),
     );
     frame.pixel_weight_map = Some(Buffer2::new_filled(3, 3, 1.0));
-    let error = acc.add_frame(frame).unwrap_err();
+    let error = acc.add_frame(&frame).unwrap_err();
     assert!(matches!(
         error,
         DrizzleError::PixelWeightDimensionMismatch {
@@ -651,7 +651,7 @@ fn drizzle_accumulator_rejects_invalid_frame_inputs() {
         WarpTransform::new(Transform::identity()),
     );
     frame.weight = f32::NAN;
-    let error = acc.add_frame(frame).unwrap_err();
+    let error = acc.add_frame(&frame).unwrap_err();
     assert!(matches!(
         error,
         DrizzleError::InvalidFrameWeight { index: 0, value } if value.is_nan()
@@ -664,7 +664,7 @@ fn drizzle_accumulator_rejects_invalid_frame_inputs() {
         WarpTransform::new(Transform::identity()),
     );
     frame.pixel_weight_map = Some(Buffer2::new(4, 4, pixel_weights));
-    let error = acc.add_frame(frame).unwrap_err();
+    let error = acc.add_frame(&frame).unwrap_err();
     assert!(matches!(
         error,
         DrizzleError::InvalidPixelWeight {

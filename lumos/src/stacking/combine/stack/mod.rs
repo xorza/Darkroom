@@ -110,15 +110,15 @@ impl From<LinearImage> for StackFrame {
 /// ```
 pub fn stack<P: AsRef<Path> + Sync>(
     paths: &[P],
-    config: StackConfig,
+    config: &StackConfig,
     progress: ProgressCallback,
     cancel: CancelToken,
 ) -> Result<StackProduct, Error> {
     // Files on disk carry no coverage, so the combine treats every pixel as fully covered.
     // `cancel` rides on the cache from construction, so the load loop polls it too.
-    combine_cached(&config, paths.len(), "paths", || {
+    combine_cached(config, paths.len(), "paths", || {
         let memory = RunMemory::read(config.cache.memory_override);
-        FrameCache::from_paths(paths, &config, memory, progress, cancel)
+        FrameCache::from_paths(paths, config, memory, progress, cancel)
     })
 }
 
@@ -138,12 +138,12 @@ pub fn stack<P: AsRef<Path> + Sync>(
 /// normalization is requested for registered frames with no common valid support.
 pub fn stack_images(
     frames: Vec<StackFrame>,
-    config: StackConfig,
+    config: &StackConfig,
     progress: ProgressCallback,
     cancel: CancelToken,
 ) -> Result<StackProduct, Error> {
     let frame_count = frames.len();
-    combine_cached(&config, frame_count, "memory", || {
+    combine_cached(config, frame_count, "memory", || {
         FrameCache::from_stack_frames(frames, config.normalization, progress, cancel)
     })
 }
@@ -154,12 +154,12 @@ pub(crate) fn stack_stored_frames(
     tier: CacheTier,
     dimensions: ImageDimensions,
     metadata: ImageMetadata,
-    config: StackConfig,
+    config: &StackConfig,
     progress: ProgressCallback,
     cancel: CancelToken,
 ) -> Result<StackProduct, Error> {
     let frame_count = frames.len();
-    combine_cached(&config, frame_count, "frame store", || {
+    combine_cached(config, frame_count, "frame store", || {
         FrameCache::from_stored_frames(
             frames,
             CacheCore {

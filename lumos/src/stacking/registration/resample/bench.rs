@@ -25,7 +25,7 @@ fn bench_plane_warp(b: quickbench::Bencher, side: usize, method: InterpolationMe
             black_box(&input),
             black_box(&mut output),
             &black_box(WarpTransform::new(transform)),
-            &params,
+            params,
         );
     });
 }
@@ -148,7 +148,7 @@ fn bench_warp_with_quality_lanczos3_1k(b: quickbench::Bencher) {
         resample::warp(
             black_box(&image),
             &black_box(WarpTransform::new(transform)),
-            &params,
+            params,
         )
     });
 }
@@ -187,7 +187,7 @@ fn bench_warp_into_fresh_4k(b: quickbench::Bencher) {
         buffers.warp_into(
             black_box(&image),
             &black_box(WarpTransform::new(transform)),
-            &params,
+            params,
         );
         black_box(buffers)
     });
@@ -206,7 +206,7 @@ fn bench_warp_into_reused_4k(b: quickbench::Bencher) {
         buffers.warp_into(
             black_box(&image),
             &black_box(WarpTransform::new(transform)),
-            &params,
+            params,
         );
     });
 }
@@ -224,7 +224,7 @@ fn bench_warp_into_rgb_sip_2k(b: quickbench::Bencher) {
     let warp = sip_warp(size);
     let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
     let mut buffers = resample::WarpBuffers::new(image.dimensions());
-    b.bench(|| buffers.warp_into(black_box(&image), black_box(&warp), &params));
+    b.bench(|| buffers.warp_into(black_box(&image), black_box(&warp), params));
 }
 
 /// A 2k RGB frame through `warp_into` with a homography: numerators and denominator are affine in x,
@@ -242,7 +242,7 @@ fn bench_warp_into_rgb_homography_2k(b: quickbench::Bencher) {
     ]));
     let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
     let mut buffers = resample::WarpBuffers::new(image.dimensions());
-    b.bench(|| buffers.warp_into(black_box(&image), black_box(&warp), &params));
+    b.bench(|| buffers.warp_into(black_box(&image), black_box(&warp), params));
 }
 
 /// The test transform with an order-3 SIP fitted to a mild radial field over `size`.

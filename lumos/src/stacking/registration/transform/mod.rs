@@ -57,8 +57,7 @@ impl TransformType {
     pub const fn min_points(&self) -> usize {
         match self {
             TransformType::Translation => 1,
-            TransformType::Euclidean => 2,
-            TransformType::Similarity => 2,
+            TransformType::Euclidean | TransformType::Similarity => 2,
             TransformType::Affine => 3,
             TransformType::Homography => 4,
         }

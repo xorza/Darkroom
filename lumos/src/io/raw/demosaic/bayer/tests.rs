@@ -409,6 +409,10 @@ fn signed_linear_gradient_crossing_zero_is_reconstructed_without_spikes() {
 /// direction filter computed at the wrong sites.
 #[test]
 fn rcd_is_the_same_on_every_bayer_phase() {
+    // Each image interpolates its own outer `INTERPOLATED_BORDER` pixels, and a crop shifted by one
+    // has its band one pixel further in; past that, both images are RCD's own.
+    const MARGIN: usize = INTERPOLATED_BORDER + 1;
+
     let (w, h) = (48, 40);
     let scene = |x: usize, y: usize, c: usize| -> f32 {
         let (x, y) = (x as f32, y as f32);
@@ -437,9 +441,6 @@ fn rcd_is_the_same_on_every_bayer_phase() {
     )
     .unwrap();
 
-    // Each image interpolates its own outer `INTERPOLATED_BORDER` pixels, and a crop shifted by one
-    // has its band one pixel further in; past that, both images are RCD's own.
-    const MARGIN: usize = INTERPOLATED_BORDER + 1;
     for (pattern, dx, dy) in [
         (CfaPattern::Grbg, 1, 0),
         (CfaPattern::Gbrg, 0, 1),

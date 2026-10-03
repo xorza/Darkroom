@@ -22,7 +22,7 @@ fn do_warp(
         input,
         &mut output,
         &WarpTransform::new(inverse),
-        &config::internals::warp_params(method),
+        config::internals::warp_params(method),
     );
     output
 }
@@ -252,7 +252,7 @@ fn warp_preserves_output_metadata() {
         method: InterpolationMethod::Bilinear,
         ..Default::default()
     };
-    let warped = resample::warp(&image, &WarpTransform::new(transform), &warp_config).image;
+    let warped = resample::warp(&image, &WarpTransform::new(transform), warp_config).image;
 
     // Verify the input's metadata is carried into the warped output (warp only
     // produces new pixel data).
@@ -329,9 +329,9 @@ fn the_public_warp_samples_through_the_sip_correction() {
     );
     for method in InterpolationMethod::ALL {
         let params = config::internals::warp_params(method);
-        let warped = resample::warp(&image, &warp_transform, &params).image;
+        let warped = resample::warp(&image, &warp_transform, params).image;
         let mut plane = Buffer2::new_default(size.width, size.height);
-        internals::warp_plane(&pixels, &mut plane, &warp_transform, &params);
+        internals::warp_plane(&pixels, &mut plane, &warp_transform, params);
         for (index, (a, e)) in warped.channel(0).iter().zip(plane.iter()).enumerate() {
             assert_eq!(
                 a.to_bits(),
@@ -365,7 +365,7 @@ fn warp_emits_coverage_and_renormalizes_bilinear_border() {
     };
     assert_eq!(config.border_value, 0.0, "test assumes a zero border");
 
-    let result = resample::warp(&image, &WarpTransform::new(transform), &config);
+    let result = resample::warp(&image, &WarpTransform::new(transform), config);
     let cov = result.coverage.pixels();
     let confidence = result.confidence.pixels();
     let val = result.image.channel(0).pixels();
@@ -409,7 +409,7 @@ fn warp_renormalizes_lanczos_edges_and_emits_coverage() {
         ..Default::default()
     };
 
-    let result = resample::warp(&image, &WarpTransform::new(transform), &config);
+    let result = resample::warp(&image, &WarpTransform::new(transform), config);
     let cov = result.coverage.pixels();
     let confidence = result.confidence.pixels();
     let val = result.image.channel(0).pixels();

@@ -141,9 +141,9 @@ fn builds_full_master_set() {
 
 #[derive(Debug)]
 struct HotMaskMetrics {
-    hot_count: usize,
-    edge_count: usize,
-    max_bin_count: usize,
+    hot: usize,
+    at_edge: usize,
+    fullest_bin: usize,
 }
 
 #[derive(Debug)]
@@ -157,7 +157,7 @@ fn hot_mask_metrics(map: &DefectMap, size: Size2us) -> HotMaskMetrics {
 
     let margin_x = size.width / 10;
     let margin_y = size.height / 10;
-    let edge_count = map
+    let at_edge = map
         .hot_indices()
         .iter()
         .filter(|&&index| {
@@ -178,9 +178,9 @@ fn hot_mask_metrics(map: &DefectMap, size: Size2us) -> HotMaskMetrics {
     }
 
     HotMaskMetrics {
-        hot_count: map.hot_indices().len(),
-        edge_count,
-        max_bin_count: *bins.iter().max().unwrap(),
+        hot: map.hot_indices().len(),
+        at_edge,
+        fullest_bin: *bins.iter().max().unwrap(),
     }
 }
 
@@ -271,16 +271,16 @@ fn hot_mask_spatial_distribution_and_repeatability() {
         ("second", &second_metrics),
         ("full", &full_metrics),
     ] {
-        let edge_share = metrics.edge_count as f64 / metrics.hot_count as f64;
+        let edge_share = metrics.at_edge as f64 / metrics.hot as f64;
         assert!(
             (edge_share - band_share).abs() <= 0.05,
             "{name}: {edge_share:.3} of the hot pixels in the edge band"
         );
-        let mean_bin = metrics.hot_count as f64 / 64.0;
+        let mean_bin = metrics.hot as f64 / 64.0;
         assert!(
-            metrics.max_bin_count as f64 <= 1.25 * mean_bin,
+            metrics.fullest_bin as f64 <= 1.25 * mean_bin,
             "{name}: busiest cell {} against a mean {mean_bin:.0}",
-            metrics.max_bin_count
+            metrics.fullest_bin
         );
     }
 }

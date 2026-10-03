@@ -63,6 +63,10 @@ fn image_ops_memory_probe() {
 
     let sampler = RssSampler::start();
     let chain_gate = sampler.gate();
+    #[expect(
+        clippy::unused_result_ok,
+        reason = "a progress line that fails to flush costs the probe nothing"
+    )]
     io::stdout().flush().ok();
 
     chain_gate.open();
@@ -73,11 +77,11 @@ fn image_ops_memory_probe() {
     let elapsed = started.elapsed();
 
     let peak = sampler.finish();
-    let anon_mb = peak.anon_mb;
+    let anon_mb = peak.anon;
     println!("chain elapsed {elapsed:?}");
     println!("peak RssAnon  {anon_mb} MB   (heap — the OOM-relevant figure)");
-    println!("  during ops  {} MB", peak.gated_anon_mb);
-    println!("peak VmRSS    {} MB   (total resident)", peak.total_mb);
+    println!("  during ops  {} MB", peak.gated_anon);
+    println!("peak VmRSS    {} MB   (total resident)", peak.total);
     println!(
         "peak / master {:.2}x",
         anon_mb as f64 / (master_bytes / MB) as f64

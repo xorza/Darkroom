@@ -87,7 +87,7 @@ fn warped(image: &LinearImage, transform: Transform) -> WarpResult {
     warp(
         image,
         &WarpTransform::new(transform),
-        &RegistrationConfig::default().warp,
+        RegistrationConfig::default().warp,
     )
 }
 
@@ -188,7 +188,7 @@ fn calibrate_snapshot() {
             flat_dark: None,
         },
         DEFAULT_SIGMA_THRESHOLD,
-        CancelToken::never(),
+        &CancelToken::never(),
     )
     .unwrap();
     let mut light = make_cfa(size, light, bayer);
@@ -272,7 +272,7 @@ fn combine_snapshot() {
     }
     let product = stack_images(
         frames,
-        StackConfig::default(),
+        &StackConfig::default(),
         ProgressCallback::default(),
         CancelToken::never(),
     )

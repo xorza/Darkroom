@@ -26,7 +26,7 @@ use crate::stacking::registration::distortion::SINGULAR_THRESHOLD;
 use crate::stacking::registration::point_normalization::PointNormalization;
 
 /// Configuration for thin-plate spline fitting.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 struct TpsConfig {
     /// Regularization parameter (lambda). Higher values produce smoother
     /// interpolation but may not pass exactly through control points.

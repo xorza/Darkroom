@@ -75,8 +75,8 @@ fn drizzle(frames: &DitheredFrames, config: &DrizzleConfig) -> StackProduct {
     drizzle_images(
         drizzle_frames(frames.images.clone(), &frames.transforms),
         config,
-        ProgressCallback::default(),
-        CancelToken::never(),
+        &ProgressCallback::default(),
+        &CancelToken::never(),
     )
     .unwrap()
     .product

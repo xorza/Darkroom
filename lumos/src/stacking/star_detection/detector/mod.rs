@@ -101,8 +101,7 @@ impl FwhmSource {
     pub const fn value(&self) -> Option<f32> {
         match self {
             FwhmSource::Disabled => None,
-            FwhmSource::Configured(fwhm) => Some(*fwhm),
-            FwhmSource::Estimated { fwhm, .. } => Some(*fwhm),
+            FwhmSource::Configured(fwhm) | FwhmSource::Estimated { fwhm, .. } => Some(*fwhm),
         }
     }
 }

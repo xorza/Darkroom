@@ -71,7 +71,7 @@ impl LogUniformFlux {
         }
     }
 
-    fn sample(&self, rng: &mut TestRng) -> f32 {
+    fn sample(self, rng: &mut TestRng) -> f32 {
         (self.log_min + rng.next_f32() * (self.log_max - self.log_min)).exp()
     }
 }

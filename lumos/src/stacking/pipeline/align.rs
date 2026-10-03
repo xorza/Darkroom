@@ -276,7 +276,7 @@ pub(crate) fn register_warp_and_stack(
             warped.warp_into(
                 &source,
                 &registration.warp_transform(),
-                &config.registration.warp,
+                config.registration.warp,
             );
             let metadata = source.metadata.clone();
             drop(source);
@@ -319,7 +319,7 @@ pub(crate) fn register_warp_and_stack(
         tier.into_cache_tier(),
         dimensions,
         metadata,
-        config.stack.for_survivors(&dropped),
+        &config.stack.for_survivors(&dropped),
         progress,
         cancel,
     )?;

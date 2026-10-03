@@ -283,6 +283,13 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
 /// `NoiseModel`, registers each, and compares.
 #[test]
 fn weighted_fit_registration_rms() {
+    /// What one registration of the pair reported.
+    #[derive(Debug)]
+    struct Registered {
+        rms: f64,
+        inliers: usize,
+    }
+
     let LightPair {
         first: img1,
         last: img2,
@@ -291,12 +298,6 @@ fn weighted_fit_registration_rms() {
     // 30,000 e-/normalized unit is representative of physical gain × the 14-bit signal range.
     let noise_model = NoiseModel::from_normalized(30_000.0, 30.0);
 
-    /// What one registration of the pair reported.
-    #[derive(Debug)]
-    struct Registered {
-        rms: f64,
-        inliers: usize,
-    }
     let register_with = |noise: Option<NoiseModel>| {
         let mut config = Config::precise_ground();
         config.measurement.centroid_method = CentroidMethod::GaussianFit;

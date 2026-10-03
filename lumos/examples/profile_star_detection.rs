@@ -7,6 +7,8 @@
 //! Or with samply:
 //!   samply record -r 4999 ./`target/release/examples/profile_star_detection`
 
+#![expect(clippy::print_stderr, reason = "an example reports to the terminal")]
+
 use std::hint;
 use std::thread;
 use std::time::Duration;

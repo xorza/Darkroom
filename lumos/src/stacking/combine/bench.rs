@@ -51,7 +51,7 @@ fn bench_stack_30(b: ::quickbench::Bencher) {
             black_box(
                 stack_images(
                     frames.clone(),
-                    config.clone(),
+                    &config.clone(),
                     ProgressCallback::default(),
                     CancelToken::never(),
                 )

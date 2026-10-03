@@ -67,6 +67,9 @@ fn assert_constant_or_fill(product: &StackProduct, value: f32, fill: f32, gate: 
 /// for that.
 #[test]
 fn a_constant_reads_back_wherever_weight_landed() {
+    const GATE: f32 = 0.5;
+    const FILL: f32 = -7.0;
+
     let size = Size2us::new(20, 20);
     let transforms = [
         ("identity", Transform::identity()),
@@ -76,8 +79,6 @@ fn a_constant_reads_back_wherever_weight_landed() {
             Transform::rotation_around(DVec2::splat(9.5), 15.0f64.to_radians()),
         ),
     ];
-    const GATE: f32 = 0.5;
-    const FILL: f32 = -7.0;
     for kernel in DrizzleKernel::ALL {
         for (name, transform) in &transforms {
             for value in [3.0, -0.5] {
@@ -378,12 +379,13 @@ fn an_unmagnified_drop_deposits_its_frame_weight() {
 /// little more than its lobes.
 #[test]
 fn a_zero_pixel_weight_keeps_the_pixel_out() {
+    const GATE: f32 = 0.25;
+
     let size = Size2us::new(12, 12);
     let pixel = Vec2us::new(5, 5);
     let transform = Transform::translation(DVec2::new(0.3, -0.2));
     let mut excluded = Buffer2::new_filled(size.width, size.height, 1.0);
     excluded[(pixel.x, pixel.y)] = 0.0;
-    const GATE: f32 = 0.25;
     for (kernel, footprint) in [
         (DrizzleKernel::Turbo, 9),
         (DrizzleKernel::Square, 9),

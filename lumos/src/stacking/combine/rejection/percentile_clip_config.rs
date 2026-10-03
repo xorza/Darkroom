@@ -36,7 +36,7 @@ impl PercentileClipConfig {
     }
 
     /// Validate that each end clips a sane share and that together they leave survivors.
-    pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
+    pub(super) fn validate(self) -> Result<(), InvalidConfigField> {
         InvalidConfigField::finite(
             "low_percentile",
             "finite and between 0 and 50",
@@ -80,7 +80,7 @@ impl PercentileClipConfig {
     ///
     /// Sorts values (with index co-array) and moves the surviving middle range
     /// to `values[..remaining]` and `indices[..remaining]`.
-    pub(super) fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
+    pub(super) fn reject(self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
         if let Some(survivors) = begin_rejection(values, scratch, 3) {
             return survivors;
         }

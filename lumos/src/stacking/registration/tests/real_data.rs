@@ -146,7 +146,7 @@ fn register_two_lights() {
 
     // Warp img2 to align with img1 and measure time
     let warp_start = Instant::now();
-    let warped = warp(&img2, &result.warp_transform(), &reg_config.warp).image;
+    let warped = warp(&img2, &result.warp_transform(), reg_config.warp).image;
     let warp_elapsed = warp_start.elapsed();
 
     println!(

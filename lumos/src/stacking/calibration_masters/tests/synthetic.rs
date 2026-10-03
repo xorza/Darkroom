@@ -51,7 +51,7 @@ fn calibrate_removes_vignette_dark_and_bias() {
             flat_dark: None,
         },
         5.0,
-        CancelToken::never(),
+        &CancelToken::never(),
     )
     .unwrap();
     let mut light = make_cfa(size, light_px, CfaType::Mono);
@@ -103,7 +103,7 @@ fn calibrate_recovers_star_field_through_a_noisy_light() {
             flat_dark: None,
         },
         5.0,
-        CancelToken::never(),
+        &CancelToken::never(),
     )
     .unwrap();
     let mut light = make_cfa(size, frame.image.channel(0).to_vec(), CfaType::Mono);

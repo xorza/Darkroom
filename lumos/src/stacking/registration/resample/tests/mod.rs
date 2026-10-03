@@ -42,7 +42,7 @@ fn translated_images_use_border_only_outside_source_footprint() {
                 let result = resample::warp(
                     &image,
                     &transform,
-                    &WarpParams {
+                    WarpParams {
                         method,
                         border_value: BORDER,
                     },
@@ -125,8 +125,8 @@ fn a_null_is_reconstructed_from_its_surviving_taps_rather_than_smeared() {
             method,
             border_value: BORDER,
         };
-        let masked = resample::warp(&fixture.declared, &transform, &params);
-        let plain = resample::warp(&fixture.undeclared, &transform, &params);
+        let masked = resample::warp(&fixture.declared, &transform, params);
+        let plain = resample::warp(&fixture.undeclared, &transform, params);
 
         // Every pixel the frame still supports reads the constant back to rounding: interpolating a
         // flat field over whichever taps survived is that field, so the fill never reaches the
@@ -192,8 +192,8 @@ fn the_footprint_a_null_reduces_is_the_kernels_own() {
             method,
             border_value: 0.0,
         };
-        let masked = resample::warp(&fixture.declared, &transform, &params);
-        let plain = resample::warp(&fixture.undeclared, &transform, &params);
+        let masked = resample::warp(&fixture.declared, &transform, params);
+        let plain = resample::warp(&fixture.undeclared, &transform, params);
         (0..dimensions.pixel_count())
             .filter(|&index| masked.coverage.pixels()[index] < plain.coverage.pixels()[index])
             .count()
@@ -232,7 +232,7 @@ fn a_block_of_nulls_wider_than_the_kernel_leaves_no_support_at_all() {
     let result = resample::warp(
         &image,
         &WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5))),
-        &WarpParams {
+        WarpParams {
             method: InterpolationMethod::Bilinear,
             border_value: BORDER,
         },
@@ -261,7 +261,7 @@ fn warp_refuses_a_non_finite_border() {
     resample::warp(
         &image,
         &transform,
-        &WarpParams {
+        WarpParams {
             border_value: f32::NAN,
             ..Default::default()
         },
@@ -301,7 +301,7 @@ fn warp_into_overwrites_dirty_buffers_completely() {
                         method,
                         border_value: -7.0,
                     };
-                    let fresh = resample::warp(image, transform, &params);
+                    let fresh = resample::warp(image, transform, params);
 
                     let mut sentinel = WarpBuffers::new(dimensions);
                     for plane in sentinel.pixels.planes_mut() {
@@ -309,11 +309,11 @@ fn warp_into_overwrites_dirty_buffers_completely() {
                     }
                     sentinel.coverage.pixels_mut().fill(f32::NAN);
                     sentinel.confidence.pixels_mut().fill(f32::NAN);
-                    sentinel.warp_into(image, transform, &params);
+                    sentinel.warp_into(image, transform, params);
 
                     let mut reused = WarpBuffers::new(dimensions);
-                    reused.warp_into(&previous, &transforms[0], &params);
-                    reused.warp_into(image, transform, &params);
+                    reused.warp_into(&previous, &transforms[0], params);
+                    reused.warp_into(image, transform, params);
 
                     for buffers in [&sentinel, &reused] {
                         for channel in 0..channels {
@@ -351,13 +351,13 @@ fn an_rgb_warp_is_three_mono_warps() {
             method,
             border_value: 0.0,
         };
-        let warped = resample::warp(&rgb, &transform, &params);
+        let warped = resample::warp(&rgb, &transform, params);
         for channel in 0..3 {
             let mono = LinearImage::from_pixels(
                 ImageDimensions::new((size.width, size.height), 1),
                 rgb.channel(channel).pixels().to_vec(),
             );
-            let alone = resample::warp(&mono, &transform, &params);
+            let alone = resample::warp(&mono, &transform, params);
             assert_bitwise(
                 warped.image.channel(channel).pixels(),
                 alone.image.channel(0).pixels(),

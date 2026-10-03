@@ -74,6 +74,8 @@ impl ScratchBuffers {
     /// branch alone; it lives on the struct rather than in the function so the allocation survives
     /// from one pixel to the next.
     pub(crate) fn sort_with_indices(&mut self, values: &mut [f32], n: usize) {
+        const INSERTION_SORT_THRESHOLD: usize = 64;
+
         let Self {
             indices,
             sort:
@@ -84,8 +86,6 @@ impl ScratchBuffers {
                 },
             ..
         } = self;
-
-        const INSERTION_SORT_THRESHOLD: usize = 64;
 
         if n <= INSERTION_SORT_THRESHOLD {
             for i in 1..n {
