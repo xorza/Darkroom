@@ -404,10 +404,9 @@ impl RunSchedule {
                 self.add_root(node_idx, RootFlags::EVENT_SOURCE);
             }
         }
-        // Ascending, which is the order the previous bitset yielded and so the
-        // order `process_order` was built in — a root list in the order the seeds
-        // happened to name would make an unchanged graph plan differently run to
-        // run. Deduplicated already, by `add_root` pushing once per node.
+        // Ascending, so an unchanged graph plans the same `process_order` run
+        // to run, whatever order the seeds named the roots in. Deduplicated
+        // already, by `add_root` pushing once per node.
         self.roots.sort_unstable();
         Ok(())
     }
@@ -600,14 +599,9 @@ impl RunSchedule {
                 };
                 // Only a producer the plan will actually run can deliver a
                 // value. A **disabled** producer feeding an *optional* input
-                // leaves the consumer perfectly schedulable — `input_missing`
-                // treats an optional port fed by a disabled producer as
-                // satisfied — but the producer itself never enters
-                // `process_order`. Marking it live here put a node the schedule
-                // does not contain into the run, and the consumer's read then
-                // demanded an output nothing would ever produce: a panic on a
-                // cold cache, and on a warm one the value from before it was
-                // disabled, served as if it were this run's.
+                // leaves the consumer schedulable — `input_missing` treats
+                // that port as satisfied — but never enters `process_order`,
+                // so it is not promoted and the consumer plans no read of it.
                 if states[addr.node_idx].promote_to_run() {
                     outputs.add_reader(program.output_idx(*addr));
                 }

@@ -51,9 +51,8 @@ impl BlobTarget {
     /// [`DiskStore::covers_demand`] is header-only, so a blob with an
     /// intact header and a corrupt body goes on passing the reuse check —
     /// while the file survives, every run prunes the producer cone and
-    /// fails the same decode. Discarding the removal error left that both
-    /// permanent and invisible; reporting it is what makes it
-    /// diagnosable, since nothing here can force the unlink through.
+    /// fails the same decode. A removal that fails is therefore reported:
+    /// nothing here can force the unlink through.
     async fn delete(&self) {
         if let Err(error) = fs::remove_file(&self.path).await
             && error.kind() != io::ErrorKind::NotFound

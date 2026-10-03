@@ -21,10 +21,8 @@ use crate::graph::Binding;
 use crate::graph::identity::{InputPort, NodeId};
 use crate::graph::node::Node;
 
-/// The binding table travels as a sequence of pairs. RON would take an
-/// `InputPort` as a map key — the string-keyed formats that forced the
-/// sequence are gone — but the sequence is the shape every stored document
-/// already has, and nothing here needs the map form.
+/// The binding table travels as a sequence of `(port, binding)` pairs — the
+/// document format — and decodes entry by entry so a repeated port is refused.
 pub(super) fn serialize_bindings<S: Serializer>(
     map: &BTreeMap<InputPort, Binding>,
     serializer: S,

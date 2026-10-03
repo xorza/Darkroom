@@ -106,11 +106,9 @@ impl ExecutionEngine {
     }
 
     /// `reporter` receives live feedback ahead of the final outcome: progress before and
-    /// after each node's lambda runs, and the pinned outputs of a node that produces or
-    /// reuses one (or is itself a pinned root), so a GUI preview updates without polling.
-    /// When `cancel` is set mid-run, scheduling stops after the in-flight node and the
-    /// caller-owned outcome is marked `cancelled`. The outcome also owns triggers
-    /// initialized successfully by an `event_sources` seed.
+    /// after each node's lambda runs. When `cancel` is set mid-run, scheduling stops after
+    /// the in-flight node and the caller-owned outcome is marked `cancelled`. The outcome
+    /// also owns triggers initialized successfully by an `event_sources` seed.
     pub(crate) async fn execute(
         &mut self,
         seeds: &RunSeeds,

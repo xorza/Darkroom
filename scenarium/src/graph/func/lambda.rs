@@ -11,7 +11,7 @@ use crate::{
 };
 
 /// Whether a node output must be produced for this run. The planner marks an output
-/// demanded when a downstream binding reads it or the host requested it through a pin.
+/// demanded when a node that runs reads it, or when the host seeded the node itself.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum OutputDemand {
     #[default]
