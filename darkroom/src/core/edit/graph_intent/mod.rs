@@ -22,7 +22,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::iter;
 
 use glam::Vec2;
-use scenarium::{Binding, DetachedNode, InputPort, Node, NodeId, Subscription};
+use scenarium::{Binding, BindingEntry, DetachedNode, InputPort, Node, NodeId, Subscription};
 
 use crate::core::document::PortRef;
 use crate::core::document::{Document, ItemPlacement, Viewport};
@@ -69,7 +69,7 @@ pub(crate) enum GraphIntent {
         /// removes node + seeds together. They must be the new node's own
         /// inputs; wiring *into* an existing node is a separate
         /// [`Self::SetInput`].
-        bindings: Vec<(InputPort, Binding)>,
+        bindings: Vec<BindingEntry>,
     },
     RemoveNode {
         node_id: NodeId,
@@ -231,16 +231,8 @@ impl GraphIntent {
                 .expect("the view places every node the graph holds")
                 .pos
                 + DUPLICATE_OFFSET;
-            // This node's *own* inputs. `bindings_touching` would also hand
-            // back every binding that *reads* the node — cloned into a fresh
-            // `Vec`, then discarded. `InputPort` orders by `(node_id,
-            // port_idx)`, so a node's inputs sit contiguously.
-            let own_inputs = graph
-                .bindings
-                .range(InputPort::new(old_id, 0)..)
-                .take_while(|(port, _)| port.node_id == old_id);
             let mut bindings = Vec::new();
-            for (port, binding) in own_inputs {
+            for (port, binding) in graph.input_bindings(old_id) {
                 let input = InputPort::new(new_id, port.port_idx);
                 match binding {
                     Binding::Bind(source) => match clones.get(&source.node_id) {
@@ -248,10 +240,16 @@ impl GraphIntent {
                             input,
                             to: Some(Binding::bind(new_source, source.port_idx)),
                         }),
-                        None if include_incoming => bindings.push((input, Binding::Bind(*source))),
+                        None if include_incoming => bindings.push(BindingEntry {
+                            port: input,
+                            binding: Binding::Bind(*source),
+                        }),
                         None => {}
                     },
-                    other @ Binding::Const(_) => bindings.push((input, other.clone())),
+                    other @ Binding::Const(_) => bindings.push(BindingEntry {
+                        port: input,
+                        binding: other.clone(),
+                    }),
                 }
             }
             intents.push(Self::AddNode {
@@ -312,7 +310,7 @@ impl GraphIntent {
                 validate::fresh_node_id(graph, node_id)?;
                 validate::finite_position(pos, "AddNode")?;
                 validate::insertable_kind(&node)?;
-                let bindings = validate::seed_bindings(graph, node_id, bindings)?;
+                validate::seed_bindings(graph, node_id, &bindings)?;
                 // The depth is fixed here rather than at write time, so a redo
                 // puts the node back at the depth the original add gave it
                 // instead of jumping it in front of whatever arrived since.

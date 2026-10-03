@@ -20,7 +20,7 @@
 //! reopen.
 
 use glam::Vec2;
-use scenarium::{Binding, BindingEntry, Graph, InputPort, Node, NodeId, NodeKind};
+use scenarium::{Binding, BindingEntry, Graph, Node, NodeId, NodeKind};
 
 use crate::core::edit::error::MalformedIntent;
 
@@ -85,14 +85,14 @@ pub(super) fn insertable_kind(node: &Node) -> Result<(), MalformedIntent> {
 pub(super) fn seed_bindings(
     graph: &Graph,
     node_id: NodeId,
-    bindings: Vec<(InputPort, Binding)>,
-) -> Result<Vec<BindingEntry>, MalformedIntent> {
-    let mut entries: Vec<BindingEntry> = Vec::with_capacity(bindings.len());
-    for (port, binding) in bindings {
+    bindings: &[BindingEntry],
+) -> Result<(), MalformedIntent> {
+    for BindingEntry { port, binding } in bindings {
+        let port = *port;
         if port.node_id != node_id {
             return Err(MalformedIntent::ForeignSeedBinding { port });
         }
-        if let Binding::Bind(source) = &binding {
+        if let Binding::Bind(source) = binding {
             // The one cycle an insertion can author: nothing reads the new
             // node yet, so the only loop it can close is through itself.
             if source.node_id == node_id {
@@ -102,9 +102,8 @@ pub(super) fn seed_bindings(
             // edge.
             present_node(graph, source.node_id, "binding producer")?;
         }
-        entries.push(BindingEntry { port, binding });
     }
-    Ok(entries)
+    Ok(())
 }
 
 /// A node an insertion's wiring points at. Unlike [`live_node`] a miss is

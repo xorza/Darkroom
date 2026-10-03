@@ -344,7 +344,10 @@ impl TestGraph {
     fn place(&mut self, func: &Func) -> NodeId {
         let node_id = NodeId::from_u128(self.mint());
         self.graph.insert(node_id, Node::from(func));
-        self.graph.bindings.extend(func.default_bindings(node_id));
+        self.graph.bindings.extend(
+            func.default_bindings(node_id)
+                .map(|entry| (entry.port, entry.binding)),
+        );
         node_id
     }
 

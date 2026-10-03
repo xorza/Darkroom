@@ -86,8 +86,8 @@ impl<'a> NodeCtx<'a> {
         let node = graph_ctx.body().find(node_id)?;
         // `None` has exactly one meaning: a `NodeKind::Func` whose id the
         // library no longer holds. A special node's declaration is hardcoded,
-        // so `Graph::node_func` resolves it unconditionally.
-        let func = graph_ctx.body().node_func(node, graph_ctx.library());
+        // so `Node::func` resolves it unconditionally.
+        let func = node.func(graph_ctx.library());
         Some(Self {
             graph_ctx,
             id: node_id,

@@ -85,11 +85,6 @@ Severity: Low — `Option`s that must be `Some`, sentinels, and caches of comput
 Severity: Low — precision lost where a caller would branch or show a cause.
 
 
-## scenarium's graph API makes hosts mirror its private rules
-Severity: Low — release asserts on lookups and private well-formedness rules force darkroom and lens to re-implement them.
-
-- [ ] Missing accessor: `darkroom` `GraphIntent::duplicate` and `scenarium/src/graph/mod.rs` `produces_cycle` both spell "a node's own inputs" as `graph.bindings.range(InputPort::new(id, 0)..).take_while(..)`, and `bindings_touching` returns a fresh two-direction `Vec`. `darkroom` `AddNode::bindings: Vec<(InputPort, Binding)>` mirrors `BindingEntry`. `Graph::node_func(&self, node, library)` never reads `self` and belongs on `Node`; `Compiler::walk` repeats its `NodeKind` match. `Subscription { emitter, event_idx, subscriber }` spells out an `EventPort` by hand while `Binding` uses `OutputPort`.
-
 ## lens node lambdas repeat boilerplate and disagree on input contracts
 Severity: Low — idioms written 4–37 times, already drifting.
 

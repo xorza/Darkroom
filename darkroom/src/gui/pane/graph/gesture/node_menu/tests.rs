@@ -171,7 +171,7 @@ fn duplicate_picks_differ_by_whether_incoming_wires_survive() {
                 GraphIntent::AddNode { bindings, .. } => Some(bindings),
                 _ => None,
             })
-            .flat_map(|bindings| bindings.iter().map(|(_, binding)| binding.clone()))
+            .flat_map(|bindings| bindings.iter().map(|entry| entry.binding.clone()))
             .collect();
         assert_eq!(
             intents

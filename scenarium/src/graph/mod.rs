@@ -164,17 +164,13 @@ impl Graph {
     pub fn find(&self, id: NodeId) -> Option<&Node> {
         self.nodes.get(&id)
     }
-    /// The declaration a node instantiates — a library entry, or a special
-    /// node's hardcoded spec. `None` for a `Func` kind the library no longer
-    /// holds: the caller decides whether that is drift to tolerate (the
-    /// editor renders a stub) or a node to skip (lowering).
-    ///
-    /// The one place the per-kind lookup happens, so no caller repeats it.
-    pub fn node_func<'a>(&'a self, node: &'a Node, library: &'a Library) -> Option<&'a Func> {
-        match &node.kind {
-            NodeKind::Func(func_id) => library.by_id(*func_id),
-            NodeKind::Special(special) => Some(special.func()),
-        }
+    /// The bindings on `node_id`'s own inputs, in port order: one contiguous
+    /// range, as `InputPort` orders by node before port.
+    pub fn input_bindings(&self, node_id: NodeId) -> impl Iterator<Item = (InputPort, &Binding)> {
+        self.bindings
+            .range(InputPort::new(node_id, 0)..)
+            .take_while(move |(port, _)| port.node_id == node_id)
+            .map(|(port, binding)| (*port, binding))
     }
     /// Whether input `port` of a node instantiating `func` is set aside by the
     /// input `func` declares to override it — the editor's reading of the
@@ -211,7 +207,7 @@ impl Graph {
     /// mirrors [`Self::input_type`].
     fn input_spec<'a>(&'a self, library: &'a Library, port: InputPort) -> Option<&'a FuncInput> {
         let node = self.find(port.node_id)?;
-        self.node_func(node, library)?.inputs.get(port.port_idx)
+        node.func(library)?.inputs.get(port.port_idx)
     }
     /// What settles one output port's type, one hop at a time: its own
     /// declaration, or — for a *wildcard* (a reroute or passthrough) — the
@@ -245,7 +241,7 @@ impl Graph {
     /// of [`Self::input_spec`].
     fn output_spec<'a>(&'a self, library: &'a Library, port: OutputPort) -> Option<&'a FuncOutput> {
         let node = self.find(port.node_id)?;
-        self.node_func(node, library)?.outputs.get(port.port_idx)
+        node.func(library)?.outputs.get(port.port_idx)
     }
     /// Every data edge as (consumer input ← producer output). Const bindings
     /// are not edges and are skipped.
@@ -283,10 +279,7 @@ impl Graph {
         let mut stack = vec![producer];
         let mut seen: HashSet<NodeId> = HashSet::from_iter([producer]);
         while let Some(node) = stack.pop() {
-            for (port, binding) in self.bindings.range(InputPort::new(node, 0)..) {
-                if port.node_id != node {
-                    break;
-                }
+            for (_, binding) in self.input_bindings(node) {
                 let Binding::Bind(source) = binding else {
                     continue;
                 };
@@ -321,7 +314,7 @@ impl Graph {
             subscriber,
         })
     }
-    pub fn bindings_touching(&self, node_id: NodeId) -> Vec<BindingEntry> {
+    fn bindings_touching(&self, node_id: NodeId) -> Vec<BindingEntry> {
         self.bindings
             .iter()
             .filter(|(port, binding)| binding.touches(**port, node_id))
@@ -362,7 +355,10 @@ impl Graph {
     /// Returns the new node id.
     pub fn add_func_node(&mut self, func: &Func) -> NodeId {
         let node_id = self.add(Node::from(func));
-        self.bindings.extend(func.default_bindings(node_id));
+        self.bindings.extend(
+            func.default_bindings(node_id)
+                .map(|entry| (entry.port, entry.binding)),
+        );
         node_id
     }
 

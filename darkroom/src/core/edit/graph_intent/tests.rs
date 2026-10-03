@@ -2,7 +2,8 @@ use std::collections::BTreeSet;
 
 use glam::Vec2;
 use scenarium::{
-    Binding, CacheMode, ConstValue, FuncId, InputPort, Node, NodeId, NodeKind, Subscription,
+    Binding, BindingEntry, CacheMode, ConstValue, FuncId, InputPort, Node, NodeId, NodeKind,
+    Subscription,
 };
 
 use super::{DUPLICATE_OFFSET, GraphIntent};
@@ -682,7 +683,10 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
         pos: Vec2::ZERO,
         node_id: fresh,
         node: func_node(),
-        bindings,
+        bindings: bindings
+            .into_iter()
+            .map(|(port, binding)| BindingEntry { port, binding })
+            .collect(),
     };
     let cases = [
         (

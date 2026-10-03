@@ -543,7 +543,14 @@ fn a_detached_node_restores_its_wiring_and_malformed_records_are_refused() {
     let mult = g.id("mult");
     // A subscription that touches `sum`, so both kinds of wiring travel.
     g.subscribe("get_a", 0, "sum");
-    assert_eq!(g.graph.bindings_touching(sum).len(), 3);
+    // Its own two inputs, in port order; the binding that reads it is not one.
+    assert_eq!(
+        g.graph
+            .input_bindings(sum)
+            .map(|(port, _)| port)
+            .collect::<Vec<_>>(),
+        [InputPort::new(sum, 0), InputPort::new(sum, 1)]
+    );
 
     let before = g.graph.clone_verbatim();
     let edges_before = g.graph.edges().count();
@@ -776,7 +783,7 @@ fn validate_tolerates_library_range_drift() {
 /// the drift guards do `is_some_and(|p| idx >= p.len())`, so the two decide
 /// opposite ways.
 #[test]
-fn node_func_resolves_to_a_declaration_or_to_unknown() {
+fn a_node_resolves_its_declaration_or_reads_unknown() {
     let mut g = TestGraph::new();
     g.add("sum", |n| {
         n.pure()
@@ -787,7 +794,7 @@ fn node_func_resolves_to_a_declaration_or_to_unknown() {
 
     let declared = g.library.by_name("sum").unwrap().clone();
     let node = g.graph.find(g.id("sum")).unwrap();
-    let ports = g.graph.node_func(node, &g.library).unwrap();
+    let ports = node.func(&g.library).unwrap();
     assert_eq!(ports.name, "sum");
     assert_eq!(ports.inputs.len(), declared.inputs.len());
     assert_eq!(ports.id, declared.id);
@@ -795,7 +802,7 @@ fn node_func_resolves_to_a_declaration_or_to_unknown() {
     // Library drift is unknown, not empty — otherwise every port on a node
     // whose func went missing would read as out of range.
     let missing_func = Node::new(NodeKind::Func(FuncId::unique()));
-    assert!(g.graph.node_func(&missing_func, &g.library).is_none());
+    assert!(missing_func.func(&g.library).is_none());
 }
 
 #[test]
