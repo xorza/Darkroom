@@ -12,7 +12,7 @@ use scenarium::DiskStore;
 use scenarium::{CompiledGraph, Compiler, DynamicValue, WorkerExited, WorkerReport};
 use scenarium::{Graph, NodeId};
 
-use crate::core::io::cache::prepare_document_cache_root;
+use crate::core::io::cache;
 use crate::core::io::preferences::Preferences;
 use crate::core::runtime_library::RuntimeLibrary;
 use crate::core::status::{StatusFamily, StatusLog};
@@ -27,6 +27,12 @@ pub(crate) struct RuntimeHost {
     /// repeated [`set_document_cache`](Self::set_document_cache) can tell
     /// whether the root changed.
     disk_root: Option<PathBuf>,
+    /// Whether `disk_root` was created, with its `.gitignore`. Done once per
+    /// root, and only when a blob can land there.
+    root_prepared: bool,
+    /// Whether the last compiled program holds a disk-backed (`Disk`/`Both`)
+    /// node — the one kind whose values reach the store.
+    disk_backed: bool,
     /// Long-lived so the lowering scratch is reused across compiles instead of
     /// reallocated per run.
     compiler: Compiler,
@@ -48,7 +54,7 @@ enum CacheRootChange {
     /// A different root, or none at all — a document opened, closed, or saved
     /// somewhere else. The worker takes the new store and writes nothing into
     /// it: each location keeps its own store and refills lazily, per
-    /// [`prepare_document_cache_root`].
+    /// [`document_cache_root`](cache::document_cache_root).
     Repointed,
     /// A document that had nowhere to persist gained a root — the first save of
     /// an unsaved document. **The one transition that owes a flush**: its
@@ -78,6 +84,8 @@ impl RuntimeHost {
             library,
             worker,
             disk_root: None,
+            root_prepared: false,
+            disk_backed: false,
             compiler: Compiler::default(),
         };
         // Install the store up front (memory-only until a document has a
@@ -107,6 +115,8 @@ impl RuntimeHost {
         match self.compiler.compile(graph, self.library.current()) {
             Ok(compiled) => {
                 status.succeeded(StatusFamily::Run);
+                self.disk_backed = graph.iter().any(|node| node.cache.persists_to_disk());
+                self.prepare_root();
                 Some(Arc::new(compiled))
             }
             Err(e) => {
@@ -128,8 +138,22 @@ impl RuntimeHost {
     /// The disk store is untouched: it is repointed separately by
     /// [`Self::set_document_cache`], and the blobs the old document wrote stay
     /// where they are for when it is reopened.
-    pub(crate) fn clear_program(&self) {
+    pub(crate) fn clear_program(&mut self) {
+        self.disk_backed = false;
         self.dispatch(WorkerBridge::clear);
+    }
+
+    /// Create the disk root, with its `.gitignore`, before the first blob can
+    /// land there: once per root, and only while the program holds a
+    /// disk-backed node.
+    fn prepare_root(&mut self) {
+        if self.root_prepared || !self.disk_backed {
+            return;
+        }
+        if let Some(root) = &self.disk_root {
+            cache::prepare_cache_root(root);
+            self.root_prepared = true;
+        }
     }
 
     /// Point the disk cache at `doc_path`'s project-local store
@@ -142,12 +166,19 @@ impl RuntimeHost {
     pub(crate) fn set_document_cache(&mut self, doc_path: Option<&Path>) {
         let previous = mem::replace(
             &mut self.disk_root,
-            doc_path.map(prepare_document_cache_root),
+            doc_path.map(cache::document_cache_root),
         );
-        match CacheRootChange::of(previous.as_deref(), self.disk_root.as_deref()) {
+        let change = CacheRootChange::of(previous.as_deref(), self.disk_root.as_deref());
+        if change != CacheRootChange::Unchanged {
+            self.root_prepared = false;
+        }
+        match change {
             CacheRootChange::Unchanged => {}
             CacheRootChange::Repointed => self.sync_worker_disk_store(),
             CacheRootChange::Gained => {
+                // The flush writes the resident disk-backed values, so the root
+                // they land in is prepared first.
+                self.prepare_root();
                 // The attach leads, and the two are not interchangeable. They
                 // usually reduce into one batch, where the worker's apply order
                 // decides and this order is moot — but the worker can wake
@@ -320,7 +351,7 @@ mod tests {
 
     use crate::core::status::StatusLog;
     use common::TempDir;
-    use scenarium::{Binding, ConstValue, Graph, InputPort, NodeId};
+    use scenarium::{Binding, CacheMode, ConstValue, Graph, InputPort, NodeId};
 
     use crate::core::io::cache::document_cache_root;
     use crate::core::io::preferences::Preferences;
@@ -418,16 +449,43 @@ mod tests {
 
         // The disk cache is memory-only until a document has a path, then
         // repoints as documents open and again when the path goes away.
-        // A real directory: pointing the cache at a document creates its
-        // sibling cache root on disk.
+        // Pointing the cache at a document creates nothing on disk: its root
+        // appears, with its `.gitignore`, only when a compiled program holds a
+        // disk-backed node that can write there.
         let dir = TempDir::new("darkroom-runtime-host");
         let first_path = dir.join("first.darkroom");
         let second_path = dir.join("second.darkroom");
+        let (first_root, second_root) = (
+            document_cache_root(&first_path),
+            document_cache_root(&second_path),
+        );
         assert_eq!(host.disk_root, None);
         host.set_document_cache(Some(&first_path));
-        assert_eq!(host.disk_root, Some(document_cache_root(&first_path)));
+        assert_eq!(host.disk_root.as_deref(), Some(first_root.as_path()));
+        assert!(!first_root.exists(), "opening a document writes nothing");
+
+        let mut status = StatusLog::default();
+        let mut memory_only = Graph::default();
+        let library = Arc::clone(host.library.current());
+        let func = library.by_name("ML Denoise").expect("built-in present");
+        let node = memory_only.add_func_node(func);
+        assert!(host.run_once(&memory_only, &mut status));
+        assert!(!first_root.exists(), "a memory-only program writes nothing");
+
+        let mut disk_backed = memory_only;
+        disk_backed.find_mut(node).unwrap().cache = CacheMode::Disk;
+        assert!(host.run_once(&disk_backed, &mut status));
+        assert!(
+            first_root.join(".gitignore").is_file(),
+            "a disk-backed program prepares the root before it can write"
+        );
+
+        // A new root is prepared again, on its own next disk-backed compile.
         host.set_document_cache(Some(&second_path));
-        assert_eq!(host.disk_root, Some(document_cache_root(&second_path)));
+        assert_eq!(host.disk_root.as_deref(), Some(second_root.as_path()));
+        assert!(!second_root.exists());
+        assert!(host.run_once(&disk_backed, &mut status));
+        assert!(second_root.join(".gitignore").is_file());
         host.set_document_cache(None);
         assert_eq!(host.disk_root, None);
     }
