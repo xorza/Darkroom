@@ -1,94 +1,195 @@
-//! Vector backends for the arcsinh curve — on a plane, and color-preserving over three — and the
-//! dispatch between them. The per-sample `asinh` is the curve's hot spot; every backend computes it
-//! by the same steps, to a few ULP relative at every magnitude (the tests' `asinh_pos_scalar`
-//! spells them out one lane at a time).
+//! The arcsinh curve as vector kernels — on a plane, and color-preserving over three.
+//!
+//! The per-sample `asinh` is the curve's hot spot. Every lane, the partial last vector's too,
+//! computes it by [`Math::asinh_f32`], so a sample's value does not depend on where in the band it
+//! falls; the scalar path calls libm's `asinhf`, and the two agree to a few ULP.
 
-use crate::image_ops::rgb::Rgb;
-use crate::image_ops::stretching::{AsinhCurve, ToneCurve, color_preserve_pixel};
-use crate::simd::dispatch;
+use crate::image_ops::stretching::AsinhCurve;
+use crate::simd::math::Math;
+use crate::simd::{F32_LANES, F32x8, Isa, Kernel, Mask8};
 
-#[cfg(target_arch = "x86_64")]
-mod avx2;
+/// Apply the arcsinh plane curve in place to one band of a plane, on the widest Isa this CPU has.
+pub(super) fn asinh_plane(plane: &mut [f32], curve: AsinhCurve) {
+    AsinhPlane { plane, curve }.dispatch();
+}
 
-#[cfg(target_arch = "aarch64")]
-mod neon;
+/// [`asinh_plane`] as a kernel: `clamp(asinh(v / β) / norm, 0, 1)`, a NaN sample to 0.
+#[derive(Debug)]
+struct AsinhPlane<'a> {
+    plane: &'a mut [f32],
+    curve: AsinhCurve,
+}
 
-/// Cephes single-precision `logf` polynomial coefficients (`cephes/logf.c`), accurate to ~1 ULP on
-/// the reduced mantissa. Shared verbatim by the AVX2 and NEON `asinh` backends (`asinh(x) =
-/// logf(x + √(x²+1))`) so the two arches stay bit-for-bit identical — one source of truth, no
-/// "keep in sync" drift. `Q1`/`Q2` are the two-part ln(2) that reassembles log from mantissa +
-/// exponent.
-pub(super) const LOG_P0: f32 = 7.037_683_6e-2;
-pub(super) const LOG_P1: f32 = -1.151_461e-1;
-pub(super) const LOG_P2: f32 = 1.167_699_9e-1;
-pub(super) const LOG_P3: f32 = -1.242_014_1e-1;
-pub(super) const LOG_P4: f32 = 1.424_932_3e-1;
-pub(super) const LOG_P5: f32 = -1.666_805_8e-1;
-pub(super) const LOG_P6: f32 = 2.000_071_5e-1;
-pub(super) const LOG_P7: f32 = -2.499_999_4e-1;
-pub(super) const LOG_P8: f32 = 3.333_333e-1;
-pub(super) const SQRTHF: f32 = 0.707_106_77;
-pub(super) const LOG_Q1: f32 = -2.121_944_4e-4;
-pub(super) const LOG_Q2: f32 = 0.693_359_4;
+impl Kernel for AsinhPlane<'_> {
+    type Output = ();
 
-/// Where the backends switch to `asinh(x) = ln(x) + ln 2`: past 2¹², the dropped `1/(4x²)` is under
-/// 1.5e-8, below the f32 resolution of a value that large.
-pub(super) const ASINH_LOG_FROM: f32 = 4096.0;
-
-/// Apply the arcsinh plane curve in place to one band of a plane.
-pub(super) fn asinh_plane(plane: &mut [f32], c: AsinhCurve) {
-    dispatch! {
-        x86: avx2_fma => avx2::asinh_plane_avx2(plane, c.inv_beta, c.inv_norm),
-        aarch64 => neon::asinh_plane_neon(plane, c.inv_beta, c.inv_norm),
-        scalar => asinh_plane_scalar(plane, c),
+    #[inline(always)]
+    fn run<S: Isa>(self, isa: S) {
+        let curve = SplatCurve::splat(isa, self.curve);
+        let (chunks, tail) = self.plane.as_chunks_mut::<F32_LANES>();
+        for samples in chunks {
+            curve.plane(isa, isa.load_f32(samples)).store(samples);
+        }
+        if !tail.is_empty() {
+            curve
+                .plane(isa, isa.load_f32_partial(tail))
+                .store_partial(tail);
+        }
     }
 }
 
-/// Scalar counterpart of the plane kernels: libm's `asinhf` through [`AsinhCurve::eval`].
-fn asinh_plane_scalar(plane: &mut [f32], c: AsinhCurve) {
-    for value in plane {
-        *value = c.eval(*value);
-    }
-}
-
-/// Apply the color-preserving arcsinh curve in place to one band of three RGB-f32 **planes**.
+/// Apply the color-preserving arcsinh curve in place to one band of three RGB-f32 **planes**, on
+/// the widest Isa this CPU has.
 ///
 /// The three slices must be the same length. Callers split the planes in lockstep and hand each
-/// task one band of every channel, so the backend choice is made per band rather than per pixel.
+/// task one band of every channel, so the Isa is chosen per band rather than per pixel.
 pub(super) fn asinh_color_preserve(
     red: &mut [f32],
     green: &mut [f32],
     blue: &mut [f32],
-    c: AsinhCurve,
+    curve: AsinhCurve,
 ) {
-    dispatch! {
-        x86: avx2_fma => avx2::asinh_color_preserve_avx2(red, green, blue, c.inv_beta, c.inv_norm),
-        aarch64 => neon::asinh_color_preserve_neon(red, green, blue, c.inv_beta, c.inv_norm),
-        scalar => asinh_color_preserve_scalar(red, green, blue, c),
+    AsinhColorPreserve {
+        red,
+        green,
+        blue,
+        curve,
+    }
+    .dispatch();
+}
+
+/// [`asinh_color_preserve`] as a kernel: `color_preserve_pixel` lane by lane — intensity, curve,
+/// channel scale, highlight cap.
+#[derive(Debug)]
+struct AsinhColorPreserve<'a> {
+    red: &'a mut [f32],
+    green: &'a mut [f32],
+    blue: &'a mut [f32],
+    curve: AsinhCurve,
+}
+
+impl Kernel for AsinhColorPreserve<'_> {
+    type Output = ();
+
+    #[inline(always)]
+    fn run<S: Isa>(self, isa: S) {
+        debug_assert!(
+            self.red.len() == self.green.len() && self.green.len() == self.blue.len(),
+            "three planes of one band"
+        );
+        let curve = SplatCurve::splat(isa, self.curve);
+        let (red, red_tail) = self.red.as_chunks_mut::<F32_LANES>();
+        let (green, green_tail) = self.green.as_chunks_mut::<F32_LANES>();
+        let (blue, blue_tail) = self.blue.as_chunks_mut::<F32_LANES>();
+        for ((red, green), blue) in red.iter_mut().zip(green).zip(blue) {
+            let [r, g, b] = curve.color_preserve(
+                isa,
+                [isa.load_f32(red), isa.load_f32(green), isa.load_f32(blue)],
+            );
+            r.store(red);
+            g.store(green);
+            b.store(blue);
+        }
+        if !red_tail.is_empty() {
+            let [r, g, b] = curve.color_preserve(
+                isa,
+                [
+                    isa.load_f32_partial(red_tail),
+                    isa.load_f32_partial(green_tail),
+                    isa.load_f32_partial(blue_tail),
+                ],
+            );
+            r.store_partial(red_tail);
+            g.store_partial(green_tail);
+            b.store_partial(blue_tail);
+        }
     }
 }
 
-/// Scalar counterpart of the vectorized kernels. Same per-pixel curve as
-/// [`color_preserve_pixel`], over the same per-band split, so every backend sees the identical
-/// work division.
-fn asinh_color_preserve_scalar(
-    red: &mut [f32],
-    green: &mut [f32],
-    blue: &mut [f32],
-    c: AsinhCurve,
-) {
-    for ((r, g), b) in red.iter_mut().zip(green.iter_mut()).zip(blue.iter_mut()) {
-        let out = color_preserve_pixel(
-            Rgb {
-                r: *r,
-                g: *g,
-                b: *b,
-            },
-            &c,
-        );
-        *r = out.r;
-        *g = out.g;
-        *b = out.b;
+/// The curve's constants, splat across the lanes.
+#[derive(Debug, Clone, Copy)]
+struct SplatCurve<V> {
+    inv_beta: V,
+    inv_norm: V,
+    third: V,
+    zero: V,
+    one: V,
+}
+
+impl<V: F32x8> SplatCurve<V> {
+    #[inline(always)]
+    fn splat<S: Isa<F32 = V>>(isa: S, curve: AsinhCurve) -> Self {
+        Self {
+            inv_beta: isa.splat_f32(curve.inv_beta),
+            inv_norm: isa.splat_f32(curve.inv_norm),
+            third: isa.splat_f32(1.0 / 3.0),
+            zero: isa.splat_f32(0.0),
+            one: isa.splat_f32(1.0),
+        }
+    }
+
+    /// `clamp(asinh(v / β) / norm, 0, 1)`, a NaN sample to 0.
+    #[inline(always)]
+    fn plane<S: Isa<F32 = V>>(self, isa: S, v: V) -> V {
+        let curved = isa.asinh_f32(v * self.inv_beta) * self.inv_norm;
+        curved.max(self.zero).min(self.one)
+    }
+
+    /// `color_preserve_pixel` lane by lane: intensity, curve, channel scale, highlight cap.
+    #[inline(always)]
+    fn color_preserve<S: Isa<F32 = V>>(self, isa: S, [r, g, b]: [V; 3]) -> [V; 3] {
+        let intensity = (r + g + b) * self.third;
+        let target = self.plane(isa, intensity);
+        // scale = target/intensity where intensity > 0, else 0 (sub-background pixels → black).
+        let scale = intensity.lanes_gt(self.zero).keep(target / intensity);
+        let (r, g, b) = (r * scale, g * scale, b * scale);
+        // Hue-preserving highlight cap: divide by the max channel when it exceeds 1.
+        let brightest = r.max(g).max(b);
+        let cap = brightest
+            .lanes_gt(self.one)
+            .select(self.one / brightest, self.one);
+        // A channel below black, possible beside a positive intensity, clamps to 0.
+        [
+            (r * cap).max(self.zero),
+            (g * cap).max(self.zero),
+            (b * cap).max(self.zero),
+        ]
+    }
+}
+
+#[cfg(test)]
+mod internals {
+    use crate::image_ops::rgb::Rgb;
+    use crate::image_ops::stretching::{AsinhCurve, ToneCurve, color_preserve_pixel};
+
+    /// The scalar plane curve the kernel is tested against: libm's `asinhf` through
+    /// [`AsinhCurve::eval`].
+    pub(super) fn asinh_plane_scalar(plane: &mut [f32], curve: AsinhCurve) {
+        for value in plane {
+            *value = curve.eval(*value);
+        }
+    }
+
+    /// The scalar color-preserving curve the kernel is tested against: [`color_preserve_pixel`].
+    pub(super) fn asinh_color_preserve_scalar(
+        red: &mut [f32],
+        green: &mut [f32],
+        blue: &mut [f32],
+        curve: AsinhCurve,
+    ) {
+        for ((r, g), b) in red.iter_mut().zip(green.iter_mut()).zip(blue.iter_mut()) {
+            let out = color_preserve_pixel(
+                Rgb {
+                    r: *r,
+                    g: *g,
+                    b: *b,
+                },
+                &curve,
+            );
+            *r = out.r;
+            *g = out.g;
+            *b = out.b;
+        }
     }
 }
 

@@ -3,8 +3,6 @@
 //! Generic implementation that can be used for both Gaussian and Moffat fitting.
 //! Uses f64 throughout for numerical stability.
 
-use std::ops::Range;
-
 use crate::math::linear_system;
 
 /// Pivot magnitude below which the damped Hessian counts as singular and the step is abandoned.
@@ -80,22 +78,14 @@ impl<'a> FitData<'a> {
         z: &'a [f64],
         weights: Option<&'a [f64]>,
     ) -> Self {
+        debug_assert!(
+            x.len() == y.len() && y.len() == z.len(),
+            "x, y and z are indexed in lockstep"
+        );
+        if let Some(weights) = weights {
+            debug_assert!(weights.len() == x.len(), "one weight per sample");
+        }
         Self { x, y, z, weights }
-    }
-
-    pub(super) const fn unweighted(x: &'a [f64], y: &'a [f64], z: &'a [f64]) -> Self {
-        Self::new(x, y, z, None)
-    }
-
-    /// Sample count — the three coordinate slices are indexed in lockstep, so any of them.
-    #[inline]
-    pub(super) const fn len(&self) -> usize {
-        self.x.len()
-    }
-
-    #[inline]
-    fn weight(&self, i: usize) -> f64 {
-        self.weights.map_or(1.0, |ws| ws[i])
     }
 }
 
@@ -111,14 +101,6 @@ pub(super) struct NormalEquations<const N: usize> {
 }
 
 impl<const N: usize> NormalEquations<N> {
-    pub(super) const fn zeroed() -> Self {
-        Self {
-            hessian: [[0.0f64; N]; N],
-            gradient: [0.0f64; N],
-            chi2: 0.0,
-        }
-    }
-
     /// Copy the accumulated upper triangle into the lower one, making the Hessian symmetric.
     pub(super) fn mirror_lower_triangle(&mut self) {
         for i in 1..N {
@@ -127,61 +109,6 @@ impl<const N: usize> NormalEquations<N> {
             }
         }
     }
-
-    /// Add `model`'s contribution over `range` — Hessian, gradient and χ² — to what is here.
-    ///
-    /// This is the one scalar per-pixel accumulation loop, shared by [`Self::from_scalar_pass`],
-    /// every model's scalar-fallback override (no SIMD available for this target), and every SIMD
-    /// backend's tail loop over the pixels left after the last full chunk — so a
-    /// numerical-stability fix only has to land once instead of in every copy. Inherent rather
-    /// than a defaulted trait method precisely so no model can substitute its own. Leaves the
-    /// Hessian's lower triangle untouched; callers mirror it once after accumulating.
-    pub(super) fn accumulate(
-        &mut self,
-        model: &(impl LMModel<N> + ?Sized),
-        data: FitData<'_>,
-        params: &[f64; N],
-        range: Range<usize>,
-    ) {
-        for i in range {
-            let w = data.weight(i);
-            let ModelSample {
-                value: model_val,
-                jacobian: row,
-            } = model.evaluate_and_jacobian(data.x[i], data.y[i], params);
-            let r = data.z[i] - model_val;
-            self.chi2 += w * r * r;
-            for k in 0..N {
-                self.gradient[k] += w * row[k] * r;
-                for j in k..N {
-                    self.hessian[k][j] += w * row[k] * row[j];
-                }
-            }
-        }
-    }
-
-    /// The full normal equations — mirrored Hessian, gradient, χ² — over the whole data set,
-    /// built with the scalar accumulation loop.
-    ///
-    /// The default body of [`LMModel::batch_build_normal_equations`], and what the fit models'
-    /// SIMD overrides fall back to when no backend applies or the fit is weighted.
-    pub(super) fn from_scalar_pass(
-        model: &(impl LMModel<N> + ?Sized),
-        data: FitData<'_>,
-        params: &[f64; N],
-    ) -> Self {
-        let mut equations = Self::zeroed();
-        equations.accumulate(model, data, params, 0..data.len());
-        equations.mirror_lower_triangle();
-        equations
-    }
-}
-
-/// The model's value at one point and its Jacobian row there.
-#[derive(Debug, Clone, Copy)]
-pub(super) struct ModelSample<const N: usize> {
-    pub(super) value: f64,
-    pub(super) jacobian: [f64; N],
 }
 
 /// Trait for models that can be fit with L-M optimization.
@@ -189,59 +116,22 @@ pub(super) trait LMModel<const N: usize> {
     /// Evaluate the model at a point.
     fn evaluate(&self, x: f64, y: f64, params: &[f64; N]) -> f64;
 
-    /// Evaluate the model and its Jacobian row at a point, in one pass.
-    ///
-    /// Fused rather than split into evaluate + derivatives so the expensive shared intermediate
-    /// (the `exp` for a Gaussian, the `powf` for a Moffat) is computed once. Every accumulation
-    /// loop goes through this, so it is the only derivative path production code takes.
-    fn evaluate_and_jacobian(&self, x: f64, y: f64, params: &[f64; N]) -> ModelSample<N>;
-
     /// Apply parameter constraints after an update.
     fn constrain(&self, params: &mut [f64; N]);
 
-    /// Sum chi² ((weighted) squared residuals) over `range` via [`Self::evaluate`].
-    /// Companion to [`NormalEquations::accumulate`] for the gradient-free chi²-only
-    /// batch path — see that method's doc for why this is shared rather than
-    /// duplicated per model/backend.
-    fn accumulate_chi2(&self, data: FitData<'_>, params: &[f64; N], range: Range<usize>) -> f64 {
-        let mut chi2 = 0.0f64;
-        for i in range {
-            let w = data.weight(i);
-            let residual = data.z[i] - self.evaluate(data.x[i], data.y[i], params);
-            chi2 += w * residual * residual;
-        }
-        chi2
-    }
-
-    /// Build normal equations (J^T·W·J, J^T·W·r) and chi² in a single pass.
-    /// Fuses model evaluation, Jacobian computation, and Hessian/gradient
-    /// accumulation to avoid storing intermediate jacobian/residuals arrays.
-    /// Default implementation calls `evaluate_and_jacobian` per pixel, applying
-    /// `data.weights` when they are present.
-    ///
-    /// Override with SIMD to process multiple pixels at once. The weighted fit is opt-in
-    /// (set a `NoiseModel`), so an override whose kernel is unweighted-only must test
-    /// `data.weights` and delegate to [`NormalEquations::from_scalar_pass`] when it is set.
-    ///
-    /// Both models' overrides spell that dispatch out identically, differing only in `N`. It is
-    /// left duplicated: the backend is chosen by `cfg`, so the arms name functions that exist
-    /// only under their own `target_arch`, and the sole way to share them is a macro — which
-    /// buys ~15 lines at the cost of making an `unsafe` call site expand from something a reader
-    /// cannot see.
+    /// The normal equations (`J^T·W·J`, `J^T·W·r`) and χ² over `data`, weighted when `data`
+    /// carries weights, in a single pass: model evaluation, Jacobian and accumulation fused, so
+    /// no Jacobian or residual array is stored. The models implement it with the shared vector
+    /// kernel.
     fn batch_build_normal_equations(
         &self,
         data: FitData<'_>,
         params: &[f64; N],
-    ) -> NormalEquations<N> {
-        NormalEquations::from_scalar_pass(self, data, params)
-    }
+    ) -> NormalEquations<N>;
 
-    /// Batch compute chi² — the (weighted) sum of squared residuals.
-    /// Default implementation calls `evaluate` per pixel. Override with SIMD under the same
-    /// weighted-delegation rule as [`Self::batch_build_normal_equations`].
-    fn batch_compute_chi2(&self, data: FitData<'_>, params: &[f64; N]) -> f64 {
-        self.accumulate_chi2(data, params, 0..data.len())
-    }
+    /// χ² over `data` — the (weighted) sum of squared residuals — from the same residuals
+    /// [`Self::batch_build_normal_equations`] takes.
+    fn batch_compute_chi2(&self, data: FitData<'_>, params: &[f64; N]) -> f64;
 
     /// Fit this model to `data` by Levenberg-Marquardt, starting from `initial_params`.
     fn fit(&self, data: FitData<'_>, initial_params: [f64; N], config: &LMConfig) -> LMResult<N> {
@@ -251,7 +141,7 @@ pub(super) trait LMModel<const N: usize> {
         let mut iterations = 0;
 
         // Normal equations at the current `params`. Rebuilt only when `params` actually moves — a
-        // rejected step changes only `lambda`, so the cached (SIMD-accelerated) Jacobian pass is
+        // rejected step changes only `lambda`, so the cached (vectorized) Jacobian pass is
         // reused across damping retries instead of being recomputed identically every iteration.
         let mut equations = self.batch_build_normal_equations(data, &params);
         // Tracked apart from `equations.chi2`: an accepted step keeps the χ² `batch_compute_chi2`
@@ -299,13 +189,10 @@ pub(super) trait LMModel<const N: usize> {
                     break;
                 }
 
-                // `params` moved → refresh the normal equations for the next iteration.
                 equations = self.batch_build_normal_equations(data, &params);
             } else {
-                // Rejected step (worse fit, or a non-finite χ² from a bad trial point): keep
-                // `params` and the cached normal equations, just increase damping. A non-finite χ²
-                // skips the relative-change test (it would be NaN) and falls straight through to
-                // the lambda ramp.
+                // A non-finite χ² from a bad trial point skips the relative-change test, which
+                // would be NaN, and falls straight through to the lambda ramp.
                 if new_chi2.is_finite() {
                     let chi2_rel_diff = (new_chi2 - prev_chi2) / prev_chi2.max(1e-30);
                     if chi2_rel_diff < 1e-10 {
@@ -332,14 +219,41 @@ pub(super) trait LMModel<const N: usize> {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use crate::star_detection::centroid::lm_optimizer::{
-        FitData, LMModel, ModelSample, NormalEquations,
-    };
+    use crate::star_detection::centroid::lm_optimizer::{FitData, LMModel, NormalEquations};
+
+    impl<'a> FitData<'a> {
+        pub(crate) const fn unweighted(x: &'a [f64], y: &'a [f64], z: &'a [f64]) -> Self {
+            Self::new(x, y, z, None)
+        }
+    }
+
+    impl<const N: usize> NormalEquations<N> {
+        pub(crate) const fn zeroed() -> Self {
+            Self {
+                hessian: [[0.0f64; N]; N],
+                gradient: [0.0f64; N],
+                chi2: 0.0,
+            }
+        }
+    }
+
+    /// The model's value at one point and its Jacobian row there.
+    #[derive(Debug, Clone, Copy)]
+    pub(crate) struct ModelSample<const N: usize> {
+        pub(crate) value: f64,
+        pub(crate) jacobian: [f64; N],
+    }
+
+    /// A model's scalar value and Jacobian row at one point: the definition each model's vector
+    /// lanes mirror, and the reference the batch kernels are tested against.
+    pub(crate) trait ModelJacobian<const N: usize>: LMModel<N> {
+        fn evaluate_and_jacobian(&self, x: f64, y: f64, params: &[f64; N]) -> ModelSample<N>;
+    }
 
     /// Scalar reference for the normal equations: `J^T·J`, `J^T·r`, and `Σr²`, from a jacobian and
     /// residuals computed by the caller.
     ///
-    /// Ground truth in SIMD-vs-scalar validation tests, so it re-derives the symmetric fill instead
+    /// Ground truth in vector-vs-scalar validation tests, so it re-derives the symmetric fill instead
     /// of calling [`NormalEquations::mirror_lower_triangle`] — sharing that step with the code
     /// under test would let a bug in it pass unnoticed. Unweighted, matching the unweighted batch
     /// paths it is compared against.
@@ -408,8 +322,8 @@ pub(crate) mod internals {
     /// of one sum of k terms differ by at most `2·γₖ·Σ|tᵢ|` with `γₖ = k·u / (1 − k·u)` (Higham,
     /// *Accuracy and Stability of Numerical Algorithms*, §3.1), so each entry is held to that,
     /// with `Σ|tᵢ|` the same equations built from `|J|` and `|r|`. Uniform weights `w` must give
-    /// `w` times the unweighted equations, through the weighted path, which bypasses the vectors.
-    pub(crate) fn assert_batch_matches_reference<M: LMModel<N>, const N: usize>(
+    /// `w` times the unweighted equations, through the same kernels.
+    pub(crate) fn assert_batch_matches_reference<M: ModelJacobian<N>, const N: usize>(
         model: &M,
         stamp: &ModelStamp,
         params: &[f64; N],
@@ -494,7 +408,7 @@ pub(crate) mod internals {
     /// Each step is `h = ε^⅓·max(1, |p|)`, which balances the difference's truncation, `h²·|f‴|/6`,
     /// against its rounding, `ε·|f|/h`: both come to about `ε^⅔ ≈ 4e-11` of the scale. `1e-6` of
     /// `max(1, |f|, |J|)` leaves that four orders of magnitude.
-    pub(crate) fn assert_jacobian_matches_differences<M: LMModel<N>, const N: usize>(
+    pub(crate) fn assert_jacobian_matches_differences<M: ModelJacobian<N>, const N: usize>(
         model: &M,
         params: &[f64; N],
         points: &[(f64, f64)],

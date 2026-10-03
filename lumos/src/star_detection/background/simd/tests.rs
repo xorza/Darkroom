@@ -1,17 +1,18 @@
-use crate::internals::simd_check::backend::Backend;
+use crate::background_mesh::spline::spline_segment::SplineSegment;
 use crate::internals::simd_check::{SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar};
-use crate::star_detection::background::simd::*;
-use imaginarium::SimdTier;
+use crate::star_detection::background::simd::internals::interpolate_segment_cubic_scalar;
+use crate::star_detection::background::simd::{
+    InterpolateSegment, SegmentRamp, interpolate_segment_cubic,
+};
 
 #[test]
 #[should_panic(expected = "assertion")]
 fn cubic_segment_simd_mismatched_lengths_panics() {
-    // Every SIMD backend derives its store bound solely from bg_out.len() and writes
-    // into noise_out with that same bound — a mismatch must be rejected even in release
-    // builds, not just debug, since it would otherwise be an out-of-bounds write.
+    // The kernel walks both outputs in lockstep, so a mismatch would leave the longer one's tail
+    // unwritten: rejected in release builds too.
     let mut bg = vec![0.0f32; 8];
     let mut noise = vec![0.0f32; 4];
-    interpolate_segment_cubic_simd(
+    interpolate_segment_cubic(
         &mut bg,
         &mut noise,
         SplineSegment {
@@ -33,18 +34,7 @@ fn cubic_segment_simd_mismatched_lengths_panics() {
     );
 }
 
-type SegmentFn = unsafe fn(&mut [f32], &mut [f32], SplineSegment, SplineSegment, SegmentRamp);
-
-const BACKENDS: &[Backend<SegmentFn>] = &[
-    #[cfg(target_arch = "x86_64")]
-    Backend::new(SimdTier::Avx2Fma, avx2::interpolate_segment_cubic_avx2),
-    #[cfg(target_arch = "x86_64")]
-    Backend::new(SimdTier::Sse41, sse41::interpolate_segment_cubic_sse),
-    #[cfg(target_arch = "aarch64")]
-    Backend::new(SimdTier::Neon, neon::interpolate_segment_cubic_neon),
-];
-
-/// The absolute terms of `segment.eval(t)`, which the backends may round differently.
+/// The absolute terms of `segment.eval(t)`, which bound its rounding error.
 fn eval_magnitude(segment: SplineSegment, t: f32) -> f32 {
     let ct = 1.0 - t;
     segment.f0.abs()
@@ -52,56 +42,48 @@ fn eval_magnitude(segment: SplineSegment, t: f32) -> f32 {
         + (t * ct).abs() * (((2.0 - t) * segment.a).abs() + ((1.0 + t) * segment.b).abs())
 }
 
-/// Every backend against the scalar reference. The shape fills both segments' coefficients, and
-/// the ramp runs from -0.25 to 1.25 so lanes on both ends extrapolate. Widths up to 1024 cover the
+/// Every tier against the scalar reference, bit for bit: the lanes evaluate `eval`'s own unfused
+/// expression at the scalar's own parameter. The shape fills both segments' coefficients, and the
+/// ramp runs from -0.25 to 1.25 so lanes on both ends extrapolate. Widths up to 1024 cover the
 /// longest segments a tile mesh makes, over which a parameter stepped by repeated addition would
 /// drift from the scalar's `start + i·step`.
-///
-/// A term of `eval` passes through at most seven roundings (`1 - t`, `t·ct`, `2 - t`, the
-/// product with `a`, the sum with the `b` term, the product with `t·ct`, the final difference),
-/// so the paths differ by the sum bound for seven.
 #[test]
-fn cubic_segment_backends_match_scalar() {
+fn cubic_segment_matches_scalar() {
     let widths: Vec<usize> = SWEEP_WIDTHS.iter().copied().chain([256, 1024]).collect();
-    assert_simd_matches_scalar(
-        BACKENDS,
-        &widths,
-        ScalarSimd::sum_tolerance(7),
-        |kernel, shape, width| {
-            let p = shape.row(8, width);
-            let bg = SplineSegment {
-                f0: p[0],
-                f1: p[1],
-                a: p[2],
-                b: p[3],
-            };
-            let noise = SplineSegment {
-                f0: p[4],
-                f1: p[5],
-                a: p[6],
-                b: p[7],
-            };
-            let ramp = SegmentRamp {
-                start: -0.25,
-                step: 1.5 / width as f32,
-            };
-            let mut bg_scalar = vec![0.0f32; width];
-            let mut noise_scalar = vec![0.0f32; width];
-            let mut bg_simd = vec![0.0f32; width];
-            let mut noise_simd = vec![0.0f32; width];
-            interpolate_segment_cubic_scalar(&mut bg_scalar, &mut noise_scalar, bg, noise, ramp);
-            // SAFETY: the harness runs only backends whose tier this CPU has, and the two
-            // outputs have one length.
-            unsafe { kernel(&mut bg_simd, &mut noise_simd, bg, noise, ramp) };
-            let magnitude = (0..width)
-                .map(|i| eval_magnitude(bg, ramp.t_at(i)))
-                .chain((0..width).map(|i| eval_magnitude(noise, ramp.t_at(i))))
-                .collect();
-            bg_scalar.extend(noise_scalar);
-            bg_simd.extend(noise_simd);
-            ScalarSimd::of_sums(bg_scalar, bg_simd, magnitude)
-        },
-    );
+    assert_simd_matches_scalar(&widths, 0.0, |tier, shape, width| {
+        let p = shape.row(8, width);
+        let bg = SplineSegment {
+            f0: p[0],
+            f1: p[1],
+            a: p[2],
+            b: p[3],
+        };
+        let noise = SplineSegment {
+            f0: p[4],
+            f1: p[5],
+            a: p[6],
+            b: p[7],
+        };
+        let ramp = SegmentRamp {
+            start: -0.25,
+            step: 1.5 / width as f32,
+        };
+        let mut bg_scalar = vec![0.0f32; width];
+        let mut noise_scalar = vec![0.0f32; width];
+        let mut bg_simd = vec![0.0f32; width];
+        let mut noise_simd = vec![0.0f32; width];
+        interpolate_segment_cubic_scalar(&mut bg_scalar, &mut noise_scalar, bg, noise, ramp);
+        tier.run(InterpolateSegment {
+            bg_out: &mut bg_simd,
+            noise_out: &mut noise_simd,
+            bg,
+            noise,
+            ramp,
+        });
+        bg_scalar.extend(noise_scalar);
+        bg_simd.extend(noise_simd);
+        ScalarSimd::new(bg_scalar, bg_simd)
+    });
 }
 
 #[test]
@@ -112,7 +94,7 @@ fn cubic_segment_simd_endpoints() {
     let mut noise = vec![0.0f32; 2];
 
     // t=0 for first pixel, t=1 for second pixel
-    interpolate_segment_cubic_simd(
+    interpolate_segment_cubic(
         &mut bg,
         &mut noise,
         SplineSegment {
@@ -166,7 +148,7 @@ fn cubic_segment_simd_midpoint() {
     let mut noise = vec![0.0f32; 1];
 
     // Expected: (100+200)/2 - 0.375*(-8+16) = 150 - 3 = 147
-    interpolate_segment_cubic_simd(
+    interpolate_segment_cubic(
         &mut bg,
         &mut noise,
         SplineSegment {
@@ -207,7 +189,7 @@ fn cubic_segment_simd_linear_when_no_correction() {
         step: 1.0 / 49.0,
     };
 
-    interpolate_segment_cubic_simd(
+    interpolate_segment_cubic(
         &mut bg,
         &mut noise,
         SplineSegment {
@@ -252,7 +234,7 @@ fn cubic_segment_simd_extrapolates_past_the_knots() {
         start: -0.5,
         step: 0.2,
     };
-    interpolate_segment_cubic_simd(&mut bg, &mut noise, segment, segment, ramp);
+    interpolate_segment_cubic(&mut bg, &mut noise, segment, segment, ramp);
 
     for (i, expected) in [(0, 41.75f32), (9, 231.326)] {
         let bound = 7.0 * f32::EPSILON * eval_magnitude(segment, ramp.t_at(i));

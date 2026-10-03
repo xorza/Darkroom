@@ -4,7 +4,7 @@
 //! statistics, then interpolates using natural bicubic spline to create a
 //! C2-continuous background map (matching SExtractor/SEP).
 //!
-//! Uses SIMD acceleration when available for statistics computation.
+//! The spline interpolation of each row runs as a vector kernel.
 
 pub(crate) mod background_estimate;
 mod simd;

@@ -1,5 +1,5 @@
 //! [`SplineSegment`]: one interval of a natural cubic spline, the one evaluator the background
-//! mesh and its SIMD kernels share.
+//! mesh and its vector kernel share.
 
 /// One interval of a natural cubic spline between two nodes, ready to evaluate.
 ///

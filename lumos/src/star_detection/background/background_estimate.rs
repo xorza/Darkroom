@@ -252,7 +252,6 @@ fn create_object_mask(
     output: &mut BitBuffer2,
     scratch: &mut BitBuffer2,
 ) {
-    // Create threshold mask using packed SIMD-optimized implementation
     create_threshold_mask(pixels, background, noise, threshold, output);
 
     dilate_mask(output, dilation_radius, scratch);
@@ -289,7 +288,6 @@ fn interpolate_row(
     let hy = cy1 - cy0;
     let ty = if ty1 == ty0 { 0.0 } else { (fy - cy0) / hy };
 
-    // Evaluate Y cubic spline at each tile column
     let node_bg = &mut scratch.node_bg[..tiles_x];
     let node_noise = &mut scratch.node_noise[..tiles_x];
 
@@ -338,7 +336,7 @@ fn interpolate_row(
         let hx = centers_x[tx1] - cx0;
         let inv_hx = 1.0 / hx;
 
-        simd::interpolate_segment_cubic_simd(
+        simd::interpolate_segment_cubic(
             &mut bg_row[x..segment_end],
             &mut noise_row[x..segment_end],
             SplineSegment::new(node_bg[tx0], node_bg[tx1], d2x_bg[tx0], d2x_bg[tx1], hx),

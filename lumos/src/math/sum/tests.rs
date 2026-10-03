@@ -1,20 +1,15 @@
 //! Tests for sum operations.
 
-#[cfg(target_arch = "x86_64")]
-use crate::internals::simd_check;
 use crate::internals::test_rng::TestRng;
-#[cfg(target_arch = "x86_64")]
-use crate::math::sum::AVX2_SUM_F32_CROSSOVER;
-use crate::math::sum::{mean_f32, scalar, sum_f32, weighted_mean_f32};
-#[cfg(target_arch = "x86_64")]
-use crate::simd::AVX2_F32_LANES;
-#[cfg(target_arch = "x86_64")]
-use imaginarium::SimdTier;
+use crate::math::sum::simd::{SumF32, WeightedSumsKernel};
+use crate::math::sum::{SUM_F32_CROSSOVER, mean_f32, scalar, sum_f32, weighted_mean_f32};
+use crate::simd::portable::Portable;
+use crate::simd::tier::Tier;
+use crate::simd::{F32_LANES, Isa};
 use std::iter;
 
-/// Lengths that straddle every gate and its remainder: under the 4-lane NEON minimum, under the
-/// 8-lane one `weighted_sums` uses on x86, under `sum_f32`'s measured crossover at 16, exactly on
-/// each, and well past all three.
+/// Lengths that straddle both gates and the vectors' remainders: under one vector, exactly one,
+/// one past it, `sum_f32`'s crossover at 16 and one past, and well past both.
 const LENGTHS: [usize; 15] = [1, 2, 3, 4, 5, 7, 8, 9, 16, 17, 63, 64, 65, 257, 1000];
 
 /// Cycles 1e6 against -1e6 so a running total cancels catastrophically, with small values between
@@ -34,8 +29,8 @@ fn sequential_f64(values: &[f32]) -> f64 {
     values.iter().map(|&value| f64::from(value)).sum()
 }
 
-/// The vector backends reassociate, so their f64 total is not bit-identical to a sequential one.
-/// What they owe is the *rounded* result: an f64 accumulator carries n·2⁻⁵³ against f32's 2⁻²⁴
+/// The vector kernel reassociates, so its f64 total is not bit-identical to a sequential one.
+/// What it owes is the *rounded* result: an f64 accumulator carries n·2⁻⁵³ against f32's 2⁻²⁴
 /// granularity, so a reassociated f64 sum has to round to the same f32 as the sequential one.
 /// A tolerance here would pass an implementation accumulating in f32.
 #[test]
@@ -47,6 +42,44 @@ fn sum_f32_rounds_to_the_same_f32_as_a_sequential_reference() {
             sequential_f64(&values) as f32,
             "len={len}"
         );
+    }
+}
+
+/// Both kernels compute the same f64 bits on every tier, at every length and not only past the
+/// gates: the lane split, the padded last vector and the fold are one choice on every CPU.
+#[test]
+fn every_tier_sums_to_the_same_bits() {
+    let portable = Portable::new();
+    for len in LENGTHS {
+        let values = cancelling_values(len);
+        let weights: Vec<f32> = (0..len).map(|i| 1.0 + i as f32 * 0.001).collect();
+        let sum = portable.run(SumF32(&values));
+        let weighted = portable.run(WeightedSumsKernel {
+            values: &values,
+            weights: &weights,
+        });
+        for tier in Tier::supported() {
+            assert_eq!(
+                tier.run(SumF32(&values)).to_bits(),
+                sum.to_bits(),
+                "{tier} len={len}"
+            );
+            let tier_weighted = tier.run(WeightedSumsKernel {
+                values: &values,
+                weights: &weights,
+            });
+            assert_eq!(
+                [
+                    tier_weighted.weighted_values.to_bits(),
+                    tier_weighted.weight_total.to_bits()
+                ],
+                [
+                    weighted.weighted_values.to_bits(),
+                    weighted.weight_total.to_bits()
+                ],
+                "{tier} len={len}"
+            );
+        }
     }
 }
 
@@ -69,7 +102,7 @@ fn exact_sum(values: &[f32]) -> f64 {
 }
 
 /// Reassociating an f64 sum moves it by at most `(n − 1)·ε·Σ|xᵢ|` (Higham, *Accuracy and
-/// Stability*, §4.2) from the exact total, whatever the order — the bound the backends' lane split
+/// Stability*, §4.2) from the exact total, whatever the order — the bound the kernel's lane split
 /// must keep. The fixture spreads its magnitudes over twenty decades, so f64 partial sums do round:
 /// the sequential sum is off the exact one, and the bound is not met by exactness alone. An f32
 /// accumulator would be off by `n·2⁻²⁴` relative and fail it.
@@ -127,12 +160,11 @@ fn mean_f32_matches_a_rounded_f64_reference_at_every_length() {
     }
 }
 
-/// Wherever `mean_f32` and `weighted_mean_f32` reach the same rung, the unit-weighted mean is the
+/// Wherever `mean_f32` and `weighted_mean_f32` take the same path, the unit-weighted mean is the
 /// plain mean bit for bit — by construction, not by numerical luck: `v * 1.0` is exact in f64 and
-/// each backend accumulates the weighted numerator with the same lane split, reduction order and
-/// scalar tail as its own `sum_f32`, so both walk the identical values through the identical
-/// additions. The lengths have to cross every gate — 4 on NEON, 8 and 16 on x86 — or the sweep
-/// never leaves the scalar path on one of the architectures.
+/// the weighted kernel accumulates its numerator with the same lane split, fold and padded last
+/// vector as the plain one, so both walk the identical values through the identical additions.
+/// The lengths cross both gates, 8 and 16, or the sweep never leaves the scalar path.
 #[test]
 fn mean_agrees_bit_for_bit_with_the_unit_weighted_mean() {
     for len in LENGTHS.into_iter().filter(|&len| !gates_differ(len)) {
@@ -146,39 +178,23 @@ fn mean_agrees_bit_for_bit_with_the_unit_weighted_mean() {
     }
 }
 
-/// Lengths where the two entry points take different rungs, so their sums associate differently.
-///
-/// On x86 `weighted_sums` goes vector at the 8-lane minimum while `sum_f32` waits for its measured
-/// crossover at 16. Without the AVX2 rung — a pre-AVX2 CPU, or Rosetta, which reports sse4.1 and no
-/// avx2 — both are scalar and the window closes, as it is closed on every other architecture.
+/// Lengths where the two entry points take different paths, so their sums associate differently:
+/// `weighted_sums` goes vector at one vector while `sum_f32` waits for its measured crossover.
 fn gates_differ(len: usize) -> bool {
-    #[cfg(target_arch = "x86_64")]
-    {
-        SimdTier::Avx2.is_supported() && (AVX2_F32_LANES..AVX2_SUM_F32_CROSSOVER).contains(&len)
-    }
-    #[cfg(not(target_arch = "x86_64"))]
-    {
-        let _ = len;
-        false
-    }
+    (F32_LANES..SUM_F32_CROSSOVER).contains(&len)
 }
 
 /// The window `gates_differ` excludes is a real divergence, not a technicality worth ignoring, and
 /// pinning it keeps that exclusion honest: unify the gates again and this stops finding its witness
 /// and fails, rather than the exclusion quietly covering nothing.
 ///
-/// Eight elements is one full AVX2 chunk with no tail. The `±1e7` pairs annihilate, leaving
-/// `2·0.001 + 2·0.0003` ≈ 3.25e-4 against terms of 1e7 — a ratio of 3e10. Neither residue is a
-/// power of two, so their low mantissa bits fall below the running total's f64 ULP of 2⁻²⁹ and get
-/// rounded away — differently by each order. `mean_f32` adds left to right; `weighted_mean_f32`
-/// sums lanes 0-3 and 4-7 apart before pairing them. The two land 2 f32 ULPs apart.
+/// Eight elements is one full vector. The `±1e7` pairs annihilate, leaving `2·0.001 + 2·0.0003` ≈
+/// 3.25e-4 against terms of 1e7 — a ratio of 3e10. Neither residue is a power of two, so their low
+/// mantissa bits fall below the running total's f64 ULP of 2⁻²⁹ and get rounded away — differently
+/// by each order. `mean_f32` adds left to right; `weighted_mean_f32` pairs lane `i` with lane
+/// `i + 4` before folding. The two land 2 f32 ULPs apart, on every CPU.
 #[test]
-#[cfg(target_arch = "x86_64")]
 fn the_split_gate_window_is_where_the_two_entry_points_diverge() {
-    if !simd_check::runs_here(SimdTier::Avx2) {
-        return;
-    }
-
     assert_eq!(
         (1..64).filter(|&len| gates_differ(len)).collect::<Vec<_>>(),
         (8..16).collect::<Vec<_>>()
@@ -246,11 +262,11 @@ fn weighted_mean_of_zero_total_weight_is_zero() {
     assert_eq!(weighted_mean_f32(&[1.0, 2.0, 3.0], &[0.0, 0.0, 0.0]), 0.0);
 }
 
-/// Crossing each backend's gate must not change the answer, on a smooth ramp and on large values
-/// cancelling against varying weights. Every product is exact in f64, and the sums err by at most
+/// Crossing the gate must not change the answer, on a smooth ramp and on large values cancelling
+/// against varying weights. Every product is exact in f64, and the sums err by at most
 /// `n·ε·1e6` ≈ 2e-7 absolute — 2e-10 in a mean over weights summing past 1 — far under a ulp of
 /// either mean in f32, so every order of summation rounds to the sequential f64 reference's f32.
-/// Lengths 3/4/5 straddle NEON's gate, 7/8/9 AVX2's.
+/// Lengths 7/8/9 straddle the gate.
 #[test]
 fn weighted_mean_agrees_with_the_f64_reference_across_every_gate() {
     for len in LENGTHS {

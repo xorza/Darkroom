@@ -1,49 +1,15 @@
 //! Tests for SIMD convolution implementations.
 
 use crate::internals::prelude::*;
-use crate::internals::simd_check::backend::Backend;
 use crate::internals::simd_check::data_shape::DataShape;
 use crate::internals::simd_check::{SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar};
-#[cfg(target_arch = "aarch64")]
-use crate::star_detection::convolution::simd::neon;
-use crate::star_detection::convolution::simd::{
-    Kernel2d, convolve_2d_row, convolve_2d_row_scalar, convolve_cols_direct,
-    convolve_cols_row_scalar, convolve_row, convolve_row_scalar, mirror_index,
+use crate::star_detection::convolution::simd::internals::{
+    convolve_2d_row_scalar, convolve_cols_row_scalar, convolve_row_scalar,
 };
-#[cfg(target_arch = "x86_64")]
-use crate::star_detection::convolution::simd::{avx2, sse41};
-use imaginarium::SimdTier;
-
-type RowFn = unsafe fn(&[f32], &mut [f32], &[f32], usize);
-type ColsRowFn = unsafe fn(&[f32], &mut [f32], Size2us, usize, &[f32], usize);
-type Row2dFn = unsafe fn(&[f32], &mut [f32], Size2us, usize, Kernel2d<'_>);
-
-const ROW_BACKENDS: &[Backend<RowFn>] = &[
-    #[cfg(target_arch = "x86_64")]
-    Backend::new(SimdTier::Avx2, avx2::convolve_row_avx2),
-    #[cfg(target_arch = "x86_64")]
-    Backend::new(SimdTier::Sse41, sse41::convolve_row_sse41),
-    #[cfg(target_arch = "aarch64")]
-    Backend::new(SimdTier::Neon, neon::convolve_row_neon),
-];
-
-const COLS_ROW_BACKENDS: &[Backend<ColsRowFn>] = &[
-    #[cfg(target_arch = "x86_64")]
-    Backend::new(SimdTier::Avx2, avx2::convolve_cols_row_avx2),
-    #[cfg(target_arch = "x86_64")]
-    Backend::new(SimdTier::Sse41, sse41::convolve_cols_row_sse41),
-    #[cfg(target_arch = "aarch64")]
-    Backend::new(SimdTier::Neon, neon::convolve_cols_row_neon),
-];
-
-const ROW_2D_BACKENDS: &[Backend<Row2dFn>] = &[
-    #[cfg(target_arch = "x86_64")]
-    Backend::new(SimdTier::Avx2, avx2::convolve_2d_row_avx2),
-    #[cfg(target_arch = "x86_64")]
-    Backend::new(SimdTier::Sse41, sse41::convolve_2d_row_sse41),
-    #[cfg(target_arch = "aarch64")]
-    Backend::new(SimdTier::Neon, neon::convolve_2d_row_neon),
-];
+use crate::star_detection::convolution::simd::{
+    Convolve2dRow, ConvolveColsRow, ConvolveRow, Kernel2d, convolve_2d_row, convolve_cols_direct,
+    convolve_row, mirror_index,
+};
 
 /// An asymmetric kernel, so a tap applied in mirrored order shows.
 fn asymmetric_kernel(radius: usize) -> Vec<f32> {
@@ -60,10 +26,10 @@ fn shape_image(shape: &DataShape, size: Size2us) -> Vec<f32> {
 #[test]
 fn convolve_row_scalar_identity() {
     let input = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-    let kernel = vec![0.0, 1.0, 0.0]; // Identity kernel
+    let kernel = vec![0.0, 1.0, 0.0];
     let mut output = vec![0.0; 5];
 
-    convolve_row_scalar(&input, &mut output, &kernel, 1);
+    convolve_row_scalar(&input, &mut output, &kernel);
 
     // 0·a + 1·b + 0·c is b exactly.
     assert_eq!(output, input);
@@ -72,38 +38,41 @@ fn convolve_row_scalar_identity() {
 #[test]
 fn convolve_row_scalar_average() {
     let input = vec![0.0, 0.0, 3.0, 0.0, 0.0];
-    let kernel = vec![1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0]; // Average kernel
+    let kernel = vec![1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0];
     let mut output = vec![0.0; 5];
 
-    convolve_row_scalar(&input, &mut output, &kernel, 1);
+    convolve_row_scalar(&input, &mut output, &kernel);
 
     // One nonzero term each: 3 · fl(1/3) rounds back to exactly 1.
     assert_eq!(output, [0.0, 1.0, 1.0, 1.0, 0.0]);
 }
 
-/// Every backend, at every radius through eight, over every shape at the sweep widths and at
-/// every width across the alignments where the last vector lands on the mirrored edge. A row needs
-/// more than `2r` samples for the mirror to stay inside it.
+/// Every tier, at every radius through eight, over every shape at the sweep widths and at every
+/// width across the alignments where the last vector lands on the mirrored edge. A row needs more
+/// than `2r` samples for the mirror to stay inside it.
 ///
-/// Every backend accumulates the taps in the scalar order with an unfused multiply then add, so
-/// each lane is the scalar result bit for bit: the tolerance is zero.
+/// Every lane accumulates the taps in the scalar order with an unfused multiply then add, so each
+/// is the scalar result bit for bit: the tolerance is zero.
 #[test]
-fn convolve_row_backends_match_scalar() {
+fn convolve_row_matches_scalar() {
     for radius in 1..=8 {
         let kernel = asymmetric_kernel(radius);
         let widths: Vec<usize> = SWEEP_WIDTHS
             .iter()
             .copied()
-            .chain(2 * radius + 8..2 * radius + 48)
+            .chain(2 * radius + 1..2 * radius + 48)
             .filter(|&width| width > 2 * radius)
             .collect();
-        assert_simd_matches_scalar(ROW_BACKENDS, &widths, 0.0, |kernel_fn, shape, width| {
+        assert_simd_matches_scalar(&widths, 0.0, |tier, shape, width| {
             let input = shape.row(width, 0);
             let mut scalar = vec![0.0f32; width];
             let mut simd = vec![0.0f32; width];
-            convolve_row_scalar(&input, &mut scalar, &kernel, radius);
-            // SAFETY: the harness runs only backends whose tier this CPU has.
-            unsafe { kernel_fn(&input, &mut simd, &kernel, radius) };
+            convolve_row_scalar(&input, &mut scalar, &kernel);
+            tier.run(ConvolveRow {
+                input: &input,
+                output: &mut simd,
+                kernel: &kernel,
+            });
             ScalarSimd::new(scalar, simd)
         });
     }
@@ -126,13 +95,13 @@ fn convolve_row_impulse_response_is_the_reversed_kernel() {
     let mut input = vec![0.0f32; width];
     input[centre] = 1.0;
 
-    // Both implementations, because an interior impulse takes the SIMD path — checking only
+    // Both implementations, because an interior impulse takes the vector path — checking only
     // `convolve_row` would leave the scalar reference's own tap order unpinned, and the parity
     // sweep cannot tell which of the two is right.
     let mut simd = vec![0.0f32; width];
     let mut scalar = vec![0.0f32; width];
-    convolve_row(&input, &mut simd, &kernel, radius);
-    convolve_row_scalar(&input, &mut scalar, &kernel, radius);
+    convolve_row(&input, &mut simd, &kernel);
+    convolve_row_scalar(&input, &mut scalar, &kernel);
 
     for (label, output) in [("simd", &simd), ("scalar", &scalar)] {
         for tap in 0..kernel.len() {
@@ -154,7 +123,6 @@ fn convolve_row_impulse_response_is_the_reversed_kernel() {
 
 #[test]
 fn mirror_index_in_bounds() {
-    // In-bounds indices should pass through unchanged
     for len in [5, 10, 100] {
         for i in 0..len {
             assert_eq!(mirror_index(i as isize, len), i);
@@ -202,16 +170,9 @@ fn convolve_cols_uniform_input() {
     let height = 32;
     let input = vec![42.0f32; width * height];
     let kernel = vec![0.1, 0.2, 0.4, 0.2, 0.1];
-    let radius = 2;
 
     let mut output = vec![0.0f32; width * height];
-    convolve_cols_direct(
-        &input,
-        &mut output,
-        Size2us::new(width, height),
-        &kernel,
-        radius,
-    );
+    convolve_cols_direct(&input, &mut output, Size2us::new(width, height), &kernel);
 
     for (i, &v) in output.iter().enumerate() {
         assert!(
@@ -233,13 +194,7 @@ fn convolve_cols_impulse_response() {
     let radius = kernel.len() / 2;
 
     let mut output = vec![0.0f32; width * height];
-    convolve_cols_direct(
-        &input,
-        &mut output,
-        Size2us::new(width, height),
-        &kernel,
-        radius,
-    );
+    convolve_cols_direct(&input, &mut output, Size2us::new(width, height), &kernel);
 
     for y in 0..height {
         for x in 0..width {
@@ -253,47 +208,41 @@ fn convolve_cols_impulse_response() {
     }
 }
 
-/// Every column backend against the scalar reference, on images whose rows are the sweep's
+/// Every tier's column pass against the scalar reference, on images whose rows are the sweep's
 /// shapes: the whole output, so the mirrored top and bottom rows are compared with the interior.
 /// Bit for bit, as for rows.
 #[test]
-fn convolve_cols_backends_match_scalar() {
+fn convolve_cols_matches_scalar() {
     for radius in [1, 2, 3, 5] {
         let kernel = asymmetric_kernel(radius);
         let height = 2 * radius + 6;
-        assert_simd_matches_scalar(
-            COLS_ROW_BACKENDS,
-            SWEEP_WIDTHS,
-            0.0,
-            |kernel_fn, shape, width| {
-                let size = Size2us::new(width, height);
-                let input = shape_image(shape, size);
-                let mut scalar = vec![0.0f32; width * height];
-                let mut simd = vec![0.0f32; width * height];
-                for y in 0..height {
-                    let row = y * width..(y + 1) * width;
-                    convolve_cols_row_scalar(
-                        &input,
-                        &mut scalar[row.clone()],
-                        size,
-                        y,
-                        &kernel,
-                        radius,
-                    );
-                    // SAFETY: the harness runs only backends whose tier this CPU has.
-                    unsafe { kernel_fn(&input, &mut simd[row], size, y, &kernel, radius) };
-                }
-                ScalarSimd::new(scalar, simd)
-            },
-        );
+        assert_simd_matches_scalar(SWEEP_WIDTHS, 0.0, |tier, shape, width| {
+            let size = Size2us::new(width, height);
+            let input = shape_image(shape, size);
+            let mut scalar = vec![0.0f32; width * height];
+            let mut simd = vec![0.0f32; width * height];
+            for y in 0..height {
+                let row = y * width..(y + 1) * width;
+                convolve_cols_row_scalar(&input, &mut scalar[row.clone()], size, y, &kernel);
+                tier.run(ConvolveColsRow {
+                    input: &input,
+                    out_row: &mut simd[row],
+                    size,
+                    y,
+                    kernel: &kernel,
+                });
+            }
+            ScalarSimd::new(scalar, simd)
+        });
     }
 }
 
-/// Every 2D backend against the scalar reference, for each odd kernel size through nine, on the
-/// two mirrored rows at each edge and one interior row. Bit for bit, as for rows; the weights
-/// rise across the kernel, so no reflection of it is itself.
+/// Every tier's 2D row against the scalar reference, for each odd kernel size through nine, on the
+/// two mirrored rows at each edge and one interior row. Bit for bit, as for rows; the weights rise
+/// across the kernel, so no reflection of it is itself. Widths below a vector take the gathered
+/// partial vector.
 #[test]
-fn convolve_2d_row_backends_match_scalar() {
+fn convolve_2d_row_matches_scalar() {
     for ksize in [3, 5, 7, 9] {
         let radius = ksize / 2;
         let weights: Vec<f32> = (0..ksize * ksize)
@@ -301,12 +250,8 @@ fn convolve_2d_row_backends_match_scalar() {
             .collect();
         let kernel = Kernel2d::new(&weights, ksize);
         let height = 2 * radius + 6;
-        let widths: Vec<usize> = SWEEP_WIDTHS
-            .iter()
-            .copied()
-            .filter(|&width| width > 2 * radius)
-            .collect();
-        assert_simd_matches_scalar(ROW_2D_BACKENDS, &widths, 0.0, |kernel_fn, shape, width| {
+        let widths: Vec<usize> = (1..8).chain(SWEEP_WIDTHS.iter().copied()).collect();
+        assert_simd_matches_scalar(&widths, 0.0, |tier, shape, width| {
             let size = Size2us::new(width, height);
             let input = shape_image(shape, size);
             let mut scalar = Vec::new();
@@ -315,8 +260,13 @@ fn convolve_2d_row_backends_match_scalar() {
                 let mut scalar_row = vec![0.0f32; width];
                 let mut simd_row = vec![0.0f32; width];
                 convolve_2d_row_scalar(&input, &mut scalar_row, size, y, kernel);
-                // SAFETY: the harness runs only backends whose tier this CPU has.
-                unsafe { kernel_fn(&input, &mut simd_row, size, y, kernel) };
+                tier.run(Convolve2dRow {
+                    input: &input,
+                    output_row: &mut simd_row,
+                    size,
+                    y,
+                    kernel,
+                });
                 scalar.extend(scalar_row);
                 simd.extend(simd_row);
             }

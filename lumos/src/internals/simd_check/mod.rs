@@ -1,4 +1,4 @@
-//! One shape table and one sweep for cross-checking a SIMD kernel against its scalar reference.
+//! One shape table and one sweep for cross-checking a vector kernel against its scalar reference.
 //!
 //! The inputs live here — uniform rows, a ramp, a spike, negatives, alternating values — rather
 //! than as one `#[test]` per shape per module with an identical body: that shape makes a new case
@@ -7,26 +7,13 @@
 //! The kernels themselves are too varied to share a call signature: the median filter takes three
 //! rows, convolution takes a kernel, the background interpolator writes two outputs, and resample
 //! takes a transform. So the caller keeps its own call and this owns the inputs, the width sweep,
-//! the comparison, and the walk over every SIMD tier the host has.
+//! the comparison, and the walk over every tier the host has.
 
-pub(crate) mod backend;
 pub(crate) mod data_shape;
 
-use imaginarium::SimdTier;
-
-use crate::internals::simd_check::backend::Backend;
 use crate::internals::simd_check::data_shape::DataShape;
 use crate::internals::test_rng::TestRng;
-
-/// Whether a test can run `tier`'s backend here. When it cannot, the line on stderr says so,
-/// since a test has no skipped state and would otherwise pass without checking it.
-pub(crate) fn runs_here(tier: SimdTier) -> bool {
-    let supported = tier.is_supported();
-    if !supported {
-        eprintln!("SKIPPED: this CPU has no {tier}, so its backend is not checked");
-    }
-    supported
-}
+use crate::simd::tier::Tier;
 
 /// The inputs every SIMD cross-check runs over. Adding one here covers every kernel at once,
 /// which is the point — the per-module copies could not do that.
@@ -98,7 +85,7 @@ pub(crate) const DATA_SHAPES: &[DataShape] = &[
     },
 ];
 
-/// Widths spanning every lane boundary the backends switch on: below a vector, exactly one,
+/// Widths spanning every lane boundary a kernel switches on: below a vector, exactly one,
 /// one-past, and several multiples plus an odd tail.
 pub(crate) const SWEEP_WIDTHS: &[usize] = &[3, 4, 5, 7, 8, 9, 11, 15, 16, 17, 31, 32, 33, 64, 100];
 
@@ -143,16 +130,6 @@ impl ScalarSimd {
         ScalarSimd::of_sums(scalar, simd, magnitude)
     }
 
-    /// The tolerance [`ScalarSimd::of_sums`] holds a result to when no term passes through more
-    /// than `roundings` roundings (k for a sum of k products): `2·γₖ`, with
-    /// `γₖ = k·u / (1 − k·u)` and `u = 2⁻²⁴`, divided by `1 − γₖ` because the magnitude is itself
-    /// a rounded f32 sum and may fall short of the exact one by that factor.
-    pub(crate) fn sum_tolerance(roundings: usize) -> f32 {
-        let ku = roundings as f64 * f64::from(f32::EPSILON) / 2.0;
-        let gamma = ku / (1.0 - ku);
-        (2.0 * gamma / (1.0 - gamma)) as f32
-    }
-
     fn agree(&self, i: usize, tol: f64) -> bool {
         let (s, v) = (f64::from(self.scalar[i]), f64::from(self.simd[i]));
         match self.magnitude.get(i) {
@@ -163,25 +140,22 @@ impl ScalarSimd {
     }
 }
 
-/// Run `kernels` for every backend in `backends` the CPU has, over every shape in
-/// [`DATA_SHAPES`] at every width in `widths` the backend admits, asserting that each backend
-/// agrees with the scalar reference to `tol` (see [`ScalarSimd`]; `0.0` demands equality).
+/// Run `kernels` on every tier this CPU has (see [`Tier::supported`]), over every shape in
+/// [`DATA_SHAPES`] at every width in `widths`, asserting that each tier agrees with the scalar
+/// reference to `tol` (see [`ScalarSimd`]; `0.0` demands equality).
 ///
-/// `kernels` is handed one backend, a shape and a width, and returns the scalar and the SIMD
-/// output; whatever else the kernel needs, it closes over. A backend whose tier the CPU lacks is
-/// reported, not run (see [`Backend::supported`]).
-pub(crate) fn assert_simd_matches_scalar<B: Copy>(
-    backends: &[Backend<B>],
+/// `kernels` is handed one tier, a shape and a width, and returns the scalar and the vector
+/// output; whatever else the kernel needs, it closes over.
+pub(crate) fn assert_simd_matches_scalar(
     widths: &[usize],
     tol: f32,
-    kernels: impl Fn(B, &DataShape, usize) -> ScalarSimd,
+    kernels: impl Fn(Tier, &DataShape, usize) -> ScalarSimd,
 ) {
     let tol = f64::from(tol);
-    for backend in Backend::supported(backends) {
-        let tier = backend.tier;
+    for tier in Tier::supported() {
         for shape in DATA_SHAPES {
-            for &width in widths.iter().filter(|&&width| width >= backend.min_width) {
-                let out = kernels(backend.kernel, shape, width);
+            for &width in widths {
+                let out = kernels(tier, shape, width);
                 assert_eq!(
                     out.scalar.len(),
                     out.simd.len(),
@@ -206,17 +180,10 @@ pub(crate) fn assert_simd_matches_scalar<B: Copy>(
 mod tests {
     use std::cell::Cell;
 
-    use crate::internals::simd_check::backend::Backend;
     use crate::internals::simd_check::{
         DATA_SHAPES, SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar,
     };
-    use imaginarium::SimdTier;
-
-    /// A tier every host of its architecture has.
-    #[cfg(target_arch = "x86_64")]
-    const BASELINE: SimdTier = SimdTier::Sse2;
-    #[cfg(target_arch = "aarch64")]
-    const BASELINE: SimdTier = SimdTier::Neon;
+    use crate::simd::tier::Tier;
 
     #[test]
     fn every_shape_fills_the_requested_width_and_varies_with_seed() {
@@ -235,9 +202,9 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "uniform w=4 [0]: scalar 1 vs simd 2")]
+    #[should_panic(expected = "Portable uniform w=4 [0]: scalar 1 vs simd 2")]
     fn a_disagreeing_kernel_pair_fails() {
-        assert_simd_matches_scalar(&[Backend::new(BASELINE, ())], &[4], 1e-6, |(), _, width| {
+        assert_simd_matches_scalar(&[4], 1e-6, |_, _, width| {
             ScalarSimd::new(vec![1.0; width], vec![2.0; width])
         });
     }
@@ -253,27 +220,18 @@ mod tests {
         assert!(!ScalarSimd::new(vec![0.5], vec![1.5]).agree(0, 0.1));
     }
 
-    /// Each backend runs once per shape and admitted width: over widths 3 and 8, the first
-    /// backend runs both and the second, admitting only 8 and up, runs one.
+    /// Each supported tier runs once per shape and width: over widths 3 and 8, twice per shape.
     #[test]
-    fn every_backend_runs_every_shape_at_every_admitted_width() {
-        let calls = [Cell::new(0), Cell::new(0)];
-        assert_simd_matches_scalar(
-            &[
-                Backend::new(BASELINE, 0),
-                Backend::with_min_width(BASELINE, 1, 8),
-            ],
-            &[3, 8],
-            0.0,
-            |backend: usize, shape, width| {
-                calls[backend].set(calls[backend].get() + 1);
-                let row = shape.row(width, 0);
-                ScalarSimd::new(row.clone(), row)
-            },
-        );
+    fn every_tier_runs_every_shape_at_every_width() {
+        let calls = Cell::new(0);
+        assert_simd_matches_scalar(&[3, 8], 0.0, |_, shape, width| {
+            calls.set(calls.get() + 1);
+            let row = shape.row(width, 0);
+            ScalarSimd::new(row.clone(), row)
+        });
         assert_eq!(
-            calls.each_ref().map(Cell::get),
-            [DATA_SHAPES.len() * 2, DATA_SHAPES.len()]
+            calls.get(),
+            Tier::supported().count() * DATA_SHAPES.len() * 2
         );
     }
 }

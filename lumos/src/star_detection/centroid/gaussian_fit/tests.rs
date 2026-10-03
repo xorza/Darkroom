@@ -7,7 +7,8 @@ use std::f64::consts::PI;
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::star_detection::centroid::gaussian_fit::*;
 use crate::star_detection::centroid::lm_optimizer::internals::{
-    ModelStamp, assert_batch_matches_reference, assert_jacobian_matches_differences,
+    ModelJacobian, ModelSample, ModelStamp, assert_batch_matches_reference,
+    assert_jacobian_matches_differences,
 };
 use crate::star_detection::centroid::tests::perturbation::Perturbation;
 

@@ -112,10 +112,7 @@ fn gaussian_convolve_with_kernel(
     // Both passes mirror at the edges per axis, so they hold for a kernel wider than the image
     // too — the outer-product kernel with the same per-axis mirror is algebraically this result.
 
-    // Step 1: Convolve rows (horizontal pass)
     convolve_rows_parallel(pixels, temp, kernel);
-
-    // Step 2: Convolve columns (vertical pass)
     convolve_cols(temp, output, kernel);
 }
 
@@ -150,7 +147,6 @@ fn convolve_2d(pixels: &Buffer2<f32>, kernel: &GaussianKernel2d, output: &mut Bu
     let height = pixels.height();
     let kernel = simd::Kernel2d::new(&kernel.weights, kernel.size);
 
-    // Parallel SIMD 2D convolution - process rows in parallel
     output
         .pixels_mut()
         .par_chunks_mut(width)
@@ -195,26 +191,22 @@ fn gaussian_kernel_1d(sigma: f32) -> Vec<f32> {
     kernel
 }
 
-/// Convolve all rows in parallel using SIMD.
+/// Convolve all rows in parallel, vectors within each row.
 fn convolve_rows_parallel(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kernel: &[f32]) {
-    let width = input.width();
-    let radius = kernel.len() / 2;
-
     output
         .pixels_mut()
-        .par_chunks_mut(width)
+        .par_chunks_mut(input.width())
         .enumerate()
         .for_each(|(y, out_row)| {
-            simd::convolve_row(input.row(y), out_row, kernel, radius);
+            simd::convolve_row(input.row(y), out_row, kernel);
         });
 }
 
-/// Convolve all columns: rayon-parallel over output rows, SIMD across the columns within each row.
+/// Convolve all columns: rayon-parallel over output rows, vectors across the columns within each
+/// row.
 fn convolve_cols(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kernel: &[f32]) {
     let size = Size2us::new(input.width(), input.height());
-    let radius = kernel.len() / 2;
-
-    simd::convolve_cols_direct(input.pixels(), output.pixels_mut(), size, kernel, radius);
+    simd::convolve_cols_direct(input.pixels(), output.pixels_mut(), size, kernel);
 }
 
 /// Compute 2D elliptical Gaussian kernel (normalized to sum to 1.0).
@@ -249,7 +241,6 @@ fn elliptical_gaussian_kernel_2d(sigma: f32, axis_ratio: f32, angle: f32) -> Gau
             let x = kx as f32 - radius as f32;
             let y = ky as f32 - radius as f32;
 
-            // Rotate coordinates to align with ellipse axes
             let x_rot = x * cos_a + y * sin_a;
             let y_rot = -x * sin_a + y * cos_a;
 

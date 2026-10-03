@@ -624,7 +624,7 @@ fn apply_color_preserving_image(image: &mut LinearImage, curve: Curve) {
 }
 
 /// Color-preserving arcsinh on an **RGB** image, band-parallel across the three planes. The curve
-/// itself, and the choice of backend that evaluates it, live in [`simd`].
+/// itself, and the kernel that evaluates it, live in [`simd`].
 fn apply_color_preserving_asinh(image: &mut LinearImage, c: AsinhCurve) {
     debug_assert!(image.is_rgb(), "caller dispatches grayscale to map_samples");
     let [r, g, b] = image.rgb_planes_mut();

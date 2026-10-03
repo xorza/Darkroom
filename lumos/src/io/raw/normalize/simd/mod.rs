@@ -1,20 +1,9 @@
-//! Vector backends for the u16 -> normalized f32 conversion, and the dispatch between them.
+//! The u16 → normalized f32 conversion as a vector kernel.
 
 use crate::io::raw::normalize::normalize_one;
-use crate::simd::dispatch;
+use crate::simd::{F32_LANES, F32x8, Isa, Kernel};
 
-#[cfg(target_arch = "aarch64")]
-mod neon;
-
-#[cfg(target_arch = "x86_64")]
-mod sse2;
-
-#[cfg(target_arch = "x86_64")]
-mod sse41;
-
-/// Normalize one chunk, vectorized where the target allows.
-///
-/// SSE4.1 leads SSE2 for its faster u16->i32 conversion (`pmovzxwd`).
+/// Normalize one chunk on the widest Isa this CPU has.
 #[inline]
 pub(super) fn normalize_chunk<const CLAMP: bool>(
     input: &[u16],
@@ -22,24 +11,48 @@ pub(super) fn normalize_chunk<const CLAMP: bool>(
     black: f32,
     span: f32,
 ) {
-    dispatch! {
-        x86: sse4_1 => sse41::normalize_chunk_sse41::<CLAMP>(input, output, black, span),
-        x86: sse2 => sse2::normalize_chunk_sse2::<CLAMP>(input, output, black, span),
-        aarch64 => neon::normalize_chunk_neon::<CLAMP>(input, output, black, span),
-        scalar => normalize_chunk_scalar::<CLAMP>(input, output, black, span),
+    NormalizeChunk::<CLAMP> {
+        input,
+        output,
+        black,
+        span,
     }
+    .dispatch();
 }
 
-/// Scalar form of the whole chunk, for architectures with no backend of their own.
-#[inline]
-fn normalize_chunk_scalar<const CLAMP: bool>(
-    input: &[u16],
-    output: &mut [f32],
+/// [`normalize_one`] over `input` into `output`, [`F32_LANES`] samples at a time. The vector
+/// steps are `normalize_one`'s own IEEE operations in its order, so the scalar tail matches them
+/// bit for bit.
+#[derive(Debug)]
+struct NormalizeChunk<'a, const CLAMP: bool> {
+    input: &'a [u16],
+    output: &'a mut [f32],
     black: f32,
     span: f32,
-) {
-    for (out, &val) in output.iter_mut().zip(input.iter()) {
-        *out = normalize_one::<CLAMP>(val, black, span);
+}
+
+impl<const CLAMP: bool> Kernel for NormalizeChunk<'_, CLAMP> {
+    type Output = ();
+
+    #[inline(always)]
+    fn run<S: Isa>(self, isa: S) {
+        let black = isa.splat_f32(self.black);
+        let span = isa.splat_f32(self.span);
+        let (input_chunks, input_tail) = self.input.as_chunks::<F32_LANES>();
+        let (output_chunks, output_tail) = self.output.as_chunks_mut::<F32_LANES>();
+
+        for (input, output) in input_chunks.iter().zip(output_chunks) {
+            let subtracted = isa.load_u16(input) - black;
+            let normalized = if CLAMP {
+                (subtracted.max(isa.splat_f32(0.0)) / span).min(isa.splat_f32(1.0))
+            } else {
+                subtracted / span
+            };
+            normalized.store(output);
+        }
+        for (&value, output) in input_tail.iter().zip(output_tail) {
+            *output = normalize_one::<CLAMP>(value, self.black, self.span);
+        }
     }
 }
 
