@@ -753,3 +753,142 @@ fn input_type_resolves_declared_types_and_rejects_out_of_range() {
     );
     assert_eq!(g.graph.input_type(&g.library, InputPort::new(dst, 9)), None);
 }
+
+/// A named edit of a func's declaration.
+type FuncEdit = (&'static str, fn(&mut Func));
+
+/// A two-input, one-output, one-event func to hold a signature against.
+fn signed_func() -> Func {
+    use crate::graph::func::{FuncEvent, FuncInput, FuncOutput};
+    Func {
+        inputs: vec![
+            FuncInput::required("a", DataType::Int),
+            FuncInput::optional("b", DataType::String),
+        ],
+        outputs: vec![FuncOutput::new("out", DataType::Float)],
+        events: vec![FuncEvent {
+            name: "tick".into(),
+            event_lambda: crate::EventLambda::default(),
+        }],
+        ..Func::new(FuncId::from_u128(7), "signed")
+    }
+}
+
+/// A signature covers what a document's wiring is indexed by — the ports' names, types and
+/// order, and the events' names — and nothing a binding does not land by.
+#[test]
+fn a_signature_covers_the_ports_and_nothing_else() {
+    use crate::graph::func::OutputType;
+    use crate::graph::func::signature::FuncSignature;
+    use crate::{FsPathConfig, FsPathMode};
+    use std::sync::Arc;
+
+    let signature = FuncSignature::of(&signed_func());
+    let edited = |edit: fn(&mut Func)| {
+        let mut func = signed_func();
+        edit(&mut func);
+        FuncSignature::of(&func)
+    };
+    let moves: [FuncEdit; 7] = [
+        ("an input renamed", |f| f.inputs[0].name = "x".into()),
+        ("an input retyped", |f| {
+            f.inputs[0].data_type = DataType::Float;
+        }),
+        ("the inputs reordered", |f| f.inputs.swap(0, 1)),
+        ("an output dropped", |f| f.outputs.clear()),
+        ("an output made a wildcard", |f| {
+            f.outputs[0].ty = OutputType::Wildcard { mirrors: 0 };
+        }),
+        ("an event renamed", |f| f.events[0].name = "tock".into()),
+        ("a custom type swapped", |f| {
+            f.inputs[1].data_type = DataType::Custom(crate::TypeId::from_u128(1));
+        }),
+    ];
+    for (what, edit) in moves {
+        assert_ne!(edited(edit), signature, "{what}");
+    }
+    let keeps: [FuncEdit; 4] = [
+        ("the func renamed", |f| f.name = "other".into()),
+        ("an input made optional", |f| f.inputs[0].required = false),
+        ("a description added", |f| {
+            f.inputs[0].description = Some("explained".into());
+        }),
+        ("a default value set", |f| {
+            f.inputs[0].default_value = Some(ConstValue::Int(3));
+        }),
+    ];
+    for (what, edit) in keeps {
+        assert_eq!(edited(edit), signature, "{what}");
+    }
+    // A path picker's mode decides what it offers, not where its binding lands.
+    let path = |mode| {
+        let mut func = signed_func();
+        func.inputs[1].data_type = DataType::FsPath(Arc::new(FsPathConfig::new(mode)));
+        FuncSignature::of(&func)
+    };
+    assert_eq!(path(FsPathMode::Directory), path(FsPathMode::NewFile));
+}
+
+/// A node holds the signature of the func it was made from. Once the library's func moves its
+/// ports, validation and reconciling both refuse the node by name; a node that recorded none
+/// adopts the library's; and a func the library lacks is left to render as a stub.
+#[test]
+fn a_node_authored_against_other_ports_is_refused_by_name() {
+    use crate::graph::func::signature::FuncSignature;
+
+    let mut g = TestGraph::new();
+    g.add("f", |n| n.pure().input(DataType::Int).output(DataType::Int));
+    let id = g.id("f");
+    let func_id = match g.graph.find(id).unwrap().kind {
+        NodeKind::Func(func_id) => func_id,
+        NodeKind::Special(_) => unreachable!("the fixture adds a func node"),
+    };
+    let current = FuncSignature::of(g.library.by_id(func_id).unwrap());
+    assert_eq!(g.graph.find(id).unwrap().signature, Some(current));
+    assert!(g.graph.reconcile_signatures(&g.library).is_ok());
+
+    g.edit_func("f", |func| func.inputs[0].data_type = DataType::String);
+    for error in [
+        g.graph.validate_with(&g.library).unwrap_err(),
+        g.graph.reconcile_signatures(&g.library).unwrap_err(),
+    ] {
+        assert!(
+            matches!(&error, GraphValidationError::SignatureMismatch { node_id, func_id: f, .. }
+                if *node_id == id && *f == func_id),
+            "{error}"
+        );
+    }
+
+    g.graph.find_mut(id).unwrap().signature = None;
+    g.graph.reconcile_signatures(&g.library).unwrap();
+    assert_eq!(
+        g.graph.find(id).unwrap().signature,
+        Some(FuncSignature::of(g.library.by_id(func_id).unwrap()))
+    );
+
+    let stub = g
+        .graph
+        .add(Node::new(NodeKind::Func(FuncId::from_u128(99))));
+    assert!(g.graph.reconcile_signatures(&g.library).is_ok());
+    assert_eq!(g.graph.find(stub).unwrap().signature, None);
+}
+
+/// A node's signature survives the document round trip, and a document saved before
+/// signatures were recorded loads with none — for reconciling to adopt.
+#[test]
+fn a_signature_round_trips_and_an_older_document_has_none() -> TestResult {
+    let node = Node::from(&signed_func());
+    let encoded = serialize(&node, SerdeFormat::Ron)?;
+    let decoded: Node = deserialize(&encoded, SerdeFormat::Ron)?;
+    assert_eq!(decoded, node);
+
+    let older: String = String::from_utf8(encoded)?
+        .lines()
+        .filter(|line| !line.contains("signature:"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!older.contains("signature"), "the older form has no field");
+    let decoded: Node = deserialize(older.as_bytes(), SerdeFormat::Ron)?;
+    assert_eq!(decoded.signature, None);
+    Ok(())
+}

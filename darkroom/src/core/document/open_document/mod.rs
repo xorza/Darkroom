@@ -23,6 +23,7 @@ use crate::core::io::preferences::Preferences;
 use crate::core::status::StatusLog;
 use crate::gui::relayout::Relayout;
 use crate::gui::requests::{DocumentRequest, Requests};
+use scenarium::Library;
 
 /// Byte budget for the undo history's packed buffer (~1 MiB). Bounds
 /// memory rather than entry count — a single large edit can't be
@@ -219,8 +220,17 @@ impl OpenDocument {
         Relayout::needed_if(signals.geometry_stale)
     }
 
-    pub(crate) fn load(path: PathBuf) -> Result<Self, DocumentLoadError> {
-        let document = document::load(&path)?;
+    /// Open the document at `path`, holding each func node to the ports it was
+    /// authored against in `library`: a node whose func moved its ports is
+    /// refused by name, rather than loaded with its wiring on the wrong ports.
+    pub(crate) fn load(path: PathBuf, library: &Library) -> Result<Self, DocumentLoadError> {
+        let mut document = document::load(&path)?;
+        if let Err(source) = document.graph.reconcile_signatures(library) {
+            return Err(DocumentLoadError::InvalidDocument {
+                path,
+                source: source.into(),
+            });
+        }
         Ok(Self {
             document,
             path: Some(path),
@@ -234,8 +244,9 @@ impl OpenDocument {
         argument: Option<PathBuf>,
         preferences: &mut Preferences,
         status: &mut StatusLog,
+        library: &Library,
     ) -> Self {
-        Self::open_at_launch_with(argument, preferences, status, Preferences::save)
+        Self::open_at_launch_with(argument, preferences, status, library, Preferences::save)
     }
 
     /// [`Self::open_at_launch`] with the preferences write injected, so a test
@@ -251,16 +262,17 @@ impl OpenDocument {
         argument: Option<PathBuf>,
         preferences: &mut Preferences,
         status: &mut StatusLog,
+        library: &Library,
         save_preferences: impl FnOnce(&Preferences) -> Result<(), String>,
     ) -> Self {
         let Some(path) = argument else {
-            return Self::load_preferred(preferences, status, save_preferences);
+            return Self::load_preferred(preferences, status, library, save_preferences);
         };
         // Made absolute up front: the argument is relative to the shell's
         // working directory, which the file dialogs' anchor and the worker's
         // disk cache both outlive.
         let path = path::absolute(&path).unwrap_or(path);
-        Self::load(path).unwrap_or_else(|error| {
+        Self::load(path, library).unwrap_or_else(|error| {
             status.error(format!("load failed: {error:#}"));
             Self::default()
         })
@@ -274,6 +286,7 @@ impl OpenDocument {
     fn load_preferred(
         preferences: &mut Preferences,
         status: &mut StatusLog,
+        library: &Library,
         save_preferences: impl FnOnce(&Preferences) -> Result<(), String>,
     ) -> Self {
         let Some(path) = preferences
@@ -283,7 +296,7 @@ impl OpenDocument {
         else {
             return Self::default();
         };
-        match Self::load(path) {
+        match Self::load(path, library) {
             Ok(open) => open,
             Err(error) => {
                 status.error(format!("load failed: {error:#}"));

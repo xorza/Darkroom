@@ -320,7 +320,7 @@ impl GraphIntent {
                     pos,
                     z: view.front_z(),
                 };
-                UndoStep::NodePresence(NodePresence::insertion(
+                UndoStep::NodePresence(Box::new(NodePresence::insertion(
                     DetachedNode {
                         node_id,
                         node,
@@ -328,14 +328,14 @@ impl GraphIntent {
                         subscriptions: Vec::new(),
                     },
                     placement,
-                ))
+                )))
             }
             Self::RemoveNode { node_id } => {
                 validate::non_nil_node(node_id, "RemoveNode")?;
                 let Some(state) = NodeState::capture(doc, node_id) else {
                     return Ok(None);
                 };
-                UndoStep::NodePresence(NodePresence::removal(state))
+                UndoStep::NodePresence(Box::new(NodePresence::removal(state)))
             }
             Self::MoveSelection { grabbed, moves } => {
                 let mut placed = Vec::with_capacity(moves.len());

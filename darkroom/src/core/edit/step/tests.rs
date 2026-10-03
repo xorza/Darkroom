@@ -78,7 +78,7 @@ fn node_presence() -> UndoStep {
     let mut fixture = DocFixture::default();
     let node_id = fixture.stub_at(Vec2::ZERO);
     let state = NodeState::capture(&fixture.doc, node_id).expect("the fixture placed it");
-    UndoStep::NodePresence(NodePresence::removal(state))
+    UndoStep::NodePresence(Box::new(NodePresence::removal(state)))
 }
 
 /// The exit prompt's split: camera, selection and stacking are navigation and

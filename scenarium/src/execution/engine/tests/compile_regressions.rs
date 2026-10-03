@@ -130,7 +130,7 @@ async fn update_with_evolved_func_recompiles_and_runs_new_lambda() {
 
     // v2: the same declaration gains an input and a different body.
     e.edit(|g| {
-        g.edit_func("generate", |func| {
+        g.evolve_func("generate", |func| {
             func.inputs
                 .push(FuncInput::optional("Extra", DataType::Int));
             func.lambda = async_lambda!(move |Invocation { outputs, .. }| {
@@ -195,7 +195,7 @@ async fn update_with_a_grown_output_list_retires_the_shorter_snapshot() {
     // The same declaration gains an output. Installing that is where the
     // retained snapshot had to be retired.
     e.edit(|g| {
-        g.edit_func("generate", |func| {
+        g.evolve_func("generate", |func| {
             func.outputs.push(FuncOutput::new("W", DataType::Int));
         });
     });

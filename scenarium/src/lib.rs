@@ -66,6 +66,7 @@ pub use graph::error::GraphValidationError;
 pub use graph::func::error::{FuncValidationError, InvokeError, InvokeResult};
 pub use graph::func::event::{AsyncEvent, AsyncEventFn, EventLambda};
 pub use graph::func::lambda::{AsyncLambda, AsyncLambdaFn, FuncLambda, Invocation, OutputDemand};
+pub use graph::func::signature::FuncSignature;
 pub use graph::func::{
     Func, FuncBehavior, FuncEvent, FuncInput, FuncOutput, OutputType, ValueVariant,
 };

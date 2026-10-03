@@ -24,6 +24,7 @@ use crate::graph::detached::DetachedNode;
 use crate::graph::func::error::InvokeError;
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::lambda::{FuncLambda, Invocation};
+use crate::graph::func::signature::FuncSignature;
 use crate::graph::func::{Func, FuncInput, FuncOutput};
 use crate::graph::identity::{FuncId, InputPort, NodeId};
 use crate::graph::node::special::SpecialNode;
@@ -265,6 +266,25 @@ impl TestGraph {
             .expect("the named node's func is registered");
         edit(&mut func);
         self.library.add(func);
+    }
+
+    /// [`edit_func`](Self::edit_func) for an edit that moves ports, with the
+    /// graph adopting the new ones: every node of the func records the new
+    /// signature, as an author who accepted the change would leave it. Without
+    /// that, the guard refuses the nodes the edit left behind.
+    pub fn evolve_func(&mut self, name: &str, edit: impl FnOnce(&mut Func)) {
+        self.edit_func(name, edit);
+        let func_id = self.func_id(name);
+        let signature = FuncSignature::of(self.library.by_id(func_id).unwrap());
+        let nodes: Vec<NodeId> = self
+            .graph
+            .iter()
+            .filter(|node| node.kind == NodeKind::Func(func_id))
+            .map(|node| node.id)
+            .collect();
+        for node in nodes {
+            self.graph.find_mut(node).unwrap().signature = Some(signature);
+        }
     }
 
     /// Replace what `name` declares with a body that always fails — the
