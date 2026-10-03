@@ -14,13 +14,13 @@ use crate::calibration_masters::cosmic_ray::reject_cosmic_rays;
 use crate::combine::error::Error as StackError;
 use crate::error::FrameDimensionMismatch;
 use crate::frame_store::frame_stats::FrameStats;
+use crate::ingest::ingest_run::IngestRun;
 use crate::io::cancelled::Cancelled;
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage};
 use crate::io::image::error::ImageError;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
-use crate::memory::run_memory::RunMemory;
 use crate::memory::{
     DECODE_TRANSIENT_FACTOR, DETECTION_WORKING_PLANES, MemoryPlan, PerFrameBytes, RunShape,
 };
@@ -63,8 +63,10 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     let total = light_paths.len();
     // Sample the machine once, here, and hand the reading to every stage below, so the tier
     // decision, the chunk sizes and the decode ceiling are derived from the same figure.
-    let memory = RunMemory::read(config.stack.cache.memory_override);
-    let load_context = memory.load_context(cancel.clone());
+    let IngestRun {
+        memory,
+        context: load_context,
+    } = IngestRun::new(&config.stack.ingest, cancel.clone());
 
     // Peek the sensor dimensions (no decode) so the tier is decided before any frame is read.
     let frame_info =
@@ -99,7 +101,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
         rayon::current_num_threads(),
         memory.planning(),
     );
-    let stage = StagePlan::new(&plan, &config.stack.cache, memory)?;
+    let stage = StagePlan::new(&plan, &config.stack.ingest, memory)?;
 
     tracing::info!(
         frames = total,

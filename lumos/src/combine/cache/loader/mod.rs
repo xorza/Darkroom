@@ -7,7 +7,6 @@ use std::sync::OnceLock;
 use common::{CancelToken, FileIdentity};
 use imaginarium::Buffer2;
 
-use crate::combine::cache_config::CacheConfig;
 use crate::combine::config::StackConfig;
 use crate::combine::error::Error;
 use crate::concurrency;
@@ -19,12 +18,13 @@ use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::frame_spill::FrameSpill;
 use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::spill_directory::SpillDirectory;
+use crate::ingest::ingest_config::IngestConfig;
+use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::error::ImageError;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::load_context::LoadContext;
 use crate::memory;
-use crate::memory::run_memory::RunMemory;
 use crate::memory::{MemoryPlan, RunShape};
 
 use crate::frame_store::stackable_image::StackableImage;
@@ -64,17 +64,13 @@ pub(super) struct LoadedCache {
 pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     paths: &[P],
     config: &StackConfig,
-    memory: RunMemory,
+    run: IngestRun,
     prepare: Option<&Prepare<'_, I>>,
     progress: ProgressCallback,
-    cancel: CancelToken,
 ) -> Result<LoadedCache, Error> {
-    if paths.is_empty() {
-        return Err(Error::NoFrames);
-    }
-
+    debug_assert!(!paths.is_empty(), "`combine_cached` refuses an empty set");
     let first_path = paths[0].as_ref();
-    let context = memory.load_context(cancel.clone());
+    let IngestRun { memory, context } = run;
 
     // Dimensions drive the in-memory-vs-disk tier decision. Peek the header without a decode when
     // the format allows it (RAW), so the in-memory path can decode every frame in parallel rather
@@ -132,7 +128,7 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     } else {
         load_to_disk::<I, P>(
             paths,
-            &config.cache,
+            &config.ingest,
             &progress,
             dimensions,
             early,
@@ -149,7 +145,7 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
             dimensions,
             metadata,
             progress,
-            cancel,
+            cancel: context.cancel,
         },
     })
 }
@@ -331,7 +327,7 @@ fn admit_decoded<I: StackableImage>(
 /// Images are loaded and cached in parallel for better throughput.
 fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     paths: &[P],
-    config: &CacheConfig,
+    config: &IngestConfig,
     progress: &ProgressCallback,
     dimensions: ImageDimensions,
     early: Option<EarlyDecode<I>>,

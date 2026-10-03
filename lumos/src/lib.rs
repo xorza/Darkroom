@@ -40,6 +40,7 @@ mod drizzle;
 mod error;
 mod frame_store;
 mod image_ops;
+mod ingest;
 mod io;
 mod math;
 mod memory;
@@ -126,7 +127,6 @@ pub use registration::transform::{Transform, TransformModel, TransformType, Warp
 pub use registration::triangle::TriangleConfig;
 pub use registration::triangle::voting::MatchIndices;
 
-pub use combine::cache_config::CacheConfig;
 pub use combine::config::{CombineMethod, Normalization, SmallN, StackConfig, Weighting};
 pub use combine::error::{Error as StackError, StackConfigError};
 pub use combine::rejection::Rejection;
@@ -139,6 +139,7 @@ pub use combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
 pub use combine::stack::{StackFrame, stack, stack_images};
 pub use frame_store::error::FrameStoreError;
 pub use frame_store::frame_quality::FramePlane;
+pub use ingest::ingest_config::IngestConfig;
 pub use progress::{ProgressCallback, StackingProgress, StackingStage};
 pub use run_report::{FlagCounts, RunReport};
 pub use stack_product::StackProduct;

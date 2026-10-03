@@ -79,9 +79,9 @@ fn build_config(
         "sigma" => StackConfig::sigma_clipped(3.0),
         other => panic!("LUMOS_METHOD: expected sigma|median|mean, got {other:?}"),
     };
-    config.cache.memory_override = memory_override;
-    config.cache.cache_dir = cache_dir;
-    config.cache.keep_cache = keep;
+    config.ingest.memory_override = memory_override;
+    config.ingest.cache_dir = cache_dir;
+    config.ingest.keep_cache = keep;
     config
 }
 

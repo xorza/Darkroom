@@ -9,13 +9,13 @@ use common::{CancelToken, TempDir};
 use crate::combine::cache::FrameCache;
 use crate::combine::stack::run_stacking;
 use crate::concurrency;
+use crate::ingest::ingest_run::IngestRun;
 use crate::internals::init_tracing;
 use crate::internals::real_data::raw_frames;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::io::raw::load_raw_cfa;
-use crate::memory::run_memory::RunMemory;
 use crate::{
     CalibrationComponent, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, MasterRole,
     Normalization, ProgressCallback, RegistrationConfig, StackConfig, Star, StarDetectionConfig,
@@ -59,10 +59,9 @@ fn bench_full_pipeline() {
         let cache = FrameCache::from_cfa_paths(
             paths,
             &config,
-            RunMemory::read(config.cache.memory_override),
+            IngestRun::new(&config.ingest, CancelToken::never()),
             None,
             ProgressCallback::default(),
-            CancelToken::never(),
         )
         .unwrap();
         let load_ms = t0.elapsed().as_secs_f64() * 1000.0;

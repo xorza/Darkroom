@@ -1,12 +1,12 @@
 //! Where the pipeline parks a frame between stages.
 
 use crate::combine::cache::core::CacheTier;
-use crate::combine::cache_config::CacheConfig;
 use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::frame_spill::FrameSpill;
 use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::spill_directory::SpillDirectory;
 use crate::frame_store::stored_frame::StoredFrame;
+use crate::ingest::ingest_config::IngestConfig;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
 use crate::memory::MemoryPlan;
@@ -28,11 +28,11 @@ pub(crate) struct StagePlan {
 impl StagePlan {
     pub(crate) fn new(
         plan: &MemoryPlan,
-        cache: &CacheConfig,
+        ingest: &IngestConfig,
         memory: RunMemory,
     ) -> Result<Self, Error> {
         Ok(Self {
-            tier: FrameTier::for_plan(plan, cache, memory)?,
+            tier: FrameTier::for_plan(plan, ingest, memory)?,
             warp_concurrency: plan.warp_concurrency,
         })
     }
@@ -61,11 +61,15 @@ pub(crate) enum FrameTier {
 
 impl FrameTier {
     /// Spill when the plan says the frame set plus its scratch will not fit.
-    fn for_plan(plan: &MemoryPlan, cache: &CacheConfig, memory: RunMemory) -> Result<Self, Error> {
+    fn for_plan(
+        plan: &MemoryPlan,
+        ingest: &IngestConfig,
+        memory: RunMemory,
+    ) -> Result<Self, Error> {
         if plan.fits_in_ram {
             return Ok(Self::Ram);
         }
-        SpillDirectory::create(&cache.cache_dir, cache.keep_cache)
+        SpillDirectory::create(&ingest.cache_dir, ingest.keep_cache)
             .map(|directory| Self::Spill {
                 directory,
                 chunk_memory: memory.planning(),

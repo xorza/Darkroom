@@ -380,9 +380,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
   - `extract_and_filter_candidates`/`extract_candidates` is one function split thinly. `[C]`
 - [ ] `26.13` **`KernelPlan` is rebuilt per frame, although the doc says "once per run"** — `drizzle/accumulator/mod.rs:182`, `drizzle/accumulator/output_band.rs:38-42`
   - It has two `impl` blocks with `OutputBand` between them (`:92`, `:122`). `[C]`
-- [ ] `26.14` **`drizzle_stack` takes a `LoadContext` whose `cancel` it ignores** — `drizzle/stack.rs:54-82`
-  - It honours `context.fits`, while `stack` always uses default FITS options (`memory/run_memory.rs:47-49`). Its memory ceiling comes from the caller, not from `CacheConfig`. `[C]`
-- [ ] `26.15` **Entry points disagree on `progress`/`cancel`** — `drizzle_stack`/`drizzle_images` take references, all others take values (`drizzle/stack.rs:69-75` vs `combine/stack/mod.rs:112-117`). `[C]`
 - [ ] `26.16` **`lib.rs:95-131` has 12 renamed re-exports** (`Config as StarDetectionConfig`, `Error as StackError`, …)
   - Rename the types, so rustc and docs show the public names. `[C]`
 - [ ] `26.17` **`SipFitResult` is public but not exported, and its diagnostics are computed and discarded** — `registration/distortion/sip/mod.rs:122`, `registration/mod.rs:398` `[C]`
@@ -398,8 +395,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
   - `.filter(|d| d.area > 0)` (`:178`)
   - the 8-bit LibRaw branch (group 16)
   - `let planar = image;` (`image_ops/ml/backend/mod.rs:282`)
-- [ ] `26.21` **`NoFrames` is checked three times** — `combine_cached`, `from_stack_frames`, `load_tiered`
-  - `combine_cached` is the documented gate. `[C]`
 - [ ] `26.22` **`check_cancel` is a free fn in `combine/error.rs:175`** (rule: error.rs is for errors only). `[C]`
 - [ ] `26.23` **The "subsample a plane into a Vec" code occurs three times** — `image_ops/stretching/mod.rs:240-244`, `image_ops/color_calibration/mod.rs:64-69`, `image_ops/denoise/mod.rs:351-357` `[C]`
 - [ ] `26.24` **`compact_by_mask` reimplements `Vec::retain`, and the dedup has two paths (`_simple`, `_hashed`)** — `star_detection/detector/stages/filter/mod.rs:229-244`
@@ -813,7 +808,9 @@ Steps 2 and 3 are done. The masters are typed: `MasterDark` records whether its 
 2. Add the `Reference::Index` single-write path.
 - **Tests:**
   - A plan for 30 resident RGB 24 MP frames on a machine with room for them stays in RAM.
-- **Closes:** 15.3, 21.2, 21.3, 26.14, 26.15, 26.21.
+- **Closes:** 15.3, 21.2, 21.3.
+
+Done in step 1 so far: `IngestConfig` (was `CacheConfig`) carries the FITS policy beside the memory override and the cache, `StackConfig::ingest` and `DrizzleConfig::ingest` hold it, and `IngestRun` reads the machine once per run and builds the one `LoadContext` every decode takes. Every entry takes its progress and cancel token by value. `combine_cached` alone refuses an empty set. Items 26.14, 26.15 and 26.21 are closed.
 
 ## Phase 7. Detection planes (C3)
 

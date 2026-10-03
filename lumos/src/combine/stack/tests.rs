@@ -1,16 +1,17 @@
 use crate::frame_store::frame_facts::FrameFacts;
 use crate::internals::prelude::*;
+use crate::memory::run_memory::RunMemory;
 
 use crate::frame_store::frame_quality::FramePlane;
 use crate::frame_store::frame_spill::FrameSpill;
 
-use crate::combine::cache_config::CacheConfig;
 use crate::combine::config::{Normalization, SmallN};
 use crate::combine::rejection::Rejection;
 use crate::combine::rejection::trim_config::TrimConfig;
 use crate::combine::stack::*;
 use crate::error::FrameDimensionMismatch;
 use crate::frame_store::spill_directory::SpillDirectory;
+use crate::ingest::ingest_config::IngestConfig;
 use crate::internals;
 use crate::internals::assertions::bits;
 use crate::internals::synthetic::patterns;
@@ -1587,9 +1588,9 @@ fn disk_backed_stack_combines_via_mmap() {
     let config = StackConfig {
         method: CombineMethod::Mean(Rejection::None),
         normalization: Normalization::None,
-        cache: CacheConfig {
+        ingest: IngestConfig {
             memory_override: Some(1), // forces disk-backed (mmap) storage
-            ..CacheConfig::with_cache_dir(temp_dir.join("cache"))
+            ..IngestConfig::with_cache_dir(temp_dir.join("cache"))
         },
         ..Default::default()
     };

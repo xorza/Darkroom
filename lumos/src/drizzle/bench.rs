@@ -107,8 +107,8 @@ fn drizzle(frames: &[DrizzleFrame<LinearImage>], config: &DrizzleConfig) -> Stac
     drizzle_images(
         frames.to_vec(),
         config,
-        &ProgressCallback::default(),
-        &CancelToken::never(),
+        ProgressCallback::default(),
+        CancelToken::never(),
     )
     .expect("bench fixture must drizzle")
     .product

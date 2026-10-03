@@ -1,11 +1,14 @@
-//! Cache configuration for disk-backed stacking operations.
+//! [`IngestConfig`]: how a run reads its frames and where it parks them.
 
 use std::env;
 use std::path::PathBuf;
 
-/// Configuration of the frame cache every combine method reads its frames through.
+use crate::io::image::fits::options::FitsLoadOptions;
+
+/// How a run reads its frames and where it parks them: the decode policy, the memory it plans
+/// against, and the frame cache every combine reads its frames through.
 #[derive(Clone, Debug, PartialEq)]
-pub struct CacheConfig {
+pub struct IngestConfig {
     /// Root the spill files go under. A run writes only into a subdirectory it creates there, and
     /// never removes anything it did not create — see `SpillDirectory`.
     pub cache_dir: PathBuf,
@@ -19,19 +22,22 @@ pub struct CacheConfig {
     /// reports. It never raises what one file's decode may allocate, which stays bound by the
     /// system reading.
     pub memory_override: Option<u64>,
+    /// How FITS frames are read; ignored for every other format.
+    pub fits: FitsLoadOptions,
 }
 
-impl Default for CacheConfig {
+impl Default for IngestConfig {
     fn default() -> Self {
         Self {
             cache_dir: env::temp_dir().join("lumos_cache"),
             keep_cache: false,
             memory_override: None,
+            fits: FitsLoadOptions::default(),
         }
     }
 }
 
-impl CacheConfig {
+impl IngestConfig {
     /// Create a new cache configuration with custom cache directory.
     pub fn with_cache_dir(cache_dir: PathBuf) -> Self {
         Self {
@@ -43,12 +49,12 @@ impl CacheConfig {
 
 #[cfg(test)]
 mod tests {
-    use crate::combine::cache_config::*;
+    use crate::ingest::ingest_config::*;
 
     #[test]
     fn default_config_spills_under_one_temp_root() {
         // Every run shares the root; each run's own subdirectory is what keeps them apart.
-        let config = CacheConfig::default();
+        let config = IngestConfig::default();
         assert_eq!(config.cache_dir, env::temp_dir().join("lumos_cache"));
         // The spill cache is cleaned up unless a caller asks otherwise, in every build profile.
         assert!(!config.keep_cache);
@@ -58,7 +64,7 @@ mod tests {
     #[test]
     fn custom_cache_directory_preserves_other_defaults() {
         let directory = PathBuf::from(".tmp/custom_cache");
-        let config = CacheConfig::with_cache_dir(directory.clone());
+        let config = IngestConfig::with_cache_dir(directory.clone());
 
         assert_eq!(config.cache_dir, directory);
         assert!(!config.keep_cache);

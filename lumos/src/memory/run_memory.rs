@@ -1,8 +1,5 @@
 //! [`RunMemory`]: the memory figure one run sizes against, read once at its entry.
 
-use common::CancelToken;
-
-use crate::io::image::load_context::LoadContext;
 use crate::memory;
 
 /// The memory one run sizes against: one system reading, taken at the run's entry and passed to
@@ -19,7 +16,7 @@ pub(crate) struct RunMemory {
 
 impl RunMemory {
     /// Read the system once; `memory_override` is
-    /// [`CacheConfig::memory_override`](crate::CacheConfig::memory_override).
+    /// [`IngestConfig::memory_override`](crate::IngestConfig::memory_override).
     pub(crate) fn read(memory_override: Option<u64>) -> Self {
         Self::new(memory::available_memory(), memory_override)
     }
@@ -43,16 +40,10 @@ impl RunMemory {
     pub(crate) fn decode_ceiling(self) -> u64 {
         memory::memory_budget(self.system)
     }
-
-    pub(crate) fn load_context(self, cancel: CancelToken) -> LoadContext {
-        LoadContext::new(cancel, self.decode_ceiling())
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use common::CancelToken;
-
     use crate::memory::memory_budget;
     use crate::memory::run_memory::RunMemory;
 
@@ -68,12 +59,6 @@ mod tests {
             overridden.decode_ceiling(),
             6_000,
             "75 % of the system reading, whatever the override"
-        );
-        assert_eq!(
-            overridden
-                .load_context(CancelToken::never())
-                .memory_limit_bytes,
-            6_000
         );
     }
 }

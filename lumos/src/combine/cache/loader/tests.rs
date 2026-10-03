@@ -1,3 +1,4 @@
+use crate::memory::run_memory::RunMemory;
 use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
 use std::time::{Duration, UNIX_EPOCH};
@@ -204,10 +205,10 @@ fn a_kept_disk_cache_is_reused_by_the_next_run() {
         })
         .collect();
     let config = StackConfig {
-        cache: CacheConfig {
+        ingest: IngestConfig {
             cache_dir: temp_dir.join("cache"),
             keep_cache: true,
-            memory_override: None,
+            ..IngestConfig::default()
         },
         ..StackConfig::default()
     };
@@ -215,10 +216,9 @@ fn a_kept_disk_cache_is_reused_by_the_next_run() {
         load_tiered::<LinearImage, _>(
             &paths,
             &config,
-            RunMemory::new(1 << 30, Some(1)),
+            IngestRun::planned(RunMemory::new(1 << 30, Some(1))),
             None,
             ProgressCallback::default(),
-            CancelToken::never(),
         )
         .unwrap()
     };

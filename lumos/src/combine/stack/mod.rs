@@ -26,8 +26,8 @@ use crate::combine::stack::quantization::{MaxSigma, SourceSigmas};
 use crate::frame_store::frame_quality::FrameQuality;
 use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::stored_frame::StoredFrame;
+use crate::ingest::ingest_run::IngestRun;
 use crate::math;
-use crate::memory::run_memory::RunMemory;
 use crate::progress::ProgressCallback;
 use crate::registration::resample::WarpResult;
 use crate::stack_product::StackProduct;
@@ -119,8 +119,12 @@ pub fn stack<P: AsRef<Path> + Sync>(
     // Files on disk carry no coverage, so the combine treats every pixel as fully covered.
     // `cancel` rides on the cache from construction, so the load loop polls it too.
     combine_cached(config, paths.len(), "paths", || {
-        let memory = RunMemory::read(config.cache.memory_override);
-        FrameCache::from_paths(paths, config, memory, progress, cancel)
+        FrameCache::from_paths(
+            paths,
+            config,
+            IngestRun::new(&config.ingest, cancel),
+            progress,
+        )
     })
 }
 
