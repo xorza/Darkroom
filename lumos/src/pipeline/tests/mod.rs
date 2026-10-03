@@ -635,9 +635,8 @@ fn the_raw_front_end_checks_each_light_at_decode() {
 
     let parametric = AlignStackConfig {
         cosmic_ray: Some(CosmicRayConfig {
-            noise: NoiseEstimation::Parametric {
-                gain: 1.5,
-                read_noise: 5.0,
+            noise: NoiseEstimation::Gain {
+                electrons_per_adu: 1.5,
             },
             ..Default::default()
         }),

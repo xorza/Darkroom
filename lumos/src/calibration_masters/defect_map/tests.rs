@@ -6,9 +6,8 @@ use crate::internals::cfa::XTRANS_PATTERN;
 use crate::io::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
 use crate::math::vec2us::Vec2us;
 
-use crate::calibration_masters::defect_map::sampling::{
-    collect_color_sample_indices, collect_color_samples,
-};
+use crate::calibration_masters::defect_map::sampling::collect_color_sample_indices;
+use crate::calibration_masters::defect_map::sampling::internals::collect_color_samples;
 use crate::{internals::cfa::make_cfa, io::raw::demosaic::bayer::CfaPattern};
 
 fn median_mad(mut samples: Vec<f32>) -> MedianMad {
@@ -430,15 +429,20 @@ fn dark_background_reconstructs_affine_mono_signal_through_image_edges() {
         })
         .collect();
     let data = Buffer2::new(size.width, size.height, pixels);
-    let background = DarkBackground::fit(&data, CfaType::Mono, &CancelToken::never()).unwrap();
+    let background = ColourMesh::measure(
+        &data,
+        &CfaType::Mono,
+        DARK_BACKGROUND_TILE_SIZE,
+        &mut MeshWorkspace::default(),
+    );
 
     for y in 0..size.height {
         for x in 0..size.width {
             let expected = 0.02 + 0.0001 * x as f32 + 0.0002 * y as f32;
+            let sky = background.at(0, Vec2us::new(x, y)).sky;
             assert!(
-                (background.at(Vec2us::new(x, y), 0) - expected).abs() < 2e-7,
-                "affine background mismatch at ({x}, {y}): expected {expected}, got {}",
-                background.at(Vec2us::new(x, y), 0)
+                (sky - expected).abs() < 2e-7,
+                "affine background mismatch at ({x}, {y}): expected {expected}, got {sky}"
             );
         }
     }

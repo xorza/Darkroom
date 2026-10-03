@@ -5,6 +5,7 @@
 //! problem back into four mono detections, whose dense neighbours really are same-colour in the
 //! mosaic. Pattern-independent: phase alone fixes the colour, so no `CfaPattern` is needed.
 
+use crate::background_mesh::colour_mesh::ColourMesh;
 use crate::bit_buffer2::BitBuffer2;
 use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::calibration_masters::cosmic_ray::mono::MonoDetector;
@@ -23,6 +24,7 @@ use crate::math::vec2us::Vec2us;
 pub(super) struct BayerDetector<'a> {
     mono: MonoDetector<'a>,
     lattice: CfaLattice,
+    cfa: CfaType,
     plane: Vec<f32>,
 }
 
@@ -31,6 +33,7 @@ impl<'a> BayerDetector<'a> {
         Self {
             mono: MonoDetector::new(config, noise),
             lattice: CfaLattice::new(cfa),
+            cfa: *cfa,
             plane: Vec::new(),
         }
     }
@@ -51,11 +54,13 @@ impl<'a> BayerDetector<'a> {
         &mut self,
         data: &mut [f32],
         size: Size2us,
+        mesh: &ColourMesh,
         found: &mut BitBuffer2,
     ) -> usize {
         let Self {
             mono,
             lattice,
+            cfa,
             plane,
         } = self;
         let mut total = 0;
@@ -67,8 +72,13 @@ impl<'a> BayerDetector<'a> {
                     continue;
                 }
                 lattice.deinterleave(data, size, phase, plane);
+                let colour = usize::from(cfa.color_at(phase));
+                let local = |index: usize| {
+                    let at = plane_size.point_of(index);
+                    mesh.at(colour, Vec2us::new(2 * at.x + a, 2 * at.y + b))
+                };
                 let mut plane_found = BitBuffer2::new_default(plane_size);
-                total += mono.reject(plane, plane_size, &mut plane_found);
+                total += mono.reject(plane, plane_size, &local, &mut plane_found);
                 plane_found.for_each_set(|pos| {
                     found.set_at(Vec2us::new(pos.x * 2 + a, pos.y * 2 + b), true);
                 });

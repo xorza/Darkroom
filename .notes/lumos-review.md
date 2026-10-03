@@ -59,10 +59,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 
 ## 6. Noise is estimated from whole-frame spread, which includes signal
 
-- [ ] `6.5` **Cosmic-ray empirical noise is one whole-frame (or whole-colour) median/MAD** — `calibration_masters/cosmic_ray/mono.rs:232-238`, `calibration_masters/cosmic_ray/xtrans.rs:244-271`
-  - Gradients make N larger, so faint hits are missed. astroscrappy uses a per-pixel `sqrt(m5 + rn² + bkg)`. `[P]`
-- [ ] `6.6` **The parametric cosmic-ray noise model drops the subtracted dark/sky level** — `calibration_masters/cosmic_ray/mono.rs:281-295`
-  - N is understated on warm long exposures, so too many pixels are flagged. astroscrappy adds `bkg`/`pssl`. `[P]`
 - [ ] `6.7` **Denoise σ at coarse scales comes from the scale's own coefficients** — `image_ops/denoise/mod.rs:330,351-362`
   - Nebula structure raises σ_j, so faint filaments are removed.
   - Use the multiresolution support (iterate on non-significant coefficients), or σ_I·σ_j^e with the B3 constants 0.889, 0.200, 0.086, 0.041, 0.020. `[P]`
@@ -398,10 +394,7 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
   - `flat_dark` (and `bias` when a dark is present) stay resident (≈96–240 MB each) and are saved. Keep only what `calibrate` reads, and record the inputs as provenance. `[C]`
 - [ ] `26.2` **The prepared flat is not its own type** — `calibration_masters/calibration_set.rs`, `calibration_masters/master_role.rs:110-112`, `calibration_masters/fits.rs:208-217`, `calibration_masters/prepared_flat/mod.rs`
   - A `PreparedFlat` struct makes the invariant a type. It also removes the forwarding `subtract` and turns 3 free fns into methods. `[C]`
-- [ ] `26.3` **`NoiseModel` behaviour is in `mono.rs`, and the dispatch is written twice** — `calibration_masters/cosmic_ray/mono.rs:224-246`, `calibration_masters/cosmic_ray/xtrans.rs:234-279` `[C]`
 - [ ] `26.4` **`StackConfig::bias()` and `dark()` are identical** — `combine/config/mod.rs:265-282` `[C]`
-- [ ] `26.5` **`DarkBackground` implements a tile mesh again** — `calibration_masters/defect_map/dark_background.rs:44-170`
-  - A per-colour mode on `background_mesh` removes the parallel copy. `[P]`
 - [ ] `26.6` **`measure_star` takes `expected_fwhm` and a grid built from it, then asserts that they agree** — `star_detection/centroid/mod.rs:168-173`
   - The grid can carry the window σ and the annulus radius, which removes arguments from `moments_centroid`, `refine_centroid`, `compute_star` and `windowed_covariance`. `[C]`
 - [ ] `26.7` **`LMConfig` never varies** — `star_detection/centroid/lm_optimizer.rs:16-40`
@@ -845,7 +838,7 @@ The combine bench (30 frames, `combine::bench`, release, one machine, same sessi
 0. Done: `CcdNoise` (`math/noise/ccd_noise.rs`), with `FrameStats` carrying the sky per slot and the electrons per unit; `SampleNoise`, `FrameWeights` and `Slots` in the combine; `RejectionScale::CcdModel` on sigma clip. `FrameNoise` as stored metadata waits for the consumer that needs it (C2's master subtraction).
 1. Done: `CfaLattice` (`io/image/cfa/cfa_lattice.rs`) holds the per-phase same-colour stencils, Euclidean and taken in whole shells, and the 2-periodic deinterleave. The defect and null repair and both CFA cosmic-ray scans use it. The flat normalization and `DifferenceNoise` read the colour from `CfaType::color_at` and need no stencil.
 2. Add the two noise estimators and `FrameStats` background noise.
-3. Give `background_mesh` the lattice, the flags, bad-tile interpolation and the sliver merge. Remove `DarkBackground`. Move the cosmic-ray background onto the mesh.
+3. Done: bad-tile fill and sliver merge; `ColourMesh` (`background_mesh/colour_mesh.rs`), a mesh per colour with the noise about each tile's plane, replaces `DarkBackground` and gives the cosmic-ray noise its local sky and σ. Open: the mesh reads the frame's `NO_DATA` flags as its mask (with the detection planes of phase 7).
 4. Done: per-slot weights, not normalized; the variance plane `Σwᵢ²vᵢ/(Σwᵢ)²` with `RunReport::variance_background_only`; drizzle on the same formula per channel, with gated pixels holding no weight, variance or coverage, and zero-weight taps marking no coverage. Open: the `dispersion` plane.
 5. Move denoise to the B3 constants and the variance plane.
 - **Tests:**
