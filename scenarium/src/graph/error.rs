@@ -22,6 +22,15 @@ pub enum GraphValidationError {
     NilFuncId { node_id: NodeId },
     #[error("node {node_id:?} references func {func_id:?}, absent from the library")]
     MissingFunc { node_id: NodeId, func_id: FuncId },
+    #[error(
+        "node {node_id:?} was authored against other ports of \"{func_name}\" ({func_id:?}) \
+         than the library declares"
+    )]
+    SignatureMismatch {
+        node_id: NodeId,
+        func_id: FuncId,
+        func_name: String,
+    },
     #[error("binding on missing node {node_id:?}")]
     BindingMissingNode { node_id: NodeId },
     #[error(

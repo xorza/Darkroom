@@ -17,6 +17,7 @@
 pub(crate) mod special;
 
 use crate::graph::func::Func;
+use crate::graph::func::signature::FuncSignature;
 use crate::graph::identity::FuncId;
 use crate::graph::node::special::SpecialNode;
 use ::serde::{Deserialize, Serialize};
@@ -102,6 +103,12 @@ pub struct Node {
     /// excludes them. A binding from one behaves like an unbound input unless
     /// the disabled producer is explicitly included in that run's node seeds.
     pub disabled: bool,
+    /// The port signature of the func this node was authored against, which its bindings and
+    /// subscriptions are indexed by. `None` for a special node, whose declaration is built in,
+    /// and for a func node no declaration was in hand for — until
+    /// [`Graph::reconcile_signatures`](crate::Graph::reconcile_signatures) adopts the library's.
+    #[serde(default)]
+    pub signature: Option<FuncSignature>,
 }
 
 impl Node {
@@ -131,6 +138,7 @@ impl Node {
             name,
             cache,
             disabled: false,
+            signature: None,
         }
     }
 }
@@ -144,6 +152,7 @@ impl From<&Func> for Node {
             name: func.name.clone(),
             cache: func.default_cache_mode,
             disabled: false,
+            signature: Some(FuncSignature::of(func)),
         }
     }
 }

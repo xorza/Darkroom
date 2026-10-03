@@ -146,7 +146,12 @@ impl App {
         // its saved geometry can size the window at creation.
         let mut runtime = RuntimeHost::new(wake, &preferences);
         let mut status = StatusLog::default();
-        let open = OpenDocument::open_at_launch(document, &mut preferences, &mut status);
+        let open = OpenDocument::open_at_launch(
+            document,
+            &mut preferences,
+            &mut status,
+            &runtime.library.published.load(),
+        );
         runtime.set_document_cache(open.path.as_deref());
         let app = Self {
             session: Session::new(open),
@@ -394,13 +399,14 @@ impl App {
     /// Load `path` into a fresh editor. A missing or corrupt file leaves the
     /// open document intact and surfaces its reason in the status bar.
     pub(crate) fn load_document(&mut self, path: &Path) {
-        let open = match OpenDocument::load(path.to_path_buf()) {
-            Ok(open) => open,
-            Err(err) => {
-                self.status.error(format!("load failed: {err:#}"));
-                return;
-            }
-        };
+        let open =
+            match OpenDocument::load(path.to_path_buf(), &self.runtime.library.published.load()) {
+                Ok(open) => open,
+                Err(err) => {
+                    self.status.error(format!("load failed: {err:#}"));
+                    return;
+                }
+            };
         self.adopt_document(open);
         self.status.error = None;
     }

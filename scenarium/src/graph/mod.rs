@@ -22,6 +22,7 @@ use crate::DataType;
 use crate::graph::detached::DetachedNode;
 use crate::graph::error::GraphValidationError;
 use crate::graph::error::ValidationResult;
+use crate::graph::func::signature::FuncSignature;
 use crate::graph::func::{Func, FuncInput, FuncOutput, OutputType};
 use crate::graph::identity::NodeId;
 use crate::graph::identity::{InputPort, OutputPort};
@@ -496,18 +497,20 @@ impl Graph {
         self.validate_references(library)
     }
 
-    /// Everything in this graph that names a declaration: every func resolves,
-    /// and a `Bind` does not sit on a `const_only` input.
+    /// Everything in this graph that names a declaration: every func resolves
+    /// with the ports its node was authored against, and a `Bind` does not sit
+    /// on a `const_only` input.
     fn validate_references(&self, library: &Library) -> ValidationResult<()> {
         for (node_id, node) in &self.nodes {
             match &node.kind {
                 NodeKind::Func(func_id) => {
-                    if library.by_id(*func_id).is_none() {
+                    let Some(func) = library.by_id(*func_id) else {
                         return Err(GraphValidationError::MissingFunc {
                             node_id: *node_id,
                             func_id: *func_id,
                         });
-                    }
+                    };
+                    Self::check_signature(*node_id, node, func)?;
                 }
                 NodeKind::Special(_) => {}
             }
@@ -524,6 +527,38 @@ impl Graph {
         }
 
         Ok(())
+    }
+
+    /// Hold every func node to the ports it was authored against: a node whose recorded
+    /// signature differs from its func's in `library` is refused by name, and a node with none —
+    /// one saved before signatures were recorded, or built without its declaration in hand —
+    /// adopts the library's. A func the library lacks is left alone, as the stub it renders as.
+    pub fn reconcile_signatures(&mut self, library: &Library) -> ValidationResult<()> {
+        for (node_id, node) in &mut self.nodes {
+            let NodeKind::Func(func_id) = node.kind else {
+                continue;
+            };
+            let Some(func) = library.by_id(func_id) else {
+                continue;
+            };
+            Self::check_signature(*node_id, node, func)?;
+            node.signature
+                .get_or_insert_with(|| FuncSignature::of(func));
+        }
+        Ok(())
+    }
+
+    fn check_signature(node_id: NodeId, node: &Node, func: &Func) -> ValidationResult<()> {
+        match node.signature {
+            Some(signature) if signature != FuncSignature::of(func) => {
+                Err(GraphValidationError::SignatureMismatch {
+                    node_id,
+                    func_id: func.id,
+                    func_name: func.name.clone(),
+                })
+            }
+            _ => Ok(()),
+        }
     }
 }
 

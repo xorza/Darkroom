@@ -32,7 +32,8 @@ use crate::core::edit::step::set_viewport::SetViewport;
 /// vocabulary rather than one arm of a wider one.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum UndoStep {
-    NodePresence(NodePresence),
+    /// Boxed: a whole detached node is several times the size of every other step.
+    NodePresence(Box<NodePresence>),
     MoveSelection(MoveSelection),
     RenameNode(RenameNode),
     SetInput(SetInput),
@@ -87,7 +88,7 @@ impl UndoStep {
     /// own rather than an arm in each of six matches.
     fn kind(&self) -> &dyn Reversible {
         match self {
-            Self::NodePresence(step) => step,
+            Self::NodePresence(step) => step.as_ref(),
             Self::MoveSelection(step) => step,
             Self::RenameNode(step) => step,
             Self::SetInput(step) => step,

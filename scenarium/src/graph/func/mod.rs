@@ -5,6 +5,7 @@ pub(crate) mod error;
 pub(crate) mod event;
 pub(crate) mod lambda;
 mod macros;
+pub(crate) mod signature;
 
 use crate::data::type_system::Strictness;
 use crate::graph::func::error::FuncValidationError;
