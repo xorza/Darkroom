@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use common::TempFile;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
+use crate::data::codec::Codecs;
 use crate::execution::cache::digest::Digest;
 use crate::execution::cache::disk_store::error::StoreError;
 use crate::execution::cache::disk_store::store_outcome::StoreOutcome;
@@ -24,26 +25,30 @@ fn target(path: &Path, digest: Digest) -> BlobTarget {
     }
 }
 
+/// The store under test. Every test names its blob path directly, so the store
+/// needs no root; what varies is the codecs it is handed.
+const STORE: DiskStore = DiskStore::new(None);
+
 async fn read_snapshot(
-    store: &DiskStore,
+    codecs: &Codecs,
     target: &BlobTarget,
     output_count: usize,
 ) -> Option<OutputSnapshot> {
     let demand = vec![OutputDemand::Skip; output_count];
-    store.read(target, &demand).await
+    STORE.read(target, codecs, &demand).await
 }
 
 /// Publish, asserting the store answered `expected`. Every call has a definite
 /// answer now; a test that dropped one would be back to inferring the write
 /// from the filesystem alone.
 async fn store_expecting(
-    store: &DiskStore,
+    codecs: &Codecs,
     target: &BlobTarget,
     snapshot: &OutputSnapshot,
     policy: StorePolicy,
     expected: StoreOutcome,
 ) {
-    let outcome = store.store(target, snapshot, policy).await;
+    let outcome = STORE.store(target, codecs, snapshot, policy).await;
     assert_eq!(
         outcome.as_ref().ok(),
         Some(&expected),
@@ -145,14 +150,14 @@ fn versioned_library(version: u32, decode_calls: Arc<AtomicU64>, fail_encode: bo
     library
 }
 
-fn versioned_store(version: u32, decode_calls: Arc<AtomicU64>) -> DiskStore {
-    DiskStore::new(&versioned_library(version, decode_calls, false), None)
+fn versioned_codecs(version: u32, decode_calls: Arc<AtomicU64>, fail_encode: bool) -> Codecs {
+    Codecs::clone(versioned_library(version, decode_calls, fail_encode).codecs())
 }
 
 #[tokio::test]
 async fn store_read_header_check_and_digest_replacement_round_trip() {
     let file = TempFile::new("roundtrip");
-    let store = DiskStore::default();
+    let codecs = Codecs::default();
     let first_digest = Digest([7; 32]);
     let second_digest = Digest([8; 32]);
     let first_target = target(file.path(), first_digest);
@@ -164,16 +169,16 @@ async fn store_read_header_check_and_digest_replacement_round_trip() {
     ]);
 
     store_expecting(
-        &store,
+        &codecs,
         &first_target,
         &first,
         StorePolicy::KnownMiss,
         StoreOutcome::Published,
     )
     .await;
-    assert!(store.covers(&first_target, first.values()).await);
-    assert!(!store.covers(&second_target, first.values()).await);
-    let restored = read_snapshot(&store, &first_target, 3).await.unwrap();
+    assert!(STORE.covers(&first_target, first.values(), &codecs).await);
+    assert!(!STORE.covers(&second_target, first.values(), &codecs).await);
+    let restored = read_snapshot(&codecs, &first_target, 3).await.unwrap();
     assert!(matches!(restored.values()[0], DynamicValue::Unbound));
     assert_eq!(restored.values()[1].as_i64(), Some(7));
     assert_eq!(restored.values()[2].as_string(), Some("x"));
@@ -182,16 +187,16 @@ async fn store_read_header_check_and_digest_replacement_round_trip() {
     // A blob under the previous digest cannot cover this one, so the probe
     // fails and the publication goes ahead.
     store_expecting(
-        &store,
+        &codecs,
         &second_target,
         &second,
         StorePolicy::PreserveCovering,
         StoreOutcome::Published,
     )
     .await;
-    assert!(read_snapshot(&store, &first_target, 3).await.is_none());
+    assert!(read_snapshot(&codecs, &first_target, 3).await.is_none());
     assert_eq!(
-        read_snapshot(&store, &second_target, 1)
+        read_snapshot(&codecs, &second_target, 1)
             .await
             .unwrap()
             .values()[0]
@@ -204,14 +209,14 @@ async fn store_read_header_check_and_digest_replacement_round_trip() {
 async fn broader_same_digest_blob_is_preserved() {
     let file = TempFile::new("coverage");
     let decode_calls = Arc::new(AtomicU64::new(0));
-    let store = versioned_store(1, Arc::clone(&decode_calls));
+    let codecs = versioned_codecs(1, Arc::clone(&decode_calls), false);
     let target = target(file.path(), Digest([11; 32]));
     let partial = OutputSnapshot::new(vec![
         DynamicValue::Static(ConstValue::Int(7)),
         DynamicValue::Unbound,
     ]);
     store_expecting(
-        &store,
+        &codecs,
         &target,
         &partial,
         StorePolicy::KnownMiss,
@@ -219,7 +224,7 @@ async fn broader_same_digest_blob_is_preserved() {
     )
     .await;
     let second_output = [OutputDemand::Skip, OutputDemand::Produce];
-    assert!(store.read(&target, &second_output).await.is_none());
+    assert!(STORE.read(&target, &codecs, &second_output).await.is_none());
     assert!(file.exists(), "an insufficient but valid blob is retained");
 
     let complete = OutputSnapshot::new(vec![
@@ -227,7 +232,7 @@ async fn broader_same_digest_blob_is_preserved() {
         DynamicValue::from_custom(Blob(vec![1, 2, 3])),
     ]);
     store_expecting(
-        &store,
+        &codecs,
         &target,
         &complete,
         StorePolicy::KnownMiss,
@@ -237,7 +242,7 @@ async fn broader_same_digest_blob_is_preserved() {
     let complete_bytes = fs::read(file.path()).unwrap();
 
     store_expecting(
-        &store,
+        &codecs,
         &target,
         &partial,
         StorePolicy::PreserveCovering,
@@ -245,9 +250,9 @@ async fn broader_same_digest_blob_is_preserved() {
     )
     .await;
     assert_eq!(fs::read(file.path()).unwrap(), complete_bytes);
-    assert!(store.covers(&target, complete.values()).await);
-    assert!(store.covers(&target, partial.values()).await);
-    let restored = read_snapshot(&store, &target, 2).await.unwrap();
+    assert!(STORE.covers(&target, complete.values(), &codecs).await);
+    assert!(STORE.covers(&target, partial.values(), &codecs).await);
+    let restored = read_snapshot(&codecs, &target, 2).await.unwrap();
     assert_eq!(restored.values()[0].as_i64(), Some(7));
     assert_eq!(
         restored.values()[1].as_custom::<Blob>(),
@@ -262,9 +267,9 @@ async fn missing_and_changed_codecs_miss_before_decode() {
     let target = target(file.path(), Digest([12; 32]));
     let snapshot = OutputSnapshot::new(vec![DynamicValue::from_custom(Blob(vec![9]))]);
     let old_calls = Arc::new(AtomicU64::new(0));
-    let old_store = versioned_store(1, Arc::clone(&old_calls));
+    let old_codecs = versioned_codecs(1, Arc::clone(&old_calls), false);
     store_expecting(
-        &old_store,
+        &old_codecs,
         &target,
         &snapshot,
         StorePolicy::KnownMiss,
@@ -273,32 +278,32 @@ async fn missing_and_changed_codecs_miss_before_decode() {
     .await;
 
     assert!(
-        !DiskStore::default()
-            .covers(&target, snapshot.values())
+        !STORE
+            .covers(&target, snapshot.values(), &Codecs::default())
             .await
     );
     assert!(
-        read_snapshot(&DiskStore::default(), &target, 1)
+        read_snapshot(&Codecs::default(), &target, 1)
             .await
             .is_none()
     );
 
     let new_calls = Arc::new(AtomicU64::new(0));
-    let new_store = versioned_store(2, Arc::clone(&new_calls));
-    assert!(!new_store.covers(&target, snapshot.values()).await);
-    assert!(read_snapshot(&new_store, &target, 1).await.is_none());
+    let new_codecs = versioned_codecs(2, Arc::clone(&new_calls), false);
+    assert!(!STORE.covers(&target, snapshot.values(), &new_codecs).await);
+    assert!(read_snapshot(&new_codecs, &target, 1).await.is_none());
     assert_eq!(new_calls.load(Ordering::SeqCst), 0);
 
     store_expecting(
-        &new_store,
+        &new_codecs,
         &target,
         &snapshot,
         StorePolicy::KnownMiss,
         StoreOutcome::Published,
     )
     .await;
-    assert!(!old_store.covers(&target, snapshot.values()).await);
-    assert!(read_snapshot(&new_store, &target, 1).await.is_some());
+    assert!(!STORE.covers(&target, snapshot.values(), &old_codecs).await);
+    assert!(read_snapshot(&new_codecs, &target, 1).await.is_some());
     assert_eq!(new_calls.load(Ordering::SeqCst), 1);
     assert_eq!(old_calls.load(Ordering::SeqCst), 0);
 }
@@ -307,29 +312,38 @@ async fn missing_and_changed_codecs_miss_before_decode() {
 /// write was fine, the library simply cannot represent this value on disk, and
 /// no retry changes that. A caller reporting to a human needs the distinction —
 /// it is the difference between "try again" and "this node will never persist".
+///
+/// The verdict comes before any I/O under either policy: the blob's directory
+/// is not created, and no covering blob is looked for.
 #[tokio::test]
 async fn unregistered_custom_value_is_reported_unsupported_not_failed() {
     let file = TempFile::new("unregistered");
-    let snapshot = OutputSnapshot::new(vec![DynamicValue::from_custom(Blob(vec![1]))]);
-    store_expecting(
-        &DiskStore::default(),
-        &target(file.path(), Digest([1; 32])),
-        &snapshot,
-        StorePolicy::KnownMiss,
-        StoreOutcome::Unsupported { type_id: BLOB_TYPE },
-    )
-    .await;
-    assert!(!file.exists());
+    let blob = file.path().join("never-created").join("blob");
+    let snapshot = OutputSnapshot::new(vec![
+        DynamicValue::Static(ConstValue::Int(1)),
+        DynamicValue::from_custom(Blob(vec![1])),
+    ]);
+    for policy in [StorePolicy::KnownMiss, StorePolicy::PreserveCovering] {
+        store_expecting(
+            &Codecs::default(),
+            &target(&blob, Digest([1; 32])),
+            &snapshot,
+            policy,
+            StoreOutcome::Unsupported { type_id: BLOB_TYPE },
+        )
+        .await;
+        assert!(!file.exists(), "{policy:?} touched the disk");
+    }
 }
 
 #[tokio::test]
 async fn failed_streaming_encode_preserves_previous_blob() {
     let file = TempFile::new("encode-failure");
     let calls = Arc::new(AtomicU64::new(0));
-    let good_store = versioned_store(1, Arc::clone(&calls));
+    let good_codecs = versioned_codecs(1, Arc::clone(&calls), false);
     let original_target = target(file.path(), Digest([4; 32]));
     store_expecting(
-        &good_store,
+        &good_codecs,
         &original_target,
         &OutputSnapshot::new(vec![DynamicValue::from_custom(Blob(vec![1, 2]))]),
         StorePolicy::KnownMiss,
@@ -338,13 +352,11 @@ async fn failed_streaming_encode_preserves_previous_blob() {
     .await;
     let original = fs::read(file.path()).unwrap();
 
-    let failing_store = DiskStore::new(
-        &versioned_library(1, Arc::new(AtomicU64::new(0)), true),
-        None,
-    );
-    let failed = failing_store
+    let failing_codecs = versioned_codecs(1, Arc::new(AtomicU64::new(0)), true);
+    let failed = STORE
         .store(
             &target(file.path(), Digest([5; 32])),
+            &failing_codecs,
             &OutputSnapshot::new(vec![DynamicValue::from_custom(Blob(vec![8; 1024]))]),
             StorePolicy::KnownMiss,
         )
@@ -362,7 +374,7 @@ async fn failed_streaming_encode_preserves_previous_blob() {
     assert_eq!(fs::read(file.path()).unwrap(), original);
     assert!(publication_temp_files(file.path()).is_empty());
     assert!(
-        read_snapshot(&good_store, &original_target, 1)
+        read_snapshot(&good_codecs, &original_target, 1)
             .await
             .is_some()
     );
@@ -376,10 +388,11 @@ async fn a_failed_publication_disturbs_nothing_around_it() {
     fs::create_dir_all(file.path()).unwrap();
     let survivor = file.path().join("survivor");
     fs::write(&survivor, b"old").unwrap();
-    let store = DiskStore::default();
-    let failed = store
+    let codecs = Codecs::default();
+    let failed = STORE
         .store(
             &target(file.path(), Digest([9; 32])),
+            &codecs,
             &OutputSnapshot::new(vec![DynamicValue::Static(ConstValue::Int(9))]),
             StorePolicy::PreserveCovering,
         )
@@ -399,10 +412,10 @@ async fn a_failed_publication_disturbs_nothing_around_it() {
 #[tokio::test]
 async fn truncated_blob_is_rejected_by_header_check_and_read() {
     let file = TempFile::new("truncated");
-    let store = DiskStore::default();
+    let codecs = Codecs::default();
     let target = target(file.path(), Digest([6; 32]));
     store_expecting(
-        &store,
+        &codecs,
         &target,
         &OutputSnapshot::new(vec![DynamicValue::Static(ConstValue::String(
             "payload".into(),
@@ -415,7 +428,7 @@ async fn truncated_blob_is_rejected_by_header_check_and_read() {
     bytes.pop();
     fs::write(file.path(), bytes).unwrap();
     let expected = [DynamicValue::Static(ConstValue::String("payload".into()))];
-    assert!(!store.covers(&target, &expected).await);
-    assert!(read_snapshot(&store, &target, 1).await.is_none());
+    assert!(!STORE.covers(&target, &expected, &codecs).await);
+    assert!(read_snapshot(&codecs, &target, 1).await.is_none());
     assert!(!file.exists(), "a corrupt cache blob is removed");
 }

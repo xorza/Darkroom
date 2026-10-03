@@ -50,13 +50,12 @@ impl RuntimeLibrary {
         }
     }
 
-    pub(crate) fn update_ml_model_paths(&mut self, paths: &MlModelPaths) -> bool {
+    pub(crate) fn update_ml_model_paths(&mut self, paths: &MlModelPaths) {
         if self.model_paths == *paths {
-            return false;
+            return;
         }
         self.model_paths.clone_from(paths);
         self.recompose();
-        true
     }
 
     fn recompose(&mut self) {
@@ -111,8 +110,8 @@ mod tests {
             preview + parts.iter().map(|part| part.funcs().count()).sum::<usize>()
         );
         assert_eq!(
-            library.types.len(),
-            parts.iter().map(|part| part.types.len()).sum::<usize>()
+            library.types().len(),
+            parts.iter().map(|part| part.types().len()).sum::<usize>()
         );
     }
 }

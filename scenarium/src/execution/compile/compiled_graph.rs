@@ -15,6 +15,9 @@
 //! search of the id column it already carries rather than a lookup through a
 //! table beside it.
 
+use std::sync::Arc;
+
+use crate::data::codec::Codecs;
 use crate::graph::identity::FuncId;
 
 use crate::containers::column::{Column, Span};
@@ -136,6 +139,9 @@ pub struct CompiledGraph {
     /// (an output-signature change re-keys). An unresolved wildcard port is
     /// `DataType::Any`. Its length is the artifact's total output count.
     pub(crate) outputs: Column<OutputIdx, DataType>,
+    /// The library's disk codecs when this was compiled, which the cache
+    /// encodes and decodes this program's values with.
+    pub(crate) codecs: Arc<Codecs>,
 }
 
 impl Index<NodeIdx> for CompiledGraph {

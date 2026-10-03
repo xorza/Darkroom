@@ -33,6 +33,8 @@ pub(crate) mod consumer_cone;
 pub(crate) mod error;
 mod validate;
 
+use std::sync::Arc;
+
 use crate::DataType;
 use crate::containers::column::{Column, Idx};
 use crate::execution::compile::compiled_graph::{
@@ -157,6 +159,7 @@ impl Compiler {
             inputs: Column::with_capacity(totals.inputs),
             outputs: Column::with_capacity(totals.outputs),
             events: Column::with_capacity(totals.events),
+            codecs: Arc::clone(library.codecs()),
         };
         // The id column is a projection of the placement, written once and never
         // read back — the walk resolves ids against `placed` itself.

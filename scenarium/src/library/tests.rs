@@ -60,7 +60,85 @@ fn registration_rejects_duplicate_ids_without_replacing_entries() {
         library.register_type(type_id, TypeEntry::custom("After"));
     }));
     assert!(duplicate_type.is_err());
-    assert_eq!(library.types[&type_id].display_name(), "Before");
+    assert_eq!(
+        library.type_entry(type_id).unwrap().display_name(),
+        "Before"
+    );
+}
+
+/// An identical type registers again as a no-op, which is what lets two
+/// libraries sharing a type merge; any difference — name, variants, codec
+/// instance, or kind — is a conflict. The codec handle a program keeps is the
+/// library's at that moment: a later registration copies the map rather than
+/// changing it under the program.
+#[test]
+fn an_identical_type_registers_again_and_a_conflict_panics() {
+    let codec: Arc<dyn CustomValueCodec> = Arc::new(StubCodec);
+    let custom = TypeId::unique();
+    let named = TypeId::unique();
+    let mut library = Library::default();
+    library.register_type(
+        custom,
+        TypeEntry::custom_with_codec("Blob", Arc::clone(&codec)),
+    );
+    library.register_type(
+        named,
+        TypeEntry::enum_with_variants("Mode", vec!["a".into()]),
+    );
+    let held = Arc::clone(library.codecs());
+
+    library.register_type(
+        custom,
+        TypeEntry::custom_with_codec("Blob", Arc::clone(&codec)),
+    );
+    library.register_type(
+        named,
+        TypeEntry::enum_with_variants("Mode", vec!["a".into()]),
+    );
+    assert_eq!(library.types().len(), 2);
+    assert!(
+        Arc::ptr_eq(&held, library.codecs()),
+        "a no-op registration leaves the handle alone"
+    );
+
+    let conflicts = [
+        (
+            custom,
+            TypeEntry::custom_with_codec("Other", Arc::clone(&codec)),
+        ),
+        (
+            custom,
+            TypeEntry::custom_with_codec("Blob", Arc::new(StubCodec)),
+        ),
+        (custom, TypeEntry::custom("Blob")),
+        (
+            named,
+            TypeEntry::enum_with_variants("Mode", vec!["b".into()]),
+        ),
+        (named, TypeEntry::custom("Mode")),
+    ];
+    for (type_id, entry) in conflicts {
+        let conflict = panic::catch_unwind(AssertUnwindSafe(|| {
+            library.register_type(type_id, entry);
+        }));
+        assert!(conflict.is_err());
+    }
+
+    let added = TypeId::unique();
+    library.register_type(
+        added,
+        TypeEntry::custom_with_codec("Added", Arc::new(StubCodec)),
+    );
+    assert!(library.codecs().get(added).is_some());
+    assert!(library.codecs().get(custom).is_some());
+    assert!(
+        held.get(added).is_none(),
+        "the handle a program kept is unchanged"
+    );
+    assert!(
+        library.codecs().get(named).is_none(),
+        "an enum has no codec"
+    );
 }
 
 #[test]
@@ -121,7 +199,7 @@ fn an_enum_declaration_over_a_custom_registration_is_refused_either_order() {
         "registering a custom type a func declares as an enum must be refused",
     );
     assert!(
-        !library.types.contains_key(&type_id),
+        library.type_entry(type_id).is_none(),
         "the refused type is not installed",
     );
     // The id stays free for the declaration that was actually meant.
@@ -206,7 +284,7 @@ fn register_type_rejecting_an_earlier_enum_default_installs_nothing() {
     );
 
     assert!(
-        !library.types.contains_key(&type_id),
+        library.type_entry(type_id).is_none(),
         "the refused entry must not stay installed",
     );
     assert_eq!(library.enum_variants(type_id), None);

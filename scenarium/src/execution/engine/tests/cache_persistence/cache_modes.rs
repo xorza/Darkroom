@@ -1,3 +1,5 @@
+use std::fs;
+
 use super::*;
 
 /// A `Both` value remains resident even when a later run neither executes
@@ -406,7 +408,7 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
     }
 
     // A pure, disk-persisted sink emitting a custom `Blob`. The type's codec
-    // is registered only when `with_codec` — and the store takes its codecs
+    // is registered only when `with_codec` — and the program takes its codecs
     // from this same library, so that one flag decides both.
     let decodes = Calls::default();
     let build = |with_codec: bool, recompute: &Calls| {
@@ -471,4 +473,30 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
         run.ran().contains(&"make_blob"),
         "the node recomputes instead of tripping a failed frontier load"
     );
+
+    // Still without the codec, a `Both` value stays in RAM and no blob is
+    // written for it: the store refuses the type before touching the disk.
+    fs::remove_file(e.blob_path("make_blob")).unwrap();
+    e.edit(|g| g.cache("make_blob", CacheMode::Both));
+    e.run_sinks().await;
+    assert_eq!(
+        recompute.count(),
+        3,
+        "the edit released the disk-only value"
+    );
+    let run = e.run_sinks().await;
+    assert!(run.cached().contains(&"make_blob"), "served from RAM");
+    assert!(!e.blob_path("make_blob").exists());
+
+    // An install that brings the codec back owes the resident value its blob,
+    // and the next reuse writes it without recomputing. The rebuilt fixture
+    // mints the same ids, so the slot and its value carry over.
+    e.edit(|g| {
+        *g = build(true, &recompute);
+        g.cache("make_blob", CacheMode::Both);
+    });
+    let run = e.run_sinks().await;
+    assert!(run.cached().contains(&"make_blob"), "served from RAM");
+    assert_eq!(recompute.count(), 3);
+    assert!(e.blob_path("make_blob").exists(), "the debt was paid");
 }

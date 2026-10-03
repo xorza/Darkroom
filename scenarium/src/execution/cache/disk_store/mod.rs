@@ -14,7 +14,6 @@ use tokio::io::{AsyncWriteExt as _, BufWriter};
 
 use crate::DynamicValue;
 use crate::data::codec::Codecs;
-use crate::data::codec::error::CodecFormatError;
 use crate::execution::cache::digest::Digest;
 use crate::execution::cache::disk_store::error::{RemovalError, StoreError, StoreResult};
 use crate::execution::cache::disk_store::store_outcome::StoreOutcome;
@@ -22,12 +21,13 @@ use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::compile::compiled_graph::ExecutionNode;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::identity::NodeId;
-use crate::library::Library;
 
+/// Where the node-output cache persists: a directory of blobs named by node
+/// id, or nowhere. The codecs that read and write the blobs belong to each
+/// program, so the store is the root alone.
 #[derive(Debug, Default)]
 pub struct DiskStore {
-    codecs: Codecs,
-    disk_root: Option<PathBuf>,
+    root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,11 +68,9 @@ impl BlobTarget {
 }
 
 impl DiskStore {
-    pub fn new(library: &Library, disk_root: Option<PathBuf>) -> Self {
-        Self {
-            codecs: library.codecs(),
-            disk_root,
-        }
+    /// A store under `root`, or a memory-only one for `None`.
+    pub const fn new(root: Option<PathBuf>) -> Self {
+        Self { root }
     }
 
     pub(super) fn blob_target(
@@ -92,7 +90,7 @@ impl DiskStore {
     fn node_path(&self, node_id: NodeId) -> Option<PathBuf> {
         let mut buf = [0u8; 32];
         let name = node_id.as_uuid().simple().encode_lower(&mut buf);
-        Some(self.disk_root.as_ref()?.join(name))
+        Some(self.root.as_ref()?.join(name))
     }
 
     pub(crate) async fn remove_node(&self, node_id: NodeId) -> Result<(), RemovalError> {
@@ -123,11 +121,11 @@ impl DiskStore {
         Ok(Some((file, file_len)))
     }
 
-    async fn covers(&self, target: &BlobTarget, outputs: &[DynamicValue]) -> bool {
+    async fn covers(&self, target: &BlobTarget, outputs: &[DynamicValue], codecs: &Codecs) -> bool {
         let Ok(Some((mut file, file_len))) = self.open_blob(target).await else {
             return false;
         };
-        format::covers_outputs(&mut file, file_len, target.digest, outputs, &self.codecs)
+        format::covers_outputs(&mut file, file_len, target.digest, outputs, codecs)
             .await
             .is_ok_and(|covers| covers)
     }
@@ -138,11 +136,16 @@ impl DiskStore {
     /// node; [`read`](Self::read) decodes the body later. Any
     /// read or framing failure reads as "cannot serve" — the node then runs and republishes
     /// the blob.
-    pub(crate) async fn covers_demand(&self, target: &BlobTarget, demand: &[OutputDemand]) -> bool {
+    pub(crate) async fn covers_demand(
+        &self,
+        target: &BlobTarget,
+        codecs: &Codecs,
+        demand: &[OutputDemand],
+    ) -> bool {
         let Ok(Some((mut file, file_len))) = self.open_blob(target).await else {
             return false;
         };
-        format::covers_demand(&mut file, file_len, target.digest, &self.codecs, demand)
+        format::covers_demand(&mut file, file_len, target.digest, codecs, demand)
             .await
             .unwrap_or(false)
     }
@@ -150,6 +153,7 @@ impl DiskStore {
     pub(crate) async fn read(
         &self,
         target: &BlobTarget,
+        codecs: &Codecs,
         demand: &[OutputDemand],
     ) -> Option<OutputSnapshot> {
         // Unlike the two coverage checks, this runs after something already
@@ -163,7 +167,7 @@ impl DiskStore {
                 return None;
             }
         };
-        match format::read(&mut file, file_len, target.digest, &self.codecs, demand).await {
+        match format::read(&mut file, file_len, target.digest, codecs, demand).await {
             Ok(Some(values)) => Some(OutputSnapshot::new(values)),
             Ok(None) => None,
             Err(error) => {
@@ -177,6 +181,10 @@ impl DiskStore {
     /// Publish a snapshot directly after a known reuse miss, or first preserve an existing
     /// covering blob when the caller has no reuse verdict.
     ///
+    /// A snapshot holding a type `codecs` cannot encode is
+    /// [`Unsupported`](StoreOutcome::Unsupported) before any I/O: the verdict
+    /// is the values' alone, so no file is opened, created or written for it.
+    ///
     /// Answers rather than logs. Whether a skipped or failed write is worth
     /// telling a human depends entirely on who asked: this runs after every
     /// node of every run, and also from a flush a user clicked for. Only the
@@ -184,10 +192,16 @@ impl DiskStore {
     pub(crate) async fn store(
         &self,
         target: &BlobTarget,
+        codecs: &Codecs,
         snapshot: &OutputSnapshot,
         policy: StorePolicy,
     ) -> StoreResult {
-        if policy == StorePolicy::PreserveCovering && self.covers(target, snapshot.values()).await {
+        if let Some(type_id) = format::unsupported_type(snapshot.values(), codecs) {
+            return Ok(StoreOutcome::Unsupported { type_id });
+        }
+        if policy == StorePolicy::PreserveCovering
+            && self.covers(target, snapshot.values(), codecs).await
+        {
             return Ok(StoreOutcome::AlreadyCovered);
         }
         let path = || target.path.clone();
@@ -211,19 +225,12 @@ impl DiskStore {
                 source,
             })?;
         let mut writer = BufWriter::new(file);
-        if let Err(error) =
-            format::write(&mut writer, target.digest, snapshot.values(), &self.codecs).await
-        {
-            // The one encode failure that is not a failure: a type this
-            // library has no codec for was never going to be written.
-            let CodecFormatError::UnknownType(type_id) = error else {
-                return Err(StoreError::Encode {
-                    path: path(),
-                    source: error,
-                });
-            };
-            return Ok(StoreOutcome::Unsupported { type_id });
-        }
+        format::write(&mut writer, target.digest, snapshot.values(), codecs)
+            .await
+            .map_err(|source| StoreError::Encode {
+                path: path(),
+                source,
+            })?;
         writer.flush().await.map_err(|source| StoreError::Write {
             path: path(),
             source,

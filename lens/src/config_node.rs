@@ -137,8 +137,8 @@ fn data_type(kind: &FieldKind) -> DataType {
 }
 
 /// Register the enum type(s) a `kind` references on `library`. One enum can
-/// appear across several config builders, so identical registrations are
-/// idempotent while conflicting metadata is a wiring bug.
+/// appear across several config builders; `register_type` takes the identical
+/// registration again and panics on conflicting metadata.
 fn register_field_enum(library: &mut Library, kind: &FieldKind) {
     match kind {
         FieldKind::Enum {
@@ -148,16 +148,7 @@ fn register_field_enum(library: &mut Library, kind: &FieldKind) {
         } => {
             let id = TypeId::literal(type_id);
             let variants = variants.iter().map(|&variant| variant.to_owned()).collect();
-            let entry = TypeEntry::enum_with_variants(*display_name, variants);
-            if let Some(existing) = library.types.get(&id) {
-                assert!(
-                    existing.display_name() == entry.display_name()
-                        && existing.variants() == entry.variants(),
-                    "conflicting enum type registration for {id}"
-                );
-            } else {
-                library.register_type(id, entry);
-            }
+            library.register_type(id, TypeEntry::enum_with_variants(*display_name, variants));
         }
         FieldKind::Option(inner) => register_field_enum(library, inner),
         _ => {}
@@ -255,7 +246,7 @@ mod tests {
         let mut library = Library::default();
         register_field_enum(&mut library, &kind);
         register_field_enum(&mut library, &kind);
-        let entry = library.types.get(&expected_id).unwrap();
+        let entry = library.type_entry(expected_id).unwrap();
         assert_eq!(entry.display_name(), "Mode");
         assert_eq!(
             entry.variants(),
@@ -264,7 +255,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "conflicting enum type registration")]
+    #[should_panic(expected = "conflicting registration of type")]
     fn rejects_disagreeing_metadata_for_one_enum_identity() {
         const TYPE_ID: &str = "5a779f56-4959-4321-86ef-0e98a6cbdd84";
         let first = FieldKind::Enum {

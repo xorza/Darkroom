@@ -62,14 +62,26 @@ enum ValueState {
     Resident {
         snapshot: OutputSnapshot,
         produced_under: Option<Digest>,
-        /// Whether a blob under `produced_under` is believed to be on disk.
+        /// What disk holds for the value.
         ///
         /// Rides *with* the value because that is the only time it is ever read:
         /// a reuse consults it exactly when serving from RAM, and a value that
         /// is gone has no durability left to be wrong about. Dropping the value
         /// therefore drops the belief, with no second call to forget.
-        on_disk: bool,
+        blob: BlobState,
     },
+}
+
+/// What disk holds for a resident value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BlobState {
+    /// No blob is believed to back the value; a disk-backed node owes one.
+    Owed,
+    /// A blob under the value's digest is believed to be on disk.
+    Written,
+    /// The value holds a type the program's codecs cannot encode, so no blob
+    /// can be written for it.
+    Unwritable,
 }
 
 /// One node's cross-run runtime state: the [`value`](RuntimeSlot::value) cache and
@@ -148,11 +160,12 @@ impl RuntimeSlot {
         self.value = ValueState::Resident {
             snapshot,
             produced_under: Some(digest),
-            on_disk: true,
+            blob: BlobState::Written,
         };
     }
 
-    /// Whether a blob backing the resident value is believed to be on disk.
+    /// Whether the resident value still owes a blob: none is believed to be
+    /// on disk, and none was found impossible to write.
     ///
     /// Belief, not proof: it records what this engine last wrote or read, so a
     /// blob deleted behind its back still reads as present. Proving it would
@@ -162,8 +175,14 @@ impl RuntimeSlot {
     /// No digest to pass: this is only ever asked of a value already established
     /// as a hit, and [`current_snapshot`](Self::current_snapshot) settled which
     /// digest that was.
-    pub(crate) fn blob_is_current(&self) -> bool {
-        matches!(self.value, ValueState::Resident { on_disk: true, .. })
+    pub(crate) fn owes_blob(&self) -> bool {
+        matches!(
+            self.value,
+            ValueState::Resident {
+                blob: BlobState::Owed,
+                ..
+            }
+        )
     }
 
     /// Record what a store left on disk for the resident value.
@@ -171,14 +190,27 @@ impl RuntimeSlot {
     /// A write that did not land leaves the node owing one, and the next
     /// resident reuse tries again — which is what makes a transient full disk
     /// heal itself rather than persist as a node that lies about being cached.
+    /// A value no codec encodes is not retried: nothing about it changes until
+    /// the value or the codecs do.
     pub(crate) fn note_store(&mut self, outcome: &StoreResult) {
-        let ValueState::Resident { on_disk, .. } = &mut self.value else {
+        let ValueState::Resident { blob, .. } = &mut self.value else {
             return;
         };
-        *on_disk = matches!(
-            outcome,
-            Ok(StoreOutcome::Published | StoreOutcome::AlreadyCovered)
-        );
+        *blob = match outcome {
+            Ok(StoreOutcome::Published | StoreOutcome::AlreadyCovered) => BlobState::Written,
+            Ok(StoreOutcome::Unsupported { .. }) => BlobState::Unwritable,
+            Err(_) => BlobState::Owed,
+        };
+    }
+
+    /// Owe a blob again for a value found unwritable — for an install, which
+    /// may bring the codec that was missing.
+    pub(crate) fn reconsider_unwritable_blob(&mut self) {
+        if let ValueState::Resident { blob, .. } = &mut self.value
+            && *blob == BlobState::Unwritable
+        {
+            *blob = BlobState::Owed;
+        }
     }
 
     /// The resident output values, or `None` when the slot holds none.
@@ -260,7 +292,7 @@ impl RuntimeSlot {
                 self.value = ValueState::Resident {
                     snapshot: OutputSnapshot::empty(output_count),
                     produced_under: None,
-                    on_disk: false,
+                    blob: BlobState::Owed,
                 };
             }
         }
@@ -299,7 +331,7 @@ impl RuntimeSlot {
         let digest = self.current_digest;
         let ValueState::Resident {
             produced_under,
-            on_disk,
+            blob,
             ..
         } = &mut self.value
         else {
@@ -309,14 +341,14 @@ impl RuntimeSlot {
         // A value this run just computed is not on disk until the store that
         // follows says so — and the buffer it was written into may be carrying
         // the previous value's answer.
-        *on_disk = false;
+        *blob = BlobState::Owed;
     }
 }
 
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::execution::cache::digest::Digest;
-    use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot, ValueState};
+    use crate::execution::cache::slot::{BlobState, OutputSnapshot, RuntimeSlot, ValueState};
 
     impl RuntimeSlot {
         /// Seed a value the run loop did not compute and no blob backs — how a
@@ -331,8 +363,67 @@ pub(crate) mod internals {
             self.value = ValueState::Resident {
                 snapshot,
                 produced_under,
-                on_disk: false,
+                blob: BlobState::Owed,
             };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+    use std::path::PathBuf;
+
+    use crate::TypeId;
+    use crate::execution::cache::digest::Digest;
+    use crate::execution::cache::disk_store::error::{StoreError, StoreResult};
+    use crate::execution::cache::disk_store::store_outcome::StoreOutcome;
+    use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot};
+    use crate::graph::identity::FuncId;
+
+    /// Each store outcome settles the debt its own way: a blob on disk pays
+    /// it, a failed write leaves it for the next reuse, and a value no codec
+    /// encodes is not retried until an install reconsiders it.
+    #[test]
+    fn a_store_outcome_settles_the_blob_debt() {
+        let mut slot = RuntimeSlot::new(FuncId::unique());
+        slot.load_output(OutputSnapshot::new(Vec::new()), Some(Digest([1; 32])));
+        assert!(slot.owes_blob(), "a value nothing wrote owes its blob");
+
+        let failed = || -> StoreResult {
+            Err(StoreError::Directory {
+                path: PathBuf::new(),
+                source: io::Error::other("disk full"),
+            })
+        };
+        let unsupported = || -> StoreResult {
+            Ok(StoreOutcome::Unsupported {
+                type_id: TypeId::unique(),
+            })
+        };
+        let rows: [(StoreResult, bool); 4] = [
+            (Ok(StoreOutcome::Published), false),
+            (failed(), true),
+            (Ok(StoreOutcome::AlreadyCovered), false),
+            (unsupported(), false),
+        ];
+        for (outcome, owes) in rows {
+            slot.note_store(&outcome);
+            assert_eq!(slot.owes_blob(), owes, "{outcome:?}");
+        }
+
+        slot.reconsider_unwritable_blob();
+        assert!(
+            slot.owes_blob(),
+            "an install reconsiders an unwritable value"
+        );
+        slot.note_store(&Ok(StoreOutcome::Published));
+        slot.reconsider_unwritable_blob();
+        assert!(!slot.owes_blob(), "a written blob is not reconsidered");
+
+        slot.clear_output();
+        slot.note_store(&unsupported());
+        slot.reconsider_unwritable_blob();
+        assert!(!slot.owes_blob(), "an empty slot owes nothing");
     }
 }
