@@ -21,6 +21,7 @@ async-trait = { workspace = true }
 notify = { workspace = true }
 rand = { workspace = true }
 blake3 = { workspace = true }
+serde = { workspace = true }
 
 [dev-dependencies]
 common = { workspace = true, features = ["internals"] }

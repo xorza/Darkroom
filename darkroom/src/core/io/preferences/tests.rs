@@ -8,9 +8,7 @@ use glam::{IVec2, UVec2};
 use palantir::ImageFilter;
 
 use crate::core::io::preferences::error::PreferencesLoadError;
-use crate::core::io::preferences::{
-    MlModelPreferences, Preferences, ViewerBackground, ViewerPreferences, WindowState,
-};
+use crate::core::io::preferences::{Preferences, ViewerBackground, ViewerPreferences, WindowState};
 
 /// The file is named for the app, and lies in the OS's configuration directory
 /// (`platform/*` `resolve_config_dir` tests cover that resolution).
@@ -44,7 +42,7 @@ fn preferences_roundtrip() {
             background: ViewerBackground::Checker,
             mag_filter: ImageFilter::Linear,
         },
-        ml_models: MlModelPreferences {
+        ml_models: lens::MlModelPaths {
             denoise: PathBuf::from("/models/d.onnx"),
             star_removal: PathBuf::from("/models/s.onnx"),
         },

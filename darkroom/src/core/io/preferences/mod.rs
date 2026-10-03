@@ -44,7 +44,7 @@ pub(crate) struct Preferences {
     /// in place and persists.
     pub(crate) viewer: ViewerPreferences,
     /// Default ONNX model paths copied into newly-authored ML node inputs.
-    pub(crate) ml_models: MlModelPreferences,
+    pub(crate) ml_models: lens::MlModelPaths,
 }
 
 /// Backdrop behind (and around) a viewer's image, as offered by the
@@ -105,33 +105,7 @@ impl Default for Preferences {
             confirm_unsaved_changes: true,
             window: None,
             viewer: ViewerPreferences::default(),
-            ml_models: MlModelPreferences::default(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
-pub(crate) struct MlModelPreferences {
-    pub(crate) denoise: PathBuf,
-    pub(crate) star_removal: PathBuf,
-}
-
-impl Default for MlModelPreferences {
-    fn default() -> Self {
-        let defaults = lens::MlModelPaths::default();
-        Self {
-            denoise: defaults.denoise,
-            star_removal: defaults.star_removal,
-        }
-    }
-}
-
-impl From<&MlModelPreferences> for lens::MlModelPaths {
-    fn from(preferences: &MlModelPreferences) -> Self {
-        Self {
-            denoise: preferences.denoise.clone(),
-            star_removal: preferences.star_removal.clone(),
+            ml_models: lens::MlModelPaths::default(),
         }
     }
 }

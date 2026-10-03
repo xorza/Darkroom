@@ -71,8 +71,7 @@ impl RuntimeHost {
     /// Assemble the func library and spin up the evaluation worker, which is
     /// woken through `wake`.
     pub(crate) fn new(wake: Wake, preferences: &Preferences) -> Self {
-        let model_paths = (&preferences.ml_models).into();
-        let library = RuntimeLibrary::new(&model_paths);
+        let library = RuntimeLibrary::new(&preferences.ml_models);
         let worker = WorkerBridge::new(wake);
         let host = Self {
             library,
@@ -88,8 +87,7 @@ impl RuntimeHost {
 
     /// Re-seed the ML nodes' model-path defaults from `preferences`.
     pub(crate) fn configure_ml_model_defaults(&mut self, preferences: &Preferences) {
-        let model_paths = (&preferences.ml_models).into();
-        self.library.update_ml_model_paths(&model_paths);
+        self.library.update_ml_model_paths(&preferences.ml_models);
     }
 
     /// Point the worker's [`DiskStore`] at the current root.
@@ -325,7 +323,7 @@ mod tests {
     use scenarium::{Binding, ConstValue, Graph, InputPort, NodeId};
 
     use crate::core::io::cache::document_cache_root;
-    use crate::core::io::preferences::{MlModelPreferences, Preferences};
+    use crate::core::io::preferences::Preferences;
     use crate::core::runtime_host::{CacheRootChange, RuntimeHost};
 
     /// The default value seeded into `func`'s model-path input (index 1),
@@ -385,7 +383,7 @@ mod tests {
         let denoise_path = "/models/host-denoise.onnx";
         let star_removal_path = "/models/host-stars.onnx";
         let mut preferences = Preferences {
-            ml_models: MlModelPreferences {
+            ml_models: lens::MlModelPaths {
                 denoise: denoise_path.into(),
                 star_removal: star_removal_path.into(),
             },

@@ -2,6 +2,10 @@
 //! `set_confirm_unsaved` is the one preference `App` also writes
 //! from outside the tab (the exit dialog's "Don't ask again").
 
+use std::path::PathBuf;
+
+use lens::MlModelPaths;
+
 use crate::gui::app::App;
 
 /// Preferences UI actions. Applied by [`PrefsCommand::apply`] after authoring.
@@ -16,10 +20,21 @@ pub(crate) enum PrefsCommand {
     PickMlModel(MlModelKind),
 }
 
+/// Which of the ML nodes' model files a Browse pick sets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MlModelKind {
     Denoise,
     StarRemoval,
+}
+
+impl MlModelKind {
+    /// The path this kind names in `paths`.
+    pub(crate) const fn path_mut(self, paths: &mut MlModelPaths) -> &mut PathBuf {
+        match self {
+            Self::Denoise => &mut paths.denoise,
+            Self::StarRemoval => &mut paths.star_removal,
+        }
+    }
 }
 
 impl PrefsCommand {

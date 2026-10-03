@@ -492,12 +492,8 @@ impl App {
     }
 
     fn set_ml_model_path(&mut self, kind: MlModelKind, path: PathBuf) {
-        match kind {
-            MlModelKind::Denoise => self.preferences.ml_models.denoise = path,
-            MlModelKind::StarRemoval => self.preferences.ml_models.star_removal = path,
-        }
-        self.runtime.configure_ml_model_defaults(&self.preferences);
-        self.save_preferences();
+        *kind.path_mut(&mut self.preferences.ml_models) = path;
+        self.apply_preferences();
     }
 
     /// Persist whether discarding unsaved changes prompts to save.
