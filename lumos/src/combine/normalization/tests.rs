@@ -17,6 +17,7 @@ fn channel_stats(channels: &[(f32, f32)]) -> FrameStats {
             .iter()
             .map(|&(median, mad)| MedianMad { median, mad })
             .collect(),
+        noise: channels.iter().map(|&(_, mad)| mad_to_sigma(mad)).collect(),
         quantization_sigma: None,
         facts: FrameFacts {
             domain: None,

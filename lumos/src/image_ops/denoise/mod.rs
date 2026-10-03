@@ -15,11 +15,11 @@ use rayon::prelude::*;
 use crate::error::InvalidConfigField;
 use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::image_ops::error::OpError;
-use crate::image_ops::wavelet::{atrous_smooth, max_scales};
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::MedianMad;
 use crate::math::statistics::subsample::{MAX_STATISTIC_SAMPLES, Subsample};
+use crate::math::wavelet::{atrous_smooth, max_scales};
 use std::mem;
 
 /// How to attenuate a wavelet coefficient that falls below the per-scale threshold.

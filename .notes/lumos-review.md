@@ -494,7 +494,6 @@ AGENTS.md promises photometry-grade error bars. These planes cannot give them.
 - [ ] `25.14` `io/raw/mod.rs:532-533,563`: "fast SIMD demosaic". RCD has no SIMD.
 - [ ] `25.15` `memory/run_memory.rs:15-16`: it promises a "share" for parallel stacks, but no code computes one.
 - [ ] `25.16` `frame_store/mod.rs:1`, `lib.rs:14`: they say frame_store does memory planning. That code is in `memory/`.
-- [ ] `25.17` `math/mod.rs:3-9`: it lists 5 of 9 submodules.
 - [ ] `25.18` `background_mesh/mod.rs:87-89`: the doc and `#[inline]` of `find_lower_tile_y` sit on `sigma_range`.
 
 ## 26. One fact in two places, wide signatures, and style deviations
@@ -946,6 +945,8 @@ Closes group 16 except 16.12, and 17.4 to 17.7 (17.1 to 17.3 close in phase 0). 
 Each phase builds and passes the verification chain on its own. A phase closes its items, and those items are then deleted from this file, together with the phase. Phase order follows the dependencies. Each phase adds its stage to the S9 harness.
 
 ## Phase 4. Spread, sorted window and rejection driver (S3, S4, C1 gather)
+
+0. Done first, because the floor needs it: the noise estimators of S10 (`math/noise`: `MrsNoise` calibrated to read white noise's own σ, `DifferenceNoise` per colour of a mosaic) and `FrameStats::noise`.
 
 1. Add `Spread` with its floor. Port `sigma_clip_iteration`.
 2. Add the sorting network over `F32x8` lanes and `SortedWindow`. Bench it against today's shortcut and sort before the methods move.
