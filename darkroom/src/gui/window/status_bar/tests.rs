@@ -50,10 +50,9 @@ fn memory_label_leads_with_the_process_then_sums_both_cache_pools() {
     );
 }
 
-/// The bar used to collapse when it had nothing to say; the process
-/// footprint gives it something on every frame, so it is recorded on
-/// an untouched document — and stays recorded when no reading is
-/// available, rather than reappearing as the figure lands.
+/// The process footprint gives the bar something to say on every frame,
+/// so it is recorded on an untouched document — and stays recorded when no
+/// reading is available, rather than reappearing as the figure lands.
 #[test]
 fn status_bar_is_recorded_on_an_idle_document_with_or_without_a_reading() {
     let mut h = SessionHarness::new(DocFixture::default());

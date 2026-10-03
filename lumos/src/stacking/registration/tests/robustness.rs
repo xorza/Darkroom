@@ -190,8 +190,7 @@ impl Scenario {
     }
 }
 
-/// `s·R(θ)` about `(c, c)`, then `offset`: the similarity the old fixtures applied about the
-/// field's centre.
+/// `s·R(θ)` about `(c, c)`, then `offset`: a similarity about the field's centre.
 fn about_centre(c: f64, offset: DVec2, angle_deg: f64, scale: f64) -> Transform {
     let linear = Transform::similarity(DVec2::ZERO, angle_deg.to_radians(), scale);
     let centre = DVec2::splat(c);

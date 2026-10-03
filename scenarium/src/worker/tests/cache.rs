@@ -151,9 +151,8 @@ async fn a_disk_cached_node_survives_a_worker_restart() {
 
 /// A flush that wrote nothing reports through the same general error the host
 /// already shows for eviction, whether the store was just attached or the host
-/// named the node. Silence used to be the only answer either way, which reads
-/// exactly like success — while the node goes on showing itself disk-backed
-/// with nothing behind it.
+/// named the node. Silence would read exactly like success — while the node
+/// goes on showing itself disk-backed with nothing behind it.
 #[tokio::test]
 async fn a_flush_failure_uses_the_general_worker_error_report() {
     let dir = TempDir::new("flush-error");
@@ -393,10 +392,10 @@ async fn resident_disk_backed_values_are_flushed_when_asked_and_not_on_a_bare_at
 /// first, so nothing of the outgoing program can be written into the incoming
 /// one's root.
 ///
-/// This is the document-open path. It used to write the closed document's
-/// resident values into the opened document's cache directory, under ids
-/// nothing there would ever read — and since no cache root is ever pruned,
-/// those blobs were permanent.
+/// This is the document-open path. In the other order the closed document's
+/// resident values would land in the opened document's cache directory, under
+/// ids nothing there would ever read — and since no cache root is ever pruned,
+/// those blobs would be permanent.
 #[tokio::test]
 async fn a_batch_resolves_its_graph_before_the_store_it_repoints_to() {
     let outgoing = TempDir::new("outgoing-doc");

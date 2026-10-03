@@ -423,8 +423,7 @@ fn common_domain_norms_preserve_pair_order_and_honor_cancellation() {
 /// frame `k` onto it is `g_k`.
 ///
 /// The frames' sky noise is unrelated to their gain — 0.006 at gain 0.8, 0.004 at 1.25 — so the
-/// ratio of sky spreads, the old seed and the old estimator for unregistered frames, misses
-/// every gain by far. The fit must find each within its own noise: the Deming slope's standard
+/// ratio of sky spreads, the obvious seed for unregistered frames, misses every gain by far. The fit must find each within its own noise: the Deming slope's standard
 /// error is `√((σ²_ref + g²σ²_k) / S_xx)`, with `S_xx` the frame's spread over the paired pixels,
 /// and 5 of those bound it.
 ///
