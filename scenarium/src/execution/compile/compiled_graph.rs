@@ -22,7 +22,9 @@ use crate::graph::identity::FuncId;
 
 use crate::containers::column::{Column, Span};
 use crate::execution::compile::consumer_cone::ConsumerCone;
-use crate::execution::identity::{EventIdx, InputIdx, NodeIdx, OutputAddr, OutputIdx};
+use crate::execution::identity::{
+    EventIdx, InputIdx, NodeIdx, OutputAddr, OutputIdx, SubscriberIdx,
+};
 use crate::execution::schedule::NodeState;
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::event::EventLambda;
@@ -67,7 +69,8 @@ impl ExecutionInput {
 
 #[derive(Debug)]
 pub(crate) struct ExecutionEvent {
-    pub subscribers: Vec<NodeIdx>,
+    /// This event's run in [`CompiledGraph::subscribers`].
+    pub subscribers: Span<SubscriberIdx>,
     pub lambda: EventLambda,
 }
 
@@ -132,6 +135,8 @@ pub struct CompiledGraph {
     pub(crate) node_ids: Column<NodeIdx, NodeId>,
     pub(crate) inputs: Column<InputIdx, ExecutionInput>,
     pub(crate) events: Column<EventIdx, ExecutionEvent>,
+    /// Every event's subscribers, one event's run after another.
+    pub(crate) subscribers: Column<SubscriberIdx, NodeIdx>,
     /// Each node's resolved declared output types (wildcards followed), packed
     /// in the same index space as the plan's output columns. Resolved by the
     /// lowering walk and copied here slot for slot, so the artifact is

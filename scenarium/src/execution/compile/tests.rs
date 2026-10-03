@@ -33,7 +33,8 @@ fn subscription_wiring_rejects_an_endpoint_outside_the_program() {
     // covers exactly the graph's nodes — so it is corrupted here by hand.
     let past_the_end = NodeIdx(compiled.program.e_nodes.len() as u32);
     let events = compiled.node("ticker").events;
-    compiled.program.events[events][0].subscribers[0] = past_the_end;
+    let subscriber = compiled.program.events[events][0].subscribers.nth(0);
+    compiled.program.subscribers[subscriber] = past_the_end;
     assert!(
         matches!(
             validate::validate(&compiled.program, &g.library),
@@ -233,8 +234,7 @@ fn summary(compiled: &CompiledGraph, authored: &[NodeId]) -> Vec<String> {
             out.push(format!("  out {output:?}"));
         }
         for event in &compiled.events[e_node.events] {
-            let subscribers: Vec<_> = event
-                .subscribers
+            let subscribers: Vec<_> = compiled.subscribers[event.subscribers]
                 .iter()
                 .map(|&idx| compiled.node_ids[idx])
                 .collect();
@@ -504,6 +504,11 @@ fn wires_each_event_with_the_subscribers_resolved_for_it() {
         "the unsubscribed port carries no subscriber"
     );
     assert_eq!(compiled.subscribers("emitter", 1), ["listener"]);
+    assert_eq!(
+        compiled.program.subscribers.len(),
+        1,
+        "one column holds every event's subscribers"
+    );
 }
 
 /// A subscription whose emitter or subscriber is disabled wires nothing, and

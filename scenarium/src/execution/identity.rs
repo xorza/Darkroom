@@ -57,6 +57,13 @@ idx_type!(
     "event column index"
 );
 
+idx_type!(
+    /// A position in the program's flat subscriber column, packed one event's
+    /// subscribers after another.
+    pub(crate) struct SubscriberIdx,
+    "subscriber column index"
+);
+
 /// An [`OutputPort`](crate::graph::identity::OutputPort)
 /// interned into the installed program's dense index space — the hash-free form
 /// every per-run edge walk uses, resolved once at compile.
