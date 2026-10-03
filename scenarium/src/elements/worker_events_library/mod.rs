@@ -98,9 +98,7 @@ pub fn worker_events_library() -> Library {
                           ..
                       }| {
                     Box::pin(async move {
-                        let frequency = inputs[0]
-                            .as_f64()
-                            .expect("frequency input type is validated before invocation");
+                        let frequency = inputs[0].required_f64();
                         let period = fps_period(frequency)?;
                         let now = Instant::now();
 

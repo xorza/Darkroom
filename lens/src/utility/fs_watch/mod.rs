@@ -157,17 +157,13 @@ pub fn fs_watch_library() -> Library {
                         debug_assert_eq!(inputs.len(), 3);
                         debug_assert_eq!(outputs.len(), 1);
                         let path = inputs[0]
-                            .as_fs_path()
-                            .expect("directory input type is validated at the compile boundary")
+                            .required_fs_path()
                             .to_string();
                         let recursive = inputs[1]
-                            .as_bool()
-                            .expect("recursive input type is validated at the compile boundary");
+                            .required_bool();
                         let debounce = Duration::from_millis(
                             // A negative debounce is none.
-                            u64::try_from(inputs[2].as_i64().expect(
-                                "debounce input type is validated at the compile boundary",
-                            ))
+                            u64::try_from(inputs[2].required_i64())
                             .unwrap_or(0),
                         );
 

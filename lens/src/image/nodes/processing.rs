@@ -37,14 +37,8 @@ fn register_brightness(library: &mut Library) {
                         debug_assert_eq!(inputs.len(), 3);
                         debug_assert_eq!(outputs.len(), 1);
                         let value = mem::take(&mut inputs[0]);
-                        let brightness = inputs[1]
-                            .as_f64()
-                            .expect("brightness input type is validated at the compile boundary")
-                            as f32;
-                        let contrast = inputs[2]
-                            .as_f64()
-                            .expect("contrast input type is validated at the compile boundary")
-                            as f32;
+                        let brightness = inputs[1].required_f64() as f32;
+                        let contrast = inputs[2].required_f64() as f32;
                         let image =
                             adjust_image(ContrastBrightness::new(contrast, brightness), value);
                         outputs[0] = DynamicValue::from_custom(image);
@@ -86,13 +80,9 @@ fn register_convert(library: &mut Library) {
                         debug_assert_eq!(inputs.len(), 2);
                         debug_assert_eq!(outputs.len(), 1);
                         let value = mem::take(&mut inputs[0]);
-                        let format = inputs[1]
-                            .as_enum()
-                            .expect("format input type is validated at the compile boundary");
+                        let format = inputs[1].required_enum();
                         let converted = {
-                            let image = value
-                                .as_custom::<Image>()
-                                .expect("image input type is validated at the compile boundary");
+                            let image = value.required_custom::<Image>();
                             conversion_target(format, image.desc().color_format)
                                 .map(|target| image.interleaved().convert_to(target))
                         };
@@ -132,21 +122,13 @@ fn register_blend(library: &mut Library) {
                     Box::pin(async move {
                         debug_assert_eq!(inputs.len(), 4);
                         debug_assert_eq!(outputs.len(), 1);
-                        let source = inputs[0]
-                            .as_custom::<Image>()
-                            .expect("source input type is validated at the compile boundary");
-                        let destination = inputs[1]
-                            .as_custom::<Image>()
-                            .expect("destination input type is validated at the compile boundary");
+                        let source = inputs[0].required_custom::<Image>();
+                        let destination = inputs[1].required_custom::<Image>();
                         let mode = inputs[2]
-                            .as_enum()
-                            .expect("mode input type is validated at the compile boundary")
+                            .required_enum()
                             .parse::<BlendMode>()
                             .expect("enum input is validated at the compile boundary");
-                        let alpha = inputs[3]
-                            .as_f64()
-                            .expect("alpha input type is validated at the compile boundary")
-                            as f32;
+                        let alpha = inputs[3].required_f64() as f32;
                         // Two independent wires: a different size or format is the user's
                         // graph, not a broken invariant, and the blend kernel asserts on it.
                         if destination.desc() != source.desc() {
@@ -200,12 +182,10 @@ fn register_transform(library: &mut Library) {
                         debug_assert_eq!(inputs.len(), 6);
                         debug_assert_eq!(outputs.len(), 1);
                         let image = inputs[0]
-                            .as_custom::<Image>()
-                            .expect("image input type is validated at the compile boundary");
+                            .required_custom::<Image>();
                         let scalar = |index: usize| {
                             inputs[index]
-                                .as_f64()
-                                .expect("transform input type is validated at the compile boundary")
+                                .required_f64()
                                 as f32
                         };
                         let center = Vec2::new(
@@ -275,13 +255,7 @@ fn adjust_image(op: ContrastBrightness, value: DynamicValue) -> Image {
     // image to allocate. Only a value still shared with other consumers has to be copied first.
     let mut image = match value.into_custom::<Image>() {
         Ok(image) => image,
-        Err(value) => Image::from(
-            value
-                .as_custom::<Image>()
-                .expect("image input type is validated at the compile boundary")
-                .interleaved()
-                .into_owned(),
-        ),
+        Err(value) => Image::from(value.required_custom::<Image>().interleaved().into_owned()),
     };
 
     op.apply_cpu(image.interleaved_mut());

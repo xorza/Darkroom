@@ -37,11 +37,7 @@ fn register_load(library: &mut Library) {
                     Box::pin(async move {
                         debug_assert_eq!(inputs.len(), 1);
                         debug_assert_eq!(outputs.len(), 1);
-                        let path = PathBuf::from(
-                            inputs[0]
-                                .as_fs_path()
-                                .expect("path input type is validated at the compile boundary"),
-                        );
+                        let path = PathBuf::from(inputs[0].required_fs_path());
                         let image = task::spawn_blocking(move || {
                             imaginarium::Image::read_file(path).map_err(InvokeError::external)
                         })
@@ -72,20 +68,17 @@ fn register_save(library: &mut Library) {
                     let value = mem::take(&mut inputs[0]);
                     let path = PathBuf::from(
                         inputs[1]
-                            .as_fs_path()
-                            .expect("path input type is validated at the compile boundary"),
+                            .required_fs_path(),
                     );
                     let format = inputs[2]
-                        .as_enum()
-                        .expect("format input type is validated at the compile boundary")
+                        .required_enum()
                         .to_owned();
                     // Saving needs the pixels by value anyway, so take them when this is the last
                     // holder and copy only when it is not.
                     let cpu_image = match value.into_custom::<Image>() {
                         Ok(image) => image.to_interleaved(),
                         Err(value) => value
-                            .as_custom::<Image>()
-                            .expect("image input type is validated at the compile boundary")
+                            .required_custom::<Image>()
                             .interleaved()
                             .into_owned(),
                     };

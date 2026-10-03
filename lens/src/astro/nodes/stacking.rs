@@ -54,9 +54,7 @@ pub(crate) fn register(library: &mut Library) {
                         debug_assert_eq!(inputs.len(), 6);
                         debug_assert_eq!(outputs.len(), 3);
 
-                        let light_paths = inputs[0]
-                            .as_fs_paths()
-                            .expect("lights input type is validated at the compile boundary");
+                        let light_paths = inputs[0].required_fs_paths();
                         let lights = light_frames(light_paths).map_err(InvokeError::external)?;
 
                         let masters_value = inputs[1].clone();
@@ -66,10 +64,7 @@ pub(crate) fn register(library: &mut Library) {
                             preset::resolve::<RegistrationKnobs, RegistrationPreset>(&inputs[3]);
                         let stack = preset::resolve::<CombineKnobs, CombinePreset>(&inputs[4]);
                         // A negative index asks for the automatic reference.
-                        let reference =
-                            usize::try_from(inputs[5].as_i64().expect(
-                                "reference input type is validated at the compile boundary",
-                            ))
+                        let reference = usize::try_from(inputs[5].required_i64())
                             .map_or(Reference::Auto, Reference::Index);
                         let config = AlignStackConfig {
                             detection,
