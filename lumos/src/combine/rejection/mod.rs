@@ -1,36 +1,36 @@
-//! Pixel rejection algorithms for stacking.
+//! Pixel rejection before the mean.
 //!
-//! This module contains various outlier rejection methods used during image stacking:
-//! - Sigma clipping (Kappa-Sigma)
-//! - Winsorized sigma clipping
-//! - Linear fit clipping
-//! - Percentile clipping
-//! - Generalized Extreme Studentized Deviate (GESD)
-//!
-//! [`Rejection`] is the enum a caller picks from; each variant's config type carries that method's
-//! whole implementation and lives in its own file beside this one. What stays here is the enum, and
-//! the handful of helpers the methods share.
+//! [`Rejection`] is the enum a caller picks from. Every method works the same way: the pixel's
+//! samples are sorted once, and each pass of the method narrows a window of them. Sigma clip,
+//! winsorized, GESD and trim reject only from the ends by their nature, and linear fit is made to.
+//! The driver here owns what the methods share: the sort, the loop over passes, the noise floor
+//! under every σ, and the rule that keeps at least `min_survivors` samples.
 
 pub(crate) mod gesd_config;
 pub(crate) mod linear_fit_clip_config;
-pub(crate) mod percentile_clip_config;
+pub(crate) mod normal_scores;
+pub(crate) mod pass;
 pub(crate) mod scratch_buffers;
 pub(crate) mod sigma_bounds;
 pub(crate) mod sigma_clip_config;
+pub(crate) mod sorted_samples;
+pub(crate) mod trim_config;
 pub(crate) mod winsorized_clip_config;
 
-use crate::combine::cache::sample::CombinedSample;
+use std::ops::Range;
+
+use crate::combine::cache::sample::{CombinedSample, PixelSamples};
 use crate::combine::rejection::gesd_config::GesdConfig;
 use crate::combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
-use crate::combine::rejection::percentile_clip_config::PercentileClipConfig;
-use crate::combine::rejection::scratch_buffers::ScratchBuffers;
-use crate::combine::rejection::sigma_bounds::SigmaBounds;
+use crate::combine::rejection::pass::{Pass, Proposal};
+use crate::combine::rejection::scratch_buffers::{MethodScratch, ScratchBuffers};
 use crate::combine::rejection::sigma_clip_config::SigmaClipConfig;
+use crate::combine::rejection::trim_config::TrimConfig;
 use crate::combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
 use crate::error::InvalidConfigField;
 use crate::math::sum;
 
-/// An iteration cap must leave at least one pass to run. Shared by the two methods that iterate.
+/// An iteration cap must leave at least one pass to run. Shared by the methods that iterate.
 fn validate_max_iterations(max_iterations: u32) -> Result<(), InvalidConfigField> {
     InvalidConfigField::check(
         max_iterations >= 1,
@@ -40,124 +40,19 @@ fn validate_max_iterations(max_iterations: u32) -> Result<(), InvalidConfigField
     )
 }
 
-/// Open a rejection: pair every value with its frame index, and report the survivor count straight
-/// back when there are too few values to reject from.
-///
-/// `min_samples` is the smallest count the method can act on at all, not a tuning knob or a fast
-/// path — a sigma clip has no spread to measure below three values, a linear fit no line to fit
-/// below four. `Some` means the caller is done and everything survives, indices already paired.
-fn begin_rejection(
-    values: &[f32],
-    scratch: &mut ScratchBuffers,
-    min_samples: usize,
-) -> Option<usize> {
-    debug_assert!(!values.is_empty());
-    scratch.reset_indices(values.len());
-    (values.len() < min_samples).then_some(values.len())
-}
-
-/// Keep predicate for asymmetric sigma rejection: `diff = value − reference`, kept when it lies
-/// within `[−low, high]` (the low- and high-side thresholds are applied separately).
-#[inline]
-fn within_threshold(diff: f32, bounds: SigmaBounds) -> bool {
-    if diff < 0.0 {
-        -diff <= bounds.low
-    } else {
-        diff <= bounds.high
-    }
-}
-
-/// Compact in place the first `count` values (with their co-`indices`) whose deviation from
-/// `reference(i)` stays within the asymmetric band `[−low, high]`, returning the survivor count.
-/// Survivors keep their relative order and stay paired with their indices. `reference` is the
-/// per-element comparison point — a constant `center` for sigma/winsorized clipping, or the fitted
-/// `a + b·i` for linear-fit clipping.
-fn compact_within(
-    values: &mut [f32],
-    indices: &mut [usize],
-    count: usize,
-    bounds: SigmaBounds,
-    reference: impl Fn(usize) -> f32,
-) -> usize {
-    let mut write = 0;
-    for read in 0..count {
-        if within_threshold(values[read] - reference(read), bounds) {
-            values[write] = values[read];
-            indices[write] = indices[read];
-            write += 1;
-        }
-    }
-    write
-}
-
-/// Median of an **ascending-sorted** slice: the middle element, or the mean of the two middle ones
-/// for an even count. The rejection centre; the upper-middle element alone sits high by up to half
-/// the gap between the two middles, which makes a symmetric band clip the low side harder.
-fn sorted_median(sorted: &[f32]) -> f32 {
-    let m = sorted.len();
-    debug_assert!(m > 0);
-    if m % 2 == 1 {
-        sorted[m / 2]
-    } else {
-        f32::midpoint(sorted[m / 2 - 1], sorted[m / 2])
-    }
-}
-
-/// MAD (median absolute deviation from `center`) of an **ascending-sorted** slice, without a
-/// scratch buffer or quickselect. The absolute deviations split into two ascending runs — the
-/// elements below `center` read backwards, and those at/above `center` read forwards — so a
-/// two-pointer merge yields them in global ascending order up to rank `len / 2`; for an even
-/// count the MAD is the mean of the deviations at ranks `len / 2 − 1` and `len / 2`, the same
-/// median [`median_fast`](crate::math::statistics::median_fast) takes.
-fn sorted_mad(sorted: &[f32], center: f32) -> f32 {
-    let m = sorted.len();
-    debug_assert!(m > 0);
-    let split = sorted.partition_point(|&v| v < center);
-    let mut l = split; // left run consumes sorted[l - 1] going down
-    let mut r = split; // right run consumes sorted[r] going up
-    let target = m / 2;
-    let mut previous = 0.0f32;
-    let mut dev = 0.0f32;
-    for _ in 0..=target {
-        let left = (l > 0).then(|| center - sorted[l - 1]);
-        let right = (r < m).then(|| sorted[r] - center);
-        previous = dev;
-        dev = match (left, right) {
-            (Some(ld), Some(rd)) if ld <= rd => {
-                l -= 1;
-                ld
-            }
-            (Some(ld), None) => {
-                l -= 1;
-                ld
-            }
-            (_, Some(rd)) => {
-                r += 1;
-                rd
-            }
-            (None, None) => break,
-        };
-    }
-    if m.is_multiple_of(2) {
-        f32::midpoint(previous, dev)
-    } else {
-        dev
-    }
-}
-
 /// Pixel rejection algorithm applied before combining.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Rejection {
     /// No rejection.
     None,
-    /// Iterative sigma clipping from median (symmetric or asymmetric).
+    /// Iterative sigma clipping about the median, symmetric or asymmetric.
     SigmaClip(SigmaClipConfig),
-    /// Replace outliers with boundary values (better for small stacks).
+    /// Sigma clipping about a Huber estimate of the centre and σ.
     Winsorized(WinsorizedClipConfig),
-    /// Fit linear trend, reject deviants (good for gradients).
+    /// Sigma clipping about a line fitted through the sorted samples on their normal scores.
     LinearFit(LinearFitClipConfig),
-    /// Clip lowest/highest percentiles.
-    Percentile(PercentileClipConfig),
+    /// Drop a fixed share from each end: a trimmed mean.
+    Trim(TrimConfig),
     /// Generalized ESD test (best for large stacks >50 frames).
     Gesd(GesdConfig),
 }
@@ -189,9 +84,9 @@ impl Rejection {
         Self::LinearFit(LinearFitClipConfig::new(sigma, sigma, 3))
     }
 
-    /// Create percentile clipping with symmetric bounds.
-    pub const fn percentile(percent: f32) -> Self {
-        Self::Percentile(PercentileClipConfig::new(percent, percent))
+    /// Create a trim of the same share from each end.
+    pub const fn trim(percent: f32) -> Self {
+        Self::Trim(TrimConfig::new(percent, percent))
     }
 
     /// Create GESD with default alpha.
@@ -200,58 +95,124 @@ impl Rejection {
     }
 
     /// Validate the held configuration, if any.
-    pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
+    pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
         match self {
             Self::None => Ok(()),
             Self::SigmaClip(config) => config.validate(),
             Self::Winsorized(config) => config.validate(),
             Self::LinearFit(config) => config.validate(),
-            Self::Percentile(config) => config.validate(),
+            Self::Trim(config) => config.validate(),
             Self::Gesd(config) => config.validate(),
         }
     }
 
-    /// Partition values by rejection algorithm, returning the number of survivors.
-    ///
-    /// After return, `values[..remaining]` holds the surviving values and `scratch.indices`
-    /// their original frame indices (kept paired). `None` does no work and returns `values.len()`.
-    fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
+    /// Whether the method measures a spread, and so needs the frames' noise as its floor.
+    pub(crate) const fn measures_spread(&self) -> bool {
+        !matches!(self, Self::None | Self::Trim(_))
+    }
+
+    /// The most passes the method runs. Winsorized runs until a pass rejects nothing, which takes
+    /// fewer passes than there are samples.
+    const fn passes(&self) -> usize {
         match self {
-            Rejection::None => values.len(),
-            Rejection::SigmaClip(c) => c.reject(values, scratch),
-            Rejection::Winsorized(c) => c.reject(values, scratch),
-            Rejection::LinearFit(c) => c.reject(values, scratch),
-            Rejection::Percentile(c) => c.reject(values, scratch),
-            Rejection::Gesd(c) => c.reject(values, scratch),
+            Self::None => 0,
+            Self::SigmaClip(config) => config.max_iterations as usize,
+            Self::Winsorized(_) => usize::MAX,
+            Self::LinearFit(config) => config.passes(),
+            Self::Trim(_) | Self::Gesd(_) => 1,
         }
+    }
+
+    /// Whether a pass that rejects nothing ends the method. Linear fit's first pass is only the
+    /// robust start for the fits: an outlier the median clip keeps can still be off the fitted line.
+    const fn settles(&self, index: usize) -> bool {
+        !matches!(self, Self::LinearFit(_)) || index > 0
+    }
+
+    fn narrow(&self, pass: &Pass<'_>, scratch: &mut MethodScratch) -> Option<Proposal> {
+        match self {
+            Self::None => None,
+            Self::SigmaClip(config) => Some(config.narrow(pass)),
+            Self::Winsorized(config) => Some(config.narrow(pass, &mut scratch.clamped)),
+            Self::LinearFit(config) => Some(config.narrow(pass, &mut scratch.scores)),
+            Self::Trim(config) => Some(config.narrow(pass)),
+            Self::Gesd(config) => config.narrow(pass, &mut scratch.gesd),
+        }
+    }
+
+    /// The window of the ascending `sorted` that survives.
+    ///
+    /// Passes run until one rejects nothing, or until the method's cap. When a pass proposes fewer
+    /// than `min_survivors` samples, the driver keeps the `min_survivors` samples of the window
+    /// before it that sit nearest the pass's centre, and stops: a pixel never loses every sample,
+    /// and the samples it keeps are the ones the method trusted most.
+    pub(crate) fn surviving_window(
+        &self,
+        sorted: &[f32],
+        background: f32,
+        min_survivors: usize,
+        scratch: &mut MethodScratch,
+    ) -> Range<usize> {
+        debug_assert!(min_survivors >= 1);
+        let mut window = 0..sorted.len();
+        for index in 0..self.passes() {
+            if window.len() <= min_survivors {
+                break;
+            }
+            let pass = Pass {
+                sorted,
+                window: window.clone(),
+                index,
+                background,
+                min_survivors,
+            };
+            let Some(proposal) = self.narrow(&pass, scratch) else {
+                break;
+            };
+            debug_assert!(
+                window.start <= proposal.window.start && proposal.window.end <= window.end,
+                "a pass widened its window: {window:?} to {:?}",
+                proposal.window
+            );
+            if proposal.window == window && self.settles(index) {
+                break;
+            }
+            if proposal.window.len() < min_survivors {
+                window = nearest(sorted, window, proposal.centre, min_survivors);
+                break;
+            }
+            window = proposal.window;
+        }
+        window
     }
 
     /// Reject outliers, then reduce the survivors to their weighted mean.
     ///
-    /// The one reduction entry point: `values` and `weights` are the samples actually reaching
-    /// this pixel, and the returned sample always carries its survivor count. `measure_quality`
-    /// asks for the survivors' effective weight as well — skipped when no output plane will read
-    /// it, since it is a second pass over the frames at every pixel.
+    /// The one reduction entry point. The returned sample always carries its survivor count, and
+    /// [`ScratchBuffers::survivor_positions`] names the survivors after it. `measure_quality` asks
+    /// for the survivors' effective weight as well, which is a second pass over the samples.
     ///
-    /// Rejection reorders `values`, so weights are re-paired through `scratch.indices` rather
-    /// than by position.
-    ///
-    /// Only the mean is weighted; [`Self::reject`] decides survivors from the values alone. That
-    /// is deliberate, and matches what `ImageIntegration`, Siril and DSS all do: rejection asks
-    /// which samples disagree with their neighbours, which is a question about the normalized
-    /// values, not about how much each frame is trusted. It is also what keeps GESD available —
-    /// its critical values come from the t-distribution for `n` iid observations, and there is no
-    /// weighted form of those tables, so a weighted GESD would be a different test rather than the
-    /// same one with weights.
+    /// Only the mean is weighted; the rejection decides survivors from the values alone. That
+    /// matches what `ImageIntegration`, Siril and DSS do: rejection asks which samples disagree
+    /// with the others, which is a question about the normalized values, not about how much each
+    /// frame is trusted. It also keeps GESD a valid test: its critical values come from the
+    /// t-distribution for `n` iid observations, and there is no weighted form of them.
     pub(crate) fn combine_mean(
         &self,
-        values: &mut [f32],
-        weights: &[f32],
+        samples: PixelSamples<'_>,
+        min_survivors: usize,
         scratch: &mut ScratchBuffers,
         measure_quality: bool,
     ) -> CombinedSample {
+        let PixelSamples {
+            values,
+            weights,
+            noise_variances,
+            ..
+        } = samples;
         debug_assert_eq!(values.len(), weights.len());
-        if let Rejection::None = self {
+        if matches!(self, Self::None) || values.len() <= min_survivors {
+            scratch.survivors = None;
             let value = sum::weighted_mean_f32(values, weights);
             return if measure_quality {
                 CombinedSample::from_all(value, weights)
@@ -260,46 +221,54 @@ impl Rejection {
             };
         }
 
-        let remaining = self.reject(values, scratch);
-        let survivors = &scratch.indices[..remaining];
-        let value = if remaining > 0 {
-            weighted_mean_indexed(
-                &values[..remaining],
+        scratch.sorted.fill(values);
+        let background = match noise_variances {
+            Some(variances) if self.measures_spread() => {
+                (variances.iter().sum::<f32>() / variances.len() as f32).sqrt()
+            }
+            _ => 0.0,
+        };
+        let window = self.surviving_window(
+            scratch.sorted.values(),
+            background,
+            min_survivors,
+            &mut scratch.methods,
+        );
+        let positions = &scratch.sorted.positions()[window.clone()];
+        scratch.weights.clear();
+        scratch
+            .weights
+            .extend(positions.iter().map(|&position| weights[position as usize]));
+        let value =
+            sum::weighted_mean_f32(&scratch.sorted.values()[window.clone()], &scratch.weights);
+        let count = window.len();
+        let sample = if measure_quality {
+            CombinedSample::from_survivors(
+                value,
                 weights,
-                survivors,
-                &mut scratch.estimate_values,
+                count,
+                positions.iter().map(|&position| position as usize),
             )
         } else {
-            0.0
+            CombinedSample::value_only(value, count)
         };
-        if measure_quality {
-            CombinedSample::from_survivors(value, weights, remaining, survivors.iter().copied())
-        } else {
-            CombinedSample::value_only(value, remaining)
-        }
+        scratch.survivors = Some(window);
+        sample
     }
 }
 
-/// Weighted mean of rejection-reordered `values`: gathers each survivor's weight
-/// via `indices[i] → weights[indices[i]]` into `scratch` so values and weights
-/// align, then delegates to the precision-preserving [`sum::weighted_mean_f32`],
-/// matching the unrejected branch. Returns `0.0` when the total weight is ~0.
-///
-/// `scratch` is a reused buffer (its prior contents are overwritten) so the
-/// per-pixel combine path allocates nothing.
-///
-/// Preconditions: `indices.len() == values.len()`, all `indices[i] < weights.len()`.
-fn weighted_mean_indexed(
-    values: &[f32],
-    weights: &[f32],
-    indices: &[usize],
-    scratch: &mut Vec<f32>,
-) -> f32 {
-    debug_assert_eq!(values.len(), indices.len());
-
-    scratch.clear();
-    scratch.extend(indices.iter().map(|&idx| weights[idx]));
-    sum::weighted_mean_f32(values, scratch.as_slice())
+/// The `count` samples of `window` nearest `centre`: a run of the sorted samples, found by dropping
+/// the farther end until `count` remain. A tie drops the higher end, so the lower position is kept.
+fn nearest(sorted: &[f32], window: Range<usize>, centre: f32, count: usize) -> Range<usize> {
+    let Range { mut start, mut end } = window;
+    while end - start > count {
+        if (sorted[end - 1] - centre).abs() >= (sorted[start] - centre).abs() {
+            end -= 1;
+        } else {
+            start += 1;
+        }
+    }
+    start..end
 }
 
 #[cfg(test)]

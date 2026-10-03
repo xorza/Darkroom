@@ -16,73 +16,12 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 
 ---
 
-## 1. Rejection is not robust: outliers survive the default combine
-
-Sigma clip is the default and the light preset. Winsorized is the bias and dark preset.
-
-- [ ] `1.1` **The sigma-clip shortcut skips rejection on low-noise data** — `combine/rejection/sigma_clip_config.rs:179`
-  - `variance < f32::EPSILON` compares σ² with 1.19e-7. Any pixel with a trimmed σ below 3.45e-4 of full scale (≈22 ADU at 16 bit) skips rejection.
-  - The comment says this "matches" the full path. It does not: the full path tests σ, not σ².
-  - Example: 20 bias frames, noise 1e-4, one cosmic ray at 0.5. The full path keeps 18 samples. The shortcut keeps all 20, so the mean moves by 240× the per-frame noise.
-  - The shortcut runs again inside the loop (`:103`). `[C]`
-- [ ] `1.2` **In the shortcut, two outliers hide each other** — `combine/rejection/sigma_clip_config.rs:146-189`
-  - The shortcut trims one min and one max, then uses a non-robust stdev.
-  - Example: {−0.1, −0.05, 0, 0, 0, 0, 0.05, 0.1, 10, 10} at k = 2.5.
-    - The shortcut computes mean 1.26 and σ 3.53. The largest deviation, 8.74, is below 8.83, so it rejects nothing.
-    - The MAD path computes σ = 0.074 and rejects both 10s.
-  - A shortcut that changes the result is a bug. Its bound must follow from the MAD path, or the shortcut must go. `[C]`
-- [ ] `1.3` **Winsorized clipping starts from a non-robust σ** — `combine/rejection/winsorized_clip_config.rs:78`
-  - σ₀ = 1.134·stdev of all samples. With 3 outliers at +10σ in 10 frames, the Huber iteration keeps all three inside the band.
-  - Simulation (500 trials, k = 3), mean rejected per pixel:
-
-    | Frames / outliers | Current start | MAD start |
-    |---|---|---|
-    | 10 / 3 | 0.006 | 2.70 |
-    | 12 / 4 | 0.0 | 3.17 |
-    | 20 / 6 | 1.45 | 5.86 |
-
-  - PixInsight PCL `WinsorizedSigmaClippingRejection` starts from 1.1926·Sn, a robust estimator. `[C]`
-  - Siril (`rejection_float.c`) also starts from a plain `siril_stats_float_sd`. So the robust start departs from Siril on purpose: it follows PCL, because the plain start fails the table above.
-- [ ] `1.4` **Winsorized has no outer loop, no survivor floor, and no Huber location step** — `combine/rejection/winsorized_clip_config.rs:115-136`
-  - It rejects once and returns. Siril loops `while changed && N > 3`. PixInsight loops until stable and keeps ≥ 3.
-  - The centre is always the plain median. PCL re-takes the mean of the winsorized values.
-  - The doc at `:12` ("matching PixInsight/Siril") is false. `[C]`
-- [ ] `1.5` **Linear-fit clipping rejects clean data** — `combine/rejection/linear_fit_clip_config.rs:67-140`
-  - Pass 0 clips at k·1.4826·MAD. Later passes clip at k × the mean absolute residual of a line through the sorted order statistics, which is a much smaller unit.
-  - Pure Gaussian data at k = 3, fraction rejected:
-
-    | Frames | Linear fit | Sigma clip |
-    |---|---|---|
-    | 20 | 4.4% | 1.9% |
-    | 50 | 6.3% | 0.8% |
-    | 200 | 7.8% | 0.4% |
-
-  - The method has no survivor floor (Siril: N − r ≤ 4).
-  - With `max_iterations = 1` it never fits a line, so it is plain sigma clip.
-  - Pass 0 (median ± k·1.4826·MAD) is a lumos addition. Siril fits the line from the first pass.
-  - "Relationship to a reference value" (`:12`) is false: the x-axis is the sorted rank.
-  - Correction: the sorted-rank x-axis and the mean-absolute-residual unit are Siril's own method (`rejection_float.c`, `LINEARFIT`). The growth of the rejection rate with N on clean data is a property of that reference method: sorted Gaussian samples follow the normal quantile curve, not a line. The lumos-only defects are the pass-0 unit change and the missing survivor floor. `[C]`
-- [ ] `1.6` **The GESD automatic `max_outliers` cap is 2 below 25 frames and 10 above** — `combine/rejection/gesd_config.rs:50-51`
-  - GESD resists masking only when r ≥ the true outlier count.
-  - Example: n = 20, three outliers at 10σ, r = 2. It rejects 2 and keeps 1, so the mean moves by 0.55σ.
-  - Siril and PixInsight use 0.3·N. `[P]`
-- [ ] `1.7` **Percentile clipping does nothing on the small stacks it is documented for** — `combine/rejection/percentile_clip_config.rs:12,71`
-  - ⌊0.1·n⌋ = 0 for n < 10, and the preset turns off the small-N fallback.
-  - The name clashes with Siril's percentile clipping (deviation from the median as a fraction of the median). This method is a trimmed mean.
-  - `(p/100)·n` in f32 gives 62 for 42% of 150. `(p·n)/100` is exact. `[C]`
-- [ ] `1.8` **Survivors can drop to zero, and the pixel is written as 0 but reported as covered** — `combine/rejection/mod.rs:263-272`
-  - Validation accepts any k > 0. There is no minimum-survivor rule (Siril 4, PixInsight 3). `[C]`
-- [ ] `1.9` **The doc says winsorized "replaces outliers", but it only clips** — `combine/rejection/mod.rs:155`, `combine/stack/quantization.rs:7`, `combine/stack/mod.rs:366-369`
-  - From this false premise, winsorized gets the `conservative` quantization σ (the worst single frame) instead of survivor tracking. That overstates the figure by ≈√N. `[C]`
-
 ## 2. Absolute `EPSILON` floors on quantities that scale with the data
 
-`math/statistics/mod.rs:320-327` already explains why such a floor is wrong and uses `σ <= |median|·EPS`. No other module uses that form.
+`Spread::resolution` and `Spread::floored` (`math/statistics/spread.rs`) are the scale-free form. The rejection and `sigma_clip_iteration` use them; the items below do not yet.
 
 **Failure scenario:** 16-bit data in a 32-bit integer FITS normalizes by 2³²−1, so σ ≈ 2e-9. Every floor below then trips.
 
-- [ ] `2.1` **Rejection degeneracy checks** — `combine/rejection/sigma_clip_config.rs:110`, `winsorized_clip_config.rs:80,97,122`, `linear_fit_clip_config.rs:75,121`
-  - `sigma < f32::EPSILON`: no rejection happens on such data. `[C]`
 - [ ] `2.2` **Weighting and normalization**
   - `combine/stack/mod.rs:253`: σ below EPS gives weight 0, and if all frames have weight 0 the stack silently falls back to equal weights.
   - `combine/normalization/photometric_gain.rs` (`deming_gain`, `Seed::of`, `ResidualWindow::at`): the gain silently becomes 1, or the fit is skipped. `[P]`
@@ -98,8 +37,6 @@ Sigma clip is the default and the light preset. Winsorized is the bias and dark 
   - 0.01 is 655 ADU at 16 bit. The fit costs about one extra LM iteration. `[C]`
 - [ ] `2.7` **Detection channel weights** — `star_detection/detector/stages/prepare/mod.rs:75`
   - `sigma > f32::EPSILON` sets the weight of every channel to 0, then falls back to equal weights. `[C]`
-- [ ] `2.8` **Two sigma-clip implementations with different floors** — `math/statistics::sigma_clip_iteration` and `SigmaClipConfig::reject`
-  - One source of truth (one relative-floor helper) prevents this whole group. `[P]`
 
 ## 3. The default registration prior rejects real sessions
 
@@ -124,10 +61,6 @@ Sigma clip is the default and the light preset. Winsorized is the bias and dark 
   - The RAW CFA loader does not record exposure (`io/raw/mod.rs:1131-1148`), so a check has nothing to compare. `[C]`
 - [ ] `4.5` **The flat floor `MIN_NORMALIZED_FLAT = 0.1` is applied without a report** — `calibration_masters/prepared_flat/mod.rs:16,69,114`
   - It is applied with no count and no warning. Deep smooth vignetting is under-corrected. `[C]`
-
-## 5. Sample scale and quantization σ do not survive I/O
-
-- [ ] `5.6` **Quantization tracking uses channel 0's gain for every channel** — `combine/stack/quantization.rs:52,66` `[C]`
 
 ## 6. Noise is estimated from whole-frame spread, which includes signal
 
@@ -470,7 +403,6 @@ AGENTS.md promises photometry-grade error bars. These planes cannot give them.
   - It is the only curve without a vector or LUT path. `[C]`
 - [ ] `24.16` **Star detection allocates per frame** — `noise_floor_from`, `from_stars`, `filter_fwhm_outliers`, the dedup `HashMap`, the median buffer, and the kernel `Vec`
   - `labels.fill(0)` writes 96 MB per 24 MP frame. Clear only the previous runs. `[C]`
-- [ ] `24.17` **Survivor weights are gathered twice per pixel** — `combine/rejection/mod.rs:263-271` `[C]`
 - [ ] `24.18` **`GlobalMap` noise is averaged per pixel in the stamp loop** — `star_detection/centroid/mod.rs:490-494` `[P]`
 
 ## 25. Docs that state false facts
@@ -534,7 +466,6 @@ AGENTS.md promises photometry-grade error bars. These planes cannot give them.
 - [ ] `26.20` **Dead code**
   - `DMat3` `IndexMut` (test-only, `math/dmat3/mod.rs:141-146`)
   - the bounds check in `resolve_matches` (`registration/triangle/voting.rs:222-223`)
-  - `Rejection::None => values.len()` (`combine/rejection/mod.rs:220`)
   - `mask.fill(false)` (`star_detection/detector/stages/detect/mod.rs:83`)
   - `.filter(|d| d.area > 0)` (`:178`)
   - the 8-bit LibRaw branch (group 16)
@@ -739,38 +670,25 @@ pub(crate) struct FrameNoise {   // per channel, in image units
 
 ## S3. `Spread`: robust scale and its floor
 
-Closes 2.1 and 2.8. Consumers: the rejection driver (S4), `sigma_clip_iteration` in the background mesh, the frame statistics and the detection noise.
+Built in `math/statistics/spread.rs`. Consumers today: the rejection driver (S4) and the floor of `sigma_clip_iteration`. The frame statistics, the background mesh and the detection noise move onto it in phases 5 and 7.
 
-- `Spread { centre, sigma }` comes from a sorted window: the median, and 1.4826·MAD with the small-sample consistency factors of Croux & Rousseeuw (1992) for n ≤ 9.
-- The spread has a floor:
+- `Spread { centre, sigma }` of a sorted window: the median, and `b_n`·1.4826·MAD. The `b_n` for n ≤ 20 are measured again for the midpoint median (`internals/reference/mad_consistency.py`, 10⁷ trials each), because Croux & Rousseeuw's table does not fit it at even n (n = 6: 1.200 against 1.1895). Above 20, `n/(n − 0.8)` is within 0.1%.
+- `sigma_eff = max(sigma, background, resolution(centre))`, where `resolution` is `|centre|·ε`, or the smallest subnormal at 0. `sigma_eff` is never 0, so a band about a tied majority holds the tied samples alone when no background is known.
+- In the combine, `background` is the RMS over the pixel's samples of `gain²·max(noise, quantization σ)² / confidence`, from `SampleNoise`. The confidence is the warp's inverse variance factor, so a warped sample's floor is its own noise and not the source's. The quantization σ holds the floor where `DifferenceNoise` reads 0 on integer data.
 
-  `sigma_eff = max(sigma, floor)`, where `floor = max(window_background, |centre|·ε)`
+## S4. One rejection driver
 
-  - `window_background` is the RMS of `gain_i · background_i` over the frames in the window, from S2. It solves two problems that a per-pixel estimate cannot solve:
-    - On integer data with few distinct values, more than half the samples can tie, so MAD is 0 or one ADU. Today that stops rejection, and a cosmic ray in a bias stack survives.
-    - An outlier cannot raise the floor, because the frame noise is measured on the whole frame.
-  - `|centre|·ε` is one ULP at the centre. The samples near the centre are spaced by that ULP, so a smaller σ is not representable. The floor uses the centre, not the largest sample: one hot pixel at 1e6 would otherwise give a floor of 0.12 and turn off the rejection.
-  - When `sigma_eff` is 0, the window is constant, and nothing can be rejected. That happens only for synthetic data with no noise model.
-- The rule is scale-free: data × s + o gives the same decisions. The S9 harness proves this for every consumer.
+Built in `combine/rejection`. Open: `RejectionScale::CcdModel` needs `CcdNoise` (S2) and moves to phase 5.
 
-## S4. `SortedWindow` and one rejection driver
-
-Closes 1.1 to 1.9 and 24.17, and the dead arm `Rejection::None => values.len()` of 26.20. It replaces the five private loops.
-
-- Every pixel's samples are sorted together with their frame ids. For n ≤ 32, one sorting network sorts 8 pixels at once in the `F32x8` lanes, branch-free, with +∞ in the empty slots. This generalizes the `median9` network that `star_detection/median_filter/simd` already has. Above 32, a scalar sort runs.
-- The contract of every method is one function: from a sorted window `[lo, hi)`, give a narrower window. Sigma clip, winsorized, GESD and trim reject only from the ends by their nature. Linear fit is made to peel only from the ends, because in sorted order a middle value describes the shape of the distribution, not an outlier.
-- The driver owns the outer loop to a fixed point (with the `max_iterations` cap), the floor from S3, and the survivor rule:
-  - `StackConfig::min_survivors` (default 3, as in PixInsight) is validated `>= 1`.
-  - When a step proposes fewer than m survivors, the driver keeps the m samples nearest the current centre, with ties to the lower position. The result is deterministic, and a pixel never has zero survivors (1.8).
-- The median combine is the centre of the same sorted window. Median and rejection share one sort.
-- The window unit is `RejectionScale::Robust` (S3), the default. `RejectionScale::CcdModel` uses the per-pixel σ from `CcdNoise` (S2), as IRAF `imcombine reject=ccdclip` does. It needs the gain, and it removes the scale-estimation noise that small stacks suffer from.
+- Every pixel's samples are sorted once, on `u64` keys (the sample's order bits, then its gather position), into `SortedSamples`. Each method narrows a window of them. The `F32x8` sorting network was not built: the key sort is about 6% of the combine bench's samples, and the light preset is faster than before without it (see the phase 4 bench below).
+- The driver loops to a fixed point under each method's pass cap. When a pass proposes fewer than `min_survivors`, it keeps the `min_survivors` samples nearest that pass's centre, ties to the lower position, and stops. A consequence: with the default of 3, a stack of 3 frames rejects nothing.
 - The methods:
-  - **Sigma clip:** a band of ±kσ about the median. `no_outliers_possible` goes away (1.1, 1.2). The sorting network pays for its sort.
-  - **Winsorized:** follows PCL. The start is the robust σ. Each Huber step clamps at c = 1.5 and takes the location again from the mean of the clamped values. The outer loop runs until no sample changes (1.3, 1.4).
-  - **Linear fit:** the sorted values are regressed on expected normal order statistics (Blom scores, `Φ⁻¹((i − 3/8)/(n + 1/4))`). The slope is a σ in Gaussian units, and k means the same thing in every pass. Pass 0 goes away. The clean-data rejection rate stays at the Gaussian tail rate for every N (1.5). The scores are computed once per run, as one flat `Vec<f32>` with `starts`.
-  - **GESD:** automatic `max_outliers = ⌊0.3·n⌋`, capped by `n − min_survivors` (1.6).
-  - **Trim** (today's percentile): counts `⌊p·n/100⌋` in integers (1.7).
-- Every method only rejects. Winsorized gets survivor tracking like the others (1.9).
+  - **Sigma clip:** a band about the median in units of `sigma_eff`. The shortcut is gone.
+  - **Winsorized:** the PCL form. The start is the robust σ. Each step clamps the working copy at ±1.5σ, takes the mean as the centre and 1.13339 × the standard deviation as σ (the exact clamped-Gaussian factor; PCL rounds it to 1.134). The clamp is cumulative, as in Siril and PCL: clamping the samples themselves at each step is Huber's proposal 2, and it breaks down at 3 outliers in 10. Passes repeat until one rejects nothing.
+  - **Linear fit:** the first pass is the median clip, as a robust start. The fitted passes regress the kept samples on their Blom scores among all n samples (a censored Q-Q regression) and clip about the intercept in units of the slope. A first pass that rejects nothing does not end the method. Clean-data rejection at k = 3: 1.16%, 0.61% and 0.38% at 20, 50 and 200 samples, falling with n (Siril's form: 4.4%, 6.3%, 7.8%).
+  - **GESD:** the cap is `⌊0.3·n⌋`, limited by `n − min_survivors` and by `n − 2`, and the sample deviation is floored. The critical values are one table by live count.
+  - **Trim** (was percentile): exact integer counts.
+- Every method only rejects, and survivors are named by frame (`PixelSamples::frame_ids`), so quantization tracking works for winsorized, under any coverage, and per channel.
 
 ## S5. `CfaLattice`: one description of the colour lattice
 
@@ -944,30 +862,23 @@ Closes group 16 except 16.12, and 17.4 to 17.7 (17.1 to 17.3 close in phase 0). 
 
 Each phase builds and passes the verification chain on its own. A phase closes its items, and those items are then deleted from this file, together with the phase. Phase order follows the dependencies. Each phase adds its stage to the S9 harness.
 
-## Phase 4. Spread, sorted window and rejection driver (S3, S4, C1 gather)
+## Phase 4. Results
 
-0. Done first, because the floor needs it: the noise estimators of S10 (`math/noise`: `MrsNoise` calibrated to read white noise's own σ, `DifferenceNoise` per colour of a mosaic) and `FrameStats::noise`.
+The combine bench (30 frames, `combine::bench`, release, one machine, same session):
 
-1. Add `Spread` with its floor. Port `sigma_clip_iteration`.
-2. Add the sorting network over `F32x8` lanes and `SortedWindow`. Bench it against today's shortcut and sort before the methods move.
-3. Write the driver. Port sigma clip, winsorized, GESD, trim and linear fit, in that order. Add `RejectionScale::CcdModel`.
-4. Add `frame_ids` to the gather. Remove `frame_indices_are_stable`.
-- **Tests:**
-  - Review example 1.2, `{−0.1, −0.05, 0, 0, 0, 0, 0.05, 0.1, 10, 10}` at k = 2.5 with no frame noise. Pass 1: median 0, MAD 0.05, σ 0.0741, band ±0.185, so both 10s go. Pass 2: MAD (0 + 0.05)/2 = 0.025, σ 0.0371, band ±0.0927, so ±0.1 go. Pass 3: MAD 0, constant window, stop. Exactly 6 survivors.
-  - 20 integer bias frames with a measured background of 0.7 ADU and one hit at +50 ADU: the floor is 0.7 ADU, so the band is ±1.75 ADU. The survivors are exactly the samples within 1.75 ADU of the median, which a hand count on the fixed data gives. Today MAD is 0 on this data and the hit survives.
-  - A hot pixel at 1e6 among samples of σ 1e-3 is rejected (it cannot raise the floor).
-  - Review example 1.1 scaled by 2e-5 gives the same survivors (S9).
-  - Winsorized, 10 frames, 3 outliers at +10σ: all 3 rejected.
-  - Linear fit on fixed-seed Gaussian data at k = 3 for N = 20, 50 and 200: the rejected fraction stays in the 99.9% binomial interval around 0.27%. That interval is the tolerance, and it states why it exists.
-  - GESD, n = 20, 3 outliers at 10σ: all 3 rejected (cap 6). Trim of 42% from 150: 63 low samples go, not 62.
-  - No method leaves fewer than `min_survivors`.
-  - The network sorts every permutation of 8 values correctly (40320 cases), and it matches the scalar sort on random lanes with empty slots.
-- **Bench:** the combine bench before and after. Record both numbers here.
-- **Closes:** group 1, 2.1, 2.8, 5.6, 24.17, part of 26.20.
+| Preset | Before | After |
+|---|---|---|
+| light (sigma clip, noise weights) | 178 ms | 135 ms |
+| median | 63 ms | 77 ms |
+| winsorized | 98 ms | 115 ms |
+
+- The light preset is faster: the old path ran the shortcut screen and then sorted anyway on most pixels.
+- Winsorized is slower because it now loops to a fixed point (the old code rejected once), and each pass estimates again.
+- The median code did not change. Run alone, it is 87 ms before and 88 ms after. In the sequence after the light preset it measures slower, which is an order effect of the allocator, not of the median path.
 
 ## Phase 5. Lattice, noise estimation, mesh, weights and variance (S5, S10, C1)
 
-0. Add `FrameNoise` and `CcdNoise` (S2): the background term is the noise this phase measures.
+0. Add `FrameNoise` and `CcdNoise` (S2): the background term is the noise this phase measures. Then add `RejectionScale::CcdModel` to the driver (S4).
 1. Add `CfaLattice`, and move `SameColorMedian`, the cosmic-ray detectors and the flat normalization onto it.
 2. Add the two noise estimators and `FrameStats` background noise.
 3. Give `background_mesh` the lattice, the flags, bad-tile interpolation and the sliver merge. Remove `DarkBackground`. Move the cosmic-ray background onto the mesh.

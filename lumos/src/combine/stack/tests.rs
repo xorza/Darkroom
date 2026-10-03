@@ -8,7 +8,8 @@ use crate::frame_store::frame_spill::FrameSpill;
 use crate::combine::cache_config::CacheConfig;
 use crate::combine::config::{Normalization, SmallN};
 use crate::combine::normalization::ChannelNorm;
-use crate::combine::rejection::percentile_clip_config::PercentileClipConfig;
+use crate::combine::rejection::Rejection;
+use crate::combine::rejection::trim_config::TrimConfig;
 use crate::combine::stack::*;
 use crate::error::FrameDimensionMismatch;
 use crate::frame_store::spill_directory::SpillDirectory;
@@ -131,10 +132,15 @@ fn cfa_stack_quantization_uses_normalization_and_actual_rejection_survivors() {
     );
     let winsorized = run_stacking(&winsorized_cache, &StackConfig::winsorized(2.5))
         .expect("this cache is never cancelled");
+    #[expect(
+        clippy::imprecise_flops,
+        reason = "the expected value repeats the sum of squares `quantization` computes, so the comparison stays exact"
+    )]
+    let expected_winsorized_sigma = (0.01f32.powi(2) + 0.02f32.powi(2)).sqrt() / 2.0;
     assert_eq!(
         winsorized.image.metadata.quantization_sigma,
-        Some(0.02),
-        "nonlinear unequal-source combines must retain the conservative largest σ"
+        Some(expected_winsorized_sigma),
+        "winsorized clipping only rejects, so its survivors combine in quadrature like any mean's"
     );
 
     let rejection_cache = make_cfa_stack_cache(
@@ -1394,9 +1400,9 @@ fn coverage_keeps_real_values_from_sigma_rejection_at_sparse_edges() {
 
 #[test]
 fn rejection_emits_channel_shaped_survivor_weight_and_linear_variance() {
-    // Percentile clipping removes each channel's high value, hence a different source frame:
-    // R keeps f0/f1, G keeps f1/f2, B keeps f0/f2. Manual weights [1,2,3] normalize to
-    // [1/6,2/6,3/6].
+    // Trimming removes each channel's high value, hence a different source frame: R keeps f0/f1,
+    // G keeps f1/f2, B keeps f0/f2. Manual weights [1,2,3] normalize to [1/6,2/6,3/6]. Three frames
+    // leave two survivors, so the minimum comes down to 2.
     let dims = ImageDimensions::new((1, 1), 3);
     let frames = vec![
         LinearImage::from_pixels(dims, vec![1.0, 100.0, 1.0]).into(),
@@ -1404,10 +1410,11 @@ fn rejection_emits_channel_shaped_survivor_weight_and_linear_variance() {
         LinearImage::from_pixels(dims, vec![100.0, 3.0, 3.0]).into(),
     ];
     let config = StackConfig {
-        method: CombineMethod::Mean(Rejection::Percentile(PercentileClipConfig::new(0.0, 34.0))),
+        method: CombineMethod::Mean(Rejection::Trim(TrimConfig::new(0.0, 34.0))),
         weighting: Weighting::Manual(vec![1.0, 2.0, 3.0]),
         normalization: Normalization::None,
         small_n: SmallN::none(),
+        min_survivors: 2,
         ..Default::default()
     };
 
@@ -1602,11 +1609,12 @@ fn noise_weights_are_inverse_variances() {
 }
 
 /// Noise weights survive the rejection: pixel 0 holds 100, 90 and 999 across three frames, the
-/// first two with MADs of 1/16 and 4. Sigma clipping at 2σ — median 100, MAD 10, so a band of ±29.7
-/// — drops the 999, and the two left average under weights in the ratio (4·16)² = 4096 : 1:
-/// (4096·100 + 90)/4097. The median of the three, 100, is what the small-stack fallback would give,
-/// so `SmallN::none()` is what lets the clip run. The weights' roundings move the mean by under
-/// 1e-9; the result rounds once, half an ulp of 100.
+/// first two with MADs of 1/16 and 4. Sigma clipping at 2σ — median 100, MAD 10, σ = 10 · 1.4826 ·
+/// 1.4869, so a band of ±44.1 — drops the 999, and the two left average under weights in the
+/// ratio (4·16)² = 4096 : 1: (4096·100 + 90)/4097. The median of the three, 100, is what the
+/// small-stack fallback would give, so `SmallN::none()` and a minimum of 2 survivors are what let
+/// the clip run. The weights' roundings move the mean by under 1e-9; the result rounds once, half
+/// an ulp of 100.
 #[test]
 fn noise_weights_survive_rejection() {
     let ramp = |start: f32, spacing: f32| -> Vec<f32> {
@@ -1626,6 +1634,7 @@ fn noise_weights_survive_rejection() {
         method: CombineMethod::Mean(Rejection::sigma_clip(2.0)),
         weighting: Weighting::Noise,
         small_n: SmallN::none(),
+        min_survivors: 2,
         ..Default::default()
     };
     let result = run_stacking(&cache, &config).expect("this cache is never cancelled");

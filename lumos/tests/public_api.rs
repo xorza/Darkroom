@@ -10,15 +10,15 @@ use lumos::{
     FitsFloatScale, FitsHduProvenance, FitsHduSelector, FitsLoadOptions, FitsNullPolicy,
     FitsTransferProvenance, FlagCounts, FrameStoreError, GesdConfig, ImageDimensions,
     ImageMetadata, InterpolationMethod, InvalidConfigField, LinearFitClipConfig, LinearImage,
-    LoadContext, MasterRole, MatchIndices, NoiseModel, Normalization, Pedestal,
-    PercentileClipConfig, QualityMap, QualityPlanes, RansacConfig, RegistrationCatalog,
-    RegistrationConfig, RegistrationError, RegistrationMatchingConfig, Rejection, RunReport,
-    SampleDomain, ScaleOrigin, SigmaClipConfig, SipConfig, SmallN, StackConfig, StackConfigError,
-    StackError, StackProduct, StarDetectionBackgroundConfig, StarDetectionCandidateConfig,
-    StarDetectionConfig, StarDetectionDiagnostics, StarDetectionFilterConfig,
-    StarDetectionFwhmConfig, StarDetectionMeasurementConfig, StarDetectionQualityFilterDiagnostics,
-    StarDetector, StarMatch, TransferProvenance, Transform, TransformModel, TransformType,
-    TriangleConfig, WarpParams, WarpTransform, Weighting, WinsorizedClipConfig,
+    LoadContext, MasterRole, MatchIndices, NoiseModel, Normalization, Pedestal, QualityMap,
+    QualityPlanes, RansacConfig, RegistrationCatalog, RegistrationConfig, RegistrationError,
+    RegistrationMatchingConfig, Rejection, RunReport, SampleDomain, ScaleOrigin, SigmaClipConfig,
+    SipConfig, SmallN, StackConfig, StackConfigError, StackError, StackProduct,
+    StarDetectionBackgroundConfig, StarDetectionCandidateConfig, StarDetectionConfig,
+    StarDetectionDiagnostics, StarDetectionFilterConfig, StarDetectionFwhmConfig,
+    StarDetectionMeasurementConfig, StarDetectionQualityFilterDiagnostics, StarDetector, StarMatch,
+    TransferProvenance, Transform, TransformModel, TransformType, TriangleConfig, TrimConfig,
+    WarpParams, WarpTransform, Weighting, WinsorizedClipConfig,
 };
 
 #[test]
@@ -86,7 +86,7 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
         Rejection::SigmaClip(SigmaClipConfig::default()),
         Rejection::Winsorized(WinsorizedClipConfig::default()),
         Rejection::LinearFit(LinearFitClipConfig::default()),
-        Rejection::Percentile(PercentileClipConfig::default()),
+        Rejection::Trim(TrimConfig::default()),
         Rejection::Gesd(GesdConfig::default()),
     ];
 

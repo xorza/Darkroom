@@ -1,44 +1,75 @@
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
+use statrs::distribution::{Continuous, ContinuousCDF, Normal};
 
-use crate::combine::rejection::winsorized_clip_config::WinsorizedEstimate;
+use crate::combine::config::DEFAULT_MIN_SURVIVORS;
+use crate::combine::rejection::sigma_bounds::SigmaBounds;
 use crate::combine::rejection::*;
+use crate::internals::invariance::Affine;
 use crate::internals::prelude::*;
-use crate::math::statistics::mad_fast;
-use crate::math::sum::mean_f32;
 use std::f64::consts::TAU;
 
-fn scratch() -> ScratchBuffers {
-    ScratchBuffers::default()
-}
-
-/// The frames `reject` keeps of `values`, ascending, after checking that every survivor's value
-/// still sits beside its own frame's index — a reorder that moved values without their indices
-/// would pair the weights with the wrong frames.
-fn survivors(
+/// The gather positions `rejection` keeps of `values`, ascending.
+fn kept_with(
+    rejection: Rejection,
     values: &[f32],
-    reject: impl Fn(&mut [f32], &mut ScratchBuffers) -> usize,
+    background: f32,
+    min_survivors: usize,
 ) -> Vec<usize> {
-    let mut working = values.to_vec();
-    let mut scratch = scratch();
-    let remaining = reject(&mut working, &mut scratch);
-    for (value, &index) in working[..remaining].iter().zip(&scratch.indices) {
-        assert_eq!(*value, values[index], "a survivor lost its frame index");
-    }
-    let mut kept = scratch.indices[..remaining].to_vec();
+    let mut scratch = ScratchBuffers::default();
+    scratch.sorted.fill(values);
+    let window = rejection.surviving_window(
+        scratch.sorted.values(),
+        background,
+        min_survivors,
+        &mut scratch.methods,
+    );
+    let mut kept: Vec<usize> = scratch.sorted.positions()[window]
+        .iter()
+        .map(|&position| position as usize)
+        .collect();
     kept.sort_unstable();
     kept
 }
 
-/// Every frame of `frames` but those in `dropped`.
-fn all_but(frames: usize, dropped: &[usize]) -> Vec<usize> {
-    (0..frames).filter(|i| !dropped.contains(i)).collect()
+/// The positions kept with no measured background and the default survivor minimum.
+fn kept(rejection: Rejection, values: &[f32]) -> Vec<usize> {
+    kept_with(rejection, values, 0.0, DEFAULT_MIN_SURVIVORS)
+}
+
+/// Every position of `count` but those in `dropped`.
+fn all_but(count: usize, dropped: &[usize]) -> Vec<usize> {
+    (0..count).filter(|i| !dropped.contains(i)).collect()
+}
+
+/// `combine_mean` over `values` with `weights`, every sample its own frame, and no noise.
+fn combine(rejection: Rejection, values: &[f32], weights: &[f32]) -> CombinedSample {
+    let mut values = values.to_vec();
+    let frame_ids: Vec<u32> = (0..values.len() as u32).collect();
+    rejection.combine_mean(
+        PixelSamples {
+            values: &mut values,
+            weights,
+            frame_ids: &frame_ids,
+            noise_variances: None,
+            channel: 0,
+        },
+        DEFAULT_MIN_SURVIVORS,
+        &mut ScratchBuffers::default(),
+        true,
+    )
+}
+
+fn standard_normal(rng: &mut ChaCha8Rng) -> f32 {
+    let u1 = rng.random::<f64>().max(f64::MIN_POSITIVE);
+    let u2 = rng.random::<f64>();
+    ((-2.0 * u1.ln()).sqrt() * (TAU * u2).cos()) as f32
 }
 
 /// Every config's documented defaults, its constructors, and the `Rejection` shorthands.
 #[test]
 fn rejection_configs_default_and_construct_as_documented() {
-    let symmetric = |sigma| SigmaBounds::symmetric(sigma);
+    let symmetric = SigmaBounds::symmetric;
     assert_eq!(
         SigmaClipConfig::default(),
         SigmaClipConfig {
@@ -60,10 +91,10 @@ fn rejection_configs_default_and_construct_as_documented() {
         }
     );
     assert_eq!(
-        PercentileClipConfig::default(),
-        PercentileClipConfig {
-            low_percentile: 10.0,
-            high_percentile: 10.0
+        TrimConfig::default(),
+        TrimConfig {
+            low_percent: 10.0,
+            high_percent: 10.0
         }
     );
     assert_eq!(
@@ -73,14 +104,6 @@ fn rejection_configs_default_and_construct_as_documented() {
             max_outliers: None
         }
     );
-    assert_eq!(
-        SigmaClipConfig::new_asymmetric(2.0, 3.0, 5),
-        SigmaClipConfig {
-            sigma: SigmaBounds::asymmetric(2.0, 3.0),
-            max_iterations: 5
-        }
-    );
-
     for (shorthand, expected) in [
         (
             Rejection::default(),
@@ -103,8 +126,8 @@ fn rejection_configs_default_and_construct_as_documented() {
             Rejection::LinearFit(LinearFitClipConfig::new(2.5, 2.5, 3)),
         ),
         (
-            Rejection::percentile(15.0),
-            Rejection::Percentile(PercentileClipConfig::new(15.0, 15.0)),
+            Rejection::trim(15.0),
+            Rejection::Trim(TrimConfig::new(15.0, 15.0)),
         ),
         (Rejection::gesd(), Rejection::Gesd(GesdConfig::default())),
     ] {
@@ -112,73 +135,59 @@ fn rejection_configs_default_and_construct_as_documented() {
     }
 }
 
+/// The automatic GESD cap is `⌊0.3·n⌋`, in integers; an explicit one is taken as given.
 #[test]
-fn gesd_config_default() {
-    let config = GesdConfig::default();
-    let automatic_cases = [
-        (0, 0),
-        (3, 0),
-        (4, 1),
-        (8, 2),
-        (15, 2),
-        (24, 2),
-        (25, 6),
-        (39, 9),
-        (40, 10),
-        (44, 10),
-        (100, 10),
-    ];
-    for (sample_count, expected) in automatic_cases {
+fn the_gesd_cap_is_three_tenths_of_the_samples() {
+    for (count, expected) in [(0, 0), (3, 0), (4, 1), (10, 3), (20, 6), (25, 7), (100, 30)] {
         assert_eq!(
-            config.max_outliers_for_size(sample_count),
+            GesdConfig::default().max_outliers_for_size(count),
             expected,
-            "automatic limit for {sample_count} samples"
+            "{count}"
         );
     }
-
-    for (sample_count, configured) in [(15, 3), (44, 11), (100, 25)] {
-        assert_eq!(
-            GesdConfig::new(0.05, Some(configured)).max_outliers_for_size(sample_count),
-            configured,
-            "explicit limit for {sample_count} samples"
-        );
-    }
+    assert_eq!(
+        GesdConfig::new(0.05, Some(11)).max_outliers_for_size(44),
+        11
+    );
 }
 
-/// Which frames sigma clipping keeps, by hand. σ is 1.4826 × the MAD about the median.
+/// Which samples sigma clipping keeps, by hand. σ = 1.4826 · MAD · `b_n` about the median.
 ///
 /// - `ramp`, [1, 1.5, …, 4, 100]: median 2.75, deviations ranked .25 .25 .75 .75 1.25 1.25 1.75
-///   97.25, MAD 1 → σ 1.4826, so 2σ keeps up to 5.72 and drops the 100. The seven left: median
-///   2.5, MAD 1 again, nothing more. The same at 2.5σ, and with a high threshold of 2 under a low
-///   one of 4.
-/// - `low_kept`, [−5, 1, 1.5, …, 4.5, 50] at low 10σ, high 2σ: median 2.75, MAD 1.25 → σ 1.853;
-///   the high cut 6.46 drops the 50, the low cut −15.8 keeps the −5. Then median 2.5, MAD 1:
-///   both cuts keep everything left.
-/// - `three_high`, [1, 1.5, 2, 2.5, 3, 50, 80, 100]: median 2.75, MAD 1.5 → σ 2.224, 2σ keeps up
-///   to 7.2: the three high values go. The five left: median 2, MAD 0.5 → σ 0.741, 2σ keeps
-///   [0.52, 3.48], all of them.
-/// - `clean`, [1, 1.125, 1.25, 0.875, 1.0625] at 3σ: median 1.0625, MAD 0.0625 → 3σ 0.278 keeps
-///   all five.
-/// - `bright`, fourteen values 7990–8010 about 8000 and a 9000: the f64 screen sees the 9000 past
-///   2.5 trimmed standard deviations, and the clip drops it.
-/// - `two_levels`, 47 × 9, 47 × 11 and six values from 100 to 800: median 11, MAD 0 for the 11s
-///   and 2 for the 9s — rank 50 of the deviations is a 2 — so σ 2.97 keeps [3.6, 18.4].
+///   97.25, MAD 1, σ = 1.4826 · 1.1274 = 1.671. At 2σ the band reaches 6.09 and drops the 100.
+///   The seven left: median 2.5, MAD 1, σ = 1.4826 · 1.1378 = 1.687, and the band holds all. The
+///   same at 2.5σ, and with low 4σ, high 2σ.
+/// - `low_kept`, [−5, 1, 1.5, …, 4.5, 50] at low 10σ, high 2σ: median 2.75, MAD 1.25, σ 2.031;
+///   the high cut 6.81 drops the 50, the low cut −17.6 keeps the −5. Then median 2.5, MAD 1, σ
+///   1.632, and both cuts keep the rest.
+/// - `three_high`, [1, 1.5, 2, 2.5, 3, 50, 80, 100] at 2σ: median 2.75, MAD 1.5, σ 2.507, so the
+///   band reaches 7.76: the three high values go. The five left: median 2, MAD 0.5, σ 0.902,
+///   band [0.20, 3.80], all kept.
+/// - `clean`, [1, 1.125, 1.25, 0.875, 1.0625] at 3σ: median 1.0625, MAD 0.0625, σ 0.1128, band
+///   [0.724, 1.401]: all kept.
+/// - `bright`, fourteen values 7990 … 8010 about 8000 and a 9000 at 2.5σ: median 8000, MAD 5, σ
+///   7.83, band ±19.6: the 9000 goes.
+/// - `two_levels`, 47 × 9, 47 × 11 and six values from 100 to 800 at 2.5σ: median 11, MAD 2 (rank
+///   50 of the deviations is a 2), σ 2.99, band [3.53, 18.47]: the six go. Then median 10, MAD 1,
+///   σ 1.50, band [6.26, 13.74]: the rest stay.
+/// - `hot`, nineteen samples of σ about 0.001 at 0.5 and a hot pixel at 10⁶: the resolution floor
+///   is taken at the centre, 0.5·ε = 6e-8, not at the largest sample, where it would be 0.12 and
+///   hold the cluster's own spread under it; the pixel goes.
+/// - Three samples are no more than the survivor minimum: nothing goes.
 #[test]
-fn sigma_clip_keeps_exactly_the_frames_its_bands_hold() {
+fn sigma_clip_keeps_exactly_the_samples_its_bands_hold() {
     let ramp = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
-    let low_kept = [-5.0, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 50.0];
-    let three_high = [1.0, 1.5, 2.0, 2.5, 3.0, 50.0, 80.0, 100.0];
-    let clean = [1.0, 1.125, 1.25, 0.875, 1.0625];
-    let bright = [
-        7990.0, 8000.0, 8010.0, 7995.0, 8005.0, 8000.0, 7990.0, 8010.0, 8000.0, 7995.0, 8005.0,
-        8000.0, 7990.0, 8010.0, 9000.0,
-    ];
     let two_levels: Vec<f32> = [9.0; 47]
         .into_iter()
         .chain([11.0; 47])
         .chain([100.0, 200.0, 500.0, 600.0, 700.0, 800.0])
         .collect();
-    for (name, values, config, kept) in [
+    let mut rng = ChaCha8Rng::seed_from_u64(3);
+    let mut hot: Vec<f32> = (0..19)
+        .map(|_| 0.5 + 1e-3 * standard_normal(&mut rng))
+        .collect();
+    hot.push(1e6);
+    for (name, values, config, kept_positions) in [
         (
             "ramp 2σ",
             &ramp[..],
@@ -199,25 +208,28 @@ fn sigma_clip_keeps_exactly_the_frames_its_bands_hold() {
         ),
         (
             "low kept",
-            &low_kept,
+            &[-5.0, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 50.0],
             SigmaClipConfig::new_asymmetric(10.0, 2.0, 5),
             all_but(10, &[9]),
         ),
         (
             "three high",
-            &three_high,
+            &[1.0, 1.5, 2.0, 2.5, 3.0, 50.0, 80.0, 100.0],
             SigmaClipConfig::new(2.0, 3),
             all_but(8, &[5, 6, 7]),
         ),
         (
             "clean",
-            &clean,
+            &[1.0, 1.125, 1.25, 0.875, 1.0625],
             SigmaClipConfig::new(3.0, 3),
             all_but(5, &[]),
         ),
         (
             "bright",
-            &bright,
+            &[
+                7990.0, 8000.0, 8010.0, 7995.0, 8005.0, 8000.0, 7990.0, 8010.0, 8000.0, 7995.0,
+                8005.0, 8000.0, 7990.0, 8010.0, 9000.0,
+            ],
             SigmaClipConfig::new(2.5, 3),
             all_but(15, &[14]),
         ),
@@ -225,106 +237,148 @@ fn sigma_clip_keeps_exactly_the_frames_its_bands_hold() {
             "two levels",
             &two_levels,
             SigmaClipConfig::new(2.5, 3),
-            all_but(94, &[]),
+            all_but(100, &[94, 95, 96, 97, 98, 99]),
         ),
         (
-            "two samples",
-            &[1.0, 2.0],
+            "hot",
+            &hot,
+            SigmaClipConfig::new(2.5, 3),
+            all_but(20, &[19]),
+        ),
+        (
+            "three samples",
+            &[1.0, 2.0, 100.0],
             SigmaClipConfig::default(),
-            all_but(2, &[]),
+            all_but(3, &[]),
         ),
     ] {
         assert_eq!(
-            survivors(values, |values, scratch| config.reject(values, scratch)),
-            kept,
+            kept(Rejection::SigmaClip(config), values),
+            kept_positions,
             "{name}"
         );
     }
+    // The asymmetric form at equal thresholds is the symmetric one.
+    assert_eq!(
+        kept(Rejection::sigma_clip_asymmetric(2.5, 2.5), &ramp),
+        kept(Rejection::sigma_clip(2.5), &ramp)
+    );
 }
 
-/// The asymmetric form at equal thresholds is the symmetric one: same survivors, same values.
+/// Review example 1.2, where the old shortcut's non-robust σ let two outliers hide each other:
+/// {−0.1, −0.05, 0, 0, 0, 0, 0.05, 0.1, 10, 10} at 2.5σ.
+///
+/// Pass 1: median 0, deviations ranked 0 0 0 0 .05 .05 .1 .1 10 10, MAD 0.05, σ = 0.05 · 1.4826 ·
+/// 1.0958 = 0.0812, band ±0.203: both 10s go. Pass 2: MAD (0 + 0.05)/2 = 0.025, σ = 0.025 · 1.4826
+/// · 1.1274 = 0.0418, band ±0.1045, which holds the ±0.1: nothing more goes. Without the
+/// small-sample factor the band would be ±0.0927 and the ±0.1 would go too.
 #[test]
-fn sigma_clip_symmetric_equals_asymmetric_same_thresholds() {
-    let values = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
-    let (mut symmetric, mut asymmetric) = (values, values);
-    let (mut first, mut second) = (scratch(), scratch());
-    let kept = SigmaClipConfig::new(2.5, 3).reject(&mut symmetric, &mut first);
-    let also_kept =
-        SigmaClipConfig::new_asymmetric(2.5, 2.5, 3).reject(&mut asymmetric, &mut second);
-    assert_eq!(kept, also_kept);
-    assert_eq!(symmetric[..kept], asymmetric[..kept]);
-    assert_eq!(first.indices[..kept], second.indices[..kept]);
+fn two_outliers_do_not_hide_each_other() {
+    let values = [-0.1, -0.05, 0.0, 0.0, 0.0, 0.0, 0.05, 0.1, 10.0, 10.0];
+    assert_eq!(
+        kept(Rejection::sigma_clip(2.5), &values),
+        all_but(10, &[8, 9])
+    );
 }
 
-/// `sorted_mad` is the upper-middle order statistic of the absolute deviations, as `mad_fast`
-/// is: odd and even lengths, a centre inside and outside the data, duplicates, a heavy outlier.
+/// Integer bias frames with a measured background of 0.7 ADU, scaled by 2⁻¹⁶ as a 16-bit decode
+/// leaves them: more than half the samples tie at 1000, so the MAD is 0, and the old rejection
+/// stopped there and kept the hit. The floor is the background, so the band is ±2.5 · 0.7 = ±1.75
+/// ADU about 1000: it keeps the 999s, 1000s and 1001s, and drops the 1002 and the hit at 1050. The
+/// next pass has the same median and floor and drops nothing more.
 #[test]
-fn sorted_mad_matches_mad_fast() {
-    let cases: &[&[f32]] = &[
-        &[1.0, 2.0, 3.0, 4.0, 100.0],
-        &[1.0, 2.0, 3.0, 4.0],
-        &[-5.0, 0.0, 0.0, 0.0, 1.0, 2.0],
-        &[10.0, 10.0, 10.0],
-        &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+fn the_background_floors_a_window_of_tied_integers() {
+    let adu = [
+        1000.0, 1000.0, 1001.0, 1000.0, 999.0, 1000.0, 1000.0, 1001.0, 1000.0, 1000.0, 999.0,
+        1000.0, 1000.0, 1002.0, 1001.0, 1000.0, 1000.0, 999.0, 1000.0, 1050.0,
     ];
-    let mut buf = vec![];
-    for sorted in cases {
-        let mid = sorted[sorted.len() / 2];
-        for &center in &[mid, sorted[0], mid + 0.05] {
-            assert_eq!(
-                sorted_mad(sorted, center),
-                mad_fast(sorted, center, &mut buf),
-                "sorted_mad({sorted:?}, {center})"
+    let scale = 1.0 / 65_536.0;
+    let values: Vec<f32> = adu.iter().map(|&value: &f32| value * scale).collect();
+    assert_eq!(
+        kept_with(
+            Rejection::sigma_clip(2.5),
+            &values,
+            0.7 * scale,
+            DEFAULT_MIN_SURVIVORS
+        ),
+        all_but(20, &[13, 19])
+    );
+    // With no background the band about the tied 1000s holds them alone.
+    assert_eq!(
+        kept(Rejection::sigma_clip(2.5), &values),
+        (0..20).filter(|&i| adu[i] == 1000.0).collect::<Vec<_>>()
+    );
+}
+
+/// Review example 1.1, twenty samples of noise 10⁻⁴ about 0.25 and a hit at 0.5, decides the same
+/// under every exact affine map of the data, for every method, with the background mapped with
+/// the data. The old sigma-clip shortcut kept the hit at unit scale and dropped it in ADU.
+#[test]
+fn every_method_decides_the_same_at_every_scale() {
+    let mut rng = TestRng::new(11);
+    let mut values: Vec<f32> = (0..20)
+        .map(|_| Affine::quantize(0.25 + 1e-4 * rng.next_gaussian_f32()))
+        .collect();
+    values[7] = Affine::quantize(0.5);
+    for rejection in [
+        Rejection::sigma_clip(2.5),
+        Rejection::winsorized(2.5),
+        Rejection::linear_fit(3.0),
+        Rejection::gesd(),
+        Rejection::trim(10.0),
+    ] {
+        for background in [0.0, 1e-4] {
+            let kept_under = |case: Affine| {
+                kept_with(
+                    rejection,
+                    &case.apply_all(&values),
+                    background * case.scale,
+                    DEFAULT_MIN_SURVIVORS,
+                )
+            };
+            assert!(
+                !kept_under(Affine::IDENTITY).contains(&7),
+                "{rejection:?} kept the hit"
             );
+            Affine::assert_equivariant(kept_under, |kept, _| kept.clone());
         }
     }
 }
 
-/// The rejection centre and its MAD are the median of an even count, not its upper-middle element.
-/// [1, 3, 7, 9]: centre (3 + 7)/2 = 5; deviations [4, 2, 2, 4] ranked [2, 2, 4, 4] → (2 + 4)/2 = 3.
-/// [1, 3, 7]: centre 3; deviations [2, 0, 4] ranked [0, 2, 4] → 2.
-#[test]
-fn rejection_centre_and_mad_are_medians_at_both_parities() {
-    assert_eq!(sorted_median(&[1.0, 3.0, 7.0, 9.0]), 5.0);
-    assert_eq!(sorted_mad(&[1.0, 3.0, 7.0, 9.0], 5.0), 3.0);
-    assert_eq!(sorted_median(&[1.0, 3.0, 7.0]), 3.0);
-    assert_eq!(sorted_mad(&[1.0, 3.0, 7.0], 3.0), 2.0);
-}
-
-/// Which frames linear-fit clipping keeps, by hand. Its first pass is a median ± k·σ clip; each
-/// pass after it fits a line through the sorted survivors and rejects by residual, σ being the
-/// mean absolute residual.
+/// Which samples linear-fit clipping keeps. Its first pass is the sigma clip; the passes after it
+/// fit the kept samples against their normal scores among all of the pixel's samples.
 ///
-/// - `off_line`, [1, 2, 3, 4, 100, 6] at 2σ: median 3.5, MAD 2 → σ 2.97, so the seed pass drops
-///   the 100. The line through [1, 2, 3, 4, 6] is `3.2 + 1.2·(x − 2)`, with residuals 0.2, 0,
-///   −0.2, −0.4, 0.4, all within 2 × their mean 0.24 — none goes.
-/// - `hidden`, ramp 10 … 90 and a 5 at 2σ: the seed (median 45, σ 37) keeps all ten; the line
-///   through the sorted ten has a mean |residual| of 0.92, and only the 5, 3.3 off it, passes 1.84.
-/// - `top`, [1 … 7, 100]: the seed (median 4.5, MAD 2 → σ 2.97) drops the 100, and [1 … 7] is a
-///   line.
-/// - `middle`, the same with the 100 a 50 among them: the seed drops it the same way.
-/// - `one_pass`, [10, 10.5, 11, 10.2, 10.8, 10.3, 10.7, 50] with one pass at 3σ: the seed alone,
-///   median 10.6, MAD 0.35 → σ 0.519, drops the 50.
-/// - `constant` has no spread, `trend` [1, 3, …, 15] is a line, and two frames are too few to fit:
-///   nothing goes.
-/// - `long`, 100 frames on the line `y = x` with frame 50 at 1000: the seed (median 50, σ 37)
-///   drops it, and the rest, one step off a line at the gap, stays within 3σ of its fit.
+/// - `off_line`, [1, 2, 3, 4, 100, 6] at 2σ: median 3.5, MAD 1.5, σ = 1.5 · 1.4826 · 1.1895 =
+///   2.65, so the first pass drops the 100; the five left lie close to their normal scores.
+/// - `top`, [1 … 7, 100], and `middle`, the same with the 100 a 50 at position 3: median 4.5, MAD
+///   2, σ 3.34; the first pass drops the outlier.
+/// - `one_pass`, [10, 10.5, 11, 10.2, 10.8, 10.3, 10.7, 50] with one fitted pass at 3σ: median
+///   10.6, MAD 0.35, σ 0.585: the first pass drops the 50.
+/// - `constant` has no spread; `trend` [1, 3, …, 15], evenly spaced, and `ramp` 10 … 90 with a 5
+///   sit within 2σ of their fitted lines at both ends; three samples are no more than the
+///   minimum: nothing goes.
+/// - `long`, 100 samples on `y = x` with sample 50 at 1000: the first pass drops it, and the rest,
+///   evenly spaced, stay within 3σ of their fit.
+/// - `fit_only`, [−1, −0.5, −0.5, −0.5, 0, 0.5, 0.5, 0.5, 1, 1.5, 5.25] at 3σ: the median clip
+///   (median 0.5, MAD 1, σ 1.601, band up to 5.30) keeps the 5.25, and so does sigma clipping to
+///   its end. The first fit over all eleven has the scores summing to 0, so the centre is the mean
+///   0.6136, and the slope 1.542 puts the band's top at 5.240: the 5.25 goes. The fit over the ten
+///   left, centre 0.296 and slope 0.918, keeps [−2.46, 3.05].
 #[test]
-fn linear_fit_keeps_exactly_the_frames_on_its_line() {
+fn linear_fit_keeps_exactly_the_samples_near_its_line() {
+    let fit_only = [-1.0, -0.5, -0.5, -0.5, 0.0, 0.5, 0.5, 0.5, 1.0, 1.5, 5.25];
+    assert_eq!(
+        kept(Rejection::sigma_clip(3.0), &fit_only),
+        all_but(11, &[])
+    );
     let mut long: Vec<f32> = (0..100).map(|i| i as f32).collect();
     long[50] = 1000.0;
-    for (name, values, config, kept) in [
+    for (name, values, config, kept_positions) in [
         (
             "off line",
             &[1.0, 2.0, 3.0, 4.0, 100.0, 6.0][..],
             LinearFitClipConfig::new(2.0, 2.0, 3),
             all_but(6, &[4]),
-        ),
-        (
-            "hidden",
-            &[10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 5.0],
-            LinearFitClipConfig::new(2.0, 2.0, 3),
-            all_but(10, &[9]),
         ),
         (
             "top",
@@ -357,10 +411,16 @@ fn linear_fit_keeps_exactly_the_frames_on_its_line() {
             all_but(8, &[]),
         ),
         (
-            "two samples",
-            &[1.0, 2.0],
+            "ramp",
+            &[10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 5.0],
+            LinearFitClipConfig::new(2.0, 2.0, 3),
+            all_but(10, &[]),
+        ),
+        (
+            "three samples",
+            &[1.0, 2.0, 100.0],
             LinearFitClipConfig::default(),
-            all_but(2, &[]),
+            all_but(3, &[]),
         ),
         (
             "long",
@@ -368,84 +428,107 @@ fn linear_fit_keeps_exactly_the_frames_on_its_line() {
             LinearFitClipConfig::new(3.0, 3.0, 3),
             all_but(100, &[50]),
         ),
+        (
+            "fit only",
+            &fit_only,
+            LinearFitClipConfig::new(3.0, 3.0, 3),
+            all_but(11, &[10]),
+        ),
     ] {
         assert_eq!(
-            survivors(values, |values, scratch| config.reject(values, scratch)),
-            kept,
+            kept(Rejection::LinearFit(config), values),
+            kept_positions,
             "{name}"
         );
     }
 }
 
-/// A long stack keeps its line: 4001 frames on the ramp `1000 + i/4` and one 3 above where the
-/// ramp would continue. The seed pass keeps it (median 1500, σ ≈ 741, 3σ far past it). The fit's
-/// σ is the mean |residual|, about 3/4002 from the outlier plus the tilt it gives the line —
-/// `(x − x̄)·3/Sxx` with `Sxx = n(n² − 1)/12 ≈ 5.3e9`, under 1.2e-6 per position, 2.3e-3 at the
-/// ends — so 3σ is a few thousandths: every ramp frame stays, and the outlier, 3 off, goes.
+/// The fit is exact on samples that lie on their normal scores: `y = 2 + 0.5·z` gives centre 2
+/// and σ 0.5, up to rounding. The samples are f32, off by up to half an ulp near 2.6, 1.2e-7; the
+/// fit carries that into the centre at most once, and into the slope at most `Σ|z − z̄|/Σ(z − z̄)²`
+/// = 0.94 times. Rounding the results to f32 adds half an ulp at 2 (1.2e-7) and at 0.5 (3e-8).
 #[test]
-fn linear_fit_keeps_a_long_ramp_and_drops_its_outlier() {
-    let mut values: Vec<f32> = (0..4001).map(|i| 1000.0 + i as f32 / 4.0).collect();
-    values.push(1000.0 + 4001.0 / 4.0 + 3.0);
-    assert_eq!(
-        survivors(&values, |values, scratch| {
-            LinearFitClipConfig::new(3.0, 3.0, 3).reject(values, scratch)
-        }),
-        all_but(4002, &[4001])
-    );
+fn the_fit_reads_the_centre_and_sigma_off_the_normal_scores() {
+    let mut scores = normal_scores::NormalScores::default();
+    let z = scores.of_count(9).to_vec();
+    let values: Vec<f32> = z.iter().map(|&z| (2.0 + 0.5 * z) as f32).collect();
+    let pass = Pass {
+        sorted: &values,
+        window: 0..9,
+        index: 1,
+        background: 0.0,
+        min_survivors: DEFAULT_MIN_SURVIVORS,
+    };
+    let fit = LinearFitClipConfig::fit(&pass, &mut scores);
+    assert!((fit.centre - 2.0).abs() <= 2.4e-7, "{fit:?}");
+    assert!((fit.sigma - 0.5).abs() <= 1.5e-7, "{fit:?}");
 }
 
-/// On [1, 3, 5, 7, 50, 11, 13, 15] at 2σ the fit rejects a frame the median cannot see.
+/// On clean Gaussian samples at 3σ the rejected share falls with the count, toward the Gaussian
+/// tail share of 0.27%; Siril's rank-based fit grows with it instead (4.4%, 6.3% and 7.8% at 20,
+/// 50 and 200 samples, review 1.5).
 ///
-/// Both first passes are the same median clip: median 9, deviations ranked 2 2 4 4 6 6 8 41, MAD
-/// 5 → σ 7.41, which drops the 50 alone. Sigma clipping then re-centres on [1, 3, 5, 7, 11, 13,
-/// 15] — median 7, MAD 4 → 2σ = 11.9 — and keeps all seven. The line through them is
-/// `55/7 + (68/28)·(x − 3)`, with residuals 0.43, 0, −0.43, −0.86, 0.71, 0.29, −0.14 and a mean
-/// |residual| of 0.41, so 2σ = 0.82 rejects the 7.
+/// The expected shares come from the SciPy reference `internals/reference/linear_fit_rate.py` over
+/// 10⁶, 4·10⁵ and 10⁵ trials: 1.1638%, 0.6147% and 0.3769%, with per-trial standard
+/// deviations of the rejected count of 0.615, 0.681 and 0.967. The tolerance is four standard
+/// errors of the difference between that reference and this run.
 #[test]
-fn linear_fit_rejects_what_sigma_clip_keeps() {
-    let values = [1.0, 3.0, 5.0, 7.0, 50.0, 11.0, 13.0, 15.0];
-    assert_eq!(
-        survivors(&values, |values, scratch| {
-            SigmaClipConfig::new(2.0, 3).reject(values, scratch)
-        }),
-        all_but(8, &[4])
-    );
-    assert_eq!(
-        survivors(&values, |values, scratch| {
-            LinearFitClipConfig::new(2.0, 2.0, 3).reject(values, scratch)
-        }),
-        all_but(8, &[3, 4])
-    );
-    // One pass of each is the same median clip.
-    assert_eq!(
-        survivors(&values, |values, scratch| {
-            SigmaClipConfig::new(2.0, 1).reject(values, scratch)
-        }),
-        all_but(8, &[4])
-    );
-    assert_eq!(
-        survivors(&values, |values, scratch| {
-            LinearFitClipConfig::new(2.0, 2.0, 1).reject(values, scratch)
-        }),
-        all_but(8, &[4])
-    );
+fn linear_fit_rejects_clean_data_at_a_rate_that_falls_with_the_count() {
+    let mut rng = ChaCha8Rng::seed_from_u64(0x51ed_270b_9a4c_33e1);
+    let mut scratch = ScratchBuffers::default();
+    let mut previous = f64::INFINITY;
+    for (count, trials, reference, per_trial_sd, reference_trials) in [
+        (20usize, 5000usize, 0.011_638, 0.615, 1_000_000.0),
+        (50, 2000, 0.006_147, 0.681, 400_000.0),
+        (200, 500, 0.003_769, 0.967, 100_000.0),
+    ] {
+        let mut rejected = 0usize;
+        let mut values = vec![0.0f32; count];
+        for _ in 0..trials {
+            for value in &mut values {
+                *value = standard_normal(&mut rng);
+            }
+            scratch.sorted.fill(&values);
+            let window = Rejection::linear_fit(3.0).surviving_window(
+                scratch.sorted.values(),
+                0.0,
+                DEFAULT_MIN_SURVIVORS,
+                &mut scratch.methods,
+            );
+            rejected += count - window.len();
+        }
+        let share = rejected as f64 / (count * trials) as f64;
+        let count_f = count as f64;
+        let standard_error =
+            (per_trial_sd / count_f) * (1.0 / trials as f64 + 1.0 / reference_trials).sqrt();
+        assert!(
+            (share - reference).abs() <= 4.0 * standard_error,
+            "{count} samples: rejected {share}, reference {reference} ± {standard_error}"
+        );
+        assert!(
+            share < previous,
+            "{count} samples: {share} after {previous}"
+        );
+        previous = share;
+    }
 }
 
-/// Which frames winsorized clipping keeps, by hand. Its centre and σ come from the Huber
-/// estimate (`robust_estimate`), and the clip is k·σ about that centre.
+/// Which samples winsorized clipping keeps. The estimate starts from the median and the MAD σ,
+/// clamps at ±1.5σ, and takes the mean and the corrected standard deviation of the clamped copy.
 ///
-/// - `ramp`, [1, 1.5, …, 4, 100] at 2σ: the estimate settles at centre 2.75, σ 1.53, so the band
-///   [−0.3, 5.8] drops the 100.
-/// - `high`, [1, 1.1, 1.2, 0.9, 1, 50] at low 3σ, high 2σ: centre 1.05, σ 0.18; the 50 goes.
-/// - `clean`, [2, 2.125, 2.25, 1.875, 2.0625] at 3σ: centre 2.0625, σ = √(0.078125/4) × 1.134 =
-///   0.158, and the widest deviation 0.1875 is inside 3σ: nothing goes.
-/// - `mild`, [1, 1.1, 1.2, 0.9, 1, 1.1, 0.8, 1.3, 2]: centre 1.1, σ 0.224 (the fixed point
-///   `winsorized_converges_to_its_huber_fixed_point` derives), so the 2.0 is 4.0σ out — kept at
-///   10σ, gone at 2σ, where the next widest, 0.3 off, is 1.3σ.
+/// - `ramp`, [1, 1.5, …, 4, 100] at 2σ, and `high`, [1, 1.1, 1.2, 0.9, 1, 50] at low 3σ, high
+///   2σ: the clamp pulls the outlier in to 1.5σ, and the band about the estimate drops it.
+/// - `clean`, [2, 2.125, 2.25, 1.875, 2.0625] at 3σ: all kept.
+/// - `mild`, [1, 1.1, 1.2, 0.9, 1, 1.1, 0.8, 1.3, 2]: the 2.0 is kept at 10σ and dropped at 2σ.
+/// - `three_of_ten`, seven samples from −1.5 to 1 and three at 10 (σ of the seven 0.85, so the
+///   three sit near 12σ) at 3σ: median 0.25, MAD 1, σ 1.62; the first clamp holds the 10s at
+///   2.69, and the clamped copy, never released, keeps them there. The band drops all three. The
+///   old start, 1.134 × the plain standard deviation, put all three inside the clamp (review 1.3).
+/// - Three samples are no more than the minimum.
 #[test]
-fn winsorized_keeps_exactly_the_frames_its_band_holds() {
+fn winsorized_keeps_exactly_the_samples_its_band_holds() {
     let mild = [1.0, 1.1, 1.2, 0.9, 1.0, 1.1, 0.8, 1.3, 2.0];
-    for (name, values, config, kept) in [
+    for (name, values, config, kept_positions) in [
         (
             "ramp",
             &[1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0][..],
@@ -477,158 +560,141 @@ fn winsorized_keeps_exactly_the_frames_its_band_holds() {
             all_but(9, &[8]),
         ),
         (
-            "two samples",
-            &[1.0, 2.0],
+            "three of ten",
+            &[-1.5, -1.0, -0.5, 0.0, 0.0, 0.5, 1.0, 10.0, 10.0, 10.0],
+            WinsorizedClipConfig::new(3.0),
+            all_but(10, &[7, 8, 9]),
+        ),
+        (
+            "three samples",
+            &[1.0, 2.0, 100.0],
             WinsorizedClipConfig::default(),
-            all_but(2, &[]),
+            all_but(3, &[]),
         ),
     ] {
         assert_eq!(
-            survivors(values, |values, scratch| config.reject(values, scratch)),
-            kept,
+            kept(Rejection::Winsorized(config), values),
+            kept_positions,
             "{name}"
         );
     }
 }
 
-/// The spread is the bias-corrected standard deviation about the median, not the MAD. Twenty
-/// values 10 + i/8 have median 11.1875 and deviations ±1/16, ±3/16, …, ±19/16, whose squares sum
-/// to 2·1330/256 = 10.390625: over 19 that is 0.546875, so σ = √0.546875 × 1.134 = 0.83860. No
-/// value is past 1.5σ = 1.26, so nothing is clamped and the first estimate stands. The MAD would
-/// give 1.4826 × 10/16 = 0.927 instead, and dropping the 1.134 would give 0.7395. Every step up to
-/// the square root is exact in f32; the root, the product and 1.134's own rounding each cost at
-/// most half an ulp near 0.84, 6e-8.
-///
-/// On 1 … 10 the same holds about 5.5: (2·(0.5² + 1.5² + … + 4.5²))/9 = 82.5/9 and σ = 3.43336,
-/// within the same three roundings near 3.4, 2.4e-7 each.
+/// The estimate by hand on [9.8, 9.9, 10, 10, 10.1, 10.1, 10.2, 10.3, 50]: median 10.1, MAD 0.1,
+/// σ₀ = 0.1 · 1.4826 · 1.1011 = 0.16325. The clamp to 10.1 ± 0.24487 moves the 9.8 up to 9.85513
+/// and the 50 down to 10.34487, symmetric about 10.1, so the mean is 90.8/9 = 10.08889 and σ₁ is
+/// 1.133393 × the standard deviation of the clamped nine, 0.191681. The next clamp, 10.08889 ±
+/// 0.28752, holds every clamped value, so nothing moves and σ is converged. The samples are f32
+/// roundings of decimals, off by up to 5e-7; that moves σ by less than 1e-5, the tolerance.
 #[test]
-fn winsorized_sigma_is_the_corrected_standard_deviation() {
-    let eighths: Vec<f32> = (0..20).map(|i| 10.0 + i as f32 / 8.0).collect();
-    let WinsorizedEstimate { center, sigma } =
-        WinsorizedClipConfig::robust_estimate(&eighths, &mut vec![]);
-    assert_eq!(center, 11.1875);
-    assert_close!(sigma, 0.546_875f64.sqrt() * 1.134, 1.8e-7);
-
-    let ten: Vec<f32> = (1..=10).map(|i| i as f32).collect();
-    let WinsorizedEstimate { center, sigma } =
-        WinsorizedClipConfig::robust_estimate(&ten, &mut vec![]);
-    assert_eq!(center, 5.5);
-    assert_close!(sigma, (82.5f64 / 9.0).sqrt() * 1.134, 7.2e-7);
-}
-
-/// With an outlier, the clamp iterates to Huber's fixed point. On [10, 10.1, 10.2, 9.9, 10,
-/// 10.1, 9.8, 10.3, 50] the median 10.1 stays put, the eight cluster values sit inside 1.5σ with
-/// squared deviations summing to S = 0.2, and the 50 clamps to 10.1 + 1.5σ. So the fixed point
-/// solves σ² = 1.134²·(S + 2.25σ²)/8: σ² = 0.0321489/0.638322, σ = 0.224421. The iteration stops
-/// once a step moves σ by at most 0.05%; it contracts by r = 1.134²·2.25/8 = 0.3617, so it stops
-/// within 0.0005σ·r/(1 − r) = 6.4e-5 of the fixed point.
-#[test]
-fn winsorized_converges_to_its_huber_fixed_point() {
-    let values = [10.0, 10.1, 10.2, 9.9, 10.0, 10.1, 9.8, 10.3, 50.0];
-    let WinsorizedEstimate { center, sigma } =
-        WinsorizedClipConfig::robust_estimate(&values, &mut vec![]);
-    assert_eq!(center, 10.1);
-    let fixed_point = (1.134f64.powi(2) * 0.2 / 8.0 / (1.0 - 1.134f64.powi(2) * 2.25 / 8.0)).sqrt();
-    assert_close!(sigma, fixed_point, 6.4e-5);
-}
-
-/// Percentile clipping drops `floor(p·n)` from each end of the sorted values. [5, 1, 3, 2, 4] at
-/// 20% drops one each side, keeping 2, 3, 4 — frames 3, 2, 4 in that order. 100 values in reverse
-/// order at 10% keep 10 … 89, which came from frames 89 down to 10. Two frames are too few.
-#[test]
-fn percentile_keeps_the_middle_of_the_sorted_frames() {
-    let mut values = [5.0, 1.0, 3.0, 2.0, 4.0];
-    let mut s = scratch();
-    let remaining = PercentileClipConfig::new(20.0, 20.0).reject(&mut values, &mut s);
-    assert_eq!(
-        (&values[..remaining], &s.indices[..remaining]),
-        (&[2.0, 3.0, 4.0][..], &[3, 2, 4][..])
-    );
-
-    let mut values: Vec<f32> = (0..100).rev().map(|i| i as f32).collect();
-    let remaining = PercentileClipConfig::new(10.0, 10.0).reject(&mut values, &mut s);
-    let expected_values: Vec<f32> = (10..90).map(|i| i as f32).collect();
-    let expected_frames: Vec<usize> = (10..90).map(|v| 99 - v).collect();
-    assert_eq!(values[..remaining], expected_values);
-    assert_eq!(s.indices[..remaining], expected_frames);
-
-    assert_eq!(
-        survivors(&[1.0, 2.0], |values, scratch| {
-            PercentileClipConfig::default().reject(values, scratch)
-        }),
-        [0, 1]
+fn the_winsorized_estimate_converges_on_its_clamped_copy() {
+    let sorted = [9.8, 9.9, 10.0, 10.0, 10.1, 10.1, 10.2, 10.3, 50.0];
+    let estimate = WinsorizedClipConfig::estimate(&sorted, 0.0, &mut Vec::new());
+    assert!((estimate.centre - 90.8 / 9.0).abs() < 1e-5, "{estimate:?}");
+    let clamped = [
+        9.855_126, 9.9, 10.0, 10.0, 10.1, 10.1, 10.2, 10.3, 10.344_874,
+    ];
+    let mean = 90.8f64 / 9.0;
+    let squares: f64 = clamped.iter().map(|&v: &f64| (v - mean).powi(2)).sum();
+    let expected = 1.133_392_655_462_487 * (squares / 8.0).sqrt();
+    assert!(
+        (f64::from(estimate.sigma) - expected).abs() < 1e-5,
+        "{estimate:?} against {expected}"
     );
 }
 
-/// The kept range: `floor(p·n)` off each end, or the middle element alone when the two meet. At
-/// 49% of 5, two come off each end, leaving 2..3; a lone element survives any percentile.
+/// The correction is `1/√v` with `v` the variance of a unit Gaussian clamped to ±1.5:
+/// `(2Φ(1.5) − 1) − 3φ(1.5) + 4.5(1 − Φ(1.5))`, through statrs. mpmath at 30 digits gives
+/// 1.13339265546248702, which the constant holds to its last bit; statrs's normal cdf is off by
+/// about 5e-12 here, so 1e-11 is the tolerance.
 #[test]
-fn surviving_range_takes_whole_frames_off_each_end() {
-    for (low, high, n, expected) in [
-        (20.0, 20.0, 10, 2..8),
-        (49.0, 49.0, 5, 2..3),
-        (10.0, 10.0, 1, 0..1),
-        (40.0, 40.0, 4, 1..3),
-        (50.0, 50.0, 4, 2..3),
-    ] {
+fn the_winsorized_correction_is_the_clamped_gaussian_variance() {
+    let normal = Normal::standard();
+    let c = 1.5;
+    let variance =
+        (2.0 * normal.cdf(c) - 1.0) - 2.0 * c * normal.pdf(c) + 2.0 * c * c * (1.0 - normal.cdf(c));
+    let correction = 1.0 / variance.sqrt();
+    assert!(
+        (correction - 1.133_392_655_462_487).abs() < 1e-11,
+        "{correction}"
+    );
+}
+
+/// A trim drops `⌊p·n/100⌋` from each end, exactly. [5, 1, 3, 2, 4] at 20% drops one each side,
+/// keeping positions 2, 3 and 4. 42% of 150 is 63, where `(0.42)·150` in f32 is 62.99999 and
+/// floors to 62. 49% of 5 drops two each side and leaves one sample, which the driver raises to
+/// the three nearest the median.
+#[test]
+fn trim_drops_exact_counts_from_each_end() {
+    assert_eq!(
+        kept(Rejection::trim(20.0), &[5.0, 1.0, 3.0, 2.0, 4.0]),
+        [2, 3, 4]
+    );
+    assert_eq!(
+        TrimConfig::new(42.0, 10.0).counts(150),
+        trim_config::TrimCounts { low: 63, high: 15 }
+    );
+    assert_eq!((0.42f32 * 150.0).floor(), 62.0);
+    for (percent, count, expected) in [(20.0, 10, 2), (49.0, 5, 2), (10.0, 1, 0), (12.5, 8, 1)] {
         assert_eq!(
-            PercentileClipConfig::new(low, high).surviving_range(n),
+            TrimConfig::new(percent, percent).counts(count).low,
             expected,
-            "{low}% / {high}% of {n}"
+            "{percent}% of {count}"
         );
     }
-}
-
-#[test]
-fn gesd_removes_single_bright_outlier() {
-    let values = [1.0, 1.1, 0.9, 1.0, 1.2, 0.8, 1.0, 100.0];
     assert_eq!(
-        survivors(&values, |values, scratch| {
-            GesdConfig::new(0.05, None).reject(values, scratch)
-        }),
-        all_but(8, &[7])
+        kept(Rejection::trim(49.0), &[1.0, 2.0, 3.0, 4.0, 10.0]),
+        [1, 2, 3]
     );
 }
 
-/// A constant set has no spread to test against, a tight one no value past the critical
-/// statistic, and two frames are too few: nothing goes.
+/// GESD drops a single bright outlier and keeps sets without one: a constant set, a tight one,
+/// and three samples, no more than the minimum.
 #[test]
-fn gesd_keeps_sets_without_an_outlier() {
-    for (name, values, config) in [
-        ("constant", &[1.0; 8][..], GesdConfig::new(0.05, Some(3))),
-        (
-            "tight",
-            &[1.0, 1.1, 0.9, 1.0, 1.2, 0.8, 1.0, 1.1],
-            GesdConfig::default(),
+fn gesd_drops_an_outlier_and_keeps_clean_sets() {
+    assert_eq!(
+        kept(
+            Rejection::gesd(),
+            &[1.0, 1.1, 0.9, 1.0, 1.2, 0.8, 1.0, 100.0]
         ),
-        ("two samples", &[1.0, 2.0], GesdConfig::default()),
+        all_but(8, &[7])
+    );
+    for (name, values) in [
+        ("constant", &[1.0; 8][..]),
+        ("tight", &[1.0, 1.1, 0.9, 1.0, 1.2, 0.8, 1.0, 1.1]),
+        ("three samples", &[1.0, 2.0, 100.0]),
     ] {
         assert_eq!(
-            survivors(values, |values, scratch| config.reject(values, scratch)),
+            kept(Rejection::gesd(), values),
             all_but(values.len(), &[]),
             "{name}"
         );
     }
 }
 
-/// At an α no t quantile resolves, the critical value is the finite limit `(n − 1)/√n`.
+/// Seventeen clean samples, −1.6 … 1.6 in steps of 0.2, and three at 10. With all twenty the mean
+/// is 30/20 = 1.5 and the sum of squares 16.32 + 17·2.25 + 3·8.5² = 271.32, so the first statistic
+/// is 8.5/√(271.32/19) = 2.249, under its critical value 2.708: the three mask each other. The
+/// second removal reaches 2.717 against 2.681, and the third 3.700 against 2.652. The automatic cap
+/// ⌊0.3·20⌋ = 6 reaches the third and drops all three. The old cap of 2 stopped at the second and
+/// kept one 10 (review 1.6).
 #[test]
-fn gesd_tiny_alpha_uses_finite_limiting_critical_value() {
-    let mut values: Vec<f32> = (0..15).map(|value| value as f32).collect();
-    let mut scratch = scratch();
-
-    let remaining = GesdConfig::new(f32::MIN_POSITIVE, Some(3)).reject(&mut values, &mut scratch);
-
-    assert_eq!(remaining, 15);
-    assert_eq!(scratch.gesd.critical_values[0], 14.0 / 15.0f64.sqrt());
+fn gesd_tests_far_enough_to_unmask_three_outliers() {
+    let mut values: Vec<f32> = (0..17).map(|i| -1.6 + 0.2 * i as f32).collect();
+    values.extend([10.0; 3]);
+    assert_eq!(kept(Rejection::gesd(), &values), all_but(20, &[17, 18, 19]));
+    assert_eq!(
+        kept(Rejection::Gesd(GesdConfig::new(0.05, Some(2))), &values),
+        all_but(20, &[18, 19])
+    );
 }
 
 /// NIST's worked example (Engineering Statistics Handbook §1.3.5.17.3): 54 values, ten candidates
 /// at α = 0.05, three outliers. The handbook prints each statistic and critical value cut to three
-/// decimals (its 3.118 is 3.11891), so each is the computed one less under 0.001.
+/// decimals, so each computed one is the printed one plus less than 0.001.
 #[test]
 fn gesd_matches_nist_reference_example() {
-    let mut values = vec![
+    let values = [
         -0.25, 0.68, 0.94, 1.15, 1.20, 1.26, 1.26, 1.34, 1.38, 1.43, 1.49, 1.49, 1.55, 1.56, 1.58,
         1.65, 1.69, 1.70, 1.76, 1.77, 1.81, 1.91, 1.94, 1.96, 1.99, 2.06, 2.09, 2.10, 2.14, 2.15,
         2.23, 2.24, 2.26, 2.35, 2.37, 2.40, 2.47, 2.54, 2.62, 2.64, 2.90, 2.92, 2.92, 2.93, 3.21,
@@ -646,22 +712,23 @@ fn gesd_matches_nist_reference_example() {
         (2.101, 3.094),
         (2.067, 3.085),
     ];
-    let mut scratch = scratch();
-
-    let remaining = GesdConfig::new(0.05, Some(10)).reject(&mut values, &mut scratch);
-
-    assert_eq!(remaining, 51);
-    assert!(scratch.indices[..remaining].iter().all(|&index| index < 51));
-    for ((statistic, critical), (expected_statistic, expected_critical)) in scratch
-        .gesd
-        .statistics
-        .iter()
-        .zip(&scratch.gesd.critical_values)
-        .zip(expected)
-    {
+    let mut scratch = ScratchBuffers::default();
+    scratch.sorted.fill(&values);
+    let window = Rejection::Gesd(GesdConfig::new(0.05, Some(10))).surviving_window(
+        scratch.sorted.values(),
+        0.0,
+        DEFAULT_MIN_SURVIVORS,
+        &mut scratch.methods,
+    );
+    assert_eq!(window, 0..51);
+    let gesd = &mut scratch.methods.gesd;
+    assert_eq!(gesd.statistics.len(), 10);
+    for (removed, (expected_statistic, expected_critical)) in expected.into_iter().enumerate() {
+        let statistic = gesd.statistics[removed];
+        let critical = gesd.critical_value(54 - removed);
         for (computed, printed) in [
-            (*statistic, expected_statistic),
-            (*critical, expected_critical),
+            (statistic, expected_statistic),
+            (critical, expected_critical),
         ] {
             assert!(
                 (0.0..0.001).contains(&(computed - printed)),
@@ -671,77 +738,130 @@ fn gesd_matches_nist_reference_example() {
     }
 }
 
+/// At an α no t quantile resolves, the critical value is the finite limit `(L − 1)/√L`.
 #[test]
-fn gesd_is_sign_symmetric_for_asymmetric_outliers() {
+fn gesd_tiny_alpha_uses_the_limiting_critical_value() {
+    let mut gesd = scratch_buffers::GesdScratch::default();
+    gesd.prepare(f32::MIN_POSITIVE);
+    assert_eq!(gesd.critical_value(15), 14.0 / 15.0f64.sqrt());
+}
+
+/// Mirrored samples drop the mirrored outliers.
+#[test]
+fn gesd_is_sign_symmetric() {
     let values = [
         -1.4, -1.2, -1.0, -0.8, -0.6, -0.4, -0.2, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, -8.0,
         10.0,
     ];
     let mirrored = values.map(|value: f32| -value);
-    let config = GesdConfig::new(0.05, Some(2));
-    let reject = |values: &mut [f32], scratch: &mut ScratchBuffers| config.reject(values, scratch);
-    assert_eq!(survivors(&values, reject), all_but(17, &[15, 16]));
-    assert_eq!(survivors(&mirrored, reject), all_but(17, &[15, 16]));
+    let rejection = Rejection::Gesd(GesdConfig::new(0.05, Some(2)));
+    assert_eq!(kept(rejection, &values), all_but(17, &[15, 16]));
+    assert_eq!(kept(rejection, &mirrored), all_but(17, &[15, 16]));
 }
 
+/// On clean Gaussian samples the test drops anything in a share α of the sets: the per-set false
+/// positive rate the critical values are built for. Five standard errors of the binomial share
+/// over 4000 sets is the tolerance.
 #[test]
 fn gesd_gaussian_false_positive_rate_matches_alpha() {
     const ALPHA: f32 = 0.05;
     const TRIALS: usize = 4_000;
-
-    // Not `TestRng`: it is an LCG, and Box-Muller over consecutive LCG outputs lays the pairs
-    // on a handful of spirals rather than filling the plane. That distorts the tails, which is
-    // exactly what a GESD outlier test measures — swapping this generator in moves the observed
-    // false-positive rate from 0.050 to 0.076, past the 5-sigma bound below.
+    // Not `TestRng`: it is an LCG, and Box-Muller over consecutive LCG outputs lays the pairs on a
+    // handful of spirals rather than filling the plane. That distorts the tails, which is exactly
+    // what an outlier test measures.
     let mut rng = ChaCha8Rng::seed_from_u64(0x947e_4d3a_7c16_b205);
-    for sample_count in [15, 25, 50, 100] {
-        let config = GesdConfig::new(ALPHA, Some(sample_count / 4));
-        let mut scratch = scratch();
+    let mut scratch = ScratchBuffers::default();
+    for count in [15, 25, 50, 100] {
+        let rejection = Rejection::Gesd(GesdConfig::new(ALPHA, Some(count / 4)));
         let mut false_positives = 0usize;
-
+        let mut values = vec![0.0f32; count];
         for _ in 0..TRIALS {
-            let mut values: Vec<f32> = (0..sample_count)
-                .map(|_| standard_normal(&mut rng))
-                .collect();
-            if config.reject(&mut values, &mut scratch) < sample_count {
+            for value in &mut values {
+                *value = standard_normal(&mut rng);
+            }
+            scratch.sorted.fill(&values);
+            let window = rejection.surviving_window(
+                scratch.sorted.values(),
+                0.0,
+                DEFAULT_MIN_SURVIVORS,
+                &mut scratch.methods,
+            );
+            if window.len() < count {
                 false_positives += 1;
             }
         }
-
         let actual = false_positives as f64 / TRIALS as f64;
         let expected = f64::from(ALPHA);
         let standard_error = (expected * (1.0 - expected) / TRIALS as f64).sqrt();
         assert!(
             (actual - expected).abs() <= 5.0 * standard_error,
-            "n={sample_count}: expected false-positive rate {expected}, got {actual}"
+            "n = {count}: expected false-positive rate {expected}, got {actual}"
         );
     }
 }
 
-fn standard_normal(rng: &mut ChaCha8Rng) -> f32 {
-    let u1 = rng.random::<f64>().max(f64::MIN_POSITIVE);
-    let u2 = rng.random::<f64>();
-    ((-2.0 * u1.ln()).sqrt() * (TAU * u2).cos()) as f32
+/// No method leaves fewer than the minimum. When a pass proposes fewer, the driver keeps the
+/// minimum nearest the pass's centre, dropping the farther end first and the higher end on a tie.
+///
+/// - Eight 1s, then 5, 6, 7, with no background: the band about the tied 1s holds them alone,
+///   eight samples. With a minimum of 9 the driver keeps the eight 1s and the 5, the nearest of the
+///   rest to the centre 1.
+/// - A trim of 49% of [1, 2, 3, 4, 10] leaves one sample; the three nearest the median 3 are 2, 3
+///   and 4: the 10 (7 off) goes before the 1 (2 off), and then the 1 before the 4 (1 off).
+/// - [1, 2, 3, 4] about 2.5 with a minimum of 3: the 1 and the 4 tie at 1.5 off, so the 4 goes.
+#[test]
+fn the_driver_keeps_the_minimum_nearest_the_centre() {
+    let mut tied = vec![1.0f32; 8];
+    tied.extend([5.0, 6.0, 7.0]);
+    assert_eq!(
+        kept_with(Rejection::sigma_clip(2.5), &tied, 0.0, 3),
+        all_but(11, &[8, 9, 10])
+    );
+    assert_eq!(
+        kept_with(Rejection::sigma_clip(2.5), &tied, 0.0, 9),
+        all_but(11, &[9, 10])
+    );
+    assert_eq!(nearest(&[1.0, 2.0, 3.0, 4.0], 0..4, 2.5, 3), 0..3);
+    assert_eq!(nearest(&[1.0, 2.0, 3.0, 4.0, 10.0], 0..5, 3.0, 3), 1..4);
+
+    let mut rng = ChaCha8Rng::seed_from_u64(17);
+    for minimum in 1..=6 {
+        for rejection in [
+            Rejection::sigma_clip(0.5),
+            Rejection::winsorized(0.5),
+            Rejection::linear_fit(0.5),
+            Rejection::Gesd(GesdConfig::new(0.5, Some(10))),
+            Rejection::trim(45.0),
+        ] {
+            for _ in 0..20 {
+                let values: Vec<f32> = (0..10).map(|_| standard_normal(&mut rng)).collect();
+                let survivors = kept_with(rejection, &values, 0.0, minimum).len();
+                assert!(
+                    survivors >= minimum,
+                    "{rejection:?} kept {survivors} of 10 under {minimum}"
+                );
+            }
+        }
+    }
 }
 
-/// `combine_mean` averages the survivors under their own frames' weights. Each expected value is
-/// the weighted mean of the survivors the tests above derive, an exact quotient rounded once.
+/// `combine_mean` averages the survivors under their own weights. Each expected value is the
+/// weighted mean of survivors derived above, an exact quotient rounded once.
 ///
 /// - No rejection over 1 … 5: 15/5, and with frame 0 weighing 10: (10 + 14)/14.
 /// - Sigma clipping at 2σ drops the 100 of the ramp: 17.5/7. At low 4σ, high 2σ with frame 0
 ///   weighing 10: (10 + 16.5)/16.
-/// - Percentile at 20% of 1 … 10 keeps 3 … 8: 33/6, and with frame 7 (the 8) weighing 10:
-///   (25 + 80)/15 = 7.
-/// - Winsorized at 2σ drops the 100 of [1, 2, 2, 2, 2, 100]: 9/5, and with frame 0 weighing 10:
-///   (10 + 8)/14.
-/// - Sigma clipping at 2σ on [2, 100, 3, 2.5, 2.25, 1.75, 2.75, 2.5]: median 2.5, MAD 0.375 drops
-///   the 100; then MAD 0.25 → 2σ = 0.74 drops the 1.75. Frame 0 weighs 8 and the rest 1/8:
-///   (16 + 13/8)/(8 + 5/8).
-/// - Linear fit at 3σ drops the 100 of [1, 1.125, 1.25, 1.375, 100, 1.5] in its seed pass, and
-///   the line through the rest is exact: (8 + 5.25/8)/(8 + 4/8).
+/// - A 20% trim of 1 … 10 keeps 3 … 8: 33/6, and with frame 7 (the 8) weighing 10: (25 + 80)/15.
+/// - Winsorized at 2σ drops the 100 of [1, 1.25, 1.5, 1.75, 2, 100]: 7.5/5, and with frame 0
+///   weighing 10: (10 + 6.5)/14.
+/// - Sigma clipping at 2σ on [2, 100, 3, 2.5, 2.25, 1.75, 2.75, 2.5]: median 2.5, MAD 0.375, σ
+///   0.627 drops the 100; then median 2.5, MAD 0.25, σ 0.426, band [1.65, 3.35] keeps the rest.
+///   Frame 0 weighs 8 and the rest 1/8: (16 + 14.75/8)/(8 + 6/8).
+/// - Linear fit at 3σ drops the 100 of [1, 1.125, 1.25, 1.375, 100, 1.5] in its first pass:
+///   (8 + 5.25/8)/(8 + 4/8).
 /// - GESD drops the 100 of [1, 1.125, 0.875, 1, 1.25, 0.75, 1, 100]: (8 + 6/8)/(8 + 6/8) = 1.
 #[test]
-fn combine_mean_weighs_each_survivor_by_its_own_frame() {
+fn combine_mean_weighs_each_survivor_by_its_own_weight() {
     let ramp = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
     let tenths: Vec<f32> = (1..=10).map(|i| i as f32).collect();
     let heavy_first = |n: usize, first: f32, rest: f32| {
@@ -751,6 +871,7 @@ fn combine_mean_weighs_each_survivor_by_its_own_frame() {
     };
     let mut heavy_eighth = vec![1.0; 10];
     heavy_eighth[7] = 10.0;
+    let quarters = [1.0, 1.25, 1.5, 1.75, 2.0, 100.0];
     for (name, rejection, values, weights, expected) in [
         (
             "none",
@@ -780,16 +901,10 @@ fn combine_mean_weighs_each_survivor_by_its_own_frame() {
             heavy_first(8, 10.0, 1.0),
             26.5 / 16.0,
         ),
+        ("trim", Rejection::trim(20.0), &tenths, vec![1.0; 10], 5.5),
         (
-            "percentile",
-            Rejection::percentile(20.0),
-            &tenths,
-            vec![1.0; 10],
-            5.5,
-        ),
-        (
-            "percentile, weighted",
-            Rejection::percentile(20.0),
+            "trim, weighted",
+            Rejection::trim(20.0),
             &tenths,
             heavy_eighth,
             7.0,
@@ -797,23 +912,23 @@ fn combine_mean_weighs_each_survivor_by_its_own_frame() {
         (
             "winsorized",
             Rejection::winsorized(2.0),
-            &[1.0, 2.0, 2.0, 2.0, 2.0, 100.0],
+            &quarters,
             vec![1.0; 6],
-            1.8,
+            1.5,
         ),
         (
             "winsorized, weighted",
             Rejection::winsorized(2.0),
-            &[1.0, 2.0, 2.0, 2.0, 2.0, 100.0],
+            &quarters,
             heavy_first(6, 10.0, 1.0),
-            18.0 / 14.0,
+            16.5 / 14.0,
         ),
         (
             "sigma clip, weighted",
             Rejection::sigma_clip(2.0),
             &[2.0, 100.0, 3.0, 2.5, 2.25, 1.75, 2.75, 2.5],
             heavy_first(8, 8.0, 0.125),
-            (16.0 + 13.0 / 8.0) / (8.0 + 5.0 / 8.0),
+            (16.0 + 14.75 / 8.0) / (8.0 + 6.0 / 8.0),
         ),
         (
             "linear fit, weighted",
@@ -830,167 +945,86 @@ fn combine_mean_weighs_each_survivor_by_its_own_frame() {
             1.0,
         ),
     ] {
-        let mut values = values.to_vec();
-        let mean = rejection
-            .combine_mean(&mut values, &weights, &mut scratch(), true)
-            .value;
-        assert_eq!(mean, expected as f32, "{name}");
-    }
-}
-
-/// Unit weights reduce to the plain mean of the survivors, bit for bit: calibration masters
-/// combine with unit weights through this path.
-#[test]
-fn unit_weights_reduce_to_the_plain_mean_of_the_survivors() {
-    let values = [1.0f32, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
-    let mut weighted_values = values;
-    let combined = Rejection::sigma_clip(2.0).combine_mean(
-        &mut weighted_values,
-        &[1.0; 8],
-        &mut scratch(),
-        true,
-    );
-
-    let mut plain_values = values;
-    let remaining = Rejection::sigma_clip(2.0).reject(&mut plain_values, &mut scratch());
-    let plain = mean_f32(&plain_values[..remaining]);
-
-    assert_eq!(combined.survivor_count, 7);
-    assert_eq!(combined.value.to_bits(), plain.to_bits());
-}
-
-/// The weighted mean reads each survivor's weight through its frame index.
-/// - [2, 4, 6] under [10, 1, 1]: (20 + 4 + 6)/12 = 2.5.
-/// - Survivors 10 and 20 of frames 0 and 2, under the three frames' [5, 0.5, 1]: 70/6.
-/// - All weights zero: 0, the documented answer for no trusted frame. One non-zero: that value.
-/// - 2e7 and sixteen halves: (2e7 + 8)/17, where an f32 running sum drops every half.
-#[test]
-fn weighted_mean_indexed_reads_weights_by_frame() {
-    let mut halves = vec![0.5f32; 17];
-    halves[0] = 2.0e7;
-    let identity: Vec<usize> = (0..17).collect();
-    for (values, weights, indices, expected) in [
-        (
-            &[2.0, 4.0, 6.0][..],
-            &[10.0, 1.0, 1.0][..],
-            &[0, 1, 2][..],
-            2.5,
-        ),
-        (&[10.0, 20.0], &[5.0, 0.5, 1.0], &[0, 2], 70.0 / 6.0),
-        (&[5.0, 10.0, 15.0], &[0.0; 3], &[0, 1, 2], 0.0),
-        (&[5.0, 10.0, 15.0], &[0.0, 2.0, 0.0], &[0, 1, 2], 10.0),
-        (&halves, &[1.0; 17], &identity, (2.0e7 + 8.0) / 17.0),
-    ] {
         assert_eq!(
-            weighted_mean_indexed(values, weights, indices, &mut Vec::new()),
+            combine(rejection, values, &weights).value,
             expected as f32,
-            "{values:?} under {weights:?}"
-        );
-    }
-}
-
-/// 100 values in reverse order take the introsort path (past 64): they come out ascending, each
-/// index naming the position it came from. A (37·i mod 200) permutation of 200 does too.
-#[test]
-fn sort_with_indices_carries_every_index_with_its_value() {
-    let reversed: Vec<f32> = (0..100).rev().map(|i| i as f32).collect();
-    let shuffled: Vec<f32> = (0..200).map(|i| ((i * 37) % 200) as f32).collect();
-    for original in [reversed, shuffled] {
-        let n = original.len();
-        let mut values = original.clone();
-        let mut scratch = scratch();
-        scratch.reset_indices(n);
-        scratch.sort_with_indices(&mut values, n);
-        let ascending: Vec<f32> = (0..n).map(|i| i as f32).collect();
-        assert_eq!(values, ascending);
-        for (value, &index) in values.iter().zip(&scratch.indices) {
-            assert_eq!(original[index], *value);
-        }
-    }
-}
-
-/// `reset_indices(n)` leaves exactly `0..n`, whatever was there and however large, and keeps the
-/// allocation.
-#[test]
-fn reset_indices_leaves_the_identity_and_keeps_capacity() {
-    for (stale, n) in [
-        (vec![], 5),
-        (vec![99, 88, 77, 66, 55], 5),
-        (vec![1, 2, 3], 0),
-        (vec![7; 100], 3),
-    ] {
-        let mut scratch = ScratchBuffers {
-            indices: stale,
-            ..Default::default()
-        };
-        let capacity = scratch.indices.capacity();
-        scratch.reset_indices(n);
-        assert_eq!(scratch.indices, (0..n).collect::<Vec<_>>());
-        assert!(scratch.indices.capacity() >= capacity);
-    }
-}
-
-/// The early exit: true only when no value can pass `k` trimmed standard deviations, the min and
-/// max being left out of the trimmed set. Never below ten values.
-///
-/// - Twenty 10s, or eighteen with a 9 and an 11: the trimmed set is constant, so nothing can go.
-/// - Seventeen 10s with 9, 11 and 100: trimmed mean 181/18, σ 0.236, and the 100 is 90 off.
-/// - 0 … 19: trimmed 1 … 18, mean 9.5, σ √(484.5/17) = 5.34; the ends are 9.5 off, inside 13.35.
-/// - [1, 1.5, 2, 2.5, 3, 50, 80, 100, 1, 1] at 2: the 80 stays in the trimmed set, but the 100 is
-///   82.4 off a mean of 17.6 with σ 30.3, past 2σ.
-/// - Five or nine 10s: too few to trim.
-#[test]
-fn no_outliers_possible_screens_by_trimmed_spread() {
-    let with = |base: usize, extra: &[f32]| {
-        let mut values = vec![10.0f32; base];
-        values.extend_from_slice(extra);
-        values
-    };
-    let ramp: Vec<f32> = (0..20).map(|i| i as f32).collect();
-    for (name, values, k, expected) in [
-        ("constant", with(20, &[]), 2.5, true),
-        ("one each side", with(18, &[11.0, 9.0]), 2.5, true),
-        ("far outlier", with(17, &[9.0, 11.0, 100.0]), 2.5, false),
-        ("ramp", ramp, 2.5, true),
-        (
-            "two outliers",
-            vec![1.0, 1.5, 2.0, 2.5, 3.0, 50.0, 80.0, 100.0, 1.0, 1.0],
-            2.0,
-            false,
-        ),
-        ("five", with(5, &[]), 2.5, false),
-        ("nine", with(9, &[]), 2.5, false),
-    ] {
-        assert_eq!(
-            SigmaClipConfig::no_outliers_possible(&values, k),
-            expected,
             "{name}"
         );
     }
 }
 
-/// The sigma-clip shortcut decides on `σ² < f32::EPSILON`, a fixed number, so the survivor set
-/// depends on the data's scale (review item 1.1). Twenty samples of noise 1e-4 and one hit at 0.5:
-/// at unit scale the shortcut keeps the hit, and in ADU (×256) the full path rejects it. The
-/// invariance check sees the difference.
+/// The survivors' positions follow the sort: the ramp's survivors are its first seven samples, in
+/// ascending order, and a pixel that sorted nothing reports none. The sample counts them, and its
+/// weight and variance factor are those of the seven unit weights: 7 and 7/49.
 #[test]
-fn the_sigma_clip_shortcut_depends_on_the_data_scale() {
-    use crate::internals::invariance::Affine;
+fn the_survivors_are_named_after_the_combine() {
+    let ramp = [4.0, 1.0, 100.0, 3.5, 1.5, 2.0, 3.0, 2.5];
+    let mut values = ramp;
+    let frame_ids: Vec<u32> = (0..8).collect();
+    let mut scratch = ScratchBuffers::default();
+    let sample = Rejection::sigma_clip(2.0).combine_mean(
+        PixelSamples {
+            values: &mut values,
+            weights: &[1.0; 8],
+            frame_ids: &frame_ids,
+            noise_variances: None,
+            channel: 0,
+        },
+        DEFAULT_MIN_SURVIVORS,
+        &mut scratch,
+        true,
+    );
+    assert_eq!(sample.survivor_count, 7);
+    assert_eq!(
+        scratch.survivor_positions(),
+        Some(&[1, 4, 5, 7, 6, 3, 0][..])
+    );
+    assert_eq!(sample.weight, 7.0);
+    assert_eq!(sample.linear_variance, 7.0 / 49.0);
 
-    let mut rng = TestRng::new(11);
-    let mut values: Vec<f32> = (0..20)
-        .map(|_| Affine::quantize(0.25 + 1e-4 * rng.next_gaussian_f32()))
-        .collect();
-    values[7] = Affine::quantize(0.5);
-    let kept = |case: Affine| {
-        survivors(&case.apply_all(&values), |v, s| {
-            Rejection::default().reject(v, s)
-        })
+    Rejection::None.combine_mean(
+        PixelSamples {
+            values: &mut values,
+            weights: &[1.0; 8],
+            frame_ids: &frame_ids,
+            noise_variances: None,
+            channel: 0,
+        },
+        DEFAULT_MIN_SURVIVORS,
+        &mut scratch,
+        true,
+    );
+    assert_eq!(scratch.survivor_positions(), None);
+}
+
+/// The noise variances become the floor as their root mean square: four samples of variance
+/// 0.25 and four of 0.75 give a background of √0.5 = 0.7071. On [0, 0, 0, 0, 0, 0, 0, 1.5], whose
+/// MAD is 0, the band at 2σ is ±1.414, so the 1.5 goes; with no noise gathered the band about the
+/// tied zeros is one subnormal step wide and the 1.5 goes all the same, and with variances of 1
+/// the band is ±2 and keeps it.
+#[test]
+fn the_gathered_noise_floors_the_spread() {
+    let values = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.5];
+    let frame_ids: Vec<u32> = (0..8).collect();
+    let survivors = |noise_variances: Option<&[f32]>| {
+        let mut values = values;
+        Rejection::sigma_clip(2.0)
+            .combine_mean(
+                PixelSamples {
+                    values: &mut values,
+                    weights: &[1.0; 8],
+                    frame_ids: &frame_ids,
+                    noise_variances,
+                    channel: 0,
+                },
+                DEFAULT_MIN_SURVIVORS,
+                &mut ScratchBuffers::default(),
+                false,
+            )
+            .survivor_count
     };
-    assert!(kept(Affine::IDENTITY).contains(&7));
-    let failing: Vec<Affine> = Affine::mismatches(kept, |kept, _| kept.clone())
-        .into_iter()
-        .map(|mismatch| mismatch.case)
-        .collect();
-    assert!(failing.contains(&Affine::CASES[2]), "{failing:?}");
+    let mixed = [0.25, 0.25, 0.25, 0.25, 0.75, 0.75, 0.75, 0.75];
+    assert_eq!(survivors(Some(&mixed)), 7);
+    assert_eq!(survivors(None), 7);
+    assert_eq!(survivors(Some(&[1.0; 8])), 8);
 }

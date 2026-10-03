@@ -12,6 +12,16 @@ use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::math::statistics;
 use common::TempDir;
 
+/// A request with the default survivor minimum and no noise.
+fn request(weights: Option<&[f32]>, planes: QualityPlanes) -> CombineRequest<'_> {
+    CombineRequest {
+        weights,
+        planes,
+        min_survivors: DEFAULT_MIN_SURVIVORS,
+        noise: None,
+    }
+}
+
 #[test]
 fn unrequested_quality_planes_are_never_allocated() {
     // A plane the request declines is never built by the reducer, which only the combine's own
@@ -24,17 +34,21 @@ fn unrequested_quality_planes_are_never_allocated() {
         ],
         Normalization::None,
     );
-    let reduce = |values: &mut [f32], weights: &[f32], _: &mut ScratchBuffers| {
+    let reduce = |samples: PixelSamples<'_>, _: &mut ScratchBuffers| {
+        let PixelSamples {
+            values, weights, ..
+        } = samples;
         CombinedSample::from_all(values.iter().sum::<f32>() / values.len() as f32, weights)
     };
 
     let weight_only = cache.process_chunked(
-        None,
-        QualityPlanes {
-            variance: false,
-            ..QualityPlanes::ALL
-        },
-        DEFAULT_MIN_SURVIVORS,
+        request(
+            None,
+            QualityPlanes {
+                variance: false,
+                ..QualityPlanes::ALL
+            },
+        ),
         reduce,
     );
     assert!(weight_only.weight.is_some());
@@ -43,17 +57,12 @@ fn unrequested_quality_planes_are_never_allocated() {
         "a variance plane was allocated for a combine that did not ask for one"
     );
 
-    let bare = cache.process_chunked(
-        None,
-        QualityPlanes::IMAGE_ONLY,
-        DEFAULT_MIN_SURVIVORS,
-        reduce,
-    );
+    let bare = cache.process_chunked(request(None, QualityPlanes::IMAGE_ONLY), reduce);
     assert!(bare.weight.is_none());
     assert!(bare.linear_variance.is_none());
 
     // Skipping the planes must not disturb the combined pixels.
-    let all = cache.process_chunked(None, QualityPlanes::ALL, DEFAULT_MIN_SURVIVORS, reduce);
+    let all = cache.process_chunked(request(None, QualityPlanes::ALL), reduce);
     assert_eq!(
         bare.pixels.channel(0).pixels(),
         all.pixels.channel(0).pixels()
@@ -276,12 +285,10 @@ fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
 }
 
 fn mean_product(cache: &FrameCache, weights: Option<&[f32]>) -> StackProduct {
-    let combined = cache.process_chunked(
-        weights,
-        QualityPlanes::ALL,
-        DEFAULT_MIN_SURVIVORS,
-        |values, weights, scratch| Rejection::None.combine_mean(values, weights, scratch, true),
-    );
+    let combined =
+        cache.process_chunked(request(weights, QualityPlanes::ALL), |samples, scratch| {
+            Rejection::None.combine_mean(samples, DEFAULT_MIN_SURVIVORS, scratch, true)
+        });
     cache.finish_product(combined, QualityPlanes::ALL, None)
 }
 
@@ -468,21 +475,18 @@ fn light_and_calibration_frames_combine_through_one_engine() {
     };
     for cache in caches(&[1.0, 3.0, 2.0]) {
         assert_eq!(cache.core.tier.chunk_memory(), None);
-        let median = cache.process_chunked(
-            None,
-            QualityPlanes::IMAGE_ONLY,
-            DEFAULT_MIN_SURVIVORS,
-            |values, _, _| CombinedSample::value_only(statistics::median_mut(values), values.len()),
-        );
+        let median =
+            cache.process_chunked(request(None, QualityPlanes::IMAGE_ONLY), |samples, _| {
+                let count = samples.values.len();
+                CombinedSample::value_only(statistics::median_mut(samples.values), count)
+            });
         assert_eq!(median.pixels.channel(0).pixels(), &[2.0; 4]);
     }
     for cache in caches(&[10.0, 20.0]) {
         let weighted = cache.process_chunked(
-            Some(&[1.0, 3.0]),
-            QualityPlanes::IMAGE_ONLY,
-            DEFAULT_MIN_SURVIVORS,
-            |values, weights, scratch| {
-                Rejection::None.combine_mean(values, weights, scratch, false)
+            request(Some(&[1.0, 3.0]), QualityPlanes::IMAGE_ONLY),
+            |samples, scratch| {
+                Rejection::None.combine_mean(samples, DEFAULT_MIN_SURVIVORS, scratch, false)
             },
         );
         assert_eq!(weighted.pixels.channel(0).pixels(), &[17.5; 4]);
@@ -499,10 +503,10 @@ fn light_and_calibration_frames_combine_through_one_engine() {
         Normalization::None,
     );
     let mean = cache.process_chunked(
-        None,
-        QualityPlanes::IMAGE_ONLY,
-        DEFAULT_MIN_SURVIVORS,
-        |values, weights, scratch| Rejection::None.combine_mean(values, weights, scratch, false),
+        request(None, QualityPlanes::IMAGE_ONLY),
+        |samples, scratch| {
+            Rejection::None.combine_mean(samples, DEFAULT_MIN_SURVIVORS, scratch, false)
+        },
     );
     for (channel, level) in [3.0, 4.0, 5.0].into_iter().enumerate() {
         assert_eq!(mean.pixels.channel(channel).pixels(), &[level; 4]);

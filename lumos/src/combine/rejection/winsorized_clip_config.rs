@@ -1,36 +1,37 @@
-//! Winsorized sigma clipping: pull outliers to the clip bounds and re-estimate spread until it
-//! converges, then clip on the bias-corrected estimate. More robust than plain sigma clipping on
-//! small stacks.
+//! Winsorized sigma clipping: a Huber estimate of the centre and σ, then a clip about them,
+//! repeated until a clip rejects nothing.
 
-use crate::combine::rejection::scratch_buffers::ScratchBuffers;
+use crate::combine::rejection::pass::{Pass, Proposal};
 use crate::combine::rejection::sigma_bounds::SigmaBounds;
-use crate::combine::rejection::{begin_rejection, compact_within, sorted_median};
 use crate::error::InvalidConfigField;
+use crate::math::statistics::spread::Spread;
 
-/// Configuration for winsorized sigma clipping.
+/// Configuration for winsorized sigma clipping, after PixInsight's `WinsorizedSigmaClipping`.
 ///
-/// Two-phase algorithm matching PixInsight/Siril:
-/// 1. **Robust estimation**: Iteratively Winsorize with Huber's c=1.5 constant
-///    until sigma converges, then apply 1.134 bias correction to get robust
-///    (center, sigma) estimates.
-/// 2. **Rejection**: Standard sigma clipping using the robust estimates and the caller's
-///    thresholds.
+/// Each pass starts from the median and the floored MAD σ of the samples still kept. It then
+/// clamps a copy of them to ±1.5σ about the centre, takes the centre again as the mean of the
+/// clamped copy and σ as its corrected standard deviation, and repeats on the clamped copy until σ
+/// moves by at most 0.05%. Then it rejects the samples outside the bounds about that centre. Passes repeat until one
+/// rejects nothing. The clamped copy is only an estimate: no sample is replaced in the mean.
 ///
-/// This is more robust for small sample sizes than standard sigma clipping.
+/// The robust start departs from Siril, which starts from the plain standard deviation: with three
+/// outliers at 10σ among ten samples that start puts all three inside the clamp, and none is
+/// rejected. PixInsight starts from a robust σ too (its Sn).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WinsorizedClipConfig {
     /// How far either side of the robust centre a value may sit, in sigma.
     pub sigma: SigmaBounds,
 }
 
-/// Huber's constant for Winsorization boundaries.
-const HUBER_C: f32 = 1.5;
-/// Bias correction factor for Winsorized standard deviation.
-const WINSORIZED_CORRECTION: f32 = 1.134;
-/// Convergence threshold for iterative Winsorization.
-const WINSORIZE_CONVERGENCE: f32 = 0.0005;
-/// Maximum iterations for Winsorization convergence.
-const WINSORIZE_MAX_ITER: u32 = 50;
+/// Huber's clamp, in σ.
+const HUBER_C: f64 = 1.5;
+/// `1/√v`, where `v = (2Φ(c) − 1) − 2cφ(c) + 2c²(1 − Φ(c))` is the variance of a unit Gaussian
+/// clamped to ±c, at c = 1.5. PixInsight rounds it to 1.134.
+const WINSORIZED_CORRECTION: f64 = 1.133_392_655_462_487;
+/// The relative change of σ at which the clamp iteration stops.
+const CONVERGENCE: f64 = 0.0005;
+/// A bound on the clamp iteration, so that no input can hold a pixel in it.
+const MAX_CLAMP_STEPS: u32 = 50;
 
 impl Default for WinsorizedClipConfig {
     fn default() -> Self {
@@ -54,115 +55,57 @@ impl WinsorizedClipConfig {
     }
 
     /// Validate the clip thresholds.
-    pub(super) fn validate(self) -> Result<(), InvalidConfigField> {
+    pub(crate) fn validate(self) -> Result<(), InvalidConfigField> {
         self.sigma.validate()
     }
 
-    /// Phase 1: Iteratively Winsorize to get a robust [`WinsorizedEstimate`].
+    pub(crate) fn narrow(self, pass: &Pass<'_>, clamped: &mut Vec<f32>) -> Proposal {
+        let estimate = Self::estimate(pass.samples(), pass.background, clamped);
+        pass.keep(self.sigma, estimate.centre, estimate.sigma)
+    }
+
+    /// The Huber estimate of an ascending window, in `clamped`'s working copy, with σ floored by
+    /// [`Spread::floored`] at every step.
     ///
-    /// Uses Huber's c=1.5 for Winsorization boundaries, converges when
-    /// `|sigma_new - sigma_old| / sigma_old < 0.0005`. Applies 1.134 bias
-    /// correction to the final sigma.
-    ///
-    /// `working` is sorted **once** up front: Winsorization clamps every value into
-    /// `[low, high]`, a monotonic map, so a sorted buffer stays sorted across iterations.
-    /// The median is then the middle element (O(1)) every pass — replacing the per-iteration
-    /// quickselect + buffer copy that dominated this hot path. `winsorized_stddev` is an
-    /// order-independent sum, so sorting changes neither the center nor the sigma.
-    pub(super) fn robust_estimate(values: &[f32], working: &mut Vec<f32>) -> WinsorizedEstimate {
-        working.clear();
-        working.extend_from_slice(values);
-        working.sort_unstable_by(f32::total_cmp);
-
-        let mut center = sorted_median(working);
-        let mut sigma = winsorized_stddev(working, center) * WINSORIZED_CORRECTION;
-
-        if sigma < f32::EPSILON {
-            return WinsorizedEstimate { center, sigma: 0.0 };
-        }
-
-        for _ in 0..WINSORIZE_MAX_ITER {
-            let low_bound = center - HUBER_C * sigma;
-            let high_bound = center + HUBER_C * sigma;
-
-            // Clamp outliers to the boundary values. `low_bound <= high_bound` (sigma > 0), and
-            // a monotone clamp preserves the existing sort order, so no re-sort is needed.
-            for v in working.iter_mut() {
-                *v = v.clamp(low_bound, high_bound);
+    /// Each step clamps the last step's copy, as Siril and PixInsight do: a sample once cut short
+    /// stays cut short when σ grows. Clamping the samples themselves at each step is Huber's
+    /// proposal 2, which breaks down here: with three samples at 10σ among ten, the outliers pull
+    /// the centre and σ up step by step until the band holds them. The copy stays sorted, since the
+    /// clamp is monotonic. Sums run in f64: the mean of samples a few steps apart at 0.5 would lose
+    /// those steps in an f32 sum.
+    pub(crate) fn estimate(sorted: &[f32], background: f32, clamped: &mut Vec<f32>) -> Spread {
+        debug_assert!(sorted.len() >= 2);
+        let start = Spread::of_sorted(sorted);
+        let mut centre = start.centre;
+        let mut sigma = start.floored(background);
+        clamped.clear();
+        clamped.extend_from_slice(sorted);
+        for _ in 0..MAX_CLAMP_STEPS {
+            let reach = (HUBER_C * f64::from(sigma)) as f32;
+            let low = centre - reach;
+            let high = centre + reach;
+            for value in clamped.iter_mut() {
+                *value = value.clamp(low, high);
             }
-
-            center = sorted_median(working);
-            let sigma_new = winsorized_stddev(working, center) * WINSORIZED_CORRECTION;
-
-            if sigma_new < f32::EPSILON {
-                return WinsorizedEstimate { center, sigma: 0.0 };
-            }
-
-            let converged = (sigma_new - sigma).abs() <= sigma * WINSORIZE_CONVERGENCE;
-            sigma = sigma_new;
-
+            let count = clamped.len() as f64;
+            let mean = clamped.iter().map(|&v| f64::from(v)).sum::<f64>() / count;
+            let squares = clamped
+                .iter()
+                .map(|&v| (f64::from(v) - mean).powi(2))
+                .sum::<f64>();
+            let next = Spread {
+                centre: mean as f32,
+                sigma: (WINSORIZED_CORRECTION * (squares / (count - 1.0)).sqrt()) as f32,
+            };
+            centre = next.centre;
+            let next_sigma = next.floored(background);
+            let converged =
+                (f64::from(next_sigma) - f64::from(sigma)).abs() <= f64::from(sigma) * CONVERGENCE;
+            sigma = next_sigma;
             if converged {
                 break;
             }
         }
-
-        WinsorizedEstimate { center, sigma }
+        Spread { centre, sigma }
     }
-
-    /// Phase 2: Reject outliers using the robust estimate from phase 1.
-    ///
-    /// Standard sigma clipping with the [`WinsorizedEstimate`] and the caller's thresholds.
-    pub(super) fn reject(self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
-        if let Some(survivors) = begin_rejection(values, scratch, 3) {
-            return survivors;
-        }
-
-        let estimate = Self::robust_estimate(values, &mut scratch.estimate_values);
-
-        if estimate.sigma < f32::EPSILON {
-            return values.len();
-        }
-
-        let n = values.len();
-        compact_within(
-            values,
-            &mut scratch.indices,
-            n,
-            SigmaBounds::asymmetric(
-                self.sigma.low * estimate.sigma,
-                self.sigma.high * estimate.sigma,
-            ),
-            |_| estimate.center,
-        )
-    }
-}
-
-/// Location and spread from [`WinsorizedClipConfig::robust_estimate`].
-///
-/// Deliberately not a [`MedianMad`](crate::math::statistics::MedianMad): `sigma` is a
-/// bias-corrected sample standard deviation about the Winsorized center — see
-/// [`winsorized_stddev`] — so it is already in Gaussian units, and sending it through that
-/// type's MAD rescale would silently inflate every Winsorized threshold by 1.4826.
-#[derive(Debug, Clone, Copy)]
-pub(super) struct WinsorizedEstimate {
-    pub(super) center: f32,
-    pub(super) sigma: f32,
-}
-
-/// Sample standard deviation of `values` about the given `center` (not MAD) — the spread estimate
-/// the Winsorized robust loop iterates on.
-pub(super) fn winsorized_stddev(values: &[f32], center: f32) -> f32 {
-    let n = values.len() as f32;
-    if n <= 1.0 {
-        return 0.0;
-    }
-    let variance = values
-        .iter()
-        .map(|&v| {
-            let d = v - center;
-            d * d
-        })
-        .sum::<f32>()
-        / (n - 1.0);
-    variance.sqrt()
 }
