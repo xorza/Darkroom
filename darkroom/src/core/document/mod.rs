@@ -1,4 +1,5 @@
 pub(crate) mod error;
+pub(crate) mod graph_revision;
 pub(crate) mod open_document;
 
 use ::serde::{Deserialize, Serialize};

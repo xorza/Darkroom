@@ -11,6 +11,7 @@ use std::path;
 use std::path::{Path, PathBuf};
 
 use crate::core::document::Document;
+use crate::core::document::graph_revision::GraphRevision;
 use crate::core::edit::action_stack::ActionStack;
 use crate::core::edit::document_queue::DocumentQueue;
 use crate::core::edit::document_request::DocumentRequest;
@@ -39,12 +40,14 @@ const UNDO_HISTORY_BYTES: usize = 1 << 20;
 struct StepSignals {
     geometry_stale: bool,
     dirtied: bool,
+    retyped: bool,
 }
 
 impl StepSignals {
     fn fold(&mut self, step: &UndoStep) {
         self.geometry_stale |= step.invalidates_cached_geometry();
         self.dirtied |= step.dirties_document();
+        self.retyped |= step.retypes_outputs();
     }
 }
 
@@ -62,6 +65,9 @@ pub(crate) struct OpenDocument {
     /// It can read "dirty" after an undo returns the document to its saved
     /// state — the safe direction (prompt rather than silently discard).
     pub(crate) dirty: bool,
+    /// The state of the graph its output types are resolved from; moved by
+    /// every edit, undo or redo that can retype an output.
+    revision: GraphRevision,
     /// This document's undo history. Beside the document rather than on a
     /// frontend because it *is* document state — opening another file
     /// replaces the pair, and no UI can outlive one and inherit the other's
@@ -81,6 +87,7 @@ impl Default for OpenDocument {
             document: Document::default(),
             path: None,
             dirty: false,
+            revision: GraphRevision::fresh(),
             history: ActionStack::new(UNDO_HISTORY_BYTES),
             batch: Vec::new(),
         }
@@ -223,7 +230,15 @@ impl OpenDocument {
         // we accept a stale "dirty" rather than tracking saved state
         // precisely.
         self.dirty |= signals.dirtied;
+        if signals.retyped {
+            self.revision = GraphRevision::fresh();
+        }
         Relayout::needed_if(signals.geometry_stale)
+    }
+
+    /// The state of the graph that output types are resolved from.
+    pub(crate) fn graph_revision(&self) -> GraphRevision {
+        self.revision
     }
 
     /// Open the document at `path`, holding each func node to the ports it was

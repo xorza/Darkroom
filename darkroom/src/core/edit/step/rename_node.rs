@@ -36,4 +36,8 @@ impl Reversible for RenameNode {
     fn invalidates_cached_geometry(&self) -> bool {
         true
     }
+
+    fn retypes_outputs(&self) -> bool {
+        false
+    }
 }

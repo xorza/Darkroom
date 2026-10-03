@@ -15,13 +15,14 @@
 //! field read, a hash lookup, or a slice index, so a per-widget call is
 //! O(1) and nothing has to be rebuilt when the document moves. The one answer
 //! that cannot come off a declaration — a wildcard output's resolved type —
-//! is read out of the [`OutputTypes`] table the context carries, resolved once
-//! by [`GraphCtx::new`] rather than per read (see
+//! is read out of the [`OutputTypes`] table the context carries, which the
+//! caller resolves once per graph edit rather than per read (see
 //! [`OutputCtx::ty`](output_ctx::OutputCtx::ty)).
 
 pub(crate) mod input_ctx;
 pub(crate) mod node_ctx;
 pub(crate) mod output_ctx;
+pub(crate) mod output_type_cache;
 
 use std::collections::BTreeSet;
 
@@ -63,9 +64,9 @@ pub(crate) struct GraphCtx<'a> {
     /// once for the whole graph, so reading one is a lookup rather than a
     /// walk. See [`OutputCtx::ty`](output_ctx::OutputCtx::ty).
     ///
-    /// Resolved by [`Self::new`] against the document the `window` carries, and
-    /// exclusively borrowed for as long as this context lives — so it cannot be
-    /// a graph edit behind, and nothing can move it out from under a reader.
+    /// Resolved by the caller against the document the `window` carries, and
+    /// borrowed for as long as this context lives — so nothing can move it out
+    /// from under a reader.
     output_types: &'a OutputTypes,
     /// Whether a pane is showing this graph, snapshot when the context was
     /// composed. See [`Self::is_visible`].
@@ -81,20 +82,12 @@ impl<'a> GraphCtx<'a> {
     /// answered "no nodes, so no pane" would leave a fresh document with no
     /// canvas to place its first node on.
     ///
-    /// **Resolves `output_types` against that document on the way in**, which
-    /// is why it arrives `&mut` and leaves shared. A context's readers answer a
-    /// wildcard port off that table, so its freshness is not a contract for
-    /// callers to keep — composing a context *is* the refresh, and the borrow
-    /// then lasts as long as the context, so nothing can edit the graph out from
-    /// under it. Darkroom edits between passes and composes a context per pass,
-    /// so each pass pays one resolve over the document it was handed.
-    ///
-    /// The table is threaded in rather than owned because the context is `Copy`:
-    /// the caller keeps the allocation across frames, and a refresh reuses its
-    /// capacity instead of building a map per pass.
-    pub(crate) fn new(window: WindowCtx<'a>, output_types: &'a mut OutputTypes) -> Self {
+    /// `output_types` must be resolved against that document — see
+    /// [`OutputTypeCache`](output_type_cache::OutputTypeCache), which resolves
+    /// it again only after an edit that can retype an output. The table is
+    /// threaded in rather than owned because the context is `Copy`.
+    pub(crate) fn new(window: WindowCtx<'a>, output_types: &'a OutputTypes) -> Self {
         let doc = window.document();
-        output_types.update(&doc.graph, window.app().library());
         Self {
             is_visible: doc.shows_graph(),
             window,

@@ -69,6 +69,10 @@ impl UndoStep {
         self.kind().invalidates_cached_geometry()
     }
 
+    pub(crate) fn retypes_outputs(&self) -> bool {
+        self.kind().retypes_outputs()
+    }
+
     /// Fold `next`, a later frame of the same held gesture, into this step:
     /// keep this step's "from" half and adopt `next`'s "to" half, in place.
     ///

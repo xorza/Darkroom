@@ -143,4 +143,8 @@ impl Reversible for NodePresence {
     fn invalidates_cached_geometry(&self) -> bool {
         true
     }
+
+    fn retypes_outputs(&self) -> bool {
+        true
+    }
 }

@@ -1,5 +1,7 @@
 //! The root of the UI's context chain.
 
+use std::sync::Arc;
+
 use scenarium::Library;
 
 use crate::gui::state::run_state::RunState;
@@ -30,7 +32,7 @@ use crate::gui::theme::Theme;
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct AppCtx<'a> {
     theme: &'a Theme,
-    library: &'a Library,
+    library: &'a Arc<Library>,
     /// Last run's centralized runtime state: per-node status/logs and the
     /// latest published values read by preview cards and viewers.
     run_state: &'a RunState,
@@ -40,7 +42,7 @@ pub(crate) struct AppCtx<'a> {
 impl<'a> AppCtx<'a> {
     pub(crate) fn new(
         theme: &'a Theme,
-        library: &'a Library,
+        library: &'a Arc<Library>,
         run_state: &'a RunState,
         status: StatusInputs<'a>,
     ) -> Self {
@@ -58,6 +60,12 @@ impl<'a> AppCtx<'a> {
 
     /// The library every node's declaration is resolved through.
     pub(crate) fn library(self) -> &'a Library {
+        self.library
+    }
+
+    /// The library as the frame holds it, for a cache that has to know
+    /// whether it is the one it was filled against.
+    pub(crate) fn shared_library(self) -> &'a Arc<Library> {
         self.library
     }
 

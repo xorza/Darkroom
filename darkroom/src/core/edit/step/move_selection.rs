@@ -77,4 +77,8 @@ impl Reversible for MoveSelection {
     fn invalidates_cached_geometry(&self) -> bool {
         false
     }
+
+    fn retypes_outputs(&self) -> bool {
+        false
+    }
 }
