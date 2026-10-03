@@ -295,23 +295,24 @@ fn extract_central_region(a: &[f32], b: &[f32], size: Size2us, margin: usize) ->
 #[test]
 fn the_public_warp_samples_through_the_sip_correction() {
     use crate::stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
+    use crate::testing::synthetic::distortion::{RadialField, RadialPairs};
 
     let size = Size2us::new(128, 128);
-    let center = DVec2::new(64.0, 64.0);
     let transform = Transform::translation(DVec2::new(5.0, -3.0));
-    let mut ref_points = Vec::new();
-    let mut target_points = Vec::new();
-    for gy in 0..10 {
-        for gx in 0..10 {
-            let r = DVec2::new(10.0 + f64::from(gx) * 11.0, 10.0 + f64::from(gy) * 11.0);
-            let d = r - center;
-            ref_points.push(r);
-            target_points.push(transform.apply(r + 3e-6 * d * d.length_squared()));
-        }
-    }
+    let field = RadialField {
+        transform,
+        start: 10,
+        step: 11,
+        extent: 109,
+        ..RadialField::new(DVec2::new(64.0, 64.0), 3e-6)
+    };
+    let RadialPairs {
+        reference: ref_points,
+        target: target_points,
+    } = field.pairs();
     let sip_config = SipConfig {
         order: 3,
-        reference_point: Some(center),
+        reference_point: Some(field.centre),
         ..Default::default()
     };
     let sip =

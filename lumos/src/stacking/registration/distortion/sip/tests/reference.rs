@@ -1,214 +1,98 @@
 use super::*;
 
+/// Without a reference point the fit centres on the points' centroid: on the grid
+/// `200, 300, …, 800` that is (500, 500), the barrel's own centre, so the fit is exact.
 #[test]
 fn reference_point_none_uses_centroid() {
-    // When reference_point is None, centroid of ref_points is used.
-    // For a symmetric grid (200..=800 step 100), centroid = (500, 500).
-    let center = DVec2::new(500.0, 500.0);
-    let k = 1e-7;
-
-    let mut ref_points = Vec::new();
-    let mut target_points = Vec::new();
-    for y in (200..=800).step_by(100) {
-        for x in (200..=800).step_by(100) {
-            let p = DVec2::new(f64::from(x), f64::from(y));
-            ref_points.push(p);
-            let d = p - center;
-            target_points.push(p + d * k * d.length_squared());
-        }
-    }
-
-    let transform = Transform::identity();
+    let field = RadialField {
+        start: 200,
+        extent: 800,
+        ..barrel()
+    };
+    let RadialPairs { reference, target } = field.pairs();
     let config = SipConfig {
         order: 3,
         reference_point: None,
         ..Default::default()
     };
-
-    let sip = fit_sip(&ref_points, &target_points, &transform, &config).polynomial;
-
-    // Centroid of symmetric grid = center, so this should work as well as explicit center
-    let residuals = sip.compute_corrected_residuals(&ref_points, &target_points, &transform);
-    let r = rms(&residuals);
-    assert!(
-        r < 0.01,
-        "Centroid reference should produce good fit: RMS={r:.6}"
-    );
-
-    // The internal reference_point should be the centroid = (500, 500)
-    // Verify: sum of ref_points / count:
-    // x values: 200,300,...,800 (7 values), mean = (200+800)/2 = 500
-    // y values: same. So centroid = (500, 500).
+    let sip = fit_sip(&reference, &target, &Transform::identity(), &config).polynomial;
     assert_eq!(
         sip.norm,
-        PointNormalization::around(&ref_points, center),
-        "the reference point is the centroid (500, 500)"
+        PointNormalization::around(&reference, field.centre)
     );
+    let residuals = sip.compute_corrected_residuals(&reference, &target, &Transform::identity());
+    assert!(rms(&residuals) <= EXACT_FIT_PX);
 }
 
+/// SIP has no constant or linear terms — those belong to the transform — so a radial field is a
+/// SIP polynomial only about its own centre. Points in one quadrant of a field centred at
+/// (512, 384): fitted about that centre, exact; about the points' centroid, the field's shift of
+/// origin leaves linear terms the polynomial cannot hold.
 #[test]
-fn crpix_vs_centroid_when_points_are_off_center() {
-    // When points are clustered in one quadrant, the centroid differs from
-    // image center. Radial distortion from image center fits better with CRPIX.
-    let image_center = DVec2::new(512.0, 384.0);
-    let k = 1e-7;
-
-    let mut ref_points = Vec::new();
-    let mut target_points = Vec::new();
-
-    // Points in lower-left quadrant only
+fn a_radial_field_is_exact_only_about_its_centre() {
+    let field = RadialField::new(DVec2::new(512.0, 384.0), 1e-7);
+    let mut reference = Vec::new();
     for y in (100..=350).step_by(50) {
         for x in (100..=450).step_by(50) {
-            let p = DVec2::new(f64::from(x), f64::from(y));
-            ref_points.push(p);
-            let d = p - image_center;
-            target_points.push(p + d * k * d.length_squared());
+            reference.push(DVec2::new(f64::from(x), f64::from(y)));
         }
     }
-
-    let transform = Transform::identity();
-
-    let config_crpix = SipConfig {
-        order: 3,
-        reference_point: Some(image_center),
-        ..Default::default()
+    let target: Vec<DVec2> = reference.iter().map(|&p| field.image(p)).collect();
+    let rms_about = |reference_point| {
+        let config = SipConfig {
+            order: 3,
+            reference_point,
+            ..Default::default()
+        };
+        let sip = fit_sip(&reference, &target, &Transform::identity(), &config).polynomial;
+        rms(&sip.compute_corrected_residuals(&reference, &target, &Transform::identity()))
     };
-    let config_centroid = SipConfig {
-        order: 3,
-        reference_point: None,
-        ..Default::default()
-    };
-
-    let sip_crpix = fit_sip(&ref_points, &target_points, &transform, &config_crpix).polynomial;
-    let sip_centroid =
-        fit_sip(&ref_points, &target_points, &transform, &config_centroid).polynomial;
-
-    let rms_crpix =
-        rms(&sip_crpix.compute_corrected_residuals(&ref_points, &target_points, &transform));
-    let rms_centroid =
-        rms(&sip_centroid.compute_corrected_residuals(&ref_points, &target_points, &transform));
-
-    // CRPIX should fit better since distortion originates from image_center
-    assert!(
-        rms_crpix < rms_centroid,
-        "CRPIX RMS ({rms_crpix:.6}) should be less than centroid RMS ({rms_centroid:.6})"
-    );
-    assert!(
-        rms_crpix < 0.01,
-        "CRPIX RMS should be very small: {rms_crpix:.6}"
-    );
+    let centred = rms_about(Some(field.centre));
+    let centroid = rms_about(None);
+    assert!(centred <= EXACT_FIT_PX, "{centred:e}");
+    assert!(centroid > 1e3 * EXACT_FIT_PX, "{centroid:e}");
 }
 
+/// Sigma clipping drops gross outliers and refits on the rest: three points 20–30 px off the barrel
+/// field, among 121 on it. Clipped, the fit of the clean points is exact; unclipped, the outliers
+/// pull it off. On clean data clipping finds nothing to drop, and the fit is the unclipped one bit
+/// for bit.
 #[test]
-fn sigma_clipping_rejects_outliers() {
-    let center = DVec2::new(500.0, 500.0);
-    let k = 1e-7;
-    let PointPairs {
-        reference: mut ref_points,
-        target: mut target_points,
-    } = make_radial_distortion_points(center, k, 100, 1000);
-
-    let transform = Transform::identity();
-    let n_clean = ref_points.len();
-
-    // Inject 3 gross outliers (20-pixel shifts)
-    ref_points.push(DVec2::new(300.0, 300.0));
-    target_points.push(DVec2::new(320.0, 280.0));
-    ref_points.push(DVec2::new(700.0, 200.0));
-    target_points.push(DVec2::new(685.0, 225.0));
-    ref_points.push(DVec2::new(100.0, 800.0));
-    target_points.push(DVec2::new(130.0, 810.0));
-
-    // Fit WITHOUT clipping
-    let config_no_clip = SipConfig {
-        order: 3,
-        reference_point: Some(center),
-        clip_iterations: 0,
-        ..Default::default()
-    };
-    let sip_no_clip = fit_sip(&ref_points, &target_points, &transform, &config_no_clip).polynomial;
-    let rms_no_clip = rms(&sip_no_clip.compute_corrected_residuals(
-        &ref_points[..n_clean],
-        &target_points[..n_clean],
-        &transform,
-    ));
-
-    // Fit WITH clipping (default: sigma=3, iterations=3)
-    let config_clipped = SipConfig {
-        order: 3,
-        reference_point: Some(center),
-        ..Default::default()
-    };
-    let sip_clipped = fit_sip(&ref_points, &target_points, &transform, &config_clipped).polynomial;
-    let rms_clipped = rms(&sip_clipped.compute_corrected_residuals(
-        &ref_points[..n_clean],
-        &target_points[..n_clean],
-        &transform,
-    ));
-
-    // Clipped fit should be significantly better on clean points
-    assert!(
-        rms_clipped < rms_no_clip * 0.5,
-        "Clipped RMS ({rms_clipped:.6}) should be much less than unclipped RMS ({rms_no_clip:.6})"
-    );
-
-    // Clipped fit should recover near-perfect results
-    assert!(
-        rms_clipped < 0.01,
-        "Clipped RMS should be near-zero: {rms_clipped:.6}"
-    );
-}
-
-#[test]
-fn sigma_clipping_no_effect_on_clean_data() {
-    // With clean data, clipping should not reject anything, so results should
-    // be identical with and without clipping.
-    let center = DVec2::new(500.0, 500.0);
-    let PointPairs {
-        reference: ref_points,
-        target: target_points,
-    } = make_radial_distortion_points(center, 1e-7, 100, 1000);
-
-    let transform = Transform::identity();
-
-    let config_clipped = SipConfig {
-        order: 3,
-        reference_point: Some(center),
-        ..Default::default()
-    };
-    let config_no_clip = SipConfig {
-        order: 3,
-        reference_point: Some(center),
-        clip_iterations: 0,
-        ..Default::default()
-    };
-
-    let sip_clipped = fit_sip(&ref_points, &target_points, &transform, &config_clipped).polynomial;
-    let sip_no_clip = fit_sip(&ref_points, &target_points, &transform, &config_no_clip).polynomial;
-
-    // Coefficients should be identical (clipping didn't change anything)
-    for (i, (&a, &b)) in sip_clipped
-        .coeffs_u
-        .iter()
-        .zip(sip_no_clip.coeffs_u.iter())
-        .enumerate()
-    {
-        assert!(
-            (a - b).abs() < 1e-14,
-            "coeffs_u[{i}]: clipped={a:.e}, no_clip={b:.e}"
-        );
+fn sigma_clipping_drops_outliers_and_leaves_clean_data_alone() {
+    let RadialPairs {
+        mut reference,
+        mut target,
+    } = barrel().pairs();
+    let clean = reference.len();
+    for (r, t) in [
+        ([300.0, 300.0], [320.0, 280.0]),
+        ([700.0, 200.0], [685.0, 225.0]),
+        ([100.0, 800.0], [130.0, 810.0]),
+    ] {
+        reference.push(DVec2::from_array(r));
+        target.push(DVec2::from_array(t));
     }
-    for (i, (&a, &b)) in sip_clipped
-        .coeffs_v
-        .iter()
-        .zip(sip_no_clip.coeffs_v.iter())
-        .enumerate()
-    {
-        assert!(
-            (a - b).abs() < 1e-14,
-            "coeffs_v[{i}]: clipped={a:.e}, no_clip={b:.e}"
-        );
-    }
+    let clean_rms = |clip_iterations| {
+        let config = SipConfig {
+            order: 3,
+            reference_point: Some(barrel().centre),
+            clip_iterations,
+            ..Default::default()
+        };
+        let sip = fit_sip(&reference, &target, &Transform::identity(), &config).polynomial;
+        rms(&sip.compute_corrected_residuals(
+            &reference[..clean],
+            &target[..clean],
+            &Transform::identity(),
+        ))
+    };
+    assert!(clean_rms(3) <= EXACT_FIT_PX, "{:e}", clean_rms(3));
+    assert!(clean_rms(0) > 1e3 * EXACT_FIT_PX, "{:e}", clean_rms(0));
+
+    let clipped = fit_field(&barrel(), 3, 3).polynomial;
+    let unclipped = fit_field(&barrel(), 3, 0).polynomial;
+    assert_eq!(clipped.coeffs_u, unclipped.coeffs_u);
+    assert_eq!(clipped.coeffs_v, unclipped.coeffs_v);
 }
 
 /// A narrow strip — x over 1000 px, y over 100 — makes the v-dependent monomials tiny beside the
@@ -218,19 +102,15 @@ fn sigma_clipping_no_effect_on_clean_data() {
 /// conditioning on top.
 #[test]
 fn a_narrow_strip_is_fitted_to_rounding() {
-    let center = DVec2::new(500.0, 500.0);
-    let k = 1e-7;
-
+    let field = barrel();
+    let center = field.centre;
     let mut ref_points = Vec::new();
-    let mut target_points = Vec::new();
     for y in (450..=550).step_by(10) {
         for x in (0..=1000).step_by(20) {
-            let p = DVec2::new(f64::from(x), f64::from(y));
-            ref_points.push(p);
-            let d = p - center;
-            target_points.push(p + d * k * d.length_squared());
+            ref_points.push(DVec2::new(f64::from(x), f64::from(y)));
         }
     }
+    let target_points: Vec<DVec2> = ref_points.iter().map(|&p| field.image(p)).collect();
     // 11 y-values × 51 x-values = 561 points; order 5 needs 3 × 18 = 54.
 
     let transform = Transform::identity();
@@ -243,10 +123,11 @@ fn a_narrow_strip_is_fitted_to_rounding() {
 
     for x_val in (0..=1000).step_by(100) {
         let p = DVec2::new(f64::from(x_val), 500.0);
-        let d = p - center;
-        let expected_target = p + d * k * d.length_squared();
-        let error = (transform.apply(sip.correct(p)) - expected_target).length();
-        assert!(error < 1e-9, "strip fit error at x={x_val}: {error:e} px");
+        let error = (transform.apply(sip.correct(p)) - field.image(p)).length();
+        assert!(
+            error <= EXACT_FIT_PX,
+            "strip fit error at x={x_val}: {error:e} px"
+        );
     }
 }
 
@@ -264,13 +145,7 @@ fn clipping_keeps_the_previous_fit_below_the_point_floor() {
             )
         })
         .collect();
-    let mut target_points: Vec<DVec2> = ref_points
-        .iter()
-        .map(|&p| {
-            let d = p - center;
-            p + d * 1e-7 * d.length_squared()
-        })
-        .collect();
+    let mut target_points: Vec<DVec2> = ref_points.iter().map(|&p| barrel().image(p)).collect();
     ref_points.push(DVec2::new(300.0, 800.0));
     target_points.push(DVec2::new(340.0, 760.0));
 

@@ -31,14 +31,15 @@
 //! (ready-made field builders), [`metrics`] (graders).
 //!
 //! Building blocks: [`star_profiles`] (PSF kernels), [`backgrounds`] (background fields),
-//! [`artifacts`] (cosmic rays, Bayer pattern), [`transforms`] (star-position transforms for
-//! registration), [`patterns`] (warp/interpolation fixtures), [`background_map`]
-//! (`BackgroundEstimate` fixtures).
+//! [`artifacts`] (cosmic rays, Bayer pattern), [`transforms`] (random star fields for
+//! registration), [`distortion`] (radial lens fields for SIP), [`patterns`] (warp/interpolation
+//! fixtures), [`background_map`] (`BackgroundEstimate` fixtures).
 
 pub(crate) mod artifacts;
 pub(crate) mod background_map;
 pub(crate) mod backgrounds;
 pub(crate) mod camera;
+pub(crate) mod distortion;
 pub(crate) mod fixtures;
 /// Eyeball-verification tool, not dead code: `#[ignore]`d generators that render every synthetic
 /// combination to PNG. Nothing calls into it — that is the point, it is run by hand. See its

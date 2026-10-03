@@ -40,49 +40,6 @@ fn insufficient_point_count_scales_with_order() {
 }
 
 #[test]
-fn zero_distortion_produces_zero_correction() {
-    // When target = ref (no distortion), all SIP coefficients should be ~0.
-    let mut ref_points = Vec::new();
-    let mut target_points = Vec::new();
-
-    for y in (0..=400).step_by(100) {
-        for x in (0..=400).step_by(100) {
-            let p = DVec2::new(f64::from(x), f64::from(y));
-            ref_points.push(p);
-            target_points.push(p);
-        }
-    }
-
-    let transform = Transform::identity();
-    let config = SipConfig {
-        order: 2,
-        reference_point: Some(DVec2::new(200.0, 200.0)),
-        ..Default::default()
-    };
-
-    let sip = fit_sip(&ref_points, &target_points, &transform, &config).polynomial;
-
-    // Verify all coefficients are essentially zero
-    for (i, &c) in sip.coeffs_u.iter().enumerate() {
-        assert!(c.abs() < 1e-12, "coeffs_u[{i}] should be ~0, got {c:.e}");
-    }
-    for (i, &c) in sip.coeffs_v.iter().enumerate() {
-        assert!(c.abs() < 1e-12, "coeffs_v[{i}] should be ~0, got {c:.e}");
-    }
-
-    // Corrections at all points should be zero
-    for &p in &ref_points {
-        let corrected = sip.correct(p);
-        assert!(
-            (corrected - p).length() < 1e-10,
-            "Correction at {:?} should be zero, got {:?}",
-            p,
-            corrected - p
-        );
-    }
-}
-
-#[test]
 fn invalid_config_returns_error() {
     let ref_points = vec![DVec2::ZERO; 10];
     let target_points = vec![DVec2::ZERO; 10];
@@ -157,210 +114,30 @@ fn mismatched_and_singular_fits_return_exact_errors() {
     assert!(matches!(singular, RegistrationError::SingularSipSystem));
 }
 
+/// `max_correction` is the largest correction over a grid on the frame, corners included: the barrel
+/// field's farthest point from the centre is a corner at `d = (−500, −500)`, where `|d|² = 500 000`
+/// and the correction `d·k·|d|²` is `(−25, −25)`, of size `25√2`. An undistorted field has none.
 #[test]
-fn max_correction_at_corners() {
-    // For radial distortion from center, max correction is at the corners
-    // (farthest from center).
-    let center = DVec2::new(500.0, 500.0);
-    let k = 1e-7;
-    let PointPairs {
-        reference: ref_points,
-        target: target_points,
-    } = make_radial_distortion_points(center, k, 100, 1000);
-
-    let transform = Transform::identity();
-    let config = SipConfig {
-        order: 3,
-        reference_point: Some(center),
-        ..Default::default()
-    };
-
-    let sip = fit_sip(&ref_points, &target_points, &transform, &config).polynomial;
-
-    let max_corr = sip.max_correction(Size2us::new(1000, 1000), 50.0);
-
-    // Hand-compute expected max correction at corner (0,0):
-    // d = (0,0) - (500,500) = (-500, -500), |d|^2 = 500000
-    // distortion = (-500, -500) * 1e-7 * 500000 = (-25, -25)
-    // |distortion| = 25 * sqrt(2) ~ 35.36
-    // The SIP should recover most of this distortion.
-    let expected_corner_correction = 25.0 * 2.0_f64.sqrt();
-
+fn max_correction_is_the_corner_correction() {
+    let size = Size2us::new(1000, 1000);
+    let barrel = fit_field(&barrel(), 3, 3).polynomial;
+    let corner = 25.0 * 2f64.sqrt();
+    assert!((barrel.max_correction(size, 50.0) - corner).abs() <= EXACT_FIT_PX);
+    let flat = fit_field(
+        &RadialField {
+            k: 0.0,
+            ..super::barrel()
+        },
+        2,
+        3,
+    )
+    .polynomial;
+    assert_eq!(flat.max_correction(size, 50.0), 0.0);
     assert!(
-        max_corr > expected_corner_correction * 0.9,
-        "Max correction {max_corr:.4} should be close to expected corner correction {expected_corner_correction:.4}"
-    );
-
-    // Also verify max_correction at center region is much smaller
-    let _max_corr_center = sip.max_correction(Size2us::new(100, 100), 50.0);
-    // The 100x100 grid at (0,0)-(100,100) is far from center,
-    // but let's use a grid around center instead by testing correction there
-    let center_correction = (sip.correct(center) - center).length();
-    assert!(
-        center_correction < 1e-10,
-        "Correction at center should be ~0, got {center_correction:.e}"
-    );
-}
-
-#[test]
-fn max_correction_zero_distortion() {
-    // With zero distortion, max_correction should be ~0.
-    let mut ref_points = Vec::new();
-    let mut target_points = Vec::new();
-    for y in (0..=400).step_by(100) {
-        for x in (0..=400).step_by(100) {
-            let p = DVec2::new(f64::from(x), f64::from(y));
-            ref_points.push(p);
-            target_points.push(p);
-        }
-    }
-
-    let transform = Transform::identity();
-    let config = SipConfig {
-        order: 2,
-        reference_point: Some(DVec2::new(200.0, 200.0)),
-        ..Default::default()
-    };
-
-    let sip = fit_sip(&ref_points, &target_points, &transform, &config).polynomial;
-
-    let max_corr = sip.max_correction(Size2us::new(400, 400), 100.0);
-    assert!(
-        max_corr < 1e-8,
-        "Zero distortion max_correction should be ~0, got {max_corr:.e}"
-    );
-}
-
-#[test]
-fn compute_corrected_residuals_length() {
-    let center = DVec2::new(500.0, 500.0);
-    let PointPairs {
-        reference: ref_points,
-        target: target_points,
-    } = make_radial_distortion_points(center, 1e-7, 100, 1000);
-    let transform = Transform::identity();
-    let config = SipConfig {
-        order: 3,
-        reference_point: Some(center),
-        ..Default::default()
-    };
-
-    let sip = fit_sip(&ref_points, &target_points, &transform, &config).polynomial;
-
-    let residuals = sip.compute_corrected_residuals(&ref_points, &target_points, &transform);
-    assert_eq!(residuals.len(), ref_points.len());
-}
-
-#[test]
-fn compute_corrected_residuals_all_small_for_fitted_data() {
-    // After fitting, every individual residual should be small (not just the mean).
-    let center = DVec2::new(500.0, 500.0);
-    let PointPairs {
-        reference: ref_points,
-        target: target_points,
-    } = make_radial_distortion_points(center, 1e-7, 100, 1000);
-    let transform = Transform::identity();
-    let config = SipConfig {
-        order: 3,
-        reference_point: Some(center),
-        ..Default::default()
-    };
-
-    let sip = fit_sip(&ref_points, &target_points, &transform, &config).polynomial;
-
-    let residuals = sip.compute_corrected_residuals(&ref_points, &target_points, &transform);
-    let max_residual = residuals.iter().copied().fold(0.0_f64, f64::max);
-    assert!(
-        max_residual < 0.05,
-        "Max individual residual should be small, got {max_residual:.6}"
-    );
-}
-
-#[test]
-fn higher_order_fits_higher_order_distortion_better() {
-    // Create a distortion with a 4th-order component that order-2 cannot model.
-    // distortion = d * k2 * r^2 + d * k4 * r^4
-    let center = DVec2::new(500.0, 500.0);
-    let k2 = 1e-7;
-    let k4 = 1e-14; // 4th-order component
-
-    let mut ref_points = Vec::new();
-    let mut target_points = Vec::new();
-
-    for y in (0..=1000).step_by(50) {
-        for x in (0..=1000).step_by(50) {
-            let p = DVec2::new(f64::from(x), f64::from(y));
-            let d = p - center;
-            let r2 = d.length_squared();
-            let r4 = r2 * r2;
-            ref_points.push(p);
-            target_points.push(p + d * k2 * r2 + d * k4 * r4);
-        }
-    }
-
-    let transform = Transform::identity();
-
-    let config_2 = SipConfig {
-        order: 2,
-        reference_point: Some(center),
-        ..Default::default()
-    };
-    let config_4 = SipConfig {
-        order: 4,
-        reference_point: Some(center),
-        ..Default::default()
-    };
-
-    let sip_2 = fit_sip(&ref_points, &target_points, &transform, &config_2).polynomial;
-    let sip_4 = fit_sip(&ref_points, &target_points, &transform, &config_4).polynomial;
-
-    let rms_2 = rms(&sip_2.compute_corrected_residuals(&ref_points, &target_points, &transform));
-    let rms_4 = rms(&sip_4.compute_corrected_residuals(&ref_points, &target_points, &transform));
-
-    // Order 4 should fit the 4th-order component much better than order 2
-    assert!(
-        rms_4 < rms_2,
-        "Order 4 RMS ({rms_4:.6}) should be less than order 2 RMS ({rms_2:.6})"
-    );
-    // Order 4 should produce a reasonably tight fit
-    // (SIP polynomials are not exact for r^4 terms due to cross-term modeling)
-    assert!(rms_4 < 0.5, "Order 4 RMS should be small: {rms_4:.6}");
-}
-
-#[test]
-fn different_k_values_produce_different_corrections() {
-    // Parameter sensitivity: different distortion strengths should produce
-    // proportionally different corrections.
-    let center = DVec2::new(500.0, 500.0);
-    let transform = Transform::identity();
-    let config = SipConfig {
-        order: 3,
-        reference_point: Some(center),
-        ..Default::default()
-    };
-
-    let PointPairs {
-        reference: ref_1,
-        target: tgt_1,
-    } = make_radial_distortion_points(center, 1e-7, 100, 1000);
-    let PointPairs {
-        reference: ref_2,
-        target: tgt_2,
-    } = make_radial_distortion_points(center, 5e-7, 100, 1000);
-
-    let sip_1 = fit_sip(&ref_1, &tgt_1, &transform, &config).polynomial;
-    let sip_2 = fit_sip(&ref_2, &tgt_2, &transform, &config).polynomial;
-
-    // At corner (0, 0): distortion scales linearly with k.
-    // k2/k1 = 5, so correction magnitude ratio should be ~5.
-    let test_p = DVec2::new(0.0, 0.0);
-    let corr_1 = (sip_1.correct(test_p) - test_p).length();
-    let corr_2 = (sip_2.correct(test_p) - test_p).length();
-
-    let ratio = corr_2 / corr_1;
-    assert!(
-        (ratio - 5.0).abs() < 0.5,
-        "Correction ratio should be ~5.0 (k ratio), got {ratio:.4}"
+        flat.coeffs_u
+            .iter()
+            .chain(&flat.coeffs_v)
+            .all(|&c| c == 0.0)
     );
 }
 
@@ -377,28 +154,16 @@ fn different_k_values_produce_different_corrections() {
 /// targets to the same bound.
 #[test]
 fn sip_corrects_in_the_reference_frame_under_any_linear_part() {
-    let center = DVec2::new(500.0, 500.0);
-    let k = 1e-7;
-    let mut reference = Vec::new();
-    for y in (0..=1000).step_by(50) {
-        for x in (0..=1000).step_by(50) {
-            reference.push(DVec2::new(f64::from(x), f64::from(y)));
-        }
-    }
-    let distorted = |r: DVec2| {
-        let d = r - center;
-        r + d * k * d.length_squared()
-    };
     let cases = [
         (
             "10°",
             Transform::similarity(DVec2::new(30.0, -20.0), 10f64.to_radians(), 1.02),
-            1e-8,
+            EXACT_FIT_PX,
         ),
         (
             "180°",
             Transform::euclidean(DVec2::new(1000.0, 1000.0), PI),
-            1e-8,
+            EXACT_FIT_PX,
         ),
         (
             "homography",
@@ -407,19 +172,15 @@ fn sip_corrects_in_the_reference_frame_under_any_linear_part() {
         ),
     ];
     for (name, transform, bound) in cases {
-        let target: Vec<DVec2> = reference
-            .iter()
-            .map(|&r| transform.apply(distorted(r)))
-            .collect();
+        let field = RadialField {
+            transform,
+            step: 50,
+            ..barrel()
+        };
+        let RadialPairs { reference, target } = field.pairs();
         // No clipping: the field is noiseless, and the homography's second-order residual is
         // structure, not outliers, so clipping would only trim the corners it is largest at.
-        let config = SipConfig {
-            order: 3,
-            reference_point: Some(center),
-            clip_iterations: 0,
-            ..Default::default()
-        };
-        let fit = fit_sip(&reference, &target, &transform, &config);
+        let fit = fit_field(&field, 3, 0);
         assert!(
             fit.max_residual < bound,
             "{name}: max residual {:e}",

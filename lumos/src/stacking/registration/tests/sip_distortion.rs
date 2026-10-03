@@ -10,26 +10,19 @@ use crate::stacking::registration::tests::helpers;
 use crate::stacking::registration::tests::helpers::register;
 use crate::stacking::registration::transform::Transform;
 use crate::testing::prelude::*;
+use crate::testing::synthetic::distortion::RadialField;
 use crate::testing::synthetic::transforms::{generate_random_positions, positions_to_stars};
-
-/// Apply a radial barrel distortion `p' = p + k·r²·(p − center)` about `center`.
-fn barrel(p: DVec2, center: DVec2, k: f64) -> DVec2 {
-    let d = p - center;
-    p + d * (k * d.length_squared())
-}
 
 #[test]
 fn register_with_sip_recovers_barrel_distortion() {
-    let center = DVec2::new(512.0, 512.0);
     let ref_pos = generate_random_positions(120, 1024.0, 1024.0, 42);
 
     // Target = a small linear shift composed with a cubic barrel distortion (~3–4 px at corners).
-    let base = Transform::translation(DVec2::new(7.0, -4.0));
-    let k = 1e-8;
-    let target_pos: Vec<DVec2> = ref_pos
-        .iter()
-        .map(|&p| base.apply(barrel(p, center, k)))
-        .collect();
+    let field = RadialField {
+        transform: Transform::translation(DVec2::new(7.0, -4.0)),
+        ..RadialField::new(DVec2::new(512.0, 512.0), 1e-8)
+    };
+    let target_pos: Vec<DVec2> = ref_pos.iter().map(|&p| field.image(p)).collect();
 
     let ref_stars = positions_to_stars(&ref_pos, 3.0);
     let target_stars = positions_to_stars(&target_pos, 3.0);
@@ -54,7 +47,7 @@ fn register_with_sip_recovers_barrel_distortion() {
         &Config {
             sip: Some(SipConfig {
                 order: 3,
-                reference_point: Some(center),
+                reference_point: Some(field.centre),
                 ..Default::default()
             }),
             ..base_config

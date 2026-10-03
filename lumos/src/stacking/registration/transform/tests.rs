@@ -147,29 +147,23 @@ fn warp_transform_new() {
 #[test]
 fn warp_transform_with_sip() {
     use crate::stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
+    use crate::testing::synthetic::distortion::{RadialField, RadialPairs};
 
     let transform = Transform::similarity(DVec2::new(3.0, -2.0), 0.02, 1.01);
-    let center = DVec2::new(50.0, 50.0);
-    let k = 1e-4;
-    let field = |r: DVec2| {
-        let d = r - center;
-        k * d * d.length_squared()
+    let field = RadialField {
+        transform,
+        start: 5,
+        step: 10,
+        extent: 95,
+        ..RadialField::new(DVec2::new(50.0, 50.0), 1e-4)
     };
-    let mut ref_pts = Vec::new();
-    let mut tgt_pts = Vec::new();
-    for gy in 0..10 {
-        for gx in 0..10 {
-            let r = DVec2::new(5.0 + f64::from(gx) * 10.0, 5.0 + f64::from(gy) * 10.0);
-            ref_pts.push(r);
-            tgt_pts.push(transform.apply(r + field(r)));
-        }
-    }
+    let RadialPairs { reference, target } = field.pairs();
     let sip_config = SipConfig {
         order: 3,
-        reference_point: Some(center),
+        reference_point: Some(field.centre),
         ..Default::default()
     };
-    let sip = SipPolynomial::fit_from_transform(&ref_pts, &tgt_pts, &transform, &sip_config)
+    let sip = SipPolynomial::fit_from_transform(&reference, &target, &transform, &sip_config)
         .unwrap()
         .polynomial;
 
@@ -183,12 +177,12 @@ fn warp_transform_with_sip() {
         assert_eq!(wt.apply(p), transform.apply(sip.correct(p)), "{p:?}");
         let correction = sip.correct(p) - p;
         assert!(
-            (correction - field(p)).length() < 1e-9,
+            (correction - field.displacement(p)).length() < 1e-9,
             "{p:?}: correction {correction:?}, field {:?}",
-            field(p)
+            field.displacement(p)
         );
     }
-    assert_eq!(field(DVec2::ZERO), DVec2::new(-25.0, -25.0));
+    assert_eq!(field.displacement(DVec2::ZERO), DVec2::new(-25.0, -25.0));
 }
 
 #[test]
@@ -211,9 +205,7 @@ fn warp_transform_apply_no_sip_matches_transform() {
 #[test]
 fn auto_sizes_its_gates_against_the_model_it_can_climb_to() {
     // The ladder ends at Homography, so every count `Auto` is measured by has to be Homography's
-    // — anything smaller would let a pair through that the last rung cannot fit. Previously
-    // `TransformType::Auto` answered Similarity's 2 here while every caller substituted
-    // Homography's 4, and only the fact that nothing called it kept the two from disagreeing.
+    // — anything smaller would let a pair through that the last rung cannot fit.
     assert_eq!(
         TransformModel::Auto.most_general(),
         TransformType::Homography

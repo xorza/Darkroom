@@ -28,12 +28,12 @@ fn sigma_and_recovery_radius_track_the_psf_width() {
     // Undersampled: the floor holds σ_max at 0.5 px where FWHM/2 would give 0.25.
     assert_eq!(max_sigma_from_fwhm(0.5), 0.5);
     // ...including the degenerate catalog that would otherwise trip RansacEstimator's assert.
-    assert!(max_sigma_from_fwhm(0.0) > 0.0);
+    assert_eq!(max_sigma_from_fwhm(0.0), 0.5);
 
-    // Squaring the radius must land exactly on the boundary MAGSAC scores against, or the two
-    // gates disagree about the same point.
+    // Squaring the radius must land on the boundary MAGSAC scores against, or the two gates disagree
+    // about the same point: a square root and a square apart, a few ulps.
     let boundary_sq = CHI2_99_2DOF * sigma * sigma;
-    assert!((radius * radius - boundary_sq).abs() < 1e-9);
+    assert!((radius * radius - boundary_sq).abs() <= 4.0 * f64::EPSILON * boundary_sq);
 }
 
 /// The ladder bar is stricter than the default accuracy gate; if that inverted, `Auto` would

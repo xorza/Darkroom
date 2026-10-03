@@ -47,9 +47,7 @@ struct KNearestCase {
 
 /// `k_nearest` over every layout that mattered, as one table.
 ///
-/// Each row pins the whole result — every rank's index and squared distance, in order — where
-/// several of the thirteen tests this replaces spot-checked a few ranks and left the rest
-/// unasserted. `clustered_points` in particular checked ranks 0, 1 and 4 of its second query.
+/// Each row pins the whole result: every rank's index and squared distance, in order.
 ///
 /// Distances are squared and hand-computed in each row's comment. They are compared to a relative
 /// 1e-9, which is far above the few ulps these arithmetic sums carry and far below the gap any
