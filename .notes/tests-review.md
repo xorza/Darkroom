@@ -15,10 +15,6 @@ Two items need a manifest change, which needs your approval: `common` with `inte
 ## Tests that cannot fail, or do not run the code their name claims
 The fixture, the tolerance or the call path makes the assertion true whatever production does. These tests report coverage that does not exist, so they come first.
 
-### scenarium, common
-Paths without a crate prefix are relative to `scenarium/src/`.
-
-
 ### darkroom, lens, imaginarium, quickbench, root `test_resources/`
 Paths are relative to the repository root.
 
@@ -40,10 +36,6 @@ Paths without a crate prefix are relative to `scenarium/src/`.
 
 ## Risky behavior with no test
 Branches with real failure modes that no test reaches.
-
-### scenarium, common
-Paths without a crate prefix are relative to `scenarium/src/`.
-
 
 ### darkroom, lens, imaginarium, quickbench, root `test_resources/`
 Paths are relative to the repository root.
@@ -79,10 +71,6 @@ Paths are relative to the repository root.
 ## Duplicate tests and fixtures that should be one table or one helper
 The same fixture or property is written many times, with different ad-hoc tolerances. Each copy drifts, and one fix has to be made in many places.
 
-### scenarium, common
-Paths without a crate prefix are relative to `scenarium/src/`.
-
-
 ### darkroom, lens, imaginarium, quickbench, root `test_resources/`
 Paths are relative to the repository root.
 
@@ -96,10 +84,6 @@ Paths are relative to the repository root.
 
 ## Stale, wrong and change-narrating comments
 Comments that describe code that no longer exists, contradict the asserted values, or narrate history.
-
-### scenarium, common
-Paths without a crate prefix are relative to `scenarium/src/`.
-
 
 ### darkroom, lens, imaginarium, quickbench, root `test_resources/`
 Paths are relative to the repository root.
