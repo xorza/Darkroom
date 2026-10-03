@@ -423,12 +423,12 @@ fn status_text(ui: &mut Ui, status: ExecStatus) -> TextInput<'static> {
 
 /// Stable id for a node's inspector toggle chip in the header.
 pub(crate) fn inspect_badge_wid(node_id: NodeId) -> WidgetId {
-    WidgetId::from_hash(("graph.node.inspect_badge", node_id))
+    wid::node("inspect_badge", node_id)
 }
 
 /// Stable id for a node's floating inspection panel.
 pub(super) fn inspect_panel_wid(node_id: NodeId) -> WidgetId {
-    WidgetId::from_hash(("graph.node.inspect_panel", node_id))
+    wid::node("inspect_panel", node_id)
 }
 
 #[cfg(test)]

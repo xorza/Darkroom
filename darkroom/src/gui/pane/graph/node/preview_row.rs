@@ -20,6 +20,7 @@ use scenarium::NodeId;
 
 use crate::core::document::TabRef;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
+use crate::gui::pane::graph::node::wid;
 use crate::gui::requests::Requests;
 use crate::gui::state::preview_store::{PreviewImage, StoredContent};
 use crate::gui::theme::Theme;
@@ -48,7 +49,7 @@ const EMPTY_LABEL: &str = "No value yet";
 /// Stable id for a preview's value area. Reconstructible from the node, so the
 /// canvas-level scan can read last frame's click without a cache.
 pub(crate) fn preview_image_wid(node_id: NodeId) -> WidgetId {
-    WidgetId::from_hash(("graph.node.preview_image", node_id))
+    wid::node("preview_image", node_id)
 }
 
 /// Draw one preview node's value area, plus the image info footer when there is

@@ -355,7 +355,7 @@ impl CanvasGeometry {
             }
             // Emitter event glyphs, drag sources for subscription wires.
             for ev in n.event_refs() {
-                let r = ui.response_for(event_glyph_wid(n.id, ev.event_idx));
+                let r = ui.response_for(event_glyph_wid(ev));
                 self.events.record(ev, r, node_min, n.pos);
             }
             // The subscription pin only exists on sink nodes (only they
