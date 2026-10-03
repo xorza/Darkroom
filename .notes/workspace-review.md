@@ -90,10 +90,6 @@ Severity: Medium — the same default is baked in two crates and goes stale sile
 
 # Low — duplication, dead surface, local simplifications
 
-## The same constant or formula is defined more than once, sometimes truncated
-Severity: Low — two sources for one fact; the copies already differ in precision or convention.
-
-
 ## Public API, dependencies and derives with no production user
 Severity: Low — removable surface; checked with `rg` across the workspace.
 
@@ -106,10 +102,6 @@ Severity: Low — `Option`s that must be `Some`, sentinels, and caches of comput
 
 - [ ] `scenarium` — `execution/engine/mod.rs` `ExecutionEngine::compiled: Option<Arc<CompiledGraph>>` while `CompiledGraph::default()` is documented as the empty program (`expect`s in `execute`/`validate`, early returns elsewhere); `execute` and `Executor::run` both clear the same outcome; `ExecutionEngine::clear` drops the `RunSchedule` buffer the type exists to recycle. `schedule/planner.rs` `Planner::color` `White`/`Black` restate `RunSchedule::states`. `graph/func/mod.rs` `ValueVariant::display_name` copies `name`; `Func::uncacheable` is never read by the engine.
 - [ ] `darkroom` — `gui/frame/geometry/mod.rs` `PortLayer::record`/`snapshot` `node_min: Option<Vec2>` is always `Some`; `widgets/port_glyph.rs` `PortGlyph::new` defaults the fill to a `WHITE` every caller overrides; `theme/card_theme.rs` `CardBorder` is a one-field wrapper whose only caller reads `.color`; `Theme` derives serde (only a test uses it) and serializes derived values (`const_value_editor_revealed`, `inline_rename_title`, `menu_button`, `palantir_theme`) beside their sources; `Theme::build` stores `text: TypeScale::DEFAULT` and passes a separate `&TypeScale::DEFAULT` to `palantir_theme_for` / `menu_button_for`.
-
-## lumos stacking numerics with avoidable loss
-Severity: Low — exact or better-conditioned forms exist.
-
 
 ## scenarium flattens errors to strings and allocates path keys per run
 Severity: Low — precision lost where a caller would branch or show a cause.
