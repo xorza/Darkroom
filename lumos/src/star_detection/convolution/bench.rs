@@ -2,11 +2,12 @@
 
 use crate::internals::prelude::*;
 use crate::internals::synthetic::fixtures::star_field;
+use crate::star_detection::config::fwhm_config::MatchedFilter;
 use crate::star_detection::convolution::simd::convolve_row;
 use crate::star_detection::convolution::simd::internals::convolve_row_scalar;
 use crate::star_detection::convolution::{
-    MatchedFilterBuffers, convolve_cols, convolve_rows_parallel, elliptical_gaussian_convolve,
-    gaussian_convolve, gaussian_kernel_1d, matched_filter,
+    convolve_cols, convolve_rows_parallel, elliptical_gaussian_convolve, gaussian_convolve,
+    gaussian_kernel_1d, matched_filter,
 };
 use ::quickbench::quick_bench;
 use std::hint::black_box;
@@ -132,10 +133,10 @@ fn bench_gaussian_convolve_1k(b: ::quickbench::Bencher) {
     let sigma = 2.0;
 
     b.bench(|| {
+        output.pixels_mut().copy_from_slice(pixels.pixels());
         gaussian_convolve(
-            black_box(&pixels),
-            black_box(sigma),
             black_box(&mut output),
+            black_box(sigma),
             black_box(&mut temp),
         );
     });
@@ -152,10 +153,10 @@ fn bench_gaussian_convolve_4k(b: ::quickbench::Bencher) {
     let sigma = 2.0;
 
     b.bench(|| {
+        output.pixels_mut().copy_from_slice(pixels.pixels());
         gaussian_convolve(
-            black_box(&pixels),
-            black_box(sigma),
             black_box(&mut output),
+            black_box(sigma),
             black_box(&mut temp),
         );
     });
@@ -194,10 +195,10 @@ fn bench_elliptical_vs_circular_1k(b: ::quickbench::Bencher) {
     let sigma = 2.0;
 
     b.bench_labeled("circular", || {
+        output.pixels_mut().copy_from_slice(pixels.pixels());
         gaussian_convolve(
-            black_box(&pixels),
-            black_box(sigma),
             black_box(&mut output),
+            black_box(sigma),
             black_box(&mut temp),
         );
     });
@@ -224,28 +225,28 @@ fn bench_matched_filter_1k(b: ::quickbench::Bencher) {
     let fwhm = 4.0;
 
     b.bench_labeled("circular", || {
+        output.pixels_mut().copy_from_slice(pixels.pixels());
         matched_filter(
-            black_box(&pixels),
-            black_box(fwhm),
-            black_box(1.0),
-            black_box(0.0),
-            black_box(&mut MatchedFilterBuffers {
-                output: &mut output,
-                temp: &mut temp,
+            black_box(&mut output),
+            black_box(MatchedFilter {
+                fwhm,
+                axis_ratio: 1.0,
+                angle: 0.0,
             }),
+            black_box(&mut temp),
         );
     });
 
     b.bench_labeled("elliptical", || {
+        output.pixels_mut().copy_from_slice(pixels.pixels());
         matched_filter(
-            black_box(&pixels),
-            black_box(fwhm),
-            black_box(0.7),
-            black_box(0.5),
-            black_box(&mut MatchedFilterBuffers {
-                output: &mut output,
-                temp: &mut temp,
+            black_box(&mut output),
+            black_box(MatchedFilter {
+                fwhm,
+                axis_ratio: 0.7,
+                angle: 0.5,
             }),
+            black_box(&mut temp),
         );
     });
 }
@@ -261,15 +262,15 @@ fn bench_matched_filter_4k(b: ::quickbench::Bencher) {
     let fwhm = 4.0;
 
     b.bench(|| {
+        output.pixels_mut().copy_from_slice(pixels.pixels());
         matched_filter(
-            black_box(&pixels),
-            black_box(fwhm),
-            black_box(1.0),
-            black_box(0.0),
-            black_box(&mut MatchedFilterBuffers {
-                output: &mut output,
-                temp: &mut temp,
+            black_box(&mut output),
+            black_box(MatchedFilter {
+                fwhm,
+                axis_ratio: 1.0,
+                angle: 0.0,
             }),
+            black_box(&mut temp),
         );
     });
 }

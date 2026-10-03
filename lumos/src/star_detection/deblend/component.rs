@@ -63,7 +63,6 @@ impl<'a> Component<'a> {
         Region {
             bbox: self.data.bbox,
             peak: self.peak.pos,
-            peak_value: self.peak.value,
             area: self.data.area,
         }
     }
@@ -100,7 +99,6 @@ impl<'a> Component<'a> {
                 out.push(Region {
                     bbox,
                     peak: peak.pos,
-                    peak_value: peak.value,
                     area,
                 });
             }

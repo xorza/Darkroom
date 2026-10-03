@@ -115,7 +115,7 @@ fn inclusive_bounds_accept_their_edges() {
         ("read_noise 0", |c| {
             c.measurement.noise_model = Some(NoiseModel::from_normalized(1.0, 0.0));
         }),
-        ("psf_axis_ratio 1", |c| c.detection.psf_axis_ratio = 1.0),
+        ("psf_axis_ratio 1", |c| c.fwhm.psf_axis_ratio = 1.0),
         ("deblend min_prominence 0", |c| {
             c.detection.deblend = Deblend::LocalMaxima {
                 min_prominence: 0.0,
@@ -142,6 +142,7 @@ fn inclusive_bounds_accept_their_edges() {
             c.background.refinement = BackgroundRefinement::Iterative {
                 iterations: 10,
                 mask_dilation: 50,
+                mask_sigma: 2.0,
             };
         }),
         ("estimation_sigma_factor 1", |c| {
@@ -180,6 +181,7 @@ fn config_invalid_parameters_return_exact_errors() {
                 config.background.refinement = BackgroundRefinement::Iterative {
                     iterations: 0,
                     mask_dilation: 3,
+                    mask_sigma: 2.0,
                 };
             }),
             "background refinement iterations",
@@ -190,6 +192,7 @@ fn config_invalid_parameters_return_exact_errors() {
                 config.background.refinement = BackgroundRefinement::Iterative {
                     iterations: 11,
                     mask_dilation: 3,
+                    mask_sigma: 2.0,
                 };
             }),
             "background refinement iterations",
@@ -200,10 +203,22 @@ fn config_invalid_parameters_return_exact_errors() {
                 config.background.refinement = BackgroundRefinement::Iterative {
                     iterations: 1,
                     mask_dilation: 51,
+                    mask_sigma: 2.0,
                 };
             }),
             "background refinement mask_dilation",
             51.0,
+        ),
+        (
+            configured(|config| {
+                config.background.refinement = BackgroundRefinement::Iterative {
+                    iterations: 1,
+                    mask_dilation: 3,
+                    mask_sigma: 0.0,
+                };
+            }),
+            "background refinement mask_sigma",
+            0.0,
         ),
         (
             configured(|config| config.detection.sigma_threshold = 0.0),
@@ -226,12 +241,12 @@ fn config_invalid_parameters_return_exact_errors() {
             0.0,
         ),
         (
-            configured(|config| config.detection.psf_axis_ratio = 0.0),
+            configured(|config| config.fwhm.psf_axis_ratio = 0.0),
             "psf_axis_ratio",
             0.0,
         ),
         (
-            configured(|config| config.detection.psf_angle = f32::INFINITY),
+            configured(|config| config.fwhm.psf_angle = f32::INFINITY),
             "psf_angle",
             f64::INFINITY,
         ),
@@ -391,8 +406,8 @@ fn config_rejects_non_finite_float_parameters() {
     type Field = (&'static str, fn(&mut Config, f32));
     let fields: [Field; 17] = [
         ("sigma_threshold", |c, v| c.detection.sigma_threshold = v),
-        ("psf_axis_ratio", |c, v| c.detection.psf_axis_ratio = v),
-        ("psf_angle", |c, v| c.detection.psf_angle = v),
+        ("psf_axis_ratio", |c, v| c.fwhm.psf_axis_ratio = v),
+        ("psf_angle", |c, v| c.fwhm.psf_angle = v),
         ("fwhm Fixed", |c, v| c.fwhm.mode = Some(FwhmMode::Fixed(v))),
         ("fwhm Auto fallback", |c, v| {
             c.fwhm.mode = Some(FwhmMode::Auto { fallback: v });

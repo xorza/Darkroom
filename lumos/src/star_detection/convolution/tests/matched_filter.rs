@@ -13,7 +13,8 @@ use crate::internals::synthetic::background_map;
 use crate::internals::visual::{ToneMap, save};
 use crate::math::statistics::MedianMad;
 use crate::star_detection::config::background_config::BackgroundConfig;
-use crate::star_detection::convolution::{MatchedFilterBuffers, matched_filter};
+use crate::star_detection::config::fwhm_config::MatchedFilter;
+use crate::star_detection::convolution::matched_filter;
 use crate::star_detection::tests::Scenario;
 
 /// One rendered field, matched-filtered at `kernel_fwhm`: each true star's response, inside a
@@ -35,15 +36,15 @@ impl Filtered {
 
         let mut output = Buffer2::new_default(width, height);
         let mut temp = Buffer2::new_default(width, height);
+        output.pixels_mut().copy_from_slice(residual.pixels());
         matched_filter(
-            &residual,
-            kernel_fwhm,
-            1.0,
-            0.0,
-            &mut MatchedFilterBuffers {
-                output: &mut output,
-                temp: &mut temp,
+            &mut output,
+            MatchedFilter {
+                fwhm: kernel_fwhm,
+                axis_ratio: 1.0,
+                angle: 0.0,
             },
+            &mut temp,
         );
         if let Some(name) = name {
             save(

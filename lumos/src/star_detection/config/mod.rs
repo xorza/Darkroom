@@ -12,7 +12,7 @@ pub(crate) mod fwhm_config;
 pub(crate) mod measurement_config;
 
 use crate::star_detection::config::background_config::{BackgroundConfig, BackgroundRefinement};
-use crate::star_detection::config::detection_config::{Connectivity, Deblend, DetectionConfig};
+use crate::star_detection::config::detection_config::{Deblend, DetectionConfig};
 use crate::star_detection::config::filter_config::FilterConfig;
 use crate::star_detection::config::fwhm_config::{FwhmConfig, FwhmMode};
 use crate::star_detection::config::measurement_config::{
@@ -75,7 +75,6 @@ impl Config {
                 min_area: 7,
                 max_area: 1500,
                 edge_margin: 20,
-                connectivity: Connectivity::Eight,
                 ..Default::default()
             },
             filter: FilterConfig {
@@ -129,6 +128,7 @@ impl Config {
                 refinement: BackgroundRefinement::Iterative {
                     iterations: 2,
                     mask_dilation: 3,
+                    mask_sigma: 2.0,
                 },
                 ..Default::default()
             },
@@ -138,7 +138,6 @@ impl Config {
                     min_contrast: 0.005,
                 },
                 deblend_min_separation: 2,
-                connectivity: Connectivity::Eight,
                 ..Default::default()
             },
             fwhm: FwhmConfig {
@@ -166,6 +165,7 @@ impl Config {
                 refinement: BackgroundRefinement::Iterative {
                     iterations: 3,
                     mask_dilation: 5,
+                    mask_sigma: 2.0,
                 },
             },
             detection: DetectionConfig {
@@ -173,7 +173,6 @@ impl Config {
                 min_area: 7,
                 max_area: 2000,
                 edge_margin: 15,
-                connectivity: Connectivity::Eight,
                 deblend: Deblend::MultiThreshold {
                     n_thresholds: 32,
                     min_contrast: 0.003,
@@ -185,6 +184,7 @@ impl Config {
                 mode: Some(FwhmMode::Auto { fallback: 3.0 }),
                 min_stars: 30,
                 estimation_sigma_factor: 2.5,
+                ..Default::default()
             },
             measurement: MeasurementConfig {
                 centroid_method: CentroidMethod::MoffatFit { beta: 2.5 },

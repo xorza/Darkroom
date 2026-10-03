@@ -7,7 +7,7 @@ pub(crate) mod detect;
 pub(crate) mod filter;
 pub(crate) mod fwhm;
 pub(super) mod measure;
-pub(crate) mod prepare;
+pub(crate) mod prepared_frame;
 
 /// Floor for a MAD-scaled FWHM rejection threshold, as a fraction of the median FWHM.
 /// Prevents a zero threshold when the FWHM distribution is near-uniform (MAD ≈ 0).

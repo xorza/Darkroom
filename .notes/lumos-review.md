@@ -42,27 +42,11 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 
 ## 8. Missing-data masks are dropped after decode
 
-- [ ] `8.2` **Star detection never reads `nulls`** — `star_detection/` (no reference)
-  - A null region becomes a flat patch with zero noise. A wholly-null tile gets σ = 0, so the threshold falls to `σ·noise_floor`, and the pixels next to the gap merge into one huge component.
-  - Pass `nulls` as the mesh mask, clear them from the threshold mask, and handle them in stamps. `[C]` path, `[P]` magnitude.
+- [ ] `8.2` **Star detection does not handle `nulls` in its stamps** — `star_detection/centroid/`
+  - The mesh leaves the pixels with no data out, and the threshold clears them. A stamp that holds them still reads their fill as a measurement. `[C]`
 
 ## 9. Star detection measures and splits on the wrong plane
 
-- [ ] `9.1` **On demosaiced frames, flux, peak, FWHM and centroid are measured on the 3×3-median plane** — `star_detection/detector/stages/prepare/mod.rs:38-44`, `star_detection/detector/mod.rs:161,209-216`
-  - The comment in `prepare` itself says filtering blurs the PSF that flux and FWHM are read from.
-  - Effect on a Gaussian:
-    - FWHM 2: 56% of flux and 42% of peak are kept, and the FWHM reads 2.23.
-    - FWHM 3: 79% of flux is kept.
-  - The centroid shows pixel locking of up to ±0.008 px.
-  - Use the median plane only for the threshold mask, and measure on the unfiltered plane. `[C]`
-- [ ] `9.2` **The matched-filter threshold assumes white noise, but the median plane is strongly correlated** — `star_detection/convolution/mod.rs:39-81`
-  - The true filtered σ is 2.18–2.63× the σ in the map (filter FWHM 2.5–6). A "4σ" threshold is then ≈1.6σ, so ≈5% of sky pixels pass it on OSC frames.
-  - Measure the noise of the filtered plane itself. That is exact under any correlation (demosaic, resampling). `[C]`
-- [ ] `9.4` **Both deblenders split on the unfiltered residual, in units that do not match detection** — `star_detection/detector/stages/detect/mod.rs:59-103,182-205`, `star_detection/deblend/component.rs:394-410`, `star_detection/deblend/local_maxima/mod.rs:68-75`
-  - The footprint is cut at σ in filtered-SNR units. The multi-threshold floor is in residual units (≈3× lower at FWHM 4).
-  - Level 0 (`multi_threshold/mod.rs:512`) breaks the footprint into noise islands, and those islands become children.
-  - LocalMaxima at prominence 0.3 splits about half of the faint stars.
-  - SEP thresholds the filtered value (`cdvalue`), and photutils deblends the convolved data. `[C]` mechanism, `[P]` frequency.
 - [ ] `9.5` **Sub-threshold branches have no minimum area** — `star_detection/deblend/multi_threshold/mod.rs:528-534,601-641`
   - A 1-pixel region is a valid node. SEP calls `lutz(..., minarea)` inside the deblend loop. `[C]`
 - [ ] `9.6` **The multi-threshold significance walk runs top-down and drops deeper splits** — `star_detection/deblend/multi_threshold/mod.rs:665-685`
@@ -71,8 +55,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 - [ ] `9.7` **Branch flux includes the pedestal below the split level** — `star_detection/deblend/multi_threshold/mod.rs:504-508,614`
   - SExtractor/SEP test `fdflux − thresh·fdnpix > mincont·root`. Bumps on bright wings carry level × npix of host light, which over-splits the wings.
   - The docs say "flux above that threshold". `[C]`
-- [ ] `9.8` **The refinement mask uses the detection σ (4) on the unfiltered plane, with square dilation** — `star_detection/background/background_estimate.rs:251-262`, `star_detection/mask_dilation/mod.rs`
-  - Faint wings stay unmasked and bias the sky upward. photutils uses ≈2σ on convolved data and a circular footprint. `[P]`
 
 ## 10. Shape metrics measure position, not shape
 
@@ -368,10 +350,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 - [ ] `26.9` **`MAX_ANNULUS_OUTER_RADIUS` copies the formula of `annulus_outer_radius`** — `star_detection/centroid/mod.rs:71` vs `:292` `[C]`
 - [ ] `26.10` **`amplitude_seed`/`min_amplitude` take `background` again** — `star_detection/centroid/stamp.rs:228,235`
   - `StampFit.sky` already holds it. `[C]`
-- [ ] `26.11` **The matched-filter PSF is split across two configs** — FWHM in `FwhmConfig`, axis ratio and angle in `DetectionConfig`
-  - `wide_field` sets `Connectivity::Eight`, which is the default. `[C]`
-- [ ] `26.12` **`residual, sky, saturation` travel together through 5–6-argument fns** — `fwhm::estimate`, `DetectResult::from_image`, `measure`
-  - `extract_and_filter_candidates`/`extract_candidates` is one function split thinly. `[C]`
 - [ ] `26.13` **`KernelPlan` is rebuilt per frame, although the doc says "once per run"** — `drizzle/accumulator/mod.rs:182`, `drizzle/accumulator/output_band.rs:38-42`
   - It has two `impl` blocks with `OutputBand` between them (`:92`, `:122`). `[C]`
 - [ ] `26.16` **`lib.rs:95-131` has 12 renamed re-exports** (`Config as StarDetectionConfig`, `Error as StackError`, …)
@@ -692,19 +670,15 @@ Still open, after S1 and S2: each master carries its noise, so the subtraction a
 
 ## C3. Detection: one plane to threshold, one plane to measure
 
-Closes group 9 except 9.3 (S1), 8.2, 15.8, 26.11 and 26.12. It uses S1 and S10.
+Built in phase 7, step 1, except the multi-threshold walk. As built:
 
-- `prepare` returns a `PreparedFrame` that holds what travels together today in 5- and 6-argument functions (26.12):
-  - `measure`: the noise-weighted channel combination, never filtered,
-  - `detect`: `measure` minus sky, median-filtered when the frame is demosaiced, then matched-filtered,
-  - `sky` and its σ map,
-  - the flags.
-- The noise of `detect` is measured on `detect` with the same mesh. That is exact under any correlation (9.2). The threshold and both deblenders work on `detect` in the units of its own σ, as SEP does (9.4).
-- The multi-threshold walk runs bottom-up and propagates `ok[]`, as in SEP `deblend.c` (9.6). It measures flux above the split level (9.7) and applies `minarea` in the loop (9.5).
-- The refinement mask thresholds `detect` at 2σ with a circular footprint (9.8).
-- Every measurement reads `measure` (9.1).
-- The `max_area` filter runs before deblending, and the deblend grids come from the detector's pool (15.8).
-- The matched-filter PSF lives in one config (26.11).
+- `PreparedFrame::new` combines the channels, measures the sky on the combined plane (the no-data pixels masked), refines it around the sources when asked, and takes it out: `measure`, never filtered. It holds the sky σ, the saturation mask, the no-data mask and the refined sources.
+- `PreparedFrame::detection_plane` copies `measure`, takes the 3×3 median when the frame was demosaiced and the matched filter when a FWHM is known, and measures the result's noise with the same mesh, around the sources and the no-data pixels. That holds under any correlation (9.2).
+- The threshold and both deblenders read the detection plane in its own σ (9.4). Every measurement reads `measure` (9.1).
+- The refinement thresholds the detection plane at `mask_sigma` and dilates by a disk (9.8).
+- The matched-filter PSF lives in `FwhmConfig` (26.11).
+
+Still to build: the multi-threshold walk runs bottom-up and propagates `ok[]`, as in SEP `deblend.c` (9.6). It measures flux above the split level (9.7) and applies `minarea` in the loop (9.5). The `max_area` filter runs before deblending, and the deblend grids come from the detector's pool (15.8).
 
 ## C4. Measurement with a convergence contract and an error output
 
@@ -786,15 +760,17 @@ The combine bench (30 frames, `combine::bench`, release, one machine, same sessi
 
 ## Phase 7. Detection planes (C3)
 
-1. Return `PreparedFrame`. Measure on `measure`, and threshold and deblend on `detect`.
+Steps 1 and 3 are done. `PreparedFrame` holds the measurement plane (the channels' noise-weighted combination less the sky, never filtered), its sky σ, the saturation and the no-data masks, and the refined sources. `DetectionPlane` filters a copy (3×3 median when demosaiced, then the matched filter) and measures its noise on itself with the same mesh. The threshold and both deblenders read the detection plane in its own σ, and measurement reads the measurement plane. The refinement masks sources on the detection plane at `mask_sigma` (2 in the presets) with a disk. The no-data mask is the mesh mask and is cleared from every threshold. The matched filter's PSF shape is in `FwhmConfig`. Items 9.1, 9.2, 9.4, 9.8, 26.11 and 26.12 are closed, and 8.2 except its stamps. The detector's pool holds 4 planes, 1 label map and up to 4 bitmasks (`DETECTION_WORKING_PLANES` = 9).
+
+Two open points from step 1:
+- The detection plane's σ is measured per 64-px tile. On a plane correlated over about 36 px (FWHM 4) a tile holds some 110 independent samples, so its σ errs by about 11%, and a 2σ threshold passes about 11% more than it states. A larger tile for the detection plane's noise, or an error-weighted σ, would narrow it.
+- The detection plane no longer records a region's peak value; measurement reads the measurement plane at the peak pixel. Phase 8's converged centroid removes the dependence on the start pixel.
+
 2. Rewrite the multi-threshold walk. Move the `max_area` filter before deblending, and pool the grids.
-3. Give the background mesh the frame's `NO_DATA` flags as its mask (8.2), and the detector `FrameStats::noise` from the ingest in place of its own estimate.
 - **Tests:**
-  - A Gaussian star of FWHM 2 on a demosaiced frame keeps 100% of its flux. Today 56% remains.
-  - On pure noise filtered to FWHM 4, the fraction of pixels above 4σ is 3.2e-5 within its binomial interval. Today it is about 5%.
   - Review example 9.6, `root(100) → [A(80) → [A1(35), A2(30)], B(5)]` at contrast 0.2, returns {A1, A2}.
   - Detections are invariant under x·s + o, and under a 180° rotation on a tile-aligned frame (S9).
-- **Closes:** group 9 except 9.3, 8.2, 15.8, 26.11, 26.12.
+- **Closes:** 9.5, 9.6, 9.7, 15.8.
 
 ## Phase 8. Numerics kit and measurement (S6, C4)
 

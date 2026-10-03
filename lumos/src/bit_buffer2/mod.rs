@@ -250,6 +250,14 @@ impl BitBuffer2 {
         }
     }
 
+    /// Set every bit `other` has set: `self |= other`, a word at a time.
+    pub(crate) fn or_with(&mut self, other: &Self) {
+        debug_assert_eq!(self.size, other.size, "size mismatch");
+        for (word, &other) in self.words.iter_mut().zip(&other.words) {
+            *word |= other;
+        }
+    }
+
     /// Clear every bit `other` has set: `self &= !other`, a word at a time.
     pub(crate) fn and_not(&mut self, other: &Self) {
         debug_assert_eq!(self.size, other.size, "size mismatch");

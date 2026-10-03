@@ -29,9 +29,13 @@ use crate::star_detection::resources::internals::BufferCounts;
 /// silently growing peak heap.
 const WORKING_SET: BufferCounts = BufferCounts {
     floats: 4,
-    bitmasks: 2,
+    bitmasks: 3,
     labels: 1,
 };
+
+/// The bitmask a frame with pixels of no data adds to [`WORKING_SET`], which these synthetic fields
+/// do not carry.
+const NO_DATA_MASK: usize = 1;
 
 /// The memory planner charges [`DETECTION_WORKING_PLANES`] image-sized planes for a frame in
 /// detection, which only means anything while that matches what the pool actually holds. Tying the
@@ -49,7 +53,10 @@ fn pinned_working_set_matches_what_the_memory_planner_charges() {
     // The label map is u32, the same width as an f32 plane. A bitmask is one bit per pixel
     // against those 32, and the planner rounds each up to a whole plane rather than model a
     // fraction — so a plain sum is the figure it should carry.
-    assert_eq!(floats + labels + bitmasks, DETECTION_WORKING_PLANES);
+    assert_eq!(
+        floats + labels + bitmasks + NO_DATA_MASK,
+        DETECTION_WORKING_PLANES
+    );
 }
 
 /// A reused detector's buffer-pool working set must stay flat in the number of frames detected: the

@@ -54,6 +54,7 @@ mod centroid;
 pub(crate) mod config;
 mod convolution;
 mod deblend;
+pub(crate) mod detection_plane;
 pub(crate) mod detector;
 mod labeling;
 mod mask_dilation;

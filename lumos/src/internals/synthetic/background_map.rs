@@ -7,7 +7,7 @@ use crate::star_detection::background::background_estimate::{
     BackgroundEstimate, Refinement, noise_floor_for,
 };
 use crate::star_detection::config::background_config::{BackgroundConfig, BackgroundRefinement};
-use crate::star_detection::config::detection_config::DetectionConfig;
+use crate::star_detection::detection_plane::PlaneFilters;
 use crate::star_detection::resources::DetectionResources;
 use imaginarium::Buffer2;
 
@@ -27,8 +27,7 @@ pub(crate) fn uniform(size: Size2us, background: f32, noise: f32) -> BackgroundE
 }
 
 /// Run the real background estimator over `pixels`, managing the buffer pool for the caller,
-/// with `config`'s refinement when it asks for one — thresholded at the default detection σ, as
-/// the detector would.
+/// with `config`'s refinement when it asks for one, on the unfiltered residual.
 ///
 /// The counterpart to [`uniform`]: that one hands back a flat map, this one measures the image.
 pub(crate) fn estimate(pixels: &Buffer2<f32>, config: &BackgroundConfig) -> BackgroundEstimate {
@@ -42,24 +41,32 @@ pub(crate) fn estimate_in(
     config: &BackgroundConfig,
     pool: &mut DetectionResources,
 ) -> BackgroundEstimate {
-    let mut estimate = BackgroundEstimate::estimate(pixels, config, pool);
-    if let BackgroundRefinement::Iterative {
+    let estimate = BackgroundEstimate::estimate(pixels, None, config, pool);
+    let BackgroundRefinement::Iterative {
         iterations,
         mask_dilation,
+        mask_sigma,
     } = config.refinement
-    {
-        estimate.refine(
-            pixels,
-            config,
-            Refinement {
-                iterations,
-                mask_dilation,
-            },
-            DetectionConfig::default().sigma_threshold,
-            pool,
-        );
-    }
-    estimate
+    else {
+        return estimate;
+    };
+    let refined = estimate.refine(
+        pixels,
+        Refinement {
+            iterations,
+            mask_dilation,
+            mask_sigma,
+        },
+        PlaneFilters {
+            median: false,
+            matched: None,
+            mask: None,
+        },
+        config,
+        pool,
+    );
+    pool.release_bit(refined.sources);
+    refined.estimate
 }
 
 #[cfg(test)]

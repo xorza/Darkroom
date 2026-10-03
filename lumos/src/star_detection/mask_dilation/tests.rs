@@ -1,11 +1,5 @@
 //! Tests for morphological dilation.
 
-#![expect(
-    clippy::identity_op,
-    clippy::erasing_op,
-    reason = "`y * width + x` keeps its form at row and column 0, so each index reads as a position"
-)]
-
 use crate::bit_buffer2::BitBuffer2;
 use crate::internals::prelude::*;
 use crate::star_detection::mask_dilation::dilate_mask;
@@ -16,7 +10,7 @@ fn dilate_into(mask: &BitBuffer2, radius: usize, dilated: &mut BitBuffer2) {
     dilate_mask(dilated, radius, &mut BitBuffer2::new_default(mask.size));
 }
 
-/// Verify dilation result against naive O(n²×r²) box dilation.
+/// Verify dilation result against a naive O(n²×r²) disk dilation.
 fn assert_naive_dilation(mask: &BitBuffer2, dilated: &BitBuffer2, radius: usize, ctx: &str) {
     let size = Size2us::new(mask.size.width, mask.size.height);
     for y in 0..size.height {
@@ -24,7 +18,8 @@ fn assert_naive_dilation(mask: &BitBuffer2, dilated: &BitBuffer2, radius: usize,
             let mut expected = false;
             for sy in y.saturating_sub(radius)..=(y + radius).min(size.height - 1) {
                 for sx in x.saturating_sub(radius)..=(x + radius).min(size.width - 1) {
-                    if mask.get_at(Vec2us::new(sx, sy)) {
+                    let distance_squared = sx.abs_diff(x).pow(2) + sy.abs_diff(y).pow(2);
+                    if distance_squared <= radius * radius && mask.get_at(Vec2us::new(sx, sy)) {
                         expected = true;
                         break;
                     }
@@ -63,65 +58,59 @@ fn dilate_mask_single_pixel_radius_0() {
     assert!(dilated.get(4));
 }
 
+/// One set pixel grows into a disk, clipped at the frame's edge: the pixels within Euclidean
+/// distance `radius`. Radius 1 is the 5-pixel cross, not the 3 × 3 square; radius 2 is the 5 × 5
+/// square less the 12 pixels at distance √5 and √8, 13 pixels; at the corner, radius 1 keeps the
+/// pixel and its two neighbours, and not the diagonal one at √2.
 #[test]
-fn dilate_mask_single_pixel_radius_1() {
-    // 3x3 mask with center pixel, radius 1 should create 3x3 square
-    let mut mask_data = vec![false; 25]; // 5x5
-    mask_data[2 * 5 + 2] = true; // center at (2, 2)
-    let mask = BitBuffer2::from_slice(Size2us::new(5, 5), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(5, 5), false);
-    dilate_into(&mask, 1, &mut dilated);
-
-    // Should dilate to 3x3 square centered at (2,2)
-    for y in 1..=3 {
-        for x in 1..=3 {
-            assert!(dilated.get(y * 5 + x), "Pixel ({x}, {y}) should be true");
+fn a_pixel_dilates_into_a_disk() {
+    for (size, seed, radius, picture) in [
+        (
+            5,
+            (2, 2),
+            1,
+            ".....\n\
+             ..#..\n\
+             .###.\n\
+             ..#..\n\
+             .....",
+        ),
+        (
+            7,
+            (3, 3),
+            2,
+            ".......\n\
+             ...#...\n\
+             ..###..\n\
+             .#####.\n\
+             ..###..\n\
+             ...#...\n\
+             .......",
+        ),
+        (
+            4,
+            (0, 0),
+            1,
+            "##..\n\
+             #...\n\
+             ....\n\
+             ....",
+        ),
+    ] {
+        let mut mask = BitBuffer2::new_filled(Size2us::new(size, size), false);
+        mask.set_at(Vec2us::new(seed.0, seed.1), true);
+        let mut dilated = BitBuffer2::new_filled(Size2us::new(size, size), false);
+        dilate_into(&mask, radius, &mut dilated);
+        for (y, row) in picture.lines().enumerate() {
+            for (x, cell) in row.trim().chars().enumerate() {
+                assert_eq!(
+                    dilated.get_at(Vec2us::new(x, y)),
+                    cell == '#',
+                    "radius {radius} from {seed:?} at ({x}, {y})"
+                );
+            }
         }
     }
-    // Corners should be false
-    assert!(!dilated.get(0 * 5 + 0));
-    assert!(!dilated.get(0 * 5 + 4));
-    assert!(!dilated.get(4 * 5 + 0));
-    assert!(!dilated.get(4 * 5 + 4));
-}
-
-#[test]
-fn dilate_mask_single_pixel_radius_2() {
-    // 7x7 mask with center pixel, radius 2 should create 5x5 square
-    let mut mask_data = vec![false; 49];
-    mask_data[3 * 7 + 3] = true; // center at (3, 3)
-    let mask = BitBuffer2::from_slice(Size2us::new(7, 7), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(7, 7), false);
-    dilate_into(&mask, 2, &mut dilated);
-
-    // Should dilate to 5x5 square centered at (3,3)
-    let mut count = 0;
-    for y in 1..=5 {
-        for x in 1..=5 {
-            assert!(dilated.get(y * 7 + x), "Pixel ({x}, {y}) should be true");
-            count += 1;
-        }
-    }
-    assert_eq!(count, 25);
-}
-
-#[test]
-fn dilate_mask_corner_pixel() {
-    // Pixel at corner (0,0), dilation should be clipped to image bounds
-    let mut mask_data = vec![false; 16];
-    mask_data[0] = true;
-    let mask = BitBuffer2::from_slice(Size2us::new(4, 4), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(4, 4), false);
-    dilate_into(&mask, 1, &mut dilated);
-
-    // Only 2x2 corner should be dilated
-    assert!(dilated.get(0 * 4 + 0));
-    assert!(dilated.get(0 * 4 + 1));
-    assert!(dilated.get(1 * 4 + 0));
-    assert!(dilated.get(1 * 4 + 1));
-    // Rest should be false
-    assert!(!dilated.get(0 * 4 + 2));
-    assert!(!dilated.get(2 * 4 + 0));
 }
 
 #[test]
