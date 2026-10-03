@@ -156,12 +156,12 @@ impl Graph {
             .map(|(id, node)| NodeRef { id: *id, node })
     }
 
-    /// The node with `id`, or `None` if this graph has none.
+    /// The node with `id`, or `None` if this graph has none — which is the
+    /// answer for the nil id, as no graph holds it.
     ///
     /// A bare `&Node` rather than a [`NodeRef`]: the caller supplied the id, so
     /// there is nothing to attach.
     pub fn find(&self, id: NodeId) -> Option<&Node> {
-        assert!(!id.is_nil());
         self.nodes.get(&id)
     }
     /// The declaration a node instantiates — a library entry, or a special
@@ -355,7 +355,6 @@ impl Graph {
 
     /// Mutable counterpart of [`Self::find`].
     pub fn find_mut(&mut self, id: NodeId) -> Option<&mut Node> {
-        assert!(!id.is_nil());
         self.nodes.get_mut(&id)
     }
 
@@ -368,7 +367,6 @@ impl Graph {
     }
 
     pub fn detach_node(&mut self, node_id: NodeId) -> DetachedNode {
-        assert!(!node_id.is_nil());
         let detached = self
             .snapshot_node(node_id)
             .expect("cannot detach a node that is not in the graph");
@@ -380,7 +378,6 @@ impl Graph {
         detached
     }
     pub fn attach_node(&mut self, detached: DetachedNode) {
-        detached.assert_valid();
         assert!(
             !self.nodes.contains_key(&detached.node_id),
             "cannot attach a node that is already in the graph"

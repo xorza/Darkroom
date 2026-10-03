@@ -147,13 +147,13 @@ pub struct Library {
 }
 
 impl Library {
+    /// The func with `id`, or `None` — which is the answer for the nil id,
+    /// as [`add`](Self::add) refuses it.
     pub fn by_id(&self, id: FuncId) -> Option<&Func> {
-        assert!(!id.is_nil());
         self.funcs.get(&id)
     }
 
     pub fn by_name(&self, name: &str) -> Option<&Func> {
-        assert!(!name.is_empty());
         self.funcs().find(|func| func.name == name)
     }
 
@@ -266,7 +266,6 @@ impl Library {
     /// picker and the const type-check. `None` if `type_id` is unregistered or
     /// names a non-enum type.
     pub fn enum_variants(&self, type_id: TypeId) -> Option<&[String]> {
-        assert!(!type_id.is_nil());
         self.types.get(&type_id)?.variants()
     }
 

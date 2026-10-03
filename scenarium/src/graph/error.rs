@@ -10,9 +10,25 @@ use thiserror::Error;
 /// Every graph validation returns this.
 pub(crate) type ValidationResult<T> = Result<T, GraphValidationError>;
 
+use crate::graph::Subscription;
 use crate::graph::identity::FuncId;
 use crate::graph::identity::NodeId;
 use crate::graph::identity::{InputPort, OutputPort};
+
+/// Why a [`DetachedNode`](crate::DetachedNode) record was refused.
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+pub enum DetachedNodeError {
+    #[error("a detached node's id must not be nil")]
+    NilNodeId,
+    #[error("binding on {port:?} does not touch the detached node")]
+    ForeignBinding { port: InputPort },
+    #[error("input {port:?} is bound twice")]
+    DuplicateBinding { port: InputPort },
+    #[error("subscription {subscription:?} does not touch the detached node")]
+    ForeignSubscription { subscription: Subscription },
+    #[error("subscription {subscription:?} appears twice")]
+    DuplicateSubscription { subscription: Subscription },
+}
 
 #[derive(Debug, Error)]
 pub enum GraphValidationError {
