@@ -45,10 +45,6 @@ Short paths are relative to `lumos/src/stacking/star_detection/`.
 - [ ] `lumos/src/stacking/star_detection/resources.rs:146-161,177-185` — comments say "Second acquire reuses" and "Third acquire allocates new", but the tests assert only width and height. Assert `buffer_counts` after each step.
 - [ ] `lumos/src/stacking/star_detection/tests/stage_effects/deblend_tests.rs:5-6` — the module doc promises a sweep showing the contrast threshold controls the split, but every test passes `deblend_config(32, 0.005)`. `deblend_separation_controls_split` (`:326`) sweeps a fixture property and asserts `touching < wide` instead of `== 1`. `contrast_at_boundary` and `n_thresholds_effect` (`multi_threshold/tests.rs:428,591`) assert `>=`, which holds for identical results. Hand calculation: secondary/total flux = 0.1/1.1 = 0.0909, so contrast 0.09 should give 2 regions and 0.15 should give 1. Assert those exact counts.
 
-### lumos — registration
-Paths are relative to `lumos/src/stacking/registration/`.
-
-
 ### lumos — combine, drizzle
 Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
 
@@ -130,13 +126,6 @@ Short paths are relative to `lumos/src/stacking/star_detection/`.
 - [ ] `lumos/src/stacking/star_detection/convolution/tests/mod.rs:523-526` — 30% tolerance on the matched-filter noise ratio over about 55k samples, with no derivation. `:566` (`large_image_convolution`, "Just verify it completes"), `:692-699` and `:254` ("Just verify it's positive") are run-only asserts.
 - [ ] `lumos/src/stacking/star_detection/detector/stages/prepare/tests.rs:329` — `out[5] > 0.30` sits beside a comment that hand-computes ≈0.37. The weights for this fixture can be computed exactly, so assert the exact value. `fwhm/tests.rs:375` allows 0.05 on an exact median.
 
-### lumos — registration
-Paths are relative to `lumos/src/stacking/registration/`.
-
-- [ ] `distortion/sip/tests/results.rs:127-130` against `:161-167` — the doc says "SIP order 3 models a radial r² term exactly, so the recovered correction has to match that, not merely approach it", yet the row allows rms < 0.01, max_residual < 0.05 and max_correction ± 0.1. The same exact-fit data is asserted at 0.01 in `sip/tests/correction.rs:57`, `:110`, `:135`, `distortion/sip/tests/reference.rs:33`, `:100`, `:160` and `sip/tests/fitting.rs:278`. `fitting.rs:196` uses `> 0.9×` and `fitting.rs:362-366` allows ±0.5 on a ratio that is exactly 5 (the fit is linear in the targets). `correction.rs:194-199` should assert `corr_barrel == -corr_pincushion`.
-- [ ] `tuning.rs:93` — `max_sigma_from_fwhm(0.0) > 0.0`; the floor makes it exactly 0.5.
-- [ ] `distortion/tps/tests.rs:427` (the comment at `:425` says ~0.1 px, the tolerance is 0.5), `:905`, `:910`, `:1011` — TPS reproduces affine maps exactly, yet the tolerance is 0.5 px.
-
 ### lumos — combine, drizzle
 Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
 
@@ -180,10 +169,6 @@ Short paths are relative to `lumos/src/stacking/star_detection/`.
 - [ ] `lumos/src/stacking/star_detection/centroid/gaussian_fit/tests.rs:1501` and `moffat_fit/tests.rs:727` — the Jacobian is checked only against a second hand derivation of the same algebra (`jacobian_row`, which for Moffat shares `fast_pow_neg`). There is no finite-difference check, so a wrong partial derivative written the same way in both places passes.
 - [ ] `lumos/src/stacking/star_detection/config/tests.rs:429-499` — the non-finite rejection table covers only `INFINITY`. NaN, the classic bypass for comparison-phrased validators, is never tested; it needs an `is_nan()` comparison instead of `assert_eq!` on the value.
 - [ ] `lumos/src/stacking/star_detection/detector/stages/filter/tests.rs:244-401` — every case in the deduplication table has fewer than 100 stars, so it runs only `remove_duplicate_stars_simple`. The spatial-hash path that production uses at ≥100 stars gets three ad-hoc tests. Of those, `remove_duplicate_stars_spatial_hash_edge_cases` (`:481`) claims "cell boundaries", but 50/5 = 10 and 52/5 = 10.4 fall in the same cell. Run the whole table through both paths (lower the crossover through the internals). `filter_returns_the_diagnostics_stored_by_the_detector` (`:5`) has no boundary cases (`snr == min_snr`, `eccentricity == max`) and no precedence case (a star failing two criteria).
-
-### lumos — registration
-Paths are relative to `lumos/src/stacking/registration/`.
-
 
 ### lumos — combine, drizzle
 Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
@@ -339,14 +324,6 @@ Short paths are relative to `lumos/src/stacking/star_detection/`.
 - [ ] `lumos/src/stacking/star_detection/tests/subpixel_accuracy.rs:252-286` — the single-shift test is one row of `subpixel_shift_recovered_across_offsets` on the same fixture.
 - [ ] `lumos/src/stacking/star_detection/config/tests.rs:367-426,88-121,501-537` — the preset `_values` tests restate the literals from `config/mod.rs`, so they only detect edits. `config_custom` and `config_with_auto_fwhm` test struct-field assignment. `background_refinement_invalid_iterations_return_exact_errors` repeats two rows of the invalid table. `background/tests/mod.rs:310` re-tests `tile_size`. `config_deblend_multi_threshold` and `multi_threshold_is_off_at_zero_and_on_from_two` overlap.
 
-### lumos — registration
-Paths are relative to `lumos/src/stacking/registration/`.
-
-- [ ] The barrel/pincushion grid generator lives in `distortion/sip/tests/mod.rs:9`, and is re-inlined at `sip/tests/correction.rs:86-97`, `sip/tests/reference.rs:12-19`, `:61-68`, `:231-238`, `sip/tests/fitting.rs:47-53`, `:219-225`, `:295-304`, `sip/tests/results.rs:98-117`, `tests/warping.rs:616-634`, `:721-736`, `transform/tests.rs:156-168` and `tests/sip_distortion.rs:15`. It also returns a tuple. Extend it with translation, k4, extent and outliers, and use it everywhere.
-- [ ] Redundant tests:
-  - `config/tests.rs:398-414` (the inequalities are implied by the exact values at `:43-60`), `:416-424` (every preset already calls `validate()`), `:103-119` (tests struct-update syntax) and `:143-147` (the third assertion that the default method is Lanczos3, after `:38` and `:152`).
-  - `distortion/sip/tests/fitting.rs:244-259` (a length-only test), `:42-92` and `:214-242` (the undistorted fixture twice, both covered by `results.rs` "undistorted") and `:285-335` (the same as `results.rs:284`).
-
 ### lumos — combine, drizzle
 Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
 
@@ -448,20 +425,6 @@ Short paths are relative to `lumos/src/stacking/star_detection/`.
   - `robustness.rs:534-535` says the fitted sigmas are "different".
   - `convolution/mod.rs:367` says "cousin module".
   - `detect_test_utils.rs:11`.
-
-### lumos — registration
-Paths are relative to `lumos/src/stacking/registration/`.
-
-- [ ] Change narration:
-  - `tests/input.rs:27-29` ("The old full sort read the upper middle")
-  - `resample/row/tests.rs:240` ("This replaces a weaker test…")
-  - `spatial/tests.rs:72-74` ("the thirteen tests this replaces")
-  - `transform/tests.rs:237-239` ("Previously `TransformType::Auto` answered…")
-  - `real_data_tests.rs:344` ("PR1 validation")
-- [ ] Stream-of-consciousness comments:
-  - `distortion/sip/tests/correction.rs:142-148` ("But actually … Let's just verify")
-  - `distortion/sip/tests/fitting.rs:202-205`, where a dead `_max_corr_center` sits beside a comment abandoning it
-- [ ] Wrong comments:
 
 ### lumos — combine, drizzle
 Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).

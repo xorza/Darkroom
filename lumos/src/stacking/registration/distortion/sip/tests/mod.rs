@@ -1,42 +1,20 @@
 use crate::stacking::registration::distortion::sip::*;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
+use crate::testing::synthetic::distortion::{RadialField, RadialPairs};
 
-/// Matched reference and target points.
-#[derive(Debug)]
-struct PointPairs {
-    reference: Vec<DVec2>,
-    target: Vec<DVec2>,
+/// How far an exact fit may miss: a field in the polynomial's span is recovered but for rounding.
+/// Hartley-normalized monomials of a 1000 px grid keep the design's condition number in the
+/// thousands, and corrections up to 35 px round at 8e-15 px, so the fit is good to ~1e-11 px; 1e-9
+/// holds it.
+const EXACT_FIT_PX: f64 = 1e-9;
+
+/// The barrel field every case starts from: `d·1e-7·|d|²` about (500, 500), so 25 px per axis at
+/// the corners of the `[0, 1000]²` grid.
+fn barrel() -> RadialField {
+    RadialField::new(DVec2::new(500.0, 500.0), 1e-7)
 }
 
-/// Generate barrel/pincushion distortion point pairs on a grid.
-///
-/// Distortion model: target = p + (p - center) * k * |p - center|^2
-/// - k > 0: barrel distortion (points pushed outward)
-/// - k < 0: pincushion distortion (points pulled inward)
-fn make_radial_distortion_points(
-    center: DVec2,
-    k: f64,
-    grid_step: usize,
-    extent: usize,
-) -> PointPairs {
-    let mut ref_points = Vec::new();
-    let mut target_points = Vec::new();
-    for y in (0..=extent).step_by(grid_step) {
-        for x in (0..=extent).step_by(grid_step) {
-            let p = DVec2::new(x as f64, y as f64);
-            let d = p - center;
-            let r2 = d.length_squared();
-            ref_points.push(p);
-            target_points.push(p + d * k * r2);
-        }
-    }
-    PointPairs {
-        reference: ref_points,
-        target: target_points,
-    }
-}
-
-/// Compute RMS of a slice of residuals.
+/// The RMS of `residuals`.
 fn rms(residuals: &[f64]) -> f64 {
     (residuals.iter().map(|r| r * r).sum::<f64>() / residuals.len() as f64).sqrt()
 }
@@ -48,6 +26,18 @@ fn fit_sip(
     config: &SipConfig,
 ) -> SipFitResult {
     SipPolynomial::fit_from_transform(ref_points, target_points, transform, config).unwrap()
+}
+
+/// An order-`order` fit of `field` about its own centre.
+fn fit_field(field: &RadialField, order: usize, clip_iterations: usize) -> SipFitResult {
+    let RadialPairs { reference, target } = field.pairs();
+    let config = SipConfig {
+        order,
+        reference_point: Some(field.centre),
+        clip_iterations,
+        ..Default::default()
+    };
+    fit_sip(&reference, &target, &field.transform, &config)
 }
 
 mod basis;

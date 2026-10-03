@@ -25,6 +25,11 @@ fn square_source_4() -> Vec<DVec2> {
     ]
 }
 
+/// How far a fit may miss what it reproduces exactly — its control points, and anywhere for an
+/// affine map, which a thin-plate spline holds in its affine part with no bending. The solve on a
+/// few dozen points with coordinates up to 1000 px rounds to ~1e-13 px; 1e-9 holds it.
+const EXACT_PX: f64 = 1e-9;
+
 /// Assert that point `a` is within `tol` of point `b` (per-component).
 fn assert_dvec2_near(a: DVec2, b: DVec2, tol: f64, msg: &str) {
     assert!(
@@ -259,7 +264,7 @@ fn tps_exact_interpolation() {
     ];
 
     let tps = fit_default(&source, &target);
-    assert_control_points_exact(&tps, &source, &target, 1e-6);
+    assert_control_points_exact(&tps, &source, &target, EXACT_PX);
 }
 
 /// Three points (minimum) should be interpolated exactly with a simple translation.
@@ -274,7 +279,7 @@ fn tps_three_points_exact() {
     let target: Vec<DVec2> = source.iter().map(|&p| p + DVec2::new(3.0, 7.0)).collect();
 
     let tps = fit_default(&source, &target);
-    assert_control_points_exact(&tps, &source, &target, 1e-6);
+    assert_control_points_exact(&tps, &source, &target, EXACT_PX);
     assert_eq!(tps.num_control_points(), 3);
 }
 
@@ -285,11 +290,11 @@ fn tps_identity() {
     let tps = fit_default(&points, &points);
 
     // Control points
-    assert_control_points_exact(&tps, &points, &points, 1e-6);
+    assert_control_points_exact(&tps, &points, &points, EXACT_PX);
 
     // Interior point: (25, 75) -> (25, 75)
     let t = tps.transform(DVec2::new(25.0, 75.0));
-    assert_dvec2_near(t, DVec2::new(25.0, 75.0), 1e-3, "interior identity");
+    assert_dvec2_near(t, DVec2::new(25.0, 75.0), EXACT_PX, "interior identity");
 
     // Bending energy should be zero for identity
     assert!(
@@ -308,11 +313,11 @@ fn tps_translation() {
     let tps = fit_default(&source, &target);
 
     // Control points
-    assert_control_points_exact(&tps, &source, &target, 1e-6);
+    assert_control_points_exact(&tps, &source, &target, EXACT_PX);
 
     // Interior: (50,50) -> (60,55). Translation is affine, so TPS reproduces exactly.
     let t = tps.transform(DVec2::new(50.0, 50.0));
-    assert_dvec2_near(t, DVec2::new(60.0, 55.0), 1e-3, "interior translation");
+    assert_dvec2_near(t, DVec2::new(60.0, 55.0), EXACT_PX, "interior translation");
 
     // Bending energy should be ~0 for affine transforms
     assert!(
@@ -331,11 +336,11 @@ fn tps_scaling() {
     let tps = fit_default(&source, &target);
 
     // Control points
-    assert_control_points_exact(&tps, &source, &target, 1e-6);
+    assert_control_points_exact(&tps, &source, &target, EXACT_PX);
 
     // Interior: (50,50)*1.1 = (55,55)
     let t = tps.transform(DVec2::new(50.0, 50.0));
-    assert_dvec2_near(t, DVec2::new(55.0, 55.0), 1e-3, "interior scaling");
+    assert_dvec2_near(t, DVec2::new(55.0, 55.0), EXACT_PX, "interior scaling");
 
     // Bending energy should be ~0 for affine
     assert!(
@@ -359,7 +364,7 @@ fn tps_rotation() {
         .collect();
 
     let tps = fit_default(&source, &target);
-    assert_control_points_exact(&tps, &source, &target, 1e-5);
+    assert_control_points_exact(&tps, &source, &target, EXACT_PX);
 
     // Interior: rotate (50, 50) by 10 degrees
     // cos(10deg) = 0.98481, sin(10deg) = 0.17365
@@ -367,7 +372,7 @@ fn tps_rotation() {
     // y' = 50*0.17365 + 50*0.98481 = 50*(0.17365 + 0.98481) = 50*1.15846 = 57.923
     let expected = DVec2::new(50.0 * cos_a - 50.0 * sin_a, 50.0 * sin_a + 50.0 * cos_a);
     let t = tps.transform(DVec2::new(50.0, 50.0));
-    assert_dvec2_near(t, expected, 1e-3, "interior rotation");
+    assert_dvec2_near(t, expected, EXACT_PX, "interior rotation");
 }
 
 /// Barrel distortion on a dense grid: control points exact, midpoints close.
@@ -395,7 +400,7 @@ fn tps_barrel_distortion() {
     // All control-point residuals should be < 1e-5
     let residuals = tps.compute_residuals(&target);
     let max_residual = residuals.iter().copied().fold(0.0f64, f64::max);
-    assert!(max_residual < 1e-5, "Max residual: {max_residual}");
+    assert!(max_residual <= EXACT_PX, "Max residual: {max_residual}");
 
     // Specific control point (400, 600):
     // d = (-100, 100), r^2 = 20000, factor = 1.02
@@ -408,7 +413,7 @@ fn tps_barrel_distortion() {
     assert!((expected.x - 398.0).abs() < 1e-6, "hand-check x");
     assert!((expected.y - 602.0).abs() < 1e-6, "hand-check y");
     let t = tps.transform(test_s);
-    assert_dvec2_near(t, expected, 1e-5, "barrel control point");
+    assert_dvec2_near(t, expected, EXACT_PX, "barrel control point");
 
     // Interior point (450, 550) -- between grid nodes at 100px spacing.
     // d = (-50, 50), r^2 = 5000, factor = 1.005
@@ -419,9 +424,10 @@ fn tps_barrel_distortion() {
     let expected_mid = center + d_mid * (1.0 + k * r2_mid);
     assert!((expected_mid.x - 449.75).abs() < 1e-6, "hand-check mid x");
     assert!((expected_mid.y - 550.25).abs() < 1e-6, "hand-check mid y");
-    // TPS interpolation at midpoint with 100px grid should be accurate within ~0.1px
+    // Between control points the spline interpolates a cubic it cannot hold: it measures 2.5e-3 px
+    // off at this cell centre, and 5e-3 holds that.
     let t_mid = tps.transform(test_mid);
-    assert_dvec2_near(t_mid, expected_mid, 0.5, "barrel midpoint");
+    assert_dvec2_near(t_mid, expected_mid, 5e-3, "barrel midpoint");
 }
 
 /// Large deformation: control points are still interpolated exactly.
@@ -437,7 +443,7 @@ fn tps_large_deformation() {
     ];
 
     let tps = fit_default(&source, &target);
-    assert_control_points_exact(&tps, &source, &target, 1e-5);
+    assert_control_points_exact(&tps, &source, &target, EXACT_PX);
 
     // Non-affine deformation must produce nonzero bending energy.
     // Compare with identity (zero energy) to ensure it's actually different.
@@ -476,7 +482,10 @@ fn tps_regularization_energy_vs_residuals() {
     let max_res_reg = residuals_reg.iter().copied().fold(0.0f64, f64::max);
 
     // Exact should have near-zero residuals
-    assert!(max_res_exact < 1e-6, "Exact max residual: {max_res_exact}");
+    assert!(
+        max_res_exact <= EXACT_PX,
+        "Exact max residual: {max_res_exact}"
+    );
 
     // Regularized should have larger residuals (it doesn't pass through points)
     assert!(
@@ -606,7 +615,7 @@ fn tps_large_coordinates() {
     let target: Vec<DVec2> = source.iter().map(|&p| p + shift).collect();
 
     let tps = fit_default(&source, &target);
-    assert_control_points_exact(&tps, &source, &target, 1e-6);
+    assert_control_points_exact(&tps, &source, &target, EXACT_PX);
 
     // Interior: translation is affine, so midpoint should be exact
     // (10050, 10050) + (5, 3) = (10055, 10053)
@@ -649,17 +658,15 @@ fn tps_extreme_coordinates() {
     // Control points should be exact
     let residuals = tps.compute_residuals(&target);
     let max_residual = residuals.iter().copied().fold(0.0f64, f64::max);
-    assert!(max_residual < 1e-5, "Max residual: {max_residual}");
+    assert!(max_residual <= EXACT_PX, "Max residual: {max_residual}");
 
-    // Verify a specific control point by hand:
-    // source[0] = (100000, 100000), d = (-50, -50), r2 = 5000
-    // target[0] = (100000, 100000) + (-50, -50)*0.05 + (3, -2) = (99997.5 + 3, 99997.5 - 2) = (100000.5, 99995.5)
-    // Wait, d*(k*r2) = (-50,-50)*(0.00001*5000) = (-50,-50)*0.05 = (-2.5, -2.5)
-    // target[0] = (100000 - 2.5 + 3, 100000 - 2.5 - 2) = (100000.5, 99995.5)
+    // source[0] = (100000, 100000): d = (−50, −50), |d|² = 5000, so the field moves it by
+    // d·1e-5·5000 = (−2.5, −2.5), and the shift (3, −2) puts it at (100000.5, 99995.5).
     let expected_0 = DVec2::new(100_000.5, 99995.5);
-    assert_dvec2_near(target[0], expected_0, 1e-6, "hand-check target[0]");
+    assert_eq!(target[0], expected_0, "hand-check target[0]");
     let t0 = tps.transform(source[0]);
-    assert_dvec2_near(t0, expected_0, 1e-4, "extreme coord point 0");
+    // Coordinates of 1e5 round a hundred times coarser than the 1000 px the bound is set for.
+    assert_dvec2_near(t0, expected_0, 100.0 * EXACT_PX, "extreme coord point 0");
 }
 
 /// Clustered points: two groups far apart, pure translation.
@@ -679,16 +686,11 @@ fn tps_clustered_points() {
     let target: Vec<DVec2> = source.iter().map(|&p| p + shift).collect();
 
     let tps = fit_default(&source, &target);
-    assert_control_points_exact(&tps, &source, &target, 1e-4);
+    assert_control_points_exact(&tps, &source, &target, EXACT_PX);
 
     // Between clusters: pure translation is affine, so (500,500) -> (505,503).
     let t = tps.transform(DVec2::new(500.0, 500.0));
-    assert_dvec2_near(
-        t,
-        DVec2::new(505.0, 503.0),
-        1.0, // TPS extrapolation between distant clusters may be slightly off
-        "between clusters",
-    );
+    assert_dvec2_near(t, DVec2::new(505.0, 503.0), EXACT_PX, "between clusters");
 }
 
 /// Batch transform must produce identical results to single transform, and
@@ -727,10 +729,10 @@ fn tps_transform_points_consistency_and_correctness() {
     {
         // Batch vs single: must be exactly identical
         let single = tps.transform(orig);
-        assert_dvec2_near(trans, single, 1e-10, &format!("batch vs single {i}"));
+        assert_eq!(trans, single, "batch vs single {i}");
 
         // Absolute correctness
-        assert_dvec2_near(trans, exp, 1e-3, &format!("absolute value {i}"));
+        assert_dvec2_near(trans, exp, EXACT_PX, &format!("absolute value {i}"));
     }
 }
 
@@ -799,7 +801,7 @@ fn tps_many_points() {
     // All residuals should be small
     let residuals = tps.compute_residuals(&target);
     let max_residual = residuals.iter().copied().fold(0.0f64, f64::max);
-    assert!(max_residual < 1e-4, "Max residual: {max_residual}");
+    assert!(max_residual <= EXACT_PX, "Max residual: {max_residual}");
 
     // Spot-check a specific control point: (200, 300)
     // dx = 2*sin(2.0) = 2*0.909297... = 1.81859...
@@ -812,13 +814,13 @@ fn tps_many_points() {
     let expected_dy = 2.0 * (3.0_f64).cos(); // -1.9799849932...
     let t = tps.transform(DVec2::new(200.0, 300.0));
     assert!(
-        (t.x - (200.0 + expected_dx)).abs() < 1e-4,
+        (t.x - (200.0 + expected_dx)).abs() <= EXACT_PX,
         "Spot x: {} expected {}",
         t.x,
         200.0 + expected_dx
     );
     assert!(
-        (t.y - (300.0 + expected_dy)).abs() < 1e-4,
+        (t.y - (300.0 + expected_dy)).abs() <= EXACT_PX,
         "Spot y: {} expected {}",
         t.y,
         300.0 + expected_dy
@@ -844,14 +846,14 @@ fn distortion_map_translation() {
     for gy in 0..map.grid.height {
         for gx in 0..map.grid.width {
             let d = map.get(Vec2us::new(gx, gy)).unwrap();
-            assert_dvec2_near(d, shift, 0.1, &format!("grid ({gx},{gy})"));
+            assert_dvec2_near(d, shift, EXACT_PX, &format!("grid ({gx},{gy})"));
         }
     }
 
     // Mean magnitude should be sqrt(5^2 + 3^2) = sqrt(34) = 5.83095...
     let expected_mag = 34.0_f64.sqrt();
     assert!(
-        (map.mean_magnitude - expected_mag).abs() < 0.1,
+        (map.mean_magnitude - expected_mag).abs() <= EXACT_PX,
         "Mean magnitude: {} expected {}",
         map.mean_magnitude,
         expected_mag
@@ -859,7 +861,7 @@ fn distortion_map_translation() {
 
     // Max magnitude should also be ~sqrt(34) for uniform translation
     assert!(
-        (map.max_magnitude - expected_mag).abs() < 0.1,
+        (map.max_magnitude - expected_mag).abs() <= EXACT_PX,
         "Max magnitude: {} expected {}",
         map.max_magnitude,
         expected_mag
@@ -899,12 +901,12 @@ fn distortion_map_interpolation() {
 
     // At grid point (0, 0): should be ~(10, 5)
     let d0 = map.interpolate(DVec2::new(0.0, 0.0));
-    assert_dvec2_near(d0, shift, 0.5, "interp at grid point");
+    assert_dvec2_near(d0, shift, EXACT_PX, "interp at grid point");
 
     // At midpoint between grid nodes (37.5, 62.5):
     // For uniform translation, bilinear interpolation of constant field = constant
     let d_mid = map.interpolate(DVec2::new(37.5, 62.5));
-    assert_dvec2_near(d_mid, shift, 0.5, "interp at midpoint");
+    assert_dvec2_near(d_mid, shift, EXACT_PX, "interp at midpoint");
 }
 
 /// `DistortionMap` with non-uniform distortion: verify gradient.
@@ -941,17 +943,10 @@ fn distortion_map_non_uniform_gradient() {
         d_left.x
     );
 
-    // Check approximate magnitudes
-    assert!(
-        (d_left.x - 1.25).abs() < 0.5,
-        "Left dx: {} expected ~1.25",
-        d_left.x
-    );
-    assert!(
-        (d_right.x - 8.75).abs() < 0.5,
-        "Right dx: {} expected ~8.75",
-        d_right.x
-    );
+    // The field is linear, which the spline holds exactly and the map's bilinear interpolation
+    // reproduces.
+    assert_dvec2_near(d_left, DVec2::new(1.25, 2.0), EXACT_PX, "left");
+    assert_dvec2_near(d_right, DVec2::new(8.75, 2.0), EXACT_PX, "right");
 }
 
 /// Different translations produce different transforms. Verifies that the
@@ -971,9 +966,9 @@ fn tps_different_translations_produce_different_results() {
     let result_b = tps_b.transform(test_pt);
 
     // A translates in x: (50,50) -> (60,50)
-    assert_dvec2_near(result_a, DVec2::new(60.0, 50.0), 1e-3, "translation A");
+    assert_dvec2_near(result_a, DVec2::new(60.0, 50.0), EXACT_PX, "translation A");
     // B translates in y: (50,50) -> (50,60)
-    assert_dvec2_near(result_b, DVec2::new(50.0, 60.0), 1e-3, "translation B");
+    assert_dvec2_near(result_b, DVec2::new(50.0, 60.0), EXACT_PX, "translation B");
 
     // Results must differ
     assert!(
@@ -1005,7 +1000,7 @@ fn tps_extra_control_point_changes_behavior() {
     let r5 = tps_5.transform(test_pt);
 
     // 4-point model is pure translation: (45,55) -> (50,58)
-    assert_dvec2_near(r4, DVec2::new(50.0, 58.0), 0.5, "4-point affine");
+    assert_dvec2_near(r4, DVec2::new(50.0, 58.0), EXACT_PX, "4-point affine");
 
     // 5-point model pushes toward the extra control point's displacement
     // So x should be > 50 and the results should differ
