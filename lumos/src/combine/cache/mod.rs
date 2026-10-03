@@ -182,6 +182,8 @@ impl FrameCache {
             // reference's decoder recorded describes one frame, not the stack.
             metadata: ImageMetadata {
                 quantization_sigma,
+                // The stack carries no flags, so it cannot claim its saturated pixels are flagged.
+                saturation_flagged: false,
                 ..self.core.metadata.clone()
             },
             pixels,

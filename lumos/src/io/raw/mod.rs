@@ -4,6 +4,7 @@ mod normalize;
 pub(crate) mod raw_files;
 
 use libraw_sys as sys;
+use std::array;
 use std::ffi;
 #[cfg(unix)]
 use std::ffi::CString;
@@ -31,7 +32,7 @@ use crate::io::image::image_provenance::{
 };
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
-use crate::io::image::pixel_flags::{Flags, PixelFlags};
+use crate::io::image::pixel_flags::{Flags, PixelFlags, SATURATION_FRACTION};
 use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::io::raw::demosaic::sensor_layout::SensorLayout;
 use crate::io::raw::demosaic::xtrans::XTransNormalization;
@@ -466,6 +467,10 @@ struct UnpackedRaw {
     /// Whether LibRaw reads a raw zero as a dead photosite: its `zero_is_bad`, set for Panasonic
     /// and some cameras its size table identifies.
     zero_is_bad: bool,
+    /// The raw value at which each LibRaw colour channel saturates, black included:
+    /// [`SATURATION_FRACTION`] of the way from its black to its linear limit — `linear_max` where
+    /// LibRaw knows it, else `maximum`.
+    saturation: [f32; 4],
     /// Whether LibRaw's linearization curve is the identity up to `maximum`. A compressed format
     /// (Sony cRAW, Nikon lossy NEF, Canon C-RAW) maps its codes through a curve whose steps grow
     /// to several ADU in the highlights, so one ADU is no longer the quantization step.
@@ -485,25 +490,44 @@ impl UnpackedRaw {
         }
     }
 
-    /// The active-area photosites a `zero_is_bad` camera reports as zero, flagged
-    /// [`Flags::NO_DATA`]; `None` when the camera has no such convention or no photosite is zero.
+    /// The flags the raw values themselves settle for the active area: [`Flags::SATURATED`] at
+    /// each channel's saturation level, and [`Flags::NO_DATA`] on the zeros of a `zero_is_bad`
+    /// camera; `None` when no photosite carries either.
     ///
-    /// LibRaw's own processing replaces them with a same-colour mean (`remove_zeroes`); lumos reads
-    /// the raw buffer itself, so without this a dead photosite would normalize to `−black / span`
-    /// and enter every stage as a measurement.
-    fn zero_flags(&self) -> Result<Option<PixelFlags>, ImageError> {
-        if !self.zero_is_bad {
-            return Ok(None);
-        }
+    /// Saturation is decided here, on the raw value before black is subtracted, because after a
+    /// dark subtraction and a flat division the level differs at every pixel. LibRaw's own
+    /// processing replaces `zero_is_bad` zeros with a same-colour mean (`remove_zeroes`); lumos reads
+    /// the raw buffer itself, so without the flag a dead photosite would normalize to
+    /// `−black / span` and enter every stage as a measurement.
+    fn decode_flags(&self) -> Result<Option<PixelFlags>, ImageError> {
         let raw = self.raw_image_slice()?;
         let SensorLayout {
             raw: raw_size,
             active,
             margin,
         } = self.layout;
-        Ok(PixelFlags::where_true(active, Flags::NO_DATA, |index| {
+        // Copied out: the closure runs on rayon workers, and `self` holds the libraw handle.
+        let (cfa_type, filters, zero_is_bad, saturation) = (
+            self.cfa_type,
+            self.visible_filters,
+            self.zero_is_bad,
+            self.saturation,
+        );
+        let channel_at = move |x: usize, y: usize| match cfa_type {
+            Some(CfaType::XTrans(pattern)) => usize::from(pattern.color_at(Vec2us::new(x, y))),
+            Some(CfaType::Bayer(_)) => libraw_filter_color(filters, y, x),
+            Some(CfaType::Mono) | None => 0,
+        };
+        Ok(PixelFlags::from_fn(active, |index| {
             let (x, y) = (index % active.width, index / active.width);
-            raw[(y + margin.y) * raw_size.width + x + margin.x] == 0
+            let value = raw[(y + margin.y) * raw_size.width + x + margin.x];
+            if value == 0 && zero_is_bad {
+                Flags::NO_DATA
+            } else if f32::from(value) >= saturation[channel_at(x, y)] {
+                Flags::SATURATED
+            } else {
+                Flags::default()
+            }
         }))
     }
 
@@ -908,6 +932,16 @@ fn unpack(libraw: LibrawState, path: &Path) -> Result<UnpackedRaw, ImageError> {
     let iso = extract_iso(inner);
     // SAFETY: inner is valid and the file is open, so LibRaw has identified the camera.
     let zero_is_bad = unsafe { sys::libraw_lumos_zero_is_bad(inner) } != 0;
+    // SAFETY: inner is valid, and color.linear_max is initialized after unpack.
+    let linear_max = unsafe { (*inner).color.linear_max };
+    let saturation = array::from_fn(|channel| {
+        let limit = match linear_max[channel] {
+            0 => maximum_raw,
+            known => known,
+        } as f32;
+        let black = black_level.per_channel[channel];
+        black + SATURATION_FRACTION * (limit - black)
+    });
     // SAFETY: inner is valid, and color.curve is initialized after unpack.
     let curve = unsafe { &(*inner).color.curve };
     let last_code = (maximum_raw as usize).min(curve.len() - 1);
@@ -931,6 +965,7 @@ fn unpack(libraw: LibrawState, path: &Path) -> Result<UnpackedRaw, ImageError> {
         camera_white_balance,
         iso,
         zero_is_bad,
+        saturation,
         linear_curve,
     })
 }
@@ -1196,6 +1231,7 @@ pub(crate) fn load_raw_cfa(path: &Path, context: &LoadContext) -> Result<CfaImag
     let metadata = ImageMetadata {
         domain: Some(raw.sample_domain()),
         quantization_sigma: raw.quantization_sigma(),
+        saturation_flagged: true,
         iso: raw.iso,
         header_dimensions: vec![raw.layout.active.height, raw.layout.active.width, 1],
         camera_white_balance: raw.camera_white_balance,
@@ -1216,7 +1252,7 @@ pub(crate) fn load_raw_cfa(path: &Path, context: &LoadContext) -> Result<CfaImag
         data: Buffer2::new(raw.layout.active.width, raw.layout.active.height, pixels),
         cfa_type,
         metadata,
-        flags: raw.zero_flags()?,
+        flags: raw.decode_flags()?,
     })
 }
 

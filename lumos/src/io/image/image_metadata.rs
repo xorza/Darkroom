@@ -72,6 +72,9 @@ pub struct ImageMetadata {
     /// the combine for a master. A demosaic clears it: interpolation mixes samples, so the bound no
     /// longer describes one of them.
     pub quantization_sigma: Option<f32>,
+    /// Whether the decoder flagged every saturated pixel in the image's flags. A RAW decode and a
+    /// FITS with a `DATAMAX` can; anything else leaves a consumer to test the samples itself.
+    pub saturation_flagged: bool,
     /// Set by `CalibrationMasters::calibrate` — guards against applying the dark/flat twice
     /// (the FITS `CALSTAT` convention). Travels with the frame through demosaic.
     pub calibrated: bool,

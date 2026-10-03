@@ -1,6 +1,7 @@
 use crate::internals::assertions::assert_close;
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::internals::cfa::make_cfa;
+use crate::internals::test_rng::TestRng;
 use crate::io::image::cfa::*;
 use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use common::TempDir;
@@ -372,4 +373,83 @@ fn every_pattern_names_the_colour_at_each_position() {
             );
         }
     }
+}
+
+/// No input photosite moves an output pixel farther away than `CfaType::demosaic_support`. An
+/// impulse of 20 on random texture, at several phases of each pattern, changes no output pixel past
+/// the support by more than 2⁻¹⁶ of the impulse. A wider survey, 40 textures at 6 phases on 128²
+/// frames, reached exactly 10 for both demosaics; this sample reaches 9 for RCD.
+#[test]
+fn the_demosaic_support_bounds_every_impulse_response() {
+    const SIDE: usize = 64;
+    for cfa_type in [
+        CfaType::Bayer(CfaPattern::Rggb),
+        CfaType::XTrans(XTRANS_PATTERN),
+    ] {
+        let size = Size2us::new(SIDE, SIDE);
+        let mut reach = 0usize;
+        for seed in 1..=6u64 {
+            let mut rng = TestRng::new(seed);
+            let base: Vec<f32> = (0..size.pixel_count())
+                .map(|_| 0.2 + 0.3 * rng.next_f32())
+                .collect();
+            let reference = make_cfa(size, base.clone(), cfa_type)
+                .demosaic(&CancelToken::never())
+                .unwrap();
+            for (cx, cy) in [(30usize, 30usize), (31, 30), (31, 31), (33, 32)] {
+                let mut pixels = base.clone();
+                pixels[cy * SIDE + cx] = 20.0;
+                let threshold = (20.0 - base[cy * SIDE + cx]) / 65_536.0;
+                let hit = make_cfa(size, pixels, cfa_type)
+                    .demosaic(&CancelToken::never())
+                    .unwrap();
+                for channel in 0..3 {
+                    for y in 0..SIDE {
+                        for x in 0..SIDE {
+                            let moved = (hit.channel(channel)[(x, y)]
+                                - reference.channel(channel)[(x, y)])
+                                .abs();
+                            if moved > threshold {
+                                reach = reach.max(x.abs_diff(cx).max(y.abs_diff(cy)));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            reach <= cfa_type.demosaic_support(),
+            "{cfa_type:?}: {reach}"
+        );
+    }
+}
+
+/// A flag on one photosite covers every output pixel the demosaic reads it into, and `NO_DATA`
+/// stays where it was: a saturated photosite at (20, 20) flags the 21 × 21 square around it.
+#[test]
+fn demosaic_spreads_flags_by_its_support() {
+    let size = Size2us::new(48usize, 48usize);
+    let mut cfa = make_cfa(
+        size,
+        vec![0.25; size.pixel_count()],
+        CfaType::Bayer(CfaPattern::Rggb),
+    );
+    cfa.flags = PixelFlags::from_fn(size, |index| match index {
+        index if index == 20 * 48 + 20 => Flags::SATURATED,
+        index if index == 40 * 48 + 40 => Flags::NO_DATA,
+        _ => Flags::default(),
+    });
+    let flags = cfa.demosaic(&CancelToken::never()).unwrap().flags.unwrap();
+    assert_eq!(flags.count(Flags::SATURATED), 21 * 21);
+    assert_eq!(flags.count(Flags::NO_DATA), 1);
+    assert!(
+        flags
+            .at_pos(Vec2us::new(10, 30))
+            .intersects(Flags::SATURATED)
+    );
+    assert!(
+        !flags
+            .at_pos(Vec2us::new(31, 20))
+            .intersects(Flags::SATURATED)
+    );
 }

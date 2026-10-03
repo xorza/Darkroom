@@ -32,7 +32,7 @@ use crate::io::image::image_provenance::{
 };
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::load_context::LoadContext;
-use crate::io::image::pixel_flags::{Flags, PixelFlags};
+use crate::io::image::pixel_flags::{Flags, PixelFlags, SATURATION_FRACTION};
 use crate::io::image::sample_domain::SampleDomain;
 use crate::math::statistics::median_mut;
 use crate::math::statistics::subsample::Subsample;
@@ -132,18 +132,27 @@ pub(super) fn read_decoded_hdu(
     let pedestal = domain_keywords::read_pedestal(header)
         .map_err(header_err)?
         .unwrap_or(context.fits.pedestal);
-    let nulls = resolve_nulls(path, &mut planes, plan.dimensions, context.fits.nulls)?;
-    let pixels = LinearPixels::from_planar_channels(
-        plan.dimensions,
-        planes.into_iter().map(|plane| plane.samples),
-    );
-
     let mut metadata = read_metadata(header, plan.shape, plan.sample_type);
     // DATAMAX is a saturation level in the file's sample units, so it only stays comparable to the
     // samples if it is divided by the same span they were.
     if let Some(data_max) = &mut metadata.data_max {
         *data_max /= f64::from(plan.sample_scale.divisor);
     }
+    let saturation = metadata
+        .data_max
+        .map(|data_max| SATURATION_FRACTION * data_max as f32);
+    metadata.saturation_flagged = saturation.is_some();
+    let flags = resolve_flags(
+        path,
+        &mut planes,
+        plan.dimensions,
+        context.fits.nulls,
+        saturation,
+    )?;
+    let pixels = LinearPixels::from_planar_channels(
+        plan.dimensions,
+        planes.into_iter().map(|plane| plane.samples),
+    );
     metadata.domain = Some(SampleDomain {
         scale: plan.sample_scale.physical,
         origin: plan.sample_scale.origin,
@@ -179,7 +188,7 @@ pub(super) fn read_decoded_hdu(
         metadata,
         cfa_type,
         pixels,
-        flags: nulls,
+        flags,
     })
 }
 
@@ -194,27 +203,29 @@ struct DecodedPlane {
     scan: SampleScan,
 }
 
-/// Apply the caller's null policy to a decoded image's planes: reject the load, or fill the nulls
-/// and hand back the mask that says where they were.
+/// Apply the caller's null policy to a decoded image's planes — reject the load, or fill the nulls
+/// — and hand back the flags the samples settle: [`Flags::NO_DATA`] where they were null, and
+/// [`Flags::SATURATED`] where a channel reaches `saturation`, a level in the decoded domain.
 ///
-/// A frame with no nulls — every frame from a sensor, and most from a survey — returns before
-/// either branch, so the whole feature costs one sum over at most three integers.
-fn resolve_nulls(
+/// A frame with no nulls and no saturation level — most frames without a `DATAMAX` — returns
+/// before any scan, so the feature costs one sum over at most three integers.
+fn resolve_flags(
     path: &Path,
     planes: &mut [DecodedPlane],
     dimensions: ImageDimensions,
     policy: FitsNullPolicy,
+    saturation: Option<f32>,
 ) -> Result<Option<PixelFlags>, ImageError> {
     let count: usize = planes
         .iter()
         .filter_map(|plane| plane.nulls)
         .map(|nulls| nulls.count)
         .sum();
-    if count == 0 {
+    if count == 0 && saturation.is_none() {
         return Ok(None);
     }
 
-    if policy == FitsNullPolicy::Reject {
+    if count > 0 && policy == FitsNullPolicy::Reject {
         let first_index = planes
             .iter()
             .enumerate()
@@ -235,28 +246,42 @@ fn resolve_nulls(
         ));
     }
 
-    // Before the fill, which is what erases the evidence.
-    let mask = {
+    // Before the fill, which is what erases the evidence. A non-finite sample fails every
+    // comparison, so a null is never also saturated.
+    let flags = {
         let samples = planes
             .iter()
             .map(|plane| plane.samples.as_slice())
             .collect::<ArrayVec<&[f32], 3>>();
-        PixelFlags::of_non_finite(dimensions.size(), &samples)
-            .expect("a nonzero count means at least one plane holds a non-finite sample")
+        PixelFlags::from_fn(dimensions.size(), |index| {
+            if samples.iter().any(|plane| !plane[index].is_finite()) {
+                Flags::NO_DATA
+            } else if saturation
+                .is_some_and(|level| samples.iter().any(|plane| plane[index] >= level))
+            {
+                Flags::SATURATED
+            } else {
+                Flags::default()
+            }
+        })
     };
+    if count == 0 {
+        return Ok(flags);
+    }
     for plane in planes.iter_mut() {
         if let Some(nulls) = plane.nulls {
             fill_nulls(&mut plane.samples, nulls.count);
         }
     }
+    let flags = flags.expect("a nonzero count means at least one plane holds a non-finite sample");
     // Only for a frame that has them, and the samples the caller is about to read are partly fill
     // with nothing in the frame itself to say so.
     tracing::info!(
-        pixels = mask.count(Flags::NO_DATA),
+        pixels = flags.count(Flags::NO_DATA),
         of = dimensions.pixel_count(),
         "FITS image declares pixels with no measurement"
     );
-    Ok(Some(mask))
+    Ok(Some(flags))
 }
 
 /// Samples the fill's median is taken over, at most.

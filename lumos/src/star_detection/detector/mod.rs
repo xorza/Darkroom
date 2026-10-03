@@ -5,12 +5,12 @@
 
 pub(super) mod stages;
 
+use arrayvec::ArrayVec;
 use serde::{Deserialize, Serialize};
-
-use imaginarium::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::linear::LinearImage;
+use crate::io::image::pixel_flags::{Flags, SATURATION_FRACTION};
 use crate::math::size2us::Size2us;
 
 use crate::error::InvalidConfigField;
@@ -104,20 +104,32 @@ impl FwhmSource {
     }
 }
 
-/// A pixel at this fraction of the data's ceiling counts as saturated: a clipped star's flat top
-/// rarely reads the ceiling itself once dark subtraction and the decoder's scaling have moved it.
-const SATURATION_FRACTION: f32 = 0.95;
-
-/// The level a pixel of `image` saturates at: [`SATURATION_FRACTION`] of its declared ceiling,
-/// `DATAMAX` in the normalized domain, or of that domain's 1 when it declares none.
+/// The level a sample of `image` saturates at when its decoder flagged nothing:
+/// [`SATURATION_FRACTION`] of its declared ceiling, `DATAMAX` in the normalized domain, or of that
+/// domain's 1 when it declares none.
 fn saturation_level(image: &LinearImage) -> f32 {
     SATURATION_FRACTION * image.metadata.data_max.map_or(1.0, |max| max as f32)
 }
 
-/// Mark the pixels of `values` at or above `level`.
-fn mark_saturated(values: &Buffer2<f32>, level: f32, mask: &mut BitBuffer2) {
-    let values = values.pixels();
-    mask.fill_from_predicate(|index| values[index] >= level);
+/// Mark the saturated pixels of `image`: the decoder's [`Flags::SATURATED`] when it flagged
+/// saturation, which a dark subtraction and a flat division leave exact; otherwise every pixel where
+/// any input channel reaches [`saturation_level`]. Per channel, before the channels are combined:
+/// a star clipped in green alone, (0.6, 1.0, 0.6), combines to 0.8.
+fn mark_saturated(image: &LinearImage, mask: &mut BitBuffer2) {
+    if image.metadata.saturation_flagged {
+        match &image.flags {
+            Some(flags) => {
+                mask.fill_from_predicate(|index| flags.at(index).intersects(Flags::SATURATED));
+            }
+            None => mask.fill(false),
+        }
+        return;
+    }
+    let level = saturation_level(image);
+    let channels: ArrayVec<&[f32], 3> = (0..image.channels())
+        .map(|channel| image.channel(channel).pixels())
+        .collect();
+    mask.fill_from_predicate(|index| channels.iter().any(|channel| channel[index] >= level));
 }
 
 /// Star detector with reusable processing resources.
@@ -179,9 +191,9 @@ impl StarDetector {
             );
         }
 
-        // Saturation is a property of the recorded values, which the subtraction below removes.
+        // Saturation is a property of the recorded values, read before anything combines them.
         let mut saturation = resources.acquire_bit();
-        mark_saturated(&residual, saturation_level(image), &mut saturation);
+        mark_saturated(image, &mut saturation);
 
         // From here on every stage reads the residual: no threshold, deblend or measurement sees
         // the sky.
@@ -278,6 +290,34 @@ mod tests {
     use crate::star_detection::config::fwhm_config::FwhmMode;
     use crate::star_detection::detector::*;
     use crate::star_detection::tests::{Placement, Scenario};
+
+    /// Review item 9.3. Without decoder flags the test runs per channel at 0.95 of the ceiling: a
+    /// star clipped in green alone, (0.6, 1.0, 0.6), is saturated, though its channels average
+    /// 0.73; (0.9, 0.9, 0.9) is not. With decoder flags only the flags count, so a calibrated pixel
+    /// that a flat lifted to 0.99 is not saturated, and a flagged one at 0.5 is.
+    #[test]
+    fn saturation_is_marked_per_channel_or_from_the_decoders_flags() {
+        use crate::internals::prelude::*;
+        use crate::io::image::pixel_flags::PixelFlags;
+
+        let size = Size2us::new(2, 1);
+        let image = rgb_image(size, vec![0.6, 0.9], vec![1.0, 0.9], vec![0.6, 0.9]);
+        let mut mask = BitBuffer2::new_default(size);
+        mark_saturated(&image, &mut mask);
+        assert_eq!([mask.get(0), mask.get(1)], [true, false]);
+
+        let mut flagged = rgb_image(size, vec![0.99, 0.5], vec![0.99, 0.5], vec![0.99, 0.5]);
+        flagged.metadata.saturation_flagged = true;
+        flagged.flags = PixelFlags::from_fn(size, |index| {
+            if index == 1 {
+                Flags::SATURATED
+            } else {
+                Flags::default()
+            }
+        });
+        mark_saturated(&flagged, &mut mask);
+        assert_eq!([mask.get(0), mask.get(1)], [false, true]);
+    }
 
     #[test]
     fn fwhm_source_distinguishes_measured_from_supplied() {
