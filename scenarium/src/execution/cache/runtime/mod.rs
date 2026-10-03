@@ -410,6 +410,10 @@ impl RuntimeCache {
 
         for input in &program.inputs[e_node.inputs] {
             match &input.binding {
+                // Set aside by its override, the input is delivered unbound.
+                _ if program.overridden(input, states) => {
+                    hasher.write_input_tag(InputTag::Unbound);
+                }
                 ExecutionBinding::None => {
                     hasher.write_input_tag(InputTag::Unbound);
                 }

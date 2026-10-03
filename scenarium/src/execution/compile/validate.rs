@@ -82,7 +82,23 @@ pub(super) fn validate(
             }
         }
 
-        for e_input in inputs {
+        for (port_idx, e_input) in inputs.iter().enumerate() {
+            if let Some(by) = e_input.overridden_by {
+                if !e_node.inputs.range().contains(&by.idx()) {
+                    return Err(CompiledGraphValidationError::OverrideOutsideNode {
+                        node_id: *node_id,
+                        port_idx,
+                    });
+                }
+                // The executor plans no read for a set-aside input, which holds
+                // only while the target cannot be wired.
+                if matches!(e_input.binding, ExecutionBinding::Bind(_)) {
+                    return Err(CompiledGraphValidationError::OverriddenBind {
+                        node_id: *node_id,
+                        port_idx,
+                    });
+                }
+            }
             if let ExecutionBinding::Bind(e_addr) = &e_input.binding {
                 // Unreachable while `Compiler::resolve` mints every address
                 // from a successful placement lookup — kept as the backstop if

@@ -428,6 +428,18 @@ impl NodeSpec {
         self
     }
 
+    /// The input declared before this call overrides input `target`.
+    #[must_use]
+    pub fn overrides(mut self, target: usize) -> Self {
+        let last = self
+            .func
+            .inputs
+            .last_mut()
+            .expect("`overrides` applies to the input declared before it");
+        last.overrides = Some(target);
+        self
+    }
+
     #[must_use]
     pub fn optional(mut self, data_type: DataType) -> Self {
         let name = format!("in{}", self.func.inputs.len());

@@ -8,7 +8,7 @@ mod macros;
 pub(crate) mod signature;
 
 use crate::data::type_system::Strictness;
-use crate::graph::func::error::FuncValidationError;
+use crate::graph::func::error::{FuncValidationError, OverrideRule};
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::lambda::FuncLambda;
 use crate::graph::node::CacheMode;
@@ -74,6 +74,11 @@ pub struct FuncInput {
     pub default_value: Option<ConstValue>,
     #[serde(default)]
     pub value_variants: Vec<ValueVariant>,
+    /// The input this one overrides: while this input delivers a value, the
+    /// target is set aside — not delivered, not digested, not required. The
+    /// target is `const_only`, so setting it aside never strands a producer.
+    #[serde(default)]
+    pub overrides: Option<usize>,
 }
 
 impl FuncInput {
@@ -87,6 +92,7 @@ impl FuncInput {
             const_only: false,
             default_value: None,
             value_variants: Vec::new(),
+            overrides: None,
         }
     }
 
@@ -101,6 +107,7 @@ impl FuncInput {
             const_only: false,
             default_value: None,
             value_variants: Vec::new(),
+            overrides: None,
         }
     }
 
@@ -123,6 +130,13 @@ impl FuncInput {
     #[must_use]
     pub fn const_only(mut self) -> Self {
         self.const_only = true;
+        self
+    }
+
+    /// Override input `target` of the same func. See [`FuncInput::overrides`].
+    #[must_use]
+    pub const fn overrides(mut self, target: usize) -> Self {
+        self.overrides = Some(target);
         self
     }
 
@@ -411,6 +425,18 @@ impl Func {
                 });
             }
         }
+        for (input_idx, input) in self.inputs.iter().enumerate() {
+            if let Some(target) = input.overrides
+                && let Err(rule) = self.check_override(input_idx, target)
+            {
+                return Err(FuncValidationError::InvalidOverride {
+                    func_id: self.id,
+                    input_idx,
+                    target,
+                    rule,
+                });
+            }
+        }
         for (output_idx, output) in self.outputs.iter().enumerate() {
             match &output.ty {
                 OutputType::Fixed(DataType::Custom(type_id) | DataType::Enum(type_id)) => {
@@ -439,6 +465,39 @@ impl Func {
         }
         Ok(())
     }
+
+    /// Whether input `input_idx` may override input `target`: an optional
+    /// input over another, `const_only` one that nothing else overrides, and
+    /// no chain — the override is one hop, resolved without a fixed point.
+    fn check_override(&self, input_idx: usize, target: usize) -> Result<(), OverrideRule> {
+        let Some(overridden) = self.inputs.get(target) else {
+            return Err(OverrideRule::TargetOutOfRange);
+        };
+        if target == input_idx {
+            return Err(OverrideRule::SelfTarget);
+        }
+        if self.inputs[input_idx].required {
+            return Err(OverrideRule::RequiredOverride);
+        }
+        if !overridden.const_only {
+            return Err(OverrideRule::WirableTarget);
+        }
+        if overridden.overrides.is_some()
+            || self
+                .inputs
+                .iter()
+                .any(|input| input.overrides == Some(input_idx))
+        {
+            return Err(OverrideRule::Chain);
+        }
+        if self.inputs[..input_idx]
+            .iter()
+            .any(|input| input.overrides == Some(target))
+        {
+            return Err(OverrideRule::SharedTarget);
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -447,6 +506,7 @@ mod tests {
     use std::sync::Arc;
 
     use crate::async_lambda;
+    use crate::graph::func::error::{FuncValidationError, OverrideRule};
     use crate::graph::func::event::EventLambda;
     use crate::graph::func::{Func, FuncInput, FuncOutput, ValueVariant};
     use crate::graph::node::CacheMode;
@@ -533,8 +593,71 @@ mod tests {
             .default(ConstValue::FsPath("a.fits".into())),
         );
 
+        // An override is one hop from an optional input onto a const-only one
+        // nothing else overrides.
+        let preset = || FuncInput::required("preset", DataType::Int).const_only();
+        let config = |target| FuncInput::optional("config", DataType::Int).overrides(target);
+        let override_rows = [
+            (
+                vec![preset(), config(2)],
+                1,
+                2,
+                OverrideRule::TargetOutOfRange,
+            ),
+            (vec![config(0)], 0, 0, OverrideRule::SelfTarget),
+            (
+                vec![
+                    preset(),
+                    FuncInput::required("config", DataType::Int).overrides(0),
+                ],
+                1,
+                0,
+                OverrideRule::RequiredOverride,
+            ),
+            (
+                vec![FuncInput::required("preset", DataType::Int), config(0)],
+                1,
+                0,
+                OverrideRule::WirableTarget,
+            ),
+            (
+                vec![
+                    preset(),
+                    FuncInput::optional("middle", DataType::Int)
+                        .const_only()
+                        .overrides(0),
+                    config(1),
+                ],
+                1,
+                0,
+                OverrideRule::Chain,
+            ),
+            (
+                vec![preset(), config(0), config(0)],
+                2,
+                0,
+                OverrideRule::SharedTarget,
+            ),
+        ];
+        for (inputs, input_idx, target, rule) in override_rows {
+            let func = Func::new(FuncId::unique(), "override")
+                .inputs(inputs)
+                .lambda(async_lambda!(|_| { Ok(()) }));
+            assert_eq!(
+                func.validate(),
+                Err(FuncValidationError::InvalidOverride {
+                    func_id: func.id,
+                    input_idx,
+                    target,
+                    rule,
+                }),
+                "{rule}"
+            );
+        }
+
         // Well-formed declarations: exact kinds, a variant member, Null on an
-        // optional input, `Any` accepting any literal, and a valid wildcard.
+        // optional input, `Any` accepting any literal, a valid wildcard and a
+        // valid override.
         Func::new(FuncId::unique(), "ok")
             .input(FuncInput::optional("int", DataType::Int).default(2i64))
             .input(FuncInput::optional("any", DataType::Any).default("text"))
@@ -551,6 +674,8 @@ mod tests {
                 )
                 .default(ConstValue::FsPaths(vec!["a.fits".into()])),
             )
+            .input(preset())
+            .input(config(5))
             .wildcard_output("value", 0)
             .lambda(async_lambda!(|_| { Ok(()) }))
             .validate()

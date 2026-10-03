@@ -38,6 +38,30 @@ pub enum FuncValidationError {
         "function {func_id:?} input {input_idx} declares a default that matches neither its type nor its picker variants"
     )]
     InvalidDefault { func_id: FuncId, input_idx: usize },
+    #[error("function {func_id:?} input {input_idx} cannot override input {target}: {rule}")]
+    InvalidOverride {
+        func_id: FuncId,
+        input_idx: usize,
+        target: usize,
+        rule: OverrideRule,
+    },
+}
+
+/// The rule an input override declaration breaks.
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+pub enum OverrideRule {
+    #[error("there is no such input")]
+    TargetOutOfRange,
+    #[error("an input cannot override itself")]
+    SelfTarget,
+    #[error("a required input always delivers, so its target could never be read")]
+    RequiredOverride,
+    #[error("the target is not const-only, so its producer would run for nothing")]
+    WirableTarget,
+    #[error("an override cannot itself be overridden or override an override")]
+    Chain,
+    #[error("another input already overrides the target")]
+    SharedTarget,
 }
 
 #[derive(Debug, Error)]
