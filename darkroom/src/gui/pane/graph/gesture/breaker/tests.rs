@@ -55,8 +55,6 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
     h.frame();
 
     h.ui.release_button(PointerButton::Right);
-    // The harness carries the pane assertion: a cut commits against the pane
-    // the scribble ran on.
     let released = h.frame();
     assert!(
         matches!(released[..], [GraphIntent::RemoveNode { node_id }] if node_id == node),

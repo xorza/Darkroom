@@ -70,11 +70,6 @@ fn null_falls_back_to_positional_port_color() {
 #[test]
 fn custom_types_keyed_by_type_id() {
     let t = Theme::default();
-    // Same id → same color.
-    assert_eq!(
-        port_color(&t, &custom(7), PortKind::Input, false),
-        port_color(&t, &custom(7), PortKind::Input, false),
-    );
     // Ids in adjacent ramp slots → different colors (ramp entries
     // are distinct, len > 1).
     assert_ne!(

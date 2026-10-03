@@ -129,11 +129,7 @@ impl NewNodeUi {
         // (`max_height` minus the chrome above it) keeps it from eating the
         // header's space — a `Hug` scroll otherwise claims the full cap.
         let surface = ui.display().logical_rect();
-        let max_height = graph_ctx
-            .theme()
-            .new_node_popup_max_height
-            .min(surface.size.h - 16.0)
-            .max(120.0);
+        let max_height = popup_cap(graph_ctx.theme().new_node_popup_max_height, surface.size.h);
         let scroll_cap = (max_height - chrome_above_results(ui)).max(MIN_RESULTS_HEIGHT);
         let (search, rows) = (&mut self.search, &mut self.rows);
         // Rows are picked at the position the *open* captured, not wherever
@@ -163,6 +159,22 @@ impl NewNodeUi {
         self.resume_floating.take()
     }
 }
+
+/// The palette's height cap: the theme's, held inside a window `surface_h`
+/// tall by [`POPUP_WINDOW_MARGIN`], and never below [`POPUP_MIN_HEIGHT`].
+fn popup_cap(theme_max: f32, surface_h: f32) -> f32 {
+    theme_max
+        .min(surface_h - POPUP_WINDOW_MARGIN)
+        .max(POPUP_MIN_HEIGHT)
+}
+
+/// What the palette leaves of a short window's height, so it never touches
+/// the window's edge.
+const POPUP_WINDOW_MARGIN: f32 = 16.0;
+
+/// Floor under the palette's height: a window too short for the theme's cap
+/// still gets a palette with a search field and a few rows.
+const POPUP_MIN_HEIGHT: f32 = 120.0;
 
 /// Gap (px) below the search field, before the results scroll.
 const SEARCH_ROW_GAP: f32 = 8.0;

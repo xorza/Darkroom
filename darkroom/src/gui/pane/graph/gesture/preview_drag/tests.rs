@@ -53,8 +53,6 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
     h.ui.set_modifiers(Modifiers::default());
     h.ui.release_button(PointerButton::Left);
 
-    // The harness carries the pane assertion: the spawn is raised against the
-    // port's own pane, not whichever one happens to be focused.
     let adds: Vec<_> = spawned
         .iter()
         .filter(|intent| matches!(intent, GraphIntent::AddNode { .. }))
