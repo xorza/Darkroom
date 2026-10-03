@@ -3,8 +3,9 @@
 //!
 //! A snapshot pins what the code does, not what is right. A change that moves one states why;
 //! one that moves without a stated reason is a regression until shown otherwise. The digests are
-//! those of an `x86_64` host with AVX2 and FMA: the vector backends and fused multiply-adds round
-//! differently on any other host, which reports the snapshots as skipped rather than failing them.
+//! those of an `x86_64` host. Every vector Isa computes the same values, but the scalar code calls
+//! the platform's libm, which another architecture or OS may round differently, so another host
+//! reports the snapshots as skipped rather than failing them.
 
 mod snapshot;
 
@@ -17,6 +18,7 @@ use crate::image_ops::stretching::{ColorMode, Stretch, StretchMethod};
 use crate::internals::cfa::make_cfa;
 use crate::internals::characterization::snapshot::Snapshot;
 use crate::internals::prelude::*;
+use crate::internals::synthetic::fixtures::star_field;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::fits::cfa::save_cfa_fits;
 use crate::io::image::load_context::LoadContext;
@@ -30,22 +32,14 @@ use crate::star_detection::config::Config as StarDetectionConfig;
 use crate::star_detection::detector::StarDetector;
 use crate::star_detection::star::Star;
 use common::TempDir;
-#[cfg(target_arch = "x86_64")]
-use imaginarium::SimdTier;
-
-#[cfg(target_arch = "x86_64")]
-use crate::internals::simd_check;
-use crate::internals::synthetic::fixtures::star_field;
 
 /// Whether this host computes the pinned digests; another one reports why it skips.
 fn pinned_host() -> bool {
-    #[cfg(target_arch = "x86_64")]
-    return simd_check::runs_here(SimdTier::Avx2Fma);
-    #[cfg(not(target_arch = "x86_64"))]
-    {
+    let pinned = cfg!(target_arch = "x86_64");
+    if !pinned {
         eprintln!("SKIPPED: the characterization snapshots are pinned on x86_64 only");
-        false
     }
+    pinned
 }
 
 /// A decode a frame cache can hold, against its pin in [`DECODE_PINS`].
@@ -253,7 +247,7 @@ fn warp_snapshot() {
     snapshot
         .f32s(result.coverage.pixels())
         .f32s(result.confidence.pixels());
-    assert_snapshot("warp", &snapshot, "f36b96e9f557e6d6");
+    assert_snapshot("warp", &snapshot, "c3a3ffd7c4f79056");
 }
 
 /// The field and two dithers of it, stacked with the default configuration.
@@ -279,7 +273,7 @@ fn combine_snapshot() {
     .unwrap();
     let mut snapshot = Snapshot::default();
     image_snapshot(&mut snapshot, &product.image);
-    assert_snapshot("combine", &snapshot, "71b60fac09428e63");
+    assert_snapshot("combine", &snapshot, "e61d750aa51cc4d0");
 }
 
 /// Each automatic stretch on a three-channel field, so the color-preserving paths run.

@@ -59,8 +59,8 @@ impl<B: PooledBuffer> BufferPool<B> {
     /// Contents are **unspecified**: a fresh buffer is zeroed, a reused one keeps whatever the
     /// last holder left. Overwrite before reading.
     ///
-    /// Release assert, for the same reason as [`Self::release`]'s: handing out a buffer of the
-    /// previous dimensions is out-of-bounds UB in the SIMD kernels downstream, not a wrong pixel.
+    /// Release assert, for the same reason as [`Self::release`]'s: a buffer of the previous
+    /// dimensions handed out is a wrong image downstream, or a panic far from its cause.
     /// The two catch different mistakes — `release` catches a holder that resized a buffer,
     /// `acquire` a pool reused across image sizes without an intervening [`Self::clear`].
     pub(crate) fn acquire(&mut self, dimensions: Size2us) -> B {
@@ -79,10 +79,10 @@ impl<B: PooledBuffer> BufferPool<B> {
 
     /// Return a buffer for reuse. It must cover `dimensions`.
     ///
-    /// Release assert, not debug: a mismatched buffer handed back would be silently reused by
-    /// SIMD kernels that do unchecked-length loads and stores off the pool's declared dimensions
-    /// — out-of-bounds UB, not a wrong pixel. The check is O(1) per acquire/release, not "too
-    /// expensive for release".
+    /// Release assert, not debug: a mismatched buffer handed back would be silently reused at the
+    /// pool's declared dimensions, indexed as an image of another shape — wrong pixels, or a
+    /// bounds panic far from the cause. The check is O(1) per acquire/release, not "too expensive
+    /// for release".
     pub(crate) fn release(&mut self, buffer: B, dimensions: Size2us) {
         assert_eq!(
             buffer.dimensions(),
@@ -142,7 +142,7 @@ mod tests {
     }
 
     /// The size the pool was previously used at must not leak through to a caller asking for a
-    /// different one — downstream SIMD kernels index off the dimensions they asked for.
+    /// different one — downstream kernels index off the dimensions they asked for.
     #[test]
     #[should_panic(expected = "acquired at new dimensions without clearing")]
     fn acquiring_at_new_dimensions_without_clearing_panics() {

@@ -1,6 +1,8 @@
 //! Does the vectorized 3x3 median row kernel beat the plain scalar loop?
 //!
-//! This is what sets — or retires — the `*_ROW_WIDTH_CROSSOVER` constants the dispatcher gates on.
+//! It retired the row-width crossovers the dispatcher once gated on: the kernel now runs at every
+//! width, so one network decides every pixel.
+//!
 //! It filters a whole image rather than timing one row: a single row of a realistic width runs in
 //! a few microseconds, short enough that timer overhead and machine state swamped the difference
 //! (an earlier per-row sweep put AVX2 anywhere from 8x faster to 3x slower than scalar at the same
@@ -13,11 +15,11 @@
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
-use crate::star_detection::median_filter::simd::{
-    median_filter_row_scalar, median_filter_row_simd,
-};
+use crate::star_detection::median_filter::simd::internals::median_filter_row_scalar;
+use crate::star_detection::median_filter::simd::median_filter_row;
 
-/// Frame widths from "narrow enough that the dispatcher's threshold is in play" up to a 6k sensor.
+/// Frame widths from narrow enough that the overlapping last vector is a large share of a row up to
+/// a 6k sensor.
 const IMAGE_WIDTHS: [usize; 5] = [16, 64, 256, 1024, 4096];
 
 /// Rows per image, chosen with the widths above to keep each sample near a megapixel of work.
@@ -35,9 +37,9 @@ fn filter_interior<const SIMD: bool>(input: &[f32], output: &mut [f32], width: u
         let below = &input[(y + 1) * width..(y + 2) * width];
         let out = &mut output[y * width..(y + 1) * width];
         if SIMD {
-            median_filter_row_simd(above, curr, below, out, width);
+            median_filter_row(above, curr, below, out);
         } else {
-            median_filter_row_scalar(above, curr, below, out, width);
+            median_filter_row_scalar(above, curr, below, out);
         }
     }
 }

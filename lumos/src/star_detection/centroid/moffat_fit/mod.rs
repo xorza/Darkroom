@@ -13,10 +13,11 @@
 mod simd;
 
 use crate::math::fwhm::{alpha_beta_to_fwhm, fwhm_beta_to_alpha, sigma_to_fwhm};
+use crate::simd::Kernel;
 use crate::star_detection::centroid::fit_is_plausible;
-use crate::star_detection::centroid::lm_optimizer::{
-    FitData, LMConfig, LMModel, ModelSample, NormalEquations,
-};
+use crate::star_detection::centroid::lm_optimizer::{FitData, LMConfig, LMModel, NormalEquations};
+use crate::star_detection::centroid::moffat_fit::simd::MoffatBatch;
+use crate::star_detection::centroid::simd::{Chi2Kernel, NormalEquationsKernel};
 use crate::star_detection::centroid::stamp::FitNoise;
 use crate::star_detection::centroid::stamp::StampFit;
 use crate::star_detection::centroid::stamp::StampGrid;
@@ -88,7 +89,7 @@ fn fast_pow_neg(u: f64, strategy: PowStrategy) -> f64 {
     }
 }
 
-/// `u^n` by squaring — the same multiplications, in the same order, as the SIMD backends' powers,
+/// `u^n` by squaring — the same multiplications, in the same order, as the vector kernel's powers,
 /// so a lane and the scalar path agree bit for bit at every `n`.
 #[inline]
 fn int_pow(u: f64, n: u32) -> f64 {
@@ -115,12 +116,10 @@ fn select_pow_strategy(beta: f64) -> PowStrategy {
     if is_half_int {
         let doubled = rounded as i64;
         if doubled % 2 == 0 {
-            // Integer beta
             PowStrategy::Int {
                 n: (doubled / 2) as u32,
             }
         } else {
-            // Half-integer beta (n + 0.5)
             PowStrategy::HalfInt {
                 int_part: (doubled / 2) as u32,
             }
@@ -162,31 +161,6 @@ impl LMModel<5> for MoffatFixedBeta {
     }
 
     #[inline]
-    fn evaluate_and_jacobian(&self, x: f64, y: f64, params: &[f64; 5]) -> ModelSample<5> {
-        let [x0, y0, amp, alpha, bg] = *params;
-        let alpha2 = alpha * alpha;
-        let dx = x - x0;
-        let dy = y - y0;
-        let r2 = dx * dx + dy * dy;
-        let u = 1.0 + r2 / alpha2;
-        let u_neg_beta = fast_pow_neg(u, self.pow_strategy);
-        let model_val = amp * u_neg_beta + bg;
-        let u_neg_beta_m1 = u_neg_beta / u;
-        let common = 2.0 * amp * self.beta / alpha2 * u_neg_beta_m1;
-
-        ModelSample {
-            value: model_val,
-            jacobian: [
-                common * dx,         // df/dx0
-                common * dy,         // df/dy0
-                u_neg_beta,          // df/damp
-                common * r2 / alpha, // df/dalpha
-                1.0,                 // df/dbg
-            ],
-        }
-    }
-
-    #[inline]
     fn constrain(&self, params: &mut [f64; 5]) {
         params[2] = params[2].max(self.min_amplitude);
         params[3] = params[3].clamp(MIN_ALPHA, self.stamp_radius);
@@ -197,13 +171,19 @@ impl LMModel<5> for MoffatFixedBeta {
         data: FitData<'_>,
         params: &[f64; 5],
     ) -> NormalEquations<5> {
-        simd::batch_build_normal_equations(self, data, params)
-            .unwrap_or_else(|| NormalEquations::from_scalar_pass(self, data, params))
+        NormalEquationsKernel {
+            model: MoffatBatch::new(self, *params),
+            data,
+        }
+        .dispatch()
     }
 
     fn batch_compute_chi2(&self, data: FitData<'_>, params: &[f64; 5]) -> f64 {
-        simd::batch_compute_chi2(self, data, params)
-            .unwrap_or_else(|| self.accumulate_chi2(data, params, 0..data.len()))
+        Chi2Kernel {
+            model: MoffatBatch::new(self, *params),
+            data,
+        }
+        .dispatch()
     }
 }
 
@@ -268,6 +248,36 @@ impl MoffatFit {
 
 #[cfg(test)]
 mod internals {
+    use crate::star_detection::centroid::lm_optimizer::LMResult;
+    use crate::star_detection::centroid::lm_optimizer::internals::{ModelJacobian, ModelSample};
+    use crate::star_detection::centroid::moffat_fit::{MoffatFixedBeta, fast_pow_neg};
+
+    impl ModelJacobian<5> for MoffatFixedBeta {
+        fn evaluate_and_jacobian(&self, x: f64, y: f64, params: &[f64; 5]) -> ModelSample<5> {
+            let [x0, y0, amp, alpha, bg] = *params;
+            let alpha2 = alpha * alpha;
+            let dx = x - x0;
+            let dy = y - y0;
+            let r2 = dx * dx + dy * dy;
+            let u = 1.0 + r2 / alpha2;
+            let u_neg_beta = fast_pow_neg(u, self.pow_strategy);
+            let model_val = amp * u_neg_beta + bg;
+            let u_neg_beta_m1 = u_neg_beta / u;
+            let common = 2.0 * amp * self.beta / alpha2 * u_neg_beta_m1;
+
+            ModelSample {
+                value: model_val,
+                jacobian: [
+                    common * dx,         // df/dx0
+                    common * dy,         // df/dy0
+                    u_neg_beta,          // df/damp
+                    common * r2 / alpha, // df/dalpha
+                    1.0,                 // df/dbg
+                ],
+            }
+        }
+    }
+
     /// Fit diagnostics kept for tests; see [`MoffatFit::debug`].
     #[derive(Debug, Clone, Copy)]
     pub(super) struct MoffatFitDebug {
@@ -278,9 +288,6 @@ mod internals {
         /// Background level.
         pub(super) background: f32,
     }
-
-    use crate::star_detection::centroid::lm_optimizer::LMResult;
-    use crate::star_detection::centroid::moffat_fit::{MoffatFixedBeta, fast_pow_neg};
 
     impl MoffatFitDebug {
         /// Derive the diagnostics from the optimizer's report. Gated with the struct, so a
@@ -299,7 +306,7 @@ mod internals {
         /// The Jacobian row alone, derived independently of
         /// [`MoffatFixedBeta::evaluate_and_jacobian`]'s fused form.
         ///
-        /// Production takes only the fused path; this exists so
+        /// The vector kernel mirrors the fused path; this exists so
         /// `moffat_fixed_beta_evaluate_and_jacobian_consistency` has a second derivation of
         /// the same algebra to check it against. Keep the two written out separately — sharing a
         /// helper between them would make the test compare an expression with itself.

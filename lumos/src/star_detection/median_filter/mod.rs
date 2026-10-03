@@ -36,31 +36,25 @@ pub(crate) fn median_filter_3x3(pixels: &Buffer2<f32>, output: &mut Buffer2<f32>
         .enumerate()
         .for_each(|(y, row)| {
             if y == 0 || y == size.height - 1 {
-                // Edge row - use generic edge handling
                 filter_edge_row(pixels, size, y, row);
             } else {
-                // Interior row - fast path for most pixels
                 filter_interior_row(pixels, size.width, y, row);
             }
         });
 }
 
-/// Filter an interior row (y is not 0 or height-1).
-/// Uses SIMD fast path for interior pixels with full 9-element neighborhood.
+/// Filter an interior row (y is not 0 or height-1): the vector kernel for every pixel with a full
+/// 9-element neighborhood.
 #[inline]
 fn filter_interior_row(pixels: &[f32], width: usize, y: usize, output_row: &mut [f32]) {
-    // Left edge pixel (x=0): 6 neighbors
     output_row[0] = median_at_left_edge(pixels, width, y);
 
-    // Interior pixels (x=1 to width-2): 9 neighbors each
     let row_above = &pixels[(y - 1) * width..y * width];
     let row_curr = &pixels[y * width..(y + 1) * width];
     let row_below = &pixels[(y + 1) * width..(y + 2) * width];
 
-    // Use SIMD-accelerated row processing
-    simd::median_filter_row_simd(row_above, row_curr, row_below, output_row, width);
+    simd::median_filter_row(row_above, row_curr, row_below, output_row);
 
-    // Right edge pixel (x=width-1): 6 neighbors
     output_row[width - 1] = median_at_right_edge(pixels, width, y);
 }
 
@@ -129,7 +123,6 @@ fn median_at_edge(pixels: &[f32], size: Size2us, pos: Vec2us) -> f32 {
 /// Median of 4 elements (average of middle two).
 #[inline]
 fn median4(v: &mut [f32]) -> f32 {
-    // Sorting network for 4 elements
     if v[0] > v[1] {
         v.swap(0, 1);
     }

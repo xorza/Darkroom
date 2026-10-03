@@ -17,7 +17,6 @@ mod gaussian_fit;
 mod lm_optimizer;
 mod local_background;
 mod moffat_fit;
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 mod simd;
 pub(crate) mod stamp;
 

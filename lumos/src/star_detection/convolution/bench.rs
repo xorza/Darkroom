@@ -3,7 +3,7 @@
 use crate::internals::prelude::*;
 use crate::internals::synthetic::fixtures::star_field;
 use crate::star_detection::convolution::simd::convolve_row;
-use crate::star_detection::convolution::simd::convolve_row_scalar;
+use crate::star_detection::convolution::simd::internals::convolve_row_scalar;
 use crate::star_detection::convolution::{
     MatchedFilterBuffers, convolve_cols, convolve_rows_parallel, elliptical_gaussian_convolve,
     gaussian_convolve, gaussian_kernel_1d, matched_filter,
@@ -16,7 +16,6 @@ fn bench_convolve_row_4k(b: ::quickbench::Bencher) {
     let width = 4096 * 10;
     let input: Vec<f32> = (0..width).map(|i| (i as f32 * 0.1).sin() * 100.0).collect();
     let kernel = gaussian_kernel_1d(2.0); // FWHM ~4.7 pixels
-    let radius = kernel.len() / 2;
     let mut output = vec![0.0f32; width];
 
     b.bench_labeled("simd", || {
@@ -24,7 +23,6 @@ fn bench_convolve_row_4k(b: ::quickbench::Bencher) {
             black_box(&input),
             black_box(&mut output),
             black_box(&kernel),
-            radius,
         );
     });
 
@@ -33,7 +31,6 @@ fn bench_convolve_row_4k(b: ::quickbench::Bencher) {
             black_box(&input),
             black_box(&mut output),
             black_box(&kernel),
-            radius,
         );
     });
 }
@@ -43,7 +40,6 @@ fn bench_convolve_row_large_kernel(b: ::quickbench::Bencher) {
     let width = 4096;
     let input: Vec<f32> = (0..width).map(|i| (i as f32 * 0.1).sin() * 100.0).collect();
     let kernel = gaussian_kernel_1d(5.0); // Larger kernel, FWHM ~11.8 pixels
-    let radius = kernel.len() / 2;
     let mut output = vec![0.0f32; width];
 
     b.bench_labeled("simd", || {
@@ -51,7 +47,6 @@ fn bench_convolve_row_large_kernel(b: ::quickbench::Bencher) {
             black_box(&input),
             black_box(&mut output),
             black_box(&kernel),
-            radius,
         );
     });
 
@@ -60,7 +55,6 @@ fn bench_convolve_row_large_kernel(b: ::quickbench::Bencher) {
             black_box(&input),
             black_box(&mut output),
             black_box(&kernel),
-            radius,
         );
     });
 }

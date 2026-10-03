@@ -190,7 +190,7 @@ fn laplacian_plus_into(data: &[f32], size: Size2us, out: &mut Vec<f32>) {
 /// difference while `median₇` stayed replicated would corrupt the border in a way neither
 /// convention does alone. Replication is also the usual choice for astronomical median filtering.
 ///
-/// The two *could* still share an interior kernel: `median_filter`'s `median_filter_row_simd`
+/// The two *could* still share an interior kernel: `median_filter`'s `median_filter_row`
 /// takes three rows and fills the interior, knowing nothing about edges. That is worth doing
 /// behind a cosmic-ray benchmark rather than before one — it couples two subsystems to accelerate
 /// one of the four windows below (areas 9, 49, 25, 25), and an `r == 1` fast path would have to

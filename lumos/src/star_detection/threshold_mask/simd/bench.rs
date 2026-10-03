@@ -3,7 +3,8 @@
 use crate::bit_buffer2::BitBuffer2;
 use crate::internals::prelude::*;
 use crate::star_detection::threshold_mask::ThresholdParams;
-use crate::star_detection::threshold_mask::simd::{process_words, process_words_scalar};
+use crate::star_detection::threshold_mask::simd::internals::process_words_scalar;
+use crate::star_detection::threshold_mask::simd::process_words;
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
@@ -45,7 +46,6 @@ fn create_bench_data(size: usize) -> BenchData {
 fn bench_threshold_mask_4k(b: ::quickbench::Bencher) {
     let BenchData { pixels, bg, noise } = create_bench_data(4096 * 4096);
     let mut mask = BitBuffer2::new_filled(Size2us::new(4096, 4096), false);
-    let pixel_end = pixels.len();
 
     b.bench_labeled("simd", || {
         let words = &mut black_box(&mut mask).words;
@@ -58,7 +58,6 @@ fn bench_threshold_mask_4k(b: ::quickbench::Bencher) {
                 min_noise: 1e-6,
             }),
             words,
-            0..pixel_end,
         );
     });
 
@@ -73,7 +72,6 @@ fn bench_threshold_mask_4k(b: ::quickbench::Bencher) {
                 min_noise: 1e-6,
             }),
             words,
-            0..pixel_end,
         );
     });
 
@@ -88,7 +86,6 @@ fn bench_threshold_mask_4k(b: ::quickbench::Bencher) {
                 min_noise: 1e-6,
             }),
             words,
-            0..pixel_end,
         );
     });
 
@@ -103,7 +100,6 @@ fn bench_threshold_mask_4k(b: ::quickbench::Bencher) {
                 min_noise: 1e-6,
             }),
             words,
-            0..pixel_end,
         );
     });
 }

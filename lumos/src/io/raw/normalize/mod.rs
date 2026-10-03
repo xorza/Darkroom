@@ -12,10 +12,10 @@ pub(crate) fn normalize_u16_to_f32_parallel(data: &[u16], black: f32, span: f32)
 }
 
 /// Shared parallel driver. `CLAMP` is a compile-time switch so each variant
-/// monomorphizes to branch-free SIMD — the light path keeps its `[0, 1]` clamp,
+/// monomorphizes to a branch-free kernel — the light path keeps its `[0, 1]` clamp,
 /// the calibration path drops it, with no duplicated kernel.
 fn normalize_generic<const CLAMP: bool>(data: &[u16], black: f32, span: f32) -> Vec<f32> {
-    const CHUNK_SIZE: usize = 16384; // Process 64KB chunks (16K * 4 bytes)
+    const CHUNK_SIZE: usize = 16384;
 
     let mut result = vec![0.0f32; data.len()];
 
@@ -29,8 +29,8 @@ fn normalize_generic<const CLAMP: bool>(data: &[u16], black: f32, span: f32) -> 
     result
 }
 
-/// Scalar form of the per-pixel transform, shared by the fallback and the SIMD
-/// remainders. `CLAMP` gates the `[0, 1]` floor/ceil.
+/// Scalar form of the per-pixel transform: the kernel's remainder, and the reference it is tested
+/// against. `CLAMP` gates the `[0, 1]` floor/ceil.
 #[inline(always)]
 fn normalize_one<const CLAMP: bool>(val: u16, black: f32, span: f32) -> f32 {
     let subtracted = f32::from(val) - black;

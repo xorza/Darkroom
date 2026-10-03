@@ -241,9 +241,9 @@ mod tests {
     #[test]
     #[should_panic(expected = "assertion")]
     fn release_f32_wrong_dimensions_panics() {
-        // A mismatched buffer must be rejected even in release builds: downstream SIMD kernels
-        // do unchecked-length loads/stores off the pool's declared dimensions, so a silently
-        // accepted mismatch would be out-of-bounds UB, not just a wrong pixel.
+        // A mismatched buffer must be rejected even in release builds: downstream kernels index
+        // off the pool's declared dimensions, so a silently accepted mismatch would be a wrong
+        // image.
         let mut pool = DetectionResources::new(Size2us::new(64, 64));
         let wrong_size = Buffer2::new_default(32, 32);
         pool.release_f32(wrong_size);
@@ -256,11 +256,9 @@ mod tests {
         let buf = pool.acquire_f32();
         pool.release_f32(buf);
 
-        // Reset to same dimensions keeps buffers
         pool.reset(Size2us::new(64, 64));
         assert_eq!(buffer_counts(&pool).floats, 1);
 
-        // Reset to different dimensions clears buffers
         pool.reset(Size2us::new(128, 128));
         assert_eq!(pool.dimensions, Size2us::new(128, 128));
         assert_eq!(buffer_counts(&pool).floats, 0);

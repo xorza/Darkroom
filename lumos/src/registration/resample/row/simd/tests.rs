@@ -1,112 +1,118 @@
-//! Every resample backend the host has, against the scalar path.
+//! The Lanczos kernel on every tier: its tap weights against the table, and its rows against
+//! `Portable`'s.
 
-use crate::internals::simd_check::backend::Backend;
-#[cfg(target_arch = "x86_64")]
-use crate::registration::resample::kernel::LANCZOS_LUT_RESOLUTION;
-use crate::registration::resample::kernel::LanczosOrder;
-#[cfg(target_arch = "x86_64")]
-use crate::registration::resample::row::simd::avx2;
-#[cfg(target_arch = "aarch64")]
-use crate::registration::resample::row::simd::neon;
-use imaginarium::SimdTier;
+use crate::internals::prelude::*;
+use crate::registration::resample::kernel::{LanczosLut, LanczosOrder};
+use crate::registration::resample::row::simd::{LanczosRow, tap_weights};
+use crate::registration::resample::row_positions::RowPositions;
+use crate::registration::transform::{Transform, WarpTransform};
+use crate::simd::tier::Tier;
+use crate::simd::{Isa, Kernel};
 
-#[cfg(target_arch = "x86_64")]
-use crate::internals::simd_check;
-use crate::internals::simd_check::{SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar};
-
-/// The scalar tap weights for `frac`: the table's own `weights`.
-fn tap_weights<const SIZE: usize>(frac: f32) -> [f32; SIZE] {
-    order_of::<SIZE>().lut().weights::<SIZE>(frac)
+/// [`tap_weights`] on whichever Isa a tier runs.
+#[derive(Debug)]
+struct Weights<'a, const A: usize, const SIZE: usize> {
+    lut: &'a LanczosLut,
+    frac: f32,
 }
 
-/// The order whose `2a`-tap window is `SIZE` wide.
-fn order_of<const SIZE: usize>() -> LanczosOrder {
-    match SIZE {
-        4 => LanczosOrder::Two,
-        6 => LanczosOrder::Three,
-        _ => LanczosOrder::Four,
+impl<const A: usize, const SIZE: usize> Kernel for Weights<'_, A, SIZE> {
+    type Output = [f32; SIZE];
+
+    #[inline(always)]
+    fn run<S: Isa>(self, isa: S) -> [f32; SIZE] {
+        tap_weights::<S, A, SIZE>(isa, self.lut, self.frac)
     }
 }
 
-/// Every Lanczos window backend at every window position of a `width × SIZE` image, against the
-/// plain weighted sum. A window term `p·wx·wy` passes through two products and the `SIZE² − 1`
-/// additions, so the two orders differ by the sum bound for `SIZE² + 1`.
-fn assert_lanczos_window_matches_scalar<const SIZE: usize>() {
-    type WindowFn<const SIZE: usize> =
-        unsafe fn(&[f32], usize, usize, usize, &[f32; SIZE], &[f32; SIZE]) -> f32;
-    // Both backends read eight floats per row for SIZE > 4, so eight is the narrowest image.
-    let backends: &[Backend<WindowFn<SIZE>>] = &[
-        #[cfg(target_arch = "x86_64")]
-        Backend::with_min_width(SimdTier::Avx2Fma, avx2::lanczos_kernel_fma::<SIZE>, 8),
-        #[cfg(target_arch = "aarch64")]
-        Backend::with_min_width(SimdTier::Neon, neon::lanczos_kernel_neon::<SIZE>, 8),
-    ];
-    let wx = tap_weights::<SIZE>(0.3);
-    let wy = tap_weights::<SIZE>(0.7);
-    assert_simd_matches_scalar(
-        backends,
-        SWEEP_WIDTHS,
-        ScalarSimd::sum_tolerance(SIZE * SIZE + 1),
-        |kernel_fn, shape, width| {
-            let pixels: Vec<f32> = (0..SIZE).flat_map(|y| shape.row(width, y)).collect();
-            let windows = 0..=width - 8;
-            let mut scalar = Vec::new();
-            let mut magnitude = Vec::new();
-            for kx in windows.clone() {
-                let mut sum = 0.0f32;
-                let mut absolute = 0.0f32;
-                for (j, &wyj) in wy.iter().enumerate() {
-                    for (k, &wxk) in wx.iter().enumerate() {
-                        let term = pixels[j * width + kx + k] * wxk * wyj;
-                        sum += term;
-                        absolute += term.abs();
-                    }
-                }
-                scalar.push(sum);
-                magnitude.push(absolute);
-            }
-            // SAFETY: the harness runs only backends whose tier this CPU has, and every window
-            // reads columns `kx..kx + 8` of rows `0..SIZE`, inside the image.
-            let simd = windows
-                .map(|kx| unsafe { kernel_fn(&pixels, width, kx, 0, &wx, &wy) })
-                .collect();
-            ScalarSimd::of_sums(scalar, simd, magnitude)
-        },
-    );
-}
-
+/// The looked-up tap weights equal the table's scalar `weights` exactly, on every tier, at every
+/// 1/1024 of a pixel and at the fraction just below 1: both index the same table by the same
+/// rounded distance.
 #[test]
-fn lanczos_window_backends_match_scalar() {
-    assert_lanczos_window_matches_scalar::<4>();
-    assert_lanczos_window_matches_scalar::<6>();
-    assert_lanczos_window_matches_scalar::<8>();
-}
-
-/// The gathered tap weights equal the scalar lookups exactly, at every 1/1024 of a pixel and
-/// just below 1: both index the same table by the same rounded distance.
-#[cfg(target_arch = "x86_64")]
-#[test]
-fn lanczos_weight_gather_matches_scalar_lookups() {
-    fn check<const A: usize, const SIZE: usize>() {
-        if !simd_check::runs_here(SimdTier::Avx2Fma) {
-            return;
-        }
-        let lut = order_of::<SIZE>().lut();
+fn tap_weights_match_the_scalar_lookups() {
+    fn check<const A: usize, const SIZE: usize>(order: LanczosOrder) {
+        let lut = order.lut();
         let fracs = (0..1024)
             .map(|k| k as f32 / 1024.0)
-            .chain([1.0 - f32::EPSILON / 2.0]);
-        for frac in fracs {
-            // SAFETY: the CPU has AVX2 and FMA, and the table holds `A·RES + 1` entries.
-            let gathered = unsafe {
-                avx2::lanczos_weights_gather::<A, SIZE>(
-                    lut.values.as_ptr(),
-                    LANCZOS_LUT_RESOLUTION as f32,
-                    frac,
-                )
-            };
-            assert_eq!(gathered, tap_weights::<SIZE>(frac), "Lanczos{A} at {frac}");
+            .chain([1.0 - f32::EPSILON / 2.0, 1.0]);
+        for tier in Tier::supported() {
+            for frac in fracs.clone() {
+                assert_eq!(
+                    tier.run(Weights::<A, SIZE> { lut, frac }),
+                    lut.weights::<SIZE>(frac),
+                    "{tier} Lanczos{A} at {frac}"
+                );
+            }
         }
     }
-    check::<3, 6>();
-    check::<4, 8>();
+    check::<2, 4>(LanczosOrder::Two);
+    check::<3, 6>(LanczosOrder::Three);
+    check::<4, 8>(LanczosOrder::Four);
+}
+
+/// One output row warped by `order` on `tier`.
+fn warp_row(
+    tier: Tier,
+    order: LanczosOrder,
+    input: &Buffer2<f32>,
+    positions: &RowPositions,
+) -> Vec<f32> {
+    let mut output_row = vec![f32::NAN; input.width()];
+    let lut = order.lut();
+    let positions = positions.positions();
+    match order {
+        LanczosOrder::Two => tier.run(LanczosRow::<2, 4> {
+            lut,
+            input,
+            positions,
+            border_value: 0.0,
+            output_row: &mut output_row,
+        }),
+        LanczosOrder::Three => tier.run(LanczosRow::<3, 6> {
+            lut,
+            input,
+            positions,
+            border_value: 0.0,
+            output_row: &mut output_row,
+        }),
+        LanczosOrder::Four => tier.run(LanczosRow::<4, 8> {
+            lut,
+            input,
+            positions,
+            border_value: 0.0,
+            output_row: &mut output_row,
+        }),
+    }
+    output_row
+}
+
+/// Every tier warps a row to `Portable`'s bits, on rows that cross the border, the interior and
+/// the right edge, where a window's last tap is the image's last column. The oracle in the row
+/// tests holds the dispatched row to the definition; this holds every tier to that row.
+#[test]
+fn every_tier_warps_to_portables_bits() {
+    let size = Size2us::new(41, 33);
+    let input = Buffer2::new(
+        size.width,
+        size.height,
+        (0..size.pixel_count())
+            .map(|i| ((i * 13 + i / size.width * 7) % 31) as f32 / 9.0 - 1.7)
+            .collect(),
+    );
+    let transform = WarpTransform::new(Transform::similarity(DVec2::new(1.5, -0.75), 0.07, 1.03));
+    let mut positions = RowPositions::default();
+    for order in [LanczosOrder::Two, LanczosOrder::Three, LanczosOrder::Four] {
+        for y in [0, size.height / 2, size.height - 1] {
+            positions.fill(y, size.width, &transform, size);
+            let reference = warp_row(Tier::portable(), order, &input, &positions);
+            for tier in Tier::supported() {
+                let row = warp_row(tier, order, &input, &positions);
+                assert_eq!(
+                    row.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                    reference.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                    "{tier} {order:?} row {y}"
+                );
+            }
+        }
+    }
 }

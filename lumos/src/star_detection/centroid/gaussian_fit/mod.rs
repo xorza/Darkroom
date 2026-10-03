@@ -13,11 +13,12 @@
 
 mod simd;
 
+use crate::simd::Kernel;
 use crate::star_detection::centroid::covariance::Cov2;
 use crate::star_detection::centroid::fit_is_plausible;
-use crate::star_detection::centroid::lm_optimizer::{
-    FitData, LMConfig, LMModel, ModelSample, NormalEquations,
-};
+use crate::star_detection::centroid::gaussian_fit::simd::GaussianBatch;
+use crate::star_detection::centroid::lm_optimizer::{FitData, LMConfig, LMModel, NormalEquations};
+use crate::star_detection::centroid::simd::{Chi2Kernel, NormalEquationsKernel};
 use crate::star_detection::centroid::stamp::FitNoise;
 use crate::star_detection::centroid::stamp::StampFit;
 use crate::star_detection::centroid::stamp::StampGrid;
@@ -89,33 +90,6 @@ impl LMModel<7> for Gaussian2D {
         amp * (-0.5 * q).exp() + bg
     }
 
-    /// `∂f/∂x0 = A·E·(a·dx + b·dy)`, `∂f/∂y0 = A·E·(b·dx + c·dy)`, `∂f/∂A = E`,
-    /// `∂f/∂a = −½A·E·dx²`, `∂f/∂b = −A·E·dx·dy`, `∂f/∂c = −½A·E·dy²`, `∂f/∂B = 1`,
-    /// with `E = exp(−½(a·dx² + 2b·dx·dy + c·dy²))`.
-    #[inline]
-    fn evaluate_and_jacobian(&self, x: f64, y: f64, params: &[f64; 7]) -> ModelSample<7> {
-        let [x0, y0, amp, a, b, c, bg] = *params;
-        let dx = x - x0;
-        let dy = y - y0;
-        let t = a * dx + b * dy;
-        let u = b * dx + c * dy;
-        let exp_val = (-0.5 * (dx * t + dy * u)).exp();
-        let amp_exp = amp * exp_val;
-        let half_amp_exp = -0.5 * amp_exp;
-        ModelSample {
-            value: amp_exp + bg,
-            jacobian: [
-                amp_exp * t,
-                amp_exp * u,
-                exp_val,
-                half_amp_exp * dx * dx,
-                half_amp_exp * dx * (dy + dy),
-                half_amp_exp * dy * dy,
-                1.0,
-            ],
-        }
-    }
-
     /// Amplitude at least `min_amplitude`, `a` and `c` within [`Gaussian2D::curvature_range`],
     /// and `b` held to [`DEFINITENESS_MARGIN`] of singular, so every step leaves a profile that is
     /// a Gaussian.
@@ -134,13 +108,19 @@ impl LMModel<7> for Gaussian2D {
         data: FitData<'_>,
         params: &[f64; 7],
     ) -> NormalEquations<7> {
-        simd::batch_build_normal_equations(self, data, params)
-            .unwrap_or_else(|| NormalEquations::from_scalar_pass(self, data, params))
+        NormalEquationsKernel {
+            model: GaussianBatch::new(*params),
+            data,
+        }
+        .dispatch()
     }
 
     fn batch_compute_chi2(&self, data: FitData<'_>, params: &[f64; 7]) -> f64 {
-        simd::batch_compute_chi2(self, data, params)
-            .unwrap_or_else(|| self.accumulate_chi2(data, params, 0..data.len()))
+        Chi2Kernel {
+            model: GaussianBatch::new(*params),
+            data,
+        }
+        .dispatch()
     }
 }
 
@@ -211,6 +191,40 @@ impl GaussianFit {
 
 #[cfg(test)]
 mod internals {
+    use glam::Vec2;
+
+    use crate::star_detection::centroid::gaussian_fit::{Gaussian2D, GaussianFit};
+    use crate::star_detection::centroid::lm_optimizer::LMResult;
+    use crate::star_detection::centroid::lm_optimizer::internals::{ModelJacobian, ModelSample};
+
+    impl ModelJacobian<7> for Gaussian2D {
+        /// `∂f/∂x0 = A·E·(a·dx + b·dy)`, `∂f/∂y0 = A·E·(b·dx + c·dy)`, `∂f/∂A = E`,
+        /// `∂f/∂a = −½A·E·dx²`, `∂f/∂b = −A·E·dx·dy`, `∂f/∂c = −½A·E·dy²`, `∂f/∂B = 1`,
+        /// with `E = exp(−½(a·dx² + 2b·dx·dy + c·dy²))`.
+        fn evaluate_and_jacobian(&self, x: f64, y: f64, params: &[f64; 7]) -> ModelSample<7> {
+            let [x0, y0, amp, a, b, c, bg] = *params;
+            let dx = x - x0;
+            let dy = y - y0;
+            let t = a * dx + b * dy;
+            let u = b * dx + c * dy;
+            let exp_val = (-0.5 * (dx * t + dy * u)).exp();
+            let amp_exp = amp * exp_val;
+            let half_amp_exp = -0.5 * amp_exp;
+            ModelSample {
+                value: amp_exp + bg,
+                jacobian: [
+                    amp_exp * t,
+                    amp_exp * u,
+                    exp_val,
+                    half_amp_exp * dx * dx,
+                    half_amp_exp * dx * (dy + dy),
+                    half_amp_exp * dy * dy,
+                    1.0,
+                ],
+            }
+        }
+    }
+
     /// Fit diagnostics kept for tests; see [`GaussianFit::debug`].
     #[derive(Debug, Clone, Copy)]
     pub(super) struct GaussianFitDebug {
@@ -223,11 +237,6 @@ mod internals {
         /// Number of iterations used.
         pub(super) iterations: usize,
     }
-
-    use glam::Vec2;
-
-    use crate::star_detection::centroid::gaussian_fit::{Gaussian2D, GaussianFit};
-    use crate::star_detection::centroid::lm_optimizer::LMResult;
 
     impl GaussianFit {
         /// The profile's σ along x and along y — its covariance's diagonal, which for an
@@ -258,7 +267,7 @@ mod internals {
         /// The Jacobian row alone, derived independently of
         /// [`Gaussian2D::evaluate_and_jacobian`]'s fused form.
         ///
-        /// Production takes only the fused path; this exists so the consistency test has a second
+        /// The vector kernel mirrors the fused path; this exists so the consistency test has a second
         /// derivation of the same algebra to check it against. Keep the two written out
         /// separately — sharing a helper between them would make the test compare an expression
         /// with itself.

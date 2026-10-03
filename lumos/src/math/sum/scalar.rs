@@ -1,7 +1,5 @@
-//! Scalar (non-SIMD) implementations of sum operations.
-//!
-//! These are both the fallback arm of the dispatch and the tail of every vector kernel, which is
-//! why they take arbitrary-length slices rather than assuming a remainder shorter than one vector.
+//! The sequential sums: the path below each entry point's vector gate, and the reference the
+//! vector kernels are tested against.
 
 use crate::math::sum::weighted_sums::WeightedSums;
 
