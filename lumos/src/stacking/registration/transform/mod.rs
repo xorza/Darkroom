@@ -1,9 +1,12 @@
 //! Transformation matrix for image registration.
 
+pub(crate) mod inverse_warp;
+
 use glam::{DMat2, DVec2};
 
 use crate::math::dmat3::DMat3;
 use crate::stacking::registration::distortion::sip::SipPolynomial;
+use crate::stacking::registration::transform::inverse_warp::InverseWarp;
 use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -423,6 +426,14 @@ impl WarpTransform {
             None => p,
         };
         self.transform.apply(corrected)
+    }
+
+    /// This warp run backwards, from target pixels to reference pixels — see [`InverseWarp`].
+    ///
+    /// # Panics
+    /// When the transform has no usable inverse ([`Transform::try_inverse`]).
+    pub fn inverse(&self) -> InverseWarp {
+        InverseWarp::new(self.transform.inverse(), self.sip.clone())
     }
 
     /// Whether this transform has a nonlinear SIP component.

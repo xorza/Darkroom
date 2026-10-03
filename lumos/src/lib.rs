@@ -102,6 +102,7 @@ pub use stacking::registration::result::{
     FailedRung, RansacFailureReason, RegistrationCatalog, RegistrationError, RegistrationResult,
     StarMatch,
 };
+pub use stacking::registration::transform::inverse_warp::{InverseMapped, InverseWarp};
 pub use stacking::registration::transform::{
     Transform, TransformModel, TransformType, WarpTransform,
 };
@@ -135,6 +136,7 @@ pub use stacking::pipeline::result::{
 
 pub use stacking::drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
 pub use stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
+pub use stacking::drizzle::drizzle_result::DrizzleResult;
 pub use stacking::drizzle::error::{DrizzleConfigError, DrizzleError};
 pub use stacking::drizzle::stack::{drizzle_images, drizzle_stack};
 

@@ -118,7 +118,7 @@ fn drizzle_config_invalid_parameters_return_exact_errors() {
 fn drizzle_output_grid_is_the_input_scaled() {
     let config = DrizzleConfig::x2();
     let acc = accumulator(ImageDimensions::new((100, 80), 3), config);
-    let dims = acc.finalize().image.dimensions();
+    let dims = acc.finalize().product.image.dimensions();
     assert_eq!(dims.width(), 200);
     assert_eq!(dims.height(), 160);
     assert_eq!(dims.channels(), 3);

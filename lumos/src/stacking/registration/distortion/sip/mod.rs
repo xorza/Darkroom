@@ -27,7 +27,7 @@
 //! | 5     | 18            | Full SIP (HST-level) |
 
 use arrayvec::ArrayVec;
-use glam::DVec2;
+use glam::{DMat2, DVec2};
 
 use nalgebra::DMatrix;
 
@@ -365,6 +365,33 @@ impl SipPolynomial {
             }
         }
         max_mag
+    }
+
+    /// The Jacobian of [`Self::correct`] at `p`: the identity plus the polynomial's derivative.
+    ///
+    /// The correction is `s·P((p − p₀)/s)` in the normalized coordinates the polynomial is held in,
+    /// so the scale cancels and its derivative is `P`'s: `∂(uᵖvᵠ)/∂u = p·uᵖ⁻¹vᵠ`, from the same
+    /// tables of powers [`evaluate_basis`] builds. Columns are the images of the x and y steps.
+    pub fn jacobian(&self, p: DVec2) -> DMat2 {
+        let uv = self.norm.normalize(p);
+        let mut powers_u = [1.0; MAX_ORDER + 1];
+        let mut powers_v = [1.0; MAX_ORDER + 1];
+        for k in 1..=MAX_ORDER {
+            powers_u[k] = powers_u[k - 1] * uv.x;
+            powers_v[k] = powers_v[k - 1] * uv.y;
+        }
+        let mut d_du = DVec2::ZERO;
+        let mut d_dv = DVec2::ZERO;
+        for (i, &(pu, pv)) in self.terms.iter().enumerate() {
+            let coefficients = DVec2::new(self.coeffs_u[i], self.coeffs_v[i]);
+            if pu > 0 {
+                d_du += coefficients * (pu as f64 * powers_u[pu - 1] * powers_v[pv]);
+            }
+            if pv > 0 {
+                d_dv += coefficients * (pv as f64 * powers_u[pu] * powers_v[pv - 1]);
+            }
+        }
+        DMat2::from_cols(DVec2::X + d_du, DVec2::Y + d_dv)
     }
 
     /// Compute the correction vector at a point (without applying it).

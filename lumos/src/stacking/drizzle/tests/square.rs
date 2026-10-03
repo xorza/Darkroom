@@ -21,7 +21,7 @@ fn square_kernel_identity_uniform() {
     };
     let mut acc = accumulator(ImageDimensions::new((5, 5), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);
-    let result = acc.finalize();
+    let result = acc.finalize().product;
     let out = result.image.channel(0);
 
     for (i, (&actual, &expected)) in out.iter().zip(pixels.iter()).enumerate() {
@@ -57,7 +57,7 @@ fn square_kernel_rotation() {
     };
     let mut acc = accumulator(ImageDimensions::new((20, 20), 1), config);
     acc.add_image(image, &transform, 1.0, None);
-    let result = acc.finalize();
+    let result = acc.finalize().product;
     let out = result.image.channel(0);
 
     // Verify coverage exists in the interior (rotated image should still cover center)
@@ -105,7 +105,7 @@ fn square_kernel_pixfrac() {
     };
     let mut acc1 = accumulator(ImageDimensions::new((6, 6), 1), config1);
     acc1.add_image(image1, &transform, 1.0, None);
-    let r1 = acc1.finalize();
+    let r1 = acc1.finalize().product;
     let covered_1 = r1.image.channel(0).iter().filter(|&&v| v > 0.01).count();
 
     let mut pixels2 = vec![0.0f32; 6 * 6];
@@ -122,7 +122,7 @@ fn square_kernel_pixfrac() {
     };
     let mut acc2 = accumulator(ImageDimensions::new((6, 6), 1), config2);
     acc2.add_image(image2, &transform, 1.0, None);
-    let r2 = acc2.finalize();
+    let r2 = acc2.finalize().product;
     let covered_2 = r2.image.channel(0).iter().filter(|&&v| v > 0.01).count();
 
     assert!(
@@ -152,7 +152,7 @@ fn square_kernel_with_pixel_weights() {
     };
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, Some(&pw));
-    let result = acc.finalize();
+    let result = acc.finalize().product;
     let out = result.image.channel(0);
 
     // (1,1) excluded → fill_value = -1.0
@@ -177,12 +177,11 @@ fn square_kernel_with_pixel_weights() {
 
 /// Test square kernel with scale=2 on a single bright pixel.
 ///
-/// scale=2, pixfrac=0.8: the drop is 0.8×0.8 of the input pixel. Integer-center: input pixel
-/// (1,1) center (1,1), corners (0.6,0.6)..(1.4,1.4), identity ×scale 2 → quad [1.2,2.8]²
-/// (area 2.56 = (pixfrac·scale)² = the Jacobian). The quad covers output cells 1,2,3 with
-/// per-axis overlaps 0.3/1.0/0.3. The center cell (2,2) is fully inside and no neighbour's
-/// quad reaches it → undiluted 2.0; edge cells are shared 50/50 with a zero-valued
-/// neighbour's quad → 1.0 (same footprint as the turbo kernel).
+/// scale=2, pixfrac=0.8: the drop is 0.8×0.8 of the input pixel. Input pixel (1,1)'s drop
+/// corners (0.6,0.6)..(1.4,1.4) land at output 2·p + ½, the quad [1.7, 3.3]² of area 2.56 =
+/// (pixfrac·scale)², covering 0.8 of cells 2 and 3 on each axis. Every input pixel's quad stays
+/// inside its own 2×2 block of cells, so the block reads the bright value undiluted — the same
+/// footprint as the turbo kernel — and the cells beside it belong to zero-valued neighbours.
 #[test]
 fn square_kernel_scale2_single_pixel() {
     let mut pixels = vec![0.0f32; 4 * 4];
@@ -199,33 +198,31 @@ fn square_kernel_scale2_single_pixel() {
     };
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);
-    let result = acc.finalize();
+    let result = acc.finalize().product;
     let out = result.image.channel(0);
+    let weight = result.weight.as_ref().unwrap().channel(0);
     let w = 8usize;
-
     let at = |x: usize, y: usize| out[y * w + x];
-    // Center cell (2,2): quad fully covers it, no neighbour reaches → undiluted 2.0.
-    assert!((at(2, 2) - 2.0).abs() < 1e-4, "center (2,2): {}", at(2, 2));
-    // Edge cells: shared 50/50 with a zero-valued neighbour's quad → 1.0.
-    assert!((at(1, 2) - 1.0).abs() < 1e-4, "edge (1,2): {}", at(1, 2));
-    assert!((at(3, 2) - 1.0).abs() < 1e-4, "edge (3,2): {}", at(3, 2));
-    assert!((at(2, 1) - 1.0).abs() < 1e-4, "edge (2,1): {}", at(2, 1));
-    assert!((at(2, 3) - 1.0).abs() < 1e-4, "edge (2,3): {}", at(2, 3));
-    // No pixel exceeds the bright value.
-    assert!(out.iter().all(|&v| v <= 2.0 + 1e-4), "no pixel exceeds 2.0");
+
+    for (x, y) in [(2, 2), (3, 2), (2, 3), (3, 3)] {
+        assert_eq!(at(x, y), 2.0, "block ({x},{y})");
+    }
+    for (x, y) in [(1, 2), (4, 2), (2, 1), (2, 4)] {
+        assert_eq!(at(x, y), 0.0, "neighbour ({x},{y})");
+        assert!(weight[y * w + x] > 0.0, "neighbour ({x},{y}) is covered");
+    }
 }
 
 /// Test Jacobian correctness via the square (polygon-overlap) kernel where two input pixels
 /// with different values mix in one output cell.
 ///
-/// scale=2, pixfrac=1.0, identity. Integer-center: pixel (0,0)=10 → quad [-1,1]², pixel
-/// (1,0)=20 → quad [1,3]×[-1,1]; their shared edge x=1 lands on the center of output cell 1.
-/// Both quads have area (pixfrac·scale)² = 4 (the Jacobian), so each contributes weight
-/// overlap/4.
-///   cell (0,0) = [-0.5,0.5): only pixel (0,0) overlaps (1.0) → 10.0
-///   cell (1,0) = [0.5,1.5): pixel (0,0) and (1,0) each overlap 0.5 → equal-weight mean
-///                            (10·0.125 + 20·0.125) / 0.25 = 15.0
-///   cell (2,0) = [1.5,2.5): only pixel (1,0) overlaps (1.0) → 20.0
+/// scale=2, pixfrac=1.0, shifted a quarter of an input pixel along x, so each quad lands half an
+/// output pixel off the grid. Pixel (0,0)=10 spans input x [−0.25, 0.75] → output [0, 2], and pixel
+/// (1,0)=20 spans [0.75, 1.75] → [2, 4]; along y both cover output rows 0 and 1 whole. Both quads
+/// have area (pixfrac·scale)² = 4 (the Jacobian), so each contributes weight overlap/4:
+///   cell (1,0) = [0.5, 1.5]: only pixel (0,0), whole → 10.0
+///   cell (2,0) = [1.5, 2.5]: half of each → equal-weight mean (10·0.125 + 20·0.125) / 0.25 = 15.0
+///   cell (3,0) = [2.5, 3.5]: only pixel (1,0), whole → 20.0
 #[test]
 fn square_kernel_jacobian_weighted_average() {
     let mut pixels = vec![0.0f32; 4 * 4];
@@ -242,28 +239,20 @@ fn square_kernel_jacobian_weighted_average() {
         ..Default::default()
     };
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
-    acc.add_image(image, &Transform::identity(), 1.0, None);
-    let result = acc.finalize();
+    acc.add_image(
+        image,
+        &Transform::translation(DVec2::new(0.25, 0.0)),
+        1.0,
+        None,
+    );
+    let result = acc.finalize().product;
     let out = result.image.channel(0);
 
-    // cell (0,0): only pixel (0,0) → 10.0
-    assert!(
-        (out[0] - 10.0).abs() < 1e-3,
-        "cell (0,0) = 10.0, got {}",
-        out[0]
-    );
-    // cell (1,0): equal-weight mean of 10 and 20 (each overlaps 0.5) → 15.0
-    assert!(
-        (out[1] - 15.0).abs() < 1e-3,
-        "cell (1,0) = 15.0, got {}",
-        out[1]
-    );
-    // cell (2,0): only pixel (1,0) → 20.0
-    assert!(
-        (out[2] - 20.0).abs() < 1e-3,
-        "cell (2,0) = 20.0, got {}",
-        out[2]
-    );
+    // The overlaps are halves and wholes of quads whose area is a power of two, so every weight,
+    // product and sum is exact and so is the mean.
+    for (cell, expected) in [(1, 10.0), (2, 15.0), (3, 20.0)] {
+        assert_eq!(out[cell], expected, "cell ({cell},0)");
+    }
 }
 
 /// Square agrees with Turbo exactly while the drop stays axis-aligned, and measurably diverges
@@ -272,8 +261,7 @@ fn square_kernel_jacobian_weighted_average() {
 /// One axis, the transform: a translation leaves every drop an axis-aligned rectangle, the only
 /// shape Turbo can represent, so the two kernels must agree to rounding. A rotation makes it a
 /// general quadrilateral and they apportion flux differently. Both drop geometries are swept —
-/// unscaled full-size drops and scaled shrunken ones — where the two tests this replaces each
-/// checked one transform at one geometry.
+/// unscaled full-size drops and scaled shrunken ones.
 #[test]
 fn square_matches_turbo_only_while_the_drop_stays_axis_aligned() {
     // A horizontal gradient: uniform data would agree under any kernel and prove nothing.
@@ -403,7 +391,7 @@ fn square_kernel_flux_conservation() {
     );
 
     // Now finalize and check the bright patch is still bright
-    let result = acc.finalize();
+    let result = acc.finalize().product;
     let out = result.image.channel(0);
 
     // The center pixel (10,10) should be close to 10.0 since it's in the middle of
@@ -438,7 +426,7 @@ fn square_kernel_two_frame_weighted_mean() {
     let mut acc = accumulator(ImageDimensions::new((6, 6), 1), config);
     acc.add_image(image1, &Transform::identity(), 1.0, None);
     acc.add_image(image2, &Transform::identity(), 3.0, None);
-    let result = acc.finalize();
+    let result = acc.finalize().product;
     let out = result.image.channel(0);
 
     // All interior pixels should be 6.5

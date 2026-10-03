@@ -9,7 +9,7 @@ use crate::stacking::drizzle::accumulator::DrizzleFrame;
 use crate::stacking::drizzle::config::DrizzleConfig;
 use crate::stacking::drizzle::stack::drizzle_images;
 use crate::stacking::progress::ProgressCallback;
-use crate::stacking::registration::transform::Transform;
+use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::testing::prelude::*;
 use crate::testing::synthetic::camera::Camera;
 use crate::testing::synthetic::observe::{Observation, render};
@@ -51,7 +51,9 @@ fn drizzle_frames(
     images
         .into_iter()
         .zip(transforms.iter().copied())
-        .map(|(source, transform)| DrizzleFrame::new(source, transform))
+        .map(|(source, transform)| {
+            DrizzleFrame::new(source, WarpTransform::new(transform.inverse()))
+        })
         .collect()
 }
 
@@ -111,7 +113,8 @@ fn drizzle_conserves_total_flux() {
             ProgressCallback::default(),
             CancelToken::never(),
         )
-        .unwrap();
+        .unwrap()
+        .product;
         let out_flux = sum(result.image.channel(0).pixels());
         let expected = single_flux * f64::from(scale * scale);
         assert!(
@@ -147,7 +150,8 @@ fn drizzle_places_star_at_scaled_truth_position() {
         ProgressCallback::default(),
         CancelToken::never(),
     )
-    .unwrap();
+    .unwrap()
+    .product;
     let out = result.image.channel(0);
     let center = star_centroid(out.pixels(), Size2us::new(out.width(), out.height()));
     assert!(
@@ -197,7 +201,8 @@ fn drizzle_dithering_recovers_resolution() {
         ProgressCallback::default(),
         CancelToken::never(),
     )
-    .unwrap();
+    .unwrap()
+    .product;
     let replicated_imgs: Vec<LinearImage> = (0..dithers.len()).map(|_| images[4].clone()).collect();
     let replicated_tf: Vec<Transform> = (0..dithers.len()).map(|_| transforms[4]).collect();
     let replicated = drizzle_images(
@@ -206,7 +211,8 @@ fn drizzle_dithering_recovers_resolution() {
         ProgressCallback::default(),
         CancelToken::never(),
     )
-    .unwrap();
+    .unwrap()
+    .product;
 
     let multi_peak = peak(multi.image.channel(0).pixels());
     let single_peak = peak(replicated.image.channel(0).pixels());
@@ -246,7 +252,8 @@ fn drizzle_emits_coverage_weight_and_linear_variance_maps() {
         ProgressCallback::default(),
         CancelToken::never(),
     )
-    .unwrap();
+    .unwrap()
+    .product;
 
     // Coverage is normalized to [0,1]; the interior is fully covered by all 4 frames.
     let cov_plane = result.coverage.as_ref().unwrap().to_plane();

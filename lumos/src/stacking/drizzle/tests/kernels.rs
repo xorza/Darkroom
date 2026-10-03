@@ -2,13 +2,14 @@ use super::*;
 
 /// Test turbo kernel drop size and overlap with hand-computed values.
 ///
-/// Setup: 4×4 input, scale=2, pixfrac=0.8 → `drop_size` = 1.6, `half_drop` = 0.8.
-/// Integer-center: input pixel (1,1) center (1,1), ×scale 2 → output center (2,2).
-/// Output: 8×8. Drop covers [1.2, 2.8]² → cells 1,2,3 with per-axis overlaps 0.3/1.0/0.3.
+/// Setup: 4×4 input, scale=2, pixfrac=0.8 → `drop_size` = 1.6, `half_drop` = 0.8. The output grid
+/// puts input pixel `i`'s footprint `[i − ½, i + ½]` on `[2i − ½, 2i + 1½]`, so its centre lands at
+/// `2i + ½`: input (1,1) at output (2.5, 2.5), its drop covering [1.7, 3.3]², 0.8 of cells 2 and 3
+/// on each axis.
 ///
-/// The center cell (2,2) is fully inside the drop (1.0×1.0) and no neighbouring input
-/// pixel's drop reaches it, so it reads the undiluted bright value. Edge cells (e.g. (1,2))
-/// are shared 50/50 with a zero-valued neighbour's drop, so a lone bright pixel reads half.
+/// Every input pixel's drop stays inside its own 2×2 block of cells, so no cell is shared: the
+/// four cells of (1,1)'s block read its undiluted value, and the cells beside them belong to
+/// zero-valued neighbours.
 #[test]
 fn turbo_kernel_overlap_exact() {
     // Single bright pixel at (1,1) with value 2.0
@@ -20,20 +21,19 @@ fn turbo_kernel_overlap_exact() {
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);
 
-    let result = acc.finalize();
+    let result = acc.finalize().product;
     let out = result.image.channel(0);
+    let weight = result.weight.as_ref().unwrap().channel(0);
     let w = 8usize;
-
     let at = |x: usize, y: usize| out[y * w + x];
-    // Center cell (2,2): only input (1,1) reaches it → undiluted bright value 2.0.
-    assert!((at(2, 2) - 2.0).abs() < 1e-5, "center (2,2): {}", at(2, 2));
-    // Edge cells: shared 50/50 with a zero-valued neighbour's drop → 2.0 / 2 = 1.0.
-    assert!((at(1, 2) - 1.0).abs() < 1e-5, "edge (1,2): {}", at(1, 2));
-    assert!((at(3, 2) - 1.0).abs() < 1e-5, "edge (3,2): {}", at(3, 2));
-    assert!((at(2, 1) - 1.0).abs() < 1e-5, "edge (2,1): {}", at(2, 1));
-    assert!((at(2, 3) - 1.0).abs() < 1e-5, "edge (2,3): {}", at(2, 3));
-    // No pixel exceeds the bright value.
-    assert!(out.iter().all(|&v| v <= 2.0 + 1e-5), "no pixel exceeds 2.0");
+
+    for (x, y) in [(2, 2), (3, 2), (2, 3), (3, 3)] {
+        assert_eq!(at(x, y), 2.0, "block ({x},{y})");
+    }
+    for (x, y) in [(1, 2), (4, 2), (2, 1), (2, 4)] {
+        assert_eq!(at(x, y), 0.0, "neighbour ({x},{y})");
+        assert!(weight[y * w + x] > 0.0, "neighbour ({x},{y}) is covered");
+    }
 }
 
 /// Test turbo kernel with non-integer translation producing asymmetric overlap.
@@ -61,7 +61,7 @@ fn turbo_kernel_fractional_shift() {
     let transform = Transform::translation(DVec2::new(0.25, 0.0));
     acc.add_image(image, &transform, 1.0, None);
 
-    let result = acc.finalize();
+    let result = acc.finalize().product;
     let out = result.image.channel(0);
     let w = 8usize;
 
@@ -82,10 +82,12 @@ fn turbo_kernel_fractional_shift() {
 
 /// Test that `min_weight_fraction` works with normalized weights.
 ///
-/// Single bright pixel (0,0), pixfrac=0.5 (drop width 1.0), scale=2, sub-pixel shift (0.1, 0).
-/// The drop centers at output (0.2, 0) and splits unevenly between cells (0,0) and (1,0):
-/// x-overlaps 0.8 and 0.2. `max_weight` = 0.8; threshold = `min_weight_fraction(0.6)` * 0.8 = 0.48.
-/// cell (0,0): weight 0.8 ≥ 0.48 → kept (1.0). cell (1,0): weight 0.2 < 0.48 → `fill_value`.
+/// pixfrac=0.5 at scale=2: every drop is one output pixel wide, and a shift of (0.1, 0) puts input
+/// pixel (i, j) at output (2i + 0.7, 2j + ½). Along x the drop [2i + 0.2, 2i + 1.2] covers 0.3 of
+/// cell 2i and 0.7 of cell 2i + 1; along y, [2j, 2j + 1] covers half of cells 2j and 2j + 1. So
+/// every cell's weight is 0.3·0.5 = 0.15 or 0.7·0.5 = 0.35: the maximum is 0.35, the threshold
+/// 0.6·0.35 = 0.21. The bright pixel (0,0)'s cells (1,0) and (1,1) weigh 0.35 and read 1.0; its
+/// cells (0,0) and (0,1) weigh 0.15 — covered, but below the threshold — and take the fill.
 #[test]
 fn min_weight_fraction_normalized() {
     let mut pixels = vec![0.0f32; 4 * 4];
@@ -98,15 +100,18 @@ fn min_weight_fraction_normalized() {
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
     let transform = Transform::translation(DVec2::new(0.1, 0.0));
     acc.add_image(image, &transform, 1.0, None);
-    let result = acc.finalize();
+    let result = acc.finalize().product;
     let out = result.image.channel(0);
+    let weight = result.weight.as_ref().unwrap().channel(0);
+    let w = 8;
 
-    assert!((out[0] - 1.0).abs() < 1e-5, "cell (0,0) kept: {}", out[0]);
-    assert!(
-        out[1].abs() < 1e-5,
-        "cell (1,0) rejected (below min_weight_fraction): {}",
-        out[1]
-    );
+    for (x, y) in [(1, 0), (1, 1)] {
+        assert_eq!(out[y * w + x], 1.0, "cell ({x},{y}) kept");
+    }
+    for (x, y) in [(0, 0), (0, 1)] {
+        assert_eq!(out[y * w + x], 0.0, "cell ({x},{y}) below the threshold");
+        assert!(weight[y * w + x] > 0.0, "cell ({x},{y}) is covered");
+    }
 }
 
 /// Test Gaussian kernel produces flux-preserving smooth output.
@@ -120,7 +125,7 @@ fn gaussian_kernel_uniform_preserves_value() {
     let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Gaussian);
     let mut acc = accumulator(ImageDimensions::new((10, 10), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);
-    let result = acc.finalize();
+    let result = acc.finalize().product;
 
     // Interior pixels should be ≈ 3.0 (Gaussian is normalized per-pixel)
     let out = result.image.channel(0);
@@ -151,7 +156,7 @@ fn lanczos_kernel_uniform_preserves_value() {
     };
     let mut acc = accumulator(ImageDimensions::new((20, 20), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);
-    let result = acc.finalize();
+    let result = acc.finalize().product;
 
     let out = result.image.channel(0);
     // Interior pixel well away from borders
@@ -162,16 +167,12 @@ fn lanczos_kernel_uniform_preserves_value() {
     );
 }
 
-/// Test that Lanczos clamping prevents negative output.
-///
-/// A single bright pixel surrounded by zeros will produce negative lobes
-/// in the Lanczos output. After clamping, all output should be >= 0.
+/// Negative data stays negative: background-subtracted frames sit around zero, and a clamp would
+/// bias every pixel below it upwards. A constant −0.5 comes out as −0.5 wherever the Lanczos window
+/// is whole — normalized weights reproduce a constant to the f32 sum of 49 taps, ≈ 49·ε·0.5 =
+/// 2.9e-6 — and a lone bright pixel's negative lobes survive.
 #[test]
-fn lanczos_clamping_no_negative_output() {
-    let mut pixels = vec![0.0f32; 20 * 20];
-    pixels[10 * 20 + 10] = 100.0; // bright point source
-    let image = mono_image(Size2us::new(20, 20), pixels);
-
+fn lanczos_keeps_negative_values() {
     let config = DrizzleConfig {
         scale: 1.0,
         pixfrac: 1.0,
@@ -180,15 +181,36 @@ fn lanczos_clamping_no_negative_output() {
         min_weight_fraction: 0.0,
         ..Default::default()
     };
-    let mut acc = accumulator(ImageDimensions::new((20, 20), 1), config);
-    acc.add_image(image, &Transform::identity(), 1.0, None);
-    let result = acc.finalize();
+    let size = Size2us::new(20, 20);
+    let mut acc = accumulator(ImageDimensions::new(size, 1), config.clone());
+    acc.add_image(
+        constant_mono_image(size, -0.5),
+        &Transform::identity(),
+        1.0,
+        None,
+    );
+    let out = acc.finalize().product;
+    for y in 3..17 {
+        for x in 3..17 {
+            let value = out.image.channel(0)[(x, y)];
+            assert!((value + 0.5).abs() < 3e-6, "({x},{y}): {value}");
+        }
+    }
 
-    let out = result.image.channel(0);
-    let min_val = out.iter().copied().fold(f32::INFINITY, f32::min);
+    let mut pixels = vec![0.0f32; size.pixel_count()];
+    pixels[10 * 20 + 10] = 100.0;
+    let mut acc = accumulator(ImageDimensions::new(size, 1), config);
+    acc.add_image(mono_image(size, pixels), &Transform::identity(), 1.0, None);
+    let out = acc.finalize().product;
+    let lowest = out
+        .image
+        .channel(0)
+        .iter()
+        .copied()
+        .fold(f32::INFINITY, f32::min);
     assert!(
-        min_val >= 0.0,
-        "Lanczos output should be clamped to >= 0.0, got min={min_val}"
+        lowest < 0.0,
+        "the negative lobes were clamped away: {lowest}"
     );
 }
 
@@ -209,7 +231,7 @@ fn two_frame_weighted_mean() {
     let mut acc = accumulator(ImageDimensions::new((10, 10), 1), config);
     acc.add_image(image1, &Transform::identity(), 1.0, None);
     acc.add_image(image2, &Transform::identity(), 3.0, None);
-    let result = acc.finalize();
+    let result = acc.finalize().product;
 
     let out = result.image.channel(0);
     // Interior pixel
@@ -240,7 +262,7 @@ fn pixfrac_changes_weight_distribution() {
     let config1 = DrizzleConfig::x2().with_pixfrac(1.0);
     let mut acc1 = accumulator(ImageDimensions::new((6, 6), 1), config1);
     acc1.add_image(image1, &transform, 1.0, None);
-    let r1 = acc1.finalize();
+    let r1 = acc1.finalize().product;
     let out1 = r1.image.channel(0);
     let covered_1 = out1.iter().filter(|&&v| v > 0.01).count();
 
@@ -253,7 +275,7 @@ fn pixfrac_changes_weight_distribution() {
     let config2 = DrizzleConfig::x2().with_pixfrac(0.3);
     let mut acc2 = accumulator(ImageDimensions::new((6, 6), 1), config2);
     acc2.add_image(image2, &transform, 1.0, None);
-    let r2 = acc2.finalize();
+    let r2 = acc2.finalize().product;
     let out2 = r2.image.channel(0);
     let covered_2 = out2.iter().filter(|&&v| v > 0.01).count();
 
@@ -278,7 +300,7 @@ fn rgb_channels_independent() {
     let config = DrizzleConfig::x2();
     let mut acc = accumulator(ImageDimensions::new((4, 4), 3), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);
-    let result = acc.finalize();
+    let result = acc.finalize().product;
 
     // Pixel (2,2) in output should have (1.0, 2.0, 3.0) (normalized by equal weight)
     let r = result.image.channel(0);
@@ -321,7 +343,7 @@ fn scale1_pixfrac1_identity() {
     };
     let mut acc = accumulator(ImageDimensions::new((5, 5), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);
-    let result = acc.finalize();
+    let result = acc.finalize().product;
 
     let out = result.image.channel(0);
     // Each input pixel center (ix+0.5, iy+0.5) → same in output.
@@ -338,8 +360,8 @@ fn scale1_pixfrac1_identity() {
 
 /// Test that custom `fill_value` appears in uncovered pixels.
 ///
-/// Point kernel at scale=2 leaves gaps (even-coordinate pixels uncovered).
-/// With `fill_value` = -999.0, those gaps should contain -999.0 instead of 0.0.
+/// Point kernel at scale=2 leaves gaps: each input pixel lands on the odd cell (2·ix + 1, 2·iy + 1),
+/// so the even cells are uncovered. With `fill_value` = -999.0, those gaps contain -999.0.
 #[test]
 fn fill_value_in_uncovered_pixels() {
     let image = constant_mono_image(Size2us::new(4, 4), 1.0);
@@ -354,30 +376,17 @@ fn fill_value_in_uncovered_pixels() {
     };
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);
-    let result = acc.finalize();
+    let result = acc.finalize().product;
 
     let out = result.image.channel(0);
     let w = 8usize;
 
-    // Point kernel (integer-center): input (ix,iy) → output (2*ix, 2*iy) (even coords).
-    // Covered pixel (0,0): value = 1.0
-    assert!(
-        (out[0] - 1.0).abs() < f32::EPSILON,
-        "Covered pixel (0,0) should be 1.0, got {}",
-        out[0]
-    );
-    // Uncovered pixel (1,1) (odd coords): fill_value = -999.0
-    assert!(
-        (out[w + 1] - (-999.0)).abs() < f32::EPSILON,
-        "Uncovered pixel (1,1) should be -999.0, got {}",
-        out[w + 1]
-    );
-    // Covered pixel (2,2) ← input (1,1): value = 1.0
-    assert!(
-        (out[2 * w + 2] - 1.0).abs() < f32::EPSILON,
-        "Covered pixel (2,2) should be 1.0, got {}",
-        out[2 * w + 2]
-    );
+    // Covered pixel (1,1) ← input (0,0): value 1.0. Uncovered pixel (0,0): the fill.
+    assert_eq!(out[w + 1], 1.0, "covered pixel (1,1)");
+    assert_eq!(out[0], -999.0, "uncovered pixel (0,0)");
+    // Covered pixel (3,3) ← input (1,1), uncovered (2,2).
+    assert_eq!(out[3 * w + 3], 1.0, "covered pixel (3,3)");
+    assert_eq!(out[2 * w + 2], -999.0, "uncovered pixel (2,2)");
 }
 
 /// Test that a zero-weight frame does not affect the output, and is not counted as covering it.
@@ -396,7 +405,7 @@ fn zero_weight_frame_ignored() {
     let mut acc = accumulator(ImageDimensions::new((8, 8), 1), config);
     acc.add_image(image1, &Transform::identity(), 1.0, None);
     acc.add_image(image2, &Transform::identity(), 0.0, None);
-    let result = acc.finalize();
+    let result = acc.finalize().product;
 
     let out = result.image.channel(0);
     // Interior pixel: should be 3.0, not influenced by the 100.0 frame
@@ -478,7 +487,7 @@ fn gaussian_kernel_with_translation() {
     let mut acc = accumulator(ImageDimensions::new((12, 12), 1), config);
     let transform = Transform::translation(DVec2::new(1.0, 0.5));
     acc.add_image(image, &transform, 1.0, None);
-    let result = acc.finalize();
+    let result = acc.finalize().product;
 
     let out = result.image.channel(0);
     let w = 24usize;
@@ -525,7 +534,7 @@ fn lanczos_kernel_with_translation() {
     let mut acc = accumulator(ImageDimensions::new((20, 20), 1), config);
     let transform = Transform::translation(DVec2::new(0.3, -0.2));
     acc.add_image(image, &transform, 1.0, None);
-    let result = acc.finalize();
+    let result = acc.finalize().product;
 
     let out = result.image.channel(0);
     // Interior pixel well away from borders (Lanczos radius=3, so stay 4+ pixels inside)
@@ -573,7 +582,7 @@ fn pixel_weight_zero_excludes_pixel() {
     };
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, Some(&pw));
-    let result = acc.finalize();
+    let result = acc.finalize().product;
     let out = result.image.channel(0);
 
     // (1,1) = index 5, should be fill_value (0.0) — the bad pixel was excluded
@@ -624,7 +633,7 @@ fn pixel_weight_scales_contribution() {
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
     acc.add_image(image1, &Transform::identity(), 1.0, Some(&pw1));
     acc.add_image(image2, &Transform::identity(), 1.0, Some(&pw2));
-    let result = acc.finalize();
+    let result = acc.finalize().product;
     let out = result.image.channel(0);
 
     // (1,1) = index 5: (2.0*0.5 + 6.0*1.0) / (0.5+1.0) = 7.0/1.5 = 4.6667
@@ -666,7 +675,7 @@ fn pixel_weight_bad_pixel_mask() {
     };
     let mut acc = accumulator(ImageDimensions::new((8, 8), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, Some(&pw));
-    let result = acc.finalize();
+    let result = acc.finalize().product;
     let out = result.image.channel(0);
 
     // Bad pixels → fill_value = -1.0
@@ -707,9 +716,9 @@ fn pixel_weight_bad_pixel_mask() {
 
 /// Test per-pixel weights with point kernel.
 ///
-/// scale=2 (integer-center): input (ix,iy) → output (2*ix, 2*iy). Point kernel = 1 pixel.
-/// Pixel (1,1) = 10.0, weight = 0.0. Should not appear at output (2,2).
-/// Pixel (0,0) = 3.0, weight = 1.0. Should appear at output (0,0) = 3.0.
+/// scale=2: input (ix,iy) lands on output (2·ix + 1, 2·iy + 1). Point kernel = 1 pixel.
+/// Pixel (1,1) = 10.0, weight = 0.0: nothing at output (3,3).
+/// Pixel (0,0) = 3.0, weight = 1.0: output (1,1) reads 3.0.
 #[test]
 fn pixel_weight_with_point_kernel() {
     let mut pixels = vec![1.0f32; 4 * 4];
@@ -723,22 +732,12 @@ fn pixel_weight_with_point_kernel() {
     let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Point);
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, Some(&pw));
-    let result = acc.finalize();
+    let result = acc.finalize().product;
     let out = result.image.channel(0);
     let w = 8usize;
 
-    // Output (2,2) ← input (1,1): excluded by weight=0 → fill_value 0.0
-    assert!(
-        out[2 * w + 2].abs() < 1e-5,
-        "Excluded pixel output (2,2) should be 0.0, got {}",
-        out[2 * w + 2]
-    );
-    // Output (0,0) ← input (0,0): weight=1.0, value=3.0
-    assert!(
-        (out[0] - 3.0).abs() < 1e-5,
-        "Good pixel output (0,0) should be 3.0, got {}",
-        out[0]
-    );
+    assert_eq!(out[3 * w + 3], 0.0, "excluded pixel (3,3) takes the fill");
+    assert_eq!(out[w + 1], 3.0, "good pixel (1,1)");
 }
 
 /// Test per-pixel weights with Gaussian kernel on a uniform image.
@@ -757,7 +756,7 @@ fn pixel_weight_with_gaussian_kernel() {
     let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Gaussian);
     let mut acc = accumulator(ImageDimensions::new((12, 12), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, Some(&pw));
-    let result = acc.finalize();
+    let result = acc.finalize().product;
     let out = result.image.channel(0);
     let w = 24usize;
 

@@ -116,17 +116,6 @@ Severity: Medium — two copies of the role → preset table; ~150 lines of lumo
 - [ ] `lumos/src/lib.rs` exports `stack`, `stack_images`, `StackFrame`, `align_and_stack` and `DefectMap` (with `pub` `detect_hot`/`detect_cold`/`correct`) — none has a non-test caller in the workspace.
 - [ ] `lens/src/astro/nodes/calibration.rs` `register` — the "Sigma" input is described as the "Sigma-clipping rejection threshold when stacking", but it is the defect-detection threshold passed to `from_images`.
 
-## `Transform` and drizzle disagree on homogeneous scale, direction and precision
-Severity: Medium — reachable through the public API and through drizzle; SIMD and scalar warps give different images.
-
-- [ ] `lumos/src/stacking/drizzle/accumulator/frame_source.rs` `FrameSource::quad_row_extent` — `half_drop·(|m3|+|m4|)` ignores `m[8]` and local perspective stretch; `input_rows` only widens by the margin given, so under-scanning drops flux at band boundaries and breaks `OutputBand`'s band-count invariance.
-- [ ] `lumos/src/stacking/drizzle/accumulator/mod.rs` `DrizzleFrame::transform` — documented input → reference, while `RegistrationResult::transform` is reference → target; nothing in lumos, lens or darkroom bridges them (tests build `translation(-d)` by hand). It is a bare `Transform`, so a SIP registration cannot reach drizzle at all.
-
-## Registration hot loops recompute work that is fixed per frame or per row
-Severity: Medium — RANSAC runs close to its iteration cap on every rung; non-linear warps evaluate the polynomial four to five times per pixel.
-
-- [ ] Per-call allocations beside the scratch types meant to avoid them: drizzle `OutputBand::distribute` / `distribute_radial` / `bands` allocate the `touched` bitset, `taps` buffer and band `Vec` per frame.
-
 ## Star-measurement fits and peak selection keep what the data does not support
 Severity: Medium — FWHM from fits that stopped early or sit on a clamp; bright stars lose peaks to fainter ones in crowded components.
 
@@ -175,7 +164,6 @@ Severity: Medium — the same default is baked in two crates and goes stale sile
 ## The same constant or formula is defined more than once, sometimes truncated
 Severity: Low — two sources for one fact; the copies already differ in precision or convention.
 
-- [ ] Lanczos in drizzle: `drizzle/accumulator/output_band.rs` `distribute_radial` evaluates `math::lanczos::kernel` (sines) for 49 taps per input pixel while registration tabulates it (`LanczosOrder::lut`), and hard-codes `LANCZOS_A = 3`.
 - [ ] Spline evaluation: `lumos/src/stacking/star_detection/background/simd/mod.rs` `SplineSegment::eval` re-implements `background_mesh::spline::cubic_spline_eval` with a "keep in sync" comment. `moffat_fit/mod.rs` `int_pow` uses `powi` for n > 5 while the SIMD versions use repeated squaring; three copies of the same table.
 - [ ] The hue-preserving intensity rescale twice: `lumos/src/image_ops/stretching/mod.rs` `color_preserve_pixel` (maps `I ≤ 0` to black, leaves negative channels) vs `lumos/src/io/image/linear.rs` `LinearImage::apply_intensity_remap` (leaves `I ≤ 0` untouched despite "Output clamped to [0, 1]", clamps negatives elsewhere).
 - [ ] Median-and-MAD by hand where `MedianMad::of_mut` exists: `lumos/src/image_ops/denoise/mod.rs` `estimate_sigma` (and its `DenoiseScratch::dev` buffer), `lumos/src/stacking/frame_store/frame_stats.rs` channel-stats closure (copies already-owned data again), `calibration_masters/defect_map/mod.rs` `compute_per_color_residual_stats` (inline `abs_deviation_inplace`). `FrameStats::measure` on the null-mask branch gathers into one `Vec` then copies into a second (3× frame bytes against `DECODE_TRANSIENT_FACTOR = 2`).
@@ -203,7 +191,6 @@ Severity: Low — `Option`s that must be `Some`, sentinels, and caches of comput
 ## lumos stacking numerics with avoidable loss
 Severity: Low — exact or better-conditioned forms exist.
 
-- [ ] `lumos/src/stacking/drizzle/accumulator/mod.rs` `new` / `add_frame` — the output grid covers `[-0.5, ceil(w·s) − 0.5]` while `scale(s)` maps the input footprint to `[-s/2, s·w − s/2]`; at s=2 every frame loses the `[-1, -0.5]` strip and the last row/column is half-covered. `finalize` clamps Lanczos output to ≥ 0, biasing near-zero (background-subtracted) pixels up. `drizzle/geometry.rs` `local_jacobian` uses whole-pixel forward differences at (x+½, y+½) — two extra `apply` calls per input pixel where the homography Jacobian has a closed form.
 - [ ] `lumos/src/stacking/combine/rejection/linear_fit_clip_config.rs` `LinearFitClipConfig::reject` — accumulates `sum_x`/`sum_xx` per pixel in f32 though they are `n(n−1)/2` and `(n−1)n(2n−1)/6`; centring `x` removes the cancellation in `denom`, and the `denom.abs() < f32::EPSILON` guard cannot fire for n ≥ 4.
 - [ ] `lumos/src/stacking/star_detection/centroid/stamp.rs` `FitNoise::weight` — the shot-noise term uses observed `z − background` (Neyman χ²), biasing amplitude and width low when a `NoiseModel` is set.
 - [ ] `lumos/src/image_ops/local_contrast/mod.rs` `apply_luts` / `bin_of` — `lut[round(v·255)]` quantizes an f32 image to 256 levels (posterization); interpolate between bins. `build_tile_luts` gives clip-redistribution leftovers to the lowest bins (black bias; OpenCV strides), and `div_ceil` tiles can be empty yet get an identity LUT blended into neighbours.

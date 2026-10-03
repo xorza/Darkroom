@@ -31,7 +31,7 @@ use crate::stacking::drizzle::accumulator::DrizzleFrame;
 use crate::stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::stacking::drizzle::stack::drizzle_images;
 use crate::stacking::progress::ProgressCallback;
-use crate::stacking::registration::transform::Transform;
+use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::stacking::stack_product::StackProduct;
 use crate::stacking::stack_product::quality_planes::QualityPlanes;
 use crate::testing::synthetic::fixtures::star_field;
@@ -70,7 +70,7 @@ fn dithered_set(base: &LinearImage, rotation: f64) -> Vec<DrizzleFrame<LinearIma
             let dy = (i as f64 * 0.71).fract() * 2.0 - 1.0;
             let transform = Transform::translation(DVec2::new(dx, dy))
                 .compose(&Transform::rotation_around(centre, rotation));
-            DrizzleFrame::new(base.clone(), transform)
+            DrizzleFrame::new(base.clone(), WarpTransform::new(transform.inverse()))
         })
         .collect()
 }
@@ -110,6 +110,7 @@ fn drizzle(frames: &[DrizzleFrame<LinearImage>], config: &DrizzleConfig) -> Stac
         CancelToken::never(),
     )
     .expect("bench fixture must drizzle")
+    .product
 }
 
 /// Every kernel on both geometries, plus the fixture clone every one of them pays.
