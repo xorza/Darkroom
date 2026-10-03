@@ -25,10 +25,6 @@ Severity: Medium — separate gestures merge into one entry, merges leave phanto
 - [ ] `ActionStack::try_merge_with_last` / `append_steps` — each coalesced frame deserializes the last entry into a fresh `Vec<UndoStep>`, merges, and bitcode-serializes it back. `append_steps` passes `&mut Vec::new()` as the "reusable" scratch, and `common/src/serde.rs` `serialize_into`'s Bitcode arm ignores the scratch anyway (`bitcode::serialize` returns its own `Vec`, then it is copied). The `serialize_into` doc ("avoid per-call allocation in hot paths (e.g. undo-step coalescing)") is false for its only caller. Keep the open gesture entry decoded on `ActionStack` and pack it when sealed.
 - [ ] `darkroom/src/core/edit/step/move_selection.rs` `MoveSelection::coalesce` — a new `moves` Vec per frame plus `next.moves.iter().find(..)` per member (O(k²)); both steps come from one latched `start_positions` list in the same order, so zip them or overwrite `to` in place. `OpenDocument::commit` (`batch`), `into_step`'s `MoveSelection` arm (`placed`) and `Anchor::resolve` (`moves`) add three more fresh Vecs per frame; `GraphIntent::MoveSelection { moves: Vec<(NodeId, Vec2)> }` is a tuple mirror of the step's `Vec<Move>`.
 
-## Pixel layout is converted and copied at crate boundaries
-Severity: Medium — full-frame copies on every stack, load, cache write and GPU download, on images of hundreds of MB.
-
-
 ## `darkroom::core` claims to be frontend-free but imports `gui` and palantir
 Severity: Medium — the documented layering does not hold.
 
