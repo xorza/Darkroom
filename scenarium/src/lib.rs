@@ -75,7 +75,7 @@ pub use graph::node::{CacheMode, Node, NodeKind};
 pub use graph::output_types::OutputTypes;
 pub use library::{Library, TypeEntry};
 pub use runtime::any_state::AnyState;
-pub use runtime::context::{ContextManager, ContextStore, ContextType};
+pub use runtime::context::ContextManager;
 pub use runtime::shared_any_state::{EventStateGuard, SharedAnyState};
 pub use worker::Worker;
 pub use worker::activity::WorkerActivity;

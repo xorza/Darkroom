@@ -198,9 +198,7 @@ impl ExecutionEngine {
         let Some(compiled) = self.compiled.as_deref() else {
             return CacheFlushReport::default();
         };
-        self.cache
-            .flush(compiled, node_ids, &mut self.executor.ctx_manager.contexts)
-            .await
+        self.cache.flush(compiled, node_ids).await
     }
 
     /// [`flush_cache`](Self::flush_cache) over every installed node, for when the
@@ -210,9 +208,7 @@ impl ExecutionEngine {
         let Some(compiled) = self.compiled.as_deref() else {
             return CacheFlushReport::default();
         };
-        self.cache
-            .flush_all(compiled, &mut self.executor.ctx_manager.contexts)
-            .await
+        self.cache.flush_all(compiled).await
     }
 
     /// Self-consistency of the installed artifact and the cache aligned to it.

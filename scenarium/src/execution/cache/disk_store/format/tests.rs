@@ -18,7 +18,6 @@ use crate::execution::cache::disk_store::format::{
 };
 use crate::graph::func::lambda::OutputDemand;
 use crate::library::{Library, TypeEntry};
-use crate::runtime::context::ContextStore;
 use crate::{CodecError, ConstValue, CustomValue, CustomValueCodec, DynamicValue, TypeId};
 
 /// Fixed, so a blob that names it has known bytes.
@@ -143,7 +142,6 @@ impl CustomValueCodec for BlobCodec {
         &self,
         value: &dyn CustomValue,
         writer: &mut (dyn AsyncWrite + Unpin + Send),
-        _ctx: &mut ContextStore,
     ) -> Result<(), CodecError> {
         let blob = value
             .as_any()
@@ -157,7 +155,6 @@ impl CustomValueCodec for BlobCodec {
         &self,
         reader: &mut (dyn AsyncRead + Unpin + Send),
         byte_len: u64,
-        _ctx: &mut ContextStore,
     ) -> Result<Arc<dyn CustomValue>, CodecError> {
         self.decode_calls.fetch_add(1, Ordering::SeqCst);
         let mut bytes = Vec::with_capacity(usize::try_from(byte_len)?);
@@ -186,15 +183,9 @@ fn library(version: u32, behavior: DecodeBehavior, decode_calls: Arc<AtomicU64>)
 
 async fn encoded(digest: Digest, outputs: &[DynamicValue], library: &Library) -> Vec<u8> {
     let mut writer = ChunkedIo::<_, 3>(Cursor::new(Vec::new()));
-    write(
-        &mut writer,
-        digest,
-        outputs,
-        &library.codecs(),
-        &mut ContextStore::default(),
-    )
-    .await
-    .unwrap();
+    write(&mut writer, digest, outputs, &library.codecs())
+        .await
+        .unwrap();
     writer.0.into_inner()
 }
 
@@ -295,7 +286,6 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
             bytes.len() as u64,
             digest,
             &library.codecs(),
-            &mut ContextStore::default(),
             &demand(outputs.len(), &[0]),
         )
         .await
@@ -310,7 +300,6 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
         bytes.len() as u64,
         digest,
         &library.codecs(),
-        &mut ContextStore::default(),
         &demand(outputs.len(), &[]),
     )
     .await
@@ -353,7 +342,6 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
         bytes.len() as u64,
         digest,
         &complete_library.codecs(),
-        &mut ContextStore::default(),
         &demand(outputs.len(), &[]),
     )
     .await
@@ -372,7 +360,6 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
         bytes.len() as u64,
         digest,
         &underread_library.codecs(),
-        &mut ContextStore::default(),
         &demand(outputs.len(), &[]),
     )
     .await
@@ -503,7 +490,6 @@ async fn malformed_header_lengths_tags_and_const_values_are_rejected() {
         invalid_bool.len() as u64,
         digest,
         &library.codecs(),
-        &mut ContextStore::default(),
         &demand(outputs.len(), &[]),
     )
     .await

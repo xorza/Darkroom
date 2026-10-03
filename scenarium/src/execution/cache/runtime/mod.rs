@@ -40,7 +40,6 @@ use crate::execution::schedule::NodeState;
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::identity::NodeId;
-use crate::runtime::context::ContextStore;
 use crate::{DynamicValue, RamUsage};
 use tokio::task;
 
@@ -623,14 +622,11 @@ impl RuntimeCache {
         states: &Column<NodeIdx, NodeState>,
         node_idx: NodeIdx,
         demand: &[OutputDemand],
-        contexts: &mut ContextStore,
         cancel: CancelToken,
     ) -> Result<ReuseOutcome, StampError> {
         self.identify(program, iter::once(node_idx), cancel).await?;
         self.stamp_digest(program, states, node_idx);
-        Ok(self
-            .hydrate_reuse(program, node_idx, demand, contexts)
-            .await)
+        Ok(self.hydrate_reuse(program, node_idx, demand).await)
     }
 
     /// Blobs are named by stable id, so they survive installs that shift indices.
@@ -698,17 +694,16 @@ impl RuntimeCache {
         program: &CompiledGraph,
         node_idx: NodeIdx,
         demand: &[OutputDemand],
-        ctx: &mut ContextStore,
     ) -> ReuseOutcome {
         let target = match self.reuse_source(program, node_idx, demand) {
             None => return ReuseOutcome::Missed,
             Some(ReuseSource::Resident) => {
-                self.settle_blob_debt(program, node_idx, ctx).await;
+                self.settle_blob_debt(program, node_idx).await;
                 return ReuseOutcome::Served;
             }
             Some(ReuseSource::Blob(target)) => target,
         };
-        let Some(snapshot) = self.disk_store.read(&target, demand, ctx).await else {
+        let Some(snapshot) = self.disk_store.read(&target, demand).await else {
             return ReuseOutcome::Missed;
         };
         self.slots[node_idx].load_from_blob(snapshot, target.digest);
@@ -729,12 +724,7 @@ impl RuntimeCache {
     /// engine already wrote — costs no I/O at all. Runs are not rare enough to
     /// pay a `stat` per disk-backed node in: an event loop executes on every
     /// tick.
-    async fn settle_blob_debt(
-        &mut self,
-        program: &CompiledGraph,
-        node_idx: NodeIdx,
-        ctx: &mut ContextStore,
-    ) {
+    async fn settle_blob_debt(&mut self, program: &CompiledGraph, node_idx: NodeIdx) {
         if self.slots[node_idx].blob_is_current() {
             return;
         }
@@ -742,7 +732,7 @@ impl RuntimeCache {
         // verdict about the *blob* — the verdict was about RAM — so a broader
         // one already on disk must survive. It also re-establishes the belief
         // when the debt was only ever a gap in this engine's knowledge.
-        self.store_node(program, node_idx, StorePolicy::PreserveCovering, ctx)
+        self.store_node(program, node_idx, StorePolicy::PreserveCovering)
             .await;
     }
 
@@ -773,11 +763,10 @@ impl RuntimeCache {
         program: &CompiledGraph,
         node_idx: NodeIdx,
         policy: StorePolicy,
-        ctx: &mut ContextStore,
     ) -> Option<StoreResult> {
         let target = self.blob_target(program, node_idx)?;
         let snapshot = self.slots[node_idx].current_snapshot()?;
-        let outcome = self.disk_store.store(&target, snapshot, policy, ctx).await;
+        let outcome = self.disk_store.store(&target, snapshot, policy).await;
         self.slots[node_idx].note_store(&outcome);
         Some(outcome)
     }
@@ -794,14 +783,12 @@ impl RuntimeCache {
         &mut self,
         program: &CompiledGraph,
         seeds: impl IntoIterator<Item = NodeId>,
-        ctx: &mut ContextStore,
     ) -> CacheFlushReport {
         self.flush_each(
             program,
             seeds
                 .into_iter()
                 .filter_map(|node_id| program.node(node_id)),
-            ctx,
         )
         .await
     }
@@ -809,15 +796,10 @@ impl RuntimeCache {
     /// [`flush`](Self::flush) over the whole installed program — what a newly
     /// attached [`DiskStore`] owes every value computed while it was
     /// memory-only.
-    pub(crate) async fn flush_all(
-        &mut self,
-        program: &CompiledGraph,
-        ctx: &mut ContextStore,
-    ) -> CacheFlushReport {
+    pub(crate) async fn flush_all(&mut self, program: &CompiledGraph) -> CacheFlushReport {
         self.flush_each(
             program,
             program.e_nodes.iter_indexed().map(|(node_idx, _)| node_idx),
-            ctx,
         )
         .await
     }
@@ -840,7 +822,6 @@ impl RuntimeCache {
         &mut self,
         program: &CompiledGraph,
         nodes: impl Iterator<Item = NodeIdx>,
-        ctx: &mut ContextStore,
     ) -> CacheFlushReport {
         let mut report = CacheFlushReport::default();
         for node_idx in nodes {
@@ -848,7 +829,7 @@ impl RuntimeCache {
             // value to persist, which is the ordinary state of one that has
             // not run.
             let Some(outcome) = self
-                .store_node(program, node_idx, StorePolicy::PreserveCovering, &mut *ctx)
+                .store_node(program, node_idx, StorePolicy::PreserveCovering)
                 .await
             else {
                 continue;

@@ -12,7 +12,6 @@ use crate::data::codec::Codecs;
 use crate::data::codec::error::CodecFormatError;
 use crate::execution::cache::digest::Digest;
 use crate::graph::func::lambda::OutputDemand;
-use crate::runtime::context::ContextStore;
 use crate::{ConstValue, DynamicValue, TypeId};
 
 const MAGIC: &[u8; 8] = b"SCENBLOB";
@@ -61,7 +60,6 @@ pub(super) async fn write<W>(
     digest: Digest,
     outputs: &[DynamicValue],
     codecs: &Codecs,
-    ctx: &mut ContextStore,
 ) -> codec::error::Result<()>
 where
     W: AsyncWrite + AsyncSeek + Unpin + Send,
@@ -97,7 +95,7 @@ where
                     .get(type_id)
                     .expect("custom output codec was checked while writing descriptors");
                 codec
-                    .encode(value.as_ref(), writer, ctx)
+                    .encode(value.as_ref(), writer)
                     .await
                     .map_err(|source| CodecFormatError::Encode { type_id, source })?;
             }
@@ -144,8 +142,7 @@ where
 
 /// Whether this blob can serve `demand` under `digest`: [`read`] stopped after its header
 /// check. Reads the fixed prefix plus one descriptor per output and stops, so a reuse
-/// verdict costs one small sequential read instead of decoding the body (and needs no
-/// [`ContextStore`]). Sharing `read_header` is what keeps a probe's verdict and the later
+/// verdict costs one small sequential read instead of decoding the body. Sharing `read_header` is what keeps a probe's verdict and the later
 /// read's from drifting apart.
 pub(super) async fn covers_demand<R>(
     reader: &mut R,
@@ -167,7 +164,6 @@ pub(super) async fn read<R>(
     file_len: u64,
     digest: Digest,
     codecs: &Codecs,
-    ctx: &mut ContextStore,
     demand: &[OutputDemand],
 ) -> codec::error::Result<Option<Vec<DynamicValue>>>
 where
@@ -192,7 +188,7 @@ where
                     .expect("custom codec was validated while reading the header");
                 let mut payload = (&mut *reader).take(descriptor.payload_len);
                 let value = codec
-                    .decode(&mut payload, descriptor.payload_len, ctx)
+                    .decode(&mut payload, descriptor.payload_len)
                     .await
                     .map_err(|source| CodecFormatError::Decode { type_id, source })?;
                 require_consumed(&payload)?;

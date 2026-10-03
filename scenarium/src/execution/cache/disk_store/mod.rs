@@ -23,7 +23,6 @@ use crate::execution::compile::compiled_graph::ExecutionNode;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::identity::NodeId;
 use crate::library::Library;
-use crate::runtime::context::ContextStore;
 
 #[derive(Debug, Default)]
 pub struct DiskStore {
@@ -135,8 +134,8 @@ impl DiskStore {
 
     /// Whether the blob at `target` can serve this run's `demand` — the reuse verdict
     /// without the decode. Header-only (magic, version, digest, arity, codec versions,
-    /// per-output coverage), so it needs no [`ContextStore`] and can be answered before the
-    /// run commits to reusing the node; [`read`](Self::read) decodes the body later. Any
+    /// per-output coverage), so it can be answered before the run commits to reusing the
+    /// node; [`read`](Self::read) decodes the body later. Any
     /// read or framing failure reads as "cannot serve" — the node then runs and republishes
     /// the blob.
     pub(crate) async fn covers_demand(&self, target: &BlobTarget, demand: &[OutputDemand]) -> bool {
@@ -152,7 +151,6 @@ impl DiskStore {
         &self,
         target: &BlobTarget,
         demand: &[OutputDemand],
-        ctx: &mut ContextStore,
     ) -> Option<OutputSnapshot> {
         // Unlike the two coverage checks, this runs after something already
         // promised the blob is there, so a filesystem that will not answer is
@@ -165,16 +163,7 @@ impl DiskStore {
                 return None;
             }
         };
-        match format::read(
-            &mut file,
-            file_len,
-            target.digest,
-            &self.codecs,
-            ctx,
-            demand,
-        )
-        .await
-        {
+        match format::read(&mut file, file_len, target.digest, &self.codecs, demand).await {
             Ok(Some(values)) => Some(OutputSnapshot::new(values)),
             Ok(None) => None,
             Err(error) => {
@@ -197,7 +186,6 @@ impl DiskStore {
         target: &BlobTarget,
         snapshot: &OutputSnapshot,
         policy: StorePolicy,
-        ctx: &mut ContextStore,
     ) -> StoreResult {
         if policy == StorePolicy::PreserveCovering && self.covers(target, snapshot.values()).await {
             return Ok(StoreOutcome::AlreadyCovered);
@@ -223,14 +211,8 @@ impl DiskStore {
                 source,
             })?;
         let mut writer = BufWriter::new(file);
-        if let Err(error) = format::write(
-            &mut writer,
-            target.digest,
-            snapshot.values(),
-            &self.codecs,
-            ctx,
-        )
-        .await
+        if let Err(error) =
+            format::write(&mut writer, target.digest, snapshot.values(), &self.codecs).await
         {
             // The one encode failure that is not a failure: a type this
             // library has no codec for was never going to be written.

@@ -9,7 +9,6 @@ use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::data::codec::error::CodecError;
-use crate::runtime::context::ContextStore;
 use crate::{CustomValue, TypeId};
 
 #[async_trait::async_trait]
@@ -22,14 +21,12 @@ pub trait CustomValueCodec: Send + Sync + Debug {
         &self,
         value: &dyn CustomValue,
         writer: &mut (dyn AsyncWrite + Unpin + Send),
-        ctx: &mut ContextStore,
     ) -> Result<(), CodecError>;
 
     async fn decode(
         &self,
         reader: &mut (dyn AsyncRead + Unpin + Send),
         byte_len: u64,
-        ctx: &mut ContextStore,
     ) -> Result<Arc<dyn CustomValue>, CodecError>;
 }
 

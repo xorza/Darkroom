@@ -15,7 +15,6 @@ use crate::execution::cache::disk_store::{BlobTarget, DiskStore, StorePolicy};
 use crate::execution::cache::slot::OutputSnapshot;
 use crate::graph::func::lambda::OutputDemand;
 use crate::library::{Library, TypeEntry};
-use crate::runtime::context::ContextStore;
 use crate::{CodecError, ConstValue, CustomValue, CustomValueCodec, DynamicValue, TypeId};
 
 fn target(path: &Path, digest: Digest) -> BlobTarget {
@@ -31,9 +30,7 @@ async fn read_snapshot(
     output_count: usize,
 ) -> Option<OutputSnapshot> {
     let demand = vec![OutputDemand::Skip; output_count];
-    store
-        .read(target, &demand, &mut ContextStore::default())
-        .await
+    store.read(target, &demand).await
 }
 
 /// Publish, asserting the store answered `expected`. Every call has a definite
@@ -46,9 +43,7 @@ async fn store_expecting(
     policy: StorePolicy,
     expected: StoreOutcome,
 ) {
-    let outcome = store
-        .store(target, snapshot, policy, &mut ContextStore::default())
-        .await;
+    let outcome = store.store(target, snapshot, policy).await;
     assert_eq!(
         outcome.as_ref().ok(),
         Some(&expected),
@@ -110,7 +105,6 @@ impl CustomValueCodec for VersionedCodec {
         &self,
         value: &dyn CustomValue,
         writer: &mut (dyn AsyncWrite + Unpin + Send),
-        _ctx: &mut ContextStore,
     ) -> Result<(), CodecError> {
         let blob = value
             .as_any()
@@ -127,7 +121,6 @@ impl CustomValueCodec for VersionedCodec {
         &self,
         reader: &mut (dyn AsyncRead + Unpin + Send),
         byte_len: u64,
-        _ctx: &mut ContextStore,
     ) -> Result<Arc<dyn CustomValue>, CodecError> {
         let mut bytes = Vec::with_capacity(usize::try_from(byte_len)?);
         reader.read_to_end(&mut bytes).await?;
@@ -226,12 +219,7 @@ async fn broader_same_digest_blob_is_preserved() {
     )
     .await;
     let second_output = [OutputDemand::Skip, OutputDemand::Produce];
-    assert!(
-        store
-            .read(&target, &second_output, &mut ContextStore::default())
-            .await
-            .is_none()
-    );
+    assert!(store.read(&target, &second_output).await.is_none());
     assert!(file.exists(), "an insufficient but valid blob is retained");
 
     let complete = OutputSnapshot::new(vec![
@@ -359,7 +347,6 @@ async fn failed_streaming_encode_preserves_previous_blob() {
             &target(file.path(), Digest([5; 32])),
             &OutputSnapshot::new(vec![DynamicValue::from_custom(Blob(vec![8; 1024]))]),
             StorePolicy::KnownMiss,
-            &mut ContextStore::default(),
         )
         .await;
     // A codec that rejects the value it was handed is a failure, unlike a type
@@ -395,7 +382,6 @@ async fn a_failed_publication_disturbs_nothing_around_it() {
             &target(file.path(), Digest([9; 32])),
             &OutputSnapshot::new(vec![DynamicValue::Static(ConstValue::Int(9))]),
             StorePolicy::PreserveCovering,
-            &mut ContextStore::default(),
         )
         .await;
 

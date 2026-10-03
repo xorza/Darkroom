@@ -389,10 +389,7 @@ impl ExecutionFrame<'_, '_> {
     /// errored-upstream.
     async fn serve_reuse(&mut self, node_idx: NodeIdx, demand: &[OutputDemand]) {
         let program = self.program;
-        let hydrated = self
-            .cache
-            .hydrate_reuse(program, node_idx, demand, &mut self.ctx.contexts)
-            .await;
+        let hydrated = self.cache.hydrate_reuse(program, node_idx, demand).await;
         match hydrated {
             ReuseOutcome::Missed => {
                 let error = RunError::CacheLoadFailed {
@@ -432,14 +429,7 @@ impl ExecutionFrame<'_, '_> {
         let cancel = self.ctx.cancel.clone();
         let hydrated = self
             .cache
-            .restamp_and_hydrate(
-                program,
-                &self.schedule.states,
-                node_idx,
-                demand,
-                &mut self.ctx.contexts,
-                cancel,
-            )
+            .restamp_and_hydrate(program, &self.schedule.states, node_idx, demand, cancel)
             .await;
         match hydrated {
             // The run is being torn down, so there is nothing to start here:
@@ -597,12 +587,7 @@ impl ExecutionFrame<'_, '_> {
         // because there one asked. The slot still records it, inside the store.
         let _ = self
             .cache
-            .store_node(
-                program,
-                node_idx,
-                StorePolicy::KnownMiss,
-                &mut self.ctx.contexts,
-            )
+            .store_node(program, node_idx, StorePolicy::KnownMiss)
             .await;
         self.release_drained_outputs(node_idx);
     }
