@@ -571,8 +571,8 @@ fn event_cell(
     let theme = ncx.theme();
     let node_id = ncx.id;
     let overhang = theme.port_overhang();
-    let wid = event_glyph_wid(node_id, event_idx);
     let ev = EventRef { node_id, event_idx };
+    let wid = event_glyph_wid(ev);
     let fill = event_color(theme, dcx.geometry().events.is_hovered(ev));
     let tip = ncx.tips().then(|| fmt!(ui, "event: {}", event.name));
     Panel::hstack()
@@ -596,8 +596,8 @@ fn event_cell(
 
 /// An event port glyph. A separate id space from data ports
 /// ([`port_circle_wid`]) because events are indexed independently of outputs.
-pub(crate) fn event_glyph_wid(node_id: NodeId, event_idx: usize) -> WidgetId {
-    WidgetId::from_hash(("graph.node", "event_glyph", node_id, event_idx))
+pub(crate) fn event_glyph_wid(event: EventRef) -> WidgetId {
+    wid::event("event_glyph", event)
 }
 
 /// Human-readable type for a port tooltip: the picker mode (and accepted

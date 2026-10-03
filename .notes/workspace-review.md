@@ -19,11 +19,6 @@ Groups are named after their shared root cause and ordered by severity, then ben
 
 # Low — duplication, dead surface, local simplifications
 
-## darkroom GUI repeats per-frame lookups and theme values
-Severity: Low.
-
-- [ ] `node/wid.rs` claims the node subtree's id vocabulary, but `port_row` `event_glyph_wid` (takes `(NodeId, usize)` instead of `EventRef`), `inspector` `inspect_badge_wid`/`inspect_panel_wid` and `preview_row` `preview_image_wid` use raw `WidgetId::from_hash` with ad-hoc prefixes.
-
 ## Docs that describe code that no longer exists
 Severity: Low — prose that misleads readers about behaviour.
 
