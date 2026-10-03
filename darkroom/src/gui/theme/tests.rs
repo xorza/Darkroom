@@ -118,3 +118,20 @@ fn luminance(c: RgbaF32) -> f32 {
         + 0.7152 * channel(f32::from(srgb.g) / 255.0)
         + 0.0722 * channel(f32::from(srgb.b) / 255.0)
 }
+
+/// The broken-path look is palantir's text edit with every state's border in
+/// the error colour, at the width each state already had.
+#[test]
+fn the_error_path_field_recolors_every_border_and_keeps_its_width() {
+    let theme = Theme::default();
+    let (base, error) = (&theme.palantir.text_edit, &theme.path_field_error);
+    for (base, error) in [
+        (&base.looks.normal, &error.looks.normal),
+        (&base.looks.hovered, &error.looks.hovered),
+        (&base.looks.active, &error.looks.active),
+    ] {
+        assert_eq!(error.background.border.color, theme.status.error);
+        assert_eq!(error.background.border.width, base.background.border.width);
+        assert_ne!(base.background.border.color, theme.status.error);
+    }
+}
