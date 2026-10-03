@@ -85,12 +85,10 @@ impl DocFixture {
     /// badges, both port columns, the const editor on the unbound input), and
     /// a port index means the same thing on every one of them.
     pub(crate) fn probes(n: usize) -> Self {
-        let probe = testing::with_stub_lambda(
-            Func::new(FuncId::unique(), "probe")
-                .pure()
-                .input(FuncInput::optional("a", DataType::Int))
-                .output(FuncOutput::new("out", DataType::Int)),
-        );
+        let probe = testing::stub_func(FuncId::unique(), "probe")
+            .pure()
+            .input(FuncInput::optional("a", DataType::Int))
+            .output(FuncOutput::new("out", DataType::Int));
         let mut fixture = Self::default();
         for _ in 0..n {
             fixture.add(&probe);

@@ -239,7 +239,7 @@ pub struct FuncEvent {
     pub event_lambda: EventLambda,
 }
 
-#[derive(Default, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct Func {
     pub id: FuncId,
     pub name: String,
@@ -268,14 +268,23 @@ pub struct Func {
 }
 
 impl Func {
-    /// Start a func definition. Defaults: `Impure`, non-sink, empty
-    /// category/inputs/outputs/events and a `None` lambda — set the rest with the
-    /// chained builders below.
-    pub fn new(id: FuncId, name: impl Into<String>) -> Self {
+    /// Start a func definition around its implementation. Defaults: `Impure`,
+    /// non-sink, cached nowhere, with no category, ports or events — set the
+    /// rest with the chained builders below.
+    pub fn new(id: FuncId, name: impl Into<String>, lambda: FuncLambda) -> Self {
         Self {
             id,
             name: name.into(),
-            ..Default::default()
+            category: String::new(),
+            sink: false,
+            uncacheable: false,
+            default_cache_mode: CacheMode::None,
+            behavior: FuncBehavior::Impure,
+            description: None,
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            events: Vec::new(),
+            lambda,
         }
     }
 
@@ -363,12 +372,6 @@ impl Func {
             name: name.into(),
             event_lambda,
         });
-        self
-    }
-
-    #[must_use]
-    pub fn lambda(mut self, lambda: FuncLambda) -> Self {
-        self.lambda = lambda;
         self
     }
 
@@ -460,9 +463,6 @@ impl Func {
                 OutputType::Fixed(_) => {}
             }
         }
-        if self.lambda.is_none() {
-            return Err(FuncValidationError::MissingLambda { func_id: self.id });
-        }
         Ok(())
     }
 
@@ -507,27 +507,26 @@ mod tests {
 
     use crate::async_lambda;
     use crate::graph::func::error::{FuncValidationError, OverrideRule};
-    use crate::graph::func::event::EventLambda;
     use crate::graph::func::{Func, FuncInput, FuncOutput, ValueVariant};
     use crate::graph::node::CacheMode;
+    use crate::testing;
     use crate::{ConstValue, DataType, FsPathConfig, FsPathMode, TypeId};
 
     #[test]
     fn validate_rejects_invalid_identities_wildcards_and_defaults() {
-        let nil_input = Func::new(FuncId::unique(), "input").input(FuncInput::required(
+        let nil_input = testing::stub_func(FuncId::unique(), "input").input(FuncInput::required(
             "value",
             DataType::Custom(TypeId::nil()),
         ));
-        let nil_output = Func::new(FuncId::unique(), "output")
+        let nil_output = testing::stub_func(FuncId::unique(), "output")
             .output(FuncOutput::new("value", DataType::Enum(TypeId::nil())));
-        let invalid_wildcard = Func::new(FuncId::unique(), "wildcard")
+        let invalid_wildcard = testing::stub_func(FuncId::unique(), "wildcard")
             .input(FuncInput::required("value", DataType::Any))
             .wildcard_output("value", 1);
-        let missing_lambda = Func::new(FuncId::unique(), "missing");
         let invalid = [
             (
                 "function id must not be nil".to_owned(),
-                Func::new(FuncId::nil(), "nil"),
+                testing::stub_func(FuncId::nil(), "nil"),
             ),
             (
                 format!(
@@ -550,10 +549,6 @@ mod tests {
                 ),
                 invalid_wildcard,
             ),
-            (
-                format!("function {:?} has no implementation", missing_lambda.id),
-                missing_lambda,
-            ),
         ];
 
         for (expected, func) in invalid {
@@ -563,7 +558,7 @@ mod tests {
         // Declared defaults are held to exact kinds (no scalar coercion) —
         // an authoring mismatch fails at registration, not in a document.
         let default_mismatch = |input: FuncInput| {
-            let func = Func::new(FuncId::unique(), "default").input(input);
+            let func = testing::stub_func(FuncId::unique(), "default").input(input);
             let expected = format!(
                 "function {:?} input 0 declares a default that matches neither its type nor its picker variants",
                 func.id
@@ -640,9 +635,8 @@ mod tests {
             ),
         ];
         for (inputs, input_idx, target, rule) in override_rows {
-            let func = Func::new(FuncId::unique(), "override")
-                .inputs(inputs)
-                .lambda(async_lambda!(|_| { Ok(()) }));
+            let func = Func::new(FuncId::unique(), "override", async_lambda!(|_| { Ok(()) }))
+                .inputs(inputs);
             assert_eq!(
                 func.validate(),
                 Err(FuncValidationError::InvalidOverride {
@@ -658,7 +652,7 @@ mod tests {
         // Well-formed declarations: exact kinds, a variant member, Null on an
         // optional input, `Any` accepting any literal, a valid wildcard and a
         // valid override.
-        Func::new(FuncId::unique(), "ok")
+        Func::new(FuncId::unique(), "ok", async_lambda!(|_| { Ok(()) }))
             .input(FuncInput::optional("int", DataType::Int).default(2i64))
             .input(FuncInput::optional("any", DataType::Any).default("text"))
             .input(FuncInput::optional("unset", DataType::Int).default(ConstValue::Null))
@@ -677,39 +671,36 @@ mod tests {
             .input(preset())
             .input(config(5))
             .wildcard_output("value", 0)
-            .lambda(async_lambda!(|_| { Ok(()) }))
             .validate()
             .unwrap();
     }
 
     #[test]
     fn default_cache_mode_defaults_to_none_and_builder_overrides() {
-        // Out of the box a func caches nothing — both `Func::default()` and the
-        // `Func::new` builder start at `CacheMode::None`.
-        assert_eq!(Func::default().default_cache_mode, CacheMode::None);
+        // Out of the box a func caches nothing.
         assert_eq!(
-            Func::new(FuncId::unique(), "f").default_cache_mode,
+            testing::stub_func(FuncId::unique(), "f").default_cache_mode,
             CacheMode::None
         );
 
         // The builder sets a hotter default; distinct inputs map to distinct
         // stored modes (not a fixed constant).
         for mode in [CacheMode::Ram, CacheMode::Disk, CacheMode::Both] {
-            let func = Func::new(FuncId::unique(), "f").default_cache_mode(mode);
+            let func = testing::stub_func(FuncId::unique(), "f").default_cache_mode(mode);
             assert_eq!(func.default_cache_mode, mode, "{mode:?} is stored verbatim");
         }
     }
 
     #[test]
     fn node_events_expose_names_and_arity() {
-        let emitter = Func::new(FuncId::unique(), "ticker")
-            .event("tick", EventLambda::default())
-            .event("tock", EventLambda::default());
+        let emitter = testing::stub_func(FuncId::unique(), "ticker")
+            .event("tick", testing::stub_event())
+            .event("tock", testing::stub_event());
         assert_eq!(emitter.events.len(), 2);
         let names: Vec<&str> = emitter.events.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(names, ["tick", "tock"]);
 
-        let silent = Func::new(FuncId::unique(), "silent");
+        let silent = testing::stub_func(FuncId::unique(), "silent");
         assert!(silent.events.is_empty());
     }
 }

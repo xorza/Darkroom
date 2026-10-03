@@ -26,28 +26,10 @@ pub(super) fn register(library: &mut Library) {
 
 fn register_brightness(library: &mut Library) {
     library.add(
-        Func::new(BRIGHTNESS_CONTRAST_FUNC_ID, "Brightness / Contrast")
-            .description("Adjusts the brightness and contrast of an image.")
-            .category("Image")
-            .pure()
-            .input(
-                FuncInput::required("Image", IMAGE_DATA_TYPE.clone())
-                    .description("Image to adjust."),
-            )
-            .input(
-                FuncInput::required("Brightness", DataType::Float)
-                    .description("Brightness offset in [−1, 1]. 0 leaves it unchanged.")
-                    .default(0.0),
-            )
-            .input(
-                FuncInput::required("Contrast", DataType::Float)
-                    .description("Contrast multiplier. 1 leaves it unchanged.")
-                    .default(1.0),
-            )
-            .output(
-                FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Adjusted image."),
-            )
-            .lambda(FuncLambda::new(
+        Func::new(
+            BRIGHTNESS_CONTRAST_FUNC_ID,
+            "Brightness / Contrast",
+            FuncLambda::new(
                 move |Invocation {
                           inputs, outputs, ..
                       }| {
@@ -69,29 +51,34 @@ fn register_brightness(library: &mut Library) {
                         Ok(())
                     })
                 },
-            )),
+            ),
+        )
+        .description("Adjusts the brightness and contrast of an image.")
+        .category("Image")
+        .pure()
+        .input(
+            FuncInput::required("Image", IMAGE_DATA_TYPE.clone()).description("Image to adjust."),
+        )
+        .input(
+            FuncInput::required("Brightness", DataType::Float)
+                .description("Brightness offset in [−1, 1]. 0 leaves it unchanged.")
+                .default(0.0),
+        )
+        .input(
+            FuncInput::required("Contrast", DataType::Float)
+                .description("Contrast multiplier. 1 leaves it unchanged.")
+                .default(1.0),
+        )
+        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Adjusted image.")),
     );
 }
 
 fn register_convert(library: &mut Library) {
     library.add(
-        Func::new(CONVERT_FUNC_ID, "Convert")
-            .description("Converts an image to a different color format.")
-            .category("Image")
-            .pure()
-            .input(
-                FuncInput::required("Image", IMAGE_DATA_TYPE.clone())
-                    .description("Image to convert."),
-            )
-            .input(
-                enum_input::<ConversionFormat>("Format", &CONVERSION_FORMAT_DATATYPE)
-                    .default(ConstValue::Enum(ColorFormat::RGB_U8.name().to_string()))
-                    .description("Target color format."),
-            )
-            .output(
-                FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Converted image."),
-            )
-            .lambda(FuncLambda::new(
+        Func::new(
+            CONVERT_FUNC_ID,
+            "Convert",
+            FuncLambda::new(
                 move |Invocation {
                           inputs, outputs, ..
                       }| {
@@ -116,32 +103,29 @@ fn register_convert(library: &mut Library) {
                         Ok(())
                     })
                 },
-            )),
+            ),
+        )
+        .description("Converts an image to a different color format.")
+        .category("Image")
+        .pure()
+        .input(
+            FuncInput::required("Image", IMAGE_DATA_TYPE.clone()).description("Image to convert."),
+        )
+        .input(
+            enum_input::<ConversionFormat>("Format", &CONVERSION_FORMAT_DATATYPE)
+                .default(ConstValue::Enum(ColorFormat::RGB_U8.name().to_string()))
+                .description("Target color format."),
+        )
+        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Converted image.")),
     );
 }
 
 fn register_blend(library: &mut Library) {
     library.add(
-        Func::new(BLEND_FUNC_ID, "Blend")
-            .description("Blends two images using the selected blend mode.")
-            .category("Image")
-            .pure()
-            .input(
-                FuncInput::required("Source", IMAGE_DATA_TYPE.clone())
-                    .description("Top image (the blend source)."),
-            )
-            .input(
-                FuncInput::required("Destination", IMAGE_DATA_TYPE.clone())
-                    .description("Bottom image (the blend backdrop)."),
-            )
-            .input(enum_input::<BlendMode>("Mode", &BLENDMODE_DATATYPE).description("Blend mode."))
-            .input(
-                FuncInput::required("Alpha", DataType::Float)
-                    .description("Blend strength in [0, 1]. 1 is full source.")
-                    .default(1.0),
-            )
-            .output(FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Blended image."))
-            .lambda(FuncLambda::new(
+        Func::new(
+            BLEND_FUNC_ID,
+            "Blend",
+            FuncLambda::new(
                 move |Invocation {
                           inputs, outputs, ..
                       }| {
@@ -183,49 +167,32 @@ fn register_blend(library: &mut Library) {
                         Ok(())
                     })
                 },
-            )),
+            ),
+        )
+        .description("Blends two images using the selected blend mode.")
+        .category("Image")
+        .pure()
+        .input(
+            FuncInput::required("Source", IMAGE_DATA_TYPE.clone())
+                .description("Top image (the blend source)."),
+        )
+        .input(
+            FuncInput::required("Destination", IMAGE_DATA_TYPE.clone())
+                .description("Bottom image (the blend backdrop)."),
+        )
+        .input(enum_input::<BlendMode>("Mode", &BLENDMODE_DATATYPE).description("Blend mode."))
+        .input(
+            FuncInput::required("Alpha", DataType::Float)
+                .description("Blend strength in [0, 1]. 1 is full source.")
+                .default(1.0),
+        )
+        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Blended image.")),
     );
 }
 
 fn register_transform(library: &mut Library) {
     library.add(
-        Func::new(TRANSFORM_FUNC_ID, "Transform")
-            .description("Applies scale, rotation, and translation to an image.")
-            .category("Image")
-            .pure()
-            .input(
-                FuncInput::required("Image", IMAGE_DATA_TYPE.clone())
-                    .description("Image to transform."),
-            )
-            .input(
-                FuncInput::required("Scale X", DataType::Float)
-                    .description("Horizontal scale factor. 1 leaves width unchanged.")
-                    .default(1.0),
-            )
-            .input(
-                FuncInput::required("Scale Y", DataType::Float)
-                    .description("Vertical scale factor. 1 leaves height unchanged.")
-                    .default(1.0),
-            )
-            .input(
-                FuncInput::required("Rotation", DataType::Float)
-                    .description("Rotation in radians, about the image center.")
-                    .default(0.0),
-            )
-            .input(
-                FuncInput::required("Translate X", DataType::Float)
-                    .description("Horizontal shift in pixels.")
-                    .default(0.0),
-            )
-            .input(
-                FuncInput::required("Translate Y", DataType::Float)
-                    .description("Vertical shift in pixels.")
-                    .default(0.0),
-            )
-            .output(
-                FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Transformed image."),
-            )
-            .lambda(FuncLambda::new(
+        Func::new(TRANSFORM_FUNC_ID, "Transform", FuncLambda::new(
                 move |Invocation {
                           inputs, outputs, ..
                       }| {
@@ -264,7 +231,42 @@ fn register_transform(library: &mut Library) {
                         Ok(())
                     })
                 },
-            )),
+            ))
+            .description("Applies scale, rotation, and translation to an image.")
+            .category("Image")
+            .pure()
+            .input(
+                FuncInput::required("Image", IMAGE_DATA_TYPE.clone())
+                    .description("Image to transform."),
+            )
+            .input(
+                FuncInput::required("Scale X", DataType::Float)
+                    .description("Horizontal scale factor. 1 leaves width unchanged.")
+                    .default(1.0),
+            )
+            .input(
+                FuncInput::required("Scale Y", DataType::Float)
+                    .description("Vertical scale factor. 1 leaves height unchanged.")
+                    .default(1.0),
+            )
+            .input(
+                FuncInput::required("Rotation", DataType::Float)
+                    .description("Rotation in radians, about the image center.")
+                    .default(0.0),
+            )
+            .input(
+                FuncInput::required("Translate X", DataType::Float)
+                    .description("Horizontal shift in pixels.")
+                    .default(0.0),
+            )
+            .input(
+                FuncInput::required("Translate Y", DataType::Float)
+                    .description("Vertical shift in pixels.")
+                    .default(0.0),
+            )
+            .output(
+                FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Transformed image."),
+            ),
     );
 }
 

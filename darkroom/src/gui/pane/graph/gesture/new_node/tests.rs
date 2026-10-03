@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use glam::UVec2;
-use scenarium::{Func, FuncId, Graph, Library, testing};
+use scenarium::{FuncId, Graph, Library, testing};
 
 use super::*;
 use crate::core::document::harness::DocFixture;
@@ -41,9 +41,8 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
         // palette is what spawns them.
         let mut library = Library::default();
         for i in 0..60 {
-            library.add(testing::with_stub_lambda(
-                Func::new(FuncId::unique(), format!("func{i:02}")).category("Bulk"),
-            ));
+            library
+                .add(testing::stub_func(FuncId::unique(), format!("func{i:02}")).category("Bulk"));
         }
         // Real shaping: the search field sizes to its text, which is the
         // measurement the cap has to divide around.
@@ -161,9 +160,7 @@ fn a_caret_blink_does_not_read_as_the_canvas_having_been_away() {
 
     let mut library = Library::default();
     for i in 0..12 {
-        library.add(testing::with_stub_lambda(
-            Func::new(FuncId::unique(), format!("func{i:02}")).category("Bulk"),
-        ));
+        library.add(testing::stub_func(FuncId::unique(), format!("func{i:02}")).category("Bulk"));
     }
     let mut h = CanvasHarness::new(DocFixture::with_library(Graph::default(), library));
     h.frame();

@@ -35,16 +35,19 @@ pub(crate) fn run_sinks_func() -> &'static Func {
 }
 
 fn build_func() -> Func {
-    Func::new(RUN_SINKS_FUNC_ID, "Run on Event")
-        .category("System")
-        .sink()
-        .uncacheable()
-        .description(
-            "Subscribes to an event and, when it fires, runs every sink \
+    Func::new(
+        RUN_SINKS_FUNC_ID,
+        "Run on Event",
+        async_lambda!(|_| { Ok(()) }),
+    )
+    .category("System")
+    .sink()
+    .uncacheable()
+    .description(
+        "Subscribes to an event and, when it fires, runs every sink \
              node — re-evaluating the whole graph. Has no inputs or outputs; \
              wire an event (e.g. a Frame Event) into it to drive periodic runs.",
-        )
-        .lambda(async_lambda!(|_| { Ok(()) }))
+    )
 }
 
 #[cfg(test)]
@@ -58,9 +61,8 @@ mod tests {
         assert!(func.outputs.is_empty());
         assert!(func.events.is_empty());
         // Sink so the editor renders a subscription pin (only sinks
-        // subscribe), and scheduled with a real (no-op) lambda.
+        // subscribe).
         assert!(func.sink);
-        assert!(!func.lambda.is_none());
         // No output ⇒ the disk-cache toggle is meaningless and hidden.
         assert!(func.uncacheable);
     }

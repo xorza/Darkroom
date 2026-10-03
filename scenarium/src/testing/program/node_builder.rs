@@ -4,12 +4,12 @@ use crate::execution::compile::compiled_graph::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode,
 };
 use crate::graph::func::FuncBehavior;
-use crate::graph::func::event::EventLambda;
 use crate::graph::func::lambda::FuncLambda;
 use crate::graph::identity::{FuncId, NodeId};
 use crate::graph::node::CacheMode;
+use crate::testing;
 use crate::testing::program::{Placed, ProgramBuilder};
-use crate::{ConstValue, DataType, async_lambda};
+use crate::{ConstValue, DataType};
 
 /// One node under construction. Ports are accumulated here and packed into the
 /// program's columns by [`add`](Self::add), so a node's runs are contiguous the
@@ -28,7 +28,7 @@ impl<'a> NodeBuilder<'a> {
     pub(super) fn new(owner: &'a mut ProgramBuilder) -> Self {
         Self {
             owner,
-            e_node: ExecutionNode::default(),
+            e_node: ExecutionNode::bare(),
             inputs: Vec::new(),
             outputs: Vec::new(),
             events: Vec::new(),
@@ -73,21 +73,6 @@ impl<'a> NodeBuilder<'a> {
     pub(crate) fn lambda(mut self, lambda: FuncLambda) -> Self {
         self.e_node.lambda = lambda;
         self
-    }
-
-    /// A no-op body, for a node the sweep or the run loop must treat as
-    /// runnable rather than `MissingLambda`.
-    pub(crate) fn stub(self) -> Self {
-        self.lambda(async_lambda!(|_| { Ok(()) }))
-    }
-
-    /// A node a cache could serve: content-cacheable, so it earns a digest, and
-    /// implemented, so the sweep does not verdict it `MissingLambda` first.
-    ///
-    /// The two together are what "could this be reused" takes, which is why
-    /// every sweep fixture states them.
-    pub(crate) fn reusable(self) -> Self {
-        self.pure().stub()
     }
 
     /// An optional input reading `binding`.
@@ -149,7 +134,7 @@ impl<'a> NodeBuilder<'a> {
     pub(crate) fn event(mut self, subscribers: impl IntoIterator<Item = Placed>) -> Self {
         self.events.push(ExecutionEvent {
             subscribers: subscribers.into_iter().map(|node| node.node_idx).collect(),
-            lambda: EventLambda::default(),
+            lambda: testing::stub_event(),
         });
         self
     }

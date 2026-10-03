@@ -34,16 +34,10 @@ pub(crate) fn replace(library: &mut Library, model_paths: &MlModelPaths) {
 
 fn register_denoise(library: &mut Library, model_path: &Path) {
     library.add(
-        Func::new(DENOISE_FUNC_ID, "ML Denoise")
-            .description("Denoises a stretched image with an ONNX model (DeepSNR).")
-            .category("Astro")
-            .pure()
-            .input(frame_input())
-            .input(model_input("Model", model_path))
-            .output(
-                FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Processed image."),
-            )
-            .lambda(FuncLambda::new(
+        Func::new(
+            DENOISE_FUNC_ID,
+            "ML Denoise",
+            FuncLambda::new(
                 move |Invocation {
                           inputs, outputs, ..
                       }| {
@@ -65,27 +59,23 @@ fn register_denoise(library: &mut Library, model_path: &Path) {
                         Ok(())
                     })
                 },
-            )),
+            ),
+        )
+        .description("Denoises a stretched image with an ONNX model (DeepSNR).")
+        .category("Astro")
+        .pure()
+        .input(frame_input())
+        .input(model_input("Model", model_path))
+        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Processed image.")),
     );
 }
 
 fn register_star_removal(library: &mut Library, model_path: &Path) {
     library.add(
-        Func::new(STAR_REMOVAL_FUNC_ID, "ML Star Removal")
-            .description("Removes stars with a StarNet ONNX model (starless + stars).")
-            .category("Astro")
-            .pure()
-            .input(frame_input())
-            .input(model_input("Model", model_path))
-            .output(
-                FuncOutput::new("Starless", IMAGE_DATA_TYPE.clone())
-                    .description("The image with stars removed."),
-            )
-            .output(
-                FuncOutput::new("Stars", IMAGE_DATA_TYPE.clone())
-                    .description("The recovered star layer."),
-            )
-            .lambda(FuncLambda::new(
+        Func::new(
+            STAR_REMOVAL_FUNC_ID,
+            "ML Star Removal",
+            FuncLambda::new(
                 move |Invocation {
                           inputs,
                           demand: output_demand,
@@ -120,7 +110,21 @@ fn register_star_removal(library: &mut Library, model_path: &Path) {
                         Ok(())
                     })
                 },
-            )),
+            ),
+        )
+        .description("Removes stars with a StarNet ONNX model (starless + stars).")
+        .category("Astro")
+        .pure()
+        .input(frame_input())
+        .input(model_input("Model", model_path))
+        .output(
+            FuncOutput::new("Starless", IMAGE_DATA_TYPE.clone())
+                .description("The image with stars removed."),
+        )
+        .output(
+            FuncOutput::new("Stars", IMAGE_DATA_TYPE.clone())
+                .description("The recovered star layer."),
+        ),
     );
 }
 

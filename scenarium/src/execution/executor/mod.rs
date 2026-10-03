@@ -349,12 +349,6 @@ impl ExecutionFrame<'_, '_> {
                     cached: self.cache.is_resident_current(node_idx),
                 };
             }
-            NodeState::MissingLambda => {
-                let error = RunError::MissingLambda {
-                    func_id: e_node.func_id,
-                };
-                self.mark_skipped(node_idx, error);
-            }
             NodeState::Reuse => self.serve_reuse(node_idx, demand).await,
             // Reuse is settled *before* the errored-dependency check inside `invoke_node`: a
             // digest-valid cached value stays valid even when an upstream re-ran for another
@@ -480,7 +474,6 @@ impl ExecutionFrame<'_, '_> {
         let e_node = &program[node_idx];
         let node_id = program.node_ids[node_idx];
         let func_id = e_node.func_id;
-        debug_assert!(!e_node.lambda.is_none());
 
         if self.has_errored_dependency(node_idx) {
             self.abandon_input_reads(node_idx);
@@ -594,8 +587,7 @@ impl ExecutionFrame<'_, '_> {
 
     /// Drop `node_id` from this run: clear any stale cached output so it isn't served as
     /// this run's result, and record the outcome under the caller's reason —
-    /// [`RunError::SkippedUpstream`] for an errored dependency,
-    /// [`RunError::MissingLambda`] for a func with no implementation, or
+    /// [`RunError::SkippedUpstream`] for an errored dependency, or
     /// [`RunError::CacheLoadFailed`] for a probed blob that no longer loads.
     fn mark_skipped(&mut self, node_idx: NodeIdx, error: RunError) {
         self.cache[node_idx].clear_output();
@@ -614,7 +606,7 @@ impl ExecutionFrame<'_, '_> {
     }
 
     /// Hand the run's outcome the triggers a freshly initialized event source owns — only
-    /// events that have a subscriber and an implementation can fire.
+    /// events that have a subscriber can fire.
     fn collect_event_triggers(&mut self, node_idx: NodeIdx, event_state: &SharedAnyState) {
         let program = self.program;
         let node_id = program.node_ids[node_idx];
@@ -622,7 +614,7 @@ impl ExecutionFrame<'_, '_> {
             program.events[program[node_idx].events]
                 .iter()
                 .enumerate()
-                .filter(|(_, event)| !event.subscribers.is_empty() && !event.lambda.is_none())
+                .filter(|(_, event)| !event.subscribers.is_empty())
                 .map(|(event_idx, event)| EventTrigger {
                     event: EventPort { node_id, event_idx },
                     lambda: event.lambda.clone(),

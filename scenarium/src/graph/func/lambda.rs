@@ -60,41 +60,27 @@ impl<T> AsyncLambdaFn for T where
 
 pub type AsyncLambda = dyn AsyncLambdaFn;
 
-#[derive(Clone, Default)]
-pub enum FuncLambda {
-    #[default]
-    None,
-    Lambda(Arc<AsyncLambda>),
-}
+/// A func's implementation. Every func has one: it is an argument of
+/// [`Func::new`](crate::Func::new), so no declaration can lack it.
+#[derive(Clone)]
+pub struct FuncLambda(Arc<AsyncLambda>);
 
 impl FuncLambda {
     pub fn new<F>(lambda: F) -> Self
     where
         F: AsyncLambdaFn,
     {
-        Self::Lambda(Arc::new(lambda))
-    }
-
-    pub fn is_none(&self) -> bool {
-        matches!(self, Self::None)
+        Self(Arc::new(lambda))
     }
 
     pub async fn invoke(&self, invocation: Invocation<'_>) -> InvokeResult<()> {
-        match self {
-            FuncLambda::None => {
-                panic!("Func missing lambda");
-            }
-            FuncLambda::Lambda(inner) => (inner)(invocation).await,
-        }
+        (self.0)(invocation).await
     }
 }
 
 impl Debug for FuncLambda {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            FuncLambda::None => f.debug_struct("FuncLambda::None").finish(),
-            FuncLambda::Lambda(_) => f.debug_struct("FuncLambda::Lambda").finish(),
-        }
+        f.write_str("FuncLambda")
     }
 }
 

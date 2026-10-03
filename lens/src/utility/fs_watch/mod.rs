@@ -151,63 +151,7 @@ pub fn fs_watch_library() -> Library {
     let mut library = Library::default();
 
     library.add(
-        Func::new(WATCH_DIRECTORY_FUNC_ID, "Watch Directory")
-            .category("System")
-            .description(
-                "Passes a directory through unchanged and fires `Changed` when files are added, \
-                 removed, renamed, or written — ignoring access-time and other metadata-only events.",
-            )
-            .input(
-                FuncInput::required("Directory", directory_type())
-                    .description("Directory to watch and pass through.")
-                    .const_only(),
-            )
-            .input(
-                FuncInput::required("Recursive", DataType::Bool)
-                    .description("Watch subdirectories too, not just the top level.")
-                    .default(true)
-                    .const_only(),
-            )
-            .input(
-                FuncInput::required("Debounce (ms)", DataType::Int)
-                    .description(
-                        "Quiet window after a change before firing, collapsing a burst into one \
-                         event. 0 disables debouncing.",
-                    )
-                    .default(1000i64)
-                    .const_only(),
-            )
-            .output(
-                FuncOutput::new("Directory", directory_type())
-                    .description("The same directory, re-emitted on each change."),
-            )
-            .event(
-                "Changed",
-                EventLambda::new(|state| {
-                    Box::pin(async move {
-                        let watch = state
-                            .lock()
-                            .await
-                            .get::<WatchState>()
-                            .map(|w| (Arc::clone(&w.signal), w.debounce));
-                        match watch {
-                            Some((signal, debounce)) => {
-                                // Wait for the first change of a burst...
-                                signal.notified().await;
-                                // ...then absorb follow-up changes until the
-                                // directory stays quiet for `debounce`, so one
-                                // user action fires once instead of N times.
-                                while !debounce.is_zero()
-                                    && timeout(debounce, signal.notified()).await.is_ok()
-                                {}
-                            }
-                            // No watcher (e.g. empty/invalid path): never fire.
-                            None => future::pending::<()>().await,
-                        }
-                    })
-                }),
-            )
-            .lambda(FuncLambda::new(
+        Func::new(WATCH_DIRECTORY_FUNC_ID, "Watch Directory", FuncLambda::new(
                 move |Invocation { event_state, inputs, outputs, .. }| {
                     Box::pin(async move {
                         debug_assert_eq!(inputs.len(), 3);
@@ -265,7 +209,62 @@ pub fn fs_watch_library() -> Library {
                         Ok(())
                     })
                 },
-            )),
+            ))
+            .category("System")
+            .description(
+                "Passes a directory through unchanged and fires `Changed` when files are added, \
+                 removed, renamed, or written — ignoring access-time and other metadata-only events.",
+            )
+            .input(
+                FuncInput::required("Directory", directory_type())
+                    .description("Directory to watch and pass through.")
+                    .const_only(),
+            )
+            .input(
+                FuncInput::required("Recursive", DataType::Bool)
+                    .description("Watch subdirectories too, not just the top level.")
+                    .default(true)
+                    .const_only(),
+            )
+            .input(
+                FuncInput::required("Debounce (ms)", DataType::Int)
+                    .description(
+                        "Quiet window after a change before firing, collapsing a burst into one \
+                         event. 0 disables debouncing.",
+                    )
+                    .default(1000i64)
+                    .const_only(),
+            )
+            .output(
+                FuncOutput::new("Directory", directory_type())
+                    .description("The same directory, re-emitted on each change."),
+            )
+            .event(
+                "Changed",
+                EventLambda::new(|state| {
+                    Box::pin(async move {
+                        let watch = state
+                            .lock()
+                            .await
+                            .get::<WatchState>()
+                            .map(|w| (Arc::clone(&w.signal), w.debounce));
+                        match watch {
+                            Some((signal, debounce)) => {
+                                // Wait for the first change of a burst...
+                                signal.notified().await;
+                                // ...then absorb follow-up changes until the
+                                // directory stays quiet for `debounce`, so one
+                                // user action fires once instead of N times.
+                                while !debounce.is_zero()
+                                    && timeout(debounce, signal.notified()).await.is_ok()
+                                {}
+                            }
+                            // No watcher (e.g. empty/invalid path): never fire.
+                            None => future::pending::<()>().await,
+                        }
+                    })
+                }),
+            ),
     );
 
     library

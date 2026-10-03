@@ -60,7 +60,7 @@ pub(crate) mod planner;
 /// and `Cut`, its positive verdict. The cache-aware sweep
 /// ([`RunSchedule::resolve`])
 /// then refines only the runnable ones, promoting what a running consumer
-/// reads to `Run`, `Reuse`, or `MissingLambda` and leaving the rest where the
+/// reads to `Run` or `Reuse` and leaving the rest where the
 /// planner put them. That is why "the planner cleared it" and "the cut pruned
 /// it" are one state rather than two: a node that could run and that nothing
 /// this run reads *is* a cut node, and holding the two apart meant a column
@@ -94,9 +94,6 @@ pub(crate) enum NodeState {
     /// digest-matched blob the run loop decodes when it reaches the node. Serve it without
     /// running the lambda.
     Reuse,
-    /// Reached, but its func has no implementation. Report the error without probing its cache
-    /// or keeping its input cone alive.
-    MissingLambda,
     /// The node must run and owns one pending read for each bound input.
     Run,
 }
@@ -293,9 +290,7 @@ impl RunSchedule {
                 }
                 NodeState::Disabled => input.required,
                 NodeState::MissingInputs => true,
-                NodeState::Cut | NodeState::Reuse | NodeState::MissingLambda | NodeState::Run => {
-                    false
-                }
+                NodeState::Cut | NodeState::Reuse | NodeState::Run => false,
             },
         }
     }
@@ -587,10 +582,6 @@ impl RunSchedule {
                 continue;
             }
             let e_node = &program[node_idx];
-            if e_node.lambda.is_none() {
-                states[node_idx] = NodeState::MissingLambda;
-                continue;
-            }
 
             let flags = root_flags[node_idx];
             let demand = &mut outputs.demand[e_node.outputs];
@@ -632,18 +623,11 @@ impl RunSchedule {
 pub(crate) mod internals {
     use super::*;
 
-    /// Root inspection and the one re-rooting a fixture needs. Production writes
-    /// roots only through [`collect_roots`](RunSchedule::collect_roots) and reads
-    /// them only as a list plus per-node flags, so these exist for the tests that
-    /// assert on one property at a time.
+    /// Root inspection. Production writes roots only through
+    /// [`collect_roots`](RunSchedule::collect_roots) and reads them only as a
+    /// list plus per-node flags, so these exist for the tests that assert on
+    /// one property at a time.
     impl RunSchedule {
-        /// Drop every root, so a fixture built by another helper can name its own.
-        pub(crate) fn clear_roots(&mut self) {
-            self.roots.clear();
-            self.root_flags
-                .reset(self.states.len(), RootFlags::default());
-        }
-
         /// The node-seeded roots, ascending.
         pub(crate) fn seeded_roots(&self) -> Vec<NodeIdx> {
             self.roots_where(RootFlags::is_seeded)

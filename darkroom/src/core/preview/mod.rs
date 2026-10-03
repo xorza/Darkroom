@@ -58,27 +58,30 @@ impl PreviewSink {
 /// has no output to persist, and it stays `Impure` (the default) because
 /// `Func::validate` refuses an outputless func that claims to be pure.
 pub(crate) fn preview_func(sink: Arc<PreviewSink>) -> Func {
-    Func::new(PREVIEW_FUNC_ID, "Preview")
-        .category("System")
-        .sink()
-        .uncacheable()
-        .description(
-            "Shows the value wired into it. The value goes to the editor \
-             rather than to a consumer, so watching one never changes what the \
-             rest of the graph computes.",
-        )
-        .input(
-            FuncInput::optional("Value", DataType::Any)
-                .description("The value to show. Anything can be wired here."),
-        )
-        .lambda(async_lambda!(
+    Func::new(
+        PREVIEW_FUNC_ID,
+        "Preview",
+        async_lambda!(
             move |Invocation { ctx, inputs, .. }| { sink = Arc::clone(&sink) } => {
                 // `current_node` is the only thing in the invocation that says
                 // *which* preview this is — the editor routes on it.
                 sink.publish(ctx.current_node(), mem::take(&mut inputs[0]));
                 Ok(())
             }
-        ))
+        ),
+    )
+    .category("System")
+    .sink()
+    .uncacheable()
+    .description(
+        "Shows the value wired into it. The value goes to the editor \
+             rather than to a consumer, so watching one never changes what the \
+             rest of the graph computes.",
+    )
+    .input(
+        FuncInput::optional("Value", DataType::Any)
+            .description("The value to show. Anything can be wired here."),
+    )
 }
 
 /// The preview func as the current library registered it, or `None` when the

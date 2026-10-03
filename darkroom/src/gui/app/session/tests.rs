@@ -1,6 +1,6 @@
 use glam::Vec2;
 use palantir::{DockOp, Key, Modifiers};
-use scenarium::{Func, FuncId, Node, NodeId, NodeKind, testing};
+use scenarium::{FuncId, Node, NodeId, NodeKind, testing};
 use std::sync::Arc;
 
 use crate::alloc_audit;
@@ -112,7 +112,7 @@ fn a_viewer_opened_by_click_shows_its_image_in_that_same_frame() {
 }
 
 fn func_node() -> Node {
-    let func = testing::with_stub_lambda(Func::new(FuncId::unique(), "probe"));
+    let func = testing::stub_func(FuncId::unique(), "probe");
     Node::from(&func)
 }
 

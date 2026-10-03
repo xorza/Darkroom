@@ -102,14 +102,6 @@ impl<'a> Runs<'a> {
         self
     }
 
-    /// Make `node` the run's one root — for a fixture about what a walk
-    /// starting somewhere other than "everything" reaches.
-    pub(crate) fn only_root(mut self, node: Placed) -> Self {
-        self.schedule.clear_roots();
-        self.schedule.add_root(node.node_idx, RootFlags::PLAIN);
-        self
-    }
-
     /// Mark `node` a node-seeded root: every output demanded, `disabled`
     /// overridden.
     pub(crate) fn seeded(mut self, node: Placed) -> Self {
@@ -138,18 +130,6 @@ impl<'a> Runs<'a> {
             OutputSnapshot::new(values.into_iter().collect()),
             Some(digest),
         );
-        self
-    }
-
-    /// Leave `values` in `node`'s slot under **no** digest — a stale value from
-    /// some earlier run, which nothing this run may serve.
-    pub(crate) fn resident(
-        mut self,
-        node: Placed,
-        values: impl IntoIterator<Item = DynamicValue>,
-    ) -> Self {
-        self.cache[node.node_idx]
-            .load_output(OutputSnapshot::new(values.into_iter().collect()), None);
         self
     }
 

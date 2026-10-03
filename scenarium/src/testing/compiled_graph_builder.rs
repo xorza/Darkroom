@@ -30,9 +30,7 @@ impl CompiledGraphBuilder {
         self.node_ids.sort();
         let mut compiled = CompiledGraph::default();
         for node_id in self.node_ids {
-            // These nodes declare no ports, so the default is exactly the
-            // bare node a fixture wants.
-            compiled.push(node_id, ExecutionNode::default());
+            compiled.push(node_id, ExecutionNode::bare());
         }
         Arc::new(compiled)
     }

@@ -13,40 +13,26 @@ impl<T> AsyncEventFn for T where T: Fn(SharedAnyState) -> AsyncEventFuture + Sen
 
 pub type AsyncEvent = dyn AsyncEventFn;
 
-#[derive(Clone, Default)]
-pub enum EventLambda {
-    #[default]
-    None,
-    Lambda(Arc<AsyncEvent>),
-}
+/// An event's implementation. Every event has one: it is an argument of
+/// [`Func::event`](crate::Func::event).
+#[derive(Clone)]
+pub struct EventLambda(Arc<AsyncEvent>);
 
 impl EventLambda {
     pub fn new<F>(lambda: F) -> Self
     where
         F: AsyncEventFn,
     {
-        Self::Lambda(Arc::new(lambda))
+        Self(Arc::new(lambda))
     }
 
     pub async fn invoke(&self, state: SharedAnyState) {
-        match self {
-            EventLambda::None => {
-                panic!("event missing lambda");
-            }
-            EventLambda::Lambda(inner) => (inner)(state).await,
-        }
-    }
-
-    pub fn is_none(&self) -> bool {
-        matches!(self, EventLambda::None)
+        (self.0)(state).await;
     }
 }
 
 impl Debug for EventLambda {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            EventLambda::None => f.debug_struct("EventLambda::None").finish(),
-            EventLambda::Lambda(_) => f.debug_struct("EventLambda::Lambda").finish(),
-        }
+        f.write_str("EventLambda")
     }
 }

@@ -24,8 +24,15 @@ pub(crate) mod worker;
 
 use crate::async_lambda;
 use crate::graph::func::Func;
+use crate::graph::func::event::EventLambda;
+use crate::graph::identity::FuncId;
 
-/// `func` with a body that does nothing, so a library will hold it.
-pub fn with_stub_lambda(func: Func) -> Func {
-    func.lambda(async_lambda!(|_| { Ok(()) }))
+/// A func whose body does nothing, for a fixture that never runs it.
+pub fn stub_func(id: FuncId, name: impl Into<String>) -> Func {
+    Func::new(id, name, async_lambda!(|_| { Ok(()) }))
+}
+
+/// An event body that does nothing, for a fixture that never fires it.
+pub fn stub_event() -> EventLambda {
+    EventLambda::new(|_| Box::pin(async {}))
 }

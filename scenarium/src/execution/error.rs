@@ -43,12 +43,6 @@ pub enum RunError {
     // The messages omit `func_id` (kept as machine-readable data): a `RunError`
     // is already paired with its `NodeId` in the node's status row, so these
     // surface to the editor attributed to the node — a raw id in the text would be noise.
-    /// The node's func was registered without an implementation
-    /// ([`FuncLambda::None`](crate::graph::func::lambda::FuncLambda)), so the node
-    /// can't execute. A host/library configuration error, reported per-node
-    /// (its consumers skip as errored-upstream) rather than crashing the run.
-    #[error("the node's function has no implementation attached")]
-    MissingLambda { func_id: FuncId },
     #[error("skipped: an upstream dependency errored")]
     SkippedUpstream { func_id: FuncId },
     /// A disk blob the resolver verified by header no longer loaded when the run loop

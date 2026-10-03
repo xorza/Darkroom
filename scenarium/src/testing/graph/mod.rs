@@ -379,7 +379,7 @@ impl NodeSpec {
         // A stub body by default, because `Library::add` rejects a func with
         // no implementation and most fixtures never invoke one.
         Self {
-            func: Func::new(func_id, name).lambda(async_lambda!(|_| { Ok(()) })),
+            func: Func::new(func_id, name, async_lambda!(|_| { Ok(()) })),
         }
     }
 
@@ -481,7 +481,7 @@ impl NodeSpec {
 
     #[must_use]
     pub fn lambda(mut self, lambda: FuncLambda) -> Self {
-        self.func = self.func.lambda(lambda);
+        self.func.lambda = lambda;
         self
     }
 

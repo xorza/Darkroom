@@ -443,65 +443,6 @@ async fn reused_consumer_does_not_delay_last_read_reclamation() {
     );
 }
 
-/// A node whose func has no implementation attached can't execute: it's reported as
-/// its own per-node [`RunError::MissingLambda`] (not silently skipped), any stale
-/// cached value is dropped so it can't be served as this run's result, and its
-/// consumers skip with the usual errored-upstream propagation.
-#[tokio::test]
-async fn missing_lambda_reports_error_and_skips_consumers() {
-    let mut prog = ProgramBuilder::default();
-    let source = prog
-        .node()
-        .cache(CacheMode::Ram)
-        .outputs(1)
-        .lambda(producer())
-        .add();
-    // No lambda at all — the declaration a library lost its implementation for.
-    let missing = prog
-        .node()
-        .cache(CacheMode::Ram)
-        .input(source.out(0))
-        .outputs(1)
-        .add();
-    let downstream = prog
-        .node()
-        .cache(CacheMode::Ram)
-        .input(missing.out(0))
-        .outputs(1)
-        .lambda(relay())
-        .add();
-
-    let mut run = prog
-        .runs()
-        .resolved()
-        .only_root(downstream)
-        .resident(missing, [value(9)]);
-    run.go().await;
-
-    assert_eq!(
-        run.ran_count(),
-        0,
-        "the source is cut, the missing implementation errors, and its consumer skips"
-    );
-    assert!(
-        run.outputs(missing).is_none(),
-        "the missing node's stale value is dropped, not served"
-    );
-    assert!(
-        matches!(run.error(missing), Some(RunError::MissingLambda { .. })),
-        "the node reports its missing implementation: {:?}",
-        run.error(missing)
-    );
-    assert!(
-        matches!(
-            run.error(downstream),
-            Some(RunError::SkippedUpstream { .. })
-        ),
-        "the consumer skips as errored-upstream: {:?}",
-        run.error(downstream)
-    );
-}
-
 /// A consumer whose digest is unchanged serves its cached value even when the
 /// shared upstream re-ran for a *different* consumer and failed: the reuse verdict
 /// is checked before the errored-dependency skip, so the valid cache is neither

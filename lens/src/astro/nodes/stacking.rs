@@ -39,42 +39,10 @@ fn light_frames(paths: &[String]) -> Result<Vec<PathBuf>, LightFramesError> {
 
 pub(crate) fn register(library: &mut Library) {
     library.add(
-        Func::new(STACK_LIGHTS_FUNC_ID, "Stack Lights")
-            .description("Calibrates, aligns, and stacks selected light frames into one image.")
-            .category("Astro")
-            .pure()
-            .input(
-                FuncInput::required("Lights", ASTRO_RAW_PATHS_DATA_TYPE.clone())
-                    .description("Camera-RAW light frames to stack."),
-            )
-            .input(
-                FuncInput::optional("Masters", MASTERS_DATA_TYPE.clone())
-                    .description("Optional calibration masters. Unwired means no calibration."),
-            )
-            .input(preset::input::<DetectionKnobs, DetectionPreset>(
-                "Detection",
-            ))
-            .input(preset::input::<RegistrationKnobs, RegistrationPreset>(
-                "Registration",
-            ))
-            .input(preset::input::<CombineKnobs, CombinePreset>("Combine"))
-            .input(
-                FuncInput::required("Reference", DataType::Int)
-                    .description(
-                        "Alignment reference frame index; −1 auto-picks the richest frame.",
-                    )
-                    .default(-1_i64),
-            )
-            .output(FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Stacked image."))
-            .output(
-                FuncOutput::new("Coverage", IMAGE_DATA_TYPE.clone())
-                    .description("Per-pixel frame-count map."),
-            )
-            .output(
-                FuncOutput::new("Weight", IMAGE_DATA_TYPE.clone())
-                    .description("Per-pixel accumulated weight map."),
-            )
-            .lambda(FuncLambda::new(
+        Func::new(
+            STACK_LIGHTS_FUNC_ID,
+            "Stack Lights",
+            FuncLambda::new(
                 move |Invocation {
                           ctx,
                           inputs,
@@ -150,7 +118,40 @@ pub(crate) fn register(library: &mut Library) {
                         Ok(())
                     })
                 },
-            )),
+            ),
+        )
+        .description("Calibrates, aligns, and stacks selected light frames into one image.")
+        .category("Astro")
+        .pure()
+        .input(
+            FuncInput::required("Lights", ASTRO_RAW_PATHS_DATA_TYPE.clone())
+                .description("Camera-RAW light frames to stack."),
+        )
+        .input(
+            FuncInput::optional("Masters", MASTERS_DATA_TYPE.clone())
+                .description("Optional calibration masters. Unwired means no calibration."),
+        )
+        .input(preset::input::<DetectionKnobs, DetectionPreset>(
+            "Detection",
+        ))
+        .input(preset::input::<RegistrationKnobs, RegistrationPreset>(
+            "Registration",
+        ))
+        .input(preset::input::<CombineKnobs, CombinePreset>("Combine"))
+        .input(
+            FuncInput::required("Reference", DataType::Int)
+                .description("Alignment reference frame index; −1 auto-picks the richest frame.")
+                .default(-1_i64),
+        )
+        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Stacked image."))
+        .output(
+            FuncOutput::new("Coverage", IMAGE_DATA_TYPE.clone())
+                .description("Per-pixel frame-count map."),
+        )
+        .output(
+            FuncOutput::new("Weight", IMAGE_DATA_TYPE.clone())
+                .description("Per-pixel accumulated weight map."),
+        ),
     );
 }
 

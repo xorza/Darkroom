@@ -86,7 +86,26 @@ pub(crate) fn add_config_builder<T: Introspect + Clone + fmt::Debug + Send + Syn
     for field in &fields {
         register_field_enum(library, &field.kind);
     }
-    let mut func = Func::new(node_id, node_name)
+    // The lambda needs each field's kind to read its input value back.
+    let kinds: Arc<[FieldKind]> = fields.iter().map(|field| field.kind).collect();
+    let lambda = FuncLambda::new(
+        move |Invocation {
+                  inputs, outputs, ..
+              }| {
+            let kinds = Arc::clone(&kinds);
+            Box::pin(async move {
+                let values: Vec<FieldValue> = kinds
+                    .iter()
+                    .zip(inputs)
+                    .map(|(kind, input)| field_value(kind, input))
+                    .collect();
+                let config = T::from_fields(&values).map_err(InvokeError::external)?;
+                outputs[0] = DynamicValue::from_custom(ConfigValue(config));
+                Ok(())
+            })
+        },
+    );
+    let mut func = Func::new(node_id, node_name, lambda)
         .category("Astro")
         .description(description)
         .pure();
@@ -99,28 +118,7 @@ pub(crate) fn add_config_builder<T: Introspect + Clone + fmt::Debug + Send + Syn
         };
         func = func.input(input.default(const_value(&field.default)));
     }
-    // The lambda needs each field's kind to read its input value back.
-    let kinds: Arc<[FieldKind]> = fields.iter().map(|field| field.kind).collect();
-    let func = func
-        .output(FuncOutput::new("Config", config_data_type::<T>()))
-        .lambda(FuncLambda::new(
-            move |Invocation {
-                      inputs, outputs, ..
-                  }| {
-                let kinds = Arc::clone(&kinds);
-                Box::pin(async move {
-                    let values: Vec<FieldValue> = kinds
-                        .iter()
-                        .zip(inputs)
-                        .map(|(kind, input)| field_value(kind, input))
-                        .collect();
-                    let config = T::from_fields(&values).map_err(InvokeError::external)?;
-                    outputs[0] = DynamicValue::from_custom(ConfigValue(config));
-                    Ok(())
-                })
-            },
-        ));
-    library.add(func);
+    library.add(func.output(FuncOutput::new("Config", config_data_type::<T>())));
 }
 
 /// Map an introspected field kind to a scenarium port type. Enum fields map to
