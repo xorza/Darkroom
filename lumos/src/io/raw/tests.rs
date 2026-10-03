@@ -745,3 +745,55 @@ fn no_black() -> Box<[u32; 4104]> {
         .try_into()
         .expect("4104 entries")
 }
+
+/// A `zero_is_bad` camera's zero photosites are flagged, at their position in the visible area
+/// (review item 8.3). LibRaw's `open_bayer` sets the flag from `procflags & 2`, which stands in for
+/// a Panasonic file. The 24 × 24 buffer reads 1000 everywhere except two zeros: one inside the
+/// visible area at raw (5, 7), which is visible (4, 6) under the one-pixel margins, and one in the
+/// masked margin at raw (0, 0), which is not part of the image. Without the flag nothing is flagged.
+#[test]
+fn a_zero_is_bad_cameras_zero_photosites_carry_no_data() {
+    const SIDE: usize = 24;
+    let flags_for = |procflags: u8| {
+        let mut samples = vec![1000u16; SIDE * SIDE];
+        samples[7 * SIDE + 5] = 0;
+        samples[0] = 0;
+        let mut bytes: Vec<u8> = samples
+            .iter()
+            .flat_map(|sample| sample.to_le_bytes())
+            .collect();
+        // SAFETY: libraw_init returns a valid pointer or null.
+        let inner = unsafe { sys::libraw_init(0) };
+        assert!(!inner.is_null());
+        let state = LibrawState { inner, buf: None };
+        // SAFETY: the handle is valid, and `bytes` outlives every use of it: the state is consumed
+        // below, before `bytes` drops.
+        let opened = unsafe {
+            sys::libraw_open_bayer(
+                state.as_ptr(),
+                bytes.as_mut_ptr(),
+                bytes.len() as u32,
+                SIDE as u16,
+                SIDE as u16,
+                1,
+                1,
+                1,
+                1,
+                procflags,
+                0x94, // RGGB in LibRaw's filter byte
+                0,
+                0,
+                0,
+            )
+        };
+        assert_eq!(opened, 0);
+        let raw = unpack(state, Path::new("bayer-dump")).unwrap();
+        raw.zero_flags().unwrap()
+    };
+
+    let flags = flags_for(2).expect("a zero inside the visible area");
+    assert_eq!(flags.size(), Size2us::new(SIDE - 2, SIDE - 2));
+    assert_eq!(flags.count(Flags::NO_DATA), 1);
+    assert_eq!(flags.at_pos(Vec2us::new(4, 6)), Flags::NO_DATA);
+    assert!(flags_for(0).is_none());
+}

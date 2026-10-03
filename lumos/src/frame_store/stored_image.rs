@@ -11,7 +11,7 @@ use crate::frame_store::stored_plane::StoredPlane;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::null_mask::NullMask;
+use crate::io::image::pixel_flags::PixelFlags;
 
 /// A calibrated image stored on disk between detection and registration.
 #[derive(Debug)]
@@ -19,23 +19,23 @@ pub(crate) struct StoredImage {
     pub(crate) metadata: ImageMetadata,
     pub(crate) dimensions: ImageDimensions,
     channels: ArrayVec<StoredPlane, 3>,
-    /// The words of the image's [`NullMask`], for a source that declared nulls. Spilled with the
-    /// channels: without it the fill under every null reads back as a measurement.
-    nulls: Option<Mmap>,
+    /// The image's [`PixelFlags`] bytes, for an image that carries any. Spilled with the channels:
+    /// without them the fill under every null reads back as a measurement.
+    flags: Option<Mmap>,
 }
 
 impl StoredImage {
-    /// Write `image`'s channels and null mask to `spill`'s files and memory-map them back.
+    /// Write `image`'s channels and flags to `spill`'s files and memory-map them back.
     pub(crate) fn spill(
         spill: &FrameSpill<'_>,
         image: &LinearImage,
     ) -> Result<Self, FrameStoreError> {
-        let nulls = image
-            .nulls
+        let flags = image
+            .flags
             .as_ref()
-            .map(|nulls| {
-                let path = spill.nulls_path();
-                write_file(&path, bytemuck::cast_slice(nulls.bits().words.as_slice()))?;
+            .map(|flags| {
+                let path = spill.flags_path();
+                write_file(&path, flags.bytes())?;
                 frame_spill::map_file(&path)
             })
             .transpose()?;
@@ -43,7 +43,7 @@ impl StoredImage {
             metadata: image.metadata.clone(),
             dimensions: image.dimensions(),
             channels: spill.spill_channels(image)?,
-            nulls,
+            flags,
         })
     }
 
@@ -55,10 +55,10 @@ impl StoredImage {
             .map(|plane| plane.chunk(0, sample_count).to_vec());
         let mut image = LinearImage::from_planar_channels(self.dimensions, planes);
         image.metadata = self.metadata.clone();
-        image.nulls = self
-            .nulls
+        image.flags = self
+            .flags
             .as_ref()
-            .map(|words| NullMask::from_words(self.dimensions.size(), bytemuck::cast_slice(words)));
+            .map(|bytes| PixelFlags::from_bytes(self.dimensions.size(), bytes));
         image
     }
 }

@@ -24,7 +24,7 @@ use crate::io::image::image_provenance::{ColorProvenance, DemosaicProvenance};
 use crate::io::image::input_format::InputFormat;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
-use crate::io::image::null_mask::NullMask;
+use crate::io::image::pixel_flags::{Flags, PixelFlags};
 use crate::io::image::sample_domain::DomainMap;
 use crate::io::image::standard::scientific_rejection;
 use crate::io::raw;
@@ -166,9 +166,9 @@ pub struct CfaImage {
     pub data: Buffer2<f32>,
     pub cfa_type: CfaType,
     pub metadata: ImageMetadata,
-    /// Which pixels carry no measurement, for a source that declared any. The samples at those
-    /// positions are a finite fill, not data — see [`NullMask`].
-    pub(crate) nulls: Option<NullMask>,
+    /// The data-quality flags of the pixels that carry any — see [`PixelFlags`]. The samples under
+    /// [`Flags::NO_DATA`] are a finite fill, not data.
+    pub(crate) flags: Option<PixelFlags>,
 }
 
 impl StackableImage for CfaImage {
@@ -178,8 +178,8 @@ impl StackableImage for CfaImage {
         ImageDimensions::new((self.data.width(), self.data.height()), 1)
     }
 
-    fn nulls(&self) -> Option<&NullMask> {
-        self.nulls.as_ref()
+    fn flags(&self) -> Option<&PixelFlags> {
+        self.flags.as_ref()
     }
 
     fn channel(&self, c: usize) -> &[f32] {
@@ -228,7 +228,7 @@ impl CfaImage {
             data,
             cfa_type,
             metadata,
-            nulls: None,
+            flags: None,
         }
     }
 
@@ -270,15 +270,19 @@ impl CfaImage {
     /// reason and through the same neighbour search — mask included, so a cluster of nulls is never
     /// repaired from its own members.
     fn repair_nulls(&mut self) {
-        let Some(nulls) = self.nulls.as_ref() else {
+        let Some(flags) = self
+            .flags
+            .as_ref()
+            .filter(|flags| flags.contains(Flags::NO_DATA))
+        else {
             return;
         };
         let neighbors = SameColorMedian::new(&self.cfa_type);
         let size = Size2us::new(self.data.width(), self.data.height());
-        let mask = nulls.bits();
+        let mask = flags.mask_of(Flags::NO_DATA);
         // The mask keeps every null out of every repair, so the order of the repairs is free.
         mask.for_each_set(|pos| {
-            let repaired = neighbors.at(&self.data, pos, Some(mask));
+            let repaired = neighbors.at(&self.data, pos, Some(&mask));
             self.data[size.index_of(pos)] = repaired;
         });
     }
@@ -301,10 +305,10 @@ impl CfaImage {
             metadata.quantization_sigma = None;
         }
         let pixels = self.data.into_vec();
-        // The mask travels at its own extent, which `repair_nulls` above is what makes honest:
+        // The flags travel at their own extent, which `repair_nulls` above is what makes honest:
         // these pixels were reconstructed rather than measured, and the combine still has to know
         // that.
-        let nulls = self.nulls;
+        let flags = self.flags;
 
         Ok(match cfa_type {
             CfaType::Mono => {
@@ -312,7 +316,7 @@ impl CfaImage {
                 let dims = ImageDimensions::new((width, height), 1);
                 let mut image = LinearImage::from_pixels(dims, pixels);
                 image.metadata = metadata;
-                image.nulls = nulls;
+                image.flags = flags;
                 image
             }
             CfaType::Bayer(cfa_pattern) => {
@@ -324,7 +328,7 @@ impl CfaImage {
                 let dims = ImageDimensions::new((width, height), 3);
                 let mut image = LinearImage::from_planar_channels(dims, planes);
                 image.metadata = metadata;
-                image.nulls = nulls;
+                image.flags = flags;
                 image
             }
             CfaType::XTrans(pattern) => {
@@ -336,7 +340,7 @@ impl CfaImage {
                 let dims = ImageDimensions::new((width, height), 3);
                 let mut image = LinearImage::from_planar_channels(dims, planes);
                 image.metadata = metadata;
-                image.nulls = nulls;
+                image.flags = flags;
                 image
             }
         })

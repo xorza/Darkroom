@@ -8,6 +8,7 @@ use crate::concurrency::JobScratchPool;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
+use crate::io::image::pixel_flags::Flags;
 use crate::registration::config::WarpParams;
 use crate::registration::resample::masked_warp::MaskedSources;
 use crate::registration::resample::row_positions::RowPositions;
@@ -72,7 +73,7 @@ pub fn warp(image: &LinearImage, warp_transform: &WarpTransform, config: WarpPar
             // pixel rather than the yes-or-no a mask can hold — and the combine gates on that
             // fraction. A mask here would be a second, coarser record able only to disagree with
             // it.
-            nulls: None,
+            flags: None,
         },
         coverage: buffers.coverage,
         confidence: buffers.confidence,
@@ -149,9 +150,10 @@ impl WarpBuffers {
         // The source declared pixels with no measurement, so every output pixel is reconstructed
         // from its surviving taps and the maps are reduced by how many of them there were.
         let masked = image
-            .nulls
+            .flags
             .as_ref()
-            .map(|nulls| MaskedSources::new(image, nulls));
+            .filter(|flags| flags.contains(Flags::NO_DATA))
+            .map(|flags| MaskedSources::new(image, flags));
 
         let warp_row = |scratch: &mut RowScratch,
                         y: usize,

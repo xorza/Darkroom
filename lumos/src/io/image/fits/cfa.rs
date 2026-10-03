@@ -10,6 +10,7 @@ use crate::io::image::cfa::CfaImage;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::error::{fits_err, fits_to_io, fits_unsupported};
 use crate::io::image::fits::metadata::{write_cfa_metadata, write_image_metadata};
+use crate::io::image::pixel_flags::Flags;
 
 pub(crate) const CFA_FITS_FORMAT: &str = "CFAIMAGE";
 /// 2: the sample scale is recorded (`LUMSCALE`); a version-1 master would reload with an assumed
@@ -105,15 +106,19 @@ impl CfaFitsHdu {
         write_cfa_metadata(&mut header, cfa).map_err(fits_to_io)?;
 
         let mut samples = cfa.data.pixels().to_vec();
-        if let Some(nulls) = &cfa.nulls {
+        if let Some(flags) = cfa
+            .flags
+            .as_ref()
+            .filter(|flags| flags.contains(Flags::NO_DATA))
+        {
             // Back out as the standard's own flag. This is written with a floating-point `BITPIX`,
             // for which IEEE NaN *is* the blank, and the decoder reads it straight back into a
             // mask. Without it the samples under those pixels — a decoder fill, or the same-colour
             // median `CfaImage::repair_nulls` put there — would reload as measurements, which is
             // the fabrication the mask exists to prevent.
             let width = cfa.data.width();
-            nulls
-                .bits()
+            flags
+                .mask_of(Flags::NO_DATA)
                 .for_each_set(|pos| samples[pos.y * width + pos.x] = f32::NAN);
         }
         let image =

@@ -19,14 +19,21 @@ fn a_null_is_repaired_from_its_same_colour_neighbours_before_demosaic() {
     let mut nulls = vec![0.0f32; size.pixel_count()];
     nulls[5] = f32::NAN;
     let mut cfa = make_cfa(size, pixels, CfaType::Mono);
-    cfa.nulls = NullMask::of_non_finite(size, &[&nulls]);
+    cfa.flags = PixelFlags::of_non_finite(size, &[&nulls]);
 
     let demosaiced = cfa.demosaic(&CancelToken::never()).unwrap();
     assert_eq!(demosaiced.channel(0).pixels()[5], 0.5);
     // The mask stays at its own extent: this pixel was reconstructed, not measured, and the combine
     // still has to gate on that.
-    assert!(demosaiced.nulls.as_ref().unwrap().bits().get(5));
-    assert_eq!(demosaiced.nulls.as_ref().unwrap().count(), 1);
+    assert!(
+        demosaiced
+            .flags
+            .as_ref()
+            .unwrap()
+            .mask_of(Flags::NO_DATA)
+            .get(5)
+    );
+    assert_eq!(demosaiced.flags.as_ref().unwrap().count(Flags::NO_DATA), 1);
 }
 
 #[test]
@@ -38,17 +45,24 @@ fn a_masters_nulls_survive_the_fits_round_trip() {
         data: Buffer2::new(2, 2, vec![0.1f32, 0.2, 0.3, 0.4]),
         cfa_type: CfaType::Mono,
         metadata: ImageMetadata::default(),
-        nulls: NullMask::of_non_finite(Size2us::new(2usize, 2usize), &[&[0.0, f32::NAN, 0.0, 0.0]]),
+        flags: PixelFlags::of_non_finite(
+            Size2us::new(2usize, 2usize),
+            &[&[0.0, f32::NAN, 0.0, 0.0]],
+        ),
     };
     let dir = TempDir::new("lumos-cfa-nulls");
     let path = dir.join("master.fits");
     cfa.save_fits(&path).unwrap();
 
     let loaded = CfaImage::from_file(&path, &LoadContext::default()).unwrap();
-    let nulls = loaded.nulls.as_ref().expect("the mask must come back");
-    assert_eq!(nulls.count(), 1);
+    let nulls = loaded.flags.as_ref().expect("the mask must come back");
+    assert_eq!(nulls.count(Flags::NO_DATA), 1);
     for index in 0..4 {
-        assert_eq!(nulls.bits().get(index), index == 1, "index {index}");
+        assert_eq!(
+            nulls.mask_of(Flags::NO_DATA).get(index),
+            index == 1,
+            "index {index}"
+        );
     }
     // The measured samples are untouched by the trip; only the null's own value is not what was
     // written, because what was written for it was "no measurement".
@@ -115,7 +129,7 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
             quantization_sigma: Some(0.000_01),
             ..Default::default()
         },
-        nulls: None,
+        flags: None,
     };
     let dir = TempDir::new("lumos-cfa-roundtrip");
     let path = dir.join("master.fits");
@@ -181,7 +195,7 @@ fn master_cfa_fits_round_trips_mono_and_xtrans_patterns() {
             data: Buffer2::new(2, 2, vec![0.1f32, 0.2, 0.3, 0.4]),
             cfa_type,
             metadata: ImageMetadata::default(),
-            nulls: None,
+            flags: None,
         };
         let path = dir.join(format!("master_{name}.fits"));
 

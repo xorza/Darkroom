@@ -79,7 +79,7 @@ impl StackProduct {
                 .cfa_type
                 .expect("a CFA master is stacked from mosaic frames"),
             metadata: self.image.metadata,
-            nulls: self.image.nulls,
+            flags: self.image.flags,
         }
     }
 }
@@ -119,7 +119,7 @@ mod tests {
         assert_eq!(master.cfa_type, pattern);
         assert_eq!(master.metadata.exposure_time, Some(30.0));
         assert_eq!(master.metadata.quantization_sigma, Some(0.25));
-        assert!(master.nulls.is_none());
+        assert!(master.flags.is_none());
     }
 
     #[test]

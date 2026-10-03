@@ -8,6 +8,7 @@ use imaginarium::Buffer2;
 
 use crate::drizzle::accumulator::MAX_CHANNELS;
 use crate::io::image::linear::LinearImage;
+use crate::io::image::pixel_flags::{Flags, PixelFlags};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::registration::transform::inverse_warp::InverseWarp;
@@ -195,7 +196,12 @@ pub(super) struct FrameSource<'a> {
     grid_area: f64,
     weight: f32,
     pixel_weights: Option<&'a [f32]>,
+    /// The frame's flags, when it carries one that excludes a pixel from deposit.
+    flags: Option<&'a PixelFlags>,
 }
+
+/// The flags whose pixel deposits nothing: the sample under it is a fill, not a measurement.
+const EXCLUDED: Flags = Flags::NO_DATA;
 
 impl<'a> FrameSource<'a> {
     /// `image` under `warp` — reference to input, as registration produces it — onto an output grid
@@ -216,6 +222,10 @@ impl<'a> FrameSource<'a> {
             grid_area: scale * scale,
             weight,
             pixel_weights: pixel_weights.map(Buffer2::pixels),
+            flags: image
+                .flags
+                .as_ref()
+                .filter(|flags| flags.contains(Flags::NO_DATA)),
         }
     }
 
@@ -377,13 +387,21 @@ impl<'a> FrameSource<'a> {
         }
     }
 
-    /// Frame weight × pixel weight at `pixel`, or `None` when the product is zero.
+    /// Frame weight × pixel weight at `pixel`, or `None` when the product is zero or the pixel's
+    /// flags exclude it.
     ///
     /// Zero is the one value worth testing for: it deposits nothing anywhere, and letting it
     /// through would have a frame that carries no weight still counted as covering every pixel it
-    /// reached.
+    /// reached. An excluded pixel is the same case: the decoder's fill under a null would otherwise
+    /// pull every output pixel it reaches toward the frame's median.
     #[inline]
     fn deposit_weight(&self, pixel: InputPixel) -> Option<f64> {
+        if self
+            .flags
+            .is_some_and(|flags| flags.at(pixel.index).intersects(EXCLUDED))
+        {
+            return None;
+        }
         let pixel_weight = self
             .pixel_weights
             .map_or(1.0, |weights| weights[pixel.index]);

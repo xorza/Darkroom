@@ -9,6 +9,7 @@
 use imaginarium::Buffer2;
 
 use crate::frame_store::stackable_image::StackableImage;
+use crate::io::image::pixel_flags::Flags;
 use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -91,10 +92,10 @@ impl FrameQuality<Buffer2<f32>> {
     /// value for every photosite, so no RAW frame and almost no camera FITS allocates anything
     /// here.
     pub(crate) fn for_unwarped(image: &impl StackableImage) -> Self {
-        let Some(nulls) = image.nulls() else {
+        let Some(flags) = image.flags().filter(|flags| flags.contains(Flags::NO_DATA)) else {
             return Self::None;
         };
-        let coverage = nulls.validity_plane();
+        let coverage = flags.validity_plane();
         Self::Planes {
             confidence: coverage.clone(),
             coverage,

@@ -32,7 +32,7 @@ use crate::io::image::image_provenance::{
 };
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::load_context::LoadContext;
-use crate::io::image::null_mask::NullMask;
+use crate::io::image::pixel_flags::{Flags, PixelFlags};
 use crate::io::image::sample_domain::SampleDomain;
 use crate::math::statistics::median_mut;
 use crate::math::statistics::subsample::Subsample;
@@ -179,7 +179,7 @@ pub(super) fn read_decoded_hdu(
         metadata,
         cfa_type,
         pixels,
-        nulls,
+        flags: nulls,
     })
 }
 
@@ -204,7 +204,7 @@ fn resolve_nulls(
     planes: &mut [DecodedPlane],
     dimensions: ImageDimensions,
     policy: FitsNullPolicy,
-) -> Result<Option<NullMask>, ImageError> {
+) -> Result<Option<PixelFlags>, ImageError> {
     let count: usize = planes
         .iter()
         .filter_map(|plane| plane.nulls)
@@ -241,7 +241,7 @@ fn resolve_nulls(
             .iter()
             .map(|plane| plane.samples.as_slice())
             .collect::<ArrayVec<&[f32], 3>>();
-        NullMask::of_non_finite(dimensions.size(), &samples)
+        PixelFlags::of_non_finite(dimensions.size(), &samples)
             .expect("a nonzero count means at least one plane holds a non-finite sample")
     };
     for plane in planes.iter_mut() {
@@ -252,7 +252,7 @@ fn resolve_nulls(
     // Only for a frame that has them, and the samples the caller is about to read are partly fill
     // with nothing in the frame itself to say so.
     tracing::info!(
-        pixels = mask.count(),
+        pixels = mask.count(Flags::NO_DATA),
         of = dimensions.pixel_count(),
         "FITS image declares pixels with no measurement"
     );

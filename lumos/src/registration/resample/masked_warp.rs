@@ -22,7 +22,7 @@ use rayon::prelude::*;
 
 use crate::combine::pixel_coverage::PixelCoverage;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::null_mask::NullMask;
+use crate::io::image::pixel_flags::{Flags, PixelFlags};
 use crate::math::vec2us::Vec2us;
 use crate::registration::config::WarpParams;
 use crate::registration::resample::row;
@@ -40,7 +40,7 @@ pub(super) struct MaskedSources {
 }
 
 impl MaskedSources {
-    pub(super) fn new(image: &LinearImage, nulls: &NullMask) -> Self {
+    pub(super) fn new(image: &LinearImage, flags: &PixelFlags) -> Self {
         let zeroed = (0..image.channels())
             .map(|channel| {
                 let source = image.channel(channel);
@@ -53,7 +53,7 @@ impl MaskedSources {
                     .enumerate()
                     .for_each(|(y, (row, source_row))| {
                         for (x, (value, &sample)) in row.iter_mut().zip(source_row).enumerate() {
-                            *value = if nulls.is_null_at(Vec2us::new(x, y)) {
+                            *value = if flags.at_pos(Vec2us::new(x, y)).intersects(Flags::NO_DATA) {
                                 0.0
                             } else {
                                 sample
@@ -64,7 +64,7 @@ impl MaskedSources {
             })
             .collect();
         Self {
-            validity: nulls.validity_plane(),
+            validity: flags.validity_plane(),
             zeroed,
         }
     }
