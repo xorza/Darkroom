@@ -207,10 +207,11 @@ impl Graph {
         let mirror = InputPort::new(port.node_id, *mirrors);
         match self.bindings.get(&mirror) {
             Some(Binding::Bind(source)) => OutputTypeSource::Bind(*source),
-            Some(Binding::Const(value)) => OutputTypeSource::Const {
-                declared: self.input_type(library, mirror).unwrap_or_default(),
-                value: value.clone(),
-            },
+            Some(Binding::Const(value)) => OutputTypeSource::Fixed(
+                self.input_type(library, mirror)
+                    .unwrap_or_default()
+                    .or_const_type(value),
+            ),
             None => OutputTypeSource::Unresolved,
         }
     }
