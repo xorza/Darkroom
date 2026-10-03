@@ -123,15 +123,9 @@ impl Image {
     pub(crate) fn desc(&self) -> imaginarium::ImageDesc {
         match &self.pixels {
             Pixels::InterleavedCpu(image) => image.desc(),
-            Pixels::PlanarCpu(planar) => imaginarium::ImageDesc::new(
-                planar.width(),
-                planar.height(),
-                if planar.is_rgb() {
-                    imaginarium::ColorFormat::RGB_F32
-                } else {
-                    imaginarium::ColorFormat::L_F32
-                },
-            ),
+            Pixels::PlanarCpu(planar) => {
+                imaginarium::ImageDesc::new(planar.width(), planar.height(), planar.color_format())
+            }
         }
     }
 }
