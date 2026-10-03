@@ -4,6 +4,7 @@ members = [
     "common/common-derive",
     "scenarium",
     "lumos",
+    "libraw-sys",
     "lens",
     "darkroom",
 ]
@@ -26,8 +27,7 @@ palantir = { path = "palantir" }
 imaginarium = { path = "imaginarium" }
 fits-well = { path = "fits-well" }
 quickbench = { path = "quickbench" }
-
-libraw-rs-sys = { version = "0.0.4" }
+libraw-sys = { path = "libraw-sys" }
 
 serde = { version = "1.0", features = ["derive", "rc"] }
 uuid = { version = "1.27", features = ["v4", "v5", "serde"] }
@@ -76,6 +76,8 @@ statrs = { version = "0.19", default-features = false }
 clap = { version = "4.6", features = ["derive"] }
 winresource = { version = "0.1" }
 ort = { version = "2.0.0-rc.13" }
+cc = { version = "1.6" }
+bindgen = { version = "0.73", default-features = false }
 
 [profile.dev]
 debug = "line-tables-only"
@@ -99,6 +101,11 @@ debug = false
 strip = "symbols"
 
 [profile.dev.package."*"]
+opt-level = 3
+
+# A workspace member, so "*" misses it, but its build script compiles LibRaw at the profile's
+# opt-level, and an unoptimized LibRaw makes every RAW decode in a dev build slow.
+[profile.dev.package.libraw-sys]
 opt-level = 3
 
 # The submodules edited and debugged most stay unoptimized, like the workspace members. A

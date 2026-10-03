@@ -10,6 +10,8 @@ Each item has a tag:
 
 References give the established practice that the item compares against.
 
+LibRaw source references (`utils_dcraw.cpp:…`, `tiff.cpp:…` and others) are line numbers in LibRaw 0.20.1. The crate now builds 0.22.2 from `libraw-sys/LibRaw`, so look them up again there.
+
 Groups are sorted by severity × benefit. Correctness comes first, then precision, then performance, then design.
 
 ---
@@ -409,8 +411,8 @@ AGENTS.md promises photometry-grade error bars. These planes cannot give them.
 - [ ] **A 3-plane cube with a stale `BAYERPAT` is refused, and an unparseable `BAYERPAT` fails non-CFA loads** — `io/image/fits/decode/pixels.rs:69-70` `[C]`
 - [ ] **`RAW_EXTENSIONS` refuses formats that LibRaw decodes** — `io/raw/mod.rs:47`
   - ORF, RW2, PEF, NRW, SRW, IIQ, 3FR, ERF, MRW and RWL are refused. Siril accepts LibRaw's full list. RW2 needs `zero_is_bad` (group 8) first. `[C]`
-- [ ] **LibRaw 0.20.1 (2020) has no Sony lossless-compressed ARW decoder** — workspace `Cargo.toml` (`libraw-rs-sys 0.0.4`)
-  - A1, A7 IV, A7R V and A7S III files fail to open. A dependency update needs your go-ahead. `[C]`
+- [ ] **Sony YCC pseudo-RAW (LibRaw 0.22) is already white-balanced, and lumos does not read `color.as_shot_wb_applied`** — `io/raw/mod.rs:297-321`
+  - The camera WB recorded in the metadata then describes a balance the samples already carry. `[P]`
 - [ ] **Common header aliases are not read** — `io/image/fits/metadata/mod.rs:26-45`
   - `EXPOSURE`, `CCD_TEMP`, `TEMPERAT`, `BINX`/`BINY`, `PIXSIZE1`, `XPIXELSZ`, `FRAMETYP`, `FILT-1`, `BLKLEVEL` (Siril `fits_keywords.c`). `[C]`
 - [ ] **`read_cfa_hdu` is a second FITS entry point with its own validation** — `io/image/fits/decode/mod.rs:163-198`
@@ -525,8 +527,6 @@ AGENTS.md promises photometry-grade error bars. These planes cannot give them.
   - `labels.fill(0)` writes 96 MB per 24 MP frame. Clear only the previous runs. `[C]`
 - [ ] **Survivor weights are gathered twice per pixel** — `combine/rejection/mod.rs:263-271` `[C]`
 - [ ] **`GlobalMap` noise is averaged per pixel in the stamp loop** — `star_detection/centroid/mod.rs:490-494` `[P]`
-- [ ] **On x86 without AVX2+FMA, every kernel calls libm `fmaf` per lane** — `simd/portable.rs:133-135`
-  - This is deliberate for bit-exactness. The cost on Ivy Bridge-class CPUs is large. `[P]`
 
 ## 25. Docs that state false facts
 
