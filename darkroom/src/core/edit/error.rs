@@ -42,6 +42,10 @@ pub(crate) enum MalformedIntent {
     /// graph would author fine and then never run.
     #[error("seed binding on {port:?} reads the node it is being added to")]
     CyclicSeedBinding { port: InputPort },
+    /// A wire onto an input its func declares const-only. The canvas never
+    /// offers one, and a graph holding it fails every compile.
+    #[error("input {port:?} is const-only and cannot take a wire")]
+    WiredConstOnly { port: InputPort },
     /// A seed binding landing somewhere other than the node being inserted.
     /// An insertion restores exactly the wiring it recorded, so it may only
     /// author its own node's inputs — anything else would be an edit of a

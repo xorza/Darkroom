@@ -100,8 +100,8 @@ impl OpenDocument {
     /// after the record. No-ops (and self-cancelling steps) are dropped, like
     /// the in-frame drain.
     #[must_use]
-    pub(crate) fn apply_edit(&mut self, intent: GraphIntent) -> Relayout {
-        self.commit([DocumentRequest::Graph(intent)])
+    pub(crate) fn apply_edit(&mut self, intent: GraphIntent, library: &Library) -> Relayout {
+        self.commit([DocumentRequest::Graph(intent)], library)
             .expect("a widget built a malformed intent")
     }
 
@@ -120,12 +120,16 @@ impl OpenDocument {
     /// on screen, and an edit applied outside a frame (a dialog result) has no
     /// business acting on it.
     #[must_use]
-    pub(crate) fn drain_requests(&mut self, requests: &mut DocumentQueue) -> Relayout {
+    pub(crate) fn drain_requests(
+        &mut self,
+        requests: &mut DocumentQueue,
+        library: &Library,
+    ) -> Relayout {
         // Usually nothing is queued, and the commit is what allocates.
         let relayout = if requests.is_empty() {
             Relayout::NotNeeded
         } else {
-            self.commit(requests.drain())
+            self.commit(requests.drain(), library)
                 .expect("a widget built a malformed intent")
         };
         // A tab whose node is gone can't stay open. Cheap when nothing died —
@@ -162,6 +166,7 @@ impl OpenDocument {
     fn commit(
         &mut self,
         queued: impl IntoIterator<Item = DocumentRequest>,
+        library: &Library,
     ) -> Result<Relayout, MalformedIntent> {
         debug_assert!(self.batch.is_empty(), "the last commit left steps behind");
         let mut signals = StepSignals::default();
@@ -180,7 +185,7 @@ impl OpenDocument {
                 }
             };
             let frame_of = intent.gesture();
-            let step = match intent.commit(&mut self.document) {
+            let step = match intent.commit(&mut self.document, library) {
                 Ok(Some(step)) => step,
                 Ok(None) => continue,
                 Err(malformed) => {

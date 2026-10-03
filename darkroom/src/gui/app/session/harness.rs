@@ -86,13 +86,15 @@ impl SessionHarness {
     /// Push one intent through the real edit path, as a widget's does.
     /// Reports whether it stranded the canvas's cached geometry.
     pub(crate) fn apply(&mut self, intent: GraphIntent) -> Relayout {
-        self.session.open.apply_edit(intent)
+        self.session.open.apply_edit(intent, &self.library)
     }
 
     /// Drain the queued intents into the document, as the frame's edit phase
     /// does. Reports whether the batch stranded the canvas's cached geometry.
     pub(crate) fn drain(&mut self) -> Relayout {
-        self.session.open.drain_requests(self.requests.document())
+        self.session
+            .open
+            .drain_requests(self.requests.document(), &self.library)
     }
 
     /// Take back the last undoable entry. Reports whether there was one.

@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use glam::Vec2;
-use scenarium::NodeId;
+use scenarium::{Library, NodeId};
 
 use super::*;
 use crate::core::document::Viewport;
@@ -16,6 +16,7 @@ use crate::core::edit::graph_intent::drag_start::DragStart;
 #[derive(Debug)]
 struct History {
     doc: Document,
+    library: Library,
     stack: ActionStack,
     /// The last gesture id minted.
     gestures: GestureId,
@@ -37,8 +38,10 @@ impl History {
 
     /// [`Self::sample`] on a stated byte budget — for the trimming case.
     fn bounded(max_bytes: usize) -> Self {
+        let DocFixture { doc, library } = DocFixture::sample();
         Self {
-            doc: DocFixture::sample().doc,
+            doc,
+            library,
             stack: ActionStack::new(max_bytes),
             gestures: GestureId::default(),
         }
@@ -77,7 +80,7 @@ impl History {
 
     fn apply(&mut self, intent: GraphIntent) -> UndoStep {
         let step = intent
-            .into_step(&self.doc)
+            .into_step(&self.doc, &self.library)
             .unwrap()
             .expect("a test commits every intent");
         step.apply(&mut self.doc);

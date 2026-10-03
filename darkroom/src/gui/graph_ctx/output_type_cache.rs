@@ -87,9 +87,12 @@ mod tests {
         // A selection retypes nothing, so the table is kept: the unbinding
         // written straight into the graph goes unseen.
         assert_eq!(
-            open.apply_edit(GraphIntent::SetSelection {
-                to: BTreeSet::from([src]),
-            }),
+            open.apply_edit(
+                GraphIntent::SetSelection {
+                    to: BTreeSet::from([src]),
+                },
+                &library
+            ),
             Relayout::NotNeeded
         );
         open.document.graph.set_input_binding(hop_in, None);
@@ -97,10 +100,13 @@ mod tests {
 
         // A binding edit moves the revision: a `Float` constant on the hop
         // retypes its output.
-        let _relayout = open.apply_edit(GraphIntent::SetInput {
-            input: hop_in,
-            to: Some(Binding::Const(ConstValue::Float(1.0))),
-        });
+        let _relayout = open.apply_edit(
+            GraphIntent::SetInput {
+                input: hop_in,
+                to: Some(Binding::Const(ConstValue::Float(1.0))),
+            },
+            &library,
+        );
         assert_eq!(ty(&mut cache, &open, &library), Some(DataType::Float));
 
         // Undo moves it too, back to the unbound input the step found.
