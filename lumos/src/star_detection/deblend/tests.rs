@@ -1,11 +1,6 @@
 //! Tests of the shared component data, and comparisons of `local_maxima` with
 //! `multi_threshold`.
 
-#![expect(
-    clippy::cast_possible_wrap,
-    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
-)]
-
 use crate::internals::prelude::*;
 use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::star_detection::config::detection_config::{Deblend, DetectionConfig};

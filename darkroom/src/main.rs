@@ -106,10 +106,6 @@ fn load_icon() -> Option<Image> {
 
 /// Minimal stderr tracing subscriber, `RUST_LOG`-controlled (defaults to
 /// `info`). `try_init` is a no-op if a subscriber is already installed.
-#[expect(
-    clippy::let_underscore_must_use,
-    reason = "a subscriber that is already installed keeps serving, which is what `try_init` allows"
-)]
 fn init_tracing() {
     use tracing_subscriber::EnvFilter;
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));

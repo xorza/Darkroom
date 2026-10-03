@@ -2,5 +2,6 @@
 allow-print-in-tests = true
 # SIMD intrinsics modules export hundreds of functions; listing them by hand only rots.
 allowed-wildcard-imports = ["x86_64", "aarch64", "arch"]
-# Proper names that `doc_markdown` would otherwise ask to wrap in backticks.
-doc-valid-idents = ["LibRaw", "PixInsight", "wcslib", "astropy", "cfitsio", "SExtractor", "Siril", "Markesteijn", "WebGPU", "macOS", "OpenCV", "DeepSNR", "StarNet", "GraXpert", "IKSS", "..", "NaN"]
+# Fraction digits keep the grouping of the source they were copied from, so a published
+# coefficient compares digit by digit.
+unreadable-literal-lint-fractions = false

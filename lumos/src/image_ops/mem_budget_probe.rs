@@ -63,10 +63,6 @@ fn image_ops_memory_probe() {
 
     let sampler = RssSampler::start();
     let chain_gate = sampler.gate();
-    #[expect(
-        clippy::unused_result_ok,
-        reason = "a progress line that fails to flush costs the probe nothing"
-    )]
     io::stdout().flush().ok();
 
     chain_gate.open();

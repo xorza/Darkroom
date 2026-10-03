@@ -86,10 +86,6 @@ pub(super) unsafe fn convolve_row_sse41(
 /// # Safety
 /// Caller must ensure SSE4.1 is available.
 #[target_feature(enable = "sse4.1")]
-#[expect(
-    clippy::cast_possible_wrap,
-    reason = "pixel coordinates and kernel taps index a slice, whose length Rust caps at isize::MAX"
-)]
 pub(super) unsafe fn convolve_cols_row_sse41(
     input: &[f32],
     out_row: &mut [f32],
@@ -132,10 +128,6 @@ pub(super) unsafe fn convolve_cols_row_sse41(
 /// # Safety
 /// Caller must ensure SSE4.1 is available.
 #[target_feature(enable = "sse4.1")]
-#[expect(
-    clippy::cast_possible_wrap,
-    reason = "pixel coordinates and kernel taps index a slice, whose length Rust caps at isize::MAX"
-)]
 pub(super) unsafe fn convolve_2d_row_sse41(
     input: &[f32],
     output_row: &mut [f32],

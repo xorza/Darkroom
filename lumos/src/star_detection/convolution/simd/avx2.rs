@@ -89,10 +89,6 @@ pub(super) unsafe fn convolve_row_avx2(
 /// # Safety
 /// Caller must ensure AVX2 is available.
 #[target_feature(enable = "avx2")]
-#[expect(
-    clippy::cast_possible_wrap,
-    reason = "pixel coordinates and kernel taps index a slice, whose length Rust caps at isize::MAX"
-)]
 pub(super) unsafe fn convolve_cols_row_avx2(
     input: &[f32],
     out_row: &mut [f32],
@@ -135,10 +131,6 @@ pub(super) unsafe fn convolve_cols_row_avx2(
 /// # Safety
 /// Caller must ensure AVX2 is available.
 #[target_feature(enable = "avx2")]
-#[expect(
-    clippy::cast_possible_wrap,
-    reason = "pixel coordinates and kernel taps index a slice, whose length Rust caps at isize::MAX"
-)]
 pub(super) unsafe fn convolve_2d_row_avx2(
     input: &[f32],
     output_row: &mut [f32],

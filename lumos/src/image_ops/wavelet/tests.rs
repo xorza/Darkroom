@@ -1,8 +1,3 @@
-#![expect(
-    clippy::cast_possible_wrap,
-    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
-)]
-
 use crate::image_ops::wavelet::{atrous_smooth, max_scales, reflect};
 use crate::internals::prelude::*;
 

@@ -1,8 +1,3 @@
-#![expect(
-    clippy::cast_possible_wrap,
-    reason = "test axis lengths are far below i64::MAX"
-)]
-
 use crate::internals::prelude::*;
 
 use std::fs::File;

@@ -104,10 +104,6 @@ async fn live_patches_reach_the_host_before_downstream_nodes_run() {
         if let WorkerReport::Progress { .. } = &report {
             entries.fetch_add(1, Ordering::SeqCst);
         }
-        #[expect(
-            clippy::unused_result_ok,
-            reason = "a report sent during teardown has no reader"
-        )]
         tx.send(report).ok();
     });
     worker

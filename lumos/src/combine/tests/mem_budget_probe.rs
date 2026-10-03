@@ -192,18 +192,10 @@ fn master_stack_memory_probe() -> io::Result<()> {
                     p.total,
                     done as f64 / secs.max(1e-3)
                 );
-                #[expect(
-                    clippy::unused_result_ok,
-                    reason = "a progress line that fails to flush costs the probe nothing"
-                )]
                 io::stdout().flush().ok();
             }
             StackingStage::Combining => {
                 combining.open();
-                #[expect(
-                    clippy::unused_result_ok,
-                    reason = "only the first combining event stamps the start; a later one finds it set"
-                )]
                 combine_start_us
                     .compare_exchange(
                         0,

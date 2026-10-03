@@ -57,10 +57,6 @@ impl WorkerBridge {
         }
     }
 
-    #[expect(
-        clippy::let_underscore_must_use,
-        reason = "a report for a closed session has no reader, and dropping it is correct"
-    )]
     fn deliver(tx: &Sender<WorkerReport>, wake: &Wake, report: WorkerReport) {
         let _ = tx.send(report);
         (wake)();

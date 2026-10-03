@@ -16,7 +16,6 @@ use std::time::Duration;
 use lumos::{ImageDimensions, LinearImage, StarDetector};
 
 #[expect(
-    clippy::cast_possible_wrap,
     clippy::cast_sign_loss,
     reason = "synthetic fixtures are small images with non-negative coordinates"
 )]

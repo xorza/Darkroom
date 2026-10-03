@@ -268,10 +268,6 @@ async fn watcher_signals_on_content_change() {
 
     // Absorb any spurious event from creating the directory itself, so the
     // assertion below measures the file write specifically.
-    #[expect(
-        clippy::let_underscore_must_use,
-        reason = "with no spurious event to absorb, the wait times out, which is fine"
-    )]
     let _ = timeout(Duration::from_millis(300), signal.notified()).await;
 
     fs::write(dir.join("new.txt"), b"hello").unwrap();

@@ -73,10 +73,6 @@ fn floor_inside(x: f64) -> i32 {
 /// Whether a `taps`×`taps` window whose top-left tap is `origin` lies wholly inside a `size`
 /// source: the one test every kernel's interior path is gated on.
 #[inline]
-#[expect(
-    clippy::cast_possible_wrap,
-    reason = "an image side is at most ImageDimensions::MAX_SIDE, 2^30, so a coordinate and a kernel's reach past it fit i32"
-)]
 pub(super) const fn window_inside(origin: IVec2, taps: usize, size: Size2us) -> bool {
     let taps = taps as i32;
     origin.x >= 0
@@ -96,10 +92,6 @@ impl ClampedAxis {
     /// Inside the footprint the cell is at least −1 and at most `length − 1`, so the two clamps
     /// are the rim on either side.
     #[inline]
-    #[expect(
-        clippy::cast_possible_wrap,
-        reason = "an image side is at most ImageDimensions::MAX_SIDE, 2^30, so a coordinate and a kernel's reach past it fit i32"
-    )]
     const fn of(cell: i32, fraction: f32, length: usize) -> ClampedAxis {
         let last = length as i32 - 1;
         if cell < 0 {

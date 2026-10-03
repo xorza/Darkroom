@@ -39,10 +39,6 @@ impl TempFile {
 }
 
 impl Drop for TempFile {
-    #[expect(
-        clippy::unused_result_ok,
-        reason = "best effort: an entry a test made unremovable must not fail teardown"
-    )]
     fn drop(&mut self) {
         if fs::remove_file(&self.0).is_err() {
             fs::remove_dir_all(&self.0).ok();

@@ -533,10 +533,6 @@ impl RuntimeCache {
         mem::swap(&mut self.fs_paths, &mut self.previous_fs_paths);
         self.fs_paths.clear();
         self.stamp_job.clear_queue();
-        #[expect(
-            clippy::let_underscore_must_use,
-            reason = "a path that fails here fails again, as its node's, when the run reaches it"
-        )]
         let _ = self.identify(program, executing, cancel).await;
     }
 
@@ -950,10 +946,6 @@ pub(crate) mod internals {
         /// path that will not stamp simply does not land, exactly as in the
         /// batched pre-run pass.
         pub(crate) fn prepare_node_blocking(&mut self, program: &CompiledGraph, node_idx: NodeIdx) {
-            #[expect(
-                clippy::let_underscore_must_use,
-                reason = "a path that will not stamp simply does not land, as in the batched pass"
-            )]
             let _ = self.prepare_nodes_blocking(program, [node_idx]);
         }
 

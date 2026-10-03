@@ -1,10 +1,5 @@
 //! Tests for SIMD convolution implementations.
 
-#![expect(
-    clippy::cast_possible_wrap,
-    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
-)]
-
 use crate::internals::prelude::*;
 use crate::internals::simd_check::backend::Backend;
 use crate::internals::simd_check::data_shape::DataShape;
