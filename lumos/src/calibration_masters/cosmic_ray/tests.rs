@@ -13,7 +13,7 @@ use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::sky_field::{Sky, SkyField};
 use crate::io::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
 use crate::io::raw::demosaic::bayer::CfaPattern;
-use crate::math::statistics::median_mut;
+use crate::math::statistics::{MedianMad, median_mut};
 
 /// 64×64: flat sky + deterministic Gaussian noise (σ≈0.003) + three well-sampled stars
 /// (FWHM≈3 px). Unclamped, because the tests inject cosmic rays above the ceiling afterwards.
@@ -122,7 +122,7 @@ fn sigclip_controls_sensitivity() {
 }
 
 #[test]
-fn empirical_and_parametric_both_catch_a_bright_cr() {
+fn measured_and_stated_gains_both_catch_a_bright_cr() {
     // Both noise models must flag an obvious bright CR among the stars.
     let SkyField {
         pixels: mut data, ..
@@ -131,10 +131,9 @@ fn empirical_and_parametric_both_catch_a_bright_cr() {
     let cr = Vec2us::new(15, 33);
     data[size.index_of(cr)] = 0.99;
     for noise in [
-        NoiseEstimation::Empirical,
-        NoiseEstimation::Parametric {
-            gain: 1.5,
-            read_noise: 5.0,
+        NoiseEstimation::Measured,
+        NoiseEstimation::Gain {
+            electrons_per_adu: 1.5,
         },
     ] {
         let mut img = cfa_from_plane(data.clone(), CfaType::Mono);
@@ -198,20 +197,23 @@ fn bayer_removes_cosmic_rays_preserves_star() {
         "star core gutted: {} (was {star})",
         out[size.index_of(core)]
     );
-    // The four CRs, and two pixels the growth pass takes: (11, 10) beside (9, 12) and (35, 39)
-    // beside (37, 37), each a diagonal neighbour in its CR's phase plane, inside the 2×2
-    // subsample block that lifts its significance past `sigfrac · sigclip`.
-    assert_eq!(count, 6);
+    // The four CRs, and three pixels the growth pass takes: (10, 10) beside (8, 8), (11, 10) beside
+    // (9, 12) and (35, 39) beside (37, 37), each a diagonal neighbour in its CR's phase plane,
+    // inside the 2×2 subsample block that lifts its significance past `sigfrac · sigclip`. The
+    // noise is the local sky σ of each colour, which the star does not inflate as it inflated the
+    // whole-plane MAD, so (8, 8) grows as the others do.
+    assert_eq!(count, 7);
     // Every in-painted photosite is flagged at its mosaic position, and nothing else is: the four
     // phase planes map back without crossing.
     let flags = img.flags.as_ref().unwrap();
     let repaired = Flags::COSMIC_RAY.union(Flags::REPAIRED);
-    assert_eq!(flags.count(Flags::COSMIC_RAY), 6);
-    assert_eq!(flags.count(Flags::REPAIRED), 6);
-    for &p in crs
-        .iter()
-        .chain(&[Vec2us::new(11, 10), Vec2us::new(35, 39)])
-    {
+    assert_eq!(flags.count(Flags::COSMIC_RAY), 7);
+    assert_eq!(flags.count(Flags::REPAIRED), 7);
+    for &p in crs.iter().chain(&[
+        Vec2us::new(10, 10),
+        Vec2us::new(11, 10),
+        Vec2us::new(35, 39),
+    ]) {
         assert_eq!(flags.at_pos(p), repaired, "({}, {})", p.x, p.y);
     }
 }
@@ -384,7 +386,7 @@ fn replace_flagged_matches_a_snapshot_reference() {
 #[test]
 fn validate_rejects_each_field_out_of_range() {
     assert_eq!(CosmicRayConfig::default().validate(), Ok(()));
-    let parametric = |gain, read_noise| NoiseEstimation::Parametric { gain, read_noise };
+    let gain = |electrons_per_adu| NoiseEstimation::Gain { electrons_per_adu };
     for (field, config) in [
         (
             "cosmic-ray sigclip",
@@ -429,16 +431,16 @@ fn validate_rejects_each_field_out_of_range() {
             },
         ),
         (
-            "cosmic-ray gain",
+            "cosmic-ray electrons_per_adu",
             CosmicRayConfig {
-                noise: parametric(0.0, 5.0),
+                noise: gain(0.0),
                 ..Default::default()
             },
         ),
         (
-            "cosmic-ray read_noise",
+            "cosmic-ray electrons_per_adu",
             CosmicRayConfig {
-                noise: parametric(1.5, -1.0),
+                noise: gain(f32::INFINITY),
                 ..Default::default()
             },
         ),
@@ -449,38 +451,50 @@ fn validate_rejects_each_field_out_of_range() {
     let edge = CosmicRayConfig {
         sigfrac: 1.0,
         niter: 1,
-        noise: parametric(1.5, 0.0),
+        noise: gain(1.5),
         ..Default::default()
     };
     assert_eq!(edge.validate(), Ok(()));
 }
 
-/// The parametric model reads the frame's ADU scale off its quantization σ: a 12-bit step,
-/// `(1/√12)/4095` in sample units, gives back 4095 ADU per unit, to the two roundings of the
-/// quotient and its inverse. A frame without one cannot use the model; the empirical one needs
-/// nothing from the frame.
+/// A stated gain on a frame that records no unit for it is refused, and the pass reports why.
 #[test]
-fn the_parametric_model_takes_its_scale_from_the_frame() {
-    let estimation = NoiseEstimation::Parametric {
-        gain: 1.5,
-        read_noise: 5.0,
-    };
-    let NoiseModel::Parametric { full_scale, .. } =
-        NoiseModel::resolve(&estimation, Some(QUANTIZATION_SIGMA_PER_STEP / 4095.0)).unwrap()
-    else {
-        panic!("a parametric estimation resolves to the parametric model")
-    };
-    assert_close!(full_scale, 4095.0, 2.0 * f32::EPSILON * 4095.0);
-    assert_eq!(NoiseModel::resolve(&estimation, None), Err(UnknownAdcStep));
-    assert_eq!(
-        NoiseModel::resolve(&NoiseEstimation::Empirical, None),
-        Ok(NoiseModel::Empirical)
-    );
-
+fn a_stated_gain_needs_a_unit_on_the_frame() {
     let mut image = cfa_from_plane(synthetic_field().pixels, CfaType::Mono);
     let config = CosmicRayConfig {
-        noise: estimation,
+        noise: NoiseEstimation::Gain {
+            electrons_per_adu: 1.5,
+        },
         ..Default::default()
     };
     assert_eq!(reject_cosmic_rays(&mut image, &config), Err(UnknownAdcStep));
+}
+
+/// A faint hit on a steep sky gradient is caught: the noise is each pixel's local σ about the
+/// mesh's tile planes, which the gradient does not inflate (review 6.5). A 128 × 128 mono frame
+/// with the sky rising from 0.05 to 0.45 across it and white noise of σ 0.002; a hit of +0.04,
+/// 20σ, at (70, 70). The whole frame's MAD reads the gradient, about 0.1 in σ, and against that the
+/// hit is under half a σ: the old whole-frame model would never flag it.
+#[test]
+fn a_faint_hit_on_a_gradient_is_caught() {
+    let size = Size2us::new(128, 128);
+    let mut rng = TestRng::new(0x6A);
+    let mut pixels: Vec<f32> = (0..size.pixel_count())
+        .map(|index| 0.05 + 0.4 * (index % 128) as f32 / 128.0 + 0.002 * rng.next_gaussian_f32())
+        .collect();
+    let hit = Vec2us::new(70, 70);
+    pixels[size.index_of(hit)] += 0.04;
+    let whole_frame_sigma = MedianMad::of_mut(&mut pixels.clone()).sigma();
+    assert!(whole_frame_sigma > 0.08, "premise: {whole_frame_sigma}");
+    let mut image = cfa_from_plane(Buffer2::new(128, 128, pixels), CfaType::Mono);
+    reject_cosmic_rays(&mut image, &CosmicRayConfig::default()).unwrap();
+    assert!(
+        image
+            .flags
+            .as_ref()
+            .unwrap()
+            .at_pos(hit)
+            .intersects(Flags::COSMIC_RAY),
+        "the hit was missed"
+    );
 }

@@ -47,11 +47,11 @@
 //! local neighbours* — a reference that tracks vignetting (smooth, locally flat) and ignores dust
 //! shadows (which dim by far less than half), so only genuinely near-zero pixels are caught.
 
-pub(crate) mod dark_background;
-mod sampling;
+pub(crate) mod sampling;
 
+use crate::background_mesh::colour_mesh::ColourMesh;
+use crate::background_mesh::workspace::MeshWorkspace;
 use crate::bit_buffer2::BitBuffer2;
-use crate::calibration_masters::defect_map::dark_background::DarkBackground;
 use crate::calibration_masters::defect_map::sampling::collect_color_residual_samples;
 use crate::calibration_masters::error::CalibrationError;
 use crate::io::image::cfa::cfa_lattice::{CfaLattice, Gathered};
@@ -295,12 +295,20 @@ fn detect_hot_pixels(
     let size = Size2us::new(data.width(), data.height());
     let total = size.pixel_count();
     let cfa_type = image.cfa_type;
-    let background = DarkBackground::fit(data, cfa_type, cancel)?;
+    let background = ColourMesh::measure(
+        data,
+        &cfa_type,
+        DARK_BACKGROUND_TILE_SIZE,
+        &mut MeshWorkspace::default(),
+    );
+    if cancel.is_cancelled() {
+        return Err(CalibrationError::Cancelled);
+    }
     let sigma_floor = residual_sigma_floor(image);
     let stats = compute_per_color_residual_stats(data, cfa_type, &background, sigma_floor);
 
-    // The broad model uses tile medians rather than same-color neighbour medians so a compact
-    // same-color cluster remains an outlier instead of becoming its own local reference.
+    // The broad model reads each colour's tile skies rather than same-color neighbour medians, so a
+    // compact same-color cluster remains an outlier instead of becoming its own local reference.
     let indices = (0..total)
         .into_par_iter()
         .filter(|&i| {
@@ -310,7 +318,7 @@ fn detect_hot_pixels(
             let point = size.point_of(i);
             let color = cfa_type.color_at(point) as usize;
             let ColorStats { median, sigma } = stats[color];
-            data[i] - background.at(point, color) > median + sigma_threshold * sigma
+            data[i] - background.at(color, point).sky > median + sigma_threshold * sigma
         })
         .collect();
 
@@ -393,7 +401,7 @@ struct ColorStats {
 fn compute_per_color_residual_stats(
     data: &Buffer2<f32>,
     cfa_type: CfaType,
-    background: &DarkBackground,
+    background: &ColourMesh,
     sigma_floor: f32,
 ) -> ArrayVec<ColorStats, 3> {
     let num_colors = cfa_type.num_colors();

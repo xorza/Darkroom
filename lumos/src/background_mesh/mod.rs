@@ -3,10 +3,12 @@
 //! then the crowding-aware Pearson mode `2.5·median − 1.5·mean` (median fallback on skew), with a
 //! 3×3 grid median filter — plus natural-cubic-spline coefficients for C²-continuous interpolation.
 //!
-//! Foundation module (depends only on `math`/`common`): the canonical robust background estimate,
-//! reused by `star_detection::background` (full-res background+noise map for detection)
-//! and `background_extraction` (tile-centre samples feeding the gradient surface fit).
+//! The canonical robust background estimate, reused by `star_detection::background` (full-res
+//! background+noise map for detection), `background_extraction` (tile-centre samples feeding the
+//! gradient surface fit), and per colour of a mosaic by [`colour_mesh`] for the hot-pixel and
+//! cosmic-ray scans.
 
+pub(crate) mod colour_mesh;
 pub(crate) mod mesh_axis;
 pub(crate) mod spline;
 pub(crate) mod tile_stats;
@@ -14,7 +16,7 @@ pub(crate) mod workspace;
 
 use crate::background_mesh::mesh_axis::MeshAxis;
 use crate::background_mesh::spline::solve_natural_spline_d2;
-use crate::background_mesh::tile_stats::{TileComponent, TileD2y, TileStats};
+use crate::background_mesh::tile_stats::{Eligible, TileComponent, TileD2y, TileStats};
 use crate::background_mesh::workspace::TileScratch;
 use crate::bit_buffer2::BitBuffer2;
 use crate::concurrency::JobScratchPool;
@@ -128,6 +130,7 @@ impl TileGrid {
         &mut self,
         pixels: &Buffer2<f32>,
         mask: Option<&BitBuffer2>,
+        eligible: Option<&Eligible<'_>>,
         sigma_clip_iterations: usize,
         tile_scratch: &JobScratchPool<TileScratch>,
     ) {
@@ -154,6 +157,7 @@ impl TileGrid {
                     let stats = TileStats::compute(
                         pixels,
                         mask,
+                        eligible,
                         tile_at(index),
                         sigma_clip_iterations,
                         scratch,
@@ -173,14 +177,17 @@ impl TileGrid {
                 .for_each_init(
                     || tile_scratch.acquire(),
                     |scratch, (index, out)| {
+                        // An eligibility test that takes no pixel of a tile leaves it nothing to
+                        // measure, mask or not.
                         *out = TileStats::compute(
                             pixels,
                             None,
+                            eligible,
                             tile_at(index),
                             sigma_clip_iterations,
                             scratch,
                         )
-                        .expect("an unmasked tile is measured");
+                        .unwrap_or_default();
                     },
                 );
             return;
@@ -188,7 +195,7 @@ impl TileGrid {
         self.fill_bad_tiles();
     }
 
-    /// Give each bad tile the median sky and the median σ of the good tiles on the nearest square
+    /// Give each bad tile the median sky, σ and noise of the good tiles on the nearest square
     /// ring around it that holds any, as SExtractor fills a bad mesh from its neighbours. Read from
     /// the measured tiles only, so a fill never feeds another.
     fn fill_bad_tiles(&mut self) {
@@ -196,6 +203,7 @@ impl TileGrid {
         let reach = tiles_x.max(tiles_y);
         let mut skies = Vec::new();
         let mut sigmas = Vec::new();
+        let mut noises = Vec::new();
         for index in 0..self.measured.len() {
             if self.measured[index] {
                 continue;
@@ -204,6 +212,7 @@ impl TileGrid {
             for radius in 1..=reach {
                 skies.clear();
                 sigmas.clear();
+                noises.clear();
                 let ring = ty.saturating_sub(radius)..=(ty + radius).min(tiles_y - 1);
                 for y in ring {
                     for x in tx.saturating_sub(radius)..=(tx + radius).min(tiles_x - 1) {
@@ -212,6 +221,7 @@ impl TileGrid {
                             let stats = self.stats[(x, y)];
                             skies.push(stats.sky);
                             sigmas.push(stats.sigma);
+                            noises.push(stats.noise);
                         }
                     }
                 }
@@ -223,6 +233,7 @@ impl TileGrid {
             self.stats[(tx, ty)] = TileStats {
                 sky: median_mut(&mut skies),
                 sigma: median_mut(&mut sigmas),
+                noise: median_mut(&mut noises),
             };
         }
     }
@@ -252,6 +263,7 @@ impl TileGrid {
 
             let mut skies = [0.0f32; 9];
             let mut sigmas = [0.0f32; 9];
+            let mut noises = [0.0f32; 9];
             let mut count = 0;
 
             for dy in -1isize..=1 {
@@ -259,14 +271,19 @@ impl TileGrid {
                     let x = Reflection::of(tile.x, dx, last.x);
                     let y = Reflection::of(tile.y, dy, last.y);
                     let edge = src[(x.pivot, y.pivot)];
-                    let (sky, sigma) = if x.pivot == x.mirror && y.pivot == y.mirror {
-                        (edge.sky, edge.sigma)
+                    let reflected = if x.pivot == x.mirror && y.pivot == y.mirror {
+                        edge
                     } else {
                         let inner = src[(x.mirror, y.mirror)];
-                        (2.0 * edge.sky - inner.sky, 2.0 * edge.sigma - inner.sigma)
+                        TileStats {
+                            sky: 2.0 * edge.sky - inner.sky,
+                            sigma: 2.0 * edge.sigma - inner.sigma,
+                            noise: 2.0 * edge.noise - inner.noise,
+                        }
                     };
-                    skies[count] = sky;
-                    sigmas[count] = sigma;
+                    skies[count] = reflected.sky;
+                    sigmas[count] = reflected.sigma;
+                    noises[count] = reflected.noise;
                     count += 1;
                 }
             }
@@ -274,6 +291,7 @@ impl TileGrid {
             out.sky = median_mut(&mut skies);
             // A steep σ gradient can reflect below zero, which no noise level is.
             out.sigma = median_mut(&mut sigmas).max(0.0);
+            out.noise = median_mut(&mut noises).max(0.0);
         });
 
         mem::swap(&mut self.stats, scratch);
