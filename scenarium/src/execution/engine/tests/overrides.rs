@@ -32,7 +32,7 @@ async fn an_override_sets_its_target_aside_while_it_delivers() {
     let overridden = |e: &TestEngine| {
         let graph = &e.graph.graph;
         let node = graph.find(e.id("pick")).unwrap();
-        let func = graph.node_func(node, &e.graph.library).unwrap();
+        let func = node.func(&e.graph.library).unwrap();
         graph.overridden(InputPort::new(e.id("pick"), 0), func)
     };
 

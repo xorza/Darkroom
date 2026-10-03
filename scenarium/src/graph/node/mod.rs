@@ -20,6 +20,7 @@ use crate::graph::func::Func;
 use crate::graph::func::signature::FuncSignature;
 use crate::graph::identity::FuncId;
 use crate::graph::node::special::SpecialNode;
+use crate::library::Library;
 use ::serde::{Deserialize, Serialize};
 
 /// Where a node's computed output is cached — the two orthogonal storage bits
@@ -112,6 +113,25 @@ pub struct Node {
 }
 
 impl Node {
+    /// The declaration this node instantiates — a library entry, or a special
+    /// node's hardcoded spec. `None` for a `Func` kind the library no longer
+    /// holds: the caller decides whether that is drift to tolerate (the editor
+    /// renders a stub) or a node to skip (lowering).
+    pub fn func<'a>(&self, library: &'a Library) -> Option<&'a Func> {
+        match &self.kind {
+            NodeKind::Func(func_id) => library.by_id(*func_id),
+            NodeKind::Special(special) => Some(special.func()),
+        }
+    }
+
+    /// The built-in this node is, if it is one.
+    pub const fn special(&self) -> Option<SpecialNode> {
+        match self.kind {
+            NodeKind::Special(special) => Some(special),
+            NodeKind::Func(_) => None,
+        }
+    }
+
     /// A fresh node of the given kind with no wiring. Callers fill that in, or
     /// use `From<&Func>` for a node shaped from its declaration.
     ///

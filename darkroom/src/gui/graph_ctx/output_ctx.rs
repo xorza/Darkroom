@@ -64,7 +64,7 @@ impl<'a> OutputCtx<'a> {
     /// unresolvable chain — both of those are *present* and `Any`. It means
     /// the table was resolved against a different graph or library than the
     /// scope carries, since a port only reaches here off a func the same
-    /// `node_func` lookup resolved, at an index that func declares. Degrading
+    /// `Node::func` lookup resolved, at an index that func declares. Degrading
     /// to `Any` would paint a stale port a plausible colour and let a scope
     /// composed without a refresh go unnoticed.
     pub(crate) fn ty(self) -> DataType {

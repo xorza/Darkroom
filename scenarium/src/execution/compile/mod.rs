@@ -43,10 +43,8 @@ use crate::execution::compile::compiled_graph::{
 };
 use crate::execution::compile::error::CompileError;
 use crate::execution::identity::{InputIdx, NodeIdx, OutputAddr};
-use crate::graph::func::{Func, FuncInput};
+use crate::graph::func::FuncInput;
 use crate::graph::identity::{InputPort, NodeId, OutputPort};
-use crate::graph::node::NodeKind;
-use crate::graph::node::special::SpecialNode;
 use crate::graph::output_types::OutputTypes;
 use crate::graph::{Binding, Graph};
 use crate::library::Library;
@@ -180,17 +178,9 @@ impl Compiler {
                 .expect("the placement names this graph's nodes");
 
             // A func and a special node both resolve to a `&Func` spec and emit
-            // one node — the spec is the only difference (`library` vs. the
-            // hardcoded `SpecialNode::func`), so the body below is shared.
-            let (func, special): (&Func, Option<SpecialNode>) = match &node.kind {
-                NodeKind::Func(func_id) => (
-                    library
-                        .by_id(*func_id)
-                        .expect("func resolved by validate_with"),
-                    None,
-                ),
-                NodeKind::Special(special) => (special.func(), Some(*special)),
-            };
+            // one node, so the body below is shared.
+            let func = node.func(library).expect("func resolved by validate_with");
+            let special = node.special();
 
             // Every port is read fresh from the func each build (never carried
             // over from the last one): the library can evolve between updates —
@@ -307,9 +297,7 @@ impl Compiler {
         placed.reserve_exact(graph.len());
         let mut totals = PortTotals::default();
         for node in graph.iter() {
-            let func = graph
-                .node_func(&node, library)
-                .expect("func resolved by validate_with");
+            let func = node.func(library).expect("func resolved by validate_with");
             totals.inputs += func.inputs.len();
             totals.outputs += func.outputs.len();
             totals.events += func.events.len();

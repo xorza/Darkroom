@@ -1,6 +1,6 @@
-use crate::graph::Binding;
 use crate::graph::identity::FuncId;
 use crate::graph::identity::{InputPort, NodeId};
+use crate::graph::{Binding, BindingEntry};
 pub(crate) mod error;
 pub(crate) mod event;
 pub(crate) mod lambda;
@@ -368,13 +368,15 @@ impl Func {
 
     /// The const bindings a fresh instance starts with: one per input that
     /// declares a default, at that input's port index.
-    pub fn default_bindings(&self, node_id: NodeId) -> impl Iterator<Item = (InputPort, Binding)> {
+    pub fn default_bindings(&self, node_id: NodeId) -> impl Iterator<Item = BindingEntry> {
         self.inputs
             .iter()
             .enumerate()
             .filter_map(move |(port_idx, input)| {
-                let default = input.default_value.clone()?;
-                Some((InputPort::new(node_id, port_idx), Binding::Const(default)))
+                Some(BindingEntry {
+                    port: InputPort::new(node_id, port_idx),
+                    binding: Binding::Const(input.default_value.clone()?),
+                })
             })
     }
 

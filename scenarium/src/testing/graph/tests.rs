@@ -46,7 +46,7 @@ fn declarations_are_per_node_unless_a_test_shares_one() {
 
     let required = |g: &TestGraph, name: &str| {
         let node = g.graph.find(g.id(name)).unwrap();
-        g.graph.node_func(node, &g.library).unwrap().inputs[0].required
+        node.func(&g.library).unwrap().inputs[0].required
     };
     assert!(!required(&g, "a"), "the edited declaration went optional");
     assert!(!required(&g, "a2"), "and its other instance shares it");
@@ -149,7 +149,7 @@ fn spec_flags_reach_the_declaration() {
 
     let func = |g: &TestGraph, name: &str| {
         let node = g.graph.find(g.id(name)).unwrap();
-        g.graph.node_func(node, &g.library).unwrap().clone()
+        node.func(&g.library).unwrap().clone()
     };
     let plain = func(&g, "plain");
     assert_eq!(plain.behavior, FuncBehavior::Impure);
