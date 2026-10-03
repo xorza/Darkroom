@@ -105,7 +105,7 @@ fn one_unreadable_path_does_not_cost_the_pass() {
 
     let mut job = StampJob::default();
     for path in present_paths.iter().chain(&missing_paths) {
-        job.request(path);
+        job.request(path.clone());
     }
     let resolved = job.run(&CancelToken::never());
     let Err(StampError::Io { path, source }) = &resolved else {
@@ -137,7 +137,7 @@ fn one_unreadable_path_does_not_cost_the_pass() {
     let written_late = in_dir("missing-0.bin".to_string());
     fs::write(&written_late, b"now here").unwrap();
     let mut job = StampJob::default();
-    job.request(&written_late);
+    job.request(written_late.clone());
     assert!(
         job.run(&CancelToken::never()).is_ok(),
         "a failure is reported, not remembered",
@@ -148,7 +148,7 @@ fn one_unreadable_path_does_not_cost_the_pass() {
     // stands, rather than raising itself once per remaining path.
     let mut job = StampJob::default();
     for path in &present_paths {
-        job.request(path);
+        job.request(path.clone());
     }
     let cancel = CancelToken::new();
     cancel.cancel();
@@ -332,6 +332,9 @@ async fn same_path_uses_one_identity_until_the_next_run() {
     );
 
     let first_run = cache[first.node_idx].current_digest;
+    // A key only the memo has: a copy of the path would be the path's length.
+    let path_text = file.to_string_lossy().into_owned();
+    cache.widen_path_key(&path_text, 4096);
     cache
         .prepare(program, schedule.executing(), CancelToken::never())
         .await;
@@ -339,5 +342,9 @@ async fn same_path_uses_one_identity_until_the_next_run() {
     assert_ne!(
         cache[first.node_idx].current_digest, first_run,
         "the next run refreshes resource identity"
+    );
+    assert!(
+        cache.path_key(&path_text).unwrap().capacity() >= 4096,
+        "and identifies the path under the key the last run held"
     );
 }
