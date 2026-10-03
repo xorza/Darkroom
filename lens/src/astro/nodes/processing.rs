@@ -37,17 +37,10 @@ pub(crate) fn register(library: &mut Library) {
 
 fn register_stretch(library: &mut Library) {
     library.add(
-        Func::new(AUTO_STRETCH_FUNC_ID, "Auto Stretch")
-            .description("Auto-stretches a linear frame to a viewable image (display tone curve).")
-            .category("Astro")
-            .pure()
-            .input(frame_input("Image"))
-            .input(preset::input::<StretchKnobs, StretchPreset>("Method"))
-            .output(
-                FuncOutput::new("Image", IMAGE_DATA_TYPE.clone())
-                    .description("Stretched, display-ready image."),
-            )
-            .lambda(FuncLambda::new(
+        Func::new(
+            AUTO_STRETCH_FUNC_ID,
+            "Auto Stretch",
+            FuncLambda::new(
                 move |Invocation {
                           inputs, outputs, ..
                       }| {
@@ -61,7 +54,17 @@ fn register_stretch(library: &mut Library) {
                         Ok(())
                     })
                 },
-            )),
+            ),
+        )
+        .description("Auto-stretches a linear frame to a viewable image (display tone curve).")
+        .category("Astro")
+        .pure()
+        .input(frame_input("Image"))
+        .input(preset::input::<StretchKnobs, StretchPreset>("Method"))
+        .output(
+            FuncOutput::new("Image", IMAGE_DATA_TYPE.clone())
+                .description("Stretched, display-ready image."),
+        ),
     );
 }
 
@@ -266,11 +269,10 @@ fn processing_func(
     inputs: Vec<FuncInput>,
     lambda: FuncLambda,
 ) -> Func {
-    Func::new(id, name)
+    Func::new(id, name, lambda)
         .category("Astro")
         .description(description)
         .pure()
         .inputs(inputs)
         .output(FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Processed image."))
-        .lambda(lambda)
 }

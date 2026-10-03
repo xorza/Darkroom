@@ -16,65 +16,55 @@ pub fn system_library() -> Library {
     // print: log the input value to the node log (info level), read
     // back by the editor. Sugar over `ContextManager::log`.
     library.add(
-        Func::new(PRINT_FUNC_ID, "Print")
-            .description("Logs any value to the node log.")
-            .category("System")
-            .sink()
-            .input(
-                FuncInput::required("Value", DataType::Any)
-                    .description("Value of any type to write to the node's log (info level)."),
-            )
-            .lambda(async_lambda!(move |Invocation { ctx, inputs, .. }| {
+        Func::new(
+            PRINT_FUNC_ID,
+            "Print",
+            async_lambda!(move |Invocation { ctx, inputs, .. }| {
                 assert_eq!(inputs.len(), 1);
                 ctx.info(inputs[0].to_value_string());
                 Ok(())
-            })),
+            }),
+        )
+        .description("Logs any value to the node log.")
+        .category("System")
+        .sink()
+        .input(
+            FuncInput::required("Value", DataType::Any)
+                .description("Value of any type to write to the node's log (info level)."),
+        ),
     );
 
     library.add(
-        Func::new(TO_STRING_FUNC_ID, "To String")
-            .description("Converts any value to its string representation.")
-            .category("System")
-            .pure()
-            .input(
-                FuncInput::required("Value", DataType::Any)
-                    .description("Value of any type to convert to text."),
-            )
-            .output(
-                FuncOutput::new("Text", DataType::String).description("The value's string form."),
-            )
-            .lambda(async_lambda!(|Invocation {
-                                       inputs, outputs, ..
-                                   }| {
+        Func::new(
+            TO_STRING_FUNC_ID,
+            "To String",
+            async_lambda!(|Invocation {
+                               inputs, outputs, ..
+                           }| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
                 outputs[0] = inputs[0].to_value_string().into();
                 Ok(())
-            })),
+            }),
+        )
+        .description("Converts any value to its string representation.")
+        .category("System")
+        .pure()
+        .input(
+            FuncInput::required("Value", DataType::Any)
+                .description("Value of any type to convert to text."),
+        )
+        .output(FuncOutput::new("Text", DataType::String).description("The value's string form.")),
     );
 
     library.add(
-        Func::new(CONCAT_FUNC_ID, "Concat")
-            .description(
-                "Converts two values of any type to text and joins them (A followed by B).",
-            )
-            .category("System")
-            .pure()
-            .input(
-                FuncInput::required("A", DataType::Any)
-                    .description("First value; its text comes first."),
-            )
-            .input(
-                FuncInput::required("B", DataType::Any)
-                    .description("Second value; its text is appended after A."),
-            )
-            .output(
-                FuncOutput::new("Text", DataType::String).description("A's text followed by B's."),
-            )
-            .lambda(async_lambda!(|Invocation {
-                                       inputs, outputs, ..
-                                   }| {
+        Func::new(
+            CONCAT_FUNC_ID,
+            "Concat",
+            async_lambda!(|Invocation {
+                               inputs, outputs, ..
+                           }| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
@@ -83,7 +73,20 @@ pub fn system_library() -> Library {
 
                 outputs[0] = result.into();
                 Ok(())
-            })),
+            }),
+        )
+        .description("Converts two values of any type to text and joins them (A followed by B).")
+        .category("System")
+        .pure()
+        .input(
+            FuncInput::required("A", DataType::Any)
+                .description("First value; its text comes first."),
+        )
+        .input(
+            FuncInput::required("B", DataType::Any)
+                .description("Second value; its text is appended after A."),
+        )
+        .output(FuncOutput::new("Text", DataType::String).description("A's text followed by B's.")),
     );
 
     library

@@ -431,7 +431,7 @@ mod planning {
 mod resolving {
     use crate::execution::compile::compiled_graph::ExecutionBinding;
     use crate::execution::schedule::NodeState;
-    use crate::graph::func::lambda::{FuncLambda, OutputDemand};
+    use crate::graph::func::lambda::OutputDemand;
     use crate::testing::program::ProgramBuilder;
     use crate::{ConstValue, DynamicValue};
 
@@ -442,12 +442,12 @@ mod resolving {
     #[tokio::test]
     async fn exact_demand_accepts_narrow_producer_cache_and_ignores_reused_reader() {
         let mut prog = ProgramBuilder::default();
-        let source = prog.node().reusable().outputs(2).add();
-        let cached = prog.node().reusable().input(source.out(1)).outputs(1).add();
-        let live = prog.node().reusable().input(source.out(0)).outputs(1).add();
+        let source = prog.node().pure().outputs(2).add();
+        let cached = prog.node().pure().input(source.out(1)).outputs(1).add();
+        let live = prog.node().pure().input(source.out(0)).outputs(1).add();
         let sink = prog
             .node()
-            .reusable()
+            .pure()
             .input(cached.out(0))
             .input(live.out(0))
             .outputs(0)
@@ -475,10 +475,10 @@ mod resolving {
     #[tokio::test]
     async fn missing_input_stops_liveness_before_its_producer() {
         let mut prog = ProgramBuilder::default();
-        let source = prog.node().reusable().outputs(1).add();
+        let source = prog.node().pure().outputs(1).add();
         let blocked = prog
             .node()
-            .reusable()
+            .pure()
             .input(source.out(0))
             .required(ExecutionBinding::None)
             .outputs(0)
@@ -497,50 +497,14 @@ mod resolving {
         assert_eq!(run.readers(source), &[0]);
     }
 
-    #[tokio::test]
-    async fn missing_lambda_stops_liveness_before_its_producer() {
-        let mut prog = ProgramBuilder::default();
-        let source = prog.node().reusable().outputs(1).add();
-        let missing = prog.node().reusable().input(source.out(0)).outputs(1).add();
-        prog.program_mut().by_id_mut(missing.node_id).lambda = FuncLambda::None;
-        let sink = prog
-            .node()
-            .reusable()
-            .input(missing.out(0))
-            .outputs(0)
-            .add();
-
-        let run = prog
-            .sweep()
-            .root(sink)
-            .cached(missing, [value(9)])
-            .run()
-            .await;
-
-        assert_eq!(run.state(source), NodeState::Cut);
-        assert_eq!(
-            run.state(missing),
-            NodeState::MissingLambda,
-            "a matching cache cannot hide a reached missing implementation"
-        );
-        assert_eq!(run.state(sink), NodeState::Run);
-        assert_eq!(run.demand(source), &[OutputDemand::Skip]);
-        assert_eq!(run.readers(source), &[0]);
-        assert_eq!(
-            run.readers(missing),
-            &[1],
-            "the downstream skip still owns one read to retire"
-        );
-    }
-
     /// A node seed demands every output it has, without any consumer reading them —
     /// the "run to this node" semantic, distinct from demand arriving through a
     /// binding.
     #[tokio::test]
     async fn a_node_seed_demands_every_output_without_readers() {
         let mut prog = ProgramBuilder::default();
-        let unseeded = prog.node().reusable().outputs(2).add();
-        let seeded = prog.node().reusable().outputs(2).add();
+        let unseeded = prog.node().pure().outputs(2).add();
+        let seeded = prog.node().pure().outputs(2).add();
 
         let run = prog
             .sweep()
@@ -571,10 +535,10 @@ mod resolving {
     #[tokio::test]
     async fn cone_reachable_only_through_a_reuse_hit_is_fully_pruned() {
         let mut prog = ProgramBuilder::default();
-        let deep = prog.node().reusable().outputs(1).add();
-        let source = prog.node().reusable().input(deep.out(0)).outputs(1).add();
-        let cached = prog.node().reusable().input(source.out(0)).outputs(1).add();
-        let sink = prog.node().reusable().input(cached.out(0)).outputs(0).add();
+        let deep = prog.node().pure().outputs(1).add();
+        let source = prog.node().pure().input(deep.out(0)).outputs(1).add();
+        let cached = prog.node().pure().input(source.out(0)).outputs(1).add();
+        let sink = prog.node().pure().input(cached.out(0)).outputs(0).add();
 
         let run = prog
             .sweep()

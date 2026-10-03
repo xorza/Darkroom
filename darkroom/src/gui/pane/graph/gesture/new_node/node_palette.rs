@@ -306,7 +306,7 @@ fn menu_row(ui: &mut Ui, popup: &CloseHandle, func: &Func) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use scenarium::{Func, FuncId};
+    use scenarium::{Func, FuncId, testing};
 
     use crate::gui::pane::graph::gesture::new_node::node_palette::{
         PaletteColumn, PaletteEntry, name_matches,
@@ -319,7 +319,7 @@ mod tests {
             .into_iter()
             .map(|spec| {
                 let (category, name) = spec.split_once('/').unwrap();
-                Func::new(FuncId::unique(), name).category(category)
+                testing::stub_func(FuncId::unique(), name).category(category)
             })
             .collect()
     }

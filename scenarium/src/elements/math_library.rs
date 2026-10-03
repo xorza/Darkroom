@@ -58,20 +58,23 @@ fn unary_float_func(
     output: FloatOutputSpec,
     operation: fn(f64) -> f64,
 ) -> Func {
-    Func::new(id, name)
-        .description(description)
-        .category("Math")
-        .pure()
-        .input(declared_input(input))
-        .output(declared_output(output))
-        .lambda(async_lambda!(move |Invocation {
-                                        inputs, outputs, ..
-                                    }| {
+    Func::new(
+        id,
+        name,
+        async_lambda!(move |Invocation {
+                                inputs, outputs, ..
+                            }| {
             assert_eq!(inputs.len(), 1);
             assert_eq!(outputs.len(), 1);
             outputs[0] = operation(float_input(inputs, 0)?).into();
             Ok(())
-        }))
+        }),
+    )
+    .description(description)
+    .category("Math")
+    .pure()
+    .input(declared_input(input))
+    .output(declared_output(output))
 }
 
 fn binary_float_func(
@@ -82,21 +85,24 @@ fn binary_float_func(
     output: FloatOutputSpec,
     operation: fn(f64, f64) -> f64,
 ) -> Func {
-    Func::new(id, name)
-        .description(description)
-        .category("Math")
-        .pure()
-        .input(declared_input(inputs[0]))
-        .input(declared_input(inputs[1]))
-        .output(declared_output(output))
-        .lambda(async_lambda!(move |Invocation {
-                                        inputs, outputs, ..
-                                    }| {
+    Func::new(
+        id,
+        name,
+        async_lambda!(move |Invocation {
+                                inputs, outputs, ..
+                            }| {
             assert_eq!(inputs.len(), 2);
             assert_eq!(outputs.len(), 1);
             outputs[0] = operation(float_input(inputs, 0)?, float_input(inputs, 1)?).into();
             Ok(())
-        }))
+        }),
+    )
+    .description(description)
+    .category("Math")
+    .pure()
+    .input(declared_input(inputs[0]))
+    .input(declared_input(inputs[1]))
+    .output(declared_output(output))
 }
 
 pub fn math_library() -> Library {
@@ -333,31 +339,12 @@ fn trigonometry_funcs() -> [Func; 6] {
 }
 
 fn divide_func() -> Func {
-    Func::new(DIVIDE_FUNC_ID, "Divide")
-        .description("Divides the first value by the second, outputs both quotient and remainder.")
-        .category("Math")
-        .pure()
-        .input(declared_input(FloatInputSpec {
-            name: "A",
-            description: "Dividend.",
-            default: 0.0,
-        }))
-        .input(declared_input(FloatInputSpec {
-            name: "B",
-            description: "Divisor.",
-            default: 1.0,
-        }))
-        .output(declared_output(FloatOutputSpec {
-            name: "Quotient",
-            description: "A ÷ B.",
-        }))
-        .output(declared_output(FloatOutputSpec {
-            name: "Remainder",
-            description: "A mod B.",
-        }))
-        .lambda(async_lambda!(move |Invocation {
-                                        inputs, outputs, ..
-                                    }| {
+    Func::new(
+        DIVIDE_FUNC_ID,
+        "Divide",
+        async_lambda!(move |Invocation {
+                                inputs, outputs, ..
+                            }| {
             assert_eq!(inputs.len(), 2);
             assert_eq!(outputs.len(), 2);
             let dividend = float_input(inputs, 0)?;
@@ -365,7 +352,29 @@ fn divide_func() -> Func {
             outputs[0] = (dividend / divisor).into();
             outputs[1] = (dividend % divisor).into();
             Ok(())
-        }))
+        }),
+    )
+    .description("Divides the first value by the second, outputs both quotient and remainder.")
+    .category("Math")
+    .pure()
+    .input(declared_input(FloatInputSpec {
+        name: "A",
+        description: "Dividend.",
+        default: 0.0,
+    }))
+    .input(declared_input(FloatInputSpec {
+        name: "B",
+        description: "Divisor.",
+        default: 1.0,
+    }))
+    .output(declared_output(FloatOutputSpec {
+        name: "Quotient",
+        description: "A ÷ B.",
+    }))
+    .output(declared_output(FloatOutputSpec {
+        name: "Remainder",
+        description: "A mod B.",
+    }))
 }
 
 #[cfg(test)]

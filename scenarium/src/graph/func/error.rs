@@ -19,8 +19,6 @@ pub enum FuncValidationError {
     NilId,
     #[error("Function with no outputs should be impure")]
     PureWithoutOutputs,
-    #[error("function {func_id:?} has no implementation")]
-    MissingLambda { func_id: FuncId },
     #[error("function {func_id:?} input {input_idx} has a nil nominal type id")]
     NilInputType { func_id: FuncId, input_idx: usize },
     #[error("function {func_id:?} output {output_idx} has a nil nominal type id")]

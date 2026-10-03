@@ -27,16 +27,10 @@ pub(super) fn register(library: &mut Library) {
 
 fn register_load(library: &mut Library) {
     library.add(
-        Func::new(LOAD_IMAGE_FUNC_ID, "Load Image")
-            .description("Loads an image from a file on disk.")
-            .category("Image")
-            .pure()
-            .input(
-                FuncInput::required("Path", image_fs_path(FsPathMode::ExistingFile))
-                    .description("Image file to load."),
-            )
-            .output(FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Loaded image."))
-            .lambda(FuncLambda::new(
+        Func::new(
+            LOAD_IMAGE_FUNC_ID,
+            "Load Image",
+            FuncLambda::new(
                 move |Invocation {
                           inputs, outputs, ..
                       }| {
@@ -57,31 +51,22 @@ fn register_load(library: &mut Library) {
                         Ok(())
                     })
                 },
-            )),
+            ),
+        )
+        .description("Loads an image from a file on disk.")
+        .category("Image")
+        .pure()
+        .input(
+            FuncInput::required("Path", image_fs_path(FsPathMode::ExistingFile))
+                .description("Image file to load."),
+        )
+        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Loaded image.")),
     );
 }
 
 fn register_save(library: &mut Library) {
     library.add(
-        Func::new(SAVE_IMAGE_FUNC_ID, "Save Image")
-            .description("Writes an image to a file on disk.")
-            .category("Image")
-            .sink()
-            .input(
-                FuncInput::required("Image", IMAGE_DATA_TYPE.clone()).description("Image to save."),
-            )
-            .input(
-                FuncInput::required("Path", image_fs_path(FsPathMode::NewFile))
-                    .description("Destination file; the extension picks the container."),
-            )
-            .input(
-                enum_input::<ConversionFormat>("Format", &CONVERSION_FORMAT_DATATYPE)
-                    .default(ConstValue::Enum(AS_IS.to_string()))
-                    .description(
-                        "Convert to this color format before saving; \"As Is\" keeps the source format.",
-                    ),
-            )
-            .lambda(FuncLambda::new(move |Invocation { inputs, .. }| {
+        Func::new(SAVE_IMAGE_FUNC_ID, "Save Image", FuncLambda::new(move |Invocation { inputs, .. }| {
                 Box::pin(async move {
                     debug_assert_eq!(inputs.len(), 3);
                     let value = mem::take(&mut inputs[0]);
@@ -115,7 +100,24 @@ fn register_save(library: &mut Library) {
                     .map_err(InvokeError::external)??;
                     Ok(())
                 })
-            })),
+            }))
+            .description("Writes an image to a file on disk.")
+            .category("Image")
+            .sink()
+            .input(
+                FuncInput::required("Image", IMAGE_DATA_TYPE.clone()).description("Image to save."),
+            )
+            .input(
+                FuncInput::required("Path", image_fs_path(FsPathMode::NewFile))
+                    .description("Destination file; the extension picks the container."),
+            )
+            .input(
+                enum_input::<ConversionFormat>("Format", &CONVERSION_FORMAT_DATATYPE)
+                    .default(ConstValue::Enum(AS_IS.to_string()))
+                    .description(
+                        "Convert to this color format before saving; \"As Is\" keeps the source format.",
+                    ),
+            ),
     );
 }
 

@@ -62,7 +62,7 @@ impl ExecutionInput {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub(crate) struct ExecutionEvent {
     pub subscribers: Vec<NodeIdx>,
     pub lambda: EventLambda,
@@ -76,7 +76,7 @@ pub(crate) struct ExecutionEvent {
 /// id sort settled before it. Everything here is `Copy` but the lambda, and that
 /// is an `Arc`, so taking one off a declaration is a refcount bump and the
 /// library stays readable behind it — which is what `Clone` is for.
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub(crate) struct ExecutionNode {
     pub sink: bool,
     /// The authoring node is disabled. Ambient planning excludes it; an
@@ -210,9 +210,32 @@ impl CompiledGraph {
 
 #[cfg(any(test, feature = "internals"))]
 pub(crate) mod internals {
+    use crate::async_lambda;
+    use crate::containers::column::Span;
     use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionNode};
     use crate::execution::identity::NodeIdx;
-    use crate::graph::identity::NodeId;
+    use crate::graph::func::FuncBehavior;
+    use crate::graph::identity::{FuncId, NodeId};
+    use crate::graph::node::CacheMode;
+
+    impl ExecutionNode {
+        /// An enabled, impure, uncached node with no ports, no func id yet and
+        /// a body that does nothing — what a hand-built fixture starts from.
+        pub(crate) fn bare() -> Self {
+            Self {
+                sink: false,
+                disabled: false,
+                behavior: FuncBehavior::Impure,
+                cache: CacheMode::None,
+                special: None,
+                inputs: Span::default(),
+                outputs: Span::default(),
+                events: Span::default(),
+                func_id: FuncId::nil(),
+                lambda: async_lambda!(|_| { Ok(()) }),
+            }
+        }
+    }
 
     impl CompiledGraph {
         /// Append one node, assigning the next dense index — the fixture form

@@ -87,29 +87,10 @@ pub fn worker_events_library() -> Library {
     let mut library = Library::default();
 
     library.add(
-        Func::new(FRAME_EVENT_FUNC_ID, "Frame Event")
-            .description("Emits a recurring frame tick, carrying the elapsed time and frame count.")
-            .category("System")
-            .input(
-                FuncInput::required("Frequency", DataType::Float)
-                    .description("Target ticks per second (Hz). 0 disables the FPS event.")
-                    .default(1.0)
-                    .const_only(),
-            )
-            .output(
-                FuncOutput::new("Delta", DataType::Float)
-                    .description("Seconds elapsed since the previous frame."),
-            )
-            .output(
-                FuncOutput::new("Frame #", DataType::Int)
-                    .description("Frame counter, incremented each tick."),
-            )
-            .event("Always", EventLambda::new(|_state| Box::pin(async {})))
-            .event(
-                "FPS",
-                EventLambda::new(|state| Box::pin(wait_for_fps_event(state))),
-            )
-            .lambda(FuncLambda::new(
+        Func::new(
+            FRAME_EVENT_FUNC_ID,
+            "Frame Event",
+            FuncLambda::new(
                 move |Invocation {
                           event_state,
                           inputs,
@@ -158,7 +139,29 @@ pub fn worker_events_library() -> Library {
                         Ok(())
                     })
                 },
-            )),
+            ),
+        )
+        .description("Emits a recurring frame tick, carrying the elapsed time and frame count.")
+        .category("System")
+        .input(
+            FuncInput::required("Frequency", DataType::Float)
+                .description("Target ticks per second (Hz). 0 disables the FPS event.")
+                .default(1.0)
+                .const_only(),
+        )
+        .output(
+            FuncOutput::new("Delta", DataType::Float)
+                .description("Seconds elapsed since the previous frame."),
+        )
+        .output(
+            FuncOutput::new("Frame #", DataType::Int)
+                .description("Frame counter, incremented each tick."),
+        )
+        .event("Always", EventLambda::new(|_state| Box::pin(async {})))
+        .event(
+            "FPS",
+            EventLambda::new(|state| Box::pin(wait_for_fps_event(state))),
+        ),
     );
 
     library

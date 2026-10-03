@@ -47,9 +47,9 @@ impl CustomValueCodec for StubCodec {
 fn registration_rejects_duplicate_ids_without_replacing_entries() {
     let func_id = FuncId::unique();
     let mut library = Library::default();
-    library.add(testing::with_stub_lambda(Func::new(func_id, "Before")));
+    library.add(testing::stub_func(func_id, "Before"));
     let duplicate_func = panic::catch_unwind(AssertUnwindSafe(|| {
-        library.add(testing::with_stub_lambda(Func::new(func_id, "After")));
+        library.add(testing::stub_func(func_id, "After"));
     }));
     assert!(duplicate_func.is_err());
     assert_eq!(library.by_id(func_id).unwrap().name, "Before");
@@ -66,11 +66,10 @@ fn registration_rejects_duplicate_ids_without_replacing_entries() {
 #[test]
 fn add_rejects_invalid_function_declarations() {
     for func in [
-        Func::new(FuncId::nil(), "nil"),
-        Func::new(FuncId::unique(), "wildcard")
+        testing::stub_func(FuncId::nil(), "nil"),
+        testing::stub_func(FuncId::unique(), "wildcard")
             .input(FuncInput::required("value", DataType::Any))
             .wildcard_output("value", 1),
-        Func::new(FuncId::unique(), "missing"),
     ] {
         let result = panic::catch_unwind(AssertUnwindSafe(|| {
             Library::default().add(func);
@@ -137,20 +136,18 @@ fn an_enum_declaration_over_a_custom_registration_is_refused_either_order() {
 fn an_enum_declared_only_by_an_output_still_blocks_a_custom_registration() {
     let type_id = TypeId::unique();
     let mut library = Library::default();
-    library.add(testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "emit")
+    library.add(
+        testing::stub_func(FuncId::unique(), "emit")
             .output(FuncOutput::new("mode", DataType::Enum(type_id))),
-    ));
+    );
     library.register_type(type_id, TypeEntry::custom("Opaque"));
 }
 
 /// A func whose `mode` input defaults to the enum variant `default`.
 fn modal_func(type_id: TypeId, default: &str) -> Func {
-    testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "modal").input(
-            FuncInput::optional("mode", DataType::Enum(type_id))
-                .default(ConstValue::Enum(default.into())),
-        ),
+    testing::stub_func(FuncId::unique(), "modal").input(
+        FuncInput::optional("mode", DataType::Enum(type_id))
+            .default(ConstValue::Enum(default.into())),
     )
 }
 
@@ -255,22 +252,25 @@ async fn invoke_by_id_and_index() -> Result<(), InvokeError> {
     // what the second call below reads back.
     let mut library = Library::default();
     library.add(
-        Func::new(FuncId::unique(), "sum")
-            .pure()
-            .input(FuncInput::required("A", DataType::Int))
-            .input(FuncInput::required("B", DataType::Int))
-            .output(FuncOutput::new("Sum", DataType::Int))
-            .lambda(async_lambda!(|Invocation {
-                                       state,
-                                       inputs,
-                                       outputs,
-                                       ..
-                                   }| {
+        Func::new(
+            FuncId::unique(),
+            "sum",
+            async_lambda!(|Invocation {
+                               state,
+                               inputs,
+                               outputs,
+                               ..
+                           }| {
                 let total = inputs[0].as_i64().unwrap() + inputs[1].as_i64().unwrap();
                 state.set(total);
                 outputs[0] = ConstValue::Int(total).into();
                 Ok(())
-            })),
+            }),
+        )
+        .pure()
+        .input(FuncInput::required("A", DataType::Int))
+        .input(FuncInput::required("B", DataType::Int))
+        .output(FuncOutput::new("Sum", DataType::Int)),
     );
     let sum = library.by_name("sum").unwrap().id;
     let sum = library.by_id(sum).unwrap();

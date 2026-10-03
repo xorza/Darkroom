@@ -19,23 +19,10 @@ fn scale_random(unit: f64, min: f64, max: f64) -> f64 {
 }
 
 fn random_func() -> Func {
-    Func::new(RANDOM_FUNC_ID, "Random")
-        .description("Generates a random float between min and max values.")
-        .category("Math")
-        .input(
-            FuncInput::required("Min", DataType::Float)
-                .description("Lower bound (inclusive).")
-                .default(0.0),
-        )
-        .input(
-            FuncInput::required("Max", DataType::Float)
-                .description("Upper bound (exclusive).")
-                .default(1.0),
-        )
-        .output(
-            FuncOutput::new("Value", DataType::Float).description("A random number in [Min, Max)."),
-        )
-        .lambda(FuncLambda::new(
+    Func::new(
+        RANDOM_FUNC_ID,
+        "Random",
+        FuncLambda::new(
             move |Invocation {
                       state: cache,
                       inputs,
@@ -52,7 +39,21 @@ fn random_func() -> Func {
                     Ok(())
                 })
             },
-        ))
+        ),
+    )
+    .description("Generates a random float between min and max values.")
+    .category("Math")
+    .input(
+        FuncInput::required("Min", DataType::Float)
+            .description("Lower bound (inclusive).")
+            .default(0.0),
+    )
+    .input(
+        FuncInput::required("Max", DataType::Float)
+            .description("Upper bound (exclusive).")
+            .default(1.0),
+    )
+    .output(FuncOutput::new("Value", DataType::Float).description("A random number in [Min, Max)."))
 }
 
 pub fn random_library() -> Library {

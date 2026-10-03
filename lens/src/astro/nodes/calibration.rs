@@ -61,35 +61,10 @@ struct RoleCachePaths {
 
 pub(crate) fn register(library: &mut Library) {
     library.add(
-        Func::new(BUILD_MASTERS_FUNC_ID, "Build Masters")
-            .description(
-                "Stacks selected raw calibration frames (darks/flats/bias/flat-darks) into \
-                 calibration masters. With `cache` on, each master is written next to its \
-                 same-directory source frames and reused while that selection is unchanged.",
-            )
-            .category("Astro")
-            .pure()
-            .inputs([
-                frames_input("Darks", "dark frames"),
-                frames_input("Flats", "flat frames"),
-                frames_input("Bias", "bias frames"),
-                frames_input("Flat Darks", "flat-dark frames"),
-            ])
-            .input(
-                FuncInput::required("Sigma", DataType::Float)
-                    .description("Hot-pixel threshold, in sigma above the dark background.")
-                    .default(f64::from(DEFAULT_SIGMA_THRESHOLD)),
-            )
-            .input(
-                FuncInput::required("Cache", DataType::Bool)
-                    .description("Write each master next to its frames and reuse it next run.")
-                    .default(true),
-            )
-            .output(
-                FuncOutput::new("Masters", MASTERS_DATA_TYPE.clone())
-                    .description("Calibration masters for the wired roles."),
-            )
-            .lambda(FuncLambda::new(
+        Func::new(
+            BUILD_MASTERS_FUNC_ID,
+            "Build Masters",
+            FuncLambda::new(
                 move |Invocation {
                           ctx,
                           inputs,
@@ -123,7 +98,35 @@ pub(crate) fn register(library: &mut Library) {
                         Ok(())
                     })
                 },
-            )),
+            ),
+        )
+        .description(
+            "Stacks selected raw calibration frames (darks/flats/bias/flat-darks) into \
+                 calibration masters. With `cache` on, each master is written next to its \
+                 same-directory source frames and reused while that selection is unchanged.",
+        )
+        .category("Astro")
+        .pure()
+        .inputs([
+            frames_input("Darks", "dark frames"),
+            frames_input("Flats", "flat frames"),
+            frames_input("Bias", "bias frames"),
+            frames_input("Flat Darks", "flat-dark frames"),
+        ])
+        .input(
+            FuncInput::required("Sigma", DataType::Float)
+                .description("Hot-pixel threshold, in sigma above the dark background.")
+                .default(f64::from(DEFAULT_SIGMA_THRESHOLD)),
+        )
+        .input(
+            FuncInput::required("Cache", DataType::Bool)
+                .description("Write each master next to its frames and reuse it next run.")
+                .default(true),
+        )
+        .output(
+            FuncOutput::new("Masters", MASTERS_DATA_TYPE.clone())
+                .description("Calibration masters for the wired roles."),
+        ),
     );
 }
 
