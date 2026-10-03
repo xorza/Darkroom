@@ -224,32 +224,8 @@ async fn a_flush_failure_uses_the_general_worker_error_report() {
 /// named those nodes and their types are a standing fact about the library.
 #[tokio::test]
 async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
-    use std::any::Any;
-    use std::fmt;
-
     use crate::library::TypeEntry;
-    use crate::{CustomValue, DynamicValue, TypeId};
-
-    const BLOB_TYPE: TypeId = TypeId::literal("9d17a6a2-8f97-4c74-a0b7-1b2c9a9f5f60");
-
-    #[derive(Debug)]
-    struct Blob;
-    impl fmt::Display for Blob {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str("Blob")
-        }
-    }
-    impl CustomValue for Blob {
-        fn type_id(&self) -> TypeId {
-            BLOB_TYPE
-        }
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
-        fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
-            self
-        }
-    }
+    use crate::testing::blob::{BLOB_TYPE, Blob};
 
     let dir = TempDir::new("flush-unsupported");
     let mut graph = TestGraph::new();
@@ -264,7 +240,7 @@ async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
             .cache(CacheMode::Both)
             .output(DataType::Custom(BLOB_TYPE))
             .lambda(async_lambda!(|Invocation { outputs, .. }| {
-                outputs[0] = DynamicValue::Custom(Arc::new(Blob));
+                outputs[0] = Blob::value([1]);
                 Ok(())
             }))
     });
@@ -315,51 +291,23 @@ async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
 /// cache that is already gone.
 #[tokio::test]
 async fn an_install_reports_the_cache_left_after_reconciling() {
-    use std::any::Any;
-    use std::fmt;
-
     use crate::library::TypeEntry;
-    use crate::{CustomValue, DynamicValue, TypeId};
+    use crate::testing::blob::{BLOB_TYPE, Blob};
 
-    const HEAVY_TYPE: TypeId = TypeId::literal("c84cc23f-f313-4adb-8788-ef82c26691ae");
+    // A blob weighs its length.
     const HEAVY_CPU: usize = 4096;
-
-    #[derive(Debug)]
-    struct Heavy;
-    impl fmt::Display for Heavy {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str("Heavy")
-        }
-    }
-    impl CustomValue for Heavy {
-        fn type_id(&self) -> TypeId {
-            HEAVY_TYPE
-        }
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
-        fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
-            self
-        }
-        fn ram_bytes(&self) -> RamUsage {
-            RamUsage {
-                cpu: HEAVY_CPU,
-                gpu: 0,
-            }
-        }
-    }
 
     let mut graph = TestGraph::new();
     graph
         .library
-        .register_type(HEAVY_TYPE, TypeEntry::custom("Heavy"));
+        .register_type(BLOB_TYPE, TypeEntry::custom("Blob"));
     graph.add("heavy", |node| {
         node.pure()
             .sink()
             .cache(CacheMode::Ram)
-            .output(DataType::Custom(HEAVY_TYPE))
+            .output(DataType::Custom(BLOB_TYPE))
             .lambda(async_lambda!(|Invocation { outputs, .. }| {
-                outputs[0] = DynamicValue::Custom(Arc::new(Heavy));
+                outputs[0] = Blob::value(vec![0; HEAVY_CPU]);
                 Ok(())
             }))
     });
@@ -409,10 +357,9 @@ async fn an_install_reports_the_cache_left_after_reconciling() {
 /// unsaved document) would otherwise be a RAM hit on every later run —
 /// which never stores — and silently recompute on reopen.
 ///
-/// And attaching the store *alone* writes nothing. The sweep used to be
-/// inferred from the attach, which made every unrelated store swap — a document
-/// opened, a library edit rebuilding the codec map — pay for a sweep, and
-/// aimed some of them at the wrong root.
+/// And attaching the store *alone* writes nothing: a store is swapped for
+/// reasons that leave nothing owed — a document opened, or saved somewhere
+/// else — so the sweep is asked for, not inferred.
 #[tokio::test]
 async fn resident_disk_backed_values_are_flushed_when_asked_and_not_on_a_bare_attach() {
     let dir = TempDir::new("storeswap");

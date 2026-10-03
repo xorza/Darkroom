@@ -1,14 +1,10 @@
-use std::any::Any;
-use std::fmt;
 use std::io;
 use std::io::Cursor;
 use std::io::SeekFrom;
 use std::pin::Pin;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::task::{Context, Poll};
 
-use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncSeek, AsyncWrite, AsyncWriteExt as _, ReadBuf};
+use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf};
 
 use crate::data::codec::error::CodecFormatError;
 use crate::execution::cache::digest::Digest;
@@ -17,11 +13,10 @@ use crate::execution::cache::disk_store::format::{
     header_len, read, write,
 };
 use crate::graph::func::lambda::OutputDemand;
-use crate::library::{Library, TypeEntry};
-use crate::{CodecError, ConstValue, CustomValue, CustomValueCodec, DynamicValue, TypeId};
-
-/// Fixed, so a blob that names it has known bytes.
-const BLOB_TYPE: TypeId = TypeId::from_u128(0x0011_2233_4455_6677_8899_aabb_ccdd_eeff);
+use crate::library::Library;
+use crate::testing::blob::{Blob, BlobCodec};
+use crate::testing::calls::Calls;
+use crate::{ConstValue, DynamicValue};
 
 /// A demand mask over `output_count` outputs with `produced` marked demanded and the rest
 /// skipped — the shape the run loop hands the decoder.
@@ -96,89 +91,14 @@ where
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-struct Blob(Vec<u8>);
-
-impl fmt::Display for Blob {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Blob({} bytes)", self.0.len())
+fn library(version: u32, under_read: bool, decodes: Calls) -> Library {
+    BlobCodec {
+        version,
+        decodes,
+        under_read,
+        ..BlobCodec::default()
     }
-}
-
-impl CustomValue for Blob {
-    fn type_id(&self) -> TypeId {
-        BLOB_TYPE
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
-        self
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-enum DecodeBehavior {
-    ReadAll,
-    ReadNone,
-}
-
-#[derive(Debug)]
-struct BlobCodec {
-    version: u32,
-    behavior: DecodeBehavior,
-    decode_calls: Arc<AtomicU64>,
-}
-
-#[async_trait::async_trait]
-impl CustomValueCodec for BlobCodec {
-    fn version(&self) -> u32 {
-        self.version
-    }
-
-    async fn encode(
-        &self,
-        value: &dyn CustomValue,
-        writer: &mut (dyn AsyncWrite + Unpin + Send),
-    ) -> Result<(), CodecError> {
-        let blob = value
-            .as_any()
-            .downcast_ref::<Blob>()
-            .expect("BlobCodec is only registered for Blob");
-        writer.write_all(&blob.0).await?;
-        Ok(())
-    }
-
-    async fn decode(
-        &self,
-        reader: &mut (dyn AsyncRead + Unpin + Send),
-        byte_len: u64,
-    ) -> Result<Arc<dyn CustomValue>, CodecError> {
-        self.decode_calls.fetch_add(1, Ordering::SeqCst);
-        let mut bytes = Vec::with_capacity(usize::try_from(byte_len)?);
-        if matches!(self.behavior, DecodeBehavior::ReadAll) {
-            reader.read_to_end(&mut bytes).await?;
-        }
-        Ok(Arc::new(Blob(bytes)))
-    }
-}
-
-fn library(version: u32, behavior: DecodeBehavior, decode_calls: Arc<AtomicU64>) -> Library {
-    let mut library = Library::default();
-    library.register_type(
-        BLOB_TYPE,
-        TypeEntry::custom_with_codec(
-            "Blob",
-            Arc::new(BlobCodec {
-                version,
-                behavior,
-                decode_calls,
-            }),
-        ),
-    );
-    library
+    .library()
 }
 
 async fn encoded(digest: Digest, outputs: &[DynamicValue], library: &Library) -> Vec<u8> {
@@ -195,7 +115,7 @@ async fn encoded(digest: Digest, outputs: &[DynamicValue], library: &Library) ->
 /// blob on disk unreadable or, worse, read with the wrong meaning.
 #[tokio::test]
 async fn a_small_blob_has_the_pinned_layout() {
-    let library = library(7, DecodeBehavior::ReadAll, Arc::default());
+    let library = library(7, false, Calls::default());
     let outputs = [
         DynamicValue::Unbound,
         DynamicValue::Static(ConstValue::Int(-2)),
@@ -219,7 +139,8 @@ async fn a_small_blob_has_the_pinned_layout() {
         &[1, 0, 0, 0], &[0; 16], &[0; 4], &[9, 0, 0, 0, 0, 0, 0, 0],
         &[1, 0, 0, 0], &[0; 16], &[0; 4], &[11, 0, 0, 0, 0, 0, 0, 0],
         &[2, 0, 0, 0],
-        &[0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x00],
+        // The blob type, 78391861-24da-4368-a3a5-2a6b7a47f112, little-endian.
+        &[0x12, 0xf1, 0x47, 0x7a, 0x6b, 0x2a, 0xa5, 0xa3, 0x68, 0x43, 0xda, 0x24, 0x61, 0x18, 0x39, 0x78],
         &[7, 0, 0, 0], &[2, 0, 0, 0, 0, 0, 0, 0],
         // Int: tag 2, -2 as little-endian two's complement.
         &[2, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
@@ -234,8 +155,8 @@ async fn a_small_blob_has_the_pinned_layout() {
 
 #[tokio::test]
 async fn indexed_header_checks_without_body_and_all_values_round_trip() {
-    let calls = Arc::new(AtomicU64::new(0));
-    let library = library(7, DecodeBehavior::ReadAll, Arc::clone(&calls));
+    let calls = Calls::default();
+    let library = library(7, false, calls.clone());
     let digest = Digest([3; 32]);
     let first_blob = (0u8..=255)
         .cycle()
@@ -292,7 +213,7 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
         .unwrap()
         .is_none()
     );
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert_eq!(calls.count(), 0);
 
     let mut reader = ChunkedIo::<_, 2>(Cursor::new(&bytes));
     let restored = read(
@@ -324,7 +245,7 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
         second_blob
     );
     assert_eq!(restored[11].as_i64(), Some(99));
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(calls.count(), 2);
 }
 
 #[tokio::test]
@@ -334,8 +255,8 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
         DynamicValue::from_custom(Blob(vec![10, 11, 12])),
         DynamicValue::Static(ConstValue::Int(77)),
     ];
-    let calls = Arc::new(AtomicU64::new(0));
-    let complete_library = library(1, DecodeBehavior::ReadAll, Arc::clone(&calls));
+    let calls = Calls::default();
+    let complete_library = library(1, false, calls.clone());
     let bytes = encoded(digest, &outputs, &complete_library).await;
     let restored = read(
         &mut Cursor::new(&bytes),
@@ -353,8 +274,8 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
     );
     assert_eq!(restored[1].as_i64(), Some(77));
 
-    let underread_calls = Arc::new(AtomicU64::new(0));
-    let underread_library = library(1, DecodeBehavior::ReadNone, Arc::clone(&underread_calls));
+    let underread_calls = Calls::default();
+    let underread_library = library(1, true, underread_calls.clone());
     let error = read(
         &mut Cursor::new(&bytes),
         bytes.len() as u64,
@@ -365,14 +286,14 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
     .await
     .unwrap_err();
     assert!(matches!(error, CodecFormatError::Frame(_)));
-    assert_eq!(underread_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(underread_calls.count(), 1);
 }
 
 #[tokio::test]
 async fn descriptors_selectively_validate_codecs_and_coverage() {
     let digest = Digest([5; 32]);
-    let calls = Arc::new(AtomicU64::new(0));
-    let registered = library(2, DecodeBehavior::ReadAll, calls);
+    let calls = Calls::default();
+    let registered = library(2, false, calls);
     let outputs = vec![
         DynamicValue::Static(ConstValue::Int(1)),
         DynamicValue::from_custom(Blob(vec![2])),
@@ -421,8 +342,8 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
         .unwrap()
     );
 
-    let changed_calls = Arc::new(AtomicU64::new(0));
-    let changed = library(3, DecodeBehavior::ReadAll, Arc::clone(&changed_calls));
+    let changed_calls = Calls::default();
+    let changed = library(3, false, changed_calls.clone());
     assert!(
         !covers_outputs(
             &mut Cursor::new(&bytes),
@@ -434,7 +355,7 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
         .await
         .unwrap()
     );
-    assert_eq!(changed_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(changed_calls.count(), 0);
 }
 
 #[tokio::test]

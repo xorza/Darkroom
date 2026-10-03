@@ -303,21 +303,15 @@ pub(crate) mod internals {
                 .expect("introspection names a node of the installed program")
         }
 
-        /// The nodes that recomputed in the last run, in the order the schedule
-        /// reached them — deps before consumers.
-        ///
-        /// `process_order` holds every reachable runnable node; this keeps the
-        /// ones that actually invoked a lambda rather than reusing a cache.
-        /// Before any run `node_ran` answers `true` for all of them, so a
-        /// plan-only test reads it as the runnable schedule.
-        pub(crate) fn ran_in_schedule_order(&self) -> Vec<NodeId> {
+        /// The runnable nodes of the last plan, in the order the schedule
+        /// walks them — deps before consumers.
+        pub(crate) fn schedule_order(&self) -> Vec<NodeId> {
             self.schedule
                 .process_order
                 .iter()
                 .copied()
                 .filter(|&node_idx| self.schedule.states[node_idx].is_runnable())
                 .map(|node_idx| self.compiled().node_ids[node_idx])
-                .filter(|&node_id| self.node_ran(node_id))
                 .collect()
         }
 
@@ -337,11 +331,6 @@ pub(crate) mod internals {
 
         pub(crate) fn node_output_readers(&self, node_id: NodeId) -> &[u32] {
             &self.schedule.outputs.readers[self.compiled().by_id(node_id).outputs]
-        }
-
-        /// Whether `node_id` recomputed (rather than reused a cache) in the last run.
-        pub(crate) fn node_ran(&self, node_id: NodeId) -> bool {
-            self.executor.ran(self.compiled(), node_id)
         }
 
         /// Resident-only argument values, test inspection only: reads whatever is

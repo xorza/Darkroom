@@ -697,10 +697,8 @@ impl ExecutionFrame<'_, '_> {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use crate::execution::compile::compiled_graph::CompiledGraph;
-    use crate::execution::executor::{Executor, NodeOutcome};
+    use crate::execution::executor::Executor;
     use crate::execution::identity::OutputIdx;
-    use crate::graph::identity::NodeId;
 
     impl Executor {
         /// How many planned reads of one output the last run left uncompleted —
@@ -709,22 +707,6 @@ pub(crate) mod internals {
         /// in production.
         pub(crate) fn remaining_reads(&self, output_idx: OutputIdx) -> u32 {
             self.remaining_reads.counts[output_idx]
-        }
-
-        /// Whether `node_id` actually recomputed its lambda in the last run — i.e.
-        /// wasn't reused from RAM/disk. Before any run (empty outcomes) every node
-        /// reads as "ran", so plan-only introspection still sees the full schedule;
-        /// an id absent from the installed program is a caller bug and panics.
-        pub(crate) fn ran(&self, program: &CompiledGraph, node_id: NodeId) -> bool {
-            let node_idx = program
-                .node(node_id)
-                .expect("an id absent from the installed program is a caller bug");
-            self.outcomes.get(node_idx).is_none_or(|outcome| {
-                matches!(
-                    outcome,
-                    NodeOutcome::Ran { .. } | NodeOutcome::Failed { .. }
-                )
-            })
         }
     }
 }
