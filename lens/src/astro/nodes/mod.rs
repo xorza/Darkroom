@@ -41,9 +41,5 @@ pub fn astro_library(model_paths: &MlModelPaths) -> Library {
     library
 }
 
-pub fn configure_ml_model_defaults(library: &mut Library, model_paths: &MlModelPaths) {
-    ml::replace(library, model_paths);
-}
-
 #[cfg(test)]
 mod tests;

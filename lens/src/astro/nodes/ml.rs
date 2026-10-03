@@ -22,16 +22,6 @@ pub(crate) fn register(library: &mut Library, model_paths: &MlModelPaths) {
     register_star_removal(library, &model_paths.star_removal);
 }
 
-pub(crate) fn replace(library: &mut Library, model_paths: &MlModelPaths) {
-    library
-        .remove(DENOISE_FUNC_ID)
-        .expect("ML denoise function is registered");
-    library
-        .remove(STAR_REMOVAL_FUNC_ID)
-        .expect("ML star-removal function is registered");
-    register(library, model_paths);
-}
-
 fn register_denoise(library: &mut Library, model_path: &Path) {
     library.add(
         Func::new(

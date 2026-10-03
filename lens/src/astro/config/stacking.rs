@@ -13,41 +13,55 @@
 use common::{Introspect, IntrospectEnum};
 use lumos::{FwhmMode, RegistrationConfig, SipConfig, StackConfig, StarDetectionConfig};
 
-use crate::astro::config::preset::preset_enum;
+use crate::astro::config::preset::Preset;
 
-const COMBINE_SIGMA: f32 = 3.0;
+/// Lumos's star-detection presets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IntrospectEnum)]
+#[config(type_id = "5f3563ab-f65d-4ed2-99ad-c63b9d3377ba")]
+pub(crate) enum DetectionPreset {
+    WideField,
+    HighResolution,
+    CrowdedField,
+    PreciseGround,
+}
 
-preset_enum! {
-    DetectionPreset => StarDetectionConfig,
-    display: "DetectionPreset",
-    variants: {
-        WideField = "wide_field" @ "Wide Field" => StarDetectionConfig::wide_field(),
-        HighResolution = "high_resolution" @ "High Resolution" => StarDetectionConfig::high_resolution(),
-        CrowdedField = "crowded_field" @ "Crowded Field" => StarDetectionConfig::crowded_field(),
-        PreciseGround = "precise_ground" @ "Precise Ground" => StarDetectionConfig::precise_ground(),
+impl Preset for DetectionPreset {
+    type Knobs = DetectionKnobs;
+    type Config = StarDetectionConfig;
+
+    fn config(self) -> StarDetectionConfig {
+        match self {
+            Self::WideField => StarDetectionConfig::wide_field(),
+            Self::HighResolution => StarDetectionConfig::high_resolution(),
+            Self::CrowdedField => StarDetectionConfig::crowded_field(),
+            Self::PreciseGround => StarDetectionConfig::precise_ground(),
+        }
     }
 }
 
-preset_enum! {
-    RegistrationPreset => RegistrationConfig,
-    display: "RegistrationPreset",
-    variants: {
-        Default = "default" @ "Default" => RegistrationConfig::default(),
-        Fast = "fast" @ "Fast" => RegistrationConfig::fast(),
-        Precise = "precise" @ "Precise" => RegistrationConfig::precise(),
-        WideField = "wide_field" @ "Wide Field" => RegistrationConfig::wide_field(),
-        Mosaic = "mosaic" @ "Mosaic" => RegistrationConfig::mosaic(),
-    }
+/// Lumos's registration presets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IntrospectEnum)]
+#[config(type_id = "7f6cfead-d076-4529-9a11-5f4da539168d")]
+pub(crate) enum RegistrationPreset {
+    Default,
+    Fast,
+    Precise,
+    WideField,
+    Mosaic,
 }
 
-preset_enum! {
-    CombinePreset => StackConfig,
-    display: "CombinePreset",
-    variants: {
-        SigmaClipped = "sigma_clipped" @ "Sigma Clipped" => StackConfig::sigma_clipped(COMBINE_SIGMA),
-        Winsorized = "winsorized" @ "Winsorized" => StackConfig::winsorized(COMBINE_SIGMA),
-        Median = "median" @ "Median" => StackConfig::median(),
-        Mean = "mean" @ "Mean" => StackConfig::mean(),
+impl Preset for RegistrationPreset {
+    type Knobs = RegistrationKnobs;
+    type Config = RegistrationConfig;
+
+    fn config(self) -> RegistrationConfig {
+        match self {
+            Self::Default => RegistrationConfig::default(),
+            Self::Fast => RegistrationConfig::fast(),
+            Self::Precise => RegistrationConfig::precise(),
+            Self::WideField => RegistrationConfig::wide_field(),
+            Self::Mosaic => RegistrationConfig::mosaic(),
+        }
     }
 }
 
@@ -165,6 +179,19 @@ pub(crate) enum CombineMethodChoice {
     Mean,
 }
 
+impl Preset for CombineMethodChoice {
+    type Knobs = CombineKnobs;
+    type Config = StackConfig;
+
+    fn config(self) -> StackConfig {
+        CombineKnobs {
+            method: self,
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
 /// The frame-combination knobs the editor offers. `sigma` is read only by the
 /// two rejecting methods.
 #[derive(Debug, Clone, Introspect)]
@@ -178,10 +205,11 @@ pub(crate) struct CombineKnobs {
 }
 
 impl Default for CombineKnobs {
+    /// Sigma-clipped at 3σ, should a rejecting method be picked.
     fn default() -> Self {
         Self {
             method: CombineMethodChoice::SigmaClipped,
-            sigma: COMBINE_SIGMA,
+            sigma: 3.0,
         }
     }
 }

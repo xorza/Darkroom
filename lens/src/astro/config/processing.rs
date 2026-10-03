@@ -18,40 +18,18 @@
 use common::{Introspect, IntrospectEnum};
 use lumos::{BackgroundMode, ColorMode, ExtractBackground, Scnr, Stretch, StretchMethod};
 
-use crate::astro::config::preset::preset_enum;
+use crate::astro::config::preset::Preset;
 
-const SCNR_ADDITIVE_AMOUNT: f32 = 0.5;
+/// The pick is the extraction mode; every other field keeps its default.
+impl Preset for BackgroundMode {
+    type Knobs = ExtractBackground;
+    type Config = ExtractBackground;
 
-preset_enum! {
-    StretchPreset => Stretch,
-    display: "StretchPreset",
-    variants: {
-        AutoAsinh = "auto_asinh" @ "Auto Asinh" => Stretch::auto_asinh(),
-        AutoStf = "auto_stf" @ "Auto STF" => Stretch::auto_stf(),
-    }
-}
-
-preset_enum! {
-    BackgroundModeKind => ExtractBackground,
-    display: "BackgroundMode",
-    variants: {
-        Subtract = "subtract" @ "Subtract" => ExtractBackground {
-            mode: BackgroundMode::Subtract,
+    fn config(self) -> ExtractBackground {
+        ExtractBackground {
+            mode: self,
             ..Default::default()
-        },
-        Divide = "divide" @ "Divide" => ExtractBackground {
-            mode: BackgroundMode::Divide,
-            ..Default::default()
-        },
-    }
-}
-
-preset_enum! {
-    ScnrKind => Scnr,
-    display: "Scnr",
-    variants: {
-        AverageNeutral = "average_neutral" @ "Average Neutral" => Scnr::average_neutral(),
-        AdditiveMask = "additive_mask" @ "Additive Mask" => Scnr::additive_mask(SCNR_ADDITIVE_AMOUNT),
+        }
     }
 }
 
@@ -65,6 +43,19 @@ pub(crate) enum ScnrMethodChoice {
     AdditiveMask,
 }
 
+impl Preset for ScnrMethodChoice {
+    type Knobs = ScnrKnobs;
+    type Config = Scnr;
+
+    fn config(self) -> Scnr {
+        ScnrKnobs {
+            method: self,
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
 /// The editable knobs behind a [`Scnr`]. `amount` is read only by
 /// [`ScnrMethodChoice::AdditiveMask`]; average-neutral is a full-strength clamp
 /// with nothing to tune.
@@ -76,10 +67,11 @@ pub(crate) struct ScnrKnobs {
 }
 
 impl Default for ScnrKnobs {
+    /// Average-neutral; the additive mask, when picked, at half strength.
     fn default() -> Self {
         Self {
             method: ScnrMethodChoice::AverageNeutral,
-            amount: SCNR_ADDITIVE_AMOUNT,
+            amount: 0.5,
         }
     }
 }
@@ -101,7 +93,21 @@ impl From<ScnrKnobs> for Scnr {
 #[config(type_id = "722f7047-a6fc-4538-abd7-8af5fd1ee0ff")]
 pub(crate) enum StretchMethodChoice {
     AutoAsinh,
+    #[config(label = "Auto STF")]
     AutoStf,
+}
+
+impl Preset for StretchMethodChoice {
+    type Knobs = StretchKnobs;
+    type Config = Stretch;
+
+    fn config(self) -> Stretch {
+        StretchKnobs {
+            method: self,
+            ..Default::default()
+        }
+        .into()
+    }
 }
 
 /// The editable knobs behind a [`Stretch`]. Both methods take a
@@ -117,16 +123,14 @@ pub(crate) struct StretchKnobs {
 }
 
 impl Default for StretchKnobs {
+    /// Lumos's automatic presets: [`Stretch::default`]'s auto-asinh, and the
+    /// STF preset's black point should STF be picked.
     fn default() -> Self {
-        let config = Stretch::default();
-        let StretchMethod::AutoAsinh { target_background } = config.method else {
-            panic!("lumos Stretch::default() must remain auto-asinh");
-        };
         Self {
             method: StretchMethodChoice::AutoAsinh,
-            target_background,
-            shadow_sigmas: 1.5,
-            color: config.color,
+            target_background: StretchMethod::AUTO_TARGET_BACKGROUND,
+            shadow_sigmas: StretchMethod::STF_SHADOW_SIGMAS,
+            color: Stretch::default().color,
         }
     }
 }

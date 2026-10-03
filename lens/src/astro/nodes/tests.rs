@@ -1,19 +1,16 @@
 //! Registration tests for the astro library.
 
 use scenarium::testing::func_invoker::FuncInvoker;
-use std::path::PathBuf;
 
 use lumos::{
     DEFAULT_SIGMA_THRESHOLD, Denoise, ExtractBackground, Hdr, LocalContrast,
     PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS,
 };
-use scenarium::{ConstValue, DataType, DynamicValue, FsPathMode, FuncBehavior, ValueVariant};
+use scenarium::{ConstValue, DataType, DynamicValue, FsPathMode, FuncBehavior};
 
-use crate::astro::config::processing::{ScnrKnobs, StretchKnobs};
-use crate::astro::config::stacking::{CombineKnobs, DetectionKnobs, RegistrationKnobs};
 use crate::astro::masters::MASTERS_DATA_TYPE;
 use crate::astro::nodes::io::{ASTRO_IMAGE_PATH_DATA_TYPE, ASTRO_RAW_PATHS_DATA_TYPE};
-use crate::astro::nodes::{MlModelPaths, astro_library, configure_ml_model_defaults};
+use crate::astro::nodes::{MlModelPaths, astro_library};
 use crate::config_node::config_data_type;
 use crate::image::IMAGE_DATA_TYPE;
 
@@ -75,6 +72,119 @@ fn build_masters_node_is_registered() {
     assert_eq!(f.inputs[5].default_value, Some(ConstValue::Bool(true)));
 }
 
+/// Every quick knob is one const-only input beside a detailed config declared
+/// to override it, and the matching builder emits that config: the D12 shape,
+/// on the six processing nodes and on the stacking node's three stages.
+#[test]
+fn every_quick_knob_has_a_config_that_overrides_it() {
+    let lib = astro_library(&MlModelPaths::default());
+    // (node, knob index, knob name, config index, config name, builder)
+    let cases = [
+        (
+            "Auto Stretch",
+            1,
+            "Method",
+            2,
+            "Config",
+            "Build Stretch Config",
+        ),
+        (
+            "Extract Background",
+            1,
+            "Mode",
+            2,
+            "Config",
+            "Build Background Config",
+        ),
+        ("SCNR", 1, "Method", 2, "Config", "Build SCNR Config"),
+        (
+            "Denoise",
+            1,
+            "Strength",
+            2,
+            "Config",
+            "Build Denoise Config",
+        ),
+        (
+            "HDR Compression",
+            1,
+            "Amount",
+            2,
+            "Config",
+            "Build HDR Config",
+        ),
+        (
+            "Local Contrast",
+            1,
+            "Strength",
+            2,
+            "Config",
+            "Build Local Contrast Config",
+        ),
+        (
+            "Stack Lights",
+            2,
+            "Detection",
+            3,
+            "Detection Config",
+            "Build Detection Config",
+        ),
+        (
+            "Stack Lights",
+            4,
+            "Registration",
+            5,
+            "Registration Config",
+            "Build Registration Config",
+        ),
+        (
+            "Stack Lights",
+            6,
+            "Combine",
+            7,
+            "Combine Config",
+            "Build Combine Config",
+        ),
+    ];
+    for (node, knob_idx, knob_name, config_idx, config_name, builder) in cases {
+        let f = lib.by_name(node).unwrap();
+        let knob = &f.inputs[knob_idx];
+        assert_eq!(knob.name, knob_name, "{node}");
+        assert!(knob.const_only && knob.required, "{node} {knob_name}");
+        assert!(
+            knob.default_value.is_some(),
+            "{node} {knob_name} starts set"
+        );
+        let config = &f.inputs[config_idx];
+        assert_eq!(config.name, config_name, "{node}");
+        assert!(!config.required, "{node} {config_name} is optional");
+        assert_eq!(config.overrides, Some(knob_idx), "{node} {config_name}");
+        let built = lib.by_name(builder).unwrap();
+        assert_eq!(
+            built.outputs[0].ty.declared(),
+            config.data_type,
+            "{builder}"
+        );
+    }
+
+    // A strength knob starts where the op's own default does.
+    let strength = |node: &str| lib.by_name(node).unwrap().inputs[1].default_value.clone();
+    assert_eq!(
+        strength("Denoise"),
+        Some(ConstValue::Float(f64::from(Denoise::default().strength)))
+    );
+    assert_eq!(
+        strength("HDR Compression"),
+        Some(ConstValue::Float(f64::from(Hdr::default().amount)))
+    );
+    assert_eq!(
+        strength("Local Contrast"),
+        Some(ConstValue::Float(f64::from(
+            LocalContrast::default().strength
+        )))
+    );
+}
+
 #[test]
 fn stack_lights_node_is_registered() {
     let lib = astro_library(&MlModelPaths::default());
@@ -82,10 +192,6 @@ fn stack_lights_node_is_registered() {
     assert_eq!(f.category, "Astro");
     // Pure: the digest folds exactly the selected light files.
     assert_eq!(f.behavior, FuncBehavior::Pure);
-
-    // One input per stage: lights, masters, detection, registration,
-    // combine, reference.
-    assert_eq!(f.inputs.len(), 6);
     let names: Vec<&str> = f.inputs.iter().map(|i| i.name.as_str()).collect();
     assert_eq!(
         names,
@@ -93,8 +199,11 @@ fn stack_lights_node_is_registered() {
             "Lights",
             "Masters",
             "Detection",
+            "Detection Config",
             "Registration",
+            "Registration Config",
             "Combine",
+            "Combine Config",
             "Reference"
         ]
     );
@@ -102,86 +211,15 @@ fn stack_lights_node_is_registered() {
     assert!(f.inputs[0].required, "light frames are required");
     assert_eq!(f.inputs[1].data_type, MASTERS_DATA_TYPE);
     assert!(!f.inputs[1].required, "masters are genuinely optional");
-    // Each stage is one config-typed input (so a build_*_config wires in),
-    // with the presets offered via value_variants + seeded to the first.
-    // It's required: the seeded preset keeps a fresh node valid, but a
-    // cleared input errors the run rather than silently defaulting.
-    assert!(f.inputs[2].required, "detection is required");
-    assert_eq!(f.inputs[2].data_type, config_data_type::<DetectionKnobs>());
-    let detection_presets: Vec<&str> = f.inputs[2]
-        .value_variants
-        .iter()
-        .map(|o| o.name.as_str())
-        .collect();
-    assert_eq!(
-        detection_presets,
-        [
-            "wide_field",
-            "high_resolution",
-            "crowded_field",
-            "precise_ground"
-        ]
-    );
-    // The dropdown *displays* friendly labels while the stored value stays the
-    // raw preset name (so saved graphs keep resolving) — display is decoupled.
-    let detection_displays: Vec<&str> = f.inputs[2]
-        .value_variants
-        .iter()
-        .map(ValueVariant::label)
-        .collect();
-    assert_eq!(
-        detection_displays,
-        [
-            "Wide Field",
-            "High Resolution",
-            "Crowded Field",
-            "Precise Ground"
-        ]
-    );
-    assert_eq!(
-        f.inputs[2].default_value,
-        Some(ConstValue::Enum("wide_field".to_string())),
-    );
-    assert_eq!(
-        f.inputs[3].data_type,
-        config_data_type::<RegistrationKnobs>()
-    );
-    assert_eq!(f.inputs[4].data_type, config_data_type::<CombineKnobs>());
-    assert_eq!(f.inputs[5].name, "Reference");
-    assert_eq!(f.inputs[5].default_value, Some(ConstValue::Int(-1)));
+    // Unset picks the richest frame; no sentinel stands in for it.
+    assert!(!f.inputs[8].required);
+    assert_eq!(f.inputs[8].default_value, None);
 
     let out_names: Vec<&str> = f.outputs.iter().map(|o| o.name.as_str()).collect();
     assert_eq!(out_names, ["Image", "Coverage", "Weight"]);
     for out in &f.outputs {
         assert_eq!(out.ty.declared(), IMAGE_DATA_TYPE);
     }
-}
-
-#[test]
-fn auto_stretch_node_is_registered() {
-    let lib = astro_library(&MlModelPaths::default());
-    let f = lib.by_name("Auto Stretch").unwrap();
-    assert_eq!(f.category, "Astro");
-    assert_eq!(f.inputs.len(), 2);
-    assert_eq!(f.inputs[0].name, "Image");
-    assert_eq!(f.inputs[0].data_type, IMAGE_DATA_TYPE);
-    assert!(f.inputs[0].required);
-    // `method` is a config-typed input with the presets as value_variants
-    // (seeded to the first), overridable by build_stretch_config.
-    assert_eq!(f.inputs[1].name, "Method");
-    assert_eq!(f.inputs[1].data_type, config_data_type::<StretchKnobs>());
-    let methods: Vec<&str> = f.inputs[1]
-        .value_variants
-        .iter()
-        .map(|o| o.name.as_str())
-        .collect();
-    assert_eq!(methods, ["auto_asinh", "auto_stf"]);
-    assert_eq!(
-        f.inputs[1].default_value,
-        Some(ConstValue::Enum("auto_asinh".to_string())),
-    );
-    assert_eq!(f.outputs.len(), 1);
-    assert_eq!(f.outputs[0].ty.declared(), IMAGE_DATA_TYPE);
 }
 
 #[test]
@@ -210,94 +248,6 @@ fn processing_nodes_are_registered() {
     }
 }
 
-#[test]
-fn scalar_per_frame_nodes_take_optional_config_overrides() {
-    let lib = astro_library(&MlModelPaths::default());
-    // denoise / hdr_compress / local_contrast keep their inline scalar and
-    // gain an optional `config` override fed by the matching build node.
-    let cases: [(&str, &str, DataType); 3] = [
-        (
-            "Denoise",
-            "Build Denoise Config",
-            config_data_type::<Denoise>(),
-        ),
-        (
-            "HDR Compression",
-            "Build HDR Config",
-            config_data_type::<Hdr>(),
-        ),
-        (
-            "Local Contrast",
-            "Build Local Contrast Config",
-            config_data_type::<LocalContrast>(),
-        ),
-    ];
-    for (node, builder, ty) in cases {
-        let f = lib.by_name(node).unwrap();
-        let config = f.inputs.last().unwrap();
-        assert_eq!(config.name, "Config", "{node} override input");
-        assert_eq!(config.data_type, ty, "{node} override type");
-        assert!(!config.required, "{node} config is an optional override");
-
-        // The builder node emits that same config type.
-        let b = lib.by_name(builder).unwrap();
-        assert_eq!(b.category, "Astro");
-        assert_eq!(b.outputs[0].ty.declared(), ty, "{builder} output type");
-        assert!(
-            b.inputs.iter().all(|i| i.required),
-            "{builder} fields required"
-        );
-    }
-}
-
-#[test]
-fn preset_nodes_use_value_variant_picks_with_build_overrides() {
-    let lib = astro_library(&MlModelPaths::default());
-    // Every preset node is consistent: a config-typed input whose `value_variants`
-    // are the preset names (seeded to the first), overridable by a build node.
-    // (node, input name, input index, config type, build node, first preset)
-    let cases: [(&str, &str, usize, DataType, &str, &str); 2] = [
-        (
-            "Auto Stretch",
-            "Method",
-            1,
-            config_data_type::<StretchKnobs>(),
-            "Build Stretch Config",
-            "auto_asinh",
-        ),
-        (
-            "SCNR",
-            "Method",
-            1,
-            config_data_type::<ScnrKnobs>(),
-            "Build SCNR Config",
-            "average_neutral",
-        ),
-    ];
-    for (node, input_name, idx, ty, builder, first_preset) in cases {
-        let f = lib.by_name(node).unwrap();
-        let input = &f.inputs[idx];
-        assert_eq!(input.name, input_name, "{node} preset input name");
-        assert_eq!(input.data_type, ty, "{node} preset input is config-typed");
-        assert!(
-            !input.value_variants.is_empty(),
-            "{node} offers preset value_variants"
-        );
-        assert_eq!(
-            input.value_variants[0].name, first_preset,
-            "{node} first preset"
-        );
-        assert_eq!(
-            input.default_value,
-            Some(ConstValue::Enum(first_preset.to_string())),
-            "{node} seeded to first preset"
-        );
-        // The matching build node exists and emits the same config type.
-        let b = lib.by_name(builder).unwrap();
-        assert_eq!(b.outputs[0].ty.declared(), ty, "{builder} output type");
-    }
-}
-
 #[tokio::test]
 async fn build_background_config_reflects_fields_and_rejects_invalid_values() {
     let lib = astro_library(&MlModelPaths::default());
@@ -323,23 +273,6 @@ async fn build_background_config_reflects_fields_and_rejects_invalid_values() {
         builder.outputs[0].ty.declared(),
         config_data_type::<ExtractBackground>()
     );
-
-    // background_extract is image + one `config` input of that type: a mode
-    // preset quick-pick (value_variants) a builder can wire into to override.
-    let bg = lib.by_name("Extract Background").unwrap();
-    let bg_names: Vec<&str> = bg.inputs.iter().map(|i| i.name.as_str()).collect();
-    assert_eq!(bg_names, ["Image", "Config"]);
-    assert!(bg.inputs[1].required, "config is required (preset-seeded)");
-    assert_eq!(
-        bg.inputs[1].data_type,
-        config_data_type::<ExtractBackground>()
-    );
-    let modes: Vec<&str> = bg.inputs[1]
-        .value_variants
-        .iter()
-        .map(|o| o.name.as_str())
-        .collect();
-    assert_eq!(modes, ["subtract", "divide"]);
 
     let mut inputs: Vec<DynamicValue> = builder
         .inputs
@@ -396,24 +329,4 @@ fn remove_stars_node_has_starless_and_stars_outputs() {
     for o in &f.outputs {
         assert_eq!(o.ty.declared(), IMAGE_DATA_TYPE);
     }
-}
-
-#[test]
-fn configured_model_defaults_replace_both_node_definitions() {
-    let mut library = astro_library(&MlModelPaths::default());
-    let paths = MlModelPaths {
-        denoise: PathBuf::from("/models/denoise.onnx"),
-        star_removal: PathBuf::from("/models/stars.onnx"),
-    };
-    let function_count = library.funcs().len();
-    configure_ml_model_defaults(&mut library, &paths);
-    assert_eq!(library.funcs().len(), function_count);
-    assert_eq!(
-        library.by_name("ML Denoise").unwrap().inputs[1].default_value,
-        Some(ConstValue::FsPath(paths.denoise.display().to_string()))
-    );
-    assert_eq!(
-        library.by_name("ML Star Removal").unwrap().inputs[1].default_value,
-        Some(ConstValue::FsPath(paths.star_removal.display().to_string()))
-    );
 }
