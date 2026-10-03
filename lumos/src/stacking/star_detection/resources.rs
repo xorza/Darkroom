@@ -154,60 +154,57 @@ mod tests {
         );
     }
 
+    /// Each kind of buffer: an acquire from an empty pool allocates, a release pools it, the next
+    /// acquire hands back that same allocation, and one past it allocates again — the counts after
+    /// every step, the reuse by address.
     #[test]
-    fn f32_buffer_acquire_release() {
-        let mut pool = DetectionResources::new(Size2us::new(64, 64));
+    fn acquire_reuses_what_release_returned() {
+        let counts = |floats, bitmasks, labels| BufferCounts {
+            floats,
+            bitmasks,
+            labels,
+        };
+        let mut pool = DetectionResources::new(Size2us::new(64, 32));
 
-        // First acquire allocates
-        let buf1 = pool.acquire_f32();
-        assert_eq!(buf1.width(), 64);
-        assert_eq!(buf1.height(), 64);
+        let first = pool.acquire_f32();
+        assert_eq!((first.width(), first.height()), (64, 32));
+        let address = first.as_ptr();
+        pool.release_f32(first);
+        assert_eq!(buffer_counts(&pool), counts(1, 0, 0));
+        let again = pool.acquire_f32();
+        assert_eq!(again.as_ptr(), address);
+        let fresh = pool.acquire_f32();
+        assert_ne!(fresh.as_ptr(), address);
+        assert_eq!(buffer_counts(&pool), counts(0, 0, 0));
+        pool.release_f32(again);
+        pool.release_f32(fresh);
+        assert_eq!(buffer_counts(&pool), counts(2, 0, 0));
 
-        // Release returns to pool
-        pool.release_f32(buf1);
+        let first = pool.acquire_bit();
+        assert_eq!(first.size, Size2us::new(64, 32));
+        let address = first.words.as_ptr();
+        pool.release_bit(first);
+        assert_eq!(buffer_counts(&pool), counts(2, 1, 0));
+        let again = pool.acquire_bit();
+        assert_eq!(again.words.as_ptr(), address);
+        let fresh = pool.acquire_bit();
+        assert_ne!(fresh.words.as_ptr(), address);
+        pool.release_bit(again);
+        pool.release_bit(fresh);
+        assert_eq!(buffer_counts(&pool), counts(2, 2, 0));
 
-        // Second acquire reuses
-        let buf2 = pool.acquire_f32();
-        assert_eq!(buf2.width(), 64);
-
-        // Third acquire allocates new
-        let buf3 = pool.acquire_f32();
-        assert_eq!(buf3.width(), 64);
-
-        pool.release_f32(buf2);
-        pool.release_f32(buf3);
-    }
-
-    #[test]
-    fn bit_buffer_acquire_release() {
-        let mut pool = DetectionResources::new(Size2us::new(128, 64));
-
-        let buf1 = pool.acquire_bit();
-        assert_eq!(buf1.size, Size2us::new(128, 64));
-
-        pool.release_bit(buf1);
-
-        let buf2 = pool.acquire_bit();
-        assert_eq!(buf2.size.width, 128);
-
-        pool.release_bit(buf2);
-    }
-
-    #[test]
-    fn u32_buffer_acquire_release() {
-        let mut pool = DetectionResources::new(Size2us::new(32, 32));
-
-        let buf1 = pool.acquire_u32();
-        assert_eq!(buf1.width(), 32);
-        assert_eq!(buf1.height(), 32);
-
-        pool.release_u32(buf1);
-
-        // Second acquire reuses same buffer
-        let buf2 = pool.acquire_u32();
-        assert_eq!(buf2.width(), 32);
-
-        pool.release_u32(buf2);
+        let first = pool.acquire_u32();
+        assert_eq!((first.width(), first.height()), (64, 32));
+        let address = first.as_ptr();
+        pool.release_u32(first);
+        assert_eq!(buffer_counts(&pool), counts(2, 2, 1));
+        let again = pool.acquire_u32();
+        assert_eq!(again.as_ptr(), address);
+        let fresh = pool.acquire_u32();
+        assert_ne!(fresh.as_ptr(), address);
+        pool.release_u32(again);
+        pool.release_u32(fresh);
+        assert_eq!(buffer_counts(&pool), counts(2, 2, 2));
     }
 
     #[test]

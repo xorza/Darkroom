@@ -210,6 +210,12 @@ fn prepare_rgb_red_star_survives() {
     let mut pool = DetectionResources::new(Size2us::new(4, 4));
     let out = prepare(&image, &mut pool);
 
-    // Background ~0.10; star pixel should be well above it (~0.10*2/3 + 0.90/3 ≈ 0.37).
-    assert!(out[5] > 0.30, "red star should survive, got {}", out[5]);
+    // Every channel's MAD is 0.01 — R's spread is 8 zeros and 7 of 0.02 about its median 0.11,
+    // the star's 0.79 above the middle — so the weights are equal and the star pixel is the mean
+    // (0.90 + 0.09 + 0.09)/3 = 0.36, to the rounding of three products and two sums (4ε).
+    assert!(
+        (out[5] - 0.36).abs() <= 4.0 * f32::EPSILON * 0.36,
+        "red star pixel {}",
+        out[5]
+    );
 }

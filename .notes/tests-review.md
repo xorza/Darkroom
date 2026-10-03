@@ -19,12 +19,6 @@ Two items need a manifest change, which needs your approval: `common` with `inte
 ## Tests that cannot fail, or do not run the code their name claims
 The fixture, the tolerance or the call path makes the assertion true whatever production does. These tests report coverage that does not exist, so they come first.
 
-### lumos — star_detection
-Short paths are relative to `lumos/src/stacking/star_detection/`.
-
-- [ ] `lumos/src/stacking/star_detection/median_filter/tests.rs:556` (`chunk_boundary`), `:202` (`large_image_parallel`), `:6`, `:264`, `:514`, `:530` — the chunk and row-split tests use either uniform input or input whose rows are identical. A wrong row offset at a chunk boundary therefore produces the same output. Use a row-varying field, compared against a sort-based naive 3×3 reference over the whole image.
-- [ ] `lumos/src/stacking/star_detection/resources.rs:146-161,177-185` — comments say "Second acquire reuses" and "Third acquire allocates new", but the tests assert only width and height. Assert `buffer_counts` after each step.
-
 ### lumos — combine, drizzle
 Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
 
@@ -94,11 +88,6 @@ Paths are relative to the repository root.
 - [ ] `lumos/tests/public_api.rs:114-128,141-156,187-194,211-214,217-226,231-235,349-354,359-368,455-467` — most asserts read back the literal the test just wrote (`max_stars == 50` after setting 50, destructured `StarMatch`, `CalibrationSet {1,2,3,4}`). Reachability is proven by the `use` and the compile. Keep the behavioural checks (`sample_domain`, `commensurate_with`, `required_stars`, `Display` strings, the zero-copy pointer checks, defaults) and drop the echoes.
 - [ ] `lumos/src/testing/assertions.rs:297-308` — one `tol` serves as both absolute and relative bound, so for `|x| > 1` every check is the looser relative one. For example, `assert_close!(p.x, 13.0, EPSILON)` (`registration/transform/tests.rs:28`) admits 13·EPSILON. Line 372 asserts a fact about f64, not about the code.
 
-### lumos — star_detection
-Short paths are relative to `lumos/src/stacking/star_detection/`.
-
-- [ ] `lumos/src/stacking/star_detection/detector/stages/prepare/tests.rs:329` — `out[5] > 0.30` sits beside a comment that hand-computes ≈0.37. The weights for this fixture can be computed exactly, so assert the exact value. `fwhm/tests.rs:375` allows 0.05 on an exact median.
-
 ### lumos — combine, drizzle
 Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
 
@@ -133,10 +122,6 @@ Paths without a crate prefix are relative to `scenarium/src/`.
 
 ## Risky behavior with no test
 Branches with real failure modes that no test reaches.
-
-### lumos — star_detection
-Short paths are relative to `lumos/src/stacking/star_detection/`.
-
 
 ### lumos — combine, drizzle
 Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
@@ -193,16 +178,6 @@ Paths are relative to the repository root.
 - [ ] `lumos/src/stacking/calibration_masters/prepared_flat/tests.rs:27-101,175-220` — `reference_apply` is the "previous per-light equation" kept as an oracle: a ~75-line second implementation of per-colour flat normalisation, asserted bit-exact. It sums with a rayon `reduce` in f64, whose association order depends on work-stealing. The hand-constructed bit-exact test above it (117-173) already pins the math, so this is a legacy-implementation test.
 - [ ] Near-identical calibrate tests that should be one table: `lumos/src/stacking/calibration_masters/tests/mod.rs:635-703` (dark-only, bias-only, dark-over-bias: same 4×4 constant light, different set, one expected value), and `744-820` / `979-1056` / `1058-1106` (full pipeline, flat-dark, flat-dark-over-bias: same signal/vignetting fixture, differing only in the flat subtractor). 24 copies of `CalibrationMasters::from_images(…, DEFAULT_SIGMA_THRESHOLD, CancelToken::never()).unwrap()` in that file collapse into one helper.
 - [ ] `lumos/src/stacking/pipeline/tests/mod.rs:824-918` — `streaming_disk_tier_matches_ram_on_real_lights` is a weaker copy of the always-run `ram_and_streaming_tiers_produce_identical_stacks` (614-772). It compares only the image, not weight, coverage, variance or metadata, and it has no premise check that the disk tier actually spilled. `calibrate_align_stack_runs_end_to_end_on_real_lights` (774-822) asserts only `width > 0` and frame bookkeeping.
-
-### lumos — star_detection
-Short paths are relative to `lumos/src/stacking/star_detection/`.
-
-- [ ] `deblend/local_maxima/tests.rs` reads the `DetectionConfig` defaults (3, 0.3) through `default_separation`/`default_prominence`, and most tests then use the literals anyway. `tests/mem_budget_probe.rs:152` (`WORKING_SET_PLANES = 12`) is an underived second figure next to `memory::DETECTION_WORKING_PLANES` (8).
-- [ ] `lumos/src/stacking/star_detection/tests/real_data.rs:125-293` and `labeling/bench.rs:14-40` — both re-implement the detection stage "same as real pipeline", including `dilate_mask(.., 1, ..)` before labeling. `DetectResult::from_image` labels the raw threshold mask with no dilation (`detector/stages/detect/mod.rs:122`). Drive `DetectResult::from_image` instead.
-- [ ] `lumos/src/stacking/star_detection/tests/mod.rs:76-163` — `Scenario::default()` (flux 5-14, sky 0.1, margin 16, FWHM 4) is a near-copy of `testing::synthetic::fixtures::star_field` (flux 6-16, sky 0.1, margin 16, FWHM 4). Benches use one, tests the other. `Scenario::frame` also throws away the cosmic-ray positions `add_cosmic_rays` returns, so `cosmic_ray_tests.rs:37,165` re-add rays by hand.
-- [ ] `lumos/src/stacking/star_detection/detector/bench.rs:124-126` — uses `rand::StdRng` instead of `testing::TestRng`.
-- [ ] Noise is generated by hand instead of with `patterns::add_gaussian_noise` (documented as "the canonical noise helper"): `convolution/tests/mod.rs:397,480-484`.
-- [ ] `lumos/src/stacking/star_detection/detector/bench.rs:33-40,92-99,108-115` — takes `frame.image.channel(0).clone()` and rebuilds a `LinearImage` from it, when `frame.image` already is one. `cosmic_ray_tests.rs:50,169` and `tests/mod.rs:158` build `LinearImage::from_pixels(ImageDimensions…)` where the prelude's `gray_image` exists. `stage_effects/detection_tests.rs:115,263,346` inline `background_estimate`, which the sibling `stage_effects/mod.rs:24` provides. `:97,239,324` and `cosmic_ray_tests.rs:24,155` hard-code 256×256 instead of reading the frame.
 
 ### lumos — combine, drizzle
 Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
@@ -265,10 +240,6 @@ Paths are relative to the repository root.
 - [ ] `lumos/src/stacking/pipeline/tests/mod.rs:32-43` — the `BaseField.registration` field is always `RegistrationConfig::default()`, a struct that only carries a constant. `552-561`: the first `dedup()` before the sort is redundant.
 - [ ] `lumos/src/stacking/calibration_masters/real_data_tests.rs:147-166` — `mean_of` returns a mean that both callers discard. `304-313` pins nine unexplained golden counts (50_248 …) as a snapshot with no correctness rationale.
 
-### lumos — star_detection
-Short paths are relative to `lumos/src/stacking/star_detection/`.
-
-
 ### lumos — combine, drizzle
 Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
 
@@ -327,23 +298,12 @@ Paths are relative to the repository root.
 
 - [ ] `lumos/src/stacking/calibration_masters/tests/mod.rs:870,872` — the messages "1000 > 199" and "1000 < 1296" come from an older fixture. The current one injects 400, and the comment above (lines 824-831) derives thresholds of 145 and 693.
 - [ ] `lumos/src/stacking/pipeline/tests/mem_budget_probe.rs:11-13,30-32` — this claims the file loaders are "libraw-RAW-only" and that `calibrate_align_stack` "needs real RAW data". `lumos/src/stacking/pipeline/tests/mod.rs:494-509` drives `calibrate_align_stack` on synthetic mono-CFA FITS in the default suite. The probe could do the same rather than proxy through `stack()`.
-- [ ] `lumos/src/memory.rs:141`, `lumos/src/stacking/pipeline/tests/mem_budget_probe.rs:2`, `lumos/src/stacking/combine/tests/mem_budget_probe.rs:2,10`, `lumos/src/stacking/star_detection/tests/mem_budget_probe.rs:2,53` — these reference `mem_budget_tests`. The modules are named `mem_budget`.
 - [ ] `lumos/src/testing/mem_probe.rs:1-2` — lists two probe users (combine, star_detection). There are four (plus `stacking/pipeline/tests/mem_budget_probe.rs` and `image_ops/mem_budget_probe.rs`).
 - [ ] `lumos/src/testing/real_data/mod.rs:4-6` — says single-subsystem real-data tests "live with that subsystem, in its `tests/real_data.rs`". `stacking/calibration_masters/real_data_tests.rs` and `stacking/registration/real_data_tests.rs` sit beside `mod.rs`, although `calibration_masters/tests/` exists.
 - [ ] `lumos/src/testing/mod.rs:177-183` — the doc of a deleted "save image as 8-bit RGB" helper, plus a duplicated `#[cfg(feature = "real-data")]`, are now glued onto `first_raw_file`.
 - [ ] `lumos/src/stacking/calibration_masters/defect_map/tests.rs:756` — the orphaned doc of a removed local X-Trans constant now prefixes `brute_force_xtrans_median`.
 - [ ] `lumos/src/testing/synthetic/backgrounds.rs:8,26,57` — documents an "Amplifier glow" generator that does not exist, and `width`/`height` arguments that are now `size`. `lumos/src/testing/synthetic/mod.rs:14-22`: the doc example uses the `lumos::testing::` path (crate-private, `cfg(test)`), has a stray `//!` mid-line (line 19), and calls the private `Scene::positions`.
 - [ ] `lumos/scripts/clone-refs.sh:90-91` — "rust-fitsio … the fitsio Rust binding lumos uses" and the `astro_image/fits` module paths are stale. lumos reads FITS through `fits-well`, and `fitsio` is not in `Cargo.lock`.
-
-### lumos — star_detection
-Short paths are relative to `lumos/src/stacking/star_detection/`.
-
-- [ ] Change narration:
-  - `mask_dilation/tests.rs:157-160`
-  - `median_filter/simd/tests.rs:4`
-- [ ] Stale or false comments:
-  - `tests/mem_budget_probe.rs:100,151` cite `mem_budget_tests`; the module is `mem_budget`.
-  - `detect_test_utils.rs:11`.
 
 ### lumos — combine, drizzle
 Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).

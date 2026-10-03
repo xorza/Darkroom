@@ -9,20 +9,35 @@ use crate::testing::synthetic::camera::Camera;
 use crate::testing::synthetic::observe::{Observation, SimFrame, render};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
 
+/// The total-flux range of [`star_field`]'s stars, log-uniform: bright, and clear of saturation on
+/// the 0.1 sky at the 4-px FWHM.
+pub(crate) const STAR_FIELD_FLUX: (f32, f32) = (5.0, 14.0);
+
+/// [`star_field`]'s flat sky.
+pub(crate) const STAR_FIELD_SKY: f32 = 0.1;
+
+/// How far [`star_field`] keeps its stars from the frame's edge, in pixels.
+pub(crate) const STAR_FIELD_MARGIN: f64 = 16.0;
+
+/// [`star_field`]'s PSF FWHM, in pixels.
+pub(crate) const STAR_FIELD_FWHM: f32 = 4.0;
+
 /// A uniform-random field of `num_stars` bright, cleanly-detected stars over a modest sky —
 /// the general-purpose populated field.
 pub(crate) fn star_field(size: Size2us, num_stars: usize, seed: u64) -> SimFrame {
     let scene = Scene::random_field(
         size,
         num_stars,
-        (6.0, 16.0),
-        BackgroundField::Uniform { level: 0.1 },
-        16.0,
+        STAR_FIELD_FLUX,
+        BackgroundField::Uniform {
+            level: STAR_FIELD_SKY,
+        },
+        STAR_FIELD_MARGIN,
         seed,
     );
     render(
         &scene,
-        &Camera::realistic(4.0),
+        &Camera::realistic(STAR_FIELD_FWHM),
         &Observation::reference(seed),
     )
 }
@@ -76,6 +91,7 @@ mod tests {
             .copied()
             .fold(0.0f32, f32::max);
         assert!(peak > 0.3, "peak {peak}");
+        assert!(peak < 0.95, "the brightest star saturates: {peak}");
     }
 
     #[test]

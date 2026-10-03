@@ -1,6 +1,7 @@
 //! Tests of the shared component data, and comparisons of `local_maxima` with
 //! `multi_threshold`.
 
+use crate::stacking::star_detection::config::detection_config::{Deblend, DetectionConfig};
 use crate::stacking::star_detection::deblend::component::Component;
 use crate::stacking::star_detection::deblend::deblend_buffers::DeblendBuffers;
 use crate::stacking::star_detection::deblend::internals::{
@@ -11,16 +12,16 @@ use crate::stacking::star_detection::deblend::region::Region;
 use crate::testing::prelude::*;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 
-/// [`deblend_local_maxima`] into a fresh list.
-fn local_maxima_regions(
-    component: &Component<'_>,
-    min_separation: usize,
-    min_prominence: f32,
-) -> Vec<Region> {
+/// [`deblend_local_maxima`] at the default config's separation and prominence, into a fresh list.
+fn local_maxima_regions(component: &Component<'_>) -> Vec<Region> {
+    let config = DetectionConfig::default();
+    let Deblend::LocalMaxima { min_prominence } = config.deblend else {
+        unreachable!("the default deblends by local maxima")
+    };
     let mut regions = Vec::new();
     deblend_local_maxima(
         component,
-        min_separation,
+        config.deblend_min_separation,
         min_prominence,
         &mut DeblendBuffers::default(),
         &mut regions,
@@ -44,8 +45,7 @@ fn local_vs_multi_threshold_single_star() {
         )],
     );
 
-    // Local maxima deblending (default: min_separation=3, min_prominence=0.3)
-    let local_result = local_maxima_regions(&Component::new(&data, &pixels, &labels), 3, 0.3);
+    let local_result = local_maxima_regions(&Component::new(&data, &pixels, &labels));
 
     // Multi-threshold deblending (default: n_thresholds=32, min_separation=3, min_contrast=0.005)
     let mt_result =
@@ -69,7 +69,7 @@ fn local_vs_multi_threshold_two_stars() {
     } = separated_pair(0.8);
 
     // Local maxima deblending
-    let local_result = local_maxima_regions(&Component::new(&data, &pixels, &labels), 3, 0.3);
+    let local_result = local_maxima_regions(&Component::new(&data, &pixels, &labels));
 
     // Multi-threshold deblending
     let mt_result =

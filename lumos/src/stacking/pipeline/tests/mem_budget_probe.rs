@@ -1,5 +1,5 @@
 //! Live peak-RSS memory probes for the end-to-end stacking pipeline — the manual, at-scale
-//! counterparts to the deterministic guards in `mem_budget_tests`.
+//! counterparts to the deterministic guards in `mem_budget`.
 //!
 //! Two probes, covering the pipeline's two memory regimes on **large synthetic data**:
 //!

@@ -4,40 +4,30 @@ use crate::bit_buffer2::BitBuffer2;
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::config::detection_config::Connectivity;
 use crate::stacking::star_detection::labeling::labeler::Labeler;
-use crate::stacking::star_detection::mask_dilation::dilate_mask;
-use crate::stacking::star_detection::threshold_mask::{ThresholdParams, create_threshold_mask};
+use crate::stacking::star_detection::threshold_mask::{
+    ThresholdParams, create_residual_threshold_mask,
+};
 use crate::testing::prelude::*;
 use crate::testing::synthetic::background_map;
 use crate::testing::synthetic::fixtures::star_field;
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
-/// Create a threshold mask using the real detection pipeline.
-/// Uses background estimation, sigma thresholding, and dilation.
+/// The mask the detect stage labels, without its matched filter: the residual of `pixels` past
+/// `sigma_threshold` of its sky noise.
 fn create_detection_mask(pixels: &Buffer2<f32>, sigma_threshold: f32) -> BitBuffer2 {
-    let width = pixels.width();
-    let height = pixels.height();
-
-    // Create background map (same as real pipeline)
     let background = background_map::estimate(pixels, &BackgroundConfig::default());
-
-    // Create threshold mask
-    let mut mask = BitBuffer2::new_filled(Size2us::new(width, height), false);
-    create_threshold_mask(
-        pixels,
-        &background.background,
-        &background.noise,
+    let sky = background.sky_noise();
+    let mut mask = BitBuffer2::new_filled(Size2us::new(pixels.width(), pixels.height()), false);
+    create_residual_threshold_mask(
+        &background.residual_of(pixels),
+        &sky.noise,
         ThresholdParams {
             sigma: sigma_threshold,
-            min_noise: background.noise_floor,
+            min_noise: sky.floor,
         },
         &mut mask,
     );
-
-    // Dilate mask (same as real pipeline - radius 1)
-    let mut scratch = BitBuffer2::new_default(Size2us::new(width, height));
-    dilate_mask(&mut mask, 1, &mut scratch);
-
     mask
 }
 

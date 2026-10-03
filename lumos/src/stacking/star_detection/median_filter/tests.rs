@@ -1,20 +1,7 @@
 //! Tests for 3x3 median filter.
 
 use crate::stacking::star_detection::median_filter::*;
-
-#[test]
-fn uniform_image() {
-    let pixels = Buffer2::new_filled(100, 100, 0.5f32);
-    let mut output = Buffer2::new_default(100, 100);
-    median_filter_3x3(&pixels, &mut output);
-
-    for (i, &val) in output.iter().enumerate() {
-        assert!(
-            (val - 0.5).abs() < 1e-6,
-            "Pixel {i} should be 0.5, got {val}"
-        );
-    }
-}
+use crate::testing::test_rng::TestRng;
 
 #[test]
 fn single_hot_pixel() {
@@ -197,84 +184,52 @@ fn salt_and_pepper_noise() {
 }
 
 #[test]
-fn large_image_parallel() {
-    // 256x256 sawtooth: pixel[i] = (i % 256) / 255.0
-    // Each row repeats [0/255, 1/255, ..., 255/255].
-    let width = 256;
-    let height = 256;
-    let data: Vec<f32> = (0..width * height)
-        .map(|i| (i % 256) as f32 / 255.0)
-        .collect();
-    let pixels = Buffer2::new(width, height, data);
-
-    let mut output = Buffer2::new_default(width, height);
-    median_filter_3x3(&pixels, &mut output);
-
-    assert_eq!(output.len(), width * height);
-
-    // Verify against scalar reference for specific interior pixels.
-    // Interior pixel (x,y) with x in 1..255, y in 1..255 has 9 neighbors.
-    // All rows are identical so the 3 rows in the neighborhood are the same.
-    // Neighborhood at (128,128): 3 copies of [127/255, 128/255, 129/255]
-    //   = [127/255]*3, [128/255]*3, [129/255]*3 → median = 128/255
-    let expected_128 = 128.0 / 255.0;
-    assert!(
-        (output[(128, 128)] - expected_128).abs() < 1e-6,
-        "Pixel (128,128) should be {}, got {}",
-        expected_128,
-        output[(128, 128)]
-    );
-
-    // Pixel (64,64): median of 3×[63,64,65]/255 = 64/255
-    let expected_64 = 64.0 / 255.0;
-    assert!(
-        (output[(64, 64)] - expected_64).abs() < 1e-6,
-        "Pixel (64,64) should be {}, got {}",
-        expected_64,
-        output[(64, 64)]
-    );
-
-    // Pixel (200,100): median of 3×[199,200,201]/255 = 200/255
-    let expected_200 = 200.0 / 255.0;
-    assert!(
-        (output[(200, 100)] - expected_200).abs() < 1e-6,
-        "Pixel (200,100) should be {}, got {}",
-        expected_200,
-        output[(200, 100)]
-    );
-}
-
-#[test]
 fn median4_averages_the_two_middle_values() {
     let mut v = [0.4, 0.1, 0.3, 0.2];
-    // Sorted: [0.1, 0.2, 0.3, 0.4], median = (0.2 + 0.3) / 2 = 0.25
-    assert!((median4(&mut v) - 0.25).abs() < 1e-6);
+    assert_eq!(median4(&mut v), f32::midpoint(0.2, 0.3));
+}
+
+/// Every order of six distinct values — 720 of them — and every pattern of two values: the
+/// network must sort all, not just the orders a hand-picked case happens to take.
+#[test]
+fn median_networks_sort_every_order() {
+    fn orders(n: usize) -> Vec<Vec<f32>> {
+        let mut all: Vec<Vec<f32>> = vec![Vec::new()];
+        for _ in 0..n {
+            let mut longer = Vec::new();
+            for prefix in &all {
+                for v in (0..n).map(|v| v as f32).filter(|v| !prefix.contains(v)) {
+                    let mut next = prefix.clone();
+                    next.push(v);
+                    longer.push(next);
+                }
+            }
+            all = longer;
+        }
+        all
+    }
+    for order in orders(6) {
+        assert_eq!(median6(&mut order.clone()), 2.5, "{order:?}");
+    }
+    for order in orders(4) {
+        assert_eq!(median4(&mut order.clone()), 1.5, "{order:?}");
+    }
+    for bits in 0..64u32 {
+        let mut v: Vec<f32> = (0..6).map(|i| ((bits >> i) & 1) as f32).collect();
+        let mut sorted = v.clone();
+        sorted.sort_by(f32::total_cmp);
+        assert_eq!(
+            median6(&mut v),
+            f32::midpoint(sorted[2], sorted[3]),
+            "{bits:06b}"
+        );
+    }
 }
 
 #[test]
 fn median6_averages_the_two_middle_values() {
     let mut v = [0.6, 0.1, 0.5, 0.2, 0.4, 0.3];
-    // Sorted: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], median = (0.3 + 0.4) / 2 = 0.35
-    assert!((median6(&mut v) - 0.35).abs() < 1e-6);
-}
-
-#[test]
-fn non_square_image() {
-    // 20x10 uniform image: median of all 0.5 values = 0.5 everywhere
-    let width = 20;
-    let height = 10;
-    let pixels = Buffer2::new_filled(width, height, 0.5f32);
-
-    let mut output = Buffer2::new_default(width, height);
-    median_filter_3x3(&pixels, &mut output);
-
-    assert_eq!(output.len(), width * height);
-    for (i, &val) in output.iter().enumerate() {
-        assert!(
-            (val - 0.5).abs() < 1e-6,
-            "Pixel {i} should be 0.5, got {val}"
-        );
-    }
+    assert_eq!(median6(&mut v), f32::midpoint(0.3, 0.4));
 }
 
 #[test]
@@ -507,38 +462,6 @@ fn filters_the_interior_of_a_4x4_image() {
 }
 
 #[test]
-fn wide_image() {
-    // Very wide, short image
-    let width = 100;
-    let height = 4;
-    let pixels = Buffer2::new_filled(width, height, 0.5f32);
-
-    let mut output = Buffer2::new_default(width, height);
-    median_filter_3x3(&pixels, &mut output);
-
-    assert_eq!(output.len(), width * height);
-    for &val in &output {
-        assert!((val - 0.5).abs() < 1e-6);
-    }
-}
-
-#[test]
-fn tall_image() {
-    // Very tall, narrow image
-    let width = 4;
-    let height = 100;
-    let pixels = Buffer2::new_filled(width, height, 0.5f32);
-
-    let mut output = Buffer2::new_default(width, height);
-    median_filter_3x3(&pixels, &mut output);
-
-    assert_eq!(output.len(), width * height);
-    for &val in &output {
-        assert!((val - 0.5).abs() < 1e-6);
-    }
-}
-
-#[test]
 fn median_with_duplicates() {
     // Test median functions with duplicate values
     let mut v4 = [0.3, 0.3, 0.7, 0.7];
@@ -548,23 +471,56 @@ fn median_with_duplicates() {
     assert!((median6(&mut v6) - 0.5).abs() < 1e-6);
 }
 
-#[test]
-fn chunk_boundary() {
-    // Test image height that's not a multiple of the chunk size (8)
-    // This ensures chunk boundary handling is correct
-    for height in [7, 9, 15, 17, 23, 25] {
-        let width = 10;
-        let pixels = Buffer2::new_filled(width, height, 0.5f32);
+/// The median of the in-frame 3×3 neighbourhood by sorting it: 9 values inside, 6 on an edge, 4
+/// at a corner, the two middle ones averaged when even.
+fn reference_median(pixels: &Buffer2<f32>, x: usize, y: usize) -> f32 {
+    let mut values: Vec<f32> = (y.saturating_sub(1)..(y + 2).min(pixels.height()))
+        .flat_map(|ny| (x.saturating_sub(1)..(x + 2).min(pixels.width())).map(move |nx| (nx, ny)))
+        .map(|(nx, ny)| pixels[(nx, ny)])
+        .collect();
+    values.sort_by(f32::total_cmp);
+    let mid = values.len() / 2;
+    if values.len() % 2 == 1 {
+        values[mid]
+    } else {
+        f32::midpoint(values[mid - 1], values[mid])
+    }
+}
 
+/// Every pixel equals the sorted reference, bit for bit, on random fields whose rows all differ —
+/// so a row read from the wrong offset, at a SIMD remainder or where the parallel split cuts the
+/// rows, changes the answer. The sizes cover the 3×3 minimum, odd widths past every lane count,
+/// one-row-thick interiors both ways, and frames tall enough to split across threads.
+#[test]
+fn matches_a_sorted_reference_everywhere() {
+    for (width, height) in [
+        (3, 3),
+        (4, 4),
+        (5, 7),
+        (17, 9),
+        (33, 3),
+        (3, 33),
+        (100, 4),
+        (4, 100),
+        (130, 67),
+        (1031, 37),
+    ] {
+        let mut rng = TestRng::new((width * 1000 + height) as u64);
+        let pixels = Buffer2::new(
+            width,
+            height,
+            (0..width * height).map(|_| rng.next_f32()).collect(),
+        );
         let mut output = Buffer2::new_default(width, height);
         median_filter_3x3(&pixels, &mut output);
-
-        assert_eq!(output.len(), width * height);
-        for (i, &val) in output.iter().enumerate() {
-            assert!(
-                (val - 0.5).abs() < 1e-6,
-                "Height {height}: Pixel {i} should be 0.5, got {val}"
-            );
+        for y in 0..height {
+            for x in 0..width {
+                assert_eq!(
+                    output[(x, y)],
+                    reference_median(&pixels, x, y),
+                    "{width}×{height} at ({x}, {y})"
+                );
+            }
         }
     }
 }

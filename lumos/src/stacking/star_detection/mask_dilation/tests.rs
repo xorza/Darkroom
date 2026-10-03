@@ -151,9 +151,8 @@ fn dilate_mask_radius_above_63_panics() {
 ///
 /// The reference rescans a `(2r+1)^2` window per pixel, so it shares no structure with the
 /// word-parallel bit implementation under test — an independent oracle, not a second copy of the
-/// same logic. It also checks the whole buffer, where the hand-written cases this replaces
-/// spot-checked a few pixels each. The explicit-footprint tests above stay as the arithmetic
-/// anchor that validates the reference itself.
+/// same logic — and it checks the whole buffer. The explicit-footprint tests above are the
+/// arithmetic anchor that validates the reference itself.
 #[test]
 fn dilation_matches_the_brute_force_reference() {
     /// How a case seeds its mask before dilating.

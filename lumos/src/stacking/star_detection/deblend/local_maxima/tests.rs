@@ -99,11 +99,11 @@ fn two_separated_stars() {
     );
     let component = Component::new(&fixture.data, &fixture.pixels, &fixture.labels);
 
-    let peaks = maxima(&component, 3, 0.3);
+    let peaks = maxima(&component, default_separation(), default_prominence());
     assert_eq!(positions(&peaks), [(30, 50), (70, 50)]);
     assert_eq!((peaks[0].value, peaks[1].value), (1.0, 0.8));
 
-    let regions = deblended(&component, 3, 0.3);
+    let regions = deblended(&component, default_separation(), default_prominence());
     let blob_area = |left: bool| {
         component
             .pixels()
@@ -205,7 +205,7 @@ fn peaks_sorted_by_brightness() {
     );
     let component = Component::new(&fixture.data, &fixture.pixels, &fixture.labels);
 
-    let peaks = maxima(&component, 3, 0.3);
+    let peaks = maxima(&component, default_separation(), default_prominence());
     assert_eq!(positions(&peaks), [(50, 50), (70, 50), (30, 50)]);
 
     // The component's own peak is the brightest pixel.
@@ -353,7 +353,11 @@ fn single_pixel_is_local_max() {
         area: 1,
     };
 
-    let peaks = maxima(&Component::new(&data, &pixels, &labels), 3, 0.3);
+    let peaks = maxima(
+        &Component::new(&data, &pixels, &labels),
+        default_separation(),
+        default_prominence(),
+    );
     assert_eq!(positions(&peaks), [(5, 5)]);
 }
 
