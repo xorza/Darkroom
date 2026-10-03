@@ -231,6 +231,10 @@ impl TestGraph {
         self.node_mut(name).disabled = true;
     }
 
+    pub fn enable(&mut self, name: &str) {
+        self.node_mut(name).disabled = false;
+    }
+
     pub fn cache(&mut self, name: &str, mode: CacheMode) {
         self.node_mut(name).cache = mode;
     }

@@ -215,9 +215,9 @@ async fn a_small_blob_has_the_pinned_layout() {
 
     #[rustfmt::skip]
     let expected: Vec<u8> = [
-        // Magic, format version 9, the digest, four outputs.
+        // Magic, format version 10, the digest, four outputs.
         &b"SCENBLOB"[..],
-        &[9, 0, 0, 0],
+        &[10, 0, 0, 0],
         &[0xab; 32],
         &[4, 0, 0, 0],
         // Body length: 9 (Int) + 11 (String) + 2 (Blob).

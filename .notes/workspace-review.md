@@ -15,11 +15,6 @@ Groups are named after their shared root cause and ordered by severity, then ben
 
 # High — wrong results, data loss, crashes on user data
 
-## A disabled producer's stale digest keys its consumer's cache
-Severity: High — a quietly wrong cache hit: a value computed with an input the run no longer delivers is served as current.
-
-- [ ] `scenarium/src/execution/cache/runtime/mod.rs` `RuntimeCache::node_digest` (Bind arm) — folds `self.slots[addr.node_idx].current_digest?` for every `Bind`, whether or not the producer runs. `stamp_digests` re-stamps only `RunSchedule::executing()`, and a disabled producer never enters `process_order`, so its slot keeps the digest of the last run it was enabled in. A pure consumer reading it on an *optional* input stays runnable (`RunSchedule::input_missing`), `collect_inputs` hands it `Unbound`, but its digest equals the one it had with the producer live; a cached consumer (`Ram`/`Both` resident, or a `Disk` blob) then reuses the old value. A never-stamped producer leaves `None`, so the consumer never caches. Fold `InputTag::Unbound` for a producer whose schedule state is not runnable, with the same predicate `collect_inputs` uses. Latent in darkroom today (`NodeCtx::can_disable` offers the chip on sinks only); `engine/tests/disabled_nodes.rs` covers only the cold run.
-
 # Medium — wrong in edge cases, duplicated truths, hot-path waste
 
 ## Undo coalescing has no gesture identity and re-encodes the tail every frame
