@@ -31,6 +31,7 @@ use crate::stacking::registration::ransac::sampling::{
     GUIDED_POOL_FRACTIONS, guided_phase_iterations, make_rng, random_sample_into,
     weighted_sample_into,
 };
+use crate::stacking::registration::result::RansacFailureReason;
 use crate::stacking::registration::transform::{Transform, TransformType};
 use crate::stacking::registration::triangle::voting::PointMatch;
 
@@ -80,6 +81,15 @@ pub(super) struct RansacResult {
     pub(super) transform: Transform,
     /// Indices of inlier matches.
     pub(super) inliers: Vec<usize>,
+}
+
+/// Why RANSAC produced no model: the reason, how many iterations ran, and the most inliers any
+/// hypothesis gathered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct RansacFailure {
+    pub(super) reason: RansacFailureReason,
+    pub(super) iterations: usize,
+    pub(super) best_inlier_count: usize,
 }
 
 /// RANSAC estimator for robust transformation fitting.
@@ -206,7 +216,7 @@ impl RansacEstimator {
         transform_type: TransformType,
         guided_iterations: usize,
         mut sample_fn: impl FnMut(usize, &mut Vec<usize>),
-    ) -> Option<RansacResult> {
+    ) -> Result<RansacResult, RansacFailure> {
         let n = ref_points.len();
         let min_samples = transform_type.min_points();
         let scorer = MagsacScorer::new(self.max_sigma);
@@ -299,7 +309,14 @@ impl RansacEstimator {
 
         // Final refinement with least squares on all inliers. A best with fewer inliers than a
         // minimal sample has nothing to re-estimate from, and is no model.
-        let best = best.filter(|best| best.inliers.len() >= min_samples)?;
+        let best_inlier_count = best.as_ref().map_or(0, |best| best.inliers.len());
+        let Some(best) = best.filter(|best| best.inliers.len() >= min_samples) else {
+            return Err(RansacFailure {
+                reason: RansacFailureReason::NoInliersFound,
+                iterations,
+                best_inlier_count,
+            });
+        };
         lo_buffers
             .points
             .gather(&best.inliers, ref_points, target_points);
@@ -320,13 +337,13 @@ impl RansacEstimator {
                 best.score,
             );
             if refined_score >= best.score && scratch.len() >= min_samples {
-                return Some(RansacResult {
+                return Ok(RansacResult {
                     transform: refined,
                     inliers: scratch,
                 });
             }
         }
-        Some(RansacResult {
+        Ok(RansacResult {
             transform: best.transform,
             inliers: best.inliers,
         })
@@ -344,16 +361,21 @@ impl RansacEstimator {
     /// * `transform_type` - Type of transformation to estimate
     ///
     /// # Returns
-    /// Best transformation found, or None if estimation failed.
+    /// Best transformation found, or why there is none.
     pub(super) fn estimate(
         &self,
         matches: &[PointMatch],
         ref_stars: &[DVec2],
         target_stars: &[DVec2],
         transform_type: TransformType,
-    ) -> Option<RansacResult> {
-        if matches.is_empty() {
-            return None;
+    ) -> Result<RansacResult, RansacFailure> {
+        let min_samples = transform_type.min_points();
+        if matches.len() < min_samples {
+            return Err(RansacFailure {
+                reason: RansacFailureReason::TooFewMatches,
+                iterations: 0,
+                best_inlier_count: 0,
+            });
         }
 
         // Extract point pairs and confidences from matches
@@ -368,12 +390,6 @@ impl RansacEstimator {
         let confidences: Vec<f64> = matches.iter().map(|m| m.confidence).collect();
 
         let n = ref_points.len();
-        let min_samples = transform_type.min_points();
-
-        if n < min_samples {
-            return None;
-        }
-
         let mut rng = make_rng(self.config.seed);
 
         // Build sorted index by confidence (descending)

@@ -9,8 +9,8 @@ use common::file_utils::{self, PublicationMode};
 use common::{CancelToken, FileIdentity};
 use lumos::ProgressCallback;
 use lumos::{
-    CalibrationMasters, CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD, LoadContext,
-    StackConfig, stack_cfa_master,
+    CalibrationMasters, CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD, LoadContext, MasterRole,
+    stack_cfa_master,
 };
 use scenarium::Invocation;
 use scenarium::{DataType, DynamicValue, Func, FuncInput, FuncLambda, FuncOutput, Library};
@@ -41,6 +41,8 @@ enum BuildMastersError {
     FrameSet(#[from] FrameSetKeyError),
     #[error(transparent)]
     Stack(#[from] lumos::StackError),
+    #[error(transparent)]
+    Calibration(#[from] lumos::CalibrationError),
     #[error("failed to update calibration cache '{path}': {source}", path = .path.display())]
     Cache {
         path: PathBuf,
@@ -75,7 +77,7 @@ pub(crate) fn register(library: &mut Library) {
             ])
             .input(
                 FuncInput::required("Sigma", DataType::Float)
-                    .description("Sigma-clipping rejection threshold when stacking.")
+                    .description("Hot-pixel threshold, in sigma above the dark background.")
                     .default(f64::from(DEFAULT_SIGMA_THRESHOLD)),
             )
             .input(
@@ -138,7 +140,7 @@ fn build_masters_cached(
 ) -> Result<CalibrationMasters, BuildMastersError> {
     let [darks, flats, bias, flat_darks] = frame_sets;
     let role = |frames: Option<Vec<PathBuf>>,
-                config: StackConfig,
+                role: MasterRole,
                 file: &str|
      -> Result<Option<CfaImage>, BuildMastersError> {
         if cancel.is_cancelled() {
@@ -180,9 +182,13 @@ fn build_masters_cached(
             }
         }
 
-        let master =
-            stack_cfa_master(&frames, config, ProgressCallback::default(), cancel.clone())?
-                .expect("a non-empty calibration frame set produces a master");
+        let master = stack_cfa_master(
+            &frames,
+            role.stack_config(),
+            ProgressCallback::default(),
+            cancel.clone(),
+        )?
+        .expect("a non-empty calibration frame set produces a master");
         if let Some((cache_paths, marker)) = cached {
             master
                 .save_fits(&cache_paths.master)
@@ -205,10 +211,10 @@ fn build_masters_cached(
 
     CalibrationMasters::from_images(
         CalibrationSet {
-            dark: role(darks, StackConfig::dark(), "master_dark.fits")?,
-            flat: role(flats, StackConfig::flat(), "master_flat.fits")?,
-            bias: role(bias, StackConfig::bias(), "master_bias.fits")?,
-            flat_dark: role(flat_darks, StackConfig::dark(), "master_flat_dark.fits")?,
+            dark: role(darks, MasterRole::Dark, "master_dark.fits")?,
+            flat: role(flats, MasterRole::Flat, "master_flat.fits")?,
+            bias: role(bias, MasterRole::Bias, "master_bias.fits")?,
+            flat_dark: role(flat_darks, MasterRole::FlatDark, "master_flat_dark.fits")?,
         },
         sigma,
         cancel,

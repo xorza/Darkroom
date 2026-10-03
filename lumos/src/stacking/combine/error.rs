@@ -9,7 +9,6 @@ use crate::io::image::cfa::CfaType;
 use crate::io::image::error::ImageError;
 use crate::io::image::image_provenance::RowOrder;
 use crate::io::image::sample_domain::SampleDomain;
-use crate::stacking::calibration_masters::error::CalibrationError;
 use crate::stacking::frame_store::error::FrameStoreError;
 use crate::stacking::frame_store::frame_quality::FramePlane;
 
@@ -43,10 +42,6 @@ pub enum Error {
 
     #[error(transparent)]
     FrameStore(#[from] FrameStoreError),
-
-    /// A calibration bundle built alongside a stack does not describe one coherent sensor.
-    #[error(transparent)]
-    Calibration(#[from] CalibrationError),
 
     #[error("No frames provided for stacking")]
     NoFrames,

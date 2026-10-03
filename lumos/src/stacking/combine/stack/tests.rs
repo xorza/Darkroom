@@ -241,48 +241,6 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
     }
 }
 
-#[test]
-fn mapped_frames_reject_nonfinite_samples_before_combining() {
-    let dimensions = ImageDimensions::new((2, 1), 3);
-    let finite =
-        LinearImage::from_planar_channels(dimensions, [vec![1.0; 2], vec![1.0; 2], vec![1.0; 2]]);
-    let source_stats = FrameStats::measure(&finite);
-    let invalid = LinearImage::from_planar_channels(
-        dimensions,
-        [vec![1.0; 2], vec![2.0; 2], vec![3.0, f32::NEG_INFINITY]],
-    );
-    let scratch = TempDir::new("lumos_nonfinite_mapped_frame");
-    let spill_directory = SpillDirectory::create(&scratch.join("cache"), false).unwrap();
-    let frame = StoredFrame::spill(
-        &FrameSpill::new(spill_directory.path(), "frame"),
-        &invalid,
-        &FrameQuality::None,
-        source_stats,
-    )
-    .unwrap();
-
-    let error = stack_stored_frames(
-        vec![frame],
-        CacheTier::of(Some(spill_directory), RunMemory::new(1 << 30, None)),
-        dimensions,
-        ImageMetadata::default(),
-        StackConfig::mean(),
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .unwrap_err();
-
-    assert!(matches!(
-        error,
-        Error::NonFiniteImageSample {
-            index: 0,
-            channel: 2,
-            pixel: 1,
-            value: f32::NEG_INFINITY,
-        }
-    ));
-}
-
 fn norm_params_for(cache: &FrameCache, normalization: Normalization) -> Option<Vec<FrameNorm>> {
     normalization::compute_frame_norms(
         &cache.frames,
@@ -1394,32 +1352,6 @@ fn registered_noise_weight_applies_half_pixel_confidence_once() {
 }
 
 #[test]
-#[should_panic(expected = "cache was normalized as")]
-fn combining_a_cache_against_a_different_normalization_is_refused() {
-    // Normalization parameters are measured when the cache is built and never recomputed, so
-    // a config naming a different normalization would be silently ignored rather than
-    // applied. The three entry points always pass the config they built with; this guards the
-    // next caller that does not.
-    let cache = FrameCache::from_images(
-        vec![
-            testing::cfa::make_cfa(Size2us::new(2, 1), vec![0.4; 2], CfaType::Mono),
-            testing::cfa::make_cfa(Size2us::new(2, 1), vec![0.2; 2], CfaType::Mono),
-        ],
-        Normalization::None,
-    );
-
-    // The assert fires before any product exists, so there is no result to inspect.
-    let _ = run_stacking(
-        &cache,
-        &StackConfig {
-            normalization: Normalization::Multiplicative,
-            small_n: SmallN::none(),
-            ..Default::default()
-        },
-    );
-}
-
-#[test]
 fn requested_planes_decide_what_the_combine_allocates() {
     // Every ancillary plane is a full image-sized allocation the reducer writes per pixel, so
     // "not requested" has to mean "never built" rather than "built and dropped".
@@ -1837,15 +1769,13 @@ fn global_norm_scale_correction() {
 #[test]
 fn global_norm_stacking_corrects_offset() {
     // After normalization, both frames should be brought to reference level
-    let cache = make_uniform_frames(16, &[100.0, 150.0]);
+    let mut cache = make_uniform_frames(16, &[100.0, 150.0]);
     let norm_params = norm_params_for(&cache, Normalization::Global).unwrap();
+    cache.frame_norms = Some(norm_params.clone());
 
-    let result = cache.process_chunked(
-        None,
-        Some(&norm_params),
-        QualityPlanes::ALL,
-        |values, w, _| mean_sample(values, w),
-    );
+    let result = cache.process_chunked(None, QualityPlanes::ALL, |values, w, _| {
+        mean_sample(values, w)
+    });
     assert_channel_near(&result.pixels, 0, 100.0, 1.0);
 }
 
@@ -1892,15 +1822,13 @@ fn multiplicative_norm_no_offset() {
 
 #[test]
 fn multiplicative_stacking_normalizes_flat_levels() {
-    let cache = make_uniform_frames(16, &[100.0, 200.0]);
+    let mut cache = make_uniform_frames(16, &[100.0, 200.0]);
     let norm_params = norm_params_for(&cache, Normalization::Multiplicative).unwrap();
+    cache.frame_norms = Some(norm_params.clone());
 
-    let result = cache.process_chunked(
-        None,
-        Some(&norm_params),
-        QualityPlanes::ALL,
-        |values, w, _| mean_sample(values, w),
-    );
+    let result = cache.process_chunked(None, QualityPlanes::ALL, |values, w, _| {
+        mean_sample(values, w)
+    });
     assert_channel_near(&result.pixels, 0, 100.0, 1.0);
 }
 
@@ -1915,15 +1843,13 @@ fn normalized_stacking_rgb() {
         // Multiplicative: different scale per channel
         (Normalization::Multiplicative, [150.0, 100.0, 600.0]),
     ] {
-        let cache = make_rgb_frames(16, &[ref_rgb, frame1_rgb]);
+        let mut cache = make_rgb_frames(16, &[ref_rgb, frame1_rgb]);
         let norm_params = norm_params_for(&cache, mode).unwrap();
+        cache.frame_norms = Some(norm_params.clone());
 
-        let result = cache.process_chunked(
-            None,
-            Some(&norm_params),
-            QualityPlanes::ALL,
-            |values, w, _| mean_sample(values, w),
-        );
+        let result = cache.process_chunked(None, QualityPlanes::ALL, |values, w, _| {
+            mean_sample(values, w)
+        });
 
         for (ch, &expected) in ref_rgb.iter().enumerate() {
             assert_channel_near(&result.pixels, ch, expected, 2.0);
@@ -1933,19 +1859,17 @@ fn normalized_stacking_rgb() {
 
 #[test]
 fn dispatch_normalized_vs_unnormalized() {
-    let cache = make_uniform_frames(16, &[100.0, 200.0]);
+    let mut cache = make_uniform_frames(16, &[100.0, 200.0]);
     let norm_params = norm_params_for(&cache, Normalization::Global).unwrap();
+    cache.frame_norms = Some(norm_params.clone());
 
-    let result_norm = cache.process_chunked(
-        None,
-        Some(&norm_params),
-        QualityPlanes::ALL,
-        |values, w, scratch| Rejection::None.combine_mean(values, w, scratch, true),
-    );
-    let result_unnorm =
-        cache.process_chunked(None, None, QualityPlanes::ALL, |values, w, scratch| {
-            Rejection::None.combine_mean(values, w, scratch, true)
-        });
+    let result_norm = cache.process_chunked(None, QualityPlanes::ALL, |values, w, scratch| {
+        Rejection::None.combine_mean(values, w, scratch, true)
+    });
+    cache.frame_norms = None;
+    let result_unnorm = cache.process_chunked(None, QualityPlanes::ALL, |values, w, scratch| {
+        Rejection::None.combine_mean(values, w, scratch, true)
+    });
 
     let norm_pixel = result_norm.pixels.channel(0)[0];
     let unnorm_pixel = result_unnorm.pixels.channel(0)[0];
@@ -2062,19 +1986,17 @@ fn norm_result_matches_lowest_noise_frame() {
     // Frame 1: low noise, median ~200 ← reference
     let f1: Vec<f32> = (0..16).map(|i| 199.0 + (i as f32) * 2.0 / 15.0).collect();
 
-    let cache = make_test_cache(vec![
+    let mut cache = make_test_cache(vec![
         LinearImage::from_pixels(dims, f0),
         LinearImage::from_pixels(dims, f1),
     ]);
     let norm_params = norm_params_for(&cache, Normalization::Global).unwrap();
+    cache.frame_norms = Some(norm_params.clone());
 
     // Frame 1 is reference (lower noise), so stacked result should be ~200
-    let result = cache.process_chunked(
-        None,
-        Some(&norm_params),
-        QualityPlanes::ALL,
-        |values, w, _| mean_sample(values, w),
-    );
+    let result = cache.process_chunked(None, QualityPlanes::ALL, |values, w, _| {
+        mean_sample(values, w)
+    });
     assert_channel_near(&result.pixels, 0, 200.0, 2.0);
 }
 

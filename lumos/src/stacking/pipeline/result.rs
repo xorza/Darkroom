@@ -7,6 +7,7 @@ use crate::io::image::error::ImageError;
 use crate::stacking::calibration_masters::cosmic_ray::error::UnknownAdcStep;
 use crate::stacking::calibration_masters::error::CalibrationError;
 use crate::stacking::combine::error::Error as StackError;
+use crate::stacking::frame_store::error::FrameStoreError;
 use crate::stacking::stack_product::StackProduct;
 use crate::stacking::star_detection::detector::Diagnostics;
 
@@ -58,6 +59,8 @@ impl AlignStackResult {
 pub enum Error {
     #[error("no light frames provided")]
     NoFrames,
+    #[error("stacking cancelled")]
+    Cancelled,
     #[error("failed to load light frame '{path}': {source}")]
     Load {
         path: PathBuf,
@@ -95,5 +98,20 @@ pub enum Error {
         source: UnknownAdcStep,
     },
     #[error(transparent)]
-    Stack(#[from] StackError),
+    FrameStore(#[from] FrameStoreError),
+    #[error(transparent)]
+    Stack(StackError),
+}
+
+/// A combine failure arrives at the one path a caller matches it on: a cancel, an empty set or a
+/// frame-store failure as the pipeline's own, everything else as the combine's.
+impl From<StackError> for Error {
+    fn from(error: StackError) -> Self {
+        match error {
+            StackError::Cancelled => Self::Cancelled,
+            StackError::NoFrames => Self::NoFrames,
+            StackError::FrameStore(error) => Self::FrameStore(error),
+            error => Self::Stack(error),
+        }
+    }
 }

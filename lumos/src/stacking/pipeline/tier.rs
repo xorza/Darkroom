@@ -6,7 +6,6 @@ use crate::memory::MemoryPlan;
 use crate::memory::run_memory::RunMemory;
 use crate::stacking::combine::cache::core::CacheTier;
 use crate::stacking::combine::cache_config::CacheConfig;
-use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::frame_store::frame_quality::FrameQuality;
 use crate::stacking::frame_store::frame_spill::FrameSpill;
 use crate::stacking::frame_store::frame_stats::FrameStats;
@@ -69,7 +68,7 @@ impl FrameTier {
                 directory,
                 chunk_memory: memory.planning(),
             })
-            .map_err(|source| Error::Stack(StackError::from(source)))
+            .map_err(Error::from)
     }
 
     pub(crate) const fn spills(&self) -> bool {
@@ -83,7 +82,7 @@ impl FrameTier {
             Self::Spill { directory, .. } => {
                 StoredImage::spill(&FrameSpill::new(directory.path(), name), &image)
                     .map(PipelineFrame::Spilled)
-                    .map_err(|source| Error::Stack(StackError::from(source)))
+                    .map_err(Error::from)
             }
         }
     }
@@ -130,7 +129,7 @@ impl FrameTier {
                     &quality,
                     source_stats,
                 )
-                .map_err(|source| Error::Stack(StackError::from(source)))?;
+                .map_err(Error::from)?;
                 let FrameQuality::Planes {
                     coverage,
                     confidence,
@@ -168,7 +167,7 @@ impl FrameTier {
                 &quality,
                 source_stats,
             )
-            .map_err(|source| Error::Stack(StackError::from(source))),
+            .map_err(Error::from),
         }
     }
 

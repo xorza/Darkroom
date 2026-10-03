@@ -61,8 +61,8 @@ pub fn align_and_stack(
     let dimensions = lights[0].dimensions();
     for (index, light) in lights.iter().enumerate() {
         FrameDimensionMismatch::check(index, dimensions, light.dimensions())
-            .map_err(|mismatch| Error::Stack(mismatch.into()))?;
-        validate_image_samples(light, index, &cancel).map_err(Error::Stack)?;
+            .map_err(|mismatch| Error::from(StackError::from(mismatch)))?;
+        validate_image_samples(light, index, &cancel)?;
     }
 
     // One reading for the run, for the tier decision and the combine's chunk sizes alike.
@@ -107,7 +107,7 @@ pub fn align_and_stack(
             // Cancelled: abort the batch rather than spend the rest of the budget detecting
             // frames the run will discard.
             if cancel.is_cancelled() {
-                return Err(Error::Stack(StackError::Cancelled));
+                return Err(Error::Cancelled);
             }
             let result = detector.detect(image);
             let n = detected_count.complete_one();
@@ -170,7 +170,7 @@ pub(crate) fn register_warp_and_stack(
     } = stage;
     let total = detected.len();
     if cancel.is_cancelled() {
-        return Err(Error::Stack(StackError::Cancelled));
+        return Err(Error::Cancelled);
     }
     debug_assert!(
         detected
@@ -282,7 +282,7 @@ pub(crate) fn register_warp_and_stack(
         },
     )?;
     if cancel.is_cancelled() {
-        return Err(Error::Stack(StackError::Cancelled));
+        return Err(Error::Cancelled);
     }
 
     let mut frames = Vec::with_capacity(outcomes.len());

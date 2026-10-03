@@ -37,7 +37,7 @@ fn estimate_uniform(
     ref_points: &[DVec2],
     target_points: &[DVec2],
     transform_type: TransformType,
-) -> Option<RansacResult> {
+) -> Result<RansacResult, RansacFailure> {
     let matches = matches_with_confidence(&vec![1.0; ref_points.len()]);
     estimator.estimate(&matches, ref_points, target_points, transform_type)
 }

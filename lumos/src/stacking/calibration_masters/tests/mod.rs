@@ -75,7 +75,7 @@ fn a_flat_with_no_positive_mean_is_refused() {
         assert!(
             matches!(
                 CalibrationMasters::from_images(images, 5.0, CancelToken::never()),
-                Err(Error::Calibration(CalibrationError::NonPositiveFlat { channel: c })) if c == channel
+                Err(CalibrationError::NonPositiveFlat { channel: c }) if c == channel
             ),
             "{cfa_type:?} flat {flat} minus {subtractor:?}"
         );
@@ -101,11 +101,11 @@ fn a_bundle_spanning_two_patterns_is_refused() {
     };
     assert!(matches!(
         CalibrationMasters::from_images(images, DEFAULT_SIGMA_THRESHOLD, CancelToken::never()),
-        Err(Error::Calibration(CalibrationError::CfaPatternMismatch {
+        Err(CalibrationError::CfaPatternMismatch {
             component: MasterRole::FlatDark,
             expected: CfaType::Bayer(CfaPattern::Rggb),
             master: CfaType::Bayer(CfaPattern::Bggr),
-        }))
+        })
     ));
 }
 
@@ -479,11 +479,14 @@ fn roles_round_trip_in_master_order() {
         MasterRole::ALL
     );
     let roles = set.into_roles();
-    assert_eq!(roles.map(|(component, _)| component), MasterRole::ALL);
-    // ...and rebuilding from that order restores each value to the role it came from.
     assert_eq!(
-        CalibrationSet::from_roles(roles.map(|(_, value)| value)).into_roles(),
-        roles
+        roles,
+        [
+            (MasterRole::Dark, "dark"),
+            (MasterRole::Flat, "flat"),
+            (MasterRole::Bias, "bias"),
+            (MasterRole::FlatDark, "flat_dark"),
+        ]
     );
 }
 
@@ -510,40 +513,42 @@ fn every_component_round_trips_through_its_extname() {
     }
 }
 
+/// An empty role stacks to no master without touching a file, and a set of no masters is an
+/// empty bundle. Each role stacks under its own preset; a flat-dark is a dark taken at the flat's
+/// exposure, so it shares the dark's.
 #[test]
-fn from_files_all_empty_yields_no_masters() {
-    // Empty frame sets must produce a `None` for every master (no file I/O path).
+fn empty_roles_yield_no_masters() {
     let empty: Vec<PathBuf> = Vec::new();
-    let masters = CalibrationMasters::from_files(
-        CalibrationSet {
-            dark: &empty,
-            flat: &empty,
-            bias: &empty,
-            flat_dark: &empty,
-        },
+    for role in MasterRole::ALL {
+        let master = stack_cfa_master(
+            &empty,
+            role.stack_config(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap();
+        assert!(master.is_none(), "{role}");
+    }
+    let masters = CalibrationMasters::from_images(
+        CalibrationSet::default(),
         DEFAULT_SIGMA_THRESHOLD,
         CancelToken::never(),
     )
     .unwrap();
-
-    let cancel = CancelToken::new();
-    cancel.cancel();
-    assert!(matches!(
-        CalibrationMasters::from_files(
-            CalibrationSet {
-                dark: &empty,
-                flat: &empty,
-                bias: &empty,
-                flat_dark: &empty,
-            },
-            DEFAULT_SIGMA_THRESHOLD,
-            cancel,
-        ),
-        Err(Error::Cancelled)
-    ));
-
     assert_eq!(masters.components().collect::<Vec<_>>(), Vec::new());
-    assert_eq!(masters.defect_summary(), None);
+
+    for (role, preset) in [
+        (MasterRole::Dark, StackConfig::dark()),
+        (MasterRole::FlatDark, StackConfig::dark()),
+        (MasterRole::Flat, StackConfig::flat()),
+        (MasterRole::Bias, StackConfig::bias()),
+    ] {
+        assert_eq!(
+            format!("{:?}", role.stack_config()),
+            format!("{preset:?}"),
+            "{role}"
+        );
+    }
 }
 
 #[test]
@@ -621,7 +626,7 @@ fn cold_detection_uses_subtracted_unfloored_flat_response() {
             CalibrationMasters::from_images(images, DEFAULT_SIGMA_THRESHOLD, CancelToken::never())
                 .unwrap();
         let defects = masters.defect_map.as_ref().unwrap();
-        assert_eq!(defects.cold_indices, [dead], "{kind:?}");
+        assert_eq!(defects.cold_indices(), [dead], "{kind:?}");
 
         let prepared = masters.masters.flat.as_ref().unwrap();
         assert_eq!(prepared.data[dead], 0.1, "{kind:?}");
@@ -648,7 +653,7 @@ fn from_images_rejects_cancelled_operation() {
         cancel,
     );
 
-    assert!(matches!(result, Err(Error::Cancelled)));
+    assert!(matches!(result, Err(CalibrationError::Cancelled)));
 }
 
 #[test]
@@ -908,19 +913,19 @@ fn defect_detection_zero_median_no_false_positives() {
         nulls: None,
     };
 
-    let defect_map = DefectMap::default()
+    let defect_map = DefectMap::new(dark.size())
         .detect_hot(&dark, 5.0, &CancelToken::never())
         .unwrap();
 
     // The tiny values should NOT be flagged as hot
     assert!(
-        defect_map.hot_count() <= 1,
+        defect_map.hot_indices().len() <= 1,
         "Expected at most 1 hot pixel (the 0.5 outlier), got {}",
-        defect_map.hot_count()
+        defect_map.hot_indices().len()
     );
     // The genuine outlier at 0.5 should be detected
     assert!(
-        defect_map.hot_indices.contains(&50),
+        defect_map.hot_indices().contains(&50),
         "Genuine hot pixel at index 50 should be detected"
     );
 }
@@ -1275,13 +1280,13 @@ fn ram_bytes_sums_present_frames_and_defects() {
     let dark = constant_cfa(Size2us::new(10, 8), 0.1, CfaType::Mono);
     assert_eq!(dark.ram_bytes(), 10 * 8 * 4);
 
-    // A defect map counts only its hot + cold index lists (3 usize = 24 bytes on
-    // a 64-bit target); an empty/default map is zero.
-    let mut defects = DefectMap::default();
-    assert_eq!(defects.ram_bytes(), 0);
-    defects.hot_indices = vec![1, 2];
-    defects.cold_indices = vec![7];
-    assert_eq!(defects.ram_bytes(), 3 * size_of::<usize>());
+    // A defect map holds its index lists and its mask. The mask's rows pad to 128 bits, so a
+    // 10-wide row is two words: 8 rows × 2 × 8 B = 128 B, all of an empty map. Three indices add
+    // 3 × 8 B.
+    let mask_bytes = 8 * 2 * size_of::<u64>();
+    assert_eq!(DefectMap::new(Size2us::new(10, 8)).ram_bytes(), mask_bytes);
+    let defects = DefectMap::from_indices(Size2us::new(10, 8), vec![1, 2], vec![7]).unwrap();
+    assert_eq!(defects.ram_bytes(), 3 * size_of::<usize>() + mask_bytes);
 
     // The bundle sums present roles + the defect map; absent roles add nothing.
     let masters = CalibrationMasters {
@@ -1293,17 +1298,18 @@ fn ram_bytes_sums_present_frames_and_defects() {
         },
         defect_map: Some(defects),
     };
-    // 320 (dark: 80·4) + 64 (flat: 16·4) + 24 (defects: 3·8) = 408 bytes.
+    // 320 (dark: 80·4) + 64 (flat: 16·4) + the defects' 24 + 128.
     assert_eq!(
         masters.ram_bytes(),
-        10 * 8 * 4 + 4 * 4 * 4 + 3 * size_of::<usize>()
+        10 * 8 * 4 + 4 * 4 * 4 + 3 * size_of::<usize>() + mask_bytes
     );
+    // Three of the 80 pixels: 3.75%.
     assert_eq!(
         masters.defect_summary(),
         Some(DefectSummary {
             hot_pixels: 2,
             cold_pixels: 1,
-            percentage: 0.0,
+            percentage: 3.75,
         })
     );
 }

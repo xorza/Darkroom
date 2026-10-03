@@ -1,4 +1,5 @@
 use crate::io::image::cfa::CfaType;
+use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::math::statistics;
 use crate::memory::ChunkMemoryLayout;
@@ -31,7 +32,6 @@ fn unrequested_quality_planes_are_never_allocated() {
 
     let weight_only = cache.process_chunked(
         None,
-        None,
         QualityPlanes {
             variance: false,
             ..QualityPlanes::ALL
@@ -44,12 +44,12 @@ fn unrequested_quality_planes_are_never_allocated() {
         "a variance plane was allocated for a combine that did not ask for one"
     );
 
-    let bare = cache.process_chunked(None, None, QualityPlanes::IMAGE_ONLY, reduce);
+    let bare = cache.process_chunked(None, QualityPlanes::IMAGE_ONLY, reduce);
     assert!(bare.weight.is_none());
     assert!(bare.linear_variance.is_none());
 
     // Skipping the planes must not disturb the combined pixels.
-    let all = cache.process_chunked(None, None, QualityPlanes::ALL, reduce);
+    let all = cache.process_chunked(None, QualityPlanes::ALL, reduce);
     assert_eq!(
         bare.pixels.channel(0).pixels(),
         all.pixels.channel(0).pixels()
@@ -74,17 +74,27 @@ fn quality_plane_request_drops_variance_for_a_non_linear_combine() {
     );
 }
 
+/// Every frame of `frames` through the per-frame checks, in order.
+fn validate_frames(frames: &[StoredFrame], dimensions: ImageDimensions) -> Result<(), Error> {
+    let mut facts = SetFacts::default();
+    for (index, frame) in frames.iter().enumerate() {
+        validate_frame(index, frame, dimensions, &mut facts, &CancelToken::never())?;
+    }
+    Ok(())
+}
+
+/// The per-frame geometry check names the frame and the plane. It guards every stored plane a
+/// caller hands in; the pipeline's own frames hold it as a contract, asserted in debug builds.
 #[test]
 fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
     // Every read of a stored plane slices it to the cache's pixel count, so a frame that does not
     // match would fault out of a slice index naming neither the frame nor the field. The geometry
     // check runs first and names both.
     let dimensions = ImageDimensions::new((4, 2), 1);
-    let params = || FrameCacheParams {
+    let core = || CacheCore {
         tier: CacheTier::Resident,
         dimensions,
         metadata: ImageMetadata::default(),
-        normalization: Normalization::None,
         progress: ProgressCallback::default(),
         cancel: CancelToken::never(),
     };
@@ -96,7 +106,7 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
     };
 
     // Short channel plane: 4 samples where the cache wants 8.
-    let error = FrameCache::from_stored_frames(vec![frame(8), frame(4)], params()).unwrap_err();
+    let error = validate_frames(&[frame(8), frame(4)], dimensions).unwrap_err();
     assert!(
         matches!(
             error,
@@ -118,7 +128,7 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
         FrameQuality::from_coverage(Buffer2::new(2, 1, vec![1.0; 2])),
         stats,
     );
-    let error = FrameCache::from_stored_frames(vec![short_coverage], params()).unwrap_err();
+    let error = validate_frames(&[short_coverage], dimensions).unwrap_err();
     assert!(
         matches!(
             error,
@@ -132,8 +142,34 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
         "expected a coverage geometry error, got {error:?}"
     );
 
-    // A correctly shaped set still builds.
-    assert!(FrameCache::from_stored_frames(vec![frame(8), frame(8)], params()).is_ok());
+    // A correctly shaped set passes, and builds.
+    assert!(validate_frames(&[frame(8), frame(8)], dimensions).is_ok());
+    assert!(
+        FrameCache::from_stored_frames(vec![frame(8), frame(8)], core(), Normalization::None)
+            .is_ok()
+    );
+}
+
+/// A stored frame that breaks the geometry the pipeline promised is a bug in the pipeline, which
+/// a debug build reports at the cache.
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "breaks the pipeline's own frame contract")]
+fn a_stored_frame_of_the_wrong_shape_is_a_pipeline_bug() {
+    let image = LinearImage::from_pixels(ImageDimensions::new((4, 1), 1), vec![1.0; 4]);
+    let stats = FrameStats::measure(&image);
+    let core = CacheCore {
+        tier: CacheTier::Resident,
+        dimensions: ImageDimensions::new((4, 2), 1),
+        metadata: ImageMetadata::default(),
+        progress: ProgressCallback::default(),
+        cancel: CancelToken::never(),
+    };
+    let _ = FrameCache::from_stored_frames(
+        vec![StoredFrame::from_memory(image, FrameQuality::None, stats)],
+        core,
+        Normalization::None,
+    );
 }
 
 /// Every frame must carry the first frame's mosaic pattern, or, like it, none: the same pixel is a
@@ -142,11 +178,10 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
 fn stored_frames_must_share_one_cfa_pattern() {
     let size = Size2us::new(4, 2);
     let dimensions = ImageDimensions::new(size, 1);
-    let params = || FrameCacheParams {
+    let core = || CacheCore {
         tier: CacheTier::Resident,
         dimensions,
         metadata: ImageMetadata::default(),
-        normalization: Normalization::None,
         progress: ProgressCallback::default(),
         cancel: CancelToken::never(),
     };
@@ -172,7 +207,8 @@ fn stored_frames_must_share_one_cfa_pattern() {
             None,
         ),
     ] {
-        let error = FrameCache::from_stored_frames(frames, params()).unwrap_err();
+        let error =
+            FrameCache::from_stored_frames(frames, core(), Normalization::None).unwrap_err();
         assert!(
             matches!(
                 error,
@@ -186,21 +222,30 @@ fn stored_frames_must_share_one_cfa_pattern() {
             "{error:?}"
         );
     }
-    assert!(FrameCache::from_stored_frames(vec![mosaic(rggb), mosaic(rggb)], params()).is_ok());
-    assert!(FrameCache::from_stored_frames(vec![linear(), linear()], params()).is_ok());
+    assert!(
+        FrameCache::from_stored_frames(
+            vec![mosaic(rggb), mosaic(rggb)],
+            core(),
+            Normalization::None
+        )
+        .is_ok()
+    );
+    assert!(
+        FrameCache::from_stored_frames(vec![linear(), linear()], core(), Normalization::None)
+            .is_ok()
+    );
 }
 
-/// Frames arriving through the frame store are held to the same pairing as caller-supplied ones
-/// (`stack_images_rejects_warp_quality_planes_that_disagree_about_support`), so a spilled or
-/// pipeline-built frame cannot reach the combine with support and confidence disagreeing.
+/// Stored frames are held to the same pairing as caller-supplied ones
+/// (`stack_images_rejects_warp_quality_planes_that_disagree_about_support`): support and confidence
+/// must agree on which pixels a frame reaches.
 #[test]
 fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
     let dimensions = ImageDimensions::new((4, 1), 1);
-    let params = || FrameCacheParams {
+    let core = || CacheCore {
         tier: CacheTier::Resident,
         dimensions,
         metadata: ImageMetadata::default(),
-        normalization: Normalization::None,
         progress: ProgressCallback::default(),
         cancel: CancelToken::never(),
     };
@@ -217,9 +262,9 @@ fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
         )
     };
 
-    let error = FrameCache::from_stored_frames(
-        vec![frame(vec![1.0, 1.0, 1.0, 1.0], vec![1.0, 1.0, 0.0, 1.0])],
-        params(),
+    let error = validate_frames(
+        &[frame(vec![1.0, 1.0, 1.0, 1.0], vec![1.0, 1.0, 0.0, 1.0])],
+        dimensions,
     )
     .unwrap_err();
     assert!(
@@ -239,19 +284,18 @@ fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
     assert!(
         FrameCache::from_stored_frames(
             vec![frame(vec![1.0, 1.0, 0.0, 1.0], vec![1.0, 1.0, 0.0, 1.0])],
-            params(),
+            core(),
+            Normalization::None,
         )
         .is_ok()
     );
 }
 
 fn mean_product(cache: &FrameCache, weights: Option<&[f32]>) -> StackProduct {
-    let combined = cache.process_chunked(
-        weights,
-        None,
-        QualityPlanes::ALL,
-        |values, weights, scratch| Rejection::None.combine_mean(values, weights, scratch, true),
-    );
+    let combined =
+        cache.process_chunked(weights, QualityPlanes::ALL, |values, weights, scratch| {
+            Rejection::None.combine_mean(values, weights, scratch, true)
+        });
     cache.finish_product(combined, QualityPlanes::ALL, None)
 }
 
@@ -447,7 +491,7 @@ fn process_chunked_median() {
     assert_eq!(cache.core.tier.chunk_memory(), None);
 
     // Median of [1, 3, 2] = 2
-    let result = cache.process_chunked(None, None, QualityPlanes::ALL, |values, weights, _| {
+    let result = cache.process_chunked(None, QualityPlanes::ALL, |values, weights, _| {
         values.sort_by(|a, b| a.partial_cmp(b).unwrap());
         CombinedSample::from_all(values[values.len() / 2], weights)
     });
@@ -476,7 +520,7 @@ fn process_chunked_rgb() {
     let cache = make_test_cache(images);
 
     // Mean: R=(1+5)/2=3, G=(2+6)/2=4, B=(3+7)/2=5
-    let result = cache.process_chunked(None, None, QualityPlanes::ALL, |values, weights, _| {
+    let result = cache.process_chunked(None, QualityPlanes::ALL, |values, weights, _| {
         CombinedSample::from_all(values.iter().sum::<f32>() / values.len() as f32, weights)
     });
 
@@ -504,7 +548,7 @@ fn process_chunked_with_weights() {
 
     // Weighted mean with weights [1, 3]: (10*1 + 20*3) / (1+3) = 70/4 = 17.5
     let weights = vec![1.0, 3.0];
-    let result = cache.process_chunked(Some(&weights), None, QualityPlanes::ALL, |values, w, _| {
+    let result = cache.process_chunked(Some(&weights), QualityPlanes::ALL, |values, w, _| {
         let sum: f32 = values.iter().zip(w.iter()).map(|(v, wt)| v * wt).sum();
         let weight_sum: f32 = w.iter().sum();
         CombinedSample::from_all(sum / weight_sum, w)
@@ -524,7 +568,7 @@ fn calibration_frames_combine_through_the_same_engine_as_lights() {
 
     // Median of [1, 3, 2] = 2 at every pixel.
     let cache = make_cfa_cache(vec![vec![1.0; 4], vec![3.0; 4], vec![2.0; 4]], dims);
-    let median = cache.process_chunked(None, None, planes, |values, _, _| {
+    let median = cache.process_chunked(None, planes, |values, _, _| {
         let value = statistics::median_mut(values);
         CombinedSample::value_only(value, values.len())
     });
@@ -540,7 +584,7 @@ fn calibration_frames_combine_through_the_same_engine_as_lights() {
     // reach the reducer unscaled, since no coverage or confidence modulates them.
     let cache = make_cfa_cache(vec![vec![10.0; 4], vec![20.0; 4]], dims);
     let weights = [1.0, 3.0];
-    let weighted = cache.process_chunked(Some(&weights), None, planes, |values, w, scratch| {
+    let weighted = cache.process_chunked(Some(&weights), planes, |values, w, scratch| {
         Rejection::None.combine_mean(values, w, scratch, false)
     });
     for &pixel in weighted.pixels.channel(0).pixels() {
@@ -551,52 +595,29 @@ fn calibration_frames_combine_through_the_same_engine_as_lights() {
     }
 }
 
+/// A frame's plane reads the rows asked for, resident or memory-mapped alike: row 1 of a 4 × 3
+/// ramp is pixels 4..8, and the whole plane is the ramp. A spilled cache sizes its chunks against
+/// the run's planning figure.
 #[test]
-fn read_channel_chunk_in_memory() {
-    let dims = ImageDimensions::new((4, 3), 1);
-    // Pixels 0-11 in row-major order
-    let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
-    let images = vec![LinearImage::from_pixels(dims, pixels)];
-
-    let cache = make_test_cache(images);
-
-    // Read row 1 (pixels 4-7)
-    let chunk = cache
-        .core
-        .read_channel_chunk(&cache.frames, |frame| &frame.channels, 0, 0, 1, 2);
-    let expected: Vec<f32> = (4..8).map(|i| i as f32).collect();
-    assert_eq!(chunk, &expected[..]);
-
-    // Read all rows
-    let all = cache
-        .core
-        .read_channel_chunk(&cache.frames, |frame| &frame.channels, 0, 0, 0, 3);
-    assert_eq!(all.len(), 12);
-}
-
-#[test]
-fn read_channel_chunk_disk_backed() {
+fn stored_planes_read_their_rows_in_memory_and_on_disk() {
     let temp_dir = TempDir::new("lumos_read_chunk_disk_test");
     let spill_directory = SpillDirectory::create(temp_dir.path(), false).unwrap();
-
     let dims = ImageDimensions::new((4, 3), 1);
-    let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
-    let image = LinearImage::from_pixels(dims, pixels);
+    let ramp: Vec<f32> = (0..12).map(|i| i as f32).collect();
+    let image = LinearImage::from_pixels(dims, ramp.clone());
 
-    // Cache the image to disk
-    let base_filename = "test_chunk";
-    let cached_frame = StoredFrame::spill(
-        &FrameSpill::new(spill_directory.path(), base_filename),
-        &image,
-        &FrameQuality::None,
-        FrameStats::measure(&image),
-    )
-    .unwrap();
-
-    let cache = FrameCache {
-        frames: vec![cached_frame],
+    let resident = make_test_cache(vec![image.clone()]);
+    let spilled = FrameCache {
+        frames: vec![
+            StoredFrame::spill(
+                &FrameSpill::new(spill_directory.path(), "test_chunk"),
+                &image,
+                &FrameQuality::None,
+                FrameStats::measure(&image),
+            )
+            .unwrap(),
+        ],
         frame_norms: None,
-        normalization: Normalization::None,
         core: CacheCore {
             tier: CacheTier::of(
                 Some(spill_directory),
@@ -608,23 +629,10 @@ fn read_channel_chunk_disk_backed() {
             cancel: CancelToken::never(),
         },
     };
-
-    // Read row 1 (pixels 4-7)
-    let chunk = cache
-        .core
-        .read_channel_chunk(&cache.frames, |frame| &frame.channels, 0, 0, 1, 2);
-    assert_eq!(cache.core.tier.chunk_memory(), Some(123_456));
-    let expected: Vec<f32> = (4..8).map(|i| i as f32).collect();
-    assert_eq!(chunk, &expected[..]);
-
-    // Read all rows
-    let all = cache
-        .core
-        .read_channel_chunk(&cache.frames, |frame| &frame.channels, 0, 0, 0, 3);
-    assert_eq!(all.len(), 12);
-    for (i, &val) in all.iter().enumerate() {
-        assert!((val - i as f32).abs() < f32::EPSILON);
+    assert_eq!(spilled.core.tier.chunk_memory(), Some(123_456));
+    for cache in [&resident, &spilled] {
+        let plane = &cache.frames[0].channels[0];
+        assert_eq!(plane.chunk(4, 8), &ramp[4..8]);
+        assert_eq!(plane.chunk(0, 12), ramp.as_slice());
     }
-
-    drop(cache);
 }

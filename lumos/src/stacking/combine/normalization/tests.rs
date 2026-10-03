@@ -2,6 +2,8 @@ use crate::stacking::combine::normalization::*;
 use crate::stacking::frame_store::frame_facts::FrameFacts;
 use crate::stacking::frame_store::frame_quality::FrameQuality;
 use crate::testing::prelude::*;
+use crate::testing::synthetic::patterns;
+use crate::testing::synthetic::sky_field::{Sky, SkyField};
 
 fn channel_stats(median: f32, mad: f32) -> MedianMad {
     MedianMad { median, mad }
@@ -207,8 +209,13 @@ fn global_norms_are_fitted_against_the_selected_reference() {
     }
 }
 
+/// Multiplicative and global norms over the common domain, per frame and channel in order, and a
+/// cancel honoured. The domain is pixels 1..=3, where the channels' medians are frame 0: 3, 30, 7;
+/// frame 1: 30, 3, 70; frame 2: 9, 300, 40. Every frame carries the same source noise, so frame 0
+/// is the reference. Each frame is an exact affine image of it, so the global fit has nothing to
+/// window and returns the ratio of spreads, and its offset puts the medians together.
 #[test]
-fn registered_rgb_measurements_preserve_pair_order_and_honor_cancellation() {
+fn common_domain_norms_preserve_pair_order_and_honor_cancellation() {
     let dimensions = ImageDimensions::new((5, 1), 3);
     let coverage = Buffer2::new(5, 1, vec![0.0, 1.0, 1.0, 1.0, 0.0]);
     let channels = [
@@ -230,14 +237,13 @@ fn registered_rgb_measurements_preserve_pair_order_and_honor_cancellation() {
     ];
     let frames = channels
         .into_iter()
-        .enumerate()
-        .map(|(frame_index, channels)| {
+        .map(|channels| {
             StoredFrame::from_memory(
                 LinearImage::from_planar_channels(dimensions, channels),
                 FrameQuality::from_coverage(coverage.clone()),
                 FrameStats {
                     channels: [channel_stats(0.0, 1.0); 3].into_iter().collect(),
-                    quantization_sigma: Some((frame_index + 1) as f32),
+                    quantization_sigma: None,
                     facts: FrameFacts {
                         domain: None,
                         row_order: None,
@@ -247,67 +253,164 @@ fn registered_rgb_measurements_preserve_pair_order_and_honor_cancellation() {
             )
         })
         .collect::<Vec<_>>();
-
-    let RegisteredMeasurements::CommonStats(measured) = measure_registered_frames(
-        &frames,
-        dimensions,
-        Normalization::Multiplicative,
-        0,
-        &CancelToken::never(),
-    )
-    .unwrap() else {
-        panic!("multiplicative normalization must return common-domain statistics");
+    let norms = |normalization| {
+        compute_frame_norms(&frames, dimensions, normalization, &CancelToken::never())
+            .unwrap()
+            .unwrap()
     };
-    let expected = [
-        [(3.0, 1.0), (30.0, 10.0), (7.0, 2.0)],
-        [(30.0, 10.0), (3.0, 1.0), (70.0, 20.0)],
-        [(9.0, 1.0), (300.0, 100.0), (40.0, 10.0)],
+
+    let expected_gains = [
+        [1.0, 1.0, 1.0],
+        [3.0 / 30.0, 30.0 / 3.0, 7.0 / 70.0],
+        [3.0f32 / 9.0, 30.0 / 300.0, 7.0 / 40.0],
     ];
-    for (frame_index, frame) in measured.iter().enumerate() {
-        assert_eq!(frame.quantization_sigma, Some((frame_index + 1) as f32));
-        for (channel, &(median, mad)) in expected[frame_index].iter().enumerate() {
+    for (frame_index, frame) in norms(Normalization::Multiplicative).iter().enumerate() {
+        for (channel, &gain) in expected_gains[frame_index].iter().enumerate() {
             assert_eq!(
-                frame.channels[channel].median, median,
-                "frame {frame_index} channel {channel} median"
-            );
-            assert_eq!(
-                frame.channels[channel].mad, mad,
-                "frame {frame_index} channel {channel} MAD"
+                frame.channels[channel],
+                ChannelNorm { gain, offset: 0.0 },
+                "frame {frame_index} channel {channel}"
             );
         }
     }
 
-    let RegisteredMeasurements::GlobalNorms(norms) = measure_registered_frames(
-        &frames,
-        dimensions,
-        Normalization::Global,
-        0,
-        &CancelToken::never(),
-    )
-    .unwrap() else {
-        panic!("global normalization must return affine parameters");
-    };
     let expected_norms = [
         [(1.0, 0.0), (1.0, 0.0), (1.0, 0.0)],
         [(0.1, 0.0), (10.0, 0.0), (0.1, 0.0)],
         [(1.0, -6.0), (0.1, 0.0), (0.2, -1.0)],
     ];
-    for (frame_index, frame) in norms.iter().enumerate() {
+    for (frame_index, frame) in norms(Normalization::Global).iter().enumerate() {
         for (channel, &(gain, offset)) in expected_norms[frame_index].iter().enumerate() {
             assert_eq!(
-                frame.channels[channel].gain, gain,
-                "frame {frame_index} channel {channel} gain"
-            );
-            assert_eq!(
-                frame.channels[channel].offset, offset,
-                "frame {frame_index} channel {channel} offset"
+                frame.channels[channel],
+                ChannelNorm { gain, offset },
+                "frame {frame_index} channel {channel}"
             );
         }
     }
 
     let cancel = CancelToken::new();
     cancel.cancel();
-    let error = measure_registered_frames(&frames, dimensions, Normalization::Global, 0, &cancel)
-        .unwrap_err();
+    let error =
+        compute_frame_norms(&frames, dimensions, Normalization::Global, &cancel).unwrap_err();
     assert!(matches!(error, Error::Cancelled));
+}
+
+/// A star field seen through three frames of known gain, offset and noise: `x_k = (truth −
+/// o_k)/g_k + n_k`. Frame 0 is the least noisy and so the reference, and the gain that carries
+/// frame `k` onto it is `g_k`.
+///
+/// The frames' sky noise is unrelated to their gain — 0.006 at gain 0.8, 0.004 at 1.25 — so the
+/// ratio of sky spreads, the old seed and the old estimator for unregistered frames, misses
+/// every gain by far. The fit must find each within its own noise: the Deming slope's standard
+/// error is `√((σ²_ref + g²σ²_k) / S_xx)`, with `S_xx` the frame's spread over the paired pixels,
+/// and 5 of those bound it.
+///
+/// The same set with one pixel of frame 2 declared blank measures over the common domain instead
+/// of every pixel. That moves which pixels are measured by one, not which estimator runs, so the
+/// gains agree with the unblanked ones to within one standard error.
+#[test]
+fn global_gains_are_recovered_from_a_star_field_and_one_blank_pixel_does_not_move_them() {
+    let size = Size2us::new(256, 256);
+    let mut rng = TestRng::new(0x9a17);
+    let stars: Vec<(Vec2, f32)> = (0..150)
+        .map(|_| {
+            let center = Vec2::new(
+                8.0 + rng.next_f32() * (size.width - 16) as f32,
+                8.0 + rng.next_f32() * (size.height - 16) as f32,
+            );
+            (center, 0.02 + rng.next_f32() * 0.78)
+        })
+        .collect();
+    let sky = Sky {
+        level: 0.1,
+        noise: 0.0,
+        clamp: false,
+    };
+    let truth = SkyField::render(size, sky, 1.5, &stars, 0).pixels;
+    let dimensions = ImageDimensions::new((size.width, size.height), 1);
+    let settings = [
+        (1.0f32, 0.0f32, 0.002f32),
+        (0.8, 0.02, 0.006),
+        (1.25, -0.03, 0.004),
+    ];
+    let images: Vec<LinearImage> = settings
+        .iter()
+        .enumerate()
+        .map(|(k, &(gain, offset, noise))| {
+            let mut pixels: Vec<f32> = truth
+                .pixels()
+                .iter()
+                .map(|&t| (t - offset) / gain)
+                .collect();
+            patterns::add_gaussian_noise(&mut pixels, noise, 100 + k as u64);
+            LinearImage::from_pixels(dimensions, pixels)
+        })
+        .collect();
+    let stored = |blank: Option<usize>| -> Vec<StoredFrame> {
+        images
+            .iter()
+            .enumerate()
+            .map(|(k, image)| {
+                let quality = match blank {
+                    Some(pixel) if k == 2 => {
+                        let mut coverage = vec![1.0; size.pixel_count()];
+                        coverage[pixel] = 0.0;
+                        FrameQuality::from_coverage(Buffer2::new(size.width, size.height, coverage))
+                    }
+                    _ => FrameQuality::None,
+                };
+                StoredFrame::from_memory(image.clone(), quality, FrameStats::measure(image))
+            })
+            .collect()
+    };
+    let gains = |frames: &[StoredFrame]| -> Vec<f32> {
+        compute_frame_norms(
+            frames,
+            dimensions,
+            Normalization::Global,
+            &CancelToken::never(),
+        )
+        .unwrap()
+        .unwrap()
+        .iter()
+        .map(|norm| norm.channels[0].gain)
+        .collect()
+    };
+
+    let mean = truth.pixels().iter().map(|&t| f64::from(t)).sum::<f64>() / truth.len() as f64;
+    let truth_spread: f64 = truth
+        .pixels()
+        .iter()
+        .map(|&t| (f64::from(t) - mean).powi(2))
+        .sum();
+    let standard_error = |k: usize| {
+        let (gain, _, noise) = settings[k];
+        let (gain, noise, reference_noise) = (f64::from(gain), f64::from(noise), 0.002f64);
+        let frame_spread = truth_spread / (gain * gain);
+        ((reference_noise.powi(2) + gain * gain * noise.powi(2)) / frame_spread).sqrt()
+    };
+
+    let full = gains(&stored(None));
+    let blanked = gains(&stored(Some(100 * size.width + 100)));
+    assert_eq!(
+        (full[0], blanked[0]),
+        (1.0, 1.0),
+        "frame 0 is the reference"
+    );
+    for k in 1..3 {
+        let expected = f64::from(settings[k].0);
+        let error = standard_error(k);
+        assert!(
+            (f64::from(full[k]) - expected).abs() <= 5.0 * error,
+            "frame {k}: gain {} vs {expected} (σ {error:e})",
+            full[k]
+        );
+        assert!(
+            (f64::from(blanked[k]) - f64::from(full[k])).abs() <= error,
+            "frame {k}: blank moved the gain from {} to {} (σ {error:e})",
+            full[k],
+            blanked[k]
+        );
+    }
 }

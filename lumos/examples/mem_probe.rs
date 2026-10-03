@@ -16,10 +16,7 @@ use std::thread;
 use std::time::Duration;
 
 use common::CancelToken;
-use lumos::{
-    AlignStackConfig, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD,
-    ProgressCallback, calibrate_align_stack,
-};
+use lumos::{AlignStackConfig, CalibrationMasters, ProgressCallback, calibrate_align_stack};
 
 /// Read a `/proc/self/status` field (e.g. `RssAnon`, `VmRSS`) in KiB.
 fn status_kb(field: &str) -> u64 {
@@ -45,18 +42,8 @@ fn main() {
     let lights = lumos::raw_files(&lights_dir).expect("scan RAW lights directory");
     let lights = &lights[..n.min(lights.len())];
 
-    let empty: Vec<PathBuf> = Vec::new();
-    let masters = CalibrationMasters::from_files(
-        CalibrationSet {
-            dark: &empty,
-            flat: &empty,
-            bias: &empty,
-            flat_dark: &empty,
-        },
-        DEFAULT_SIGMA_THRESHOLD,
-        CancelToken::never(),
-    )
-    .expect("empty masters");
+    // The probe stacks lights alone: an empty bundle calibrates nothing.
+    let masters = CalibrationMasters::default();
 
     let mut config = AlignStackConfig::default();
     config.registration.ransac.seed = Some(1);

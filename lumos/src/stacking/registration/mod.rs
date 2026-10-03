@@ -66,10 +66,7 @@ use crate::stacking::registration::recovery::{RecoveredMatches, recover_matches}
 use crate::stacking::registration::spatial::KdTree;
 use config::Config;
 use distortion::sip::SipPolynomial;
-use result::{
-    FailedRung, RansacFailureReason, RegistrationCatalog, RegistrationError, RegistrationResult,
-    StarMatch,
-};
+use result::{FailedRung, RegistrationCatalog, RegistrationError, RegistrationResult, StarMatch};
 use transform::{TransformModel, TransformType, WarpTransform};
 
 use std::time::Instant;
@@ -344,10 +341,10 @@ fn estimate_and_refine(
     let ransac = RansacEstimator::new(config.ransac.clone(), max_sigma);
     let ransac_result = ransac
         .estimate(matches, ref_stars, target_stars, transform_type)
-        .ok_or(RegistrationError::RansacFailed {
-            reason: RansacFailureReason::NoInliersFound,
-            iterations: config.ransac.max_iterations,
-            best_inlier_count: 0,
+        .map_err(|failure| RegistrationError::RansacFailed {
+            reason: failure.reason,
+            iterations: failure.iterations,
+            best_inlier_count: failure.best_inlier_count,
         })?;
     let ransac_ms = t0.elapsed().as_secs_f64() * 1000.0;
 

@@ -263,23 +263,6 @@ it calibrate that spread differently.
       more here. The doc comment says "kappa-sigma clipping" without saying which spread estimator,
       so the difference is invisible at the call site.
 
-## 12. The Deming fit's inlier window may exclude the pixels that constrain the slope
-
-- [ ] `paired_photometric_gain` seeds with a MAD-ratio gain, then keeps only residuals inside
-      `4 · 1.4826 · MAD(residual)` of the residual median. The residual MAD over a stratified sample
-      of the common domain is sky-noise dominated.
-
-- [ ] Any star bright enough to have a photometric lever arm has a residual far outside that window
-      as soon as the seed gain is even slightly off — a 5% mismatch at 0.5 in normalized units is
-      0.025, against a window of a few times the sky σ. So the Deming fit runs on what is left, which
-      is close to flat sky, where `s_xy` is small and the slope is poorly determined.
-
-- [ ] The `covariance <= f64::EPSILON → 1.0` guard means a genuinely flat field degrades to unity
-      gain rather than to a wild one, so this is a precision question, not a crash. Worth measuring:
-      on a real registered set, compare the Deming gain against the MAD-ratio seed and against the
-      unregistered `Normalization::Global` path. If they disagree by more than the noise, the window
-      is the first thing to look at.
-
 ## 13. Smaller precision and interpretation items
 
 - [ ] **`Weighting::Noise` collapses the channels.** `resolve_weights` averages `gain·1.4826·MAD`

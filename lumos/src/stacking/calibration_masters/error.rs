@@ -19,12 +19,14 @@ pub enum CalibrationError {
     /// A second pass would subtract the dark and divide the flat twice.
     #[error("the light frame is already calibrated")]
     AlreadyCalibrated,
+    /// Building the bundle was cancelled before it finished.
+    #[error("calibration-master construction was cancelled")]
+    Cancelled,
     /// The flat, once its own bias or flat-dark is subtracted, has no positive mean to normalize
     /// by — in the given CFA colour channel, or over the whole frame (`None`). Swapped roles (a
     /// dark given as the flat) and a subtractor at the wrong level both end here.
     #[error("the subtracted flat has no positive mean{}", channel.map_or(String::new(), |c| format!(" in colour channel {c}")))]
     NonPositiveFlat { channel: Option<usize> },
-    /// A calibration master was captured with a different sensor pattern.
     /// A calibration master was captured with a different sensor pattern than the rest of the
     /// bundle, when the set is assembled, or than the light, when one is calibrated.
     #[error("{component} master CFA pattern {master:?} does not match {expected:?}")]

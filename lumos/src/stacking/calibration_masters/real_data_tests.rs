@@ -25,11 +25,12 @@ use quickbench::quick_bench;
 
 use crate::io::raw;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
+use crate::stacking::calibration_masters::internals::masters_from_files;
 use crate::stacking::calibration_masters::stack_cfa_master;
 use crate::stacking::progress::ProgressCallback;
 use crate::testing::init_tracing;
 use crate::testing::real_data::raw_frames;
-use crate::{CalibrationMasters, CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD, StackConfig};
+use crate::{CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD, StackConfig};
 
 /// Bundled calibration frame paths grouped by role (no flat-darks in this set).
 #[derive(Debug)]
@@ -73,7 +74,7 @@ fn builds_full_master_set() {
     init_tracing();
     let paths = calibration_paths();
 
-    let masters = CalibrationMasters::from_files(
+    let masters = masters_from_files(
         CalibrationSet {
             dark: &paths.darks,
             flat: &paths.flats,
@@ -81,9 +82,7 @@ fn builds_full_master_set() {
             flat_dark: &[],
         },
         DEFAULT_SIGMA_THRESHOLD,
-        CancelToken::never(),
-    )
-    .expect("master build failed");
+    );
 
     // Every supplied role yields a master; the un-supplied flat-dark stays `None`.
     let dark = masters.masters.dark.as_ref().expect("master dark");
@@ -178,7 +177,7 @@ fn hot_mask_metrics(map: &DefectMap, size: Size2us) -> HotMaskMetrics {
     let margin_x = size.width / 10;
     let margin_y = size.height / 10;
     let edge_count = map
-        .hot_indices
+        .hot_indices()
         .iter()
         .filter(|&&index| {
             let p = size.point_of(index);
@@ -190,7 +189,7 @@ fn hot_mask_metrics(map: &DefectMap, size: Size2us) -> HotMaskMetrics {
         })
         .count();
     let mut bins = [0usize; BINS * BINS];
-    for &index in &map.hot_indices {
+    for &index in map.hot_indices() {
         let p = size.point_of(index);
         let bx = (p.x * BINS / size.width).min(BINS - 1);
         let by = (p.y * BINS / size.height).min(BINS - 1);
@@ -198,7 +197,7 @@ fn hot_mask_metrics(map: &DefectMap, size: Size2us) -> HotMaskMetrics {
     }
 
     HotMaskMetrics {
-        hot_count: map.hot_indices.len(),
+        hot_count: map.hot_indices().len(),
         edge_count,
         max_bin_count: *bins.iter().max().unwrap(),
     }
@@ -249,7 +248,7 @@ fn hot_mask_spatial_distribution_and_repeatability() {
         .expect("master-dark stack failed")
         .expect("master dark");
         let size = Size2us::new(dark.data.width(), dark.data.height());
-        let map = DefectMap::default()
+        let map = DefectMap::new(dark.size())
             .detect_hot(&dark, DEFAULT_SIGMA_THRESHOLD, &CancelToken::never())
             .expect("hot detection failed");
         DetectedHotMask { map, size }
@@ -261,16 +260,16 @@ fn hot_mask_spatial_distribution_and_repeatability() {
     assert_eq!(second.size, first.size);
     assert_eq!(full.size, first.size);
 
-    let intersection = sorted_intersection_count(&first.map.hot_indices, &second.map.hot_indices);
-    let union = first.map.hot_indices.len() + second.map.hot_indices.len() - intersection;
+    let intersection = sorted_intersection_count(first.map.hot_indices(), second.map.hot_indices());
+    let union = first.map.hot_indices().len() + second.map.hot_indices().len() - intersection;
     let jaccard = intersection as f32 / union as f32;
     let first_metrics = hot_mask_metrics(&first.map, first.size);
     let second_metrics = hot_mask_metrics(&second.map, second.size);
     let full_metrics = hot_mask_metrics(&full.map, full.size);
     println!(
         "  alternating master-dark hot masks: {} and {}, intersection {}, Jaccard {:.4}",
-        first.map.hot_indices.len(),
-        second.map.hot_indices.len(),
+        first.map.hot_indices().len(),
+        second.map.hot_indices().len(),
         intersection,
         jaccard
     );
@@ -300,19 +299,15 @@ fn bench_build_masters_from_files(b: ::quickbench::Bencher) {
         paths.bias.len(),
     );
     b.bench(|| {
-        black_box(
-            CalibrationMasters::from_files(
-                CalibrationSet {
-                    dark: &paths.darks,
-                    flat: &paths.flats,
-                    bias: &paths.bias,
-                    flat_dark: &[],
-                },
-                DEFAULT_SIGMA_THRESHOLD,
-                CancelToken::never(),
-            )
-            .expect("master build failed"),
-        )
+        black_box(masters_from_files(
+            CalibrationSet {
+                dark: &paths.darks,
+                flat: &paths.flats,
+                bias: &paths.bias,
+                flat_dark: &[],
+            },
+            DEFAULT_SIGMA_THRESHOLD,
+        ))
     });
 }
 

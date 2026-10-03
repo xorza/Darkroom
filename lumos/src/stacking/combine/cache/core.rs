@@ -144,16 +144,14 @@ impl CacheCore {
     /// stacks, bounded row chunks for disk-backed), gather each frame's channel slice for the
     /// chunk via [`StoredPlane::chunk`], and hand `(output_slice, ChunkContext)` to `process`. The frames
     /// live in the owning cache, so they're passed in. Returns the combined `LinearPixels`.
-    pub(super) fn process_chunks<F, Channels, Process>(
+    pub(super) fn process_chunks<Process>(
         &self,
-        frames: &[F],
-        frame_channels: Channels,
+        frames: &[StoredFrame],
         memory: ChunkMemoryLayout,
         chunk_memory: Option<u64>,
         mut process: Process,
     ) -> LinearPixels
     where
-        Channels: for<'a> Fn(&'a F) -> &'a [StoredPlane] + Copy,
         Process: FnMut(&mut [f32], ChunkContext<'_>),
     {
         let dims = self.dimensions;
@@ -181,15 +179,8 @@ impl CacheCore {
                 let pixels_in_chunk = rows_in_chunk * width;
 
                 chunks.clear();
-                chunks.extend((0..frame_count).map(|frame_idx| {
-                    self.read_channel_chunk(
-                        frames,
-                        frame_channels,
-                        frame_idx,
-                        channel,
-                        start_row,
-                        end_row,
-                    )
+                chunks.extend(frames.iter().map(|frame| {
+                    frame.channels[channel].chunk(start_row * width, end_row * width)
                 }));
 
                 let output_slice = &mut output.channel_mut(channel).pixels_mut()
@@ -221,23 +212,5 @@ impl CacheCore {
         }
 
         output
-    }
-
-    /// Read a horizontal chunk (rows `start_row..end_row`) of a single channel from one frame,
-    /// tier-agnostically via [`StoredPlane::chunk`].
-    pub(super) fn read_channel_chunk<'a, F, Channels>(
-        &self,
-        frames: &'a [F],
-        channels: Channels,
-        frame_idx: usize,
-        channel: usize,
-        start_row: usize,
-        end_row: usize,
-    ) -> &'a [f32]
-    where
-        Channels: Fn(&'a F) -> &'a [StoredPlane],
-    {
-        let width = self.dimensions.width();
-        channels(&frames[frame_idx])[channel].chunk(start_row * width, end_row * width)
     }
 }

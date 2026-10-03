@@ -64,26 +64,6 @@ Severity: Medium — worst-case frame cost grows with nodes, wires and library s
 - [ ] `gesture/breaker/mod.rs` `Scribble::intersects_cubic` / `intersects_rect` — every visible wire is cut into 16 chords, each tested against every scribble segment (up to ~500), and every node rect against every segment, with no bounding-box rejection; `Wire::hull()` already exists. Keep a running scribble bounding box in `add_point`.
 - [ ] `darkroom/src/gui/graph_ctx/mod.rs` `GraphCtx::new` → `scenarium` `OutputTypes::update` — runs every frame: two hash inserts and a `DataType` clone per output port, and `OutputTypeSource::Const` clones a whole `ConstValue` to read its kind. No production func declares a wildcard output (see the scenarium group), so the table always equals the declared types.
 
-## The stacking pipeline applies values resolved for its inputs to the survivors
-Severity: Medium — manual weighting fails or misattributes after a registration drop; detection is not memory-bounded.
-
-- [ ] `lumos/src/stacking/combine/cache/mod.rs` `FrameCache::from_stored_frames` — its only caller passes frames the pipeline produced itself, yet it runs `validate_stored_geometry`, `validate_stored_samples` and `validate_frame_quality` as `Result` paths; on the spill tier this faults every plane in from disk once before the combine reads them again. Code-contract checks belong in `debug_assert!`.
-
-## Normalization and combine: measured statistics thrown away, facts passed back to their owner
-Severity: Medium — the largest registered-normalization pass does twice the work; normalization has two sources guarded by a runtime assert.
-
-- [ ] `lumos/src/stacking/combine/normalization/mod.rs` `measure_common_stats` — `cancellable_median_mad` runs a second full selection plus an abs-deviation pass per frame × channel to produce a MAD nothing reads (`Multiplicative` uses medians only; `measure_global_norms` reads `.median`). It also rebuilds full `FrameStats` (cloning `domain`, `row_order`, `quantization_sigma`) to carry one median per channel; `RegisteredMeasurements::{CommonStats, GlobalNorms}` exists only to route that back.
-- [ ] `normalization/mod.rs` `compute_frame_norms` — `Normalization::Global` switches estimator (MAD-ratio gain vs a Deming fit) whenever any frame carries quality planes, so one FITS with a single `BLANK` pixel changes the gain model for every frame. Partial coverage should change where statistics are measured, not which estimator runs. `stratified_valid_indices` polls cancel with a per-pixel modulo that `CANCEL_POLL_CHUNK`'s doc says was removed.
-- [ ] `lumos/src/stacking/combine/cache/mod.rs` `FrameCache::process_chunked(weights, frame_norms, ..)` — every call passes `cache.frame_norms.as_deref()` back into a method on that same cache. `combine_cached` / `run_stacking` hand `normalization` to the builder separately from `config`, and `FrameCache::normalization` is stored only so `run_stacking` can `assert_eq!` the two copies.
-- [ ] `combine/cache/core.rs` `CacheCore::process_chunks` / `read_channel_chunk` are generic over `F` and an accessor closure, with one call passing `&[StoredFrame]` and `|frame| &frame.channels`. `run_stacking`'s `Mean(rejection)` arm repeats the `Winsorized` arm verbatim minus the sigma.
-
-## Calibration-master construction is duplicated between lens and lumos
-Severity: Medium — two copies of the role → preset table; ~150 lines of lumos scheduling with no production caller.
-
-- [ ] `lumos/src/stacking/calibration_masters/mod.rs` `CalibrationMasters::from_files` (with `RoleStack`, `weighted_budget`, `frames_fit_in_memory`) has no caller outside tests, `real_data_tests` and `pipeline_bench`; the app's path, lens `build_masters_cached`, restates the role → preset table and runs roles sequentially through `stack_cfa_master`. Put the presets on `MasterRole` so both read one table.
-- [ ] `lumos/src/lib.rs` exports `stack`, `stack_images`, `StackFrame`, `align_and_stack` and `DefectMap` (with `pub` `detect_hot`/`detect_cold`/`correct`) — none has a non-test caller in the workspace.
-- [ ] `lens/src/astro/nodes/calibration.rs` `register` — the "Sigma" input is described as the "Sigma-clipping rejection threshold when stacking", but it is the defect-detection threshold passed to `from_images`.
-
 ## scenarium's `WorkerStatus` folds three messages into one record
 Severity: Medium — hosts receive states that cannot happen, darkroom handles them anyway, and live progress paints failed nodes as executed.
 
@@ -127,7 +107,6 @@ Severity: Low — removable surface; checked with `rg` across the workspace.
 ## Placeholder values and derived fields stored beside their source
 Severity: Low — `Option`s that must be `Some`, sentinels, and caches of computable values.
 
-- [ ] `lumos` combine — `defect_map/mod.rs` `DefectMap::dimensions: Option<Size2us>` is `None` only during the `Default` → `detect_hot` → `detect_cold` chain and `.expect`ed in `correct`; `hot_indices`/`cold_indices` are `pub` and documented ascending "for the binary-search invariant" that nothing uses, yet `fits.rs` `validate_sorted` rejects files on it; `count`/`percentage` double-count a pixel both hot and dead. `DefectMap::correct` rebuilds a full-sensor `BitBuffer2` from the immutable lists on every light.
 - [ ] `lumos` support — `bit_buffer2/mod.rs` `len`/`stride` (and `words`) are stored mutable `pub(crate)` beside the `size` they derive from; `get`/`set`/`Index<usize>`/`BitIter::next` do a div and mod per call via `Size2us::point_of`, inside per-pixel loops (`NullMask::is_null`, `cosmic_ray/masks.rs`, `cosmic_ray/xtrans.rs` `xtrans_replace`, `normalization::stratified_valid_indices` over a 37.7 M-bit domain). `math/urect/mod.rs` `URect::new` runs a release `assert!` on every construction (which pushed `markesteijn_steps` off the type) while `URect::empty` builds the `min > max` state `new` forbids. `concurrency/mod.rs` `JobScratchLease::value` is an `Option` that is `Some` for the lease's life (`ManuallyDrop`).
 - [ ] `scenarium` — `execution/engine/mod.rs` `ExecutionEngine::compiled: Option<Arc<CompiledGraph>>` while `CompiledGraph::default()` is documented as the empty program (`expect`s in `execute`/`validate`, early returns elsewhere); `execute` and `Executor::run` both clear the same outcome; `ExecutionEngine::clear` drops the `RunSchedule` buffer the type exists to recycle. `schedule/planner.rs` `Planner::color` `White`/`Black` restate `RunSchedule::states`. `graph/func/mod.rs` `ValueVariant::display_name` copies `name`; `Func::uncacheable` is never read by the engine.
 - [ ] `darkroom` — `gui/frame/geometry/mod.rs` `PortLayer::record`/`snapshot` `node_min: Option<Vec2>` is always `Some`; `widgets/port_glyph.rs` `PortGlyph::new` defaults the fill to a `WHITE` every caller overrides; `theme/card_theme.rs` `CardBorder` is a one-field wrapper whose only caller reads `.color`; `Theme` derives serde (only a test uses it) and serializes derived values (`const_value_editor_revealed`, `inline_rename_title`, `menu_button`, `palantir_theme`) beside their sources; `Theme::build` stores `text: TypeScale::DEFAULT` and passes a separate `&TypeScale::DEFAULT` to `palantir_theme_for` / `menu_button_for`.
@@ -136,14 +115,6 @@ Severity: Low — `Option`s that must be `Some`, sentinels, and caches of comput
 Severity: Low — exact or better-conditioned forms exist.
 
 - [ ] `lumos/src/stacking/combine/rejection/linear_fit_clip_config.rs` `LinearFitClipConfig::reject` — accumulates `sum_x`/`sum_xx` per pixel in f32 though they are `n(n−1)/2` and `(n−1)n(2n−1)/6`; centring `x` removes the cancellation in `denom`, and the `denom.abs() < f32::EPSILON` guard cannot fire for n ≥ 4.
-
-## lumos error types route through each other in both directions
-Severity: Low — callers must match the same failure at two paths.
-
-- [ ] `lumos/src/stacking/combine/error.rs` `Error::Calibration(CalibrationError)` exists because `from_images` / `from_files` / `DefectMap::detect_*` return the combine's `Error`; the pipeline `Error` also has its own `Calibration` beside `Stack(StackError)`, so one failure arrives at two paths.
-- [ ] The pipeline `Error` has no `Cancelled` (five sites build `Error::Stack(StackError::Cancelled)`), duplicates `NoFrames` with `StackError::NoFrames`, and lacks `From<FrameStoreError>` (`pipeline/tier.rs` writes the same `map_err` four times).
-- [ ] `calibration_masters/fits.rs` `load` stringifies a typed `CalibrationError` into `io::Error::InvalidData`; `encode_defect_map` builds the `LUMWID` failure with `invalid_data` and `LUMHEI` with `FitsError::KeywordOutOfRange` in one expression.
-- [ ] `lumos/src/stacking/registration/mod.rs` `estimate_and_refine` — every `None` from RANSAC becomes `RansacFailed { NoInliersFound, iterations: max_iterations, best_inlier_count: 0 }`, including when RANSAC never ran.
 
 ## scenarium flattens errors to strings and allocates path keys per run
 Severity: Low — precision lost where a caller would branch or show a cause.
