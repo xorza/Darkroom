@@ -253,10 +253,6 @@ fn ensure_cfa_frames(
         let cfa = make_cfa(size, frame(i), CfaType::Mono);
         save_cfa_fits(path, &cfa)?;
         print!("\r  generating {}… {}/{n}", dir.display(), i + 1);
-        #[expect(
-            clippy::unused_result_ok,
-            reason = "a progress line that fails to flush costs the probe nothing"
-        )]
         io::stdout().flush().ok();
     }
     Ok(paths)

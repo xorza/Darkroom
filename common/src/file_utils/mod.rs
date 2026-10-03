@@ -57,10 +57,6 @@ impl Publication {
 }
 
 impl Drop for Publication {
-    #[expect(
-        clippy::let_underscore_must_use,
-        reason = "best-effort cleanup: a temporary that cannot be removed is left behind"
-    )]
     fn drop(&mut self) {
         if !self.temporary.as_os_str().is_empty() {
             let _ = fs::remove_file(&self.temporary);

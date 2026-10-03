@@ -60,10 +60,6 @@ impl TestWorker {
         let worker = Worker::new(move |report| {
             // The receiver outlives the worker in every test here; a closed
             // channel means the fixture is being torn down.
-            #[expect(
-                clippy::unused_result_ok,
-                reason = "a report sent during teardown has no reader"
-            )]
             tx.send(report).ok();
         });
         Self {

@@ -144,9 +144,5 @@ fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
 
 fn init_tracing() {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    #[expect(
-        clippy::let_underscore_must_use,
-        reason = "a subscriber already installed keeps logging; the example needs no second"
-    )]
     let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
 }

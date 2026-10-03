@@ -266,7 +266,6 @@ pub(super) mod internals {
     /// the window summed and normalized — with the warp's own edge-extended bilinear where the
     /// window leaves the source.
     #[expect(
-        clippy::cast_possible_wrap,
         clippy::cast_sign_loss,
         reason = "an image side is at most ImageDimensions::MAX_SIDE, 2^30, so a coordinate and a kernel's reach past it fit i32; the taps are read only once the window is inside the image"
     )]

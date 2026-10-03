@@ -31,10 +31,6 @@ impl StoredPlane {
         #[cfg(unix)]
         {
             use memmap2::Advice;
-            #[expect(
-                clippy::let_underscore_must_use,
-                reason = "read-ahead advice is a hint: a kernel that refuses it reads the plane all the same"
-            )]
             let _ = mmap.advise(Advice::Sequential);
         }
         Ok(Self::Mapped(mmap))

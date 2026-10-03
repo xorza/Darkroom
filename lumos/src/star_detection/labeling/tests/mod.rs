@@ -8,7 +8,6 @@
 //! runs must equal a scan of the labels.
 
 #![expect(
-    clippy::cast_possible_wrap,
     clippy::cast_sign_loss,
     reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
 )]

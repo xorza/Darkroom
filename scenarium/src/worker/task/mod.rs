@@ -232,10 +232,6 @@ where
         }
 
         for reply in self.intent.syncs.drain(..) {
-            #[expect(
-                clippy::let_underscore_must_use,
-                reason = "a requester that stopped waiting needs no reply"
-            )]
             let _ = reply.send(());
         }
     }

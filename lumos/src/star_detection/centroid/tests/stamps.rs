@@ -1,8 +1,3 @@
-#![expect(
-    clippy::cast_possible_wrap,
-    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
-)]
-
 use super::*;
 use crate::star_detection::centroid::stamp::{StampFit, sigma_from_moments};
 

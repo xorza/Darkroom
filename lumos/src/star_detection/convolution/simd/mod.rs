@@ -79,10 +79,6 @@ pub(super) fn mirror_index(i: isize, len: usize) -> usize {
 
 /// Scalar convolution for a single pixel with mirror boundary handling.
 #[inline]
-#[expect(
-    clippy::cast_possible_wrap,
-    reason = "pixel coordinates and kernel taps index a slice, whose length Rust caps at isize::MAX"
-)]
 fn convolve_pixel_scalar(
     input: &[f32],
     kernel: &[f32],
@@ -167,10 +163,6 @@ fn convolve_cols_row(
 
 /// Scalar single column-row convolution.
 #[inline]
-#[expect(
-    clippy::cast_possible_wrap,
-    reason = "pixel coordinates and kernel taps index a slice, whose length Rust caps at isize::MAX"
-)]
 fn convolve_cols_row_scalar(
     input: &[f32],
     out_row: &mut [f32],
@@ -210,10 +202,6 @@ pub(super) fn convolve_2d_row(
 
 /// Scalar implementation of single-row 2D convolution.
 #[inline]
-#[expect(
-    clippy::cast_possible_wrap,
-    reason = "pixel coordinates and kernel taps index a slice, whose length Rust caps at isize::MAX"
-)]
 fn convolve_2d_row_scalar(
     input: &[f32],
     output_row: &mut [f32],

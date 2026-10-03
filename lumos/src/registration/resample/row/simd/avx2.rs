@@ -100,10 +100,6 @@ struct GatherTables {
 impl GatherTables {
     /// For `i < A` the tap sits left of centre and its distance grows with `frac`; for `i ≥ A` it
     /// sits right of centre and shrinks with it, hence the sign flip.
-    #[expect(
-        clippy::cast_possible_wrap,
-        reason = "the order A is at most 4, and a tap index below 2A"
-    )]
     const fn new<const A: usize, const SIZE: usize>() -> Self {
         let mut base = [0.0f32; 8];
         let mut sign = [0.0f32; 8];

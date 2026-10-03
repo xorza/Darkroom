@@ -78,10 +78,6 @@ pub(super) unsafe fn convolve_row_neon(
 ///
 /// # Safety
 /// Caller must ensure running on aarch64.
-#[expect(
-    clippy::cast_possible_wrap,
-    reason = "pixel coordinates and kernel taps index a slice, whose length Rust caps at isize::MAX"
-)]
 pub(super) unsafe fn convolve_cols_row_neon(
     input: &[f32],
     out_row: &mut [f32],
@@ -123,10 +119,6 @@ pub(super) unsafe fn convolve_cols_row_neon(
 ///
 /// # Safety
 /// Caller must ensure running on aarch64.
-#[expect(
-    clippy::cast_possible_wrap,
-    reason = "pixel coordinates and kernel taps index a slice, whose length Rust caps at isize::MAX"
-)]
 pub(super) unsafe fn convolve_2d_row_neon(
     input: &[f32],
     output_row: &mut [f32],

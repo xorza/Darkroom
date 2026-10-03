@@ -141,10 +141,6 @@ fn detect_memory_probe() {
             i + 1,
             (i + 1) as f64 / secs.max(1e-3)
         );
-        #[expect(
-            clippy::unused_result_ok,
-            reason = "a progress line that fails to flush costs the probe nothing"
-        )]
         io::stdout().flush().ok();
     }
     let total_secs = start.elapsed().as_secs_f64();

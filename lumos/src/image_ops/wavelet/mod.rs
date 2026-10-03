@@ -27,10 +27,6 @@ pub(crate) fn atrous_smooth(
 }
 
 /// Horizontal B3-spline convolution with taps at `x ± step` and `x ± 2·step` (mirror boundary).
-#[expect(
-    clippy::cast_possible_wrap,
-    reason = "pixel coordinates and tap steps index a slice, whose length Rust caps at isize::MAX"
-)]
 fn convolve_horizontal(src: &Buffer2<f32>, dst: &mut Buffer2<f32>, step: usize) {
     let width = src.width();
     let wi = width as isize;
@@ -77,10 +73,6 @@ fn convolve_horizontal(src: &Buffer2<f32>, dst: &mut Buffer2<f32>, step: usize) 
 }
 
 /// Vertical B3-spline convolution with taps at `y ± step` and `y ± 2·step` (mirror boundary).
-#[expect(
-    clippy::cast_possible_wrap,
-    reason = "pixel coordinates and tap steps index a slice, whose length Rust caps at isize::MAX"
-)]
 fn convolve_vertical(src: &Buffer2<f32>, dst: &mut Buffer2<f32>, step: usize) {
     let width = src.width();
     let height = src.height();

@@ -258,10 +258,6 @@ pub(crate) fn ensure_frames(
         write_fits_u16(path, size, &data, &mut buf)?;
         generated += 1;
         print!("\r  generating {prefix} frames… {}/{}", i + 1, n);
-        #[expect(
-            clippy::unused_result_ok,
-            reason = "a progress line that fails to flush costs the probe nothing"
-        )]
         io::stdout().flush().ok();
     }
     if generated > 0 {

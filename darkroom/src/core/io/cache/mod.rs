@@ -31,10 +31,6 @@ pub(crate) fn document_cache_root(doc_path: &Path) -> PathBuf {
 /// a document with no disk-backed node leaves its folder untouched. A failure
 /// just means no `.gitignore` yet — the cache still works, since blob writes
 /// recreate the dir.
-#[expect(
-    clippy::let_underscore_must_use,
-    reason = "the ignore file is a courtesy; a cache without it still works"
-)]
 pub(crate) fn prepare_cache_root(root: &Path) {
     if fs::create_dir_all(root).is_err() {
         return;

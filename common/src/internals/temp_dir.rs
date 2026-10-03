@@ -51,10 +51,6 @@ impl TempDir {
 }
 
 impl Drop for TempDir {
-    #[expect(
-        clippy::unused_result_ok,
-        reason = "best effort: an entry a test made unremovable must not fail teardown"
-    )]
     fn drop(&mut self) {
         // Best effort: a test that deliberately made an entry unremovable — to
         // watch an eviction fail on it — must not then fail in teardown.
