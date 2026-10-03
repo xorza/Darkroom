@@ -5,8 +5,6 @@
 - mesh once registrations
 - image buffer and lens image interleaved/planar formats
 - quickbench - runonce cli arg
-- palantir prelude
 - custom panels
 - custom renderer backends
 - wgpu features and limits request public api
-- audit noisy lints

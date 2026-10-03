@@ -1,7 +1,8 @@
 //! Walking the output in memory-bounded row chunks.
 //!
 //! The part of the combine that does not depend on what is being combined: pick a chunk height
-//! the budget allows, gather each frame's slice of the chunk through [`StoredPlane::chunk`] — the
+//! the budget allows, gather each frame's slice of the chunk through
+//! [`StoredPlane::chunk`](crate::frame_store::stored_plane::StoredPlane::chunk) — the
 //! one call that hides whether a plane is resident or memory-mapped — and hand the pair to the
 //! reducer. An in-memory stack is a single chunk; a spilled one is as many as the budget dictates.
 
@@ -93,7 +94,8 @@ pub(super) struct ChunkContext<'a> {
 impl CacheCore {
     /// Combine engine: walk the output in memory-bounded row chunks (whole planes for in-memory
     /// stacks, bounded row chunks for disk-backed), gather each frame's channel slice for the chunk
-    /// via [`StoredPlane::chunk`], and hand `(output_slice, ChunkContext)` to `process`. The frames
+    /// via [`StoredPlane::chunk`](crate::frame_store::stored_plane::StoredPlane::chunk), and hand
+    /// `(output_slice, ChunkContext)` to `process`. The frames
     /// live in the owning cache, so they're passed in. Returns the combined `LinearPixels`.
     pub(super) fn process_chunks<Process>(
         &self,

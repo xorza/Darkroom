@@ -51,12 +51,9 @@ impl<T> CalibrationSet<T> {
             .map(|role| (role, self.get(role)))
     }
 
-    /// The four roles by value, in [`MasterRole::ALL`] order.
-    ///
-    /// An array rather than an iterator because the concurrent half of
-    /// [`CalibrationMasters::from_files`] hands it straight to rayon, which parallelizes `[T; N]`
-    /// but not an array iterator. [`Self::from_roles`] is its inverse; the two are the only place
-    /// the field-to-role correspondence is written, and `roles_round_trip_in_master_order` pins it.
+    /// The four roles by value, in [`MasterRole::ALL`] order: the one place the field-to-role
+    /// correspondence is written. [`Self::try_map`] rebuilds a set from it by position, and
+    /// `roles_round_trip_in_master_order` pins the order.
     pub(crate) fn into_roles(self) -> [(MasterRole, T); 4] {
         [
             (MasterRole::Dark, self.dark),

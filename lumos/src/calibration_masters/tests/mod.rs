@@ -459,9 +459,9 @@ fn a_set_that_cannot_be_loaded_cannot_be_built() {
 
 #[test]
 fn roles_round_trip_in_master_order() {
-    // `into_roles`/`from_roles` are the pivot every per-role walk goes through, so their order
-    // has to be the one `MasterRole::ALL` and `iter` publish — otherwise a set rebuilt after a
-    // parallel map comes back with each master under the wrong role.
+    // `into_roles` is the pivot `try_map` goes through, so its order has to be the one
+    // `MasterRole::ALL` and `iter` publish — otherwise the set `try_map` rebuilds comes back with
+    // each master under the wrong role.
     let set = CalibrationSet {
         dark: "dark",
         flat: "flat",

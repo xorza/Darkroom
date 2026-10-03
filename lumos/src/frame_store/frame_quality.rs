@@ -184,8 +184,10 @@ impl<P> FrameQuality<P> {
     ///
     /// Its inverse, and here for the same reason: which plane is which is decided in this file
     /// alone, so a writer and a later reader cannot disagree. The caller establishes that both are
-    /// there — see [`CachedQuality`](crate::frame_store::frame_spill::CachedQuality) —
-    /// which is why this reads a plane rather than looking for one.
+    /// there — a commit that
+    /// [`carries_quality`](crate::frame_store::frame_spill::Committed::carries_quality), with both
+    /// planes [on disk](crate::frame_store::frame_spill::FrameSpill::quality_on_disk) — which is
+    /// why this reads a plane rather than looking for one.
     pub(crate) fn read_spilled<E>(
         mut read: impl FnMut(FramePlane) -> Result<P, E>,
     ) -> Result<Self, E> {

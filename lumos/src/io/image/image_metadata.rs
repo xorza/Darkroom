@@ -66,9 +66,9 @@ impl ImageMetadata {
     /// the unit that span was in.
     ///
     /// `None` for an image this crate synthesized rather than decoded, and for a preview raster
-    /// that declared no domain. Two frames are commensurate when both answer and the answers
-    /// satisfy [`SampleDomain::commensurate_with`]; when either is `None` there is nothing to
-    /// compare, which is not the same as agreeing.
+    /// that declared no domain. Two frames are commensurate when both answer and
+    /// [`SampleDomain::conversion_to`] relates the answers; when either is `None` there is nothing
+    /// to compare, which is not the same as agreeing.
     pub fn sample_domain(&self) -> Option<SampleDomain> {
         self.provenance
             .as_ref()
