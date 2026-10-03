@@ -249,7 +249,7 @@ fn gaussian_fit_rotated_ellipse() {
     let result = result.unwrap();
 
     // Position should still be accurate
-    let error = ((result.pos.x - true_cx).powi(2) + (result.pos.y - true_cy).powi(2)).sqrt();
+    let error = (result.pos.x - true_cx).hypot(result.pos.y - true_cy);
     assert!(
         error < 0.1,
         "Position error {error} too large for rotated ellipse fit"

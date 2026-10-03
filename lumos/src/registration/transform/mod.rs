@@ -375,7 +375,7 @@ impl Transform {
     pub fn scale_factor(&self) -> f64 {
         let a = self.matrix[0];
         let c = self.matrix[3];
-        (a * a + c * c).sqrt()
+        a.hypot(c)
     }
 
     /// Whether this is a usable transformation: every entry finite, and an inverse that

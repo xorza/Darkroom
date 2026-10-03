@@ -97,6 +97,10 @@ fn cfa_stack_quantization_uses_normalization_and_actual_rejection_survivors() {
         },
     )
     .expect("this cache is never cancelled");
+    #[expect(
+        clippy::imprecise_flops,
+        reason = "the expected value repeats the N-term sum of squares `quantization` computes, so the comparison stays exact"
+    )]
     let expected_normalized_sigma =
         ((0.25f32 * 0.01).powi(2) + (0.75f32 * 2.0 * 0.02).powi(2)).sqrt();
     assert_eq!(normalized.image.channel(0).pixels().to_vec(), vec![0.4; 2]);

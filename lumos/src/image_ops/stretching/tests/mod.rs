@@ -253,7 +253,7 @@ fn ghs_reference_t(d: f64, b: f64, u: f64) -> f64 {
     if b == 0.0 {
         1.0 - (-d * u).exp()
     } else if b == -1.0 {
-        (1.0 + d * u).ln()
+        (d * u).ln_1p()
     } else if b < 0.0 {
         (1.0 - (1.0 - b * d * u).powf((b + 1.0) / b)) / (d * (b + 1.0))
     } else {

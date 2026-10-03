@@ -76,10 +76,6 @@ impl DataType {
     /// out which literals describe no type of their own and why. The match is
     /// deliberately exhaustive: a new [`ConstValue`] variant must fail to
     /// compile here rather than fall into `Any` unexamined.
-    #[expect(
-        clippy::match_same_arms,
-        reason = "each literal kind states its own reason for reporting `Any`"
-    )]
     pub(crate) fn or_const_type(self, value: &ConstValue) -> DataType {
         if !matches!(self, DataType::Any) {
             return self;
