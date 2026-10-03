@@ -395,12 +395,6 @@ impl NodeSpec {
         self
     }
 
-    #[must_use]
-    pub fn uncacheable(mut self) -> Self {
-        self.func = self.func.uncacheable();
-        self
-    }
-
     /// The [`CacheMode`] nodes of this func start at.
     #[must_use]
     pub fn cache(mut self, mode: CacheMode) -> Self {

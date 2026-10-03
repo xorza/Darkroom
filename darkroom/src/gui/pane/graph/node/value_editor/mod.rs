@@ -68,17 +68,7 @@ pub(super) fn show(
             .iter()
             .position(|o| &o.value == value)
             .unwrap_or(0);
-        // A `ValueVariant` carries a `name` *and* a `display_name`, so which
-        // of the two the dropdown reads is this call's choice, not the
-        // type's — which is why the label is projected rather than derived.
-        let picked = combo_pick(
-            ui,
-            theme,
-            id,
-            value_variants,
-            |o| o.display_name.as_str(),
-            before,
-        )?;
+        let picked = combo_pick(ui, theme, id, value_variants, ValueVariant::label, before)?;
         return value_variants.get(picked).map(|o| o.value.clone());
     }
     // The widget follows the *declared* port type, not the stored literal's

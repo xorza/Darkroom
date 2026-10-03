@@ -199,22 +199,20 @@ fn cache_mode_reads_verbatim_per_node() {
 
 #[test]
 fn impure_flag_reads_from_func_behavior() {
-    // Three funcs differing only in the flags the header gate reads: a `Pure`
-    // one (offers the storage toggles), an `Impure` one (no content digest,
-    // so the toggles are hidden), and a self-caching one.
+    // Three funcs differing only in what the header gate reads: a `Pure` one
+    // (offers the storage toggles), an `Impure` one (no content digest, so the
+    // toggles are hidden), and an outputless sink (nothing to store).
     let mut g = TestGraph::new();
     let pure_id = g.add("pure_src", |n| n.pure().output(DataType::Int));
     let impure_id = g.add("impure_src", |n| n.output(DataType::Int));
-    let self_cached_id = g.add("self_cached", |n| {
-        n.pure().uncacheable().output(DataType::Int)
-    });
+    let outputless_id = g.add("outputless", |n| n.sink().input(DataType::Int));
 
     let mut fixture = GraphCtxFixture::over(g);
     let graph_ctx = fixture.graph_ctx();
 
     let pure = graph_ctx.node(pure_id).unwrap();
     let impure = graph_ctx.node(impure_id).unwrap();
-    let self_cached = graph_ctx.node(self_cached_id).unwrap();
+    let outputless = graph_ctx.node(outputless_id).unwrap();
 
     assert!(!pure.impure(), "a Pure func keeps its cache chips");
     assert!(impure.impure(), "an Impure func hides its cache chips");
@@ -230,12 +228,8 @@ fn impure_flag_reads_from_func_behavior() {
     assert!(pure.cache_controls());
     assert!(!impure.cache_controls());
     assert!(
-        self_cached.can_evict_cache(),
-        "self-caching funcs can still have cached downstream consumers"
-    );
-    assert!(
-        !self_cached.cache_controls(),
-        "self-caching funcs hide Scenarium storage controls"
+        !outputless.cache_controls() && !outputless.can_evict_cache(),
+        "an outputless func has nothing to store or evict"
     );
     assert!(!pure.sink() && !impure.sink());
 }

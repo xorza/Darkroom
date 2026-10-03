@@ -6,7 +6,6 @@ use scenarium::{AnyState, ConstValue, ContextManager, OutputDemand, SharedAnySta
 fn the_declaration_is_a_sink_that_produces_nothing() {
     let func = preview_func(Arc::default());
     assert!(func.sink, "an ambient sinks run must reach it");
-    assert!(func.uncacheable, "no output to persist");
     assert!(func.outputs.is_empty());
     assert!(func.events.is_empty());
     assert_eq!(func.inputs.len(), 1);

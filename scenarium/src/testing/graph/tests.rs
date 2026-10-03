@@ -144,11 +144,7 @@ fn spec_flags_reach_the_declaration() {
     let mut g = TestGraph::new();
     g.add("plain", |n| n.output(DataType::Int));
     g.add("flagged", |n| {
-        n.pure()
-            .sink()
-            .uncacheable()
-            .cache(CacheMode::Both)
-            .output(DataType::Int)
+        n.pure().sink().cache(CacheMode::Both).output(DataType::Int)
     });
 
     let func = |g: &TestGraph, name: &str| {
@@ -157,11 +153,11 @@ fn spec_flags_reach_the_declaration() {
     };
     let plain = func(&g, "plain");
     assert_eq!(plain.behavior, FuncBehavior::Impure);
-    assert!(!plain.sink && !plain.uncacheable);
+    assert!(!plain.sink);
     assert_eq!(plain.default_cache_mode, CacheMode::None);
 
     let flagged = func(&g, "flagged");
     assert_eq!(flagged.behavior, FuncBehavior::Pure);
-    assert!(flagged.sink && flagged.uncacheable);
+    assert!(flagged.sink);
     assert_eq!(flagged.default_cache_mode, CacheMode::Both);
 }

@@ -54,9 +54,9 @@ impl PreviewSink {
 /// The preview func, bound to the sink its lambda publishes into.
 ///
 /// `sink()` so an ambient sinks run reaches it — that is what makes a preview
-/// refresh without the editor naming it as a seed. `uncacheable()` because it
-/// has no output to persist, and it stays `Impure` (the default) because
-/// `Func::validate` refuses an outputless func that claims to be pure.
+/// refresh without the editor naming it as a seed. It stays `Impure` (the
+/// default) because `Func::validate` refuses an outputless func that claims to
+/// be pure.
 pub(crate) fn preview_func(sink: Arc<PreviewSink>) -> Func {
     Func::new(
         PREVIEW_FUNC_ID,
@@ -72,7 +72,6 @@ pub(crate) fn preview_func(sink: Arc<PreviewSink>) -> Func {
     )
     .category("System")
     .sink()
-    .uncacheable()
     .description(
         "Shows the value wired into it. The value goes to the editor \
              rather than to a consumer, so watching one never changes what the \

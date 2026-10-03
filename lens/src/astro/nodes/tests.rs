@@ -7,7 +7,7 @@ use lumos::{
     DEFAULT_SIGMA_THRESHOLD, Denoise, ExtractBackground, Hdr, LocalContrast,
     PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS,
 };
-use scenarium::{ConstValue, DataType, DynamicValue, FsPathMode, FuncBehavior};
+use scenarium::{ConstValue, DataType, DynamicValue, FsPathMode, FuncBehavior, ValueVariant};
 
 use crate::astro::config::processing::{ScnrKnobs, StretchKnobs};
 use crate::astro::config::stacking::{CombineKnobs, DetectionKnobs, RegistrationKnobs};
@@ -127,7 +127,7 @@ fn stack_lights_node_is_registered() {
     let detection_displays: Vec<&str> = f.inputs[2]
         .value_variants
         .iter()
-        .map(|o| o.display_name.as_str())
+        .map(ValueVariant::label)
         .collect();
     assert_eq!(
         detection_displays,
