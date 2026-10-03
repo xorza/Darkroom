@@ -5,4 +5,5 @@
 
 pub(crate) mod anchored_menu;
 pub(crate) mod inspector;
+pub(crate) mod node_context_menu;
 pub(crate) mod wire;

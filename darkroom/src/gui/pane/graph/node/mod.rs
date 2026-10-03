@@ -11,7 +11,7 @@ use crate::core::document::StackedItem;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::ctx::DrawCtx;
 use crate::gui::pane::graph::gesture::breaker::breaker_probe::BreakerProbe;
-use crate::gui::pane::graph::gesture::drag_anchor::GroupDrag;
+use crate::gui::pane::graph::gesture::group_drag::GroupDrag;
 use crate::gui::requests::Requests;
 use palantir::{Track, Ui};
 use scenarium::NodeId;

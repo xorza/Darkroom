@@ -15,10 +15,11 @@ use crate::gui::app::commands::run::RunCommand;
 use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::gesture::pan_zoom::{self, Framing};
 use crate::gui::requests::Requests;
+use crate::gui::widgets::chip::Chip;
 use crate::gui::widgets::support::{
     dot, filled_rect, frame, play_triangle, play_triangle_at, stroked_rect,
 };
-use crate::gui::widgets::toolbar::{BUTTON_GAP, Chip, TOOLBAR_MARGIN, pill};
+use crate::gui::widgets::toolbar::{BUTTON_GAP, TOOLBAR_MARGIN, pill};
 
 /// The toolbar's chip ids. One graph pane, so each is a fixed hash.
 pub(crate) fn run_button_wid() -> WidgetId {

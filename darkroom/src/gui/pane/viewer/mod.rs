@@ -46,7 +46,8 @@ use crate::gui::state::preview_store::{
     DrawableImage, PreviewMessage, PreviewStore, StoredContent,
 };
 use crate::gui::theme::Theme;
-use crate::gui::widgets::toolbar::{BUTTON_GAP, Chip, TOOLBAR_MARGIN, pill, pill_rule};
+use crate::gui::widgets::chip::Chip;
+use crate::gui::widgets::toolbar::{BUTTON_GAP, TOOLBAR_MARGIN, pill, pill_rule};
 
 /// One image-viewer tab's state: what it shows and how it's framed.
 /// Lives in the `MainWindow`'s per-node viewer map, keyed by (and

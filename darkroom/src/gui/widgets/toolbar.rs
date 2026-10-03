@@ -1,21 +1,17 @@
-//! Shared chrome for floating view toolbars: the frosted group pill and
-//! the square glyph buttons riding on it. Used by the graph canvas
-//! toolbar and the image viewer's control panel; each caller keeps its
-//! own glyphs and toggle color policy.
+//! Shared chrome for floating view toolbars: the frosted group pill the
+//! [`Chip`](crate::gui::widgets::chip::Chip) buttons ride on. Used by the
+//! graph canvas toolbar and the image viewer's control panel; each caller
+//! keeps its own glyphs and toggle color policy.
 
 use palantir::prelude::*;
 
 use crate::gui::theme::Theme;
-use crate::gui::widgets::support::tooltip_after;
+use crate::gui::widgets::chip::BUTTON_RADIUS;
 
-/// Side of each square button, in px.
-const BUTTON_SIZE: f32 = 30.0;
 /// Inset of a toolbar from its view's corner.
 pub(crate) const TOOLBAR_MARGIN: f32 = 8.0;
 /// Gap between buttons.
 pub(crate) const BUTTON_GAP: f32 = 6.0;
-/// Corner radius of a button's rounded-rect background.
-const BUTTON_RADIUS: f32 = 6.0;
 /// Opacity of a group pill's frosted chrome backdrop. Keeps the toolbar
 /// readable over an empty canvas *and* over content it happens to sit on —
 /// the backdrop color sits between the canvas and node fills, so a bit of
@@ -62,89 +58,4 @@ pub(crate) fn pill_rule(ui: &mut Ui, theme: &Theme) {
         .color(theme.colors.border_soft())
         .margin(Spacing::new(INSET, 0.0, INSET, 0.0))
         .show(ui);
-}
-
-/// One square chip button riding a group pill: an opaque rounded chip
-/// whose icon is painted by a caller closure, with a hover tooltip.
-/// Momentary by default — neutral fill lifting on hover, muted glyph;
-/// [`toggled`](Self::toggled) turns it into a toggle whose active state
-/// inverts the chip (accent fill under a dark glyph). Builder chain
-/// ending in [`show`](Self::show), like an palantir widget.
-#[derive(Debug)]
-pub(crate) struct Chip {
-    wid: WidgetId,
-    tip: &'static str,
-    toggled: bool,
-    idle_glyph: Option<RgbaF32>,
-    toggled_fill: Option<RgbaF32>,
-}
-
-impl Chip {
-    pub(crate) fn new(wid: WidgetId, tip: &'static str) -> Self {
-        Self {
-            wid,
-            tip,
-            toggled: false,
-            idle_glyph: None,
-            toggled_fill: None,
-        }
-    }
-
-    /// Toggle state: while `true` the chip inverts — the toggled fill
-    /// under a dark glyph. Default `false` (a momentary action chip).
-    pub(crate) fn toggled(mut self, on: bool) -> Self {
-        self.toggled = on;
-        self
-    }
-
-    /// Glyph ink while idle (untoggled). Default: `text_muted`.
-    pub(crate) fn idle_glyph(mut self, color: RgbaF32) -> Self {
-        self.idle_glyph = Some(color);
-        self
-    }
-
-    /// Chip fill while toggled. Default: the selection accent.
-    pub(crate) fn toggled_fill(mut self, color: RgbaF32) -> Self {
-        self.toggled_fill = Some(color);
-        self
-    }
-
-    /// Draw the chip: state-dependent fill, the icon painted centered in
-    /// the `BUTTON_SIZE` box by `draw_glyph`, and the hover tooltip.
-    /// Returns whether it was clicked this frame.
-    pub(crate) fn show(
-        self,
-        ui: &mut Ui,
-        theme: &Theme,
-        draw_glyph: impl FnOnce(&mut Ui, f32, RgbaF32),
-    ) -> bool {
-        let hovered = ui.response_for(self.wid).hovered();
-        // Glyph and fill vary on different axes: the glyph only inverts
-        // for the toggled state, the fill also lifts on hover.
-        let glyph = if self.toggled {
-            theme.colors.chrome_fill
-        } else {
-            self.idle_glyph.unwrap_or(theme.colors.text_muted)
-        };
-        let fill = if self.toggled {
-            self.toggled_fill.unwrap_or(theme.colors.selection_rect)
-        } else if hovered {
-            theme.card.header_fill
-        } else {
-            theme.card.fill
-        };
-        let s = BUTTON_SIZE;
-        let button = Panel::zstack()
-            .id(self.wid)
-            .size((Sizing::fixed(s), Sizing::fixed(s)))
-            .sense(Sense::CLICK)
-            .background(Background::rounded(fill, Corners::all(BUTTON_RADIUS)))
-            .show(ui, |ui| draw_glyph(ui, s, glyph));
-        // Take the owned snapshot + click result so the button's `ui`
-        // borrow ends before the tooltip records into `ui`.
-        let snapshot = button.response.snapshot();
-        let clicked = button.response.left.clicked();
-        tooltip_after(ui, &snapshot, Some(self.tip));
-        clicked
-    }
 }

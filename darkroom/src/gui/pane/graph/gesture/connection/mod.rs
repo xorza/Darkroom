@@ -13,7 +13,8 @@ use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
 use crate::gui::pane::graph::gesture::canvas_gesture::preview_drag_modifier;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
 use crate::gui::pane::graph::node::port_color::port_color;
-use crate::gui::pane::graph::paint::wire::{GlyphDrag, Wire, WirePass, WireTint};
+use crate::gui::pane::graph::paint::wire::glyph_drag::GlyphDrag;
+use crate::gui::pane::graph::paint::wire::{Wire, WirePass, WireTint};
 use crate::gui::requests::Requests;
 use crate::gui::theme::Theme;
 
