@@ -3,7 +3,8 @@
 use crate::io::image::cfa::CfaType;
 use crate::io::image::sample_domain::SampleDomain;
 use crate::math::size2us::Size2us;
-use crate::stacking::calibration_masters::{CalibrationComponent, MasterRole};
+use crate::stacking::calibration_masters::calibration_component::CalibrationComponent;
+use crate::stacking::calibration_masters::master_role::MasterRole;
 
 /// A calibration master does not describe the same measurement as the light it is applied to.
 ///

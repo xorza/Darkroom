@@ -67,9 +67,11 @@ pub use stacking::calibration_masters::cosmic_ray::error::UnknownAdcStep;
 pub use stacking::calibration_masters::defect_map::DefectMap;
 pub use stacking::calibration_masters::error::CalibrationError;
 
+pub use stacking::calibration_masters::calibration_component::CalibrationComponent;
+pub use stacking::calibration_masters::calibration_set::CalibrationSet;
+pub use stacking::calibration_masters::master_role::MasterRole;
 pub use stacking::calibration_masters::{
-    CalibrationComponent, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD,
-    DefectSummary, MasterRole, stack_cfa_master,
+    CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, DefectSummary, stack_cfa_master,
 };
 
 pub use stacking::star_detection::config::Config as StarDetectionConfig;

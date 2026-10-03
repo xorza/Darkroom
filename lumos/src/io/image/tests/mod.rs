@@ -16,7 +16,7 @@ use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::{ColorProvenance, ImageProvenance};
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::preview_image::PreviewImage;
-use crate::stacking::frame_store::StackableImage;
+use crate::stacking::frame_store::stackable_image::StackableImage;
 
 #[test]
 fn preview_extensions_are_fits_then_raw_then_imaginarium() {

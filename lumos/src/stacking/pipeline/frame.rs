@@ -3,7 +3,7 @@
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
-use crate::stacking::frame_store::StoredImage;
+use crate::stacking::frame_store::stored_image::StoredImage;
 use crate::stacking::star_detection::detector::Diagnostics;
 use crate::stacking::star_detection::star::Star;
 

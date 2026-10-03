@@ -18,7 +18,7 @@ use crate::stacking::combine::CANCEL_POLL_CHUNK;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::error::check_cancel;
 use crate::stacking::combine::pixel_coverage::PixelCoverage;
-use crate::stacking::frame_store::StoredFrame;
+use crate::stacking::frame_store::stored_frame::StoredFrame;
 use crate::stacking::frame_store::stored_plane::StoredPlane;
 
 #[derive(Debug)]

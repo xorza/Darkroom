@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::io::image::cfa::CfaType;
 use crate::io::image::image_provenance::RowOrder;
 use crate::io::image::sample_domain::SampleDomain;
-use crate::stacking::frame_store::StackableImage;
+use crate::stacking::frame_store::stackable_image::StackableImage;
 
 /// What a frame's decoder said its samples are, which every frame of a set has to state alike —
 /// see [`SetFacts`](crate::stacking::combine::cache::set_facts::SetFacts). Carried with the
