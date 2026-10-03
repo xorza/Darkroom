@@ -968,3 +968,29 @@ fn no_outliers_possible_screens_by_trimmed_spread() {
         );
     }
 }
+
+/// The sigma-clip shortcut decides on `σ² < f32::EPSILON`, a fixed number, so the survivor set
+/// depends on the data's scale (review item 1.1). Twenty samples of noise 1e-4 and one hit at 0.5:
+/// at unit scale the shortcut keeps the hit, and in ADU (×256) the full path rejects it. The
+/// invariance check sees the difference.
+#[test]
+fn the_sigma_clip_shortcut_depends_on_the_data_scale() {
+    use crate::internals::invariance::Affine;
+
+    let mut rng = TestRng::new(11);
+    let mut values: Vec<f32> = (0..20)
+        .map(|_| Affine::quantize(0.25 + 1e-4 * rng.next_gaussian_f32()))
+        .collect();
+    values[7] = Affine::quantize(0.5);
+    let kept = |case: Affine| {
+        survivors(&case.apply_all(&values), |v, s| {
+            Rejection::default().reject(v, s)
+        })
+    };
+    assert!(kept(Affine::IDENTITY).contains(&7));
+    let failing: Vec<Affine> = Affine::mismatches(kept, |kept, _| kept.clone())
+        .into_iter()
+        .map(|mismatch| mismatch.case)
+        .collect();
+    assert!(failing.contains(&Affine::CASES[2]), "{failing:?}");
+}
