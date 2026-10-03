@@ -79,18 +79,26 @@ fn translation_components_return_the_offset_built_in() {
     assert_close!(tc.y, -3.0, EPSILON);
 }
 
+/// `rotation_angle` and `scale_factor` read a similarity's angle and scale at every scale and every
+/// angle: the scale enters the angle's `atan2` as a common factor and the angle the scale's
+/// `hypot` as `cos² + sin²` — dropping the `c` term would leave `|s·cos θ|`. A few ulps each.
 #[test]
-fn rotation_angle_recovers_the_euclidean_angle() {
-    let angle = 0.5;
-    let t = Transform::euclidean(DVec2::ZERO, angle);
-    assert_close!(t.rotation_angle(), angle, EPSILON);
-}
-
-#[test]
-fn scale_factor_recovers_the_similarity_scale() {
-    let scale = 2.5;
-    let t = Transform::similarity(DVec2::ZERO, 0.0, scale);
-    assert_close!(t.scale_factor(), scale, EPSILON);
+fn rotation_angle_and_scale_factor_at_every_scale_and_angle() {
+    for scale in [0.5, 1.0, 2.5] {
+        for angle in [-2.0, -0.3, 0.0, 0.5, 1.2, 2.5] {
+            let t = Transform::similarity(DVec2::new(3.0, -1.0), angle, scale);
+            assert!(
+                (t.rotation_angle() - angle).abs() <= 4.0 * f64::EPSILON * angle.abs().max(1.0),
+                "θ {angle} at s {scale}: {}",
+                t.rotation_angle()
+            );
+            assert!(
+                (t.scale_factor() - scale).abs() <= 4.0 * f64::EPSILON * scale,
+                "s {scale} at θ {angle}: {}",
+                t.scale_factor()
+            );
+        }
+    }
 }
 
 #[test]
@@ -119,17 +127,6 @@ fn homography_transform() {
     let p = t.apply(DVec2::new(2.0, 4.0));
     assert_close!(p.x, 7.0, EPSILON);
     assert_close!(p.y, 7.0, EPSILON);
-}
-
-#[test]
-fn homography_perspective() {
-    // Homography with perspective component
-    let t = Transform::homography([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.001, 0.0]);
-    let p = t.apply(DVec2::new(100.0, 0.0));
-    // w = 0.001 * 100 + 1 = 1.1
-    // x' = 100 / 1.1 ≈ 90.9
-    assert!((p.x - 90.909).abs() < 0.01);
-    assert_close!(p.y, 0.0, EPSILON);
 }
 
 #[test]
@@ -290,49 +287,51 @@ fn rotation_around_center() {
     );
 }
 
+/// The inverse undoes the transform, as a transform and as `apply_inverse`, for a translation, a
+/// similarity and a homography; composing a homography with its inverse is the identity, and the
+/// composition applies its right operand first. The round trips are a matrix inverse and a product
+/// in f64 on coordinates up to 500: a few ulps of 500, 1e-12.
 #[test]
-fn inverse_roundtrip_translation() {
-    // T(10, -5) then T^{-1} should give back the original point
-    let t = Transform::translation(DVec2::new(10.0, -5.0));
-    let p = DVec2::new(3.0, 7.0);
-
-    // apply then apply_inverse should return original
-    let mapped = t.apply(p);
-    let recovered = t.apply_inverse(mapped);
-    assert!(
-        (recovered.x - p.x).abs() < EPSILON,
-        "Roundtrip x: expected {}, got {}",
-        p.x,
-        recovered.x
-    );
-    assert!(
-        (recovered.y - p.y).abs() < EPSILON,
-        "Roundtrip y: expected {}, got {}",
-        p.y,
-        recovered.y
-    );
-}
-
-#[test]
-fn inverse_roundtrip_similarity() {
-    // Similarity with rotation and scale: roundtrip should recover original
-    let t = Transform::similarity(DVec2::new(7.0, -3.0), 0.7, 1.3);
-    let p = DVec2::new(100.0, 200.0);
-
-    let mapped = t.apply(p);
-    let recovered = t.apply_inverse(mapped);
-    assert!(
-        (recovered.x - p.x).abs() < 1e-8,
-        "Roundtrip x: expected {}, got {}",
-        p.x,
-        recovered.x
-    );
-    assert!(
-        (recovered.y - p.y).abs() < 1e-8,
-        "Roundtrip y: expected {}, got {}",
-        p.y,
-        recovered.y
-    );
+fn inverse_and_compose_round_trip_every_model() {
+    let homography = Transform::homography([1.02, 0.01, 10.0, -0.015, 0.98, -4.0, 2e-4, -1e-4]);
+    let points = [
+        DVec2::new(3.0, 7.0),
+        DVec2::new(100.0, 200.0),
+        DVec2::new(-250.0, 480.0),
+    ];
+    for t in [
+        Transform::translation(DVec2::new(10.0, -5.0)),
+        Transform::similarity(DVec2::new(7.0, -3.0), 0.7, 1.3),
+        homography,
+    ] {
+        let inverse = t.inverse();
+        for p in points {
+            let mapped = t.apply(p);
+            assert!(inverse.apply(mapped).distance(p) < 1e-12, "{t} at {p:?}");
+            assert!(t.apply_inverse(mapped).distance(p) < 1e-12, "{t} at {p:?}");
+            assert!(
+                t.compose(&inverse).apply(p).distance(p) < 1e-12,
+                "{t} at {p:?}"
+            );
+        }
+    }
+    let shift = Transform::translation(DVec2::new(5.0, -2.0));
+    for p in points {
+        assert!(
+            homography
+                .compose(&shift)
+                .apply(p)
+                .distance(homography.apply(shift.apply(p)))
+                < 1e-12
+        );
+        assert!(
+            shift
+                .compose(&homography)
+                .apply(p)
+                .distance(shift.apply(homography.apply(p)))
+                < 1e-12
+        );
+    }
 }
 
 #[test]
