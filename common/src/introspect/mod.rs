@@ -211,10 +211,6 @@ pub trait IntrospectInteger:
 {
     const KIND: IntegerKind;
 
-    #[expect(
-        clippy::map_err_ignore,
-        reason = "a `TryFromIntError` says only that the value does not fit, which the error it becomes states with the field, value and type"
-    )]
     fn from_field_value(field: &'static str, value: IntegerValue) -> Result<Self, IntrospectError> {
         Self::try_from(value).map_err(|_| IntrospectError::integer(field, value, Self::KIND))
     }

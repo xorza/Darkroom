@@ -908,10 +908,6 @@ fn open_refused(path: &Path, ret: i32) -> ImageError {
 }
 
 #[cfg(unix)]
-#[expect(
-    clippy::map_err_ignore,
-    reason = "where the interior NUL sits adds nothing to the message"
-)]
 fn open_libraw_input(
     inner: *mut sys::libraw_data_t,
     path: &Path,

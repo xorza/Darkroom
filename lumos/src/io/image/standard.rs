@@ -26,7 +26,7 @@ pub(crate) fn read_standard_image(path: &Path) -> Result<Image, ImageError> {
 
 /// The `f32` target format a given image deinterleaves into: `L_F32` for
 /// grayscale, `RGB_F32` for color.
-pub(crate) fn f32_target_format(image: &Image) -> ColorFormat {
+pub(crate) const fn f32_target_format(image: &Image) -> ColorFormat {
     match image.desc().color_format.channel_count {
         ChannelCount::L => ColorFormat::L_F32,
         ChannelCount::Rgb | ChannelCount::Rgba => ColorFormat::RGB_F32,

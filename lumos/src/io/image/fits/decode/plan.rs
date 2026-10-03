@@ -72,7 +72,7 @@ impl FitsDecodePlan {
     /// A floating-point one carries its nulls in-band as IEEE NaN, with nothing in the header to
     /// announce them, so it answers `true` whether or not any are actually there. Wrong only in the
     /// direction that over-reserves.
-    pub(super) fn may_carry_nulls(&self) -> bool {
+    pub(super) const fn may_carry_nulls(&self) -> bool {
         !self.sample_type.is_integer() || self.scaling.blank.is_some()
     }
 }
