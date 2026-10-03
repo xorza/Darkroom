@@ -15,7 +15,7 @@ use scenarium::{Graph, NodeId};
 use crate::core::io::cache::prepare_document_cache_root;
 use crate::core::io::preferences::Preferences;
 use crate::core::runtime_library::RuntimeLibrary;
-use crate::core::status::StatusLog;
+use crate::core::status::{StatusFamily, StatusLog};
 use crate::core::wake::Wake;
 use crate::core::worker::WorkerBridge;
 
@@ -106,11 +106,11 @@ impl RuntimeHost {
     fn compile(&mut self, graph: &Graph, status: &mut StatusLog) -> Option<Arc<CompiledGraph>> {
         match self.compiler.compile(graph, self.library.current()) {
             Ok(compiled) => {
-                status.error = None;
+                status.succeeded(StatusFamily::Run);
                 Some(Arc::new(compiled))
             }
             Err(e) => {
-                status.error(format!("compile failed: {e}"));
+                status.error(StatusFamily::Run, format!("compile failed: {e}"));
                 None
             }
         }
@@ -195,7 +195,10 @@ impl RuntimeHost {
             return false;
         };
         if !compiled.contains(node_id) {
-            status.error("nothing to run: this node has no compiled work".to_owned());
+            status.error(
+                StatusFamily::Run,
+                "nothing to run: this node has no compiled work".to_owned(),
+            );
             return false;
         }
         self.dispatch(|worker| {
@@ -367,7 +370,7 @@ mod tests {
                 .is_empty(),
             "a node the program has no work for reaches nothing"
         );
-        assert_eq!(status.error, None, "no compile failure was reported");
+        assert_eq!(status.current(), None, "no compile failure was reported");
         assert_eq!(
             graph.bindings.get(&dangling),
             Some(&Binding::bind(producer, 99)),

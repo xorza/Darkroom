@@ -21,7 +21,7 @@ use crate::core::edit::relayout::Relayout;
 use crate::core::edit::step::undo_step::UndoStep;
 use crate::core::io::document::{self, DocumentLoadError, DocumentSaveError};
 use crate::core::io::preferences::Preferences;
-use crate::core::status::StatusLog;
+use crate::core::status::{StatusFamily, StatusLog};
 use scenarium::Library;
 
 /// Byte budget for the undo history's packed buffer (~1 MiB). Bounds
@@ -286,7 +286,7 @@ impl OpenDocument {
         // disk cache both outlive.
         let path = path::absolute(&path).unwrap_or(path);
         Self::load(path, library).unwrap_or_else(|error| {
-            status.error(format!("load failed: {error:#}"));
+            status.error(StatusFamily::Document, format!("load failed: {error:#}"));
             Self::default()
         })
     }
@@ -308,7 +308,7 @@ impl OpenDocument {
         match Self::load(path, library) {
             Ok(open) => open,
             Err(error) => {
-                status.error(format!("load failed: {error:#}"));
+                status.error(StatusFamily::Document, format!("load failed: {error:#}"));
                 preferences.document_path = None;
                 Self::default()
             }

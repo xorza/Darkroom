@@ -15,7 +15,7 @@ use crate::core::edit::relayout::Relayout;
 use crate::core::io::preferences::error::PreferencesLoadError;
 use crate::core::io::preferences::{Preferences, WindowState};
 use crate::core::runtime_host::RuntimeHost;
-use crate::core::status::StatusLog;
+use crate::core::status::{StatusFamily, StatusLog};
 use crate::core::wake::Wake;
 use crate::gui::HostHandle;
 use crate::gui::MAIN_WINDOW;
@@ -153,7 +153,10 @@ impl App {
         let mut status = StatusLog::default();
         let preferences_writable = preferences.is_ok();
         let mut preferences = preferences.unwrap_or_else(|error| {
-            status.error(format!("{error}; this session's settings are not saved"));
+            status.error(
+                StatusFamily::Preferences,
+                format!("{error}; this session's settings are not saved"),
+            );
             Preferences::default()
         });
         let mut runtime = RuntimeHost::new(wake, &preferences);
@@ -419,12 +422,13 @@ impl App {
         let open = match OpenDocument::load(path.to_path_buf(), self.runtime.library.current()) {
             Ok(open) => open,
             Err(err) => {
-                self.status.error(format!("load failed: {err:#}"));
+                self.status
+                    .error(StatusFamily::Document, format!("load failed: {err:#}"));
                 return;
             }
         };
         self.adopt_document(open);
-        self.status.error = None;
+        self.status.succeeded(StatusFamily::Document);
     }
 
     /// Cmd+S: overwrite the current file if there is one, else fall
@@ -452,9 +456,11 @@ impl App {
                 self.runtime
                     .set_document_cache(self.session.open.path.as_deref());
                 self.remember_document_path();
-                self.status.error = None;
+                self.status.succeeded(StatusFamily::Document);
             }
-            Err(err) => self.status.error(format!("save failed: {err:#}")),
+            Err(err) => self
+                .status
+                .error(StatusFamily::Document, format!("save failed: {err:#}")),
         }
     }
 
@@ -480,8 +486,9 @@ impl App {
         if !self.preferences_writable {
             return;
         }
-        if let Err(err) = self.preferences.save() {
-            self.status.error(err);
+        match self.preferences.save() {
+            Ok(()) => self.status.succeeded(StatusFamily::Preferences),
+            Err(err) => self.status.error(StatusFamily::Preferences, err),
         }
     }
 
@@ -622,7 +629,7 @@ impl palantir::App for App {
             &library,
             &self.run_state,
             StatusInputs {
-                error: self.status.error.as_deref(),
+                error: self.status.current(),
                 process_memory: self.process_memory.sample(Instant::now()),
             },
         );
