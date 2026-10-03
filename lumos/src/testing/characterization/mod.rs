@@ -196,12 +196,12 @@ fn calibrate_snapshot() {
     masters.calibrate(&mut light).unwrap();
     let mut snapshot = Snapshot::default();
     snapshot.f32s(light.data.pixels());
-    assert_snapshot("calibration", &snapshot, "8cf72cb5dacfe93e");
+    assert_snapshot("calibration", &snapshot, "21e8e831ef2cee0a");
 
     let demosaiced = light.demosaic(&CancelToken::never()).unwrap();
     let mut snapshot = Snapshot::default();
     image_snapshot(&mut snapshot, &demosaiced);
-    assert_snapshot("demosaic", &snapshot, "39a9fab73c044eef");
+    assert_snapshot("demosaic", &snapshot, "0032183d7bf25121");
 }
 
 #[test]
@@ -222,7 +222,7 @@ fn detect_snapshot() {
             star.sharpness,
         ]);
     }
-    assert_snapshot("detection", &snapshot, "740dc46b9f2028a8");
+    assert_snapshot("detection", &snapshot, "86c27a99bf4a6e5a");
 }
 
 #[test]
@@ -240,7 +240,7 @@ fn register_snapshot() {
         .f64s(result.transform().matrix())
         .count(result.num_inliers())
         .f64s(&[result.rms_error()]);
-    assert_snapshot("registration", &snapshot, "b1511c40e135a0f4");
+    assert_snapshot("registration", &snapshot, "9883984baccc8db3");
 }
 
 #[test]
@@ -254,7 +254,7 @@ fn warp_snapshot() {
     snapshot
         .f32s(result.coverage.pixels())
         .f32s(result.confidence.pixels());
-    assert_snapshot("warp", &snapshot, "0844b150fa4dea5a");
+    assert_snapshot("warp", &snapshot, "f36b96e9f557e6d6");
 }
 
 /// The field and two dithers of it, stacked with the default configuration.
@@ -280,7 +280,7 @@ fn combine_snapshot() {
     .unwrap();
     let mut snapshot = Snapshot::default();
     image_snapshot(&mut snapshot, &product.image);
-    assert_snapshot("combine", &snapshot, "b59d8cd028469c88");
+    assert_snapshot("combine", &snapshot, "71b60fac09428e63");
 }
 
 /// Each automatic stretch on a three-channel field, so the color-preserving paths run.
@@ -307,7 +307,7 @@ fn stretch_snapshot() {
         stretch.apply(&mut image).unwrap();
         image_snapshot(&mut snapshot, &image);
     }
-    assert_snapshot("stretch", &snapshot, "3dbf371076451ed6");
+    assert_snapshot("stretch", &snapshot, "3d5611657479e913");
 }
 
 /// The first RAW light of the dataset, decoded to its CFA plane.

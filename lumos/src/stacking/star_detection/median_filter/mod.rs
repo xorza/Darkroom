@@ -148,48 +148,27 @@ fn median4(v: &mut [f32]) -> f32 {
     f32::midpoint(v[1], v[2])
 }
 
-/// Median of 6 elements (average of middle two).
+/// Median of 6 elements (average of middle two), through the optimal 12-comparator sorting network
+/// for six inputs (Knuth, TAOCP vol. 3, §5.3.4), which sorts every one of the 720 orders.
 #[inline]
 fn median6(v: &mut [f32]) -> f32 {
-    // Sorting network for 6 elements
-    if v[0] > v[1] {
-        v.swap(0, 1);
-    }
-    if v[2] > v[3] {
-        v.swap(2, 3);
-    }
-    if v[4] > v[5] {
-        v.swap(4, 5);
-    }
-    if v[0] > v[2] {
-        v.swap(0, 2);
-    }
-    if v[1] > v[3] {
-        v.swap(1, 3);
-    }
-    if v[0] > v[4] {
-        v.swap(0, 4);
-    }
-    if v[1] > v[5] {
-        v.swap(1, 5);
-    }
-    if v[1] > v[2] {
-        v.swap(1, 2);
-    }
-    if v[3] > v[4] {
-        v.swap(3, 4);
-    }
-    if v[2] > v[4] {
-        v.swap(2, 4);
-    }
-    if v[1] > v[2] {
-        v.swap(1, 2);
-    }
-    if v[3] > v[4] {
-        v.swap(3, 4);
-    }
-    if v[2] > v[3] {
-        v.swap(2, 3);
+    for (i, j) in [
+        (1, 2),
+        (4, 5),
+        (0, 2),
+        (3, 5),
+        (0, 1),
+        (3, 4),
+        (1, 4),
+        (0, 3),
+        (2, 5),
+        (1, 3),
+        (2, 4),
+        (2, 3),
+    ] {
+        if v[i] > v[j] {
+            v.swap(i, j);
+        }
     }
     f32::midpoint(v[2], v[3])
 }

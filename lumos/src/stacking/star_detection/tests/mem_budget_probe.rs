@@ -1,5 +1,5 @@
 //! Live peak-RSS memory probe for the star-detection pipeline — the manual, at-scale counterpart to
-//! the deterministic guard in `mem_budget_tests`.
+//! the deterministic guard in `mem_budget`.
 //!
 //! Detects stars across a stream of synthetic frames through one reused [`StarDetector`] and
 //! *watches* peak heap. The point it demonstrates: because the detector recycles its image-sized
@@ -43,16 +43,11 @@ use std::io::{self, Write};
 use std::time::Instant;
 
 use crate::io::image::linear::LinearImage;
+use crate::memory::DETECTION_WORKING_PLANES;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::mem_probe::{MB, RssSampler, env_parse, measured, two_x_ceiling_mb};
 use crate::testing::synthetic::fixtures::star_field;
-
-/// Generous upper bound on the detector's per-detection working set, in image-sized f32 planes:
-/// the pooled f32 scratch, plus the bitmasks and label map counted as their f32-equivalent, plus
-/// slack for transient (non-pooled) allocations. Used only to size the peak-heap ceiling; the exact
-/// pool footprint is pinned in `mem_budget_tests`.
-const WORKING_SET_PLANES: u64 = 12;
 
 fn preset_config() -> Config {
     match env::var("LUMOS_SD_PRESET").ok().as_deref() {
@@ -178,7 +173,8 @@ fn detect_memory_probe() {
     // plus a fixed baseline for the process (allocator, rendered ring is already in `resident`). If
     // detection leaked a buffer per frame, peak heap would scale with `n` and overrun this. A
     // generous 2× headroom absorbs allocator fragmentation and the sampler's coarse 2 ms cadence.
-    let working_set_bytes = WORKING_SET_PLANES * plane_bytes;
+    // The planner's charge for one detection's pool; the 2× headroom covers its transients.
+    let working_set_bytes = DETECTION_WORKING_PLANES as u64 * plane_bytes;
     let ceiling_mb = two_x_ceiling_mb(resident_bytes, working_set_bytes);
 
     if measured(anon_mb, "ceiling check") {

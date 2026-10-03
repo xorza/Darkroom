@@ -1,5 +1,5 @@
 //! Live peak-RSS memory probe for the from-paths stacker — the manual, at-scale counterpart to the
-//! deterministic guards in `mem_budget_tests`.
+//! deterministic guards in `mem_budget`.
 //!
 //! Builds a stack of synthetic 16-bit FITS frames on disk, then combines them into one master
 //! through [`stack`] — the same memory-tiered `CacheCore` engine calibration-master creation
@@ -7,7 +7,7 @@
 //! in RAM: with a small budget the combiner spills each decoded frame to disk and mmaps it back
 //! (peak heap ≈ one chunk, flat in the frame count); with a large budget every frame stays resident
 //! (peak heap ≈ linear in the frame count). For an explicit numeric budget it also asserts peak heap
-//! stays within it — the live check the projection test in `mem_budget_tests` can only model.
+//! stays within it — the live check the projection test in `mem_budget` can only model.
 //!
 //! `#[ignore]`d because it's heavy and measurement-only: peak RSS is a per-process high-water mark,
 //! so run **one config per process** with a filter, exactly like the benches:

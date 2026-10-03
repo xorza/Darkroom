@@ -33,6 +33,9 @@ use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::prelude::*;
 use crate::testing::synthetic::artifacts::{add_bayer_pattern, add_cosmic_rays};
 use crate::testing::synthetic::camera::{Camera, PsfModel};
+use crate::testing::synthetic::fixtures::{
+    STAR_FIELD_FLUX, STAR_FIELD_FWHM, STAR_FIELD_MARGIN, STAR_FIELD_SKY, star_field,
+};
 use crate::testing::synthetic::observe::{Observation, SimFrame, render};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
 
@@ -129,19 +132,24 @@ pub(super) struct Scenario {
     pub(super) seed: u64,
 }
 
+/// The scenario of no override is [`star_field`]'s field: its flux, sky, margin and camera.
 impl Default for Scenario {
     fn default() -> Self {
+        let camera = Camera::realistic(STAR_FIELD_FWHM);
         Self {
             size: Size2us::new(256, 256),
             num_stars: 30,
-            // A flux-14 star peaks ~0.6 (fwhm 4): bright but clear of the saturation cut.
-            flux: (5.0, 14.0),
-            fwhm: 4.0,
+            flux: STAR_FIELD_FLUX,
+            fwhm: STAR_FIELD_FWHM,
             psf: None,
-            background: BackgroundField::Uniform { level: 0.1 },
-            full_well_e: 50_000.0,
-            read_noise_e: 3.0,
-            placement: Placement::Uniform { margin: 16.0 },
+            background: BackgroundField::Uniform {
+                level: STAR_FIELD_SKY,
+            },
+            full_well_e: camera.full_well_e,
+            read_noise_e: camera.read_noise_e,
+            placement: Placement::Uniform {
+                margin: STAR_FIELD_MARGIN,
+            },
             cosmic_rays: 0,
             bayer: false,
             seed: 42,
@@ -200,4 +208,17 @@ impl Scenario {
         }
         frame
     }
+}
+
+/// The default scenario renders exactly [`star_field`]: one field definition for the tests and
+/// the benches.
+#[test]
+fn the_default_scenario_is_the_star_field() {
+    let scenario = Scenario::default();
+    let frame = scenario.frame();
+    let field = star_field(scenario.size, scenario.num_stars, scenario.seed);
+    assert_eq!(
+        frame.image.channel(0).pixels(),
+        field.image.channel(0).pixels()
+    );
 }

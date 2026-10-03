@@ -136,10 +136,10 @@ fn detect_rho_opiuchi() {
 fn inspect_pipeline_intermediates_rho_opiuchi() {
     use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
     use crate::stacking::star_detection::convolution::{MatchedFilterBuffers, matched_filter};
+    use crate::stacking::star_detection::detector::stages::detect::DetectResult;
     use crate::stacking::star_detection::detector::stages::fwhm;
     use crate::stacking::star_detection::detector::stages::prepare;
     use crate::stacking::star_detection::labeling::LabelMap;
-    use crate::stacking::star_detection::mask_dilation::dilate_mask;
     use crate::stacking::star_detection::resources::DetectionResources;
     use crate::stacking::star_detection::threshold_mask::create_residual_threshold_mask;
     use crate::testing::visual;
@@ -259,28 +259,20 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     visual::save_mask(&mask, &out("06_threshold_mask"));
     println!("Saved: 06_threshold_mask ({pixels_above} pixels above threshold)");
 
-    // 8. Dilated mask
-    let mut dilated = pool.acquire_bit();
-    dilated.copy_from(&mask);
-    let mut scratch = pool.acquire_bit();
-    dilate_mask(&mut dilated, 1, &mut scratch);
-    pool.release_bit(scratch);
-    let dilated_count = dilated.count_ones();
-    visual::save_mask(&dilated, &out("07_dilated_mask"));
-    println!("Saved: 07_dilated_mask ({dilated_count} pixels)");
-
-    // 9. Label map
-    let label_map = LabelMap::from_pool(&dilated, config.detection.connectivity, &mut pool);
+    // 8. Label map, of the mask as it stands — the stage labels it undilated
+    let label_map = LabelMap::from_pool(&mask, config.detection.connectivity, &mut pool);
     let num_labels = label_map.num_labels();
     let labels_buf = Buffer2::new(width, height, label_map.labels().to_vec());
     let labels_rgb = visual::labels_to_rgb(&labels_buf);
-    visual::save_rgb(&labels_rgb, &out("08_label_map"));
-    println!("Saved: 08_label_map ({num_labels} components)");
-
-    // Clean up
+    visual::save_rgb(&labels_rgb, &out("07_label_map"));
+    println!("Saved: 07_label_map ({num_labels} components)");
     label_map.release_to_pool(&mut pool);
-    pool.release_bit(dilated);
     pool.release_bit(mask);
+
+    // The stage itself, on the same residual and FWHM, saw what these images show.
+    let stage = DetectResult::from_image(&residual, &sky, fwhm, &config.detection, &mut pool);
+    assert_eq!(stage.pixels_above_threshold, pixels_above);
+    assert_eq!(stage.connected_components, num_labels);
     background.release_to_pool(&mut pool);
     pool.release_f32(grayscale);
 }

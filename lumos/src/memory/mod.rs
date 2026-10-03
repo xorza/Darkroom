@@ -123,7 +123,7 @@ pub(crate) fn quality_plane_bytes(dimensions: ImageDimensions) -> usize {
 /// scratch), the u32 label map, and two bitmasks (saturation and threshold). A bitmask is a
 /// thirty-second of an f32 plane; charging each as a whole one keeps this integral and errs high.
 ///
-/// `star_detection::mem_budget_tests` pins the detector's actual pool and checks it against this,
+/// `star_detection::mem_budget` pins the detector's actual pool and checks it against this,
 /// so a stage that grows its scratch cannot drift away from the planner silently.
 pub(crate) const DETECTION_WORKING_PLANES: usize = 7;
 
