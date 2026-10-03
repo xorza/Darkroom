@@ -3,6 +3,7 @@
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
+use crate::stacking::frame_store::frame_stats::FrameStats;
 use crate::stacking::frame_store::stored_image::StoredImage;
 use crate::stacking::star_detection::detector::Diagnostics;
 use crate::stacking::star_detection::star::Star;
@@ -52,4 +53,6 @@ pub(crate) struct DetectedFrame {
     pub(crate) stars: Vec<Star>,
     /// The detection funnel for this frame, carried through to the caller rather than only logged.
     pub(crate) diagnostics: Diagnostics,
+    /// The frame's statistics, measured on its pixels as decoded.
+    pub(crate) stats: FrameStats,
 }

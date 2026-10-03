@@ -16,6 +16,9 @@ use crate::stacking::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::stacking::calibration_masters::cosmic_ray::masks::CrMasks;
 use crate::stacking::calibration_masters::cosmic_ray::noise_model::NoiseModel;
 
+/// Frame-sized `f32` planes the mono detector holds, however many iterations it runs.
+pub(crate) const MONO_SCRATCH_PLANES: usize = 5;
+
 /// The mono detector's frame-sized `f32` working set, allocated on the first iteration and reused
 /// by every one after it.
 ///
@@ -44,9 +47,6 @@ struct MonoScratch {
     frame: Vec<f32>,
 }
 
-/// Monochrome L.A.Cosmic on one plane (also each deinterleaved Bayer plane). Subsample ×2 → clipped
-/// Laplacian → resample → significance `S = L⁺/(2N)` → `S' = S − median₅(S)` → fine structure `F`
-/// → flag → grow → in-paint → iterate. Returns the CR pixel count.
 /// The mono cosmic-ray detector: its configuration, and the working set it reuses.
 ///
 /// Owning both is what lets one detector clean every Bayer phase plane with a single allocation —
@@ -66,6 +66,15 @@ impl<'a> MonoDetector<'a> {
             noise,
             scratch: MonoScratch::default(),
         }
+    }
+
+    /// The bytes a detection on a `size` plane allocates beside it: the scratch planes and the
+    /// masks, or nothing on a plane too small to scan.
+    pub(super) fn heap_bytes(size: Size2us) -> usize {
+        if size.width < 3 || size.height < 3 {
+            return 0;
+        }
+        MONO_SCRATCH_PLANES * size.pixel_count() * size_of::<f32>() + CrMasks::heap_bytes(size)
     }
 
     /// Detect and in-paint cosmic rays in one dense plane, in place, returning the CR pixel count.
@@ -340,11 +349,9 @@ pub(crate) mod internals {
     use crate::stacking::calibration_masters::cosmic_ray::mono::{MonoDetector, MonoScratch};
     use crate::stacking::calibration_masters::cosmic_ray::noise_model::NoiseModel;
 
-    /// Frame-sized `f32` planes the mono detector holds, however many iterations it runs.
-    pub(crate) const MONO_SCRATCH_PLANES: usize = 5;
-
     /// Total capacity, in floats, of the mono detector's working set after a run on `data` — what
-    /// `mem_budget` weighs against [`MONO_SCRATCH_PLANES`].
+    /// `mem_budget` weighs against
+    /// [`MONO_SCRATCH_PLANES`](crate::stacking::calibration_masters::cosmic_ray::mono::MONO_SCRATCH_PLANES).
     ///
     /// Destructured rather than summed through a helper, so a plane added to or dropped from
     /// [`MonoScratch`] fails to compile here instead of silently drifting from the constant.

@@ -27,7 +27,7 @@ pub(crate) mod error;
 pub(crate) mod masks;
 pub(crate) mod mono;
 pub(crate) mod noise_model;
-mod xtrans;
+pub(crate) mod xtrans;
 
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::math::size2us::Size2us;
@@ -62,6 +62,16 @@ pub(crate) fn reject_cosmic_rays(
         c @ CfaType::XTrans(_) => XtransDetector::new(config, noise, c).reject(pixels, size),
         CfaType::Mono => MonoDetector::new(config, noise).reject(pixels, size),
     })
+}
+
+/// The bytes a cosmic-ray pass over a `size` mosaic of `cfa_type` allocates beside the mosaic, at
+/// its peak.
+pub(crate) fn heap_bytes(cfa_type: &CfaType, size: Size2us) -> usize {
+    match cfa_type {
+        CfaType::Bayer(_) => BayerDetector::heap_bytes(size),
+        CfaType::XTrans(_) => XtransDetector::heap_bytes(size),
+        CfaType::Mono => MonoDetector::heap_bytes(size),
+    }
 }
 
 #[cfg(test)]

@@ -60,14 +60,6 @@ Paths are relative to the repository root.
 ## Loose tolerances where the exact answer is known
 Deterministic, often noiseless fixtures are asserted with bands that have no stated reason. A regression of the size of the band passes. In some cases the band hides a production bug.
 
-### lumos — shared harness, calibration, pipeline, frame_store
-Paths are relative to the repository root.
-
-- [ ] `lumos/src/testing/visual/report.rs:421-429` (`0.2 < err < 0.25`, exact √0.05), `report.rs:380-419` (`< 0.01` around exact fractions), `lumos/src/testing/visual/mod.rs:249-257` (Asinh asserts only `> 84`, exact is 163), and `lumos/src/testing/synthetic/transforms.rs:271-279` (equal `len()` does not prove the same survivors; band 50-100).
-- [ ] `lumos/src/buffer_pool.rs:136-145` — `should_panic(expected = "assertion \`left == right\` failed")` matches either of the pool's two asserts. The `release` mismatch assert (`buffer_pool.rs:83`) is never exercised. Give each assert its own message and test both.
-- [ ] `lumos/src/memory.rs:366-392` — the table loop recomputes the expected value with the production formula (`* 75 / 100`, `max(MIN_CHUNK_ROWS)`), which is a tautology. Only the hand-derived `85` case (393-402) tests anything. `load_concurrency_accounts…` (322-342) lists 9 expected values with no derivation, and line 419 repeats the `memory_budget` test.
-- [ ] `lumos/tests/public_api.rs:114-128,141-156,187-194,211-214,217-226,231-235,349-354,359-368,455-467` — most asserts read back the literal the test just wrote (`max_stars == 50` after setting 50, destructured `StarMatch`, `CalibrationSet {1,2,3,4}`). Reachability is proven by the `use` and the compile. Keep the behavioural checks (`sample_domain`, `commensurate_with`, `required_stars`, `Display` strings, the zero-copy pointer checks, defaults) and drop the echoes.
-
 ### lumos — combine, drizzle
 Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
 
@@ -118,11 +110,6 @@ Paths are relative to the repository root.
 ## Second sources of truth: tests and harness re-implement production or each other
 A copy of a formula, a constant or a pipeline step changes with the code it copies, or drifts away from it. Either way it cannot catch the bug it exists for.
 
-### lumos — shared harness, calibration, pipeline, frame_store
-Paths are relative to the repository root.
-
-- [ ] `lumos/src/testing/visual/report.rs:13-74,133-254` — `DetectionMetrics` re-derives `metrics::DetectionScore`: `detection_rate` is `completeness`, `precision` is `reliability`, and `false_positive_rate` is `1 − precision`. The hand-written `Default` (54-74) is derivable, and `impl Default for PassCriteria` (275-284) has no caller.
-
 ### lumos — combine, drizzle
 Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
 
@@ -170,10 +157,6 @@ Paths are relative to the repository root.
 ## Duplicate tests and fixtures that should be one table or one helper
 The same fixture or property is written many times, with different ad-hoc tolerances. Each copy drifts, and one fix has to be made in many places.
 
-### lumos — shared harness, calibration, pipeline, frame_store
-Paths are relative to the repository root.
-
-
 ### lumos — combine, drizzle
 Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
 
@@ -215,11 +198,6 @@ Paths are relative to `lumos/src/stacking/`, except those that start with `lumos
 
 ## Stale, wrong and change-narrating comments
 Comments that describe code that no longer exists, contradict the asserted values, or narrate history.
-
-### lumos — shared harness, calibration, pipeline, frame_store
-Paths are relative to the repository root.
-
-- [ ] `lumos/scripts/clone-refs.sh:90-91` — "rust-fitsio … the fitsio Rust binding lumos uses" and the `astro_image/fits` module paths are stale. lumos reads FITS through `fits-well`, and `fitsio` is not in `Cargo.lock`.
 
 ### lumos — combine, drizzle
 Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).

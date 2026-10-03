@@ -7,6 +7,9 @@ use crate::math::vec2us::Vec2us;
 use crate::stacking::calibration_masters::cosmic_ray::FINE_STRUCTURE_SIGMA_FLOOR;
 use crate::stacking::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 
+/// Masks a detection holds: the accumulated one, plus `primary` and `flags`.
+pub(crate) const CONCURRENT_MASKS: usize = 3;
+
 /// The three cosmic-ray masks a detection holds, one bit per pixel each.
 ///
 /// All three live for the whole detection rather than being rebuilt per iteration, which costs
@@ -23,6 +26,11 @@ pub(super) struct CrMasks {
 }
 
 impl CrMasks {
+    /// The bytes the masks of a `size` detection hold.
+    pub(super) fn heap_bytes(size: Size2us) -> usize {
+        CONCURRENT_MASKS * BitBuffer2::heap_bytes(size)
+    }
+
     pub(super) fn new(size: Size2us) -> Self {
         Self {
             accumulated: new_cr_mask(size),
@@ -111,9 +119,6 @@ fn new_cr_mask(size: Size2us) -> BitBuffer2 {
 pub(crate) mod internals {
     use crate::bit_buffer2::BitBuffer2;
     use crate::math::size2us::Size2us;
-
-    /// Masks a detection holds: the accumulated one, plus `primary` and `flags`.
-    pub(crate) const CONCURRENT_MASKS: usize = 3;
 
     /// The mask as the detector allocates it, for `mem_budget` to weigh.
     pub(crate) fn new_cr_mask(size: Size2us) -> BitBuffer2 {

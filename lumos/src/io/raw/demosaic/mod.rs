@@ -8,10 +8,26 @@ pub(crate) mod bayer;
 pub(crate) mod sensor_layout;
 pub(crate) mod xtrans;
 
+/// What one decode costs: the bytes it leaves, and its peak on the way there, the output included.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct DemosaicMemory {
     pub(crate) output_bytes: usize,
     pub(crate) peak_bytes: usize,
+}
+
+impl DemosaicMemory {
+    /// This decode inside a pass that at some point holds `bytes`: its peak raised to at least
+    /// that.
+    pub(crate) const fn with_peak_at_least(self, bytes: usize) -> Self {
+        Self {
+            output_bytes: self.output_bytes,
+            peak_bytes: if bytes > self.peak_bytes {
+                bytes
+            } else {
+                self.peak_bytes
+            },
+        }
+    }
 }
 
 #[cfg(test)]

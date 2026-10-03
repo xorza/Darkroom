@@ -97,6 +97,11 @@ impl BitBuffer2 {
         }
     }
 
+    /// The bytes a buffer of `size` allocates, rows padded and all.
+    pub(crate) fn heap_bytes(size: Size2us) -> usize {
+        bit_layout(size).num_words * size_of::<u64>()
+    }
+
     /// Create a new bit buffer with all bits set to false.
     #[inline]
     pub(crate) fn new_default(size: Size2us) -> Self {

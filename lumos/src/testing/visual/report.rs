@@ -1,7 +1,7 @@
-//! Detection metrics computation for visual tests.
+//! The text report a visual detection test writes beside its images.
 
 use crate::stacking::star_detection::star::Star;
-use crate::testing::synthetic::metrics::match_catalogs;
+use crate::testing::synthetic::metrics::{DetectionScore, match_catalogs};
 use crate::testing::synthetic::observe::ObservedSource;
 use common::internals;
 use glam::DVec2;
@@ -9,105 +9,125 @@ use std::fmt;
 use std::fs::File;
 use std::io::Write;
 
-/// Comprehensive detection metrics.
+/// What a detection run recovered: the catalog match's [`DetectionScore`], and how far the
+/// matched stars' measurements are from the truth.
 #[derive(Debug, Clone)]
 pub(crate) struct DetectionMetrics {
-    // Counts
-    /// Number of correctly detected stars (within match radius of ground truth)
-    true_positives: usize,
-    /// Number of spurious detections (no matching ground truth)
-    false_positives: usize,
-    /// Number of missed ground truth stars
-    false_negatives: usize,
-    /// Total ground truth stars
-    total_truth: usize,
-    /// Total detected stars
-    total_detected: usize,
-
-    // Rates
-    /// Detection rate: TP / (TP + FN)
-    pub(crate) detection_rate: f32,
-    /// Precision: TP / (TP + FP)
-    precision: f32,
-    /// F1 score: harmonic mean of detection rate and precision
-    f1_score: f32,
-    /// False positive rate: FP / `total_detected`
-    pub(crate) false_positive_rate: f32,
-
-    // Positional accuracy
-    /// Mean centroid error
-    mean_centroid_error: f32,
-    /// Median centroid error
-    median_centroid_error: f32,
-    /// Maximum centroid error
-    max_centroid_error: f32,
-    /// Standard deviation of centroid errors
-    std_centroid_error: f32,
-
-    // Property accuracy (for matched stars)
-    /// Mean FWHM error
-    mean_fwhm_error: f32,
-    /// Mean flux error
-    mean_flux_error: f32,
+    score: DetectionScore,
+    /// Distances from each matched star to its true position, in pixels.
+    centroid: ErrorSummary,
+    /// Mean relative FWHM error over the matched stars whose true FWHM is positive.
+    mean_fwhm_error: f64,
+    /// Mean relative flux error over the matched stars whose true flux is positive.
+    mean_flux_error: f64,
 }
 
-impl Default for DetectionMetrics {
-    fn default() -> Self {
+/// Mean, median, largest and standard deviation of a set of errors; all zero for none.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct ErrorSummary {
+    mean: f64,
+    median: f64,
+    max: f64,
+    std: f64,
+}
+
+impl ErrorSummary {
+    /// The median is the upper middle value of an even count.
+    fn of(mut errors: Vec<f64>) -> Self {
+        if errors.is_empty() {
+            return Self::default();
+        }
+        errors.sort_by(f64::total_cmp);
+        let n = errors.len() as f64;
+        let mean = errors.iter().sum::<f64>() / n;
+        let variance = errors.iter().map(|e| (e - mean).powi(2)).sum::<f64>() / n;
         Self {
-            true_positives: 0,
-            false_positives: 0,
-            false_negatives: 0,
-            total_truth: 0,
-            total_detected: 0,
-            detection_rate: 0.0,
-            precision: 0.0,
-            f1_score: 0.0,
-            false_positive_rate: 0.0,
-            mean_centroid_error: 0.0,
-            median_centroid_error: 0.0,
-            max_centroid_error: 0.0,
-            std_centroid_error: 0.0,
-            mean_fwhm_error: 0.0,
-            mean_flux_error: 0.0,
+            mean,
+            median: errors[errors.len() / 2],
+            max: errors[errors.len() - 1],
+            std: variance.sqrt(),
+        }
+    }
+}
+
+impl DetectionMetrics {
+    /// Match `detected` to `ground_truth` within `match_radius` pixels and grade the matches.
+    pub(crate) fn measure(
+        ground_truth: &[ObservedSource],
+        detected: &[Star],
+        match_radius: f64,
+    ) -> Self {
+        let truth_positions: Vec<DVec2> = ground_truth.iter().map(|s| s.pos).collect();
+        let detected_positions: Vec<DVec2> = detected.iter().map(|s| s.pos).collect();
+        let pairs = match_catalogs(&truth_positions, &detected_positions, match_radius);
+        let relative = |truth: f32, measured: f32| {
+            (truth > 0.0).then(|| f64::from((measured - truth).abs() / truth))
+        };
+        let mean = |errors: Vec<f64>| ErrorSummary::of(errors).mean;
+        Self {
+            score: DetectionScore {
+                matched: pairs.len(),
+                n_truth: ground_truth.len(),
+                n_recovered: detected.len(),
+            },
+            centroid: ErrorSummary::of(
+                pairs
+                    .iter()
+                    .map(|&(ti, di)| truth_positions[ti].distance(detected_positions[di]))
+                    .collect(),
+            ),
+            mean_fwhm_error: mean(
+                pairs
+                    .iter()
+                    .filter_map(|&(ti, di)| relative(ground_truth[ti].fwhm, detected[di].fwhm))
+                    .collect(),
+            ),
+            mean_flux_error: mean(
+                pairs
+                    .iter()
+                    .filter_map(|&(ti, di)| relative(ground_truth[ti].flux, detected[di].flux))
+                    .collect(),
+            ),
         }
     }
 }
 
 impl fmt::Display for DetectionMetrics {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let score = &self.score;
+        let (completeness, reliability) = (score.completeness(), score.reliability());
+        let f1 = if completeness + reliability > 0.0 {
+            2.0 * completeness * reliability / (completeness + reliability)
+        } else {
+            0.0
+        };
         writeln!(f, "Detection Metrics")?;
-        writeln!(f, "================")?;
         writeln!(f)?;
         writeln!(f, "Counts:")?;
-        writeln!(f, "  Ground truth stars:  {}", self.total_truth)?;
-        writeln!(f, "  Detected stars:      {}", self.total_detected)?;
-        writeln!(f, "  True positives:      {}", self.true_positives)?;
-        writeln!(f, "  False positives:     {}", self.false_positives)?;
-        writeln!(f, "  False negatives:     {}", self.false_negatives)?;
+        writeln!(f, "  Ground truth stars:  {}", score.n_truth)?;
+        writeln!(f, "  Detected stars:      {}", score.n_recovered)?;
+        writeln!(f, "  True positives:      {}", score.matched)?;
+        writeln!(
+            f,
+            "  False positives:     {}",
+            score.n_recovered - score.matched
+        )?;
+        writeln!(
+            f,
+            "  False negatives:     {}",
+            score.n_truth - score.matched
+        )?;
         writeln!(f)?;
         writeln!(f, "Rates:")?;
-        writeln!(
-            f,
-            "  Detection rate:      {:.1}%",
-            self.detection_rate * 100.0
-        )?;
-        writeln!(f, "  Precision:           {:.1}%", self.precision * 100.0)?;
-        writeln!(f, "  F1 score:            {:.3}", self.f1_score)?;
-        writeln!(
-            f,
-            "  False positive rate: {:.1}%",
-            self.false_positive_rate * 100.0
-        )?;
+        writeln!(f, "  Completeness:        {:.1}%", completeness * 100.0)?;
+        writeln!(f, "  Reliability:         {:.1}%", reliability * 100.0)?;
+        writeln!(f, "  F1 score:            {f1:.3}")?;
         writeln!(f)?;
         writeln!(f, "Centroid Accuracy (pixels):")?;
-        writeln!(f, "  Mean error:          {:.3}", self.mean_centroid_error)?;
-        writeln!(
-            f,
-            "  Median error:        {:.3}",
-            self.median_centroid_error
-        )?;
-        writeln!(f, "  Max error:           {:.3}", self.max_centroid_error)?;
-        writeln!(f, "  Std deviation:       {:.3}", self.std_centroid_error)?;
+        writeln!(f, "  Mean error:          {:.3}", self.centroid.mean)?;
+        writeln!(f, "  Median error:        {:.3}", self.centroid.median)?;
+        writeln!(f, "  Max error:           {:.3}", self.centroid.max)?;
+        writeln!(f, "  Std deviation:       {:.3}", self.centroid.std)?;
         writeln!(f)?;
         writeln!(f, "Property Accuracy:")?;
         writeln!(
@@ -119,145 +139,10 @@ impl fmt::Display for DetectionMetrics {
             f,
             "  Mean flux error:     {:.1}%",
             self.mean_flux_error * 100.0
-        )?;
-        Ok(())
+        )
     }
 }
 
-/// Compute detection metrics from ground truth and detected stars.
-///
-/// # Arguments
-/// * `ground_truth` - True star positions and properties
-/// * `detected` - Detected stars
-/// * `match_radius` - Maximum distance for matching (typically 2 × FWHM)
-pub(crate) fn compute_detection_metrics(
-    ground_truth: &[ObservedSource],
-    detected: &[Star],
-    match_radius: f32,
-) -> DetectionMetrics {
-    let truth_positions: Vec<DVec2> = ground_truth.iter().map(|s| s.pos).collect();
-    let detected_positions: Vec<DVec2> = detected.iter().map(|s| s.pos).collect();
-    let pairs = match_catalogs(
-        &truth_positions,
-        &detected_positions,
-        f64::from(match_radius),
-    );
-
-    let true_positives = pairs.len();
-    let false_negatives = ground_truth.len() - true_positives;
-    let false_positives = detected.len() - true_positives;
-
-    // Detection rate and precision
-    let detection_rate = if ground_truth.is_empty() {
-        1.0
-    } else {
-        true_positives as f32 / ground_truth.len() as f32
-    };
-
-    let precision = if detected.is_empty() {
-        1.0
-    } else {
-        true_positives as f32 / detected.len() as f32
-    };
-
-    let f1_score = if detection_rate + precision > 0.0 {
-        2.0 * detection_rate * precision / (detection_rate + precision)
-    } else {
-        0.0
-    };
-
-    let false_positive_rate = if detected.is_empty() {
-        0.0
-    } else {
-        false_positives as f32 / detected.len() as f32
-    };
-
-    // Compute centroid errors
-    let centroid_errors: Vec<f32> = pairs
-        .iter()
-        .map(|&(ti, di)| truth_positions[ti].distance(detected_positions[di]) as f32)
-        .collect();
-
-    let mean_centroid_error = if centroid_errors.is_empty() {
-        0.0
-    } else {
-        centroid_errors.iter().sum::<f32>() / centroid_errors.len() as f32
-    };
-
-    let median_centroid_error = if centroid_errors.is_empty() {
-        0.0
-    } else {
-        let mut sorted = centroid_errors.clone();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        sorted[sorted.len() / 2]
-    };
-
-    let max_centroid_error = centroid_errors.iter().copied().fold(0.0, f32::max);
-
-    let std_centroid_error = if centroid_errors.len() > 1 {
-        let variance = centroid_errors
-            .iter()
-            .map(|e| (e - mean_centroid_error).powi(2))
-            .sum::<f32>()
-            / centroid_errors.len() as f32;
-        variance.sqrt()
-    } else {
-        0.0
-    };
-
-    // Compute FWHM and flux errors
-    let mut fwhm_errors = Vec::new();
-    let mut flux_errors = Vec::new();
-
-    for &(ti, di) in &pairs {
-        let truth = &ground_truth[ti];
-        let det = &detected[di];
-
-        // FWHM relative error
-        if truth.fwhm > 0.0 {
-            let fwhm_err = (det.fwhm - truth.fwhm).abs() / truth.fwhm;
-            fwhm_errors.push(fwhm_err);
-        }
-
-        // Flux relative error
-        if truth.flux > 0.0 {
-            let flux_err = (det.flux - truth.flux).abs() / truth.flux;
-            flux_errors.push(flux_err);
-        }
-    }
-
-    let mean_fwhm_error = if fwhm_errors.is_empty() {
-        0.0
-    } else {
-        fwhm_errors.iter().sum::<f32>() / fwhm_errors.len() as f32
-    };
-
-    let mean_flux_error = if flux_errors.is_empty() {
-        0.0
-    } else {
-        flux_errors.iter().sum::<f32>() / flux_errors.len() as f32
-    };
-
-    DetectionMetrics {
-        true_positives,
-        false_positives,
-        false_negatives,
-        total_truth: ground_truth.len(),
-        total_detected: detected.len(),
-        detection_rate,
-        precision,
-        f1_score,
-        false_positive_rate,
-        mean_centroid_error,
-        median_centroid_error,
-        max_centroid_error,
-        std_centroid_error,
-        mean_fwhm_error,
-        mean_flux_error,
-    }
-}
-
-/// Save metrics to a text file.
 /// Write `metrics` as text to the debug file `name`, when debug output is on.
 pub(crate) fn save_metrics(metrics: &DetectionMetrics, name: &str) {
     if let Some(path) = internals::debug_output_path(name) {
@@ -268,9 +153,10 @@ pub(crate) fn save_metrics(metrics: &DetectionMetrics, name: &str) {
 
 #[cfg(test)]
 mod tests {
+    use crate::testing::assertions::is_close;
     use crate::testing::visual::report::*;
 
-    fn make_truth(x: f64, y: f64) -> ObservedSource {
+    fn truth(x: f64, y: f64) -> ObservedSource {
         ObservedSource {
             pos: DVec2::new(x, y),
             flux: 100.0,
@@ -278,59 +164,59 @@ mod tests {
         }
     }
 
-    fn make_det(x: f32, y: f32) -> Star {
-        Star::at(DVec2::new(f64::from(x), f64::from(y))).with_eccentricity(0.0)
+    fn star(x: f64, y: f64) -> Star {
+        Star::at(DVec2::new(x, y)).with_eccentricity(0.0)
     }
 
+    /// Matches, false positives and misses: two of two found, one found plus one spurious, and one
+    /// of two found.
     #[test]
-    fn perfect_detection() {
-        let truth = vec![make_truth(10.0, 10.0), make_truth(50.0, 50.0)];
-        let detected = vec![make_det(10.0, 10.0), make_det(50.0, 50.0)];
-
-        let metrics = compute_detection_metrics(&truth, &detected, 5.0);
-
-        assert_eq!(metrics.true_positives, 2);
-        assert_eq!(metrics.false_positives, 0);
-        assert_eq!(metrics.false_negatives, 0);
-        assert!((metrics.detection_rate - 1.0).abs() < 0.01);
-        assert!((metrics.precision - 1.0).abs() < 0.01);
+    fn counts_follow_the_catalog_match() {
+        for (truth_stars, detected, matched) in [
+            (
+                vec![truth(10.0, 10.0), truth(50.0, 50.0)],
+                vec![star(10.0, 10.0), star(50.0, 50.0)],
+                2,
+            ),
+            (
+                vec![truth(10.0, 10.0)],
+                vec![star(10.0, 10.0), star(100.0, 100.0)],
+                1,
+            ),
+            (
+                vec![truth(10.0, 10.0), truth(100.0, 100.0)],
+                vec![star(10.0, 10.0)],
+                1,
+            ),
+        ] {
+            let metrics = DetectionMetrics::measure(&truth_stars, &detected, 5.0);
+            assert_eq!(
+                (
+                    metrics.score.matched,
+                    metrics.score.n_truth,
+                    metrics.score.n_recovered
+                ),
+                (matched, truth_stars.len(), detected.len())
+            );
+        }
     }
 
+    /// Three stars off by 0.5, 1 and 2 px along x: mean 3.5/3, median 1, max 2, and variance
+    /// ((2/3)² + (1/6)² + (5/6)²)/3 = 7/18, which a few f64 roundings reach within 4ε.
     #[test]
-    fn with_false_positive() {
-        let truth = vec![make_truth(10.0, 10.0)];
-        let detected = vec![make_det(10.0, 10.0), make_det(100.0, 100.0)];
-
-        let metrics = compute_detection_metrics(&truth, &detected, 5.0);
-
-        assert_eq!(metrics.true_positives, 1);
-        assert_eq!(metrics.false_positives, 1);
-        assert_eq!(metrics.false_negatives, 0);
-        assert!((metrics.detection_rate - 1.0).abs() < 0.01);
-        assert!((metrics.precision - 0.5).abs() < 0.01);
-    }
-
-    #[test]
-    fn with_missed_star() {
-        let truth = vec![make_truth(10.0, 10.0), make_truth(100.0, 100.0)];
-        let detected = vec![make_det(10.0, 10.0)];
-
-        let metrics = compute_detection_metrics(&truth, &detected, 5.0);
-
-        assert_eq!(metrics.true_positives, 1);
-        assert_eq!(metrics.false_positives, 0);
-        assert_eq!(metrics.false_negatives, 1);
-        assert!((metrics.detection_rate - 0.5).abs() < 0.01);
-        assert!((metrics.precision - 1.0).abs() < 0.01);
-    }
-
-    #[test]
-    fn centroid_error() {
-        let truth = vec![make_truth(10.0, 10.0)];
-        let detected = vec![make_det(10.1, 10.2)]; // 0.224 pixel error
-
-        let metrics = compute_detection_metrics(&truth, &detected, 5.0);
-
-        assert!(metrics.mean_centroid_error > 0.2 && metrics.mean_centroid_error < 0.25);
+    fn centroid_errors_summarise_the_matched_offsets() {
+        let truth_stars = [truth(10.0, 10.0), truth(50.0, 50.0), truth(90.0, 90.0)];
+        let detected = [star(10.5, 10.0), star(51.0, 50.0), star(92.0, 90.0)];
+        let centroid = DetectionMetrics::measure(&truth_stars, &detected, 5.0).centroid;
+        assert_eq!(
+            (centroid.mean, centroid.median, centroid.max),
+            (3.5 / 3.0, 1.0, 2.0)
+        );
+        assert!(is_close(
+            centroid.std,
+            (7.0f64 / 18.0).sqrt(),
+            4.0 * f64::EPSILON
+        ));
+        assert_eq!(ErrorSummary::of(Vec::new()), ErrorSummary::default());
     }
 }
