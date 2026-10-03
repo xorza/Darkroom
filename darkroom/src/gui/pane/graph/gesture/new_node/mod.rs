@@ -3,6 +3,7 @@
 //! [`NodePalette`].
 
 pub(crate) mod node_palette;
+pub(crate) mod palette_rows;
 
 use glam::Vec2;
 use palantir::{Ui, WidgetId};
@@ -12,6 +13,7 @@ use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
 use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::gesture::canvas_gesture::CanvasGesture;
 use crate::gui::pane::graph::gesture::new_node::node_palette::NodePalette;
+use crate::gui::pane::graph::gesture::new_node::palette_rows::PaletteRows;
 use crate::gui::pane::graph::paint::anchored_menu::AnchoredMenu;
 use crate::gui::requests::Requests;
 
@@ -40,6 +42,8 @@ pub(crate) struct NewNodeUi {
     /// filters the listed entries by name (a matching category name shows
     /// that whole column). Empty ⇒ everything shows.
     search: Search,
+    /// The rows the search matched, filtered again only when it changes.
+    rows: PaletteRows,
 }
 
 /// The palette's search text and its case-folded copy.
@@ -54,10 +58,17 @@ struct Search {
 }
 
 impl Search {
-    fn fold(&mut self) {
+    /// Fold this frame's text, and report whether the fold changed — the
+    /// palette's cue to filter its rows again. Compared before it is
+    /// rebuilt, so an unchanged query costs one pass and no write.
+    fn fold(&mut self) -> bool {
+        let lowered = || self.text.chars().flat_map(char::to_lowercase);
+        if lowered().eq(self.folded.chars()) {
+            return false;
+        }
         self.folded.clear();
-        self.folded
-            .extend(self.text.chars().flat_map(char::to_lowercase));
+        self.folded.extend(lowered());
+        true
     }
 }
 
@@ -124,7 +135,7 @@ impl NewNodeUi {
             .min(surface.size.h - 16.0)
             .max(120.0);
         let scroll_cap = (max_height - chrome_above_results(ui)).max(MIN_RESULTS_HEIGHT);
-        let search = &mut self.search;
+        let (search, rows) = (&mut self.search, &mut self.rows);
         // Rows are picked at the position the *open* captured, not wherever
         // the pointer has drifted to by the frame of the click.
         let pos = self.world_pos;
@@ -134,7 +145,7 @@ impl NewNodeUi {
             .menu
             .show(ui, "new_node_popup", Some(max_height), |ui, popup| {
                 let palette = NodePalette::new(graph_ctx, pos);
-                palette.body(ui, popup, search, scroll_cap, just_opened)
+                palette.body(ui, popup, search, rows, scroll_cap, just_opened)
             });
 
         if let Some(intent) = chosen {

@@ -121,6 +121,11 @@ const BEZIER_SAMPLES: usize = 16;
 pub(super) struct Scribble {
     points: Vec<Vec2>,
     length: f32,
+    /// The corners of the polyline's bounding box, kept as points arrive.
+    /// Every segment lies inside it, so a target whose own box misses it
+    /// cannot cross, and is rejected before any segment test.
+    lo: Vec2,
+    hi: Vec2,
     /// Target input ports whose data binding the breaker intersects this
     /// frame, drained on release into an unbound `GraphIntent::SetInput`.
     broken: Vec<InputPort>,
@@ -140,6 +145,8 @@ impl Scribble {
         self.points.clear();
         self.points.push(p);
         self.length = 0.0;
+        self.lo = p;
+        self.hi = p;
         self.begin_frame();
     }
 
@@ -172,6 +179,15 @@ impl Scribble {
         };
         self.points.push(clamped);
         self.length += added;
+        self.lo = self.lo.min(clamped);
+        self.hi = self.hi.max(clamped);
+    }
+
+    /// Whether the box `min..=max` lies wholly outside the polyline's own, so
+    /// nothing inside it can touch the polyline. Closed on both sides: a box
+    /// that only touches the polyline's still counts as overlapping.
+    fn misses(&self, min: Vec2, max: Vec2) -> bool {
+        max.x < self.lo.x || min.x > self.hi.x || max.y < self.lo.y || min.y > self.hi.y
     }
 
     fn segments(&self) -> impl Iterator<Item = (Vec2, Vec2)> + '_ {
@@ -188,6 +204,9 @@ impl Scribble {
         }
         let min = rect.min;
         let max = rect.max();
+        if self.misses(min, max) {
+            return false;
+        }
         let inside = |p: Vec2| p.x >= min.x && p.x <= max.x && p.y >= min.y && p.y <= max.y;
         if self.points.iter().any(|&p| inside(p)) {
             return true;
@@ -213,7 +232,11 @@ impl Scribble {
     /// runs once per connection per frame while the gesture is
     /// active, so we don't cache.
     fn intersects_cubic(&self, p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2) -> bool {
-        if self.points.len() < 2 {
+        // A cubic stays inside its control points' box, and so does every
+        // chord between two of its samples.
+        if self.points.len() < 2
+            || self.misses(p0.min(p1).min(p2).min(p3), p0.max(p1).max(p2).max(p3))
+        {
             return false;
         }
         let mut prev = p0;
