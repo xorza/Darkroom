@@ -1,7 +1,5 @@
 use super::*;
-use common::SerdeFormat;
 
-use palantir::RgbaF32;
 use static_assertions::assert_not_impl_any;
 
 assert_not_impl_any!(Theme: Copy);
@@ -11,35 +9,8 @@ assert_not_impl_any!(CardTheme: Copy);
 assert_not_impl_any!(PortTheme: Copy);
 assert_not_impl_any!(StatusColors: Copy);
 assert_not_impl_any!(TypeColors: Copy);
-assert_not_impl_any!(CardBorder: Copy);
 assert_not_impl_any!(ConstValueEditorTheme: Copy);
 assert_not_impl_any!(InlineRenameTheme: Copy);
-
-/// The whole bundle — darkroom's own fields *and* the nested
-/// palantir palette — must survive a RON round-trip. That is the
-/// on-disk theme format, and this is the only thing holding it: no
-/// UI writes or reads one. Exercises the awkward case too — the
-/// tooltip's infinite max-size axis, handled by `Size`'s custom serde.
-#[test]
-fn theme_roundtrips_through_ron() {
-    let mut theme = Theme::default();
-    theme.card.min_width = 137.5;
-    theme.colors.text_muted = RgbaF32::hex(0x0012_3456);
-    theme.palantir.window_clear = RgbaF32::hex(0x00ab_cdef);
-
-    let bytes = common::serialize(&theme, SerdeFormat::Ron).expect("serialize theme");
-    let back: Theme = common::deserialize(&bytes, SerdeFormat::Ron)
-        .expect("theme should deserialize from its own RON output");
-
-    assert_eq!(back.card.min_width, 137.5);
-    assert_eq!(back.colors.text_muted, RgbaF32::hex(0x0012_3456));
-    assert_eq!(back.canvas.bg, theme.canvas.bg);
-    // Nested palantir palette round-trips too.
-    assert_eq!(back.palantir.window_clear, RgbaF32::hex(0x00ab_cdef));
-    // The infinite tooltip-height axis survives `Size`'s serde.
-    assert!(back.palantir.tooltip.max_size.h.is_infinite());
-    assert_eq!(back.palantir.tooltip.max_size.w, 280.0);
-}
 
 /// Pin which palette role reaches which field, plus the non-trivial
 /// palantir tweak, so a regression in `Theme::build`'s wiring, in

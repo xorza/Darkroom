@@ -9,7 +9,7 @@ use crate::gui::theme::palette::Palette;
 /// dock's tabs. Named for the shape rather than the node, because all
 /// three read from it — a header band derives its own tighter radius from
 /// [`Self::inner_radius`] rather than carrying fields of its own.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub(crate) struct CardTheme {
     /// Body fill.
     pub(crate) fill: RgbaF32,
@@ -36,14 +36,6 @@ pub(crate) struct CardTheme {
     /// legible at any zoom.
     pub(crate) min_width: f32,
     pub(crate) min_height: f32,
-}
-
-/// Result of [`Theme::card_border`](crate::gui::theme::Theme::card_border): the
-/// resolved outline color. The width is [`CardTheme::border_width_total`] —
-/// constant, so selecting never resizes a card.
-#[derive(Clone, Debug)]
-pub(crate) struct CardBorder {
-    pub(crate) color: RgbaF32,
 }
 
 impl CardTheme {

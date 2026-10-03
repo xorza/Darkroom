@@ -75,14 +75,17 @@ pub(super) fn subscription_pin(ui: &mut Ui, theme: &Theme, node: NodeCtx<'_>, ho
     // left — plus a quarter, aiming it up-left along the wire arriving from
     // there. Placed by its grown box's center rather than in flow, so it
     // straddles the node's top-left corner.
-    PortGlyph::arrow(subscription_glyph_wid(node.id), theme.ports.size)
-        .turn(PI + FRAC_PI_4)
-        .fill(event_color(theme, hovered))
-        .centered_on(node.pos)
-        .tip(Some(
-            "Event subscription — drag to an emitter, or drop an event wire here",
-        ))
-        .show(ui);
+    PortGlyph::arrow(
+        subscription_glyph_wid(node.id),
+        theme.ports.size,
+        event_color(theme, hovered),
+    )
+    .turn(PI + FRAC_PI_4)
+    .centered_on(node.pos)
+    .tip(Some(
+        "Event subscription — drag to an emitter, or drop an event wire here",
+    ))
+    .show(ui);
 }
 
 /// Stable id for a node's event-subscription pin. Keyed on the node (a

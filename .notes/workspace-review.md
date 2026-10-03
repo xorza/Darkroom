@@ -19,11 +19,6 @@ Groups are named after their shared root cause and ordered by severity, then ben
 
 # Low — duplication, dead surface, local simplifications
 
-## Placeholder values and derived fields stored beside their source
-Severity: Low — `Option`s that must be `Some`, sentinels, and caches of computable values.
-
-- [ ] `darkroom` — `gui/frame/geometry/mod.rs` `PortLayer::record`/`snapshot` `node_min: Option<Vec2>` is always `Some`; `widgets/port_glyph.rs` `PortGlyph::new` defaults the fill to a `WHITE` every caller overrides; `theme/card_theme.rs` `CardBorder` is a one-field wrapper whose only caller reads `.color`; `Theme` derives serde (only a test uses it) and serializes derived values (`const_value_editor_revealed`, `inline_rename_title`, `menu_button`, `palantir_theme`) beside their sources; `Theme::build` stores `text: TypeScale::DEFAULT` and passes a separate `&TypeScale::DEFAULT` to `palantir_theme_for` / `menu_button_for`.
-
 ## darkroom GUI repeats per-frame lookups and theme values
 Severity: Low.
 

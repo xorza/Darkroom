@@ -136,7 +136,7 @@ impl<K> Default for PortLayer<K> {
 
 impl<K: GlyphKey> PortLayer<K> {
     /// Snapshot one widget into `live`, refreshing its persistent offset.
-    fn record(&mut self, key: K, r: ResponseState, node_min: Option<Vec2>, node_pos: Vec2) {
+    fn record(&mut self, key: K, r: ResponseState, node_min: Vec2, node_pos: Vec2) {
         let info = snapshot(r, node_min, node_pos, key, &mut self.offsets);
         self.live.insert(key, info);
     }
@@ -338,19 +338,19 @@ impl CanvasGeometry {
             for kind in [PortKind::Input, PortKind::Output] {
                 for port in n.ports(kind) {
                     let r = ui.response_for(port_circle_wid(port));
-                    self.ports.record(port, r, Some(node_min), n.pos);
+                    self.ports.record(port, r, node_min, n.pos);
                 }
             }
             // Emitter event glyphs, drag sources for subscription wires.
             for ev in n.event_refs() {
                 let r = ui.response_for(event_glyph_wid(n.id, ev.event_idx));
-                self.events.record(ev, r, Some(node_min), n.pos);
+                self.events.record(ev, r, node_min, n.pos);
             }
             // The subscription pin only exists on sink nodes (only they
             // render one — see `header::subscription_glyph`).
             if n.sink() {
                 let r = ui.response_for(subscription_glyph_wid(n.id));
-                self.subs.record(n.id, r, Some(node_min), n.pos);
+                self.subs.record(n.id, r, node_min, n.pos);
             }
         }
     }
@@ -382,15 +382,12 @@ impl CanvasGeometry {
 /// position. Shared by data ports, event glyphs, and subscription pins.
 fn snapshot<K: GlyphKey>(
     r: ResponseState,
-    node_min: Option<Vec2>,
+    node_min: Vec2,
     node_pos: Vec2,
     key: K,
     offsets: &mut HashMap<K, Vec2>,
 ) -> PortInfo {
-    let fresh_offset = match (r.layout_rect, node_min) {
-        (Some(rect), Some(node_min)) => Some(rect.center() - node_min),
-        _ => None,
-    };
+    let fresh_offset = r.layout_rect.map(|rect| rect.center() - node_min);
     if let Some(offset) = fresh_offset {
         offsets.insert(key, offset);
     }

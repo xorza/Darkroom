@@ -87,22 +87,23 @@ pub(crate) struct PortGlyphResponse {
 }
 
 impl<'a> PortGlyph<'a> {
-    /// A data port's circle, `diameter` across.
-    pub(crate) fn circle(wid: WidgetId, diameter: f32) -> Self {
-        Self::new(wid, diameter, GlyphShape::Circle { outline: None })
+    /// A data port's circle, `diameter` across, inked `fill`.
+    pub(crate) fn circle(wid: WidgetId, diameter: f32, fill: RgbaF32) -> Self {
+        Self::new(wid, diameter, GlyphShape::Circle { outline: None }, fill)
     }
 
-    /// An emitter event's triangle, apex pointing right (the emit direction).
-    pub(crate) fn arrow(wid: WidgetId, size: f32) -> Self {
-        Self::new(wid, size, GlyphShape::Arrow { turn: 0.0 })
+    /// An emitter event's triangle, apex pointing right (the emit direction),
+    /// inked `fill`.
+    pub(crate) fn arrow(wid: WidgetId, size: f32, fill: RgbaF32) -> Self {
+        Self::new(wid, size, GlyphShape::Arrow { turn: 0.0 }, fill)
     }
 
-    fn new(wid: WidgetId, size: f32, shape: GlyphShape) -> Self {
+    fn new(wid: WidgetId, size: f32, shape: GlyphShape, fill: RgbaF32) -> Self {
         Self {
             wid,
             size,
             shape,
-            fill: RgbaF32::WHITE,
+            fill,
             placement: Placement::Margin(Spacing::ZERO),
             tip: None,
         }
@@ -117,12 +118,6 @@ impl<'a> PortGlyph<'a> {
         } else {
             base
         }
-    }
-
-    /// Ink of the painted shape. Defaults to white — every caller sets it.
-    pub(crate) fn fill(mut self, color: RgbaF32) -> Self {
-        self.fill = color;
-        self
     }
 
     /// Ring a circle with an annulus strictly outside its fill. Ignored by
