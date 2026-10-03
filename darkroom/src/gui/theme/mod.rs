@@ -99,9 +99,8 @@ pub(crate) struct Theme {
     /// record path — and kept next to its base so the pair can't drift.
     pub(crate) const_value_editor_revealed: ConstValueEditorTheme,
 
-    /// Look for the inline-rename widget (node title, boundary port,
-    /// graph tab). Text is left unset, so a rename inherits ambient
-    /// `palantir::Theme::text` like any other label.
+    /// Look for the inline-rename widget. Text is left unset, so a rename
+    /// inherits ambient `palantir::Theme::text` like any other label.
     pub(crate) inline_rename: InlineRenameTheme,
 
     /// The node-title variant of `inline_rename`, with the ambient text
