@@ -146,6 +146,53 @@ fn deblend_separation_controls_split() {
     assert_eq!(pair_count(2.0), 1, "a near-coincident pair must merge");
 }
 
+/// A group too big for one candidate is still deblended: sixteen 0.3 stars on a 6-px grid form
+/// one component of over 500 px — the default `max_area` — holding sixteen peaks. The area bound
+/// applies to the regions the deblender makes, each a 6-px cell, so every star is a candidate,
+/// under both deblenders.
+#[test]
+fn a_crowded_group_splits_into_every_star() {
+    let truths: Vec<(f32, f32)> = (0..16)
+        .map(|i| {
+            (
+                110.0 + (i % 4) as f32 * SEPARATION,
+                110.0 + (i / 4) as f32 * SEPARATION,
+            )
+        })
+        .collect();
+    let stars: Vec<(f32, f32, f32)> = truths.iter().map(|&(x, y)| (x, y, 0.3)).collect();
+    let pixels = field(Size2us::new(256, 256), fwhm_to_sigma(4.0), &stars, 42);
+    let background = background_estimate(&pixels);
+    for deblend in [
+        DetectionConfig::default().deblend,
+        Deblend::MultiThreshold {
+            n_thresholds: 32,
+            min_contrast: 0.005,
+        },
+    ] {
+        let config = DetectionConfig {
+            deblend,
+            ..Default::default()
+        };
+        let result = detect_test(
+            &background.residual_of(&pixels),
+            &background.sky_noise(),
+            &config,
+        );
+        // One component split — the group, the sky's lone noise pixels staying whole and under
+        // the area floor — into sixteen regions that together hold more than `max_area`.
+        assert_eq!(result.deblended_components, 1, "{deblend:?}");
+        assert_eq!(result.regions.len(), 16, "{deblend:?}");
+        let group_area: usize = result.regions.iter().map(|region| region.area).sum();
+        assert!(group_area > config.max_area, "{deblend:?}: {group_area} px");
+        assert_eq!(
+            matched_truths(&result.regions, &truths, fwhm_to_sigma(4.0)),
+            16,
+            "{deblend:?}: every star of the group"
+        );
+    }
+}
+
 /// Both deblenders decide on the residual, so a sky pedestal under the same blend changes nothing.
 ///
 /// A 0.2 star with a 0.05 one 5 px away (σ 1.5), noiseless, on a sky of 0 and of 0.1 that the

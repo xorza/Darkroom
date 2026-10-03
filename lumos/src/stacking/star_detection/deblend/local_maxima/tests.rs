@@ -5,6 +5,7 @@
 
 use crate::math::urect::URect;
 use crate::stacking::star_detection::config::detection_config::{Deblend, DetectionConfig};
+use crate::stacking::star_detection::deblend::component::Assignment;
 use crate::stacking::star_detection::deblend::internals::{TestComponent, make_test_component};
 use crate::stacking::star_detection::deblend::local_maxima::*;
 use crate::stacking::star_detection::labeling::LabelMap;
@@ -36,6 +37,35 @@ fn stars(size: Size2us, sigma: f32, stars: &[(f32, f32, f32)]) -> TestComponent 
     make_test_component(size, &stars)
 }
 
+/// [`find_local_maxima`] into a fresh list.
+fn maxima(component: &Component<'_>, min_separation: usize, min_prominence: f32) -> Vec<Pixel> {
+    let mut peaks = Vec::new();
+    find_local_maxima(
+        component,
+        min_separation,
+        min_prominence,
+        &mut Vec::new(),
+        Kept {
+            peaks: &mut peaks,
+            occupied: &mut Vec::new(),
+        },
+    );
+    peaks
+}
+
+/// [`deblend_local_maxima`] into a fresh list.
+fn deblended(component: &Component<'_>, min_separation: usize, min_prominence: f32) -> Vec<Region> {
+    let mut regions = Vec::new();
+    deblend_local_maxima(
+        component,
+        min_separation,
+        min_prominence,
+        &mut DeblendBuffers::default(),
+        &mut regions,
+    );
+    regions
+}
+
 /// `(x, y)` of each peak, in the order given.
 fn positions(peaks: &[Pixel]) -> Vec<(usize, usize)> {
     peaks.iter().map(|p| (p.pos.x, p.pos.y)).collect()
@@ -46,21 +76,11 @@ fn single_star_is_one_whole_region() {
     let fixture = stars(Size2us::new(100, 100), 3.0, &[(50.0, 50.0, 1.0)]);
     let component = Component::new(&fixture.data, &fixture.pixels, &fixture.labels);
 
-    let peaks = find_local_maxima(
-        &component,
-        default_separation(),
-        default_prominence(),
-        &mut Vec::new(),
-    );
+    let peaks = maxima(&component, default_separation(), default_prominence());
     assert_eq!(positions(&peaks), [(50, 50)]);
     assert_eq!(peaks[0].value, 1.0);
 
-    let regions = deblend_local_maxima(
-        &component,
-        default_separation(),
-        default_prominence(),
-        &mut Vec::new(),
-    );
+    let regions = deblended(&component, default_separation(), default_prominence());
     assert_eq!(regions.len(), 1);
     assert_eq!(regions[0].bbox, fixture.data.bbox);
     assert_eq!(regions[0].area, fixture.data.area);
@@ -79,11 +99,11 @@ fn two_separated_stars() {
     );
     let component = Component::new(&fixture.data, &fixture.pixels, &fixture.labels);
 
-    let peaks = find_local_maxima(&component, 3, 0.3, &mut Vec::new());
+    let peaks = maxima(&component, 3, 0.3);
     assert_eq!(positions(&peaks), [(30, 50), (70, 50)]);
     assert_eq!((peaks[0].value, peaks[1].value), (1.0, 0.8));
 
-    let regions = deblend_local_maxima(&component, 3, 0.3, &mut Vec::new());
+    let regions = deblended(&component, 3, 0.3);
     let blob_area = |left: bool| {
         component
             .pixels()
@@ -118,9 +138,9 @@ fn euclidean_separation() {
     );
     let component = Component::new(&fixture.data, &fixture.pixels, &fixture.labels);
 
-    let merged = find_local_maxima(&component, 5, 0.3, &mut Vec::new());
+    let merged = maxima(&component, 5, 0.3);
     assert_eq!(positions(&merged), [(50, 50)]);
-    let separate = find_local_maxima(&component, 4, 0.3, &mut Vec::new());
+    let separate = maxima(&component, 4, 0.3);
     assert_eq!(positions(&separate), [(50, 50), (53, 53)]);
 }
 
@@ -134,9 +154,9 @@ fn prominence_filter() {
     );
     let component = Component::new(&fixture.data, &fixture.pixels, &fixture.labels);
 
-    let strict = find_local_maxima(&component, 3, 0.5, &mut Vec::new());
+    let strict = maxima(&component, 3, 0.5);
     assert_eq!(positions(&strict), [(30, 50)]);
-    let loose = find_local_maxima(&component, 3, 0.1, &mut Vec::new());
+    let loose = maxima(&component, 3, 0.1);
     assert_eq!(positions(&loose), [(30, 50), (70, 50)]);
 }
 
@@ -151,9 +171,9 @@ fn zero_min_separation_keeps_adjacent_peaks() {
     );
     let component = Component::new(&fixture.data, &fixture.pixels, &fixture.labels);
 
-    let none = find_local_maxima(&component, 0, 0.1, &mut Vec::new());
+    let none = maxima(&component, 0, 0.1);
     assert_eq!(positions(&none), [(50, 50), (53, 50)]);
-    let four = find_local_maxima(&component, 4, 0.1, &mut Vec::new());
+    let four = maxima(&component, 4, 0.1);
     assert_eq!(positions(&four), [(50, 50)]);
 }
 
@@ -170,9 +190,9 @@ fn equal_brightness_tie_breaking() {
     let component = Component::new(&fixture.data, &fixture.pixels, &fixture.labels);
     assert_eq!(fixture.pixels[(48, 50)], fixture.pixels[(52, 50)]);
 
-    let tied = find_local_maxima(&component, 5, 0.3, &mut Vec::new());
+    let tied = maxima(&component, 5, 0.3);
     assert_eq!(positions(&tied), [(48, 50)]);
-    let both = find_local_maxima(&component, 4, 0.3, &mut Vec::new());
+    let both = maxima(&component, 4, 0.3);
     assert_eq!(positions(&both), [(48, 50), (52, 50)]);
 }
 
@@ -185,7 +205,7 @@ fn peaks_sorted_by_brightness() {
     );
     let component = Component::new(&fixture.data, &fixture.pixels, &fixture.labels);
 
-    let peaks = find_local_maxima(&component, 3, 0.3, &mut Vec::new());
+    let peaks = maxima(&component, 3, 0.3);
     assert_eq!(positions(&peaks), [(50, 50), (70, 50), (30, 50)]);
 
     // The component's own peak is the brightest pixel.
@@ -203,30 +223,29 @@ fn close_peaks_keep_the_brighter() {
     );
     let component = Component::new(&fixture.data, &fixture.pixels, &fixture.labels);
 
-    let peaks = find_local_maxima(&component, 5, 0.3, &mut Vec::new());
+    let peaks = maxima(&component, 5, 0.3);
     assert_eq!(positions(&peaks), [(50, 50)]);
 }
 
 #[test]
-fn many_peaks_keep_the_brightest() {
+fn many_peaks_are_all_kept_brightest_first() {
     // Twelve stars 8 px apart, brightening left to right (0.45 + 0.05·i), so raster order meets
     // the dimmest first. Neighbours add exp(−64/4.5) ≈ 7e-7 at each centre, so every centre is a
-    // local maximum of its own amplitude. The kept eight must be the brightest — i = 11 down to
-    // 4, at x = 10 + 8i — not the first eight scanned.
+    // local maximum of its own amplitude: all twelve are kept, the brightest first — i = 11 down
+    // to 0, at x = 10 + 8i.
     let star_list: Vec<(f32, f32, f32)> = (0..12)
         .map(|i| ((10 + i * 8) as f32, 50.0, 0.45 + i as f32 * 0.05))
         .collect();
     let fixture = stars(Size2us::new(120, 100), 1.5, &star_list);
 
-    let peaks = find_local_maxima(
+    let peaks = maxima(
         &Component::new(&fixture.data, &fixture.pixels, &fixture.labels),
         2,
         0.1,
-        &mut Vec::new(),
     );
 
     let xs: Vec<usize> = peaks.iter().map(|p| p.pos.x).collect();
-    assert_eq!(xs, [98, 90, 82, 74, 66, 58, 50, 42]);
+    assert_eq!(xs, [98, 90, 82, 74, 66, 58, 50, 42, 34, 26, 18, 10]);
     assert!(peaks.iter().all(|p| p.pos.y == 50));
 }
 
@@ -243,11 +262,10 @@ fn suppressed_peak_does_not_suppress_dimmer_ones() {
         &[(50.0, 50.0, 0.6), (53.0, 50.0, 0.8), (56.0, 50.0, 1.0)],
     );
 
-    let peaks = find_local_maxima(
+    let peaks = maxima(
         &Component::new(&fixture.data, &fixture.pixels, &fixture.labels),
         4,
         0.1,
-        &mut Vec::new(),
     );
 
     assert_eq!(positions(&peaks), [(56, 50), (50, 50)]);
@@ -312,11 +330,11 @@ fn plateau_no_local_max() {
     };
     let component = Component::new(&data, &pixels, &labels);
 
-    let peaks = find_local_maxima(&component, 1, 0.0, &mut Vec::new());
+    let peaks = maxima(&component, 1, 0.0);
     assert!(peaks.is_empty(), "a plateau has no strict local maximum");
 
     // With no maximum the component stays whole, peaked at its first brightest pixel.
-    let regions = deblend_local_maxima(&component, 1, 0.0, &mut Vec::new());
+    let regions = deblended(&component, 1, 0.0);
     assert_eq!(regions.len(), 1);
     assert_eq!((regions[0].peak, regions[0].area), (Vec2us::new(3, 3), 16));
 }
@@ -335,19 +353,15 @@ fn single_pixel_is_local_max() {
         area: 1,
     };
 
-    let peaks = find_local_maxima(
-        &Component::new(&data, &pixels, &labels),
-        3,
-        0.3,
-        &mut Vec::new(),
-    );
+    let peaks = maxima(&Component::new(&data, &pixels, &labels), 3, 0.3);
     assert_eq!(positions(&peaks), [(5, 5)]);
 }
 
 #[test]
 fn voronoi_assignment_and_its_tie() {
     // A 61-pixel line x = 20..=80 with peaks at its ends. Pixel 50 is 30 from both, and the tie
-    // goes to the first peak given: 31 pixels to x = 20, 30 to x = 80. No peaks, no regions.
+    // goes to the first peak given: 31 pixels to x = 20, 30 to x = 80. Under two peaks there is
+    // nothing to split: the component stays whole, peaked at its own brightest pixel.
     let mut pixels = Buffer2::new_filled(100, 100, 0.0f32);
     let mut labels_buf = Buffer2::new_filled(100, 100, 0u32);
     for x in 20..=80 {
@@ -369,7 +383,12 @@ fn voronoi_assignment_and_its_tie() {
         value: 1.0,
     };
 
-    let regions = component.assign_to_nearest(&[peak(20), peak(80)]);
+    let split = |peaks: &[Pixel]| {
+        let mut regions = Vec::new();
+        component.split_at(peaks, &mut Assignment::default(), &mut regions);
+        regions
+    };
+    let regions = split(&[peak(20), peak(80)]);
     let summary: Vec<(usize, URect)> = regions.iter().map(|r| (r.area, r.bbox)).collect();
     assert_eq!(
         summary,
@@ -379,5 +398,107 @@ fn voronoi_assignment_and_its_tie() {
         ]
     );
 
-    assert!(component.assign_to_nearest(&[]).is_empty());
+    for peaks in [&[][..], &[peak(80)]] {
+        let whole = split(peaks);
+        assert_eq!(whole.len(), 1, "{} peaks", peaks.len());
+        assert_eq!((whole[0].peak, whole[0].area), (Vec2us::new(20, 50), 61));
+    }
+}
+
+/// A full-box component of random values, quantized to 16 levels so neighbouring maxima often tie,
+/// and its label map: hundreds of local maxima, many equal in value and in distance.
+fn noise_component(size: Size2us, seed: u64) -> (Buffer2<f32>, LabelMap, ComponentData) {
+    let mut rng = TestRng::new(seed);
+    let pixels = Buffer2::new(
+        size.width,
+        size.height,
+        (0..size.pixel_count())
+            .map(|_| 0.1 + (rng.next_f32() * 16.0).floor() / 16.0)
+            .collect(),
+    );
+    let labels = LabelMap::from_raw(Buffer2::new_filled(size.width, size.height, 1u32), 1);
+    let data = ComponentData {
+        bbox: URect::new(Vec2us::ZERO, Vec2us::new(size.width, size.height)),
+        label: 1,
+        area: size.pixel_count(),
+    };
+    (pixels, labels, data)
+}
+
+/// The windowed suppression and the cell-grid split give what the plain definitions give: every
+/// candidate checked against every kept peak, every pixel against every peak. On a noise field of
+/// tied values and tied distances, over separations from none to wide and peak counts from a few,
+/// under the grid's crossover, to hundreds.
+#[test]
+fn fast_paths_match_the_definitions() {
+    for (seed, separation, prominence) in [
+        (1, 0, 0.9),
+        (2, 1, 0.5),
+        (3, 3, 0.1),
+        (4, 8, 0.1),
+        (5, 2, 0.95),
+    ] {
+        let (pixels, labels, data) = noise_component(Size2us::new(61, 43), seed);
+        let component = Component::new(&data, &pixels, &labels);
+
+        let mut candidates: Vec<Pixel> = component
+            .pixels()
+            .filter(|&p| {
+                p.value >= component.peak().value * prominence && is_local_maximum(p, &pixels)
+            })
+            .collect();
+        candidates.sort_unstable_by(Pixel::brighter_first);
+        let mut expected: Vec<Pixel> = Vec::new();
+        for candidate in candidates {
+            if expected.iter().all(|kept| {
+                kept.pos.x.abs_diff(candidate.pos.x).pow(2)
+                    + kept.pos.y.abs_diff(candidate.pos.y).pow(2)
+                    >= separation * separation
+            }) {
+                expected.push(candidate);
+            }
+        }
+        let peaks = maxima(&component, separation, prominence);
+        assert_eq!(
+            positions(&peaks),
+            positions(&expected),
+            "seed {seed}, separation {separation}"
+        );
+
+        let mut regions = Vec::new();
+        component.split_at(&peaks, &mut Assignment::default(), &mut regions);
+        let mut areas = vec![0usize; peaks.len()];
+        let mut boxes = vec![URect::empty(); peaks.len()];
+        for pixel in component.pixels() {
+            let nearest = (0..peaks.len())
+                .min_by_key(|&i| {
+                    (
+                        pixel.pos.x.abs_diff(peaks[i].pos.x).pow(2)
+                            + pixel.pos.y.abs_diff(peaks[i].pos.y).pow(2),
+                        i,
+                    )
+                })
+                .expect("peaks");
+            areas[nearest] += 1;
+            boxes[nearest].include(pixel.pos);
+        }
+        let expected_regions: Vec<(Vec2us, usize, URect)> = peaks
+            .iter()
+            .zip(areas.iter().zip(&boxes))
+            .filter(|(_, (area, _))| **area > 0)
+            .map(|(peak, (&area, &bbox))| (peak.pos, area, bbox))
+            .collect();
+        let got: Vec<(Vec2us, usize, URect)> = regions
+            .iter()
+            .map(|region| (region.peak, region.area, region.bbox))
+            .collect();
+        if peaks.len() > 1 {
+            assert_eq!(got, expected_regions, "seed {seed}: {} peaks", peaks.len());
+        }
+        assert!(
+            seed != 3 || peaks.len() > 50,
+            "the dense case must reach the grid: {} peaks",
+            peaks.len()
+        );
+    }
 }

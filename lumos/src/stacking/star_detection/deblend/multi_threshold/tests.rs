@@ -318,7 +318,9 @@ fn deblend_contrast_bar_is_root_flux_not_parent() {
                 value: flux,
             },
             flux,
-            children: children.iter().map(|&c| c as u32).collect(),
+            children: children
+                .first()
+                .map_or(0..0, |&first| first as u32..(first + children.len()) as u32),
         }
     }
 
@@ -473,7 +475,7 @@ fn create_child_nodes_diagonal_uses_euclidean_not_chebyshev() {
     // close"), but squared Euclidean is 3²+3²=18 (>= 4²=16, "well separated").
     // create_child_nodes must agree with the squared-Euclidean metric that
     // local_maxima::find_local_maxima and the shared nearest_peak_index /
-    // Component::assign_to_nearest Voronoi step use everywhere else in this module —
+    // Component::split_at Voronoi step use everywhere else in this module —
     // not Chebyshev, which would wrongly merge these two.
     let mut tree = vec![DeblendNode {
         peak: Pixel {
@@ -481,7 +483,7 @@ fn create_child_nodes_diagonal_uses_euclidean_not_chebyshev() {
             value: 1.0,
         },
         flux: 10.0,
-        children: ArrayVec::new(),
+        children: 0..0,
     }];
     let parent_idx = 0;
     let mut pixel_to_node = NodeGrid::default();
@@ -502,6 +504,16 @@ fn create_child_nodes_diagonal_uses_euclidean_not_chebyshev() {
         &mut pixel_to_node,
         parent_idx,
         &child_regions,
+        &[
+            GrownRegion {
+                parent: 0,
+                index: 0,
+            },
+            GrownRegion {
+                parent: 0,
+                index: 1,
+            },
+        ],
         &mut Vec::new(),
         4,
     );
@@ -694,11 +706,10 @@ fn zero_valued_pixels_below_the_floor_do_not_prevent_deblending() {
 }
 
 #[test]
-fn many_stars_keep_the_brightest_peaks() {
+fn many_stars_are_all_kept() {
     // Twelve stars 12 px apart in one connected chain, brightening left to right (0.45 + 0.05·i),
     // so raster and tree order meet the dimmest first. Each is its own branch (its flux is several
-    // percent of the chain's, far above 0.005), and only MAX_PEAKS survive: the eight brightest,
-    // i = 4..11 at x = 15 + 12i.
+    // percent of the chain's, far above 0.005), and every one is kept: x = 15 + 12i.
     let stars: Vec<_> = (0..12)
         .map(|i| {
             SyntheticStar::new(
@@ -720,17 +731,15 @@ fn many_stars_keep_the_brightest_peaks() {
 
     let mut peaks: Vec<usize> = result.iter().map(|region| region.peak.x).collect();
     peaks.sort_unstable();
-    assert_eq!(peaks, [63, 75, 87, 99, 111, 123, 135, 147]);
+    assert_eq!(peaks, [15, 27, 39, 51, 63, 75, 87, 99, 111, 123, 135, 147]);
     let total_area: usize = result.iter().map(|o| o.area).sum();
     assert_eq!(total_area, data.area, "Area should be conserved");
 }
 
 #[test]
-fn a_wide_split_keeps_its_brightest_children() {
-    // Sixteen disjoint stars on a 25 px grid under one label, dimming by 0.03 in raster order:
-    // the root splits sixteen ways at the floor and keeps MAX_CHILDREN = 8, the brightest — the
-    // first two rows. The eight it did not keep stay part of the root: a later level must not
-    // split them off again in place of the first eight.
+fn a_wide_split_keeps_every_child() {
+    // Sixteen disjoint stars on a 25 px grid under one label, dimming by 0.03 in raster order: the
+    // root splits sixteen ways at the floor and keeps every branch.
     let mut stars = Vec::new();
     for row in 0..4 {
         for col in 0..4 {
@@ -756,12 +765,61 @@ fn a_wide_split_keeps_its_brightest_children() {
         .map(|region| (region.peak.y, region.peak.x))
         .collect();
     peaks.sort_unstable();
-    let expected: Vec<(usize, usize)> = (0..2)
+    let expected: Vec<(usize, usize)> = (0..4)
         .flat_map(|row| (0..4).map(move |col| (20 + row * 25, 20 + col * 25)))
         .collect();
     assert_eq!(peaks, expected);
     let total_area: usize = result.iter().map(|o| o.area).sum();
     assert_eq!(total_area, data.area, "Area should be conserved");
+}
+
+#[test]
+fn a_node_splits_once() {
+    // Five disjoint blobs under one label, cut from a floor of 0.5: A, a 3×3 square of 1.0, and
+    // the single pixels B1 0.9 at x = 40, B2 0.85 at 42, C1 0.8 at 60, C2 0.75 at 62. At the
+    // first level the root splits five ways; brightest first, B2 lies 2 px from B1 and C2 from C1,
+    // under the separation of 3, so the root keeps A, B1, C1 as children and B2 and C2 as its
+    // own. At the next level those two are again two regions of the root — and the root, already
+    // split, must not split again: replacing its children with B2 and C2 would lose A, B1, C1.
+    let size = Size2us::new(80, 20);
+    let mut pixels = Buffer2::new_filled(size.width, size.height, 0.0f32);
+    let mut labels_buf = Buffer2::new_filled(size.width, size.height, 0u32);
+    let mut bbox = URect::empty();
+    let mut area = 0;
+    let mut light = |x: usize, y: usize, value: f32| {
+        pixels[(x, y)] = value;
+        labels_buf[(x, y)] = 1;
+        bbox.include(Vec2us::new(x, y));
+        area += 1;
+    };
+    for y in 9..12 {
+        for x in 9..12 {
+            light(x, y, 1.0);
+        }
+    }
+    for (x, value) in [(40, 0.9), (42, 0.85), (60, 0.8), (62, 0.75)] {
+        light(x, 10, value);
+    }
+    let labels = LabelMap::from_raw(labels_buf, 1);
+    let data = ComponentData {
+        bbox,
+        label: 1,
+        area,
+    };
+
+    let result = deblend_multi_threshold_floored(
+        &Component::new(&data, &pixels, &labels),
+        0.5,
+        64,
+        3,
+        0.005,
+    );
+
+    let mut peaks: Vec<usize> = result.iter().map(|region| region.peak.x).collect();
+    peaks.sort_unstable();
+    assert_eq!(peaks, [9, 40, 60]);
+    let total_area: usize = result.iter().map(|o| o.area).sum();
+    assert_eq!(total_area, area, "Area should be conserved");
 }
 
 #[test]
@@ -798,8 +856,9 @@ fn buffer_reuse_consistency() {
             ),
         ],
     );
-    let run = |fixture: &TestComponent, buffers: &mut TreeBuffers| {
+    let run = |fixture: &TestComponent, buffers: &mut DeblendBuffers| {
         let component = Component::new(&fixture.data, &fixture.pixels, &fixture.labels);
+        let mut regions = Vec::new();
         let floor = component
             .pixels()
             .map(|p| p.value)
@@ -814,18 +873,20 @@ fn buffer_reuse_consistency() {
                 connectivity: Connectivity::Eight,
             },
             buffers,
-        )
-        .iter()
-        .map(|region| (region.peak, region.bbox, region.area))
-        .collect::<Vec<_>>()
+            &mut regions,
+        );
+        regions
+            .iter()
+            .map(|region| (region.peak, region.bbox, region.area))
+            .collect::<Vec<_>>()
     };
 
-    let fresh_pair = run(&pair, &mut TreeBuffers::default());
-    let fresh_close = run(&close, &mut TreeBuffers::default());
+    let fresh_pair = run(&pair, &mut DeblendBuffers::default());
+    let fresh_close = run(&close, &mut DeblendBuffers::default());
     assert_eq!(fresh_pair.len(), 2);
     assert_eq!(fresh_close.len(), 2);
 
-    let mut shared = TreeBuffers::default();
+    let mut shared = DeblendBuffers::default();
     assert_eq!(run(&pair, &mut shared), fresh_pair);
     assert_eq!(run(&close, &mut shared), fresh_close);
     assert_eq!(run(&pair, &mut shared), fresh_pair);
@@ -1291,7 +1352,7 @@ fn find_significant_branches_small_tree() {
                 value: 1.0,
             },
             flux: 100.0,
-            children: [1, 2].into_iter().collect(),
+            children: 1..3,
         },
         DeblendNode {
             peak: Pixel {
@@ -1299,7 +1360,7 @@ fn find_significant_branches_small_tree() {
                 value: 0.8,
             },
             flux: 40.0,
-            children: ArrayVec::new(),
+            children: 0..0,
         },
         DeblendNode {
             peak: Pixel {
@@ -1307,7 +1368,7 @@ fn find_significant_branches_small_tree() {
                 value: 0.7,
             },
             flux: 35.0,
-            children: ArrayVec::new(),
+            children: 0..0,
         },
     ];
 

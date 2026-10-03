@@ -222,7 +222,7 @@ fn detect_snapshot() {
             star.sharpness,
         ]);
     }
-    assert_snapshot("detection", &snapshot, "8f2c26a5c825de9f");
+    assert_snapshot("detection", &snapshot, "740dc46b9f2028a8");
 }
 
 #[test]
@@ -240,7 +240,7 @@ fn register_snapshot() {
         .f64s(result.transform().matrix())
         .count(result.num_inliers())
         .f64s(&[result.rms_error()]);
-    assert_snapshot("registration", &snapshot, "86c6a512db17b9a8");
+    assert_snapshot("registration", &snapshot, "b1511c40e135a0f4");
 }
 
 #[test]

@@ -20,9 +20,6 @@ pub(super) mod local_maxima;
 pub(super) mod multi_threshold;
 pub(super) mod region;
 
-/// Most stars one component splits into. A component holding more keeps its brightest.
-const MAX_PEAKS: usize = 8;
-
 /// A pixel with its coordinates and value.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Pixel {
@@ -84,8 +81,6 @@ fn peaks_too_close(a: Vec2us, b: Vec2us, min_sep_sq: usize) -> bool {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use arrayvec::ArrayVec;
-
     #[cfg(feature = "bench")]
     use crate::bit_buffer2::BitBuffer2;
     use imaginarium::Buffer2;
@@ -94,10 +89,10 @@ pub(crate) mod internals {
     use crate::math::urect::URect;
     use crate::math::vec2us::Vec2us;
     use crate::stacking::star_detection::config::detection_config::Connectivity;
-    use crate::stacking::star_detection::deblend::MAX_PEAKS;
     use crate::stacking::star_detection::deblend::component::Component;
+    use crate::stacking::star_detection::deblend::deblend_buffers::DeblendBuffers;
     use crate::stacking::star_detection::deblend::multi_threshold::{
-        MultiThresholdParams, TreeBuffers, deblend_multi_threshold,
+        MultiThresholdParams, deblend_multi_threshold,
     };
     use crate::stacking::star_detection::deblend::region::Region;
     use crate::stacking::star_detection::labeling::LabelMap;
@@ -185,7 +180,7 @@ pub(crate) mod internals {
         n_thresholds: usize,
         min_separation: usize,
         min_contrast: f32,
-    ) -> ArrayVec<Region, MAX_PEAKS> {
+    ) -> Vec<Region> {
         let floor = component
             .pixels()
             .map(|p| p.value)
@@ -219,7 +214,8 @@ pub(crate) mod internals {
         n_thresholds: usize,
         min_separation: usize,
         min_contrast: f32,
-    ) -> ArrayVec<Region, MAX_PEAKS> {
+    ) -> Vec<Region> {
+        let mut regions = Vec::new();
         deblend_multi_threshold(
             component,
             floor,
@@ -229,8 +225,10 @@ pub(crate) mod internals {
                 min_separation,
                 connectivity: Connectivity::Eight,
             },
-            &mut TreeBuffers::default(),
-        )
+            &mut DeblendBuffers::default(),
+            &mut regions,
+        );
+        regions
     }
 }
 

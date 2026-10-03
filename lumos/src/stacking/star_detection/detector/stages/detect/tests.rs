@@ -178,11 +178,10 @@ fn rectangles(size: Size2us, rects: &[Rect]) -> Rectangles {
     }
 }
 
-/// Which regions survive the area and edge filters, each at its bound: `min_area` applies to a
-/// region after deblending, `max_area` to its component before — so a component too large is
-/// dropped whole even when its pieces would fit, and pieces too small are dropped even from a
-/// component that is not. The edge margin admits a box that starts at it or ends at `size −
-/// margin` (boxes are half-open), and nothing beyond.
+/// Which regions survive the area and edge filters, each at its bound: both area bounds apply to a
+/// region after deblending — so a component too large is kept as the pieces that fit, and pieces
+/// too small are dropped even from a component that is not. The edge margin admits a box that
+/// starts at it or ends at `size − margin` (boxes are half-open), and nothing beyond.
 #[test]
 fn region_filter_bounds() {
     let size = Size2us::new(64, 64);
@@ -246,7 +245,7 @@ fn region_filter_bounds() {
                 max: (55, 47),
                 peaks: &[(53, 45)],
             },
-            // Area 30 > max, two peaks that would split it into 15s: dropped whole.
+            // Area 30 > max, two peaks that split it into 15s: both kept.
             Rect {
                 min: (20, 48),
                 max: (30, 51),
@@ -274,9 +273,12 @@ fn region_filter_bounds() {
         .map(|region| (region.peak.x, region.peak.y))
         .collect();
     kept.sort_unstable();
-    assert_eq!(kept, [(11, 30), (32, 12), (41, 13), (52, 40)]);
-    // The area-8 component did split, though neither piece survived.
-    assert_eq!(result.deblended_components, 1);
+    assert_eq!(
+        kept,
+        [(11, 30), (21, 49), (28, 49), (32, 12), (41, 13), (52, 40)]
+    );
+    // Both two-peak components split, though neither piece of the area-8 one survived.
+    assert_eq!(result.deblended_components, 2);
 }
 
 /// The stage's counts on a residual whose answer is known: two 3×3 squares and one 10×1 bar of

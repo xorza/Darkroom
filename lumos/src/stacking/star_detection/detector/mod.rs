@@ -267,12 +267,18 @@ impl StarDetector {
 
 #[cfg(test)]
 pub(super) mod internals {
-    use crate::stacking::star_detection::detector::StarDetector;
+    use crate::io::image::linear::LinearImage;
+    use crate::stacking::star_detection::detector::{StarDetector, saturation_level};
     use crate::stacking::star_detection::resources::internals::BufferCounts;
     use crate::stacking::star_detection::resources::internals::buffer_counts;
 
     pub(crate) fn buffer_counts_for(detector: &StarDetector) -> Option<BufferCounts> {
         detector.resources.as_ref().map(buffer_counts)
+    }
+
+    /// The level the detector marks `image`'s pixels saturated at.
+    pub(crate) fn saturation_level_of(image: &LinearImage) -> f32 {
+        saturation_level(image)
     }
 }
 

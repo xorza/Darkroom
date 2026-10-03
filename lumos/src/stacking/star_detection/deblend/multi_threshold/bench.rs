@@ -8,9 +8,10 @@ use std::hint::black_box;
 
 use crate::stacking::star_detection::config::detection_config::Connectivity;
 use crate::stacking::star_detection::deblend::component::Component;
+use crate::stacking::star_detection::deblend::deblend_buffers::DeblendBuffers;
 use crate::stacking::star_detection::deblend::internals::label_above;
 use crate::stacking::star_detection::deblend::multi_threshold::{
-    MultiThresholdParams, TreeBuffers, deblend_multi_threshold,
+    MultiThresholdParams, deblend_multi_threshold,
 };
 use crate::testing::synthetic::fixtures::cluster_field;
 
@@ -31,10 +32,11 @@ fn bench_deblend_multi_threshold_6k_dense(b: ::quickbench::Bencher) {
     let min_separation = 3;
     let min_contrast = 0.005;
 
-    let mut buffers = TreeBuffers::default();
+    let (mut buffers, mut regions) = (DeblendBuffers::default(), Vec::new());
 
     b.bench(|| {
         for component in &reasonable_components {
+            regions.clear();
             black_box(deblend_multi_threshold(
                 &Component::new(black_box(component), &pixels, &labels),
                 0.05,
@@ -45,6 +47,7 @@ fn bench_deblend_multi_threshold_6k_dense(b: ::quickbench::Bencher) {
                     connectivity: Connectivity::Four,
                 },
                 &mut buffers,
+                &mut regions,
             ));
         }
     });
@@ -59,7 +62,6 @@ fn bench_deblend_multi_threshold_6k_dense_fewer_levels(b: ::quickbench::Bencher)
     let labels = label_above(&pixels, 0.05);
     let components = labels.components();
 
-    // Filter out huge components - multi-threshold is O(n^2) and not practical for >100k pixels
     let reasonable_components: Vec<_> = components
         .iter()
         .filter(|c| c.area < 100_000)
@@ -70,10 +72,11 @@ fn bench_deblend_multi_threshold_6k_dense_fewer_levels(b: ::quickbench::Bencher)
     let min_separation = 3;
     let min_contrast = 0.005;
 
-    let mut buffers = TreeBuffers::default();
+    let (mut buffers, mut regions) = (DeblendBuffers::default(), Vec::new());
 
     b.bench(|| {
         for component in &reasonable_components {
+            regions.clear();
             black_box(deblend_multi_threshold(
                 &Component::new(black_box(component), &pixels, &labels),
                 0.05,
@@ -84,6 +87,7 @@ fn bench_deblend_multi_threshold_6k_dense_fewer_levels(b: ::quickbench::Bencher)
                     connectivity: Connectivity::Four,
                 },
                 &mut buffers,
+                &mut regions,
             ));
         }
     });
@@ -98,7 +102,6 @@ fn bench_multi_threshold_4k_dense(b: ::quickbench::Bencher) {
     let labels = label_above(&pixels, 0.05);
     let components = labels.components();
 
-    // Filter out huge components - multi-threshold is O(n^2) and not practical for >100k pixels
     let reasonable_components: Vec<_> = components.iter().filter(|c| c.area < 100_000).collect();
 
     let n_thresholds = 32;
@@ -106,10 +109,11 @@ fn bench_multi_threshold_4k_dense(b: ::quickbench::Bencher) {
     let min_contrast = 0.005;
 
     // Reuse buffers across components (same as real pipeline via rayon fold)
-    let mut buffers = TreeBuffers::default();
+    let (mut buffers, mut regions) = (DeblendBuffers::default(), Vec::new());
 
     b.bench(|| {
         for component in &reasonable_components {
+            regions.clear();
             black_box(deblend_multi_threshold(
                 &Component::new(black_box(component), &pixels, &labels),
                 0.05,
@@ -120,6 +124,7 @@ fn bench_multi_threshold_4k_dense(b: ::quickbench::Bencher) {
                     connectivity: Connectivity::Four,
                 },
                 &mut buffers,
+                &mut regions,
             ));
         }
     });

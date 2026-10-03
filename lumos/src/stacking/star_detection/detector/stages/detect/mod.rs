@@ -142,7 +142,7 @@ fn extract_and_filter_candidates(
     }
 
     result.regions.retain(|c| {
-        c.area >= config.min_area
+        (config.min_area..=config.max_area).contains(&c.area)
             && c.bbox.min.x >= config.edge_margin
             && c.bbox.min.y >= config.edge_margin
             && c.bbox.max.x <= size.width.saturating_sub(config.edge_margin)
@@ -177,12 +177,12 @@ fn extract_candidates(
     let result = label_map
         .components()
         .par_iter()
-        .filter(|data| data.area > 0 && data.area <= config.max_area)
+        .filter(|data| data.area > 0)
         .fold(
             || (ExtractionResult::default(), deblend_buffers.acquire()),
             |(mut acc, mut buffers), data| {
                 let component = Component::new(data, residual, label_map);
-                let regions = match config.deblend {
+                let pushed = match config.deblend {
                     Deblend::MultiThreshold {
                         n_thresholds,
                         min_contrast,
@@ -195,17 +195,18 @@ fn extract_candidates(
                             min_separation: config.deblend_min_separation,
                             connectivity: config.connectivity,
                         },
-                        &mut buffers.tree,
+                        &mut buffers,
+                        &mut acc.regions,
                     ),
                     Deblend::LocalMaxima { min_prominence } => deblend_local_maxima(
                         &component,
                         config.deblend_min_separation,
                         min_prominence,
-                        &mut buffers.maxima,
+                        &mut buffers,
+                        &mut acc.regions,
                     ),
                 };
-                acc.deblended_components += usize::from(regions.len() > 1);
-                acc.regions.extend(regions);
+                acc.deblended_components += usize::from(pushed > 1);
                 (acc, buffers)
             },
         )

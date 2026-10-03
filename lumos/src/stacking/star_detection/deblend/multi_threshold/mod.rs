@@ -6,20 +6,16 @@
 //! 3. A branch is its own object when it holds at least `min_contrast` of the flux the whole
 //!    component holds above the detection threshold.
 
-use std::ops::Index;
-
-use arrayvec::ArrayVec;
+use std::ops::{Index, Range};
 
 use crate::math::size2us::Size2us;
 use crate::math::urect::URect;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::config::detection_config::Connectivity;
 use crate::stacking::star_detection::deblend::component::Component;
+use crate::stacking::star_detection::deblend::deblend_buffers::DeblendBuffers;
 use crate::stacking::star_detection::deblend::region::Region;
-use crate::stacking::star_detection::deblend::{MAX_PEAKS, Pixel, peaks_too_close};
-
-/// Maximum children per node (same as `MAX_PEAKS` since each child becomes a candidate).
-const MAX_CHILDREN: usize = MAX_PEAKS;
+use crate::stacking::star_detection::deblend::{Pixel, peaks_too_close};
 
 /// Sentinel value indicating no pixel value at grid position.
 const NO_PIXEL: f32 = f32::NEG_INFINITY;
@@ -249,8 +245,9 @@ struct DeblendNode {
     peak: Pixel,
     /// Residual flux of the branch: the sum over its pixels above the level it split at.
     flux: f32,
-    /// Branches that split from this node at a higher level, brightest by flux first.
-    children: ArrayVec<u32, MAX_CHILDREN>,
+    /// Branches that split from this node at a higher level, brightest by flux first: they are
+    /// added together, so they are one run of the tree.
+    children: Range<u32>,
 }
 
 /// A set of pixel regions held in one flat buffer.
@@ -365,6 +362,14 @@ impl RegionScratch {
     }
 }
 
+/// A region of the current level and the node it grew from.
+#[derive(Debug, Clone, Copy)]
+struct GrownRegion {
+    parent: u32,
+    /// The region's index in the level's set.
+    index: u32,
+}
+
 /// A child region with the two facts its ranking and its node need: flux and peak.
 #[derive(Debug, Clone, Copy)]
 struct RankedRegion {
@@ -383,14 +388,11 @@ pub(crate) struct TreeBuffers {
     pixel_to_node: NodeGrid,
     /// Pixels above current threshold.
     above_threshold: Vec<Pixel>,
-    /// Pixels belonging to a parent that are above threshold.
-    parent_pixels_above: Vec<Pixel>,
     /// The regions the component broke into at the current threshold level.
     regions: RegionSet,
-    /// The regions one parent split into. Separate from `regions` because it is filled while
-    /// `regions` is being iterated, so the two cannot share a buffer.
-    child_regions: RegionSet,
-    /// `child_regions` ranked by flux.
+    /// The level's regions with the node each grew from, grouped by node.
+    parents: Vec<GrownRegion>,
+    /// One split's regions ranked by flux.
     child_order: Vec<RankedRegion>,
     region_scratch: RegionScratch,
     /// The tree of one component; node 0 is its root.
@@ -399,8 +401,9 @@ pub(crate) struct TreeBuffers {
     leaves: Vec<u32>,
 }
 
-/// Split `component` by its multi-threshold tree: one region when fewer than two branches pass
-/// the contrast test, else one region per passing branch, the [`MAX_PEAKS`] brightest by flux.
+/// Split `component` by its multi-threshold tree onto `out`: one region when fewer than two
+/// branches pass the contrast test, else one region per passing branch, brightest by flux first.
+/// Returns how many it pushed.
 ///
 /// `floor` is the detection threshold at the component, in residual units — the lowest level of
 /// the ladder, as SExtractor's `DETECT_THRESH` is. It must be positive.
@@ -408,19 +411,25 @@ pub(crate) fn deblend_multi_threshold(
     component: &Component<'_>,
     floor: f32,
     params: MultiThresholdParams,
-    buffers: &mut TreeBuffers,
-) -> ArrayVec<Region, MAX_PEAKS> {
+    buffers: &mut DeblendBuffers,
+    out: &mut Vec<Region>,
+) -> usize {
     debug_assert!(floor > 0.0, "the ladder starts at a positive threshold");
     debug_assert!(params.n_thresholds >= 1, "the ladder has at least one step");
-    let mut result = ArrayVec::new();
+    let DeblendBuffers {
+        peaks,
+        assignment,
+        tree: buffers,
+        ..
+    } = buffers;
+    peaks.clear();
     let peak = component.peak();
 
     // Branches are disjoint subsets of the root's pixels, all above a positive floor, so no two
     // can each hold `min_contrast ≥ 1` of the root's flux; and a peak at or below the floor
     // leaves the ladder no room to split.
     if params.min_contrast >= 1.0 || peak.value <= floor {
-        result.push(component.whole());
-        return result;
+        return component.split_at(peaks, assignment, out);
     }
 
     build_deblend_tree(
@@ -435,23 +444,16 @@ pub(crate) fn deblend_multi_threshold(
     );
     let TreeBuffers { tree, leaves, .. } = buffers;
     find_significant_branches(tree, params.min_contrast, leaves);
-    if leaves.len() <= 1 {
-        result.push(component.whole());
-        return result;
+    if leaves.len() > 1 {
+        leaves.sort_unstable_by(|&a, &b| {
+            tree[b as usize]
+                .flux
+                .total_cmp(&tree[a as usize].flux)
+                .then(a.cmp(&b))
+        });
+        peaks.extend(leaves.iter().map(|&i| tree[i as usize].peak));
     }
-
-    leaves.sort_unstable_by(|&a, &b| {
-        tree[b as usize]
-            .flux
-            .total_cmp(&tree[a as usize].flux)
-            .then(a.cmp(&b))
-    });
-    let peaks: ArrayVec<Pixel, MAX_PEAKS> = leaves
-        .iter()
-        .take(MAX_PEAKS)
-        .map(|&i| tree[i as usize].peak)
-        .collect();
-    component.assign_to_nearest(&peaks)
+    component.split_at(peaks, assignment, out)
 }
 
 /// The exponentially spaced ladder one component is cut at: the floor to start
@@ -504,7 +506,7 @@ fn build_deblend_tree(
             .filter(|p| p.value >= low)
             .map(|p| p.value)
             .sum(),
-        children: ArrayVec::new(),
+        children: 0..0,
     });
 
     for level in 0..=ladder.n_thresholds {
@@ -533,67 +535,46 @@ fn build_deblend_tree(
     }
 }
 
-/// Check every region of the current level for a split of its parent, and add the branches of
-/// each split to the tree.
+/// Find the splits of the current level and add their branches to the tree.
+///
+/// Each region of the level lies inside the pixels of one node: the branch it grew from. A node
+/// two or more regions grew from split here. The regions are grouped by node in one pass, so a
+/// level costs its pixel count however many regions it holds.
 fn process_level(buffers: &mut TreeBuffers, params: MultiThresholdParams) {
-    // Destructured rather than reached through `buffers.` so the read of `regions` and the writes
-    // to the scratch below it borrow disjointly across the loop.
     let TreeBuffers {
         pixel_to_node,
-        above_threshold,
         regions,
-        parent_pixels_above,
-        child_regions,
+        parents,
         child_order,
-        region_scratch,
         tree,
         ..
     } = buffers;
 
-    for region in regions.iter() {
-        // All pixels of a connected region come from one parent, unless an earlier split left
-        // some of them behind on another node.
-        let Some(parent_idx) = find_single_parent_grid(region, pixel_to_node) else {
-            continue;
-        };
+    parents.clear();
+    parents.extend(regions.iter().enumerate().filter_map(|(index, region)| {
+        find_single_parent_grid(region, pixel_to_node).map(|parent| GrownRegion {
+            parent: parent as u32,
+            index: index as u32,
+        })
+    }));
+    parents.sort_unstable_by_key(|grown| (grown.parent, grown.index));
+    for group in parents.chunk_by(|a, b| a.parent == b.parent) {
+        let parent = group[0].parent as usize;
         // A node splits once. The regions its split did not keep — too close to a brighter
-        // sibling, or past MAX_CHILDREN — stay part of it; splitting them again at a later level
-        // would replace the children it already has.
-        if !tree[parent_idx].children.is_empty() {
+        // sibling — stay part of it; splitting them again at a later level would replace the
+        // children it already has.
+        if group.len() < 2 || !tree[parent].children.is_empty() {
             continue;
         }
-
-        // Rescanning per region rather than bucketing every parent's count in one pass before the
-        // loop: `create_child_nodes` reassigns `pixel_to_node` *inside* this loop, so a count
-        // taken up front would be stale for every parent split earlier in the same level.
-        parent_pixels_above.clear();
-        parent_pixels_above.extend(
-            above_threshold
-                .iter()
-                .filter(|p| pixel_to_node.get(p.pos) == Some(parent_idx))
-                .copied(),
+        create_child_nodes(
+            tree,
+            pixel_to_node,
+            parent,
+            regions,
+            group,
+            child_order,
+            params.min_separation,
         );
-
-        // Fewer pixels in this region than the parent has above the threshold means they did not
-        // all stay connected: something else formed alongside it, so the parent split.
-        if region.len() < parent_pixels_above.len() {
-            find_connected_regions_grid(
-                parent_pixels_above,
-                params.connectivity,
-                child_regions,
-                region_scratch,
-            );
-            if child_regions.len() > 1 {
-                create_child_nodes(
-                    tree,
-                    pixel_to_node,
-                    parent_idx,
-                    child_regions,
-                    child_order,
-                    params.min_separation,
-                );
-            }
-        }
     }
 }
 
@@ -615,55 +596,51 @@ fn find_single_parent_grid(region: &[Pixel], pixel_to_node: &NodeGrid) -> Option
     parent
 }
 
-/// Add the regions `parent_idx` split into as its children: brightest by flux first, each at
-/// least `min_separation` from every brighter sibling kept, up to [`MAX_CHILDREN`].
+/// Add the regions of `group`, which `parent_idx` split into, as its children: brightest by flux
+/// first, each at least `min_separation` from every brighter sibling kept.
 fn create_child_nodes(
     tree: &mut Vec<DeblendNode>,
     pixel_to_node: &mut NodeGrid,
     parent_idx: usize,
-    child_regions: &RegionSet,
+    regions: &RegionSet,
+    group: &[GrownRegion],
     child_order: &mut Vec<RankedRegion>,
     min_separation: usize,
 ) {
     child_order.clear();
-    child_order.extend(
-        child_regions
-            .iter()
-            .enumerate()
-            .map(|(index, region)| RankedRegion {
-                flux: region.iter().map(|p| p.value).sum(),
-                peak: Pixel::brightest(region.iter().copied()).expect("a region holds a pixel"),
-                index: index as u32,
-            }),
-    );
+    child_order.extend(group.iter().map(|grown| {
+        let region = &regions[grown.index as usize];
+        RankedRegion {
+            flux: region.iter().map(|p| p.value).sum(),
+            peak: Pixel::brightest(region.iter().copied()).expect("a region holds a pixel"),
+            index: grown.index,
+        }
+    }));
     child_order.sort_unstable_by(|a, b| b.flux.total_cmp(&a.flux).then(a.index.cmp(&b.index)));
 
     let min_sep_sq = min_separation * min_separation;
-    let mut children: ArrayVec<u32, MAX_CHILDREN> = ArrayVec::new();
+    let first = tree.len();
     for ranked in child_order.iter() {
-        if children.is_full() {
-            break;
-        }
-        let too_close = children
+        let too_close = tree[first..]
             .iter()
-            .any(|&idx| peaks_too_close(ranked.peak.pos, tree[idx as usize].peak.pos, min_sep_sq));
+            .any(|sibling| peaks_too_close(ranked.peak.pos, sibling.peak.pos, min_sep_sq));
         if too_close {
             continue;
         }
 
         let child_idx = tree.len();
-        for p in &child_regions[ranked.index as usize] {
+        for p in &regions[ranked.index as usize] {
             pixel_to_node.set(p.pos, child_idx);
         }
+        let start = child_idx as u32;
         tree.push(DeblendNode {
             peak: ranked.peak,
             flux: ranked.flux,
-            children: ArrayVec::new(),
+            children: start..start,
         });
-        children.push(child_idx as u32);
     }
 
-    tree[parent_idx].children = children;
+    tree[parent_idx].children = first as u32..tree.len() as u32;
 }
 
 /// Collect into `leaves` the nodes of `tree` that stand as separate objects under the contrast
@@ -694,15 +671,15 @@ fn collect_significant_leaves(
     let node = &tree[node_idx];
     let passing = node
         .children
-        .iter()
-        .filter(|&&child| tree[child as usize].flux >= min_flux);
+        .clone()
+        .filter(|&child| tree[child as usize].flux >= min_flux);
 
     // Fewer than two children clear the bar: this node is one object.
     if passing.clone().count() <= 1 {
         leaves.push(node_idx as u32);
         return;
     }
-    for &child in passing {
+    for child in passing {
         collect_significant_leaves(tree, child as usize, min_flux, leaves);
     }
 }
