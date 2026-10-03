@@ -25,12 +25,11 @@ use crate::combine::error::Error;
 use crate::combine::error::check_cancel;
 use crate::combine::normalization::common_domain::CommonDomain;
 use crate::combine::normalization::photometric_gain::{paired_photometric_gain, sample_stats};
-use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::sample_domain::DomainMap;
-use crate::math::statistics::{MedianMad, mad_to_sigma, median_mut};
+use crate::math::statistics::{MedianMad, median_mut};
 use std::iter;
 
 /// Per-channel affine normalization applied as `normalized = raw * gain + offset`.
@@ -90,7 +89,7 @@ impl FrameNorm {
                 }));
         }
         check_cancel(cancel)?;
-        let reference = select_reference_frame(frames.iter().map(|frame| &frame.source_stats));
+        let reference = select_reference_frame(frames, &to_domain);
         let mut norms = fitted_frame_norms(frames, dimensions, normalization, reference, cancel)?;
         // A fitted norm lands each frame on the reference frame's raw values; the reference's own
         // map then carries those into the shared domain: `map(gain·x + offset)`.
@@ -182,7 +181,7 @@ fn fitted_frame_norms(
                 Some(domain) => domain_medians(frames, pixel_count, domain, cancel)?,
                 None => frames.iter().map(source_medians).collect(),
             };
-            multiplicative_norms(&medians, reference)
+            multiplicative_norms(&medians, reference)?
         }
         Normalization::None => unreachable!("handled by the caller"),
     };
@@ -197,29 +196,27 @@ fn fitted_frame_norms(
     Ok(norms)
 }
 
-fn select_reference_frame<'a>(stats: impl IntoIterator<Item = &'a FrameStats>) -> usize {
-    let mut stats = stats.into_iter().enumerate();
-    let (_, first) = stats.next().expect("normalization requires frames");
+/// The least noisy frame: the lowest mean noise variance over its channels, each σ carried into
+/// the shared domain by `to_domain`, so frames decoded at different scales compare in one unit.
+/// The first wins a tie.
+fn select_reference_frame(frames: &[StoredFrame], to_domain: &[DomainMap]) -> usize {
+    let mean_variance = |(frame, map): (&StoredFrame, &DomainMap)| {
+        let stats = &frame.source_stats;
+        (0..stats.channels.len())
+            .map(|channel| (map.gain * f64::from(stats.channel_noise(channel))).powi(2))
+            .sum::<f64>()
+            / stats.channels.len() as f64
+    };
+    let mut scores = frames.iter().zip(to_domain).map(mean_variance).enumerate();
+    let (_, mut best_score) = scores.next().expect("normalization requires frames");
     let mut best_frame = 0;
-    let mut best_mad = average_mad(first);
-
-    for (frame_index, frame_stats) in stats {
-        let average_mad = average_mad(frame_stats);
-        if average_mad < best_mad {
-            best_mad = average_mad;
-            best_frame = frame_index;
+    for (frame, score) in scores {
+        if score < best_score {
+            best_score = score;
+            best_frame = frame;
         }
     }
     best_frame
-}
-
-fn average_mad(stats: &FrameStats) -> f32 {
-    stats
-        .channels
-        .iter()
-        .map(|channel| channel.mad)
-        .sum::<f32>()
-        / stats.channels.len() as f32
 }
 
 fn source_medians(frame: &StoredFrame) -> ArrayVec<f32, 3> {
@@ -237,24 +234,44 @@ fn identity_norm(channel_count: usize) -> FrameNorm {
     FrameNorm { channels }
 }
 
-/// `gain = median_ref / median`, per channel; a median at or below `f32::EPSILON` has no scale to
-/// match and keeps unit gain.
-fn multiplicative_norms(medians: &[ArrayVec<f32, 3>], reference: usize) -> Vec<FrameNorm> {
+/// `gain = median_ref / median`, per channel.
+///
+/// # Errors
+/// [`Error::NonPositiveMedian`] when a median is not positive: a ratio to it scales nothing, and
+/// unit gain in its place would combine the frame at a scale no one measured.
+fn multiplicative_norms(
+    medians: &[ArrayVec<f32, 3>],
+    reference: usize,
+) -> Result<Vec<FrameNorm>, Error> {
     medians
         .iter()
-        .map(|frame| FrameNorm {
-            channels: frame
+        .enumerate()
+        .map(|(index, frame)| {
+            let channels = frame
                 .iter()
                 .zip(&medians[reference])
-                .map(|(&median, &reference_median)| ChannelNorm {
-                    gain: if median > f32::EPSILON {
-                        reference_median / median
+                .enumerate()
+                .map(|(channel, (&median, &reference_median))| {
+                    if median > 0.0 && reference_median > 0.0 {
+                        Ok(ChannelNorm {
+                            gain: reference_median / median,
+                            offset: 0.0,
+                        })
                     } else {
-                        1.0
-                    },
-                    offset: 0.0,
+                        let (index, median) = if median > 0.0 {
+                            (reference, reference_median)
+                        } else {
+                            (index, median)
+                        };
+                        Err(Error::NonPositiveMedian {
+                            index,
+                            channel,
+                            median,
+                        })
+                    }
                 })
-                .collect(),
+                .collect::<Result<_, _>>()?;
+            Ok(FrameNorm { channels })
         })
         .collect()
 }
@@ -472,9 +489,9 @@ fn stratified_indices(
     Ok(indices)
 }
 
-/// The noise variance of one frame's channel at the sampled pixels: the source's sky σ², scaled
-/// by the mean inverse confidence there, since interpolation that averaged several source pixels
-/// left less noise than the source had.
+/// The noise variance of one frame's channel at the sampled pixels: the source's white noise σ²,
+/// scaled by the mean inverse confidence there, since interpolation that averaged several source
+/// pixels left less noise than the source had.
 fn source_noise_variance(
     frame: &StoredFrame,
     channel: usize,
@@ -482,7 +499,7 @@ fn source_noise_variance(
     pixel_count: usize,
     cancel: &CancelToken,
 ) -> Result<f64, Error> {
-    let sigma = f64::from(mad_to_sigma(frame.source_stats.channels[channel].mad));
+    let sigma = f64::from(frame.source_stats.channel_noise(channel));
     let Some(confidence) = frame.quality.confidence() else {
         return Ok(sigma * sigma);
     };

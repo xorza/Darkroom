@@ -22,9 +22,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 
 **Failure scenario:** 16-bit data in a 32-bit integer FITS normalizes by 2³²−1, so σ ≈ 2e-9. Every floor below then trips.
 
-- [ ] `2.2` **Weighting and normalization**
-  - `combine/stack/mod.rs:253`: σ below EPS gives weight 0, and if all frames have weight 0 the stack silently falls back to equal weights.
-  - `combine/normalization/photometric_gain.rs` (`deming_gain`, `Seed::of`, `ResidualWindow::at`): the gain silently becomes 1, or the fit is skipped. `[P]`
 - [ ] `2.3` **Star SNR variance floor** — `star_detection/centroid/mod.rs:570`
   - The floor `f32::EPSILON` makes σ_total ≥ 3.45e-4. Every star's SNR is 10³–10⁴× too low, so every star fails `min_snr`.
   - On 16-bit frames, sky σ below ≈2.5 ADU is also understated. `[C]`
@@ -64,11 +61,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 
 ## 6. Noise is estimated from whole-frame spread, which includes signal
 
-- [ ] `6.1` **Combine noise weights use whole-frame MAD** — `combine/stack/mod.rs:236-258`, `combine/frame_stats.rs:34`
-  - On a signal-dominated field, gain·MAD is the same for every frame, so Noise weighting degenerates to equal weights.
-  - Gradients make the MAD larger, so frames with gradients are underweighted.
-  - PixInsight weights by MRS noise (Starck & Murtagh, first wavelet layer). The same MAD also feeds reference selection and the Deming noise ratio. `[C]` mechanism.
-- [ ] `6.3` **Reference normalization compares raw `average_mad` across sample domains** — `combine/normalization/mod.rs:190-205` `[C]`
 - [ ] `6.4` **Detection RGB weights use whole-frame MAD** — `star_detection/detector/stages/prepare/mod.rs:66-91`
   - A red nebula down-weights R. Each frame copies 3 planes and runs 2 quickselects per plane.
   - Use MAD of first differences ÷ √2 on a strided sample. `[C]` mechanism.

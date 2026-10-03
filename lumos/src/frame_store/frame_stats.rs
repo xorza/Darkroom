@@ -125,6 +125,23 @@ impl FrameStats {
         }
     }
 
+    /// The white noise of a channel, raised to the quantization σ: the slot's own for a full plane,
+    /// and the root mean square over the colours for the one channel of a mosaic.
+    pub(crate) fn channel_noise(&self, channel: usize) -> f32 {
+        let floor = self.quantization_sigma.unwrap_or(0.0);
+        if self.noise.len() == self.channels.len() {
+            self.noise[channel].max(floor)
+        } else {
+            debug_assert_eq!(self.channels.len(), 1);
+            let squares: f32 = self
+                .noise
+                .iter()
+                .map(|&sigma| sigma.max(floor).powi(2))
+                .sum();
+            (squares / self.noise.len() as f32).sqrt()
+        }
+    }
+
     /// The noise model of one slot: a channel, or a colour of a mosaic.
     pub(crate) fn ccd_noise(&self, slot: usize) -> CcdNoise {
         let sigma = self.noise[slot].max(self.quantization_sigma.unwrap_or(0.0));
@@ -178,7 +195,8 @@ mod tests {
     /// An RGGB mosaic of constant colours, red 1/8, green 1/4, blue 3/8: each colour's sky is its own
     /// level, where the whole-mosaic median, 1/4, would put red's 1/8 below its sky and blue's 3/8
     /// above it. The noise model takes the quantization σ 1/16 where the measured noise is 0, and the
-    /// electrons per unit from 2 e⁻/ADU over a declared 1000 ADU: 2000.
+    /// electrons per unit from 2 e⁻/ADU over a declared 1000 ADU: 2000. The mosaic's one channel has
+    /// the root mean square of its colours' floored noise, 1/16.
     #[test]
     fn a_mosaic_has_a_sky_per_colour() {
         let size = Size2us::new(8, 8);
@@ -204,6 +222,7 @@ mod tests {
         let stats = FrameStats::measure(&image);
         assert_eq!(stats.sky.as_slice(), [0.125, 0.25, 0.375]);
         assert_eq!(stats.channels[0].median, 0.25);
+        assert_eq!(stats.channel_noise(0), 1.0 / 16.0);
         assert_eq!(
             stats.ccd_noise(2),
             CcdNoise {
