@@ -19,8 +19,11 @@ fn out() -> Vec<DynamicValue> {
 
 const DEMANDED: &[OutputDemand] = &[OutputDemand::Produce];
 
-fn complete_snapshot(values: Vec<DynamicValue>) -> OutputSnapshot {
-    OutputSnapshot::new(values)
+/// Make `slot` hold [`out`] produced under `digest`, which is also its
+/// current digest — a resident hit, on a slot an install already owns.
+fn make_resident(slot: &mut RuntimeSlot, digest: Digest) {
+    slot.current_digest = Some(digest);
+    slot.load_output(OutputSnapshot::new(out()), Some(digest));
 }
 
 /// A slot holding `values`, keyed by `current_digest` and recorded as produced
@@ -33,7 +36,7 @@ fn resident_slot(
 ) -> RuntimeSlot {
     let mut slot = RuntimeSlot::default();
     slot.current_digest = current_digest;
-    slot.load_output(complete_snapshot(values), produced_under);
+    slot.load_output(OutputSnapshot::new(values), produced_under);
     slot
 }
 
@@ -259,9 +262,7 @@ fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
     let retaining = build([CacheMode::Ram; 4]);
     cache.install_for_test(&retaining);
     for (index, _) in cases.iter().enumerate() {
-        let slot = &mut cache.slots[NodeIdx(index as u32)];
-        slot.current_digest = Some(digest);
-        slot.load_output(complete_snapshot(out()), Some(digest));
+        make_resident(&mut cache.slots[NodeIdx(index as u32)], digest);
     }
 
     cache.reconcile(&retaining, &build(cases.map(|(mode, _)| mode)));
@@ -301,8 +302,7 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
     let slot = &mut cache.slots[node_idx];
     slot.state.set(17_u32);
     slot.event_state.lock().await.set(23_u32);
-    slot.current_digest = Some(digest);
-    slot.load_output(complete_snapshot(out()), Some(digest));
+    make_resident(slot, digest);
 
     // Same func: everything survives.
     installed = reinstall(&mut cache, &installed, build(func_id));
@@ -351,8 +351,7 @@ fn reconcile_follows_ids_when_the_index_space_shifts() {
     cache.install_for_test(&installed);
     for i in 0..3u32 {
         let slot = &mut cache.slots[NodeIdx(i)];
-        slot.current_digest = Some(digest(u128::from(i) + 1));
-        slot.load_output(complete_snapshot(out()), Some(digest(u128::from(i) + 1)));
+        make_resident(slot, digest(u128::from(i) + 1));
         slot.state.set(i);
     }
 
@@ -393,7 +392,7 @@ fn hydrate_turns_a_miss_into_a_hit() {
         "empty slot misses"
     );
 
-    cache.hydrate(node_idx, complete_snapshot(out()), d);
+    cache.hydrate(node_idx, OutputSnapshot::new(out()), d);
     assert!(
         cache.is_resident_hit(node_idx, DEMANDED),
         "a slot hydrated under its current digest hits"

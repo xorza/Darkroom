@@ -66,10 +66,6 @@ Paths without a crate prefix are relative to `scenarium/src/`.
 - [ ] There are two spellings of "a test failure error". `graph/func/lambda.rs:98-119` defines a `TestInvokeError` wrapper behind `internals::failure`. `testing/graph/mod.rs:344` (`failing_lambda`) uses `InvokeError::external(std::io::Error::other(..))`. Delete `TestInvokeError`, and implement `failure` as the `io::Error::other` form so `failing_lambda` can call it.
 - [ ] Priming a cache hit is spelled three times: `testing/program/runs.rs:122-142` (`Runs::cached`), `testing/program/sweep.rs:86-91` (`Sweep::run`), and `RuntimeCache::hydrate` (`execution/cache/runtime/mod.rs` internals). The first two each re-do `stamp_digests` + `expect(current_digest)` + `load_output(.., Some(digest))`. Make it one `RuntimeCache` internals method that both call.
 - [ ] There are three near-identical `Blob(Vec<u8>)` + byte-codec fixtures: `execution/cache/disk_store/tests.rs:70-152` (`VersionedCodec`), `execution/cache/disk_store/format/tests.rs:97-182` (`BlobCodec`), and `execution/engine/tests/cache_persistence/cache_modes.rs:363-415` (`BlobCodec`). Unit `CustomValue` boilerplate repeats in `worker/tests/cache.rs:221-238,311-334`, `execution/cache/runtime/tests.rs:501-529`, `execution/engine/tests/mid_run_release.rs:46-62` and `data/dynamic_value.rs:193-215`. One `testing` fixture (a `Blob` value plus a codec with version, decode-counter and fail/under-read knobs, and a `ram_bytes` override) would replace about 200 lines.
-- [ ] `scenarium/src/execution/engine/mod.rs:378-385`: `get_argument_values(&NodeId)` only forwards to `get_argument_values_at(NodeId)`, which only forwards to `argument_values_at`. Collapse the chain to one method taking `NodeId` by value.
-- [ ] `scenarium/src/execution/cache/runtime/tests.rs:21-23`: `complete_snapshot` is an identity wrapper over `OutputSnapshot::new`. Also `:260-264`, `:300-304`, `:351-355` re-spell `resident_slot(Some(d), Some(d), out())` inline.
-- [ ] `scenarium/src/execution/executor/tests.rs:20` and `scenarium/src/execution/schedule/tests.rs:440` define the same `value(i64) -> DynamicValue` helper. Move it next to `ProgramBuilder`.
-- [ ] `scenarium/src/execution/schedule/tests.rs:221-225,264-268,282-287`: the `Planner::default()` + `RunSchedule::default()` + `plan(..)` boilerplate is repeated where `ProgramBuilder::plan/try_plan` already exist. `dependency_cycle_is_rejected` is `prog.try_plan(&RunSeeds::sinks())`. The sites that deliberately reuse one planner across calls are fine.
 
 ### darkroom, lens, imaginarium, quickbench, root `test_resources/`
 Paths are relative to the repository root.
@@ -88,9 +84,6 @@ The same fixture or property is written many times, with different ad-hoc tolera
 ### scenarium, common
 Paths without a crate prefix are relative to `scenarium/src/`.
 
-- [ ] `scenarium/src/graph/tests.rs:334-358` (`node_remove_test`): it returns `TestResult` without any `?`, and the disable-everything loop (`:341-344`) has nothing to do with removal.
-- [ ] `scenarium/src/execution/engine/tests/node_seeds.rs:88` duplicates `:94`: the `output_i64("mult") == None` assertion is already covered by `outputs("mult").is_empty()`.
-- [ ] `scenarium/src/library/tests.rs:254` (`invoke_by_id_and_index`): there is no "index" in the test, and the `by_name` → `.id` → `by_id` round trip (`:276-277`) tests lookup only incidentally.
 
 ### darkroom, lens, imaginarium, quickbench, root `test_resources/`
 Paths are relative to the repository root.
@@ -111,7 +104,6 @@ Comments that describe code that no longer exists, contradict the asserted value
 ### scenarium, common
 Paths without a crate prefix are relative to `scenarium/src/`.
 
-- [ ] Comments that narrate change: `scenarium/src/worker/event_loop/tests.rs:168-172` ("Stale-event filtering is now structural…", also `//` rather than `///` on a test doc), and `scenarium/src/worker/batch/tests.rs:160-162` ("implicit today (Option::replace)").
 
 ### darkroom, lens, imaginarium, quickbench, root `test_resources/`
 Paths are relative to the repository root.

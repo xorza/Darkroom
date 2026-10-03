@@ -312,16 +312,9 @@ fn type_mismatched_wiring_lowers_as_unbound_through_wildcard_chains() {
 }
 
 #[test]
-fn node_remove_test() {
+fn removing_a_node_drops_it_and_every_edge_touching_it() {
     let mut g = TestGraph::sample();
-
     let sum = g.id("sum");
-    g.cache("sum", CacheMode::Ram);
-    assert_eq!(g.graph.find_by_name("sum").unwrap().cache, CacheMode::Ram);
-    for node in g.graph.nodes.values_mut() {
-        node.disabled = true;
-    }
-    assert!(g.graph.iter().all(|node| node.disabled));
 
     g.remove("sum");
 

@@ -346,17 +346,8 @@ pub(crate) mod internals {
 
         /// Resident-only argument values, test inspection only: reads whatever is
         /// in RAM, so a disk-only (not-yet-hydrated) node reads back empty.
-        pub(crate) fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
-            self.get_argument_values_at(*node_id)
-        }
-
-        pub(crate) fn get_argument_values_at(&self, node_id: NodeId) -> Option<ArgumentValues> {
-            self.compiled().node(node_id)?;
-            Some(self.argument_values_at(node_id))
-        }
-
-        fn argument_values_at(&self, node_id: NodeId) -> ArgumentValues {
-            let e_node = &self.compiled().by_id(node_id);
+        pub(crate) fn argument_values(&self, node_id: NodeId) -> Option<ArgumentValues> {
+            let e_node = &self.compiled()[self.compiled().node(node_id)?];
 
             let inputs = self.compiled().inputs[e_node.inputs]
                 .iter()
@@ -375,7 +366,7 @@ pub(crate) mod internals {
                 .map(<[DynamicValue]>::to_vec)
                 .unwrap_or_default();
 
-            ArgumentValues { inputs, outputs }
+            Some(ArgumentValues { inputs, outputs })
         }
 
         /// The runtime slot for a stable id — test introspection.

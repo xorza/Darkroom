@@ -13,10 +13,6 @@ use crate::graph::node::CacheMode;
 use crate::testing::program::ProgramBuilder;
 use crate::{ConstValue, async_lambda};
 
-fn value(value: i64) -> DynamicValue {
-    DynamicValue::Static(ConstValue::Int(value))
-}
-
 fn producer() -> FuncLambda {
     async_lambda!(|Invocation { outputs, .. }| {
         outputs[0] = DynamicValue::Static(ConstValue::Int(7));
@@ -390,7 +386,7 @@ async fn a_reused_output_with_no_consumers_is_reclaimed_immediately() {
         .readers([0])
         .demand(a, 0)
         .state(a, NodeState::Reuse)
-        .cached(a, [value(7)]);
+        .cached(a, [ProgramBuilder::value(7)]);
     run.go().await;
 
     assert!(run.reused(a));

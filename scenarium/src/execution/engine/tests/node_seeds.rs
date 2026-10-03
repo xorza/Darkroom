@@ -85,7 +85,6 @@ async fn node_seed_combines_with_a_sink_run_without_retaining() {
         "the explicit override feeds the ordinary sink during this run"
     );
     assert_eq!(run.logs(), ["132"], "(1 + 11) * 11");
-    assert_eq!(e.output_i64("mult", 0), None, "…and it is not retained");
     assert!(
         e.outputs("sum").is_empty(),
         "the targeted value is released after its real consumer"

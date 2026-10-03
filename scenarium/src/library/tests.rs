@@ -315,10 +315,10 @@ fn type_entry_kinds_expose_only_valid_codec_attachments() {
     assert!(library.codecs().get(enum_id).is_none());
 }
 
-/// A func reached by id computes, and its node state carries between calls
-/// the way it does between two runs of one node.
+/// A func computes through the invoker, and its node state carries between
+/// calls the way it does between two runs of one node.
 #[tokio::test]
-async fn invoke_by_id_and_index() -> Result<(), InvokeError> {
+async fn an_invoked_func_keeps_its_node_state_between_calls() -> Result<(), InvokeError> {
     // The body stashes what it computed in the node's own state, which is
     // what the second call below reads back.
     let mut library = Library::default();
@@ -343,8 +343,7 @@ async fn invoke_by_id_and_index() -> Result<(), InvokeError> {
         .input(FuncInput::required("B", DataType::Int))
         .output(FuncOutput::new("Sum", DataType::Int)),
     );
-    let sum = library.by_name("sum").unwrap().id;
-    let sum = library.by_id(sum).unwrap();
+    let sum = library.by_name("sum").unwrap();
     let int = |value: i64| DynamicValue::Static(ConstValue::Int(value));
     let mut node = FuncInvoker::default();
 

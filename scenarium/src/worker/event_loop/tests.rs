@@ -181,11 +181,9 @@ async fn lambda_panic_is_captured_not_unwound() {
     assert!(active.stop().await.is_empty());
 }
 
-// Stale-event filtering is now structural: each start_event_loop
-// call returns a fresh Receiver; stop_event_loop drops the old
-// pair so any undelivered events die with the channel. This test
-// verifies the structural guarantee by confirming the old
-// Receiver is closed after its sibling handle is stopped.
+/// Each event loop start returns a fresh receiver, and stopping one drops its
+/// pair, so events it never delivered die with the channel: the old receiver
+/// reads closed once its sibling handle is stopped.
 #[tokio::test]
 async fn stopped_event_loop_channel_is_closed() {
     let event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
