@@ -26,7 +26,7 @@ use crate::core::document::node_key::NodeKey;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::ctx::DrawCtx;
 use crate::gui::pane::graph::frame::geometry::PortLayer;
-use crate::gui::pane::graph::gesture::breaker::BreakerProbe;
+use crate::gui::pane::graph::gesture::breaker::breaker_probe::BreakerProbe;
 use crate::gui::theme::color::toward;
 
 /// Minimum length of a wire's bezier control handles, so a short or backward

@@ -8,7 +8,7 @@ use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph::ctx::DrawCtx;
-use crate::gui::pane::graph::gesture::breaker::BreakerProbe;
+use crate::gui::pane::graph::gesture::breaker::breaker_probe::BreakerProbe;
 use crate::gui::pane::graph::gesture::drag_anchor;
 use crate::gui::pane::graph::node::header::{header, status_row, subscription_pin};
 use crate::gui::pane::graph::node::memory_row::memory_row;
