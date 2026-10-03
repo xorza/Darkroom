@@ -23,6 +23,8 @@ pub(crate) struct InterpolateScratch {
     pub(crate) d2x_bg: Vec<f32>,
     pub(crate) d2x_noise: Vec<f32>,
     pub(crate) spline_scratch: Vec<f32>,
+    /// The sky row of an interpolation that keeps only the noise.
+    pub(crate) discarded_row: Vec<f32>,
 }
 
 impl InterpolateScratch {

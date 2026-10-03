@@ -11,7 +11,7 @@ use crate::internals::visual::{ToneMap, gray_to_rgb, save_image};
 use crate::star_detection::config::Config;
 use crate::star_detection::config::filter_config::FilterConfig;
 use crate::star_detection::detector::StarDetector;
-use crate::star_detection::detector::internals::saturation_level_of;
+use crate::star_detection::detector::stages::prepared_frame::internals::saturation_level_of;
 use crate::star_detection::tests::{Scenario, isolated, near, synthetic_config};
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};

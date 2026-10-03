@@ -6,22 +6,18 @@ use crate::star_detection::threshold_mask::ThresholdParams;
 /// Pixels per packed word.
 const WORD_PIXELS: usize = 64;
 
-/// Threshold one row into its packed words, on the widest Isa this CPU has.
-///
-/// With `WITH_BG` the level is `bg + σ·noise`; otherwise it is `σ·noise` (matched-filter case —
-/// background already subtracted), and `bg` is unused and may be empty. Every word past the row's
-/// pixels is cleared, which keeps the row padding of a `BitBuffer2` clear.
+/// Threshold one row of a residual into its packed words against `σ·noise`, on the widest Isa
+/// this CPU has. Every word past the row's pixels is cleared, which keeps the row padding of a
+/// `BitBuffer2` clear.
 #[cfg_attr(not(test), inline)]
-pub(super) fn process_words<const WITH_BG: bool>(
+pub(super) fn process_words(
     pixels: &[f32],
-    bg: &[f32],
     noise: &[f32],
     threshold: ThresholdParams,
     words: &mut [u64],
 ) {
-    ProcessWords::<WITH_BG> {
+    ProcessWords {
         pixels,
-        bg,
         noise,
         threshold,
         words,
@@ -32,28 +28,23 @@ pub(super) fn process_words<const WITH_BG: bool>(
 /// [`process_words`] as a kernel.
 ///
 /// A packed word is a set of detections, so one differing bit is one pixel two paths disagree
-/// about. The level is therefore the unfused `σ · max(noise, floor)` plus `bg` the scalar
-/// reference computes: a fused multiply-add would round differently from it at `px == level`.
+/// about. The level is therefore the unfused `σ · max(noise, floor)` the scalar reference
+/// computes.
 #[derive(Debug)]
-struct ProcessWords<'a, const WITH_BG: bool> {
+struct ProcessWords<'a> {
     pixels: &'a [f32],
-    bg: &'a [f32],
     noise: &'a [f32],
     threshold: ThresholdParams,
     words: &'a mut [u64],
 }
 
-impl<const WITH_BG: bool> Kernel for ProcessWords<'_, WITH_BG> {
+impl Kernel for ProcessWords<'_> {
     type Output = ();
 
     #[inline(always)]
     fn run<S: Isa>(self, isa: S) {
         let len = self.pixels.len();
         debug_assert_eq!(self.noise.len(), len, "one noise sample per pixel");
-        debug_assert!(
-            !WITH_BG || self.bg.len() == len,
-            "one background sample per pixel"
-        );
         debug_assert!(
             self.words.len() >= len.div_ceil(WORD_PIXELS),
             "a word per 64 pixels"
@@ -65,16 +56,10 @@ impl<const WITH_BG: bool> Kernel for ProcessWords<'_, WITH_BG> {
         };
         let (pixel_words, pixel_tail) = self.pixels.as_chunks::<WORD_PIXELS>();
         let (noise_words, noise_tail) = self.noise.as_chunks::<WORD_PIXELS>();
-        let (bg_words, bg_tail) = self.bg.as_chunks::<WORD_PIXELS>();
         let (full, rest) = self.words.split_at_mut(pixel_words.len());
 
-        for (i, (word, (pixels, noise))) in full
-            .iter_mut()
-            .zip(pixel_words.iter().zip(noise_words))
-            .enumerate()
-        {
-            let bg = if WITH_BG { &bg_words[i] } else { pixels };
-            *word = threshold.word_bits::<S, WITH_BG>(isa, pixels, bg, noise);
+        for (word, (pixels, noise)) in full.iter_mut().zip(pixel_words.iter().zip(noise_words)) {
+            *word = threshold.word_bits(isa, pixels, noise);
         }
 
         let Some((last, padding)) = rest.split_first_mut() else {
@@ -84,13 +69,7 @@ impl<const WITH_BG: bool> Kernel for ProcessWords<'_, WITH_BG> {
         *last = if pixel_tail.is_empty() {
             0
         } else {
-            let bg = if WITH_BG { bg_tail } else { pixel_tail };
-            let bits = threshold.word_bits::<S, WITH_BG>(
-                isa,
-                &padded(pixel_tail),
-                &padded(bg),
-                &padded(noise_tail),
-            );
+            let bits = threshold.word_bits(isa, &padded(pixel_tail), &padded(noise_tail));
             bits & ((1 << pixel_tail.len()) - 1)
         };
     }
@@ -106,30 +85,21 @@ struct Levels<V> {
 impl<V: F32x8> Levels<V> {
     /// Bit `i` set where pixel `i` of the word exceeds its level.
     #[inline(always)]
-    fn word_bits<S: Isa<F32 = V>, const WITH_BG: bool>(
+    fn word_bits<S: Isa<F32 = V>>(
         self,
         isa: S,
         pixels: &[f32; WORD_PIXELS],
-        bg: &[f32; WORD_PIXELS],
         noise: &[f32; WORD_PIXELS],
     ) -> u64 {
         let (pixels, []) = pixels.as_chunks::<F32_LANES>() else {
-            unreachable!("a word is whole vectors")
-        };
-        let (bg, []) = bg.as_chunks::<F32_LANES>() else {
             unreachable!("a word is whole vectors")
         };
         let (noise, []) = noise.as_chunks::<F32_LANES>() else {
             unreachable!("a word is whole vectors")
         };
         let mut bits = 0u64;
-        for (group, ((pixels, bg), noise)) in pixels.iter().zip(bg).zip(noise).enumerate() {
+        for (group, (pixels, noise)) in pixels.iter().zip(noise).enumerate() {
             let level = self.sigma * isa.load_f32(noise).max(self.min_noise);
-            let level = if WITH_BG {
-                isa.load_f32(bg) + level
-            } else {
-                level
-            };
             let above = isa.load_f32(pixels).lanes_gt(level).to_bitmask();
             bits |= u64::from(above) << (group * F32_LANES);
         }
@@ -151,9 +121,8 @@ mod internals {
     use crate::star_detection::threshold_mask::simd::WORD_PIXELS;
 
     /// The scalar reference the kernel is tested and benched against, written apart from it.
-    pub(super) fn process_words_scalar<const WITH_BG: bool>(
+    pub(super) fn process_words_scalar(
         pixels: &[f32],
-        bg: &[f32],
         noise: &[f32],
         threshold: ThresholdParams,
         words: &mut [u64],
@@ -165,11 +134,7 @@ mod internals {
                 if px_idx >= pixels.len() {
                     break;
                 }
-                let mut level = threshold.level(noise[px_idx]);
-                if WITH_BG {
-                    level += bg[px_idx];
-                }
-                if pixels[px_idx] > level {
+                if pixels[px_idx] > threshold.level(noise[px_idx]) {
                     bits |= 1u64 << bit;
                 }
             }

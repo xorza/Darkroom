@@ -288,7 +288,6 @@ fn gaussian_fit_rejects_a_diagonal_elongated_star() {
     let region = Region {
         bbox: URect::new(Vec2us::new(24, 24), Vec2us::new(41, 41)),
         peak: Vec2us::new(32, 32),
-        peak_value: 0.8,
         area: 200,
     };
     let expected_fwhm = 6.23;

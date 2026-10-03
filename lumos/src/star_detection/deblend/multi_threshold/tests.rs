@@ -985,29 +985,6 @@ fn bbox_contains_all_peaks() {
 }
 
 #[test]
-fn peak_values_match_image() {
-    // Verify that peak_value matches the actual pixel value
-    let TestComponent {
-        pixels,
-        labels,
-        data,
-    } = separated_pair(0.8);
-
-    let result =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
-
-    for candidate in &result {
-        let actual_value = pixels[(candidate.peak.x, candidate.peak.y)];
-        assert!(
-            (candidate.peak_value - actual_value).abs() < 1e-6,
-            "peak_value {} should match pixel value {}",
-            candidate.peak_value,
-            actual_value
-        );
-    }
-}
-
-#[test]
 fn single_threshold_level() {
     // Test with n_thresholds = 1 (edge case)
     let TestComponent {

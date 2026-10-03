@@ -230,7 +230,6 @@ fn measure_star_multiple_stars_independent() {
     let edge = Region {
         bbox: URect::new(Vec2us::new(0, 30), Vec2us::new(6, 36)),
         peak: Vec2us::new(3, 32),
-        peak_value: 0.9,
         area: 18,
     };
     assert!(
@@ -380,7 +379,6 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
     let region = Region {
         bbox: URect::new(Vec2us::new(28, 26), Vec2us::new(40, 38)),
         peak: Vec2us::new(34, 32),
-        peak_value: 1.0,
         area: 40,
     };
     let star = measured
@@ -399,7 +397,7 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
         &measured.residual,
         &measured.sky,
         star.pos,
-        region.peak_value,
+        measured.residual[(region.peak.x, region.peak.y)],
         radius,
         Some(sky_at_fit),
         config.noise_model.as_ref(),

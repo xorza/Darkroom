@@ -85,7 +85,6 @@ fn single_star_is_one_whole_region() {
     assert_eq!(regions[0].bbox, fixture.data.bbox);
     assert_eq!(regions[0].area, fixture.data.area);
     assert_eq!(regions[0].peak, Vec2us::new(50, 50));
-    assert_eq!(regions[0].peak_value, fixture.pixels[(50, 50)]);
 }
 
 #[test]
@@ -110,15 +109,12 @@ fn two_separated_stars() {
             .filter(|p| (p.pos.x < 50) == left)
             .count()
     };
-    let summary: Vec<(Vec2us, f32, usize)> = regions
-        .iter()
-        .map(|r| (r.peak, r.peak_value, r.area))
-        .collect();
+    let summary: Vec<(Vec2us, usize)> = regions.iter().map(|r| (r.peak, r.area)).collect();
     assert_eq!(
         summary,
         [
-            (Vec2us::new(30, 50), 1.0, blob_area(true)),
-            (Vec2us::new(70, 50), 0.8, blob_area(false)),
+            (Vec2us::new(30, 50), blob_area(true)),
+            (Vec2us::new(70, 50), blob_area(false)),
         ]
     );
     assert!(regions.iter().all(|r| r.bbox.contains(r.peak)));

@@ -5,6 +5,9 @@ use crate::memory::*;
 use crate::stack_product::quality_planes::QualityPlanes;
 
 const MIB: u64 = 1024 * 1024;
+/// The detector's planes these plans are written for. The planner's arithmetic is what they pin;
+/// the detector's own count is pinned against the planner in `star_detection::mem_budget`.
+const DETECTOR_PLANES: usize = 7;
 const GB: u64 = 1024 * MIB;
 const FRAME_96MB: usize = 6240 * 4160 * size_of::<f32>();
 
@@ -161,7 +164,7 @@ fn held_frames_are_charged_only_what_the_run_adds() {
             peak_bytes: DECODE_TRANSIENT_FACTOR * frame_bytes,
         },
         held_bytes,
-        detection_bytes: DETECTION_WORKING_PLANES * plane_bytes,
+        detection_bytes: DETECTOR_PLANES * plane_bytes,
         warp: Some(PerFrameBytes::new(plane_bytes, frame_bytes)),
         output_bytes: 0,
     };
@@ -296,7 +299,7 @@ fn pipeline_shape(
         frame_count: frames,
         decode: demosaic.with_peak_at_least(DECODE_TRANSIENT_FACTOR * demosaic.output_bytes),
         held_bytes: 0,
-        detection_bytes: DETECTION_WORKING_PLANES * plane_bytes,
+        detection_bytes: DETECTOR_PLANES * plane_bytes,
         warp: Some(PerFrameBytes::new(plane_bytes, demosaic.output_bytes)),
         output_bytes,
     }

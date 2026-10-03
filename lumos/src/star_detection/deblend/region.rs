@@ -14,8 +14,6 @@ pub(crate) struct Region {
     pub bbox: URect,
     /// Peak pixel coordinates within the region.
     pub peak: Vec2us,
-    /// Peak pixel value.
-    pub peak_value: f32,
     /// Number of pixels in the region.
     pub area: usize,
 }

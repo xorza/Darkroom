@@ -270,7 +270,8 @@ pub(super) fn measure_star(
         residual,
         sky,
         pos,
-        region.peak_value,
+        // The region's own peak value is the detection plane's, filtered.
+        residual[(region.peak.x, region.peak.y)],
         stamp_radius,
         annulus_background,
         config.noise_model.as_ref(),

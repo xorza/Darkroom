@@ -76,7 +76,6 @@ impl Measured {
                 Vec2us::new((px + 6).min(width), (py + 6).min(height)),
             ),
             peak: Vec2us::new(px, py),
-            peak_value: self.residual[(px, py)],
             area: 50,
         }
     }

@@ -5,22 +5,18 @@
 
 pub(super) mod stages;
 
-use arrayvec::ArrayVec;
 use serde::{Deserialize, Serialize};
 
-use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::pixel_flags::{Flags, SATURATION_FRACTION};
 use crate::math::size2us::Size2us;
 
 use crate::error::InvalidConfigField;
 use crate::math::statistics::median_mut;
-use crate::star_detection::background::background_estimate::{BackgroundEstimate, Refinement};
 use crate::star_detection::config::Config;
-use crate::star_detection::config::background_config::BackgroundRefinement;
 use crate::star_detection::detector::stages::detect::DetectResult;
 use crate::star_detection::detector::stages::filter::FilterOutcome;
 use crate::star_detection::detector::stages::fwhm;
+use crate::star_detection::detector::stages::prepared_frame::PreparedFrame;
 use crate::star_detection::resources::DetectionResources;
 use crate::star_detection::star::Star;
 
@@ -104,34 +100,6 @@ impl FwhmSource {
     }
 }
 
-/// The level a sample of `image` saturates at when its decoder flagged nothing:
-/// [`SATURATION_FRACTION`] of its declared ceiling, `DATAMAX` in the normalized domain, or of that
-/// domain's 1 when it declares none.
-fn saturation_level(image: &LinearImage) -> f32 {
-    SATURATION_FRACTION * image.metadata.data_max.map_or(1.0, |max| max as f32)
-}
-
-/// Mark the saturated pixels of `image`: the decoder's [`Flags::SATURATED`] when it flagged
-/// saturation, which a dark subtraction and a flat division leave exact; otherwise every pixel where
-/// any input channel reaches [`saturation_level`]. Per channel, before the channels are combined:
-/// a star clipped in green alone, (0.6, 1.0, 0.6), combines to 0.8.
-fn mark_saturated(image: &LinearImage, mask: &mut BitBuffer2) {
-    if image.metadata.saturation_flagged {
-        match &image.flags {
-            Some(flags) => {
-                mask.fill_from_predicate(|index| flags.at(index).intersects(Flags::SATURATED));
-            }
-            None => mask.fill(false),
-        }
-        return;
-    }
-    let level = saturation_level(image);
-    let channels: ArrayVec<&[f32], 3> = (0..image.channels())
-        .map(|channel| image.channel(channel).pixels())
-        .collect();
-    mask.fill_from_predicate(|index| channels.iter().any(|channel| channel[index] >= level));
-}
-
 /// Star detector with reusable processing resources.
 #[derive(Debug)]
 pub struct StarDetector {
@@ -170,43 +138,17 @@ impl StarDetector {
             .get_or_insert_with(|| DetectionResources::new(Size2us::new(width, height)));
         resources.reset(Size2us::new(width, height));
 
-        let mut residual = stages::prepare::prepare(image, resources);
-
-        let mut background =
-            BackgroundEstimate::estimate(&residual, &self.config.background, resources);
-        if let BackgroundRefinement::Iterative {
-            iterations,
-            mask_dilation,
-        } = self.config.background.refinement
-        {
-            background.refine(
-                &residual,
-                &self.config.background,
-                Refinement {
-                    iterations,
-                    mask_dilation,
-                },
-                self.config.detection.sigma_threshold,
-                resources,
-            );
-        }
-
-        // Saturation is a property of the recorded values, read before anything combines them.
-        let mut saturation = resources.acquire_bit();
-        mark_saturated(image, &mut saturation);
-
-        // From here on every stage reads the residual: no threshold, deblend or measurement sees
-        // the sky.
-        let sky = background.subtract_from(&mut residual, resources);
-
-        let fwhm = fwhm::estimate(&residual, &sky, &saturation, &self.config, resources);
-        let detect_result = DetectResult::from_image(
-            &residual,
-            &sky,
-            fwhm.value(),
+        let mut frame = PreparedFrame::new(image, &self.config, resources);
+        let fwhm = fwhm::estimate(&frame, &self.config, resources);
+        let plane = frame.detection_plane(fwhm.value(), &self.config, resources);
+        frame.release_sources(resources);
+        let detect_result = DetectResult::from_plane(
+            &plane,
+            frame.no_data.as_ref(),
             &self.config.detection,
             resources,
         );
+        plane.release_to_pool(resources);
 
         let mut diagnostics = Diagnostics {
             pixels_above_threshold: detect_result.pixels_above_threshold,
@@ -220,19 +162,13 @@ impl StarDetector {
 
         let stars = stages::measure::measure(
             &detect_result.regions,
-            &residual,
-            &sky,
-            &saturation,
+            &frame,
             &self.config.measurement,
             fwhm.value(),
         );
         diagnostics.stars_after_centroid = stars.len();
+        frame.release_to_pool(resources);
 
-        resources.release_bit(saturation);
-        sky.release_to_pool(resources);
-        resources.release_f32(residual);
-
-        // Step 6: Apply quality filters, sort, and remove duplicates
         let FilterOutcome {
             stars,
             diagnostics: quality_filter,
@@ -266,18 +202,12 @@ impl StarDetector {
 
 #[cfg(test)]
 pub(super) mod internals {
-    use crate::io::image::linear::LinearImage;
-    use crate::star_detection::detector::{StarDetector, saturation_level};
+    use crate::star_detection::detector::StarDetector;
     use crate::star_detection::resources::internals::BufferCounts;
     use crate::star_detection::resources::internals::buffer_counts;
 
     pub(crate) fn buffer_counts_for(detector: &StarDetector) -> Option<BufferCounts> {
         detector.resources.as_ref().map(buffer_counts)
-    }
-
-    /// The level the detector marks `image`'s pixels saturated at.
-    pub(crate) fn saturation_level_of(image: &LinearImage) -> f32 {
-        saturation_level(image)
     }
 }
 
@@ -291,32 +221,77 @@ mod tests {
     use crate::star_detection::detector::*;
     use crate::star_detection::tests::{Placement, Scenario};
 
-    /// Review item 9.3. Without decoder flags the test runs per channel at 0.95 of the ceiling: a
-    /// star clipped in green alone, (0.6, 1.0, 0.6), is saturated, though its channels average
-    /// 0.73; (0.9, 0.9, 0.9) is not. With decoder flags only the flags count, so a calibrated pixel
-    /// that a flat lifted to 0.99 is not saturated, and a flagged one at 0.5 is.
+    /// Review item 9.1. A Gaussian star of FWHM 2 keeps all its flux on a demosaiced frame: the
+    /// detection plane takes the 3×3 median there, and measurement reads the plane no filter
+    /// touched, so the frame read as demosaiced and as measured gives the same star, bit for bit.
+    /// The median used to keep 56% of it.
+    ///
+    /// Amplitude 1 on a sky of 0.1, the same in all three channels with a noise of 0.001. The flux
+    /// is the rendered star's sum, 4.53, plus the noise over the 15 × 15 stamp of FWHM 4,
+    /// 0.015 of standard deviation: within 5 of them.
     #[test]
-    fn saturation_is_marked_per_channel_or_from_the_decoders_flags() {
+    fn a_demosaiced_frame_measures_its_stars_unfiltered() {
         use crate::internals::prelude::*;
-        use crate::io::image::pixel_flags::PixelFlags;
+        use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
+        use crate::io::image::image_provenance::{
+            ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
+            SourceContainer, TransferProvenance,
+        };
 
-        let size = Size2us::new(2, 1);
-        let image = rgb_image(size, vec![0.6, 0.9], vec![1.0, 0.9], vec![0.6, 0.9]);
-        let mut mask = BitBuffer2::new_default(size);
-        mark_saturated(&image, &mut mask);
-        assert_eq!([mask.get(0), mask.get(1)], [true, false]);
-
-        let mut flagged = rgb_image(size, vec![0.99, 0.5], vec![0.99, 0.5], vec![0.99, 0.5]);
-        flagged.metadata.saturation_flagged = true;
-        flagged.flags = PixelFlags::from_fn(size, |index| {
-            if index == 1 {
-                Flags::SATURATED
-            } else {
-                Flags::default()
-            }
-        });
-        mark_saturated(&flagged, &mut mask);
-        assert_eq!([mask.get(0), mask.get(1)], [false, true]);
+        let size = Size2us::new(64, 64);
+        let mut star = Buffer2::new_filled(size.width, size.height, 0.0f32);
+        SyntheticStar::new(
+            Vec2::new(32.3, 31.6),
+            1.0,
+            StarProfile::Gaussian {
+                sigma: 2.0 / 2.354_82,
+            },
+        )
+        .add_to(&mut star);
+        let truth: f64 = star.pixels().iter().map(|&value| f64::from(value)).sum();
+        let mut rng = TestRng::new(3);
+        let channel: Vec<f32> = star
+            .pixels()
+            .iter()
+            .map(|&value| 0.1 + value + 0.001 * rng.next_gaussian_f32())
+            .collect();
+        let frame = |demosaic| {
+            let mut image = rgb_image(size, channel.clone(), channel.clone(), channel.clone());
+            image.metadata.provenance = Some(ImageProvenance {
+                container: SourceContainer::CameraRaw,
+                decoder: DecoderProvenance::LibRaw,
+                transfer: TransferProvenance::RawNormalized,
+                color: ColorProvenance::SensorRgb,
+                clipped: true,
+                demosaic,
+                row_order: RowOrder::TopDown,
+            });
+            image
+        };
+        // A star this narrow, off the pixel grid, reads lopsided marginals; its shape is not what
+        // this measures.
+        let mut config = Config::default();
+        config.filter.max_roundness = 1.0;
+        let brightest = |image: &LinearImage| {
+            StarDetector::from_config(config.clone())
+                .unwrap()
+                .detect(image)
+                .stars
+                .into_iter()
+                .next()
+                .expect("the star is detected")
+        };
+        let demosaiced = brightest(&frame(DemosaicProvenance::LumosRcd));
+        let measured = brightest(&frame(DemosaicProvenance::None));
+        assert_eq!(demosaiced.pos, measured.pos);
+        assert_eq!(demosaiced.flux.to_bits(), measured.flux.to_bits());
+        assert_eq!(demosaiced.peak.to_bits(), measured.peak.to_bits());
+        assert_eq!(demosaiced.fwhm.to_bits(), measured.fwhm.to_bits());
+        assert!(
+            (f64::from(demosaiced.flux) - truth).abs() <= 5.0 * 0.015,
+            "flux {} of {truth}",
+            demosaiced.flux
+        );
     }
 
     #[test]

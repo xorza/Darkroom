@@ -34,13 +34,12 @@ fn bench_detect_6k_globular_cluster(b: ::quickbench::Bencher) {
             refinement: BackgroundRefinement::Iterative {
                 iterations: 2,
                 mask_dilation: 3,
+                mask_sigma: 2.0,
             },
         },
         detection: DetectionConfig {
             sigma_threshold: 4.0,
             connectivity: Connectivity::Eight,
-            psf_axis_ratio: 1.0,
-            psf_angle: 0.0,
             deblend: Deblend::MultiThreshold {
                 n_thresholds: 32,
                 min_contrast: 0.005,
@@ -54,6 +53,8 @@ fn bench_detect_6k_globular_cluster(b: ::quickbench::Bencher) {
             mode: Some(FwhmMode::Fixed(4.0)),
             min_stars: 10,
             estimation_sigma_factor: 2.0,
+            psf_axis_ratio: 1.0,
+            psf_angle: 0.0,
         },
         measurement: MeasurementConfig {
             centroid_method: CentroidMethod::WeightedMoments,

@@ -16,8 +16,13 @@ pub enum BackgroundRefinement {
     Iterative {
         /// Number of refinement iterations. Usually 1-2 is sufficient.
         iterations: usize,
-        /// Radius the source mask is dilated by before the sky is re-estimated around it.
+        /// Radius of the disk the source mask is dilated by before the sky is re-estimated
+        /// around it.
         mask_dilation: usize,
+        /// The level, in the detection plane's own σ, above which a pixel is masked as a source.
+        /// Lower than the detection threshold, so a source's faint wings are masked too: photutils
+        /// masks at 2σ on the convolved data.
+        mask_sigma: f32,
     },
 }
 
@@ -29,6 +34,7 @@ impl BackgroundRefinement {
             Self::Iterative {
                 iterations,
                 mask_dilation,
+                mask_sigma,
             } => {
                 InvalidConfigField::check(
                     (1..=10).contains(iterations),
@@ -41,6 +47,12 @@ impl BackgroundRefinement {
                     "background refinement mask_dilation",
                     "at most 50",
                     *mask_dilation as f64,
+                )?;
+                InvalidConfigField::finite(
+                    "background refinement mask_sigma",
+                    "finite and positive",
+                    *mask_sigma,
+                    |value| value > 0.0,
                 )
             }
         }

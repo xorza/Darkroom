@@ -13,9 +13,10 @@ use crate::internals::visual::report::{DetectionMetrics, save_metrics};
 use crate::internals::visual::{ToneMap, save, save_comparison};
 use crate::star_detection::config::Config;
 use crate::star_detection::config::fwhm_config::FwhmMode;
-use crate::star_detection::convolution::{MatchedFilterBuffers, matched_filter};
+use crate::star_detection::config::fwhm_config::MatchedFilter;
+use crate::star_detection::convolution::matched_filter;
 use crate::star_detection::detector::StarDetector;
-use crate::star_detection::detector::internals::saturation_level_of;
+use crate::star_detection::detector::stages::prepared_frame::internals::saturation_level_of;
 use crate::star_detection::tests::{MATCH_RADIUS, near};
 
 mod challenging_tests;
@@ -117,15 +118,15 @@ fn run_test(name: &str, prefix: &str, frame: &SimFrame, config: &Config, min_dec
         Some(FwhmMode::Fixed(fwhm)) => {
             let mut output = Buffer2::new_filled(size.width, size.height, 0.0);
             let mut temp = Buffer2::new_filled(size.width, size.height, 0.0);
+            output.pixels_mut().copy_from_slice(clean_residual.pixels());
             matched_filter(
-                &clean_residual,
-                fwhm,
-                config.detection.psf_axis_ratio,
-                config.detection.psf_angle,
-                &mut MatchedFilterBuffers {
-                    output: &mut output,
-                    temp: &mut temp,
+                &mut output,
+                MatchedFilter {
+                    fwhm,
+                    axis_ratio: config.fwhm.psf_axis_ratio,
+                    angle: config.fwhm.psf_angle,
                 },
+                &mut temp,
             );
             output
         }

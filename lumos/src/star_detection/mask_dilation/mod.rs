@@ -8,16 +8,16 @@ use rayon::slice::ParallelSliceMut;
 
 use crate::bit_buffer2::BitBuffer2;
 
-/// Dilate `mask` in place by `radius` with a square structuring element (morphological dilation),
-/// using `scratch` — any contents, the mask's size — for the intermediate pass.
+/// Dilate `mask` in place by a disk of `radius`: a pixel is set when a set pixel lies within
+/// Euclidean distance `radius` of it. `scratch`, of any contents and the mask's size, holds the
+/// source while the mask is rewritten.
 ///
-/// This connects nearby pixels that might be separated due to variable threshold.
-/// Used in star detection to merge fragmented detections and in background
-/// estimation to mask object wings.
+/// A disk rather than a square, as photutils dilates its source masks: a square reaches √2 times
+/// further along the diagonals and masks sky that no source touches.
 ///
-/// Separable: a horizontal pass on packed 64-bit words into `scratch`, then a vertical pass that
-/// ORs each output row's `2·radius + 1` neighbouring rows back into `mask`. Both passes run row
-/// by row in parallel over contiguous memory, at O(radius) word operations per word.
+/// Each output row ORs the rows within `radius` of it, each smeared horizontally by the disk's
+/// half-width at that offset, `⌊√(radius² − dy²)⌋`, on packed 64-bit words. Rows run in parallel
+/// over contiguous memory.
 pub(crate) fn dilate_mask(mask: &mut BitBuffer2, radius: usize, scratch: &mut BitBuffer2) {
     assert_eq!(mask.size, scratch.size, "size mismatch");
     if radius == 0 {
@@ -35,40 +35,32 @@ pub(crate) fn dilate_mask(mask: &mut BitBuffer2, radius: usize, scratch: &mut Bi
     if words_per_row == 0 {
         return;
     }
+    // The words that hold pixels; a row's stride may pad it with more, which stay clear. The smear
+    // must not set the bits past the width in the last of them either.
+    let used_words = width.div_ceil(64);
+    let last_word_bits = width - (used_words - 1) * 64;
+    let last_word_mask = if last_word_bits == 64 {
+        u64::MAX
+    } else {
+        (1u64 << last_word_bits) - 1
+    };
 
-    let input = &mask.words;
-    scratch
-        .words
-        .par_chunks_mut(words_per_row)
-        .enumerate()
-        .for_each(|(y, out_row)| {
-            let row = &input[y * words_per_row..(y + 1) * words_per_row];
-            for (word_idx, out) in out_row.iter_mut().enumerate() {
-                let base_x = word_idx * 64;
-                let mut result = dilate_word_fast(row, word_idx, radius);
-                // Mask off bits beyond width for the last (partial) word.
-                if base_x < width && base_x + 64 > width {
-                    result &= (1u64 << (width - base_x)) - 1;
-                }
-                *out = result;
-            }
-        });
-
-    let horizontal = &scratch.words;
+    scratch.words.copy_from_slice(&mask.words);
+    let source = &scratch.words;
     mask.words
         .par_chunks_mut(words_per_row)
         .enumerate()
         .for_each(|(y, out_row)| {
-            let first = y.saturating_sub(radius);
-            let last = (y + radius).min(height - 1);
-            out_row
-                .copy_from_slice(&horizontal[first * words_per_row..(first + 1) * words_per_row]);
-            for source in first + 1..=last {
-                let row = &horizontal[source * words_per_row..(source + 1) * words_per_row];
-                for (out, &word) in out_row.iter_mut().zip(row) {
-                    *out |= word;
+            out_row.fill(0);
+            for source_y in y.saturating_sub(radius)..=(y + radius).min(height - 1) {
+                let offset = source_y.abs_diff(y);
+                let reach = (radius * radius - offset * offset).isqrt();
+                let row = &source[source_y * words_per_row..][..used_words];
+                for (word_idx, out) in out_row[..used_words].iter_mut().enumerate() {
+                    *out |= dilate_word_fast(row, word_idx, reach);
                 }
             }
+            out_row[used_words - 1] &= last_word_mask;
         });
 }
 
