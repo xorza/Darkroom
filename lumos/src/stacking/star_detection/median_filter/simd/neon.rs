@@ -1,7 +1,5 @@
 //! NEON SIMD implementation for 3x3 median filter on aarch64.
 
-#![allow(clippy::needless_range_loop)]
-
 use std::arch::aarch64::*;
 
 use crate::stacking::star_detection::median_filter::simd::median9_scalar;

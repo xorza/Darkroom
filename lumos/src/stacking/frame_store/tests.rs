@@ -379,7 +379,7 @@ fn plane_persistence_roundtrips_pixels() {
     let pixels: Vec<f32> = (0..12).map(|value| value as f32).collect();
     StoredPlane::write(&path, &pixels).unwrap();
 
-    let mapped = StoredPlane::map(path.clone()).unwrap();
+    let mapped = StoredPlane::map(&path.clone()).unwrap();
     assert_eq!(mapped.chunk(0, pixels.len()), pixels);
 
     drop(mapped);

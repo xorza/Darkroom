@@ -489,16 +489,6 @@ fn winsorized_keeps_exactly_the_frames_its_band_holds() {
             "{name}"
         );
     }
-
-    // The estimate does not read the clip's own k: the Huber clamp is always 1.5σ.
-    let estimate = |config: WinsorizedClipConfig| {
-        let WinsorizedEstimate { center, sigma } = config.robust_estimate(&mild, &mut vec![]);
-        [center.to_bits(), sigma.to_bits()]
-    };
-    assert_eq!(
-        estimate(WinsorizedClipConfig::new(10.0)),
-        estimate(WinsorizedClipConfig::new(2.0))
-    );
 }
 
 /// The spread is the bias-corrected standard deviation about the median, not the MAD. Twenty
@@ -513,14 +503,15 @@ fn winsorized_keeps_exactly_the_frames_its_band_holds() {
 /// within the same three roundings near 3.4, 2.4e-7 each.
 #[test]
 fn winsorized_sigma_is_the_corrected_standard_deviation() {
-    let config = WinsorizedClipConfig::new(3.0);
     let eighths: Vec<f32> = (0..20).map(|i| 10.0 + i as f32 / 8.0).collect();
-    let WinsorizedEstimate { center, sigma } = config.robust_estimate(&eighths, &mut vec![]);
+    let WinsorizedEstimate { center, sigma } =
+        WinsorizedClipConfig::robust_estimate(&eighths, &mut vec![]);
     assert_eq!(center, 11.1875);
     assert_close!(sigma, 0.546_875f64.sqrt() * 1.134, 1.8e-7);
 
     let ten: Vec<f32> = (1..=10).map(|i| i as f32).collect();
-    let WinsorizedEstimate { center, sigma } = config.robust_estimate(&ten, &mut vec![]);
+    let WinsorizedEstimate { center, sigma } =
+        WinsorizedClipConfig::robust_estimate(&ten, &mut vec![]);
     assert_eq!(center, 5.5);
     assert_close!(sigma, (82.5f64 / 9.0).sqrt() * 1.134, 7.2e-7);
 }
@@ -535,7 +526,7 @@ fn winsorized_sigma_is_the_corrected_standard_deviation() {
 fn winsorized_converges_to_its_huber_fixed_point() {
     let values = [10.0, 10.1, 10.2, 9.9, 10.0, 10.1, 9.8, 10.3, 50.0];
     let WinsorizedEstimate { center, sigma } =
-        WinsorizedClipConfig::new(2.5).robust_estimate(&values, &mut vec![]);
+        WinsorizedClipConfig::robust_estimate(&values, &mut vec![]);
     assert_eq!(center, 10.1);
     let fixed_point = (1.134f64.powi(2) * 0.2 / 8.0 / (1.0 - 1.134f64.powi(2) * 2.25 / 8.0)).sqrt();
     assert_close!(sigma, fixed_point, 6.4e-5);

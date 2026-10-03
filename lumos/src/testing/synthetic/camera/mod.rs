@@ -35,9 +35,9 @@ impl PsfModel {
     /// The round-equivalent FWHM (in pixels) a detector should recover.
     pub(crate) fn fwhm(&self) -> f32 {
         match self {
-            PsfModel::Gaussian { fwhm } => *fwhm,
-            PsfModel::Moffat { fwhm, .. } => *fwhm,
-            PsfModel::Elliptical { fwhm, .. } => *fwhm,
+            PsfModel::Gaussian { fwhm }
+            | PsfModel::Moffat { fwhm, .. }
+            | PsfModel::Elliptical { fwhm, .. } => *fwhm,
         }
     }
 

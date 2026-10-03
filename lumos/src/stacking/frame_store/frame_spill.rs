@@ -129,7 +129,7 @@ impl<'a> FrameSpill<'a> {
         for channel in 0..image.dimensions().channels() {
             let path = self.channel_path(channel);
             StoredPlane::write(&path, image.channel(channel))?;
-            planes.push(StoredPlane::map(path)?);
+            planes.push(StoredPlane::map(&path)?);
         }
         Ok(planes)
     }
@@ -142,9 +142,9 @@ impl<'a> FrameSpill<'a> {
         carries_quality: bool,
         stats: &FrameStats,
     ) -> Result<(), FrameStoreError> {
-        write_sidecar(self.stats_path(), stats)?;
+        write_sidecar(&self.stats_path(), stats)?;
         write_sidecar(
-            self.commit_path(),
+            &self.commit_path(),
             &Commit {
                 key,
                 carries_quality,
@@ -234,7 +234,7 @@ struct Sidecar<T> {
     value: T,
 }
 
-fn write_sidecar<T: Serialize>(path: PathBuf, value: &T) -> Result<(), FrameStoreError> {
+fn write_sidecar<T: Serialize>(path: &Path, value: &T) -> Result<(), FrameStoreError> {
     let sidecar = Sidecar {
         format: SIDECAR_FORMAT,
         value,
@@ -243,7 +243,7 @@ fn write_sidecar<T: Serialize>(path: PathBuf, value: &T) -> Result<(), FrameStor
     // filesystem or the caller can cause.
     let bytes = common::serialize(&sidecar, SerdeFormat::Bitcode)
         .expect("a sidecar of plain scalars always serializes");
-    write_file(&path, &bytes)
+    write_file(path, &bytes)
 }
 
 /// Read a sidecar back, or `None` if it is absent, unreadable, or not this layout.

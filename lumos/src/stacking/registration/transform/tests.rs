@@ -432,7 +432,7 @@ fn display_names_every_model_that_shares_the_four_component_form() {
 #[should_panic(expected = "the transform is singular, or its inverse cannot be normalized")]
 fn inverse_singular_panics() {
     let degenerate = Transform::affine([0.0; 6]);
-    let _ = degenerate.inverse();
+    let _inverse = degenerate.inverse();
 }
 
 #[test]

@@ -44,7 +44,7 @@ use std::path::PathBuf;
 
 /// The bundle `images` builds, at the default defect threshold.
 fn bundle(images: CalibrationSet<Option<CfaImage>>) -> CalibrationMasters {
-    CalibrationMasters::from_images(images, DEFAULT_SIGMA_THRESHOLD, CancelToken::never()).unwrap()
+    CalibrationMasters::from_images(images, DEFAULT_SIGMA_THRESHOLD, &CancelToken::never()).unwrap()
 }
 
 #[test]
@@ -54,7 +54,7 @@ fn calibrating_a_calibrated_light_is_refused() {
     let mut images = CalibrationSet::default();
     *images.get_mut(MasterRole::Dark) =
         Some(constant_cfa(Size2us::new(4, 4), 0.125, CfaType::Mono));
-    let masters = CalibrationMasters::from_images(images, 5.0, CancelToken::never()).unwrap();
+    let masters = CalibrationMasters::from_images(images, 5.0, &CancelToken::never()).unwrap();
     let mut light = constant_cfa(Size2us::new(4, 4), 0.5, CfaType::Mono);
     masters.calibrate(&mut light).unwrap();
     assert!(light.metadata.calibrated);
@@ -81,7 +81,7 @@ fn a_flat_with_no_positive_mean_is_refused() {
             subtractor.map(|level| constant_cfa(Size2us::new(4, 4), level, cfa_type));
         assert!(
             matches!(
-                CalibrationMasters::from_images(images, 5.0, CancelToken::never()),
+                CalibrationMasters::from_images(images, 5.0, &CancelToken::never()),
                 Err(CalibrationError::NonPositiveFlat { channel: c }) if c == channel
             ),
             "{cfa_type:?} flat {flat} minus {subtractor:?}"
@@ -107,7 +107,7 @@ fn a_bundle_spanning_two_patterns_is_refused() {
         ..CalibrationSet::default()
     };
     assert!(matches!(
-        CalibrationMasters::from_images(images, DEFAULT_SIGMA_THRESHOLD, CancelToken::never()),
+        CalibrationMasters::from_images(images, DEFAULT_SIGMA_THRESHOLD, &CancelToken::never()),
         Err(CalibrationError::CfaPatternMismatch {
             component: MasterRole::FlatDark,
             expected: CfaType::Bayer(CfaPattern::Rggb),
@@ -411,7 +411,7 @@ fn a_set_that_cannot_be_loaded_cannot_be_built() {
         flat_dark: None,
     };
     assert_eq!(
-        CalibrationMasters::from_images(mismatched, DEFAULT_SIGMA_THRESHOLD, CancelToken::never())
+        CalibrationMasters::from_images(mismatched, DEFAULT_SIGMA_THRESHOLD, &CancelToken::never())
             .unwrap_err()
             .to_string(),
         // Dark is seen first, so it sets the expectation the bias then fails.
@@ -430,7 +430,7 @@ fn a_set_that_cannot_be_loaded_cannot_be_built() {
         CalibrationMasters::from_images(
             mismatched_flat,
             DEFAULT_SIGMA_THRESHOLD,
-            CancelToken::never()
+            &CancelToken::never()
         )
         .unwrap_err()
         .to_string(),
@@ -445,7 +445,7 @@ fn a_set_that_cannot_be_loaded_cannot_be_built() {
         flat_dark: None,
     };
     let masters =
-        CalibrationMasters::from_images(coherent, DEFAULT_SIGMA_THRESHOLD, CancelToken::never())
+        CalibrationMasters::from_images(coherent, DEFAULT_SIGMA_THRESHOLD, &CancelToken::never())
             .expect("a coherent set builds");
     assert_eq!(
         masters.components().collect::<Vec<_>>(),
@@ -635,7 +635,7 @@ fn from_images_rejects_cancelled_operation() {
             ..Default::default()
         },
         DEFAULT_SIGMA_THRESHOLD,
-        cancel,
+        &cancel,
     );
 
     assert!(matches!(result, Err(CalibrationError::Cancelled)));
@@ -774,7 +774,7 @@ fn sigma_threshold_affects_detection() {
             ..Default::default()
         },
         3.0,
-        CancelToken::never(),
+        &CancelToken::never(),
     )
     .unwrap();
     let masters_loose = CalibrationMasters::from_images(
@@ -783,7 +783,7 @@ fn sigma_threshold_affects_detection() {
             ..Default::default()
         },
         40.0,
-        CancelToken::never(),
+        &CancelToken::never(),
     )
     .unwrap();
 

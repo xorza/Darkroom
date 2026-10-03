@@ -362,9 +362,9 @@ fn read_xtrans_pattern(header: &Header) -> fits_well::Result<XTransPattern> {
             };
         }
     }
-    XTransPattern::new(pattern).map_err(|_| fits_well::FitsError::TypeMismatch {
-        name: "CFATYPE".to_string(),
-        expected: "valid X-Trans pattern",
+    XTransPattern::new(pattern).map_err(|error| fits_well::FitsError::TypeMismatch {
+        name: format!("XTRNROW0..XTRNROW5 ({error})"),
+        expected: "X-Trans pattern",
     })
 }
 
@@ -462,6 +462,10 @@ pub(super) fn read_text(header: &Header, key: &str) -> fits_well::Result<Option<
     Ok(header.get_text(key)?.map(str::to_owned))
 }
 
+#[expect(
+    clippy::map_err_ignore,
+    reason = "a failed integer conversion carries nothing past the range the message names"
+)]
 fn read_u32(header: &Header, key: &'static str) -> fits_well::Result<Option<u32>> {
     header
         .get_integer(key)?
@@ -471,6 +475,10 @@ fn read_u32(header: &Header, key: &'static str) -> fits_well::Result<Option<u32>
         .transpose()
 }
 
+#[expect(
+    clippy::map_err_ignore,
+    reason = "a failed integer conversion carries nothing past the range the message names"
+)]
 fn read_i32(header: &Header, key: &'static str) -> fits_well::Result<Option<i32>> {
     header
         .get_integer(key)?

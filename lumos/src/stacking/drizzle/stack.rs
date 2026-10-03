@@ -70,8 +70,8 @@ pub fn drizzle_stack<P: AsRef<Path>>(
     frames: Vec<DrizzleFrame<P>>,
     config: &DrizzleConfig,
     context: &LoadContext,
-    progress: ProgressCallback,
-    cancel: CancelToken,
+    progress: &ProgressCallback,
+    cancel: &CancelToken,
 ) -> Result<DrizzleResult, DrizzleError> {
     let frame_count = frames.len();
     // The decoders poll cancellation off the context, so the run's token has to reach them —
@@ -84,7 +84,7 @@ pub fn drizzle_stack<P: AsRef<Path>>(
     let loaded = frames
         .into_iter()
         .map(|frame| load_drizzle_frame(frame, &context));
-    accumulate(loaded, frame_count, config, progress, &cancel, "paths")
+    accumulate(loaded, frame_count, config, progress, cancel, "paths")
 }
 
 /// Drizzle stack frames already held in memory.
@@ -99,8 +99,8 @@ pub fn drizzle_stack<P: AsRef<Path>>(
 pub fn drizzle_images(
     frames: Vec<DrizzleFrame<LinearImage>>,
     config: &DrizzleConfig,
-    progress: ProgressCallback,
-    cancel: CancelToken,
+    progress: &ProgressCallback,
+    cancel: &CancelToken,
 ) -> Result<DrizzleResult, DrizzleError> {
     let frame_count = frames.len();
     accumulate(
@@ -108,7 +108,7 @@ pub fn drizzle_images(
         frame_count,
         config,
         progress,
-        &cancel,
+        cancel,
         "memory",
     )
 }
@@ -122,7 +122,7 @@ fn accumulate(
     mut frames: impl Iterator<Item = Result<DrizzleFrame<LinearImage>, DrizzleError>>,
     frame_count: usize,
     config: &DrizzleConfig,
-    progress: ProgressCallback,
+    progress: &ProgressCallback,
     cancel: &CancelToken,
     source: &'static str,
 ) -> Result<DrizzleResult, DrizzleError> {
@@ -147,7 +147,7 @@ fn accumulate(
     );
 
     let mut accumulator = DrizzleAccumulator::new(input_dims, config.clone())?;
-    accumulator.add_frame(first)?;
+    accumulator.add_frame(&first)?;
     progress.report(1, frame_count, StackingStage::Drizzling);
 
     for (index, frame) in frames.enumerate() {
@@ -155,7 +155,7 @@ fn accumulate(
         if cancel.is_cancelled() {
             return Err(DrizzleError::Cancelled);
         }
-        accumulator.add_frame(frame?)?;
+        accumulator.add_frame(&frame?)?;
         progress.report(index + 2, frame_count, StackingStage::Drizzling);
     }
 

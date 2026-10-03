@@ -79,7 +79,7 @@ pub(crate) fn register(library: &mut Library) {
                 let cache = inputs[5].required_bool();
 
                 let masters = runtime::run_cancellable(cancel, move |cancel| {
-                    build_masters_cached(frame_sets, sigma, cache, cancel)
+                    build_masters_cached(frame_sets, sigma, cache, &cancel)
                 })
                 .await?;
                 outputs[0] = DynamicValue::from_custom(Masters::from(masters));
@@ -128,7 +128,7 @@ fn build_masters_cached(
     frame_sets: [Option<Vec<PathBuf>>; 4],
     sigma: f32,
     cache: bool,
-    cancel: CancelToken,
+    cancel: &CancelToken,
 ) -> Result<CalibrationMasters, BuildMastersError> {
     let [darks, flats, bias, flat_darks] = frame_sets;
     let role = |frames: Option<Vec<PathBuf>>,
@@ -348,7 +348,7 @@ mod tests {
                 [Some(vec![missing.clone()]), None, None, None],
                 3.0,
                 cache,
-                CancelToken::never(),
+                &CancelToken::never(),
             )
             .unwrap_err()
         };

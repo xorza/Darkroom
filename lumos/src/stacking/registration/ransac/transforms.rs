@@ -331,6 +331,10 @@ fn dlt_rows(reference: DVec2, target: DVec2) -> [[f64; 9]; 2] {
     ]
 }
 
+#[expect(
+    clippy::large_types_passed_by_value,
+    reason = "`SVD::new` consumes the matrix, so a reference would only add a copy"
+)]
 fn solve_homogeneous_svd_fixed(a: SMatrix<f64, 9, 9>) -> Option<DMat3> {
     let svd = SVD::new(a, false, true);
     let v_t = svd.v_t?;

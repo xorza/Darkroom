@@ -94,7 +94,10 @@ fn synthetic_value(scene: SyntheticScene, channel: usize, pos: Vec2us) -> f32 {
 }
 
 #[test]
-#[expect(clippy::excessive_precision)]
+#[expect(
+    clippy::excessive_precision,
+    reason = "the reference values are pasted as librtprocess printed them"
+)]
 fn markesteijn_matches_librtprocess_reference_scenes() {
     const WIDTH: usize = 96;
     const HEIGHT: usize = 96;

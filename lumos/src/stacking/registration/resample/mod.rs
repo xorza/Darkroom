@@ -60,11 +60,7 @@ pub struct WarpResult {
 /// let config = RegistrationConfig::default();
 /// let aligned = warp(&target_image, &result.warp_transform(), &config.warp).image;
 /// ```
-pub fn warp(
-    image: &LinearImage,
-    warp_transform: &WarpTransform,
-    config: &WarpParams,
-) -> WarpResult {
+pub fn warp(image: &LinearImage, warp_transform: &WarpTransform, config: WarpParams) -> WarpResult {
     let mut buffers = WarpBuffers::new(image.dimensions());
     buffers.warp_into(image, warp_transform, config);
     WarpResult {
@@ -131,7 +127,7 @@ impl WarpBuffers {
         &mut self,
         image: &LinearImage,
         warp_transform: &WarpTransform,
-        config: &WarpParams,
+        config: WarpParams,
     ) {
         // Release assert rather than a `Result`: a non-finite border is caller error, not a runtime
         // failure, and it reaches every pixel outside the source footprint — seeding NaN into the
@@ -251,7 +247,7 @@ pub(super) mod internals {
         input: &Buffer2<f32>,
         output: &mut Buffer2<f32>,
         transform: &WarpTransform,
-        params: &WarpParams,
+        params: WarpParams,
     ) {
         let size = Size2us::new(input.width(), input.height());
         debug_assert_eq!((output.width(), output.height()), (size.width, size.height));

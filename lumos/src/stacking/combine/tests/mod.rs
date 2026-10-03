@@ -55,7 +55,7 @@ fn frame_set(scene: &Scene, camera: &Camera, n: usize, base_seed: u64) -> FrameS
     FrameSet { sims, clean }
 }
 
-fn stack_frames(sims: &[SimFrame], config: StackConfig) -> LinearImage {
+fn stack_frames(sims: &[SimFrame], config: &StackConfig) -> LinearImage {
     let frames: Vec<StackFrame> = sims.iter().map(|s| s.image.clone().into()).collect();
     stack_images(
         frames,
@@ -93,7 +93,7 @@ fn mean_stack_reduces_noise_as_sqrt_n() {
 
     // Residual RMS vs the clean truth: a single frame vs the N-frame mean.
     let single_rms = rms_diff(sims[0].image.channel(0).pixels(), clean.pixels());
-    let stack = stack_frames(&sims, StackConfig::mean());
+    let stack = stack_frames(&sims, &StackConfig::mean());
     let stack_rms = rms_diff(stack.channel(0).pixels(), clean.pixels());
 
     // Averaging N independent frames shrinks the noise by √N. Each RMS over 16 384 pixels carries
@@ -124,8 +124,8 @@ fn sigma_clip_rejects_injected_outliers_where_mean_is_contaminated() {
         inject_spike(&mut sims[f], Vec2us::new(x, y), 1.0);
     }
 
-    let mean = stack_frames(&sims, StackConfig::mean());
-    let clipped = stack_frames(&sims, StackConfig::sigma_clipped(2.5));
+    let mean = stack_frames(&sims, &StackConfig::mean());
+    let clipped = stack_frames(&sims, &StackConfig::sigma_clipped(2.5));
 
     // A plain mean is dragged toward the spike by (1 − 0.1)/14 = 0.0643, give or take the 14
     // frames' noise, SKY_SIGMA/√14 = 3.8e-4. Sigma clipping drops the spike, and the 13 frames
@@ -179,7 +179,7 @@ fn all_rejection_methods_remove_outliers() {
             config.method,
             "{name} must run as configured"
         );
-        let stacked = stack_frames(&sims, config);
+        let stacked = stack_frames(&sims, &config);
         for &(_, x, y) in &sites {
             let idx = y * W + x;
             let err = f64::from(stacked.channel(0).pixels()[idx] - clean.pixels()[idx]).abs();
@@ -209,14 +209,14 @@ fn noise_weighting_beats_equal_on_mixed_quality_frames() {
 
     let equal = stack_frames(
         &sims,
-        StackConfig {
+        &StackConfig {
             weighting: Weighting::Equal,
             ..StackConfig::mean()
         },
     );
     let weighted = stack_frames(
         &sims,
-        StackConfig {
+        &StackConfig {
             weighting: Weighting::Noise,
             ..StackConfig::mean()
         },
@@ -264,7 +264,9 @@ fn rejection_methods_preserve_clean_frames() {
     let camera = Camera::realistic(4.0);
     let FrameSet { sims, clean } = frame_set(&scene, &camera, 15, 500);
     let mean_rms = rms_diff(
-        stack_frames(&sims, StackConfig::mean()).channel(0).pixels(),
+        stack_frames(&sims, &StackConfig::mean())
+            .channel(0)
+            .pixels(),
         clean.pixels(),
     );
     for (name, config) in [
@@ -273,7 +275,7 @@ fn rejection_methods_preserve_clean_frames() {
         ("gesd", StackConfig::gesd()),
     ] {
         let rms = rms_diff(
-            stack_frames(&sims, config).channel(0).pixels(),
+            stack_frames(&sims, &config).channel(0).pixels(),
             clean.pixels(),
         );
         assert!(

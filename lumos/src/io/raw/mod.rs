@@ -156,8 +156,8 @@ fn consolidate_black_levels(
     maximum_raw: u32,
     visible_filters: u32,
 ) -> Result<BlackLevel, BlackLevelError> {
-    let mut cblack = [0u32; 4104];
-    cblack.copy_from_slice(cblack_raw);
+    // Folded in place, as libraw folds its own: 16 KiB, too large a copy for the stack.
+    let mut cblack = cblack_raw.to_vec();
     let mut black = black_raw;
 
     if cblack[4] > 0 && cblack[5] > 0 {
@@ -845,10 +845,9 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
 
     // Consolidate per-channel black levels (replicates libraw adjust_bl)
     // SAFETY: inner is valid, color.cblack is initialized after unpack.
-    let cblack_raw: [u32; 4104] = unsafe { (*inner).color.cblack };
-    let black_level =
-        consolidate_black_levels(&cblack_raw, black_raw, maximum_raw, visible_filters)
-            .map_err(|source| raw_err(path, source.to_string()))?;
+    let cblack_raw: &[u32; 4104] = unsafe { &(*inner).color.cblack };
+    let black_level = consolidate_black_levels(cblack_raw, black_raw, maximum_raw, visible_filters)
+        .map_err(|source| raw_err(path, source.to_string()))?;
 
     // SAFETY: inner is valid, and color.cam_mul is initialized after unpack.
     let cam_mul = unsafe { (*inner).color.cam_mul };
@@ -909,6 +908,10 @@ fn open_refused(path: &Path, ret: i32) -> ImageError {
 }
 
 #[cfg(unix)]
+#[expect(
+    clippy::map_err_ignore,
+    reason = "where the interior NUL sits adds nothing to the message"
+)]
 fn open_libraw_input(
     inner: *mut sys::libraw_data_t,
     path: &Path,

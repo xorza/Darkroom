@@ -127,15 +127,11 @@ fn sorted_mad(sorted: &[f32], center: f32) -> f32 {
                 l -= 1;
                 ld
             }
-            (Some(_), Some(rd)) => {
-                r += 1;
-                rd
-            }
             (Some(ld), None) => {
                 l -= 1;
                 ld
             }
-            (None, Some(rd)) => {
+            (_, Some(rd)) => {
                 r += 1;
                 rd
             }

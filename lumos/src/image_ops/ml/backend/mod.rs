@@ -69,6 +69,10 @@ pub enum MlError {
     Model(String),
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "taken by value so `map_err(model_err)` reads as it does"
+)]
 fn model_err(e: ort::Error) -> MlError {
     MlError::Model(e.to_string())
 }

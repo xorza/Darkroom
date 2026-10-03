@@ -191,7 +191,7 @@ pub(super) fn vote_for_correspondences(
 /// Filters matches by minimum votes, sorts by vote count, and greedily assigns
 /// matches ensuring each reference and target point is used at most once.
 pub(super) fn resolve_matches(
-    vote_matrix: VoteMatrix,
+    vote_matrix: &VoteMatrix,
     n_ref: usize,
     n_target: usize,
     min_votes: usize,

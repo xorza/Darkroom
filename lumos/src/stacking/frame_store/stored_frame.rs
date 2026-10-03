@@ -57,7 +57,7 @@ impl StoredFrame {
         let quality = quality.try_map(|plane, buffer| {
             let path = spill.quality_path(plane);
             StoredPlane::write(&path, buffer.pixels())?;
-            StoredPlane::map(path)
+            StoredPlane::map(&path)
         })?;
         Ok(Self {
             channels,
@@ -100,10 +100,10 @@ impl StoredFrame {
             return Ok(None);
         }
         let channels = (0..dimensions.channels())
-            .map(|channel| StoredPlane::map(spill.channel_path(channel)))
+            .map(|channel| StoredPlane::map(&spill.channel_path(channel)))
             .collect::<Result<_, _>>()?;
         let quality = if carries_quality {
-            FrameQuality::read_spilled(|plane| StoredPlane::map(spill.quality_path(plane)))?
+            FrameQuality::read_spilled(|plane| StoredPlane::map(&spill.quality_path(plane)))?
         } else {
             FrameQuality::None
         };

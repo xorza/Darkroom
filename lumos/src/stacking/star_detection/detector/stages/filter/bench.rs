@@ -35,9 +35,9 @@ fn random_stars(count: usize, width: f64, height: f64) -> Vec<Star> {
         .collect()
 }
 
-fn bench_deduplication(b: ::quickbench::Bencher, base_stars: Vec<Star>) {
+fn bench_deduplication(b: ::quickbench::Bencher, base_stars: &[Star]) {
     b.bench(|| {
-        let mut stars = base_stars.clone();
+        let mut stars = base_stars.to_vec();
         // Sort by flux — the algorithm's documented precondition.
         stars.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
         black_box(remove_duplicate_stars(&mut stars, 5.0))
@@ -48,10 +48,10 @@ fn bench_deduplication(b: ::quickbench::Bencher, base_stars: Vec<Star>) {
 /// Simulates dense star field scenario similar to rho-opiuchi detection.
 #[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_remove_duplicate_stars_5000(b: ::quickbench::Bencher) {
-    bench_deduplication(b, random_stars(5000, 4096.0, 4096.0));
+    bench_deduplication(b, &random_stars(5000, 4096.0, 4096.0));
 }
 
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_remove_duplicate_stars_10000(b: ::quickbench::Bencher) {
-    bench_deduplication(b, random_stars(10000, 8000.0, 6000.0));
+    bench_deduplication(b, &random_stars(10000, 8000.0, 6000.0));
 }

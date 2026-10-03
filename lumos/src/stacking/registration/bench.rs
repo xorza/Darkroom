@@ -136,7 +136,7 @@ mod real_data {
                     result.elapsed_ms(),
                 );
 
-                let warped = warp(&images[i], &result.warp_transform(), &reg_config.warp).image;
+                let warped = warp(&images[i], &result.warp_transform(), reg_config.warp).image;
 
                 let output_path = output_dir.join(tiff_name(&paths[i]));
                 warped

@@ -11,6 +11,12 @@
 //! cargo run --release --example star_detection -- /path/to/image.fits
 //! ```
 
+#![expect(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "an example reports to the terminal"
+)]
+
 use std::env;
 use std::path::Path;
 use std::process;

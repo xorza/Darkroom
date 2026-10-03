@@ -59,9 +59,14 @@ impl PointNormalization {
     }
 
     /// Map a point from normalized space back to pixel space.
-    // Only TPS denormalizes whole points, and TPS has no caller outside its own tests until it is
-    // integrated into the registration pipeline — see the module note in `tps/mod.rs`.
-    #[cfg_attr(not(test), expect(dead_code))]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only TPS denormalizes whole points, and TPS has no caller outside its own \
+                      tests until the registration pipeline takes it up; see `tps/mod.rs`"
+        )
+    )]
     #[inline]
     pub(crate) fn denormalize(self, p: DVec2) -> DVec2 {
         p * self.scale + self.center

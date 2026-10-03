@@ -396,7 +396,7 @@ fn from_planar_channels_rgb() {
 #[test]
 #[should_panic(expected = "all RGB planes must share width")]
 fn rgb_planes_reject_mismatched_dimensions() {
-    let _ = LinearImage::from([
+    let _image = LinearImage::from([
         Buffer2::new(2, 1, vec![1.0, 2.0]),
         Buffer2::new(1, 1, vec![3.0]),
         Buffer2::new(2, 1, vec![4.0, 5.0]),
@@ -409,13 +409,13 @@ fn rgb_planes_reject_mismatched_dimensions() {
 #[test]
 #[should_panic(expected = "Width must be positive")]
 fn single_plane_rejects_an_empty_image() {
-    let _ = LinearImage::from(Buffer2::<f32>::new(0, 4, vec![]));
+    let _image = LinearImage::from(Buffer2::<f32>::new(0, 4, vec![]));
 }
 
 #[test]
 #[should_panic(expected = "Height must be positive")]
 fn rgb_planes_reject_an_empty_image() {
-    let _ = LinearImage::from([
+    let _image = LinearImage::from([
         Buffer2::<f32>::new(4, 0, vec![]),
         Buffer2::<f32>::new(4, 0, vec![]),
         Buffer2::<f32>::new(4, 0, vec![]),

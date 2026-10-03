@@ -87,6 +87,16 @@ fn filter_returns_the_diagnostics_stored_by_the_detector() {
 /// reference from rejecting everything.
 #[test]
 fn filter_fwhm_outliers_over_every_case() {
+    /// One `filter_fwhm_outliers` call and the stars it must leave behind.
+    struct Case {
+        name: &'static str,
+        /// `(fwhm, flux)` pairs, brightest first.
+        stars: Vec<(f32, f32)>,
+        deviation: f32,
+        /// Surviving fluxes, in order.
+        survivors: Vec<f32>,
+    }
+
     /// `(fwhm, flux)` pairs, brightest first.
     fn stars(pairs: &[(f32, f32)]) -> Vec<Star> {
         pairs
@@ -118,16 +128,6 @@ fn filter_fwhm_outliers_over_every_case() {
     ];
     let mut with_two_outliers = ramp(8, 3.0, 0.2);
     with_two_outliers.extend([(6.0, 10.0), (7.0, 5.0)]);
-
-    /// One `filter_fwhm_outliers` call and the stars it must leave behind.
-    struct Case {
-        name: &'static str,
-        /// `(fwhm, flux)` pairs, brightest first.
-        stars: Vec<(f32, f32)>,
-        deviation: f32,
-        /// Surviving fluxes, in order.
-        survivors: Vec<f32>,
-    }
 
     let cases = vec![
         Case {
@@ -244,6 +244,8 @@ fn filter_fwhm_outliers_over_every_case() {
 /// expected sequence identifies exactly which stars survived and in what order.
 #[test]
 fn remove_duplicate_stars_over_every_geometry() {
+    type Path = fn(&mut Vec<Star>, f32) -> usize;
+
     struct Case {
         /// `(x, y, flux)` in input order — the order the function actually honours.
         stars: Vec<(f64, f64, f32)>,
@@ -405,7 +407,6 @@ fn remove_duplicate_stars_over_every_geometry() {
         },
     ];
 
-    type Path = fn(&mut Vec<Star>, f32) -> usize;
     let paths: [(&str, Path); 2] = [
         ("simple", remove_duplicate_stars_simple),
         ("hashed", remove_duplicate_stars_hashed),

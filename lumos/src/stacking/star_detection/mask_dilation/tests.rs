@@ -1,7 +1,10 @@
 //! Tests for morphological dilation.
 
-// Allow identity operations like `y * width + x` for clarity in 2D indexing
-#![allow(clippy::identity_op, clippy::erasing_op)]
+#![expect(
+    clippy::identity_op,
+    clippy::erasing_op,
+    reason = "`y * width + x` keeps its form at row and column 0, so each index reads as a position"
+)]
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::stacking::star_detection::mask_dilation::dilate_mask;

@@ -33,6 +33,10 @@ pub(crate) fn init_tracing() {
     // `ort` (ONNX Runtime) logs its arena allocations at INFO — far too chatty; quiet it by default.
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,ort=warn"));
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "every test calls this, and only the first in a process installs the subscriber"
+    )]
     let _ = tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_test_writer()

@@ -154,7 +154,7 @@ fn a_stored_frame_of_the_wrong_shape_is_a_pipeline_bug() {
     let image = LinearImage::from_pixels(ImageDimensions::new((4, 1), 1), vec![1.0; 4]);
     let stats = FrameStats::measure(&image);
     let core = CacheCore::plain(CacheTier::Resident, ImageDimensions::new((4, 2), 1));
-    let _ = FrameCache::from_stored_frames(
+    let _cache = FrameCache::from_stored_frames(
         vec![StoredFrame::from_memory(image, FrameQuality::None, stats)],
         core,
         Normalization::None,

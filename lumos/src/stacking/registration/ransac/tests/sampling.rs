@@ -72,6 +72,8 @@ fn weighted_sample_into_pool_smaller_than_k() {
 /// and from the pool.
 #[test]
 fn weighted_sampling_follows_the_weights() {
+    const DRAWS: usize = 21_000;
+
     use rand::SeedableRng;
     let mut rng = SmallRng::seed_from_u64(42);
     let pool: Vec<usize> = (0..20).collect();
@@ -79,7 +81,6 @@ fn weighted_sampling_follows_the_weights() {
     let mut buffer = Vec::new();
     let mut scratch = Vec::new();
 
-    const DRAWS: usize = 21_000;
     let mut counts = [0usize; 20];
     for _ in 0..DRAWS {
         weighted_sample_into(&mut rng, &pool, &weights, 1, &mut buffer, &mut scratch);

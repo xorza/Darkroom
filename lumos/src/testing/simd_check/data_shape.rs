@@ -22,6 +22,6 @@ impl Debug for DataShape {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("DataShape")
             .field("name", &self.name)
-            .finish()
+            .finish_non_exhaustive()
     }
 }

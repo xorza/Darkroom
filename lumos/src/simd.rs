@@ -42,6 +42,20 @@ pub(crate) const NEON_F32_LANES: usize = 4;
 /// feature detected, the `aarch64` arm runs only on aarch64, where NEON is unconditional. A
 /// backend with any further precondition (a minimum length, a bound) states it in `if <guard>`,
 /// which is checked in the same expression.
+#[cfg_attr(
+    not(target_arch = "aarch64"),
+    expect(
+        unused_macro_rules,
+        reason = "the `@neon` rules expand only where an `aarch64` arm compiles"
+    )
+)]
+#[cfg_attr(
+    not(target_arch = "x86_64"),
+    expect(
+        unused_macro_rules,
+        reason = "the `@available` and `@x86` rules expand only where an `x86` arm compiles"
+    )
+)]
 macro_rules! dispatch {
     (@available avx2) => {
         ::imaginarium::SimdTier::Avx2.is_supported()

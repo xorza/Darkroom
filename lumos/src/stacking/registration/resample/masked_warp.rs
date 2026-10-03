@@ -94,7 +94,7 @@ impl MaskedSources {
     pub(super) fn warp_row(
         &self,
         positions: &[Option<SourcePosition>],
-        config: &WarpParams,
+        config: WarpParams,
         support: &mut Vec<f32>,
         channel_rows: &mut [&mut [f32]],
         coverage_row: &mut [f32],

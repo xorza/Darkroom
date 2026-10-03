@@ -416,7 +416,7 @@ pub(crate) fn demosaic(
     if cancel.is_cancelled() {
         return Err(Cancelled);
     }
-    border_interpolate(&mut rgb_r, &mut rgb_b, &mut rgb_g, cfa, &pattern, s);
+    border_interpolate(&mut rgb_r, &mut rgb_b, &mut rgb_g, cfa, pattern, s);
 
     // Per-row contiguous copy (margins cropped); cheaper than the interleaved
     // scatter and lets the caller take the buffers zero-copy.
@@ -649,7 +649,7 @@ fn border_interpolate(
     rgb_b: &mut [f32],
     rgb_g: &mut [f32],
     cfa: &[f32],
-    pattern: &CfaPattern,
+    pattern: CfaPattern,
     s: Strides,
 ) {
     let Strides {

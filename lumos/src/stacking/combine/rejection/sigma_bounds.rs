@@ -37,7 +37,7 @@ impl SigmaBounds {
     ///
     /// Reports under the field names a caller sets, `sigma_low` and `sigma_high`, rather than this
     /// type's own — the error names what the user wrote, not how it is stored.
-    pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
+    pub(super) fn validate(self) -> Result<(), InvalidConfigField> {
         InvalidConfigField::finite("sigma_low", "finite and positive", self.low, |value| {
             value > 0.0
         })?;

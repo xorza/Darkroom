@@ -91,7 +91,7 @@ fn bench_full_pipeline() {
             flat_dark: None,
         },
         DEFAULT_SIGMA_THRESHOLD,
-        CancelToken::never(),
+        &CancelToken::never(),
     )
     .unwrap();
     println!(
@@ -186,7 +186,7 @@ fn bench_full_pipeline() {
             let result = register(ref_stars, stars, &reg_config)
                 .unwrap_or_else(|e| panic!("Registration failed: {e}"));
             let warp_start = Instant::now();
-            let warped = warp(img, &result.warp_transform(), &reg_config.warp).image;
+            let warped = warp(img, &result.warp_transform(), reg_config.warp).image;
             let warp_ms = warp_start.elapsed().as_secs_f64() * 1000.0;
             println!(
                 "  {} inliers, RMS={:.3}px, reg={:.1}ms, warp={:.1}ms",
@@ -236,7 +236,7 @@ fn bench_full_pipeline() {
 
     let stacked = stack(
         &registered_paths,
-        stack_config,
+        &stack_config,
         ProgressCallback::default(),
         CancelToken::never(),
     )

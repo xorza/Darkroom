@@ -54,7 +54,7 @@ impl WinsorizedClipConfig {
     }
 
     /// Validate the clip thresholds.
-    pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
+    pub(super) fn validate(self) -> Result<(), InvalidConfigField> {
         self.sigma.validate()
     }
 
@@ -69,11 +69,7 @@ impl WinsorizedClipConfig {
     /// The median is then the middle element (O(1)) every pass — replacing the per-iteration
     /// quickselect + buffer copy that dominated this hot path. `winsorized_stddev` is an
     /// order-independent sum, so sorting changes neither the center nor the sigma.
-    pub(super) fn robust_estimate(
-        &self,
-        values: &[f32],
-        working: &mut Vec<f32>,
-    ) -> WinsorizedEstimate {
+    pub(super) fn robust_estimate(values: &[f32], working: &mut Vec<f32>) -> WinsorizedEstimate {
         working.clear();
         working.extend_from_slice(values);
         working.sort_unstable_by(f32::total_cmp);
@@ -116,12 +112,12 @@ impl WinsorizedClipConfig {
     /// Phase 2: Reject outliers using the robust estimate from phase 1.
     ///
     /// Standard sigma clipping with the [`WinsorizedEstimate`] and the caller's thresholds.
-    pub(super) fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
+    pub(super) fn reject(self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
         if let Some(survivors) = begin_rejection(values, scratch, 3) {
             return survivors;
         }
 
-        let estimate = self.robust_estimate(values, &mut scratch.estimate_values);
+        let estimate = Self::robust_estimate(values, &mut scratch.estimate_values);
 
         if estimate.sigma < f32::EPSILON {
             return values.len();

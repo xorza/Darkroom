@@ -257,7 +257,7 @@ mod internals {
         /// derivation of the same algebra to check it against. Keep the two written out
         /// separately — sharing a helper between them would make the test compare an expression
         /// with itself.
-        pub(super) fn jacobian_row(&self, x: f64, y: f64, params: &[f64; 7]) -> [f64; 7] {
+        pub(super) fn jacobian_row(x: f64, y: f64, params: &[f64; 7]) -> [f64; 7] {
             let [x0, y0, amp, a, b, c, _bg] = *params;
             let dx = x - x0;
             let dy = y - y0;

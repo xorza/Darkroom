@@ -281,7 +281,7 @@ pub(super) mod internals {
 
     /// Any method at `pos`, the border outside the footprint: the single-point oracle the row warp
     /// is held to.
-    pub(crate) fn interpolate(data: &Buffer2<f32>, pos: DVec2, params: &WarpParams) -> f32 {
+    pub(crate) fn interpolate(data: &Buffer2<f32>, pos: DVec2, params: WarpParams) -> f32 {
         let size = Size2us::new(data.width(), data.height());
         let Some(position) = SourcePosition::within(pos, size) else {
             return params.border_value;

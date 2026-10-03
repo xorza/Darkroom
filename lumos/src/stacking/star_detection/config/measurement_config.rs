@@ -33,9 +33,9 @@ pub enum CentroidMethod {
 
 impl CentroidMethod {
     /// Validate the centroid method configuration.
-    pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
+    pub(super) fn validate(self) -> Result<(), InvalidConfigField> {
         if let CentroidMethod::MoffatFit { beta } = self {
-            InvalidConfigField::finite("Moffat beta", "finite and in (0, 10]", *beta, |value| {
+            InvalidConfigField::finite("Moffat beta", "finite and in (0, 10]", beta, |value| {
                 value > 0.0 && value <= 10.0
             })?;
         }
@@ -85,7 +85,7 @@ impl NoiseModel {
     /// `signal` is the summed background-subtracted signal, `background_noise` is the empirical
     /// per-pixel background standard deviation, and `sample_count` is the number of summed pixels.
     pub(crate) fn variance_normalized(
-        &self,
+        self,
         signal: f64,
         background_noise: f64,
         sample_count: usize,

@@ -68,7 +68,7 @@ fn status_kb(field: &str) -> u64 {
 pub(crate) struct PhaseGate(Arc<AtomicBool>);
 
 impl PhaseGate {
-    /// Open the gate: subsequent samples count toward [`PeakRss::gated_anon_mb`]. Idempotent.
+    /// Open the gate: subsequent samples count toward [`PeakRss::gated_anon`]. Idempotent.
     pub(crate) fn open(&self) {
         self.0.store(true, Ordering::Relaxed);
     }
@@ -78,13 +78,13 @@ impl PhaseGate {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PeakRss {
     /// Peak `RssAnon` (heap — the OOM-relevant figure) over the whole run.
-    pub(crate) anon_mb: u64,
+    pub(crate) anon: u64,
     /// Peak `VmRSS` (total resident, including reclaimable mmap pages) over the whole run.
-    pub(crate) total_mb: u64,
+    pub(crate) total: u64,
     /// Peak `RssAnon` sampled while the [`PhaseGate`] was open (e.g. combine / steady state).
-    pub(crate) gated_anon_mb: u64,
+    pub(crate) gated_anon: u64,
     /// Peak `RssAnon` sampled while the [`PhaseGate`] was closed (e.g. load / warmup).
-    pub(crate) ungated_anon_mb: u64,
+    pub(crate) ungated_anon: u64,
 }
 
 /// Background sampler of peak heap (`RssAnon`) and total resident (`VmRSS`) for the duration of a
@@ -153,12 +153,14 @@ impl RssSampler {
     /// Stop sampling, join the thread, and return the peaks converted KiB → MiB.
     pub(crate) fn finish(self) -> PeakRss {
         self.stop.store(true, Ordering::Relaxed);
-        self.handle.join().ok();
+        self.handle
+            .join()
+            .expect("the sampler thread does not panic");
         PeakRss {
-            anon_mb: self.peak_anon.load(Ordering::Relaxed) / 1024,
-            total_mb: self.peak_total.load(Ordering::Relaxed) / 1024,
-            gated_anon_mb: self.peak_gated.load(Ordering::Relaxed) / 1024,
-            ungated_anon_mb: self.peak_ungated.load(Ordering::Relaxed) / 1024,
+            anon: self.peak_anon.load(Ordering::Relaxed) / 1024,
+            total: self.peak_total.load(Ordering::Relaxed) / 1024,
+            gated_anon: self.peak_gated.load(Ordering::Relaxed) / 1024,
+            ungated_anon: self.peak_ungated.load(Ordering::Relaxed) / 1024,
         }
     }
 }
@@ -252,6 +254,10 @@ pub(crate) fn ensure_frames(
         write_fits_u16(path, size, &data, &mut buf)?;
         generated += 1;
         print!("\r  generating {prefix} frames… {}/{}", i + 1, n);
+        #[expect(
+            clippy::unused_result_ok,
+            reason = "a progress line that fails to flush costs the probe nothing"
+        )]
         io::stdout().flush().ok();
     }
     if generated > 0 {

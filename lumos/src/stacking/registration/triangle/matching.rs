@@ -68,7 +68,7 @@ pub(crate) fn match_triangles(
         n_ref,
         n_target,
     );
-    resolve_matches(vote_matrix, n_ref, n_target, config.min_votes)
+    resolve_matches(&vote_matrix, n_ref, n_target, config.min_votes)
 }
 
 /// Form triangles using k-nearest neighbors from a k-d tree.

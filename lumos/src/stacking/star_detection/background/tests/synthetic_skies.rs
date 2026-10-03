@@ -28,7 +28,6 @@ use crate::testing::visual::{ToneMap, save};
 /// wings: pinned at its measured size on each sky.
 #[test]
 fn rendered_skies_are_recovered() {
-    init_tracing();
     struct Case {
         name: &'static str,
         sky: BackgroundField,
@@ -37,6 +36,8 @@ fn rendered_skies_are_recovered() {
         model_error: Option<f32>,
         star_move: f32,
     }
+
+    init_tracing();
     let cases = [
         Case {
             name: "uniform",

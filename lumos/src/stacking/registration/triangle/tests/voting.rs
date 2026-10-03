@@ -109,7 +109,7 @@ fn resolve_matches_claims_each_star_once_by_votes() {
         (&[], 1, &[]),
     ];
     for (entries, min_votes, expected) in cases {
-        let matches = resolve_matches(vote_matrix_from_entries(5, 5, entries), 5, 5, min_votes);
+        let matches = resolve_matches(&vote_matrix_from_entries(5, 5, entries), 5, 5, min_votes);
         let resolved: Vec<(usize, usize, f64)> = matches
             .iter()
             .map(|m| (m.indices.reference, m.indices.target, m.confidence))

@@ -43,7 +43,7 @@ fn integer_shifts_copy_the_source() {
                 (spread - 1.0) * range + (taps + 3.0) * f32::EPSILON * largest * spread
             });
             let mut output = Buffer2::new_filled(size.width, size.height, f32::NAN);
-            warp_plane(&input, &mut output, &transform, &params);
+            warp_plane(&input, &mut output, &transform, params);
             for y in 0..size.height {
                 for x in 0..size.width {
                     let source_x = x as i32 + shift.0;
@@ -103,7 +103,7 @@ fn a_homography_horizon_takes_the_border_and_no_coverage() {
                 border_value: BORDER,
             };
             let mut output = Buffer2::new_default(WIDTH, HEIGHT);
-            warp_plane(&input, &mut output, &wt, &params);
+            warp_plane(&input, &mut output, &wt, params);
             let coverage =
                 quality::internals::maps(Size2us::new(WIDTH, HEIGHT), &wt, method).coverage;
 
@@ -148,7 +148,7 @@ fn an_image_smaller_than_the_kernel_falls_back_exactly() {
             &input,
             &mut output,
             &wt,
-            &config::internals::warp_params(method),
+            config::internals::warp_params(method),
         );
         assert!(
             output.pixels().iter().all(|&value| value == 0.5),

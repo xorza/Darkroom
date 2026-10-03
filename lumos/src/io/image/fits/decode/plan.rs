@@ -327,8 +327,7 @@ pub(super) fn dimensions_from_shape(
         ));
     }
     let (width, height, channels) = match shape {
-        [width, height] => (*width, *height, 1),
-        [width, height, 1] => (*width, *height, 1),
+        [width, height] | [width, height, 1] => (*width, *height, 1),
         [width, height, 3] if cube == FitsCubeInterpretation::Rgb => (*width, *height, 3),
         [_, _, 3] => Err(fits_unsupported(
             path,

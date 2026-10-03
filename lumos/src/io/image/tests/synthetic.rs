@@ -311,7 +311,7 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     let stack_paths = |paths: &[&Path]| {
         stack::stack(
             paths,
-            StackConfig::default(),
+            &StackConfig::default(),
             crate::ProgressCallback::default(),
             CancelToken::never(),
         )
@@ -736,7 +736,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
             flat_dark: None,
         },
         5.0,
-        CancelToken::never(),
+        &CancelToken::never(),
     )
     .unwrap();
     let mut equivalent = make_cfa(size, pixels, pattern);

@@ -99,7 +99,7 @@ fn limited_map_accepts_empty_input() {
 #[test]
 #[should_panic(expected = "max_concurrent must be positive")]
 fn limited_map_rejects_zero_concurrency() {
-    let _ = try_par_map_limited(&[1], 0, |_index, value| Ok::<_, ()>(*value));
+    let _refused = try_par_map_limited(&[1], 0, |_index, value| Ok::<_, ()>(*value));
 }
 
 #[test]

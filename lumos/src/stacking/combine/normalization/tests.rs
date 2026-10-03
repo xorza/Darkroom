@@ -263,7 +263,7 @@ fn stacked_frames_land_on_the_reference_level() {
     ] {
         let product = stack_images(
             frames.into_iter().map(StackFrame::from).collect(),
-            StackConfig {
+            &StackConfig {
                 method: CombineMethod::Mean(Rejection::None),
                 normalization,
                 ..Default::default()
