@@ -170,7 +170,7 @@ mod tests {
     /// A builder node's ports are its config's fields, in declaration order,
     /// and a saved graph binds them by position — so reordering or renaming a
     /// field in lumos silently rewires every document that used the node.
-    /// Pinned here because the config types live in another crate now: this is
+    /// Pinned here because the config types live in another crate: this is
     /// what makes the coupling visible from the side that depends on it.
     #[test]
     fn builder_ports_follow_the_lumos_field_order() {

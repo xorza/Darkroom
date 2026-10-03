@@ -9,7 +9,7 @@ use crate::image::nodes::image_library;
 use crate::image::{IMAGE_DATA_TYPE, Image};
 
 #[test]
-fn format_defaults_are_exact() {
+fn enum_defaults_are_exact() {
     let library = image_library();
     let convert = library.by_name("Convert").unwrap();
     assert_eq!(convert.inputs[0].data_type, IMAGE_DATA_TYPE);
@@ -29,6 +29,13 @@ fn format_defaults_are_exact() {
     assert_eq!(
         save.inputs[2].default_value,
         Some(ConstValue::Enum(AS_IS.to_string())),
+    );
+
+    let blend = library.by_name("Blend").unwrap();
+    assert_eq!(blend.inputs[2].name, "Mode");
+    assert_eq!(
+        blend.inputs[2].default_value,
+        Some(ConstValue::Enum("Normal".to_string())),
     );
 }
 

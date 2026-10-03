@@ -70,9 +70,8 @@ mod tests {
 
     use crate::image::format::{AS_IS, ConversionFormat};
 
-    /// `enum_input` seeds a dropdown to its first variant, so "As Is" first is what makes Save
-    /// Image default to no conversion; every color format follows by name, and every variant
-    /// parses back to what it names.
+    /// "As Is" leads the dropdown, every color format follows by name, and every variant parses
+    /// back to what it names.
     #[test]
     fn as_is_leads_every_format_name() {
         let names = ConversionFormat::variant_names();

@@ -14,7 +14,7 @@ use scenarium::Invocation;
 
 const LOAD_ASTRO_IMAGE_FUNC_ID: FuncId = FuncId::literal("fbcc8899-efc3-40e0-a6fd-8743f86edbd3");
 
-pub(crate) static ASTRO_IMAGE_PATH_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| {
+pub(super) static ASTRO_IMAGE_PATH_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| {
     DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
         FsPathMode::ExistingFile,
         PREVIEW_IMAGE_EXTENSIONS
@@ -24,7 +24,7 @@ pub(crate) static ASTRO_IMAGE_PATH_DATA_TYPE: LazyLock<DataType> = LazyLock::new
     )))
 });
 
-pub(crate) static ASTRO_RAW_PATHS_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| {
+pub(super) static ASTRO_RAW_PATHS_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| {
     DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
         FsPathMode::ExistingFiles,
         RAW_EXTENSIONS.iter().map(ToString::to_string).collect(),

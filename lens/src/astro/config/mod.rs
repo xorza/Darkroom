@@ -5,14 +5,16 @@ pub(crate) mod preset;
 pub(crate) mod processing;
 pub(crate) mod stacking;
 
+use std::fmt;
+
+use common::Introspect;
+use lumos::{Denoise, ExtractBackground, Hdr, LocalContrast};
 use scenarium::FuncId;
 use scenarium::Library;
 
-use lumos::{Denoise, ExtractBackground, Hdr, LocalContrast};
-
 use crate::astro::config::processing::{ScnrKnobs, StretchKnobs};
 use crate::astro::config::stacking::{CombineKnobs, DetectionKnobs, RegistrationKnobs};
-use crate::config_node::add_config_builder;
+use crate::config_node::ConfigValue;
 
 const BUILD_BACKGROUND_CONFIG_FUNC_ID: FuncId =
     FuncId::literal("9cda0462-1b8e-4c50-83d6-4db470df22d9");
@@ -32,58 +34,68 @@ const BUILD_STRETCH_CONFIG_FUNC_ID: FuncId =
 const BUILD_SCNR_CONFIG_FUNC_ID: FuncId = FuncId::literal("d07742d1-4469-4739-b2ff-78b4dcf64132");
 
 pub(crate) fn register_builders(library: &mut Library) {
-    add_config_builder::<ExtractBackground>(
+    add_builder::<ExtractBackground>(
         library,
         BUILD_BACKGROUND_CONFIG_FUNC_ID,
         "Build Background Config",
         "Builds a detailed background-extraction config",
     );
-    add_config_builder::<DetectionKnobs>(
+    add_builder::<DetectionKnobs>(
         library,
         BUILD_DETECTION_CONFIG_FUNC_ID,
         "Build Detection Config",
         "Builds a detailed star-detection config",
     );
-    add_config_builder::<RegistrationKnobs>(
+    add_builder::<RegistrationKnobs>(
         library,
         BUILD_REGISTRATION_CONFIG_FUNC_ID,
         "Build Registration Config",
         "Builds a detailed registration config",
     );
-    add_config_builder::<CombineKnobs>(
+    add_builder::<CombineKnobs>(
         library,
         BUILD_COMBINE_CONFIG_FUNC_ID,
         "Build Combine Config",
         "Builds a detailed frame-combination config",
     );
-    add_config_builder::<Denoise>(
+    add_builder::<Denoise>(
         library,
         BUILD_DENOISE_CONFIG_FUNC_ID,
         "Build Denoise Config",
         "Builds a detailed wavelet-denoise config",
     );
-    add_config_builder::<Hdr>(
+    add_builder::<Hdr>(
         library,
         BUILD_HDR_CONFIG_FUNC_ID,
         "Build HDR Config",
         "Builds a detailed HDR dynamic-range-compression config",
     );
-    add_config_builder::<LocalContrast>(
+    add_builder::<LocalContrast>(
         library,
         BUILD_LOCAL_CONTRAST_CONFIG_FUNC_ID,
         "Build Local Contrast Config",
         "Builds a detailed local-contrast config",
     );
-    add_config_builder::<StretchKnobs>(
+    add_builder::<StretchKnobs>(
         library,
         BUILD_STRETCH_CONFIG_FUNC_ID,
         "Build Stretch Config",
         "Builds a detailed display-stretch config",
     );
-    add_config_builder::<ScnrKnobs>(
+    add_builder::<ScnrKnobs>(
         library,
         BUILD_SCNR_CONFIG_FUNC_ID,
         "Build SCNR Config",
         "Builds a detailed SCNR (green-removal) config",
     );
+}
+
+fn add_builder<T: Introspect + Clone + fmt::Debug + Send + Sync + 'static>(
+    library: &mut Library,
+    id: FuncId,
+    name: &str,
+    description: &str,
+) {
+    let func = ConfigValue::<T>::builder(library, id, name, description).category("Astro");
+    library.add(func);
 }

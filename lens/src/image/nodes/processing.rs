@@ -6,8 +6,8 @@ use scenarium::Invocation;
 use scenarium::async_lambda;
 use scenarium::{ConstValue, DataType, DynamicValue, InvokeError};
 use scenarium::{Func, FuncInput, FuncOutput, Library};
+use strum::VariantNames;
 
-use crate::config_node::enum_input;
 use crate::image::format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat};
 use crate::image::nodes::BLENDMODE_DATATYPE;
 use crate::image::{IMAGE_DATA_TYPE, Image};
@@ -95,7 +95,7 @@ fn register_convert(library: &mut Library) {
             FuncInput::required("Image", IMAGE_DATA_TYPE.clone()).description("Image to convert."),
         )
         .input(
-            enum_input::<ConversionFormat>("Format", &CONVERSION_FORMAT_DATATYPE)
+            FuncInput::required("Format", CONVERSION_FORMAT_DATATYPE)
                 .default(ConstValue::Enum(ColorFormat::RGB_U8.name().to_string()))
                 .description("Target color format."),
         )
@@ -148,7 +148,13 @@ fn register_blend(library: &mut Library) {
             FuncInput::required("Destination", IMAGE_DATA_TYPE.clone())
                 .description("Bottom image (the blend backdrop)."),
         )
-        .input(enum_input::<BlendMode>("Mode", &BLENDMODE_DATATYPE).description("Blend mode."))
+        .input(
+            FuncInput::required("Mode", BLENDMODE_DATATYPE)
+                .default(ConstValue::Enum(
+                    BlendMode::VARIANTS[BlendMode::default() as usize].to_owned(),
+                ))
+                .description("Blend mode."),
+        )
         .input(
             FuncInput::required("Alpha", DataType::Float)
                 .description("Blend strength in [0, 1]. 1 is full source.")

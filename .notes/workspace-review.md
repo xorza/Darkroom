@@ -57,19 +57,12 @@ Severity: Medium — worst-case frame cost grows with nodes, wires and library s
 ## Public API, dependencies and derives with no production user
 Severity: Low — removable surface; checked with `rg` across the workspace.
 
-- [ ] `lens` — `Cargo.toml` `parking_lot` is unreferenced; `astro/nodes/calibration.rs` `CACHE_PRESENT` prefix distinguishes nothing.
 - [ ] `darkroom` — `core/document/open_document/replay_outcome.rs` `ReplayOutcome::took` (tests only, `allow(dead_code)`); `gui/state/run_state/mod.rs` `RunState::apply_worker_status` is `pub(crate)` with no outside caller; `OpenDocument::open_at_launch_with` is a production indirection (injected `save_preferences` closure) existing for a test.
 
 ## Placeholder values and derived fields stored beside their source
 Severity: Low — `Option`s that must be `Some`, sentinels, and caches of computable values.
 
 - [ ] `darkroom` — `gui/frame/geometry/mod.rs` `PortLayer::record`/`snapshot` `node_min: Option<Vec2>` is always `Some`; `widgets/port_glyph.rs` `PortGlyph::new` defaults the fill to a `WHITE` every caller overrides; `theme/card_theme.rs` `CardBorder` is a one-field wrapper whose only caller reads `.color`; `Theme` derives serde (only a test uses it) and serializes derived values (`const_value_editor_revealed`, `inline_rename_title`, `menu_button`, `palantir_theme`) beside their sources; `Theme::build` stores `text: TypeScale::DEFAULT` and passes a separate `&TypeScale::DEFAULT` to `palantir_theme_for` / `menu_button_for`.
-
-## lens node lambdas repeat boilerplate and disagree on input contracts
-Severity: Low — idioms written 4–37 times, already drifting.
-
-- [ ] `lens/src/config_node.rs` — `enum_input` is not part of the config bridge and its doc says "Shared by both libraries" though only the image library calls it (both `ConversionFormat` sites override its default); `add_config_builder` hard-codes `.category("Astro")`.
-- [ ] `lens/src/astro/nodes/io.rs` `ASTRO_IMAGE_PATH_DATA_TYPE` is `pub(crate)` but used in one file; `astro/mod.rs` module doc says frames flow as `RGB_F32` `Image`, contradicting the planar/interleaved `Pixels` design.
 
 ## darkroom core keeps containers and checks it does not need
 Severity: Low.
