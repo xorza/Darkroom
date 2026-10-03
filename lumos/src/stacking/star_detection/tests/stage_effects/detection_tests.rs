@@ -75,7 +75,11 @@ fn detection_sparse() {
 
     // Detect candidates
     let det_config = DetectionConfig::default();
-    let candidates = detect_stars_test(&pixels, &background, &det_config);
+    let candidates = detect_stars_test(
+        &background.residual_of(&pixels),
+        &background.sky_noise(),
+        &det_config,
+    );
 
     println!("Ground truth: {} stars", ground_truth.len());
     println!("Detected candidates: {}", candidates.len());
@@ -148,7 +152,12 @@ fn detection_is_invariant_to_the_frames_sample_scale() {
         .collect();
     let config = DetectionConfig::default();
 
-    let native = detect_stars_test(&pixels, &background_estimate(&pixels), &config);
+    let native_bg = background_estimate(&pixels);
+    let native = detect_stars_test(
+        &native_bg.residual_of(&pixels),
+        &native_bg.sky_noise(),
+        &config,
+    );
     let native_matched = matched_truths(&native, &truths, 5.0);
     assert!(
         native_matched > 0,
@@ -163,7 +172,6 @@ fn detection_is_invariant_to_the_frames_sample_scale() {
     // The estimate scales with the frame rather than bottoming out: at 1e-5 the tile σ and the
     // floor derived from it are each exactly 1e-5 of their native values.
     let scaled_bg = background_estimate(&scaled);
-    let native_bg = background_estimate(&pixels);
     assert!(
         (scaled_bg.noise_floor / native_bg.noise_floor - SCALE).abs() < SCALE * 1e-3,
         "noise floor {:e} did not track the frame from {:e}",
@@ -171,7 +179,11 @@ fn detection_is_invariant_to_the_frames_sample_scale() {
         native_bg.noise_floor
     );
 
-    let scaled_detected = detect_stars_test(&scaled, &scaled_bg, &config);
+    let scaled_detected = detect_stars_test(
+        &scaled_bg.residual_of(&scaled),
+        &scaled_bg.sky_noise(),
+        &config,
+    );
     assert_eq!(
         matched_truths(&scaled_detected, &truths, 5.0),
         native_matched,
@@ -231,7 +243,11 @@ fn detection_thresholds() {
             sigma_threshold: sigma,
             ..Default::default()
         };
-        let candidates = detect_stars_test(&pixels, &background, &det_config);
+        let candidates = detect_stars_test(
+            &background.residual_of(&pixels),
+            &background.sky_noise(),
+            &det_config,
+        );
         let matched = matched_truths(&candidates, &truth_positions, 5.0);
         println!(
             "sigma {sigma}: candidates {}, matched {matched}",
@@ -314,7 +330,11 @@ fn detection_area_filter() {
             max_area,
             ..Default::default()
         };
-        let candidates = detect_stars_test(&pixels, &background, &det_config);
+        let candidates = detect_stars_test(
+            &background.residual_of(&pixels),
+            &background.sky_noise(),
+            &det_config,
+        );
         let matched = matched_truths(&candidates, &truth_positions, 5.0);
         let false_positives = candidates.len().saturating_sub(matched);
         (matched, false_positives)

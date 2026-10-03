@@ -50,6 +50,24 @@ fn large_image_parallel_path() {
             assert_eq!(label_map[y * width + x], label1);
         }
     }
+
+    // Each 10×10 square: area 100, the half-open box it was drawn into.
+    for (label, min) in [
+        (label1, (10, 10)),
+        (label2, (350, 250)),
+        (label3, (195, 145)),
+    ] {
+        let component = label_map.components()[label as usize - 1];
+        assert_eq!(component.label, label);
+        assert_eq!(component.area, 100);
+        assert_eq!(
+            (component.bbox.min, component.bbox.max),
+            (
+                Vec2us::new(min.0, min.1),
+                Vec2us::new(min.0 + 10, min.1 + 10)
+            )
+        );
+    }
 }
 
 #[test]

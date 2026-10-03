@@ -1,6 +1,6 @@
-use crate::math::urect::URect;
 use crate::stacking::star_detection::detector::stages::detect::*;
 use crate::testing::prelude::*;
+use crate::testing::synthetic::background_map;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 
 /// The rendered stars and a label map marking all of them as one component.
@@ -38,12 +38,18 @@ fn one_component(size: Size2us, stars: &[SyntheticStar]) -> OneComponent {
 
 fn local_maxima_config() -> DetectionConfig {
     DetectionConfig {
-        deblend_n_thresholds: 0, // 0 selects the local-maxima deblend path
+        deblend: Deblend::LocalMaxima {
+            min_prominence: 0.3,
+        },
         deblend_min_separation: 3,
-        deblend_min_prominence: 0.3,
         max_area: usize::MAX,
         ..Default::default()
     }
+}
+
+/// A flat sky noise of 0.01 over `size`.
+fn flat_sky(size: Size2us) -> SkyNoise {
+    background_map::uniform(size, 0.0, 0.01).sky_noise()
 }
 
 #[test]
@@ -76,7 +82,14 @@ fn local_maxima_deblended_counts_split_components_not_extra_regions() {
         ],
     );
 
-    let result = extract_candidates(&pixels, &label_map, &local_maxima_config());
+    let sky = flat_sky(Size2us::new(pixels.width(), pixels.height()));
+    let result = extract_candidates(
+        &pixels,
+        &sky,
+        &label_map,
+        &local_maxima_config(),
+        &JobScratchPool::default(),
+    );
 
     assert_eq!(
         result.regions.len(),
@@ -104,71 +117,17 @@ fn local_maxima_single_peak_reports_zero_deblended() {
         )],
     );
 
-    let result = extract_candidates(&pixels, &label_map, &local_maxima_config());
+    let sky = flat_sky(Size2us::new(pixels.width(), pixels.height()));
+    let result = extract_candidates(
+        &pixels,
+        &sky,
+        &label_map,
+        &local_maxima_config(),
+        &JobScratchPool::default(),
+    );
 
     assert_eq!(result.regions.len(), 1);
     assert_eq!(result.deblended_components, 0);
-}
-
-#[test]
-fn component_collection_merges_cross_job_metadata_exactly() {
-    let width = 5;
-    let height = 6;
-    let mut labels = Buffer2::new_filled(width, height, 0u32);
-    for (x, y, label) in [
-        (0, 0, 1),
-        (1, 0, 1),
-        (0, 3, 1),
-        (4, 1, 2),
-        (3, 4, 2),
-        (2, 5, 3),
-    ] {
-        labels[(x, y)] = label;
-    }
-    let label_map = LabelMap::from_raw(labels, 3);
-
-    let components = collect_component_data(&label_map);
-    let parallel = collect_component_data_dense(&label_map, 3);
-    let sequential = collect_component_data_dense(&label_map, 1);
-
-    assert_eq!(components.len(), 3);
-    assert_eq!(components[0].label, 1);
-    assert_eq!(components[0].area, 3);
-    assert_eq!(
-        components[0].bbox,
-        URect::new(Vec2us::new(0, 0), Vec2us::new(2, 4))
-    );
-    assert_eq!(components[1].label, 2);
-    assert_eq!(components[1].area, 2);
-    assert_eq!(
-        components[1].bbox,
-        URect::new(Vec2us::new(3, 1), Vec2us::new(5, 5))
-    );
-    assert_eq!(components[2].label, 3);
-    assert_eq!(components[2].area, 1);
-    assert_eq!(
-        components[2].bbox,
-        URect::new(Vec2us::new(2, 5), Vec2us::new(3, 6))
-    );
-    for alternative in [parallel, sequential] {
-        assert_eq!(alternative.len(), components.len());
-        for (actual, expected) in alternative.iter().zip(&components) {
-            assert_eq!(actual.label, expected.label);
-            assert_eq!(actual.area, expected.area);
-            assert_eq!(actual.bbox, expected.bbox);
-        }
-    }
-
-    assert_eq!(
-        dense_component_jobs(100_000, 2048 * 2048, 8),
-        3,
-        "three 4.8 MB dense jobs fit in one 16 MiB label plane"
-    );
-    assert_eq!(
-        dense_component_jobs(2048 * 2048, 2048 * 2048, 8),
-        1,
-        "an oversized dense scratch falls back to the scratch-free sequential scan"
-    );
 }
 
 #[test]
@@ -196,8 +155,13 @@ fn edge_margin_swallowing_image_yields_no_regions_without_panicking() {
             ..local_maxima_config()
         };
 
-        let result =
-            extract_and_filter_candidates(&pixels, &label_map, &config, Size2us::new(32, 32));
+        let result = extract_and_filter_candidates(
+            &pixels,
+            &flat_sky(Size2us::new(32, 32)),
+            &label_map,
+            &config,
+            &JobScratchPool::default(),
+        );
 
         assert!(
             result.regions.is_empty(),

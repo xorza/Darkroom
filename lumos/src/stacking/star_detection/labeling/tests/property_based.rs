@@ -24,6 +24,12 @@ fn random_masks_match_reference() {
             density: 0.25,
             seeds: 0..10,
         },
+        // Tall enough for several strips, so the run-collected components cross boundaries.
+        RandomMaskCase {
+            size: Size2us::new(150, 300),
+            density: 0.3,
+            seeds: 25..28,
+        },
         RandomMaskCase {
             size: Size2us::new(42, 46),
             density: 0.5,

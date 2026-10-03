@@ -203,6 +203,7 @@ fn compare_with_reference(mask_data: &[bool], size: Size2us) {
     );
 
     verify_ccl_invariants(mask_data, label_map_4.labels(), size, Connectivity::Four);
+    verify_components(&label_map_4);
 
     // Verify same grouping (labels may differ but grouping must match)
     verify_same_grouping(label_map_4.labels(), &ref_labels_4, size.pixel_count());
@@ -223,7 +224,24 @@ fn compare_with_reference(mask_data: &[bool], size: Size2us) {
     );
 
     verify_ccl_invariants(mask_data, label_map_8.labels(), size, Connectivity::Eight);
+    verify_components(&label_map_8);
     verify_same_grouping(label_map_8.labels(), &ref_labels_8, size.pixel_count());
+}
+
+/// The box and area the labeling collected from its runs against a scan of every labelled pixel.
+fn verify_components(label_map: &LabelMap) {
+    let size = Size2us::new(label_map.width(), label_map.height());
+    let scanned = LabelMap::from_raw(
+        Buffer2::new(size.width, size.height, label_map.labels().to_vec()),
+        label_map.num_labels(),
+    );
+    assert_eq!(label_map.components().len(), scanned.components().len());
+    for (from_runs, from_scan) in label_map.components().iter().zip(scanned.components()) {
+        assert_eq!(
+            (from_runs.label, from_runs.area, from_runs.bbox),
+            (from_scan.label, from_scan.area, from_scan.bbox)
+        );
+    }
 }
 
 /// Verify two labelings have the same grouping (same pixels grouped together).

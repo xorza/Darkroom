@@ -10,7 +10,7 @@
 use crate::bit_buffer2::BitBuffer2;
 use crate::stacking::star_detection::threshold_mask::internals::{TEST_MIN_NOISE, test_params};
 use crate::stacking::star_detection::threshold_mask::{
-    create_threshold_mask, create_threshold_mask_filtered,
+    create_residual_threshold_mask, create_threshold_mask,
 };
 use crate::testing::prelude::*;
 
@@ -31,7 +31,7 @@ fn create_threshold_mask_test(
 }
 
 /// Helper to create filtered threshold mask for tests
-fn create_threshold_mask_filtered_test(
+fn create_residual_threshold_mask_test(
     filtered: &[f32],
     noise: &[f32],
     sigma: f32,
@@ -40,7 +40,7 @@ fn create_threshold_mask_filtered_test(
     let filtered = Buffer2::new(size.width, size.height, filtered.to_vec());
     let noise = Buffer2::new(size.width, size.height, noise.to_vec());
     let mut mask = BitBuffer2::new_filled(size, false);
-    create_threshold_mask_filtered(&filtered, &noise, test_params(sigma), &mut mask);
+    create_residual_threshold_mask(&filtered, &noise, test_params(sigma), &mut mask);
     mask
 }
 
@@ -306,7 +306,7 @@ fn filtered_threshold_mask_truth_table() {
 
     for case in cases {
         let mask =
-            create_threshold_mask_filtered_test(case.pixels, case.noise, case.sigma, case.size);
+            create_residual_threshold_mask_test(case.pixels, case.noise, case.sigma, case.size);
         let actual: Vec<bool> = mask.iter().collect();
 
         assert_eq!(actual.as_slice(), case.expected, "{}: {case:?}", case.name);
@@ -490,7 +490,7 @@ fn filtered_matches_scalar() {
     let scalar_mask = scalar_threshold_filtered(&pixels_data, &noise_data, sigma);
 
     // Compute with packed BitBuffer2
-    let mask = create_threshold_mask_filtered_test(
+    let mask = create_residual_threshold_mask_test(
         &pixels_data,
         &noise_data,
         sigma,
@@ -686,7 +686,7 @@ fn filtered_remainder_handling() {
         // even indices: 0.5 > 0.3 -> true
         // odd indices: 0.1 <= 0.3 -> false
         let mask =
-            create_threshold_mask_filtered_test(&filtered, &noise, 3.0, Size2us::new(size, 1));
+            create_residual_threshold_mask_test(&filtered, &noise, 3.0, Size2us::new(size, 1));
 
         for i in 0..size {
             let expected = i % 2 == 0;
@@ -714,7 +714,7 @@ fn filtered_large_image() {
     }
 
     let mask =
-        create_threshold_mask_filtered_test(&filtered, &noise, 3.0, Size2us::new(width, height));
+        create_residual_threshold_mask_test(&filtered, &noise, 3.0, Size2us::new(width, height));
 
     for y in 0..height {
         for x in 0..width {

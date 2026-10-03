@@ -13,8 +13,8 @@ pub struct FilterConfig {
     pub max_sharpness: f32,
     /// Maximum accepted absolute roundness.
     pub max_roundness: f32,
-    /// Maximum robust FWHM deviation in MAD-scaled units.
-    pub max_fwhm_deviation: f32,
+    /// Maximum robust FWHM deviation in MAD-scaled units, or `None` to keep every FWHM.
+    pub max_fwhm_deviation: Option<f32>,
     /// Minimum retained separation between duplicate stars in pixels.
     pub duplicate_min_separation: f32,
 }
@@ -26,7 +26,7 @@ impl Default for FilterConfig {
             max_eccentricity: 0.6,
             max_sharpness: 0.7,
             max_roundness: 0.5,
-            max_fwhm_deviation: 3.0,
+            max_fwhm_deviation: Some(3.0),
             duplicate_min_separation: 8.0,
         }
     }
@@ -55,12 +55,14 @@ impl FilterConfig {
             self.max_roundness,
             |value| value > 0.0 && value <= 1.0,
         )?;
-        InvalidConfigField::finite(
-            "max_fwhm_deviation",
-            "finite and non-negative",
-            self.max_fwhm_deviation,
-            |value| value >= 0.0,
-        )?;
+        if let Some(deviation) = self.max_fwhm_deviation {
+            InvalidConfigField::finite(
+                "max_fwhm_deviation",
+                "finite and positive",
+                deviation,
+                |value| value > 0.0,
+            )?;
+        }
         InvalidConfigField::finite(
             "duplicate_min_separation",
             "finite and non-negative",

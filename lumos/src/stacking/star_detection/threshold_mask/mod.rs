@@ -1,8 +1,8 @@
 //! SIMD-optimized threshold mask creation.
 //!
-//! Creates binary masks marking pixels above a sigma threshold relative to
-//! background and noise estimates. Used by both background estimation
-//! (to mask bright objects) and detection (to find star candidates).
+//! Creates binary masks marking pixels above a sigma threshold: against a background map, which
+//! background refinement masks bright objects with before the sky is known well enough to
+//! subtract, and on the residual, which detection finds its candidates in.
 //!
 //! Uses bit-packed storage (`BitBuffer2`) for memory efficiency - each pixel
 //! uses 1 bit instead of 1 byte, reducing memory usage by 8x.
@@ -23,9 +23,8 @@ use imaginarium::Buffer2;
 pub(crate) struct ThresholdParams {
     /// Detection threshold in units of the local noise σ.
     pub(crate) sigma: f32,
-    /// Floor applied to each per-pixel σ, in the samples' own units — see
-    /// [`BackgroundEstimate::noise_floor`](crate::stacking::star_detection::background::background_estimate::BackgroundEstimate::noise_floor), which is
-    /// what every caller in the pipeline passes.
+    /// Floor applied to each per-pixel σ, in the samples' own units — the frame's own floor from
+    /// `background_estimate::noise_floor_from`, which is what every caller in the pipeline passes.
     pub(crate) min_noise: f32,
 }
 
@@ -77,15 +76,15 @@ pub(crate) fn create_threshold_mask(
         });
 }
 
-/// Create binary mask from a filtered (background-subtracted) image.
+/// Create binary mask from a residual — an image whose sky is already subtracted, matched-filtered
+/// or not.
 ///
-/// Sets bit `i` to 1 where `filtered[i] > sigma * noise[i]`.
-/// Used for matched-filtered images where background is already subtracted.
+/// Sets bit `i` to 1 where `residual[i] > sigma * noise[i]`.
 ///
 /// Note: All input buffers must have the same dimensions as the mask.
 /// The output mask has row-aligned storage (stride may differ from width).
-pub(crate) fn create_threshold_mask_filtered(
-    filtered: &Buffer2<f32>,
+pub(crate) fn create_residual_threshold_mask(
+    residual: &Buffer2<f32>,
     noise: &Buffer2<f32>,
     threshold: ThresholdParams,
     mask: &mut BitBuffer2,
@@ -93,13 +92,13 @@ pub(crate) fn create_threshold_mask_filtered(
     let width = mask.size.width;
     let height = mask.size.height;
     // Release asserts (see `create_threshold_mask`): these dims drive unchecked SIMD loads.
-    assert_eq!(width, filtered.width());
-    assert_eq!(height, filtered.height());
+    assert_eq!(width, residual.width());
+    assert_eq!(height, residual.height());
     assert_eq!(width, noise.width());
     assert_eq!(height, noise.height());
 
     let words_per_row = mask.words_per_row();
-    let filtered = filtered.pixels();
+    let residual = residual.pixels();
     let noise = noise.pixels();
 
     mask.words
@@ -108,7 +107,7 @@ pub(crate) fn create_threshold_mask_filtered(
         .for_each(|(y, row_words)| {
             let row_pixel_start = y * width;
             simd::process_words::<false>(
-                filtered,
+                residual,
                 &[],
                 noise,
                 threshold,

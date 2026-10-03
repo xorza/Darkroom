@@ -8,63 +8,23 @@ use std::cmp::Reverse;
 use std::hint::black_box;
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::math::urect::URect;
 use crate::stacking::star_detection::config::detection_config::Connectivity;
-use crate::stacking::star_detection::deblend::ComponentData;
+use crate::stacking::star_detection::deblend::component::Component;
 use crate::stacking::star_detection::deblend::local_maxima::{
     deblend_local_maxima, find_local_maxima,
 };
 use crate::stacking::star_detection::labeling::LabelMap;
 use crate::testing::synthetic::fixtures::cluster_field;
 
-/// A label map and the components it labels.
-#[derive(Debug)]
-struct Components {
-    labels: LabelMap,
-    components: Vec<ComponentData>,
-}
-
-/// Create components from a pixel buffer for benchmarking.
-fn create_components_from_pixels(pixels: &Buffer2<f32>, threshold: f32) -> Components {
-    let width = pixels.width();
-    let height = pixels.height();
-
-    let mut mask = BitBuffer2::new_filled(Size2us::new(width, height), false);
+/// Label the pixels of `pixels` above `threshold`, for benchmarking.
+fn label_above(pixels: &Buffer2<f32>, threshold: f32) -> LabelMap {
+    let mut mask = BitBuffer2::new_filled(Size2us::new(pixels.width(), pixels.height()), false);
     for (idx, &value) in pixels.iter().enumerate() {
         if value > threshold {
             mask.set(idx, true);
         }
     }
-
-    let labels = LabelMap::from_mask(&mask, Connectivity::Four);
-    let num_labels = labels.num_labels();
-
-    let mut components = Vec::with_capacity(num_labels);
-    let mut bboxes = vec![URect::empty(); num_labels + 1];
-    let mut areas = vec![0usize; num_labels + 1];
-
-    for y in 0..height {
-        for x in 0..width {
-            let idx = y * width + x;
-            let label = labels[idx];
-            if label > 0 {
-                bboxes[label as usize].include(Vec2us::new(x, y));
-                areas[label as usize] += 1;
-            }
-        }
-    }
-
-    for label in 1..=num_labels {
-        if areas[label] > 0 {
-            components.push(ComponentData {
-                bbox: bboxes[label],
-                label: label as u32,
-                area: areas[label],
-            });
-        }
-    }
-
-    Components { labels, components }
+    LabelMap::from_mask(&mask, Connectivity::Four)
 }
 
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
@@ -73,21 +33,22 @@ fn bench_find_local_maxima_6k_dense(b: ::quickbench::Bencher) {
         .image
         .channel(0)
         .clone();
-    let Components { labels, components } = create_components_from_pixels(&pixels, 0.05);
+    let labels = label_above(&pixels, 0.05);
+    let components = labels.components();
 
     // Find the 100 largest components for benchmarking
-    let mut sorted_components = components.clone();
+    let mut sorted_components = components.to_vec();
     sorted_components.sort_by_key(|c| Reverse(c.area));
     let large_components: Vec<_> = sorted_components.into_iter().take(100).collect();
 
+    let mut maxima = Vec::new();
     b.bench(|| {
         for component in &large_components {
             black_box(find_local_maxima(
-                black_box(component),
-                black_box(&pixels),
-                black_box(&labels),
+                &Component::new(black_box(component), &pixels, &labels),
                 black_box(3),
                 black_box(0.3),
+                &mut maxima,
             ));
         }
     });
@@ -99,16 +60,17 @@ fn bench_deblend_local_maxima_6k_dense(b: ::quickbench::Bencher) {
         .image
         .channel(0)
         .clone();
-    let Components { labels, components } = create_components_from_pixels(&pixels, 0.05);
+    let labels = label_above(&pixels, 0.05);
+    let components = labels.components();
 
+    let mut maxima = Vec::new();
     b.bench(|| {
-        for component in &components {
+        for component in components {
             black_box(deblend_local_maxima(
-                black_box(component),
-                black_box(&pixels),
-                black_box(&labels),
+                &Component::new(black_box(component), &pixels, &labels),
                 black_box(3),
                 black_box(0.3),
+                &mut maxima,
             ));
         }
     });
@@ -120,16 +82,17 @@ fn bench_local_maxima_4k_dense(b: ::quickbench::Bencher) {
         .image
         .channel(0)
         .clone();
-    let Components { labels, components } = create_components_from_pixels(&pixels, 0.05);
+    let labels = label_above(&pixels, 0.05);
+    let components = labels.components();
 
+    let mut maxima = Vec::new();
     b.bench(|| {
-        for component in &components {
+        for component in components {
             black_box(deblend_local_maxima(
-                black_box(component),
-                black_box(&pixels),
-                black_box(&labels),
+                &Component::new(black_box(component), &pixels, &labels),
                 black_box(3),
                 black_box(0.3),
+                &mut maxima,
             ));
         }
     });

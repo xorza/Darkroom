@@ -7,9 +7,8 @@
 use glam::DVec2;
 use imaginarium::Buffer2;
 
+use crate::math::fwhm::equal_area_fwhm;
 use crate::math::size2us::Size2us;
-use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
-use crate::stacking::star_detection::centroid::local_background::LocalBackground;
 use crate::stacking::star_detection::centroid::{MAX_STAMP_SIZE, is_valid_stamp_position};
 
 #[derive(Debug, Clone, Copy)]
@@ -26,6 +25,25 @@ impl Cov2 {
 
     pub(super) fn det(self) -> f64 {
         self.xx * self.yy - self.xy * self.xy
+    }
+
+    /// The FWHM of the circle of equal area — see [`equal_area_fwhm`].
+    pub(super) fn fwhm(self) -> f32 {
+        equal_area_fwhm(self.det())
+    }
+
+    /// `√(1 − λ₂/λ₁)` from the principal variances `λ₁ ≥ λ₂`: 0 for a round profile, toward 1 as
+    /// it elongates, whatever its orientation.
+    pub(super) fn eccentricity(self) -> f32 {
+        let trace = self.trace();
+        let spread = (trace * trace - 4.0 * self.det()).max(0.0).sqrt();
+        let major = f64::midpoint(trace, spread);
+        let minor = (trace - spread) / 2.0;
+        if major > f64::EPSILON {
+            (1.0 - minor / major).max(0.0).sqrt().min(1.0) as f32
+        } else {
+            0.0
+        }
     }
 
     /// Inverse of the symmetric matrix, or `None` if (near-)singular.
@@ -52,23 +70,22 @@ pub(super) const MAX_SIGMA_SQ: f64 = 100.0;
 /// Weights the second moments by a circular Gaussian whose scale is iterated to
 /// match the source (`σ_w² → trace(C)/2`), exponentially suppressing far-wing
 /// noise, then deconvolves the window — `C = (C_obs⁻¹ − σ_w⁻²·I)⁻¹` — so the
-/// result stays unbiased. Uses the unclamped signed `(px − bg)`: the window already
+/// result stays unbiased. Uses the unclamped signed residual less `offset`: the window already
 /// kills the wings, so noise cancels instead of rectifying and inflating
 /// eccentricity (the failure mode of plain signed moments over a fixed stamp).
 ///
 /// Returns the source covariance, or `None` if it never reaches a valid
 /// positive-definite estimate (caller falls back to the plain moments).
 ///
-/// `background_override` replaces the per-pixel map with a flat stamp-level sky,
-/// exactly as in [`compute_star`](super::compute_star) — both must subtract the same background or
-/// FWHM/eccentricity and flux/SNR would come from different sky conventions.
+/// `offset` is the stamp's local sky left in the residual, exactly as in
+/// [`compute_star`](super::compute_star) — both must subtract the same one or FWHM/eccentricity and
+/// flux/SNR would come from different sky conventions.
 ///
 /// The whole stamp must lie inside the frame; this indexes rows and columns unchecked, so a
 /// position nearer the edge than `stamp_radius` underflows the column arithmetic.
 pub(super) fn windowed_covariance(
-    pixels: &Buffer2<f32>,
-    background: &BackgroundEstimate,
-    background_override: Option<LocalBackground>,
+    residual: &Buffer2<f32>,
+    offset: f32,
     pos: DVec2,
     stamp_radius: usize,
     seed_sigma_sq: f64,
@@ -79,7 +96,7 @@ pub(super) fn windowed_covariance(
     debug_assert!(
         is_valid_stamp_position(
             pos,
-            Size2us::new(pixels.width(), pixels.height()),
+            Size2us::new(residual.width(), residual.height()),
             stamp_radius
         ),
         "windowed_covariance needs the whole stamp in frame: pos {pos}, radius {stamp_radius}"
@@ -121,8 +138,7 @@ pub(super) fn windowed_covariance(
 
         for dy in -sr..=sr {
             let y = (icy + dy as isize) as usize;
-            let px_row = pixels.row(y);
-            let bg_row = background.background.row(y);
+            let px_row = residual.row(y);
 
             let fy = y as f64 - pos_y;
             let row_weight = (-fy * fy * inv_two_sw).exp();
@@ -133,11 +149,7 @@ pub(super) fn windowed_covariance(
                 .enumerate()
             {
                 let x = icx as usize + column - stamp_radius;
-                let bg = match background_override {
-                    Some(local) => local.bg,
-                    None => bg_row[x],
-                };
-                let wv = column_weight * row_weight * f64::from(px_row[x] - bg);
+                let wv = column_weight * row_weight * f64::from(px_row[x] - offset);
                 w_sum += wv;
                 mxx += wv * fx * fx;
                 myy += wv * fy * fy;

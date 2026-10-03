@@ -118,13 +118,14 @@ pub(crate) fn quality_plane_bytes(dimensions: ImageDimensions) -> usize {
     FRAME_QUALITY_PLANES * dimensions.pixel_count() * size_of::<f32>()
 }
 
-/// Image-sized planes the star detector's pool holds at its high-water mark: six f32 planes, the
-/// u32 label map, and the threshold bitmask. The bitmask is a thirty-second of an f32 plane;
-/// charging it as a whole one keeps this integral and errs high.
+/// Image-sized planes the star detector's pool holds at its high-water mark over every preset:
+/// four f32 planes (the residual, the sky noise, and the matched filter's output and pass
+/// scratch), the u32 label map, and two bitmasks (saturation and threshold). A bitmask is a
+/// thirty-second of an f32 plane; charging each as a whole one keeps this integral and errs high.
 ///
 /// `star_detection::mem_budget_tests` pins the detector's actual pool and checks it against this,
 /// so a stage that grows its scratch cannot drift away from the planner silently.
-pub(crate) const DETECTION_WORKING_PLANES: usize = 8;
+pub(crate) const DETECTION_WORKING_PLANES: usize = 7;
 
 /// What one frame costs the detect-register-warp stage, derived from the decoded frame rather
 /// than assumed — so a mono frame is not charged for channels it does not have, and a demosaiced

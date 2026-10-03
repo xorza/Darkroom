@@ -33,11 +33,6 @@ impl URect {
         }
     }
 
-    #[inline]
-    pub(crate) const fn is_empty(self) -> bool {
-        self.min.x >= self.max.x || self.min.y >= self.max.y
-    }
-
     // Saturating, not plain subtraction: `empty()` inverts the bounds to seed accumulation,
     // so it is the one rectangle whose min can exceed its max.
     #[inline]
@@ -70,27 +65,6 @@ impl URect {
         self.min.y = min_usize(self.min.y, point.y);
         self.max.x = max_usize(self.max.x, point.x + 1);
         self.max.y = max_usize(self.max.y, point.y + 1);
-    }
-
-    #[inline]
-    pub(crate) const fn union(self, other: Self) -> Self {
-        if self.is_empty() {
-            return other;
-        }
-        if other.is_empty() {
-            return self;
-        }
-
-        Self::new(
-            Vec2us::new(
-                min_usize(self.min.x, other.min.x),
-                min_usize(self.min.y, other.min.y),
-            ),
-            Vec2us::new(
-                max_usize(self.max.x, other.max.x),
-                max_usize(self.max.y, other.max.y),
-            ),
-        )
     }
 }
 

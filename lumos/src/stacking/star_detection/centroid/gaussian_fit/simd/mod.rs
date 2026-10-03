@@ -25,8 +25,8 @@ mod neon;
 pub(super) fn batch_build_normal_equations(
     model: &Gaussian2D,
     data: FitData<'_>,
-    params: &[f64; 6],
-) -> Option<NormalEquations<6>> {
+    params: &[f64; 7],
+) -> Option<NormalEquations<7>> {
     if data.weights.is_some() {
         return None;
     }
@@ -46,7 +46,7 @@ pub(super) fn batch_build_normal_equations(
 pub(super) fn batch_compute_chi2(
     model: &Gaussian2D,
     data: FitData<'_>,
-    params: &[f64; 6],
+    params: &[f64; 7],
 ) -> Option<f64> {
     if data.weights.is_some() {
         return None;

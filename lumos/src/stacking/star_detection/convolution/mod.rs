@@ -8,10 +8,9 @@
 
 mod simd;
 
-use simd::mirror_index;
-
 use rayon::prelude::*;
 
+use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::math::fwhm::fwhm_to_sigma;
 use crate::math::size2us::Size2us;
 use imaginarium::Buffer2;
@@ -26,92 +25,60 @@ struct GaussianKernel2d {
     size: usize,
 }
 
-/// Scratch buffers for [`matched_filter`]. All three must have the same
-/// dimensions as the input image.
+/// Scratch buffers for [`matched_filter`]. Both must have the same dimensions as the input image.
 #[derive(Debug)]
 pub(crate) struct MatchedFilterBuffers<'a> {
     /// Convolved output (the result).
     pub(crate) output: &'a mut Buffer2<f32>,
-    /// Scratch space for background subtraction.
-    pub(crate) subtraction_scratch: &'a mut Buffer2<f32>,
     /// Temporary buffer for separable convolution passes.
     pub(crate) temp: &'a mut Buffer2<f32>,
 }
 
 /// Apply matched filter convolution optimized for star detection.
 ///
-/// Convolves the background-subtracted image with a Gaussian kernel matching
-/// the expected PSF. The output is normalized by `sqrt(sum(K^2))` so that the
-/// noise level in the convolved image matches the original noise map. This
-/// means the existing threshold `filtered[px] > sigma * noise[px]` is correct.
+/// Convolves the residual — the image less its sky, so the convolution carries no pedestal — with a
+/// Gaussian kernel matching the expected PSF. The output is normalized by `sqrt(sum(K^2))` so that
+/// the noise level in the convolved image matches the original noise map, and the threshold
+/// `filtered[px] > sigma * noise[px]` stays correct.
 ///
 /// Follows the SEP matched filter approach (Barbary 2016):
 /// `SNR = conv(D, K) / (sigma * sqrt(sum(K^2)))`
 ///
 /// Supports elliptical PSF shapes for stars elongated due to tracking errors,
 /// field rotation, or optical aberrations. For circular PSFs, use `axis_ratio = 1.0`.
-///
-/// # Arguments
-/// * `pixels` - Input image
-/// * `background` - Background model to subtract
-/// * `fwhm` - Full width at half maximum of PSF
-/// * `axis_ratio` - PSF ellipticity (1.0 = circular)
-/// * `angle` - PSF rotation angle in radians
-/// * `buffers` - Pre-allocated scratch buffers (same dimensions as input)
 pub(crate) fn matched_filter(
-    pixels: &Buffer2<f32>,
-    background: &Buffer2<f32>,
+    residual: &Buffer2<f32>,
     fwhm: f32,
     axis_ratio: f32,
     angle: f32,
     buffers: &mut MatchedFilterBuffers<'_>,
 ) {
     let output = &mut *buffers.output;
-    let subtraction_scratch = &mut *buffers.subtraction_scratch;
     let temp = &mut *buffers.temp;
-    assert_eq!(pixels.width(), background.width());
-    assert_eq!(pixels.height(), background.height());
-    assert_eq!(pixels.width(), output.width());
-    assert_eq!(pixels.height(), output.height());
-    assert_eq!(pixels.width(), subtraction_scratch.width());
-    assert_eq!(pixels.height(), subtraction_scratch.height());
+    assert_eq!(residual.width(), output.width());
+    assert_eq!(residual.height(), output.height());
     assert!(
         axis_ratio > 0.0 && axis_ratio <= 1.0,
         "Axis ratio must be in (0, 1]"
     );
 
-    // Subtract background (parallel) - allow negative residuals for correct
-    // noise statistics during convolution (no clipping)
-    subtraction_scratch
-        .pixels_mut()
-        .par_iter_mut()
-        .zip(pixels.pixels().par_iter())
-        .zip(background.pixels().par_iter())
-        .for_each(|((out, &px), &bg)| {
-            *out = px - bg;
-        });
-
-    // Convolve with elliptical Gaussian kernel
     let sigma = fwhm_to_sigma(fwhm);
 
-    // Compute noise normalization factor: sqrt(sum(K^2))
-    // For separable kernel: sum_2d(K^2) = sum_1d(K^2)^2
-    // axis_ratio close to 1.0 → circular kernel; use faster separable path
+    // sqrt(sum(K²)) of the kernel the convolution used; an axis ratio this close to 1 takes the
+    // separable circular kernel.
     let noise_norm = if (axis_ratio - 1.0).abs() < CIRCULAR_KERNEL_THRESHOLD {
-        gaussian_convolve(subtraction_scratch, sigma, output, temp)
+        gaussian_convolve(residual, sigma, output, temp)
     } else {
-        elliptical_gaussian_convolve(subtraction_scratch, sigma, axis_ratio, angle, output, temp)
+        elliptical_gaussian_convolve(residual, sigma, axis_ratio, angle, output)
     };
 
-    // Normalize output so noise matches original noise map.
-    // After convolution: conv_noise = orig_noise * sqrt(sum(K^2))
-    // After division: normalized_noise = orig_noise
-    // So threshold `filtered[px] > sigma * noise[px]` uses the correct noise.
+    // After convolution the noise is the map's times sqrt(sum(K²)); dividing it out puts the
+    // filtered image back on the map's scale.
     let inv_norm = 1.0 / noise_norm;
     output
         .pixels_mut()
-        .par_iter_mut()
-        .for_each(|px| *px *= inv_norm);
+        .par_chunks_mut(SAMPLES_PER_BLOCK)
+        .for_each(|block| block.iter_mut().for_each(|px| *px *= inv_norm));
 }
 
 /// Apply separable Gaussian convolution to an image.
@@ -142,15 +109,8 @@ fn gaussian_convolve_with_kernel(
     output: &mut Buffer2<f32>,
     temp: &mut Buffer2<f32>,
 ) {
-    let width = pixels.width();
-    let height = pixels.height();
-    let radius = kernel.len() / 2;
-
-    // If kernel is larger than image dimension, fall back to direct 2D convolution
-    if radius >= width.min(height) / 2 {
-        gaussian_convolve_2d_direct(pixels, kernel, output);
-        return;
-    }
+    // Both passes mirror at the edges per axis, so they hold for a kernel wider than the image
+    // too — the outer-product kernel with the same per-axis mirror is algebraically this result.
 
     // Step 1: Convolve rows (horizontal pass)
     convolve_rows_parallel(pixels, temp, kernel);
@@ -171,17 +131,9 @@ fn elliptical_gaussian_convolve(
     axis_ratio: f32,
     angle: f32,
     output: &mut Buffer2<f32>,
-    temp: &mut Buffer2<f32>,
 ) -> f32 {
-    let width = pixels.width();
-    let height = pixels.height();
-    assert_eq!(width, output.width());
-    assert_eq!(height, output.height());
-
-    // For axis_ratio very close to 1.0, use faster separable convolution
-    if (axis_ratio - 1.0).abs() < CIRCULAR_KERNEL_THRESHOLD {
-        return gaussian_convolve(pixels, sigma, output, temp);
-    }
+    assert_eq!(pixels.width(), output.width());
+    assert_eq!(pixels.height(), output.height());
 
     let kernel = elliptical_gaussian_kernel_2d(sigma, axis_ratio, angle);
     convolve_2d(pixels, &kernel, output);
@@ -259,50 +211,6 @@ fn convolve_cols(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kernel: &[f32]
     let radius = kernel.len() / 2;
 
     simd::convolve_cols_direct(input.pixels(), output.pixels_mut(), size, kernel, radius);
-}
-
-/// Direct 2D Gaussian convolution for small images or large kernels.
-fn gaussian_convolve_2d_direct(
-    pixels: &Buffer2<f32>,
-    kernel_1d: &[f32],
-    output: &mut Buffer2<f32>,
-) {
-    let width = pixels.width();
-    let height = pixels.height();
-    let radius = kernel_1d.len() / 2;
-
-    // Build 2D kernel
-    let ksize = kernel_1d.len();
-    let mut kernel_2d = vec![0.0f32; ksize * ksize];
-    for ky in 0..ksize {
-        for kx in 0..ksize {
-            kernel_2d[ky * ksize + kx] = kernel_1d[ky] * kernel_1d[kx];
-        }
-    }
-
-    output
-        .pixels_mut()
-        .par_chunks_mut(width)
-        .enumerate()
-        .for_each(|(y, out_row)| {
-            for (x, out_pixel) in out_row.iter_mut().enumerate() {
-                let mut sum = 0.0f32;
-
-                for ky in 0..ksize {
-                    for kx in 0..ksize {
-                        let sx = x as isize + kx as isize - radius as isize;
-                        let sy = y as isize + ky as isize - radius as isize;
-
-                        let sx = mirror_index(sx, width);
-                        let sy = mirror_index(sy, height);
-
-                        sum += pixels.row(sy)[sx] * kernel_2d[ky * ksize + kx];
-                    }
-                }
-
-                *out_pixel = sum;
-            }
-        });
 }
 
 /// Compute 2D elliptical Gaussian kernel (normalized to sum to 1.0).

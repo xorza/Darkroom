@@ -40,7 +40,7 @@ use crate::testing::synthetic::scene::{BackgroundField, Scene};
 /// so the measured FWHM stays accurate.
 fn synthetic_config() -> Config {
     let mut config = Config::default();
-    config.fwhm.expected = 0.0;
+    config.fwhm.mode = None;
     config.filter.min_snr = 5.0;
     config
 }

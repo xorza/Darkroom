@@ -107,7 +107,7 @@ fn convolve_pixel_scalar(
 #[inline]
 pub(super) fn convolve_row(input: &[f32], output: &mut [f32], kernel: &[f32], radius: usize) {
     dispatch! {
-        x86: avx2_fma => x86::convolve_row_avx2(input, output, kernel, radius),
+        x86: avx2 => x86::convolve_row_avx2(input, output, kernel, radius),
         x86: sse4_1 => x86::convolve_row_sse41(input, output, kernel, radius),
         aarch64 => neon::convolve_row_neon(input, output, kernel, radius),
         scalar => convolve_row_scalar(input, output, kernel, radius),
@@ -158,7 +158,7 @@ fn convolve_cols_row(
     radius: usize,
 ) {
     dispatch! {
-        x86: avx2_fma => x86::convolve_cols_row_avx2(input, out_row, size, y, kernel, radius),
+        x86: avx2 => x86::convolve_cols_row_avx2(input, out_row, size, y, kernel, radius),
         x86: sse4_1 => x86::convolve_cols_row_sse41(input, out_row, size, y, kernel, radius),
         aarch64 => neon::convolve_cols_row_neon(input, out_row, size, y, kernel, radius),
         scalar => convolve_cols_row_scalar(input, out_row, size, y, kernel, radius),
@@ -197,7 +197,7 @@ pub(super) fn convolve_2d_row(
     kernel: Kernel2d<'_>,
 ) {
     dispatch! {
-        x86: avx2_fma => x86::convolve_2d_row_avx2(input, output_row, size, y, kernel),
+        x86: avx2 => x86::convolve_2d_row_avx2(input, output_row, size, y, kernel),
         x86: sse4_1 => x86::convolve_2d_row_sse41(input, output_row, size, y, kernel),
         aarch64 => neon::convolve_2d_row_neon(input, output_row, size, y, kernel),
         scalar => convolve_2d_row_scalar(input, output_row, size, y, kernel),

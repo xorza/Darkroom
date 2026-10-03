@@ -76,10 +76,12 @@ pub use stacking::star_detection::config::background_config::{
     BackgroundConfig as StarDetectionBackgroundConfig, BackgroundRefinement,
 };
 pub use stacking::star_detection::config::detection_config::{
-    Connectivity, DetectionConfig as StarDetectionCandidateConfig,
+    Connectivity, Deblend, DetectionConfig as StarDetectionCandidateConfig,
 };
 pub use stacking::star_detection::config::filter_config::FilterConfig as StarDetectionFilterConfig;
-pub use stacking::star_detection::config::fwhm_config::FwhmConfig as StarDetectionFwhmConfig;
+pub use stacking::star_detection::config::fwhm_config::{
+    FwhmConfig as StarDetectionFwhmConfig, FwhmMode,
+};
 pub use stacking::star_detection::config::measurement_config::{
     CentroidMethod, LocalBackgroundMethod, MeasurementConfig as StarDetectionMeasurementConfig,
     NoiseModel,

@@ -5,11 +5,14 @@ use crate::testing::prelude::*;
 // remaining `Star::at` defaults already clear `filter_config()` — so each test spoils exactly
 // the one property it is about.
 
-/// Estimation settings with a 4.0 fallback, so a fallback result is distinguishable
-/// from the 3.0 the star fixtures below are built around.
+/// The fallback every case passes, distinguishable from the 3.0 the star fixtures below are
+/// built around.
+const FALLBACK: f32 = 4.0;
+
+/// Estimation settings that fall back to [`FALLBACK`].
 fn fwhm_config(min_stars: usize) -> FwhmConfig {
     FwhmConfig {
-        expected: 4.0,
+        mode: Some(FwhmMode::Auto { fallback: FALLBACK }),
         min_stars,
         ..Default::default()
     }
@@ -31,7 +34,7 @@ fn fwhm_estimation_insufficient_stars() {
         .map(|_| Star::at(DVec2::ZERO).with_fwhm(3.0))
         .collect();
 
-    let result = from_stars(&stars, &fwhm_config(5), &filter_config());
+    let result = from_stars(&stars, &fwhm_config(5), FALLBACK, &filter_config());
 
     // The fallback FWHM has no dependence on the 4 candidate stars, so it is `Configured` —
     // not an `Estimated` claiming 4 stars produced it.
@@ -51,7 +54,7 @@ fn fwhm_estimation_pre_rejection_median_reports_pre_rejection_count() {
         .collect();
     stars.extend((0..4).map(|_| Star::at(DVec2::ZERO).with_fwhm(18.0)));
 
-    let result = from_stars(&stars, &fwhm_config(7), &filter_config());
+    let result = from_stars(&stars, &fwhm_config(7), FALLBACK, &filter_config());
 
     let fwhm = result.value().expect("an FWHM was estimated");
     assert!((fwhm - 3.0).abs() < 0.01);
@@ -70,7 +73,7 @@ fn fwhm_estimation_filters_saturated() {
         .collect();
     stars[0] = Star::at(DVec2::ZERO).with_fwhm(10.0).with_peak(0.98);
 
-    let result = from_stars(&stars, &fwhm_config(5), &filter_config());
+    let result = from_stars(&stars, &fwhm_config(5), FALLBACK, &filter_config());
 
     // All 9 good stars have FWHM=3.0, so median should be exactly 3.0
     let fwhm = result
@@ -90,7 +93,7 @@ fn fwhm_estimation_filters_high_eccentricity() {
         .collect();
     stars[0] = Star::at(DVec2::ZERO).with_fwhm(10.0).with_eccentricity(0.9);
 
-    let result = from_stars(&stars, &fwhm_config(5), &filter_config());
+    let result = from_stars(&stars, &fwhm_config(5), FALLBACK, &filter_config());
 
     let fwhm = result
         .value()
@@ -109,7 +112,7 @@ fn fwhm_estimation_filters_cosmic_rays() {
         .collect();
     stars[0] = Star::at(DVec2::ZERO).with_fwhm(1.0).with_sharpness(0.9);
 
-    let result = from_stars(&stars, &fwhm_config(5), &filter_config());
+    let result = from_stars(&stars, &fwhm_config(5), FALLBACK, &filter_config());
 
     let fwhm = result
         .value()
@@ -129,7 +132,7 @@ fn fwhm_estimation_filters_invalid_fwhm() {
     stars[0] = Star::at(DVec2::ZERO).with_fwhm(0.2); // Too small
     stars[1] = Star::at(DVec2::ZERO).with_fwhm(25.0); // Too large
 
-    let result = from_stars(&stars, &fwhm_config(5), &filter_config());
+    let result = from_stars(&stars, &fwhm_config(5), FALLBACK, &filter_config());
 
     // 8 remaining stars all at FWHM=3.0
     let fwhm = result
@@ -150,7 +153,7 @@ fn fwhm_estimation_rejects_outliers() {
     stars.push(Star::at(DVec2::ZERO).with_fwhm(12.0));
     stars.push(Star::at(DVec2::ZERO).with_fwhm(15.0));
 
-    let result = from_stars(&stars, &fwhm_config(5), &filter_config());
+    let result = from_stars(&stars, &fwhm_config(5), FALLBACK, &filter_config());
 
     // MAD-based rejection should remove the 12.0 and 15.0 outliers
     let fwhm = result
@@ -169,7 +172,7 @@ fn fwhm_estimation_uniform_values() {
         .map(|_| Star::at(DVec2::ZERO).with_fwhm(4.5))
         .collect();
 
-    let result = from_stars(&stars, &fwhm_config(5), &filter_config());
+    let result = from_stars(&stars, &fwhm_config(5), FALLBACK, &filter_config());
 
     let fwhm = result.value().expect("an FWHM was estimated");
     assert!((fwhm - 4.5).abs() < 0.01);
@@ -190,7 +193,7 @@ fn fwhm_estimation_varying_values() {
         .map(|&f| Star::at(DVec2::ZERO).with_fwhm(f))
         .collect();
 
-    let result = from_stars(&stars, &fwhm_config(5), &filter_config());
+    let result = from_stars(&stars, &fwhm_config(5), FALLBACK, &filter_config());
 
     let fwhm = result.value().expect("an FWHM was estimated");
     // Median of sorted [2.8, 2.9, 2.9, 3.0, 3.0, 3.0, 3.1, 3.1, 3.2, 3.3]
@@ -209,10 +212,10 @@ fn fwhm_estimation_varying_values() {
 fn fwhm_estimation_empty_after_filtering() {
     // All stars filtered out → returns default with 0 stars
     let stars: Vec<Star> = (0..10)
-        .map(|_| Star::at(DVec2::ZERO).with_fwhm(3.0).with_peak(0.98)) // All saturated
+        .map(|_| Star::at(DVec2::ZERO).with_fwhm(3.0).with_saturated(true))
         .collect();
 
-    let result = from_stars(&stars, &fwhm_config(5), &filter_config());
+    let result = from_stars(&stars, &fwhm_config(5), FALLBACK, &filter_config());
 
     assert!(matches!(result, FwhmSource::Configured(fwhm) if (fwhm - 4.0).abs() < 0.01));
 }

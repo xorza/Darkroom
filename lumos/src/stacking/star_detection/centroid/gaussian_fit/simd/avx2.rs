@@ -1,4 +1,4 @@
-//! AVX2+FMA SIMD implementation for `Gaussian2D` batch operations.
+//! AVX2+FMA SIMD implementation for the elliptical `Gaussian2D` batch operations.
 //!
 //! Processes 4 f64 pixels per AVX2 iteration for `batch_build_normal_equations`
 //! and `batch_compute_chi2`. Uses a fast polynomial `exp()` approximation
@@ -76,10 +76,12 @@ unsafe fn simd_exp_fast(x: __m256d) -> __m256d {
     _mm256_mul_pd(exp_r, pow2n)
 }
 
-/// Batch build normal equations (J^T J, J^T r, chi²) using AVX2+FMA.
+/// Batch build normal equations (J^T J, J^T r, chi²) for the elliptical Gaussian.
 ///
-/// For N=6 (`Gaussian2D`), accumulates 21 upper-triangle hessian elements,
-/// 6 gradient elements, and chi² directly in AVX2 registers (28 total).
+/// For N=7, accumulates 28 upper-triangle hessian elements, 7 gradient elements, and chi² in
+/// registers (36 total). The Jacobian row is the model's own (see
+/// [`Gaussian2D::evaluate_and_jacobian`]), with the background's `∂f/∂bg = 1` folded into plain
+/// additions.
 ///
 /// # Safety
 /// Caller must ensure AVX2 and FMA are available on the current CPU.
@@ -89,30 +91,22 @@ pub(super) unsafe fn batch_build_normal_equations_avx2(
     data_x: &[f64],
     data_y: &[f64],
     data_z: &[f64],
-    params: &[f64; 6],
-) -> NormalEquations<6> {
+    params: &[f64; 7],
+) -> NormalEquations<7> {
     let n = data_x.len();
-    let [x0, y0, amp, sigma_x, sigma_y, bg] = *params;
-    let sigma_x2 = sigma_x * sigma_x;
-    let sigma_y2 = sigma_y * sigma_y;
-    let inv_sigma_x2 = 1.0 / sigma_x2;
-    let inv_sigma_y2 = 1.0 / sigma_y2;
+    let [x0, y0, amp, a, b, c, bg] = *params;
 
     unsafe {
         let v_x0 = _mm256_set1_pd(x0);
         let v_y0 = _mm256_set1_pd(y0);
         let v_amp = _mm256_set1_pd(amp);
         let v_bg = _mm256_set1_pd(bg);
-        let v_inv_sx2 = _mm256_set1_pd(inv_sigma_x2);
-        let v_inv_sy2 = _mm256_set1_pd(inv_sigma_y2);
+        let v_a = _mm256_set1_pd(a);
+        let v_b = _mm256_set1_pd(b);
+        let v_c = _mm256_set1_pd(c);
         let v_neg_half = _mm256_set1_pd(-0.5);
-        let v_inv_sx3 = _mm256_set1_pd(1.0 / (sigma_x2 * sigma_x));
-        let v_inv_sy3 = _mm256_set1_pd(1.0 / (sigma_y2 * sigma_y));
         let v_one = _mm256_set1_pd(1.0);
         let zero = _mm256_setzero_pd();
-
-        // 21 upper-triangle hessian + 6 gradient + 1 chi² = 28 accumulators. Flat rather than
-        // arrays-plus-loops on purpose — see `centroid::simd` for the measurement.
         let mut v_chi2 = zero;
         let mut v_g0 = zero;
         let mut v_g1 = zero;
@@ -120,27 +114,35 @@ pub(super) unsafe fn batch_build_normal_equations_avx2(
         let mut v_g3 = zero;
         let mut v_g4 = zero;
         let mut v_g5 = zero;
+        let mut v_g6 = zero;
         let mut v_h00 = zero;
         let mut v_h01 = zero;
         let mut v_h02 = zero;
         let mut v_h03 = zero;
         let mut v_h04 = zero;
         let mut v_h05 = zero;
+        let mut v_h06 = zero;
         let mut v_h11 = zero;
         let mut v_h12 = zero;
         let mut v_h13 = zero;
         let mut v_h14 = zero;
         let mut v_h15 = zero;
+        let mut v_h16 = zero;
         let mut v_h22 = zero;
         let mut v_h23 = zero;
         let mut v_h24 = zero;
         let mut v_h25 = zero;
+        let mut v_h26 = zero;
         let mut v_h33 = zero;
         let mut v_h34 = zero;
         let mut v_h35 = zero;
+        let mut v_h36 = zero;
         let mut v_h44 = zero;
         let mut v_h45 = zero;
+        let mut v_h46 = zero;
         let mut v_h55 = zero;
+        let mut v_h56 = zero;
+        let mut v_h66 = zero;
 
         let chunks = n / 4;
 
@@ -150,84 +152,61 @@ pub(super) unsafe fn batch_build_normal_equations_avx2(
             let vy = _mm256_loadu_pd(data_y.as_ptr().add(base));
             let vz = _mm256_loadu_pd(data_z.as_ptr().add(base));
 
-            // dx, dy
             let dx = _mm256_sub_pd(vx, v_x0);
             let dy = _mm256_sub_pd(vy, v_y0);
-
-            // dx², dy²
-            let dx2 = _mm256_mul_pd(dx, dx);
-            let dy2 = _mm256_mul_pd(dy, dy);
-
-            // exponent = -0.5 * (dx²/σx² + dy²/σy²)
-            let term_x = _mm256_mul_pd(dx2, v_inv_sx2);
-            let term_y = _mm256_fmadd_pd(dy2, v_inv_sy2, term_x);
-            let exponent = _mm256_mul_pd(v_neg_half, term_y);
-
-            // exp_val = fast_exp(exponent)
-            let exp_val = simd_exp_fast(exponent);
-
-            // amp_exp = amp * exp_val
+            // t = a·dx + b·dy and u = b·dx + c·dy, so the quadratic form is dx·t + dy·u.
+            let t = _mm256_fmadd_pd(v_b, dy, _mm256_mul_pd(v_a, dx));
+            let u = _mm256_fmadd_pd(v_c, dy, _mm256_mul_pd(v_b, dx));
+            let q = _mm256_fmadd_pd(dy, u, _mm256_mul_pd(dx, t));
+            let exp_val = simd_exp_fast(_mm256_mul_pd(v_neg_half, q));
             let amp_exp = _mm256_mul_pd(v_amp, exp_val);
-
-            // model_val = amp_exp + bg
-            let model_val = _mm256_add_pd(amp_exp, v_bg);
-            let residual = _mm256_sub_pd(vz, model_val);
-
-            // chi²
+            let residual = _mm256_sub_pd(vz, _mm256_add_pd(amp_exp, v_bg));
             v_chi2 = _mm256_fmadd_pd(residual, residual, v_chi2);
 
-            // Jacobian rows:
-            let j0 = _mm256_mul_pd(amp_exp, _mm256_mul_pd(dx, v_inv_sx2));
-            let j1 = _mm256_mul_pd(amp_exp, _mm256_mul_pd(dy, v_inv_sy2));
+            let half_amp_exp = _mm256_mul_pd(v_neg_half, amp_exp);
+            let j0 = _mm256_mul_pd(amp_exp, t);
+            let j1 = _mm256_mul_pd(amp_exp, u);
             let j2 = exp_val;
-            let j3 = _mm256_mul_pd(amp_exp, _mm256_mul_pd(dx2, v_inv_sx3));
-            let j4 = _mm256_mul_pd(amp_exp, _mm256_mul_pd(dy2, v_inv_sy3));
-            // j5 = 1.0 (implicit)
-
-            // Gradient: g[i] += j[i] * residual
+            let j3 = _mm256_mul_pd(half_amp_exp, _mm256_mul_pd(dx, dx));
+            let j4 = _mm256_mul_pd(_mm256_mul_pd(half_amp_exp, dx), _mm256_add_pd(dy, dy));
+            let j5 = _mm256_mul_pd(half_amp_exp, _mm256_mul_pd(dy, dy));
             v_g0 = _mm256_fmadd_pd(j0, residual, v_g0);
             v_g1 = _mm256_fmadd_pd(j1, residual, v_g1);
             v_g2 = _mm256_fmadd_pd(j2, residual, v_g2);
             v_g3 = _mm256_fmadd_pd(j3, residual, v_g3);
             v_g4 = _mm256_fmadd_pd(j4, residual, v_g4);
-            v_g5 = _mm256_add_pd(v_g5, residual); // j5=1
-
-            // Hessian upper triangle: h[i][j] += j[i] * j[j]
-            // Row 0
+            v_g5 = _mm256_fmadd_pd(j5, residual, v_g5);
+            v_g6 = _mm256_add_pd(v_g6, residual);
             v_h00 = _mm256_fmadd_pd(j0, j0, v_h00);
             v_h01 = _mm256_fmadd_pd(j0, j1, v_h01);
             v_h02 = _mm256_fmadd_pd(j0, j2, v_h02);
             v_h03 = _mm256_fmadd_pd(j0, j3, v_h03);
             v_h04 = _mm256_fmadd_pd(j0, j4, v_h04);
-            v_h05 = _mm256_add_pd(v_h05, j0); // j5=1
-
-            // Row 1
+            v_h05 = _mm256_fmadd_pd(j0, j5, v_h05);
+            v_h06 = _mm256_add_pd(v_h06, j0);
             v_h11 = _mm256_fmadd_pd(j1, j1, v_h11);
             v_h12 = _mm256_fmadd_pd(j1, j2, v_h12);
             v_h13 = _mm256_fmadd_pd(j1, j3, v_h13);
             v_h14 = _mm256_fmadd_pd(j1, j4, v_h14);
-            v_h15 = _mm256_add_pd(v_h15, j1); // j5=1
-
-            // Row 2
+            v_h15 = _mm256_fmadd_pd(j1, j5, v_h15);
+            v_h16 = _mm256_add_pd(v_h16, j1);
             v_h22 = _mm256_fmadd_pd(j2, j2, v_h22);
             v_h23 = _mm256_fmadd_pd(j2, j3, v_h23);
             v_h24 = _mm256_fmadd_pd(j2, j4, v_h24);
-            v_h25 = _mm256_add_pd(v_h25, j2); // j5=1
-
-            // Row 3
+            v_h25 = _mm256_fmadd_pd(j2, j5, v_h25);
+            v_h26 = _mm256_add_pd(v_h26, j2);
             v_h33 = _mm256_fmadd_pd(j3, j3, v_h33);
             v_h34 = _mm256_fmadd_pd(j3, j4, v_h34);
-            v_h35 = _mm256_add_pd(v_h35, j3); // j5=1
-
-            // Row 4
+            v_h35 = _mm256_fmadd_pd(j3, j5, v_h35);
+            v_h36 = _mm256_add_pd(v_h36, j3);
             v_h44 = _mm256_fmadd_pd(j4, j4, v_h44);
-            v_h45 = _mm256_add_pd(v_h45, j4); // j5=1
-
-            // Row 5: h55 += j5*j5 = 1
-            v_h55 = _mm256_add_pd(v_h55, v_one);
+            v_h45 = _mm256_fmadd_pd(j4, j5, v_h45);
+            v_h46 = _mm256_add_pd(v_h46, j4);
+            v_h55 = _mm256_fmadd_pd(j5, j5, v_h55);
+            v_h56 = _mm256_add_pd(v_h56, j5);
+            v_h66 = _mm256_add_pd(v_h66, v_one);
         }
 
-        // Horizontal sums
         let chi2 = hsum(v_chi2);
         let gradient = [
             hsum(v_g0),
@@ -236,29 +215,37 @@ pub(super) unsafe fn batch_build_normal_equations_avx2(
             hsum(v_g3),
             hsum(v_g4),
             hsum(v_g5),
+            hsum(v_g6),
         ];
-        let mut hessian = [[0.0f64; 6]; 6];
+        let mut hessian = [[0.0f64; 7]; 7];
         hessian[0][0] = hsum(v_h00);
         hessian[0][1] = hsum(v_h01);
         hessian[0][2] = hsum(v_h02);
         hessian[0][3] = hsum(v_h03);
         hessian[0][4] = hsum(v_h04);
         hessian[0][5] = hsum(v_h05);
+        hessian[0][6] = hsum(v_h06);
         hessian[1][1] = hsum(v_h11);
         hessian[1][2] = hsum(v_h12);
         hessian[1][3] = hsum(v_h13);
         hessian[1][4] = hsum(v_h14);
         hessian[1][5] = hsum(v_h15);
+        hessian[1][6] = hsum(v_h16);
         hessian[2][2] = hsum(v_h22);
         hessian[2][3] = hsum(v_h23);
         hessian[2][4] = hsum(v_h24);
         hessian[2][5] = hsum(v_h25);
+        hessian[2][6] = hsum(v_h26);
         hessian[3][3] = hsum(v_h33);
         hessian[3][4] = hsum(v_h34);
         hessian[3][5] = hsum(v_h35);
+        hessian[3][6] = hsum(v_h36);
         hessian[4][4] = hsum(v_h44);
         hessian[4][5] = hsum(v_h45);
+        hessian[4][6] = hsum(v_h46);
         hessian[5][5] = hsum(v_h55);
+        hessian[5][6] = hsum(v_h56);
+        hessian[6][6] = hsum(v_h66);
 
         let mut equations = NormalEquations {
             hessian,
@@ -280,7 +267,7 @@ pub(super) unsafe fn batch_build_normal_equations_avx2(
     }
 }
 
-/// Batch compute chi² using AVX2+FMA.
+/// Batch compute chi² for the elliptical Gaussian.
 ///
 /// # Safety
 /// Caller must ensure AVX2 and FMA are available on the current CPU.
@@ -290,20 +277,19 @@ pub(super) unsafe fn batch_compute_chi2_avx2(
     data_x: &[f64],
     data_y: &[f64],
     data_z: &[f64],
-    params: &[f64; 6],
+    params: &[f64; 7],
 ) -> f64 {
     let n = data_x.len();
-    let [x0, y0, amp, sigma_x, sigma_y, bg] = *params;
-    let sigma_x2 = sigma_x * sigma_x;
-    let sigma_y2 = sigma_y * sigma_y;
+    let [x0, y0, amp, a, b, c, bg] = *params;
 
     unsafe {
         let v_x0 = _mm256_set1_pd(x0);
         let v_y0 = _mm256_set1_pd(y0);
         let v_amp = _mm256_set1_pd(amp);
         let v_bg = _mm256_set1_pd(bg);
-        let v_inv_sx2 = _mm256_set1_pd(1.0 / sigma_x2);
-        let v_inv_sy2 = _mm256_set1_pd(1.0 / sigma_y2);
+        let v_a = _mm256_set1_pd(a);
+        let v_b = _mm256_set1_pd(b);
+        let v_c = _mm256_set1_pd(c);
         let v_neg_half = _mm256_set1_pd(-0.5);
 
         let mut v_chi2 = _mm256_setzero_pd();
@@ -317,12 +303,10 @@ pub(super) unsafe fn batch_compute_chi2_avx2(
 
             let dx = _mm256_sub_pd(vx, v_x0);
             let dy = _mm256_sub_pd(vy, v_y0);
-            let dx2 = _mm256_mul_pd(dx, dx);
-            let dy2 = _mm256_mul_pd(dy, dy);
-            let term_x = _mm256_mul_pd(dx2, v_inv_sx2);
-            let term_y = _mm256_fmadd_pd(dy2, v_inv_sy2, term_x);
-            let exponent = _mm256_mul_pd(v_neg_half, term_y);
-            let exp_val = simd_exp_fast(exponent);
+            let t = _mm256_fmadd_pd(v_b, dy, _mm256_mul_pd(v_a, dx));
+            let u = _mm256_fmadd_pd(v_c, dy, _mm256_mul_pd(v_b, dx));
+            let q = _mm256_fmadd_pd(dy, u, _mm256_mul_pd(dx, t));
+            let exp_val = simd_exp_fast(_mm256_mul_pd(v_neg_half, q));
             let model_val = _mm256_fmadd_pd(v_amp, exp_val, v_bg);
             let residual = _mm256_sub_pd(vz, model_val);
             v_chi2 = _mm256_fmadd_pd(residual, residual, v_chi2);

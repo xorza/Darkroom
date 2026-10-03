@@ -7,13 +7,19 @@ pub(super) mod stages;
 
 use serde::{Deserialize, Serialize};
 
+use imaginarium::Buffer2;
+
+use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 
 use crate::error::InvalidConfigField;
 use crate::math::statistics::median_mut;
-use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
+use crate::stacking::star_detection::background::background_estimate::{
+    BackgroundEstimate, Refinement,
+};
 use crate::stacking::star_detection::config::Config;
+use crate::stacking::star_detection::config::background_config::BackgroundRefinement;
 use crate::stacking::star_detection::detector::stages::detect::DetectResult;
 use crate::stacking::star_detection::detector::stages::filter::FilterOutcome;
 use crate::stacking::star_detection::detector::stages::fwhm;
@@ -63,12 +69,10 @@ pub struct Diagnostics {
     pub stars_after_centroid: usize,
     /// Rejections produced by the quality-filtering stage.
     pub quality_filter: QualityFilterDiagnostics,
-    /// Final number of stars returned.
-    pub final_star_count: usize,
-    /// Median FWHM of detected stars (pixels).
-    pub median_fwhm: f32,
-    /// Median SNR of detected stars.
-    pub median_snr: f32,
+    /// Median FWHM of the detected stars in pixels, `None` when none was detected.
+    pub median_fwhm: Option<f32>,
+    /// Median SNR of the detected stars, `None` when none was detected.
+    pub median_snr: Option<f32>,
     /// Where the matched filter's FWHM came from.
     pub fwhm: FwhmSource,
 }
@@ -106,6 +110,22 @@ impl FwhmSource {
     pub fn was_estimated(&self) -> bool {
         matches!(self, FwhmSource::Estimated { .. })
     }
+}
+
+/// A pixel at this fraction of the data's ceiling counts as saturated: a clipped star's flat top
+/// rarely reads the ceiling itself once dark subtraction and the decoder's scaling have moved it.
+const SATURATION_FRACTION: f32 = 0.95;
+
+/// The level a pixel of `image` saturates at: [`SATURATION_FRACTION`] of its declared ceiling,
+/// `DATAMAX` in the normalized domain, or of that domain's 1 when it declares none.
+fn saturation_level(image: &LinearImage) -> f32 {
+    SATURATION_FRACTION * image.metadata.data_max.map_or(1.0, |max| max as f32)
+}
+
+/// Mark the pixels of `values` at or above `level`.
+fn mark_saturated(values: &Buffer2<f32>, level: f32, mask: &mut BitBuffer2) {
+    let values = values.pixels();
+    mask.fill_from_predicate(|index| values[index] >= level);
 }
 
 /// Star detector with reusable processing resources.
@@ -151,31 +171,39 @@ impl StarDetector {
             .get_or_insert_with(|| DetectionResources::new(Size2us::new(width, height)));
         resources.reset(Size2us::new(width, height));
 
-        // Step 1: Image preparation (grayscale, CFA filter)
-        let grayscale_image = stages::prepare::prepare(image, resources);
+        let mut residual = stages::prepare::prepare(image, resources);
 
-        // Step 2: Estimate background and noise
         let mut background =
-            BackgroundEstimate::estimate(&grayscale_image, &self.config.background, resources);
-
-        // Step 2b: Refine background if iterative refinement is enabled
-        if self.config.background.refinement.iterations() > 0 {
+            BackgroundEstimate::estimate(&residual, &self.config.background, resources);
+        if let BackgroundRefinement::Iterative {
+            iterations,
+            mask_dilation,
+        } = self.config.background.refinement
+        {
             background.refine(
-                &grayscale_image,
+                &residual,
                 &self.config.background,
+                Refinement {
+                    iterations,
+                    mask_dilation,
+                },
                 self.config.detection.sigma_threshold,
                 resources,
             );
         }
 
-        // Step 3: Determine effective FWHM (manual > auto-estimate > disabled)
-        let fwhm = fwhm::estimate(&grayscale_image, &background, &self.config, resources);
-        let effective_fwhm = fwhm.value().unwrap_or(0.0);
+        // Saturation is a property of the recorded values, which the subtraction below removes.
+        let mut saturation = resources.acquire_bit();
+        mark_saturated(&residual, saturation_level(image), &mut saturation);
 
-        // Step 4: Detect star candidate regions (with optional matched filter)
+        // From here on every stage reads the residual: no threshold, deblend or measurement sees
+        // the sky.
+        let sky = background.subtract_from(&mut residual, resources);
+
+        let fwhm = fwhm::estimate(&residual, &sky, &saturation, &self.config, resources);
         let detect_result = DetectResult::from_image(
-            &grayscale_image,
-            &background,
+            &residual,
+            &sky,
             fwhm.value(),
             &self.config.detection,
             resources,
@@ -191,18 +219,19 @@ impl StarDetector {
         };
         tracing::debug!("Detected {} star candidates", detect_result.regions.len());
 
-        // Step 5: Compute precise centroids (parallel)
         let stars = stages::measure::measure(
             &detect_result.regions,
-            &grayscale_image,
-            &background,
+            &residual,
+            &sky,
+            &saturation,
             &self.config.measurement,
-            effective_fwhm,
+            fwhm.value(),
         );
         diagnostics.stars_after_centroid = stars.len();
 
-        background.release_to_pool(resources);
-        resources.release_f32(grayscale_image);
+        resources.release_bit(saturation);
+        sky.release_to_pool(resources);
+        resources.release_f32(residual);
 
         // Step 6: Apply quality filters, sort, and remove duplicates
         let FilterOutcome {
@@ -224,15 +253,12 @@ impl StarDetector {
             );
         }
 
-        // Compute final statistics
-        diagnostics.final_star_count = stars.len();
         if !stars.is_empty() {
             let mut buf: Vec<f32> = stars.iter().map(|s| s.fwhm).collect();
-            diagnostics.median_fwhm = median_mut(&mut buf);
-
+            diagnostics.median_fwhm = Some(median_mut(&mut buf));
             buf.clear();
             buf.extend(stars.iter().map(|s| s.snr));
-            diagnostics.median_snr = median_mut(&mut buf);
+            diagnostics.median_snr = Some(median_mut(&mut buf));
         }
 
         DetectionResult { stars, diagnostics }
@@ -256,8 +282,9 @@ mod bench;
 #[cfg(test)]
 mod tests {
     use crate::stacking::star_detection::config::detection_config::DetectionConfig;
+    use crate::stacking::star_detection::config::fwhm_config::FwhmMode;
     use crate::stacking::star_detection::detector::*;
-    use crate::stacking::star_detection::tests::Scenario;
+    use crate::stacking::star_detection::tests::{Placement, Scenario};
 
     #[test]
     fn fwhm_source_distinguishes_measured_from_supplied() {
@@ -298,6 +325,40 @@ mod tests {
         assert_eq!((error.field, error.value), ("sigma_threshold", 0.0));
     }
 
+    /// Stars up to 2.5× the 4 px seed come back at their own width: the estimate measures again
+    /// at the stamp the first pass implies. Measured once at the seed's stamp they read narrow —
+    /// 6.78 for a 10 px star.
+    ///
+    /// Flux scales with FWHM² to hold each star's peak; the brightest have SNR in the hundreds,
+    /// so a star's width carries about 1% noise and the median of 13 or more well under that.
+    /// 1% bounds it (measured: within 0.02%).
+    #[test]
+    fn auto_fwhm_recovers_wide_stars() {
+        for fwhm in [5.0f32, 6.0, 8.0, 10.0] {
+            let scale = fwhm * fwhm / 16.0;
+            let frame = Scenario {
+                size: Size2us::new(384, 384),
+                num_stars: 20,
+                flux: (5.0 * scale, 14.0 * scale),
+                fwhm,
+                placement: Placement::Uniform { margin: 40.0 },
+                ..Default::default()
+            }
+            .frame();
+            let mut config = Config::default();
+            config.fwhm.mode = Some(FwhmMode::Auto { fallback: 4.0 });
+            let result = StarDetector::from_config(config)
+                .unwrap()
+                .detect(&frame.image);
+            assert!(result.diagnostics.fwhm.was_estimated(), "FWHM {fwhm}");
+            let estimate = result.diagnostics.fwhm.value().unwrap();
+            assert!(
+                (estimate - fwhm).abs() < 0.01 * fwhm,
+                "FWHM {fwhm} estimated as {estimate}"
+            );
+        }
+    }
+
     #[test]
     fn auto_estimated_fwhm_is_used_for_final_measurement() {
         for (actual_fwhm, configured_seed, flux) in
@@ -311,14 +372,15 @@ mod tests {
             }
             .frame();
             let mut auto_config = Config::default();
-            auto_config.fwhm.expected = configured_seed;
-            auto_config.fwhm.auto_estimate = true;
+            auto_config.fwhm.mode = Some(FwhmMode::Auto {
+                fallback: configured_seed,
+            });
             auto_config.fwhm.min_stars = 5;
             auto_config.filter.min_snr = 1.0;
             auto_config.filter.max_eccentricity = 1.0;
             auto_config.filter.max_sharpness = 1.0;
             auto_config.filter.max_roundness = 1.0;
-            auto_config.filter.max_fwhm_deviation = 0.0;
+            auto_config.filter.max_fwhm_deviation = None;
             auto_config.filter.duplicate_min_separation = 0.0;
 
             let auto_result = StarDetector::from_config(auto_config.clone())
@@ -339,8 +401,7 @@ mod tests {
             );
 
             let mut manual_config = auto_config;
-            manual_config.fwhm.expected = effective_fwhm;
-            manual_config.fwhm.auto_estimate = false;
+            manual_config.fwhm.mode = Some(FwhmMode::Fixed(effective_fwhm));
             let manual_result = StarDetector::from_config(manual_config)
                 .unwrap()
                 .detect(&frame.image);

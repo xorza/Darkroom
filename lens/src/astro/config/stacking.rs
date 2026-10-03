@@ -11,7 +11,7 @@
 //! carry.
 
 use common::{Introspect, IntrospectEnum};
-use lumos::{RegistrationConfig, SipConfig, StackConfig, StarDetectionConfig};
+use lumos::{FwhmMode, RegistrationConfig, SipConfig, StackConfig, StarDetectionConfig};
 
 use crate::astro::config::preset::preset_enum;
 
@@ -77,7 +77,12 @@ impl From<StarDetectionConfig> for DetectionKnobs {
     fn from(config: StarDetectionConfig) -> Self {
         Self {
             sigma_threshold: config.detection.sigma_threshold,
-            expected_fwhm: config.fwhm.expected,
+            expected_fwhm: config
+                .fwhm
+                .mode
+                .or(StarDetectionConfig::default().fwhm.mode)
+                .expect("the default config runs a matched filter")
+                .seed(),
             min_area: config.detection.min_area,
             max_area: config.detection.max_area,
             min_snr: config.filter.min_snr,
@@ -90,7 +95,7 @@ impl From<DetectionKnobs> for StarDetectionConfig {
     fn from(knobs: DetectionKnobs) -> Self {
         let mut config = StarDetectionConfig::default();
         config.detection.sigma_threshold = knobs.sigma_threshold;
-        config.fwhm.expected = knobs.expected_fwhm;
+        config.fwhm.mode = Some(FwhmMode::Fixed(knobs.expected_fwhm));
         config.detection.min_area = knobs.min_area;
         config.detection.max_area = knobs.max_area;
         config.filter.min_snr = knobs.min_snr;
@@ -194,7 +199,7 @@ impl From<CombineKnobs> for StackConfig {
 
 #[cfg(test)]
 mod tests {
-    use lumos::{RegistrationConfig, SipConfig, StackConfig, StarDetectionConfig};
+    use lumos::{FwhmMode, RegistrationConfig, SipConfig, StackConfig, StarDetectionConfig};
 
     use crate::astro::config::stacking::{
         CombineKnobs, CombineMethodChoice, DetectionKnobs, RegistrationKnobs,
@@ -210,7 +215,7 @@ mod tests {
         config.detection.sigma_threshold = 4.5;
         config.detection.min_area = 7;
         config.detection.max_area = 900;
-        config.fwhm.expected = 3.25;
+        config.fwhm.mode = Some(FwhmMode::Fixed(3.25));
         config.filter.min_snr = 12.5;
         config.filter.max_eccentricity = 0.75;
 
@@ -218,7 +223,7 @@ mod tests {
         assert_eq!(restored.detection.sigma_threshold, 4.5);
         assert_eq!(restored.detection.min_area, 7);
         assert_eq!(restored.detection.max_area, 900);
-        assert_eq!(restored.fwhm.expected, 3.25);
+        assert_eq!(restored.fwhm.mode, Some(FwhmMode::Fixed(3.25)));
         assert_eq!(restored.filter.min_snr, 12.5);
         assert_eq!(restored.filter.max_eccentricity, 0.75);
     }

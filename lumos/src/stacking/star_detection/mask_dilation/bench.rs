@@ -22,8 +22,14 @@ fn create_sparse_mask(size: Size2us) -> BitBuffer2 {
 fn bench_dilate_mask_6k(b: ::quickbench::Bencher) {
     let mask = create_sparse_mask(Size2us::new(6144, 6144));
     let mut output = BitBuffer2::new_default(Size2us::new(6144, 6144));
+    let mut scratch = BitBuffer2::new_default(Size2us::new(6144, 6144));
 
     b.bench(|| {
-        dilate_mask(black_box(&mask), black_box(3), black_box(&mut output));
+        output.copy_from(&mask);
+        dilate_mask(
+            black_box(&mut output),
+            black_box(3),
+            black_box(&mut scratch),
+        );
     });
 }

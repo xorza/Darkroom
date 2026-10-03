@@ -112,7 +112,7 @@ impl Rendered {
 /// A detector for the synthetic frames: no FWHM prior, a 5 SNR floor and a 3σ threshold.
 fn detector() -> StarDetector {
     let mut config = DetConfig::default();
-    config.fwhm.expected = 0.0;
+    config.fwhm.mode = None;
     config.filter.min_snr = 5.0;
     config.detection.sigma_threshold = 3.0;
     StarDetector::from_config(config).unwrap()

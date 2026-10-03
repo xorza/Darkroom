@@ -3,27 +3,27 @@
 //! Combines matched filtering (optional), thresholding, connected component
 //! labeling, and deblending into a single stage that returns detected regions.
 
-use parking_lot::Mutex;
 use rayon::prelude::*;
 
+use crate::concurrency::JobScratchPool;
 use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use imaginarium::Buffer2;
 
-use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
-use crate::stacking::star_detection::config::detection_config::DetectionConfig;
+use crate::stacking::star_detection::background::sky_noise::SkyNoise;
+use crate::stacking::star_detection::config::detection_config::{Deblend, DetectionConfig};
 use crate::stacking::star_detection::convolution::{MatchedFilterBuffers, matched_filter};
-use crate::stacking::star_detection::deblend::ComponentData;
+use crate::stacking::star_detection::deblend::component::Component;
+use crate::stacking::star_detection::deblend::deblend_buffers::DeblendBuffers;
 use crate::stacking::star_detection::deblend::local_maxima::deblend_local_maxima;
 use crate::stacking::star_detection::deblend::multi_threshold::{
-    DeblendBuffers, deblend_multi_threshold,
+    MultiThresholdParams, deblend_multi_threshold,
 };
 use crate::stacking::star_detection::deblend::region::Region;
 use crate::stacking::star_detection::labeling::LabelMap;
 use crate::stacking::star_detection::resources::DetectionResources;
 
 use crate::stacking::star_detection::threshold_mask::{
-    ThresholdParams, create_threshold_mask, create_threshold_mask_filtered,
+    ThresholdParams, create_residual_threshold_mask,
 };
 
 /// Result of detection stage with diagnostic statistics.
@@ -40,97 +40,70 @@ pub(crate) struct DetectResult {
 }
 
 /// Result of candidate extraction (internal).
+#[derive(Debug, Default)]
 struct ExtractionResult {
     regions: Vec<Region>,
     deblended_components: usize,
 }
 
 impl DetectResult {
-    /// Detect star candidate regions in the image.
+    /// Detect star candidate regions in the residual — the image less its sky.
     ///
-    /// Applies matched filtering if FWHM is provided, then performs thresholding,
-    /// connected component labeling, and deblending to extract candidate regions.
-    ///
-    /// All buffer management is contained within this function.
+    /// Applies the matched filter when `fwhm` is given, then thresholds against the sky noise,
+    /// labels the connected components and deblends them, all on the residual.
     pub(crate) fn from_image(
-        pixels: &Buffer2<f32>,
-        stats: &BackgroundEstimate,
+        residual: &Buffer2<f32>,
+        sky: &SkyNoise,
         fwhm: Option<f32>,
         config: &DetectionConfig,
         pool: &mut DetectionResources,
     ) -> Self {
-        let width = pixels.width();
-        let height = pixels.height();
-
-        // Apply matched filter if FWHM is provided; its output buffer is acquired only then.
-        let filtered: Option<Buffer2<f32>> = if let Some(fwhm) = fwhm {
+        let filtered: Option<Buffer2<f32>> = fwhm.map(|fwhm| {
             tracing::debug!(
                 "Applying matched filter with FWHM={:.1}, axis_ratio={:.2}, angle={:.1}°",
                 fwhm,
                 config.psf_axis_ratio,
                 config.psf_angle.to_degrees()
             );
-
             let mut output = pool.acquire_f32();
-            let mut convolution_scratch = pool.acquire_f32();
-            let mut convolution_temp = pool.acquire_f32();
+            let mut temp = pool.acquire_f32();
             matched_filter(
-                pixels,
-                &stats.background,
+                residual,
                 fwhm,
                 config.psf_axis_ratio,
                 config.psf_angle,
                 &mut MatchedFilterBuffers {
                     output: &mut output,
-                    subtraction_scratch: &mut convolution_scratch,
-                    temp: &mut convolution_temp,
+                    temp: &mut temp,
                 },
             );
-            pool.release_f32(convolution_temp);
-            pool.release_f32(convolution_scratch);
+            pool.release_f32(temp);
+            output
+        });
 
-            Some(output)
-        } else {
-            None
-        };
-
-        // Acquire mask buffer from pool
         let mut mask = pool.acquire_bit();
         mask.fill(false);
-
-        let threshold = ThresholdParams {
-            sigma: config.sigma_threshold,
-            min_noise: stats.noise_floor,
-        };
-
-        if let Some(filtered) = &filtered {
-            debug_assert_eq!(width, filtered.width());
-            debug_assert_eq!(height, filtered.height());
-            create_threshold_mask_filtered(filtered, &stats.noise, threshold, &mut mask);
-        } else {
-            create_threshold_mask(
-                pixels,
-                &stats.background,
-                &stats.noise,
-                threshold,
-                &mut mask,
-            );
-        }
-
+        create_residual_threshold_mask(
+            filtered.as_ref().unwrap_or(residual),
+            &sky.noise,
+            ThresholdParams {
+                sigma: config.sigma_threshold,
+                min_noise: sky.floor,
+            },
+            &mut mask,
+        );
         let pixels_above_threshold = mask.count_ones();
 
         let label_map = LabelMap::from_pool(&mask, config.connectivity, pool);
         let connected_components = label_map.num_labels();
-
         pool.release_bit(mask);
+        if let Some(filtered) = filtered {
+            pool.release_f32(filtered);
+        }
 
         let extraction =
-            extract_and_filter_candidates(pixels, &label_map, config, Size2us::new(width, height));
-
+            extract_and_filter_candidates(residual, sky, &label_map, config, &pool.deblend);
         label_map.release_to_pool(pool);
-        if let Some(scratch) = filtered {
-            pool.release_f32(scratch);
-        }
 
         Self {
             regions: extraction.regions,
@@ -143,12 +116,14 @@ impl DetectResult {
 
 /// Extract candidates from label map and filter by size/edge constraints.
 fn extract_and_filter_candidates(
-    pixels: &Buffer2<f32>,
+    residual: &Buffer2<f32>,
+    sky: &SkyNoise,
     label_map: &LabelMap,
     config: &DetectionConfig,
-    size: Size2us,
+    deblend_buffers: &JobScratchPool<DeblendBuffers>,
 ) -> ExtractionResult {
-    let mut result = extract_candidates(pixels, label_map, config);
+    let size = Size2us::new(residual.width(), residual.height());
+    let mut result = extract_candidates(residual, sky, label_map, config, deblend_buffers);
 
     // `DetectionConfig::validate()` can't bound `edge_margin` against the image (it doesn't know the
     // image size), so a margin that swallows the whole image is only catchable here: the retain
@@ -179,96 +154,67 @@ fn extract_and_filter_candidates(
 
 /// Extract candidate properties from labeled image with deblending.
 fn extract_candidates(
-    pixels: &Buffer2<f32>,
+    residual: &Buffer2<f32>,
+    sky: &SkyNoise,
     label_map: &LabelMap,
     config: &DetectionConfig,
+    deblend_buffers: &JobScratchPool<DeblendBuffers>,
 ) -> ExtractionResult {
     if label_map.num_labels() == 0 {
-        return ExtractionResult {
-            regions: Vec::new(),
-            deblended_components: 0,
-        };
+        return ExtractionResult::default();
     }
-    let component_data = collect_component_data(label_map);
-    let total_components = component_data.len();
+    let total_components = label_map.num_labels();
 
     tracing::debug!(
         total_components,
         max_area = config.max_area,
-        multi_threshold = config.is_multi_threshold(),
+        deblend = ?config.deblend,
         "Processing components for candidate extraction"
     );
 
-    // Track (regions, deblended_count) where deblended_count is the number of
-    // components that produced more than one region.
-    let result = if config.is_multi_threshold() {
-        let (regions, deblended_components) = component_data
-            .into_par_iter()
-            .filter(|data| data.area > 0 && data.area <= config.max_area)
-            .fold(
-                || (Vec::new(), 0usize, DeblendBuffers::new()),
-                |(mut regions, mut deblended, mut buffers), data| {
-                    let deblend_result = deblend_multi_threshold(
-                        &data,
-                        pixels,
-                        label_map,
-                        config.deblend_n_thresholds,
+    // One deblend buffer set per fold split, leased from the detector's pool so a frame after the
+    // first reuses the last one's.
+    let result = label_map
+        .components()
+        .par_iter()
+        .filter(|data| data.area > 0 && data.area <= config.max_area)
+        .fold(
+            || (ExtractionResult::default(), deblend_buffers.acquire()),
+            |(mut acc, mut buffers), data| {
+                let component = Component::new(data, residual, label_map);
+                let regions = match config.deblend {
+                    Deblend::MultiThreshold {
+                        n_thresholds,
+                        min_contrast,
+                    } => deblend_multi_threshold(
+                        &component,
+                        sky.threshold_at(component.peak().pos, config.sigma_threshold),
+                        MultiThresholdParams {
+                            n_thresholds,
+                            min_contrast,
+                            min_separation: config.deblend_min_separation,
+                            connectivity: config.connectivity,
+                        },
+                        &mut buffers.tree,
+                    ),
+                    Deblend::LocalMaxima { min_prominence } => deblend_local_maxima(
+                        &component,
                         config.deblend_min_separation,
-                        config.deblend_min_contrast,
-                        &mut buffers,
-                    );
-                    if deblend_result.len() > 1 {
-                        deblended += 1;
-                    }
-                    regions.extend(deblend_result);
-                    (regions, deblended, buffers)
-                },
-            )
-            .map(|(regions, deblended, _)| (regions, deblended))
-            .reduce(
-                || (Vec::new(), 0),
-                |(mut a, da), (b, db)| {
-                    a.extend(b);
-                    (a, da + db)
-                },
-            );
-        ExtractionResult {
-            regions,
-            deblended_components,
-        }
-    } else {
-        let (regions, deblended_components) = component_data
-            .into_par_iter()
-            .filter(|data| data.area > 0 && data.area <= config.max_area)
-            .fold(
-                || (Vec::new(), 0usize),
-                |(mut regions, mut deblended), data| {
-                    let deblend_result = deblend_local_maxima(
-                        &data,
-                        pixels,
-                        label_map,
-                        config.deblend_min_separation,
-                        config.deblend_min_prominence,
-                    );
-                    if deblend_result.len() > 1 {
-                        deblended += 1;
-                    }
-                    regions.extend(deblend_result);
-                    (regions, deblended)
-                },
-            )
-            .reduce(
-                || (Vec::new(), 0),
-                |(mut a, da), (b, db)| {
-                    a.extend(b);
-                    (a, da + db)
-                },
-            );
-        ExtractionResult {
-            regions,
-            deblended_components,
-        }
-    };
+                        min_prominence,
+                        &mut buffers.maxima,
+                    ),
+                };
+                acc.deblended_components += usize::from(regions.len() > 1);
+                acc.regions.extend(regions);
+                (acc, buffers)
+            },
+        )
+        .map(|(acc, _)| acc)
+        .reduce(ExtractionResult::default, |mut a, b| {
+            a.regions.extend(b.regions);
+            a.deblended_components += b.deblended_components;
+            a
+        });
 
     tracing::debug!(
         regions = result.regions.len(),
@@ -279,125 +225,27 @@ fn extract_candidates(
     result
 }
 
-/// Collect component metadata (bounding boxes and areas) from label map.
-fn collect_component_data(label_map: &LabelMap) -> Vec<ComponentData> {
-    let num_labels = label_map.num_labels();
-    let height = label_map.height();
-    let max_jobs = (rayon::current_num_threads()).min(height).max(1);
-    let num_jobs = dense_component_jobs(num_labels, label_map.labels().len(), max_jobs);
-    collect_component_data_dense(label_map, num_jobs)
-}
-
-fn dense_component_jobs(num_labels: usize, pixel_count: usize, max_jobs: usize) -> usize {
-    let bytes_per_job = num_labels.saturating_mul(size_of::<ComponentData>());
-    if bytes_per_job == 0 {
-        return max_jobs;
-    }
-    let scratch_budget = pixel_count.saturating_mul(size_of::<u32>());
-    (scratch_budget / bytes_per_job).clamp(1, max_jobs)
-}
-
-fn collect_component_data_dense(label_map: &LabelMap, num_jobs: usize) -> Vec<ComponentData> {
-    let num_labels = label_map.num_labels();
-    let labels = label_map.labels();
-    let width = label_map.width();
-    let height = label_map.height();
-    if num_jobs == 1 {
-        let mut result = vec![ComponentData::default(); num_labels];
-        accumulate_component_rows(labels, width, 0, height, &mut result, |_| {});
-        return result;
-    }
-
-    let rows_per_job = height.div_ceil(num_jobs);
-    let result = Mutex::new(vec![ComponentData::default(); num_labels]);
-
-    (0..num_jobs).into_par_iter().for_each(|job_idx| {
-        let start_row = job_idx * rows_per_job;
-        let end_row = (start_row + rows_per_job).min(height);
-        let mut local = vec![ComponentData::default(); num_labels];
-        let mut touched = Vec::with_capacity(num_labels.min(1024));
-
-        accumulate_component_rows(labels, width, start_row, end_row, &mut local, |index| {
-            touched.push(index);
-        });
-
-        let mut result = result.lock();
-        for index in touched {
-            merge_component_data(&mut result[index], local[index]);
-        }
-    });
-
-    result.into_inner()
-}
-
-fn accumulate_component_rows(
-    labels: &[u32],
-    width: usize,
-    start_row: usize,
-    end_row: usize,
-    data: &mut [ComponentData],
-    mut first_seen: impl FnMut(usize),
-) {
-    for y in start_row..end_row {
-        let row_start = y * width;
-        for x in 0..width {
-            let label = labels[row_start + x];
-            if label == 0 {
-                continue;
-            }
-            let index = (label - 1) as usize;
-            let component = &mut data[index];
-            if component.area == 0 {
-                component.label = label;
-                first_seen(index);
-            }
-            component.bbox.include(Vec2us::new(x, y));
-            component.area += 1;
-        }
-    }
-}
-
-fn merge_component_data(target: &mut ComponentData, source: ComponentData) {
-    target.bbox = target.bbox.union(source.bbox);
-    target.label = source.label;
-    target.area += source.area;
-}
-
 /// Test and bench helpers that reach into this stage.
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::math::size2us::Size2us;
-    use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
+    use crate::stacking::star_detection::background::sky_noise::SkyNoise;
     use crate::stacking::star_detection::config::detection_config::DetectionConfig;
-    #[cfg(feature = "bench")]
-    use crate::stacking::star_detection::deblend::ComponentData;
     use crate::stacking::star_detection::deblend::region::Region;
-    #[cfg(feature = "bench")]
-    use crate::stacking::star_detection::detector::stages::detect;
     use crate::stacking::star_detection::detector::stages::detect::DetectResult;
-    #[cfg(feature = "bench")]
-    use crate::stacking::star_detection::labeling::LabelMap;
     use crate::stacking::star_detection::resources::DetectionResources;
     use imaginarium::Buffer2;
 
-    /// Detect stars with automatic buffer pool management, allocating a throwaway
+    /// Detect stars in a residual with automatic buffer pool management, allocating a throwaway
     /// [`DetectionResources`] per call. Benchmarks that care about that cost drive
     /// [`DetectResult::from_image`] directly with a pre-allocated pool instead.
     pub(crate) fn detect_stars_test(
-        pixels: &Buffer2<f32>,
-        background: &BackgroundEstimate,
+        residual: &Buffer2<f32>,
+        sky: &SkyNoise,
         config: &DetectionConfig,
     ) -> Vec<Region> {
-        let mut pool = DetectionResources::new(Size2us::new(pixels.width(), pixels.height()));
-        DetectResult::from_image(pixels, background, None, config, &mut pool).regions
-    }
-
-    /// Reaches `collect_component_data` from the detector's benchmarks; production code and the
-    /// tests both go through `DetectResult::from_image`. Narrower gate than the module because
-    /// only the benches want it.
-    #[cfg(feature = "bench")]
-    pub(crate) fn collect_components(label_map: &LabelMap) -> Vec<ComponentData> {
-        detect::collect_component_data(label_map)
+        let mut pool = DetectionResources::new(Size2us::new(residual.width(), residual.height()));
+        DetectResult::from_image(residual, sky, None, config, &mut pool).regions
     }
 }
 

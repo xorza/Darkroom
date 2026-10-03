@@ -4,6 +4,7 @@
 //! stated sub-pixel tolerance, accuracy tracks SNR, and the three centroid methods
 //! (weighted-moments / Gaussian-fit / Moffat-fit) agree and the profile fits beat moments.
 
+use super::unsaturated;
 use crate::testing::prelude::*;
 use crate::testing::synthetic::background_map;
 use crate::testing::synthetic::sky_field::{Sky, SkyField};
@@ -93,8 +94,9 @@ fn centroid_recovers_known_subpixel_positions() {
     let mut max_error = 0.0f64;
     for &(true_x, true_y) in &positions {
         let star = measure_star(
-            &pixels,
-            &background,
+            &background.residual_of(&pixels),
+            &background.sky_noise(),
+            &unsaturated(&pixels),
             &candidate_at(&pixels, true_x, true_y),
             &config,
             fwhm,
@@ -138,8 +140,9 @@ fn centroid_accuracy_improves_with_snr() {
     let mut measured = Vec::new();
     for &(tx, ty, _) in &stars {
         let star = measure_star(
-            &pixels,
-            &background,
+            &background.residual_of(&pixels),
+            &background.sky_noise(),
+            &unsaturated(&pixels),
             &candidate_at(&pixels, tx, ty),
             &config,
             fwhm,
@@ -192,8 +195,9 @@ fn centroid_methods_agree_and_fits_beat_moments() {
             ..Default::default()
         };
         let star = measure_star(
-            &pixels,
-            &background,
+            &background.residual_of(&pixels),
+            &background.sky_noise(),
+            &unsaturated(&pixels),
             &candidate_at(&pixels, tx, ty),
             &config,
             fwhm,

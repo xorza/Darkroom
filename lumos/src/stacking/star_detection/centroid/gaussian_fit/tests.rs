@@ -1,6 +1,7 @@
 //! Tests for 2D Gaussian fitting.
 use crate::testing::prelude::*;
 use crate::testing::synthetic::patterns;
+use std::f32::consts::FRAC_PI_4;
 
 use crate::math::fwhm::{fwhm_to_sigma, sigma_to_fwhm};
 use crate::stacking::star_detection::centroid::gaussian_fit::*;
@@ -444,10 +445,10 @@ fn gaussian_fit_recovers_known_parameters() {
             result.pos
         );
         assert!(
-            result.sigma.x.is_finite() && result.sigma.y.is_finite(),
+            result.axis_sigma().x.is_finite() && result.axis_sigma().y.is_finite(),
             "{}: non-finite sigma {:?}",
             case.name,
-            result.sigma
+            result.axis_sigma()
         );
 
         if case.expect_converged {
@@ -471,17 +472,17 @@ fn gaussian_fit_recovers_known_parameters() {
         }
         if let Some(tol) = case.sigma_tol {
             assert!(
-                (result.sigma.x - case.sigma.x).abs() < tol,
+                (result.axis_sigma().x - case.sigma.x).abs() < tol,
                 "{}: sigma.x {} vs {} (tol {tol})",
                 case.name,
-                result.sigma.x,
+                result.axis_sigma().x,
                 case.sigma.x
             );
             assert!(
-                (result.sigma.y - case.sigma.y).abs() < tol,
+                (result.axis_sigma().y - case.sigma.y).abs() < tol,
                 "{}: sigma.y {} vs {} (tol {tol})",
                 case.name,
-                result.sigma.y,
+                result.axis_sigma().y,
                 case.sigma.y
             );
         }
@@ -626,8 +627,8 @@ fn gaussian_fit_uniform_data_returns_result() {
     assert!(result.pos.x.is_finite());
     assert!(result.pos.y.is_finite());
     assert!(result.debug.amplitude.is_finite());
-    assert!(result.sigma.x.is_finite());
-    assert!(result.sigma.y.is_finite());
+    assert!(result.axis_sigma().x.is_finite());
+    assert!(result.axis_sigma().y.is_finite());
 }
 
 #[test]
@@ -1110,8 +1111,8 @@ fn gaussian_fit_sigma_at_lower_bound() {
     assert!(result.is_some());
     let result = result.unwrap();
     // Sigma should be clamped to >= 0.5
-    assert!(result.sigma.x >= 0.5);
-    assert!(result.sigma.y >= 0.5);
+    assert!(result.axis_sigma().x >= 0.5);
+    assert!(result.axis_sigma().y >= 0.5);
     // Centroid should still be reasonable
     assert!((result.pos.x - true_cx).abs() < 0.2);
     assert!((result.pos.y - true_cy).abs() < 0.2);
@@ -1149,8 +1150,8 @@ fn gaussian_fit_sigma_at_upper_bound() {
     assert!(result.is_some());
     let result = result.unwrap();
     // Sigma should be clamped to <= stamp_radius
-    assert!(result.sigma.x <= stamp_radius as f32);
-    assert!(result.sigma.y <= stamp_radius as f32);
+    assert!(result.axis_sigma().x <= stamp_radius as f32);
+    assert!(result.axis_sigma().y <= stamp_radius as f32);
     // Centroid should still be found
     assert!((result.pos.x - true_cx).abs() < 0.5);
     assert!((result.pos.y - true_cy).abs() < 0.5);
@@ -1253,11 +1254,10 @@ struct StampData {
     z: Vec<f64>,
 }
 
-/// Build stamp data arrays (x, y, z) for a Gaussian profile at given params.
-fn make_gaussian_stamp_data(size: usize, params: &[f64; 6]) -> StampData {
-    let [x0, y0, amp, sigma_x, sigma_y, bg] = *params;
-    let sigma_x2 = sigma_x * sigma_x;
-    let sigma_y2 = sigma_y * sigma_y;
+/// Build stamp data arrays (x, y, z) for a Gaussian profile at given
+/// `[x0, y0, amp, a, b, c, bg]`.
+fn make_gaussian_stamp_data(size: usize, params: &[f64; 7]) -> StampData {
+    let [x0, y0, amp, a, b, c, bg] = *params;
     let mut data_x = Vec::with_capacity(size * size);
     let mut data_y = Vec::with_capacity(size * size);
     let mut data_z = Vec::with_capacity(size * size);
@@ -1267,7 +1267,7 @@ fn make_gaussian_stamp_data(size: usize, params: &[f64; 6]) -> StampData {
             let y = iy as f64;
             let dx = x - x0;
             let dy = y - y0;
-            let z = amp * (-0.5 * (dx * dx / sigma_x2 + dy * dy / sigma_y2)).exp() + bg;
+            let z = amp * (-0.5 * (a * dx * dx + 2.0 * b * dx * dy + c * dy * dy)).exp() + bg;
             data_x.push(x);
             data_y.push(y);
             data_z.push(z);
@@ -1284,10 +1284,10 @@ fn make_gaussian_stamp_data(size: usize, params: &[f64; 6]) -> StampData {
 fn batch_build_normal_equations_matches_scalar() {
     use crate::stacking::star_detection::centroid::lm_optimizer::LMModel;
 
-    let true_params = [6.3, 6.7, 1000.0, 2.5, 3.0, 100.0];
+    let true_params = [6.3, 6.7, 1000.0, 0.16, 0.03, 0.111, 100.0];
     // Use offset params so residuals are non-trivial
-    let params = [6.5, 6.5, 980.0, 2.6, 2.9, 102.0];
-    let model = Gaussian2D { stamp_radius: 8.0 };
+    let params = [6.5, 6.5, 980.0, 0.15, 0.02, 0.12, 102.0];
+    let model = Gaussian2D { max_sigma: 8.0 };
     let StampData {
         x: data_x,
         y: data_y,
@@ -1330,8 +1330,8 @@ fn batch_build_normal_equations_matches_scalar() {
     assert_close_slice!(gradient_scalar, gradient_batch, SIMD_TOL, "gradient");
 
     // Hessian should match (full matrix including mirrored lower triangle)
-    for i in 0..6 {
-        for j in 0..6 {
+    for i in 0..7 {
+        for j in 0..7 {
             assert_close!(
                 hessian_scalar[i][j],
                 hessian_batch[i][j],
@@ -1348,10 +1348,10 @@ fn batch_build_normal_equations_matches_scalar() {
 fn batch_compute_chi2_matches_scalar() {
     use crate::stacking::star_detection::centroid::lm_optimizer::LMModel;
 
-    let model = Gaussian2D { stamp_radius: 8.0 };
+    let model = Gaussian2D { max_sigma: 8.0 };
     // Use slightly off params so residuals are non-zero
-    let true_params = [6.3, 6.7, 1000.0, 2.5, 3.0, 100.0];
-    let test_params = [6.5, 6.5, 980.0, 2.6, 2.9, 102.0];
+    let true_params = [6.3, 6.7, 1000.0, 0.16, 0.03, 0.111, 100.0];
+    let test_params = [6.5, 6.5, 980.0, 0.15, 0.02, 0.12, 102.0];
     let StampData {
         x: data_x,
         y: data_y,
@@ -1388,9 +1388,9 @@ fn batch_compute_chi2_matches_scalar() {
 fn batch_weighted_bypasses_simd_and_applies_weights() {
     use crate::stacking::star_detection::centroid::lm_optimizer::LMModel;
 
-    let true_params = [6.3, 6.7, 1000.0, 2.5, 3.0, 100.0];
-    let params = [6.5, 6.5, 980.0, 2.6, 2.9, 102.0];
-    let model = Gaussian2D { stamp_radius: 8.0 };
+    let true_params = [6.3, 6.7, 1000.0, 0.16, 0.03, 0.111, 100.0];
+    let params = [6.5, 6.5, 980.0, 0.15, 0.02, 0.12, 102.0];
+    let model = Gaussian2D { max_sigma: 8.0 };
     let StampData {
         x: data_x,
         y: data_y,
@@ -1417,7 +1417,7 @@ fn batch_weighted_bypasses_simd_and_applies_weights() {
             scale,
             unweighted.chi2
         );
-        for i in 0..6 {
+        for i in 0..7 {
             assert_close!(
                 weighted.gradient[i],
                 scale * unweighted.gradient[i],
@@ -1427,7 +1427,7 @@ fn batch_weighted_bypasses_simd_and_applies_weights() {
                 scale,
                 unweighted.gradient[i]
             );
-            for j in 0..6 {
+            for j in 0..7 {
                 assert_close!(
                     weighted.hessian[i][j],
                     scale * unweighted.hessian[i][j],
@@ -1446,10 +1446,10 @@ fn batch_weighted_bypasses_simd_and_applies_weights() {
 fn batch_build_normal_equations_various_stamp_sizes() {
     use crate::stacking::star_detection::centroid::lm_optimizer::LMModel;
 
-    let model = Gaussian2D { stamp_radius: 10.0 };
-    let true_params = [5.0, 5.0, 500.0, 2.0, 2.5, 50.0];
+    let model = Gaussian2D { max_sigma: 10.0 };
+    let true_params = [5.0, 5.0, 500.0, 0.25, -0.04, 0.16, 50.0];
     // Offset params for non-trivial residuals
-    let params = [5.2, 4.8, 490.0, 2.1, 2.4, 51.0];
+    let params = [5.2, 4.8, 490.0, 0.23, -0.03, 0.17, 51.0];
 
     // Test sizes that exercise: exact multiple of 4, remainder 1, 2, 3
     for size in [3, 4, 5, 7, 9, 11, 13, 15, 17] {
@@ -1491,7 +1491,7 @@ fn batch_build_normal_equations_various_stamp_sizes() {
             "size={size}: chi2 mismatch: scalar={chi2_scalar}, batch={chi2_batch}"
         );
 
-        for i in 0..6 {
+        for i in 0..7 {
             assert_close!(
                 gradient_scalar[i],
                 gradient_batch[i],
@@ -1500,7 +1500,7 @@ fn batch_build_normal_equations_various_stamp_sizes() {
                 gradient_scalar[i],
                 gradient_batch[i]
             );
-            for j in 0..6 {
+            for j in 0..7 {
                 assert_close!(
                     hessian_scalar[i][j],
                     hessian_batch[i][j],
@@ -1519,11 +1519,12 @@ fn gaussian_evaluate_and_jacobian_consistency() {
     use crate::stacking::star_detection::centroid::gaussian_fit::Gaussian2D;
     use crate::stacking::star_detection::centroid::lm_optimizer::LMModel;
 
-    let model = Gaussian2D { stamp_radius: 15.0 };
-    let params_list: &[[f64; 6]] = &[
-        [10.0, 10.0, 1000.0, 2.0, 2.0, 100.0],
-        [5.5, 7.3, 500.0, 1.5, 3.0, 50.0],
-        [0.0, 0.0, 1.0, 1.0, 1.0, 0.0],
+    let model = Gaussian2D { max_sigma: 15.0 };
+    let params_list: &[[f64; 7]] = &[
+        [10.0, 10.0, 1000.0, 0.25, 0.0, 0.25, 100.0],
+        [5.5, 7.3, 500.0, 0.44, 0.1, 0.111, 50.0],
+        [5.5, 7.3, 500.0, 0.44, -0.2, 0.111, 50.0],
+        [0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0],
     ];
     let points = [(8.0, 9.0), (10.0, 10.0), (12.0, 11.0), (5.0, 7.0)];
 
@@ -1537,12 +1538,15 @@ fn gaussian_evaluate_and_jacobian_consistency() {
             } = model.evaluate_and_jacobian(x, y, params);
 
             assert!(
-                (eval - fused_eval).abs() < 1e-15,
+                (eval - fused_eval).abs() <= 64.0 * f64::EPSILON * eval.abs().max(1.0),
                 "evaluate mismatch: eval={eval}, fused={fused_eval}"
             );
-            for i in 0..6 {
+            // The fused form sums the exponent as dx·t + dy·u, the reference as
+            // a·dx² + 2b·dx·dy + c·dy²: a few ulps apart, which exp carries into E scaled by the
+            // exponent's size (≤ 8 over these points). 64ε relative bounds both.
+            for i in 0..7 {
                 assert!(
-                    (jac[i] - fused_jac[i]).abs() < 1e-14,
+                    (jac[i] - fused_jac[i]).abs() <= 64.0 * f64::EPSILON * jac[i].abs().max(1.0),
                     "jacobian[{i}] mismatch: jac={}, fused={}",
                     jac[i],
                     fused_jac[i]
@@ -1550,4 +1554,38 @@ fn gaussian_evaluate_and_jacobian_consistency() {
             }
         }
     }
+}
+
+/// The inverse-covariance form has no angle, so a round star is an ordinary point of it: its fit
+/// takes no more iterations than an elongated one's from the same round seed.
+#[test]
+fn gaussian_fit_converges_as_fast_on_a_round_star() {
+    let size = Size2us::new(31, 31);
+    let iterations = |sigma_x: f32, sigma_y: f32| {
+        let pixels = SyntheticStar::new(
+            Vec2::new(15.0, 15.0),
+            0.8,
+            StarProfile::Elliptical {
+                sigma_x,
+                sigma_y,
+                angle: FRAC_PI_4,
+            },
+        )
+        .stamp(size, 0.1);
+        let fit = GaussianFit::new(
+            &pixels,
+            DVec2::new(15.3, 14.8),
+            &StampGrid::new(8),
+            0.1,
+            None,
+            &GaussianFitConfig::default(),
+        )
+        .expect("the fit lands");
+        assert!(fit.converged);
+        fit.debug.iterations
+    };
+    let round = iterations(2.5, 2.5);
+    let elongated = iterations(3.5, 2.0);
+    // Measured: 4 and 5.
+    assert!(round <= elongated, "round {round} vs elongated {elongated}");
 }

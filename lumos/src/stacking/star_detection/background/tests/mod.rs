@@ -461,8 +461,10 @@ fn iterative_background_with_bright_stars() {
 
     // Iterative estimate (should be better at excluding stars)
     let config = BackgroundConfig {
-        refinement: BackgroundRefinement::Iterative { iterations: 2 },
-        mask_dilation: 5,
+        refinement: BackgroundRefinement::Iterative {
+            iterations: 2,
+            mask_dilation: 5,
+        },
         tile_size: 32,
         sigma_clip_iterations: 2,
     };
@@ -529,8 +531,10 @@ fn iterative_background_no_dilation() {
         .add_to(&mut pixels);
 
     let config = BackgroundConfig {
-        refinement: BackgroundRefinement::Iterative { iterations: 1 },
-        mask_dilation: 0, // No dilation
+        refinement: BackgroundRefinement::Iterative {
+            iterations: 1,
+            mask_dilation: 0,
+        },
         tile_size: 32,
         sigma_clip_iterations: 2,
     };
@@ -546,7 +550,6 @@ fn iterative_background_config_default() {
     let config = BackgroundConfig::default();
 
     assert!(matches!(config.refinement, BackgroundRefinement::None));
-    assert_eq!(config.mask_dilation, 3);
 }
 
 #[test]

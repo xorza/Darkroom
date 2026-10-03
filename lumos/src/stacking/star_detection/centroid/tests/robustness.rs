@@ -1,4 +1,5 @@
 use super::*;
+use crate::stacking::star_detection::detector::stages::filter::Rejection;
 use crate::testing::synthetic::background_map;
 
 /// Test centroiding with undersampled PSF (FWHM < 2 pixels).
@@ -18,8 +19,7 @@ fn centroid_undersampled_psf() {
     let stamp_radius = 5; // Smaller stamp for undersampled
 
     let result = refine_centroid(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
         DVec2::splat(32.0),
         stamp_radius,
         expected_fwhm,
@@ -55,8 +55,7 @@ fn centroid_large_psf() {
     let stamp_radius = MAX_STAMP_RADIUS; // Use maximum allowed
 
     let result = refine_centroid(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
         DVec2::splat(64.0),
         stamp_radius,
         expected_fwhm,
@@ -125,7 +124,15 @@ fn metrics_small_fwhm() {
         .stamp(Size2us::new(width, height), 0.1);
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
-    let metrics = compute_star(&pixels, &bg, DVec2::splat(32.0), 0.0, 5, None, None);
+    let metrics = compute_star(
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
+        DVec2::splat(32.0),
+        0.0,
+        5,
+        None,
+        None,
+    );
 
     assert!(metrics.is_some(), "Should compute metrics for small FWHM");
     let m = metrics.unwrap();
@@ -144,8 +151,8 @@ fn metrics_large_fwhm() {
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics = compute_star(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
         DVec2::splat(64.0),
         0.0,
         MAX_STAMP_RADIUS,
@@ -195,7 +202,12 @@ fn centroid_with_nearby_star() {
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
     let expected_fwhm = sigma_to_fwhm(sigma);
 
-    let result = refine_centroid(&pixels, &bg, primary_pos, TEST_STAMP_RADIUS, expected_fwhm);
+    let result = refine_centroid(
+        &bg.residual_of(&pixels),
+        primary_pos,
+        TEST_STAMP_RADIUS,
+        expected_fwhm,
+    );
 
     assert!(result.is_some(), "Should find centroid despite nearby star");
     let new_pos = result.unwrap();
@@ -231,7 +243,12 @@ fn centroid_blended_stars() {
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
     let expected_fwhm = sigma_to_fwhm(sigma);
 
-    let result = refine_centroid(&pixels, &bg, primary_pos, TEST_STAMP_RADIUS, expected_fwhm);
+    let result = refine_centroid(
+        &bg.residual_of(&pixels),
+        primary_pos,
+        TEST_STAMP_RADIUS,
+        expected_fwhm,
+    );
 
     assert!(result.is_some(), "Should attempt centroid on blended stars");
     let new_pos = result.unwrap();
@@ -315,8 +332,8 @@ fn eccentricity_with_contamination() {
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics_single = compute_star(
-        &single_star,
-        &bg,
+        &bg.residual_of(&single_star),
+        &bg.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -326,8 +343,8 @@ fn eccentricity_with_contamination() {
     .unwrap();
 
     let metrics_contaminated = compute_star(
-        &contaminated,
-        &bg,
+        &bg.residual_of(&contaminated),
+        &bg.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -388,7 +405,12 @@ fn centroid_rotated_ellipse_45deg() {
     );
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
-    let result = refine_centroid(&pixels, &bg, DVec2::splat(32.0), TEST_STAMP_RADIUS, 6.0);
+    let result = refine_centroid(
+        &bg.residual_of(&pixels),
+        DVec2::splat(32.0),
+        TEST_STAMP_RADIUS,
+        6.0,
+    );
 
     assert!(result.is_some(), "Should find centroid for rotated ellipse");
     let new_pos = result.unwrap();
@@ -422,7 +444,7 @@ fn centroid_various_rotation_angles() {
             0.8,
         );
 
-        let result = refine_centroid(&pixels, &bg, true_pos, TEST_STAMP_RADIUS, 6.0);
+        let result = refine_centroid(&bg.residual_of(&pixels), true_pos, TEST_STAMP_RADIUS, 6.0);
 
         assert!(
             result.is_some(),
@@ -459,7 +481,16 @@ fn eccentricity_rotation_invariant() {
             0.8,
         );
 
-        let metrics = compute_star(&pixels, &bg, pos, 0.0, TEST_STAMP_RADIUS, None, None).unwrap();
+        let metrics = compute_star(
+            &bg.residual_of(&pixels),
+            &bg.sky_noise(),
+            pos,
+            0.0,
+            TEST_STAMP_RADIUS,
+            None,
+            None,
+        )
+        .unwrap();
         eccentricities.push((angle_deg, metrics.eccentricity));
     }
 
@@ -475,7 +506,7 @@ fn eccentricity_rotation_invariant() {
     }
 }
 
-/// Test Gaussian fitting on rotated ellipse (fits axis-aligned `sigma_x`, `sigma_y`).
+/// The Gaussian fit recovers a rotated ellipse's full covariance, not only its axis projections.
 #[test]
 fn gaussian_fit_rotated_ellipse() {
     use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
@@ -516,19 +547,67 @@ fn gaussian_fit_rotated_ellipse() {
         "Position error {error} too large for rotated ellipse fit"
     );
 
-    // The fitted sigma values will be axis-aligned projections, not the true major/minor axes
-    // Just verify they're reasonable and different from each other
-    assert!(
-        result.sigma.x > 1.0 && result.sigma.x < 5.0,
-        "sigma_x out of range"
-    );
-    assert!(
-        result.sigma.y > 1.0 && result.sigma.y < 5.0,
-        "sigma_y out of range"
-    );
+    // A 45° ellipse with principal σ 3.5 and 2.0 has covariance R·diag(σ₁², σ₂²)·Rᵀ:
+    // xx = yy = (3.5² + 2²)/2 = 8.125 and xy = (3.5² − 2²)/2 = 4.125, the off-diagonal term an
+    // axis-aligned model cannot represent. Noiseless samples of the model itself, so the fit is
+    // exact up to the f32 rounding of the pixels.
+    let c = result.covariance;
+    for (got, want) in [(c.xx, 8.125), (c.yy, 8.125), (c.xy, 4.125)] {
+        assert!((got - want).abs() < EXACT_FIT_PX2, "{got} vs {want}");
+    }
+    // √(1 − 2²/3.5²) = √(33/49) = 0.820652; σ_eq = √(3.5·2) = √7, FWHM = 2√(2 ln 2)·√7 = 6.230268.
+    // Both read the covariance above, held to 1e-6 px², and come out as f32: 1e-5 is that error
+    // carried through plus a few f32 ulps of the result.
+    assert!((result.covariance.eccentricity() - 0.820_652).abs() < 1e-5);
+    assert!((result.covariance.fwhm() - 6.230_268).abs() < 1e-5);
 }
 
 /// Test recovery from initial guess 2 pixels away from true position.
+/// Under `GaussianFit` a 45° elongated star reports the eccentricity of its true shape —
+/// √(1 − 2²/3.5²) = 0.8207 for σ 3.5 × 2.0 — and the filter rejects it as eccentric at the
+/// `high_resolution` preset's 0.5. The axis-aligned fit read it as round, σx = σy = √8.125, and
+/// passed it.
+#[test]
+fn gaussian_fit_rejects_a_diagonal_elongated_star() {
+    let size = Size2us::new(64, 64);
+    let pixels =
+        make_rotated_elliptical_star(size, Vec2::new(32.0, 32.0), 3.5, 2.0, FRAC_PI_4, 0.8);
+    let bg = background_map::uniform(size, 0.1, 0.01);
+    let config = MeasurementConfig {
+        centroid_method: CentroidMethod::GaussianFit,
+        ..Default::default()
+    };
+    let region = Region {
+        bbox: URect::new(Vec2us::new(24, 24), Vec2us::new(41, 41)),
+        peak: Vec2us::new(32, 32),
+        peak_value: 0.8,
+        area: 200,
+    };
+    let expected_fwhm = 6.23;
+    let star = measure_star(
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
+        &unsaturated(&pixels),
+        &region,
+        &config,
+        expected_fwhm,
+        &StampGrid::new(compute_stamp_radius(expected_fwhm)),
+    )
+    .expect("the star measures");
+    // FWHM = 2√(2 ln 2)·√(3.5·2) = 6.230268. The covariance is fitted to noiseless samples of its
+    // own model, so both hold to a few f32 ulps; 1e-5 bounds that.
+    assert!(
+        (star.eccentricity - 0.820_652).abs() < 1e-5,
+        "{}",
+        star.eccentricity
+    );
+    assert!((star.fwhm - 6.230_268).abs() < 1e-5, "{}", star.fwhm);
+    assert_eq!(
+        Rejection::of(&star, &Config::high_resolution().filter),
+        Some(Rejection::Eccentric)
+    );
+}
+
 #[test]
 fn recovery_from_2pixel_offset() {
     let width = 64;
@@ -546,8 +625,12 @@ fn recovery_from_2pixel_offset() {
 
     let mut pos = initial_guess;
     for _ in 0..MAX_MOMENTS_ITERATIONS {
-        if let Some(new_pos) = refine_centroid(&pixels, &bg, pos, TEST_STAMP_RADIUS, expected_fwhm)
-        {
+        if let Some(new_pos) = refine_centroid(
+            &bg.residual_of(&pixels),
+            pos,
+            TEST_STAMP_RADIUS,
+            expected_fwhm,
+        ) {
             let delta = new_pos - pos;
             pos = new_pos;
             if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
@@ -583,8 +666,12 @@ fn recovery_from_3pixel_offset() {
 
     let mut pos = initial_guess;
     for _ in 0..MAX_MOMENTS_ITERATIONS {
-        if let Some(new_pos) = refine_centroid(&pixels, &bg, pos, TEST_STAMP_RADIUS, expected_fwhm)
-        {
+        if let Some(new_pos) = refine_centroid(
+            &bg.residual_of(&pixels),
+            pos,
+            TEST_STAMP_RADIUS,
+            expected_fwhm,
+        ) {
             let delta = new_pos - pos;
             pos = new_pos;
             if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {

@@ -8,16 +8,17 @@ use crate::background_mesh::spline::{cubic_spline_eval, solve_natural_spline_d2}
 use crate::background_mesh::tile_stats::TileComponent;
 use crate::bit_buffer2::BitBuffer2;
 use crate::concurrency::JobScratchPool;
+use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::math::statistics::median_mut;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::background::simd;
 use crate::stacking::star_detection::background::simd::{SegmentRamp, SplineSegment};
+use crate::stacking::star_detection::background::sky_noise::SkyNoise;
 use crate::stacking::star_detection::background::workspace::InterpolateScratch;
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::mask_dilation::dilate_mask;
 use crate::stacking::star_detection::resources::DetectionResources;
 use crate::stacking::star_detection::threshold_mask::{ThresholdParams, create_threshold_mask};
-use std::mem;
 
 /// Per-pixel background and noise estimates for an image.
 ///
@@ -120,20 +121,20 @@ impl BackgroundEstimate {
         }
     }
 
-    /// Refine the estimate using iterative object masking.
-    ///
-    /// Call this after initial estimation when using `BackgroundRefinement::Iterative`.
+    /// Refine the estimate by masking the sources it finds and re-estimating the sky around them,
+    /// `iterations` times, the mask dilated by `mask_dilation`.
     pub(crate) fn refine(
         &mut self,
         pixels: &Buffer2<f32>,
         config: &BackgroundConfig,
+        refinement: Refinement,
         detection_sigma: f32,
         resources: &mut DetectionResources,
     ) {
-        let iterations = config.refinement.iterations();
-        if iterations == 0 {
-            return;
-        }
+        let Refinement {
+            iterations,
+            mask_dilation,
+        } = refinement;
 
         let mut mask = resources.acquire_bit();
         let mut scratch = resources.acquire_bit();
@@ -147,7 +148,7 @@ impl BackgroundEstimate {
                     sigma: detection_sigma,
                     min_noise: self.noise_floor,
                 },
-                config.mask_dilation,
+                mask_dilation,
                 &mut mask,
                 &mut scratch,
             );
@@ -175,11 +176,35 @@ impl BackgroundEstimate {
         resources.release_bit(mask);
     }
 
-    /// Release buffers back to the pool.
-    pub(crate) fn release_to_pool(self, pool: &mut DetectionResources) {
+    /// Subtract the sky from `pixels` in place, leaving the residual every later stage reads, and
+    /// keep only its noise: the background plane goes back to the pool.
+    pub(crate) fn subtract_from(
+        self,
+        pixels: &mut Buffer2<f32>,
+        pool: &mut DetectionResources,
+    ) -> SkyNoise {
+        pixels
+            .pixels_mut()
+            .par_chunks_mut(SAMPLES_PER_BLOCK)
+            .zip(self.background.pixels().par_chunks(SAMPLES_PER_BLOCK))
+            .for_each(|(values, sky)| {
+                for (value, &sky) in values.iter_mut().zip(sky) {
+                    *value -= sky;
+                }
+            });
         pool.release_f32(self.background);
-        pool.release_f32(self.noise);
+        SkyNoise {
+            noise: self.noise,
+            floor: self.noise_floor,
+        }
     }
+}
+
+/// The parameters of `BackgroundRefinement::Iterative`, once a refinement is known to run.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Refinement {
+    pub(crate) iterations: usize,
+    pub(crate) mask_dilation: usize,
 }
 
 /// Interpolate background map from tile grid into output buffers.
@@ -221,11 +246,7 @@ fn create_object_mask(
     // Create threshold mask using packed SIMD-optimized implementation
     create_threshold_mask(pixels, background, noise, threshold, output);
 
-    // Dilate mask to cover object wings
-    if dilation_radius > 0 {
-        dilate_mask(output, dilation_radius, scratch);
-        mem::swap(output, scratch);
-    }
+    dilate_mask(output, dilation_radius, scratch);
 }
 
 /// Interpolate an entire row using natural bicubic spline interpolation.
@@ -343,6 +364,44 @@ fn interpolate_row(
         x = segment_end;
         if x >= width {
             break;
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use imaginarium::Buffer2;
+
+    use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
+    use crate::stacking::star_detection::background::sky_noise::SkyNoise;
+    use crate::stacking::star_detection::resources::DetectionResources;
+
+    impl BackgroundEstimate {
+        /// `pixels` less this background: the residual the stages after the subtraction read.
+        pub(crate) fn residual_of(&self, pixels: &Buffer2<f32>) -> Buffer2<f32> {
+            let mut residual = pixels.clone();
+            for (value, &sky) in residual
+                .pixels_mut()
+                .iter_mut()
+                .zip(self.background.pixels())
+            {
+                *value -= sky;
+            }
+            residual
+        }
+
+        /// Return both planes to `pool` without subtracting them from anything.
+        pub(crate) fn release_to_pool(self, pool: &mut DetectionResources) {
+            pool.release_f32(self.background);
+            pool.release_f32(self.noise);
+        }
+
+        /// This estimate's noise, as [`BackgroundEstimate::subtract_from`] hands it on.
+        pub(crate) fn sky_noise(&self) -> SkyNoise {
+            SkyNoise {
+                noise: self.noise.clone(),
+                floor: self.noise_floor,
+            }
         }
     }
 }
