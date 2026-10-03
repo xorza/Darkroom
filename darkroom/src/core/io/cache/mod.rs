@@ -9,35 +9,33 @@ use std::path::{Path, PathBuf};
 
 use common::file_utils;
 
-/// The cache directory for a document: `<stem>.darkroom-cache/` beside the
+use crate::core::io::document::EXTENSION;
+
+/// The cache directory for a document: `<stem>.<EXTENSION>-cache/` beside the
 /// document file (e.g. `proj/scene.darkroom` → `proj/scene.darkroom-cache/`).
 /// Per-document-named so two projects in one folder keep separate stores.
+/// Save-As / moving the project does *not* carry the cache along — each
+/// location keeps its own store, which refills lazily as nodes recompute.
 pub(crate) fn document_cache_root(doc_path: &Path) -> PathBuf {
     let stem = doc_path.file_stem().unwrap_or_default();
     let mut name = stem.to_os_string();
-    name.push(".darkroom-cache");
+    name.push(".");
+    name.push(EXTENSION);
+    name.push("-cache");
     doc_path.with_file_name(name)
-}
-
-/// The document's blob-store root, ensuring the dir and a self-ignoring
-/// `.gitignore` exist. Save-As / moving the project does *not* carry the cache
-/// along — each location keeps its own store, which refills lazily as nodes
-/// recompute.
-pub(crate) fn prepare_document_cache_root(doc_path: &Path) -> PathBuf {
-    let root = document_cache_root(doc_path);
-    ensure_gitignore(&root);
-    root
 }
 
 /// Best-effort: create `root` and drop a `*`-pattern `.gitignore`, so the whole
 /// cache folder (blobs + the ignore file itself) stays out of version control.
-/// A failure just means no `.gitignore` yet — the cache still works, since blob
-/// writes recreate the dir.
+/// Called before the first blob can land there, not when a document opens, so
+/// a document with no disk-backed node leaves its folder untouched. A failure
+/// just means no `.gitignore` yet — the cache still works, since blob writes
+/// recreate the dir.
 #[expect(
     clippy::let_underscore_must_use,
     reason = "the ignore file is a courtesy; a cache without it still works"
 )]
-fn ensure_gitignore(root: &Path) {
+pub(crate) fn prepare_cache_root(root: &Path) {
     if fs::create_dir_all(root).is_err() {
         return;
     }

@@ -30,7 +30,9 @@ fn build_creates_dir_and_self_ignoring_gitignore() {
     let dir = TempDir::new("darkroom-cache");
     let doc_path = dir.join("scene.darkroom");
 
-    let root = prepare_document_cache_root(&doc_path);
+    let root = document_cache_root(&doc_path);
+    assert!(!root.exists(), "naming the root creates nothing");
+    prepare_cache_root(&root);
 
     assert_eq!(root, dir.join("scene.darkroom-cache"));
     assert!(root.is_dir(), "cache dir created beside the document");
