@@ -39,8 +39,8 @@ impl AnchoredMenu {
     /// For a caller with per-frame setup to skip: [`Self::show`] answers
     /// `None` for a closed menu anyway, but only *after* its arguments
     /// have been built.
-    pub(crate) fn open_on(&self) -> bool {
-        self.anchor.get().is_some()
+    pub(crate) fn is_open(&self) -> bool {
+        !self.anchor.is_idle()
     }
 
     /// Show the menu when open, recording `body` inside the shared popup chrome. `body` records the
@@ -116,6 +116,10 @@ impl NodeContextMenu {
     /// gated by the wrapped [`AnchoredMenu`] being open.
     pub(crate) fn reset(&mut self) {
         self.menu.reset();
+    }
+
+    pub(crate) fn is_open(&self) -> bool {
+        self.menu.is_open()
     }
 
     /// Open on `node`, anchored at the pointer, and report whether it did.

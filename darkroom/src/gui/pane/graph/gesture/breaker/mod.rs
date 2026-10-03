@@ -280,6 +280,11 @@ impl BreakerUI {
         self.latched.clear();
     }
 
+    /// Whether a scribble is in flight.
+    pub(crate) fn in_flight(&self) -> bool {
+        !self.latched.is_idle()
+    }
+
     /// Drive the gesture from the outer canvas response: start, extend,
     /// release. On release, drains all three `broken_*` collections into
     /// their matching severing `GraphIntent` (`RemoveNode`, `SetInput { to: None

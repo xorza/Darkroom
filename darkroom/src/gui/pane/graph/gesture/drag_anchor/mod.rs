@@ -60,6 +60,11 @@ impl GroupDrag {
         self.anchor = None;
     }
 
+    /// Whether a drag is latched.
+    pub(crate) fn in_flight(&self) -> bool {
+        self.anchor.is_some()
+    }
+
     /// Start (or replace) the gesture. `members` includes the grabbed node
     /// itself.
     pub(crate) fn latch(

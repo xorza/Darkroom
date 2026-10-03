@@ -79,6 +79,11 @@ impl SelectionUI {
         self.preview.clear();
     }
 
+    /// Whether a band is in flight.
+    pub(crate) fn in_flight(&self) -> bool {
+        !self.band.is_idle()
+    }
+
     /// The live swept set while a band is in flight over this pane,
     /// for node/pin draw to paint against; `None` for every other pane and
     /// when no band is active (the caller falls back to the pane's

@@ -81,6 +81,11 @@ impl NodeUI {
         self.focus_kept_last = None;
     }
 
+    /// Whether a node drag is latched.
+    pub(super) fn in_flight(&self) -> bool {
+        self.drag.in_flight()
+    }
+
     /// Record the widget tree of every scene node retained by `cull`
     /// (plus the focus-owning node — see the loop comment),
     /// skipping off-screen ones entirely. Emits selection/raise intents

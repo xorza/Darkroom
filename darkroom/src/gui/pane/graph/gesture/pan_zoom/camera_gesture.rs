@@ -46,6 +46,12 @@ impl CameraGesture {
         self.scroll = None;
     }
 
+    /// Whether a pan drag is latched. A scroll run has no press to cancel,
+    /// so it never counts.
+    pub(crate) fn in_flight(&self) -> bool {
+        !self.pan.is_idle()
+    }
+
     /// Latch a pan drag at the camera's current `pan`, as a new gesture.
     pub(crate) fn latch_pan(&mut self, pan: Vec2, out: &mut Requests) {
         self.pan.latch(PanAnchor {

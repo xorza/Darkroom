@@ -72,6 +72,11 @@ impl NewNodeUi {
         self.search.folded.clear();
     }
 
+    /// Whether the palette is open.
+    pub(crate) fn in_flight(&self) -> bool {
+        self.menu.is_open()
+    }
+
     pub(crate) fn apply(
         &mut self,
         ui: &mut Ui,
@@ -102,7 +107,7 @@ impl NewNodeUi {
         // the display and a last-frame rect — so nothing but an open
         // palette on *this* pane should pay for it. `show` would answer
         // `None` anyway, but only after its arguments were built.
-        if !self.menu.open_on() {
+        if !self.menu.is_open() {
             return;
         }
 

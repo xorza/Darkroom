@@ -41,6 +41,11 @@ impl NodeMenuUi {
         self.menu.reset();
     }
 
+    /// Whether the menu is open.
+    pub(crate) fn in_flight(&self) -> bool {
+        self.menu.is_open()
+    }
+
     /// Record the menu and resolve this frame's pick onto `out` — a run as
     /// the [`AppCommand`] it means, the structural picks as ordinary intents.
     ///

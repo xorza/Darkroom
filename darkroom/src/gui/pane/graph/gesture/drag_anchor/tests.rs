@@ -1,5 +1,5 @@
 use glam::Vec2;
-use palantir::Key;
+use palantir::{Key, PointerButton};
 
 use crate::core::document::harness::DocFixture;
 use crate::core::edit::graph_intent::GraphIntent;
@@ -68,6 +68,40 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
         moved(&after),
         None,
         "a cancelled drag moves nothing: {after:?}"
+    );
+}
+
+/// Esc cancels what is in flight, and deselects only when nothing was: a
+/// first Esc during a drag of the selection ends the drag and keeps the
+/// selection, and a second, with nothing left in flight, clears it.
+#[test]
+fn esc_cancels_a_drag_before_it_deselects() {
+    let mut h = CanvasHarness::new(DocFixture::probes(2));
+    let dragged = h.node(0);
+    h.doc_mut().main_view.selected = [dragged].into_iter().collect();
+    h.prime(2);
+
+    let grab = h.node_center(dragged);
+    h.ui.press_at(grab);
+    h.frame();
+    h.ui.drag_to(grab + Vec2::new(40.0, 0.0));
+    h.frame();
+    h.frame();
+
+    h.ui.key(Key::Escape);
+    let first = h.frame();
+    assert!(
+        matches!(first[..], [GraphIntent::MoveSelection { offset, .. }] if offset == Vec2::ZERO),
+        "the first Esc only puts the drag back: {first:?}"
+    );
+    h.ui.release_button(PointerButton::Left);
+    h.frame();
+
+    h.ui.key(Key::Escape);
+    let second = h.frame();
+    assert!(
+        matches!(second[..], [GraphIntent::SetSelection { ref to }] if to.is_empty()),
+        "the second Esc deselects: {second:?}"
     );
 }
 
