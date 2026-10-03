@@ -56,7 +56,7 @@ impl Session {
     /// The graph the runtime is compiled and run against — the one reach
     /// across this boundary that is not a frame concern, so it is named here
     /// rather than spelled out at each of `App`'s run commands.
-    pub(crate) fn graph(&self) -> &Graph {
+    pub(crate) const fn graph(&self) -> &Graph {
         &self.open.document.graph
     }
 

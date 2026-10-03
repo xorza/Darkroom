@@ -104,7 +104,7 @@ impl FrameQuality<Buffer2<f32>> {
 
 impl<P> FrameQuality<P> {
     /// The frame's per-pixel warp support, or `None` for a frame that carries no frame quality.
-    pub(crate) fn coverage(&self) -> Option<&P> {
+    pub(crate) const fn coverage(&self) -> Option<&P> {
         match self {
             Self::None => None,
             Self::Planes { coverage, .. } => Some(coverage),
@@ -112,7 +112,7 @@ impl<P> FrameQuality<P> {
     }
 
     /// The frame's per-pixel interpolation confidence, or `None` as in [`Self::coverage`].
-    pub(crate) fn confidence(&self) -> Option<&P> {
+    pub(crate) const fn confidence(&self) -> Option<&P> {
         match self {
             Self::None => None,
             Self::Planes { confidence, .. } => Some(confidence),
@@ -154,7 +154,7 @@ impl<P> FrameQuality<P> {
     }
 
     /// Whether the frame carries no frame quality at all.
-    pub(crate) fn is_none(&self) -> bool {
+    pub(crate) const fn is_none(&self) -> bool {
         matches!(self, Self::None)
     }
 

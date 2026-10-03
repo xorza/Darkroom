@@ -51,7 +51,7 @@ impl QualityPlanes {
 
     /// Drop the planes this combine method cannot produce, so the request reaching the reducer
     /// is exactly what it will write.
-    pub(crate) fn resolve(self, produces_variance: bool) -> Self {
+    pub(crate) const fn resolve(self, produces_variance: bool) -> Self {
         Self {
             variance: self.variance && produces_variance,
             ..self

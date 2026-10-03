@@ -326,7 +326,7 @@ struct NullSummary {
 
 impl NullSummary {
     /// Restate this summary in an index space `by` samples earlier — a chunk's, in its plane's.
-    fn offset_by(self, by: usize) -> Self {
+    const fn offset_by(self, by: usize) -> Self {
         Self {
             count: self.count,
             first_index: self.first_index + by,

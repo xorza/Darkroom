@@ -20,11 +20,11 @@ unsafe impl<T: Copy> Send for UnsafeSendPtr<T> {}
 unsafe impl<T: Copy> Sync for UnsafeSendPtr<T> {}
 
 impl<T: Copy> UnsafeSendPtr<T> {
-    pub(crate) fn new(ptr: T) -> Self {
+    pub(crate) const fn new(ptr: T) -> Self {
         Self(ptr)
     }
 
-    pub(crate) fn get(&self) -> T {
+    pub(crate) const fn get(&self) -> T {
         self.0
     }
 }

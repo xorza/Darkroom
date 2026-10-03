@@ -59,7 +59,7 @@ impl CfaType {
     /// Get the color index (0=R, 1=G, 2=B) at position (x, y).
     /// For Mono, always returns 0.
     #[inline(always)]
-    pub fn color_at(&self, pos: Vec2us) -> u8 {
+    pub const fn color_at(&self, pos: Vec2us) -> u8 {
         match self {
             CfaType::Mono => 0,
             CfaType::Bayer(p) => p.color_at(pos) as u8,
@@ -68,7 +68,7 @@ impl CfaType {
     }
 
     /// Number of distinct color channels (1 for Mono, 3 for Bayer/X-Trans).
-    pub fn num_colors(&self) -> usize {
+    pub const fn num_colors(&self) -> usize {
         match self {
             CfaType::Mono => 1,
             CfaType::Bayer(_) | CfaType::XTrans(_) => 3,
@@ -219,12 +219,16 @@ impl StackableImage for CfaImage {
 
 impl CfaImage {
     /// The sensor extent the samples cover.
-    pub(crate) fn size(&self) -> Size2us {
+    pub(crate) const fn size(&self) -> Size2us {
         Size2us::new(self.data.width(), self.data.height())
     }
 
     /// Create an in-memory sensor image whose CFA classification is supplied by the caller.
-    pub fn from_plane(data: Buffer2<f32>, cfa_type: CfaType, metadata: ImageMetadata) -> Self {
+    pub const fn from_plane(
+        data: Buffer2<f32>,
+        cfa_type: CfaType,
+        metadata: ImageMetadata,
+    ) -> Self {
         Self {
             data,
             cfa_type,
@@ -250,7 +254,7 @@ impl CfaImage {
 
     /// Resident RAM held by this frame: its single f32 CFA plane's pixel bytes.
     /// Metadata is negligible against a full-sensor plane.
-    pub fn ram_bytes(&self) -> usize {
+    pub const fn ram_bytes(&self) -> usize {
         self.data.width() * self.data.height() * size_of::<f32>()
     }
 

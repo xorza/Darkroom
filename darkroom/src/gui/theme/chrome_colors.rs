@@ -69,18 +69,18 @@ impl ChromeColors {
     /// Rubber-band interior wash — `selection_rect` at 12%, pairing
     /// with [`Self::selection_border`] (the derivation the
     /// `selection_rect` doc promises lives in one place).
-    pub(crate) fn selection_fill(&self) -> RgbaF32 {
+    pub(crate) const fn selection_fill(&self) -> RgbaF32 {
         self.selection_rect.with_alpha(0.12)
     }
 
     /// Rubber-band outline — `selection_rect` near-opaque.
-    pub(crate) fn selection_border(&self) -> RgbaF32 {
+    pub(crate) const fn selection_border(&self) -> RgbaF32 {
         self.selection_rect.with_alpha(0.85)
     }
 
     /// Soft hairline rule — `text_muted` at 18%, the peer of
     /// palantir's `Palette::border_soft`.
-    pub(crate) fn border_soft(&self) -> RgbaF32 {
+    pub(crate) const fn border_soft(&self) -> RgbaF32 {
         self.text_muted.with_alpha(0.18)
     }
 }

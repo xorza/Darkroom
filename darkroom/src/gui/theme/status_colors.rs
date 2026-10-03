@@ -28,7 +28,7 @@ pub(crate) struct StatusColors {
 }
 
 impl StatusColors {
-    pub(super) fn from_palette(p: &Palette) -> Self {
+    pub(super) const fn from_palette(p: &Palette) -> Self {
         Self {
             success: p.status_success,
             info: p.status_info,

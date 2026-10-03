@@ -49,7 +49,7 @@ impl Pixel {
 /// Squared Euclidean distance between two pixel positions — the one peak-separation
 /// metric shared by the Voronoi assignment and every min-separation check.
 #[inline]
-fn dist_sq(a: Vec2us, b: Vec2us) -> usize {
+const fn dist_sq(a: Vec2us, b: Vec2us) -> usize {
     let dx = a.x.abs_diff(b.x);
     let dy = a.y.abs_diff(b.y);
     dx * dx + dy * dy
@@ -75,7 +75,7 @@ fn nearest_peak_index(pos: Vec2us, peaks: &[Pixel]) -> usize {
 /// `min_separation * min_separation`, pre-squared by the caller since peak-separation
 /// checks run in a loop over many candidate pairs.
 #[inline]
-fn peaks_too_close(a: Vec2us, b: Vec2us, min_sep_sq: usize) -> bool {
+const fn peaks_too_close(a: Vec2us, b: Vec2us, min_sep_sq: usize) -> bool {
     dist_sq(a, b) < min_sep_sq
 }
 

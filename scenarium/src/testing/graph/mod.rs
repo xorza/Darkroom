@@ -350,7 +350,7 @@ impl TestGraph {
         node_id
     }
 
-    fn mint(&mut self) -> u128 {
+    const fn mint(&mut self) -> u128 {
         self.next_id += 1;
         self.next_id
     }

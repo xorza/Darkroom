@@ -36,7 +36,7 @@ pub(crate) struct WindowCtx<'a> {
 }
 
 impl<'a> WindowCtx<'a> {
-    pub(crate) fn new(app: AppCtx<'a>, open: &'a OpenDocument) -> Self {
+    pub(crate) const fn new(app: AppCtx<'a>, open: &'a OpenDocument) -> Self {
         Self { app, open }
     }
 
@@ -44,12 +44,12 @@ impl<'a> WindowCtx<'a> {
     /// arrangement around it. The projection nearly every reader wants; the
     /// tab strip, which also shows [`OpenDocument::dirty`], takes the pair
     /// through [`Self::open`] instead.
-    pub(crate) fn document(self) -> &'a Document {
+    pub(crate) const fn document(self) -> &'a Document {
         &self.open.document
     }
 
     /// The open document whole — its content *and* the file it came from.
-    pub(crate) fn open(self) -> &'a OpenDocument {
+    pub(crate) const fn open(self) -> &'a OpenDocument {
         self.open
     }
 
@@ -61,7 +61,7 @@ impl<'a> WindowCtx<'a> {
     /// takes one directly, which is how it says it reads nothing
     /// document-shaped. Below here every reader goes through a `GraphCtx`
     /// accessor instead.
-    pub(crate) fn app(self) -> AppCtx<'a> {
+    pub(crate) const fn app(self) -> AppCtx<'a> {
         self.app
     }
 }

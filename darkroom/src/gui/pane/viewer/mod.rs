@@ -123,14 +123,14 @@ impl ShownSource {
         }
     }
 
-    fn image(&self) -> Option<&DrawableImage> {
+    const fn image(&self) -> Option<&DrawableImage> {
         match self {
             Self::Image(image) => Some(image),
             Self::Nothing | Self::NoImage(_) => None,
         }
     }
 
-    fn hint(&self) -> Option<PreviewMessage<'_>> {
+    const fn hint(&self) -> Option<PreviewMessage<'_>> {
         match self {
             Self::Image(_) => None,
             Self::NoImage(error) => Some(PreviewMessage::Failure(error)),

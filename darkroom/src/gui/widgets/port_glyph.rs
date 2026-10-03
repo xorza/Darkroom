@@ -88,17 +88,17 @@ pub(crate) struct PortGlyphResponse {
 
 impl<'a> PortGlyph<'a> {
     /// A data port's circle, `diameter` across, inked `fill`.
-    pub(crate) fn circle(wid: WidgetId, diameter: f32, fill: RgbaF32) -> Self {
+    pub(crate) const fn circle(wid: WidgetId, diameter: f32, fill: RgbaF32) -> Self {
         Self::new(wid, diameter, GlyphShape::Circle { outline: None }, fill)
     }
 
     /// An emitter event's triangle, apex pointing right (the emit direction),
     /// inked `fill`.
-    pub(crate) fn arrow(wid: WidgetId, size: f32, fill: RgbaF32) -> Self {
+    pub(crate) const fn arrow(wid: WidgetId, size: f32, fill: RgbaF32) -> Self {
         Self::new(wid, size, GlyphShape::Arrow { turn: 0.0 }, fill)
     }
 
-    fn new(wid: WidgetId, size: f32, shape: GlyphShape, fill: RgbaF32) -> Self {
+    const fn new(wid: WidgetId, size: f32, shape: GlyphShape, fill: RgbaF32) -> Self {
         Self {
             wid,
             size,
@@ -122,7 +122,7 @@ impl<'a> PortGlyph<'a> {
 
     /// Ring a circle with an annulus strictly outside its fill. Ignored by
     /// [`arrow`](Self::arrow). Default: no ring.
-    pub(crate) fn outline(mut self, color: RgbaF32) -> Self {
+    pub(crate) const fn outline(mut self, color: RgbaF32) -> Self {
         if let GlyphShape::Circle { outline } = &mut self.shape {
             *outline = Some(color);
         }
@@ -131,7 +131,7 @@ impl<'a> PortGlyph<'a> {
 
     /// Rotate an arrow's apex by `radians` about the box center. Ignored by
     /// [`circle`](Self::circle). Default: none (apex points right).
-    pub(crate) fn turn(mut self, radians: f32) -> Self {
+    pub(crate) const fn turn(mut self, radians: f32) -> Self {
         if let GlyphShape::Arrow { turn } = &mut self.shape {
             *turn = radians;
         }
@@ -141,7 +141,7 @@ impl<'a> PortGlyph<'a> {
     /// Lay the glyph out in flow with `margin`. The hit-box growth is folded
     /// back out of it, so node layout and the glyph's own position are
     /// unchanged and only the hover/grab area grows. Default: no margin.
-    pub(crate) fn margin(mut self, margin: Spacing) -> Self {
+    pub(crate) const fn margin(mut self, margin: Spacing) -> Self {
         self.placement = Placement::Margin(margin);
         self
     }
@@ -149,7 +149,7 @@ impl<'a> PortGlyph<'a> {
     /// Place the glyph out of flow, its *grown* box centered on `point` in the
     /// parent's coordinate space — for one that hangs off a corner rather than
     /// sitting in a row.
-    pub(crate) fn centered_on(mut self, point: Vec2) -> Self {
+    pub(crate) const fn centered_on(mut self, point: Vec2) -> Self {
         self.placement = Placement::CenteredOn(point);
         self
     }

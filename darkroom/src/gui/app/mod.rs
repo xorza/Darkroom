@@ -118,7 +118,7 @@ enum PendingTransition {
 
 impl PendingTransition {
     /// How the prompt finishes "Save changes to X before …?".
-    fn prompt_tail(&self) -> &'static str {
+    const fn prompt_tail(&self) -> &'static str {
         match self {
             Self::Quit => "quitting",
             Self::New => "closing it",
@@ -230,7 +230,7 @@ impl App {
     /// Whether a destructive transition has to prompt before proceeding:
     /// unsaved changes and the confirm preference both hold. The single
     /// predicate behind every path that replaces or discards the document.
-    fn needs_discard_confirmation(&self) -> bool {
+    const fn needs_discard_confirmation(&self) -> bool {
         self.session.open.dirty && self.preferences.confirm_unsaved_changes
     }
 

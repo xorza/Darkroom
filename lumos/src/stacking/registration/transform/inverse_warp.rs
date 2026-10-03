@@ -42,7 +42,7 @@ pub struct InverseMapped {
 }
 
 impl InverseWarp {
-    pub(crate) fn new(to_reference: Transform, sip: Option<SipPolynomial>) -> Self {
+    pub(crate) const fn new(to_reference: Transform, sip: Option<SipPolynomial>) -> Self {
         Self { to_reference, sip }
     }
 

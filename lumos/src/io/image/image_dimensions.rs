@@ -55,7 +55,7 @@ impl ImageDimensions {
 
     /// Total number of f32 samples: `width * height * channels`.
     /// For a 100x100 RGB image, returns 30000.
-    pub fn sample_count(&self) -> usize {
+    pub const fn sample_count(&self) -> usize {
         self.pixel_count()
             .checked_mul(self.channels)
             .expect("ImageDimensions validates sample count during construction")

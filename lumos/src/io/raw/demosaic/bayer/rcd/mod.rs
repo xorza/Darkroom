@@ -64,7 +64,7 @@ struct Strides {
 }
 
 impl Strides {
-    fn new(rw: usize, rh: usize) -> Self {
+    const fn new(rw: usize, rh: usize) -> Self {
         Self {
             rw,
             rh,

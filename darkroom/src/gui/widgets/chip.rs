@@ -27,7 +27,7 @@ pub(crate) struct Chip {
 }
 
 impl Chip {
-    pub(crate) fn new(wid: WidgetId, tip: &'static str) -> Self {
+    pub(crate) const fn new(wid: WidgetId, tip: &'static str) -> Self {
         Self {
             wid,
             tip,
@@ -39,19 +39,19 @@ impl Chip {
 
     /// Toggle state: while `true` the chip inverts — the toggled fill
     /// under a dark glyph. Default `false` (a momentary action chip).
-    pub(crate) fn toggled(mut self, on: bool) -> Self {
+    pub(crate) const fn toggled(mut self, on: bool) -> Self {
         self.toggled = on;
         self
     }
 
     /// Glyph ink while idle (untoggled). Default: `text_muted`.
-    pub(crate) fn idle_glyph(mut self, color: RgbaF32) -> Self {
+    pub(crate) const fn idle_glyph(mut self, color: RgbaF32) -> Self {
         self.idle_glyph = Some(color);
         self
     }
 
     /// Chip fill while toggled. Default: the selection accent.
-    pub(crate) fn toggled_fill(mut self, color: RgbaF32) -> Self {
+    pub(crate) const fn toggled_fill(mut self, color: RgbaF32) -> Self {
         self.toggled_fill = Some(color);
         self
     }

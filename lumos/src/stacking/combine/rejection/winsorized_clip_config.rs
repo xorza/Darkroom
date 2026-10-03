@@ -41,13 +41,13 @@ impl Default for WinsorizedClipConfig {
 }
 
 impl WinsorizedClipConfig {
-    pub fn new(sigma: f32) -> Self {
+    pub const fn new(sigma: f32) -> Self {
         Self {
             sigma: SigmaBounds::symmetric(sigma),
         }
     }
 
-    pub fn new_asymmetric(sigma_low: f32, sigma_high: f32) -> Self {
+    pub const fn new_asymmetric(sigma_low: f32, sigma_high: f32) -> Self {
         Self {
             sigma: SigmaBounds::asymmetric(sigma_low, sigma_high),
         }

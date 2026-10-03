@@ -46,7 +46,7 @@ impl StoredContent {
     /// for a value that failed to prepare. The single downcast both readers —
     /// the preview card and the image viewer — go through, so a new variant can't
     /// be handled by one and silently fall through the other.
-    pub(crate) fn image(&self) -> Option<&PreviewImage> {
+    pub(crate) const fn image(&self) -> Option<&PreviewImage> {
         match self {
             StoredContent::Image(image) => Some(image),
             StoredContent::Text(_) | StoredContent::Error(_) => None,
@@ -57,7 +57,7 @@ impl StoredContent {
     /// itself, or the reason it isn't renderable. `None` when [`Self::image`]
     /// answered — the two are complementary, so a caller that renders the
     /// image never also has a message to show.
-    pub(crate) fn message(&self) -> Option<PreviewMessage<'_>> {
+    pub(crate) const fn message(&self) -> Option<PreviewMessage<'_>> {
         match self {
             StoredContent::Text(text) => Some(PreviewMessage::Text(text.as_str())),
             StoredContent::Error(error) => Some(PreviewMessage::Failure(error)),

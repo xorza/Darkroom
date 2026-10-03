@@ -48,7 +48,7 @@ impl DiscardOutcome {
     /// neither proceeds nor silences: silencing there would disable the
     /// guard on the strength of a save that never happened, and the next
     /// discard would go unprompted.
-    pub(super) fn resolve(self, still_dirty: bool) -> DiscardResolution {
+    pub(super) const fn resolve(self, still_dirty: bool) -> DiscardResolution {
         let proceed = match self.choice {
             DiscardChoice::Stay | DiscardChoice::Cancel => false,
             DiscardChoice::Discard => true,

@@ -94,7 +94,7 @@ impl PointNormalization {
 
     /// [`Self::denormalize`] as a transform, built directly rather than by inverting
     /// [`Self::normalizing_transform`].
-    pub(crate) fn denormalizing_transform(self) -> Transform {
+    pub(crate) const fn denormalizing_transform(self) -> Transform {
         Transform::affine([
             self.scale,
             0.0,

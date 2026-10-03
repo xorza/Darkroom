@@ -49,7 +49,7 @@ impl LabelMap {
 
     /// Number of connected components (excluding background).
     #[inline]
-    pub(crate) fn num_labels(&self) -> usize {
+    pub(crate) const fn num_labels(&self) -> usize {
         self.components.len()
     }
 
@@ -60,12 +60,12 @@ impl LabelMap {
     }
 
     #[inline]
-    pub(crate) fn width(&self) -> usize {
+    pub(crate) const fn width(&self) -> usize {
         self.labels.width()
     }
 
     #[inline]
-    pub(crate) fn height(&self) -> usize {
+    pub(crate) const fn height(&self) -> usize {
         self.labels.height()
     }
 }

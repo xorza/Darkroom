@@ -41,7 +41,7 @@ pub struct SmallN {
 impl SmallN {
     /// No fallback — the method is reliable at any frame count (Winsorized, Percentile, Median,
     /// plain mean).
-    pub fn none() -> Self {
+    pub const fn none() -> Self {
         Self {
             min_frames: 0,
             fallback: CombineMethod::Median,
@@ -49,7 +49,7 @@ impl SmallN {
     }
 
     /// Fall back to the median below `min_frames` frames.
-    pub fn median_below(min_frames: usize) -> Self {
+    pub const fn median_below(min_frames: usize) -> Self {
         Self {
             min_frames,
             fallback: CombineMethod::Median,

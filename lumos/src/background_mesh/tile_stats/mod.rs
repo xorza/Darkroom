@@ -46,14 +46,14 @@ pub(crate) struct TileD2y {
 }
 
 impl TileD2y {
-    pub(crate) fn get(self, component: TileComponent) -> f32 {
+    pub(crate) const fn get(self, component: TileComponent) -> f32 {
         match component {
             TileComponent::Sky => self.sky,
             TileComponent::Sigma => self.sigma,
         }
     }
 
-    pub(crate) fn get_mut(&mut self, component: TileComponent) -> &mut f32 {
+    pub(crate) const fn get_mut(&mut self, component: TileComponent) -> &mut f32 {
         match component {
             TileComponent::Sky => &mut self.sky,
             TileComponent::Sigma => &mut self.sigma,
@@ -63,7 +63,7 @@ impl TileD2y {
 
 impl TileStats {
     /// The statistic `component` names.
-    pub(crate) fn get(self, component: TileComponent) -> f32 {
+    pub(crate) const fn get(self, component: TileComponent) -> f32 {
         match component {
             TileComponent::Sky => self.sky,
             TileComponent::Sigma => self.sigma,
@@ -242,7 +242,7 @@ fn count_unmasked_pixels(mask: &BitBuffer2, tile: URect) -> usize {
 }
 
 #[inline]
-fn unmasked_bits(mask_word: u64, bit_offset: usize, bits_to_process: usize) -> u64 {
+const fn unmasked_bits(mask_word: u64, bit_offset: usize, bits_to_process: usize) -> u64 {
     let relevant_bits = if bits_to_process == 64 {
         !0
     } else {

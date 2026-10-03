@@ -152,7 +152,7 @@ pub(super) struct DropReach {
 }
 
 impl<'a> OutputBand<'a> {
-    pub(super) fn new(
+    pub(super) const fn new(
         rows: Range<usize>,
         width: usize,
         planes: PlaneSpan<'a>,

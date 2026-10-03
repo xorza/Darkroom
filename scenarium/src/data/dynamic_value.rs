@@ -18,7 +18,7 @@ pub struct RamUsage {
 }
 
 impl RamUsage {
-    pub fn total(&self) -> usize {
+    pub const fn total(&self) -> usize {
         self.cpu + self.gpu
     }
 }
@@ -77,7 +77,7 @@ impl DynamicValue {
         DynamicValue::Custom(Arc::new(value))
     }
 
-    pub fn as_static(&self) -> Option<&ConstValue> {
+    pub const fn as_static(&self) -> Option<&ConstValue> {
         match self {
             DynamicValue::Static(value) => Some(value),
             _ => None,

@@ -21,7 +21,7 @@ pub(crate) struct CanvasTheme {
 }
 
 impl CanvasTheme {
-    pub(super) fn from_palette(p: &Palette) -> Self {
+    pub(super) const fn from_palette(p: &Palette) -> Self {
         Self {
             bg: p.canvas_bg,
             dot: p.canvas_dot,

@@ -136,7 +136,7 @@ pub(super) fn draw_swatch(
 
 /// The single colour `mode` paints, or `None` for the checker, which is a
 /// pattern. The one mapping the swatch and the viewer's backdrop both read.
-pub(super) fn flat_fill(theme: &Theme, mode: ViewerBackground) -> Option<RgbaF32> {
+pub(super) const fn flat_fill(theme: &Theme, mode: ViewerBackground) -> Option<RgbaF32> {
     match mode {
         ViewerBackground::Theme => Some(theme.canvas.bg),
         ViewerBackground::Black => Some(RgbaF32::BLACK),

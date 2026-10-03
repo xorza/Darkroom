@@ -87,13 +87,13 @@ impl<'a> InlineRename<'a> {
     /// the editor both record under it, which is what keeps the draft
     /// alive across the swap — so it has to be stable per underlying
     /// domain item (node id, port id, graph id, …).
-    pub(crate) fn id(mut self, id: WidgetId) -> Self {
+    pub(crate) const fn id(mut self, id: WidgetId) -> Self {
         self.id = id;
         self
     }
 
     /// Override the character cap applied to the active `TextEdit`.
-    pub(crate) fn max_chars(mut self, n: usize) -> Self {
+    pub(crate) const fn max_chars(mut self, n: usize) -> Self {
         self.max_chars = n;
         self
     }

@@ -174,27 +174,27 @@ impl Default for Rejection {
 
 impl Rejection {
     /// Create sigma clipping with default iterations.
-    pub fn sigma_clip(sigma: f32) -> Self {
+    pub const fn sigma_clip(sigma: f32) -> Self {
         Self::SigmaClip(SigmaClipConfig::new(sigma, 3))
     }
 
     /// Create asymmetric sigma clipping.
-    pub fn sigma_clip_asymmetric(sigma_low: f32, sigma_high: f32) -> Self {
+    pub const fn sigma_clip_asymmetric(sigma_low: f32, sigma_high: f32) -> Self {
         Self::SigmaClip(SigmaClipConfig::new_asymmetric(sigma_low, sigma_high, 3))
     }
 
     /// Create winsorized sigma clipping.
-    pub fn winsorized(sigma: f32) -> Self {
+    pub const fn winsorized(sigma: f32) -> Self {
         Self::Winsorized(WinsorizedClipConfig::new(sigma))
     }
 
     /// Create linear fit clipping with symmetric thresholds.
-    pub fn linear_fit(sigma: f32) -> Self {
+    pub const fn linear_fit(sigma: f32) -> Self {
         Self::LinearFit(LinearFitClipConfig::new(sigma, sigma, 3))
     }
 
     /// Create percentile clipping with symmetric bounds.
-    pub fn percentile(percent: f32) -> Self {
+    pub const fn percentile(percent: f32) -> Self {
         Self::Percentile(PercentileClipConfig::new(percent, percent))
     }
 

@@ -163,7 +163,7 @@ impl IndexMut<NodeIdx> for RuntimeCache {
 
 impl RuntimeCache {
     /// The span of the slot column — the program node count it is aligned to.
-    pub(crate) fn slot_count(&self) -> usize {
+    pub(crate) const fn slot_count(&self) -> usize {
         self.slots.len()
     }
 
@@ -262,7 +262,7 @@ impl RuntimeCache {
     /// The per-node breakdown the last
     /// [`measure_resident_ram`](Self::measure_resident_ram) left behind, spanning the
     /// program the slots are aligned to. Empty until the first measurement.
-    pub(crate) fn node_ram(&self) -> &Column<NodeIdx, RamUsage> {
+    pub(crate) const fn node_ram(&self) -> &Column<NodeIdx, RamUsage> {
         &self.node_ram
     }
 

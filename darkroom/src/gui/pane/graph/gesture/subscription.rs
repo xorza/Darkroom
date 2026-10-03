@@ -67,7 +67,7 @@ impl SubscriptionUI {
     /// Whether a subscription-wire gesture is in flight — feeds the
     /// wire-fade tier. (A method, not a `pub(crate)` field: `InFlight` is
     /// module-private.)
-    pub(crate) fn is_dragging(&self) -> bool {
+    pub(crate) const fn is_dragging(&self) -> bool {
         self.state.get().is_some()
     }
 

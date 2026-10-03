@@ -49,7 +49,7 @@ impl SourcePosition {
     /// This position held to the grid of pixel centres, `[0, w − 1] × [0, h − 1]`: where bilinear
     /// and nearest sample a position in the half-pixel rim of the footprint.
     #[inline]
-    pub(super) fn clamped_to_centers(self, size: Size2us) -> Self {
+    pub(super) const fn clamped_to_centers(self, size: Size2us) -> Self {
         let (cell_x, fx) = clamp_axis(self.cell_x, self.fx, size.width);
         let (cell_y, fy) = clamp_axis(self.cell_y, self.fy, size.height);
         Self {
@@ -73,7 +73,7 @@ fn floor_inside(x: f64) -> i32 {
 /// Whether a `taps`×`taps` window whose top-left tap is `origin` lies wholly inside a `size`
 /// source: the one test every kernel's interior path is gated on.
 #[inline]
-pub(super) fn window_inside(origin: IVec2, taps: usize, size: Size2us) -> bool {
+pub(super) const fn window_inside(origin: IVec2, taps: usize, size: Size2us) -> bool {
     let taps = taps as i32;
     origin.x >= 0
         && origin.y >= 0
@@ -84,7 +84,7 @@ pub(super) fn window_inside(origin: IVec2, taps: usize, size: Size2us) -> bool {
 /// One axis of [`SourcePosition::clamped_to_centers`]. Inside the footprint the cell is at least
 /// −1 and at most `length − 1`, so the two clamps are the rim on either side.
 #[inline]
-fn clamp_axis(cell: i32, fraction: f32, length: usize) -> (i32, f32) {
+const fn clamp_axis(cell: i32, fraction: f32, length: usize) -> (i32, f32) {
     let last = length as i32 - 1;
     if cell < 0 {
         (0, 0.0)

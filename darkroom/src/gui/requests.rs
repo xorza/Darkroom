@@ -40,7 +40,7 @@ pub(crate) struct Requests {
 
 impl Requests {
     /// A fresh id for a gesture that starts now; see [`GestureId`].
-    pub(crate) fn open_gesture(&mut self) -> GestureId {
+    pub(crate) const fn open_gesture(&mut self) -> GestureId {
         self.document.open_gesture()
     }
 
@@ -68,7 +68,7 @@ impl Requests {
     /// [`Self::pop_app`]: the document drains three times a frame, and app
     /// commands come out at the end, the only time there is an `&mut App` to
     /// run them with.
-    pub(crate) fn document(&mut self) -> &mut DocumentQueue {
+    pub(crate) const fn document(&mut self) -> &mut DocumentQueue {
         &mut self.document
     }
 

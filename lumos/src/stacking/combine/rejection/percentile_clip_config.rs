@@ -28,7 +28,7 @@ impl Default for PercentileClipConfig {
 }
 
 impl PercentileClipConfig {
-    pub fn new(low_percentile: f32, high_percentile: f32) -> Self {
+    pub const fn new(low_percentile: f32, high_percentile: f32) -> Self {
         Self {
             low_percentile,
             high_percentile,

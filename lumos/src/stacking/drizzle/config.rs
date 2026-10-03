@@ -113,21 +113,21 @@ impl DrizzleConfig {
 
     /// Set pixel fraction.
     #[must_use]
-    pub fn with_pixfrac(mut self, pixfrac: f32) -> Self {
+    pub const fn with_pixfrac(mut self, pixfrac: f32) -> Self {
         self.pixfrac = pixfrac;
         self
     }
 
     /// Set kernel type.
     #[must_use]
-    pub fn with_kernel(mut self, kernel: DrizzleKernel) -> Self {
+    pub const fn with_kernel(mut self, kernel: DrizzleKernel) -> Self {
         self.kernel = kernel;
         self
     }
 
     /// Set minimum coverage threshold.
     #[must_use]
-    pub fn with_min_weight_fraction(mut self, min_weight_fraction: f32) -> Self {
+    pub const fn with_min_weight_fraction(mut self, min_weight_fraction: f32) -> Self {
         self.min_weight_fraction = min_weight_fraction;
         self
     }

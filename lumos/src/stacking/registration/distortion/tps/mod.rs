@@ -228,7 +228,7 @@ impl ThinPlateSpline {
     }
 
     /// Get the number of control points.
-    fn num_control_points(&self) -> usize {
+    const fn num_control_points(&self) -> usize {
         self.control_points.len()
     }
 

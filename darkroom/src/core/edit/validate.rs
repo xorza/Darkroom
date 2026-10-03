@@ -26,7 +26,10 @@ use crate::core::edit::error::MalformedIntent;
 /// An id the intent must actually name. A nil id is nothing a widget could
 /// have read out of the document, so it is malformed rather than stale — and
 /// it comes first, because the lookup would read it as merely absent.
-pub(super) fn non_nil_node(node_id: NodeId, role: &'static str) -> Result<(), MalformedIntent> {
+pub(super) const fn non_nil_node(
+    node_id: NodeId,
+    role: &'static str,
+) -> Result<(), MalformedIntent> {
     if node_id.is_nil() {
         return Err(MalformedIntent::NilNodeId { role });
     }
@@ -64,7 +67,7 @@ pub(super) fn fresh_node_id(graph: &Graph, node_id: NodeId) -> Result<(), Malfor
 /// A newly inserted node's kind has to name something: a non-nil func id, or
 /// a built-in special. The func need not resolve — a duplicated stub stays a
 /// stub, as a loaded one does.
-pub(super) fn insertable_kind(node: &Node) -> Result<(), MalformedIntent> {
+pub(super) const fn insertable_kind(node: &Node) -> Result<(), MalformedIntent> {
     match &node.kind {
         NodeKind::Func(func_id) => {
             if func_id.is_nil() {

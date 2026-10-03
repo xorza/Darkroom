@@ -146,10 +146,10 @@ pub(super) fn collect_color_sample_indices(
     indices
 }
 
-fn scaled_partition(part: usize, part_count: usize, length: usize) -> usize {
+const fn scaled_partition(part: usize, part_count: usize, length: usize) -> usize {
     (part as u128 * length as u128 / part_count as u128) as usize
 }
 
-fn stratified_center(part: usize, part_count: usize, length: usize) -> usize {
+const fn stratified_center(part: usize, part_count: usize, length: usize) -> usize {
     ((2 * part as u128 + 1) * length as u128 / (2 * part_count as u128)) as usize
 }

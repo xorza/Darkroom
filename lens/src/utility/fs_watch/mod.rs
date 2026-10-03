@@ -132,7 +132,7 @@ impl Debug for WatchState {
 /// it's filtered too. `Modify(Any)` is still kept: some backends (macOS
 /// `FSEvents`) report a real write that coarsely, and dropping it would swallow
 /// genuine changes.
-fn is_content_change(kind: EventKind) -> bool {
+const fn is_content_change(kind: EventKind) -> bool {
     match kind {
         EventKind::Modify(ModifyKind::Metadata(_)) => false,
         EventKind::Create(_) | EventKind::Remove(_) | EventKind::Modify(_) => true,

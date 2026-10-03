@@ -35,7 +35,7 @@ pub struct AlignStackResult {
 }
 
 impl AlignStackResult {
-    pub(crate) fn from_product(
+    pub(crate) const fn from_product(
         product: StackProduct,
         reference: usize,
         registered: usize,

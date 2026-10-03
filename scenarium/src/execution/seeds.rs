@@ -29,7 +29,7 @@ pub(crate) struct RunSeeds {
 impl RunSeeds {
     /// Whether these seeds would start no run at all — every trigger off and
     /// both lists empty.
-    pub(crate) fn is_empty(&self) -> bool {
+    pub(crate) const fn is_empty(&self) -> bool {
         !self.sinks && !self.event_sources && self.events.is_empty() && self.node_ids.is_empty()
     }
 

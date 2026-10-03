@@ -44,7 +44,7 @@ impl RuntimeLibrary {
     }
 
     /// The registry as last composed.
-    pub(crate) fn current(&self) -> &Arc<ScenariumLibrary> {
+    pub(crate) const fn current(&self) -> &Arc<ScenariumLibrary> {
         &self.current
     }
 }

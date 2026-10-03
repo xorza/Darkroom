@@ -192,7 +192,7 @@ async fn read_plane(
 }
 
 /// The two header bytes that name a format: its channel count, and its sample type as 0, 1, 2.
-fn format_bytes(format: ColorFormat) -> [u8; 2] {
+const fn format_bytes(format: ColorFormat) -> [u8; 2] {
     let sample = match format.sample_type {
         SampleType::U8 => 0,
         SampleType::U16 => 1,
@@ -201,7 +201,7 @@ fn format_bytes(format: ColorFormat) -> [u8; 2] {
     [format.channel_count as u8, sample]
 }
 
-fn format_from_bytes(bytes: [u8; 2]) -> Option<ColorFormat> {
+const fn format_from_bytes(bytes: [u8; 2]) -> Option<ColorFormat> {
     let channel_count = match bytes[0] {
         1 => ChannelCount::L,
         3 => ChannelCount::Rgb,

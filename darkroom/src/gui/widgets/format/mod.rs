@@ -16,7 +16,7 @@ use std::str;
 /// Stays within 7 characters up to `999999s` (decimals drop past `999.99s`),
 /// which is what `node::header::RUN_TIME_MIN_WIDTH` reserves so a running
 /// node's label measures identically across digit-count changes (see the test).
-pub(crate) fn fmt_elapsed(secs: f64) -> Elapsed {
+pub(crate) const fn fmt_elapsed(secs: f64) -> Elapsed {
     Elapsed(secs)
 }
 
@@ -74,7 +74,7 @@ fn printed_integer_part(value: f64, precision: usize) -> u64 {
 /// [`fmt_elapsed`]: bare `B` under 1 KB, then `KB`/`MB`/`GB` carrying
 /// 1–2 decimals. Used by the window status bar and each node body's memory
 /// readout, so both render identical figures.
-pub(crate) fn fmt_bytes(bytes: u64) -> Bytes {
+pub(crate) const fn fmt_bytes(bytes: u64) -> Bytes {
     Bytes(bytes)
 }
 

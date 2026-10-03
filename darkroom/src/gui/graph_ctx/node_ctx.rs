@@ -114,14 +114,14 @@ impl<'a> NodeCtx<'a> {
     /// Takes the answer rather than a `Ui`: the widget id it comes off is
     /// `gui::pane::graph::node`'s (`wid::hovered`), and this type sits below
     /// that module.
-    pub(crate) fn with_hover(self, hovered: bool) -> Self {
+    pub(crate) const fn with_hover(self, hovered: bool) -> Self {
         Self { hovered, ..self }
     }
 
     /// Whether the port rows build their hover tooltips: their text is
     /// composed per port per frame, and no port can be showing one while the
     /// pointer is elsewhere, so only the node under it pays.
-    pub(crate) fn tips(self) -> bool {
+    pub(crate) const fn tips(self) -> bool {
         self.hovered
     }
 
@@ -129,7 +129,7 @@ impl<'a> NodeCtx<'a> {
     /// over the node surfaces the (otherwise invisible) chips at half
     /// strength — the edit affordance appears exactly when the pointer is in
     /// the neighborhood, and geometry never changes.
-    pub(crate) fn sve(self) -> &'a ConstValueEditorTheme {
+    pub(crate) const fn sve(self) -> &'a ConstValueEditorTheme {
         let theme = self.graph_ctx.theme();
         if self.hovered {
             &theme.const_value_editor_revealed
@@ -139,7 +139,7 @@ impl<'a> NodeCtx<'a> {
     }
 
     /// The palette and metrics this node paints from.
-    pub(crate) fn theme(self) -> &'a Theme {
+    pub(crate) const fn theme(self) -> &'a Theme {
         self.graph_ctx.theme()
     }
 
@@ -166,19 +166,19 @@ impl<'a> NodeCtx<'a> {
     /// against an older library), so its interface can't be resolved.
     /// Rendered as a portless error stub the user can still select and
     /// delete — never silently dropped.
-    pub(crate) fn missing(self) -> bool {
+    pub(crate) const fn missing(self) -> bool {
         self.func.is_none()
     }
 
     /// Excluded from execution (`Node::disabled`). Sink headers expose the
     /// toggle; the body paints any authored disabled node dimmed.
-    pub(crate) fn disabled(self) -> bool {
+    pub(crate) const fn disabled(self) -> bool {
         self.node.disabled
     }
 
     /// Where this node's output is cached. The header's two storage chips
     /// toggle its RAM and disk bits.
-    pub(crate) fn cache(self) -> CacheMode {
+    pub(crate) const fn cache(self) -> CacheMode {
         self.node.cache
     }
 
@@ -241,7 +241,7 @@ impl<'a> NodeCtx<'a> {
     /// fact, not a lookup in a compiled program — the palette and the header
     /// record every frame, including before the first compile, so an
     /// affordance can't wait on one.
-    pub(crate) fn runnable(self) -> bool {
+    pub(crate) const fn runnable(self) -> bool {
         !self.missing()
     }
 
@@ -269,7 +269,7 @@ impl<'a> NodeCtx<'a> {
     }
 
     /// The func this node instantiates, `None` for one the library lacks.
-    pub(super) fn func(self) -> Option<&'a Func> {
+    pub(super) const fn func(self) -> Option<&'a Func> {
         self.func
     }
 

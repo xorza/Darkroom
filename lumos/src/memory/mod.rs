@@ -47,7 +47,7 @@ pub(crate) fn memory_budget(available_memory: u64) -> u64 {
 }
 
 /// Bytes one frame's pixels occupy, planar f32.
-pub(crate) fn frame_bytes(dimensions: ImageDimensions) -> usize {
+pub(crate) const fn frame_bytes(dimensions: ImageDimensions) -> usize {
     dimensions.sample_count() * size_of::<f32>()
 }
 
@@ -114,7 +114,7 @@ const FRAME_QUALITY_PLANES: usize = 2;
 ///
 /// One plane per pixel rather than per sample: coverage and confidence are channel-independent, so
 /// an RGB frame pays for two planes here, not six.
-pub(crate) fn quality_plane_bytes(dimensions: ImageDimensions) -> usize {
+pub(crate) const fn quality_plane_bytes(dimensions: ImageDimensions) -> usize {
     FRAME_QUALITY_PLANES * dimensions.pixel_count() * size_of::<f32>()
 }
 
@@ -172,7 +172,7 @@ impl RunShape {
     /// A stack of frames decoded straight into the combine, with no warp: each one's resident
     /// bytes (its pixels, and its quality planes if it may carry them) plus the statistics
     /// scratch its decode holds beside them.
-    pub(crate) fn decoded_stack(
+    pub(crate) const fn decoded_stack(
         frame_count: usize,
         resident_bytes: usize,
         frame_bytes: usize,

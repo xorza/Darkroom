@@ -35,7 +35,7 @@ pub struct OutputPort {
 }
 
 impl OutputPort {
-    pub fn new(node_id: NodeId, port_idx: usize) -> Self {
+    pub const fn new(node_id: NodeId, port_idx: usize) -> Self {
         Self { node_id, port_idx }
     }
 }
@@ -54,7 +54,7 @@ pub struct EventPort {
 }
 
 impl EventPort {
-    pub fn new(node_id: NodeId, event_idx: usize) -> Self {
+    pub const fn new(node_id: NodeId, event_idx: usize) -> Self {
         Self { node_id, event_idx }
     }
 }
@@ -72,7 +72,7 @@ pub struct InputPort {
 }
 
 impl InputPort {
-    pub fn new(node_id: NodeId, port_idx: usize) -> Self {
+    pub const fn new(node_id: NodeId, port_idx: usize) -> Self {
         Self { node_id, port_idx }
     }
 }

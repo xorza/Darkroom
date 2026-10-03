@@ -31,7 +31,7 @@ impl MasterRole {
 
     /// The role's `EXTNAME` in a saved bundle — the name a writer stamps on its HDU and a reader
     /// recognizes it by, so the two cannot disagree about where a role lives.
-    pub(crate) fn extname(self) -> &'static str {
+    pub(crate) const fn extname(self) -> &'static str {
         match self {
             Self::Dark => "MASTER_DARK",
             Self::Flat => "MASTER_FLAT",
@@ -42,7 +42,7 @@ impl MasterRole {
 
     /// Whether this role is stored already prepared — bias/flat-dark subtracted, per-colour
     /// normalized and clamped. Only the flat is; the others are stored as stacked.
-    pub(crate) fn prepared(self) -> bool {
+    pub(crate) const fn prepared(self) -> bool {
         matches!(self, Self::Flat)
     }
 

@@ -98,7 +98,7 @@ pub enum FwhmSource {
 
 impl FwhmSource {
     /// The FWHM the detector ran with, or `None` when matched filtering was off.
-    pub fn value(&self) -> Option<f32> {
+    pub const fn value(&self) -> Option<f32> {
         match self {
             FwhmSource::Disabled => None,
             FwhmSource::Configured(fwhm) => Some(*fwhm),

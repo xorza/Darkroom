@@ -50,7 +50,7 @@ pub enum IntegerKind {
 }
 
 impl IntegerKind {
-    fn type_name(self) -> &'static str {
+    const fn type_name(self) -> &'static str {
         match self {
             Self::I8 => "i8",
             Self::I16 => "i16",
@@ -76,7 +76,7 @@ pub enum FloatKind {
 }
 
 impl FloatKind {
-    fn type_name(self) -> &'static str {
+    const fn type_name(self) -> &'static str {
         match self {
             Self::F32 => "f32",
             Self::F64 => "f64",

@@ -82,7 +82,7 @@ impl NodeUI {
     }
 
     /// Whether a node drag is latched.
-    pub(super) fn in_flight(&self) -> bool {
+    pub(super) const fn in_flight(&self) -> bool {
         self.drag.in_flight()
     }
 

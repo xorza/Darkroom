@@ -26,7 +26,7 @@ pub(crate) enum PortKind {
 }
 
 impl PortKind {
-    pub(crate) fn opposite(self) -> Self {
+    pub(crate) const fn opposite(self) -> Self {
         match self {
             PortKind::Input => PortKind::Output,
             PortKind::Output => PortKind::Input,
@@ -56,7 +56,7 @@ impl NodeKey for PortRef {
 impl PortRef {
     /// `node_id`'s `port_idx`th input — the left-column counterpart of the
     /// graph's [`InputPort`].
-    pub(crate) fn input(node_id: NodeId, port_idx: usize) -> Self {
+    pub(crate) const fn input(node_id: NodeId, port_idx: usize) -> Self {
         Self {
             node_id,
             kind: PortKind::Input,
@@ -66,7 +66,7 @@ impl PortRef {
 
     /// `node_id`'s `port_idx`th output — the right-column counterpart of the
     /// graph's [`OutputPort`].
-    pub(crate) fn output(node_id: NodeId, port_idx: usize) -> Self {
+    pub(crate) const fn output(node_id: NodeId, port_idx: usize) -> Self {
         Self {
             node_id,
             kind: PortKind::Output,

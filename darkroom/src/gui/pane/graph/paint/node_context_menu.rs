@@ -32,7 +32,7 @@ impl NodeContextMenu {
         self.menu.reset();
     }
 
-    pub(crate) fn is_open(&self) -> bool {
+    pub(crate) const fn is_open(&self) -> bool {
         self.menu.is_open()
     }
 

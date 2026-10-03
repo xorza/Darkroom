@@ -23,7 +23,7 @@ pub struct CalibrationSet<T> {
 
 impl<T> CalibrationSet<T> {
     /// The value for `role`. Total, because a set holds one of everything [`MasterRole`] names.
-    pub fn get(&self, role: MasterRole) -> &T {
+    pub const fn get(&self, role: MasterRole) -> &T {
         match role {
             MasterRole::Dark => &self.dark,
             MasterRole::Flat => &self.flat,
@@ -33,7 +33,7 @@ impl<T> CalibrationSet<T> {
     }
 
     /// [`Self::get`] by unique reference, for filling a set one role at a time.
-    pub(crate) fn get_mut(&mut self, role: MasterRole) -> &mut T {
+    pub(crate) const fn get_mut(&mut self, role: MasterRole) -> &mut T {
         match role {
             MasterRole::Dark => &mut self.dark,
             MasterRole::Flat => &mut self.flat,

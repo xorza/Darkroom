@@ -74,7 +74,7 @@ impl NodePresence {
     ///
     /// Unselected: adding a node leaves the selection alone, and a caller that
     /// wants the new node selected raises that as its own edit.
-    pub(crate) fn insertion(detached: DetachedNode, placement: ItemPlacement) -> Self {
+    pub(crate) const fn insertion(detached: DetachedNode, placement: ItemPlacement) -> Self {
         Self {
             node_id: detached.node_id(),
             state: Change {
@@ -89,7 +89,7 @@ impl NodePresence {
     }
 
     /// Take `state`'s node out of the document; undo puts it back whole.
-    pub(crate) fn removal(state: NodeState) -> Self {
+    pub(crate) const fn removal(state: NodeState) -> Self {
         Self {
             node_id: state.detached.node_id(),
             state: Change {

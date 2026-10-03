@@ -142,7 +142,7 @@ impl HexLookup {
 
     /// Get hex offsets for a given (row, col) position.
     #[inline(always)]
-    pub(crate) fn get(&self, row: usize, col: usize) -> &[HexOffset; HEX_ENTRIES] {
+    pub(crate) const fn get(&self, row: usize, col: usize) -> &[HexOffset; HEX_ENTRIES] {
         &self.offsets[row % 3][col % 3]
     }
 }

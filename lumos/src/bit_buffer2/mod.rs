@@ -110,7 +110,7 @@ impl BitBuffer2 {
 
     /// Get the number of words per row.
     #[inline]
-    pub(crate) fn words_per_row(&self) -> usize {
+    pub(crate) const fn words_per_row(&self) -> usize {
         self.stride / BITS_PER_WORD
     }
 

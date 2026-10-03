@@ -28,7 +28,7 @@ impl Relayout {
     /// Lift a predicate that already answers the question, for the passes that
     /// derive it from something else — an `UndoStep`'s own verdict, or a
     /// canvas noticing it just came back on screen.
-    pub(crate) fn needed_if(stranded: bool) -> Self {
+    pub(crate) const fn needed_if(stranded: bool) -> Self {
         if stranded {
             Self::Needed
         } else {

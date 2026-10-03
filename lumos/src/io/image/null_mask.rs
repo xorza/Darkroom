@@ -53,7 +53,7 @@ impl NullMask {
     }
 
     /// How many pixels carry no measurement. Never zero — a mask with nothing in it is `None`.
-    pub(crate) fn count(&self) -> usize {
+    pub(crate) const fn count(&self) -> usize {
         self.count
     }
 
@@ -64,7 +64,7 @@ impl NullMask {
 
     /// The mask in the bit-buffer form a neighbour search takes, so a pixel reconstructed from its
     /// neighbours never draws on another that has nothing to give.
-    pub(crate) fn bits(&self) -> &BitBuffer2 {
+    pub(crate) const fn bits(&self) -> &BitBuffer2 {
         &self.nulls
     }
 

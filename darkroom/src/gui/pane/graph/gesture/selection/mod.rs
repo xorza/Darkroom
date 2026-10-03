@@ -80,7 +80,7 @@ impl SelectionUI {
     }
 
     /// Whether a band is in flight.
-    pub(crate) fn in_flight(&self) -> bool {
+    pub(crate) const fn in_flight(&self) -> bool {
         !self.band.is_idle()
     }
 

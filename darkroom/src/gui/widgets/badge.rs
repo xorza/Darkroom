@@ -79,7 +79,7 @@ pub(crate) struct Badge {
 
 impl Badge {
     /// An interactive chip (`filled` = its "on" state; `wid` makes it clickable).
-    pub(crate) fn control(
+    pub(crate) const fn control(
         glyph: &'static str,
         color: RgbaF32,
         filled: bool,
@@ -115,13 +115,13 @@ impl Badge {
     }
 
     /// Swap the chip's ink to `color` while the pointer is over it.
-    pub(crate) fn hover_color(mut self, color: RgbaF32) -> Self {
+    pub(crate) const fn hover_color(mut self, color: RgbaF32) -> Self {
         self.hover_color = Some(color);
         self
     }
 
     /// A read-only descriptor pill. `salt` is its stable id for the tooltip.
-    pub(crate) fn marker(
+    pub(crate) const fn marker(
         salt: &'static str,
         glyph: &'static str,
         color: RgbaF32,

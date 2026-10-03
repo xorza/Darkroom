@@ -155,7 +155,7 @@ impl LinearPixels {
         }
     }
 
-    pub(crate) fn channel_count(&self) -> usize {
+    pub(crate) const fn channel_count(&self) -> usize {
         match self {
             LinearPixels::L(_) => 1,
             LinearPixels::Rgb(_) => 3,

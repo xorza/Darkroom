@@ -94,7 +94,7 @@ impl CfaPattern {
     /// height leaves the phases where they were, so the caller must not flip there — see
     /// `read_bayer_cfa`, which is where that parity is checked.
     #[must_use]
-    pub fn flip_vertical(self) -> Self {
+    pub const fn flip_vertical(self) -> Self {
         match self {
             CfaPattern::Rggb => CfaPattern::Gbrg,
             CfaPattern::Gbrg => CfaPattern::Rggb,
@@ -106,7 +106,7 @@ impl CfaPattern {
     /// Flip the pattern horizontally (swap columns).
     /// Used when XBAYROFF is odd.
     #[must_use]
-    pub fn flip_horizontal(self) -> Self {
+    pub const fn flip_horizontal(self) -> Self {
         match self {
             CfaPattern::Rggb => CfaPattern::Grbg,
             CfaPattern::Grbg => CfaPattern::Rggb,
@@ -116,7 +116,7 @@ impl CfaPattern {
     }
 
     /// Convert LibRaw's visible-origin pattern for consumers indexing the full raw buffer.
-    pub(crate) fn at_raw_origin(self, top_margin: usize, left_margin: usize) -> Self {
+    pub(crate) const fn at_raw_origin(self, top_margin: usize, left_margin: usize) -> Self {
         let mut pattern = self;
         if top_margin & 1 != 0 {
             pattern = pattern.flip_vertical();
@@ -130,7 +130,7 @@ impl CfaPattern {
     /// Get color index at position (y, x) in the Bayer pattern.
     /// Returns: 0=Red, 1=Green, 2=Blue
     #[inline(always)]
-    pub fn color_at(&self, pos: Vec2us) -> usize {
+    pub const fn color_at(&self, pos: Vec2us) -> usize {
         let row = pos.y & 1;
         let col = pos.x & 1;
         match self {

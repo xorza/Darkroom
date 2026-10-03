@@ -15,7 +15,7 @@ pub(crate) struct InputCtx<'a> {
 }
 
 impl<'a> InputCtx<'a> {
-    pub(super) fn new(node: NodeCtx<'a>, port_idx: usize, declared: &'a FuncInput) -> Self {
+    pub(super) const fn new(node: NodeCtx<'a>, port_idx: usize, declared: &'a FuncInput) -> Self {
         Self {
             node,
             port_idx,
@@ -24,12 +24,12 @@ impl<'a> InputCtx<'a> {
     }
 
     /// This port's address in the graph.
-    pub(crate) fn port(self) -> InputPort {
+    pub(crate) const fn port(self) -> InputPort {
         InputPort::new(self.node.id, self.port_idx)
     }
 
     /// This port's address in the canvas's glyph domains.
-    pub(crate) fn port_ref(self) -> PortRef {
+    pub(crate) const fn port_ref(self) -> PortRef {
         PortRef::input(self.node.id, self.port_idx)
     }
 
@@ -42,7 +42,7 @@ impl<'a> InputCtx<'a> {
         self.declared.description.as_deref().unwrap_or_default()
     }
 
-    pub(crate) fn ty(self) -> &'a DataType {
+    pub(crate) const fn ty(self) -> &'a DataType {
         &self.declared.data_type
     }
 
@@ -52,13 +52,13 @@ impl<'a> InputCtx<'a> {
     }
 
     /// Required inputs render with more visual weight than optional ones.
-    pub(crate) fn required(self) -> bool {
+    pub(crate) const fn required(self) -> bool {
         self.declared.required
     }
 
     /// Const-only inputs reject a wired binding: the connection gesture won't
     /// snap to them, so they can only hold a literal.
-    pub(crate) fn const_only(self) -> bool {
+    pub(crate) const fn const_only(self) -> bool {
         self.declared.const_only
     }
 

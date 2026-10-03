@@ -34,7 +34,7 @@ enum EventLoopTransition {
 }
 
 impl EventLoopTransition {
-    fn for_intent(intent: &BatchIntent, event_loop_active: bool) -> Self {
+    const fn for_intent(intent: &BatchIntent, event_loop_active: bool) -> Self {
         match intent.loop_request {
             Some(LoopCommand::Start) => Self::Rebuild,
             Some(LoopCommand::Stop) => Self::Stop,
@@ -395,14 +395,14 @@ where
         }
     }
 
-    fn executing_activity(&self) -> WorkerActivity {
+    const fn executing_activity(&self) -> WorkerActivity {
         match &self.event_loop {
             Some(_) => WorkerActivity::ExecutingEventLoop,
             None => WorkerActivity::Executing,
         }
     }
 
-    fn resting_activity(&self) -> WorkerActivity {
+    const fn resting_activity(&self) -> WorkerActivity {
         match &self.event_loop {
             Some(_) => WorkerActivity::EventLoop,
             None => WorkerActivity::Idle,

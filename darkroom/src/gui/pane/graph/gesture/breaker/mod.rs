@@ -42,7 +42,7 @@ impl BreakerUI {
     }
 
     /// Whether a scribble is in flight.
-    pub(crate) fn in_flight(&self) -> bool {
+    pub(crate) const fn in_flight(&self) -> bool {
         !self.latched.is_idle()
     }
 

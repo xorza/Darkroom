@@ -581,7 +581,7 @@ impl Graph {
 
 impl Binding {
     /// A data binding wired to producer `node_id`'s output port `port_idx`.
-    pub fn bind(node_id: NodeId, port_idx: usize) -> Self {
+    pub const fn bind(node_id: NodeId, port_idx: usize) -> Self {
         Binding::Bind(OutputPort::new(node_id, port_idx))
     }
 

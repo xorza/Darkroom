@@ -118,7 +118,7 @@ impl DefectMap {
     }
 
     /// The sensor extent the indices apply to.
-    pub fn dimensions(&self) -> Size2us {
+    pub const fn dimensions(&self) -> Size2us {
         self.dimensions
     }
 
@@ -134,7 +134,7 @@ impl DefectMap {
     }
 
     /// Resident RAM held by the map: its hot and cold index lists and its mask.
-    pub fn ram_bytes(&self) -> usize {
+    pub const fn ram_bytes(&self) -> usize {
         (self.hot_indices.len() + self.cold_indices.len()) * size_of::<usize>()
             + self.mask.words.len() * size_of::<u64>()
     }
@@ -209,7 +209,7 @@ impl DefectMap {
     }
 
     /// How many pixels are defective, hot or cold; a pixel that is both counts once.
-    pub fn count(&self) -> usize {
+    pub const fn count(&self) -> usize {
         self.count
     }
 

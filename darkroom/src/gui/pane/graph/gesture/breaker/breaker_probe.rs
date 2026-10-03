@@ -25,14 +25,14 @@ pub(crate) struct BreakerProbe<'a> {
 
 impl<'a> BreakerProbe<'a> {
     /// A probe over `live`, the scribble in flight, or none.
-    pub(super) fn new(live: Option<&'a mut Scribble>) -> Self {
+    pub(super) const fn new(live: Option<&'a mut Scribble>) -> Self {
         Self { live }
     }
 
     /// True if a breaker gesture is live this frame. Wire-fade emphasis and
     /// similar ambient state read this instead of reaching into the scribble
     /// directly.
-    pub(crate) fn is_active(&self) -> bool {
+    pub(crate) const fn is_active(&self) -> bool {
         self.live.is_some()
     }
 
