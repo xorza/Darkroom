@@ -39,6 +39,8 @@ pub(crate) struct TileGrid {
     pub(crate) centers_y: Vec<f32>,
     tile_size: usize,
     dimensions: Size2us,
+    /// Which tiles measured their own statistics; the others were filled from them.
+    measured: Vec<bool>,
 }
 
 impl TileGrid {
@@ -71,6 +73,7 @@ impl TileGrid {
             centers_y,
             tile_size,
             dimensions,
+            measured: vec![false; n],
         }
     }
 
@@ -118,6 +121,9 @@ impl TileGrid {
         lo.saturating_sub(1)
     }
 
+    /// Every tile's statistics, a bad tile's taken from its good neighbours (see
+    /// [`Self::fill_bad_tiles`]). When the mask leaves no good tile at all, it covers too much to
+    /// leave a sky anywhere, and every tile is measured without it.
     fn fill_tile_stats(
         &mut self,
         pixels: &Buffer2<f32>,
@@ -128,25 +134,97 @@ impl TileGrid {
         let tiles_x = self.stats.width();
         let columns = MeshAxis::new(self.dimensions.width, self.tile_size);
         let rows = MeshAxis::new(self.dimensions.height, self.tile_size);
+        let tile_at = |index: usize| {
+            let (tx, ty) = (index % tiles_x, index / tiles_x);
+            URect::new(
+                Vec2us::new(columns.start(tx), rows.start(ty)),
+                Vec2us::new(columns.end(tx), rows.end(ty)),
+            )
+        };
 
+        self.measured.resize(self.stats.pixels().len(), false);
         self.stats
             .pixels_mut()
             .par_iter_mut()
+            .zip(self.measured.par_iter_mut())
             .enumerate()
             .for_each_init(
                 || tile_scratch.acquire(),
-                |scratch, (idx, out)| {
-                    let tx = idx % tiles_x;
-                    let ty = idx / tiles_x;
-
-                    let tile = URect::new(
-                        Vec2us::new(columns.start(tx), rows.start(ty)),
-                        Vec2us::new(columns.end(tx), rows.end(ty)),
+                |scratch, (index, (out, measured))| {
+                    let stats = TileStats::compute(
+                        pixels,
+                        mask,
+                        tile_at(index),
+                        sigma_clip_iterations,
+                        scratch,
                     );
-
-                    *out = TileStats::compute(pixels, mask, tile, sigma_clip_iterations, scratch);
+                    *measured = stats.is_some();
+                    *out = stats.unwrap_or_default();
                 },
             );
+        if self.measured.iter().all(|&measured| measured) {
+            return;
+        }
+        if !self.measured.contains(&true) {
+            self.stats
+                .pixels_mut()
+                .par_iter_mut()
+                .enumerate()
+                .for_each_init(
+                    || tile_scratch.acquire(),
+                    |scratch, (index, out)| {
+                        *out = TileStats::compute(
+                            pixels,
+                            None,
+                            tile_at(index),
+                            sigma_clip_iterations,
+                            scratch,
+                        )
+                        .expect("an unmasked tile is measured");
+                    },
+                );
+            return;
+        }
+        self.fill_bad_tiles();
+    }
+
+    /// Give each bad tile the median sky and the median σ of the good tiles on the nearest square
+    /// ring around it that holds any, as SExtractor fills a bad mesh from its neighbours. Read from
+    /// the measured tiles only, so a fill never feeds another.
+    fn fill_bad_tiles(&mut self) {
+        let (tiles_x, tiles_y) = (self.stats.width(), self.stats.height());
+        let reach = tiles_x.max(tiles_y);
+        let mut skies = Vec::new();
+        let mut sigmas = Vec::new();
+        for index in 0..self.measured.len() {
+            if self.measured[index] {
+                continue;
+            }
+            let (tx, ty) = (index % tiles_x, index / tiles_x);
+            for radius in 1..=reach {
+                skies.clear();
+                sigmas.clear();
+                let ring = ty.saturating_sub(radius)..=(ty + radius).min(tiles_y - 1);
+                for y in ring {
+                    for x in tx.saturating_sub(radius)..=(tx + radius).min(tiles_x - 1) {
+                        let on_ring = x.abs_diff(tx).max(y.abs_diff(ty)) == radius;
+                        if on_ring && self.measured[y * tiles_x + x] {
+                            let stats = self.stats[(x, y)];
+                            skies.push(stats.sky);
+                            sigmas.push(stats.sigma);
+                        }
+                    }
+                }
+                if !skies.is_empty() {
+                    break;
+                }
+            }
+            debug_assert!(!skies.is_empty(), "some tile is measured");
+            self.stats[(tx, ty)] = TileStats {
+                sky: median_mut(&mut skies),
+                sigma: median_mut(&mut sigmas),
+            };
+        }
     }
 
     /// The 3×3 median of every tile, to reject tiles a bright object spoiled.

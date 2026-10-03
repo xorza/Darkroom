@@ -222,13 +222,14 @@ mod tests {
         let second_pixels = Buffer2::new_filled(64, 32, 0.25);
         let mut workspace = MeshWorkspace::default();
 
+        // 100 × 70 in 32s: remainders of 4 and 6, under half a tile, join their neighbours.
         let grid = workspace.compute(&first_pixels, None, 32, SIGMA_CLIP_ITERATIONS, false);
-        assert_eq!(grid.stats.width(), 4);
-        assert_eq!(grid.stats.height(), 3);
+        assert_eq!(grid.stats.width(), 3);
+        assert_eq!(grid.stats.height(), 2);
 
         let grid = workspace.compute(&first_pixels, None, 50, SIGMA_CLIP_ITERATIONS, false);
         assert_eq!(grid.stats.width(), 2);
-        assert_eq!(grid.stats.height(), 2);
+        assert_eq!(grid.stats.height(), 1);
 
         let grid = workspace.compute(&second_pixels, None, 16, SIGMA_CLIP_ITERATIONS, false);
         assert_eq!(grid.stats.width(), 4);
