@@ -1,5 +1,4 @@
 use crate::io::image::cfa::CfaType;
-use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::math::statistics;
 use crate::stacking::combine::cache::*;
@@ -12,19 +11,18 @@ use crate::testing::cfa::make_cfa;
 use crate::testing::prelude::*;
 use common::TempDir;
 
-use crate::stacking::combine::cache::internals::make_test_cache;
-
 #[test]
 fn unrequested_quality_planes_are_never_allocated() {
-    // The observable `StackProduct` has said `linear_variance: None` for a median for as long as
-    // the field has existed — it used to be allocated, written per pixel, and then cleared. What
-    // matters is that the reducer no longer builds it, which is only visible on the combine's own
-    // output, before `finish_product` shapes it.
+    // A plane the request declines is never built by the reducer, which only the combine's own
+    // output shows, before `finish_product` shapes it.
     let dims = ImageDimensions::new((4, 2), 1);
-    let cache = make_test_cache(vec![
-        LinearImage::from_pixels(dims, vec![1.0; 8]),
-        LinearImage::from_pixels(dims, vec![3.0; 8]),
-    ]);
+    let cache = FrameCache::from_images(
+        vec![
+            LinearImage::from_pixels(dims, vec![1.0; 8]),
+            LinearImage::from_pixels(dims, vec![3.0; 8]),
+        ],
+        Normalization::None,
+    );
     let reduce = |values: &mut [f32], weights: &[f32], _: &mut ScratchBuffers| {
         CombinedSample::from_all(values.iter().sum::<f32>() / values.len() as f32, weights)
     };
@@ -94,13 +92,7 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
     // match would fault out of a slice index naming neither the frame nor the field. The geometry
     // check runs first and names both.
     let dimensions = ImageDimensions::new((4, 2), 1);
-    let core = || CacheCore {
-        tier: CacheTier::Resident,
-        dimensions,
-        metadata: ImageMetadata::default(),
-        progress: ProgressCallback::default(),
-        cancel: CancelToken::never(),
-    };
+    let core = || CacheCore::plain(CacheTier::Resident, dimensions);
     let frame = |pixels: usize| {
         let image =
             LinearImage::from_pixels(ImageDimensions::new((pixels, 1), 1), vec![1.0; pixels]);
@@ -161,13 +153,7 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
 fn a_stored_frame_of_the_wrong_shape_is_a_pipeline_bug() {
     let image = LinearImage::from_pixels(ImageDimensions::new((4, 1), 1), vec![1.0; 4]);
     let stats = FrameStats::measure(&image);
-    let core = CacheCore {
-        tier: CacheTier::Resident,
-        dimensions: ImageDimensions::new((4, 2), 1),
-        metadata: ImageMetadata::default(),
-        progress: ProgressCallback::default(),
-        cancel: CancelToken::never(),
-    };
+    let core = CacheCore::plain(CacheTier::Resident, ImageDimensions::new((4, 2), 1));
     let _ = FrameCache::from_stored_frames(
         vec![StoredFrame::from_memory(image, FrameQuality::None, stats)],
         core,
@@ -181,13 +167,7 @@ fn a_stored_frame_of_the_wrong_shape_is_a_pipeline_bug() {
 fn stored_frames_must_share_one_cfa_pattern() {
     let size = Size2us::new(4, 2);
     let dimensions = ImageDimensions::new(size, 1);
-    let core = || CacheCore {
-        tier: CacheTier::Resident,
-        dimensions,
-        metadata: ImageMetadata::default(),
-        progress: ProgressCallback::default(),
-        cancel: CancelToken::never(),
-    };
+    let core = || CacheCore::plain(CacheTier::Resident, dimensions);
     let mosaic = |cfa_type: CfaType| {
         let image = make_cfa(size, vec![1.0; size.pixel_count()], cfa_type);
         let stats = FrameStats::measure(&image);
@@ -245,13 +225,7 @@ fn stored_frames_must_share_one_cfa_pattern() {
 #[test]
 fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
     let dimensions = ImageDimensions::new((4, 1), 1);
-    let core = || CacheCore {
-        tier: CacheTier::Resident,
-        dimensions,
-        metadata: ImageMetadata::default(),
-        progress: ProgressCallback::default(),
-        cancel: CancelToken::never(),
-    };
+    let core = || CacheCore::plain(CacheTier::Resident, dimensions);
     let frame = |coverage: Vec<f32>, confidence: Vec<f32>| {
         let image = LinearImage::from_pixels(dimensions, vec![1.0; 4]);
         let stats = FrameStats::measure(&image);
@@ -361,7 +335,7 @@ fn finish_product_uniform_equal_weights() {
     let images: Vec<LinearImage> = (0..4)
         .map(|i| LinearImage::from_pixels(dims, vec![i as f32; 6]))
         .collect();
-    let product = mean_product(&make_test_cache(images), None);
+    let product = mean_product(&FrameCache::from_images(images, Normalization::None), None);
     let linear_variance = product.linear_variance.as_ref().unwrap();
     assert!(matches!(
         product.weight.as_ref().unwrap(),
@@ -398,16 +372,15 @@ fn finish_product_uniform_manual_weights() {
     let images: Vec<LinearImage> = (0..4)
         .map(|_| LinearImage::from_pixels(dims, vec![0.5; 2]))
         .collect();
-    let product = mean_product(&make_test_cache(images), Some(&[1.0, 2.0, 3.0, 4.0]));
+    let product = mean_product(
+        &FrameCache::from_images(images, Normalization::None),
+        Some(&[1.0, 2.0, 3.0, 4.0]),
+    );
     let linear_variance = product.linear_variance.as_ref().unwrap();
     for p in 0..2 {
         assert_eq!(product.coverage.as_ref().unwrap()[p], 1.0);
         assert_eq!(product.weight.as_ref().unwrap().channel(0)[p], 10.0);
-        assert!(
-            (linear_variance.channel(0)[p] - 0.30).abs() < 1e-6,
-            "variance = {}",
-            linear_variance.channel(0)[p]
-        );
+        assert_eq!(linear_variance.channel(0)[p], 0.3);
     }
 }
 
@@ -456,145 +429,69 @@ fn finish_product_partial_coverage() {
             3.0,
             "px{pixel}"
         );
-        assert!(
-            (linear_variance.channel(0)[pixel] - 1.0 / 3.0).abs() < 1e-6,
-            "px{pixel} variance = {}",
-            linear_variance.channel(0)[pixel]
-        );
+        assert_eq!(linear_variance.channel(0)[pixel], 1.0 / 3.0, "px{pixel}");
     }
 }
 
-/// Build an in-memory [`FrameCache`] from single-channel CFA frame pixels: a calibration cache,
-/// carrying no coverage or confidence.
-fn make_cfa_cache(frames_pixels: Vec<Vec<f32>>, dims: ImageDimensions) -> FrameCache {
-    let images = frames_pixels
-        .into_iter()
-        .map(|pixels| CfaImage {
-            data: Buffer2::new(dims.width(), dims.height(), pixels),
-            cfa_type: CfaType::Mono,
-            metadata: ImageMetadata::default(),
-            quantization_sigma: None,
-            nulls: None,
-        })
-        .collect();
-    FrameCache::from_images(images, Normalization::None)
-}
-
+/// Light and calibration frames combine through one engine: a resident cache of linear frames and
+/// one of mono CFA frames give the same median of [1, 3, 2], 2, and the same weighted mean of
+/// [10, 20] under [1, 3], 70/4 = 17.5, at every pixel. Neither carries coverage, so the weights
+/// reach the reducer unscaled. An RGB set combines per channel: (1 + 5)/2, (2 + 6)/2, (3 + 7)/2.
 #[test]
-fn process_chunked_median() {
-    // Create in-memory cache with 3 grayscale frames
-    let dims = ImageDimensions::new((4, 4), 1);
-    let images = vec![
-        LinearImage::from_pixels(dims, vec![1.0; 16]),
-        LinearImage::from_pixels(dims, vec![3.0; 16]),
-        LinearImage::from_pixels(dims, vec![2.0; 16]),
-    ];
-
-    let cache = make_test_cache(images);
-    assert_eq!(cache.core.tier.chunk_memory(), None);
-
-    // Median of [1, 3, 2] = 2
-    let result = cache.process_chunked(None, QualityPlanes::ALL, |values, weights, _| {
-        values.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        CombinedSample::from_all(values[values.len() / 2], weights)
-    });
-
-    assert_eq!(result.pixels.channel_count(), 1);
-    assert_eq!(result.pixels.channel(0).len(), 16);
-    for &pixel in result.pixels.channel(0).pixels() {
-        assert_eq!(pixel, 2.0);
-    }
-}
-
-#[test]
-fn process_chunked_rgb() {
-    // Create in-memory cache with 2 RGB frames
-    let dims = ImageDimensions::new((2, 2), 3);
-    // Frame 1: R=1, G=2, B=3 for all pixels
-    let pixels1: Vec<f32> = (0..4).flat_map(|_| vec![1.0, 2.0, 3.0]).collect();
-    // Frame 2: R=5, G=6, B=7 for all pixels
-    let pixels2: Vec<f32> = (0..4).flat_map(|_| vec![5.0, 6.0, 7.0]).collect();
-
-    let images = vec![
-        LinearImage::from_pixels(dims, pixels1),
-        LinearImage::from_pixels(dims, pixels2),
-    ];
-
-    let cache = make_test_cache(images);
-
-    // Mean: R=(1+5)/2=3, G=(2+6)/2=4, B=(3+7)/2=5
-    let result = cache.process_chunked(None, QualityPlanes::ALL, |values, weights, _| {
-        CombinedSample::from_all(values.iter().sum::<f32>() / values.len() as f32, weights)
-    });
-
-    assert_eq!(result.pixels.channel_count(), 3);
-    for &pixel in result.pixels.channel(0).pixels() {
-        assert!((pixel - 3.0).abs() < f32::EPSILON, "R channel");
-    }
-    for &pixel in result.pixels.channel(1).pixels() {
-        assert!((pixel - 4.0).abs() < f32::EPSILON, "G channel");
-    }
-    for &pixel in result.pixels.channel(2).pixels() {
-        assert!((pixel - 5.0).abs() < f32::EPSILON, "B channel");
-    }
-}
-
-#[test]
-fn process_chunked_with_weights() {
+fn light_and_calibration_frames_combine_through_one_engine() {
     let dims = ImageDimensions::new((2, 2), 1);
-    let images = vec![
-        LinearImage::from_pixels(dims, vec![10.0; 4]),
-        LinearImage::from_pixels(dims, vec![20.0; 4]),
-    ];
-
-    let cache = make_test_cache(images);
-
-    // Weighted mean with weights [1, 3]: (10*1 + 20*3) / (1+3) = 70/4 = 17.5
-    let weights = vec![1.0, 3.0];
-    let result = cache.process_chunked(Some(&weights), QualityPlanes::ALL, |values, w, _| {
-        let sum: f32 = values.iter().zip(w.iter()).map(|(v, wt)| v * wt).sum();
-        let weight_sum: f32 = w.iter().sum();
-        CombinedSample::from_all(sum / weight_sum, w)
-    });
-
-    for &pixel in result.pixels.channel(0).pixels() {
-        assert_eq!(pixel, 17.5);
-    }
-}
-
-#[test]
-fn calibration_frames_combine_through_the_same_engine_as_lights() {
-    // A calibration cache carries no coverage, so every frame contributes at every pixel — the
-    // behaviour the separate calibration reducer used to provide.
-    let dims = ImageDimensions::new((2, 2), 1);
-    let planes = QualityPlanes::IMAGE_ONLY;
-
-    // Median of [1, 3, 2] = 2 at every pixel.
-    let cache = make_cfa_cache(vec![vec![1.0; 4], vec![3.0; 4], vec![2.0; 4]], dims);
-    let median = cache.process_chunked(None, planes, |values, _, _| {
-        let value = statistics::median_mut(values);
-        CombinedSample::value_only(value, values.len())
-    });
-    assert_eq!(median.pixels.channel_count(), 1);
-    for &pixel in median.pixels.channel(0).pixels() {
-        assert!(
-            (pixel - 2.0).abs() < f32::EPSILON,
-            "calibration median should be 2, got {pixel}"
+    let caches = |values: &[f32]| {
+        let linear = FrameCache::from_images(
+            values
+                .iter()
+                .map(|&value| LinearImage::from_pixels(dims, vec![value; 4]))
+                .collect(),
+            Normalization::None,
         );
+        let mosaic = FrameCache::from_images(
+            values
+                .iter()
+                .map(|&value| make_cfa(dims.size(), vec![value; 4], CfaType::Mono))
+                .collect(),
+            Normalization::None,
+        );
+        [linear, mosaic]
+    };
+    for cache in caches(&[1.0, 3.0, 2.0]) {
+        assert_eq!(cache.core.tier.chunk_memory(), None);
+        let median = cache.process_chunked(None, QualityPlanes::IMAGE_ONLY, |values, _, _| {
+            CombinedSample::value_only(statistics::median_mut(values), values.len())
+        });
+        assert_eq!(median.pixels.channel(0).pixels(), &[2.0; 4]);
+    }
+    for cache in caches(&[10.0, 20.0]) {
+        let weighted = cache.process_chunked(
+            Some(&[1.0, 3.0]),
+            QualityPlanes::IMAGE_ONLY,
+            |values, weights, scratch| {
+                Rejection::None.combine_mean(values, weights, scratch, false)
+            },
+        );
+        assert_eq!(weighted.pixels.channel(0).pixels(), &[17.5; 4]);
     }
 
-    // Weighted mean of [10, 20] with weights [1, 3] = (10 + 60) / 4 = 17.5 — per-frame weights
-    // reach the reducer unscaled, since no coverage or confidence modulates them.
-    let cache = make_cfa_cache(vec![vec![10.0; 4], vec![20.0; 4]], dims);
-    let weights = [1.0, 3.0];
-    let weighted = cache.process_chunked(Some(&weights), planes, |values, w, scratch| {
-        Rejection::None.combine_mean(values, w, scratch, false)
-    });
-    for &pixel in weighted.pixels.channel(0).pixels() {
-        assert!(
-            (pixel - 17.5).abs() < f32::EPSILON,
-            "calibration weighted mean should be 17.5, got {pixel}"
-        );
+    let rgb = |values: [f32; 3]| {
+        LinearImage::from_planar_channels(
+            ImageDimensions::new((2, 2), 3),
+            values.map(|value| vec![value; 4]),
+        )
+    };
+    let cache = FrameCache::from_images(
+        vec![rgb([1.0, 2.0, 3.0]), rgb([5.0, 6.0, 7.0])],
+        Normalization::None,
+    );
+    let mean = cache.process_chunked(
+        None,
+        QualityPlanes::IMAGE_ONLY,
+        |values, weights, scratch| Rejection::None.combine_mean(values, weights, scratch, false),
+    );
+    for (channel, level) in [3.0, 4.0, 5.0].into_iter().enumerate() {
+        assert_eq!(mean.pixels.channel(channel).pixels(), &[level; 4]);
     }
 }
 
@@ -609,9 +506,9 @@ fn stored_planes_read_their_rows_in_memory_and_on_disk() {
     let ramp: Vec<f32> = (0..12).map(|i| i as f32).collect();
     let image = LinearImage::from_pixels(dims, ramp.clone());
 
-    let resident = make_test_cache(vec![image.clone()]);
-    let spilled = FrameCache {
-        frames: vec![
+    let resident = FrameCache::from_images(vec![image.clone()], Normalization::None);
+    let spilled = FrameCache::from_stored_frames(
+        vec![
             StoredFrame::spill(
                 &FrameSpill::new(spill_directory.path(), "test_chunk"),
                 &image,
@@ -620,18 +517,16 @@ fn stored_planes_read_their_rows_in_memory_and_on_disk() {
             )
             .unwrap(),
         ],
-        frame_norms: None,
-        core: CacheCore {
-            tier: CacheTier::of(
+        CacheCore::plain(
+            CacheTier::of(
                 Some(spill_directory),
                 RunMemory::new(1 << 30, Some(123_456)),
             ),
-            dimensions: dims,
-            metadata: ImageMetadata::default(),
-            progress: ProgressCallback::default(),
-            cancel: CancelToken::never(),
-        },
-    };
+            dims,
+        ),
+        Normalization::None,
+    )
+    .unwrap();
     assert_eq!(spilled.core.tier.chunk_memory(), Some(123_456));
     for cache in [&resident, &spilled] {
         let plane = &cache.frames[0].channels[0];

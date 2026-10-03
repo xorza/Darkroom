@@ -50,12 +50,15 @@ use std::time::Instant;
 
 use common::CancelToken;
 
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::math::size2us::Size2us;
-use crate::memory::memory_budget;
+use crate::memory;
+use crate::memory::{MemoryPlan, RunShape};
 use crate::stacking::combine::config::{CombineMethod, StackConfig};
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::combine::stack::stack;
 use crate::stacking::progress::{ProgressCallback, StackingProgress, StackingStage};
+use crate::stacking::stack_product::quality_planes::QualityPlanes;
 use crate::testing::mem_probe::{
     BudgetChoice, MB, RssSampler, budget_ceiling_mb, ensure_frames, env_parse, parse_budget,
 };
@@ -123,9 +126,20 @@ fn master_stack_memory_probe() -> io::Result<()> {
         resident_if_ram as f64 / 1e9
     );
     if let Some(avail) = budget.memory_override {
-        // Mirror of the internal tier rule: usable = 75% of the budget; spill if the set exceeds it.
-        let usable = memory_budget(avail);
-        let tier = if resident_if_ram <= usable {
+        // The loader's own plan for this set: plain mono frames, every quality plane requested.
+        let dimensions = ImageDimensions::new(size, 1);
+        let frame = memory::frame_bytes(dimensions);
+        let plan = MemoryPlan::plan(
+            RunShape::decoded_stack(
+                n,
+                frame,
+                frame,
+                QualityPlanes::ALL.resident_bytes(dimensions),
+            ),
+            rayon::current_num_threads(),
+            avail,
+        );
+        let tier = if plan.fits_in_ram {
             "in-memory (resident)"
         } else {
             "disk (spill + mmap)"

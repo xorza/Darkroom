@@ -131,52 +131,111 @@ impl MaxSigma {
 
 #[cfg(test)]
 mod tests {
-    use crate::stacking::combine::stack::quantization::SourceSigmas;
+    use arrayvec::ArrayVec;
 
+    use crate::math::statistics::MedianMad;
+    use crate::stacking::combine::normalization::{ChannelNorm, FrameNorm};
+    use crate::stacking::combine::stack::quantization::{MaxSigma, SourceSigmas};
+    use crate::stacking::frame_store::frame_facts::FrameFacts;
+    use crate::stacking::frame_store::frame_stats::FrameStats;
+
+    fn stats(quantization_sigma: Option<f32>) -> FrameStats {
+        FrameStats {
+            channels: [MedianMad {
+                median: 0.5,
+                mad: 0.1,
+            }]
+            .into_iter()
+            .collect(),
+            quantization_sigma,
+            facts: FrameFacts {
+                domain: None,
+                row_order: None,
+                cfa_type: None,
+            },
+        }
+    }
+
+    fn norms(gains: &[f32]) -> Vec<FrameNorm> {
+        gains
+            .iter()
+            .map(|&gain| {
+                let mut channels = ArrayVec::new();
+                channels.push(ChannelNorm { gain, offset: 0.0 });
+                FrameNorm { channels }
+            })
+            .collect()
+    }
+
+    /// A set has sigmas to propagate only when every frame declares a finite, positive one.
     #[test]
-    fn quantization_helpers_follow_per_frame_coefficients_and_median_order_statistics() {
-        let source_sigma = 0.01;
-        let equal_sigmas = [source_sigma; 4];
-        let equal_mean = SourceSigmas(Vec::from(equal_sigmas))
-            .combined_mean(None, None, 0..4)
-            .unwrap();
-        assert!(
-            (equal_mean - 0.005).abs() < f32::EPSILON,
-            "four-frame equal mean: σ/√4 = 0.005, got {equal_mean}"
+    fn source_sigmas_need_every_frame_to_declare_one() {
+        let measure = |sigmas: &[Option<f32>]| {
+            SourceSigmas::measure(&sigmas.iter().map(|&sigma| stats(sigma)).collect::<Vec<_>>())
+                .map(|sigmas| sigmas.0)
+        };
+        assert_eq!(measure(&[Some(0.25), Some(0.5)]), Some(vec![0.25, 0.5]));
+        for unusable in [
+            None,
+            Some(0.0),
+            Some(-0.25),
+            Some(f32::NAN),
+            Some(f32::INFINITY),
+        ] {
+            assert_eq!(measure(&[Some(0.25), unusable]), None, "{unusable:?}");
+        }
+    }
+
+    /// Every σ here is dyadic, so each figure is exact up to its one square root.
+    /// - Four equal sources in a mean: √(4·σ²)/4 = σ/2.
+    /// - Weights 3/4 and 1/4 on σ 1/2 and 1: √(0.375² + 0.25²) = √0.203125.
+    /// - A two-sample median averages both, σ·√(6/12); a three-sample one is the order statistic,
+    ///   σ·√(3/5). Unequal sources fall back on the largest σ.
+    /// - Normalized, a median takes the largest gain-scaled σ, by magnitude: gains −2 and 1 on σ 1/4
+    ///   give 1/2.
+    #[test]
+    fn combined_sigmas_follow_the_reduction() {
+        let sigma = 0.25f32;
+        let equal = SourceSigmas(vec![sigma; 4]);
+        assert_eq!(equal.combined_mean(None, None, 0..4), Some(sigma / 2.0));
+
+        let unequal = SourceSigmas(vec![0.5, 1.0]);
+        assert_eq!(
+            unequal.combined_mean(Some(&[0.75, 0.25]), None, 0..2),
+            Some(0.203_125f32.sqrt())
+        );
+        assert_eq!(unequal.combined_median(None), Some(1.0));
+
+        assert_eq!(
+            SourceSigmas(vec![sigma; 2]).combined_median(None),
+            Some(sigma * 0.5f32.sqrt())
+        );
+        assert_eq!(
+            SourceSigmas(vec![sigma; 3]).combined_median(None),
+            Some(sigma * (3.0f32 / 5.0).sqrt())
         );
 
-        let source_sigmas = [0.01, 0.02];
-        let weighted = SourceSigmas(Vec::from(source_sigmas))
-            .combined_mean(Some(&[0.75, 0.25]), None, 0..2)
-            .unwrap();
-        let expected_weighted = ((0.75f32 * 0.01).powi(2) + (0.25f32 * 0.02).powi(2)).sqrt();
-        assert!(
-            (weighted - expected_weighted).abs() < f32::EPSILON,
-            "weighted unequal-source mean: expected {expected_weighted}, got {weighted}"
+        let scaled = SourceSigmas(vec![sigma; 2]);
+        assert_eq!(
+            scaled.combined_median(Some(&norms(&[-2.0, 1.0]))),
+            Some(0.5)
         );
+        assert_eq!(scaled.conservative(Some(&norms(&[-2.0, 1.0]))), Some(0.5));
+        // No survivors carry no weight, and so no figure.
+        assert_eq!(scaled.combined_mean(None, None, 0..0), None);
+    }
 
-        let median_two = SourceSigmas(Vec::from([source_sigma; 2]))
-            .combined_median(None)
-            .unwrap();
-        let median_three = SourceSigmas(Vec::from([source_sigma; 3]))
-            .combined_median(None)
-            .unwrap();
-        assert!(
-            (median_two - source_sigma / 2.0f32.sqrt()).abs() < f32::EPSILON,
-            "two-sample uniform median averages both samples: σ/√2, got {median_two}"
-        );
-        assert!(
-            (median_three - source_sigma * (3.0f32 / 5.0).sqrt()).abs() < f32::EPSILON,
-            "three-sample uniform median order statistic: σ·√(3/5), got {median_three}"
-        );
-        assert!(
-            (SourceSigmas(Vec::from(source_sigmas))
-                .combined_median(None)
-                .unwrap()
-                - 0.02)
-                .abs()
-                < f32::EPSILON,
-            "unequal uniform source widths must retain the conservative largest σ"
-        );
+    /// The running maximum of the pixels' σ, ordered by the floats' bits: a smaller σ or none leaves
+    /// it, a larger one raises it, and a seed of 0 that nothing raised reads as no figure.
+    #[test]
+    fn max_sigma_keeps_the_largest_recorded() {
+        let max = MaxSigma::seeded(0.25);
+        max.record(None);
+        max.record(Some(0.125));
+        assert_eq!(max.get(), Some(0.25));
+        max.record(Some(0.5));
+        max.record(Some(0.375));
+        assert_eq!(max.get(), Some(0.5));
+        assert_eq!(MaxSigma::seeded(0.0).get(), None);
     }
 }

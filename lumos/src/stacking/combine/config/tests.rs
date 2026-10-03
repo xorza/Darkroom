@@ -51,54 +51,123 @@ fn for_survivors_keeps_the_weights_of_the_frames_left() {
     ));
 }
 
+/// Every preset's method, weighting, normalization and small-stack fallback.
 #[test]
-fn default_config() {
-    let config = StackConfig::default();
-    assert!(matches!(
-        config.method,
-        CombineMethod::Mean(Rejection::SigmaClip(..))
-    ));
-    assert_eq!(config.weighting, Weighting::Equal);
-    assert_eq!(config.normalization, Normalization::None);
-}
-
-#[test]
-fn sigma_clipped_preset() {
-    let config = StackConfig::sigma_clipped(2.0);
-    assert!(matches!(
-        config.method,
-        CombineMethod::Mean(Rejection::SigmaClip(c))
-            if (c.sigma.low - 2.0).abs() < f32::EPSILON && (c.sigma.high - 2.0).abs() < f32::EPSILON
-    ));
-}
-
-#[test]
-fn median_preset() {
-    let config = StackConfig::median();
-    assert_eq!(config.method, CombineMethod::Median);
-}
-
-#[test]
-fn weighted_preset() {
-    let config = StackConfig::weighted(vec![1.0, 2.0, 3.0]);
-    assert!(matches!(config.method, CombineMethod::Mean(..)));
-    assert!(matches!(config.weighting, Weighting::Manual(ref w) if w.len() == 3));
-}
-
-#[test]
-fn struct_update_syntax() {
-    let config = StackConfig {
-        method: CombineMethod::Mean(Rejection::SigmaClip(SigmaClipConfig::new_asymmetric(
-            2.0, 3.0, 5,
-        ))),
-        normalization: Normalization::Global,
-        ..Default::default()
-    };
-    assert!(matches!(
-        config.method,
-        CombineMethod::Mean(Rejection::SigmaClip(..))
-    ));
-    assert_eq!(config.normalization, Normalization::Global);
+fn presets_configure_as_documented() {
+    let mean = CombineMethod::Mean;
+    let floor = SmallN::median_below(MIN_FRAMES_FOR_REJECTION);
+    for (name, config, method, weighting, normalization, small_n) in [
+        (
+            "default",
+            StackConfig::default(),
+            mean(Rejection::default()),
+            Weighting::Equal,
+            Normalization::None,
+            floor,
+        ),
+        (
+            "sigma clipped",
+            StackConfig::sigma_clipped(2.0),
+            mean(Rejection::sigma_clip(2.0)),
+            Weighting::Equal,
+            Normalization::None,
+            floor,
+        ),
+        (
+            "median",
+            StackConfig::median(),
+            CombineMethod::Median,
+            Weighting::Equal,
+            Normalization::None,
+            SmallN::none(),
+        ),
+        (
+            "mean",
+            StackConfig::mean(),
+            mean(Rejection::None),
+            Weighting::Equal,
+            Normalization::None,
+            SmallN::none(),
+        ),
+        (
+            "weighted",
+            StackConfig::weighted(vec![1.0, 2.0, 3.0]),
+            mean(Rejection::default()),
+            Weighting::Manual(vec![1.0, 2.0, 3.0]),
+            Normalization::None,
+            floor,
+        ),
+        (
+            "winsorized",
+            StackConfig::winsorized(2.0),
+            mean(Rejection::winsorized(2.0)),
+            Weighting::Equal,
+            Normalization::None,
+            SmallN::none(),
+        ),
+        (
+            "linear fit",
+            StackConfig::linear_fit(2.0),
+            mean(Rejection::linear_fit(2.0)),
+            Weighting::Equal,
+            Normalization::None,
+            floor,
+        ),
+        (
+            "percentile",
+            StackConfig::percentile(15.0),
+            mean(Rejection::percentile(15.0)),
+            Weighting::Equal,
+            Normalization::None,
+            SmallN::none(),
+        ),
+        (
+            "gesd",
+            StackConfig::gesd(),
+            mean(Rejection::gesd()),
+            Weighting::Equal,
+            Normalization::None,
+            SmallN::median_below(MIN_FRAMES_FOR_GESD),
+        ),
+        (
+            "bias",
+            StackConfig::bias(),
+            mean(Rejection::winsorized(3.0)),
+            Weighting::Equal,
+            Normalization::None,
+            SmallN::none(),
+        ),
+        (
+            "dark",
+            StackConfig::dark(),
+            mean(Rejection::winsorized(3.0)),
+            Weighting::Equal,
+            Normalization::None,
+            SmallN::none(),
+        ),
+        (
+            "flat",
+            StackConfig::flat(),
+            mean(Rejection::sigma_clip(3.0)),
+            Weighting::Equal,
+            Normalization::Multiplicative,
+            SmallN::median_below(8),
+        ),
+        (
+            "light",
+            StackConfig::light(),
+            mean(Rejection::sigma_clip(2.5)),
+            Weighting::Noise,
+            Normalization::Global,
+            floor,
+        ),
+    ] {
+        assert_eq!(config.method, method, "{name}");
+        assert_eq!(config.weighting, weighting, "{name}");
+        assert_eq!(config.normalization, normalization, "{name}");
+        assert_eq!(config.small_n, small_n, "{name}");
+    }
+    assert_eq!((MIN_FRAMES_FOR_REJECTION, MIN_FRAMES_FOR_GESD), (5, 15));
 }
 
 #[test]
@@ -210,59 +279,4 @@ fn validate_invalid_config_returns_exact_errors() {
     for (config, expected) in structural {
         assert_eq!(config.validate(), Err(expected));
     }
-}
-
-#[test]
-fn bias_preset() {
-    let config = StackConfig::bias();
-    assert!(matches!(
-        config.method,
-        CombineMethod::Mean(Rejection::Winsorized(c))
-            if (c.sigma.low - 3.0).abs() < f32::EPSILON
-    ));
-    assert_eq!(config.normalization, Normalization::None);
-}
-
-#[test]
-fn dark_preset() {
-    let config = StackConfig::dark();
-    assert!(matches!(
-        config.method,
-        CombineMethod::Mean(Rejection::Winsorized(c))
-            if (c.sigma.low - 3.0).abs() < f32::EPSILON
-    ));
-    assert_eq!(config.normalization, Normalization::None);
-}
-
-#[test]
-fn flat_preset() {
-    let config = StackConfig::flat();
-    assert!(matches!(
-        config.method,
-        CombineMethod::Mean(Rejection::SigmaClip(c))
-            if (c.sigma.low - 3.0).abs() < f32::EPSILON
-    ));
-    assert_eq!(config.normalization, Normalization::Multiplicative);
-}
-
-#[test]
-fn light_preset() {
-    let config = StackConfig::light();
-    assert!(matches!(
-        config.method,
-        CombineMethod::Mean(Rejection::SigmaClip(c))
-            if (c.sigma.low - 2.5).abs() < f32::EPSILON
-    ));
-    assert_eq!(config.weighting, Weighting::Noise);
-    assert_eq!(config.normalization, Normalization::Global);
-}
-
-#[test]
-fn gesd_preset_uses_supported_sample_floor() {
-    let config = StackConfig::gesd();
-    assert!(matches!(
-        config.method,
-        CombineMethod::Mean(Rejection::Gesd(..))
-    ));
-    assert_eq!(config.small_n, SmallN::median_below(15));
 }
