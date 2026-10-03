@@ -45,8 +45,9 @@ pub(super) struct InputPixel {
 pub(super) struct Droplet {
     /// Where the input pixel's centre lands on the output grid.
     pub(super) centre: DVec2,
-    /// Frame weight × pixel weight ÷ area magnification — the Jacobian divides out the local
-    /// magnification so a stretched drop deposits the flux it carried, not the area it covers.
+    /// Frame weight × pixel weight ÷ the area the warp magnifies by — the output grid's own `s²`
+    /// excluded, so an unmagnified drop deposits the frame weight in total, as the square kernel's
+    /// clipped quadrilateral does, and a magnified one deposits less per output pixel it covers.
     pub(super) weight: f64,
 }
 
@@ -189,6 +190,9 @@ pub(super) struct FrameSource<'a> {
     planes: ArrayVec<&'a [f32], MAX_CHANNELS>,
     size: Size2us,
     map: InputMap,
+    /// The output grid's area per reference pixel, `s²`: the magnification of a drop the warp
+    /// leaves unscaled.
+    grid_area: f64,
     weight: f32,
     pixel_weights: Option<&'a [f32]>,
 }
@@ -209,6 +213,7 @@ impl<'a> FrameSource<'a> {
                 .collect(),
             size: Size2us::new(image.width(), image.height()),
             map: InputMap::new(warp, output_grid(scale)),
+            grid_area: scale * scale,
             weight,
             pixel_weights: pixel_weights.map(Buffer2::pixels),
         }
@@ -238,7 +243,7 @@ impl<'a> FrameSource<'a> {
         }
         Drop::Landed(Droplet {
             centre: landing.position,
-            weight: weight / landing.magnification,
+            weight: weight * self.grid_area / landing.magnification,
         })
     }
 

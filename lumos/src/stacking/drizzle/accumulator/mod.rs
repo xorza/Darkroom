@@ -492,8 +492,13 @@ pub(crate) mod internals {
             self.band_rows_override = None;
         }
 
-        pub(crate) fn accumulated_flux_sum(&self, channel: usize) -> f32 {
-            self.data[channel].pixels().iter().sum()
+        /// `Σ flux·w` over channel `channel`'s accumulated plane, summed in f64.
+        pub(crate) fn accumulated_flux_sum(&self, channel: usize) -> f64 {
+            self.data[channel]
+                .pixels()
+                .iter()
+                .map(|&value| f64::from(value))
+                .sum()
         }
     }
 }

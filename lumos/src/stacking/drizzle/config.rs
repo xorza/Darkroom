@@ -29,6 +29,17 @@ pub enum DrizzleKernel {
     Lanczos,
 }
 
+impl DrizzleKernel {
+    /// Every kernel.
+    pub const ALL: [Self; 5] = [
+        Self::Square,
+        Self::Turbo,
+        Self::Point,
+        Self::Gaussian,
+        Self::Lanczos,
+    ];
+}
+
 /// Configuration for Drizzle stacking.
 #[derive(Debug, Clone)]
 pub struct DrizzleConfig {

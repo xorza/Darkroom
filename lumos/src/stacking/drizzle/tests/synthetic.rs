@@ -1,16 +1,10 @@
-//! Drizzle reconstruction tests on forward-model dithered frame sets.
+//! Drizzle reconstruction on forward-model dithered frame sets.
 //!
-//! The unit tests in `tests.rs` cover the kernel geometry, weight/linear-variance/coverage maps, and
-//! pixel masks on hand-built frames. These verify the *reconstruction outcome* on realistic
-//! sub-pixel-dithered renders: total flux is conserved, a source lands at its scale-mapped truth
-//! position, and dithering recovers resolution a single undersampled frame cannot.
+//! The rest of the drizzle tests cover the kernel geometry, the quality maps and pixel masks on
+//! hand-built frames. These check the reconstruction on sub-pixel-dithered renders: total flux, a
+//! source's position, the quality maps' closed form, and the resolution dithering recovers.
 
-use crate::stacking::drizzle::accumulator::DrizzleFrame;
-use crate::stacking::drizzle::config::DrizzleConfig;
-use crate::stacking::drizzle::stack::drizzle_images;
-use crate::stacking::progress::ProgressCallback;
-use crate::stacking::registration::transform::{Transform, WarpTransform};
-use crate::testing::prelude::*;
+use super::*;
 use crate::testing::synthetic::camera::Camera;
 use crate::testing::synthetic::observe::{Observation, render};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
@@ -23,8 +17,7 @@ struct DitheredFrames {
 }
 
 /// Render one sub-pixel-dithered frame per offset, with the drizzle transform that registers it
-/// back onto the common grid (`output = transform.apply(input)·scale`, so a frame whose star is
-/// dithered to `pos + d` uses `translation(-d)` to land it at `pos·scale`).
+/// back onto the common grid: a frame whose star is dithered to `pos + d` uses `translation(−d)`.
 fn dithered_frames(scene: &Scene, camera: &Camera, dithers: &[DVec2]) -> DitheredFrames {
     let images = dithers
         .iter()
@@ -43,19 +36,16 @@ fn dithered_frames(scene: &Scene, camera: &Camera, dithers: &[DVec2]) -> Dithere
     DitheredFrames { images, transforms }
 }
 
-fn drizzle_frames(
-    images: Vec<LinearImage>,
-    transforms: &[Transform],
-) -> Vec<DrizzleFrame<LinearImage>> {
-    assert_eq!(images.len(), transforms.len());
-    images
-        .into_iter()
-        .zip(transforms.iter().copied())
-        .map(|(source, transform)| {
-            DrizzleFrame::new(source, WarpTransform::new(transform.inverse()))
-        })
-        .collect()
-}
+/// The four half-pixel dithers. At scale 2 and pixfrac 0.8, and at scale 1 and pixfrac 1, they
+/// leave every interior output cell the same weight from every frame: each input pixel's drop
+/// splits evenly over a fixed block of cells, so the drizzle is a plain average of block-replicated
+/// frames.
+const HALF_PIXEL_DITHERS: [DVec2; 4] = [
+    DVec2::ZERO,
+    DVec2::new(0.5, 0.0),
+    DVec2::new(0.0, 0.5),
+    DVec2::new(0.5, 0.5),
+];
 
 fn sum(px: &[f32]) -> f64 {
     px.iter().map(|&v| f64::from(v)).sum()
@@ -65,14 +55,14 @@ fn peak(px: &[f32]) -> f32 {
     px.iter().copied().fold(f32::MIN, f32::max)
 }
 
-/// Flux-weighted centroid of a star on a (near-)zero background.
-fn star_centroid(px: &[f32], size: Size2us) -> DVec2 {
+/// Flux-weighted centroid of a star on a zero background.
+fn star_centroid(image: &Buffer2<f32>) -> DVec2 {
     let mut s = 0.0;
     let mut sx = 0.0;
     let mut sy = 0.0;
-    for y in 0..size.height {
-        for x in 0..size.width {
-            let v = f64::from(px[size.index_of(Vec2us::new(x, y))]);
+    for y in 0..image.height() {
+        for x in 0..image.width() {
+            let v = f64::from(image[(x, y)]);
             s += v;
             sx += v * x as f64;
             sy += v * y as f64;
@@ -81,6 +71,22 @@ fn star_centroid(px: &[f32], size: Size2us) -> DVec2 {
     DVec2::new(sx / s, sy / s)
 }
 
+fn drizzle(frames: &DitheredFrames, config: &DrizzleConfig) -> StackProduct {
+    drizzle_images(
+        drizzle_frames(frames.images.clone(), &frames.transforms),
+        config,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .unwrap()
+    .product
+}
+
+/// Drizzle keeps surface brightness, so the output holds `s²` times an input frame's flux: with
+/// the half-pixel dithers every input pixel's drop splits evenly over `s²` cells, and every frame
+/// weighs the same at every cell, so the output sums to `s²` times the frames' mean flux. The star
+/// sits far from the border, where frames reach unevenly. A cell sums at most 16 deposits, a
+/// relative 33·ε, and the totals are taken in f64.
 #[test]
 fn drizzle_conserves_total_flux() {
     let size = Size2us::new(64, 64);
@@ -90,81 +96,55 @@ fn drizzle_conserves_total_flux() {
         5.0,
         BackgroundField::Uniform { level: 0.0 },
     );
-    let camera = Camera::ideal(3.5);
-    let dithers = [
-        DVec2::ZERO,
-        DVec2::new(0.5, 0.0),
-        DVec2::new(0.0, 0.5),
-        DVec2::new(0.5, 0.5),
-    ];
-    let DitheredFrames { images, transforms } = dithered_frames(&scene, &camera, &dithers);
-    let single_flux = sum(images[0].channel(0).pixels());
+    let frames = dithered_frames(&scene, &Camera::ideal(3.5), &HALF_PIXEL_DITHERS);
+    let mean_flux = frames
+        .images
+        .iter()
+        .map(|image| sum(image.channel(0).pixels()))
+        .sum::<f64>()
+        / frames.images.len() as f64;
 
-    // Drizzle preserves surface brightness, so Σ over the output ≈ scale²·Σ over an input frame.
-    for scale in [1.0f32, 2.0] {
-        let config = DrizzleConfig {
-            scale,
-            pixfrac: if scale == 1.0 { 1.0 } else { 0.8 },
-            ..DrizzleConfig::default()
-        };
-        let result = drizzle_images(
-            drizzle_frames(images.clone(), &transforms),
-            &config,
-            ProgressCallback::default(),
-            CancelToken::never(),
-        )
-        .unwrap()
-        .product;
-        let out_flux = sum(result.image.channel(0).pixels());
-        let expected = single_flux * f64::from(scale * scale);
+    for (scale, pixfrac) in [(1.0f32, 1.0), (2.0, 0.8)] {
+        let product = drizzle(
+            &frames,
+            &kernel_config(DrizzleKernel::Turbo, scale, pixfrac),
+        );
+        let out_flux = sum(product.image.channel(0).pixels());
+        let expected = mean_flux * f64::from(scale * scale);
         assert!(
-            (out_flux - expected).abs() < expected * 0.05,
-            "scale {scale}: Σ_out {out_flux:.3} vs scale²·Σ_in {expected:.3}"
+            (out_flux - expected).abs() <= 33.0 * f64::from(f32::EPSILON) * expected,
+            "scale {scale}: Σ_out {out_flux} against s²·Σ_in {expected}"
         );
     }
 }
 
+/// A star lands at its reference position on the output grid, `s·p + (s − 1)/2`, measured against
+/// the centroid of the undithered frame itself so the PSF's pixel sampling cancels. With the
+/// half-pixel dithers each frame's pixel fills its own 2×2 block of cells about its drop's centre,
+/// so the output's centroid is the drop centres' — to the f32 rounding of each value, a relative
+/// 9·ε, at offsets up to the 128-pixel width, twice over for the input's centroid.
 #[test]
-fn drizzle_places_star_at_scaled_truth_position() {
+fn drizzle_places_star_at_its_reference_position() {
     let size = Size2us::new(64, 64);
-    let pos = DVec2::new(28.0, 36.0);
-    let scene = Scene::single(size, pos, 5.0, BackgroundField::Uniform { level: 0.0 });
-    let camera = Camera::ideal(3.5);
-    let dithers = [
-        DVec2::ZERO,
-        DVec2::new(0.4, 0.0),
-        DVec2::new(0.0, 0.4),
-        DVec2::new(0.4, 0.4),
-        DVec2::new(-0.3, 0.2),
-    ];
-    let DitheredFrames { images, transforms } = dithered_frames(&scene, &camera, &dithers);
-
-    let scale = 2.0;
-    let config = DrizzleConfig {
-        scale,
-        ..DrizzleConfig::default()
-    };
-    let result = drizzle_images(
-        drizzle_frames(images, &transforms),
-        &config,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .unwrap()
-    .product;
-    let out = result.image.channel(0);
-    let center = star_centroid(out.pixels(), Size2us::new(out.width(), out.height()));
-    assert!(
-        (center.x - pos.x * f64::from(scale)).abs() < 1.0,
-        "centroid x {:.2} vs pos·scale {}",
-        center.x,
-        pos.x * f64::from(scale)
+    let scene = Scene::single(
+        size,
+        DVec2::new(28.0, 36.0),
+        5.0,
+        BackgroundField::Uniform { level: 0.0 },
     );
+    let frames = dithered_frames(&scene, &Camera::ideal(3.5), &HALF_PIXEL_DITHERS);
+    let scale = 2.0;
+    let product = drizzle(
+        &frames,
+        &kernel_config(DrizzleKernel::Turbo, scale as f32, 0.8),
+    );
+    let truth =
+        scale * star_centroid(frames.images[0].channel(0)) + DVec2::splat((scale - 1.0) / 2.0);
+    let center = star_centroid(product.image.channel(0));
+    let bound = 2.0 * 9.0 * f64::from(f32::EPSILON) * 128.0;
     assert!(
-        (center.y - pos.y * f64::from(scale)).abs() < 1.0,
-        "centroid y {:.2} vs pos·scale {}",
-        center.y,
-        pos.y * f64::from(scale)
+        (center - truth).abs().max_element() <= bound,
+        "centroid {center:?} against {truth:?}"
     );
 }
 
@@ -179,41 +159,24 @@ fn drizzle_dithering_recovers_resolution() {
         2.0,
         BackgroundField::Uniform { level: 0.0 },
     );
-    let camera = Camera::ideal(1.8);
     let offs = [-1.0 / 3.0, 0.0, 1.0 / 3.0];
     let dithers: Vec<DVec2> = offs
         .iter()
         .flat_map(|&dx| offs.iter().map(move |&dy| DVec2::new(dx, dy)))
         .collect();
-    let DitheredFrames { images, transforms } = dithered_frames(&scene, &camera, &dithers);
-
-    let config = DrizzleConfig {
-        scale: 2.0,
-        pixfrac: 0.6,
-        ..DrizzleConfig::default()
-    };
+    let frames = dithered_frames(&scene, &Camera::ideal(1.8), &dithers);
+    let config = kernel_config(DrizzleKernel::Turbo, 2.0, 0.6);
 
     // Distinct sub-pixel dithers vs the same single frame replicated N times: same frame count and
     // flux, so the only difference is sub-pixel diversity. Recovering it sharpens the peak.
-    let multi = drizzle_images(
-        drizzle_frames(images.clone(), &transforms),
+    let multi = drizzle(&frames, &config);
+    let replicated = drizzle(
+        &DitheredFrames {
+            images: vec![frames.images[4].clone(); dithers.len()],
+            transforms: vec![frames.transforms[4]; dithers.len()],
+        },
         &config,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .unwrap()
-    .product;
-    let replicated_imgs: Vec<LinearImage> = (0..dithers.len()).map(|_| images[4].clone()).collect();
-    let replicated_tf: Vec<Transform> = (0..dithers.len()).map(|_| transforms[4]).collect();
-    let replicated = drizzle_images(
-        drizzle_frames(replicated_imgs, &replicated_tf),
-        &config,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .unwrap()
-    .product;
-
+    );
     let multi_peak = peak(multi.image.channel(0).pixels());
     let single_peak = peak(replicated.image.channel(0).pixels());
     assert!(
@@ -222,10 +185,15 @@ fn drizzle_dithering_recovers_resolution() {
     );
 }
 
+/// The quality maps' closed form for the half-pixel dithers at scale 1 and pixfrac 1, where a drop
+/// is one output pixel. The undithered frame puts one whole drop on a pixel, weight 1; a frame
+/// dithered half a pixel along one axis puts two half drops, `½ + ½`; along both, four quarters.
+/// So `Σw` = 4, `Σw²` = 1 + 2·(¼ + ¼) + 4·1/16 = 2.25, and the variance factor 2.25/16 = 9/64 —
+/// below the 1/4 of four whole drops, the pooling of neighbouring pixels that is the point of the
+/// variance plane. Every frame reaches every pixel. All exact. The last row and column are left
+/// out: the half-dithered frames reach them with half a drop.
 #[test]
-fn drizzle_emits_coverage_weight_and_linear_variance_maps() {
-    // The coverage, weight, and linear-variance maps are drizzle's science deliverable; verify them
-    // against the closed form for N equal-weight frames at full interior coverage.
+fn drizzle_quality_maps_have_their_closed_form() {
     let size = Size2us::new(64, 64);
     let scene = Scene::single(
         size,
@@ -233,56 +201,18 @@ fn drizzle_emits_coverage_weight_and_linear_variance_maps() {
         5.0,
         BackgroundField::Uniform { level: 0.1 },
     );
-    let camera = Camera::ideal(3.5);
-    let dithers = [
-        DVec2::ZERO,
-        DVec2::new(0.5, 0.0),
-        DVec2::new(0.0, 0.5),
-        DVec2::new(0.5, 0.5),
-    ];
-    let DitheredFrames { images, transforms } = dithered_frames(&scene, &camera, &dithers);
-    let config = DrizzleConfig {
-        scale: 1.0,
-        pixfrac: 1.0,
-        ..DrizzleConfig::default()
-    };
-    let result = drizzle_images(
-        drizzle_frames(images, &transforms),
-        &config,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .unwrap()
-    .product;
-
-    // Coverage is normalized to [0,1]; the interior is fully covered by all 4 frames.
-    let cov_plane = result.coverage.as_ref().unwrap().to_plane();
-    let cov = cov_plane.pixels();
-    assert!(
-        cov.iter().all(|&c| (-1e-4..=1.0001).contains(&c)),
-        "coverage must stay in [0,1]"
-    );
-    assert!(
-        (cov[size.index_of(Vec2us::new(32, 32))] - 1.0).abs() < 0.05,
-        "interior coverage {} should be ~1",
-        cov[size.index_of(Vec2us::new(32, 32))]
-    );
-
-    // weight = Σwᵢ ≈ the 4 frames' total. variance = Σwᵢ²/(Σwᵢ)² = 1/N_eff; drizzle pools each
-    // frame's drop across neighbouring output pixels, so N_eff ≥ the frame count (variance
-    // smaller than a naive 1/4) — that pooling is the whole point of the WHT.
-    let weight_c =
-        result.weight.as_ref().unwrap().channel(0).pixels()[size.index_of(Vec2us::new(32, 32))];
-    let var_c = result.linear_variance.as_ref().unwrap().channel(0).pixels()
-        [size.index_of(Vec2us::new(32, 32))];
-    let n_eff = 1.0 / var_c;
-    println!("interior weight {weight_c:.3}, variance {var_c:.4}, N_eff {n_eff:.1}");
-    assert!(
-        (3.5..=4.5).contains(&weight_c),
-        "interior weight {weight_c} should equal the 4 frames"
-    );
-    assert!(
-        var_c > 0.0 && n_eff >= 4.0,
-        "effective contributions {n_eff:.1} should be ≥ the 4 frames (drop pooling)"
-    );
+    let frames = dithered_frames(&scene, &Camera::ideal(3.5), &HALF_PIXEL_DITHERS);
+    let product = drizzle(&frames, &kernel_config(DrizzleKernel::Turbo, 1.0, 1.0));
+    let coverage = product.coverage.as_ref().unwrap();
+    let weight = weight_plane(&product);
+    let variance = product.linear_variance.as_ref().unwrap().channel(0);
+    for y in 0..63 {
+        for x in 0..63 {
+            assert_eq!(
+                (coverage[(x, y)], weight[(x, y)], variance[(x, y)]),
+                (1.0, 4.0, 9.0 / 64.0),
+                "({x}, {y}): coverage, weight, variance"
+            );
+        }
+    }
 }
