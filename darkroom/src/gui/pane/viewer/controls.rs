@@ -14,8 +14,9 @@ use scenarium::NodeId;
 use crate::core::io::preferences::ViewerBackground;
 use crate::gui::pane::viewer::glyph;
 use crate::gui::theme::Theme;
+use crate::gui::widgets::chip::Chip;
 use crate::gui::widgets::support::muted_text;
-use crate::gui::widgets::toolbar::{Chip, pill_background};
+use crate::gui::widgets::toolbar::pill_background;
 
 /// The backdrop radio roster — mode, widget-id key, tooltip — the one
 /// table behind the controls loop and the swatch ids.

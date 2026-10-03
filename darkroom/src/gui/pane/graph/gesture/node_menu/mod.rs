@@ -8,7 +8,7 @@ use crate::gui::app::commands::run::RunCommand;
 use scenarium::NodeId;
 
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::pane::graph::paint::anchored_menu::NodeContextMenu;
+use crate::gui::pane::graph::paint::node_context_menu::NodeContextMenu;
 use crate::gui::requests::Requests;
 
 /// Right-click on a node body → a small popup with actions on the node.
