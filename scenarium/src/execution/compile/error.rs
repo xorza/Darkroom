@@ -13,7 +13,7 @@
 
 use thiserror::Error;
 
-use crate::execution::identity::{NodeIdx, OutputAddr};
+use crate::execution::index::{NodeIdx, OutputAddr};
 use crate::graph::error::GraphValidationError;
 use crate::graph::identity::{FuncId, NodeId};
 use std::fmt;

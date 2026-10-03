@@ -53,12 +53,12 @@ objc2-foundation = { workspace = true }
 # Embeds `assets/icons/darkroom.ico` into the .exe as a Win32 resource so
 # Explorer / taskbar show the app icon. No-op off Windows (see build.rs).
 [target.'cfg(windows)'.build-dependencies]
-winresource = "0.1"
+winresource = { workspace = true }
 
 # `cargo bundle --release -p darkroom` reads this to build darkroom.app
 # (macOS) / a .deb (Linux). The .icns lands in Contents/Resources and is
 # referenced from the generated Info.plist. Regenerate icons with
-# assets/icons/generate.sh.
+# scripts/generate-icons.sh.
 [package.metadata.bundle]
 name = "darkroom"
 identifier = "com.cssodessa.darkroom"

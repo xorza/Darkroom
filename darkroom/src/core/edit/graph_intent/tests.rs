@@ -3,11 +3,11 @@ use std::collections::BTreeSet;
 use glam::Vec2;
 use scenarium::{
     Binding, BindingEntry, CacheMode, ConstValue, DataType, FuncId, FuncInput, FuncOutput,
-    InputPort, Library, Node, NodeId, NodeKind, Subscription, testing,
+    InputPort, Library, Node, NodeId, NodeKind, Subscription, internals,
 };
 
 use super::{DUPLICATE_OFFSET, GraphIntent};
-use crate::core::document::harness::DocFixture;
+use crate::core::document::internals::DocFixture;
 use crate::core::document::{Document, Viewport};
 use crate::core::edit::error::MalformedIntent;
 use crate::core::edit::gesture_id::GestureId;
@@ -893,9 +893,9 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
 /// same input commits.
 #[test]
 fn a_wire_onto_a_const_only_input_is_refused() {
-    let knob_func = testing::stub_func(FuncId::unique(), "knob")
+    let knob_func = internals::stub_func(FuncId::unique(), "knob")
         .input(FuncInput::required("strength", DataType::Float).const_only());
-    let feed_func = testing::stub_func(FuncId::unique(), "feed")
+    let feed_func = internals::stub_func(FuncId::unique(), "feed")
         .output(FuncOutput::new("value", DataType::Float));
     let mut fixture = DocFixture::default();
     let knob = fixture.add(&knob_func);

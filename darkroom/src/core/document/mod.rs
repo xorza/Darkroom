@@ -493,7 +493,7 @@ impl From<CoreGraph> for Document {
 }
 
 #[cfg(test)]
-pub(crate) mod harness;
+pub(crate) mod internals;
 
 #[cfg(test)]
 mod tests {
@@ -502,7 +502,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::core::document::harness::DocFixture;
+    use crate::core::document::internals::DocFixture;
     use palantir::DockOp;
 
     /// Every `NodeId`-keyed cache sweeps against one rule, and the two

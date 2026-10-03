@@ -22,7 +22,7 @@ use glam::Vec2;
 use palantir::widget::{LineCap, Shape};
 use palantir::{ColorRamp, Rect, RgbaF32, Size, Stroke, Ui};
 
-use crate::gui::pane::graph::ctx::DrawCtx;
+use crate::gui::pane::graph::draw_ctx::DrawCtx;
 use crate::gui::pane::graph::gesture::breaker::breaker_probe::BreakerProbe;
 use crate::gui::theme::color::toward;
 

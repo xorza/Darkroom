@@ -1,5 +1,5 @@
 use common::TempDir;
-use scenarium::testing::func_invoker::FuncInvoker;
+use scenarium::internals::func_invoker::FuncInvoker;
 
 use imaginarium::ColorFormat;
 use scenarium::{ConstValue, DynamicValue};

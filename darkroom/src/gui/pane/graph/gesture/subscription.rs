@@ -6,7 +6,7 @@ use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::event_ref::EventRef;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
-use crate::gui::pane::graph::ctx::CanvasCtx;
+use crate::gui::pane::graph::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
 use crate::gui::pane::graph::node::port_color::event_color;

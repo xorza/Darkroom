@@ -1,6 +1,6 @@
 use super::*;
-use crate::core::document::harness::DocFixture;
-use crate::gui::app::session::harness::SessionHarness;
+use crate::core::document::internals::DocFixture;
+use crate::gui::app::session::internals::SessionHarness;
 
 /// The rendered line, or `None` where there is no readout at all.
 fn rendered(process: u64, cache: RamUsage) -> Option<String> {

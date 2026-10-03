@@ -1,5 +1,5 @@
 use crate::containers::column::{Column, Span};
-use crate::execution::identity::NodeIdx;
+use crate::execution::index::NodeIdx;
 
 /// `iter_indexed` is what lets a walk carry the index without reconstructing it
 /// from a counter, so it must agree with indexing on every entry.

@@ -1,7 +1,7 @@
+use crate::internals::assertions::assert_close;
 use crate::io::raw::demosaic::sensor_layout::SensorLayout;
 use crate::io::raw::demosaic::xtrans::internals::{make_xtrans, test_pattern, to_u16};
 use crate::io::raw::demosaic::xtrans::markesteijn_steps::*;
-use crate::testing::assertions::assert_close;
 
 #[test]
 fn green_minmax_uniform() {

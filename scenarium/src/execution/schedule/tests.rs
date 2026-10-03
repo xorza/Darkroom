@@ -5,13 +5,13 @@
 mod planning {
     use crate::execution::compile::compiled_graph::ExecutionBinding;
     use crate::execution::error::Error;
-    use crate::execution::identity::{NodeIdx, OutputAddr, OutputIdx};
+    use crate::execution::index::{NodeIdx, OutputAddr, OutputIdx};
     use crate::execution::schedule::planner::Planner;
     use crate::execution::schedule::{NodeState, ResolvedOutputs, RootFlags, RunSchedule};
     use crate::execution::seeds::RunSeeds;
     use crate::graph::func::lambda::OutputDemand;
     use crate::graph::identity::{EventPort, NodeId};
-    use crate::testing::program::ProgramBuilder;
+    use crate::internals::program::ProgramBuilder;
 
     #[test]
     #[cfg(debug_assertions)]
@@ -433,7 +433,7 @@ mod resolving {
     use crate::execution::compile::compiled_graph::ExecutionBinding;
     use crate::execution::schedule::NodeState;
     use crate::graph::func::lambda::OutputDemand;
-    use crate::testing::program::ProgramBuilder;
+    use crate::internals::program::ProgramBuilder;
 
     #[tokio::test]
     async fn exact_demand_accepts_narrow_producer_cache_and_ignores_reused_reader() {

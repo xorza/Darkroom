@@ -229,7 +229,7 @@ impl ExecutionEngine {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use crate::execution::identity::NodeIdx;
+    use crate::execution::index::NodeIdx;
     use std::result;
 
     use crate::DynamicValue;

@@ -5,11 +5,11 @@ use crate::ConstValue;
 use crate::execution::compile::error::{CompiledGraphValidationError, PortPool};
 use crate::graph::identity::FuncId;
 use crate::graph::node::Node;
-use crate::testing;
-use crate::testing::graph::NodeSpec;
-use crate::testing::graph::TestGraph;
-use crate::testing::graph::compiled::Compiled;
-use crate::testing::program::ProgramBuilder;
+use crate::internals;
+use crate::internals::graph::NodeSpec;
+use crate::internals::graph::TestGraph;
+use crate::internals::graph::compiled::Compiled;
+use crate::internals::program::ProgramBuilder;
 
 /// The walk wires a subscription to the emitter's own event slot, and the
 /// artifact carries a range backstop under it — kept because the subscriber
@@ -17,7 +17,9 @@ use crate::testing::program::ProgramBuilder;
 #[test]
 fn subscription_wiring_rejects_an_endpoint_outside_the_program() {
     let mut g = TestGraph::new();
-    g.add("ticker", |n| n.sink().event("tick", testing::stub_event()));
+    g.add("ticker", |n| {
+        n.sink().event("tick", internals::stub_event())
+    });
     g.add("listener", NodeSpec::sink);
     g.subscribe("ticker", 0, "listener");
 
@@ -264,7 +266,7 @@ fn a_reused_compiler_produces_what_a_fresh_one_does() {
         n.pure()
             .output(DataType::String)
             .output(DataType::Float)
-            .event("tick", testing::stub_event())
+            .event("tick", internals::stub_event())
     });
     warmup.add("consumer", |n| {
         n.sink().input(DataType::String).input(DataType::Float)
@@ -491,8 +493,8 @@ fn stamps_each_output_with_the_resolved_type() {
 fn wires_each_event_with_the_subscribers_resolved_for_it() {
     let mut g = TestGraph::new();
     g.add("emitter", |n| {
-        n.event("quiet", testing::stub_event())
-            .event("subscribed", testing::stub_event())
+        n.event("quiet", internals::stub_event())
+            .event("subscribed", internals::stub_event())
     });
     g.add("listener", NodeSpec::sink);
     g.subscribe("emitter", 1, "listener");
@@ -527,7 +529,7 @@ fn drops_subscriptions_that_cannot_fire() {
         let mut g = TestGraph::new();
         g.add("emitter", move |mut n| {
             for i in 0..events {
-                n = n.event(&format!("e{i}"), testing::stub_event());
+                n = n.event(&format!("e{i}"), internals::stub_event());
             }
             n
         });

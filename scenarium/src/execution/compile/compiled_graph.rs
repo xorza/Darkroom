@@ -22,9 +22,7 @@ use crate::graph::identity::FuncId;
 
 use crate::containers::column::{Column, Span};
 use crate::execution::compile::consumer_cone::ConsumerCone;
-use crate::execution::identity::{
-    EventIdx, InputIdx, NodeIdx, OutputAddr, OutputIdx, SubscriberIdx,
-};
+use crate::execution::index::{EventIdx, InputIdx, NodeIdx, OutputAddr, OutputIdx, SubscriberIdx};
 use crate::execution::schedule::NodeState;
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::event::EventLambda;
@@ -223,7 +221,7 @@ impl CompiledGraph {
 pub(crate) mod internals {
     use crate::containers::column::Span;
     use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionNode};
-    use crate::execution::identity::NodeIdx;
+    use crate::execution::index::NodeIdx;
     use crate::graph::func::FuncBehavior;
     use crate::graph::func::lambda::FuncLambda;
     use crate::graph::identity::{FuncId, NodeId};

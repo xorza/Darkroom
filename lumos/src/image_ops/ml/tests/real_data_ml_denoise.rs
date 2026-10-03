@@ -1,9 +1,9 @@
 use crate::image_ops::ml::denoise::MlDenoise;
+use crate::internals::init_tracing;
+use crate::internals::real_data;
+use crate::internals::real_data::ml_support::onnx_weights;
+use crate::internals::visual;
 use crate::io::image::linear::LinearImage;
-use crate::testing::init_tracing;
-use crate::testing::real_data;
-use crate::testing::real_data::ml_support::onnx_weights;
-use crate::testing::visual;
 
 /// Mean |adjacent-pixel difference| of the intensity — a high-frequency noise proxy (slow gradients
 /// cancel; pixel-scale grain is what a denoiser removes).

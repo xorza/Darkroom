@@ -1,24 +1,24 @@
 #![forbid(unsafe_code)]
 
+mod builtin;
 mod containers;
 mod data;
-mod elements;
 mod execution;
 mod graph;
+#[cfg(any(test, feature = "internals"))]
+pub mod internals;
 mod library;
 mod runtime;
-#[cfg(any(test, feature = "internals"))]
-pub mod testing;
 mod worker;
 
+pub use builtin::math_library::math_library;
+pub use builtin::system_library::system_library;
+pub use builtin::worker_events_library::{FRAME_EVENT_FUNC_ID, worker_events_library};
 pub use data::codec::CustomValueCodec;
 pub use data::codec::error::{CodecError, CodecFormatError};
 pub use data::const_value::{ConstValue, ValueText};
 pub use data::dynamic_value::{CustomValue, DynamicValue, RamUsage};
 pub use data::type_system::{DataType, EnumVariants, FsPathConfig, FsPathMode, TypeId};
-pub use elements::math_library::math_library;
-pub use elements::system_library::system_library;
-pub use elements::worker_events_library::{FRAME_EVENT_FUNC_ID, worker_events_library};
 pub use execution::cache::disk_store::DiskStore;
 pub use execution::cache::disk_store::error::{RemovalError, StoreError};
 pub use execution::cache::runtime::error::{

@@ -11,8 +11,8 @@ use crate::execution::cache::disk_store::store_outcome::StoreOutcome;
 use crate::execution::cache::disk_store::{BlobTarget, DiskStore, StorePolicy};
 use crate::execution::cache::slot::OutputSnapshot;
 use crate::graph::func::lambda::OutputDemand;
-use crate::testing::blob::{BLOB_TYPE, Blob, BlobCodec};
-use crate::testing::calls::Calls;
+use crate::internals::blob::{BLOB_TYPE, Blob, BlobCodec};
+use crate::internals::calls::Calls;
 use crate::{ConstValue, DynamicValue};
 
 fn target(path: &Path, digest: Digest) -> BlobTarget {

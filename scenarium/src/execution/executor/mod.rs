@@ -27,7 +27,7 @@ use common::CancelToken;
 use crate::DynamicValue;
 use crate::RamUsage;
 use crate::containers::column::Column;
-use crate::execution::identity::{NodeIdx, OutputAddr, OutputIdx};
+use crate::execution::index::{NodeIdx, OutputAddr, OutputIdx};
 use crate::execution::report::EventTrigger;
 use crate::execution::report::{ExecutionOutcome, LogLevel, NodeExecutionStatus, NodeStatus};
 use crate::execution::report::{RunPhase, RunReporter};
@@ -698,7 +698,7 @@ impl ExecutionFrame<'_, '_> {
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::execution::executor::Executor;
-    use crate::execution::identity::OutputIdx;
+    use crate::execution::index::OutputIdx;
 
     impl Executor {
         /// How many planned reads of one output the last run left uncompleted —

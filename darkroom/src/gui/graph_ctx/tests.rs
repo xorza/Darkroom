@@ -1,13 +1,13 @@
-use scenarium::testing::graph::NodeSpec;
-use scenarium::testing::graph::TestGraph;
+use scenarium::internals::graph::NodeSpec;
+use scenarium::internals::graph::TestGraph;
 use scenarium::{
     Binding, CacheMode, ConstValue, DataType, FuncId, Graph, InputPort, Node, NodeId, NodeKind,
 };
 
 use crate::core::document::TabRef;
-use crate::core::document::harness::DocFixture;
+use crate::core::document::internals::DocFixture;
 use crate::core::document::{PortKind, PortRef};
-use crate::gui::graph_ctx::harness::GraphCtxFixture;
+use crate::gui::graph_ctx::internals::GraphCtxFixture;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
 
 /// Composing a context does not ask whether anyone is looking — the document,

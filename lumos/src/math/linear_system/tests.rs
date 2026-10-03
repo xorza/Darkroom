@@ -1,7 +1,7 @@
 //! Tests for the dense solver.
 
+use crate::internals::assertions::assert_close;
 use crate::math::linear_system::solve_in_place;
-use crate::testing::assertions::assert_close;
 
 /// The distortion solvers' threshold.
 const COARSE: f64 = 1e-12;

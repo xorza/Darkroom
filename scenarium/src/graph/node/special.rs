@@ -4,14 +4,14 @@
 //! Modeling them as a [`SpecialNode`] enum variant on the node's kind (vs. a flag
 //! on every [`Func`]/`Node`) keeps the common path clean: a new special case is a
 //! new variant plus a hardcoded spec — its interface + lambda live in an
-//! `elements/` module (e.g. [`run_sinks`](crate::elements::run_sinks))
+//! `builtin/` module (e.g. [`run_sinks`](crate::builtin::run_sinks))
 //! — with no new field elsewhere. [`SpecialNode::func`] maps a variant to that
 //! interface; the engine then special-cases the node's *behavior* (e.g. the
 //! run-sinks promotion in the planner's root collection).
 
 use serde::{Deserialize, Serialize};
 
-use crate::elements::run_sinks::run_sinks_func;
+use crate::builtin::run_sinks::run_sinks_func;
 use crate::graph::func::Func;
 
 /// A built-in node identified by *kind*, not by a `FuncId`. Its ports + lambda

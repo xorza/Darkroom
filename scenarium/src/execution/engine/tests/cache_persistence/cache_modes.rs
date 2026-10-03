@@ -348,8 +348,8 @@ async fn impure_cone_persist_node_is_not_disk_cached() {
 /// disk instead.
 #[tokio::test]
 async fn missing_codec_skips_disk_cache_instead_of_panicking() {
+    use crate::internals::blob::{BLOB_TYPE, Blob, BlobCodec};
     use crate::library::TypeEntry;
-    use crate::testing::blob::{BLOB_TYPE, Blob, BlobCodec};
 
     // A pure, disk-persisted sink emitting a custom `Blob`. The type's codec
     // is registered only when `with_codec` — and the program takes its codecs

@@ -1,4 +1,4 @@
-use crate::testing::prelude::*;
+use crate::internals::prelude::*;
 #[test]
 fn construction_constants_arithmetic_and_tuple_conversions_are_exact() {
     let left = Vec2us::new(5, 7);

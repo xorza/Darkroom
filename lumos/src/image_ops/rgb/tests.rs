@@ -1,5 +1,5 @@
 use crate::image_ops::rgb::Rgb;
-use crate::testing::assertions::assert_close;
+use crate::internals::assertions::assert_close;
 
 #[test]
 fn intensity_scale_and_zero_have_exact_channel_values() {

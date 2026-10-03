@@ -8,13 +8,13 @@ exclude = ["AGENTS.md", "CLAUDE.md"]
 workspace = true
 
 [features]
-# Exposes test-only helpers (e.g. `SerdeFormat::all_formats_for_testing`) to
+# Exposes test-only helpers (e.g. `TempDir`) to
 # downstream crates' test targets without putting them in the released surface.
 internals = []
 introspect-derive = ["dep:common-derive"]
 
 [dependencies]
-common-derive = { path = "common-derive", optional = true }
+common-derive = { workspace = true, optional = true }
 glam = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
@@ -26,5 +26,5 @@ tokio = { workspace = true }
 windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
-common-derive = { path = "common-derive" }
+common-derive = { workspace = true }
 uuid = { workspace = true }

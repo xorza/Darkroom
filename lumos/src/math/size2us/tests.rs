@@ -1,4 +1,4 @@
-use crate::testing::prelude::*;
+use crate::internals::prelude::*;
 #[test]
 fn size_measures_extent_and_indexes_row_major() {
     let size = Size2us::new(4, 3);

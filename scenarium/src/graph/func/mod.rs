@@ -495,24 +495,24 @@ mod tests {
     use crate::graph::func::lambda::FuncLambda;
     use crate::graph::func::{Func, FuncInput, FuncOutput, ValueVariant};
     use crate::graph::node::CacheMode;
-    use crate::testing;
+    use crate::internals;
     use crate::{ConstValue, DataType, FsPathConfig, FsPathMode, TypeId};
 
     #[test]
     fn validate_rejects_invalid_identities_wildcards_and_defaults() {
-        let nil_input = testing::stub_func(FuncId::unique(), "input").input(FuncInput::required(
+        let nil_input = internals::stub_func(FuncId::unique(), "input").input(FuncInput::required(
             "value",
             DataType::Custom(TypeId::nil()),
         ));
-        let nil_output = testing::stub_func(FuncId::unique(), "output")
+        let nil_output = internals::stub_func(FuncId::unique(), "output")
             .output(FuncOutput::new("value", DataType::Enum(TypeId::nil())));
-        let invalid_wildcard = testing::stub_func(FuncId::unique(), "wildcard")
+        let invalid_wildcard = internals::stub_func(FuncId::unique(), "wildcard")
             .input(FuncInput::required("value", DataType::Any))
             .wildcard_output("value", 1);
         let invalid = [
             (
                 "function id must not be nil".to_owned(),
-                testing::stub_func(FuncId::nil(), "nil"),
+                internals::stub_func(FuncId::nil(), "nil"),
             ),
             (
                 format!(
@@ -544,7 +544,7 @@ mod tests {
         // Declared defaults are held to exact kinds (no scalar coercion) —
         // an authoring mismatch fails at registration, not in a document.
         let default_mismatch = |input: FuncInput| {
-            let func = testing::stub_func(FuncId::unique(), "default").input(input);
+            let func = internals::stub_func(FuncId::unique(), "default").input(input);
             let expected = format!(
                 "function {:?} input 0 declares a default that matches neither its type nor its picker variants",
                 func.id
@@ -678,28 +678,28 @@ mod tests {
     fn default_cache_mode_defaults_to_none_and_builder_overrides() {
         // Out of the box a func caches nothing.
         assert_eq!(
-            testing::stub_func(FuncId::unique(), "f").default_cache_mode,
+            internals::stub_func(FuncId::unique(), "f").default_cache_mode,
             CacheMode::None
         );
 
         // The builder sets a hotter default; distinct inputs map to distinct
         // stored modes (not a fixed constant).
         for mode in [CacheMode::Ram, CacheMode::Disk, CacheMode::Both] {
-            let func = testing::stub_func(FuncId::unique(), "f").default_cache_mode(mode);
+            let func = internals::stub_func(FuncId::unique(), "f").default_cache_mode(mode);
             assert_eq!(func.default_cache_mode, mode, "{mode:?} is stored verbatim");
         }
     }
 
     #[test]
     fn node_events_expose_names_and_arity() {
-        let emitter = testing::stub_func(FuncId::unique(), "ticker")
-            .event("tick", testing::stub_event())
-            .event("tock", testing::stub_event());
+        let emitter = internals::stub_func(FuncId::unique(), "ticker")
+            .event("tick", internals::stub_event())
+            .event("tock", internals::stub_event());
         assert_eq!(emitter.events.len(), 2);
         let names: Vec<&str> = emitter.events.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(names, ["tick", "tock"]);
 
-        let silent = testing::stub_func(FuncId::unique(), "silent");
+        let silent = internals::stub_func(FuncId::unique(), "silent");
         assert!(silent.events.is_empty());
     }
 }

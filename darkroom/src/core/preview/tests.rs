@@ -1,5 +1,5 @@
 use super::*;
-use scenarium::testing::func_invoker::FuncInvoker;
+use scenarium::internals::func_invoker::FuncInvoker;
 use scenarium::{AnyState, ConstValue, ContextManager, OutputDemand, SharedAnyState};
 
 #[test]

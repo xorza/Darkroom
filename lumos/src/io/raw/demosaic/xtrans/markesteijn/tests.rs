@@ -1,10 +1,10 @@
+use crate::internals::prelude::*;
 use crate::io::raw::demosaic::sensor_layout::SensorLayout;
 use crate::io::raw::demosaic::xtrans::internals::{
     make_xtrans, test_pattern, test_pattern_array, to_u16,
 };
 use crate::io::raw::demosaic::xtrans::markesteijn::*;
 use crate::io::raw::demosaic::xtrans::markesteijn_steps::MARK_INFO_BORDER;
-use crate::testing::prelude::*;
 
 #[derive(Clone, Copy, Debug)]
 enum SyntheticScene {

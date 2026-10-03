@@ -5,13 +5,13 @@ use std::sync::Arc;
 
 use crate::alloc_audit;
 use crate::core::document::TabRef;
-use crate::core::document::harness::DocFixture;
+use crate::core::document::internals::DocFixture;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::preview::preview_func;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::file::FileCommand;
 use crate::gui::app::commands::run::RunCommand;
-use crate::gui::app::session::harness::SessionHarness;
+use crate::gui::app::session::internals::SessionHarness;
 use crate::gui::pane::graph::node::preview_row::preview_image_wid;
 use crate::gui::pane::graph::toolbar::internals::run_chip_wid;
 use crate::gui::pane::viewer::ImageViewer;

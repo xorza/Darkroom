@@ -30,7 +30,7 @@ use windows as sys;
 /// Only macOS has anything to do. A Linux desktop entry's `%f` and a Windows
 /// shell association both put the path in argv, where the CLI already reads
 /// it; Launch Services sends an Apple Event instead and never fills argv, so
-/// without this the association in `assets/macos/Info.plist` would launch the
+/// without this the association in `packaging/macos/Info.plist` would launch the
 /// editor empty.
 ///
 /// Call once, after the host is built and before it runs — that window is the

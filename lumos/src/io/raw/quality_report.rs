@@ -10,6 +10,8 @@ use std::path::Path;
 
 use imaginarium::Buffer2;
 
+use crate::internals::init_tracing;
+use crate::internals::real_data::raw_frames;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
@@ -17,8 +19,6 @@ use crate::io::raw::internals::load_raw_libraw_demosaic;
 use crate::io::raw::load_raw;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use crate::testing::init_tracing;
-use crate::testing::real_data::raw_frames;
 
 /// Pixels this far from an edge are left out: both demosaics extrapolate there.
 const BORDER: usize = 6;

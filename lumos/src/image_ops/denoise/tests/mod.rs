@@ -2,10 +2,10 @@
 mod real_data;
 
 use crate::image_ops::denoise::{Denoise, Threshold};
-use crate::testing::images::{gray_image as gray, rgb_image as rgb};
-use crate::testing::prelude::*;
-use crate::testing::synthetic::metrics::pixel_stats;
-use crate::testing::synthetic::patterns;
+use crate::internals::images::{gray_image as gray, rgb_image as rgb};
+use crate::internals::prelude::*;
+use crate::internals::synthetic::metrics::pixel_stats;
+use crate::internals::synthetic::patterns;
 
 /// A flat `bg` with white Gaussian noise of `sigma`.
 fn noisy(size: Size2us, bg: f32, sigma: f32, seed: u64) -> Vec<f32> {

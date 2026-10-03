@@ -1,6 +1,6 @@
 use super::*;
-use crate::core::document::harness::DocFixture;
-use crate::gui::graph_ctx::harness::GraphCtxFixture;
+use crate::core::document::internals::DocFixture;
+use crate::gui::graph_ctx::internals::GraphCtxFixture;
 
 #[test]
 fn node_bounds_uses_cached_sizes_and_falls_back_to_points() {

@@ -13,7 +13,7 @@ use glam::Vec2;
 use scenarium::{Binding, CacheMode, ConstValue, InputPort, NodeId, Subscription};
 
 use crate::core::document::Viewport;
-use crate::core::document::harness::DocFixture;
+use crate::core::document::internals::DocFixture;
 use crate::core::edit::step::change::Change;
 use crate::core::edit::step::move_selection::{Move, MoveSelection};
 use crate::core::edit::step::node_presence::{NodePresence, NodeState};

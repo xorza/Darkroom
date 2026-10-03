@@ -2,7 +2,7 @@ use common::TempDir;
 use scenarium::{Binding, ConstValue, InputPort, NodeId};
 
 use super::*;
-use crate::core::document::harness::DocFixture;
+use crate::core::document::internals::DocFixture;
 use ron::ser;
 use std::fs;
 

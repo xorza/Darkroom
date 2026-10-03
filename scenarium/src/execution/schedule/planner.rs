@@ -7,7 +7,7 @@
 use crate::containers::set::IdxSet;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::error::{Error, Result};
-use crate::execution::identity::NodeIdx;
+use crate::execution::index::NodeIdx;
 use crate::execution::schedule::{NodeState, RunSchedule};
 use crate::execution::seeds::RunSeeds;
 

@@ -1,6 +1,6 @@
 use super::*;
 use crate::execution::cache::disk_store::DiskStore;
-use crate::testing::graph::NodeSpec;
+use crate::internals::graph::NodeSpec;
 use std::fs;
 
 /// Eviction is fire-and-forget: it happens inside the batch, before the
@@ -223,8 +223,8 @@ async fn a_flush_failure_uses_the_general_worker_error_report() {
 /// named those nodes and their types are a standing fact about the library.
 #[tokio::test]
 async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
+    use crate::internals::blob::{BLOB_TYPE, Blob};
     use crate::library::TypeEntry;
-    use crate::testing::blob::{BLOB_TYPE, Blob};
 
     let dir = TempDir::new("flush-unsupported");
     let mut graph = TestGraph::new();
@@ -290,8 +290,8 @@ async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
 /// cache that is already gone.
 #[tokio::test]
 async fn an_install_reports_the_cache_left_after_reconciling() {
+    use crate::internals::blob::{BLOB_TYPE, Blob};
     use crate::library::TypeEntry;
-    use crate::testing::blob::{BLOB_TYPE, Blob};
 
     // A blob weighs its length.
     const HEAVY_CPU: usize = 4096;

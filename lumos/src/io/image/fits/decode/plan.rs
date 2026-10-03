@@ -98,7 +98,7 @@ impl FitsDecodePlan {
 /// with `DATAMAX` absent it scans the data instead (three sampled pixels on the partial-read path,
 /// which is why its full and partial reads can disagree about the same file). A divisor read off
 /// each frame's own extrema differs frame to frame, which is exactly what
-/// [`crate::stacking::combine`] now rejects a frame set for. An unnormalized float FITS carrying no
+/// [`crate::combine`] now rejects a frame set for. An unnormalized float FITS carrying no
 /// `DATAMAX` therefore reaches the pipeline as it stands; the display stage measures its own range
 /// rather than the decoder guessing one.
 fn sample_scale(

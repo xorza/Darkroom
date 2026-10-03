@@ -2,21 +2,21 @@
 mod real_data;
 mod synthetic;
 
-use crate::testing::prelude::*;
+use crate::internals::prelude::*;
 use common::TempDir;
 use imaginarium::{ColorFormat, Image, ImageDesc};
 
+use crate::internals::fits::fits_transfer;
 use crate::io::image::PREVIEW_IMAGE_EXTENSIONS;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::provenance::FitsTransferProvenance;
-use crate::testing::fits::fits_transfer;
 use fits_well::image::SampleType;
 
+use crate::frame_store::stackable_image::StackableImage;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::{ColorProvenance, ImageProvenance};
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::preview_image::{PreviewImage, PreviewPixels};
-use crate::stacking::frame_store::stackable_image::StackableImage;
 
 #[test]
 fn preview_extensions_are_fits_then_raw_then_imaginarium() {

@@ -1,9 +1,9 @@
 //! Tests for Bayer CFA types and RCD demosaicing.
 
+use crate::internals::prelude::*;
 use crate::io::raw::demosaic::bayer::rcd::INTERPOLATED_BORDER;
 use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern, rcd};
 use crate::io::raw::demosaic::sensor_layout::SensorLayout;
-use crate::testing::prelude::*;
 use rayon::ThreadPoolBuilder;
 
 /// Every phase round-trips through its `BAYERPAT` spelling, in any case and with blanks around

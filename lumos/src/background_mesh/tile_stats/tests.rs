@@ -4,7 +4,7 @@
 )]
 
 use crate::background_mesh::tile_stats::*;
-use crate::testing::prelude::*;
+use crate::internals::prelude::*;
 
 #[test]
 fn sextractor_sky_hand_computed() {

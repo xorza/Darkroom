@@ -1,7 +1,7 @@
 use std::f64::consts::PI;
 
+use crate::internals::assertions::assert_close;
 use crate::math::lanczos::kernel;
-use crate::testing::assertions::assert_close;
 
 /// `sinc` at a nonzero integer reads `sin` of the rounded f32 product `n·π`, which is off a true
 /// zero by that rounding: at most half an ulp of `4π` (2⁻²¹ ≈ 4.8e-7) plus `n` times π's own

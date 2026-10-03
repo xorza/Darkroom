@@ -6,11 +6,12 @@ pub(crate) mod node_palette;
 pub(crate) mod palette_rows;
 
 use glam::Vec2;
+use palantir::widget::approx;
 use palantir::{Ui, WidgetId};
 
 use crate::core::document::PortRef;
 use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
-use crate::gui::pane::graph::ctx::CanvasCtx;
+use crate::gui::pane::graph::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph::gesture::canvas_gesture::CanvasGesture;
 use crate::gui::pane::graph::gesture::new_node::node_palette::NodePalette;
 use crate::gui::pane::graph::gesture::new_node::palette_rows::PaletteRows;
@@ -198,8 +199,8 @@ pub(crate) fn results_wid() -> WidgetId {
 }
 
 /// Vertical space the palette's chrome claims above the scrolling results: the
-/// popup's own padding, plus everything the layout placed between the search
-/// field's top edge and the results' top edge.
+/// popup's own padding and border, plus everything the layout placed between
+/// the search field's top edge and the results' top edge.
 ///
 /// The inner `Scroll` needs this subtracted from the popup's height cap
 /// because a stack hands every non-`Fill` child its *full* main extent — a
@@ -210,9 +211,13 @@ pub(crate) fn results_wid() -> WidgetId {
 /// row.
 ///
 /// Every term is read rather than assumed — the two rows off their own
-/// last-frame rects, the padding off the theme slot the popup is built from —
-/// so restyling the field's text or the menu's padding resizes the results
-/// area with it instead of silently mis-sizing the scroll.
+/// last-frame rects, the padding and border off the theme slot the popup is
+/// built from — so restyling the field's text or the menu's chrome resizes the
+/// results area with it instead of silently mis-sizing the scroll.
+///
+/// Palantir folds a chrome's border into its padding on every side, unless the
+/// width paints nothing. That fold (`Background::border_inset`) is not public,
+/// so its gate is repeated here over the same public `approx` predicate.
 ///
 /// The span between the rows is measured rather than re-summed from the
 /// field's height, [`SEARCH_ROW_GAP`] and the stack's gutter. A sum has to be
@@ -232,7 +237,13 @@ fn chrome_above_results(ui: &Ui) -> f32 {
         },
         |(field, results)| results.min.y - field.min.y,
     );
-    menu.padding.vertical_sum() + rows
+    let border = menu.panel.border.width;
+    let border = if approx::paints_nothing(border) {
+        0.0
+    } else {
+        border
+    };
+    menu.padding.vertical_sum() + 2.0 * border + rows
 }
 
 #[cfg(test)]

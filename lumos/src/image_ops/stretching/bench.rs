@@ -2,8 +2,8 @@
 //! two automatic color-preserving curves. Run:
 //! `cargo test -p lumos --release --features bench stretching::bench -- --ignored --nocapture`
 
-use crate::testing::prelude::*;
-use crate::testing::synthetic::patterns;
+use crate::internals::prelude::*;
+use crate::internals::synthetic::patterns;
 use quickbench::quick_bench;
 use std::array;
 use std::hint::black_box;

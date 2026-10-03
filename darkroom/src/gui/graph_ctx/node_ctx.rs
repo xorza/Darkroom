@@ -29,7 +29,7 @@ const MISSING_FUNC_LABEL: &str = "missing func";
 /// the prepass gestures, and the record all read nodes through this same type.
 /// The facts that only a *record* has settled — the effective selection, the
 /// open inspectors, the cull region — stay on
-/// [`DrawCtx`](crate::gui::pane::graph::ctx::DrawCtx), which travels beside
+/// [`DrawCtx`](crate::gui::pane::graph::draw_ctx::DrawCtx), which travels beside
 /// this rather than inside it, so a reader cannot reach for one in a phase
 /// where it does not exist yet.
 ///

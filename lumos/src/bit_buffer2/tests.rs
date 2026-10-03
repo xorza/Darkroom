@@ -1,9 +1,9 @@
-use crate::testing::prelude::*;
+use crate::internals::prelude::*;
 use std::mem;
 use std::panic::catch_unwind;
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::testing::panic_message;
+use crate::internals::panic_message;
 
 /// Every bit of `buffer` in row-major order.
 fn iter_bits(buffer: &BitBuffer2) -> Vec<bool> {

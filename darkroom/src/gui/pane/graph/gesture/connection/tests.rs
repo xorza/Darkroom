@@ -1,12 +1,12 @@
-use palantir::internals::UiHarness;
+use palantir::internals::harness::UiHarness;
 use scenarium::NodeId;
-use scenarium::testing::graph::NodeSpec;
-use scenarium::testing::graph::TestGraph;
+use scenarium::internals::graph::NodeSpec;
+use scenarium::internals::graph::TestGraph;
 
 use super::*;
-use crate::core::document::harness::DocFixture;
-use crate::gui::graph_ctx::harness::GraphCtxFixture;
-use crate::gui::pane::graph::harness::CanvasHarness;
+use crate::core::document::internals::DocFixture;
+use crate::gui::graph_ctx::internals::GraphCtxFixture;
+use crate::gui::pane::graph::internals::CanvasHarness;
 use crate::gui::pane::graph::node::port_row::port_circle_wid;
 
 /// Two two-in/one-out nodes wired producer → consumer — enough graph for a

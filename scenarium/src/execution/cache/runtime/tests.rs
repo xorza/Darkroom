@@ -6,11 +6,11 @@ use crate::execution::cache::digest::Digest;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot};
 use crate::execution::compile::compiled_graph::CompiledGraph;
-use crate::execution::identity::{NodeIdx, OutputAddr};
+use crate::execution::index::{NodeIdx, OutputAddr};
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::node::CacheMode;
-use crate::testing::program::ProgramBuilder;
+use crate::internals::program::ProgramBuilder;
 use crate::{ConstValue, DataType, DynamicValue, RamUsage};
 
 fn out() -> Vec<DynamicValue> {

@@ -215,10 +215,10 @@ impl<'a> XTransImage<'a> {
 
 #[cfg(test)]
 pub(crate) mod internals {
+    use crate::internals::cfa::XTRANS_PATTERN;
     use crate::io::raw::demosaic::sensor_layout::SensorLayout;
     use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
     use crate::io::raw::demosaic::xtrans::{XTransImage, XTransNormalization};
-    use crate::testing::cfa::XTRANS_PATTERN;
 
     pub(crate) const TEST_SPAN: f32 = 65535.0;
 

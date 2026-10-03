@@ -174,7 +174,7 @@ impl PreviewImage {
     /// its texture in the pass that draws it rather than a frame later.
     ///
     /// `&self` because that ask comes from the record pass, which holds the
-    /// run projection immutably (see [`AppCtx`](crate::gui::app::ctx::AppCtx)).
+    /// run projection immutably (see [`AppCtx`](crate::gui::app::app_ctx::AppCtx)).
     /// The borrow is taken, resolved and dropped inside this call, so nothing
     /// can observe the cell mid-upload or hold it across a frame — and both
     /// answers are read *out* of it rather than borrowed from, the handle as a

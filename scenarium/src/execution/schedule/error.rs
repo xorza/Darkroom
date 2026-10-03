@@ -9,7 +9,7 @@
 
 use thiserror::Error;
 
-use crate::execution::identity::NodeIdx;
+use crate::execution::index::NodeIdx;
 use crate::execution::schedule::NodeState;
 use crate::graph::identity::NodeId;
 

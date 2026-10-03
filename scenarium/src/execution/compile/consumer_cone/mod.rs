@@ -2,7 +2,7 @@
 
 use crate::containers::set::IdxSet;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
-use crate::execution::identity::NodeIdx;
+use crate::execution::index::NodeIdx;
 
 /// What a set of seed nodes reaches downstream: every node that reads a seed's
 /// outputs, transitively, plus the seeds themselves.

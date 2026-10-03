@@ -1,9 +1,9 @@
 use super::*;
 use crate::DataType;
 use crate::graph::identity::NodeId;
-use crate::testing::graph::NodeSpec;
-use crate::testing::graph::TestGraph;
-use crate::testing::graph::compiled::Compiled;
+use crate::internals::graph::NodeSpec;
+use crate::internals::graph::TestGraph;
+use crate::internals::graph::compiled::Compiled;
 
 /// The shared source → sink + unwired `loose` graph, compiled — the three
 /// positions a seed can occupy relative to a consumer edge.

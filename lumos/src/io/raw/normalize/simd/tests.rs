@@ -1,11 +1,11 @@
 //! Every normalize backend the host has, against the scalar form.
 
+use crate::internals::simd_check::backend::Backend;
 use crate::io::raw::normalize::normalize_one;
 #[cfg(target_arch = "aarch64")]
 use crate::io::raw::normalize::simd::neon;
 #[cfg(target_arch = "x86_64")]
 use crate::io::raw::normalize::simd::{sse2, sse41};
-use crate::testing::simd_check::backend::Backend;
 use imaginarium::SimdTier;
 
 type ChunkFn = unsafe fn(&[u16], &mut [f32], f32, f32);

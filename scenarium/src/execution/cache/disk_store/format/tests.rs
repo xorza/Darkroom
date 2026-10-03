@@ -13,9 +13,9 @@ use crate::execution::cache::disk_store::format::{
     header_len, read, write,
 };
 use crate::graph::func::lambda::OutputDemand;
+use crate::internals::blob::{Blob, BlobCodec};
+use crate::internals::calls::Calls;
 use crate::library::Library;
-use crate::testing::blob::{Blob, BlobCodec};
-use crate::testing::calls::Calls;
 use crate::{ConstValue, DynamicValue};
 
 /// A demand mask over `output_count` outputs with `produced` marked demanded and the rest

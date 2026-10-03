@@ -35,9 +35,9 @@ mod tests {
     use crate::image_ops::hdr::Hdr;
     use crate::image_ops::local_contrast::LocalContrast;
     use crate::image_ops::stretching::{ColorMode, Stretch, StretchMethod};
+    use crate::internals::images::gray_image;
     use crate::io::image::linear::LinearImage;
     use crate::math::size2us::Size2us;
-    use crate::testing::images::gray_image;
 
     /// Every op that owns a `validate`, at each bound its config can break, so an op added
     /// without the `self.validate()?` prologue this module describes fails here rather than

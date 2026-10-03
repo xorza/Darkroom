@@ -3,6 +3,8 @@ use std::path::Path;
 use imaginarium::{Buffer2, ChannelCount, ColorFormat, FileFormat, Image};
 use rayon::prelude::*;
 
+use crate::frame_store::cache_key::DecoderKind;
+use crate::frame_store::stackable_image::StackableImage;
 use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::image_ops::rgb::Rgb;
 use crate::io::image::cfa::CfaType;
@@ -19,8 +21,6 @@ use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::null_mask::NullMask;
 use crate::io::image::standard::{f32_target_format, read_standard_image, scientific_rejection};
-use crate::stacking::frame_store::cache_key::DecoderKind;
-use crate::stacking::frame_store::stackable_image::StackableImage;
 
 /// A one- or three-channel floating-point image in a linear numeric domain.
 #[derive(Debug, Clone)]
@@ -388,7 +388,7 @@ impl From<LinearImage> for Image {
 
 #[cfg(test)]
 mod tests {
-    use crate::testing::prelude::*;
+    use crate::internals::prelude::*;
 
     #[test]
     fn map_rgb_maps_every_channel_of_a_pixel_and_skips_grayscale() {

@@ -26,21 +26,20 @@
 
 #![deny(unsafe_code)]
 
-// Type-holding modules are `pub(crate)`; their public surface is defined by the
+// Type-holding modules are private; their public surface is defined by the
 // crate-root `pub use`s below (one canonical path per item). Modules that are
-// free-function namespaces (or a macro home) stay `pub` and are used as
-// `common::<module>::fn`.
+// free-function namespaces stay `pub` and are used as `common::<module>::fn`.
 
 #[macro_use]
-pub mod macros;
+mod macros;
 pub mod file_utils;
 #[cfg(any(test, feature = "internals"))]
 pub mod internals;
 
-pub(crate) mod cancel_token;
-pub(crate) mod float_ext;
-pub(crate) mod introspect;
-pub(crate) mod serde;
+mod cancel_token;
+mod float_ext;
+mod introspect;
+mod serde;
 
 pub use cancel_token::CancelToken;
 pub use file_utils::file_identity::FileIdentity;

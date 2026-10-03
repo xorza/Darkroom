@@ -12,7 +12,7 @@ use palantir::prelude::*;
 
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
-use crate::gui::pane::graph::ctx::CanvasCtx;
+use crate::gui::pane::graph::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph::gesture::pan_zoom::{self, Framing};
 use crate::gui::requests::Requests;
 use crate::gui::widgets::chip::Chip;

@@ -4,11 +4,11 @@ use glam::{UVec2, Vec2};
 use palantir::WidgetId;
 use scenarium::{Binding, InputPort, NodeId};
 
-use crate::core::document::harness::DocFixture;
+use crate::core::document::internals::DocFixture;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
-use crate::gui::pane::graph::harness::CanvasHarness;
+use crate::gui::pane::graph::internals::CanvasHarness;
 
 /// Room for three nodes in a row *and* the opened menu below them.
 const SURFACE: UVec2 = UVec2::new(1600, 900);

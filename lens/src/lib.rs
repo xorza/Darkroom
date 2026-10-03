@@ -7,13 +7,14 @@
 
 mod astro;
 mod config_node;
+mod fs_watch;
 mod image;
-mod utility;
+mod random;
 
 // Published surface — only what darkroom consumes. Everything else (config
 // projections, presets, datatypes, the config bridge) stays crate-internal.
 pub use astro::nodes::{MlModelPaths, astro_library};
+pub use fs_watch::fs_watch_library;
 pub use image::nodes::image_library;
 pub use image::{IMAGE_TYPE_ID, Image};
-pub use utility::fs_watch::fs_watch_library;
-pub use utility::random::random_library;
+pub use random::random_library;

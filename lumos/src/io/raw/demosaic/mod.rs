@@ -32,10 +32,10 @@ impl DemosaicMemory {
 
 #[cfg(test)]
 mod memory_tests {
+    use crate::internals::cfa::XTRANS_PATTERN;
     use crate::io::image::cfa::CfaType;
     use crate::io::image::image_dimensions::ImageDimensions;
     use crate::io::raw::demosaic::bayer::CfaPattern;
-    use crate::testing::cfa::XTRANS_PATTERN;
 
     #[test]
     fn demosaic_memory_counts_each_plane_the_kernel_holds() {

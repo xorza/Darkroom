@@ -42,7 +42,7 @@ use crate::execution::compile::compiled_graph::{
     CompiledGraph, ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode,
 };
 use crate::execution::compile::error::CompileError;
-use crate::execution::identity::{InputIdx, NodeIdx, OutputAddr};
+use crate::execution::index::{InputIdx, NodeIdx, OutputAddr};
 use crate::graph::func::FuncInput;
 use crate::graph::identity::{InputPort, NodeId, OutputPort};
 use crate::graph::output_types::OutputTypes;

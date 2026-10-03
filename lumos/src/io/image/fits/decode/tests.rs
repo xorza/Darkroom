@@ -3,7 +3,7 @@
     reason = "test axis lengths are far below i64::MAX"
 )]
 
-use crate::testing::prelude::*;
+use crate::internals::prelude::*;
 
 use std::fs::File;
 
@@ -12,13 +12,13 @@ use fits_well::header::Header;
 use fits_well::image::{Bitpix, Compression, CompressionOptions, Image};
 use fits_well::io::{BLOCK_SIZE, HduKind};
 
+use crate::internals::fits::{fits_transfer, write_fits};
 use crate::io::image::fits::decode::plan::internals::description;
 use crate::io::image::fits::decode::*;
 use crate::io::image::fits::options::{
     FitsChecksumPolicy, FitsFloatScale, FitsHduSelector, FitsLoadOptions, FitsNullPolicy,
 };
 use crate::io::image::fits::provenance::FitsTransferProvenance;
-use crate::testing::fits::{fits_transfer, write_fits};
 use common::TempDir;
 use std::fs;
 

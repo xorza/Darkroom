@@ -14,11 +14,11 @@
 //! Gated behind the `real-data` feature (the dataset is). Run: `cargo test -p lumos --release
 //! --features bench,real-data image_ops::bench -- --ignored --nocapture`
 
-use crate::testing::prelude::*;
+use crate::internals::prelude::*;
 use quickbench::quick_bench;
 use std::hint::black_box;
 
-use crate::testing::real_data;
+use crate::internals::real_data;
 use crate::{
     ColorMode, Denoise, ExtractBackground, Hdr, LocalContrast, NeutralizeBackground, Scnr, Stretch,
     StretchMethod,

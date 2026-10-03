@@ -12,6 +12,8 @@ use std::path::Path;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::frame_store::cache_key::DecoderKind;
+use crate::frame_store::frame_peek::FramePeek;
 use crate::io::cancelled::Cancelled;
 use crate::io::image::cfa::same_color::SameColorMedian;
 use crate::io::image::error::ImageError;
@@ -33,10 +35,8 @@ use crate::io::raw::demosaic::xtrans::markesteijn;
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::{XTransPattern, XTransPatternError};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use crate::stacking::frame_store::cache_key::DecoderKind;
-use crate::stacking::frame_store::frame_peek::FramePeek;
 
-use crate::stacking::frame_store::stackable_image::StackableImage;
+use crate::frame_store::stackable_image::StackableImage;
 use common::CancelToken;
 use imaginarium::Buffer2;
 

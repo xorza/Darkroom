@@ -2,8 +2,8 @@
 mod real_data;
 
 use crate::image_ops::stretching::*;
-use crate::testing::images::{gray_image as gray, rgb_image as rgb};
-use crate::testing::prelude::*;
+use crate::internals::images::{gray_image as gray, rgb_image as rgb};
+use crate::internals::prelude::*;
 use std::f32::consts::LN_10;
 use std::iter;
 

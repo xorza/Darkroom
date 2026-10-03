@@ -23,7 +23,7 @@ use crate::image_ops::error::OpError;
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::robust_sigma_f64;
-use crate::stacking::star_detection::config::background_config::DEFAULT_SIGMA_CLIP_ITERATIONS;
+use crate::star_detection::config::background_config::DEFAULT_SIGMA_CLIP_ITERATIONS;
 
 /// How the modeled background is removed from the image.
 ///

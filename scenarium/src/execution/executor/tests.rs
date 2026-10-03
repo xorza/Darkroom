@@ -10,7 +10,7 @@ use crate::graph::func::lambda::FuncLambda;
 use crate::graph::func::lambda::internals;
 use crate::graph::identity::NodeId;
 use crate::graph::node::CacheMode;
-use crate::testing::program::ProgramBuilder;
+use crate::internals::program::ProgramBuilder;
 use crate::{ConstValue, async_lambda};
 
 fn producer() -> FuncLambda {
