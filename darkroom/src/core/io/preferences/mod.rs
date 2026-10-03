@@ -1,10 +1,14 @@
+pub(crate) mod error;
+
 use std::fs;
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
 
 use common::{SerdeFormat, deserialize, file_utils, serialize};
 use glam::{IVec2, UVec2};
 use palantir::ImageFilter;
 
+use crate::core::io::preferences::error::PreferencesLoadError;
 use crate::platform;
 
 /// Preferences file name, resolved inside the platform's configuration
@@ -15,7 +19,6 @@ const PREFERENCES_FILE: &str = "darkroom.preferences.ron";
 /// Persisted session state: the document open when the app last closed,
 /// and editor behavior.
 /// Reloaded on startup so darkroom reopens where the user left off.
-/// Missing / unreadable preferences fall back to `default()`.
 /// `#[serde(default)]` so a partial preferences file still deserializes.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -154,14 +157,29 @@ impl Preferences {
             .join(PREFERENCES_FILE)
     }
 
-    /// Read the preferences from the configuration directory. Any failure (missing
-    /// file, parse error) degrades to the default rather than
-    /// blocking startup — a corrupt preferences file shouldn't brick the app.
-    pub(crate) fn load() -> Self {
-        match fs::read(Self::path()) {
-            Ok(bytes) => deserialize(&bytes, SerdeFormat::Ron).unwrap_or_default(),
-            Err(_) => Self::default(),
-        }
+    /// Read the preferences from the configuration directory. A missing file
+    /// is a first run, and reads as the defaults; a file that cannot be read
+    /// or parsed is an error, so the caller can report it and leave the file
+    /// as the user has it.
+    pub(crate) fn load() -> Result<Self, PreferencesLoadError> {
+        Self::load_from(&Self::path())
+    }
+
+    fn load_from(path: &Path) -> Result<Self, PreferencesLoadError> {
+        let bytes = match fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Self::default()),
+            Err(source) => {
+                return Err(PreferencesLoadError::Read {
+                    path: path.to_path_buf(),
+                    source,
+                });
+            }
+        };
+        deserialize(&bytes, SerdeFormat::Ron).map_err(|source| PreferencesLoadError::Parse {
+            path: path.to_path_buf(),
+            source: Box::new(source),
+        })
     }
 
     /// Write the preferences to the configuration directory. `Err` carries the

@@ -7,13 +7,10 @@
 //! that true — the two are one unit, replaced together when a different file
 //! is opened.
 
-pub(crate) mod replay_outcome;
-
 use std::path;
 use std::path::{Path, PathBuf};
 
 use crate::core::document::Document;
-use crate::core::document::open_document::replay_outcome::ReplayOutcome;
 use crate::core::edit::action_stack::ActionStack;
 use crate::core::edit::document_queue::DocumentQueue;
 use crate::core::edit::document_request::DocumentRequest;
@@ -193,33 +190,25 @@ impl OpenDocument {
         Ok(self.land(&signals))
     }
 
-    /// Replay the last entry backwards. Reports whether the canvas's cached
-    /// geometry was stranded; `took` says whether there was an entry at all.
+    /// Replay the last entry backwards, and report whether that stranded the
+    /// canvas's cached geometry. With nothing to undo it is a no-op.
     #[must_use]
-    pub(crate) fn undo(&mut self) -> ReplayOutcome {
+    pub(crate) fn undo(&mut self) -> Relayout {
         // Folded into a value first: the replay callback runs while the
         // history is mutably borrowed, so it cannot touch `self`.
         let mut signals = StepSignals::default();
-        let took = self
-            .history
+        self.history
             .undo(&mut self.document, &mut |step| signals.fold(step));
-        ReplayOutcome {
-            took,
-            relayout: self.land(&signals),
-        }
+        self.land(&signals)
     }
 
     /// Replay the next entry forwards — the mirror of [`Self::undo`].
     #[must_use]
-    pub(crate) fn redo(&mut self) -> ReplayOutcome {
+    pub(crate) fn redo(&mut self) -> Relayout {
         let mut signals = StepSignals::default();
-        let took = self
-            .history
+        self.history
             .redo(&mut self.document, &mut |step| signals.fold(step));
-        ReplayOutcome {
-            took,
-            relayout: self.land(&signals),
-        }
+        self.land(&signals)
     }
 
     /// Land folded [`StepSignals`]. The one place each signal's *effect* is
@@ -257,17 +246,6 @@ impl OpenDocument {
 
     /// The document a launching frontend opens: `argument` when the command
     /// line named a file, otherwise the one `preferences` remembers.
-    pub(crate) fn open_at_launch(
-        argument: Option<PathBuf>,
-        preferences: &mut Preferences,
-        status: &mut StatusLog,
-        library: &Library,
-    ) -> Self {
-        Self::open_at_launch_with(argument, preferences, status, library, Preferences::save)
-    }
-
-    /// [`Self::open_at_launch`] with the preferences write injected, so a test
-    /// can drive the path where forgetting a bad remembered document fails too.
     ///
     /// A named file outranks the remembered one, reopening preference
     /// included — the user asked for that document by name — and a named file
@@ -275,15 +253,18 @@ impl OpenDocument {
     /// back to the remembered one, which would read as the file having loaded.
     /// Either way it leaves the preferences alone: a command-line document is
     /// this launch's, and saving it is what makes it the remembered one.
-    fn open_at_launch_with(
+    ///
+    /// A remembered document that fails to load is reported to `status` and
+    /// forgotten in `preferences`, so the next launch starts clean instead of
+    /// failing again; persisting that is the caller's.
+    pub(crate) fn open_at_launch(
         argument: Option<PathBuf>,
         preferences: &mut Preferences,
         status: &mut StatusLog,
         library: &Library,
-        save_preferences: impl FnOnce(&Preferences) -> Result<(), String>,
     ) -> Self {
         let Some(path) = argument else {
-            return Self::load_preferred(preferences, status, library, save_preferences);
+            return Self::load_preferred(preferences, status, library);
         };
         // Made absolute up front: the argument is relative to the shell's
         // working directory, which the file dialogs' anchor and the worker's
@@ -296,15 +277,11 @@ impl OpenDocument {
     }
 
     /// The document `preferences` remembers, or an empty one when there is
-    /// none or reopening is switched off. A failed load is reported to
-    /// `status` and forgets the remembered path, so the next launch starts
-    /// clean instead of failing again — which is why this takes the
-    /// preferences by `&mut` and persists them.
+    /// none or reopening is switched off.
     fn load_preferred(
         preferences: &mut Preferences,
         status: &mut StatusLog,
         library: &Library,
-        save_preferences: impl FnOnce(&Preferences) -> Result<(), String>,
     ) -> Self {
         let Some(path) = preferences
             .document_path
@@ -318,9 +295,6 @@ impl OpenDocument {
             Err(error) => {
                 status.error(format!("load failed: {error:#}"));
                 preferences.document_path = None;
-                if let Err(error) = save_preferences(preferences) {
-                    status.error(error);
-                }
                 Self::default()
             }
         }
@@ -351,6 +325,11 @@ pub(crate) mod internals {
                 document,
                 ..Self::default()
             }
+        }
+
+        /// Whether an undo would take an entry back.
+        pub(crate) fn can_undo(&self) -> bool {
+            self.history.can_undo()
         }
     }
 }

@@ -84,7 +84,10 @@ fn run_gui(document: Option<PathBuf>) -> Result<(), WinitHostError> {
     if let Some(icon) = load_icon() {
         window = window.icon(icon);
     }
-    if let Some(w) = &preferences.window {
+    if let Ok(Preferences {
+        window: Some(w), ..
+    }) = &preferences
+    {
         window = window.inner_size(w.size).maximized(w.maximized);
         if let Some(pos) = w.position {
             window = window.position(pos);

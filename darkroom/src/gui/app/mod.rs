@@ -12,6 +12,7 @@ use scenarium::NodeId;
 use crate::core::document::open_document::OpenDocument;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::relayout::Relayout;
+use crate::core::io::preferences::error::PreferencesLoadError;
 use crate::core::io::preferences::{Preferences, WindowState};
 use crate::core::runtime_host::RuntimeHost;
 use crate::core::status::StatusLog;
@@ -64,10 +65,15 @@ pub(crate) struct App {
     status: StatusLog,
     theme: Theme,
     host_handle: HostHandle,
-    /// Persisted session state (active theme name + last document).
-    /// Written on every doc/theme change so the next launch reopens
-    /// where the user left off.
+    /// Persisted session state: the last document, the window, the viewer
+    /// and model choices. Written on every change through
+    /// [`Self::save_preferences`], so the next launch reopens where the user
+    /// left off.
     preferences: Preferences,
+    /// False when the preferences file existed but could not be read: the
+    /// file stays as the user has it, and this session's changes stay in
+    /// memory.
+    preferences_writable: bool,
     /// The document-replacing transition waiting on the unsaved-changes
     /// prompt, and thus whether that prompt is up at all. Raised by
     /// [`Self::guard_discard`]; cleared when the user answers.
@@ -133,7 +139,7 @@ impl App {
     pub(crate) fn new(
         ui: &mut Ui,
         handle: HostHandle,
-        mut preferences: Preferences,
+        preferences: Result<Preferences, PreferencesLoadError>,
         document: Option<PathBuf>,
     ) -> Self {
         // The worker wakes the winit loop via the host handle (see
@@ -144,8 +150,14 @@ impl App {
         };
         // `preferences` is loaded in `run_gui` before the window exists, so
         // its saved geometry can size the window at creation.
-        let mut runtime = RuntimeHost::new(wake, &preferences);
         let mut status = StatusLog::default();
+        let preferences_writable = preferences.is_ok();
+        let mut preferences = preferences.unwrap_or_else(|error| {
+            status.error(format!("{error}; this session's settings are not saved"));
+            Preferences::default()
+        });
+        let mut runtime = RuntimeHost::new(wake, &preferences);
+        let remembered = preferences.document_path.clone();
         let open = OpenDocument::open_at_launch(
             document,
             &mut preferences,
@@ -153,7 +165,7 @@ impl App {
             &runtime.library.published.load(),
         );
         runtime.set_document_cache(open.path.as_deref());
-        let app = Self {
+        let mut app = Self {
             session: Session::new(open),
             runtime,
             run_state: RunState::default(),
@@ -161,13 +173,18 @@ impl App {
             theme: Theme::default(),
             host_handle: handle,
             preferences,
+            preferences_writable,
             confirm_discard: None,
             process_memory: ProcessMemory::new(),
             requests: Requests::default(),
         };
         // Onto the Ui before frame 1, so palantir's own widgets paint right.
         ui.set_theme(app.theme.palantir.clone());
-        // ui.debug_overlay.damage_rect = true;
+        // A remembered document that failed to load was forgotten; persist
+        // that, so the next launch does not fail on it again.
+        if app.preferences.document_path != remembered {
+            app.save_preferences();
+        }
         app
     }
 
@@ -461,6 +478,9 @@ impl App {
     /// bar — the one save path every caller routes through, so a broken
     /// preferences file can't fail silently.
     pub(crate) fn save_preferences(&mut self) {
+        if !self.preferences_writable {
+            return;
+        }
         if let Err(err) = self.preferences.save() {
             self.status.error(err);
         }

@@ -17,12 +17,6 @@ Groups are named after their shared root cause and ordered by severity, then ben
 
 # Medium — wrong in edge cases, duplicated truths, hot-path waste
 
-## Loaded documents and preferences are not held to the editor's invariants
-Severity: Medium — an untrusted file can hide the graph pane for good, and a corrupt preferences file is silently destroyed.
-
-- [ ] `darkroom/src/core/document/mod.rs` `Document::validate` — palantir's `DockState` deserialization requires only that some group holds the file's own `pinned` tab; `pinned` and `seed` come from the file. Darkroom never checks `layout.pinned() == TabRef::Graph`, that `TabRef::Graph` is present, or that the seed is `DOCK_SEED`. A layout pinning `Preferences` with no `Graph` loads, and the menu can reopen only `Preferences` (`gui/window/menu_bar.rs`).
-- [ ] `darkroom/src/core/io/preferences/mod.rs` `Preferences::load` — `deserialize(..).unwrap_or_default()` with no log or status; the next `save_preferences` (any document open/save, any preference change, every close) overwrites the unreadable file with defaults. Report the parse error (`App::new` has a `StatusLog`) and do not overwrite a file that failed to parse.
-
 ## Canvas per-frame work that scales with graph size
 Severity: Medium — worst-case frame cost grows with nodes, wires and library size while nothing changes.
 
@@ -32,11 +26,6 @@ Severity: Medium — worst-case frame cost grows with nodes, wires and library s
 
 
 # Low — duplication, dead surface, local simplifications
-
-## Public API, dependencies and derives with no production user
-Severity: Low — removable surface; checked with `rg` across the workspace.
-
-- [ ] `darkroom` — `core/document/open_document/replay_outcome.rs` `ReplayOutcome::took` (tests only, `allow(dead_code)`); `gui/state/run_state/mod.rs` `RunState::apply_worker_status` is `pub(crate)` with no outside caller; `OpenDocument::open_at_launch_with` is a production indirection (injected `save_preferences` closure) existing for a test.
 
 ## Placeholder values and derived fields stored beside their source
 Severity: Low — `Option`s that must be `Some`, sentinels, and caches of computable values.
@@ -68,7 +57,7 @@ Severity: Low.
 ## Docs that describe code that no longer exists
 Severity: Low — prose that misleads readers about behaviour.
 
-- [ ] `darkroom` core — `core/edit/validate.rs` says "saving validates only in debug builds" (it validates always); `Editor::frame`, `Editor::apply_edit`, `App::frame` are cited in `gui/app/mod.rs`, `gui/app/commands/mod.rs`, `gui/window/mod.rs`; `gui/app/mod.rs` mentions an "active theme name" and a `Load` variant (now `OpenPicked`); `gui/app/session/mod.rs` `menu_shortcut` claims Save-As ordering matters (palantir compares modifiers exactly); `PreviewStore::ingest_preview` self-references; `RunState::sync_previews` mentions "the old pinned push"; the `Document` doc says "two halves are public" over three public fields.
+- [ ] `darkroom` core — `core/edit/validate.rs` says "saving validates only in debug builds" (it validates always); `Editor::frame`, `Editor::apply_edit`, `App::frame` are cited in `gui/app/mod.rs`, `gui/app/commands/mod.rs`, `gui/window/mod.rs`; `gui/app/mod.rs` mentions a `Load` variant (now `OpenPicked`); `gui/app/session/mod.rs` `menu_shortcut` claims Save-As ordering matters (palantir compares modifiers exactly); `PreviewStore::ingest_preview` self-references; `RunState::sync_previews` mentions "the old pinned push"; the `Document` doc says "two halves are public" over three public fields.
 - [ ] `lumos` — `star_detection/mod.rs` mentions "adaptive thresholding" and `measure_star` "Laplacian SNR" (neither exists), an orphan doc line sits above `compute_star`, `LabelMap::from_pool` says "Four (default)" (default is `Eight`), `compute_annulus_background` documents arguments it does not take; `Stretch::auto_stf`'s "0.25 is PixInsight's STF default" sits beside `0.2`, and `auto_asinh` is "gentler than STF's 0.25" though both are 0.2; `math/statistics` docs describe two entry points where one exists; `magsac/mod.rs` `MagsacScorer::new` derives `outlier_loss` from a removed formula; `ScratchBuffers` claims `for_each_init` allocation (it leases from `JobScratchPool`); `CacheConfig` says "(median, sigma-clipped)"; `stacking/mod.rs` omits `frame_store` and `stack_product`; `load_raw_cfa`'s doc is attached to `raw_cfa_frame_info`; `markesteijn`/`urect` cite a "pinned toolchain" the workspace does not have.
 
 ## Style rules not applied

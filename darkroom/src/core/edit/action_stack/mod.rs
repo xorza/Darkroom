@@ -243,4 +243,17 @@ impl ActionStack {
 }
 
 #[cfg(test)]
+pub(crate) mod internals {
+    use crate::core::edit::action_stack::ActionStack;
+
+    impl ActionStack {
+        /// Whether [`ActionStack::undo`] would take an entry back: a packed one,
+        /// or the open gesture unless sealing it would drop it.
+        pub(crate) fn can_undo(&self) -> bool {
+            self.cursor > 0 || self.open.as_ref().is_some_and(|open| !open.step.is_noop())
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests;

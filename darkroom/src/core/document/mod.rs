@@ -447,11 +447,23 @@ impl Document {
     }
 
     /// Full structural validation for untrusted documents.
+    ///
+    /// The layout is held to what [`Self::new_layout`] builds: the graph tab
+    /// pinned, which palantir's own load check already makes present, and
+    /// this editor's dock seed.
     pub(crate) fn validate(&self) -> Result<(), DocumentValidationError> {
         self.graph.validate()?;
         self.main_view
             .validate(&self.graph)
             .map_err(|source| DocumentValidationError::MainView { source })?;
+
+        let tab = self.layout.pinned();
+        if tab != TabRef::Graph {
+            return Err(DocumentValidationError::PinnedTab { tab });
+        }
+        if self.layout.dock_id() != Self::new_layout().dock_id() {
+            return Err(DocumentValidationError::ForeignDock);
+        }
 
         for tab in self.layout.all_tabs() {
             if !self.holds_tab(tab) {
@@ -565,9 +577,27 @@ mod tests {
         );
     }
 
+    /// The sample validates, and a layout that pins another tab, or was
+    /// saved under another dock seed, does not — each would pass palantir's
+    /// own load check.
     #[test]
-    fn document_passes_validation() {
-        DocFixture::sample().doc.validate().unwrap();
+    fn validation_holds_the_layout_to_the_editors_dock() {
+        let mut doc = DocFixture::sample().doc;
+        doc.validate().unwrap();
+
+        doc.layout = DockState::new(DOCK_SEED, TabRef::Preferences);
+        assert!(matches!(
+            doc.validate(),
+            Err(DocumentValidationError::PinnedTab {
+                tab: TabRef::Preferences
+            })
+        ));
+
+        doc.layout = DockState::new("another.dock", TabRef::Graph);
+        assert!(matches!(
+            doc.validate(),
+            Err(DocumentValidationError::ForeignDock)
+        ));
     }
 
     /// Paint order is a total order over `(z, NodeId)`, so items sharing the
