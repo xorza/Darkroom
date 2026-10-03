@@ -10,7 +10,6 @@ use crate::graph::func::error::InvokeError;
 use crate::graph::func::lambda::Invocation;
 use crate::graph::func::{Func, FuncInput};
 use crate::library::{Library, TypeEntry};
-use crate::runtime::context::ContextStore;
 use crate::testing;
 use crate::testing::func_invoker::FuncInvoker;
 use crate::{
@@ -31,7 +30,6 @@ impl CustomValueCodec for StubCodec {
         &self,
         _value: &dyn CustomValue,
         _writer: &mut (dyn AsyncWrite + Unpin + Send),
-        _ctx: &mut ContextStore,
     ) -> Result<(), CodecError> {
         unreachable!()
     }
@@ -40,7 +38,6 @@ impl CustomValueCodec for StubCodec {
         &self,
         _reader: &mut (dyn AsyncRead + Unpin + Send),
         _byte_len: u64,
-        _ctx: &mut ContextStore,
     ) -> Result<Arc<dyn CustomValue>, CodecError> {
         unreachable!()
     }

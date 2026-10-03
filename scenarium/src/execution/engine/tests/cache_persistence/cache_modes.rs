@@ -348,16 +348,7 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
 
     use crate::data::codec::error::CodecError;
     use crate::library::TypeEntry;
-    use crate::runtime::context::{ContextStore, ContextType};
     use crate::{CustomValue, CustomValueCodec, TypeId};
-
-    /// Decode-side context resource: proves a codec can reach the runtime
-    /// store while reconstructing a value read from disk.
-    #[derive(Debug, Default)]
-    struct DecodeProbe {
-        decodes: usize,
-    }
-    const DECODE_PROBE: ContextType<DecodeProbe> = ContextType::new(DecodeProbe::default);
 
     const BLOB_TYPE: TypeId = TypeId::literal("50be7976-6d55-4567-8389-13107b1698ba");
 
@@ -380,8 +371,11 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
         }
     }
 
+    /// Counts its decodes, so the reopened run can show it was served from disk.
     #[derive(Debug)]
-    struct BlobCodec;
+    struct BlobCodec {
+        decodes: Calls,
+    }
     #[async_trait]
     impl CustomValueCodec for BlobCodec {
         fn version(&self) -> u32 {
@@ -392,7 +386,6 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
             &self,
             value: &dyn CustomValue,
             writer: &mut (dyn AsyncWrite + Unpin + Send),
-            _ctx: &mut ContextStore,
         ) -> result::Result<(), CodecError> {
             writer
                 .write_all(&value.as_any().downcast_ref::<Blob>().unwrap().0)
@@ -404,9 +397,8 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
             &self,
             reader: &mut (dyn AsyncRead + Unpin + Send),
             byte_len: u64,
-            ctx: &mut ContextStore,
         ) -> result::Result<Arc<dyn CustomValue>, CodecError> {
-            ctx.get(DECODE_PROBE).decodes += 1;
+            self.decodes.bump();
             let mut bytes = Vec::with_capacity(usize::try_from(byte_len)?);
             reader.read_to_end(&mut bytes).await?;
             Ok(Arc::new(Blob(bytes)))
@@ -416,13 +408,19 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
     // A pure, disk-persisted sink emitting a custom `Blob`. The type's codec
     // is registered only when `with_codec` — and the store takes its codecs
     // from this same library, so that one flag decides both.
+    let decodes = Calls::default();
     let build = |with_codec: bool, recompute: &Calls| {
         let recompute = recompute.clone();
         let mut g = TestGraph::new();
         g.library.register_type(
             BLOB_TYPE,
             if with_codec {
-                TypeEntry::custom_with_codec("Blob", Arc::new(BlobCodec))
+                TypeEntry::custom_with_codec(
+                    "Blob",
+                    Arc::new(BlobCodec {
+                        decodes: decodes.clone(),
+                    }),
+                )
             } else {
                 TypeEntry::custom("Blob")
             },
@@ -453,22 +451,12 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
     e.run_sinks().await;
     assert_eq!(recompute.count(), 1, "the cold run computes");
 
-    // Reopen with the codec: served from disk, and the hydration decode
-    // reaches the engine's own runtime context store.
+    // Reopen with the codec: served from disk, through one decode.
     let mut e = e.reopen();
     let run = e.run_sinks().await;
     assert_eq!(recompute.count(), 1, "codec present ⇒ served from disk");
     assert!(run.cached().contains(&"make_blob"));
-    assert_eq!(
-        e.engine
-            .executor
-            .ctx_manager
-            .contexts
-            .get(DECODE_PROBE)
-            .decodes,
-        1,
-        "the hydration decode reached the engine's runtime context store"
-    );
+    assert_eq!(decodes.count(), 1, "the hydration decoded the blob once");
 
     // Reopen WITHOUT the codec: the blob is present but undecodable, so it
     // is not flagged available — recompute, no panic.

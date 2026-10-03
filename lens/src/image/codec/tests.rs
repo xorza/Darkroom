@@ -1,5 +1,5 @@
 use imaginarium::{ALL_FORMATS, ColorFormat, Image as CpuImage, ImageDesc};
-use scenarium::{ContextStore, CustomValueCodec, Library};
+use scenarium::{CustomValueCodec, Library};
 
 use crate::image::codec::{HEADER_LEN, ImageCodec, image_type_entry};
 use crate::image::{IMAGE_TYPE_ID, Image};
@@ -18,22 +18,16 @@ fn sample() -> Sample {
     }
 }
 
-/// The codec no longer reads anything out of the store — image values are CPU-resident by
-/// construction — but the trait still hands one in, so tests need something to pass.
-fn cpu_context() -> ContextStore {
-    ContextStore::default()
-}
-
 async fn round_trip(image: CpuImage) -> CpuImage {
     let value = Image::from(image);
     let mut bytes = Vec::new();
     ImageCodec
-        .encode(&value, &mut bytes, &mut cpu_context())
+        .encode(&value, &mut bytes)
         .await
         .expect("a CPU-resident image encodes");
     let byte_len = bytes.len() as u64;
     let decoded = ImageCodec
-        .decode(&mut Cursor::new(bytes), byte_len, &mut cpu_context())
+        .decode(&mut Cursor::new(bytes), byte_len)
         .await
         .expect("image decodes");
     decoded
@@ -61,10 +55,7 @@ async fn every_format_round_trips_pixel_exact() {
     let sample = sample();
     let value = Image::from(CpuImage::new_with_data(sample.desc, sample.pixels.clone()).unwrap());
     let mut bytes = Vec::new();
-    ImageCodec
-        .encode(&value, &mut bytes, &mut cpu_context())
-        .await
-        .unwrap();
+    ImageCodec.encode(&value, &mut bytes).await.unwrap();
     assert_eq!(
         &bytes[..HEADER_LEN as usize],
         &[3, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0]
@@ -78,7 +69,7 @@ async fn decode_rejects_short_unknown_and_mismatched_payloads() {
     async fn error(bytes: Vec<u8>) -> String {
         let byte_len = bytes.len() as u64;
         ImageCodec
-            .decode(&mut Cursor::new(bytes), byte_len, &mut cpu_context())
+            .decode(&mut Cursor::new(bytes), byte_len)
             .await
             .map(|_| ())
             .expect_err("the payload is refused")
