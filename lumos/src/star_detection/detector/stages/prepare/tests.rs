@@ -108,72 +108,59 @@ fn the_median_filter_follows_interpolation() {
     }
 }
 
+/// Weights are `1/σ²` normalized: equal σ give a third each; σ 1/64, 1/64 and 1/16 give relative
+/// weights 1, 1 and 1/16, so 16/33, 16/33 and 1/33. A tiny σ does not overflow, since only the
+/// ratios enter. A channel with no noise takes the whole weight, shared among such channels.
 #[test]
-fn detection_weights_equal_noise() {
-    // Identical per-channel MAD → equal inverse-variance weights (≈ 1/3 each).
-    let dims = ImageDimensions::new((4, 4), 3);
-    let ch = channel_with_mad(0.5, 0.02);
-    let image = LinearImage::from_planar_channels(dims, vec![ch.clone(), ch.clone(), ch]);
-
-    let mut scratch = [
-        Buffer2::new_default(4, 4),
-        Buffer2::new_default(4, 4),
-        Buffer2::new_default(4, 4),
-    ];
-    let w = detection_channel_weights(&image, &mut scratch);
-
-    for &wi in &w {
-        assert!((wi - 1.0 / 3.0).abs() < 1e-4, "expected ~1/3, got {wi}");
-    }
-    assert!((w.iter().sum::<f32>() - 1.0).abs() < 1e-5);
-}
-
-#[test]
-fn detection_weights_downweight_noisy_channel() {
-    // R,G clean (MAD 0.02), B noisy (MAD 0.08). σ ∝ MAD, so w ∝ 1/MAD².
-    // w_R / w_B = (0.08 / 0.02)² = 16.
-    let dims = ImageDimensions::new((4, 4), 3);
-    let clean = channel_with_mad(0.5, 0.02);
-    let noisy = channel_with_mad(0.5, 0.08);
-    let image = LinearImage::from_planar_channels(dims, vec![clean.clone(), clean, noisy]);
-
-    let mut scratch = [
-        Buffer2::new_default(4, 4),
-        Buffer2::new_default(4, 4),
-        Buffer2::new_default(4, 4),
-    ];
-    let w = detection_channel_weights(&image, &mut scratch);
-
-    assert!((w[0] - w[1]).abs() < 1e-5, "R and G have equal noise");
-    let ratio = w[0] / w[2];
-    assert!(
-        (ratio - 16.0).abs() < 0.05,
-        "w_R/w_B should be ~16, got {ratio}"
+fn detection_weights_are_inverse_variances() {
+    assert_eq!(inverse_variance_weights([0.25; 3]), [1.0 / 3.0; 3]);
+    assert_eq!(
+        inverse_variance_weights([1.0 / 64.0, 1.0 / 64.0, 1.0 / 16.0]),
+        [16.0 / 33.0, 16.0 / 33.0, 1.0 / 33.0]
     );
-    assert!((w.iter().sum::<f32>() - 1.0).abs() < 1e-5);
+    assert_eq!(
+        inverse_variance_weights([1e-30, 1e-30, 4e-30]),
+        inverse_variance_weights([1.0, 1.0, 4.0])
+    );
+    assert_eq!(inverse_variance_weights([0.0, 0.25, 0.0]), [0.5, 0.0, 0.5]);
+    assert_eq!(inverse_variance_weights([0.0; 3]), [1.0 / 3.0; 3]);
 }
 
+/// The weights read the white noise, not the spread: a red channel carrying a strong gradient on
+/// top of the same noise as green and blue keeps its weight. Noise σ 0.01 in every channel of a
+/// 256 × 256 frame; red adds a ramp across the frame, whose MAD alone is 0.25. The MAD would put
+/// red's weight near 0; the estimates differ by their own error, a few percent, so each weight is
+/// within 0.03 of a third.
 #[test]
-fn detection_weights_all_flat_falls_back_to_mean() {
-    // Uniform channels have MAD 0 → degenerate; weights fall back to 1/3 each.
-    let dims = ImageDimensions::new((4, 4), 3);
-    let flat = vec![0.5f32; 16];
-    let image = LinearImage::from_planar_channels(dims, vec![flat.clone(), flat.clone(), flat]);
-
-    let mut scratch = [
-        Buffer2::new_default(4, 4),
-        Buffer2::new_default(4, 4),
-        Buffer2::new_default(4, 4),
-    ];
-    let w = detection_channel_weights(&image, &mut scratch);
-
-    assert_eq!(w, [1.0 / 3.0; 3]);
+fn detection_weights_ignore_signal() {
+    let size = 256;
+    let mut rng = TestRng::new(7);
+    let mut channel = |ramp: bool| -> Vec<f32> {
+        (0..size * size)
+            .map(|index| {
+                let gradient = if ramp {
+                    (index % size) as f32 / size as f32
+                } else {
+                    0.0
+                };
+                0.5 + gradient + 0.01 * rng.next_gaussian_f32()
+            })
+            .collect()
+    };
+    let image = LinearImage::from_planar_channels(
+        ImageDimensions::new((size, size), 3),
+        vec![channel(true), channel(false), channel(false)],
+    );
+    let weights = inverse_variance_weights(channel_noise(&image));
+    for weight in weights {
+        assert!((weight - 1.0 / 3.0).abs() < 0.03, "{weights:?}");
+    }
 }
 
 #[test]
 fn prepare_rgb_equal_noise_is_mean() {
-    // Distinct per-channel levels but identical spread → equal weights, so the
-    // detection plane is the plain mean of the three channels.
+    // Distinct per-channel levels; a 4 × 4 frame is too small for the noise estimate, which reads
+    // 0 in every channel, so the weights are equal and the detection plane is the plain mean.
     let dims = ImageDimensions::new((4, 4), 3);
     let r = channel_with_mad(0.30, 0.02);
     let g = channel_with_mad(0.50, 0.02);
@@ -194,9 +181,8 @@ fn prepare_rgb_equal_noise_is_mean() {
 
 #[test]
 fn prepare_rgb_red_star_survives() {
-    // A star bright only in R must remain prominent in the detection plane.
-    // With equal-noise channels the weights are ~1/3, so the star peak lands at
-    // ~1/3 of its R amplitude — far above Rec.709's 0.21× crush of red.
+    // A star bright only in R must remain prominent in the detection plane. With equal weights the
+    // star peak lands at 1/3 of its R amplitude — far above Rec.709's 0.21× crush of red.
     let dims = ImageDimensions::new((4, 4), 3);
     let mut r = channel_with_mad(0.10, 0.01);
     r[5] = 0.90; // bright red star, off the symmetric background
@@ -207,9 +193,9 @@ fn prepare_rgb_red_star_survives() {
     let mut pool = DetectionResources::new(Size2us::new(4, 4));
     let out = prepare(&image, &mut pool);
 
-    // Every channel's MAD is 0.01 — R's spread is 8 zeros and 7 of 0.02 about its median 0.11,
-    // the star's 0.79 above the middle — so the weights are equal and the star pixel is the mean
-    // (0.90 + 0.09 + 0.09)/3 = 0.36, to the rounding of three products and two sums (4ε).
+    // A 4 × 4 frame is too small for the noise estimate, which reads 0 in every channel, so the
+    // weights are equal and the star pixel is the mean (0.90 + 0.09 + 0.09)/3 = 0.36, to the
+    // rounding of three products and two sums (4ε).
     assert!(
         (out[5] - 0.36).abs() <= 4.0 * f32::EPSILON * 0.36,
         "red star pixel {}",

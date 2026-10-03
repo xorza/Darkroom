@@ -32,9 +32,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
   - Solving the Marquardt-scaled system (unit diagonal) makes the threshold scale-free. `[P]`
 - [ ] `2.6` **Amplitude seed floored at 0.01 normalized** — `star_detection/centroid/stamp.rs:228-237`
   - 0.01 is 655 ADU at 16 bit. The fit costs about one extra LM iteration. `[C]`
-- [ ] `2.7` **Detection channel weights** — `star_detection/detector/stages/prepare/mod.rs:75`
-  - `sigma > f32::EPSILON` sets the weight of every channel to 0, then falls back to equal weights. `[C]`
-
 ## 3. The default registration prior rejects real sessions
 
 - [ ] `3.1` **Default `max_rotation` = 10° drops every frame after a meridian flip** — `registration/ransac/config.rs:35`, `registration/ransac/mod.rs:113-127`, `pipeline/config.rs:24`
@@ -61,9 +58,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 
 ## 6. Noise is estimated from whole-frame spread, which includes signal
 
-- [ ] `6.4` **Detection RGB weights use whole-frame MAD** — `star_detection/detector/stages/prepare/mod.rs:66-91`
-  - A red nebula down-weights R. Each frame copies 3 planes and runs 2 quickselects per plane.
-  - Use MAD of first differences ÷ √2 on a strided sample. `[C]` mechanism.
 - [ ] `6.5` **Cosmic-ray empirical noise is one whole-frame (or whole-colour) median/MAD** — `calibration_masters/cosmic_ray/mono.rs:232-238`, `calibration_masters/cosmic_ray/xtrans.rs:244-271`
   - Gradients make N larger, so faint hits are missed. astroscrappy uses a per-pixel `sqrt(m5 + rn² + bkg)`. `[P]`
 - [ ] `6.6` **The parametric cosmic-ray noise model drops the subtracted dark/sky level** — `calibration_masters/cosmic_ray/mono.rs:281-295`

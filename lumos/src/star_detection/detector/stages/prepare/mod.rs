@@ -3,7 +3,9 @@
 use rayon::prelude::*;
 
 use crate::io::image::linear::LinearImage;
-use crate::math::statistics::MedianMad;
+use crate::io::image::pixel_flags::Flags;
+use crate::math::noise::mrs_noise::MrsNoise;
+use crate::math::size2us::Size2us;
 use crate::star_detection::median_filter::median_filter_3x3;
 use crate::star_detection::resources::DetectionResources;
 use imaginarium::Buffer2;
@@ -14,7 +16,7 @@ use std::mem;
 ///
 /// Steps:
 ///   1. Reduce to one plane: copy for grayscale, or an inverse-variance
-///      (noise-weighted) channel combination for RGB (see `detection_channel_weights`).
+///      (noise-weighted) channel combination for RGB (see `inverse_variance_weights`).
 ///   2. 3×3 median filter to suppress demosaic interpolation artifacts (if interpolated).
 ///
 /// The returned buffer is acquired from `pool`; the caller owns it.
@@ -26,12 +28,8 @@ pub(crate) fn prepare(image: &LinearImage, pool: &mut DetectionResources) -> Buf
             .pixels_mut()
             .copy_from_slice(image.channel(0).pixels());
     } else {
-        let mut scratch = [pool.acquire_f32(), pool.acquire_f32(), pool.acquire_f32()];
-        let weights = detection_channel_weights(image, &mut scratch);
+        let weights = inverse_variance_weights(channel_noise(image));
         combine_channels(image, weights, &mut pixels);
-        for buf in scratch {
-            pool.release_f32(buf);
-        }
     }
 
     // Only interpolated frames have the artifacts to suppress; a monochrome sensor's plane is
@@ -46,48 +44,41 @@ pub(crate) fn prepare(image: &LinearImage, pool: &mut DetectionResources) -> Buf
     pixels
 }
 
-/// Inverse-variance ("noise") weights for collapsing RGB into the detection plane.
+/// Each channel's white noise, by the multiresolution estimator over the pixels no flag names: the
+/// noise stacking weighs by, and not the MAD, which a red nebula inflates in red.
+fn channel_noise(image: &LinearImage) -> [f32; 3] {
+    let flags = image.flags.as_ref();
+    let excluded = |index: usize| flags.is_some_and(|flags| flags.at(index) != Flags::default());
+    let size = Size2us::new(image.width(), image.height());
+    [0, 1, 2].map(|channel| MrsNoise::estimate(image.channel(channel).pixels(), size, excluded))
+}
+
+/// Inverse-variance weights for collapsing RGB into the detection plane, summing to 1.
 ///
-/// Each channel is weighted by `1/σ²` — σ from the per-channel MAD, the same
-/// noise convention stacking uses for `Weighting::Noise` — and the weights are
-/// normalized to sum to 1. This is the optimal *linear* combiner for an unknown
-/// (flat) source SED, i.e. the linear analogue of the SExtractor χ² detection
-/// image. It is deliberately kept linear rather than a χ² sum-of-squares because
-/// flux, centroid, FWHM, and SNR are all measured on this plane downstream, and
-/// squaring would distort the PSF and break flux linearity.
+/// This is the optimal *linear* combiner for an unknown (flat) source SED, the linear analogue of
+/// the SExtractor χ² detection image. It is kept linear rather than a χ² sum of squares because
+/// flux, centroid, FWHM and SNR are measured on this plane downstream, and squaring would distort
+/// the PSF and break flux linearity. Unlike Rec.709 luminance, it never zeroes a band, so red- and
+/// blue-dominant stars stay detectable.
 ///
-/// Unlike Rec.709 luminance (a perceptual weighting that discards ~79% of red and
-/// ~93% of blue signal), this never zeroes a band — it only down-weights noisier
-/// ones — so red- and blue-dominant stars stay detectable.
-///
-/// The three per-channel median+MAD passes are independent and run concurrently,
-/// each reusing one caller-supplied scratch buffer (so there is no per-call
-/// allocation). Each scratch buffer must be one channel long; they are clobbered.
-fn detection_channel_weights(image: &LinearImage, scratch: &mut [Buffer2<f32>; 3]) -> [f32; 3] {
-    let mut inv_var = [0.0f32; 3];
-    inv_var
-        .as_mut_slice()
-        .par_iter_mut()
-        .zip(scratch.as_mut_slice().par_iter_mut())
-        .enumerate()
-        .for_each(|(c, (iv, buf))| {
-            let dst = buf.pixels_mut();
-            dst.copy_from_slice(image.channel(c).pixels());
-            let sigma = MedianMad::of_mut(dst).sigma();
-            *iv = if sigma > f32::EPSILON {
-                1.0 / (sigma * sigma)
+/// Each weight is `(σ_min/σ)²` before the sum, which needs no `1/σ²` that a tiny σ could overflow.
+/// A channel with no measured noise is better than any with noise, so the channels at σ = 0 share
+/// the whole weight: the limit of `1/σ²`. Only synthetic data has one.
+fn inverse_variance_weights(sigmas: [f32; 3]) -> [f32; 3] {
+    let quiet = sigmas.iter().filter(|&&sigma| sigma == 0.0).count();
+    if quiet > 0 {
+        return sigmas.map(|sigma| {
+            if sigma == 0.0 {
+                1.0 / quiet as f32
             } else {
                 0.0
-            };
+            }
         });
-
-    let sum: f32 = inv_var.iter().sum();
-    if sum > f32::EPSILON {
-        [inv_var[0] / sum, inv_var[1] / sum, inv_var[2] / sum]
-    } else {
-        // Every channel is flat (degenerate / synthetic) — fall back to the mean.
-        [1.0 / 3.0; 3]
     }
+    let least = sigmas.into_iter().fold(f32::INFINITY, f32::min);
+    let relative = sigmas.map(|sigma| (least / sigma).powi(2));
+    let sum: f32 = relative.iter().sum();
+    relative.map(|weight| weight / sum)
 }
 
 /// Write `Σ wₖ·channelₖ` into `output` (RGB only).
