@@ -134,7 +134,7 @@ impl ConnectionUI {
         // Both modes span frames, and undo runs before this prepass, so the
         // node the wire grew out of can be deleted under it. Not re-latching is how the gesture drops — a commit
         // against a dead producer is refused at the edit boundary anyway,
-        // silently, and `port_data_type` would meanwhile report the start
+        // silently, and `GraphCtx::port_type` would meanwhile report the start
         // as untyped (which `scan_snap_target` reads as "compatible with
         // anything").
         if !graph_ctx.contains(state.drag.node()) {
@@ -276,8 +276,8 @@ impl ConnectionUI {
         // Tint the in-flight wire by the dragged port's data type, so the
         // preview already reads as the type being connected.
         let theme = graph_ctx.theme();
-        let drag_ty = port_data_type(graph_ctx, start_port).unwrap_or_default();
-        let color = port_color(theme, &drag_ty, start_port.kind, false);
+        let drag_ty = graph_ctx.port_type(start_port).unwrap_or(&DataType::Any);
+        let color = port_color(theme, drag_ty, start_port.kind, false);
         Wire::data(p0, p3).add(ui, theme.stroke_width, color);
     }
 }
@@ -314,14 +314,14 @@ pub(crate) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
 /// unbound (drift tolerance) — so it wears the same warning the run will report
 /// on the port.
 fn data_tint(theme: &Theme, graph_ctx: GraphCtx<'_>, src: PortRef, tgt: PortRef) -> WireTint {
-    let src_ty = port_data_type(graph_ctx, src).unwrap_or_default();
-    let tgt_ty = port_data_type(graph_ctx, tgt).unwrap_or_default();
-    if !tgt_ty.compatible_with(&src_ty) {
+    let src_ty = graph_ctx.port_type(src).unwrap_or(&DataType::Any);
+    let tgt_ty = graph_ctx.port_type(tgt).unwrap_or(&DataType::Any);
+    if !tgt_ty.compatible_with(src_ty) {
         return WireTint::flat(theme.status.warning);
     }
     WireTint::new(
-        port_color(theme, &src_ty, PortKind::Output, false),
-        port_color(theme, &tgt_ty, PortKind::Input, false),
+        port_color(theme, src_ty, PortKind::Output, false),
+        port_color(theme, tgt_ty, PortKind::Input, false),
     )
 }
 
@@ -373,11 +373,8 @@ fn scan_snap_target(
 /// Whether a wire dragged from `start` may land on `port` — the two
 /// rejections that outlive the geometric hit test in [`scan_snap_target`].
 fn accepts_wire(graph_ctx: GraphCtx<'_>, start: PortRef, port: PortRef) -> bool {
-    let compatible = match (
-        port_data_type(graph_ctx, start),
-        port_data_type(graph_ctx, port),
-    ) {
-        (Some(a), Some(b)) => a.compatible_with(&b),
+    let compatible = match (graph_ctx.port_type(start), graph_ctx.port_type(port)) {
+        (Some(a), Some(b)) => a.compatible_with(b),
         // Missing type info (port not in the scene this frame) — don't
         // block; let the intent layer decide.
         _ => true,
@@ -437,17 +434,6 @@ fn dropped_on_empty_canvas(ui: &mut Ui, geometry: &CanvasGeometry) -> bool {
         .rect
         .is_some_and(|r| r.contains(pointer));
     over_canvas && !geometry.over_any_node(pointer)
-}
-
-/// The declared [`DataType`] of `port` in the current scene, or `None`
-/// if the port isn't present (e.g. mid-rebuild).
-fn port_data_type(graph_ctx: GraphCtx<'_>, port: PortRef) -> Option<DataType> {
-    let node = graph_ctx.node(port.node_id)?;
-    let ty = match port.kind {
-        PortKind::Input => node.input(port.port_idx)?.ty().clone(),
-        PortKind::Output => node.output(port.port_idx)?.ty().clone(),
-    };
-    Some(ty)
 }
 
 /// Convert a snapped `(start, end)` `PortRef` pair (one `Input`, one

@@ -81,7 +81,7 @@ pub(crate) enum ExecStatus {
 
 /// Everything the editor knows about one node from the last run.
 #[derive(Default, Debug)]
-struct NodeRunState {
+pub(crate) struct NodeRunState {
     status: ExecStatus,
     logs: Vec<NodeLog>,
     /// Human-readable message for this run's failure. `None` unless the node
@@ -95,6 +95,20 @@ struct NodeRunState {
     /// Input ports the last run could not satisfy, by index on this node — the run's
     /// own verdict, so a port bound to a disabled or missing producer counts too.
     missing_inputs: Vec<usize>,
+}
+
+impl NodeRunState {
+    pub(crate) fn status(&self) -> ExecStatus {
+        self.status
+    }
+
+    pub(crate) fn ram(&self) -> RamUsage {
+        self.ram
+    }
+
+    pub(crate) fn missing_inputs(&self) -> &[usize] {
+        &self.missing_inputs
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -248,8 +262,10 @@ impl RunState {
         }
     }
 
-    pub(crate) fn status(&self, id: NodeId) -> ExecStatus {
-        self.nodes.get(&id).map(|n| n.status).unwrap_or_default()
+    /// Everything the last run said about `id`, or `None` when it said
+    /// nothing — one lookup for a reader that asks several things.
+    pub(crate) fn node(&self, id: NodeId) -> Option<&NodeRunState> {
+        self.nodes.get(&id)
     }
 
     pub(crate) fn logs(&self, id: NodeId) -> &[NodeLog] {
@@ -259,21 +275,6 @@ impl RunState {
     /// This run's failure message for a node. `None` unless it errored.
     pub(crate) fn error(&self, id: NodeId) -> Option<&str> {
         self.nodes.get(&id)?.error.as_deref()
-    }
-
-    /// RAM this node's cached output currently holds (zero if it holds nothing).
-    /// Read into the scene each rebuild to drive the node body's memory readout.
-    pub(crate) fn ram(&self, id: NodeId) -> RamUsage {
-        self.nodes.get(&id).map(|n| n.ram).unwrap_or_default()
-    }
-
-    /// The input ports the last run reported unsatisfied on this node. Read into the
-    /// scene each rebuild so only the ports that actually went unfed glow, rather than
-    /// every required one on a node the run flagged.
-    pub(crate) fn missing_inputs(&self, id: NodeId) -> &[usize] {
-        self.nodes
-            .get(&id)
-            .map_or(&[], |n| n.missing_inputs.as_slice())
     }
 
     /// Live progress: assign the node's status as it arrives, overwriting
@@ -439,6 +440,23 @@ impl RunState {
     pub(crate) fn clear(&mut self) {
         self.nodes.clear();
         self.previews.entries.clear();
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use scenarium::{NodeId, RamUsage};
+
+    use crate::gui::state::run_state::{ExecStatus, NodeRunState, RunState};
+
+    impl RunState {
+        pub(crate) fn status(&self, id: NodeId) -> ExecStatus {
+            self.node(id).map(NodeRunState::status).unwrap_or_default()
+        }
+
+        pub(crate) fn ram(&self, id: NodeId) -> RamUsage {
+            self.node(id).map(NodeRunState::ram).unwrap_or_default()
+        }
     }
 }
 
