@@ -1,13 +1,15 @@
 //! Calibration master frame creation and management.
 
 pub(crate) mod calibration_component;
+pub(crate) mod calibration_outcome;
 pub(crate) mod calibration_set;
 pub(crate) mod cosmic_ray;
 pub(crate) mod defect_map;
 pub(crate) mod error;
 mod fits;
+pub(crate) mod master_dark;
 pub(crate) mod master_role;
-mod prepared_flat;
+pub(crate) mod prepared_flat;
 
 use std::io;
 use std::path::Path;
@@ -17,19 +19,23 @@ use common::CancelToken;
 use crate::calibration_masters::defect_map::DefectMap;
 use crate::calibration_masters::error::CalibrationError;
 use crate::combine::cache::FrameCache;
+use crate::combine::cache::loader::Prepare;
 use crate::combine::config::StackConfig;
 use crate::combine::error::Error;
 use crate::combine::stack::combine_cached;
 use crate::io::image::cfa::CfaImage;
-use crate::io::image::sample_domain::DomainMap;
+use crate::io::image::sample_domain::{DomainMap, Pedestal};
 use crate::math::size2us::Size2us;
 use crate::memory::run_memory::RunMemory;
 use crate::progress::ProgressCallback;
 use crate::stack_product::quality_planes::QualityPlanes;
 
 use crate::calibration_masters::calibration_component::CalibrationComponent;
+use crate::calibration_masters::calibration_outcome::CalibrationOutcome;
 use crate::calibration_masters::calibration_set::CalibrationSet;
+use crate::calibration_masters::master_dark::{DarkBias, MasterDark};
 use crate::calibration_masters::master_role::MasterRole;
+use crate::calibration_masters::prepared_flat::PreparedFlat;
 /// Default sigma threshold for defect detection.
 ///
 /// A pixel is flagged as defective if it exceeds the per-color residual median by more than
@@ -48,19 +54,38 @@ pub struct DefectSummary {
     pub percentage: f32,
 }
 
-/// Master calibration frames, prepared flat divisor, and derived defect map.
+/// The calibration a light receives: what to subtract, the flat to divide by, and the defects to
+/// repair. Only what [`Self::calibrate`] reads is kept; the flat-dark is spent on the flat.
 ///
-/// Construction subtracts the flat's bias/flat-dark, detects cold pixels from that unfloored
-/// response, then consumes it into a normalized, clamped divisor. Calibration operates on raw CFA
-/// data before demosaicing so defect correction can use same-color neighbors.
+/// Construction removes the flat's additive part if its stack did not, detects cold pixels from
+/// that unfloored response, then consumes it into a normalized, floored divisor. With a bias beside
+/// the dark, the dark keeps its thermal signal alone, which scales with exposure. Calibration
+/// operates on raw CFA data before demosaicing so defect correction can use same-color neighbors.
 #[derive(Debug, Default)]
 pub struct CalibrationMasters {
-    masters: CalibrationSet<Option<CfaImage>>,
+    bias: Option<CfaImage>,
+    dark: Option<MasterDark>,
+    flat: Option<PreparedFlat>,
     defect_map: Option<DefectMap>,
 }
 
+/// Exposures within this share of each other count as one: capture software times frames to a few
+/// milliseconds, far inside it, and a dark that matters, such as 120 s on 300 s lights, is far
+/// outside.
+const EXPOSURE_TOLERANCE: f64 = 0.01;
+
+/// Sensor temperatures within this many degrees count as one: a regulated cooler holds its set
+/// point to a few tenths of a degree, and dark current changes by about 12% per degree.
+const TEMPERATURE_TOLERANCE: f64 = 1.0;
+
 /// Stack one calibration role's raw CFA frames into a single master, under `config` — the
 /// role's preset is [`MasterRole::stack_config`]. Returns `None` if `paths` is empty.
+///
+/// `subtract`, when given, is taken from every frame before its statistics and the combine, and the
+/// master is marked calibrated: flats take their flat-dark or bias this way, so the multiplicative
+/// normalization scales each flat's own signal. Scaling a flat that still holds its offset `b` and
+/// subtracting the offset from the master afterwards leaves `b·(mean gain − 1)`, a vignetting
+/// residual of a few percent, as PixInsight and Siril avoid by calibrating each flat first.
 ///
 /// The preset carries its own small-frame fallback (`StackConfig::small_n`): the combine engine
 /// downgrades to the median below the preset's `min_frames` (e.g. `flat()` below 8), so no
@@ -69,6 +94,7 @@ pub struct CalibrationMasters {
 pub fn stack_cfa_master(
     paths: &[impl AsRef<Path> + Sync],
     config: StackConfig,
+    subtract: Option<&CfaImage>,
     progress: ProgressCallback,
     cancel: CancelToken,
 ) -> Result<Option<CfaImage>, Error> {
@@ -86,19 +112,57 @@ pub fn stack_cfa_master(
     };
     // `cancel` rides on the cache from construction, so the RAW-decode load loop
     // polls it too (not just the combine).
+    let prepare = |index: usize, frame: &mut CfaImage| -> Result<(), Error> {
+        let Some(master) = subtract else {
+            return Ok(());
+        };
+        if master.cfa_type != frame.cfa_type || master.size() != frame.size() {
+            return Err(Error::SubtractorShape {
+                index,
+                frame: frame.size(),
+                subtractor: master.size(),
+            });
+        }
+        let map = match (&frame.metadata.domain, &master.metadata.domain) {
+            (Some(frame_domain), Some(master_domain)) => master_domain
+                .conversion_to(frame_domain)
+                .ok_or_else(|| Error::SubtractorDomain {
+                    index,
+                    frame: Box::new(frame_domain.clone()),
+                    subtractor: Box::new(master_domain.clone()),
+                })?,
+            _ => DomainMap::IDENTITY,
+        };
+        frame.subtract(master, map);
+        frame.metadata.calibrated = true;
+        Ok(())
+    };
+    let prepare = subtract.map(|_| &prepare as &Prepare<'_, CfaImage>);
     let product = combine_cached(&config, paths.len(), "cfa paths", || {
-        FrameCache::from_cfa_paths(paths, &config, memory, progress, cancel)
+        FrameCache::from_cfa_paths(paths, &config, memory, prepare, progress, cancel)
     })?;
 
     Ok(Some(product.into_cfa_master()))
 }
 
 impl CalibrationMasters {
+    /// The present masters, with their roles, in calibration order.
+    fn masters(&self) -> impl Iterator<Item = (MasterRole, &CfaImage)> {
+        [
+            (MasterRole::Dark, self.dark.as_ref().map(|dark| &dark.image)),
+            (
+                MasterRole::Flat,
+                self.flat.as_ref().map(PreparedFlat::divisor),
+            ),
+            (MasterRole::Bias, self.bias.as_ref()),
+        ]
+        .into_iter()
+        .filter_map(|(role, master)| master.map(|master| (role, master)))
+    }
+
     /// Components present in this bundle, in calibration order.
     pub fn components(&self) -> impl Iterator<Item = CalibrationComponent> {
-        self.masters
-            .iter()
-            .filter(|(_, master)| master.is_some())
+        self.masters()
             .map(|(role, _)| CalibrationComponent::Master(role))
             .chain(
                 self.defect_map
@@ -116,22 +180,26 @@ impl CalibrationMasters {
         })
     }
 
+    /// Photosites the flat's floor raised: every light is corrected by less than its vignetting
+    /// asks there.
+    pub fn floored_flat_pixels(&self) -> usize {
+        self.flat.as_ref().map_or(0, PreparedFlat::floored)
+    }
+
     /// Resident RAM held by this bundle: the present master frames' pixel bytes
     /// plus the defect map's index lists.
     pub fn ram_bytes(&self) -> usize {
         let frame_bytes = self
-            .masters
-            .iter()
-            .filter_map(|(_, master)| master.as_ref())
-            .map(CfaImage::ram_bytes)
+            .masters()
+            .map(|(_, master)| master.ram_bytes())
             .sum::<usize>();
         frame_bytes + self.defect_map.as_ref().map_or(0, DefectMap::ram_bytes)
     }
 
     /// Save this coherent master bundle as a versioned, checksummed multi-extension FITS file.
     ///
-    /// The flat is already bias/flat-dark subtracted, per-color normalized, and clamped in this
-    /// representation. Loading the bundle does not repeat flat preparation or defect detection.
+    /// The flat is stored prepared and the dark with its bias state. Loading the bundle does not
+    /// repeat flat preparation or defect detection.
     pub fn save(&self, path: &Path) -> io::Result<()> {
         fits::save(path, self)
     }
@@ -143,17 +211,17 @@ impl CalibrationMasters {
 
     /// Create `CalibrationMasters` from pre-built CFA images.
     ///
-    /// Generates defect map from the CFA dark if provided.
-    /// `images.flat_dark` is a dark frame taken at the flat's exposure time — used
-    /// instead of bias for flat normalization when provided.
-    /// `sigma_threshold` controls defect detection sensitivity (see
-    /// [`DEFAULT_SIGMA_THRESHOLD`]).
+    /// The flat's additive part is removed here only when its stack did not remove it per frame
+    /// ([`stack_cfa_master`] with a subtractor marks it calibrated): by the flat-dark, else the
+    /// bias. A flat that still holds an offset with neither is refused. Cold pixels are detected on
+    /// that flat, hot pixels on the dark; with a bias, the dark keeps its thermal signal alone.
+    /// `sigma_threshold` controls defect detection sensitivity (see [`DEFAULT_SIGMA_THRESHOLD`]).
     ///
     /// # Errors
     ///
-    /// A [`CalibrationError`] when the masters do not describe one sensor or the flat has no
-    /// positive mean to normalize by, and [`CalibrationError::Cancelled`] if cancellation is
-    /// requested before defect detection completes.
+    /// A [`CalibrationError`] when the masters do not describe one sensor, the flat has no positive
+    /// mean to normalize by or holds an offset nothing removes, and [`CalibrationError::Cancelled`]
+    /// if cancellation is requested before defect detection completes.
     pub fn from_images(
         images: CalibrationSet<Option<CfaImage>>,
         sigma_threshold: f32,
@@ -172,18 +240,29 @@ impl CalibrationMasters {
             bias,
             flat_dark,
         } = images;
-        let flat_subtractor = match (&flat, &flat_dark, &bias) {
-            (Some(flat), Some(subtractor), _) => Some((
-                subtractor,
-                master_scale(flat, subtractor, MasterRole::FlatDark)?,
-            )),
-            (Some(flat), None, Some(subtractor)) => Some((
-                subtractor,
-                master_scale(flat, subtractor, MasterRole::Bias)?,
-            )),
-            _ => None,
-        };
-        let subtracted_flat = flat.map(|flat| prepared_flat::subtract(flat, flat_subtractor));
+        let subtracted_flat = flat
+            .map(|mut flat| {
+                if flat.metadata.calibrated {
+                    return Ok(flat);
+                }
+                let subtractor = match (&flat_dark, &bias) {
+                    (Some(subtractor), _) => Some((subtractor, MasterRole::FlatDark)),
+                    (None, Some(subtractor)) => Some((subtractor, MasterRole::Bias)),
+                    (None, None) => None,
+                };
+                match subtractor {
+                    Some((subtractor, role)) => {
+                        let map = master_scale(&flat, subtractor, role)?;
+                        flat.subtract(subtractor, map);
+                    }
+                    None if holds_offset(&flat) => {
+                        return Err(CalibrationError::FlatWithoutSubtractor);
+                    }
+                    None => {}
+                }
+                Ok(flat)
+            })
+            .transpose()?;
 
         // Hot pixels from the dark, cold/dead pixels from the subtracted flat — None if neither
         // exists. Detection must precede normalization's near-zero floor.
@@ -201,18 +280,31 @@ impl CalibrationMasters {
             None
         };
 
-        let flat = subtracted_flat.map(prepared_flat::normalize).transpose()?;
+        let dark = dark
+            .map(|mut dark| -> Result<MasterDark, CalibrationError> {
+                let Some(bias) = &bias else {
+                    return Ok(MasterDark {
+                        image: dark,
+                        bias: DarkBias::Included,
+                    });
+                };
+                let map = master_scale(&dark, bias, MasterRole::Bias)?;
+                dark.subtract(bias, map);
+                Ok(MasterDark {
+                    image: dark,
+                    bias: DarkBias::Removed,
+                })
+            })
+            .transpose()?;
+        let flat = subtracted_flat.map(PreparedFlat::new).transpose()?;
         if cancel.is_cancelled() {
             return Err(CalibrationError::Cancelled);
         }
 
         Ok(Self {
-            masters: CalibrationSet {
-                dark,
-                flat,
-                bias,
-                flat_dark,
-            },
+            bias,
+            dark,
+            flat,
             defect_map,
         })
     }
@@ -224,13 +316,31 @@ impl CalibrationMasters {
     /// read as independent HDUs. Between the two, no `CalibrationMasters` can exist spanning two
     /// sensors, so `save` cannot write a bundle `load` would reject.
     fn validate_dimensions(&self) -> Result<(), CalibrationError> {
-        let expected = self.masters.common_dimensions()?;
+        let mut masters = self.masters();
+        let Some((_, first)) = masters.next() else {
+            return Ok(());
+        };
+        let expected = first.size();
+        for (role, master) in masters {
+            if master.cfa_type != first.cfa_type {
+                return Err(CalibrationError::CfaPatternMismatch {
+                    component: role,
+                    expected: first.cfa_type,
+                    master: master.cfa_type,
+                });
+            }
+            if master.size() != expected {
+                return Err(CalibrationError::DimensionMismatch {
+                    component: role.into(),
+                    expected,
+                    master: master.size(),
+                });
+            }
+        }
         // The map's dimensions come from whichever master it was detected on, so within a bundle
         // built here it always agrees; a file can disagree.
-        if let (Some(expected), Some(defects)) = (
-            expected,
-            self.defect_map.as_ref().map(DefectMap::dimensions),
-        ) && expected != defects
+        if let Some(defects) = self.defect_map.as_ref().map(DefectMap::dimensions)
+            && defects != expected
         {
             return Err(CalibrationError::DimensionMismatch {
                 component: CalibrationComponent::Defects,
@@ -244,47 +354,104 @@ impl CalibrationMasters {
     /// Calibrate a raw CFA light frame in place.
     ///
     /// Applies calibration on raw (un-demosaiced) data:
-    /// 1. Dark subtraction (or bias if no dark)
+    /// 1. The bias and the dark, the dark matched to the light: exposure within 1%, temperature
+    ///    within 1 °C. A bias-removed dark of another exposure is scaled by the light's exposure
+    ///    over its own; one that holds the bias is refused. A fact one side does not declare is
+    ///    not compared, and the outcome says so.
     /// 2. Flat division with normalization
     /// 3. CFA-aware defect pixel correction
     ///
     /// # Errors
     ///
-    /// Returns [`CalibrationError`] when the light or any stored master is missing CFA metadata,
-    /// or when a master's Mono, Bayer, or X-Trans pattern differs from the light. Validation
-    /// completes before the light is mutated.
-    pub fn calibrate(&self, image: &mut CfaImage) -> Result<(), CalibrationError> {
+    /// Returns [`CalibrationError`] when the light or any stored master is missing CFA metadata, a
+    /// master's pattern differs from the light, the dark does not match it, or a flat would divide
+    /// a light that holds an offset nothing subtracts. Validation completes before the light is
+    /// mutated.
+    pub fn calibrate(&self, image: &mut CfaImage) -> Result<CalibrationOutcome, CalibrationError> {
         // Double application would subtract the dark and divide the flat twice. The flag comes
         // from the file (`LUMCAL`), so this is input to refuse, not an invariant to assert.
         if image.metadata.calibrated {
             return Err(CalibrationError::AlreadyCalibrated);
         }
         self.validate_against_light(image)?;
-        // 1. Dark subtraction (or bias), in the light's own domain.
-        let subtracted = match (&self.masters.dark, &self.masters.bias) {
-            (Some(dark), _) => Some((dark, MasterRole::Dark)),
-            (None, Some(bias)) => Some((bias, MasterRole::Bias)),
-            (None, None) => None,
-        };
-        let subtracted = subtracted
-            .map(|(master, role)| master_scale(image, master, role).map(|scale| (master, scale)))
+        let mut outcome = CalibrationOutcome::default();
+        let dark = self
+            .dark
+            .as_ref()
+            .map(|dark| -> Result<_, CalibrationError> {
+                let scale = self.dark_scale(dark, image, &mut outcome)?;
+                Ok((
+                    &dark.image,
+                    master_scale(image, &dark.image, MasterRole::Dark)?,
+                    scale,
+                ))
+            })
             .transpose()?;
+        // The bias is subtracted on its own unless the dark still holds it.
+        let bias = self
+            .bias
+            .as_ref()
+            .filter(|_| {
+                self.dark
+                    .as_ref()
+                    .is_none_or(|dark| dark.bias == DarkBias::Removed)
+            })
+            .map(|bias| master_scale(image, bias, MasterRole::Bias).map(|map| (bias, map)))
+            .transpose()?;
+        if self.flat.is_some() && dark.is_none() && bias.is_none() && holds_offset(image) {
+            return Err(CalibrationError::LightWithoutSubtractor);
+        }
+
         image.metadata.calibrated = true;
-        if let Some((master, scale)) = subtracted {
-            image.subtract(master, scale);
+        if let Some((bias, map)) = bias {
+            image.subtract(bias, map);
         }
-
-        // 2. Flat division
-        if let Some(ref flat) = self.masters.flat {
-            prepared_flat::apply(flat, image);
+        if let Some((dark, map, scale)) = dark {
+            image.subtract_scaled(dark, map, scale);
         }
-
-        // 3. CFA-aware defective pixel correction
-        if let Some(ref defect_map) = self.defect_map {
+        if let Some(flat) = &self.flat {
+            flat.apply(image);
+        }
+        if let Some(defect_map) = &self.defect_map {
             defect_map.correct(image);
         }
+        Ok(outcome)
+    }
 
-        Ok(())
+    /// The factor `dark` is subtracted from `light` by: 1 when their exposures match or one is
+    /// undeclared, the ratio for a bias-removed dark of another exposure. Records in `outcome` what
+    /// it could not compare.
+    fn dark_scale(
+        &self,
+        dark: &MasterDark,
+        light: &CfaImage,
+        outcome: &mut CalibrationOutcome,
+    ) -> Result<f64, CalibrationError> {
+        match (light.metadata.ccd_temp, dark.temperature()) {
+            (Some(light), Some(dark)) if (light - dark).abs() > TEMPERATURE_TOLERANCE => {
+                return Err(CalibrationError::DarkTemperatureMismatch { light, dark });
+            }
+            (Some(_), Some(_)) => {}
+            _ => outcome.unverified_temperature = true,
+        }
+        let (Some(light), Some(exposure)) = (light.metadata.exposure_time, dark.exposure()) else {
+            outcome.unverified_exposure = true;
+            return Ok(1.0);
+        };
+        if (light - exposure).abs() <= EXPOSURE_TOLERANCE * light.max(exposure) {
+            return Ok(1.0);
+        }
+        match dark.bias {
+            DarkBias::Removed => {
+                let scale = light / exposure;
+                outcome.dark_scale = Some(scale);
+                Ok(scale)
+            }
+            DarkBias::Included => Err(CalibrationError::DarkExposureMismatch {
+                light,
+                dark: exposure,
+            }),
+        }
     }
 
     /// Every master must describe the same sensor as `image`, in both pattern and extent.
@@ -298,11 +465,7 @@ impl CalibrationMasters {
         let light_size = Size2us::new(image.data.width(), image.data.height());
         let light_domain = image.metadata.domain.as_ref();
 
-        for (role, master) in self
-            .masters
-            .iter()
-            .filter_map(|(role, master)| master.as_ref().map(|master| (role, master)))
-        {
+        for (role, master) in self.masters() {
             if master.cfa_type != light {
                 return Err(CalibrationError::CfaPatternMismatch {
                     component: role,
@@ -351,6 +514,16 @@ impl CalibrationMasters {
     }
 }
 
+/// Whether `frame` may still hold an additive offset: its pedestal is kept or unknown. A frame with
+/// no domain was synthesized, and states nothing to check.
+fn holds_offset(frame: &CfaImage) -> bool {
+    frame
+        .metadata
+        .domain
+        .as_ref()
+        .is_some_and(|domain| domain.pedestal != Pedestal::Removed)
+}
+
 /// The map that expresses `master`'s samples in `frame`'s domain, for the master in `role`.
 ///
 /// The identity when either declares no domain: a synthesized frame has none, and there is nothing
@@ -387,29 +560,38 @@ pub(crate) mod internals {
     use crate::calibration_masters::master_role::MasterRole;
 
     use crate::calibration_masters::{CalibrationMasters, stack_cfa_master};
+    use crate::io::image::cfa::CfaImage;
     use crate::progress::ProgressCallback;
 
-    /// Every role stacked under its preset, then the set assembled — what a caller does role by
-    /// role.
+    /// Every role stacked under its preset, the flats with their flat-dark or bias taken from each
+    /// frame, then the set assembled — what a caller does role by role.
     pub(crate) fn masters_from_files<P: AsRef<Path> + Sync>(
         frames: CalibrationSet<&[P]>,
         sigma_threshold: f32,
     ) -> CalibrationMasters {
-        let stack = |paths: &[P], role: MasterRole| {
+        let stack = |paths: &[P], role: MasterRole, subtract: Option<&CfaImage>| {
             stack_cfa_master(
                 paths,
                 role.stack_config(),
+                subtract,
                 ProgressCallback::default(),
                 CancelToken::never(),
             )
             .expect("stack a calibration master")
         };
+        let bias = stack(frames.bias, MasterRole::Bias, None);
+        let flat_dark = stack(frames.flat_dark, MasterRole::FlatDark, None);
+        let flat = stack(
+            frames.flat,
+            MasterRole::Flat,
+            flat_dark.as_ref().or(bias.as_ref()),
+        );
         CalibrationMasters::from_images(
             CalibrationSet {
-                dark: stack(frames.dark, MasterRole::Dark),
-                flat: stack(frames.flat, MasterRole::Flat),
-                bias: stack(frames.bias, MasterRole::Bias),
-                flat_dark: stack(frames.flat_dark, MasterRole::FlatDark),
+                dark: stack(frames.dark, MasterRole::Dark, None),
+                flat,
+                bias,
+                flat_dark,
             },
             sigma_threshold,
             &CancelToken::never(),

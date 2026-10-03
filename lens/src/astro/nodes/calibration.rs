@@ -131,9 +131,13 @@ fn build_masters_cached(
     cancel: &CancelToken,
 ) -> Result<CalibrationMasters, BuildMastersError> {
     let [darks, flats, bias, flat_darks] = frame_sets;
+    // A master stacked with a subtractor taken from each frame is keyed by the subtractor's
+    // frames too, so a flat cached before its bias changed, or before flats were calibrated per
+    // frame, is stacked again.
     let role = |frames: Option<Vec<PathBuf>>,
                 role: MasterRole,
-                file: &str|
+                file: &str,
+                subtract: Option<(&CfaImage, &[PathBuf])>|
      -> Result<Option<CfaImage>, BuildMastersError> {
         if cancel.is_cancelled() {
             return Err(BuildMastersError::Cancelled);
@@ -149,7 +153,12 @@ fn build_masters_cached(
         let cached = cache
             .then(|| -> Result<_, BuildMastersError> {
                 let paths = role_cache_paths(&frames, file)?;
-                Ok((paths, frame_set_key(&frames)?))
+                let mut key = frame_set_key(&frames)?;
+                if let Some((_, subtractor_frames)) = subtract {
+                    key.push_str("\nsubtract ");
+                    key.push_str(&frame_set_key(subtractor_frames)?);
+                }
+                Ok((paths, key))
             })
             .transpose()?;
 
@@ -176,6 +185,7 @@ fn build_masters_cached(
         let master = stack_cfa_master(
             &frames,
             role.stack_config(),
+            subtract.map(|(master, _)| master),
             ProgressCallback::default(),
             cancel.clone(),
         )?
@@ -200,12 +210,27 @@ fn build_masters_cached(
         Ok(Some(master))
     };
 
+    let bias_master = role(bias.clone(), MasterRole::Bias, "master_bias.fits", None)?;
+    let flat_dark_master = role(
+        flat_darks.clone(),
+        MasterRole::FlatDark,
+        "master_flat_dark.fits",
+        None,
+    )?;
+    // Each flat takes its flat-dark, else the bias, before the flats are normalized and combined.
+    let flat_subtractor = match (&flat_dark_master, &flat_darks, &bias_master, &bias) {
+        (Some(master), Some(frames), _, _) | (None, _, Some(master), Some(frames)) => {
+            Some((master, frames.as_slice()))
+        }
+        _ => None,
+    };
+    let flat_master = role(flats, MasterRole::Flat, "master_flat.fits", flat_subtractor)?;
     CalibrationMasters::from_images(
         CalibrationSet {
-            dark: role(darks, MasterRole::Dark, "master_dark.fits")?,
-            flat: role(flats, MasterRole::Flat, "master_flat.fits")?,
-            bias: role(bias, MasterRole::Bias, "master_bias.fits")?,
-            flat_dark: role(flat_darks, MasterRole::FlatDark, "master_flat_dark.fits")?,
+            dark: role(darks, MasterRole::Dark, "master_dark.fits", None)?,
+            flat: flat_master,
+            bias: bias_master,
+            flat_dark: flat_dark_master,
         },
         sigma,
         cancel,

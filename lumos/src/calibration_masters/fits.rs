@@ -21,7 +21,9 @@ use crate::calibration_masters::CalibrationMasters;
 use crate::calibration_masters::calibration_component::CalibrationComponent;
 use crate::calibration_masters::calibration_set::CalibrationSet;
 use crate::calibration_masters::defect_map::DefectMap;
+use crate::calibration_masters::master_dark::{DarkBias, MasterDark};
 use crate::calibration_masters::master_role::MasterRole;
+use crate::calibration_masters::prepared_flat::PreparedFlat;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::fits::cfa::{
     CFA_FITS_FORMAT, CFA_FITS_VERSION, CfaFitsHdu, CfaFitsHduMetadata,
@@ -32,7 +34,11 @@ use crate::math::size2us::Size2us;
 
 const BUNDLE_FORMAT: &str = "CALMASTR";
 const DEFECT_FORMAT: &str = "DEFMAP";
-const BUNDLE_VERSION: i64 = 1;
+/// Version 2 stores the dark with its bias state and holds no flat-dark.
+const BUNDLE_VERSION: i64 = 2;
+
+/// The keyword that states whether the dark still holds the bias.
+const DARK_BIAS_KEYWORD: &str = "LUMDBIAS";
 
 /// Where each component's HDU sits in a bundle being read.
 #[derive(Debug, Default)]
@@ -48,14 +54,11 @@ pub(super) fn save(path: &Path, masters: &CalibrationMasters) -> io::Result<()> 
             .write_raw_hdu(&bundle_primary_header()?, &[])
             .map_err(fits_to_io)?;
 
-        for (role, master) in masters.masters.iter() {
-            let Some(image) = master.as_ref() else {
-                continue;
-            };
+        for (role, image) in masters.masters() {
             // The `IMAGETYP` a role's HDU carries is its `EXTNAME` in words, so the two cannot
             // drift.
             let image_type = role.extname().replace('_', " ");
-            let encoded = CfaFitsHdu::encode(
+            let mut encoded = CfaFitsHdu::encode(
                 image,
                 CfaFitsHduMetadata {
                     extname: Some(role.extname()),
@@ -63,6 +66,16 @@ pub(super) fn save(path: &Path, masters: &CalibrationMasters) -> io::Result<()> 
                     prepared: role.prepared(),
                 },
             )?;
+            if let (MasterRole::Dark, Some(dark)) = (role, &masters.dark) {
+                let state = match dark.bias {
+                    DarkBias::Included => "INCLUDED",
+                    DarkBias::Removed => "REMOVED",
+                };
+                encoded
+                    .header
+                    .set(DARK_BIAS_KEYWORD, state)
+                    .map_err(fits_to_io)?;
+            }
             writer
                 .write_image(&encoded.image, Some(&encoded.header))
                 .map_err(fits_to_io)?;
@@ -85,10 +98,36 @@ pub(super) fn load(path: &Path) -> io::Result<CalibrationMasters> {
     verify_checksums(&mut reader)?;
     let indices = bundle_indices(&reader)?;
 
+    if indices.masters.flat_dark.is_some() {
+        return Err(invalid_data(
+            "a calibration-master bundle holds no flat-dark: the flat is stored prepared",
+        ));
+    }
+    let dark = match indices.masters.dark {
+        Some(index) => {
+            let bias = match reader.hdus()[index]
+                .header
+                .get_text(DARK_BIAS_KEYWORD)
+                .map_err(fits_to_io)?
+            {
+                Some("INCLUDED") => DarkBias::Included,
+                Some("REMOVED") => DarkBias::Removed,
+                _ => {
+                    return Err(invalid_data(format!(
+                        "MASTER_DARK must state {DARK_BIAS_KEYWORD} as INCLUDED or REMOVED"
+                    )));
+                }
+            };
+            read_master(&mut reader, Some(index), MasterRole::Dark, path)?
+                .map(|image| MasterDark { image, bias })
+        }
+        None => None,
+    };
     let masters = CalibrationMasters {
-        masters: indices
-            .masters
-            .try_map(|role, index| read_master(&mut reader, index, role, path))?,
+        bias: read_master(&mut reader, indices.masters.bias, MasterRole::Bias, path)?,
+        dark,
+        flat: read_master(&mut reader, indices.masters.flat, MasterRole::Flat, path)?
+            .map(PreparedFlat::from_divisor),
         defect_map: read_defect_map(&mut reader, indices.defects)?,
     };
     // The same coherence check `from_images` runs, so a bundle read back from disk is exactly as

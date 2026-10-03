@@ -4,7 +4,10 @@ use std::path::Path;
 
 use common::CancelToken;
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use crate::calibration_masters::CalibrationMasters;
+use crate::calibration_masters::calibration_outcome::CalibrationOutcome;
 use crate::calibration_masters::cosmic_ray;
 use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::calibration_masters::cosmic_ray::reject_cosmic_rays;
@@ -29,6 +32,7 @@ use crate::pipeline::result::{AlignStackResult, Error};
 use crate::pipeline::tier::StagePlan;
 use crate::progress::stage_counter::StageCounter;
 use crate::progress::{ProgressCallback, StackingStage};
+use crate::run_report::RunReport;
 
 /// Calibrate, align, and stack camera-RAW or mosaic-FITS light frames end to end.
 ///
@@ -109,6 +113,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     // demosaic itself polls `cancel` between stages (see `CfaImage::demosaic`), so the heavy
     // phase stays interruptible at full core utilization within a batch.
     let done = StageCounter::new(&progress, StackingStage::Preparing, total);
+    let notes = CalibrationNotes::default();
     let detected: Vec<DetectedFrame> = {
         let mut detectors =
             DetectorPool::from_config(&config.detection, plan.decode_concurrency.min(total))
@@ -123,6 +128,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
                 masters,
                 config.cosmic_ray.as_ref(),
                 &load_context,
+                &notes,
             )?;
             // Checked here, at decode, rather than after every frame has been detected: a frame
             // from another sensor fails the run before the rest are paid for.
@@ -147,7 +153,38 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
         })
     }?;
 
-    register_warp_and_stack(detected, config, stage, progress, cancel)
+    let mut result = register_warp_and_stack(detected, config, stage, progress, cancel)?;
+    notes.report_into(&mut result.product.report, masters);
+    Ok(result)
+}
+
+/// What calibrating the lights could not check, counted across the workers.
+#[derive(Debug, Default)]
+struct CalibrationNotes {
+    unverified_exposures: AtomicU64,
+    unverified_temperatures: AtomicU64,
+    scaled_darks: AtomicU64,
+}
+
+impl CalibrationNotes {
+    fn record(&self, outcome: CalibrationOutcome) {
+        let count = |counter: &AtomicU64, happened: bool| {
+            counter.fetch_add(u64::from(happened), Ordering::Relaxed);
+        };
+        count(&self.unverified_exposures, outcome.unverified_exposure);
+        count(
+            &self.unverified_temperatures,
+            outcome.unverified_temperature,
+        );
+        count(&self.scaled_darks, outcome.dark_scale.is_some());
+    }
+
+    fn report_into(&self, report: &mut RunReport, masters: &CalibrationMasters) {
+        report.unverified_dark_exposures = self.unverified_exposures.load(Ordering::Relaxed);
+        report.unverified_dark_temperatures = self.unverified_temperatures.load(Ordering::Relaxed);
+        report.scaled_darks = self.scaled_darks.load(Ordering::Relaxed);
+        report.floored_flat_pixels = masters.floored_flat_pixels() as u64;
+    }
 }
 
 /// Load one raw light, apply the calibration masters, optionally reject cosmic rays, and
@@ -157,6 +194,7 @@ fn decode_calibrate_demosaic(
     masters: &CalibrationMasters,
     cosmic_ray: Option<&CosmicRayConfig>,
     context: &LoadContext,
+    notes: &CalibrationNotes,
 ) -> Result<LinearImage, Error> {
     let mut cfa = match CfaImage::from_file(path, context) {
         Ok(image) => image,
@@ -170,7 +208,7 @@ fn decode_calibrate_demosaic(
             });
         }
     };
-    masters.calibrate(&mut cfa)?;
+    notes.record(masters.calibrate(&mut cfa)?);
     if let Some(cosmic_ray) = cosmic_ray {
         // Dispatched per CFA type inside `reject_cosmic_rays` (mono / Bayer-deinterleave /
         // X-Trans same-color).
@@ -184,4 +222,38 @@ fn decode_calibrate_demosaic(
     // Demosaic is the other heavy step; it polls `cancel` internally and bails mid-pass.
     cfa.demosaic(&context.cancel)
         .map_err(|Cancelled| Error::Cancelled)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Three lights: one unverified in exposure, one in temperature and scaled, one clean. The
+    /// report counts each fact once per light that met it, and carries the bundle's floored flat
+    /// pixels, here none.
+    #[test]
+    fn the_notes_count_what_calibration_could_not_check() {
+        let notes = CalibrationNotes::default();
+        notes.record(CalibrationOutcome {
+            unverified_exposure: true,
+            ..CalibrationOutcome::default()
+        });
+        notes.record(CalibrationOutcome {
+            unverified_temperature: true,
+            dark_scale: Some(2.5),
+            ..CalibrationOutcome::default()
+        });
+        notes.record(CalibrationOutcome::default());
+        let mut report = RunReport::default();
+        notes.report_into(&mut report, &CalibrationMasters::default());
+        assert_eq!(
+            (
+                report.unverified_dark_exposures,
+                report.unverified_dark_temperatures,
+                report.scaled_darks,
+                report.floored_flat_pixels
+            ),
+            (1, 1, 1, 0)
+        );
+    }
 }

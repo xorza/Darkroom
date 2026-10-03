@@ -378,6 +378,12 @@ impl CfaImage {
     /// averages them out correctly. Clamping to zero would introduce a positive
     /// bias in the stacked result.
     pub fn subtract(&mut self, dark: &CfaImage, map: DomainMap) {
+        self.subtract_scaled(dark, map, 1.0);
+    }
+
+    /// [`Self::subtract`] with `dark`'s signal scaled by `scale` first, as a bias-removed dark is
+    /// scaled to the light's exposure. The pedestal offset is not scaled: it is a level, not signal.
+    pub(crate) fn subtract_scaled(&mut self, dark: &CfaImage, map: DomainMap, scale: f64) {
         assert!(
             self.data.width() == dark.data.width() && self.data.height() == dark.data.height(),
             "CfaImage dimensions mismatch: {}x{} vs {}x{}",
@@ -398,7 +404,7 @@ impl CfaImage {
             dark.metadata.domain,
             self.metadata.domain
         );
-        let (gain, offset) = (map.gain as f32, map.offset as f32);
+        let (gain, offset) = ((map.gain * scale) as f32, map.offset as f32);
         self.data
             .par_iter_mut()
             .zip(dark.data.par_iter())

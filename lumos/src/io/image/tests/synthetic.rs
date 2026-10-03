@@ -450,6 +450,7 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
                 &[rggb.as_path(), bggr.as_path(), never_decoded.as_path()],
                 &config,
                 memory,
+                None,
                 ProgressCallback::default(),
                 CancelToken::never(),
             )

@@ -115,6 +115,7 @@ fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
         stack_cfa_master(
             paths,
             role.stack_config(),
+            None,
             ProgressCallback::default(),
             CancelToken::never(),
         )

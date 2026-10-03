@@ -154,6 +154,7 @@ fn pipeline_budget_probe() -> io::Result<()> {
         let master = stack_cfa_master(
             &calibration,
             config,
+            None,
             ProgressCallback::default(),
             CancelToken::never(),
         )

@@ -11,6 +11,7 @@ use crate::io::image::cfa::CfaType;
 use crate::io::image::error::ImageError;
 use crate::io::image::image_provenance::RowOrder;
 use crate::io::image::sample_domain::SampleDomain;
+use crate::math::size2us::Size2us;
 
 /// Invalid [`crate::StackConfig`] parameters.
 ///
@@ -60,6 +61,27 @@ pub enum Error {
         index: usize,
         channel: usize,
         median: f32,
+    },
+
+    /// The master a calibration stack subtracts from every frame is of another sensor shape or
+    /// pattern than frame `index`.
+    #[error(
+        "frame {index} is {frame} on its sensor, but the master it subtracts is {subtractor}, or of another pattern"
+    )]
+    SubtractorShape {
+        index: usize,
+        frame: Size2us,
+        subtractor: Size2us,
+    },
+
+    /// The master a calibration stack subtracts cannot be expressed in frame `index`'s domain.
+    #[error(
+        "frame {index} was decoded into sample domain {frame}, which the subtracted master's {subtractor} cannot be converted to"
+    )]
+    SubtractorDomain {
+        index: usize,
+        frame: Box<SampleDomain>,
+        subtractor: Box<SampleDomain>,
     },
 
     /// `Weighting::Noise` weighs each frame by its inverse noise variance, and this frame measured
