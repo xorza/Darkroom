@@ -102,7 +102,12 @@ impl<'a> XtransDetector<'a> {
     /// mono path's ×2 subsample — same-colour sampling is already coarse and the iteration handles
     /// multi-pixel hits. Significance is `S = L⁺/N` with no `S'` median subtraction, since `L⁺`
     /// (excess over the same-colour median) is already a local high-pass.
-    pub(super) fn reject(&mut self, data: &mut [f32], size: Size2us) -> usize {
+    pub(super) fn reject(
+        &mut self,
+        data: &mut [f32],
+        size: Size2us,
+        found: &mut BitBuffer2,
+    ) -> usize {
         debug_assert_eq!(data.len(), size.pixel_count());
         if size.width < 7 || size.height < 7 {
             return 0;
@@ -145,6 +150,7 @@ impl<'a> XtransDetector<'a> {
             );
         }
 
+        found.copy_from(&masks.accumulated);
         masks.accumulated.count_ones()
     }
 }
@@ -325,6 +331,7 @@ fn xtrans_replace(
 
 #[cfg(test)]
 pub(crate) mod internals {
+    use crate::bit_buffer2::BitBuffer2;
     use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
     use crate::calibration_masters::cosmic_ray::noise_model::NoiseModel;
     use crate::calibration_masters::cosmic_ray::xtrans::{XtransDetector, XtransScratch};
@@ -336,7 +343,7 @@ pub(crate) mod internals {
     pub(crate) fn xtrans_scratch_floats(data: &mut [f32], size: Size2us, cfa: &CfaType) -> usize {
         let config = CosmicRayConfig::default();
         let mut detector = XtransDetector::new(&config, NoiseModel::Empirical, cfa);
-        detector.reject(data, size);
+        detector.reject(data, size, &mut BitBuffer2::new_default(size));
         let XtransScratch {
             lplus,
             f,

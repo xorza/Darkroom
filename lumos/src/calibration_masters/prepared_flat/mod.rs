@@ -10,6 +10,7 @@ use rayon::prelude::*;
 
 use crate::calibration_masters::error::CalibrationError;
 use crate::io::image::cfa::{CfaImage, CfaType};
+use crate::io::image::pixel_flags::{Flags, PixelFlags};
 use crate::io::image::sample_domain::DomainMap;
 use crate::math::vec2us::Vec2us;
 
@@ -41,6 +42,8 @@ pub(super) fn normalize(mut flat: CfaImage) -> Result<CfaImage, CalibrationError
     Ok(flat)
 }
 
+/// Divide `image` by the prepared flat, and flag [`Flags::FLAT_FLOOR`] where the divisor sits at
+/// its floor: those pixels are corrected by less than their vignetting asks.
 pub(super) fn apply(flat: &CfaImage, image: &mut CfaImage) {
     assert!(
         image.data.width() == flat.data.width() && image.data.height() == flat.data.height(),
@@ -56,6 +59,16 @@ pub(super) fn apply(flat: &CfaImage, image: &mut CfaImage) {
         .par_iter_mut()
         .zip(flat.data.par_iter())
         .for_each(|(pixel, divisor)| *pixel /= divisor);
+    let divisors = flat.data.pixels();
+    if divisors
+        .par_iter()
+        .any(|&divisor| divisor <= MIN_NORMALIZED_FLAT)
+    {
+        let size = image.size();
+        PixelFlags::add_where(&mut image.flags, size, Flags::FLAT_FLOOR, |index| {
+            divisors[index] <= MIN_NORMALIZED_FLAT
+        });
+    }
 }
 
 fn normalize_mono(flat: &mut Buffer2<f32>) -> Result<(), CalibrationError> {

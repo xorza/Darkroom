@@ -1,5 +1,6 @@
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::internals::prelude::*;
+use crate::io::image::pixel_flags::Flags;
 
 use crate::CfaType;
 use crate::calibration_masters::prepared_flat::{MIN_NORMALIZED_FLAT, apply, normalize, subtract};
@@ -33,6 +34,11 @@ fn prepared_flat_matches_hand_computed_mono_calibration() {
     let mut light = make_cfa(Size2us::new(2, 2), vec![1.0; 4], CfaType::Mono);
     apply(&prepared, &mut light);
     assert_eq!(light.data.pixels(), &[10.0, 1.0, 1.0, 0.5]);
+    // The floored divisor is flagged, and only it: that pixel is corrected by less than its flat
+    // asked for.
+    let flags = light.flags.as_ref().unwrap();
+    assert_eq!(flags.count(Flags::FLAT_FLOOR), 1);
+    assert_eq!(flags.at(0), Flags::FLAT_FLOOR);
 }
 
 #[test]

@@ -7,10 +7,12 @@
 
 use rayon::prelude::*;
 
+use crate::bit_buffer2::BitBuffer2;
 use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::calibration_masters::cosmic_ray::mono::MonoDetector;
 use crate::calibration_masters::cosmic_ray::noise_model::NoiseModel;
 use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 
 /// The Bayer detector: a mono detector, plus the buffer each phase is deinterleaved into.
 ///
@@ -40,12 +42,18 @@ impl<'a> BayerDetector<'a> {
         }
     }
 
-    /// Clean every phase in place, returning the total CR pixel count across the four.
+    /// Clean every phase in place, marking every in-painted photosite in `found` (the mosaic's
+    /// size) and returning the total across the four.
     ///
     /// Deinterleave and re-interleave are row-parallel like the detection between them. They are
     /// only a few percent of a frame today, but they are the whole of its *serial* fraction — the
     /// one part that would not shrink as thread count rises.
-    pub(super) fn reject(&mut self, data: &mut [f32], size: Size2us) -> usize {
+    pub(super) fn reject(
+        &mut self,
+        data: &mut [f32],
+        size: Size2us,
+        found: &mut BitBuffer2,
+    ) -> usize {
         let (w, h) = (size.width, size.height);
         let Self { mono, plane } = self;
         let mut total = 0;
@@ -68,7 +76,12 @@ impl<'a> BayerDetector<'a> {
                     }
                 });
 
-                total += mono.reject(plane, Size2us::new(pw, ph));
+                let plane_size = Size2us::new(pw, ph);
+                let mut plane_found = BitBuffer2::new_default(plane_size);
+                total += mono.reject(plane, plane_size, &mut plane_found);
+                plane_found.for_each_set(|pos| {
+                    found.set_at(Vec2us::new(pos.x * 2 + a, pos.y * 2 + b), true);
+                });
 
                 // Re-interleave the cleaned plane. Chunking the mosaic by row keeps each thread's
                 // writes to one row, so the phase's rows can be picked out of the full sweep.

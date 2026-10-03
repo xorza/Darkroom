@@ -29,7 +29,9 @@ pub(crate) mod mono;
 pub(crate) mod noise_model;
 pub(crate) mod xtrans;
 
+use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::cfa::{CfaImage, CfaType};
+use crate::io::image::pixel_flags::{Flags, PixelFlags};
 use crate::math::size2us::Size2us;
 
 use crate::calibration_masters::cosmic_ray::bayer::BayerDetector;
@@ -45,8 +47,9 @@ use crate::calibration_masters::cosmic_ray::xtrans::XtransDetector;
 const FINE_STRUCTURE_SIGMA_FLOOR: f32 = 0.01;
 
 /// Detect and in-paint cosmic rays in a single calibrated frame, in place, dispatching on its CFA
-/// type (mono / Bayer / X-Trans). Returns the number of CR pixels corrected, or an error when
-/// the parametric noise model needs an ADC step the frame does not record.
+/// type (mono / Bayer / X-Trans), and flag every in-painted pixel [`Flags::COSMIC_RAY`] and
+/// [`Flags::REPAIRED`]. Returns the number of CR pixels corrected, or an error when the parametric
+/// noise model needs an ADC step the frame does not record.
 pub(crate) fn reject_cosmic_rays(
     image: &mut CfaImage,
     config: &CosmicRayConfig,
@@ -55,13 +58,25 @@ pub(crate) fn reject_cosmic_rays(
     let size = Size2us::new(image.data.width(), image.data.height());
     // Disjoint fields: the pixels go in by `&mut`, the CFA type is read beside them.
     let pixels = image.data.pixels_mut();
-    Ok(match &image.cfa_type {
+    let mut found = BitBuffer2::new_default(size);
+    let count = match &image.cfa_type {
         // Bayer is 2×2-periodic → four dense same-color planes; reuse the mono detector per plane.
-        CfaType::Bayer(_) => BayerDetector::new(config, noise).reject(pixels, size),
+        CfaType::Bayer(_) => BayerDetector::new(config, noise).reject(pixels, size, &mut found),
         // X-Trans has no dense same-color sub-lattice → same-color stencils on the mosaic.
-        c @ CfaType::XTrans(_) => XtransDetector::new(config, noise, c).reject(pixels, size),
-        CfaType::Mono => MonoDetector::new(config, noise).reject(pixels, size),
-    })
+        c @ CfaType::XTrans(_) => {
+            XtransDetector::new(config, noise, c).reject(pixels, size, &mut found)
+        }
+        CfaType::Mono => MonoDetector::new(config, noise).reject(pixels, size, &mut found),
+    };
+    if count > 0 {
+        PixelFlags::add_where(
+            &mut image.flags,
+            size,
+            Flags::COSMIC_RAY.union(Flags::REPAIRED),
+            |index| found.get(index),
+        );
+    }
+    Ok(count)
 }
 
 /// The bytes a cosmic-ray pass over a `size` mosaic of `cfa_type` allocates beside the mosaic, at
