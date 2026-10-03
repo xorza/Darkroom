@@ -43,11 +43,12 @@ impl PreviewSink {
         self.latest.lock().unwrap().insert(node_id, value);
     }
 
-    /// GUI side: take everything published since the last drain. Empty on an
-    /// idle frame, which is the common case.
-    pub(crate) fn drain(&self) -> Vec<(NodeId, DynamicValue)> {
-        let mut latest = self.latest.lock().unwrap();
-        latest.drain().collect()
+    /// GUI side: swap everything published since the last drain into the
+    /// empty `buffer`. The two maps trade places, so each keeps its capacity
+    /// and a drain allocates nothing; the lock is held only for the swap.
+    pub(crate) fn drain_into(&self, buffer: &mut HashMap<NodeId, DynamicValue>) {
+        debug_assert!(buffer.is_empty(), "the last drain's values were not taken");
+        mem::swap(&mut *self.latest.lock().unwrap(), buffer);
     }
 }
 

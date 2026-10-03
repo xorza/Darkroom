@@ -42,6 +42,7 @@ use crate::core::document::Document;
 use crate::core::runtime_host::RuntimeHost;
 use crate::core::status::StatusLog;
 use scenarium::CompiledGraph;
+use scenarium::DynamicValue;
 use scenarium::LogLevel;
 use scenarium::NodeExecutionStatus;
 use scenarium::NodeId;
@@ -143,6 +144,10 @@ pub(crate) struct RunState {
     /// Explicit eviction clears this projection until the next
     /// run because successful eviction is fire-and-forget.
     pub(crate) cache_ram: RamUsage,
+    /// The values preview nodes published since the last frame, swapped in
+    /// from the worker's side and emptied into [`Self::previews`]. Kept so the
+    /// swap reuses its capacity.
+    published: HashMap<NodeId, DynamicValue>,
 }
 
 impl RunState {
@@ -163,7 +168,7 @@ impl RunState {
     /// the status and log projections it reads reflect the latest run.
     pub(crate) fn sync(
         &mut self,
-        runtime: &mut RuntimeHost,
+        runtime: &RuntimeHost,
         status: &mut StatusLog,
         ui: &Ui,
         document: &Document,
@@ -191,11 +196,8 @@ impl RunState {
     /// Reports only — a published *value* needs a texture allocated for it and
     /// is taken by [`Self::sync_previews`], so this stays a pure fold and names
     /// no `Ui`.
-    fn drain_reports(&mut self, runtime: &mut RuntimeHost, status: &mut StatusLog) {
-        // Owned, so the channel borrow is gone before the loop below needs
-        // `runtime` again.
-        let events = runtime.drain_worker();
-        for report in events {
+    fn drain_reports(&mut self, runtime: &RuntimeHost, status: &mut StatusLog) {
+        for report in runtime.drain_worker() {
             self.apply_report(report, status);
         }
     }
@@ -307,6 +309,7 @@ impl RunState {
             node.missing_inputs.clear();
         }
         for node in &update.nodes {
+            assert_reported(&compiled, node.node_id);
             if let Some(status) = &node.status {
                 let status = match status {
                     NodeExecutionStatus::Cached => ExecStatus::Cached,
@@ -314,19 +317,17 @@ impl RunState {
                         ExecStatus::Executed(*elapsed_secs)
                     }
                     NodeExecutionStatus::MissingInputs { ports } => {
-                        self.record_missing_inputs(&compiled, node.node_id, ports);
+                        self.record_missing_inputs(node.node_id, ports);
                         ExecStatus::MissingInputs
                     }
                     NodeExecutionStatus::Errored { error } => {
-                        self.record_error(&compiled, node.node_id, error);
+                        self.record_error(node.node_id, error);
                         ExecStatus::Errored
                     }
                 };
-                assert_reported(&compiled, node.node_id);
                 self.nodes.entry(node.node_id).or_default().status = status;
             }
             if node.ram.total() > 0 {
-                assert_reported(&compiled, node.node_id);
                 self.nodes.entry(node.node_id).or_default().ram = node.ram;
             }
         }
@@ -386,13 +387,7 @@ impl RunState {
 
     /// Record the ports one node went unfed on. The run's own verdict is the
     /// whole list, so it replaces rather than unions.
-    fn record_missing_inputs(
-        &mut self,
-        compiled: &CompiledGraph,
-        node_id: NodeId,
-        ports: &[usize],
-    ) {
-        assert_reported(compiled, node_id);
+    fn record_missing_inputs(&mut self, node_id: NodeId, ports: &[usize]) {
         let slot = self.nodes.entry(node_id).or_default();
         slot.missing_inputs.clear();
         slot.missing_inputs.extend_from_slice(ports);
@@ -400,8 +395,7 @@ impl RunState {
 
     /// Record one run error's message against the node that failed, so the
     /// inspector can show the actual cause instead of a bare "errored".
-    fn record_error(&mut self, compiled: &CompiledGraph, node_id: NodeId, error: &RunError) {
-        assert_reported(compiled, node_id);
+    fn record_error(&mut self, node_id: NodeId, error: &RunError) {
         self.nodes.entry(node_id).or_default().error = Some(error.to_string());
     }
 
@@ -414,14 +408,14 @@ impl RunState {
     /// what to upload, or it is taken in and immediately reconsidered against
     /// a document that has already been walked.
     ///
-    /// Nothing to resolve on the way in, unlike the old pinned push: a preview
-    /// is entry-only, so its execution id attributes to exactly one authored
+    /// Nothing to resolve on the way in: a preview is entry-only, so its execution id attributes to exactly one authored
     /// node and that node is the widget. A value whose id belongs to an
     /// earlier compile is dropped — the node it named may not exist any more,
     /// and a preview only ever shows the current run's value anyway.
     ///
     fn sync_previews(&mut self, runtime: &RuntimeHost, ui: &Ui, document: &Document) {
-        for (node_id, value) in runtime.drain_previews() {
+        runtime.drain_previews(&mut self.published);
+        for (node_id, value) in self.published.drain() {
             // The gate's borrow ends with the condition, so the store can be
             // written in the body without cloning the compile to release it.
             if self
