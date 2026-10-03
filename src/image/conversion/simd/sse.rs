@@ -384,10 +384,6 @@ pub(super) unsafe fn convert_u8_to_u16_row_sse2(src: &[u8], dst: &mut [u8], _wid
 #[inline]
 #[target_feature(enable = "sse2")]
 fn divide_by_257(words: __m128i) -> __m128i {
-    #[expect(
-        clippy::cast_possible_wrap,
-        reason = "the bit pattern of 65281 as a u16 lane"
-    )]
     let multiplier = _mm_set1_epi16(65281u16 as i16);
     let quotient = _mm_mulhi_epu16(words, multiplier);
     _mm_srli_epi16::<8>(_mm_add_epi16(quotient, _mm_set1_epi16(128)))

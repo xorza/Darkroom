@@ -161,10 +161,6 @@ impl Download {
         staging
             .slice(..)
             .map_async(wgpu::MapMode::Read, move |result| {
-                #[expect(
-                    clippy::let_underscore_must_use,
-                    reason = "the receiver is gone only when the download was dropped mid-flight"
-                )]
                 let _ = sender.send(result);
             });
         Self { staging, mapped }
