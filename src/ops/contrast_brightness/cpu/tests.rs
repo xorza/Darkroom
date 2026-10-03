@@ -19,10 +19,10 @@ fn image_from_channels(format: ColorFormat, width: usize, bytes: Vec<u8>) -> Ima
     Image::new_with_data(desc, bytes).unwrap()
 }
 
-/// Long enough that every kernel runs at least one full vector body and then a
-/// tail: the widest flat body is 16 `u8`, so 21 leaves 5 over; the widest
-/// alpha-preserving body is 16 RGBA pixels on NEON, so 21 pixels leave 5 over.
-const SWEEP_LEN: usize = 21;
+/// Long enough that every kernel the dispatch can pick runs at least one full vector body and
+/// then a tail. The widest flat body is 32 `u8` on AVX2, so 37 leaves 5 over; every other body,
+/// flat or alpha-preserving, is 16, 8 or 4 items wide, and 37 is one past a multiple of each.
+const SWEEP_LEN: usize = 37;
 
 /// `contrast = 2.0, brightness = 0.0` folds to `value * 2 - mid`, whose ties
 /// land exactly on `.5` — so these also pin the round-half-to-even behaviour.
