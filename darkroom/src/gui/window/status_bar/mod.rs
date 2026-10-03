@@ -4,7 +4,7 @@
 //! error slot until a subsequent success clears it) and the memory readout
 //! (right): this process's own resident footprint, plus the runtime cache's
 //! system + GPU bytes under one `Cache` clause, mirrored from the last
-//! completed `WorkerStatus` and shown only when the cache holds something.
+//! completed `RunSummary` and shown only when the cache holds something.
 //! The footprint is never zero, so the bar is always present: a strip that
 //! appears and vanishes reads as layout jitter, and a permanent one keeps
 //! the dock from resizing when a run lands.

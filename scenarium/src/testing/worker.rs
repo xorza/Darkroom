@@ -31,9 +31,9 @@ use crate::graph::identity::{EventPort, NodeId};
 use crate::testing::engine::RunOutcome;
 use crate::testing::graph::TestGraph;
 use crate::worker::Worker;
+use crate::worker::activity::WorkerActivity;
 use crate::worker::error::WorkerError;
 use crate::worker::protocol::{WorkerMessage, WorkerReport};
-use crate::worker::status::{WorkerStatus, WorkerStatusKind};
 
 /// How long a wait here gives the worker before failing the test — generous
 /// enough that a loaded machine does not flake, bounded so a wedged worker
@@ -206,16 +206,22 @@ impl TestWorker {
         match &report {
             WorkerReport::Installed { compiled, .. } => self.installed = Some(Arc::clone(compiled)),
             WorkerReport::Cleared => self.installed = None,
-            WorkerReport::Status(_) | WorkerReport::Error(_) => {}
+            WorkerReport::Activity(_)
+            | WorkerReport::Progress { .. }
+            | WorkerReport::Completed(_)
+            | WorkerReport::Error(_) => {}
         }
         report
     }
 
-    /// The next status of any kind, skipping installs and errors.
-    pub(crate) async fn status(&mut self) -> Arc<WorkerStatus> {
+    /// The worker's activity as the next report that states it gives it — an activity change,
+    /// or a completed run's resting activity — skipping everything else.
+    pub(crate) async fn activity(&mut self) -> WorkerActivity {
         loop {
-            if let WorkerReport::Status(status) = self.report().await {
-                return status;
+            match self.report().await {
+                WorkerReport::Activity(activity) => return activity,
+                WorkerReport::Completed(summary) => return summary.activity,
+                _ => {}
             }
         }
     }
@@ -225,15 +231,14 @@ impl TestWorker {
     pub(crate) async fn finished(&mut self) -> Result<RunOutcome, Error> {
         loop {
             match self.report().await {
-                WorkerReport::Status(status)
-                    if matches!(status.kind, WorkerStatusKind::Completed { .. }) =>
-                {
-                    return Ok(RunOutcome::published(&self.graph, &status));
+                WorkerReport::Completed(summary) => {
+                    return Ok(RunOutcome::published(&self.graph, &summary));
                 }
                 WorkerReport::Error(WorkerError::Execution { error }) => return Err(error),
                 WorkerReport::Installed { .. }
                 | WorkerReport::Cleared
-                | WorkerReport::Status(_)
+                | WorkerReport::Activity(_)
+                | WorkerReport::Progress { .. }
                 | WorkerReport::Error(
                     WorkerError::CacheEviction { .. } | WorkerError::CacheFlush { .. },
                 ) => {}
@@ -265,7 +270,10 @@ impl TestWorker {
                     self.installed = Some(Arc::clone(compiled));
                 }
                 WorkerReport::Cleared => self.installed = None,
-                WorkerReport::Status(_) | WorkerReport::Error(_) => {}
+                WorkerReport::Activity(_)
+                | WorkerReport::Progress { .. }
+                | WorkerReport::Completed(_)
+                | WorkerReport::Error(_) => {}
             }
             drained.push(report);
         }
@@ -292,10 +300,7 @@ impl TestWorker {
         let runs: Vec<WorkerReport> = self
             .drain()
             .into_iter()
-            .filter(|report| {
-                matches!(report, WorkerReport::Status(status)
-                    if matches!(status.kind, WorkerStatusKind::Completed { .. }))
-            })
+            .filter(|report| matches!(report, WorkerReport::Completed(_)))
             .collect();
         assert!(runs.is_empty(), "unexpected run: {runs:?}");
     }

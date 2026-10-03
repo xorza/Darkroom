@@ -29,7 +29,7 @@ use crate::containers::column::Column;
 use crate::execution::identity::{NodeIdx, OutputAddr, OutputIdx};
 use crate::execution::report::EventTrigger;
 use crate::execution::report::{ExecutionOutcome, LogLevel, NodeExecutionStatus, NodeStatus};
-use crate::execution::report::{RunPhase, RunProgress, RunReporter};
+use crate::execution::report::{RunPhase, RunReporter};
 use crate::graph::func::error::InvokeError;
 use crate::graph::func::lambda::{Invocation, OutputDemand};
 use crate::graph::identity::EventPort;
@@ -61,7 +61,7 @@ enum NodeOutcome {
     /// Its lambda ran and succeeded, taking `secs`.
     Ran { secs: f64 },
     /// Its lambda ran but errored — an invoke failure, or a cancel mid-invoke.
-    Failed { secs: f64, error: RunError },
+    Failed { error: RunError },
     /// Never ran — an upstream dependency errored, its func has no implementation attached,
     /// or the cached output it was resolved to reuse failed to load.
     Skipped { error: RunError },
@@ -160,7 +160,6 @@ impl Executor {
         } = request;
 
         outcome.clear();
-        let start = Instant::now();
         // Hold the cancel flag on the context so lambdas can poll it inside
         // off-thread work, and so the loop-top / post-loop checks below read
         // one source.
@@ -201,7 +200,6 @@ impl Executor {
         }
 
         self.ctx_manager.current_node = None;
-        outcome.elapsed_secs = start.elapsed().as_secs_f64();
         outcome.logs.append(&mut self.ctx_manager.logs);
         outcome.cancelled = self.ctx_manager.cancel.is_cancelled();
     }
@@ -251,17 +249,14 @@ impl Executor {
                     error: RunError::Cancelled { .. },
                 }
                 | NodeOutcome::Cut { cached: false } => None,
-                // A genuine failure did run: one row carries both the attempt's time and the
-                // reason it ended, so nothing has to reconcile a node listed as two things.
-                NodeOutcome::Failed { secs, error } => {
+                // A genuine failure did run, so it counts among the executed.
+                NodeOutcome::Failed { error } => {
                     outcome.ran_node_count += 1;
                     Some(NodeExecutionStatus::Errored {
-                        elapsed_secs: Some(*secs),
                         error: error.clone(),
                     })
                 }
                 NodeOutcome::Skipped { error } => Some(NodeExecutionStatus::Errored {
-                    elapsed_secs: None,
                     error: error.clone(),
                 }),
                 // The planner may have stopped at this node for want of an input — the one
@@ -514,10 +509,8 @@ impl ExecutionFrame<'_, '_> {
         // Attribute any logs this node emits to it (read by `ContextManager::log`).
         self.ctx.current_node = Some(node_id);
         let invoke_start = Instant::now();
-        self.reporter.progress(RunProgress {
-            node_id,
-            phase: RunPhase::Started { at: invoke_start },
-        });
+        self.reporter
+            .progress(node_id, RunPhase::Started { at: invoke_start });
 
         let result = {
             let slot = self.cache[node_idx].invoke_slot(e_node.outputs.len as usize);
@@ -569,22 +562,22 @@ impl ExecutionFrame<'_, '_> {
             }
             Err(error) => {
                 slot.clear_output();
-                self.node_outcomes[node_idx] = NodeOutcome::Failed {
-                    secs: run_time,
-                    error,
-                };
+                self.node_outcomes[node_idx] = NodeOutcome::Failed { error };
                 false
             }
         };
-        // No `Finished` for the cancelled node — it didn't complete; the consumer would
-        // otherwise paint it executed live.
+        // No finish for the cancelled node — it didn't complete.
         if !cancelled {
-            self.reporter.progress(RunProgress {
-                node_id,
-                phase: RunPhase::Finished {
+            let phase = if succeeded {
+                RunPhase::Succeeded {
                     elapsed_secs: run_time,
-                },
-            });
+                }
+            } else {
+                RunPhase::Failed {
+                    elapsed_secs: run_time,
+                }
+            };
+            self.reporter.progress(node_id, phase);
         }
         if !succeeded {
             return;

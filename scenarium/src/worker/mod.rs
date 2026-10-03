@@ -8,12 +8,13 @@ use crate::worker::error::WorkerExited;
 use crate::worker::protocol::{WorkerMessage, WorkerReport};
 use crate::worker::task::WorkerTask;
 
+pub(crate) mod activity;
 pub(crate) mod batch;
 pub(crate) mod error;
 pub(crate) mod event_loop;
 pub(crate) mod pause_gate;
 pub(crate) mod protocol;
-pub(crate) mod status;
+pub(crate) mod run_summary;
 mod task;
 
 #[derive(Debug)]

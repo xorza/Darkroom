@@ -10,7 +10,7 @@ fn nid(n: u128) -> NodeId {
     NodeId::from_u128(n)
 }
 
-fn completed_status(executed: &[(NodeId, f64)], errored: &[NodeId]) -> WorkerStatus {
+fn completed_status(executed: &[(NodeId, f64)], errored: &[NodeId]) -> WorkerReport {
     let mut nodes = executed
         .iter()
         .map(|&(node_id, elapsed_secs)| NodeStatus {
@@ -22,7 +22,6 @@ fn completed_status(executed: &[(NodeId, f64)], errored: &[NodeId]) -> WorkerSta
     nodes.extend(errored.iter().map(|&node_id| NodeStatus {
         node_id,
         status: Some(NodeExecutionStatus::Errored {
-            elapsed_secs: None,
             error: RunError::Invoke {
                 func_id: FuncId::from_u128(0),
                 message: "test error".into(),
@@ -30,32 +29,11 @@ fn completed_status(executed: &[(NodeId, f64)], errored: &[NodeId]) -> WorkerSta
         }),
         ram: RamUsage::default(),
     }));
-    WorkerStatus {
-        kind: WorkerStatusKind::Completed {
-            elapsed_secs: 0.0,
-            executed_node_count: executed.len(),
-            cancelled: false,
-        },
+    WorkerReport::Completed(Arc::new(RunSummary {
+        executed_node_count: executed.len(),
         nodes,
-        ..WorkerStatus::default()
-    }
-}
-
-fn node_patch(
-    activity: WorkerActivity,
-    node_id: NodeId,
-    status: NodeExecutionStatus,
-) -> WorkerStatus {
-    WorkerStatus {
-        activity,
-        kind: WorkerStatusKind::Patch,
-        nodes: vec![NodeStatus {
-            node_id,
-            status: Some(status),
-            ram: RamUsage::default(),
-        }],
-        ..WorkerStatus::default()
-    }
+        ..RunSummary::default()
+    }))
 }
 
 fn run_state(nodes: impl IntoIterator<Item = NodeId>) -> RunState {
@@ -171,12 +149,14 @@ fn clear_drops_the_document_half_and_keeps_the_worker_half() {
     assert_eq!(state.cache_ram, RamUsage { cpu: 24, gpu: 0 });
 
     // And that program still attributes a report, rather than panicking.
-    state.apply_worker_status(&node_patch(
-        WorkerActivity::Executing,
-        node,
-        NodeExecutionStatus::Cached,
-    ));
-    assert_eq!(state.status(node), ExecStatus::Cached);
+    state.apply_report(
+        WorkerReport::Progress {
+            node_id: node,
+            phase: RunPhase::Succeeded { elapsed_secs: 0.5 },
+        },
+        &mut StatusLog::default(),
+    );
+    assert_eq!(state.status(node), ExecStatus::Executed(0.5));
 }
 
 /// The cache readout follows the worker's own measurements and nothing else.
@@ -244,24 +224,31 @@ fn install_and_clear_reports_carry_the_cache_reading() {
     assert!(state.previews.entries.is_empty());
 }
 
+/// Progress marks a node running, then executed or errored as its lambda finishes, and the
+/// worker's activity follows its own reports.
 #[test]
-fn node_patch_marks_the_attributed_node_running_then_executed() {
-    let node = nid(1);
-    let mut rs = run_state([node]);
+fn progress_marks_the_attributed_node_running_then_finished() {
+    let (succeeds, fails) = (nid(1), nid(2));
+    let mut rs = run_state([succeeds, fails]);
+    let mut log = StatusLog::default();
+    let mut progress = |rs: &mut RunState, node_id, phase| {
+        rs.apply_report(WorkerReport::Progress { node_id, phase }, &mut log);
+    };
 
-    rs.apply_worker_status(&node_patch(
-        WorkerActivity::Executing,
-        node,
-        NodeExecutionStatus::Running { at: Instant::now() },
-    ));
-    assert!(matches!(rs.status(node), ExecStatus::Running(_)));
+    rs.apply_report(
+        WorkerReport::Activity(WorkerActivity::Executing),
+        &mut StatusLog::default(),
+    );
+    assert!(rs.activity.is_executing());
+    let at = Instant::now();
+    progress(&mut rs, succeeds, RunPhase::Started { at });
+    assert_eq!(rs.status(succeeds), ExecStatus::Running(at));
+    progress(&mut rs, succeeds, RunPhase::Succeeded { elapsed_secs: 0.5 });
+    assert_eq!(rs.status(succeeds), ExecStatus::Executed(0.5));
 
-    rs.apply_worker_status(&node_patch(
-        WorkerActivity::Executing,
-        node,
-        NodeExecutionStatus::Executed { elapsed_secs: 0.5 },
-    ));
-    assert_eq!(rs.status(node), ExecStatus::Executed(0.5));
+    progress(&mut rs, fails, RunPhase::Started { at });
+    progress(&mut rs, fails, RunPhase::Failed { elapsed_secs: 0.25 });
+    assert_eq!(rs.status(fails), ExecStatus::Errored);
 
     // A node no event mentioned stays None.
     assert_eq!(rs.status(nid(99)), ExecStatus::None);
@@ -277,13 +264,17 @@ fn completed_snapshot_replaces_the_previous_run() {
     let errored = nid(2);
     let mut rs = run_state([executed, errored]);
 
-    rs.apply_worker_status(&completed_status(&[(nid(1), 1.0), (nid(2), 0.25)], &[]));
+    let mut log = StatusLog::default();
+    rs.apply_report(
+        completed_status(&[(nid(1), 1.0), (nid(2), 0.25)], &[]),
+        &mut log,
+    );
     assert_eq!(rs.status(executed), ExecStatus::Executed(1.0));
     assert_eq!(rs.status(errored), ExecStatus::Executed(0.25));
     assert_eq!(rs.error(errored), None);
 
     // Second run: only `errored` is reported, and it failed.
-    rs.apply_worker_status(&completed_status(&[], &[nid(2)]));
+    rs.apply_report(completed_status(&[], &[nid(2)]), &mut log);
     assert_eq!(rs.status(errored), ExecStatus::Errored);
     // The failure message rides along with the status — the inspector
     // shows it instead of a bare "errored".

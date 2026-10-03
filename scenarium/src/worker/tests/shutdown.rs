@@ -40,14 +40,10 @@ async fn exit_waits_for_active_event_cleanup_and_the_idle_report() {
     w.worker.exit().await.unwrap();
 
     assert!(dropped.load(Ordering::SeqCst));
-    let saw_idle = w.drain().into_iter().any(|report| {
-        matches!(
-            report,
-            WorkerReport::Status(status)
-                if status.kind == WorkerStatusKind::Activity
-                    && status.activity == WorkerActivity::Idle
-        )
-    });
+    let saw_idle = w
+        .drain()
+        .into_iter()
+        .any(|report| matches!(report, WorkerReport::Activity(WorkerActivity::Idle)));
     assert!(saw_idle, "exit returned before publishing idle");
     assert!(w.worker.send(WorkerMessage::Clear).is_err());
 }

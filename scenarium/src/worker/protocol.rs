@@ -6,9 +6,11 @@ use tokio::sync::oneshot;
 use crate::RamUsage;
 use crate::execution::cache::disk_store::DiskStore;
 use crate::execution::compile::compiled_graph::CompiledGraph;
+use crate::execution::report::RunPhase;
 use crate::execution::seeds::RunSeeds;
 use crate::graph::identity::NodeId;
-use crate::worker::status::WorkerStatus;
+use crate::worker::activity::WorkerActivity;
+use crate::worker::run_summary::RunSummary;
 
 #[derive(Debug)]
 pub enum WorkerReport {
@@ -25,7 +27,16 @@ pub enum WorkerReport {
     /// zero by construction, so nothing is carried.
     Cleared,
     Error(WorkerError),
-    Status(Arc<WorkerStatus>),
+    /// What the worker is doing changed.
+    Activity(WorkerActivity),
+    /// A node's lambda started or finished, as the run reaches it.
+    Progress {
+        node_id: NodeId,
+        phase: RunPhase,
+    },
+    /// A run completed. Reuses one allocation across runs while the host drops each summary
+    /// before the next arrives.
+    Completed(Arc<RunSummary>),
 }
 
 #[derive(Debug)]
