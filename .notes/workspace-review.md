@@ -20,8 +20,6 @@ Groups are named after their shared root cause and ordered by severity, then ben
 ## Canvas per-frame work that scales with graph size
 Severity: Medium — worst-case frame cost grows with nodes, wires and library size while nothing changes.
 
-- [ ] `gesture/new_node/node_palette.rs` `PaletteEntry::matching` (called from `NodePalette::body`) — allocates a new `Vec` sized to the whole library every frame the palette is open and sorts it with `lowercase_cmp` (Unicode case-folding per comparison), even when the query is unchanged. `NewNodeUi` owns a persistent `Search`; keep the row buffer there and re-filter only when `search.folded` changes. `name_matches` allocates `to_lowercase()` per non-ASCII row per frame.
-- [ ] `gesture/breaker/mod.rs` `Scribble::intersects_cubic` / `intersects_rect` — every visible wire is cut into 16 chords, each tested against every scribble segment (up to ~500), and every node rect against every segment, with no bounding-box rejection; `Wire::hull()` already exists. Keep a running scribble bounding box in `add_point`.
 - [ ] `darkroom/src/gui/graph_ctx/mod.rs` `GraphCtx::new` → `scenarium` `OutputTypes::update` — runs every frame: two hash inserts and a `DataType` clone per output port, and `OutputTypeSource::Const` clones a whole `ConstValue` to read its kind. No production func declares a wildcard output (see the scenarium group), so the table always equals the declared types.
 
 

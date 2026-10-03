@@ -187,3 +187,25 @@ fn a_caret_blink_does_not_read_as_the_canvas_having_been_away() {
         "the palette closed across a paint-only frame",
     );
 }
+
+/// The search reports a change only when its fold changed, so the palette
+/// filters its rows once per edit of the query and not on every frame — and
+/// not when the edit only changed the case.
+#[test]
+fn the_search_reports_only_a_changed_fold() {
+    let mut search = Search::default();
+    assert!(!search.fold(), "an empty query folds to what it was");
+
+    search.text.push_str("Blur");
+    assert!(search.fold());
+    assert_eq!(search.folded, "blur");
+    assert!(!search.fold(), "an unchanged query is no change");
+
+    search.text.make_ascii_uppercase();
+    assert!(!search.fold(), "a case change folds the same");
+    assert_eq!(search.folded, "blur");
+
+    search.text.push('x');
+    assert!(search.fold());
+    assert_eq!(search.folded, "blurx");
+}
