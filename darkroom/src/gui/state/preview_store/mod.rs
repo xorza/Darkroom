@@ -309,15 +309,20 @@ pub(crate) mod internals {
         }
     }
 
-    /// The smallest opaque image a preview card will render — 2×1 RGBA8.
+    /// A black `width`×`height` image in `format`, as a node would publish it.
+    pub(crate) fn image_value(width: usize, height: usize, format: ColorFormat) -> DynamicValue {
+        let raw = RawImage::new_black(ImageDesc::new(width, height, format)).unwrap();
+        DynamicValue::from_custom(LensImage::from(raw))
+    }
+
+    /// The smallest opaque image a preview card will render — 2×1 RGB8, which
+    /// has no alpha channel to be transparent with.
     ///
     /// Publishing a value is what makes a card clickable at all (it records
     /// `Sense::NONE` without one), so every test about that chip, or about the
     /// viewer tab it opens, starts by ingesting this.
     pub(crate) fn opaque_image_value() -> DynamicValue {
-        let desc = ImageDesc::new(2, 1, ColorFormat::RGBA_U8);
-        let raw = RawImage::new_with_data(desc, vec![255; desc.row_bytes()]).unwrap();
-        DynamicValue::from_custom(LensImage::from(raw))
+        image_value(2, 1, ColorFormat::RGB_U8)
     }
 }
 

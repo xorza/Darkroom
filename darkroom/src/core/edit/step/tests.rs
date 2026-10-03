@@ -23,7 +23,7 @@ use crate::core::edit::step::set_input::SetInput;
 use crate::core::edit::step::set_node_property::{NodeProperty, SetNodeProperty};
 use crate::core::edit::step::set_selection::SetSelection;
 use crate::core::edit::step::set_subscription::SetSubscription;
-use crate::core::edit::step::set_viewport::SetViewport;
+use crate::core::edit::step::set_viewport::{SetViewport, VIEWPORT_EPS};
 use crate::core::edit::step::undo_step::UndoStep;
 
 fn viewport(pan: Vec2, zoom: f32) -> Viewport {
@@ -354,10 +354,19 @@ fn viewport_noop_is_measured_not_exact() {
     let base = viewport(Vec2::new(3.0, 4.0), 1.5);
 
     assert!(same(base, base), "an unmoved camera is a no-op");
-    // Just inside the 1e-4 threshold, on each axis in turn.
-    assert!(same(base, viewport(base.pan + Vec2::new(5e-5, 0.0), 1.5)));
-    assert!(same(base, viewport(base.pan, 1.5 + 5e-5)));
-    // ...and just outside it.
-    assert!(!same(base, viewport(base.pan + Vec2::new(2e-4, 0.0), 1.5)));
-    assert!(!same(base, viewport(base.pan, 1.5 + 2e-4)));
+    // Half the threshold on each axis in turn is inside it, and twice it is
+    // outside.
+    for (scale, expected) in [(0.5, true), (2.0, false)] {
+        let d = VIEWPORT_EPS * scale;
+        assert_eq!(
+            same(base, viewport(base.pan + Vec2::new(d, 0.0), 1.5)),
+            expected,
+            "pan by {d}"
+        );
+        assert_eq!(
+            same(base, viewport(base.pan, 1.5 + d)),
+            expected,
+            "zoom by {d}"
+        );
+    }
 }

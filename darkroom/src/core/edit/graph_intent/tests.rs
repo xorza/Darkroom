@@ -54,19 +54,6 @@ fn undo_all(doc: &mut Document, steps: &[UndoStep]) {
     }
 }
 
-fn func_node() -> Node {
-    Node::new(NodeKind::Func(FuncId::unique()))
-}
-
-fn add_node(pos: Vec2, node_id: NodeId, node: Node) -> GraphIntent {
-    GraphIntent::AddNode {
-        pos,
-        node_id,
-        node,
-        bindings: vec![],
-    }
-}
-
 fn subscribe(emitter: NodeId, subscriber: NodeId, subscribe: bool) -> GraphIntent {
     GraphIntent::SetSubscription {
         subscription: Subscription {
@@ -178,15 +165,10 @@ fn redo_restores_the_depth_an_add_had() {
     let mut doc = fixture.doc;
     let x = NodeId::unique();
 
-    let add = GraphIntent::AddNode {
-        pos: Vec2::new(50.0, 0.0),
-        node_id: x,
-        node: func_node(),
-        bindings: vec![],
-    }
-    .commit(&mut doc, &fixture.library)
-    .unwrap()
-    .expect("adding a fresh node commits");
+    let add = GraphIntent::add_node(Vec2::new(50.0, 0.0), x, DocFixture::stub_node())
+        .commit(&mut doc, &fixture.library)
+        .unwrap()
+        .expect("adding a fresh node commits");
     let x_z = doc.main_view.item_placements[&x].z;
     let raise = GraphIntent::Raise { key: y }
         .commit(&mut doc, &fixture.library)
@@ -684,13 +666,13 @@ fn insertions_reusing_an_identity_are_refused_instead_of_panicking() {
     assert_invalid(
         &mut doc,
         &fixture.library,
-        add_node(Vec2::ZERO, live, func_node()),
+        GraphIntent::add_node(Vec2::ZERO, live, DocFixture::stub_node()),
         "AddNode over a live id",
     );
     assert_invalid(
         &mut doc,
         &fixture.library,
-        add_node(Vec2::ZERO, NodeId::nil(), func_node()),
+        GraphIntent::add_node(Vec2::ZERO, NodeId::nil(), DocFixture::stub_node()),
         "AddNode with a nil id",
     );
 
@@ -699,7 +681,7 @@ fn insertions_reusing_an_identity_are_refused_instead_of_panicking() {
     // already in.
     let repeated = NodeId::unique();
     assert!(
-        add_node(Vec2::ZERO, repeated, func_node())
+        GraphIntent::add_node(Vec2::ZERO, repeated, DocFixture::stub_node())
             .commit(&mut doc, &fixture.library)
             .unwrap()
             .is_some()
@@ -707,7 +689,7 @@ fn insertions_reusing_an_identity_are_refused_instead_of_panicking() {
     assert_invalid(
         &mut doc,
         &fixture.library,
-        add_node(Vec2::ONE, repeated, func_node()),
+        GraphIntent::add_node(Vec2::ONE, repeated, DocFixture::stub_node()),
         "a second AddNode repeating an id from the same batch",
     );
 }
@@ -724,14 +706,14 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
     let ghost = NodeId::unique();
     let nan = Vec2::new(f32::NAN, 0.0);
 
-    let mut nil_func = func_node();
+    let mut nil_func = DocFixture::stub_node();
     nil_func.kind = NodeKind::Func(FuncId::nil());
 
     let fresh = NodeId::unique();
     let seeded = |bindings: Vec<(InputPort, Binding)>| GraphIntent::AddNode {
         pos: Vec2::ZERO,
         node_id: fresh,
-        node: func_node(),
+        node: DocFixture::stub_node(),
         bindings: bindings
             .into_iter()
             .map(|(port, binding)| BindingEntry { port, binding })
@@ -740,11 +722,11 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
     let cases = [
         (
             "AddNode at a non-finite position",
-            add_node(nan, NodeId::unique(), func_node()),
+            GraphIntent::add_node(nan, NodeId::unique(), DocFixture::stub_node()),
         ),
         (
             "AddNode with a nil func id",
-            add_node(Vec2::ZERO, NodeId::unique(), nil_func),
+            GraphIntent::add_node(Vec2::ZERO, NodeId::unique(), nil_func),
         ),
         (
             "AddNode seeding a binding from a producer that isn't there",

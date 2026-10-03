@@ -445,8 +445,8 @@ mod tests {
 
         // Type repeats the name (case-insensitively) → the name alone, no
         // "Image · Image" stutter; distinct type → "name · type". A path
-        // port still announces its type when the name differs — the old
-        // formatter dropped it entirely for valueless path ports.
+        // port announces its type when the name differs, with no value
+        // shown or with one.
         let cases: [(&str, &DataType, &str); 4] = [
             ("Float", &DataType::Float, "Float"),
             ("Brightness", &DataType::Float, "Brightness · float"),

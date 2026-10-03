@@ -1,10 +1,8 @@
 use super::*;
 
-/// `node::header::RUN_TIME_MIN_WIDTH` reserves ~7 mono glyphs so a running
-/// node's label measures the same across every digit-count change, which
-/// is what stops its outgoing wires twitching mid-run. That only holds
-/// while `fmt_elapsed` stays inside 7 characters — widen it and the floor
-/// silently stops covering the common range.
+/// Each unit switch on both sides, and the carry that shows a value rounding
+/// up to the next unit's 1 in that unit. The node header measures these
+/// against the width its label reserves.
 #[test]
 fn fmt_elapsed_steps_through_units_within_the_reserved_width() {
     // Both sides of every unit switch, plus the digit-count steps within
@@ -29,12 +27,10 @@ fn fmt_elapsed_steps_through_units_within_the_reserved_width() {
         (999_999.0, "999999s"),
     ];
     for (secs, expected) in cases {
-        let got = fmt_elapsed(secs).to_string();
-        assert_eq!(got, expected, "fmt_elapsed({secs})");
-        assert!(
-            got.chars().count() <= 7,
-            "{got:?} is {} chars — past what RUN_TIME_MIN_WIDTH reserves",
-            got.chars().count(),
+        assert_eq!(
+            fmt_elapsed(secs).to_string(),
+            expected,
+            "fmt_elapsed({secs})"
         );
     }
 }

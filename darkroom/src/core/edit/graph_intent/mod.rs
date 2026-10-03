@@ -533,4 +533,24 @@ impl GraphIntent {
 }
 
 #[cfg(test)]
+pub(crate) mod internals {
+    use glam::Vec2;
+    use scenarium::{Node, NodeId};
+
+    use crate::core::edit::graph_intent::GraphIntent;
+
+    impl GraphIntent {
+        /// An `AddNode` of `node` at `pos` under `node_id`, seeding no binding.
+        pub(crate) const fn add_node(pos: Vec2, node_id: NodeId, node: Node) -> Self {
+            Self::AddNode {
+                pos,
+                node_id,
+                node,
+                bindings: Vec::new(),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests;

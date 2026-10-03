@@ -147,7 +147,7 @@ fn the_frame_that_first_draws_a_viewer_uploads_and_frames_it() {
     let pane = Some(Vec2::new(800.0, 600.0));
     // The record closure runs once per pass, so counting it is what
     // says the frame settled in one — palantir keeps its pass structure
-    // to itself, and `FrameReport` no longer names it.
+    // to itself, and `FrameReport` does not name it.
     let mut passes = 0u32;
     let first = h.frame(|ui| {
         passes += 1;

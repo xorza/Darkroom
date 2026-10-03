@@ -510,9 +510,7 @@ mod tests {
     /// all of them at once, and nothing can be retained by one sweep while
     /// another has released it.
     ///
-    /// Re-diverging the predicates is what this catches: they were four
-    /// separate spellings of `graph.find(..).is_some()` before, and nothing
-    /// said which were meant to differ.
+    /// Re-diverging the predicates is what this catches.
     #[test]
     fn node_liveness_is_one_rule_with_two_declared_narrowings() {
         let mut fixture = DocFixture::default();

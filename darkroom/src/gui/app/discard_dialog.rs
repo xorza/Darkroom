@@ -160,10 +160,10 @@ mod tests {
 
     #[test]
     fn only_a_transition_that_goes_through_can_silence_the_prompt() {
-        // The regression this pins: "Don't ask again" used to persist
-        // *before* the save ran, so cancelling a Save As left the document
-        // open and dirty with the guard permanently off — and the next
-        // discard took the work with it, silently.
+        // "Don't ask again" persists only once the transition goes through.
+        // Persisted before the save ran, a cancelled Save As would leave the
+        // document open and dirty with the guard permanently off — and the
+        // next discard would take the work with it, silently.
         assert_eq!(
             answer(DiscardChoice::Save, true).resolve(true),
             resolution(false, false),

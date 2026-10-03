@@ -106,7 +106,7 @@ impl SessionHarness {
 
     /// One editor frame. Returns the commands the **first** record pass
     /// produced; a frame with pending action input records twice and the
-    /// second pass no longer sees the one-frame edges that raise most
+    /// second pass does not see the one-frame edges that raise most
     /// commands.
     pub(crate) fn frame(&mut self) -> Vec<AppCommand> {
         let Self {

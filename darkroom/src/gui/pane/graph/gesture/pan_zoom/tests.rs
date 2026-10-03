@@ -1,5 +1,3 @@
-use scenarium::NodeId;
-
 use super::*;
 use crate::core::document::harness::DocFixture;
 use crate::gui::graph_ctx::harness::GraphCtxFixture;
@@ -13,12 +11,11 @@ fn node_bounds_uses_cached_sizes_and_falls_back_to_points() {
     //   a: (0,0) 150×80      — on-screen, size cached
     //   b: (1000,500) 200×100 — culled, but its size is still cached
     //   c: (-50,300) never measured — contributes a point
-    let (a, b, c) = (NodeId::unique(), NodeId::unique(), NodeId::unique());
-    let mut scene = GraphCtxFixture::over(DocFixture::stubs([
-        (a, Vec2::new(0.0, 0.0)),
-        (b, Vec2::new(1000.0, 500.0)),
-        (c, Vec2::new(-50.0, 300.0)),
-    ]));
+    let mut fixture = DocFixture::default();
+    let a = fixture.stub_at(Vec2::new(0.0, 0.0));
+    let b = fixture.stub_at(Vec2::new(1000.0, 500.0));
+    fixture.stub_at(Vec2::new(-50.0, 300.0));
+    let mut scene = GraphCtxFixture::over(fixture);
     let mut geometry = CanvasGeometry::default();
     geometry.seed_node_size(a, Size::new(150.0, 80.0));
     geometry.seed_node_size(b, Size::new(200.0, 100.0));
@@ -38,227 +35,147 @@ fn node_bounds_uses_cached_sizes_and_falls_back_to_points() {
     assert_eq!(sel.size, Size::new(200.0, 100.0));
 
     // Empty graph → nothing to frame.
-    let mut empty = GraphCtxFixture::over(DocFixture::stubs([]));
+    let mut empty = GraphCtxFixture::over(DocFixture::default());
     assert!(node_bounds(&geometry, empty.graph_ctx(), false).is_none());
 }
 
+/// Wheel up zooms in, wheel down zooms out, and each notch multiplies by the
+/// same step. The expected values are `1.00250005722045898^n` in f64 — the
+/// base is `1.0025` as f32 rounds it — so they test the formula, not repeat it.
 #[test]
-fn scroll_to_zoom_factor_zero_delta_is_identity() {
-    // No scroll event → no zoom change. Bit-exact because
-    // `1.0025_f32.powf(0.0)` returns exactly `1.0` by f32 spec.
-    assert_eq!(scroll_to_zoom_factor(0.0), 1.0);
+fn scroll_to_zoom_factor_is_one_step_per_pixel() {
+    assert_eq!(scroll_to_zoom_factor(0.0), 1.0, "no scroll, no zoom");
+    let cases: [(f32, f64); 4] = [
+        (-18.0, 1.045_970_195_001_467_5),
+        (18.0, 0.956_050_186_495_607_6),
+        (-36.0, 1.094_053_648_831_408),
+        (-72.0, 1.196_953_386_521_317_8),
+    ];
+    for (delta, expected) in cases {
+        let got = f64::from(scroll_to_zoom_factor(delta));
+        // `powf` is accurate to one ulp, not correctly rounded.
+        assert!(
+            (got - expected).abs() <= f64::from(f32::EPSILON) * expected,
+            "scroll {delta}: factor {got}, expected {expected}",
+        );
+    }
 }
 
+/// The world point under the pivot stays under it, also when the zoom clamps
+/// and the factor that applies is not the one asked for.
 #[test]
-fn scroll_to_zoom_factor_wheel_up_zooms_in() {
-    // One classic wheel notch up after palantir line→pixel
-    // conversion lands around `-line_px` (theme default ≈ 18 px,
-    // sign-flipped at ingest). Round-trip check: a typical wheel
-    // notch produces a > 1.0 factor; magnitude is the documented
-    // `SCROLL_ZOOM_BASE^|delta|`.
-    let f = scroll_to_zoom_factor(-18.0);
-    assert!(f > 1.0, "wheel up must zoom in, got factor {f}");
-    // Hand-computed: 1.0025^18 ≈ 1.04604.
-    let expected = SCROLL_ZOOM_BASE.powf(18.0);
-    assert!(
-        (f - expected).abs() < 1e-6,
-        "factor {f} != expected {expected}",
-    );
-}
-
-#[test]
-fn scroll_to_zoom_factor_wheel_down_zooms_out() {
-    // Mirrored notch in the other direction: factor < 1, and
-    // multiplied with the up-notch factor produces ~1.0 (the two
-    // are reciprocals modulo float error).
-    let f_down = scroll_to_zoom_factor(18.0);
-    let f_up = scroll_to_zoom_factor(-18.0);
-    assert!(f_down < 1.0, "wheel down must zoom out, got {f_down}");
-    let product = f_down * f_up;
-    assert!(
-        (product - 1.0).abs() < 1e-6,
-        "opposite-direction factors must reciprocate, got product {product}",
-    );
-}
-
-#[test]
-fn scroll_to_zoom_factor_scales_monotonically_with_magnitude() {
-    // 4 notches up zooms more aggressively than 1 notch up.
-    let one = scroll_to_zoom_factor(-18.0);
-    let four = scroll_to_zoom_factor(-72.0);
-    assert!(
-        four > one,
-        "larger-magnitude up-scroll must produce larger factor; one={one}, four={four}",
-    );
-    // 4 × notch = (single notch factor) ^ 4 by exponent law.
-    let expected_four = one.powi(4);
-    assert!(
-        (four - expected_four).abs() < 1e-5,
-        "factor for 4 notches {four} != single^4 {expected_four}",
-    );
-}
-
-#[test]
-fn zoom_about_holds_pivot_invariant() {
-    // The point under the pivot in world space (i.e. in
-    // pre-transform inner-canvas coords) must land on the same
-    // local pivot after zooming. Algebra:
-    //   world_before = (pivot - pan_before) / zoom_before
-    //   world_after  = (pivot - pan_after)  / zoom_after
-    //   require world_before == world_after.
-    let (mut pan, mut zoom) = (Vec2::new(40.0, 20.0), 1.5);
-    let pivot = Vec2::new(200.0, 150.0);
-    let world_before = (pivot - pan) / zoom;
-    zoom_about(
-        &mut pan,
-        &mut zoom,
-        pivot,
-        1.3,
-        CANVAS_MIN_ZOOM,
-        CANVAS_MAX_ZOOM,
-    );
-    let world_after = (pivot - pan) / zoom;
-    let drift = (world_after - world_before).length();
-    assert!(
-        drift < 1e-4,
-        "world point under pivot drifted by {drift} (before={world_before}, after={world_after})",
-    );
-}
-
-#[test]
-fn zoom_about_with_scroll_factor_preserves_pivot() {
-    // End-to-end: a wheel scroll triggers `zoom_about` with the
-    // `scroll_to_zoom_factor` output. The same pivot invariant
-    // must hold regardless of which factor source the caller used.
-    let (mut pan, mut zoom) = (Vec2::new(-15.0, 75.0), 0.8);
-    let pivot = Vec2::new(300.0, 200.0);
-    let world_before = (pivot - pan) / zoom;
-    // 2 notches up.
-    let factor = scroll_to_zoom_factor(-36.0);
-    zoom_about(
-        &mut pan,
-        &mut zoom,
+fn zoom_about_holds_the_pivot_and_clamps() {
+    struct Case {
+        pan: Vec2,
+        zoom: f32,
+        pivot: Vec2,
+        factor: f32,
+        expected_zoom: f32,
+    }
+    let cases = [
+        Case {
+            pan: Vec2::new(40.0, 20.0),
+            zoom: 1.5,
+            pivot: Vec2::new(200.0, 150.0),
+            factor: 1.3,
+            expected_zoom: 1.5 * 1.3,
+        },
+        Case {
+            pan: Vec2::new(-15.0, 75.0),
+            zoom: 0.8,
+            pivot: Vec2::new(300.0, 200.0),
+            factor: scroll_to_zoom_factor(-36.0),
+            expected_zoom: 0.8 * scroll_to_zoom_factor(-36.0),
+        },
+        Case {
+            pan: Vec2::new(10.0, 10.0),
+            zoom: CANVAS_MAX_ZOOM * 0.9,
+            pivot: Vec2::new(100.0, 100.0),
+            factor: 5.0,
+            expected_zoom: CANVAS_MAX_ZOOM,
+        },
+        Case {
+            pan: Vec2::new(10.0, 10.0),
+            zoom: CANVAS_MIN_ZOOM * 1.1,
+            pivot: Vec2::new(100.0, 100.0),
+            factor: 0.01,
+            expected_zoom: CANVAS_MIN_ZOOM,
+        },
+    ];
+    for Case {
+        mut pan,
+        mut zoom,
         pivot,
         factor,
-        CANVAS_MIN_ZOOM,
-        CANVAS_MAX_ZOOM,
-    );
-    let world_after = (pivot - pan) / zoom;
-    let drift = (world_after - world_before).length();
-    assert!(drift < 1e-4, "drift {drift}");
-    // Sanity: zoom did move in the expected direction (in).
-    assert!(zoom > 0.8, "scroll up should grow zoom; got {zoom}");
+        expected_zoom,
+    } in cases
+    {
+        let world_before = (pivot - pan) / zoom;
+        zoom_about(
+            &mut pan,
+            &mut zoom,
+            pivot,
+            factor,
+            CANVAS_MIN_ZOOM,
+            CANVAS_MAX_ZOOM,
+        );
+        assert_eq!(zoom, expected_zoom, "factor {factor}");
+        // Four f32 roundings lie between the two world points: the effective
+        // factor, the scaled offset, and the two subtractions.
+        let drift = ((pivot - pan) / zoom - world_before).abs().max_element();
+        let tolerance = 4.0 * f32::EPSILON * world_before.abs().max_element();
+        assert!(
+            drift <= tolerance,
+            "factor {factor}: the world point under the pivot drifted by {drift}",
+        );
+    }
 }
 
+/// Fitting puts the bounds' center on the pane's center, at the tighter
+/// axis's scale, never past 1:1 and never under the minimum zoom. Every value
+/// here is exact in f32, so the asserts are exact too.
 #[test]
-fn zoom_about_clamps_to_max() {
-    // Trying to zoom past `CANVAS_MAX_ZOOM` saturates without
-    // overshooting. Pivot invariance still holds at the clamped
-    // value (effective factor = CANVAS_MAX_ZOOM / zoom_before, not the
-    // requested factor).
-    let (mut pan, mut zoom) = (Vec2::new(10.0, 10.0), CANVAS_MAX_ZOOM * 0.9);
-    let pivot = Vec2::new(100.0, 100.0);
-    zoom_about(
-        &mut pan,
-        &mut zoom,
-        pivot,
-        5.0,
-        CANVAS_MIN_ZOOM,
-        CANVAS_MAX_ZOOM,
-    );
-    assert!(
-        (zoom - CANVAS_MAX_ZOOM).abs() < 1e-5,
-        "expected saturation at CANVAS_MAX_ZOOM={CANVAS_MAX_ZOOM}, got {zoom}",
-    );
-}
-
-#[test]
-fn zoom_about_clamps_to_min() {
-    let (mut pan, mut zoom) = (Vec2::new(10.0, 10.0), CANVAS_MIN_ZOOM * 1.1);
-    let pivot = Vec2::new(100.0, 100.0);
-    zoom_about(
-        &mut pan,
-        &mut zoom,
-        pivot,
-        0.01,
-        CANVAS_MIN_ZOOM,
-        CANVAS_MAX_ZOOM,
-    );
-    assert!(
-        (zoom - CANVAS_MIN_ZOOM).abs() < 1e-5,
-        "expected saturation at CANVAS_MIN_ZOOM={CANVAS_MIN_ZOOM}, got {zoom}",
-    );
-}
-
-/// The world point at the bbox center must land on the viewport
-/// center after applying the fitted `pan`/`scale`
-/// (`outer_local = pan + scale * world`).
-fn assert_centered(t: &Viewport, bounds: Rect, pane: Vec2) {
-    let mapped = t.pan + bounds.center() * t.zoom;
-    let drift = (mapped - pane * 0.5).length();
-    assert!(drift < 1e-3, "bbox center off viewport center by {drift}");
-}
-
-#[test]
-fn fit_target_shrinks_oversized_bounds() {
-    // 1000×500 world bbox at origin into an 800×600 pane. Margin 40 →
-    // avail 720×520. sx = 720/1000 = 0.72, sy = 520/500 = 1.04; the
-    // width binds, so scale = 0.72.
-    let bounds = Rect::new(0.0, 0.0, 1000.0, 500.0);
-    let viewport = Vec2::new(800.0, 600.0);
-    let t = fit_target(bounds, viewport);
-    assert!((t.zoom - 0.72).abs() < 1e-4, "zoom {}", t.zoom);
-    // pan = (400,300) - (500,250)*0.72 = (40, 120).
-    assert!(
-        (t.pan - Vec2::new(40.0, 120.0)).length() < 1e-3,
-        "pan {}",
-        t.pan
-    );
-    assert_centered(&t, bounds, viewport);
-}
-
-#[test]
-fn fit_target_never_magnifies_past_one_to_one() {
-    // A small bbox would fit at 5.2×, but fitting must not zoom in
-    // past 1:1 — scale caps at 1.0, still centered.
-    let bounds = Rect::new(0.0, 0.0, 100.0, 100.0);
-    let viewport = Vec2::new(800.0, 600.0);
-    let t = fit_target(bounds, viewport);
-    assert_eq!(t.zoom, 1.0);
-    // pan = (400,300) - (50,50)*1.0 = (350, 250).
-    assert!(
-        (t.pan - Vec2::new(350.0, 250.0)).length() < 1e-3,
-        "pan {}",
-        t.pan
-    );
-    assert_centered(&t, bounds, viewport);
-}
-
-#[test]
-fn fit_target_degenerate_point_holds_scale_and_centers() {
-    // A zero-size bbox (single unmeasured node) can't fit-scale — both
-    // axes are unbounded → scale falls back to 1.0, point recentred.
-    let bounds = Rect::new(200.0, 200.0, 0.0, 0.0);
-    let viewport = Vec2::new(800.0, 600.0);
-    let t = fit_target(bounds, viewport);
-    assert_eq!(t.zoom, 1.0);
-    assert!(
-        (t.pan - Vec2::new(200.0, 100.0)).length() < 1e-3,
-        "pan {}",
-        t.pan
-    );
-    assert_centered(&t, bounds, viewport);
-}
-
-#[test]
-fn fit_target_clamps_to_min_zoom() {
-    // A bbox far larger than any reachable zoom saturates at CANVAS_MIN_ZOOM
-    // rather than the (smaller) exact fit; still centered.
-    let bounds = Rect::new(0.0, 0.0, 100_000.0, 100_000.0);
-    let viewport = Vec2::new(800.0, 600.0);
-    let t = fit_target(bounds, viewport);
-    assert!((t.zoom - CANVAS_MIN_ZOOM).abs() < 1e-6, "zoom {}", t.zoom);
-    assert_centered(&t, bounds, viewport);
+fn fit_target_centers_at_the_tighter_scale() {
+    let pane = Vec2::new(800.0, 600.0);
+    let cases = [
+        // Margin 40 leaves 720×520: 720/1000 = 0.72 binds before 520/500.
+        // pan = (400, 300) - (500, 250)·0.72 = (40, 120).
+        (
+            Rect::new(0.0, 0.0, 1000.0, 500.0),
+            0.72,
+            Vec2::new(40.0, 120.0),
+        ),
+        // It would fit at 5.2×, but stops at 1:1.
+        // pan = (400, 300) - (50, 50) = (350, 250).
+        (
+            Rect::new(0.0, 0.0, 100.0, 100.0),
+            1.0,
+            Vec2::new(350.0, 250.0),
+        ),
+        // A zero-size box constrains no axis, so it is 1:1 and centred.
+        // pan = (400, 300) - (200, 200) = (200, 100).
+        (
+            Rect::new(200.0, 200.0, 0.0, 0.0),
+            1.0,
+            Vec2::new(200.0, 100.0),
+        ),
+        // The exact fit is under the minimum zoom, so the minimum holds.
+        // pan = (400, 300) - (50000, 50000)·0.1 = (-4600, -4700).
+        (
+            Rect::new(0.0, 0.0, 100_000.0, 100_000.0),
+            CANVAS_MIN_ZOOM,
+            Vec2::new(-4600.0, -4700.0),
+        ),
+    ];
+    for (bounds, zoom, pan) in cases {
+        let t = fit_target(bounds, pane);
+        assert_eq!((t.zoom, t.pan), (zoom, pan), "{bounds:?}");
+        assert_eq!(
+            t.pan + bounds.center() * t.zoom,
+            pane * 0.5,
+            "{bounds:?} centred"
+        );
+    }
 }
 
 #[test]
