@@ -1167,18 +1167,18 @@ Each phase builds and passes the verification chain on its own. A phase closes i
 - Performance: the rest of group 24, each with a bench before and after.
 - Docs: the rest of group 25. A doc that a phase above rewrites is fixed in that phase.
 - Style: the rest of group 26. Dependencies: group 27.
-- Scope decisions for 16.12, 19.8 and 20.3.
-- **Closes:** 18.1, 18.2, 22.2 to 22.4, the rest of groups 24 to 27, and 16.12, 19.8 and 20.3 after their decisions.
+- Markesteijn 3-pass as an option (16.12). SCNR Maximum Neutral, Maximum Mask and an Average Neutral amount (19.8).
+- **Closes:** 16.12, 18.1, 18.2, 19.8, 22.2 to 22.4, the rest of groups 24 to 27. 20.3 stays open until CFA drizzle enters the scope.
 
-# Decisions to confirm
+# Decisions
 
-Each item has a recommendation. Each needs an answer before its phase starts.
+Confirmed on 2026-10-03.
 
-1. **Linear-fit model (phase 4).** Recommended: normal-score regression, so that k is in σ units and the clean-data rejection rate is the same for every N. The alternative is Siril's exact rank fit with the survivor floor.
-2. **`min_survivors` default (phase 3).** Recommended: 3, as in PixInsight. Siril uses 4.
-3. **Flagged samples in the combine (phase 3).** Recommended: exclude `SATURATED`, `COSMIC_RAY` and `REPAIRED` samples while `min_survivors` unflagged samples remain. The alternative keeps the repaired and clipped values, as most amateur tools do.
-4. **Flag storage (phase 3).** Recommended: one byte plane. The alternative is one `BitBuffer2` per bit. It uses less memory when one bit is set, but each pixel then needs several reads and the warp needs one pass per bit.
-5. **Dark scaling (phase 6).** Recommended: exposure-ratio scaling only, for a bias-removed dark. PixInsight-style optimization can come later as an option.
-6. **Features, not defects.** CFA drizzle (20.3), SCNR Maximum Neutral and Maximum Mask (19.8), Markesteijn 3-pass (16.12). Recommended: 3-pass Markesteijn as an option. The other two wait.
+1. **Linear fit (phase 4):** normal-score regression.
+2. **`min_survivors` default (phase 3):** 3.
+3. **Flagged samples in the combine (phase 3):** excluded while `min_survivors` unflagged samples remain.
+4. **Flag storage (phase 3):** one byte plane.
+5. **Dark scaling (phase 6):** exposure-ratio scaling only, for a bias-removed dark.
+6. **Scope:** Markesteijn 3-pass as an option (16.12), and SCNR Maximum Neutral, Maximum Mask and an Average Neutral amount (19.8) are in scope. CFA drizzle (20.3) waits.
 
 No phase needs a new dependency. `statrs` gives `Φ⁻¹` and `erf`. `sysinfo` gives the cgroup limits. `std` gives the Windows delete-on-close flags. `/proc/self/mountinfo` gives the file system type.
