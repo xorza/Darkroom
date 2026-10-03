@@ -72,7 +72,7 @@ Severity: Medium — the same default is baked in two crates and goes stale sile
 ## Public API, dependencies and derives with no production user
 Severity: Low — removable surface; checked with `rg` across the workspace.
 
-- [ ] `scenarium` — `impl FromStr for DataType`; serde derives on `DataType`, `FsPathConfig`, `FsPathMode`, `FuncBehavior`, `FuncInput`, `FuncOutput`, `OutputType`, `ValueVariant`, `OutputDemand`, `EventPort`; `lib.rs` `pub use common::CancelToken` (every user imports `common::CancelToken`); `digest_pod_ints!` widths `u8`/`u16`/`i8`/`i16`/`i32`. `Library::remove` has no production caller once lens's test-only path goes (below), and its doc ("lens drops its ML nodes…") is stale.
+- [ ] `scenarium` — `Library::remove` has no production caller once lens's test-only path goes (below), and its doc ("lens drops its ML nodes…") is stale.
 - [ ] `lens` — `astro/nodes/mod.rs` `configure_ml_model_defaults` (re-exported from `lib.rs`) and `astro/nodes/ml.rs` `replace` are called only by `astro/nodes/tests.rs` (darkroom has its own same-named method); `Cargo.toml` `parking_lot` is unreferenced; `astro/nodes/stacking.rs` `light_frames` / `LightFramesError` duplicate lumos's `Error::NoFrames` and `AsRef<Path>` handling; `astro/nodes/calibration.rs` `CACHE_PRESENT` prefix distinguishes nothing.
 - [ ] `darkroom` — `core/document/open_document/replay_outcome.rs` `ReplayOutcome::took` (tests only, `allow(dead_code)`); `gui/state/run_state/mod.rs` `RunState::apply_worker_status` is `pub(crate)` with no outside caller; `OpenDocument::open_at_launch_with` is a production indirection (injected `save_preferences` closure) existing for a test.
 

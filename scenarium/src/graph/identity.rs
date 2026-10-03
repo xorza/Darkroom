@@ -47,9 +47,7 @@ impl OutputPort {
 /// Lives here rather than in the execution internals because it names the
 /// same thing on both sides: a node in a compiled program *is* the authored
 /// node, and its event ports are the func's.
-#[derive(
-    Clone, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
-)]
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EventPort {
     pub node_id: NodeId,
     pub event_idx: usize,

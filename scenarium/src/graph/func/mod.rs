@@ -13,9 +13,8 @@ use crate::graph::func::event::EventLambda;
 use crate::graph::func::lambda::FuncLambda;
 use crate::graph::node::CacheMode;
 use crate::{ConstValue, DataType, TypeId};
-use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum FuncBehavior {
     // could return different values for same inputs
     #[default]
@@ -24,13 +23,12 @@ pub enum FuncBehavior {
     Pure,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ValueVariant {
     pub name: String,
     pub value: ConstValue,
     /// A friendlier dropdown label than `name`, when there is one. See
     /// [`label`](Self::label).
-    #[serde(default)]
     pub display: Option<String>,
 }
 
@@ -58,29 +56,24 @@ impl ValueVariant {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FuncInput {
     pub name: String,
     pub required: bool,
     pub data_type: DataType,
     /// One-line human explanation shown as the port's hover tooltip in the
     /// editor (units, range, meaning). Display-only — execution never reads it.
-    #[serde(default)]
     pub description: Option<String>,
     /// When set, this input may only hold a `Const` literal — wiring an upstream
     /// output into it (a `Bind`) is rejected by graph validation and blocked in
     /// the editor. For inputs a node reads as configuration, so a stray
     /// connection can't silently defeat that.
-    #[serde(default)]
     pub const_only: bool,
-    #[serde(default)]
     pub default_value: Option<ConstValue>,
-    #[serde(default)]
     pub value_variants: Vec<ValueVariant>,
     /// The input this one overrides: while this input delivers a value, the
     /// target is set aside — not delivered, not digested, not required. The
     /// target is `const_only`, so setting it aside never strands a producer.
-    #[serde(default)]
     pub overrides: Option<usize>,
 }
 
@@ -186,7 +179,7 @@ impl FuncInput {
 /// An output port's type: either a fixed [`DataType`], or a *wildcard* that
 /// mirrors an input. A sum type (rather than a `DataType` + an
 /// `Option<mirror>`) so a wildcard can't carry a stray concrete type.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OutputType {
     /// A fixed, declared output type.
     Fixed(DataType),
@@ -209,13 +202,12 @@ impl OutputType {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FuncOutput {
     pub name: String,
     pub ty: OutputType,
     /// One-line human explanation shown as the port's hover tooltip in the
     /// editor. Display-only — execution never reads it.
-    #[serde(default)]
     pub description: Option<String>,
 }
 
