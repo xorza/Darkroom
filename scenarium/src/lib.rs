@@ -35,7 +35,6 @@ mod runtime;
 pub mod testing;
 mod worker;
 
-pub use common::CancelToken;
 pub use data::codec::CustomValueCodec;
 pub use data::codec::error::{CodecError, CodecFormatError};
 pub use data::const_value::{ConstValue, ValueText};

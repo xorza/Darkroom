@@ -1,7 +1,5 @@
-use std::str::FromStr;
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
 use strum::VariantNames;
 
 use common::id_type;
@@ -23,7 +21,7 @@ impl<T: VariantNames> EnumVariants for T {
 
 id_type!(TypeId);
 
-#[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Hash)]
 pub enum FsPathMode {
     #[default]
     ExistingFile,
@@ -32,7 +30,7 @@ pub enum FsPathMode {
     Directory,
 }
 
-#[derive(Clone, Default, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, PartialEq, Eq, Hash)]
 pub struct FsPathConfig {
     pub mode: FsPathMode,
     pub extensions: Vec<String>,
@@ -51,7 +49,7 @@ impl FsPathConfig {
     }
 }
 
-#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
 pub enum DataType {
     #[default]
     Any,
@@ -213,21 +211,6 @@ pub(crate) enum Strictness {
     Declared,
     /// A document's authored `Const`, at compile.
     Authored,
-}
-
-impl FromStr for DataType {
-    type Err = ();
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "float" | "number" => Ok(DataType::Float),
-            "int" => Ok(DataType::Int),
-            "bool" => Ok(DataType::Bool),
-            "string" => Ok(DataType::String),
-            "path" => Ok(DataType::FsPath(Arc::new(FsPathConfig::default()))),
-            _ => Err(()),
-        }
-    }
 }
 
 #[cfg(test)]
