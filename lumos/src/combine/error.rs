@@ -52,6 +52,16 @@ pub enum Error {
     #[error("registered frames have no pixels with common valid warp support")]
     NoCommonCoverage,
 
+    /// Multiplicative normalization divides by each frame's median, and this one is not positive.
+    #[error(
+        "frame {index} has median {median} in channel {channel}; a multiplicative normalization needs a positive one"
+    )]
+    NonPositiveMedian {
+        index: usize,
+        channel: usize,
+        median: f32,
+    },
+
     /// `Weighting::Noise` weighs each frame by its inverse noise variance, and this frame measured
     /// none: only synthetic data has no noise at all.
     #[error("frame {index} has no measured noise to weight by; use Equal or Manual weighting")]
