@@ -18,8 +18,11 @@
 //! layout around it. Neither can be mistaken for the other, so no code path
 //! has to carry state it will not read.
 
+pub(crate) mod drag_start;
+
 use std::collections::{BTreeSet, HashMap};
 use std::iter;
+use std::sync::Arc;
 
 use glam::Vec2;
 use scenarium::{Binding, BindingEntry, DetachedNode, InputPort, Node, NodeId, Subscription};
@@ -27,6 +30,8 @@ use scenarium::{Binding, BindingEntry, DetachedNode, InputPort, Node, NodeId, Su
 use crate::core::document::PortRef;
 use crate::core::document::{Document, ItemPlacement, Viewport};
 use crate::core::edit::error::MalformedIntent;
+use crate::core::edit::gesture_id::GestureId;
+use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::core::edit::step::change::Change;
 use crate::core::edit::step::move_selection::{Move, MoveSelection};
 use crate::core::edit::step::node_presence::{NodePresence, NodeState};
@@ -74,15 +79,16 @@ pub(crate) enum GraphIntent {
     RemoveNode {
         node_id: NodeId,
     },
-    /// Drag-move one or more selected node bodies in canvas-world
-    /// coordinates. A multi-select drag moves the whole group as a single
-    /// undo entry; a plain drag carries just the one grabbed item. `grabbed`
-    /// is whichever member the pointer latched — it keys the drag gesture so
-    /// consecutive frames coalesce.
+    /// One frame of a drag of one or more node bodies, in canvas-world
+    /// coordinates: every member of `members` moves to its start plus
+    /// `offset`. A multi-select drag moves the whole group; a plain drag
+    /// carries just the grabbed item. The frames of one `gesture` fold into
+    /// one undo entry.
     MoveSelection {
-        grabbed: NodeId,
-        /// `(item, target position)` per moved member.
-        moves: Vec<(NodeId, Vec2)>,
+        gesture: GestureId,
+        /// Shared with the drag that latched them, so a frame copies no list.
+        members: Arc<[DragStart]>,
+        offset: Vec2,
     },
     RenameNode {
         node_id: NodeId,
@@ -113,8 +119,11 @@ pub(crate) enum GraphIntent {
         node_id: NodeId,
         to: NodeProperty,
     },
+    /// Move the graph camera. A frame of a held gesture names it, so its
+    /// frames fold into one undo entry; a one-shot jump names none.
     SetViewport {
         to: Viewport,
+        gesture: Option<GestureId>,
     },
     /// Add (`subscribe = true`) or remove (`false`) an event subscription: an
     /// event wire dropped on, or severed from, a subscription pin.
@@ -328,27 +337,27 @@ impl GraphIntent {
                 };
                 UndoStep::NodePresence(Box::new(NodePresence::removal(state)))
             }
-            Self::MoveSelection { grabbed, moves } => {
-                let mut placed = Vec::with_capacity(moves.len());
-                for (key, to) in moves {
+            Self::MoveSelection {
+                members, offset, ..
+            } => {
+                let mut moves = Vec::with_capacity(members.len());
+                for member in members.iter() {
+                    let to = member.pos + offset;
                     validate::finite_position(to, "MoveSelection")?;
                     // Drag-sourced (spans frames): a member whose item
                     // vanished mid-gesture (node removed) drops quietly.
-                    let Some(placement) = view.item_placements.get(&key) else {
+                    let Some(placement) = view.item_placements.get(&member.node) else {
                         continue;
                     };
-                    placed.push(Move {
-                        key,
+                    moves.push(Move {
+                        key: member.node,
                         pos: Change {
                             from: placement.pos,
                             to,
                         },
                     });
                 }
-                UndoStep::MoveSelection(MoveSelection {
-                    grabbed,
-                    moves: placed,
-                })
+                UndoStep::MoveSelection(MoveSelection { moves })
             }
             Self::RenameNode { node_id, to } => {
                 let Some(node) = validate::live_node(graph, node_id, "RenameNode")? else {
@@ -432,7 +441,7 @@ impl GraphIntent {
                     property: Change { from, to },
                 })
             }
-            Self::SetViewport { to } => {
+            Self::SetViewport { to, .. } => {
                 if !to.is_valid() {
                     return Err(MalformedIntent::InvalidViewport);
                 }
@@ -473,6 +482,15 @@ impl GraphIntent {
             }
         };
         Ok(Some(step))
+    }
+
+    /// The held gesture this intent is a frame of, if any.
+    pub(crate) const fn gesture(&self) -> Option<GestureId> {
+        match self {
+            Self::MoveSelection { gesture, .. } => Some(*gesture),
+            Self::SetViewport { gesture, .. } => *gesture,
+            _ => None,
+        }
     }
 
     /// Build, no-op-filter, and apply one intent against `doc` in a single

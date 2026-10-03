@@ -39,9 +39,9 @@ use crate::gui::pane::graph::gesture::canvas_gesture::{CanvasGesture, classify_c
 use crate::gui::pane::graph::gesture::connection::ConnectionUI;
 use crate::gui::pane::graph::gesture::new_node::NewNodeUi;
 use crate::gui::pane::graph::gesture::node_menu::NodeMenuUi;
+use crate::gui::pane::graph::gesture::pan_zoom::camera_gesture::CameraGesture;
 use crate::gui::pane::graph::gesture::preview_drag::PreviewDrag;
 use crate::gui::pane::graph::gesture::selection::SelectionUI;
-use crate::gui::pane::graph::gesture::slot::GestureSlot;
 use crate::gui::pane::graph::gesture::subscription::SubscriptionUI;
 use crate::gui::pane::graph::gesture::{connection, pan_zoom, shortcuts, subscription};
 use crate::gui::pane::graph::node::{NodeDrawOutcome, NodeUI};
@@ -147,13 +147,9 @@ pub(crate) struct GraphUI {
     new_node_ui: NewNodeUi,
     node_menu: NodeMenuUi,
     selection_ui: SelectionUI,
-    /// Viewport pan snapshot captured at the frame the active pan-drag
-    /// latched, keyed by the pane that latched it. While the drag is
-    /// active, that pane's `viewport.pan = anchor + drag_delta`. Input
-    /// bookkeeping (lifetime = one gesture), not viewport state — and
-    /// keyed because `emit_pan_zoom` runs once per visible pane, so the
-    /// idle ones must not consume the live one's release edge.
-    pan_anchor: GestureSlot<Vec2>,
+    /// The camera's input in flight: a pan drag's latch, and the run of
+    /// wheel or pinch input. Input bookkeeping, not viewport state.
+    camera: CameraGesture,
 }
 
 impl GraphUI {
@@ -194,7 +190,7 @@ impl GraphUI {
             new_node_ui,
             node_menu,
             selection_ui,
-            pan_anchor,
+            camera,
             // Survivors: caches and panels that outlive the scene on purpose,
             // and the frame-local facts `prepass` rewrites before anything
             // reads them.
@@ -213,7 +209,7 @@ impl GraphUI {
         new_node_ui.reset();
         node_menu.reset();
         selection_ui.reset();
-        pan_anchor.clear();
+        camera.reset();
     }
 
     /// Take note of whether a pane is showing this canvas, and report whether
@@ -276,8 +272,8 @@ impl GraphUI {
         self.cancelled = ui.escape_pressed();
         let gesture = classify_canvas_gesture(ui);
         self.gesture = gesture;
-        pan_zoom::emit_pan_zoom(&mut self.pan_anchor, ui, graph_ctx, gesture, out);
-        self.node_ui.prepass(ui, graph_ctx, out);
+        pan_zoom::emit_pan_zoom(&mut self.camera, ui, graph_ctx, gesture, out);
+        self.node_ui.prepass(ui, graph_ctx, self.cancelled, out);
         // One walk, filling the geometry caches and the whole hit digest off
         // the same per-node and per-port responses.
         self.geometry.rebuild(ui, graph_ctx);

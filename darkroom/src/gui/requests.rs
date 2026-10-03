@@ -7,6 +7,7 @@ use palantir::DockOp;
 
 use crate::core::document::TabRef;
 use crate::core::edit::document_queue::DocumentQueue;
+use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::app::commands::AppCommand;
 
@@ -38,6 +39,11 @@ pub(crate) struct Requests {
 }
 
 impl Requests {
+    /// A fresh id for a gesture that starts now; see [`GestureId`].
+    pub(crate) fn open_gesture(&mut self) -> GestureId {
+        self.document.open_gesture()
+    }
+
     /// Queue a graph edit.
     pub(crate) fn push_graph(&mut self, intent: GraphIntent) {
         self.document.push_graph(intent);

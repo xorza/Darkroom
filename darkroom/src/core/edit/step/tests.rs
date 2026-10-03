@@ -32,7 +32,6 @@ fn viewport(pan: Vec2, zoom: f32) -> Viewport {
 
 fn move_step(key: NodeId, from: Vec2, to: Vec2) -> UndoStep {
     UndoStep::MoveSelection(MoveSelection {
-        grabbed: key,
         moves: vec![Move {
             key,
             pos: Change { from, to },
@@ -211,42 +210,75 @@ fn invalidates_cached_geometry_splits_resizes_from_moves() {
     }
 }
 
-/// Only the two kinds a pointer can hold open carry a gesture key, and each
-/// answers `coalesce` for its own variant and nothing else — the pairing the
-/// action stack relies on when it folds an entry in place.
+/// A later frame of a held gesture folds into the open step in place: each
+/// member keeps its first `from` and takes the latest `to`, and a member the
+/// later frame no longer carries keeps the position it last had.
 #[test]
-fn only_held_gestures_coalesce() {
+fn a_held_gesture_absorbs_its_next_frame_in_place() {
     let (a, b) = (NodeId::unique(), NodeId::unique());
-    let rename = UndoStep::RenameNode(RenameNode {
-        node_id: a,
-        name: Change {
-            from: "a".into(),
-            to: "b".into(),
-        },
-    });
-    assert!(rename.gesture_key().is_none(), "a rename is its own entry");
-    assert!(rename.coalesce(&rename).is_none());
-
-    // Two frames of the same drag fold into one step spanning both.
-    let first = move_step(a, Vec2::ZERO, Vec2::new(10.0, 0.0));
-    let second = move_step(a, Vec2::new(10.0, 0.0), Vec2::new(25.0, 0.0));
-    assert_eq!(first.gesture_key(), second.gesture_key());
-    let folded = first.coalesce(&second).expect("one drag, one entry");
-    let UndoStep::MoveSelection(folded) = &folded else {
-        panic!("a folded drag stays a drag: {folded:?}");
+    let mv = |key, from, to| Move {
+        key,
+        pos: Change { from, to },
     };
-    assert_eq!(folded.moves.len(), 1);
+    let mut open = UndoStep::MoveSelection(MoveSelection {
+        moves: vec![
+            mv(a, Vec2::ZERO, Vec2::new(10.0, 0.0)),
+            mv(b, Vec2::ONE, Vec2::new(11.0, 1.0)),
+        ],
+    });
+    // `a` dragged on to 25; `b` vanished, so the frame no longer carries it.
+    open.absorb(&move_step(a, Vec2::new(10.0, 0.0), Vec2::new(25.0, 0.0)));
+    let UndoStep::MoveSelection(folded) = &open else {
+        panic!("a folded drag stays a drag: {open:?}");
+    };
+    let halves: Vec<_> = folded
+        .moves
+        .iter()
+        .map(|moved| (moved.key, moved.pos.from, moved.pos.to))
+        .collect();
     assert_eq!(
-        (folded.moves[0].pos.from, folded.moves[0].pos.to),
-        (Vec2::ZERO, Vec2::new(25.0, 0.0)),
-        "the fold keeps the first `from` and takes the last `to`"
+        halves,
+        [
+            (a, Vec2::ZERO, Vec2::new(25.0, 0.0)),
+            (b, Vec2::ONE, Vec2::new(11.0, 1.0)),
+        ]
     );
 
-    // A different grabbed member is a different gesture, and folds nothing.
-    let other = move_step(b, Vec2::ZERO, Vec2::new(1.0, 0.0));
-    assert_ne!(first.gesture_key(), other.gesture_key());
-    // Kinds never fold across variants, whatever the stack asks.
-    assert!(first.coalesce(&rename).is_none());
+    let camera = |from, to| {
+        UndoStep::SetViewport(SetViewport {
+            viewport: Change { from, to },
+        })
+    };
+    let (start, mid, end) = (
+        viewport(Vec2::ZERO, 1.0),
+        viewport(Vec2::new(5.0, 0.0), 1.0),
+        viewport(Vec2::new(5.0, 0.0), 2.0),
+    );
+    let mut open = camera(start, mid);
+    open.absorb(&camera(mid, end));
+    let UndoStep::SetViewport(folded) = &open else {
+        panic!("a folded camera move stays one: {open:?}");
+    };
+    assert_eq!(
+        folded.viewport,
+        Change {
+            from: start,
+            to: end
+        }
+    );
+}
+
+/// A gesture emits one kind of intent for its whole life, so a frame of
+/// another kind is a caller bug, not a fold.
+#[test]
+#[should_panic(expected = "a gesture cannot fold")]
+fn a_gesture_refuses_a_frame_of_another_kind() {
+    let a = NodeId::unique();
+    let mut open = move_step(a, Vec2::ZERO, Vec2::ONE);
+    open.absorb(&UndoStep::Raise(Raise {
+        key: a,
+        z: Change { from: 0, to: 1 },
+    }));
 }
 
 /// The camera compares with a tolerance rather than for equality: a pan of a

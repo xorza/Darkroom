@@ -2,22 +2,20 @@
 
 use crate::core::document::Document;
 use crate::core::edit::step::change::Direction;
-use crate::core::edit::step::gesture_key::GestureKey;
-use crate::core::edit::step::undo_step::UndoStep;
 
 /// One reversible edit primitive: a slot the document holds, plus what that
 /// slot held before the edit and after it.
 ///
 /// **This trait is the checklist for a new kind of edit.** Everything the
 /// pipeline wants to know about a kind — how it writes, whether it changed
-/// anything, what it costs the frame, whether it merges with the step before
-/// it — is answered in that kind's own `impl`, so adding one is writing one
-/// file rather than widening a match in five. The two questions with no safe
-/// default have no default here either: a kind that forgets to answer them
-/// does not compile.
+/// anything, what it costs the frame — is answered in that kind's own `impl`,
+/// so adding one is writing one file rather than widening a match in four.
+/// No question has a default: a kind that forgets to answer one does not
+/// compile.
 ///
 /// Implementors are the payload structs behind
-/// [`UndoStep`]'s variants; the enum forwards each call to the one it holds.
+/// [`UndoStep`](crate::core::edit::step::undo_step::UndoStep)'s variants; the
+/// enum forwards each call to the one it holds.
 pub(super) trait Reversible {
     /// Write one half of this step into `doc`: the "to" half going forward,
     /// the "from" half going back.
@@ -46,13 +44,12 @@ pub(super) trait Reversible {
     /// `OpenDocument::dirty`.
     fn dirties_document(&self) -> bool;
 
-    /// Whether replaying this strands
-    /// [`CanvasGeometry`](crate::gui::pane::graph::frame::geometry::CanvasGeometry)'s
-    /// cross-frame caches: a widget whose *measured size* changed, or a node
-    /// with no cached port offsets at all. Those caches are what wires anchor
-    /// to, so a true answer costs one `ui.request_relayout()` at the end of
-    /// `Editor::frame` and a second pass that rebuilds them against the first
-    /// pass's arranged rects.
+    /// Whether replaying this strands the canvas's cross-frame geometry
+    /// caches: a widget whose *measured size* changed, or a node with no
+    /// cached port offsets at all. Those caches are what wires anchor to, so a
+    /// true answer costs one relayout request at the end of the frame and a
+    /// second pass that rebuilds them against the first pass's arranged
+    /// rects.
     ///
     /// A step that only *moves* or reorders answers false even though it does
     /// change what the layout engine reads: a port center resolves as
@@ -61,24 +58,4 @@ pub(super) trait Reversible {
     /// per gesture frame, so a spurious true doubles the whole editor pipeline
     /// for the length of the drag.
     fn invalidates_cached_geometry(&self) -> bool;
-
-    /// This step's continuous-gesture identity, or `None` when it is always
-    /// its own undo entry. A kind that answers `Some` must also implement
-    /// [`Self::coalesce`], since the action stack asks for the fold as soon as
-    /// two keys match.
-    fn gesture_key(&self) -> Option<GestureKey> {
-        None
-    }
-
-    /// Fold `next` — the step that just arrived under the same
-    /// [`Self::gesture_key`] — into this one: keep this step's "from" half and
-    /// adopt `next`'s "to" half.
-    ///
-    /// The stack has already matched keys, so `next` is the same variant; the
-    /// implementation re-checks anyway rather than trusting a caller with the
-    /// invariant, and answers `None` if it isn't.
-    fn coalesce(&self, next: &UndoStep) -> Option<UndoStep> {
-        let _ = next;
-        None
-    }
 }

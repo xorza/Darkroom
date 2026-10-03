@@ -70,6 +70,9 @@ pub(crate) struct OpenDocument {
     /// replaces the pair, and no UI can outlive one and inherit the other's
     /// history.
     history: ActionStack,
+    /// The steps of the batch [`Self::commit`] is recording, kept so a frame's
+    /// edits allocate no list once it has grown. Empty between commits.
+    batch: Vec<UndoStep>,
 }
 
 impl Default for OpenDocument {
@@ -82,6 +85,7 @@ impl Default for OpenDocument {
             path: None,
             dirty: false,
             history: ActionStack::new(UNDO_HISTORY_BYTES),
+            batch: Vec::new(),
         }
     }
 }
@@ -144,8 +148,9 @@ impl OpenDocument {
     /// this has to stage the batch first.
     ///
     /// No-op and stale intents are dropped per-intent, and an empty batch
-    /// records nothing. A *run* of intents becomes one undo entry, so a
-    /// gesture that emits N of them is still one Ctrl+Z.
+    /// records nothing. A *run* of intents becomes one undo entry, and a batch
+    /// that is one frame of a held gesture folds into that gesture's entry, so
+    /// a drag held for N frames is still one Ctrl+Z.
     ///
     /// Returns whether the batch stranded the canvas's cached geometry. The
     /// batch's other outcome — a dirtied document — is landed here; only the
@@ -154,8 +159,11 @@ impl OpenDocument {
         &mut self,
         queued: impl IntoIterator<Item = DocumentRequest>,
     ) -> Result<Relayout, MalformedIntent> {
-        let mut batch = Vec::new();
+        debug_assert!(self.batch.is_empty(), "the last commit left steps behind");
         let mut signals = StepSignals::default();
+        // The gesture of the batch's last step; it names the batch only when
+        // that step is the batch's one.
+        let mut gesture = None;
         for item in queued {
             let intent = match item {
                 DocumentRequest::Graph(intent) => intent,
@@ -167,13 +175,21 @@ impl OpenDocument {
                     continue;
                 }
             };
-            let Some(step) = intent.commit(&mut self.document)? else {
-                continue;
+            let frame_of = intent.gesture();
+            let step = match intent.commit(&mut self.document) {
+                Ok(Some(step)) => step,
+                Ok(None) => continue,
+                Err(malformed) => {
+                    self.batch.clear();
+                    return Err(malformed);
+                }
             };
             signals.fold(&step);
-            batch.push(step);
+            self.batch.push(step);
+            gesture = frame_of;
         }
-        self.history.push_current(&batch);
+        let gesture = gesture.filter(|_| self.batch.len() == 1);
+        self.history.push(&mut self.batch, gesture);
         Ok(self.land(&signals))
     }
 

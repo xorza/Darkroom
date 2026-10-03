@@ -43,6 +43,7 @@ pub(crate) fn emit(ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
                 pan: view.viewport.pan,
                 zoom: 1.0,
             },
+            gesture: None,
         });
     }
     // Ctrl+D drops wires from producers outside the selection; keeping them

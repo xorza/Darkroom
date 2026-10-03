@@ -1,12 +1,15 @@
 //! One node's body: the widget that records it, and what recording it reports.
 
+use std::sync::Arc;
+
 use palantir::prelude::*;
 
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph::ctx::DrawCtx;
 use crate::gui::pane::graph::gesture::breaker::BreakerProbe;
-use crate::gui::pane::graph::gesture::drag_anchor::selected_group_positions;
+use crate::gui::pane::graph::gesture::drag_anchor;
 use crate::gui::pane::graph::node::header::{header, status_row, subscription_pin};
 use crate::gui::pane::graph::node::memory_row::memory_row;
 use crate::gui::pane::graph::node::port_row::ports_row;
@@ -177,13 +180,16 @@ impl<'a> NodeWidget<'a> {
             // group together;
             // grabbing an unselected node selects only it and drags it
             // alone.
-            let start_positions = if selected {
-                selected_group_positions(dcx)
+            let members = if selected {
+                drag_anchor::selected_group(dcx)
             } else {
                 out.extend_graph(GraphIntent::click(false, ncx.graph_ctx.selected(), node.id));
-                vec![(node.id, node.pos)]
+                Arc::from([DragStart {
+                    node: node.id,
+                    pos: node.pos,
+                }])
             };
-            state.drag.latch(node.id, start_positions, handle);
+            state.drag.latch(node.id, members, handle, out);
         }
         response
     }
