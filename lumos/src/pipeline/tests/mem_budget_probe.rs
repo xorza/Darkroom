@@ -148,8 +148,8 @@ fn pipeline_budget_probe() -> io::Result<()> {
     let start = Instant::now();
     let master = |k: usize, role: MasterRole| {
         let mut config = role.stack_config();
-        config.cache.memory_override = budget.memory_override;
-        config.cache.cache_dir = base.join(format!("cache_{k}"));
+        config.ingest.memory_override = budget.memory_override;
+        config.ingest.cache_dir = base.join(format!("cache_{k}"));
         let stage_start = Instant::now();
         let master = stack_cfa_master(
             &calibration,
@@ -181,8 +181,8 @@ fn pipeline_budget_probe() -> io::Result<()> {
     .expect("assemble the masters");
 
     let mut config = AlignStackConfig::default();
-    config.stack.cache.memory_override = budget.memory_override;
-    config.stack.cache.cache_dir = base.join("cache_2");
+    config.stack.ingest.memory_override = budget.memory_override;
+    config.stack.ingest.cache_dir = base.join("cache_2");
     let stage_start = Instant::now();
     let result = calibrate_align_stack(
         &lights,
@@ -396,7 +396,7 @@ fn raw_lights_memory_probe() {
 
     let mut config = AlignStackConfig::default();
     config.registration.ransac.seed = Some(1);
-    config.stack.cache.memory_override = budget.memory_override;
+    config.stack.ingest.memory_override = budget.memory_override;
     // The gate opens as the preparing pass reports its last frame, so the peak splits into the
     // decode and detect pass and the register, warp and combine passes after it.
     let sampler = RssSampler::start();

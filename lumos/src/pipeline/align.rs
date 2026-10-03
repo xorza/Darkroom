@@ -12,9 +12,9 @@ use crate::concurrency;
 use crate::error::FrameDimensionMismatch;
 use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::stored_frame::StoredFrame;
+use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::linear::LinearImage;
 use crate::io::raw::demosaic::DemosaicMemory;
-use crate::memory::run_memory::RunMemory;
 use crate::memory::{
     DECODE_TRANSIENT_FACTOR, DETECTION_WORKING_PLANES, MemoryPlan, PerFrameBytes, RunShape,
 };
@@ -72,7 +72,7 @@ pub fn align_and_stack(
     }
 
     // One reading for the run, for the tier decision and the combine's chunk sizes alike.
-    let memory = RunMemory::read(config.stack.cache.memory_override);
+    let memory = IngestRun::new(&config.stack.ingest, cancel.clone()).memory;
     let total = lights.len();
     // The inputs are already decoded and resident: what the preparing pass adds to each is the
     // copy its statistics sort, beside the detector. On the spill tier that charges the input
@@ -93,7 +93,7 @@ pub fn align_and_stack(
         rayon::current_num_threads(),
         memory.planning(),
     );
-    let stage = StagePlan::new(&plan, &config.stack.cache, memory)?;
+    let stage = StagePlan::new(&plan, &config.stack.ingest, memory)?;
 
     tracing::info!(
         frames = total,

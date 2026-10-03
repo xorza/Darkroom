@@ -13,8 +13,14 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use crate::combine::config::StackConfig;
+use crate::combine::error::Error as StackError;
 use crate::combine::stack;
+use crate::drizzle::accumulator::DrizzleFrame;
+use crate::drizzle::config::DrizzleConfig;
+use crate::drizzle::error::DrizzleError;
+use crate::drizzle::stack::drizzle_stack;
 use crate::frame_store::frame_peek::FramePeek;
+use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode::{load_cfa_fits, load_linear_fits};
 use crate::io::image::fits::options::{
@@ -24,6 +30,8 @@ use crate::io::image::load_context::LoadContext;
 use crate::io::image::sample_domain::{DomainMap, ScaleOrigin};
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::memory::run_memory::RunMemory;
+use crate::progress::ProgressCallback;
+use crate::registration::transform::{Transform, WarpTransform};
 
 use crate::frame_store::stackable_image::StackableImage;
 use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
@@ -345,13 +353,13 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
         stack::stack(
             paths,
             &StackConfig::default(),
-            crate::ProgressCallback::default(),
+            ProgressCallback::default(),
             CancelToken::never(),
         )
     };
     assert!(matches!(
         stack_paths(&[&normalized_path, &adu_path]),
-        Err(crate::StackError::SampleDomainMismatch {
+        Err(StackError::SampleDomainMismatch {
             index: 1,
             reference_index: 0,
             ..
@@ -367,9 +375,9 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
 #[test]
 fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
     use crate::combine::cache::FrameCache;
-    use crate::combine::cache_config::CacheConfig;
     use crate::combine::config::Normalization;
     use crate::combine::error::Error;
+    use crate::ingest::ingest_config::IngestConfig;
     use crate::progress::ProgressCallback;
 
     let dir = TempDir::new("lumos-frame-set");
@@ -402,7 +410,7 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
         .unwrap();
     for available_memory in [1 << 30, 1] {
         let config = StackConfig {
-            cache: CacheConfig::with_cache_dir(dir.join("cache")),
+            ingest: IngestConfig::with_cache_dir(dir.join("cache")),
             normalization: Normalization::None,
             ..StackConfig::default()
         };
@@ -412,9 +420,8 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
                 FrameCache::from_paths(
                     &[reference.as_path(), second, never_decoded.as_path()],
                     &config,
-                    memory,
+                    IngestRun::planned(memory),
                     ProgressCallback::default(),
-                    CancelToken::never(),
                 )
             })
         };
@@ -449,10 +456,9 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
             FrameCache::from_cfa_paths(
                 &[rggb.as_path(), bggr.as_path(), never_decoded.as_path()],
                 &config,
-                memory,
+                IngestRun::planned(memory),
                 None,
                 ProgressCallback::default(),
-                CancelToken::never(),
             )
         });
         assert!(
@@ -605,6 +611,54 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
     assert_eq!(
         reason,
         "image contains 1 null/non-finite samples; first at linear index 2"
+    );
+
+    // Every entry that reads files takes its FITS policy from its config: the strict one refuses
+    // the frame in a stack and in a drizzle, and the default one stacks it.
+    let paths = [float_path.clone(), float_path.clone()];
+    let stack_config = |fits: &FitsLoadOptions| {
+        let mut config = StackConfig::default();
+        config.ingest.fits = fits.clone();
+        config.ingest.cache_dir = dir.join("cache");
+        config
+    };
+    let stacked = stack::stack(
+        &paths,
+        &stack_config(&float_context.fits),
+        ProgressCallback::default(),
+        CancelToken::never(),
+    );
+    assert!(stacked.is_ok(), "{stacked:?}");
+    let refused = stack::stack(
+        &paths,
+        &stack_config(&strict.fits),
+        ProgressCallback::default(),
+        CancelToken::never(),
+    );
+    assert!(
+        matches!(
+            refused,
+            Err(StackError::ImageLoad(ImageError::FitsUnsupported { .. }))
+        ),
+        "{refused:?}"
+    );
+    let mut drizzle = DrizzleConfig::default();
+    drizzle.ingest.fits = strict.fits.clone();
+    let refused = drizzle_stack(
+        vec![DrizzleFrame::new(
+            float_path,
+            WarpTransform::new(Transform::identity()),
+        )],
+        &drizzle,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    );
+    assert!(
+        matches!(
+            refused,
+            Err(DrizzleError::ImageLoad(ImageError::FitsUnsupported { .. }))
+        ),
+        "{refused:?}"
     );
 }
 

@@ -780,15 +780,15 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
     config.registration.ransac.seed = Some(0x5EED_0F5E);
 
     let mut ram_config = config.clone();
-    ram_config.stack.cache.memory_override = Some(u64::MAX);
-    ram_config.stack.cache.cache_dir = scratch.join("ram_cache");
+    ram_config.stack.ingest.memory_override = Some(u64::MAX);
+    ram_config.stack.ingest.cache_dir = scratch.join("ram_cache");
 
     let mut streaming_config = config;
-    streaming_config.stack.cache.memory_override = Some(1);
-    streaming_config.stack.cache.cache_dir = scratch.join("streaming_cache");
+    streaming_config.stack.ingest.memory_override = Some(1);
+    streaming_config.stack.ingest.cache_dir = scratch.join("streaming_cache");
     // Kept so the premise assertion below can observe that the spill tier really ran; the whole
     // scratch tree goes away when `scratch` drops.
-    streaming_config.stack.cache.keep_cache = true;
+    streaming_config.stack.ingest.keep_cache = true;
 
     let masters = CalibrationMasters::default();
     let ram = calibrate_align_stack(
@@ -812,11 +812,11 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
     // spill directory, so its presence — and the RAM path's lack of one — is what proves this test
     // exercised two code paths rather than the same one twice.
     assert!(
-        streaming_config.stack.cache.cache_dir.is_dir(),
+        streaming_config.stack.ingest.cache_dir.is_dir(),
         "streaming tier never spilled; both runs took the RAM path"
     );
     assert!(
-        !ram_config.stack.cache.cache_dir.exists(),
+        !ram_config.stack.ingest.cache_dir.exists(),
         "RAM tier spilled to disk; both runs took the streaming path"
     );
 

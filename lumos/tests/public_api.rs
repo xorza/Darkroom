@@ -3,15 +3,15 @@ use std::io::{Error, ErrorKind};
 use common::CancelToken;
 use imaginarium::Buffer2;
 use lumos::{
-    AlignStackError, AlignStackResult, AlignmentSummary, CacheConfig, CalibrationComponent,
-    CalibrationError, CalibrationMasters, CalibrationSet, CfaPattern, CombineMethod, Coverage,
-    DefectSummary, DomainMap, DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame,
-    FitsChecksumPolicy, FitsChecksumProvenance, FitsChecksumState, FitsCubeInterpretation,
-    FitsFloatScale, FitsHduProvenance, FitsHduSelector, FitsLoadOptions, FitsNullPolicy,
-    FitsTransferProvenance, FlagCounts, FrameStoreError, GesdConfig, ImageDimensions,
-    ImageMetadata, InterpolationMethod, InvalidConfigField, LinearFitClipConfig, LinearImage,
-    LoadContext, MasterRole, MatchIndices, NoiseModel, Normalization, Pedestal, QualityMap,
-    QualityPlanes, RansacConfig, RegistrationCatalog, RegistrationConfig, RegistrationError,
+    AlignStackError, AlignStackResult, AlignmentSummary, CalibrationComponent, CalibrationError,
+    CalibrationMasters, CalibrationSet, CfaPattern, CombineMethod, Coverage, DefectSummary,
+    DomainMap, DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame, FitsChecksumPolicy,
+    FitsChecksumProvenance, FitsChecksumState, FitsCubeInterpretation, FitsFloatScale,
+    FitsHduProvenance, FitsHduSelector, FitsLoadOptions, FitsNullPolicy, FitsTransferProvenance,
+    FlagCounts, FrameStoreError, GesdConfig, ImageDimensions, ImageMetadata, IngestConfig,
+    InterpolationMethod, InvalidConfigField, LinearFitClipConfig, LinearImage, LoadContext,
+    MasterRole, MatchIndices, NoiseModel, Normalization, Pedestal, QualityMap, QualityPlanes,
+    RansacConfig, RegistrationCatalog, RegistrationConfig, RegistrationError,
     RegistrationMatchingConfig, Rejection, RunReport, SampleDomain, ScaleOrigin, SigmaClipConfig,
     SipConfig, SmallN, StackConfig, StackConfigError, StackError, StackProduct,
     StarDetectionBackgroundConfig, StarDetectionCandidateConfig, StarDetectionConfig,
@@ -98,7 +98,7 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
             min_frames: 3,
             fallback: CombineMethod::Median,
         },
-        cache: CacheConfig::default(),
+        ingest: IngestConfig::default(),
         quality: QualityPlanes::IMAGE_ONLY,
         min_survivors: 4,
     };

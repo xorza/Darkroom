@@ -3,10 +3,10 @@
 //! This module provides a single `StackConfig` type that encapsulates all stacking
 //! parameters: combination method, pixel rejection, normalization, and memory settings.
 
-use crate::combine::cache_config::CacheConfig;
 use crate::combine::error::StackConfigError;
 use crate::combine::rejection::Rejection;
 use crate::error::InvalidConfigField;
+use crate::ingest::ingest_config::IngestConfig;
 use crate::stack_product::quality_planes::QualityPlanes;
 
 /// Method for combining pixel values across frames.
@@ -153,7 +153,7 @@ pub struct StackConfig {
     /// Combine method used when there are too few frames for `method`'s rejection (see [`SmallN`]).
     pub small_n: SmallN,
     /// Cache/memory behavior.
-    pub cache: CacheConfig,
+    pub ingest: IngestConfig,
     /// Which ancillary per-pixel planes the combine should produce. Defaults to all of them —
     /// they are what makes the stacked master measurable — but each is a full image-sized
     /// allocation, so a caller that discards them should say so.
@@ -176,7 +176,7 @@ impl Default for StackConfig {
             normalization: Normalization::None,
             // Default method is σ-clip, so the default fallback is the library σ-floor.
             small_n: SmallN::median_below(MIN_FRAMES_FOR_REJECTION),
-            cache: CacheConfig::default(),
+            ingest: IngestConfig::default(),
             quality: QualityPlanes::ALL,
             min_survivors: DEFAULT_MIN_SURVIVORS,
         }

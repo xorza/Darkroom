@@ -10,10 +10,10 @@ use crate::calibration_masters::error::CalibrationError;
 use crate::calibration_masters::master_dark::{DarkBias, MasterDark};
 use crate::calibration_masters::prepared_flat::PreparedFlat;
 use crate::calibration_masters::stack_cfa_master;
-use crate::combine::cache_config::CacheConfig;
 use crate::combine::config::{CombineMethod, SmallN, StackConfig, Weighting};
 use crate::combine::error::{Error, StackConfigError};
 use crate::combine::rejection::Rejection;
+use crate::ingest::ingest_config::IngestConfig;
 use crate::internals::assertions::bits;
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::internals::cfa::cfa_from_plane;
@@ -1301,10 +1301,10 @@ fn flats_are_calibrated_before_they_are_combined() {
     for memory_override in [None, Some(1)] {
         let config = StackConfig {
             small_n: SmallN::none(),
-            cache: CacheConfig {
+            ingest: IngestConfig {
                 memory_override,
                 cache_dir: directory.join("cache"),
-                ..CacheConfig::default()
+                ..IngestConfig::default()
             },
             ..StackConfig::flat()
         };

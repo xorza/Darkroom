@@ -11,6 +11,7 @@ use crate::internals::prelude::*;
 use crate::io::image::cfa::CfaType;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::math::statistics;
+use crate::memory::run_memory::RunMemory;
 use common::TempDir;
 
 /// A mono request with the default survivor minimum, no weights and no noise.

@@ -34,6 +34,7 @@ use crate::concurrency::JobScratchPool;
 use crate::error::FrameDimensionMismatch;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_plane::StoredPlane;
+use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
@@ -41,7 +42,6 @@ use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::pixel_flags::{Flags, PixelFlags};
 use crate::math::vec2us::Vec2us;
 use crate::memory::ChunkMemoryLayout;
-use crate::memory::run_memory::RunMemory;
 use crate::progress::ProgressCallback;
 use crate::run_report::{AtomicFlagCounts, LocalFlagCounts, RunReport};
 use crate::stack_product::StackProduct;
@@ -141,9 +141,7 @@ impl FrameCache {
         progress: ProgressCallback,
         cancel: CancelToken,
     ) -> Result<Self, Error> {
-        if frames.is_empty() {
-            return Err(Error::NoFrames);
-        }
+        debug_assert!(!frames.is_empty(), "`combine_cached` refuses an empty set");
         check_cancel(&cancel)?;
         let dimensions = frames[0].image.dimensions();
         let metadata = frames[0].image.metadata.clone();
@@ -624,33 +622,31 @@ impl FrameCache {
         }
     }
 
-    /// Build a cache from CFA calibration frame files, tiered in RAM or on disk under `memory`.
+    /// Build a cache from CFA calibration frame files, tiered in RAM or on disk under `run`.
     pub(crate) fn from_cfa_paths<P: AsRef<Path> + Sync>(
         paths: &[P],
         config: &StackConfig,
-        memory: RunMemory,
+        run: IngestRun,
         prepare: Option<&Prepare<'_, CfaImage>>,
         progress: ProgressCallback,
-        cancel: CancelToken,
     ) -> Result<Self, Error> {
         Self::from_tiered_paths(
-            loader::load_tiered::<CfaImage, P>(paths, config, memory, prepare, progress, cancel)?,
+            loader::load_tiered::<CfaImage, P>(paths, config, run, prepare, progress)?,
             config.normalization,
         )
     }
 
-    /// Build a cache from light-frame image files, tiered in RAM or on disk under `memory`. Nothing
+    /// Build a cache from light-frame image files, tiered in RAM or on disk under `run`. Nothing
     /// here was warped, so a frame has full support and unit confidence everywhere unless its
     /// source declared pixels with no measurement.
     pub(crate) fn from_paths<P: AsRef<Path> + Sync>(
         paths: &[P],
         config: &StackConfig,
-        memory: RunMemory,
+        run: IngestRun,
         progress: ProgressCallback,
-        cancel: CancelToken,
     ) -> Result<Self, Error> {
         Self::from_tiered_paths(
-            loader::load_tiered::<LinearImage, P>(paths, config, memory, None, progress, cancel)?,
+            loader::load_tiered::<LinearImage, P>(paths, config, run, None, progress)?,
             config.normalization,
         )
     }

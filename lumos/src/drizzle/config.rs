@@ -2,6 +2,7 @@
 
 use crate::drizzle::error::DrizzleConfigError;
 use crate::error::InvalidConfigField;
+use crate::ingest::ingest_config::IngestConfig;
 use crate::stack_product::quality_planes::QualityPlanes;
 
 /// Drizzle kernel type for distributing flux.
@@ -73,6 +74,9 @@ pub struct DrizzleConfig {
     ///
     /// [`StackConfig::quality`]: crate::StackConfig::quality
     pub quality: QualityPlanes,
+    /// How [`drizzle_stack`](crate::drizzle_stack) reads its frames. It streams them one at a time
+    /// and never spills, so only the decode policy and the memory reading apply.
+    pub ingest: IngestConfig,
 }
 
 impl Default for DrizzleConfig {
@@ -84,6 +88,7 @@ impl Default for DrizzleConfig {
             fill_value: 0.0,
             min_weight_fraction: 0.1,
             quality: QualityPlanes::ALL,
+            ingest: IngestConfig::default(),
         }
     }
 }

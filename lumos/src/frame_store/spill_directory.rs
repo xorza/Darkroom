@@ -1,7 +1,7 @@
 //! The directory a run spills frames into, and the one rule for removing it.
 //!
 //! Lumos removes a directory only when that directory carries [`MARKER`], which lumos writes into
-//! every directory it creates. A caller can point `CacheConfig::cache_dir` anywhere — a shared
+//! every directory it creates. A caller can point `IngestConfig::cache_dir` anywhere — a shared
 //! cache root, the folder the lights live in — and the worst a run can do there is leave its own
 //! subdirectory behind.
 

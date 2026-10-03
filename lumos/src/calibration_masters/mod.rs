@@ -23,10 +23,10 @@ use crate::combine::cache::loader::Prepare;
 use crate::combine::config::StackConfig;
 use crate::combine::error::Error;
 use crate::combine::stack::combine_cached;
+use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::sample_domain::{DomainMap, Pedestal};
 use crate::math::size2us::Size2us;
-use crate::memory::run_memory::RunMemory;
 use crate::progress::ProgressCallback;
 use crate::stack_product::quality_planes::QualityPlanes;
 
@@ -103,7 +103,7 @@ pub fn stack_cfa_master(
     if paths.is_empty() {
         return Ok(None);
     }
-    let memory = RunMemory::read(config.cache.memory_override);
+    let run = IngestRun::new(&config.ingest, cancel);
     // A master is mosaic data for the calibration stage to consume, not a science product: the
     // ancillary planes would be allocated and written per pixel for nothing.
     let config = StackConfig {
@@ -139,7 +139,7 @@ pub fn stack_cfa_master(
     };
     let prepare = subtract.map(|_| &prepare as &Prepare<'_, CfaImage>);
     let product = combine_cached(&config, paths.len(), "cfa paths", || {
-        FrameCache::from_cfa_paths(paths, &config, memory, prepare, progress, cancel)
+        FrameCache::from_cfa_paths(paths, &config, run, prepare, progress)
     })?;
 
     Ok(Some(product.into_cfa_master()))

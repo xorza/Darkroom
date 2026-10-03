@@ -12,6 +12,7 @@ use crate::drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
 use crate::drizzle::config::DrizzleConfig;
 use crate::drizzle::drizzle_result::DrizzleResult;
 use crate::drizzle::error::DrizzleError;
+use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::error::ImageError;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
@@ -50,10 +51,7 @@ fn load_drizzle_frame<P: AsRef<Path>>(
 /// # Arguments
 ///
 /// * `frames` - Paths bundled with their registration warp and optional quality weights
-/// * `config` - Drizzle configuration
-/// * `context` - Resource limits and image-load policy. Its `cancel` field is **ignored** — the
-///   `cancel` argument governs the whole run, decode included, so cancellation reads the same
-///   here as on every other stacking entry point
+/// * `config` - Drizzle configuration; [`DrizzleConfig::ingest`] says how the frames are read
 /// * `progress` - Progress callback
 /// * `cancel` - Cooperative cancellation, polled between frames and inside each decode
 ///
@@ -66,25 +64,23 @@ fn load_drizzle_frame<P: AsRef<Path>>(
 ///
 /// Returns an error for invalid configuration, missing frames, image loading failures,
 /// inconsistent image dimensions, invalid frame weights, or cancellation.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "every stacking entry takes its progress and cancel token the same way, by value"
+)]
 pub fn drizzle_stack<P: AsRef<Path>>(
     frames: Vec<DrizzleFrame<P>>,
     config: &DrizzleConfig,
-    context: &LoadContext,
-    progress: &ProgressCallback,
-    cancel: &CancelToken,
+    progress: ProgressCallback,
+    cancel: CancelToken,
 ) -> Result<DrizzleResult, DrizzleError> {
     let frame_count = frames.len();
-    // The decoders poll cancellation off the context, so the run's token has to reach them —
-    // the caller supplies decode policy, this supplies the token.
-    let context = LoadContext {
-        cancel: cancel.clone(),
-        ..context.clone()
-    };
+    let run = IngestRun::new(&config.ingest, cancel.clone());
     // Lazy, so only the frame currently being accumulated is resident.
     let loaded = frames
         .into_iter()
-        .map(|frame| load_drizzle_frame(frame, &context));
-    accumulate(loaded, frame_count, config, progress, cancel, "paths")
+        .map(|frame| load_drizzle_frame(frame, &run.context));
+    accumulate(loaded, frame_count, config, &progress, &cancel, "paths")
 }
 
 /// Drizzle stack frames already held in memory.
@@ -96,19 +92,23 @@ pub fn drizzle_stack<P: AsRef<Path>>(
 ///
 /// Returns an error for invalid configuration, missing frames, inconsistent image dimensions,
 /// invalid frame weights, or cancellation.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "every stacking entry takes its progress and cancel token the same way, by value"
+)]
 pub fn drizzle_images(
     frames: Vec<DrizzleFrame<LinearImage>>,
     config: &DrizzleConfig,
-    progress: &ProgressCallback,
-    cancel: &CancelToken,
+    progress: ProgressCallback,
+    cancel: CancelToken,
 ) -> Result<DrizzleResult, DrizzleError> {
     let frame_count = frames.len();
     accumulate(
         frames.into_iter().map(Ok),
         frame_count,
         config,
-        progress,
-        cancel,
+        &progress,
+        &cancel,
         "memory",
     )
 }

@@ -35,9 +35,8 @@ fn drizzle_stack_refuses_before_decoding() {
     let result = drizzle_stack(
         Vec::<DrizzleFrame<PathBuf>>::new(),
         &DrizzleConfig::default(),
-        &LoadContext::default(),
-        &ProgressCallback::default(),
-        &CancelToken::never(),
+        ProgressCallback::default(),
+        CancelToken::never(),
     );
     assert!(matches!(result.unwrap_err(), DrizzleError::NoFrames));
 
@@ -51,16 +50,15 @@ fn drizzle_stack_refuses_before_decoding() {
             warp_of(Transform::identity()),
         )],
         &invalid,
-        &LoadContext::default(),
-        &ProgressCallback::default(),
-        &CancelToken::never(),
+        ProgressCallback::default(),
+        CancelToken::never(),
     );
     assert!(matches!(result.unwrap_err(), DrizzleError::Config(_)));
 }
 
 /// From paths, a drizzle gives what the same frames give in memory once loaded; a file that does
-/// not load is `ImageLoad`; and the run's token, not the context's, governs the decode — a
-/// cancelled run reports `Cancelled`, and a cancelled context under a live run is ignored.
+/// not load is `ImageLoad`; and the run's token governs the decode — a cancelled run reports
+/// `Cancelled`.
 #[test]
 fn drizzle_stack_loads_its_frames_under_the_run_token() {
     let scratch = TempDir::new("lumos_drizzle_stack");
@@ -99,23 +97,18 @@ fn drizzle_stack_loads_its_frames_under_the_run_token() {
     let in_memory = drizzle_images(
         drizzle_frames(loaded, &transforms),
         &config,
-        &ProgressCallback::default(),
-        &CancelToken::never(),
+        ProgressCallback::default(),
+        CancelToken::never(),
     )
     .unwrap()
     .product;
     let cancelled = CancelToken::new();
     cancelled.cancel();
-    let cancelled_context = LoadContext {
-        cancel: cancelled.clone(),
-        ..LoadContext::default()
-    };
     let from_paths = drizzle_stack(
         frames(&paths),
         &config,
-        &cancelled_context,
-        &ProgressCallback::default(),
-        &CancelToken::never(),
+        ProgressCallback::default(),
+        CancelToken::never(),
     )
     .unwrap()
     .product;
@@ -129,9 +122,8 @@ fn drizzle_stack_loads_its_frames_under_the_run_token() {
         drizzle_stack(
             frames(&missing),
             &config,
-            &LoadContext::default(),
-            &ProgressCallback::default(),
-            &CancelToken::never(),
+            ProgressCallback::default(),
+            CancelToken::never(),
         ),
         Err(DrizzleError::ImageLoad(_))
     ));
@@ -139,9 +131,8 @@ fn drizzle_stack_loads_its_frames_under_the_run_token() {
         drizzle_stack(
             frames(&paths),
             &config,
-            &LoadContext::default(),
-            &ProgressCallback::default(),
-            &cancelled,
+            ProgressCallback::default(),
+            cancelled,
         ),
         Err(DrizzleError::Cancelled)
     ));
@@ -152,8 +143,8 @@ fn drizzle_images_empty() {
     let result = drizzle_images(
         Vec::new(),
         &DrizzleConfig::default(),
-        &ProgressCallback::default(),
-        &CancelToken::never(),
+        ProgressCallback::default(),
+        CancelToken::never(),
     );
     assert!(matches!(result.unwrap_err(), DrizzleError::NoFrames));
 }
@@ -176,8 +167,8 @@ fn drizzle_stops_between_frames_when_cancelled() {
     let result = drizzle_images(
         frames,
         &DrizzleConfig::default(),
-        &ProgressCallback::default(),
-        &cancel,
+        ProgressCallback::default(),
+        cancel,
     );
     assert!(
         matches!(result.unwrap_err(), DrizzleError::Cancelled),
@@ -197,8 +188,8 @@ fn drizzle_stops_between_frames_when_cancelled() {
         drizzle_images(
             frames,
             &DrizzleConfig::default(),
-            &ProgressCallback::default(),
-            &CancelToken::never(),
+            ProgressCallback::default(),
+            CancelToken::never(),
         )
         .is_ok()
     );
@@ -251,8 +242,8 @@ fn a_sip_warp_drizzles_through_its_inverse() {
     let from_images = drizzle_images(
         vec![DrizzleFrame::new(image.clone(), warp.clone())],
         &config,
-        &ProgressCallback::default(),
-        &CancelToken::never(),
+        ProgressCallback::default(),
+        CancelToken::never(),
     )
     .unwrap();
     let mut acc = accumulator(ImageDimensions::new(size, 1), config);
@@ -338,8 +329,8 @@ fn drizzle_images_dimension_mismatch() {
     let result = drizzle_images(
         drizzle_frames(vec![a, b], &[Transform::identity(), Transform::identity()]),
         &DrizzleConfig::default(),
-        &ProgressCallback::default(),
-        &CancelToken::never(),
+        ProgressCallback::default(),
+        CancelToken::never(),
     );
     assert!(matches!(
         result.unwrap_err(),
