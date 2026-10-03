@@ -90,7 +90,7 @@ impl<'a> NodeWidget<'a> {
             // in the error color so it reads as broken-but-deletable.
             theme.status.error
         } else {
-            theme.card_border(broken, selected).color
+            theme.card_border(broken, selected)
         };
         // Sample modifiers before the panel borrows `ui` for the rest
         // of this scope (the click handler below can't reborrow it).

@@ -19,10 +19,10 @@ pub(crate) mod status_colors;
 pub(crate) mod type_colors;
 pub(crate) mod type_scale;
 
-use palantir::{ButtonTheme, FontWeight, TextStyle};
+use palantir::{ButtonTheme, FontWeight, RgbaF32, TextStyle};
 
 use crate::gui::theme::canvas_theme::CanvasTheme;
-use crate::gui::theme::card_theme::{CardBorder, CardTheme};
+use crate::gui::theme::card_theme::CardTheme;
 use crate::gui::theme::chrome_colors::ChromeColors;
 use crate::gui::theme::const_value_editor_theme::ConstValueEditorTheme;
 use crate::gui::theme::inline_rename_theme::InlineRenameTheme;
@@ -49,11 +49,9 @@ use crate::gui::theme::type_scale::TypeScale;
 /// Tweak fields on `theme.palantir` during construction to
 /// override palantir's defaults.
 ///
-/// Serializable so the whole bundle (palantir palette + darkroom
-/// layout + colors) can be written and read back as one RON theme file. No
-/// UI reaches that yet — the app assembles [`Theme::default`] every
-/// launch — so the derives exist for the format, not for a caller.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+/// Built from the baked-in [`Palette`] on every launch; there is no theme
+/// file.
+#[derive(Clone, Debug)]
 pub(crate) struct Theme {
     /// Stroke width of every mark drawn on the canvas at wire scale: the
     /// wires themselves, the in-flight drag preview, the subscription pin's
@@ -68,28 +66,27 @@ pub(crate) struct Theme {
     /// overflow when the function list exceeds the cap.
     pub(crate) new_node_popup_max_height: f32,
 
-    /// Font sizes by hierarchy tier, serialized as the `[text]` sub-table.
+    /// Font sizes by hierarchy tier.
     pub(crate) text: TypeScale,
 
-    /// The graph canvas and its dotted backdrop (`[canvas]`).
+    /// The graph canvas and its dotted backdrop.
     pub(crate) canvas: CanvasTheme,
 
     /// Elevated rounded surfaces — node bodies, the inspector panel, dock
-    /// tabs (`[card]`).
+    /// tabs.
     pub(crate) card: CardTheme,
 
-    /// A node's ports: circles, label ink, column geometry (`[ports]`).
+    /// A node's ports: circles, label ink, column geometry.
     pub(crate) ports: PortTheme,
 
     /// The semantic feedback palette — success / info / busy / warning /
-    /// error (`[status]`).
+    /// error.
     pub(crate) status: StatusColors,
 
-    /// The colours belonging to no single widget (`[colors]`).
+    /// The colours belonging to no single widget.
     pub(crate) colors: ChromeColors,
 
-    /// Data-type → wire/port hue roster (see [`TypeColors`]),
-    /// serialized as the `[type_colors]` sub-table.
+    /// Data-type → wire/port hue roster (see [`TypeColors`]).
     pub(crate) type_colors: TypeColors,
 
     /// Look + dimensions for the inline static-value editor that hugs a
@@ -160,15 +157,14 @@ impl Theme {
     /// stub state) special-cases that tier around this call instead of
     /// forcing it in here.
     #[inline]
-    pub(crate) fn card_border(&self, broken: bool, selected: bool) -> CardBorder {
-        let color = if broken {
+    pub(crate) fn card_border(&self, broken: bool, selected: bool) -> RgbaF32 {
+        if broken {
             self.colors.connection_broken
         } else if selected {
             self.colors.selection_rect
         } else {
             self.card.border
-        };
-        CardBorder { color }
+        }
     }
 
     /// Assemble the full theme from `p` — the darkroom peer of
@@ -178,6 +174,7 @@ impl Theme {
     /// being hand-assembled, so a palette edit reaches the whole app.
     fn build(p: &Palette) -> Self {
         let colors = ChromeColors::from_palette(p);
+        let text = TypeScale::DEFAULT;
         // The palantir half is derived here rather than stored on `Palette`:
         // it is a projection of the same roles, and a second copy of them
         // could drift from the one the darkroom rosters read.
@@ -196,9 +193,10 @@ impl Theme {
                 header_fill: card.header_fill,
                 warning: status.warning,
                 corner_radius: card.corner_radius,
-                text: &TypeScale::DEFAULT,
+                text: &text,
             },
         );
+        let menu_button = menu_button_for(&pal, palantir.text, &text);
         let inline_rename = InlineRenameTheme::from_palette(&pal);
         let inline_rename_title = inline_rename.clone().with_text(TextStyle {
             weight: FontWeight::BOLD,
@@ -210,7 +208,7 @@ impl Theme {
             stroke_width: 2.0,
             floating_widget_gap: 16.0,
             new_node_popup_max_height: 400.0,
-            text: TypeScale::DEFAULT,
+            text,
             canvas: CanvasTheme::from_palette(p),
             card,
             ports: PortTheme::from_palette(p),
@@ -221,7 +219,7 @@ impl Theme {
             const_value_editor_revealed: ConstValueEditorTheme::revealed_from_palette(&pal),
             inline_rename,
             inline_rename_title,
-            menu_button: menu_button_for(&pal, palantir.text, &TypeScale::DEFAULT),
+            menu_button,
             palantir,
         }
     }

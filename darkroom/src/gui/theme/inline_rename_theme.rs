@@ -8,7 +8,7 @@ use palantir::{Background, Spacing, TextEditTheme, TextStyle};
 /// look is stripped to the bare editor surface (no padding/margin, no
 /// border, transparent fill) so the field's `Hug` height equals its
 /// plain `Text` twin and the row doesn't reshape on a swap.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub(crate) struct InlineRenameTheme {
     pub(crate) text_edit: TextEditTheme,
 }

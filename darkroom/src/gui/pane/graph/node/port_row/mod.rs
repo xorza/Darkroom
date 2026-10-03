@@ -306,8 +306,7 @@ fn input_label_cell(
                 port_label(ui, theme, input.name(), tip, set_aside);
                 PortGlyphResponse::default()
             } else {
-                let mut circle = PortGlyph::circle(wid, diameter)
-                    .fill(fill)
+                let mut circle = PortGlyph::circle(wid, diameter, fill)
                     .margin(margin)
                     .tip(tip);
                 if let Some(color) = outline {
@@ -465,8 +464,7 @@ fn output_cell(
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
             port_label(ui, theme, output.name(), tip, false);
-            PortGlyph::circle(wid, theme.ports.size)
-                .fill(fill)
+            PortGlyph::circle(wid, theme.ports.size, fill)
                 .margin(Spacing::new(0.0, 0.0, -overhang, 0.0))
                 .tip(tip)
                 .show(ui)
@@ -592,8 +590,7 @@ fn event_cell(
                     ..ui.theme().text
                 })
                 .show(ui);
-            PortGlyph::arrow(wid, theme.ports.size)
-                .fill(fill)
+            PortGlyph::arrow(wid, theme.ports.size, fill)
                 .margin(Spacing::new(0.0, 0.0, -overhang, 0.0))
                 .tip(tip)
                 .show(ui);

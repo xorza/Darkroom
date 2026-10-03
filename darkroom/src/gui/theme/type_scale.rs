@@ -13,7 +13,7 @@
 /// Palette-independent, so unlike
 /// [`ChromeColors`](crate::gui::theme::chrome_colors::ChromeColors) there is
 /// no `from_palette` here: a single [`Self::DEFAULT`] is the whole story.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub(crate) struct TypeScale {
     /// The loudest tier: a floating panel's own heading — the inspector's node
     /// title.

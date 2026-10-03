@@ -6,9 +6,8 @@ use palantir::RgbaF32;
 use crate::gui::theme::palette::Palette;
 
 /// Chrome colours that belong to no single widget — the surround, the
-/// shared inks, and the badge roster. Serialized as the theme's
-/// `[colors]` table.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+/// shared inks, and the badge roster.
+#[derive(Clone, Debug)]
 pub(crate) struct ChromeColors {
     /// The selection accent: the rubber-band rectangle (translucent fill +
     /// near-opaque 1px border, both derived from this) *and* the selected-

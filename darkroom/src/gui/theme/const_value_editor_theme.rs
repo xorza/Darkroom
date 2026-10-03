@@ -15,7 +15,7 @@ const VALUE_EDITOR_MAX_WIDTH: f32 = 240.0;
 /// editor derived from it) which the numeric fields use directly and the
 /// `Button`/`ComboBox` siblings (path pick, enum, presets) borrow via
 /// `drag_value.chip`, and the fixed field width.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub(crate) struct ConstValueEditorTheme {
     pub(crate) drag_value: DragValueTheme,
     /// Minimum logical-px width of the value column — editors fill it down to
