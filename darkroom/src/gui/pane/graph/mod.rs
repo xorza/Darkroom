@@ -329,7 +329,7 @@ impl GraphUI {
         self.subscription_ui.bake_snap_hover(&mut self.geometry);
         // The keyboard half of the same phase. Last, so a chord reads the
         // document the pointer gestures above were raised against.
-        shortcuts::emit(ui, graph_ctx, deselect, out);
+        shortcuts::emit(ui, graph_ctx, &self.geometry, deselect, out);
         Relayout::needed_if(appearing)
     }
 

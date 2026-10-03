@@ -10,9 +10,10 @@
 
 use palantir::{Key, Shortcut, Ui};
 
-use crate::core::document::Viewport;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
+use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
+use crate::gui::pane::graph::gesture::pan_zoom::{self, Framing};
 use crate::gui::requests::Requests;
 
 const RESET_ZOOM_SHORTCUT: Shortcut = Shortcut::ctrl('0');
@@ -31,7 +32,13 @@ const DUPLICATE_SHORTCUT: Shortcut = Shortcut::ctrl('D');
 /// `deselect` is this frame's Esc when nothing was in flight. The canvas
 /// decides it, since only the canvas knows whether the Esc cancelled a
 /// gesture instead.
-pub(crate) fn emit(ui: &mut Ui, graph_ctx: GraphCtx<'_>, deselect: bool, out: &mut Requests) {
+pub(crate) fn emit(
+    ui: &mut Ui,
+    graph_ctx: GraphCtx<'_>,
+    geometry: &CanvasGeometry,
+    deselect: bool,
+    out: &mut Requests,
+) {
     let reset_zoom = ui.key_pressed(RESET_ZOOM_SHORTCUT);
     let duplicate = ui.key_pressed(DUPLICATE_SHORTCUT);
     let delete =
@@ -40,14 +47,11 @@ pub(crate) fn emit(ui: &mut Ui, graph_ctx: GraphCtx<'_>, deselect: bool, out: &m
     if deselect && !view.selected.is_empty() {
         out.push_graph(GraphIntent::clear_selection());
     }
-    if reset_zoom {
-        out.push_graph(GraphIntent::SetViewport {
-            to: Viewport {
-                pan: view.viewport.pan,
-                zoom: 1.0,
-            },
-            gesture: None,
-        });
+    // Ctrl+0 is the toolbar's reset view: 1:1, centred on the content.
+    if reset_zoom
+        && let Some(reset) = pan_zoom::framing_intent(ui, geometry, graph_ctx, Framing::Reset)
+    {
+        out.push_graph(reset);
     }
     // Ctrl+D drops wires from producers outside the selection; keeping them
     // is the node menu's second Duplicate pick, which has a label to say so.

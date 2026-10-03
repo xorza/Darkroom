@@ -5,6 +5,7 @@ use std::time::Duration;
 use glam::Vec2;
 
 use crate::core::edit::gesture_id::GestureId;
+use crate::gui::pane::graph::gesture::pan_zoom;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
 use crate::gui::requests::Requests;
 
@@ -60,22 +61,11 @@ impl CameraGesture {
         });
     }
 
-    /// Fold a live pan drag into `pan`, and return its gesture while it is
-    /// held: `anchor + delta`, or, for a missing delta after a latch, the
-    /// release that drops the anchor. A call before anything latched does
-    /// nothing at all.
-    ///
-    /// Measured from the latch rather than integrated per frame, so a pan
-    /// lands exactly where the pointer says however many frames it took (no
-    /// per-frame rounding drift).
+    /// Fold a live pan drag into `pan` — see [`pan_zoom::fold_pan_drag`] —
+    /// and return its gesture while it is held.
     pub(crate) fn fold_pan(&mut self, delta: Option<Vec2>, pan: &mut Vec2) -> Option<GestureId> {
-        let &anchor = self.pan.get()?;
-        let Some(delta) = delta else {
-            self.pan.clear();
-            return None;
-        };
-        *pan = anchor.start + delta;
-        Some(anchor.gesture)
+        pan_zoom::fold_pan_drag(&mut self.pan, |anchor| anchor.start, delta, pan)
+            .map(|anchor| anchor.gesture)
     }
 
     /// The gesture a frame of wheel, touchpad or pinch input at `now` belongs

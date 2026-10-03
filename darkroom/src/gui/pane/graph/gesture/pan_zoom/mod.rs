@@ -15,8 +15,42 @@ use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
 use crate::gui::pane::graph::gesture::pan_zoom::camera_gesture::CameraGesture;
+use crate::gui::pane::graph::gesture::slot::GestureSlot;
 use crate::gui::pane::graph::{CanvasGesture, outer_canvas_widget_id};
 use crate::gui::requests::Requests;
+
+/// Fold a live pan drag into `pan`: the latch's start (read by `start`)
+/// plus `delta` while the drag is held, and a missing delta after a latch is
+/// the release edge that drops it. Returns the latch while it is held; a call
+/// before anything latched does nothing at all. Shared by the canvas and the
+/// image viewer.
+///
+/// Measured from the latch rather than integrated per frame, so a pan lands
+/// exactly where the pointer says however many frames it took (no per-frame
+/// rounding drift).
+pub(crate) fn fold_pan_drag<'s, T>(
+    slot: &'s mut GestureSlot<T>,
+    start: impl FnOnce(&T) -> Vec2,
+    delta: Option<Vec2>,
+    pan: &mut Vec2,
+) -> Option<&'s T> {
+    let Some(delta) = delta else {
+        slot.clear();
+        return None;
+    };
+    let latched = slot.get()?;
+    *pan = start(latched) + delta;
+    Some(latched)
+}
+
+/// Whether `resp` carries any scroll, touchpad or pinch input this frame.
+/// Palantir reports exactly zero, and a unit zoom, for none, so the tests are
+/// exact.
+pub(crate) fn scrolled(resp: &ResponseState) -> bool {
+    resp.scroll.pixels != Vec2::ZERO
+        || resp.scroll.lines.y != 0.0
+        || resp.scroll.zoom != ZoomFactor::ONE
+}
 
 /// Fold one frame's scroll/pinch deltas from `resp` into `v` — the
 /// shared half of the canvas and image-viewer pan/zoom gestures (drag
@@ -34,7 +68,7 @@ pub(crate) fn fold_scroll_zoom(
     if resp.scroll.pixels != Vec2::ZERO {
         v.pan -= resp.scroll.pixels;
     }
-    if resp.scroll.lines.y.abs() > f32::EPSILON
+    if resp.scroll.lines.y != 0.0
         && let Some(pivot) = resp.pointer_local
     {
         let text = &ui.theme().text;
@@ -165,7 +199,8 @@ pub(crate) fn zoom_about(
 /// down) to a multiplicative zoom factor. Negative `delta_y` (wheel
 /// up) zooms in (`factor > 1`); positive (wheel down) zooms out
 /// (`factor < 1`). Pure function so it can be unit-tested without
-/// spinning up a UI. Shared with [`crate::gui::pane::viewer`].
+/// spinning up a UI. [`fold_scroll_zoom`] is its one reader, for the canvas
+/// and the viewer alike.
 pub(super) fn scroll_to_zoom_factor(delta_y: f32) -> f32 {
     SCROLL_ZOOM_BASE.powf(-delta_y)
 }
