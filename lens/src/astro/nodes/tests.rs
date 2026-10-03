@@ -1,4 +1,5 @@
-//! Registration tests for the astro library.
+//! The astro library's node shapes, its path types, and the builder
+//! nodes' invocation at the input boundary.
 
 use scenarium::testing::func_invoker::FuncInvoker;
 

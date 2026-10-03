@@ -22,8 +22,6 @@ use crate::astro::nodes::runtime;
 
 const BUILD_MASTERS_FUNC_ID: FuncId = FuncId::literal("f2f6f1ff-5b10-409c-900f-d6b48750a529");
 
-const CACHE_PRESENT: &str = "present:";
-
 #[derive(Debug, thiserror::Error)]
 enum FrameSetKeyError {
     #[error("failed to read metadata for '{path}': {source}", path = .path.display())]
@@ -103,7 +101,10 @@ pub(crate) fn register(library: &mut Library) {
         ])
         .input(
             FuncInput::required("Sigma", DataType::Float)
-                .description("Hot-pixel threshold, in sigma above the dark background.")
+                .description(
+                    "Hot-pixel defect threshold: a master-dark pixel more than this many sigma \
+                     above its color's dark background is a defect. Values below 1 count as 1.",
+                )
                 .default(f64::from(DEFAULT_SIGMA_THRESHOLD)),
         )
         .input(
@@ -148,8 +149,7 @@ fn build_masters_cached(
         let cached = cache
             .then(|| -> Result<_, BuildMastersError> {
                 let paths = role_cache_paths(&frames, file)?;
-                let marker = format!("{CACHE_PRESENT}{}", frame_set_key(&frames)?);
-                Ok((paths, marker))
+                Ok((paths, frame_set_key(&frames)?))
             })
             .transpose()?;
 
@@ -265,6 +265,7 @@ fn cache_marker_path(cache_path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::io;
     use std::path::PathBuf;
     use std::slice;
 
@@ -273,7 +274,7 @@ mod tests {
     use common::CancelToken;
 
     use crate::astro::nodes::calibration::{
-        BuildMastersError, build_masters_cached, frame_set_key, role_cache_paths,
+        BuildMastersError, FrameSetKeyError, build_masters_cached, frame_set_key, role_cache_paths,
     };
 
     #[test]
@@ -318,11 +319,22 @@ mod tests {
         fs::write(&second, b"bb").unwrap();
         let two_frames = frame_set_key(&[first.clone(), second.clone()]).unwrap();
         assert_ne!(two_frames, one_frame);
+        // The key follows the selection order: a reordered set sums in another
+        // order, so its master can differ in the last bits.
+        let reordered = frame_set_key(&[second.clone(), first.clone()]).unwrap();
+        assert_ne!(reordered, two_frames);
         fs::write(&first, b"aaa").unwrap();
         let edited = frame_set_key(&[first.clone(), second]).unwrap();
         assert_ne!(edited, two_frames);
-        fs::remove_file(&first).unwrap();
         assert_ne!(frame_set_key(&[]).unwrap(), edited);
+
+        fs::remove_file(&first).unwrap();
+        let error = frame_set_key(slice::from_ref(&first)).unwrap_err();
+        assert!(matches!(
+            error,
+            FrameSetKeyError::Metadata { path, source }
+                if path == first && source.kind() == io::ErrorKind::NotFound
+        ));
     }
 
     /// A missing frame fails the key's `stat` with the cache on, and with it off the key is never

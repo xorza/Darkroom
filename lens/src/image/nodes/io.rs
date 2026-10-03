@@ -10,7 +10,6 @@ use imaginarium::SUPPORTED_EXTENSIONS;
 use scenarium::{ConstValue, DataType, DynamicValue, FsPathConfig, FsPathMode, InvokeError};
 use scenarium::{Func, FuncInput, FuncOutput, Library};
 
-use crate::config_node::enum_input;
 use crate::image::format::{AS_IS, CONVERSION_FORMAT_DATATYPE, ConversionFormat};
 use crate::image::{IMAGE_DATA_TYPE, Image};
 use scenarium::Invocation;
@@ -90,7 +89,7 @@ fn register_save(library: &mut Library) {
                     .description("Destination file; the extension picks the container."),
             )
             .input(
-                enum_input::<ConversionFormat>("Format", &CONVERSION_FORMAT_DATATYPE)
+                FuncInput::required("Format", CONVERSION_FORMAT_DATATYPE)
                     .default(ConstValue::Enum(AS_IS.to_string()))
                     .description(
                         "Convert to this color format before saving; \"As Is\" keeps the source format.",

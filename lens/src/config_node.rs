@@ -1,7 +1,7 @@
 //! Generic config-builder nodes — the scenarium bridge over
 //! [`common`]'s struct introspection.
 //!
-//! [`config_builder_func`] turns any [`common::Introspect`] config type into a
+//! [`ConfigValue::builder`] turns any [`common::Introspect`] config type into a
 //! `Func` whose inputs are the type's fields (mapped from [`common::FieldDesc`]
 //! to scenarium [`DataType`]s) and whose output is the built config as a
 //! wireable [`ConfigValue`]. So a consuming node can take either a quick preset
@@ -21,7 +21,7 @@ use std::sync::Arc;
 use common::{FieldKind, FieldValue, Introspect};
 use scenarium::Invocation;
 use scenarium::async_lambda;
-use scenarium::{ConstValue, CustomValue, DataType, DynamicValue, EnumVariants, TypeId};
+use scenarium::{ConstValue, CustomValue, DataType, DynamicValue, TypeId};
 use scenarium::{Func, FuncId, FuncInput, FuncOutput};
 use scenarium::{InvokeError, Library, TypeEntry};
 
@@ -70,60 +70,50 @@ pub(crate) const fn config_data_type<T: Introspect>() -> DataType {
     DataType::Custom(wire_type_id::<T>())
 }
 
-/// A required enum/preset dropdown input seeded to `E`'s first variant. Shared by
-/// both libraries: the default keeps a fresh node valid, while clearing it
-/// surfaces as a missing input. (The first-variant default is read from `E`
-/// directly, so this needs no library handle.)
-pub(crate) fn enum_input<E: EnumVariants>(name: &str, datatype: &DataType) -> FuncInput {
-    let mut input = FuncInput::required(name, datatype.clone());
-    input.default_value = E::variant_names().into_iter().next().map(ConstValue::Enum);
-    input
-}
-
-/// Build a config-builder `Func` for `T` — one labeled input per introspected
-/// field, a single `config` output of [`config_data_type::<T>`] — and add it to
-/// `library`, registering `T`'s output type and any enum field types so the
-/// editor can render them. Adds internally (rather than returning the `Func`) so
-/// the caller needn't borrow `library` twice.
-pub(crate) fn add_config_builder<T: Introspect + Clone + fmt::Debug + Send + Sync + 'static>(
-    library: &mut Library,
-    node_id: FuncId,
-    node_name: &str,
-    description: &str,
-) {
-    let fields = T::fields();
-    library.register_type(wire_type_id::<T>(), TypeEntry::custom(T::DISPLAY_NAME));
-    for field in &fields {
-        register_field_enum(library, &field.kind);
+impl<T: Introspect + Clone + fmt::Debug + Send + Sync + 'static> ConfigValue<T> {
+    /// The node that builds a `T`: one labeled input per introspected field
+    /// and a single `Config` output of [`config_data_type::<T>`]. Registers
+    /// `T`'s output type and its fields' enum types on `library`, so the editor
+    /// can render them. The caller adds the node, under its own category.
+    pub(crate) fn builder(
+        library: &mut Library,
+        node_id: FuncId,
+        node_name: &str,
+        description: &str,
+    ) -> Func {
+        let fields = T::fields();
+        library.register_type(wire_type_id::<T>(), TypeEntry::custom(T::DISPLAY_NAME));
+        for field in &fields {
+            register_field_enum(library, &field.kind);
+        }
+        // The lambda needs each field's kind to read its input value back.
+        let kinds: Arc<[FieldKind]> = fields.iter().map(|field| field.kind).collect();
+        let lambda = async_lambda!(move |Invocation { inputs, outputs, .. }| {
+            kinds = Arc::clone(&kinds),
+        } => {
+            let values: Vec<FieldValue> = kinds
+                .iter()
+                .zip(inputs)
+                .map(|(kind, input)| field_value(kind, input))
+                .collect();
+            let config = T::from_fields(&values).map_err(InvokeError::external)?;
+            outputs[0] = DynamicValue::from_custom(ConfigValue(config));
+            Ok(())
+        });
+        let mut func = Func::new(node_id, node_name, lambda)
+            .description(description)
+            .pure();
+        for field in &fields {
+            let data_type = data_type(&field.kind);
+            let input = if field.required {
+                FuncInput::required(field.label, data_type)
+            } else {
+                FuncInput::optional(field.label, data_type)
+            };
+            func = func.input(input.default(const_value(&field.default)));
+        }
+        func.output(FuncOutput::new("Config", config_data_type::<T>()))
     }
-    // The lambda needs each field's kind to read its input value back.
-    let kinds: Arc<[FieldKind]> = fields.iter().map(|field| field.kind).collect();
-    let lambda = async_lambda!(move |Invocation { inputs, outputs, .. }| {
-        kinds = Arc::clone(&kinds),
-    } => {
-        let values: Vec<FieldValue> = kinds
-            .iter()
-            .zip(inputs)
-            .map(|(kind, input)| field_value(kind, input))
-            .collect();
-        let config = T::from_fields(&values).map_err(InvokeError::external)?;
-        outputs[0] = DynamicValue::from_custom(ConfigValue(config));
-        Ok(())
-    });
-    let mut func = Func::new(node_id, node_name, lambda)
-        .category("Astro")
-        .description(description)
-        .pure();
-    for field in &fields {
-        let data_type = data_type(&field.kind);
-        let input = if field.required {
-            FuncInput::required(field.label, data_type)
-        } else {
-            FuncInput::optional(field.label, data_type)
-        };
-        func = func.input(input.default(const_value(&field.default)));
-    }
-    library.add(func.output(FuncOutput::new("Config", config_data_type::<T>())));
 }
 
 /// Map an introspected field kind to a scenarium port type. Enum fields map to
