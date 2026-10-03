@@ -26,9 +26,12 @@ async fn persist_output_survives_reopen_and_invalidates_on_digest_change() {
         1,
         "the cut prunes the memory-only source upstream of a disk hit"
     );
-    assert!(!run.ran().contains(&"src"), "src was cut, not executed");
-    assert!(run.cached().contains(&"mult"), "mult reused from disk");
-    assert!(!run.ran().contains(&"mult"), "mult did not recompute");
+    assert_eq!(
+        run.ran(),
+        ["print"],
+        "src was cut and mult did not recompute"
+    );
+    assert_eq!(run.cached(), ["mult"], "mult reused from disk");
     assert!(
         !e.holds_output("mult"),
         "a full run does not retain a Disk node after the run"
@@ -37,7 +40,7 @@ async fn persist_output_survives_reopen_and_invalidates_on_digest_change() {
     // A targeted run on `mult` hydrates the disk hit, but targeting must not
     // turn it into an implicit RAM cache.
     let run = e.run_nodes(["mult"]).await;
-    assert!(run.cached().contains(&"mult"));
+    assert_eq!(run.cached(), ["mult"]);
     assert!(
         !e.holds_output("mult"),
         "a targeted run releases the hydrated Disk value"
@@ -54,7 +57,7 @@ async fn persist_output_survives_reopen_and_invalidates_on_digest_change() {
         "an input change makes mult miss and recompute from src"
     );
     assert!(
-        !run.cached().contains(&"mult"),
+        run.cached().is_empty(),
         "mult should not be cached after a digest change"
     );
     // The blob is keyed by node id, so the recompute replaced the superseded
@@ -106,7 +109,7 @@ async fn a_probed_blob_that_stops_decoding_fails_its_node_and_self_heals() {
         matches!(run.error("print"), Some(RunError::SkippedUpstream)),
         "its consumer skips as errored-upstream"
     );
-    assert!(!run.cached().contains(&"mult"));
+    assert!(run.cached().is_empty());
     assert_eq!(
         dir.entry_count(),
         0,
@@ -136,7 +139,11 @@ async fn an_older_format_blob_recomputes_and_is_replaced_in_the_same_run() {
     let mut e =
         TestEngine::over(source_mult_print(CacheMode::Disk, 1, &calls)).with_disk_store(dir.path());
     let run = e.run_sinks().await;
-    assert!(run.ran().contains(&"mult"), "the cold run computes mult");
+    assert_eq!(
+        run.ran(),
+        ["src", "mult", "print"],
+        "the cold run computes mult"
+    );
     assert_eq!(calls.count(), 1);
 
     let blob = e.blob_path("mult");
@@ -146,8 +153,9 @@ async fn an_older_format_blob_recomputes_and_is_replaced_in_the_same_run() {
     // producer cone, so the blob is deleted and mult recomputes in this same run.
     let mut e = e.reopen();
     let run = e.run_sinks().await;
-    assert!(
-        run.ran().contains(&"mult"),
+    assert_eq!(
+        run.ran(),
+        ["src", "mult", "print"],
         "the refused blob is a same-run miss"
     );
     assert!(run.errored().is_empty(), "the recomputed run succeeds");
@@ -160,10 +168,7 @@ async fn an_older_format_blob_recomputes_and_is_replaced_in_the_same_run() {
     // Reopen: mult's fresh blob is a clean hit → reused, not recomputed.
     let mut e = e.reopen();
     let run = e.run_sinks().await;
-    assert!(
-        !run.ran().contains(&"mult"),
-        "the replaced blob is a clean hit"
-    );
+    assert_eq!(run.ran(), ["print"], "the replaced blob is a clean hit");
     assert_eq!(
         calls.count(),
         2,
@@ -191,7 +196,7 @@ async fn vanished_frontier_blob_recomputes_instead_of_panicking() {
 
     let mut e = TestEngine::over(g).with_disk_store(dir.path());
     e.run_sinks().await;
-    let after_run1 = calls.count();
+    assert_eq!(calls.count(), 1);
 
     // Reopen, then remove sum's blob before the run reaches it.
     let mut e = e.reopen();
@@ -199,18 +204,16 @@ async fn vanished_frontier_blob_recomputes_instead_of_panicking() {
     let run = e.run_sinks().await;
 
     // The run completes — no panic: the missing blob just misses.
-    assert!(
-        run.ran().contains(&"sum"),
+    assert_eq!(
+        run.ran(),
+        ["src", "sum", "print"],
         "sum recomputes when its blob is gone"
     );
     assert!(
-        !run.cached().contains(&"sum"),
+        run.cached().is_empty(),
         "a vanished blob is not served as a cache hit"
     );
-    assert!(
-        calls.count() > after_run1,
-        "src re-ran to feed sum's recompute"
-    );
+    assert_eq!(calls.count(), 2, "src re-ran to feed sum's recompute");
 }
 
 /// A `Both`-mode node whose store failed owes a blob, and pays it on the next
@@ -254,8 +257,9 @@ async fn a_both_mode_node_whose_store_failed_republishes_without_recomputing() {
         1,
         "a resident value is still served from RAM"
     );
-    assert!(
-        !run.ran().contains(&"src"),
+    assert_eq!(
+        run.ran(),
+        ["print"],
         "settling the debt must not re-run the node"
     );
     assert!(
@@ -282,7 +286,7 @@ async fn a_both_mode_node_whose_store_failed_republishes_without_recomputing() {
     let mut e = e.reopen();
     let run = e.run_sinks().await;
     assert_eq!(calls.count(), 1, "the republished blob is served on reopen");
-    assert!(run.cached().contains(&"src"));
+    assert_eq!(run.cached(), ["src"]);
 }
 
 /// A redefined output type can't serve a stale blob: `produce`'s func is

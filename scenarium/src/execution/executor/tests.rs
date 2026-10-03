@@ -154,8 +154,14 @@ async fn upstream_error_retires_skipped_reads_without_harming_live_readers() {
         run.outputs(healthy).is_none(),
         "the healthy non-RAM producer is reclaimed after the live reader lands"
     );
-    assert!(run.error(failed).unwrap().to_string().contains("boom"));
-    assert!(run.error(blocked).unwrap().to_string().contains("upstream"));
+    assert!(matches!(
+        run.error(failed),
+        Some(RunError::Invoke(error)) if error.to_string() == "boom"
+    ));
+    assert!(matches!(
+        run.error(blocked),
+        Some(RunError::SkippedUpstream)
+    ));
 }
 
 #[tokio::test]
@@ -490,9 +496,12 @@ async fn reuse_survives_failed_upstream_rerun() {
         Some(6),
         "B's valid cached value survives the sibling failure"
     );
-    assert!(run.error(a).is_some(), "A's own failure is reported");
     assert!(
-        run.error(c).is_some(),
+        matches!(run.error(a), Some(RunError::Invoke(_))),
+        "A's own failure is reported"
+    );
+    assert!(
+        matches!(run.error(c), Some(RunError::SkippedUpstream)),
         "C is skipped for the errored upstream"
     );
     assert!(run.error(b).is_none(), "B carries no error");

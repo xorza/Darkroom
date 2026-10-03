@@ -59,15 +59,10 @@ async fn explicit_cache_eviction_removes_the_downstream_ram_and_disk_cone() {
     assert_eq!(a_calls.count(), 2);
     assert_eq!(b_calls.count(), 1);
     assert_eq!(run.logs(), ["132"]);
-    for name in evicted {
-        assert!(
-            run.ran().contains(&name),
-            "{name} must recompute after reopening"
-        );
-    }
-    assert!(
-        !run.ran().contains(&"src_b"),
-        "the retained sibling blob must still be reusable after reopening"
+    assert_eq!(
+        run.ran(),
+        evicted,
+        "the evicted cone recomputes, and the retained sibling blob is reused"
     );
 
     // A blob that cannot be deleted is reported, and the rest of the cone
@@ -134,14 +129,12 @@ async fn shared_producer_read_by_a_running_consumer_is_not_cut() {
         2,
         "src is still read by print_direct, so the cut must keep it"
     );
-    assert!(
-        run.ran().contains(&"src"),
+    assert_eq!(
+        run.ran(),
+        ["src", "print_direct", "print_mult"],
         "the shared producer runs for its executing consumer"
     );
-    assert!(
-        run.cached().contains(&"mult"),
-        "mult still reuses from disk"
-    );
+    assert_eq!(run.cached(), ["mult"], "mult still reuses from disk");
 }
 
 /// Two disk-cached nodes chained (`sum` → `mult`) under an executing sink.
@@ -214,8 +207,9 @@ async fn chained_disk_cache_hydrates_only_the_live_frontier() {
 
     e.edit(|g| g.constant("mult", 1, 3i64));
     let run = e.run_sinks().await;
-    assert!(
-        run.ran().contains(&"sum"),
+    assert_eq!(
+        run.ran(),
+        ["src", "sum", "mult", "print"],
         "a value absent from the new store recomputes when needed"
     );
     assert_eq!(
@@ -277,8 +271,9 @@ async fn stale_ram_value_does_not_mask_a_valid_disk_blob() {
     );
 
     let run = e.run_sinks().await;
-    assert!(
-        !run.ran().contains(&"mult"),
+    assert_eq!(
+        run.ran(),
+        ["print"],
         "mult is a disk cache hit on flip-back, not recomputed — without \
          this a recompute would yield 6 regardless and the stale-RAM path \
          would go untested"

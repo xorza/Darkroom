@@ -209,10 +209,10 @@ async fn an_unidentifiable_path_runs_the_node_uncached() {
         "a path the lambda never reads must not fail it: {:?}",
         run.error("ignores_path"),
     );
-    assert!(
-        run.ran().contains(&"ignores_path"),
-        "and the node runs rather than being skipped: {:?}",
+    assert_eq!(
         run.ran(),
+        ["ignores_path", "capture"],
+        "and the node runs rather than being skipped"
     );
 }
 

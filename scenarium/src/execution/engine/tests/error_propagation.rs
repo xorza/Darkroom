@@ -21,18 +21,13 @@ async fn node_error_propagates_to_dependents() {
     // reported through the run, not the cross-run cache, which only
     // reflects which outputs survived.
     assert_eq!(run.errored(), ["Print", "get_a", "mult", "sum"]);
-    assert!(
-        run.error("get_a")
-            .expect("the failing node reports its own error")
-            .to_string()
-            .contains("Intentional failure")
-    );
+    assert!(matches!(
+        run.error("get_a"),
+        Some(RunError::Invoke(error)) if error.to_string() == "Intentional failure in get_a"
+    ));
     for name in ["sum", "mult", "Print"] {
         assert!(
-            run.error(name)
-                .unwrap_or_else(|| panic!("{name} should carry an upstream error"))
-                .to_string()
-                .contains("upstream"),
+            matches!(run.error(name), Some(RunError::SkippedUpstream)),
             "{name} should report an upstream error",
         );
         assert!(e.outputs(name).is_empty(), "{name} should have no output");

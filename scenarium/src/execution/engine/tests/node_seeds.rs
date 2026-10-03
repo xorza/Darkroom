@@ -60,7 +60,7 @@ async fn second_seeded_run_obeys_none_cache_mode() {
         "nothing was retained, so both sources ran again"
     );
     assert_eq!(run.ran_node_count, 3);
-    assert!(!run.cached().contains(&"sum"));
+    assert!(run.cached().is_empty());
     assert!(run.holding_ram().is_empty());
 }
 
