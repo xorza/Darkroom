@@ -36,7 +36,7 @@ fn duplicate_ports_fail_in_every_binding_format() {
         (port, Binding::Const(2i64.into())),
     ]);
 
-    for format in [SerdeFormat::Ron, SerdeFormat::Bitcode] {
+    for format in SerdeFormat::ALL {
         let bytes = serialize(&bindings, format).unwrap();
         let error = deserialize::<CheckedBindings>(&bytes, format)
             .expect_err("a repeated input port does not decode")

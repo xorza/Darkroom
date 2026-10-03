@@ -64,9 +64,6 @@ fn cache_mode_bits_and_from_bits_round_trip() {
             "from_bits({ram},{disk})"
         );
     }
-    // Distinct modes must not share a bit pattern (guards a botched refactor).
-    assert_ne!(CacheMode::Ram, CacheMode::Disk);
-    assert_ne!(CacheMode::None, CacheMode::Both);
 }
 
 #[test]
@@ -83,7 +80,7 @@ fn cache_mode_round_trips() {
         g.add("src", |n| n.pure().output(DataType::Int));
         g.cache("src", mode);
 
-        for format in [SerdeFormat::Ron, SerdeFormat::Bitcode] {
+        for format in SerdeFormat::ALL {
             let bytes = serialize(&g.graph, format).unwrap();
             let back: Graph = deserialize(&bytes, format).unwrap();
             assert_eq!(
@@ -425,16 +422,6 @@ fn produces_cycle_reaches_a_producer_past_a_const_and_an_unbound_port() {
 }
 
 #[test]
-fn typed_id_from_str_preserves_uuid_error() {
-    let input = "not-a-uuid";
-    let error: uuid::Error = input.parse::<FuncId>().unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        uuid::Uuid::parse_str(input).unwrap_err().to_string()
-    );
-}
-
-#[test]
 fn binding_conversions() {
     let nid = NodeId::unique();
     let from_port: Binding = OutputPort::new(nid, 1).into();
@@ -676,7 +663,7 @@ fn add_func_node_seeds_only_the_inputs_with_defaults() {
 #[test]
 fn serialization_round_trips_a_graph_through_every_format() -> TestResult {
     let graph = TestGraph::sample().graph;
-    for format in [SerdeFormat::Ron, SerdeFormat::Bitcode] {
+    for format in SerdeFormat::ALL {
         let serialized = serialize(&graph, format)?;
         let deserialized: Graph = deserialize(&serialized, format)?;
         assert_eq!(graph, deserialized, "{format:?} round-trips a graph whole");

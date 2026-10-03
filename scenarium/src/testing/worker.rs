@@ -199,7 +199,13 @@ impl TestWorker {
             .await
             .expect("the worker published nothing in time")
             .expect("the worker's report channel closed");
-        match &report {
+        self.observe(&report);
+        report
+    }
+
+    /// Track which program the worker holds, from a report read off the stream.
+    fn observe(&mut self, report: &WorkerReport) {
+        match report {
             WorkerReport::Installed { compiled, .. } => self.installed = Some(Arc::clone(compiled)),
             WorkerReport::Cleared => self.installed = None,
             WorkerReport::Activity(_)
@@ -207,7 +213,6 @@ impl TestWorker {
             | WorkerReport::Completed(_)
             | WorkerReport::Error(_) => {}
         }
-        report
     }
 
     /// The worker's activity as the next report that states it gives it — an activity change,
@@ -261,16 +266,7 @@ impl TestWorker {
     pub(crate) fn drain(&mut self) -> Vec<WorkerReport> {
         let mut drained = Vec::new();
         while let Ok(report) = self.reports.try_recv() {
-            match &report {
-                WorkerReport::Installed { compiled, .. } => {
-                    self.installed = Some(Arc::clone(compiled));
-                }
-                WorkerReport::Cleared => self.installed = None,
-                WorkerReport::Activity(_)
-                | WorkerReport::Progress { .. }
-                | WorkerReport::Completed(_)
-                | WorkerReport::Error(_) => {}
-            }
+            self.observe(&report);
             drained.push(report);
         }
         drained

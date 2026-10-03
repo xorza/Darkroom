@@ -120,7 +120,7 @@ async fn update_with_evolved_func_recompiles_and_runs_new_lambda() {
     use crate::async_lambda;
 
     let mut g = TestGraph::new();
-    g.add("generate", |n| n.pure().output(DataType::Int).returns(1i64));
+    g.add("generate", |n| n.returns(1i64));
     g.add("print", NodeSpec::records);
     g.wire("generate", 0, "print", 0);
 
@@ -160,9 +160,8 @@ async fn update_with_evolved_func_recompiles_and_runs_new_lambda() {
 /// old value. Growing an output need not: the id is unchanged, so `reown`
 /// sees no owner change, and the stale `produced_under` still equals the
 /// stale `current_digest`, so the RAM-retention check keeps a snapshot that
-/// is now one value short of the port list. Debug builds caught it at
-/// install as an `OutputArity` invariant violation; release builds carried
-/// the mismatched snapshot into the run.
+/// would be one value short of the port list. The install retires it, so the
+/// next run recomputes both outputs.
 #[tokio::test]
 async fn update_with_a_grown_output_list_retires_the_shorter_snapshot() {
     use crate::async_lambda;
@@ -199,5 +198,39 @@ async fn update_with_a_grown_output_list_retires_the_shorter_snapshot() {
             func.outputs.push(FuncOutput::new("W", DataType::Int));
         });
     });
-    e.run_sinks().await;
+    let run = e.run_sinks().await;
+    assert!(
+        run.ran().contains(&"generate"),
+        "the retired value recomputes"
+    );
+    assert_eq!(e.outputs("generate").len(), 2);
+    assert_eq!(e.output_i64("generate", 1), Some(2));
+}
+
+/// Library drift: wiring that references ports/events the library no
+/// longer declares must still compile — the dangling binding degrades
+/// to unbound (a required input reports missing), and a dangling
+/// subscription wires nothing.
+#[tokio::test]
+async fn dangling_wiring_compiles_and_reports_missing_input() {
+    let mut e = TestEngine::over(TestGraph::sample());
+    // sum's required input 0 bound to an output `get_a` doesn't have, plus a
+    // subscription to an event it doesn't emit — the drift a changed library
+    // leaves behind. Neither may fail the compile.
+    e.edit(|g| {
+        g.wire("get_a", 9, "sum", 0);
+        g.subscribe("get_a", 9, "sum");
+    });
+
+    assert!(
+        e.engine.compiled().subscribers.is_empty(),
+        "the dangling subscription wires nothing"
+    );
+    let run = e.run_sinks().await;
+
+    assert_eq!(
+        run.missing_ports("sum"),
+        [0],
+        "the dangling binding degrades to a missing input on that exact port"
+    );
 }

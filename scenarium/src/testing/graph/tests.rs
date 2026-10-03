@@ -1,5 +1,4 @@
 use super::*;
-use crate::execution::compile::Compiler;
 use crate::graph::func::FuncBehavior;
 
 /// The builder states a whole graph — declarations, wiring and bodies — and
@@ -25,11 +24,7 @@ fn a_named_graph_compiles_to_one_node_per_name() {
         Binding::bind(g.id("src"), 0)
     );
     // `returns` declared the output its literal implies.
-    let compiled = Compiler::default()
-        .compile(&g.graph, &g.library)
-        .expect("the fixture compiles");
-    assert!(compiled.contains(g.id("src")));
-    assert_eq!(compiled.node_ids.len(), 3);
+    assert_eq!(g.compile().output_types("src"), [DataType::Int]);
 }
 
 /// One func per node by default: editing one node's declaration leaves

@@ -1,4 +1,5 @@
 use super::*;
+use crate::execution::report::NodeExecutionStatus;
 
 use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
@@ -132,4 +133,23 @@ async fn unwritten_output_port_is_cleared_before_reexecution() {
         matches!(e.output("partial_writer", 1), Some(DynamicValue::Unbound)),
         "the unwritten port is cleared before invoke, not left holding 20"
     );
+}
+
+#[tokio::test]
+async fn executed_nodes_reported() {
+    let mut e = TestEngine::over(TestGraph::sample());
+
+    let run = e.run_sinks().await;
+
+    assert_eq!(run.ran(), ["get_b", "get_a", "sum", "mult", "Print"]);
+    assert_eq!(run.ran_node_count, 5);
+    assert!(run.errored().is_empty());
+    assert!(run.missing_inputs().is_empty());
+
+    for name in run.ran() {
+        let Some(NodeExecutionStatus::Executed { elapsed_secs }) = run.status(name) else {
+            panic!("{name} ran, so it reports an elapsed time");
+        };
+        assert!(*elapsed_secs >= 0.0, "{name} has negative elapsed_secs");
+    }
 }

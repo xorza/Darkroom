@@ -237,7 +237,7 @@ async fn scan_header<R>(
     digest: Digest,
     codecs: &Codecs,
     mut accept: impl FnMut(usize, OutputDescriptor) -> bool,
-) -> io::Result<Option<HeaderPrefix>>
+) -> codec::error::Result<Option<HeaderPrefix>>
 where
     R: AsyncRead + Unpin,
 {
@@ -277,7 +277,7 @@ async fn read_prefix<R>(
     reader: &mut R,
     file_len: u64,
     digest: Digest,
-) -> io::Result<Option<HeaderPrefix>>
+) -> codec::error::Result<Option<HeaderPrefix>>
 where
     R: AsyncRead + Unpin,
 {
@@ -370,7 +370,9 @@ async fn write_descriptor(
     writer.write_all(&bytes).await
 }
 
-async fn read_descriptor(reader: &mut (impl AsyncRead + Unpin)) -> io::Result<OutputDescriptor> {
+async fn read_descriptor(
+    reader: &mut (impl AsyncRead + Unpin),
+) -> codec::error::Result<OutputDescriptor> {
     let mut bytes = [0; DESCRIPTOR_LEN];
     reader.read_exact(&mut bytes).await?;
     if bytes[1..4] != [0; 3] {
@@ -620,8 +622,8 @@ fn descriptor_payload_len_offset(index: usize) -> u64 {
         + PAYLOAD_LEN_OFFSET
 }
 
-fn invalid_data(message: &'static str) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, message)
+fn invalid_data(message: &'static str) -> CodecFormatError {
+    CodecFormatError::Frame(message.into())
 }
 
 #[cfg(test)]

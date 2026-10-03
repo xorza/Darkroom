@@ -521,3 +521,80 @@ fn prettify(name: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ")
 }
+
+#[cfg(test)]
+mod tests {
+    use syn::{DeriveInput, parse_quote};
+
+    use crate::{prettify, type_identity};
+
+    /// Each malformed type-level `#[config]` is refused with the message for
+    /// its rule; a well-formed one yields its id and name.
+    #[test]
+    fn type_identity_refuses_each_malformed_attribute() {
+        let refusals: [(DeriveInput, &str); 6] = [
+            (
+                parse_quote! { enum Mode { A } },
+                "IntrospectEnum requires `#[config(type_id = \"…\")]`",
+            ),
+            (
+                parse_quote! { #[config(type_id = "not-a-uuid")] enum Mode { A } },
+                "`type_id` must be a UUID",
+            ),
+            (
+                parse_quote! {
+                    #[config(type_id = "3EFFBD19-D4A8-4A9B-A931-78FD0E4F8ADB")]
+                    enum Mode { A }
+                },
+                "`type_id` must be a canonical lowercase UUID",
+            ),
+            (
+                parse_quote! {
+                    #[config(type_id = "3effbd19-d4a8-4a9b-a931-78fd0e4f8adb")]
+                    #[config(type_id = "3effbd19-d4a8-4a9b-a931-78fd0e4f8adb")]
+                    enum Mode { A }
+                },
+                "duplicate `type_id`",
+            ),
+            (
+                parse_quote! {
+                    #[config(type_id = "3effbd19-d4a8-4a9b-a931-78fd0e4f8adb", name = "A", name = "B")]
+                    enum Mode { A }
+                },
+                "duplicate `name`",
+            ),
+            (
+                parse_quote! { #[config(label = "x")] enum Mode { A } },
+                "expected `type_id` or `name`",
+            ),
+        ];
+        for (input, message) in refusals {
+            let error = type_identity(&input, "IntrospectEnum")
+                .err()
+                .expect("the attribute is refused");
+            assert_eq!(error.to_string(), message);
+        }
+
+        let input: DeriveInput = parse_quote! {
+            #[config(type_id = "3effbd19-d4a8-4a9b-a931-78fd0e4f8adb", name = "Speed")]
+            enum Mode { A }
+        };
+        let identity = type_identity(&input, "IntrospectEnum").unwrap();
+        assert_eq!(
+            identity.type_id.value(),
+            "3effbd19-d4a8-4a9b-a931-78fd0e4f8adb"
+        );
+        assert_eq!(
+            identity.name.map(|name| name.value()).as_deref(),
+            Some("Speed")
+        );
+    }
+
+    #[test]
+    fn prettify_title_cases_each_word() {
+        assert_eq!(prettify("tile_size"), "Tile Size");
+        assert_eq!(prettify("limit"), "Limit");
+        assert_eq!(prettify("a__b_"), "A B");
+        assert_eq!(prettify(""), "");
+    }
+}

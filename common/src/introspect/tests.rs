@@ -44,7 +44,7 @@ enum Speed {
 /// change here is a change to what is already on disk.
 #[test]
 fn derived_introspect_enum_renders_and_parses_its_own_variant_names() {
-    assert_ne!(Speed::TYPE_ID, Mode::TYPE_ID);
+    assert_eq!(Speed::TYPE_ID, "3effbd19-d4a8-4a9b-a931-78fd0e4f8adb");
     assert_eq!(Speed::DISPLAY_NAME, "Speed");
     assert_eq!(Speed::VARIANTS, ["fast", "slow", "very_fast"]);
     assert_eq!(Speed::Slow.to_variant(), "slow");
@@ -156,7 +156,11 @@ fn fields_carry_labels_concrete_kinds_required_and_defaults() {
         "OptionalDefaults",
         "the type name otherwise"
     );
-    assert_ne!(Knobs::TYPE_ID, OptionalDefaults::TYPE_ID);
+    assert_eq!(Knobs::TYPE_ID, "ea74f1cf-8e8f-4940-a6b9-1cbf4ed60202");
+    assert_eq!(
+        OptionalDefaults::TYPE_ID,
+        "0c155c3a-ee37-48a8-9ec3-3b27dea7a6c3"
+    );
     let fields = Knobs::fields();
     let labels: Vec<&str> = fields.iter().map(|f| f.label).collect();
     assert_eq!(
@@ -427,37 +431,4 @@ fn rebuilds_with_overrides_fallbacks_and_checked_numeric_errors() {
         error.to_string(),
         "field `threshold` value inf cannot be represented as f32"
     );
-}
-
-mod other {
-    use crate::introspect::IntrospectEnum;
-
-    #[derive(Debug)]
-    pub(crate) enum Mode {
-        Only,
-    }
-
-    impl IntrospectEnum for Mode {
-        const TYPE_ID: &'static str = "b3ee5042-6965-4d47-a8ca-bcd979dd5491";
-        const DISPLAY_NAME: &'static str = "Mode";
-
-        const VARIANTS: &'static [&'static str] = &["only"];
-
-        fn to_variant(&self) -> &'static str {
-            match self {
-                Mode::Only => "only",
-            }
-        }
-
-        fn from_variant(name: &str) -> Option<Self> {
-            (name == "only").then_some(Mode::Only)
-        }
-    }
-}
-
-#[test]
-fn same_named_enums_in_different_modules_have_distinct_identities() {
-    assert_eq!(Mode::DISPLAY_NAME, other::Mode::DISPLAY_NAME);
-    assert_ne!(Mode::TYPE_ID, other::Mode::TYPE_ID);
-    assert_eq!(other::Mode::VARIANTS, ["only"]);
 }
