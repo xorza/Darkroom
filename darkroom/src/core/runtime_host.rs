@@ -22,10 +22,9 @@ use crate::core::worker::WorkerBridge;
 pub(crate) struct RuntimeHost {
     pub(crate) library: RuntimeLibrary,
     worker: WorkerBridge,
-    /// The active disk-store root (`None` = memory-only),
-    /// remembered so graph-library operations can re-push the worker's
-    /// [`DiskStore`] — which carries a library snapshot — without the caller
-    /// re-supplying the document path.
+    /// The active disk-store root (`None` = memory-only), remembered so a
+    /// repeated [`set_document_cache`](Self::set_document_cache) can tell
+    /// whether the root changed.
     disk_root: Option<PathBuf>,
     /// Long-lived so the lowering scratch is reused across compiles instead of
     /// reallocated per run.
@@ -90,21 +89,12 @@ impl RuntimeHost {
     /// Re-seed the ML nodes' model-path defaults from `preferences`.
     pub(crate) fn configure_ml_model_defaults(&mut self, preferences: &Preferences) {
         let model_paths = (&preferences.ml_models).into();
-        if self.library.update_ml_model_paths(&model_paths) {
-            self.sync_worker_disk_store();
-        }
+        self.library.update_ml_model_paths(&model_paths);
     }
 
-    /// Push a fresh [`DiskStore`] (current library snapshot + current root)
-    /// to the worker. The one constructor of worker-side disk stores, so a
-    /// library edit or a root change can't leave the other half stale.
+    /// Point the worker's [`DiskStore`] at the current root.
     fn sync_worker_disk_store(&self) {
-        self.dispatch(|worker| {
-            worker.set_disk_store(DiskStore::new(
-                &self.library.published.load(),
-                self.disk_root.clone(),
-            ))
-        });
+        self.dispatch(|worker| worker.set_disk_store(DiskStore::new(self.disk_root.clone())));
     }
 
     /// Compile `graph` against the current library. A failure is reported to

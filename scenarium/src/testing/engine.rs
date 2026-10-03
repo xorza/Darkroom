@@ -104,7 +104,7 @@ impl TestEngine {
     /// verdict already given was answered from the previous store.
     pub(crate) fn attach_disk_store(&mut self, root: impl Into<PathBuf>) {
         let root = root.into();
-        let store = DiskStore::new(&self.graph.library, Some(root.clone()));
+        let store = DiskStore::new(Some(root.clone()));
         self.engine.set_disk_store(store);
         self.disk_root = Some(root);
     }

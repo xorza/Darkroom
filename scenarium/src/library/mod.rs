@@ -85,6 +85,41 @@ impl TypeEntry {
         }
     }
 
+    /// Whether `other` declares this same type: the same name, the same
+    /// variants, and the same codec instance.
+    fn same_as(&self, other: &Self) -> bool {
+        match (&self.kind, &other.kind) {
+            (
+                TypeEntryKind::Custom {
+                    display_name,
+                    codec,
+                },
+                TypeEntryKind::Custom {
+                    display_name: other_name,
+                    codec: other_codec,
+                },
+            ) => {
+                display_name == other_name
+                    && match (codec, other_codec) {
+                        (None, None) => true,
+                        (Some(codec), Some(other)) => Arc::ptr_eq(codec, other),
+                        _ => false,
+                    }
+            }
+            (
+                TypeEntryKind::Enum {
+                    display_name,
+                    variants,
+                },
+                TypeEntryKind::Enum {
+                    display_name: other_name,
+                    variants: other_variants,
+                },
+            ) => display_name == other_name && variants == other_variants,
+            _ => false,
+        }
+    }
+
     fn codec(&self) -> Option<&Arc<dyn CustomValueCodec>> {
         match &self.kind {
             TypeEntryKind::Custom { codec, .. } => codec.as_ref(),
@@ -101,11 +136,14 @@ impl TypeEntry {
 pub struct Library {
     funcs: HashMap<FuncId, Func>,
 
-    /// Registered nominal types (`Custom`/`Enum`), keyed by [`TypeId`]. The home
-    /// for type metadata and the disk codecs the output cache dispatches through.
-    /// Lookup-only (never iterated in order), so a plain map rather than an
-    /// ordered map.
-    pub types: HashMap<TypeId, TypeEntry>,
+    /// Registered nominal types (`Custom`/`Enum`), keyed by [`TypeId`]. Written
+    /// only by [`register_type`](Self::register_type), whose gates every entry
+    /// passes.
+    types: HashMap<TypeId, TypeEntry>,
+    /// The codecs among `types`, shared with each program compiled from this
+    /// library. Registration copies the map only while a program still holds
+    /// the previous one.
+    codecs: Arc<Codecs>,
 }
 
 impl Library {
@@ -148,15 +186,20 @@ impl Library {
         self.funcs.remove(&id)
     }
 
-    /// Register a nominal type. Panics on a duplicate id — two decls for one type
-    /// is a wiring bug, not a runtime condition.
+    /// Register a nominal type. Registering an identical entry again does
+    /// nothing, so libraries that share a type merge; a conflicting entry under
+    /// a registered id panics — two declarations for one type is a wiring bug,
+    /// not a runtime condition.
     pub fn register_type(&mut self, type_id: impl Into<TypeId>, entry: TypeEntry) {
         let type_id = type_id.into();
         assert!(!type_id.is_nil());
-        assert!(
-            !self.types.contains_key(&type_id),
-            "duplicate type registration"
-        );
+        if let Some(existing) = self.types.get(&type_id) {
+            assert!(
+                existing.same_as(&entry),
+                "conflicting registration of type {type_id:?}"
+            );
+            return;
+        }
         // Funcs and their enum types register in either order, so the
         // membership gate runs from both directions: `add` checks against
         // types already present, and a fresh enum entry re-checks the funcs
@@ -194,7 +237,20 @@ impl Library {
                 }
             }
         }
+        if let Some(codec) = entry.codec() {
+            Arc::make_mut(&mut self.codecs).insert(type_id, Arc::clone(codec));
+        }
         self.types.insert(type_id, entry);
+    }
+
+    /// The registered entry of `type_id`, if any.
+    pub fn type_entry(&self, type_id: TypeId) -> Option<&TypeEntry> {
+        self.types.get(&type_id)
+    }
+
+    /// Every registered type.
+    pub fn types(&self) -> impl ExactSizeIterator<Item = (&TypeId, &TypeEntry)> {
+        self.types.iter()
     }
 
     /// Whether `type_id` is registered as a **custom** type — the state
@@ -232,16 +288,9 @@ impl Library {
         }
     }
 
-    /// Snapshot of the registered disk codecs — everything the output cache's
-    /// serialize/deserialize needs from the library.
-    pub(crate) fn codecs(&self) -> Codecs {
-        Codecs {
-            by_type: self
-                .types
-                .iter()
-                .filter_map(|(id, entry)| Some((*id, Arc::clone(entry.codec()?))))
-                .collect(),
-        }
+    /// The registered disk codecs, as a handle a compiled program keeps.
+    pub(crate) fn codecs(&self) -> &Arc<Codecs> {
+        &self.codecs
     }
 
     pub fn merge<T: Into<Library>>(&mut self, other: T) {

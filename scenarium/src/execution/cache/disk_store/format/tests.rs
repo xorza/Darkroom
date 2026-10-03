@@ -183,7 +183,7 @@ fn library(version: u32, behavior: DecodeBehavior, decode_calls: Arc<AtomicU64>)
 
 async fn encoded(digest: Digest, outputs: &[DynamicValue], library: &Library) -> Vec<u8> {
     let mut writer = ChunkedIo::<_, 3>(Cursor::new(Vec::new()));
-    write(&mut writer, digest, outputs, &library.codecs())
+    write(&mut writer, digest, outputs, library.codecs())
         .await
         .unwrap();
     writer.0.into_inner()
@@ -273,7 +273,7 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
             bytes.len() as u64,
             digest,
             &outputs,
-            &library.codecs(),
+            library.codecs(),
         )
         .await
         .unwrap()
@@ -285,7 +285,7 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
             &mut Cursor::new(&bytes),
             bytes.len() as u64,
             digest,
-            &library.codecs(),
+            library.codecs(),
             &demand(outputs.len(), &[0]),
         )
         .await
@@ -299,7 +299,7 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
         &mut reader,
         bytes.len() as u64,
         digest,
-        &library.codecs(),
+        library.codecs(),
         &demand(outputs.len(), &[]),
     )
     .await
@@ -341,7 +341,7 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
         &mut Cursor::new(&bytes),
         bytes.len() as u64,
         digest,
-        &complete_library.codecs(),
+        complete_library.codecs(),
         &demand(outputs.len(), &[]),
     )
     .await
@@ -359,7 +359,7 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
         &mut Cursor::new(&bytes),
         bytes.len() as u64,
         digest,
-        &underread_library.codecs(),
+        underread_library.codecs(),
         &demand(outputs.len(), &[]),
     )
     .await
@@ -385,7 +385,7 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
             bytes.len() as u64,
             digest,
             &outputs,
-            &registered.codecs(),
+            registered.codecs(),
         )
         .await
         .unwrap()
@@ -400,7 +400,7 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
             bytes.len() as u64,
             digest,
             &partial,
-            &registered.codecs(),
+            registered.codecs(),
         )
         .await
         .unwrap()
@@ -415,7 +415,7 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
             bytes.len() as u64,
             digest,
             &wrong_kind,
-            &registered.codecs(),
+            registered.codecs(),
         )
         .await
         .unwrap()
@@ -429,7 +429,7 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
             bytes.len() as u64,
             digest,
             &outputs,
-            &changed.codecs(),
+            changed.codecs(),
         )
         .await
         .unwrap()
@@ -476,7 +476,7 @@ async fn malformed_header_lengths_tags_and_const_values_are_rejected() {
                 bytes.len() as u64,
                 digest,
                 &outputs,
-                &library.codecs(),
+                library.codecs(),
             )
             .await
             .is_err()
@@ -489,7 +489,7 @@ async fn malformed_header_lengths_tags_and_const_values_are_rejected() {
         &mut Cursor::new(&invalid_bool),
         invalid_bool.len() as u64,
         digest,
-        &library.codecs(),
+        library.codecs(),
         &demand(outputs.len(), &[]),
     )
     .await

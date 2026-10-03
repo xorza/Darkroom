@@ -39,7 +39,7 @@ async fn an_eviction_failure_uses_the_general_worker_error_report() {
     fs::create_dir(&blocked_path).unwrap();
 
     w.settle([
-        w.disk_store(dir.path()),
+        TestWorker::disk_store(dir.path()),
         w.update(),
         WorkerMessage::EvictCache {
             nodes: vec![blocked],
@@ -110,7 +110,11 @@ async fn a_disk_cached_node_survives_a_worker_restart() {
     let calls = Calls::default();
 
     let mut w = TestWorker::over(disk_cached_graph(&calls));
-    w.send_many([w.disk_store(dir.path()), w.update(), TestWorker::sinks()]);
+    w.send_many([
+        TestWorker::disk_store(dir.path()),
+        w.update(),
+        TestWorker::sinks(),
+    ]);
     let cold = w.run().await;
     assert_eq!(
         cold.ran(),
@@ -124,7 +128,11 @@ async fn a_disk_cached_node_survives_a_worker_restart() {
     // disk and is reused. Its input `source` feeds only the reused
     // `square`, which never reads it, so the pre-run cut prunes it.
     let mut w = w.restart();
-    w.send_many([w.disk_store(dir.path()), w.update(), TestWorker::sinks()]);
+    w.send_many([
+        TestWorker::disk_store(dir.path()),
+        w.update(),
+        TestWorker::sinks(),
+    ]);
     let warm = w.run().await;
     assert_eq!(
         calls.count(),
@@ -164,8 +172,11 @@ async fn a_flush_failure_uses_the_general_worker_error_report() {
     fs::create_dir(&blocked_path).unwrap();
 
     // The sweep the host asks for once the store is attached.
-    w.settle([w.disk_store(dir.path()), WorkerMessage::FlushAllCaches])
-        .await;
+    w.settle([
+        TestWorker::disk_store(dir.path()),
+        WorkerMessage::FlushAllCaches,
+    ])
+    .await;
     let WorkerReport::Error(WorkerError::CacheFlush {
         failures,
         unsupported,
@@ -262,8 +273,11 @@ async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
     w.send_many([w.update(), TestWorker::sinks()]);
     w.run().await;
 
-    w.settle([w.disk_store(dir.path()), WorkerMessage::FlushAllCaches])
-        .await;
+    w.settle([
+        TestWorker::disk_store(dir.path()),
+        WorkerMessage::FlushAllCaches,
+    ])
+    .await;
     w.quiet();
     assert_eq!(dir.entry_count(), 0, "nothing could be written");
 
@@ -411,7 +425,7 @@ async fn resident_disk_backed_values_are_flushed_when_asked_and_not_on_a_bare_at
     w.run().await;
     assert_eq!(dir.entry_count(), 0);
 
-    w.settle([w.disk_store(dir.path())]).await;
+    w.settle([TestWorker::disk_store(dir.path())]).await;
     assert_eq!(
         dir.entry_count(),
         0,
@@ -446,7 +460,7 @@ async fn a_batch_resolves_its_graph_before_the_store_it_repoints_to() {
     // The outgoing document: computed against its own store, value resident.
     let mut w = TestWorker::over(graph);
     w.send_many([
-        w.disk_store(outgoing.path()),
+        TestWorker::disk_store(outgoing.path()),
         w.update(),
         TestWorker::sinks(),
     ]);
@@ -458,7 +472,7 @@ async fn a_batch_resolves_its_graph_before_the_store_it_repoints_to() {
     // resident and really would follow the store to a new root.
     let elsewhere = TempDir::new("no-graph-op");
     w.settle([
-        w.disk_store(elsewhere.path()),
+        TestWorker::disk_store(elsewhere.path()),
         WorkerMessage::FlushAllCaches,
     ])
     .await;
@@ -474,7 +488,7 @@ async fn a_batch_resolves_its_graph_before_the_store_it_repoints_to() {
     // because the graph op ran first.
     w.settle([
         WorkerMessage::Clear,
-        w.disk_store(incoming.path()),
+        TestWorker::disk_store(incoming.path()),
         WorkerMessage::FlushAllCaches,
     ])
     .await;

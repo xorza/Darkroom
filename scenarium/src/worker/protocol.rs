@@ -59,9 +59,9 @@ pub enum WorkerMessage {
     /// just been given a root.
     ///
     /// Asked for rather than inferred from [`Self::SetDiskStore`]. A store is
-    /// replaced for several unrelated reasons — a document opened, a document
-    /// saved again to the same place, a library edit rebuilding the codec map —
-    /// and only the host can tell which of them left values owing a blob. A
+    /// replaced for several unrelated reasons — a document opened, closed, or
+    /// saved somewhere else — and only the host can tell which of them left
+    /// values owing a blob. A
     /// worker guessing wrote the *outgoing* document's values into the
     /// *incoming* document's root, under ids nothing there would ever read.
     FlushAllCaches,

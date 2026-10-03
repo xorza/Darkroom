@@ -287,6 +287,8 @@ impl RuntimeCache {
             let slot = match retained.remove(node_id) {
                 Some(mut slot) => {
                     slot.reown(owner);
+                    // An unwritable verdict was the previous program's codecs'.
+                    slot.reconsider_unwritable_blob();
                     slot
                 }
                 None => RuntimeSlot::new(owner),
@@ -665,7 +667,11 @@ impl RuntimeCache {
         match self.reuse_source(program, node_idx, demand) {
             None => false,
             Some(ReuseSource::Resident) => true,
-            Some(ReuseSource::Blob(target)) => self.disk_store.covers_demand(&target, demand).await,
+            Some(ReuseSource::Blob(target)) => {
+                self.disk_store
+                    .covers_demand(&target, &program.codecs, demand)
+                    .await
+            }
         }
     }
 
@@ -707,7 +713,7 @@ impl RuntimeCache {
             }
             Some(ReuseSource::Blob(target)) => target,
         };
-        let Some(snapshot) = self.disk_store.read(&target, demand).await else {
+        let Some(snapshot) = self.disk_store.read(&target, &program.codecs, demand).await else {
             return ReuseOutcome::Missed;
         };
         self.slots[node_idx].load_from_blob(snapshot, target.digest);
@@ -729,7 +735,7 @@ impl RuntimeCache {
     /// pay a `stat` per disk-backed node in: an event loop executes on every
     /// tick.
     async fn settle_blob_debt(&mut self, program: &CompiledGraph, node_idx: NodeIdx) {
-        if self.slots[node_idx].blob_is_current() {
+        if !self.slots[node_idx].owes_blob() {
             return;
         }
         // `PreserveCovering` rather than `KnownMiss`: this carries no reuse
@@ -770,7 +776,10 @@ impl RuntimeCache {
     ) -> Option<StoreResult> {
         let target = self.blob_target(program, node_idx)?;
         let snapshot = self.slots[node_idx].current_snapshot()?;
-        let outcome = self.disk_store.store(&target, snapshot, policy).await;
+        let outcome = self
+            .disk_store
+            .store(&target, &program.codecs, snapshot, policy)
+            .await;
         self.slots[node_idx].note_store(&outcome);
         Some(outcome)
     }

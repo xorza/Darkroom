@@ -163,10 +163,9 @@ impl TestWorker {
         }
     }
 
-    /// `SetDiskStore` pointing the cache's disk tier at `root`, using this
-    /// graph's own codecs.
-    pub(crate) fn disk_store(&self, root: impl Into<PathBuf>) -> WorkerMessage {
-        WorkerMessage::SetDiskStore(DiskStore::new(&self.graph.library, Some(root.into())))
+    /// `SetDiskStore` pointing the cache's disk tier at `root`.
+    pub(crate) fn disk_store(root: impl Into<PathBuf>) -> WorkerMessage {
+        WorkerMessage::SetDiskStore(DiskStore::new(Some(root.into())))
     }
 
     pub(crate) fn send(&self, msg: WorkerMessage) {
