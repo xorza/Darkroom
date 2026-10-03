@@ -111,10 +111,7 @@ fn register_denoise(library: &mut Library) {
                 Box::pin(async move {
                     let config = inputs[2].as_custom::<ConfigValue<Denoise>>().map_or_else(
                         || Denoise {
-                            strength: inputs[1]
-                                .as_f64()
-                                .map(|value| value as f32)
-                                .expect("strength input type is validated at the compile boundary"),
+                            strength: inputs[1].required_f64() as f32,
                             ..Default::default()
                         },
                         |config| config.0,
@@ -193,10 +190,7 @@ fn register_hdr(library: &mut Library) {
                 Box::pin(async move {
                     let config = inputs[2].as_custom::<ConfigValue<Hdr>>().map_or_else(
                         || Hdr {
-                            amount: inputs[1]
-                                .as_f64()
-                                .map(|value| value as f32)
-                                .expect("amount input type is validated at the compile boundary"),
+                            amount: inputs[1].required_f64() as f32,
                             ..Default::default()
                         },
                         |config| config.0,
@@ -230,9 +224,7 @@ fn register_local_contrast(library: &mut Library) {
                         .as_custom::<ConfigValue<LocalContrast>>()
                         .map_or_else(
                             || LocalContrast {
-                                strength: inputs[1].as_f64().map(|value| value as f32).expect(
-                                    "strength input type is validated at the compile boundary",
-                                ),
+                                strength: inputs[1].required_f64() as f32,
                                 ..Default::default()
                             },
                             |config| config.0,

@@ -173,34 +173,11 @@ fn const_value(value: &FieldValue) -> ConstValue {
 /// Read an input's runtime value back into a neutral field value.
 fn field_value(kind: &FieldKind, value: &DynamicValue) -> FieldValue {
     match kind {
-        FieldKind::Int(_) => FieldValue::Int(
-            value
-                .as_i64()
-                .expect("integer config input type is validated at the compile boundary")
-                .into(),
-        ),
-        FieldKind::Float(_) => FieldValue::Float(
-            value
-                .as_f64()
-                .expect("float config input type is validated at the compile boundary"),
-        ),
-        FieldKind::Bool => FieldValue::Bool(
-            value
-                .as_bool()
-                .expect("boolean config input type is validated at the compile boundary"),
-        ),
-        FieldKind::Str => FieldValue::Str(
-            value
-                .as_string()
-                .expect("string config input type is validated at the compile boundary")
-                .to_string(),
-        ),
-        FieldKind::Enum { .. } => FieldValue::Enum(
-            value
-                .as_enum()
-                .expect("enum config input type is validated at the compile boundary")
-                .to_string(),
-        ),
+        FieldKind::Int(_) => FieldValue::Int(value.required_i64().into()),
+        FieldKind::Float(_) => FieldValue::Float(value.required_f64()),
+        FieldKind::Bool => FieldValue::Bool(value.required_bool()),
+        FieldKind::Str => FieldValue::Str(value.required_string().to_string()),
+        FieldKind::Enum { .. } => FieldValue::Enum(value.required_enum().to_string()),
         FieldKind::Option(_) if matches!(value, DynamicValue::Unbound) => FieldValue::Null,
         FieldKind::Option(_) if matches!(value.as_static(), Some(ConstValue::Null)) => {
             FieldValue::Null
@@ -299,7 +276,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "float config input type is validated")]
+    #[should_panic(expected = "a required input holds Unbound, not a number")]
     fn rejects_incompatible_required_values() {
         field_value(&FieldKind::Float(FloatKind::F64), &DynamicValue::Unbound);
     }

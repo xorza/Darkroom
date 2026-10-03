@@ -44,11 +44,7 @@ fn register_denoise(library: &mut Library, model_path: &Path) {
                     Box::pin(async move {
                         debug_assert_eq!(inputs.len(), 2);
                         debug_assert_eq!(outputs.len(), 1);
-                        let model = PathBuf::from(
-                            inputs[1]
-                                .as_fs_path()
-                                .expect("model input type is validated at the compile boundary"),
-                        );
+                        let model = PathBuf::from(inputs[1].required_fs_path());
                         let output =
                             runtime::run_ml(mem::take(&mut inputs[0]), move |mut image| {
                                 MlDenoise::new(model).apply(&mut image)?;
@@ -86,11 +82,7 @@ fn register_star_removal(library: &mut Library, model_path: &Path) {
                     Box::pin(async move {
                         debug_assert_eq!(inputs.len(), 2);
                         debug_assert_eq!(outputs.len(), 2);
-                        let model = PathBuf::from(
-                            inputs[1]
-                                .as_fs_path()
-                                .expect("model input type is validated at the compile boundary"),
-                        );
+                        let model = PathBuf::from(inputs[1].required_fs_path());
                         if need_stars {
                             let result = runtime::run_ml(mem::take(&mut inputs[0]), move |image| {
                                 RemoveStars::new(model).split(image)

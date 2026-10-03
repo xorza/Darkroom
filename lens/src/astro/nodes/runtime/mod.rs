@@ -42,11 +42,7 @@ where
 fn image_to_planar(value: DynamicValue) -> LinearImage {
     match value.into_custom::<Image>() {
         Ok(image) => image.to_planar(),
-        Err(value) => value
-            .as_custom::<Image>()
-            .expect("image input type is validated at the compile boundary")
-            .planar()
-            .into_owned(),
+        Err(value) => value.required_custom::<Image>().planar().into_owned(),
     }
 }
 

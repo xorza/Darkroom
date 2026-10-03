@@ -82,13 +82,8 @@ pub(crate) fn register(library: &mut Library) {
                             })
                         };
                         let frame_sets = [frames(0), frames(1), frames(2), frames(3)];
-                        let sigma = inputs[4]
-                            .as_f64()
-                            .map(|value| value as f32)
-                            .expect("sigma input type is validated at the compile boundary");
-                        let cache = inputs[5]
-                            .as_bool()
-                            .expect("cache input type is validated at the compile boundary");
+                        let sigma = inputs[4].required_f64() as f32;
+                        let cache = inputs[5].required_bool();
 
                         let masters = runtime::run_cancellable(cancel, move |cancel| {
                             build_masters_cached(frame_sets, sigma, cache, cancel)

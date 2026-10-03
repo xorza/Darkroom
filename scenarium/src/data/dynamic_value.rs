@@ -1,3 +1,4 @@
+use std::any;
 use std::any::Any;
 use std::fmt;
 use std::fmt::Debug;
@@ -131,6 +132,75 @@ impl DynamicValue {
         Arc::try_unwrap(typed).map_err(|shared| DynamicValue::Custom(shared))
     }
 
+    /// The value of a required input declared `Float` (or any scalar the
+    /// declaration coerces).
+    ///
+    /// The `required_*` reads state what the compiler guarantees a lambda: a
+    /// node runs only with every required input bound to a value of its
+    /// declared type. A lambda reading a required input as declared cannot
+    /// fail; one that panics here read a port as a type it does not declare.
+    #[track_caller]
+    pub fn required_f64(&self) -> f64 {
+        self.as_f64().unwrap_or_else(|| self.misread("a number"))
+    }
+
+    /// The value of a required input declared `Int`. See [`required_f64`](Self::required_f64).
+    #[track_caller]
+    pub fn required_i64(&self) -> i64 {
+        self.as_i64().unwrap_or_else(|| self.misread("an integer"))
+    }
+
+    /// The value of a required input declared `Bool`. See [`required_f64`](Self::required_f64).
+    #[track_caller]
+    pub fn required_bool(&self) -> bool {
+        self.as_bool().unwrap_or_else(|| self.misread("a boolean"))
+    }
+
+    /// The value of a required input declared `String`. See [`required_f64`](Self::required_f64).
+    #[track_caller]
+    pub fn required_string(&self) -> &str {
+        self.as_string().unwrap_or_else(|| self.misread("a string"))
+    }
+
+    /// The variant of a required input declared `Enum`. See [`required_f64`](Self::required_f64).
+    #[track_caller]
+    pub fn required_enum(&self) -> &str {
+        self.as_enum()
+            .unwrap_or_else(|| self.misread("an enum variant"))
+    }
+
+    /// The path of a required input declared `FsPath` for one path. See
+    /// [`required_f64`](Self::required_f64).
+    #[track_caller]
+    pub fn required_fs_path(&self) -> &str {
+        self.as_fs_path().unwrap_or_else(|| self.misread("a path"))
+    }
+
+    /// The paths of a required input declared `FsPath`. See
+    /// [`required_f64`](Self::required_f64).
+    #[track_caller]
+    pub fn required_fs_paths(&self) -> &[String] {
+        self.as_fs_paths().unwrap_or_else(|| self.misread("paths"))
+    }
+
+    /// The value of a required input declared `Custom` as `T`. See
+    /// [`required_f64`](Self::required_f64).
+    #[track_caller]
+    pub fn required_custom<T: CustomValue>(&self) -> &T {
+        self.as_custom()
+            .unwrap_or_else(|| self.misread(any::type_name::<T>()))
+    }
+
+    #[cold]
+    #[track_caller]
+    fn misread(&self, expected: &str) -> ! {
+        panic!(
+            "a required input holds {self:?}, not {expected}: the compiler delivers every \
+             required input bound and of its declared type, so the lambda read a port as \
+             another type"
+        )
+    }
+
     pub fn to_value_string(&self) -> String {
         match self {
             DynamicValue::Unbound => String::new(),
@@ -191,6 +261,8 @@ impl From<&str> for DynamicValue {
 
 #[cfg(test)]
 mod tests {
+    use std::panic;
+
     use super::*;
 
     #[derive(Debug)]
@@ -227,6 +299,42 @@ mod tests {
         assert_eq!(
             DynamicValue::from_custom(Tag("z")).to_value_string(),
             "tag:z"
+        );
+    }
+
+    /// Each required read returns a value of its declared kind, a scalar
+    /// coerced the way the declaration's coercion class allows, and panics,
+    /// naming the misread, on anything else.
+    #[test]
+    fn required_reads_return_the_declared_kind_and_name_a_misread() {
+        assert_eq!(DynamicValue::from(3i64).required_f64(), 3.0);
+        assert_eq!(DynamicValue::from(2.75f64).required_f64(), 2.75);
+        assert_eq!(DynamicValue::from(7i64).required_i64(), 7);
+        assert!(DynamicValue::from(true).required_bool());
+        let string = DynamicValue::Static(ConstValue::String("text".into()));
+        assert_eq!(string.required_string(), "text");
+        let variant = DynamicValue::Static(ConstValue::Enum("auto".into()));
+        assert_eq!(variant.required_enum(), "auto");
+        let path = DynamicValue::Static(ConstValue::FsPath("a.fits".into()));
+        assert_eq!(path.required_fs_path(), "a.fits");
+        assert_eq!(path.required_fs_paths(), ["a.fits"]);
+        let tag = DynamicValue::from_custom(Tag("t"));
+        assert_eq!(tag.required_custom::<Tag>().0, "t");
+
+        let message = |read: fn(&DynamicValue) -> String| {
+            let panic = panic::catch_unwind(|| read(&DynamicValue::Unbound)).unwrap_err();
+            panic.downcast_ref::<String>().cloned().unwrap()
+        };
+        assert!(
+            message(|v| v.required_f64().to_string())
+                .starts_with("a required input holds Unbound, not a number")
+        );
+        assert!(
+            message(|v| v.required_string().to_owned())
+                .starts_with("a required input holds Unbound, not a string")
+        );
+        assert!(
+            message(|v| v.required_custom::<Tag>().0.to_owned()).contains(any::type_name::<Tag>())
         );
     }
 
