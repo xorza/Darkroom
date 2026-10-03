@@ -1,34 +1,14 @@
 use std::fs;
 use std::io;
 use std::io::{Seek as _, SeekFrom, Write as _};
-use std::path::PathBuf;
 use std::sync::{Arc, Barrier};
 
 use tokio::io::AsyncWriteExt as _;
 
 use crate::TempDir;
+use crate::file_utils::internals::publication_temp_files;
 use crate::file_utils::{AtomicFile, PublicationMode, SyncAtomicFile, publish, publish_bytes};
-use std::path::Path;
 use std::thread;
-
-fn publication_temp_files(path: &Path) -> Vec<PathBuf> {
-    let parent = path.parent().unwrap();
-    let prefix = format!("{}.", path.file_name().unwrap().to_string_lossy());
-    fs::read_dir(parent)
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .filter(|candidate| {
-            candidate
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .starts_with(&prefix)
-                && candidate
-                    .extension()
-                    .is_some_and(|extension| extension == "tmp")
-        })
-        .collect()
-}
 
 #[test]
 fn publication_replaces_complete_files_and_cleans_up_failures() {

@@ -11,7 +11,6 @@ use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::error::RunError;
 use crate::execution::executor::{Executor, RunRequest};
-use crate::execution::identity::OutputAddr;
 use crate::execution::report::ExecutionOutcome;
 use crate::execution::report::internals::DiscardedReports;
 use crate::execution::schedule::{NodeState, ResolvedOutputs, RootFlags, RunSchedule};
@@ -44,10 +43,7 @@ pub(crate) struct Runs<'a> {
 
 impl<'a> Runs<'a> {
     pub(super) fn new(owner: &'a ProgramBuilder) -> Self {
-        let mut schedule = owner.staged(NodeState::Run);
-        for placed in &owner.placed {
-            schedule.add_root(placed.node_idx, RootFlags::PLAIN);
-        }
+        let schedule = owner.running();
         let mut cache = RuntimeCache::default();
         cache.install_for_test(&owner.program);
         let mut runs = Self {
@@ -94,10 +90,7 @@ impl<'a> Runs<'a> {
     /// Demand one output no consumer reads — what a node seed does, and the
     /// only way `Produce` reaches a port with a zero reader count.
     pub(crate) fn demand(mut self, node: Placed, port: usize) -> Self {
-        let output_idx = self.program().output_idx(OutputAddr {
-            node_idx: node.node_idx,
-            port_idx: port as u32,
-        });
+        let output_idx = self.program().output_idx(node.addr(port));
         self.schedule.outputs.demand[output_idx] = OutputDemand::Produce;
         self
     }
@@ -214,11 +207,8 @@ impl<'a> Runs<'a> {
     /// Planned reads of `node`'s output `port` the run has not completed — zero
     /// once every consumer has read it or had its read retired.
     pub(crate) fn remaining_reads(&self, node: Placed, port: usize) -> u32 {
-        let output_idx = self.program().output_idx(OutputAddr {
-            node_idx: node.node_idx,
-            port_idx: port as u32,
-        });
-        self.executor.remaining_reads(output_idx)
+        self.executor
+            .remaining_reads(self.program().output_idx(node.addr(port)))
     }
 
     fn set_readers(&mut self, readers: Vec<u32>) {

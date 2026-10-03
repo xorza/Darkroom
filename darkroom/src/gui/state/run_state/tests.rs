@@ -4,7 +4,6 @@ use std::io;
 
 use scenarium::InvokeError;
 use scenarium::NodeStatus;
-use scenarium::testing::compiled_graph_builder::CompiledGraphBuilder;
 
 use crate::gui::state::preview_store::StoredContent;
 
@@ -38,12 +37,8 @@ fn completed_status(executed: &[(NodeId, f64)], errored: &[NodeId]) -> WorkerRep
 }
 
 fn run_state(nodes: impl IntoIterator<Item = NodeId>) -> RunState {
-    let mut builder = CompiledGraphBuilder::new();
-    for node_id in nodes {
-        builder.insert_node(node_id);
-    }
     RunState {
-        compiled: Some(builder.build()),
+        compiled: Some(Arc::new(CompiledGraph::bare(nodes))),
         ..RunState::default()
     }
 }
@@ -182,9 +177,7 @@ fn install_and_clear_reports_carry_the_cache_reading() {
 
     // An install that dropped every cached node reports an empty cache, and
     // the readout follows it down.
-    let mut builder = CompiledGraphBuilder::new();
-    builder.insert_node(nid(2));
-    let replacement = builder.build();
+    let replacement = Arc::new(CompiledGraph::bare([nid(2)]));
     state.apply_report(
         WorkerReport::Installed {
             compiled: Arc::clone(&replacement),

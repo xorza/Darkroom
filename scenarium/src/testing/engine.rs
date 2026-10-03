@@ -24,9 +24,9 @@ use crate::execution::cache::runtime::error::CacheNodeFailure;
 use crate::execution::compile::error::CompileError;
 use crate::execution::engine::ExecutionEngine;
 use crate::execution::error::{Result, RunError};
-use crate::execution::report::RunPhase;
 use crate::execution::report::internals::{CollectingReporter, DiscardedReports};
 use crate::execution::report::{ExecutionOutcome, NodeExecutionStatus, NodeStatus};
+use crate::execution::report::{RunPhase, RunReporter};
 use crate::execution::schedule::NodeState;
 use crate::execution::seeds::RunSeeds;
 use crate::graph::func::lambda::OutputDemand;
@@ -164,14 +164,6 @@ impl TestEngine {
         .await
     }
 
-    /// An event port on a named node.
-    pub(crate) fn event(&self, name: &str, event_idx: usize) -> EventPort {
-        EventPort {
-            node_id: self.id(name),
-            event_idx,
-        }
-    }
-
     pub(crate) async fn run_sinks(&mut self) -> RunOutcome {
         self.run(RunSeeds::sinks()).await
     }
@@ -190,30 +182,19 @@ impl TestEngine {
 
     /// Run every sink, also handing back the live progress the run published.
     pub(crate) async fn run_sinks_reporting(&mut self) -> ReportedRun {
-        let TestEngine {
-            graph,
-            engine,
-            outcome,
-            ..
-        } = self;
         let mut reporter = CollectingReporter::default();
-        engine
-            .execute(
-                &RunSeeds::sinks(),
-                &mut reporter,
-                CancelToken::never(),
-                outcome,
-            )
+        let run = self
+            .execute_with(&mut reporter, RunSeeds::sinks(), CancelToken::never())
             .await
             .expect("the run completes");
-        let names = NameMap::of(graph);
+        let names = NameMap::of(&self.graph);
         ReportedRun {
             progress: reporter
                 .progress
                 .iter()
                 .map(|&(node_id, phase)| (names.name(node_id), phase))
                 .collect(),
-            run: RunOutcome::snapshot(graph, engine, outcome),
+            run,
         }
     }
 
@@ -272,15 +253,24 @@ impl TestEngine {
         seeds: RunSeeds,
         cancel: CancelToken,
     ) -> Result<RunOutcome> {
+        self.execute_with(&mut DiscardedReports, seeds, cancel)
+            .await
+    }
+
+    /// The one place a test run executes: under `reporter`, then read back.
+    async fn execute_with(
+        &mut self,
+        reporter: &mut dyn RunReporter,
+        seeds: RunSeeds,
+        cancel: CancelToken,
+    ) -> Result<RunOutcome> {
         let TestEngine {
             graph,
             engine,
             outcome,
             ..
         } = self;
-        engine
-            .execute(&seeds, &mut DiscardedReports, cancel, outcome)
-            .await?;
+        engine.execute(&seeds, reporter, cancel, outcome).await?;
         Ok(RunOutcome::snapshot(graph, engine, outcome))
     }
 
@@ -477,14 +467,7 @@ impl RunOutcome {
 
     /// Names still holding RAM after the run, sorted.
     pub(crate) fn holding_ram(&self) -> Vec<&str> {
-        let mut names: Vec<&str> = self
-            .rows
-            .iter()
-            .filter(|(_, row)| row.ram.total() > 0)
-            .map(|(name, _)| name.as_str())
-            .collect();
-        names.sort_unstable();
-        names
+        sorted_names(&self.rows, |row| row.ram.total() > 0)
     }
 
     /// Log lines the run emitted, in order — how a `records` node reports what
@@ -525,14 +508,7 @@ impl RunOutcome {
     /// predict, while a name list is readable and stable across a fixture whose
     /// ids move.
     fn with_status(&self, matches: impl Fn(&NodeExecutionStatus) -> bool) -> Vec<&str> {
-        let mut names: Vec<&str> = self
-            .rows
-            .iter()
-            .filter(|(_, row)| row.status.as_ref().is_some_and(&matches))
-            .map(|(name, _)| name.as_str())
-            .collect();
-        names.sort_unstable();
-        names
+        sorted_names(&self.rows, |row| row.status.as_ref().is_some_and(&matches))
     }
 }
 
@@ -594,15 +570,22 @@ impl PlanOutcome {
 
     /// Sorted by name — see [`RunOutcome::cached`] for why.
     fn where_state(&self, matches: impl Fn(NodeState) -> bool) -> Vec<&str> {
-        let mut names: Vec<&str> = self
-            .states
-            .iter()
-            .filter(|(_, state)| *state != NodeState::Unvisited && matches(*state))
-            .map(|(name, _)| name.as_str())
-            .collect();
-        names.sort_unstable();
-        names
+        sorted_names(&self.states, |state| {
+            *state != NodeState::Unvisited && matches(*state)
+        })
     }
+}
+
+/// The names of the `rows` that `keep` holds for, sorted — the shape every
+/// set-like accessor above answers in.
+fn sorted_names<T>(rows: &[(String, T)], keep: impl Fn(&T) -> bool) -> Vec<&str> {
+    let mut names: Vec<&str> = rows
+        .iter()
+        .filter(|(_, row)| keep(row))
+        .map(|(name, _)| name.as_str())
+        .collect();
+    names.sort_unstable();
+    names
 }
 
 /// Ids back to the names the fixture gave them.
@@ -612,12 +595,13 @@ struct NameMap {
 }
 
 impl NameMap {
+    /// Named as the fixture named them, like [`Compiled`](crate::testing::graph::compiled::Compiled):
+    /// an instance node carries its func's name, not its own.
     fn of(graph: &TestGraph) -> Self {
         Self {
             by_id: graph
-                .graph
-                .iter()
-                .map(|node| (node.id, node.name.clone()))
+                .names()
+                .map(|(node_id, name)| (node_id, name.to_owned()))
                 .collect(),
         }
     }

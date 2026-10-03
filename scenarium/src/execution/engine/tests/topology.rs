@@ -54,6 +54,13 @@ async fn cached_output_survives_node_removal() {
     let mut e = TestEngine::over(g);
     let run = e.run_sinks().await;
     assert_eq!(run.ran_node_count, 4, "both sinks and both sources");
+    let mut ran = run.ran();
+    ran.sort_unstable();
+    assert_eq!(
+        ran,
+        ["a", "b", "print_a", "print_b"],
+        "the instance reports under its own name"
+    );
     let mut logged = run.logs();
     logged.sort_unstable();
     assert_eq!(logged, ["2", "5"]);

@@ -462,6 +462,13 @@ impl NodeSpec {
         self
     }
 
+    /// One `Any` input and one wildcard output mirroring it — the generic hop
+    /// for wildcard type resolution through a node.
+    #[must_use]
+    pub fn passthrough(self) -> Self {
+        self.input(DataType::Any).wildcard(0)
+    }
+
     /// An output mirroring input `mirrors` — a passthrough / reroute port.
     #[must_use]
     pub fn wildcard(mut self, mirrors: usize) -> Self {
@@ -535,10 +542,7 @@ impl NodeSpec {
     #[must_use]
     pub fn counted(self, value: impl Into<ConstValue>, calls: &Calls) -> Self {
         let value = value.into();
-        let data_type = DataType::Any.or_const_type(&value);
-        self.pure()
-            .output(data_type)
-            .compute(calls.returning(value))
+        self.returns(value.clone()).compute(calls.returning(value))
     }
 
     /// A pure two-input arithmetic node: `in0 op in1`, both `Int`, one `Int`
@@ -605,12 +609,50 @@ pub(crate) mod compiled;
 
 #[cfg(test)]
 mod internals {
+    use std::sync::Arc;
+
+    use crate::DataType;
     use crate::execution::compile::Compiler;
+    use crate::execution::compile::compiled_graph::CompiledGraph;
     use crate::execution::compile::error::CompileError;
+    use crate::graph::identity::{EventPort, NodeId, OutputPort};
+    use crate::graph::output_types::OutputTypes;
     use crate::testing::graph::TestGraph;
     use crate::testing::graph::compiled::Compiled;
 
     impl TestGraph {
+        /// Every node the fixture named, under that name — which, for an
+        /// [`instance`](Self::instance), is not the node's own (its func's).
+        pub(crate) fn names(&self) -> impl Iterator<Item = (NodeId, &str)> {
+            self.ids
+                .iter()
+                .map(|(name, node_id)| (*node_id, name.as_str()))
+        }
+
+        /// The effective type at `name`'s output `port`, through the graph's one
+        /// resolver — what the editor paints.
+        ///
+        /// A miss is the fixture naming a port that is not declared — never an
+        /// `Any` to assert on, which is what an unresolvable *chain* resolves to.
+        pub(crate) fn output_type(&self, name: &str, port: usize) -> DataType {
+            let mut types = OutputTypes::default();
+            types.update(&self.graph, &self.library);
+            types
+                .get(OutputPort::new(self.id(name), port))
+                .expect("the fixture names a declared output port")
+                .clone()
+        }
+
+        /// `name`'s event `event_idx`.
+        pub(crate) fn event(&self, name: &str, event_idx: usize) -> EventPort {
+            EventPort::new(self.id(name), event_idx)
+        }
+
+        /// This fixture lowered, as an install or a message carries it.
+        pub(crate) fn program(&self) -> Arc<CompiledGraph> {
+            Arc::new(self.compile().program)
+        }
+
         /// Lower this fixture, keeping the names. Panics on a compile error —
         /// for the tests where the refusal *is* the subject, see
         /// [`try_compile`](Self::try_compile).
