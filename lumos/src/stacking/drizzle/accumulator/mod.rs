@@ -115,6 +115,10 @@ impl DrizzleAccumulator {
     /// # Errors
     ///
     /// Returns an error when `config` is invalid.
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "validate holds the scale positive, so each output side is non-negative"
+    )]
     pub fn new(input_dims: ImageDimensions, config: DrizzleConfig) -> Result<Self, DrizzleError> {
         config.validate()?;
         let output = Size2us::new(

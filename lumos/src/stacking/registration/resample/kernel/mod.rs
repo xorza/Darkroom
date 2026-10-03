@@ -45,6 +45,15 @@ impl LanczosOrder {
         }
     }
 
+    /// The taps a window holds before its centre cell, `a − 1`, signed for window arithmetic.
+    pub(super) const fn taps_before(self) -> i32 {
+        match self {
+            Self::Two => 1,
+            Self::Three => 2,
+            Self::Four => 3,
+        }
+    }
+
     /// This order's table, built on first use.
     pub(super) fn lut(self) -> &'static LanczosLut {
         static LUTS: [OnceLock<LanczosLut>; 3] =
@@ -78,6 +87,10 @@ impl LanczosLut {
     /// construction, so the `abs()` and `>= a` branch a signed distance would need are the caller's
     /// guarantee instead. `internals::lookup` is the signed form, for oracles.
     #[inline(always)]
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "the caller passes a non-negative distance, as the debug assertion checks"
+    )]
     pub(super) fn lookup_positive(&self, abs_x: f32) -> f32 {
         debug_assert!(abs_x >= 0.0 && abs_x <= self.a as f32);
         let idx = (abs_x * LANCZOS_LUT_RESOLUTION as f32 + 0.5) as usize;
@@ -136,6 +149,10 @@ pub(super) fn bicubic_weights(f: f32) -> [f32; 4] {
 
 /// Bilinear sample at `pos`, held to the pixel-centre grid in the footprint's half-pixel rim.
 #[inline]
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "a position clamped to the pixel-centre grid has non-negative cells"
+)]
 pub(super) fn bilinear_sample(input: &Buffer2<f32>, pos: SourcePosition) -> f32 {
     let size = Size2us::new(input.width(), input.height());
     let pos = pos.clamped_to_centers(size);
@@ -165,6 +182,10 @@ pub(super) fn bilinear_sample(input: &Buffer2<f32>, pos: SourcePosition) -> f32 
 
 /// The pixel nearest `pos`, a half rounding up as `f32::round` does.
 #[inline]
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "a position clamped to the pixel-centre grid has non-negative cells"
+)]
 pub(super) fn nearest_sample(input: &Buffer2<f32>, pos: SourcePosition) -> f32 {
     let size = Size2us::new(input.width(), input.height());
     let pos = pos.clamped_to_centers(size);
@@ -185,22 +206,25 @@ pub(super) fn bicubic_sample(data: &Buffer2<f32>, pos: SourcePosition) -> f32 {
     let wy = bicubic_weights(pos.fy);
 
     let (pixels, w, h) = (data.pixels(), data.width(), data.height());
-    let (wi, hi) = (w as i32, h as i32);
     let mut sum = 0.0f32;
     let mut w_in = 0.0f32;
-    for (j, &wyj) in wy.iter().enumerate() {
-        let py = pos.cell_y - 1 + j as i32;
-        if py < 0 || py >= hi {
+    for (py, &wyj) in (pos.cell_y - 1..).zip(&wy) {
+        let Ok(py) = usize::try_from(py) else {
+            continue;
+        };
+        if py >= h {
             continue;
         }
-        let row_off = py as usize * w;
-        for (i, &wxi) in wx.iter().enumerate() {
-            let px = pos.cell_x - 1 + i as i32;
-            if px < 0 || px >= wi {
+        let row_off = py * w;
+        for (px, &wxi) in (pos.cell_x - 1..).zip(&wx) {
+            let Ok(px) = usize::try_from(px) else {
+                continue;
+            };
+            if px >= w {
                 continue;
             }
             let weight = wxi * wyj;
-            sum += pixels[row_off + px as usize] * weight;
+            sum += pixels[row_off + px] * weight;
             w_in += weight;
         }
     }
@@ -225,6 +249,10 @@ pub(super) mod internals {
     /// bench need — the warp paths all go through [`LanczosLut::lookup_positive`].
     impl LanczosLut {
         /// The table read at a signed distance either side of centre, zero beyond the kernel's support.
+        #[expect(
+            clippy::cast_sign_loss,
+            reason = "an absolute distance is non-negative"
+        )]
         pub(crate) fn lookup(&self, x: f32) -> f32 {
             let abs_x = x.abs();
             if abs_x >= self.a as f32 {
@@ -238,6 +266,11 @@ pub(super) mod internals {
     /// Lanczos-`a` at `pos` straight from the definition — every tap's signed distance looked up,
     /// the window summed and normalized — with the warp's own edge-extended bilinear where the
     /// window leaves the source.
+    #[expect(
+        clippy::cast_possible_wrap,
+        clippy::cast_sign_loss,
+        reason = "an image side is at most ImageDimensions::MAX_SIDE, 2^30, so a coordinate and a kernel's reach past it fit i32; the taps are read only once the window is inside the image"
+    )]
     pub(crate) fn interpolate_lanczos(
         data: &Buffer2<f32>,
         pos: DVec2,

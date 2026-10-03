@@ -1,3 +1,9 @@
+#![expect(
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
+)]
+
 use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
 use crate::io::raw::demosaic::bayer::CfaPattern;

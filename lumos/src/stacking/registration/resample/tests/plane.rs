@@ -1,3 +1,9 @@
+#![expect(
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
+)]
+
 use crate::stacking::registration::config::{self, InterpolationMethod, WarpParams};
 use crate::stacking::registration::resample::internals::warp_plane;
 use crate::stacking::registration::resample::kernel::LanczosOrder;

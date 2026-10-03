@@ -7,6 +7,12 @@
 //! also makes every band count agree with every other — and the boxes and areas collected from the
 //! runs must equal a scan of the labels.
 
+#![expect(
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
+)]
+
 use std::collections::VecDeque;
 
 use crate::bit_buffer2::BitBuffer2;

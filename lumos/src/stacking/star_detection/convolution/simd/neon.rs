@@ -78,6 +78,10 @@ pub(super) unsafe fn convolve_row_neon(
 ///
 /// # Safety
 /// Caller must ensure running on aarch64.
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "pixel coordinates and kernel taps index a slice, whose length Rust caps at isize::MAX"
+)]
 pub(super) unsafe fn convolve_cols_row_neon(
     input: &[f32],
     out_row: &mut [f32],
@@ -119,6 +123,10 @@ pub(super) unsafe fn convolve_cols_row_neon(
 ///
 /// # Safety
 /// Caller must ensure running on aarch64.
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "pixel coordinates and kernel taps index a slice, whose length Rust caps at isize::MAX"
+)]
 pub(super) unsafe fn convolve_2d_row_neon(
     input: &[f32],
     output_row: &mut [f32],
@@ -146,9 +154,10 @@ pub(super) unsafe fn convolve_2d_row_neon(
                     let kv = vdupq_n_f32(kval);
                     let base_sx = x as isize + kx as isize - radius;
 
-                    if base_sx >= 0 && base_sx + 4 <= size.width as isize {
-                        let vals =
-                            vld1q_f32(input.as_ptr().add(input_row_offset + base_sx as usize));
+                    if let Ok(start) = usize::try_from(base_sx)
+                        && start + 4 <= size.width
+                    {
+                        let vals = vld1q_f32(input.as_ptr().add(input_row_offset + start));
                         sum = vaddq_f32(sum, vmulq_f32(vals, kv));
                     } else {
                         let mut vals = [0.0f32; 4];

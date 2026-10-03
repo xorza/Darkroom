@@ -1,5 +1,10 @@
 //! Cosmic-ray rejection through the whole detector, against the truth that rendered the frame.
 
+#![expect(
+    clippy::cast_sign_loss,
+    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
+)]
+
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::config::filter_config::FilterConfig;
 use crate::stacking::star_detection::detector::StarDetector;

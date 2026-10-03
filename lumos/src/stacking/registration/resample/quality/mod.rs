@@ -85,7 +85,7 @@ impl LanczosWindow {
         Self {
             pos,
             order,
-            origin: pos.window_origin(order.a() as i32 - 1),
+            origin: pos.window_origin(order.taps_before()),
         }
     }
 
@@ -145,6 +145,7 @@ fn lanczos_interior_sums(order: LanczosOrder) -> &'static [AxisSums] {
 
 /// The entry of [`lanczos_interior_sums`] a fractional offset selects — the same rounding the tap
 /// lookups apply, so the sums come from the weights the border path would have computed.
+#[expect(clippy::cast_sign_loss, reason = "a fraction lies in [0, 1]")]
 fn fraction_index(f: f32) -> usize {
     debug_assert!((0.0..=1.0).contains(&f));
     (f * LANCZOS_LUT_RESOLUTION as f32 + 0.5) as usize
@@ -204,7 +205,7 @@ impl SeparableTaps {
     fn lanczos(window: LanczosWindow) -> Self {
         let mut taps = Self::empty(
             window.pos,
-            window.order.a() as i32 - 1,
+            window.order.taps_before(),
             window.taps(),
             BorderConfidence::ClampedBilinear,
         );
@@ -294,11 +295,10 @@ impl SeparableTaps {
 
 fn axis_weight_stats(start: i32, weights: &[f32], length: usize) -> AxisWeightStats {
     let mut stats = AxisWeightStats::default();
-    for (i, &weight) in weights.iter().enumerate() {
+    for (coordinate, &weight) in (start..).zip(weights) {
         let magnitude = weight.abs();
         stats.magnitude += magnitude;
-        let coordinate = start + i as i32;
-        if coordinate >= 0 && (coordinate as usize) < length {
+        if usize::try_from(coordinate).is_ok_and(|coordinate| coordinate < length) {
             stats.in_sums.signed += weight;
             stats.in_magnitude += magnitude;
             stats.in_sums.square += weight * weight;

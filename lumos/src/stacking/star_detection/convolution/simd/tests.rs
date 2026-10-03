@@ -1,5 +1,10 @@
 //! Tests for SIMD convolution implementations.
 
+#![expect(
+    clippy::cast_possible_wrap,
+    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
+)]
+
 #[cfg(target_arch = "aarch64")]
 use crate::stacking::star_detection::convolution::simd::neon;
 #[cfg(target_arch = "x86_64")]

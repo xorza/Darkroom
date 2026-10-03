@@ -1171,6 +1171,10 @@ fn not_a_cfa_frame(path: &Path) -> ImageError {
 }
 
 /// Extract ISO from libraw metadata.
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "only a positive speed reaches the cast"
+)]
 fn extract_iso(inner: *mut sys::libraw_data_t) -> Option<u32> {
     // SAFETY: inner is valid after unpack.
     let iso_speed = unsafe { (*inner).other.iso_speed };

@@ -1,3 +1,8 @@
+#![expect(
+    clippy::cast_possible_wrap,
+    reason = "test axis lengths are far below i64::MAX"
+)]
+
 use crate::testing::prelude::*;
 
 use std::fs::File;
@@ -114,21 +119,24 @@ fn shape_validation_rejects_zero_overflow_and_unsupported_cubes_without_panickin
         assert!(reason.contains("must be nonzero"), "{reason}");
     }
 
-    let pixel_overflow = unsupported_reason(
-        plan::dimensions_from_shape(path, &[usize::MAX, 2], FitsCubeInterpretation::Reject)
-            .unwrap_err(),
+    // A side past the limit is refused before any count is formed from it; at the limit it is
+    // accepted.
+    let side = ImageDimensions::MAX_SIDE;
+    for shape in [[side + 1, 2], [2, side + 1], [usize::MAX, 2]] {
+        let reason = unsupported_reason(
+            plan::dimensions_from_shape(path, &shape, FitsCubeInterpretation::Reject).unwrap_err(),
+        );
+        assert!(
+            reason.contains("has a side past 1073741824 px"),
+            "{shape:?}: {reason}"
+        );
+    }
+    assert_eq!(
+        plan::dimensions_from_shape(path, &[side, 1], FitsCubeInterpretation::Reject)
+            .unwrap()
+            .size(),
+        (side, 1).into()
     );
-    assert!(pixel_overflow.contains("pixel count overflows"));
-
-    let sample_overflow = unsupported_reason(
-        plan::dimensions_from_shape(
-            path,
-            &[usize::MAX / 2 + 1, 1, 3],
-            FitsCubeInterpretation::Rgb,
-        )
-        .unwrap_err(),
-    );
-    assert!(sample_overflow.contains("sample count overflows"));
 
     let huge_shape = [1_000_000_000, 1_000_000_000, 4];
     let huge_cube = image_header(-32, &huge_shape);

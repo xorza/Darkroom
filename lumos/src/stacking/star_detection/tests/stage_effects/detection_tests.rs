@@ -1,6 +1,11 @@
 //! Thresholding and the area cut, through `detect_stars_test`, against the truth that rendered the
 //! frame: around every isolated source the candidate count is exact.
 
+#![expect(
+    clippy::cast_sign_loss,
+    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
+)]
+
 use crate::stacking::star_detection::config::detection_config::DetectionConfig;
 use crate::stacking::star_detection::detector::stages::detect::internals::detect_stars_test;
 use crate::stacking::star_detection::tests::stage_effects::{background_estimate, peaks};

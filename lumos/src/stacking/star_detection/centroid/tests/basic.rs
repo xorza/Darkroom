@@ -1,3 +1,9 @@
+#![expect(
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
+)]
+
 use super::*;
 
 /// A lone star found by detection on an estimated sky and measured with the default config, as the
@@ -301,11 +307,15 @@ fn valid_stamp_position_covers_boundaries_and_rounding() {
     ];
 
     for case in cases {
-        assert_eq!(
-            is_valid_stamp_position(case.position, case.size, radius),
-            case.expected,
-            "{}: {case:?}",
-            case.name
-        );
+        let centre = stamp_centre(case.position, case.size, radius);
+        assert_eq!(centre.is_some(), case.expected, "{}: {case:?}", case.name);
+        if let Some(centre) = centre {
+            assert_eq!(
+                (centre.x as f64, centre.y as f64),
+                (case.position.x.round(), case.position.y.round()),
+                "{}: the centre is the nearest pixel",
+                case.name
+            );
+        }
     }
 }

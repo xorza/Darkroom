@@ -18,7 +18,7 @@ use std::mem;
 /// Maps direction index to (dy, dx) offset for the spatial Laplacian.
 /// Dir 0 = horizontal (0,1), Dir 1 = vertical (1,0),
 /// Dir 2 = diagonal (1,1), Dir 3 = anti-diagonal (1,-1).
-const DIR_OFFSETS: [(i32, i32); NDIR] = [(0, 1), (1, 0), (1, 1), (1, -1)];
+const DIR_OFFSETS: [(isize, isize); NDIR] = [(0, 1), (1, 0), (1, 1), (1, -1)];
 const GREEN_BLOCK_DIRECTIONS: usize = 2;
 
 /// The band the border fill writes, from the active area's edge. The colour and homogeneity steps
@@ -61,15 +61,12 @@ pub(crate) fn compute_green_minmax(
                     let mut max_g = f32::MIN;
 
                     for ho in &hex_offsets[..6] {
-                        let ny = raw_y as i32 + ho.dy;
-                        let nx = raw_x as i32 + ho.dx;
-
-                        if ny >= 0
-                            && nx >= 0
-                            && (ny as usize) < xtrans.layout.raw.height
-                            && (nx as usize) < xtrans.layout.raw.width
+                        if let Some(ny) = raw_y.checked_add_signed(ho.dy)
+                            && let Some(nx) = raw_x.checked_add_signed(ho.dx)
+                            && ny < xtrans.layout.raw.height
+                            && nx < xtrans.layout.raw.width
                         {
-                            let g = xtrans.read_normalized(ny as usize, nx as usize);
+                            let g = xtrans.read_normalized(ny, nx);
                             min_g = min_g.min(g);
                             max_g = max_g.max(g);
                         }
@@ -126,7 +123,7 @@ pub(crate) fn interpolate_green(
         let raw_y = y + xtrans.layout.margin.y;
         let row_off = y * width;
         // librtprocess stores the alternating-row candidates in the opposite direction slots.
-        let flip = usize::from((raw_y as i64 - hex.sgrow as i64).rem_euclid(3) == 0);
+        let flip = usize::from((raw_y + 3 - hex.sgrow).is_multiple_of(3));
 
         for x in 0..width {
             let raw_x = x + xtrans.layout.margin.x;
@@ -144,15 +141,13 @@ pub(crate) fn interpolate_green(
                 let lo = gmin[row_off + x];
                 let hi = gmax[row_off + x];
 
-                let read = |dy: i32, dx: i32| -> f32 {
-                    let ny = raw_y as i32 + dy;
-                    let nx = raw_x as i32 + dx;
-                    if ny >= 0
-                        && nx >= 0
-                        && (ny as usize) < xtrans.layout.raw.height
-                        && (nx as usize) < raw_width
+                let read = |dy: isize, dx: isize| -> f32 {
+                    if let Some(ny) = raw_y.checked_add_signed(dy)
+                        && let Some(nx) = raw_x.checked_add_signed(dx)
+                        && ny < xtrans.layout.raw.height
+                        && nx < raw_width
                     {
-                        xtrans.read_normalized(ny as usize, nx as usize)
+                        xtrans.read_normalized(ny, nx)
                     } else {
                         raw_val
                     }
@@ -369,7 +364,7 @@ fn opposite_color(
     let width = xtrans.layout.active.width;
     let raw_y = y + xtrans.layout.margin.y;
     let center_green = green_at(green_dir, green_base, width, y, x);
-    let primary_vertical = (raw_y as i64 - hex.sgrow as i64).rem_euclid(3) != 0;
+    let primary_vertical = !(raw_y + 3 - hex.sgrow).is_multiple_of(3);
     let (primary_dy, primary_dx) = if primary_vertical {
         (1isize, 0isize)
     } else {
@@ -469,10 +464,10 @@ fn green_block_colors(
     let offsets = hex.get(y + xtrans.layout.margin.y, x + xtrans.layout.margin.x);
     let first = offsets[direction * 2];
     let second = offsets[direction * 2 + 1];
-    let first_y = y.wrapping_add_signed(first.dy as isize);
-    let first_x = x.wrapping_add_signed(first.dx as isize);
-    let second_y = y.wrapping_add_signed(second.dy as isize);
-    let second_x = x.wrapping_add_signed(second.dx as isize);
+    let first_y = y.wrapping_add_signed(first.dy);
+    let first_x = x.wrapping_add_signed(first.dx);
+    let second_y = y.wrapping_add_signed(second.dy);
+    let second_x = x.wrapping_add_signed(second.dx);
     let center_green = green_at(green_dir, green_base, width, y, x);
     let first_green = green_at(green_dir, green_base, width, first_y, first_x);
     let second_green = green_at(green_dir, green_base, width, second_y, second_x);
@@ -728,24 +723,28 @@ pub(crate) fn compute_derivatives(
                             pr: prc,
                         } = center;
 
-                        let fx = x as i32 + dir_dx;
                         let YPbPr {
                             luma: yf,
                             pb: pbf,
                             pr: prf,
-                        } = if has_next && fx >= 0 && (fx as usize) < width {
-                            rows[2][fx as usize]
+                        } = if has_next
+                            && let Some(fx) = x.checked_add_signed(dir_dx)
+                            && fx < width
+                        {
+                            rows[2][fx]
                         } else {
                             center
                         };
 
-                        let bx = x as i32 - dir_dx;
                         let YPbPr {
                             luma: yb,
                             pb: pbb,
                             pr: prb,
-                        } = if has_prev && bx >= 0 && (bx as usize) < width {
-                            rows[0][bx as usize]
+                        } = if has_prev
+                            && let Some(bx) = x.checked_add_signed(-dir_dx)
+                            && bx < width
+                        {
+                            rows[0][bx]
                         } else {
                             center
                         };

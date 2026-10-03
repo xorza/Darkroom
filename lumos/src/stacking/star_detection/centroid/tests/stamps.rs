@@ -1,3 +1,8 @@
+#![expect(
+    clippy::cast_possible_wrap,
+    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
+)]
+
 use super::*;
 use crate::stacking::star_detection::centroid::stamp::{StampFit, sigma_from_moments};
 
@@ -278,11 +283,10 @@ fn local_annulus_fills_at_the_tightest_stamp() {
         let side = 2 * radius + 1;
         let residual = Buffer2::new_filled(side, side, 0.25f32);
         let corner = DVec2::splat(radius as f64);
-        assert!(is_valid_stamp_position(
-            corner,
-            Size2us::new(side, side),
-            radius
-        ));
+        assert_eq!(
+            stamp_centre(corner, Size2us::new(side, side), radius),
+            Some(Vec2us::new(radius, radius))
+        );
         let sky =
             compute_annulus_background(&residual, corner, radius, annulus_outer_radius(radius));
         assert!(sky.is_some(), "radius {radius}");

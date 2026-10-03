@@ -125,6 +125,7 @@ pub(crate) fn save_image(image: Image, name: &str) {
 }
 
 /// Convert an f32 plane to an 8-bit grayscale image under `tone`.
+#[expect(clippy::cast_sign_loss, reason = "a tone-mapped value lies in [0, 1]")]
 fn to_gray(pixels: &[f32], size: Size2us, tone: ToneMap) -> GrayImage {
     let bytes: Vec<u8> = tone
         .apply(pixels)
@@ -170,6 +171,10 @@ pub(crate) fn labels_to_rgb(labels: &imaginarium::Buffer2<u32>) -> image::RgbIma
 
 /// Convert HSV to RGB color.
 #[cfg(feature = "real-data")]
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "hue, saturation and value lie in [0, 1]"
+)]
 fn hsv_to_rgb(h: f32, s: f32, v: f32) -> image::Rgb<u8> {
     use image::Rgb;
 

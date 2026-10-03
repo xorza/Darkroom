@@ -11,6 +11,10 @@ use crate::stacking::registration::point_normalization::{PointNormalization, cen
 use crate::stacking::registration::transform::{Transform, TransformType};
 
 /// Compute adaptive iteration count for early termination.
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "both logarithms are negative, so their quotient is positive"
+)]
 pub(super) fn adaptive_iterations(inlier_ratio: f64, sample_size: usize, confidence: f64) -> usize {
     if inlier_ratio <= 0.0 || inlier_ratio >= 1.0 {
         return 1;
@@ -18,7 +22,8 @@ pub(super) fn adaptive_iterations(inlier_ratio: f64, sample_size: usize, confide
 
     // N = log(1 - confidence) / log(1 - w^n)
     // where w = inlier_ratio, n = sample_size
-    let w_n = inlier_ratio.powi(sample_size as i32);
+    let w_n =
+        inlier_ratio.powi(i32::try_from(sample_size).expect("a minimal sample is a few points"));
     if w_n >= 1.0 {
         return 1;
     }

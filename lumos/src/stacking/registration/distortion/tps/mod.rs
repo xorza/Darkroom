@@ -316,6 +316,10 @@ impl DistortionMap {
     /// * `image_width` - Image width in pixels
     /// * `image_height` - Image height in pixels
     /// * `grid_spacing` - Spacing between grid points
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "a size over a positive grid spacing is non-negative"
+    )]
     fn from_tps(tps: &ThinPlateSpline, image: Size2us, grid_spacing: f64) -> Self {
         let grid = Size2us::new(
             (image.width as f64 / grid_spacing).ceil() as usize + 1,
@@ -358,6 +362,10 @@ impl DistortionMap {
     }
 
     /// Interpolate the distortion at an arbitrary position.
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "a point before the grid saturates to its first cell, which then extrapolates"
+    )]
     fn interpolate(&self, p: DVec2) -> DVec2 {
         let gx = p.x / self.spacing;
         let gy = p.y / self.spacing;

@@ -152,9 +152,9 @@ impl XTransOffsets {
     pub(crate) fn new(pattern: &XTransPattern) -> Self {
         let pattern = pattern.rows();
         let per_phase = array::from_fn(|phase| {
-            let px = (phase % 6) as i32;
-            let py = (phase / 6) as i32;
-            let my_color = pattern[py as usize][px as usize];
+            let my_color = pattern[phase / 6][phase % 6];
+            let px = i32::try_from(phase % 6).expect("a column of the 6×6 pattern");
+            let py = i32::try_from(phase / 6).expect("a row of the 6×6 pattern");
 
             let mut candidates: Vec<(i32, (i32, i32))> = Vec::new();
             for dy in -XTRANS_RADIUS..=XTRANS_RADIUS {

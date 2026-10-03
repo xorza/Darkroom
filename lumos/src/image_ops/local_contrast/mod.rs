@@ -82,6 +82,7 @@ impl LocalContrast {
 
 /// The CLAHE mapping on the combined intensity plane; [`LocalContrast::apply`] computes the
 /// intensity, runs this, then remaps the image's channels to it.
+#[expect(clippy::cast_sign_loss, reason = "a square root is non-negative")]
 fn clahe_map(intensity: &Buffer2<f32>, config: &LocalContrast) -> Buffer2<f32> {
     // Keep each tile well-populated (≳ 4·N_BINS pixels) so the clipped-histogram CDF is meaningful;
     // on a small image this caps the requested tile count (a no-op on a real megapixel frame).
@@ -101,6 +102,10 @@ fn clahe_map(intensity: &Buffer2<f32>, config: &LocalContrast) -> Buffer2<f32> {
 type TileLut = [f32; N_BINS + 1];
 
 /// One mapping per tile, row-major.
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "the clip limit is at least 1 by construction"
+)]
 fn build_tile_luts(
     intensity: &Buffer2<f32>,
     columns: &TileAxis,
@@ -244,6 +249,10 @@ fn apply_luts(
 
 /// `v` through `lut`, linear between its bin edges.
 #[inline]
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "the value is clamped into [0, 1] first"
+)]
 fn map_through(lut: &TileLut, v: f32) -> f32 {
     let position = v.clamp(0.0, 1.0) * N_BINS as f32;
     let bin = (position as usize).min(N_BINS - 1);
@@ -253,6 +262,10 @@ fn map_through(lut: &TileLut, v: f32) -> f32 {
 
 /// The histogram bin of `v`: `[b/N, (b+1)/N)`, 1 in the last bin.
 #[inline]
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "the value is clamped into [0, 1] first"
+)]
 fn bin_of(v: f32) -> usize {
     ((v.clamp(0.0, 1.0) * N_BINS as f32) as usize).min(N_BINS - 1)
 }

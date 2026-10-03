@@ -134,6 +134,10 @@ impl Scene {
     /// A centrally-concentrated field: most sources packed into a Gaussian core, the rest a
     /// sparse halo — a crowded cluster for deblend/labeling stress. Fluxes are log-uniform in
     /// `flux_range`; deterministic in `seed`.
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "synthetic fixtures are small images with non-negative coordinates"
+    )]
     pub(crate) fn cluster(
         size: Size2us,
         count: usize,

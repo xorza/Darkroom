@@ -16,6 +16,10 @@ use crate::stacking::progress::ProgressCallback;
 
 /// A 1 MP mono frame: smooth background + per-frame offset/gain (so normalization has work to do) +
 /// ~0.2% bright outliers (so rejection has something to clip).
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "synthetic fixtures are small images with non-negative coordinates"
+)]
 fn synth_frame(size: Size2us, frame: u32) -> LinearImage {
     let n = size.pixel_count();
     let offset = 0.05 + (frame as f32) * 0.002;

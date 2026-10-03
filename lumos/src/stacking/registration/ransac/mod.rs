@@ -362,6 +362,10 @@ impl RansacEstimator {
     ///
     /// # Returns
     /// Best transformation found, or why there is none.
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "the sampling fraction of a match count is non-negative"
+    )]
     pub(super) fn estimate(
         &self,
         matches: &[PointMatch],

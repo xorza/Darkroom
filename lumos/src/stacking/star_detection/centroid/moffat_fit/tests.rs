@@ -1,4 +1,9 @@
 //! Tests for Moffat profile fitting.
+
+#![expect(
+    clippy::cast_possible_wrap,
+    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
+)]
 use crate::testing::prelude::*;
 
 use std::f64::consts::PI;

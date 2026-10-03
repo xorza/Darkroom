@@ -25,7 +25,7 @@ unsafe fn logf_avx2(x: __m256) -> __m256 {
         _mm256_set1_epi32(126),
     ));
     let m = _mm256_castsi256_ps(_mm256_or_si256(
-        _mm256_and_si256(xi, _mm256_set1_epi32(0x807f_ffffu32 as i32)),
+        _mm256_and_si256(xi, _mm256_set1_epi32(0x807f_ffff_u32.cast_signed())),
         _mm256_set1_epi32(0x3f00_0000),
     ));
 

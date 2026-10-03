@@ -128,6 +128,10 @@ pub(crate) mod internals {
         )
     }
 
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "synthetic fixtures are small images with non-negative coordinates"
+    )]
     pub(crate) fn make_test_component(size: Size2us, stars: &[SyntheticStar]) -> TestComponent {
         let mut pixels = Buffer2::new_filled(size.width, size.height, 0.0f32);
         let mut labels = Buffer2::new_filled(size.width, size.height, 0u32);

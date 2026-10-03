@@ -36,27 +36,29 @@ pub(super) fn compute_annulus_background(
     // Use stack-allocated ArrayVec to avoid heap allocation
     let mut values: ArrayVec<f32, MAX_ANNULUS_PIXELS> = ArrayVec::new();
 
-    let width = residual.width() as isize;
-    let height = residual.height() as isize;
-    let outer_r_i32 = outer_radius as i32;
-    for dy in -outer_r_i32..=outer_r_i32 {
+    let (width, height) = (residual.width(), residual.height());
+    let reach = isize::try_from(outer_radius).expect("an annulus is a few dozen pixels across");
+    for dy in -reach..=reach {
         // Row bound first so the row slice — and its bounds check — is taken once, not per
         // column. The annulus can hang off the frame, so the row may not exist at all.
-        let y = icy + dy as isize;
-        if y < 0 || y >= height {
+        let Ok(y) = usize::try_from(icy + dy) else {
+            continue;
+        };
+        if y >= height {
             continue;
         }
-        let row = residual.row(y as usize);
+        let row = residual.row(y);
 
-        for dx in -outer_r_i32..=outer_r_i32 {
+        for dx in -reach..=reach {
             let r2 = (dx * dx + dy * dy) as f32;
             if r2 < inner_r2 || r2 > outer_r2 {
                 continue;
             }
 
-            let x = icx + dx as isize;
-            if x >= 0 && x < width {
-                values.push(row[x as usize]);
+            if let Ok(x) = usize::try_from(icx + dx)
+                && x < width
+            {
+                values.push(row[x]);
             }
         }
     }

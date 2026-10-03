@@ -288,6 +288,10 @@ impl<'a> FrameSource<'a> {
     /// pixel's, or its output row within `output_margin` of the band. Deliberately generous at the
     /// row level — over-scanning costs one transform and a rejected row test per pixel, measured at
     /// ~0.9 ns against ~100 ns for a deposit, while under-scanning would drop flux.
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "each bound is held at 0 or above first, and the cast saturates at the top"
+    )]
     pub(super) fn input_rows(
         &self,
         rows: &Range<usize>,
@@ -312,6 +316,10 @@ impl<'a> FrameSource<'a> {
 
     /// The lowest and highest input row the output rectangle `[0, right] × [low, high]` maps onto,
     /// or `None` when no bound exists and the whole frame has to be scanned.
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "an output rectangle's right edge and height are non-negative, and an empty one saturates to 0"
+    )]
     fn input_row_extent(&self, low: f64, high: f64, right: f64) -> Option<RowExtent> {
         match &self.map {
             InputMap::Transform { to_input, .. } => {

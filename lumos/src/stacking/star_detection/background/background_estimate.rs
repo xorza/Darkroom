@@ -266,6 +266,7 @@ fn create_object_mask(
 /// 3. Evaluate X spline per-pixel using SIMD-accelerated segments
 ///
 /// Uses pre-allocated `scratch` buffers to avoid heap allocations per row.
+#[expect(clippy::cast_sign_loss, reason = "a tile centre is non-negative")]
 fn interpolate_row(
     bg_row: &mut [f32],
     noise_row: &mut [f32],

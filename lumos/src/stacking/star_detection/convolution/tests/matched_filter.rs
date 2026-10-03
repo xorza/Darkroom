@@ -3,6 +3,11 @@
 //! The filter's output is in units of the input noise, so a star's response over the robust floor
 //! of the filtered image is its detection SNR.
 
+#![expect(
+    clippy::cast_sign_loss,
+    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
+)]
+
 use crate::math::statistics::MedianMad;
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::convolution::{MatchedFilterBuffers, matched_filter};

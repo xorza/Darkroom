@@ -1,3 +1,8 @@
+#![expect(
+    clippy::cast_possible_wrap,
+    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
+)]
+
 use crate::stacking::combine::pixel_coverage::PixelCoverage;
 use crate::stacking::registration::config::InterpolationMethod;
 use crate::stacking::registration::resample::kernel::LanczosOrder;

@@ -1,6 +1,11 @@
 //! Sub-pixel recovery of noisy stars through an estimated sky: each method lands within the
 //! scatter the noise propagates to it, so the error falls with the star's amplitude as derived.
 
+#![expect(
+    clippy::cast_possible_wrap,
+    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
+)]
+
 use super::*;
 use std::f64::consts::PI;
 

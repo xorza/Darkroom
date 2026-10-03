@@ -1,3 +1,9 @@
+#![expect(
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
+)]
+
 use super::*;
 use std::f32::consts::PI;
 

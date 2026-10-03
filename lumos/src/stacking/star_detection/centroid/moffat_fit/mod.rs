@@ -104,6 +104,10 @@ fn int_pow(u: f64, n: u32) -> f64 {
 }
 
 /// Select optimal strategy for computing u^(-beta).
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "validate holds β in (0, 10], so its doubled, rounded order is positive"
+)]
 fn select_pow_strategy(beta: f64) -> PowStrategy {
     let rounded = (beta * 2.0).round();
     let is_half_int = (beta * 2.0 - rounded).abs() < 1e-10;

@@ -548,8 +548,8 @@ fn reconstruction_geometry_dependencies_are_completed_by_earlier_stages() {
             if native == 1 && !is_solitary_green(&hex, y, x) {
                 let offsets = hex.get(y, x);
                 for offset in &offsets[..4] {
-                    let neighbor_y = y.wrapping_add_signed(offset.dy as isize);
-                    let neighbor_x = x.wrapping_add_signed(offset.dx as isize);
+                    let neighbor_y = y.wrapping_add_signed(offset.dy);
+                    let neighbor_x = x.wrapping_add_signed(offset.dx);
                     let neighbor = pattern.color_at(Vec2us::new(neighbor_x, neighbor_y));
                     assert!(
                         neighbor != 1 || is_solitary_green(&hex, neighbor_y, neighbor_x),

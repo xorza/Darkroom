@@ -116,6 +116,10 @@ impl SyntheticStar {
     }
 
     /// Add into `pixels`, visiting only the pixels within [`Self::radius`].
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "synthetic fixtures are small images with non-negative coordinates"
+    )]
     pub(crate) fn add_to(self, pixels: &mut Buffer2<f32>) {
         let (width, height) = (pixels.width(), pixels.height());
         let radius = self.radius();
