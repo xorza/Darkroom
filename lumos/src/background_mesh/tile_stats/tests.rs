@@ -20,45 +20,74 @@ fn sextractor_sky_hand_computed() {
     assert_eq!(sextractor_sky(&stats(5.0, 5.0, 0.0)), 5.0);
 }
 
+/// Hand rows, then the invariants over a sweep: strictly increasing, gaps within one of the even
+/// spacing `n/m` (the two halves meet one wider, where the mirrored floors round apart), and
+/// `o_k + o_(m−1−k) = n − 1`.
 #[test]
-fn collect_sampled_pixels_small_tile() {
-    let pixels = Buffer2::new_filled(32, 32, 0.5);
-    let mut values = Vec::new();
-    collect_sampled_pixels(
-        &pixels,
-        URect::new(Vec2us::ZERO, Vec2us::new(32, 32)),
-        &mut values,
-    );
-    // Small tile should collect all or most pixels
-    assert!(values.len() >= 100);
-    assert!(values.iter().all(|&v| (v - 0.5).abs() < 0.01));
+fn sample_ordinals_are_even_and_point_symmetric() {
+    let ordinals = |count: usize, candidates: usize| -> Vec<usize> {
+        (0..count)
+            .map(|k| sample_ordinal(k, count, candidates))
+            .collect()
+    };
+    // ⌊((2k+1)·10 − 4)/8⌋ = 0, 3, then the mirror 9 − 3, 9 − 0.
+    assert_eq!(ordinals(4, 10), [0, 3, 6, 9]);
+    // An odd count of an odd n keeps the middle ordinal (9 − 1)/2 = 4.
+    assert_eq!(ordinals(3, 9), [1, 4, 7]);
+    assert_eq!(ordinals(10, 10), (0..10).collect::<Vec<_>>());
+
+    for candidates in (2..3000).step_by(7).chain([4096, 65536]) {
+        for count in [2, 4, 64, MAX_TILE_SAMPLES] {
+            if count > candidates {
+                continue;
+            }
+            let picked = ordinals(count, candidates);
+            let (low, high) = (candidates / count, candidates.div_ceil(count) + 1);
+            for pair in picked.windows(2) {
+                let gap = pair[1] - pair[0];
+                assert!(
+                    (low..=high).contains(&gap),
+                    "{count} of {candidates}: gap {gap} outside {low}..={high}"
+                );
+            }
+            for (k, &ordinal) in picked.iter().enumerate() {
+                assert_eq!(
+                    ordinal + picked[count - 1 - k],
+                    candidates - 1,
+                    "{count} of {candidates}: k = {k}"
+                );
+            }
+        }
+    }
 }
 
+/// A 64×64 tile at (10, 20) in a frame of `x + 1000·y`: 1024 of its 4096 pixels, centred on the
+/// tile centre (41.5, 51.5) — their mean is the plane there, exactly, as every value and the sum
+/// are exact in f64.
 #[test]
-fn collect_sampled_pixels_large_tile() {
-    let pixels = Buffer2::new_filled(256, 256, 0.5);
-    let mut values = Vec::new();
-    collect_sampled_pixels(
-        &pixels,
-        URect::new(Vec2us::ZERO, Vec2us::new(256, 256)),
-        &mut values,
+fn tile_samples_centre_on_the_tile() {
+    let size = Size2us::new(100, 100);
+    let pixels = Buffer2::new(
+        size.width,
+        size.height,
+        (0..size.pixel_count())
+            .map(|i| (i % size.width + 1000 * (i / size.width)) as f32)
+            .collect(),
     );
-    assert!(values.len() <= MAX_TILE_SAMPLES);
-    assert!(values.iter().all(|&v| (v - 0.5).abs() < 0.01));
-}
-
-#[test]
-fn collect_unmasked_pixels_none_masked() {
-    let pixels = Buffer2::new_filled(64, 64, 0.5);
-    let mask = BitBuffer2::new_filled(Size2us::new(64, 64), false);
+    let tile = URect::new(Vec2us::new(10, 20), Vec2us::new(74, 84));
     let mut values = Vec::new();
-    collect_unmasked_pixels(
-        &pixels,
-        &mask,
-        URect::new(Vec2us::ZERO, Vec2us::new(64, 64)),
-        &mut values,
-    );
+    collect_tile_pixels(&pixels, tile, &mut values);
     assert_eq!(values.len(), MAX_TILE_SAMPLES);
+    let mean = values.iter().map(|&v| f64::from(v)).sum::<f64>() / values.len() as f64;
+    assert_eq!(mean, 41.5 + 1000.0 * 51.5);
+
+    let small = URect::new(Vec2us::new(3, 4), Vec2us::new(13, 9));
+    values.clear();
+    collect_tile_pixels(&pixels, small, &mut values);
+    let every: Vec<f32> = (4..9)
+        .flat_map(|y| (3..13).map(move |x| (x + 1000 * y) as f32))
+        .collect();
+    assert_eq!(values, every, "a tile within the budget reads every pixel");
 }
 
 #[test]
@@ -76,47 +105,7 @@ fn collect_unmasked_pixels_all_masked() {
 }
 
 #[test]
-fn collect_unmasked_pixels_partial_mask() {
-    let width = 64;
-    let height = 64;
-    let pixels = Buffer2::new_filled(width, height, 0.5);
-
-    // Mask every other pixel
-    let mut mask = BitBuffer2::new_filled(Size2us::new(width, height), false);
-    for y in 0..height {
-        for x in 0..width {
-            if (x + y) % 2 == 0 {
-                mask.set_at(Vec2us::new(x, y), true);
-            }
-        }
-    }
-
-    let mut values = Vec::new();
-    collect_unmasked_pixels(
-        &pixels,
-        &mask,
-        URect::new(Vec2us::ZERO, Vec2us::new(64, 64)),
-        &mut values,
-    );
-    assert_eq!(values.len(), MAX_TILE_SAMPLES);
-}
-
-#[test]
-fn collect_unmasked_pixels_partial_tile() {
-    let pixels = Buffer2::new_filled(100, 100, 0.5);
-    let mask = BitBuffer2::new_filled(Size2us::new(100, 100), false);
-    let mut values = Vec::new();
-    collect_unmasked_pixels(
-        &pixels,
-        &mask,
-        URect::new(Vec2us::new(10, 20), Vec2us::new(70, 80)),
-        &mut values,
-    );
-    assert_eq!(values.len(), MAX_TILE_SAMPLES);
-}
-
-#[test]
-fn masked_sampling_matches_evenly_spaced_unmasked_ordinals() {
+fn masked_sampling_reads_the_unmasked_ordinals() {
     #[derive(Debug)]
     struct SamplingCase {
         size: Size2us,
@@ -170,7 +159,7 @@ fn masked_sampling_matches_evenly_spaced_unmasked_ordinals() {
             }
         }
 
-        let mut expected: Vec<f32> = (case.tile.min.y..case.tile.max.y)
+        let expected: Vec<f32> = (case.tile.min.y..case.tile.max.y)
             .flat_map(|y| {
                 let mask = &mask;
                 let pixels = &pixels;
@@ -179,7 +168,10 @@ fn masked_sampling_matches_evenly_spaced_unmasked_ordinals() {
                     .map(move |x| pixels[size.index_of(Vec2us::new(x, y))])
             })
             .collect();
-        reference_subsample(&mut expected, MAX_TILE_SAMPLES);
+        let count = expected.len().min(MAX_TILE_SAMPLES);
+        let expected: Vec<f32> = (0..count)
+            .map(|k| expected[sample_ordinal(k, count, expected.len())])
+            .collect();
 
         let mut actual = Vec::new();
         collect_unmasked_pixels(&pixels, &mask, case.tile, &mut actual);

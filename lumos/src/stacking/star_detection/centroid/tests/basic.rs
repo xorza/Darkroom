@@ -66,15 +66,26 @@ fn a_detected_star_measures_as_on_its_true_sky() {
         let npix = (2 * radius + 1).pow(2);
         let sigma_sq = f64::from(sigma).powi(2);
         let contraction = sigma_sq / (sigma_sq + window_sigma.powi(2));
-        let error = (star.pos - truth).length();
+        let error = (reference.pos - truth).length();
         // Plus the f64 rounding of the weighted sums, ε per term over the stamp at coordinates ≈ 64.
         let bound = 1.01 * (nearest - truth).length() * contraction.powi(10)
             + npix as f64 * f64::EPSILON * truth.max_element();
         assert!(error <= bound, "σ {sigma} at {truth}: {error} > {bound}");
 
-        // The estimated sky is 0.1 to within one f32 ulp (7.5e-9) per pixel, against stars whose
-        // stamp sums to ≥ 31: a relative change of ≤ 225 · 7.5e-9 / 31 = 5.4e-8 in every sum the
-        // metrics are built from. 1e-6 holds it with room for the f32 rounding of each metric.
+        // The estimated sky is 0.1 to within four f32 ulps (3e-8) per pixel — past the outer tile
+        // centres the spline weighs its nodes by |1 − t| + |t| ≤ 2, each product and sum rounded —
+        // against stars whose stamp sums to ≥ 31: a relative change of ≤ 225 · 3e-8 / 31 = 2.2e-7
+        // in every sum the metrics are built from. 1e-6 holds it with room for the f32 rounding of
+        // each metric.
+        let sky_error = background
+            .background
+            .iter()
+            .map(|&level| (level - SKY).abs())
+            .fold(0.0, f32::max);
+        assert!(
+            sky_error <= 3e-8,
+            "σ {sigma} at {truth}: sky off by {sky_error}"
+        );
         let same = |name, a: f64, b: f64| {
             assert!(
                 (a - b).abs() <= 1e-6 * b.abs().max(1.0),
@@ -86,7 +97,6 @@ fn a_detected_star_measures_as_on_its_true_sky() {
         for (name, a, b) in [
             ("flux", star.flux, reference.flux),
             ("fwhm", star.fwhm, reference.fwhm),
-            ("eccentricity", star.eccentricity, reference.eccentricity),
             ("peak", star.peak, reference.peak),
             ("sharpness", star.sharpness, reference.sharpness),
             ("sround", star.roundness.sround, reference.roundness.sround),
@@ -94,6 +104,13 @@ fn a_detected_star_measures_as_on_its_true_sky() {
         ] {
             same(name, f64::from(a), f64::from(b));
         }
+        // e² = 1 − λ₂/λ₁ moves by the variances' relative change, so e itself, by its square root
+        // near 0 — a round star's eccentricity is held through its square.
+        same(
+            "eccentricity²",
+            f64::from(star.eccentricity).powi(2),
+            f64::from(reference.eccentricity).powi(2),
+        );
 
         // Each sample takes four f32 roundings of at most ε · (A + sky) — the profile's exp and
         // scale, the add onto the sky and the subtraction from it — so the 225 of them move the

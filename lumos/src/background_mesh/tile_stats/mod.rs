@@ -8,6 +8,10 @@ use imaginarium::Buffer2;
 
 /// Maximum samples per tile for statistics computation.
 pub(crate) const MAX_TILE_SAMPLES: usize = 1024;
+const _: () = assert!(
+    MAX_TILE_SAMPLES.is_multiple_of(2),
+    "sample_ordinal needs an even count"
+);
 
 /// Tile statistics computed during background estimation.
 #[derive(Clone, Copy, Debug, Default)]
@@ -87,16 +91,10 @@ impl TileStats {
                 collect_unmasked_pixels(pixels, m, tile, values);
                 if values.is_empty() {
                     // All pixels masked — no choice but to use all pixels
-                    collect_sampled_pixels(pixels, tile, values);
+                    collect_tile_pixels(pixels, tile, values);
                 }
             }
-            None => {
-                if tile.area() <= MAX_TILE_SAMPLES {
-                    collect_all_pixels(pixels, tile, values);
-                } else {
-                    collect_sampled_pixels(pixels, tile, values);
-                }
-            }
+            None => collect_tile_pixels(pixels, tile, values),
         }
 
         if values.is_empty() {
@@ -128,30 +126,43 @@ fn sextractor_sky(stats: &ClippedStats) -> f32 {
     }
 }
 
-/// Collect all pixels from a tile region.
-#[inline]
-fn collect_all_pixels(pixels: &Buffer2<f32>, tile: URect, values: &mut Vec<f32>) {
-    let width = pixels.width();
-    let tile_width = tile.width();
-    for y in tile.min.y..tile.max.y {
-        let row_start = y * width + tile.min.x;
-        values.extend_from_slice(&pixels[row_start..row_start + tile_width]);
+/// The `k`-th of `count` ordinals picked from `0..candidates`: evenly spread, and point-symmetric,
+/// `k` and `count − 1 − k` summing to `candidates − 1`. Over a whole tile in raster order that
+/// reflection is the one through the tile's centre, so the samples centre on it exactly and a
+/// plane's statistics read the plane there. Picking from the first ordinal on instead puts the
+/// samples' centre half a spacing early, and the sky a half-spacing step of its gradient off.
+///
+/// `count` is at most `candidates`, and even whenever `candidates` is: no self-symmetric middle
+/// ordinal exists then. `count == candidates` picks every one.
+const fn sample_ordinal(k: usize, count: usize, candidates: usize) -> usize {
+    if 2 * k < count {
+        ((2 * k + 1) * candidates - count) / (2 * count)
+    } else {
+        candidates - 1 - sample_ordinal(count - 1 - k, count, candidates)
     }
 }
 
-/// Collect sampled pixels using strided access (~`MAX_TILE_SAMPLES` pixels).
-#[inline]
-fn collect_sampled_pixels(pixels: &Buffer2<f32>, tile: URect, values: &mut Vec<f32>) {
-    let width = pixels.width();
-    let stride = ((tile.area() as f32 / MAX_TILE_SAMPLES as f32).max(1.0))
-        .sqrt()
-        .ceil() as usize;
+/// How many of `candidates` pixels a tile samples: all of them up to [`MAX_TILE_SAMPLES`], which is
+/// even, as [`sample_ordinal`] needs.
+const fn sample_count(candidates: usize) -> usize {
+    if candidates < MAX_TILE_SAMPLES {
+        candidates
+    } else {
+        MAX_TILE_SAMPLES
+    }
+}
 
-    for y in (tile.min.y..tile.max.y).step_by(stride) {
-        let row_start = y * width;
-        for x in (tile.min.x..tile.max.x).step_by(stride) {
-            values.push(pixels[row_start + x]);
-        }
+/// Every pixel of `tile`, or [`MAX_TILE_SAMPLES`] of them picked by [`sample_ordinal`].
+fn collect_tile_pixels(pixels: &Buffer2<f32>, tile: URect, values: &mut Vec<f32>) {
+    let width = pixels.width();
+    let tile_width = tile.width();
+    let candidates = tile.area();
+    let count = sample_count(candidates);
+    values.reserve_exact(count);
+    for k in 0..count {
+        let ordinal = sample_ordinal(k, count, candidates);
+        let (x, y) = (ordinal % tile_width, ordinal / tile_width);
+        values.push(pixels[(tile.min.y + y) * width + tile.min.x + x]);
     }
 }
 
@@ -163,7 +174,7 @@ fn collect_unmasked_pixels(
     values: &mut Vec<f32>,
 ) {
     let unmasked_count = count_unmasked_pixels(mask, tile);
-    let sample_count = unmasked_count.min(MAX_TILE_SAMPLES);
+    let sample_count = sample_count(unmasked_count);
     if sample_count == 0 {
         return;
     }
@@ -171,10 +182,7 @@ fn collect_unmasked_pixels(
     let width = pixels.width();
     let mask_words = &mask.words;
     let words_per_row = mask.words_per_row();
-    let ordinal_step = unmasked_count / sample_count;
-    let ordinal_remainder = unmasked_count % sample_count;
-    let mut next_ordinal = 0;
-    let mut remainder_accumulator = 0;
+    let mut next_ordinal = sample_ordinal(0, sample_count, unmasked_count);
     let mut ordinal = 0;
     let mut selected_count = 0;
 
@@ -196,12 +204,7 @@ fn collect_unmasked_pixels(
                     if selected_count == sample_count {
                         return;
                     }
-                    next_ordinal += ordinal_step;
-                    remainder_accumulator += ordinal_remainder;
-                    if remainder_accumulator >= sample_count {
-                        next_ordinal += 1;
-                        remainder_accumulator -= sample_count;
-                    }
+                    next_ordinal = sample_ordinal(selected_count, sample_count, unmasked_count);
                 }
                 ordinal += 1;
                 bits &= bits - 1;
@@ -246,17 +249,6 @@ fn unmasked_bits(mask_word: u64, bit_offset: usize, bits_to_process: usize) -> u
         ((1u64 << bits_to_process) - 1) << bit_offset
     };
     (!mask_word & relevant_bits) >> bit_offset
-}
-
-#[cfg(test)]
-fn reference_subsample(values: &mut Vec<f32>, target_size: usize) {
-    let len = values.len();
-    if len > target_size {
-        for write_index in 0..target_size {
-            values[write_index] = values[write_index * len / target_size];
-        }
-        values.truncate(target_size);
-    }
 }
 
 #[cfg(test)]

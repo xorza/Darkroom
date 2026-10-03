@@ -17,16 +17,15 @@ pub(super) unsafe fn interpolate_segment_cubic_sse(
 
     unsafe {
         let bg_f0_v = _mm_set1_ps(bg.f0);
-        let bg_f1_v = _mm_set1_ps(bg.f1);
+        let bg_rise_v = _mm_set1_ps(bg.f1 - bg.f0);
         let bg_a_v = _mm_set1_ps(bg.a);
         let bg_b_v = _mm_set1_ps(bg.b);
         let noise_f0_v = _mm_set1_ps(noise.f0);
-        let noise_f1_v = _mm_set1_ps(noise.f1);
+        let noise_rise_v = _mm_set1_ps(noise.f1 - noise.f0);
         let noise_a_v = _mm_set1_ps(noise.a);
         let noise_b_v = _mm_set1_ps(noise.b);
         let one = _mm_set1_ps(1.0);
         let two = _mm_set1_ps(2.0);
-        let zero = _mm_setzero_ps();
         let start = _mm_set1_ps(ramp.start);
         let step = _mm_set1_ps(ramp.step);
         let lanes = _mm_set_ps(3.0, 2.0, 1.0, 0.0);
@@ -35,8 +34,7 @@ pub(super) unsafe fn interpolate_segment_cubic_sse(
         while i + 4 <= len {
             // `start + i·step` per lane, as `SegmentRamp::t_at` rounds it (see the AVX2 kernel).
             let index = _mm_add_ps(_mm_set1_ps(i as f32), lanes);
-            let t_v = _mm_add_ps(start, _mm_mul_ps(index, step));
-            let t = _mm_min_ps(_mm_max_ps(t_v, zero), one);
+            let t = _mm_add_ps(start, _mm_mul_ps(index, step));
             let ct = _mm_sub_ps(one, t);
 
             // cubic = (2-t)*a + (1+t)*b (no FMA on SSE4.1)
@@ -47,8 +45,8 @@ pub(super) unsafe fn interpolate_segment_cubic_sse(
                 _mm_mul_ps(one_plus_t, bg_b_v),
             );
             let t_ct = _mm_mul_ps(t, ct);
-            // result = ct*f0 + t*f1 - t*ct*cubic
-            let linear = _mm_add_ps(_mm_mul_ps(ct, bg_f0_v), _mm_mul_ps(t, bg_f1_v));
+            // result = f0 + t*(f1 - f0) - t*ct*cubic
+            let linear = _mm_add_ps(bg_f0_v, _mm_mul_ps(t, bg_rise_v));
             let result = _mm_sub_ps(linear, _mm_mul_ps(t_ct, cubic));
             _mm_storeu_ps(bg_out.as_mut_ptr().add(i), result);
 
@@ -56,7 +54,7 @@ pub(super) unsafe fn interpolate_segment_cubic_sse(
                 _mm_mul_ps(two_minus_t, noise_a_v),
                 _mm_mul_ps(one_plus_t, noise_b_v),
             );
-            let n_linear = _mm_add_ps(_mm_mul_ps(ct, noise_f0_v), _mm_mul_ps(t, noise_f1_v));
+            let n_linear = _mm_add_ps(noise_f0_v, _mm_mul_ps(t, noise_rise_v));
             let n_result = _mm_sub_ps(n_linear, _mm_mul_ps(t_ct, n_cubic));
             _mm_storeu_ps(noise_out.as_mut_ptr().add(i), n_result);
 

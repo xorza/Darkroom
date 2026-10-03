@@ -269,16 +269,15 @@ fn interpolate_row(
     let tiles_x = grid.stats.width();
     let centers_x = &grid.centers_x;
 
-    let ty0 = grid.find_lower_tile_y(fy);
-    let ty1 = (ty0 + 1).min(grid.stats.height() - 1);
+    // Past the outer tile centres the end interval's cubic continues, on every side alike, as
+    // SEP extrapolates: holding the edge value instead would bend a sky gradient flat there.
+    let tiles_y = grid.stats.height();
+    let ty0 = grid.find_lower_tile_y(fy).min(tiles_y.saturating_sub(2));
+    let ty1 = (ty0 + 1).min(tiles_y - 1);
     let cy0 = grid.centers_y[ty0];
     let cy1 = grid.centers_y[ty1];
     let hy = cy1 - cy0;
-    let ty = if ty1 == ty0 {
-        0.0
-    } else {
-        ((fy - cy0) / hy).clamp(0.0, 1.0)
-    };
+    let ty = if ty1 == ty0 { 0.0 } else { (fy - cy0) / hy };
 
     // Evaluate Y cubic spline at each tile column
     let node_bg = &mut scratch.node_bg[..tiles_x];
@@ -309,62 +308,48 @@ fn interpolate_row(
         &mut scratch.spline_scratch,
     );
 
+    if tiles_x == 1 {
+        bg_row.fill(node_bg[0]);
+        noise_row.fill(node_noise[0]);
+        return;
+    }
+
+    // Each interval takes the pixels below its upper centre; the first and last run on to the
+    // row's ends.
     let mut x = 0usize;
-
-    for tx0 in 0..tiles_x {
-        let tx1 = (tx0 + 1).min(tiles_x - 1);
-
-        let segment_end = if tx0 + 1 < tiles_x {
-            (centers_x[tx0 + 1].floor() as usize).min(width)
+    for tx0 in 0..tiles_x - 1 {
+        let tx1 = tx0 + 1;
+        let segment_end = if tx1 < tiles_x - 1 {
+            (centers_x[tx1].ceil() as usize).min(width)
         } else {
             width
         };
-
-        if segment_end <= x {
-            continue;
-        }
-
-        let bg_segment = &mut bg_row[x..segment_end];
-        let noise_segment = &mut noise_row[x..segment_end];
-
         let cx0 = centers_x[tx0];
-        let cx1 = centers_x[tx1];
+        let hx = centers_x[tx1] - cx0;
+        let hx2_6 = hx * hx / 6.0;
+        let inv_hx = 1.0 / hx;
 
-        if tx1 == tx0 {
-            // Single tile column — constant fill
-            bg_segment.fill(node_bg[tx0]);
-            noise_segment.fill(node_noise[tx0]);
-        } else {
-            let hx = cx1 - cx0;
-            let hx2_6 = hx * hx / 6.0;
-            let inv_hx = 1.0 / hx;
-
-            simd::interpolate_segment_cubic_simd(
-                bg_segment,
-                noise_segment,
-                SplineSegment {
-                    f0: node_bg[tx0],
-                    f1: node_bg[tx1],
-                    a: hx2_6 * d2x_bg[tx0],
-                    b: hx2_6 * d2x_bg[tx1],
-                },
-                SplineSegment {
-                    f0: node_noise[tx0],
-                    f1: node_noise[tx1],
-                    a: hx2_6 * d2x_noise[tx0],
-                    b: hx2_6 * d2x_noise[tx1],
-                },
-                SegmentRamp {
-                    start: (x as f32 - cx0) * inv_hx,
-                    step: inv_hx,
-                },
-            );
-        }
-
+        simd::interpolate_segment_cubic_simd(
+            &mut bg_row[x..segment_end],
+            &mut noise_row[x..segment_end],
+            SplineSegment {
+                f0: node_bg[tx0],
+                f1: node_bg[tx1],
+                a: hx2_6 * d2x_bg[tx0],
+                b: hx2_6 * d2x_bg[tx1],
+            },
+            SplineSegment {
+                f0: node_noise[tx0],
+                f1: node_noise[tx1],
+                a: hx2_6 * d2x_noise[tx0],
+                b: hx2_6 * d2x_noise[tx1],
+            },
+            SegmentRamp {
+                start: (x as f32 - cx0) * inv_hx,
+                step: inv_hx,
+            },
+        );
         x = segment_end;
-        if x >= width {
-            break;
-        }
     }
 }
 
