@@ -1,18 +1,17 @@
 //! Standard image load and save nodes.
 
 use scenarium::FuncId;
+use scenarium::async_lambda;
 use std::mem;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use imaginarium::SUPPORTED_EXTENSIONS;
 use scenarium::{ConstValue, DataType, DynamicValue, FsPathConfig, FsPathMode, InvokeError};
-use scenarium::{Func, FuncInput, FuncLambda, FuncOutput, Library};
+use scenarium::{Func, FuncInput, FuncOutput, Library};
 
 use crate::config_node::enum_input;
-use crate::image::format::{
-    AS_IS, CONVERSION_FORMAT_DATATYPE, ConversionFormat, conversion_target,
-};
+use crate::image::format::{AS_IS, CONVERSION_FORMAT_DATATYPE, ConversionFormat};
 use crate::image::{IMAGE_DATA_TYPE, Image};
 use scenarium::Invocation;
 use tokio::task;
@@ -30,24 +29,20 @@ fn register_load(library: &mut Library) {
         Func::new(
             LOAD_IMAGE_FUNC_ID,
             "Load Image",
-            FuncLambda::new(
-                move |Invocation {
-                          inputs, outputs, ..
-                      }| {
-                    Box::pin(async move {
-                        debug_assert_eq!(inputs.len(), 1);
-                        debug_assert_eq!(outputs.len(), 1);
-                        let path = PathBuf::from(inputs[0].required_fs_path());
-                        let image = task::spawn_blocking(move || {
-                            imaginarium::Image::read_file(path).map_err(InvokeError::external)
-                        })
-                        .await
-                        .map_err(InvokeError::external)??;
-                        outputs[0] = DynamicValue::from_custom(Image::from(image));
-                        Ok(())
-                    })
-                },
-            ),
+            async_lambda!(move |Invocation {
+                                    inputs, outputs, ..
+                                }| {
+                debug_assert_eq!(inputs.len(), 1);
+                debug_assert_eq!(outputs.len(), 1);
+                let path = PathBuf::from(inputs[0].required_fs_path());
+                let image = task::spawn_blocking(move || {
+                    imaginarium::Image::read_file(path).map_err(InvokeError::external)
+                })
+                .await
+                .map_err(InvokeError::external)??;
+                outputs[0] = DynamicValue::from_custom(Image::from(image));
+                Ok(())
+            }),
         )
         .description("Loads an image from a file on disk.")
         .category("Image")
@@ -62,22 +57,19 @@ fn register_load(library: &mut Library) {
 
 fn register_save(library: &mut Library) {
     library.add(
-        Func::new(SAVE_IMAGE_FUNC_ID, "Save Image", FuncLambda::new(move |Invocation { inputs, .. }| {
-                Box::pin(async move {
+        Func::new(SAVE_IMAGE_FUNC_ID, "Save Image", async_lambda!(move |Invocation { inputs, .. }| {
                     debug_assert_eq!(inputs.len(), 3);
                     let value = mem::take(&mut inputs[0]);
                     let path = PathBuf::from(
                         inputs[1]
                             .required_fs_path(),
                     );
-                    let format = inputs[2]
-                        .required_enum()
-                        .to_owned();
+                    let format = inputs[2].required_enum_as::<ConversionFormat>();
                     // Saving needs the pixels by value anyway, so take them when this is the last
                     // holder and copy only when it is not.
                     let cpu_image = Image::take_interleaved(value);
                     task::spawn_blocking(move || {
-                        match conversion_target(&format, cpu_image.desc().color_format) {
+                        match format.target(cpu_image.desc().color_format) {
                             Some(target) => cpu_image.convert_to(target).save_file(path),
                             None => cpu_image.save_file(path),
                         }
@@ -86,8 +78,7 @@ fn register_save(library: &mut Library) {
                     .await
                     .map_err(InvokeError::external)??;
                     Ok(())
-                })
-            }))
+                }))
             .description("Writes an image to a file on disk.")
             .category("Image")
             .sink()

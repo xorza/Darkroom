@@ -13,6 +13,7 @@ use lumos::{
     BackgroundMode, Denoise, ExtractBackground, Hdr, LinearImage, LocalContrast,
     NeutralizeBackground, OpError, Scnr, Stretch,
 };
+use scenarium::async_lambda;
 use scenarium::{DataType, Func, FuncId, FuncInput, FuncLambda, FuncOutput, Invocation, Library};
 
 use crate::astro::config::preset::Preset;
@@ -99,19 +100,14 @@ pub(crate) fn register(library: &mut Library) {
         "Neutralize Background",
         "Shifts each channel so the background reads neutral gray.",
         vec![Image::input("Image")],
-        FuncLambda::new(
-            move |Invocation {
-                      inputs, outputs, ..
-                  }| {
-                Box::pin(async move {
-                    let value = mem::take(&mut inputs[0]);
-                    outputs[0] =
-                        runtime::run_frame_op(value, |image| NeutralizeBackground.apply(image))
-                            .await?;
-                    Ok(())
-                })
-            },
-        ),
+        async_lambda!(move |Invocation {
+                                inputs, outputs, ..
+                            }| {
+            let value = mem::take(&mut inputs[0]);
+            outputs[0] =
+                runtime::run_frame_op(value, |image| NeutralizeBackground.apply(image)).await?;
+            Ok(())
+        }),
     ));
 }
 
@@ -172,19 +168,14 @@ where
             P::picker(pick),
             P::config_input("Config", 1),
         ],
-        FuncLambda::new(
-            move |Invocation {
-                      inputs, outputs, ..
-                  }| {
-                Box::pin(async move {
-                    let config = P::resolve(&inputs[1], &inputs[2]);
-                    let value = mem::take(&mut inputs[0]);
-                    outputs[0] =
-                        runtime::run_frame_op(value, move |image| config.run(image)).await?;
-                    Ok(())
-                })
-            },
-        ),
+        async_lambda!(move |Invocation {
+                                inputs, outputs, ..
+                            }| {
+            let config = P::resolve(&inputs[1], &inputs[2]);
+            let value = mem::take(&mut inputs[0]);
+            outputs[0] = runtime::run_frame_op(value, move |image| config.run(image)).await?;
+            Ok(())
+        }),
     )
 }
 
@@ -221,22 +212,17 @@ where
                 .default(f64::from(knob.default)),
             ConfigValue::<T>::input("Config", 1),
         ],
-        FuncLambda::new(
-            move |Invocation {
-                      inputs, outputs, ..
-                  }| {
-                Box::pin(async move {
-                    let config = match inputs[2].as_custom::<ConfigValue<T>>() {
-                        Some(config) => config.0.clone(),
-                        None => with(inputs[1].required_f64() as f32),
-                    };
-                    let value = mem::take(&mut inputs[0]);
-                    outputs[0] =
-                        runtime::run_frame_op(value, move |image| config.run(image)).await?;
-                    Ok(())
-                })
-            },
-        ),
+        async_lambda!(move |Invocation {
+                                inputs, outputs, ..
+                            }| {
+            let config = match inputs[2].as_custom::<ConfigValue<T>>() {
+                Some(config) => config.0.clone(),
+                None => with(inputs[1].required_f64() as f32),
+            };
+            let value = mem::take(&mut inputs[0]);
+            outputs[0] = runtime::run_frame_op(value, move |image| config.run(image)).await?;
+            Ok(())
+        }),
     )
 }
 

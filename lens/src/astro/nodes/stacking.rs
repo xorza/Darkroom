@@ -5,9 +5,10 @@ use lumos::{
     AlignStackConfig, CalibrationMasters, LinearImage, QualityPlanes, Reference,
     calibrate_align_stack,
 };
+use scenarium::async_lambda;
 use scenarium::{
-    DataType, DynamicValue, Func, FuncId, FuncInput, FuncLambda, FuncOutput, Invocation,
-    InvokeError, InvokeResult, Library, OutputDemand,
+    DataType, DynamicValue, Func, FuncId, FuncInput, FuncOutput, Invocation, InvokeError,
+    InvokeResult, Library, OutputDemand,
 };
 
 use crate::astro::config::preset::Preset;
@@ -52,68 +53,59 @@ pub(crate) fn register(library: &mut Library) {
         Func::new(
             STACK_LIGHTS_FUNC_ID,
             "Stack Lights",
-            FuncLambda::new(
-                move |Invocation {
-                          ctx,
-                          inputs,
-                          demand,
-                          outputs,
-                          ..
-                      }| {
-                    let cancel = ctx.cancel_flag();
-                    let quality = quality(demand);
-                    Box::pin(async move {
-                        debug_assert_eq!(inputs.len(), 9);
-                        debug_assert_eq!(outputs.len(), 3);
+            async_lambda!(move |Invocation { ctx, inputs, demand, outputs, .. }| {
+                cancel = ctx.cancel_flag(),
+                quality = quality(demand),
+            } => {
+                debug_assert_eq!(inputs.len(), 9);
+                debug_assert_eq!(outputs.len(), 3);
 
-                        let lights = inputs[0].required_fs_paths().to_vec();
-                        let masters_value = inputs[1].clone();
-                        let mut stack = CombineMethodChoice::resolve(&inputs[6], &inputs[7]);
-                        stack.quality = quality;
-                        let reference = reference(&inputs[REFERENCE])?;
-                        let config = AlignStackConfig {
-                            detection: DetectionPreset::resolve(&inputs[2], &inputs[3]),
-                            registration: RegistrationPreset::resolve(&inputs[4], &inputs[5]),
-                            stack,
-                            reference,
-                            cosmic_ray: None,
-                        };
+                let lights = inputs[0].required_fs_paths().to_vec();
+                let masters_value = inputs[1].clone();
+                let mut stack = CombineMethodChoice::resolve(&inputs[6], &inputs[7]);
+                stack.quality = quality;
+                let reference = reference(&inputs[REFERENCE])?;
+                let config = AlignStackConfig {
+                    detection: DetectionPreset::resolve(&inputs[2], &inputs[3]),
+                    registration: RegistrationPreset::resolve(&inputs[4], &inputs[5]),
+                    stack,
+                    reference,
+                    cosmic_ray: None,
+                };
 
-                        let result = runtime::run_cancellable(cancel, move |cancel| {
-                            let empty = CalibrationMasters::default();
-                            let masters = masters_value
-                                .as_custom::<Masters>()
-                                .map_or(&empty, |masters| &masters.masters);
-                            calibrate_align_stack(
-                                &lights,
-                                masters,
-                                &config,
-                                ProgressCallback::default(),
-                                cancel,
-                            )
-                        })
-                        .await?;
+                let result = runtime::run_cancellable(cancel, move |cancel| {
+                    let empty = CalibrationMasters::default();
+                    let masters = masters_value
+                        .as_custom::<Masters>()
+                        .map_or(&empty, |masters| &masters.masters);
+                    calibrate_align_stack(
+                        &lights,
+                        masters,
+                        &config,
+                        ProgressCallback::default(),
+                        cancel,
+                    )
+                })
+                .await?;
 
-                        let product = result.product;
-                        outputs[0] = DynamicValue::from_custom(Image::from(product.image));
-                        if quality.coverage {
-                            let coverage = product
-                                .coverage
-                                .expect("the stack produces the coverage it was asked for");
-                            outputs[1] =
-                                DynamicValue::from_custom(Image::from(LinearImage::from(coverage)));
-                        }
-                        if quality.weight {
-                            let weight = product
-                                .weight
-                                .expect("the stack produces the weight it was asked for");
-                            outputs[2] =
-                                DynamicValue::from_custom(Image::from(LinearImage::from(weight)));
-                        }
-                        Ok(())
-                    })
-                },
-            ),
+                let product = result.product;
+                outputs[0] = DynamicValue::from_custom(Image::from(product.image));
+                if quality.coverage {
+                    let coverage = product
+                        .coverage
+                        .expect("the stack produces the coverage it was asked for");
+                    outputs[1] =
+                        DynamicValue::from_custom(Image::from(LinearImage::from(coverage)));
+                }
+                if quality.weight {
+                    let weight = product
+                        .weight
+                        .expect("the stack produces the weight it was asked for");
+                    outputs[2] =
+                        DynamicValue::from_custom(Image::from(LinearImage::from(weight)));
+                }
+                Ok(())
+            }),
         )
         .description("Calibrates, aligns, and stacks selected light frames into one image.")
         .category("Astro")

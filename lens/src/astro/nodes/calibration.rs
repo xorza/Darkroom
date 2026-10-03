@@ -1,6 +1,7 @@
 //! Calibration-master node and source-aware on-disk master cache.
 
 use scenarium::FuncId;
+use scenarium::async_lambda;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -13,7 +14,7 @@ use lumos::{
     stack_cfa_master,
 };
 use scenarium::Invocation;
-use scenarium::{DataType, DynamicValue, Func, FuncInput, FuncLambda, FuncOutput, Library};
+use scenarium::{DataType, DynamicValue, Func, FuncInput, FuncOutput, Library};
 
 use crate::astro::masters::{MASTERS_DATA_TYPE, Masters};
 use crate::astro::nodes::io::ASTRO_RAW_PATHS_DATA_TYPE;
@@ -64,36 +65,28 @@ pub(crate) fn register(library: &mut Library) {
         Func::new(
             BUILD_MASTERS_FUNC_ID,
             "Build Masters",
-            FuncLambda::new(
-                move |Invocation {
-                          ctx,
-                          inputs,
-                          outputs,
-                          ..
-                      }| {
-                    let cancel = ctx.cancel_flag();
-                    Box::pin(async move {
-                        debug_assert_eq!(inputs.len(), 6);
-                        debug_assert_eq!(outputs.len(), 1);
+            async_lambda!(move |Invocation { ctx, inputs, outputs, .. }| {
+                cancel = ctx.cancel_flag(),
+            } => {
+                debug_assert_eq!(inputs.len(), 6);
+                debug_assert_eq!(outputs.len(), 1);
 
-                        let frames = |index: usize| {
-                            inputs[index].as_fs_paths().map(|paths| {
-                                paths.iter().map(PathBuf::from).collect::<Vec<PathBuf>>()
-                            })
-                        };
-                        let frame_sets = [frames(0), frames(1), frames(2), frames(3)];
-                        let sigma = inputs[4].required_f64() as f32;
-                        let cache = inputs[5].required_bool();
-
-                        let masters = runtime::run_cancellable(cancel, move |cancel| {
-                            build_masters_cached(frame_sets, sigma, cache, cancel)
-                        })
-                        .await?;
-                        outputs[0] = DynamicValue::from_custom(Masters::from(masters));
-                        Ok(())
+                let frames = |index: usize| {
+                    inputs[index].as_fs_paths().map(|paths| {
+                        paths.iter().map(PathBuf::from).collect::<Vec<PathBuf>>()
                     })
-                },
-            ),
+                };
+                let frame_sets = [frames(0), frames(1), frames(2), frames(3)];
+                let sigma = inputs[4].required_f64() as f32;
+                let cache = inputs[5].required_bool();
+
+                let masters = runtime::run_cancellable(cancel, move |cancel| {
+                    build_masters_cached(frame_sets, sigma, cache, cancel)
+                })
+                .await?;
+                outputs[0] = DynamicValue::from_custom(Masters::from(masters));
+                Ok(())
+            }),
         )
         .description(
             "Stacks selected raw calibration frames (darks/flats/bias/flat-darks) into \

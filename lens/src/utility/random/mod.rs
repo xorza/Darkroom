@@ -2,17 +2,10 @@ use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 use scenarium::FuncId;
 use scenarium::Invocation;
-use scenarium::{
-    DataType, DynamicValue, Func, FuncInput, FuncLambda, FuncOutput, InvokeError, Library,
-};
+use scenarium::async_lambda;
+use scenarium::{DataType, Func, FuncInput, FuncOutput, Library};
 
 const RANDOM_FUNC_ID: FuncId = FuncId::literal("01897928-66cd-52cb-abeb-a5bfd7f3763e");
-
-fn float_input(inputs: &[DynamicValue], index: usize) -> Result<f64, InvokeError> {
-    inputs[index]
-        .as_f64()
-        .ok_or_else(|| InvokeError::invalid_input(index, "a number", &inputs[index]))
-}
 
 fn scale_random(unit: f64, min: f64, max: f64) -> f64 {
     min + (max - min) * unit
@@ -22,24 +15,20 @@ fn random_func() -> Func {
     Func::new(
         RANDOM_FUNC_ID,
         "Random",
-        FuncLambda::new(
-            move |Invocation {
-                      state: cache,
-                      inputs,
-                      outputs,
-                      ..
-                  }| {
-                Box::pin(async move {
-                    debug_assert_eq!(inputs.len(), 2);
-                    debug_assert_eq!(outputs.len(), 1);
-                    let rng = cache.get_or_insert_with(|| StdRng::from_rng(&mut rand::rng()));
-                    let min = float_input(inputs, 0)?;
-                    let max = float_input(inputs, 1)?;
-                    outputs[0] = scale_random(rng.random::<f64>(), min, max).into();
-                    Ok(())
-                })
-            },
-        ),
+        async_lambda!(move |Invocation {
+                                state: cache,
+                                inputs,
+                                outputs,
+                                ..
+                            }| {
+            debug_assert_eq!(inputs.len(), 2);
+            debug_assert_eq!(outputs.len(), 1);
+            let rng = cache.get_or_insert_with(|| StdRng::from_rng(&mut rand::rng()));
+            let min = inputs[0].required_f64();
+            let max = inputs[1].required_f64();
+            outputs[0] = scale_random(rng.random::<f64>(), min, max).into();
+            Ok(())
+        }),
     )
     .description("Generates a random float between min and max values.")
     .category("Math")

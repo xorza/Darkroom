@@ -74,7 +74,6 @@ Severity: Low — `Option`s that must be `Some`, sentinels, and caches of comput
 ## lens node lambdas repeat boilerplate and disagree on input contracts
 Severity: Low — idioms written 4–37 times, already drifting.
 
-- [ ] All lambdas — the `move |Invocation {..}| Box::pin(async move {..})` wrapper; two enum reads (`image/format.rs` `conversion_target`, `register_blend`) still `.expect` a variant parse the compiler already checked. `lens/src/utility/random/mod.rs` `float_input` returns `InvokeError::InvalidInput` for the same case every other node treats as unreachable (a copy of scenarium's private `math_library::float_input`).
 - [ ] `lens/src/config_node.rs` — `enum_input` is not part of the config bridge and its doc says "Shared by both libraries" though only the image library calls it (both `ConversionFormat` sites override its default); `add_config_builder` hard-codes `.category("Astro")`.
 - [ ] `lens/src/image/mod.rs` `Image::desc`'s planar arm re-derives the `LinearImage → ColorFormat` mapping lumos owns; `astro/nodes/io.rs` `ASTRO_IMAGE_PATH_DATA_TYPE` is `pub(crate)` but used in one file; `astro/mod.rs` module doc says frames flow as `RGB_F32` `Image`, contradicting the planar/interleaved `Pixels` design.
 

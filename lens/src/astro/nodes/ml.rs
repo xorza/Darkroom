@@ -6,8 +6,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use lumos::{MlDenoise, MlError, RemoveStars};
+use scenarium::async_lambda;
 use scenarium::{ConstValue, DataType, DynamicValue, FsPathConfig, FsPathMode};
-use scenarium::{Func, FuncId, FuncInput, FuncLambda, FuncOutput, Library};
+use scenarium::{Func, FuncId, FuncInput, FuncOutput, Library};
 
 use crate::astro::nodes::MlModelPaths;
 use crate::astro::nodes::runtime;
@@ -27,25 +28,20 @@ fn register_denoise(library: &mut Library, model_path: &Path) {
         Func::new(
             DENOISE_FUNC_ID,
             "ML Denoise",
-            FuncLambda::new(
-                move |Invocation {
-                          inputs, outputs, ..
-                      }| {
-                    Box::pin(async move {
-                        debug_assert_eq!(inputs.len(), 2);
-                        debug_assert_eq!(outputs.len(), 1);
-                        let model = PathBuf::from(inputs[1].required_fs_path());
-                        let output =
-                            runtime::run_on_planes(mem::take(&mut inputs[0]), move |mut image| {
-                                MlDenoise::new(model).apply(&mut image)?;
-                                Ok::<_, MlError>(image)
-                            })
-                            .await?;
-                        outputs[0] = DynamicValue::from_custom(Image::from(output));
-                        Ok(())
-                    })
-                },
-            ),
+            async_lambda!(move |Invocation {
+                                    inputs, outputs, ..
+                                }| {
+                debug_assert_eq!(inputs.len(), 2);
+                debug_assert_eq!(outputs.len(), 1);
+                let model = PathBuf::from(inputs[1].required_fs_path());
+                let output = runtime::run_on_planes(mem::take(&mut inputs[0]), move |mut image| {
+                    MlDenoise::new(model).apply(&mut image)?;
+                    Ok::<_, MlError>(image)
+                })
+                .await?;
+                outputs[0] = DynamicValue::from_custom(Image::from(output));
+                Ok(())
+            }),
         )
         .description("Denoises a stretched image with an ONNX model (DeepSNR).")
         .category("Astro")
@@ -61,41 +57,33 @@ fn register_star_removal(library: &mut Library, model_path: &Path) {
         Func::new(
             STAR_REMOVAL_FUNC_ID,
             "ML Star Removal",
-            FuncLambda::new(
-                move |Invocation {
-                          inputs,
-                          demand: output_demand,
-                          outputs,
-                          ..
-                      }| {
-                    let need_stars = !output_demand[1].is_skip();
-                    Box::pin(async move {
-                        debug_assert_eq!(inputs.len(), 2);
-                        debug_assert_eq!(outputs.len(), 2);
-                        let model = PathBuf::from(inputs[1].required_fs_path());
-                        if need_stars {
-                            let result =
-                                runtime::run_on_planes(mem::take(&mut inputs[0]), move |image| {
-                                    RemoveStars::new(model).split(image)
-                                })
-                                .await?;
-                            outputs[0] = DynamicValue::from_custom(Image::from(result.starless));
-                            outputs[1] = DynamicValue::from_custom(Image::from(result.stars));
-                        } else {
-                            let starless = runtime::run_on_planes(
-                                mem::take(&mut inputs[0]),
-                                move |mut image| {
-                                    RemoveStars::new(model).apply(&mut image)?;
-                                    Ok::<_, MlError>(image)
-                                },
-                            )
-                            .await?;
-                            outputs[0] = DynamicValue::from_custom(Image::from(starless));
-                        }
-                        Ok(())
-                    })
-                },
-            ),
+            async_lambda!(move |Invocation { inputs, demand: output_demand, outputs, .. }| {
+                need_stars = !output_demand[1].is_skip(),
+            } => {
+                debug_assert_eq!(inputs.len(), 2);
+                debug_assert_eq!(outputs.len(), 2);
+                let model = PathBuf::from(inputs[1].required_fs_path());
+                if need_stars {
+                    let result =
+                        runtime::run_on_planes(mem::take(&mut inputs[0]), move |image| {
+                            RemoveStars::new(model).split(image)
+                        })
+                        .await?;
+                    outputs[0] = DynamicValue::from_custom(Image::from(result.starless));
+                    outputs[1] = DynamicValue::from_custom(Image::from(result.stars));
+                } else {
+                    let starless = runtime::run_on_planes(
+                        mem::take(&mut inputs[0]),
+                        move |mut image| {
+                            RemoveStars::new(model).apply(&mut image)?;
+                            Ok::<_, MlError>(image)
+                        },
+                    )
+                    .await?;
+                    outputs[0] = DynamicValue::from_custom(Image::from(starless));
+                }
+                Ok(())
+            }),
         )
         .description("Removes stars with a StarNet ONNX model (starless + stars).")
         .category("Astro")
