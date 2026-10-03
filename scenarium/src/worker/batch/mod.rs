@@ -40,13 +40,9 @@ pub(crate) struct BatchIntent {
     /// [`WorkerMessage::FlushAllCaches`].
     pub(crate) flush_all_caches: bool,
     pub(crate) loop_request: Option<LoopCommand>,
-    /// What this batch's `Run` messages ask for, coalesced — plus the events
-    /// the running loop fired, which arrive outside any message.
-    ///
-    /// The seeds themselves rather than a second spelling of their four
-    /// fields: combining is [`RunSeeds::merge`]'s, and what leaves here is the
-    /// same value the engine is handed, so nothing has to be taken apart and
-    /// put back together across the worker boundary.
+    /// What this batch's run messages ask for, coalesced — plus the events
+    /// the running loop fired, which arrive outside any message. The same
+    /// value the engine is handed.
     pub(crate) seeds: RunSeeds,
     pub(crate) evict_cache: Vec<NodeId>,
     pub(crate) flush_cache: Vec<NodeId>,
@@ -70,7 +66,12 @@ impl BatchIntent {
                 WorkerMessage::FlushCache { nodes } => unique::extend(&mut self.flush_cache, nodes),
                 WorkerMessage::FlushAllCaches => self.flush_all_caches = true,
                 WorkerMessage::SetDiskStore(cache) => self.disk_store = Some(cache),
-                WorkerMessage::Run { seeds } => self.seeds.merge(seeds),
+                WorkerMessage::RunSinks => self.seeds.sinks = true,
+                WorkerMessage::RunNodes { nodes } => {
+                    unique::extend(&mut self.seeds.node_ids, nodes);
+                }
+                #[cfg(test)]
+                WorkerMessage::FireEvents { events } => self.seeds.add_events(events),
                 WorkerMessage::StartEventLoop => self.loop_request = Some(LoopCommand::Start),
                 WorkerMessage::StopEventLoop => self.loop_request = Some(LoopCommand::Stop),
                 WorkerMessage::Sync { reply } => self.syncs.push(reply),

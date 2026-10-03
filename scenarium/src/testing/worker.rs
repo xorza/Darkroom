@@ -26,7 +26,6 @@ use crate::execution::cache::disk_store::DiskStore;
 use crate::execution::compile::Compiler;
 use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::error::Error;
-use crate::execution::seeds::RunSeeds;
 use crate::graph::identity::{EventPort, NodeId};
 use crate::testing::engine::RunOutcome;
 use crate::testing::graph::TestGraph;
@@ -143,9 +142,7 @@ impl TestWorker {
 
     /// `Run` seeded with every sink — the "compute the document" entry.
     pub(crate) fn sinks() -> WorkerMessage {
-        WorkerMessage::Run {
-            seeds: RunSeeds::sinks(),
-        }
+        WorkerMessage::RunSinks
     }
 
     /// An event port on a named node.
@@ -158,8 +155,8 @@ impl TestWorker {
 
     /// `Run` seeded with one firing of that event.
     pub(crate) fn fire(&self, name: &str, event_idx: usize) -> WorkerMessage {
-        WorkerMessage::Run {
-            seeds: RunSeeds::events(vec![self.event(name, event_idx)]),
+        WorkerMessage::FireEvents {
+            events: vec![self.event(name, event_idx)],
         }
     }
 

@@ -55,7 +55,6 @@ pub use execution::compile::error::CompileError;
 pub use execution::error::{Error, Result, RunError};
 pub use execution::report::{LogEntry, LogLevel};
 pub use execution::report::{NodeExecutionStatus, NodeStatus, RunPhase};
-pub use execution::seeds::RunSeeds;
 pub use graph::Binding;
 pub use graph::BindingEntry;
 pub use graph::Graph;

@@ -3,47 +3,30 @@ use crate::graph::identity::{EventPort, NodeId};
 
 /// What seeds a run's schedule — the roots the planner walks back from. The four
 /// are independent and combine: a run can target sink nodes, the event loop's
-/// triggerable events, a set of injected events, and/or specific nodes, all at once.
+/// event sources, fired events, and/or specific nodes, all at once.
+///
+/// The worker's own: a host asks for sinks or nodes through
+/// [`WorkerMessage`](crate::WorkerMessage), and the worker adds the events its
+/// loop fires and the sources a loop start initializes.
 #[derive(Debug, Default, Clone)]
-pub struct RunSeeds {
+pub(crate) struct RunSeeds {
     /// Include all sink nodes — the ordinary "produce the outputs" trigger.
-    pub sinks: bool,
+    pub(crate) sinks: bool,
     /// Include every node owning a subscribed event so it initializes the
     /// shared state and runtime triggers that drive the event loop.
-    pub event_sources: bool,
+    pub(crate) event_sources: bool,
     /// Run the subscribers of these specific fired events. An event absent from the
     /// installed program fails with
     /// [`Error::EventSeedNotFound`](crate::execution::error::Error::EventSeedNotFound).
-    pub events: Vec<EventPort>,
+    pub(crate) events: Vec<EventPort>,
     /// Run these exact compiled nodes and deliver every output — the on-demand "run to
     /// this node" / preview trigger. An explicitly seeded disabled node is enabled for
     /// this run; an identity absent from the installed program fails with
     /// [`Error::NodeSeedNotFound`](crate::execution::error::Error::NodeSeedNotFound).
-    pub node_ids: Vec<NodeId>,
+    pub(crate) node_ids: Vec<NodeId>,
 }
 
 impl RunSeeds {
-    pub fn sinks() -> Self {
-        Self {
-            sinks: true,
-            ..Self::default()
-        }
-    }
-
-    pub fn nodes(node_ids: Vec<NodeId>) -> Self {
-        Self {
-            node_ids,
-            ..Self::default()
-        }
-    }
-
-    pub fn events(events: Vec<EventPort>) -> Self {
-        Self {
-            events,
-            ..Self::default()
-        }
-    }
-
     /// Whether these seeds would start no run at all — every trigger off and
     /// both lists empty.
     pub(crate) fn is_empty(&self) -> bool {
@@ -59,29 +42,38 @@ impl RunSeeds {
         self.node_ids.clear();
     }
 
-    /// Fold `other` in: the triggers are independent, so they *or* together,
-    /// and the two lists gain what they don't already name.
-    ///
-    /// This is what lets a worker coalesce a burst of `Run` messages into one
-    /// run. It lives here rather than on the batch that calls it because the
-    /// combining rule is a property of the seeds — "these four combine" is the
-    /// same sentence the type's own doc opens with.
-    pub(crate) fn merge(&mut self, other: RunSeeds) {
-        let RunSeeds {
-            sinks,
-            event_sources,
-            events,
-            node_ids,
-        } = other;
-        self.sinks |= sinks;
-        self.event_sources |= event_sources;
-        self.add_events(events);
-        unique::extend(&mut self.node_ids, node_ids);
-    }
-
     /// Seed the subscribers of `events` too — the event loop's fired events,
     /// which reach a batch outside any `Run` message.
     pub(crate) fn add_events(&mut self, events: impl IntoIterator<Item = EventPort>) {
         unique::extend(&mut self.events, events);
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use crate::execution::seeds::RunSeeds;
+    use crate::graph::identity::{EventPort, NodeId};
+
+    impl RunSeeds {
+        pub(crate) fn sinks() -> Self {
+            Self {
+                sinks: true,
+                ..Self::default()
+            }
+        }
+
+        pub(crate) fn nodes(node_ids: Vec<NodeId>) -> Self {
+            Self {
+                node_ids,
+                ..Self::default()
+            }
+        }
+
+        pub(crate) fn events(events: Vec<EventPort>) -> Self {
+            Self {
+                events,
+                ..Self::default()
+            }
+        }
     }
 }

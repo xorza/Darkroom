@@ -199,7 +199,7 @@ impl TestEngine {
         let mut reporter = CollectingReporter::default();
         engine
             .execute(
-                RunSeeds::sinks(),
+                &RunSeeds::sinks(),
                 &mut reporter,
                 CancelToken::never(),
                 outcome,
@@ -279,7 +279,7 @@ impl TestEngine {
             ..
         } = self;
         engine
-            .execute(seeds, &mut DiscardedReports, cancel, outcome)
+            .execute(&seeds, &mut DiscardedReports, cancel, outcome)
             .await?;
         Ok(RunOutcome::snapshot(graph, engine, outcome))
     }
@@ -379,8 +379,6 @@ pub(crate) struct RunOutcome {
     logs: Vec<String>,
     pub(crate) ran_node_count: usize,
     pub(crate) cancelled: bool,
-    /// The events this run was seeded with, echoed back.
-    pub(crate) triggered_events: Vec<EventPort>,
     /// The events a successful event source armed for the loop to spawn.
     pub(crate) armed_events: Vec<EventPort>,
     pub(crate) cache_ram: RamUsage,
@@ -407,7 +405,6 @@ impl RunOutcome {
                 .collect(),
             ran_node_count: outcome.ran_node_count,
             cancelled: outcome.cancelled,
-            triggered_events: outcome.triggered_events.clone(),
             armed_events: outcome
                 .event_triggers
                 .iter()
@@ -442,7 +439,6 @@ impl RunOutcome {
                 .collect(),
             ran_node_count: status.executed_node_count,
             cancelled: status.cancelled,
-            triggered_events: Vec::new(),
             armed_events: Vec::new(),
             cache_ram: status.cache_ram,
         };

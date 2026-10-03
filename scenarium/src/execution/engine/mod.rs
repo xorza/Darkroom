@@ -113,7 +113,7 @@ impl ExecutionEngine {
     /// initialized successfully by an `event_sources` seed.
     pub(crate) async fn execute(
         &mut self,
-        mut seeds: RunSeeds,
+        seeds: &RunSeeds,
         reporter: &mut dyn RunReporter,
         cancel: CancelToken,
         outcome: &mut ExecutionOutcome,
@@ -126,7 +126,7 @@ impl ExecutionEngine {
         // in this order over the one buffer; each asserts `RunSchedule::validate` in
         // debug, which is what catches a schedule spanning some other program.
         let compiled: &CompiledGraph = &self.compiled;
-        self.planner.plan(compiled, &seeds, &mut self.schedule)?;
+        self.planner.plan(compiled, seeds, &mut self.schedule)?;
 
         // Phase 2a: prepare filesystem identities away from the async worker. The stamps are
         // reused for repeated paths and any late bound-path restamp this run.
@@ -166,8 +166,6 @@ impl ExecutionEngine {
         // carries the RAM it ended up holding — which the two steps above just settled.
         self.executor
             .collect_outcome(compiled, &self.schedule, self.cache.node_ram(), outcome);
-
-        outcome.triggered_events.append(&mut seeds.events);
 
         Ok(())
     }

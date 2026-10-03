@@ -92,7 +92,6 @@ pub(crate) struct ExecutionOutcome {
     /// the rows are built rather than derived from them, since a failed node's row no
     /// longer says "executed" separately.
     pub(crate) ran_node_count: usize,
-    pub(crate) triggered_events: Vec<EventPort>,
     pub(crate) event_triggers: Vec<EventTrigger>,
     pub(crate) logs: Vec<LogEntry>,
     pub(crate) cancelled: bool,
@@ -103,7 +102,6 @@ impl ExecutionOutcome {
     pub(crate) fn clear(&mut self) {
         self.nodes.clear();
         self.ran_node_count = 0;
-        self.triggered_events.clear();
         self.event_triggers.clear();
         self.logs.clear();
         self.cancelled = false;

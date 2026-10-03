@@ -18,7 +18,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use scenarium::CompiledGraph;
 use scenarium::DiskStore;
 use scenarium::NodeId;
-use scenarium::{RunSeeds, Worker, WorkerExited, WorkerMessage, WorkerReport};
+use scenarium::{Worker, WorkerExited, WorkerMessage, WorkerReport};
 
 use crate::core::background_runtime::BackgroundRuntime;
 use crate::core::wake::Wake;
@@ -119,22 +119,19 @@ impl WorkerBridge {
 
     /// Execute every sink in the installed program.
     pub(crate) fn run_sinks(&self) -> Result<(), WorkerExited> {
-        self.worker.send(WorkerMessage::Run {
-            seeds: RunSeeds::sinks(),
-        })
+        self.worker.send(WorkerMessage::RunSinks)
     }
 
     /// Execute these exact nodes in the installed program and deliver their
     /// outputs. Plural because a run is seeded with a set — a "run to this
     /// node" contributes one.
     pub(crate) fn run_nodes(&self, node_ids: Vec<NodeId>) -> Result<(), WorkerExited> {
-        self.worker.send(WorkerMessage::Run {
-            seeds: RunSeeds::nodes(node_ids),
-        })
+        self.worker
+            .send(WorkerMessage::RunNodes { nodes: node_ids })
     }
 
-    /// Swap the engine's output cache (codec registry + store root) — e.g. to
-    /// repoint at the active document's store. Takes effect before the next
+    /// Point the engine's output cache at another store root — e.g. the
+    /// active document's. Takes effect before the next
     /// run's compile. Attaching writes nothing; see [`Self::flush_all_caches`].
     pub(crate) fn set_disk_store(&self, cache: DiskStore) -> Result<(), WorkerExited> {
         self.worker.send(WorkerMessage::SetDiskStore(cache))

@@ -37,17 +37,15 @@ fn batch_intent_accumulates_simple_flags() {
         WorkerMessage::FlushCache {
             nodes: vec![node_id],
         },
-        WorkerMessage::Run {
-            seeds: RunSeeds::sinks(),
+        WorkerMessage::RunSinks,
+        WorkerMessage::FireEvents {
+            events: vec![event],
         },
-        WorkerMessage::Run {
-            seeds: RunSeeds::events(vec![event]),
+        WorkerMessage::RunNodes {
+            nodes: vec![node_id],
         },
-        WorkerMessage::Run {
-            seeds: RunSeeds::nodes(vec![node_id]),
-        },
-        WorkerMessage::Run {
-            seeds: RunSeeds::nodes(vec![node_id]),
+        WorkerMessage::RunNodes {
+            nodes: vec![node_id],
         },
         WorkerMessage::Sync { reply: reply_ack },
     ]);
@@ -102,14 +100,14 @@ fn batch_intent_deduplicates_events() {
     let mut intent = BatchIntent::default();
     intent.reset(
         [
-            WorkerMessage::Run {
-                seeds: RunSeeds::events(vec![event]),
+            WorkerMessage::FireEvents {
+                events: vec![event],
             },
-            WorkerMessage::Run {
-                seeds: RunSeeds::events(vec![event]),
+            WorkerMessage::FireEvents {
+                events: vec![event],
             },
-            WorkerMessage::Run {
-                seeds: RunSeeds::events(vec![event, event]),
+            WorkerMessage::FireEvents {
+                events: vec![event, event],
             },
         ],
         [event],
