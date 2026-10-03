@@ -86,15 +86,14 @@ impl NodeUI {
         self.drag.in_flight()
     }
 
-    /// Record the widget tree of every scene node retained by `cull`
-    /// (plus the focus-owning node — see the loop comment),
-    /// skipping off-screen ones entirely. Emits selection/raise intents
-    /// for body clicks and latches the drag anchor for a body/title drag
-    /// (port circles capture their own presses via `Sense::CLICK`, so
-    /// drags don't latch off the port grabs); `prepass` converts the
-    /// anchor into `GraphIntent::MoveSelection` on later frames.
-    /// Record every node the cull keeps, and report what the draw saw but
-    /// could not act on — see [`NodeDrawOutcome`].
+    /// Record the widget tree of every scene node retained by `cull` (plus
+    /// the focus-owning node — see the loop comment), skipping off-screen ones
+    /// entirely, and report what the draw saw but could not act on — see
+    /// [`NodeDrawOutcome`]. Emits selection/raise intents for body clicks and
+    /// latches the drag anchor for a body/title drag (port circles capture
+    /// their own presses via `Sense::CLICK`, so drags don't latch off the port
+    /// grabs); `prepass` converts the anchor into `GraphIntent::MoveSelection`
+    /// on later frames.
     pub(super) fn draw_all(
         &mut self,
         ui: &mut Ui,

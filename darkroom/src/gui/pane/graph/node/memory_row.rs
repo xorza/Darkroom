@@ -26,7 +26,7 @@ pub(super) fn memory_row(ui: &mut Ui, ncx: NodeCtx<'_>) {
         return;
     }
     let theme = ncx.theme();
-    // Same inner radius the header rounds to (`Theme::card_inner_radius`),
+    // Same inner radius the header rounds to (`CardTheme::inner_radius`),
     // not the card's raw outer `corner_radius` — else this strip's
     // corner leaves a wedge of body fill showing past the border stroke.
     let r = theme.card.inner_radius();

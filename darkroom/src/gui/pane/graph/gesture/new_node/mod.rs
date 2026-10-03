@@ -105,7 +105,7 @@ impl NewNodeUi {
 
         // Everything below is per-open work — the height arithmetic reads
         // the display and a last-frame rect — so nothing but an open
-        // palette on *this* pane should pay for it. `show` would answer
+        // palette should pay for it. `show` would answer
         // `None` anyway, but only after its arguments were built.
         if !self.menu.is_open() {
             return;

@@ -43,9 +43,9 @@ impl PreviewDrag {
         self.drag.in_flight()
     }
 
-    /// Swept once per frame over the whole scene: only one pointer drag can be
-    /// in flight, and `PortRef` is document-unique, so the pane comes from the
-    /// port's own node rather than from the caller.
+    /// Advance the drag in flight, or latch a new one off a Ctrl+drag on an
+    /// output port. Swept once per frame over the whole scene: only one
+    /// pointer drag can be in flight.
     pub(crate) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
         let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
         // A live drag owns the frame; only once it ends does the latch scan
@@ -87,9 +87,8 @@ impl PreviewDrag {
     }
 }
 
-/// First output port whose circle began a drag this frame. Unfiltered by pane:
-/// only one press exists, so the caller resolves the winner's pane once rather
-/// than paying a lookup per candidate node.
+/// First output port whose circle began a drag this frame. Only one press
+/// exists, so the first is the only one.
 fn scan_output_drag_start(geometry: &CanvasGeometry, graph_ctx: GraphCtx<'_>) -> Option<PortRef> {
     let keys = graph_ctx
         .nodes()

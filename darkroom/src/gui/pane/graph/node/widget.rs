@@ -42,6 +42,7 @@ pub(super) struct NodeResponse {
 /// what [`NodeUI`] holds is per-node: there is one pointer so one drag, and
 /// `row_tracks` is deliberately one buffer the whole frame slices out of.
 /// Per-widget state would reintroduce the allocation it exists to avoid.
+#[derive(Debug)]
 pub(super) struct NodeWidget<'a> {
     state: &'a mut NodeUI,
     ncx: NodeCtx<'a>,
@@ -64,8 +65,8 @@ impl<'a> NodeWidget<'a> {
 
         // Probe the body against the breaker polyline. Hit → recolor border
         // red and flag the node for deletion on release. The rect is the same
-        // `node_world_rect` the cull above and the rubber band test — this
-        // frame's position plus the cached measured size — so all three agree
+        // `node_world_rect` the cull and the rubber band test — this frame's
+        // position plus the cached measured size — so all three agree
         // on where the node is even when the document moved it out from under
         // a live gesture (an undo, say). A node that has never
         // recorded has no size yet, so the breaker can't catch it until next
@@ -80,10 +81,9 @@ impl<'a> NodeWidget<'a> {
         let selected = dcx.is_selected(ncx.id);
         // The border width is *always* the selection width so selecting a
         // node never resizes it (stroke folds into padding — width-gated,
-        // not color-gated). Only the color changes, a 4-tier decision: the
-        // breaker alarm wins, then the missing-stub color, then
-        // `Theme::card_border`'s own broken/selected/resting 3-tier (broken
-        // can't recur here since it's already handled, but the helper still
+        // not color-gated). Only the color changes: the breaker alarm wins,
+        // then the missing-stub color, then `Theme::card_border`'s selected
+        // or resting color.
         let border_width = theme.card.border_width_total();
         let border = if node.missing() && !broken {
             // A stub for a node whose func is gone from the library: paint it

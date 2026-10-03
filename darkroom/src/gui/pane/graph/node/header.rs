@@ -58,7 +58,7 @@ const RUN_TIME_MIN_WIDTH: f32 = 52.0;
 
 /// One whole-node event-subscription pin: an event-colored triangle behind
 /// the node's top-left corner, its apex pointing up-left toward the
-/// incoming wire. Recorded by `NodeUI::draw_one` immediately *before* its
+/// incoming wire. Recorded by `NodeWidget::show` immediately *before* its
 /// node's body, so it peeks out from behind the corner while keeping the
 /// node stack's paint order (above lower nodes, below raised ones) and the
 /// cull decision. The `port_glyph::HIT_SCALE`-grown box is centered on the corner
@@ -107,7 +107,7 @@ pub(super) fn header(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut 
     // The header sits inside the body's border stroke (the layout folds
     // the stroke width into the body's padding), so it must round to the
     // stroke's *inner* radius, not the card's outer `corner_radius` —
-    // see `Theme::card_inner_radius`.
+    // see `CardTheme::inner_radius`.
     let r = theme.card.inner_radius();
     Panel::hstack()
         .id_salt("header")
@@ -371,8 +371,8 @@ fn property_chip(
 /// hover-lifted tint), but the glyph is the SDF play triangle rather than
 /// a font glyph, echoing the ports' triangle vocabulary and staying
 /// optically centered at any zoom. Quiet at rest — muted ink like the
-/// other idle controls — and takes the palette's success green
-/// (`exec_executed_glow`) on hover: "go", pointing at the outcome the
+/// other idle controls — and takes the success green (`status.success`) on
+/// hover: "go", pointing at the outcome the
 /// click delivers.
 ///
 /// Reports its own click, like every other chip in this file: the widget is

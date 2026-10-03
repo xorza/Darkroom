@@ -80,9 +80,8 @@ pub(crate) struct CanvasGeometry {
 }
 
 /// A glyph key that names the node its glyph hangs off — how a [`PortLayer`]
-/// evicts a deleted node's entries, and how a wire drag resolves the pane it
-/// belongs to (`GraphCtx::contains`) and notices the node disappearing
-/// under it.
+/// evicts a deleted node's entries, and how a wire drag notices the node
+/// disappearing under it (`GraphCtx::contains`).
 /// Every glyph domain the canvas keys on has one: a data port and an emitter
 /// event belong to their node, and a subscription pin *is* its node (a
 /// subscription is whole-node, so its layer is keyed by `NodeId` directly).
@@ -297,15 +296,13 @@ impl CanvasGeometry {
         self.node_sizes.retain(|id, _| keep(*id));
     }
 
-    /// Fills `hits` on the way through — see the type docs for why the polls
-    /// live here. This walk and that digest want the same response for every
-    /// node and every port, so they share one: the body poll below is at once
-    /// the node's cached size, its screen rect, the cull test, and its click,
-    /// right-click and drag edges.
+    /// One walk over every node and port — see the type docs for why the
+    /// polls live here: the body poll below is at once the node's cached size
+    /// and its screen rect.
     ///
-    /// Runs in [`crate::gui::pane::graph::GraphUI::prepass`], and is the
-    /// digest's only writer — it clears and refills it whole, so nothing
-    /// carries over from the frame before.
+    /// Runs in [`crate::gui::pane::graph::GraphUI::prepass`]. It clears and
+    /// refills the per-frame snapshots whole, so nothing carries over from the
+    /// frame before.
     pub(crate) fn rebuild(&mut self, ui: &Ui, graph_ctx: GraphCtx<'_>) {
         self.ports.live.clear();
         self.events.live.clear();

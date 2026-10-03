@@ -84,12 +84,6 @@ impl ConnectionUI {
     /// re-enters [`DragMode::Floating`] so the user clicks the exact port
     /// to land it. The context's Esc — resolved once by the canvas — drops
     /// either mode without emitting anything.
-    ///
-    /// Swept over the whole scene once per frame. The latch scan spans
-    /// every pane (only one press exists), but everything after it runs
-    /// against the pane that owns the wire's start node — which is also
-    /// what makes a cross-pane wire unrepresentable: the snap scan never
-    /// sees another graph's ports.
     pub(crate) fn apply(
         &mut self,
         ui: &mut Ui,
@@ -132,8 +126,7 @@ impl ConnectionUI {
             return;
         };
         // Both modes span frames, and undo runs before this prepass, so the
-        // pane can close and the node the wire grew out of can be deleted
-        // under it. Not re-latching is how the gesture drops — a commit
+        // node the wire grew out of can be deleted under it. Not re-latching is how the gesture drops — a commit
         // against a dead producer is refused at the edit boundary anyway,
         // silently, and `port_data_type` would meanwhile report the start
         // as untyped (which `scan_snap_target` reads as "compatible with
@@ -254,11 +247,6 @@ impl ConnectionUI {
     /// share the pan/zoom transform with permanent connections.
     pub(crate) fn draw_in_flight(&self, ui: &mut Ui, cx: CanvasCtx<'_>, canvas_origin: Vec2) {
         let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
-        // Scoped: the preview belongs to the pane holding the wire's
-        // start node. Unscoped, every *other* pane also drew it — from
-        // its own `canvas_origin` and under its own transform, so the
-        // wire's graph-space endpoints landed as a phantom curve over an
-        // unrelated graph.
         let Some(state) = self.state.get().copied() else {
             return;
         };

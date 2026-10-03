@@ -24,8 +24,7 @@ use crate::gui::theme::Theme;
 /// rect — so the probe converts nothing.
 #[derive(Debug)]
 pub(crate) struct BreakerProbe<'a> {
-    /// The live scribble, or `None` when no gesture is in flight on this
-    /// pane. The `Option` is the liveness: [`BreakerUI::probe`] hands out the
+    /// The live scribble, or `None` when no gesture is in flight. The `Option` is the liveness: [`BreakerUI::probe`] hands out the
     /// buffers only while its slot is latched, so a stale scribble left over
     /// from the last gesture is unreachable rather than merely ignored.
     live: Option<&'a mut Scribble>,
@@ -88,7 +87,8 @@ impl BreakerProbe<'_> {
 const MIN_POINT_DISTANCE: f32 = 4.0;
 /// Hard cap on the total polyline length. Once hit, further points
 /// stop appending; the last segment is clamped to land exactly on
-/// the limit. Matches the deprecated breaker.
+/// the limit. With [`MIN_POINT_DISTANCE`] spacing it holds a scribble to
+/// 500 segments, which bounds the per-frame intersection work.
 const MAX_BREAKER_LENGTH: f32 = 2000.0;
 /// Bezier sampling resolution for hit-testing. 16 segments matches
 /// the deprecated implementation's `ensure_sampled` density and is
@@ -366,18 +366,12 @@ impl BreakerUI {
         self.latched.clear();
     }
 
-    /// Hand the active state to this pane's inline intersection consumers
-    /// (the node body and both wire hit-tests), or an inert probe when the
-    /// scribble belongs to another pane.
+    /// Hand the active state to the inline intersection consumers (the node
+    /// body and both wire hit-tests), or an inert probe when no scribble is in
+    /// flight.
     ///
-    /// The pane check is load-bearing, not cosmetic. The polyline lives in
-    /// its own graph's pre-transform world coordinates, and every pane places
-    /// its nodes in its own — so an unscoped probe would test one pane's
-    /// scribble against another's rects and mark wires and nodes broken in
-    /// a graph the pointer never touched, deleting them on release. It
-    /// also keeps `begin_frame` to one call per frame: this runs once per
-    /// visible pane, and a second call would clear the marks the owning
-    /// pane just recorded.
+    /// Called once per record pass, so `begin_frame` clears last pass's marks
+    /// exactly once before the consumers record this pass's.
     pub(crate) fn probe(&mut self) -> BreakerProbe<'_> {
         if self.latched.is_idle() {
             return BreakerProbe { live: None };

@@ -12,8 +12,8 @@
 //! compatible glyph the pointer is over, generic over the two
 //! [`PortLayer`] key domains it spans: a data connection drags
 //! `PortRef → PortRef`, an event wire drags `EventRef → NodeId` or — started
-//! from the other end — `NodeId → EventRef`. Latching, the release edge, which
-//! pane owns the gesture, and where the preview's free end sits are stated once
+//! from the other end — `NodeId → EventRef`. Latching, the release edge, the
+//! fixed end's node, and where the preview's free end sits are stated once
 //! here; each family still owns which glyphs are candidates and what a release
 //! commits.
 
@@ -183,8 +183,8 @@ impl<A: GlyphKey, B: GlyphKey> GlyphDrag<A, B> {
         layer.first_drag_started(keys).map(Self::new)
     }
 
-    /// The node the fixed end hangs off: the pane that owns the gesture, and
-    /// the node whose disappearance (undo, a breaker swipe) ends it.
+    /// The node the fixed end hangs off, whose disappearance (undo, a breaker
+    /// swipe) ends the gesture.
     pub(crate) fn node(self) -> NodeId {
         self.from.node()
     }
@@ -222,9 +222,9 @@ impl<A: GlyphKey, B: GlyphKey> GlyphDrag<A, B> {
 /// [`crate::gui::pane::graph::GraphUI::record_canvas`] and passed by `&mut`, so the
 /// breaker probe reborrows into each renderer in turn.
 ///
-/// The pane-wide half is [`DrawCtx`] itself, not a re-declaration of its
+/// The canvas-wide half is [`DrawCtx`] itself, not a re-declaration of its
 /// fields: the wires record in the same pass as the node bodies they run
-/// between, off the same theme, pane, geometry and cull, and `WirePass` was
+/// between, off the same theme, graph, geometry and cull, and `WirePass` was
 /// built two lines from a live `DrawCtx`. What's left here is what only a
 /// wire pass has — the breaker probe it marks hits against, and this frame's
 /// emphasis tier.

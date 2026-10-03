@@ -467,10 +467,9 @@ impl Display for HeaderReadout<'_> {
     }
 }
 
-/// Display label for a viewer tab / pane header: the node's name (falling
-/// back to "image" for an unnamed node) plus a compact port tag, so
-/// several ports of one node stay tellable apart — e.g. "stack · out 1".
-/// The one formatter for both the tab strip and the viewer title.
+/// Display label for a viewer tab / pane header: the node's name, falling
+/// back to "image" for an unnamed node. The one formatter for both the tab
+/// strip and the viewer title.
 ///
 /// Borrowed from the document rather than assembled: both readers record
 /// every frame, and both arms are text something already owns. Each reader

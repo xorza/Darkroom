@@ -124,8 +124,8 @@ impl NodeContextMenu {
 
     /// Open on `node`, anchored at the pointer, and report whether it did.
     ///
-    /// `node` comes from the record pass that drew it, so it is in the pane by
-    /// construction — nothing left to confirm. Called *after* that draw,
+    /// `node` comes from the record pass that drew it, so it is in the graph
+    /// by construction — nothing left to confirm. Called *after* that draw,
     /// because the menu is the canvas's state and the draw holds it shared;
     /// the popup itself records on the next pass, which a right-click
     /// guarantees (action input always earns one).
