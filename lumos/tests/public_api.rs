@@ -8,17 +8,17 @@ use lumos::{
     DefectSummary, DomainMap, DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame,
     FitsChecksumPolicy, FitsChecksumProvenance, FitsChecksumState, FitsCubeInterpretation,
     FitsFloatScale, FitsHduProvenance, FitsHduSelector, FitsLoadOptions, FitsNullPolicy,
-    FitsTransferProvenance, FrameStoreError, GesdConfig, ImageDimensions, ImageMetadata,
-    InterpolationMethod, InvalidConfigField, LinearFitClipConfig, LinearImage, LoadContext,
-    MasterRole, MatchIndices, NoiseModel, Normalization, Pedestal, PercentileClipConfig,
-    QualityMap, QualityPlanes, RansacConfig, RegistrationCatalog, RegistrationConfig,
-    RegistrationError, RegistrationMatchingConfig, Rejection, SampleDomain, ScaleOrigin,
-    SigmaClipConfig, SipConfig, SmallN, StackConfig, StackConfigError, StackError, StackProduct,
-    StarDetectionBackgroundConfig, StarDetectionCandidateConfig, StarDetectionConfig,
-    StarDetectionDiagnostics, StarDetectionFilterConfig, StarDetectionFwhmConfig,
-    StarDetectionMeasurementConfig, StarDetectionQualityFilterDiagnostics, StarDetector, StarMatch,
-    TransferProvenance, Transform, TransformModel, TransformType, TriangleConfig, WarpParams,
-    WarpTransform, Weighting, WinsorizedClipConfig,
+    FitsTransferProvenance, FlagCounts, FrameStoreError, GesdConfig, ImageDimensions,
+    ImageMetadata, InterpolationMethod, InvalidConfigField, LinearFitClipConfig, LinearImage,
+    LoadContext, MasterRole, MatchIndices, NoiseModel, Normalization, Pedestal,
+    PercentileClipConfig, QualityMap, QualityPlanes, RansacConfig, RegistrationCatalog,
+    RegistrationConfig, RegistrationError, RegistrationMatchingConfig, Rejection, RunReport,
+    SampleDomain, ScaleOrigin, SigmaClipConfig, SipConfig, SmallN, StackConfig, StackConfigError,
+    StackError, StackProduct, StarDetectionBackgroundConfig, StarDetectionCandidateConfig,
+    StarDetectionConfig, StarDetectionDiagnostics, StarDetectionFilterConfig,
+    StarDetectionFwhmConfig, StarDetectionMeasurementConfig, StarDetectionQualityFilterDiagnostics,
+    StarDetector, StarMatch, TransferProvenance, Transform, TransformModel, TransformType,
+    TriangleConfig, WarpParams, WarpTransform, Weighting, WinsorizedClipConfig,
 };
 
 #[test]
@@ -100,6 +100,7 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
         },
         cache: CacheConfig::default(),
         quality: QualityPlanes::IMAGE_ONLY,
+        min_survivors: 4,
     };
     assert_eq!(QualityPlanes::default(), QualityPlanes::ALL);
 
@@ -308,6 +309,13 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
         weight: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![2.0, 1.0]))),
         linear_variance: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![0.5, 1.0]))),
         cfa_type: None,
+        report: RunReport {
+            excluded_samples: FlagCounts {
+                saturated: 2,
+                ..FlagCounts::default()
+            },
+            kept_flagged_samples: FlagCounts::default(),
+        },
     };
     let _: AlignStackResult = AlignStackResult {
         product,

@@ -200,8 +200,12 @@ pub(super) struct FrameSource<'a> {
     flags: Option<&'a PixelFlags>,
 }
 
-/// The flags whose pixel deposits nothing: the sample under it is a fill, not a measurement.
-const EXCLUDED: Flags = Flags::NO_DATA;
+/// The flags whose pixel deposits nothing: the sample under it is a fill or an interpolation from
+/// neighbours, not a measurement. Another frame's drop measures it. A saturated sample still
+/// deposits: it is a lower bound, and the only value some cores have.
+const EXCLUDED: Flags = Flags::NO_DATA
+    .union(Flags::COSMIC_RAY)
+    .union(Flags::REPAIRED);
 
 impl<'a> FrameSource<'a> {
     /// `image` under `warp` — reference to input, as registration produces it — onto an output grid
@@ -222,10 +226,7 @@ impl<'a> FrameSource<'a> {
             grid_area: scale * scale,
             weight,
             pixel_weights: pixel_weights.map(Buffer2::pixels),
-            flags: image
-                .flags
-                .as_ref()
-                .filter(|flags| flags.contains(Flags::NO_DATA)),
+            flags: image.flags.as_ref(),
         }
     }
 

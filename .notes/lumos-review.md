@@ -945,20 +945,6 @@ Closes group 16 except 16.12, and 17.4 to 17.7 (17.1 to 17.3 close in phase 0). 
 
 Each phase builds and passes the verification chain on its own. A phase closes its items, and those items are then deleted from this file, together with the phase. Phase order follows the dependencies. Each phase adds its stage to the S9 harness.
 
-## Phase 3. Pixel flags and run report (S1, S8)
-
-0. Add `RunReport` to `StackProduct` and `AlignStackResult`. Its first entries are the flag counts of this phase.
-1. Done: `PixelFlags` replaced `NullMask` (`NO_DATA`), drizzle skips flagged pixels, and RAW `zero_is_bad` zeros are flagged through a `libraw-sys` shim.
-2. Done: the RAW decoder flags `SATURATED` per channel from `linear_max` or `maximum`, a FITS `DATAMAX` flags it too, `ImageMetadata::saturation_flagged` records which, the demosaic dilates flags by its measured reach of 10, and detection reads the flags or tests each input channel.
-3. Carry the flags through calibration, the warp, the kept decode cache and FITS. A warped frame keeps `saturation_flagged` from its source today but no flags; the warp must carry them.
-4. Read them in the combine (exclusion and survivor floor) and in drizzle. Remove the f32 planes of `for_unwarped`.
-- **Tests:**
-  - A star clipped at the raw limit in G only is flagged. The flag survives dark subtraction and flat division.
-  - One flagged pixel in a Lanczos-3 warp with a shift of (0.5, 0.5) flags exactly 6 × 6 = 36 output pixels. At half-pixel phase none of the 6 taps per axis is zero.
-  - 10 frames, 3 of them saturated at a pixel: the output is the mean of the other 7. All 10 saturated: the output pixel is flagged `SATURATED`.
-  - A frame with a NaN border drizzles to the same output as the frame cropped. A Panasonic zero is `NO_DATA`, not `−black/span`.
-- **Closes:** nothing left beyond the steps above (8.1, 8.3 and 9.3 are closed).
-
 ## Phase 4. Spread, sorted window and rejection driver (S3, S4, C1 gather)
 
 1. Add `Spread` with its floor. Port `sigma_clip_iteration`.
@@ -1062,7 +1048,7 @@ Each phase builds and passes the verification chain on its own. A phase closes i
 1. Replace the preview path, and remove the list in 16.2.
 2. Add the integer `BlackLevel`, the one-pass normalize and checked file arithmetic.
 3. Add the white-balanced demosaic and the LibRaw fallback settings. Refuse SuperCCD and odd pitch. Widen the extension list.
-4. Merge the FITS entry points. Add the alias table and the streamed checksum.
+4. Merge the FITS entry points. Add the alias table and the streamed checksum. Write and read the `LUMFLAGS` extension, and give the stack product's flags a public view (`PixelFlags` and `LinearImage::flags` are crate-internal today).
 5. Add the RCD golden cross-check (16.13).
 - **Tests:** preview and science agree pixel for pixel in the former margin band. A Canon black level with `cblack` is exact against a hand sum in integers. A portrait frame through the fallback keeps W×H.
 - **Closes:** group 16 except 16.12, 15.9, 17.4 to 17.7.

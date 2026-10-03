@@ -13,6 +13,8 @@ use crate::combine::rejection::scratch_buffers::ScratchBuffers;
 pub(crate) struct CombineScratch {
     pub(super) values: Vec<f32>,
     pub(super) eff_weights: Vec<f32>,
+    /// Each gathered sample's flags, in the same order.
+    pub(super) sample_flags: Vec<u8>,
     pub(super) buffers: ScratchBuffers,
 }
 
@@ -22,6 +24,7 @@ impl CombineScratch {
     pub(super) fn resize(&mut self, frame_count: usize) {
         self.values.resize(frame_count, 0.0);
         self.eff_weights.resize(frame_count, 0.0);
+        self.sample_flags.resize(frame_count, 0);
         self.buffers.reserve(frame_count);
     }
 }

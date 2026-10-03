@@ -152,6 +152,7 @@ mod tests {
                 domain: None,
                 row_order: None,
                 cfa_type: None,
+                saturation_flagged: false,
             },
         }
     }

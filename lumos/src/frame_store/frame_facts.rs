@@ -19,6 +19,9 @@ pub(crate) struct FrameFacts {
     pub(crate) row_order: Option<RowOrder>,
     /// The mosaic pattern of an undemosaiced sensor frame.
     pub(crate) cfa_type: Option<CfaType>,
+    /// Whether the frame's decoder flagged every saturated pixel — see
+    /// [`ImageMetadata::saturation_flagged`](crate::ImageMetadata::saturation_flagged).
+    pub(crate) saturation_flagged: bool,
 }
 
 impl FrameFacts {
@@ -27,6 +30,7 @@ impl FrameFacts {
             domain: image.metadata().domain.clone(),
             row_order: image.metadata().row_order(),
             cfa_type: image.cfa_type(),
+            saturation_flagged: image.metadata().saturation_flagged,
         }
     }
 }

@@ -25,6 +25,17 @@ pub enum InterpolationMethod {
 }
 
 impl InterpolationMethod {
+    /// How far the kernel reaches from a sample's source cell: an output pixel reads source columns
+    /// `cell − radius + 1 ..= cell + radius`, and the same rows. Nearest reads the cell or the next.
+    pub(crate) const fn tap_radius(self) -> usize {
+        match self {
+            Self::Nearest | Self::Bilinear => 1,
+            Self::Bicubic | Self::Lanczos2 => 2,
+            Self::Lanczos3 => 3,
+            Self::Lanczos4 => 4,
+        }
+    }
+
     /// Every method, from the cheapest to the widest kernel.
     pub const ALL: [Self; 6] = [
         Self::Nearest,

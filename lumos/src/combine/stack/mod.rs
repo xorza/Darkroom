@@ -343,20 +343,26 @@ pub(crate) fn run_stacking(
     // Coverage is not only the warp's: a frame whose source declared pixels with no measurement
     // carries it too, so one edge-masked panel costs the whole set its sigma propagation. Blunt
     // but not wrong — the compaction that breaks the mapping is the same either way.
-    let frame_indices_are_stable = cache.frames.iter().all(|frame| frame.quality.is_none());
+    //
+    // Flags compact the gathered samples the same way, wherever a flagged sample is left out.
+    let frame_indices_are_stable = cache
+        .frames
+        .iter()
+        .all(|frame| frame.quality.is_none() && frame.flags.is_none());
     let sigmas = source_sigmas.filter(|_| frame_indices_are_stable);
 
     let (combined, quantization_sigma) = match method {
         CombineMethod::Median => {
             let sigma = sigmas.and_then(|sigmas| sigmas.combined_median(norms));
-            let combined = cache.process_chunked(None, planes, |values, w, _| {
-                let value = math::statistics::median_mut(values);
-                if measure_quality {
-                    CombinedSample::from_all(value, w)
-                } else {
-                    CombinedSample::value_only(value, values.len())
-                }
-            });
+            let combined =
+                cache.process_chunked(None, planes, config.min_survivors, |values, w, _| {
+                    let value = math::statistics::median_mut(values);
+                    if measure_quality {
+                        CombinedSample::from_all(value, w)
+                    } else {
+                        CombinedSample::value_only(value, values.len())
+                    }
+                });
             (combined, sigma)
         }
         CombineMethod::Mean(rejection) => {
@@ -377,8 +383,11 @@ pub(crate) fn run_stacking(
                         .expect("a validated stack has positive total weight");
                     let max_sigma = MaxSigma::seeded(all_survivors);
                     let frame_weights = weights.as_deref();
-                    let combined =
-                        cache.process_chunked(weights.as_deref(), planes, |values, w, scratch| {
+                    let combined = cache.process_chunked(
+                        weights.as_deref(),
+                        planes,
+                        config.min_survivors,
+                        |values, w, scratch| {
                             let sample = reduce(values, w, scratch);
                             if sample.survivor_count != frame_count {
                                 max_sigma.record(sigmas.combined_mean(
@@ -388,7 +397,8 @@ pub(crate) fn run_stacking(
                                 ));
                             }
                             sample
-                        });
+                        },
+                    );
                     (combined, max_sigma.get())
                 }
                 sigmas => {
@@ -396,7 +406,12 @@ pub(crate) fn run_stacking(
                         .filter(|_| winsorized)
                         .and_then(|sigmas| sigmas.conservative(norms));
                     (
-                        cache.process_chunked(weights.as_deref(), planes, reduce),
+                        cache.process_chunked(
+                            weights.as_deref(),
+                            planes,
+                            config.min_survivors,
+                            reduce,
+                        ),
                         sigma,
                     )
                 }

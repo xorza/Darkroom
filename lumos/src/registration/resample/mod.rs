@@ -3,12 +3,13 @@
 use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
+use std::slice;
 
-use crate::concurrency::JobScratchPool;
+use crate::concurrency::{JobScratchPool, UnsafeSendPtr};
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
-use crate::io::image::pixel_flags::Flags;
+use crate::io::image::pixel_flags::{Flags, PixelFlags, Reach};
 use crate::registration::config::WarpParams;
 use crate::registration::resample::masked_warp::MaskedSources;
 use crate::registration::resample::row_positions::RowPositions;
@@ -68,12 +69,7 @@ pub fn warp(image: &LinearImage, warp_transform: &WarpTransform, config: WarpPar
         image: LinearImage {
             metadata: image.metadata.clone(),
             pixels: buffers.pixels,
-            // The source's nulls are in `coverage` now, not here. A null spreads over the kernel
-            // footprint of every output pixel that reached it, so what comes out is a fraction per
-            // pixel rather than the yes-or-no a mask can hold — and the combine gates on that
-            // fraction. A mask here would be a second, coarser record able only to disagree with
-            // it.
-            flags: None,
+            flags: buffers.flags,
         },
         coverage: buffers.coverage,
         confidence: buffers.confidence,
@@ -95,6 +91,12 @@ pub(crate) struct WarpBuffers {
     pub(crate) pixels: LinearPixels,
     pub(crate) coverage: Buffer2<f32>,
     pub(crate) confidence: Buffer2<f32>,
+    /// The source's flags at each output pixel, for a source that carries any but `NO_DATA`: every
+    /// flag of a source pixel the kernel can read there. The source's nulls are in `coverage`
+    /// instead. A null spreads over the kernel footprint of every output pixel that reached it, so
+    /// what comes out is a fraction per pixel rather than a yes-or-no, and the combine gates on
+    /// that fraction.
+    pub(crate) flags: Option<PixelFlags>,
     pub(crate) rows: JobScratchPool<RowScratch>,
 }
 
@@ -112,6 +114,7 @@ impl WarpBuffers {
             pixels: LinearPixels::new_zeroed(dimensions),
             coverage: Buffer2::new_default(dimensions.width(), dimensions.height()),
             confidence: Buffer2::new_default(dimensions.width(), dimensions.height()),
+            flags: None,
             rows: JobScratchPool::default(),
         }
     }
@@ -154,6 +157,31 @@ impl WarpBuffers {
             .as_ref()
             .filter(|flags| flags.contains(Flags::NO_DATA))
             .map(|flags| MaskedSources::new(image, flags));
+        // Grown by the kernel's reach once, so each output pixel reads one byte at its source cell
+        // rather than one per tap: the cell's flags then cover `cell − radius + 1 ..= cell + radius`
+        // on both axes, the source pixels the kernel's window reads.
+        let source_flags = image
+            .flags
+            .as_ref()
+            .filter(|flags| flags.contains_other_than(Flags::NO_DATA))
+            .and_then(|flags| flags.without(Flags::NO_DATA))
+            .map(|mut flags| {
+                let radius = config.method.tap_radius();
+                flags.dilate_window(
+                    Reach {
+                        before: radius - 1,
+                        after: radius,
+                    },
+                    Flags::default(),
+                );
+                flags
+            });
+        let mut flag_plane = source_flags
+            .as_ref()
+            .map(|_| Buffer2::<u8>::new_default(width, size.height));
+        let flag_rows = flag_plane
+            .as_mut()
+            .map(|plane| UnsafeSendPtr::new(plane.pixels_mut().as_mut_ptr()));
 
         let warp_row = |scratch: &mut RowScratch,
                         y: usize,
@@ -163,6 +191,18 @@ impl WarpBuffers {
             scratch.positions.fill(y, width, warp_transform, size);
             let positions = scratch.positions.positions();
             quality::write_row(positions, size, config.method, coverage_row, confidence_row);
+            if let (Some(source), Some(rows)) = (&source_flags, flag_rows) {
+                // SAFETY: each output row is written by exactly one call, at its own offset.
+                let row = unsafe { slice::from_raw_parts_mut(rows.get().add(y * width), width) };
+                for (flag, position) in row.iter_mut().zip(positions) {
+                    *flag = position.map_or(0, |p| {
+                        // A footprint edge at −½ floors to cell −1.
+                        let x = (p.cell_x.max(0).unsigned_abs() as usize).min(size.width - 1);
+                        let y = (p.cell_y.max(0).unsigned_abs() as usize).min(size.height - 1);
+                        source.byte(y * width + x)
+                    });
+                }
+            }
             match &masked {
                 None => {
                     for (channel, output_row) in channel_rows.iter_mut().enumerate() {
@@ -191,6 +231,7 @@ impl WarpBuffers {
             coverage,
             confidence,
             rows,
+            ..
         } = self;
         let quality_rows = coverage
             .pixels_mut()
@@ -230,6 +271,7 @@ impl WarpBuffers {
                 ),
             _ => unreachable!("an image has one channel or three"),
         }
+        self.flags = flag_plane.and_then(PixelFlags::from_buffer);
     }
 }
 

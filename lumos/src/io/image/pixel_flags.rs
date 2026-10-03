@@ -36,6 +36,17 @@ impl Flags {
     /// vignetting asks.
     pub(crate) const FLAT_FLOOR: Self = Self(1 << 5);
 
+    /// The flags a stored byte holds.
+    #[inline]
+    pub(crate) const fn from_byte(byte: u8) -> Self {
+        Self(byte)
+    }
+
+    #[inline]
+    pub(crate) const fn byte(self) -> u8 {
+        self.0
+    }
+
     #[inline]
     pub(crate) const fn union(self, other: Self) -> Self {
         Self(self.0 | other.0)
@@ -112,14 +123,19 @@ impl PixelFlags {
         }
     }
 
-    /// OR every flag but `fixed` over the `(2·radius + 1)²` square around each pixel, clipped to the
+    /// [`Self::dilate_window`] over the square `radius` either side of each pixel.
+    pub(crate) fn dilate(&mut self, radius: usize, fixed: Flags) {
+        self.dilate_window(Reach::symmetric(radius), fixed);
+    }
+
+    /// OR every flag but `fixed` over the window `reach` spans around each pixel, clipped to the
     /// image: what an operation whose output at a pixel reads its inputs that far away does to the
     /// facts the inputs carried. `fixed` flags stay where they are.
     ///
     /// Separable, and each pass is van Herk–Gil-Werman: an OR over blocks of the window's length
     /// from both ends, so a pixel costs the same at any radius.
-    pub(crate) fn dilate(&mut self, radius: usize, fixed: Flags) {
-        if radius == 0 {
+    pub(crate) fn dilate_window(&mut self, reach: Reach, fixed: Flags) {
+        if reach.before == 0 && reach.after == 0 {
             return;
         }
         let Size2us { width, height } = self.size();
@@ -129,12 +145,12 @@ impl PixelFlags {
         horizontal
             .par_chunks_mut(width)
             .zip(source.par_chunks(width))
-            .for_each(|(out, row)| or_window(row, out, radius));
+            .for_each(|(out, row)| or_window(row, out, reach));
         // The vertical pass runs the same window over whole rows at once: a row is one element of
         // the column-wise sequence, and OR is element-wise.
         let mut prefix = horizontal.clone();
         let mut suffix = horizontal.clone();
-        let block = 2 * radius + 1;
+        let block = reach.len();
         for y in 1..height {
             if y % block != 0 {
                 let (before, current) = prefix.split_at_mut(y * width);
@@ -149,12 +165,7 @@ impl PixelFlags {
         }
         let bits = self.bits.pixels_mut();
         bits.par_chunks_mut(width).enumerate().for_each(|(y, out)| {
-            let parts = WindowParts::of(
-                y.saturating_sub(radius),
-                (y + radius).min(height - 1),
-                block,
-                height,
-            );
+            let parts = WindowParts::of(reach.window(y, height), block, height);
             let (from_suffix, from_prefix) = match parts {
                 WindowParts::Both { suffix, prefix } => (Some(suffix), Some(prefix)),
                 WindowParts::Prefix(at) => (None, Some(at)),
@@ -171,6 +182,30 @@ impl PixelFlags {
             }
         });
         self.counts = counts_of(self.bits.pixels());
+    }
+
+    /// Flags from a plane of their bytes; `None` when no pixel holds one.
+    pub(crate) fn from_buffer(bits: Buffer2<u8>) -> Option<Self> {
+        let flags = Self::from_plane(bits);
+        flags.counts.iter().any(|&count| count > 0).then_some(flags)
+    }
+
+    /// Whether any pixel holds a flag other than those in `except`.
+    pub(crate) fn contains_other_than(&self, except: Flags) -> bool {
+        self.counts
+            .iter()
+            .enumerate()
+            .any(|(bit, &count)| count > 0 && except.0 & (1 << bit) == 0)
+    }
+
+    /// The flags with those in `removed` cleared everywhere; `None` when nothing else remains.
+    pub(crate) fn without(&self, removed: Flags) -> Option<Self> {
+        let keep = !removed.0;
+        Self::from_buffer(Buffer2::new(
+            self.bits.width(),
+            self.bits.height(),
+            self.bits.pixels().iter().map(|&byte| byte & keep).collect(),
+        ))
     }
 
     /// Flags restored from the bytes [`Self::bytes`] holds, as a spill wrote them.
@@ -191,10 +226,20 @@ impl PixelFlags {
         self.bits.pixels()
     }
 
+    pub(crate) fn into_buffer(self) -> Buffer2<u8> {
+        self.bits
+    }
+
     /// The flags of the pixel at `index`, row-major.
     #[inline]
     pub(crate) fn at(&self, index: usize) -> Flags {
         Flags(self.bits.pixels()[index])
+    }
+
+    /// The raw byte of the pixel at `index`, for a copy that keeps every flag.
+    #[inline]
+    pub(crate) fn byte(&self, index: usize) -> u8 {
+        self.bits.pixels()[index]
     }
 
     #[inline]
@@ -267,10 +312,10 @@ fn or_into(target: &mut [u8], source: &[u8]) {
     }
 }
 
-/// `out[i]` = OR of `row[i − radius ..= i + radius]`, clipped to the row.
-fn or_window(row: &[u8], out: &mut [u8], radius: usize) {
+/// `out[i]` = OR of `row[i − reach.before ..= i + reach.after]`, clipped to the row.
+fn or_window(row: &[u8], out: &mut [u8], reach: Reach) {
     let len = row.len();
-    let block = 2 * radius + 1;
+    let block = reach.len();
     let mut prefix = row.to_vec();
     let mut suffix = row.to_vec();
     for i in 1..len {
@@ -284,12 +329,7 @@ fn or_window(row: &[u8], out: &mut [u8], radius: usize) {
         }
     }
     for (i, value) in out.iter_mut().enumerate() {
-        let parts = WindowParts::of(
-            i.saturating_sub(radius),
-            (i + radius).min(len - 1),
-            block,
-            len,
-        );
+        let parts = WindowParts::of(reach.window(i, len), block, len);
         *value = match parts {
             WindowParts::Both {
                 suffix: s,
@@ -299,6 +339,41 @@ fn or_window(row: &[u8], out: &mut [u8], radius: usize) {
             WindowParts::Suffix(at) => suffix[at],
         };
     }
+}
+
+/// How far a window reaches either side of the pixel it is for, along one axis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Reach {
+    pub(crate) before: usize,
+    pub(crate) after: usize,
+}
+
+impl Reach {
+    pub(crate) const fn symmetric(radius: usize) -> Self {
+        Self {
+            before: radius,
+            after: radius,
+        }
+    }
+
+    const fn len(self) -> usize {
+        self.before + self.after + 1
+    }
+
+    /// The window for position `i` of a sequence of `len`, clipped to it.
+    fn window(self, i: usize, len: usize) -> Span {
+        Span {
+            first: i.saturating_sub(self.before),
+            last: (i + self.after).min(len - 1),
+        }
+    }
+}
+
+/// An inclusive run of indices along one axis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Span {
+    first: usize,
+    last: usize,
 }
 
 /// Which block ORs make up the OR over a window `[first, last]` of a sequence of `len`, where
@@ -318,7 +393,7 @@ enum WindowParts {
 impl WindowParts {
     /// One block holds a shorter window only at the sequence's ends: one that starts at its
     /// block's start is a prefix, and one that ends at its block's clipped end is a suffix.
-    fn of(first: usize, last: usize, block: usize, len: usize) -> Self {
+    fn of(Span { first, last }: Span, block: usize, len: usize) -> Self {
         debug_assert!(last >= first && last - first < block && last < len);
         if first / block != last / block {
             return Self::Both {
@@ -368,7 +443,7 @@ pub(crate) mod internals {
 #[cfg(test)]
 mod tests {
     use crate::internals::test_rng::TestRng;
-    use crate::io::image::pixel_flags::{Flags, PixelFlags};
+    use crate::io::image::pixel_flags::{Flags, PixelFlags, Reach};
     use crate::math::size2us::Size2us;
 
     #[test]
@@ -413,14 +488,28 @@ mod tests {
         assert!(flags.contains(Flags::NO_DATA));
     }
 
-    /// The separable dilation equals the brute-force square OR, for every radius from 1 to past the
-    /// image and for widths and heights that do not divide into blocks; `NO_DATA` does not spread.
+    /// The separable dilation equals the brute-force window OR, for symmetric reaches from 1 to past
+    /// the image and for the one-sided kernel reach a warp needs, on widths and heights that do not
+    /// divide into blocks; `NO_DATA` does not spread.
     #[test]
-    fn dilation_matches_the_brute_force_square() {
+    fn dilation_matches_the_brute_force_window() {
         let mut rng = TestRng::new(7);
         for (width, height) in [(1usize, 1usize), (7, 5), (13, 17), (32, 3)] {
             let size = Size2us::new(width, height);
-            for radius in [1usize, 2, 3, 6, 40] {
+            for reach in [1usize, 2, 3, 6, 40]
+                .map(Reach::symmetric)
+                .into_iter()
+                .chain([
+                    Reach {
+                        before: 2,
+                        after: 3,
+                    },
+                    Reach {
+                        before: 0,
+                        after: 1,
+                    },
+                ])
+            {
                 let initial: Vec<Flags> = (0..size.pixel_count())
                     .map(|_| match rng.next_u64() % 9 {
                         0 => Flags::SATURATED,
@@ -431,12 +520,14 @@ mod tests {
                 let Some(mut flags) = PixelFlags::from_fn(size, |index| initial[index]) else {
                     continue;
                 };
-                flags.dilate(radius, Flags::NO_DATA);
+                flags.dilate_window(reach, Flags::NO_DATA);
                 for y in 0..height {
                     for x in 0..width {
                         let near = |flag: Flags| {
-                            (y.saturating_sub(radius)..=(y + radius).min(height - 1)).any(|sy| {
-                                (x.saturating_sub(radius)..=(x + radius).min(width - 1))
+                            let rows = reach.window(y, height);
+                            let columns = reach.window(x, width);
+                            (rows.first..=rows.last).any(|sy| {
+                                (columns.first..=columns.last)
                                     .any(|sx| initial[sy * width + sx] == flag)
                             })
                         };
@@ -455,7 +546,7 @@ mod tests {
                         assert_eq!(
                             flags.at(index),
                             expected,
-                            "{width}x{height}, radius {radius}, ({x}, {y})"
+                            "{width}x{height}, {reach:?}, ({x}, {y})"
                         );
                     }
                 }

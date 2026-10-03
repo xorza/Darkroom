@@ -183,6 +183,14 @@ fn validate_invalid_config_returns_exact_errors() {
         (StackConfig::sigma_clipped(-1.0), "sigma_low", -1.0),
         (
             StackConfig {
+                min_survivors: 0,
+                ..Default::default()
+            },
+            "min_survivors",
+            0.0,
+        ),
+        (
+            StackConfig {
                 method: CombineMethod::Mean(Rejection::sigma_clip_asymmetric(2.0, f32::INFINITY)),
                 ..Default::default()
             },
