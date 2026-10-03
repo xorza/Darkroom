@@ -24,11 +24,6 @@ Severity: Low — `Option`s that must be `Some`, sentinels, and caches of comput
 
 - [ ] `darkroom` — `gui/frame/geometry/mod.rs` `PortLayer::record`/`snapshot` `node_min: Option<Vec2>` is always `Some`; `widgets/port_glyph.rs` `PortGlyph::new` defaults the fill to a `WHITE` every caller overrides; `theme/card_theme.rs` `CardBorder` is a one-field wrapper whose only caller reads `.color`; `Theme` derives serde (only a test uses it) and serializes derived values (`const_value_editor_revealed`, `inline_rename_title`, `menu_button`, `palantir_theme`) beside their sources; `Theme::build` stores `text: TypeScale::DEFAULT` and passes a separate `&TypeScale::DEFAULT` to `palantir_theme_for` / `menu_button_for`.
 
-## darkroom core keeps containers and checks it does not need
-Severity: Low.
-
-- [ ] Small duplications: `core/document/mod.rs` `GraphView::validate` counts placements with a loop (`item_placements.len()`); `core/io/document/mod.rs` writes size and extension checks twice, once per error enum, in opposite control-flow styles.
-
 ## darkroom GUI repeats per-frame lookups and theme values
 Severity: Low.
 

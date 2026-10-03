@@ -18,7 +18,7 @@ const MAX_DOCUMENT_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum DocumentLoadError {
-    #[error("{path} must use the .darkroom extension", path = .path.display())]
+    #[error("{path} must use the .{EXTENSION} extension", path = .path.display())]
     InvalidExtension { path: PathBuf },
     #[error("{path}: {source}", path = .path.display())]
     Open {
@@ -164,7 +164,12 @@ pub(crate) fn load(path: &Path) -> Result<Document, DocumentLoadError> {
             path: path.to_path_buf(),
         });
     }
-    ensure_load_document_size(path, entry.size())?;
+    if !fits(entry.size()) {
+        return Err(DocumentLoadError::DocumentTooLarge {
+            path: path.to_path_buf(),
+            size: entry.size(),
+        });
+    }
 
     let mut encoded = Vec::with_capacity(entry.size() as usize);
     (&mut entry)
@@ -174,7 +179,12 @@ pub(crate) fn load(path: &Path) -> Result<Document, DocumentLoadError> {
             path: path.to_path_buf(),
             source,
         })?;
-    ensure_load_document_size(path, encoded.len() as u64)?;
+    if !fits(encoded.len() as u64) {
+        return Err(DocumentLoadError::DocumentTooLarge {
+            path: path.to_path_buf(),
+            size: encoded.len() as u64,
+        });
+    }
 
     let document: Document = common::deserialize(&encoded, SerdeFormat::Ron).map_err(|source| {
         DocumentLoadError::DeserializeDocument {
@@ -192,7 +202,11 @@ pub(crate) fn load(path: &Path) -> Result<Document, DocumentLoadError> {
 }
 
 pub(crate) fn save(document: &Document, path: &Path) -> Result<(), DocumentSaveError> {
-    ensure_extension(path)?;
+    if !has_extension(path) {
+        return Err(DocumentSaveError::InvalidExtension {
+            path: path.to_path_buf(),
+        });
+    }
     document
         .validate()
         .map_err(|source| DocumentSaveError::InvalidDocument {
@@ -206,7 +220,12 @@ pub(crate) fn save(document: &Document, path: &Path) -> Result<(), DocumentSaveE
             source,
         }
     })?;
-    ensure_save_document_size(path, encoded.len() as u64)?;
+    if !fits(encoded.len() as u64) {
+        return Err(DocumentSaveError::DocumentTooLarge {
+            path: path.to_path_buf(),
+            size: encoded.len() as u64,
+        });
+    }
 
     file_utils::publish(path, file_utils::PublicationMode::Durable, |file| {
         write_archive(file, &encoded)
@@ -224,41 +243,16 @@ pub(crate) fn with_extension(mut path: PathBuf) -> PathBuf {
     path
 }
 
-fn ensure_extension(path: &Path) -> Result<(), DocumentSaveError> {
-    if has_extension(path) {
-        Ok(())
-    } else {
-        Err(DocumentSaveError::InvalidExtension {
-            path: path.to_path_buf(),
-        })
-    }
-}
-
 fn has_extension(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| extension.eq_ignore_ascii_case(EXTENSION))
 }
 
-fn ensure_save_document_size(path: &Path, size: u64) -> Result<(), DocumentSaveError> {
-    if size <= MAX_DOCUMENT_BYTES {
-        Ok(())
-    } else {
-        Err(DocumentSaveError::DocumentTooLarge {
-            path: path.to_path_buf(),
-            size,
-        })
-    }
-}
-
-fn ensure_load_document_size(path: &Path, size: u64) -> Result<(), DocumentLoadError> {
-    if size > MAX_DOCUMENT_BYTES {
-        return Err(DocumentLoadError::DocumentTooLarge {
-            path: path.to_path_buf(),
-            size,
-        });
-    }
-    Ok(())
+/// Whether a `size`-byte document entry is within the limit — the one
+/// predicate a load and a save both hold an entry to.
+const fn fits(size: u64) -> bool {
+    size <= MAX_DOCUMENT_BYTES
 }
 
 fn write_archive(file: &mut File, encoded: &[u8]) -> io::Result<()> {
