@@ -305,10 +305,10 @@ impl GraphView {
 /// positioning it, and the pane layout showing it. The `Library` it resolves
 /// against lives one level up on `App` (runtime-owned).
 ///
-/// The two halves are public because a caller that touches both wants them
+/// The fields are public because a caller that touches several wants them
 /// borrowed together, and destructuring is what proves they are disjoint —
-/// a pair of accessor methods would each borrow the whole `Document` and
-/// couldn't be held at once.
+/// accessor methods would each borrow the whole `Document` and couldn't be
+/// held at once.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Document {
     pub(crate) graph: CoreGraph,

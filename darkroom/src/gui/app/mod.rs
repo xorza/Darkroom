@@ -40,7 +40,7 @@ use session::Session;
 /// evaluating it, and lends the document to the [`Session`] that authors each
 /// frame. `App` also owns preferences, dialogs, theme, and exit policy.
 /// `update` drains external queues once, while replayable `record` runs
-/// `Editor::frame` and handles actions only in the pass that receives input.
+/// `Session::frame` and handles actions only in the pass that receives input.
 #[derive(Debug)]
 pub(crate) struct App {
     /// The document being edited and the UI showing it — replaced as a unit
@@ -247,7 +247,7 @@ impl App {
         }
     }
 
-    /// Run a transition the guard cleared. `Load` picks its file here
+    /// Run a transition the guard cleared. `OpenPicked` picks its file here
     /// rather than before the prompt, so a cancelled prompt doesn't leave
     /// the user having chosen a file for nothing.
     fn perform(&mut self, transition: PendingTransition) {
@@ -334,12 +334,12 @@ impl App {
 
     /// Open a file dialog for a node's `FsPath` const input and, if the
     /// user makes a selection, apply the chosen paths as a `SetInput` edit. Runs after
-    /// authoring, so it goes through `Editor::apply_edit` rather than the
-    /// frame's intent drain.
+    /// authoring, so it goes through `OpenDocument::apply_edit` rather than
+    /// the frame's intent drain.
     ///
     /// Reports the edit's relayout need rather than acting on it — this runs
-    /// after `Editor::frame` has handed its own back, and `App::frame` spends
-    /// both together.
+    /// after `Session::frame` has handed its own back, and `App::record`
+    /// spends both together.
     #[must_use]
     fn pick_input_path(&mut self, pick: &PathPick) -> Relayout {
         let extensions: Vec<&str> = pick.config.extensions.iter().map(String::as_str).collect();

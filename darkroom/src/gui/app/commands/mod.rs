@@ -53,7 +53,7 @@ impl AppCommand {
     ///
     /// Returns whether the command stranded the canvas's cached geometry.
     /// Only an edit can — the rest touch state no canvas measures against —
-    /// but it is reported rather than requested here so that `App::frame`
+    /// but it is reported rather than requested here so that `App::record`
     /// stays the one place in the app that asks for a relayout.
     #[must_use]
     pub(super) fn apply(self, app: &mut App) -> Relayout {
