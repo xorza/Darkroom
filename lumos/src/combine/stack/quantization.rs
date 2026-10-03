@@ -2,14 +2,13 @@
 //!
 //! Each input frame may declare the σ of its own digitization; what the stack inherits depends on
 //! how its samples were reduced. A weighted mean of independent sources combines them in
-//! quadrature; a median is not a linear combination, so it gets the order-statistic factor when
-//! every source shares one σ and a conservative bound otherwise; and Winsorization, which
-//! replaces samples with order statistics, has no fixed coefficient set to propagate through at
-//! all.
+//! quadrature, over the frames that survived rejection; a median is not a linear combination, so
+//! it gets the order-statistic factor when every source shares one σ and a conservative bound
+//! otherwise.
 //!
-//! Rejection keeps a different survivor set at every pixel, so the figure the master carries is
-//! the least-reduced pixel's — seeded from "nothing rejected" and raised wherever a pixel lost
-//! frames, which is what [`MaxSigma`] accumulates.
+//! Rejection and coverage keep a different set of frames at every pixel, so the figure the master
+//! carries is the least-reduced pixel's — seeded from every frame and raised wherever a pixel had
+//! fewer, which is what [`MaxSigma`] accumulates.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -37,33 +36,41 @@ impl SourceSigmas {
             .map(Self)
     }
 
-    /// Frames combine in quadrature under the weights and gains they were actually combined with,
-    /// so a weighted mean over `survivor_indices` carries `√Σ(wᵢ·gainᵢ·σᵢ)² / Σwᵢ`.
+    /// Frames combine in quadrature under the weights and the gains of `channel` they were actually
+    /// combined with, so a weighted mean over `survivor_indices` carries `√Σ(wᵢ·gainᵢ·σᵢ)² / Σwᵢ`.
     pub(super) fn combined_mean(
         &self,
         weights: Option<&[f32]>,
         frame_norms: Option<&[FrameNorm]>,
+        channel: usize,
         survivor_indices: impl IntoIterator<Item = usize>,
     ) -> Option<f32> {
         let mut total_weight = 0.0f32;
         let mut variance = 0.0f32;
         for index in survivor_indices {
             let weight = weights.map_or(1.0, |values| values[index]);
-            let gain = frame_norms.map_or(1.0, |norms| norms[index].channels[0].gain);
+            let gain = frame_norms.map_or(1.0, |norms| norms[index].channels[channel].gain);
             total_weight += weight;
             variance += (weight * gain * self.0[index]).powi(2);
         }
         (total_weight > 0.0).then(|| variance.sqrt() / total_weight)
     }
 
-    /// The largest σ any frame contributes once normalization has scaled it — the bound to fall
-    /// back on when the reduction has no fixed linear coefficients to propagate through.
+    /// The largest σ any frame contributes in any channel once normalization has scaled it — the
+    /// bound to fall back on when the reduction has no fixed linear coefficients to propagate
+    /// through.
     pub(super) fn conservative(&self, frame_norms: Option<&[FrameNorm]>) -> Option<f32> {
         self.0
             .iter()
             .enumerate()
             .map(|(index, sigma)| {
-                frame_norms.map_or(*sigma, |norms| norms[index].channels[0].gain.abs() * sigma)
+                frame_norms.map_or(*sigma, |norms| {
+                    norms[index]
+                        .channels
+                        .iter()
+                        .map(|channel| channel.gain.abs() * sigma)
+                        .fold(0.0, f32::max)
+                })
             })
             .reduce(f32::max)
     }
@@ -195,15 +202,18 @@ mod tests {
     ///   σ·√(3/5). Unequal sources fall back on the largest σ.
     /// - Normalized, a median takes the largest gain-scaled σ, by magnitude: gains −2 and 1 on σ 1/4
     ///   give 1/2.
+    /// - Each channel takes its own gain: two frames of σ 1/4 with gains 1 and 2 in channels 0 and 1
+    ///   give √(2·(1/4)²)/2 = √2/8 in channel 0 and √(2·(1/2)²)/2 = √2/4 in channel 1, and the
+    ///   conservative bound takes channel 1's 1/2.
     #[test]
     fn combined_sigmas_follow_the_reduction() {
         let sigma = 0.25f32;
         let equal = SourceSigmas(vec![sigma; 4]);
-        assert_eq!(equal.combined_mean(None, None, 0..4), Some(sigma / 2.0));
+        assert_eq!(equal.combined_mean(None, None, 0, 0..4), Some(sigma / 2.0));
 
         let unequal = SourceSigmas(vec![0.5, 1.0]);
         assert_eq!(
-            unequal.combined_mean(Some(&[0.75, 0.25]), None, 0..2),
+            unequal.combined_mean(Some(&[0.75, 0.25]), None, 0, 0..2),
             Some(0.203_125f32.sqrt())
         );
         assert_eq!(unequal.combined_median(None), Some(1.0));
@@ -224,7 +234,26 @@ mod tests {
         );
         assert_eq!(scaled.conservative(Some(&norms(&[-2.0, 1.0]))), Some(0.5));
         // No survivors carry no weight, and so no figure.
-        assert_eq!(scaled.combined_mean(None, None, 0..0), None);
+        assert_eq!(scaled.combined_mean(None, None, 0, 0..0), None);
+
+        let two_channels: Vec<FrameNorm> = (0..2)
+            .map(|_| FrameNorm {
+                channels: [1.0, 2.0]
+                    .into_iter()
+                    .map(|gain| ChannelNorm { gain, offset: 0.0 })
+                    .collect(),
+            })
+            .collect();
+        let pair = SourceSigmas(vec![sigma; 2]);
+        assert_eq!(
+            pair.combined_mean(None, Some(&two_channels), 0, 0..2),
+            Some(2.0f32.sqrt() / 8.0)
+        );
+        assert_eq!(
+            pair.combined_mean(None, Some(&two_channels), 1, 0..2),
+            Some(2.0f32.sqrt() / 4.0)
+        );
+        assert_eq!(pair.conservative(Some(&two_channels)), Some(0.5));
     }
 
     /// The running maximum of the pixels' σ, ordered by the floats' bits: a smaller σ or none

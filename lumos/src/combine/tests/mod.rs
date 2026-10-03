@@ -169,7 +169,7 @@ fn all_rejection_methods_remove_outliers() {
         ("sigma_clip", StackConfig::sigma_clipped(2.5)),
         ("winsorized", StackConfig::winsorized(2.5)),
         ("linear_fit", StackConfig::linear_fit(2.5)),
-        ("percentile", StackConfig::percentile(20.0)),
+        ("trim", StackConfig::trim(20.0)),
         ("gesd", StackConfig::gesd()),
         ("median", StackConfig::median()),
     ];

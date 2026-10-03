@@ -21,7 +21,7 @@ pub enum CombineMethod {
 }
 
 /// Default frames below which sigma-clip and linear-fit rejection are too unreliable to trust and
-/// the combine falls back to the median. GESD has its own stricter floor; Winsorized/Percentile are
+/// the combine falls back to the median. GESD has its own stricter floor; Winsorized and Trim are
 /// stable at smaller N.
 const MIN_FRAMES_FOR_REJECTION: usize = 5;
 const MIN_FRAMES_FOR_GESD: usize = 15;
@@ -40,8 +40,8 @@ pub struct SmallN {
 }
 
 impl SmallN {
-    /// No fallback — the method is reliable at any frame count (Winsorized, Percentile, Median,
-    /// plain mean).
+    /// No fallback — the method is reliable at any frame count (Winsorized, Trim, Median, plain
+    /// mean).
     pub const fn none() -> Self {
         Self {
             min_frames: 0,
@@ -251,11 +251,11 @@ impl StackConfig {
         }
     }
 
-    /// Preset: percentile clipping (simple, for small stacks <10).
-    pub fn percentile(percent: f32) -> Self {
+    /// Preset: a trimmed mean, dropping `percent` of the samples from each end.
+    pub fn trim(percent: f32) -> Self {
         Self {
-            method: CombineMethod::Mean(Rejection::percentile(percent)),
-            // Percentile clips a fixed fraction — stable at small N, no median fallback.
+            method: CombineMethod::Mean(Rejection::trim(percent)),
+            // A trim measures no spread, so a small stack needs no median fallback.
             small_n: SmallN::none(),
             ..Default::default()
         }

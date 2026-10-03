@@ -3,10 +3,12 @@
 use serde::{Deserialize, Serialize};
 
 use crate::math::statistics::float::Float;
+use crate::math::statistics::spread::Spread;
 use crate::math::sum::mean_f32;
 use std::iter;
 
 pub(crate) mod float;
+pub(crate) mod spread;
 pub(crate) mod subsample;
 
 /// A distribution's location and spread — what one pass over the values measures.
@@ -319,13 +321,7 @@ fn sigma_clip_iteration(
     let mad = median_fast(&mut deviations[..*len]);
     let sigma = mad_to_sigma(mad);
 
-    // Degenerate against the data's own magnitude, not against a fixed number: one `f32` step at
-    // `median` is the smallest spread the samples can even represent, so a σ below it is genuinely
-    // unmeasurable — whatever span the decoder divided by. A bare `sigma < f32::EPSILON` instead
-    // declares any frame whose whole noise range sits under 1.2e-7 to be flat, which is what a
-    // 32-bit integer FITS becomes once it is normalized, and hands back a zero σ that collapses
-    // every threshold built from it.
-    if sigma <= median.abs() * f32::EPSILON {
+    if sigma <= Spread::resolution(median) {
         return ClipResult::Converged(MedianMad { median, mad: 0.0 });
     }
 

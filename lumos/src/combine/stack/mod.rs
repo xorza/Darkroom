@@ -14,12 +14,12 @@ use common::CancelToken;
 use imaginarium::Buffer2;
 
 use crate::combine::cache::core::{CacheCore, CacheTier};
-use crate::combine::cache::sample::CombinedSample;
-use crate::combine::cache::{CombineOutput, FrameCache};
+use crate::combine::cache::sample::{CombinedSample, PixelSamples};
+use crate::combine::cache::sample_noise::SampleNoise;
+use crate::combine::cache::{CombineOutput, CombineRequest, FrameCache};
 use crate::combine::config::{CombineMethod, StackConfig, Weighting};
 use crate::combine::error::{Error, StackConfigError};
 use crate::combine::normalization::FrameNorm;
-use crate::combine::rejection::Rejection;
 use crate::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::combine::stack::quantization::{MaxSigma, SourceSigmas};
 use crate::frame_store::frame_quality::FrameQuality;
@@ -334,87 +334,82 @@ pub(crate) fn run_stacking(
     let planes = config.quality.resolve(weighted_combine);
     let measure_quality = planes.weight || planes.variance;
 
-    let source_sigmas = SourceSigmas::measure(stats());
-    // Propagating quantization noise through rejection needs each surviving sample's *frame*
-    // index, to reach that frame's source sigma and normalization gain. Under partial coverage
-    // the reducer sees a compacted subset whose indices no longer name frames, so the tracking is
-    // limited to frame sets where every frame contributes at every pixel.
-    //
-    // Coverage is not only the warp's: a frame whose source declared pixels with no measurement
-    // carries it too, so one edge-masked panel costs the whole set its sigma propagation. Blunt
-    // but not wrong — the compaction that breaks the mapping is the same either way.
-    //
-    // Flags compact the gathered samples the same way, wherever a flagged sample is left out.
-    let frame_indices_are_stable = cache
-        .frames
-        .iter()
-        .all(|frame| frame.quality.is_none() && frame.flags.is_none());
-    let sigmas = source_sigmas.filter(|_| frame_indices_are_stable);
+    let sigmas = SourceSigmas::measure(stats());
+    let min_survivors = config.min_survivors;
 
     let (combined, quantization_sigma) = match method {
         CombineMethod::Median => {
             let sigma = sigmas.and_then(|sigmas| sigmas.combined_median(norms));
-            let combined =
-                cache.process_chunked(None, planes, config.min_survivors, |values, w, _| {
-                    let value = math::statistics::median_mut(values);
-                    if measure_quality {
-                        CombinedSample::from_all(value, w)
-                    } else {
-                        CombinedSample::value_only(value, values.len())
-                    }
-                });
+            let request = CombineRequest {
+                weights: None,
+                planes,
+                min_survivors,
+                noise: None,
+            };
+            let combined = cache.process_chunked(request, |samples, _| {
+                let value = math::statistics::median_mut(samples.values);
+                if measure_quality {
+                    CombinedSample::from_all(value, samples.weights)
+                } else {
+                    CombinedSample::value_only(value, samples.values.len())
+                }
+            });
             (combined, sigma)
         }
         CombineMethod::Mean(rejection) => {
-            let reduce = move |values: &mut [f32], w: &[f32], scratch: &mut ScratchBuffers| {
-                rejection.combine_mean(values, w, scratch, measure_quality)
+            let noise = rejection.measures_spread().then(|| {
+                SampleNoise::new(stats(), norms, cache.frames[0].source_stats.facts.cfa_type)
+            });
+            let request = CombineRequest {
+                weights: weights.as_deref(),
+                planes,
+                min_survivors,
+                noise: noise.as_ref(),
             };
-            // Winsorization replaces samples with order statistics, so it has no fixed linear
-            // coefficient set to propagate quantization variance through: it takes the
-            // conservative bound instead of tracking survivors.
-            let winsorized = matches!(rejection, Rejection::Winsorized(_));
+            let reduce = move |samples: PixelSamples<'_>, scratch: &mut ScratchBuffers| {
+                rejection.combine_mean(samples, min_survivors, scratch, measure_quality)
+            };
             match sigmas {
-                Some(sigmas) if !winsorized => {
-                    // Rejection keeps a different survivor set at every pixel, so the master's
-                    // floor is the least-reduced pixel: seed with "nothing rejected" and raise it
-                    // wherever a pixel lost frames.
-                    let all_survivors = sigmas
-                        .combined_mean(weights.as_deref(), norms, 0..frame_count)
-                        .expect("a validated stack has positive total weight");
-                    let max_sigma = MaxSigma::seeded(all_survivors);
+                Some(sigmas) => {
+                    // Rejection and coverage keep a different set of frames at every pixel, so the
+                    // master's figure is the least-reduced pixel's: seed with every frame and raise
+                    // it wherever a pixel had fewer.
                     let frame_weights = weights.as_deref();
-                    let combined = cache.process_chunked(
-                        weights.as_deref(),
-                        planes,
-                        config.min_survivors,
-                        |values, w, scratch| {
-                            let sample = reduce(values, w, scratch);
-                            if sample.survivor_count != frame_count {
-                                max_sigma.record(sigmas.combined_mean(
+                    let all_frames = (0..cache.core.dimensions.channels())
+                        .map(|channel| {
+                            sigmas
+                                .combined_mean(frame_weights, norms, channel, 0..frame_count)
+                                .expect("a validated stack has positive total weight")
+                        })
+                        .fold(0.0, f32::max);
+                    let max_sigma = MaxSigma::seeded(all_frames);
+                    let combined = cache.process_chunked(request, |samples, scratch| {
+                        let PixelSamples {
+                            frame_ids, channel, ..
+                        } = samples;
+                        let sample = reduce(samples, scratch);
+                        if sample.survivor_count != frame_count {
+                            let frame = |position: &u32| frame_ids[*position as usize] as usize;
+                            max_sigma.record(match scratch.survivor_positions() {
+                                Some(positions) => sigmas.combined_mean(
                                     frame_weights,
                                     norms,
-                                    scratch.indices[..sample.survivor_count].iter().copied(),
-                                ));
-                            }
-                            sample
-                        },
-                    );
+                                    channel,
+                                    positions.iter().map(frame),
+                                ),
+                                None => sigmas.combined_mean(
+                                    frame_weights,
+                                    norms,
+                                    channel,
+                                    frame_ids.iter().map(|&id| id as usize),
+                                ),
+                            });
+                        }
+                        sample
+                    });
                     (combined, max_sigma.get())
                 }
-                sigmas => {
-                    let sigma = sigmas
-                        .filter(|_| winsorized)
-                        .and_then(|sigmas| sigmas.conservative(norms));
-                    (
-                        cache.process_chunked(
-                            weights.as_deref(),
-                            planes,
-                            config.min_survivors,
-                            reduce,
-                        ),
-                        sigma,
-                    )
-                }
+                None => (cache.process_chunked(request, reduce), None),
             }
         }
     };

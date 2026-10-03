@@ -4,6 +4,7 @@ pub(crate) mod core;
 pub(crate) mod frame_check;
 mod loader;
 pub(crate) mod sample;
+pub(crate) mod sample_noise;
 pub(crate) mod set_facts;
 
 use common::CancelToken;
@@ -13,7 +14,10 @@ use rayon::prelude::*;
 use crate::combine::cache::core::{CacheCore, CacheTier, ChunkContext};
 use crate::combine::cache::frame_check::FrameCheck;
 use crate::combine::cache::loader::LoadedCache;
-use crate::combine::cache::sample::{CombineScratch, CombinedSample};
+use crate::combine::cache::sample::{
+    CombineScratch, CombinedSample, GatheredSamples, PixelSamples,
+};
+use crate::combine::cache::sample_noise::SampleNoise;
 use crate::combine::cache::set_facts::SetFacts;
 use crate::combine::config::{Normalization, StackConfig};
 use crate::combine::error::Error;
@@ -31,6 +35,7 @@ use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::pixel_flags::{Flags, PixelFlags};
+use crate::math::vec2us::Vec2us;
 use crate::memory::ChunkMemoryLayout;
 use crate::memory::run_memory::RunMemory;
 use crate::progress::ProgressCallback;
@@ -54,14 +59,6 @@ pub(crate) struct CombineOutput {
     report: RunReport,
 }
 
-/// The flags a combine leaves a sample out for, while enough unflagged samples remain: each says
-/// the value is not the photosite's own measurement.
-const SOFT_EXCLUDED: Flags = Flags::SATURATED
-    .union(Flags::DEFECT)
-    .union(Flags::COSMIC_RAY)
-    .union(Flags::REPAIRED)
-    .union(Flags::FLAT_FLOOR);
-
 /// The output rows one combine row-task writes: the combined value, plus whichever ancillary
 /// planes were requested. Bundling them keeps one gather loop instead of one per plane subset.
 #[derive(Debug)]
@@ -70,6 +67,17 @@ struct QualityRows<'a> {
     weight: Option<&'a mut [f32]>,
     linear_variance: Option<&'a mut [f32]>,
     flags: Option<&'a mut [u8]>,
+}
+
+/// What a combine pass gathers beside the samples, and how many samples it keeps at the least.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CombineRequest<'a> {
+    /// Per-frame weights; `None` weighs every frame equally.
+    pub(crate) weights: Option<&'a [f32]>,
+    pub(crate) planes: QualityPlanes,
+    pub(crate) min_survivors: usize,
+    /// The frames' noise, for a reducer that measures a spread; `None` gathers no noise.
+    pub(crate) noise: Option<&'a SampleNoise>,
 }
 
 /// The frames feeding one combine, with their normalization parameters. Calibration masters and
@@ -83,46 +91,6 @@ pub(crate) struct FrameCache {
     /// normalization the cache was built with; `None` when every frame is combined as it stands.
     pub(crate) frame_norms: Option<Vec<FrameNorm>>,
     pub(crate) core: CacheCore,
-}
-
-/// Leave out the samples whose flags [`SOFT_EXCLUDED`] names, keeping the rest in order with
-/// their weights and flags, when at least `min_survivors` unflagged samples remain; otherwise keep
-/// every sample. Returns how many samples stay at the front, and counts each flagged sample as
-/// left out or as kept.
-fn leave_out_flagged(
-    values: &mut [f32],
-    weights: &mut [f32],
-    flags: &mut [u8],
-    min_survivors: usize,
-    excluded: &mut LocalFlagCounts,
-    kept_flagged: &mut LocalFlagCounts,
-) -> usize {
-    let flagged = flags
-        .iter()
-        .filter(|&&byte| Flags::from_byte(byte).intersects(SOFT_EXCLUDED))
-        .count();
-    if flagged == 0 {
-        return values.len();
-    }
-    if values.len() - flagged < min_survivors {
-        for &byte in flags.iter() {
-            kept_flagged.count(Flags::from_byte(byte));
-        }
-        return values.len();
-    }
-    let mut write = 0;
-    for read in 0..values.len() {
-        let sample_flags = Flags::from_byte(flags[read]);
-        if sample_flags.intersects(SOFT_EXCLUDED) {
-            excluded.count(sample_flags);
-        } else {
-            values[write] = values[read];
-            weights[write] = weights[read];
-            flags[write] = flags[read];
-            write += 1;
-        }
-    }
-    write
 }
 
 impl FrameCache {
@@ -341,14 +309,18 @@ impl FrameCache {
     /// loop. A pixel no frame supports gets `0`.
     pub(crate) fn process_chunked<Combine>(
         &self,
-        weights: Option<&[f32]>,
-        planes: QualityPlanes,
-        min_survivors: usize,
+        request: CombineRequest<'_>,
         combine: Combine,
     ) -> CombineOutput
     where
-        Combine: Fn(&mut [f32], &[f32], &mut ScratchBuffers) -> CombinedSample + Sync,
+        Combine: Fn(PixelSamples<'_>, &mut ScratchBuffers) -> CombinedSample + Sync,
     {
+        let CombineRequest {
+            weights,
+            planes,
+            min_survivors,
+            noise,
+        } = request;
         if let Some(w) = weights {
             assert_eq!(
                 w.len(),
@@ -388,6 +360,7 @@ impl FrameCache {
                 } = ctx;
                 let frame_count = frames.len();
                 let chunk_pixels = output_slice.len();
+                debug_assert_eq!(pixel_offset % width, 0, "a chunk starts at a row");
                 // Per-frame support and confidence slices; `None` means full support/unit
                 // confidence.
                 let chunk_end = pixel_offset + chunk_pixels;
@@ -460,13 +433,24 @@ impl FrameCache {
                             values,
                             eff_weights,
                             sample_flags,
+                            frame_ids,
+                            noise_variances,
                             buffers,
                         } = &mut **scratch;
+                        let values = values.as_mut_slice();
+                        let eff_weights = eff_weights.as_mut_slice();
+                        let sample_flags = sample_flags.as_mut_slice();
+                        let frame_ids = frame_ids.as_mut_slice();
+                        let noise_variances = noise_variances.as_mut_slice();
                         let mut row_excluded = LocalFlagCounts::default();
                         let mut row_kept = LocalFlagCounts::default();
                         let row_offset = row_in_chunk * width;
+                        let y = pixel_offset / width + row_in_chunk;
                         for pixel_in_row in 0..width {
                             let pixel_idx = row_offset + pixel_in_row;
+                            let noise_slot = noise.map(|noise| {
+                                (noise, noise.slot(channel, Vec2us::new(pixel_in_row, y)))
+                            });
                             let mut covered = 0usize;
                             for (frame_idx, chunk) in frames.iter().enumerate() {
                                 let support = match coverage[frame_idx] {
@@ -490,14 +474,25 @@ impl FrameCache {
                                         weights.map_or(1.0, |w| w[frame_idx]) * q;
                                     sample_flags[covered] =
                                         flags[frame_idx].map_or(0, |plane| plane[pixel_idx]);
+                                    frame_ids[covered] = frame_idx as u32;
+                                    if let Some((noise, slot)) = noise_slot {
+                                        // Confidence is the warp's inverse variance factor.
+                                        noise_variances[covered] =
+                                            noise.variance(frame_idx, slot) / q;
+                                    }
                                     covered += 1;
                                 }
                             }
                             let kept = if any_flags {
-                                leave_out_flagged(
-                                    &mut values[..covered],
-                                    &mut eff_weights[..covered],
-                                    &mut sample_flags[..covered],
+                                GatheredSamples {
+                                    values: &mut *values,
+                                    eff_weights: &mut *eff_weights,
+                                    sample_flags: &mut *sample_flags,
+                                    frame_ids: &mut *frame_ids,
+                                    noise_variances: &mut *noise_variances,
+                                }
+                                .leave_out_flagged(
+                                    covered,
                                     min_survivors,
                                     &mut row_excluded,
                                     &mut row_kept,
@@ -512,7 +507,16 @@ impl FrameCache {
                                     values[..kept].iter().all(|v| v.is_finite()),
                                     "non-finite pixel value entered the combine",
                                 );
-                                combine(&mut values[..kept], &eff_weights[..kept], buffers)
+                                combine(
+                                    PixelSamples {
+                                        values: &mut values[..kept],
+                                        weights: &eff_weights[..kept],
+                                        frame_ids: &frame_ids[..kept],
+                                        noise_variances: noise.map(|_| &noise_variances[..kept]),
+                                        channel,
+                                    },
+                                    buffers,
+                                )
                             };
                             if let Some(row_flags) = row.flags.as_deref_mut() {
                                 let pixel_flags = if covered == 0 {
