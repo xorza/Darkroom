@@ -1,24 +1,15 @@
 //! The structural pass: one backward post-order DFS from the run's roots that
 //! fills a [`RunSchedule`]'s order and per-node verdicts. The scratch it walks
-//! with — the coloring and the work stack — lives on the [`Planner`] and is kept
-//! across runs, so a repeated plan on an unchanged graph allocates nothing.
+//! with — the entered marks and the work stack — lives on the [`Planner`] and
+//! is kept across runs, so a repeated plan on an unchanged graph allocates
+//! nothing.
 
-use crate::containers::column::Column;
+use crate::containers::set::IdxSet;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::error::{Error, Result};
 use crate::execution::identity::NodeIdx;
 use crate::execution::schedule::{NodeState, RunSchedule};
 use crate::execution::seeds::RunSeeds;
-
-/// DFS coloring for the backward pass. White = unvisited, Gray = on
-/// stack (Done pushed, children pending), Black = children done.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum Color {
-    #[default]
-    White,
-    Gray,
-    Black,
-}
 
 #[derive(Debug)]
 enum Visit {
@@ -28,10 +19,14 @@ enum Visit {
 
 /// Reusable per-run scheduling scratch, kept across runs so a repeated plan on
 /// an unchanged graph does no scheduling allocations.
+///
+/// The walk's three colors are read off the schedule: a node is done (black)
+/// once its state left `Unvisited`, on the stack (gray) when entered but not
+/// done, and unvisited (white) otherwise. Only "entered" is the walk's own.
 #[derive(Debug, Default)]
 pub(crate) struct Planner {
-    /// DFS coloring for the backward pass.
-    color: Column<NodeIdx, Color>,
+    /// The nodes the walk has entered, whose `Done` visit is pushed.
+    entered: IdxSet<NodeIdx>,
     /// DFS work stack.
     stack: Vec<Visit>,
 }
@@ -39,7 +34,7 @@ pub(crate) struct Planner {
 impl Planner {
     fn reset_for_program(&mut self, program: &CompiledGraph) {
         self.stack.clear();
-        self.color.reset(program.e_nodes.len(), Color::White);
+        self.entered.reset(program.e_nodes.len());
     }
 
     /// Build the per-run schedule into `schedule` from the installed program and the run's
@@ -87,8 +82,8 @@ impl Planner {
             let node_idx = match visit {
                 Visit::Discover(node_idx) => node_idx,
                 Visit::Done(node_idx) => {
-                    debug_assert_eq!(self.color[node_idx], Color::Gray);
-                    self.color[node_idx] = Color::Black;
+                    debug_assert!(self.entered.contains(node_idx));
+                    debug_assert_eq!(schedule.states[node_idx], NodeState::Unvisited);
                     schedule.process_order.push(node_idx);
                     // Runnable unless a required input is unbound or fed by a
                     // non-runnable producer. Post-order ⇒ deps already verdicted, so
@@ -109,26 +104,24 @@ impl Planner {
                 }
             };
 
-            match self.color[node_idx] {
-                Color::Gray => {
-                    return Err(Error::CycleDetected {
-                        node_id: program.node_ids[node_idx],
-                    });
-                }
-                Color::Black => continue,
-                Color::White => {}
+            if schedule.states[node_idx] != NodeState::Unvisited {
+                continue;
+            }
+            if self.entered.contains(node_idx) {
+                return Err(Error::CycleDetected {
+                    node_id: program.node_ids[node_idx],
+                });
             }
 
             let e_node = &program[node_idx];
             // Disabled nodes block dependency traversal, but an explicit node
             // seed is recorded before this walk and overrides disable for this run.
             if e_node.disabled && !schedule.root_flags(node_idx).is_seeded() {
-                self.color[node_idx] = Color::Black;
                 schedule.states[node_idx] = NodeState::Disabled;
                 continue;
             }
 
-            self.color[node_idx] = Color::Gray;
+            self.entered.insert(node_idx);
             self.stack.push(Visit::Done(node_idx));
 
             for e_input in &program.inputs[e_node.inputs] {

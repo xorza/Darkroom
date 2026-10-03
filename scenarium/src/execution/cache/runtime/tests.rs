@@ -91,7 +91,7 @@ fn reinstall(
     previous: &CompiledGraph,
     next: CompiledGraph,
 ) -> CompiledGraph {
-    cache.reconcile(Some(previous), &next);
+    cache.reconcile(previous, &next);
     next
 }
 
@@ -264,7 +264,7 @@ fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
         slot.load_output(complete_snapshot(out()), Some(digest));
     }
 
-    cache.reconcile(Some(&retaining), &build(cases.map(|(mode, _)| mode)));
+    cache.reconcile(&retaining, &build(cases.map(|(mode, _)| mode)));
 
     for (index, (mode, expected_resident)) in cases.iter().enumerate() {
         assert_eq!(

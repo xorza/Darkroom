@@ -202,12 +202,11 @@ impl<'a> NodeCtx<'a> {
     }
 
     /// Whether the header offers the RAM/disk storage chips. An impure func
-    /// has no content digest to key a cache on, and a func that declares
-    /// itself uncacheable or exposes no outputs has nothing to store — a
-    /// `missing` stub for both reasons at once.
+    /// has no content digest to key a cache on, and a func with no outputs
+    /// has nothing to store — a `missing` stub for both reasons at once.
     pub(crate) fn cache_controls(self) -> bool {
         self.func
-            .is_some_and(|f| !f.uncacheable && !f.outputs.is_empty() && !f.impure())
+            .is_some_and(|f| !f.outputs.is_empty() && !f.impure())
     }
 
     /// Whether the header offers runtime cache eviction — it needs a

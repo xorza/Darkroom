@@ -28,30 +28,33 @@ pub enum FuncBehavior {
 pub struct ValueVariant {
     pub name: String,
     pub value: ConstValue,
-    /// Human label shown in the editor's picker dropdown. Display-only — the
-    /// value bound on pick is [`ValueVariant::value`], never this. Defaults to
-    /// `name` via [`ValueVariant::new`]; override with [`ValueVariant::display`]
-    /// to show a friendlier label than a raw/serialized `name`.
+    /// A friendlier dropdown label than `name`, when there is one. See
+    /// [`label`](Self::label).
     #[serde(default)]
-    pub display_name: String,
+    pub display: Option<String>,
 }
 
 impl ValueVariant {
     /// A picker variant whose dropdown label is its `name`.
     pub fn new(name: impl Into<String>, value: ConstValue) -> Self {
-        let name = name.into();
         Self {
-            display_name: name.clone(),
-            name,
+            name: name.into(),
             value,
+            display: None,
         }
     }
 
     /// Override the dropdown label (leaving `name`/`value` untouched).
     #[must_use]
-    pub fn display(mut self, display_name: impl Into<String>) -> Self {
-        self.display_name = display_name.into();
+    pub fn display(mut self, label: impl Into<String>) -> Self {
+        self.display = Some(label.into());
         self
+    }
+
+    /// The label the editor's picker shows: the display label, else `name`.
+    /// Display-only — the value bound on pick is [`value`](Self::value).
+    pub fn label(&self) -> &str {
+        self.display.as_deref().unwrap_or(&self.name)
     }
 }
 
@@ -246,11 +249,6 @@ pub struct Func {
     pub category: String,
     pub sink: bool,
 
-    /// Node manages its own output caching, so the editor's disk-cache (persist)
-    /// toggle is meaningless on it and hidden.
-    /// `false` (the default) means a normal node that offers the toggle.
-    pub uncacheable: bool,
-
     /// The [`CacheMode`] a freshly created node of this func copies into its
     /// `cache`. Defaults to [`CacheMode::None`] (no caching); raise it with the
     /// [`default_cache_mode`](Func::default_cache_mode) builder for funcs worth
@@ -277,7 +275,6 @@ impl Func {
             name: name.into(),
             category: String::new(),
             sink: false,
-            uncacheable: false,
             default_cache_mode: CacheMode::None,
             behavior: FuncBehavior::Impure,
             description: None,
@@ -310,14 +307,6 @@ impl Func {
     #[must_use]
     pub fn sink(mut self) -> Self {
         self.sink = true;
-        self
-    }
-
-    /// Hide the editor's disk-cache (persist) toggle for this node — for nodes
-    /// that cache their output themselves. See [`Func::uncacheable`].
-    #[must_use]
-    pub fn uncacheable(mut self) -> Self {
-        self.uncacheable = true;
         self
     }
 
@@ -378,9 +367,9 @@ impl Func {
     /// Whether this func recomputes every run — it has no content digest, so
     /// no cache mode is honored on a node instantiating it.
     ///
-    /// A method rather than a field like [`sink`](Self::sink) and
-    /// [`uncacheable`](Self::uncacheable) because it reads off
-    /// [`behavior`](Self::behavior), which names more than this one question.
+    /// A method rather than a field like [`sink`](Self::sink) because it
+    /// reads off [`behavior`](Self::behavior), which names more than this one
+    /// question.
     pub fn impure(&self) -> bool {
         self.behavior == FuncBehavior::Impure
     }
@@ -673,6 +662,18 @@ mod tests {
             .wildcard_output("value", 0)
             .validate()
             .unwrap();
+    }
+
+    #[test]
+    fn a_variant_label_is_its_display_else_its_name() {
+        let plain = ValueVariant::new("auto_stf", ConstValue::Int(1));
+        assert_eq!(plain.label(), "auto_stf");
+        let friendly = plain.clone().display("Auto STF");
+        assert_eq!(friendly.label(), "Auto STF");
+        assert_eq!(
+            friendly.name, "auto_stf",
+            "the name is what saved graphs bind"
+        );
     }
 
     #[test]

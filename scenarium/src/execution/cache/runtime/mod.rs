@@ -267,19 +267,17 @@ impl RuntimeCache {
     /// installed program's RAM-retention policy immediately. The one place ids
     /// are hashed for slot access; every per-run access is an index read.
     ///
-    /// `previous` is the program the slots currently belong to, `None` before
-    /// anything was installed. It is named rather than remembered because the
+    /// `previous` is the program the slots currently belong to — the empty one
+    /// before anything was installed. It is named rather than remembered because the
     /// only caller —
     /// [`ExecutionEngine::install`](crate::execution::engine::ExecutionEngine) —
     /// holds both programs at the moment of the swap, so the pair this walks is
     /// established by the owner rather than validated afterwards.
-    pub(crate) fn reconcile(&mut self, previous: Option<&CompiledGraph>, program: &CompiledGraph) {
-        // `Column::drain` empties the column when its guard drops, so the slots
-        // are released even on the first install, where the left side of the zip
-        // yields nothing.
+    pub(crate) fn reconcile(&mut self, previous: &CompiledGraph, program: &CompiledGraph) {
         let mut retained: HashMap<NodeId, RuntimeSlot> = previous
-            .into_iter()
-            .flat_map(|previous| previous.node_ids.iter().copied())
+            .node_ids
+            .iter()
+            .copied()
             .zip(self.slots.drain())
             .collect();
         for (node_id, e_node) in program.node_ids.iter().zip(program.e_nodes.iter()) {
@@ -928,7 +926,7 @@ pub(crate) mod internals {
         /// [`ExecutionEngine::install`](crate::execution::engine::ExecutionEngine)
         /// does.
         pub(crate) fn install_for_test(&mut self, program: &CompiledGraph) {
-            self.reconcile(None, program);
+            self.reconcile(&CompiledGraph::default(), program);
         }
 
         /// The attached store, for the tests that read its I/O counters or

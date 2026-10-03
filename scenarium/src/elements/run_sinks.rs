@@ -27,8 +27,7 @@ const RUN_SINKS_FUNC_ID: FuncId = FuncId::literal("edec890e-5c23-49fb-a131-aaef3
 /// The hardcoded interface for `RunSinks`, built once. No inputs, outputs,
 /// or events, and a no-op lambda: the node is a pure event-driven trigger whose
 /// only effect (running all sinks) is applied by the planner, not the
-/// lambda. `sink` so the editor treats it as an event subscriber;
-/// `uncacheable` because with no output there is nothing to persist.
+/// lambda. `sink` so the editor treats it as an event subscriber.
 pub(crate) fn run_sinks_func() -> &'static Func {
     static F: OnceLock<Func> = OnceLock::new();
     F.get_or_init(build_func)
@@ -42,7 +41,6 @@ fn build_func() -> Func {
     )
     .category("System")
     .sink()
-    .uncacheable()
     .description(
         "Subscribes to an event and, when it fires, runs every sink \
              node — re-evaluating the whole graph. Has no inputs or outputs; \
@@ -63,7 +61,5 @@ mod tests {
         // Sink so the editor renders a subscription pin (only sinks
         // subscribe).
         assert!(func.sink);
-        // No output ⇒ the disk-cache toggle is meaningless and hidden.
-        assert!(func.uncacheable);
     }
 }

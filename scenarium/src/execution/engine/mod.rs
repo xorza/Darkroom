@@ -34,10 +34,10 @@ use crate::graph::identity::NodeId;
 /// persistent form is the [`CompiledGraph`] alone.
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionEngine {
-    /// The installed immutable artifact. Replaced only by [`Self::install`],
-    /// which reconciles `cache` onto it in the same step, so the two never move
-    /// independently.
-    compiled: Option<Arc<CompiledGraph>>,
+    /// The installed immutable artifact — the empty program until the first
+    /// install. Replaced only by [`Self::install`] and [`Self::clear`], which
+    /// move `cache` with it, so the two never move independently.
+    compiled: Arc<CompiledGraph>,
     /// The cross-run cache, its slots index-aligned to `compiled`'s dense node
     /// space. The cache holds no artifact handle of its own — a program reaches
     /// its methods as an argument, from whoever is reading the pair — so "the
@@ -56,15 +56,14 @@ pub(crate) struct ExecutionEngine {
 
 impl ExecutionEngine {
     pub(crate) fn is_empty(&self) -> bool {
-        self.compiled
-            .as_deref()
-            .is_none_or(|compiled| compiled.e_nodes.is_empty())
+        self.compiled.e_nodes.is_empty()
     }
 
+    /// Install the empty program and drop every slot. The schedule keeps its
+    /// buffers: the next run plans into them from scratch.
     pub(crate) fn clear(&mut self) {
-        self.compiled = None;
+        self.compiled = Arc::default();
         self.cache.clear();
-        self.schedule = RunSchedule::default();
     }
 
     /// Install a host-compiled [`CompiledGraph`] as the current program, replacing the
@@ -79,9 +78,8 @@ impl ExecutionEngine {
     /// The schedule isn't cleared here: every `execute` re-`plan`s from scratch and nothing
     /// reads the reusable buffer between an install and the next run.
     pub(crate) fn install(&mut self, compiled: Arc<CompiledGraph>) {
-        let previous = self.compiled.as_deref();
-        self.cache.reconcile(previous, &compiled);
-        self.compiled = Some(compiled);
+        self.cache.reconcile(&self.compiled, &compiled);
+        self.compiled = compiled;
         self.validate_debug();
     }
 
@@ -104,10 +102,7 @@ impl ExecutionEngine {
         &mut self,
         node_ids: impl IntoIterator<Item = NodeId>,
     ) -> Vec<CacheNodeFailure> {
-        let Some(compiled) = self.compiled.as_deref() else {
-            return Vec::new();
-        };
-        self.cache.evict(compiled, node_ids).await
+        self.cache.evict(&self.compiled, node_ids).await
     }
 
     /// `reporter` receives live feedback ahead of the final outcome: progress before and
@@ -123,8 +118,6 @@ impl ExecutionEngine {
         cancel: CancelToken,
         outcome: &mut ExecutionOutcome,
     ) -> Result<()> {
-        outcome.clear();
-
         // Phase 2: schedule into the reusable buffer. Purely structural —
         // reachability + topological order + missing-input verdicts + walk roots, no
         // cache/digest state. Node seeds already identify exact compiled roots.
@@ -132,10 +125,7 @@ impl ExecutionEngine {
         // This function is the one place the three passes below run, and they must run
         // in this order over the one buffer; each asserts `RunSchedule::validate` in
         // debug, which is what catches a schedule spanning some other program.
-        let compiled = self
-            .compiled
-            .as_deref()
-            .expect("execution requires an installed compiled graph");
+        let compiled: &CompiledGraph = &self.compiled;
         self.planner.plan(compiled, &seeds, &mut self.schedule)?;
 
         // Phase 2a: prepare filesystem identities away from the async worker. The stamps are
@@ -195,28 +185,19 @@ impl ExecutionEngine {
         &mut self,
         node_ids: impl IntoIterator<Item = NodeId>,
     ) -> CacheFlushReport {
-        let Some(compiled) = self.compiled.as_deref() else {
-            return CacheFlushReport::default();
-        };
-        self.cache.flush(compiled, node_ids).await
+        self.cache.flush(&self.compiled, node_ids).await
     }
 
     /// [`flush_cache`](Self::flush_cache) over every installed node, for when the
     /// worker attaches a new [`DiskStore`]. This makes values computed while the
     /// store was memory-only durable once a document receives a cache root.
     pub(crate) async fn flush_all_caches(&mut self) -> CacheFlushReport {
-        let Some(compiled) = self.compiled.as_deref() else {
-            return CacheFlushReport::default();
-        };
-        self.cache.flush_all(compiled).await
+        self.cache.flush_all(&self.compiled).await
     }
 
     /// Self-consistency of the installed artifact and the cache aligned to it.
     fn validate(&self) -> result::Result<(), InstallValidationError> {
-        let program = self
-            .compiled
-            .as_deref()
-            .expect("validation requires an installed compiled graph");
+        let program: &CompiledGraph = &self.compiled;
         if self.cache.slot_count() != program.e_nodes.len() {
             return Err(InstallValidationError::NodeCount {
                 slots: self.cache.slot_count(),
@@ -283,9 +264,7 @@ pub(crate) mod internals {
         /// Production reaches the artifact and its cache through the methods
         /// above, which is what keeps the two moving together.
         pub(crate) fn compiled(&self) -> &CompiledGraph {
-            self.compiled
-                .as_deref()
-                .expect("execution requires an installed compiled graph")
+            &self.compiled
         }
 
         /// Compile + install in one step — the shape the in-tree tests are
@@ -313,10 +292,7 @@ pub(crate) mod internals {
                 events: events.to_vec(),
                 node_ids: Vec::new(),
             };
-            let compiled = self
-                .compiled
-                .as_deref()
-                .expect("execution preparation requires an installed compiled graph");
+            let compiled: &CompiledGraph = &self.compiled;
             self.planner.plan(compiled, &seeds, &mut self.schedule)?;
             self.schedule.resolve(compiled, &mut self.cache).await;
             Ok(())
