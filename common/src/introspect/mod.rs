@@ -325,6 +325,9 @@ pub trait IntrospectEnum: Sized {
     const DISPLAY_NAME: &'static str;
     /// Every variant's string, in declaration order.
     const VARIANTS: &'static [&'static str];
+    /// Every variant's label for a person, in declaration order: display
+    /// only, never stored.
+    const LABELS: &'static [&'static str];
 
     fn to_variant(&self) -> &'static str;
     fn from_variant(name: &str) -> Option<Self>;

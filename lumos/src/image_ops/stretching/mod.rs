@@ -95,6 +95,13 @@ pub enum ColorMode {
     PerChannel,
 }
 
+impl StretchMethod {
+    /// The background level the automatic presets place the median on.
+    pub const AUTO_TARGET_BACKGROUND: f32 = 0.2;
+    /// How many σ below the median the STF preset puts the black point.
+    pub const STF_SHADOW_SIGMAS: f32 = 1.5;
+}
+
 /// A stretch to apply to a stacked image. Output is always clamped to `[0, 1]`.
 #[derive(Debug, Clone, Copy)]
 pub struct Stretch {
@@ -106,9 +113,8 @@ impl Stretch {
     /// Color-preserving normalized-arcsinh auto-stretch — the recommended best-quality default.
     pub fn auto_asinh() -> Self {
         Self {
-            // A touch gentler than STF's 0.25 — asinh's softer highlights read better slightly darker.
             method: StretchMethod::AutoAsinh {
-                target_background: 0.2,
+                target_background: StretchMethod::AUTO_TARGET_BACKGROUND,
             },
             color: ColorMode::ColorPreserving,
         }
@@ -117,10 +123,9 @@ impl Stretch {
     /// Color-preserving STF (MTF) auto-stretch — the standard automatic "screen stretch".
     pub fn auto_stf() -> Self {
         Self {
-            // 0.25 is PixInsight's STF default target background.
             method: StretchMethod::AutoStf {
-                shadow_sigmas: 1.5,
-                target_background: 0.2,
+                shadow_sigmas: StretchMethod::STF_SHADOW_SIGMAS,
+                target_background: StretchMethod::AUTO_TARGET_BACKGROUND,
             },
             color: ColorMode::ColorPreserving,
         }

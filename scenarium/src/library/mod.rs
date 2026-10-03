@@ -179,13 +179,6 @@ impl Library {
         self.funcs.insert(func.id, func);
     }
 
-    /// Drop a func declaration, handing back what was registered under `id` —
-    /// how a host assembles a library that omits an entry a shared builder
-    /// added (lens drops its ML nodes when their backend is unavailable).
-    pub fn remove(&mut self, id: FuncId) -> Option<Func> {
-        self.funcs.remove(&id)
-    }
-
     /// Register a nominal type. Registering an identical entry again does
     /// nothing, so libraries that share a type merge; a conflicting entry under
     /// a registered id panics — two declarations for one type is a wiring bug,
@@ -375,6 +368,21 @@ where
             library.add(func);
         }
         library
+    }
+}
+
+#[cfg(any(test, feature = "internals"))]
+pub(crate) mod internals {
+    use crate::graph::func::Func;
+    use crate::graph::identity::FuncId;
+    use crate::library::Library;
+
+    impl Library {
+        /// Take a func declaration out, for a fixture that edits one and adds
+        /// it back.
+        pub(crate) fn remove(&mut self, id: FuncId) -> Option<Func> {
+            self.funcs.remove(&id)
+        }
     }
 }
 

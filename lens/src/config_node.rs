@@ -48,6 +48,16 @@ impl<T: Introspect + Clone + fmt::Debug + Send + Sync + 'static> CustomValue for
     }
 }
 
+impl<T: Introspect> ConfigValue<T> {
+    /// An optional detailed config of `T` named `name`, declared to override
+    /// input `overrides`: while one is wired, that knob is set aside.
+    pub(crate) fn input(name: &str, overrides: usize) -> FuncInput {
+        FuncInput::optional(name, config_data_type::<T>())
+            .overrides(overrides)
+            .description("Detailed config; overrides the quick knob while wired.")
+    }
+}
+
 impl<T: fmt::Debug> fmt::Display for ConfigValue<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self.0)

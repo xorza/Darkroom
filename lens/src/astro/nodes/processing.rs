@@ -1,20 +1,25 @@
 //! Per-frame astronomical processing nodes.
+//!
+//! Each takes an image and one quick knob — a preset picker, or for an op
+//! tuned by a single strength that strength — beside an optional `Config`
+//! port declared to override the knob, so a wired config is what runs and the
+//! editor shows the knob set aside.
 
-use lumos::{Denoise, ExtractBackground, Hdr, LocalContrast, NeutralizeBackground};
-use scenarium::FuncId;
-use scenarium::{DataType, Func, FuncInput, FuncLambda, FuncOutput, Library};
-
-use crate::astro::config::preset;
-use crate::astro::config::processing::{
-    BackgroundModeKind, ScnrKind, ScnrKnobs, StretchKnobs, StretchPreset,
-};
-use crate::astro::nodes::runtime;
-use common::Introspect;
-
-use crate::config_node::{ConfigValue, config_data_type};
-use crate::image::{IMAGE_DATA_TYPE, Image};
-use scenarium::Invocation;
+use std::fmt;
 use std::mem;
+
+use common::Introspect;
+use lumos::{
+    BackgroundMode, Denoise, ExtractBackground, Hdr, LinearImage, LocalContrast,
+    NeutralizeBackground, OpError, Scnr, Stretch,
+};
+use scenarium::{DataType, Func, FuncId, FuncInput, FuncLambda, FuncOutput, Invocation, Library};
+
+use crate::astro::config::preset::Preset;
+use crate::astro::config::processing::{ScnrMethodChoice, StretchMethodChoice};
+use crate::astro::nodes::runtime;
+use crate::config_node::ConfigValue;
+use crate::image::{IMAGE_DATA_TYPE, Image};
 
 const AUTO_STRETCH_FUNC_ID: FuncId = FuncId::literal("c15248e0-006a-4a4a-9aae-b1fc7886dea1");
 const EXTRACT_BACKGROUND_FUNC_ID: FuncId = FuncId::literal("e27c2a02-ec2a-4c6d-afea-60d1276ff8e1");
@@ -26,132 +31,69 @@ const HDR_COMPRESSION_FUNC_ID: FuncId = FuncId::literal("300a2ec5-0ccd-47ec-b282
 const LOCAL_CONTRAST_FUNC_ID: FuncId = FuncId::literal("6a28b732-2704-454b-8afd-0a91d385458a");
 
 pub(crate) fn register(library: &mut Library) {
-    register_stretch(library);
-    register_background(library);
-    register_denoise(library);
-    register_scnr(library);
-    register_neutralize(library);
-    register_hdr(library);
-    register_local_contrast(library);
-}
-
-fn register_stretch(library: &mut Library) {
-    library.add(
-        Func::new(
-            AUTO_STRETCH_FUNC_ID,
-            "Auto Stretch",
-            FuncLambda::new(
-                move |Invocation {
-                          inputs, outputs, ..
-                      }| {
-                    Box::pin(async move {
-                        debug_assert_eq!(inputs.len(), 2);
-                        debug_assert_eq!(outputs.len(), 1);
-                        let config = preset::resolve::<StretchKnobs, StretchPreset>(&inputs[1]);
-                        let value = mem::take(&mut inputs[0]);
-                        outputs[0] =
-                            runtime::run_frame_op(value, move |image| config.apply(image)).await?;
-                        Ok(())
-                    })
-                },
-            ),
-        )
-        .description("Auto-stretches a linear frame to a viewable image (display tone curve).")
-        .category("Astro")
-        .pure()
-        .input(Image::input("Image"))
-        .input(preset::input::<StretchKnobs, StretchPreset>("Method"))
-        .output(
-            FuncOutput::new("Image", IMAGE_DATA_TYPE.clone())
-                .description("Stretched, display-ready image."),
-        ),
-    );
-}
-
-fn register_background(library: &mut Library) {
-    library.add(processing_func(
+    StretchMethodChoice::register(library);
+    BackgroundMode::register(library);
+    ScnrMethodChoice::register(library);
+    library.add(preset_func::<StretchMethodChoice>(
+        AUTO_STRETCH_FUNC_ID,
+        "Auto Stretch",
+        "Auto-stretches a linear frame to a viewable image (display tone curve).",
+        "Method",
+    ));
+    library.add(preset_func::<BackgroundMode>(
         EXTRACT_BACKGROUND_FUNC_ID,
         "Extract Background",
         "Fits and removes a smooth sky-background gradient.",
-        vec![
-            Image::input("Image"),
-            preset::input::<ExtractBackground, BackgroundModeKind>("Config"),
-        ],
-        FuncLambda::new(
-            move |Invocation {
-                      inputs, outputs, ..
-                  }| {
-                Box::pin(async move {
-                    let config =
-                        preset::resolve::<ExtractBackground, BackgroundModeKind>(&inputs[1]);
-                    let value = mem::take(&mut inputs[0]);
-                    outputs[0] =
-                        runtime::run_frame_op(value, move |image| config.apply(image)).await?;
-                    Ok(())
-                })
-            },
-        ),
+        "Mode",
     ));
-}
-
-fn register_denoise(library: &mut Library) {
-    library.add(processing_func(
-        DENOISE_FUNC_ID,
-        "Denoise",
-        "Wavelet denoise (starlet coefficient thresholding).",
-        vec![
-            Image::input("Image"),
-            float_input("Strength", 0.85, "Denoise strength in [0, 1]."),
-            config_override_input::<Denoise>(),
-        ],
-        FuncLambda::new(
-            move |Invocation {
-                      inputs, outputs, ..
-                  }| {
-                Box::pin(async move {
-                    let config = inputs[2].as_custom::<ConfigValue<Denoise>>().map_or_else(
-                        || Denoise {
-                            strength: inputs[1].required_f64() as f32,
-                            ..Default::default()
-                        },
-                        |config| config.0,
-                    );
-                    let value = mem::take(&mut inputs[0]);
-                    outputs[0] =
-                        runtime::run_frame_op(value, move |image| config.apply(image)).await?;
-                    Ok(())
-                })
-            },
-        ),
-    ));
-}
-
-fn register_scnr(library: &mut Library) {
-    library.add(processing_func(
+    library.add(preset_func::<ScnrMethodChoice>(
         SCNR_FUNC_ID,
         "SCNR",
         "Removes the residual green cast (SCNR).",
-        vec![
-            Image::input("Image"),
-            preset::input::<ScnrKnobs, ScnrKind>("Method"),
-        ],
-        FuncLambda::new(
-            move |Invocation {
-                      inputs, outputs, ..
-                  }| {
-                Box::pin(async move {
-                    let method = preset::resolve::<ScnrKnobs, ScnrKind>(&inputs[1]);
-                    let value = mem::take(&mut inputs[0]);
-                    outputs[0] =
-                        runtime::run_frame_op(value, move |image| method.apply(image)).await?;
-                    Ok(())
-                })
-            },
-        ),
+        "Method",
     ));
-}
-
-fn register_neutralize(library: &mut Library) {
+    library.add(strength_func(
+        DENOISE_FUNC_ID,
+        "Denoise",
+        "Wavelet denoise (starlet coefficient thresholding).",
+        Knob {
+            name: "Strength",
+            description: "Denoise strength in [0, 1].",
+            default: Denoise::default().strength,
+        },
+        |strength| Denoise {
+            strength,
+            ..Default::default()
+        },
+    ));
+    library.add(strength_func(
+        HDR_COMPRESSION_FUNC_ID,
+        "HDR Compression",
+        "Compresses large-scale dynamic range (multiscale HDR).",
+        Knob {
+            name: "Amount",
+            description: "Compression amount in [0, 1].",
+            default: Hdr::default().amount,
+        },
+        |amount| Hdr {
+            amount,
+            ..Default::default()
+        },
+    ));
+    library.add(strength_func(
+        LOCAL_CONTRAST_FUNC_ID,
+        "Local Contrast",
+        "Local contrast enhancement (CLAHE).",
+        Knob {
+            name: "Strength",
+            description: "Local-contrast strength in [0, 1].",
+            default: LocalContrast::default().strength,
+        },
+        |strength| LocalContrast {
+            strength,
+            ..Default::default()
+        },
+    ));
     library.add(processing_func(
         NEUTRALIZE_BACKGROUND_FUNC_ID,
         "Neutralize Background",
@@ -173,81 +115,129 @@ fn register_neutralize(library: &mut Library) {
     ));
 }
 
-fn register_hdr(library: &mut Library) {
-    library.add(processing_func(
-        HDR_COMPRESSION_FUNC_ID,
-        "HDR Compression",
-        "Compresses large-scale dynamic range (multiscale HDR).",
+/// A `lumos` op that rewrites a frame in place.
+trait FrameOp: Send + 'static {
+    fn run(&self, image: &mut LinearImage) -> Result<(), OpError>;
+}
+
+impl FrameOp for Stretch {
+    fn run(&self, image: &mut LinearImage) -> Result<(), OpError> {
+        self.apply(image)
+    }
+}
+
+impl FrameOp for ExtractBackground {
+    fn run(&self, image: &mut LinearImage) -> Result<(), OpError> {
+        self.apply(image)
+    }
+}
+
+impl FrameOp for Scnr {
+    fn run(&self, image: &mut LinearImage) -> Result<(), OpError> {
+        self.apply(image)
+    }
+}
+
+impl FrameOp for Denoise {
+    fn run(&self, image: &mut LinearImage) -> Result<(), OpError> {
+        self.apply(image)
+    }
+}
+
+impl FrameOp for Hdr {
+    fn run(&self, image: &mut LinearImage) -> Result<(), OpError> {
+        self.apply(image)
+    }
+}
+
+impl FrameOp for LocalContrast {
+    fn run(&self, image: &mut LinearImage) -> Result<(), OpError> {
+        self.apply(image)
+    }
+}
+
+/// A node over `P`'s configs: the image, `P`'s picker named `pick`, and the
+/// config overriding it.
+fn preset_func<P>(id: FuncId, name: &str, description: &str, pick: &str) -> Func
+where
+    P: Preset,
+    P::Config: FrameOp,
+{
+    processing_func(
+        id,
+        name,
+        description,
         vec![
             Image::input("Image"),
-            float_input("Amount", 0.5, "Compression amount in [0, 1]."),
-            config_override_input::<Hdr>(),
+            P::picker(pick),
+            P::config_input("Config", 1),
         ],
         FuncLambda::new(
             move |Invocation {
                       inputs, outputs, ..
                   }| {
                 Box::pin(async move {
-                    let config = inputs[2].as_custom::<ConfigValue<Hdr>>().map_or_else(
-                        || Hdr {
-                            amount: inputs[1].required_f64() as f32,
-                            ..Default::default()
-                        },
-                        |config| config.0,
-                    );
+                    let config = P::resolve(&inputs[1], &inputs[2]);
                     let value = mem::take(&mut inputs[0]);
                     outputs[0] =
-                        runtime::run_frame_op(value, move |image| config.apply(image)).await?;
+                        runtime::run_frame_op(value, move |image| config.run(image)).await?;
                     Ok(())
                 })
             },
         ),
-    ));
+    )
 }
 
-fn register_local_contrast(library: &mut Library) {
-    library.add(processing_func(
-        LOCAL_CONTRAST_FUNC_ID,
-        "Local Contrast",
-        "Local contrast enhancement (CLAHE).",
+/// The one strength an op is tuned by, as a node's quick knob.
+#[derive(Debug, Clone, Copy)]
+struct Knob {
+    name: &'static str,
+    description: &'static str,
+    /// The op's own default, so the knob starts where the op does.
+    default: f32,
+}
+
+/// A node over a config tuned by one strength: the image, the strength, and
+/// the config overriding it; `with` builds the config a strength stands for.
+fn strength_func<T>(
+    id: FuncId,
+    name: &str,
+    description: &str,
+    knob: Knob,
+    with: fn(f32) -> T,
+) -> Func
+where
+    T: FrameOp + Introspect + Clone + fmt::Debug + Sync,
+{
+    processing_func(
+        id,
+        name,
+        description,
         vec![
             Image::input("Image"),
-            float_input("Strength", 0.8, "Local-contrast strength in [0, 1]."),
-            config_override_input::<LocalContrast>(),
+            FuncInput::required(knob.name, DataType::Float)
+                .const_only()
+                .description(knob.description)
+                .default(f64::from(knob.default)),
+            ConfigValue::<T>::input("Config", 1),
         ],
         FuncLambda::new(
             move |Invocation {
                       inputs, outputs, ..
                   }| {
                 Box::pin(async move {
-                    let config = inputs[2]
-                        .as_custom::<ConfigValue<LocalContrast>>()
-                        .map_or_else(
-                            || LocalContrast {
-                                strength: inputs[1].required_f64() as f32,
-                                ..Default::default()
-                            },
-                            |config| config.0,
-                        );
+                    let config = match inputs[2].as_custom::<ConfigValue<T>>() {
+                        Some(config) => config.0.clone(),
+                        None => with(inputs[1].required_f64() as f32),
+                    };
                     let value = mem::take(&mut inputs[0]);
                     outputs[0] =
-                        runtime::run_frame_op(value, move |image| config.apply(image)).await?;
+                        runtime::run_frame_op(value, move |image| config.run(image)).await?;
                     Ok(())
                 })
             },
         ),
-    ));
-}
-
-fn config_override_input<T: Introspect>() -> FuncInput {
-    FuncInput::optional("Config", config_data_type::<T>())
-        .description("Optional detailed config; overrides the inline knob when wired.")
-}
-
-fn float_input(name: &str, default: f32, description: &str) -> FuncInput {
-    FuncInput::required(name, DataType::Float)
-        .description(description)
-        .default(f64::from(default))
+    )
 }
 
 fn processing_func(
@@ -262,5 +252,5 @@ fn processing_func(
         .description(description)
         .pure()
         .inputs(inputs)
-        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Processed image."))
+        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Processed image."))
 }

@@ -12,7 +12,8 @@
 //! `Float`, `bool` → `Bool`, `String` → `Str`, `Option<T>` → `T` but not
 //! required, anything else → an enum (the type must impl
 //! `common::IntrospectEnum`). Field attribute `#[config(label = "…")]` overrides
-//! the auto label (the field name title-cased). Enum derive requires a stable
+//! the auto label (the field name title-cased), and so does the same attribute
+//! on an enum variant (the variant's words title-cased). Enum derive requires a stable
 //! `#[config(type_id = "…")]` UUID, and owns the variant strings itself — no
 //! `Display`/`FromStr` and no derive crate beyond this one, so any crate that
 //! already depends on `common` can describe its own config types.
@@ -142,6 +143,7 @@ fn expand_enum(input: &DeriveInput) -> syn::Result<TokenStream> {
     };
     let mut variants = Vec::new();
     let mut names = Vec::new();
+    let mut labels = Vec::new();
     for variant in &data.variants {
         if !matches!(variant.fields, Fields::Unit) {
             return Err(syn::Error::new_spanned(
@@ -149,11 +151,11 @@ fn expand_enum(input: &DeriveInput) -> syn::Result<TokenStream> {
                 "IntrospectEnum requires fieldless (unit) variants",
             ));
         }
+        let name = snake_case(&variant.ident.to_string());
+        let label = variant_label(variant)?.unwrap_or_else(|| prettify(&name));
         variants.push(&variant.ident);
-        names.push(LitStr::new(
-            &snake_case(&variant.ident.to_string()),
-            variant.ident.span(),
-        ));
+        names.push(LitStr::new(&name, variant.ident.span()));
+        labels.push(LitStr::new(&label, variant.ident.span()));
     }
 
     Ok(quote! {
@@ -161,6 +163,7 @@ fn expand_enum(input: &DeriveInput) -> syn::Result<TokenStream> {
             const TYPE_ID: &'static str = #type_id;
             const DISPLAY_NAME: &'static str = ::core::stringify!(#ident);
             const VARIANTS: &'static [&'static str] = &[ #(#names),* ];
+            const LABELS: &'static [&'static str] = &[ #(#labels),* ];
 
             fn to_variant(&self) -> &'static str {
                 match self {
@@ -177,6 +180,27 @@ fn expand_enum(input: &DeriveInput) -> syn::Result<TokenStream> {
         }
     }
     .into())
+}
+
+/// A variant's `#[config(label = "…")]`, if it has one.
+fn variant_label(variant: &syn::Variant) -> syn::Result<Option<String>> {
+    let mut label = None;
+    for attr in &variant.attrs {
+        if !attr.path().is_ident("config") {
+            continue;
+        }
+        attr.parse_nested_meta(|meta| {
+            if !meta.path.is_ident("label") {
+                return Err(meta.error("expected `label`"));
+            }
+            if label.is_some() {
+                return Err(meta.error("duplicate `label`"));
+            }
+            label = Some(meta.value()?.parse::<LitStr>()?.value());
+            Ok(())
+        })?;
+    }
+    Ok(label)
 }
 
 /// A variant name in the `snake_case` the persisted string uses: an underscore
@@ -526,7 +550,7 @@ fn prettify(name: &str) -> String {
 mod tests {
     use syn::{DeriveInput, parse_quote};
 
-    use crate::{prettify, type_identity};
+    use crate::{prettify, type_identity, variant_label};
 
     /// Each malformed type-level `#[config]` is refused with the message for
     /// its rule; a well-formed one yields its id and name.
@@ -588,6 +612,36 @@ mod tests {
             identity.name.map(|name| name.value()).as_deref(),
             Some("Speed")
         );
+    }
+
+    /// A variant names its label once, with `label` and nothing else.
+    #[test]
+    fn variant_label_reads_one_label() {
+        let variant = |input: DeriveInput| match input.data {
+            syn::Data::Enum(data) => data.variants.into_iter().next().unwrap(),
+            _ => unreachable!("the fixtures are enums"),
+        };
+        let labelled =
+            variant(parse_quote! { enum Mode { #[config(label = "Auto STF")] AutoStf } });
+        assert_eq!(
+            variant_label(&labelled).unwrap().as_deref(),
+            Some("Auto STF")
+        );
+        let plain = variant(parse_quote! { enum Mode { AutoStf } });
+        assert_eq!(variant_label(&plain).unwrap(), None);
+        for (input, message) in [
+            (
+                parse_quote! { enum Mode { #[config(name = "x")] A } },
+                "expected `label`",
+            ),
+            (
+                parse_quote! { enum Mode { #[config(label = "x", label = "y")] A } },
+                "duplicate `label`",
+            ),
+        ] {
+            let error = variant_label(&variant(input)).unwrap_err();
+            assert_eq!(error.to_string(), message);
+        }
     }
 
     #[test]

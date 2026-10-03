@@ -14,6 +14,7 @@ impl IntrospectEnum for Mode {
     const DISPLAY_NAME: &'static str = "Mode";
 
     const VARIANTS: &'static [&'static str] = &["fast", "slow"];
+    const LABELS: &'static [&'static str] = &["Fast", "Slow"];
 
     fn to_variant(&self) -> &'static str {
         match self {
@@ -35,6 +36,7 @@ impl IntrospectEnum for Mode {
 #[config(type_id = "3effbd19-d4a8-4a9b-a931-78fd0e4f8adb")]
 enum Speed {
     Fast,
+    #[config(label = "Slow (safe)")]
     Slow,
     VeryFast,
 }
@@ -47,6 +49,8 @@ fn derived_introspect_enum_renders_and_parses_its_own_variant_names() {
     assert_eq!(Speed::TYPE_ID, "3effbd19-d4a8-4a9b-a931-78fd0e4f8adb");
     assert_eq!(Speed::DISPLAY_NAME, "Speed");
     assert_eq!(Speed::VARIANTS, ["fast", "slow", "very_fast"]);
+    // Labels are the variant's words title-cased unless the variant names its own.
+    assert_eq!(Speed::LABELS, ["Fast", "Slow (safe)", "Very Fast"]);
     assert_eq!(Speed::Slow.to_variant(), "slow");
     assert_eq!(Speed::VeryFast.to_variant(), "very_fast");
     // Every rendered name parses back to the variant it came from.
