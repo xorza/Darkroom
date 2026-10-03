@@ -84,7 +84,7 @@ impl NewNodeUi {
     }
 
     /// Whether the palette is open.
-    pub(crate) fn in_flight(&self) -> bool {
+    pub(crate) const fn in_flight(&self) -> bool {
         self.menu.is_open()
     }
 
@@ -159,7 +159,7 @@ impl NewNodeUi {
 
     /// Take the source of a wire whose drop spawned a node this frame — the
     /// canvas re-floats it on `ConnectionUI`. `None` on a plain palette open.
-    pub(crate) fn take_resume_floating(&mut self) -> Option<PortRef> {
+    pub(crate) const fn take_resume_floating(&mut self) -> Option<PortRef> {
         self.resume_floating.take()
     }
 }

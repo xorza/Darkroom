@@ -70,7 +70,7 @@ impl ConnectionUI {
     }
 
     /// Whether a wire is in flight, or its palette is about to open.
-    pub(crate) fn in_flight(&self) -> bool {
+    pub(crate) const fn in_flight(&self) -> bool {
         !self.state.is_idle() || !self.pending_open.is_idle()
     }
 
@@ -154,20 +154,20 @@ impl ConnectionUI {
 
     /// Take the source port of a wire dropped on empty canvas this frame —
     /// the canvas hands it to the new-node popup to open it.
-    pub(crate) fn take_pending_connection(&mut self) -> Option<PortRef> {
+    pub(crate) const fn take_pending_connection(&mut self) -> Option<PortRef> {
         self.pending_open.take()
     }
 
     /// Whether a new-connection gesture is in flight — feeds the wire-fade
     /// tier. (A method, not a `pub(crate)` field: `InFlight` is
     /// module-private.)
-    pub(crate) fn is_dragging(&self) -> bool {
+    pub(crate) const fn is_dragging(&self) -> bool {
         self.state.get().is_some()
     }
 
     /// Whether a floating wire ended on a right-click this frame — the
     /// canvas suppresses the palette that same right-click would open.
-    pub(crate) fn ended_on_secondary(&self) -> bool {
+    pub(crate) const fn ended_on_secondary(&self) -> bool {
         self.ended_on_secondary
     }
 

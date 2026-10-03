@@ -79,7 +79,7 @@ impl<I> Span<I> {
     /// The run of `len` entries at `start` — how [`Column::append`] names what
     /// it just wrote, and how a stage that knows a run's size before its
     /// contents reserves one for a later stage to fill.
-    pub(crate) fn new(start: u32, len: u32) -> Self {
+    pub(crate) const fn new(start: u32, len: u32) -> Self {
         Self {
             start,
             len,
@@ -93,7 +93,7 @@ impl<I> Span<I> {
         self.len == 0
     }
 
-    pub(crate) fn range(self) -> Range<usize> {
+    pub(crate) const fn range(self) -> Range<usize> {
         let start = self.start as usize;
         start..start + self.len as usize
     }
@@ -191,11 +191,11 @@ impl<I, T> Column<I, T> {
 
     /// The index space the column spans — what a validator checks before
     /// reading it by index.
-    pub(crate) fn len(&self) -> usize {
+    pub(crate) const fn len(&self) -> usize {
         self.values.len()
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
+    pub(crate) const fn is_empty(&self) -> bool {
         self.values.is_empty()
     }
 

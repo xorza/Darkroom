@@ -70,7 +70,10 @@ pub struct NoiseModel {
 
 impl NoiseModel {
     /// Create a noise model whose signal scale already matches normalized Lumos pixels.
-    pub fn from_normalized(electrons_per_normalized_unit: f32, read_noise_electrons: f32) -> Self {
+    pub const fn from_normalized(
+        electrons_per_normalized_unit: f32,
+        read_noise_electrons: f32,
+    ) -> Self {
         Self {
             electrons_per_normalized_unit,
             read_noise_electrons,

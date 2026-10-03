@@ -108,7 +108,11 @@ pub(super) const fn compute_stamp_radius(expected_fwhm: f32) -> usize {
 
 /// Check if position is within valid bounds for stamp extraction.
 #[inline]
-pub(super) fn is_valid_stamp_position(pos: DVec2, size: Size2us, stamp_radius: usize) -> bool {
+pub(super) const fn is_valid_stamp_position(
+    pos: DVec2,
+    size: Size2us,
+    stamp_radius: usize,
+) -> bool {
     let icx = pos.x.round() as isize;
     let icy = pos.y.round() as isize;
     icx >= stamp_radius as isize

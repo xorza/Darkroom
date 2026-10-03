@@ -20,7 +20,7 @@ pub struct SigmaBounds {
 
 impl SigmaBounds {
     /// The same threshold either side.
-    pub fn symmetric(sigma: f32) -> Self {
+    pub const fn symmetric(sigma: f32) -> Self {
         Self {
             low: sigma,
             high: sigma,
@@ -28,7 +28,7 @@ impl SigmaBounds {
     }
 
     /// Separate thresholds — e.g. clipping bright satellite trails harder than dark pixels.
-    pub fn asymmetric(low: f32, high: f32) -> Self {
+    pub const fn asymmetric(low: f32, high: f32) -> Self {
         Self { low, high }
     }
 

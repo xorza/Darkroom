@@ -124,7 +124,7 @@ impl FuncInput {
     /// Restrict this input to a `Const` literal — no upstream `Bind`. See
     /// [`FuncInput::const_only`].
     #[must_use]
-    pub fn const_only(mut self) -> Self {
+    pub const fn const_only(mut self) -> Self {
         self.const_only = true;
         self
     }
@@ -291,13 +291,13 @@ impl Func {
 
     /// Mark the func `Pure` (same inputs → same outputs; cacheable).
     #[must_use]
-    pub fn pure(mut self) -> Self {
+    pub const fn pure(mut self) -> Self {
         self.behavior = FuncBehavior::Pure;
         self
     }
 
     #[must_use]
-    pub fn sink(mut self) -> Self {
+    pub const fn sink(mut self) -> Self {
         self.sink = true;
         self
     }
@@ -306,7 +306,7 @@ impl Func {
     /// [`Func::default_cache_mode`]). Defaults to [`CacheMode::None`]; raise it
     /// for funcs whose output is worth caching by default.
     #[must_use]
-    pub fn default_cache_mode(mut self, mode: CacheMode) -> Self {
+    pub const fn default_cache_mode(mut self, mode: CacheMode) -> Self {
         self.default_cache_mode = mode;
         self
     }

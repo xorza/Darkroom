@@ -14,7 +14,7 @@ use crate::gui::theme::type_scale::TypeScale;
 ///   canvas, so a chip dissolves into the pane below it.
 /// - `elem` and `node_fill` are one colour by design: nodes and palantir's
 ///   own surfaces sit on the same tier.
-pub(super) fn palantir_palette_for(p: &Palette) -> palantir::Palette {
+pub(super) const fn palantir_palette_for(p: &Palette) -> palantir::Palette {
     palantir::Palette {
         text: p.text,
         text_muted: p.text_muted,

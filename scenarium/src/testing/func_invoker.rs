@@ -66,7 +66,7 @@ impl FuncInvoker {
 
     /// The context the calls run under, for a test that installs what a body
     /// reads from it.
-    pub fn ctx_mut(&mut self) -> &mut ContextManager {
+    pub const fn ctx_mut(&mut self) -> &mut ContextManager {
         &mut self.ctx
     }
 }

@@ -39,7 +39,7 @@ pub(crate) struct CardTheme {
 }
 
 impl CardTheme {
-    pub(super) fn from_palette(p: &Palette) -> Self {
+    pub(super) const fn from_palette(p: &Palette) -> Self {
         Self {
             fill: p.node_fill,
             border: p.node_border,
@@ -75,7 +75,7 @@ impl CardTheme {
     /// panels — so they all read as the same kind of surface. Only the blur
     /// scales with how high a surface sits; colour and offset are fixed.
     #[inline]
-    pub(crate) fn elevation_shadow(&self, blur: f32) -> Shadow {
+    pub(crate) const fn elevation_shadow(&self, blur: f32) -> Shadow {
         Shadow::drop(self.ambient_shadow, glam::Vec2::new(0.0, 3.0), blur)
     }
 }

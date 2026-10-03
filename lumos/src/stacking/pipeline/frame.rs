@@ -31,7 +31,7 @@ impl PipelineFrame {
         }
     }
 
-    pub(crate) fn metadata(&self) -> &ImageMetadata {
+    pub(crate) const fn metadata(&self) -> &ImageMetadata {
         match self {
             Self::Resident(image) => &image.metadata,
             Self::Spilled(stored) => &stored.metadata,

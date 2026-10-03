@@ -58,12 +58,12 @@ pub(super) fn memory_row(ui: &mut Ui, ncx: NodeCtx<'_>) {
 }
 
 /// The system-RAM pool's hue: the cache badge's, as a cache is what holds it.
-fn ram_hue(theme: &Theme) -> RgbaF32 {
+const fn ram_hue(theme: &Theme) -> RgbaF32 {
     theme.colors.badge_cache
 }
 
 /// The GPU-memory pool's hue: the accent the graph badge wears.
-fn vram_hue(theme: &Theme) -> RgbaF32 {
+const fn vram_hue(theme: &Theme) -> RgbaF32 {
     theme.colors.badge_graph
 }
 

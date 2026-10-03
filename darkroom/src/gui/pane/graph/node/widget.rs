@@ -49,7 +49,7 @@ pub(super) struct NodeWidget<'a> {
 }
 
 impl<'a> NodeWidget<'a> {
-    pub(super) fn new(state: &'a mut NodeUI, ncx: NodeCtx<'a>) -> Self {
+    pub(super) const fn new(state: &'a mut NodeUI, ncx: NodeCtx<'a>) -> Self {
         Self { state, ncx }
     }
 
@@ -198,7 +198,7 @@ impl<'a> NodeWidget<'a> {
 /// The accent color for a node's last-run status, or `None` when it
 /// didn't run. Shared by the body glow and the header time label so they
 /// read as one cue.
-pub(crate) fn exec_color(theme: &Theme, status: ExecStatus) -> Option<RgbaF32> {
+pub(crate) const fn exec_color(theme: &Theme, status: ExecStatus) -> Option<RgbaF32> {
     match status {
         ExecStatus::None => None,
         ExecStatus::Cached => Some(theme.status.info),
@@ -215,7 +215,7 @@ pub(crate) fn exec_color(theme: &Theme, status: ExecStatus) -> Option<RgbaF32> {
 /// crossing beneath it. The ambient color is the theme's elevation swatch
 /// (`node_ambient_shadow`), shared with the inspector panels so all
 /// elevated surfaces cast one kind of shadow.
-fn node_shadow(theme: &Theme, status: ExecStatus) -> Shadow {
+const fn node_shadow(theme: &Theme, status: ExecStatus) -> Shadow {
     match exec_color(theme, status) {
         // Blur/spread sized so the glow carries elevation too — it replaces
         // the ambient shadow, and a tighter halo would leave a just-run node

@@ -29,7 +29,7 @@ impl PixelCoverage {
     pub(crate) const FULL: Self = Self(1.0);
 
     #[inline]
-    pub(crate) fn new(fraction: f32) -> Self {
+    pub(crate) const fn new(fraction: f32) -> Self {
         Self(fraction)
     }
 

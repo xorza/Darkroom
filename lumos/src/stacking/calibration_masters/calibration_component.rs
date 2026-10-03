@@ -17,7 +17,7 @@ pub enum CalibrationComponent {
 
 impl CalibrationComponent {
     /// The component's `EXTNAME` in a saved bundle.
-    pub(crate) fn extname(self) -> &'static str {
+    pub(crate) const fn extname(self) -> &'static str {
         match self {
             Self::Master(role) => role.extname(),
             Self::Defects => "DEFECT_MAP",

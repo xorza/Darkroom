@@ -57,7 +57,7 @@ pub enum TransferProvenance {
 
 impl TransferProvenance {
     /// The FITS transfer record, or `None` for samples that did not come from a FITS HDU.
-    pub(crate) fn fits(&self) -> Option<&FitsTransferProvenance> {
+    pub(crate) const fn fits(&self) -> Option<&FitsTransferProvenance> {
         match self {
             TransferProvenance::FitsNormalized(transfer) => Some(transfer),
             _ => None,

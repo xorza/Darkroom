@@ -75,7 +75,7 @@ impl LibrawState {
     }
 
     /// The libraw instance, borrowed for no longer than the state that frees it.
-    fn as_ptr(&self) -> *mut sys::libraw_data_t {
+    const fn as_ptr(&self) -> *mut sys::libraw_data_t {
         self.inner
     }
 }
@@ -142,7 +142,7 @@ impl BlackLevel {
     /// What one normalized unit is worth for this file. It differs between frames — libraw reads
     /// `maximum` per camera and per ISO, and `black` per frame — so two frames convert by the ratio
     /// of their spans (`SampleDomain::conversion_to`).
-    fn span(&self) -> f32 {
+    const fn span(&self) -> f32 {
         self.span
     }
 }
@@ -358,7 +358,12 @@ pub(crate) const fn libraw_filter_color(filters: u32, row: usize, col: usize) ->
 }
 
 #[inline(always)]
-fn raw_filter_color(visible_filters: u32, raw_row: usize, raw_col: usize, margin: Vec2us) -> usize {
+const fn raw_filter_color(
+    visible_filters: u32,
+    raw_row: usize,
+    raw_col: usize,
+    margin: Vec2us,
+) -> usize {
     libraw_filter_color(
         visible_filters,
         raw_row.wrapping_sub(margin.y),
@@ -392,7 +397,7 @@ enum ChannelBlackDelta {
 
 impl ChannelBlackDelta {
     #[inline(always)]
-    fn at_visible(&self, row: usize, col: usize) -> f32 {
+    const fn at_visible(&self, row: usize, col: usize) -> f32 {
         match self {
             ChannelBlackDelta::LibRawFilter {
                 visible_filters,

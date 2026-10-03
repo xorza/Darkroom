@@ -209,7 +209,7 @@ impl GraphUI {
     ///
     /// Destructured like [`Self::reset_gestures`], so a new controller does not
     /// compile until it is asked here too.
-    fn in_flight(&self) -> bool {
+    const fn in_flight(&self) -> bool {
         let Self {
             node_ui,
             breaker_ui,

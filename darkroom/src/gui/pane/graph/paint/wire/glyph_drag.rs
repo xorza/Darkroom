@@ -28,7 +28,7 @@ pub(crate) struct GlyphDrag<A, B> {
 
 impl<A: NodeKey, B: NodeKey> GlyphDrag<A, B> {
     /// A drag off `from` with nothing snapped yet.
-    pub(crate) fn new(from: A) -> Self {
+    pub(crate) const fn new(from: A) -> Self {
         Self { from, snap: None }
     }
 

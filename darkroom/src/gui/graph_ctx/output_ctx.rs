@@ -15,7 +15,7 @@ pub(crate) struct OutputCtx<'a> {
 }
 
 impl<'a> OutputCtx<'a> {
-    pub(super) fn new(node: NodeCtx<'a>, port_idx: usize, declared: &'a FuncOutput) -> Self {
+    pub(super) const fn new(node: NodeCtx<'a>, port_idx: usize, declared: &'a FuncOutput) -> Self {
         Self {
             node,
             port_idx,
@@ -24,12 +24,12 @@ impl<'a> OutputCtx<'a> {
     }
 
     /// This port's address in the graph.
-    pub(crate) fn port(self) -> OutputPort {
+    pub(crate) const fn port(self) -> OutputPort {
         OutputPort::new(self.node.id, self.port_idx)
     }
 
     /// This port's address in the canvas's glyph domains.
-    pub(crate) fn port_ref(self) -> PortRef {
+    pub(crate) const fn port_ref(self) -> PortRef {
         PortRef::output(self.node.id, self.port_idx)
     }
 

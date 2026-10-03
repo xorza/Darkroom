@@ -61,7 +61,7 @@ impl GroupDrag {
     }
 
     /// Whether a drag is latched.
-    pub(crate) fn in_flight(&self) -> bool {
+    pub(crate) const fn in_flight(&self) -> bool {
         self.anchor.is_some()
     }
 

@@ -37,14 +37,14 @@ pub struct FsPathConfig {
 }
 
 impl FsPathConfig {
-    pub fn new(mode: FsPathMode) -> Self {
+    pub const fn new(mode: FsPathMode) -> Self {
         Self {
             mode,
             extensions: Vec::new(),
         }
     }
 
-    pub fn with_extensions(mode: FsPathMode, extensions: Vec<String>) -> Self {
+    pub const fn with_extensions(mode: FsPathMode, extensions: Vec<String>) -> Self {
         Self { mode, extensions }
     }
 }
@@ -143,7 +143,7 @@ impl DataType {
     /// convert freely between them — `Bool` reads as `0`/`1`, `Float`
     /// truncates to int, any nonzero reads as `true`.
     /// [`ConstValue::is_numeric_scalar`] is the same class on the value side.
-    fn is_numeric_scalar(&self) -> bool {
+    const fn is_numeric_scalar(&self) -> bool {
         matches!(self, DataType::Float | DataType::Int | DataType::Bool)
     }
 

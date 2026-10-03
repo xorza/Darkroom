@@ -186,7 +186,7 @@ impl TileAxis {
         Self { bounds, centres }
     }
 
-    fn tiles(&self) -> usize {
+    const fn tiles(&self) -> usize {
         self.centres.len()
     }
 

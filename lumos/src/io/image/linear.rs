@@ -124,7 +124,7 @@ impl LinearImage {
         self.pixels.channel(0).height()
     }
 
-    pub fn channels(&self) -> usize {
+    pub const fn channels(&self) -> usize {
         self.pixels.channel_count()
     }
 
@@ -140,16 +140,16 @@ impl LinearImage {
         self.pixel_count() * self.channels()
     }
 
-    pub fn is_grayscale(&self) -> bool {
+    pub const fn is_grayscale(&self) -> bool {
         matches!(self.pixels, LinearPixels::L(_))
     }
 
-    pub fn is_rgb(&self) -> bool {
+    pub const fn is_rgb(&self) -> bool {
         matches!(self.pixels, LinearPixels::Rgb(_))
     }
 
     /// The interleaved format these planes repack to: `RGB_F32` or `L_F32`.
-    pub fn color_format(&self) -> ColorFormat {
+    pub const fn color_format(&self) -> ColorFormat {
         if self.is_rgb() {
             ColorFormat::RGB_F32
         } else {

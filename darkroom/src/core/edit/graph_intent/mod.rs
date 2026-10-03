@@ -177,7 +177,7 @@ impl GraphIntent {
     /// Drop the whole selection. Named rather than spelled `SetSelection`
     /// with an empty set at each call, so a reader sees the intent and not
     /// the mechanism.
-    pub(crate) fn clear_selection() -> Self {
+    pub(crate) const fn clear_selection() -> Self {
         Self::SetSelection {
             to: BTreeSet::new(),
         }

@@ -54,20 +54,20 @@ pub enum CacheMode {
 impl CacheMode {
     /// Whether a current reproducible value is retained in RAM and reused across runs
     /// (`Ram`/`Both`). The other modes drop the RAM copy after each run.
-    pub fn caches_in_ram(self) -> bool {
+    pub const fn caches_in_ram(self) -> bool {
         matches!(self, CacheMode::Ram | CacheMode::Both)
     }
 
     /// Whether the node's value is persisted to the disk store
     /// (`Disk`/`Both`), so it survives a reload.
-    pub fn persists_to_disk(self) -> bool {
+    pub const fn persists_to_disk(self) -> bool {
         matches!(self, CacheMode::Disk | CacheMode::Both)
     }
 
     /// Compose a mode from the two storage bits — the inverse of
     /// [`caches_in_ram`](Self::caches_in_ram)/[`persists_to_disk`](Self::persists_to_disk),
     /// used by the editor's two independent cache toggles.
-    pub fn from_bits(ram: bool, disk: bool) -> Self {
+    pub const fn from_bits(ram: bool, disk: bool) -> Self {
         match (ram, disk) {
             (false, false) => CacheMode::None,
             (true, false) => CacheMode::Ram,

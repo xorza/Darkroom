@@ -208,7 +208,7 @@ fn rb_index(color: u8) -> usize {
 }
 
 #[inline(always)]
-fn is_solitary_green(hex: &HexLookup, raw_y: usize, raw_x: usize) -> bool {
+const fn is_solitary_green(hex: &HexLookup, raw_y: usize, raw_x: usize) -> bool {
     raw_y % 3 == hex.sgrow && raw_x % 3 == hex.sgcol
 }
 
@@ -218,7 +218,7 @@ fn active_raw(xtrans: &XTransImage<'_>, y: usize, x: usize) -> f32 {
 }
 
 #[inline(always)]
-fn green_at(green_dir: &[f32], green_base: usize, width: usize, y: usize, x: usize) -> f32 {
+const fn green_at(green_dir: &[f32], green_base: usize, width: usize, y: usize, x: usize) -> f32 {
     green_dir[green_base + y * width + x]
 }
 
@@ -909,7 +909,7 @@ fn build_summed_area_table(data: &[u8], size: Size2us, sat: &mut [u32]) {
 #[inline(always)]
 /// `min` and `max` are both inclusive. Takes the corners loose rather than as a [`URect`](crate::math::urect::URect) because
 /// this runs once per direction per pixel and `URect::new` asserts its bounds in release.
-fn sat_query(sat: &[u32], width: usize, min: Vec2us, max: Vec2us) -> u32 {
+const fn sat_query(sat: &[u32], width: usize, min: Vec2us, max: Vec2us) -> u32 {
     let bottom_right = sat[max.y * width + max.x];
     let above = if min.y == 0 {
         0

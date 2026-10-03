@@ -23,7 +23,7 @@ pub(crate) struct DocumentQueue {
 
 impl DocumentQueue {
     /// A fresh id for a gesture that starts now.
-    pub(crate) fn open_gesture(&mut self) -> GestureId {
+    pub(crate) const fn open_gesture(&mut self) -> GestureId {
         self.last_gesture = self.last_gesture.next();
         self.last_gesture
     }
@@ -46,7 +46,7 @@ impl DocumentQueue {
         self.requests.drain(..)
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
+    pub(crate) const fn is_empty(&self) -> bool {
         self.requests.is_empty()
     }
 

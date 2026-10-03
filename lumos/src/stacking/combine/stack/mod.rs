@@ -262,7 +262,7 @@ fn resolve_weights<'a>(
     }
 }
 
-fn validate_manual_weights(
+const fn validate_manual_weights(
     config: &StackConfig,
     frame_count: usize,
 ) -> Result<(), StackConfigError> {

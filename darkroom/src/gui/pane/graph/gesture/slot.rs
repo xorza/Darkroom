@@ -29,19 +29,19 @@ impl<S> GestureSlot<S> {
 
     /// Whether nothing is held — the guard a latch opens with, since a
     /// controller only starts a gesture when it has none.
-    pub(crate) fn is_idle(&self) -> bool {
+    pub(crate) const fn is_idle(&self) -> bool {
         self.held.is_none()
     }
 
     /// The held gesture.
-    pub(crate) fn get(&self) -> Option<&S> {
+    pub(crate) const fn get(&self) -> Option<&S> {
         self.held.as_ref()
     }
 
     /// Take the held gesture out. The shape a state machine wants: take,
     /// advance, [`Self::latch`] it back — and simply not re-latching is how
     /// it ends.
-    pub(crate) fn take(&mut self) -> Option<S> {
+    pub(crate) const fn take(&mut self) -> Option<S> {
         self.held.take()
     }
 }

@@ -14,7 +14,7 @@ pub(crate) struct OutputSnapshot {
 }
 
 impl OutputSnapshot {
-    pub(crate) fn new(values: Vec<DynamicValue>) -> Self {
+    pub(crate) const fn new(values: Vec<DynamicValue>) -> Self {
         Self { values }
     }
 
@@ -175,7 +175,7 @@ impl RuntimeSlot {
     /// No digest to pass: this is only ever asked of a value already established
     /// as a hit, and [`current_snapshot`](Self::current_snapshot) settled which
     /// digest that was.
-    pub(crate) fn owes_blob(&self) -> bool {
+    pub(crate) const fn owes_blob(&self) -> bool {
         matches!(
             self.value,
             ValueState::Resident {
@@ -192,7 +192,7 @@ impl RuntimeSlot {
     /// heal itself rather than persist as a node that lies about being cached.
     /// A value no codec encodes is not retried: nothing about it changes until
     /// the value or the codecs do.
-    pub(crate) fn note_store(&mut self, outcome: &StoreResult) {
+    pub(crate) const fn note_store(&mut self, outcome: &StoreResult) {
         let ValueState::Resident { blob, .. } = &mut self.value else {
             return;
         };

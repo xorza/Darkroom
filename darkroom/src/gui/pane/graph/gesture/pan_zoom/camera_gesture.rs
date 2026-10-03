@@ -49,7 +49,7 @@ impl CameraGesture {
 
     /// Whether a pan drag is latched. A scroll run has no press to cancel,
     /// so it never counts.
-    pub(crate) fn in_flight(&self) -> bool {
+    pub(crate) const fn in_flight(&self) -> bool {
         !self.pan.is_idle()
     }
 

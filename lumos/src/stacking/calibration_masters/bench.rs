@@ -24,7 +24,7 @@ use crate::{
 const W: usize = 2000;
 const H: usize = 1500;
 
-fn bayer() -> CfaType {
+const fn bayer() -> CfaType {
     CfaType::Bayer(CfaPattern::Rggb)
 }
 

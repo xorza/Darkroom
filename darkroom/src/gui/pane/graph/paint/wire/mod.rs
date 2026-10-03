@@ -220,14 +220,14 @@ pub(crate) struct WireTint {
 
 impl WireTint {
     /// Distinct colors per end, which lower to a gradient along the curve.
-    pub(crate) fn new(start: RgbaF32, end: RgbaF32) -> Self {
+    pub(crate) const fn new(start: RgbaF32, end: RgbaF32) -> Self {
         Self { start, end }
     }
 
     /// One color for the whole curve — an event wire (events carry no data
     /// type), or a data wire whose type mismatch paints it all in the warning
     /// color.
-    pub(crate) fn flat(color: RgbaF32) -> Self {
+    pub(crate) const fn flat(color: RgbaF32) -> Self {
         Self {
             start: color,
             end: color,
@@ -271,7 +271,7 @@ impl WireEmphasis {
     /// Resolve this frame's emphasis inputs. `fading` is "any wire gesture
     /// is active" — the callers OR together the two drag controllers and
     /// the breaker.
-    pub(crate) fn resolve(canvas_bg: RgbaF32, fading: bool) -> Self {
+    pub(crate) const fn resolve(canvas_bg: RgbaF32, fading: bool) -> Self {
         Self { fading, canvas_bg }
     }
 
@@ -306,7 +306,7 @@ impl WireEmphasis {
     /// Whether this wire is hover-emphasized: an endpoint glyph is
     /// hovered. Never while a gesture fades the set — the snap target's
     /// forced endpoint hover must not re-emphasize a faded wire.
-    fn hovered(&self, endpoint_hovered: bool) -> bool {
+    const fn hovered(&self, endpoint_hovered: bool) -> bool {
         !self.fading && endpoint_hovered
     }
 

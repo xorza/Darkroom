@@ -29,7 +29,7 @@ enum OutputKind {
 }
 
 impl OutputKind {
-    fn tag(self) -> u8 {
+    const fn tag(self) -> u8 {
         match self {
             Self::Unbound => 0,
             Self::Static => 1,

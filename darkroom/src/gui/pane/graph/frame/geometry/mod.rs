@@ -183,7 +183,7 @@ impl<K: NodeKey> PortLayer<K> {
     /// The glyph a drag started on this frame, or `None` — what every
     /// drag-source controller (connection, preview spawn, event wire) latches
     /// on, each keeping only the kinds of glyph it starts from.
-    pub(crate) fn started_drag(&self) -> Option<K> {
+    pub(crate) const fn started_drag(&self) -> Option<K> {
         self.started_drag
     }
 

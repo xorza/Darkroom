@@ -102,7 +102,7 @@ pub(super) struct MaxSigma(AtomicU32);
 impl MaxSigma {
     /// Seed with the σ every pixel would carry if nothing were rejected — the floor the pixels
     /// that do lose frames then raise.
-    pub(super) fn seeded(sigma: f32) -> Self {
+    pub(super) const fn seeded(sigma: f32) -> Self {
         Self(AtomicU32::new(sigma.to_bits()))
     }
 

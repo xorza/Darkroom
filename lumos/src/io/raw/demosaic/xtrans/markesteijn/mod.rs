@@ -47,7 +47,7 @@ const REGION_WORDS: [usize; 5] = [NDIR, 2 * NDIR, NDIR, 1, 1];
 const ARENA_WORDS_PER_PIXEL: usize =
     REGION_WORDS[0] + REGION_WORDS[1] + REGION_WORDS[2] + REGION_WORDS[3] + REGION_WORDS[4];
 
-pub(crate) fn demosaic_memory(size: Size2us) -> DemosaicMemory {
+pub(crate) const fn demosaic_memory(size: Size2us) -> DemosaicMemory {
     let pixels = size.width.saturating_mul(size.height);
     let output_words = pixels.saturating_mul(3);
     let peak_words = pixels.saturating_mul(1 + ARENA_WORDS_PER_PIXEL + 3);

@@ -22,7 +22,7 @@ pub(crate) struct SensorLayout {
 impl SensorLayout {
     /// A layout for a buffer already cropped to its visible area: raw and active
     /// extents coincide and there is no margin to skip.
-    pub(crate) fn cropped(size: Size2us) -> Self {
+    pub(crate) const fn cropped(size: Size2us) -> Self {
         Self {
             raw: size,
             active: size,

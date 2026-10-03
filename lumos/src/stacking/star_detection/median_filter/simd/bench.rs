@@ -21,7 +21,7 @@ use crate::stacking::star_detection::median_filter::simd::{
 const IMAGE_WIDTHS: [usize; 5] = [16, 64, 256, 1024, 4096];
 
 /// Rows per image, chosen with the widths above to keep each sample near a megapixel of work.
-fn rows_for(width: usize) -> usize {
+const fn rows_for(width: usize) -> usize {
     (1 << 20) / width
 }
 

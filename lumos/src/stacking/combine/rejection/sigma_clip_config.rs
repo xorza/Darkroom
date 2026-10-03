@@ -32,7 +32,7 @@ impl Default for SigmaClipConfig {
 
 impl SigmaClipConfig {
     /// Create symmetric sigma clipping (same threshold for low and high).
-    pub fn new(sigma: f32, max_iterations: u32) -> Self {
+    pub const fn new(sigma: f32, max_iterations: u32) -> Self {
         Self {
             sigma: SigmaBounds::symmetric(sigma),
             max_iterations,
@@ -40,7 +40,7 @@ impl SigmaClipConfig {
     }
 
     /// Create asymmetric sigma clipping with separate low/high thresholds.
-    pub fn new_asymmetric(sigma_low: f32, sigma_high: f32, max_iterations: u32) -> Self {
+    pub const fn new_asymmetric(sigma_low: f32, sigma_high: f32, max_iterations: u32) -> Self {
         Self {
             sigma: SigmaBounds::asymmetric(sigma_low, sigma_high),
             max_iterations,

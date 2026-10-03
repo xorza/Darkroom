@@ -41,7 +41,7 @@ pub(crate) fn event_color(theme: &Theme, hovered: bool) -> RgbaF32 {
     lit(theme.ports.event, hovered)
 }
 
-fn fallback(theme: &Theme, kind: PortKind) -> RgbaF32 {
+const fn fallback(theme: &Theme, kind: PortKind) -> RgbaF32 {
     match kind {
         PortKind::Input => theme.ports.input,
         PortKind::Output => theme.ports.output,
@@ -71,7 +71,7 @@ fn type_hue(t: &TypeColors, ty: &DataType) -> RgbaF32 {
 
 /// Pick a ramp entry from a type id so a given custom/enum type always
 /// lands on the same color.
-fn ramp_pick(ramp: &[RgbaF32], key: u128) -> RgbaF32 {
+const fn ramp_pick(ramp: &[RgbaF32], key: u128) -> RgbaF32 {
     ramp[(key % ramp.len() as u128) as usize]
 }
 

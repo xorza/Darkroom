@@ -32,7 +32,7 @@ impl Default for LinearFitClipConfig {
 }
 
 impl LinearFitClipConfig {
-    pub fn new(sigma_low: f32, sigma_high: f32, max_iterations: u32) -> Self {
+    pub const fn new(sigma_low: f32, sigma_high: f32, max_iterations: u32) -> Self {
         Self {
             sigma: SigmaBounds::asymmetric(sigma_low, sigma_high),
             max_iterations,

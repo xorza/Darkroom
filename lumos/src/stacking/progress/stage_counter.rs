@@ -18,7 +18,11 @@ pub(crate) struct StageCounter<'a> {
 }
 
 impl<'a> StageCounter<'a> {
-    pub(crate) fn new(progress: &'a ProgressCallback, stage: StackingStage, total: usize) -> Self {
+    pub(crate) const fn new(
+        progress: &'a ProgressCallback,
+        stage: StackingStage,
+        total: usize,
+    ) -> Self {
         Self {
             progress,
             stage,

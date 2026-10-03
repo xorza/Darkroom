@@ -42,7 +42,7 @@ impl NodeMenuUi {
     }
 
     /// Whether the menu is open.
-    pub(crate) fn in_flight(&self) -> bool {
+    pub(crate) const fn in_flight(&self) -> bool {
         self.menu.is_open()
     }
 

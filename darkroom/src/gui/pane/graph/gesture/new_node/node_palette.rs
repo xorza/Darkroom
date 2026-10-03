@@ -42,7 +42,7 @@ impl<'a> PaletteEntry<'a> {
     }
 
     /// The identity [`PaletteRows`] keeps for this entry.
-    pub(super) fn row(self) -> PaletteRow {
+    pub(super) const fn row(self) -> PaletteRow {
         match self {
             PaletteEntry::Func(f) => PaletteRow::Func(f.id),
             PaletteEntry::Special(s) => PaletteRow::Special(s),
@@ -70,7 +70,7 @@ struct PaletteColumn<'a> {
 }
 
 impl<'a> NodePalette<'a> {
-    pub(super) fn new(graph_ctx: GraphCtx<'a>, pos: Vec2) -> Self {
+    pub(super) const fn new(graph_ctx: GraphCtx<'a>, pos: Vec2) -> Self {
         Self { graph_ctx, pos }
     }
 

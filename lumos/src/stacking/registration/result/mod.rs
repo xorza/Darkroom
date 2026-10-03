@@ -192,12 +192,12 @@ impl RegistrationResult {
     }
 
     /// Computed transformation from reference coordinates to target coordinates.
-    pub fn transform(&self) -> Transform {
+    pub const fn transform(&self) -> Transform {
         self.transform
     }
 
     /// The SIP distortion correction, when one was requested.
-    pub fn sip(&self) -> Option<&SipPolynomial> {
+    pub const fn sip(&self) -> Option<&SipPolynomial> {
         self.sip.as_ref()
     }
 
@@ -207,7 +207,7 @@ impl RegistrationResult {
     }
 
     /// Number of matched stars used by the fitted transform.
-    pub fn num_inliers(&self) -> usize {
+    pub const fn num_inliers(&self) -> usize {
         self.matched_stars.len()
     }
 
@@ -234,7 +234,7 @@ impl RegistrationResult {
     }
 
     /// Registration processing time in milliseconds.
-    pub fn elapsed_ms(&self) -> f64 {
+    pub const fn elapsed_ms(&self) -> f64 {
         self.elapsed_ms
     }
 
@@ -247,7 +247,7 @@ impl RegistrationResult {
     }
 
     /// Set the elapsed time.
-    pub(crate) fn with_elapsed(mut self, ms: f64) -> Self {
+    pub(crate) const fn with_elapsed(mut self, ms: f64) -> Self {
         self.elapsed_ms = ms;
         self
     }

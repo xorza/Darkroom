@@ -49,7 +49,7 @@ impl ConstValue {
     /// on the type side, and
     /// [`DataType::accepts_const`](crate::DataType) reads this one to hold a
     /// literal to exactly what a runtime read of it would accept.
-    pub(crate) fn is_numeric_scalar(&self) -> bool {
+    pub(crate) const fn is_numeric_scalar(&self) -> bool {
         matches!(
             self,
             ConstValue::Float(_) | ConstValue::Int(_) | ConstValue::Bool(_)
@@ -131,7 +131,7 @@ impl ConstValue {
     /// A renderer rather than a `String` so a per-frame reader can write it
     /// into a buffer it already holds — `write!(buf, "{}", v.value_text())` —
     /// instead of taking one it would only copy out of and drop.
-    pub fn value_text(&self) -> ValueText<'_> {
+    pub const fn value_text(&self) -> ValueText<'_> {
         ValueText(self)
     }
 

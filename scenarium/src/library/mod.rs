@@ -277,7 +277,7 @@ impl Library {
     }
 
     /// The registered disk codecs, as a handle a compiled program keeps.
-    pub(crate) fn codecs(&self) -> &Arc<Codecs> {
+    pub(crate) const fn codecs(&self) -> &Arc<Codecs> {
         &self.codecs
     }
 

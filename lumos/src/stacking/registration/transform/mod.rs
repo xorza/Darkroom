@@ -54,7 +54,7 @@ pub enum TransformType {
 
 impl TransformType {
     /// Minimum number of point correspondences required to estimate this transform.
-    pub fn min_points(&self) -> usize {
+    pub const fn min_points(&self) -> usize {
         match self {
             TransformType::Translation => 1,
             TransformType::Euclidean => 2,
@@ -87,7 +87,7 @@ impl TransformModel {
     ///
     /// What the star-count and match-count gates size against, since a run that may climb to
     /// homography has to arrive with enough points to fit one.
-    pub fn most_general(self) -> TransformType {
+    pub const fn most_general(self) -> TransformType {
         match self {
             Self::Fixed(transform_type) => transform_type,
             Self::Auto => TransformType::Homography,
@@ -145,7 +145,7 @@ impl Display for Transform {
 
 impl Transform {
     /// Create identity transform.
-    pub fn identity() -> Self {
+    pub const fn identity() -> Self {
         Self {
             matrix: DMat3::identity(),
             transform_type: TransformType::Translation,
@@ -153,7 +153,7 @@ impl Transform {
     }
 
     /// Create translation transform.
-    pub fn translation(t: DVec2) -> Self {
+    pub const fn translation(t: DVec2) -> Self {
         Self {
             matrix: DMat3::from_array([1.0, 0.0, t.x, 0.0, 1.0, t.y, 0.0, 0.0, 1.0]),
             transform_type: TransformType::Translation,
@@ -181,7 +181,7 @@ impl Transform {
     }
 
     /// Create affine transform from 6 parameters [a, b, tx, c, d, ty].
-    pub fn affine(params: [f64; 6]) -> Self {
+    pub const fn affine(params: [f64; 6]) -> Self {
         Self {
             matrix: DMat3::from_array([
                 params[0], params[1], params[2], params[3], params[4], params[5], 0.0, 0.0, 1.0,
@@ -191,7 +191,7 @@ impl Transform {
     }
 
     /// Create homography from 8 parameters (9th element is 1.0).
-    pub fn homography(params: [f64; 8]) -> Self {
+    pub const fn homography(params: [f64; 8]) -> Self {
         Self {
             matrix: DMat3::from_array([
                 params[0], params[1], params[2], params[3], params[4], params[5], params[6],
@@ -202,7 +202,7 @@ impl Transform {
     }
 
     /// Create scale transform.
-    pub fn scale(s: DVec2) -> Self {
+    pub const fn scale(s: DVec2) -> Self {
         Self {
             matrix: DMat3::from_array([s.x, 0.0, 0.0, 0.0, s.y, 0.0, 0.0, 0.0, 1.0]),
             transform_type: TransformType::Affine,
@@ -261,12 +261,12 @@ impl Transform {
     }
 
     /// Row-major homogeneous matrix coefficients.
-    pub fn matrix(&self) -> &[f64; 9] {
+    pub const fn matrix(&self) -> &[f64; 9] {
         self.matrix.as_array()
     }
 
     /// The concrete model represented by this transform.
-    pub fn transform_type(&self) -> TransformType {
+    pub const fn transform_type(&self) -> TransformType {
         self.transform_type
     }
 
@@ -401,7 +401,7 @@ pub struct WarpTransform {
 
 impl WarpTransform {
     /// Create a warp transform with no SIP correction.
-    pub fn new(transform: Transform) -> Self {
+    pub const fn new(transform: Transform) -> Self {
         Self {
             transform,
             sip: None,
@@ -409,7 +409,7 @@ impl WarpTransform {
     }
 
     /// Create a warp transform with SIP distortion correction.
-    pub fn with_sip(transform: Transform, sip: SipPolynomial) -> Self {
+    pub const fn with_sip(transform: Transform, sip: SipPolynomial) -> Self {
         Self {
             transform,
             sip: Some(sip),

@@ -43,7 +43,7 @@ impl ContextManager {
     ///
     /// # Panics
     /// Outside a node invoke — on a hand-built manager, or after a run.
-    pub fn current_node(&self) -> NodeId {
+    pub const fn current_node(&self) -> NodeId {
         self.current_node
             .expect("current_node is only readable inside a lambda invoke")
     }
@@ -97,7 +97,7 @@ pub(crate) mod internals {
     impl ContextManager {
         /// Stand in for the executor's per-invoke attribution, so a lambda that
         /// reads [`ContextManager::current_node`] can be tested without a run.
-        pub fn set_current_node(&mut self, node_id: NodeId) {
+        pub const fn set_current_node(&mut self, node_id: NodeId) {
             self.current_node = Some(node_id);
         }
     }

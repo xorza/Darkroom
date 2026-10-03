@@ -242,22 +242,22 @@ impl RootFlags {
     /// bypass cache reuse for the event-loop bootstrap run.
     pub(crate) const EVENT_SOURCE: Self = Self(Self::PLAIN.0 | 1 << 2);
 
-    pub(crate) fn is_root(self) -> bool {
+    pub(crate) const fn is_root(self) -> bool {
         self.0 & Self::PLAIN.0 != 0
     }
 
-    pub(crate) fn is_seeded(self) -> bool {
+    pub(crate) const fn is_seeded(self) -> bool {
         self.0 & Self::SEEDED.0 == Self::SEEDED.0
     }
 
-    pub(crate) fn is_event_source(self) -> bool {
+    pub(crate) const fn is_event_source(self) -> bool {
         self.0 & Self::EVENT_SOURCE.0 == Self::EVENT_SOURCE.0
     }
 
     /// Both sets of properties. A node reached twice by
     /// [`collect_roots`](RunSchedule::collect_roots) — a sink that also owns a
     /// subscribed event — keeps what each pass gave it.
-    fn union(self, other: Self) -> Self {
+    const fn union(self, other: Self) -> Self {
         Self(self.0 | other.0)
     }
 }

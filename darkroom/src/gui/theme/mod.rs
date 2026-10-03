@@ -162,7 +162,7 @@ impl Theme {
     /// stub state) special-cases that tier around this call instead of
     /// forcing it in here.
     #[inline]
-    pub(crate) fn card_border(&self, broken: bool, selected: bool) -> RgbaF32 {
+    pub(crate) const fn card_border(&self, broken: bool, selected: bool) -> RgbaF32 {
         if broken {
             self.colors.connection_broken
         } else if selected {

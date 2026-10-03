@@ -68,7 +68,7 @@ pub(super) struct FitData<'a> {
 }
 
 impl<'a> FitData<'a> {
-    pub(super) fn new(
+    pub(super) const fn new(
         x: &'a [f64],
         y: &'a [f64],
         z: &'a [f64],
@@ -77,13 +77,13 @@ impl<'a> FitData<'a> {
         Self { x, y, z, weights }
     }
 
-    pub(super) fn unweighted(x: &'a [f64], y: &'a [f64], z: &'a [f64]) -> Self {
+    pub(super) const fn unweighted(x: &'a [f64], y: &'a [f64], z: &'a [f64]) -> Self {
         Self::new(x, y, z, None)
     }
 
     /// Sample count — the three coordinate slices are indexed in lockstep, so any of them.
     #[inline]
-    pub(super) fn len(&self) -> usize {
+    pub(super) const fn len(&self) -> usize {
         self.x.len()
     }
 
@@ -105,7 +105,7 @@ pub(super) struct NormalEquations<const N: usize> {
 }
 
 impl<const N: usize> NormalEquations<N> {
-    pub(super) fn zeroed() -> Self {
+    pub(super) const fn zeroed() -> Self {
         Self {
             hessian: [[0.0f64; N]; N],
             gradient: [0.0f64; N],

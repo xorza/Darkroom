@@ -40,7 +40,7 @@ pub(crate) struct AppCtx<'a> {
 }
 
 impl<'a> AppCtx<'a> {
-    pub(crate) fn new(
+    pub(crate) const fn new(
         theme: &'a Theme,
         library: &'a Arc<Library>,
         run_state: &'a RunState,
@@ -54,7 +54,7 @@ impl<'a> AppCtx<'a> {
         }
     }
 
-    pub(crate) fn theme(self) -> &'a Theme {
+    pub(crate) const fn theme(self) -> &'a Theme {
         self.theme
     }
 
@@ -65,25 +65,25 @@ impl<'a> AppCtx<'a> {
 
     /// The library as the frame holds it, for a cache that has to know
     /// whether it is the one it was filled against.
-    pub(crate) fn shared_library(self) -> &'a Arc<Library> {
+    pub(crate) const fn shared_library(self) -> &'a Arc<Library> {
         self.library
     }
 
     /// The last completed run's per-node verdicts and published values.
-    pub(crate) fn run_state(self) -> &'a RunState {
+    pub(crate) const fn run_state(self) -> &'a RunState {
         self.run_state
     }
 
     /// The last failed action's message (the engine's `StatusLog::error`
     /// slot), shown in the status bar until a subsequent success clears it.
-    pub(crate) fn status_error(self) -> Option<&'a str> {
+    pub(crate) const fn status_error(self) -> Option<&'a str> {
         self.status.error
     }
 
     /// This process's resident bytes (see
     /// [`ProcessMemory`](crate::gui::state::process_memory::ProcessMemory)), rendered as the
     /// status bar's `MEM` clause.
-    pub(crate) fn process_memory(self) -> u64 {
+    pub(crate) const fn process_memory(self) -> u64 {
         self.status.process_memory
     }
 }

@@ -25,7 +25,7 @@ const REFERENCE: usize = 8;
 
 /// The ancillary planes a run computes: coverage and weight for a reader of
 /// their outputs, and never the variance, which the node does not output.
-fn quality(demand: &[OutputDemand]) -> QualityPlanes {
+const fn quality(demand: &[OutputDemand]) -> QualityPlanes {
     QualityPlanes {
         coverage: !demand[1].is_skip(),
         weight: !demand[2].is_skip(),

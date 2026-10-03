@@ -8,7 +8,7 @@ use smallvec::SmallVec;
 
 /// Extract the coordinate for the given split dimension (0 = x, 1 = y).
 #[inline(always)]
-fn dim_value(p: DVec2, dim: usize) -> f64 {
+const fn dim_value(p: DVec2, dim: usize) -> f64 {
     if dim == 0 { p.x } else { p.y }
 }
 
@@ -33,7 +33,7 @@ struct Subtree {
 
 impl Subtree {
     /// The whole tree, at depth zero.
-    fn root(len: usize) -> Self {
+    const fn root(len: usize) -> Self {
         Self {
             start: 0,
             end: len,
@@ -41,22 +41,22 @@ impl Subtree {
         }
     }
 
-    fn len(self) -> usize {
+    const fn len(self) -> usize {
         self.end - self.start
     }
 
     /// The node index this subtree splits on: the median of its range.
-    fn mid(self) -> usize {
+    const fn mid(self) -> usize {
         self.start + self.len() / 2
     }
 
     /// Levels alternate x and y.
-    fn split_dim(self) -> usize {
+    const fn split_dim(self) -> usize {
         self.depth % 2
     }
 
     /// The two halves either side of [`Self::mid`], one level down.
-    fn children(self) -> [Self; 2] {
+    const fn children(self) -> [Self; 2] {
         let (mid, depth) = (self.mid(), self.depth + 1);
         [
             Self {
@@ -221,7 +221,7 @@ impl KdTree {
     }
 
     /// Get the number of points in the tree.
-    pub(super) fn len(&self) -> usize {
+    pub(super) const fn len(&self) -> usize {
         self.points.len()
     }
 

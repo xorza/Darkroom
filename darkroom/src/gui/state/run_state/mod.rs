@@ -98,11 +98,11 @@ pub(crate) struct NodeRunState {
 }
 
 impl NodeRunState {
-    pub(crate) fn status(&self) -> ExecStatus {
+    pub(crate) const fn status(&self) -> ExecStatus {
         self.status
     }
 
-    pub(crate) fn ram(&self) -> RamUsage {
+    pub(crate) const fn ram(&self) -> RamUsage {
         self.ram
     }
 

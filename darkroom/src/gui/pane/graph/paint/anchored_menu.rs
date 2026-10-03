@@ -38,7 +38,7 @@ impl AnchoredMenu {
     /// For a caller with per-frame setup to skip: [`Self::show`] answers
     /// `None` for a closed menu anyway, but only *after* its arguments
     /// have been built.
-    pub(crate) fn is_open(&self) -> bool {
+    pub(crate) const fn is_open(&self) -> bool {
         !self.anchor.is_idle()
     }
 

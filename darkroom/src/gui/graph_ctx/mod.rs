@@ -104,7 +104,7 @@ impl<'a> GraphCtx<'a> {
     /// field read. The hit sweep is the one reader — it runs at the top of the
     /// frame, before the navigation phase settles which tabs are active, so it
     /// cannot assume a canvas.
-    pub(crate) fn is_visible(self) -> bool {
+    pub(crate) const fn is_visible(self) -> bool {
         self.is_visible
     }
 
@@ -114,26 +114,26 @@ impl<'a> GraphCtx<'a> {
     /// shown graph — a duplicate copies wiring the projection alone can't
     /// describe. Prefer [`Self::body`] / [`Self::view`], which say which
     /// half is being read.
-    pub(crate) fn document(self) -> &'a Document {
+    pub(crate) const fn document(self) -> &'a Document {
         self.window.document()
     }
 
     /// The authoring graph this pane shows.
-    pub(crate) fn body(self) -> &'a Graph {
+    pub(crate) const fn body(self) -> &'a Graph {
         &self.document().graph
     }
 
     /// Its view metadata: placements, viewport, committed selection.
-    pub(crate) fn view(self) -> &'a GraphView {
+    pub(crate) const fn view(self) -> &'a GraphView {
         &self.document().main_view
     }
 
-    pub(crate) fn viewport(self) -> Viewport {
+    pub(crate) const fn viewport(self) -> Viewport {
         self.view().viewport
     }
 
     /// The palette and metrics every widget in this pane paints from.
-    pub(crate) fn theme(self) -> &'a Theme {
+    pub(crate) const fn theme(self) -> &'a Theme {
         self.window.app().theme()
     }
 
@@ -147,14 +147,14 @@ impl<'a> GraphCtx<'a> {
     /// The last run's results, for the readers that want more of a node than
     /// its [`NodeCtx`] surfaces — its logs, its failure message, the value
     /// a preview published.
-    pub(crate) fn run_state(self) -> &'a RunState {
+    pub(crate) const fn run_state(self) -> &'a RunState {
         self.window.app().run_state()
     }
 
     /// This graph's resolved output types. `pub(super)` because the one
     /// reader is [`OutputCtx::ty`](output_ctx::OutputCtx::ty) — a widget
     /// asks a port for its type, never the table for a port.
-    pub(super) fn output_types(self) -> &'a OutputTypes {
+    pub(super) const fn output_types(self) -> &'a OutputTypes {
         self.output_types
     }
 
@@ -227,7 +227,7 @@ impl<'a> GraphCtx<'a> {
     }
 
     /// This graph's committed selection.
-    pub(crate) fn selected(self) -> &'a BTreeSet<NodeId> {
+    pub(crate) const fn selected(self) -> &'a BTreeSet<NodeId> {
         &self.view().selected
     }
 

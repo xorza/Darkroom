@@ -30,7 +30,7 @@ impl FramePeek {
 
     /// Bytes one such frame occupies once resident: its own pixels, plus the quality planes if it
     /// may carry them.
-    pub(crate) fn resident_bytes(self) -> usize {
+    pub(crate) const fn resident_bytes(self) -> usize {
         let quality = if self.may_carry_nulls {
             memory::quality_plane_bytes(self.dimensions)
         } else {

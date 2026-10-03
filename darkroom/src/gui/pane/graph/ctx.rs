@@ -37,7 +37,7 @@ pub(crate) struct CanvasCtx<'a> {
 }
 
 impl<'a> CanvasCtx<'a> {
-    pub(super) fn new(
+    pub(super) const fn new(
         graph_ctx: GraphCtx<'a>,
         geometry: &'a CanvasGeometry,
         gesture: Option<CanvasGesture>,
@@ -51,28 +51,28 @@ impl<'a> CanvasCtx<'a> {
         }
     }
 
-    pub(crate) fn graph_ctx(self) -> GraphCtx<'a> {
+    pub(crate) const fn graph_ctx(self) -> GraphCtx<'a> {
         self.graph_ctx
     }
 
-    pub(crate) fn theme(self) -> &'a Theme {
+    pub(crate) const fn theme(self) -> &'a Theme {
         self.graph_ctx.theme()
     }
 
     /// Last frame's port centers and node rects.
-    pub(crate) fn geometry(self) -> &'a CanvasGeometry {
+    pub(crate) const fn geometry(self) -> &'a CanvasGeometry {
         self.geometry
     }
 
     /// Which bare-canvas gesture latched this frame, if any. Canvas-private:
     /// the classification is this module's arbitration, and no reader outside
     /// it has a use for the answer.
-    pub(super) fn gesture(self) -> Option<CanvasGesture> {
+    pub(super) const fn gesture(self) -> Option<CanvasGesture> {
         self.gesture
     }
 
     /// Whether this frame's Esc cancels whatever gesture is in flight.
-    pub(super) fn cancelled(self) -> bool {
+    pub(super) const fn cancelled(self) -> bool {
         self.cancelled
     }
 
@@ -81,7 +81,7 @@ impl<'a> CanvasCtx<'a> {
     /// ended a floating wire must not also open the palette). A derived
     /// context rather than a `gesture` parameter beside this one, so there is
     /// still exactly one answer in scope at the call site.
-    pub(super) fn without_gesture(self) -> Self {
+    pub(super) const fn without_gesture(self) -> Self {
         Self {
             gesture: None,
             ..self
@@ -125,7 +125,7 @@ pub(crate) struct DrawCtx<'a> {
 }
 
 impl<'a> DrawCtx<'a> {
-    pub(super) fn new(
+    pub(super) const fn new(
         canvas: CanvasCtx<'a>,
         selected: Selection<'a>,
         inspectors: &'a Inspectors,
@@ -140,23 +140,23 @@ impl<'a> DrawCtx<'a> {
     }
 
     /// The palette and metrics this pass paints from, off the pane's context.
-    pub(crate) fn theme(self) -> &'a Theme {
+    pub(crate) const fn theme(self) -> &'a Theme {
         self.canvas.theme()
     }
 
-    pub(crate) fn graph_ctx(self) -> GraphCtx<'a> {
+    pub(crate) const fn graph_ctx(self) -> GraphCtx<'a> {
         self.canvas.graph_ctx()
     }
 
-    pub(crate) fn geometry(self) -> &'a CanvasGeometry {
+    pub(crate) const fn geometry(self) -> &'a CanvasGeometry {
         self.canvas.geometry()
     }
 
-    pub(crate) fn inspectors(self) -> &'a Inspectors {
+    pub(crate) const fn inspectors(self) -> &'a Inspectors {
         self.inspectors
     }
 
-    pub(crate) fn cull(self) -> CullRegion {
+    pub(crate) const fn cull(self) -> CullRegion {
         self.cull
     }
 

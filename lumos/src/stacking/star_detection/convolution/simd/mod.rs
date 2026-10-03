@@ -41,18 +41,18 @@ impl<'a> Kernel2d<'a> {
 
     /// Side length in taps.
     #[inline]
-    pub(super) fn size(self) -> usize {
+    pub(super) const fn size(self) -> usize {
         self.size
     }
 
     /// Offset from the kernel's first tap to its centre.
     #[inline]
-    pub(super) fn radius(self) -> usize {
+    pub(super) const fn radius(self) -> usize {
         self.size / 2
     }
 
     #[inline]
-    pub(super) fn at(self, ky: usize, kx: usize) -> f32 {
+    pub(super) const fn at(self, ky: usize, kx: usize) -> f32 {
         self.weights[ky * self.size + kx]
     }
 }

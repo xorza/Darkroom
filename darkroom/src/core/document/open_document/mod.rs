@@ -242,7 +242,7 @@ impl OpenDocument {
     }
 
     /// The state of the graph that output types are resolved from.
-    pub(crate) fn graph_revision(&self) -> GraphRevision {
+    pub(crate) const fn graph_revision(&self) -> GraphRevision {
         self.revision
     }
 

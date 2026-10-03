@@ -44,7 +44,7 @@ pub(crate) struct PortTheme {
 }
 
 impl PortTheme {
-    pub(super) fn from_palette(p: &Palette) -> Self {
+    pub(super) const fn from_palette(p: &Palette) -> Self {
         Self {
             input: p.input_port,
             output: p.output_port,

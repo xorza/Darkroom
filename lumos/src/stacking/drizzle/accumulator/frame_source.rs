@@ -219,7 +219,7 @@ impl<'a> FrameSource<'a> {
         }
     }
 
-    pub(super) fn width(&self) -> usize {
+    pub(super) const fn width(&self) -> usize {
         self.size.width
     }
 

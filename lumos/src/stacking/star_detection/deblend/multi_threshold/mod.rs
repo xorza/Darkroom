@@ -272,7 +272,7 @@ impl RegionSet {
         self.ends.clear();
     }
 
-    fn len(&self) -> usize {
+    const fn len(&self) -> usize {
         self.ends.len()
     }
 

@@ -73,7 +73,7 @@ impl CombinedSample {
 
     /// A reduction for a combine that asked for no quality planes: the walk over survivor weights
     /// would produce two numbers nothing reads, and it costs one pass over the frames per pixel.
-    pub(crate) fn value_only(value: f32, survivor_count: usize) -> Self {
+    pub(crate) const fn value_only(value: f32, survivor_count: usize) -> Self {
         Self {
             value,
             survivor_count,

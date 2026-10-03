@@ -81,7 +81,7 @@ struct LanczosWindow {
 }
 
 impl LanczosWindow {
-    fn new(pos: SourcePosition, order: LanczosOrder) -> Self {
+    const fn new(pos: SourcePosition, order: LanczosOrder) -> Self {
         Self {
             pos,
             order,
@@ -89,11 +89,11 @@ impl LanczosWindow {
         }
     }
 
-    fn taps(&self) -> usize {
+    const fn taps(&self) -> usize {
         2 * self.order.a()
     }
 
-    fn is_interior(&self, size: Size2us) -> bool {
+    const fn is_interior(&self, size: Size2us) -> bool {
         window_inside(self.origin, self.taps(), size)
     }
 }
@@ -235,7 +235,7 @@ impl SeparableTaps {
     }
 
     /// Whether every tap on both axes lands inside the source.
-    fn is_interior(&self, size: Size2us) -> bool {
+    const fn is_interior(&self, size: Size2us) -> bool {
         window_inside(self.origin, self.taps, size)
     }
 

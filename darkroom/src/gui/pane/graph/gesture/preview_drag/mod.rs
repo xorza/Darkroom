@@ -37,7 +37,7 @@ impl PreviewDrag {
     }
 
     /// Whether a spawned preview is being dragged.
-    pub(crate) fn in_flight(&self) -> bool {
+    pub(crate) const fn in_flight(&self) -> bool {
         self.drag.in_flight()
     }
 

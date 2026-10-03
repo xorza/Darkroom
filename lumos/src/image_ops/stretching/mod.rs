@@ -111,7 +111,7 @@ pub struct Stretch {
 
 impl Stretch {
     /// Color-preserving normalized-arcsinh auto-stretch — the recommended best-quality default.
-    pub fn auto_asinh() -> Self {
+    pub const fn auto_asinh() -> Self {
         Self {
             method: StretchMethod::AutoAsinh {
                 target_background: StretchMethod::AUTO_TARGET_BACKGROUND,
@@ -121,7 +121,7 @@ impl Stretch {
     }
 
     /// Color-preserving STF (MTF) auto-stretch — the standard automatic "screen stretch".
-    pub fn auto_stf() -> Self {
+    pub const fn auto_stf() -> Self {
         Self {
             method: StretchMethod::AutoStf {
                 shadow_sigmas: StretchMethod::STF_SHADOW_SIGMAS,

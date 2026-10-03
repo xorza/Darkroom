@@ -47,7 +47,7 @@ pub struct DrizzleFrame<T> {
 
 impl<T> DrizzleFrame<T> {
     /// Create an equally weighted frame without a per-pixel weight map.
-    pub fn new(source: T, warp: WarpTransform) -> Self {
+    pub const fn new(source: T, warp: WarpTransform) -> Self {
         Self {
             source,
             warp,

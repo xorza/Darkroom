@@ -70,7 +70,7 @@ enum NodeOutcome {
 
 impl NodeOutcome {
     /// The run error the node carries — a failed run, or a node skipped for an error.
-    fn error(&self) -> Option<&RunError> {
+    const fn error(&self) -> Option<&RunError> {
         match self {
             NodeOutcome::Failed { error, .. } | NodeOutcome::Skipped { error } => Some(error),
             _ => None,

@@ -91,7 +91,7 @@ impl Default for Scnr {
 impl Scnr {
     /// Average Neutral: `G' = min(G, (R+B)/2)` — a full-strength clamp of green to the red/blue
     /// average. The default.
-    pub fn average_neutral() -> Self {
+    pub const fn average_neutral() -> Self {
         Self {
             method: ScnrMethod::AverageNeutral,
         }
@@ -100,7 +100,7 @@ impl Scnr {
     /// Additive Mask with blend `amount` ∈ `[0,1]` (0 = no change, 1 = full strength): attenuates
     /// rather than clamps, so genuine teal (OIII planetary nebulae) survives. `m = min(1, R+B)`,
     /// `G' = G·(1−amount)·(1−m) + m·G`.
-    pub fn additive_mask(amount: f32) -> Self {
+    pub const fn additive_mask(amount: f32) -> Self {
         Self {
             method: ScnrMethod::AdditiveMask { amount },
         }
@@ -134,7 +134,7 @@ impl Scnr {
 }
 
 /// Average Neutral: clamp green to the red/blue average.
-fn scnr_average_neutral(px: Rgb) -> Rgb {
+const fn scnr_average_neutral(px: Rgb) -> Rgb {
     Rgb {
         r: px.r,
         g: px.g.min(f32::midpoint(px.r, px.b)),

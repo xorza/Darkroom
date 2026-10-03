@@ -77,7 +77,7 @@ const LOG_LINE_CAP: usize = 20;
 
 /// Next state in the `Closed → Open → Pinned → Closed` cycle. `None`
 /// is the `Closed` state.
-fn cycle(mode: Option<InspectMode>) -> Option<InspectMode> {
+const fn cycle(mode: Option<InspectMode>) -> Option<InspectMode> {
     match mode {
         None => Some(InspectMode::Open),
         Some(InspectMode::Open) => Some(InspectMode::Pinned),
