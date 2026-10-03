@@ -12,7 +12,6 @@ use crate::internals::prelude::*;
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::sky_field::{Sky, SkyField};
 use crate::io::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
-use crate::io::image::pixel_flags::Flags;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::math::statistics::median_mut;
 
