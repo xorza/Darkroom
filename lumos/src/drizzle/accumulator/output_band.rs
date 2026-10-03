@@ -493,24 +493,26 @@ impl<'a> OutputBand<'a> {
     /// signature there is no input/output pair to mix up, and the samples are read once per drop
     /// instead of once per output pixel it covers.
     ///
-    /// The two quality planes stay `Option`s tested per deposit although the config fixes them for
-    /// the whole run: the test is on a value the loop cannot change, so it hoists, and
-    /// monomorphizing the band over the four combinations to prove it would quadruple every kernel
-    /// below.
+    /// The quality planes stay tested per deposit although the config fixes them for the whole
+    /// run: the test is on a value the loop cannot change, so it hoists, and monomorphizing the
+    /// band over the combinations to prove it would multiply every kernel below.
     #[inline]
     fn accumulate(&mut self, fluxes: &Fluxes, index: usize, weight: f32) {
-        for (plane, &flux) in self.planes.data.iter_mut().zip(fluxes.iter()) {
+        for (plane, &flux) in self.planes.data.iter_mut().zip(&fluxes.values) {
             plane[index] += flux * weight;
         }
-        // Weight is channel-independent, so accumulate it and its square once per output pixel.
+        // Weight is channel-independent, so accumulate it once per output pixel.
         self.planes.weight[index] += weight;
-        if let Some(weight_sq) = &mut self.planes.weight_sq {
-            weight_sq[index] += weight * weight;
+        for (plane, &variance) in self.planes.variance.iter_mut().zip(&fluxes.variances) {
+            plane[index] += weight * weight * variance;
         }
 
         // A frame reaches an output pixel through however many of its input pixels land on it, so
-        // coverage cannot simply count deposits; the bitmap is what makes it one per frame.
-        if let Some(counts) = &mut self.planes.counts {
+        // coverage cannot simply count deposits; the bitmap is what makes it one per frame. A tap
+        // of zero weight, where a Lanczos lobe crosses zero, deposits nothing and reaches nothing.
+        if weight != 0.0
+            && let Some(counts) = &mut self.planes.counts
+        {
             let mask = 1u64 << (index % u64::BITS as usize);
             let word = &mut self.touched[index / u64::BITS as usize];
             if *word & mask == 0 {

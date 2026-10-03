@@ -13,6 +13,9 @@ pub struct RunReport {
     /// Channel samples the combine kept although their pixel carried the flag, because leaving
     /// them out would have dropped the pixel below the minimum survivor count.
     pub kept_flagged_samples: FlagCounts,
+    /// The variance plane holds the background noise only: some frame did not state its gain, so
+    /// the photon noise of the signal above the sky is missing from it.
+    pub variance_background_only: bool,
 }
 
 /// A count per data-quality flag a combine acts on. A sample with two flags counts under both.

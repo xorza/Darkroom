@@ -2,10 +2,12 @@
 
 pub(crate) mod core;
 pub(crate) mod frame_check;
+pub(crate) mod frame_weights;
 mod loader;
 pub(crate) mod sample;
 pub(crate) mod sample_noise;
 pub(crate) mod set_facts;
+pub(crate) mod slots;
 
 use common::CancelToken;
 use imaginarium::Buffer2;
@@ -13,12 +15,14 @@ use rayon::prelude::*;
 
 use crate::combine::cache::core::{CacheCore, CacheTier, ChunkContext};
 use crate::combine::cache::frame_check::FrameCheck;
+use crate::combine::cache::frame_weights::FrameWeights;
 use crate::combine::cache::loader::LoadedCache;
 use crate::combine::cache::sample::{
     CombineScratch, CombinedSample, GatheredSamples, PixelSamples,
 };
-use crate::combine::cache::sample_noise::SampleNoise;
+use crate::combine::cache::sample_noise::{NoiseColumns, SampleNoise};
 use crate::combine::cache::set_facts::SetFacts;
+use crate::combine::cache::slots::Slots;
 use crate::combine::config::{Normalization, StackConfig};
 use crate::combine::error::Error;
 use crate::combine::error::check_cancel;
@@ -52,7 +56,7 @@ use std::path::Path;
 pub(crate) struct CombineOutput {
     pub(super) pixels: LinearPixels,
     weight: Option<LinearPixels>,
-    linear_variance: Option<LinearPixels>,
+    variance: Option<LinearPixels>,
     /// The stack's flags, for a frame set where any frame carries flags: [`Flags::NO_DATA`] where
     /// no frame reached a pixel, [`Flags::SATURATED`] where a kept sample was.
     flags: Option<Buffer2<u8>>,
@@ -65,7 +69,7 @@ pub(crate) struct CombineOutput {
 struct QualityRows<'a> {
     value: &'a mut [f32],
     weight: Option<&'a mut [f32]>,
-    linear_variance: Option<&'a mut [f32]>,
+    variance: Option<&'a mut [f32]>,
     flags: Option<&'a mut [u8]>,
 }
 
@@ -73,11 +77,14 @@ struct QualityRows<'a> {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CombineRequest<'a> {
     /// Per-frame weights; `None` weighs every frame equally.
-    pub(crate) weights: Option<&'a [f32]>,
+    pub(crate) weights: Option<&'a FrameWeights>,
     pub(crate) planes: QualityPlanes,
     pub(crate) min_survivors: usize,
-    /// The frames' noise, for a reducer that measures a spread; `None` gathers no noise.
+    /// The frames' noise, for a reducer that measures a spread or a variance; `None` gathers no
+    /// noise.
     pub(crate) noise: Option<&'a SampleNoise>,
+    /// How `weights` and `noise` index a pixel.
+    pub(crate) slots: Slots,
 }
 
 /// The frames feeding one combine, with their normalization parameters. Calibration masters and
@@ -195,7 +202,7 @@ impl FrameCache {
         let CombineOutput {
             pixels,
             weight: weight_pixels,
-            linear_variance: linear_variance_pixels,
+            variance: variance_pixels,
             flags,
             report,
         } = combined;
@@ -219,7 +226,7 @@ impl FrameCache {
             flags: flags.and_then(PixelFlags::from_buffer),
         };
         let weight = weight_pixels.map(QualityMap::from_pixels);
-        let linear_variance = linear_variance_pixels.map(QualityMap::from_pixels);
+        let variance = variance_pixels.map(QualityMap::from_pixels);
         let frame_count = self.frames.len();
         let width = dimensions.width();
         let height = dimensions.height();
@@ -234,7 +241,7 @@ impl FrameCache {
                     size: dimensions.size(),
                 }),
                 weight,
-                linear_variance,
+                variance,
                 cfa_type,
                 report,
             };
@@ -293,7 +300,7 @@ impl FrameCache {
             image,
             coverage: Some(Coverage::PerPixel(coverage)),
             weight,
-            linear_variance,
+            variance,
             cfa_type,
             report,
         }
@@ -320,14 +327,9 @@ impl FrameCache {
             planes,
             min_survivors,
             noise,
+            slots,
         } = request;
-        if let Some(w) = weights {
-            assert_eq!(
-                w.len(),
-                self.frames.len(),
-                "Weight count must match frame count"
-            );
-        }
+        debug_assert!(noise.is_none_or(|noise| noise.slots() == slots));
         // An in-memory stack is one chunk, so the per-chunk cancel check in
         // `process_chunks` can't interrupt the combine — poll per row here too.
         let cancel = self.core.cancel.clone();
@@ -336,7 +338,7 @@ impl FrameCache {
         let memory = self.weighted_layout(planes);
         // Coverage sizing must reuse this pre-output snapshot or resident planes are charged twice.
         let mut output_weight = planes.weight.then(|| LinearPixels::new_zeroed(dimensions));
-        let mut output_linear_variance = planes
+        let mut output_variance = planes
             .variance
             .then(|| LinearPixels::new_zeroed(dimensions));
         let any_flags = self.frames.iter().any(|frame| frame.flags.is_some());
@@ -388,7 +390,7 @@ impl FrameCache {
                     .map(|value| QualityRows {
                         value,
                         weight: None,
-                        linear_variance: None,
+                        variance: None,
                         flags: None,
                     })
                     .collect();
@@ -399,11 +401,11 @@ impl FrameCache {
                         row.weight = Some(chunk);
                     }
                 }
-                if let Some(plane) = output_linear_variance.as_mut() {
+                if let Some(plane) = output_variance.as_mut() {
                     let slice = &mut plane.channel_mut(channel).pixels_mut()
                         [pixel_offset..pixel_offset + chunk_pixels];
                     for (row, chunk) in rows.iter_mut().zip(slice.chunks_mut(width)) {
-                        row.linear_variance = Some(chunk);
+                        row.variance = Some(chunk);
                     }
                 }
                 // One plane for every channel, each pass ORing into it: a pixel is flagged when any
@@ -434,23 +436,25 @@ impl FrameCache {
                             eff_weights,
                             sample_flags,
                             frame_ids,
-                            noise_variances,
+                            noise_background,
+                            noise_sky,
+                            noise_inverse_electrons,
                             buffers,
                         } = &mut **scratch;
                         let values = values.as_mut_slice();
                         let eff_weights = eff_weights.as_mut_slice();
                         let sample_flags = sample_flags.as_mut_slice();
                         let frame_ids = frame_ids.as_mut_slice();
-                        let noise_variances = noise_variances.as_mut_slice();
+                        let noise_background = noise_background.as_mut_slice();
+                        let noise_sky = noise_sky.as_mut_slice();
+                        let noise_inverse_electrons = noise_inverse_electrons.as_mut_slice();
                         let mut row_excluded = LocalFlagCounts::default();
                         let mut row_kept = LocalFlagCounts::default();
                         let row_offset = row_in_chunk * width;
                         let y = pixel_offset / width + row_in_chunk;
                         for pixel_in_row in 0..width {
                             let pixel_idx = row_offset + pixel_in_row;
-                            let noise_slot = noise.map(|noise| {
-                                (noise, noise.slot(channel, Vec2us::new(pixel_in_row, y)))
-                            });
+                            let slot = slots.slot(channel, Vec2us::new(pixel_in_row, y));
                             let mut covered = 0usize;
                             for (frame_idx, chunk) in frames.iter().enumerate() {
                                 let support = match coverage[frame_idx] {
@@ -470,15 +474,20 @@ impl FrameCache {
                                         None => chunk[pixel_idx],
                                     };
                                     values[covered] = v;
-                                    eff_weights[covered] =
-                                        weights.map_or(1.0, |w| w[frame_idx]) * q;
+                                    eff_weights[covered] = weights
+                                        .map_or(1.0, |weights| weights.weight(frame_idx, slot))
+                                        * q;
                                     sample_flags[covered] =
                                         flags[frame_idx].map_or(0, |plane| plane[pixel_idx]);
                                     frame_ids[covered] = frame_idx as u32;
-                                    if let Some((noise, slot)) = noise_slot {
+                                    if let Some(noise) = noise {
                                         // Confidence is the warp's inverse variance factor.
-                                        noise_variances[covered] =
-                                            noise.variance(frame_idx, slot) / q;
+                                        let model = noise.model(frame_idx, slot);
+                                        noise_background[covered] = model.background_variance / q;
+                                        noise_sky[covered] = model.sky;
+                                        noise_inverse_electrons[covered] = model
+                                            .electrons_per_unit
+                                            .map_or(0.0, |electrons| 1.0 / (electrons * q));
                                     }
                                     covered += 1;
                                 }
@@ -489,7 +498,9 @@ impl FrameCache {
                                     eff_weights: &mut *eff_weights,
                                     sample_flags: &mut *sample_flags,
                                     frame_ids: &mut *frame_ids,
-                                    noise_variances: &mut *noise_variances,
+                                    noise_background: &mut *noise_background,
+                                    noise_sky: &mut *noise_sky,
+                                    noise_inverse_electrons: &mut *noise_inverse_electrons,
                                 }
                                 .leave_out_flagged(
                                     covered,
@@ -512,7 +523,11 @@ impl FrameCache {
                                         values: &mut values[..kept],
                                         weights: &eff_weights[..kept],
                                         frame_ids: &frame_ids[..kept],
-                                        noise_variances: noise.map(|_| &noise_variances[..kept]),
+                                        noise: noise.map(|_| NoiseColumns {
+                                            background: &noise_background[..kept],
+                                            sky: &noise_sky[..kept],
+                                            inverse_electrons: &noise_inverse_electrons[..kept],
+                                        }),
                                         channel,
                                     },
                                     buffers,
@@ -534,8 +549,8 @@ impl FrameCache {
                             if let Some(weight) = row.weight.as_deref_mut() {
                                 weight[pixel_in_row] = sample.weight;
                             }
-                            if let Some(variance) = row.linear_variance.as_deref_mut() {
-                                variance[pixel_in_row] = sample.linear_variance;
+                            if let Some(variance) = row.variance.as_deref_mut() {
+                                variance[pixel_in_row] = sample.variance;
                             }
                         }
                         excluded.add(&row_excluded);
@@ -547,11 +562,13 @@ impl FrameCache {
         CombineOutput {
             pixels,
             weight: output_weight,
-            linear_variance: output_linear_variance,
+            variance: output_variance,
             flags: output_flags,
             report: RunReport {
                 excluded_samples: excluded.totals(),
                 kept_flagged_samples: kept_flagged.totals(),
+                variance_background_only: planes.variance
+                    && noise.is_some_and(|noise| !noise.every_gain_known()),
             },
         }
     }

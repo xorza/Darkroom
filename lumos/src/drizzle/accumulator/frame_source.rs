@@ -9,6 +9,7 @@ use imaginarium::Buffer2;
 use crate::drizzle::accumulator::MAX_CHANNELS;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::pixel_flags::{Flags, PixelFlags};
+use crate::math::noise::ccd_noise::CcdNoise;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::registration::transform::inverse_warp::InverseWarp;
@@ -25,8 +26,13 @@ const JACOBIAN_MIN: f64 = 1e-30;
 /// under 0.1 input row — inside the extra row [`FrameSource::input_rows`] adds for it.
 const SIP_BOUNDARY_STRIDE: usize = 8;
 
-/// One input pixel's samples, one per channel.
-pub(super) type Fluxes = ArrayVec<f32, MAX_CHANNELS>;
+/// One input pixel's samples, one per channel, and each one's model variance when the drizzle
+/// measures a variance.
+#[derive(Debug)]
+pub(super) struct Fluxes {
+    pub(super) values: ArrayVec<f32, MAX_CHANNELS>,
+    pub(super) variances: ArrayVec<f32, MAX_CHANNELS>,
+}
 
 /// One input pixel, as both the coordinate the transform takes and the flat index its samples live
 /// at.
@@ -198,6 +204,8 @@ pub(super) struct FrameSource<'a> {
     pixel_weights: Option<&'a [f32]>,
     /// The frame's flags, when it carries one that excludes a pixel from deposit.
     flags: Option<&'a PixelFlags>,
+    /// Each channel's noise model, or none when the drizzle measures no variance.
+    noise: ArrayVec<CcdNoise, MAX_CHANNELS>,
 }
 
 /// The flags whose pixel deposits nothing: the sample under it is a fill or an interpolation from
@@ -216,7 +224,9 @@ impl<'a> FrameSource<'a> {
         scale: f64,
         weight: f32,
         pixel_weights: Option<&'a Buffer2<f32>>,
+        noise: ArrayVec<CcdNoise, MAX_CHANNELS>,
     ) -> Self {
+        debug_assert!(noise.is_empty() || noise.len() == image.channels());
         Self {
             planes: (0..image.channels())
                 .map(|channel| image.channel(channel).pixels())
@@ -227,6 +237,7 @@ impl<'a> FrameSource<'a> {
             weight,
             pixel_weights: pixel_weights.map(Buffer2::pixels),
             flags: image.flags.as_ref(),
+            noise,
         }
     }
 
@@ -236,7 +247,15 @@ impl<'a> FrameSource<'a> {
 
     #[inline]
     pub(super) fn fluxes(&self, pixel: InputPixel) -> Fluxes {
-        self.planes.iter().map(|plane| plane[pixel.index]).collect()
+        let values: ArrayVec<f32, MAX_CHANNELS> =
+            self.planes.iter().map(|plane| plane[pixel.index]).collect();
+        let variances = self
+            .noise
+            .iter()
+            .zip(&values)
+            .map(|(model, &value)| model.variance_at(value))
+            .collect();
+        Fluxes { values, variances }
     }
 
     /// The drop at `pixel`.
@@ -427,6 +446,8 @@ fn output_grid(scale: f64) -> Transform {
 pub(crate) mod internals {
     use std::ops::Range;
 
+    use arrayvec::ArrayVec;
+
     use crate::drizzle::accumulator::frame_source::FrameSource;
     use crate::io::image::linear::LinearImage;
     use crate::registration::transform::WarpTransform;
@@ -441,7 +462,7 @@ pub(crate) mod internals {
         output_margin: f64,
         input_margin: f64,
     ) -> Range<usize> {
-        FrameSource::new(image, warp, scale, 1.0, None).input_rows(
+        FrameSource::new(image, warp, scale, 1.0, None, ArrayVec::new()).input_rows(
             &rows,
             output_width,
             output_margin,

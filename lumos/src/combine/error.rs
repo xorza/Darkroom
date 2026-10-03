@@ -52,6 +52,11 @@ pub enum Error {
     #[error("registered frames have no pixels with common valid warp support")]
     NoCommonCoverage,
 
+    /// `Weighting::Noise` weighs each frame by its inverse noise variance, and this frame measured
+    /// none: only synthetic data has no noise at all.
+    #[error("frame {index} has no measured noise to weight by; use Equal or Manual weighting")]
+    NoNoiseToWeigh { index: usize },
+
     /// A file that could not be decoded, held as the decoder's own error — which already names the
     /// path, and stays matchable on *which* decode failed. Wrapping it in a variant of our own
     /// printed the path twice and flattened the cause into an `io::Error`. A decode that was

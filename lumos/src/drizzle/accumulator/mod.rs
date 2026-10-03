@@ -16,6 +16,7 @@ use crate::drizzle::config::DrizzleConfig;
 use crate::drizzle::drizzle_result::DrizzleResult;
 use crate::drizzle::error::DrizzleError;
 use crate::error::FrameDimensionMismatch;
+use crate::frame_store::frame_stats::FrameStats;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
@@ -70,7 +71,8 @@ struct PlaneSpan<'a> {
     /// Weighted flux per channel.
     data: ArrayVec<&'a mut [f32], MAX_CHANNELS>,
     weight: &'a mut [f32],
-    weight_sq: Option<&'a mut [f32]>,
+    /// `Σwᵢ²·vᵢ` per channel; empty when the config declines the variance plane.
+    variance: ArrayVec<&'a mut [f32], MAX_CHANNELS>,
     counts: Option<&'a mut [f32]>,
 }
 
@@ -85,14 +87,14 @@ pub struct DrizzleAccumulator {
     /// Accumulated drizzle weight `Σ wᵢ` per output pixel. Channel-independent (the per-pixel
     /// `wᵢ` is purely geometric × frame weight), so a single map serves all channels.
     weight: Buffer2<f32>,
-    /// Accumulated squared weight `Σwᵢ²` per output pixel — drives the linear-variance factor
-    /// (`Var = Σwᵢ²/(Σwᵢ)²` per unit input variance), which the correlation-suppressed image RMS
+    /// `Σwᵢ²·vᵢ` per channel, `vᵢ` each input pixel's model variance at its own value: divided by
+    /// `(Σwᵢ)²` it is the output's variance, which the correlation-suppressed image RMS
     /// understates.
     ///
-    /// `None` when the config declines the variance plane, which is the one quality output with a
-    /// cost beyond its own allocation: this is an output-grid plane resident for the whole run, and
-    /// two more arithmetic operations at every deposit.
-    weight_sq: Option<Buffer2<f32>>,
+    /// Empty when the config declines the variance plane, which is the one quality output with a
+    /// cost beyond its own allocation: these are output-grid planes resident for the whole run, a
+    /// noise measurement per frame, and more arithmetic at every deposit.
+    variance: ArrayVec<Buffer2<f32>, MAX_CHANNELS>,
     /// How many frames deposited any flux at each output pixel, when the config asks for coverage.
     frame_counts: Option<Buffer2<f32>>,
     /// Configuration.
@@ -139,10 +141,13 @@ impl DrizzleAccumulator {
             frames_added: 0,
             data,
             weight: Buffer2::new_default(output.width, output.height),
-            weight_sq: config
-                .quality
-                .variance
-                .then(|| Buffer2::new_default(output.width, output.height)),
+            variance: if config.quality.variance {
+                (0..input_dims.channels())
+                    .map(|_| Buffer2::new_default(output.width, output.height))
+                    .collect()
+            } else {
+                ArrayVec::new()
+            },
             frame_counts: config
                 .quality
                 .coverage
@@ -173,12 +178,22 @@ impl DrizzleAccumulator {
             return Ok(());
         }
 
+        // Measured on the frame as it arrives: drizzle takes no statistics from a caller.
+        let noise = if self.variance.is_empty() {
+            ArrayVec::new()
+        } else {
+            let stats = FrameStats::measure(&frame.source);
+            (0..frame.source.channels())
+                .map(|channel| stats.ccd_noise(channel))
+                .collect()
+        };
         let source = FrameSource::new(
             &frame.source,
             &frame.warp,
             f64::from(self.config.scale),
             frame.weight,
             frame.pixel_weight_map.as_ref(),
+            noise,
         );
         let plan = KernelPlan::new(&self.config);
         let reach = plan.reach();
@@ -205,7 +220,7 @@ impl DrizzleAccumulator {
         let Self {
             data,
             weight,
-            weight_sq,
+            variance,
             frame_counts,
             touched,
             scans,
@@ -216,7 +231,7 @@ impl DrizzleAccumulator {
         let bands: Vec<OutputBand<'_>> = split_planes(
             data,
             weight,
-            weight_sq.as_mut(),
+            variance,
             frame_counts.as_mut(),
             width * band_rows,
         )
@@ -291,7 +306,7 @@ impl DrizzleAccumulator {
         split_planes(
             &mut self.data,
             &mut self.weight,
-            self.weight_sq.as_mut(),
+            &mut self.variance,
             self.frame_counts.as_mut(),
             span_len,
         )
@@ -299,6 +314,8 @@ impl DrizzleAccumulator {
         .for_each(|mut span| {
             for index in 0..span.weight.len() {
                 let weight = span.weight[index];
+                // A pixel below the gate holds the fill value, which no frame measured: it carries
+                // no weight, no variance and no coverage, so no plane claims a measurement there.
                 let covered = weight >= threshold;
                 for plane in &mut span.data {
                     plane[index] = if covered {
@@ -307,16 +324,22 @@ impl DrizzleAccumulator {
                         fill_value
                     };
                 }
-                // Linear output-variance factor: Var(O) = Σ(wᵢ²)/(Σwᵢ)². `0` where uncovered.
-                if let Some(weight_sq) = &mut span.weight_sq {
-                    weight_sq[index] = if weight > 0.0 {
-                        weight_sq[index] / (weight * weight)
+                for plane in &mut span.variance {
+                    plane[index] = if covered {
+                        plane[index] / (weight * weight)
                     } else {
                         0.0
                     };
                 }
                 if let Some(counts) = &mut span.counts {
-                    counts[index] *= inv_frames;
+                    counts[index] = if covered {
+                        counts[index] * inv_frames
+                    } else {
+                        0.0
+                    };
+                }
+                if !covered {
+                    span.weight[index] = 0.0;
                 }
             }
         });
@@ -334,7 +357,7 @@ impl DrizzleAccumulator {
                 .quality
                 .weight
                 .then_some(QualityMap::Shared(self.weight)),
-            linear_variance: self.weight_sq.map(QualityMap::Shared),
+            variance: (!self.variance.is_empty()).then(|| QualityMap::from_planes(self.variance)),
             // Drizzle takes demosaiced frames, which carry no mosaic.
             cfa_type: None,
             // Drizzle leaves out every flagged pixel it cannot use, with no survivor floor to keep
@@ -415,7 +438,7 @@ impl DrizzleAccumulator {
 fn split_planes<'a>(
     data: &'a mut ArrayVec<Buffer2<f32>, MAX_CHANNELS>,
     weight: &'a mut Buffer2<f32>,
-    weight_sq: Option<&'a mut Buffer2<f32>>,
+    variance: &'a mut ArrayVec<Buffer2<f32>, MAX_CHANNELS>,
     counts: Option<&'a mut Buffer2<f32>>,
     span_len: usize,
 ) -> Vec<PlaneSpan<'a>> {
@@ -424,7 +447,10 @@ fn split_planes<'a>(
         .iter_mut()
         .map(|plane| plane.pixels_mut().chunks_mut(span_len))
         .collect();
-    let mut weight_sq = weight_sq.map(|buffer| buffer.pixels_mut().chunks_mut(span_len));
+    let mut variance: ArrayVec<_, MAX_CHANNELS> = variance
+        .iter_mut()
+        .map(|plane| plane.pixels_mut().chunks_mut(span_len))
+        .collect();
     let mut counts = counts.map(|buffer| buffer.pixels_mut().chunks_mut(span_len));
 
     // The weight plane drives the split: it is the one plane that is always present, and every
@@ -438,9 +464,14 @@ fn split_planes<'a>(
                 .map(|chunks| chunks.next().expect("one chunk per span per channel"))
                 .collect(),
             weight,
-            weight_sq: weight_sq
-                .as_mut()
-                .map(|chunks| chunks.next().expect("one variance chunk per span")),
+            variance: variance
+                .iter_mut()
+                .map(|chunks| {
+                    chunks
+                        .next()
+                        .expect("one variance chunk per span per channel")
+                })
+                .collect(),
             counts: counts
                 .as_mut()
                 .map(|chunks| chunks.next().expect("one coverage chunk per span")),
@@ -496,6 +527,11 @@ pub(crate) mod internals {
             self.add_frame(frame)
                 .expect("test frame must be coherent with the accumulator");
             self.band_rows_override = None;
+        }
+
+        /// `Σw` per output pixel as deposited, before `finalize` gates it.
+        pub(crate) const fn accumulated_weights(&self) -> &Buffer2<f32> {
+            &self.weight
         }
 
         /// `Σ flux·w` over channel `channel`'s accumulated plane, summed in f64.

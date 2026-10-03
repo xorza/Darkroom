@@ -3,6 +3,7 @@ use rand_chacha::ChaCha8Rng;
 use statrs::distribution::{Continuous, ContinuousCDF, Normal};
 
 use crate::combine::config::DEFAULT_MIN_SURVIVORS;
+use crate::combine::rejection::rejection_scale::RejectionScale;
 use crate::combine::rejection::sigma_bounds::SigmaBounds;
 use crate::combine::rejection::*;
 use crate::internals::invariance::Affine;
@@ -18,9 +19,16 @@ fn kept_with(
 ) -> Vec<usize> {
     let mut scratch = ScratchBuffers::default();
     scratch.sorted.fill(values);
+    let variances = vec![background * background; values.len()];
+    let zeros = vec![0.0; values.len()];
+    let noise = NoiseColumns {
+        background: &variances,
+        sky: &zeros,
+        inverse_electrons: &zeros,
+    };
     let window = rejection.surviving_window(
-        scratch.sorted.values(),
-        background,
+        &scratch.sorted,
+        Some(noise),
         min_survivors,
         &mut scratch.methods,
     );
@@ -51,7 +59,7 @@ fn combine(rejection: Rejection, values: &[f32], weights: &[f32]) -> CombinedSam
             values: &mut values,
             weights,
             frame_ids: &frame_ids,
-            noise_variances: None,
+            noise: None,
             channel: 0,
         },
         DEFAULT_MIN_SURVIVORS,
@@ -74,7 +82,8 @@ fn rejection_configs_default_and_construct_as_documented() {
         SigmaClipConfig::default(),
         SigmaClipConfig {
             sigma: symmetric(2.5),
-            max_iterations: 3
+            max_iterations: 3,
+            scale: RejectionScale::Robust,
         }
     );
     assert_eq!(
@@ -452,8 +461,11 @@ fn the_fit_reads_the_centre_and_sigma_off_the_normal_scores() {
     let mut scores = normal_scores::NormalScores::default();
     let z = scores.of_count(9).to_vec();
     let values: Vec<f32> = z.iter().map(|&z| (2.0 + 0.5 * z) as f32).collect();
+    let positions: Vec<u32> = (0..9).collect();
     let pass = Pass {
         sorted: &values,
+        positions: &positions,
+        noise: None,
         window: 0..9,
         index: 1,
         background: 0.0,
@@ -490,8 +502,8 @@ fn linear_fit_rejects_clean_data_at_a_rate_that_falls_with_the_count() {
             }
             scratch.sorted.fill(&values);
             let window = Rejection::linear_fit(3.0).surviving_window(
-                scratch.sorted.values(),
-                0.0,
+                &scratch.sorted,
+                None,
                 DEFAULT_MIN_SURVIVORS,
                 &mut scratch.methods,
             );
@@ -715,8 +727,8 @@ fn gesd_matches_nist_reference_example() {
     let mut scratch = ScratchBuffers::default();
     scratch.sorted.fill(&values);
     let window = Rejection::Gesd(GesdConfig::new(0.05, Some(10))).surviving_window(
-        scratch.sorted.values(),
-        0.0,
+        &scratch.sorted,
+        None,
         DEFAULT_MIN_SURVIVORS,
         &mut scratch.methods,
     );
@@ -781,8 +793,8 @@ fn gesd_gaussian_false_positive_rate_matches_alpha() {
             }
             scratch.sorted.fill(&values);
             let window = rejection.surviving_window(
-                scratch.sorted.values(),
-                0.0,
+                &scratch.sorted,
+                None,
                 DEFAULT_MIN_SURVIVORS,
                 &mut scratch.methods,
             );
@@ -955,19 +967,28 @@ fn combine_mean_weighs_each_survivor_by_its_own_weight() {
 
 /// The survivors' positions follow the sort: the ramp's survivors are its first seven samples, in
 /// ascending order, and a pixel that sorted nothing reports none. The sample counts them, and its
-/// weight and variance factor are those of the seven unit weights: 7 and 7/49.
+/// weight is that of the seven unit weights, 7.
+///
+/// The variance is `Σw²·v/(Σw)²` with each sample's model taken at the combined value 17.5/7 =
+/// 2.5: background 1/4 plus `(2.5 − 1/2)·1/4` above the sky, 3/4, so 7·(3/4)/49 = 3/28, exact up
+/// to its one rounding.
 #[test]
 fn the_survivors_are_named_after_the_combine() {
     let ramp = [4.0, 1.0, 100.0, 3.5, 1.5, 2.0, 3.0, 2.5];
     let mut values = ramp;
     let frame_ids: Vec<u32> = (0..8).collect();
+    let noise = NoiseColumns {
+        background: &[0.25; 8],
+        sky: &[0.5; 8],
+        inverse_electrons: &[0.25; 8],
+    };
     let mut scratch = ScratchBuffers::default();
     let sample = Rejection::sigma_clip(2.0).combine_mean(
         PixelSamples {
             values: &mut values,
             weights: &[1.0; 8],
             frame_ids: &frame_ids,
-            noise_variances: None,
+            noise: Some(noise),
             channel: 0,
         },
         DEFAULT_MIN_SURVIVORS,
@@ -979,15 +1000,16 @@ fn the_survivors_are_named_after_the_combine() {
         scratch.survivor_positions(),
         Some(&[1, 4, 5, 7, 6, 3, 0][..])
     );
+    assert_eq!(sample.value, 2.5);
     assert_eq!(sample.weight, 7.0);
-    assert_eq!(sample.linear_variance, 7.0 / 49.0);
+    assert_eq!(sample.variance, 3.0 / 28.0);
 
     Rejection::None.combine_mean(
         PixelSamples {
             values: &mut values,
             weights: &[1.0; 8],
             frame_ids: &frame_ids,
-            noise_variances: None,
+            noise: None,
             channel: 0,
         },
         DEFAULT_MIN_SURVIVORS,
@@ -997,7 +1019,7 @@ fn the_survivors_are_named_after_the_combine() {
     assert_eq!(scratch.survivor_positions(), None);
 }
 
-/// The noise variances become the floor as their root mean square: four samples of variance
+/// The background columns become the floor as their root mean square: four samples of variance
 /// 0.25 and four of 0.75 give a background of √0.5 = 0.7071. On [0, 0, 0, 0, 0, 0, 0, 1.5], whose
 /// MAD is 0, the band at 2σ is ±1.414, so the 1.5 goes; with no noise gathered the band about the
 /// tied zeros is one subnormal step wide and the 1.5 goes all the same, and with variances of 1
@@ -1006,7 +1028,8 @@ fn the_survivors_are_named_after_the_combine() {
 fn the_gathered_noise_floors_the_spread() {
     let values = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.5];
     let frame_ids: Vec<u32> = (0..8).collect();
-    let survivors = |noise_variances: Option<&[f32]>| {
+    let zeros = [0.0; 8];
+    let survivors = |background: Option<&[f32]>| {
         let mut values = values;
         Rejection::sigma_clip(2.0)
             .combine_mean(
@@ -1014,7 +1037,11 @@ fn the_gathered_noise_floors_the_spread() {
                     values: &mut values,
                     weights: &[1.0; 8],
                     frame_ids: &frame_ids,
-                    noise_variances,
+                    noise: background.map(|background| NoiseColumns {
+                        background,
+                        sky: &zeros,
+                        inverse_electrons: &zeros,
+                    }),
                     channel: 0,
                 },
                 DEFAULT_MIN_SURVIVORS,
@@ -1027,4 +1054,38 @@ fn the_gathered_noise_floors_the_spread() {
     assert_eq!(survivors(Some(&mixed)), 7);
     assert_eq!(survivors(None), 7);
     assert_eq!(survivors(Some(&[1.0; 8])), 8);
+}
+
+/// On [99, 100, 100, 101, 100, 115] at 2.5σ the two scales disagree. The MAD about the median 100
+/// is 0.5, so σ = 0.5 · 1.4826 · 1.1895 = 0.882 and the band ±2.2 drops the 115. The five left
+/// have a MAD of 0, and the measured background, √0.01 = 0.1, makes the band ±0.25: the 99 and the
+/// 101 go too, and three samples stay. The CCD model with background variance 0.01, sky 0 and one
+/// electron per unit gives 0.01 + 100 = 100.01 at the median, σ 10.0, band ±25: the 115 is 1.5σ of
+/// photon noise above 100 electrons, and all six stay.
+#[test]
+fn the_ccd_model_reads_photon_noise_the_mad_cannot_see() {
+    let values = [99.0, 100.0, 100.0, 101.0, 100.0, 115.0];
+    let background = [0.01; 6];
+    let sky = [0.0; 6];
+    let inverse_electrons = [1.0; 6];
+    let noise = NoiseColumns {
+        background: &background,
+        sky: &sky,
+        inverse_electrons: &inverse_electrons,
+    };
+    let kept_under = |scale| {
+        let mut scratch = ScratchBuffers::default();
+        scratch.sorted.fill(&values);
+        let rejection = Rejection::SigmaClip(SigmaClipConfig::new(2.5, 3).with_scale(scale));
+        rejection
+            .surviving_window(
+                &scratch.sorted,
+                Some(noise),
+                DEFAULT_MIN_SURVIVORS,
+                &mut scratch.methods,
+            )
+            .len()
+    };
+    assert_eq!(kept_under(RejectionScale::Robust), 3);
+    assert_eq!(kept_under(RejectionScale::CcdModel), 6);
 }

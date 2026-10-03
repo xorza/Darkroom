@@ -867,19 +867,19 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
 
     let ram_variance = ram
         .product
-        .linear_variance
+        .variance
         .as_ref()
-        .expect("a σ-clipped mean emits a linear-variance plane");
+        .expect("a σ-clipped mean emits a variance plane");
     let streaming_variance = streaming
         .product
-        .linear_variance
+        .variance
         .as_ref()
-        .expect("a σ-clipped mean emits a linear-variance plane");
+        .expect("a σ-clipped mean emits a variance plane");
     for channel in 0..channels {
         assert_eq!(
             bits(ram_variance.channel(channel).pixels()),
             bits(streaming_variance.channel(channel).pixels()),
-            "linear-variance channel {channel} differs between the RAM and streaming tiers"
+            "variance channel {channel} differs between the RAM and streaming tiers"
         );
     }
 

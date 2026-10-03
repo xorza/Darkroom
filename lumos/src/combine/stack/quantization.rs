@@ -37,18 +37,17 @@ impl SourceSigmas {
     }
 
     /// Frames combine in quadrature under the weights and the gains of `channel` they were actually
-    /// combined with, so a weighted mean over `survivor_indices` carries `√Σ(wᵢ·gainᵢ·σᵢ)² / Σwᵢ`.
+    /// combined with, so a weighted mean over the `(frame, weight)` survivors carries
+    /// `√Σ(wᵢ·gainᵢ·σᵢ)² / Σwᵢ`.
     pub(super) fn combined_mean(
         &self,
-        weights: Option<&[f32]>,
         frame_norms: Option<&[FrameNorm]>,
         channel: usize,
-        survivor_indices: impl IntoIterator<Item = usize>,
+        survivors: impl IntoIterator<Item = (usize, f32)>,
     ) -> Option<f32> {
         let mut total_weight = 0.0f32;
         let mut variance = 0.0f32;
-        for index in survivor_indices {
-            let weight = weights.map_or(1.0, |values| values[index]);
+        for (index, weight) in survivors {
             let gain = frame_norms.map_or(1.0, |norms| norms[index].channels[channel].gain);
             total_weight += weight;
             variance += (weight * gain * self.0[index]).powi(2);
@@ -155,7 +154,9 @@ mod tests {
             .into_iter()
             .collect(),
             noise: [mad_to_sigma(0.1)].into_iter().collect(),
+            sky: [0.5].into_iter().collect(),
             quantization_sigma,
+            electrons_per_unit: None,
             facts: FrameFacts {
                 domain: None,
                 row_order: None,
@@ -209,11 +210,14 @@ mod tests {
     fn combined_sigmas_follow_the_reduction() {
         let sigma = 0.25f32;
         let equal = SourceSigmas(vec![sigma; 4]);
-        assert_eq!(equal.combined_mean(None, None, 0, 0..4), Some(sigma / 2.0));
+        assert_eq!(
+            equal.combined_mean(None, 0, (0..4).map(|frame| (frame, 1.0))),
+            Some(sigma / 2.0)
+        );
 
         let unequal = SourceSigmas(vec![0.5, 1.0]);
         assert_eq!(
-            unequal.combined_mean(Some(&[0.75, 0.25]), None, 0, 0..2),
+            unequal.combined_mean(None, 0, [(0, 0.75), (1, 0.25)]),
             Some(0.203_125f32.sqrt())
         );
         assert_eq!(unequal.combined_median(None), Some(1.0));
@@ -234,7 +238,7 @@ mod tests {
         );
         assert_eq!(scaled.conservative(Some(&norms(&[-2.0, 1.0]))), Some(0.5));
         // No survivors carry no weight, and so no figure.
-        assert_eq!(scaled.combined_mean(None, None, 0, 0..0), None);
+        assert_eq!(scaled.combined_mean(None, 0, []), None);
 
         let two_channels: Vec<FrameNorm> = (0..2)
             .map(|_| FrameNorm {
@@ -246,11 +250,11 @@ mod tests {
             .collect();
         let pair = SourceSigmas(vec![sigma; 2]);
         assert_eq!(
-            pair.combined_mean(None, Some(&two_channels), 0, 0..2),
+            pair.combined_mean(Some(&two_channels), 0, [(0, 1.0), (1, 1.0)]),
             Some(2.0f32.sqrt() / 8.0)
         );
         assert_eq!(
-            pair.combined_mean(None, Some(&two_channels), 1, 0..2),
+            pair.combined_mean(Some(&two_channels), 1, [(0, 1.0), (1, 1.0)]),
             Some(2.0f32.sqrt() / 4.0)
         );
         assert_eq!(pair.conservative(Some(&two_channels)), Some(0.5));
