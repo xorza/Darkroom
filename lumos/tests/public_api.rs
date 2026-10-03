@@ -18,7 +18,7 @@ use lumos::{
     StarDetectionDiagnostics, StarDetectionFilterConfig, StarDetectionFwhmConfig,
     StarDetectionMeasurementConfig, StarDetectionQualityFilterDiagnostics, StarDetector, StarMatch,
     TransferProvenance, Transform, TransformModel, TransformType, TriangleConfig, WarpParams,
-    Weighting, WinsorizedClipConfig,
+    WarpTransform, Weighting, WinsorizedClipConfig,
 };
 
 #[test]
@@ -218,10 +218,10 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
     assert_eq!(noise.read_noise_electrons, 10.0);
     noise.validate().unwrap();
 
-    let frame = DrizzleFrame::new("light.fits", Transform::identity());
+    let frame = DrizzleFrame::new("light.fits", WarpTransform::new(Transform::identity()));
     let DrizzleFrame {
         source,
-        transform: _,
+        warp: _,
         weight,
         pixel_weight_map,
     } = frame;

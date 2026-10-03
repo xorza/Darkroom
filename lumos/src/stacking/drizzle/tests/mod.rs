@@ -16,10 +16,10 @@ use crate::stacking::drizzle::accumulator::frame_source::internals::input_rows;
 use crate::stacking::drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
 use crate::stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::stacking::drizzle::error::{DrizzleConfigError, DrizzleError};
-use crate::stacking::drizzle::geometry::{AreaMagnification, boxer, local_jacobian, sgarea};
+use crate::stacking::drizzle::geometry::{boxer, sgarea};
 use crate::stacking::drizzle::stack::{drizzle_images, drizzle_stack};
 use crate::stacking::progress::ProgressCallback;
-use crate::stacking::registration::transform::Transform;
+use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::stacking::stack_product::StackProduct;
 use crate::stacking::stack_product::coverage::Coverage;
 use crate::stacking::stack_product::quality_map::QualityMap;
@@ -52,7 +52,7 @@ fn drizzle_one(
 ) -> StackProduct {
     let mut acc = accumulator(ImageDimensions::new((side, side), 1), config);
     acc.add_image(image, transform, 1.0, pixel_weights);
-    acc.finalize()
+    acc.finalize().product
 }
 
 fn mono_image(size: Size2us, pixels: Vec<f32>) -> LinearImage {
@@ -115,12 +115,12 @@ fn drizzle_frames(
     images
         .into_iter()
         .zip(transforms.iter().copied())
-        .map(|(source, transform)| DrizzleFrame::new(source, transform))
+        .map(|(source, transform)| DrizzleFrame::new(source, warp_of(transform)))
         .collect()
 }
 
-/// A registration transform with the drizzle output scale composed in, the way `accumulate_image`
-/// builds it before handing it to a kernel.
-fn output_transform(transform: Transform, scale: f32) -> Transform {
-    Transform::scale(DVec2::splat(f64::from(scale))).compose(&transform)
+/// The registration warp a fixture's input-to-reference `transform` stands for: its inverse, the
+/// direction registration reports.
+fn warp_of(transform: Transform) -> WarpTransform {
+    WarpTransform::new(transform.inverse())
 }

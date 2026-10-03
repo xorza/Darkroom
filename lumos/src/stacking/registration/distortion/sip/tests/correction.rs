@@ -202,3 +202,38 @@ fn barrel_vs_pincushion_opposite_corrections() {
         "Magnitudes should be similar: barrel={mag_barrel:.4}, pincushion={mag_pincushion:.4}"
     );
 }
+
+/// The analytic Jacobian of `correct` against a central difference, for an order-5 fit of a
+/// barrel field at points across it. The difference with step `h` = 1e-2 px has truncation error
+/// `h²/6·|c'''|` — the correction's third derivative is at most `6·k` = 6e-7 per px² here, so 1e-11 —
+/// and rounding error `u·|p|/h` ≈ 2e-11 at `|p|` ≈ 1000; 1e-9 holds the sum.
+#[test]
+fn jacobian_is_the_derivative_of_correct() {
+    let center = DVec2::new(500.0, 500.0);
+    let PointPairs { reference, target } = make_radial_distortion_points(center, 1e-7, 50, 1000);
+    let config = SipConfig {
+        order: 5,
+        reference_point: Some(center),
+        ..Default::default()
+    };
+    let sip = fit_sip(&reference, &target, &Transform::identity(), &config).polynomial;
+    let h = 1e-2;
+    for p in [
+        DVec2::new(500.0, 500.0),
+        DVec2::new(120.0, 870.0),
+        DVec2::new(950.0, 40.0),
+    ] {
+        let jacobian = sip.jacobian(p);
+        for (axis, step) in [DVec2::new(h, 0.0), DVec2::new(0.0, h)]
+            .into_iter()
+            .enumerate()
+        {
+            let difference = (sip.correct(p + step) - sip.correct(p - step)) / (2.0 * h);
+            let column = jacobian.col(axis);
+            assert!(
+                (column - difference).length() < 1e-9,
+                "at {p:?} axis {axis}: {column:?} against {difference:?}"
+            );
+        }
+    }
+}

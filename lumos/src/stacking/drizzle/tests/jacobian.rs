@@ -44,7 +44,7 @@ fn point_jacobian_two_frame_weighted_mean() {
     let mut acc = accumulator(ImageDimensions::new((w, h), 1), config);
     acc.add_image(image_a, &Transform::identity(), 1.0, None);
     acc.add_image(image_b, &make_scale2x_transform(), 1.0, None);
-    let result = acc.finalize();
+    let result = acc.finalize().product;
 
     // output(5,5) = (10*1 + 0*0.25) / (1+0.25) = 8.0
     let out = result.image.channel(0);
@@ -80,7 +80,7 @@ fn point_jacobian_two_frame_both_nonzero() {
     let mut acc = accumulator(ImageDimensions::new((w, h), 1), config);
     acc.add_image(image_a, &Transform::identity(), 1.0, None);
     acc.add_image(image_b, &make_scale2x_transform(), 1.0, None);
-    let result = acc.finalize();
+    let result = acc.finalize().product;
 
     // output(5,5) = (10*1 + 2*0.25) / (1+0.25) = 10.5/1.25 = 8.4
     let out = result.image.channel(0);
@@ -120,7 +120,7 @@ fn turbo_jacobian_two_frame_weighted_mean() {
     let mut acc = accumulator(ImageDimensions::new((w, h), 1), config);
     acc.add_image(image_a, &Transform::identity(), 1.0, None);
     acc.add_image(image_b, &make_scale2x_transform(), 1.0, None);
-    let result = acc.finalize();
+    let result = acc.finalize().product;
 
     // Integer-center: Frame B drop (centered (4,4), drop_size 1) fully covers output (4,4),
     // so overlap = 1.0 (not the old 0.25). data = 10*1.0 + 2*0.25 = 10.5,
@@ -170,11 +170,11 @@ fn turbo_matches_square_affine_with_jacobian() {
 
     let mut acc_turbo = accumulator(ImageDimensions::new((w, h), 1), config_turbo);
     acc_turbo.add_image(image_turbo, &transform, 1.0, None);
-    let result_turbo = acc_turbo.finalize();
+    let result_turbo = acc_turbo.finalize().product;
 
     let mut acc_square = accumulator(ImageDimensions::new((w, h), 1), config_square);
     acc_square.add_image(image_square, &transform, 1.0, None);
-    let result_square = acc_square.finalize();
+    let result_square = acc_square.finalize().product;
 
     let out_turbo = result_turbo.image.channel(0);
     let out_square = result_square.image.channel(0);
@@ -225,7 +225,7 @@ fn gaussian_jacobian_two_frame_weighted_mean() {
         let mut acc = accumulator(ImageDimensions::new((w, h), 1), config.clone());
         acc.add_image(image_a, &Transform::identity(), 1.0, None);
         acc.add_image(image_b, b_transform, 1.0, None);
-        let r = acc.finalize();
+        let r = acc.finalize().product;
         r.image.channel(0)[4 * w + 4]
     };
 
@@ -266,7 +266,7 @@ fn lanczos_jacobian_two_frame_weighted_mean() {
         let mut acc = accumulator(ImageDimensions::new((w, h), 1), config.clone());
         acc.add_image(image_a, &Transform::identity(), 1.0, None);
         acc.add_image(image_b, b_transform, 1.0, None);
-        let r = acc.finalize();
+        let r = acc.finalize().product;
         r.image.channel(0)[4 * w + 4]
     };
 
@@ -316,7 +316,7 @@ fn all_kernels_jacobian_matches_square_affine() {
     let image_sq = mono_image(Size2us::new(w, h), pixels.clone());
     let mut acc_sq = accumulator(ImageDimensions::new((w, h), 1), config_sq);
     acc_sq.add_image(image_sq, &transform, 1.0, None);
-    let result_sq = acc_sq.finalize();
+    let result_sq = acc_sq.finalize().product;
     assert_product_finite(&result_sq);
     let out_sq = result_sq.image.channel(0);
 
@@ -335,7 +335,7 @@ fn all_kernels_jacobian_matches_square_affine() {
         let image = mono_image(Size2us::new(w, h), pixels.clone());
         let mut acc = accumulator(ImageDimensions::new((w, h), 1), config);
         acc.add_image(image, &transform, 1.0, None);
-        let result = acc.finalize();
+        let result = acc.finalize().product;
         assert_product_finite(&result);
         let out = result.image.channel(0);
         let ow = result.image.width();
@@ -367,159 +367,4 @@ fn all_kernels_jacobian_matches_square_affine() {
             "{kernel:?} vs Square: max_diff={max_diff:.4}, expected < 0.2"
         );
     }
-}
-
-#[test]
-fn local_jacobian_identity_scale1() {
-    // Identity transform, scale=1: one input pixel maps to exactly one output pixel.
-    // Jacobian = |det(I)| * 1² = 1.0
-    let transform = Transform::identity();
-    let center = transform.apply(DVec2::new(5.0, 5.0));
-    let jaco = local_jacobian(&transform, center, Vec2us::new(5, 5));
-    assert!(
-        (jaco - 1.0).abs() < 1e-10,
-        "Identity scale=1: expected 1.0, got {jaco}"
-    );
-}
-
-#[test]
-fn local_jacobian_identity_scale2() {
-    // Identity transform, scale=2: one input pixel maps to a 2×2 area in output.
-    // Jacobian = |det(I)| * 2² = 4.0
-    let transform = output_transform(Transform::identity(), 2.0);
-    let center = transform.apply(DVec2::new(5.0, 5.0));
-    let jaco = local_jacobian(&transform, center, Vec2us::new(5, 5));
-    assert!(
-        (jaco - 4.0).abs() < 1e-10,
-        "Identity scale=2: expected 4.0, got {jaco}"
-    );
-}
-
-#[test]
-fn local_jacobian_rotation_preserves_area() {
-    // Pure rotation around origin: area is preserved, Jacobian = scale².
-    // Rotation by 30° around (0, 0), scale=1.
-    let angle = 30.0_f64.to_radians();
-    let transform = Transform::euclidean(DVec2::ZERO, angle);
-    let center = transform.apply(DVec2::new(50.0, 50.0));
-    let jaco = local_jacobian(&transform, center, Vec2us::new(50, 50));
-    // Rotation preserves area: Jacobian = 1.0
-    assert!(
-        (jaco - 1.0).abs() < 1e-10,
-        "30° rotation: expected 1.0, got {jaco}"
-    );
-}
-
-#[test]
-fn local_jacobian_anisotropic_scale() {
-    // Scale by 2x in x, 3x in y: area magnification = 6.
-    let transform = Transform::scale(DVec2::new(2.0, 3.0));
-    let center = transform.apply(DVec2::new(5.0, 5.0));
-    // Jacobian = |det([2,0;0,3])| * scale² = 6 * 1 = 6.0
-    let jaco = local_jacobian(&transform, center, Vec2us::new(5, 5));
-    assert!(
-        (jaco - 6.0).abs() < 1e-10,
-        "2x×3x scale: expected 6.0, got {jaco}"
-    );
-}
-
-#[test]
-fn local_jacobian_perspective_varies_spatially() {
-    // Perspective transform: Jacobian should differ at different image locations.
-    // Homography with small perspective terms.
-    let transform = Transform::homography([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1e-4, 0.0]);
-
-    // At x=0: w ≈ 1, minimal distortion
-    let c0 = transform.apply(DVec2::new(0.0, 0.0));
-    let jaco_left = local_jacobian(&transform, c0, Vec2us::ZERO);
-
-    // At x=1000: w ≈ 1.1, noticeable distortion
-    let c1000 = transform.apply(DVec2::new(1000.0, 0.0));
-    let jaco_right = local_jacobian(&transform, c1000, Vec2us::new(1000, 0));
-
-    // Jacobians must differ for perspective transform
-    assert!(
-        (jaco_left - jaco_right).abs() > 0.01,
-        "Perspective Jacobian should vary: left={jaco_left:.6}, right={jaco_right:.6}"
-    );
-    // At x=0, w≈1 so jaco≈1. At x=1000, w≈1.1 so area shrinks → jaco < 1.
-    assert!(
-        jaco_left > jaco_right,
-        "Left side should have larger Jacobian than right: {jaco_left:.6} vs {jaco_right:.6}"
-    );
-}
-
-/// The per-frame factor and the per-pixel finite difference measure the same quantity for every
-/// linear model — that agreement is what lets the kernels resolve it once instead of at every input
-/// pixel. Checked far from the origin, where the finite difference subtracts two large coordinates
-/// and the matrix form does not.
-#[test]
-fn area_magnification_agrees_with_the_per_pixel_jacobian_for_linear_models() {
-    let cases = [
-        (
-            "translation",
-            Transform::translation(DVec2::new(17.0, -9.0)),
-        ),
-        (
-            "euclidean",
-            Transform::euclidean(DVec2::new(3.0, 4.0), 0.21),
-        ),
-        (
-            "similarity",
-            Transform::similarity(DVec2::new(3.0, 4.0), 0.21, 1.37),
-        ),
-        (
-            "affine",
-            Transform::affine([1.02, 0.03, 12.0, -0.04, 0.98, -7.0]),
-        ),
-    ];
-
-    for (name, transform) in cases {
-        let to_output = output_transform(transform, 2.0);
-        let magnification = AreaMagnification::new(&to_output);
-        for pixel in [Vec2us::ZERO, Vec2us::new(7, 3), Vec2us::new(6000, 4000)] {
-            let center = to_output.apply(DVec2::new(pixel.x as f64, pixel.y as f64));
-            let uniform = magnification.at(center, pixel);
-            let per_pixel = local_jacobian(&to_output, center, pixel);
-            assert!(
-                (uniform - per_pixel).abs() < 1e-9 * per_pixel,
-                "{name} at {pixel:?}: uniform {uniform}, per-pixel {per_pixel}"
-            );
-        }
-    }
-
-    // Hand-computed: det([1.02, 0.03; -0.04, 0.98]) = 1.02·0.98 − 0.03·(−0.04) = 1.0008, and the
-    // factor is that times scale².
-    let affine = Transform::affine([1.02, 0.03, 12.0, -0.04, 0.98, -7.0]);
-    let at_origin = |scale: f32| {
-        let to_output = output_transform(affine, scale);
-        AreaMagnification::new(&to_output).at(to_output.apply(DVec2::ZERO), Vec2us::ZERO)
-    };
-    assert!((at_origin(2.0) - 1.0008 * 4.0).abs() < 1e-12);
-    // Scale is not ignored: composed into the matrix, it is quadratic in the determinant.
-    assert!((at_origin(1.0) - 1.0008).abs() < 1e-12);
-}
-
-/// A projective transform keeps the per-pixel path, because its factor genuinely varies.
-#[test]
-fn area_magnification_stays_per_pixel_for_a_homography() {
-    let transform = output_transform(
-        Transform::homography([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1e-4, 0.0]),
-        1.0,
-    );
-    let magnification = AreaMagnification::new(&transform);
-
-    let near = Vec2us::ZERO;
-    let far = Vec2us::new(1000, 0);
-    let at = |pixel: Vec2us| {
-        let center = transform.apply(DVec2::new(pixel.x as f64, pixel.y as f64));
-        magnification.at(center, pixel)
-    };
-
-    assert!(
-        (at(near) - at(far)).abs() > 0.01,
-        "a homography's magnification must vary: {} vs {}",
-        at(near),
-        at(far)
-    );
 }

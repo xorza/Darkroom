@@ -1,4 +1,5 @@
 use super::*;
+use crate::stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
 use std::path::PathBuf;
 use std::ptr;
 
@@ -13,15 +14,14 @@ fn drizzle_single_image() {
     let identity = Transform::identity();
     acc.add_image(image, &identity, 1.0, None);
 
-    let result = acc.finalize();
+    let result = acc.finalize().product;
 
     // Output should be 200x200
     assert_eq!(result.image.width(), 200);
     assert_eq!(result.image.height(), 200);
 
-    // With scale=2, pixfrac=0.8: drop_size = 0.8*2 = 1.6 output pixels.
-    // Integer-center: input pixel (ix,iy) center at (ix,iy), scaled to (2*ix, 2*iy).
-    // A single flat image is reproduced wherever there is coverage: value = val·w / w = val.
+    // With scale=2, pixfrac=0.8: drop_size = 0.8*2 = 1.6 output pixels, centred on (2·ix + ½,
+    // 2·iy + ½). A single flat image is reproduced wherever there is coverage: value = val·w / w.
     // Only the thin high-edge band (coverage < min_weight_fraction) falls back to fill_value.
     let pixels = result.image.channel(0);
     assert!(
@@ -36,7 +36,7 @@ fn drizzle_single_image() {
         "interior should be fully covered (only edges fill): {covered}/{}",
         pixels.len()
     );
-    // Input pixel (0,0)'s drop is centered on output (0,0) → covered, reads the input value.
+    // Input pixel (0,0)'s drop covers 0.8 of output (0,0) on each axis → reads the input value.
     assert!(
         (pixels[0] - 0.5).abs() < 1e-5,
         "Pixel (0,0) should be 0.5, got {}",
@@ -54,24 +54,22 @@ fn drizzle_point_kernel() {
     let identity = Transform::identity();
     acc.add_image(image, &identity, 1.0, None);
 
-    let result = acc.finalize();
+    let result = acc.finalize().product;
     assert_eq!(result.image.width(), 20);
     assert_eq!(result.image.height(), 20);
 
-    // Point kernel (integer-center): input (ix,iy) center at (ix,iy),
-    // scaled → output round(ix*2) = 2*ix, round(iy*2) = 2*iy (even coords).
-    // Covered pixels (even x, even y): value = 1.0/1.0 = 1.0; others fill_value = 0.0.
+    // Point kernel: input (ix,iy) lands at (2·ix + ½, 2·iy + ½), the corner its 2×2 block of
+    // output cells shares — a tie `f64::round` breaks upward, onto the odd cell (2·ix + 1, 2·iy + 1).
+    // Covered pixels read 1.0/1.0 = 1.0; the rest take fill_value = 0.0.
     let pixels = result.image.channel(0);
     let w = 20;
-    // (0,0) ← input (0,0): value = 1.0
-    assert_eq!(pixels[0], 1.0);
-    // (2,0) ← input (1,0): value = 1.0
-    assert_eq!(pixels[2], 1.0);
-    // (1,1): odd coords, no coverage → 0.0
-    assert!((pixels[w + 1]).abs() < f32::EPSILON);
-    // (3,3): odd coords, no coverage → 0.0
-    assert!((pixels[3 * w + 3]).abs() < f32::EPSILON);
-    // Exactly 100 covered pixels (10×10 input maps to 10×10 even-coordinate outputs)
+    // (1,1) ← input (0,0), and (3,1) ← input (1,0).
+    assert_eq!(pixels[w + 1], 1.0);
+    assert_eq!(pixels[w + 3], 1.0);
+    // Even coordinates: no drop lands there.
+    assert_eq!(pixels[0], 0.0);
+    assert_eq!(pixels[2 * w + 2], 0.0);
+    // Exactly 100 covered pixels: 10×10 inputs onto 10×10 odd-coordinate outputs.
     let covered = pixels.iter().filter(|&&v| v > 0.5).count();
     assert_eq!(covered, 100);
 }
@@ -111,7 +109,7 @@ fn drizzle_stops_between_frames_when_cancelled() {
         .map(|_| {
             DrizzleFrame::new(
                 constant_mono_image(Size2us::new(16, 16), 0.5),
-                Transform::identity(),
+                WarpTransform::new(Transform::identity()),
             )
         })
         .collect();
@@ -132,7 +130,7 @@ fn drizzle_stops_between_frames_when_cancelled() {
         .map(|_| {
             DrizzleFrame::new(
                 constant_mono_image(Size2us::new(16, 16), 0.5),
-                Transform::identity(),
+                WarpTransform::new(Transform::identity()),
             )
         })
         .collect();
@@ -147,26 +145,130 @@ fn drizzle_stops_between_frames_when_cancelled() {
     );
 }
 
+/// A SIP fit of `field` about the centre of a `size` frame, on `transform`, as registration would
+/// report it.
+fn sip_warp(size: Size2us, transform: Transform, field: impl Fn(DVec2) -> DVec2) -> WarpTransform {
+    let center = DVec2::new(size.width as f64 / 2.0, size.height as f64 / 2.0);
+    let mut reference = Vec::new();
+    for y in (0..size.height).step_by(2) {
+        for x in (0..size.width).step_by(2) {
+            reference.push(DVec2::new(x as f64, y as f64));
+        }
+    }
+    let target: Vec<DVec2> = reference
+        .iter()
+        .map(|&r| transform.apply(r + field(r - center)))
+        .collect();
+    let config = SipConfig {
+        order: 3,
+        reference_point: Some(center),
+        clip_iterations: 0,
+        ..SipConfig::default()
+    };
+    let fit = SipPolynomial::fit_from_transform(&reference, &target, &transform, &config).unwrap();
+    WarpTransform::with_sip(transform, fit.polynomial)
+}
+
+/// A frame registered with SIP drizzles through the warp's inverse: `drizzle_images` and the
+/// accumulator give the same planes bit for bit, every pixel converges, and a lone bright pixel at
+/// input `t` lands on the output cell nearest `s·r + (s − 1)/2`, where `r` is the warp's inverse
+/// of `t` — at scale 1 and with the point kernel, the cell `round(r)`.
 #[test]
-fn drizzle_images_matches_accumulator() {
-    // drizzle_images with one identity-transformed frame must reproduce the
-    // single-image accumulator path: 200x200 output, interior pixels = 0.5.
-    let image = constant_mono_image(Size2us::new(100, 100), 0.5);
-    let result = drizzle_images(
-        vec![DrizzleFrame::new(image, Transform::identity())],
-        &DrizzleConfig::x2(),
+fn a_sip_warp_drizzles_through_its_inverse() {
+    let size = Size2us::new(32, 32);
+    let warp = sip_warp(
+        size,
+        Transform::similarity(DVec2::new(0.7, -0.4), 0.02, 1.0),
+        |d| d * 2e-5 * d.length_squared(),
+    );
+    let config = kernel_config(DrizzleKernel::Square, 1.5, 0.7);
+    let image = mono_image(
+        size,
+        (0..size.pixel_count())
+            .map(|i| (i % 7) as f32 * 0.25)
+            .collect(),
+    );
+
+    let from_images = drizzle_images(
+        vec![DrizzleFrame::new(image.clone(), warp.clone())],
+        &config,
         ProgressCallback::default(),
         CancelToken::never(),
     )
     .unwrap();
+    let mut acc = accumulator(ImageDimensions::new(size, 1), config);
+    acc.add_frame(DrizzleFrame::new(image, warp.clone()))
+        .unwrap();
+    let from_accumulator = acc.finalize();
+    assert_eq!(from_images.unconverged_points, 0);
+    assert_eq!(from_accumulator.unconverged_points, 0);
+    let bits = |product: &StackProduct| -> Vec<u32> {
+        product
+            .image
+            .channel(0)
+            .iter()
+            .map(|v| v.to_bits())
+            .collect()
+    };
+    assert_eq!(bits(&from_images.product), bits(&from_accumulator.product));
 
-    assert_eq!(result.image.width(), 200);
-    assert_eq!(result.image.height(), 200);
-    let pixels = result.image.channel(0);
+    let mut pixels = vec![0.0f32; size.pixel_count()];
+    let t = Vec2us::new(20, 9);
+    pixels[size.index_of(t)] = 1.0;
+    let point = kernel_config(DrizzleKernel::Point, 1.0, 1.0);
+    let mut acc = accumulator(ImageDimensions::new(size, 1), point);
+    acc.add_frame(DrizzleFrame::new(mono_image(size, pixels), warp.clone()))
+        .unwrap();
+    let out = acc.finalize().product;
+    let r = warp
+        .inverse()
+        .apply(DVec2::new(t.x as f64, t.y as f64))
+        .unwrap()
+        .position;
+    let landing = Vec2us::new(r.x.round() as usize, r.y.round() as usize);
+    assert_eq!(
+        out.image.channel(0)[(landing.x, landing.y)],
+        1.0,
+        "at {r:?}"
+    );
+}
+
+/// Past a fold the warp has no inverse, and those input pixels deposit nothing and are counted —
+/// once each, though the 4-row bands' scans overlap. `c(x) = −0.03·x²` about the centre folds the
+/// field where `x + c(x)` peaks, `x = 1/(2·0.03)` ≈ 16.7 px right of it, at `t = 1/(4·0.03)` ≈ 8.3;
+/// every input pixel further right than that has no preimage, and every one left of it has one.
+#[test]
+fn pixels_past_a_fold_are_counted_once_and_deposit_nothing() {
+    let size = Size2us::new(40, 24);
+    let warp = sip_warp(size, Transform::identity(), |d| {
+        DVec2::new(-0.03 * d.x * d.x, 0.0)
+    });
+    let inverse = warp.inverse();
+    let failing = (0..size.height)
+        .flat_map(|y| (0..size.width).map(move |x| DVec2::new(x as f64, y as f64)))
+        .filter(|&t| inverse.apply(t).is_none())
+        .count();
     assert!(
-        (pixels[0] - 0.5).abs() < 1e-5,
-        "Pixel (0,0) should be 0.5, got {}",
-        pixels[0]
+        failing > 0 && failing < size.pixel_count(),
+        "{failing} of the frame fail"
+    );
+
+    let mut acc = accumulator(
+        ImageDimensions::new(size, 1),
+        kernel_config(DrizzleKernel::Turbo, 1.0, 1.0),
+    );
+    acc.add_frame_with_band_rows(DrizzleFrame::new(constant_mono_image(size, 1.0), warp), 4);
+    let result = acc.finalize();
+    assert_eq!(result.unconverged_points, failing);
+    // No position was guessed for a failing pixel: every covered output pixel holds the constant
+    // exactly.
+    assert!(
+        result
+            .product
+            .image
+            .channel(0)
+            .iter()
+            .all(|&value| value == 0.0 || value == 1.0)
     );
 }
 
@@ -206,7 +308,7 @@ fn drizzle_rgb_uses_shared_quality_planes() {
     let identity = Transform::identity();
     acc.add_image(image, &identity, 1.0, None);
 
-    let result = acc.finalize();
+    let result = acc.finalize().product;
 
     assert_eq!(result.image.width(), 100);
     assert_eq!(result.image.height(), 100);
@@ -239,46 +341,27 @@ fn drizzle_with_translation() {
     let config = DrizzleConfig::x2();
     let mut acc = accumulator(ImageDimensions::new((20, 20), 1), config);
 
-    // Integer-center: input pixel (10,10) center (10,10), +translation (0.5,0.5) → (10.5,10.5),
-    // ×scale 2 → output center (21,21). drop_size 1.6 → drop [20.2,21.8]², covering cells
-    // 20,21,22 with per-axis overlaps 0.3/1.0/0.3.
+    // Input pixel (10,10), translated by (0.5,0.5) to reference (10.5,10.5), lands at output
+    // 2·10.5 + ½ = 21.5: drop [20.7, 22.3]², 0.8 of cells 21 and 22 on each axis. Every input
+    // pixel's drop stays inside its own 2×2 block of cells, so the block reads the bright value
+    // undiluted and the cells beside it belong to zero-valued neighbours.
     let transform = Transform::translation(DVec2::new(0.5, 0.5));
     acc.add_image(image, &transform, 1.0, None);
 
-    let result = acc.finalize();
+    let result = acc.finalize().product;
     assert_eq!(result.image.width(), 40);
     assert_eq!(result.image.height(), 40);
 
     let out = result.image.channel(0);
+    let weight = result.weight.as_ref().unwrap().channel(0);
     let at = |x: usize, y: usize| out[y * 40 + x];
-    // Center cell (21,21): only the bright pixel's drop reaches it (1.0×1.0 overlap) → 1.0.
-    assert!(
-        (at(21, 21) - 1.0).abs() < 1e-5,
-        "center (21,21): {}",
-        at(21, 21)
-    );
-    // Edge cells are shared 50/50 with a neighbouring zero-valued input pixel's drop →
-    // weighted mean (1.0·w + 0.0·w) / 2w = 0.5.
-    assert!(
-        (at(20, 21) - 0.5).abs() < 1e-5,
-        "edge (20,21): {}",
-        at(20, 21)
-    );
-    assert!(
-        (at(22, 21) - 0.5).abs() < 1e-5,
-        "edge (22,21): {}",
-        at(22, 21)
-    );
-    assert!(
-        (at(21, 20) - 0.5).abs() < 1e-5,
-        "edge (21,20): {}",
-        at(21, 20)
-    );
-    assert!(
-        (at(21, 22) - 0.5).abs() < 1e-5,
-        "edge (21,22): {}",
-        at(21, 22)
-    );
+    for (x, y) in [(21, 21), (22, 21), (21, 22), (22, 22)] {
+        assert_eq!(at(x, y), 1.0, "block ({x},{y})");
+    }
+    for (x, y) in [(20, 21), (23, 21), (21, 20), (21, 23)] {
+        assert_eq!(at(x, y), 0.0, "neighbour ({x},{y})");
+        assert!(weight[y * 40 + x] > 0.0, "neighbour ({x},{y}) is covered");
+    }
     // Far from the bright spot → 0; no pixel exceeds the input value.
     assert!(at(0, 0).abs() < 1e-5);
     assert!(
@@ -289,19 +372,19 @@ fn drizzle_with_translation() {
 
 #[test]
 fn coverage_map() {
-    // Point kernel with identity: covered at even coords, uncovered at odd
     let image = constant_mono_image(Size2us::new(4, 4), 1.0);
     let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Point);
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);
-    let result = acc.finalize();
+    let result = acc.finalize().product;
 
-    // Output 8×8. Covered pixels at (2*ix, 2*iy) for ix,iy=0..3 (even coords).
-    // Normalized coverage: max_coverage = 1.0
-    assert!((result.coverage.as_ref().unwrap()[(0, 0)] - 1.0).abs() < f32::EPSILON); // covered
-    assert!((result.coverage.as_ref().unwrap()[(1, 1)]).abs() < f32::EPSILON); // uncovered (odd)
-    assert!((result.coverage.as_ref().unwrap()[(2, 2)] - 1.0).abs() < f32::EPSILON); // covered
-    assert!((result.coverage.as_ref().unwrap()[(3, 3)]).abs() < f32::EPSILON); // uncovered (odd)
+    // Output 8×8. Each input pixel lands on the corner of its 2×2 block, (2·ix + ½, 2·iy + ½), which
+    // rounds onto the odd cell (2·ix + 1, 2·iy + 1): covered by the one frame there, nowhere else.
+    let coverage = result.coverage.as_ref().unwrap();
+    assert_eq!(coverage[(1, 1)], 1.0);
+    assert_eq!(coverage[(3, 3)], 1.0);
+    assert_eq!(coverage[(0, 0)], 0.0);
+    assert_eq!(coverage[(2, 2)], 0.0);
 }
 
 #[test]
@@ -328,7 +411,7 @@ fn weight_and_linear_variance_maps() {
             None,
         );
     }
-    let equal = acc.finalize();
+    let equal = acc.finalize().product;
     let equal_linear_variance = equal.linear_variance.as_ref().unwrap();
     assert!(
         (equal.weight.as_ref().unwrap().channel(0).pixels()[idx] - 3.0).abs() < 1e-5,
@@ -356,7 +439,7 @@ fn weight_and_linear_variance_maps() {
         3.0,
         None,
     );
-    let unequal = acc.finalize();
+    let unequal = acc.finalize().product;
     let unequal_linear_variance = unequal.linear_variance.as_ref().unwrap();
     assert!(
         (unequal.weight.as_ref().unwrap().channel(0).pixels()[idx] - 4.0).abs() < 1e-5,
@@ -476,7 +559,7 @@ fn coverage_counts_frames_rather_than_accumulated_weight() {
         3.0,
         None,
     );
-    let product = acc.finalize();
+    let product = acc.finalize().product;
     let coverage = product.coverage.as_ref().expect("coverage was requested");
     let weight = product
         .weight
@@ -561,7 +644,7 @@ fn band_count_does_not_change_the_result() {
                 };
                 let mut accumulator = accumulator(dimensions, config);
                 accumulator.add_image_with_band_rows(image.clone(), &transform, band_rows);
-                accumulator.finalize()
+                accumulator.finalize().product
             };
 
             // One band is the serial walk; 5 rows over a 64- or 128-row output is a dozen or more of
@@ -607,18 +690,29 @@ fn input_row_estimate_widens_to_the_frame_across_the_vanishing_line() {
 
     // Inverse divisor `1 − 0.01·x`, which is zero at output column 100 and so takes both signs over
     // a 200-wide grid.
-    let straddling = Transform::homography([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, -0.01, 0.0]).inverse();
-    assert_eq!(input_rows(&image, straddling, 0..4, 200, 0.5), 0..12);
+    // The warp goes reference → input, so the input rows come back through the homography itself.
+    let straddling = WarpTransform::new(Transform::homography([
+        1.0, 0.0, 0.0, 0.0, 1.0, 0.0, -0.01, 0.0,
+    ]));
+    assert_eq!(
+        input_rows(&image, &straddling, 1.0, 0..4, 200, 0.5, 0.0),
+        0..12
+    );
 
     // A grid narrow enough to stay on one side of it keeps the corner bound. It is not the linear
     // answer: the divisor is 0.51 at column 49, so the far corner of output rows [-0.5, 3.5] maps
     // back to input row 3.5/0.51 = 6.86, and the estimate runs to 8 rather than 4.
-    assert_eq!(input_rows(&image, straddling, 0..4, 50, 0.5), 0..8);
+    assert_eq!(
+        input_rows(&image, &straddling, 1.0, 0..4, 50, 0.5, 0.0),
+        0..8
+    );
 
-    // And the linear case, whose divisor is a constant 1: output rows [-0.5, 3.5] shifted down by
-    // two are input rows [-2.5, 1.5], so rows 0, 1 and 2.
-    let shifted = Transform::translation(DVec2::new(0.0, 2.0));
-    assert_eq!(input_rows(&image, shifted, 0..4, 200, 0.5), 0..3);
+    // And the linear case, whose divisor is a constant 1: output rows [-0.5, 3.5] shifted up by
+    // two are input rows [-2.5, 1.5], so rows 0, 1 and 2. A drop reaching 1.5 input rows from its
+    // centre — the square kernel's — widens that to [-4, 3], rows 0 to 3.
+    let shifted = WarpTransform::new(Transform::translation(DVec2::new(0.0, -2.0)));
+    assert_eq!(input_rows(&image, &shifted, 1.0, 0..4, 200, 0.5, 0.0), 0..3);
+    assert_eq!(input_rows(&image, &shifted, 1.0, 0..4, 200, 0.5, 1.5), 0..4);
 }
 
 #[test]
@@ -628,7 +722,7 @@ fn drizzle_accumulator_rejects_invalid_frame_inputs() {
 
     let mut frame = DrizzleFrame::new(
         constant_mono_image(Size2us::new(4, 4), 1.0),
-        Transform::identity(),
+        WarpTransform::new(Transform::identity()),
     );
     frame.pixel_weight_map = Some(Buffer2::new_filled(3, 3, 1.0));
     let error = acc.add_frame(frame).unwrap_err();
@@ -645,7 +739,7 @@ fn drizzle_accumulator_rejects_invalid_frame_inputs() {
 
     let mut frame = DrizzleFrame::new(
         constant_mono_image(Size2us::new(4, 4), 1.0),
-        Transform::identity(),
+        WarpTransform::new(Transform::identity()),
     );
     frame.weight = f32::NAN;
     let error = acc.add_frame(frame).unwrap_err();
@@ -658,7 +752,7 @@ fn drizzle_accumulator_rejects_invalid_frame_inputs() {
     pixel_weights[5] = -0.25;
     let mut frame = DrizzleFrame::new(
         constant_mono_image(Size2us::new(4, 4), 1.0),
-        Transform::identity(),
+        WarpTransform::new(Transform::identity()),
     );
     frame.pixel_weight_map = Some(Buffer2::new(4, 4, pixel_weights));
     let error = acc.add_frame(frame).unwrap_err();

@@ -13,9 +13,9 @@ use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::stacking::drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
 use crate::stacking::drizzle::config::DrizzleConfig;
+use crate::stacking::drizzle::drizzle_result::DrizzleResult;
 use crate::stacking::drizzle::error::DrizzleError;
 use crate::stacking::progress::{ProgressCallback, StackingStage};
-use crate::stacking::stack_product::StackProduct;
 
 fn load_drizzle_frame<P: AsRef<Path>>(
     frame: DrizzleFrame<P>,
@@ -23,7 +23,7 @@ fn load_drizzle_frame<P: AsRef<Path>>(
 ) -> Result<DrizzleFrame<LinearImage>, DrizzleError> {
     let DrizzleFrame {
         source,
-        transform,
+        warp,
         weight,
         pixel_weight_map,
     } = frame;
@@ -36,20 +36,20 @@ fn load_drizzle_frame<P: AsRef<Path>>(
     };
     Ok(DrizzleFrame {
         source: image,
-        transform,
+        warp,
         weight,
         pixel_weight_map,
     })
 }
 
-/// Drizzle stack images from disk with per-frame transforms.
+/// Drizzle stack images from disk with per-frame warps.
 ///
 /// Streams frames one at a time (only one input image is resident at a time). To drizzle frames
 /// already held in memory, use [`drizzle_images`].
 ///
 /// # Arguments
 ///
-/// * `frames` - Paths bundled with their transform and optional quality weights
+/// * `frames` - Paths bundled with their registration warp and optional quality weights
 /// * `config` - Drizzle configuration
 /// * `context` - Resource limits and image-load policy. Its `cancel` field is **ignored** — the
 ///   `cancel` argument governs the whole run, decode included, so cancellation reads the same
@@ -60,7 +60,7 @@ fn load_drizzle_frame<P: AsRef<Path>>(
 /// # Returns
 ///
 /// The drizzled result: image plus coverage, weight (`Σwᵢ`), and linear-variance
-/// (`Σwᵢ²/(Σwᵢ)²`) maps.
+/// (`Σwᵢ²/(Σwᵢ)²`) maps, and the count of input pixels a SIP warp could not place.
 ///
 /// # Errors
 ///
@@ -72,7 +72,7 @@ pub fn drizzle_stack<P: AsRef<Path>>(
     context: &LoadContext,
     progress: ProgressCallback,
     cancel: CancelToken,
-) -> Result<StackProduct, DrizzleError> {
+) -> Result<DrizzleResult, DrizzleError> {
     let frame_count = frames.len();
     // The decoders poll cancellation off the context, so the run's token has to reach them —
     // the caller supplies decode policy, this supplies the token.
@@ -101,7 +101,7 @@ pub fn drizzle_images(
     config: &DrizzleConfig,
     progress: ProgressCallback,
     cancel: CancelToken,
-) -> Result<StackProduct, DrizzleError> {
+) -> Result<DrizzleResult, DrizzleError> {
     let frame_count = frames.len();
     accumulate(
         frames.into_iter().map(Ok),
@@ -125,7 +125,7 @@ fn accumulate(
     progress: ProgressCallback,
     cancel: &CancelToken,
     source: &'static str,
-) -> Result<StackProduct, DrizzleError> {
+) -> Result<DrizzleResult, DrizzleError> {
     if frame_count == 0 {
         return Err(DrizzleError::NoFrames);
     }
