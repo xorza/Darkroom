@@ -68,7 +68,8 @@ fn sample_ordinals_are_even_and_point_symmetric() {
 
 /// A 64×64 tile at (10, 20) in a frame of `x + 1000·y`: 1024 of its 4096 pixels, centred on the
 /// tile centre (41.5, 51.5) — their mean is the plane there, exactly, as every value and the sum
-/// are exact in f64.
+/// are exact in f64. Each offset is the doubled step from that centre to the pixel its value
+/// names: `2·v = 2·41.5 + o.x + 1000·(2·51.5 + o.y)`.
 #[test]
 fn tile_samples_centre_on_the_tile() {
     let size = Size2us::new(100, 100);
@@ -80,15 +81,19 @@ fn tile_samples_centre_on_the_tile() {
             .collect(),
     );
     let tile = URect::new(Vec2us::new(10, 20), Vec2us::new(74, 84));
-    let mut values = Vec::new();
-    collect_tile_pixels(&pixels, tile, &mut values);
+    let (mut values, mut offsets) = (Vec::new(), Vec::new());
+    collect_tile_pixels(&pixels, tile, &mut values, &mut offsets);
     assert_eq!(values.len(), MAX_TILE_SAMPLES);
     let mean = values.iter().map(|&v| f64::from(v)).sum::<f64>() / values.len() as f64;
     assert_eq!(mean, 41.5 + 1000.0 * 51.5);
+    for (&v, &[ox, oy]) in values.iter().zip(&offsets) {
+        assert_eq!(2 * v as i32, 83 + ox + 1000 * (103 + oy), "{v}");
+    }
 
     let small = URect::new(Vec2us::new(3, 4), Vec2us::new(13, 9));
     values.clear();
-    collect_tile_pixels(&pixels, small, &mut values);
+    offsets.clear();
+    collect_tile_pixels(&pixels, small, &mut values, &mut offsets);
     let every: Vec<f32> = (4..9)
         .flat_map(|y| (3..13).map(move |x| (x + 1000 * y) as f32))
         .collect();
@@ -172,14 +177,77 @@ fn masked_sampling_reads_the_unmasked_ordinals() {
             .map(|k| expected[sample_ordinal(k, count, expected.len())])
             .collect();
 
-        let mut actual = Vec::new();
-        collect_unmasked_pixels(&pixels, &mask, case.tile, &mut actual);
+        let (mut actual, mut offsets) = (Vec::new(), Vec::new());
+        collect_unmasked_pixels(&pixels, &mask, case.tile, &mut actual, &mut offsets);
 
         assert_eq!(actual, expected, "case: {case:?}");
+        let named: Vec<[i32; 2]> = actual
+            .iter()
+            .map(|&v| {
+                let i = v as usize;
+                centred(case.tile, i % size.width, i / size.width)
+            })
+            .collect();
+        assert_eq!(offsets, named, "case: {case:?}");
         assert!(
             actual.capacity() <= MAX_TILE_SAMPLES,
             "case retained {} samples: {case:?}",
             actual.capacity()
+        );
+    }
+}
+
+/// A tile's sky reads its samples less the tile's own plane, so on a planar sky it equals the sky
+/// of the same tile levelled to the plane's value at its centre (19.5, 21.5):
+/// `0.25·19.5 + 2·21.5 = 47.875`. Exactly: every value, the fitted slope and every difference are
+/// exact. A ±0.5 checkerboard gives both tiles the same noise, and is uncorrelated with the
+/// position over the tile, so the fit leaves it alone. A masked 4×4 block removes as many of each
+/// sign from every row and column it covers, which keeps that true. σ reads the raw samples, so
+/// the slope's spread counts in it.
+#[test]
+fn a_tile_reads_its_sky_about_its_own_plane() {
+    use crate::background_mesh::workspace::TileScratch;
+
+    let size = Size2us::new(40, 40);
+    // 32×32 = 1024 pixels: the whole tile is read, so the samples are exactly the pixels.
+    let tile = URect::new(Vec2us::new(4, 6), Vec2us::new(36, 38));
+    let frame = |level: &dyn Fn(usize, usize) -> f32, checker: f32| {
+        let pixels = (0..size.pixel_count())
+            .map(|i| {
+                let (x, y) = (i % size.width, i / size.width);
+                let sign = if (x + y).is_multiple_of(2) { 1.0 } else { -1.0 };
+                level(x, y) + sign * checker
+            })
+            .collect();
+        Buffer2::new(size.width, size.height, pixels)
+    };
+    let plane = |x: usize, y: usize| 0.25 * x as f32 + 2.0 * y as f32;
+    let flat = |_: usize, _: usize| 47.875;
+    let mut star = BitBuffer2::new_filled(size, false);
+    for y in 12..16 {
+        for x in 20..24 {
+            star.set_at(Vec2us::new(x, y), true);
+        }
+    }
+
+    let mut scratch = TileScratch::default();
+    for mask in [None, Some(&star)] {
+        let mut stats =
+            |pixels: &Buffer2<f32>| TileStats::compute(pixels, mask, tile, 3, &mut scratch);
+        let masked = mask.is_some();
+        assert_eq!(
+            stats(&frame(&plane, 0.0)).sky,
+            47.875,
+            "a bare plane, mask {masked}"
+        );
+        let levelled = stats(&frame(&flat, 0.5));
+        let sloped = stats(&frame(&plane, 0.5));
+        assert_eq!(sloped.sky, levelled.sky, "mask {masked}");
+        assert!(
+            sloped.sigma > 10.0 * levelled.sigma,
+            "the raw σ counts the slope: {} against {}, mask {masked}",
+            sloped.sigma,
+            levelled.sigma
         );
     }
 }

@@ -7,7 +7,12 @@ use imaginarium::Buffer2;
 
 #[derive(Debug, Default)]
 pub(crate) struct TileScratch {
+    /// A tile's samples.
     pub(crate) values: Vec<f32>,
+    /// Each sample's doubled offset from the tile's centre.
+    pub(crate) offsets: Vec<[i32; 2]>,
+    /// The samples less the tile's plane, reordered by the clip.
+    pub(crate) detrended: Vec<f32>,
     pub(crate) deviations: Vec<f32>,
 }
 

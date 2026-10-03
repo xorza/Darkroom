@@ -131,7 +131,8 @@ fn spline_at(xs: &[f64], ys: &[f64], m: &[f64], x: f64) -> f64 {
 /// `mad_to_sigma(aᵢ)`, exactly (dyadic values, exact sums). Both sequences rise, which the 3×3 median
 /// keeps. The maps along that axis are then the natural cubic splines through those tile values at
 /// the tile centres 15.5 + 32i — checked against an independent f64 spline at every pixel, the end
-/// intervals' extrapolation included, and constant across. The f32 spline differs from the f64 one
+/// intervals' extrapolation included, and constant across. The noise map is that spline clipped to
+/// the tile σ's range, which its extrapolation leaves at both ends. The f32 spline differs from the f64 one
 /// by the rounding of its solve and evaluation, a few ulps of the values: ≤ 2.6e-8 measured, held
 /// to 4ε of the largest sky, 0.75.
 #[test]
@@ -172,7 +173,7 @@ fn maps_follow_the_natural_spline_through_the_tile_skies() {
             for x in 0..width {
                 let at = if along_x { x } else { y } as f64;
                 let sky = spline_at(&centres, &skies, &sky_m, at);
-                let sigma = spline_at(&centres, &sigmas, &sigma_m, at);
+                let sigma = spline_at(&centres, &sigmas, &sigma_m, at).clamp(sigmas[0], sigmas[4]);
                 let axis = if along_x { "x" } else { "y" };
                 let (got_sky, got_sigma) = (
                     f64::from(background.background[(x, y)]),

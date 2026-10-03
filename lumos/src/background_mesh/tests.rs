@@ -66,22 +66,19 @@ fn grid_shape_and_flat_skies() {
 
 /// A bright-ward tail that survives clipping pulls the mean above the median, and the Pearson mode
 /// `2.5·median − 1.5·mean` takes the sky below both. One 32 × 32 tile, read whole: the ramp
-/// `0.1 + i·1e-5` with its top 200 values raised by 0.005. The median of the 1024 averages ranks 511
-/// and 512, 0.1 + 511.5e-5 = 0.105115 (raising the top 200 moves neither); the mean is that plus
-/// 200 · 0.005/1024 = 0.000977. The tail's largest deviation, 0.0101, sits inside 3σ ≈ 0.0114, so
+/// `0.1 + j·2e-5` for j in 0..512, each value at a pixel and at its reflection through the tile's
+/// centre, so the tile's plane is flat, exactly; the top 100 j are raised by 0.005, 200 pixels.
+/// The median of the 1024 averages ranks 511 and 512, j = 255 and 256: 0.1 + 255.5·2e-5 =
+/// 0.10511 (raising the top moves neither); the mean is that plus 200 · 0.005/1024 = 0.000977. The tail's largest deviation, 0.0101, sits inside 3σ ≈ 0.0114, so
 /// nothing clips; `|mean − median|` is under 0.3σ, so the mode applies: 0.105115 − 1.5 · 0.000977 =
 /// 0.103650. The inputs round to f32 by 3.7e-9 at most, the Pearson weights carry that four times
 /// over, and the products and difference round once each near 0.26: 1e-7 holds it.
 #[test]
 fn skewed_tile_sky_sits_below_median() {
-    let n = 1024usize;
-    let mut values: Vec<f32> = (0..n).map(|i| 0.1 + i as f32 * 1e-5).collect();
-    for v in values.iter_mut().skip(n - 200) {
-        *v += 0.005;
-    }
-    let pixels = Buffer2::new(32, 32, values);
+    let ramp = |j: usize| 0.1 + j as f32 * 2e-5 + if j >= 412 { 0.005 } else { 0.0 };
+    let pixels = Buffer2::new(32, 32, (0..1024).map(|i| ramp(i.min(1023 - i))).collect());
     let sky = make_grid(&pixels, 32).stats[(0, 0)].sky;
-    let median = 0.1 + 511.5e-5;
+    let median = 0.1 + 255.5 * 2e-5;
     let expected = median - 1.5 * (200.0 * 0.005 / 1024.0);
     assert!(
         (f64::from(sky) - expected).abs() < 1e-7,
@@ -152,7 +149,9 @@ fn mad_sigma_known_value() {
 }
 
 /// Clipping removes bright outliers from a sky with spread, and then reads the sky alone. One
-/// 32 × 32 tile: 1000 pixels at 100 + (i mod 10), a hundred of each of 100..109, and 24 at 10000.
+/// 32 × 32 tile: 1000 pixels at 100 + (i mod 10), a hundred of each of 100..109, and 24 at 10000,
+/// each value at a pixel and at its reflection through the tile's centre, so the plane of any
+/// band of them is flat, exactly.
 ///
 /// The first pass ranks all 1024: ranks 511 and 512 are both 105, and of the deviations from it
 /// (100 at 0, then 200 each at 1..4, 100 at 5, and the outliers) ranks 511 and 512 are 3, so
@@ -165,9 +164,14 @@ fn mad_sigma_known_value() {
 /// past 0.3σ from it, and the sky falls back to that median.
 #[test]
 fn clipping_rejects_outliers_from_a_sky_with_spread() {
-    let mut values: Vec<f32> = (0..1000).map(|i| 100.0 + (i % 10) as f32).collect();
-    values.extend([10_000.0f32; 24]);
-    let pixels = Buffer2::new(32, 32, values);
+    let value = |i: usize| {
+        if i < 500 {
+            100.0 + (i % 10) as f32
+        } else {
+            10_000.0
+        }
+    };
+    let pixels = Buffer2::new(32, 32, (0..1024).map(|i| value(i.min(1023 - i))).collect());
 
     let clipped = make_grid(&pixels, 32).stats[(0, 0)];
     assert_eq!((clipped.sky, clipped.sigma), (104.5, mad_to_sigma(2.5f32)));
