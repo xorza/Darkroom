@@ -16,7 +16,7 @@ use rayon::prelude::*;
 use crate::combine::cache::core::{CacheCore, CacheTier, ChunkContext};
 use crate::combine::cache::frame_check::FrameCheck;
 use crate::combine::cache::frame_weights::FrameWeights;
-use crate::combine::cache::loader::{LoadedCache, Prepare};
+use crate::combine::cache::loader::LoadedCache;
 use crate::combine::cache::sample::{
     CombineScratch, CombinedSample, GatheredSamples, PixelSamples,
 };
@@ -34,6 +34,7 @@ use crate::concurrency::JobScratchPool;
 use crate::error::FrameDimensionMismatch;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_plane::StoredPlane;
+use crate::ingest::frame_step::FrameStep;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::image_metadata::ImageMetadata;
@@ -627,11 +628,11 @@ impl FrameCache {
         paths: &[P],
         config: &StackConfig,
         run: IngestRun,
-        prepare: Option<&Prepare<'_, CfaImage>>,
+        step: Option<&dyn FrameStep<CfaImage>>,
         progress: ProgressCallback,
     ) -> Result<Self, Error> {
         Self::from_tiered_paths(
-            loader::load_tiered::<CfaImage, P>(paths, config, run, prepare, progress)?,
+            loader::load_tiered::<CfaImage, P>(paths, config, run, step, progress)?,
             config.normalization,
         )
     }
