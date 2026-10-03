@@ -20,6 +20,7 @@ use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::registration::transform::WarpTransform;
+use crate::run_report::RunReport;
 use crate::stack_product::StackProduct;
 use crate::stack_product::coverage::Coverage;
 use crate::stack_product::quality_map::QualityMap;
@@ -336,6 +337,9 @@ impl DrizzleAccumulator {
             linear_variance: self.weight_sq.map(QualityMap::Shared),
             // Drizzle takes demosaiced frames, which carry no mosaic.
             cfa_type: None,
+            // Drizzle leaves out every flagged pixel it cannot use, with no survivor floor to keep
+            // one for: there is nothing per pixel to report.
+            report: RunReport::default(),
         };
         DrizzleResult {
             product,

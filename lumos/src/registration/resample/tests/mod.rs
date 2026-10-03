@@ -1,5 +1,5 @@
 use crate::internals::prelude::*;
-use crate::io::image::pixel_flags::PixelFlags;
+use crate::io::image::pixel_flags::{Flags, PixelFlags};
 use crate::registration::config::{InterpolationMethod, WarpParams};
 use crate::registration::resample;
 use crate::registration::resample::WarpBuffers;
@@ -385,3 +385,39 @@ fn assert_bitwise(actual: &[f32], expected: &[f32], method: InterpolationMethod)
 }
 
 mod plane;
+
+/// A flag reaches every output pixel whose kernel window reads the flagged source pixel. Under a
+/// half-pixel shift output x samples source x + 0.5, whose cell is x, and a Lanczos-3 window reads
+/// cells x − 2 ..= x + 3. A saturated source pixel at (10, 10) is therefore read by the outputs
+/// x, y ∈ 7..=12: 6 × 6 = 36 of them, and no others. `NO_DATA` becomes coverage, not a flag.
+#[test]
+fn a_flag_reaches_every_output_its_kernel_window_reads() {
+    let size = Size2us::new(24, 24);
+    let mut image = gray_image(size, vec![0.25; size.pixel_count()]);
+    image.flags = PixelFlags::from_fn(size, |index| match index {
+        index if index == 10 * 24 + 10 => Flags::SATURATED,
+        index if index == 20 * 24 + 20 => Flags::NO_DATA,
+        _ => Flags::default(),
+    });
+    let transform = WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5)));
+    let warped = resample::warp(
+        &image,
+        &transform,
+        WarpParams {
+            method: InterpolationMethod::Lanczos3,
+            border_value: 0.0,
+        },
+    );
+    let flags = warped.image.flags.unwrap();
+    assert_eq!(flags.count(Flags::SATURATED), 36);
+    assert_eq!(flags.count(Flags::NO_DATA), 0);
+    for y in 7..=12 {
+        for x in 7..=12 {
+            assert_eq!(
+                flags.at_pos(Vec2us::new(x, y)),
+                Flags::SATURATED,
+                "({x}, {y})"
+            );
+        }
+    }
+}

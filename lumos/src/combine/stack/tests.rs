@@ -21,7 +21,7 @@ use crate::io::image::image_provenance::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
     SourceContainer, TransferProvenance,
 };
-use crate::io::image::pixel_flags::PixelFlags;
+use crate::io::image::pixel_flags::{Flags, PixelFlags};
 use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::math::statistics::MedianMad;
 use crate::registration::config::{self, InterpolationMethod};
@@ -983,6 +983,7 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
                     domain: None,
                     row_order: None,
                     cfa_type: None,
+                    saturation_flagged: false,
                 },
             };
             frame
@@ -1649,6 +1650,7 @@ fn noise_weighting_folds_normalization_gain() {
                 domain: None,
                 row_order: None,
                 cfa_type: None,
+                saturation_flagged: false,
             },
         }
     };
@@ -1692,4 +1694,56 @@ fn manual_weighting_is_scale_invariant() {
 fn equal_weighting_returns_none() {
     let weights = resolve_weights(&Weighting::Equal, &[], None);
     assert!(weights.is_none());
+}
+
+/// A flagged sample is left out while `min_survivors` (3) unflagged samples remain at its pixel,
+/// and kept otherwise. Ten frames, no rejection, three pixels:
+/// - pixel 0: frames 0..3 saturated at 1.0, the rest 0.25 — the mean of the seven is 0.25;
+/// - pixel 1: every frame saturated at 1.0 — all are kept, and the stack's pixel is flagged;
+/// - pixel 2: frames 0..8 saturated at 0.5, two clean at 0.25 — two is below three, so all ten stay:
+///   (8 × 0.5 + 2 × 0.25) / 10 = 0.45, flagged.
+///
+/// The report counts the 3 left out, and the 10 + 8 kept.
+#[test]
+fn flagged_samples_are_left_out_while_enough_clean_ones_remain() {
+    let dims = ImageDimensions::new((3, 1), 1);
+    let frames: Vec<StackFrame> = (0..10)
+        .map(|frame| {
+            let saturated = [frame < 3, true, frame < 8];
+            let values = [
+                if saturated[0] { 1.0 } else { 0.25 },
+                1.0,
+                if saturated[2] { 0.5 } else { 0.25 },
+            ];
+            let mut image = LinearImage::from_pixels(dims, values.to_vec());
+            image.metadata.saturation_flagged = true;
+            image.flags = PixelFlags::from_fn(dims.size(), |index| {
+                if saturated[index] {
+                    Flags::SATURATED
+                } else {
+                    Flags::default()
+                }
+            });
+            image.into()
+        })
+        .collect();
+    let config = StackConfig {
+        method: CombineMethod::Mean(Rejection::None),
+        ..StackConfig::default()
+    };
+    let product = combine(frames, &config).unwrap();
+    let pixels = product.image.channel(0).pixels();
+    assert_eq!(pixels[0], 0.25);
+    assert_eq!(pixels[1], 1.0);
+    assert_close!(pixels[2], 0.45, f32::EPSILON);
+
+    assert!(product.image.metadata.saturation_flagged);
+    let flags = product.image.flags.as_ref().unwrap();
+    let saturated: Vec<bool> = (0..3)
+        .map(|index| flags.at(index).intersects(Flags::SATURATED))
+        .collect();
+    assert_eq!(saturated, [false, true, true]);
+    assert_eq!(product.report.excluded_samples.saturated, 3);
+    assert_eq!(product.report.kept_flagged_samples.saturated, 18);
+    assert_eq!(product.report.excluded_samples.cosmic_ray, 0);
 }

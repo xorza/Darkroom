@@ -22,6 +22,7 @@ fn channel_stats(channels: &[(f32, f32)]) -> FrameStats {
             domain: None,
             row_order: None,
             cfa_type: None,
+            saturation_flagged: false,
         },
     }
 }

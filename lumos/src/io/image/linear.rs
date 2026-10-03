@@ -4,7 +4,7 @@ use imaginarium::{Buffer2, ChannelCount, ColorFormat, FileFormat, Image};
 use rayon::prelude::*;
 
 use crate::frame_store::cache_key::DecoderKind;
-use crate::frame_store::stackable_image::StackableImage;
+use crate::frame_store::stackable_image::{ImageParts, StackableImage};
 use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::image_ops::rgb::Rgb;
 use crate::io::image::cfa::CfaType;
@@ -341,8 +341,11 @@ impl StackableImage for LinearImage {
         LinearImage::from_file(path, context)
     }
 
-    fn into_planes(self) -> arrayvec::ArrayVec<Buffer2<f32>, 3> {
-        self.pixels.into_planes()
+    fn into_parts(self) -> ImageParts {
+        ImageParts {
+            planes: self.pixels.into_planes(),
+            flags: self.flags,
+        }
     }
 }
 

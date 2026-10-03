@@ -37,7 +37,7 @@ use crate::io::raw::demosaic::xtrans::xtrans_pattern::{XTransPattern, XTransPatt
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
-use crate::frame_store::stackable_image::StackableImage;
+use crate::frame_store::stackable_image::{ImageParts, StackableImage};
 use common::CancelToken;
 use imaginarium::Buffer2;
 
@@ -217,10 +217,13 @@ impl StackableImage for CfaImage {
             .map(FramePeek::from)
     }
 
-    fn into_planes(self) -> arrayvec::ArrayVec<Buffer2<f32>, 3> {
+    fn into_parts(self) -> ImageParts {
         let mut planes = arrayvec::ArrayVec::new();
         planes.push(self.data);
-        planes
+        ImageParts {
+            planes,
+            flags: self.flags,
+        }
     }
 }
 

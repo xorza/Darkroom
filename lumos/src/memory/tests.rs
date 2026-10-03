@@ -134,12 +134,13 @@ fn a_warped_run_charges_the_combine_output() {
     assert_eq!(output, 10 * plane_bytes);
     let shape = |output_bytes| pipeline_shape(plane_bytes, mono(plane_bytes), 5, output_bytes);
     // Mono, five frames, one worker: the decode peaks at 5 frames + its 1P statistics copy and the
-    // 7P detector = 13P; the warp at 5 × 3P warped + the one worker's 1P source = 16P; and the
-    // combine at 15P + the output's 10P = 25P, which decides.
-    assert!(MemoryPlan::plan(shape(output), 1, available_for_usable(25 * 10 * MIB)).fits_in_ram);
-    assert!(!MemoryPlan::plan(shape(output), 1, available_for_usable(24 * 10 * MIB)).fits_in_ram);
-    assert!(MemoryPlan::plan(shape(0), 1, available_for_usable(16 * 10 * MIB)).fits_in_ram);
-    assert!(!MemoryPlan::plan(shape(0), 1, available_for_usable(16 * 10 * MIB) - 2).fits_in_ram);
+    // 7P detector = 13P; the warp at 5 × 3¼P warped + the one worker's 1P source = 17¼P; and the
+    // combine at 16¼P + the output's 10P = 26¼P, which decides. In quarter planes: 105 and 69.
+    let quarters = |count: u64| available_for_usable(count * 10 * MIB / 4);
+    assert!(MemoryPlan::plan(shape(output), 1, quarters(105)).fits_in_ram);
+    assert!(!MemoryPlan::plan(shape(output), 1, quarters(105) - 2).fits_in_ram);
+    assert!(MemoryPlan::plan(shape(0), 1, quarters(69)).fits_in_ram);
+    assert!(!MemoryPlan::plan(shape(0), 1, quarters(69) - 2).fits_in_ram);
 }
 
 /// Rows per chunk by hand: the usable budget over the bytes a row of every input plane costs,
@@ -152,8 +153,8 @@ fn a_warped_run_charges_the_combine_output() {
 ///   planes cost 3600 B a row, so 85 whole rows fit. Ten resident planes leave nothing: the floor.
 #[test]
 fn optimal_chunk_rows_matches_budget_arithmetic() {
-    let layout = |input_planes, resident_planes| ChunkMemoryLayout {
-        input_planes,
+    let layout = |input_planes: usize, resident_planes| ChunkMemoryLayout {
+        input_bytes: input_planes * size_of::<f32>(),
         resident_planes,
     };
     for (layout, size, available, expected) in [
@@ -256,25 +257,27 @@ fn plan(
     )
 }
 
-/// The per-frame figures every plan below is derived from, in planes. A warped frame is its output
-/// and two quality planes: 3P mono, 5P colour. A warp holds the source beside it: 4P and 8P.
+/// The per-frame figures every plan below is derived from, in planes. A warped frame is its output,
+/// two quality planes and a quarter-plane of flags: 3¼P mono, 5¼P colour. A warp holds the source
+/// beside it: 4¼P and 8¼P. In quarter planes: 13 and 17, 21 and 33.
 #[test]
 fn a_warp_holds_its_source_beside_the_warped_frame() {
     let plane_bytes = plane(10);
-    for (output, warped, working) in [(1, 3, 4), (3, 5, 8)] {
+    let quarter = plane_bytes / 4;
+    for (output, warped, working) in [(1, 13, 17), (3, 21, 33)] {
         assert_eq!(
             PerFrameBytes::new(plane_bytes, output * plane_bytes),
             PerFrameBytes {
-                warped: warped * plane_bytes,
-                working: working * plane_bytes,
+                warped: warped * quarter,
+                working: working * quarter,
             }
         );
     }
 }
 
 /// 100 MiB planes, ten X-Trans frames, eight workers, 6 GiB = 61.44P usable. The warped set alone
-/// is 50P, and the decode pass 30P + one 26P transient; it is the eight workers' 3P sources on top
-/// of the warped set, 74P, that force the spill.
+/// is 52½P, and the decode pass 30P + one 26P transient; it is the eight workers' 3P sources on top
+/// of the warped set, 76½P, that force the spill.
 #[test]
 fn scratch_reserve_streams_a_set_whose_frames_alone_would_fit() {
     let plane_bytes = plane(100);
@@ -288,10 +291,10 @@ fn scratch_reserve_streams_a_set_whose_frames_alone_would_fit() {
 
 /// 100 MiB planes, ten frames, eight workers, 61.44P usable.
 /// - Mono stays resident: the decode pass is 10P + 8P (its 1P statistics copy and the 7P detector),
-///   the warp 30P + 8 × 1P. Decodes take 8P each from the 51.44P beyond the frames: six. The warp's
-///   1P sources fit all eight workers.
-/// - Bayer spills on the warp, 50P + 8 × 3P = 74P. Spilled, a decode is its 7P peak and the 7P
-///   detector, 14P: four fit. A warp is 8P: seven.
+///   the warp 32½P + 8 × 1P. Decodes take 8P each from the 51.44P beyond the frames: six. The
+///   warp's 1P sources fit all eight workers.
+/// - Bayer spills on the warp, 52½P + 8 × 3P = 76½P. Spilled, a decode is its 7P peak and the 7P
+///   detector, 14P: four fit. A warp is 8¼P: seven.
 /// - X-Trans spills likewise. A decode is its 22P peak and the detector, 29P: two fit.
 #[test]
 fn fan_out_follows_each_demosaics_peak() {
@@ -327,7 +330,7 @@ fn fan_out_follows_each_demosaics_peak() {
 }
 
 /// 10 MiB planes, five X-Trans frames, eight workers, 614.4P usable: the decode pass is 15P + 26P
-/// and the warp 25P + 5 × 3P, so it fits, and the frame count binds both fan-outs.
+/// and the warp 26¼P + 5 × 3P, so it fits, and the frame count binds both fan-outs.
 #[test]
 fn small_set_uses_all_workers_in_ram() {
     let plane_bytes = plane(10);
@@ -342,18 +345,19 @@ fn small_set_uses_all_workers_in_ram() {
 }
 
 /// 10 MiB planes, five frames, four workers. Each demosaic's RAM-tier boundary is its larger peak:
-/// X-Trans's decode pass, 5 × 3P + 26P = 41P; Bayer's warp, 5 × 5P + 4 × 3P = 37P, above its 26P
-/// decode pass; mono's warp, 5 × 3P + 4 × 1P = 19P, above its 13P decode pass.
+/// X-Trans's decode pass, 5 × 3P + 26P = 41P, above its warp's 5 × 5¼P + 4 × 3P = 38¼P; Bayer's
+/// warp, 38¼P, above its 26P decode pass; mono's warp, 5 × 3¼P + 4 × 1P = 20¼P, above its 13P
+/// decode pass. In quarter planes: 164, 153 and 81.
 #[test]
 fn ram_tier_respects_algorithm_specific_concurrency_boundaries() {
     let plane_bytes = plane(10);
     let (frames, threads) = (5, 4);
-    for (demosaic, boundary_planes) in [
-        (xtrans(plane_bytes), 41),
-        (bayer(plane_bytes), 37),
-        (mono(plane_bytes), 19),
+    for (demosaic, boundary_quarters) in [
+        (xtrans(plane_bytes), 164),
+        (bayer(plane_bytes), 153),
+        (mono(plane_bytes), 81),
     ] {
-        let boundary = available_for_usable(boundary_planes * 10 * MIB);
+        let boundary = available_for_usable(boundary_quarters * 10 * MIB / 4);
         assert!(plan(plane_bytes, demosaic, frames, threads, boundary).fits_in_ram);
         assert!(!plan(plane_bytes, demosaic, frames, threads, boundary - 2).fits_in_ram);
     }
@@ -454,10 +458,10 @@ fn planned_concurrency_never_overshoots_its_tier_budget() {
 }
 
 /// 100 MiB planes, twenty X-Trans frames, sixteen workers.
-/// - 2 GiB → 15.36P usable: spilled, under one 29P decode and two 8P warps; both pinned or bound
+/// - 2 GiB → 15.36P usable: spilled, under one 29P decode and two 8¼P warps; both pinned or bound
 ///   to 1.
-/// - 16 GiB → 122.88P: the warp, 100P + 16 × 3P, still spills; four 29P decodes and fifteen 8P
-///   warps fit.
+/// - 16 GiB → 122.88P: the warp, 105P + 16 × 3P, still spills; four 29P decodes and fourteen
+///   8¼P warps fit.
 /// - 2⁵⁰ B: everything fits and the workers bind.
 #[test]
 fn budget_flips_the_tier_and_scales_streaming_fanout() {
@@ -478,7 +482,7 @@ fn budget_flips_the_tier_and_scales_streaming_fanout() {
             MemoryPlan {
                 fits_in_ram: false,
                 decode_concurrency: 4,
-                warp_concurrency: 15,
+                warp_concurrency: 14,
             },
         ),
         (

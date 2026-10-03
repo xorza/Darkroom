@@ -6,6 +6,7 @@
 use crate::combine::cache_config::CacheConfig;
 use crate::combine::error::StackConfigError;
 use crate::combine::rejection::Rejection;
+use crate::error::InvalidConfigField;
 use crate::stack_product::quality_planes::QualityPlanes;
 
 /// Method for combining pixel values across frames.
@@ -156,7 +157,15 @@ pub struct StackConfig {
     /// they are what makes the stacked master measurable — but each is a full image-sized
     /// allocation, so a caller that discards them should say so.
     pub quality: QualityPlanes,
+    /// The fewest samples a pixel keeps when the combine leaves samples out: flagged ones today
+    /// (saturated, repaired, cosmic ray, defect, flat floor). A flagged sample is left out only
+    /// while this many unflagged samples remain at its pixel; otherwise every sample stays.
+    /// PixInsight keeps 3, Siril 4. At least 1.
+    pub min_survivors: usize,
 }
+
+/// [`StackConfig::min_survivors`] by default, as PixInsight's `ImageIntegration`.
+pub(crate) const DEFAULT_MIN_SURVIVORS: usize = 3;
 
 impl Default for StackConfig {
     fn default() -> Self {
@@ -168,6 +177,7 @@ impl Default for StackConfig {
             small_n: SmallN::median_below(MIN_FRAMES_FOR_REJECTION),
             cache: CacheConfig::default(),
             quality: QualityPlanes::ALL,
+            min_survivors: DEFAULT_MIN_SURVIVORS,
         }
     }
 }
@@ -308,6 +318,12 @@ impl StackConfig {
 
     /// Validate configuration parameters.
     pub fn validate(&self) -> Result<(), StackConfigError> {
+        InvalidConfigField::check(
+            self.min_survivors >= 1,
+            "min_survivors",
+            "at least 1",
+            self.min_survivors as f64,
+        )?;
         if let CombineMethod::Mean(rejection) = &self.method {
             rejection.validate()?;
         }

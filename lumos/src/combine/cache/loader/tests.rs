@@ -4,6 +4,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use crate::combine::cache::loader::*;
 use crate::frame_store::cache_key::DecoderKind;
+use crate::frame_store::frame_spill::Carries;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::linear::LinearImage;
 use common::TempDir;
@@ -77,7 +78,16 @@ fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
     );
     let mut sentinel = spill.committed(key).unwrap().stats;
     sentinel.channels[0].median = 99.0;
-    spill.commit(key, false, &sentinel).unwrap();
+    spill
+        .commit(
+            key,
+            Carries {
+                quality: false,
+                flags: false,
+            },
+            &sentinel,
+        )
+        .unwrap();
     let reused = cache_test_frame::<LinearImage>(temp_dir.path(), &source, dims, 0).unwrap();
     assert_eq!(reused.channels[0].chunk(0, 3), &[0.0, 1.0, 102.0]);
     assert_eq!(reused.source_stats.channels[0].median, 99.0);

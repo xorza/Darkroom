@@ -56,12 +56,13 @@ pub(crate) const DECODE_TRANSIENT_FACTOR: usize = 2;
 
 const MIN_CHUNK_ROWS: usize = 64;
 
-/// What one combine pass holds in memory, in planes, so [`ChunkMemoryLayout::optimal_chunk_rows`]
-/// can price a row.
+/// What one combine pass holds in memory, so [`ChunkMemoryLayout::optimal_chunk_rows`] can price a
+/// row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ChunkMemoryLayout {
-    /// Planes read concurrently for the active row chunk.
-    pub(crate) input_planes: usize,
+    /// Bytes read per pixel of the active row chunk, across every plane read concurrently: four
+    /// for each f32 plane, one for a flag plane.
+    pub(crate) input_bytes: usize,
     /// Full image-sized planes held throughout chunk processing.
     pub(crate) resident_planes: usize,
 }
@@ -72,8 +73,7 @@ impl ChunkMemoryLayout {
     pub(crate) fn optimal_chunk_rows(self, size: Size2us, available_memory: u64) -> usize {
         let bytes_per_row = size
             .width
-            .checked_mul(self.input_planes)
-            .and_then(|value| value.checked_mul(size_of::<f32>()))
+            .checked_mul(self.input_bytes)
             .map_or(u64::MAX, |value| value as u64);
         if bytes_per_row == 0 {
             return MIN_CHUNK_ROWS;
@@ -118,6 +118,13 @@ pub(crate) const fn quality_plane_bytes(dimensions: ImageDimensions) -> usize {
     FRAME_QUALITY_PLANES * dimensions.pixel_count() * size_of::<f32>()
 }
 
+/// Bytes a frame's flag plane adds: one per pixel, whatever its channel count. Charged to every
+/// frame, since a decoder that flags saturation, and a calibration that flags its repairs, give one
+/// to most frames.
+pub(crate) const fn flag_plane_bytes(dimensions: ImageDimensions) -> usize {
+    dimensions.pixel_count()
+}
+
 /// Image-sized planes the star detector's pool holds at its high-water mark over every preset:
 /// four f32 planes (the residual, the sky noise, and the matched filter's output and pass
 /// scratch), the u32 label map, and two bitmasks (saturation and threshold). A bitmask is a
@@ -141,9 +148,12 @@ pub(crate) struct PerFrameBytes {
 }
 
 impl PerFrameBytes {
-    /// For a frame of `output_bytes` whose planes are `plane_bytes` each.
+    /// For a frame of `output_bytes` whose planes are `plane_bytes` each, and its flag plane of one
+    /// byte per pixel.
     pub(crate) const fn new(plane_bytes: usize, output_bytes: usize) -> Self {
-        let warped = output_bytes.saturating_add(FRAME_QUALITY_PLANES.saturating_mul(plane_bytes));
+        let warped = output_bytes
+            .saturating_add(FRAME_QUALITY_PLANES.saturating_mul(plane_bytes))
+            .saturating_add(plane_bytes / size_of::<f32>());
         Self {
             warped,
             working: output_bytes.saturating_add(warped),

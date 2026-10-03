@@ -40,5 +40,13 @@ pub(crate) trait StackableImage: Send + Sync + Debug + Sized {
         None
     }
 
-    fn into_planes(self) -> ArrayVec<Buffer2<f32>, 3>;
+    /// The image's channel planes and its flags, moved out.
+    fn into_parts(self) -> ImageParts;
+}
+
+/// What [`StackableImage::into_parts`] moves out of an image.
+#[derive(Debug)]
+pub(crate) struct ImageParts {
+    pub(crate) planes: ArrayVec<Buffer2<f32>, 3>,
+    pub(crate) flags: Option<PixelFlags>,
 }

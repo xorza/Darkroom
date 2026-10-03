@@ -7,6 +7,7 @@ pub(crate) mod quality_planes;
 
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::linear::LinearImage;
+use crate::run_report::RunReport;
 use crate::stack_product::coverage::Coverage;
 use crate::stack_product::quality_map::QualityMap;
 
@@ -56,6 +57,9 @@ pub struct StackProduct {
     /// The mosaic pattern every frame shared, for a stack of undemosaiced sensor frames; `None`
     /// for any other stack.
     pub cfa_type: Option<CfaType>,
+    /// What the combine decided on its own: the samples it left out for their flags, and the
+    /// flagged ones it had to keep.
+    pub report: RunReport,
 }
 
 impl StackProduct {
@@ -89,6 +93,7 @@ mod tests {
     use crate::internals::prelude::*;
     use crate::io::image::cfa::CfaType;
     use crate::io::raw::demosaic::bayer::CfaPattern;
+    use crate::run_report::RunReport;
     use crate::stack_product::StackProduct;
     use crate::stack_product::coverage::Coverage;
 
@@ -106,6 +111,7 @@ mod tests {
             weight: None,
             linear_variance: None,
             cfa_type,
+            report: RunReport::default(),
         }
     }
 
