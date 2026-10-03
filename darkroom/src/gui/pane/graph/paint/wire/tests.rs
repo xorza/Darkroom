@@ -139,7 +139,7 @@ fn paint_ramps_differing_ends_and_flattens_equal_ones() {
 #[test]
 fn a_glyph_key_names_the_node_its_glyph_hangs_off() {
     use crate::core::document::{PortKind, PortRef};
-    use crate::gui::EventRef;
+    use crate::gui::event_ref::EventRef;
 
     let node = NodeId::unique();
     // A port and an emitter event belong to their node…

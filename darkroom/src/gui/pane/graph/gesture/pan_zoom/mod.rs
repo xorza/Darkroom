@@ -13,10 +13,11 @@ use palantir::{Rect, ResponseState, Size, Ui, ZoomFactor};
 use crate::core::document::Viewport;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
+use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
 use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
+use crate::gui::pane::graph::gesture::canvas_gesture::CanvasGesture;
 use crate::gui::pane::graph::gesture::pan_zoom::camera_gesture::CameraGesture;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
-use crate::gui::pane::graph::{CanvasGesture, outer_canvas_widget_id};
 use crate::gui::requests::Requests;
 
 /// Fold a live pan drag into `pan`: the latch's start (read by `start`)

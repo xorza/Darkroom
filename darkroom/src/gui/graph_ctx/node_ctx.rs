@@ -5,7 +5,7 @@ use scenarium::{CacheMode, Func, FuncEvent, Node, NodeId, NodeKind, RamUsage};
 
 use crate::core::document::{PortKind, PortRef};
 use crate::core::preview;
-use crate::gui::EventRef;
+use crate::gui::event_ref::EventRef;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;

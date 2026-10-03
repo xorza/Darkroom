@@ -3,9 +3,9 @@
 /// An RGB color: three `f32` channel values. A small value type for per-pixel color work.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Rgb {
-    pub r: f32,
-    pub g: f32,
-    pub b: f32,
+    pub(crate) r: f32,
+    pub(crate) g: f32,
+    pub(crate) b: f32,
 }
 
 impl Rgb {
