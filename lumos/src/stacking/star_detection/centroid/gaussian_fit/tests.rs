@@ -2,21 +2,23 @@
 use crate::testing::prelude::*;
 use crate::testing::synthetic::patterns;
 use std::f32::consts::FRAC_PI_4;
+use std::f64::consts::PI;
 
-use crate::math::fwhm::{fwhm_to_sigma, sigma_to_fwhm};
 use crate::stacking::star_detection::centroid::gaussian_fit::*;
-use crate::stacking::star_detection::centroid::lm_optimizer::internals::reference_normal_equations;
+use crate::stacking::star_detection::centroid::lm_optimizer::internals::{
+    ModelStamp, assert_batch_matches_reference, assert_jacobian_matches_differences,
+};
 use crate::stacking::star_detection::centroid::tests::perturbation::Perturbation;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 
 /// One recovery case: render a star of known parameters, optionally spoil the stamp or lie to
-/// the fitter about something, then check what it got back.
+/// the fitter about its background, then check what it got back.
 ///
-/// Every tolerance is per-case and every one is optional. They span 0.02 (a bright, well-sampled
-/// star) to 0.5 (15% noise), so a single shared bound would quietly loosen the strict cases.
-/// `None` means the case makes no claim about that quantity at all, which is not the same as a
-/// loose bound — the runner's unconditional finiteness check is what keeps an all-`None` case
-/// from being vacuous.
+/// A clean stamp is samples of the fitted model itself, so the fit must return it to the f32
+/// rounding of those samples: 2⁻²⁴ ≈ 6e-8 of each value, so of `A + B`, which reaches the
+/// parameters relative to the amplitude — an error of `(A + B)/A` times that, carried at up to a
+/// few times more (measured: ≤ 4e-7 at A + B ≈ A). [`EXACT`] times `(A + B)/A` bounds it. A spoiled
+/// stamp is held to the position's Cramér–Rao bound instead (see [`RecoveryCase::position_bound`]).
 #[derive(Debug)]
 struct RecoveryCase {
     name: &'static str,
@@ -34,21 +36,22 @@ struct RecoveryCase {
     /// Background handed to the fitter. `None` gives it the true one; `Some` deliberately lies
     /// to it, since background is itself a fitted parameter.
     fit_background: Option<f32>,
-    /// `None` uses `GaussianFitConfig::default()`.
-    max_iterations: Option<usize>,
-    pos_tol: Option<f64>,
-    sigma_tol: Option<f32>,
-    amplitude_tol: Option<f32>,
-    background_tol: Option<f32>,
-    /// Only asserted where the original test did: a guess that starts on the answer can report
-    /// `converged == false` having had nothing to do.
-    expect_converged: bool,
 }
 
+/// The relative error a clean stamp's fitted parameters keep where the star dominates its
+/// samples; see [`RecoveryCase`].
+const EXACT: f64 = 1e-6;
+
 impl RecoveryCase {
-    /// Circular sigmas keep the `Gaussian` path rather than an `Elliptical` with equal axes —
-    /// the two agree analytically but not bit-for-bit, and these cases were written against
-    /// the circular one.
+    /// Five standard deviations of the position under the stamp's perturbation: for a Gaussian
+    /// profile in white noise σₙ the Fisher information on each centre coordinate is
+    /// `(A/σₙ)²·π/2`, whatever its width, so `σ_pos = √(2/π)·σₙ/A`.
+    fn position_bound(&self) -> f64 {
+        5.0 * (2.0 / PI).sqrt() * f64::from(self.perturbation.rms()) / f64::from(self.amplitude)
+    }
+
+    /// Circular sigmas render through the `Gaussian` profile, unequal ones through an axis-aligned
+    /// `Elliptical`.
     fn profile(&self) -> StarProfile {
         if self.sigma.x == self.sigma.y {
             StarProfile::Gaussian {
@@ -66,6 +69,80 @@ impl RecoveryCase {
 
 const RECOVERY_CASES: &[RecoveryCase] = &[
     RecoveryCase {
+        name: "quarter_pixel",
+        stamp: 21,
+        center: DVec2::new(10.25, 10.25),
+        amplitude: 1.0,
+        sigma: Vec2::splat(2.5),
+        background: 0.1,
+        guess: DVec2::splat(10.0),
+        fit_radius: 8,
+        perturbation: Perturbation::None,
+        fit_background: None,
+    },
+    RecoveryCase {
+        name: "half_pixel",
+        stamp: 21,
+        center: DVec2::new(10.5, 10.5),
+        amplitude: 1.0,
+        sigma: Vec2::splat(2.5),
+        background: 0.1,
+        guess: DVec2::splat(10.0),
+        fit_radius: 8,
+        perturbation: Perturbation::None,
+        fit_background: None,
+    },
+    RecoveryCase {
+        name: "three_quarter_pixel",
+        stamp: 21,
+        center: DVec2::new(10.75, 10.75),
+        amplitude: 1.0,
+        sigma: Vec2::splat(2.5),
+        background: 0.1,
+        guess: DVec2::splat(10.0),
+        fit_radius: 8,
+        perturbation: Perturbation::None,
+        fit_background: None,
+    },
+    RecoveryCase {
+        name: "mixed_offset",
+        stamp: 21,
+        center: DVec2::new(9.7, 10.4),
+        amplitude: 1.0,
+        sigma: Vec2::splat(2.5),
+        background: 0.1,
+        guess: DVec2::splat(10.0),
+        fit_radius: 8,
+        perturbation: Perturbation::None,
+        fit_background: None,
+    },
+    // Fainter than the absolute amplitude floor the fit once had, 0.01 in data units: a faint
+    // star in normalized data.
+    RecoveryCase {
+        name: "below_an_absolute_floor",
+        stamp: 21,
+        center: DVec2::new(10.3, 9.8),
+        amplitude: 0.005,
+        sigma: Vec2::splat(2.0),
+        background: 0.1,
+        guess: DVec2::splat(10.0),
+        fit_radius: 8,
+        perturbation: Perturbation::None,
+        fit_background: None,
+    },
+    RecoveryCase {
+        name: "milli_amplitude",
+        stamp: 21,
+        center: DVec2::new(10.0, 10.0),
+        amplitude: 0.001,
+        sigma: Vec2::splat(2.5),
+        background: 0.1,
+        guess: DVec2::splat(10.0),
+        fit_radius: 8,
+        perturbation: Perturbation::None,
+        fit_background: None,
+    },
+    RecoveryCase {
         name: "centered",
         stamp: 21,
         center: DVec2::new(10.0, 10.0),
@@ -74,14 +151,8 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         background: 0.1,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
-        pos_tol: Some(0.1),
-        sigma_tol: Some(0.2),
-        amplitude_tol: None,
-        background_tol: None,
         perturbation: Perturbation::None,
         fit_background: None,
-        max_iterations: None,
-        expect_converged: false,
     },
     RecoveryCase {
         name: "subpixel_offset",
@@ -92,14 +163,8 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         background: 0.1,
         guess: DVec2::new(10.0, 11.0),
         fit_radius: 8,
-        pos_tol: Some(0.05),
-        sigma_tol: None,
-        amplitude_tol: None,
-        background_tol: None,
         perturbation: Perturbation::None,
         fit_background: None,
-        max_iterations: None,
-        expect_converged: true,
     },
     RecoveryCase {
         name: "asymmetric",
@@ -110,14 +175,8 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         background: 0.1,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
-        pos_tol: None,
-        sigma_tol: Some(0.3),
-        amplitude_tol: None,
-        background_tol: None,
         perturbation: Perturbation::None,
         fit_background: None,
-        max_iterations: None,
-        expect_converged: false,
     },
     RecoveryCase {
         name: "high_snr",
@@ -128,14 +187,8 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         background: 1.0,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
-        pos_tol: Some(0.02),
-        sigma_tol: None,
-        amplitude_tol: Some(1.0),
-        background_tol: None,
         perturbation: Perturbation::None,
         fit_background: None,
-        max_iterations: None,
-        expect_converged: false,
     },
     RecoveryCase {
         // Amplitude is clamped to a 0.01 floor, so this only pins that a fit comes back at all.
@@ -147,14 +200,8 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         background: 0.1,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
-        pos_tol: None,
-        sigma_tol: None,
-        amplitude_tol: None,
-        background_tol: None,
         perturbation: Perturbation::None,
         fit_background: None,
-        max_iterations: None,
-        expect_converged: false,
     },
     RecoveryCase {
         name: "large_sigma",
@@ -165,14 +212,8 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         background: 0.1,
         guess: DVec2::splat(15.0),
         fit_radius: 12,
-        pos_tol: Some(0.2),
-        sigma_tol: Some(0.5),
-        amplitude_tol: None,
-        background_tol: None,
         perturbation: Perturbation::None,
         fit_background: None,
-        max_iterations: None,
-        expect_converged: false,
     },
     RecoveryCase {
         // Sigma 1.0 is close to Nyquist: fewer lit pixels, so position is looser.
@@ -184,14 +225,8 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         background: 0.1,
         guess: DVec2::splat(7.0),
         fit_radius: 5,
-        pos_tol: Some(0.15),
-        sigma_tol: None,
-        amplitude_tol: None,
-        background_tol: None,
         perturbation: Perturbation::None,
         fit_background: None,
-        max_iterations: None,
-        expect_converged: false,
     },
     RecoveryCase {
         name: "zero_background",
@@ -202,14 +237,8 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         background: 0.0,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
-        pos_tol: Some(0.1),
-        sigma_tol: None,
-        amplitude_tol: None,
-        background_tol: Some(0.05),
         perturbation: Perturbation::None,
         fit_background: None,
-        max_iterations: None,
-        expect_converged: false,
     },
     RecoveryCase {
         name: "high_background",
@@ -220,14 +249,8 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         background: 10.0,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
-        pos_tol: Some(0.1),
-        sigma_tol: None,
-        amplitude_tol: None,
-        background_tol: None,
         perturbation: Perturbation::None,
         fit_background: None,
-        max_iterations: None,
-        expect_converged: false,
     },
     RecoveryCase {
         name: "sawtooth_noise",
@@ -238,14 +261,8 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         background: 0.1,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
-        pos_tol: Some(0.2),
-        sigma_tol: None,
-        amplitude_tol: None,
-        background_tol: None,
         perturbation: Perturbation::Sawtooth { amplitude: 0.02 },
         fit_background: None,
-        max_iterations: None,
-        expect_converged: false,
     },
     RecoveryCase {
         // Noise sigma is 5% of amplitude.
@@ -257,17 +274,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         background: 0.1,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
-        pos_tol: Some(0.2),
-        sigma_tol: None,
-        amplitude_tol: None,
-        background_tol: None,
         perturbation: Perturbation::Gaussian {
             sigma: 0.05,
             seed: 12345,
         },
         fit_background: None,
-        max_iterations: None,
-        expect_converged: true,
     },
     RecoveryCase {
         // 15% noise: must still converge, position just gets looser.
@@ -279,21 +290,15 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         background: 0.1,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
-        pos_tol: Some(0.5),
-        sigma_tol: None,
-        amplitude_tol: None,
-        background_tol: None,
         perturbation: Perturbation::Gaussian {
             sigma: 0.15,
             seed: 54321,
         },
         fit_background: None,
-        max_iterations: None,
-        expect_converged: true,
     },
     RecoveryCase {
         // SNR ~0.2. Makes no accuracy claim — it pins only that the fit stays finite instead of
-        // diverging, which the runner now asserts for every case.
+        // diverging, which the runner asserts for every case.
         name: "low_snr",
         stamp: 21,
         center: DVec2::new(10.0, 10.0),
@@ -302,14 +307,8 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         background: 0.5,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
-        pos_tol: None,
-        sigma_tol: None,
-        amplitude_tol: None,
-        background_tol: None,
         perturbation: Perturbation::None,
         fit_background: None,
-        max_iterations: None,
-        expect_converged: false,
     },
     RecoveryCase {
         // Fitter is handed a background 20% too high; it should recover the true one anyway,
@@ -322,14 +321,8 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         background: 0.1,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
-        pos_tol: Some(0.1),
-        sigma_tol: None,
-        amplitude_tol: None,
-        background_tol: Some(0.05),
         perturbation: Perturbation::None,
         fit_background: Some(0.12),
-        max_iterations: None,
-        expect_converged: true,
     },
     RecoveryCase {
         // Guess starts 2px off in both axes and needs the longer budget to walk back.
@@ -341,14 +334,8 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         background: 0.1,
         guess: DVec2::new(8.0, 12.0),
         fit_radius: 8,
-        pos_tol: Some(0.1),
-        sigma_tol: None,
-        amplitude_tol: None,
-        background_tol: None,
         perturbation: Perturbation::None,
         fit_background: None,
-        max_iterations: Some(100),
-        expect_converged: true,
     },
     RecoveryCase {
         name: "very_high_amplitude",
@@ -359,14 +346,8 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         background: 100.0,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
-        pos_tol: Some(0.1),
-        sigma_tol: None,
-        amplitude_tol: None,
-        background_tol: None,
         perturbation: Perturbation::None,
         fit_background: None,
-        max_iterations: None,
-        expect_converged: true,
     },
     RecoveryCase {
         // Sigma 0.8 is below the pixel scale — barely resolved.
@@ -378,14 +359,8 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         background: 0.1,
         guess: DVec2::splat(10.0),
         fit_radius: 8,
-        pos_tol: Some(0.15),
-        sigma_tol: None,
-        amplitude_tol: None,
-        background_tol: None,
         perturbation: Perturbation::None,
         fit_background: None,
-        max_iterations: None,
-        expect_converged: true,
     },
     RecoveryCase {
         // Wide and faint at once: the loosest position bound in the table.
@@ -397,20 +372,10 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         background: 0.05,
         guess: DVec2::splat(20.0),
         fit_radius: 15,
-        pos_tol: Some(1.0),
-        sigma_tol: None,
-        amplitude_tol: None,
-        background_tol: None,
         perturbation: Perturbation::None,
         fit_background: None,
-        max_iterations: None,
-        expect_converged: false,
     },
 ];
-
-/// SIMD and scalar accumulate the same ~225 f64 terms in a different order, so they differ by
-/// FMA and reassociation rounding — a few ulp relative, never a structural disagreement.
-const SIMD_TOL: f64 = 1e-10;
 
 #[test]
 fn gaussian_fit_recovers_known_parameters() {
@@ -419,1107 +384,241 @@ fn gaussian_fit_recovers_known_parameters() {
             .stamp(Size2us::new(case.stamp, case.stamp), case.background);
         case.perturbation.apply(&mut pixels);
 
-        let config = match case.max_iterations {
-            Some(max_iterations) => GaussianFitConfig {
-                max_iterations,
-                ..Default::default()
-            },
-            None => GaussianFitConfig::default(),
-        };
         let result = GaussianFit::new(
             &pixels,
             case.guess,
             &StampGrid::new(case.fit_radius),
             case.fit_background.unwrap_or(case.background),
             None,
-            &config,
+            &GaussianFitConfig::default(),
         )
         .unwrap_or_else(|| panic!("{}: fit returned None", case.name));
+        assert!(result.converged, "{}: did not converge", case.name);
 
-        // Asserted for every case, not just the ones that used to say so: a fit that diverges to
-        // NaN would otherwise slip past any case whose tolerances are all `None`.
-        assert!(
-            result.pos.x.is_finite() && result.pos.y.is_finite(),
-            "{}: non-finite position {:?}",
-            case.name,
-            result.pos
-        );
-        assert!(
-            result.axis_sigma().x.is_finite() && result.axis_sigma().y.is_finite(),
-            "{}: non-finite sigma {:?}",
-            case.name,
-            result.axis_sigma()
-        );
-
-        if case.expect_converged {
-            assert!(result.converged, "{}: did not converge", case.name);
-        }
-        if let Some(tol) = case.pos_tol {
-            assert!(
-                (result.pos.x - case.center.x).abs() < tol,
-                "{}: x {} vs {} (tol {tol})",
-                case.name,
-                result.pos.x,
-                case.center.x
-            );
-            assert!(
-                (result.pos.y - case.center.y).abs() < tol,
-                "{}: y {} vs {} (tol {tol})",
-                case.name,
-                result.pos.y,
-                case.center.y
-            );
-        }
-        if let Some(tol) = case.sigma_tol {
-            assert!(
-                (result.axis_sigma().x - case.sigma.x).abs() < tol,
-                "{}: sigma.x {} vs {} (tol {tol})",
-                case.name,
-                result.axis_sigma().x,
-                case.sigma.x
-            );
-            assert!(
-                (result.axis_sigma().y - case.sigma.y).abs() < tol,
-                "{}: sigma.y {} vs {} (tol {tol})",
-                case.name,
-                result.axis_sigma().y,
-                case.sigma.y
-            );
-        }
-        if let Some(tol) = case.amplitude_tol {
-            assert!(
-                (result.debug.amplitude - case.amplitude).abs() < tol,
-                "{}: amplitude {} vs {} (tol {tol})",
-                case.name,
-                result.debug.amplitude,
-                case.amplitude
-            );
-        }
-        if let Some(tol) = case.background_tol {
-            assert!(
-                (result.debug.background - case.background).abs() < tol,
-                "{}: background {} vs {} (tol {tol})",
-                case.name,
-                result.debug.background,
-                case.background
-            );
-        }
-    }
-}
-
-#[test]
-fn sigma_fwhm_conversion() {
-    let sigma = 2.0;
-    let fwhm = sigma_to_fwhm(sigma);
-    let sigma_back = fwhm_to_sigma(fwhm);
-    assert!((sigma_back - sigma).abs() < 1e-6);
-    assert!((fwhm - 4.71).abs() < 0.01);
-}
-
-#[test]
-fn gaussian_fit_edge_position() {
-    let width = 21;
-    let height = 21;
-    let pixels = Buffer2::new_filled(width, height, 0.1f32);
-
-    let config = GaussianFitConfig::default();
-    let result = GaussianFit::new(
-        &pixels,
-        DVec2::new(2.0, 10.0),
-        &StampGrid::new(8),
-        0.1,
-        None,
-        &config,
-    );
-    assert!(result.is_none());
-}
-
-#[test]
-fn gaussian_fit_stamp_too_small() {
-    let width = 5;
-    let height = 5;
-    let pixels = Buffer2::new_filled(width, height, 0.5f32);
-
-    let config = GaussianFitConfig::default();
-    // Center at 2,2 with radius 3 would go outside the 5x5 image
-    // extract_stamp returns None when stamp doesn't fit
-    let result = GaussianFit::new(
-        &pixels,
-        DVec2::splat(2.0),
-        &StampGrid::new(3),
-        0.5,
-        None,
-        &config,
-    );
-    assert!(result.is_none());
-}
-
-#[test]
-fn fwhm_accuracy() {
-    // Test that FWHM is correctly computed from sigma
-    let sigma = 2.0;
-    let fwhm = sigma_to_fwhm(sigma);
-
-    // FWHM = 2 * sqrt(2 * ln(2)) * sigma ≈ 2.355 * sigma
-    let expected = 2.0 * (2.0 * 2.0f32.ln()).sqrt() * sigma;
-    assert!((fwhm - expected).abs() < 1e-5);
-}
-
-#[test]
-fn gaussian_fit_converges_within_max_iterations() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.0f64;
-    let true_cy = 10.0f64;
-    let true_amp = 1.0;
-    let true_sigma = 2.5;
-    let true_bg = 0.1;
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx as f32, true_cy as f32),
-        true_amp,
-        StarProfile::Gaussian { sigma: true_sigma },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    let config = GaussianFitConfig {
-        max_iterations: 10, // Low iteration limit
-        ..Default::default()
-    };
-    let result = GaussianFit::new(
-        &pixels,
-        DVec2::splat(10.0),
-        &StampGrid::new(8),
-        true_bg,
-        None,
-        &config,
-    );
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    // Should converge quickly for perfect data
-    assert!(result.converged);
-    assert!(result.debug.iterations <= 10);
-}
-
-#[test]
-fn gaussian_fit_uniform_data_returns_result() {
-    // Uniform data (no star) - should still return a result, though meaningless
-    let width = 21;
-    let height = 21;
-    let uniform_value = 0.5f32;
-    let pixels = Buffer2::new_filled(width, height, uniform_value);
-
-    let config = GaussianFitConfig::default();
-    let result = GaussianFit::new(
-        &pixels,
-        DVec2::splat(10.0),
-        &StampGrid::new(8),
-        uniform_value,
-        None,
-        &config,
-    );
-
-    // Should produce some result (may not converge well)
-    assert!(result.is_some());
-    let result = result.unwrap();
-    // Values should be finite
-    assert!(result.pos.x.is_finite());
-    assert!(result.pos.y.is_finite());
-    assert!(result.debug.amplitude.is_finite());
-    assert!(result.axis_sigma().x.is_finite());
-    assert!(result.axis_sigma().y.is_finite());
-}
-
-#[test]
-fn gaussian_fit_center_outside_stamp_rejected() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.0f64;
-    let true_cy = 10.0f64;
-    let true_amp = 1.0;
-    let true_sigma = 2.5;
-    let true_bg = 0.1;
-
-    // Create a stamp with peak at edge so fitting might push center outside
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx as f32, true_cy as f32),
-        true_amp,
-        StarProfile::Gaussian { sigma: true_sigma },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    let config = GaussianFitConfig::default();
-    // Give initial guess very far from true center - should still find it
-    let result = GaussianFit::new(
-        &pixels,
-        DVec2::splat(10.0),
-        &StampGrid::new(3),
-        true_bg,
-        None,
-        &config,
-    );
-
-    // Small stamp radius = 3, if result.pos.x as f32 moves more than 3 pixels from cx, it's rejected
-    // With true center at 10, the fit should succeed
-    assert!(result.is_some());
-}
-
-#[test]
-fn gaussian_fit_rms_residual_computed() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.0f64;
-    let true_cy = 10.0f64;
-    let true_amp = 1.0;
-    let true_sigma = 2.5;
-    let true_bg = 0.1;
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx as f32, true_cy as f32),
-        true_amp,
-        StarProfile::Gaussian { sigma: true_sigma },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    let config = GaussianFitConfig::default();
-    let result = GaussianFit::new(
-        &pixels,
-        DVec2::splat(10.0),
-        &StampGrid::new(8),
-        true_bg,
-        None,
-        &config,
-    )
-    .unwrap();
-
-    // For perfect data, RMS residual should be very small
-    assert!(
-        result.debug.rms_residual < 1e-4,
-        "RMS residual too high: {}",
-        result.debug.rms_residual
-    );
-    assert!(result.debug.rms_residual >= 0.0);
-}
-
-#[test]
-fn gaussian_fit_multiple_positions() {
-    // Test fitting at various subpixel positions
-    let width = 21;
-    let height = 21;
-    let true_amp = 1.0;
-    let true_sigma = 2.5;
-    let true_bg = 0.1;
-
-    for &(offset_x, offset_y) in &[
-        (0.0, 0.0),
-        (0.25, 0.25),
-        (0.5, 0.5),
-        (0.75, 0.75),
-        (-0.3, 0.4),
-    ] {
-        let true_cx: f64 = 10.0 + offset_x;
-        let true_cy: f64 = 10.0 + offset_y;
-
-        let pixels = SyntheticStar::new(
-            Vec2::new(true_cx as f32, true_cy as f32),
-            true_amp,
-            StarProfile::Gaussian { sigma: true_sigma },
-        )
-        .stamp(Size2us::new(width, height), true_bg);
-
-        let config = GaussianFitConfig::default();
-        let result = GaussianFit::new(
-            &pixels,
-            DVec2::splat(10.0),
-            &StampGrid::new(8),
-            true_bg,
-            None,
-            &config,
-        );
-
-        assert!(
-            result.is_some(),
-            "Failed for offset ({offset_x}, {offset_y})"
-        );
-        let result = result.unwrap();
-        assert!(
-            (result.pos.x - true_cx).abs() < 0.1,
-            "X error {} for offset ({}, {})",
-            (result.pos.x - true_cx).abs(),
-            offset_x,
-            offset_y
-        );
-        assert!(
-            (result.pos.y - true_cy).abs() < 0.1,
-            "Y error {} for offset ({}, {})",
-            (result.pos.y - true_cy).abs(),
-            offset_x,
-            offset_y
-        );
-    }
-}
-
-#[test]
-fn reference_normal_equations_symmetry() {
-    // Create test jacobian and residuals
-    let jacobian = vec![
-        [1.0f64, 0.5, 0.3, 0.2, 0.1, 0.05],
-        [0.8, 0.6, 0.4, 0.25, 0.15, 0.08],
-        [0.6, 0.7, 0.5, 0.3, 0.2, 0.1],
-        [0.4, 0.4, 0.35, 0.22, 0.18, 0.07],
-    ];
-    let residuals = vec![0.1f64, -0.05, 0.08, -0.03];
-
-    let NormalEquations {
-        hessian, gradient, ..
-    } = reference_normal_equations(&jacobian, &residuals);
-
-    // Hessian must be symmetric: H[i][j] == H[j][i]
-    for (i, row) in hessian.iter().enumerate() {
-        for (j, &val) in row.iter().enumerate() {
-            assert!(
-                (val - hessian[j][i]).abs() < 1e-6,
-                "Hessian not symmetric at [{},{}]: {} vs {}",
-                i,
-                j,
-                val,
-                hessian[j][i]
-            );
-        }
-    }
-
-    // All values should be finite
-    for (i, &g) in gradient.iter().enumerate() {
-        assert!(g.is_finite(), "Gradient[{i}] not finite");
-        for (j, &h) in hessian[i].iter().enumerate() {
-            assert!(h.is_finite(), "Hessian[{i}][{j}] not finite");
-        }
-    }
-}
-
-#[test]
-fn reference_normal_equations_values() {
-    // Simple case: single jacobian row
-    let jacobian = vec![[1.0f64, 2.0, 3.0, 4.0, 5.0, 6.0]];
-    let residuals = vec![1.0f64];
-
-    let NormalEquations {
-        hessian,
-        gradient,
-        chi2,
-    } = reference_normal_equations(&jacobian, &residuals);
-
-    // chi² is Σr² over the one residual: 1² = 1
-    assert_eq!(chi2, 1.0);
-
-    // Gradient should be J^T * r = [1, 2, 3, 4, 5, 6]
-    for (i, &g) in gradient.iter().enumerate() {
-        let expected = (i + 1) as f64;
-        assert!(
-            (g - expected).abs() < 1e-6,
-            "Gradient[{i}] = {g}, expected {expected}"
-        );
-    }
-
-    // Hessian should be J^T * J = outer product
-    for (i, row) in hessian.iter().enumerate() {
-        for (j, &h) in row.iter().enumerate() {
-            let expected = ((i + 1) * (j + 1)) as f64;
-            assert!(
-                (h - expected).abs() < 1e-6,
-                "Hessian[{i}][{j}] = {h}, expected {expected}"
-            );
-        }
-    }
-}
-
-#[test]
-fn reference_normal_equations_empty() {
-    let jacobian: Vec<[f64; 6]> = vec![];
-    let residuals: Vec<f64> = vec![];
-
-    let NormalEquations {
-        hessian,
-        gradient,
-        chi2,
-    } = reference_normal_equations(&jacobian, &residuals);
-
-    // Empty input should give zero hessian, gradient and chi²
-    assert_eq!(chi2, 0.0);
-    for &g in &gradient {
-        assert_eq!(g, 0.0);
-    }
-    for row in &hessian {
-        for &h in row {
-            assert_eq!(h, 0.0);
-        }
-    }
-}
-
-#[test]
-fn reference_normal_equations_positive_semidefinite() {
-    // For any Jacobian, J^T * J should be positive semi-definite
-    // This means x^T * H * x >= 0 for all x
-    let jacobian = vec![
-        [0.5f64, 0.3, 0.8, 0.2, 0.6, 0.4],
-        [0.7, 0.4, 0.2, 0.5, 0.3, 0.1],
-        [0.3, 0.6, 0.5, 0.4, 0.2, 0.3],
-    ];
-    let residuals = vec![0.1f64, -0.2, 0.15];
-
-    let NormalEquations { hessian, .. } = reference_normal_equations(&jacobian, &residuals);
-
-    // Test with several random vectors
-    let test_vectors = [
-        [1.0f64, 0.0, 0.0, 0.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
-        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-        [0.5, -0.3, 0.7, -0.2, 0.4, -0.1],
-    ];
-
-    for x in &test_vectors {
-        let mut result = 0.0f64;
-        for (i, row) in hessian.iter().enumerate() {
-            for (j, &h) in row.iter().enumerate() {
-                result += x[i] * h * x[j];
+        let position_error = (result.pos - case.center).length();
+        if matches!(case.perturbation, Perturbation::None) {
+            let relative = |got: f32, want: f32| f64::from((got - want).abs() / want);
+            let sigma = result.axis_sigma();
+            let scale = f64::from(case.amplitude + case.background);
+            let bound = EXACT * scale / f64::from(case.amplitude);
+            for (what, error) in [
+                ("position", position_error),
+                ("σx", relative(sigma.x, case.sigma.x)),
+                ("σy", relative(sigma.y, case.sigma.y)),
+                ("cross term", result.covariance.xy.abs()),
+                (
+                    "amplitude",
+                    relative(result.debug.amplitude, case.amplitude),
+                ),
+                (
+                    "background",
+                    f64::from((result.debug.background - case.background).abs())
+                        / f64::from(case.amplitude),
+                ),
+            ] {
+                assert!(error <= bound, "{}: {what} off by {error:e}", case.name);
             }
-        }
-        assert!(
-            result >= -1e-6,
-            "Hessian not positive semi-definite: x^T H x = {result}"
-        );
-    }
-}
-
-/// Test that `reference_normal_equations` produces correct results with many rows.
-#[test]
-fn reference_normal_equations_many_rows() {
-    let n = 17;
-    let mut jacobian = Vec::with_capacity(n);
-    let mut residuals = Vec::with_capacity(n);
-
-    for i in 0..n {
-        let base = (i as f64 + 1.0) * 0.1;
-        jacobian.push([
-            base,
-            base * 0.5,
-            base * 0.3,
-            base * 0.7,
-            base * 0.2,
-            base * 0.9,
-        ]);
-        residuals.push(0.05 - 0.01 * i as f64);
-    }
-
-    let NormalEquations {
-        hessian, gradient, ..
-    } = reference_normal_equations(&jacobian, &residuals);
-
-    // Compute reference result
-    let mut ref_hessian = [[0.0f64; 6]; 6];
-    let mut ref_gradient = [0.0f64; 6];
-    for (row, &r) in jacobian.iter().zip(residuals.iter()) {
-        for i in 0..6 {
-            ref_gradient[i] += row[i] * r;
-            for j in 0..6 {
-                ref_hessian[i][j] += row[i] * row[j];
-            }
-        }
-    }
-
-    // Verify gradient matches
-    for i in 0..6 {
-        assert!(
-            (gradient[i] - ref_gradient[i]).abs() < 1e-4,
-            "Gradient[{}]: got {}, expected {}",
-            i,
-            gradient[i],
-            ref_gradient[i]
-        );
-    }
-
-    // Verify hessian matches (including symmetry)
-    for i in 0..6 {
-        for j in 0..6 {
-            assert!(
-                (hessian[i][j] - ref_hessian[i][j]).abs() < 1e-4,
-                "Hessian[{}][{}]: got {}, expected {}",
-                i,
-                j,
-                hessian[i][j],
-                ref_hessian[i][j]
-            );
-            assert!(
-                (hessian[i][j] - hessian[j][i]).abs() < 1e-6,
-                "Hessian not symmetric at [{i},{j}]",
-            );
-        }
-    }
-}
-
-/// Test with exactly 8 rows.
-#[test]
-fn reference_normal_equations_exactly_8_rows() {
-    let jacobian: Vec<[f64; 6]> = (0..8)
-        .map(|i| {
-            let v = f64::from(i + 1);
-            [v, v * 0.5, v * 0.3, v * 0.8, v * 0.1, v * 0.6]
-        })
-        .collect();
-    let residuals: Vec<f64> = (0..8).map(|i| 0.1 * (f64::from(i) - 3.5)).collect();
-
-    let NormalEquations {
-        hessian, gradient, ..
-    } = reference_normal_equations(&jacobian, &residuals);
-
-    // Reference
-    let mut ref_hessian = [[0.0f64; 6]; 6];
-    let mut ref_gradient = [0.0f64; 6];
-    for (row, &r) in jacobian.iter().zip(residuals.iter()) {
-        for i in 0..6 {
-            ref_gradient[i] += row[i] * r;
-            for j in 0..6 {
-                ref_hessian[i][j] += row[i] * row[j];
-            }
-        }
-    }
-
-    for i in 0..6 {
-        assert!(
-            (gradient[i] - ref_gradient[i]).abs() < 1e-4,
-            "Gradient[{}]: got {}, expected {}",
-            i,
-            gradient[i],
-            ref_gradient[i]
-        );
-        for j in 0..6 {
-            assert!(
-                (hessian[i][j] - ref_hessian[i][j]).abs() < 1e-4,
-                "Hessian[{}][{}]: got {}, expected {}",
-                i,
-                j,
-                hessian[i][j],
-                ref_hessian[i][j]
-            );
-        }
-    }
-}
-
-/// Test with a realistic stamp size (289 pixels = 17x17) to verify accumulated precision.
-#[test]
-fn reference_normal_equations_large_stamp() {
-    let n = 289;
-    let mut jacobian = Vec::with_capacity(n);
-    let mut residuals = Vec::with_capacity(n);
-
-    // Simulate a Gaussian-like Jacobian pattern
-    let sigma = 3.0f64;
-    for i in 0..n {
-        let x = (i % 17) as f64 - 8.0;
-        let y = (i / 17) as f64 - 8.0;
-        let r2 = x * x + y * y;
-        let exp_val = (-0.5 * r2 / (sigma * sigma)).exp();
-        jacobian.push([
-            exp_val * x / (sigma * sigma),             // dF/dx0
-            exp_val * y / (sigma * sigma),             // dF/dy0
-            exp_val,                                   // dF/dA
-            exp_val * x * x / (sigma * sigma * sigma), // dF/dsigma_x
-            exp_val * y * y / (sigma * sigma * sigma), // dF/dsigma_y
-            1.0,                                       // dF/dbg
-        ]);
-        residuals.push(0.01 * exp_val + 0.001 * (i as f64 % 7.0 - 3.0));
-    }
-
-    let NormalEquations {
-        hessian, gradient, ..
-    } = reference_normal_equations(&jacobian, &residuals);
-
-    // Reference
-    let mut ref_hessian = [[0.0f64; 6]; 6];
-    let mut ref_gradient = [0.0f64; 6];
-    for (row, &r) in jacobian.iter().zip(residuals.iter()) {
-        for i in 0..6 {
-            ref_gradient[i] += row[i] * r;
-            for j in 0..6 {
-                ref_hessian[i][j] += row[i] * row[j];
-            }
-        }
-    }
-
-    for i in 0..6 {
-        let rel_err = if ref_gradient[i].abs() > 1e-6 {
-            (gradient[i] - ref_gradient[i]).abs() / ref_gradient[i].abs()
         } else {
-            (gradient[i] - ref_gradient[i]).abs()
-        };
-        assert!(
-            rel_err < 1e-3,
-            "Gradient[{}]: got {}, expected {}, rel_err={}",
-            i,
-            gradient[i],
-            ref_gradient[i],
-            rel_err
-        );
-        for j in 0..6 {
-            let rel_err = if ref_hessian[i][j].abs() > 1e-6 {
-                (hessian[i][j] - ref_hessian[i][j]).abs() / ref_hessian[i][j].abs()
-            } else {
-                (hessian[i][j] - ref_hessian[i][j]).abs()
-            };
             assert!(
-                rel_err < 1e-3,
-                "Hessian[{}][{}]: got {}, expected {}, rel_err={}",
-                i,
-                j,
-                hessian[i][j],
-                ref_hessian[i][j],
-                rel_err
+                position_error <= case.position_bound(),
+                "{}: position off by {position_error} against {}",
+                case.name,
+                case.position_bound()
             );
         }
     }
 }
 
+/// The fit returns `None` where the data cannot support a fit, and lands exactly just inside each
+/// bound. A clean σ 2.5 star at the stamp's centre unless a row says otherwise.
 #[test]
-fn gaussian_fit_sigma_at_lower_bound() {
-    // Test with sigma very close to constraint minimum (0.5 px)
-    let width = 15;
-    let height = 15;
-    let true_cx = 7.0f64;
-    let true_cy = 7.0f64;
-    let true_amp = 1.0;
-    let true_sigma = 0.6; // Just above min constraint of 0.5
-    let true_bg = 0.1;
+fn gaussian_fit_rejects_what_the_data_cannot_support() {
+    #[derive(Debug)]
+    struct Case {
+        name: &'static str,
+        side: usize,
+        /// `None` for a uniform stamp with no star.
+        sigma: Option<f32>,
+        seed: DVec2,
+        radius: usize,
+        lands: bool,
+    }
+    let centre = |side: usize| DVec2::splat((side / 2) as f64);
+    let cases = [
+        // σ is held to [0.5, radius]: 0.6 and 9 fit, 0.3 and 12 would pin it.
+        Case {
+            name: "σ just above the floor",
+            side: 15,
+            sigma: Some(0.6),
+            seed: centre(15),
+            radius: 5,
+            lands: true,
+        },
+        Case {
+            name: "σ under the floor",
+            side: 15,
+            sigma: Some(0.3),
+            seed: centre(15),
+            radius: 5,
+            lands: false,
+        },
+        Case {
+            name: "σ just under the stamp radius",
+            side: 31,
+            sigma: Some(9.0),
+            seed: centre(31),
+            radius: 10,
+            lands: true,
+        },
+        Case {
+            name: "σ past the stamp radius",
+            side: 41,
+            sigma: Some(12.0),
+            seed: centre(41),
+            radius: 10,
+            lands: false,
+        },
+        // No star: the amplitude falls to its floor.
+        Case {
+            name: "uniform stamp",
+            side: 21,
+            sigma: None,
+            seed: centre(21),
+            radius: 8,
+            lands: false,
+        },
+        // The fit finds the star 2 px from its seed, inside a radius of 3; from 4 px it would
+        // have to move beyond it.
+        Case {
+            name: "centre within the radius of the seed",
+            side: 21,
+            sigma: Some(2.5),
+            seed: DVec2::new(12.0, 10.0),
+            radius: 3,
+            lands: true,
+        },
+        Case {
+            name: "centre beyond the radius of the seed",
+            side: 21,
+            sigma: Some(2.5),
+            seed: DVec2::new(14.0, 10.0),
+            radius: 3,
+            lands: false,
+        },
+        // A stamp that leaves the frame.
+        Case {
+            name: "stamp off the left edge",
+            side: 21,
+            sigma: Some(2.5),
+            seed: DVec2::new(2.0, 10.0),
+            radius: 8,
+            lands: false,
+        },
+        Case {
+            name: "stamp larger than the frame",
+            side: 5,
+            sigma: Some(1.0),
+            seed: centre(5),
+            radius: 3,
+            lands: false,
+        },
+    ];
 
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx as f32, true_cy as f32),
-        true_amp,
-        StarProfile::Gaussian { sigma: true_sigma },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    let config = GaussianFitConfig::default();
-    let result = GaussianFit::new(
-        &pixels,
-        DVec2::splat(7.0),
-        &StampGrid::new(5),
-        true_bg,
-        None,
-        &config,
-    );
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    // Sigma should be clamped to >= 0.5
-    assert!(result.axis_sigma().x >= 0.5);
-    assert!(result.axis_sigma().y >= 0.5);
-    // Centroid should still be reasonable
-    assert!((result.pos.x - true_cx).abs() < 0.2);
-    assert!((result.pos.y - true_cy).abs() < 0.2);
+    for case in cases {
+        let size = Size2us::new(case.side, case.side);
+        let truth = centre(case.side);
+        let pixels = match case.sigma {
+            Some(sigma) => {
+                SyntheticStar::new(truth.as_vec2(), 1.0, StarProfile::Gaussian { sigma })
+                    .stamp(size, 0.1)
+            }
+            None => Buffer2::new_filled(case.side, case.side, 0.1),
+        };
+        let fit = GaussianFit::new(
+            &pixels,
+            case.seed,
+            &StampGrid::new(case.radius),
+            0.1,
+            None,
+            &GaussianFitConfig::default(),
+        );
+        assert_eq!(fit.is_some(), case.lands, "{}", case.name);
+        if let (Some(fit), Some(sigma)) = (fit, case.sigma) {
+            assert!(
+                (fit.pos - truth).length() <= EXACT,
+                "{}: {}",
+                case.name,
+                fit.pos
+            );
+            assert!(
+                f64::from((fit.axis_sigma().x - sigma).abs() / sigma) <= EXACT,
+                "{}: σ {}",
+                case.name,
+                fit.axis_sigma().x
+            );
+        }
+    }
 }
 
+/// The RMS residual a fit reports: the f32 rounding of a clean stamp, and the noise of a noisy one
+/// less the seven parameters' share of it, `σₙ·√((N − 7)/N)` over N = 17² pixels. The sample RMS
+/// scatters by `1/√(2N)` = 4.2% of σₙ; 5 of those bound it.
 #[test]
-fn gaussian_fit_sigma_at_upper_bound() {
-    // Test with sigma close to stamp_radius constraint
-    let width = 31;
-    let height = 31;
-    let true_cx = 15.0f64;
-    let true_cy = 15.0f64;
-    let true_amp = 1.0;
-    let stamp_radius = 10;
-    let true_sigma = 9.0; // Close to stamp_radius
-    let true_bg = 0.1;
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx as f32, true_cy as f32),
-        true_amp,
-        StarProfile::Gaussian { sigma: true_sigma },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    let config = GaussianFitConfig::default();
-    let result = GaussianFit::new(
-        &pixels,
-        DVec2::splat(15.0),
-        &StampGrid::new(stamp_radius),
-        true_bg,
-        None,
-        &config,
-    );
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    // Sigma should be clamped to <= stamp_radius
-    assert!(result.axis_sigma().x <= stamp_radius as f32);
-    assert!(result.axis_sigma().y <= stamp_radius as f32);
-    // Centroid should still be found
-    assert!((result.pos.x - true_cx).abs() < 0.5);
-    assert!((result.pos.y - true_cy).abs() < 0.5);
-}
-
-#[test]
-fn gaussian_fit_extreme_amplitude_range() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.0f64;
-    let true_cy = 10.0f64;
-    let true_sigma = 2.5;
-    let true_bg = 0.1;
-
-    // Test across wide amplitude range
-    for amp_exp in [-3, -2, -1, 0, 1, 2, 3, 4] {
-        let true_amp = 10.0f32.powi(amp_exp);
-        let pixels = SyntheticStar::new(
-            Vec2::new(true_cx as f32, true_cy as f32),
-            true_amp,
-            StarProfile::Gaussian { sigma: true_sigma },
-        )
-        .stamp(Size2us::new(width, height), true_bg);
-
-        let config = GaussianFitConfig::default();
-        let result = GaussianFit::new(
+fn gaussian_fit_rms_residual() {
+    let n: f64 = 17.0 * 17.0;
+    for noise in [0.0f32, 0.05] {
+        let mut pixels =
+            SyntheticStar::new(Vec2::splat(10.0), 1.0, StarProfile::Gaussian { sigma: 2.5 })
+                .stamp(Size2us::new(21, 21), 0.1);
+        patterns::add_gaussian_noise(&mut pixels, noise, 11111);
+        let fit = GaussianFit::new(
             &pixels,
             DVec2::splat(10.0),
             &StampGrid::new(8),
-            true_bg,
+            0.1,
             None,
-            &config,
-        );
-
-        assert!(result.is_some(), "Failed for amplitude=10^{amp_exp}");
-        let result = result.unwrap();
-        assert!(
-            result.pos.x.is_finite(),
-            "Non-finite x for amplitude=10^{amp_exp}"
-        );
-        assert!(
-            result.pos.y.is_finite(),
-            "Non-finite y for amplitude=10^{amp_exp}"
-        );
-        assert!(
-            result.debug.amplitude.is_finite(),
-            "Non-finite amplitude for amplitude=10^{amp_exp}"
-        );
-    }
-}
-
-#[test]
-fn gaussian_fit_residual_distribution() {
-    // On noisy data, check that residuals are reasonable
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.0f64;
-    let true_cy = 10.0f64;
-    let true_amp = 1.0;
-    let true_sigma = 2.5;
-    let true_bg = 0.1;
-    let noise_sigma = 0.05;
-
-    let mut pixels = SyntheticStar::new(
-        Vec2::new(true_cx as f32, true_cy as f32),
-        true_amp,
-        StarProfile::Gaussian { sigma: true_sigma },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-    patterns::add_gaussian_noise(&mut pixels, noise_sigma, 11111);
-
-    let config = GaussianFitConfig::default();
-    let result = GaussianFit::new(
-        &pixels,
-        DVec2::splat(10.0),
-        &StampGrid::new(8),
-        true_bg,
-        None,
-        &config,
-    );
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-
-    // RMS residual should be roughly proportional to noise level
-    // Allow factor of 2-3 due to fitting degrees of freedom
-    assert!(
-        result.debug.rms_residual < noise_sigma * 3.0,
-        "RMS residual {} much larger than noise {}",
-        result.debug.rms_residual,
-        noise_sigma
-    );
-}
-
-/// Stamp sample coordinates and values.
-#[derive(Debug)]
-struct StampData {
-    x: Vec<f64>,
-    y: Vec<f64>,
-    z: Vec<f64>,
-}
-
-/// Build stamp data arrays (x, y, z) for a Gaussian profile at given
-/// `[x0, y0, amp, a, b, c, bg]`.
-fn make_gaussian_stamp_data(size: usize, params: &[f64; 7]) -> StampData {
-    let [x0, y0, amp, a, b, c, bg] = *params;
-    let mut data_x = Vec::with_capacity(size * size);
-    let mut data_y = Vec::with_capacity(size * size);
-    let mut data_z = Vec::with_capacity(size * size);
-    for iy in 0..size {
-        for ix in 0..size {
-            let x = ix as f64;
-            let y = iy as f64;
-            let dx = x - x0;
-            let dy = y - y0;
-            let z = amp * (-0.5 * (a * dx * dx + 2.0 * b * dx * dy + c * dy * dy)).exp() + bg;
-            data_x.push(x);
-            data_y.push(y);
-            data_z.push(z);
-        }
-    }
-    StampData {
-        x: data_x,
-        y: data_y,
-        z: data_z,
-    }
-}
-
-#[test]
-fn batch_build_normal_equations_matches_scalar() {
-    use crate::stacking::star_detection::centroid::lm_optimizer::LMModel;
-
-    let true_params = [6.3, 6.7, 1000.0, 0.16, 0.03, 0.111, 100.0];
-    // Use offset params so residuals are non-trivial
-    let params = [6.5, 6.5, 980.0, 0.15, 0.02, 0.12, 102.0];
-    let model = Gaussian2D { max_sigma: 8.0 };
-    let StampData {
-        x: data_x,
-        y: data_y,
-        z: data_z,
-    } = make_gaussian_stamp_data(13, &true_params);
-
-    // Scalar reference: build jacobian/residuals then compute hessian/gradient
-    let mut jac_scalar = Vec::new();
-    let mut res_scalar = Vec::new();
-    for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
-        let ModelSample {
-            value: model_val,
-            jacobian: jac_row,
-        } = model.evaluate_and_jacobian(x, y, &params);
-        jac_scalar.push(jac_row);
-        res_scalar.push(z - model_val);
-    }
-    let NormalEquations {
-        hessian: hessian_scalar,
-        gradient: gradient_scalar,
-        chi2: chi2_scalar,
-    } = reference_normal_equations(&jac_scalar, &res_scalar);
-
-    // Batch path (uses SIMD on x86_64 with AVX2)
-    let NormalEquations {
-        hessian: hessian_batch,
-        gradient: gradient_batch,
-        chi2: chi2_batch,
-    } = model.batch_build_normal_equations(FitData::unweighted(&data_x, &data_y, &data_z), &params);
-
-    // Chi² should match
-    assert_close!(
-        chi2_scalar,
-        chi2_batch,
-        SIMD_TOL,
-        "chi2 mismatch: scalar={chi2_scalar}, batch={chi2_batch}"
-    );
-
-    // Gradient should match
-    assert_close_slice!(gradient_scalar, gradient_batch, SIMD_TOL, "gradient");
-
-    // Hessian should match (full matrix including mirrored lower triangle)
-    for i in 0..7 {
-        for j in 0..7 {
-            assert_close!(
-                hessian_scalar[i][j],
-                hessian_batch[i][j],
-                SIMD_TOL,
-                "hessian[{i}][{j}] mismatch: scalar={}, batch={}",
-                hessian_scalar[i][j],
-                hessian_batch[i][j]
+            &GaussianFitConfig::default(),
+        )
+        .unwrap();
+        let rms = f64::from(fit.debug.rms_residual);
+        if noise == 0.0 {
+            assert!(rms < 1e-7, "clean stamp: {rms}");
+        } else {
+            let expected = f64::from(noise) * ((n - 7.0) / n).sqrt();
+            let bound = 5.0 * f64::from(noise) / (2.0 * n).sqrt();
+            assert!(
+                (rms - expected).abs() <= bound,
+                "noise {noise}: rms {rms} against {expected} ± {bound}"
             );
         }
     }
 }
 
+/// The batch normal equations against the scalar reference at every stamp size through 17 — sizes
+/// on and off the vector width — with a cross term in play.
 #[test]
-fn batch_compute_chi2_matches_scalar() {
-    use crate::stacking::star_detection::centroid::lm_optimizer::LMModel;
-
-    let model = Gaussian2D { max_sigma: 8.0 };
-    // Use slightly off params so residuals are non-zero
-    let true_params = [6.3, 6.7, 1000.0, 0.16, 0.03, 0.111, 100.0];
-    let test_params = [6.5, 6.5, 980.0, 0.15, 0.02, 0.12, 102.0];
-    let StampData {
-        x: data_x,
-        y: data_y,
-        z: data_z,
-    } = make_gaussian_stamp_data(13, &true_params);
-
-    // Scalar chi²
-    let chi2_scalar: f64 = data_x
-        .iter()
-        .zip(data_y.iter())
-        .zip(data_z.iter())
-        .map(|((&x, &y), &z)| {
-            let r = z - model.evaluate(x, y, &test_params);
-            r * r
-        })
-        .sum();
-
-    // Batch chi² (uses SIMD on x86_64 with AVX2)
-    let chi2_batch =
-        model.batch_compute_chi2(FitData::unweighted(&data_x, &data_y, &data_z), &test_params);
-
-    assert_close!(
-        chi2_scalar,
-        chi2_batch,
-        SIMD_TOL,
-        "chi2 mismatch: scalar={chi2_scalar}, batch={chi2_batch}, diff={}",
-        (chi2_scalar - chi2_batch).abs()
-    );
-}
-
-/// Weighted data must bypass the SIMD kernels (which are unweighted-only) and still apply the
-/// weights, so uniform weights reproduce the unweighted result and a uniform `w` scales it by `w`.
-#[test]
-fn batch_weighted_bypasses_simd_and_applies_weights() {
-    use crate::stacking::star_detection::centroid::lm_optimizer::LMModel;
-
-    let true_params = [6.3, 6.7, 1000.0, 0.16, 0.03, 0.111, 100.0];
-    let params = [6.5, 6.5, 980.0, 0.15, 0.02, 0.12, 102.0];
-    let model = Gaussian2D { max_sigma: 8.0 };
-    let StampData {
-        x: data_x,
-        y: data_y,
-        z: data_z,
-    } = make_gaussian_stamp_data(13, &true_params);
-
-    let unweighted =
-        model.batch_build_normal_equations(FitData::unweighted(&data_x, &data_y, &data_z), &params);
-
-    for scale in [1.0f64, 2.0] {
-        let weights = vec![scale; data_x.len()];
-        let weighted = model.batch_build_normal_equations(
-            FitData::new(&data_x, &data_y, &data_z, Some(&weights)),
-            &params,
-        );
-
-        // Every term of the normal equations is linear in the per-pixel weight.
-        assert_close!(
-            weighted.chi2,
-            scale * unweighted.chi2,
-            SIMD_TOL,
-            "chi2 at w={scale}: {} != {} * {}",
-            weighted.chi2,
-            scale,
-            unweighted.chi2
-        );
-        for i in 0..7 {
-            assert_close!(
-                weighted.gradient[i],
-                scale * unweighted.gradient[i],
-                SIMD_TOL,
-                "gradient[{i}] at w={scale}: {} != {} * {}",
-                weighted.gradient[i],
-                scale,
-                unweighted.gradient[i]
-            );
-            for j in 0..7 {
-                assert_close!(
-                    weighted.hessian[i][j],
-                    scale * unweighted.hessian[i][j],
-                    SIMD_TOL,
-                    "hessian[{i}][{j}] at w={scale}: {} != {} * {}",
-                    weighted.hessian[i][j],
-                    scale,
-                    unweighted.hessian[i][j]
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn batch_build_normal_equations_various_stamp_sizes() {
-    use crate::stacking::star_detection::centroid::lm_optimizer::LMModel;
-
-    let model = Gaussian2D { max_sigma: 10.0 };
-    let true_params = [5.0, 5.0, 500.0, 0.25, -0.04, 0.16, 50.0];
-    // Offset params for non-trivial residuals
+fn batch_normal_equations_match_reference() {
+    let model = Gaussian2D {
+        max_sigma: 10.0,
+        min_amplitude: 1e-6,
+    };
+    let truth = [5.0, 5.0, 500.0, 0.25, -0.04, 0.16, 50.0];
+    // Away from the truth, so the residuals are not zero.
     let params = [5.2, 4.8, 490.0, 0.23, -0.03, 0.17, 51.0];
-
-    // Test sizes that exercise: exact multiple of 4, remainder 1, 2, 3
     for size in [3, 4, 5, 7, 9, 11, 13, 15, 17] {
-        let StampData {
-            x: data_x,
-            y: data_y,
-            z: data_z,
-        } = make_gaussian_stamp_data(size, &true_params);
-
-        // Scalar reference
-        let mut jac_scalar = Vec::new();
-        let mut res_scalar = Vec::new();
-        for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
-            let ModelSample {
-                value: model_val,
-                jacobian: jac_row,
-            } = model.evaluate_and_jacobian(x, y, &params);
-            jac_scalar.push(jac_row);
-            res_scalar.push(z - model_val);
-        }
-        let NormalEquations {
-            hessian: hessian_scalar,
-            gradient: gradient_scalar,
-            chi2: chi2_scalar,
-        } = reference_normal_equations(&jac_scalar, &res_scalar);
-
-        // Batch
-        let NormalEquations {
-            hessian: hessian_batch,
-            gradient: gradient_batch,
-            chi2: chi2_batch,
-        } = model
-            .batch_build_normal_equations(FitData::unweighted(&data_x, &data_y, &data_z), &params);
-
-        assert_close!(
-            chi2_scalar,
-            chi2_batch,
-            SIMD_TOL,
-            "size={size}: chi2 mismatch: scalar={chi2_scalar}, batch={chi2_batch}"
-        );
-
-        for i in 0..7 {
-            assert_close!(
-                gradient_scalar[i],
-                gradient_batch[i],
-                SIMD_TOL,
-                "size={size}: gradient[{i}] mismatch: scalar={}, batch={}",
-                gradient_scalar[i],
-                gradient_batch[i]
-            );
-            for j in 0..7 {
-                assert_close!(
-                    hessian_scalar[i][j],
-                    hessian_batch[i][j],
-                    SIMD_TOL,
-                    "size={size}: hessian[{i}][{j}] mismatch: scalar={}, batch={}",
-                    hessian_scalar[i][j],
-                    hessian_batch[i][j]
-                );
-            }
-        }
+        let stamp = ModelStamp::of(&model, size, &truth);
+        assert_batch_matches_reference(&model, &stamp, &params);
     }
 }
 
 #[test]
 fn gaussian_evaluate_and_jacobian_consistency() {
-    use crate::stacking::star_detection::centroid::gaussian_fit::Gaussian2D;
     use crate::stacking::star_detection::centroid::lm_optimizer::LMModel;
 
-    let model = Gaussian2D { max_sigma: 15.0 };
+    let model = Gaussian2D {
+        max_sigma: 15.0,
+        min_amplitude: 1e-6,
+    };
     let params_list: &[[f64; 7]] = &[
         [10.0, 10.0, 1000.0, 0.25, 0.0, 0.25, 100.0],
         [5.5, 7.3, 500.0, 0.44, 0.1, 0.111, 50.0],
@@ -1553,6 +652,7 @@ fn gaussian_evaluate_and_jacobian_consistency() {
                 );
             }
         }
+        assert_jacobian_matches_differences(&model, params, &points);
     }
 }
 

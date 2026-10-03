@@ -12,7 +12,7 @@
 
 mod simd;
 
-use crate::math::fwhm::sigma_to_fwhm;
+use crate::math::fwhm::{alpha_beta_to_fwhm, fwhm_beta_to_alpha, sigma_to_fwhm};
 use crate::stacking::star_detection::centroid::fit_is_plausible;
 use crate::stacking::star_detection::centroid::lm_optimizer::{
     FitData, LMConfig, LMModel, ModelSample, NormalEquations,
@@ -138,14 +138,17 @@ struct MoffatFixedBeta {
     stamp_radius: f64,
     beta: f64,
     pow_strategy: PowStrategy,
+    /// The smallest amplitude the fit may take; see [`StampFit::min_amplitude`].
+    min_amplitude: f64,
 }
 
 impl MoffatFixedBeta {
-    fn new(stamp_radius: f64, beta: f64) -> Self {
+    fn new(stamp_radius: f64, beta: f64, min_amplitude: f64) -> Self {
         Self {
             stamp_radius,
             beta,
             pow_strategy: select_pow_strategy(beta),
+            min_amplitude,
         }
     }
 }
@@ -186,7 +189,7 @@ impl LMModel<5> for MoffatFixedBeta {
 
     #[inline]
     fn constrain(&self, params: &mut [f64; 5]) {
-        params[2] = params[2].max(0.01); // Amplitude > 0
+        params[2] = params[2].max(self.min_amplitude);
         params[3] = params[3].clamp(MIN_ALPHA, self.stamp_radius);
     }
 
@@ -208,11 +211,12 @@ impl LMModel<5> for MoffatFixedBeta {
 impl MoffatFit {
     /// Fit a 2D Moffat profile to a star stamp via Levenberg-Marquardt (f64 throughout). When
     /// `noise` is set, each pixel is weighted by `1/σ²` from the CCD noise model so the
-    /// shot-noisy bright core doesn't bias the fit (PR1); `None` is a plain unweighted fit.
+    /// shot-noisy bright core doesn't bias the fit; `None` is a plain unweighted fit.
     ///
     /// `None` also when the stamp falls outside the frame, holds too few pixels to constrain five
-    /// parameters, or the fit lands somewhere [`fit_is_plausible`] rejects, or α ends pinned at one
-    /// of [`MoffatFixedBeta::constrain`]'s bounds — a width the data did not support.
+    /// parameters, or the fit lands somewhere the data did not support: a centre that wandered off
+    /// ([`fit_is_plausible`]), or an amplitude or α pinned at one of
+    /// [`MoffatFixedBeta::constrain`]'s bounds.
     pub(super) fn new(
         pixels: &Buffer2<f32>,
         pos: DVec2,
@@ -237,14 +241,19 @@ impl MoffatFit {
             f64::from(background),
         ];
 
-        let model = MoffatFixedBeta::new(grid.radius as f64, f64::from(config.fixed_beta));
+        let model = MoffatFixedBeta::new(
+            grid.radius as f64,
+            f64::from(config.fixed_beta),
+            fit.min_amplitude(background),
+        );
         let result = fit.fit(&model, grid, initial_params, &config.lm);
 
-        let [x0, y0, _, alpha, _] = result.params;
+        let [x0, y0, amplitude, alpha, _] = result.params;
         let result_pos = fit.to_image(x0, y0);
 
-        let alpha_free = alpha > MIN_ALPHA && alpha < grid.radius as f64;
-        if !alpha_free || !fit_is_plausible(result_pos, pos, grid.radius) {
+        let shape_free =
+            amplitude > model.min_amplitude && alpha > MIN_ALPHA && alpha < grid.radius as f64;
+        if !shape_free || !fit_is_plausible(result_pos, pos, grid.radius) {
             return None;
         }
 
@@ -258,20 +267,6 @@ impl MoffatFit {
     }
 }
 
-/// Convert Moffat alpha and beta to FWHM.
-/// FWHM = 2 * alpha * sqrt(2^(1/beta) - 1)
-#[inline]
-pub(super) fn alpha_beta_to_fwhm(alpha: f32, beta: f32) -> f32 {
-    2.0 * alpha * (2.0f32.powf(1.0 / beta) - 1.0).sqrt()
-}
-
-/// Convert FWHM and beta to Moffat alpha.
-/// alpha = FWHM / (2 * sqrt(2^(1/beta) - 1))
-#[inline]
-pub(super) fn fwhm_beta_to_alpha(fwhm: f32, beta: f32) -> f32 {
-    fwhm / (2.0 * (2.0f32.powf(1.0 / beta) - 1.0).sqrt())
-}
-
 #[cfg(test)]
 mod internals {
     /// Fit diagnostics kept for tests; see [`MoffatFit::debug`].
@@ -283,8 +278,6 @@ mod internals {
         pub(super) alpha: f32,
         /// Background level.
         pub(super) background: f32,
-        /// Number of iterations used.
-        pub(super) iterations: usize,
     }
 
     use crate::stacking::star_detection::centroid::lm_optimizer::LMResult;
@@ -299,7 +292,6 @@ mod internals {
                 amplitude: amplitude as f32,
                 alpha: alpha as f32,
                 background: background as f32,
-                iterations: result.iterations,
             }
         }
     }
@@ -309,7 +301,7 @@ mod internals {
         /// [`MoffatFixedBeta::evaluate_and_jacobian`]'s fused form.
         ///
         /// Production takes only the fused path; this exists so
-        /// `test_moffat_fixed_beta_evaluate_and_jacobian_consistency` has a second derivation of
+        /// `moffat_fixed_beta_evaluate_and_jacobian_consistency` has a second derivation of
         /// the same algebra to check it against. Keep the two written out separately — sharing a
         /// helper between them would make the test compare an expression with itself.
         pub(super) fn jacobian_row(&self, x: f64, y: f64, params: &[f64; 5]) -> [f64; 5] {

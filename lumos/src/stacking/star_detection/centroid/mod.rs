@@ -95,9 +95,15 @@ const CONVERGENCE_THRESHOLD_SQ: f64 =
 
 /// Compute stamp radius from expected FWHM.
 #[inline]
-pub(super) fn compute_stamp_radius(expected_fwhm: f32) -> usize {
+pub(super) const fn compute_stamp_radius(expected_fwhm: f32) -> usize {
     let radius = (expected_fwhm * STAMP_RADIUS_FWHM_FACTOR).ceil() as usize;
-    radius.clamp(MIN_STAMP_RADIUS, MAX_STAMP_RADIUS)
+    if radius < MIN_STAMP_RADIUS {
+        MIN_STAMP_RADIUS
+    } else if radius > MAX_STAMP_RADIUS {
+        MAX_STAMP_RADIUS
+    } else {
+        radius
+    }
 }
 
 /// Check if position is within valid bounds for stamp extraction.
@@ -153,29 +159,17 @@ pub(super) fn measure_star(
     let stamp_radius = grid.radius;
     debug_assert_eq!(stamp_radius, compute_stamp_radius(expected_fwhm));
 
-    // Initial position from peak
     let mut pos = DVec2::new(region.peak.x as f64, region.peak.y as f64);
 
-    // First pass: weighted moments for initial refinement.
-    // When a fitting method follows, only 2 iterations are needed — the L-M
-    // optimizer refines position independently and converges to the same result
-    // regardless of Phase 1 precision (verified by tests).
+    // A fit that follows needs only 2 moments steps: it converges to the same optimum from any
+    // seed the moments leave (`moments_contract_and_fits_ignore_the_seed`).
     let phase1_iters = match config.centroid_method {
         CentroidMethod::WeightedMoments => MAX_MOMENTS_ITERATIONS,
         CentroidMethod::GaussianFit | CentroidMethod::MoffatFit { .. } => {
             MOMENTS_ITERATIONS_BEFORE_FIT
         }
     };
-    for _ in 0..phase1_iters {
-        let new_pos = refine_centroid(residual, pos, stamp_radius, expected_fwhm)?;
-
-        let delta = new_pos - pos;
-        pos = new_pos;
-
-        if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
-            break;
-        }
-    }
+    pos = moments_centroid(residual, pos, stamp_radius, expected_fwhm, phase1_iters)?;
 
     // The global map's sky is already out of the residual, so with no annulus the stamp is
     // measured as it stands, against the map's noise at the star.
@@ -184,17 +178,19 @@ pub(super) fn measure_star(
         noise: sky.noise.row(pos.y.round() as usize)[pos.x.round() as usize],
     };
 
-    // The annulus estimate; None in GlobalMap mode or when the annulus has too few
-    // in-bounds samples (star near an edge). A failed annulus falls back to the map's for the fit
-    // seed below, but must NOT become a metrics override: the map's noise at one pixel stands in
-    // for the stamp only where nothing better was measured.
+    // None in GlobalMap mode, or when fewer than 10 annulus pixels lie in the frame — which a
+    // centre at a stamp that fits never meets, since it keeps at least 8r of them. A missing
+    // annulus falls back to the map's for the fit seed below, but must NOT become a metrics
+    // override: the map's noise at one pixel stands in for the stamp only where nothing better was
+    // measured.
     let annulus_at = |at: DVec2| match config.local_background {
         LocalBackgroundMethod::GlobalMap => None,
-        LocalBackgroundMethod::LocalAnnulus => {
-            let inner_radius = stamp_radius;
-            let outer_radius = (stamp_radius as f32 * 1.5).ceil() as usize;
-            compute_annulus_background(residual, at, inner_radius, outer_radius)
-        }
+        LocalBackgroundMethod::LocalAnnulus => compute_annulus_background(
+            residual,
+            at,
+            stamp_radius,
+            annulus_outer_radius(stamp_radius),
+        ),
     };
     let moments_pos = pos;
     let annulus_background = annulus_at(pos);
@@ -203,13 +199,10 @@ pub(super) fn measure_star(
         noise: local_noise,
     } = annulus_background.unwrap_or_else(global_fallback);
 
-    // Refine with profile fitting if requested.
-    // When fit converges, also extract FWHM and eccentricity from fit parameters
-    // (more accurate than moment-based estimates).
+    // A converged fit's widths replace the moment-based FWHM and eccentricity.
     let mut fit_fwhm: Option<f32> = None;
     let mut fit_eccentricity: Option<f32> = None;
 
-    // Inverse-variance fit weights when a noise model is configured (PR1).
     let fit_noise = config.noise_model.map(|noise_model| FitNoise {
         sky_noise: local_noise,
         noise_model,
@@ -245,9 +238,7 @@ pub(super) fn measure_star(
                 // Moffat is radially symmetric (single alpha) — eccentricity stays moment-based
             }
         }
-        CentroidMethod::WeightedMoments => {
-            // Already computed above
-        }
+        CentroidMethod::WeightedMoments => {}
     }
 
     // The estimate above was centred on the moments position, and the fit has since moved the
@@ -261,7 +252,7 @@ pub(super) fn measure_star(
         annulus_at(pos)
     };
 
-    // Compute quality metrics (flux, SNR, sharpness, roundness always from moments)
+    // Flux, SNR, sharpness and roundness come from the stamp whatever the method.
     let mut star = compute_star(
         residual,
         sky,
@@ -273,7 +264,6 @@ pub(super) fn measure_star(
     )?;
     star.saturated = saturation.get_at(region.peak);
 
-    // Override FWHM and eccentricity with fit-derived values when available
     if let Some(fwhm) = fit_fwhm {
         star.fwhm = fwhm;
     }
@@ -282,6 +272,34 @@ pub(super) fn measure_star(
     }
 
     Some(star)
+}
+
+/// The outer radius of the sky annulus around a stamp of `stamp_radius`: half as far again, so
+/// the annulus is as wide as the stamp is deep and holds enough sky pixels to clip.
+const fn annulus_outer_radius(stamp_radius: usize) -> usize {
+    (3 * stamp_radius).div_ceil(2)
+}
+
+/// Weighted-moments centroid from `start`: at most `iterations` steps of [`refine_centroid`],
+/// stopping once a step moves less than `CENTROID_CONVERGENCE_THRESHOLD`. `None` when a step
+/// leaves the frame or finds no flux.
+fn moments_centroid(
+    residual: &Buffer2<f32>,
+    start: DVec2,
+    stamp_radius: usize,
+    expected_fwhm: f32,
+    iterations: usize,
+) -> Option<DVec2> {
+    let mut pos = start;
+    for _ in 0..iterations {
+        let new_pos = refine_centroid(residual, pos, stamp_radius, expected_fwhm)?;
+        let delta = new_pos - pos;
+        pos = new_pos;
+        if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
+            break;
+        }
+    }
+    Some(pos)
 }
 
 /// Single iteration of centroid refinement using Gaussian-weighted moments.
@@ -302,8 +320,7 @@ fn refine_centroid(
     let icx = pos.x.round() as isize;
     let icy = pos.y.round() as isize;
 
-    // Adaptive sigma based on expected FWHM
-    // The expected sigma, 0.8× for tighter weighting to reduce noise.
+    // 0.8 of the expected σ: a tighter window weights the noisy wings less.
     let sigma = (fwhm_to_sigma(expected_fwhm) * 0.8).clamp(1.0, stamp_radius as f32 * 0.5);
     let two_sigma_sq = 2.0 * f64::from(sigma) * f64::from(sigma);
 
@@ -373,7 +390,7 @@ fn refine_centroid(
     // `sum_x` is the first moment about the stamp's left edge, so lift it back into image x.
     let new_pos = DVec2::new(x0 as f64 + sum_x / sum_w, sum_y / sum_w);
 
-    // Reject if centroid moved too far (likely bad detection)
+    // A step this far means the stamp holds something other than one star.
     let max_move = stamp_size as f64 / 4.0;
     if (new_pos - pos).abs().max_element() > max_move {
         return None;
@@ -432,7 +449,6 @@ fn compute_star(
     let mut noise_count = 0usize;
     let mut peak_value = f64::NEG_INFINITY;
 
-    // For roundness calculation: marginal sums
     let stamp_size = 2 * stamp_radius + 1;
     let mut marginal_x = [0.0f64; MAX_STAMP_SIZE];
     let mut marginal_y = [0.0f64; MAX_STAMP_SIZE];
@@ -453,12 +469,10 @@ fn compute_star(
             weight_sum += value;
             peak_value = peak_value.max(signal);
 
-            // Core flux for sharpness (3x3 region around center)
             if dx.abs() <= 1 && dy.abs() <= 1 {
                 core_flux += signal;
             }
 
-            // Marginal distributions for roundness
             let mx_idx = (dx + stamp_radius_i32) as usize;
             let my_idx = (dy + stamp_radius_i32) as usize;
             marginal_x[mx_idx] += value;
@@ -474,7 +488,6 @@ fn compute_star(
             sum_y2 += value * fy * fy;
             sum_xy += value * fx * fy;
 
-            // Collect noise from background region (outer ring)
             let r2 = dx * dx + dy * dy;
             if local.is_none() && r2 > outer_ring_threshold {
                 noise_sum += f64::from(noise_row[x]);
@@ -504,7 +517,6 @@ fn compute_star(
     let fwhm = cov.fwhm();
     let eccentricity = cov.eccentricity();
 
-    // Compute SNR using appropriate noise model
     let avg_noise = match local {
         Some(local) => local.noise,
         None if noise_count > 0 => (noise_sum / noise_count as f64) as f32,
@@ -516,7 +528,6 @@ fn compute_star(
 
     let snr = compute_snr(flux_f32, avg_noise, npix, noise_model);
 
-    // Sharpness = peak / core_flux
     let sharpness = if core_flux > f64::EPSILON {
         (peak_value / core_flux).clamp(0.0, 1.0) as f32
     } else {

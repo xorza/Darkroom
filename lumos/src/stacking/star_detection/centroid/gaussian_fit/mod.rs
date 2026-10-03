@@ -57,6 +57,8 @@ pub(super) struct GaussianFit {
 struct Gaussian2D {
     /// The widest σ the fit may take, in px: the stamp radius.
     max_sigma: f64,
+    /// The smallest amplitude the fit may take; see [`StampFit::min_amplitude`].
+    min_amplitude: f64,
 }
 
 /// The narrowest σ the fit may take, in px.
@@ -109,12 +111,13 @@ impl LMModel<7> for Gaussian2D {
         }
     }
 
-    /// Amplitude positive, `a` and `c` within [`Gaussian2D::curvature_range`], and `b` held to
-    /// [`DEFINITENESS_MARGIN`] of singular, so every step leaves a profile that is a Gaussian.
+    /// Amplitude at least `min_amplitude`, `a` and `c` within [`Gaussian2D::curvature_range`],
+    /// and `b` held to [`DEFINITENESS_MARGIN`] of singular, so every step leaves a profile that is
+    /// a Gaussian.
     #[inline]
     fn constrain(&self, params: &mut [f64; 7]) {
         let (min_curvature, max_curvature) = self.curvature_range();
-        params[2] = params[2].max(0.01);
+        params[2] = params[2].max(self.min_amplitude);
         params[3] = params[3].clamp(min_curvature, max_curvature);
         params[5] = params[5].clamp(min_curvature, max_curvature);
         let b_max = ((1.0 - DEFINITENESS_MARGIN) * params[3] * params[5]).sqrt();
@@ -143,9 +146,9 @@ impl GaussianFit {
     /// unweighted fit.
     ///
     /// `None` also when the stamp falls outside the frame, holds too few pixels to constrain seven
-    /// parameters, or the fit lands somewhere [`fit_is_plausible`] rejects — a centre that wandered
-    /// off, or a shape pinned at one of [`Gaussian2D::constrain`]'s bounds, which is a fit the data
-    /// did not support.
+    /// parameters, or the fit lands somewhere the data did not support: a centre that wandered off
+    /// ([`fit_is_plausible`]), or an amplitude or shape pinned at one of
+    /// [`Gaussian2D::constrain`]'s bounds.
     pub(super) fn new(
         pixels: &Buffer2<f32>,
         pos: DVec2,
@@ -170,16 +173,18 @@ impl GaussianFit {
 
         let model = Gaussian2D {
             max_sigma: grid.radius as f64,
+            min_amplitude: fit.min_amplitude(background),
         };
         let result = fit.fit(&model, grid, initial_params, config);
 
-        let [x0, y0, _, a, b, c, _] = result.params;
+        let [x0, y0, amplitude, a, b, c, _] = result.params;
         let result_pos = fit.to_image(x0, y0);
         let (min_curvature, max_curvature) = model.curvature_range();
         let b_max = ((1.0 - DEFINITENESS_MARGIN) * a * c).sqrt();
-        let shape_free = [a, c]
-            .iter()
-            .all(|&k| k > min_curvature && k < max_curvature)
+        let shape_free = amplitude > model.min_amplitude
+            && [a, c]
+                .iter()
+                .all(|&k| k > min_curvature && k < max_curvature)
             && b.abs() < b_max;
         if !shape_free || !fit_is_plausible(result_pos, pos, grid.radius) {
             return None;

@@ -1,288 +1,100 @@
 use super::*;
-use crate::testing::synthetic::background_map;
 
-/// Verify that Phase 1 (weighted moments) reaches sub-pixel accuracy quickly.
-/// After 2 iterations the position should be within 0.1px of the final converged position.
-/// This establishes that reducing max iterations for fitting methods is safe.
+/// How the moments phase converges and what the profile fits make of it, on noiseless Gaussian
+/// stars at sub-pixel offsets, each measured at its own FWHM and stamp.
+///
+/// The moments window is a Gaussian of `σ_w = 0.8σ` around the current position, and the weighted
+/// mean of a Gaussian star under it lies at `(μ·σ_w² + p·σ²) / (σ² + σ_w²)`: each step shrinks the
+/// error by `σ² / (σ² + σ_w²)` = 1 / 1.64. Two steps, as `measure_star` takes before a fit, leave it
+/// at 0.37 of the start — and the fits must not care: from the 2-step and the 10-step seed they
+/// land on the same optimum, a Gaussian on the truth (the profile is its own model) and a
+/// Moffat within its model's bias.
 #[test]
-fn phase1_reaches_good_accuracy_in_few_iterations() {
-    let width = 64;
-    let height = 64;
-    let true_pos = DVec2::new(32.3, 32.7);
-    let pixels = SyntheticStar::new(
-        true_pos.as_vec2(),
-        0.8,
-        StarProfile::Gaussian { sigma: 2.5 },
-    )
-    .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-    let stamp_radius = 7;
-    let expected_fwhm = 5.9;
+fn moments_contract_and_fits_ignore_the_seed() {
+    const CONTRACTION: f64 = 1.0 / 1.64;
+    for (x, y, sigma) in [(32.3, 32.7, 2.5f32), (32.8, 32.2, 3.5), (32.1, 32.9, 1.8)] {
+        let truth = DVec2::new(x, y);
+        let size = Size2us::new(64, 64);
+        let pixels = SyntheticStar::new(truth.as_vec2(), 0.8, StarProfile::Gaussian { sigma })
+            .stamp(size, 0.1);
+        let residual = background_map::uniform(size, 0.1, 0.01).residual_of(&pixels);
+        let fwhm = sigma_to_fwhm(sigma);
+        let radius = compute_stamp_radius(fwhm);
+        let start = DVec2::new(x.round(), y.round());
+        let moments = |n| moments_centroid(&residual, start, radius, fwhm, n).unwrap();
+        let error = |p: DVec2| (p - truth).length();
 
-    // Run full convergence to get the final position
-    let mut pos_full = DVec2::new(32.0, 33.0);
-    for _ in 0..MAX_MOMENTS_ITERATIONS {
-        let new_pos = refine_centroid(
-            &bg.residual_of(&pixels),
-            pos_full,
-            stamp_radius,
-            expected_fwhm,
-        )
-        .expect("refine should succeed");
-        let delta = new_pos - pos_full;
-        pos_full = new_pos;
-        if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
-            break;
-        }
-    }
-
-    // Run only 2 iterations
-    let mut pos_2iter = DVec2::new(32.0, 33.0);
-    for _ in 0..2 {
-        pos_2iter = refine_centroid(
-            &bg.residual_of(&pixels),
-            pos_2iter,
-            stamp_radius,
-            expected_fwhm,
-        )
-        .expect("refine should succeed");
-    }
-
-    // After 2 iterations, should be within 0.2px of the fully converged position
-    // (the convergence threshold is 0.001px, so final iterations refine at sub-millipixel
-    // level — well beyond what L-M fitting needs as a starting point)
-    let diff = ((pos_2iter.x - pos_full.x).powi(2) + (pos_2iter.y - pos_full.y).powi(2)).sqrt();
-    assert!(
-        diff < 0.2,
-        "After 2 iterations, position should be within 0.2px of converged result, got {diff:.4}px diff"
-    );
-
-    // And within 0.3px of the true position
-    let error = ((pos_2iter.x - true_pos.x).powi(2) + (pos_2iter.y - true_pos.y).powi(2)).sqrt();
-    assert!(
-        error < 0.3,
-        "After 2 iterations, position should be within 0.3px of true position, got {error:.4}px error"
-    );
-}
-
-/// Verify that even a single Phase 1 iteration provides a reasonable starting
-/// point for L-M fitting (position within ~0.5 pixels of true center).
-#[test]
-fn single_phase1_iteration_provides_good_seed() {
-    let width = 64;
-    let height = 64;
-
-    // Test multiple sub-pixel offsets
-    for dx in 0..5 {
-        for dy in 0..5 {
-            let true_pos = DVec2::new(32.0 + f64::from(dx) * 0.2, 32.0 + f64::from(dy) * 0.2);
-            let pixels = SyntheticStar::new(
-                true_pos.as_vec2(),
-                0.8,
-                StarProfile::Gaussian { sigma: 2.5 },
-            )
-            .stamp(Size2us::new(width, height), 0.1);
-            let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-            // Start from integer peak position
-            let start = DVec2::new(true_pos.x.round(), true_pos.y.round());
-
-            let after_one = refine_centroid(&bg.residual_of(&pixels), start, 7, 5.9)
-                .expect("refine should succeed");
-
-            let error =
-                ((after_one.x - true_pos.x).powi(2) + (after_one.y - true_pos.y).powi(2)).sqrt();
-
+        // The sampled star follows the continuous contraction to within 1%, and from 2 and 3 px
+        // off as from the nearest pixel: ten steps leave 1.64⁻¹⁰ = 0.7% of the start.
+        for offset in [DVec2::new(2.0, -2.0), DVec2::new(2.1, 2.1)] {
+            let far = truth + offset;
+            let after = moments_centroid(&residual, far, radius, fwhm, 10).unwrap();
             assert!(
-                error < 0.5,
-                "Single iteration should get within 0.5px of true pos, got {:.3} for true_pos=({:.1}, {:.1})",
-                error,
-                true_pos.x,
-                true_pos.y
+                error(after) < 1.05 * offset.length() * CONTRACTION.powi(10),
+                "σ {sigma} from {offset}: {}",
+                error(after)
+            );
+        }
+        let (one, two, ten) = (moments(1), moments(2), moments(10));
+        let ratio = error(two) / error(one);
+        assert!(
+            (ratio - CONTRACTION).abs() < 0.01 * CONTRACTION,
+            "σ {sigma}: step ratio {ratio}"
+        );
+        assert!(
+            error(ten) < 1.01 * error(one) * CONTRACTION.powi(9),
+            "σ {sigma}: ten steps left {}",
+            error(ten)
+        );
+
+        // The fits converge to one optimum from either seed: apart by no more than the optimizer's
+        // stopping step, 1e-8 of a parameter (measured: 3e-14 px). The Gaussian lands on the truth
+        // to the f32 rounding of the residual, ≤ 2.1e-6 px measured; the Moffat, a different
+        // profile, carries its fixed-β bias, ≤ 2.6e-4 px measured on these stamps.
+        let grid = StampGrid::new(radius);
+        let gaussian = |seed| {
+            GaussianFit::new(
+                &residual,
+                seed,
+                &grid,
+                0.0,
+                None,
+                &GaussianFitConfig::default(),
+            )
+            .expect("the Gaussian fit lands")
+            .pos
+        };
+        let moffat = |seed| {
+            let config = MoffatFitConfig {
+                fixed_beta: 2.5,
+                ..Default::default()
+            };
+            MoffatFit::new(&residual, seed, &grid, 0.0, None, &config)
+                .expect("the Moffat fit lands")
+                .pos
+        };
+        for (model, fit, bias) in [
+            ("Gaussian", &gaussian as &dyn Fn(DVec2) -> DVec2, 1e-5),
+            ("Moffat", &moffat, 1e-3),
+        ] {
+            let (from_two, from_ten) = (fit(two), fit(ten));
+            assert!(
+                (from_two - from_ten).length() < 1e-8,
+                "σ {sigma} {model}: {from_two} vs {from_ten}"
+            );
+            assert!(
+                error(from_two) < bias,
+                "σ {sigma} {model}: {}",
+                error(from_two)
             );
         }
     }
 }
 
-/// Verify that `GaussianFit` accuracy is equivalent whether Phase 1 runs 2 or 10 iterations.
-#[test]
-fn gaussian_fit_accuracy_independent_of_phase1_iterations() {
-    use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
-
-    let width = 64;
-    let height = 64;
-    let true_pos = DVec2::new(32.3, 32.7);
-    let sigma = 2.5;
-    let pixels = SyntheticStar::new(true_pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma })
-        .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-    let stamp_radius = 7;
-    let expected_fwhm = 5.9;
-
-    // Phase 1 with only 2 iterations
-    let mut pos_2iter = DVec2::new(32.0, 33.0);
-    for _ in 0..2 {
-        pos_2iter = refine_centroid(
-            &bg.residual_of(&pixels),
-            pos_2iter,
-            stamp_radius,
-            expected_fwhm,
-        )
-        .expect("refine should succeed");
-    }
-
-    // Phase 1 with full 10 iterations
-    let mut pos_full = DVec2::new(32.0, 33.0);
-    for _ in 0..MAX_MOMENTS_ITERATIONS {
-        let new_pos = refine_centroid(
-            &bg.residual_of(&pixels),
-            pos_full,
-            stamp_radius,
-            expected_fwhm,
-        )
-        .expect("refine should succeed");
-        let delta = new_pos - pos_full;
-        pos_full = new_pos;
-        if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
-            break;
-        }
-    }
-
-    // Now apply Gaussian fit from both starting points
-    let config = GaussianFitConfig::default();
-    let result_2iter = GaussianFit::new(
-        &pixels,
-        pos_2iter,
-        &StampGrid::new(stamp_radius),
-        0.1,
-        None,
-        &config,
-    )
-    .expect("fit should succeed from 2-iter seed");
-    let result_full = GaussianFit::new(
-        &pixels,
-        pos_full,
-        &StampGrid::new(stamp_radius),
-        0.1,
-        None,
-        &config,
-    )
-    .expect("fit should succeed from full seed");
-
-    // Both should converge to essentially the same position
-    let diff = ((result_2iter.pos.x - result_full.pos.x).powi(2)
-        + (result_2iter.pos.y - result_full.pos.y).powi(2))
-    .sqrt();
-
-    assert!(
-        diff < 0.01,
-        "Gaussian fit should converge to same position regardless of Phase 1 iterations: diff={diff:.4}"
-    );
-
-    // Both should be close to true position
-    let error_2iter = ((result_2iter.pos.x - true_pos.x).powi(2)
-        + (result_2iter.pos.y - true_pos.y).powi(2))
-    .sqrt();
-    assert!(
-        error_2iter < 0.05,
-        "Gaussian fit from 2-iter seed should achieve <0.05px accuracy, got {error_2iter:.4}"
-    );
-}
-
-/// Verify that `MoffatFit` accuracy is equivalent whether Phase 1 runs 2 or 10 iterations.
-#[test]
-fn moffat_fit_accuracy_independent_of_phase1_iterations() {
-    use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFit, MoffatFitConfig};
-
-    let width = 64;
-    let height = 64;
-    let true_pos = DVec2::new(32.3, 32.7);
-    let pixels = SyntheticStar::new(
-        true_pos.as_vec2(),
-        0.8,
-        StarProfile::Gaussian { sigma: 2.5 },
-    )
-    .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-    let stamp_radius = 7;
-    let expected_fwhm = 5.9;
-
-    // Phase 1 with only 2 iterations
-    let mut pos_2iter = DVec2::new(32.0, 33.0);
-    for _ in 0..2 {
-        pos_2iter = refine_centroid(
-            &bg.residual_of(&pixels),
-            pos_2iter,
-            stamp_radius,
-            expected_fwhm,
-        )
-        .expect("refine should succeed");
-    }
-
-    // Phase 1 with full 10 iterations
-    let mut pos_full = DVec2::new(32.0, 33.0);
-    for _ in 0..MAX_MOMENTS_ITERATIONS {
-        let new_pos = refine_centroid(
-            &bg.residual_of(&pixels),
-            pos_full,
-            stamp_radius,
-            expected_fwhm,
-        )
-        .expect("refine should succeed");
-        let delta = new_pos - pos_full;
-        pos_full = new_pos;
-        if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
-            break;
-        }
-    }
-
-    // Now apply Moffat fit from both starting points
-    let config = MoffatFitConfig {
-        fixed_beta: 2.5,
-        ..MoffatFitConfig::default()
-    };
-    let result_2iter = MoffatFit::new(
-        &pixels,
-        pos_2iter,
-        &StampGrid::new(stamp_radius),
-        0.1,
-        None,
-        &config,
-    )
-    .expect("fit should succeed from 2-iter seed");
-    let result_full = MoffatFit::new(
-        &pixels,
-        pos_full,
-        &StampGrid::new(stamp_radius),
-        0.1,
-        None,
-        &config,
-    )
-    .expect("fit should succeed from full seed");
-
-    // Both should converge to essentially the same position
-    let diff = ((result_2iter.pos.x - result_full.pos.x).powi(2)
-        + (result_2iter.pos.y - result_full.pos.y).powi(2))
-    .sqrt();
-
-    assert!(
-        diff < 0.01,
-        "Moffat fit should converge to same position regardless of Phase 1 iterations: diff={diff:.4}"
-    );
-
-    // Both should be close to true position
-    let error_2iter = ((result_2iter.pos.x - true_pos.x).powi(2)
-        + (result_2iter.pos.y - true_pos.y).powi(2))
-    .sqrt();
-    assert!(
-        error_2iter < 0.05,
-        "Moffat fit from 2-iter seed should achieve <0.05px accuracy, got {error_2iter:.4}"
-    );
-}
-
 #[test]
 fn compute_stamp_radius_scales_and_clamps() {
     use crate::stacking::star_detection::centroid::compute_stamp_radius;
+
     let cases = [
         (1.0, 4),
         (2.0, 4),
@@ -294,7 +106,6 @@ fn compute_stamp_radius_scales_and_clamps() {
         (10.0, 15),
         (20.0, 15),
     ];
-
     for (fwhm, expected) in cases {
         assert_eq!(
             compute_stamp_radius(fwhm),
@@ -302,225 +113,4 @@ fn compute_stamp_radius_scales_and_clamps() {
             "FWHM {fwhm} uses ceil(1.75 × FWHM), clamped to [4, 15]"
         );
     }
-}
-
-/// Verifies that using only 2 pre-fit moments iterations produces equivalent
-/// centroid results compared to using 10 iterations before Gaussian/Moffat fitting.
-///
-/// This test validates the design decision in `MOMENTS_ITERATIONS_BEFORE_FIT`:
-/// the L-M optimizer refines position independently and converges to the same
-/// result regardless of Phase 1 precision.
-#[test]
-fn prefit_moments_iterations_sufficient() {
-    use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
-    use crate::stacking::star_detection::centroid::{CONVERGENCE_THRESHOLD_SQ, refine_centroid};
-
-    let width = 64;
-    let height = 64;
-
-    // Test with various sub-pixel positions and FWHM values
-    let test_cases = [
-        (DVec2::new(32.3, 32.7), 2.5f32), // Typical star, FWHM ~5.9
-        (DVec2::new(32.8, 32.2), 3.5f32), // Larger PSF, FWHM ~8.2
-        (DVec2::new(32.1, 32.9), 1.8f32), // Smaller PSF, FWHM ~4.2
-    ];
-
-    for (true_pos, sigma) in test_cases {
-        let pixels = SyntheticStar::new(true_pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma })
-            .stamp(Size2us::new(width, height), 0.1);
-        let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-        let expected_fwhm = fwhm_to_sigma(sigma);
-        let stamp_radius = 7;
-
-        // Start from peak position (slightly off from true position)
-        let peak_pos = DVec2::new(true_pos.x.round(), true_pos.y.round());
-
-        // Run with 2 iterations (current MOMENTS_ITERATIONS_BEFORE_FIT)
-        let mut pos_2iter = peak_pos;
-        for _ in 0..2 {
-            if let Some(new_pos) = refine_centroid(
-                &bg.residual_of(&pixels),
-                pos_2iter,
-                stamp_radius,
-                expected_fwhm,
-            ) {
-                let delta = new_pos - pos_2iter;
-                pos_2iter = new_pos;
-                if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
-                    break;
-                }
-            }
-        }
-
-        // Run with 10 iterations (fully converged moments)
-        let mut pos_10iter = peak_pos;
-        for _ in 0..10 {
-            if let Some(new_pos) = refine_centroid(
-                &bg.residual_of(&pixels),
-                pos_10iter,
-                stamp_radius,
-                expected_fwhm,
-            ) {
-                let delta = new_pos - pos_10iter;
-                pos_10iter = new_pos;
-                if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
-                    break;
-                }
-            }
-        }
-
-        // Now apply Gaussian fitting to both starting points
-        let local_bg = 0.1;
-        let fit_config = GaussianFitConfig::default();
-
-        let result_from_2iter = GaussianFit::new(
-            &pixels,
-            pos_2iter,
-            &StampGrid::new(stamp_radius),
-            local_bg,
-            None,
-            &fit_config,
-        );
-        let result_from_10iter = GaussianFit::new(
-            &pixels,
-            pos_10iter,
-            &StampGrid::new(stamp_radius),
-            local_bg,
-            None,
-            &fit_config,
-        );
-
-        // Both should converge
-        assert!(
-            result_from_2iter.is_some(),
-            "Gaussian fit from 2-iter moments failed for sigma={sigma}"
-        );
-        assert!(
-            result_from_10iter.is_some(),
-            "Gaussian fit from 10-iter moments failed for sigma={sigma}"
-        );
-
-        let pos_final_2iter = result_from_2iter.unwrap().pos;
-        let pos_final_10iter = result_from_10iter.unwrap().pos;
-
-        // Final positions should be nearly identical (< 0.01 pixels)
-        let diff = (pos_final_2iter - pos_final_10iter).length();
-        assert!(
-            diff < 0.01,
-            "Position difference {diff:.6} pixels exceeds 0.01 for sigma={sigma}: \
-             2-iter={pos_final_2iter:?}, 10-iter={pos_final_10iter:?}"
-        );
-
-        // Both should be accurate to within 0.05 pixels of true position
-        let error_2iter = (pos_final_2iter - true_pos).length();
-        let error_10iter = (pos_final_10iter - true_pos).length();
-        assert!(
-            error_2iter < 0.05,
-            "2-iter centroid error {error_2iter:.4} exceeds 0.05 for sigma={sigma}"
-        );
-        assert!(
-            error_10iter < 0.05,
-            "10-iter centroid error {error_10iter:.4} exceeds 0.05 for sigma={sigma}"
-        );
-    }
-}
-
-/// Same test but for Moffat fitting to ensure both PSF models benefit
-/// from the 2-iteration pre-fit optimization.
-#[test]
-fn prefit_moments_iterations_sufficient_moffat() {
-    use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFit, MoffatFitConfig};
-    use crate::stacking::star_detection::centroid::{
-        CONVERGENCE_THRESHOLD_SQ, lm_optimizer, refine_centroid,
-    };
-
-    let width = 64;
-    let height = 64;
-    let true_pos = DVec2::new(32.4, 32.6);
-    let sigma = 2.5f32;
-
-    let pixels = SyntheticStar::new(true_pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma })
-        .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-    let expected_fwhm = fwhm_to_sigma(sigma);
-    let stamp_radius = 7;
-
-    let peak_pos = DVec2::new(true_pos.x.round(), true_pos.y.round());
-
-    // Run with 2 iterations
-    let mut pos_2iter = peak_pos;
-    for _ in 0..2 {
-        if let Some(new_pos) = refine_centroid(
-            &bg.residual_of(&pixels),
-            pos_2iter,
-            stamp_radius,
-            expected_fwhm,
-        ) {
-            let delta = new_pos - pos_2iter;
-            pos_2iter = new_pos;
-            if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
-                break;
-            }
-        }
-    }
-
-    // Run with 10 iterations
-    let mut pos_10iter = peak_pos;
-    for _ in 0..10 {
-        if let Some(new_pos) = refine_centroid(
-            &bg.residual_of(&pixels),
-            pos_10iter,
-            stamp_radius,
-            expected_fwhm,
-        ) {
-            let delta = new_pos - pos_10iter;
-            pos_10iter = new_pos;
-            if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
-                break;
-            }
-        }
-    }
-
-    // Apply Moffat fitting to both
-    let local_bg = 0.1;
-    let fit_config = MoffatFitConfig {
-        fixed_beta: 2.5,
-        lm: lm_optimizer::LMConfig::default(),
-    };
-
-    let result_from_2iter = MoffatFit::new(
-        &pixels,
-        pos_2iter,
-        &StampGrid::new(stamp_radius),
-        local_bg,
-        None,
-        &fit_config,
-    );
-    let result_from_10iter = MoffatFit::new(
-        &pixels,
-        pos_10iter,
-        &StampGrid::new(stamp_radius),
-        local_bg,
-        None,
-        &fit_config,
-    );
-
-    assert!(
-        result_from_2iter.is_some(),
-        "Moffat fit from 2-iter moments failed"
-    );
-    assert!(
-        result_from_10iter.is_some(),
-        "Moffat fit from 10-iter moments failed"
-    );
-
-    let pos_final_2iter = result_from_2iter.unwrap().pos;
-    let pos_final_10iter = result_from_10iter.unwrap().pos;
-
-    // Final positions should be nearly identical
-    let diff = (pos_final_2iter - pos_final_10iter).length();
-    assert!(
-        diff < 0.01,
-        "Moffat position difference {diff:.6} pixels exceeds 0.01: 2-iter={pos_final_2iter:?}, 10-iter={pos_final_10iter:?}"
-    );
 }

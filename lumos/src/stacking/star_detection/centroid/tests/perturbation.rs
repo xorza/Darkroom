@@ -20,6 +20,16 @@ pub(crate) enum Perturbation {
 }
 
 impl Perturbation {
+    /// The perturbation's root-mean-square size per pixel. The sawtooth cycles through
+    /// `(k − 3)/3` for k = 0..7, whose mean square is 4/9.
+    pub(crate) fn rms(&self) -> f32 {
+        match *self {
+            Perturbation::None => 0.0,
+            Perturbation::Sawtooth { amplitude } => amplitude * 2.0 / 3.0,
+            Perturbation::Gaussian { sigma, .. } => sigma,
+        }
+    }
+
     pub(crate) fn apply(&self, pixels: &mut Buffer2<f32>) {
         match *self {
             Perturbation::None => {}

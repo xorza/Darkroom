@@ -5,10 +5,11 @@
 //! electron count at that level and sets the Poisson shot-noise scale (see
 //! [`noise`](crate::testing::synthetic::noise)).
 
+use crate::math::fwhm::fwhm_beta_to_alpha;
 use crate::math::fwhm::fwhm_to_sigma;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar, fwhm_to_moffat_alpha};
+use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use glam::Vec2;
 use imaginarium::Buffer2;
 use std::f32::consts::PI;
@@ -59,7 +60,7 @@ impl PsfModel {
                 )
             }
             PsfModel::Moffat { fwhm, beta } => {
-                let alpha = fwhm_to_moffat_alpha(fwhm * seeing_scale, beta);
+                let alpha = fwhm_beta_to_alpha(fwhm * seeing_scale, beta);
                 (
                     StarProfile::Moffat { alpha, beta },
                     flux * (beta - 1.0) / (PI * alpha * alpha),

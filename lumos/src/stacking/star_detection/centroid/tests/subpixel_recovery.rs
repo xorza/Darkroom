@@ -1,230 +1,103 @@
-//! Centroid stage tests.
-//!
-//! Sub-pixel centroid accuracy on synthetic stars: exact known positions are recovered to a
-//! stated sub-pixel tolerance, accuracy tracks SNR, and the three centroid methods
-//! (weighted-moments / Gaussian-fit / Moffat-fit) agree and the profile fits beat moments.
+//! Sub-pixel recovery of noisy stars through an estimated sky: each method lands within the
+//! scatter the noise propagates to it, so the error falls with the star's amplitude as derived.
 
-use super::unsaturated;
-use crate::testing::prelude::*;
-use crate::testing::synthetic::background_map;
-use crate::testing::synthetic::sky_field::{Sky, SkyField};
-use std::f32::consts::PI;
+use super::*;
+use std::f64::consts::PI;
 
-use crate::math::fwhm::fwhm_to_sigma;
-use crate::math::urect::URect;
-use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
-use crate::stacking::star_detection::centroid::compute_stamp_radius;
-use crate::stacking::star_detection::centroid::measure_star;
-use crate::stacking::star_detection::centroid::stamp::StampGrid;
-use crate::stacking::star_detection::config::background_config::BackgroundConfig;
-use crate::stacking::star_detection::config::measurement_config::{
-    CentroidMethod, MeasurementConfig,
-};
-use crate::stacking::star_detection::deblend::region::Region;
-
-/// Background estimate at the tile size these fixtures are built for.
+/// One field of round Gaussians on a 0.1 sky with white noise σₙ = 0.01, its sky estimated at the
+/// default tile size, each star measured from its nearest pixel at the matched FWHM 4.0 (σ = 1.70).
 ///
-/// Carried here rather than borrowed from the star-detection stage tests: this file exercises
-/// `measure_star` against positions it chose, so it should not depend on that module's scaffolding.
-fn background_estimate(pixels: &Buffer2<f32>) -> BackgroundEstimate {
-    background_map::estimate(
-        pixels,
-        &BackgroundConfig {
-            tile_size: 64,
-            ..Default::default()
-        },
-    )
-}
-
-/// Render `stars` as `(x, y, brightness)` Gaussians of width `sigma` on a 0.1 sky + Gaussian
-/// noise σ `noise`.
-fn field(
-    size: Size2us,
-    sigma: f32,
-    stars: &[(f32, f32, f32)],
-    noise: f32,
-    seed: u64,
-) -> Buffer2<f32> {
-    // Callers give total brightness; a Gaussian of this width spreads it over 2πσ².
-    let stars: Vec<(Vec2, f32)> = stars
-        .iter()
-        .map(|&(x, y, brightness)| (Vec2::new(x, y), brightness / (2.0 * PI * sigma * sigma)))
-        .collect();
-    let sky = Sky {
-        level: 0.1,
-        noise,
-        clamp: true,
-    };
-    SkyField::render(size, sky, sigma, &stars, seed).pixels
-}
-
-/// Build a 11×11 candidate region centred on the pixel nearest `(x, y)`.
-fn candidate_at(pixels: &Buffer2<f32>, x: f32, y: f32) -> Region {
-    let size = Size2us::new(pixels.width(), pixels.height());
-    let (px, py) = (x.round() as usize, y.round() as usize);
-    Region {
-        bbox: URect::new(
-            Vec2us::new(px.saturating_sub(5), py.saturating_sub(5)),
-            Vec2us::new((px + 6).min(size.width), (py + 6).min(size.height)),
-        ),
-        peak: Vec2us::new(px, py),
-        peak_value: pixels[(px, py)],
-        area: 50,
-    }
-}
-
+/// Per axis, five times the scatter each method propagates bounds its error:
+/// - The Gaussian fit is efficient on its own model: the Cramér–Rao bound `√(2/π)·σₙ/A`. Its
+///   sky is a free parameter, so the estimate's error does not reach it.
+/// - The moments fixed point `p = F(p)` moves by `δF / (1 − c)`, with `c` = 1/1.64 the step's
+///   contraction and `δF` one step's noise, `σₙ·√Σ(w·dx)² / Σ w·I` (`one_noisy_step_scatters_as_propagated`).
+///   To that add what ten steps leave of the seed, and the pull of a sky estimated off by δ,
+///   `δ·Σ w·|dx| / Σ w·I` per step.
+///
+/// The fit is checked to have converged — a failed fit falls back to the moments silently — by its
+/// FWHM, which replaces the moments' only then.
 #[test]
-fn centroid_recovers_known_subpixel_positions() {
-    let size = Size2us::new(256, 256);
-    let fwhm = 4.0;
-    let sigma = fwhm_to_sigma(fwhm);
-    let positions = [
-        (50.0, 50.0),     // integer
-        (100.3, 50.2),    // sub-pixel x
-        (50.7, 100.8),    // sub-pixel y
-        (150.5, 150.5),   // half-pixel both
-        (100.25, 100.75), // quarter-pixel
+fn noisy_stars_land_within_their_propagated_scatter() {
+    const NOISE: f64 = 0.01;
+    const SKY: f32 = 0.1;
+    let fwhm = 4.0f32;
+    let sigma = f64::from(fwhm_to_sigma(fwhm));
+    let radius = compute_stamp_radius(fwhm);
+    let window_sq = (0.8 * sigma).powi(2);
+    let contraction = sigma.powi(2) / (sigma.powi(2) + window_sq);
+    let stars = [
+        (DVec2::new(50.0, 50.0), 0.28f32),
+        (DVec2::new(100.3, 50.2), 0.28),
+        (DVec2::new(50.7, 100.8), 0.28),
+        (DVec2::new(150.5, 150.5), 0.28),
+        (DVec2::new(100.25, 100.75), 0.28),
+        (DVec2::new(40.42, 200.37), 0.14),
+        (DVec2::new(100.42, 200.37), 0.08),
+        (DVec2::new(160.42, 200.37), 0.055),
     ];
-    // Bright stars (high SNR) so centroiding is limited by sampling, not noise.
-    let stars: Vec<(f32, f32, f32)> = positions.iter().map(|&(x, y)| (x, y, 5.0)).collect();
-    let pixels = field(size, sigma, &stars, 0.01, 42);
-    let background = background_estimate(&pixels);
-    let config = MeasurementConfig::default();
-
-    let mut max_error = 0.0f64;
-    for &(true_x, true_y) in &positions {
-        let star = measure_star(
-            &background.residual_of(&pixels),
-            &background.sky_noise(),
-            &unsaturated(&pixels),
-            &candidate_at(&pixels, true_x, true_y),
-            &config,
-            fwhm,
-            &StampGrid::new(compute_stamp_radius(fwhm)),
+    let mut pixels = Buffer2::new_filled(256, 256, SKY);
+    for &(centre, amplitude) in &stars {
+        SyntheticStar::new(
+            centre.as_vec2(),
+            amplitude,
+            StarProfile::Gaussian {
+                sigma: sigma as f32,
+            },
         )
-        .unwrap_or_else(|| panic!("no centroid at ({true_x}, {true_y})"));
-        let error = ((star.pos.x - f64::from(true_x)).powi(2)
-            + (star.pos.y - f64::from(true_y)).powi(2))
-        .sqrt();
-        println!(
-            "({true_x:.2},{true_y:.2}) -> ({:.3},{:.3}) err {error:.4}",
-            star.pos.x, star.pos.y
-        );
-        max_error = max_error.max(error);
+        .add_exact(&mut pixels);
     }
-    // Bright, well-sampled Gaussians: every centroid is recovered to a small fraction of a pixel.
-    assert!(
-        max_error < 0.15,
-        "max centroid error {max_error:.4} should be sub-0.15 px"
-    );
-}
-
-#[test]
-fn centroid_accuracy_improves_with_snr() {
-    let size = Size2us::new(256, 128);
-    let fwhm = 4.0;
-    let sigma = fwhm_to_sigma(fwhm);
-    // Descending brightness at a fixed sub-pixel position (bright → near the noise floor, but
-    // all still centroidable).
-    let brightnesses = [5.0f32, 2.5, 1.5, 1.0];
-    let y = 64.37;
-    let stars: Vec<(f32, f32, f32)> = brightnesses
+    patterns::add_gaussian_noise(pixels.pixels_mut(), NOISE as f32, 42);
+    let background = background_map::estimate(&pixels, &BackgroundConfig::default());
+    let sky_error = background
+        .background
         .iter()
-        .enumerate()
-        .map(|(i, &b)| (40.0 + i as f32 * 60.0 + 0.42, y, b))
-        .collect();
-    let pixels = field(size, sigma, &stars, 0.01, 42);
-    let background = background_estimate(&pixels);
-    let config = MeasurementConfig::default();
+        .map(|&level| f64::from((level - SKY).abs()))
+        .fold(0.0, f64::max);
+    let measured = Measured::of(&pixels, &background);
 
-    let mut measured = Vec::new();
-    for &(tx, ty, _) in &stars {
-        let star = measure_star(
-            &background.residual_of(&pixels),
-            &background.sky_noise(),
-            &unsaturated(&pixels),
-            &candidate_at(&pixels, tx, ty),
-            &config,
-            fwhm,
-            &StampGrid::new(compute_stamp_radius(fwhm)),
-        )
-        .expect("centroid");
-        let error =
-            ((star.pos.x - f64::from(tx)).powi(2) + (star.pos.y - f64::from(ty)).powi(2)).sqrt();
-        measured.push((star.snr, error));
-        println!("brightness target: SNR {:.1}, error {error:.4}", star.snr);
-    }
+    for &(centre, amplitude) in &stars {
+        let truth = centre.as_vec2().as_dvec2();
+        let amplitude = f64::from(amplitude);
+        let seed = truth.round();
+        let (mut spread, mut pull, mut light) = (0.0f64, 0.0f64, 0.0f64);
+        let r = radius as i32;
+        for dy in -r..=r {
+            for dx in -r..=r {
+                let offset = seed + DVec2::new(f64::from(dx), f64::from(dy)) - truth;
+                let weight = (-offset.length_squared() / (2.0 * window_sq)).exp();
+                let star = amplitude * (-offset.length_squared() / (2.0 * sigma.powi(2))).exp();
+                spread += (weight * offset.x).powi(2).max((weight * offset.y).powi(2));
+                pull += weight * offset.x.abs().max(offset.y.abs());
+                light += weight * star;
+            }
+        }
+        let moments_bound =
+            (5.0 * NOISE * spread.sqrt() + sky_error * pull) / light / (1.0 - contraction)
+                + 1.01 * (seed - truth).length() * contraction.powi(10);
+        let fit_bound = 5.0 * (2.0 / PI).sqrt() * NOISE / amplitude;
 
-    // SNR decreases with brightness, monotonically.
-    for w in measured.windows(2) {
-        assert!(
-            w[1].0 < w[0].0,
-            "SNR must fall with brightness: {:.1} then {:.1}",
-            w[0].0,
-            w[1].0
-        );
-    }
-    // The brightest (highest-SNR) star is recovered sub-0.1 px.
-    assert!(
-        measured[0].1 < 0.1,
-        "brightest centroid error {:.4} should be sub-0.1 px",
-        measured[0].1
-    );
-    // The faintest (lowest SNR) is no better than a brighter one — error grows as SNR drops.
-    assert!(
-        measured[3].1 >= measured[0].1,
-        "faint centroid error {:.4} should not beat the brightest {:.4}",
-        measured[3].1,
-        measured[0].1
-    );
-}
-
-#[test]
-fn centroid_methods_agree_and_fits_beat_moments() {
-    let size = Size2us::new(128, 128);
-    let fwhm = 4.0;
-    let sigma = fwhm_to_sigma(fwhm);
-    let (tx, ty) = (64.37f32, 64.63f32);
-    // A bright, clean star so all three methods are in their accurate regime.
-    let pixels = field(size, sigma, &[(tx, ty, 5.0)], 0.005, 7);
-    let background = background_estimate(&pixels);
-
-    let error_for = |method: CentroidMethod| -> (f64, f64) {
-        let config = MeasurementConfig {
-            centroid_method: method,
-            ..Default::default()
+        let region = measured.region_at(truth);
+        let measure = |centroid_method| {
+            let config = MeasurementConfig {
+                centroid_method,
+                ..Default::default()
+            };
+            measured
+                .measure(&region, &config, fwhm)
+                .expect("the star measures")
         };
-        let star = measure_star(
-            &background.residual_of(&pixels),
-            &background.sky_noise(),
-            &unsaturated(&pixels),
-            &candidate_at(&pixels, tx, ty),
-            &config,
-            fwhm,
-            &StampGrid::new(compute_stamp_radius(fwhm)),
-        )
-        .expect("centroid");
-        let err =
-            ((star.pos.x - f64::from(tx)).powi(2) + (star.pos.y - f64::from(ty)).powi(2)).sqrt();
-        (star.pos.x, err)
-    };
+        let moments = measure(CentroidMethod::WeightedMoments);
+        let fit = measure(CentroidMethod::GaussianFit);
+        assert_ne!(fit.fwhm, moments.fwhm, "{truth}: the fit converged");
 
-    let (wm_x, wm_err) = error_for(CentroidMethod::WeightedMoments);
-    let (gf_x, gf_err) = error_for(CentroidMethod::GaussianFit);
-    let (mf_x, mf_err) = error_for(CentroidMethod::MoffatFit { beta: 2.5 });
-    println!("errors — moments {wm_err:.4}, gaussian {gf_err:.4}, moffat {mf_err:.4}");
-
-    // All three land within a small fraction of a pixel of truth and of each other.
-    assert!(wm_err < 0.1, "weighted-moments error {wm_err:.4}");
-    assert!(gf_err < 0.05, "gaussian-fit error {gf_err:.4}");
-    assert!(mf_err < 0.05, "moffat-fit error {mf_err:.4}");
-    assert!(
-        (gf_x - mf_x).abs() < 0.05 && (gf_x - wm_x).abs() < 0.1,
-        "methods should agree on x: wm {wm_x:.3}, gf {gf_x:.3}, mf {mf_x:.3}"
-    );
-    // The profile fits advertise ~0.01 px; they should be at least as accurate as moments.
-    assert!(
-        gf_err <= wm_err && mf_err <= wm_err,
-        "profile fits should match or beat moments: wm {wm_err:.4}, gf {gf_err:.4}, mf {mf_err:.4}"
-    );
+        for (method, star, bound) in [("moments", moments, moments_bound), ("fit", fit, fit_bound)]
+        {
+            let error = (star.pos - truth).abs().max_element();
+            assert!(
+                error <= bound,
+                "{truth}, A {amplitude}, {method}: {error} > {bound}"
+            );
+        }
+    }
 }

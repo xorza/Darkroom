@@ -1,190 +1,266 @@
 use super::*;
-use crate::testing::synthetic::background_map;
+use std::f32::consts::PI;
 
+/// One moments step, against what it must return. A star centred on the start stays put: its
+/// light is point-symmetric about the window. A lone pixel `k` columns off moves the centroid onto
+/// it exactly — at k = 5, inside the `stamp_size / 4` = 23/4 limit; at k = 6, beyond it, the step is
+/// refused. No positive light at all, or a stamp off the frame, gives nothing.
 #[test]
-fn refine_centroid_centered_star() {
-    let width = 64;
-    let height = 64;
-    let pos = DVec2::splat(32.0);
-    let pixels = SyntheticStar::new(pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma: 2.5 })
-        .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    let result = refine_centroid(
-        &bg.residual_of(&pixels),
-        pos,
-        TEST_STAMP_RADIUS,
-        TEST_EXPECTED_FWHM,
+fn refine_centroid_steps() {
+    let size = Size2us::new(64, 64);
+    let centre = DVec2::splat(32.0);
+    let star = Measured::flat(
+        &SyntheticStar::new(centre.as_vec2(), 0.8, StarProfile::Gaussian { sigma: 2.5 })
+            .stamp(size, 0.1),
+        0.1,
+        0.01,
+    );
+    let step = |residual: &Buffer2<f32>, from: DVec2| {
+        refine_centroid(residual, from, TEST_STAMP_RADIUS, TEST_EXPECTED_FWHM)
+    };
+    let centred = step(&star.residual, centre).unwrap();
+    assert!((centred - centre).length() <= 1e-12, "{centred}");
+    assert_eq!(
+        step(&star.residual, DVec2::new(3.0, 32.0)),
+        None,
+        "off the frame"
     );
 
-    assert!(result.is_some());
-    let new_pos = result.unwrap();
-    // Should stay very close to original position
-    assert!((new_pos.x - pos.x).abs() < 0.5);
-    assert!((new_pos.y - pos.y).abs() < 0.5);
+    let lone = |k: usize| {
+        let mut residual = Buffer2::new_filled(64, 64, 0.0f32);
+        residual[(32 + k, 32)] = 1.0;
+        residual
+    };
+    assert_eq!(step(&lone(5), centre), Some(DVec2::new(37.0, 32.0)));
+    assert_eq!(step(&lone(6), centre), None, "moved past stamp_size / 4");
+
+    assert_eq!(
+        step(&Buffer2::new_filled(64, 64, 0.0), centre),
+        None,
+        "no light"
+    );
+    assert_eq!(
+        step(&Buffer2::new_filled(64, 64, -0.5), centre),
+        None,
+        "only negative light"
+    );
 }
 
+/// A clean Gaussian star of amplitude A and σ 2.5, centred on a pixel: its flux is the sampled
+/// Gaussian's sum, 2πσ²·A (the sum over integers equals the integral to e^(−2π²σ²)), less what
+/// falls outside the 23 × 23 stamp — 2·P(|z| > 4.4) ≈ 2.2e-5 of it. Its SNR is that flux over
+/// `σₙ·(2r + 1)`. FWHM and eccentricity do not depend on A; flux and SNR scale with it, to the f32
+/// rounding of the residual (each pixel's `v + 0.1 − 0.1` loses at most 2⁻²⁵·0.2, so the stamp
+/// ≤ 529·6e-9 = 3.2e-6 of a flux near 15).
 #[test]
-fn refine_centroid_offset_converges() {
-    let width = 64;
-    let height = 64;
-    let true_pos = DVec2::new(32.3, 32.7);
-    let pixels = SyntheticStar::new(
-        true_pos.as_vec2(),
-        0.8,
-        StarProfile::Gaussian { sigma: 2.5 },
-    )
-    .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
+fn compute_star_of_a_clean_star() {
+    let size = Size2us::new(64, 64);
+    let centre = DVec2::splat(32.0);
+    let npix = (2 * TEST_STAMP_RADIUS + 1) as f32;
+    let reference = |amplitude: f32| {
+        let pixels = SyntheticStar::new(
+            centre.as_vec2(),
+            amplitude,
+            StarProfile::Gaussian { sigma: 2.5 },
+        )
+        .stamp(size, 0.1);
+        Measured::flat(&pixels, 0.1, 0.01)
+            .compute(centre, TEST_STAMP_RADIUS)
+            .expect("a star")
+    };
 
-    // Start with integer guess (peak pixel position)
-    let start_pos = DVec2::new(32.0, 33.0);
-
-    let result = refine_centroid(
-        &bg.residual_of(&pixels),
-        start_pos,
-        TEST_STAMP_RADIUS,
-        TEST_EXPECTED_FWHM,
-    );
-
-    assert!(result.is_some());
-    let new_pos = result.unwrap();
-    // Should move towards true center
-    let old_error =
-        ((start_pos.x - true_pos.x).powi(2) + (start_pos.y - true_pos.y).powi(2)).sqrt();
-    let new_error = ((new_pos.x - true_pos.x).powi(2) + (new_pos.y - true_pos.y).powi(2)).sqrt();
+    let base = reference(0.8);
+    let flux = 2.0 * PI * 6.25 * 0.8;
     assert!(
-        new_error < old_error,
-        "Refinement should reduce error: {old_error} -> {new_error}"
+        (base.flux - flux).abs() <= 2.5e-5 * flux,
+        "flux {}",
+        base.flux
     );
-}
-
-#[test]
-fn refine_centroid_invalid_position_returns_none() {
-    let width = 64;
-    let height = 64;
-    let pixels = Buffer2::new_filled(width, height, 0.5f32);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    // Position too close to edge
-    let result = refine_centroid(
-        &bg.residual_of(&pixels),
-        DVec2::new(3.0, 32.0),
-        TEST_STAMP_RADIUS,
-        TEST_EXPECTED_FWHM,
+    assert!(
+        (base.snr - base.flux / (0.01 * npix)).abs() <= 1e-6 * base.snr,
+        "SNR {}",
+        base.snr
     );
-    assert!(result.is_none());
-}
+    assert_eq!(base.pos, centre);
 
-#[test]
-fn refine_centroid_zero_flux_returns_none() {
-    let width = 64;
-    let height = 64;
-    // All pixels equal to background - no signal
-    let pixels = Buffer2::new_filled(width, height, 0.1f32);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    let result = refine_centroid(
-        &bg.residual_of(&pixels),
-        DVec2::splat(32.0),
-        TEST_STAMP_RADIUS,
-        TEST_EXPECTED_FWHM,
-    );
-    assert!(result.is_none());
-}
-
-#[test]
-fn refine_centroid_rejects_large_movement() {
-    let width = 64;
-    let height = 64;
-    // Create a star very far from initial position (outside the stamp entirely)
-    let pixels = SyntheticStar::new(Vec2::splat(50.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
-        .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    // Start far from the actual star - the stamp won't contain the star,
-    // so there's no signal, which should cause rejection
-    let result = refine_centroid(
-        &bg.residual_of(&pixels),
-        DVec2::splat(32.0),
-        TEST_STAMP_RADIUS,
-        TEST_EXPECTED_FWHM,
-    );
-
-    // With no star in the stamp (star is at 50,50, stamp centered at 32,32 with radius 7),
-    // the weighted centroid has zero or near-zero flux
-    assert!(result.is_none());
-}
-
-#[test]
-fn refine_centroid_iterative_convergence() {
-    let width = 64;
-    let height = 64;
-    let true_pos = DVec2::new(32.25, 32.75);
-    let pixels = SyntheticStar::new(
-        true_pos.as_vec2(),
-        0.8,
-        StarProfile::Gaussian { sigma: 2.5 },
-    )
-    .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    // Simulate multiple iterations like measure_star does
-    let mut pos = DVec2::splat(32.0);
-
-    for iteration in 0..MAX_MOMENTS_ITERATIONS {
-        let result = refine_centroid(
-            &bg.residual_of(&pixels),
-            pos,
-            TEST_STAMP_RADIUS,
-            TEST_EXPECTED_FWHM,
+    for scale in [0.5f32, 2.0] {
+        let scaled = reference(0.8 * scale);
+        assert!(
+            (scaled.flux / base.flux - scale).abs() <= 1e-6 * scale,
+            "flux at ×{scale}: {}",
+            scaled.flux
         );
-        assert!(result.is_some(), "Iteration {iteration} failed");
+        assert!(
+            (scaled.snr / base.snr - scale).abs() <= 1e-6 * scale,
+            "SNR at ×{scale}: {}",
+            scaled.snr
+        );
+        assert!(
+            (scaled.fwhm - base.fwhm).abs() <= 1e-6 * base.fwhm,
+            "FWHM at ×{scale}"
+        );
+        assert!(
+            (scaled.eccentricity - base.eccentricity).abs() <= 3e-4,
+            "eccentricity at ×{scale}"
+        );
+    }
+}
 
-        let new_pos = result.unwrap();
-        let delta = new_pos - pos;
-        pos = new_pos;
+/// Doubling the sky noise halves the SNR exactly: the flux is the same, and the noise the SNR
+/// reads, the mean of a uniform map over the stamp's outer ring, doubles bit for bit.
+#[test]
+fn snr_halves_when_the_noise_doubles() {
+    let size = Size2us::new(64, 64);
+    let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
+        .stamp(size, 0.1);
+    let snr = |noise: f32| {
+        Measured::flat(&pixels, 0.1, noise)
+            .compute(DVec2::splat(32.0), TEST_STAMP_RADIUS)
+            .unwrap()
+            .snr
+    };
+    assert_eq!(snr(0.02), 2.0 * snr(0.04));
+}
 
-        if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
-            break;
+/// The same star on a sky of 10 measures as on a sky of 0.1: the sky is gone from the residual,
+/// up to the f32 rounding of `v + 10 − 10` — 2⁻²⁰ per pixel, 529 · 1e-6 = 5e-4 of a flux of 15.7.
+#[test]
+fn a_bright_sky_changes_nothing() {
+    let size = Size2us::new(64, 64);
+    let measure = |sky: f32| {
+        let pixels =
+            SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
+                .stamp(size, sky);
+        Measured::flat(&pixels, sky, 0.01)
+            .compute(DVec2::splat(32.0), TEST_STAMP_RADIUS)
+            .unwrap()
+    };
+    let (dark, bright) = (measure(0.1), measure(10.0));
+    assert!(
+        (bright.flux - dark.flux).abs() <= 5e-4,
+        "{} vs {}",
+        bright.flux,
+        dark.flux
+    );
+    assert!((bright.fwhm - dark.fwhm).abs() <= 1e-4 * dark.fwhm);
+}
+
+/// One moments step from the true centre under white noise σₙ: the step is a ratio of weighted
+/// sums, so to first order its error is `σₙ·√Σ(w·dx)² / Σ w·I` per axis, with `w` the window and
+/// `I` the noiseless star — computed here from the same stamp. Five of those bound it.
+#[test]
+fn one_noisy_step_scatters_as_propagated() {
+    let size = Size2us::new(64, 64);
+    let centre = DVec2::splat(32.0);
+    let clean = SyntheticStar::new(centre.as_vec2(), 0.8, StarProfile::Gaussian { sigma: 2.5 })
+        .stamp(size, 0.1);
+    let noise = 0.05f32;
+    let mut noisy = clean.clone();
+    patterns::add_gaussian_noise(&mut noisy, noise, 21);
+
+    let window2 = (0.8 * f64::from(fwhm_to_sigma(TEST_EXPECTED_FWHM))).powi(2);
+    let r = TEST_STAMP_RADIUS as isize;
+    let (mut spread, mut light) = (0.0f64, 0.0f64);
+    for dy in -r..=r {
+        for dx in -r..=r {
+            let w = (-((dx * dx + dy * dy) as f64) / (2.0 * window2)).exp();
+            let value = f64::from(clean[((32 + dx) as usize, (32 + dy) as usize)] - 0.1);
+            spread += (w * dx as f64).powi(2);
+            light += w * value;
         }
     }
+    let bound = 5.0 * f64::from(noise) * spread.sqrt() / light;
 
-    // Should converge close to true position
-    let error = ((pos.x - true_pos.x).powi(2) + (pos.y - true_pos.y).powi(2)).sqrt();
-    assert!(error < 0.2, "Failed to converge: error = {error}");
+    let step = refine_centroid(
+        &Measured::flat(&noisy, 0.1, noise).residual,
+        centre,
+        TEST_STAMP_RADIUS,
+        TEST_EXPECTED_FWHM,
+    )
+    .unwrap();
+    let error = (step - centre).abs();
+    assert!(
+        error.x <= bound && error.y <= bound,
+        "{error} against {bound}"
+    );
 }
 
+/// Two stars far apart, each measured from its own detection, land on their own centres: each is
+/// point-symmetric about its peak pixel and the other is outside its stamp, so exactly.
 #[test]
-fn compute_star_valid_star() {
-    let width = 64;
-    let height = 64;
-    let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
-        .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    let peak = 0.73;
-    let star = compute_star(
-        &bg.residual_of(&pixels),
-        &bg.sky_noise(),
-        DVec2::splat(32.0),
-        peak,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
+fn measure_star_multiple_stars_independent() {
+    let mut pixels = Buffer2::new_filled(128, 128, 0.1f32);
+    for (centre, amplitude) in [(Vec2::splat(40.0), 0.8), (Vec2::splat(90.0), 0.6)] {
+        SyntheticStar::new(centre, amplitude, StarProfile::Gaussian { sigma: 2.5 })
+            .add_to(&mut pixels);
+    }
+    let measured = Measured::flat(&pixels, 0.1, 0.01);
+    let candidates = detect_stars_test(
+        &measured.residual,
+        &measured.sky,
+        &DetectionConfig::default(),
     );
+    let mut positions: Vec<DVec2> = candidates
+        .iter()
+        .map(|candidate| {
+            measured
+                .measure(candidate, &MeasurementConfig::default(), TEST_EXPECTED_FWHM)
+                .expect("a star")
+                .pos
+        })
+        .collect();
+    positions.sort_by(|a, b| a.x.total_cmp(&b.x));
+    assert_eq!(positions.len(), 2);
+    for (position, truth) in positions
+        .iter()
+        .zip([DVec2::splat(40.0), DVec2::splat(90.0)])
+    {
+        assert!(
+            (*position - truth).length() <= 1e-9,
+            "{position} vs {truth}"
+        );
+    }
 
-    assert!(star.is_some());
-    let m = star.unwrap();
-    assert_eq!(m.pos, Vec2::splat(32.0).as_dvec2());
-    assert_eq!(m.peak, peak);
-    assert!(m.flux > 0.0, "Flux should be positive");
-    assert!(m.fwhm > 0.0, "FWHM should be positive");
+    // A candidate whose stamp would leave the frame is not measured.
+    let edge = Region {
+        bbox: URect::new(Vec2us::new(0, 30), Vec2us::new(6, 36)),
+        peak: Vec2us::new(3, 32),
+        peak_value: 0.9,
+        area: 18,
+    };
     assert!(
-        m.eccentricity >= 0.0 && m.eccentricity <= 1.0,
-        "Eccentricity out of range"
+        measured
+            .measure(&edge, &MeasurementConfig::default(), TEST_EXPECTED_FWHM)
+            .is_none()
     );
-    assert!(m.snr > 0.0, "SNR should be positive");
+}
+
+/// A tail on one side breaks the symmetry SROUND measures: a 0.3 companion stretched along x,
+/// 4 px right of a round star, against the round star alone (SROUND 0 exactly; see `fitting`).
+#[test]
+fn a_one_sided_tail_raises_sround() {
+    let mut pixels =
+        SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
+            .stamp(Size2us::new(64, 64), 0.1);
+    SyntheticStar::new(
+        Vec2::new(36.0, 32.0),
+        0.3,
+        StarProfile::Elliptical {
+            sigma_x: 2.0,
+            sigma_y: 1.0,
+            angle: 0.0,
+        },
+    )
+    .add_to(&mut pixels);
+    let star = Measured::flat(&pixels, 0.1, 0.01)
+        .compute(DVec2::splat(32.0), TEST_STAMP_RADIUS)
+        .unwrap();
+    eprintln!("SROUND {}", star.roundness.sround);
+    assert!(
+        star.roundness.sround > 0.01,
+        "SROUND {}",
+        star.roundness.sround
+    );
 }
 
 #[test]
@@ -246,968 +322,18 @@ fn compute_star_local_offset_removes_what_the_global_map_left() {
 
 #[test]
 fn compute_star_invalid_position_returns_none() {
-    let width = 64;
-    let height = 64;
-    let pixels = Buffer2::new_filled(width, height, 0.5f32);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    // Position too close to edge
-    let metrics = compute_star(
-        &bg.residual_of(&pixels),
-        &bg.sky_noise(),
-        DVec2::new(3.0, 32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    );
-    assert!(metrics.is_none());
-}
-
-#[test]
-fn compute_star_zero_flux_returns_none() {
-    let width = 64;
-    let height = 64;
-    // All pixels equal to or below background
-    let pixels = Buffer2::new_filled(width, height, 0.05f32);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    let metrics = compute_star(
-        &bg.residual_of(&pixels),
-        &bg.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    );
-    assert!(metrics.is_none());
-}
-
-#[test]
-fn compute_star_fwhm_scales_with_sigma() {
-    let width = 128;
-    let height = 128;
-
-    // Create stars with different sigmas
-    let sigma_small = 2.0f32;
-    let sigma_large = 4.0f32;
-
-    let pixels_small = SyntheticStar::new(
-        Vec2::splat(64.0),
-        0.8,
-        StarProfile::Gaussian { sigma: sigma_small },
-    )
-    .stamp(Size2us::new(width, height), 0.1);
-    let pixels_large = SyntheticStar::new(
-        Vec2::splat(64.0),
-        0.8,
-        StarProfile::Gaussian { sigma: sigma_large },
-    )
-    .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    let metrics_small = compute_star(
-        &bg.residual_of(&pixels_small),
-        &bg.sky_noise(),
-        DVec2::splat(64.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap();
-    let metrics_large = compute_star(
-        &bg.residual_of(&pixels_large),
-        &bg.sky_noise(),
-        DVec2::splat(64.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap();
-
-    // Larger sigma should result in larger FWHM
+    let pixels = Buffer2::new_filled(64, 64, 0.5f32);
+    let measured = Measured::flat(&pixels, 0.1, 0.01);
     assert!(
-        metrics_large.fwhm > metrics_small.fwhm,
-        "Larger sigma should give larger FWHM: {} vs {}",
-        metrics_large.fwhm,
-        metrics_small.fwhm
+        measured
+            .compute(DVec2::new(3.0, 32.0), TEST_STAMP_RADIUS)
+            .is_none()
     );
-}
-
-#[test]
-fn compute_star_snr_scales_with_amplitude() {
-    let width = 64;
-    let height = 64;
-
-    let pixels_dim =
-        SyntheticStar::new(Vec2::splat(32.0), 0.2, StarProfile::Gaussian { sigma: 2.5 })
-            .stamp(Size2us::new(width, height), 0.1);
-    let pixels_bright =
-        SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
-            .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    let metrics_dim = compute_star(
-        &bg.residual_of(&pixels_dim),
-        &bg.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap();
-    let metrics_bright = compute_star(
-        &bg.residual_of(&pixels_bright),
-        &bg.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap();
-
-    // Brighter star should have higher SNR
+    // No net light above the sky: not a star.
+    let flat = Measured::flat(&Buffer2::new_filled(64, 64, 0.1f32), 0.1, 0.01);
     assert!(
-        metrics_bright.snr > metrics_dim.snr,
-        "Brighter star should have higher SNR: {} vs {}",
-        metrics_bright.snr,
-        metrics_dim.snr
-    );
-}
-
-#[test]
-fn elongated_star_high_eccentricity() {
-    let width = 64;
-    let height = 64;
-    // Elongated star: sigma_x = 4, sigma_y = 1 (4:1 aspect ratio)
-    let pixels = SyntheticStar::new(
-        Vec2::splat(32.0),
-        0.8,
-        StarProfile::Elliptical {
-            sigma_x: 4.0,
-            sigma_y: 1.5,
-            angle: 0.0,
-        },
-    )
-    .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    let metrics = compute_star(
-        &bg.residual_of(&pixels),
-        &bg.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap();
-
-    // Elongated star should have high eccentricity (> 0.5)
-    assert!(
-        metrics.eccentricity > 0.5,
-        "Elongated star should have high eccentricity: {}",
-        metrics.eccentricity
-    );
-}
-
-#[test]
-fn circular_vs_elongated_eccentricity() {
-    let width = 64;
-    let height = 64;
-
-    let circular = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
-        .stamp(Size2us::new(width, height), 0.1);
-    let elongated = SyntheticStar::new(
-        Vec2::splat(32.0),
-        0.8,
-        StarProfile::Elliptical {
-            sigma_x: 4.0,
-            sigma_y: 2.0,
-            angle: 0.0,
-        },
-    )
-    .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    let metrics_circular = compute_star(
-        &bg.residual_of(&circular),
-        &bg.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap();
-    let metrics_elongated = compute_star(
-        &bg.residual_of(&elongated),
-        &bg.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap();
-
-    assert!(
-        metrics_elongated.eccentricity > metrics_circular.eccentricity,
-        "Elongated star should have higher eccentricity: {} vs {}",
-        metrics_elongated.eccentricity,
-        metrics_circular.eccentricity
-    );
-}
-
-#[test]
-fn centroid_with_noisy_background() {
-    let width = 64;
-    let height = 64;
-    let true_pos = DVec2::splat(32.0);
-
-    // Create star with added noise
-    let mut pixels = SyntheticStar::new(
-        true_pos.as_vec2(),
-        0.8,
-        StarProfile::Gaussian { sigma: 2.5 },
-    )
-    .stamp(Size2us::new(width, height), 0.1);
-
-    // Add random-ish noise pattern (deterministic for reproducibility)
-    for (i, pixel) in pixels.iter_mut().enumerate() {
-        let noise = ((i * 7 + 13) % 100) as f32 * 0.001 - 0.05;
-        *pixel += noise;
-    }
-
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.05); // Higher noise estimate
-
-    let result = refine_centroid(
-        &bg.residual_of(&pixels),
-        true_pos,
-        TEST_STAMP_RADIUS,
-        TEST_EXPECTED_FWHM,
-    );
-    assert!(result.is_some());
-
-    let new_pos = result.unwrap();
-    // With noise, allow more tolerance
-    assert!(
-        (new_pos.x - true_pos.x).abs() < 1.0,
-        "X error too large with noise"
-    );
-    assert!(
-        (new_pos.y - true_pos.y).abs() < 1.0,
-        "Y error too large with noise"
-    );
-}
-
-#[test]
-fn snr_decreases_with_higher_noise() {
-    let width = 64;
-    let height = 64;
-    let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
-        .stamp(Size2us::new(width, height), 0.1);
-
-    let bg_low_noise = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-    let bg_high_noise = background_map::uniform(Size2us::new(width, height), 0.1, 0.1);
-
-    let metrics_low = compute_star(
-        &bg_low_noise.residual_of(&pixels),
-        &bg_low_noise.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap();
-    let metrics_high = compute_star(
-        &bg_high_noise.residual_of(&pixels),
-        &bg_high_noise.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap();
-
-    assert!(
-        metrics_low.snr > metrics_high.snr,
-        "Lower noise should give higher SNR: {} vs {}",
-        metrics_low.snr,
-        metrics_high.snr
-    );
-}
-
-#[test]
-fn fwhm_formula_for_known_gaussian() {
-    // For a Gaussian with known sigma, verify FWHM ≈ sigma_to_fwhm(sigma)
-    let width = 128;
-    let height = 128;
-    let sigma = 3.0f32;
-    let expected_fwhm = sigma_to_fwhm(sigma);
-
-    let pixels = SyntheticStar::new(Vec2::splat(64.0), 0.8, StarProfile::Gaussian { sigma })
-        .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.001); // Very low noise
-
-    let metrics = compute_star(
-        &bg.residual_of(&pixels),
-        &bg.sky_noise(),
-        DVec2::splat(64.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap();
-
-    // Allow 10% error due to discrete sampling and finite aperture
-    let error = (metrics.fwhm - expected_fwhm).abs() / expected_fwhm;
-    assert!(
-        error < 0.1,
-        "FWHM should be close to 2.355*sigma: expected {}, got {}, error {}",
-        expected_fwhm,
-        metrics.fwhm,
-        error
-    );
-}
-
-#[test]
-fn flux_proportional_to_amplitude() {
-    let width = 64;
-    let height = 64;
-
-    let pixels_amp1 =
-        SyntheticStar::new(Vec2::splat(32.0), 0.4, StarProfile::Gaussian { sigma: 2.5 })
-            .stamp(Size2us::new(width, height), 0.1);
-    let pixels_amp2 =
-        SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
-            .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    let metrics1 = compute_star(
-        &bg.residual_of(&pixels_amp1),
-        &bg.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap();
-    let metrics2 = compute_star(
-        &bg.residual_of(&pixels_amp2),
-        &bg.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap();
-
-    // Flux should scale roughly proportionally with amplitude
-    let flux_ratio = metrics2.flux / metrics1.flux;
-    let amp_ratio = 0.8 / 0.4;
-
-    assert!(
-        (flux_ratio - amp_ratio).abs() < 0.5,
-        "Flux ratio {flux_ratio} should be close to amplitude ratio {amp_ratio}"
-    );
-}
-
-#[test]
-fn eccentricity_bounds() {
-    // Eccentricity should always be in [0, 1]
-    let width = 64;
-    let height = 64;
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    // Test various star shapes
-    let circular = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
-        .stamp(Size2us::new(width, height), 0.1);
-    let elongated_x = SyntheticStar::new(
-        Vec2::splat(32.0),
-        0.8,
-        StarProfile::Elliptical {
-            sigma_x: 5.0,
-            sigma_y: 2.0,
-            angle: 0.0,
-        },
-    )
-    .stamp(Size2us::new(width, height), 0.1);
-    let elongated_y = SyntheticStar::new(
-        Vec2::splat(32.0),
-        0.8,
-        StarProfile::Elliptical {
-            sigma_x: 2.0,
-            sigma_y: 5.0,
-            angle: 0.0,
-        },
-    )
-    .stamp(Size2us::new(width, height), 0.1);
-
-    for (name, pixels) in [
-        ("circular", circular),
-        ("elongated_x", elongated_x),
-        ("elongated_y", elongated_y),
-    ] {
-        let metrics = compute_star(
-            &bg.residual_of(&pixels),
-            &bg.sky_noise(),
-            DVec2::splat(32.0),
-            0.0,
-            TEST_STAMP_RADIUS,
-            None,
-            None,
-        )
-        .unwrap();
-        assert!(
-            metrics.eccentricity >= 0.0 && metrics.eccentricity <= 1.0,
-            "{} eccentricity {} out of bounds [0,1]",
-            name,
-            metrics.eccentricity
-        );
-    }
-}
-
-#[test]
-fn eccentricity_orientation_invariant() {
-    // Eccentricity should be similar regardless of orientation (x vs y elongation)
-    let width = 64;
-    let height = 64;
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    let elongated_x = SyntheticStar::new(
-        Vec2::splat(32.0),
-        0.8,
-        StarProfile::Elliptical {
-            sigma_x: 4.0,
-            sigma_y: 2.0,
-            angle: 0.0,
-        },
-    )
-    .stamp(Size2us::new(width, height), 0.1);
-    let elongated_y = SyntheticStar::new(
-        Vec2::splat(32.0),
-        0.8,
-        StarProfile::Elliptical {
-            sigma_x: 2.0,
-            sigma_y: 4.0,
-            angle: 0.0,
-        },
-    )
-    .stamp(Size2us::new(width, height), 0.1);
-
-    let metrics_x = compute_star(
-        &bg.residual_of(&elongated_x),
-        &bg.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap();
-    let metrics_y = compute_star(
-        &bg.residual_of(&elongated_y),
-        &bg.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap();
-
-    // Should have similar eccentricity (within 20%)
-    let diff = (metrics_x.eccentricity - metrics_y.eccentricity).abs();
-    let avg = f32::midpoint(metrics_x.eccentricity, metrics_y.eccentricity);
-    assert!(
-        diff / avg < 0.2,
-        "X and Y elongated stars should have similar eccentricity: {} vs {}",
-        metrics_x.eccentricity,
-        metrics_y.eccentricity
-    );
-}
-
-#[test]
-fn snr_formula_consistency() {
-    // SNR = flux / (noise * sqrt(aperture_area))
-    // Verify the formula behaves as expected
-    let width = 64;
-    let height = 64;
-    let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
-        .stamp(Size2us::new(width, height), 0.1);
-
-    let noise1 = 0.02f32;
-    let noise2 = 0.04f32; // 2x noise
-
-    let bg1 = background_map::uniform(Size2us::new(width, height), 0.1, noise1);
-    let bg2 = background_map::uniform(Size2us::new(width, height), 0.1, noise2);
-
-    let metrics1 = compute_star(
-        &bg1.residual_of(&pixels),
-        &bg1.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap();
-    let metrics2 = compute_star(
-        &bg2.residual_of(&pixels),
-        &bg2.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap();
-
-    // SNR should halve when noise doubles (same flux)
-    let snr_ratio = metrics1.snr / metrics2.snr;
-    assert!(
-        (snr_ratio - 2.0).abs() < 0.1,
-        "SNR ratio should be ~2 when noise doubles: got {snr_ratio}"
-    );
-}
-
-#[test]
-fn metrics_with_high_background() {
-    // Stars should still be measurable with high but uniform background
-    let width = 64;
-    let height = 64;
-
-    // One star on a bright sky. `add_to` truncates at the profile's own radius, which is what the
-    // hand-rolled `if value > 0.001` guard did — and it matters, because the untruncated tail
-    // lifts the tiled background median enough to change what the detector sees.
-    let mut pixels = Buffer2::new_filled(width, height, 0.5f32);
-    SyntheticStar::new(Vec2::splat(32.0), 0.4, StarProfile::Gaussian { sigma: 2.5 })
-        .add_to(&mut pixels);
-
-    let bg = background_map::uniform(Size2us::new(width, height), 0.5, 0.02);
-    let metrics = compute_star(
-        &bg.residual_of(&pixels),
-        &bg.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    );
-
-    assert!(
-        metrics.is_some(),
-        "Should compute metrics with high background"
-    );
-    let m = metrics.unwrap();
-    assert!(m.flux > 0.0, "Flux should be positive");
-    assert!(m.fwhm > 0.0, "FWHM should be positive");
-}
-
-#[test]
-fn fwhm_independent_of_amplitude() {
-    // FWHM should be the same regardless of star brightness (same sigma)
-    let width = 64;
-    let height = 64;
-    let sigma = 2.5f32;
-
-    let pixels_dim = SyntheticStar::new(Vec2::splat(32.0), 0.3, StarProfile::Gaussian { sigma })
-        .stamp(Size2us::new(width, height), 0.1);
-    let pixels_bright = SyntheticStar::new(Vec2::splat(32.0), 0.9, StarProfile::Gaussian { sigma })
-        .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    let metrics_dim = compute_star(
-        &bg.residual_of(&pixels_dim),
-        &bg.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap();
-    let metrics_bright = compute_star(
-        &bg.residual_of(&pixels_bright),
-        &bg.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap();
-
-    // FWHM should be within 20% of each other
-    let diff = (metrics_dim.fwhm - metrics_bright.fwhm).abs();
-    let avg = f32::midpoint(metrics_dim.fwhm, metrics_bright.fwhm);
-    assert!(
-        diff / avg < 0.2,
-        "FWHM should be amplitude-independent: dim={}, bright={}",
-        metrics_dim.fwhm,
-        metrics_bright.fwhm
-    );
-}
-
-#[test]
-fn eccentricity_increases_with_elongation() {
-    let width = 64;
-    let height = 64;
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    // Create stars with increasing elongation ratios
-    let ratio_1_1 = SyntheticStar::new(
-        Vec2::splat(32.0),
-        0.8,
-        StarProfile::Elliptical {
-            sigma_x: 2.5,
-            sigma_y: 2.5,
-            angle: 0.0,
-        },
-    )
-    .stamp(Size2us::new(width, height), 0.1); // circular
-    let ratio_2_1 = SyntheticStar::new(
-        Vec2::splat(32.0),
-        0.8,
-        StarProfile::Elliptical {
-            sigma_x: 4.0,
-            sigma_y: 2.0,
-            angle: 0.0,
-        },
-    )
-    .stamp(Size2us::new(width, height), 0.1);
-    let ratio_3_1 = SyntheticStar::new(
-        Vec2::splat(32.0),
-        0.8,
-        StarProfile::Elliptical {
-            sigma_x: 6.0,
-            sigma_y: 2.0,
-            angle: 0.0,
-        },
-    )
-    .stamp(Size2us::new(width, height), 0.1);
-
-    let ecc_1 = compute_star(
-        &bg.residual_of(&ratio_1_1),
-        &bg.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap()
-    .eccentricity;
-    let ecc_2 = compute_star(
-        &bg.residual_of(&ratio_2_1),
-        &bg.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap()
-    .eccentricity;
-    let ecc_3 = compute_star(
-        &bg.residual_of(&ratio_3_1),
-        &bg.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap()
-    .eccentricity;
-
-    assert!(
-        ecc_1 < ecc_2 && ecc_2 < ecc_3,
-        "Eccentricity should increase with elongation: {ecc_1} < {ecc_2} < {ecc_3}"
-    );
-}
-
-#[test]
-fn measure_star_returns_none_for_edge_candidate() {
-    let width = 64;
-    let height = 64;
-    let pixels = Buffer2::new_filled(width, height, 0.5f32);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-    let config = Config::default();
-
-    // Create region near edge
-    let region = Region {
-        bbox: URect::new(Vec2us::new(0, 30), Vec2us::new(6, 36)),
-        peak: Vec2us::new(3, 32),
-        peak_value: 0.9,
-        area: 18,
-    };
-
-    let result = measure_star(
-        &bg.residual_of(&pixels),
-        &bg.sky_noise(),
-        &unsaturated(&pixels),
-        &region,
-        &config.measurement,
-        config.fwhm.mode.unwrap().seed(),
-        &StampGrid::new(compute_stamp_radius(config.fwhm.mode.unwrap().seed())),
-    );
-    assert!(
-        result.is_none(),
-        "Should reject candidate too close to edge"
-    );
-}
-
-#[test]
-fn measure_star_multiple_stars_independent() {
-    let width = 128;
-    let height = 128;
-
-    // Create two well-separated stars using the helper function
-    let star1_cx = 40.0f32;
-    let star1_cy = 40.0f32;
-    let star2_cx = 90.0f32;
-    let star2_cy = 90.0f32;
-
-    // Start with uniform background
-    let mut pixels = Buffer2::new_filled(width, height, 0.1f32);
-
-    for (centre, amplitude) in [
-        (Vec2::new(star1_cx, star1_cy), 0.8),
-        (Vec2::new(star2_cx, star2_cy), 0.6),
-    ] {
-        SyntheticStar::new(centre, amplitude, StarProfile::Gaussian { sigma: 2.5 })
-            .add_to(&mut pixels);
-    }
-
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-    let config = Config {
-        detection: DetectionConfig {
-            edge_margin: 10,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let candidates =
-        detect_stars_test(&bg.residual_of(&pixels), &bg.sky_noise(), &config.detection);
-
-    assert_eq!(candidates.len(), 2, "Should detect two stars");
-
-    // Compute centroids for both
-    let stars: Vec<_> = candidates
-        .iter()
-        .filter_map(|c| {
-            measure_star(
-                &bg.residual_of(&pixels),
-                &bg.sky_noise(),
-                &unsaturated(&pixels),
-                c,
-                &config.measurement,
-                config.fwhm.mode.unwrap().seed(),
-                &StampGrid::new(compute_stamp_radius(config.fwhm.mode.unwrap().seed())),
-            )
-        })
-        .collect();
-
-    assert_eq!(stars.len(), 2, "Should compute centroids for both stars");
-
-    // Verify each star is close to its true position
-    for star in &stars {
-        let near_star1 = (star.pos.x - f64::from(star1_cx)).abs() < 1.0
-            && (star.pos.y - f64::from(star1_cy)).abs() < 1.0;
-        let near_star2 = (star.pos.x - f64::from(star2_cx)).abs() < 1.0
-            && (star.pos.y - f64::from(star2_cy)).abs() < 1.0;
-        assert!(
-            near_star1 || near_star2,
-            "Star at ({}, {}) not near either true position",
-            star.pos.x,
-            star.pos.y
-        );
-    }
-}
-
-#[test]
-fn circular_star_roundness() {
-    // A circular Gaussian star should have roundness near zero
-    let width = 64;
-    let height = 64;
-    let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
-        .stamp(Size2us::new(width, height), 0.1);
-
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-    let config = Config::default();
-    let candidates =
-        detect_stars_test(&bg.residual_of(&pixels), &bg.sky_noise(), &config.detection);
-
-    assert_eq!(candidates.len(), 1);
-
-    let star = measure_star(
-        &bg.residual_of(&pixels),
-        &bg.sky_noise(),
-        &unsaturated(&pixels),
-        &candidates[0],
-        &config.measurement,
-        config.fwhm.mode.unwrap().seed(),
-        &StampGrid::new(compute_stamp_radius(config.fwhm.mode.unwrap().seed())),
-    )
-    .expect("Should compute centroid");
-
-    // Circular star should have roundness close to 0
-    assert!(
-        star.roundness.ground.abs() < 0.1,
-        "Circular star should have GROUND near 0, got {}",
-        star.roundness.ground
-    );
-    assert!(
-        star.roundness.sround < 0.1,
-        "Circular star should have SROUND near 0, got {}",
-        star.roundness.sround
-    );
-}
-
-#[test]
-fn elongated_x_star_roundness() {
-    // An elongated star in x direction should have negative GROUND.
-    //
-    // 128x128 and a noise floor: without noise the tiled MAD is exactly zero and the detection
-    // threshold degenerates, which left this fixture flipping on a sub-0.001 change in the
-    // profile's far tail rather than on anything to do with roundness.
-    let width = 128;
-    let height = 128;
-    let mut pixels = Buffer2::new_filled(width, height, 0.1f32);
-
-    // Create elongated Gaussian (sigma_x > sigma_y)
-    let cx = 64.0;
-    let cy = 64.0;
-    let sigma_x = 4.0;
-    let sigma_y = 2.0;
-    SyntheticStar::new(
-        Vec2::new(cx, cy),
-        0.8,
-        StarProfile::Elliptical {
-            sigma_x,
-            sigma_y,
-            angle: 0.0,
-        },
-    )
-    .add_to(&mut pixels);
-    patterns::add_gaussian_noise(&mut pixels, 0.002, 4242);
-
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-    let config = Config::default();
-    let candidates =
-        detect_stars_test(&bg.residual_of(&pixels), &bg.sky_noise(), &config.detection);
-
-    assert!(!candidates.is_empty());
-
-    let star = measure_star(
-        &bg.residual_of(&pixels),
-        &bg.sky_noise(),
-        &unsaturated(&pixels),
-        &candidates[0],
-        &config.measurement,
-        config.fwhm.mode.unwrap().seed(),
-        &StampGrid::new(compute_stamp_radius(config.fwhm.mode.unwrap().seed())),
-    )
-    .expect("Should compute centroid");
-
-    // X-elongated star: more flux in x marginal -> higher Hx -> negative GROUND
-    // (GROUND = (Hx - Hy) / (Hx + Hy), but Hx is sum in y direction)
-    // Actually, marginal_x sums along y for each x position, so x-elongated means
-    // the x marginal has lower peak (more spread). Let's just check it's non-zero.
-    assert!(
-        star.roundness.ground.abs() > 0.05 || star.eccentricity > 0.3,
-        "Elongated star should have noticeable shape metrics"
-    );
-}
-
-#[test]
-fn asymmetric_star_sround() {
-    // An asymmetric source should have non-zero SROUND
-    let width = 64;
-    let height = 64;
-    let mut pixels = Buffer2::new_filled(width, height, 0.1f32);
-
-    // Create a star with extra flux on one side (like a cosmic ray tail)
-    let cx = 32.0;
-    let cy = 32.0;
-    for y in 0..height {
-        for x in 0..width {
-            let dx = x as f32 - cx;
-            let dy = y as f32 - cy;
-            let r2 = dx * dx + dy * dy;
-            let mut value = 0.8 * (-r2 / (2.0 * 2.5 * 2.5)).exp();
-
-            // Add asymmetric tail to the right
-            if dx > 0.0 && dx < 8.0 && dy.abs() < 2.0 {
-                value += 0.3 * (-(dx - 4.0).powi(2) / 8.0).exp();
-            }
-
-            if value > 0.001 {
-                pixels[(x, y)] += value;
-            }
-        }
-    }
-
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-    let config = Config::default();
-    let candidates =
-        detect_stars_test(&bg.residual_of(&pixels), &bg.sky_noise(), &config.detection);
-
-    assert!(!candidates.is_empty());
-
-    let star = measure_star(
-        &bg.residual_of(&pixels),
-        &bg.sky_noise(),
-        &unsaturated(&pixels),
-        &candidates[0],
-        &config.measurement,
-        config.fwhm.mode.unwrap().seed(),
-        &StampGrid::new(compute_stamp_radius(config.fwhm.mode.unwrap().seed())),
-    )
-    .expect("Should compute centroid");
-
-    // Asymmetric source should have higher SROUND (symmetry metric)
-    // The tail adds more flux to the right side
-    assert!(
-        star.roundness.sround > 0.01,
-        "Asymmetric star should have SROUND > 0, got {}",
-        star.roundness.sround
+        flat.compute(DVec2::splat(32.0), TEST_STAMP_RADIUS)
+            .is_none()
     );
 }
 
@@ -1217,39 +343,34 @@ fn asymmetric_star_sround() {
 /// that lands straight in flux and SNR.
 #[test]
 fn annulus_sky_is_centred_on_the_fitted_position() {
-    use crate::stacking::star_detection::config::measurement_config::LocalBackgroundMethod;
-
     let size = Size2us::new(64, 64);
     // 0.02 of sky per column, so shifting the annulus one pixel moves its sigma-clipped median by
     // ~0.02 — several percent of this star's flux once summed over the stamp.
     let sky = |x: usize| 0.1 + 0.02 * x as f32;
-
-    let mut data = vec![0.0f32; size.pixel_count()];
-    let mut bg_data = vec![0.0f32; size.pixel_count()];
+    let mut pixels =
+        SyntheticStar::new(Vec2::splat(32.0), 1.0, StarProfile::Gaussian { sigma: 2.5 })
+            .stamp(size, 0.0);
+    let mut sky_plane = Buffer2::new_filled(size.width, size.height, 0.0f32);
     for y in 0..size.height {
         for x in 0..size.width {
-            let dx = x as f32 - 32.0;
-            let dy = y as f32 - 32.0;
-            data[y * size.width + x] = sky(x) + (-0.5 * (dx * dx + dy * dy) / (2.5 * 2.5)).exp();
-            bg_data[y * size.width + x] = sky(x);
+            pixels[(x, y)] += sky(x);
+            sky_plane[(x, y)] = sky(x);
         }
     }
-    let pixels = Buffer2::new(size.width, size.height, data);
-    let mut noise = Buffer2::new_default(size.width, size.height);
-    noise.fill(0.01);
-    let bg = BackgroundEstimate {
-        background: Buffer2::new(size.width, size.height, bg_data),
-        noise,
-        noise_floor: 1e-6,
-    };
-
+    let measured = Measured::of(
+        &pixels,
+        &BackgroundEstimate {
+            background: sky_plane,
+            noise: Buffer2::new_filled(size.width, size.height, 0.01),
+            noise_floor: 1e-6,
+        },
+    );
     let config = MeasurementConfig {
         centroid_method: CentroidMethod::GaussianFit,
         local_background: LocalBackgroundMethod::LocalAnnulus,
         ..Default::default()
     };
     let radius = compute_stamp_radius(4.0);
-
     // Seeded two pixels off the star, so the fit has to cross a pixel boundary to reach it.
     let region = Region {
         bbox: URect::new(Vec2us::new(28, 26), Vec2us::new(40, 38)),
@@ -1257,25 +378,21 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
         peak_value: 1.0,
         area: 40,
     };
-    let star = measure_star(
-        &bg.residual_of(&pixels),
-        &bg.sky_noise(),
-        &unsaturated(&pixels),
-        &region,
-        &config,
-        4.0,
-        &StampGrid::new(radius),
-    )
-    .expect("star should measure");
+    let star = measured
+        .measure(&region, &config, 4.0)
+        .expect("star should measure");
 
     // Same metrics pass, but with the sky annulus explicitly centred where the fit ended up.
-    // `outer_radius` mirrors `measure_star`: ceil(1.5 x radius).
-    let outer = (radius as f32 * 1.5).ceil() as usize;
-    let sky_at_fit = compute_annulus_background(&bg.residual_of(&pixels), star.pos, radius, outer)
-        .expect("annulus has samples");
+    let sky_at_fit = compute_annulus_background(
+        &measured.residual,
+        star.pos,
+        radius,
+        annulus_outer_radius(radius),
+    )
+    .expect("annulus has samples");
     let expected = compute_star(
-        &bg.residual_of(&pixels),
-        &bg.sky_noise(),
+        &measured.residual,
+        &measured.sky,
         star.pos,
         region.peak_value,
         radius,
@@ -1348,14 +465,8 @@ fn empty_sky_stamps_measure_no_signal() {
     let side = 496;
     let size = Size2us::new(side, side);
     let sigma = 0.01f32;
-    let mut rng = TestRng::new(7);
-    let residual = Buffer2::new(
-        side,
-        side,
-        (0..side * side)
-            .map(|_| sigma * rng.next_gaussian_f32())
-            .collect(),
-    );
+    let mut residual = Buffer2::new_filled(side, side, 0.0f32);
+    patterns::add_gaussian_noise(residual.pixels_mut(), sigma, 7);
     let sky = background_map::uniform(size, 0.0, sigma).sky_noise();
 
     for radius in [7usize, 13, 15] {
