@@ -147,7 +147,7 @@ async fn an_unidentifiable_path_runs_the_node_uncached() {
             run.error(loader),
         );
         assert!(
-            matches!(run.error(dependent), Some(RunError::SkippedUpstream { .. })),
+            matches!(run.error(dependent), Some(RunError::SkippedUpstream)),
             "its dependent must skip as errored-upstream: {:?}",
             run.error(dependent),
         );

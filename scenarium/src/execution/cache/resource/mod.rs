@@ -147,11 +147,13 @@ impl StampJob {
         }
         // Follows a symlinked root, unlike the walk below: the path a node
         // was handed names what it means to read.
-        let metadata = fs::metadata(path)?;
+        let path = Path::new(path);
+        let metadata = fs::metadata(path).map_err(StampError::io(path))?;
         if metadata.is_dir() {
-            self.stamp_directory(Path::new(path), cancel)
+            self.stamp_directory(path, cancel)
         } else {
-            Ok(FsPathId::File(FileIdentity::from_metadata(&metadata)?))
+            let file = FileIdentity::from_metadata(&metadata).map_err(StampError::io(path))?;
+            Ok(FsPathId::File(file))
         }
     }
 
@@ -186,9 +188,10 @@ impl StampJob {
         for rel in &self.files {
             // `symlink_metadata`, so the second pass reads a link exactly
             // as the first one classified it.
-            let metadata = fs::symlink_metadata(root.join(rel))?;
+            let path = root.join(rel);
+            let metadata = fs::symlink_metadata(&path).map_err(StampError::io(&path))?;
             hasher.write_len_prefixed(rel.as_os_str().as_encoded_bytes());
-            let file = FileIdentity::from_metadata(&metadata)?;
+            let file = FileIdentity::from_metadata(&metadata).map_err(StampError::io(&path))?;
             hasher.write_pod(file.len).write_pod(file.mtime_ns);
         }
         Ok(FsPathId::Directory(hasher.finish()))
@@ -216,13 +219,17 @@ impl StampJob {
         self.pending.clear();
         self.pending.push(PathBuf::new());
         while let Some(rel_dir) = self.pending.pop() {
-            for entry in fs::read_dir(root.join(&rel_dir))? {
+            let dir = root.join(&rel_dir);
+            for entry in fs::read_dir(&dir).map_err(StampError::io(&dir))? {
                 if cancel.is_cancelled() {
                     return Err(StampError::Cancelled);
                 }
-                let entry = entry?;
+                let entry = entry.map_err(StampError::io(&dir))?;
                 let rel = rel_dir.join(entry.file_name());
-                if entry.file_type()?.is_dir() {
+                let file_type = entry
+                    .file_type()
+                    .map_err(StampError::io(&root.join(&rel)))?;
+                if file_type.is_dir() {
                     self.pending.push(rel);
                 } else {
                     self.files.push(rel);

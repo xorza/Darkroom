@@ -125,10 +125,8 @@ impl Compiler {
         // Validate before building anything: the graph+library pair is untrusted
         // input, and a passing check lets the walk below resolve every reference
         // infallibly.
-        if let Err(e) = graph.validate_with(library) {
-            return Err(CompileError {
-                message: e.to_string(),
-            });
+        if let Err(source) = graph.validate_with(library) {
+            return Err(CompileError { source });
         }
 
         let compiled = self.walk(graph, library);

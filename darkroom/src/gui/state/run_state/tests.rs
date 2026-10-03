@@ -1,6 +1,8 @@
 use super::*;
 
-use scenarium::FuncId;
+use std::io;
+
+use scenarium::InvokeError;
 use scenarium::NodeStatus;
 use scenarium::testing::compiled_graph_builder::CompiledGraphBuilder;
 
@@ -22,10 +24,9 @@ fn completed_status(executed: &[(NodeId, f64)], errored: &[NodeId]) -> WorkerRep
     nodes.extend(errored.iter().map(|&node_id| NodeStatus {
         node_id,
         status: Some(NodeExecutionStatus::Errored {
-            error: RunError::Invoke {
-                func_id: FuncId::from_u128(0),
-                message: "test error".into(),
-            },
+            error: RunError::Invoke(Arc::new(InvokeError::external(io::Error::other(
+                "test error",
+            )))),
         }),
         ram: RamUsage::default(),
     }));

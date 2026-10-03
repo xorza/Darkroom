@@ -2,7 +2,8 @@ use super::*;
 
 use crate::execution::error::RunError;
 use crate::execution::report::{LogLevel, NodeExecutionStatus};
-use crate::graph::identity::{FuncId, NodeId};
+use crate::graph::func::lambda::internals;
+use crate::graph::identity::NodeId;
 
 /// Publishing a completed run is a move, not a reduction: the rows the run produced
 /// reach the host in the order and shape the run gave them, and the only thing the
@@ -27,10 +28,7 @@ fn a_summary_publishes_the_runs_rows_verbatim() {
         NodeStatus {
             node_id: failed,
             status: Some(NodeExecutionStatus::Errored {
-                error: RunError::Invoke {
-                    func_id: FuncId::unique(),
-                    message: "failed".into(),
-                },
+                error: RunError::Invoke(Arc::new(internals::failure("failed"))),
             }),
             ram: RamUsage::default(),
         },

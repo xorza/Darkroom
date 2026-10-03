@@ -1,4 +1,13 @@
+use std::error::Error as _;
+use std::io;
+
 use super::*;
+use crate::async_lambda;
+
+/// A lambda's failure with a cause of its own.
+#[derive(Debug, thiserror::Error)]
+#[error("could not read the frame")]
+struct ReadFailed(#[source] io::Error);
 
 #[tokio::test]
 async fn node_error_propagates_to_dependents() {
@@ -33,4 +42,25 @@ async fn node_error_propagates_to_dependents() {
     assert!(e.outputs("get_a").is_empty());
     assert!(run.error("get_b").is_none());
     assert_eq!(e.output_i64("get_b", 0), Some(42));
+
+    // The lambda's error reaches the row whole: its own message, and its own
+    // cause behind it rather than folded into a string.
+    e.edit(|g| {
+        g.edit_func("get_a", |func| {
+            func.lambda = async_lambda!(|_| {
+                Err(InvokeError::external(ReadFailed(io::Error::other(
+                    "disk gone",
+                ))))
+            });
+        });
+    });
+    let run = e.run_sinks().await;
+    let error = run.error("get_a").expect("the failing node reports");
+    assert!(matches!(error, RunError::Invoke(_)));
+    assert_eq!(error.to_string(), "could not read the frame");
+    assert_eq!(
+        error.source().map(ToString::to_string).as_deref(),
+        Some("disk gone")
+    );
+    assert!(matches!(run.error("sum"), Some(RunError::SkippedUpstream)));
 }

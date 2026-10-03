@@ -64,8 +64,10 @@ pub enum OverrideRule {
 
 #[derive(Debug, Error)]
 pub enum InvokeError {
-    #[error("{0}")]
-    External(#[source] Box<dyn error::Error + Send + Sync>),
+    /// A failure of the code the lambda called, kept whole: its message and
+    /// its own source chain are the error's.
+    #[error(transparent)]
+    External(Box<dyn error::Error + Send + Sync>),
     #[error("input {index} must be {expected}, got {actual}")]
     InvalidInput {
         index: usize,
