@@ -14,7 +14,10 @@ use scenarium::{Library, TypeEntry};
 use crate::astro::config;
 use crate::astro::masters::MASTERS_TYPE_ID;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The ONNX files the ML nodes load. Serializable so a frontend can persist
+/// it as it stands; a missing field reads as its default.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct MlModelPaths {
     pub denoise: PathBuf,
     pub star_removal: PathBuf,

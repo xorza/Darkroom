@@ -13,6 +13,7 @@
 use std::mem;
 use std::path::{Path, PathBuf};
 
+use lens::MlModelPaths;
 use palantir::FontWeight;
 use palantir::prelude::*;
 
@@ -84,7 +85,7 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences, out: &mu
                                 download_label: "Download DeepSNR CLI \u{2197}",
                                 download_url: "https://starnetastro.com/cli-tools/deepsnr/",
                             },
-                            &mut prefs.ml_models.denoise,
+                            &mut prefs.ml_models,
                             out,
                         );
                         model_row(
@@ -96,7 +97,7 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences, out: &mu
                                 download_label: "Download StarNet CLI \u{2197}",
                                 download_url: "https://starnetastro.com/cli-tools/starnet/",
                             },
-                            &mut prefs.ml_models.star_removal,
+                            &mut prefs.ml_models,
                             out,
                         );
                     });
@@ -186,13 +187,20 @@ struct PathField {
 /// tool plus unzip/point-at-the-`.onnx` guidance).
 /// Writes `path` in place and queues [`PrefsCommand::Changed`] on an
 /// edited path, or [`PrefsCommand::PickMlModel`] when Browse is clicked.
-fn model_row(ui: &mut Ui, theme: &Theme, row: ModelRow, path: &mut PathBuf, out: &mut Requests) {
+fn model_row(
+    ui: &mut Ui,
+    theme: &Theme,
+    row: ModelRow,
+    paths: &mut MlModelPaths,
+    out: &mut Requests,
+) {
     let ModelRow {
         label,
         kind,
         download_label,
         download_url,
     } = row;
+    let path = kind.path_mut(paths);
     let id = WidgetId::from_hash(("preferences.ml_model_path", label));
     // Refresh the draft from `path` only when `path` changed *externally*
     // (initial load, a Browse pick, or last frame's commit) — never on
@@ -410,44 +418,52 @@ mod tests {
             download_url: "https://example.invalid",
         };
         let id = WidgetId::from_hash(("preferences.ml_model_path", row.label));
-        let mut path = PathBuf::from("/a.onnx");
+        let mut paths = MlModelPaths {
+            denoise: PathBuf::from("/a.onnx"),
+            ..MlModelPaths::default()
+        };
         let mut h = UiHarness::new(UVec2::new(800, 200));
-        let mut frame = |h: &mut UiHarness, path: &mut PathBuf| {
+        let mut frame = |h: &mut UiHarness, paths: &mut MlModelPaths| {
             let mut out = Requests::default();
-            h.frame(|ui| model_row(ui, &theme, row, path, &mut out));
+            h.frame(|ui| model_row(ui, &theme, row, paths, &mut out));
             iter::from_fn(|| out.pop_app())
                 .filter(|command| matches!(command, AppCommand::Prefs(PrefsCommand::Changed)))
                 .count()
         };
         let type_x = |h: &mut UiHarness,
-                      frame: &mut dyn FnMut(&mut UiHarness, &mut PathBuf) -> usize,
-                      path: &mut PathBuf| {
+                      frame: &mut dyn FnMut(&mut UiHarness, &mut MlModelPaths) -> usize,
+                      paths: &mut MlModelPaths| {
             let center = h.rect(id).expect("path field arranged").center();
             h.click_at(center);
-            frame(h, path);
+            frame(h, paths);
             h.key(Key::End);
-            frame(h, path);
+            frame(h, paths);
             h.key(Key::Char('x'));
-            assert_eq!(frame(h, path), 0, "typing queues nothing");
+            assert_eq!(frame(h, paths), 0, "typing queues nothing");
         };
 
-        frame(&mut h, &mut path);
-        type_x(&mut h, &mut frame, &mut path);
+        frame(&mut h, &mut paths);
+        type_x(&mut h, &mut frame, &mut paths);
         h.key(Key::Escape);
         let mut queued = 0;
         for _ in 0..3 {
-            queued += frame(&mut h, &mut path);
+            queued += frame(&mut h, &mut paths);
         }
         assert_eq!(queued, 0, "Escape must queue no change");
         assert_eq!(
-            path,
+            paths.denoise,
             PathBuf::from("/a.onnx"),
             "Escape must not write the draft"
         );
 
-        type_x(&mut h, &mut frame, &mut path);
+        type_x(&mut h, &mut frame, &mut paths);
         h.key(Key::Enter);
-        assert_eq!(frame(&mut h, &mut path), 1, "Enter queues one change");
-        assert_eq!(path, PathBuf::from("/a.onnxx"));
+        assert_eq!(frame(&mut h, &mut paths), 1, "Enter queues one change");
+        assert_eq!(paths.denoise, PathBuf::from("/a.onnxx"));
+        assert_eq!(
+            paths.star_removal,
+            MlModelPaths::default().star_removal,
+            "the row writes only the path its kind names"
+        );
     }
 }
