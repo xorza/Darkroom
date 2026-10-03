@@ -54,11 +54,16 @@ async fn invoking_publishes_the_latest_value_per_node() {
 
     invoke(7).await;
     invoke(8).await;
-    let drained = sink.drain();
+    let mut drained = HashMap::new();
+    sink.drain_into(&mut drained);
     assert_eq!(drained.len(), 1, "one entry per node, not per invoke");
-    assert_eq!(drained[0].0, first);
-    assert_eq!(drained[0].1.as_i64(), Some(8), "the later value wins");
-    assert!(sink.drain().is_empty(), "a drain empties the sink");
+    assert_eq!(drained[&first].as_i64(), Some(8), "the later value wins");
+
+    // The drained map's storage goes back to the sink with the next drain,
+    // which finds nothing.
+    drained.clear();
+    sink.drain_into(&mut drained);
+    assert!(drained.is_empty(), "a drain empties the sink");
 }
 
 /// An invoke with no attribution is an executor bug, not a runtime state,

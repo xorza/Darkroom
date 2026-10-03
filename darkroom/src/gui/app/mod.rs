@@ -593,7 +593,7 @@ impl palantir::App for App {
         // `draw_panels` skips a panel whose node is gone — so the lag costs
         // memory and nothing else.
         self.run_state.sync(
-            &mut self.runtime,
+            &self.runtime,
             &mut self.status,
             ui,
             &self.session.open.document,

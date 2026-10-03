@@ -3,6 +3,7 @@
 //! top, so worker construction and the drain/run primitives live here rather
 //! than in the shell.
 
+use std::collections::HashMap;
 use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -293,12 +294,8 @@ impl RuntimeHost {
     }
 
     /// Non-blocking drain of worker results posted since the last frame.
-    ///
-    /// Owned rather than an iterator: the caller writes back through `self`
-    /// while handling a report, so a borrowing iterator would have to be
-    /// collected at the call site anyway.
-    pub(crate) fn drain_worker(&self) -> Vec<WorkerReport> {
-        self.worker.drain().collect()
+    pub(crate) fn drain_worker(&self) -> impl Iterator<Item = WorkerReport> + '_ {
+        self.worker.drain()
     }
 
     /// Non-blocking drain of every preview value the worker's lambdas published
@@ -308,8 +305,8 @@ impl RuntimeHost {
     /// report stream: a preview node's lambda writes it directly. Ordering
     /// against the reports does not matter — a value is only ever the *latest*
     /// for its node, never a step in a sequence.
-    pub(crate) fn drain_previews(&self) -> Vec<(NodeId, DynamicValue)> {
-        self.library.previews.drain()
+    pub(crate) fn drain_previews(&self, buffer: &mut HashMap<NodeId, DynamicValue>) {
+        self.library.previews.drain_into(buffer);
     }
 }
 
