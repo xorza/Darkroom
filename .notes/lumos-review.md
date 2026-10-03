@@ -32,6 +32,7 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
   - Solving the Marquardt-scaled system (unit diagonal) makes the threshold scale-free. `[P]`
 - [ ] `2.6` **Amplitude seed floored at 0.01 normalized** — `star_detection/centroid/stamp.rs:228-237`
   - 0.01 is 655 ADU at 16 bit. The fit costs about one extra LM iteration. `[C]`
+
 ## 3. The default registration prior rejects real sessions
 
 - [ ] `3.1` **Default `max_rotation` = 10° drops every frame after a meridian flip** — `registration/ransac/config.rs:35`, `registration/ransac/mod.rs:113-127`, `pipeline/config.rs:24`
@@ -293,10 +294,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
   - astroscrappy grows twice (at `sigclip`, then at `sigcliplow`) with no objlim test. lumos grows one ring and applies objlim, so the wings of bright hits stay. `[C]` deviation, `[P]` impact.
 - [ ] `18.2` **The hot-pixel σ estimator breaks down above ≈1% defect density** — `calibration_masters/defect_map/mod.rs:396-405`
   - p99(|r|) falls inside the warm population on uncooled DSLR darks. `[P]`
-- [ ] `18.3` **Bayer green defects are repaired from stride-2 neighbours only** — `io/image/cfa/same_color/mod.rs:33-42`
-  - The four diagonal greens at √2 px are the nearest. `[P]`
-- [ ] `18.4` **The X-Trans neighbour cut-off has a directional bias** — `io/image/cfa/same_color/mod.rs:152-178`
-  - Manhattan ties are broken by scan order. Use Euclidean distance with a symmetric tie-break. `[P]`
 - [ ] `18.5` **A fully or heavily masked background tile still produces a sky value** — `background_mesh/tile_stats/mod.rs:179-192,305-354`
   - photutils `exclude_percentile` and SExtractor bad meshes interpolate those tiles from good neighbours instead. `[C]` behaviour.
 - [ ] `18.6` **The last `MeshAxis` tile can be a 1–5 px sliver** — `background_mesh/mesh_axis.rs:14-18`, `calibration_masters/defect_map/dark_background.rs:55-56,93-110`
@@ -850,7 +847,7 @@ The combine bench (30 frames, `combine::bench`, release, one machine, same sessi
 ## Phase 5. Lattice, noise estimation, mesh, weights and variance (S5, S10, C1)
 
 0. Done: `CcdNoise` (`math/noise/ccd_noise.rs`), with `FrameStats` carrying the sky per slot and the electrons per unit; `SampleNoise`, `FrameWeights` and `Slots` in the combine; `RejectionScale::CcdModel` on sigma clip. `FrameNoise` as stored metadata waits for the consumer that needs it (C2's master subtraction).
-1. Add `CfaLattice`, and move `SameColorMedian`, the cosmic-ray detectors and the flat normalization onto it.
+1. Done: `CfaLattice` (`io/image/cfa/cfa_lattice.rs`) holds the per-phase same-colour stencils, Euclidean and taken in whole shells, and the 2-periodic deinterleave. The defect and null repair and both CFA cosmic-ray scans use it. The flat normalization and `DifferenceNoise` read the colour from `CfaType::color_at` and need no stencil.
 2. Add the two noise estimators and `FrameStats` background noise.
 3. Give `background_mesh` the lattice, the flags, bad-tile interpolation and the sliver merge. Remove `DarkBackground`. Move the cosmic-ray background onto the mesh.
 4. Done: per-slot weights, not normalized; the variance plane `Σwᵢ²vᵢ/(Σwᵢ)²` with `RunReport::variance_background_only`; drizzle on the same formula per channel, with gated pixels holding no weight, variance or coverage, and zero-weight taps marking no coverage. Open: the `dispersion` plane.

@@ -61,7 +61,9 @@ pub(crate) fn reject_cosmic_rays(
     let mut found = BitBuffer2::new_default(size);
     let count = match &image.cfa_type {
         // Bayer is 2×2-periodic → four dense same-color planes; reuse the mono detector per plane.
-        CfaType::Bayer(_) => BayerDetector::new(config, noise).reject(pixels, size, &mut found),
+        c @ CfaType::Bayer(_) => {
+            BayerDetector::new(config, noise, c).reject(pixels, size, &mut found)
+        }
         // X-Trans has no dense same-color sub-lattice → same-color stencils on the mosaic.
         c @ CfaType::XTrans(_) => {
             XtransDetector::new(config, noise, c).reject(pixels, size, &mut found)

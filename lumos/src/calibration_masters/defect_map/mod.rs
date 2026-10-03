@@ -54,7 +54,7 @@ use crate::bit_buffer2::BitBuffer2;
 use crate::calibration_masters::defect_map::dark_background::DarkBackground;
 use crate::calibration_masters::defect_map::sampling::collect_color_residual_samples;
 use crate::calibration_masters::error::CalibrationError;
-use crate::io::image::cfa::same_color::SameColorMedian;
+use crate::io::image::cfa::cfa_lattice::{CfaLattice, Gathered};
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::pixel_flags::{Flags, PixelFlags};
 use crate::math::size2us::Size2us;
@@ -236,10 +236,15 @@ impl DefectMap {
         // defect (hot column, adjacent same-color pixels) cannot pull a bad or half-corrected
         // value into a neighbour's median, and the order of the lists does not matter. A pixel
         // in both lists is repaired twice to the same value.
-        let neighbors = SameColorMedian::new(&image.cfa_type);
+        let lattice = CfaLattice::new(&image.cfa_type);
+        let mut scratch = Gathered::default();
         for &idx in self.hot_indices.iter().chain(&self.cold_indices) {
-            image.data[idx] =
-                neighbors.at(&image.data, self.dimensions.point_of(idx), Some(&self.mask));
+            image.data[idx] = lattice.median(
+                &image.data,
+                self.dimensions.point_of(idx),
+                Some(&self.mask),
+                &mut scratch,
+            );
         }
         let mask = &self.mask;
         PixelFlags::add_where(
@@ -349,17 +354,18 @@ fn detect_cold_pixels(
     let data = &image.data;
     let size = Size2us::new(data.width(), data.height());
     let total = size.pixel_count();
-    let neighbors = SameColorMedian::new(&image.cfa_type);
+    let lattice = CfaLattice::new(&image.cfa_type);
 
     let indices = (0..total)
         .into_par_iter()
-        .filter(|&i| {
+        .map_init(Gathered::default, |scratch, i| {
             if cancel.is_cancelled() {
-                return false;
+                return None;
             }
-            let local = neighbors.at(data, size.point_of(i), None);
-            data[i] < dead_fraction * local
+            let local = lattice.median(data, size.point_of(i), None, scratch);
+            (data[i] < dead_fraction * local).then_some(i)
         })
+        .flatten()
         .collect();
 
     if cancel.is_cancelled() {

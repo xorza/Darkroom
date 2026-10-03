@@ -4,7 +4,7 @@
 //! filter pattern metadata. Used for calibration frame processing (darks,
 //! flats, bias) and hot pixel correction on raw data.
 
-pub(crate) mod same_color;
+pub(crate) mod cfa_lattice;
 
 use std::io;
 use std::path::Path;
@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::frame_store::cache_key::DecoderKind;
 use crate::frame_store::frame_peek::FramePeek;
 use crate::io::cancelled::Cancelled;
-use crate::io::image::cfa::same_color::SameColorMedian;
+use crate::io::image::cfa::cfa_lattice::{CfaLattice, Gathered};
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::{cfa as fits_cfa, decode as fits_decode};
 use crate::io::image::image_dimensions::ImageDimensions;
@@ -292,12 +292,13 @@ impl CfaImage {
         else {
             return;
         };
-        let neighbors = SameColorMedian::new(&self.cfa_type);
+        let lattice = CfaLattice::new(&self.cfa_type);
         let size = Size2us::new(self.data.width(), self.data.height());
         let mask = flags.mask_of(Flags::NO_DATA);
+        let mut scratch = Gathered::default();
         // The mask keeps every null out of every repair, so the order of the repairs is free.
         mask.for_each_set(|pos| {
-            let repaired = neighbors.at(&self.data, pos, Some(&mask));
+            let repaired = lattice.median(&self.data, pos, Some(&mask), &mut scratch);
             self.data[size.index_of(pos)] = repaired;
         });
     }
