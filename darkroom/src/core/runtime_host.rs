@@ -105,7 +105,7 @@ impl RuntimeHost {
     /// outcome slot, shared with file and preferences reporting, and this host
     /// is otherwise headless.
     fn compile(&mut self, graph: &Graph, status: &mut StatusLog) -> Option<Arc<CompiledGraph>> {
-        match self.compiler.compile(graph, &self.library.published.load()) {
+        match self.compiler.compile(graph, self.library.current()) {
             Ok(compiled) => {
                 status.error = None;
                 Some(Arc::new(compiled))
@@ -331,7 +331,10 @@ mod tests {
     /// The default value seeded into `func`'s model-path input (index 1),
     /// read back through the published library.
     fn ml_model_default(host: &RuntimeHost, func: &str) -> Option<ConstValue> {
-        host.library.published.load().by_name(func).unwrap().inputs[1]
+        Arc::clone(host.library.current())
+            .by_name(func)
+            .unwrap()
+            .inputs[1]
             .default_value
             .clone()
     }
@@ -344,7 +347,7 @@ mod tests {
         // Nothing prunes it — the authored wiring stays (it revives if the
         // library gets the port back) and compilation tolerates it as an
         // unbound input.
-        let library = host.library.published.load();
+        let library = Arc::clone(host.library.current());
         let func = library.by_name("ML Denoise").expect("built-in present");
         let mut graph = Graph::default();
         let producer = graph.add_func_node(func);

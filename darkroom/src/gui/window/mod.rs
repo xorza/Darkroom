@@ -7,12 +7,13 @@ use std::collections::HashMap;
 
 use palantir::prelude::*;
 use palantir::{DockOp, DockView, KeyFilter, TabOverflow};
-use scenarium::{NodeId, OutputTypes};
+use scenarium::NodeId;
 
 use crate::core::document::{Document, TabRef};
 use crate::core::edit::relayout::Relayout;
 use crate::core::io::preferences::Preferences;
 use crate::gui::graph_ctx::GraphCtx;
+use crate::gui::graph_ctx::output_type_cache::OutputTypeCache;
 use crate::gui::pane::graph::GraphUI;
 use crate::gui::pane::viewer::ImageViewer;
 use crate::gui::requests::Requests;
@@ -62,11 +63,9 @@ pub(crate) struct MainWindow {
     /// fill it — the navigation scan and the record — reuse one buffer's
     /// capacity rather than building a `Vec` per frame.
     dock_ops: Vec<DockOp<TabRef>>,
-    /// The allocation behind the [`GraphCtx`]s below, and nothing more: each
-    /// composition refills it, so it carries no state across frames and is a
-    /// field only so a refresh reuses its capacity rather than building a map
-    /// per pass.
-    output_types: OutputTypes,
+    /// The open document's resolved output types, kept across frames and
+    /// resolved again only after an edit that can retype an output.
+    output_types: OutputTypeCache,
 }
 
 impl MainWindow {
@@ -118,7 +117,8 @@ impl MainWindow {
                 // Reached from `active_tabs`, so a pane is showing the graph
                 // by construction — which is what `GraphUI::prepass` asserts.
                 TabRef::Graph => {
-                    request_relayout |= graph_ui.prepass(ui, GraphCtx::new(cx, output_types), out);
+                    let types = output_types.refresh(cx.open(), cx.app().shared_library());
+                    request_relayout |= graph_ui.prepass(ui, GraphCtx::new(cx, types), out);
                 }
                 // Neither derives a document mutation from input: preferences
                 // edits go through their own widgets, and a viewer only
@@ -173,7 +173,7 @@ impl MainWindow {
                     cx,
                     graph_ui,
                     image_viewers,
-                    output_types,
+                    output_types: output_types.refresh(cx.open(), app.shared_library()),
                     prefs,
                     out,
                 };

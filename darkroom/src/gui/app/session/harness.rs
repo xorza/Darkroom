@@ -33,6 +33,7 @@ use crate::gui::requests::Requests;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
 use std::iter;
+use std::sync::Arc;
 
 /// Surface every editor test frames at unless it resizes. Wide enough
 /// that the dock strip lays its chips out unwrapped.
@@ -44,7 +45,7 @@ pub(crate) struct SessionHarness {
     /// geometry through it directly — `h.ui.press_at(..)`, `h.ui.rect(..)`.
     pub(crate) ui: UiHarness,
     pub(crate) session: Session,
-    pub(crate) library: Library,
+    pub(crate) library: Arc<Library>,
     pub(crate) theme: Theme,
     /// The run projections the frame reads — `App`'s in production, so a
     /// test that wants a node to look executed writes it here.
@@ -73,7 +74,7 @@ impl SessionHarness {
         Self {
             ui,
             session: Session::new(OpenDocument::over(fixture.doc)),
-            library: fixture.library,
+            library: Arc::new(fixture.library),
             theme,
             run_state: RunState::default(),
             preferences: Preferences::default(),

@@ -35,7 +35,7 @@ pub(crate) struct DockPanes<'a> {
     pub(crate) cx: WindowCtx<'a>,
     pub(crate) graph_ui: &'a mut GraphUI,
     pub(crate) image_viewers: &'a mut HashMap<NodeId, ImageViewer>,
-    pub(crate) output_types: &'a mut OutputTypes,
+    pub(crate) output_types: &'a OutputTypes,
     pub(crate) prefs: &'a mut Preferences,
     pub(crate) out: &'a mut Requests,
 }

@@ -1,11 +1,11 @@
 //! The per-step predicates the undo stack and the frame pipeline read off a
 //! step.
 //!
-//! The two the trait leaves no default for — whether a step dirties the
-//! document and whether it strands the canvas caches — are swept over one
-//! representative of *every* kind, so a kind whose answer is wrong shows up
-//! here rather than as a save prompt that never fires or a drag that pays for
-//! two record passes.
+//! The frame-cost questions — whether a step dirties the document, whether
+//! it strands the canvas caches, whether it retypes an output — are swept
+//! over one representative of *every* kind, so a kind whose answer is wrong
+//! shows up here rather than as a save prompt that never fires, a drag that
+//! pays for two record passes, or a wire drawn with a stale type.
 
 use std::collections::BTreeSet;
 
@@ -126,6 +126,65 @@ fn dirties_document_splits_edits_from_navigation() {
     ];
     for step in &content {
         assert!(step.dirties_document(), "content step must dirty: {step:?}");
+    }
+}
+
+/// Only a node coming or going, or a binding changing, can move a wildcard
+/// output's resolved type; every other kind leaves the type table as it was,
+/// so a drag frame resolves nothing.
+#[test]
+fn retypes_outputs_splits_wiring_from_everything_else() {
+    let node_id = NodeId::unique();
+    let every_kind = [
+        (node_presence(), true),
+        (
+            set_input(InputPort::new(node_id, 0), None, Some(cst(1.0))),
+            true,
+        ),
+        (move_step(node_id, Vec2::ZERO, Vec2::new(5.0, 5.0)), false),
+        (
+            UndoStep::RenameNode(RenameNode {
+                node_id,
+                name: Change {
+                    from: "a".into(),
+                    to: "b".into(),
+                },
+            }),
+            false,
+        ),
+        (
+            UndoStep::SetSelection(SetSelection {
+                selection: Change {
+                    from: BTreeSet::new(),
+                    to: BTreeSet::from([node_id]),
+                },
+            }),
+            false,
+        ),
+        (
+            UndoStep::Raise(Raise {
+                key: node_id,
+                z: Change { from: 0, to: 7 },
+            }),
+            false,
+        ),
+        (
+            node_property(node_id, CacheMode::None, CacheMode::Ram),
+            false,
+        ),
+        (
+            UndoStep::SetViewport(SetViewport {
+                viewport: Change {
+                    from: viewport(Vec2::ZERO, 1.0),
+                    to: viewport(Vec2::new(10.0, 20.0), 2.0),
+                },
+            }),
+            false,
+        ),
+        (subscription(node_id, NodeId::unique(), false, true), false),
+    ];
+    for (step, retypes) in &every_kind {
+        assert_eq!(step.retypes_outputs(), *retypes, "{step:?}");
     }
 }
 

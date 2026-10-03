@@ -162,7 +162,7 @@ impl App {
             document,
             &mut preferences,
             &mut status,
-            &runtime.library.published.load(),
+            runtime.library.current(),
         );
         runtime.set_document_cache(open.path.as_deref());
         let mut app = Self {
@@ -416,14 +416,13 @@ impl App {
     /// Load `path` into a fresh editor. A missing or corrupt file leaves the
     /// open document intact and surfaces its reason in the status bar.
     pub(crate) fn load_document(&mut self, path: &Path) {
-        let open =
-            match OpenDocument::load(path.to_path_buf(), &self.runtime.library.published.load()) {
-                Ok(open) => open,
-                Err(err) => {
-                    self.status.error(format!("load failed: {err:#}"));
-                    return;
-                }
-            };
+        let open = match OpenDocument::load(path.to_path_buf(), self.runtime.library.current()) {
+            Ok(open) => open,
+            Err(err) => {
+                self.status.error(format!("load failed: {err:#}"));
+                return;
+            }
+        };
         self.adopt_document(open);
         self.status.error = None;
     }
@@ -618,7 +617,7 @@ impl palantir::App for App {
 
         // One library snapshot for this record pass (a cheap Arc clone).
         // A command that publishes below is visible to pass B or the next frame.
-        let library = self.runtime.library.published.load();
+        let library = Arc::clone(self.runtime.library.current());
         // The frame's read-only world, composed once here: everything below
         // derives its own context from this one rather than taking the refs
         // again.

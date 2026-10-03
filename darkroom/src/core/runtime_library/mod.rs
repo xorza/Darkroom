@@ -1,6 +1,6 @@
 //! The ephemeral runtime registry shared by every frontend.
 
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use lens::{MlModelPaths, astro_library, fs_watch_library, image_library, random_library};
 use scenarium::Library as ScenariumLibrary;
@@ -8,30 +8,12 @@ use scenarium::{math_library, system_library, worker_events_library};
 
 use crate::core::preview::{self, PreviewSink};
 
-#[derive(Clone, Debug)]
-pub(crate) struct PublishedLibrary {
-    current: Arc<RwLock<Arc<ScenariumLibrary>>>,
-}
-
-impl PublishedLibrary {
-    fn new(current: Arc<ScenariumLibrary>) -> Self {
-        Self {
-            current: Arc::new(RwLock::new(current)),
-        }
-    }
-
-    pub(crate) fn load(&self) -> Arc<ScenariumLibrary> {
-        self.current.read().unwrap().clone()
-    }
-
-    fn replace(&self, current: Arc<ScenariumLibrary>) {
-        *self.current.write().unwrap() = current;
-    }
-}
-
 #[derive(Debug)]
 pub(crate) struct RuntimeLibrary {
-    pub(crate) published: PublishedLibrary,
+    /// The registry as last composed. Replaced whole on a recompose, never
+    /// edited, so a frame that cloned the `Arc` keeps reading one registry
+    /// throughout.
+    current: Arc<ScenariumLibrary>,
     model_paths: MlModelPaths,
     /// Where the preview func's lambda publishes. Created once and captured by
     /// every recomposed snapshot, so the values in flight survive a settings
@@ -42,9 +24,8 @@ pub(crate) struct RuntimeLibrary {
 impl RuntimeLibrary {
     pub(crate) fn new(model_paths: &MlModelPaths) -> Self {
         let previews = Arc::new(PreviewSink::default());
-        let current = Arc::new(compose(model_paths, &previews));
         Self {
-            published: PublishedLibrary::new(Arc::clone(&current)),
+            current: Arc::new(compose(model_paths, &previews)),
             model_paths: model_paths.clone(),
             previews,
         }
@@ -59,8 +40,12 @@ impl RuntimeLibrary {
     }
 
     fn recompose(&mut self) {
-        let current = Arc::new(compose(&self.model_paths, &self.previews));
-        self.published.replace(current);
+        self.current = Arc::new(compose(&self.model_paths, &self.previews));
+    }
+
+    /// The registry as last composed.
+    pub(crate) fn current(&self) -> &Arc<ScenariumLibrary> {
+        &self.current
     }
 }
 
