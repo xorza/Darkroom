@@ -158,9 +158,8 @@ impl<'a> GraphCtx<'a> {
 
     /// This graph's nodes, in no particular order.
     ///
-    /// Driven by the view's placements rather than the graph's own node list,
-    /// since only a placed node has somewhere to be. A placement whose node is
-    /// gone is skipped rather than faked.
+    /// Driven by the view's placements, which name exactly the graph's nodes,
+    /// since a placement carries the position a node is drawn at.
     ///
     /// Unordered because almost nothing needs the stack: scanning for
     /// emitters, resolving a drag anchor, framing the viewport and hit-testing
@@ -170,7 +169,7 @@ impl<'a> GraphCtx<'a> {
         self.view()
             .item_placements
             .iter()
-            .filter_map(move |(id, placement)| NodeCtx::resolve(self, *id, placement.pos))
+            .map(move |(id, placement)| NodeCtx::resolve(self, *id, placement.pos))
     }
 
     /// This graph's node ids back-to-front into `out`: later entries draw in
@@ -186,10 +185,10 @@ impl<'a> GraphCtx<'a> {
     }
 
     /// One node of this graph, or `None` for an id it does not hold — a node
-    /// deleted since the caller read the id, or one belonging to another pane.
+    /// deleted since the caller read the id.
     pub(crate) fn node(self, node_id: NodeId) -> Option<NodeCtx<'a>> {
         let placement = *self.view().item_placements.get(&node_id)?;
-        NodeCtx::resolve(self, node_id, placement.pos)
+        Some(NodeCtx::resolve(self, node_id, placement.pos))
     }
 
     pub(crate) fn contains(self, node_id: NodeId) -> bool {

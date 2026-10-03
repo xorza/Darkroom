@@ -27,7 +27,6 @@ Severity: Low — `Option`s that must be `Some`, sentinels, and caches of comput
 ## darkroom core keeps containers and checks it does not need
 Severity: Low.
 
-- [ ] Defensive branches that disagree with document invariants: `gui/app/mod.rs` `App::run_node`'s `debug_assert!(false)` cites panes and paths that no longer exist (the reachable case is stale data, covered by `RuntimeHost::run_node`); `gui/graph_ctx/mod.rs` `GraphCtx::nodes`/`node` skip "a placement whose node is gone" while `NodeState::capture` and `GraphIntent::duplicate` `expect` the bijection.
 - [ ] Small duplications: `core/document/mod.rs` `GraphView::validate` counts placements with a loop (`item_placements.len()`); `core/io/document/mod.rs` writes size and extension checks twice, once per error enum, in opposite control-flow styles.
 
 ## darkroom GUI repeats per-frame lookups and theme values
