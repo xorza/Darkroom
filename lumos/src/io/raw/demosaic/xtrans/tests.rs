@@ -3,11 +3,11 @@
     reason = "test samples lie inside the sensor's non-negative range"
 )]
 
+use crate::internals::assertions::assert_close;
 use crate::io::raw::demosaic::xtrans::internals::{test_pattern, test_pattern_array};
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPatternError;
 use crate::io::raw::demosaic::xtrans::*;
 use crate::math::size2us::Size2us;
-use crate::testing::assertions::assert_close;
 
 #[test]
 fn xtrans_pattern_color_at() {

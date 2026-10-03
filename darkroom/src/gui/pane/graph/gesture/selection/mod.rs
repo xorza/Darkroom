@@ -7,7 +7,7 @@ use palantir::{Rect, Stroke, Ui};
 
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
-use crate::gui::pane::graph::ctx::CanvasCtx;
+use crate::gui::pane::graph::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph::gesture::canvas_gesture::CanvasGesture;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
 use crate::gui::requests::Requests;
@@ -25,7 +25,7 @@ use crate::gui::theme::Theme;
 pub(crate) struct SelectionUI {
     band: GestureSlot<RubberBand>,
     /// The swept set while a band is active, **sorted and deduplicated** so
-    /// [`Selection::contains`](crate::gui::pane::graph::ctx::Selection::contains) can binary-search
+    /// [`Selection::contains`](crate::gui::pane::graph::draw_ctx::Selection::contains) can binary-search
     /// it. Owned here rather than written into the document, which the gesture only touches once,
     /// on release.
     ///

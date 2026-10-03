@@ -1,7 +1,7 @@
 use common::TempDir;
 
-use crate::testing::assertions::{assert_close, assert_close_slice};
-use crate::testing::cfa::XTRANS_PATTERN;
+use crate::internals::assertions::{assert_close, assert_close_slice};
+use crate::internals::cfa::XTRANS_PATTERN;
 
 use crate::io::raw::*;
 use std::array;
@@ -143,10 +143,10 @@ fn demosaic_overshoots_the_light_frame_range_it_is_clamped_back_into() {
 #[test]
 fn load_raw_valid_file() {
     // Check mean is reasonable (not all zeros or all ones)
-    use crate::testing::synthetic::metrics::pixel_stats;
+    use crate::internals::synthetic::metrics::pixel_stats;
 
-    use crate::testing::init_tracing;
-    use crate::testing::real_data::raw_frames;
+    use crate::internals::init_tracing;
+    use crate::internals::real_data::raw_frames;
 
     let path = raw_frames("Lights").swap_remove(0);
 
@@ -184,7 +184,7 @@ fn load_raw_valid_file() {
 #[cfg(feature = "real-data")]
 #[test]
 fn load_raw_dimensions_match() {
-    use crate::testing::real_data::raw_frames;
+    use crate::internals::real_data::raw_frames;
 
     let path = raw_frames("Lights").swap_remove(0);
 
@@ -484,8 +484,8 @@ fn xtrans_direct_and_calibration_black_corrections_match() {
 #[cfg(feature = "real-data")]
 #[test]
 fn real_xtrans_channel_black_matches_direct_and_calibration_paths() {
+    use crate::internals::real_data::raw_frames;
     use crate::io::raw::demosaic::xtrans::XTransImage;
-    use crate::testing::real_data::raw_frames;
 
     let paths = raw_frames("Lights");
     let Some(raw) = paths

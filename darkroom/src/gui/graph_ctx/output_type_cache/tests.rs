@@ -1,10 +1,10 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use scenarium::testing::graph::{NodeSpec, TestGraph};
+use scenarium::internals::graph::{NodeSpec, TestGraph};
 use scenarium::{Binding, ConstValue, DataType, InputPort, Library, OutputPort};
 
-use crate::core::document::harness::DocFixture;
+use crate::core::document::internals::DocFixture;
 use crate::core::document::open_document::OpenDocument;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::relayout::Relayout;

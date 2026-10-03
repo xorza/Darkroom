@@ -1,9 +1,9 @@
 use quickbench::quick_bench;
 
+use crate::internals::init_tracing;
+use crate::internals::real_data::raw_frames;
 use crate::io::raw::internals::load_raw_libraw_demosaic;
 use crate::io::raw::*;
-use crate::testing::init_tracing;
-use crate::testing::real_data::raw_frames;
 
 #[quick_bench(warmup_iters = 1, iters = 5)]
 fn raw_load(b: quickbench::Bencher) {

@@ -4,7 +4,7 @@
 //! 3×3 grid median filter — plus natural-cubic-spline coefficients for C²-continuous interpolation.
 //!
 //! Foundation module (depends only on `math`/`common`): the canonical robust background estimate,
-//! reused by `stacking::star_detection::background` (full-res background+noise map for detection)
+//! reused by `star_detection::background` (full-res background+noise map for detection)
 //! and `background_extraction` (tile-centre samples feeding the gradient surface fit).
 
 pub(crate) mod mesh_axis;

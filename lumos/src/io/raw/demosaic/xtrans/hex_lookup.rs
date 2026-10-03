@@ -152,8 +152,8 @@ impl HexLookup {
 
 #[cfg(test)]
 mod tests {
+    use crate::internals::cfa::XTRANS_PATTERN;
     use crate::io::raw::demosaic::xtrans::hex_lookup::*;
-    use crate::testing::cfa::XTRANS_PATTERN;
     use std::ptr;
 
     #[test]

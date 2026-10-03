@@ -6,11 +6,14 @@
 //! exemption from it), and both halves of the null convention. The demosaic path is exercised by
 //! building mosaics from known colours and demosaicing them back.
 
-use crate::testing::prelude::*;
+use crate::internals::prelude::*;
 use std::fs::File;
 use std::path::Path;
 use std::path::PathBuf;
 
+use crate::combine::config::StackConfig;
+use crate::combine::stack;
+use crate::frame_store::frame_peek::FramePeek;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode::{load_cfa_fits, load_linear_fits};
 use crate::io::image::fits::options::{FitsFloatScale, FitsLoadOptions, FitsNullPolicy};
@@ -18,13 +21,10 @@ use crate::io::image::load_context::LoadContext;
 use crate::io::image::sample_domain::ScaleOrigin;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::memory::run_memory::RunMemory;
-use crate::stacking::combine::config::StackConfig;
-use crate::stacking::combine::stack;
-use crate::stacking::frame_store::frame_peek::FramePeek;
 
-use crate::stacking::frame_store::stackable_image::StackableImage;
-use crate::testing::cfa::{XTRANS_PATTERN, make_cfa};
-use crate::testing::fits::write_fits;
+use crate::frame_store::stackable_image::StackableImage;
+use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
+use crate::internals::fits::write_fits;
 use crate::{CalibrationMasters, CalibrationSet, CfaImage, CfaType, PreviewImage, PreviewPixels};
 use common::TempDir;
 use fits_well::header::Header;
@@ -333,11 +333,11 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
 /// fixed.
 #[test]
 fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
-    use crate::stacking::combine::cache::FrameCache;
-    use crate::stacking::combine::cache_config::CacheConfig;
-    use crate::stacking::combine::config::Normalization;
-    use crate::stacking::combine::error::Error;
-    use crate::stacking::progress::ProgressCallback;
+    use crate::combine::cache::FrameCache;
+    use crate::combine::cache_config::CacheConfig;
+    use crate::combine::config::Normalization;
+    use crate::combine::error::Error;
+    use crate::progress::ProgressCallback;
 
     let dir = TempDir::new("lumos-frame-set");
     let image = Image::new(vec![4, 1], vec![0.0f32, 0.25, 0.5, 1.0]).unwrap();

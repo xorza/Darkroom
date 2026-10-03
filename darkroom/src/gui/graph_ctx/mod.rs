@@ -34,7 +34,7 @@ use crate::core::document::{Document, GraphView, PortKind, PortRef, StackedItem,
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
-use crate::gui::window::ctx::WindowCtx;
+use crate::gui::window::window_ctx::WindowCtx;
 
 /// The graph pane for this frame. `Copy` (the window context plus one shared
 /// ref), so it threads through the draw chain like `DrawCtx`.
@@ -238,7 +238,7 @@ impl<'a> GraphCtx<'a> {
 }
 
 #[cfg(test)]
-pub(crate) mod harness;
+pub(crate) mod internals;
 
 #[cfg(test)]
 mod tests;

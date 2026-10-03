@@ -5,8 +5,8 @@ use std::hint::black_box;
 
 use crate::background_mesh::workspace::MeshWorkspace;
 use crate::bit_buffer2::BitBuffer2;
+use crate::internals::synthetic::fixtures::cluster_field;
 use crate::math::size2us::Size2us;
-use crate::testing::synthetic::fixtures::cluster_field;
 
 const BENCH_SIGMA_CLIP_ITERATIONS: usize = 2;
 

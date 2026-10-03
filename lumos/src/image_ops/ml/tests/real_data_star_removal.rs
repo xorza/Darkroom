@@ -1,8 +1,8 @@
 use crate::image_ops::ml::star_removal::RemoveStars;
-use crate::testing::init_tracing;
-use crate::testing::real_data;
-use crate::testing::real_data::ml_support::onnx_weights;
-use crate::testing::visual;
+use crate::internals::init_tracing;
+use crate::internals::real_data;
+use crate::internals::real_data::ml_support::onnx_weights;
+use crate::internals::visual;
 
 fn max_of(p: &[f32]) -> f32 {
     p.iter().copied().fold(0.0f32, f32::max)

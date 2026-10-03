@@ -1,9 +1,9 @@
 use glam::Vec2;
 use scenarium::{Binding, NodeKind};
 
-use crate::core::document::harness::DocFixture;
+use crate::core::document::internals::DocFixture;
 use crate::core::preview;
-use crate::gui::pane::graph::harness::CanvasHarness;
+use crate::gui::pane::graph::internals::CanvasHarness;
 use crate::gui::pane::graph::node::port_row::port_circle_wid;
 use std::sync::Arc;
 

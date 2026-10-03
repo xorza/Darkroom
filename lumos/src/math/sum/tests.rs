@@ -1,13 +1,13 @@
 //! Tests for sum operations.
 
 #[cfg(target_arch = "x86_64")]
+use crate::internals::simd_check;
+use crate::internals::test_rng::TestRng;
+#[cfg(target_arch = "x86_64")]
 use crate::math::sum::AVX2_SUM_F32_CROSSOVER;
 use crate::math::sum::{mean_f32, scalar, sum_f32, weighted_mean_f32};
 #[cfg(target_arch = "x86_64")]
 use crate::simd::AVX2_F32_LANES;
-#[cfg(target_arch = "x86_64")]
-use crate::testing::simd_check;
-use crate::testing::test_rng::TestRng;
 #[cfg(target_arch = "x86_64")]
 use imaginarium::SimdTier;
 use std::iter;

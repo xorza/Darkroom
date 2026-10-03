@@ -8,7 +8,7 @@ use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
-use crate::gui::pane::graph::ctx::CanvasCtx;
+use crate::gui::pane::graph::canvas_ctx::CanvasCtx;
 use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
 use crate::gui::pane::graph::gesture::canvas_gesture::preview_drag_modifier;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;

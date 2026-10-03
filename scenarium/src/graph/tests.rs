@@ -10,8 +10,8 @@ use crate::graph::func::Func;
 use crate::graph::identity::FuncId;
 use crate::graph::node::{CacheMode, Node, NodeKind};
 use crate::graph::{Binding, BindingEntry, InputPort, NodeId, OutputPort, Subscription};
-use crate::testing;
-use crate::testing::graph::{NodeSpec, TestGraph};
+use crate::internals;
+use crate::internals::graph::{NodeSpec, TestGraph};
 use crate::{ConstValue, DataType, DetachedNode};
 use common::{SerdeFormat, deserialize, serialize};
 use std::panic;
@@ -76,14 +76,14 @@ fn a_new_node_takes_what_its_declaration_says() {
 
     // A fresh func node inherits its func's `default_cache_mode` — the out-of-box
     // `None`, or whatever the func's builder raised it to.
-    let plain = testing::stub_func(FuncId::unique(), "plain");
+    let plain = internals::stub_func(FuncId::unique(), "plain");
     assert_eq!(
         Node::from(&plain).cache,
         CacheMode::None,
         "default func → no caching"
     );
 
-    let hot = testing::stub_func(FuncId::unique(), "hot").default_cache_mode(CacheMode::Both);
+    let hot = internals::stub_func(FuncId::unique(), "hot").default_cache_mode(CacheMode::Both);
     assert_eq!(
         Node::from(&hot).cache,
         CacheMode::Both,
@@ -792,9 +792,9 @@ fn signed_func() -> Func {
         outputs: vec![FuncOutput::new("out", DataType::Float)],
         events: vec![FuncEvent {
             name: "tick".into(),
-            event_lambda: testing::stub_event(),
+            event_lambda: internals::stub_event(),
         }],
-        ..testing::stub_func(FuncId::from_u128(7), "signed")
+        ..internals::stub_func(FuncId::from_u128(7), "signed")
     }
 }
 

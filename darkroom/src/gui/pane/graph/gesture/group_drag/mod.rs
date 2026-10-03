@@ -16,7 +16,7 @@ use crate::core::edit::gesture_id::GestureId;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::pane::graph::ctx::DrawCtx;
+use crate::gui::pane::graph::draw_ctx::DrawCtx;
 use crate::gui::requests::Requests;
 
 /// One in-flight group drag, or none.

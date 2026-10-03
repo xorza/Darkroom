@@ -2,9 +2,9 @@
 mod real_data;
 
 use crate::image_ops::color_calibration::*;
-use crate::testing::assertions::assert_close_slice;
-use crate::testing::images::{gray_image as gray, rgb_image as rgb};
-use crate::testing::prelude::*;
+use crate::internals::assertions::assert_close_slice;
+use crate::internals::images::{gray_image as gray, rgb_image as rgb};
+use crate::internals::prelude::*;
 
 /// A green background at 0.3 over red and blue at 0.1, and a white star 0.4 above every channel.
 /// The flat backgrounds are their own medians, exactly; neutralizing moves green down by 0.2 to the

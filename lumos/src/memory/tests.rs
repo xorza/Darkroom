@@ -1,8 +1,8 @@
+use crate::internals::cfa::XTRANS_PATTERN;
 use crate::io::image::cfa::CfaType;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::memory::*;
-use crate::stacking::stack_product::quality_planes::QualityPlanes;
-use crate::testing::cfa::XTRANS_PATTERN;
+use crate::stack_product::quality_planes::QualityPlanes;
 
 const MIB: u64 = 1024 * 1024;
 const GB: u64 = 1024 * MIB;

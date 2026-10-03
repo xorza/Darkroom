@@ -13,7 +13,7 @@
 //!
 //! Split the way the graph pane is, by what each part does rather than by what
 //! it draws: [`camera`] is the affine algebra between texels, logical px and
-//! the pane, [`glyph`] is the drawn vocabulary, and [`controls`] is the
+//! the pane, [`glyph`] is the drawn vocabulary, and [`toolbar`] is the
 //! floating chrome the panel stamps out. This file is [`ImageViewer`] and
 //! nothing else — the state one viewer tab keeps across frames, and the record
 //! pass that drives it.
@@ -21,8 +21,8 @@
 //! [`TabRef::ImageViewer`]: crate::core::document::TabRef::ImageViewer
 
 mod camera;
-mod controls;
 mod glyph;
+mod toolbar;
 
 use scenarium::NodeId;
 use std::fmt;
@@ -40,7 +40,7 @@ use crate::gui::pane::graph::gesture::slot::GestureSlot;
 use crate::gui::pane::viewer::camera::{
     VIEWER_MAX_ZOOM, VIEWER_MIN_ZOOM, draw_rect, fit_viewport, zoom_about_pane_center,
 };
-use crate::gui::pane::viewer::controls::{BACKDROPS, control_wid, filter_toggle, readout_pill};
+use crate::gui::pane::viewer::toolbar::{BACKDROPS, control_wid, filter_toggle, readout_pill};
 use crate::gui::state::preview_store::error::PreviewImageError;
 use crate::gui::state::preview_store::{
     DrawableImage, PreviewMessage, PreviewStore, StoredContent,

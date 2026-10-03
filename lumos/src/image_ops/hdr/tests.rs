@@ -1,8 +1,8 @@
 use crate::image_ops::hdr::Hdr;
 use crate::image_ops::wavelet::{atrous_smooth, max_scales};
-use crate::testing::assertions::assert_close_slice;
-use crate::testing::images::{gray_image as gray, rgb_image as rgb};
-use crate::testing::prelude::*;
+use crate::internals::assertions::assert_close_slice;
+use crate::internals::images::{gray_image as gray, rgb_image as rgb};
+use crate::internals::prelude::*;
 use std::mem;
 
 /// A smooth radial brightness dome — bright center (~1.0), dark corners (~0.1). The large-scale

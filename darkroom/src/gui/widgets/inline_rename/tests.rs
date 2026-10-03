@@ -1,15 +1,21 @@
 use super::*;
 use crate::gui::theme::Theme;
-use palantir::internals::UiHarness;
+use palantir::Display;
+use palantir::internals::harness::UiHarness;
 
 /// The idle label puts the name flush against its panel's leading edge,
-/// where the editor will draw it. `pixel_snap(false)` keeps the
-/// comparison exact.
+/// where the editor will draw it. Pixel snapping off keeps the comparison
+/// exact.
 #[test]
 fn the_idle_name_sits_on_the_panels_leading_edge() {
     let theme = Theme::default();
     let id = WidgetId::from_hash("rename-leading-edge");
-    let mut h = UiHarness::new(UVec2::new(300, 100)).pixel_snap(false);
+    let surface = UVec2::new(300, 100);
+    let mut h = UiHarness::new(surface);
+    h.set_display(Display {
+        pixel_snap: false,
+        ..Display::from_physical(surface, 1.0)
+    });
     h.frame(|ui| {
         InlineRename::new("Ab", &theme.inline_rename)
             .id(id)

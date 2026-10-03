@@ -44,7 +44,7 @@ use crate::containers::set::IdxSet;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding, ExecutionInput};
 use crate::execution::error::{Error, Result};
-use crate::execution::identity::{NodeIdx, OutputIdx};
+use crate::execution::index::{NodeIdx, OutputIdx};
 use crate::execution::schedule::error::RunScheduleValidationError;
 use crate::execution::seeds::RunSeeds;
 use crate::graph::func::lambda::OutputDemand;

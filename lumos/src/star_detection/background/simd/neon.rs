@@ -1,0 +1,67 @@
+//! NEON cubic-spline segment interpolation.
+
+use std::arch::aarch64::*;
+
+use crate::background_mesh::spline::spline_segment::SplineSegment;
+use crate::star_detection::background::simd::SegmentRamp;
+
+/// Evaluate cubic spline for 4 values using NEON.
+pub(super) unsafe fn interpolate_segment_cubic_neon(
+    bg_out: &mut [f32],
+    noise_out: &mut [f32],
+    bg: SplineSegment,
+    noise: SplineSegment,
+    ramp: SegmentRamp,
+) {
+    let len = bg_out.len();
+
+    unsafe {
+        let bg_f0_v = vdupq_n_f32(bg.f0);
+        let bg_rise_v = vdupq_n_f32(bg.f1 - bg.f0);
+        let bg_a_v = vdupq_n_f32(bg.a);
+        let bg_b_v = vdupq_n_f32(bg.b);
+        let noise_f0_v = vdupq_n_f32(noise.f0);
+        let noise_rise_v = vdupq_n_f32(noise.f1 - noise.f0);
+        let noise_a_v = vdupq_n_f32(noise.a);
+        let noise_b_v = vdupq_n_f32(noise.b);
+        let one = vdupq_n_f32(1.0);
+        let two = vdupq_n_f32(2.0);
+        let start = vdupq_n_f32(ramp.start);
+        let step = vdupq_n_f32(ramp.step);
+        let lane_offsets: [f32; 4] = [0.0, 1.0, 2.0, 3.0];
+        let lanes = vld1q_f32(lane_offsets.as_ptr());
+
+        let mut i = 0;
+        while i + 4 <= len {
+            // `start + i·step` per lane, as `SegmentRamp::t_at` rounds it (see the AVX2 kernel).
+            let index = vaddq_f32(vdupq_n_f32(i as f32), lanes);
+            let t = vaddq_f32(start, vmulq_f32(index, step));
+            let ct = vsubq_f32(one, t);
+
+            // cubic = (2-t)*a + (1+t)*b
+            let two_minus_t = vsubq_f32(two, t);
+            let one_plus_t = vaddq_f32(one, t);
+            let cubic = vfmaq_f32(vmulq_f32(two_minus_t, bg_a_v), one_plus_t, bg_b_v);
+            let t_ct = vmulq_f32(t, ct);
+            // result = f0 + t*(f1 - f0) - t*ct*cubic
+            let linear = vfmaq_f32(bg_f0_v, t, bg_rise_v);
+            let result = vsubq_f32(linear, vmulq_f32(t_ct, cubic));
+            vst1q_f32(bg_out.as_mut_ptr().add(i), result);
+
+            let n_cubic = vfmaq_f32(vmulq_f32(two_minus_t, noise_a_v), one_plus_t, noise_b_v);
+            let n_linear = vfmaq_f32(noise_f0_v, t, noise_rise_v);
+            let n_result = vsubq_f32(n_linear, vmulq_f32(t_ct, n_cubic));
+            vst1q_f32(noise_out.as_mut_ptr().add(i), n_result);
+
+            i += 4;
+        }
+
+        // Scalar remainder
+        while i < len {
+            let t = ramp.t_at(i);
+            bg_out[i] = bg.eval(t);
+            noise_out[i] = noise.eval(t);
+            i += 1;
+        }
+    }
+}

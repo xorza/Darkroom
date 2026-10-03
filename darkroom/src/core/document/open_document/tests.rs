@@ -6,7 +6,7 @@ use common::TempDir;
 use glam::Vec2;
 
 use crate::core::document::Document;
-use crate::core::document::harness::DocFixture;
+use crate::core::document::internals::DocFixture;
 use crate::core::document::open_document::OpenDocument;
 use crate::core::edit::document_queue::DocumentQueue;
 use crate::core::edit::graph_intent::GraphIntent;

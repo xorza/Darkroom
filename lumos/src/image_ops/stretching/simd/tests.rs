@@ -8,9 +8,9 @@ use crate::image_ops::stretching::simd::neon;
 use crate::image_ops::stretching::simd::{
     ASINH_LOG_FROM, asinh_color_preserve_scalar, asinh_plane_scalar,
 };
-use crate::testing::simd_check;
-use crate::testing::simd_check::backend::Backend;
-use crate::testing::simd_check::{SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar};
+use crate::internals::simd_check;
+use crate::internals::simd_check::backend::Backend;
+use crate::internals::simd_check::{SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar};
 use imaginarium::SimdTier;
 use std::f32::consts::LN_2;
 

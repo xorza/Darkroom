@@ -1,10 +1,10 @@
 use crate::image_ops::local_contrast::{
     LocalContrast, N_BINS, TileAxis, build_tile_luts, clip_histogram,
 };
-use crate::testing::images::{gray_image as gray, rgb_image as rgb};
-use crate::testing::prelude::*;
-use crate::testing::synthetic::metrics::pixel_stats;
-use crate::testing::synthetic::patterns;
+use crate::internals::images::{gray_image as gray, rgb_image as rgb};
+use crate::internals::prelude::*;
+use crate::internals::synthetic::metrics::pixel_stats;
+use crate::internals::synthetic::patterns;
 
 /// A low-contrast horizontal gradient, intensity 0.45 to 0.55.
 fn low_contrast(size: Size2us) -> Vec<f32> {

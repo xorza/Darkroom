@@ -96,7 +96,7 @@ mod tests {
     use crate::graph::func::signature::FuncSignature;
     use crate::graph::func::{Func, FuncEvent, FuncInput, FuncOutput};
     use crate::graph::identity::FuncId;
-    use crate::testing;
+    use crate::internals;
 
     /// One small func's signature, from its bytes written out by hand rather than by the
     /// encoder: the domain, then each length-prefixed list — one input `value` of kind 2 (Int),
@@ -110,9 +110,9 @@ mod tests {
             outputs: vec![FuncOutput::new("out", DataType::Float)],
             events: vec![FuncEvent {
                 name: "tick".into(),
-                event_lambda: testing::stub_event(),
+                event_lambda: internals::stub_event(),
             }],
-            ..testing::stub_func(FuncId::from_u128(1), "pinned")
+            ..internals::stub_func(FuncId::from_u128(1), "pinned")
         };
         let count = |n: u64| n.to_le_bytes().to_vec();
         let name = |text: &str| [count(text.len() as u64), text.as_bytes().to_vec()].concat();

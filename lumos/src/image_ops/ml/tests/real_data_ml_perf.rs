@@ -10,9 +10,9 @@ use std::time::Instant;
 
 use crate::image_ops::ml::backend::internals::tile_count;
 use crate::image_ops::ml::star_removal::RemoveStars;
-use crate::testing::init_tracing;
-use crate::testing::real_data;
-use crate::testing::real_data::ml_support::onnx_weights;
+use crate::internals::init_tracing;
+use crate::internals::real_data;
+use crate::internals::real_data::ml_support::onnx_weights;
 
 #[test]
 #[ignore = "perf probe: loads the 125MB model and processes the whole frame; run manually"]

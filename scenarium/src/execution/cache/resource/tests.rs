@@ -7,7 +7,7 @@ use crate::execution::cache::resource::error::StampError;
 use crate::execution::cache::resource::{FsPathId, StampJob};
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::graph::identity::FuncId;
-use crate::testing::program::ProgramBuilder;
+use crate::internals::program::ProgramBuilder;
 use crate::{ConstValue, DataType};
 use std::fs;
 use std::io;

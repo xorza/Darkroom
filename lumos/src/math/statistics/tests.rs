@@ -2,8 +2,8 @@
 
 use std::f64::consts::{PI, SQRT_2};
 
+use crate::internals::prelude::*;
 use crate::math::statistics::*;
-use crate::testing::prelude::*;
 
 #[derive(Debug)]
 struct MedianCase {

@@ -1,7 +1,7 @@
 //! The astro library's node shapes, its path types, and the builder
 //! nodes' invocation at the input boundary.
 
-use scenarium::testing::func_invoker::FuncInvoker;
+use scenarium::internals::func_invoker::FuncInvoker;
 
 use lumos::{
     DEFAULT_SIGMA_THRESHOLD, Denoise, ExtractBackground, Hdr, LocalContrast,

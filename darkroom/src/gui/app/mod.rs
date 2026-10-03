@@ -19,8 +19,8 @@ use crate::core::status::{StatusFamily, StatusLog};
 use crate::core::wake::Wake;
 use crate::gui::HostHandle;
 use crate::gui::MAIN_WINDOW;
+use crate::gui::app::app_ctx::{AppCtx, StatusInputs};
 use crate::gui::app::commands::prefs::MlModelKind;
-use crate::gui::app::ctx::{AppCtx, StatusInputs};
 use crate::gui::app::discard_dialog::{DiscardChoice, DiscardOutcome};
 use crate::gui::dialogs;
 use crate::gui::pane::graph::node::port_row::PathPick;
@@ -29,8 +29,8 @@ use crate::gui::state::process_memory::ProcessMemory;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
 
+pub(crate) mod app_ctx;
 pub(crate) mod commands;
-pub(crate) mod ctx;
 mod discard_dialog;
 pub(crate) mod session;
 

@@ -6,7 +6,7 @@ use scenarium::{Library, NodeId};
 
 use super::*;
 use crate::core::document::Viewport;
-use crate::core::document::harness::{self, DocFixture};
+use crate::core::document::internals::{self, DocFixture};
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::drag_start::DragStart;
 
@@ -49,7 +49,7 @@ impl History {
 
     /// The `i`th node of the sample, in its paint order.
     fn node(&self, i: usize) -> NodeId {
-        harness::nth_in_paint_order(&self.doc.main_view, i)
+        internals::nth_in_paint_order(&self.doc.main_view, i)
     }
 
     fn pos(&self, node_id: NodeId) -> Vec2 {

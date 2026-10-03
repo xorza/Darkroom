@@ -1,4 +1,4 @@
-use scenarium::{FuncId, Library, testing};
+use scenarium::{FuncId, Library, internals};
 
 use crate::gui::pane::graph::gesture::new_node::node_palette::PaletteEntry;
 use crate::gui::pane::graph::gesture::new_node::palette_rows::{PaletteRows, name_matches};
@@ -9,7 +9,7 @@ fn library() -> Library {
     let mut library = Library::default();
     for spec in ["Zoom/crop", "blur/Sharpen", "Blur/gaussian", "blur/box"] {
         let (category, name) = spec.split_once('/').unwrap();
-        library.add(testing::stub_func(FuncId::unique(), name).category(category));
+        library.add(internals::stub_func(FuncId::unique(), name).category(category));
     }
     library
 }

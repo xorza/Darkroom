@@ -19,7 +19,7 @@ use crate::core::edit::step::set_node_property::NodeProperty;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
-use crate::gui::pane::graph::ctx::DrawCtx;
+use crate::gui::pane::graph::draw_ctx::DrawCtx;
 use crate::gui::pane::graph::node::port_color::event_color;
 use crate::gui::pane::graph::node::wid;
 use crate::gui::pane::graph::node::widget::exec_color;
@@ -446,12 +446,12 @@ mod tests {
     use scenarium::{CacheMode, NodeId};
     use std::mem;
 
-    use crate::core::document::harness::DocFixture;
+    use crate::core::document::internals::DocFixture;
     use crate::core::edit::graph_intent::GraphIntent;
     use crate::core::edit::step::set_node_property::NodeProperty;
     use crate::gui::app::commands::AppCommand;
     use crate::gui::app::commands::run::RunCommand;
-    use crate::gui::pane::graph::harness::CanvasHarness;
+    use crate::gui::pane::graph::internals::CanvasHarness;
     use crate::gui::pane::graph::node::wid;
     use crate::gui::theme::Theme;
     use crate::gui::widgets::format::fmt_elapsed;
@@ -462,7 +462,7 @@ mod tests {
     #[test]
     fn every_run_time_fits_the_reserved_width() {
         use glam::UVec2;
-        use palantir::internals::UiHarness;
+        use palantir::internals::harness::UiHarness;
         use palantir::{Configure, RgbaF32, Text, WidgetId};
 
         use crate::gui::pane::graph::node::header::{RUN_TIME_MIN_WIDTH, run_time_style};

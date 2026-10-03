@@ -1,11 +1,11 @@
 use std::time::Duration;
 
 use glam::UVec2;
-use scenarium::{FuncId, Graph, Library, testing};
+use scenarium::{FuncId, Graph, Library, internals};
 
 use super::*;
-use crate::core::document::harness::DocFixture;
-use crate::gui::pane::graph::harness::CanvasHarness;
+use crate::core::document::internals::DocFixture;
+use crate::gui::pane::graph::internals::CanvasHarness;
 
 /// A much bigger search field and a much roomier popup than the defaults.
 fn enlarge(t: &mut palantir::Theme) {
@@ -18,7 +18,7 @@ fn enlarge(t: &mut palantir::Theme) {
 fn bulk_library(n: usize) -> Library {
     let mut library = Library::default();
     for i in 0..n {
-        library.add(testing::stub_func(FuncId::unique(), format!("func{i:02}")).category("Bulk"));
+        library.add(internals::stub_func(FuncId::unique(), format!("func{i:02}")).category("Bulk"));
     }
     library
 }
@@ -96,8 +96,11 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
         // Spanned from the field's top to the results' bottom rather than
         // rebuilt from the terms `chrome_above_results` adds up: a term missing
         // from both sides of a rebuilt sum cancels, and the test passes over
-        // exactly the gap the popup then paints its rows outside.
-        let used = menu.padding.vertical_sum() + (results.max().y - field.min.y);
+        // exactly the gap the popup then paints its rows outside. The chrome
+        // around the span is the theme's padding plus the panel's border, which
+        // palantir folds into the padding on every side.
+        let chrome = menu.padding.vertical_sum() + 2.0 * menu.panel.border.width;
+        let used = chrome + (results.max().y - field.min.y);
         assert!(
             used <= cap + 0.5,
             "{label}: field {} and results {} overflow the {cap} cap (used {used})",

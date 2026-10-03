@@ -2,7 +2,7 @@ use crate::DataType;
 use crate::graph::Graph;
 use crate::graph::identity::OutputPort;
 use crate::graph::output_types::OutputTypes;
-use crate::testing::graph::{NodeSpec, TestGraph};
+use crate::internals::graph::{NodeSpec, TestGraph};
 
 /// `src` (declared `Int`) → `p1` → `p2`, both passthroughs declaring a
 /// wildcard output over an `Any` input, plus a second producer wired to

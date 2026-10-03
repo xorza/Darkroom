@@ -1,8 +1,8 @@
 use glam::Vec2;
 
 use super::*;
-use crate::core::document::harness::DocFixture;
-use crate::gui::pane::graph::harness::CanvasHarness;
+use crate::core::document::internals::DocFixture;
+use crate::gui::pane::graph::internals::CanvasHarness;
 
 /// The breaker cuts a node where the *document* says it is, not where it last
 /// painted.

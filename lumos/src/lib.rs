@@ -1,10 +1,18 @@
 //! Lumos - Astronomical image processing library.
 //!
-//! This library provides tools for processing astronomical images, including:
-//! - Star detection and centroiding
-//! - Image registration and alignment
-//! - Frame stacking (mean, median, sigma-clipped)
-//! - Calibration frame handling (darks, flats, bias)
+//! The pipeline stages, in the order a set of sub-exposures passes through them:
+//!
+//! - [`io`] — RAW and FITS decode into linear planar images.
+//! - [`calibration_masters`] — master dark/flat/bias + defect maps, per-frame calibration.
+//! - [`star_detection`] — sub-pixel star detection feeding registration.
+//! - [`registration`] — star-pattern alignment + image warp into a common frame.
+//! - [`combine`] — statistical per-pixel frame combination (rejection/normalization/weighting).
+//! - [`drizzle`] — Fruchter & Hook variable-pixel reconstruction (dithered/super-resolution sets).
+//! - [`pipeline`] — end-to-end orchestration (`align_and_stack`, `calibrate_align_stack`).
+//! - [`image_ops`] — non-linear operations on the stacked master, strictly after the linear stages.
+//!
+//! What the stages share: [`frame_store`] (memory planning and RAM/mmap frame storage),
+//! [`stack_product`] (the combined image and the per-pixel planes beside it), and [`progress`].
 //!
 //! # Quick Start
 //!
@@ -22,18 +30,30 @@
 //! println!("Found {} stars", result.stars.len());
 //! ```
 
-pub(crate) mod background_mesh;
-pub(crate) mod bit_buffer2;
-pub(crate) mod buffer_pool;
-pub(crate) mod concurrency;
-pub(crate) mod error;
-pub(crate) mod image_ops;
-pub(crate) mod io;
-pub(crate) mod math;
-pub(crate) mod memory;
-pub(crate) mod simd;
-pub(crate) mod stacking;
+mod background_mesh;
+mod bit_buffer2;
+mod buffer_pool;
+mod calibration_masters;
+mod combine;
+mod concurrency;
+mod drizzle;
+mod error;
+mod frame_store;
+mod image_ops;
+mod io;
+mod math;
+mod memory;
+mod pipeline;
+mod progress;
+mod registration;
+mod simd;
+mod stack_product;
+mod star_detection;
 
+pub use calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
+pub use calibration_masters::cosmic_ray::error::UnknownAdcStep;
+pub use calibration_masters::defect_map::DefectMap;
+pub use calibration_masters::error::CalibrationError;
 pub use error::{FrameDimensionMismatch, InvalidConfigField};
 pub use io::image::PREVIEW_IMAGE_EXTENSIONS;
 pub use io::image::cfa::{CfaImage, CfaType};
@@ -62,88 +82,78 @@ pub use io::raw::provenance::RawTransferProvenance;
 pub use io::raw::raw_files::raw_files;
 pub use math::size2us::Size2us;
 pub use math::vec2us::Vec2us;
-pub use stacking::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
-pub use stacking::calibration_masters::cosmic_ray::error::UnknownAdcStep;
-pub use stacking::calibration_masters::defect_map::DefectMap;
-pub use stacking::calibration_masters::error::CalibrationError;
 
-pub use stacking::calibration_masters::calibration_component::CalibrationComponent;
-pub use stacking::calibration_masters::calibration_set::CalibrationSet;
-pub use stacking::calibration_masters::master_role::MasterRole;
-pub use stacking::calibration_masters::{
+pub use calibration_masters::calibration_component::CalibrationComponent;
+pub use calibration_masters::calibration_set::CalibrationSet;
+pub use calibration_masters::master_role::MasterRole;
+pub use calibration_masters::{
     CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, DefectSummary, stack_cfa_master,
 };
 
-pub use stacking::star_detection::config::Config as StarDetectionConfig;
-pub use stacking::star_detection::config::background_config::{
+pub use star_detection::config::Config as StarDetectionConfig;
+pub use star_detection::config::background_config::{
     BackgroundConfig as StarDetectionBackgroundConfig, BackgroundRefinement,
 };
-pub use stacking::star_detection::config::detection_config::{
+pub use star_detection::config::detection_config::{
     Connectivity, Deblend, DetectionConfig as StarDetectionCandidateConfig,
 };
-pub use stacking::star_detection::config::filter_config::FilterConfig as StarDetectionFilterConfig;
-pub use stacking::star_detection::config::fwhm_config::{
-    FwhmConfig as StarDetectionFwhmConfig, FwhmMode,
-};
-pub use stacking::star_detection::config::measurement_config::{
+pub use star_detection::config::filter_config::FilterConfig as StarDetectionFilterConfig;
+pub use star_detection::config::fwhm_config::{FwhmConfig as StarDetectionFwhmConfig, FwhmMode};
+pub use star_detection::config::measurement_config::{
     CentroidMethod, LocalBackgroundMethod, MeasurementConfig as StarDetectionMeasurementConfig,
     NoiseModel,
 };
-pub use stacking::star_detection::detector::{
+pub use star_detection::detector::{
     DetectionResult as StarDetectionResult, Diagnostics as StarDetectionDiagnostics, FwhmSource,
     QualityFilterDiagnostics as StarDetectionQualityFilterDiagnostics, StarDetector,
 };
-pub use stacking::star_detection::roundness::Roundness;
-pub use stacking::star_detection::star::Star;
+pub use star_detection::roundness::Roundness;
+pub use star_detection::star::Star;
 
-pub use stacking::registration::config::{
+pub use registration::config::{
     Config as RegistrationConfig, InterpolationMethod, RegistrationMatchingConfig, WarpParams,
 };
-pub use stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
-pub use stacking::registration::ransac::config::RansacConfig;
-pub use stacking::registration::register;
-pub use stacking::registration::resample::{WarpResult, warp};
-pub use stacking::registration::result::{
+pub use registration::distortion::sip::{SipConfig, SipPolynomial};
+pub use registration::ransac::config::RansacConfig;
+pub use registration::register;
+pub use registration::resample::{WarpResult, warp};
+pub use registration::result::{
     FailedRung, RansacFailureReason, RegistrationCatalog, RegistrationError, RegistrationResult,
     StarMatch,
 };
-pub use stacking::registration::transform::inverse_warp::{InverseMapped, InverseWarp};
-pub use stacking::registration::transform::{
-    Transform, TransformModel, TransformType, WarpTransform,
-};
-pub use stacking::registration::triangle::TriangleConfig;
-pub use stacking::registration::triangle::voting::MatchIndices;
+pub use registration::transform::inverse_warp::{InverseMapped, InverseWarp};
+pub use registration::transform::{Transform, TransformModel, TransformType, WarpTransform};
+pub use registration::triangle::TriangleConfig;
+pub use registration::triangle::voting::MatchIndices;
 
-pub use stacking::combine::cache_config::CacheConfig;
-pub use stacking::combine::config::{CombineMethod, Normalization, SmallN, StackConfig, Weighting};
-pub use stacking::combine::error::{Error as StackError, StackConfigError};
-pub use stacking::combine::rejection::Rejection;
-pub use stacking::combine::rejection::gesd_config::GesdConfig;
-pub use stacking::combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
-pub use stacking::combine::rejection::percentile_clip_config::PercentileClipConfig;
-pub use stacking::combine::rejection::sigma_clip_config::SigmaClipConfig;
-pub use stacking::combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
-pub use stacking::combine::stack::{StackFrame, stack, stack_images};
-pub use stacking::frame_store::error::FrameStoreError;
-pub use stacking::frame_store::frame_quality::FramePlane;
-pub use stacking::progress::{ProgressCallback, StackingProgress, StackingStage};
-pub use stacking::stack_product::StackProduct;
-pub use stacking::stack_product::coverage::Coverage;
-pub use stacking::stack_product::quality_map::QualityMap;
-pub use stacking::stack_product::quality_planes::QualityPlanes;
+pub use combine::cache_config::CacheConfig;
+pub use combine::config::{CombineMethod, Normalization, SmallN, StackConfig, Weighting};
+pub use combine::error::{Error as StackError, StackConfigError};
+pub use combine::rejection::Rejection;
+pub use combine::rejection::gesd_config::GesdConfig;
+pub use combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
+pub use combine::rejection::percentile_clip_config::PercentileClipConfig;
+pub use combine::rejection::sigma_clip_config::SigmaClipConfig;
+pub use combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
+pub use combine::stack::{StackFrame, stack, stack_images};
+pub use frame_store::error::FrameStoreError;
+pub use frame_store::frame_quality::FramePlane;
+pub use progress::{ProgressCallback, StackingProgress, StackingStage};
+pub use stack_product::StackProduct;
+pub use stack_product::coverage::Coverage;
+pub use stack_product::quality_map::QualityMap;
+pub use stack_product::quality_planes::QualityPlanes;
 
-pub use stacking::pipeline::align::align_and_stack;
-pub use stacking::pipeline::calibrate::calibrate_align_stack;
-pub use stacking::pipeline::config::{AlignStackConfig, Reference};
-pub use stacking::pipeline::result::{
-    AlignStackResult, AlignmentSummary, Error as AlignStackError,
-};
+pub use pipeline::align::align_and_stack;
+pub use pipeline::calibrate::calibrate_align_stack;
+pub use pipeline::config::{AlignStackConfig, Reference};
+pub use pipeline::result::{AlignStackResult, AlignmentSummary, Error as AlignStackError};
 
-pub use stacking::drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
-pub use stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
-pub use stacking::drizzle::drizzle_result::DrizzleResult;
-pub use stacking::drizzle::error::{DrizzleConfigError, DrizzleError};
-pub use stacking::drizzle::stack::{drizzle_images, drizzle_stack};
+pub use drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
+pub use drizzle::config::{DrizzleConfig, DrizzleKernel};
+pub use drizzle::drizzle_result::DrizzleResult;
+pub use drizzle::error::{DrizzleConfigError, DrizzleError};
+pub use drizzle::stack::{drizzle_images, drizzle_stack};
 
 pub use image_ops::stretching::{ColorMode, Stretch, StretchMethod};
 
@@ -167,4 +177,4 @@ pub use image_ops::ml::denoise::MlDenoise;
 pub use image_ops::ml::star_removal::{RemoveStars, StarRemovalResult};
 
 #[cfg(test)]
-pub(crate) mod testing;
+mod internals;

@@ -1,13 +1,14 @@
 [workspace]
 members = [
     "common",
+    "common/common-derive",
     "scenarium",
-    "darkroom",
+    "lumos",
     "lens",
-    "lumos"
+    "darkroom",
 ]
 default-members = ["darkroom"]
-exclude = [".tmp", "palantir", "imaginarium", "fits-well", "quickbench"]
+exclude = ["palantir", "imaginarium", "fits-well", "quickbench"]
 
 resolver = "3"
 
@@ -17,13 +18,14 @@ edition = "2024"
 
 [workspace.dependencies]
 common = { path = "common" }
-quickbench = { path = "quickbench" }
+common-derive = { path = "common/common-derive" }
 scenarium = { path = "scenarium" }
-imaginarium = { path = "imaginarium" }
-lens = { path = "lens" }
 lumos = { path = "lumos" }
+lens = { path = "lens" }
 palantir = { path = "palantir" }
+imaginarium = { path = "imaginarium" }
 fits-well = { path = "fits-well" }
+quickbench = { path = "quickbench" }
 
 libraw-rs-sys = { version = "0.0.4" }
 
@@ -72,6 +74,7 @@ rand_chacha = { version = "0.10" }
 nalgebra = { version = "0.35" }
 statrs = { version = "0.19", default-features = false }
 clap = { version = "4.6", features = ["derive"] }
+winresource = { version = "0.1" }
 ort = { version = "2.0.0-rc.13" }
 
 [profile.dev]

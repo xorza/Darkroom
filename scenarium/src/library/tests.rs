@@ -9,9 +9,9 @@ use crate::FuncOutput;
 use crate::graph::func::error::InvokeError;
 use crate::graph::func::lambda::Invocation;
 use crate::graph::func::{Func, FuncInput};
+use crate::internals;
+use crate::internals::func_invoker::FuncInvoker;
 use crate::library::{Library, TypeEntry};
-use crate::testing;
-use crate::testing::func_invoker::FuncInvoker;
 use crate::{
     CodecError, ConstValue, CustomValue, CustomValueCodec, DataType, DynamicValue, TypeId,
     async_lambda,
@@ -47,9 +47,9 @@ impl CustomValueCodec for StubCodec {
 fn registration_rejects_duplicate_ids_without_replacing_entries() {
     let func_id = FuncId::unique();
     let mut library = Library::default();
-    library.add(testing::stub_func(func_id, "Before"));
+    library.add(internals::stub_func(func_id, "Before"));
     let duplicate_func = panic::catch_unwind(AssertUnwindSafe(|| {
-        library.add(testing::stub_func(func_id, "After"));
+        library.add(internals::stub_func(func_id, "After"));
     }));
     assert!(duplicate_func.is_err());
     assert_eq!(library.by_id(func_id).unwrap().name, "Before");
@@ -146,7 +146,7 @@ fn an_identical_type_registers_again_and_a_conflict_panics() {
 #[test]
 #[should_panic(expected = "invalid function declaration: NilId")]
 fn add_refuses_a_declaration_validate_refuses() {
-    Library::default().add(testing::stub_func(FuncId::nil(), "nil"));
+    Library::default().add(internals::stub_func(FuncId::nil(), "nil"));
 }
 
 /// A func declaring a type as an enum while that type is registered
@@ -208,7 +208,7 @@ fn an_enum_declared_only_by_an_output_still_blocks_a_custom_registration() {
     let type_id = TypeId::unique();
     let mut library = Library::default();
     library.add(
-        testing::stub_func(FuncId::unique(), "emit")
+        internals::stub_func(FuncId::unique(), "emit")
             .output(FuncOutput::new("mode", DataType::Enum(type_id))),
     );
     library.register_type(type_id, TypeEntry::custom("Opaque"));
@@ -216,7 +216,7 @@ fn an_enum_declared_only_by_an_output_still_blocks_a_custom_registration() {
 
 /// A func whose `mode` input defaults to the enum variant `default`.
 fn modal_func(type_id: TypeId, default: &str) -> Func {
-    testing::stub_func(FuncId::unique(), "modal").input(
+    internals::stub_func(FuncId::unique(), "modal").input(
         FuncInput::optional("mode", DataType::Enum(type_id))
             .default(ConstValue::Enum(default.into())),
     )

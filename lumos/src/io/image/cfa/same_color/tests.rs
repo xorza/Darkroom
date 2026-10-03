@@ -7,6 +7,7 @@
 use imaginarium::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
+use crate::internals::cfa::XTRANS_PATTERN;
 use crate::io::image::cfa::CfaType;
 use crate::io::image::cfa::same_color::{
     SameColorMedian, XTRANS_NEIGHBORS, XTRANS_RADIUS, XTransOffsets,
@@ -14,7 +15,6 @@ use crate::io::image::cfa::same_color::{
 use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mut;
 use crate::math::vec2us::Vec2us;
-use crate::testing::cfa::XTRANS_PATTERN;
 
 #[test]
 fn bayer_same_color_neighbors() {

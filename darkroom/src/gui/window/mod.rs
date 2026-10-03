@@ -1,7 +1,7 @@
-pub(crate) mod ctx;
 pub(crate) mod dock_panes;
 pub(crate) mod menu_bar;
 pub(crate) mod status_bar;
+pub(crate) mod window_ctx;
 
 use std::collections::HashMap;
 
@@ -19,8 +19,8 @@ use crate::gui::graph_ctx::output_type_cache::OutputTypeCache;
 use crate::gui::pane::graph::GraphUI;
 use crate::gui::pane::viewer::ImageViewer;
 use crate::gui::requests::Requests;
-use crate::gui::window::ctx::WindowCtx;
 use crate::gui::window::dock_panes::DockPanes;
+use crate::gui::window::window_ctx::WindowCtx;
 
 /// The application root's [`Configure::input_scope`] anchor. A fixed id
 /// rather than an auto one because the scope is the thing darkroom's
@@ -232,9 +232,9 @@ mod tests {
 
     use scenarium::NodeId;
 
-    use crate::core::document::harness::DocFixture;
+    use crate::core::document::internals::DocFixture;
     use crate::core::edit::graph_intent::GraphIntent;
-    use crate::gui::pane::graph::harness::CanvasHarness;
+    use crate::gui::pane::graph::internals::CanvasHarness;
     use crate::gui::window::MainWindow;
 
     /// The canvas's node caches are swept only when the graph's revision

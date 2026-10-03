@@ -99,8 +99,8 @@ impl fmt::Display for ImageDimensions {
 
 #[cfg(test)]
 mod tests {
+    use crate::internals::panic_message;
     use crate::io::image::image_dimensions::ImageDimensions;
-    use crate::testing::panic_message;
     use std::panic::catch_unwind;
 
     #[test]

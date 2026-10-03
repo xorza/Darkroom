@@ -31,9 +31,9 @@
 use std::io::{self, Write};
 use std::time::Instant;
 
+use crate::internals::mem_probe::{MB, RssSampler, env_parse, measured};
+use crate::internals::synthetic::patterns;
 use crate::io::image::image_dimensions::ImageDimensions;
-use crate::testing::mem_probe::{MB, RssSampler, env_parse, measured};
-use crate::testing::synthetic::patterns;
 use crate::{Denoise, ExtractBackground, Stretch};
 
 /// The widest single op working set, in image-sized f32 planes: `Denoise`'s wavelet workspace

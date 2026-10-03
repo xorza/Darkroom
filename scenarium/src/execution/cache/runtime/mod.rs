@@ -35,7 +35,7 @@ use crate::execution::cache::runtime::error::{
 use crate::execution::cache::slot::RuntimeSlot;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::compile::consumer_cone::ConsumerCone;
-use crate::execution::identity::{NodeIdx, OutputAddr};
+use crate::execution::index::{NodeIdx, OutputAddr};
 use crate::execution::schedule::NodeState;
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;
@@ -927,7 +927,7 @@ pub(crate) mod internals {
     use crate::execution::cache::runtime::RuntimeCache;
     use crate::execution::cache::slot::OutputSnapshot;
     use crate::execution::compile::compiled_graph::CompiledGraph;
-    use crate::execution::identity::NodeIdx;
+    use crate::execution::index::NodeIdx;
 
     impl RuntimeCache {
         /// A first install of `program` — the production pairing without an

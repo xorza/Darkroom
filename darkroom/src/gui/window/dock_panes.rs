@@ -23,7 +23,7 @@ use crate::gui::pane::graph::GraphUI;
 use crate::gui::pane::preferences;
 use crate::gui::pane::viewer::{self, ImageViewer};
 use crate::gui::requests::Requests;
-use crate::gui::window::ctx::WindowCtx;
+use crate::gui::window::window_ctx::WindowCtx;
 
 /// Everything a pane's body needs, borrowed for one record pass.
 ///
@@ -147,8 +147,8 @@ mod tests {
     use palantir::{DockState, TabStrip};
 
     use crate::core::document::TabRef;
-    use crate::core::document::harness::DocFixture;
-    use crate::gui::app::session::harness::SessionHarness;
+    use crate::core::document::internals::DocFixture;
+    use crate::gui::app::session::internals::SessionHarness;
 
     /// Which tab kinds reserve the unsaved-changes dot is darkroom's own
     /// sentence, and the dot is a visibility change rather than a layout

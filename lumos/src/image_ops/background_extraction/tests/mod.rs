@@ -3,9 +3,9 @@ mod real_data;
 
 use crate::image_ops::background_extraction::*;
 use crate::image_ops::stretching::Stretch;
+use crate::internals::images::rgb_image as rgb;
+use crate::internals::prelude::*;
 use crate::math::statistics::median_mut;
-use crate::testing::images::rgb_image as rgb;
-use crate::testing::prelude::*;
 
 fn fill(size: Size2us, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {
     let mut v = vec![0.0f32; size.pixel_count()];

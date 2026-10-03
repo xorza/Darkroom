@@ -3,7 +3,7 @@
 //! and this process's own footprint.
 //!
 //! None of it draws. It is lent to the UI tree through
-//! [`AppCtx`](crate::gui::app::ctx::AppCtx), and `App` is its only writer —
+//! [`AppCtx`](crate::gui::app::app_ctx::AppCtx), and `App` is its only writer —
 //! which is why it lives beside the shell rather than among the widgets that
 //! read it.
 

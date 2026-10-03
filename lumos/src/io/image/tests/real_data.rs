@@ -4,11 +4,11 @@
 //! gated once, at the module, instead of one `cfg` per `use` in a file that is mostly feature-free.
 
 use common::CancelToken;
-use common::internals::debug_output_path;
+use common::internals;
 
+use crate::internals::real_data::raw_frames;
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage};
 use crate::io::image::load_context::LoadContext;
-use crate::testing::real_data::raw_frames;
 
 /// The first RAW light loads through the CFA entry point at the size its header declares, and
 /// demosaics to three channels of that size.
@@ -26,7 +26,7 @@ fn the_first_raw_light_loads_at_its_declared_size_and_demosaics() {
     assert_eq!(image.dimensions().size(), declared.size());
     assert_eq!(image.channels(), 3);
 
-    if let Some(path) = debug_output_path("light_from_raw.tiff") {
+    if let Some(path) = internals::debug_output_path("light_from_raw.tiff") {
         imaginarium::Image::from(image).save_file(path).unwrap();
     }
 }

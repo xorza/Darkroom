@@ -23,11 +23,11 @@ use crate::gui::app::commands::file::FileCommand;
 use crate::gui::app::commands::run::RunCommand;
 use crate::gui::requests::Requests;
 use crate::gui::window::MainWindow;
-use crate::gui::window::ctx::WindowCtx;
+use crate::gui::window::window_ctx::WindowCtx;
 use palantir::{Shortcut, Ui};
 use scenarium::Graph;
 
-use crate::gui::app::ctx::AppCtx;
+use crate::gui::app::app_ctx::AppCtx;
 
 const UNDO_SHORTCUT: Shortcut = Shortcut::ctrl('Z');
 const REDO_SHORTCUT: Shortcut = Shortcut::ctrl_shift('Z');
@@ -223,7 +223,7 @@ impl Session {
 }
 
 #[cfg(test)]
-pub(crate) mod harness;
+pub(crate) mod internals;
 
 #[cfg(test)]
 mod tests;

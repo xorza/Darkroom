@@ -1,5 +1,5 @@
+use crate::internals::prelude::*;
 use crate::math::urect::URect;
-use crate::testing::prelude::*;
 
 #[test]
 fn urect_accumulation_uses_exclusive_max() {

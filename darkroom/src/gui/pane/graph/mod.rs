@@ -15,7 +15,8 @@
 
 pub(crate) mod background;
 pub(crate) mod canvas;
-pub(crate) mod ctx;
+pub(crate) mod canvas_ctx;
+pub(crate) mod draw_ctx;
 pub(crate) mod frame;
 pub(crate) mod gesture;
 pub(crate) mod node;
@@ -31,7 +32,8 @@ use crate::core::edit::relayout::Relayout;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::background::CanvasBackground;
 use crate::gui::pane::graph::canvas::{inner_canvas_widget_id, outer_canvas_widget_id};
-use crate::gui::pane::graph::ctx::{CanvasCtx, DrawCtx, Selection};
+use crate::gui::pane::graph::canvas_ctx::CanvasCtx;
+use crate::gui::pane::graph::draw_ctx::{DrawCtx, Selection};
 use crate::gui::pane::graph::frame::cull::CullRegion;
 use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
 use crate::gui::pane::graph::gesture::breaker::BreakerUI;
@@ -548,37 +550,20 @@ impl GraphUI {
 }
 
 #[cfg(test)]
-pub(crate) mod internals {
-    use super::*;
-
-    impl GraphUI {
-        /// The canvas's cross-frame geometry cache, for the tests that assert
-        /// on what a record filled into it and what [`GraphUI::retain_nodes`]
-        /// released — port centers, node sizes, cached world rects.
-        ///
-        /// Shared, not `&mut`: a test reads what the passes settled, it does
-        /// not seed the cache by hand.
-        pub(crate) fn geometry(&self) -> &CanvasGeometry {
-            &self.geometry
-        }
-    }
-}
-
-#[cfg(test)]
-pub(crate) mod harness;
+pub(crate) mod internals;
 
 #[cfg(test)]
 mod tests {
     use palantir::DockOp;
-    use palantir::internals::UiHarness;
+    use palantir::internals::harness::UiHarness;
     use scenarium::{Binding, InputPort};
     use std::sync::Arc;
 
     use super::*;
-    use crate::core::document::harness::DocFixture;
+    use crate::core::document::internals::DocFixture;
     use crate::core::document::{PortRef, TabRef};
     use crate::core::preview::preview_func;
-    use crate::gui::pane::graph::harness::CanvasHarness;
+    use crate::gui::pane::graph::internals::CanvasHarness;
     use crate::gui::pane::graph::node::port_row::port_circle_wid;
     use crate::gui::pane::graph::node::preview_row::preview_image_wid;
     use crate::gui::state::preview_store::internals::opaque_image_value;

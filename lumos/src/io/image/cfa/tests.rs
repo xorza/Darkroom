@@ -1,12 +1,12 @@
+use crate::internals::assertions::assert_close;
+use crate::internals::cfa::XTRANS_PATTERN;
+use crate::internals::cfa::make_cfa;
 use crate::io::image::cfa::*;
 use crate::io::image::image_provenance::{
     DecoderProvenance, ImageProvenance, RowOrder, SourceContainer, TransferProvenance,
 };
 use crate::io::image::sample_domain::ScaleOrigin;
 use crate::io::raw::provenance::RawTransferProvenance;
-use crate::testing::assertions::assert_close;
-use crate::testing::cfa::XTRANS_PATTERN;
-use crate::testing::cfa::make_cfa;
 use common::TempDir;
 use std::fs;
 

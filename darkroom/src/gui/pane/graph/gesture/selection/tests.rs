@@ -1,9 +1,9 @@
 use glam::Vec2;
 use palantir::Modifiers;
 
-use crate::core::document::harness::DocFixture;
+use crate::core::document::internals::DocFixture;
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::gui::pane::graph::harness::CanvasHarness;
+use crate::gui::pane::graph::internals::CanvasHarness;
 
 /// Escape cancels a rubber band: no `SetSelection`, and the next band
 /// starts from a clean base.

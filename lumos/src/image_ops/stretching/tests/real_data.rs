@@ -2,10 +2,10 @@
 //! write viewable JPEGs for visual inspection. Gated behind the `real-data` feature (the dataset
 //! lives in `test_data/lumos_data/`).
 
+use crate::internals::init_tracing;
+use crate::internals::real_data;
+use crate::internals::visual;
 use crate::math::statistics::median_mut;
-use crate::testing::init_tracing;
-use crate::testing::real_data;
-use crate::testing::visual;
 use crate::{ColorMode, NeutralizeBackground, Scnr, Stretch, StretchMethod};
 
 #[derive(Debug)]

@@ -1,10 +1,10 @@
 use glam::Vec2;
 use palantir::{Key, PointerButton};
 
-use crate::core::document::harness::DocFixture;
+use crate::core::document::internals::DocFixture;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::edit::graph_intent::drag_start::DragStart;
-use crate::gui::pane::graph::harness::CanvasHarness;
+use crate::gui::pane::graph::internals::CanvasHarness;
 
 /// A drag on a node body moves that node, by the pointer's travel.
 ///

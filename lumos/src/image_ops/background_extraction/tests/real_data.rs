@@ -3,12 +3,12 @@
 //! on the **stretched** master to flatten the display-domain background, saving a viewable
 //! before/after. Gated behind the `real-data` feature.
 
+use crate::internals::init_tracing;
+use crate::internals::real_data;
+use crate::internals::visual;
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mut;
-use crate::testing::init_tracing;
-use crate::testing::real_data;
-use crate::testing::visual;
 use crate::{ExtractBackground, NeutralizeBackground};
 
 /// Max−min of the robust background level across the four corners of the intensity plane — a proxy

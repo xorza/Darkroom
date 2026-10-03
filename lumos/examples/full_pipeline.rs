@@ -14,7 +14,7 @@
 
 #![expect(clippy::print_stdout, reason = "an example reports to the terminal")]
 
-use std::fs;
+use common::internals;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -73,11 +73,7 @@ fn main() {
     );
 
     // Save the stacked master.
-    let output = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("test_output/stacked_result.tiff");
-    fs::create_dir_all(output.parent().unwrap()).expect("create output directory");
+    let output = internals::output_path("stacked_result.tiff");
     let image: imaginarium::Image = result.product.image.into();
     image.save_file(&output).expect("save stacked master");
     tracing::info!(path = %output.display(), "Saved stacked master");

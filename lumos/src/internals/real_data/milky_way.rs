@@ -1,0 +1,82 @@
+//! Real-data "best Milky Way" pipeline: green-removal + stretch (as in the neutralize / SCNR /
+//! renorm reference) with the new display-domain enhancers layered on — linear wavelet denoise,
+//! HDR multiscale dynamic-range compression, and CLAHE local contrast — tuned for a wide-angle
+//! Milky Way. Writes the stretched base and the enhanced result for side-by-side visual comparison.
+//! Gated behind the `real-data` feature.
+
+use crate::internals::init_tracing;
+use crate::internals::real_data;
+use crate::internals::visual;
+use crate::io::image::linear::LinearImage;
+use crate::math::statistics::median_mut;
+use crate::{
+    ColorMode, Denoise, Hdr, LocalContrast, NeutralizeBackground, Scnr, Stretch, StretchMethod,
+};
+
+fn median(image: &LinearImage) -> f32 {
+    median_mut(&mut image.intensity_plane().into_vec())
+}
+
+fn assert_displayable(image: &LinearImage, label: &str) {
+    let plane = image.intensity_plane();
+    let (min, max) = plane
+        .pixels()
+        .iter()
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &v| {
+            (lo.min(v), hi.max(v))
+        });
+    // The renorm `NeutralizeBackground` shifts the background additively (so it dips negative — as
+    // in the reference renorm image; save_png clamps the floor). Only the highlight ceiling is a
+    // hard display limit; the floor just shouldn't be absurd.
+    assert!(
+        max <= 1.0 + 1e-3 && min > -0.5,
+        "{label} is displayable: min {min} max {max}"
+    );
+}
+
+#[test]
+fn milky_way_best_pipeline() {
+    init_tracing();
+    let mut img = real_data::linear_master();
+
+    NeutralizeBackground.apply(&mut img).unwrap(); // equalize the green-elevated background
+    Denoise::default().apply(&mut img).unwrap(); // gentle wavelet denoise (MW-tuned default)
+
+    Stretch {
+        method: StretchMethod::AutoStf {
+            shadow_sigmas: 1.5,
+            target_background: 0.2,
+        },
+        color: ColorMode::ColorPreserving,
+    }
+    .apply(&mut img)
+    .unwrap();
+    Scnr::average_neutral().apply(&mut img).unwrap();
+    NeutralizeBackground.apply(&mut img).unwrap(); // re-neutralize the now-display-domain background
+    eprintln!("stretched base: median {:.3}", median(&img));
+    assert_displayable(&img, "stretched base");
+    visual::save_linear(&img, "milky_way/stretched");
+
+    // HDR: gently compress the bright star-cloud cores to reveal detail (small amount; too much
+    // flattens the large-scale brightness).
+    Hdr {
+        scales: 6,
+        amount: 0.3,
+    }
+    .apply(&mut img)
+    .unwrap();
+    // Local contrast: pop the dust lanes / dark rifts (modest clip + strength so it doesn't crush
+    // the background or over-sharpen the dense starfield).
+    LocalContrast {
+        tiles: 8,
+        clip_limit: 2.0,
+        strength: 0.6,
+    }
+    .apply(&mut img)
+    .unwrap();
+    Scnr::average_neutral().apply(&mut img).unwrap(); // final green touch-up after the enhancement
+
+    eprintln!("enhanced: median {:.3}", median(&img));
+    assert_displayable(&img, "enhanced");
+    visual::save_linear(&img, "milky_way/enhanced");
+}

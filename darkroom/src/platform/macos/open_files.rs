@@ -2,7 +2,7 @@
 //!
 //! Launch Services delivers them as `application:openURLs:` on the
 //! `NSApplicationDelegate` and never in argv, so without this the association
-//! `assets/macos/Info.plist` declares launches the editor empty.
+//! `packaging/macos/Info.plist` declares launches the editor empty.
 //!
 //! **Why the selector is bolted onto winit's delegate rather than our own.**
 //! winit registers a `WinitApplicationDelegate` in `EventLoop::new` and reads

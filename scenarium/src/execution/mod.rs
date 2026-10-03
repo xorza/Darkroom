@@ -20,7 +20,7 @@ pub(crate) mod compile;
 pub(crate) mod engine;
 pub(crate) mod error;
 pub(crate) mod executor;
-pub(crate) mod identity;
+pub(crate) mod index;
 pub(crate) mod report;
 pub(crate) mod schedule;
 pub(crate) mod seeds;

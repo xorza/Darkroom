@@ -1,11 +1,11 @@
 use super::*;
-use palantir::internals::UiHarness;
+use palantir::internals::harness::UiHarness;
 use std::sync::Arc;
 
 use imaginarium::{Image as RawImage, ImageDesc};
 use scenarium::{ConstValue, Node, NodeKind, SpecialNode};
 
-use crate::core::document::harness::DocFixture;
+use crate::core::document::internals::DocFixture;
 use crate::core::preview::preview_func;
 use crate::gui::state::preview_store::internals::image_value;
 

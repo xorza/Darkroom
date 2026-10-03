@@ -11,7 +11,7 @@
 use palantir::prelude::*;
 use scenarium::RamUsage;
 
-use crate::gui::app::ctx::AppCtx;
+use crate::gui::app::app_ctx::AppCtx;
 use crate::gui::widgets::format::fmt_bytes;
 use crate::gui::widgets::support::{colored_text, hspacer, muted_text};
 use std::fmt;
