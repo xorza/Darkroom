@@ -81,13 +81,13 @@ impl SubscriptionUI {
         // start one this frame (distinct widget-id spaces, one press), so
         // trying the emitter scan first is arbitrary, not a conflict.
         if self.state.is_idle() {
-            let emitters = graph_ctx.nodes().flat_map(NodeCtx::event_refs);
-            // Only sink nodes render a pin, so only they can start a reverse
-            // event drag.
-            let pins = graph_ctx.nodes().filter(|n| n.sink()).map(|n| n.id);
-            let latched = GlyphDrag::latch(&geometry.events, emitters)
+            // Every event glyph is an emitter, and only sink nodes render a
+            // pin, so whatever glyph a drag started on can start this one.
+            let latched = GlyphDrag::latch(&geometry.events, |_| true)
                 .map(InFlight::FromEmitter)
-                .or_else(|| GlyphDrag::latch(&geometry.subs, pins).map(InFlight::FromSubscriber));
+                .or_else(|| {
+                    GlyphDrag::latch(&geometry.subs, |_| true).map(InFlight::FromSubscriber)
+                });
             if let Some(latched) = latched
                 && graph_ctx.contains(latched.node())
             {

@@ -15,12 +15,10 @@ use std::sync::Arc;
 use palantir::Ui;
 use scenarium::NodeId;
 
-use crate::core::document::{PortKind, PortRef};
+use crate::core::document::PortKind;
 use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::core::preview;
-use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::ctx::CanvasCtx;
-use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
 use crate::gui::pane::graph::gesture::canvas_gesture::preview_drag_modifier;
 use crate::gui::pane::graph::gesture::drag_anchor::GroupDrag;
 use crate::gui::pane::graph::node::port_row::{add_preview_intents, port_circle_wid};
@@ -53,7 +51,11 @@ impl PreviewDrag {
         if self.drag.advance(ui, graph_ctx, cx.cancelled(), out) || !preview_drag_modifier(ui) {
             return;
         }
-        let Some(port) = scan_output_drag_start(geometry, graph_ctx) else {
+        let Some(port) = geometry
+            .ports
+            .started_drag()
+            .filter(|port| port.kind == PortKind::Output)
+        else {
             return;
         };
         if !graph_ctx.contains(port.node_id) {
@@ -85,15 +87,6 @@ impl PreviewDrag {
         self.drag
             .latch(node_id, members, port_circle_wid(port), out);
     }
-}
-
-/// First output port whose circle began a drag this frame. Only one press
-/// exists, so the first is the only one.
-fn scan_output_drag_start(geometry: &CanvasGeometry, graph_ctx: GraphCtx<'_>) -> Option<PortRef> {
-    let keys = graph_ctx
-        .nodes()
-        .flat_map(|node| node.ports(PortKind::Output));
-    geometry.ports.first_drag_started(keys)
 }
 
 #[cfg(test)]
