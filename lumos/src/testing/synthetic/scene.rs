@@ -9,7 +9,7 @@ use std::f64::consts::PI;
 
 use crate::math::size2us::Size2us;
 use crate::testing::synthetic::backgrounds::{
-    NebulaConfig, add_gradient_background, add_nebula_background, add_uniform_background,
+    NebulaConfig, Vignette, add_gradient_background, add_nebula_background, add_uniform_background,
     add_vignette_background,
 };
 use crate::testing::test_rng::TestRng;
@@ -29,19 +29,9 @@ pub(crate) struct TrueSource {
 /// normalized units. Delegates to the existing `backgrounds` generators.
 #[derive(Debug, Clone)]
 pub(crate) enum BackgroundField {
-    Uniform {
-        level: f32,
-    },
-    Gradient {
-        start: f32,
-        end: f32,
-        angle: f32,
-    },
-    Vignette {
-        center: f32,
-        edge: f32,
-        falloff: f32,
-    },
+    Uniform { level: f32 },
+    Gradient { start: f32, end: f32, angle: f32 },
+    Vignette(Vignette),
     Nebula(NebulaConfig),
 }
 
@@ -54,11 +44,9 @@ impl BackgroundField {
             BackgroundField::Gradient { start, end, angle } => {
                 add_gradient_background(&mut pixels, size, *start, *end, *angle);
             }
-            BackgroundField::Vignette {
-                center,
-                edge,
-                falloff,
-            } => add_vignette_background(&mut pixels, size, *center, *edge, *falloff),
+            BackgroundField::Vignette(vignette) => {
+                add_vignette_background(&mut pixels, size, *vignette);
+            }
             BackgroundField::Nebula(cfg) => add_nebula_background(&mut pixels, size, cfg),
         }
         pixels
@@ -199,25 +187,21 @@ mod tests {
     use crate::testing::synthetic::metrics::pixel_stats;
     use crate::testing::synthetic::scene::*;
 
+    /// The scene renders each background through its generator, so a uniform level is that
+    /// level exactly and a gradient reaches both end levels exactly.
     #[test]
-    fn uniform_background_renders_constant() {
-        let bg = BackgroundField::Uniform { level: 0.1 };
-        let buf = bg.render(Size2us::new(32, 16));
+    fn backgrounds_render_their_levels() {
+        let buf = BackgroundField::Uniform { level: 0.25 }.render(Size2us::new(32, 16));
         assert_eq!(buf.len(), 32 * 16);
-        assert!(buf.iter().all(|&p| (p - 0.1).abs() < 1e-6));
-    }
+        assert!(buf.iter().all(|&p| p == 0.25));
 
-    #[test]
-    fn gradient_background_spans_endpoints() {
-        // Horizontal 0→1 gradient: left edge ≈ 0, right edge ≈ 1.
         let bg = BackgroundField::Gradient {
             start: 0.0,
             end: 1.0,
             angle: 0.0,
         };
         let buf = bg.render(Size2us::new(64, 4));
-        assert!(buf[0] < 0.05, "left {}", buf[0]);
-        assert!(buf[63] > 0.95, "right {}", buf[63]);
+        assert_eq!((buf[0], buf[63], buf[64], buf[127]), (0.0, 1.0, 0.0, 1.0));
     }
 
     #[test]

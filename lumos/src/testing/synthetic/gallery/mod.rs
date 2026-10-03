@@ -24,7 +24,7 @@ use crate::math::vec2us::Vec2us;
 use crate::stacking::registration::transform::Transform;
 
 use crate::testing::synthetic::artifacts::add_cosmic_rays;
-use crate::testing::synthetic::backgrounds::NebulaConfig;
+use crate::testing::synthetic::backgrounds::{NebulaConfig, Vignette};
 use crate::testing::synthetic::camera::{BiasField, Camera, FlatField, PsfModel, SensorDefects};
 use crate::testing::synthetic::fixtures::{cluster_field, star_field};
 use crate::testing::synthetic::observe::{Observation, SimFrame, render};
@@ -130,11 +130,11 @@ fn gallery_backgrounds() {
         ),
         (
             "backgrounds/vignette",
-            BackgroundField::Vignette {
+            BackgroundField::Vignette(Vignette {
                 center: 0.3,
                 edge: 0.05,
                 falloff: 2.0,
-            },
+            }),
             ToneMap::Clamp,
         ),
         (
@@ -284,7 +284,11 @@ fn gallery_sensor() {
     let size = Size2us::new(256, 256);
     // The multiplicative flat map itself.
     let vignette_flat = FlatField {
-        vignette: Some((1.0, 0.4, 2.5)),
+        vignette: Some(Vignette {
+            center: 1.0,
+            edge: 0.4,
+            falloff: 2.5,
+        }),
         channel_gain: [1.0; 3],
     };
     save(

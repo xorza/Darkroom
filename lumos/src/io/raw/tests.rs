@@ -4,7 +4,6 @@ use crate::testing::assertions::{assert_close, assert_close_slice};
 use crate::testing::cfa::XTRANS_PATTERN;
 
 use crate::io::raw::*;
-use crate::testing::synthetic::metrics::pixel_stats;
 use std::array;
 
 #[test]
@@ -172,6 +171,7 @@ fn load_raw_valid_file() {
     }
 
     // Check mean is reasonable (not all zeros or all ones)
+    use crate::testing::synthetic::metrics::pixel_stats;
     let mean = (0..image.channels())
         .map(|channel| pixel_stats(image.channel(channel)).mean)
         .sum::<f64>()

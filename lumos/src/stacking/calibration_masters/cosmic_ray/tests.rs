@@ -8,8 +8,8 @@ use crate::stacking::calibration_masters::cosmic_ray::*;
 use crate::testing::cfa::XTRANS_PATTERN;
 use crate::testing::cfa::cfa_from_plane;
 use crate::testing::prelude::*;
+use crate::testing::synthetic::patterns;
 use crate::testing::synthetic::sky_field::{Sky, SkyField};
-use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 
 /// 64×64: flat sky + deterministic Gaussian noise (σ≈0.003) + three well-sampled stars
 /// (FWHM≈3 px). Unclamped, because the tests inject cosmic rays above the ceiling afterwards.
@@ -71,8 +71,9 @@ fn removes_cosmic_rays_preserves_stars() {
             out[size.index_of(p)]
         );
     }
-    // 7 injected; allow modest growth but not runaway over-flagging.
-    assert!((7..=20).contains(&count), "unexpected CR count: {count}");
+    // The 7 injected, and (13, 54): it shares the 2×2 subsample block of the CR at (12, 54), which
+    // lifts its significance past the growth threshold `sigfrac · sigclip`.
+    assert_eq!(count, 8);
 }
 
 #[test]
@@ -83,7 +84,7 @@ fn clean_field_few_false_positives() {
         &CosmicRayConfig::default(),
     )
     .unwrap();
-    assert!(count <= 2, "clean field should flag ~0 CRs, got {count}");
+    assert_eq!(count, 0, "a clean field flags nothing");
 }
 
 #[test]
@@ -156,17 +157,14 @@ fn bayer_removes_cosmic_rays_preserves_star() {
     // Bayer deinterleave path: a well-sampled star + CRs spread across all four 2×2 phases. The
     // CRs go; the star core survives (each phase plane's mono detector protects it).
     let size = Size2us::new(48, 48);
-    let mut data = Buffer2::new_filled(size.width, size.height, 0.05f32);
-    let mut rng = TestRng::new(11);
-    for v in &mut data {
-        *v += rng.next_gaussian_f32() * 0.003;
-    }
-    SyntheticStar::new(
-        Vec2::new(24.0, 24.0),
-        0.6,
-        StarProfile::Gaussian { sigma: 2.5 },
-    )
-    .add_to(&mut data);
+    let sky = Sky {
+        level: 0.05,
+        noise: 0.003,
+        clamp: false,
+    };
+    let SkyField {
+        pixels: mut data, ..
+    } = SkyField::render(size, sky, 2.5, &[(Vec2::new(24.0, 24.0), 0.6)], 11);
     let core = Vec2us::new(24, 24);
     let star = data[size.index_of(core)];
     // Each CR sits in a different (x%2, y%2) phase, exercising all four planes.
@@ -196,7 +194,10 @@ fn bayer_removes_cosmic_rays_preserves_star() {
         "star core gutted: {} (was {star})",
         out[size.index_of(core)]
     );
-    assert!((4..=24).contains(&count), "unexpected CR count: {count}");
+    // The four CRs, and two pixels the growth pass takes: (11, 10) beside (9, 12) and (35, 39)
+    // beside (37, 37), each a diagonal neighbour in its CR's phase plane, inside the 2×2
+    // subsample block that lifts its significance past `sigfrac · sigclip`.
+    assert_eq!(count, 6);
 }
 
 #[test]
@@ -210,18 +211,15 @@ fn bayer_tight_star_eaten_is_a_known_limitation() {
     // (e.g. mosaic-level detection) flips it loudly. Contrast `bayer_removes_cosmic_rays_...`,
     // which uses a *well-sampled* FWHM≈5.9 px star that survives.
     let size = Size2us::new(48, 48);
-    let mut data = Buffer2::new_filled(size.width, size.height, 0.05f32);
-    let mut rng = TestRng::new(13);
-    for v in &mut data {
-        *v += rng.next_gaussian_f32() * 0.003;
-    }
-    // σ=1.0 → FWHM≈2.35 px in the mosaic
-    SyntheticStar::new(
-        Vec2::new(24.0, 24.0),
-        0.6,
-        StarProfile::Gaussian { sigma: 1.0 },
-    )
-    .add_to(&mut data);
+    let sky = Sky {
+        level: 0.05,
+        noise: 0.003,
+        clamp: false,
+    };
+    // σ = 1.0 → FWHM ≈ 2.35 px in the mosaic.
+    let SkyField {
+        pixels: mut data, ..
+    } = SkyField::render(size, sky, 1.0, &[(Vec2::new(24.0, 24.0), 0.6)], 13);
     let core = Vec2us::new(24, 24);
     let crs = [Vec2us::new(8, 8), Vec2us::new(37, 37)];
     for &p in &crs {
@@ -261,13 +259,13 @@ fn xtrans_removes_cosmic_ray_preserves_flat_field() {
         _ => 0.30, // B
     };
     let mut data = vec![0.0f32; size.pixel_count()];
-    let mut rng = TestRng::new(5);
     for y in 0..size.height {
         for x in 0..size.width {
             let p = Vec2us::new(x, y);
-            data[size.index_of(p)] = color_val(cfa.color_at(p)) + rng.next_gaussian_f32() * 0.002;
+            data[size.index_of(p)] = color_val(cfa.color_at(p));
         }
     }
+    patterns::add_gaussian_noise(&mut data, 0.002, 5);
     let cr = Vec2us::new(9, 9);
     data[size.index_of(cr)] = 0.95;
 
@@ -456,7 +454,7 @@ fn the_parametric_model_takes_its_scale_from_the_frame() {
     else {
         panic!("a parametric estimation resolves to the parametric model")
     };
-    assert_close!(full_scale, 4095.0, 2.0 * f32::EPSILON);
+    assert_close!(full_scale, 4095.0, 2.0 * f32::EPSILON * 4095.0);
     assert_eq!(NoiseModel::resolve(&estimation, None), Err(UnknownAdcStep));
     assert_eq!(
         NoiseModel::resolve(&NoiseEstimation::Empirical, None),

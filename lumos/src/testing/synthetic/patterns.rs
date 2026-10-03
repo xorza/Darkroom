@@ -37,11 +37,10 @@ pub(crate) fn horizontal_gradient(size: Size2us, left: f32, right: f32) -> Buffe
     Buffer2::new(size.width, size.height, pixels)
 }
 
-/// Add deterministic Gaussian noise to a pixel slice.
+/// Add seeded Gaussian noise of a constant `sigma` to a pixel slice — for a fixture that wants one
+/// fixed noise level. The sensor's own signal-dependent noise is [`render`]'s, through `noise`.
 ///
-/// Uses Box-Muller transform via `TestRng::next_gaussian_f32()`.
-/// This is the canonical noise helper — all test code should use this
-/// instead of reimplementing Gaussian noise locally.
+/// [`render`]: crate::testing::synthetic::observe::render
 pub(crate) fn add_gaussian_noise(pixels: &mut [f32], sigma: f32, seed: u64) {
     let mut rng = TestRng::new(seed);
     for p in pixels.iter_mut() {

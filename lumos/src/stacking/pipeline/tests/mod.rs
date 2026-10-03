@@ -30,37 +30,31 @@ use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::synthetic::fixtures::star_field;
 use common::TempDir;
 
+use crate::testing::assertions::bits;
 use crate::testing::cfa::make_cfa;
 
-#[derive(Debug)]
-struct BaseField {
-    image: LinearImage,
-    registration: RegistrationConfig,
-}
-
-fn base_field() -> BaseField {
-    BaseField {
-        image: star_field(Size2us::new(256, 256), 40, 66666).image,
-        registration: RegistrationConfig::default(),
-    }
+fn base_field() -> LinearImage {
+    star_field(Size2us::new(256, 256), 40, 66666).image
 }
 
 /// Warp `base` by a pure translation to fake a dithered exposure.
-fn shifted(base: &LinearImage, reg: &RegistrationConfig, dx: f64, dy: f64) -> LinearImage {
+fn shifted(base: &LinearImage, dx: f64, dy: f64) -> LinearImage {
     let t = Transform::translation(DVec2::new(dx, dy));
-    warp(base, &WarpTransform::new(t), &reg.warp).image
+    warp(
+        base,
+        &WarpTransform::new(t),
+        &RegistrationConfig::default().warp,
+    )
+    .image
 }
 
 #[test]
 fn aligns_shifted_frames_into_a_sharp_stack() {
-    let BaseField {
-        image: base,
-        registration: reg,
-    } = base_field();
+    let base = base_field();
     let frames = vec![
         base.clone(),
-        shifted(&base, &reg, 8.0, -5.0),
-        shifted(&base, &reg, -6.0, 7.0),
+        shifted(&base, 8.0, -5.0),
+        shifted(&base, -6.0, 7.0),
     ];
 
     let config = AlignStackConfig {
@@ -161,10 +155,7 @@ fn aligns_shifted_frames_into_a_sharp_stack() {
 
 #[test]
 fn drops_unregisterable_frame_and_stacks_the_rest() {
-    let BaseField {
-        image: base,
-        registration: reg,
-    } = base_field();
+    let base = base_field();
     let dims = base.dimensions();
     // A flat frame has no stars → registration fails → it is dropped, not fatal. Two of them, at
     // non-adjacent indices, so `dropped` also pins its documented ascending order — no sort
@@ -173,9 +164,9 @@ fn drops_unregisterable_frame_and_stacks_the_rest() {
     let frames = vec![
         base.clone(),
         blank(),
-        shifted(&base, &reg, 5.0, 3.0),
+        shifted(&base, 5.0, 3.0),
         blank(),
-        shifted(&base, &reg, -4.0, 6.0),
+        shifted(&base, -4.0, 6.0),
     ];
 
     let config = AlignStackConfig {
@@ -212,9 +203,9 @@ fn drops_unregisterable_frame_and_stacks_the_rest() {
     let frames = vec![
         base.clone(),
         blank(),
-        shifted(&base, &reg, 5.0, 3.0),
+        shifted(&base, 5.0, 3.0),
         blank(),
-        shifted(&base, &reg, -4.0, 6.0),
+        shifted(&base, -4.0, 6.0),
     ];
     let result = align_and_stack(
         frames,
@@ -231,13 +222,10 @@ fn stacked_master_inherits_reference_frame_metadata() {
     // The master's metadata comes from the reference frame (the alignment anchor), not frame 0,
     // so the RAM and streaming tiers agree. With reference = index 1, frame 0 is a (warped)
     // non-reference frame whose metadata must NOT win.
-    let BaseField {
-        image: base,
-        registration: reg,
-    } = base_field();
-    let mut f0 = shifted(&base, &reg, 5.0, 3.0);
+    let base = base_field();
+    let mut f0 = shifted(&base, 5.0, 3.0);
     let mut f1 = base.clone(); // the reference (index 1)
-    let mut f2 = shifted(&base, &reg, -4.0, 6.0);
+    let mut f2 = shifted(&base, -4.0, 6.0);
     f0.metadata.exposure_time = Some(10.0);
     f1.metadata.exposure_time = Some(20.0);
     f2.metadata.exposure_time = Some(30.0);
@@ -274,7 +262,7 @@ fn mismatched_frame_dimensions_are_rejected_before_registration() {
     // `warp` reprojects into the source frame's own grid, so a frame from a different sensor
     // would reach the combine as a differently-sized plane rather than as an error. The guard
     // sits ahead of registration; frame 1 is the first mismatch even though frame 2 also differs.
-    let BaseField { image: base, .. } = base_field();
+    let base = base_field();
     let odd = LinearImage::from_pixels(ImageDimensions::new((128, 128), 1), vec![0.1; 128 * 128]);
     let odder = LinearImage::from_pixels(ImageDimensions::new((64, 64), 1), vec![0.1; 64 * 64]);
 
@@ -305,14 +293,11 @@ fn an_invalid_registration_config_is_reported_as_one() {
     // catalogs did not match", and the pipeline reads the latter as a frame to drop — so before
     // the config was validated up front, a bad registration config made every frame "fail to
     // register" and surfaced as `AllFramesDropped`, blaming the data.
-    let BaseField {
-        image: base,
-        registration: reg,
-    } = base_field();
+    let base = base_field();
     let frames = vec![
         base.clone(),
-        shifted(&base, &reg, 5.0, 3.0),
-        shifted(&base, &reg, -4.0, 6.0),
+        shifted(&base, 5.0, 3.0),
+        shifted(&base, -4.0, 6.0),
     ];
 
     let mut config = AlignStackConfig {
@@ -346,14 +331,11 @@ fn a_bad_registration_config_is_never_mistaken_for_frames_that_would_not_match()
     // config with the same error type as "these two catalogs did not match", which the per-frame
     // loop drops. Enter through the shared body so no up-front check runs, and the loop itself
     // has to tell them apart.
-    let BaseField {
-        image: base,
-        registration: reg,
-    } = base_field();
+    let base = base_field();
     let images = vec![
         base.clone(),
-        shifted(&base, &reg, 5.0, 3.0),
-        shifted(&base, &reg, -4.0, 6.0),
+        shifted(&base, 5.0, 3.0),
+        shifted(&base, -4.0, 6.0),
     ];
 
     let mut config = AlignStackConfig {
@@ -404,7 +386,7 @@ fn an_invalid_stack_config_is_caught_before_the_frames_are_worked() {
     // detected, registered and warped — so a run whose frames also fail to register would
     // report `AllFramesDropped` and never mention the config at all. Validating up front means
     // the config is blamed, and nothing upstream is paid for.
-    let BaseField { image: base, .. } = base_field();
+    let base = base_field();
     let dims = base.dimensions();
     let blank = || LinearImage::from_pixels(dims, vec![0.1; dims.pixel_count()]);
     let frames = vec![base, blank(), blank()];
@@ -439,7 +421,7 @@ fn an_invalid_stack_config_is_caught_before_the_frames_are_worked() {
 fn all_non_reference_frames_dropped_errors() {
     // With the reference produced in-place (it survives in `frames`), "nothing aligned" means
     // only the reference remains — guard the changed `frames.len() <= 1` condition.
-    let BaseField { image: base, .. } = base_field();
+    let base = base_field();
     let dims = base.dimensions();
     let blank = || LinearImage::from_pixels(dims, vec![0.1; dims.pixel_count()]);
     // Reference has stars; both others are blank → both fail to register → nothing aligns.
@@ -464,15 +446,12 @@ fn all_non_reference_frames_dropped_errors() {
 
 #[test]
 fn auto_reference_picks_the_richest_frame() {
-    let BaseField {
-        image: base,
-        registration: reg,
-    } = base_field();
+    let base = base_field();
     // Frame 1 (full field) has far more stars than frame 0 (a near-blank), so Auto must
     // anchor on frame 1.
     let dims = base.dimensions();
     let sparse = LinearImage::from_pixels(dims, vec![0.1; dims.pixel_count()]);
-    let frames = vec![sparse, base.clone(), shifted(&base, &reg, 4.0, -3.0)];
+    let frames = vec![sparse, base.clone(), shifted(&base, 4.0, -3.0)];
 
     let result = align_and_stack(
         frames,
@@ -592,14 +571,6 @@ fn public_input_errors() {
     );
 }
 
-fn bits(buffer: &Buffer2<f32>) -> Vec<u32> {
-    buffer
-        .pixels()
-        .iter()
-        .map(|value| value.to_bits())
-        .collect()
-}
-
 /// Persist `image` as a single-channel (`CfaType::Mono`) Lumos CFA FITS light — the cheapest
 /// input `calibrate_align_stack` accepts, since the mono demosaic is a passthrough and the frame
 /// reaches detection unchanged. `exposure_time` is distinct per frame so the stacked master's
@@ -689,14 +660,11 @@ fn the_raw_front_end_checks_each_light_at_decode() {
 #[test]
 fn both_front_ends_report_the_same_stages() {
     let scratch = TempDir::new("lumos_stage_parity");
-    let BaseField {
-        image: base,
-        registration: reg,
-    } = base_field();
+    let base = base_field();
     let frames = [
         base.clone(),
-        shifted(&base, &reg, 4.0, -3.0),
-        shifted(&base, &reg, -2.0, 5.0),
+        shifted(&base, 4.0, -3.0),
+        shifted(&base, -2.0, 5.0),
     ];
 
     let stages = |reports: &Mutex<Vec<(StackingStage, usize, usize)>>| {
@@ -706,7 +674,6 @@ fn both_front_ends_report_the_same_stages() {
             .iter()
             .map(|(stage, ..)| *stage)
             .collect();
-        seen.dedup();
         seen.sort_by_key(|stage| format!("{stage:?}"));
         seen.dedup();
         seen
@@ -763,16 +730,10 @@ fn both_front_ends_report_the_same_stages() {
     );
 }
 
-/// The all-RAM and memory-bounded runs must produce the same stack.
-///
-/// Both go through one body now ([`super::align::register_warp_and_stack`]), so this no longer
-/// guards two transcriptions against drift — it guards the claim that
-/// [`super::tier::FrameTier`] only decides *where* a frame lives. A resident frame moves out of
-/// `PipelineFrame`, a spilled one is read back from its memory map, and the combined result has
-/// to be bit-identical either way.
-///
-/// The always-run counterpart to `streaming_disk_tier_matches_ram_on_real_lights`, which needs
-/// the `real-data` feature and its dataset.
+/// The all-RAM and memory-bounded runs must produce the same stack. Both tiers run one body,
+/// `align::register_warp_and_stack`, and [`FrameTier`] decides only where a frame lives: a
+/// resident frame moves out of `PipelineFrame`, a spilled one is read back from its memory map, and
+/// the combined result has to be bit-identical either way.
 ///
 /// Both runs read the same mono-CFA FITS lights and differ only in `memory_override`, the input
 /// `MemoryPlan::plan` keys its tier decision on. RANSAC is seeded, removing the pipeline's only other
@@ -780,10 +741,7 @@ fn both_front_ends_report_the_same_stages() {
 #[test]
 fn ram_and_streaming_tiers_produce_identical_stacks() {
     let scratch = TempDir::new("lumos_tier_equivalence");
-    let BaseField {
-        image: base,
-        registration: reg,
-    } = base_field();
+    let base = base_field();
 
     // Five dithered exposures: five clears `StackConfig`'s default `SmallN::median_below(5)`, so
     // the σ-clipped mean actually runs and the combine emits a linear-variance plane — without
@@ -794,12 +752,12 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
     let blank = || LinearImage::from_pixels(dims, vec![0.1; dims.pixel_count()]);
     let frames = [
         base.clone(),
-        shifted(&base, &reg, 6.0, -4.0),
+        shifted(&base, 6.0, -4.0),
         blank(),
-        shifted(&base, &reg, -5.0, 7.0),
-        shifted(&base, &reg, 3.0, 9.0),
+        shifted(&base, -5.0, 7.0),
+        shifted(&base, 3.0, 9.0),
         blank(),
-        shifted(&base, &reg, -8.0, -2.0),
+        shifted(&base, -8.0, -2.0),
     ];
     // Frames 1 and 3 declare a block of pixels null, so both tiers carry a mask from decode to
     // warp: the spill tier has to bring it back from disk for the two stacks to agree.
@@ -883,8 +841,8 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
     let channels = ram.product.image.channels();
     for channel in 0..channels {
         assert_eq!(
-            bits(ram.product.image.channel(channel)),
-            bits(streaming.product.image.channel(channel)),
+            bits(ram.product.image.channel(channel).pixels()),
+            bits(streaming.product.image.channel(channel).pixels()),
             "image channel {channel} differs between the RAM and streaming tiers"
         );
         assert_eq!(
@@ -894,8 +852,16 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
         );
     }
     assert_eq!(
-        bits(&ram.product.coverage.as_ref().unwrap().to_plane()),
-        bits(&streaming.product.coverage.as_ref().unwrap().to_plane()),
+        bits(ram.product.coverage.as_ref().unwrap().to_plane().pixels()),
+        bits(
+            streaming
+                .product
+                .coverage
+                .as_ref()
+                .unwrap()
+                .to_plane()
+                .pixels()
+        ),
         "coverage differs between the RAM and streaming tiers"
     );
 
@@ -911,8 +877,8 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
         .expect("a σ-clipped mean emits a linear-variance plane");
     for channel in 0..channels {
         assert_eq!(
-            bits(ram_variance.channel(channel)),
-            bits(streaming_variance.channel(channel)),
+            bits(ram_variance.channel(channel).pixels()),
+            bits(streaming_variance.channel(channel).pixels()),
             "linear-variance channel {channel} differs between the RAM and streaming tiers"
         );
     }
@@ -935,28 +901,13 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
 #[cfg(feature = "real-data")]
 #[test]
 fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
-    use crate::stacking::calibration_masters::internals::masters_from_files;
-    use crate::stacking::pipeline::calibrate::calibrate_align_stack;
-    use crate::testing::real_data::raw_frames;
-    use crate::{CalibrationSet, DEFAULT_SIGMA_THRESHOLD};
+    use crate::testing::real_data::{self, raw_frames};
 
-    let dark_paths = raw_frames("Darks");
-    let bias_paths = raw_frames("Bias");
-    let flat_paths = raw_frames("Flats");
-    let empty: Vec<PathBuf> = Vec::new();
-    let masters = masters_from_files(
-        CalibrationSet {
-            dark: &dark_paths,
-            flat: &flat_paths,
-            bias: &bias_paths,
-            flat_dark: &empty,
-        },
-        DEFAULT_SIGMA_THRESHOLD,
-    );
-
+    let masters = real_data::calibration_masters();
     let all = raw_frames("Lights");
     let lights = &all[..all.len().min(3)];
     assert!(lights.len() >= 2, "need ≥2 lights to exercise registration");
+    let frame = real_data::raw_light(&lights[0]);
 
     let result = calibrate_align_stack(
         lights,
@@ -967,108 +918,20 @@ fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
     )
     .expect("calibrate_align_stack");
 
-    // A real stacked image came out, and every input frame is accounted for.
-    assert!(result.product.image.width() > 0 && result.product.image.height() > 0);
-    assert_eq!(
-        result.alignment.registered + result.alignment.dropped.len(),
-        lights.len()
-    );
-    assert!(
-        result.alignment.registered >= 1,
-        "at least the reference is stacked"
-    );
-}
-
-#[cfg(feature = "real-data")]
-#[test]
-fn streaming_disk_tier_matches_ram_on_real_lights() {
-    use crate::stacking::calibration_masters::internals::masters_from_files;
-    use crate::stacking::pipeline::calibrate::calibrate_align_stack;
-    use crate::testing::real_data::raw_frames;
-    use crate::{CalibrationSet, DEFAULT_SIGMA_THRESHOLD};
-
-    let dark_paths = raw_frames("Darks");
-    let bias_paths = raw_frames("Bias");
-    let flat_paths = raw_frames("Flats");
-    let empty: Vec<PathBuf> = Vec::new();
-    let masters = masters_from_files(
-        CalibrationSet {
-            dark: &dark_paths,
-            flat: &flat_paths,
-            bias: &bias_paths,
-            flat_dark: &empty,
-        },
-        DEFAULT_SIGMA_THRESHOLD,
-    );
-
-    let all = raw_frames("Lights");
-    let lights = &all[..all.len().min(3)];
-    assert!(lights.len() >= 2, "need ≥2 lights to exercise registration");
-
-    // Seed RANSAC so both tiers are bit-comparable (registration is the only nondeterminism).
-    let mut config = AlignStackConfig::default();
-    config.registration.ransac.seed = Some(0x00C0_FFEE);
-
-    // RAM tier: huge memory budget → the all-in-memory path.
-    let mut ram_cfg = config.clone();
-    ram_cfg.stack.cache.memory_override = Some(u64::MAX);
-    let ram = calibrate_align_stack(
-        lights,
-        &masters,
-        &ram_cfg,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .expect("RAM-tier stack");
-
-    // Disk tier: a 1-byte budget forces the streaming disk path.
-    let mut disk_cfg = config;
-    disk_cfg.stack.cache.memory_override = Some(1);
-    let disk = calibrate_align_stack(
-        lights,
-        &masters,
-        &disk_cfg,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .expect("disk-tier (streaming) stack");
-
-    assert_eq!(
-        ram.alignment.registered, disk.alignment.registered,
-        "same frames stacked"
-    );
-    assert_eq!(
-        ram.alignment.dropped, disk.alignment.dropped,
-        "same frames dropped"
-    );
-    assert_eq!(
-        ram.alignment.reference, disk.alignment.reference,
-        "same reference"
-    );
-    assert_eq!(
-        ram.product.image.dimensions(),
-        disk.product.image.dimensions()
-    );
-    // Bit-identical: same frames, same (seeded) registration, same combine — only the frame
-    // storage (RAM vs mmap) differs.
-    for c in 0..ram.product.image.channels() {
-        let a: Vec<u32> = ram
-            .product
-            .image
-            .channel(c)
-            .pixels()
-            .iter()
-            .map(|x| x.to_bits())
-            .collect();
-        let b: Vec<u32> = disk
-            .product
-            .image
-            .channel(c)
-            .pixels()
-            .iter()
-            .map(|x| x.to_bits())
-            .collect();
-        assert_eq!(a, b, "channel {c} differs between the RAM and disk tiers");
+    // Three lights of one field a few minutes apart all register, and the stack has a light's
+    // geometry and only finite samples.
+    assert_eq!(result.alignment.dropped, Vec::<usize>::new());
+    assert_eq!(result.alignment.registered, lights.len());
+    assert_eq!(result.product.image.dimensions(), frame.dimensions());
+    for channel in 0..frame.channels() {
+        assert!(
+            result
+                .product
+                .image
+                .channel(channel)
+                .iter()
+                .all(|v| v.is_finite())
+        );
     }
 }
 

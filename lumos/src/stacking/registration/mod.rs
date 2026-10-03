@@ -58,9 +58,6 @@ pub(crate) mod transform;
 pub(crate) mod triangle;
 mod tuning;
 
-#[cfg(all(test, feature = "real-data"))]
-mod real_data_tests;
-
 use crate::stacking::registration::point_pairs::PointPairs;
 use crate::stacking::registration::recovery::{RecoveredMatches, recover_matches};
 use crate::stacking::registration::spatial::KdTree;

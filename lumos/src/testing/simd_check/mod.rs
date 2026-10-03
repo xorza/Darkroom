@@ -14,9 +14,9 @@ pub(crate) mod data_shape;
 
 use imaginarium::SimdTier;
 
-use crate::testing::assertions::is_close;
 use crate::testing::simd_check::backend::Backend;
 use crate::testing::simd_check::data_shape::DataShape;
+use crate::testing::test_rng::TestRng;
 
 /// Whether a test can run `tier`'s backend here. When it cannot, the line on stderr says so,
 /// since a test has no skipped state and would otherwise pass without checking it.
@@ -92,15 +92,8 @@ pub(crate) const DATA_SHAPES: &[DataShape] = &[
     DataShape {
         name: "pseudo-random",
         fill: |w, s| {
-            let mut state = 0x2545_F491_4F6C_DD1Du64 ^ (s as u64).wrapping_mul(0x9E37_79B9);
-            (0..w)
-                .map(|_| {
-                    state = state
-                        .wrapping_mul(6_364_136_223_846_793_005)
-                        .wrapping_add(1);
-                    (state >> 33) as f32 / (1u64 << 31) as f32
-                })
-                .collect()
+            let mut rng = TestRng::new(0x2545_F491_4F6C_DD1D ^ s as u64);
+            (0..w).map(|_| rng.next_f32()).collect()
         },
     },
 ];
@@ -119,7 +112,7 @@ pub(crate) struct ScalarSimd {
 }
 
 impl ScalarSimd {
-    /// Outputs whose error is measured against each element's own size (see [`is_close`]).
+    /// Outputs whose error is measured against each element's own size, floored at 1.
     pub(crate) fn new(scalar: Vec<f32>, simd: Vec<f32>) -> ScalarSimd {
         ScalarSimd {
             scalar,
@@ -164,7 +157,8 @@ impl ScalarSimd {
         let (s, v) = (f64::from(self.scalar[i]), f64::from(self.simd[i]));
         match self.magnitude.get(i) {
             Some(&magnitude) => s == v || (s - v).abs() <= tol * f64::from(magnitude),
-            None => is_close(s, v, tol),
+            // Each element's own size, floored at 1: near zero a relative bound leaves no room.
+            None => s == v || (s - v).abs() <= tol * s.abs().max(v.abs()).max(1.0),
         }
     }
 }

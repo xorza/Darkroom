@@ -1,16 +1,14 @@
 //! Live peak-RSS memory probes for the end-to-end stacking pipeline — the manual, at-scale
 //! counterparts to the deterministic guards in `mem_budget`.
 //!
-//! Two probes, covering the pipeline's two memory regimes on **large synthetic data**:
+//! Two probes cover the pipeline's two memory regimes on **large synthetic data**, and a third
+//! runs the RAW front end on the bundled dataset:
 //!
-//! - [`pipeline_stack_budget_probe`] — the **total-budget** regime. Stacks a large synthetic FITS set
-//!   through the real memory-tiered engine ([`stack`]) repeatedly, once per stage the pipeline runs
-//!   (master dark/flat/bias + the final light combine). One budget is set for the whole run; the
-//!   probe asserts peak heap stays under it **across every stage**, proving each stage's frames free
-//!   before the next loads — so the pipeline respects one total budget regardless of stage count.
-//!   This is the same `CacheCore` tiering that `CalibrationMasters::from_files` and the final combine
-//!   both drive; the file loaders they use are libraw-RAW-only, so this exercises the shared engine
-//!   through the FITS-capable `stack()` instead.
+//! - [`pipeline_budget_probe`] — the **total-budget** regime. Runs the pipeline's own stages on
+//!   synthetic FITS under one budget: the dark and flat masters through [`stack_cfa_master`], then
+//!   the lights through [`calibrate_align_stack`] — calibrate, detect, register, warp, combine. The
+//!   probe asserts peak heap stays under the budget **across every stage**, plus the masters the
+//!   caller holds, proving each stage's frames free before the next loads.
 //!
 //! - [`align_stack_memory_probe`] — the **bounded-working-set** regime. Runs the real
 //!   detect → register → warp → combine flow ([`align_and_stack`]) over a large synthetic star-field
@@ -18,57 +16,73 @@
 //!   warped frames + concurrent detection scratch), with headroom — so a per-frame leak in any stage
 //!   would blow the ceiling.
 //!
-//! Both are `#[ignore]`d: heavy and measurement-only, so run one config per process with a filter,
+//! - [`raw_lights_memory_probe`] (feature `real-data`) — the libraw RAW decode and demosaic that
+//!   synthetic FITS skip: the dataset's lights through [`calibrate_align_stack`] with empty
+//!   masters, so the peak is the decode, align and stack work alone. Under a budget the peak must
+//!   stay within it; the disk tier should stay about flat in the frame count, the RAM tier linear.
+//!
+//! All are `#[ignore]`d: heavy and measurement-only, so run one config per process with a filter,
 //! like the benches. Peak RSS is read from `/proc/self/status` (Linux-only); elsewhere the pipeline
 //! still runs but the numeric assertion is skipped.
 //!
 //! ```sh
-//! cargo test -p lumos --release pipeline_stack_budget_probe -- --ignored --nocapture
-//! cargo test -p lumos --release align_stack_memory_probe    -- --ignored --nocapture
+//! cargo test -p lumos --release pipeline_budget_probe    -- --ignored --nocapture
+//! cargo test -p lumos --release align_stack_memory_probe -- --ignored --nocapture
+//! cargo test -p lumos --release --features real-data raw_lights_memory_probe -- --ignored --nocapture
 //! ```
-//!
-//! What neither covers: the libraw RAW decode + demosaic arena, and the RAW file-based
-//! `from_files` / `calibrate_align_stack` orchestration — those need real RAW data (the real-data
-//! tests are the hook). Everything downstream of the decode is exercised here on synthetic data.
 
 use crate::math::size2us::Size2us;
 use std::env;
+use std::fs;
 use std::hint::black_box;
-use std::io;
-use std::path::PathBuf;
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use common::CancelToken;
 use glam::DVec2;
 
+use crate::io::image::cfa::CfaType;
+use crate::io::image::fits::cfa::save_cfa_fits;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::io::raw::demosaic::DemosaicMemory;
 use crate::memory;
-use crate::memory::{PerFrameBytes, memory_budget};
-use crate::stacking::combine::config::StackConfig;
-use crate::stacking::combine::stack::stack;
+use crate::memory::PerFrameBytes;
+use crate::stacking::calibration_masters::calibration_set::CalibrationSet;
+use crate::stacking::calibration_masters::master_role::MasterRole;
+use crate::stacking::calibration_masters::{
+    CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, stack_cfa_master,
+};
 use crate::stacking::pipeline::align::align_and_stack;
+use crate::stacking::pipeline::calibrate::calibrate_align_stack;
 use crate::stacking::pipeline::config::{AlignStackConfig, Reference};
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::resample::warp;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::stacking::stack_product::quality_planes::QualityPlanes;
+use crate::testing::cfa::make_cfa;
 use crate::testing::mem_probe::{
-    BudgetChoice, MB, RssSampler, budget_ceiling_mb, ensure_frames, env_parse, measured,
-    parse_budget, two_x_ceiling_mb,
+    BudgetChoice, MB, RssSampler, budget_ceiling_mb, env_parse, measured, parse_budget,
+    synth_frame_u16, two_x_ceiling_mb,
 };
-use crate::testing::synthetic::fixtures::star_field;
+use crate::testing::synthetic::camera::Camera;
+use crate::testing::synthetic::fixtures::{
+    STAR_FIELD_FLUX, STAR_FIELD_FWHM, STAR_FIELD_MARGIN, STAR_FIELD_SKY, star_field,
+};
+use crate::testing::synthetic::observe::{Observation, render};
+use crate::testing::synthetic::scene::{BackgroundField, Scene};
 
 #[test]
 #[ignore = "manual live peak-RSS probe; run explicitly with a filter, one config per process"]
-fn pipeline_stack_budget_probe() -> io::Result<()> {
+fn pipeline_budget_probe() -> io::Result<()> {
     let n: usize = env_parse("LUMOS_PIPE_FRAMES", 24);
     let size = Size2us::new(
         env_parse("LUMOS_PIPE_W", 6000),
         env_parse("LUMOS_PIPE_H", 6000),
     );
+    let stars: usize = env_parse("LUMOS_PIPE_STARS", 2000);
     let seed: u64 = env_parse("LUMOS_PIPE_SEED", 1);
     // Default 2048 MB so the default 6000×6000 × 24 set (3.3 GB resident) overflows it → disk tier.
     let budget = parse_budget("LUMOS_PIPE_BUDGET", BudgetChoice::mb(2048));
@@ -77,118 +91,173 @@ fn pipeline_stack_budget_probe() -> io::Result<()> {
         |_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tmp/lumos_pipeline_stack"),
         PathBuf::from,
     );
-    let frames_dir = base.join(format!("{}x{}_n{n}_s{seed}", size.width, size.height));
-
+    let set_name = format!("{}x{}_n{n}_s{seed}", size.width, size.height);
     let frame_bytes = (size.pixel_count() * size_of::<f32>()) as u64;
-    let resident_if_ram = frame_bytes * n as u64;
 
-    // The pipeline's stacking sequence: three calibration masters + the final light combine. The same
-    // synthetic set stands in for each — memory behavior is identical across roles (same engine, same
-    // frame size), and reusing it keeps the on-disk fixture to one set instead of four.
-    let stages = ["master-dark", "master-flat", "master-bias", "light-combine"];
-
-    println!("=== lumos pipeline stacking memory probe (total budget across stages) ===");
+    println!("=== lumos pipeline memory probe (total budget across stages) ===");
     println!(
         "per stage     {n} × {}×{} mono  ({:.1} MB/frame f32)",
         size.width,
         size.height,
         frame_bytes as f64 / MB as f64
     );
-    println!("stages        {} ({})", stages.len(), stages.join(" → "));
+    println!("stages        master-dark → master-flat → lights ({stars} stars each)");
     println!("budget        {}", budget.label);
-    println!(
-        "resident set  {:.2} GB per stage if fully in-memory (Σ frames as f32)",
-        resident_if_ram as f64 / 1e9
-    );
-    if let Some(avail) = budget.memory_override {
-        let usable = memory_budget(avail);
-        let tier = if resident_if_ram <= usable {
-            "in-memory (resident)"
-        } else {
-            "disk (spill + mmap)"
-        };
-        println!("predicted     {tier} per stage");
-    }
     println!();
 
-    let frames = ensure_frames(&frames_dir, "pipe", n, size, seed)?;
-    println!(
-        "frames ready  {} on disk ({:.2} GB){}",
+    // One set stands in for both masters: a dark and a flat of the same pedestal subtract nothing
+    // from each other, as no bias or flat-dark is given, so the flat keeps its vignetting.
+    let calibration = ensure_cfa_frames(&base.join(format!("cal_{set_name}")), n, size, |i| {
+        synth_frame_u16(size, i, seed)
+            .into_iter()
+            .map(|sample| f32::from(sample) / f32::from(u16::MAX))
+            .collect()
+    })?;
+    let scene = Scene::random_field(
+        size,
+        stars,
+        STAR_FIELD_FLUX,
+        BackgroundField::Uniform {
+            level: STAR_FIELD_SKY,
+        },
+        STAR_FIELD_MARGIN,
+        seed,
+    );
+    let camera = Camera::realistic(STAR_FIELD_FWHM);
+    let lights = ensure_cfa_frames(
+        &base.join(format!("lights_{set_name}_{stars}")),
         n,
-        frames.bytes_on_disk as f64 / 1e9,
-        if frames.generated > 0 {
-            format!(
-                ", generated {} in {:.1}s",
-                frames.generated, frames.gen_secs
-            )
-        } else {
-            " (all reused)".into()
-        }
-    );
+        size,
+        |i| {
+            // Deterministic dithers in ~±8 px, small enough that every light overlaps the first,
+            // each with its own noise.
+            let dx = ((i * 37 % 11) as f64 - 5.0) * 1.7;
+            let dy = ((i * 53 % 11) as f64 - 5.0) * 1.7;
+            let observation = Observation {
+                transform: Transform::translation(DVec2::new(dx, dy)),
+                ..Observation::reference(seed.wrapping_add(i as u64))
+            };
+            let frame = render(&scene, &camera, &observation);
+            frame.image.channel(0).pixels().to_vec()
+        },
+    )?;
     println!();
 
-    // One sampler spanning every stage: the peak it reports is the max over the whole sequence, so an
-    // assertion of "peak ≤ budget" is a *total*-budget check — each stage's cache must drop before the
-    // next loads, or K stages would stack to ~K× the budget.
+    // One sampler spanning every stage: the peak it reports is the max over the whole sequence, so
+    // an assertion of "peak ≤ budget" is a *total*-budget check — each stage's cache must drop
+    // before the next loads, or K stages would stack to ~K× the budget.
     let sampler = RssSampler::start();
     let start = Instant::now();
-    for (k, stage) in stages.iter().enumerate() {
-        let mut config = StackConfig::sigma_clipped(3.0);
+    let master = |k: usize, role: MasterRole| {
+        let mut config = role.stack_config();
         config.cache.memory_override = budget.memory_override;
-        // A per-stage cache dir under the (real-disk) base, removed on drop so temp disk doesn't grow
-        // across stages either. Distinct dirs avoid any cross-stage file reuse confusing the tiering.
         config.cache.cache_dir = base.join(format!("cache_{k}"));
-
         let stage_start = Instant::now();
-        let result = stack(
-            &frames.paths,
+        let master = stack_cfa_master(
+            &calibration,
             config,
             ProgressCallback::default(),
             CancelToken::never(),
         )
-        .expect("stack failed");
+        .expect("stack a master");
         println!(
-            "  [{}/{}] {stage:<14} ({:.2}s)",
+            "  [{}/3] master {role:?} ({:.2}s)",
             k + 1,
-            stages.len(),
             stage_start.elapsed().as_secs_f64()
         );
-        black_box(&result);
-    }
+        master
+    };
+    let dark = master(0, MasterRole::Dark);
+    let flat = master(1, MasterRole::Flat);
+    let masters = CalibrationMasters::from_images(
+        CalibrationSet {
+            dark,
+            flat,
+            bias: None,
+            flat_dark: None,
+        },
+        DEFAULT_SIGMA_THRESHOLD,
+        CancelToken::never(),
+    )
+    .expect("assemble the masters");
+
+    let mut config = AlignStackConfig::default();
+    config.stack.cache.memory_override = budget.memory_override;
+    config.stack.cache.cache_dir = base.join("cache_2");
+    let stage_start = Instant::now();
+    let result = calibrate_align_stack(
+        &lights,
+        &masters,
+        &config,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .expect("calibrate_align_stack");
+    println!(
+        "  [3/3] lights ({:.2}s), {} registered, {} dropped",
+        stage_start.elapsed().as_secs_f64(),
+        result.alignment.registered,
+        result.alignment.dropped.len()
+    );
+    black_box(&result);
     let total_secs = start.elapsed().as_secs_f64();
 
     let peak = sampler.finish();
     let anon_mb = peak.anon_mb;
-    let total_stacks = stages.len();
-    let mpix = (size.pixel_count() * n * total_stacks) as f64 / 1e6;
+    let held_mb = masters.ram_bytes() as u64 / MB;
 
     println!("\n=== result ===");
-    println!(
-        "time          {total_secs:.2}s over {total_stacks} stages ({:.0} Mpix/s)",
-        mpix / total_secs.max(1e-3)
-    );
+    println!("time          {total_secs:.2}s over 3 stages");
     println!("peak RssAnon  {anon_mb} MB   (heap — the OOM-relevant figure, across ALL stages)");
     println!(
         "peak VmRSS    {} MB   (total resident, incl. mmap'd spill)",
         peak.total_mb
     );
+    println!("masters held  {held_mb} MB");
 
-    // The budget is a hard heap ceiling for the whole sequence. `budget_ceiling_mb` skips what no
-    // budget can hold (the `disk`/`ram` sentinels, a sub-floor budget) and the off-Linux case.
+    assert_eq!(
+        result.alignment.registered, n,
+        "every dithered light should register (probe misconfigured?)"
+    );
+    // The budget stands for the memory each stage may take. The masters are outside it: the caller
+    // holds them, and in a real run the system's available-memory figure already excludes them.
+    // `budget_ceiling_mb` skips what no budget can hold (the `disk`/`ram` sentinels, a sub-floor
+    // budget) and the off-Linux case.
     if let Some(budget_mb) = budget_ceiling_mb(anon_mb, &budget, frame_bytes) {
+        let ceiling_mb = budget_mb + held_mb;
         assert!(
-            anon_mb <= budget_mb,
-            "peak heap {anon_mb} MB exceeded the {budget_mb} MB budget across {total_stacks} \
-             stages — a stage's memory didn't free before the next, so the pipeline's total \
-             footprint scales with the stage count instead of respecting one budget"
+            anon_mb <= ceiling_mb,
+            "peak heap {anon_mb} MB exceeded the {budget_mb} MB budget plus {held_mb} MB of \
+             masters — a stage's memory didn't free before the next, or a stage overran its budget"
         );
-        println!(
-            "budget check  OK: peak heap {anon_mb} MB ≤ {budget_mb} MB across all {total_stacks} \
-             stages (memory freed between stages)"
-        );
+        println!("budget check  OK: peak heap {anon_mb} MB ≤ {ceiling_mb} MB across all stages");
     }
 
     Ok(())
+}
+
+/// `n` mono-CFA FITS frames of `size` in `dir`, frame `i` holding the samples `frame(i)` gives,
+/// skipping any already present so a re-run reuses the set.
+fn ensure_cfa_frames(
+    dir: &Path,
+    n: usize,
+    size: Size2us,
+    frame: impl Fn(usize) -> Vec<f32>,
+) -> io::Result<Vec<PathBuf>> {
+    fs::create_dir_all(dir)?;
+    let paths: Vec<PathBuf> = (0..n)
+        .map(|i| dir.join(format!("frame_{i:04}.fits")))
+        .collect();
+    for (i, path) in paths.iter().enumerate() {
+        if path.exists() {
+            continue;
+        }
+        let cfa = make_cfa(size, frame(i), CfaType::Mono);
+        save_cfa_fits(path, &cfa)?;
+        print!("\r  generating {}… {}/{n}", dir.display(), i + 1);
+        io::stdout().flush().ok();
+    }
+    Ok(paths)
 }
 
 #[test]
@@ -309,5 +378,65 @@ fn align_stack_memory_probe() {
             "ceiling check OK: peak heap {anon_mb} MB ≤ {ceiling_mb} MB (within the RAM path's \
              working set)"
         );
+    }
+}
+
+#[cfg(feature = "real-data")]
+#[test]
+#[ignore = "manual live peak-RSS probe; run explicitly with a filter, one config per process"]
+fn raw_lights_memory_probe() {
+    use crate::testing::real_data;
+
+    let n: usize = env_parse("LUMOS_RAW_FRAMES", usize::MAX);
+    let budget = parse_budget("LUMOS_RAW_BUDGET", BudgetChoice::mb(4096));
+    let all = real_data::raw_frames("Lights");
+    let lights = &all[..n.min(all.len())];
+
+    println!("=== lumos RAW lights memory probe (decode → calibrate → align → stack) ===");
+    println!("lights        {}", lights.len());
+    println!("budget        {}", budget.label);
+
+    let mut config = AlignStackConfig::default();
+    config.registration.ransac.seed = Some(1);
+    config.stack.cache.memory_override = budget.memory_override;
+    let sampler = RssSampler::start();
+    let start = Instant::now();
+    let result = calibrate_align_stack(
+        lights,
+        &CalibrationMasters::default(),
+        &config,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .expect("calibrate_align_stack");
+    let total_secs = start.elapsed().as_secs_f64();
+    let peak = sampler.finish();
+    let anon_mb = peak.anon_mb;
+
+    let image = &result.product.image;
+    let frame_bytes = (image.dimensions().sample_count() * size_of::<f32>()) as u64;
+    println!(
+        "stacked       {}×{} × {} ch, {} registered, {} dropped, {total_secs:.2}s",
+        image.width(),
+        image.height(),
+        image.channels(),
+        result.alignment.registered,
+        result.alignment.dropped.len()
+    );
+    println!("peak RssAnon  {anon_mb} MB   (heap — the OOM-relevant figure)");
+    println!(
+        "peak VmRSS    {} MB   (total resident, incl. mmap'd spill)",
+        peak.total_mb
+    );
+    black_box(&result);
+
+    assert_eq!(result.alignment.registered, lights.len());
+    if let Some(budget_mb) = budget_ceiling_mb(anon_mb, &budget, frame_bytes) {
+        assert!(
+            anon_mb <= budget_mb,
+            "peak heap {anon_mb} MB exceeded the {budget_mb} MB budget on {} RAW lights",
+            lights.len()
+        );
+        println!("budget check  OK: peak heap {anon_mb} MB ≤ {budget_mb} MB");
     }
 }

@@ -1,11 +1,5 @@
-//! Background generators for synthetic test images.
-//!
-//! Provides various background patterns:
-//! - Uniform
-//! - Linear gradients
-//! - Radial vignette
-//! - Nebula-like structures
-//! - Amplifier glow (corner brightening)
+//! Background generators for synthetic test images: uniform, linear gradient, radial vignette
+//! and nebula-like structure.
 
 use glam::Vec2;
 
@@ -19,14 +13,10 @@ pub(super) fn add_uniform_background(pixels: &mut [f32], level: f32) {
     }
 }
 
-/// Add linear gradient background.
-///
-/// # Arguments
-/// * `pixels` - Mutable pixel buffer
-/// * `width`, `height` - Image dimensions
-/// * `level_start` - Background level at top-left
-/// * `level_end` - Background level at bottom-right
-/// * `angle` - Gradient direction in radians (0 = horizontal left-to-right)
+/// Add a linear gradient along `angle` (radians, 0 = left to right): `level_start` at the pixel
+/// the direction leaves from and `level_end` at the pixel it reaches last — the first and last
+/// columns at angle 0, as [`horizontal_gradient`](crate::testing::synthetic::patterns::horizontal_gradient)
+/// spans them. A frame with no extent along the direction takes the midpoint.
 pub(super) fn add_gradient_background(
     pixels: &mut [f32],
     size: Size2us,
@@ -36,45 +26,54 @@ pub(super) fn add_gradient_background(
 ) {
     let cos_a = angle.cos();
     let sin_a = angle.sin();
-
-    // Project diagonal to get max distance along gradient direction
-    let max_dist = (size.width as f32 * cos_a.abs() + size.height as f32 * sin_a.abs()).max(1.0);
+    let project = |x: f32, y: f32| x * cos_a + y * sin_a;
+    let (last_x, last_y) = ((size.width - 1) as f32, (size.height - 1) as f32);
+    let corners = [
+        project(0.0, 0.0),
+        project(last_x, 0.0),
+        project(0.0, last_y),
+        project(last_x, last_y),
+    ];
+    let first = corners.into_iter().fold(f32::INFINITY, f32::min);
+    let span = corners.into_iter().fold(f32::NEG_INFINITY, f32::max) - first;
 
     for y in 0..size.height {
         for x in 0..size.width {
-            let dist = x as f32 * cos_a + y as f32 * sin_a;
-            let t = (dist / max_dist).clamp(0.0, 1.0);
+            let t = if span > 0.0 {
+                ((project(x as f32, y as f32) - first) / span).clamp(0.0, 1.0)
+            } else {
+                0.5
+            };
             let level = level_start + (level_end - level_start) * t;
             pixels[size.index_of(Vec2us::new(x, y))] += level;
         }
     }
 }
 
-/// Add radial vignette (darker corners).
-///
-/// # Arguments
-/// * `pixels` - Mutable pixel buffer
-/// * `width`, `height` - Image dimensions
-/// * `center_level` - Background level at image center
-/// * `edge_level` - Background level at corners
-/// * `falloff` - Power of radial falloff (1.0 = linear, 2.0 = quadratic)
-pub(super) fn add_vignette_background(
-    pixels: &mut [f32],
-    size: Size2us,
-    center_level: f32,
-    edge_level: f32,
-    falloff: f32,
-) {
-    let center = Vec2::new(size.width as f32 / 2.0, size.height as f32 / 2.0);
-    let max_r = center.length();
+/// A radial vignette: `center` at the image centre, `edge` at the corners, and between them
+/// the radius over the corner radius to the power `falloff` (1 linear, 2 quadratic).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Vignette {
+    pub(crate) center: f32,
+    pub(crate) edge: f32,
+    pub(crate) falloff: f32,
+}
 
+impl Vignette {
+    /// The level at pixel `(x, y)` of a `size` frame.
+    pub(crate) fn at(self, size: Size2us, x: usize, y: usize) -> f32 {
+        let centre = Vec2::new(size.width as f32 / 2.0, size.height as f32 / 2.0);
+        let max_r = centre.length().max(1.0);
+        let t = (Vec2::new(x as f32, y as f32).distance(centre) / max_r).powf(self.falloff);
+        self.center + (self.edge - self.center) * t
+    }
+}
+
+/// Add a radial [`Vignette`].
+pub(super) fn add_vignette_background(pixels: &mut [f32], size: Size2us, vignette: Vignette) {
     for y in 0..size.height {
         for x in 0..size.width {
-            let pixel_pos = Vec2::new(x as f32, y as f32);
-            let r = pixel_pos.distance(center);
-            let t = (r / max_r).powf(falloff);
-            let level = center_level + (edge_level - center_level) * t;
-            pixels[size.index_of(Vec2us::new(x, y))] += level;
+            pixels[size.index_of(Vec2us::new(x, y))] += vignette.at(size, x, y);
         }
     }
 }
@@ -144,46 +143,66 @@ pub(super) fn add_nebula_background(pixels: &mut [f32], size: Size2us, config: &
 
 #[cfg(test)]
 mod tests {
+    use crate::testing::prelude::*;
     use crate::testing::synthetic::backgrounds::*;
+
+    use crate::testing::synthetic::patterns;
+    use std::f32::consts::FRAC_PI_2;
 
     #[test]
     fn uniform_background() {
-        let mut pixels = vec![0.0f32; 64 * 64];
-        add_uniform_background(&mut pixels, 0.1);
-
-        for &p in &pixels {
-            assert!((p - 0.1).abs() < 0.001);
-        }
+        let mut pixels = vec![0.25f32; 64 * 64];
+        add_uniform_background(&mut pixels, 0.5);
+        assert!(pixels.iter().all(|&p| p == 0.75));
     }
 
+    /// At angle 0 the gradient spans the first column to the last, as `horizontal_gradient` does:
+    /// `t = x/63` in both, so the two agree bit for bit and reach both end levels exactly. At a
+    /// right angle it runs down the rows instead, and a one-column-wide angle-0 frame has no
+    /// extent to span, so it takes the midpoint.
     #[test]
-    fn gradient_horizontal() {
-        let width = 64;
-        let height = 64;
-        let mut pixels = vec![0.0f32; width * height];
-
-        add_gradient_background(&mut pixels, Size2us::new(width, height), 0.0, 1.0, 0.0);
-
-        // Left edge should be ~0, right edge should be ~1
-        assert!(pixels[32 * width] < 0.1);
-        assert!(pixels[32 * width + width - 1] > 0.9);
-    }
-
-    #[test]
-    fn vignette_center_brighter() {
-        let width = 64;
-        let height = 64;
-        let mut pixels = vec![0.0f32; width * height];
-
-        add_vignette_background(&mut pixels, Size2us::new(width, height), 0.5, 0.1, 2.0);
-
-        // Center should be brightest
-        let center = pixels[32 * width + 32];
-        let corner = pixels[0];
-
-        assert!(
-            center > corner,
-            "Center {center} should be > corner {corner}"
+    fn gradient_spans_its_end_levels() {
+        let size = Size2us::new(64, 4);
+        let mut pixels = vec![0.0f32; size.pixel_count()];
+        add_gradient_background(&mut pixels, size, 0.0, 1.0, 0.0);
+        assert_eq!(
+            pixels,
+            patterns::horizontal_gradient(size, 0.0, 1.0).into_vec()
         );
+        assert_eq!((pixels[0], pixels[63]), (0.0, 1.0));
+
+        // At π/2 the f32 cosine is −4.371e-8, not 0, so a row's 63 columns tilt it by
+        // 63·4.371e-8 = 2.754e-6, and the projection, the offset, the division and the scale
+        // round once each, half an ulp of 3 (1.2e-7) at most: 3.23e-6 off the row's level `y`.
+        let size = Size2us::new(64, 4);
+        let mut pixels = vec![0.0f32; size.pixel_count()];
+        add_gradient_background(&mut pixels, size, 0.0, 3.0, FRAC_PI_2);
+        for (index, &value) in pixels.iter().enumerate() {
+            assert_close!(value, (index / 64) as f32, 3.23e-6, "pixel {index}");
+        }
+
+        let mut pixels = vec![0.0f32; 4];
+        add_gradient_background(&mut pixels, Size2us::new(1, 4), 0.0, 1.0, 0.0);
+        assert_eq!(pixels, [0.5; 4]);
+    }
+
+    /// (32, 32) is the centre of a 64×64 frame, radius 0, so it reads `center_level` exactly. The
+    /// corner (0, 0) is at the corner radius, `t = 1`, so it reads `0.5 + (0.1 − 0.5)`: two f32
+    /// roundings of at most half an ulp of 0.4 each, ε/4 in all.
+    #[test]
+    fn vignette_reads_its_levels_at_centre_and_corner() {
+        let size = Size2us::new(64, 64);
+        let mut pixels = vec![0.0f32; size.pixel_count()];
+        add_vignette_background(
+            &mut pixels,
+            size,
+            Vignette {
+                center: 0.5,
+                edge: 0.1,
+                falloff: 2.0,
+            },
+        );
+        assert_eq!(pixels[32 * 64 + 32], 0.5);
+        assert_close!(pixels[0], 0.1, f32::EPSILON / 4.0);
     }
 }

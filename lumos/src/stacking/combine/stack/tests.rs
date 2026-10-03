@@ -156,11 +156,10 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
     let (w, h, n) = (40usize, 30usize, 12usize);
     let dims = ImageDimensions::new((w, h), 1);
     let make_frame = |f: usize| -> StackFrame {
-        let mut px = vec![0.0f32; w * h];
-        for (i, p) in px.iter_mut().enumerate() {
-            let hash = (i as u32).wrapping_mul(2_654_435_761) ^ (f as u32).wrapping_mul(40503);
-            *p = 0.2 + (f as f32) * 0.01 + (hash as f32 / u32::MAX as f32 - 0.5) * 0.02;
-        }
+        let mut rng = TestRng::new(f as u64);
+        let mut px: Vec<f32> = (0..w * h)
+            .map(|_| 0.2 + (f as f32) * 0.01 + (rng.next_f32() - 0.5) * 0.02)
+            .collect();
         px[(f * 7) % (w * h)] = 0.95; // an outlier so rejection actually fires
         let image = LinearImage::from_planar_channels(dims, [px]);
         // Every other frame gets a partial coverage map (warped-border emulation).
@@ -1287,12 +1286,9 @@ fn registered_global_normalization_uses_paired_signal_samples() {
 #[test]
 fn registered_noise_weight_applies_half_pixel_confidence_once() {
     let dims = ImageDimensions::new((64, 48), 1);
-    let mut state = 0x1234_5678_u32;
+    let mut rng = TestRng::new(0x1234_5678);
     let pixels = (0..dims.pixel_count())
-        .map(|_| {
-            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-            state as f32 / u32::MAX as f32 - 0.5
-        })
+        .map(|_| rng.next_f32() - 0.5)
         .collect();
     let source = LinearImage::from_pixels(dims, pixels);
     let params = config::internals::warp_params(InterpolationMethod::Bilinear);

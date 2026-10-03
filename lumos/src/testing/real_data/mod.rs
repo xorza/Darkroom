@@ -1,11 +1,8 @@
 //! Shared scaffolding for real-data tests, plus the two that span more than one subsystem.
 //!
 //! Everything here runs against the bundled `test_data/lumos_data` dataset behind the `real-data`
-//! feature. A real-data test that exercises *one* subsystem now lives with that subsystem, in its
-//! `tests/real_data.rs`, so this module is not one subsystem's test directory wearing the name
-//! of shared infrastructure.
-//!
-//! What is left is genuinely shared or genuinely cross-cutting:
+//! feature. A real-data test that exercises *one* subsystem lives with that subsystem, in its
+//! `tests/real_data.rs`. What is here is shared or cross-cutting:
 //!
 //! - [`pipeline_bench`] — full master-darks/flats → calibrate → register → stack benchmark
 //!   (`cargo test -p lumos --release bench_full_pipeline -- --ignored --nocapture`).
@@ -23,7 +20,11 @@ use crate::io::image::load_context::LoadContext;
 use crate::io::raw::load_raw_cfa;
 
 use crate::io::raw::raw_files;
-use crate::{NeutralizeBackground, Scnr, Stretch};
+use crate::stacking::calibration_masters::internals::masters_from_files;
+use crate::{
+    CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, NeutralizeBackground, Scnr,
+    Stretch,
+};
 
 mod milky_way;
 mod pipeline_bench;
@@ -83,6 +84,37 @@ pub(crate) fn display_master() -> LinearImage {
     Stretch::auto_stf().apply(&mut img).unwrap();
     Scnr::average_neutral().apply(&mut img).unwrap();
     img
+}
+
+/// The bundled dataset's calibration frames, one RAW list per role; it has no flat-darks.
+#[derive(Debug)]
+pub(crate) struct CalibrationFrames {
+    pub(crate) darks: Vec<PathBuf>,
+    pub(crate) flats: Vec<PathBuf>,
+    pub(crate) bias: Vec<PathBuf>,
+}
+
+/// The calibration frames of the bundled dataset.
+pub(crate) fn calibration_frames() -> CalibrationFrames {
+    CalibrationFrames {
+        darks: raw_frames("Darks"),
+        flats: raw_frames("Flats"),
+        bias: raw_frames("Bias"),
+    }
+}
+
+/// The bundled dataset's masters: every role stacked under its preset, then assembled.
+pub(crate) fn calibration_masters() -> CalibrationMasters {
+    let frames = calibration_frames();
+    masters_from_files(
+        CalibrationSet {
+            dark: &frames.darks,
+            flat: &frames.flats,
+            bias: &frames.bias,
+            flat_dark: &[],
+        },
+        DEFAULT_SIGMA_THRESHOLD,
+    )
 }
 
 /// Two RAW lights of one field.
