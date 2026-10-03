@@ -46,11 +46,9 @@ fn form_triangles_from_neighbors_too_few_points() {
     assert!(triangles.is_empty());
 }
 
+/// With `k` = 1 each point has one neighbour, and a triangle needs two: none form.
 #[test]
 fn form_triangles_from_neighbors_k1_insufficient() {
-    // With k=1, each point only has 1 neighbor. Need 2 neighbors to form a triangle.
-    // So no triangles should be formed (you need at least 2 neighbors of point i
-    // to pair them into a triangle).
     let points = vec![
         DVec2::new(0.0, 0.0),
         DVec2::new(100.0, 0.0),
@@ -58,44 +56,14 @@ fn form_triangles_from_neighbors_k1_insufficient() {
         DVec2::new(0.0, 100.0),
         DVec2::new(100.0, 100.0),
     ];
-    let tree = KdTree::build(points.clone()).unwrap();
-
-    // k=1: each point gets 1 neighbor. With only 1 neighbor per point,
-    // we need pairs of neighbors, so can't form triangles from just 1 neighbor.
-    // Actually the loop needs at least 2 neighbors (ni and n2 must be different).
-    // But k=1 means k_nearest returns point itself + 1 neighbor = 2 results,
-    // so after filtering self, only 1 neighbor remains. Skip(ni+1) means no n2 → no triangles.
-    let triangles = form_triangles_from_neighbors(&tree, 1);
-    assert!(
-        triangles.is_empty(),
-        "k=1 should produce no triangles, got {}",
-        triangles.len()
-    );
+    let triangles = form_triangles_from_neighbors(&tree(&points), 1);
+    assert!(triangles.is_empty(), "{triangles:?}");
 }
 
-#[test]
-fn form_triangles_from_neighbors_no_duplicates() {
-    let points = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(1.0, 0.0),
-        DVec2::new(2.0, 0.0),
-        DVec2::new(0.0, 1.0),
-        DVec2::new(1.0, 1.0),
-        DVec2::new(2.0, 1.0),
-    ];
-    let tree = KdTree::build(points.clone()).unwrap();
-
-    let triangles = form_triangles_from_neighbors(&tree, 5);
-
-    let mut sorted = triangles.clone();
-    sorted.sort_unstable();
-    sorted.dedup();
-    assert_eq!(sorted.len(), triangles.len(), "Found duplicate triangles");
-}
-
+/// With every point a neighbour of every other, the triangles are all `C(n, 3)` of them, each once:
+/// `C(6, 3)` = 20 distinct sorted index triples.
 #[test]
 fn form_triangles_full_k_equals_brute_force() {
-    // With k = n-1 (all neighbors), should produce C(n,3) = n*(n-1)*(n-2)/6 triangles
     let points = vec![
         DVec2::new(0.0, 0.0),
         DVec2::new(1.0, 0.0),
@@ -106,13 +74,18 @@ fn form_triangles_full_k_equals_brute_force() {
     ];
 
     let n = points.len();
-    // C(6,3) = 6*5*4/6 = 20
-    let brute_force_count = n * (n - 1) * (n - 2) / 6;
-    assert_eq!(brute_force_count, 20);
+    let brute_force_count = 20;
 
-    let tree = KdTree::build(points.clone()).unwrap();
-    let triangles = form_triangles_from_neighbors(&tree, n - 1);
+    let triangles = form_triangles_from_neighbors(&tree(&points), n - 1);
     assert_eq!(triangles.len(), brute_force_count);
+    let mut distinct = triangles.clone();
+    distinct.dedup();
+    assert_eq!(distinct, triangles);
+    assert!(
+        triangles
+            .iter()
+            .all(|t| t[0] < t[1] && t[1] < t[2] && t[2] < n)
+    );
 }
 
 #[test]
@@ -131,20 +104,9 @@ fn form_triangles_kdtree_too_few() {
 
 #[test]
 fn form_triangles_kdtree_single_triangle() {
-    // 3 points forming a 3-4-5 triangle
-    let positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(3.0, 0.0),
-        DVec2::new(0.0, 4.0),
-    ];
-
-    let triangles = triangles_of(&positions, 3);
-
-    // Exactly 1 valid triangle from 3 points
+    let triangles = triangles_of(&THREE_FOUR_FIVE, 3);
     assert_eq!(triangles.len(), 1);
-    // Ratios should be (3/5, 4/5) = (0.6, 0.8)
-    assert!((triangles[0].ratios.0 - 0.6).abs() < 1e-10);
-    assert!((triangles[0].ratios.1 - 0.8).abs() < 1e-10);
+    assert_eq!(triangles[0].ratios, (0.6, 0.8));
 }
 
 #[test]
@@ -163,15 +125,7 @@ fn form_triangles_kdtree_all_collinear() {
 #[test]
 fn form_triangles_kdtree_ratios_in_valid_range() {
     // 5 points forming a non-degenerate pattern
-    let positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
-
-    let triangles = triangles_of(&positions, 4);
+    let triangles = triangles_of(&SQUARE_AND_CENTRE, 4);
 
     // Should form multiple triangles from 5 points
     assert!(triangles.len() >= 4);

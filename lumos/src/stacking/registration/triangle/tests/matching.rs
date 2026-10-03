@@ -30,13 +30,7 @@ fn match_triangles_empty_inputs() {
 #[test]
 fn match_identical_star_lists() {
     // 5 points with asymmetric pattern → each matches itself
-    let positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
+    let positions = SQUARE_AND_CENTRE.to_vec();
 
     let matches = match_points(&positions, &positions, &TriangleConfig::default());
 
@@ -49,13 +43,7 @@ fn match_identical_star_lists() {
 #[test]
 fn match_translated_stars() {
     // Translation preserves triangle ratios → all 5 match
-    let ref_positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
+    let ref_positions = SQUARE_AND_CENTRE.to_vec();
 
     let offset = DVec2::new(100.0, 50.0);
     let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p + offset).collect();
@@ -75,13 +63,7 @@ fn match_translated_stars() {
 #[test]
 fn match_scaled_stars() {
     // Uniform scaling preserves triangle ratios → all 5 match
-    let ref_positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
+    let ref_positions = SQUARE_AND_CENTRE.to_vec();
 
     let target_positions: Vec<DVec2> = ref_positions.iter().map(|p| *p * 2.0).collect();
 
@@ -101,13 +83,7 @@ fn match_scaled_stars() {
 fn match_rotated_stars() {
     // 90-degree rotation: (x,y) → (-y,x). Preserves ratios. Orientation check off
     // for symmetric pattern to avoid ambiguous correspondence.
-    let ref_positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
+    let ref_positions = SQUARE_AND_CENTRE.to_vec();
 
     let target_positions: Vec<DVec2> = ref_positions
         .iter()
@@ -126,13 +102,7 @@ fn match_rotated_stars() {
 #[test]
 fn match_with_missing_stars() {
     // Target has 4 of 5 reference stars → should match exactly 4
-    let ref_positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
+    let ref_positions = SQUARE_AND_CENTRE.to_vec();
 
     let target_positions = vec![
         DVec2::new(0.0, 0.0),
@@ -184,43 +154,29 @@ fn match_with_extra_stars() {
     }
 }
 
+/// A mirror image flips every triangle's orientation. `IRREGULAR` against its mirror: with the
+/// orientation check, no triangle pair agrees and nothing matches; without it each triangle meets
+/// its mirror, every point draws its six votes at itself, and all five match.
 #[test]
-fn match_mirrored_image_orientation_effect() {
-    // Mirror flips orientation. With orientation check on, mirrored should get
-    // fewer matches than with it off.
-    let ref_positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
-
-    let target_positions: Vec<DVec2> = ref_positions
-        .iter()
-        .map(|p| DVec2::new(-p.x, p.y))
-        .collect();
-
-    let config_with = TriangleConfig {
-        check_orientation: true,
-        min_votes: 1,
-        ..Default::default()
-    };
-    let matches_with = match_points(&ref_positions, &target_positions, &config_with);
-
-    let config_without = TriangleConfig {
-        check_orientation: false,
-        min_votes: 1,
-        ..Default::default()
-    };
-    let matches_without = match_points(&ref_positions, &target_positions, &config_without);
-
-    assert!(
-        matches_without.len() >= matches_with.len(),
-        "Orientation check should not increase matches: with={}, without={}",
-        matches_with.len(),
-        matches_without.len()
-    );
+fn the_orientation_check_refuses_a_mirror_image() {
+    let mirrored = IRREGULAR.map(|p| DVec2::new(-p.x, p.y));
+    for (check_orientation, matched) in [(true, 0), (false, 5)] {
+        let config = TriangleConfig {
+            check_orientation,
+            ..Default::default()
+        };
+        let matches = match_points(&IRREGULAR, &mirrored, &config);
+        assert_eq!(
+            matches.len(),
+            matched,
+            "orientation check {check_orientation}"
+        );
+        assert!(
+            matches
+                .iter()
+                .all(|m| m.indices.reference == m.indices.target)
+        );
+    }
 }
 
 #[test]
@@ -300,86 +256,50 @@ fn match_permuted_indices() {
     }
 }
 
+/// The ratio tolerance decides whether two triangles agree. The 3-4-5 triangle has ratios
+/// (0.6, 0.8); a triangle of sides 3, 4.05 and 5 has (0.6, 0.81). Its third vertex sits where
+/// circles of radius 3 about one end of the 5-side and 4.05 about the other meet:
+/// `x = (25 + 9 − 4.05²)/10`, `y = √(9 − x²)`. A tolerance of 0.005 refuses the pair and nothing
+/// matches; 0.02 accepts it and its three vertices match, a vote each.
 #[test]
-fn match_ratio_tolerance_sensitivity() {
-    // Different ratio_tolerance values should produce different match counts.
-    // Tighter tolerance → fewer matches (or same), looser → more (or same).
-    let ref_positions: Vec<DVec2> = (0..25)
-        .map(|i| {
-            let base_x = f64::from(i % 5) * 80.0 + 100.0;
-            let base_y = f64::from(i / 5) * 80.0 + 100.0;
-            // Deterministic jitter to break grid symmetry
-            let jitter_x = (f64::from(i * 13 + 7) * 0.37).sin() * 15.0;
-            let jitter_y = (f64::from(i * 17 + 3) * 0.53).cos() * 15.0;
-            DVec2::new(base_x + jitter_x, base_y + jitter_y)
-        })
-        .collect();
-
-    // Add sub-pixel noise to break exact ratio equality
-    let target_positions: Vec<DVec2> = ref_positions
-        .iter()
-        .enumerate()
-        .map(|(i, p)| {
-            let noise_x = ((i * 7 + 3) as f64 * 0.73).sin() * 0.3;
-            let noise_y = ((i * 11 + 5) as f64 * 0.91).cos() * 0.3;
-            DVec2::new(p.x + noise_x, p.y + noise_y)
-        })
-        .collect();
-
-    let tight = TriangleConfig {
-        ratio_tolerance: 0.001,
-        min_votes: 2,
-        ..Default::default()
-    };
-    let loose = TriangleConfig {
-        ratio_tolerance: 0.1,
-        min_votes: 2,
-        ..Default::default()
-    };
-
-    let matches_tight = match_points(&ref_positions, &target_positions, &tight);
-    let matches_loose = match_points(&ref_positions, &target_positions, &loose);
-
-    // Loose tolerance should find at least as many matches
-    assert!(
-        matches_loose.len() >= matches_tight.len(),
-        "Loose tolerance ({}) should find >= tight tolerance ({}) matches",
-        matches_loose.len(),
-        matches_tight.len()
-    );
+fn the_ratio_tolerance_decides_whether_triangles_agree() {
+    let x = (25.0 + 9.0 - 4.05 * 4.05) / 10.0;
+    let stretched = [
+        DVec2::ZERO,
+        DVec2::new(x, (9.0 - x * x).sqrt()),
+        DVec2::new(5.0, 0.0),
+    ];
+    let reference = [DVec2::ZERO, DVec2::new(0.0, 3.0), DVec2::new(4.0, 0.0)];
+    for (ratio_tolerance, matched) in [(0.005, 0), (0.02, 3)] {
+        let config = TriangleConfig {
+            ratio_tolerance,
+            min_votes: 1,
+            check_orientation: false,
+        };
+        let matches = match_points(&reference, &stretched, &config);
+        assert_eq!(matches.len(), matched, "tolerance {ratio_tolerance}");
+    }
 }
 
+/// `min_votes` is the evidence a pair needs. Four of `IRREGULAR`'s points against themselves form
+/// all four triangles, each point a vertex of three: every point draws exactly three votes, so all
+/// four match at `min_votes` 3 and none at 4.
 #[test]
-fn match_min_votes_sensitivity() {
-    // Higher min_votes should produce fewer (or equal) matches
-    let ref_positions: Vec<DVec2> = (0..20)
-        .map(|i| {
-            let x = f64::from(i % 5) * 50.0;
-            let y = f64::from(i / 5) * 50.0;
-            DVec2::new(x, y)
-        })
-        .collect();
-
-    let target_positions = ref_positions.clone();
-
-    let low_min = TriangleConfig {
-        min_votes: 1,
-        ..Default::default()
-    };
-    let high_min = TriangleConfig {
-        min_votes: 5,
-        ..Default::default()
-    };
-
-    let matches_low = match_points(&ref_positions, &target_positions, &low_min);
-    let matches_high = match_points(&ref_positions, &target_positions, &high_min);
-
-    assert!(
-        matches_low.len() >= matches_high.len(),
-        "min_votes=1 ({}) should find >= min_votes=5 ({}) matches",
-        matches_low.len(),
-        matches_high.len()
-    );
+fn min_votes_is_the_evidence_a_pair_needs() {
+    let four = &IRREGULAR[..4];
+    for (min_votes, matched) in [(3, 4), (4, 0)] {
+        let config = TriangleConfig {
+            min_votes,
+            ..Default::default()
+        };
+        let matches = match_points(four, four, &config);
+        assert_eq!(matches.len(), matched, "min_votes {min_votes}");
+        assert!(
+            matches
+                .iter()
+                .all(|m| m.indices.reference == m.indices.target)
+        );
+    }
 }
 
 #[test]

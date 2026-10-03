@@ -48,9 +48,6 @@ Short paths are relative to `lumos/src/stacking/star_detection/`.
 ### lumos — registration
 Paths are relative to `lumos/src/stacking/registration/`.
 
-- [ ] `triangle/tests/matching.rs:218`, `:344`, `:377` — `>=` comparisons that pass when the parameter is ignored (both runs equal): `check_orientation`, `ratio_tolerance`, `min_votes`. `:304`'s comment even says the counts "should produce different match counts". Use fixtures where the outcomes differ and assert both exact values (A→X, B→Y, X≠Y).
-- [ ] `triangle/tests/voting.rs:112-121` — `vote_matrix_dense_saturating_add` stops at 1000 votes, while the u16 saturation it is named for happens at 65535. Saturation is never reached.
-- [ ] `triangle/tests/geometry.rs:216-243` and `:309-339`, and `triangle/tests/matching.rs:462-500` — the "boundary" tests probe nowhere near the boundary. The side ratio is 10.05 against a limit of 10, and the tolerances 0.3 and 0.5 sit around differences of 0.4 and 0.2. Probe exactly at the limit (ratio 10, tolerance equal to dr) to pin strict versus inclusive.
 
 ### lumos — combine, drizzle
 Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
@@ -353,9 +350,6 @@ Paths are relative to `lumos/src/stacking/registration/`.
   - `transform/tests.rs:123-132` (a 0.01-tolerance version of `:422-433`).
   - `spatial/tests.rs:368-374` (the same as `build_empty`); `:703-768`, `:307-366` (k-nearest cases outside the table that replaced 13 such tests); `:376-517` (8 radius tests that should be one table); `:19-46` and `:519-533` (`get_point` checked three times).
   - `distortion/sip/tests/fitting.rs:244-259` (a length-only test), `:42-92` and `:214-242` (the undistorted fixture twice, both covered by `results.rs` "undistorted") and `:285-335` (the same as `results.rs:284`).
-  - `triangle/tests/formation.rs:77-95` (implied by `:97`).
-  - `triangle/tests/invariant.rs:10-40`, `:77-91` (three tests on one fixture).
-  - The 3-4-5 triangle is rebuilt about 10 times across `geometry.rs` and `invariant.rs`, and the square-plus-centre five points about 12 times across `matching.rs`, `voting.rs`, `formation.rs` and `invariant.rs`.
 
 ### lumos — combine, drizzle
 Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
@@ -470,11 +464,9 @@ Paths are relative to `lumos/src/stacking/registration/`.
   - `real_data_tests.rs:344` ("PR1 validation")
 - [ ] Stream-of-consciousness comments:
   - `distortion/sip/tests/correction.rs:142-148` ("But actually … Let's just verify")
-  - `triangle/tests/formation.rs:62-67` ("Actually the loop needs…")
   - `distortion/sip/tests/fitting.rs:202-205`, where a dead `_max_corr_center` sits beside a comment abandoning it
 - [ ] Wrong comments:
   - `spatial/tests.rs:748` versus `:763`: two different hand sums for the same distance (409258.37 against 409267.37). The first is wrong.
-  - `triangle/tests/geometry.rs:288-292` ("2-1-sqrt(5) triangle", but the sides are 2, 1.005, 1.005).
 
 ### lumos — combine, drizzle
 Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).

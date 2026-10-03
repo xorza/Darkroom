@@ -1,400 +1,163 @@
 use super::*;
 
+/// A triangle's ratios are its shorter sides over its longest, its vertices are ordered by the side
+/// they face — shortest first — and its orientation is the sign of that ordering's turn.
+///
+/// The 3-4-5 triangle's sides are exactly 3, 4 and 5: ratios (0.6, 0.8), correctly rounded. Its
+/// vertex at the origin faces the 5, (3, 0) faces the 4 and (0, 4) the 3, so indices `[a, b, c]`
+/// reorder to `[c, b, a]`; from (0, 4) to (3, 0) to the origin turns clockwise, and the mirror
+/// image turns the other way. Scale and translation change none of it. The equilateral triangle's
+/// sides are 10 to the rounding of its irrational height: ratios 1 to a few ulps.
 #[test]
-fn triangle_from_positions_3_4_5() {
-    // 3-4-5 right triangle:
-    // p0=(0,0), p1=(3,0), p2=(0,4)
-    // d01 = 3, d12 = sqrt(9+16) = 5, d20 = 4
-    // Sorted sides: [3, 4, 5]
-    // ratios = (3/5, 4/5) = (0.6, 0.8)
-    let tri = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(3.0, 0.0),
-            DVec2::new(0.0, 4.0),
-        ],
-    )
-    .unwrap();
+fn triangle_ratios_roles_and_orientation() {
+    let mirrored = THREE_FOUR_FIVE.map(|p| DVec2::new(-p.x, p.y));
+    let moved = THREE_FOUR_FIVE.map(|p| p * 10.0 + DVec2::new(7.0, -2.0));
+    for (positions, ratios, orientation) in [
+        (THREE_FOUR_FIVE, (0.6, 0.8), Orientation::Clockwise),
+        (moved, (0.6, 0.8), Orientation::Clockwise),
+        (mirrored, (0.6, 0.8), Orientation::CounterClockwise),
+    ] {
+        let tri = Triangle::from_positions([10, 20, 30], positions).unwrap();
+        assert_eq!(tri.ratios, ratios, "{positions:?}");
+        assert_eq!(tri.indices, [30, 20, 10], "{positions:?}");
+        assert_eq!(tri.orientation, orientation, "{positions:?}");
+    }
 
-    assert!((tri.ratios.0 - 0.6).abs() < 1e-10);
-    assert!((tri.ratios.1 - 0.8).abs() < 1e-10);
-}
-
-#[test]
-fn triangle_equilateral_ratios() {
-    // Equilateral triangle: all sides equal = 10.0
-    // ratios = (10/10, 10/10) = (1.0, 1.0)
-    let tri = Triangle::from_positions(
+    let equilateral = Triangle::from_positions(
         [0, 1, 2],
         [
             DVec2::new(0.0, 0.0),
             DVec2::new(10.0, 0.0),
-            // height = 10 * sqrt(3)/2 = 8.6602540378...
-            DVec2::new(5.0, 8.660_254_037_844_386),
+            // Height `10·√3/2 = √75`.
+            DVec2::new(5.0, 75.0f64.sqrt()),
         ],
     )
     .unwrap();
+    assert!((equilateral.ratios.0 - 1.0).abs() <= 4.0 * f64::EPSILON);
+    assert!((equilateral.ratios.1 - 1.0).abs() <= 4.0 * f64::EPSILON);
+}
 
+/// Degenerate and unstable shapes are refused. The side-ratio limit is `longest/shortest > 10`:
+/// sides 1, √85 and exactly 10 — the shortest side `(0, 1)`, the longest `(6, 8)` — sit on it and
+/// are kept, while moving the far vertex a ten-millionth further out refuses them.
+#[test]
+fn degenerate_and_elongated_triangles_are_refused() {
+    let p = DVec2::new;
+    for (positions, kept, why) in [
+        ([p(0.0, 0.0), p(1.0, 1.0), p(2.0, 2.0)], false, "collinear"),
+        (
+            [p(0.0, 0.0), p(0.0, 0.0), p(1.0, 1.0)],
+            false,
+            "a repeated point",
+        ),
+        (
+            [p(0.0, 0.0), p(100.0, 0.0), p(50.0, 1e-10)],
+            false,
+            "area² 2.5e-17, under 1e-6",
+        ),
+        (
+            [p(0.0, 0.0), p(100.0, 0.0), p(50.0, 1.0)],
+            true,
+            "thin but sound: area² 2500, side ratio 2",
+        ),
+        (
+            [p(0.0, 0.0), p(100.0, 0.0), p(100.0, 1.0)],
+            false,
+            "side ratio 100",
+        ),
+        (
+            [p(0.0, 0.0), p(0.0, 1.0), p(6.0, 8.0)],
+            true,
+            "side ratio exactly 10",
+        ),
+        (
+            [p(0.0, 0.0), p(0.0, 1.0), p(6.000_000_6, 8.000_000_8)],
+            false,
+            "side ratio 10.000 001",
+        ),
+    ] {
+        assert_eq!(
+            Triangle::from_positions([0, 1, 2], positions).is_some(),
+            kept,
+            "{why}"
+        );
+    }
+}
+
+/// Similarity is `|Δratio| < tolerance` on both ratios, strictly: ratios a dyadic 1/32 apart are
+/// not similar at a tolerance of 1/32 and are at the next float up. Both ratios have to pass.
+#[test]
+fn similarity_is_strict_in_both_ratios() {
+    let tri = |ratios| Triangle {
+        indices: [0, 1, 2],
+        ratios,
+        orientation: Orientation::Clockwise,
+    };
+    let a = tri((0.5, 0.75));
+    let step = 1.0 / 32.0;
+    let b = tri((0.5 + step, 0.75));
+    assert!(!a.is_similar(&b, step));
+    assert!(a.is_similar(&b, step.next_up()));
+    let c = tri((0.5, 0.75 + step));
+    assert!(!a.is_similar(&c, step));
+    assert!(a.is_similar(&c, step.next_up()));
+    let d = tri((0.5 + step / 2.0, 0.75 + step));
     assert!(
-        (tri.ratios.0 - 1.0).abs() < 1e-10,
-        "Expected ratio.0 = 1.0, got {}",
-        tri.ratios.0
-    );
-    assert!(
-        (tri.ratios.1 - 1.0).abs() < 1e-10,
-        "Expected ratio.1 = 1.0, got {}",
-        tri.ratios.1
+        !a.is_similar(&d, step),
+        "the first ratio passes, the second does not"
     );
 }
 
+/// Every order of the same three indexed points gives the same triangle: the side sort breaks ties
+/// by original index.
 #[test]
-fn triangle_ratios_scale_invariant() {
-    // 3-4-5 triangle at scale 1 and scale 10 should have identical ratios = (0.6, 0.8)
-    let tri1 = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(3.0, 0.0),
-            DVec2::new(0.0, 4.0),
-        ],
-    )
-    .unwrap();
-
-    let tri2 = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(30.0, 0.0),
-            DVec2::new(0.0, 40.0),
-        ],
-    )
-    .unwrap();
-
-    assert!((tri1.ratios.0 - tri2.ratios.0).abs() < 1e-10);
-    assert!((tri1.ratios.1 - tri2.ratios.1).abs() < 1e-10);
-    // Both should be exactly the 3-4-5 ratios
-    assert!((tri1.ratios.0 - 0.6).abs() < 1e-10);
-    assert!((tri1.ratios.1 - 0.8).abs() < 1e-10);
-}
-
-#[test]
-fn triangle_orientation_exact() {
-    // 3-4-5 right triangle: p0=(0,0), p1=(3,0), p2=(0,4)
-    // Sorted sides: d01=3 (opp vtx 2), d20=4 (opp vtx 1), d12=5 (opp vtx 0)
-    // Reordered vertices: [2, 1, 0] → positions [p2, p1, p0] = [(0,4), (3,0), (0,0)]
-    // Cross product: rp0=(0,4), rp1=(3,0), rp2=(0,0)
-    // rv01 = (3,0)-(0,4) = (3,-4), rv02 = (0,0)-(0,4) = (0,-4)
-    // cross = 3*(-4) - (-4)*0 = -12 < 0 → Clockwise
-    let tri = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(3.0, 0.0),
-            DVec2::new(0.0, 4.0),
-        ],
-    )
-    .unwrap();
-
-    assert_eq!(tri.orientation, Orientation::Clockwise);
-
-    // Mirror x → p0=(0,0), p1=(-3,0), p2=(0,4)
-    // Sorted sides are the same lengths: d01=3, d12=5, d20=4
-    // Reordered vertices: [2, 1, 0] → positions [p2, p1, p0] = [(0,4), (-3,0), (0,0)]
-    // rv01 = (-3,0)-(0,4) = (-3,-4), rv02 = (0,0)-(0,4) = (0,-4)
-    // cross = (-3)*(-4) - (-4)*0 = 12 > 0 → CounterClockwise
-    let mirrored = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(-3.0, 0.0),
-            DVec2::new(0.0, 4.0),
-        ],
-    )
-    .unwrap();
-
-    assert_eq!(mirrored.orientation, Orientation::CounterClockwise);
-}
-
-#[test]
-fn degenerate_triangle_collinear() {
-    let tri = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(1.0, 1.0),
-            DVec2::new(2.0, 2.0),
-        ],
-    );
-    assert!(tri.is_none());
-}
-
-#[test]
-fn degenerate_triangle_duplicate_point() {
-    let tri = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(0.0, 0.0),
-            DVec2::new(1.0, 1.0),
-        ],
-    );
-    assert!(tri.is_none());
-}
-
-#[test]
-fn triangle_very_flat_rejected() {
-    // Nearly collinear: height = 1e-10 on base = 100
-    // area = 0.5 * 100 * 1e-10 = 5e-9, area^2 = 2.5e-17 < MIN_TRIANGLE_AREA_SQ (1e-6)
-    let tri = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(100.0, 0.0),
-            DVec2::new(50.0, 1e-10),
-        ],
-    );
-    assert!(tri.is_none());
-}
-
-#[test]
-fn triangle_near_collinear_accepted() {
-    // Thin triangle with height=1 on base=100
-    // Sides: d01=100, d02=sqrt(2500+1)~50.01, d12=sqrt(2500+1)~50.01
-    // Sorted: [50.01, 50.01, 100] → ratio ≈ (0.5001, 0.5001)
-    // area = 0.5 * 100 * 1 = 50, area^2 = 2500 > 1e-6 → accepted
-    // side ratio: 100/50.01 ≈ 2.0 < 10 → accepted
-    let tri = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(100.0, 0.0),
-            DVec2::new(50.0, 1.0),
-        ],
-    );
-    assert!(tri.is_some());
-
-    let tri = tri.unwrap();
-    // d01 = 100 (longest), d02 = sqrt(50^2 + 1) ≈ 50.00999, d12 = sqrt(50^2 + 1) ≈ 50.00999
-    // ratios ≈ (50.01/100, 50.01/100) ≈ (0.5001, 0.5001)
-    assert!((tri.ratios.0 - 0.5001).abs() < 0.001);
-    assert!((tri.ratios.1 - 0.5001).abs() < 0.001);
-}
-
-#[test]
-fn triangle_side_ratio_filter_rejects_elongated() {
-    // Very elongated: p0=(0,0), p1=(100,0), p2=(100,1)
-    // d01=100, d12=1, d20=sqrt(10001)≈100.005
-    // longest/shortest = 100.005/1 ≈ 100 >> 10 → rejected
-    let tri = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(100.0, 0.0),
-            DVec2::new(100.0, 1.0),
-        ],
-    );
-    assert!(tri.is_none());
-}
-
-#[test]
-fn triangle_side_ratio_filter_accepts_moderate() {
-    // Moderate: p0=(0,0), p1=(5,0), p2=(5,1)
-    // d01=5, d12=1, d20=sqrt(26)≈5.099
-    // longest/shortest = 5.099/1 ≈ 5.1 < 10 → accepted
-    let tri = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(5.0, 0.0),
-            DVec2::new(5.0, 1.0),
-        ],
-    );
-    assert!(tri.is_some());
-}
-
-#[test]
-fn triangle_side_ratio_filter_boundary() {
-    // At boundary: p0=(0,0), p1=(10,0), p2=(10,1)
-    // d01=10, d12=1, d20=sqrt(101)≈10.05
-    // longest/shortest = 10.05/1 ≈ 10.05 > 10 → rejected
-    let tri_over = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(10.0, 0.0),
-            DVec2::new(10.0, 1.0),
-        ],
-    );
-    assert!(tri_over.is_none());
-
-    // Wider: p0=(0,0), p1=(10,0), p2=(10,2)
-    // d01=10, d12=2, d20=sqrt(104)≈10.198
-    // longest/shortest = 10.198/2 ≈ 5.1 < 10 → accepted
-    let tri_under = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(10.0, 0.0),
-            DVec2::new(10.0, 2.0),
-        ],
-    );
-    assert!(tri_under.is_some());
-}
-
-#[test]
-fn is_similar_identical_triangles() {
-    // 3-4-5 at two scales: ratios both (0.6, 0.8) → difference = (0, 0) < any tolerance
-    let tri1 = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(3.0, 0.0),
-            DVec2::new(0.0, 4.0),
-        ],
-    )
-    .unwrap();
-
-    let tri2 = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(10.0, 10.0),
-            DVec2::new(40.0, 10.0),
-            DVec2::new(10.0, 50.0),
-        ],
-    )
-    .unwrap();
-
-    assert!(tri1.is_similar(&tri2, 0.01));
-    // Even with the tightest tolerance above zero
-    assert!(tri1.is_similar(&tri2, 1e-9));
-}
-
-#[test]
-fn is_similar_different_triangles() {
-    // 1-1-sqrt(2) isoceles right triangle:
-    // d01=1, d12=1, d20=sqrt(2)
-    // ratios = (1/sqrt(2), 1/sqrt(2)) ≈ (0.7071, 0.7071)
-    let tri1 = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(1.0, 0.0),
-            DVec2::new(0.0, 1.0),
-        ],
-    )
-    .unwrap();
-
-    // Very thin triangle (rejected elongated ones filtered out, so use something different)
-    // 2-1-sqrt(5) triangle:
-    // p0=(0,0), p1=(2,0), p2=(1,0.1)
-    // d01=2, d12=sqrt(1+0.01)≈1.005, d20=sqrt(1+0.01)≈1.005
-    // ratios ≈ (1.005/2, 1.005/2) ≈ (0.5025, 0.5025)
-    let tri2 = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(2.0, 0.0),
-            DVec2::new(1.0, 0.1),
-        ],
-    )
-    .unwrap();
-
-    // Ratio difference ≈ |0.7071 - 0.5025| ≈ 0.205 → not similar at 0.01 tolerance
-    assert!(!tri1.is_similar(&tri2, 0.01));
-    // But should match at 0.3 tolerance
-    assert!(tri1.is_similar(&tri2, 0.3));
-}
-
-#[test]
-fn is_similar_with_exact_tolerance_boundary() {
-    // 3-4-5: ratios = (0.6, 0.8)
-    let tri1 = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(3.0, 0.0),
-            DVec2::new(0.0, 4.0),
-        ],
-    )
-    .unwrap();
-
-    // Equilateral: ratios = (1.0, 1.0)
-    let tri2 = Triangle::from_positions(
-        [0, 1, 2],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(10.0, 0.0),
-            DVec2::new(5.0, 8.660_254_037_844_386),
-        ],
-    )
-    .unwrap();
-
-    // dr0 = |0.6 - 1.0| = 0.4, dr1 = |0.8 - 1.0| = 0.2
-    // is_similar requires BOTH dr0 < tol AND dr1 < tol
-    // At tol=0.3, dr0=0.4 >= 0.3 → not similar
-    assert!(!tri1.is_similar(&tri2, 0.3));
-    // At tol=0.5, both dr0=0.4 < 0.5 and dr1=0.2 < 0.5 → similar
-    assert!(tri1.is_similar(&tri2, 0.5));
-}
-
-#[test]
-fn vertex_ordering_by_geometric_role() {
-    // 3-4-5 right triangle with arbitrary indices [10, 20, 30]:
-    // p0=(0,0), p1=(3,0), p2=(0,4)
-    // d01=3 (opp vtx 2=idx30), d12=5 (opp vtx 0=idx10), d20=4 (opp vtx 1=idx20)
-    // Sorted by side length: shortest=3(opp idx30), middle=4(opp idx20), longest=5(opp idx10)
-    // Reordered indices: [30, 20, 10]
-    let tri = Triangle::from_positions(
-        [10, 20, 30],
-        [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(3.0, 0.0),
-            DVec2::new(0.0, 4.0),
-        ],
-    )
-    .unwrap();
-
-    assert_eq!(tri.indices[0], 30); // opposite shortest side (d01=3)
-    assert_eq!(tri.indices[1], 20); // opposite middle side (d20=4)
-    assert_eq!(tri.indices[2], 10); // opposite longest side (d12=5)
-}
-
-#[test]
-fn vertex_ordering_deterministic_across_input_orders() {
-    let p_a = DVec2::new(0.0, 0.0);
-    let p_b = DVec2::new(5.0, 0.0);
-    let p_c = DVec2::new(2.0, 7.0);
-
-    // All 6 permutations of the same 3 points with the same original indices
-    let orders: [(usize, usize, usize); 6] = [
-        (0, 1, 2),
-        (0, 2, 1),
-        (1, 0, 2),
-        (1, 2, 0),
-        (2, 0, 1),
-        (2, 1, 0),
+fn vertex_ordering_is_the_same_for_every_input_order() {
+    let points = [
+        DVec2::new(0.0, 0.0),
+        DVec2::new(5.0, 0.0),
+        DVec2::new(2.0, 7.0),
     ];
-    let pts = [p_a, p_b, p_c];
-    let idx = [100, 200, 300];
+    let indices = [100, 200, 300];
+    let reference = Triangle::from_positions(indices, points).unwrap();
+    for (a, b, c) in [(0, 2, 1), (1, 0, 2), (1, 2, 0), (2, 0, 1), (2, 1, 0)] {
+        let tri = Triangle::from_positions(
+            [indices[a], indices[b], indices[c]],
+            [points[a], points[b], points[c]],
+        )
+        .unwrap();
+        assert_eq!(tri.indices, reference.indices, "({a}, {b}, {c})");
+        assert_eq!(tri.orientation, reference.orientation, "({a}, {b}, {c})");
+        assert_eq!(tri.ratios, reference.ratios, "({a}, {b}, {c})");
+    }
+}
 
-    let reference =
-        Triangle::from_positions([idx[0], idx[1], idx[2]], [pts[0], pts[1], pts[2]]).unwrap();
+/// The invariant tree holds each triangle's ratios as a point at the triangle's own index, and an
+/// empty set has no tree.
+#[test]
+fn the_invariant_tree_indexes_triangles_by_their_ratios() {
+    assert!(build_invariant_tree(&[]).is_none());
+    let triangles = triangles_of(&IRREGULAR, 4);
+    let tree = build_invariant_tree(&triangles).unwrap();
+    assert_eq!(tree.len(), triangles.len());
+    for (i, tri) in triangles.iter().enumerate() {
+        assert_eq!(tree.get_point(i), DVec2::new(tri.ratios.0, tri.ratios.1));
+    }
+}
 
-    for (a, b, c) in orders {
-        let tri =
-            Triangle::from_positions([idx[a], idx[b], idx[c]], [pts[a], pts[b], pts[c]]).unwrap();
-
-        assert_eq!(
-            tri.indices, reference.indices,
-            "Permutation ({a},{b},{c}) produced different indices: {:?} vs {:?}",
-            tri.indices, reference.indices
-        );
-        assert_eq!(
-            tri.orientation, reference.orientation,
-            "Permutation ({a},{b},{c}) produced different orientation"
-        );
-        assert!((tri.ratios.0 - reference.ratios.0).abs() < 1e-10);
-        assert!((tri.ratios.1 - reference.ratios.1).abs() < 1e-10);
+/// The fixture the matching tests rely on: all ten of `IRREGULAR`'s triangles are valid, and no two
+/// are within 0.05 of each other on both ratios — the closest pair is 0.056 apart.
+#[test]
+fn irregular_triangles_are_pairwise_dissimilar() {
+    let triangles = triangles_of(&IRREGULAR, 4);
+    assert_eq!(triangles.len(), 10);
+    for (i, a) in triangles.iter().enumerate() {
+        for b in &triangles[i + 1..] {
+            assert!(
+                !a.is_similar(b, 0.05),
+                "{:?} and {:?}",
+                a.indices,
+                b.indices
+            );
+        }
     }
 }

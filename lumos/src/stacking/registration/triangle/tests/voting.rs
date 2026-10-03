@@ -1,124 +1,70 @@
 use super::*;
-use std::collections::HashMap;
 
+/// A vote matrix is dense below 250 000 cells and sparse from there, and either way it counts each
+/// pair's votes at the pair it was given: `ref·n_target + target` in the dense layout, corners
+/// included.
 #[test]
-fn vote_matrix_dense_mode() {
-    // 10*10 = 100 < 250,000 → dense
-    let mut vm = VoteMatrix::new(10, 10);
-    assert!(matches!(vm, VoteMatrix::Dense { .. }));
-
-    vm.increment(0, 0);
-    vm.increment(0, 0);
-    vm.increment(5, 7);
-
-    let entries: Vec<_> = vm.nonzero_entries();
-    let get = |r, t| entries.iter().find(|e| e.0 == r && e.1 == t).map(|e| e.2);
-    assert_eq!(get(0, 0), Some(2));
-    assert_eq!(get(5, 7), Some(1));
-    assert_eq!(entries.len(), 2);
-}
-
-#[test]
-fn vote_matrix_sparse_mode() {
-    // 600*600 = 360,000 >= 250,000 → sparse
-    let mut vm = VoteMatrix::new(600, 600);
-    assert!(matches!(vm, VoteMatrix::Sparse(_)));
-
-    vm.increment(0, 0);
-    vm.increment(0, 0);
-    vm.increment(100, 200);
-
-    let entries: Vec<_> = vm.nonzero_entries();
-    let get = |r, t| entries.iter().find(|e| e.0 == r && e.1 == t).map(|e| e.2);
-    assert_eq!(get(0, 0), Some(2));
-    assert_eq!(get(100, 200), Some(1));
-    assert_eq!(entries.len(), 2);
-}
-
-#[test]
-fn vote_matrix_empty() {
-    let vm_dense = VoteMatrix::new(5, 5);
-    assert_eq!(vm_dense.nonzero_entries().len(), 0);
-
-    let vm_sparse = VoteMatrix::new(600, 600);
-    assert_eq!(vm_sparse.nonzero_entries().len(), 0);
-}
-
-#[test]
-fn vote_matrix_threshold_boundary() {
-    // size < 250,000 → dense, size >= 250,000 → sparse
-
-    // 499*500 = 249,500 < 250,000 → dense
-    let vm_below = VoteMatrix::new(499, 500);
-    assert!(matches!(vm_below, VoteMatrix::Dense { .. }));
-
-    // 500*500 = 250,000, not < 250,000 → sparse
-    let vm_at = VoteMatrix::new(500, 500);
-    assert!(matches!(vm_at, VoteMatrix::Sparse(_)));
-}
-
-#[test]
-fn vote_matrix_dense_index_mapping() {
-    // Verify that dense mode correctly maps (ref_idx, target_idx) → flat index
-    // Formula: flat_idx = ref_idx * n_target + target_idx
-    let n_ref = 3;
-    let n_target = 4;
-    let mut vm = VoteMatrix::new(n_ref, n_target);
-
-    // Set specific cells with different vote counts to verify index mapping
-    // (0,0) → idx 0, (0,3) → idx 3, (1,2) → idx 6, (2,0) → idx 8, (2,3) → idx 11
-    vm.increment(0, 0); // 1 vote at (0,0)
-    vm.increment(0, 3);
-    vm.increment(0, 3); // 2 votes at (0,3)
-    vm.increment(1, 2);
-    vm.increment(1, 2);
-    vm.increment(1, 2); // 3 votes at (1,2)
-    vm.increment(2, 0); // 1 vote at (2,0)
-    vm.increment(2, 3);
-    vm.increment(2, 3);
-    vm.increment(2, 3);
-    vm.increment(2, 3); // 4 votes at (2,3)
-
-    let entries: Vec<_> = vm.nonzero_entries();
-    let get = |r, t| entries.iter().find(|e| e.0 == r && e.1 == t).map(|e| e.2);
-
-    assert_eq!(get(0, 0), Some(1));
-    assert_eq!(get(0, 3), Some(2));
-    assert_eq!(get(1, 2), Some(3));
-    assert_eq!(get(2, 0), Some(1));
-    assert_eq!(get(2, 3), Some(4));
-    assert_eq!(entries.len(), 5);
-}
-
-#[test]
-fn vote_matrix_dense_boundary_indices() {
-    // Test accessing corners: (0,0), (0,n-1), (n-1,0), (n-1,n-1)
-    let n = 10;
-    let mut vm = VoteMatrix::new(n, n);
-    vm.increment(0, 0);
-    vm.increment(0, n - 1);
-    vm.increment(n - 1, 0);
-    vm.increment(n - 1, n - 1);
-
-    let entries: Vec<_> = vm.nonzero_entries();
-    let get = |r, t| entries.iter().find(|e| e.0 == r && e.1 == t).map(|e| e.2);
-    assert_eq!(get(0, 0), Some(1));
-    assert_eq!(get(0, n - 1), Some(1));
-    assert_eq!(get(n - 1, 0), Some(1));
-    assert_eq!(get(n - 1, n - 1), Some(1));
-    assert_eq!(entries.len(), 4);
-}
-
-#[test]
-fn vote_matrix_dense_saturating_add() {
-    // Dense mode uses u16. Verify exact count for reasonable values.
-    let mut vm = VoteMatrix::new(2, 2);
-    for _ in 0..1000 {
-        vm.increment(0, 0);
+fn vote_matrices_count_each_pair() {
+    for (n_ref, n_target, dense) in [
+        (10, 10, true),
+        (3, 4, true),
+        (499, 500, true),
+        (500, 500, false),
+        (600, 600, false),
+    ] {
+        let mut matrix = VoteMatrix::new(n_ref, n_target);
+        assert_eq!(
+            matches!(matrix, VoteMatrix::Dense { .. }),
+            dense,
+            "{n_ref}×{n_target}"
+        );
+        assert!(matrix.nonzero_entries().is_empty());
+        let entries = [
+            (0, 0, 1),
+            (0, n_target - 1, 2),
+            (n_ref - 1, 0, 3),
+            (n_ref - 1, n_target - 1, 4),
+            (n_ref / 2, n_target / 3, 5),
+        ];
+        for &(r, t, votes) in &entries {
+            for _ in 0..votes {
+                matrix.increment(r, t);
+            }
+        }
+        let mut counted = matrix.nonzero_entries();
+        counted.sort_unstable();
+        let mut expected = entries.to_vec();
+        expected.sort_unstable();
+        assert_eq!(counted, expected, "{n_ref}×{n_target}");
     }
-    let entries: Vec<_> = vm.nonzero_entries();
-    let votes = entries.iter().find(|e| e.0 == 0 && e.1 == 0).unwrap().2;
-    assert_eq!(votes, 1000);
+}
+
+/// A dense cell holds a `u16`: 65 534 votes count exactly, and the next is past what the dense
+/// layout promises to hold — a debug build stops on it. The sparse layout counts in `u32`, past
+/// the dense limit.
+#[test]
+fn a_dense_cell_holds_65_534_votes_and_a_sparse_one_more() {
+    let mut dense = VoteMatrix::new(2, 2);
+    for _ in 0..65_534 {
+        dense.increment(1, 0);
+    }
+    assert_eq!(dense.nonzero_entries(), [(1, 0, 65_534)]);
+
+    let mut sparse = VoteMatrix::new(600, 600);
+    for _ in 0..70_000 {
+        sparse.increment(599, 3);
+    }
+    assert_eq!(sparse.nonzero_entries(), [(599, 3, 70_000)]);
+}
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "Vote overflow")]
+fn the_65_535th_dense_vote_is_refused_in_debug() {
+    let mut dense = VoteMatrix::new(2, 2);
+    for _ in 0..65_535 {
+        dense.increment(0, 0);
+    }
 }
 
 /// Greedy resolution, case by case: the pairs that survive `min_votes` are taken in descending
@@ -172,151 +118,62 @@ fn resolve_matches_claims_each_star_once_by_votes() {
     }
 }
 
+/// Each pair of similar triangles votes for its three vertex pairs. `IRREGULAR` against itself: its
+/// ten triangles are pairwise dissimilar, so each votes only for itself, and point `i` draws one
+/// vote per triangle it is a vertex of — six, `C(4, 2)` — at `(i, i)` and nothing anywhere else.
+/// Mirrored, every triangle turns the other way: with the orientation check no pair votes at all,
+/// and without it the votes are the unmirrored ones.
 #[test]
-fn vote_for_correspondences_identical_triangles() {
-    // Identical point sets → every triangle matches itself → diagonal dominates
-    let positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
-
-    let triangles = triangles_of(&positions, 4);
-    assert!(!triangles.is_empty());
-    let invariant_tree = build_invariant_tree(&triangles).unwrap();
-
-    let config = TriangleConfig::default();
-    let vm = vote_for_correspondences(
-        &triangles,
-        &triangles,
-        &invariant_tree,
-        &config,
-        positions.len(),
-        positions.len(),
-    );
-
-    let votes: HashMap<(usize, usize), usize> = vm
-        .nonzero_entries()
-        .into_iter()
-        .map(|(r, t, v)| ((r, t), v))
-        .collect();
-
-    // Diagonal should dominate: self-votes >= any cross-vote for each point
-    for i in 0..positions.len() {
-        let self_votes = votes.get(&(i, i)).copied().unwrap_or(0);
-        assert!(self_votes > 0, "Point {i} should have self-votes");
-        for j in 0..positions.len() {
-            if i != j {
-                let cross_votes = votes.get(&(i, j)).copied().unwrap_or(0);
-                assert!(
-                    self_votes >= cross_votes,
-                    "Point {i}: self-votes ({self_votes}) < cross-votes to {j} ({cross_votes})"
-                );
-            }
-        }
+fn similar_triangles_vote_for_their_vertices() {
+    let mirrored = IRREGULAR.map(|p| DVec2::new(-p.x, p.y));
+    let reference = triangles_of(&IRREGULAR, 4);
+    let invariant_tree = build_invariant_tree(&reference).unwrap();
+    let diagonal: Vec<(usize, usize, usize)> = (0..5).map(|i| (i, i, 6)).collect();
+    for (target, check_orientation, expected) in [
+        (IRREGULAR, true, diagonal.clone()),
+        (mirrored, false, diagonal),
+        (mirrored, true, Vec::new()),
+    ] {
+        let config = TriangleConfig {
+            check_orientation,
+            ..Default::default()
+        };
+        let votes = vote_for_correspondences(
+            &triangles_of(&target, 4),
+            &reference,
+            &invariant_tree,
+            &config,
+            5,
+            5,
+        );
+        let mut counted = votes.nonzero_entries();
+        counted.sort_unstable();
+        assert_eq!(counted, expected, "orientation check {check_orientation}");
     }
 }
 
+/// A triangle only votes for one within the ratio tolerance: an equilateral one, ratios (1, 1),
+/// against a thin one, ratios (0.5001, 0.5001), at 0.01, draws nothing.
 #[test]
-fn vote_for_correspondences_no_matching_triangles() {
-    // Equilateral-ish triangle vs very thin triangle → no matches at tight tolerance
-    let positions_a = vec![
+fn dissimilar_triangles_do_not_vote() {
+    let equilateral = [
         DVec2::new(0.0, 0.0),
         DVec2::new(10.0, 0.0),
-        DVec2::new(5.0, 8.66), // equilateral, ratios ≈ (1.0, 1.0)
+        DVec2::new(5.0, 75.0f64.sqrt()),
     ];
-
-    let positions_b = vec![
+    let thin = [
         DVec2::new(0.0, 0.0),
         DVec2::new(100.0, 0.0),
-        DVec2::new(50.0, 1.0), // very thin, ratios ≈ (0.5, 0.5)
+        DVec2::new(50.0, 1.0),
     ];
-
-    let tri_a = triangles_of(&positions_a, 3);
-    let tri_b = triangles_of(&positions_b, 3);
-    assert!(!tri_a.is_empty());
-    assert!(!tri_b.is_empty());
-
-    let invariant_tree = build_invariant_tree(&tri_a).unwrap();
-
-    let config = TriangleConfig {
-        ratio_tolerance: 0.01,
-        ..Default::default()
-    };
-
-    let vm = vote_for_correspondences(
-        &tri_b,
-        &tri_a,
-        &invariant_tree,
-        &config,
-        positions_a.len(),
-        positions_b.len(),
+    let reference = triangles_of(&equilateral, 3);
+    let votes = vote_for_correspondences(
+        &triangles_of(&thin, 3),
+        &reference,
+        &build_invariant_tree(&reference).unwrap(),
+        &TriangleConfig::default(),
+        3,
+        3,
     );
-
-    assert_eq!(vm.nonzero_entries().len(), 0);
-}
-
-#[test]
-fn vote_for_correspondences_orientation_filtering() {
-    let positions = vec![
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 0.0),
-        DVec2::new(0.0, 10.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
-
-    // Mirror x to flip all triangle orientations
-    let mirrored: Vec<DVec2> = positions.iter().map(|p| DVec2::new(-p.x, p.y)).collect();
-
-    let ref_triangles = triangles_of(&positions, 4);
-    let target_triangles = triangles_of(&mirrored, 4);
-    let invariant_tree = build_invariant_tree(&ref_triangles).unwrap();
-
-    // With orientation check: mirrored triangles rejected → fewer/no votes
-    let config_with = TriangleConfig {
-        check_orientation: true,
-        ..Default::default()
-    };
-    let vm_with = vote_for_correspondences(
-        &target_triangles,
-        &ref_triangles,
-        &invariant_tree,
-        &config_with,
-        positions.len(),
-        mirrored.len(),
-    );
-
-    // Without orientation check: all matching triangles accepted → more votes
-    let config_without = TriangleConfig {
-        check_orientation: false,
-        ..Default::default()
-    };
-    let vm_without = vote_for_correspondences(
-        &target_triangles,
-        &ref_triangles,
-        &invariant_tree,
-        &config_without,
-        positions.len(),
-        mirrored.len(),
-    );
-
-    let total_with: usize = vm_with
-        .nonzero_entries()
-        .into_iter()
-        .map(|(_, _, v)| v)
-        .sum();
-    let total_without: usize = vm_without
-        .nonzero_entries()
-        .into_iter()
-        .map(|(_, _, v)| v)
-        .sum();
-
-    // With mirroring, orientation check should block matches
-    assert!(
-        total_without > total_with,
-        "Orientation filtering should reduce votes: with={total_with}, without={total_without}"
-    );
+    assert!(votes.nonzero_entries().is_empty());
 }
