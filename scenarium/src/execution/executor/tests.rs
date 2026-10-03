@@ -192,7 +192,7 @@ async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
 #[tokio::test]
 async fn unbound_output_errors_only_when_demanded() {
     let mut prog = ProgramBuilder::default();
-    let silent = async_lambda!(|_| { Ok(()) });
+    let silent = FuncLambda::stub();
     let a = prog
         .node()
         .cache(CacheMode::Ram)
@@ -229,7 +229,7 @@ async fn unbound_output_errors_only_when_demanded() {
         .node()
         .cache(CacheMode::Ram)
         .outputs(1)
-        .lambda(async_lambda!(|_| { Ok(()) }))
+        .lambda(FuncLambda::stub())
         .add();
 
     let mut run = prog.runs().readers([0]);

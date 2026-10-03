@@ -221,11 +221,11 @@ impl CompiledGraph {
 
 #[cfg(any(test, feature = "internals"))]
 pub(crate) mod internals {
-    use crate::async_lambda;
     use crate::containers::column::Span;
     use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionNode};
     use crate::execution::identity::NodeIdx;
     use crate::graph::func::FuncBehavior;
+    use crate::graph::func::lambda::FuncLambda;
     use crate::graph::identity::{FuncId, NodeId};
     use crate::graph::node::CacheMode;
 
@@ -243,7 +243,7 @@ pub(crate) mod internals {
                 outputs: Span::default(),
                 events: Span::default(),
                 func_id: FuncId::nil(),
-                lambda: async_lambda!(|_| { Ok(()) }),
+                lambda: FuncLambda::stub(),
             }
         }
     }

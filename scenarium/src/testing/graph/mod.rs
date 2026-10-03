@@ -14,15 +14,14 @@
 //! [`sample`](TestGraph::sample), where a test can retarget one body without
 //! reaching every other node built from the same shape.
 
-use std::io;
 use std::sync::Arc;
 
 use hashbrown::HashMap;
 
 use crate::async_lambda;
 use crate::graph::detached::DetachedNode;
-use crate::graph::func::error::InvokeError;
 use crate::graph::func::event::EventLambda;
+use crate::graph::func::lambda::internals as lambda;
 use crate::graph::func::lambda::{FuncLambda, Invocation};
 use crate::graph::func::signature::FuncSignature;
 use crate::graph::func::{Func, FuncInput, FuncOutput};
@@ -364,7 +363,7 @@ impl TestGraph {
 
 /// The body both `fails` methods install, so the two cannot drift.
 fn failing_lambda(message: &'static str) -> FuncLambda {
-    async_lambda!(move |_| { Err(InvokeError::external(io::Error::other(message))) })
+    async_lambda!(move |_| { Err(lambda::failure(message)) })
 }
 
 /// One node's declaration under construction — [`Func`]'s builders, plus the
@@ -382,7 +381,7 @@ impl NodeSpec {
         // A stub body by default, because `Library::add` rejects a func with
         // no implementation and most fixtures never invoke one.
         Self {
-            func: Func::new(func_id, name, async_lambda!(|_| { Ok(()) })),
+            func: Func::new(func_id, name, FuncLambda::stub()),
         }
     }
 

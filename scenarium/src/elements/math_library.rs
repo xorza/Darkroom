@@ -373,8 +373,8 @@ fn divide_func() -> Func {
 mod tests {
     use super::*;
     use crate::graph::func::error::InvokeError;
-    use crate::{ConstValue, DynamicValue};
     use crate::testing::func_invoker::FuncInvoker;
+    use crate::{ConstValue, DynamicValue};
 
     async fn invoke(name: &str, values: &[DynamicValue]) -> Result<Vec<DynamicValue>, InvokeError> {
         let library = math_library();

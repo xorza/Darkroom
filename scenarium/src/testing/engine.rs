@@ -361,8 +361,9 @@ pub(crate) struct ReportedRun {
 /// The per-node facts of one finished run, keyed by name.
 #[derive(Debug)]
 pub(crate) struct RunOutcome {
-    /// Names that invoked their lambda, in the order the schedule reached them
-    /// — deps before consumers, which is what makes this readable as the run.
+    /// Names that invoked their lambda and succeeded, in the order the
+    /// schedule reached them — deps before consumers, which is what makes
+    /// this readable as the run.
     ran: Vec<String>,
     /// Every row the run reported, in the program's node order.
     rows: Vec<(String, NodeStatus)>,
@@ -379,8 +380,9 @@ impl RunOutcome {
         let names = NameMap::of(graph);
         Self {
             ran: engine
-                .ran_in_schedule_order()
+                .schedule_order()
                 .into_iter()
+                .filter(|&node_id| outcome.ran(node_id))
                 .map(|node_id| names.name(node_id))
                 .collect(),
             rows: outcome
@@ -531,7 +533,7 @@ impl PlanOutcome {
             .collect();
         Self {
             order: engine
-                .ran_in_schedule_order()
+                .schedule_order()
                 .into_iter()
                 .map(|node_id| names.name(node_id))
                 .collect(),

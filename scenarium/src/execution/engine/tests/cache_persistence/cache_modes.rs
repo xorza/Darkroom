@@ -342,70 +342,8 @@ async fn impure_cone_persist_node_is_not_disk_cached() {
 /// disk instead.
 #[tokio::test]
 async fn missing_codec_skips_disk_cache_instead_of_panicking() {
-    use std::any::Any;
-    use std::fmt;
-
-    use async_trait::async_trait;
-    use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
-
-    use crate::data::codec::error::CodecError;
     use crate::library::TypeEntry;
-    use crate::{CustomValue, CustomValueCodec, TypeId};
-
-    const BLOB_TYPE: TypeId = TypeId::literal("50be7976-6d55-4567-8389-13107b1698ba");
-
-    #[derive(Debug)]
-    struct Blob(Vec<u8>);
-    impl fmt::Display for Blob {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(f, "Blob({} bytes)", self.0.len())
-        }
-    }
-    impl CustomValue for Blob {
-        fn type_id(&self) -> TypeId {
-            BLOB_TYPE
-        }
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
-        fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
-            self
-        }
-    }
-
-    /// Counts its decodes, so the reopened run can show it was served from disk.
-    #[derive(Debug)]
-    struct BlobCodec {
-        decodes: Calls,
-    }
-    #[async_trait]
-    impl CustomValueCodec for BlobCodec {
-        fn version(&self) -> u32 {
-            0
-        }
-
-        async fn encode(
-            &self,
-            value: &dyn CustomValue,
-            writer: &mut (dyn AsyncWrite + Unpin + Send),
-        ) -> result::Result<(), CodecError> {
-            writer
-                .write_all(&value.as_any().downcast_ref::<Blob>().unwrap().0)
-                .await?;
-            Ok(())
-        }
-
-        async fn decode(
-            &self,
-            reader: &mut (dyn AsyncRead + Unpin + Send),
-            byte_len: u64,
-        ) -> result::Result<Arc<dyn CustomValue>, CodecError> {
-            self.decodes.bump();
-            let mut bytes = Vec::with_capacity(usize::try_from(byte_len)?);
-            reader.read_to_end(&mut bytes).await?;
-            Ok(Arc::new(Blob(bytes)))
-        }
-    }
+    use crate::testing::blob::{BLOB_TYPE, Blob, BlobCodec};
 
     // A pure, disk-persisted sink emitting a custom `Blob`. The type's codec
     // is registered only when `with_codec` — and the program takes its codecs
@@ -421,6 +359,7 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
                     "Blob",
                     Arc::new(BlobCodec {
                         decodes: decodes.clone(),
+                        ..BlobCodec::default()
                     }),
                 )
             } else {

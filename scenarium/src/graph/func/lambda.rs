@@ -82,25 +82,23 @@ impl Debug for FuncLambda {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "internals"))]
 pub(crate) mod internals {
-    use std::error;
-    use std::fmt;
+    use std::io;
 
+    use crate::async_lambda;
     use crate::graph::func::error::InvokeError;
+    use crate::graph::func::lambda::FuncLambda;
 
-    #[derive(Debug)]
-    struct TestInvokeError(String);
-
-    impl fmt::Display for TestInvokeError {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str(&self.0)
+    impl FuncLambda {
+        /// A body that does nothing, for a fixture that never runs it.
+        pub(crate) fn stub() -> Self {
+            async_lambda!(|_| { Ok(()) })
         }
     }
 
-    impl error::Error for TestInvokeError {}
-
+    /// A lambda's failure, carrying `message`.
     pub(crate) fn failure(message: impl Into<String>) -> InvokeError {
-        InvokeError::external(TestInvokeError(message.into()))
+        InvokeError::external(io::Error::other(message.into()))
     }
 }

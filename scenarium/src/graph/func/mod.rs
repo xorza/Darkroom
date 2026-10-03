@@ -488,8 +488,8 @@ mod tests {
     use crate::graph::identity::FuncId;
     use std::sync::Arc;
 
-    use crate::async_lambda;
     use crate::graph::func::error::{FuncValidationError, OverrideRule};
+    use crate::graph::func::lambda::FuncLambda;
     use crate::graph::func::{Func, FuncInput, FuncOutput, ValueVariant};
     use crate::graph::node::CacheMode;
     use crate::testing;
@@ -618,8 +618,7 @@ mod tests {
             ),
         ];
         for (inputs, input_idx, target, rule) in override_rows {
-            let func = Func::new(FuncId::unique(), "override", async_lambda!(|_| { Ok(()) }))
-                .inputs(inputs);
+            let func = Func::new(FuncId::unique(), "override", FuncLambda::stub()).inputs(inputs);
             assert_eq!(
                 func.validate(),
                 Err(FuncValidationError::InvalidOverride {
@@ -635,7 +634,7 @@ mod tests {
         // Well-formed declarations: exact kinds, a variant member, Null on an
         // optional input, `Any` accepting any literal, a valid wildcard and a
         // valid override.
-        Func::new(FuncId::unique(), "ok", async_lambda!(|_| { Ok(()) }))
+        Func::new(FuncId::unique(), "ok", FuncLambda::stub())
             .input(FuncInput::optional("int", DataType::Int).default(2i64))
             .input(FuncInput::optional("any", DataType::Any).default("text"))
             .input(FuncInput::optional("unset", DataType::Int).default(ConstValue::Null))

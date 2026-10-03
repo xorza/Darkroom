@@ -1,13 +1,8 @@
-use std::any::Any;
-use std::fmt;
 use std::fs;
 use std::path::Path;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use common::TempFile;
 use common::file_utils::internals::publication_temp_files;
-use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
 use crate::data::codec::Codecs;
 use crate::execution::cache::digest::Digest;
@@ -16,8 +11,9 @@ use crate::execution::cache::disk_store::store_outcome::StoreOutcome;
 use crate::execution::cache::disk_store::{BlobTarget, DiskStore, StorePolicy};
 use crate::execution::cache::slot::OutputSnapshot;
 use crate::graph::func::lambda::OutputDemand;
-use crate::library::{Library, TypeEntry};
-use crate::{CodecError, ConstValue, CustomValue, CustomValueCodec, DynamicValue, TypeId};
+use crate::testing::blob::{BLOB_TYPE, Blob, BlobCodec};
+use crate::testing::calls::Calls;
+use crate::{ConstValue, DynamicValue};
 
 fn target(path: &Path, digest: Digest) -> BlobTarget {
     BlobTarget {
@@ -57,90 +53,14 @@ async fn store_expecting(
     );
 }
 
-const BLOB_TYPE: TypeId = TypeId::literal("78391861-24da-4368-a3a5-2a6b7a47f112");
-
-#[derive(Debug, PartialEq, Eq)]
-struct Blob(Vec<u8>);
-
-impl fmt::Display for Blob {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Blob({} bytes)", self.0.len())
-    }
-}
-
-impl CustomValue for Blob {
-    fn type_id(&self) -> TypeId {
-        BLOB_TYPE
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
-        self
-    }
-}
-
-#[derive(Debug)]
-struct VersionedCodec {
-    version: u32,
-    decode_calls: Arc<AtomicU64>,
-    fail_encode: bool,
-}
-
-#[async_trait::async_trait]
-impl CustomValueCodec for VersionedCodec {
-    fn version(&self) -> u32 {
-        self.version
-    }
-
-    async fn encode(
-        &self,
-        value: &dyn CustomValue,
-        writer: &mut (dyn AsyncWrite + Unpin + Send),
-    ) -> Result<(), CodecError> {
-        let blob = value
-            .as_any()
-            .downcast_ref::<Blob>()
-            .expect("VersionedCodec is only registered for Blob");
-        writer.write_all(&blob.0).await?;
-        if self.fail_encode {
-            return Err("injected encode failure".into());
-        }
-        Ok(())
-    }
-
-    async fn decode(
-        &self,
-        reader: &mut (dyn AsyncRead + Unpin + Send),
-        byte_len: u64,
-    ) -> Result<Arc<dyn CustomValue>, CodecError> {
-        let mut bytes = Vec::with_capacity(usize::try_from(byte_len)?);
-        reader.read_to_end(&mut bytes).await?;
-        self.decode_calls.fetch_add(1, Ordering::SeqCst);
-        Ok(Arc::new(Blob(bytes)))
-    }
-}
-
-fn versioned_library(version: u32, decode_calls: Arc<AtomicU64>, fail_encode: bool) -> Library {
-    let mut library = Library::default();
-    library.register_type(
-        BLOB_TYPE,
-        TypeEntry::custom_with_codec(
-            "Blob",
-            Arc::new(VersionedCodec {
-                version,
-                decode_calls,
-                fail_encode,
-            }),
-        ),
-    );
-    library
-}
-
-fn versioned_codecs(version: u32, decode_calls: Arc<AtomicU64>, fail_encode: bool) -> Codecs {
-    Codecs::clone(versioned_library(version, decode_calls, fail_encode).codecs())
+fn versioned_codecs(version: u32, decodes: Calls, fail_encode: bool) -> Codecs {
+    let codec = BlobCodec {
+        version,
+        decodes,
+        fail_encode,
+        ..BlobCodec::default()
+    };
+    Codecs::clone(codec.library().codecs())
 }
 
 #[tokio::test]
@@ -197,8 +117,8 @@ async fn store_read_header_check_and_digest_replacement_round_trip() {
 #[tokio::test]
 async fn broader_same_digest_blob_is_preserved() {
     let file = TempFile::new("coverage");
-    let decode_calls = Arc::new(AtomicU64::new(0));
-    let codecs = versioned_codecs(1, Arc::clone(&decode_calls), false);
+    let decode_calls = Calls::default();
+    let codecs = versioned_codecs(1, decode_calls.clone(), false);
     let target = target(file.path(), Digest([11; 32]));
     let partial = OutputSnapshot::new(vec![
         DynamicValue::Static(ConstValue::Int(7)),
@@ -247,7 +167,7 @@ async fn broader_same_digest_blob_is_preserved() {
         restored.values()[1].as_custom::<Blob>(),
         Some(&Blob(vec![1, 2, 3]))
     );
-    assert_eq!(decode_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(decode_calls.count(), 1);
 }
 
 #[tokio::test]
@@ -255,8 +175,8 @@ async fn missing_and_changed_codecs_miss_before_decode() {
     let file = TempFile::new("codec-version");
     let target = target(file.path(), Digest([12; 32]));
     let snapshot = OutputSnapshot::new(vec![DynamicValue::from_custom(Blob(vec![9]))]);
-    let old_calls = Arc::new(AtomicU64::new(0));
-    let old_codecs = versioned_codecs(1, Arc::clone(&old_calls), false);
+    let old_calls = Calls::default();
+    let old_codecs = versioned_codecs(1, old_calls.clone(), false);
     store_expecting(
         &old_codecs,
         &target,
@@ -277,11 +197,11 @@ async fn missing_and_changed_codecs_miss_before_decode() {
             .is_none()
     );
 
-    let new_calls = Arc::new(AtomicU64::new(0));
-    let new_codecs = versioned_codecs(2, Arc::clone(&new_calls), false);
+    let new_calls = Calls::default();
+    let new_codecs = versioned_codecs(2, new_calls.clone(), false);
     assert!(!STORE.covers(&target, snapshot.values(), &new_codecs).await);
     assert!(read_snapshot(&new_codecs, &target, 1).await.is_none());
-    assert_eq!(new_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(new_calls.count(), 0);
 
     store_expecting(
         &new_codecs,
@@ -293,8 +213,8 @@ async fn missing_and_changed_codecs_miss_before_decode() {
     .await;
     assert!(!STORE.covers(&target, snapshot.values(), &old_codecs).await);
     assert!(read_snapshot(&new_codecs, &target, 1).await.is_some());
-    assert_eq!(new_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(old_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(new_calls.count(), 1);
+    assert_eq!(old_calls.count(), 0);
 }
 
 /// A type with no codec is reported as unwritten rather than as a failure: the
@@ -328,8 +248,8 @@ async fn unregistered_custom_value_is_reported_unsupported_not_failed() {
 #[tokio::test]
 async fn failed_streaming_encode_preserves_previous_blob() {
     let file = TempFile::new("encode-failure");
-    let calls = Arc::new(AtomicU64::new(0));
-    let good_codecs = versioned_codecs(1, Arc::clone(&calls), false);
+    let calls = Calls::default();
+    let good_codecs = versioned_codecs(1, calls.clone(), false);
     let original_target = target(file.path(), Digest([4; 32]));
     store_expecting(
         &good_codecs,
@@ -341,7 +261,7 @@ async fn failed_streaming_encode_preserves_previous_blob() {
     .await;
     let original = fs::read(file.path()).unwrap();
 
-    let failing_codecs = versioned_codecs(1, Arc::new(AtomicU64::new(0)), true);
+    let failing_codecs = versioned_codecs(1, Calls::default(), true);
     let failed = STORE
         .store(
             &target(file.path(), Digest([5; 32])),

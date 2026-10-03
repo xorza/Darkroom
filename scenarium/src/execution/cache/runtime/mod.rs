@@ -918,6 +918,8 @@ fn is_unset_path(path: &str) -> bool {
 pub(crate) mod internals {
     use common::CancelToken;
 
+    use crate::DynamicValue;
+
     use crate::execution::cache::digest::Digest;
     use crate::execution::cache::disk_store::DiskStore;
     use crate::execution::cache::resource::FsPathId;
@@ -994,6 +996,15 @@ pub(crate) mod internals {
         pub(crate) fn stamp_file(&mut self, path: &str, len: u64, mtime_ns: i128) {
             self.fs_paths
                 .insert(path.to_string(), FsPathId::file(len, mtime_ns));
+        }
+
+        /// Make `values` a hit for `node_idx`: resident under the digest this
+        /// run stamped for it.
+        pub(crate) fn prime_hit(&mut self, node_idx: NodeIdx, values: Vec<DynamicValue>) {
+            let digest = self.slots[node_idx]
+                .current_digest
+                .expect("a primed node is reproducible, so this run stamped it a digest");
+            self.slots[node_idx].load_output(OutputSnapshot::new(values), Some(digest));
         }
 
         /// Plant a whole snapshot under the digest it is to count as produced
