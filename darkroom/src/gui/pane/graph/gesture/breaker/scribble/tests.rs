@@ -48,61 +48,54 @@ fn add_point_skips_short_segments() {
 
 #[test]
 fn add_point_caps_total_length() {
-    // Past MAX_BREAKER_LENGTH the last segment is clamped and
-    // further pushes are no-ops. Hand-computed: starting at 0 and
-    // pushing (3000, 0) has seg = 3000 > remaining = 2000, so t =
-    // 2000/3000 and the appended point lands at exactly
-    // (2000, 0) — the cap.
+    // Past MAX_BREAKER_LENGTH the last segment is clamped and further pushes
+    // are no-ops. From 0, a push to (3000, 0) has seg = 3000 > remaining =
+    // 2000, so t = 2000/3000. That rounds up to 0.66666669 in f32, and
+    // 3000 · t = 2000.00006 is closer to 2000 than to the next f32 (2000.000122),
+    // so the clamped point lands at exactly (2000, 0).
     let mut b = scribble_at(Vec2::ZERO);
     b.add_point(Vec2::new(3000.0, 0.0));
-    assert_eq!(b.points.len(), 2);
-    assert!((b.points[1].x - MAX_BREAKER_LENGTH).abs() < 1e-4);
-    let before = b.points.len();
+    assert_eq!(b.points, [Vec2::ZERO, Vec2::new(MAX_BREAKER_LENGTH, 0.0)]);
+    assert_eq!(b.length, MAX_BREAKER_LENGTH);
     b.add_point(Vec2::new(4000.0, 0.0));
-    assert_eq!(b.points.len(), before, "no append past cap");
+    assert_eq!(b.points.len(), 2, "no append past cap");
 }
 
+/// A polyline crosses a wire only when one of its segments properly crosses
+/// one of the wire's chords.
 #[test]
-fn intersects_cubic_diagonal_through_straight_wire() {
-    // Straight horizontal cubic from (0,0) to (100,0). A breaker
-    // segment crossing it transversely must register. Vertical
-    // breaker at x=50, y from -10 to +10 — proper crossing at
-    // (50, 0), nowhere near a cubic endpoint (which would be a
-    // degenerate "touch at vertex" the strict-crossing test
-    // intentionally rejects).
-    let mut b = scribble_at(Vec2::new(50.0, -10.0));
-    b.add_point(Vec2::new(50.0, 10.0));
-    assert!(b.intersects_cubic(
+fn intersects_cubic_finds_a_proper_crossing() {
+    let straight = [
         Vec2::new(0.0, 0.0),
         Vec2::new(33.0, 0.0),
         Vec2::new(66.0, 0.0),
         Vec2::new(100.0, 0.0),
-    ));
-}
-
-#[test]
-fn intersects_cubic_misses_parallel_polyline() {
-    // Breaker runs parallel to the wire well below it — no crossing.
-    let mut b = scribble_at(Vec2::new(0.0, 50.0));
-    b.add_point(Vec2::new(100.0, 50.0));
-    assert!(!b.intersects_cubic(
-        Vec2::new(0.0, 0.0),
-        Vec2::new(33.0, 0.0),
-        Vec2::new(66.0, 0.0),
-        Vec2::new(100.0, 0.0),
-    ));
-}
-
-#[test]
-fn intersects_cubic_empty_breaker_is_false() {
-    // Single-point breaker (no segments yet) can't intersect.
-    let b = scribble_at(Vec2::ZERO);
-    assert!(!b.intersects_cubic(
-        Vec2::ZERO,
-        Vec2::new(1.0, 0.0),
-        Vec2::new(2.0, 0.0),
-        Vec2::new(3.0, 0.0),
-    ));
+    ];
+    let cases: [(&[Vec2], bool, &str); 3] = [
+        (
+            &[Vec2::new(50.0, -10.0), Vec2::new(50.0, 10.0)],
+            true,
+            "a vertical stroke crosses at (50, 0), clear of any chord's end",
+        ),
+        (
+            &[Vec2::new(0.0, 50.0), Vec2::new(100.0, 50.0)],
+            false,
+            "a parallel stroke 50 below never meets the wire",
+        ),
+        (
+            &[Vec2::new(50.0, 0.0)],
+            false,
+            "a single point has no segment to cross with",
+        ),
+    ];
+    for (points, expected, why) in cases {
+        let mut b = scribble_at(points[0]);
+        for &p in &points[1..] {
+            b.add_point(p);
+        }
+        let [p0, p1, p2, p3] = straight;
+        assert_eq!(b.intersects_cubic(p0, p1, p2, p3), expected, "{why}");
+    }
 }
 
 /// The point of keeping the scribble beside the slot rather than inside it: a

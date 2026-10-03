@@ -44,7 +44,7 @@ fn a_typed_ports_color_varies_by_type_and_hover_but_not_by_column() {
     }
 }
 
-/// Every port lifts through one rule now, so an untyped port rests on its
+/// Every port lifts through one rule, so an untyped port rests on its
 /// positional colour and hovers to the same emphasis a typed one would.
 #[test]
 fn null_falls_back_to_positional_port_color() {

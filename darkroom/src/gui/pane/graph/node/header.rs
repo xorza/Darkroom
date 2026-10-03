@@ -56,6 +56,14 @@ const NODE_NAME_MAX_CHARS: usize = 32;
 /// of header is cheaper than being one glyph short of the common case.
 const RUN_TIME_MIN_WIDTH: f32 = 52.0;
 
+/// The run-time label's style: label-tier mono, in the status colour.
+fn run_time_style(ui: &Ui, theme: &Theme, color: RgbaF32) -> TextStyle {
+    TextStyle {
+        color,
+        ..mono_text(ui, theme.text.label)
+    }
+}
+
 /// The status row's bottom padding: tight, so the row reads as part of the
 /// header block rather than of the port rows below it.
 const STATUS_ROW_PAD_BOTTOM: f32 = 2.0;
@@ -220,10 +228,7 @@ pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
                 }
                 let elapsed = fmt!(ui, "{}", fmt_elapsed(secs));
                 Text::new(elapsed)
-                    .style(&TextStyle {
-                        color,
-                        ..mono_text(ui, theme.text.label)
-                    })
+                    .style(&run_time_style(ui, theme, color))
                     .min_size((RUN_TIME_MIN_WIDTH, 0.0))
                     .show(ui);
             }
@@ -449,6 +454,44 @@ mod tests {
     use crate::gui::app::commands::run::RunCommand;
     use crate::gui::pane::graph::harness::CanvasHarness;
     use crate::gui::pane::graph::node::wid;
+    use crate::gui::theme::Theme;
+    use crate::gui::widgets::format::fmt_elapsed;
+
+    /// Every run time `fmt_elapsed` writes, from each unit's smallest to its
+    /// widest, fits the floor the label reserves — measured with real shaping
+    /// in the label's own style, so neither side can drift alone.
+    #[test]
+    fn every_run_time_fits_the_reserved_width() {
+        use glam::UVec2;
+        use palantir::internals::UiHarness;
+        use palantir::{Configure, RgbaF32, Text, WidgetId};
+
+        use crate::gui::pane::graph::node::header::{RUN_TIME_MIN_WIDTH, run_time_style};
+
+        let secs = [
+            0.0, 999.4e-6, 999.94e-3, 9.994, 99.999, 999.994, 999.996, 9_999.96, 999_999.0,
+        ];
+        let theme = Theme::default();
+        let mut h = UiHarness::with_text(UVec2::new(800, 200));
+        let id = |i: usize| WidgetId::from_hash(("run_time", i));
+        h.frame(|ui| {
+            for (i, &s) in secs.iter().enumerate() {
+                let style = run_time_style(ui, &theme, RgbaF32::WHITE);
+                Text::new(fmt_elapsed(s).to_string())
+                    .id(id(i))
+                    .style(&style)
+                    .show(ui);
+            }
+        });
+        for (i, &s) in secs.iter().enumerate() {
+            let width = h.rect(id(i)).expect("label arranged").size.w;
+            assert!(
+                width <= RUN_TIME_MIN_WIDTH,
+                "{} is {width} px wide, past the {RUN_TIME_MIN_WIDTH} px floor",
+                fmt_elapsed(s),
+            );
+        }
+    }
 
     /// What one click on a chip raised, in the two tiers it can reach.
     #[derive(Debug)]

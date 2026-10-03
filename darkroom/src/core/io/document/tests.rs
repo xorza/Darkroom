@@ -69,9 +69,8 @@ fn document_extension_is_required_case_insensitively() {
 #[test]
 fn save_refuses_an_invalid_document_and_leaves_the_file_alone() {
     // Save validates with the same predicate as load, so a document
-    // the next launch would refuse can never replace the one on disk.
-    // Before this, save only asserted in debug builds — a release
-    // build wrote the bad project happily and failed at reopen.
+    // the next launch would refuse can never replace the one on disk —
+    // in release builds too.
     let dir = TempDir::new("darkroom-document-refused");
     let path = dir.join("refused.darkroom");
     let good = Document::default();

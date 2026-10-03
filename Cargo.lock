@@ -514,6 +514,7 @@ dependencies = [
  "serde",
  "thiserror 2.0.20",
  "tokio",
+ "uuid",
  "windows-sys 0.61.2",
 ]
 
@@ -1455,9 +1456,9 @@ dependencies = [
  "imaginarium",
  "lumos",
  "notify",
- "parking_lot",
  "rand",
  "scenarium",
+ "serde",
  "strum",
  "strum_macros",
  "thiserror 2.0.20",

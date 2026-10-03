@@ -1,6 +1,6 @@
 use glam::Vec2;
 use palantir::{DockOp, Key, Modifiers};
-use scenarium::{FuncId, Node, NodeId, NodeKind, testing};
+use scenarium::NodeId;
 use std::sync::Arc;
 
 use crate::alloc_audit;
@@ -111,34 +111,19 @@ fn a_viewer_opened_by_click_shows_its_image_in_that_same_frame() {
     );
 }
 
-fn func_node() -> Node {
-    let func = testing::stub_func(FuncId::unique(), "probe");
-    Node::from(&func)
-}
-
-fn add(node_id: NodeId) -> GraphIntent {
-    GraphIntent::AddNode {
-        pos: Vec2::ZERO,
-        node_id,
-        node: func_node(),
-        bindings: vec![],
-    }
-}
-
 /// A widget cannot legitimately build a malformed intent — it reads
 /// every identity it emits out of the live document — so one is our own
-/// bug and fails loudly in every build, rather than being reported back
-/// to a caller that no longer exists.
+/// bug and fails loudly in every build: no caller is there to take a
+/// refusal back.
 #[test]
 #[should_panic(expected = "a widget built a malformed intent")]
 fn a_widget_built_malformed_intent_is_a_bug_not_a_refusal() {
     let mut test = SessionHarness::new(DocFixture::default());
-    test.apply(GraphIntent::AddNode {
-        pos: Vec2::ZERO,
-        node_id: NodeId::nil(),
-        node: Node::new(NodeKind::Func(FuncId::unique())),
-        bindings: vec![],
-    });
+    test.apply(GraphIntent::add_node(
+        Vec2::ZERO,
+        NodeId::nil(),
+        DocFixture::stub_node(),
+    ));
 }
 
 /// The exit prompt's signal: content edits flip `dirty`, navigation
@@ -148,7 +133,11 @@ fn dirty_flag_tracks_content_edits_not_navigation() {
     let mut test = SessionHarness::new(DocFixture::default());
     let node_id = NodeId::unique();
 
-    test.apply(add(node_id));
+    test.apply(GraphIntent::add_node(
+        Vec2::ZERO,
+        node_id,
+        DocFixture::stub_node(),
+    ));
     assert!(test.session.open.dirty, "adding a node is savable work");
 
     test.session.open.dirty = false;
@@ -166,7 +155,11 @@ fn dirty_flag_tracks_content_edits_not_navigation() {
 fn dock_ops_apply_without_entering_the_undo_history_or_dirtying() {
     let mut test = SessionHarness::new(DocFixture::default());
     let node_id = NodeId::unique();
-    test.apply(add(node_id));
+    test.apply(GraphIntent::add_node(
+        Vec2::ZERO,
+        node_id,
+        DocFixture::stub_node(),
+    ));
 
     let tab = TabRef::ImageViewer(node_id);
     test.session.open.dirty = false;
@@ -206,9 +199,8 @@ fn dock_ops_apply_without_entering_the_undo_history_or_dirtying() {
 }
 
 /// Two surfaces answering the same frame both reach `App`, in the order
-/// they answered. The single-slot arbitration this replaced kept the
-/// first claim and dropped the rest, so a Ctrl+S that landed on the frame
-/// a run chip was clicked simply did not save.
+/// they answered. A queue that kept only the first claim would drop a
+/// Ctrl+S that landed on the frame a run chip was clicked.
 #[test]
 fn a_chord_and_a_click_on_one_frame_both_reach_the_app() {
     let mut test = SessionHarness::new(DocFixture::probes(1));

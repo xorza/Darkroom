@@ -6,10 +6,9 @@ use crate::core::document::{Document, Viewport};
 use crate::core::edit::step::change::{Change, Direction};
 use crate::core::edit::step::reversible::Reversible;
 
-/// 1e-4 is the threshold below which two pan/scale samples are considered the
-/// same camera — it keeps idle pan/zoom from polluting the undo stack with
-/// sub-pixel deltas.
-const VIEWPORT_EPS: f32 = 1e-4;
+/// The distance below which two pan/zoom samples are the same camera — it
+/// keeps idle pan/zoom from polluting the undo stack with sub-pixel deltas.
+pub(super) const VIEWPORT_EPS: f32 = 1e-4;
 
 /// The graph camera, before and after.
 #[derive(Debug, Serialize, Deserialize)]

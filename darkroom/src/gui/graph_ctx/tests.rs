@@ -9,9 +9,9 @@ use crate::core::document::harness::DocFixture;
 use crate::core::document::{PortKind, PortRef};
 use crate::gui::graph_ctx::harness::GraphCtxFixture;
 
-/// Composing a context no longer asks whether anyone is looking — the
-/// document, the library and the run resolve either way — so visibility rides
-/// along as a field for the one pass that runs before the tab set settles.
+/// Composing a context does not ask whether anyone is looking — the document,
+/// the library and the run resolve either way — so visibility rides along as a
+/// field for the one pass that runs before the tab set settles.
 ///
 /// It tracks the *active tab*, never the graph's contents, and the two come
 /// apart in both directions: an empty graph on a Graph tab is a real pane (a
@@ -99,7 +99,7 @@ fn a_missing_func_reads_as_a_deletable_stub() {
 
     // The resolved node, by contrast, exposes its real ports.
     assert!(
-        known_node.inputs().len() > 0,
+        known_node.inputs().len() == 2,
         "the resolved func still reports its interface"
     );
 

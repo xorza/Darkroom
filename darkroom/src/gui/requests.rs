@@ -117,7 +117,7 @@ mod tests {
     /// leaves the app tier untouched — which is what lets the editor drain
     /// three times a frame while `App` still gets every command, in order,
     /// once the pass is over. Pinned here because the routing lives in the
-    /// push methods now: a tier pushed to the wrong queue would surface as a
+    /// push methods: a tier pushed to the wrong queue would surface as a
     /// command vanishing mid-pass rather than as a type error.
     #[test]
     fn each_level_drains_its_own_tier_and_leaves_the_rest_queued() {
