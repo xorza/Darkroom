@@ -313,10 +313,10 @@ async fn same_path_uses_one_identity_until_the_next_run() {
     cache
         .prepare(program, schedule.executing(), CancelToken::never())
         .await;
-    cache.stamp_digest(program, first.node_idx);
+    cache.stamp_digest(program, &schedule.states, first.node_idx);
 
     fs::write(&file, b"longer").unwrap();
-    cache.stamp_digest(program, second.node_idx);
+    cache.stamp_digest(program, &schedule.states, second.node_idx);
     assert_eq!(
         cache[first.node_idx].current_digest, cache[second.node_idx].current_digest,
         "both consumers fold the run's one coherent resource identity"
@@ -326,7 +326,7 @@ async fn same_path_uses_one_identity_until_the_next_run() {
     cache
         .prepare(program, schedule.executing(), CancelToken::never())
         .await;
-    cache.stamp_digest(program, first.node_idx);
+    cache.stamp_digest(program, &schedule.states, first.node_idx);
     assert_ne!(
         cache[first.node_idx].current_digest, first_run,
         "the next run refreshes resource identity"

@@ -130,7 +130,7 @@ impl<'a> Runs<'a> {
             cache,
             ..
         } = &mut self;
-        cache.stamp_digests(&owner.program, schedule.executing());
+        cache.stamp_digests(&owner.program, &schedule.states, schedule.executing());
         let digest = cache[node.node_idx]
             .current_digest
             .expect("a cached fixture node is reproducible, so it has a digest");

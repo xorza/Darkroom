@@ -437,7 +437,14 @@ impl ExecutionFrame<'_, '_> {
         let cancel = self.ctx.cancel.clone();
         let hydrated = self
             .cache
-            .restamp_and_hydrate(program, node_idx, demand, &mut self.ctx.contexts, cancel)
+            .restamp_and_hydrate(
+                program,
+                &self.schedule.states,
+                node_idx,
+                demand,
+                &mut self.ctx.contexts,
+                cancel,
+            )
             .await;
         match hydrated {
             // The run is being torn down, so there is nothing to start here:

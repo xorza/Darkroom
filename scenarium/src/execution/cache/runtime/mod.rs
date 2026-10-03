@@ -36,6 +36,7 @@ use crate::execution::cache::slot::RuntimeSlot;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::compile::consumer_cone::ConsumerCone;
 use crate::execution::identity::{NodeIdx, OutputAddr};
+use crate::execution::schedule::NodeState;
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::identity::NodeId;
@@ -338,20 +339,26 @@ impl RuntimeCache {
     pub(crate) fn stamp_digests(
         &mut self,
         program: &CompiledGraph,
+        states: &Column<NodeIdx, NodeState>,
         executing: impl IntoIterator<Item = NodeIdx>,
     ) {
         for node_idx in executing {
-            self.stamp_digest(program, node_idx);
+            self.stamp_digest(program, states, node_idx);
         }
     }
 
     /// Stamp one node's structural content digest into its slot. The resolver's
     /// pass calls this before exact output demand is known; cache coverage is
     /// probed later by [`probe_reuse`](Self::probe_reuse).
-    pub(crate) fn stamp_digest(&mut self, program: &CompiledGraph, node_idx: NodeIdx) {
+    pub(crate) fn stamp_digest(
+        &mut self,
+        program: &CompiledGraph,
+        states: &Column<NodeIdx, NodeState>,
+        node_idx: NodeIdx,
+    ) {
         // Folded whole before the write, so the fold's read of the slots ends
         // before the slot it stamps is borrowed mutably.
-        let digest = self.node_digest(program, node_idx);
+        let digest = self.node_digest(program, states, node_idx);
         self.slots[node_idx].current_digest = digest;
     }
 
@@ -364,7 +371,9 @@ impl RuntimeCache {
     /// - An **`Impure`** node has no digest (`None`) — it varies per run, so it never caches and
     ///   always recomputes; a `Bind` producer with a `None` digest taints this node to `None`.
     /// - Otherwise fold every input structurally: a `Const`'s value + prepared `FsPath`
-    ///   file/dir content, or a `Bind` producer's stamped `current_digest` — plus, for a
+    ///   file/dir content, or a `Bind` producer's stamped `current_digest` — unless `states`
+    ///   says the producer does not run this run, when the input folds as unbound, which is
+    ///   what the executor hands the node there — plus, for a
     ///   resource-typed input, the live identity of the referent behind the *delivered* value
     ///   ([`hash_bound_fs_path`](Self::hash_bound_fs_path)). That last fold needs the producer's
     ///   value: unreadable ⇒ `None`, and the run loop re-stamps such a node at reach time, once
@@ -375,7 +384,12 @@ impl RuntimeCache {
     /// external identity. The third — the node's own identity and inputs — is the program's, so
     /// that arrives as an argument. The *encoding* stays in `digest`, beside the [`DOMAIN`]
     /// versioning it.
-    pub(crate) fn node_digest(&self, program: &CompiledGraph, node_idx: NodeIdx) -> Option<Digest> {
+    pub(crate) fn node_digest(
+        &self,
+        program: &CompiledGraph,
+        states: &Column<NodeIdx, NodeState>,
+        node_idx: NodeIdx,
+    ) -> Option<Digest> {
         let e_node = &program[node_idx];
 
         // Only a `Pure` node is content-cacheable; an `Impure` node varies per run, so it has no
@@ -398,6 +412,12 @@ impl RuntimeCache {
         for input in &program.inputs[e_node.inputs] {
             match &input.binding {
                 ExecutionBinding::None => {
+                    hasher.write_input_tag(InputTag::Unbound);
+                }
+                // The executor delivers unbound for a producer the run skips (see its
+                // `producer_runs`), so the key is the unbound one: folding the producer's stamp
+                // would key this node on the last run the producer took part in.
+                ExecutionBinding::Bind(addr) if !states[addr.node_idx].is_runnable() => {
                     hasher.write_input_tag(InputTag::Unbound);
                 }
                 ExecutionBinding::Const(value) => {
@@ -600,13 +620,14 @@ impl RuntimeCache {
     pub(crate) async fn restamp_and_hydrate(
         &mut self,
         program: &CompiledGraph,
+        states: &Column<NodeIdx, NodeState>,
         node_idx: NodeIdx,
         demand: &[OutputDemand],
         contexts: &mut ContextStore,
         cancel: CancelToken,
     ) -> Result<ReuseOutcome, StampError> {
         self.identify(program, iter::once(node_idx), cancel).await?;
-        self.stamp_digest(program, node_idx);
+        self.stamp_digest(program, states, node_idx);
         Ok(self
             .hydrate_reuse(program, node_idx, demand, contexts)
             .await)

@@ -82,7 +82,7 @@ impl<'a> Sweep<'a> {
 
         let mut cache = RuntimeCache::default();
         cache.install_for_test(program);
-        cache.stamp_digests(program, schedule.executing());
+        cache.stamp_digests(program, &schedule.states, schedule.executing());
         for (node, values) in cached {
             let digest = cache[node.node_idx]
                 .current_digest

@@ -547,7 +547,7 @@ impl RunSchedule {
     pub(crate) async fn resolve(&mut self, program: &CompiledGraph, cache: &mut RuntimeCache) {
         // The cache holds no program of its own, so every question below names
         // the one `program` this schedule was planned against.
-        cache.stamp_digests(program, self.executing());
+        cache.stamp_digests(program, &self.states, self.executing());
         // The sweep *accumulates* demand and readers, so it starts from zero of
         // its own accord rather than trusting whoever opened the schedule.
         self.outputs.reset(program.outputs.len());

@@ -1,10 +1,13 @@
 use super::*;
 use common::TempFile;
 
+use crate::containers::column::Column;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::OutputSnapshot;
+use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::compile::compiled_graph::ExecutionBinding;
 use crate::execution::identity::{NodeIdx, OutputAddr};
+use crate::execution::schedule::NodeState;
 use crate::graph::identity::FuncId;
 use crate::testing::program::node_builder::NodeBuilder;
 use crate::testing::program::{Placed, ProgramBuilder};
@@ -16,6 +19,13 @@ use std::fs;
 /// signature folds into the digest, and one case below pins the resulting bytes.
 fn pure(prog: &mut ProgramBuilder, func: u128, count: usize) -> NodeBuilder<'_> {
     typed(prog, func, &vec![DataType::Int; count])
+}
+
+/// Every node of `program` running this run, so every bound producer's stamp folds.
+fn running(program: &CompiledGraph) -> Column<NodeIdx, NodeState> {
+    let mut states = Column::default();
+    states.reset(program.e_nodes.len(), NodeState::Run);
+    states
 }
 
 /// [`pure`] with explicit output types, for the signature-folding cases.
@@ -40,7 +50,7 @@ impl Digests {
         for idx in 0..program.e_nodes.len() {
             let node_idx = NodeIdx(idx as u32);
             cache.prepare_node_blocking(program, node_idx);
-            cache.stamp_digest(program, node_idx);
+            cache.stamp_digest(program, &running(program), node_idx);
         }
         Self(cache)
     }
@@ -264,7 +274,9 @@ fn fs_path_folds_file_identity_and_path() {
         .prepare_nodes_blocking(batched, [blank_node.node_idx, real_node.node_idx])
         .expect("an unset path is not a walk failure");
     assert!(
-        cache.node_digest(batched, real_node.node_idx).is_some(),
+        cache
+            .node_digest(batched, &running(batched), real_node.node_idx)
+            .is_some(),
         "a named path still stamps when batched beside an unset one"
     );
     fs::remove_file(file).unwrap();
@@ -278,7 +290,7 @@ fn fs_path_folds_file_identity_and_path() {
         let mut cache = RuntimeCache::default();
         cache.install_for_test(p.program());
         cache.stamp_file(path, 4, 7);
-        cache.node_digest(p.program(), node.node_idx)
+        cache.node_digest(p.program(), &running(p.program()), node.node_idx)
     };
     let here = "definitely-missing-elsewhere";
     let there = "definitely-missing-somewhere";
@@ -332,7 +344,9 @@ fn bound_fs_path_folds_delivered_file_identity() {
         let program = p.program();
         let mut cache = RuntimeCache::default();
         cache.install_for_test(program);
-        let stamped = cache.node_digest(program, producer.node_idx).unwrap();
+        let stamped = cache
+            .node_digest(program, &running(program), producer.node_idx)
+            .unwrap();
         cache[producer.node_idx].current_digest = Some(stamped);
         if let Some(value) = value {
             cache.hydrate(producer.node_idx, OutputSnapshot::new(vec![value]), stamped);
@@ -340,8 +354,8 @@ fn bound_fs_path_folds_delivered_file_identity() {
         cache.prepare_node_blocking(program, declared.node_idx);
         cache.prepare_node_blocking(program, control.node_idx);
         DigestPair {
-            typed: cache.node_digest(program, declared.node_idx),
-            plain: cache.node_digest(program, control.node_idx),
+            typed: cache.node_digest(program, &running(program), declared.node_idx),
+            plain: cache.node_digest(program, &running(program), control.node_idx),
         }
     };
     let fs_path = || Some(DynamicValue::Static(ConstValue::FsPath(path.clone())));
@@ -449,7 +463,9 @@ fn bound_fs_path_folds_delivered_file_identity() {
     let program = p.program();
     let mut cache = RuntimeCache::default();
     cache.install_for_test(program);
-    let stamped = cache.node_digest(program, producer.node_idx).unwrap();
+    let stamped = cache
+        .node_digest(program, &running(program), producer.node_idx)
+        .unwrap();
     cache[producer.node_idx].current_digest = Some(stamped);
     cache.hydrate(
         producer.node_idx,
@@ -459,7 +475,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
     cache[producer.node_idx].current_digest = Some(Digest([9; 32]));
     cache.prepare_node_blocking(program, declared.node_idx);
     assert_eq!(
-        cache.node_digest(program, declared.node_idx),
+        cache.node_digest(program, &running(program), declared.node_idx),
         None,
         "a path value produced under an old producer digest is unreadable"
     );
@@ -690,4 +706,36 @@ fn digest_hasher_encodes_deterministically_and_without_collisions() {
         }),
         "write_digest folds the digest's raw bytes"
     );
+}
+
+/// A bound input whose producer does not run this run folds as unbound, which is what the
+/// executor delivers there: the consumer keys exactly as its unbound twin does. With the producer
+/// running, it folds the producer's stamp instead.
+#[test]
+fn a_skipped_producer_folds_its_consumer_as_unbound() {
+    let mut p = ProgramBuilder::default();
+    let producer = pure(&mut p, 10, 1).add();
+    let bound = pure(&mut p, 20, 1).input(producer.out(0)).add();
+    let unbound = pure(&mut p, 20, 1).input(ExecutionBinding::None).add();
+    let program = p.program();
+    let mut cache = RuntimeCache::default();
+    cache.install_for_test(program);
+
+    let mut states = running(program);
+    cache.stamp_digest(program, &states, producer.node_idx);
+    let digest = |cache: &RuntimeCache, states: &Column<NodeIdx, NodeState>, node: Placed| {
+        cache.node_digest(program, states, node.node_idx)
+    };
+    assert_ne!(
+        digest(&cache, &states, bound),
+        digest(&cache, &states, unbound)
+    );
+    for skipped in [NodeState::Disabled, NodeState::MissingInputs] {
+        states[producer.node_idx] = skipped;
+        assert_eq!(
+            digest(&cache, &states, bound),
+            digest(&cache, &states, unbound),
+            "{skipped:?}"
+        );
+    }
 }

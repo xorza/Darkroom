@@ -16,7 +16,7 @@ use crate::runtime::context::ContextStore;
 use crate::{ConstValue, DynamicValue, TypeId};
 
 const MAGIC: &[u8; 8] = b"SCENBLOB";
-const FORMAT_VERSION: u32 = 9;
+const FORMAT_VERSION: u32 = 10;
 const FIXED_LEN: usize = 8 + 4 + 32 + 4 + 8;
 const DESCRIPTOR_LEN: usize = 1 + 3 + 16 + 4 + 8;
 const BODY_LEN_OFFSET: u64 = (8 + 4 + 32 + 4) as u64;
