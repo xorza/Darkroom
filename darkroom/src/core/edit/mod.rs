@@ -14,7 +14,10 @@
 //!   - [`action_stack`] — the packed undo history those steps are stored in.
 
 pub(crate) mod action_stack;
+pub(crate) mod document_queue;
+pub(crate) mod document_request;
 pub(crate) mod error;
 pub(crate) mod graph_intent;
+pub(crate) mod relayout;
 pub(crate) mod step;
 mod validate;

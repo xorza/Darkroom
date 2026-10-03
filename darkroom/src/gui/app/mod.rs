@@ -11,6 +11,7 @@ use scenarium::NodeId;
 
 use crate::core::document::open_document::OpenDocument;
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::edit::relayout::Relayout;
 use crate::core::io::preferences::{Preferences, WindowState};
 use crate::core::runtime_host::RuntimeHost;
 use crate::core::status::StatusLog;
@@ -22,7 +23,6 @@ use crate::gui::app::ctx::{AppCtx, StatusInputs};
 use crate::gui::app::discard_dialog::{DiscardChoice, DiscardOutcome};
 use crate::gui::dialogs;
 use crate::gui::pane::graph::node::port_row::PathPick;
-use crate::gui::relayout::Relayout;
 use crate::gui::requests::Requests;
 use crate::gui::state::process_memory::ProcessMemory;
 use crate::gui::state::run_state::RunState;

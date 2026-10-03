@@ -27,6 +27,7 @@ use palantir::prelude::*;
 
 use crate::core::document::Document;
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::edit::relayout::Relayout;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::background::CanvasBackground;
 use crate::gui::pane::graph::canvas::{inner_canvas_widget_id, outer_canvas_widget_id};
@@ -46,7 +47,6 @@ use crate::gui::pane::graph::gesture::{connection, pan_zoom, shortcuts, subscrip
 use crate::gui::pane::graph::node::{NodeDrawOutcome, NodeUI};
 use crate::gui::pane::graph::paint::inspector::Inspectors;
 use crate::gui::pane::graph::paint::wire::{WireEmphasis, WirePass};
-use crate::gui::relayout::Relayout;
 use crate::gui::requests::Requests;
 
 /// Canvas-level UI state, shared by **every** graph pane on screen: the

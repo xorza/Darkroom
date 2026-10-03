@@ -10,11 +10,11 @@ use palantir::{DockOp, DockView, KeyFilter, TabOverflow};
 use scenarium::{NodeId, OutputTypes};
 
 use crate::core::document::{Document, TabRef};
+use crate::core::edit::relayout::Relayout;
 use crate::core::io::preferences::Preferences;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::GraphUI;
 use crate::gui::pane::viewer::ImageViewer;
-use crate::gui::relayout::Relayout;
 use crate::gui::requests::Requests;
 use crate::gui::window::ctx::WindowCtx;
 use crate::gui::window::dock_panes::DockPanes;

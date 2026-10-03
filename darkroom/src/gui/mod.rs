@@ -2,7 +2,6 @@ pub(crate) mod app;
 pub(crate) mod dialogs;
 pub(crate) mod graph_ctx;
 pub(crate) mod pane;
-pub(crate) mod relayout;
 pub(crate) mod requests;
 pub(crate) mod state;
 pub(crate) mod theme;

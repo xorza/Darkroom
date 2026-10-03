@@ -15,14 +15,15 @@ use std::path::{Path, PathBuf};
 use crate::core::document::Document;
 use crate::core::document::open_document::replay_outcome::ReplayOutcome;
 use crate::core::edit::action_stack::ActionStack;
+use crate::core::edit::document_queue::DocumentQueue;
+use crate::core::edit::document_request::DocumentRequest;
 use crate::core::edit::error::MalformedIntent;
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::edit::relayout::Relayout;
 use crate::core::edit::step::undo_step::UndoStep;
 use crate::core::io::document::{self, DocumentLoadError, DocumentSaveError};
 use crate::core::io::preferences::Preferences;
 use crate::core::status::StatusLog;
-use crate::gui::relayout::Relayout;
-use crate::gui::requests::{DocumentRequest, Requests};
 use scenarium::Library;
 
 /// Byte budget for the undo history's packed buffer (~1 MiB). Bounds
@@ -111,12 +112,12 @@ impl OpenDocument {
     /// on screen, and an edit applied outside a frame (a dialog result) has no
     /// business acting on it.
     #[must_use]
-    pub(crate) fn drain_requests(&mut self, requests: &mut Requests) -> Relayout {
+    pub(crate) fn drain_requests(&mut self, requests: &mut DocumentQueue) -> Relayout {
         // Usually nothing is queued, and the commit is what allocates.
         let relayout = if requests.is_empty() {
             Relayout::NotNeeded
         } else {
-            self.commit(requests.drain_document())
+            self.commit(requests.drain())
                 .expect("a widget built a malformed intent")
         };
         // A tab whose node is gone can't stay open. Cheap when nothing died —

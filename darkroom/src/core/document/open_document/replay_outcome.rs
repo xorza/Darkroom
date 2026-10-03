@@ -1,6 +1,6 @@
 //! What one undo/redo replay did.
 
-use crate::gui::relayout::Relayout;
+use crate::core::edit::relayout::Relayout;
 
 /// What one undo/redo replay did.
 ///
