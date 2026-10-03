@@ -1,7 +1,17 @@
+#![cfg_attr(
+    feature = "wgpu",
+    expect(
+        clippy::print_stdout,
+        reason = "an example reports what it did on stdout"
+    )
+)]
+
 mod common;
 
-use common::*;
-use imaginarium::*;
+use common::{ensure_output_dir, load_lena_rgba_u8, print_image_info, save_image};
+use imaginarium::ContrastBrightness;
+#[cfg(feature = "wgpu")]
+use imaginarium::Image;
 
 fn main() {
     ensure_output_dir();
@@ -22,20 +32,18 @@ fn main() {
 /// separate bindings, so the op needs a distinct output image.
 #[cfg(feature = "wgpu")]
 fn on_gpu(input: &Image) {
+    use imaginarium::{Gpu, GpuContext, GpuContrastBrightnessPipeline, GpuImage};
+
     let Ok(gpu) = Gpu::new() else {
         println!("no GPU available, skipping the GPU example");
         return;
     };
     let mut context = GpuContext::new(gpu.clone());
-    let pipeline = context
-        .get_or_create(GpuContrastBrightnessPipeline::new)
-        .unwrap();
+    let pipeline = context.get_or_create(GpuContrastBrightnessPipeline::new);
 
-    let uploaded = GpuImage::from_image(&gpu, input);
-    let mut rendered = GpuImage::new_empty(&gpu, input.desc());
-    ContrastBrightness::new(1.5, 0.1)
-        .apply_gpu(&gpu, pipeline, &uploaded, &mut rendered)
-        .unwrap();
+    let uploaded = GpuImage::from_image(&gpu, input).expect("upload");
+    let mut rendered = GpuImage::new_empty(&gpu, input.desc()).expect("allocate");
+    ContrastBrightness::new(1.5, 0.1).apply_gpu(&gpu, pipeline, &uploaded, &mut rendered);
 
     save_image(
         &rendered.to_image(&gpu).unwrap(),

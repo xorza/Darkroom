@@ -12,6 +12,10 @@ shims.
   No SIMD path lands without both.
 - **9 formats, always.** New ops and shaders handle the full format set, or
   declare a narrower supported list. Half-covering the matrix is a bug.
+- **One rounding rule.** Every narrowing into an integer sample rounds to
+  nearest with ties to even and saturates (`common::sample::Sample`); SIMD
+  kernels and WGSL (`gpu/packed.wgsl`) follow it, and every GPU test compares
+  with the CPU result.
 
 ## Verification
 

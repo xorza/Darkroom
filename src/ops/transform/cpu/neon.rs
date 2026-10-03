@@ -6,7 +6,8 @@
 //!
 //! Every step matches the scalar reference bit-for-bit: widening is exact for
 //! `0..=255` / `0..=65535`, the blend uses plain muls + adds (no FMA), the clamp
-//! is `vmax`/`vmin`, and the float→int convert truncates toward zero like `as`.
+//! is `vmax`/`vmin`, and the float→int convert rounds to nearest with ties to even
+//! like `round_ties_even`.
 //! The `neon_matches_scalar` test asserts exact equality.
 
 use std::arch::aarch64::*;
@@ -14,12 +15,14 @@ use std::arch::aarch64::*;
 use glam::Vec2;
 use rayon::prelude::*;
 
-use super::{Transform, TransformElem};
+use crate::common::sample::Sample;
 use crate::image::Image;
+use crate::ops::transform::Transform;
+use crate::ops::transform::cpu::pixel_index;
 
 /// A packed (RGB/RGBA) element type that loads/stores one pixel's `N` channels
 /// as the low `N` lanes of an `f32x4`.
-pub(super) trait NeonPacked: TransformElem {
+pub(super) trait NeonPacked: Sample {
     /// Loads the `N` channels at element index `base` into the low `N` lanes
     /// (higher lanes are zero).
     ///
@@ -42,11 +45,11 @@ impl NeonPacked for u8 {
             // Pack the channels into the low bytes of a u32; for N==3 read the 3
             // bytes individually to avoid a 4-byte over-read past the last pixel.
             let packed: u32 = match N {
-                4 => (p as *const u32).read_unaligned(),
-                3 => *p as u32 | ((*p.add(1) as u32) << 8) | ((*p.add(2) as u32) << 16),
+                4 => p.cast::<u32>().read_unaligned(),
+                3 => u32::from(*p) | (u32::from(*p.add(1)) << 8) | (u32::from(*p.add(2)) << 16),
                 _ => unreachable!(),
             };
-            let bytes = vcreate_u8(packed as u64);
+            let bytes = vcreate_u8(u64::from(packed));
             vcvtq_f32_u32(vmovl_u16(vget_low_u16(vmovl_u8(bytes))))
         }
     }
@@ -60,7 +63,7 @@ impl NeonPacked for u8 {
                     let n16 = vmovn_u32(u);
                     let u8x = vmovn_u16(vcombine_u16(n16, n16));
                     let packed = vget_lane_u32::<0>(vreinterpret_u32_u8(u8x));
-                    (p as *mut u32).write_unaligned(packed);
+                    p.cast::<u32>().write_unaligned(packed);
                 }
                 3 => {
                     *p = vgetq_lane_u32::<0>(u) as u8;
@@ -118,7 +121,7 @@ impl NeonPacked for f32 {
     }
     #[inline]
     unsafe fn store<const N: usize>(out: &mut [f32], base: usize, v: float32x4_t) {
-        // Unclamped, matching the scalar f32 `from_f32`.
+        // Unclamped, matching the scalar `f32::from_f32`.
         unsafe {
             let p = out.as_mut_ptr().add(base);
             match N {
@@ -134,10 +137,11 @@ impl NeonPacked for f32 {
     }
 }
 
-/// Clamps `v` to `[0, max]` and truncates toward zero — matches `from_f32`.
+/// Clamps `v` to `[0, max]` and rounds to nearest with ties to even — matches
+/// [`Sample::from_f32`], NaN to zero included.
 #[inline]
 fn clamp_to_u32(v: float32x4_t, max: f32) -> uint32x4_t {
-    unsafe { vcvtq_u32_f32(vminq_f32(vmaxq_f32(v, vdupq_n_f32(0.0)), vdupq_n_f32(max))) }
+    unsafe { vcvtnq_u32_f32(vminq_f32(vmaxq_f32(v, vdupq_n_f32(0.0)), vdupq_n_f32(max))) }
 }
 
 /// `a*(1-t) + b*t` per lane with a broadcast scalar `t` — two muls + add (no
@@ -155,10 +159,11 @@ fn read_tap<T: NeonPacked, const N: usize>(
     x: i32,
     y: i32,
 ) -> float32x4_t {
-    if x < 0 || y < 0 || x >= w as i32 || y >= h as i32 {
+    let Some(pixel) = pixel_index(w, h, x, y) else {
+        // SAFETY: NEON is baseline on aarch64.
         return unsafe { vdupq_n_f32(0.0) };
-    }
-    let base = (y as usize * w + x as usize) * N;
+    };
+    let base = pixel * N;
     // SAFETY: the bounds check above guarantees `base + N <= pixels.len()`.
     unsafe { T::load::<N>(pixels, base) }
 }
@@ -179,7 +184,7 @@ pub(super) unsafe fn apply_packed<T: NeonPacked, const N: usize>(
     let out_stride = output.desc().row_bytes();
 
     let in_pixels: &[T] = bytemuck::cast_slice(input.bytes());
-    let inv = transform.transform.inverse();
+    let inv = transform.inverse();
 
     output
         .bytes_mut()

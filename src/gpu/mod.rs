@@ -1,6 +1,7 @@
+pub(crate) mod compute_kernel;
 pub(crate) mod context;
 pub(crate) mod gpu_image;
-mod slot;
+pub(crate) mod packed_layout;
 
 use std::sync::Arc;
 
@@ -15,6 +16,11 @@ pub struct Gpu {
 
 impl Gpu {
     /// Creates a new GPU context, initializing wgpu with default settings.
+    ///
+    /// The device gets wgpu's downlevel limits, which every adapter wgpu supports
+    /// meets, raised to the adapter's own buffer limits: an astrophotography frame
+    /// (24 MP of `RGBA_F32` is 384 MB) needs every byte of buffer the adapter allows,
+    /// and asking for more than it has would fail the device outright.
     pub fn new() -> Result<Self> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all().with_env(),
@@ -29,12 +35,11 @@ impl Gpu {
         }))
         .map_err(|e| Error::Gpu(format!("failed to find suitable GPU adapter: {e}")))?;
 
-        // Request higher limits for large image processing (astrophotography images can be 24+ megapixels)
-        // Support up to 1GB buffers
+        let supported = adapter.limits();
         let limits = wgpu::Limits {
-            max_buffer_size: 1024 * 1024 * 1024,
-            max_storage_buffer_binding_size: 1024 * 1024 * 1024,
-            ..Default::default()
+            max_buffer_size: supported.max_buffer_size,
+            max_storage_buffer_binding_size: supported.max_storage_buffer_binding_size,
+            ..wgpu::Limits::downlevel_defaults()
         };
 
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
@@ -50,39 +55,36 @@ impl Gpu {
     }
 
     /// Polls the device, blocking until all pending operations complete.
-    fn wait(&self) {
+    pub(crate) fn wait(&self) {
         self.device
             .poll(wgpu::PollType::wait_indefinitely())
-            .unwrap();
+            .expect("polling the device");
     }
 
-    /// Polls the device asynchronously until all pending operations complete.
-    pub async fn wait_async(&self) {
-        loop {
-            if self
-                .device
-                .poll(wgpu::PollType::Poll)
-                .unwrap()
-                .is_queue_empty()
-            {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
+    /// The largest buffer this device binds as storage — the largest image it can process.
+    pub(crate) fn max_buffer_bytes(&self) -> u64 {
+        let limits = self.device.limits();
+        limits
+            .max_buffer_size
+            .min(limits.max_storage_buffer_binding_size)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::common::internals::gpu::test_gpu;
 
+    /// A device exists when the host has a GPU, and it binds at least wgpu's downlevel
+    /// 128 MiB storage buffer.
     #[test]
-    fn test_gpu_context_creation() {
-        let result = Gpu::new();
-        if let Err(e) = &result {
-            eprintln!("GPU context creation failed (expected on headless systems): {e}");
+    fn a_device_binds_large_buffers() {
+        let Some(gpu) = test_gpu() else {
             return;
-        }
-        let _ctx = result.unwrap();
+        };
+        assert!(
+            gpu.max_buffer_bytes() >= 128 << 20,
+            "{}",
+            gpu.max_buffer_bytes()
+        );
     }
 }

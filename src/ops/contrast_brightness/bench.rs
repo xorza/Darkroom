@@ -62,7 +62,7 @@ pub fn bench(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(3));
 
     for frame in FRAMES {
-        for &format in ALL_FORMATS {
+        for format in ALL_FORMATS {
             // Criterion turns ids into report paths, so keep them space-free.
             let label = format!("{format}_{}", frame.label).replace(' ', "_");
 

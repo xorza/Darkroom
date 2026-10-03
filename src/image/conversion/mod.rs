@@ -2,81 +2,50 @@
 //! type `u8`/`u16`/`f32` and/or channel count L/RGB/RGBA), e.g. `RGB_U8` →
 //! `RGBA_F32`. [`convert_image`] is the single entry point: it processes rows in
 //! parallel through a SIMD kernel when one exists for the pair ([`simd`]), else
-//! the scalar reference ([`scalar`]). Layout is preserved (interleaved →
-//! interleaved); changing *layout* is the separate
-//! [`transpose`](crate::image::transpose).
+//! the scalar reference ([`scalar`]).
 
-pub(super) mod scalar;
-mod simd;
-
-// Rec. 709 (sRGB) luminance weights scaled to fixed-point for integer math
-// R: 0.2126 * 65536 = 13933
-// G: 0.7152 * 65536 = 46871
-// B: 0.0722 * 65536 = 4732
-// Total: 65536 (allows shift by 16 instead of divide)
-const LUMA_R: u32 = 13933;
-const LUMA_G: u32 = 46871;
-const LUMA_B: u32 = 4732;
-
-#[cfg(feature = "bench")]
-pub(crate) mod bench;
-#[cfg(test)]
-mod tests;
+pub(crate) mod scalar;
+pub(crate) mod simd;
 
 use rayon::prelude::*;
 
 use crate::image::Image;
 
-use scalar::{ConversionInfo, dispatch_convert_row_scalar};
-
 /// Convert `from` into `to`'s format, using SIMD acceleration when available.
-/// `from` and `to` must share dimensions; every format pair is handled (SIMD
-/// fast paths fall back to the scalar reference), so this is infallible.
-pub(super) fn convert_image(from: &Image, to: &mut Image) {
+///
+/// # Panics
+/// Unless the two images share dimensions and differ in format — an equal format is a copy,
+/// which the caller makes.
+pub(crate) fn convert_image(from: &Image, to: &mut Image) {
+    let (from_desc, to_desc) = (from.desc(), to.desc());
     assert_eq!(
-        from.desc().width,
-        to.desc().width,
-        "source/target width mismatch"
+        (from_desc.width, from_desc.height),
+        (to_desc.width, to_desc.height),
+        "source/target dimensions mismatch"
     );
-    assert_eq!(
-        from.desc().height,
-        to.desc().height,
-        "source/target height mismatch"
+    assert_ne!(
+        from_desc.color_format, to_desc.color_format,
+        "a conversion to the same format is a copy"
     );
 
-    let from_fmt = from.desc().color_format;
-    let to_fmt = to.desc().color_format;
-
-    // Same format - nothing to do
-    if from_fmt == to_fmt {
-        return;
-    }
-
-    let width = from.desc().width;
-    let from_stride = from.desc().row_bytes();
-    let to_stride = to.desc().row_bytes();
-
+    let width = from_desc.width;
+    let from_stride = from_desc.row_bytes();
+    let to_stride = to_desc.row_bytes();
     let from_bytes = from.bytes();
-    let to_bytes = to.bytes_mut();
+    let rows = to.bytes_mut().par_chunks_mut(to_stride).enumerate();
 
-    if let Some(convert_row) = simd::row_converter(from_fmt, to_fmt) {
-        to_bytes
-            .par_chunks_mut(to_stride)
-            .enumerate()
-            .for_each(|(y, to_row)| {
-                let from_row = &from_bytes[y * from_stride..];
-                // SAFETY: `row_converter` verified this CPU has the kernel's feature.
-                unsafe { convert_row(from_row, to_row, width) };
-            });
+    if let Some(kernel) = simd::row_converter(from_desc.color_format, to_desc.color_format) {
+        rows.for_each(|(y, to_row)| {
+            // SAFETY: `row_converter` verified this CPU has the kernel's feature.
+            unsafe { kernel(&from_bytes[y * from_stride..], to_row, width) };
+        });
     } else {
-        let info = ConversionInfo::new(from_fmt, to_fmt);
-
-        to_bytes
-            .par_chunks_mut(to_stride)
-            .enumerate()
-            .for_each(|(y, to_row)| {
-                let from_row = &from_bytes[y * from_stride..];
-                dispatch_convert_row_scalar(from_row, to_row, width, &info);
-            });
+        let convert_row = scalar::row_converter(from_desc.color_format, to_desc.color_format);
+        rows.for_each(|(y, to_row)| convert_row(&from_bytes[y * from_stride..], to_row, width));
     }
 }
+
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
+#[cfg(test)]
+mod tests;

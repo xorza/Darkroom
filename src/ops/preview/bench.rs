@@ -6,14 +6,15 @@ use std::time::Duration;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use super::Preview;
 use crate::common::color_format::ALL_FORMATS;
 use crate::common::internals::create_test_image;
+use crate::ops::preview::Preview;
 
 const SRC_W: usize = 6144;
 const SRC_H: usize = 4096;
 const PREVIEW_MAX: usize = 256;
 
+#[expect(clippy::cast_sign_loss, reason = "a positive box size, rounded")]
 pub fn bench(c: &mut Criterion) {
     // Fit the source into a 256px box, preserving aspect (≈ 256×171).
     let scale = PREVIEW_MAX as f32 / SRC_W.max(SRC_H) as f32;
@@ -26,7 +27,7 @@ pub fn bench(c: &mut Criterion) {
     group.warm_up_time(Duration::from_secs(1));
     group.measurement_time(Duration::from_secs(3));
 
-    for &format in ALL_FORMATS {
+    for format in ALL_FORMATS {
         let src = create_test_image(format, SRC_W, SRC_H, 0);
         // Criterion turns ids into report paths, so keep them space-free.
         let label = format.to_string().replace(' ', "_");

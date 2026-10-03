@@ -1,19 +1,12 @@
-#[cfg(target_arch = "aarch64")]
-use super::neon_kernel;
-use super::{ChannelAffine, RowKernel, apply_kernel};
-#[cfg(target_arch = "x86_64")]
-use super::{avx2_kernel, sse41_kernel};
-use crate::common::color_format::{
-    ALL_FORMATS, ALPHA_FORMATS, ChannelSize, ChannelType, ColorFormat,
-};
+use super::{apply_kernel, row_kernel};
+use crate::common::color_format::{ALL_FORMATS, ColorFormat, SampleType};
 use crate::common::image_diff::{max_pixel_diff, pixels_equal};
-use crate::common::internals::{create_test_image, load_lena_rgba_u8_61x38};
-use crate::image::{Image, ImageDesc};
+use crate::common::internals::create_test_image;
+use crate::image::Image;
+use crate::image::image_desc::ImageDesc;
+use crate::ops::contrast_brightness::channel_affine::ChannelAffine;
 use crate::ops::contrast_brightness::{ContrastBrightness, cpu};
-
-fn pixels_changed(img1: &Image, img2: &Image) -> bool {
-    !pixels_equal(img1, img2)
-}
+use crate::simd_tier::SimdTier;
 
 /// Builds a single-row image from raw channel bytes.
 fn image_from_channels(format: ColorFormat, width: usize, bytes: Vec<u8>) -> Image {
@@ -106,6 +99,36 @@ fn contrast_two_maps_hand_computed_values_f32() {
     assert_eq!(image.bytes(), bytemuck::cast_slice::<f32, u8>(&want));
 }
 
+/// Brightness alone adds `brightness · max`, exactly where nothing saturates: at 0.2 that is
+/// `0.2 · 255 = 51` for `u8` (100 → 151), `0.2 · 65535 = 13107` for `u16` (1000 → 14107),
+/// and `0.2` itself for `f32` (0.25 → 0.25 + 0.2, rounded once in f32).
+#[test]
+fn brightness_adds_its_share_of_the_full_scale() {
+    let params = ContrastBrightness::new(1.0, 0.2);
+    let mut image = image_from_channels(ColorFormat::L_U8, 1, vec![100]);
+    params.apply_cpu(&mut image);
+    assert_eq!(image.bytes(), &[151]);
+
+    let mut image = image_from_channels(
+        ColorFormat::L_U16,
+        1,
+        bytemuck::cast_slice(&[1000u16]).to_vec(),
+    );
+    params.apply_cpu(&mut image);
+    assert_eq!(image.bytes(), bytemuck::cast_slice::<u16, u8>(&[14107]));
+
+    let mut image = image_from_channels(
+        ColorFormat::L_F32,
+        1,
+        bytemuck::cast_slice(&[0.25f32]).to_vec(),
+    );
+    params.apply_cpu(&mut image);
+    assert_eq!(
+        image.bytes(),
+        bytemuck::cast_slice::<f32, u8>(&[0.25f32 + 0.2])
+    );
+}
+
 #[test]
 fn contrast_two_transforms_rgb_and_leaves_alpha_alone() {
     // Same mapping as the flat u8 case, but laid out as RGBA pixels: the three
@@ -135,7 +158,7 @@ fn identity_params_leave_every_format_bit_identical() {
     // contrast 1.0 / brightness 0.0 folds to `value * 1.0 + 0.0`, which is
     // exact for floats too — so this is an equality check, not an epsilon one.
     for format in ALL_FORMATS {
-        let input = create_test_image(*format, 17, 5, 0);
+        let input = create_test_image(format, 17, 5, 0);
         let mut output = input.clone();
 
         ContrastBrightness::new(1.0, 0.0).apply_cpu(&mut output);
@@ -149,14 +172,14 @@ fn identity_params_leave_every_format_bit_identical() {
 
 #[test]
 fn alpha_survives_every_alpha_format() {
-    for format in ALPHA_FORMATS {
-        let input = create_test_image(*format, 16, 4, 0);
+    for format in ALL_FORMATS.into_iter().filter(|format| format.has_alpha()) {
+        let input = create_test_image(format, 16, 4, 0);
         let mut output = input.clone();
 
         ContrastBrightness::new(2.0, 0.3).apply_cpu(&mut output);
 
-        let channels = format.channel_count.channel_count() as usize;
-        let channel_size = format.channel_size.byte_count() as usize;
+        let channels = format.channel_count.count();
+        let channel_size = format.sample_type.size();
         let alpha_offset = (channels - 1) * channel_size;
         let pixel_size = channels * channel_size;
 
@@ -191,13 +214,13 @@ fn every_knob_direction_changes_every_format() {
 
     for (label, params, width, height) in cases {
         for format in ALL_FORMATS {
-            let input = create_test_image(*format, width, height, 0);
+            let input = create_test_image(format, width, height, 0);
             let mut output = input.clone();
 
             params.apply_cpu(&mut output);
 
             assert!(
-                pixels_changed(&input, &output),
+                !pixels_equal(&input, &output),
                 "{label} should change output for format {format}"
             );
         }
@@ -207,8 +230,8 @@ fn every_knob_direction_changes_every_format() {
 #[test]
 fn extreme_brightness_clamps_to_the_range_ends() {
     for format in ALL_FORMATS {
-        let input = create_test_image(*format, 4, 2, 0);
-        let affine_max = ChannelAffine::new(&ContrastBrightness::default(), *format).max;
+        let input = create_test_image(format, 4, 2, 0);
+        let affine_max = ChannelAffine::new(ContrastBrightness::default(), format).max;
 
         // Saturating up pins every colour channel at the format's maximum, and
         // saturating down pins it at zero. Alpha is exempt.
@@ -216,12 +239,8 @@ fn extreme_brightness_clamps_to_the_range_ends() {
             let mut output = input.clone();
             ContrastBrightness::new(1.0, brightness).apply_cpu(&mut output);
 
-            let channels = format.channel_count.channel_count() as usize;
-            let colour_channels = if format.channel_count.channel_count() == 4 {
-                channels - 1
-            } else {
-                channels
-            };
+            let channels = format.channel_count.count();
+            let colour_channels = channels - usize::from(format.has_alpha());
             for (index, value) in channel_values(&output).iter().enumerate() {
                 if index % channels >= colour_channels {
                     continue;
@@ -238,18 +257,13 @@ fn extreme_brightness_clamps_to_the_range_ends() {
 /// Every colour channel of `image` as an `f32`, in its own units.
 fn channel_values(image: &Image) -> Vec<f32> {
     let format = image.desc().color_format;
-    match (format.channel_size, format.channel_type) {
-        (ChannelSize::_8bit, ChannelType::UInt) => {
-            image.bytes().iter().map(|v| f32::from(*v)).collect()
-        }
-        (ChannelSize::_16bit, ChannelType::UInt) => bytemuck::cast_slice::<u8, u16>(image.bytes())
+    match format.sample_type {
+        SampleType::U8 => image.bytes().iter().map(|v| f32::from(*v)).collect(),
+        SampleType::U16 => bytemuck::cast_slice::<u8, u16>(image.bytes())
             .iter()
             .map(|v| f32::from(*v))
             .collect(),
-        (ChannelSize::_32bit, ChannelType::Float) => {
-            bytemuck::cast_slice::<u8, f32>(image.bytes()).to_vec()
-        }
-        _ => unreachable!("unsupported format in ALL_FORMATS"),
+        SampleType::F32 => bytemuck::cast_slice::<u8, f32>(image.bytes()).to_vec(),
     }
 }
 
@@ -263,18 +277,23 @@ fn simd_matches_the_scalar_reference_bit_for_bit() {
     // exercises each kernel's tail (a width that is no vector's multiple).
     // Both paths evaluate the same fused affine in the same order, so floats
     // are held to equality here too, not an epsilon.
-    for (tier, select) in kernel_tiers() {
+    for tier in SimdTier::ALL {
+        if !tier.is_supported() {
+            eprintln!("SKIPPED: this CPU has no {tier}, so its kernels are not checked");
+            continue;
+        }
         for format in ALL_FORMATS {
-            let kernel =
-                select(*format).unwrap_or_else(|| panic!("{tier} has no kernel for {format}"));
+            let Some(kernel) = row_kernel(tier, format) else {
+                continue;
+            };
 
             for (contrast, brightness) in PARAM_SWEEP {
-                let input = create_test_image(*format, 17, 5, 0);
+                let input = create_test_image(format, 17, 5, 0);
                 let op = ContrastBrightness::new(contrast, brightness);
 
                 let mut actual = input.clone();
-                // SAFETY: `kernel_tiers` only yields tiers this CPU supports.
-                unsafe { apply_kernel(kernel, &op, &mut actual) };
+                // SAFETY: `tier` is supported on this CPU, checked above.
+                unsafe { apply_kernel(kernel, op, &mut actual) };
 
                 let mut expected = input.clone();
                 cpu::apply_scalar(op, &mut expected);
@@ -287,45 +306,10 @@ fn simd_matches_the_scalar_reference_bit_for_bit() {
                 );
                 // Sanity: the sweep actually transformed the pixels.
                 assert!(
-                    pixels_changed(&input, &actual),
+                    !pixels_equal(&input, &actual),
                     "params ({contrast}, {brightness}) left {format} unchanged"
                 );
             }
         }
     }
-}
-
-/// A SIMD tier: its name, and the selector mapping a format to its kernel.
-type KernelTier = (&'static str, fn(ColorFormat) -> Option<RowKernel>);
-
-/// The SIMD tiers this CPU can actually execute.
-#[cfg(target_arch = "x86_64")]
-fn kernel_tiers() -> Vec<KernelTier> {
-    let mut tiers: Vec<KernelTier> = Vec::new();
-    if crate::cpu_features::has_sse4_1() {
-        tiers.push(("sse4.1", sse41_kernel));
-    }
-    if crate::cpu_features::has_avx2() {
-        tiers.push(("avx2", avx2_kernel));
-    }
-    assert!(!tiers.is_empty(), "x86_64 without SSE4.1 is not supported");
-    tiers
-}
-
-#[cfg(target_arch = "aarch64")]
-fn kernel_tiers() -> Vec<KernelTier> {
-    vec![("neon", neon_kernel)]
-}
-
-#[test]
-fn test_large_image() {
-    let input = load_lena_rgba_u8_61x38();
-    let mut output = input.clone();
-
-    ContrastBrightness::new(1.2, 0.05).apply_cpu(&mut output);
-
-    assert!(
-        pixels_changed(&input, &output),
-        "large image test should change output"
-    );
 }

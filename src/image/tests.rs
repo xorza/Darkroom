@@ -1,448 +1,201 @@
-use crate::common::color_format::{ChannelCount, ChannelSize, ChannelType, ColorFormat};
+use std::path::Path;
+
+use crate::common::buffer2::Buffer2;
+use crate::common::color_format::{ALL_FORMATS, ColorFormat};
 use crate::common::error::Error;
-use crate::common::internals::{
-    load_lena_rgba_f32_895x551, load_lena_rgba_u8_895x551, test_output_path,
-};
-use crate::image::conversion::scalar::ChannelConvert;
-use crate::image::{Image, ImageDesc};
+use crate::common::internals::{create_test_image, lena};
+use crate::image::Image;
+use crate::image::image_desc::ImageDesc;
 
 #[test]
-fn read_lena_rgba_8bit() {
-    let img = load_lena_rgba_u8_895x551();
-    assert_eq!(img.desc().width, 895);
-    assert_eq!(img.desc().height, 551);
-    assert_eq!(img.desc().row_bytes(), 3580); // 895 * 4 = 3580
-    assert_eq!(img.desc().color_format.channel_size, ChannelSize::_8bit);
-    assert_eq!(img.desc().color_format.channel_count, ChannelCount::Rgba);
-    assert_eq!(img.desc().color_format.channel_type, ChannelType::UInt);
+fn lena_reads_as_packed_rgba() {
+    let img = lena(ColorFormat::RGBA_U8);
+    assert_eq!(img.desc(), ImageDesc::new(895, 551, ColorFormat::RGBA_U8));
+    assert_eq!(img.desc().row_bytes(), 895 * 4);
+    assert_eq!(img.bytes().len(), 895 * 4 * 551);
 }
 
+/// The extension picks the codec, case-insensitively; a missing or unknown one is refused
+/// before any I/O.
 #[test]
-fn read_lena_rgb_converted() {
-    let img = load_lena_rgba_u8_895x551()
-        .convert(ColorFormat::RGB_U8)
-        .unwrap();
-    assert_eq!(img.desc().width, 895);
-    assert_eq!(img.desc().height, 551);
-    assert_eq!(img.desc().row_bytes(), 2685); // 895 * 3, tightly packed
-    assert_eq!(img.desc().color_format.channel_size, ChannelSize::_8bit);
-    assert_eq!(img.desc().color_format.channel_count, ChannelCount::Rgb);
-}
-
-#[test]
-fn read_missing_file_returns_error() {
-    let result = Image::read_file("/nonexistent/does_not_exist.png");
-    assert!(result.is_err());
-}
-
-#[test]
-fn read_invalid_extension_returns_error() {
-    let result = Image::read_file("/nonexistent/file.xyz");
-    assert!(matches!(result, Err(Error::InvalidExtension(_))));
-}
-
-#[test]
-fn read_case_insensitive_extension() {
-    // This test verifies that uppercase extensions work
-    // We can't easily test this without actual files, but we verify the code path
-    let result = Image::read_file("/nonexistent/does_not_exist.PNG");
-    // Should fail with IO error (file not found), not InvalidExtension
+fn read_file_dispatches_on_the_extension() {
     assert!(matches!(
-        result,
-        Err(Error::Io(_)) | Err(Error::ImageCodec(_))
+        Image::read_file("/nonexistent/file.xyz"),
+        Err(Error::InvalidExtension(path)) if path == Path::new("/nonexistent/file.xyz")
+    ));
+    assert!(matches!(
+        Image::read_file("/nonexistent/file"),
+        Err(Error::InvalidExtension(path)) if path == Path::new("/nonexistent/file")
+    ));
+    assert!(matches!(
+        Image::read_file("/nonexistent/does_not_exist.PNG"),
+        Err(Error::ImageCodec(_))
+    ));
+    assert!(matches!(
+        Image::read_file("/nonexistent/does_not_exist.TIF"),
+        Err(Error::Io(_))
     ));
 }
 
+/// TIFF stores all nine formats; each one reads back byte for byte.
 #[test]
-fn save_and_reload_png() {
-    let original = load_lena_rgba_u8_895x551()
-        .convert(ColorFormat::RGB_U8)
-        .unwrap();
-    original
-        .save_file(test_output_path("save_reload.png"))
-        .unwrap();
-
-    let reloaded = Image::read_file(test_output_path("save_reload.png")).unwrap();
-    assert_eq!(original.desc().width, reloaded.desc().width);
-    assert_eq!(original.desc().height, reloaded.desc().height);
-    assert_eq!(original.desc().color_format, reloaded.desc().color_format);
-    // Compare packed bytes (ignore stride padding differences)
-    assert_eq!(original.clone().bytes(), reloaded.bytes());
-}
-
-#[test]
-fn save_and_reload_tiff() {
-    let original = load_lena_rgba_f32_895x551()
-        .convert(ColorFormat::RGB_F32)
-        .unwrap();
-    original
-        .save_file(test_output_path("save_reload.tiff"))
-        .unwrap();
-
-    let reloaded = Image::read_file(test_output_path("save_reload.tiff")).unwrap();
-    assert_eq!(original.desc().width, reloaded.desc().width);
-    assert_eq!(original.desc().height, reloaded.desc().height);
-    assert_eq!(original.desc().color_format, reloaded.desc().color_format);
-}
-
-#[test]
-fn save_tiff_with_misaligned_bytes_returns_error() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::L_U16);
-    // 3 bytes doesn't match expected size for GRAY_U16 (stride * height)
-    let result = Image::new_with_data(desc, vec![0u8; 3]);
-    assert!(result.is_err());
-}
-
-#[test]
-fn new_empty_creates_zeroed_image() {
-    let desc = ImageDesc::new(10, 10, ColorFormat::RGBA_U8);
-    let img = Image::new_black(desc).unwrap();
-
-    assert!(img.bytes().iter().all(|&b| b == 0));
-    assert_eq!(
-        img.bytes().len(),
-        img.desc().row_bytes() * img.desc().height
-    );
-}
-
-#[test]
-fn new_with_data_preserves_bytes() {
-    let desc = ImageDesc::new(2, 2, ColorFormat::L_U8);
-    let data = vec![1, 2, 3, 4]; // 2x2, tightly packed
-    let img = Image::new_with_data(desc, data.clone()).unwrap();
-
-    assert_eq!(img.bytes(), &data[..]);
-}
-
-#[test]
-fn invalid_float_format_returns_error() {
-    // 8-bit float is not valid
-    let format = ColorFormat {
-        channel_count: ChannelCount::Rgba,
-        channel_size: ChannelSize::_8bit,
-        channel_type: ChannelType::Float,
-    };
-    let desc = ImageDesc::new(1, 1, format);
-    let result = Image::new_black(desc);
-
-    assert!(matches!(result, Err(Error::InvalidColorFormat(_))));
-}
-
-#[test]
-fn valid_f32_format_succeeds() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::RGBA_F32);
-    let result = Image::new_black(desc);
-    assert!(result.is_ok());
-}
-
-#[test]
-fn image_desc_is_tightly_packed() {
-    // No row padding: row_bytes is exactly width * bytes_per_pixel, even for
-    // narrow formats whose rows don't land on a 4-byte boundary.
-    let desc = ImageDesc::new(1, 1, ColorFormat::L_U8);
-    assert_eq!(desc.row_bytes(), 1);
-
-    let desc = ImageDesc::new(3, 1, ColorFormat::RGB_U8);
-    assert_eq!(desc.row_bytes(), 9); // 3 px * 3 bytes, no padding
-
-    let desc = ImageDesc::new(5, 1, ColorFormat::RGBA_U16);
-    assert_eq!(desc.row_bytes(), 40); // 5 px * 8 bytes
-    assert_eq!(desc.size_in_bytes(), desc.row_bytes() * desc.height);
-}
-
-#[test]
-fn image_desc_size_calculation() {
-    let desc = ImageDesc::new(100, 50, ColorFormat::RGBA_U8);
-    assert_eq!(desc.size_in_bytes(), desc.row_bytes() * desc.height);
-}
-
-#[test]
-fn bytes_per_pixel_calculation() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::RGBA_U8);
-    let img = Image::new_black(desc).unwrap();
-    assert_eq!(img.bytes_per_pixel(), 4);
-
-    let desc = ImageDesc::new(1, 1, ColorFormat::RGB_U16);
-    let img = Image::new_black(desc).unwrap();
-    assert_eq!(img.bytes_per_pixel(), 6);
-
-    let desc = ImageDesc::new(1, 1, ColorFormat::L_F32);
-    let img = Image::new_black(desc).unwrap();
-    assert_eq!(img.bytes_per_pixel(), 4);
-}
-
-#[test]
-fn convert_same_format_returns_same_image() {
-    let desc = ImageDesc::new(2, 2, ColorFormat::RGBA_U8);
-    let data = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-    let img = Image::new_with_data(desc, data.clone()).unwrap();
-
-    // Same format is a move-through: the very same allocation comes back.
-    let ptr = img.bytes().as_ptr();
-    let converted = img.convert(ColorFormat::RGBA_U8).unwrap();
-    assert_eq!(converted.bytes(), &data[..]);
-    assert_eq!(converted.bytes().as_ptr(), ptr);
-}
-
-#[test]
-fn convert_to_borrows_and_matches_convert() {
-    let desc = ImageDesc::new(2, 2, ColorFormat::RGBA_U8);
-    let data = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-    let img = Image::new_with_data(desc, data.clone()).unwrap();
-
-    // The borrowing form leaves the source untouched and readable afterward...
-    let via_borrow = img.convert_to(ColorFormat::RGB_U16).unwrap();
-    assert_eq!(img.bytes(), &data[..]);
-
-    // ...and produces exactly what the consuming form does.
-    let via_move = img.convert(ColorFormat::RGB_U16).unwrap();
-    assert_eq!(via_borrow.desc(), via_move.desc());
-    assert_eq!(via_borrow.bytes(), via_move.bytes());
-}
-
-#[test]
-fn convert_rgba_u8_to_rgba_u16() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::RGBA_U8);
-    let src = Image::new_with_data(desc, vec![0, 128, 255, 64]).unwrap();
-    let result = src.convert(ColorFormat::RGBA_U16).unwrap();
-
-    assert_eq!(result.desc().color_format, ColorFormat::RGBA_U16);
-    let expected_vals: [u16; 4] = [
-        0u8.convert(),
-        128u8.convert(),
-        255u8.convert(),
-        64u8.convert(),
-    ];
-    let expected_bytes: Vec<u8> = bytemuck::cast_slice(&expected_vals).to_vec();
-    assert_eq!(result.bytes(), &expected_bytes[..]);
-}
-
-#[test]
-fn convert_rgb_u8_to_rgb_u16() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::RGB_U8);
-    let src = Image::new_with_data(desc, vec![0, 128, 255]).unwrap();
-    let result = src.convert(ColorFormat::RGB_U16).unwrap();
-
-    assert_eq!(result.desc().color_format, ColorFormat::RGB_U16);
-    let expected_vals: [u16; 3] = [0u8.convert(), 128u8.convert(), 255u8.convert()];
-    let expected_bytes: Vec<u8> = bytemuck::cast_slice(&expected_vals).to_vec();
-    assert_eq!(result.bytes(), &expected_bytes[..]);
-}
-
-#[test]
-fn convert_gray_u8_to_gray_u16() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::L_U8);
-    let src = Image::new_with_data(desc, vec![200]).unwrap();
-    let result = src.convert(ColorFormat::L_U16).unwrap();
-
-    assert_eq!(result.desc().color_format, ColorFormat::L_U16);
-    let expected_val: u16 = 200u8.convert();
-    let expected_bytes: Vec<u8> = bytemuck::cast_slice(&[expected_val]).to_vec();
-    assert_eq!(result.bytes(), &expected_bytes[..]);
-}
-
-#[test]
-fn convert_channel_count_gray_to_rgb() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::L_U8);
-    let src = Image::new_with_data(desc, vec![128]).unwrap();
-    let result = src.convert(ColorFormat::RGB_U8).unwrap();
-
-    assert_eq!(result.desc().color_format, ColorFormat::RGB_U8);
-    // Gray value should be replicated to R, G, B
-    assert_eq!(result.bytes()[0], 128); // R
-    assert_eq!(result.bytes()[1], 128); // G
-    assert_eq!(result.bytes()[2], 128); // B
-}
-
-#[test]
-fn convert_channel_count_rgb_to_gray() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::RGB_U8);
-    // R=100, G=150, B=200
-    // Luminance (Rec.709) = 0.2126*100 + 0.7152*150 + 0.0722*200 = 142.98
-    let src = Image::new_with_data(desc, vec![100, 150, 200]).unwrap();
-    let result = src.convert(ColorFormat::L_U8).unwrap();
-
-    assert_eq!(result.desc().color_format, ColorFormat::L_U8);
-    // Should be luminance-weighted grayscale
-    assert_eq!(result.bytes()[0], 142);
-}
-
-#[test]
-fn convert_rgba_to_rgb_drops_alpha() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::RGBA_U8);
-    let src = Image::new_with_data(desc, vec![100, 150, 200, 255]).unwrap();
-    let result = src.convert(ColorFormat::RGB_U8).unwrap();
-
-    assert_eq!(result.desc().color_format, ColorFormat::RGB_U8);
-    assert_eq!(result.bytes()[0], 100); // R
-    assert_eq!(result.bytes()[1], 150); // G
-    assert_eq!(result.bytes()[2], 200); // B
-}
-
-#[test]
-fn convert_rgb_to_rgba_adds_max_alpha() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::RGB_U8);
-    let src = Image::new_with_data(desc, vec![100, 150, 200]).unwrap();
-    let result = src.convert(ColorFormat::RGBA_U8).unwrap();
-
-    assert_eq!(result.desc().color_format, ColorFormat::RGBA_U8);
-    assert_eq!(result.bytes()[0], 100); // R
-    assert_eq!(result.bytes()[1], 150); // G
-    assert_eq!(result.bytes()[2], 200); // B
-    assert_eq!(result.bytes()[3], 255); // A = max
-}
-
-#[test]
-fn convert_to_float_normalizes() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::L_U8);
-    let src = Image::new_with_data(desc, vec![255]).unwrap();
-    let result = src.convert(ColorFormat::L_F32).unwrap();
-
-    let float_val: f32 = bytemuck::cast_slice(&result.bytes()[..4])[0];
-    assert!(
-        (float_val - 1.0).abs() < 0.01,
-        "Expected ~1.0, got {float_val}"
-    );
-}
-
-#[test]
-fn convert_from_float_denormalizes() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::L_F32);
-    let float_bytes: [u8; 4] = 1.0f32.to_ne_bytes();
-    let data = float_bytes.to_vec();
-    let src = Image::new_with_data(desc, data).unwrap();
-    let result = src.convert(ColorFormat::L_U8).unwrap();
-
-    assert_eq!(result.bytes()[0], 255);
-}
-
-#[test]
-fn convert_and_save_various_formats() {
-    let img = load_lena_rgba_u8_895x551();
-
-    // Test various format conversions
-    let conversions = [
-        (ColorFormat::L_U8, test_output_path("conv-gray-u8.tiff")),
-        (ColorFormat::L_U16, test_output_path("conv-gray-u16.tiff")),
-        (ColorFormat::RGB_U8, test_output_path("conv-rgb-u8.tiff")),
-        (ColorFormat::RGB_U16, test_output_path("conv-rgb-u16.tiff")),
-        (
-            ColorFormat::RGBA_U16,
-            test_output_path("conv-rgba-u16.tiff"),
-        ),
-        (
-            ColorFormat::RGBA_F32,
-            test_output_path("conv-rgba-f32.tiff"),
-        ),
-    ];
-
-    for (format, path) in conversions {
-        img.clone()
-            .convert(format)
-            .unwrap_or_else(|_| panic!("Failed to convert to {format:?}"))
-            .save_file(&path)
-            .unwrap_or_else(|_| panic!("Failed to save {path:?}"));
+fn every_format_round_trips_through_tiff() {
+    let dir = tempfile::tempdir().unwrap();
+    for format in ALL_FORMATS {
+        let image = create_test_image(format, 17, 5, 3);
+        let path = dir.path().join(format!("{format}.tiff"));
+        image.save_file(&path).unwrap();
+        let reloaded = Image::read_file(&path).unwrap();
+        assert_eq!(reloaded.desc(), image.desc(), "{format}");
+        assert_eq!(reloaded.bytes(), image.bytes(), "{format}");
     }
 }
 
+/// PNG stores the integer formats and reads them back byte for byte; it has no float.
 #[test]
-fn double_conversion_preserves_dimensions() {
-    let original = load_lena_rgba_u8_895x551();
-    let width = original.desc().width;
-    let height = original.desc().height;
-
-    let converted = original
-        .convert(ColorFormat::RGBA_F32)
-        .unwrap()
-        .convert(ColorFormat::RGBA_U16)
-        .unwrap();
-
-    assert_eq!(converted.desc().width, width);
-    assert_eq!(converted.desc().height, height);
+fn integer_formats_round_trip_through_png() {
+    let dir = tempfile::tempdir().unwrap();
+    for format in ALL_FORMATS {
+        let image = create_test_image(format, 17, 5, 3);
+        let path = dir.path().join(format!("{format}.png"));
+        if format.sample_type.is_float() {
+            assert!(
+                matches!(image.save_file(&path), Err(Error::UnsupportedFormat(message)) if message == format!("PNG cannot store {format}")),
+                "{format}"
+            );
+            continue;
+        }
+        image.save_file(&path).unwrap();
+        let reloaded = Image::read_file(&path).unwrap();
+        assert_eq!(reloaded.desc(), image.desc(), "{format}");
+        assert_eq!(reloaded.bytes(), image.bytes(), "{format}");
+    }
 }
 
+/// JPEG takes 8-bit grey and RGB only.
 #[test]
-fn single_pixel_image() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::RGBA_U8);
-    let img = Image::new_black(desc).unwrap();
-    assert!(img.desc().row_bytes() >= 4);
-}
-
-#[test]
-fn large_image_dimensions() {
-    let desc = ImageDesc::new(4096, 4096, ColorFormat::RGBA_U8);
-    // Just verify it calculates correctly without overflow
-    assert_eq!(desc.size_in_bytes(), desc.row_bytes() * 4096);
-}
-
-#[test]
-fn clone_image() {
-    let desc = ImageDesc::new(2, 2, ColorFormat::RGBA_U8);
-    let data = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-    let img = Image::new_with_data(desc, data.clone()).unwrap();
-    let cloned = img.clone();
-
-    assert_eq!(img.desc(), cloned.desc());
-    assert_eq!(img.bytes(), cloned.bytes());
-}
-
-// Each format's typed `Buffer2<[T; N]>` is intrinsically aligned to its element
-// type `T` — exactly what `bytemuck::cast_slice` to that element needs (f32 → 4,
-// u16 → 2). This must hold for both construction paths, including `new_with_data`
-// which copies a plain (align-1) `Vec<u8>` into the typed buffer.
-#[test]
-fn image_bytes_are_element_aligned() {
-    for &format in &[ColorFormat::RGBA_F32, ColorFormat::L_F32] {
-        let desc = ImageDesc::new(10, 10, format);
-        let from_black = Image::new_black(desc).unwrap();
-        let from_data = Image::new_with_data(desc, vec![0u8; desc.size_in_bytes()]).unwrap();
-        for img in [from_black, from_data] {
-            assert_eq!(
-                img.bytes().as_ptr() as usize % std::mem::align_of::<f32>(),
-                0,
-                "{format:?} bytes must be f32-aligned for cast_slice::<f32>"
+fn jpeg_refuses_what_it_cannot_store() {
+    let dir = tempfile::tempdir().unwrap();
+    for format in ALL_FORMATS {
+        let image = create_test_image(format, 8, 8, 0);
+        let result = image.save_file(dir.path().join(format!("{format}.jpg")));
+        if format == ColorFormat::L_U8 || format == ColorFormat::RGB_U8 {
+            result.unwrap();
+        } else {
+            assert!(
+                matches!(result, Err(Error::UnsupportedFormat(message)) if message == format!("JPEG cannot store {format}")),
+                "{format}"
             );
         }
     }
-    for &format in &[ColorFormat::RGBA_U16, ColorFormat::L_U16] {
-        let desc = ImageDesc::new(8, 8, format);
-        let img = Image::new_with_data(desc, vec![0u8; desc.size_in_bytes()]).unwrap();
+}
+
+/// A grey-with-alpha PNG has no format of its own; it reads as RGBA with its alpha.
+#[test]
+fn grey_alpha_png_widens_to_rgba() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("la.png");
+    image::save_buffer(&path, &[10, 200, 30, 40], 2, 1, image::ColorType::La8).unwrap();
+    let reloaded = Image::read_file(&path).unwrap();
+    assert_eq!(reloaded.desc(), ImageDesc::new(2, 1, ColorFormat::RGBA_U8));
+    assert_eq!(reloaded.bytes(), &[10, 10, 10, 200, 30, 30, 30, 40]);
+}
+
+#[test]
+fn construction_checks_dimensions_and_length() {
+    assert!(matches!(
+        Image::new_with_data(ImageDesc::new(1, 1, ColorFormat::L_U16), vec![0; 3]),
+        Err(Error::SizeMismatch(message)) if message == "bytes length 3 does not match expected size 2"
+    ));
+    assert!(matches!(
+        Image::new_black(ImageDesc::new(0, 4, ColorFormat::L_U8)),
+        Err(Error::SizeMismatch(message)) if message == "image dimensions must be non-zero, got 0x4"
+    ));
+    assert!(matches!(
+        Image::new_black(ImageDesc::new(usize::MAX / 2, 3, ColorFormat::RGBA_F32)),
+        Err(Error::SizeMismatch(_))
+    ));
+}
+
+/// A `u8` format keeps the caller's allocation both ways; `u16` and `f32` copy into storage
+/// aligned for their type, which a `Vec<u8>` does not promise.
+#[test]
+fn byte_vectors_are_reused_where_the_layout_allows() {
+    for format in ALL_FORMATS {
+        let desc = ImageDesc::new(6, 2, format);
+        let bytes: Vec<u8> = (0..desc.size_in_bytes())
+            .map(|i| (i * 7 % 251) as u8)
+            .collect();
+        let given = bytes.clone();
+        let pointer = given.as_ptr();
+        let image = Image::new_with_data(desc, given).unwrap();
+        assert_eq!(image.bytes(), bytes, "{format}");
         assert_eq!(
-            img.bytes().as_ptr() as usize % std::mem::align_of::<u16>(),
+            image.bytes().as_ptr() as usize % format.sample_type.size(),
             0,
-            "{format:?} bytes must be u16-aligned for cast_slice::<u16>"
+            "{format}: storage is aligned for its sample type"
+        );
+        assert_eq!(
+            image.bytes().as_ptr() == pointer,
+            format.sample_type.size() == 1,
+            "{format}"
+        );
+
+        let pointer = image.bytes().as_ptr();
+        let back = image.into_bytes();
+        assert_eq!(back, bytes, "{format}");
+        assert_eq!(
+            back.as_ptr() == pointer,
+            format.sample_type.size() == 1,
+            "{format}"
         );
     }
 }
 
+/// The same format is a move-through: the very same allocation comes back.
 #[test]
-fn into_bytes_preserves_data() {
-    let desc = ImageDesc::new(100, 100, ColorFormat::RGBA_U8);
-    let mut img = Image::new_black(desc).unwrap();
-    img.bytes_mut()[..4].copy_from_slice(&[1, 2, 3, 4]);
-    let expected = img.bytes().to_vec();
-    let vec = img.into_bytes();
-    // into_bytes copies (the typed buffer's allocation can't be reinterpreted as a
-    // Vec<u8>), so assert the data is preserved rather than pointer identity.
-    assert_eq!(vec, expected, "into_bytes must preserve the pixel data");
+fn convert_to_the_same_format_keeps_the_allocation() {
+    let image = create_test_image(ColorFormat::RGBA_U16, 3, 2, 0);
+    let pointer = image.bytes().as_ptr();
+    assert_eq!(
+        image.convert(ColorFormat::RGBA_U16).bytes().as_ptr(),
+        pointer
+    );
+}
+
+/// RGB 2×1: planes R = [1, 4], G = [2, 5], B = [3, 6] ⟷ interleaved [1, 2, 3, 4, 5, 6].
+#[test]
+fn planes_interleave_into_the_format_they_spell() {
+    let planes = [
+        Buffer2::new(2, 1, vec![1u8, 4]),
+        Buffer2::new(2, 1, vec![2u8, 5]),
+        Buffer2::new(2, 1, vec![3u8, 6]),
+    ];
+    let image = Image::from(planes.each_ref());
+    assert_eq!(image.desc(), ImageDesc::new(2, 1, ColorFormat::RGB_U8));
+    assert_eq!(image.bytes(), &[1, 2, 3, 4, 5, 6]);
+
+    let back: [Buffer2<u8>; 3] = (&image).try_into().unwrap();
+    assert_eq!(back, planes);
+
+    let grey = Image::from([&Buffer2::new(3, 1, vec![10u16, 20, 30])]);
+    assert_eq!(grey.desc().color_format, ColorFormat::L_U16);
+    assert_eq!(grey.bytes(), bytemuck::cast_slice::<u16, u8>(&[10, 20, 30]));
 }
 
 #[test]
-fn cast_to_f32_slice_works() {
-    let desc = ImageDesc::new(1, 1, ColorFormat::RGBA_F32);
-    let mut img = Image::new_black(desc).unwrap();
+fn deinterleaving_into_another_format_is_refused() {
+    let image = Image::new_black(ImageDesc::new(2, 2, ColorFormat::RGB_U8)).unwrap();
+    let result: Result<[Buffer2<f32>; 1], Error> = (&image).try_into();
+    assert!(matches!(
+        result,
+        Err(Error::InvalidColorFormat(message)) if message == "cannot deinterleave a RGB u8 image into 1 f32 planes"
+    ));
+}
 
-    // Write f32 values via bytemuck
-    let floats: &mut [f32] = bytemuck::cast_slice_mut(img.bytes_mut());
-    floats[0] = 1.0;
-    floats[1] = 0.5;
-    floats[2] = 0.25;
-    floats[3] = 1.0;
-
-    // Read back
-    let floats: &[f32] = bytemuck::cast_slice(img.bytes());
-    assert_eq!(floats[0], 1.0);
-    assert_eq!(floats[1], 0.5);
-    assert_eq!(floats[2], 0.25);
-    assert_eq!(floats[3], 1.0);
+#[test]
+#[should_panic(expected = "an image needs at least one pixel")]
+fn empty_planes_are_refused() {
+    let empty: Buffer2<f32> = Buffer2::new(0, 3, Vec::new());
+    drop(Image::from([&empty]));
 }

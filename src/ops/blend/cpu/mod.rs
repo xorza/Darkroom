@@ -2,17 +2,15 @@
 mod neon;
 #[cfg(target_arch = "x86_64")]
 mod sse41;
-#[cfg(test)]
-mod tests;
 
-use bytemuck::Pod;
 use rayon::prelude::*;
 
-use crate::common::color_format::{ChannelCount, ChannelSize, ChannelType, ColorFormat};
-#[cfg(target_arch = "x86_64")]
-use crate::cpu_features;
+use crate::common::color_format::{ColorFormat, SampleType};
+use crate::common::sample::Sample;
 use crate::image::Image;
 use crate::ops::blend::{Blend, BlendMode};
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+use crate::simd_tier::SimdTier;
 
 /// A SIMD row kernel blending one `src`/`dst` row pair into `out`. All three are
 /// exactly one packed row, so a kernel's pixel count is its slice length and it
@@ -20,65 +18,64 @@ use crate::ops::blend::{Blend, BlendMode};
 ///
 /// # Safety
 /// The running CPU must support the feature the kernel was compiled for;
-/// [`row_kernel`] is what establishes that.
+/// [`row_kernel`] at a supported [`SimdTier`] is what establishes that.
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 type RowKernel = unsafe fn(src: &[u8], dst: &[u8], out: &mut [u8], params: Blend);
 
-/// The SIMD row kernel for `format` on this arch, or `None` when the CPU lacks
-/// the feature or the format has no vector path — callers then take the scalar
-/// reference.
+/// The SIMD row kernel `tier` has for `format`, or `None` when the tier or the
+/// format has no vector path — callers then take the scalar reference.
 ///
 /// Only RGBA is specialized: its four channels fill a vector register exactly,
 /// which is what lets one register hold a pixel and the blend stay branch-free
 /// across channels. L and RGB fall to the scalar path.
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-fn row_kernel(format: ColorFormat) -> Option<RowKernel> {
+fn row_kernel(tier: SimdTier, format: ColorFormat) -> Option<RowKernel> {
     #[cfg(target_arch = "aarch64")]
     use crate::ops::blend::cpu::neon as simd;
     #[cfg(target_arch = "x86_64")]
     use crate::ops::blend::cpu::sse41 as simd;
 
     #[cfg(target_arch = "x86_64")]
-    if !cpu_features::has_sse4_1() {
+    if tier < SimdTier::Sse41 {
         return None;
     }
+    #[cfg(target_arch = "aarch64")]
+    let SimdTier::Neon = tier;
 
-    if format.channel_count != ChannelCount::Rgba {
+    if !format.has_alpha() {
         return None;
     }
-    Some(match (format.channel_size, format.channel_type) {
-        (ChannelSize::_8bit, ChannelType::UInt) => simd::rgba_u8_row as RowKernel,
-        (ChannelSize::_32bit, ChannelType::Float) => simd::rgba_f32_row as RowKernel,
-        _ => return None,
+    Some(match format.sample_type {
+        SampleType::U8 => simd::rgba_u8_row as RowKernel,
+        SampleType::F32 => simd::rgba_f32_row as RowKernel,
+        SampleType::U16 => return None,
     })
 }
 
 /// Blends `src` over `dst` into `output`, all three sharing a descriptor.
-pub(super) fn apply(params: &Blend, src: &Image, dst: &Image, output: &mut Image) {
+pub(super) fn apply(params: Blend, src: &Image, dst: &Image, output: &mut Image) {
     src.desc().assert_same(dst.desc(), "src/dst");
     src.desc().assert_same(output.desc(), "src/output");
 
     let format = src.desc().color_format;
 
     #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    if let Some(kernel) = row_kernel(format) {
-        // SAFETY: `row_kernel` verified this CPU has the kernel's feature.
-        unsafe { apply_kernel(kernel, *params, src, dst, output) };
+    if let Some(kernel) = SimdTier::widest().and_then(|tier| row_kernel(tier, format)) {
+        // SAFETY: the kernel is the widest supported tier's.
+        unsafe { apply_kernel(kernel, params, src, dst, output) };
         return;
     }
 
-    apply_scalar(*params, src, dst, output);
+    apply_scalar(params, src, dst, output);
 }
 
 /// The scalar path, picking the storage type the format stores channels in.
 /// Split out so the tests can reach the reference past the SIMD dispatch.
 fn apply_scalar(params: Blend, src: &Image, dst: &Image, output: &mut Image) {
-    let format = src.desc().color_format;
-    match (format.channel_size, format.channel_type) {
-        (ChannelSize::_8bit, ChannelType::UInt) => apply_typed::<u8>(params, src, dst, output),
-        (ChannelSize::_16bit, ChannelType::UInt) => apply_typed::<u16>(params, src, dst, output),
-        (ChannelSize::_32bit, ChannelType::Float) => apply_typed::<f32>(params, src, dst, output),
-        _ => unreachable!("unsupported color format for blend: {format:?}"),
+    match src.desc().color_format.sample_type {
+        SampleType::U8 => apply_typed::<u8>(params, src, dst, output),
+        SampleType::U16 => apply_typed::<u16>(params, src, dst, output),
+        SampleType::F32 => apply_typed::<f32>(params, src, dst, output),
     }
 }
 
@@ -109,55 +106,34 @@ unsafe fn apply_kernel(
         });
 }
 
-/// One channel value in a storage type, blended against its destination.
-trait BlendApply: Pod + Send + Sync {
-    fn blend(self, dst: Self, mode: BlendMode, alpha: f32) -> Self;
-}
-
-impl BlendApply for u8 {
-    #[inline]
-    fn blend(self, dst: Self, mode: BlendMode, alpha: f32) -> Self {
-        let max = f32::from(Self::MAX);
-        let result = mode.blend(f32::from(self) / max, f32::from(dst) / max, alpha);
-        (result * max).clamp(0.0, max) as Self
-    }
-}
-
-impl BlendApply for u16 {
-    #[inline]
-    fn blend(self, dst: Self, mode: BlendMode, alpha: f32) -> Self {
-        let max = f32::from(Self::MAX);
-        let result = mode.blend(f32::from(self) / max, f32::from(dst) / max, alpha);
-        (result * max).clamp(0.0, max) as Self
-    }
-}
-
-impl BlendApply for f32 {
-    #[inline]
-    fn blend(self, dst: Self, mode: BlendMode, alpha: f32) -> Self {
-        mode.blend(self, dst, alpha).clamp(0.0, 1.0)
-    }
+/// One channel value blended against its destination: both normalized, blended, scaled back
+/// and clamped to the full scale, then narrowed by the crate's rounding rule. A NaN from a
+/// float channel or alpha survives the clamp, as `f32::clamp` leaves it.
+#[inline]
+fn blend_value<T: Sample>(src: T, dst: T, mode: BlendMode, alpha: f32) -> T {
+    let blended = mode.blend(src.to_unit(), dst.to_unit(), alpha);
+    T::from_f32((blended * T::FULL_SCALE_F32).clamp(0.0, T::FULL_SCALE_F32))
 }
 
 /// Blends one pixel in place: `params.mode` over the leading `color` channels,
 /// and — where the format carries alpha, so `color` is one short of the pixel —
 /// a plain alpha mix over the last one, which carries no mode of its own.
 #[inline]
-fn blend_pixel<T: BlendApply>(params: Blend, src: &[T], dst: &[T], out: &mut [T], color: usize) {
+fn blend_pixel<T: Sample>(params: Blend, src: &[T], dst: &[T], out: &mut [T], color: usize) {
     let Blend { mode, alpha } = params;
     for ((&s, &d), o) in src[..color]
         .iter()
         .zip(&dst[..color])
         .zip(out[..color].iter_mut())
     {
-        *o = s.blend(d, mode, alpha);
+        *o = blend_value(s, d, mode, alpha);
     }
     for ((&s, &d), o) in src[color..]
         .iter()
         .zip(&dst[color..])
         .zip(out[color..].iter_mut())
     {
-        *o = s.blend(d, BlendMode::Normal, alpha);
+        *o = blend_value(s, d, BlendMode::Normal, alpha);
     }
 }
 
@@ -167,7 +143,7 @@ fn blend_pixel<T: BlendApply>(params: Blend, src: &[T], dst: &[T], out: &mut [T]
 /// The three slices are what [`slice::as_chunks`] left over, so each holds a
 /// whole number of pixels.
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-fn rgba_tail<T: BlendApply>(params: Blend, src: &[T], dst: &[T], out: &mut [T]) {
+fn rgba_tail<T: Sample>(params: Blend, src: &[T], dst: &[T], out: &mut [T]) {
     let (src, rest) = src.as_chunks::<4>();
     let (dst, _) = dst.as_chunks::<4>();
     let (out, _) = out.as_chunks_mut::<4>();
@@ -180,25 +156,21 @@ fn rgba_tail<T: BlendApply>(params: Blend, src: &[T], dst: &[T], out: &mut [T]) 
     }
 }
 
-/// The scalar reference: per-channel blending through [`BlendApply`]. Taken when
+/// The scalar reference: per-channel blending through [`blend_value`]. Taken when
 /// the CPU offers no SIMD kernel for the format, and cross-checked against the
 /// SIMD kernels by the tests.
 fn apply_typed<T>(params: Blend, src: &Image, dst: &Image, output: &mut Image)
 where
-    T: BlendApply,
+    T: Sample,
 {
     let format = src.desc().color_format;
-    debug_assert_eq!(
-        format.channel_size.byte_count() as usize,
-        size_of::<T>(),
-        "storage type does not match the image's channel size"
-    );
+    debug_assert_eq!(format.sample_type, T::TYPE);
 
-    let channels = format.channel_count.channel_count() as usize;
+    let channels = format.channel_count.count();
     let stride = src.desc().row_bytes();
     // Channels the blend mode applies to; alpha, where the format has one, is
     // the last channel and is left to the mix alone.
-    let color = channels - usize::from(format.channel_count == ChannelCount::Rgba);
+    let color = channels - usize::from(format.has_alpha());
     let (src_bytes, dst_bytes) = (src.bytes(), dst.bytes());
 
     output
@@ -218,3 +190,6 @@ where
             }
         });
 }
+
+#[cfg(test)]
+mod tests;

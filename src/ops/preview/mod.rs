@@ -1,5 +1,3 @@
-#[cfg(feature = "bench")]
-pub(crate) mod bench;
 mod cpu;
 
 use crate::image::Image;
@@ -19,7 +17,7 @@ pub struct Preview {
 }
 
 impl Preview {
-    pub fn new(width: usize, height: usize) -> Self {
+    pub const fn new(width: usize, height: usize) -> Self {
         Self { width, height }
     }
 
@@ -32,3 +30,6 @@ impl Preview {
         cpu::generate(self, input)
     }
 }
+
+#[cfg(feature = "bench")]
+pub(crate) mod bench;

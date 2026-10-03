@@ -5,5 +5,6 @@ pub(crate) mod error;
 #[cfg(test)]
 pub(crate) mod image_diff;
 #[cfg(any(test, feature = "internals"))]
-#[allow(dead_code)] // Some helpers only used by feature-gated test modules.
 pub(crate) mod internals;
+pub(crate) mod luma;
+pub(crate) mod sample;

@@ -1,13 +1,10 @@
-#[cfg(feature = "bench")]
-pub(crate) mod bench;
+mod channel_affine;
 mod cpu;
 #[cfg(feature = "wgpu")]
 mod gpu;
 #[cfg(feature = "wgpu")]
 pub(crate) mod pipeline;
 
-#[cfg(feature = "wgpu")]
-use crate::common::error::Result;
 #[cfg(feature = "wgpu")]
 use crate::gpu::Gpu;
 #[cfg(feature = "wgpu")]
@@ -36,7 +33,7 @@ impl Default for ContrastBrightness {
 }
 
 impl ContrastBrightness {
-    pub fn new(contrast: f32, brightness: f32) -> Self {
+    pub const fn new(contrast: f32, brightness: f32) -> Self {
         Self {
             contrast,
             brightness,
@@ -44,13 +41,15 @@ impl ContrastBrightness {
     }
 
     /// Builder method to set contrast.
-    pub fn contrast(mut self, contrast: f32) -> Self {
+    #[must_use]
+    pub const fn contrast(mut self, contrast: f32) -> Self {
         self.contrast = contrast;
         self
     }
 
     /// Builder method to set brightness.
-    pub fn brightness(mut self, brightness: f32) -> Self {
+    #[must_use]
+    pub const fn brightness(mut self, brightness: f32) -> Self {
         self.brightness = brightness;
         self
     }
@@ -64,13 +63,14 @@ impl ContrastBrightness {
     /// Where `mid` is the middle value of the type's range.
     /// Alpha channel (if present) is preserved unchanged.
     pub fn apply_cpu(&self, image: &mut Image) {
-        cpu::apply(self, image);
+        cpu::apply(*self, image);
     }
 
-    /// Applies contrast and brightness adjustment using GPU.
+    /// Applies contrast and brightness adjustment on the GPU, as [`Self::apply_cpu`]
+    /// does, from `input` into `output`.
     ///
     /// # Panics
-    /// Panics if images have different dimensions or color formats.
+    /// Panics unless the two images share a descriptor.
     #[cfg(feature = "wgpu")]
     pub fn apply_gpu(
         &self,
@@ -78,10 +78,13 @@ impl ContrastBrightness {
         pipeline: &GpuContrastBrightnessPipeline,
         input: &GpuImage,
         output: &mut GpuImage,
-    ) -> Result<()> {
-        gpu::apply(self, ctx, pipeline, input, output)
+    ) {
+        gpu::apply(*self, ctx, pipeline, input, output);
     }
 }
+
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
 
 #[cfg(test)]
 mod tests {
@@ -98,7 +101,7 @@ mod tests {
     #[test]
     fn apply_cpu_adjusts_in_place_without_reallocating() {
         for format in ALL_FORMATS {
-            let source = create_test_image(*format, 17, 5, 0);
+            let source = create_test_image(format, 17, 5, 0);
             let mut image = source.clone();
             let before = image.bytes().as_ptr();
 
