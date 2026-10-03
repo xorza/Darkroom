@@ -49,18 +49,20 @@ fn lanczos_kernel_outside_support() {
     assert_eq!(kernel(100.0, 3.0), 0.0);
 }
 
+/// `L(½, a) = sinc(π/2)·sinc(π/(2a))`, with `sinc(π/2) = 2/π`:
+/// - a = 3: `sinc(π/6) = ½·6/π`, so `6/π²` = 0.607927;
+/// - a = 2: `sinc(π/4) = (√2/2)·4/π`, so `4√2/π²` = 0.573159.
+///
+/// The two differ, so `a` reaches the window. f32 evaluation is within a few ulps of 0.6.
 #[test]
 fn lanczos_kernel_at_half() {
-    // L(0.5, 3) = sinc(0.5) * sinc(0.5/3) = [sin(pi/2)/(pi/2)] * [sin(pi/6)/(pi/6)]
-    // sinc(0.5) = sin(pi*0.5) / (pi*0.5) = 1.0 / (pi/2) = 2/pi
-    // sinc(1/6) = sin(pi/6) / (pi/6) = 0.5 / (pi/6) = 3/pi
-    // L(0.5, 3) = (2/pi) * (3/pi) = 6 / pi^2
-    let expected = 6.0 / (PI * PI);
-    let actual = kernel(0.5, 3.0);
-    assert!(
-        (actual - expected).abs() < 1e-6,
-        "L(0.5, 3) = 6/pi^2 = {expected}, got {actual}"
-    );
+    for (a, expected) in [(3.0, 6.0 / (PI * PI)), (2.0, 4.0 * 2f32.sqrt() / (PI * PI))] {
+        let actual = kernel(0.5, a);
+        assert!(
+            (actual - expected).abs() < TOL,
+            "L(0.5, {a}) = {expected}, got {actual}"
+        );
+    }
 }
 
 #[test]

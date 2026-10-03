@@ -1266,14 +1266,7 @@ fn signed_uniform_warp_and_weighted_combine_preserve_dc() {
         ..Default::default()
     };
 
-    for method in [
-        InterpolationMethod::Nearest,
-        InterpolationMethod::Bilinear,
-        InterpolationMethod::Bicubic,
-        InterpolationMethod::Lanczos2,
-        InterpolationMethod::Lanczos3,
-        InterpolationMethod::Lanczos4,
-    ] {
+    for method in InterpolationMethod::ALL {
         let warped = resample::warp(&source, &transform, &config::internals::warp_params(method));
         let frames = vec![
             StackFrame::from(source.clone()),

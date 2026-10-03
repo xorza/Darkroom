@@ -1,332 +1,76 @@
 use crate::stacking::registration::config::{self, InterpolationMethod, WarpParams};
 use crate::stacking::registration::resample::internals::warp_plane;
-use crate::stacking::registration::resample::kernel::internals as kernel_test_support;
+use crate::stacking::registration::resample::kernel::LanczosOrder;
 use crate::stacking::registration::resample::quality;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::testing::prelude::*;
 
+/// An integer shift samples every output pixel at a pixel centre, so it copies the source pixel
+/// there, and outside the source it is the border.
+///
+/// Nearest, bilinear and bicubic weigh the centre tap 1 and the rest exactly 0, so they copy it
+/// exactly. A Lanczos table entry at a nonzero integer is the f32 kernel's rounding residue, not 0:
+/// its window lets through `leak = Σ|L(k)|, k ≠ 0` per axis of every other tap's difference from
+/// the centre, `((1 + leak)² − 1)·range` in all, on top of the row's `SIZE² + 3` roundings against
+/// the window's absolute sum (see `row`'s oracle test). At the edges Lanczos falls back to
+/// bilinear, which is exact.
 #[test]
-fn warp_identity_preserves_image() {
-    let input: Vec<f32> = (0..16).map(|i| i as f32).collect();
-    let input_buf = Buffer2::new(4, 4, input.clone());
-
-    let mut output = Buffer2::new_default(4, 4);
-    warp_plane(
-        &input_buf,
-        &mut output,
-        &WarpTransform::new(Transform::identity()),
-        &config::internals::warp_params(InterpolationMethod::Bilinear),
+fn integer_shifts_copy_the_source() {
+    let size = Size2us::new(24, 20);
+    let input = Buffer2::new(
+        size.width,
+        size.height,
+        (0..size.pixel_count())
+            .map(|i| ((i * 13 + i / size.width * 7) % 31) as f32 / 9.0 - 1.7)
+            .collect(),
     );
-
-    for (i, (&inp, &out)) in input.iter().zip(output.iter()).enumerate() {
-        assert!(
-            (inp - out).abs() < 0.1,
-            "Pixel {i}: expected {inp}, got {out}"
-        );
-    }
-}
-
-#[test]
-fn warp_integer_translation() {
-    // Translation by (1,1): output[p] = input[T(p)] = input[p + (1,1)]
-    // So input(1,1)=5 appears at output(0,0)
-    let mut input = vec![0.0f32; 16];
-    input[5] = 1.0; // Position (1, 1) in a 4x4 grid: index = 1*4+1 = 5
-    let input_buf = Buffer2::new(4, 4, input);
-
-    let transform = Transform::translation(DVec2::new(1.0, 1.0));
-
-    let mut output = Buffer2::new_default(4, 4);
-    warp_plane(
-        &input_buf,
-        &mut output,
-        &WarpTransform::new(transform),
-        &config::internals::warp_params(InterpolationMethod::Bilinear),
-    );
-
-    // output(0,0) samples input(1,1) = 1.0
-    assert!(
-        (output[0] - 1.0).abs() < 0.01,
-        "Expected 1.0 at output(0,0), got {}",
-        output[0]
-    );
-    // output(1,1) samples input(2,2) = 0.0
-    assert!(
-        output[5] < 0.01,
-        "Expected 0.0 at output(1,1), got {}",
-        output[5]
-    );
-}
-
-#[test]
-fn plane_warp_lanczos3_identity() {
-    let width = 32;
-    let height = 32;
-    let input: Vec<f32> = (0..width * height).map(|i| (i as f32) / 1024.0).collect();
-    let input_buf = Buffer2::new(width, height, input);
-
-    let mut output = Buffer2::new_filled(width, height, 0.0);
-    warp_plane(
-        &input_buf,
-        &mut output,
-        &WarpTransform::new(Transform::identity()),
-        &config::internals::warp_params(InterpolationMethod::Lanczos3),
-    );
-
-    // Interior pixels should match input closely
-    for y in 4..height - 4 {
-        for x in 4..width - 4 {
-            let expected = input_buf[(x, y)];
-            let actual = output[(x, y)];
-            assert!(
-                (actual - expected).abs() < 0.02,
-                "Identity mismatch at ({x}, {y}): {actual} vs {expected}"
-            );
+    let range = 30.0 / 9.0;
+    let largest = 1.7f32;
+    for shift in [(0, 0), (2, -1), (-3, 4), (7, 0)] {
+        let transform = WarpTransform::new(Transform::translation(DVec2::new(
+            f64::from(shift.0),
+            f64::from(shift.1),
+        )));
+        for method in InterpolationMethod::ALL {
+            let params = config::internals::warp_params(method);
+            let tolerance = LanczosOrder::of(method).map_or(0.0, |order| {
+                let lut = order.lut();
+                let leak: f32 = (1..=order.a())
+                    .map(|k| 2.0 * lut.lookup_positive(k as f32).abs())
+                    .sum();
+                let taps = (4 * order.a() * order.a()) as f32;
+                let spread = (1.0 + leak) * (1.0 + leak);
+                (spread - 1.0) * range + (taps + 3.0) * f32::EPSILON * largest * spread
+            });
+            let mut output = Buffer2::new_filled(size.width, size.height, f32::NAN);
+            warp_plane(&input, &mut output, &transform, &params);
+            for y in 0..size.height {
+                for x in 0..size.width {
+                    let source_x = x as i32 + shift.0;
+                    let source_y = y as i32 + shift.1;
+                    let inside = (0..size.width as i32).contains(&source_x)
+                        && (0..size.height as i32).contains(&source_y);
+                    let expected = if inside {
+                        input[(source_x as usize, source_y as usize)]
+                    } else {
+                        params.border_value
+                    };
+                    let actual = output[(x, y)];
+                    assert!(
+                        (actual - expected).abs() <= tolerance,
+                        "{method:?} shift {shift:?} ({x}, {y}): {actual}, expected {expected}"
+                    );
+                }
+            }
         }
     }
 }
 
+/// A homography's horizon maps to infinity: the column on it takes the border and has no coverage,
+/// and nothing anywhere turns non-finite — at the horizon itself, and a hair short of it, where the
+/// position is finite but past `i32::MAX`.
 #[test]
-fn plane_warp_lanczos3_integer_translation() {
-    let width = 64;
-    let height = 64;
-    let input: Vec<f32> = (0..width * height).map(|i| (i as f32) / 4096.0).collect();
-    let input_buf = Buffer2::new(width, height, input);
-    // output[p] = input[p + (5,3)]
-    let transform = Transform::translation(DVec2::new(5.0, 3.0));
-
-    let mut output = Buffer2::new_filled(width, height, 0.0);
-    warp_plane(
-        &input_buf,
-        &mut output,
-        &WarpTransform::new(transform),
-        &config::internals::warp_params(InterpolationMethod::Lanczos3),
-    );
-
-    for y in 8..height - 8 {
-        for x in 5..width - 15 {
-            let expected = input_buf[(x + 5, y + 3)];
-            let actual = output[(x, y)];
-            assert!(
-                (actual - expected).abs() < 0.02,
-                "Translation mismatch at ({x}, {y}): {actual} vs {expected}"
-            );
-        }
-    }
-}
-
-#[test]
-fn plane_warp_lanczos3_matches_per_pixel() {
-    // Verify the optimized plane warp Lanczos3 path matches the per-pixel reference.
-    let width = 32;
-    let height = 32;
-    let input: Vec<f32> = (0..width * height)
-        .map(|i| f32::midpoint((i as f32 * 0.037).sin(), 1.0))
-        .collect();
-    let input_buf = Buffer2::new(width, height, input);
-    let transform = Transform::similarity(DVec2::new(16.0, 16.0), 0.03, 1.02);
-
-    let mut output = Buffer2::new_filled(width, height, 0.0);
-    let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
-    warp_plane(
-        &input_buf,
-        &mut output,
-        &WarpTransform::new(transform),
-        &params,
-    );
-
-    for y in 0..height {
-        for x in 0..width {
-            let src = transform.apply(DVec2::new(x as f64, y as f64));
-            let expected = kernel_test_support::interpolate(&input_buf, src, &params);
-            let actual = output[(x, y)];
-            assert!(
-                (actual - expected).abs() < 1e-4,
-                "Mismatch at ({x}, {y}): plane warp={actual} vs interpolate={expected}"
-            );
-        }
-    }
-}
-
-// The generic warp loop (used for Bicubic, Lanczos2, Lanczos4, Nearest)
-// uses incremental stepping for linear transforms. These tests verify
-// that the stepped output matches per-pixel transform.apply() exactly.
-
-/// Reference per-pixel warp used to validate incremental stepping.
-fn warp_per_pixel_reference(
-    input: &Buffer2<f32>,
-    output: &mut Buffer2<f32>,
-    warp_transform: &WarpTransform,
-    params: &WarpParams,
-) {
-    let width = input.width();
-    let height = input.height();
-    for y in 0..height {
-        for x in 0..width {
-            let src = warp_transform.apply(DVec2::new(x as f64, y as f64));
-            output[(x, y)] = kernel_test_support::interpolate(input, src, params);
-        }
-    }
-}
-
-#[test]
-fn generic_stepping_bicubic_matches_per_pixel() {
-    // Bicubic with a similarity transform (translation + rotation + scale).
-    // Stepped output should match per-pixel reference exactly (same f32 path).
-    let width = 64;
-    let height = 64;
-    let input: Vec<f32> = (0..width * height)
-        .map(|i| f32::midpoint((i as f32 * 0.037).sin(), 1.0))
-        .collect();
-    let input_buf = Buffer2::new(width, height, input);
-    let transform = Transform::similarity(DVec2::new(3.0, 2.0), 0.05, 1.02);
-    let wt = WarpTransform::new(transform);
-    assert!(wt.is_linear());
-    let params = config::internals::warp_params(InterpolationMethod::Bicubic);
-
-    let mut output_stepped = Buffer2::new_default(width, height);
-    let mut output_reference = Buffer2::new_default(width, height);
-    warp_plane(&input_buf, &mut output_stepped, &wt, &params);
-    warp_per_pixel_reference(&input_buf, &mut output_reference, &wt, &params);
-
-    for y in 0..height {
-        for x in 0..width {
-            let stepped = output_stepped[(x, y)];
-            let reference = output_reference[(x, y)];
-            assert!(
-                (stepped - reference).abs() < 1e-4,
-                "Bicubic mismatch at ({x}, {y}): stepped={stepped}, reference={reference}"
-            );
-        }
-    }
-}
-
-#[test]
-fn generic_stepping_lanczos2_matches_per_pixel() {
-    let width = 64;
-    let height = 64;
-    let input: Vec<f32> = (0..width * height)
-        .map(|i| f32::midpoint((i as f32 * 0.023).sin(), 1.0))
-        .collect();
-    let input_buf = Buffer2::new(width, height, input);
-    let transform = Transform::similarity(DVec2::new(5.0, -1.0), 0.03, 0.98);
-    let wt = WarpTransform::new(transform);
-    assert!(wt.is_linear());
-    let params = config::internals::warp_params(InterpolationMethod::Lanczos2);
-
-    let mut output_stepped = Buffer2::new_default(width, height);
-    let mut output_reference = Buffer2::new_default(width, height);
-    warp_plane(&input_buf, &mut output_stepped, &wt, &params);
-    warp_per_pixel_reference(&input_buf, &mut output_reference, &wt, &params);
-
-    for y in 0..height {
-        for x in 0..width {
-            let stepped = output_stepped[(x, y)];
-            let reference = output_reference[(x, y)];
-            assert!(
-                (stepped - reference).abs() < 1e-4,
-                "Lanczos2 mismatch at ({x}, {y}): stepped={stepped}, reference={reference}"
-            );
-        }
-    }
-}
-
-#[test]
-fn generic_stepping_lanczos4_matches_per_pixel() {
-    let width = 64;
-    let height = 64;
-    let input: Vec<f32> = (0..width * height)
-        .map(|i| f32::midpoint((i as f32 * 0.041).sin(), 1.0))
-        .collect();
-    let input_buf = Buffer2::new(width, height, input);
-    let transform = Transform::similarity(DVec2::new(2.0, 3.0), -0.02, 1.01);
-    let wt = WarpTransform::new(transform);
-    assert!(wt.is_linear());
-    let params = config::internals::warp_params(InterpolationMethod::Lanczos4);
-
-    let mut output_stepped = Buffer2::new_default(width, height);
-    let mut output_reference = Buffer2::new_default(width, height);
-    warp_plane(&input_buf, &mut output_stepped, &wt, &params);
-    warp_per_pixel_reference(&input_buf, &mut output_reference, &wt, &params);
-
-    for y in 0..height {
-        for x in 0..width {
-            let stepped = output_stepped[(x, y)];
-            let reference = output_reference[(x, y)];
-            assert!(
-                (stepped - reference).abs() < 1e-4,
-                "Lanczos4 mismatch at ({x}, {y}): stepped={stepped}, reference={reference}"
-            );
-        }
-    }
-}
-
-#[test]
-fn generic_stepping_nearest_matches_per_pixel() {
-    let width = 64;
-    let height = 64;
-    let input: Vec<f32> = (0..width * height)
-        .map(|i| f32::midpoint((i as f32 * 0.013).sin(), 1.0))
-        .collect();
-    let input_buf = Buffer2::new(width, height, input);
-    let transform = Transform::similarity(DVec2::new(1.0, 2.0), 0.01, 1.0);
-    let wt = WarpTransform::new(transform);
-    assert!(wt.is_linear());
-    let params = config::internals::warp_params(InterpolationMethod::Nearest);
-
-    let mut output_stepped = Buffer2::new_default(width, height);
-    let mut output_reference = Buffer2::new_default(width, height);
-    warp_plane(&input_buf, &mut output_stepped, &wt, &params);
-    warp_per_pixel_reference(&input_buf, &mut output_reference, &wt, &params);
-
-    for y in 0..height {
-        for x in 0..width {
-            let stepped = output_stepped[(x, y)];
-            let reference = output_reference[(x, y)];
-            // Nearest is exact — no floating point interpolation
-            assert!(
-                (stepped - reference).abs() < 1e-6,
-                "Nearest mismatch at ({x}, {y}): stepped={stepped}, reference={reference}"
-            );
-        }
-    }
-}
-
-#[test]
-fn generic_stepping_disabled_for_homography() {
-    // With a homography, is_linear() returns false, so stepping is disabled.
-    // Output should match per-pixel reference exactly.
-    let width = 32;
-    let height = 32;
-    let input: Vec<f32> = (0..width * height)
-        .map(|i| f32::midpoint((i as f32 * 0.029).sin(), 1.0))
-        .collect();
-    let input_buf = Buffer2::new(width, height, input);
-    // Homography with small perspective component
-    let transform = Transform::homography([1.0, 0.0, 2.0, 0.0, 1.0, 1.0, 0.001, 0.0005]);
-    let wt = WarpTransform::new(transform);
-    assert!(!wt.is_linear());
-    let params = config::internals::warp_params(InterpolationMethod::Bicubic);
-
-    let mut output_stepped = Buffer2::new_default(width, height);
-    let mut output_reference = Buffer2::new_default(width, height);
-    warp_plane(&input_buf, &mut output_stepped, &wt, &params);
-    warp_per_pixel_reference(&input_buf, &mut output_reference, &wt, &params);
-
-    for y in 0..height {
-        for x in 0..width {
-            let stepped = output_stepped[(x, y)];
-            let reference = output_reference[(x, y)];
-            assert!(
-                (stepped - reference).abs() < 1e-6,
-                "Homography mismatch at ({x}, {y}): stepped={stepped}, reference={reference}"
-            );
-        }
-    }
-}
-
-#[test]
-fn lanczos_homography_horizon_uses_border_and_zero_coverage() {
+fn a_homography_horizon_takes_the_border_and_no_coverage() {
     const WIDTH: usize = 16;
     const HEIGHT: usize = 8;
     const HORIZON_X: usize = 8;
@@ -353,12 +97,7 @@ fn lanczos_homography_horizon_uses_border_and_zero_coverage() {
             assert!(horizon.x > f64::from(i32::MAX));
         }
 
-        for method in [
-            InterpolationMethod::Lanczos2,
-            InterpolationMethod::Lanczos3,
-            InterpolationMethod::Lanczos3,
-            InterpolationMethod::Lanczos4,
-        ] {
+        for method in InterpolationMethod::ALL {
             let params = WarpParams {
                 method,
                 border_value: BORDER,
@@ -392,22 +131,29 @@ fn lanczos_homography_horizon_uses_border_and_zero_coverage() {
     }
 }
 
+/// An image narrower than any Lanczos window is sampled by the bilinear fallback everywhere, which
+/// returns a constant exactly.
 #[test]
-fn warp_tiny_image_smaller_than_lanczos4_kernel() {
+fn an_image_smaller_than_the_kernel_falls_back_exactly() {
     let size = Size2us::new(3, 3);
     let input = Buffer2::new_filled(size.width, size.height, 0.5f32);
-    let mut output = Buffer2::new_default(size.width, size.height);
-    let wt = WarpTransform::new(Transform::identity());
-    let params = config::internals::warp_params(InterpolationMethod::Lanczos4);
-    warp_plane(&input, &mut output, &wt, &params);
-    for &value in output.pixels() {
-        assert!(
-            value.is_finite(),
-            "tiny-image warp produced non-finite {value}"
+    let wt = WarpTransform::new(Transform::translation(DVec2::new(0.3, -0.2)));
+    for method in [
+        InterpolationMethod::Lanczos2,
+        InterpolationMethod::Lanczos3,
+        InterpolationMethod::Lanczos4,
+    ] {
+        let mut output = Buffer2::new_default(size.width, size.height);
+        warp_plane(
+            &input,
+            &mut output,
+            &wt,
+            &config::internals::warp_params(method),
         );
         assert!(
-            (value - 0.5).abs() < 1e-4,
-            "uniform image must stay 0.5, got {value}"
+            output.pixels().iter().all(|&value| value == 0.5),
+            "{method:?}: {:?}",
+            output.pixels()
         );
     }
 }

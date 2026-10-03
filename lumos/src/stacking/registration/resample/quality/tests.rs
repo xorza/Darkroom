@@ -27,14 +27,6 @@ fn quality_of(
             quality::quality_at(position, size, method)
         })
 }
-const INTERPOLATION_METHODS: [InterpolationMethod; 6] = [
-    InterpolationMethod::Nearest,
-    InterpolationMethod::Bilinear,
-    InterpolationMethod::Bicubic,
-    InterpolationMethod::Lanczos2,
-    InterpolationMethod::Lanczos3,
-    InterpolationMethod::Lanczos4,
-];
 
 #[test]
 fn warp_coverage_nearest_identity_is_all_ones() {
@@ -118,7 +110,7 @@ fn source_footprint_boundary_is_inclusive() {
         (3.0, -0.5001),
         (3.0, 5.5001),
     ] {
-        for method in INTERPOLATION_METHODS {
+        for method in InterpolationMethod::ALL {
             let quality = quality_of(x, y, dims, method);
             assert_eq!(quality.coverage, 0.0, "{method:?} at ({x}, {y})");
             assert_eq!(quality.confidence, 0.0, "{method:?} at ({x}, {y})");
@@ -257,7 +249,7 @@ fn support_and_confidence_vanish_together_across_every_border() {
     // Stepping by an awkward fraction sweeps sub-pixel phase instead of landing on pixel centres,
     // and the span reaches a full kernel radius past both borders on each axis.
     const STEP: f32 = 0.157;
-    for method in INTERPOLATION_METHODS {
+    for method in InterpolationMethod::ALL {
         let radius = method.kernel_radius() as f32 + 1.0;
         let mut lowest_survivor = f32::INFINITY;
         let mut partial_support_seen = false;
@@ -308,7 +300,7 @@ fn support_and_confidence_vanish_together_across_every_border() {
 #[test]
 fn coverage_is_continuous_and_monotonic_across_left_border() {
     let dims = Size2us::new(32, 32);
-    for method in INTERPOLATION_METHODS {
+    for method in InterpolationMethod::ALL {
         let radius = method.kernel_radius() as i32;
         let mut previous = 0.0;
         for integer in -radius..=radius {
