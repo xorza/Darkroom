@@ -255,20 +255,8 @@ fn model_row(
                         .placeholder("/path/to/model.onnx");
                     // A broken committed path recolors the field's chrome to
                     // the error tint (message under the row says what's wrong).
-                    let error_style = problem.is_some().then(|| {
-                        let mut style = ui.theme().text_edit.clone();
-                        for look in [
-                            &mut style.looks.normal,
-                            &mut style.looks.hovered,
-                            &mut style.looks.active,
-                        ] {
-                            let bg = &mut look.background;
-                            bg.border = Stroke::new(theme.status.error, bg.border.width);
-                        }
-                        style
-                    });
-                    if let Some(style) = error_style.as_ref() {
-                        edit = edit.style(style);
+                    if problem.is_some() {
+                        edit = edit.style(&theme.path_field_error);
                     }
                     let outcome = DraftOutcome::of(&edit.show(ui));
                     if outcome == DraftOutcome::Cancel {

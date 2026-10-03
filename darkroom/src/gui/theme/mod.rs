@@ -19,7 +19,7 @@ pub(crate) mod status_colors;
 pub(crate) mod type_colors;
 pub(crate) mod type_scale;
 
-use palantir::{ButtonTheme, FontWeight, RgbaF32, TextStyle};
+use palantir::{ButtonTheme, FontWeight, RgbaF32, Stroke, TextEditTheme, TextStyle};
 
 use crate::gui::theme::canvas_theme::CanvasTheme;
 use crate::gui::theme::card_theme::CardTheme;
@@ -111,7 +111,13 @@ pub(crate) struct Theme {
     /// per node per frame just to carry one weight.
     pub(crate) inline_rename_title: InlineRenameTheme,
 
-    /// Look for a menu-bar trigger button (`[menu_button]`). Darkroom's
+    /// The preferences path field's look while its committed path is broken:
+    /// palantir's text edit with every state's border in the error colour.
+    /// Precomputed at construction like `const_value_editor_revealed`, so a
+    /// broken path costs no theme clone per frame.
+    pub(crate) path_field_error: TextEditTheme,
+
+    /// Look for a menu-bar trigger button. Darkroom's
     /// own slot: palantir ships the recipe but no theme field, because
     /// none of its widgets resolve against a menu-bar style — the bar
     /// passes this to [`palantir::Button::style`] itself.
@@ -197,6 +203,7 @@ impl Theme {
             },
         );
         let menu_button = menu_button_for(&pal, palantir.text, &text);
+        let path_field_error = error_bordered(&palantir.text_edit, status.error);
         let inline_rename = InlineRenameTheme::from_palette(&pal);
         let inline_rename_title = inline_rename.clone().with_text(TextStyle {
             weight: FontWeight::BOLD,
@@ -220,9 +227,23 @@ impl Theme {
             inline_rename,
             inline_rename_title,
             menu_button,
+            path_field_error,
             palantir,
         }
     }
+}
+
+/// `base` with every state's border in `color`, its width kept.
+fn error_bordered(base: &TextEditTheme, color: RgbaF32) -> TextEditTheme {
+    let mut style = base.clone();
+    for look in [
+        &mut style.looks.normal,
+        &mut style.looks.hovered,
+        &mut style.looks.active,
+    ] {
+        look.background.border = Stroke::new(color, look.background.border.width);
+    }
+    style
 }
 
 impl Default for Theme {
