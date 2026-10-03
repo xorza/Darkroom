@@ -32,7 +32,6 @@ pub(crate) mod local_contrast;
 pub(crate) mod ml;
 pub(crate) mod rgb;
 pub(crate) mod stretching;
-pub(crate) mod wavelet;
 
 #[cfg(all(test, feature = "bench", feature = "real-data"))]
 mod bench;

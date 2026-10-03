@@ -4,7 +4,7 @@
 //! compressing the **large-scale** brightness while preserving fine detail: à trous starlet
 //! decomposition, attenuate the coarse residual toward its mean, leave the detail layers,
 //! recombine. A **display-domain** (post-stretch) operation, streaming
-//! [`crate::image_ops::wavelet::atrous_smooth`] — see [`hdr_map`] for why the layer pyramid is
+//! [`crate::math::wavelet::atrous_smooth`] — see [`hdr_map`] for why the layer pyramid is
 //! never materialized.
 
 use common::Introspect;
@@ -13,10 +13,10 @@ use rayon::prelude::*;
 use crate::error::InvalidConfigField;
 use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::image_ops::error::OpError;
-use crate::image_ops::wavelet::{atrous_smooth, max_scales};
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::math::sum;
+use crate::math::wavelet::{atrous_smooth, max_scales};
 use imaginarium::Buffer2;
 use std::mem;
 

@@ -3,7 +3,7 @@
 //! exact-reconstructing — `image == residual + Σ layers`, where the detail `w_{j+1} = c_j −
 //! c_{j+1}` telescopes out of successive smooths.
 //!
-//! Shared multiscale primitive: both `denoise` (thresholds the details) and `hdr` (compresses the
+//! Shared multiscale primitive: `denoise` (thresholds the details) and `hdr` (compresses the
 //! coarse residual) **stream** [`atrous_smooth`] over a rolling pair of planes and exploit the
 //! telescoping identity, so the layer pyramid is never materialized.
 

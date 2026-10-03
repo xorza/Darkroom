@@ -137,7 +137,7 @@ mod tests {
     use crate::combine::stack::quantization::{MaxSigma, SourceSigmas};
     use crate::frame_store::frame_facts::FrameFacts;
     use crate::frame_store::frame_stats::FrameStats;
-    use crate::math::statistics::MedianMad;
+    use crate::math::statistics::{MedianMad, mad_to_sigma};
 
     fn stats(quantization_sigma: Option<f32>) -> FrameStats {
         FrameStats {
@@ -147,6 +147,7 @@ mod tests {
             }]
             .into_iter()
             .collect(),
+            noise: [mad_to_sigma(0.1)].into_iter().collect(),
             quantization_sigma,
             facts: FrameFacts {
                 domain: None,

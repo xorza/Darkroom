@@ -23,7 +23,7 @@ use crate::io::image::image_provenance::{
 };
 use crate::io::image::pixel_flags::{Flags, PixelFlags};
 use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
-use crate::math::statistics::MedianMad;
+use crate::math::statistics::{MedianMad, mad_to_sigma};
 use crate::registration::config::{self, InterpolationMethod};
 use crate::registration::resample;
 use crate::registration::transform::{Transform, WarpTransform};
@@ -978,6 +978,7 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
             );
             frame.source_stats = FrameStats {
                 channels: [MedianMad { median, mad }].into_iter().collect(),
+                noise: [mad_to_sigma(mad)].into_iter().collect(),
                 quantization_sigma: None,
                 facts: FrameFacts {
                     domain: None,
@@ -1645,6 +1646,7 @@ fn noise_weighting_folds_normalization_gain() {
         channels.push(MedianMad { median: 0.5, mad });
         FrameStats {
             channels,
+            noise: [mad_to_sigma(mad)].into_iter().collect(),
             quantization_sigma: None,
             facts: FrameFacts {
                 domain: None,

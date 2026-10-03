@@ -1,5 +1,5 @@
-use crate::image_ops::wavelet::{atrous_smooth, max_scales, reflect};
 use crate::internals::prelude::*;
+use crate::math::wavelet::{atrous_smooth, max_scales, reflect};
 
 fn pattern(size: Size2us) -> Buffer2<f32> {
     let px = (0..size.pixel_count())
