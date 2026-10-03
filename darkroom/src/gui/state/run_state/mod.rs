@@ -40,7 +40,7 @@ use palantir::Ui;
 
 use crate::core::document::Document;
 use crate::core::runtime_host::RuntimeHost;
-use crate::core::status::StatusLog;
+use crate::core::status::{StatusFamily, StatusLog};
 use scenarium::CompiledGraph;
 use scenarium::DynamicValue;
 use scenarium::LogLevel;
@@ -228,7 +228,7 @@ impl RunState {
                 if matches!(&error, WorkerError::Execution { .. }) {
                     self.clear();
                 }
-                status.error(error.to_string());
+                status.error(StatusFamily::Run, error.to_string());
             }
             WorkerReport::Activity(activity) => self.activity = activity,
             WorkerReport::Progress { node_id, phase } => self.apply_progress(node_id, phase),
@@ -241,7 +241,7 @@ impl RunState {
                 }
                 // A completed run supersedes any lingering failure message
                 // from an earlier event-loop tick.
-                status.error = None;
+                status.succeeded(StatusFamily::Run);
                 self.activity = summary.activity;
                 self.replace_results(&summary);
             }
