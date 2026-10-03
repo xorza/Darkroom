@@ -25,7 +25,7 @@ const MIN_ROWS_PER_STRIP: usize = 64;
 /// RLE-based connected-component labeling: strip the mask into horizontal bands, label each in
 /// parallel against one shared union-find, stitch the labels across the band boundaries, then
 /// write the dense relabeling back in parallel and collect each component's box and area from
-/// its runs.
+/// its runs. Components are numbered in raster order of their first pixel, whatever the strips.
 ///
 /// Every buffer this needs lives here and is refilled, never reallocated once it is large
 /// enough, so a frame after the first allocates nothing.
@@ -61,7 +61,21 @@ impl Labeler {
         &mut self,
         mask: &BitBuffer2,
         connectivity: Connectivity,
+        labels: Buffer2<u32>,
+    ) -> LabelMap {
+        let height = mask.size.height;
+        let num_strips = (height / MIN_ROWS_PER_STRIP).clamp(1, rayon::current_num_threads());
+        self.label_in_strips(mask, connectivity, labels, num_strips)
+    }
+
+    /// [`Self::label`] cut into `num_strips` bands of `height / num_strips` rows, the last taking
+    /// the remainder. At least one, and at most one per row.
+    fn label_in_strips(
+        &mut self,
+        mask: &BitBuffer2,
+        connectivity: Connectivity,
         mut labels: Buffer2<u32>,
+        num_strips: usize,
     ) -> LabelMap {
         let width = mask.size.width;
         let height = mask.size.height;
@@ -82,8 +96,11 @@ impl Labeler {
             mapping,
             ..
         } = self;
+        debug_assert!(
+            (1..=height).contains(&num_strips),
+            "between one strip and one per row"
+        );
         let words_per_row = mask.words_per_row();
-        let num_strips = (height / MIN_ROWS_PER_STRIP).clamp(1, rayon::current_num_threads());
         let rows_per_strip = height / num_strips;
         let strip_rows = |strip_idx: usize| {
             let end = if strip_idx == num_strips - 1 {
@@ -125,7 +142,12 @@ impl Labeler {
             );
         }
 
-        let count = union_find.build_label_map(mapping);
+        let count = union_find.build_label_map(
+            strips
+                .iter()
+                .flat_map(|strip| strip.runs.iter().map(|&(_, run)| run.label)),
+            mapping,
+        );
         if count == 0 {
             return LabelMap { labels, components };
         }
@@ -263,5 +285,26 @@ fn stitch_boundary(
         }
 
         below_idx += 1;
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use imaginarium::Buffer2;
+
+    use crate::bit_buffer2::BitBuffer2;
+    use crate::stacking::star_detection::config::detection_config::Connectivity;
+    use crate::stacking::star_detection::labeling::LabelMap;
+    use crate::stacking::star_detection::labeling::labeler::Labeler;
+
+    /// Label `mask` in exactly `num_strips` bands, whatever the thread count — so a test reaches
+    /// the stitch across band boundaries on any machine.
+    pub(crate) fn label_in_strips(
+        mask: &BitBuffer2,
+        connectivity: Connectivity,
+        num_strips: usize,
+    ) -> LabelMap {
+        let labels = Buffer2::new_filled(mask.size.width, mask.size.height, 0u32);
+        Labeler::default().label_in_strips(mask, connectivity, labels, num_strips)
     }
 }

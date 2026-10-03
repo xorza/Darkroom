@@ -44,8 +44,7 @@ pub(super) fn process_words_scalar<const WITH_BG: bool>(
             }
 
             let px = pixels[px_idx];
-            let mut threshold =
-                threshold_params.sigma * noise[px_idx].max(threshold_params.min_noise);
+            let mut threshold = threshold_params.level(noise[px_idx]);
             if WITH_BG {
                 threshold += bg[px_idx];
             }

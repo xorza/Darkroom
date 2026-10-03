@@ -2,12 +2,16 @@
 //!
 //! The deblender's defining job is to split N known blended sources into exactly N peaks, so
 //! these assert the *exact* resolved count and that each true position is recovered — a lower
-//! bound (`>= N`) would pass a deblender that under-splits or fragments a single star. A knob
-//! sweep pins that the contrast threshold actually controls the split.
+//! bound (`>= N`) would pass a deblender that under-splits or fragments a single star. Every
+//! fixture is checked to be one connected component first, and the contrast and the separation
+//! are each shown to move the split.
 
 use crate::math::fwhm::fwhm_to_sigma;
 use crate::stacking::star_detection::config::detection_config::{Deblend, DetectionConfig};
-use crate::stacking::star_detection::detector::stages::detect::internals::detect_stars_test;
+use crate::stacking::star_detection::deblend::region::Region;
+use crate::stacking::star_detection::detector::stages::detect::internals::{
+    detect_stars_test, detect_test,
+};
 use crate::stacking::star_detection::tests::stage_effects::{background_estimate, matched_truths};
 use crate::testing::prelude::*;
 use crate::testing::synthetic::background_map;
@@ -40,29 +44,45 @@ fn deblend_config(n_thresholds: usize, min_contrast: f32) -> DetectionConfig {
     }
 }
 
-#[test]
-fn deblend_resolves_equal_pair_into_exactly_two() {
-    let size = Size2us::new(256, 256);
-    let fwhm = 4.0;
-    let sigma = fwhm_to_sigma(fwhm);
-    let sep = fwhm * 2.5;
-    let (x1, x2, y) = (128.0 - sep / 2.0, 128.0 + sep / 2.0, 128.0);
-    let pixels = field(size, sigma, &[(x1, y, 0.15), (x2, y, 0.15)], 42);
+/// Detect `stars` (σ for a 4 px FWHM) on [`DETECTION_SKY`] at `contrast`. When they come out as
+/// more than one region, exactly one component must have been split — the stars shared it, so
+/// the split is the deblender's and not the threshold's.
+fn deblend_blend(size: Size2us, stars: &[(f32, f32, f32)], contrast: f32) -> Vec<Region> {
+    let pixels = field(size, fwhm_to_sigma(4.0), stars, 42);
     let background = background_estimate(&pixels);
-
-    let candidates = detect_stars_test(
+    let result = detect_test(
         &background.residual_of(&pixels),
         &background.sky_noise(),
-        &deblend_config(32, 0.005),
+        &deblend_config(32, contrast),
+    );
+    let expected_splits = usize::from(result.regions.len() > 1);
+    assert_eq!(
+        result.deblended_components, expected_splits,
+        "the stars must be one blended component"
+    );
+    result.regions
+}
+
+// At 1.5 FWHM = 6 px apart (σ = 1.70), the saddle between two stars holds 2·A·e^(−9/5.77) =
+// 0.42·A, which keeps a 0.15 pair (0.063) above the 0.04 threshold: one component, two peaks.
+// At 2.5 FWHM the saddle is 0.027·A and the pair is two components before any deblending.
+const SEPARATION: f32 = 6.0;
+
+#[test]
+fn deblend_resolves_equal_pair_into_exactly_two() {
+    let (x1, x2, y) = (128.0 - SEPARATION / 2.0, 128.0 + SEPARATION / 2.0, 128.0);
+    let candidates = deblend_blend(
+        Size2us::new(256, 256),
+        &[(x1, y, 0.15), (x2, y, 0.15)],
+        0.005,
     );
     assert_eq!(
         candidates.len(),
         2,
-        "equal pair at 2.5 FWHM must split into exactly 2, got {}",
-        candidates.len()
+        "an equal pair must split into exactly 2"
     );
     assert_eq!(
-        matched_truths(&candidates, &[(x1, y), (x2, y)], sigma),
+        matched_truths(&candidates, &[(x1, y), (x2, y)], fwhm_to_sigma(4.0)),
         2,
         "both true positions must be recovered"
     );
@@ -70,29 +90,18 @@ fn deblend_resolves_equal_pair_into_exactly_two() {
 
 #[test]
 fn deblend_resolves_chain_of_five() {
-    let size = Size2us::new(256, 128);
-    let fwhm = 4.0;
-    let sigma = fwhm_to_sigma(fwhm);
-    let sep = fwhm * 2.5;
-    let star_y = 64.0;
-    let truths: Vec<(f32, f32)> = (0..5).map(|i| (100.0 + i as f32 * sep, star_y)).collect();
+    let truths: Vec<(f32, f32)> = (0..5)
+        .map(|i| (100.0 + i as f32 * SEPARATION, 64.0))
+        .collect();
     let stars: Vec<(f32, f32, f32)> = truths.iter().map(|&(x, y)| (x, y, 0.15)).collect();
-    let pixels = field(size, sigma, &stars, 42);
-    let background = background_estimate(&pixels);
-
-    let candidates = detect_stars_test(
-        &background.residual_of(&pixels),
-        &background.sky_noise(),
-        &deblend_config(32, 0.005),
-    );
+    let candidates = deblend_blend(Size2us::new(256, 128), &stars, 0.005);
     assert_eq!(
         candidates.len(),
         5,
-        "chain of 5 at 2.5 FWHM must split into exactly 5, got {}",
-        candidates.len()
+        "a chain of 5 must split into exactly 5"
     );
     assert_eq!(
-        matched_truths(&candidates, &truths, sigma),
+        matched_truths(&candidates, &truths, fwhm_to_sigma(4.0)),
         5,
         "every chain member must be recovered"
     );
@@ -100,59 +109,41 @@ fn deblend_resolves_chain_of_five() {
 
 #[test]
 fn deblend_resolves_unequal_pair() {
-    let size = Size2us::new(256, 256);
-    let fwhm = 4.0;
-    let sigma = fwhm_to_sigma(fwhm);
-    let sep = fwhm * 2.5;
-    let (x1, x2, y) = (128.0 - sep / 2.0, 128.0 + sep / 2.0, 128.0);
-    // Bright (~20σ) + faint (~5σ companion).
-    let pixels = field(size, sigma, &[(x1, y, 0.20), (x2, y, 0.05)], 42);
-    let background = background_estimate(&pixels);
+    // A 0.20 star with a 0.10 companion: the saddle holds 0.30·0.21 = 0.063 and the companion
+    // peaks at 0.10, above it, so it is a branch of its own. It holds 0.10 / 0.30 = 1/3 of the
+    // pair's flux at most: a contrast of 0.005 splits it off, 0.5 keeps the pair whole.
+    let (x1, x2, y) = (128.0 - SEPARATION / 2.0, 128.0 + SEPARATION / 2.0, 128.0);
+    let stars = [(x1, y, 0.20), (x2, y, 0.10)];
 
-    let candidates = detect_stars_test(
-        &background.residual_of(&pixels),
-        &background.sky_noise(),
-        &deblend_config(32, 0.005),
-    );
+    let split = deblend_blend(Size2us::new(256, 256), &stars, 0.005);
+    assert_eq!(split.len(), 2, "the unequal pair must split into exactly 2");
     assert_eq!(
-        candidates.len(),
-        2,
-        "unequal pair must split into exactly 2, got {}",
-        candidates.len()
-    );
-    assert_eq!(
-        matched_truths(&candidates, &[(x1, y), (x2, y)], sigma),
+        matched_truths(&split, &[(x1, y), (x2, y)], fwhm_to_sigma(4.0)),
         2,
         "both bright and faint companion must be recovered"
     );
+    let whole = deblend_blend(Size2us::new(256, 256), &stars, 0.5);
+    assert_eq!(whole.len(), 1, "a 0.5 contrast must keep the pair whole");
 }
 
 #[test]
 fn deblend_separation_controls_split() {
-    // The separation at which a blended equal pair resolves is the deblender's defining knob:
-    // far apart → two peaks, very close → merged into one.
-    let size = Size2us::new(256, 256);
-    let fwhm = 4.0;
-    let sigma = fwhm_to_sigma(fwhm);
-    let pair_count = |sep_fwhm: f32| -> usize {
-        let sep = fwhm * sep_fwhm;
+    // 6 px apart the pair resolves into two; 2 px apart its peaks are one.
+    let pair_count = |sep: f32| {
         let (x1, x2, y) = (128.0 - sep / 2.0, 128.0 + sep / 2.0, 128.0);
-        let pixels = field(size, sigma, &[(x1, y, 0.15), (x2, y, 0.15)], 42);
-        let background = background_estimate(&pixels);
-        detect_stars_test(
-            &background.residual_of(&pixels),
-            &background.sky_noise(),
-            &deblend_config(32, 0.005),
+        deblend_blend(
+            Size2us::new(256, 256),
+            &[(x1, y, 0.15), (x2, y, 0.15)],
+            0.005,
         )
         .len()
     };
-    let wide = pair_count(2.5);
-    let touching = pair_count(0.5);
-    assert_eq!(wide, 2, "a well-separated pair must resolve into 2");
-    assert!(
-        touching < wide,
-        "a near-coincident pair must merge: touching {touching} vs wide {wide}"
+    assert_eq!(
+        pair_count(SEPARATION),
+        2,
+        "a resolved pair must split into 2"
     );
+    assert_eq!(pair_count(2.0), 1, "a near-coincident pair must merge");
 }
 
 /// Both deblenders decide on the residual, so a sky pedestal under the same blend changes nothing.

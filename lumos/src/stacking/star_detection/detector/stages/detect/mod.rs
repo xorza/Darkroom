@@ -244,8 +244,18 @@ pub(crate) mod internals {
         sky: &SkyNoise,
         config: &DetectionConfig,
     ) -> Vec<Region> {
+        detect_test(residual, sky, config).regions
+    }
+
+    /// [`detect_stars_test`] with the stage's whole result: the regions and the counts behind
+    /// them.
+    pub(crate) fn detect_test(
+        residual: &Buffer2<f32>,
+        sky: &SkyNoise,
+        config: &DetectionConfig,
+    ) -> DetectResult {
         let mut pool = DetectionResources::new(Size2us::new(residual.width(), residual.height()));
-        DetectResult::from_image(residual, sky, None, config, &mut pool).regions
+        DetectResult::from_image(residual, sky, None, config, &mut pool)
     }
 }
 

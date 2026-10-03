@@ -3,7 +3,7 @@
 use std::ops::Range;
 
 use crate::stacking::star_detection::threshold_mask::ThresholdParams;
-use crate::stacking::star_detection::threshold_mask::internals::{TEST_MIN_NOISE, test_params};
+use crate::stacking::star_detection::threshold_mask::internals::test_params;
 #[cfg(target_arch = "x86_64")]
 use crate::stacking::star_detection::threshold_mask::simd::avx2::process_words_avx2;
 #[cfg(target_arch = "aarch64")]
@@ -63,11 +63,11 @@ fn sweep_widths() -> Vec<usize> {
         .collect()
 }
 
-/// The threshold the kernels compare against, written as they write it so a pixel set to it lands
-/// exactly on the boundary rather than near it.
+/// The threshold the kernels compare against, from the level they all compute, so a pixel set to
+/// it lands exactly on the boundary rather than near it.
 fn threshold_at(with_bg: bool, bg: f32, noise: f32, sigma: f32) -> f32 {
-    let threshold = sigma * noise.max(TEST_MIN_NOISE);
-    if with_bg { threshold + bg } else { threshold }
+    let level = test_params(sigma).level(noise);
+    if with_bg { level + bg } else { level }
 }
 
 /// One backend mode against the scalar reference, over every shared data shape and width.
@@ -77,7 +77,7 @@ fn threshold_at(with_bg: bool, bg: f32, noise: f32, sigma: f32) -> f32 {
 /// `bg + σ·noise` unfused — a contracted multiply-add would round differently from this reference.
 ///
 /// The inputs lean on the shared shapes for coverage, and add what is specific to this kernel:
-/// `noise` takes the `negative` shape among others, which exercises the [`TEST_MIN_NOISE`] clamp both
+/// `noise` takes the `negative` shape among others, which exercises the `TEST_MIN_NOISE` clamp both
 /// paths must apply identically, and pixels are forced onto the exact threshold at both word edges
 /// and in the tail, where a strict `>` must leave them unset.
 fn assert_mode_matches_scalar(

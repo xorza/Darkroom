@@ -3,7 +3,7 @@
 
 use crate::stacking::star_detection::deblend::component::Component;
 use crate::stacking::star_detection::deblend::internals::{
-    TestComponent, deblend_multi_threshold_test, make_test_component,
+    TestComponent, deblend_multi_threshold_test, make_test_component, separated_pair,
 };
 use crate::stacking::star_detection::deblend::local_maxima::deblend_local_maxima;
 use crate::testing::prelude::*;
@@ -52,21 +52,7 @@ fn local_vs_multi_threshold_two_stars() {
         pixels,
         labels,
         data,
-    } = make_test_component(
-        Size2us::new(100, 100),
-        &[
-            SyntheticStar::new(
-                Vec2::new(30.0, 50.0),
-                1.0,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-            SyntheticStar::new(
-                Vec2::new(70.0, 50.0),
-                0.8,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-        ],
-    );
+    } = separated_pair(0.8);
 
     // Local maxima deblending
     let local_result = deblend_local_maxima(

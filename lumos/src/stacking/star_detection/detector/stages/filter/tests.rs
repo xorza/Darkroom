@@ -78,10 +78,8 @@ fn filter_returns_the_diagnostics_stored_by_the_detector() {
 
 /// FWHM outlier rejection over every case that mattered, as one table.
 ///
-/// Each row pins the *surviving fluxes in order*, which is stronger than the removed-count the
-/// eleven tests this replaces asserted. Fluxes are distinct and exactly representable, so the
-/// sequence identifies precisely which stars survived — and because it is a sequence, it also
-/// subsumes the separate order-preservation test.
+/// Each row pins the *surviving fluxes in order*. Fluxes are distinct and exactly representable,
+/// so the sequence identifies precisely which stars survived, and in what order.
 ///
 /// The reference set is the first `max(len / 2, 5)` stars *in the order given*, which is why every
 /// fixture is built brightest-first: production sorts by flux before calling this. `max_fwhm` is
@@ -238,168 +236,198 @@ fn filter_fwhm_outliers_over_every_case() {
     }
 }
 
-/// Deduplication over every geometry that mattered, as one table.
+/// Deduplication over every geometry that mattered, as one table, through both the brute-force
+/// and the spatial-hash path — the dispatcher picks by star count, so neither path alone would
+/// see every row.
 ///
-/// Each case pins the *surviving fluxes in order*, which is stronger than what most of the
-/// fifteen tests this replaces asserted — they checked a count, and sometimes one coordinate.
-/// Fluxes are distinct within every case, so the expected sequence identifies exactly which
-/// stars survived and in what order.
+/// Each case pins the *surviving fluxes in order*. Fluxes are distinct within every case, so the
+/// expected sequence identifies exactly which stars survived and in what order.
 #[test]
 fn remove_duplicate_stars_over_every_geometry() {
     struct Case {
         /// `(x, y, flux)` in input order — the order the function actually honours.
-        stars: &'static [(f64, f64, f32)],
+        stars: Vec<(f64, f64, f32)>,
         separation: f32,
         /// Fluxes of the survivors, in order.
-        survivors: &'static [f32],
+        survivors: Vec<f32>,
         why: &'static str,
     }
 
     let cases = [
         Case {
-            stars: &[],
+            stars: vec![],
             separation: 8.0,
-            survivors: &[],
+            survivors: vec![],
             why: "nothing to dedupe",
         },
         Case {
-            stars: &[(10.0, 10.0, 100.0)],
+            stars: vec![(10.0, 10.0, 100.0)],
             separation: 8.0,
-            survivors: &[100.0],
+            survivors: vec![100.0],
             why: "one star is never its own duplicate",
         },
         Case {
-            stars: &[
+            stars: vec![
                 (10.0, 10.0, 100.0),
                 (50.0, 50.0, 90.0),
                 (100.0, 100.0, 80.0),
             ],
             separation: 8.0,
-            survivors: &[100.0, 90.0, 80.0],
+            survivors: vec![100.0, 90.0, 80.0],
             why: "all far apart",
         },
         Case {
-            stars: &[(10.0, 10.0, 100.0), (12.0, 12.0, 90.0), (50.0, 50.0, 80.0)],
+            stars: vec![(10.0, 10.0, 100.0), (12.0, 12.0, 90.0), (50.0, 50.0, 80.0)],
             separation: 8.0,
-            survivors: &[100.0, 80.0],
+            survivors: vec![100.0, 80.0],
             why: "one pair at 2.83, one star far off",
         },
         Case {
-            stars: &[(10.0, 10.0, 100.0), (11.0, 11.0, 50.0)],
+            stars: vec![(10.0, 10.0, 100.0), (11.0, 11.0, 50.0)],
             separation: 8.0,
-            survivors: &[100.0],
+            survivors: vec![100.0],
             why: "brightest-first input keeps the bright one",
         },
         Case {
             // The documented precondition: it keeps the FIRST of a cluster and never reads
             // `.flux`. Callers sort by flux beforehand; this is what skipping that gets you.
-            stars: &[(11.0, 11.0, 50.0), (10.0, 10.0, 100.0)],
+            stars: vec![(11.0, 11.0, 50.0), (10.0, 10.0, 100.0)],
             separation: 8.0,
-            survivors: &[50.0],
+            survivors: vec![50.0],
             why: "unsorted input keeps first, not brightest",
         },
         Case {
-            stars: &[(10.0, 10.0, 100.0), (16.0, 16.0, 90.0)],
+            stars: vec![(10.0, 10.0, 100.0), (16.0, 16.0, 90.0)],
             separation: 8.0,
-            survivors: &[100.0, 90.0],
+            survivors: vec![100.0, 90.0],
             why: "sqrt(6^2+6^2) = 8.485, outside 8.0",
         },
         Case {
             // The boundary itself. The comparison is strictly less than, so a pair exactly
             // `separation` apart survives; a hair inside it does not.
-            stars: &[(10.0, 10.0, 100.0), (18.0, 10.0, 90.0)],
+            stars: vec![(10.0, 10.0, 100.0), (18.0, 10.0, 90.0)],
             separation: 8.0,
-            survivors: &[100.0, 90.0],
+            survivors: vec![100.0, 90.0],
             why: "distance == separation is kept",
         },
         Case {
-            stars: &[(10.0, 10.0, 100.0), (17.999, 10.0, 90.0)],
+            stars: vec![(10.0, 10.0, 100.0), (17.999, 10.0, 90.0)],
             separation: 8.0,
-            survivors: &[100.0],
+            survivors: vec![100.0],
             why: "a hair inside the boundary is removed",
         },
         Case {
-            stars: &[(10.0, 10.0, 100.0), (15.0, 15.0, 90.0)],
+            stars: vec![(10.0, 10.0, 100.0), (15.0, 15.0, 90.0)],
             separation: 8.0,
-            survivors: &[100.0],
+            survivors: vec![100.0],
             why: "sqrt(5^2+5^2) = 7.07, inside 8.0",
         },
         Case {
-            stars: &[(10.0, 10.0, 100.0), (12.0, 10.0, 90.0), (14.0, 10.0, 80.0)],
+            stars: vec![(10.0, 10.0, 100.0), (12.0, 10.0, 90.0), (14.0, 10.0, 80.0)],
             separation: 8.0,
-            survivors: &[100.0],
+            survivors: vec![100.0],
             why: "cluster of three collapses to the first",
         },
         Case {
-            stars: &[
+            stars: vec![
                 (10.0, 10.0, 100.0),
                 (12.0, 10.0, 90.0),
                 (100.0, 100.0, 80.0),
                 (102.0, 100.0, 70.0),
             ],
             separation: 8.0,
-            survivors: &[100.0, 80.0],
+            survivors: vec![100.0, 80.0],
             why: "two pairs, far apart from each other",
         },
         Case {
             // Chained: 5 is inside 8 of the first, 10 is not, and 20 is clear of 10.
-            stars: &[
+            stars: vec![
                 (0.0, 0.0, 100.0),
                 (5.0, 0.0, 90.0),
                 (10.0, 0.0, 80.0),
                 (20.0, 0.0, 70.0),
             ],
             separation: 8.0,
-            survivors: &[100.0, 80.0, 70.0],
+            survivors: vec![100.0, 80.0, 70.0],
             why: "a removed star cannot shadow the next",
         },
         Case {
-            stars: &[(10.0, 10.0, 100.0), (10.0, 15.0, 90.0), (10.0, 25.0, 80.0)],
+            // Twenty stars 0.5 px apart from x = 10: those up to 17.5 are inside 8 of the first,
+            // the one at 18.0 is exactly 8 away and stays, and 18.5..19.5 fall inside 8 of it.
+            stars: (0..20)
+                .map(|i| (10.0 + f64::from(i) * 0.5, 10.0, 100.0 - i as f32))
+                .collect(),
             separation: 8.0,
-            survivors: &[100.0, 80.0],
+            survivors: vec![100.0, 84.0],
+            why: "a dense run keeps its first and the first star 8 px on",
+        },
+        Case {
+            stars: vec![(10.0, 10.0, 100.0), (10.0, 15.0, 90.0), (10.0, 25.0, 80.0)],
+            separation: 8.0,
+            survivors: vec![100.0, 80.0],
             why: "separation is euclidean, not per-axis",
         },
         Case {
-            stars: &[(10.0, 10.0, 100.0), (10.0, 10.0, 90.0), (10.0, 10.0, 80.0)],
+            stars: vec![(10.0, 10.0, 100.0), (10.0, 10.0, 90.0), (10.0, 10.0, 80.0)],
             separation: 8.0,
-            survivors: &[100.0],
+            survivors: vec![100.0],
             why: "coincident stars collapse to one",
         },
         Case {
-            stars: &[(10.0, 10.0, 100.0), (30.0, 10.0, 90.0), (50.0, 10.0, 80.0)],
+            stars: vec![(10.0, 10.0, 100.0), (30.0, 10.0, 90.0), (50.0, 10.0, 80.0)],
             separation: 25.0,
-            survivors: &[100.0, 80.0],
+            survivors: vec![100.0, 80.0],
             why: "20 < 25 removed, 40 >= 25 kept",
         },
         Case {
-            stars: &[
+            // Cells are `separation` wide: x = 49 and 51 sit in cells 9 and 10 at separation 5.
+            stars: vec![(49.0, 50.0, 100.0), (51.0, 50.0, 90.0)],
+            separation: 5.0,
+            survivors: vec![100.0],
+            why: "a duplicate across a cell boundary",
+        },
+        Case {
+            stars: vec![(49.0, 49.0, 100.0), (51.0, 51.0, 90.0), (56.0, 49.0, 80.0)],
+            separation: 5.0,
+            survivors: vec![100.0, 80.0],
+            why: "a duplicate in the diagonal cell; 7 px on, two cells over, is kept",
+        },
+        Case {
+            stars: vec![
                 (10.0, 10.0, 100.0),
                 (12.0, 10.0, 95.0),
                 (50.0, 50.0, 90.0),
                 (100.0, 100.0, 85.0),
             ],
             separation: 8.0,
-            survivors: &[100.0, 90.0, 85.0],
+            survivors: vec![100.0, 90.0, 85.0],
             why: "survivors keep their input order",
         },
     ];
 
+    type Path = fn(&mut Vec<Star>, f32) -> usize;
+    let paths: [(&str, Path); 2] = [
+        ("simple", remove_duplicate_stars_simple),
+        ("hashed", remove_duplicate_stars_hashed),
+    ];
     for case in &cases {
-        let mut stars: Vec<Star> = case
-            .stars
-            .iter()
-            .map(|&(x, y, flux)| Star::at(DVec2::new(x, y)).with_flux(flux))
-            .collect();
-        let removed = remove_duplicate_stars(&mut stars, case.separation);
+        for (path, dedupe) in paths {
+            let mut stars: Vec<Star> = case
+                .stars
+                .iter()
+                .map(|&(x, y, flux)| Star::at(DVec2::new(x, y)).with_flux(flux))
+                .collect();
+            let removed = dedupe(&mut stars, case.separation);
 
-        let survivors: Vec<f32> = stars.iter().map(|s| s.flux).collect();
-        assert_eq!(survivors, case.survivors, "{}", case.why);
-        assert_eq!(
-            removed,
-            case.stars.len() - case.survivors.len(),
-            "{}: removed count disagrees with the survivors",
-            case.why
-        );
+            let survivors: Vec<f32> = stars.iter().map(|s| s.flux).collect();
+            assert_eq!(survivors, case.survivors, "{path}: {}", case.why);
+            assert_eq!(
+                removed,
+                case.stars.len() - case.survivors.len(),
+                "{path}: {}: removed count disagrees with the survivors",
+                case.why
+            );
+        }
     }
 }
 
@@ -417,115 +445,11 @@ fn zero_separation_removes_nothing_on_either_path() {
     }
 }
 
-#[test]
-fn remove_duplicate_stars_many_duplicates() {
-    // 20 stars along x=10..19.5, y=10, spacing=0.5px, all within 8px of star[0]
-    // Star[0] at x=10 has highest flux (100), so it survives.
-    // Stars at x=10.5..19.5 are within 9.5px of star[0].
-    // All stars within 8px of any brighter star get removed.
-    // Star at x=18.0 is 8.0px from star[0] — at boundary (not removed since
-    // distance must be strictly less). But star at x=17.5 is 7.5 < 8.0 → removed.
-    let mut stars: Vec<Star> = (0..20)
-        .map(|i| {
-            Star::at(DVec2::new(10.0 + (f64::from(i) * 0.5), 10.0)).with_flux(100.0 - i as f32)
-        })
-        .collect();
-
-    let removed = remove_duplicate_stars(&mut stars, 8.0);
-
-    // Star[0] (x=10.0, flux=100): kept.
-    // Stars[1..16] (x=10.5..17.5): dist < 8.0 from star[0] → removed (15 stars).
-    // Star[16] (x=18.0, flux=84): dist = 8.0 from star[0]. 8^2 = 64 is NOT < 64 → kept.
-    // Stars[17..20] (x=18.5..19.5): dist < 8.0 from star[16] → removed (3 stars).
-    // Total: 15 + 3 = 18 removed, 2 survivors.
-    assert_eq!(
-        removed, 18,
-        "Should remove 18 of 20 clustered stars, removed {removed}"
-    );
-    assert_eq!(stars.len(), 2, "Star[0] and star[16] should survive");
-}
-
-#[test]
-fn remove_duplicate_stars_spatial_hash_path() {
-    // Test with >100 stars to exercise spatial hashing code path
-    // Create a grid of stars with some duplicates
-    let mut stars: Vec<Star> = Vec::new();
-
-    // Create 150 stars in a grid pattern (15x10)
-    for y in 0..10 {
-        for x in 0..15 {
-            let px = f64::from(x) * 20.0 + 10.0; // 20 pixel spacing
-            let py = f64::from(y) * 20.0 + 10.0;
-            let flux = 1000.0 - (y * 15 + x) as f32; // Decreasing flux
-            stars.push(Star::at(DVec2::new(px, py)).with_flux(flux));
-        }
-    }
-
-    // Add some duplicates close to existing stars
-    stars.push(Star::at(DVec2::new(12.0, 12.0)).with_flux(50.0)); // Close to (10, 10)
-    stars.push(Star::at(DVec2::new(32.0, 12.0)).with_flux(45.0)); // Close to (30, 10)
-    stars.push(Star::at(DVec2::new(52.0, 32.0)).with_flux(40.0)); // Close to (50, 30)
-
-    // Sort by flux (required)
-    stars.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
-
-    let initial_count = stars.len();
-    let removed = remove_duplicate_stars(&mut stars, 8.0);
-
-    // Should remove the 3 duplicates
-    assert_eq!(removed, 3);
-    assert_eq!(stars.len(), initial_count - 3);
-
-    // Verify no remaining stars are too close
-    for i in 0..stars.len() {
-        for j in (i + 1)..stars.len() {
-            let dx = stars[i].pos.x - stars[j].pos.x;
-            let dy = stars[i].pos.y - stars[j].pos.y;
-            let dist_sq = dx * dx + dy * dy;
-            assert!(
-                dist_sq >= 64.0, // 8.0^2
-                "Stars at ({}, {}) and ({}, {}) are too close: dist={}",
-                stars[i].pos.x,
-                stars[i].pos.y,
-                stars[j].pos.x,
-                stars[j].pos.y,
-                dist_sq.sqrt()
-            );
-        }
-    }
-}
-
-#[test]
-fn remove_duplicate_stars_spatial_hash_edge_cases() {
-    // Test edge cases for spatial hashing: stars at grid cell boundaries
-    let mut stars: Vec<Star> = Vec::new();
-
-    // Create 200 stars spread across a large area
-    for i in 0..200 {
-        let x = f64::from(i % 20) * 100.0 + 50.0;
-        let y = f64::from(i / 20) * 100.0 + 50.0;
-        stars.push(Star::at(DVec2::new(x, y)).with_flux(1000.0 - i as f32));
-    }
-
-    // Add duplicates at cell boundaries (separation = 5.0, so cell size = 5.0)
-    // Star at boundary between cells
-    stars.push(Star::at(DVec2::new(52.0, 50.0)).with_flux(10.0)); // Close to (50, 50)
-
-    stars.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
-
-    let removed = remove_duplicate_stars(&mut stars, 5.0);
-
-    assert_eq!(removed, 1);
-    assert_eq!(stars.len(), 200);
-}
-
+/// The two paths agree star for star on 500 random positions — the dispatcher's own choice, the
+/// hash at this count, against the brute force.
 #[test]
 fn remove_duplicate_stars_spatial_hash_consistency() {
-    // Verify spatial hash gives same results as simple algorithm
     let mut rng = TestRng::new(12345);
-
-    // Generate 500 random stars. The positions stay f32-derived so the RNG stream, and with it
-    // the fixture, is unchanged by the widening to DVec2.
     let base_stars: Vec<Star> = (0..500)
         .map(|i| {
             let x = f64::from(rng.next_f32() * 1000.0);
@@ -534,32 +458,59 @@ fn remove_duplicate_stars_spatial_hash_consistency() {
         })
         .collect();
 
-    // Run with spatial hash (>100 stars)
     let mut stars_hash = base_stars.clone();
-    stars_hash.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
     let removed_hash = remove_duplicate_stars(&mut stars_hash, 10.0);
-
-    // Run with simple algorithm (force by using small chunks)
     let mut stars_simple = base_stars;
-    stars_simple.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
     let removed_simple = remove_duplicate_stars_simple(&mut stars_simple, 10.0);
 
-    // Results should match
-    assert_eq!(
-        removed_hash, removed_simple,
-        "Spatial hash removed {removed_hash} but simple removed {removed_simple}"
+    assert!(
+        removed_hash > 0,
+        "the fixture must have duplicates to agree on"
     );
-    assert_eq!(stars_hash.len(), stars_simple.len());
+    assert_eq!(removed_hash, removed_simple);
+    let positions = |stars: &[Star]| stars.iter().map(|s| s.pos).collect::<Vec<_>>();
+    assert_eq!(positions(&stars_hash), positions(&stars_simple));
+}
 
-    // Verify same stars kept (by position)
-    for (h, s) in stars_hash.iter().zip(stars_simple.iter()) {
-        assert!(
-            (h.pos.x - s.pos.x).abs() < 0.001 && (h.pos.y - s.pos.y).abs() < 0.001,
-            "Mismatch: hash({}, {}) vs simple({}, {})",
-            h.pos.x,
-            h.pos.y,
-            s.pos.x,
-            s.pos.y
-        );
+/// Each quality test on its bound passes — every criterion rejects strictly beyond it — and a star
+/// failing two criteria is counted under the first one checked: saturation, SNR, eccentricity,
+/// sharpness, roundness.
+#[test]
+fn rejection_bounds_and_precedence() {
+    let config = FilterConfig::default();
+    let base = Star::at(DVec2::ZERO);
+    let round = |ground: f32| Roundness {
+        ground,
+        sround: 0.0,
+    };
+    let cases = [
+        (base.with_snr(config.min_snr), None),
+        (base.with_eccentricity(config.max_eccentricity), None),
+        (base.with_sharpness(config.max_sharpness), None),
+        (base.with_roundness(round(config.max_roundness)), None),
+        (base.with_roundness(round(-config.max_roundness)), None),
+        (base.with_snr(9.99), Some(Rejection::LowSnr)),
+        (base.with_eccentricity(0.61), Some(Rejection::Eccentric)),
+        (base.with_sharpness(0.71), Some(Rejection::CosmicRay)),
+        (base.with_roundness(round(-0.51)), Some(Rejection::NotRound)),
+        (
+            base.with_saturated(true).with_snr(1.0),
+            Some(Rejection::Saturated),
+        ),
+        (
+            base.with_snr(1.0).with_eccentricity(0.9),
+            Some(Rejection::LowSnr),
+        ),
+        (
+            base.with_eccentricity(0.9).with_sharpness(0.9),
+            Some(Rejection::Eccentric),
+        ),
+        (
+            base.with_sharpness(0.9).with_roundness(round(0.9)),
+            Some(Rejection::CosmicRay),
+        ),
+    ];
+    for (star, expected) in cases {
+        assert_eq!(Rejection::of(&star, &config), expected, "{star:?}");
     }
 }

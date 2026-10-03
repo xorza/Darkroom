@@ -148,9 +148,15 @@ fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
     }
 
     if stars.len() < SPATIAL_HASH_CROSSOVER {
-        return remove_duplicate_stars_simple(stars, min_separation);
+        remove_duplicate_stars_simple(stars, min_separation)
+    } else {
+        remove_duplicate_stars_hashed(stars, min_separation)
     }
+}
 
+/// The spatial-hash path of [`remove_duplicate_stars`]: the same answer in O(stars).
+fn remove_duplicate_stars_hashed(stars: &mut Vec<Star>, min_separation: f32) -> usize {
+    debug_assert!(min_separation > 0.0, "the cell size is the separation");
     let min_sep_sq = f64::from(min_separation * min_separation);
     let cell_size = f64::from(min_separation);
 
