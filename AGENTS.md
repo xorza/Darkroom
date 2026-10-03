@@ -35,6 +35,11 @@ from their own directory: from the root, `cargo fmt -p` rejects them and
 them, `Cargo.toml` above all, must stay valid in a standalone checkout; never
 make them inherit from this workspace.
 
+`libraw-sys/LibRaw` is upstream LibRaw at a release tag, compiled and bound by
+`libraw-sys/build.rs`; never edit it. Bindgen needs libclang: Xcode tools on
+macOS, "C++ Clang tools" or `winget install LLVM.LLVM` on Windows,
+`libclang-dev` on Linux.
+
 ## Verification
 
 Per touched member crate:

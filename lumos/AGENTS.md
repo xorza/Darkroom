@@ -38,16 +38,20 @@ Benches are quickbench `#[test] #[ignore]` functions in `bench.rs` files, compil
 the `bench` feature: `cargo test -p lumos --release --features bench <filter> -- --ignored --nocapture`.
 
 A change to a vector kernel (anything under `simd::Isa`) is also checked for code that fell out
-of line. A function the `#[target_feature]` entry does not inline runs without AVX2 and FMA, so
-the kernel stays correct but slows by an order of magnitude, and no test fails. This must print
-`0`:
+of line. A function the `#[target_feature]` entry does not inline runs without AVX2 and FMA in a
+build below x86-64-v3, so the kernel stays correct but slows by an order of magnitude, and no
+test fails. This must print `0`:
 
 ```
 cargo rustc -p lumos --release --lib -- --emit=asm && grep -E "call.*(Avx2|core_arch)" $(ls -t ../target/release/deps/lumos-*.s | head -1) | grep -vc 5enter
 ```
 
 It catches a missing `#[inline(always)]` and a closure that calls a vector op. Plain AVX
-intrinsics are no witness: the workspace enables `+f16c`, which implies AVX everywhere.
+intrinsics are no witness: the workspace builds for x86-64-v3, which enables AVX2 and FMA
+everywhere.
+
+That flag (`.cargo/config.toml`) may be turned off. Never rely on it: keep the runtime ISA
+dispatch, and keep every kernel correct and fast without it.
 
 `real-data` runs the tests that read the gitignored ~7.4 GB dataset in
 `test_data/lumos_data/` — only when asked. Its ML tests also need ONNX weights

@@ -22,7 +22,7 @@ imaginarium = { workspace = true }
 ort = { workspace = true, optional = true }
 
 fits-well = { workspace = true }
-libraw-rs-sys = { workspace = true }
+libraw-sys = { workspace = true }
 
 thiserror = { workspace = true }
 bytemuck = { workspace = true }

@@ -1,0 +1,14 @@
+[package]
+name = "libraw-sys"
+version.workspace = true
+edition.workspace = true
+description = "FFI bindings to LibRaw, built statically from the vendored LibRaw submodule."
+license = "LGPL-2.1-only OR CDDL-1.0"
+links = "raw"
+
+# No workspace lints: the crate is bindgen output, which trips most of them; `lib.rs` allows what
+# the default lints flag.
+
+[build-dependencies]
+cc = { workspace = true }
+bindgen = { workspace = true, features = ["prettyplease", "runtime"] }

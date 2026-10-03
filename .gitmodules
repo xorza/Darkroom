@@ -10,3 +10,6 @@
 [submodule "fits-well"]
 	path = fits-well
 	url = git@github.com:xorza/fits-well.git
+[submodule "libraw-sys/LibRaw"]
+	path = libraw-sys/LibRaw
+	url = https://github.com/LibRaw/LibRaw.git
