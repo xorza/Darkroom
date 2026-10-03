@@ -56,6 +56,7 @@ use crate::calibration_masters::defect_map::sampling::collect_color_residual_sam
 use crate::calibration_masters::error::CalibrationError;
 use crate::io::image::cfa::same_color::SameColorMedian;
 use crate::io::image::cfa::{CfaImage, CfaType};
+use crate::io::image::pixel_flags::{Flags, PixelFlags};
 use crate::math::size2us::Size2us;
 use crate::math::statistics::{MedianMad, mad_to_sigma};
 use common::CancelToken;
@@ -219,7 +220,9 @@ impl DefectMap {
     }
 
     /// Correct defective pixels on raw CFA data by replacing with median of
-    /// same-color CFA neighbors.
+    /// same-color CFA neighbors, and flag them [`Flags::DEFECT`] and [`Flags::REPAIRED`]: the value
+    /// left there is the neighbours', and a combine with other frames at that pixel can leave it
+    /// out.
     ///
     /// # Panics
     ///
@@ -238,6 +241,13 @@ impl DefectMap {
             image.data[idx] =
                 neighbors.at(&image.data, self.dimensions.point_of(idx), Some(&self.mask));
         }
+        let mask = &self.mask;
+        PixelFlags::add_where(
+            &mut image.flags,
+            self.dimensions,
+            Flags::DEFECT.union(Flags::REPAIRED),
+            |index| mask.get(index),
+        );
     }
 }
 

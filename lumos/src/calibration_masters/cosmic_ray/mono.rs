@@ -77,11 +77,17 @@ impl<'a> MonoDetector<'a> {
         MONO_SCRATCH_PLANES * size.pixel_count() * size_of::<f32>() + CrMasks::heap_bytes(size)
     }
 
-    /// Detect and in-paint cosmic rays in one dense plane, in place, returning the CR pixel count.
+    /// Detect and in-paint cosmic rays in one dense plane, in place, marking every in-painted pixel
+    /// in `found` (the plane's size) and returning how many there are.
     ///
     /// Subsample ×2 → clipped Laplacian → resample → significance `S = L⁺/(2N)` →
     /// `S' = S − median₅(S)` → fine structure `F` → flag → grow → in-paint → iterate.
-    pub(super) fn reject(&mut self, data: &mut [f32], size: Size2us) -> usize {
+    pub(super) fn reject(
+        &mut self,
+        data: &mut [f32],
+        size: Size2us,
+        found: &mut BitBuffer2,
+    ) -> usize {
         debug_assert_eq!(data.len(), size.pixel_count());
         if size.width < 3 || size.height < 3 {
             return 0;
@@ -134,6 +140,7 @@ impl<'a> MonoDetector<'a> {
             replace_flagged(data, size, &masks.accumulated, frame);
         }
 
+        found.copy_from(&masks.accumulated);
         masks.accumulated.count_ones()
     }
 }
@@ -343,6 +350,7 @@ pub(super) fn replace_flagged(
 
 #[cfg(test)]
 pub(crate) mod internals {
+    use crate::bit_buffer2::BitBuffer2;
     use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
     use crate::calibration_masters::cosmic_ray::mono::{MonoDetector, MonoScratch};
     use crate::calibration_masters::cosmic_ray::noise_model::NoiseModel;
@@ -360,7 +368,7 @@ pub(crate) mod internals {
         config: &CosmicRayConfig,
     ) -> usize {
         let mut detector = MonoDetector::new(config, NoiseModel::Empirical);
-        detector.reject(data, size);
+        detector.reject(data, size, &mut BitBuffer2::new_default(size));
         let MonoScratch {
             significance,
             fine,

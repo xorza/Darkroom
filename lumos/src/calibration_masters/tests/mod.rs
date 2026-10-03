@@ -17,6 +17,7 @@ use crate::internals::cfa::{constant_cfa, make_cfa};
 use crate::internals::prelude::*;
 use crate::io::image::cfa::{CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
 use crate::io::image::load_context::LoadContext;
+use crate::io::image::pixel_flags::Flags;
 use crate::io::image::preview_image::PreviewImage;
 use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::io::raw::demosaic::bayer::CfaPattern;
@@ -845,6 +846,13 @@ fn calibrate_hot_pixel_correction() {
     let mut light = cfa_from_plane(light_pixels, pattern);
     masters.calibrate(&mut light).unwrap();
     assert_eq!(light.data[2 * w + 2], 0.5 - 0.0625);
+    // The repaired pixel says so, and no other does.
+    let flags = light.flags.as_ref().unwrap();
+    assert_eq!(flags.count(Flags::REPAIRED), 1);
+    assert_eq!(
+        flags.at_pos(Vec2us::new(2, 2)),
+        Flags::DEFECT.union(Flags::REPAIRED)
+    );
 }
 
 #[test]

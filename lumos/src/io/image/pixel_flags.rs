@@ -26,6 +26,20 @@ impl Flags {
     /// The raw value reached the sensor's linear limit, so the sample is a lower bound, not a
     /// measurement.
     pub(crate) const SATURATED: Self = Self(1 << 1);
+    /// Hot or cold in the defect map.
+    pub(crate) const DEFECT: Self = Self(1 << 2);
+    /// Found by L.A.Cosmic.
+    pub(crate) const COSMIC_RAY: Self = Self(1 << 3);
+    /// The value is an interpolation from neighbours, not the photosite's own.
+    pub(crate) const REPAIRED: Self = Self(1 << 4);
+    /// The flat divisor was clamped at its floor, so the value is corrected by less than its
+    /// vignetting asks.
+    pub(crate) const FLAT_FLOOR: Self = Self(1 << 5);
+
+    #[inline]
+    pub(crate) const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
 
     #[inline]
     pub(crate) const fn intersects(self, other: Self) -> bool {
@@ -61,6 +75,41 @@ impl PixelFlags {
             .for_each(|(index, byte)| *byte = flags_at(index).0);
         let flags = Self::from_plane(bits);
         flags.counts.iter().any(|&count| count > 0).then_some(flags)
+    }
+
+    /// OR `flags` into every pixel whose row-major index satisfies `holds`, creating the plane in
+    /// `slot` when it has none and some pixel does.
+    pub(crate) fn add_where(
+        slot: &mut Option<Self>,
+        size: Size2us,
+        flags: Flags,
+        holds: impl Fn(usize) -> bool + Sync,
+    ) {
+        match slot {
+            Some(existing) => {
+                debug_assert_eq!(existing.size(), size, "flags for another geometry");
+                existing
+                    .bits
+                    .pixels_mut()
+                    .par_iter_mut()
+                    .enumerate()
+                    .for_each(|(index, byte)| {
+                        if holds(index) {
+                            *byte |= flags.0;
+                        }
+                    });
+                existing.counts = counts_of(existing.bits.pixels());
+            }
+            None => {
+                *slot = Self::from_fn(size, |index| {
+                    if holds(index) {
+                        flags
+                    } else {
+                        Flags::default()
+                    }
+                });
+            }
+        }
     }
 
     /// OR every flag but `fixed` over the `(2·radius + 1)²` square around each pixel, clipped to the
@@ -294,13 +343,6 @@ impl WindowParts {
 pub(crate) mod internals {
     use crate::io::image::pixel_flags::{Flags, PixelFlags};
     use crate::math::size2us::Size2us;
-
-    impl Flags {
-        #[inline]
-        pub(crate) const fn union(self, other: Self) -> Self {
-            Self(self.0 | other.0)
-        }
-    }
 
     impl PixelFlags {
         /// The pixels where any of `planes` holds a non-finite sample, flagged [`Flags::NO_DATA`],

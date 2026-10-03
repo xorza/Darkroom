@@ -3,7 +3,6 @@
     reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
 )]
 
-use crate::bit_buffer2::BitBuffer2;
 use crate::calibration_masters::cosmic_ray::config::NoiseEstimation;
 use crate::calibration_masters::cosmic_ray::mono::replace_flagged;
 use crate::calibration_masters::cosmic_ray::*;
@@ -13,6 +12,7 @@ use crate::internals::prelude::*;
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::sky_field::{Sky, SkyField};
 use crate::io::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
+use crate::io::image::pixel_flags::Flags;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::math::statistics::median_mut;
 
@@ -203,6 +203,18 @@ fn bayer_removes_cosmic_rays_preserves_star() {
     // beside (37, 37), each a diagonal neighbour in its CR's phase plane, inside the 2×2
     // subsample block that lifts its significance past `sigfrac · sigclip`.
     assert_eq!(count, 6);
+    // Every in-painted photosite is flagged at its mosaic position, and nothing else is: the four
+    // phase planes map back without crossing.
+    let flags = img.flags.as_ref().unwrap();
+    let repaired = Flags::COSMIC_RAY.union(Flags::REPAIRED);
+    assert_eq!(flags.count(Flags::COSMIC_RAY), 6);
+    assert_eq!(flags.count(Flags::REPAIRED), 6);
+    for &p in crs
+        .iter()
+        .chain(&[Vec2us::new(11, 10), Vec2us::new(35, 39)])
+    {
+        assert_eq!(flags.at_pos(p), repaired, "({}, {})", p.x, p.y);
+    }
 }
 
 #[test]
