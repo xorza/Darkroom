@@ -522,14 +522,9 @@ mod tests {
         let plain = fixture.stub_at(Vec2::ZERO);
         let mut doc = fixture.doc;
 
-        // The shared rule answers for both kinds; the preview narrowing is a
-        // strict subset of it, never a different question.
+        // The shared rule answers for both kinds.
         for node in [preview, plain] {
             assert!(doc.holds_node(node), "the document holds {node:?}");
-            assert!(
-                !doc.holds_preview_node(node) || doc.holds_node(node),
-                "the preview narrowing cannot outlive the rule it narrows"
-            );
         }
         assert!(doc.holds_preview_node(preview));
         assert!(

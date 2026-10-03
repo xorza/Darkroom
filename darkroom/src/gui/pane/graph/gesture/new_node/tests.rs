@@ -7,19 +7,34 @@ use super::*;
 use crate::core::document::harness::DocFixture;
 use crate::gui::pane::graph::harness::CanvasHarness;
 
+/// A much bigger search field and a much roomier popup than the defaults.
+fn enlarge(t: &mut palantir::Theme) {
+    t.text.font_size_px *= 3.0;
+    t.context_menu.padding = palantir::Spacing::all(24.0);
+    t.context_menu.gap = 12.0;
+}
+
+/// `n` stub funcs in one category — enough rows for a palette to overflow.
+fn bulk_library(n: usize) -> Library {
+    let mut library = Library::default();
+    for i in 0..n {
+        library.add(testing::stub_func(FuncId::unique(), format!("func{i:02}")).category("Bulk"));
+    }
+    library
+}
+
 /// The new-node palette keeps its search field and its results inside the
 /// height cap, at whatever height the field actually measures.
 ///
 /// The results `Scroll` has to carry an explicit cap of its own — a stack
 /// hands every non-`Fill` child its full main extent, so a `Hug` scroll offered
 /// the popup's cap takes all of it and shoves the search row past the bottom.
-/// That cap used to be `cap - 48.0`, a hand-tuned stand-in for a height nothing
-/// read; restyling the field's text or the menu's padding would have gone on
-/// subtracting 48. Both cases below run the same assertion, the second with the
-/// field's text scaled well past the old constant.
+/// The cap is measured off the field's real height, so both cases below run
+/// the same assertion, the second with the field's text and the popup's
+/// padding scaled well up.
 #[test]
 fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
-    use palantir::{Rect, Spacing};
+    use palantir::Rect;
 
     /// The surface the palette opens against — 900 px tall, which is what the
     /// cap below is resolved from.
@@ -39,11 +54,7 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
         // Enough rows in one category to overflow any sane cap, so the scroll
         // is genuinely competing for the popup's height. No nodes placed: the
         // palette is what spawns them.
-        let mut library = Library::default();
-        for i in 0..60 {
-            library
-                .add(testing::stub_func(FuncId::unique(), format!("func{i:02}")).category("Bulk"));
-        }
+        let library = bulk_library(60);
         // Real shaping: the search field sizes to its text, which is the
         // measurement the cap has to divide around.
         let mut h = CanvasHarness::shaping_text(
@@ -60,11 +71,7 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
 
         // The same cap `NewNodeUi::apply` resolves, against this harness's
         // 900 px surface.
-        let cap = h
-            .ctx
-            .theme
-            .new_node_popup_max_height
-            .clamp(120.0, (SURFACE.y as f32 - 16.0).max(120.0));
+        let cap = popup_cap(h.ctx.theme.new_node_popup_max_height, SURFACE.y as f32);
         Palette {
             field: h.ui.rect(search_field_wid()).expect("field recorded"),
             results: h.ui.rect(results_wid()).expect("results recorded"),
@@ -72,10 +79,6 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
         }
     }
 
-    /// The field sits above the results, and the two plus the popup's own
-    /// chrome fit the cap — with no more slack than the chrome accounts for,
-    /// which is what catches an allowance that over-subtracts as well as one
-    /// that under-subtracts.
     /// The field sits above the results, and the two plus the popup's own
     /// chrome fit the cap with no slack the chrome doesn't account for —
     /// which catches an allowance that over-subtracts as well as one that
@@ -115,18 +118,12 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
     let small = open_palette(|_| {});
     assert_fits(small, &plain.context_menu, "default theme");
 
-    // Now restyle both terms the retired 48 px constant could never have
-    // tracked: a much bigger search field, and a much roomier popup. The
-    // results area has to give up exactly what they took.
+    // Now restyle both terms a fixed allowance could never track: a much
+    // bigger search field, and a much roomier popup. The results area has to
+    // give up exactly what they took.
     let mut restyled = palantir::Theme::default();
-    restyled.text.font_size_px *= 3.0;
-    restyled.context_menu.padding = Spacing::all(24.0);
-    restyled.context_menu.gap = 12.0;
-    let big = open_palette(|t| {
-        t.text.font_size_px *= 3.0;
-        t.context_menu.padding = Spacing::all(24.0);
-        t.context_menu.gap = 12.0;
-    });
+    enlarge(&mut restyled);
+    let big = open_palette(enlarge);
     assert_fits(big, &restyled.context_menu, "bigger field and popup");
 
     assert!(
@@ -147,22 +144,17 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
 /// away — the open palette focuses its search field, whose caret blink wakes
 /// the runtime with no input behind it, and that wake runs no record pass.
 ///
-/// Before this was pinned, `GraphUI::appearing` stamped `Ui::frame_id`, which
-/// counts painted frames too: one blink opened a gap in it, the next real
-/// frame reset every in-flight gesture, and the palette vanished under the
-/// pointer. The reset is `GraphUI`-wide, so the palette here stands in for
-/// every gesture the same blink dropped.
+/// A stamp that counted painted frames would see a gap at every blink, and the
+/// next real frame would reset every in-flight gesture, the palette with them.
+/// The reset is `GraphUI`-wide, so the palette here stands in for every
+/// gesture the same blink would drop.
 #[test]
 fn a_caret_blink_does_not_read_as_the_canvas_having_been_away() {
     /// Past the caret's blink half-period, so the wake has fired by the frame
     /// below and that frame has nothing else to do.
     const IDLE: Duration = Duration::from_millis(600);
 
-    let mut library = Library::default();
-    for i in 0..12 {
-        library.add(testing::stub_func(FuncId::unique(), format!("func{i:02}")).category("Bulk"));
-    }
-    let mut h = CanvasHarness::new(DocFixture::with_library(Graph::default(), library));
+    let mut h = CanvasHarness::new(DocFixture::with_library(Graph::default(), bulk_library(12)));
     h.frame();
     let anchor = Vec2::new(500.0, 400.0);
     h.ui.right_click_at(anchor);
@@ -208,4 +200,13 @@ fn the_search_reports_only_a_changed_fold() {
     search.text.push('x');
     assert!(search.fold());
     assert_eq!(search.folded, "blurx");
+}
+
+/// The cap is the theme's inside a tall window, the window less its margin
+/// inside a short one, and the floor inside one shorter still.
+#[test]
+fn the_popup_cap_holds_the_palette_inside_the_window() {
+    assert_eq!(popup_cap(400.0, 900.0), 400.0);
+    assert_eq!(popup_cap(400.0, 300.0), 300.0 - POPUP_WINDOW_MARGIN);
+    assert_eq!(popup_cap(400.0, 100.0), POPUP_MIN_HEIGHT);
 }

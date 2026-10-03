@@ -144,8 +144,6 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     );
 
     h.ui.release_button(PointerButton::Left);
-    // The harness carries the pane assertion: a wire commits against the pane
-    // holding its start node, never the focused one.
     let released = h.frame();
     assert!(
         matches!(
