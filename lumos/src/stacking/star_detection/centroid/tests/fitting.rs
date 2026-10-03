@@ -1,287 +1,149 @@
 use super::*;
-use crate::testing::synthetic::background_map;
 
-/// Test that weighted centroid achieves claimed ~0.05 pixel accuracy
-/// by testing many random sub-pixel offsets.
+/// Every centroid method over a 10 × 10 grid of sub-pixel offsets in 0.1 px steps, each fit seeded
+/// at the pixel nearest the star.
+///
+/// The profile fits are handed samples of their own model, so they must land on the truth to the
+/// f32 rounding of the samples (≤ 1e-6 px; see `gaussian_fit`'s `RecoveryCase`), and every one must
+/// converge. `measure_star`'s moments start at the seed and contract by 1/1.64 a step at the
+/// matched window (see `convergence`), so ten steps leave the start's error times 1.64⁻¹⁰ =
+/// 7.1e-3, with 1% for the sampling.
 #[test]
-fn weighted_centroid_precision_statistical() {
-    let width = 128;
-    let height = 128;
-    let sigma = 2.5f32;
-
-    // Test a grid of sub-pixel positions
-    let mut total_error = 0.0f64;
-    let mut max_error = 0.0f64;
-    let mut count = 0;
-
+fn every_method_on_a_sub_pixel_grid() {
+    let size = Size2us::new(64, 64);
+    let fwhm = sigma_to_fwhm(2.5);
+    let moments = MeasurementConfig {
+        centroid_method: CentroidMethod::WeightedMoments,
+        ..Default::default()
+    };
     for dx in 0..10 {
         for dy in 0..10 {
-            let true_pos = DVec2::new(64.0 + f64::from(dx) * 0.1, 64.0 + f64::from(dy) * 0.1);
+            // The star sits where its f32 centre rounds 32 + 0.1·k to.
+            let truth = DVec2::new(32.0 + f64::from(dx) * 0.1, 32.0 + f64::from(dy) * 0.1)
+                .as_vec2()
+                .as_dvec2();
+            let seed = truth.round();
 
-            let pixels =
-                SyntheticStar::new(true_pos.as_vec2(), 1.0, StarProfile::Gaussian { sigma })
-                    .stamp(Size2us::new(width, height), 0.1);
-            let bg = background_map::estimate(
-                &pixels,
-                &BackgroundConfig {
-                    tile_size: 32,
-                    ..Default::default()
-                },
+            let gaussian =
+                SyntheticStar::new(truth.as_vec2(), 1.0, StarProfile::Gaussian { sigma: 2.5 })
+                    .stamp(size, 0.1);
+            let fit = GaussianFit::new(
+                &gaussian,
+                seed,
+                &StampGrid::new(8),
+                0.1,
+                None,
+                &GaussianFitConfig::default(),
+            )
+            .expect("the Gaussian fit lands");
+            assert!(fit.converged, "Gaussian at {truth}");
+            assert!(
+                (fit.pos - truth).length() <= 1e-6,
+                "Gaussian at {truth}: {}",
+                fit.pos
             );
-            let config = Config {
-                measurement: MeasurementConfig {
-                    centroid_method: CentroidMethod::WeightedMoments,
-                    ..Default::default()
+
+            let moffat = SyntheticStar::new(
+                truth.as_vec2(),
+                1.0,
+                StarProfile::Moffat {
+                    alpha: 2.5,
+                    beta: 2.5,
                 },
-                ..Default::default()
-            };
-            let candidates =
-                detect_stars_test(&bg.residual_of(&pixels), &bg.sky_noise(), &config.detection);
-
-            if candidates.is_empty() {
-                continue;
-            }
-
-            if let Some(star) = measure_star(
-                &bg.residual_of(&pixels),
-                &bg.sky_noise(),
-                &unsaturated(&pixels),
-                &candidates[0],
-                &config.measurement,
-                config.fwhm.mode.unwrap().seed(),
-                &StampGrid::new(compute_stamp_radius(config.fwhm.mode.unwrap().seed())),
-            ) {
-                let error =
-                    ((star.pos.x - true_pos.x).powi(2) + (star.pos.y - true_pos.y).powi(2)).sqrt();
-                total_error += error;
-                max_error = max_error.max(error);
-                count += 1;
-            }
-        }
-    }
-
-    let avg_error = total_error / f64::from(count);
-
-    // Weighted centroid should achieve ~0.05 pixel accuracy on average
-    assert!(
-        avg_error < 0.1,
-        "Average centroid error {avg_error} exceeds 0.1 pixels (count={count})"
-    );
-    assert!(
-        max_error < 0.2,
-        "Max centroid error {max_error} exceeds 0.2 pixels"
-    );
-}
-
-/// Test that Gaussian fitting achieves claimed ~0.01 pixel accuracy.
-#[test]
-fn gaussian_fit_precision_statistical() {
-    use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
-
-    let width = 21;
-    let height = 21;
-    let sigma = 2.5f32;
-    let background = 0.1f32;
-
-    let mut total_error = 0.0f64;
-    let mut max_error = 0.0f64;
-    let mut count = 0;
-
-    // Test a grid of sub-pixel positions
-    for dx in 0..10 {
-        for dy in 0..10 {
-            let true_cx = f64::from(10.0 + dx as f32 * 0.1);
-            let true_cy = f64::from(10.0 + dy as f32 * 0.1);
-
-            // `SyntheticStar` renders the same untruncated Gaussian this used to spell out:
-            // `shape_at` is `exp(-(dx²+dy²)/2σ²)` over the whole buffer, so the fixture is
-            // unchanged and the ~0.01 px ground truth stays analytic.
-            let pixels_buf = SyntheticStar::new(
-                Vec2::new(true_cx as f32, true_cy as f32),
-                1.0,
-                StarProfile::Gaussian { sigma },
             )
-            .stamp(Size2us::new(width, height), background);
-
-            let config = GaussianFitConfig::default();
-            if let Some(result) = GaussianFit::new(
-                &pixels_buf,
-                DVec2::splat(10.0),
-                &StampGrid::new(8),
-                background,
-                None,
-                &config,
-            ) && result.converged
-            {
-                let error =
-                    ((result.pos.x - true_cx).powi(2) + (result.pos.y - true_cy).powi(2)).sqrt();
-                total_error += error;
-                max_error = max_error.max(error);
-                count += 1;
-            }
-        }
-    }
-
-    let avg_error = total_error / f64::from(count);
-
-    // Gaussian fitting should achieve ~0.01 pixel accuracy
-    assert!(
-        avg_error < 0.02,
-        "Average Gaussian fit error {avg_error} exceeds 0.02 pixels (count={count})"
-    );
-    assert!(
-        max_error < 0.05,
-        "Max Gaussian fit error {max_error} exceeds 0.05 pixels"
-    );
-}
-
-/// Test that Moffat fitting achieves claimed ~0.01 pixel accuracy.
-#[test]
-fn moffat_fit_precision_statistical() {
-    use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFit, MoffatFitConfig};
-
-    let width = 21;
-    let height = 21;
-    let alpha = 2.5f32;
-    let beta = 2.5f32;
-    let background = 0.1f32;
-
-    let mut total_error = 0.0f64;
-    let mut max_error = 0.0f64;
-    let mut count = 0;
-
-    // Test a grid of sub-pixel positions
-    for dx in 0..10 {
-        for dy in 0..10 {
-            let true_cx = f64::from(10.0 + dx as f32 * 0.1);
-            let true_cy = f64::from(10.0 + dy as f32 * 0.1);
-
-            // Same profile as `StarProfile::Moffat`: `(1 + r²/α²)^-β`, untruncated.
-            let pixels_buf = SyntheticStar::new(
-                Vec2::new(true_cx as f32, true_cy as f32),
-                1.0,
-                StarProfile::Moffat { alpha, beta },
-            )
-            .stamp(Size2us::new(width, height), background);
-
+            .stamp(size, 0.1);
             let config = MoffatFitConfig {
-                fixed_beta: beta,
+                fixed_beta: 2.5,
                 ..Default::default()
             };
-            if let Some(result) = MoffatFit::new(
-                &pixels_buf,
-                DVec2::splat(10.0),
-                &StampGrid::new(8),
-                background,
-                None,
-                &config,
-            ) && result.converged
-            {
-                let error =
-                    ((result.pos.x - true_cx).powi(2) + (result.pos.y - true_cy).powi(2)).sqrt();
-                total_error += error;
-                max_error = max_error.max(error);
-                count += 1;
-            }
+            let fit = MoffatFit::new(&moffat, seed, &StampGrid::new(8), 0.1, None, &config)
+                .expect("the Moffat fit lands");
+            assert!(fit.converged, "Moffat at {truth}");
+            assert!(
+                (fit.pos - truth).length() <= 1e-6,
+                "Moffat at {truth}: {}",
+                fit.pos
+            );
+
+            let measured = Measured::flat(&gaussian, 0.1, 0.01);
+            let star = measured
+                .measure(&measured.region_at(seed), &moments, fwhm)
+                .expect("the moments measure");
+            let bound = 1.01 * (seed - truth).length() * (1.0 / 1.64f64).powi(10);
+            assert!(
+                (star.pos - truth).length() <= bound,
+                "moments at {truth}: {} against {bound}",
+                star.pos
+            );
         }
     }
-
-    let avg_error = total_error / f64::from(count);
-
-    // Moffat fitting should achieve ~0.01 pixel accuracy
-    assert!(
-        avg_error < 0.02,
-        "Average Moffat fit error {avg_error} exceeds 0.02 pixels (count={count})"
-    );
-    assert!(
-        max_error < 0.05,
-        "Max Moffat fit error {max_error} exceeds 0.05 pixels"
-    );
 }
 
-/// Verify FWHM estimation accuracy from second moments.
+/// The moment metrics of noiseless Gaussian stars at the stamp `measure_star` would give them.
+///
+/// The windowed covariance deconvolves its window exactly for a Gaussian, so FWHM and eccentricity
+/// come out to the f32 rounding of the samples: 2e-6 of the FWHM, measured ≤ 1.1e-6. A round star's
+/// eccentricity, √(1 − λ₂/λ₁), turns a rounding δ in the ratio into √δ: ≤ 3e-4. The marginals of
+/// an axis-aligned star peak at `A·σ_y·√(2π)` and `A·σ_x·√(2π)`, so GROUND = (σy − σx)/(σx + σy) — up
+/// to the stamp's truncation, ≤ 4.5e-5 at 3.75σ — and SROUND is zero for any star symmetric in both
+/// axes. Sharpness is the peak over the 3 × 3 core, 1/(1 + 2·e^(−1/2σ²))² for a round star on a
+/// pixel centre.
 #[test]
-fn fwhm_estimation_accuracy() {
-    let width = 128;
-    let height = 128;
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.001);
+fn moment_metrics_of_gaussian_stars() {
+    let size = Size2us::new(128, 128);
+    let at = DVec2::splat(64.0);
+    for (sigma_x, sigma_y) in [
+        (1.5f32, 1.5f32),
+        (2.0, 2.0),
+        (2.5, 2.5),
+        (3.0, 3.0),
+        (3.5, 3.5),
+        (4.0, 4.0),
+        (3.0, 2.0),
+        (4.0, 2.0),
+        (2.0, 4.0),
+    ] {
+        let profile = StarProfile::Elliptical {
+            sigma_x,
+            sigma_y,
+            angle: 0.0,
+        };
+        let pixels = SyntheticStar::new(at.as_vec2(), 0.8, profile).stamp(size, 0.1);
+        let radius = compute_stamp_radius(sigma_to_fwhm(sigma_x.max(sigma_y)));
+        let star = Measured::flat(&pixels, 0.1, 0.01)
+            .compute(at, radius)
+            .expect("a star");
 
-    // Test various sigma values
-    for sigma in [1.5f32, 2.0, 2.5, 3.0, 3.5, 4.0] {
-        let expected_fwhm = sigma_to_fwhm(sigma);
-        let pixels = SyntheticStar::new(Vec2::splat(64.0), 1.0, StarProfile::Gaussian { sigma })
-            .stamp(Size2us::new(width, height), 0.1);
-
-        let metrics = compute_star(
-            &bg.residual_of(&pixels),
-            &bg.sky_noise(),
-            DVec2::splat(64.0),
-            0.0,
-            TEST_STAMP_RADIUS,
-            None,
-            None,
-        )
-        .unwrap();
-
-        let fwhm_error = (metrics.fwhm - expected_fwhm).abs() / expected_fwhm;
+        let label = format!("σ {sigma_x} × {sigma_y}");
+        let fwhm = sigma_to_fwhm((sigma_x * sigma_y).sqrt());
         assert!(
-            fwhm_error < 0.15,
-            "FWHM error {:.1}% too large for sigma={} (expected={:.2}, got={:.2})",
-            fwhm_error * 100.0,
-            sigma,
-            expected_fwhm,
-            metrics.fwhm
+            (star.fwhm - fwhm).abs() <= 2e-6 * fwhm,
+            "{label}: FWHM {}",
+            star.fwhm
         );
-    }
-}
-
-/// Verify eccentricity calculation for known elliptical sources.
-#[test]
-fn eccentricity_calculation_accuracy() {
-    let width = 64;
-    let height = 64;
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    // Test various axis ratios
-    // eccentricity = sqrt(1 - (b/a)^2) where a >= b
-    let test_cases = [
-        (2.5, 2.5, 0.0),   // Circular: e = 0
-        (3.0, 2.0, 0.745), // 1.5:1 ratio: e = sqrt(1 - 4/9) ≈ 0.745
-        (4.0, 2.0, 0.866), // 2:1 ratio: e = sqrt(1 - 1/4) ≈ 0.866
-    ];
-
-    for (sigma_major, sigma_minor, expected_ecc) in test_cases {
-        let pixels = SyntheticStar::new(
-            Vec2::splat(32.0),
-            0.8,
-            StarProfile::Elliptical {
-                sigma_x: sigma_major,
-                sigma_y: sigma_minor,
-                angle: 0.0,
-            },
-        )
-        .stamp(Size2us::new(width, height), 0.1);
-        let metrics = compute_star(
-            &bg.residual_of(&pixels),
-            &bg.sky_noise(),
-            DVec2::splat(32.0),
-            0.0,
-            TEST_STAMP_RADIUS,
-            None,
-            None,
-        )
-        .unwrap();
-
-        let ecc_error = (metrics.eccentricity - expected_ecc).abs();
+        let (minor, major) = (sigma_x.min(sigma_y), sigma_x.max(sigma_y));
+        let eccentricity = (1.0 - (minor / major).powi(2)).sqrt();
         assert!(
-            ecc_error < 0.15,
-            "Eccentricity error {} too large for ratio {:.1}:{:.1} (expected={:.3}, got={:.3})",
-            ecc_error,
-            sigma_major,
-            sigma_minor,
-            expected_ecc,
-            metrics.eccentricity
+            (star.eccentricity - eccentricity).abs() <= 3e-4,
+            "{label}: eccentricity {}",
+            star.eccentricity
         );
+        let ground = (sigma_y - sigma_x) / (sigma_x + sigma_y);
+        assert!(
+            (star.roundness.ground - ground).abs() <= 1e-4,
+            "{label}: GROUND {}",
+            star.roundness.ground
+        );
+        assert_eq!(star.roundness.sround, 0.0, "{label}: SROUND");
+        if sigma_x == sigma_y {
+            let core = 1.0 + 2.0 * (-1.0 / (2.0 * sigma_x * sigma_x)).exp();
+            let sharpness = 1.0 / (core * core);
+            assert!(
+                (star.sharpness - sharpness).abs() <= 1e-6,
+                "{label}: sharpness {}",
+                star.sharpness
+            );
+        }
     }
 }
 
@@ -322,279 +184,6 @@ fn snr_stays_continuous_as_sky_noise_vanishes() {
 
     // The step across the floor is a factor of 1.16, not the 2896 the old branch produced.
     assert!(below / above < 1.2, "discontinuous: {above} -> {below}");
-}
-
-/// Verify sharpness distinguishes point sources from extended sources.
-#[test]
-fn sharpness_point_vs_extended() {
-    let width = 64;
-    let height = 64;
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    // Compact star (small sigma) - high sharpness
-    let compact = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 1.5 })
-        .stamp(Size2us::new(width, height), 0.1);
-    let metrics_compact = compute_star(
-        &bg.residual_of(&compact),
-        &bg.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap();
-
-    // Extended star (large sigma) - lower sharpness
-    let extended = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 4.0 })
-        .stamp(Size2us::new(width, height), 0.1);
-    let metrics_extended = compute_star(
-        &bg.residual_of(&extended),
-        &bg.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap();
-
-    assert!(
-        metrics_compact.sharpness > metrics_extended.sharpness,
-        "Compact star should have higher sharpness than extended: {} vs {}",
-        metrics_compact.sharpness,
-        metrics_extended.sharpness
-    );
-
-    // Sharpness should be in valid range
-    assert!(
-        metrics_compact.sharpness > 0.0 && metrics_compact.sharpness <= 1.0,
-        "Sharpness out of range: {}",
-        metrics_compact.sharpness
-    );
-}
-
-/// Verify Moffat FWHM formula is correct.
-#[test]
-fn moffat_fwhm_formula() {
-    use crate::stacking::star_detection::centroid::moffat_fit::{
-        alpha_beta_to_fwhm, fwhm_beta_to_alpha,
-    };
-
-    // Test known values
-    // For beta=2.5: FWHM = 2*alpha*sqrt(2^0.4 - 1) ≈ 2*alpha*0.5657 ≈ 1.131*alpha
-    let alpha = 2.0f32;
-    let beta = 2.5f32;
-    let fwhm = alpha_beta_to_fwhm(alpha, beta);
-
-    // Verify against expected value
-    let expected = 2.0 * alpha * (2.0f32.powf(1.0 / beta) - 1.0).sqrt();
-    assert!(
-        (fwhm - expected).abs() < 1e-6,
-        "FWHM formula incorrect: {fwhm} vs {expected}"
-    );
-
-    // Verify round-trip
-    let alpha_back = fwhm_beta_to_alpha(fwhm, beta);
-    assert!(
-        (alpha_back - alpha).abs() < 1e-6,
-        "Round-trip failed: {alpha_back} vs {alpha}"
-    );
-
-    // Test limiting case: as beta -> infinity, Moffat -> Gaussian
-    // For large beta, FWHM ≈ 2*alpha*sqrt(ln(2)/beta) -> 0
-    // But for beta=4.765 (theoretical), FWHM ≈ 0.95*alpha
-    let beta_theory = 4.765f32;
-    let fwhm_theory = alpha_beta_to_fwhm(alpha, beta_theory);
-    assert!(
-        fwhm_theory > 0.0 && fwhm_theory < fwhm,
-        "Higher beta should give smaller FWHM"
-    );
-}
-
-/// Test Gaussian fitting recovers correct sigma values.
-#[test]
-fn gaussian_fit_sigma_recovery() {
-    use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
-
-    let width = 21;
-    let height = 21;
-    let background = 0.1f32;
-
-    // Test sigma values that fit well within stamp_radius=8
-    for true_sigma in [2.0f32, 2.5, 3.0, 3.5] {
-        let cx = 10.0f64;
-        let cy = 10.0f64;
-
-        let mut pixels = Buffer2::new_filled(width, height, background);
-        for y in 0..height {
-            for x in 0..width {
-                let dx = x as f32 - cx as f32;
-                let dy = y as f32 - cy as f32;
-                pixels[(x, y)] +=
-                    1.0 * (-0.5 * (dx * dx + dy * dy) / (true_sigma * true_sigma)).exp();
-            }
-        }
-
-        let config = GaussianFitConfig::default();
-        let result = GaussianFit::new(
-            &pixels,
-            DVec2::new(cx, cy),
-            &StampGrid::new(8),
-            background,
-            None,
-            &config,
-        );
-
-        let result =
-            result.unwrap_or_else(|| panic!("Fit should return Some for sigma={true_sigma}"));
-
-        // Noiseless samples of a round Gaussian: covariance σ²·I, exact up to the f32 rounding
-        // of the pixels.
-        let c = result.covariance;
-        let var = f64::from(true_sigma * true_sigma);
-        for (got, want) in [(c.xx, var), (c.yy, var), (c.xy, 0.0)] {
-            assert!(
-                (got - want).abs() < EXACT_FIT_PX2,
-                "σ = {true_sigma}: {got} vs {want}"
-            );
-        }
-    }
-}
-
-/// Test that fitting works with noisy data.
-#[test]
-fn gaussian_fit_with_noise() {
-    use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
-
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.3f64;
-    let true_cy = 10.7f64;
-    let true_sigma = 2.5f32;
-    let background = 0.1f32;
-
-    // Create Gaussian with deterministic "noise" pattern
-    let mut pixels = Buffer2::new_filled(width, height, background);
-    for y in 0..height {
-        for x in 0..width {
-            let dx = x as f32 - true_cx as f32;
-            let dy = y as f32 - true_cy as f32;
-            let signal = 1.0 * (-0.5 * (dx * dx + dy * dy) / (true_sigma * true_sigma)).exp();
-            // Add small deterministic noise
-            let noise = ((x * 7 + y * 13) % 100) as f32 * 0.001 - 0.05;
-            pixels[(x, y)] += signal + noise * 0.1;
-        }
-    }
-
-    let config = GaussianFitConfig::default();
-    let result = GaussianFit::new(
-        &pixels,
-        DVec2::splat(10.0),
-        &StampGrid::new(8),
-        background,
-        None,
-        &config,
-    );
-
-    assert!(result.is_some(), "Fit should succeed with noise");
-    let result = result.unwrap();
-
-    // With noise, expect slightly worse but still good accuracy
-    let error = ((result.pos.x - true_cx).powi(2) + (result.pos.y - true_cy).powi(2)).sqrt();
-    assert!(error < 0.15, "Position error {error} too large with noise");
-}
-
-/// Verify GROUND is close to 0 for circular sources.
-#[test]
-fn ground_circular_source() {
-    let width = 64;
-    let height = 64;
-    let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
-        .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    let metrics = compute_star(
-        &bg.residual_of(&pixels),
-        &bg.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap();
-
-    assert!(
-        metrics.roundness.ground.abs() < 0.1,
-        "Circular source should have GROUND near 0, got {}",
-        metrics.roundness.ground
-    );
-}
-
-/// Verify GROUND detects x-elongated sources.
-#[test]
-fn ground_x_elongated() {
-    let width = 64;
-    let height = 64;
-    // sigma_x > sigma_y means more spread in x direction
-    let pixels = SyntheticStar::new(
-        Vec2::splat(32.0),
-        0.8,
-        StarProfile::Elliptical {
-            sigma_x: 4.0,
-            sigma_y: 2.0,
-            angle: 0.0,
-        },
-    )
-    .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    let metrics = compute_star(
-        &bg.residual_of(&pixels),
-        &bg.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap();
-
-    // For x-elongated: marginal in x has lower peak (more spread)
-    // GROUND = (Hx - Hy) / (Hx + Hy)
-    // This should be negative because Hx (peak of x marginal) < Hy
-    assert!(
-        metrics.roundness.ground != 0.0,
-        "Elongated source should have non-zero GROUND"
-    );
-}
-
-/// Verify SROUND is close to 0 for symmetric sources.
-#[test]
-fn sround_symmetric_source() {
-    let width = 64;
-    let height = 64;
-    let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
-        .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    let metrics = compute_star(
-        &bg.residual_of(&pixels),
-        &bg.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap();
-
-    assert!(
-        metrics.roundness.sround < 0.1,
-        "Symmetric source should have SROUND near 0, got {}",
-        metrics.roundness.sround
-    );
 }
 
 /// Both profile fits accept or reject a centre through one predicate, so its bounds are pinned

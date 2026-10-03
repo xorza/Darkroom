@@ -1,4 +1,4 @@
-//! FWHM and Gaussian sigma conversion.
+//! FWHM conversions of the Gaussian and Moffat profiles.
 
 /// The FWHM of a Gaussian per unit of its sigma: `2·√(2·ln 2)`.
 ///
@@ -30,12 +30,23 @@ pub(crate) fn equal_area_fwhm(det: f64) -> f32 {
     sigma_to_fwhm(det.max(0.0).sqrt().sqrt() as f32)
 }
 
+/// The FWHM of a Moffat profile, `2α·√(2^(1/β) − 1)`.
+pub(crate) fn alpha_beta_to_fwhm(alpha: f32, beta: f32) -> f32 {
+    2.0 * alpha * (2.0f32.powf(1.0 / beta) - 1.0).sqrt()
+}
+
+/// The Moffat α of a profile with this FWHM and `beta`: the inverse of [`alpha_beta_to_fwhm`].
+pub(crate) fn fwhm_beta_to_alpha(fwhm: f32, beta: f32) -> f32 {
+    fwhm / (2.0 * (2.0f32.powf(1.0 / beta) - 1.0).sqrt())
+}
+
 #[cfg(test)]
 mod tests {
     use std::f64::consts::LN_2;
 
     use crate::math::fwhm::{
-        FWHM_PER_SIGMA, FWHM_PER_SIGMA_F32, equal_area_fwhm, fwhm_to_sigma, sigma_to_fwhm,
+        FWHM_PER_SIGMA, FWHM_PER_SIGMA_F32, alpha_beta_to_fwhm, equal_area_fwhm,
+        fwhm_beta_to_alpha, fwhm_to_sigma, sigma_to_fwhm,
     };
 
     #[test]
@@ -61,5 +72,25 @@ mod tests {
     fn fwhm_sigma_conversion_roundtrip() {
         let back = sigma_to_fwhm(fwhm_to_sigma(4.5));
         assert!((back - 4.5).abs() <= 4.5 * f32::EPSILON, "{back}");
+    }
+
+    /// FWHM = 2α·√(2^(1/β) − 1), and its inverse, to the few f32 roundings each takes: α 2, β 2.5
+    /// gives 4·√(2^0.4 − 1) = 2.2610.
+    #[test]
+    fn alpha_beta_fwhm_conversion() {
+        for (alpha, beta) in [(2.0f32, 2.5f32), (1.0, 1.5), (3.0, 4.0), (6.0, 6.0)] {
+            let exact = 2.0 * f64::from(alpha) * (2f64.powf(1.0 / f64::from(beta)) - 1.0).sqrt();
+            let fwhm = alpha_beta_to_fwhm(alpha, beta);
+            assert!(
+                (f64::from(fwhm) - exact).abs() <= 8.0 * f64::from(f32::EPSILON) * exact,
+                "α {alpha} β {beta}: {fwhm} vs {exact}"
+            );
+            let back = fwhm_beta_to_alpha(fwhm, beta);
+            assert!(
+                (back - alpha).abs() <= 16.0 * f32::EPSILON * alpha,
+                "α {alpha} β {beta}: back to {back}"
+            );
+        }
+        assert!((f64::from(alpha_beta_to_fwhm(2.0, 2.5)) - 2.2610).abs() < 1e-4);
     }
 }

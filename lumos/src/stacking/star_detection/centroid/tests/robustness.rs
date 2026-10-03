@@ -1,169 +1,5 @@
 use super::*;
 use crate::stacking::star_detection::detector::stages::filter::Rejection;
-use crate::testing::synthetic::background_map;
-
-/// Test centroiding with undersampled PSF (FWHM < 2 pixels).
-/// This is a challenging case where the star is barely resolved.
-#[test]
-fn centroid_undersampled_psf() {
-    let width = 64;
-    let height = 64;
-    let sigma = 0.7f32; // FWHM ≈ 1.65 pixels (undersampled)
-    let true_pos = DVec2::new(32.3, 32.7);
-
-    let pixels = SyntheticStar::new(true_pos.as_vec2(), 0.9, StarProfile::Gaussian { sigma })
-        .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    let expected_fwhm = sigma_to_fwhm(sigma);
-    let stamp_radius = 5; // Smaller stamp for undersampled
-
-    let result = refine_centroid(
-        &bg.residual_of(&pixels),
-        DVec2::splat(32.0),
-        stamp_radius,
-        expected_fwhm,
-    );
-
-    assert!(
-        result.is_some(),
-        "Should find centroid for undersampled PSF"
-    );
-    let new_pos = result.unwrap();
-
-    // Undersampled PSFs have worse accuracy - allow 0.5 pixel error
-    let error = ((new_pos.x - true_pos.x).powi(2) + (new_pos.y - true_pos.y).powi(2)).sqrt();
-    assert!(
-        error < 0.5,
-        "Centroid error {error} too large for undersampled PSF (FWHM={expected_fwhm:.2})"
-    );
-}
-
-/// Test centroiding with very large PSF (FWHM > 15 pixels).
-#[test]
-fn centroid_large_psf() {
-    let width = 128;
-    let height = 128;
-    let sigma = 8.0f32; // FWHM ≈ 18.8 pixels (large PSF)
-    let true_pos = DVec2::new(64.3, 64.7);
-
-    let pixels = SyntheticStar::new(true_pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma })
-        .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    let expected_fwhm = sigma_to_fwhm(sigma);
-    let stamp_radius = MAX_STAMP_RADIUS; // Use maximum allowed
-
-    let result = refine_centroid(
-        &bg.residual_of(&pixels),
-        DVec2::splat(64.0),
-        stamp_radius,
-        expected_fwhm,
-    );
-
-    assert!(result.is_some(), "Should find centroid for large PSF");
-    let new_pos = result.unwrap();
-
-    // Large PSFs have reduced accuracy since the stamp radius (15px) is smaller
-    // than the FWHM (18.8px), so not all light is captured for weighting.
-    // Allow 0.5 pixel error for such extreme cases.
-    let error = ((new_pos.x - true_pos.x).powi(2) + (new_pos.y - true_pos.y).powi(2)).sqrt();
-    assert!(
-        error < 0.5,
-        "Centroid error {error} too large for large PSF (FWHM={expected_fwhm:.2})"
-    );
-}
-
-/// Test Gaussian fitting with undersampled PSF.
-#[test]
-fn gaussian_fit_undersampled_psf() {
-    use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
-
-    let width = 21;
-    let height = 21;
-    let true_sigma = 0.8f32; // FWHM ≈ 1.88 pixels
-    let true_cx = 10.3f64;
-    let true_cy = 10.7f64;
-    let background = 0.1f32;
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx as f32, true_cy as f32),
-        1.0,
-        StarProfile::Gaussian { sigma: true_sigma },
-    )
-    .stamp(Size2us::new(width, height), background);
-
-    let config = GaussianFitConfig::default();
-    let result = GaussianFit::new(
-        &pixels,
-        DVec2::splat(10.0),
-        &StampGrid::new(6),
-        background,
-        None,
-        &config,
-    );
-
-    assert!(result.is_some(), "Should fit undersampled Gaussian");
-    let result = result.unwrap();
-
-    // Position accuracy degrades for undersampled PSFs
-    let error = ((result.pos.x - true_cx).powi(2) + (result.pos.y - true_cy).powi(2)).sqrt();
-    assert!(
-        error < 0.3,
-        "Position error {error} too large for undersampled PSF"
-    );
-}
-
-/// Test metrics computation with very small FWHM.
-#[test]
-fn metrics_small_fwhm() {
-    let width = 64;
-    let height = 64;
-    let sigma = 0.8f32; // Very small
-    let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.9, StarProfile::Gaussian { sigma })
-        .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    let metrics = compute_star(
-        &bg.residual_of(&pixels),
-        &bg.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        5,
-        None,
-        None,
-    );
-
-    assert!(metrics.is_some(), "Should compute metrics for small FWHM");
-    let m = metrics.unwrap();
-    assert!(m.fwhm > 0.0, "FWHM should be positive");
-    assert!(m.flux > 0.0, "Flux should be positive");
-}
-
-/// Test metrics computation with very large FWHM.
-#[test]
-fn metrics_large_fwhm() {
-    let width = 128;
-    let height = 128;
-    let sigma = 7.0f32; // Large
-    let pixels = SyntheticStar::new(Vec2::splat(64.0), 0.8, StarProfile::Gaussian { sigma })
-        .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    let metrics = compute_star(
-        &bg.residual_of(&pixels),
-        &bg.sky_noise(),
-        DVec2::splat(64.0),
-        0.0,
-        MAX_STAMP_RADIUS,
-        None,
-        None,
-    );
-
-    assert!(metrics.is_some(), "Should compute metrics for large FWHM");
-    let m = metrics.unwrap();
-    assert!(m.fwhm > 10.0, "FWHM should be large: {}", m.fwhm);
-}
 
 /// Create two overlapping stars on a 0.1 sky.
 fn make_blended_stars(
@@ -180,186 +16,127 @@ fn make_blended_stars(
     pixels
 }
 
-/// Test centroiding with a nearby contaminating star.
+/// One moments step from a star's centre is pulled toward a companion by exactly the weighted share
+/// the window gives it. Under a Gaussian window of `σ_w` around the primary, a Gaussian star of σ and
+/// amplitude A at distance d weighs `A·e^(−d²/2(σ² + σ_w²))` relative to the primary's A₁, and its
+/// weighted light centres at `d·σ_w²/(σ² + σ_w²)`: the step moves by that times `M₂/(M₁ + M₂)`.
+/// Both products lie well inside the stamp, so the sampled sums match to 1e-6.
+///
+/// The same companion shows in the shape: a round star alone has eccentricity 0 to rounding, and
+/// beside the companion clearly more (measured 0.557 and 0.763).
 #[test]
-fn centroid_with_nearby_star() {
-    let width = 64;
-    let height = 64;
-    let sigma = 2.5f32;
-
-    // Primary star at center, fainter companion 8 pixels away
-    let primary_pos = DVec2::new(32.0, 32.0);
-    let secondary_pos = DVec2::new(40.0, 32.0); // 8 pixels separation
-    let pixels = make_blended_stars(
-        Size2us::new(width, height),
-        primary_pos.as_vec2(),
-        secondary_pos.as_vec2(),
-        sigma,
-        0.8,
-        0.3,
+fn moments_pull_toward_a_companion_as_derived() {
+    let size = Size2us::new(64, 64);
+    let (sigma2, window2) = (2.5f64 * 2.5, (0.8 * 2.5f64).powi(2));
+    let alone = Measured::flat(
+        &SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
+            .stamp(size, 0.1),
+        0.1,
+        0.01,
     );
+    let round = alone
+        .compute(DVec2::splat(32.0), TEST_STAMP_RADIUS)
+        .unwrap();
+    assert!(round.eccentricity <= 3e-4, "alone: {}", round.eccentricity);
 
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-    let expected_fwhm = sigma_to_fwhm(sigma);
+    for (distance, amplitude) in [(8.0f32, 0.3f32), (5.0, 0.5)] {
+        let pixels = make_blended_stars(
+            size,
+            Vec2::splat(32.0),
+            Vec2::new(32.0 + distance, 32.0),
+            2.5,
+            0.8,
+            amplitude,
+        );
+        let measured = Measured::flat(&pixels, 0.1, 0.01);
+        let step = refine_centroid(
+            &measured.residual,
+            DVec2::splat(32.0),
+            TEST_STAMP_RADIUS,
+            sigma_to_fwhm(2.5),
+        )
+        .unwrap();
 
-    let result = refine_centroid(
-        &bg.residual_of(&pixels),
-        primary_pos,
-        TEST_STAMP_RADIUS,
-        expected_fwhm,
-    );
+        let d = f64::from(distance);
+        let weight = f64::from(amplitude) / 0.8 * (-d * d / (2.0 * (sigma2 + window2))).exp();
+        let pull = weight / (1.0 + weight) * d * window2 / (sigma2 + window2);
+        assert!(
+            (step.x - 32.0 - pull).abs() <= 1e-6 * pull,
+            "d {distance}: pulled {} against {pull}",
+            step.x - 32.0
+        );
+        assert!(
+            step.y == 32.0 || (step.y - 32.0).abs() <= 1e-12,
+            "d {distance}: {}",
+            step.y
+        );
 
-    assert!(result.is_some(), "Should find centroid despite nearby star");
-    let new_pos = result.unwrap();
-
-    // Primary centroid should be pulled slightly toward secondary
-    // but should still be within 1 pixel of true position
-    let error = ((new_pos.x - primary_pos.x).powi(2) + (new_pos.y - primary_pos.y).powi(2)).sqrt();
-    assert!(
-        error < 1.0,
-        "Centroid error {error} too large with nearby contamination"
-    );
+        let blended = measured
+            .compute(DVec2::splat(32.0), TEST_STAMP_RADIUS)
+            .unwrap();
+        assert!(
+            blended.eccentricity > 0.5,
+            "d {distance}: {}",
+            blended.eccentricity
+        );
+    }
 }
 
-/// Test centroiding with closely blended stars (partially overlapping).
-#[test]
-fn centroid_blended_stars() {
-    let width = 64;
-    let height = 64;
-    let sigma = 2.5f32;
-
-    // Two stars only 5 pixels apart (significant overlap)
-    let primary_pos = DVec2::new(32.0, 32.0);
-    let secondary_pos = DVec2::new(37.0, 32.0);
-    let pixels = make_blended_stars(
-        Size2us::new(width, height),
-        primary_pos.as_vec2(),
-        secondary_pos.as_vec2(),
-        sigma,
-        0.8,
-        0.5,
-    );
-
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-    let expected_fwhm = sigma_to_fwhm(sigma);
-
-    let result = refine_centroid(
-        &bg.residual_of(&pixels),
-        primary_pos,
-        TEST_STAMP_RADIUS,
-        expected_fwhm,
-    );
-
-    assert!(result.is_some(), "Should attempt centroid on blended stars");
-    let new_pos = result.unwrap();
-
-    // Centroid will be pulled toward center of light - check it moved toward secondary
-    // This is expected behavior for blended sources
-    assert!(
-        new_pos.x > primary_pos.x,
-        "Blended centroid should be pulled toward secondary star"
-    );
-}
-
-/// Test Gaussian fitting with contaminating star in the wing.
+/// A one-star Gaussian fit to a stamp with a 0.2 companion 7 px off sits on its own optimum of the
+/// two-star light, pulled 0.3725 px toward the companion — no closed form for a model that does not
+/// hold, so pinned to 1e-4 of the measured value, and along x only by symmetry.
 #[test]
 fn gaussian_fit_with_contamination() {
-    use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
-
-    let width = 31;
-    let height = 31;
-    let sigma = 2.5f32;
-    let background = 0.1f32;
-
-    // Primary star at center
-    let true_cx = 15.0f64;
-    let true_cy = 15.0f64;
-
-    let size = Size2us::new(width, height);
-    let mut pixels = SyntheticStar::new(
-        Vec2::new(true_cx as f32, true_cy as f32),
-        0.8,
-        StarProfile::Gaussian { sigma },
+    let mut pixels =
+        SyntheticStar::new(Vec2::splat(15.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
+            .stamp(Size2us::new(31, 31), 0.1);
+    SyntheticStar::new(
+        Vec2::new(22.0, 15.0),
+        0.2,
+        StarProfile::Gaussian { sigma: 2.5 },
     )
-    .stamp(size, background);
-
-    // Faint contaminating star at edge of stamp
-    SyntheticStar::new(Vec2::new(22.0, 15.0), 0.2, StarProfile::Gaussian { sigma })
-        .add_exact(&mut pixels);
-
-    let config = GaussianFitConfig::default();
-    let result = GaussianFit::new(
+    .add_exact(&mut pixels);
+    let fit = GaussianFit::new(
         &pixels,
-        DVec2::new(true_cx, true_cy),
+        DVec2::splat(15.0),
         &StampGrid::new(8),
-        background,
+        0.1,
         None,
-        &config,
-    );
-
-    assert!(result.is_some(), "Should fit despite contamination");
-    let result = result.unwrap();
-
-    // Position should still be reasonably accurate (within 0.5 pixel)
-    let error = ((result.pos.x - true_cx).powi(2) + (result.pos.y - true_cy).powi(2)).sqrt();
-    assert!(
-        error < 0.5,
-        "Position error {error} too large with wing contamination"
-    );
+        &GaussianFitConfig::default(),
+    )
+    .expect("the fit lands");
+    assert!((fit.pos.x - 15.0 - 0.37246).abs() <= 1e-4, "{}", fit.pos);
+    assert!((fit.pos.y - 15.0).abs() <= 1e-9, "{}", fit.pos);
 }
 
-/// Test that eccentricity is affected by nearby star contamination.
+/// Moments where the continuous contraction does not hold: a star of σ 0.7 is undersampled, and
+/// one of σ 8 is cut by the largest stamp at under 2σ. From 0.76 px off, ten steps still reach
+/// 1.3e-2 and 1.9e-2 px (measured), held here to 1.5× that; their FWHMs read 2.171 against a
+/// true 1.648 and 18.02 against 18.84 (measured), pinned to 1e-3 relative.
 #[test]
-fn eccentricity_with_contamination() {
-    let width = 64;
-    let height = 64;
-    let sigma = 2.5f32;
-
-    // Single circular star
-    let single_star = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma })
-        .stamp(Size2us::new(width, height), 0.1);
-
-    // Star with nearby companion (will appear elongated)
-    let contaminated = make_blended_stars(
-        Size2us::new(width, height),
-        Vec2::splat(32.0),
-        Vec2::new(38.0, 32.0),
-        sigma,
-        0.8,
-        0.4,
-    );
-
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    let metrics_single = compute_star(
-        &bg.residual_of(&single_star),
-        &bg.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap();
-
-    let metrics_contaminated = compute_star(
-        &bg.residual_of(&contaminated),
-        &bg.sky_noise(),
-        DVec2::splat(32.0),
-        0.0,
-        TEST_STAMP_RADIUS,
-        None,
-        None,
-    )
-    .unwrap();
-
-    // Contaminated source should have higher eccentricity
-    assert!(
-        metrics_contaminated.eccentricity > metrics_single.eccentricity,
-        "Contaminated source should appear more elongated: {} vs {}",
-        metrics_contaminated.eccentricity,
-        metrics_single.eccentricity
-    );
+fn moments_on_undersampled_and_truncated_stars() {
+    for (sigma, side, radius, position_bound, fwhm) in [
+        (0.7f32, 64, 5usize, 0.02, 2.171_242),
+        (8.0, 128, MAX_STAMP_RADIUS, 0.03, 18.024_85),
+    ] {
+        let start = DVec2::splat((side / 2) as f64);
+        let truth = (start + DVec2::new(0.3, 0.7)).as_vec2();
+        let pixels = SyntheticStar::new(truth, 0.9, StarProfile::Gaussian { sigma })
+            .stamp(Size2us::new(side, side), 0.1);
+        let measured = Measured::flat(&pixels, 0.1, 0.01);
+        let after =
+            moments_centroid(&measured.residual, start, radius, sigma_to_fwhm(sigma), 10).unwrap();
+        assert!(
+            (after - truth.as_dvec2()).length() <= position_bound,
+            "σ {sigma}: {after}"
+        );
+        let star = measured.compute(start, radius).unwrap();
+        assert!(
+            (star.fwhm - fwhm).abs() <= 1e-3 * fwhm,
+            "σ {sigma}: FWHM {}",
+            star.fwhm
+        );
+    }
 }
 
 /// Create a rotated elliptical Gaussian.
@@ -388,120 +165,51 @@ fn make_rotated_elliptical_star(
 }
 
 /// Test centroiding on a 45-degree rotated ellipse.
+/// A 4 × 2 ellipse at every angle: its moments are exact, as for an axis-aligned one.
+///
+/// Centred on a pixel, the light is point-symmetric about the start, so one step stays put (to
+/// 1e-12). The windowed covariance reads eccentricity √(1 − 2²/4²) = 0.866025 and FWHM
+/// 2√(2 ln 2)·√8 = 6.660437 at every angle, to f32 rounding. Started 0.76 px off, the error
+/// contracts per principal axis by `σ²/(σ² + σ_w²)`; the major axis is the slowest, 16/(16 + 4.155)
+/// at the 6 px window, so ten steps leave at most that to the tenth of the start (+1%).
 #[test]
-fn centroid_rotated_ellipse_45deg() {
-    let width = 64;
-    let height = 64;
-    let true_pos = DVec2::new(32.3, 32.7);
-    let angle = FRAC_PI_4; // 45 degrees
-
-    let pixels = make_rotated_elliptical_star(
-        Size2us::new(width, height),
-        true_pos.as_vec2(),
-        4.0,
-        2.0,
-        angle,
-        0.8,
-    );
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    let result = refine_centroid(
-        &bg.residual_of(&pixels),
-        DVec2::splat(32.0),
-        TEST_STAMP_RADIUS,
-        6.0,
-    );
-
-    assert!(result.is_some(), "Should find centroid for rotated ellipse");
-    let new_pos = result.unwrap();
-
-    // Rotated ellipses with high eccentricity and offset starting position
-    // have reduced accuracy. Allow 0.6 pixel error.
-    let error = ((new_pos.x - true_pos.x).powi(2) + (new_pos.y - true_pos.y).powi(2)).sqrt();
-    assert!(
-        error < 0.6,
-        "Centroid error {error} too large for 45° rotated ellipse"
-    );
-}
-
-/// Test centroiding on various rotation angles.
-#[test]
-fn centroid_various_rotation_angles() {
-    let width = 64;
-    let height = 64;
-    let true_pos = DVec2::new(32.0, 32.0);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    // Test multiple rotation angles
-    for angle_deg in [0, 30, 45, 60, 90, 120, 150] {
-        let angle_rad = (angle_deg as f32).to_radians();
-        let pixels = make_rotated_elliptical_star(
-            Size2us::new(width, height),
-            true_pos.as_vec2(),
-            4.0,
-            2.0,
-            angle_rad,
-            0.8,
+fn rotated_ellipse_moments_at_every_angle() {
+    let size = Size2us::new(64, 64);
+    let centre = DVec2::splat(32.0);
+    let window2 = (0.8 * f64::from(fwhm_to_sigma(6.0))).powi(2);
+    let slowest = 16.0 / (16.0 + window2);
+    for degrees in [0.0f32, 30.0, 45.0, 60.0, 90.0, 120.0, 135.0, 150.0] {
+        let angle = degrees.to_radians();
+        let centred = Measured::flat(
+            &make_rotated_elliptical_star(size, centre.as_vec2(), 4.0, 2.0, angle, 0.8),
+            0.1,
+            0.01,
         );
-
-        let result = refine_centroid(&bg.residual_of(&pixels), true_pos, TEST_STAMP_RADIUS, 6.0);
-
+        let step = refine_centroid(&centred.residual, centre, 15, 6.0).unwrap();
+        assert!((step - centre).length() <= 1e-12, "{degrees}°: {step}");
+        let star = centred.compute(centre, 15).unwrap();
         assert!(
-            result.is_some(),
-            "Should find centroid for {angle_deg}° rotated ellipse"
+            (star.eccentricity - 0.866_025_4).abs() <= 1e-6,
+            "{degrees}°: {}",
+            star.eccentricity
         );
-        let new_pos = result.unwrap();
-
-        let error = ((new_pos.x - true_pos.x).powi(2) + (new_pos.y - true_pos.y).powi(2)).sqrt();
         assert!(
-            error < 0.2,
-            "Centroid error {error} too large for {angle_deg}° rotated ellipse"
-        );
-    }
-}
-
-/// Test that rotated ellipses have similar eccentricity regardless of angle.
-#[test]
-fn eccentricity_rotation_invariant() {
-    let width = 64;
-    let height = 64;
-    let pos = DVec2::splat(32.0);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-
-    let mut eccentricities = Vec::new();
-
-    for angle_deg in [0, 45, 90, 135] {
-        let angle_rad = (angle_deg as f32).to_radians();
-        let pixels = make_rotated_elliptical_star(
-            Size2us::new(width, height),
-            pos.as_vec2(),
-            4.0,
-            2.0,
-            angle_rad,
-            0.8,
+            (star.fwhm - 6.660_437).abs() <= 2e-6 * 6.660_437,
+            "{degrees}°: {}",
+            star.fwhm
         );
 
-        let metrics = compute_star(
-            &bg.residual_of(&pixels),
-            &bg.sky_noise(),
-            pos,
-            0.0,
-            TEST_STAMP_RADIUS,
-            None,
-            None,
-        )
-        .unwrap();
-        eccentricities.push((angle_deg, metrics.eccentricity));
-    }
-
-    // All eccentricities should be similar (within 20% of each other)
-    let avg_ecc: f32 =
-        eccentricities.iter().map(|(_, e)| e).sum::<f32>() / eccentricities.len() as f32;
-    for (angle, ecc) in &eccentricities {
-        let diff = (ecc - avg_ecc).abs() / avg_ecc;
+        let truth = DVec2::new(32.3, 32.7).as_vec2();
+        let offset = Measured::flat(
+            &make_rotated_elliptical_star(size, truth, 4.0, 2.0, angle, 0.8),
+            0.1,
+            0.01,
+        );
+        let after = moments_centroid(&offset.residual, centre, 15, 6.0, 10).unwrap();
+        let bound = 1.01 * (centre - truth.as_dvec2()).length() * slowest.powi(10);
         assert!(
-            diff < 0.25,
-            "Eccentricity at {angle}° differs too much from average: {ecc} vs {avg_ecc}"
+            (after - truth.as_dvec2()).length() <= bound,
+            "{degrees}° from off-centre: {after} against {bound}"
         );
     }
 }
@@ -605,178 +313,5 @@ fn gaussian_fit_rejects_a_diagonal_elongated_star() {
     assert_eq!(
         Rejection::of(&star, &Config::high_resolution().filter),
         Some(Rejection::Eccentric)
-    );
-}
-
-#[test]
-fn recovery_from_2pixel_offset() {
-    let width = 64;
-    let height = 64;
-    let true_pos = DVec2::new(32.0, 32.0);
-    let sigma = 2.5f32;
-
-    let pixels = SyntheticStar::new(true_pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma })
-        .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-    let expected_fwhm = sigma_to_fwhm(sigma);
-
-    // Start 2 pixels away
-    let initial_guess = DVec2::new(34.0, 30.0);
-
-    let mut pos = initial_guess;
-    for _ in 0..MAX_MOMENTS_ITERATIONS {
-        if let Some(new_pos) = refine_centroid(
-            &bg.residual_of(&pixels),
-            pos,
-            TEST_STAMP_RADIUS,
-            expected_fwhm,
-        ) {
-            let delta = new_pos - pos;
-            pos = new_pos;
-            if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
-                break;
-            }
-        } else {
-            break;
-        }
-    }
-
-    let error = ((pos.x - true_pos.x).powi(2) + (pos.y - true_pos.y).powi(2)).sqrt();
-    assert!(
-        error < 0.2,
-        "Should recover from 2-pixel offset, error = {error}"
-    );
-}
-
-/// Test recovery from initial guess 3 pixels away.
-#[test]
-fn recovery_from_3pixel_offset() {
-    let width = 64;
-    let height = 64;
-    let true_pos = DVec2::new(32.0, 32.0);
-    let sigma = 2.5f32;
-
-    let pixels = SyntheticStar::new(true_pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma })
-        .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
-    let expected_fwhm = sigma_to_fwhm(sigma);
-
-    // Start 3 pixels away diagonally
-    let initial_guess = DVec2::new(34.1, 34.1); // ~3 pixel offset
-
-    let mut pos = initial_guess;
-    for _ in 0..MAX_MOMENTS_ITERATIONS {
-        if let Some(new_pos) = refine_centroid(
-            &bg.residual_of(&pixels),
-            pos,
-            TEST_STAMP_RADIUS,
-            expected_fwhm,
-        ) {
-            let delta = new_pos - pos;
-            pos = new_pos;
-            if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
-                break;
-            }
-        } else {
-            break;
-        }
-    }
-
-    let error = ((pos.x - true_pos.x).powi(2) + (pos.y - true_pos.y).powi(2)).sqrt();
-    assert!(
-        error < 0.3,
-        "Should recover from 3-pixel offset, error = {error}"
-    );
-}
-
-/// Test Gaussian fitting with bad initial position guess.
-#[test]
-fn gaussian_fit_bad_initial_guess() {
-    use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
-
-    let width = 31;
-    let height = 31;
-    let true_cx = 15.0f64;
-    let true_cy = 15.0f64;
-    let sigma = 2.5f32;
-    let background = 0.1f32;
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx as f32, true_cy as f32),
-        1.0,
-        StarProfile::Gaussian { sigma },
-    )
-    .stamp(Size2us::new(width, height), background);
-
-    // Initial guess 2.5 pixels away
-    let initial_guess = DVec2::new(13.0, 17.0);
-
-    let config = GaussianFitConfig::default();
-    let result = GaussianFit::new(
-        &pixels,
-        initial_guess,
-        &StampGrid::new(8),
-        background,
-        None,
-        &config,
-    );
-
-    assert!(result.is_some(), "Should converge from bad initial guess");
-    let result = result.unwrap();
-
-    let error = ((result.pos.x - true_cx).powi(2) + (result.pos.y - true_cy).powi(2)).sqrt();
-    assert!(
-        error < 0.1,
-        "Gaussian fit should recover from bad guess, error = {error}"
-    );
-}
-
-/// Test Moffat fitting with bad initial position guess.
-#[test]
-fn moffat_fit_bad_initial_guess() {
-    use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFit, MoffatFitConfig};
-
-    let width = 31;
-    let height = 31;
-    let true_cx = 15.0f64;
-    let true_cy = 15.0f64;
-    let alpha = 2.5f32;
-    let beta = 2.5f32;
-    let background = 0.1f32;
-
-    let mut pixels = Buffer2::new_filled(width, height, background);
-    for y in 0..height {
-        for x in 0..width {
-            let r2 = (x as f32 - true_cx as f32).powi(2) + (y as f32 - true_cy as f32).powi(2);
-            pixels[(x, y)] += 1.0 * (1.0 + r2 / (alpha * alpha)).powf(-beta);
-        }
-    }
-
-    // Initial guess 2 pixels away
-    let initial_guess = DVec2::new(13.0, 17.0);
-
-    let config = MoffatFitConfig {
-        fixed_beta: beta,
-        ..Default::default()
-    };
-    let result = MoffatFit::new(
-        &pixels,
-        initial_guess,
-        &StampGrid::new(8),
-        background,
-        None,
-        &config,
-    );
-
-    assert!(
-        result.is_some(),
-        "Moffat should converge from bad initial guess"
-    );
-    let result = result.unwrap();
-
-    let error = ((result.pos.x - true_cx).powi(2) + (result.pos.y - true_cy).powi(2)).sqrt();
-    assert!(
-        error < 0.1,
-        "Moffat fit should recover from bad guess, error = {error}"
     );
 }

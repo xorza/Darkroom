@@ -238,6 +238,13 @@ impl StampFit {
         f64::from((self.stamp.peak - background).max(0.01))
     }
 
+    /// The smallest amplitude a fit may take: a millionth of the seed, so positive — a profile of
+    /// zero amplitude has no centre or width to fit — and relative to the star rather than to the
+    /// data's units. A fit pinned there found no star in the stamp.
+    pub(super) fn min_amplitude(&self, background: f32) -> f64 {
+        1e-6 * self.amplitude_seed(background)
+    }
+
     /// Lift a fitted centre out of the stamp frame back into image coordinates.
     pub(super) fn to_image(&self, x0: f64, y0: f64) -> DVec2 {
         DVec2::new(x0, y0) + self.stamp.origin

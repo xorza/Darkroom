@@ -1,61 +1,125 @@
 use super::*;
-use crate::testing::synthetic::background_map;
 
+/// A lone star found by detection on an estimated sky and measured with the default config, as the
+/// pipeline runs it before the FWHM is known: one candidate at the nearest pixel, a moments centroid
+/// as far along as ten steps take it, the flux of the stamp's samples, and every metric as on
+/// the true sky.
+///
+/// The default method is ten weighted-moments steps with a window of `σ_w = 0.8 · σ(seed FWHM 4.0)`
+/// = 1.359 px, each step shrinking the error by `c = σ² / (σ² + σ_w²)` — see
+/// `moments_contract_and_fits_ignore_the_seed`. The flux sums the residual over the
+/// (2r+1)² stamp around the rounded centroid, r = `compute_stamp_radius(4.0)` = 7, and the
+/// samples are point values of a separable profile: A · Σᵢ g(i − x₀) · Σⱼ g(j − y₀).
 #[test]
-fn centroid_accuracy() {
-    // Use larger image to minimize background estimation effects
-    let width = 128;
-    let height = 128;
-    let true_pos = DVec2::new(64.3, 64.7);
-    let pixels = SyntheticStar::new(
-        true_pos.as_vec2(),
-        0.8,
-        StarProfile::Gaussian { sigma: 2.5 },
-    )
-    .stamp(Size2us::new(width, height), 0.1);
-
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
+fn a_detected_star_measures_as_on_its_true_sky() {
+    const AMPLITUDE: f64 = 0.8;
+    const SKY: f32 = 0.1;
+    const SEED_FWHM: f32 = 4.0;
+    // A noiseless frame thresholds at its noise floor, 1e-4 of the sky: the σ = 3 star stays above
+    // 4 · 1e-5 out to r = 3 · √(2 ln(0.8 / 4e-5)) = 13.3 px, a footprint of π · 13.3² ≈ 560 px —
+    // past the default 500.
+    let config = Config {
+        detection: DetectionConfig {
+            max_area: 1000,
             ..Default::default()
         },
-    );
-    let config = Config::default();
-    let candidates =
-        detect_stars_test(&bg.residual_of(&pixels), &bg.sky_noise(), &config.detection);
+        ..Default::default()
+    };
+    let radius = compute_stamp_radius(SEED_FWHM);
+    let window_sigma = f64::from(0.8 * fwhm_to_sigma(SEED_FWHM));
+    for (x, y, sigma) in [(64.3, 64.7, 2.5f32), (64.0, 64.0, 3.0), (64.6, 63.8, 3.0)] {
+        let truth = DVec2::new(x, y);
+        let pixels = SyntheticStar::new(
+            truth.as_vec2(),
+            AMPLITUDE as f32,
+            StarProfile::Gaussian { sigma },
+        )
+        .stamp(Size2us::new(128, 128), SKY);
+        let truth = truth.as_vec2().as_dvec2();
+        let background = background_map::estimate(
+            &pixels,
+            &BackgroundConfig {
+                tile_size: 32,
+                ..Default::default()
+            },
+        );
+        let estimated = Measured::of(&pixels, &background);
+        let exact = Measured::flat(&pixels, SKY, 0.01);
 
-    assert_eq!(candidates.len(), 1);
+        let candidates = detect_stars_test(&estimated.residual, &estimated.sky, &config.detection);
+        assert_eq!(candidates.len(), 1, "σ {sigma} at {truth}");
+        let region = &candidates[0];
+        let nearest = truth.round();
+        assert_eq!(
+            region.peak,
+            Vec2us::new(nearest.x as usize, nearest.y as usize),
+            "σ {sigma} at {truth}"
+        );
 
-    let star = measure_star(
-        &bg.residual_of(&pixels),
-        &bg.sky_noise(),
-        &unsaturated(&pixels),
-        &candidates[0],
-        &config.measurement,
-        config.fwhm.mode.unwrap().seed(),
-        &StampGrid::new(compute_stamp_radius(config.fwhm.mode.unwrap().seed())),
-    )
-    .expect("Should compute centroid");
+        let star = estimated
+            .measure(region, &config.measurement, SEED_FWHM)
+            .expect("the star measures");
+        let reference = exact
+            .measure(region, &config.measurement, SEED_FWHM)
+            .expect("the star measures on the true sky");
 
-    let error_x = (star.pos.x - true_pos.x).abs();
-    let error_y = (star.pos.y - true_pos.y).abs();
+        let npix = (2 * radius + 1).pow(2);
+        let sigma_sq = f64::from(sigma).powi(2);
+        let contraction = sigma_sq / (sigma_sq + window_sigma.powi(2));
+        let error = (star.pos - truth).length();
+        // Plus the f64 rounding of the weighted sums, ε per term over the stamp at coordinates ≈ 64.
+        let bound = 1.01 * (nearest - truth).length() * contraction.powi(10)
+            + npix as f64 * f64::EPSILON * truth.max_element();
+        assert!(error <= bound, "σ {sigma} at {truth}: {error} > {bound}");
 
-    // Sub-pixel accuracy within 0.2 pixels is good for weighted centroid
-    assert!(
-        error_x < 0.2,
-        "X centroid error {} too large (true={}, computed={})",
-        error_x,
-        true_pos.x,
-        star.pos.x
-    );
-    assert!(
-        error_y < 0.2,
-        "Y centroid error {} too large (true={}, computed={})",
-        error_y,
-        true_pos.y,
-        star.pos.y
-    );
+        // The estimated sky is 0.1 to within one f32 ulp (7.5e-9) per pixel, against stars whose
+        // stamp sums to ≥ 31: a relative change of ≤ 225 · 7.5e-9 / 31 = 5.4e-8 in every sum the
+        // metrics are built from. 1e-6 holds it with room for the f32 rounding of each metric.
+        let same = |name, a: f64, b: f64| {
+            assert!(
+                (a - b).abs() <= 1e-6 * b.abs().max(1.0),
+                "σ {sigma} at {truth}: {name} {a} vs {b} on the true sky"
+            );
+        };
+        same("x", star.pos.x, reference.pos.x);
+        same("y", star.pos.y, reference.pos.y);
+        for (name, a, b) in [
+            ("flux", star.flux, reference.flux),
+            ("fwhm", star.fwhm, reference.fwhm),
+            ("eccentricity", star.eccentricity, reference.eccentricity),
+            ("peak", star.peak, reference.peak),
+            ("sharpness", star.sharpness, reference.sharpness),
+            ("sround", star.roundness.sround, reference.roundness.sround),
+            ("ground", star.roundness.ground, reference.roundness.ground),
+        ] {
+            same(name, f64::from(a), f64::from(b));
+        }
+
+        // Each sample takes four f32 roundings of at most ε · (A + sky) — the profile's exp and
+        // scale, the add onto the sky and the subtraction from it — so the 225 of them move the
+        // sum by at most 225 · 4ε · 0.9.
+        let centre = star.pos.round();
+        let samples = |c: f64, x0: f64| -> f64 {
+            (-(radius as i32)..=radius as i32)
+                .map(|d| (-(c + f64::from(d) - x0).powi(2) / (2.0 * sigma_sq)).exp())
+                .sum()
+        };
+        let expected = AMPLITUDE * samples(centre.x, truth.x) * samples(centre.y, truth.y);
+        let rounding = npix as f64 * 4.0 * f64::from(f32::EPSILON) * (AMPLITUDE + f64::from(SKY));
+        assert!(
+            (f64::from(reference.flux) - expected).abs() <= rounding,
+            "σ {sigma} at {truth}: flux {} vs {expected}",
+            reference.flux
+        );
+        // With no annulus the SNR divides by the map's noise over the stamp, 0.01 on the true
+        // sky, times √npix.
+        let snr = f64::from(reference.flux) / (0.01 * (npix as f64).sqrt());
+        assert!(
+            (f64::from(reference.snr) - snr).abs() <= 1e-6 * snr,
+            "σ {sigma} at {truth}: SNR {} vs {snr}",
+            reference.snr
+        );
+    }
 }
 
 /// The same pixels measured near the origin and far out along x must give the same sub-pixel
@@ -123,146 +187,6 @@ fn subpixel_result_is_independent_of_distance_from_the_origin() {
     assert!(
         y_drift < 1e-9,
         "y drifted {y_drift} px under an x-only shift"
-    );
-}
-
-#[test]
-fn fwhm_estimation() {
-    // Use larger image for better background estimation
-    let width = 128;
-    let height = 128;
-    let sigma = 3.0f32;
-    let expected_fwhm = sigma_to_fwhm(sigma);
-    let pixels = SyntheticStar::new(Vec2::splat(64.0), 0.8, StarProfile::Gaussian { sigma })
-        .stamp(Size2us::new(width, height), 0.1);
-
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-    // Use higher max_area because dilation (radius=2) expands the star region
-    let config = Config {
-        detection: DetectionConfig {
-            max_area: 1000,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let candidates =
-        detect_stars_test(&bg.residual_of(&pixels), &bg.sky_noise(), &config.detection);
-
-    assert_eq!(candidates.len(), 1);
-
-    let star = measure_star(
-        &bg.residual_of(&pixels),
-        &bg.sky_noise(),
-        &unsaturated(&pixels),
-        &candidates[0],
-        &config.measurement,
-        config.fwhm.mode.unwrap().seed(),
-        &StampGrid::new(compute_stamp_radius(config.fwhm.mode.unwrap().seed())),
-    )
-    .expect("Should compute centroid");
-
-    // FWHM estimation from weighted second moments has systematic bias due to
-    // finite aperture and background noise - 40% tolerance is reasonable
-    let fwhm_error = (star.fwhm - expected_fwhm).abs() / expected_fwhm;
-    assert!(
-        fwhm_error < 0.4,
-        "FWHM error {} too large (expected={}, computed={})",
-        fwhm_error,
-        expected_fwhm,
-        star.fwhm
-    );
-}
-
-#[test]
-fn circular_star_eccentricity() {
-    let width = 64;
-    let height = 64;
-    let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
-        .stamp(Size2us::new(width, height), 0.1);
-
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-    let config = Config::default();
-    let candidates =
-        detect_stars_test(&bg.residual_of(&pixels), &bg.sky_noise(), &config.detection);
-
-    let star = measure_star(
-        &bg.residual_of(&pixels),
-        &bg.sky_noise(),
-        &unsaturated(&pixels),
-        &candidates[0],
-        &config.measurement,
-        config.fwhm.mode.unwrap().seed(),
-        &StampGrid::new(compute_stamp_radius(config.fwhm.mode.unwrap().seed())),
-    )
-    .expect("Should compute centroid");
-
-    assert!(
-        star.eccentricity < 0.3,
-        "Circular star has high eccentricity: {}",
-        star.eccentricity
-    );
-}
-
-#[test]
-fn snr_and_flux_values() {
-    // A bright star (amplitude 0.8, sigma 2.5) on background 0.0 should have
-    // substantial SNR (>> 10) and measurable flux
-    let width = 64;
-    let height = 64;
-    let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
-        .stamp(Size2us::new(width, height), 0.1);
-
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-    let config = Config::default();
-    let candidates =
-        detect_stars_test(&bg.residual_of(&pixels), &bg.sky_noise(), &config.detection);
-
-    let star = measure_star(
-        &bg.residual_of(&pixels),
-        &bg.sky_noise(),
-        &unsaturated(&pixels),
-        &candidates[0],
-        &config.measurement,
-        config.fwhm.mode.unwrap().seed(),
-        &StampGrid::new(compute_stamp_radius(config.fwhm.mode.unwrap().seed())),
-    )
-    .expect("Should compute centroid");
-
-    // Bright star with amplitude 0.8 on zero background should have high SNR
-    assert!(
-        star.snr > 50.0,
-        "Bright star SNR {} should be > 50",
-        star.snr
-    );
-    // Flux should be substantial for amplitude=0.8 Gaussian
-    assert!(
-        star.flux > 1.0,
-        "Bright star flux {} should be > 1.0",
-        star.flux
-    );
-    // Peak should be close to star amplitude
-    assert!(
-        star.peak > 0.5,
-        "Peak {} should be close to amplitude 0.8",
-        star.peak
     );
 }
 
@@ -335,13 +259,13 @@ fn valid_stamp_position_covers_boundaries_and_rounding() {
         },
         Case {
             name: "fraction rounds in",
-            position: DVec2::new(7.4, 32.0),
+            position: DVec2::new(radius as f64 + 0.4, 32.0),
             size: Size2us::new(64, 64),
             expected: true,
         },
         Case {
             name: "fraction rounds out",
-            position: DVec2::new(6.4, 32.0),
+            position: DVec2::new(radius as f64 - 0.6, 32.0),
             size: Size2us::new(64, 64),
             expected: false,
         },
