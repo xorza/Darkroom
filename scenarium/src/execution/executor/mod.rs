@@ -84,7 +84,7 @@ pub(crate) struct Executor {
     /// Per-*invoke* scratch: the node's resolved inputs, refilled for each node that runs.
     inputs: Vec<DynamicValue>,
     /// The run's mutable copy of the resolved live binding counts. Input consumption or
-    /// retirement decrements it; production demand and host pins remain immutable.
+    /// retirement decrements it; the resolved demand stays as the sweep left it.
     remaining_reads: RemainingOutputReads,
     /// Per-run outcome per node (see [`NodeOutcome`]), aligned to the program's
     /// dense node vector. Reused across runs and rebuilt each run.

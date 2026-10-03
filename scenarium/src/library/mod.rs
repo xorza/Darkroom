@@ -205,12 +205,10 @@ impl Library {
         // types already present, and a fresh enum entry re-checks the funcs
         // already added.
         //
-        // **Before the insert.** This gate panics, and installing first
-        // left the rejected entry in `types` for every later lookup to
-        // find — the registry kept exactly the declaration it had just
-        // refused. Nothing is in the map yet, so the check resolves
-        // `type_id` from `entry` directly; every *other* enum a func
-        // declares was already gated when that type registered.
+        // **Before the insert**, so a refused entry never reaches `types`.
+        // Nothing is in the map yet, so the check resolves `type_id` from
+        // `entry` directly; every *other* enum a func declares was already
+        // gated when that type registered.
         match entry.variants() {
             Some(variants) => {
                 for func in self.funcs.values() {
@@ -222,10 +220,8 @@ impl Library {
             // The other half of the same gate. `enum_variants` answers
             // `None` for "not registered yet" *and* for "registered as a
             // custom type", and deferred registration makes the first one
-            // legitimate — so nothing rejected a func that declared this
-            // id as an enum, and the mismatch only surfaced much later
-            // and much quieter, as an enum const that failed
-            // `const_satisfies` and lowered to unbound.
+            // legitimate — so `add` cannot refuse a func that declares this
+            // id as an enum, and the custom registration has to.
             None => {
                 for func in self.funcs.values() {
                     assert!(

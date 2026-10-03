@@ -663,7 +663,7 @@ impl RuntimeCache {
     ///
     /// RAM reuse trusts residency ([`is_resident_hit`](Self::is_resident_hit)): a resident
     /// digest-valid value is served, because a content digest attests the value produced
-    /// under it — however the value came to be resident (mode retention or a preview pin).
+    /// under it — however the value came to be resident.
     /// Disk reuse stays gated on `persists_to_disk` (`Disk`/`Both`, enforced in
     /// [`DiskStore::blob_target`]) and is answered from the blob header alone.
     ///
@@ -883,16 +883,10 @@ impl RuntimeCache {
                 continue;
             };
             // A snapshot holding a different number of values cannot
-            // describe this node's outputs, whatever its digest says.
-            //
-            // The digest is the only other thing keeping a snapshot
-            // alive, and it does not have to move: a func that grows an
-            // output while keeping its id reuses the lowered
-            // node, so `reown` sees no owner change and the stale
-            // `produced_under` still equals the stale `current_digest`.
-            // Both retention checks passed, and the mismatch surfaced
-            // only at install validation — a debug panic, and in release
-            // a snapshot indexed by port positions it no longer has.
+            // describe this node's outputs, whatever its digest says: a func
+            // that grows an output keeps its id, so `reown` sees no owner
+            // change and the stale `produced_under` still equals the stale
+            // `current_digest`.
             let retained = resident_len == e_node.outputs.len as usize
                 && e_node.cache.caches_in_ram()
                 && e_node.behavior == FuncBehavior::Pure

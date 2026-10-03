@@ -113,11 +113,11 @@ pub fn worker_events_library() -> Library {
                                 previous.last_execution = now;
                                 // `last_fps_emit` belongs to
                                 // `wait_for_fps_event`, which stamps it when
-                                // it emits. Stamping it here too restarted
-                                // the countdown on every execution, so a
+                                // it emits: stamped here too, every execution
+                                // would restart the countdown, and a
                                 // subscriber re-reading this source faster
-                                // than the period postponed the FPS event
-                                // for as long as it kept doing so.
+                                // than the period would postpone the event
+                                // indefinitely.
                                 previous.frame_no += 1;
                             } else {
                                 delta = period.map_or(0.0, |period| period.as_secs_f64());

@@ -205,9 +205,8 @@ impl StampJob {
     /// Walk **the whole subtree** under `root`, listing every file beneath
     /// it rather than only its immediate children: a pure function handed
     /// a directory consumes it recursively, so the recursive contents are
-    /// what its output is a function of. Stamping one level deep let
-    /// `root/sub/file` change freely while `root`'s fingerprint — and
-    /// every cache key folding it — stood still.
+    /// what its output is a function of, and `root/sub/file` changing has to
+    /// move `root`'s fingerprint.
     ///
     /// **Symlinks are listed, never followed.** `DirEntry::file_type`
     /// does not traverse them, so a link to a directory is a leaf here:
