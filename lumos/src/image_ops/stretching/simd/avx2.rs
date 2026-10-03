@@ -1,23 +1,20 @@
-//! AVX2 color-preserving arcsinh stretch. The default `auto_asinh` stretch spends ~30% of its time
-//! in a per-pixel libm `asinhf` (one call per pixel on the combined intensity). This vectorizes the
-//! whole color-preserving pixel op — intensity, `asinh` curve, channel scale, highlight cap — eight
-//! pixels at a time, in place, with `asinh(x) = logf(x + √(x²+1))` over a Cephes single-precision
-//! `logf` (≈1–2 ULP, i.e. f32-exact). The three channels are contiguous planes, so each iteration is
-//! three `loadu` and three `storeu` — on interleaved storage this needed three stride-3
-//! `_mm256_i32gather_ps` on load and a 24-store scalar loop on the way back, which against ~35
-//! vector ops of actual maths was a large fraction of the kernel.
+//! AVX2 arcsinh stretch, eight samples at a time: the plane curve, and the whole color-preserving
+//! pixel op — intensity, curve, channel scale, highlight cap. The three channels are contiguous
+//! planes, so each iteration is three `loadu` and three `storeu`.
 
 use std::arch::x86_64::*;
 
 use crate::image_ops::rgb::Rgb;
 
 use crate::image_ops::stretching::simd::{
-    LOG_P0, LOG_P1, LOG_P2, LOG_P3, LOG_P4, LOG_P5, LOG_P6, LOG_P7, LOG_P8, LOG_Q1, LOG_Q2, SQRTHF,
+    ASINH_LOG_FROM, LOG_P0, LOG_P1, LOG_P2, LOG_P3, LOG_P4, LOG_P5, LOG_P6, LOG_P7, LOG_P8, LOG_Q1,
+    LOG_Q2, SQRTHF,
 };
-use crate::image_ops::stretching::{AsinhCurve, color_preserve_pixel};
+use crate::image_ops::stretching::{AsinhCurve, ToneCurve, color_preserve_pixel};
+use std::f32::consts::LN_2;
 
-/// Vectorized single-precision `logf` for 8 lanes (Cephes). Valid for `x > 0`; callers here only
-/// ever pass `x = arg + √(arg²+1) ≥ 1`.
+/// Vectorized single-precision `logf` for 8 lanes (Cephes), ~1 ULP. Valid for `x > 0`; other lanes
+/// give a value [`asinh_avx2`] discards.
 #[target_feature(enable = "avx2,fma")]
 #[inline]
 unsafe fn logf_avx2(x: __m256) -> __m256 {
@@ -55,14 +52,60 @@ unsafe fn logf_avx2(x: __m256) -> __m256 {
     _mm256_fmadd_ps(e, _mm256_set1_ps(LOG_Q2), res) // + e·ln2_hi
 }
 
-/// Vectorized `asinh(x) = logf(x + √(x²+1))`, exact for all real x (the argument to logf is always
-/// positive).
+/// Vectorized `asinh(x)` for `x ≥ 0`, to a few ULP relative at every magnitude — the steps the
+/// tests' `asinh_pos_scalar` spells out one lane at a time. Negative `x` gives a non-positive value
+/// or NaN, both of which the callers' clamp to `[0, 1]` turns to 0.
 #[target_feature(enable = "avx2,fma")]
 #[inline]
 unsafe fn asinh_avx2(x: __m256) -> __m256 {
-    let root = _mm256_sqrt_ps(_mm256_fmadd_ps(x, x, _mm256_set1_ps(1.0)));
     // SAFETY: `logf_avx2` needs AVX2+FMA, which this function's own `target_feature` establishes.
-    unsafe { logf_avx2(_mm256_add_ps(x, root)) }
+    unsafe {
+        let one = _mm256_set1_ps(1.0);
+        let s = _mm256_mul_ps(x, x);
+        let u = _mm256_add_ps(
+            x,
+            _mm256_div_ps(s, _mm256_add_ps(one, _mm256_sqrt_ps(_mm256_add_ps(one, s)))),
+        );
+        let w = _mm256_add_ps(one, u);
+        let dw = _mm256_sub_ps(w, one);
+        // One `logf` serves both forms: of `1 + u` below the switch, of `x` past it.
+        let large = _mm256_cmp_ps::<_CMP_GT_OQ>(x, _mm256_set1_ps(ASINH_LOG_FROM));
+        let log = logf_avx2(_mm256_blendv_ps(w, x, large));
+        let log1p = _mm256_blendv_ps(
+            _mm256_mul_ps(log, _mm256_div_ps(u, dw)),
+            u,
+            _mm256_cmp_ps::<_CMP_EQ_OQ>(dw, _mm256_setzero_ps()),
+        );
+        _mm256_blendv_ps(log1p, _mm256_add_ps(log, _mm256_set1_ps(LN_2)), large)
+    }
+}
+
+/// The arcsinh plane curve over one band, in place: `clamp(asinh(v / β) / norm, 0, 1)`. Eight
+/// samples per iteration; [`AsinhCurve::eval`] finishes the tail.
+///
+/// # Safety
+/// The caller must ensure AVX2+FMA are available (checked once at dispatch).
+#[target_feature(enable = "avx2,fma")]
+pub(super) unsafe fn asinh_plane_avx2(plane: &mut [f32], inv_beta: f32, inv_norm: f32) {
+    // SAFETY: every operation below needs the ISA this function's `target_feature` establishes;
+    // the loads and stores stay inside `plane`.
+    unsafe {
+        let (vib, vin) = (_mm256_set1_ps(inv_beta), _mm256_set1_ps(inv_norm));
+        let (zero, one) = (_mm256_setzero_ps(), _mm256_set1_ps(1.0));
+        let mut p = 0;
+        while p + 8 <= plane.len() {
+            let v = _mm256_loadu_ps(plane.as_ptr().add(p));
+            let curved = _mm256_mul_ps(asinh_avx2(_mm256_mul_ps(v, vib)), vin);
+            // `max(·, 0)` returns its second operand for NaN: a NaN lane becomes black.
+            let out = _mm256_min_ps(_mm256_max_ps(curved, zero), one);
+            _mm256_storeu_ps(plane.as_mut_ptr().add(p), out);
+            p += 8;
+        }
+        let curve = AsinhCurve { inv_beta, inv_norm };
+        for value in &mut plane[p..] {
+            *value = curve.eval(*value);
+        }
+    }
 }
 
 /// Color-preserving arcsinh stretch of one band of three RGB-f32 **planes**, in place. The three
@@ -114,9 +157,11 @@ pub(super) unsafe fn asinh_color_preserve_avx2(
                 _mm256_div_ps(one, maxc),
                 _mm256_cmp_ps::<_CMP_GT_OQ>(maxc, one),
             );
-            _mm256_storeu_ps(red.as_mut_ptr().add(p), _mm256_mul_ps(nr, cap));
-            _mm256_storeu_ps(green.as_mut_ptr().add(p), _mm256_mul_ps(ng, cap));
-            _mm256_storeu_ps(blue.as_mut_ptr().add(p), _mm256_mul_ps(nb, cap));
+            // A channel below black, possible beside a positive intensity, clamps to 0.
+            let out = |v| _mm256_max_ps(_mm256_mul_ps(v, cap), zero);
+            _mm256_storeu_ps(red.as_mut_ptr().add(p), out(nr));
+            _mm256_storeu_ps(green.as_mut_ptr().add(p), out(ng));
+            _mm256_storeu_ps(blue.as_mut_ptr().add(p), out(nb));
             p += 8;
         }
 

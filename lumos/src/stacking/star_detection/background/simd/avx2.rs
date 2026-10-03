@@ -2,7 +2,8 @@
 
 use std::arch::x86_64::*;
 
-use crate::stacking::star_detection::background::simd::{SegmentRamp, SplineSegment};
+use crate::background_mesh::spline::spline_segment::SplineSegment;
+use crate::stacking::star_detection::background::simd::SegmentRamp;
 
 /// Evaluate cubic spline for 8 values using AVX2+FMA.
 #[target_feature(enable = "avx2,fma")]

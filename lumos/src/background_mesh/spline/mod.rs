@@ -1,32 +1,7 @@
 //! Natural cubic spline numerics: tridiagonal solve for second derivatives plus per-interval
 //! evaluation, used to interpolate the tile-grid sky/sigma values C²-continuously.
 
-/// Evaluate natural cubic spline between two nodes.
-///
-/// Given function values `f0`, `f1` and second derivatives `d0`, `d1` at the
-/// endpoints of an interval of width `h`, evaluates the cubic at parameter
-/// `t` (t=0 gives f0, t=1 gives f1). Outside [0, 1] the interval's cubic runs on past its
-/// knots, which is how the end intervals extrapolate.
-///
-/// Standard cubic spline formula (Numerical Recipes, SEP/SExtractor):
-///   f(t) = (1-t)*f0 + t*f1 + ((1-t)³ - (1-t))*a + (t³ - t)*b
-/// where a = h²/6 * `d2_0`, b = h²/6 * `d2_1`.
-///
-/// Factored form (since (ct³-ct) = -t*ct*(2-t) and (t³-t) = -t*ct*(1+t)), its linear part as a
-/// rise from `f0` so equal nodes with no curvature give `f0` exactly, at any `t`:
-///   f(t) = f0 + t*(f1-f0) - t*(1-t)*((2-t)*a + (1+t)*b)
-#[inline]
-pub(crate) fn cubic_spline_eval(f0: f32, f1: f32, d0: f32, d1: f32, h: f32, t: f32) -> f32 {
-    if h <= 0.0 {
-        return f0;
-    }
-    let h2_6 = h * h / 6.0;
-    let a = h2_6 * d0;
-    let b = h2_6 * d1;
-    let ct = 1.0 - t;
-    let t_ct = t * ct;
-    f0 + t * (f1 - f0) - t_ct * ((2.0 - t) * a + (1.0 + t) * b)
-}
+pub(crate) mod spline_segment;
 
 /// Solve for second derivatives of a natural cubic spline.
 ///

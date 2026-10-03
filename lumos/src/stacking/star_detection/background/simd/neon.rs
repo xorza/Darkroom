@@ -2,7 +2,8 @@
 
 use std::arch::aarch64::*;
 
-use crate::stacking::star_detection::background::simd::{SegmentRamp, SplineSegment};
+use crate::background_mesh::spline::spline_segment::SplineSegment;
+use crate::stacking::star_detection::background::simd::SegmentRamp;
 
 /// Evaluate cubic spline for 4 values using NEON.
 pub(super) unsafe fn interpolate_segment_cubic_neon(

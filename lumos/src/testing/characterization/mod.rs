@@ -307,7 +307,7 @@ fn stretch_snapshot() {
         stretch.apply(&mut image).unwrap();
         image_snapshot(&mut snapshot, &image);
     }
-    assert_snapshot("stretch", &snapshot, "3d5611657479e913");
+    assert_snapshot("stretch", &snapshot, "1e8cd0a9f753d0ab");
 }
 
 /// The first RAW light of the dataset, decoded to its CFA plane.

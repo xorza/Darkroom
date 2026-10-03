@@ -1,6 +1,7 @@
 use imaginarium::{Buffer2, ChannelCount, Image};
 use rayon::prelude::*;
 
+use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::math::sum;
 use std::array;
@@ -170,11 +171,11 @@ impl LinearPixels {
     }
 
     pub(crate) fn mean(&self) -> f32 {
-        // The partial sums combine in f64 and nothing rounds until the end. Rounding each chunk to
-        // f32 first would put one narrow rounding per 8192 pixels between a plane and its mean —
-        // ~2900 of them on a 24MP frame — which is the error the f64 accumulator exists to avoid.
+        // The partial sums combine in f64 and nothing rounds until the end. Rounding each block to
+        // f32 first would put one narrow rounding per block between a plane and its mean — ~2900 of
+        // them on a 24MP frame — which is the error the f64 accumulator exists to avoid.
         fn parallel_sum(values: &[f32]) -> f64 {
-            values.par_chunks(8192).map(sum::sum_f32).sum()
+            values.par_chunks(SAMPLES_PER_BLOCK).map(sum::sum_f32).sum()
         }
 
         match self {

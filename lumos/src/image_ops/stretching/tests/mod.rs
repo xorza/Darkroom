@@ -201,6 +201,92 @@ fn ghs_endpoints_and_monotonic_across_b_family() {
     }
 }
 
+/// The textbook GHS, in f64: the base `T` and its slope per `b` branch, the mirror about `sp`, the
+/// linear tails past `lp` and `hp`, normalized to [0, 1].
+fn ghs_reference(d: f64, b: f64, sp: f64, lp: f64, hp: f64, x: f64) -> f64 {
+    let t = |u: f64| {
+        if b == 0.0 {
+            1.0 - (-d * u).exp()
+        } else if b == -1.0 {
+            (1.0 + d * u).ln()
+        } else if b < 0.0 {
+            (1.0 - (1.0 - b * d * u).powf((b + 1.0) / b)) / (d * (b + 1.0))
+        } else {
+            1.0 - (1.0 + b * d * u).powf(-1.0 / b)
+        }
+    };
+    let tp = |u: f64| {
+        if b == 0.0 {
+            d * (-d * u).exp()
+        } else if b == -1.0 {
+            d / (1.0 + d * u)
+        } else if b < 0.0 {
+            (1.0 - b * d * u).powf(1.0 / b)
+        } else {
+            d * (1.0 + b * d * u).powf(-(1.0 + b) / b)
+        }
+    };
+    let raw = |x: f64| {
+        if x < lp {
+            tp(sp - lp) * (x - lp) - t(sp - lp)
+        } else if x < sp {
+            -t(sp - x)
+        } else if x < hp {
+            t(x - sp)
+        } else {
+            tp(hp - sp) * (x - hp) + t(hp - sp)
+        }
+    };
+    ((raw(x) - raw(0.0)) / (raw(1.0) - raw(0.0))).clamp(0.0, 1.0)
+}
+
+/// The f32 curve against the f64 textbook one at every 1/400 of [0, 1], through both limits of
+/// `b` — at them, and 2e-6 and 1e-5 off them, where the textbook forms cancel in f32 by up to 21%
+/// — and across `d` and the protection points. The f64 forms are accurate to ~1e-10 there; the
+/// f32 curve rounds each base value to a few ε and divides by a range of order one, held to 64ε.
+#[test]
+fn ghs_matches_an_f64_reference_through_both_limits() {
+    let bound = 64.0 * f64::from(f32::EPSILON);
+    for b in [
+        -3.0f32,
+        -1.0 - 1e-5,
+        -1.0 - 2e-6,
+        -1.0,
+        -1.0 + 2e-6,
+        -1.0 + 1e-5,
+        -0.5,
+        -1e-5,
+        -2e-6,
+        0.0,
+        2e-6,
+        1e-5,
+        0.5,
+        2.0,
+    ] {
+        for d in [0.5f32, 5.0, 12.0] {
+            for (sp, lp, hp) in [(0.3f32, 0.0f32, 1.0f32), (0.4, 0.15, 0.85)] {
+                let curve = GhsCurve::new(d, b, sp, lp, hp);
+                for i in 0..=400 {
+                    let x = i as f32 / 400.0;
+                    let expected = ghs_reference(
+                        f64::from(d),
+                        f64::from(b),
+                        f64::from(sp),
+                        f64::from(lp),
+                        f64::from(hp),
+                        f64::from(x),
+                    );
+                    let got = f64::from(curve.eval(x));
+                    assert!(
+                        (got - expected).abs() <= bound,
+                        "b {b}, d {d}, sp {sp}: at {x} {got} vs {expected}"
+                    );
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn ghs_identity_when_d_zero() {
     let c = GhsCurve::new(0.0, 1.0, 0.3, 0.1, 0.9);

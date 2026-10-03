@@ -4,7 +4,7 @@ use arrayvec::ArrayVec;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::math::statistics::{MedianMad, mad_with_scratch, median_mut};
+use crate::math::statistics::MedianMad;
 use crate::stacking::frame_store::StackableImage;
 use crate::stacking::frame_store::frame_facts::FrameFacts;
 
@@ -38,34 +38,28 @@ impl FrameStats {
         let channels = (0..dimensions.channels())
             .into_par_iter()
             .map(|channel| {
-                // Gathered only for a frame that has a mask; without one the plane itself is what
-                // gets measured, and the single copy below is the scratch the median sorts in
-                // place — the same one allocation this cost before nulls existed.
-                let measured = nulls.map(|nulls| {
-                    image
-                        .channel(channel)
+                // One copy per channel, the measured samples, which the median and the MAD then
+                // sort in place.
+                let plane = image.channel(channel);
+                let mut measured: Vec<f32> = match nulls {
+                    Some(nulls) => plane
                         .iter()
                         .enumerate()
                         .filter(|(index, _)| !nulls.is_null(*index))
                         .map(|(_, &sample)| sample)
-                        .collect::<Vec<f32>>()
-                });
-                let data = measured
-                    .as_deref()
-                    .unwrap_or_else(|| image.channel(channel));
+                        .collect(),
+                    None => plane.to_vec(),
+                };
                 // A frame with nothing measured anywhere has no statistics to report. It also
                 // contributes at no pixel, so what goes here is never read — but it has to be
                 // something, and the median of nothing would panic.
-                if data.is_empty() {
+                if measured.is_empty() {
                     return MedianMad {
                         median: 0.0,
                         mad: 0.0,
                     };
                 }
-                let mut scratch = data.to_vec();
-                let median = median_mut(&mut scratch);
-                let mad = mad_with_scratch(data, median, &mut scratch);
-                MedianMad { median, mad }
+                MedianMad::of_mut(&mut measured)
             })
             .collect::<Vec<_>>()
             .into_iter()

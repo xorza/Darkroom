@@ -1,13 +1,10 @@
-//! Vector backends for the color-preserving arcsinh curve, and the dispatch between them.
-//!
-//! The per-pixel `asinh` is the curve's hot spot, so each backend computes it ≈ f32-exact (~1 ULP
-//! vs libm) over a whole band of three planes at once. Planar storage is what lets them take three
-//! plain `loadu`/`storeu` per vector: on interleaved data AVX2 needed three stride-3 gathers and a
-//! 24-store scalar write-back per 8 pixels, while NEON's `vld3q_f32`/`vst3q_f32` did it in one
-//! instruction each — a large win on x86 and roughly neutral on aarch64.
+//! Vector backends for the arcsinh curve — on a plane, and color-preserving over three — and the
+//! dispatch between them. The per-sample `asinh` is the curve's hot spot; every backend computes it
+//! by the same steps, to a few ULP relative at every magnitude (the tests' `asinh_pos_scalar` spells
+//! them out one lane at a time).
 
 use crate::image_ops::rgb::Rgb;
-use crate::image_ops::stretching::{AsinhCurve, color_preserve_pixel};
+use crate::image_ops::stretching::{AsinhCurve, ToneCurve, color_preserve_pixel};
 use crate::simd::dispatch;
 
 #[cfg(target_arch = "x86_64")]
@@ -33,6 +30,26 @@ pub(super) const LOG_P8: f32 = 3.333_333e-1;
 pub(super) const SQRTHF: f32 = 0.707_106_77;
 pub(super) const LOG_Q1: f32 = -2.121_944_4e-4;
 pub(super) const LOG_Q2: f32 = 0.693_359_4;
+
+/// Where the backends switch to `asinh(x) = ln(x) + ln 2`: past 2¹², the dropped `1/(4x²)` is under
+/// 1.5e-8, below the f32 resolution of a value that large.
+pub(super) const ASINH_LOG_FROM: f32 = 4096.0;
+
+/// Apply the arcsinh plane curve in place to one band of a plane.
+pub(super) fn asinh_plane(plane: &mut [f32], c: AsinhCurve) {
+    dispatch! {
+        x86: avx2_fma => avx2::asinh_plane_avx2(plane, c.inv_beta, c.inv_norm),
+        aarch64 => neon::asinh_plane_neon(plane, c.inv_beta, c.inv_norm),
+        scalar => asinh_plane_scalar(plane, c),
+    }
+}
+
+/// Scalar counterpart of the plane kernels: libm's `asinhf` through [`AsinhCurve::eval`].
+fn asinh_plane_scalar(plane: &mut [f32], c: AsinhCurve) {
+    for value in plane {
+        *value = c.eval(*value);
+    }
+}
 
 /// Apply the color-preserving arcsinh curve in place to one band of three RGB-f32 **planes**.
 ///

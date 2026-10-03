@@ -1,3 +1,4 @@
+use crate::background_mesh::spline::spline_segment::SplineSegment;
 use crate::background_mesh::spline::*;
 
 #[test]
@@ -92,7 +93,7 @@ fn solve_d2_non_uniform_spacing() {
 }
 
 #[test]
-fn cubic_spline_eval_endpoints() {
+fn spline_segment_endpoints() {
     // At t=0: should return f0; at t=1: should return f1
     let f0 = 10.0;
     let f1 = 20.0;
@@ -100,15 +101,15 @@ fn cubic_spline_eval_endpoints() {
     let d1 = -3.0;
     let h = 32.0;
 
-    let val_0 = cubic_spline_eval(f0, f1, d0, d1, h, 0.0);
-    let val_1 = cubic_spline_eval(f0, f1, d0, d1, h, 1.0);
+    let val_0 = SplineSegment::new(f0, f1, d0, d1, h).eval(0.0);
+    let val_1 = SplineSegment::new(f0, f1, d0, d1, h).eval(1.0);
 
     assert!((val_0 - f0).abs() < 1e-6, "t=0: expected {f0}, got {val_0}");
     assert!((val_1 - f1).abs() < 1e-6, "t=1: expected {f1}, got {val_1}");
 }
 
 #[test]
-fn cubic_spline_eval_midpoint() {
+fn spline_segment_midpoint() {
     // At t=0.5, using f(t) = ct*f0 + t*f1 - t*ct*((2-t)*a + (1+t)*b):
     //   = (f0+f1)/2 - 0.375*(a+b)
     // where a = h²/6*d0, b = h²/6*d1
@@ -118,7 +119,7 @@ fn cubic_spline_eval_midpoint() {
     let d0 = 2.0; // a = 6*2 = 12
     let d1 = -1.0; // b = 6*(-1) = -6
     // Expected: (100+200)/2 - 0.375*(12 + (-6)) = 150 - 0.375*6 = 150 - 2.25 = 147.75
-    let val = cubic_spline_eval(f0, f1, d0, d1, h, 0.5);
+    let val = SplineSegment::new(f0, f1, d0, d1, h).eval(0.5);
     assert!(
         (val - 147.75).abs() < 1e-4,
         "t=0.5: expected 147.75, got {val}"
@@ -126,7 +127,7 @@ fn cubic_spline_eval_midpoint() {
 }
 
 #[test]
-fn cubic_spline_eval_zero_d2_is_linear() {
+fn spline_segment_zero_d2_is_linear() {
     // With d0=d1=0, the spline should be exactly linear
     let f0 = 10.0;
     let f1 = 50.0;
@@ -134,7 +135,7 @@ fn cubic_spline_eval_zero_d2_is_linear() {
 
     for i in 0..=10 {
         let t = i as f32 / 10.0;
-        let val = cubic_spline_eval(f0, f1, 0.0, 0.0, h, t);
+        let val = SplineSegment::new(f0, f1, 0.0, 0.0, h).eval(t);
         let expected = (1.0 - t) * f0 + t * f1;
         assert!(
             (val - expected).abs() < 1e-5,
@@ -278,15 +279,15 @@ fn solve_d2_symmetric_data() {
 }
 
 #[test]
-fn cubic_spline_eval_h_zero_returns_f0() {
+fn spline_segment_h_zero_returns_f0() {
     // When h=0 (degenerate interval), should return f0
-    let val = cubic_spline_eval(42.0, 99.0, 5.0, -3.0, 0.0, 0.5);
+    let val = SplineSegment::new(42.0, 99.0, 5.0, -3.0, 0.0).eval(0.5);
     assert_eq!(val, 42.0);
 }
 
 #[test]
-fn cubic_spline_eval_h_negative_returns_f0() {
-    let val = cubic_spline_eval(42.0, 99.0, 5.0, -3.0, -1.0, 0.5);
+fn spline_segment_h_negative_returns_f0() {
+    let val = SplineSegment::new(42.0, 99.0, 5.0, -3.0, -1.0).eval(0.5);
     assert_eq!(val, 42.0);
 }
 
@@ -307,7 +308,7 @@ fn spline_roundtrip_reproduces_nodes() {
         // From left interval (t=1): interval [i-1, i]
         if i > 0 {
             let h = centers[i] - centers[i - 1];
-            let val = cubic_spline_eval(values[i - 1], values[i], d2[i - 1], d2[i], h, 1.0);
+            let val = SplineSegment::new(values[i - 1], values[i], d2[i - 1], d2[i], h).eval(1.0);
             assert!(
                 (val - values[i]).abs() < 1e-4,
                 "Node {} from left: expected {}, got {}",
@@ -319,7 +320,7 @@ fn spline_roundtrip_reproduces_nodes() {
         // From right interval (t=0): interval [i, i+1]
         if i < 4 {
             let h = centers[i + 1] - centers[i];
-            let val = cubic_spline_eval(values[i], values[i + 1], d2[i], d2[i + 1], h, 0.0);
+            let val = SplineSegment::new(values[i], values[i + 1], d2[i], d2[i + 1], h).eval(0.0);
             assert!(
                 (val - values[i]).abs() < 1e-4,
                 "Node {} from right: expected {}, got {}",
@@ -347,8 +348,10 @@ fn spline_roundtrip_interior_continuity() {
         let h_left = centers[i] - centers[i - 1];
         let h_right = centers[i + 1] - centers[i];
 
-        let val_left = cubic_spline_eval(values[i - 1], values[i], d2[i - 1], d2[i], h_left, 1.0);
-        let val_right = cubic_spline_eval(values[i], values[i + 1], d2[i], d2[i + 1], h_right, 0.0);
+        let val_left =
+            SplineSegment::new(values[i - 1], values[i], d2[i - 1], d2[i], h_left).eval(1.0);
+        let val_right =
+            SplineSegment::new(values[i], values[i + 1], d2[i], d2[i + 1], h_right).eval(0.0);
 
         assert!(
             (val_left - val_right).abs() < 1e-4,
@@ -357,16 +360,10 @@ fn spline_roundtrip_interior_continuity() {
 
         // C1 check: numerical derivative from both sides should match
         let eps = 1e-4;
-        let val_left_m = cubic_spline_eval(
-            values[i - 1],
-            values[i],
-            d2[i - 1],
-            d2[i],
-            h_left,
-            1.0 - eps,
-        );
+        let val_left_m =
+            SplineSegment::new(values[i - 1], values[i], d2[i - 1], d2[i], h_left).eval(1.0 - eps);
         let val_right_p =
-            cubic_spline_eval(values[i], values[i + 1], d2[i], d2[i + 1], h_right, eps);
+            SplineSegment::new(values[i], values[i + 1], d2[i], d2[i + 1], h_right).eval(eps);
         // Derivative from left: (val_left - val_left_m) / (eps * h_left)
         // Derivative from right: (val_right_p - val_right) / (eps * h_right)
         let deriv_left = (val_left - val_left_m) / (eps * h_left);

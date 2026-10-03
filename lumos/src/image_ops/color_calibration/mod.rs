@@ -12,14 +12,11 @@ use crate::error::InvalidConfigField;
 use crate::image_ops::error::OpError;
 use crate::io::image::linear::LinearImage;
 use crate::math::statistics::ClippedStats;
+use crate::math::statistics::subsample::{MAX_STATISTIC_SAMPLES, Subsample};
 
 /// Sigma-clip parameters for the robust per-channel background estimate (rejects stars/nebula).
 const BACKGROUND_KAPPA: f32 = 2.5;
 const BACKGROUND_ITERATIONS: usize = 5;
-/// Cap on the per-channel sample size for the background estimate (uniform stride for larger
-/// channels, matching `defect_map`'s `MAX_MEDIAN_SAMPLES`). A robust background median converges
-/// well below this; small images stay exact (stride 1).
-const MAX_BACKGROUND_SAMPLES: usize = 1_000_000;
 
 /// Neutralize the per-channel sky background so the background is a neutral gray (R=G=B).
 ///
@@ -63,11 +60,11 @@ fn channel_backgrounds(image: &LinearImage) -> Rgb {
     }
 }
 
-/// One channel's robust (sigma-clipped median) background: subsample the plane at a uniform stride
-/// capped at `MAX_BACKGROUND_SAMPLES` (exact for small images) and take its sigma-clipped median.
+/// One channel's robust (sigma-clipped median) background, from a [`Subsample`] of the plane.
 fn channel_background(plane: &[f32], scratch: &mut Vec<f32>) -> f32 {
-    let stride = (plane.len() / MAX_BACKGROUND_SAMPLES).max(1);
-    let mut s: Vec<f32> = plane.iter().step_by(stride).copied().collect();
+    let mut s: Vec<f32> = Subsample::new(plane.len(), MAX_STATISTIC_SAMPLES)
+        .of(plane)
+        .collect();
     ClippedStats::sigma_clipped(&mut s, scratch, BACKGROUND_KAPPA, BACKGROUND_ITERATIONS).median
 }
 

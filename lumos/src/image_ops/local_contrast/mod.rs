@@ -110,110 +110,172 @@ fn clahe_map(intensity: &Buffer2<f32>, config: &LocalContrast) -> Buffer2<f32> {
         as usize)
         .max(1);
     let tiles = config.tiles.min(max_tiles);
-    let luts = build_tile_luts(intensity, tiles, config.clip_limit);
-    apply_luts(intensity, &luts, tiles, config.strength)
+    let columns = TileAxis::new(intensity.width(), tiles);
+    let rows = TileAxis::new(intensity.height(), tiles);
+    let luts = build_tile_luts(intensity, &columns, &rows, config.clip_limit);
+    apply_luts(intensity, &luts, &columns, &rows, config.strength)
 }
 
-/// One mapping LUT per tile (`tiles*tiles`, row-major), each `bin → [0,1]` from the clipped CDF.
-fn build_tile_luts(intensity: &Buffer2<f32>, tiles: usize, clip_limit: f32) -> Vec<[f32; N_BINS]> {
-    let size = Size2us::new(intensity.width(), intensity.height());
-    let (tw, th) = (size.width.div_ceil(tiles), size.height.div_ceil(tiles));
-    let mut luts = vec![[0.0f32; N_BINS]; tiles * tiles];
-    luts.par_iter_mut().enumerate().for_each(|(idx, lut)| {
-        let (tx, ty) = (idx % tiles, idx / tiles);
-        let (x0, x1) = (tx * tw, ((tx + 1) * tw).min(size.width));
-        let (y0, y1) = (ty * th, ((ty + 1) * th).min(size.height));
+/// A tile's mapping: the clipped histogram's cumulative fraction at each bin edge, `N_BINS + 1`
+/// nodes from 0 to 1. Between edges the mapping is linear, the CDF of the histogram's own
+/// piecewise-uniform density — so a value maps continuously, not to its bin's one level.
+type TileLut = [f32; N_BINS + 1];
 
+/// One mapping per tile, row-major.
+fn build_tile_luts(
+    intensity: &Buffer2<f32>,
+    columns: &TileAxis,
+    rows: &TileAxis,
+    clip_limit: f32,
+) -> Vec<TileLut> {
+    let mut luts = vec![[0.0f32; N_BINS + 1]; columns.tiles() * rows.tiles()];
+    luts.par_iter_mut().enumerate().for_each(|(idx, lut)| {
+        let (tx, ty) = (idx % columns.tiles(), idx / columns.tiles());
+        let (x0, x1) = (columns.bounds[tx], columns.bounds[tx + 1]);
         let mut hist = [0u32; N_BINS];
-        let mut count = 0u32;
-        for y in y0..y1 {
+        for y in rows.bounds[ty]..rows.bounds[ty + 1] {
             for &v in &intensity.row(y)[x0..x1] {
                 hist[bin_of(v)] += 1;
-                count += 1;
             }
         }
-        if count == 0 {
-            // Empty tile (div_ceil overshoot at an edge): identity mapping.
-            for (b, e) in lut.iter_mut().enumerate() {
-                *e = b as f32 / (N_BINS as f32 - 1.0);
-            }
-            return;
-        }
-
-        // Clip each bin at the limit and redistribute the excess equally (contrast limiting).
+        let count: u32 = hist.iter().sum();
         let clip = (clip_limit * count as f32 / N_BINS as f32).max(1.0) as u32;
-        let mut excess = 0u32;
-        for c in &mut hist {
-            if *c > clip {
-                excess += *c - clip;
-                *c = clip;
-            }
-        }
-        let add = excess / N_BINS as u32;
-        let rem = excess % N_BINS as u32;
-        for (b, c) in hist.iter_mut().enumerate() {
-            *c += add + u32::from((b as u32) < rem);
-        }
-
-        // Normalized CDF → mapping.
+        clip_histogram(&mut hist, clip);
         let total: u32 = hist.iter().sum();
         let mut cum = 0u32;
+        lut[0] = 0.0;
         for (b, &c) in hist.iter().enumerate() {
             cum += c;
-            lut[b] = cum as f32 / total as f32;
+            lut[b + 1] = cum as f32 / total as f32;
         }
     });
     luts
+}
+
+/// Clip every bin at `clip` and hand the excess back evenly: an equal share to every bin, and the
+/// remainder one apiece to bins spread across the range at a stride of `N_BINS / remainder`, as
+/// OpenCV's CLAHE does — given to the lowest bins instead, it would lift the dark end alone.
+fn clip_histogram(hist: &mut [u32; N_BINS], clip: u32) {
+    let mut excess = 0u32;
+    for c in hist.iter_mut() {
+        if *c > clip {
+            excess += *c - clip;
+            *c = clip;
+        }
+    }
+    let share = excess / N_BINS as u32;
+    let mut remainder = (excess % N_BINS as u32) as usize;
+    for c in hist.iter_mut() {
+        *c += share;
+    }
+    if let Some(stride) = N_BINS.checked_div(remainder) {
+        let stride = stride.max(1);
+        let mut bin = 0;
+        while bin < N_BINS && remainder > 0 {
+            hist[bin] += 1;
+            bin += stride;
+            remainder -= 1;
+        }
+    }
+}
+
+/// How one axis of `extent` pixels splits into tiles: tile `t` covers `[t·extent/n, (t+1)·extent/n)`
+/// — never empty, as at most `extent` tiles are made — and sits at the mean index of its pixels.
+#[derive(Debug)]
+struct TileAxis {
+    /// The tiles' edges, `n + 1` of them.
+    bounds: Vec<usize>,
+    centres: Vec<f32>,
+}
+
+/// The two tiles a coordinate blends between, and the weight of the second.
+#[derive(Debug, Clone, Copy)]
+struct Blend {
+    lower: usize,
+    upper: usize,
+    weight: f32,
+}
+
+impl TileAxis {
+    fn new(extent: usize, tiles: usize) -> Self {
+        let tiles = tiles.clamp(1, extent);
+        let bounds: Vec<usize> = (0..=tiles).map(|t| t * extent / tiles).collect();
+        let centres = bounds
+            .windows(2)
+            .map(|edge| (edge[0] + edge[1] - 1) as f32 * 0.5)
+            .collect();
+        Self { bounds, centres }
+    }
+
+    fn tiles(&self) -> usize {
+        self.centres.len()
+    }
+
+    /// The tiles whose centres bracket `x`, the nearer edge tile alone past the outer centres.
+    fn blend(&self, x: usize) -> Blend {
+        let x = x as f32;
+        let upper = self.centres.partition_point(|&centre| centre <= x);
+        if upper == 0 || upper == self.tiles() {
+            let edge = upper.min(self.tiles() - 1);
+            return Blend {
+                lower: edge,
+                upper: edge,
+                weight: 0.0,
+            };
+        }
+        let (c0, c1) = (self.centres[upper - 1], self.centres[upper]);
+        Blend {
+            lower: upper - 1,
+            upper,
+            weight: (x - c0) / (c1 - c0),
+        }
+    }
 }
 
 /// Map each pixel's intensity through the bilinearly-interpolated four-tile mapping, blended with
 /// the original by `strength`.
 fn apply_luts(
     intensity: &Buffer2<f32>,
-    luts: &[[f32; N_BINS]],
-    tiles: usize,
+    luts: &[TileLut],
+    columns: &TileAxis,
+    rows: &TileAxis,
     strength: f32,
 ) -> Buffer2<f32> {
     let size = Size2us::new(intensity.width(), intensity.height());
-    let (tw, th) = (
-        size.width.div_ceil(tiles) as f32,
-        size.height.div_ceil(tiles) as f32,
-    );
-    let last = tiles as f32 - 1.0;
+    let column_blends: Vec<Blend> = (0..size.width).map(|x| columns.blend(x)).collect();
     let mut out = Buffer2::new_default(size.width, size.height);
     out.pixels_mut()
         .par_chunks_mut(size.width)
         .enumerate()
         .for_each(|(y, orow)| {
-            // Fractional tile-centre position of this row (tile ty centred at (ty+0.5)·th).
-            let gy = ((y as f32 + 0.5) / th - 0.5).clamp(0.0, last);
-            let ty0 = gy.floor() as usize;
-            let ty1 = (ty0 + 1).min(tiles - 1);
-            let fy = gy - ty0 as f32;
-            let irow = intensity.row(y);
-            for x in 0..size.width {
-                let v = irow[x];
-                let b = bin_of(v);
-                let gx = ((x as f32 + 0.5) / tw - 0.5).clamp(0.0, last);
-                let tx0 = gx.floor() as usize;
-                let tx1 = (tx0 + 1).min(tiles - 1);
-                let fx = gx - tx0 as f32;
-                let tl = luts[ty0 * tiles + tx0][b];
-                let tr = luts[ty0 * tiles + tx1][b];
-                let bl = luts[ty1 * tiles + tx0][b];
-                let br = luts[ty1 * tiles + tx1][b];
-                let top = tl + fx * (tr - tl);
-                let bot = bl + fx * (br - bl);
-                let mapped = top + fy * (bot - top);
-                orow[x] = v + strength * (mapped - v);
+            let row = rows.blend(y);
+            let (top, bottom) = (row.lower * columns.tiles(), row.upper * columns.tiles());
+            for ((o, &v), column) in orow.iter_mut().zip(intensity.row(y)).zip(&column_blends) {
+                let at = |tile: usize| map_through(&luts[tile], v);
+                let upper_row = at(top + column.lower)
+                    + column.weight * (at(top + column.upper) - at(top + column.lower));
+                let lower_row = at(bottom + column.lower)
+                    + column.weight * (at(bottom + column.upper) - at(bottom + column.lower));
+                let mapped = upper_row + row.weight * (lower_row - upper_row);
+                *o = v + strength * (mapped - v);
             }
         });
     out
 }
 
+/// `v` through `lut`, linear between its bin edges.
+#[inline]
+fn map_through(lut: &TileLut, v: f32) -> f32 {
+    let position = v.clamp(0.0, 1.0) * N_BINS as f32;
+    let bin = (position as usize).min(N_BINS - 1);
+    let fraction = position - bin as f32;
+    lut[bin] + fraction * (lut[bin + 1] - lut[bin])
+}
+
+/// The histogram bin of `v`: `[b/N, (b+1)/N)`, 1 in the last bin.
 #[inline]
 fn bin_of(v: f32) -> usize {
-    (v.clamp(0.0, 1.0) * (N_BINS as f32 - 1.0)).round() as usize
+    ((v.clamp(0.0, 1.0) * N_BINS as f32) as usize).min(N_BINS - 1)
 }
 
 #[cfg(test)]

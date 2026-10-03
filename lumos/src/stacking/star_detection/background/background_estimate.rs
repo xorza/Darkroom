@@ -4,7 +4,8 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::background_mesh::TileGrid;
-use crate::background_mesh::spline::{cubic_spline_eval, solve_natural_spline_d2};
+use crate::background_mesh::spline::solve_natural_spline_d2;
+use crate::background_mesh::spline::spline_segment::SplineSegment;
 use crate::background_mesh::tile_stats::TileComponent;
 use crate::bit_buffer2::BitBuffer2;
 use crate::concurrency::JobScratchPool;
@@ -12,7 +13,7 @@ use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::math::statistics::median_mut;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::background::simd;
-use crate::stacking::star_detection::background::simd::{SegmentRamp, SplineSegment};
+use crate::stacking::star_detection::background::simd::SegmentRamp;
 use crate::stacking::star_detection::background::sky_noise::SkyNoise;
 use crate::stacking::star_detection::background::workspace::InterpolateScratch;
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
@@ -288,13 +289,13 @@ fn interpolate_row(
         let f1_bg = grid.stats[(tx, ty1)].sky;
         let d0_bg = grid.d2y(TileComponent::Sky, Vec2us::new(tx, ty0));
         let d1_bg = grid.d2y(TileComponent::Sky, Vec2us::new(tx, ty1));
-        node_bg[tx] = cubic_spline_eval(f0_bg, f1_bg, d0_bg, d1_bg, hy, ty);
+        node_bg[tx] = SplineSegment::new(f0_bg, f1_bg, d0_bg, d1_bg, hy).eval(ty);
 
         let f0_n = grid.stats[(tx, ty0)].sigma;
         let f1_n = grid.stats[(tx, ty1)].sigma;
         let d0_n = grid.d2y(TileComponent::Sigma, Vec2us::new(tx, ty0));
         let d1_n = grid.d2y(TileComponent::Sigma, Vec2us::new(tx, ty1));
-        node_noise[tx] = cubic_spline_eval(f0_n, f1_n, d0_n, d1_n, hy, ty);
+        node_noise[tx] = SplineSegment::new(f0_n, f1_n, d0_n, d1_n, hy).eval(ty);
     }
 
     let d2x_bg = &mut scratch.d2x_bg[..tiles_x];
@@ -326,24 +327,19 @@ fn interpolate_row(
         };
         let cx0 = centers_x[tx0];
         let hx = centers_x[tx1] - cx0;
-        let hx2_6 = hx * hx / 6.0;
         let inv_hx = 1.0 / hx;
 
         simd::interpolate_segment_cubic_simd(
             &mut bg_row[x..segment_end],
             &mut noise_row[x..segment_end],
-            SplineSegment {
-                f0: node_bg[tx0],
-                f1: node_bg[tx1],
-                a: hx2_6 * d2x_bg[tx0],
-                b: hx2_6 * d2x_bg[tx1],
-            },
-            SplineSegment {
-                f0: node_noise[tx0],
-                f1: node_noise[tx1],
-                a: hx2_6 * d2x_noise[tx0],
-                b: hx2_6 * d2x_noise[tx1],
-            },
+            SplineSegment::new(node_bg[tx0], node_bg[tx1], d2x_bg[tx0], d2x_bg[tx1], hx),
+            SplineSegment::new(
+                node_noise[tx0],
+                node_noise[tx1],
+                d2x_noise[tx0],
+                d2x_noise[tx1],
+                hx,
+            ),
             SegmentRamp {
                 start: (x as f32 - cx0) * inv_hx,
                 step: inv_hx,

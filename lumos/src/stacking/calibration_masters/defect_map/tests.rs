@@ -11,22 +11,8 @@ use crate::stacking::calibration_masters::defect_map::sampling::{
 };
 use crate::{io::raw::demosaic::bayer::CfaPattern, testing::cfa::make_cfa};
 
-#[derive(Debug, PartialEq)]
-struct MedianMad {
-    median: f32,
-    mad: f32,
-}
-
 fn median_mad(mut samples: Vec<f32>) -> MedianMad {
-    assert!(!samples.is_empty());
-    let median = median_mut(&mut samples);
-    for sample in &mut samples {
-        *sample = (*sample - median).abs();
-    }
-    MedianMad {
-        median,
-        mad: median_mut(&mut samples),
-    }
+    MedianMad::of_mut(&mut samples)
 }
 
 fn is_hot(defect_map: &DefectMap, pixel_idx: usize) -> bool {
