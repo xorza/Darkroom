@@ -259,6 +259,11 @@ impl<'a> NodeCtx<'a> {
             .map(move |(port_idx, input)| InputCtx::new(self, port_idx, input))
     }
 
+    /// The func this node instantiates, `None` for one the library lacks.
+    pub(super) fn func(self) -> Option<&'a Func> {
+        self.func
+    }
+
     /// One input port by index.
     pub(crate) fn input(self, port_idx: usize) -> Option<InputCtx<'a>> {
         let declared = self.func?.inputs.get(port_idx)?;
