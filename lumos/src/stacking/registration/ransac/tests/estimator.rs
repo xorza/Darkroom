@@ -54,7 +54,7 @@ impl Case {
                 &targets,
                 self.model,
             )
-            .unwrap_or_else(|| panic!("{}: no estimate", self.name));
+            .unwrap_or_else(|failure| panic!("{}: no estimate, {failure:?}", self.name));
         let expected: Vec<usize> = (0..self.points.len())
             .filter(|i| !self.outliers.contains(i))
             .collect();
@@ -248,17 +248,28 @@ fn ransac_recovers_every_model_and_exactly_its_inliers() {
     }
 }
 
-/// No estimate without enough matches: none at all, or fewer than the model's minimal sample.
+/// No estimate without enough matches — none at all, or fewer than the model's minimal sample —
+/// and the failure says RANSAC never ran rather than that it found no inliers.
 #[test]
 fn too_few_matches_give_no_estimate() {
     let estimator = seeded(1.0, RansacConfig::default());
-    assert!(
+    let never_ran = Err(RansacFailure {
+        reason: RansacFailureReason::TooFewMatches,
+        iterations: 0,
+        best_inlier_count: 0,
+    });
+    assert_eq!(
         estimator
             .estimate(&[], &[], &[], TransformType::Translation)
-            .is_none()
+            .map(|result| result.inliers),
+        never_ran
     );
     let one = [DVec2::ZERO];
-    assert!(estimate_uniform(&estimator, &one, &one, TransformType::Similarity).is_none());
+    assert_eq!(
+        estimate_uniform(&estimator, &one, &one, TransformType::Similarity)
+            .map(|result| result.inliers),
+        never_ran
+    );
 }
 
 /// A seed repeats a run: the same inliers and the same transform, bit for bit.
@@ -492,5 +503,5 @@ fn confidence_weighted_sampling_finds_the_trusted_pairs_first() {
         &target_points,
         TransformType::Similarity,
     );
-    assert_ne!(uniform.map(|result| result.inliers), Some(trusted));
+    assert_ne!(uniform.map(|result| result.inliers), Ok(trusted));
 }

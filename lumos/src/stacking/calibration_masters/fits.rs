@@ -93,7 +93,7 @@ pub(super) fn load(path: &Path) -> io::Result<CalibrationMasters> {
     // trustworthy as one just built — and neither can exist in a state the other would reject.
     masters
         .validate_dimensions()
-        .map_err(|source| invalid_data(source.to_string()))?;
+        .map_err(|source| IoError::new(ErrorKind::InvalidData, source))?;
     Ok(masters)
 }
 
@@ -225,13 +225,13 @@ struct EncodedDefectMap {
 }
 
 fn encode_defect_map(map: &DefectMap) -> io::Result<EncodedDefectMap> {
-    let mut kinds = Vec::with_capacity(map.hot_indices.len() + map.cold_indices.len());
-    kinds.resize(map.hot_indices.len(), 0);
-    kinds.resize(kinds.len() + map.cold_indices.len(), 1);
-    let indices = map
-        .hot_indices
+    let (hot, cold) = (map.hot_indices(), map.cold_indices());
+    let mut kinds = Vec::with_capacity(hot.len() + cold.len());
+    kinds.resize(hot.len(), 0);
+    kinds.resize(kinds.len() + cold.len(), 1);
+    let indices = hot
         .iter()
-        .chain(&map.cold_indices)
+        .chain(cold)
         .map(|&index| {
             i64::try_from(index)
                 .map_err(|_| invalid_data("defect index exceeds the FITS signed-64 range"))
@@ -251,23 +251,22 @@ fn encode_defect_map(map: &DefectMap) -> io::Result<EncodedDefectMap> {
         .and_then(|header| header.set("LUMOSFMT", DEFECT_FORMAT))
         .and_then(|header| header.set("LUMOSVER", BUNDLE_VERSION))
         .map_err(fits_to_io)?;
-    if let Some(dimensions) = map.dimensions {
-        header
-            .set(
-                "LUMWID",
-                i64::try_from(dimensions.width).map_err(|_| {
-                    invalid_data("defect-map width exceeds the FITS signed-64 range")
-                })?,
-            )
-            .and_then(|header| {
-                header.set(
-                    "LUMHEI",
-                    i64::try_from(dimensions.height)
-                        .map_err(|_| fits_well::FitsError::KeywordOutOfRange { name: "LUMHEI" })?,
-                )
-            })
-            .map_err(fits_to_io)?;
-    }
+    let dimensions = map.dimensions();
+    let extent = |extent: usize, name: &str| {
+        i64::try_from(extent).map_err(|_| {
+            invalid_data(format!(
+                "defect-map {name} exceeds the FITS signed-64 range"
+            ))
+        })
+    };
+    let (width, height) = (
+        extent(dimensions.width, "width")?,
+        extent(dimensions.height, "height")?,
+    );
+    header
+        .set("LUMWID", width)
+        .and_then(|header| header.set("LUMHEI", height))
+        .map_err(fits_to_io)?;
     Ok(EncodedDefectMap { table, header })
 }
 
@@ -307,68 +306,36 @@ fn read_defect_map(
             "DEFECT_MAP column lengths do not match NAXIS2",
         ));
     }
-    if dimensions.is_none() && !indices.is_empty() {
-        return Err(invalid_data("non-empty DEFECT_MAP is missing dimensions"));
-    }
-
-    let pixel_count = dimensions.map(Size2us::pixel_count);
     let mut hot_indices = Vec::new();
     let mut cold_indices = Vec::new();
     for (kind, index) in kinds.into_iter().zip(indices) {
         let index = usize::try_from(index)
             .map_err(|_| invalid_data("DEFECT_MAP contains a negative or oversized index"))?;
-        if pixel_count.is_some_and(|count| index >= count) {
-            return Err(invalid_data(
-                "DEFECT_MAP index lies outside its sensor dimensions",
-            ));
-        }
         match kind {
             0 => hot_indices.push(index),
             1 => cold_indices.push(index),
             _ => return Err(invalid_data("DEFECT_MAP KIND must be 0 or 1")),
         }
     }
-    validate_sorted(&hot_indices, "hot")?;
-    validate_sorted(&cold_indices, "cold")?;
-    Ok(Some(DefectMap {
-        hot_indices,
-        cold_indices,
-        dimensions,
-    }))
+    DefectMap::from_indices(dimensions, hot_indices, cold_indices)
+        .map(Some)
+        .ok_or_else(|| invalid_data("DEFECT_MAP index lies outside its sensor dimensions"))
 }
 
-fn read_defect_dimensions(header: &Header) -> io::Result<Option<Size2us>> {
-    let width = header.get_integer("LUMWID").map_err(fits_to_io)?;
-    let height = header.get_integer("LUMHEI").map_err(fits_to_io)?;
-    match (width, height) {
-        (None, None) => Ok(None),
-        (Some(width), Some(height)) => {
-            let width = usize::try_from(width)
-                .ok()
-                .filter(|value| *value > 0)
-                .ok_or_else(|| invalid_data("DEFECT_MAP has an invalid width"))?;
-            let height = usize::try_from(height)
-                .ok()
-                .filter(|value| *value > 0)
-                .ok_or_else(|| invalid_data("DEFECT_MAP has an invalid height"))?;
-            width
-                .checked_mul(height)
-                .ok_or_else(|| invalid_data("DEFECT_MAP dimensions overflow"))?;
-            Ok(Some(Size2us::new(width, height)))
-        }
-        _ => Err(invalid_data(
-            "DEFECT_MAP must declare both LUMWID and LUMHEI or neither",
-        )),
-    }
-}
-
-fn validate_sorted(indices: &[usize], kind: &str) -> io::Result<()> {
-    if indices.windows(2).any(|pair| pair[0] >= pair[1]) {
-        return Err(invalid_data(format!(
-            "DEFECT_MAP {kind} indices must be strictly ascending"
-        )));
-    }
-    Ok(())
+fn read_defect_dimensions(header: &Header) -> io::Result<Size2us> {
+    let extent = |name: &str| -> io::Result<usize> {
+        header
+            .get_integer(name)
+            .map_err(fits_to_io)?
+            .and_then(|value| usize::try_from(value).ok())
+            .filter(|&value| value > 0)
+            .ok_or_else(|| invalid_data(format!("DEFECT_MAP has no valid {name}")))
+    };
+    let (width, height) = (extent("LUMWID")?, extent("LUMHEI")?);
+    width
+        .checked_mul(height)
+        .ok_or_else(|| invalid_data("DEFECT_MAP dimensions overflow"))?;
+    Ok(Size2us::new(width, height))
 }
 
 fn invalid_data(message: impl Into<String>) -> IoError {

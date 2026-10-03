@@ -86,8 +86,16 @@ fn estimate_honours_the_plausibility_limits() {
         &Transform::similarity(DVec2::new(5.0, -3.0), 30.0f64.to_radians(), 1.0),
         &ref_points,
     );
-    assert!(
-        estimate_uniform(&estimator, &ref_points, &rotated, TransformType::Similarity).is_none()
+    // Every hypothesis is implausible, so none is scored: the whole budget runs and the best
+    // gathered no inliers.
+    assert_eq!(
+        estimate_uniform(&estimator, &ref_points, &rotated, TransformType::Similarity)
+            .map(|result| result.inliers),
+        Err(RansacFailure {
+            reason: RansacFailureReason::NoInliersFound,
+            iterations: RansacConfig::default().max_iterations,
+            best_inlier_count: 0,
+        })
     );
     let mild = apply_all(
         &Transform::similarity(DVec2::new(5.0, -3.0), 5.0f64.to_radians(), 1.05),

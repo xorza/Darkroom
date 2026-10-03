@@ -120,7 +120,7 @@ fn bench_defect_map_build_bayer(b: ::quickbench::Bencher) {
     );
     b.bench(|| {
         black_box(
-            DefectMap::default()
+            DefectMap::new(dark.size())
                 .detect_hot(
                     black_box(&dark),
                     DEFAULT_SIGMA_THRESHOLD,

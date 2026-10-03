@@ -103,7 +103,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
         detectors.try_map(light_paths, |detector, index, path| {
             // Skip launching the RAW decode (the slow uninterruptible step) once cancelled.
             if cancel.is_cancelled() {
-                return Err(Error::Stack(StackError::Cancelled));
+                return Err(Error::Cancelled);
             }
             let image = decode_calibrate_demosaic(
                 path.as_ref(),
@@ -114,7 +114,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
             // Checked here, at decode, rather than after every frame has been detected: a frame
             // from another sensor fails the run before the rest are paid for.
             FrameDimensionMismatch::check(index, output, image.dimensions())
-                .map_err(|mismatch| Error::Stack(mismatch.into()))?;
+                .map_err(|mismatch| Error::from(StackError::from(mismatch)))?;
             // Detect while the decoded frame is still in hand, so the spilled tier reads it back
             // once (for the warp) rather than twice.
             let result = detector.detect(&image);
@@ -143,7 +143,7 @@ fn decode_calibrate_demosaic(
     let mut cfa = match CfaImage::from_file(path, context) {
         Ok(image) => image,
         Err(ImageError::Cancelled { .. }) => {
-            return Err(Error::Stack(StackError::Cancelled));
+            return Err(Error::Cancelled);
         }
         Err(source) => {
             return Err(Error::Load {
@@ -165,5 +165,5 @@ fn decode_calibrate_demosaic(
     }
     // Demosaic is the other heavy step; it polls `cancel` internally and bails mid-pass.
     cfa.demosaic(&context.cancel)
-        .map_err(|Cancelled| Error::Stack(StackError::Cancelled))
+        .map_err(|Cancelled| Error::Cancelled)
 }

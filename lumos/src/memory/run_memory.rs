@@ -47,23 +47,6 @@ impl RunMemory {
     pub(crate) fn load_context(self, cancel: CancelToken) -> LoadContext {
         LoadContext::new(cancel, self.decode_ceiling())
     }
-
-    /// The share of the planning figure for a stack of `part` of `whole` frames, when the stacks of
-    /// all `whole` frames run side by side.
-    ///
-    /// Proportional to the frame count, floored, so the shares sum to at most the whole; and a
-    /// stack fits its share exactly when the whole set fits the whole, so no stack spills while the
-    /// total fits. `whole == 0` keeps the whole figure.
-    pub(crate) fn share(self, part: usize, whole: usize) -> Self {
-        if whole == 0 {
-            return self;
-        }
-        let share = u128::from(self.planning) * part as u128 / whole as u128;
-        Self {
-            planning: u64::try_from(share).expect("a share is at most the whole"),
-            ..self
-        }
-    }
 }
 
 #[cfg(test)]
@@ -92,26 +75,5 @@ mod tests {
                 .memory_limit_bytes,
             6_000
         );
-    }
-
-    /// Shares are floored and sum to at most the whole: 1000 split 1 : 2 : 4 of 7 frames is
-    /// ⌊1000/7⌋ = 142, ⌊2000/7⌋ = 285 and ⌊4000/7⌋ = 571, which sum to 998. A stack holding every
-    /// frame gets all of it, and the decode ceiling never shrinks.
-    #[test]
-    fn shares_are_frame_weighted_and_never_exceed_the_whole() {
-        let memory = RunMemory::new(4_000, Some(1_000));
-        let shares = [1, 2, 4].map(|part| memory.share(part, 7));
-        assert_eq!(shares.map(RunMemory::planning), [142, 285, 571]);
-        assert!(shares.iter().map(|share| share.planning()).sum::<u64>() <= 1_000);
-        assert!(
-            shares
-                .iter()
-                .all(|share| share.decode_ceiling() == memory.decode_ceiling())
-        );
-        assert_eq!(memory.share(7, 7), memory);
-        assert_eq!(memory.share(0, 7).planning(), 0);
-        assert_eq!(memory.share(3, 0), memory);
-        let huge = RunMemory::new(u64::MAX, None);
-        assert_eq!(huge.share(3, 3).planning(), u64::MAX);
     }
 }

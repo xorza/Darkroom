@@ -216,6 +216,11 @@ impl StackableImage for CfaImage {
 }
 
 impl CfaImage {
+    /// The sensor extent the samples cover.
+    pub(crate) fn size(&self) -> Size2us {
+        Size2us::new(self.data.width(), self.data.height())
+    }
+
     /// Create an in-memory sensor image whose CFA classification is supplied by the caller.
     pub fn from_plane(data: Buffer2<f32>, cfa_type: CfaType, metadata: ImageMetadata) -> Self {
         Self {

@@ -935,7 +935,7 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
 #[cfg(feature = "real-data")]
 #[test]
 fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
-    use crate::stacking::calibration_masters::CalibrationMasters;
+    use crate::stacking::calibration_masters::internals::masters_from_files;
     use crate::stacking::pipeline::calibrate::calibrate_align_stack;
     use crate::testing::real_data::raw_frames;
     use crate::{CalibrationSet, DEFAULT_SIGMA_THRESHOLD};
@@ -944,7 +944,7 @@ fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
     let bias_paths = raw_frames("Bias");
     let flat_paths = raw_frames("Flats");
     let empty: Vec<PathBuf> = Vec::new();
-    let masters = CalibrationMasters::from_files(
+    let masters = masters_from_files(
         CalibrationSet {
             dark: &dark_paths,
             flat: &flat_paths,
@@ -952,9 +952,7 @@ fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
             flat_dark: &empty,
         },
         DEFAULT_SIGMA_THRESHOLD,
-        CancelToken::never(),
-    )
-    .expect("build calibration masters");
+    );
 
     let all = raw_frames("Lights");
     let lights = &all[..all.len().min(3)];
@@ -984,7 +982,7 @@ fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
 #[cfg(feature = "real-data")]
 #[test]
 fn streaming_disk_tier_matches_ram_on_real_lights() {
-    use crate::stacking::calibration_masters::CalibrationMasters;
+    use crate::stacking::calibration_masters::internals::masters_from_files;
     use crate::stacking::pipeline::calibrate::calibrate_align_stack;
     use crate::testing::real_data::raw_frames;
     use crate::{CalibrationSet, DEFAULT_SIGMA_THRESHOLD};
@@ -993,7 +991,7 @@ fn streaming_disk_tier_matches_ram_on_real_lights() {
     let bias_paths = raw_frames("Bias");
     let flat_paths = raw_frames("Flats");
     let empty: Vec<PathBuf> = Vec::new();
-    let masters = CalibrationMasters::from_files(
+    let masters = masters_from_files(
         CalibrationSet {
             dark: &dark_paths,
             flat: &flat_paths,
@@ -1001,9 +999,7 @@ fn streaming_disk_tier_matches_ram_on_real_lights() {
             flat_dark: &empty,
         },
         DEFAULT_SIGMA_THRESHOLD,
-        CancelToken::never(),
-    )
-    .expect("build calibration masters");
+    );
 
     let all = raw_frames("Lights");
     let lights = &all[..all.len().min(3)];
@@ -1074,4 +1070,19 @@ fn streaming_disk_tier_matches_ram_on_real_lights() {
             .collect();
         assert_eq!(a, b, "channel {c} differs between the RAM and disk tiers");
     }
+}
+
+/// A combine failure reaches the caller on one path: a cancel, an empty set and a frame-store
+/// failure as the pipeline's own variants, anything else as the combine's.
+#[test]
+fn combine_failures_arrive_on_one_path() {
+    assert!(matches!(
+        Error::from(StackError::Cancelled),
+        Error::Cancelled
+    ));
+    assert!(matches!(Error::from(StackError::NoFrames), Error::NoFrames));
+    assert!(matches!(
+        Error::from(StackError::NoCommonCoverage),
+        Error::Stack(StackError::NoCommonCoverage)
+    ));
 }

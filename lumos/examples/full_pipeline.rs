@@ -18,8 +18,8 @@ use std::time::Instant;
 
 use common::CancelToken;
 use lumos::{
-    AlignStackConfig, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD,
-    ProgressCallback, calibrate_align_stack,
+    AlignStackConfig, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, MasterRole,
+    ProgressCallback, calibrate_align_stack, stack_cfa_master,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -112,13 +112,22 @@ fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
         "Calibration frames"
     );
 
-    let empty: Vec<PathBuf> = Vec::new();
-    let masters = CalibrationMasters::from_files(
+    // Each role stacks under its own preset; the set is assembled once every master exists.
+    let stack = |paths: &[PathBuf], role: MasterRole| {
+        stack_cfa_master(
+            paths,
+            role.stack_config(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .expect("failed to stack a calibration master")
+    };
+    let masters = CalibrationMasters::from_images(
         CalibrationSet {
-            dark: &darks,
-            flat: &flats,
-            bias: &bias,
-            flat_dark: &empty,
+            dark: stack(&darks, MasterRole::Dark),
+            flat: stack(&flats, MasterRole::Flat),
+            bias: stack(&bias, MasterRole::Bias),
+            flat_dark: None,
         },
         DEFAULT_SIGMA_THRESHOLD,
         CancelToken::never(),

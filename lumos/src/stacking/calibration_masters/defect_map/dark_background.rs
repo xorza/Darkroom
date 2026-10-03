@@ -15,7 +15,7 @@ use crate::math::statistics::median_mut;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::calibration_masters::defect_map::DARK_BACKGROUND_TILE_SIZE;
 use crate::stacking::calibration_masters::defect_map::sampling::collect_color_samples;
-use crate::stacking::combine::error::Error;
+use crate::stacking::calibration_masters::error::CalibrationError;
 use std::array;
 
 #[derive(Debug, Clone, Copy)]
@@ -43,7 +43,7 @@ impl DarkBackground {
         data: &Buffer2<f32>,
         cfa_type: CfaType,
         cancel: &CancelToken,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, CalibrationError> {
         let width = data.width();
         let height = data.height();
         assert!(
@@ -59,7 +59,7 @@ impl DarkBackground {
             .into_par_iter()
             .map(|index| {
                 if cancel.is_cancelled() {
-                    return Err(Error::Cancelled);
+                    return Err(CalibrationError::Cancelled);
                 }
 
                 let tx = index % tiles_x;
@@ -85,7 +85,7 @@ impl DarkBackground {
                 }
                 Ok(DarkTile { values })
             })
-            .collect::<Result<_, Error>>()?;
+            .collect::<Result<_, CalibrationError>>()?;
 
         let missing: [bool; 3] = array::from_fn(|color| {
             color < num_colors && tiles.iter().any(|tile| tile.values[color].is_nan())

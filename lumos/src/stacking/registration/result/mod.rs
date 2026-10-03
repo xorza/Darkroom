@@ -37,13 +37,16 @@ impl Display for RegistrationCatalog {
 /// Reason for RANSAC failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RansacFailureReason {
-    /// No inliers found after all iterations.
+    /// Fewer candidate matches than the model's minimal sample: RANSAC never ran.
+    TooFewMatches,
+    /// No hypothesis gathered a minimal sample's worth of inliers in the iterations run.
     NoInliersFound,
 }
 
 impl Display for RansacFailureReason {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
+            RansacFailureReason::TooFewMatches => write!(f, "too few matches to sample"),
             RansacFailureReason::NoInliersFound => write!(f, "no inliers found"),
         }
     }

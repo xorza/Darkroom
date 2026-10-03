@@ -13,8 +13,6 @@ use rayon::prelude::*;
 use crate::concurrency::JobScratchPool;
 use crate::error::FrameDimensionMismatch;
 use crate::io::image::cfa::CfaImage;
-use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::memory::run_memory::RunMemory;
@@ -66,54 +64,45 @@ struct QualityRows<'a> {
 pub(crate) struct FrameCache {
     // Stored planes drop before the spill directory owner in `core`.
     pub(crate) frames: Vec<StoredFrame>,
+    /// Each frame's affine onto the reference, measured once at construction for the
+    /// normalization the cache was built with; `None` when every frame is combined as it stands.
     pub(crate) frame_norms: Option<Vec<FrameNorm>>,
-    /// The normalization `frame_norms` was measured for. Kept so the combine can confirm the
-    /// `StackConfig` it is handed asks for the normalization the cache was actually built with —
-    /// the parameters are fixed at construction and never recomputed.
-    pub(crate) normalization: Normalization,
     pub(crate) core: CacheCore,
-}
-
-#[derive(Debug)]
-pub(crate) struct FrameCacheParams {
-    pub(crate) tier: CacheTier,
-    pub(crate) dimensions: ImageDimensions,
-    pub(crate) metadata: ImageMetadata,
-    pub(crate) normalization: Normalization,
-    pub(crate) progress: ProgressCallback,
-    pub(crate) cancel: CancelToken,
 }
 
 impl FrameCache {
     /// Build a cache from frames already placed in the shared frame store.
     pub(crate) fn from_stored_frames(
         frames: Vec<StoredFrame>,
-        params: FrameCacheParams,
+        core: CacheCore,
+        normalization: Normalization,
     ) -> Result<Self, Error> {
-        let FrameCacheParams {
-            tier,
-            dimensions,
-            metadata,
-            normalization,
-            progress,
-            cancel,
-        } = params;
+        // The pipeline produced these frames: their geometry, samples and quality pair are its own
+        // contracts, checked in debug builds only — on the spill tier a release check would fault
+        // every plane in from disk once before the combine reads it again. What the frames' sources
+        // stated (domain, row order, pattern) is the input's, and is checked here always.
         let mut facts = SetFacts::default();
         for (index, frame) in frames.iter().enumerate() {
-            validate_frame(index, frame, dimensions, &mut facts, &cancel)?;
+            check_cancel(&core.cancel)?;
+            facts.admit(index, &frame.source_stats.facts)?;
+            debug_assert!(
+                validate_frame(
+                    index,
+                    frame,
+                    core.dimensions,
+                    &mut SetFacts::default(),
+                    &CancelToken::never(),
+                )
+                .is_ok(),
+                "stored frame {index} breaks the pipeline's own frame contract"
+            );
         }
-        let frame_norms = compute_frame_norms(&frames, dimensions, normalization, &cancel)?;
+        let frame_norms =
+            compute_frame_norms(&frames, core.dimensions, normalization, &core.cancel)?;
         Ok(Self {
             frames,
             frame_norms,
-            normalization,
-            core: CacheCore {
-                tier,
-                dimensions,
-                metadata,
-                progress,
-                cancel,
-            },
+            core,
         })
     }
 
@@ -161,7 +150,6 @@ impl FrameCache {
         Ok(Self {
             frames: stored,
             frame_norms,
-            normalization,
             core: CacheCore {
                 tier: CacheTier::Resident,
                 dimensions,
@@ -291,7 +279,6 @@ impl FrameCache {
     pub(crate) fn process_chunked<Combine>(
         &self,
         weights: Option<&[f32]>,
-        frame_norms: Option<&[FrameNorm]>,
         planes: QualityPlanes,
         combine: Combine,
     ) -> CombineOutput
@@ -308,6 +295,7 @@ impl FrameCache {
         // An in-memory stack is one chunk, so the per-chunk cancel check in
         // `process_chunks` can't interrupt the combine — poll per row here too.
         let cancel = self.core.cancel.clone();
+        let frame_norms = self.frame_norms.as_deref();
         let dimensions = self.core.dimensions;
         let memory = weighted_chunk_memory_layout(&self.frames, dimensions.channels(), planes);
         // Coverage sizing must reuse this pre-output snapshot or resident planes are charged twice.
@@ -320,7 +308,6 @@ impl FrameCache {
         let scratch_pool = JobScratchPool::<CombineScratch>::default();
         let pixels = self.core.process_chunks(
             &self.frames,
-            |frame| &frame.channels,
             memory,
             self.core.tier.chunk_memory(),
             |output_slice, ctx| {
@@ -488,7 +475,6 @@ impl FrameCache {
         Ok(Self {
             frames,
             frame_norms,
-            normalization,
             core,
         })
     }
@@ -551,7 +537,6 @@ pub(crate) mod internals {
             Self {
                 frames,
                 frame_norms,
-                normalization,
                 core,
             }
         }
