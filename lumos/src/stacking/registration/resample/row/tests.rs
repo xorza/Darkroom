@@ -1,21 +1,12 @@
+use std::f64::consts::PI;
+
 use crate::stacking::registration::config::{self, InterpolationMethod};
 use crate::stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
-use crate::stacking::registration::resample::kernel;
-use crate::stacking::registration::resample::kernel::internals;
+use crate::stacking::registration::resample::kernel::{LanczosOrder, internals};
 use crate::stacking::registration::resample::row;
 use crate::stacking::registration::resample::row_positions::RowPositions;
-use crate::stacking::registration::resample::source_position::SourcePosition;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::testing::prelude::*;
-
-const METHODS: [InterpolationMethod; 6] = [
-    InterpolationMethod::Nearest,
-    InterpolationMethod::Bilinear,
-    InterpolationMethod::Bicubic,
-    InterpolationMethod::Lanczos2,
-    InterpolationMethod::Lanczos3,
-    InterpolationMethod::Lanczos4,
-];
 
 const LANCZOS: [InterpolationMethod; 3] = [
     InterpolationMethod::Lanczos2,
@@ -111,7 +102,7 @@ fn sample_row_matches_the_single_point_oracle() {
     ] {
         let input = signed_field(size);
         for transform in &transforms(size) {
-            for method in METHODS {
+            for method in InterpolationMethod::ALL {
                 let params = config::internals::warp_params(method);
                 for y in [0, size.height / 2, size.height - 1] {
                     let row = warp_row(&input, y, transform, method, params.border_value);
@@ -138,25 +129,69 @@ fn sample_row_matches_the_single_point_oracle() {
     }
 }
 
-/// A 3×3 ramp 0..8, sampled between pixel centres and blended by hand:
-/// at (0.5, 0.5) top 0 → 1 is 0.5, bottom 3 → 4 is 3.5, and halfway between them 2;
-/// at (1.5, 0.5) the same over 1, 2, 4, 5 gives 3; at (0.25, 0.75) top 0.25, bottom 3.25,
-/// three quarters of the way 2.5 — all exact in f32.
+/// One column of ones, sampled a quarter and a half pixel past it, against hand values. Each
+/// method has its own, so a method wired to another's kernel fails here.
+///
+/// The column is constant down the image, so the y weights divide out and the value is the x
+/// weight of the column's tap over the sum of the taps. Nearest at 4.25 is the column, 1, and at
+/// 4.5 rounds up past it, 0; bilinear is `1 − f`. Catmull-Rom gives the column `K(f)` of weights
+/// summing to 1: `K(0.25)` = 0.8671875 and `K(0.5)` = 0.5625. Lanczos-`a` at 4.5 has its taps at
+/// distances ½, 1½, …, `a − ½` in pairs, and with `s₁ = sin(π/8)`, `s₃ = sin(3π/8)`:
+/// - a = 2: `L(½) = 4√2/π²`, `L(1½) = −4√2/(9π²)`, so `1/(2(1 − 1/9))` = 9/16 — Catmull-Rom's
+///   value at ½, which is why bicubic is checked at 4.25 too;
+/// - a = 3: `L(½) = 6/π²`, `L(1½) = −4/(3π²)`, `L(2½) = 6/(25π²)`, so `3/(6 − 4/3 + 6/25)` =
+///   225/368;
+/// - a = 4: `L(k + ½) ∝ ±s/(2k + 1)²` with `s` = s₁, s₃, s₃, s₁, so
+///   `s₁/(2(s₁·48/49 − s₃·16/225))`.
+///
+/// The table entries at these distances are the f32 kernel, each off by 1e-6 at most (see
+/// `math::lanczos`'s tests); the ratio moves by that for its numerator and by up to `2a` of them
+/// for its sum, which is near 1. The 64 products and the sum round to 64·ε more.
 #[test]
-fn bilinear_sample_hand_computed() {
-    let input = Buffer2::new(3, 3, (0..9).map(|i| i as f32).collect());
-    let size = Size2us::new(3, 3);
-    for (x, y, expected) in [
-        (1.0, 1.0, 4.0),
-        (0.5, 0.5, 2.0),
-        (1.5, 0.5, 3.0),
-        (0.25, 0.75, 2.5),
+fn a_column_of_ones_samples_to_hand_values() {
+    let size = Size2us::new(10, 9);
+    let input = Buffer2::new(
+        size.width,
+        size.height,
+        (0..size.pixel_count())
+            .map(|i| if i % size.width == 4 { 1.0 } else { 0.0 })
+            .collect(),
+    );
+    let s1 = (PI / 8.0).sin();
+    let s3 = (3.0 * PI / 8.0).sin();
+    for (method, shift, expected) in [
+        (InterpolationMethod::Nearest, 0.25, 1.0),
+        (InterpolationMethod::Nearest, 0.5, 0.0),
+        (InterpolationMethod::Bilinear, 0.25, 0.75),
+        (InterpolationMethod::Bilinear, 0.5, 0.5),
+        (InterpolationMethod::Bicubic, 0.25, 0.867_187_5),
+        (InterpolationMethod::Bicubic, 0.5, 0.5625),
+        (InterpolationMethod::Lanczos2, 0.5, 9.0 / 16.0),
+        (InterpolationMethod::Lanczos3, 0.5, 225.0 / 368.0),
+        (
+            InterpolationMethod::Lanczos4,
+            0.5,
+            s1 / (2.0 * (s1 * 48.0 / 49.0 - s3 * 16.0 / 225.0)),
+        ),
     ] {
-        let position = SourcePosition::within(DVec2::new(x, y), size).unwrap();
-        assert_eq!(
-            kernel::bilinear_sample(&input, position),
-            expected,
-            "({x}, {y})"
+        let tolerance = LanczosOrder::of(method).map_or(0.0, |order| {
+            (2 * order.a() + 1) as f64 * 1e-6 + 64.0 * f64::from(f32::EPSILON)
+        });
+        let shift = WarpTransform::new(Transform::translation(DVec2::new(shift, 0.0)));
+        let actual = f64::from(warp_row(&input, 4, &shift, method, 0.0)[4]);
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "{method:?} {shift:?}: {actual}, expected {expected}"
+        );
+        let params = config::internals::warp_params(method);
+        let oracle = f64::from(internals::interpolate(
+            &input,
+            shift.apply(DVec2::new(4.0, 4.0)),
+            &params,
+        ));
+        assert!(
+            (oracle - expected).abs() <= tolerance,
+            "{method:?} oracle: {oracle}, expected {expected}"
         );
     }
 }
@@ -173,25 +208,31 @@ fn positions_outside_the_footprint_take_the_border() {
     assert_eq!(row, [27.5, 37.5, -5.0, -5.0]);
 }
 
-/// A constant reproduces itself to rounding, in the interior and at the edges where Lanczos falls
-/// back to bilinear: the normalized weights sum to one, so only the f32 summation of up to 64
-/// terms of size 2.5 is left, ≈ 64·ε·2.5 = 1.9e-5.
+/// A constant reproduces itself to rounding, in the interior and at the edges, where bicubic drops
+/// its outside taps and Lanczos falls back to bilinear: the normalized weights sum to one, so only
+/// the f32 summation of up to 64 terms of size 2.5 is left, ≈ 64·ε·2.5 = 1.9e-5.
 #[test]
-fn lanczos_preserves_signed_constants_at_interior_and_edges() {
+fn every_method_preserves_signed_constants_at_interior_and_edges() {
     let size = Size2us::new(24, 20);
-    let identity = WarpTransform::new(Transform::identity());
-    for method in LANCZOS {
-        for expected in [-1.25, 0.0, 2.5] {
-            let input = Buffer2::new_filled(size.width, size.height, expected);
-            for y in [0, 1, 4, 10, size.height - 1] {
-                for (x, actual) in warp_row(&input, y, &identity, method, 0.0)
-                    .into_iter()
-                    .enumerate()
-                {
-                    assert!(
-                        (actual - expected).abs() < 2e-5,
-                        "{method:?} ({x}, {y}): expected {expected}, got {actual}"
-                    );
+    // Both stay inside the footprint: the shift moves no position more than 0.43 px.
+    let transforms = [
+        WarpTransform::new(Transform::identity()),
+        WarpTransform::new(Transform::translation(DVec2::new(0.37, -0.43))),
+    ];
+    for method in InterpolationMethod::ALL {
+        for transform in &transforms {
+            for expected in [-1.25, 0.0, 2.5] {
+                let input = Buffer2::new_filled(size.width, size.height, expected);
+                for y in [0, 1, 4, 10, size.height - 1] {
+                    for (x, actual) in warp_row(&input, y, transform, method, 0.0)
+                        .into_iter()
+                        .enumerate()
+                    {
+                        assert!(
+                            (actual - expected).abs() < 2e-5,
+                            "{method:?} ({x}, {y}): expected {expected}, got {actual}"
+                        );
+                    }
                 }
             }
         }

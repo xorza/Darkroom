@@ -1,18 +1,20 @@
 use crate::io::image::null_mask::NullMask;
 use crate::stacking::registration::config::{InterpolationMethod, WarpParams};
 use crate::stacking::registration::resample;
+use crate::stacking::registration::resample::WarpBuffers;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::testing::prelude::*;
 
-const TOL: f32 = 1e-5;
-const INTERPOLATION_METHODS: [InterpolationMethod; 6] = [
-    InterpolationMethod::Nearest,
-    InterpolationMethod::Bilinear,
-    InterpolationMethod::Bicubic,
-    InterpolationMethod::Lanczos2,
-    InterpolationMethod::Lanczos3,
-    InterpolationMethod::Lanczos4,
-];
+/// A constant read back through normalized weights: the f32 sum of up to 64 terms of 3.25 rounds
+/// to at most 64·ε·3.25 = 2.5e-5.
+const TOL: f32 = 2.5e-5;
+
+/// A `size` image of `channels` signed, unstructured planes, interleaved.
+fn signed_pixels(size: Size2us, channels: usize) -> Vec<f32> {
+    (0..size.pixel_count() * channels)
+        .map(|i| ((i * 13 + i / size.width * 7) % 31) as f32 / 9.0 - 1.7)
+        .collect()
+}
 
 #[test]
 fn translated_images_use_border_only_outside_source_footprint() {
@@ -36,7 +38,7 @@ fn translated_images_use_border_only_outside_source_footprint() {
         for (translation, outside_x, inside_x) in [(-0.75, 0, 1), (0.75, WIDTH - 1, WIDTH - 2)] {
             let transform =
                 WarpTransform::new(Transform::translation(DVec2::new(translation, 0.0)));
-            for method in INTERPOLATION_METHODS {
+            for method in InterpolationMethod::ALL {
                 let result = resample::warp(
                     &image,
                     &transform,
@@ -114,7 +116,11 @@ fn a_null_is_reconstructed_from_its_surviving_taps_rather_than_smeared() {
     let fixture = NullFixture::new(dimensions, 8 * 16 + 8);
     let transform = WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5)));
 
-    for method in INTERPOLATION_METHODS {
+    // The masked value is the ratio of two warps, each rounding to `(SIZE² + 3)·ε` of its absolute
+    // weight sum — under 2 for any kernel here — times its scale, `CONSTANT` and 1. One null takes
+    // one tap, at most `L(½)² ≈ 0.37` at this shift, so the denominator stays above 0.6.
+    let tolerance = 2.0 * 67.0 * f32::EPSILON * 2.0 * CONSTANT / 0.6;
+    for method in InterpolationMethod::ALL {
         let params = WarpParams {
             method,
             border_value: BORDER,
@@ -122,7 +128,7 @@ fn a_null_is_reconstructed_from_its_surviving_taps_rather_than_smeared() {
         let masked = resample::warp(&fixture.declared, &transform, &params);
         let plain = resample::warp(&fixture.undeclared, &transform, &params);
 
-        // Every pixel the frame still supports reads the constant back exactly: interpolating a
+        // Every pixel the frame still supports reads the constant back to rounding: interpolating a
         // flat field over whichever taps survived is that field, so the fill never reaches the
         // result no matter how much of the window it took up.
         let mut reduced = 0;
@@ -131,7 +137,7 @@ fn a_null_is_reconstructed_from_its_surviving_taps_rather_than_smeared() {
             let coverage = masked.coverage.pixels()[index];
             if coverage > 0.0 {
                 assert!(
-                    (value - CONSTANT).abs() < 1e-3,
+                    (value - CONSTANT).abs() <= tolerance,
                     "{method:?} pixel {index}: coverage {coverage}, value {value}"
                 );
             } else {
@@ -145,7 +151,7 @@ fn a_null_is_reconstructed_from_its_surviving_taps_rather_than_smeared() {
         // The control frame smears instead: with nothing marking that sample as missing, the 999
         // lands in every output pixel whose window reached it.
         let smeared = (0..dimensions.pixel_count())
-            .filter(|&index| (plain.image.channel(0).pixels()[index] - CONSTANT).abs() > 1e-3)
+            .filter(|&index| (plain.image.channel(0).pixels()[index] - CONSTANT).abs() > tolerance)
             .count();
         assert!(smeared > 0, "{method:?}: the control must smear");
 
@@ -241,7 +247,7 @@ fn a_block_of_nulls_wider_than_the_kernel_leaves_no_support_at_all() {
     // And well outside it the frame is untouched, so the block cost only its own neighbourhood.
     let corner = 2 * 24 + 2;
     assert_eq!(result.coverage.pixels()[corner], 1.0);
-    assert!((result.image.channel(0).pixels()[corner] - 3.25).abs() < 1e-5);
+    assert_eq!(result.image.channel(0).pixels()[corner], 3.25);
 }
 
 #[test]
@@ -261,4 +267,121 @@ fn warp_refuses_a_non_finite_border() {
         },
     );
 }
+/// `warp_into` writes every plane in full, so buffers handed back dirty — NaN, or what the last
+/// frame left — come out bit for bit what a fresh `warp` gives: mono and RGB, without nulls and
+/// with them, for an affine model and a homography.
+#[test]
+fn warp_into_overwrites_dirty_buffers_completely() {
+    let size = Size2us::new(20, 14);
+    let transforms = [
+        WarpTransform::new(Transform::similarity(DVec2::new(1.5, -2.25), 0.05, 1.02)),
+        WarpTransform::new(Transform::homography([
+            1.01, 0.02, -1.5, -0.01, 0.99, 2.0, 1e-3, -2e-3,
+        ])),
+    ];
+    let mut nulls = vec![0.0f32; size.pixel_count()];
+    nulls[5 * size.width + 7] = f32::NAN;
+    nulls[9 * size.width + 13] = f32::NAN;
+    for channels in [1, 3] {
+        let dimensions = ImageDimensions::new((size.width, size.height), channels);
+        let plain = LinearImage::from_pixels(dimensions, signed_pixels(size, channels));
+        let mut masked = plain.clone();
+        masked.nulls = NullMask::of_non_finite(size, &[&nulls]);
+        let previous = LinearImage::from_pixels(
+            dimensions,
+            signed_pixels(size, channels)
+                .into_iter()
+                .map(|value| value * -3.0)
+                .collect(),
+        );
+        for image in [&plain, &masked] {
+            for transform in &transforms {
+                for method in InterpolationMethod::ALL {
+                    let params = WarpParams {
+                        method,
+                        border_value: -7.0,
+                    };
+                    let fresh = resample::warp(image, transform, &params);
+
+                    let mut sentinel = WarpBuffers::new(dimensions);
+                    for plane in sentinel.pixels.planes_mut() {
+                        plane.pixels_mut().fill(f32::NAN);
+                    }
+                    sentinel.coverage.pixels_mut().fill(f32::NAN);
+                    sentinel.confidence.pixels_mut().fill(f32::NAN);
+                    sentinel.warp_into(image, transform, &params);
+
+                    let mut reused = WarpBuffers::new(dimensions);
+                    reused.warp_into(&previous, &transforms[0], &params);
+                    reused.warp_into(image, transform, &params);
+
+                    for buffers in [&sentinel, &reused] {
+                        for channel in 0..channels {
+                            assert_bitwise(
+                                buffers.pixels.channel(channel).pixels(),
+                                fresh.image.channel(channel).pixels(),
+                                method,
+                            );
+                        }
+                        assert_bitwise(buffers.coverage.pixels(), fresh.coverage.pixels(), method);
+                        assert_bitwise(
+                            buffers.confidence.pixels(),
+                            fresh.confidence.pixels(),
+                            method,
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Every channel of an RGB warp is the warp of that channel alone, bit for bit: the channels share
+/// the row's positions and maps but nothing of each other's values.
+#[test]
+fn an_rgb_warp_is_three_mono_warps() {
+    let size = Size2us::new(20, 14);
+    let rgb = LinearImage::from_pixels(
+        ImageDimensions::new((size.width, size.height), 3),
+        signed_pixels(size, 3),
+    );
+    let transform = WarpTransform::new(Transform::euclidean(DVec2::new(3.0, -2.0), 0.0175));
+    for method in InterpolationMethod::ALL {
+        let params = WarpParams {
+            method,
+            border_value: 0.0,
+        };
+        let warped = resample::warp(&rgb, &transform, &params);
+        for channel in 0..3 {
+            let mono = LinearImage::from_pixels(
+                ImageDimensions::new((size.width, size.height), 1),
+                rgb.channel(channel).pixels().to_vec(),
+            );
+            let alone = resample::warp(&mono, &transform, &params);
+            assert_bitwise(
+                warped.image.channel(channel).pixels(),
+                alone.image.channel(0).pixels(),
+                method,
+            );
+            assert_bitwise(warped.coverage.pixels(), alone.coverage.pixels(), method);
+            assert_bitwise(
+                warped.confidence.pixels(),
+                alone.confidence.pixels(),
+                method,
+            );
+        }
+    }
+}
+
+fn assert_bitwise(actual: &[f32], expected: &[f32], method: InterpolationMethod) {
+    assert_eq!(actual.len(), expected.len());
+    for (index, (a, e)) in actual.iter().zip(expected).enumerate() {
+        assert_eq!(
+            a.to_bits(),
+            e.to_bits(),
+            "{method:?} pixel {index}: {a} against {e}"
+        );
+    }
+}
+
 mod plane;

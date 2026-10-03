@@ -437,14 +437,8 @@ impl WarpTransform {
     }
 
     /// Whether this transform has a nonlinear SIP component.
-    pub fn has_sip(&self) -> bool {
+    pub const fn has_sip(&self) -> bool {
         self.sip.is_some()
-    }
-
-    /// Whether this transform is purely linear (affine or simpler, no SIP).
-    /// When true, incremental stepping and SIMD can be used.
-    pub fn is_linear(&self) -> bool {
-        self.sip.is_none() && self.transform.transform_type() != TransformType::Homography
     }
 }
 

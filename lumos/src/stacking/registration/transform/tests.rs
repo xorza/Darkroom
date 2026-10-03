@@ -137,82 +137,61 @@ fn warp_transform_new() {
     let t = Transform::translation(DVec2::new(10.0, 5.0));
     let wt = WarpTransform::new(t);
     assert!(!wt.has_sip());
-    assert!(wt.is_linear());
 
     let p = wt.apply(DVec2::new(1.0, 2.0));
     assert_close!(p.x, 11.0, EPSILON);
     assert_close!(p.y, 7.0, EPSILON);
 }
 
+/// A warp with SIP maps `p` to `T(p + c(p))`, bit for bit. The field `k·d·|d|²` about (50, 50) is a
+/// cubic, which an order-3 SIP represents exactly, so the fit recovers it to its solve's rounding —
+/// well under 1e-9 px on 100 points this size — even at the corner, outside the fitted grid, where
+/// `d` = (−50, −50) and the correction is `1e-4·(−50)·5000` = −25 px on each axis.
 #[test]
 fn warp_transform_with_sip() {
     use crate::stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
 
-    let transform = Transform::identity();
-
-    // Create a simple SIP from synthetic points with barrel distortion
-    let cx = 50.0;
-    let cy = 50.0;
+    let transform = Transform::similarity(DVec2::new(3.0, -2.0), 0.02, 1.01);
+    let center = DVec2::new(50.0, 50.0);
     let k = 1e-4;
+    let field = |r: DVec2| {
+        let d = r - center;
+        k * d * d.length_squared()
+    };
     let mut ref_pts = Vec::new();
     let mut tgt_pts = Vec::new();
     for gy in 0..10 {
         for gx in 0..10 {
-            let rx = 5.0 + f64::from(gx) * 10.0;
-            let ry = 5.0 + f64::from(gy) * 10.0;
-            let dx = rx - cx;
-            let dy = ry - cy;
-            let r2 = dx * dx + dy * dy;
-            ref_pts.push(DVec2::new(rx, ry));
-            tgt_pts.push(DVec2::new(rx + k * dx * r2, ry + k * dy * r2));
+            let r = DVec2::new(5.0 + f64::from(gx) * 10.0, 5.0 + f64::from(gy) * 10.0);
+            ref_pts.push(r);
+            tgt_pts.push(transform.apply(r + field(r)));
         }
     }
     let sip_config = SipConfig {
         order: 3,
-        reference_point: Some(DVec2::new(cx, cy)),
+        reference_point: Some(center),
         ..Default::default()
     };
     let sip = SipPolynomial::fit_from_transform(&ref_pts, &tgt_pts, &transform, &sip_config)
         .unwrap()
         .polynomial;
 
-    let wt = WarpTransform::with_sip(transform, sip);
+    let wt = WarpTransform::with_sip(transform, sip.clone());
     assert!(wt.has_sip());
-    assert!(!wt.is_linear());
-
-    // Corner point should differ from identity
-    let corner = DVec2::new(0.0, 0.0);
-    let result = wt.apply(corner);
-    let no_sip = WarpTransform::new(transform).apply(corner);
-    assert!(
-        (result - no_sip).length() > 0.01,
-        "SIP should produce different coordinates"
-    );
-}
-
-#[test]
-fn warp_transform_is_linear() {
-    // Translation: linear
-    let wt = WarpTransform::new(Transform::translation(DVec2::new(1.0, 2.0)));
-    assert!(wt.is_linear());
-
-    // Euclidean: linear
-    let wt = WarpTransform::new(Transform::euclidean(DVec2::ZERO, 0.1));
-    assert!(wt.is_linear());
-
-    // Similarity: linear
-    let wt = WarpTransform::new(Transform::similarity(DVec2::ZERO, 0.1, 1.02));
-    assert!(wt.is_linear());
-
-    // Affine: linear
-    let wt = WarpTransform::new(Transform::affine([1.0, 0.0, 5.0, 0.0, 1.0, 3.0]));
-    assert!(wt.is_linear());
-
-    // Homography: not linear
-    let wt = WarpTransform::new(Transform::homography([
-        1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.001, 0.0,
-    ]));
-    assert!(!wt.is_linear());
+    for p in [
+        DVec2::ZERO,
+        DVec2::new(37.5, 81.25),
+        DVec2::new(120.0, -10.0),
+    ] {
+        assert_eq!(wt.apply(p), transform.apply(sip.correct(p)), "{p:?}");
+        let correction = sip.correct(p) - p;
+        assert!(
+            (correction - field(p)).length() < 1e-9,
+            "{p:?}: correction {correction:?}, field {:?}",
+            field(p)
+        );
+    }
+    assert_eq!(field(DVec2::ZERO), DVec2::new(-25.0, -25.0));
 }
 
 #[test]
