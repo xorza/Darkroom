@@ -126,8 +126,7 @@ Severity: Medium — the same default is baked in two crates and goes stale sile
 ## The same constant or formula is defined more than once, sometimes truncated
 Severity: Low — two sources for one fact; the copies already differ in precision or convention.
 
-- [ ] `moffat_fit/mod.rs` `int_pow` uses `powi` for n > 5 while the SIMD versions use repeated squaring; three copies of the same table.
-- [ ] `lumos/src/stacking/calibration_masters/defect_map/dark_background.rs` `DarkBackground::fit` — a second tiled background grid with a balanced partition (`tx * width / tiles_x`) and its own centres, while `background_mesh` uses `tx * tile_size` plus a remainder tile; it allocates `[Vec<f32>; 3]` per tile in the parallel loop instead of leasing from `JobScratchPool`. `background_mesh/mod.rs` `TileGrid::new_uninit` and `matches_layout` both compute `tile_size.min(w).min(h)`; `image_ops/background_extraction` `SKY_CLIP_ITERATIONS = 3` restates `BackgroundConfig`'s default, and `collect_samples` runs `compute_y_spline_derivatives` it never reads.
+- [ ] `lumos/src/stacking/calibration_masters/defect_map/dark_background.rs` `DarkBackground::fit` — a second tiled background grid with a balanced partition (`tx * width / tiles_x`) and its own centres, while `background_mesh` uses `tx * tile_size` plus a remainder tile; it allocates `[Vec<f32>; 3]` per tile in the parallel loop instead of leasing from `JobScratchPool`.
 
 ## Public API, dependencies and derives with no production user
 Severity: Low — removable surface; checked with `rg` across the workspace.

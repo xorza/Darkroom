@@ -47,6 +47,10 @@ impl BackgroundRefinement {
     }
 }
 
+/// Sigma-clip passes per tile by default: the detector's sky, and the gradient fit's, which reads
+/// the same estimator.
+pub(crate) const DEFAULT_SIGMA_CLIP_ITERATIONS: usize = 3;
+
 /// Configuration for tiled background estimation and optional refinement.
 #[derive(Debug, Clone)]
 pub struct BackgroundConfig {
@@ -62,7 +66,7 @@ impl Default for BackgroundConfig {
     fn default() -> Self {
         Self {
             tile_size: 64,
-            sigma_clip_iterations: 3,
+            sigma_clip_iterations: DEFAULT_SIGMA_CLIP_ITERATIONS,
             refinement: BackgroundRefinement::None,
         }
     }

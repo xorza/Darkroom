@@ -3,10 +3,9 @@
 //! Gated behind the `real-data` feature.
 
 use crate::io::image::linear::LinearImage;
-use crate::io::image::load_context::LoadContext;
 use crate::math::statistics::{mad_to_sigma, mad_with_scratch, median_mut};
 use crate::testing::init_tracing;
-use crate::testing::real_data::dataset_dir;
+use crate::testing::real_data;
 use crate::testing::visual;
 use crate::{Denoise, NeutralizeBackground, Scnr, Stretch};
 
@@ -35,11 +34,7 @@ fn highfreq_noise(image: &LinearImage, channel: usize) -> f32 {
 fn denoise_reduces_linear_noise() {
     init_tracing();
 
-    let mut img = LinearImage::from_file(
-        dataset_dir().join("stacked_light.tiff"),
-        &LoadContext::default(),
-    )
-    .expect("load");
+    let mut img = real_data::linear_master();
 
     // Neutralize the background first so denoising runs on color-calibrated linear data.
     NeutralizeBackground.apply(&mut img).unwrap();

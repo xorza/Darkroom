@@ -9,9 +9,14 @@ fn sextractor_sky_hand_computed() {
         mean,
     };
     // Mild skew (|mean−median| = 0.2 < 0.3σ): Pearson mode 2.5·100 − 1.5·100.2 = 99.7,
-    // pulled below the median toward the histogram peak.
+    // pulled below the median toward the histogram peak. 2.5·100 is exact; 1.5·100.2 and the
+    // difference round once each, by half an ulp of 150 and of 99.7: 1.2e-5.
     let sky = sextractor_sky(&stats(100.0, 100.2, 1.0));
-    assert!((sky - 99.7).abs() < 1e-4, "mode = 99.7, got {sky}");
+    let mode = 250.0 - 1.5 * f64::from(100.2f32);
+    assert!(
+        (f64::from(sky) - mode).abs() <= 1.2e-5,
+        "mode = {mode}, got {sky}"
+    );
     // Strong skew (1.0 ≥ 0.3σ): the mode extrapolation is unreliable → plain median.
     assert_eq!(sextractor_sky(&stats(100.0, 101.0, 1.0)), 100.0);
     // Symmetric histogram: mode = 2.5·m − 1.5·m = m — estimator changes nothing.
@@ -90,20 +95,9 @@ fn tile_samples_centre_on_the_tile() {
     assert_eq!(values, every, "a tile within the budget reads every pixel");
 }
 
-#[test]
-fn collect_unmasked_pixels_all_masked() {
-    let pixels = Buffer2::new_filled(64, 64, 0.5);
-    let mask = BitBuffer2::new_filled(Size2us::new(64, 64), true);
-    let mut values = Vec::new();
-    collect_unmasked_pixels(
-        &pixels,
-        &mask,
-        URect::new(Vec2us::ZERO, Vec2us::new(64, 64)),
-        &mut values,
-    );
-    assert!(values.is_empty());
-}
-
+/// The unmasked pixels of a tile, read in raster order and sampled by [`sample_ordinal`] past the
+/// budget — on a frame of `i`, where every value names its pixel. The mask is every pixel with
+/// `(x + 3y) mod m = 0`; `m = 1` masks the whole tile, which reads nothing.
 #[test]
 fn masked_sampling_reads_the_unmasked_ordinals() {
     #[derive(Debug)]
@@ -138,6 +132,11 @@ fn masked_sampling_reads_the_unmasked_ordinals() {
             size: Size2us::new(256, 256),
             tile: URect::new(Vec2us::ZERO, Vec2us::new(256, 256)),
             mask_modulus: None,
+        },
+        SamplingCase {
+            size: Size2us::new(64, 64),
+            tile: URect::new(Vec2us::ZERO, Vec2us::new(64, 64)),
+            mask_modulus: Some(1),
         },
     ];
 

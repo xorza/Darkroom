@@ -88,24 +88,19 @@ fn fast_pow_neg(u: f64, strategy: PowStrategy) -> f64 {
     }
 }
 
-/// Compute u^n for small integer n using repeated squaring.
+/// `u^n` by squaring — the same multiplications, in the same order, as the SIMD backends' powers,
+/// so a lane and the scalar path agree bit for bit at every `n`.
 #[inline]
 fn int_pow(u: f64, n: u32) -> f64 {
-    match n {
-        0 => 1.0,
-        1 => u,
-        2 => u * u,
-        3 => u * u * u,
-        4 => {
-            let u2 = u * u;
-            u2 * u2
+    let (mut result, mut base, mut exp) = (1.0, u, n);
+    while exp > 0 {
+        if exp & 1 == 1 {
+            result *= base;
         }
-        5 => {
-            let u2 = u * u;
-            u2 * u2 * u
-        }
-        _ => u.powi(n as i32),
+        base *= base;
+        exp >>= 1;
     }
+    result
 }
 
 /// Select optimal strategy for computing u^(-beta).

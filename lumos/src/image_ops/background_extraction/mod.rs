@@ -22,9 +22,7 @@ use crate::image_ops::error::OpError;
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::robust_sigma_f64;
-
-/// Sigma-clip passes for the per-tile sky estimate (matches the detector's tiled-background default).
-const SKY_CLIP_ITERATIONS: usize = 3;
+use crate::stacking::star_detection::config::background_config::DEFAULT_SIGMA_CLIP_ITERATIONS;
 
 /// How the modeled background is removed from the image.
 ///
@@ -217,7 +215,7 @@ fn collect_samples(
     workspace: &mut MeshWorkspace,
 ) -> Vec<Sample> {
     let size = Size2us::new(channel.width(), channel.height());
-    let grid = workspace.compute(channel, None, tile, SKY_CLIP_ITERATIONS, false);
+    let grid = workspace.tile_stats(channel, None, tile, DEFAULT_SIGMA_CLIP_ITERATIONS, false);
 
     let mut samples = Vec::with_capacity(grid.stats.width() * grid.stats.height());
     for ty in 0..grid.stats.height() {
@@ -338,6 +336,7 @@ fn fit_surface(
 /// are packed into a `(degree+1)²` matrix `C[i][j]`. For each row `y` the powers `y^j` collapse `C`
 /// into a 1-D polynomial in `x` (`b[i] = Σ_j C[i][j]·y^j`), which every pixel in the row evaluates by
 /// Horner — `degree` fused multiply-adds, no `powi`, and no full-resolution model plane.
+#[derive(Debug)]
 struct Surface {
     /// Row-major `C[i*d1 + j]` for the monomials `x^i·y^j`; `(degree+1)² ≤ 25`.
     c_mat: [f64; 25],

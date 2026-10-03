@@ -14,7 +14,7 @@ pub(crate) use crate::io::image::image_dimensions::ImageDimensions;
 pub(crate) use crate::io::image::linear::LinearImage;
 pub(crate) use crate::math::size2us::Size2us;
 pub(crate) use crate::math::vec2us::Vec2us;
-pub(crate) use crate::testing::assertions::{assert_close, is_close};
+pub(crate) use crate::testing::assertions::assert_close;
 pub(crate) use crate::testing::images::{gray_image, rgb_image};
 pub(crate) use crate::testing::test_rng::TestRng;
 pub(crate) use common::CancelToken;

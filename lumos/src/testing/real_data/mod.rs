@@ -11,8 +11,8 @@
 //!   (`cargo test -p lumos --release bench_full_pipeline -- --ignored --nocapture`).
 //! - [`milky_way`] — the "best Milky Way" chain: green removal, stretch, denoise, HDR and CLAHE
 //!   together, so it belongs to no single image op.
-//! - [`ml_support`] (feature `ml`) — weight resolution and the stretched master the `ml`
-//!   prototypes in `image_ops/ml/tests/` share.
+//! - [`ml_support`] (feature `ml`) — weight resolution for the `ml` prototypes in
+//!   `image_ops/ml/tests/`.
 
 use std::path::{Path, PathBuf};
 
@@ -23,6 +23,7 @@ use crate::io::image::load_context::LoadContext;
 use crate::io::raw::load_raw_cfa;
 
 use crate::io::raw::raw_files;
+use crate::{NeutralizeBackground, Scnr, Stretch};
 
 mod milky_way;
 mod pipeline_bench;
@@ -68,6 +69,22 @@ pub(crate) fn raw_light(path: &Path) -> LinearImage {
         .expect("demosaic a RAW light")
 }
 
+/// The bundled stacked light master, linear — a real stack, so its bright star cores exceed 1.0.
+pub(crate) fn linear_master() -> LinearImage {
+    LinearImage::from_file(dataset_path("stacked_light.tiff"), &LoadContext::default())
+        .expect("load stacked_light.tiff")
+}
+
+/// The bundled master in the display domain `[0, 1]`: background neutralized, auto-STF stretched,
+/// green removed — the input the display enhancers and the ML filters take.
+pub(crate) fn display_master() -> LinearImage {
+    let mut img = linear_master();
+    NeutralizeBackground.apply(&mut img).unwrap();
+    Stretch::auto_stf().apply(&mut img).unwrap();
+    Scnr::average_neutral().apply(&mut img).unwrap();
+    img
+}
+
 /// Two RAW lights of one field.
 #[derive(Debug)]
 pub(crate) struct LightPair {
@@ -86,17 +103,11 @@ pub(crate) fn first_and_last_lights() -> LightPair {
     }
 }
 
-/// Shared scaffolding for the `ml`-gated real-data prototypes (`star_removal`, `ml_denoise`):
-/// resolving caller-supplied weights and building the stretched display-domain master.
+/// Weight resolution for the `ml`-gated real-data prototypes (`star_removal`, `ml_denoise`).
 #[cfg(feature = "ml")]
 pub(crate) mod ml_support {
     use std::env;
     use std::path::PathBuf;
-
-    use crate::io::image::linear::LinearImage;
-    use crate::io::image::load_context::LoadContext;
-    use crate::testing::real_data::dataset_path;
-    use crate::{NeutralizeBackground, Scnr, Stretch};
 
     /// Resolve caller-supplied ONNX weights: the `env_var` override, else `test_data/<default_file>`.
     /// Returns `None` (after a skip message) when absent — lumos ships no models, so the tests skip
@@ -119,19 +130,5 @@ pub(crate) mod ml_support {
             );
             None
         }
-    }
-
-    /// Load the bundled linear master, neutralize its background and apply the default STF stretch —
-    /// the display-domain `[0, 1]` input the ML filters (StarNet / DeepSNR) are trained for.
-    pub(crate) fn stretched_master() -> LinearImage {
-        let mut img =
-            LinearImage::from_file(dataset_path("stacked_light.tiff"), &LoadContext::default())
-                .expect("load stacked_light.tiff");
-
-        NeutralizeBackground.apply(&mut img).unwrap();
-        Stretch::auto_stf().apply(&mut img).unwrap();
-        Scnr::average_neutral().apply(&mut img).unwrap();
-
-        img
     }
 }

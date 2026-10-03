@@ -6,10 +6,8 @@ use crate::image_ops::rgb::Rgb;
 use crate::testing::visual;
 
 use crate::image_ops::color_calibration::channel_backgrounds;
-use crate::io::image::linear::LinearImage;
-use crate::io::image::load_context::LoadContext;
 use crate::testing::init_tracing;
-use crate::testing::real_data::dataset_dir;
+use crate::testing::real_data;
 use crate::{NeutralizeBackground, Scnr, Stretch};
 
 fn spread(bg: Rgb) -> f32 {
@@ -20,11 +18,7 @@ fn spread(bg: Rgb) -> f32 {
 fn neutralize_then_stretch_removes_green() {
     init_tracing();
 
-    let image = LinearImage::from_file(
-        dataset_dir().join("stacked_light.tiff"),
-        &LoadContext::default(),
-    )
-    .expect("load");
+    let image = real_data::linear_master();
 
     // The raw OSC stack has a colored (green-elevated) background: the per-channel backgrounds differ.
     let before = channel_backgrounds(&image);

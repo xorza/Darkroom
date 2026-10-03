@@ -2,11 +2,9 @@
 //! write viewable JPEGs for visual inspection. Gated behind the `real-data` feature (the dataset
 //! lives in `test_data/lumos_data/`).
 
-use crate::io::image::linear::LinearImage;
-use crate::io::image::load_context::LoadContext;
 use crate::math::statistics::median_mut;
 use crate::testing::init_tracing;
-use crate::testing::real_data::dataset_dir;
+use crate::testing::real_data;
 use crate::testing::visual;
 use crate::{ColorMode, NeutralizeBackground, Scnr, Stretch, StretchMethod};
 
@@ -32,9 +30,7 @@ fn stats(pixels: &[f32]) -> Stats {
 fn stretch_stacked_light() {
     init_tracing();
 
-    let path = dataset_dir().join("stacked_light.tiff");
-    let mut image =
-        LinearImage::from_file(&path, &LoadContext::default()).expect("load stacked_light.tiff");
+    let mut image = real_data::linear_master();
     assert!(image.width() > 0 && image.height() > 0);
 
     NeutralizeBackground.apply(&mut image).unwrap();

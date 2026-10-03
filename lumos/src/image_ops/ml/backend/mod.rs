@@ -111,7 +111,9 @@ impl TiledOnnxConfig {
     }
 }
 
-/// Tile origins covering `dim` with 512-px windows at `stride`, the last one flush to the edge.
+/// Tile origins covering `dim` with 512-px windows at `stride`, the last one flush to the edge. The
+/// loop ends at the first window that reaches the edge, so only that one is clamped and no origin
+/// repeats.
 fn tile_starts(dim: usize, stride: usize) -> Vec<usize> {
     let mut v = Vec::new();
     let mut x = 0;
@@ -122,7 +124,6 @@ fn tile_starts(dim: usize, stride: usize) -> Vec<usize> {
         }
         x += stride;
     }
-    v.dedup();
     v
 }
 
@@ -213,72 +214,15 @@ fn build_output(rgb: bool, acc: &[Vec<f32>; 3], weight: &[f32], size: Size2us) -
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::image_ops::ml::backend::*;
+#[cfg(all(test, feature = "real-data"))]
+pub(crate) mod internals {
+    use crate::image_ops::ml::backend::tile_starts;
 
-    /// Plane of `width × height` whose value at `(x, y)` is `base + x + y * 1000`, so a wrong tile
-    /// origin or a swapped channel produces a distinctly wrong number rather than a near miss.
-    fn ramp(width: usize, height: usize, base: f32) -> Buffer2<f32> {
-        let pixels = (0..width * height)
-            .map(|i| base + (i % width) as f32 + (i / width) as f32 * 1000.0)
-            .collect();
-        Buffer2::new(width, height, pixels)
-    }
-
-    #[test]
-    fn a_tile_reads_from_its_own_origin_with_each_channel_in_its_own_model_slot() {
-        // 640² so the tile origin is not forced to (0,0) and an off-by-one in the row stride shows.
-        let (side, tile) = (640usize, Vec2us::new(128, 96));
-        let planar = LinearImage::from(array::from_fn::<_, 3, _>(|c| {
-            ramp(side, side, c as f32 * 0.5)
-        }));
-        let mut input = vec![0.0f32; WINDOW * WINDOW * 3];
-        fill_tile_input(&planar, tile, &mut input);
-
-        // Model pixel (ww, hh) must be master pixel (tile.x + ww, tile.y + hh). Every value here
-        // exceeds 1.0 and so arrives clamped — which is the contract, the model wants [0,1].
-        for (ww, hh) in [(0usize, 0usize), (1, 0), (0, 1), (WINDOW - 1, WINDOW - 1)] {
-            let dst = (hh * WINDOW + ww) * 3;
-            let src = (tile.y + hh) * side + tile.x + ww;
-            for c in 0..3 {
-                let expected = planar.channel(c).pixels()[src].clamp(0.0, 1.0);
-                assert_eq!(
-                    input[dst + c],
-                    expected,
-                    "channel {c} at model ({ww}, {hh})"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn a_mono_master_replicates_into_all_three_model_channels() {
-        // The net is RGB-only, so a grayscale master must arrive as R=G=B rather than leaving two
-        // channels at zero — and the clamp is what keeps a sub-background or star-core sample in
-        // the [0,1] domain the model was trained on.
-        let side = WINDOW;
-        let plane = Buffer2::new(
-            side,
-            side,
-            (0..side * side)
-                .map(|i| match i {
-                    0 => -0.25,
-                    1 => 1.5,
-                    _ => 0.5,
-                })
-                .collect(),
-        );
-        let planar = LinearImage::from(plane);
-        let mut input = vec![0.0f32; WINDOW * WINDOW * 3];
-        fill_tile_input(&planar, Vec2us::new(0, 0), &mut input);
-
-        for (pixel, expected) in [(0usize, 0.0f32), (1, 1.0), (2, 0.5), (side * side - 1, 0.5)] {
-            assert_eq!(
-                &input[pixel * 3..pixel * 3 + 3],
-                &[expected; 3],
-                "pixel {pixel}"
-            );
-        }
+    /// How many tiles cover `dim` at `stride` on one axis.
+    pub(crate) fn tile_count(dim: usize, stride: usize) -> usize {
+        tile_starts(dim, stride).len()
     }
 }
+
+#[cfg(test)]
+mod tests;

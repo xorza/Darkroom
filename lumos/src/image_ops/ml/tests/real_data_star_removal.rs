@@ -1,6 +1,7 @@
 use crate::image_ops::ml::star_removal::RemoveStars;
 use crate::testing::init_tracing;
-use crate::testing::real_data::ml_support::{onnx_weights, stretched_master};
+use crate::testing::real_data;
+use crate::testing::real_data::ml_support::onnx_weights;
 use crate::testing::visual;
 
 fn max_of(p: &[f32]) -> f32 {
@@ -20,7 +21,7 @@ fn starnet_removes_stars() {
     };
 
     // StarNet wants stretched display data in [0,1].
-    let img = stretched_master();
+    let img = real_data::display_master();
     visual::save_linear(&img, "star_removal/input");
     // Captured before `split` below consumes `img` (it repurposes the input's own
     // buffer for its `stars` output rather than allocating a fresh one).

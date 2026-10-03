@@ -28,7 +28,7 @@ use crate::testing::synthetic::backgrounds::NebulaConfig;
 use crate::testing::synthetic::camera::{BiasField, Camera, FlatField, PsfModel, SensorDefects};
 use crate::testing::synthetic::fixtures::{cluster_field, star_field};
 use crate::testing::synthetic::observe::{Observation, SimFrame, render};
-use crate::testing::synthetic::patterns::diagonal_gradient;
+use crate::testing::synthetic::patterns;
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
 use crate::testing::visual::{self, ToneMap};
 
@@ -60,22 +60,6 @@ fn save_frame(scene: &Scene, camera: &Camera, obs: &Observation, name: &str, ton
 /// A representative populated star field over `background`.
 fn demo_field(size: Size2us, background: BackgroundField, seed: u64) -> Scene {
     Scene::random_field(size, 120, (3.0, 250.0), background, 16.0, seed)
-}
-
-/// Create a horizontal gradient from left to right.
-fn horizontal_gradient(size: Size2us, left: f32, right: f32) -> Buffer2<f32> {
-    let mut pixels = vec![0.0f32; size.pixel_count()];
-    for y in 0..size.height {
-        for x in 0..size.width {
-            let t = if size.width > 1 {
-                x as f32 / (size.width - 1) as f32
-            } else {
-                0.5
-            };
-            pixels[size.index_of(Vec2us::new(x, y))] = left + t * (right - left);
-        }
-    }
-    Buffer2::new(size.width, size.height, pixels)
 }
 
 /// Create a checkerboard pattern.
@@ -483,13 +467,13 @@ fn gallery_patterns() {
         ToneMap::Clamp,
     );
     save(
-        horizontal_gradient(size, 0.0, 1.0).pixels(),
+        patterns::horizontal_gradient(size, 0.0, 1.0).pixels(),
         size,
         "patterns/horizontal_gradient",
         ToneMap::Clamp,
     );
     save(
-        diagonal_gradient(size).pixels(),
+        patterns::diagonal_gradient(size).pixels(),
         size,
         "patterns/diagonal_gradient",
         ToneMap::Clamp,

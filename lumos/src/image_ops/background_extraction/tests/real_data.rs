@@ -4,13 +4,12 @@
 //! before/after. Gated behind the `real-data` feature.
 
 use crate::io::image::linear::LinearImage;
-use crate::io::image::load_context::LoadContext;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mut;
 use crate::testing::init_tracing;
-use crate::testing::real_data::dataset_dir;
+use crate::testing::real_data;
 use crate::testing::visual;
-use crate::{ExtractBackground, NeutralizeBackground, Scnr, Stretch};
+use crate::{ExtractBackground, NeutralizeBackground};
 
 /// Max−min of the robust background level across the four corners of the intensity plane — a proxy
 /// for the corner-to-corner gradient. A light-pollution gradient makes opposite corners differ;
@@ -46,15 +45,7 @@ fn corner_background_spread(image: &LinearImage) -> f32 {
 fn extract_flattens_background_on_stretched_master() {
     init_tracing();
 
-    // The display-domain master, as the other real-data tests build it.
-    let mut img = LinearImage::from_file(
-        dataset_dir().join("stacked_light.tiff"),
-        &LoadContext::default(),
-    )
-    .expect("load");
-    NeutralizeBackground.apply(&mut img).unwrap();
-    Stretch::auto_stf().apply(&mut img).unwrap();
-    Scnr::average_neutral().apply(&mut img).unwrap();
+    let img = real_data::display_master();
     visual::save_linear(&img, "bg_extraction/stretched");
 
     let before = corner_background_spread(&img);

@@ -384,11 +384,7 @@ mod internals {
             );
 
             let mut buffer = Self::new_default(size);
-            for (index, &value) in data.iter().enumerate() {
-                if value {
-                    buffer.set(index, true);
-                }
-            }
+            buffer.fill_from_predicate(|index| data[index]);
             buffer
         }
     }

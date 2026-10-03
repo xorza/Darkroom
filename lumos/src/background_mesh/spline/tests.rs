@@ -1,376 +1,167 @@
 use crate::background_mesh::spline::spline_segment::SplineSegment;
 use crate::background_mesh::spline::*;
 
-#[test]
-fn solve_d2_two_points_gives_zero() {
-    // Natural spline with 2 points: d2 = 0 everywhere (linear)
-    let values = [10.0, 20.0];
-    let centers = [0.0, 1.0];
-    let mut d2 = [999.0; 2];
-    let mut scratch = [0.0; 1];
-
-    solve_natural_spline_d2(&values, &centers, &mut d2, &mut scratch);
-    assert_eq!(d2[0], 0.0);
-    assert_eq!(d2[1], 0.0);
+/// One natural-spline system, hand-solved.
+#[derive(Debug)]
+struct SplineCase {
+    name: &'static str,
+    values: &'static [f32],
+    centers: &'static [f32],
+    d2: &'static [f64],
 }
 
-#[test]
-fn solve_d2_linear_data_gives_zero() {
-    // Linear function f(x) = 2x + 1 at x = 0, 1, 2, 3
-    // Second derivative of a linear function is 0 everywhere
-    let values = [1.0, 3.0, 5.0, 7.0];
-    let centers = [0.0, 1.0, 2.0, 3.0];
-    let mut d2 = [0.0; 4];
-    let mut scratch = [0.0; 2];
-
-    solve_natural_spline_d2(&values, &centers, &mut d2, &mut scratch);
-
-    for (i, &d) in d2.iter().enumerate() {
-        assert!(d.abs() < 1e-5, "d2[{i}] = {d} should be 0 for linear data");
-    }
+/// The interior equation at node `i` of a natural spline through `values` at `centers`:
+/// `h₀·d″ᵢ₋₁ + 2(h₀ + h₁)·d″ᵢ + h₁·d″ᵢ₊₁ = 6·((fᵢ₊₁ − fᵢ)/h₁ − (fᵢ − fᵢ₋₁)/h₀)`, and the two
+/// segments' slopes at the node, `(f − f₋)/h₀ + h₀(d″₋ + 2d″)/6` from the left and
+/// `(f₊ − f)/h₁ − h₁(2d″ + d″₊)/6` from the right, meet exactly when it holds.
+fn slope_mismatch(values: &[f32], centers: &[f32], d2: &[f32], i: usize) -> f64 {
+    let at = |k: usize| {
+        (
+            f64::from(values[k]),
+            f64::from(centers[k]),
+            f64::from(d2[k]),
+        )
+    };
+    let ((f_l, x_l, d_l), (f, x, d), (f_r, x_r, d_r)) = (at(i - 1), at(i), at(i + 1));
+    let (h_l, h_r) = (x - x_l, x_r - x);
+    let left = (f - f_l) / h_l + h_l * (d_l + 2.0 * d) / 6.0;
+    let right = (f_r - f) / h_r - h_r * (2.0 * d + d_r) / 6.0;
+    left - right
 }
 
+/// The second derivatives `solve_natural_spline_d2` finds, against systems solved by hand. Under
+/// three nodes there are no interior equations and every `d″` is 0; linear data has a zero
+/// right-hand side. With `h = 1` the interior rows read `d″₋ + 4d″ + d″₊ = 6·Δ²f`:
+/// - x² at 0..3: `4a + b = 12`, `a + 4b = 12`, so `a = b = 12/5`;
+/// - x³ at 0..4: right-hand sides 36, 72, 108, solved to 45/7, 72/7, 171/7;
+/// - [1, 4, 9, 4, 1]: 12, −60, 12, symmetric, so `4a + b = 12`, `a + 2b = −30`: 54/7 and −132/7.
+///
+/// Non-uniform, x² at 0, 1, 3 (`h` = 1, 2): `6·d″ = 6·(8/2 − 1/1)`, so 3. And x² at 0, 2, 4, 5 —
+/// a short last interval, as a frame whose width is not a whole number of tiles leaves:
+/// `8a + 2b = 6·(12/2 − 4/2) = 24`, `2a + 6b = 6·(9/1 − 12/2) = 18`, so `a = 27/11`, `b = 24/11`.
+/// That case runs both the forward sweep and the back substitution once each.
+///
+/// The sweep rounds each unknown about four times and the back substitution twice more, and the
+/// system's diagonal dominance keeps those from growing: 8ε of the largest `d″` bounds it.
 #[test]
-fn solve_d2_quadratic_data() {
-    // f(x) = x² at x = 0, 1, 2, 3 → f = [0, 1, 4, 9]
-    // True second derivative = 2 everywhere
-    // Natural spline with n=4 points, uniform h=1:
-    //   Interior equations (i=1, i=2):
-    //   d2[0]=0, d2[3]=0 (natural BC)
-    //
-    //   i=1: h0*d2[0] + 2*(h0+h1)*d2[1] + h1*d2[2] = 6*((f2-f1)/h1 - (f1-f0)/h0)
-    //        0 + 4*d2[1] + 1*d2[2] = 6*((4-1)/1 - (1-0)/1) = 6*(3-1) = 12
-    //
-    //   i=2: h1*d2[1] + 2*(h1+h2)*d2[2] + h2*d2[3] = 6*((f3-f2)/h2 - (f2-f1)/h1)
-    //        1*d2[1] + 4*d2[2] + 0 = 6*((9-4)/1 - (4-1)/1) = 6*(5-3) = 12
-    //
-    //   System: 4*d2[1] + d2[2] = 12
-    //           d2[1] + 4*d2[2] = 12
-    //   Solution: d2[1] = d2[2] = 12/5 = 2.4
-    let values = [0.0, 1.0, 4.0, 9.0];
-    let centers = [0.0, 1.0, 2.0, 3.0];
-    let mut d2 = [0.0; 4];
-    let mut scratch = [0.0; 2];
-
-    solve_natural_spline_d2(&values, &centers, &mut d2, &mut scratch);
-
-    assert!(d2[0].abs() < 1e-6, "d2[0] = {}, expected 0", d2[0]);
-    assert!(d2[3].abs() < 1e-6, "d2[3] = {}, expected 0", d2[3]);
-    assert!(
-        (d2[1] - 2.4).abs() < 1e-5,
-        "d2[1] = {}, expected 2.4",
-        d2[1]
-    );
-    assert!(
-        (d2[2] - 2.4).abs() < 1e-5,
-        "d2[2] = {}, expected 2.4",
-        d2[2]
-    );
-}
-
-#[test]
-fn solve_d2_non_uniform_spacing() {
-    // f(x) = x² at x = 0, 1, 3 → f = [0, 1, 9]
-    // h0 = 1, h1 = 2
-    // One interior equation (i=1):
-    //   2*(h0+h1)*d2[1] = 6*((f2-f1)/h1 - (f1-f0)/h0)
-    //   2*(1+2)*d2[1] = 6*((9-1)/2 - (1-0)/1) = 6*(4-1) = 18
-    //   6*d2[1] = 18 → d2[1] = 3
-    let values = [0.0, 1.0, 9.0];
-    let centers = [0.0, 1.0, 3.0];
-    let mut d2 = [0.0; 3];
-    let mut scratch = [0.0; 1];
-
-    solve_natural_spline_d2(&values, &centers, &mut d2, &mut scratch);
-
-    assert!(d2[0].abs() < 1e-6, "d2[0] = {}, expected 0", d2[0]);
-    assert!(d2[2].abs() < 1e-6, "d2[2] = {}, expected 0", d2[2]);
-    assert!(
-        (d2[1] - 3.0).abs() < 1e-5,
-        "d2[1] = {}, expected 3.0",
-        d2[1]
-    );
-}
-
-#[test]
-fn spline_segment_endpoints() {
-    // At t=0: should return f0; at t=1: should return f1
-    let f0 = 10.0;
-    let f1 = 20.0;
-    let d0 = 5.0;
-    let d1 = -3.0;
-    let h = 32.0;
-
-    let val_0 = SplineSegment::new(f0, f1, d0, d1, h).eval(0.0);
-    let val_1 = SplineSegment::new(f0, f1, d0, d1, h).eval(1.0);
-
-    assert!((val_0 - f0).abs() < 1e-6, "t=0: expected {f0}, got {val_0}");
-    assert!((val_1 - f1).abs() < 1e-6, "t=1: expected {f1}, got {val_1}");
-}
-
-#[test]
-fn spline_segment_midpoint() {
-    // At t=0.5, using f(t) = ct*f0 + t*f1 - t*ct*((2-t)*a + (1+t)*b):
-    //   = (f0+f1)/2 - 0.375*(a+b)
-    // where a = h²/6*d0, b = h²/6*d1
-    let f0 = 100.0;
-    let f1 = 200.0;
-    let h = 6.0; // h²/6 = 6
-    let d0 = 2.0; // a = 6*2 = 12
-    let d1 = -1.0; // b = 6*(-1) = -6
-    // Expected: (100+200)/2 - 0.375*(12 + (-6)) = 150 - 0.375*6 = 150 - 2.25 = 147.75
-    let val = SplineSegment::new(f0, f1, d0, d1, h).eval(0.5);
-    assert!(
-        (val - 147.75).abs() < 1e-4,
-        "t=0.5: expected 147.75, got {val}"
-    );
-}
-
-#[test]
-fn spline_segment_zero_d2_is_linear() {
-    // With d0=d1=0, the spline should be exactly linear
-    let f0 = 10.0;
-    let f1 = 50.0;
-    let h = 32.0;
-
-    for i in 0..=10 {
-        let t = i as f32 / 10.0;
-        let val = SplineSegment::new(f0, f1, 0.0, 0.0, h).eval(t);
-        let expected = (1.0 - t) * f0 + t * f1;
-        assert!(
-            (val - expected).abs() < 1e-5,
-            "t={t}: expected {expected}, got {val}"
-        );
-    }
-}
-
-#[test]
-fn solve_d2_single_point() {
-    let values = [42.0];
-    let centers = [5.0];
-    let mut d2 = [999.0; 1];
-    let mut scratch = [0.0; 1];
-
-    solve_natural_spline_d2(&values, &centers, &mut d2, &mut scratch);
-    assert_eq!(d2[0], 0.0);
-}
-
-#[test]
-fn solve_d2_empty() {
-    let values: [f32; 0] = [];
-    let centers: [f32; 0] = [];
-    let mut d2: [f32; 0] = [];
-    let mut scratch: [f32; 0] = [];
-
-    solve_natural_spline_d2(&values, &centers, &mut d2, &mut scratch);
-    // No-op, just shouldn't panic
-}
-
-#[test]
-fn solve_d2_five_points_cubic() {
-    // f(x) = x³ at x = 0, 1, 2, 3, 4 → f = [0, 1, 8, 27, 64]
-    // True f''(x) = 6x, so f''(0)=0, f''(1)=6, f''(2)=12, f''(3)=18, f''(4)=24
-    // Natural BC forces d2[0]=0, d2[4]=0, so the spline won't match true f''
-    // at interior points. We solve the 3×3 tridiagonal system:
-    //
-    // h = 1 (uniform spacing)
-    // Interior equations (i=1,2,3):
-    //   i=1: 4*d2[1] + d2[2] = 6*((f2-f1) - (f1-f0)) = 6*(7 - 1) = 36
-    //   i=2: d2[1] + 4*d2[2] + d2[3] = 6*((f3-f2) - (f2-f1)) = 6*(19 - 7) = 72
-    //   i=3: d2[2] + 4*d2[3] = 6*((f4-f3) - (f3-f2)) = 6*(37 - 19) = 108
-    //
-    // Forward elimination:
-    //   Row 1: d = 4, cp[0] = 1/4, d2[1] = 36/4 = 9
-    //   Row 2: d = 4 - 1*(1/4) = 15/4, cp[1] = 1/(15/4) = 4/15
-    //          d2[2] = (72 - 1*9)/(15/4) = 63/(15/4) = 63*4/15 = 252/15 = 16.8
-    //   Row 3: d = 4 - 1*(4/15) = 56/15
-    //          d2[3] = (108 - 1*16.8)/(56/15) = 91.2/(56/15) = 91.2*15/56 = 1368/56 = 24.4286...
-    //
-    // Back substitution:
-    //   d2[3] = 1368/56 = 24.42857...
-    //   d2[2] = 16.8 - (4/15)*24.42857... = 16.8 - 6.51429... = 10.28571...
-    //   d2[1] = 9 - (1/4)*10.28571... = 9 - 2.57143... = 6.42857...
-    //
-    // Exact fractions: d2[1] = 45/7, d2[2] = 72/7, d2[3] = 171/7
-    let values = [0.0, 1.0, 8.0, 27.0, 64.0];
-    let centers = [0.0, 1.0, 2.0, 3.0, 4.0];
-    let mut d2 = [0.0; 5];
-    let mut scratch = [0.0; 3];
-
-    solve_natural_spline_d2(&values, &centers, &mut d2, &mut scratch);
-
-    assert!(d2[0].abs() < 1e-5, "d2[0] = {}, expected 0", d2[0]);
-    assert!(d2[4].abs() < 1e-5, "d2[4] = {}, expected 0", d2[4]);
-    let expected_1 = 45.0 / 7.0; // 6.42857...
-    let expected_2 = 72.0 / 7.0; // 10.28571...
-    let expected_3 = 171.0 / 7.0; // 24.42857...
-    assert!(
-        (d2[1] - expected_1).abs() < 1e-4,
-        "d2[1] = {}, expected {}",
-        d2[1],
-        expected_1
-    );
-    assert!(
-        (d2[2] - expected_2).abs() < 1e-4,
-        "d2[2] = {}, expected {}",
-        d2[2],
-        expected_2
-    );
-    assert!(
-        (d2[3] - expected_3).abs() < 1e-4,
-        "d2[3] = {}, expected {}",
-        d2[3],
-        expected_3
-    );
-}
-
-#[test]
-fn solve_d2_symmetric_data() {
-    // f = [1, 4, 9, 4, 1] at x = [0, 1, 2, 3, 4] (symmetric around x=2)
-    // Symmetry requires d2[1] == d2[3] and d2[2] is the center value.
-    //
-    // Interior equations (uniform h=1):
-    //   i=1: 4*d2[1] + d2[2] = 6*((9-4) - (4-1)) = 6*(5-3) = 12
-    //   i=2: d2[1] + 4*d2[2] + d2[3] = 6*((4-9) - (9-4)) = 6*(-5-5) = -60
-    //   i=3: d2[2] + 4*d2[3] = 6*((1-4) - (4-9)) = 6*(-3+5) = 12
-    //
-    // By symmetry d2[1] = d2[3]. Let a = d2[1] = d2[3], b = d2[2]:
-    //   4a + b = 12
-    //   a + 4b + a = -60 → 2a + 4b = -60 → a + 2b = -30
-    //   From first: b = 12 - 4a
-    //   Substitute: a + 2(12-4a) = -30 → a + 24 - 8a = -30 → -7a = -54 → a = 54/7
-    //   b = 12 - 4*54/7 = 12 - 216/7 = (84-216)/7 = -132/7
-    let values = [1.0, 4.0, 9.0, 4.0, 1.0];
-    let centers = [0.0, 1.0, 2.0, 3.0, 4.0];
-    let mut d2 = [0.0; 5];
-    let mut scratch = [0.0; 3];
-
-    solve_natural_spline_d2(&values, &centers, &mut d2, &mut scratch);
-
-    let expected_sym = 54.0 / 7.0; // d2[1] = d2[3]
-    let expected_center = -132.0 / 7.0; // d2[2]
-
-    assert!(d2[0].abs() < 1e-5, "d2[0] = {}, expected 0", d2[0]);
-    assert!(d2[4].abs() < 1e-5, "d2[4] = {}, expected 0", d2[4]);
-    assert!(
-        (d2[1] - expected_sym).abs() < 1e-4,
-        "d2[1] = {}, expected {} (54/7)",
-        d2[1],
-        expected_sym
-    );
-    assert!(
-        (d2[3] - expected_sym).abs() < 1e-4,
-        "d2[3] = {}, expected {} (54/7)",
-        d2[3],
-        expected_sym
-    );
-    assert!(
-        (d2[1] - d2[3]).abs() < 1e-6,
-        "Symmetry broken: d2[1]={} != d2[3]={}",
-        d2[1],
-        d2[3]
-    );
-    assert!(
-        (d2[2] - expected_center).abs() < 1e-4,
-        "d2[2] = {}, expected {} (-132/7)",
-        d2[2],
-        expected_center
-    );
-}
-
-#[test]
-fn spline_segment_h_zero_returns_f0() {
-    // When h=0 (degenerate interval), should return f0
-    let val = SplineSegment::new(42.0, 99.0, 5.0, -3.0, 0.0).eval(0.5);
-    assert_eq!(val, 42.0);
-}
-
-#[test]
-fn spline_segment_h_negative_returns_f0() {
-    let val = SplineSegment::new(42.0, 99.0, 5.0, -3.0, -1.0).eval(0.5);
-    assert_eq!(val, 42.0);
-}
-
-#[test]
-fn spline_roundtrip_reproduces_nodes() {
-    // Solve d2 for f = [0, 1, 8, 27, 64] (x³), then verify that evaluating
-    // the spline at each node point exactly reproduces the function value.
-    let values = [0.0f32, 1.0, 8.0, 27.0, 64.0];
-    let centers = [0.0f32, 1.0, 2.0, 3.0, 4.0];
-    let mut d2 = [0.0f32; 5];
-    let mut scratch = [0.0f32; 3];
-
-    solve_natural_spline_d2(&values, &centers, &mut d2, &mut scratch);
-
-    // At each node i, evaluate spline from interval [i-1, i] at t=1
-    // and from interval [i, i+1] at t=0. Both should give values[i].
-    for i in 0..5 {
-        // From left interval (t=1): interval [i-1, i]
-        if i > 0 {
-            let h = centers[i] - centers[i - 1];
-            let val = SplineSegment::new(values[i - 1], values[i], d2[i - 1], d2[i], h).eval(1.0);
+fn solve_d2_hand_solved() {
+    let cases = [
+        SplineCase {
+            name: "empty",
+            values: &[],
+            centers: &[],
+            d2: &[],
+        },
+        SplineCase {
+            name: "one node",
+            values: &[42.0],
+            centers: &[5.0],
+            d2: &[0.0],
+        },
+        SplineCase {
+            name: "two nodes",
+            values: &[10.0, 20.0],
+            centers: &[0.0, 1.0],
+            d2: &[0.0, 0.0],
+        },
+        SplineCase {
+            name: "linear",
+            values: &[1.0, 3.0, 5.0, 7.0],
+            centers: &[0.0, 1.0, 2.0, 3.0],
+            d2: &[0.0; 4],
+        },
+        SplineCase {
+            name: "quadratic",
+            values: &[0.0, 1.0, 4.0, 9.0],
+            centers: &[0.0, 1.0, 2.0, 3.0],
+            d2: &[0.0, 2.4, 2.4, 0.0],
+        },
+        SplineCase {
+            name: "cubic",
+            values: &[0.0, 1.0, 8.0, 27.0, 64.0],
+            centers: &[0.0, 1.0, 2.0, 3.0, 4.0],
+            d2: &[0.0, 45.0 / 7.0, 72.0 / 7.0, 171.0 / 7.0, 0.0],
+        },
+        SplineCase {
+            name: "symmetric",
+            values: &[1.0, 4.0, 9.0, 4.0, 1.0],
+            centers: &[0.0, 1.0, 2.0, 3.0, 4.0],
+            d2: &[0.0, 54.0 / 7.0, -132.0 / 7.0, 54.0 / 7.0, 0.0],
+        },
+        SplineCase {
+            name: "non-uniform, three nodes",
+            values: &[0.0, 1.0, 9.0],
+            centers: &[0.0, 1.0, 3.0],
+            d2: &[0.0, 3.0, 0.0],
+        },
+        SplineCase {
+            name: "non-uniform, short last interval",
+            values: &[0.0, 4.0, 16.0, 25.0],
+            centers: &[0.0, 2.0, 4.0, 5.0],
+            d2: &[0.0, 27.0 / 11.0, 24.0 / 11.0, 0.0],
+        },
+    ];
+    for case in cases {
+        let n = case.values.len();
+        let mut d2 = vec![999.0f32; n];
+        let mut scratch = vec![0.0f32; n.saturating_sub(2).max(1)];
+        solve_natural_spline_d2(case.values, case.centers, &mut d2, &mut scratch);
+        let largest = case.d2.iter().fold(0.0f64, |m, d| m.max(d.abs()));
+        let bound = 8.0 * f64::from(f32::EPSILON) * largest;
+        for (k, (&got, &expected)) in d2.iter().zip(case.d2).enumerate() {
             assert!(
-                (val - values[i]).abs() < 1e-4,
-                "Node {} from left: expected {}, got {}",
-                i,
-                values[i],
-                val
-            );
-        }
-        // From right interval (t=0): interval [i, i+1]
-        if i < 4 {
-            let h = centers[i + 1] - centers[i];
-            let val = SplineSegment::new(values[i], values[i + 1], d2[i], d2[i + 1], h).eval(0.0);
-            assert!(
-                (val - values[i]).abs() < 1e-4,
-                "Node {} from right: expected {}, got {}",
-                i,
-                values[i],
-                val
+                (f64::from(got) - expected).abs() <= bound,
+                "{}: d″[{k}] = {got}, expected {expected}",
+                case.name
             );
         }
     }
 }
 
+/// The spline is C¹: at every interior node of irregular data on irregular spacing the two
+/// segments' slopes meet. Each `d″` is within 8ε of the largest of them (see
+/// [`solve_d2_hand_solved`]), and the slopes weigh the three at a node by `h₀/2` and `h₁/2` in all,
+/// so they meet to `(h₀ + h₁)/2 · 8ε · max|d″|`; the slopes themselves are taken in f64.
 #[test]
-fn spline_roundtrip_interior_continuity() {
-    // At each interior node, the value from the left interval (t=1) should
-    // match the value from the right interval (t=0). This tests C0 continuity.
-    // Also test that the first derivative is continuous (C1).
+fn spline_slopes_meet_at_every_interior_node() {
     let values = [2.0f32, 5.0, 3.0, 8.0, 1.0, 6.0];
-    let centers = [0.0f32, 1.0, 2.0, 3.0, 4.0, 5.0];
+    let centers = [0.0f32, 1.0, 3.0, 4.0, 7.0, 8.0];
     let mut d2 = [0.0f32; 6];
     let mut scratch = [0.0f32; 4];
-
     solve_natural_spline_d2(&values, &centers, &mut d2, &mut scratch);
-
+    let largest = d2.iter().fold(0.0f64, |m, &d| m.max(f64::from(d).abs()));
     for i in 1..5 {
-        let h_left = centers[i] - centers[i - 1];
-        let h_right = centers[i + 1] - centers[i];
-
-        let val_left =
-            SplineSegment::new(values[i - 1], values[i], d2[i - 1], d2[i], h_left).eval(1.0);
-        let val_right =
-            SplineSegment::new(values[i], values[i + 1], d2[i], d2[i + 1], h_right).eval(0.0);
-
+        let span = f64::from(centers[i + 1] - centers[i - 1]);
+        let bound = span / 2.0 * 8.0 * f64::from(f32::EPSILON) * largest;
+        let mismatch = slope_mismatch(&values, &centers, &d2, i);
         assert!(
-            (val_left - val_right).abs() < 1e-4,
-            "C0 break at node {i}: left={val_left}, right={val_right}"
+            mismatch.abs() <= bound,
+            "node {i}: {mismatch:e} > {bound:e}"
         );
+    }
+}
 
-        // C1 check: numerical derivative from both sides should match
-        let eps = 1e-4;
-        let val_left_m =
-            SplineSegment::new(values[i - 1], values[i], d2[i - 1], d2[i], h_left).eval(1.0 - eps);
-        let val_right_p =
-            SplineSegment::new(values[i], values[i + 1], d2[i], d2[i + 1], h_right).eval(eps);
-        // Derivative from left: (val_left - val_left_m) / (eps * h_left)
-        // Derivative from right: (val_right_p - val_right) / (eps * h_right)
-        let deriv_left = (val_left - val_left_m) / (eps * h_left);
-        let deriv_right = (val_right_p - val_right) / (eps * h_right);
-        assert!(
-            (deriv_left - deriv_right).abs() < 0.1,
-            "C1 break at node {i}: deriv_left={deriv_left}, deriv_right={deriv_right}"
-        );
+/// A segment at its nodes is its node values; with no curvature it is the straight line between
+/// them, exact at dyadic `t`; and at `t = ½` with `h = 6`, `a = 6·2 = 12` and `b = 6·(−1) = −6`,
+/// `150 − ¼·(1.5·12 + 1.5·(−6)) = 147.75`. Every step is exact in f32. A zero or negative width is
+/// the constant `f0`.
+#[test]
+fn spline_segment_hand_computed() {
+    let curved = SplineSegment::new(10.0, 20.0, 5.0, -3.0, 32.0);
+    assert_eq!((curved.eval(0.0), curved.eval(1.0)), (10.0, 20.0));
+
+    let straight = SplineSegment::new(10.0, 50.0, 0.0, 0.0, 32.0);
+    for i in 0..=8 {
+        let t = i as f32 / 8.0;
+        assert_eq!(straight.eval(t), 10.0 + 40.0 * t, "t = {t}");
+    }
+
+    assert_eq!(
+        SplineSegment::new(100.0, 200.0, 2.0, -1.0, 6.0).eval(0.5),
+        147.75
+    );
+
+    for h in [0.0, -1.0] {
+        assert_eq!(SplineSegment::new(42.0, 99.0, 5.0, -3.0, h).eval(0.5), 42.0);
     }
 }

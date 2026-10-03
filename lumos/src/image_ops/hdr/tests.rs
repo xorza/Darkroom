@@ -1,7 +1,7 @@
-use crate::image_ops::error::OpError;
 use crate::image_ops::hdr::Hdr;
-use crate::image_ops::wavelet::atrous_smooth;
-use crate::testing::images::gray_image as gray;
+use crate::image_ops::wavelet::{atrous_smooth, max_scales};
+use crate::testing::assertions::assert_close_slice;
+use crate::testing::images::{gray_image as gray, rgb_image as rgb};
 use crate::testing::prelude::*;
 use std::mem;
 
@@ -153,12 +153,15 @@ fn hdr_matches_explicit_pyramid_reference() {
     Hdr { scales, amount }.apply(&mut img).unwrap();
     let out = img.channel(0);
     let expected = reference_hdr(&px, size, scales, amount);
-    for (o, e) in out.pixels().iter().zip(&expected) {
-        assert!(
-            (o - e).abs() < 1e-5,
-            "collapsed formula matches the layer pyramid: {o} vs {e}"
-        );
-    }
+    // Both sides hold values ≤ 1. The reference rounds each of its three layer differences, their
+    // two sums, the residual's flattening twice and the final sum; the collapse rounds a handful
+    // of times on its own: under 8ε absolute between them.
+    assert_close_slice!(
+        out.pixels(),
+        expected,
+        8.0 * f32::EPSILON,
+        "collapsed vs pyramid"
+    );
 }
 
 /// A flat plane has no large-scale contrast to compress: whatever the amount, it comes back as
@@ -182,37 +185,38 @@ fn a_flat_plane_comes_back_as_itself() {
     }
 }
 
+/// On colour the compression stays in display range on its own — the remap divides by a channel
+/// past white rather than clipping it — on a dome whose red runs twice its intensity.
 #[test]
-fn hdr_output_stays_in_range() {
-    let mut img = gray(Size2us::new(96, 96), dome(Size2us::new(96, 96)));
+fn hdr_keeps_colour_in_range() {
+    let size = Size2us::new(96, 96);
+    let i = dome(size);
+    let r: Vec<f32> = i.iter().map(|&v| (2.0 * v).min(1.0)).collect();
+    let mut img = rgb(size, r, i.clone(), i);
     Hdr::default().apply(&mut img).unwrap();
-    for &v in &img.channel(0).to_vec() {
-        assert!((0.0..=1.0).contains(&v), "output in [0,1]: {v}");
+    for channel in 0..3 {
+        for &v in img.channel(channel).pixels() {
+            assert!((0.0..=1.0).contains(&v), "channel {channel}: {v}");
+        }
     }
 }
 
+/// More scales move more structure into the compressed residual, so 2 and 4 scales differ; past
+/// what the frame holds (`max_scales`, 5 for 48 px) a request is that limit, bit for bit.
 #[test]
-fn rejects_invalid_config_before_zero_amount_shortcut() {
-    let mut img = gray(Size2us::new(8, 8), vec![0.5; 64]);
-    let err = Hdr {
-        scales: 6,
-        amount: 1.5,
-    }
-    .apply(&mut img)
-    .unwrap_err();
-    assert!(
-        matches!(&err, OpError::InvalidConfig(m) if m.field == "hdr amount"),
-        "expected an InvalidConfig amount error, got {err:?}"
-    );
-
-    let err = Hdr {
-        scales: 0,
-        amount: 0.0,
-    }
-    .apply(&mut img)
-    .unwrap_err();
-    assert!(
-        matches!(&err, OpError::InvalidConfig(m) if m.field == "hdr scales"),
-        "expected an InvalidConfig scales error, got {err:?}"
-    );
+fn scales_change_the_output_up_to_the_frame_limit() {
+    let size = Size2us::new(48, 48);
+    let run = |scales| {
+        let mut img = gray(size, dome(size));
+        Hdr {
+            scales,
+            amount: 0.6,
+        }
+        .apply(&mut img)
+        .unwrap();
+        img.channel(0).pixels().to_vec()
+    };
+    assert_eq!(max_scales(size), 5);
+    assert_ne!(run(2), run(4));
+    assert_eq!(run(20), run(5));
 }
