@@ -184,8 +184,6 @@ Short paths are relative to `lumos/src/stacking/star_detection/`.
 ### lumos — registration
 Paths are relative to `lumos/src/stacking/registration/`.
 
-- [ ] `spatial/tests.rs` — every k-d tree fixture has ≤ 50 points on a line or a grid. There is no brute-force cross-check of `k_nearest_into`, `nearest_one` and `radius_indices_into` on seeded random 2-D sets of a few hundred points, which is the standard oracle for this structure and the only way to reach deep splits.
-- [ ] `transform/tests.rs:83-94` — `rotation_angle` is tested only at scale 1 and `scale_factor` only at angle 0. At angle 0 `scale_factor` reduces to |a|, so dropping the `c` term would pass. `apply_inverse`, `inverse` and `compose` are never tested on a homography (`:313-401` covers translation and similarity only).
 
 ### lumos — combine, drizzle
 Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
@@ -347,8 +345,6 @@ Paths are relative to `lumos/src/stacking/registration/`.
 - [ ] The barrel/pincushion grid generator lives in `distortion/sip/tests/mod.rs:9`, and is re-inlined at `sip/tests/correction.rs:86-97`, `sip/tests/reference.rs:12-19`, `:61-68`, `:231-238`, `sip/tests/fitting.rs:47-53`, `:219-225`, `:295-304`, `sip/tests/results.rs:98-117`, `tests/warping.rs:616-634`, `:721-736`, `transform/tests.rs:156-168` and `tests/sip_distortion.rs:15`. It also returns a tuple. Extend it with translation, k4, extent and outliers, and use it everywhere.
 - [ ] Redundant tests:
   - `config/tests.rs:398-414` (the inequalities are implied by the exact values at `:43-60`), `:416-424` (every preset already calls `validate()`), `:103-119` (tests struct-update syntax) and `:143-147` (the third assertion that the default method is Lanczos3, after `:38` and `:152`).
-  - `transform/tests.rs:123-132` (a 0.01-tolerance version of `:422-433`).
-  - `spatial/tests.rs:368-374` (the same as `build_empty`); `:703-768`, `:307-366` (k-nearest cases outside the table that replaced 13 such tests); `:376-517` (8 radius tests that should be one table); `:19-46` and `:519-533` (`get_point` checked three times).
   - `distortion/sip/tests/fitting.rs:244-259` (a length-only test), `:42-92` and `:214-242` (the undistorted fixture twice, both covered by `results.rs` "undistorted") and `:285-335` (the same as `results.rs:284`).
 
 ### lumos — combine, drizzle
@@ -466,7 +462,6 @@ Paths are relative to `lumos/src/stacking/registration/`.
   - `distortion/sip/tests/correction.rs:142-148` ("But actually … Let's just verify")
   - `distortion/sip/tests/fitting.rs:202-205`, where a dead `_max_corr_center` sits beside a comment abandoning it
 - [ ] Wrong comments:
-  - `spatial/tests.rs:748` versus `:763`: two different hand sums for the same distance (409258.37 against 409267.37). The first is wrong.
 
 ### lumos — combine, drizzle
 Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
