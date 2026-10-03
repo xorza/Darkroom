@@ -23,6 +23,14 @@ impl QualityMap {
         }
     }
 
+    /// The quality plane of an image channel.
+    pub const fn channel(&self, channel: usize) -> &Buffer2<f32> {
+        match self {
+            Self::Shared(plane) => plane,
+            Self::PerChannel(planes) => &planes[channel],
+        }
+    }
+
     /// One plane per image channel: shared for one channel, per channel for three.
     ///
     /// # Panics
@@ -41,23 +49,6 @@ impl From<QualityMap> for LinearImage {
         match map {
             QualityMap::Shared(plane) => plane.into(),
             QualityMap::PerChannel(planes) => planes.into(),
-        }
-    }
-}
-
-#[cfg(test)]
-pub(crate) mod internals {
-    use imaginarium::Buffer2;
-
-    use crate::stack_product::quality_map::QualityMap;
-
-    impl QualityMap {
-        /// The quality plane applicable to an image channel.
-        pub(crate) fn channel(&self, channel: usize) -> &Buffer2<f32> {
-            match self {
-                Self::Shared(plane) => plane,
-                Self::PerChannel(planes) => &planes[channel],
-            }
         }
     }
 }

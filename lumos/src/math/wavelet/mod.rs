@@ -126,6 +126,39 @@ fn reflect(i: isize, n: isize) -> usize {
     if m >= n { period - m } else { m }.unsigned_abs()
 }
 
+/// The σ of detail layer `scale` for unit white noise: `√Σw²` of the layer's response to an impulse.
+///
+/// The smooth at scale `j` is separable, `g_j(x)·g_j(y)` with `g_j` the B3 kernel convolved with its
+/// dilations up to `2^(j−1)`, so the layer `w_j = c_j − c_{j+1}` has
+/// `Σw_j² = (Σg_j²)² − 2(Σg_j·g_{j+1})² + (Σg_{j+1}²)²`, exactly, at any scale. Starck & Murtagh
+/// publish these as 0.889, 0.200, 0.086, 0.041 and 0.020.
+pub(crate) fn white_noise_sigma(scale: usize) -> f64 {
+    let fine = smoothing_filter(scale);
+    let coarse = smoothing_filter(scale + 1);
+    // Both are symmetric about their centres; the finer one sits in the middle of the coarser.
+    let offset = (coarse.len() - fine.len()) / 2;
+    let fine_energy: f64 = fine.iter().map(|g| g * g).sum();
+    let coarse_energy: f64 = coarse.iter().map(|g| g * g).sum();
+    let cross: f64 = fine.iter().zip(&coarse[offset..]).map(|(a, b)| a * b).sum();
+    (fine_energy * fine_energy - 2.0 * cross * cross + coarse_energy * coarse_energy).sqrt()
+}
+
+/// The 1-D kernel `scale` smoothing steps apply: the impulse convolved with the B3 kernel at hole
+/// spacings 1, 2, …, `2^(scale−1)`.
+fn smoothing_filter(scale: usize) -> Vec<f64> {
+    let mut filter = vec![1.0];
+    for step in (0..scale).map(|j| 1usize << j) {
+        let mut next = vec![0.0; filter.len() + 4 * step];
+        for (i, &value) in filter.iter().enumerate() {
+            for (tap, &weight) in B3.iter().enumerate() {
+                next[i + tap * step] += value * f64::from(weight);
+            }
+        }
+        filter = next;
+    }
+    filter
+}
+
 /// Largest scale count for which the coarsest hole step stays within the image: `2^J ≤ min(w, h)`.
 /// Beyond it the à trous kernel spans the whole frame, so the extra scales do nothing.
 pub(crate) fn max_scales(size: Size2us) -> usize {
