@@ -83,8 +83,11 @@ fn peaks_too_close(a: Vec2us, b: Vec2us, min_sep_sq: usize) -> bool {
 }
 
 #[cfg(test)]
-mod internals {
+pub(crate) mod internals {
     use arrayvec::ArrayVec;
+
+    #[cfg(feature = "bench")]
+    use crate::bit_buffer2::BitBuffer2;
     use imaginarium::Buffer2;
 
     use crate::math::size2us::Size2us;
@@ -99,16 +102,38 @@ mod internals {
     use crate::stacking::star_detection::deblend::region::Region;
     use crate::stacking::star_detection::labeling::LabelMap;
     use crate::stacking::star_detection::labeling::component_data::ComponentData;
-    use crate::testing::synthetic::star_profiles::SyntheticStar;
+    use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
+    use glam::Vec2;
 
+    /// Rendered stars and the one label covering every pixel they light above 0.001.
     #[derive(Debug)]
-    pub(super) struct TestComponent {
-        pub(super) pixels: Buffer2<f32>,
-        pub(super) labels: LabelMap,
-        pub(super) data: ComponentData,
+    pub(crate) struct TestComponent {
+        pub(crate) pixels: Buffer2<f32>,
+        pub(crate) labels: LabelMap,
+        pub(crate) data: ComponentData,
     }
 
-    pub(super) fn make_test_component(size: Size2us, stars: &[SyntheticStar]) -> TestComponent {
+    /// A 1.0 star at (30, 50) and a `secondary` one at (70, 50), σ 2.5, on 100×100: two disjoint
+    /// blobs under one label.
+    pub(super) fn separated_pair(secondary: f32) -> TestComponent {
+        make_test_component(
+            Size2us::new(100, 100),
+            &[
+                SyntheticStar::new(
+                    Vec2::new(30.0, 50.0),
+                    1.0,
+                    StarProfile::Gaussian { sigma: 2.5 },
+                ),
+                SyntheticStar::new(
+                    Vec2::new(70.0, 50.0),
+                    secondary,
+                    StarProfile::Gaussian { sigma: 2.5 },
+                ),
+            ],
+        )
+    }
+
+    pub(crate) fn make_test_component(size: Size2us, stars: &[SyntheticStar]) -> TestComponent {
         let mut pixels = Buffer2::new_filled(size.width, size.height, 0.0f32);
         let mut labels = Buffer2::new_filled(size.width, size.height, 0u32);
         let mut bbox = URect::empty();
@@ -172,6 +197,19 @@ mod internals {
             min_separation,
             min_contrast,
         )
+    }
+
+    /// The pixels of `pixels` above `threshold`, labelled with 4-connectivity: the components the
+    /// deblender benches run on.
+    #[cfg(feature = "bench")]
+    pub(crate) fn label_above(pixels: &Buffer2<f32>, threshold: f32) -> LabelMap {
+        let mut mask = BitBuffer2::new_filled(Size2us::new(pixels.width(), pixels.height()), false);
+        for (idx, &value) in pixels.iter().enumerate() {
+            if value > threshold {
+                mask.set(idx, true);
+            }
+        }
+        LabelMap::from_mask(&mask, Connectivity::Four)
     }
 
     /// [`deblend_multi_threshold_test`] with the ladder's floor given.

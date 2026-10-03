@@ -1,231 +1,120 @@
 //! Tests for connected component labeling.
+//!
+//! Every mask runs through [`check`]: both connectivities, and every band count in
+//! [`STRIP_COUNTS`] the height allows, each held to a flood-fill reference label for label.
+//! Components are numbered in raster order of their first pixel whatever the bands, and the
+//! reference seeds its fills in raster order, so the two label maps must be equal outright — which
+//! also makes every band count agree with every other — and the boxes and areas collected from the
+//! runs must equal a scan of the labels.
 
-// Allow identity operations like `y * width + x` for clarity in 2D indexing
-#![allow(clippy::identity_op, clippy::erasing_op)]
+use std::collections::VecDeque;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::stacking::star_detection::config::detection_config::Connectivity;
 use crate::stacking::star_detection::labeling::LabelMap;
+use crate::stacking::star_detection::labeling::labeler::internals::label_in_strips;
 use crate::testing::prelude::*;
 
-/// Per-pixel labels and how many components they name.
+mod parallel;
+mod property_based;
+mod runs;
+mod shapes;
+
+/// Band counts every mask is labelled in: one band, and several, so a mask more than a few rows
+/// tall crosses band boundaries whatever the machine's thread count.
+const STRIP_COUNTS: [usize; 5] = [1, 2, 3, 5, 8];
+
+/// A binary mask with its size.
 #[derive(Debug)]
-struct Labeled {
-    labels: Vec<u32>,
-    count: usize,
+struct Mask {
+    size: Size2us,
+    data: Vec<bool>,
 }
 
-/// Simple flood-fill reference implementation for ground truth comparison.
-/// This is intentionally naive and slow but obviously correct.
-fn reference_ccl_4conn(mask: &[bool], size: Size2us) -> Labeled {
-    let mut labels = vec![0u32; size.width * size.height];
-    let mut current_label = 0u32;
+impl Mask {
+    /// One string per row, `#` set and `.` clear.
+    fn ascii(rows: &[&str]) -> Self {
+        let width = rows.first().map_or(0, |row| row.len());
+        assert!(rows.iter().all(|row| row.len() == width), "ragged mask");
+        let data = rows
+            .iter()
+            .flat_map(|row| row.bytes().map(|b| b == b'#'))
+            .collect();
+        Self {
+            size: Size2us::new(width, rows.len()),
+            data,
+        }
+    }
 
-    for start_y in 0..size.height {
-        for start_x in 0..size.width {
-            let start_idx = start_y * size.width + start_x;
-            if !mask[start_idx] || labels[start_idx] != 0 {
-                continue;
+    /// The pixels `(x, y)` for which `set` holds.
+    fn from_fn(size: Size2us, mut set: impl FnMut(usize, usize) -> bool) -> Self {
+        let mut data = Vec::with_capacity(size.pixel_count());
+        for y in 0..size.height {
+            for x in 0..size.width {
+                data.push(set(x, y));
             }
+        }
+        Self { size, data }
+    }
 
-            // New component - flood fill
-            current_label += 1;
-            let mut stack = vec![(start_x, start_y)];
+    fn bits(&self) -> BitBuffer2 {
+        BitBuffer2::from_slice(self.size, &self.data)
+    }
+}
 
-            while let Some((x, y)) = stack.pop() {
-                let idx = y * size.width + x;
-                if labels[idx] != 0 || !mask[idx] {
+/// The 4- and 8-connected labelings of a mask, as the production path computes them.
+#[derive(Debug)]
+struct Labelings {
+    four: LabelMap,
+    eight: LabelMap,
+}
+
+fn neighbours(connectivity: Connectivity) -> &'static [(isize, isize)] {
+    match connectivity {
+        Connectivity::Four => &[(0, -1), (-1, 0), (1, 0), (0, 1)],
+        Connectivity::Eight => &[
+            (-1, -1),
+            (0, -1),
+            (1, -1),
+            (-1, 0),
+            (1, 0),
+            (-1, 1),
+            (0, 1),
+            (1, 1),
+        ],
+    }
+}
+
+/// Flood fill from each unlabelled foreground pixel in raster order: naive, slow and obviously
+/// correct, and numbered the way the labeler numbers.
+fn reference(mask: &Mask, connectivity: Connectivity) -> Vec<u32> {
+    let Size2us { width, height } = mask.size;
+    let mut labels = vec![0u32; mask.data.len()];
+    let mut next = 0u32;
+    let mut queue = VecDeque::new();
+    for start in 0..mask.data.len() {
+        if !mask.data[start] || labels[start] != 0 {
+            continue;
+        }
+        next += 1;
+        labels[start] = next;
+        queue.push_back(start);
+        while let Some(index) = queue.pop_front() {
+            let (x, y) = ((index % width) as isize, (index / width) as isize);
+            for &(dx, dy) in neighbours(connectivity) {
+                let (nx, ny) = (x + dx, y + dy);
+                if nx < 0 || ny < 0 || nx >= width as isize || ny >= height as isize {
                     continue;
                 }
-                labels[idx] = current_label;
-
-                // 4-connectivity neighbors
-                if x > 0 {
-                    stack.push((x - 1, y));
-                }
-                if x + 1 < size.width {
-                    stack.push((x + 1, y));
-                }
-                if y > 0 {
-                    stack.push((x, y - 1));
-                }
-                if y + 1 < size.height {
-                    stack.push((x, y + 1));
+                let neighbour = ny as usize * width + nx as usize;
+                if mask.data[neighbour] && labels[neighbour] == 0 {
+                    labels[neighbour] = next;
+                    queue.push_back(neighbour);
                 }
             }
         }
     }
-
-    Labeled {
-        labels,
-        count: current_label as usize,
-    }
-}
-
-/// Simple flood-fill reference implementation for 8-connectivity.
-fn reference_ccl_8conn(mask: &[bool], size: Size2us) -> Labeled {
-    let mut labels = vec![0u32; size.width * size.height];
-    let mut current_label = 0u32;
-
-    for start_y in 0..size.height {
-        for start_x in 0..size.width {
-            let start_idx = start_y * size.width + start_x;
-            if !mask[start_idx] || labels[start_idx] != 0 {
-                continue;
-            }
-
-            // New component - flood fill
-            current_label += 1;
-            let mut stack = vec![(start_x, start_y)];
-
-            while let Some((x, y)) = stack.pop() {
-                let idx = y * size.width + x;
-                if labels[idx] != 0 || !mask[idx] {
-                    continue;
-                }
-                labels[idx] = current_label;
-
-                // 8-connectivity neighbors
-                for dy in -1i32..=1 {
-                    for dx in -1i32..=1 {
-                        if dx == 0 && dy == 0 {
-                            continue;
-                        }
-                        let nx = x as i32 + dx;
-                        let ny = y as i32 + dy;
-                        if nx >= 0 && nx < size.width as i32 && ny >= 0 && ny < size.height as i32 {
-                            stack.push((nx as usize, ny as usize));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    Labeled {
-        labels,
-        count: current_label as usize,
-    }
-}
-
-/// Verify CCL invariants on any label map.
-fn verify_ccl_invariants(mask: &[bool], labels: &[u32], size: Size2us, connectivity: Connectivity) {
-    // Invariant 1: Background pixels have label 0
-    for (i, (&m, &l)) in mask.iter().zip(labels.iter()).enumerate() {
-        if !m {
-            assert_eq!(l, 0, "Background pixel at index {i} has non-zero label {l}");
-        }
-    }
-
-    // Invariant 2: Foreground pixels have non-zero labels
-    for (i, (&m, &l)) in mask.iter().zip(labels.iter()).enumerate() {
-        if m {
-            assert!(l > 0, "Foreground pixel at index {i} has zero label");
-        }
-    }
-
-    // Invariant 3: Connected pixels have the same label
-    for y in 0..size.height {
-        for x in 0..size.width {
-            let idx = y * size.width + x;
-            if !mask[idx] {
-                continue;
-            }
-            let label = labels[idx];
-
-            // Check all neighbors based on connectivity
-            let neighbors: Vec<(i32, i32)> = match connectivity {
-                Connectivity::Four => vec![(-1, 0), (1, 0), (0, -1), (0, 1)],
-                Connectivity::Eight => vec![
-                    (-1, -1),
-                    (0, -1),
-                    (1, -1),
-                    (-1, 0),
-                    (1, 0),
-                    (-1, 1),
-                    (0, 1),
-                    (1, 1),
-                ],
-            };
-
-            for (dx, dy) in neighbors {
-                let nx = x as i32 + dx;
-                let ny = y as i32 + dy;
-                if nx >= 0 && nx < size.width as i32 && ny >= 0 && ny < size.height as i32 {
-                    let nidx = ny as usize * size.width + nx as usize;
-                    if mask[nidx] {
-                        assert_eq!(
-                            labels[nidx], label,
-                            "Connected pixels at ({},{}) and ({},{}) have different labels: {} vs {}",
-                            x, y, nx, ny, label, labels[nidx]
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    // Invariant 4: Labels are sequential starting from 1
-    let max_label = *labels.iter().max().unwrap_or(&0);
-    if max_label > 0 {
-        let mut label_present = vec![false; max_label as usize + 1];
-        for &l in labels {
-            if l > 0 {
-                label_present[l as usize] = true;
-            }
-        }
-        for l in 1..=max_label {
-            assert!(
-                label_present[l as usize],
-                "Label {l} is missing from sequential range 1..{max_label}"
-            );
-        }
-    }
-}
-
-/// Compare our implementation against reference flood-fill.
-fn compare_with_reference(mask_data: &[bool], size: Size2us) {
-    let mask = BitBuffer2::from_slice(size, mask_data);
-
-    // Test 4-connectivity
-    let label_map_4 = LabelMap::from_mask(&mask, Connectivity::Four);
-    let Labeled {
-        labels: ref_labels_4,
-        count: ref_count_4,
-    } = reference_ccl_4conn(mask_data, size);
-
-    assert_eq!(
-        label_map_4.num_labels(),
-        ref_count_4,
-        "4-conn: Component count mismatch: got {}, expected {}",
-        label_map_4.num_labels(),
-        ref_count_4
-    );
-
-    verify_ccl_invariants(mask_data, label_map_4.labels(), size, Connectivity::Four);
-    verify_components(&label_map_4);
-
-    // Verify same grouping (labels may differ but grouping must match)
-    verify_same_grouping(label_map_4.labels(), &ref_labels_4, size.pixel_count());
-
-    // Test 8-connectivity
-    let label_map_8 = LabelMap::from_mask(&mask, Connectivity::Eight);
-    let Labeled {
-        labels: ref_labels_8,
-        count: ref_count_8,
-    } = reference_ccl_8conn(mask_data, size);
-
-    assert_eq!(
-        label_map_8.num_labels(),
-        ref_count_8,
-        "8-conn: Component count mismatch: got {}, expected {}",
-        label_map_8.num_labels(),
-        ref_count_8
-    );
-
-    verify_ccl_invariants(mask_data, label_map_8.labels(), size, Connectivity::Eight);
-    verify_components(&label_map_8);
-    verify_same_grouping(label_map_8.labels(), &ref_labels_8, size.pixel_count());
+    labels
 }
 
 /// The box and area the labeling collected from its runs against a scan of every labelled pixel.
@@ -244,47 +133,37 @@ fn verify_components(label_map: &LabelMap) {
     }
 }
 
-/// Verify two labelings have the same grouping (same pixels grouped together).
-fn verify_same_grouping(labels_a: &[u32], labels_b: &[u32], len: usize) {
-    // Two labelings are equivalent if: for all i,j:
-    // labels_a[i] == labels_a[j] <=> labels_b[i] == labels_b[j]
-    // We check this by verifying that mapping from a->b is consistent
-
-    use std::collections::HashMap;
-    let mut a_to_b: HashMap<u32, u32> = HashMap::new();
-
-    for i in 0..len {
-        let la = labels_a[i];
-        let lb = labels_b[i];
-
-        if la == 0 && lb == 0 {
-            continue; // Both background
+/// Label `mask` both ways, at every band count, against [`reference`]; see the module docs.
+fn check(mask: &Mask) -> Labelings {
+    let bits = mask.bits();
+    let label = |connectivity: Connectivity| {
+        let expected = reference(mask, connectivity);
+        let count = expected.iter().copied().max().unwrap_or(0) as usize;
+        let strips = STRIP_COUNTS
+            .iter()
+            .copied()
+            .filter(|&strips| strips <= mask.size.height);
+        for strips in strips {
+            let map = label_in_strips(&bits, connectivity, strips);
+            assert_eq!(
+                map.labels(),
+                expected,
+                "{connectivity:?} in {strips} bands differs from the reference"
+            );
+            assert_eq!(map.num_labels(), count);
+            verify_components(&map);
         }
-
-        assert!(
-            !(la == 0 || lb == 0),
-            "Pixel {i} has label {la} in A but {lb} in B (one is background)"
+        let map = LabelMap::from_mask(&bits, connectivity);
+        assert_eq!(
+            map.labels(),
+            expected,
+            "{connectivity:?} at the default bands"
         );
-
-        match a_to_b.get(&la) {
-            Some(&expected_b) => {
-                assert_eq!(
-                    lb, expected_b,
-                    "Inconsistent grouping: label {la} in A maps to both {expected_b} and {lb} in B"
-                );
-            }
-            None => {
-                a_to_b.insert(la, lb);
-            }
-        }
+        verify_components(&map);
+        map
+    };
+    Labelings {
+        four: label(Connectivity::Four),
+        eight: label(Connectivity::Eight),
     }
 }
-
-mod basic;
-mod eight_connectivity;
-mod ground_truth;
-mod parallel;
-mod pixel_level;
-mod property_based;
-mod rle;
-mod word_boundary;

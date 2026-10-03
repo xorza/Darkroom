@@ -1,347 +1,140 @@
-use super::*;
+//! Masks tall enough to cut into several bands: every band count in `STRIP_COUNTS` puts its
+//! boundaries somewhere else, so each case is stitched at many rows.
+
+use crate::stacking::star_detection::labeling::tests::{Mask, STRIP_COUNTS, check};
+use crate::testing::prelude::*;
+
+const SIZE: Size2us = Size2us::new(400, 300);
 
 #[test]
-fn large_image_parallel_path() {
-    // Large image to trigger parallel code path (>100k pixels)
-    let width = 400;
-    let height = 300;
-    let mut mask_data = vec![false; width * height];
+fn tall_masks_count_as_worked_out() {
+    // (name, mask, 4-connected count, 8-connected count)
+    let cases = [
+        (
+            "a vertical line through every band",
+            Mask::from_fn(SIZE, |x, _| x == 200),
+            1,
+            1,
+        ),
+        (
+            "a diagonal through every band",
+            Mask::from_fn(SIZE, |x, y| x == y),
+            300,
+            1,
+        ),
+        (
+            "a U joined only at its foot",
+            Mask::from_fn(SIZE, |x, y| {
+                ((x == 100 || x == 300) && (50..250).contains(&y))
+                    || (y == 249 && (100..=300).contains(&x))
+            }),
+            1,
+            1,
+        ),
+        (
+            "a band of rows 60..70",
+            Mask::from_fn(SIZE, |x, y| {
+                (60..70).contains(&y) && (100..200).contains(&x)
+            }),
+            1,
+            1,
+        ),
+        (
+            "every other row",
+            Mask::from_fn(SIZE, |_, y| y % 2 == 0),
+            150,
+            150,
+        ),
+        // Lines every 10 rows: one component each, through any band boundary they meet.
+        (
+            "horizontal lines",
+            Mask::from_fn(SIZE, |x, y| y % 10 == 5 && (10..390).contains(&x)),
+            30,
+            30,
+        ),
+        (
+            "a sparse grid of single pixels",
+            Mask::from_fn(SIZE, |x, y| x % 10 == 5 && y % 10 == 5),
+            40 * 30,
+            40 * 30,
+        ),
+        // A quarter of the pixels, each its own component — its diagonal neighbours are odd in x
+        // and y, so unset: the union-find holds one provisional label per run, here 30 000, sized
+        // from the foreground count.
+        (
+            "a dense grid of single pixels",
+            Mask::from_fn(SIZE, |x, y| x % 2 == 0 && y % 2 == 0),
+            200 * 150,
+            200 * 150,
+        ),
+        (
+            "every pixel set",
+            Mask::from_fn(Size2us::new(200, 200), |_, _| true),
+            1,
+            1,
+        ),
+        (
+            "four corners of a large frame",
+            Mask::from_fn(Size2us::new(1000, 1000), |x, y| {
+                (x == 10 || x == 990) && (y == 10 || y == 990)
+            }),
+            4,
+            4,
+        ),
+        (
+            "one wide row",
+            Mask::from_fn(Size2us::new(500, 1), |x, _| {
+                [10..20, 100..110, 400..410]
+                    .iter()
+                    .any(|run| run.contains(&x))
+            }),
+            3,
+            3,
+        ),
+        (
+            "one tall column",
+            Mask::from_fn(Size2us::new(1, 500), |_, y| {
+                [10..20, 100..110, 400..410]
+                    .iter()
+                    .any(|run| run.contains(&y))
+            }),
+            3,
+            3,
+        ),
+    ];
 
-    // Create several separate components
-    // Component 1: top-left corner
-    for y in 10..20 {
-        for x in 10..20 {
-            mask_data[y * width + x] = true;
-        }
-    }
-    // Component 2: bottom-right corner
-    for y in 250..260 {
-        for x in 350..360 {
-            mask_data[y * width + x] = true;
-        }
-    }
-    // Component 3: center
-    for y in 145..155 {
-        for x in 195..205 {
-            mask_data[y * width + x] = true;
-        }
-    }
-
-    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let label_map = LabelMap::from_mask(&mask, Connectivity::Four);
-
-    assert_eq!(label_map.num_labels(), 3);
-
-    // Verify each component has consistent labels
-    let label1 = label_map[10 * width + 10];
-    let label2 = label_map[250 * width + 350];
-    let label3 = label_map[145 * width + 195];
-
-    assert!(label1 > 0);
-    assert!(label2 > 0);
-    assert!(label3 > 0);
-    assert_ne!(label1, label2);
-    assert_ne!(label1, label3);
-    assert_ne!(label2, label3);
-
-    // Check all pixels in component 1
-    for y in 10..20 {
-        for x in 10..20 {
-            assert_eq!(label_map[y * width + x], label1);
-        }
-    }
-
-    // Each 10×10 square: area 100, the half-open box it was drawn into.
-    for (label, min) in [
-        (label1, (10, 10)),
-        (label2, (350, 250)),
-        (label3, (195, 145)),
-    ] {
-        let component = label_map.components()[label as usize - 1];
-        assert_eq!(component.label, label);
-        assert_eq!(component.area, 100);
+    for (name, mask, four, eight) in cases {
+        let labelled = check(&mask);
         assert_eq!(
-            (component.bbox.min, component.bbox.max),
-            (
-                Vec2us::new(min.0, min.1),
-                Vec2us::new(min.0 + 10, min.1 + 10)
-            )
+            (labelled.four.num_labels(), labelled.eight.num_labels()),
+            (four, eight),
+            "{name}"
         );
     }
 }
 
+/// A 5×5 square across every band boundary the band counts produce, each in its own columns: every
+/// square must stay one component however the rows are cut.
 #[test]
-fn dense_mask_does_not_overflow_atomic_uf() {
-    // Regression: the parallel union-find capacity scales with the foreground count, not a
-    // fixed 5%-of-pixels heuristic. A grid of isolated pixels is one component each — 25% of
-    // pixels here — which previously overflowed the atomic union-find (cap = pixels/20) and
-    // panicked. With cap = count_ones() it labels cleanly.
-    let width = 400;
-    let height = 300; // Tall enough to strip into several bands.
-    let mut mask_data = vec![false; width * height];
-    let mut expected = 0;
-    for y in (0..height).step_by(2) {
-        for x in (0..width).step_by(2) {
-            mask_data[y * width + x] = true;
-            expected += 1;
-        }
-    }
-
-    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let label_map = LabelMap::from_mask(&mask, Connectivity::Four);
-
-    // Every isolated pixel is its own component (4-connectivity, 1-px gaps).
-    assert_eq!(label_map.num_labels(), expected); // 200 * 150 = 30_000, far above pixels/20
-}
-
-#[test]
-fn strip_boundary_vertical_line() {
-    // Vertical line spanning multiple strips (tests boundary merging)
-    let width = 400;
-    let height = 300;
-    let mut mask_data = vec![false; width * height];
-
-    // Vertical line from y=0 to y=299 at x=200
-    for y in 0..height {
-        mask_data[y * width + 200] = true;
-    }
-
-    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let label_map = LabelMap::from_mask(&mask, Connectivity::Four);
-
-    // Should be single component despite crossing strip boundaries
-    assert_eq!(label_map.num_labels(), 1);
-
-    let label = label_map[200]; // First pixel
-    for y in 0..height {
-        assert_eq!(
-            label_map[y * width + 200],
-            label,
-            "Pixel at y={y} should have same label"
-        );
-    }
-}
-
-#[test]
-fn strip_boundary_diagonal() {
-    // Diagonal line that crosses strip boundaries but should NOT connect
-    // (4-connectivity means diagonal pixels are separate)
-    let width = 400;
-    let height = 300;
-    let mut mask_data = vec![false; width * height];
-
-    // Diagonal from (0,0) to (299,299) - one pixel per row
-    for i in 0..height.min(width) {
-        mask_data[i * width + i] = true;
-    }
-
-    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let label_map = LabelMap::from_mask(&mask, Connectivity::Four);
-
-    // Each diagonal pixel should be separate (4-connectivity)
-    assert_eq!(label_map.num_labels(), height.min(width));
-}
-
-#[test]
-fn strip_boundary_u_shape_large() {
-    // Large U-shape that spans strip boundaries and requires merging
-    let width = 400;
-    let height = 300;
-    let mut mask_data = vec![false; width * height];
-
-    // Left vertical bar from y=50 to y=250
-    for y in 50..250 {
-        mask_data[y * width + 100] = true;
-    }
-    // Right vertical bar from y=50 to y=250
-    for y in 50..250 {
-        mask_data[y * width + 300] = true;
-    }
-    // Bottom horizontal bar connecting them at y=249
-    for x in 100..=300 {
-        mask_data[249 * width + x] = true;
-    }
-
-    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let label_map = LabelMap::from_mask(&mask, Connectivity::Four);
-
-    // All should be one component
-    assert_eq!(label_map.num_labels(), 1);
-
-    let label = label_map[50 * width + 100];
-    // Check some pixels from each part
-    assert_eq!(label_map[100 * width + 100], label); // left bar
-    assert_eq!(label_map[100 * width + 300], label); // right bar
-    assert_eq!(label_map[249 * width + 200], label); // bottom bar
-}
-
-#[test]
-fn many_small_components() {
-    // Many small isolated components (stress test for label allocation)
-    let width = 400;
-    let height = 300;
-    let mut mask_data = vec![false; width * height];
-
-    // Create grid of single pixels, spaced 10 apart
-    let mut expected_count = 0;
-    for y in (5..height).step_by(10) {
-        for x in (5..width).step_by(10) {
-            mask_data[y * width + x] = true;
-            expected_count += 1;
-        }
-    }
-
-    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let label_map = LabelMap::from_mask(&mask, Connectivity::Four);
-
-    assert_eq!(label_map.num_labels(), expected_count);
-}
-
-#[test]
-fn single_row_large() {
-    // Single row, wide image (edge case for strip division)
-    let width = 500;
-    let height = 1;
-    let mut mask_data = vec![false; width * height];
-
-    // Three separate components
-    mask_data[10..20].fill(true);
-    mask_data[100..110].fill(true);
-    mask_data[400..410].fill(true);
-
-    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let label_map = LabelMap::from_mask(&mask, Connectivity::Four);
-
-    assert_eq!(label_map.num_labels(), 3);
-}
-
-#[test]
-fn single_column_large() {
-    // Single column, tall image
-    let width = 1;
-    let height = 500;
-    let mut mask_data = vec![false; width * height];
-
-    // Three separate components
-    mask_data[10..20].fill(true);
-    mask_data[100..110].fill(true);
-    mask_data[400..410].fill(true);
-
-    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let label_map = LabelMap::from_mask(&mask, Connectivity::Four);
-
-    assert_eq!(label_map.num_labels(), 3);
-}
-
-#[test]
-fn component_at_strip_boundary_exact() {
-    // Component exactly at strip boundary (64 rows per strip)
-    let width = 400;
-    let height = 300;
-    let mut mask_data = vec![false; width * height];
-
-    // Small square crossing y=64 boundary (rows 62-66)
-    for y in 62..67 {
-        for x in 100..105 {
-            mask_data[y * width + x] = true;
-        }
-    }
-
-    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let label_map = LabelMap::from_mask(&mask, Connectivity::Four);
-
-    assert_eq!(label_map.num_labels(), 1);
-
-    let label = label_map[62 * width + 100];
-    for y in 62..67 {
-        for x in 100..105 {
-            assert_eq!(label_map[y * width + x], label);
-        }
-    }
-}
-
-#[test]
-fn all_pixels_set_large() {
-    // Large fully-filled image (worst case for union-find)
-    let width = 200;
-    let height = 200;
-    let mask_data = vec![true; width * height];
-
-    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let label_map = LabelMap::from_mask(&mask, Connectivity::Four);
-
-    assert_eq!(label_map.num_labels(), 1);
-    assert!(label_map.labels().iter().all(|&l| l == 1));
-}
-
-#[test]
-fn one_pattern_labels_the_same_at_any_size() {
-    // The same pattern at a size that resolves to one strip and at one that resolves to several,
-    // so the boundary stitch is proved not to change the answer.
-    let pattern_test = |size: Size2us| {
-        let mut mask_data = vec![false; size.pixel_count()];
-
-        // Create a pattern: horizontal lines every 10 rows
-        for y in (5..size.height).step_by(10) {
-            for x in 10..(size.width - 10) {
-                mask_data[size.index_of(Vec2us::new(x, y))] = true;
-            }
-        }
-
-        let mask = BitBuffer2::from_slice(size, &mask_data);
-        let label_map = LabelMap::from_mask(&mask, Connectivity::Four);
-
-        // Count expected: one component per line
-        let expected_lines = (size.height - 5) / 10 + usize::from((size.height - 5) % 10 >= 1);
-        (label_map.num_labels(), expected_lines)
-    };
-
-    // Under `MIN_ROWS_PER_STRIP`, so a single band with nothing to stitch.
-    let (small_labels, small_expected) = pattern_test(Size2us::new(100, 100));
-    // Several bands, so every line crosses at least one boundary.
-    let (large_labels, large_expected) = pattern_test(Size2us::new(400, 300));
-
-    assert_eq!(small_labels, small_expected);
-    assert_eq!(large_labels, large_expected);
-}
-
-#[test]
-fn alternating_rows_large() {
-    // Alternating rows pattern that stresses strip boundary merging
-    let width = 400;
-    let height = 300;
-    let mut mask_data = vec![false; width * height];
-
-    // Fill every other row completely
-    for y in (0..height).step_by(2) {
-        for x in 0..width {
-            mask_data[y * width + x] = true;
-        }
-    }
-
-    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let label_map = LabelMap::from_mask(&mask, Connectivity::Four);
-
-    // Each row is a separate component (no vertical connectivity)
-    let expected = height.div_ceil(2);
-    assert_eq!(label_map.num_labels(), expected);
-}
-
-#[test]
-fn sparse_large() {
-    // Very sparse: few pixels spread across large image
-    let width = 1000;
-    let height = 1000;
-    let mut mask_data = vec![false; width * height];
-
-    // Only 4 isolated pixels in corners
-    mask_data[10 * width + 10] = true;
-    mask_data[10 * width + 990] = true;
-    mask_data[990 * width + 10] = true;
-    mask_data[990 * width + 990] = true;
-
-    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let label_map = LabelMap::from_mask(&mask, Connectivity::Four);
-
-    assert_eq!(label_map.num_labels(), 4);
+fn squares_across_every_band_boundary_stay_whole() {
+    let mut boundaries: Vec<usize> = STRIP_COUNTS
+        .iter()
+        .flat_map(|&strips| (1..strips).map(move |k| k * (SIZE.height / strips)))
+        .collect();
+    boundaries.sort_unstable();
+    boundaries.dedup();
+    let mask = Mask::from_fn(SIZE, |x, y| {
+        boundaries.iter().enumerate().any(|(i, &boundary)| {
+            (i * 10..i * 10 + 5).contains(&x) && (boundary - 2..boundary + 3).contains(&y)
+        })
+    });
+    let labelled = check(&mask);
+    assert_eq!(labelled.four.num_labels(), boundaries.len());
+    assert!(
+        labelled
+            .four
+            .components()
+            .iter()
+            .all(|component| component.area == 25)
+    );
 }

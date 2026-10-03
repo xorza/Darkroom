@@ -464,6 +464,13 @@ struct ThresholdLadder {
     n_thresholds: usize,
 }
 
+impl ThresholdLadder {
+    /// Level `i` of `0..=n_thresholds`: `low` itself at 0, `high` up to rounding at `n`.
+    fn level(self, i: usize) -> f32 {
+        self.low * (self.high / self.low).powf(i as f32 / self.n_thresholds as f32)
+    }
+}
+
 /// Build the deblending tree in `buffers.tree` by tracking connectivity at each level.
 ///
 /// The root is the whole component, holding the flux above `ladder.low`; levels `0..=n` then
@@ -475,12 +482,7 @@ fn build_deblend_tree(
     params: MultiThresholdParams,
     buffers: &mut TreeBuffers,
 ) {
-    let ThresholdLadder {
-        low,
-        high,
-        n_thresholds,
-    } = ladder;
-    let ratio = high / low;
+    let low = ladder.low;
 
     let TreeBuffers {
         component_pixels,
@@ -505,8 +507,8 @@ fn build_deblend_tree(
         children: ArrayVec::new(),
     });
 
-    for level in 0..=n_thresholds {
-        let threshold = low * ratio.powf(level as f32 / n_thresholds as f32);
+    for level in 0..=ladder.n_thresholds {
+        let threshold = ladder.level(level);
 
         let TreeBuffers {
             component_pixels,
@@ -554,12 +556,16 @@ fn process_level(buffers: &mut TreeBuffers, params: MultiThresholdParams) {
         let Some(parent_idx) = find_single_parent_grid(region, pixel_to_node) else {
             continue;
         };
+        // A node splits once. The regions its split did not keep — too close to a brighter
+        // sibling, or past MAX_CHILDREN — stay part of it; splitting them again at a later level
+        // would replace the children it already has.
+        if !tree[parent_idx].children.is_empty() {
+            continue;
+        }
 
         // Rescanning per region rather than bucketing every parent's count in one pass before the
-        // loop: `create_child_nodes` reassigns `pixel_to_node` *inside* this loop and does it
-        // partially, leaving pixels on the parent when a child peak is too close to a brighter
-        // sibling or past MAX_CHILDREN. A count taken up front would be stale by exactly those
-        // pixels and would report splits that never happened.
+        // loop: `create_child_nodes` reassigns `pixel_to_node` *inside* this loop, so a count
+        // taken up front would be stale for every parent split earlier in the same level.
         parent_pixels_above.clear();
         parent_pixels_above.extend(
             above_threshold

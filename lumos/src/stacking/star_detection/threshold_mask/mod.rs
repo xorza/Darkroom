@@ -28,6 +28,15 @@ pub(crate) struct ThresholdParams {
     pub(crate) min_noise: f32,
 }
 
+impl ThresholdParams {
+    /// The level a residual must exceed where the noise is `noise`: `sigma · max(noise,
+    /// min_noise)`. The vector backends compute the same expression lane by lane.
+    #[inline]
+    pub(crate) const fn level(self, noise: f32) -> f32 {
+        self.sigma * noise.max(self.min_noise)
+    }
+}
+
 /// Create binary mask of pixels above threshold into a `BitBuffer2`.
 ///
 /// Sets bit `i` to 1 where `pixels[i] > background[i] + sigma * noise[i]`.

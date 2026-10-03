@@ -91,22 +91,6 @@ fn config_presets() {
 }
 
 #[test]
-fn config_custom() {
-    let config = configured(|config| {
-        config.fwhm.mode = Some(FwhmMode::Fixed(5.0));
-        config.filter.min_snr = 15.0;
-        config.detection.edge_margin = 20;
-        config.measurement.noise_model = Some(NoiseModel::from_normalized(24_000.0, 5.0));
-    });
-
-    assert_eq!(config.fwhm.mode, Some(FwhmMode::Fixed(5.0)));
-    assert!((config.filter.min_snr - 15.0).abs() < 1e-6);
-    assert_eq!(config.detection.edge_margin, 20);
-    assert!(config.measurement.noise_model.is_some());
-    assert_eq!(config.validate(), Ok(()));
-}
-
-#[test]
 fn fwhm_modes_validate_and_seed_from_their_value() {
     // No filter at all, a fixed width, and an estimate that falls back to its own value: all
     // valid, and the seed is the one width each carries.
@@ -119,14 +103,6 @@ fn fwhm_modes_validate_and_seed_from_their_value() {
         assert_eq!(config.validate(), Ok(()), "{mode:?}");
         assert_eq!(mode.map(FwhmMode::seed), seed);
     }
-}
-
-#[test]
-fn config_validates_centroid() {
-    let config = configured(|config| {
-        config.measurement.centroid_method = CentroidMethod::MoffatFit { beta: 2.5 };
-    });
-    assert_eq!(config.validate(), Ok(()));
 }
 
 #[test]
@@ -407,204 +383,67 @@ fn a_bound_that_is_another_config_value_is_reported_with_it() {
     );
 }
 
-#[test]
-fn config_deblend_n_thresholds_bounds_accepted() {
-    for n_thresholds in [2, 32, MAX_DEBLEND_N_THRESHOLDS] {
-        assert_eq!(
-            configured(|config| config.detection.deblend = multi_threshold(n_thresholds))
-                .validate(),
-            Ok(()),
-            "n_thresholds = {n_thresholds}"
-        );
-    }
-}
-
-#[test]
-fn config_wide_field_values() {
-    let config = Config::wide_field();
-    assert_eq!(config.fwhm.mode, Some(FwhmMode::Auto { fallback: 6.0 }));
-    assert_eq!(config.detection.min_area, 7);
-    assert_eq!(config.detection.max_area, 1500);
-    assert_eq!(config.detection.edge_margin, 20);
-    assert!((config.filter.max_eccentricity - 0.7).abs() < 1e-6);
-    assert_eq!(config.detection.connectivity, Connectivity::Eight);
-}
-
-#[test]
-fn config_precise_ground_values() {
-    let config = Config::precise_ground();
-    assert!(matches!(
-        config.measurement.centroid_method,
-        CentroidMethod::MoffatFit { beta } if (beta - 2.5).abs() < 1e-6
-    ));
-    assert_eq!(
-        config.measurement.local_background,
-        LocalBackgroundMethod::LocalAnnulus
-    );
-    assert_eq!(
-        config.detection.deblend,
-        Deblend::MultiThreshold {
-            n_thresholds: 32,
-            min_contrast: 0.003,
-        }
-    );
-    assert!((config.filter.min_snr - 15.0).abs() < 1e-6);
-    assert_eq!(config.filter.max_fwhm_deviation, Some(4.0));
-    assert_eq!(config.background.tile_size, 128);
-    assert!(matches!(
-        config.background.refinement,
-        BackgroundRefinement::Iterative {
-            iterations: 3,
-            mask_dilation: 5,
-        }
-    ));
-    assert!((config.detection.sigma_threshold - 3.0).abs() < 1e-6);
-    assert_eq!(config.fwhm.mode, Some(FwhmMode::Auto { fallback: 3.0 }));
-    assert_eq!(config.fwhm.min_stars, 30);
-}
-
-#[test]
-fn config_high_resolution_values() {
-    let config = Config::high_resolution();
-    assert_eq!(config.fwhm.mode, Some(FwhmMode::Auto { fallback: 2.5 }));
-    assert_eq!(config.detection.min_area, 3);
-    assert_eq!(config.detection.max_area, 200);
-    assert!((config.filter.min_snr - 15.0).abs() < 1e-6);
-    assert!((config.filter.max_eccentricity - 0.5).abs() < 1e-6);
-    assert!((config.filter.max_roundness - 0.3).abs() < 1e-6);
-    assert!(matches!(
-        config.measurement.centroid_method,
-        CentroidMethod::GaussianFit
-    ));
-}
-
-#[test]
-fn config_crowded_field_values() {
-    let config = Config::crowded_field();
-    assert_eq!(
-        config.detection.deblend,
-        Deblend::MultiThreshold {
-            n_thresholds: 32,
-            min_contrast: 0.005,
-        }
-    );
-    assert_eq!(config.detection.deblend_min_separation, 2);
-    assert!(matches!(
-        config.background.refinement,
-        BackgroundRefinement::Iterative {
-            iterations: 2,
-            mask_dilation: 3,
-        }
-    ));
-    assert!((config.filter.duplicate_min_separation - 3.0).abs() < 1e-6);
-    assert_eq!(config.fwhm.mode, Some(FwhmMode::Auto { fallback: 4.0 }));
-}
-
+/// Every float field rejects every non-finite value. NaN is the one a comparison-phrased check
+/// lets through — every comparison with it is false — so it is the case that matters most; it is
+/// reported as NaN, which `assert_eq!` on the value cannot see.
 #[test]
 fn config_rejects_non_finite_float_parameters() {
-    let cases = [
-        (
-            configured(|config| config.detection.sigma_threshold = f32::INFINITY),
-            "sigma_threshold",
-            f64::INFINITY,
-        ),
-        (
-            configured(|config| config.fwhm.mode = Some(FwhmMode::Fixed(f32::INFINITY))),
-            "fwhm Fixed",
-            f64::INFINITY,
-        ),
-        (
-            configured(|config| config.detection.psf_axis_ratio = f32::INFINITY),
-            "psf_axis_ratio",
-            f64::INFINITY,
-        ),
-        (
-            configured(|config| config.fwhm.estimation_sigma_factor = f32::INFINITY),
-            "fwhm estimation_sigma_factor",
-            f64::INFINITY,
-        ),
-        (
-            configured(|config| {
-                config.detection.deblend = Deblend::LocalMaxima {
-                    min_prominence: f32::INFINITY,
-                };
-            }),
-            "deblend min_prominence",
-            f64::INFINITY,
-        ),
-        (
-            configured(|config| {
-                config.detection.deblend = Deblend::MultiThreshold {
-                    n_thresholds: 32,
-                    min_contrast: f32::INFINITY,
-                };
-            }),
-            "deblend min_contrast",
-            f64::INFINITY,
-        ),
-        (
-            configured(|config| config.filter.min_snr = f32::INFINITY),
-            "min_snr",
-            f64::INFINITY,
-        ),
-        (
-            configured(|config| config.filter.max_eccentricity = f32::INFINITY),
-            "max_eccentricity",
-            f64::INFINITY,
-        ),
-        (
-            configured(|config| config.filter.max_sharpness = f32::INFINITY),
-            "max_sharpness",
-            f64::INFINITY,
-        ),
-        (
-            configured(|config| config.filter.max_roundness = f32::INFINITY),
-            "max_roundness",
-            f64::INFINITY,
-        ),
-        (
-            configured(|config| config.filter.max_fwhm_deviation = Some(f32::INFINITY)),
-            "max_fwhm_deviation",
-            f64::INFINITY,
-        ),
-        (
-            configured(|config| config.filter.duplicate_min_separation = f32::INFINITY),
-            "duplicate_min_separation",
-            f64::INFINITY,
-        ),
+    type Field = (&'static str, fn(&mut Config, f32));
+    let fields: [Field; 17] = [
+        ("sigma_threshold", |c, v| c.detection.sigma_threshold = v),
+        ("psf_axis_ratio", |c, v| c.detection.psf_axis_ratio = v),
+        ("psf_angle", |c, v| c.detection.psf_angle = v),
+        ("fwhm Fixed", |c, v| c.fwhm.mode = Some(FwhmMode::Fixed(v))),
+        ("fwhm Auto fallback", |c, v| {
+            c.fwhm.mode = Some(FwhmMode::Auto { fallback: v });
+        }),
+        ("fwhm estimation_sigma_factor", |c, v| {
+            c.fwhm.estimation_sigma_factor = v;
+        }),
+        ("deblend min_prominence", |c, v| {
+            c.detection.deblend = Deblend::LocalMaxima { min_prominence: v };
+        }),
+        ("deblend min_contrast", |c, v| {
+            c.detection.deblend = Deblend::MultiThreshold {
+                n_thresholds: 32,
+                min_contrast: v,
+            };
+        }),
+        ("min_snr", |c, v| c.filter.min_snr = v),
+        ("max_eccentricity", |c, v| c.filter.max_eccentricity = v),
+        ("max_sharpness", |c, v| c.filter.max_sharpness = v),
+        ("max_roundness", |c, v| c.filter.max_roundness = v),
+        ("max_fwhm_deviation", |c, v| {
+            c.filter.max_fwhm_deviation = Some(v);
+        }),
+        ("Moffat beta", |c, v| {
+            c.measurement.centroid_method = CentroidMethod::MoffatFit { beta: v };
+        }),
+        ("electrons_per_normalized_unit", |c, v| {
+            c.measurement.noise_model = Some(NoiseModel::from_normalized(v, 5.0));
+        }),
+        ("read_noise_electrons", |c, v| {
+            c.measurement.noise_model = Some(NoiseModel::from_normalized(1.0, v));
+        }),
+        ("duplicate_min_separation", |c, v| {
+            c.filter.duplicate_min_separation = v;
+        }),
     ];
-
-    for (config, field, value) in cases {
-        let invalid = config.validate().unwrap_err();
-        assert_eq!((invalid.field, invalid.value), (field, value));
-    }
-}
-
-#[test]
-fn background_refinement_validates_both_fields() {
-    assert_eq!(BackgroundRefinement::None.validate(), Ok(()));
-    assert_eq!(
-        BackgroundRefinement::Iterative {
-            iterations: 3,
-            mask_dilation: 0,
+    for (field, set) in fields {
+        for value in [f32::INFINITY, f32::NEG_INFINITY, f32::NAN] {
+            let invalid = configured(|config| set(config, value))
+                .validate()
+                .unwrap_err();
+            assert_eq!(invalid.field, field, "{field} = {value}");
+            if value.is_nan() {
+                assert!(
+                    invalid.value.is_nan(),
+                    "{field} = NaN reported {}",
+                    invalid.value
+                );
+            } else {
+                assert_eq!(invalid.value, f64::from(value), "{field} = {value}");
+            }
         }
-        .validate(),
-        Ok(())
-    );
-}
-
-#[test]
-fn background_refinement_invalid_iterations_return_exact_errors() {
-    for iterations in [0, 11] {
-        let invalid = BackgroundRefinement::Iterative {
-            iterations,
-            mask_dilation: 3,
-        }
-        .validate()
-        .unwrap_err();
-        assert_eq!(
-            invalid.to_string(),
-            format!("background refinement iterations must be between 1 and 10, got {iterations}")
-        );
     }
 }

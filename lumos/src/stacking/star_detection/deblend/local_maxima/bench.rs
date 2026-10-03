@@ -7,25 +7,12 @@ use ::quickbench::quick_bench;
 use std::cmp::Reverse;
 use std::hint::black_box;
 
-use crate::bit_buffer2::BitBuffer2;
-use crate::stacking::star_detection::config::detection_config::Connectivity;
 use crate::stacking::star_detection::deblend::component::Component;
+use crate::stacking::star_detection::deblend::internals::label_above;
 use crate::stacking::star_detection::deblend::local_maxima::{
     deblend_local_maxima, find_local_maxima,
 };
-use crate::stacking::star_detection::labeling::LabelMap;
 use crate::testing::synthetic::fixtures::cluster_field;
-
-/// Label the pixels of `pixels` above `threshold`, for benchmarking.
-fn label_above(pixels: &Buffer2<f32>, threshold: f32) -> LabelMap {
-    let mut mask = BitBuffer2::new_filled(Size2us::new(pixels.width(), pixels.height()), false);
-    for (idx, &value) in pixels.iter().enumerate() {
-        if value > threshold {
-            mask.set(idx, true);
-        }
-    }
-    LabelMap::from_mask(&mask, Connectivity::Four)
-}
 
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_find_local_maxima_6k_dense(b: ::quickbench::Bencher) {

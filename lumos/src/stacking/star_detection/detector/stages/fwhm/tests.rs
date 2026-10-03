@@ -1,9 +1,9 @@
 use crate::stacking::star_detection::detector::stages::fwhm::*;
+use crate::stacking::star_detection::roundness::Roundness;
 use crate::testing::prelude::*;
 
 // FWHM estimation never reads position, so every fixture below sits at the origin, and the
-// remaining `Star::at` defaults already clear `filter_config()` — so each test spoils exactly
-// the one property it is about.
+// remaining `Star::at` defaults clear `filter_config()`.
 
 /// The fallback every case passes, distinguishable from the 3.0 the star fixtures below are
 /// built around.
@@ -18,204 +18,192 @@ fn fwhm_config(min_stars: usize) -> FwhmConfig {
     }
 }
 
-/// Quality bounds loose enough that only the star each test spoils gets rejected.
+/// Quality bounds: the defaults, with eccentricity widened to 0.8.
 fn filter_config() -> FilterConfig {
     FilterConfig {
         max_eccentricity: 0.8,
-        max_sharpness: 0.7,
         ..Default::default()
     }
 }
 
-#[test]
-fn fwhm_estimation_insufficient_stars() {
-    // Fewer than min_stars returns default FWHM
-    let stars: Vec<Star> = (0..4)
-        .map(|_| Star::at(DVec2::ZERO).with_fwhm(3.0))
-        .collect();
-
-    let result = from_stars(&stars, &fwhm_config(5), FALLBACK, &filter_config());
-
-    // The fallback FWHM has no dependence on the 4 candidate stars, so it is `Configured` —
-    // not an `Estimated` claiming 4 stars produced it.
-    assert!(matches!(result, FwhmSource::Configured(fwhm) if (fwhm - 4.0).abs() < 0.01));
+/// `n` clean stars of FWHM `fwhm`.
+fn clean(n: usize, fwhm: f32) -> Vec<Star> {
+    (0..n)
+        .map(|_| Star::at(DVec2::ZERO).with_fwhm(fwhm))
+        .collect()
 }
 
-#[test]
-fn fwhm_estimation_pre_rejection_median_reports_pre_rejection_count() {
-    // 6 stars at FWHM=3.0 (tight cluster) + 4 outliers at FWHM=18.0. MAD-based
-    // rejection drops all 4 outliers, leaving 6 < min_stars(7), so the function
-    // falls back to the pre-rejection median (still 3.0, computed over all 10
-    // stars). stars_used must reflect that provenance: 10 stars actually
-    // contributed to the returned value (non-zero, since a pre-rejection median
-    // is still a genuine auto-estimate, unlike the insufficient-stars fallback).
-    let mut stars: Vec<Star> = (0..6)
-        .map(|_| Star::at(DVec2::ZERO).with_fwhm(3.0))
-        .collect();
-    stars.extend((0..4).map(|_| Star::at(DVec2::ZERO).with_fwhm(18.0)));
-
-    let result = from_stars(&stars, &fwhm_config(7), FALLBACK, &filter_config());
-
-    let fwhm = result.value().expect("an FWHM was estimated");
-    assert!((fwhm - 3.0).abs() < 0.01);
-    assert!(
-        matches!(result, FwhmSource::Estimated { stars_used: 10, .. }),
-        "the pre-rejection count that produced the median must be what is reported, got {result:?}"
-    );
+/// Nine clean 3.0 stars and `spoiled`.
+fn nine_and(spoiled: Star) -> Vec<Star> {
+    let mut stars = clean(9, 3.0);
+    stars.push(spoiled);
+    stars
 }
 
+/// Every outcome of `from_stars`, as the whole `FwhmSource` it returns.
+///
+/// The quality cases spoil a star whose FWHM is the same 3.0 as the rest, so only the quality
+/// filter can remove it: the outcome is `Estimated { 3.0, 9 }` with the filter and would be
+/// `{ 3.0, 10 }` without. Medians of ten take the mean of the middle two; the MAD floor is
+/// `0.1 · median`, so a 3.0 cluster with MAD 0 keeps `|f − 3| ≤ 3 · 0.3 = 0.9`.
 #[test]
-fn fwhm_estimation_filters_saturated() {
-    // Saturated stars (peak > 0.95) are excluded
-    // 9 good stars at FWHM=3.0 + 1 saturated at FWHM=10.0
-    let mut stars: Vec<Star> = (0..10)
-        .map(|_| Star::at(DVec2::ZERO).with_fwhm(3.0))
-        .collect();
-    stars[0] = Star::at(DVec2::ZERO).with_fwhm(10.0).with_peak(0.98);
+fn from_stars_over_every_case() {
+    let base = Star::at(DVec2::ZERO);
+    let cases: Vec<(&str, Vec<Star>, usize, FwhmSource)> = vec![
+        // 4 < min_stars: the fallback, which no star produced.
+        (
+            "insufficient",
+            clean(4, 3.0),
+            5,
+            FwhmSource::Configured(FALLBACK),
+        ),
+        // Median 3.0 over ten; MAD 0 → threshold 0.9 drops the four 18.0s, leaving 6 < 7: the
+        // pre-rejection median, credited to the ten that made it.
+        (
+            "pre-rejection median",
+            {
+                let mut stars = clean(6, 3.0);
+                stars.extend(clean(4, 18.0));
+                stars
+            },
+            7,
+            FwhmSource::Estimated {
+                fwhm: 3.0,
+                stars_used: 10,
+            },
+        ),
+        (
+            "saturated",
+            nine_and(base.with_saturated(true)),
+            5,
+            FwhmSource::Estimated {
+                fwhm: 3.0,
+                stars_used: 9,
+            },
+        ),
+        (
+            "low snr",
+            nine_and(base.with_snr(5.0)),
+            5,
+            FwhmSource::Estimated {
+                fwhm: 3.0,
+                stars_used: 9,
+            },
+        ),
+        (
+            "eccentric",
+            nine_and(base.with_eccentricity(0.9)),
+            5,
+            FwhmSource::Estimated {
+                fwhm: 3.0,
+                stars_used: 9,
+            },
+        ),
+        (
+            "cosmic ray",
+            nine_and(base.with_sharpness(0.9)),
+            5,
+            FwhmSource::Estimated {
+                fwhm: 3.0,
+                stars_used: 9,
+            },
+        ),
+        (
+            "not round",
+            nine_and(base.with_roundness(Roundness {
+                ground: 0.6,
+                sround: 0.0,
+            })),
+            5,
+            FwhmSource::Estimated {
+                fwhm: 3.0,
+                stars_used: 9,
+            },
+        ),
+        // On each quality bound exactly: kept, as the filter stage keeps it.
+        (
+            "on every bound",
+            nine_and(
+                base.with_snr(10.0)
+                    .with_eccentricity(0.8)
+                    .with_sharpness(0.7)
+                    .with_roundness(Roundness {
+                        ground: 0.5,
+                        sround: -0.5,
+                    }),
+            ),
+            5,
+            FwhmSource::Estimated {
+                fwhm: 3.0,
+                stars_used: 10,
+            },
+        ),
+        // 0.2 and 25.0 lie outside [0.5, 20): with the range check 8 < 9 stars remain and the
+        // fallback stands. Without it, ten would pass and MAD would leave the pre-rejection
+        // `{ 3.0, 10 }`.
+        (
+            "implausible widths",
+            {
+                let mut stars = clean(8, 3.0);
+                stars.push(base.with_fwhm(0.2));
+                stars.push(base.with_fwhm(25.0));
+                stars
+            },
+            9,
+            FwhmSource::Configured(FALLBACK),
+        ),
+        // Twelve stars, median 3.0, MAD 0: the 12.0 and 15.0 go and ten remain.
+        (
+            "outliers",
+            {
+                let mut stars = clean(10, 3.0);
+                stars.push(base.with_fwhm(12.0));
+                stars.push(base.with_fwhm(15.0));
+                stars
+            },
+            5,
+            FwhmSource::Estimated {
+                fwhm: 3.0,
+                stars_used: 10,
+            },
+        ),
+        (
+            "uniform",
+            clean(10, 4.5),
+            5,
+            FwhmSource::Estimated {
+                fwhm: 4.5,
+                stars_used: 10,
+            },
+        ),
+        // Sorted 2.8 2.9 2.9 3.0 3.0 | 3.0 3.1 3.1 3.2 3.3: median 3.0. Deviations sort to
+        // 0 0 0 0.1 0.1 | 0.1 0.1 0.2 0.2 0.3, MAD 0.1 against the 0.3 floor: threshold 0.9
+        // keeps all ten.
+        (
+            "spread",
+            [2.8, 3.0, 3.1, 3.2, 2.9, 3.3, 3.0, 3.1, 2.9, 3.0]
+                .into_iter()
+                .map(|fwhm| base.with_fwhm(fwhm))
+                .collect(),
+            5,
+            FwhmSource::Estimated {
+                fwhm: 3.0,
+                stars_used: 10,
+            },
+        ),
+        (
+            "all rejected",
+            (0..10).map(|_| base.with_saturated(true)).collect(),
+            5,
+            FwhmSource::Configured(FALLBACK),
+        ),
+    ];
 
-    let result = from_stars(&stars, &fwhm_config(5), FALLBACK, &filter_config());
-
-    // All 9 good stars have FWHM=3.0, so median should be exactly 3.0
-    let fwhm = result
-        .value()
-        .expect("FWHM should be 3.0 (saturated star filtered)");
-    assert!(
-        (fwhm - 3.0).abs() < 0.01,
-        "FWHM should be 3.0 (saturated star filtered), got {fwhm}"
-    );
-}
-
-#[test]
-fn fwhm_estimation_filters_high_eccentricity() {
-    // High eccentricity stars (> max_eccentricity=0.8) are excluded
-    let mut stars: Vec<Star> = (0..10)
-        .map(|_| Star::at(DVec2::ZERO).with_fwhm(3.0))
-        .collect();
-    stars[0] = Star::at(DVec2::ZERO).with_fwhm(10.0).with_eccentricity(0.9);
-
-    let result = from_stars(&stars, &fwhm_config(5), FALLBACK, &filter_config());
-
-    let fwhm = result
-        .value()
-        .expect("FWHM should be 3.0 (high-ecc star filtered)");
-    assert!(
-        (fwhm - 3.0).abs() < 0.01,
-        "FWHM should be 3.0 (high-ecc star filtered), got {fwhm}"
-    );
-}
-
-#[test]
-fn fwhm_estimation_filters_cosmic_rays() {
-    // High sharpness (cosmic rays, sharpness >= 0.7) are excluded
-    let mut stars: Vec<Star> = (0..10)
-        .map(|_| Star::at(DVec2::ZERO).with_fwhm(3.0))
-        .collect();
-    stars[0] = Star::at(DVec2::ZERO).with_fwhm(1.0).with_sharpness(0.9);
-
-    let result = from_stars(&stars, &fwhm_config(5), FALLBACK, &filter_config());
-
-    let fwhm = result
-        .value()
-        .expect("FWHM should be 3.0 (cosmic ray filtered)");
-    assert!(
-        (fwhm - 3.0).abs() < 0.01,
-        "FWHM should be 3.0 (cosmic ray filtered), got {fwhm}"
-    );
-}
-
-#[test]
-fn fwhm_estimation_filters_invalid_fwhm() {
-    // FWHM outside valid range (0.5..20.0) are excluded
-    let mut stars: Vec<Star> = (0..10)
-        .map(|_| Star::at(DVec2::ZERO).with_fwhm(3.0))
-        .collect();
-    stars[0] = Star::at(DVec2::ZERO).with_fwhm(0.2); // Too small
-    stars[1] = Star::at(DVec2::ZERO).with_fwhm(25.0); // Too large
-
-    let result = from_stars(&stars, &fwhm_config(5), FALLBACK, &filter_config());
-
-    // 8 remaining stars all at FWHM=3.0
-    let fwhm = result
-        .value()
-        .expect("FWHM should be 3.0 (invalid FWHM stars filtered)");
-    assert!(
-        (fwhm - 3.0).abs() < 0.01,
-        "FWHM should be 3.0 (invalid FWHM stars filtered), got {fwhm}"
-    );
-}
-
-#[test]
-fn fwhm_estimation_rejects_outliers() {
-    // 10 stars at FWHM=3.0 + 2 outliers at 12.0 and 15.0
-    let mut stars: Vec<Star> = (0..10)
-        .map(|_| Star::at(DVec2::ZERO).with_fwhm(3.0))
-        .collect();
-    stars.push(Star::at(DVec2::ZERO).with_fwhm(12.0));
-    stars.push(Star::at(DVec2::ZERO).with_fwhm(15.0));
-
-    let result = from_stars(&stars, &fwhm_config(5), FALLBACK, &filter_config());
-
-    // MAD-based rejection should remove the 12.0 and 15.0 outliers
-    let fwhm = result
-        .value()
-        .expect("FWHM should be 3.0 (outliers rejected)");
-    assert!(
-        (fwhm - 3.0).abs() < 0.01,
-        "FWHM should be 3.0 (outliers rejected), got {fwhm}"
-    );
-}
-
-#[test]
-fn fwhm_estimation_uniform_values() {
-    // All identical FWHM values
-    let stars: Vec<Star> = (0..10)
-        .map(|_| Star::at(DVec2::ZERO).with_fwhm(4.5))
-        .collect();
-
-    let result = from_stars(&stars, &fwhm_config(5), FALLBACK, &filter_config());
-
-    let fwhm = result.value().expect("an FWHM was estimated");
-    assert!((fwhm - 4.5).abs() < 0.01);
-    assert!(matches!(
-        result,
-        FwhmSource::Estimated { stars_used: 10, .. }
-    ));
-}
-
-#[test]
-fn fwhm_estimation_varying_values() {
-    // FWHM values: [2.8, 2.9, 2.9, 3.0, 3.0, 3.0, 3.1, 3.1, 3.2, 3.3]
-    // Sorted: median is average of values at indices 4,5 = (3.0+3.0)/2 = 3.0
-    // No outliers, so all 10 stars should be used
-    let fwhms = [2.8, 3.0, 3.1, 3.2, 2.9, 3.3, 3.0, 3.1, 2.9, 3.0];
-    let stars: Vec<Star> = fwhms
-        .iter()
-        .map(|&f| Star::at(DVec2::ZERO).with_fwhm(f))
-        .collect();
-
-    let result = from_stars(&stars, &fwhm_config(5), FALLBACK, &filter_config());
-
-    let fwhm = result.value().expect("an FWHM was estimated");
-    // Median of sorted [2.8, 2.9, 2.9, 3.0, 3.0, 3.0, 3.1, 3.1, 3.2, 3.3]
-    // = value at index 5 = 3.0
-    assert!(
-        (fwhm - 3.0).abs() < 0.05,
-        "FWHM should be ~3.0 (median of varied values), got {fwhm}"
-    );
-    assert!(
-        matches!(result, FwhmSource::Estimated { stars_used: 10, .. }),
-        "all 10 stars should be used, got {result:?}"
-    );
-}
-
-#[test]
-fn fwhm_estimation_empty_after_filtering() {
-    // All stars filtered out → returns default with 0 stars
-    let stars: Vec<Star> = (0..10)
-        .map(|_| Star::at(DVec2::ZERO).with_fwhm(3.0).with_saturated(true))
-        .collect();
-
-    let result = from_stars(&stars, &fwhm_config(5), FALLBACK, &filter_config());
-
-    assert!(matches!(result, FwhmSource::Configured(fwhm) if (fwhm - 4.0).abs() < 0.01));
+    for (name, stars, min_stars, expected) in cases {
+        assert_eq!(
+            from_stars(&stars, &fwhm_config(min_stars), FALLBACK, &filter_config()),
+            expected,
+            "{name}"
+        );
+    }
 }

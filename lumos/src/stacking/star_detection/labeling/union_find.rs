@@ -105,19 +105,26 @@ impl UnionFind {
 
     /// Fill `map` with the dense 1..=N relabeling — `map[provisional]` is the final label — and
     /// return N, the number of distinct components.
-    pub(super) fn build_label_map(&self, map: &mut Vec<u32>) -> usize {
-        let total_labels = self.label_count();
+    ///
+    /// Final labels are numbered in the order `provisional` first reaches each component, so a
+    /// caller that walks its runs in raster order gets labels independent of how the provisional
+    /// ones were handed out across threads. Every provisional label must appear in `provisional`.
+    pub(super) fn build_label_map(
+        &self,
+        provisional: impl Iterator<Item = u32>,
+        map: &mut Vec<u32>,
+    ) -> usize {
         map.clear();
-        map.resize(total_labels + 1, 0);
+        map.resize(self.label_count() + 1, 0);
         let mut count = 0u32;
 
-        for i in 1..=total_labels {
-            let root = self.find(i as u32);
-            if map[root as usize] == 0 {
+        for label in provisional {
+            let root = self.find(label) as usize;
+            if map[root] == 0 {
                 count += 1;
-                map[root as usize] = count;
+                map[root] = count;
             }
-            map[i] = map[root as usize];
+            map[label as usize] = map[root];
         }
 
         count as usize

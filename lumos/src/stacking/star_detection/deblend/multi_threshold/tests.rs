@@ -2,7 +2,7 @@
 
 use crate::stacking::star_detection::deblend::internals::{
     TestComponent, deblend_multi_threshold_floored, deblend_multi_threshold_test,
-    make_test_component,
+    make_test_component, separated_pair,
 };
 use crate::stacking::star_detection::deblend::multi_threshold::*;
 use crate::stacking::star_detection::labeling::LabelMap;
@@ -49,21 +49,7 @@ fn two_separated_stars_deblend() {
         pixels,
         labels,
         data,
-    } = make_test_component(
-        Size2us::new(100, 100),
-        &[
-            SyntheticStar::new(
-                Vec2::new(30.0, 50.0),
-                1.0,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-            SyntheticStar::new(
-                Vec2::new(70.0, 50.0),
-                0.8,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-        ],
-    );
+    } = separated_pair(0.8);
 
     let result =
         deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
@@ -109,25 +95,26 @@ fn late_gaussian_split_uses_full_threshold_ladder() {
         ],
     );
 
+    // The ladder `deblend_multi_threshold_test` cuts at: from the component's faintest pixel to
+    // its peak. The pair only separates above their saddle, late in it — so the deblender must
+    // run the ladder that far, not stop after its first few levels.
     let threshold_count = 32;
-    let low = Component::new(&data, &pixels, &labels)
-        .pixels()
-        .map(|pixel| pixel.value)
-        .fold(f32::MAX, f32::min);
-    let high = Component::new(&data, &pixels, &labels).peak().value;
-    let low = low.max(high * 1e-6).max(f32::MIN_POSITIVE);
-    let ratio = (high / low).max(1.0);
+    let component = Component::new(&data, &pixels, &labels);
+    let ladder = ThresholdLadder {
+        low: component
+            .pixels()
+            .map(|pixel| pixel.value)
+            .fold(f32::MAX, f32::min),
+        high: component.peak().value,
+        n_thresholds: threshold_count,
+    };
     let saddle = pixels[(50, 50)];
     let split_level = (0..=threshold_count)
-        .find(|&level| {
-            let t = level as f32 / threshold_count as f32;
-            low * ratio.powf(t) > saddle
-        })
+        .find(|&level| ladder.level(level) > saddle)
         .unwrap();
-
     assert!(
         split_level > 4,
-        "fixture must stay connected through the old four-level early-exit window, split at {split_level}"
+        "fixture must stay connected through the ladder's first levels, split at {split_level}"
     );
 
     let result = deblend_multi_threshold_test(
@@ -152,21 +139,7 @@ fn faint_secondary_below_contrast() {
         pixels,
         labels,
         data,
-    } = make_test_component(
-        Size2us::new(100, 100),
-        &[
-            SyntheticStar::new(
-                Vec2::new(30.0, 50.0),
-                1.0,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-            SyntheticStar::new(
-                Vec2::new(70.0, 50.0),
-                0.001,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-        ],
-    );
+    } = separated_pair(0.001);
 
     let result =
         deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.01);
@@ -179,28 +152,25 @@ fn faint_secondary_below_contrast() {
 }
 
 #[test]
-fn threshold_levels_exponential() {
-    let low = 0.1f32;
-    let high = 1.0f32;
-    let n = 10usize;
-    let ratio = (high / low).max(1.0);
-    let thresholds: Vec<f32> = (0..=n)
-        .map(|i| {
-            let t = i as f32 / n as f32;
-            low * ratio.powf(t)
-        })
-        .collect();
-
-    assert_eq!(thresholds.len(), 11);
-    assert!((thresholds[0] - 0.1).abs() < 1e-6);
-    assert!((thresholds[10] - 1.0).abs() < 1e-6);
-
-    for i in 1..thresholds.len() {
-        let step_ratio = thresholds[i] / thresholds[i - 1];
-        let expected_ratio = (1.0f32 / 0.1).powf(1.0 / 10.0);
+fn threshold_ladder_is_exponential_from_floor_to_peak() {
+    // 0.1 to 1.0 in ten steps: each level 10^(1/10) ≈ 1.2589 times the last. Level 0 is `low`
+    // exactly (a zeroth power); the rest carry one powf and one multiply of f32 rounding, a few
+    // ulps — 8ε relative bounds them.
+    let ladder = ThresholdLadder {
+        low: 0.1,
+        high: 1.0,
+        n_thresholds: 10,
+    };
+    let tolerance = |value: f32| 8.0 * f32::EPSILON * value;
+    assert_eq!(ladder.level(0), 0.1);
+    assert!((ladder.level(10) - 1.0).abs() <= tolerance(1.0));
+    let step = 10f32.powf(0.1);
+    for i in 1..=10 {
+        let expected = 0.1 * step.powi(i as i32);
         assert!(
-            (step_ratio - expected_ratio).abs() < 0.01,
-            "Threshold spacing should be exponential"
+            (ladder.level(i) - expected).abs() <= tolerance(expected),
+            "level {i}: {} vs {expected}",
+            ladder.level(i)
         );
     }
 }
@@ -239,21 +209,7 @@ fn deblend_disabled_with_high_contrast() {
         pixels,
         labels,
         data,
-    } = make_test_component(
-        Size2us::new(100, 100),
-        &[
-            SyntheticStar::new(
-                Vec2::new(30.0, 50.0),
-                1.0,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-            SyntheticStar::new(
-                Vec2::new(70.0, 50.0),
-                0.8,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-        ],
-    );
+    } = separated_pair(0.8);
 
     let result = deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 1.0);
 
@@ -352,9 +308,9 @@ fn deblend_contrast_bar_is_root_flux_not_parent() {
     //     one child clears → dim_branch stays a single object.
     // Result: {bright, dim_branch} = 2 objects.
     //
-    // Under the old *parent*-relative bar, faint(12) would clear 0.2·40 = 8, so
-    // dim_branch would over-split into {mid, faint} → 3 objects. This pins the
-    // SExtractor-correct root/total-flux criterion (T2.4).
+    // A *parent*-relative bar would let faint(12) clear 0.2·40 = 8, over-splitting
+    // dim_branch into {mid, faint} → 3 objects. This pins SExtractor's root/total-flux
+    // criterion.
     fn node(flux: f32, children: &[usize]) -> DeblendNode {
         DeblendNode {
             peak: Pixel {
@@ -390,21 +346,7 @@ fn equal_brightness_stars() {
         pixels,
         labels,
         data,
-    } = make_test_component(
-        Size2us::new(100, 100),
-        &[
-            SyntheticStar::new(
-                Vec2::new(30.0, 50.0),
-                1.0,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-            SyntheticStar::new(
-                Vec2::new(70.0, 50.0),
-                1.0,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-        ],
-    );
+    } = separated_pair(1.0);
 
     let result =
         deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
@@ -425,35 +367,24 @@ fn equal_brightness_stars() {
 
 #[test]
 fn contrast_at_boundary() {
+    // Two disjoint stars, σ 2.5, amplitudes 1.0 and 0.1, under one label: they split at the
+    // floor, each branch the whole star. The labelled pixels stop where a star falls to 0.001,
+    // at r = σ·√(2 ln(A/0.001)): the bright one keeps 1 − 0.001 of its flux, the faint one
+    // 1 − 0.01. The faint branch's share is 0.1·0.99 / (0.1·0.99 + 0.999) = 0.0902: a contrast of
+    // 0.08 splits it off, 0.10 does not.
     let TestComponent {
         pixels,
         labels,
         data,
-    } = make_test_component(
-        Size2us::new(100, 100),
-        &[
-            SyntheticStar::new(
-                Vec2::new(30.0, 50.0),
-                1.0,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-            SyntheticStar::new(
-                Vec2::new(70.0, 50.0),
-                0.1,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-        ],
+    } = separated_pair(0.1);
+    let component = Component::new(&data, &pixels, &labels);
+    assert_eq!(
+        deblend_multi_threshold_test(&component, 32, 3, 0.08).len(),
+        2
     );
-
-    let result_pass =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.09);
-
-    let result_fail =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.15);
-
-    assert!(
-        result_pass.len() >= result_fail.len(),
-        "Lower contrast threshold should find more or equal objects"
+    assert_eq!(
+        deblend_multi_threshold_test(&component, 32, 3, 0.10).len(),
+        1
     );
 }
 
@@ -463,21 +394,7 @@ fn pixel_assignment_conservation() {
         pixels,
         labels,
         data,
-    } = make_test_component(
-        Size2us::new(100, 100),
-        &[
-            SyntheticStar::new(
-                Vec2::new(30.0, 50.0),
-                1.0,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-            SyntheticStar::new(
-                Vec2::new(70.0, 50.0),
-                0.8,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-        ],
-    );
+    } = separated_pair(0.8);
 
     let result =
         deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
@@ -599,6 +516,11 @@ fn create_child_nodes_diagonal_uses_euclidean_not_chebyshev() {
 
 #[test]
 fn n_thresholds_effect() {
+    // A 1.0 and a 0.9 star 8 px apart, σ 2.5: the saddle midway holds (1.0 + 0.9)·e^(−16/12.5) =
+    // 0.528 and the peaks 1.006 and 0.906. The ladder runs from the faintest labelled pixel
+    // (~0.001) to 1.006, a ratio of about 1000. At four levels the top two sit at 0.179 — below
+    // the saddle, still one region — and at the bright peak itself, above the faint one: no level
+    // falls between, so the pair never splits. At 64 levels, 1.114 apart, several do.
     let TestComponent {
         pixels,
         labels,
@@ -607,26 +529,26 @@ fn n_thresholds_effect() {
         Size2us::new(100, 100),
         &[
             SyntheticStar::new(
-                Vec2::new(35.0, 50.0),
+                Vec2::new(46.0, 50.0),
                 1.0,
                 StarProfile::Gaussian { sigma: 2.5 },
             ),
             SyntheticStar::new(
-                Vec2::new(65.0, 50.0),
+                Vec2::new(54.0, 50.0),
                 0.9,
                 StarProfile::Gaussian { sigma: 2.5 },
             ),
         ],
     );
-    let result_few =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 4, 3, 0.005);
-    let result_many =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 64, 3, 0.005);
-
-    assert!(
-        result_many.len() >= result_few.len(),
-        "More thresholds should find >= objects"
+    let component = Component::new(&data, &pixels, &labels);
+    assert_eq!(
+        deblend_multi_threshold_test(&component, 4, 3, 0.005).len(),
+        1
     );
+    let split = deblend_multi_threshold_test(&component, 64, 3, 0.005);
+    let mut peaks: Vec<usize> = split.iter().map(|region| region.peak.x).collect();
+    peaks.sort_unstable();
+    assert_eq!(peaks, [46, 54]);
 }
 
 #[test]
@@ -772,13 +694,16 @@ fn zero_valued_pixels_below_the_floor_do_not_prevent_deblending() {
 }
 
 #[test]
-fn many_stars_max_peaks_limit() {
-    // Create more stars than MAX_PEAKS to test limiting behavior
+fn many_stars_keep_the_brightest_peaks() {
+    // Twelve stars 12 px apart in one connected chain, brightening left to right (0.45 + 0.05·i),
+    // so raster and tree order meet the dimmest first. Each is its own branch (its flux is several
+    // percent of the chain's, far above 0.005), and only MAX_PEAKS survive: the eight brightest,
+    // i = 4..11 at x = 15 + 12i.
     let stars: Vec<_> = (0..12)
         .map(|i| {
             SyntheticStar::new(
                 Vec2::new((15 + i * 12) as f32, 50.0),
-                1.0 - i as f32 * 0.05,
+                0.45 + i as f32 * 0.05,
                 StarProfile::Gaussian { sigma: 2.0 },
             )
         })
@@ -793,32 +718,25 @@ fn many_stars_max_peaks_limit() {
     let result =
         deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
 
-    // Should not exceed MAX_PEAKS
-    assert!(
-        result.len() <= MAX_PEAKS,
-        "Should not exceed MAX_PEAKS ({}), got {}",
-        MAX_PEAKS,
-        result.len()
-    );
-
-    // Area should still be conserved
+    let mut peaks: Vec<usize> = result.iter().map(|region| region.peak.x).collect();
+    peaks.sort_unstable();
+    assert_eq!(peaks, [63, 75, 87, 99, 111, 123, 135, 147]);
     let total_area: usize = result.iter().map(|o| o.area).sum();
     assert_eq!(total_area, data.area, "Area should be conserved");
 }
 
 #[test]
-fn large_tree_over_64_nodes() {
-    // Create a scenario that might produce > 64 nodes to test HashSet fallback
-    // Use many small stars that will create many tree nodes
+fn a_wide_split_keeps_its_brightest_children() {
+    // Sixteen disjoint stars on a 25 px grid under one label, dimming by 0.03 in raster order:
+    // the root splits sixteen ways at the floor and keeps MAX_CHILDREN = 8, the brightest — the
+    // first two rows. The eight it did not keep stay part of the root: a later level must not
+    // split them off again in place of the first eight.
     let mut stars = Vec::new();
     for row in 0..4 {
         for col in 0..4 {
-            let x = 20 + col * 25;
-            let y = 20 + row * 25;
-            let amp = 1.0 - (row * 4 + col) as f32 * 0.03;
             stars.push(SyntheticStar::new(
-                Vec2::new(x as f32, y as f32),
-                amp,
+                Vec2::new((20 + col * 25) as f32, (20 + row * 25) as f32),
+                1.0 - (row * 4 + col) as f32 * 0.03,
                 StarProfile::Gaussian { sigma: 2.0 },
             ));
         }
@@ -833,57 +751,24 @@ fn large_tree_over_64_nodes() {
     let result =
         deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 64, 3, 0.005);
 
-    // Should find multiple objects
-    assert!(result.len() >= 2, "Should find multiple objects");
-
-    // Area conservation
-    let total_area: usize = result.iter().map(|o| o.area).sum();
-    assert_eq!(total_area, data.area, "Area should be conserved");
-}
-
-#[test]
-fn very_large_tree_heap_fallback() {
-    // Create a scenario that produces > 128 nodes to test heap fallback path
-    // Use many stars in a grid pattern with high threshold count
-    let mut stars = Vec::new();
-    for row in 0..6 {
-        for col in 0..6 {
-            let x = 15 + col * 20;
-            let y = 15 + row * 20;
-            let amp = 1.0 - (row * 6 + col) as f32 * 0.02;
-            stars.push(SyntheticStar::new(
-                Vec2::new(x as f32, y as f32),
-                amp,
-                StarProfile::Gaussian { sigma: 1.8 },
-            ));
-        }
-    }
-
-    let TestComponent {
-        pixels,
-        labels,
-        data,
-    } = make_test_component(Size2us::new(150, 150), &stars);
-
-    let result =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 128, 2, 0.001);
-
-    // Should find multiple objects (exact count depends on merging)
-    assert!(!result.is_empty(), "Should find at least one object");
-
-    // Area conservation
+    let mut peaks: Vec<(usize, usize)> = result
+        .iter()
+        .map(|region| (region.peak.y, region.peak.x))
+        .collect();
+    peaks.sort_unstable();
+    let expected: Vec<(usize, usize)> = (0..2)
+        .flat_map(|row| (0..4).map(move |col| (20 + row * 25, 20 + col * 25)))
+        .collect();
+    assert_eq!(peaks, expected);
     let total_area: usize = result.iter().map(|o| o.area).sum();
     assert_eq!(total_area, data.area, "Area should be conserved");
 }
 
 #[test]
 fn buffer_reuse_consistency() {
-    // Run the same deblending multiple times to ensure buffer reuse doesn't cause issues
-    let TestComponent {
-        pixels,
-        labels,
-        data,
-    } = make_test_component(
+    // One `TreeBuffers` through A, then a different component B, then A again: every result must
+    // equal the one fresh buffers give, so nothing a previous component left behind leaks in.
+    let pair = make_test_component(
         Size2us::new(100, 100),
         &[
             SyntheticStar::new(
@@ -898,30 +783,60 @@ fn buffer_reuse_consistency() {
             ),
         ],
     );
+    let close = make_test_component(
+        Size2us::new(60, 60),
+        &[
+            SyntheticStar::new(
+                Vec2::new(26.0, 30.0),
+                1.0,
+                StarProfile::Gaussian { sigma: 2.5 },
+            ),
+            SyntheticStar::new(
+                Vec2::new(34.0, 30.0),
+                0.9,
+                StarProfile::Gaussian { sigma: 2.5 },
+            ),
+        ],
+    );
+    let run = |fixture: &TestComponent, buffers: &mut TreeBuffers| {
+        let component = Component::new(&fixture.data, &fixture.pixels, &fixture.labels);
+        let floor = component
+            .pixels()
+            .map(|p| p.value)
+            .fold(f32::INFINITY, f32::min);
+        deblend_multi_threshold(
+            &component,
+            floor,
+            MultiThresholdParams {
+                n_thresholds: 32,
+                min_contrast: 0.005,
+                min_separation: 3,
+                connectivity: Connectivity::Eight,
+            },
+            buffers,
+        )
+        .iter()
+        .map(|region| (region.peak, region.bbox, region.area))
+        .collect::<Vec<_>>()
+    };
 
-    let result1 =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
-    let result2 =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
-    let result3 =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
+    let fresh_pair = run(&pair, &mut TreeBuffers::default());
+    let fresh_close = run(&close, &mut TreeBuffers::default());
+    assert_eq!(fresh_pair.len(), 2);
+    assert_eq!(fresh_close.len(), 2);
 
-    // All runs should produce identical results
-    assert_eq!(result1.len(), result2.len());
-    assert_eq!(result2.len(), result3.len());
-
-    for i in 0..result1.len() {
-        assert_eq!(result1[i].peak, result2[i].peak);
-        assert_eq!(result2[i].peak, result3[i].peak);
-        assert_eq!(result1[i].area, result2[i].area);
-        assert_eq!(result2[i].area, result3[i].area);
-    }
+    let mut shared = TreeBuffers::default();
+    assert_eq!(run(&pair, &mut shared), fresh_pair);
+    assert_eq!(run(&close, &mut shared), fresh_close);
+    assert_eq!(run(&pair, &mut shared), fresh_pair);
 }
 
 #[test]
 fn connected_regions_complex_shape() {
-    // Test with a dumbbell-shaped component (two blobs connected by thin bridge)
-    // The two blobs have distinct peaks that should be deblended
+    // A dumbbell: blobs at x = 20 and 80 (σ 3, 1.0 and 0.9) joined by a thin bridge along y = 25
+    // (σ 15 × 0.6, amplitude 0.05), so the component is connected through it. The bridge's crest
+    // splits off as a branch of its own, about 1% of the flux, which a 5% contrast discards; the
+    // blobs, near half each, stay.
     let TestComponent {
         pixels,
         labels,
@@ -933,30 +848,33 @@ fn connected_regions_complex_shape() {
                 Vec2::new(20.0, 25.0),
                 1.0,
                 StarProfile::Gaussian { sigma: 3.0 },
-            ), // Left blob
+            ),
             SyntheticStar::new(
                 Vec2::new(80.0, 25.0),
                 0.9,
                 StarProfile::Gaussian { sigma: 3.0 },
-            ), // Right blob
+            ),
+            SyntheticStar::new(
+                Vec2::new(50.0, 25.0),
+                0.05,
+                StarProfile::Elliptical {
+                    sigma_x: 15.0,
+                    sigma_y: 0.6,
+                    angle: 0.0,
+                },
+            ),
         ],
     );
+    let component = Component::new(&data, &pixels, &labels);
+    // One component under 8-connectivity: the bridge row is lit end to end.
+    assert!((20..=80).all(|x| labels[25 * 100 + x] == 1));
 
-    let result =
-        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
-
-    // Should find both peaks
-    assert_eq!(result.len(), 2, "Should find both peaks");
-
-    // Area conservation
+    let result = deblend_multi_threshold_test(&component, 32, 3, 0.05);
+    let mut peaks: Vec<(usize, usize)> = result.iter().map(|c| (c.peak.x, c.peak.y)).collect();
+    peaks.sort_unstable();
+    assert_eq!(peaks, [(20, 25), (80, 25)]);
     let total_area: usize = result.iter().map(|o| o.area).sum();
     assert_eq!(total_area, data.area, "Area should be conserved");
-
-    // Peaks should be at expected positions
-    let mut peak_xs: Vec<_> = result.iter().map(|c| c.peak.x).collect();
-    peak_xs.sort_unstable();
-    assert!((peak_xs[0] as i32 - 20).abs() <= 1);
-    assert!((peak_xs[1] as i32 - 80).abs() <= 1);
 }
 
 #[test]
@@ -1007,21 +925,7 @@ fn peak_values_match_image() {
         pixels,
         labels,
         data,
-    } = make_test_component(
-        Size2us::new(100, 100),
-        &[
-            SyntheticStar::new(
-                Vec2::new(30.0, 50.0),
-                1.0,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-            SyntheticStar::new(
-                Vec2::new(70.0, 50.0),
-                0.8,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-        ],
-    );
+    } = separated_pair(0.8);
 
     let result =
         deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
@@ -1044,21 +948,7 @@ fn single_threshold_level() {
         pixels,
         labels,
         data,
-    } = make_test_component(
-        Size2us::new(100, 100),
-        &[
-            SyntheticStar::new(
-                Vec2::new(30.0, 50.0),
-                1.0,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-            SyntheticStar::new(
-                Vec2::new(70.0, 50.0),
-                0.8,
-                StarProfile::Gaussian { sigma: 2.5 },
-            ),
-        ],
-    );
+    } = separated_pair(0.8);
 
     let result =
         deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 1, 3, 0.005);
