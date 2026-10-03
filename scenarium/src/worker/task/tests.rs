@@ -6,7 +6,6 @@ use tokio_util::sync::CancellationToken;
 use common::CancelToken;
 
 use crate::execution::report::{RunPhase, RunReporter};
-use crate::execution::seeds::RunSeeds;
 use crate::graph::identity::NodeId;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand};
 use crate::worker::protocol::{WorkerMessage, WorkerReport};
@@ -17,8 +16,8 @@ async fn next_intent_receives_many_messages_into_a_reusable_buffer() {
     let (tx, rx) = mpsc::unbounded_channel();
     let node_id = NodeId::unique();
     tx.send(WorkerMessage::Clear).unwrap();
-    tx.send(WorkerMessage::Run {
-        seeds: RunSeeds::nodes(vec![node_id]),
+    tx.send(WorkerMessage::RunNodes {
+        nodes: vec![node_id],
     })
     .unwrap();
     let shutdown = CancellationToken::new();
@@ -133,8 +132,8 @@ fn pending_run_couples_event_source_initialization_to_loop_rebuild() {
     let node_id = NodeId::unique();
     let mut explicit = BatchIntent::default();
     explicit.reset(
-        [WorkerMessage::Run {
-            seeds: RunSeeds::nodes(vec![node_id]),
+        [WorkerMessage::RunNodes {
+            nodes: vec![node_id],
         }],
         [],
     );

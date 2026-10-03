@@ -7,7 +7,6 @@ use crate::RamUsage;
 use crate::execution::cache::disk_store::DiskStore;
 use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::report::RunPhase;
-use crate::execution::seeds::RunSeeds;
 use crate::graph::identity::NodeId;
 use crate::worker::activity::WorkerActivity;
 use crate::worker::run_summary::RunSummary;
@@ -68,8 +67,22 @@ pub enum WorkerMessage {
     /// Attach the store the cache persists to and serves from. Attaching alone
     /// writes nothing; see [`Self::FlushAllCaches`].
     SetDiskStore(DiskStore),
-    Run {
-        seeds: RunSeeds,
+    /// Run every sink of the installed program.
+    RunSinks,
+    /// Run these nodes of the installed program and deliver every output —
+    /// "run to this node". A disabled node named here runs for this run; one
+    /// the program does not hold fails the run.
+    RunNodes {
+        nodes: Vec<NodeId>,
+    },
+    /// Run the subscribers of these events, as if the event loop fired them.
+    #[cfg(test)]
+    #[expect(
+        clippy::absolute_paths,
+        reason = "a test-only variant names its type in place of a cfg'd import"
+    )]
+    FireEvents {
+        events: Vec<crate::graph::identity::EventPort>,
     },
     StartEventLoop,
     StopEventLoop,

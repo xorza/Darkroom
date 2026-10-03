@@ -23,8 +23,8 @@ async fn events_are_deduplicated() {
     w.send(w.update());
 
     let event = w.event("Frame Event", 0);
-    w.send(WorkerMessage::Run {
-        seeds: RunSeeds::events(vec![event, event, event]),
+    w.send(WorkerMessage::FireEvents {
+        events: vec![event, event, event],
     });
 
     assert_eq!(w.run().await.logs(), ["1"]);
@@ -53,12 +53,7 @@ async fn node_seeds_override_a_disabled_node_and_run_only_its_cone() {
     let mut w = TestWorker::over(graph);
     let sum = w.id("sum");
 
-    w.send_many([
-        w.update(),
-        WorkerMessage::Run {
-            seeds: RunSeeds::nodes(vec![sum]),
-        },
-    ]);
+    w.send_many([w.update(), WorkerMessage::RunNodes { nodes: vec![sum] }]);
 
     let run = w.run().await;
     assert_eq!(

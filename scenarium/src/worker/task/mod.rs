@@ -323,7 +323,7 @@ where
         let result = self
             .engine
             .execute(
-                run.seeds,
+                &run.seeds,
                 &mut reporter,
                 self.run_cancel.clone(),
                 &mut self.outcome,

@@ -12,8 +12,8 @@ async fn a_stale_event_seed_is_rejected_without_stopping_the_worker() {
     w.graph = TestWorker::print_graph("replacement");
     w.send_many([
         w.update(),
-        WorkerMessage::Run {
-            seeds: RunSeeds::events(vec![stale]),
+        WorkerMessage::FireEvents {
+            events: vec![stale],
         },
     ]);
 

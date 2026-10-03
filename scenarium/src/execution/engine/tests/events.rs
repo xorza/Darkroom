@@ -47,11 +47,6 @@ async fn execute_events_runs_subscribers() {
     assert_eq!(run.ran(), ["emit", "recv"]);
     assert_eq!(calls.count(), 1);
     assert_eq!(run.logs(), ["1"]);
-    assert_eq!(
-        run.triggered_events,
-        [tick],
-        "the triggering event is echoed back"
-    );
 }
 
 #[tokio::test]
@@ -144,7 +139,6 @@ async fn run_sinks_node_runs_all_sinks_on_event() {
     assert_eq!(run.ran(), ["trigger", "source", "sink"]);
     assert_eq!(source_calls.count(), 1);
     assert_eq!(run.logs(), ["1"]);
-    assert_eq!(run.triggered_events.len(), 1);
 }
 
 /// Without the `RunSinks` sink, firing `emit`'s tick reaches no subscriber,
