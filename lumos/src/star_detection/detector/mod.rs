@@ -53,7 +53,7 @@ pub struct QualityFilterDiagnostics {
 }
 
 /// Diagnostic information from star detection.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Diagnostics {
     /// Number of pixels above detection threshold.
     pub pixels_above_threshold: usize,

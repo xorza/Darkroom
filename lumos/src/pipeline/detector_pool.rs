@@ -47,6 +47,33 @@ impl DetectorPool {
     {
         concurrency::try_par_map_bounded(len, &mut self.detectors, f)
     }
+
+    /// [`Self::try_map`] with a second slot beside each detector, which the job keeps from one
+    /// index to the next it takes: a worker's warp buffers, for one.
+    pub(crate) fn try_map_with<S, R, E, F>(
+        &mut self,
+        len: usize,
+        slots: &mut [S],
+        f: F,
+    ) -> Result<Vec<R>, E>
+    where
+        S: Send,
+        R: Send,
+        E: Send,
+        F: Fn(&mut StarDetector, &mut S, usize) -> Result<R, E> + Sync,
+    {
+        assert_eq!(slots.len(), self.detectors.len(), "one slot per detector");
+        let mut paired: Vec<(&mut StarDetector, &mut S)> =
+            self.detectors.iter_mut().zip(slots.iter_mut()).collect();
+        concurrency::try_par_map_bounded(len, &mut paired, |(detector, slot), index| {
+            f(detector, slot, index)
+        })
+    }
+
+    /// One detector of the pool, for a frame detected alone.
+    pub(crate) fn first(&mut self) -> &mut StarDetector {
+        &mut self.detectors[0]
+    }
 }
 
 #[cfg(test)]

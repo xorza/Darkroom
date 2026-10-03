@@ -289,8 +289,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 
 - [ ] `21.1` **`Reference::Auto` picks by star count only** — `pipeline/align.rs:350-353`, `pipeline/config.rs:15`
   - The median FWHM is already measured. Siril uses lowest FWHM or wFWHM. Ties go to the last index. `[C]`
-- [ ] `21.2` **`Reference::Index` still spills every frame twice** — `pipeline/calibrate.rs:112-150`
-  - When the anchor is known, decode → detect → register → warp → store needs one write. `[C]`
 - [ ] `21.4` **The result discards per-frame registration (transform, RMS, inliers)** — `pipeline/result.rs:25-55` `[C]`
 
 ## 22. Run-to-run determinism
@@ -627,24 +625,14 @@ Closes 2.5, 13.5 and the solver parts of 11.8. Each item replaces copies that ex
 
 ## S7. One ingest stage
 
-Closes 4.1 (with C2), 15.3, 21.2, 21.3, 26.14, 26.15 and 26.21.
+Built in phase 6, as shared parts rather than one function. As built:
 
-```rust
-enum FrameSource<'a> { Paths(&'a [PathBuf]), Frames(Vec<LinearImage>) }
-enum FrameOp<'a> { Subtract(&'a MasterBias), Calibrate(&'a CalibrationPlan),
-                   CosmicRay(CosmicRayConfig), Demosaic, Detect(&'a DetectorPool) }
-struct FrameRecord { image: PipelineFrame, flags: Option<PixelFlags>,
-                     stats: FrameStats, stars: Option<Vec<Star>> }
-```
-
-- One function runs `source → ops → checks → statistics → tier` for every entry point. It does the dimension check, the non-finite check (in the parallel closure, 21.3), the frame-facts admission and the cancel checks once.
-- Each `FrameOp` states its memory: its peak and its output for a given frame shape. The `RunShape` is built from the op list, and a `Frames` source charges no resident input again (15.3). The four hand-built shapes go away.
-- The entry points become short:
-  - `stack(paths)`: ingest with no ops, then combine.
-  - `stack_cfa_master` for flats: ingest with `Subtract`, then combine. Each flat sub is calibrated before the multiplicative normalization (4.1).
-  - `align_and_stack(frames)`: ingest with `Detect`, then register, warp and combine.
-  - `calibrate_align_stack`: ingest with `Calibrate`, `CosmicRay`, `Demosaic` and `Detect`. With `Reference::Index`, the op list also registers and warps, so each frame is written once (21.2).
-- Every entry takes `LoadContext` the same way and passes its FITS options and cancel token (26.14). Progress and cancel are passed the same way everywhere (26.15). `NoFrames` is checked once (26.21).
+- `IngestConfig` carries the FITS policy, the memory override and the cache. `StackConfig::ingest` and `DrizzleConfig::ingest` hold it. `IngestRun` reads the machine once per run and builds the one `LoadContext` every decode takes, so every entry honours the caller's FITS policy and cancel token.
+- `FrameAdmission` checks every decoded frame in one order (geometry, facts against frame 0, samples) and measures its statistics, inside the parallel closure.
+- The combine-direct entries (`stack`, `stack_cfa_master`) load through the loader. A flat's subtraction is a `FrameStep`, and a stepped frame never enters the kept cache.
+- The registered entries (`align_and_stack`, `calibrate_align_stack`) prepare and detect through `LightSource::detect`. A held frame is charged net of what the caller already holds (`RunShape::held_bytes`).
+- With `Reference::Index`, raw lights go through `RawLights::stack_in_one_pass`: the reference first, then each light through its preparation, detection, registration, warp and store, written once, under `MemoryPlan::single_pass`. `FrameRegistrar` and `RegisteredSet` are the register and combine steps both paths share.
+- The loader and the detection stage stay two functions. One parks `StoredFrame`s for the combine and reuses the kept cache, and the other parks detected frames for registration. A single function over both would need a generic park step and a kept-cache branch that only one side reads.
 
 ## S8. `RunReport`: no silent decisions
 
@@ -795,22 +783,6 @@ The combine bench (30 frames, `combine::bench`, release, one machine, same sessi
 - The light preset is faster: the old path ran the shortcut screen and then sorted anyway on most pixels.
 - Winsorized is slower because it now loops to a fixed point (the old code rejected once), and each pass estimates again.
 - The median code did not change. Run alone, it is 87 ms before and 88 ms after. In the sequence after the light preset it measures slower, which is an order effect of the allocator, not of the median path.
-
-## Phase 6. Ingest and calibration plan (S7, C2)
-
-Steps 2 and 3 are done. The masters are typed: `MasterDark` records whether its bias is in it, and `PreparedFlat` owns the divisor and the count of floored pixels. `calibrate` matches a dark to the light by exposure (1%) and temperature (1 °C), scales a bias-removed dark by the exposure ratio, and returns a `CalibrationOutcome` that the run report counts. The RAW loader records the exposure and the sensor temperature. `stack_cfa_master` subtracts the flat-dark or the bias from each flat before the flats are normalized. The bundle (version 2) keeps only what `calibrate` reads. Items 4.1 to 4.3, 4.5, 26.1 and 26.2 are closed.
-
-Step 1 is done, in a different shape from S7. The entries share their parts, not one function:
-
-- `IngestConfig` (was `CacheConfig`) carries the FITS policy beside the memory override and the cache. `StackConfig::ingest` and `DrizzleConfig::ingest` hold it. `IngestRun` reads the machine once per run and builds the one `LoadContext` every decode takes.
-- `FrameAdmission` checks every decoded frame (geometry, facts against frame 0, samples) and measures its statistics, inside the parallel closure.
-- The combine-direct entries (`stack`, `stack_cfa_master`) load through the loader. A flat's subtraction is a `FrameStep`, and a stepped frame never enters the kept cache.
-- The registered entries (`align_and_stack`, `calibrate_align_stack`) prepare and detect through `LightSource::detect`. A held frame is charged net of what the caller already holds (`RunShape::held_bytes`).
-- The loader and the detection stage stay two functions. One parks `StoredFrame`s for the combine and reuses the kept cache, and the other parks detected frames for registration. A single function over both would need a generic park step and a kept-cache branch that only one side reads.
-
-Items 15.3, 21.3, 26.14, 26.15 and 26.21 are closed.
-
-Remaining: add the `Reference::Index` single-write path. **Closes:** 21.2.
 
 ## Phase 7. Detection planes (C3)
 

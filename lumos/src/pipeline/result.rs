@@ -12,7 +12,7 @@ use crate::stack_product::StackProduct;
 use crate::star_detection::detector::Diagnostics;
 
 /// Registration bookkeeping for an aligned stack.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct AlignmentSummary {
     /// Index into the input of the alignment reference frame.
     pub reference: usize,

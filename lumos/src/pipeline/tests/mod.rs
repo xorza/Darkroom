@@ -18,7 +18,7 @@ use crate::pipeline::align::{align_and_stack, register_warp_and_stack};
 use crate::pipeline::calibrate::calibrate_align_stack;
 use crate::pipeline::config::{AlignStackConfig, Reference};
 use crate::pipeline::frame::{DetectedFrame, PipelineFrame};
-use crate::pipeline::result::Error;
+use crate::pipeline::result::{AlignStackResult, Error};
 use crate::pipeline::tier::{FrameTier, StagePlan};
 use crate::progress::{ProgressCallback, StackingProgress, StackingStage};
 use crate::registration::config::Config as RegistrationConfig;
@@ -729,10 +729,11 @@ fn both_front_ends_report_the_same_stages() {
     );
 }
 
-/// The all-RAM and memory-bounded runs must produce the same stack. Both tiers run one body,
-/// `align::register_warp_and_stack`, and [`FrameTier`] decides only where a frame lives: a
-/// resident frame moves out of `PipelineFrame`, a spilled one is read back from its memory map, and
-/// the combined result has to be bit-identical either way.
+/// The all-RAM and memory-bounded runs must produce the same stack, in two passes and in one.
+/// [`FrameTier`] decides only where a frame lives: a resident frame moves out of `PipelineFrame`, a
+/// spilled one is read back from its memory map, and the combined result has to be bit-identical
+/// either way. A named reference takes each light through one pass, and a found one through two,
+/// and they too agree.
 ///
 /// Both runs read the same mono-CFA FITS lights and differ only in `memory_override`, the input
 /// `MemoryPlan::plan` keys its tier decision on. RANSAC is seeded, removing the pipeline's only
@@ -740,7 +741,8 @@ fn both_front_ends_report_the_same_stages() {
 #[test]
 fn ram_and_streaming_tiers_produce_identical_stacks() {
     let scratch = TempDir::new("lumos_tier_equivalence");
-    let base = base_field();
+    // Smaller than `base_field`, since the lights are stacked four times.
+    let base = star_field(Size2us::new(160, 160), 24, 66666).image;
 
     // Five dithered exposures: five clears `StackConfig`'s default `SmallN::median_below(5)`, so
     // the σ-clipped mean actually runs and the combine emits a linear-variance plane — without
@@ -791,22 +793,18 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
     streaming_config.stack.ingest.keep_cache = true;
 
     let masters = CalibrationMasters::default();
-    let ram = calibrate_align_stack(
-        &paths,
-        &masters,
-        &ram_config,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .expect("RAM-tier stack");
-    let streaming = calibrate_align_stack(
-        &paths,
-        &masters,
-        &streaming_config,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .expect("streaming-tier stack");
+    let run = |config: &AlignStackConfig| {
+        calibrate_align_stack(
+            &paths,
+            &masters,
+            config,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .expect("stack the lights")
+    };
+    let ram = run(&ram_config);
+    let streaming = run(&streaming_config);
 
     // Premise: the two budgets must straddle the tier boundary. Only the streaming path creates a
     // spill directory, so its presence — and the RAM path's lack of one — is what proves this test
@@ -819,10 +817,6 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
         !ram_config.stack.ingest.cache_dir.exists(),
         "RAM tier spilled to disk; both runs took the streaming path"
     );
-
-    assert_eq!(ram.alignment.reference, streaming.alignment.reference);
-    assert_eq!(ram.alignment.registered, streaming.alignment.registered);
-    assert_eq!(ram.alignment.dropped, streaming.alignment.dropped);
     assert_eq!(
         ram.alignment.dropped,
         vec![2, 5],
@@ -832,68 +826,105 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
         ram.alignment.registered, 5,
         "every dithered frame should register against the reference"
     );
-
-    assert_eq!(
-        ram.product.image.dimensions(),
-        streaming.product.image.dimensions()
-    );
-    let channels = ram.product.image.channels();
-    for channel in 0..channels {
-        assert_eq!(
-            bits(ram.product.image.channel(channel).pixels()),
-            bits(streaming.product.image.channel(channel).pixels()),
-            "image channel {channel} differs between the RAM and streaming tiers"
-        );
-        assert_eq!(
-            bits(ram.product.weight.as_ref().unwrap().channel(channel)),
-            bits(streaming.product.weight.as_ref().unwrap().channel(channel)),
-            "weight channel {channel} differs between the RAM and streaming tiers"
-        );
-    }
-    assert_eq!(
-        bits(ram.product.coverage.as_ref().unwrap().to_plane().pixels()),
-        bits(
-            streaming
-                .product
-                .coverage
-                .as_ref()
-                .unwrap()
-                .to_plane()
-                .pixels()
-        ),
-        "coverage differs between the RAM and streaming tiers"
-    );
-
-    let ram_variance = ram
-        .product
-        .variance
-        .as_ref()
-        .expect("a σ-clipped mean emits a variance plane");
-    let streaming_variance = streaming
-        .product
-        .variance
-        .as_ref()
-        .expect("a σ-clipped mean emits a variance plane");
-    for channel in 0..channels {
-        assert_eq!(
-            bits(ram_variance.channel(channel).pixels()),
-            bits(streaming_variance.channel(channel).pixels()),
-            "variance channel {channel} differs between the RAM and streaming tiers"
-        );
-    }
-
-    // The master inherits the reference frame's metadata, and the two tiers reach that by
-    // different routes — the RAM path overwrites it after combining, the streaming path threads it
-    // in. Distinct per-frame exposure times make the comparison non-vacuous.
-    let inherited = ram.product.image.metadata.exposure_time;
+    // The master inherits the reference frame's metadata. Distinct per-frame exposure times make
+    // the comparison below non-vacuous.
     assert!(
-        inherited.is_some(),
+        ram.product.image.metadata.exposure_time.is_some(),
         "per-frame exposure time did not survive the FITS round-trip; \
-         the metadata comparison below would be vacuous"
+         the metadata comparison would be vacuous"
+    );
+
+    // Naming the reference the automatic choice found takes each light through one pass, on both
+    // tiers, and the stack is the same. The spilled one-pass run writes each light once, warped:
+    // no calibrated light is parked before its registration, as the two-pass run parks every one.
+    let one_pass = |config: &AlignStackConfig, cache: &str| {
+        let mut config = config.clone();
+        config.reference = Reference::Index(ram.alignment.reference);
+        config.stack.ingest.cache_dir = scratch.join(cache);
+        (run(&config), config.stack.ingest.cache_dir)
+    };
+    let (ram_one_pass, _) = one_pass(&ram_config, "ram_one_pass_cache");
+    let (streaming_one_pass, one_pass_dir) = one_pass(&streaming_config, "one_pass_cache");
+    let spilled_names = |directory: &Path| {
+        let mut names = Vec::new();
+        let mut pending = vec![directory.to_path_buf()];
+        while let Some(directory) = pending.pop() {
+            for entry in std::fs::read_dir(&directory).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    pending.push(path);
+                } else {
+                    names.push(path.file_name().unwrap().to_string_lossy().into_owned());
+                }
+            }
+        }
+        names
+    };
+    let two_pass_names = spilled_names(&streaming_config.stack.ingest.cache_dir);
+    let one_pass_names = spilled_names(&one_pass_dir);
+    assert!(two_pass_names.iter().any(|name| name.starts_with("calib_")));
+    assert!(
+        one_pass_names
+            .iter()
+            .any(|name| name.starts_with("warped_"))
+    );
+    assert!(
+        !one_pass_names.iter().any(|name| name.starts_with("calib_")),
+        "{one_pass_names:?}"
+    );
+
+    for (other, label) in [
+        (&streaming, "streaming"),
+        (&ram_one_pass, "RAM one-pass"),
+        (&streaming_one_pass, "streaming one-pass"),
+    ] {
+        assert_same_stack(&ram, other, label);
+    }
+}
+
+/// Two runs stack the same lights against the same reference, bit for bit: every plane, the
+/// alignment, the detection funnels and the inherited metadata.
+fn assert_same_stack(expected: &AlignStackResult, actual: &AlignStackResult, label: &str) {
+    assert_eq!(expected.alignment, actual.alignment, "{label}");
+    assert_eq!(expected.detection, actual.detection, "{label}");
+    let (expected, actual) = (&expected.product, &actual.product);
+    assert_eq!(
+        expected.image.dimensions(),
+        actual.image.dimensions(),
+        "{label}"
+    );
+    for channel in 0..expected.image.channels() {
+        assert_eq!(
+            bits(expected.image.channel(channel).pixels()),
+            bits(actual.image.channel(channel).pixels()),
+            "{label}: image channel {channel}"
+        );
+        assert_eq!(
+            bits(expected.weight.as_ref().unwrap().channel(channel)),
+            bits(actual.weight.as_ref().unwrap().channel(channel)),
+            "{label}: weight channel {channel}"
+        );
+        assert_eq!(
+            bits(
+                expected
+                    .variance
+                    .as_ref()
+                    .expect("a σ-clipped mean emits a variance plane")
+                    .channel(channel)
+                    .pixels()
+            ),
+            bits(actual.variance.as_ref().unwrap().channel(channel).pixels()),
+            "{label}: variance channel {channel}"
+        );
+    }
+    assert_eq!(
+        bits(expected.coverage.as_ref().unwrap().to_plane().pixels()),
+        bits(actual.coverage.as_ref().unwrap().to_plane().pixels()),
+        "{label}: coverage"
     );
     assert_eq!(
-        inherited, streaming.product.image.metadata.exposure_time,
-        "master metadata came from a different frame on each tier"
+        expected.image.metadata.exposure_time, actual.image.metadata.exposure_time,
+        "{label}: the master inherits another frame's metadata"
     );
 }
 
