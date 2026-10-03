@@ -190,7 +190,7 @@ mod tests {
 
     use scenarium::{
         Binding, Compiler, ConstValue, Graph, InputPort, WorkerActivity, WorkerReport,
-        WorkerStatusKind, system_library, worker_events_library,
+        system_library, worker_events_library,
     };
 
     use crate::core::wake::Wake;
@@ -241,9 +241,7 @@ mod tests {
             delivered += 1;
             if matches!(
                 report,
-                WorkerReport::Status(status)
-                    if status.activity == WorkerActivity::EventLoop
-                        && matches!(status.kind, WorkerStatusKind::Completed { .. })
+                WorkerReport::Completed(summary) if summary.activity == WorkerActivity::EventLoop
             ) {
                 break;
             }

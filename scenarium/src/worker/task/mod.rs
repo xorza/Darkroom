@@ -12,9 +12,11 @@ use crate::execution::cache::runtime::cache_flush_report::CacheFlushReport;
 use crate::execution::engine::ExecutionEngine;
 use crate::execution::error::Error;
 use crate::execution::report::ExecutionOutcome;
-use crate::execution::report::{RunProgress, RunReporter};
+use crate::execution::report::{RunPhase, RunReporter};
 use crate::execution::seeds::RunSeeds;
 use crate::graph::identity::EventPort;
+use crate::graph::identity::NodeId;
+use crate::worker::activity::WorkerActivity;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand};
 use crate::worker::error::WorkerError;
 use crate::worker::event_loop::{
@@ -22,7 +24,7 @@ use crate::worker::event_loop::{
 };
 use crate::worker::pause_gate::PauseGate;
 use crate::worker::protocol::{WorkerMessage, WorkerReport};
-use crate::worker::status::{WorkerActivity, WorkerStatusPublisher};
+use crate::worker::run_summary::RunSummaryPublisher;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EventLoopTransition {
@@ -97,7 +99,7 @@ pub(crate) struct WorkerTask<ExecutionCallback> {
     run_cancel: CancelToken,
     shutdown: CancellationToken,
     engine: ExecutionEngine,
-    status: WorkerStatusPublisher,
+    summary: RunSummaryPublisher,
     outcome: ExecutionOutcome,
     intent: BatchIntent,
     messages: Vec<WorkerMessage>,
@@ -122,7 +124,7 @@ where
             run_cancel,
             shutdown,
             engine: ExecutionEngine::default(),
-            status: WorkerStatusPublisher::default(),
+            summary: RunSummaryPublisher::default(),
             outcome: ExecutionOutcome::default(),
             intent: BatchIntent::default(),
             messages: Vec::new(),
@@ -226,9 +228,7 @@ where
         // stop is not — its `execute` reports `Executing` directly, without
         // a transient `Idle` flashing in between.
         if stopped_loop && !ran {
-            (self.callback)(WorkerReport::Status(
-                self.status.activity(WorkerActivity::Idle),
-            ));
+            (self.callback)(WorkerReport::Activity(WorkerActivity::Idle));
         }
 
         for reply in self.intent.syncs.drain(..) {
@@ -315,10 +315,9 @@ where
             return;
         }
         let activity = self.executing_activity();
-        (self.callback)(WorkerReport::Status(self.status.activity(activity)));
+        (self.callback)(WorkerReport::Activity(activity));
         let _pause_guard = self.event_loop_pause_gate.close();
         let mut reporter = WorkerRunReporter {
-            status: &mut self.status,
             callback: &self.callback,
         };
         let result = self
@@ -345,13 +344,13 @@ where
                     }
                 }
                 let activity = self.resting_activity();
-                (self.callback)(WorkerReport::Status(
-                    self.status.completed(activity, &mut self.outcome),
+                (self.callback)(WorkerReport::Completed(
+                    self.summary.publish(activity, &mut self.outcome),
                 ));
             }
             Err(error) => {
                 let activity = self.resting_activity();
-                (self.callback)(WorkerReport::Status(self.status.activity(activity)));
+                (self.callback)(WorkerReport::Activity(activity));
                 (self.callback)(WorkerReport::Error(WorkerError::Execution { error }));
             }
         }
@@ -384,9 +383,7 @@ where
         }
         tracing::info!("Event loop stopped");
         if report_idle {
-            (self.callback)(WorkerReport::Status(
-                self.status.activity(WorkerActivity::Idle),
-            ));
+            (self.callback)(WorkerReport::Activity(WorkerActivity::Idle));
         }
         for panic in panics {
             (self.callback)(WorkerReport::Error(WorkerError::Execution {
@@ -413,12 +410,9 @@ where
     }
 }
 
-/// Publishes a run's live feedback to the host as the run loop produces it. Owns the
-/// borrows a report needs — the status publisher's retained allocation and the host
-/// callback — so the executor can hand each event straight over instead of queueing it for
-/// a relay to drain.
+/// Publishes a run's live feedback to the host as the run loop produces it, by value, so the
+/// executor can hand each event straight over instead of queueing it for a relay to drain.
 struct WorkerRunReporter<'a, C> {
-    status: &'a mut WorkerStatusPublisher,
     callback: &'a C,
 }
 
@@ -432,10 +426,8 @@ impl<C> RunReporter for WorkerRunReporter<'_, C>
 where
     C: Fn(WorkerReport) + Sync,
 {
-    fn progress(&mut self, progress: RunProgress) {
-        let mut patch = self.status.patch();
-        patch.push(&progress);
-        (self.callback)(WorkerReport::Status(patch.finish()));
+    fn progress(&mut self, node_id: NodeId, phase: RunPhase) {
+        (self.callback)(WorkerReport::Progress { node_id, phase });
     }
 }
 

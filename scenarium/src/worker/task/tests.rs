@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::time::Instant;
 
 use tokio::sync::mpsc;
@@ -6,13 +5,11 @@ use tokio_util::sync::CancellationToken;
 
 use common::CancelToken;
 
-use crate::execution::report::NodeExecutionStatus;
-use crate::execution::report::{RunPhase, RunProgress, RunReporter};
+use crate::execution::report::{RunPhase, RunReporter};
 use crate::execution::seeds::RunSeeds;
 use crate::graph::identity::NodeId;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand};
 use crate::worker::protocol::{WorkerMessage, WorkerReport};
-use crate::worker::status::{WorkerActivity, WorkerStatusKind, WorkerStatusPublisher};
 use crate::worker::task::{EventLoopTransition, PendingRun, WorkerRunReporter, WorkerTask};
 
 #[tokio::test]
@@ -147,69 +144,28 @@ fn pending_run_couples_event_source_initialization_to_loop_rebuild() {
     assert_eq!(run.seeds.node_ids, [node_id]);
 }
 
-/// Each reported event publishes its own snapshot the moment it happens, and a snapshot
-/// the host has not drained yet is never mutated by the next one.
+/// Each reported event reaches the host the moment it happens, by value and in order.
 #[test]
-fn worker_reporter_publishes_each_event_and_preserves_published_snapshots() {
+fn worker_reporter_publishes_each_event_in_order() {
     let first_node = NodeId::unique();
     let second_node = NodeId::unique();
-    let mut status = WorkerStatusPublisher::default();
-    drop(status.activity(WorkerActivity::Executing));
     let (tx, mut rx) = mpsc::unbounded_channel();
     let callback = |report| tx.send(report).unwrap();
     let mut reporter = WorkerRunReporter {
-        status: &mut status,
         callback: &callback,
     };
+    let at = Instant::now();
+    reporter.progress(first_node, RunPhase::Started { at });
+    reporter.progress(second_node, RunPhase::Failed { elapsed_secs: 0.25 });
 
-    reporter.progress(RunProgress {
-        node_id: first_node,
-        phase: RunPhase::Started { at: Instant::now() },
-    });
-    reporter.progress(RunProgress {
-        node_id: second_node,
-        phase: RunPhase::Finished { elapsed_secs: 0.25 },
-    });
-
-    let WorkerReport::Status(started) = rx.try_recv().unwrap() else {
-        panic!("progress must produce a status patch");
-    };
-    let WorkerReport::Status(finished) = rx.try_recv().unwrap() else {
-        panic!("progress must produce a status patch");
-    };
-    assert!(rx.try_recv().is_err());
-    assert_eq!(started.kind, WorkerStatusKind::Patch);
-    assert_eq!(started.activity, WorkerActivity::Executing);
-    assert_eq!(started.nodes.len(), 1);
-    assert_eq!(started.nodes[0].node_id, first_node);
-    assert!(matches!(
-        started.nodes[0].status,
-        Some(NodeExecutionStatus::Running { .. })
-    ));
-    assert_eq!(finished.nodes.len(), 1);
-    assert_eq!(finished.nodes[0].node_id, second_node);
-    assert!(matches!(
-        finished.nodes[0].status,
-        Some(NodeExecutionStatus::Executed { elapsed_secs: 0.25 })
-    ));
-    // The second patch could not reuse the first's still-queued allocation.
-    assert!(!Arc::ptr_eq(&started, &finished));
-
-    // Publishing over a still-queued snapshot allocates fresh rather than deep-cloning
-    // vectors it immediately clears — a clone would carry the previous capacity over.
-    let idle = status.activity(WorkerActivity::Idle);
-    assert!(idle.nodes.is_empty());
-    assert_eq!(idle.nodes.capacity(), 0);
-    assert_eq!(started.nodes.len(), 1, "a published snapshot is immutable");
-
-    drop((started, finished));
-    let allocation = Arc::as_ptr(&idle);
-    drop(idle);
-    let executing = status.activity(WorkerActivity::Executing);
-    assert_eq!(
-        Arc::as_ptr(&executing),
-        allocation,
-        "a drained snapshot's allocation is recycled"
-    );
+    for (node, expected) in [
+        (first_node, RunPhase::Started { at }),
+        (second_node, RunPhase::Failed { elapsed_secs: 0.25 }),
+    ] {
+        let WorkerReport::Progress { node_id, phase } = rx.try_recv().unwrap() else {
+            panic!("progress must produce a progress report");
+        };
+        assert_eq!((node_id, phase), (node, expected));
+    }
     assert!(rx.try_recv().is_err());
 }

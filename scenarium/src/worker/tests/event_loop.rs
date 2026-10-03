@@ -158,9 +158,14 @@ async fn one_task_panicking_stops_the_loop() {
     let mut activities = Vec::new();
     loop {
         match w.report().await {
-            WorkerReport::Status(status) => {
-                if activities.last() != Some(&status.activity) {
-                    activities.push(status.activity);
+            WorkerReport::Activity(activity) => {
+                if activities.last() != Some(&activity) {
+                    activities.push(activity);
+                }
+            }
+            WorkerReport::Completed(summary) => {
+                if activities.last() != Some(&summary.activity) {
+                    activities.push(summary.activity);
                 }
             }
             WorkerReport::Error(WorkerError::Execution {
@@ -172,6 +177,7 @@ async fn one_task_panicking_stops_the_loop() {
             }
             WorkerReport::Installed { .. }
             | WorkerReport::Cleared
+            | WorkerReport::Progress { .. }
             | WorkerReport::Error(
                 WorkerError::Execution { .. }
                 | WorkerError::CacheEviction { .. }

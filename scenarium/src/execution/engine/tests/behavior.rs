@@ -3,7 +3,7 @@ use super::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 #[tokio::test]
-async fn execute_emits_started_then_finished_progress_per_node() {
+async fn execute_emits_started_then_succeeded_progress_per_node() {
     use crate::execution::report::RunPhase;
 
     let mut e = TestEngine::over(TestGraph::sample());
@@ -24,8 +24,8 @@ async fn execute_emits_started_then_finished_progress_per_node() {
         );
         assert_eq!(started_name, finished_name, "one node brackets itself");
         assert!(
-            matches!(finished_phase, RunPhase::Finished { elapsed_secs } if *elapsed_secs >= 0.0),
-            "second of pair is Finished with non-negative elapsed",
+            matches!(finished_phase, RunPhase::Succeeded { elapsed_secs } if *elapsed_secs >= 0.0),
+            "second of pair is a success with non-negative elapsed",
         );
         started.push(started_name);
     }
@@ -34,6 +34,30 @@ async fn execute_emits_started_then_finished_progress_per_node() {
     // the nodes that finally executed.
     assert_eq!(started, run.ran());
     assert_eq!(started.len(), run.ran_node_count);
+}
+
+/// A lambda that fails reports its finish as a failure, so a host never paints it executed; the
+/// consumers it starves never start.
+#[tokio::test]
+async fn a_failing_node_finishes_as_a_failure() {
+    use crate::execution::report::RunPhase;
+
+    let mut e = TestEngine::over(TestGraph::sample());
+    e.edit(|g| g.fails("sum", "boom"));
+    let ReportedRun { progress, .. } = e.run_sinks_reporting().await;
+    let sum: Vec<RunPhase> = progress
+        .iter()
+        .filter(|(name, _)| *name == "sum")
+        .map(|&(_, phase)| phase)
+        .collect();
+    assert!(
+        matches!(
+            sum.as_slice(),
+            [RunPhase::Started { .. }, RunPhase::Failed { .. }]
+        ),
+        "{sum:?}"
+    );
+    assert!(progress.iter().all(|(name, _)| *name != "mult"));
 }
 
 #[tokio::test]

@@ -32,7 +32,7 @@ use crate::execution::seeds::RunSeeds;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::identity::{EventPort, NodeId};
 use crate::testing::graph::TestGraph;
-use crate::worker::status::{WorkerStatus, WorkerStatusKind};
+use crate::worker::run_summary::RunSummary;
 use crate::{DynamicValue, RamUsage};
 
 /// A [`TestGraph`] with a live engine over it.
@@ -211,7 +211,7 @@ impl TestEngine {
             progress: reporter
                 .progress
                 .iter()
-                .map(|event| (names.name(event.node_id), event.phase))
+                .map(|&(node_id, phase)| (names.name(node_id), phase))
                 .collect(),
             run: RunOutcome::snapshot(graph, engine, outcome),
         }
@@ -417,24 +417,16 @@ impl RunOutcome {
         }
     }
 
-    /// The same snapshot taken from a status a [`Worker`] published.
+    /// The same snapshot taken from the summary a [`Worker`] published.
     ///
-    /// A status carries the run's rows and its whole-run header, and nothing
+    /// A summary carries the run's rows and its whole-run header, and nothing
     /// else: the worker publishes what the run *produced*, never how the
     /// schedule walked it. So this fills [`ran`](Self::ran) with the same names
-    /// sorted, and the events — which a status also does not carry — stay
+    /// sorted, and the events — which a summary also does not carry — stay
     /// empty.
     ///
     /// [`Worker`]: crate::worker::Worker
-    pub(crate) fn published(graph: &TestGraph, status: &WorkerStatus) -> Self {
-        let WorkerStatusKind::Completed {
-            executed_node_count,
-            cancelled,
-            ..
-        } = status.kind
-        else {
-            panic!("only a completed status carries a run");
-        };
+    pub(crate) fn published(graph: &TestGraph, status: &RunSummary) -> Self {
         let names = NameMap::of(graph);
         let mut outcome = Self {
             ran: Vec::new(),
@@ -448,8 +440,8 @@ impl RunOutcome {
                 .iter()
                 .map(|entry| entry.message.clone())
                 .collect(),
-            ran_node_count: executed_node_count,
-            cancelled,
+            ran_node_count: status.executed_node_count,
+            cancelled: status.cancelled,
             triggered_events: Vec::new(),
             armed_events: Vec::new(),
             cache_ram: status.cache_ram,
