@@ -1,4 +1,4 @@
-//! Whole-editor test harness: drives [`Editor::frame`] through palantir's
+//! Whole-editor test harness: drives [`Session::frame`] through palantir's
 //! [`UiHarness`], so a test can feed a real pointer event and assert on
 //! what the editor did with it.
 //!
@@ -9,7 +9,7 @@
 //! pointer event and an intent: hit-testing, response routing, pane scoping.
 //!
 //! **The record closure runs once per record pass, not once per frame.**
-//! `Editor::frame` is called from `App::record`, so on a frame with
+//! `Session::frame` is called from `App::record`, so on a frame with
 //! pending action input it runs *twice*, exactly as in production. That
 //! is deliberate — it is the behaviour under test. What a caller must
 //! not do is accumulate across frames on the assumption of one call per
@@ -144,7 +144,7 @@ impl SessionHarness {
         // held input, which is where a chord pressed before a click lands.
         let mut commands = Vec::new();
         ui.frame(|recorder: &mut Ui| {
-            // Deliberately dropped: production hands this to `App::frame`,
+            // Deliberately dropped: production hands this to `App::record`,
             // which owns the app's one `request_relayout`. This harness
             // asserts on commands and documents, not on layout passes.
             let _needs_relayout = session.frame(recorder, ctx, preferences, requests);

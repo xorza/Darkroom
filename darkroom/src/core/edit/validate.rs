@@ -15,9 +15,8 @@
 //! Two failure modes motivate the split. Some of these guard *panics*:
 //! `Graph::insert` panics on a duplicate id, and `Graph::attach_node` on a
 //! node already present. The rest guard *corruption*: state that applies cleanly
-//! and leaves a document `Document::validate` rejects — which, because saving
-//! validates only in debug builds, means a project that writes fine and won't
-//! reopen.
+//! and leaves a document `Document::validate` rejects — which saving refuses,
+//! so a project the user can no longer save.
 
 use glam::Vec2;
 use scenarium::{Binding, BindingEntry, Graph, InputPort, Library, Node, NodeId, NodeKind};

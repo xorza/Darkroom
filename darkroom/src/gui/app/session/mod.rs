@@ -186,9 +186,8 @@ impl Session {
     /// Every chord is sampled with `key_pressed` each frame so all
     /// stay subscribed for palantir's wake-gate (sampling them all up
     /// front, not short-circuited, so one chord firing doesn't drop
-    /// the others' subscription that frame). Save-As (Ctrl+Shift+S) is
-    /// checked before Save (Ctrl+S) so the shift variant wins its
-    /// combo. Theme actions are menu-only — no shortcut.
+    /// the others' subscription that frame). Palantir matches modifiers
+    /// exactly, so Ctrl+Shift+S never also reads as Ctrl+S.
     fn menu_shortcut(ui: &mut Ui, requests: &mut Requests) {
         let new = ui.key_pressed(NEW_SHORTCUT);
         let open = ui.key_pressed(OPEN_SHORTCUT);
