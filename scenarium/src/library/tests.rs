@@ -141,19 +141,12 @@ fn an_identical_type_registers_again_and_a_conflict_panics() {
     );
 }
 
+/// `add` refuses what `Func::validate` refuses, naming the rule; the rules
+/// themselves are `validate`'s tests.
 #[test]
-fn add_rejects_invalid_function_declarations() {
-    for func in [
-        testing::stub_func(FuncId::nil(), "nil"),
-        testing::stub_func(FuncId::unique(), "wildcard")
-            .input(FuncInput::required("value", DataType::Any))
-            .wildcard_output("value", 1),
-    ] {
-        let result = panic::catch_unwind(AssertUnwindSafe(|| {
-            Library::default().add(func);
-        }));
-        assert!(result.is_err(), "invalid declaration was registered");
-    }
+#[should_panic(expected = "invalid function declaration: NilId")]
+fn add_refuses_a_declaration_validate_refuses() {
+    Library::default().add(testing::stub_func(FuncId::nil(), "nil"));
 }
 
 /// A func declaring a type as an enum while that type is registered

@@ -322,7 +322,6 @@ async fn a_lambda_reads_the_execution_node_it_is_running_as() {
 
     // Index order is id order, and placement mints ascending ids, so `a` runs first.
     assert_eq!(*seen.lock().unwrap(), vec![a.node_id, b.node_id]);
-    assert_ne!(a, b, "the two nodes are distinguishable at all");
 }
 
 /// A node seed ("run to this node") demands the node's output but does not

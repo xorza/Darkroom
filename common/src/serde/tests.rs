@@ -26,7 +26,7 @@ fn every_format_round_trips_and_appends() {
         label: "payload".to_string(),
         count: 42,
     };
-    for format in [SerdeFormat::Ron, SerdeFormat::Bitcode] {
+    for format in SerdeFormat::ALL {
         let bytes = serialize(&value, format).unwrap();
         let back: TestValue = deserialize(&bytes, format).unwrap();
         assert_eq!(back, value, "{format:?}");

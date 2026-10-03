@@ -95,11 +95,18 @@ async fn a_cancel_with_no_active_run_does_not_reach_the_next_one() {
     assert_eq!(run.ran_node_count, 1, "the run completed in full");
 }
 
+/// A `Sync` sent behind a run is acknowledged only after the run reported:
+/// the completion is already queued when `settle` returns.
 #[tokio::test]
 async fn sync_fires_after_execution() {
     let mut w = TestWorker::frames();
 
     w.settle([w.update(), w.fire("Frame Event", 0)]).await;
 
-    w.run().await;
+    assert!(
+        w.drain()
+            .iter()
+            .any(|report| matches!(report, WorkerReport::Completed(_))),
+        "the run completed before the sync was acknowledged"
+    );
 }

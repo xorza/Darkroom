@@ -444,42 +444,56 @@ async fn malformed_header_lengths_tags_and_const_values_are_rejected() {
     let library = Library::default();
     let original = encoded(digest, &outputs, &library).await;
 
-    let mut malformed = Vec::new();
-    let mut wrong_magic = original.clone();
-    wrong_magic[0] ^= 0xff;
-    malformed.push(wrong_magic);
-    let mut wrong_version = original.clone();
-    wrong_version[8..12].copy_from_slice(&FORMAT_VERSION.wrapping_add(1).to_le_bytes());
-    malformed.push(wrong_version);
-    let mut reserved = original.clone();
-    reserved[FIXED_LEN + 1] = 1;
-    malformed.push(reserved);
-    let mut unknown_tag = original.clone();
-    unknown_tag[FIXED_LEN] = 9;
-    malformed.push(unknown_tag);
-    let mut wrong_payload_len = original.clone();
+    let corrupt = |edit: &dyn Fn(&mut Vec<u8>)| {
+        let mut bytes = original.clone();
+        edit(&mut bytes);
+        bytes
+    };
     let length_offset = FIXED_LEN + PAYLOAD_LEN_OFFSET as usize;
-    wrong_payload_len[length_offset..length_offset + 8].copy_from_slice(&3u64.to_le_bytes());
-    malformed.push(wrong_payload_len);
-    let mut wrong_body_len = original.clone();
-    wrong_body_len[BODY_LEN_OFFSET as usize..BODY_LEN_OFFSET as usize + 8]
-        .copy_from_slice(&3u64.to_le_bytes());
-    malformed.push(wrong_body_len);
-    let mut trailing = original.clone();
-    trailing.push(0);
-    malformed.push(trailing);
-
-    for bytes in malformed {
+    let body_offset = BODY_LEN_OFFSET as usize;
+    let cases: [(&str, Vec<u8>); 7] = [
+        (
+            "cache header has the wrong magic",
+            corrupt(&|b| b[0] ^= 0xff),
+        ),
+        (
+            "cache header has an unsupported version",
+            corrupt(&|b| b[8..12].copy_from_slice(&FORMAT_VERSION.wrapping_add(1).to_le_bytes())),
+        ),
+        (
+            "cache descriptor reserved bytes are not zero",
+            corrupt(&|b| b[FIXED_LEN + 1] = 1),
+        ),
+        (
+            "cache descriptor has an unknown value tag",
+            corrupt(&|b| b[FIXED_LEN] = 9),
+        ),
+        (
+            "cache descriptor lengths do not equal the declared body length",
+            corrupt(&|b| b[length_offset..length_offset + 8].copy_from_slice(&3u64.to_le_bytes())),
+        ),
+        (
+            "cache header and body lengths do not equal the file length",
+            corrupt(&|b| b[body_offset..body_offset + 8].copy_from_slice(&3u64.to_le_bytes())),
+        ),
+        (
+            "cache header and body lengths do not equal the file length",
+            corrupt(&|b| b.push(0)),
+        ),
+    ];
+    for (refusal, bytes) in cases {
+        let error = covers_outputs(
+            &mut Cursor::new(&bytes),
+            bytes.len() as u64,
+            digest,
+            &outputs,
+            library.codecs(),
+        )
+        .await
+        .unwrap_err();
         assert!(
-            covers_outputs(
-                &mut Cursor::new(&bytes),
-                bytes.len() as u64,
-                digest,
-                &outputs,
-                library.codecs(),
-            )
-            .await
-            .is_err()
+            matches!(&error, CodecFormatError::Frame(message) if message == refusal),
+            "{refusal}: {error}"
         );
     }
 

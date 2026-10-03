@@ -102,3 +102,46 @@ macro_rules! id_type {
         }
     };
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::serde::serde_format::SerdeFormat;
+    use crate::serde::{deserialize, serialize};
+
+    crate::id_type!(SampleId);
+
+    const SPELLED: &str = "3effbd19-d4a8-4a9b-a931-78fd0e4f8adb";
+
+    /// The newtype is the UUID it wraps, in every form it converts through.
+    #[test]
+    fn an_id_is_the_uuid_it_wraps() {
+        let id = SampleId::literal(SPELLED);
+        assert_eq!(id.to_string(), SPELLED);
+        assert_eq!(SPELLED.parse::<SampleId>().unwrap(), id);
+        assert_eq!(SampleId::from_u128(id.as_u128()), id);
+        assert_eq!(uuid::Uuid::from(id), id.as_uuid());
+        assert!(!id.is_nil());
+        assert!(SampleId::default().is_nil());
+        assert_eq!(SampleId::default(), SampleId::nil());
+        assert!(!SampleId::unique().is_nil());
+        for format in SerdeFormat::ALL {
+            let bytes = serialize(&id, format).unwrap();
+            assert_eq!(
+                deserialize::<SampleId>(&bytes, format).unwrap(),
+                id,
+                "{format:?}"
+            );
+        }
+    }
+
+    /// A malformed id fails with the UUID crate's own error.
+    #[test]
+    fn a_malformed_id_keeps_the_uuid_error() {
+        let input = "not-a-uuid";
+        let error: uuid::Error = input.parse::<SampleId>().unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            uuid::Uuid::parse_str(input).unwrap_err().to_string()
+        );
+    }
+}

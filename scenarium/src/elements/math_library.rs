@@ -389,6 +389,8 @@ mod tests {
         FuncInvoker::default().call(func, values.to_vec()).await
     }
 
+    type Kernel = fn(f64) -> f64;
+
     fn float(value: f64) -> DynamicValue {
         ConstValue::Float(value).into()
     }
@@ -409,6 +411,29 @@ mod tests {
         let divide = invoke("Divide", &[float(7.0), float(3.0)]).await.unwrap();
         assert_eq!(divide[0].as_f64(), Some(7.0 / 3.0));
         assert_eq!(divide[1].as_f64(), Some(1.0));
+
+        // One input at which the seven functions all differ, so a func wired
+        // to another's kernel fails its row.
+        let unary: [(&str, Kernel); 7] = [
+            ("Square Root", f64::sqrt),
+            ("Sine", f64::sin),
+            ("Cosine", f64::cos),
+            ("Tangent", f64::tan),
+            ("Arcsine", f64::asin),
+            ("Arccosine", f64::acos),
+            ("Arctangent", f64::atan),
+        ];
+        for (name, kernel) in unary {
+            let outputs = invoke(name, &[float(0.5)]).await.unwrap();
+            assert_eq!(outputs[0].as_f64(), Some(kernel(0.5)), "{name}(0.5)");
+        }
+        let at_half: Vec<f64> = unary.iter().map(|(_, kernel)| kernel(0.5)).collect();
+        for (i, value) in at_half.iter().enumerate() {
+            assert!(
+                !at_half[i + 1..].contains(value),
+                "the fixture tells the ops apart"
+            );
+        }
 
         let text = DynamicValue::Static(ConstValue::String("not a number".into()));
         assert!(invoke("Add", &[text.clone(), float(3.0)]).await.is_err());
