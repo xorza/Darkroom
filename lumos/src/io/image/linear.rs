@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use imaginarium::{Buffer2, ChannelCount, FileFormat, Image};
+use imaginarium::{Buffer2, ChannelCount, ColorFormat, FileFormat, Image};
 use rayon::prelude::*;
 
 use crate::image_ops::SAMPLES_PER_BLOCK;
@@ -146,6 +146,15 @@ impl LinearImage {
 
     pub fn is_rgb(&self) -> bool {
         matches!(self.pixels, LinearPixels::Rgb(_))
+    }
+
+    /// The interleaved format these planes repack to: `RGB_F32` or `L_F32`.
+    pub fn color_format(&self) -> ColorFormat {
+        if self.is_rgb() {
+            ColorFormat::RGB_F32
+        } else {
+            ColorFormat::L_F32
+        }
     }
 
     /// Get channel as Buffer2 reference (0=L or R, 1=G, 2=B).

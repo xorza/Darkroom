@@ -29,7 +29,6 @@ Severity: Medium — separate gestures merge into one entry, merges leave phanto
 Severity: Medium — full-frame copies on every stack, load, cache write and GPU download, on images of hundreds of MB.
 
 - [ ] `lens/src/astro/nodes/io.rs` `register` (Load Astro Image) / `lumos/src/io/image/preview_image.rs` — `PreviewImage::from(LinearImage)` interleaves a FITS/RAW decode and the first astro node deinterleaves it again: two full copies per load. Let the preview product hand back its planes.
-- [ ] `lens/src/image/codec/mod.rs` `ImageCodec::encode` / `decode` — always writes `image.interleaved()` and restores `InterleavedCpu`, so caching an astro output repacks planes and a cache hit deinterleaves again; `decode` zero-fills with `Image::new_black` before `read_exact` overwrites every byte.
 
 ## `darkroom::core` claims to be frontend-free but imports `gui` and palantir
 Severity: Medium — the documented layering does not hold.
@@ -75,7 +74,7 @@ Severity: Low — `Option`s that must be `Some`, sentinels, and caches of comput
 Severity: Low — idioms written 4–37 times, already drifting.
 
 - [ ] `lens/src/config_node.rs` — `enum_input` is not part of the config bridge and its doc says "Shared by both libraries" though only the image library calls it (both `ConversionFormat` sites override its default); `add_config_builder` hard-codes `.category("Astro")`.
-- [ ] `lens/src/image/mod.rs` `Image::desc`'s planar arm re-derives the `LinearImage → ColorFormat` mapping lumos owns; `astro/nodes/io.rs` `ASTRO_IMAGE_PATH_DATA_TYPE` is `pub(crate)` but used in one file; `astro/mod.rs` module doc says frames flow as `RGB_F32` `Image`, contradicting the planar/interleaved `Pixels` design.
+- [ ] `lens/src/astro/nodes/io.rs` `ASTRO_IMAGE_PATH_DATA_TYPE` is `pub(crate)` but used in one file; `astro/mod.rs` module doc says frames flow as `RGB_F32` `Image`, contradicting the planar/interleaved `Pixels` design.
 
 ## darkroom core keeps containers and checks it does not need
 Severity: Low.
