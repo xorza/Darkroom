@@ -191,22 +191,6 @@ impl LinearImage {
         self.pixels.mean()
     }
 
-    /// Per-sample parallel in-place map over every plane. For work that treats each sample alike
-    /// whatever channel it belongs to; [`Self::map_rgb`] is the form for work that needs the whole
-    /// pixel.
-    pub(crate) fn map_samples(&mut self, sample: impl Fn(f32) -> f32 + Sync) {
-        for plane in self.planes_mut() {
-            plane
-                .pixels_mut()
-                .par_chunks_mut(SAMPLES_PER_BLOCK)
-                .for_each(|block| {
-                    for value in block {
-                        *value = sample(*value);
-                    }
-                });
-        }
-    }
-
     /// Per-pixel parallel in-place map that needs all three channels at once. A no-op on a
     /// grayscale image, which has no cross-channel relationship for `rgb` to act on — every caller
     /// (SCNR, background neutralization, the colour-preserving stretch) is meaningless in mono and
@@ -245,59 +229,55 @@ impl LinearImage {
         );
         let mut intensity = vec![0.0f32; self.pixel_count()];
         intensity
-            .par_iter_mut()
-            .zip(r.par_iter())
-            .zip(g.par_iter())
-            .zip(b.par_iter())
-            .for_each(|(((out, &r), &g), &b)| *out = Rgb { r, g, b }.intensity());
+            .par_chunks_mut(SAMPLES_PER_BLOCK)
+            .zip(r.par_chunks(SAMPLES_PER_BLOCK))
+            .zip(g.par_chunks(SAMPLES_PER_BLOCK))
+            .zip(b.par_chunks(SAMPLES_PER_BLOCK))
+            .for_each(|(((out, r), g), b)| {
+                for (((out, &r), &g), &b) in out.iter_mut().zip(r).zip(g).zip(b) {
+                    *out = Rgb { r, g, b }.intensity();
+                }
+            });
         Buffer2::new(self.width(), self.height(), intensity)
     }
 
     /// Enhance in the intensity (luminance) domain: take the combined intensity, transform it with
-    /// `map`, then rescale every channel hue-preservingly so the new intensity matches. The shape
-    /// shared by the display enhancers ([`crate::image_ops::hdr`],
-    /// [`crate::image_ops::local_contrast`]).
+    /// `map`, then move every pixel to its new intensity with its hue kept
+    /// ([`Rgb::with_intensity`]); L takes the new intensity clamped to `[0, 1]`. The shape shared
+    /// by the display enhancers ([`crate::image_ops::hdr`], [`crate::image_ops::local_contrast`]).
     pub(crate) fn remap_intensity(&mut self, map: impl FnOnce(&Buffer2<f32>) -> Buffer2<f32>) {
-        let intensity = self.intensity_plane();
-        let mapped = map(&intensity);
-        self.apply_intensity_remap(&intensity, &mapped);
-    }
-
-    /// Hue-preserving intensity remap: scale each pixel's channels by `mapped/intensity`
-    /// (with a highlight cap so a channel can't clip past white and shift hue); L takes
-    /// `mapped` directly. Output clamped to `[0, 1]`. `intensity`/`mapped` must match the
-    /// image's dimensions.
-    fn apply_intensity_remap(&mut self, intensity: &Buffer2<f32>, mapped: &Buffer2<f32>) {
+        let mapped = map(&self.intensity_plane());
         if !self.is_rgb() {
             self.channel_mut(0)
                 .pixels_mut()
-                .par_iter_mut()
-                .zip(mapped.pixels().par_iter())
-                .for_each(|(p, &m)| *p = m.clamp(0.0, 1.0));
+                .par_chunks_mut(SAMPLES_PER_BLOCK)
+                .zip(mapped.pixels().par_chunks(SAMPLES_PER_BLOCK))
+                .for_each(|(out, mapped)| {
+                    for (out, &m) in out.iter_mut().zip(mapped) {
+                        *out = m.clamp(0.0, 1.0);
+                    }
+                });
             return;
         }
         let [r, g, b] = self.rgb_planes_mut();
-        r.par_iter_mut()
-            .zip(g.par_iter_mut())
-            .zip(b.par_iter_mut())
-            .zip(intensity.pixels().par_iter())
-            .zip(mapped.pixels().par_iter())
-            .for_each(|((((r, g), b), &i), &m)| {
-                if i <= 0.0 {
-                    return;
+        r.par_chunks_mut(SAMPLES_PER_BLOCK)
+            .zip(g.par_chunks_mut(SAMPLES_PER_BLOCK))
+            .zip(b.par_chunks_mut(SAMPLES_PER_BLOCK))
+            .zip(mapped.pixels().par_chunks(SAMPLES_PER_BLOCK))
+            .for_each(|(((r, g), b), mapped)| {
+                for (((r, g), b), &m) in
+                    r.iter_mut().zip(g.iter_mut()).zip(b.iter_mut()).zip(mapped)
+                {
+                    let out = Rgb {
+                        r: *r,
+                        g: *g,
+                        b: *b,
+                    }
+                    .with_intensity(m);
+                    *r = out.r;
+                    *g = out.g;
+                    *b = out.b;
                 }
-                let gain = m / i;
-                let (mut nr, mut ng, mut nb) = (*r * gain, *g * gain, *b * gain);
-                let maxc = nr.max(ng).max(nb);
-                if maxc > 1.0 {
-                    let s = 1.0 / maxc;
-                    nr *= s;
-                    ng *= s;
-                    nb *= s;
-                }
-                *r = nr.max(0.0);
-                *g = ng.max(0.0);
-                *b = nb.max(0.0);
             });
     }
 
@@ -439,24 +419,6 @@ mod tests {
     }
 
     #[test]
-    fn map_samples_maps_every_plane() {
-        let mut image = rgb_image(
-            Size2us::new(2, 1),
-            vec![0.1, 0.4],
-            vec![0.2, 0.5],
-            vec![0.3, 0.6],
-        );
-        image.map_samples(|v| v + 1.0);
-        assert_eq!(image.channel(0).pixels(), &[1.1, 1.4]);
-        assert_eq!(image.channel(1).pixels(), &[1.2, 1.5]);
-        assert_eq!(image.channel(2).pixels(), &[1.3, 1.6]);
-
-        let mut gray = gray_image(Size2us::new(3, 1), vec![0.0, 0.25, 0.5]);
-        gray.map_samples(|v| v + 0.25);
-        assert_eq!(gray.channel(0).pixels(), &[0.25, 0.5, 0.75]);
-    }
-
-    #[test]
     fn intensity_plane_is_channel_mean_for_rgb_and_identity_for_l() {
         // RGB: (0.3,0,0) → 0.1, (0.6,0.6,0.6) → 0.6 (mean; approx for the /3 rounding).
         let rgb = rgb_image(
@@ -472,16 +434,20 @@ mod tests {
         assert_eq!(l.intensity_plane().pixels(), &[0.2, 0.7]);
     }
 
+    /// Doubling the intensity doubles every channel, `2I / I` being 2 exactly; a mono plane takes
+    /// the mapped intensity itself, clamped to `[0, 1]`.
     #[test]
-    fn apply_intensity_remap_scales_rgb_hue_preservingly() {
-        // One pixel (0.2,0.1,0.1), I = 0.4/3; double the mapped intensity → gain 2.
+    fn remap_intensity_moves_pixels_with_their_hue() {
         let mut image = rgb_image(Size2us::new(1, 1), vec![0.2], vec![0.1], vec![0.1]);
-        let intensity = image.intensity_plane();
-        let mapped = Buffer2::new(1, 1, vec![intensity.pixels()[0] * 2.0]);
-        image.apply_intensity_remap(&intensity, &mapped);
-        // each channel x2, none exceeds 1 → no cap
+        image.remap_intensity(|intensity| {
+            Buffer2::new(1, 1, intensity.pixels().iter().map(|&i| 2.0 * i).collect())
+        });
         assert_eq!(image.channel(0).pixels(), &[0.4]);
         assert_eq!(image.channel(1).pixels(), &[0.2]);
         assert_eq!(image.channel(2).pixels(), &[0.2]);
+
+        let mut gray = gray_image(Size2us::new(3, 1), vec![0.2, 0.5, 0.7]);
+        gray.remap_intensity(|_| Buffer2::new(3, 1, vec![-0.5, 0.25, 1.5]));
+        assert_eq!(gray.channel(0).pixels(), &[0.0, 0.25, 1.0]);
     }
 }

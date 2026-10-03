@@ -11,10 +11,12 @@ use common::Introspect;
 use rayon::prelude::*;
 
 use crate::error::InvalidConfigField;
+use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::image_ops::error::OpError;
 use crate::image_ops::wavelet::{atrous_smooth, max_scales};
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
+use crate::math::sum;
 use imaginarium::Buffer2;
 use std::mem;
 
@@ -105,13 +107,18 @@ fn hdr_map(intensity: &Buffer2<f32>, config: &Hdr) -> Buffer2<f32> {
     }
     let mut residual = c_curr;
 
-    let mean = residual.pixels().iter().sum::<f32>() / residual.len() as f32;
+    // Accumulated in f64: a sequential f32 fold over a 24 MP plane drifts by percents.
+    let mean = sum::mean_f32(residual.pixels());
     let amount = config.amount;
     residual
         .pixels_mut()
-        .par_iter_mut()
-        .zip(intensity.pixels().par_iter())
-        .for_each(|(r, &i)| *r = i - amount * (*r - mean));
+        .par_chunks_mut(SAMPLES_PER_BLOCK)
+        .zip(intensity.pixels().par_chunks(SAMPLES_PER_BLOCK))
+        .for_each(|(residual, intensity)| {
+            for (r, &i) in residual.iter_mut().zip(intensity) {
+                *r = i - amount * (*r - mean);
+            }
+        });
     residual
 }
 

@@ -97,12 +97,6 @@ Severity: Medium — two copies of the role → preset table; ~150 lines of lumo
 - [ ] `lumos/src/lib.rs` exports `stack`, `stack_images`, `StackFrame`, `align_and_stack` and `DefectMap` (with `pub` `detect_hot`/`detect_cold`/`correct`) — none has a non-test caller in the workspace.
 - [ ] `lens/src/astro/nodes/calibration.rs` `register` — the "Sigma" input is described as the "Sigma-clipping rejection threshold when stacking", but it is the defect-detection threshold passed to `from_images`.
 
-## Normalization and image ops lose precision they claim to keep
-Severity: Medium — measurable error on every real frame where an exact or stable form is available.
-
-- [ ] `lumos/src/image_ops/hdr/mod.rs` `hdr_map` — `residual.pixels().iter().sum::<f32>() / len` is a sequential f32 fold; on a 6032×4028 plane a true mean of 0.2000 comes out 0.1885 (−5.8%), shifting every output pixel by `amount·Δmean`. `LinearPixels::mean` already does it exactly (f64 partials via `math::sum::sum_f32`).
-- [ ] `lumos/src/image_ops/stretching/mod.rs` `ghs_base_t` / `ghs_base_tp` / `GHS_EPS` — the general forms cancel as `b → 0` or `b → −1`; f32 vs f64 at d = 5 gives 18.6% error at b = 2e-6, 4.5% at 1e-5, 20.6% at −1 + 2e-6. The `1e-6` threshold protects only the exact limit. Use `−expm1(−ln_1p(b·d·u)/b)`-style forms, stable through both limits.
-
 ## scenarium's `WorkerStatus` folds three messages into one record
 Severity: Medium — hosts receive states that cannot happen, darkroom handles them anyway, and live progress paints failed nodes as executed.
 
@@ -132,10 +126,7 @@ Severity: Medium — the same default is baked in two crates and goes stale sile
 ## The same constant or formula is defined more than once, sometimes truncated
 Severity: Low — two sources for one fact; the copies already differ in precision or convention.
 
-- [ ] Spline evaluation: `lumos/src/stacking/star_detection/background/simd/mod.rs` `SplineSegment::eval` re-implements `background_mesh::spline::cubic_spline_eval` with a "keep in sync" comment. `moffat_fit/mod.rs` `int_pow` uses `powi` for n > 5 while the SIMD versions use repeated squaring; three copies of the same table.
-- [ ] The hue-preserving intensity rescale twice: `lumos/src/image_ops/stretching/mod.rs` `color_preserve_pixel` (maps `I ≤ 0` to black, leaves negative channels) vs `lumos/src/io/image/linear.rs` `LinearImage::apply_intensity_remap` (leaves `I ≤ 0` untouched despite "Output clamped to [0, 1]", clamps negatives elsewhere).
-- [ ] Median-and-MAD by hand where `MedianMad::of_mut` exists: `lumos/src/image_ops/denoise/mod.rs` `estimate_sigma` (and its `DenoiseScratch::dev` buffer), `lumos/src/stacking/frame_store/frame_stats.rs` channel-stats closure (copies already-owned data again), `calibration_masters/defect_map/mod.rs` `compute_per_color_residual_stats` (inline `abs_deviation_inplace`). `FrameStats::measure` on the null-mask branch gathers into one `Vec` then copies into a second (3× frame bytes against `DECODE_TRANSIENT_FACTOR = 2`).
-- [ ] Subsample caps: `color_calibration` `MAX_BACKGROUND_SAMPLES` (1 000 000) claims to match `defect_map` `MAX_MEDIAN_SAMPLES` (100 000); `stretching` `MAX_STRETCH_SAMPLES` (1 000 000) claims to match `color_calibration`/`denoise`; `denoise` `MAX_NOISE_SAMPLES` is 500 000. The stride `(len / cap).max(1)` rounds down, so a plane of `cap..2·cap−1` samples is taken whole. The strided copy is written separately in `stretching::subsample`, `subsample_intensity`, `color_calibration::channel_background` and `denoise::estimate_sigma`; `subsample_intensity` and `estimate_sigma` contradict each other on whether `step_by` over `Zip` reads every element.
+- [ ] `moffat_fit/mod.rs` `int_pow` uses `powi` for n > 5 while the SIMD versions use repeated squaring; three copies of the same table.
 - [ ] `lumos/src/stacking/calibration_masters/defect_map/dark_background.rs` `DarkBackground::fit` — a second tiled background grid with a balanced partition (`tx * width / tiles_x`) and its own centres, while `background_mesh` uses `tx * tile_size` plus a remainder tile; it allocates `[Vec<f32>; 3]` per tile in the parallel loop instead of leasing from `JobScratchPool`. `background_mesh/mod.rs` `TileGrid::new_uninit` and `matches_layout` both compute `tile_size.min(w).min(h)`; `image_ops/background_extraction` `SKY_CLIP_ITERATIONS = 3` restates `BackgroundConfig`'s default, and `collect_samples` runs `compute_y_spline_derivatives` it never reads.
 
 ## Public API, dependencies and derives with no production user
@@ -159,13 +150,6 @@ Severity: Low — `Option`s that must be `Some`, sentinels, and caches of comput
 Severity: Low — exact or better-conditioned forms exist.
 
 - [ ] `lumos/src/stacking/combine/rejection/linear_fit_clip_config.rs` `LinearFitClipConfig::reject` — accumulates `sum_x`/`sum_xx` per pixel in f32 though they are `n(n−1)/2` and `(n−1)n(2n−1)/6`; centring `x` removes the cancellation in `denom`, and the `denom.abs() < f32::EPSILON` guard cannot fire for n ≥ 4.
-- [ ] `lumos/src/image_ops/local_contrast/mod.rs` `apply_luts` / `bin_of` — `lut[round(v·255)]` quantizes an f32 image to 256 levels (posterization); interpolate between bins. `build_tile_luts` gives clip-redistribution leftovers to the lowest bins (black bias; OpenCV strides), and `div_ceil` tiles can be empty yet get an identity LUT blended into neighbours.
-
-## SIMD backends and duplicated kernels disagree where nothing says why
-Severity: Low — results vary by CPU.
-
-- [ ] `lumos/src/image_ops/stretching/simd/mod.rs` — the vectorized Cephes `asinh` serves only RGB colour-preserving stretches; mono and `PerChannel` call libm `asinhf` per sample (the cost the AVX2 doc puts at ~30%), so one curve uses two `asinh` implementations. `simd/{avx2,neon}.rs` document `asinh_*` as "exact for all real x" / "≈1–2 ULP"; `logf(x + √(x²+1))` is accurate only in absolute terms (relative error ~6e-8/x for small x, cancellation for negative x).
-- [ ] `lumos/src/image_ops/stretching/mod.rs` `map_plane` duplicates `LinearImage::map_samples` loop for loop (mono under `ColorPreserving` vs `PerChannel` take different paths for identical work); the monomorphizing `match curve` is written three times. `image_ops/mod.rs` `SAMPLES_PER_BLOCK` records that per-sample rayon dispatch dominates cheap ops, yet `hdr::hdr_map`'s final pass, `denoise::denoise_plane`'s subtraction, `LinearImage::apply_intensity_remap` and `intensity_plane` are per-sample `par_iter` zips; `LinearPixels::mean` hard-codes `8192`.
 
 ## lumos error types route through each other in both directions
 Severity: Low — callers must match the same failure at two paths.

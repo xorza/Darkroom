@@ -133,7 +133,7 @@ fn reference_hdr(px: &[f32], size: Size2us, scales: usize, amount: f32) -> Vec<f
         mem::swap(&mut c_curr, &mut c_next);
     }
     let residual = c_curr.pixels();
-    let mean = residual.iter().sum::<f32>() / residual.len() as f32;
+    let mean = (residual.iter().map(|&v| f64::from(v)).sum::<f64>() / residual.len() as f64) as f32;
     let keep = 1.0 - amount;
     (0..size.pixel_count())
         .map(|i| {
@@ -158,6 +158,27 @@ fn hdr_matches_explicit_pyramid_reference() {
             (o - e).abs() < 1e-5,
             "collapsed formula matches the layer pyramid: {o} vs {e}"
         );
+    }
+}
+
+/// A flat plane has no large-scale contrast to compress: whatever the amount, it comes back as
+/// itself. Its residual is the plane to the smoothing's rounding, so its mean is too — when the
+/// mean is taken in f64. A sequential f32 fold over these 262 144 samples drifts by about n·ε/2
+/// = 1.6% of 0.2, which `amount` = 0.9 would carry into every pixel; the smoothing's own rounding
+/// is a few ulps of 0.2, held here to 8.
+#[test]
+fn a_flat_plane_comes_back_as_itself() {
+    let size = Size2us::new(512, 512);
+    let mut img = gray(size, vec![0.2; size.pixel_count()]);
+    Hdr {
+        scales: 5,
+        amount: 0.9,
+    }
+    .apply(&mut img)
+    .unwrap();
+    let bound = 8.0 * f32::EPSILON * 0.2;
+    for &v in img.channel(0).pixels() {
+        assert!((v - 0.2).abs() <= bound, "{v}");
     }
 }
 

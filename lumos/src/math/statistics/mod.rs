@@ -7,6 +7,7 @@ use crate::math::sum::mean_f32;
 use std::iter;
 
 pub(crate) mod float;
+pub(crate) mod subsample;
 
 /// A distribution's location and spread — what one pass over the values measures.
 ///

@@ -2,7 +2,8 @@
 
 use std::arch::x86_64::*;
 
-use crate::stacking::star_detection::background::simd::{SegmentRamp, SplineSegment};
+use crate::background_mesh::spline::spline_segment::SplineSegment;
+use crate::stacking::star_detection::background::simd::SegmentRamp;
 
 /// Evaluate cubic spline for 4 values using SSE4.1.
 #[target_feature(enable = "sse4.1")]

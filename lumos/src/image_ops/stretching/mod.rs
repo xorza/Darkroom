@@ -39,6 +39,7 @@ use crate::error::InvalidConfigField;
 use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::image_ops::error::OpError;
 use crate::io::image::linear::LinearImage;
+use crate::math::statistics::subsample::{MAX_STATISTIC_SAMPLES, Subsample};
 use crate::math::statistics::{MedianMad, median_mut};
 
 mod simd;
@@ -251,10 +252,11 @@ fn apply_per_channel_image(image: &mut LinearImage, method: StretchMethod) -> Re
     Ok(())
 }
 
-/// Uniform-stride subsample of a plane, capped at `MAX_STRETCH_SAMPLES` for the curve's median/MAD.
+/// A [`Subsample`] of a plane for the curve's median/MAD.
 fn subsample(plane: &[f32]) -> Vec<f32> {
-    let stride = (plane.len() / MAX_STRETCH_SAMPLES).max(1);
-    plane.iter().step_by(stride).copied().collect()
+    Subsample::new(plane.len(), MAX_STATISTIC_SAMPLES)
+        .of(plane)
+        .collect()
 }
 
 /// Curves that need no image statistics — built straight from their parameters. Returns `None` for
@@ -269,33 +271,23 @@ fn explicit_curve(method: StretchMethod) -> Option<Curve> {
     }
 }
 
-/// Cap on the sample count for the auto methods' median/MAD. A robust median+MAD converges far below
-/// this, so a uniform-stride subsample is statistically identical to selecting over every pixel —
-/// and avoids two full-resolution quickselects (matches `color_calibration` / `denoise`).
-const MAX_STRETCH_SAMPLES: usize = 1_000_000;
-
 /// Uniform-stride subsample of the combined intensity `I = (r+g+b)/3` (the sample itself for mono),
 /// computed from the planes directly — never materializing the full intensity plane just to throw
 /// all but every `stride`-th value away. Identical samples to subsampling
 /// [`LinearImage::intensity_plane`](crate::io::image::linear::LinearImage::intensity_plane).
 fn subsample_intensity(image: &LinearImage) -> Vec<f32> {
     let plane = image.channel(0).pixels();
-    let stride = (plane.len() / MAX_STRETCH_SAMPLES).max(1);
+    let sample = Subsample::new(plane.len(), MAX_STATISTIC_SAMPLES);
     if !image.is_rgb() {
-        return plane.iter().step_by(stride).copied().collect();
+        return sample.of(plane).collect();
     }
     let (g, b) = (image.channel(1).pixels(), image.channel(2).pixels());
-    // The one place the interleaved layout was genuinely better: a stride-`n` walk got r, g and b
-    // of each sampled pixel from a single cache line, where three planes cost three lines and three
-    // TLB streams. Running it in parallel hides that latency — the work is a pure map over indices.
-    //
-    // Indexed rather than `zip(g).zip(b).step_by(stride)` for a second reason: `step_by` on a
-    // nested `Zip` walks every element and discards all but each stride-th, reading all three planes
-    // in full instead of the 1/stride of them this needs.
-    (0..plane.len().div_ceil(stride))
+    // A stride-`n` walk over three planes costs three cache lines and three TLB streams per sampled
+    // pixel; running it in parallel hides that latency — the work is a pure map over indices.
+    (0..sample.count())
         .into_par_iter()
-        .map(|sample| {
-            let i = sample * stride;
+        .map(|k| {
+            let i = sample.index(k);
             Rgb {
                 r: plane[i],
                 g: g[i],
@@ -311,6 +303,14 @@ fn subsample_intensity(image: &LinearImage) -> Vec<f32> {
 /// valid display value.
 trait ToneCurve: Copy + Sync {
     fn eval(&self, x: f32) -> f32;
+
+    /// [`Self::eval`] over a block of samples, in place — where a curve with a vector kernel takes
+    /// it over.
+    fn eval_block(&self, block: &mut [f32]) {
+        for value in block {
+            *value = self.eval(*value);
+        }
+    }
 }
 
 /// STF: a linear clip-rescale `[black, 1] → [0, 1]`, then `MTF(midtones, ·)`.
@@ -391,36 +391,40 @@ impl ToneCurve for AsinhCurve {
         // highlights (or negative post-subtraction pixels) still land in display range.
         ((x * self.inv_beta).asinh() * self.inv_norm).clamp(0.0, 1.0)
     }
+
+    fn eval_block(&self, block: &mut [f32]) {
+        simd::asinh_plane(block, *self);
+    }
 }
 
-/// `b`-special-cases collapse below this — `b = −1` (logarithmic) and `b = 0` (exponential) are
-/// genuine limits where the general forms divide by `b` or `b + 1`.
-const GHS_EPS: f32 = 1e-6;
-
-/// GHS base hyperbolic function `T(u)` for `u ≥ 0`, selected on `b`. `T(0) = 0` in
-/// every case, which is what makes the curve continuous at the symmetry point.
+/// GHS base hyperbolic function `T(u)` for `u ≥ 0`, selected on `b`. `T(0) = 0` in every case,
+/// which is what makes the curve continuous at the symmetry point.
+///
+/// Written through `ln_1p`/`expm1` so it stays accurate as `b` nears its two limits: the textbook
+/// `1 − (1 + b·d·u)^(−1/b)` cancels as `b → 0` (in f32, 18.6% off at `b = 2e-6`, `d = 5`) and the
+/// `b < 0` form divides by `b + 1` as `b → −1`. Only the limits themselves, `b = 0` (exponential)
+/// and `b = −1` (logarithmic), take their own forms — the general ones are `0/0` there exactly.
+/// Each branch fixes its own scale, which the curve's normalization divides out.
 fn ghs_base_t(d: f32, b: f32, u: f32) -> f32 {
-    if (b + 1.0).abs() < GHS_EPS {
-        (1.0 + d * u).ln()
-    } else if b.abs() < GHS_EPS {
-        1.0 - (-d * u).exp()
+    if b == 0.0 {
+        -(-d * u).exp_m1()
+    } else if b == -1.0 {
+        (d * u).ln_1p() / d
     } else if b < 0.0 {
-        (1.0 - (1.0 - b * d * u).powf((b + 1.0) / b)) / (d * (b + 1.0))
+        -(((b + 1.0) / b) * (-b * d * u).ln_1p()).exp_m1() / (d * (b + 1.0))
     } else {
-        1.0 - (1.0 + b * d * u).powf(-1.0 / b)
+        -(-(b * d * u).ln_1p() / b).exp_m1()
     }
 }
 
 /// Derivative `T'(u)` of [`ghs_base_t`] — the slope of the linear shadow/highlight tails.
 fn ghs_base_tp(d: f32, b: f32, u: f32) -> f32 {
-    if (b + 1.0).abs() < GHS_EPS {
-        d / (1.0 + d * u)
-    } else if b.abs() < GHS_EPS {
+    if b == 0.0 {
         d * (-d * u).exp()
     } else if b < 0.0 {
-        (1.0 - b * d * u).powf(1.0 / b)
+        ((-b * d * u).ln_1p() / b).exp()
     } else {
-        d * (1.0 + b * d * u).powf(-(1.0 + b) / b)
+        d * (-((1.0 + b) / b) * (b * d * u).ln_1p()).exp()
     }
 }
 
@@ -429,7 +433,7 @@ fn ghs_base_tp(d: f32, b: f32, u: f32) -> f32 {
 /// monotonic. Four base evaluations are precomputed here; `eval` does two per pixel.
 #[derive(Debug, Clone, Copy)]
 struct GhsCurve {
-    /// `d ≈ 0` ⇒ the transform is the identity; short-circuit (the normalization would be `0/0`).
+    /// `d = 0`, or a range too small to normalize: the transform is the identity.
     identity: bool,
     d: f32,
     b: f32,
@@ -463,15 +467,17 @@ impl GhsCurve {
             t0: 0.0,
             inv_range: 1.0,
         };
-        if d < GHS_EPS {
-            return zero;
-        }
         let t_sp_lp = ghs_base_t(d, b, sp - lp);
         let tp_sp_lp = ghs_base_tp(d, b, sp - lp);
         let t_hp_sp = ghs_base_t(d, b, hp - sp);
         let tp_hp_sp = ghs_base_tp(d, b, hp - sp);
         let t0 = -lp * tp_sp_lp - t_sp_lp; // T1(0)
         let t1 = (1.0 - hp) * tp_hp_sp + t_hp_sp; // T4(1)
+        // `d = 0` is the identity, and a `d` so small that the curve's range underflows is it too:
+        // the normalization would divide by zero.
+        if d == 0.0 || !(t1 - t0).is_normal() {
+            return zero;
+        }
         Self {
             identity: false,
             t_sp_lp,
@@ -604,42 +610,25 @@ fn apply_curve_plane(plane: &mut [f32], curve: Curve) {
 }
 
 fn map_plane<C: ToneCurve>(plane: &mut [f32], curve: C) {
-    plane.par_chunks_mut(SAMPLES_PER_BLOCK).for_each(|block| {
-        for value in block {
-            *value = curve.eval(*value);
-        }
-    });
+    plane
+        .par_chunks_mut(SAMPLES_PER_BLOCK)
+        .for_each(|block| curve.eval_block(block));
 }
 
-/// Map one pixel under color-preserving stretch: run `curve` on the combined
-/// intensity and scale every channel by `f(I)/I`, with a hue-preserving highlight
-/// cap.
+/// Map one pixel under color-preserving stretch: `curve` on the combined intensity, the pixel moved
+/// to that intensity with its hue kept ([`Rgb::with_intensity`]).
 fn color_preserve_pixel<C: ToneCurve>(px: Rgb, curve: &C) -> Rgb {
-    let intensity = px.intensity();
-    // Sub-background pixels (≤ 0, possible after background subtraction) map to black.
-    if intensity <= 0.0 {
-        return Rgb::ZERO;
-    }
-    let scaled = px.scale(curve.eval(intensity) / intensity);
-    // Hue-preserving highlight cap: when a channel exceeds 1, divide all three by the max.
-    let maxc = scaled.r.max(scaled.g).max(scaled.b);
-    if maxc > 1.0 {
-        scaled.scale(1.0 / maxc)
-    } else {
-        scaled
-    }
+    px.with_intensity(curve.eval(px.intensity()))
 }
 
 /// Color-preserving stretch. Resolves the curve type once.
 ///
 /// On a grayscale image the combined intensity *is* the single channel, so "scale each channel by
-/// `f(I)/I`" reduces to evaluating the curve on that channel — `map_samples`, not `map_rgb`.
+/// `f(I)/I`" reduces to the curve on that plane.
 fn apply_color_preserving_image(image: &mut LinearImage, curve: Curve) {
     if !image.is_rgb() {
-        match curve {
-            Curve::Stf(c) => image.map_samples(|l| c.eval(l)),
-            Curve::Asinh(c) => image.map_samples(|l| c.eval(l)),
-            Curve::Ghs(c) => image.map_samples(|l| c.eval(l)),
+        for plane in image.planes_mut() {
+            apply_curve_plane(plane.pixels_mut(), curve);
         }
         return;
     }
