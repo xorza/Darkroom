@@ -109,10 +109,6 @@ const fn sample_format_name(result: &DecodingResult) -> &'static str {
 /// The dimensions as the `u32` the encoders take.
 fn encoder_dimensions(image: &Image) -> Result<[u32; 2]> {
     let desc = image.desc();
-    #[expect(
-        clippy::map_err_ignore,
-        reason = "`TryFromIntError` says only that the value did not fit, which the message says"
-    )]
     let fit = |extent: usize| {
         u32::try_from(extent).map_err(|_| {
             Error::UnsupportedFormat(format!("{desc} is larger than an image file can hold"))
