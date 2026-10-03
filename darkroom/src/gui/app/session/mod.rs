@@ -219,7 +219,7 @@ impl Session {
     /// frame — [`Self::frame`] runs per *record pass*, so a sweep here would
     /// run twice on a frame carrying action input.
     pub(super) fn reconcile_caches(&mut self) {
-        self.main_window.reconcile(&self.open.document);
+        self.main_window.reconcile(&self.open);
     }
 }
 

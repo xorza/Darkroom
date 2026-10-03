@@ -6,6 +6,7 @@ use scenarium::{Binding, InputPort};
 use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
+use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
 use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
@@ -109,9 +110,14 @@ impl ConnectionUI {
             });
         }
         // Latch a fresh port drag only when idle.
-        let candidates = drag_candidates(graph_ctx, preview_drag_modifier(ui));
+        // The output column drops out while the preview-spawn chord is
+        // held: that chord is the preview drag's, so the two controllers
+        // never both latch one press.
+        let preview_chord = preview_drag_modifier(ui);
         if self.state.is_idle()
-            && let Some(drag) = GlyphDrag::latch(&geometry.ports, candidates)
+            && let Some(drag) = GlyphDrag::latch(&geometry.ports, |port| {
+                !preview_chord || port.kind == PortKind::Input
+            })
             && graph_ctx.contains(drag.node())
         {
             self.state.latch(InFlight {
@@ -319,25 +325,6 @@ fn data_tint(theme: &Theme, graph_ctx: GraphCtx<'_>, src: PortRef, tgt: PortRef)
     )
 }
 
-/// Every port a fresh wire drag may latch on, a node's inputs before its
-/// outputs so the topmost recorded port wins ties (matches paint order).
-///
-/// The output column drops out while the preview-spawn chord is held
-/// ([`preview_drag_modifier`], passed in as `preview_chord` so the returned
-/// iterator doesn't keep `Ui` borrowed): that chord is reserved for the
-/// preview-spawn drag (see `preview_drag.rs`), so the two controllers never
-/// both latch the same press.
-fn drag_candidates(graph_ctx: GraphCtx<'_>, preview_chord: bool) -> impl Iterator<Item = PortRef> {
-    let kinds: &'static [PortKind] = if preview_chord {
-        &[PortKind::Input]
-    } else {
-        &[PortKind::Input, PortKind::Output]
-    };
-    graph_ctx
-        .nodes()
-        .flat_map(|n| kinds.iter().flat_map(move |&kind| n.ports(kind)))
-}
-
 /// Whether `port` is a const-only input — one that rejects a wired binding, so a
 /// dragged wire must never snap to it or start a bind from it.
 fn input_const_only(graph_ctx: GraphCtx<'_>, port: PortRef) -> bool {
@@ -347,7 +334,7 @@ fn input_const_only(graph_ctx: GraphCtx<'_>, port: PortRef) -> bool {
     graph_ctx
         .node(port.node_id)
         .and_then(|n| n.input(port.port_idx))
-        .is_some_and(crate::gui::graph_ctx::input_ctx::InputCtx::const_only)
+        .is_some_and(InputCtx::const_only)
 }
 
 /// Port currently under the pointer that is a compatible target for `start` —

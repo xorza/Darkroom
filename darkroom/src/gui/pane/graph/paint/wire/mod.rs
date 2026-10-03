@@ -176,11 +176,13 @@ impl<A: GlyphKey, B: GlyphKey> GlyphDrag<A, B> {
         Self { from, snap: None }
     }
 
-    /// Latch on the first of `keys` whose glyph began a drag this frame, or
-    /// `None` when no press landed on one. Candidate order is the caller's
-    /// tie-break — the topmost recorded glyph comes first.
-    pub(crate) fn latch(layer: &PortLayer<A>, keys: impl Iterator<Item = A>) -> Option<Self> {
-        layer.first_drag_started(keys).map(Self::new)
+    /// Latch on the glyph that began a drag this frame, when `accepts` takes
+    /// it; `None` when no press landed on one.
+    pub(crate) fn latch(layer: &PortLayer<A>, accepts: impl FnOnce(A) -> bool) -> Option<Self> {
+        layer
+            .started_drag()
+            .filter(|&key| accepts(key))
+            .map(Self::new)
     }
 
     /// The node the fixed end hangs off, whose disappearance (undo, a breaker

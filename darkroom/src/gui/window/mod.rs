@@ -9,7 +9,9 @@ use palantir::prelude::*;
 use palantir::{DockOp, DockView, KeyFilter, TabOverflow};
 use scenarium::NodeId;
 
-use crate::core::document::{Document, TabRef};
+use crate::core::document::TabRef;
+use crate::core::document::graph_revision::GraphRevision;
+use crate::core::document::open_document::OpenDocument;
 use crate::core::edit::relayout::Relayout;
 use crate::core::io::preferences::Preferences;
 use crate::gui::graph_ctx::GraphCtx;
@@ -66,6 +68,10 @@ pub(crate) struct MainWindow {
     /// The open document's resolved output types, kept across frames and
     /// resolved again only after an edit that can retype an output.
     output_types: OutputTypeCache,
+    /// The graph revision the canvas's node caches were last swept at. A node
+    /// can only go with a step that moves the revision, so a frame at the
+    /// same one has nothing to sweep.
+    swept_at: Option<GraphRevision>,
 }
 
 impl MainWindow {
@@ -148,6 +154,7 @@ impl MainWindow {
             image_viewers,
             dock_ops,
             output_types,
+            swept_at: _,
         } = self;
         Panel::vstack()
             .id(app_root_wid())
@@ -194,13 +201,19 @@ impl MainWindow {
 
     /// Release everything this window caches for a subject the document has
     /// stopped holding: the canvas's `NodeId`-keyed tables (see
-    /// [`GraphUI::retain_nodes`]) and the per-tab viewer state.
+    /// [`GraphUI::retain_nodes`]), swept only when the graph's revision moved,
+    /// and the per-tab viewer state.
     ///
     /// Driven from `App::update`, beside the preview store's
     /// sweep. Both live here because `MainWindow` owns both, so a new cache
     /// joins them rather than earning its own call site.
-    pub(crate) fn reconcile(&mut self, document: &Document) {
-        self.graph_ui.retain_nodes(document);
+    pub(crate) fn reconcile(&mut self, open: &OpenDocument) {
+        let document = &open.document;
+        let revision = open.graph_revision();
+        if self.swept_at != Some(revision) {
+            self.graph_ui.retain_nodes(document);
+            self.swept_at = Some(revision);
+        }
         // Keyed by node, but scoped to its *tab*: a viewer's framing dies when
         // the tab closes, not when the node does — and a closed tab's node may
         // well still be in the graph.
@@ -210,5 +223,48 @@ impl MainWindow {
                 .all_tabs()
                 .any(|t| t == TabRef::ImageViewer(*node_id))
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::mem;
+
+    use scenarium::NodeId;
+
+    use crate::core::document::harness::DocFixture;
+    use crate::core::edit::graph_intent::GraphIntent;
+    use crate::gui::pane::graph::harness::CanvasHarness;
+    use crate::gui::window::MainWindow;
+
+    /// The canvas's node caches are swept only when the graph's revision
+    /// moved. A node removed behind the edit pipeline's back — which nothing
+    /// in production does — stays cached, which is what shows a frame at the
+    /// same revision sweeps nothing; a removal through the pipeline sweeps
+    /// every node gone by then.
+    #[test]
+    fn the_node_caches_are_swept_only_after_the_revision_moves() {
+        let fixture = DocFixture::probes(2);
+        let (stays, leaves) = (fixture.node(0), fixture.node(1));
+        let mut h = CanvasHarness::new(fixture);
+        h.prime(2);
+        let mut window = MainWindow {
+            graph_ui: mem::take(&mut h.graph_ui),
+            ..MainWindow::default()
+        };
+        let cached = |window: &MainWindow, id: NodeId| window.graph_ui.geometry().caches_node(id);
+        window.reconcile(&h.ctx.open);
+        assert!(cached(&window, stays) && cached(&window, leaves));
+
+        h.ctx.open.document.remove_node(leaves);
+        window.reconcile(&h.ctx.open);
+        assert!(cached(&window, leaves), "no revision move, no sweep");
+
+        let _relayout = h
+            .ctx
+            .open
+            .apply_edit(GraphIntent::RemoveNode { node_id: stays }, &h.ctx.library);
+        window.reconcile(&h.ctx.open);
+        assert!(!cached(&window, stays) && !cached(&window, leaves));
     }
 }

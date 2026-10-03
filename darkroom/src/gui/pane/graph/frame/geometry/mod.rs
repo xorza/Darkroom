@@ -123,6 +123,10 @@ impl GlyphKey for NodeId {
 pub(crate) struct PortLayer<K> {
     live: HashMap<K, PortInfo>,
     offsets: HashMap<K, Vec2>,
+    /// The glyph a drag started on this frame, noted as the walk records it.
+    /// One press starts at most one drag, so the controllers latching off it
+    /// read it here instead of probing every candidate glyph.
+    started_drag: Option<K>,
 }
 
 impl<K> Default for PortLayer<K> {
@@ -130,6 +134,7 @@ impl<K> Default for PortLayer<K> {
         Self {
             live: HashMap::new(),
             offsets: HashMap::new(),
+            started_drag: None,
         }
     }
 }
@@ -138,7 +143,16 @@ impl<K: GlyphKey> PortLayer<K> {
     /// Snapshot one widget into `live`, refreshing its persistent offset.
     fn record(&mut self, key: K, r: ResponseState, node_min: Vec2, node_pos: Vec2) {
         let info = snapshot(r, node_min, node_pos, key, &mut self.offsets);
+        if info.drag_started && self.started_drag.is_none() {
+            self.started_drag = Some(key);
+        }
         self.live.insert(key, info);
+    }
+
+    /// Forget last frame's snapshots, keeping the offsets and the capacity.
+    fn begin_frame(&mut self) {
+        self.live.clear();
+        self.started_drag = None;
     }
 
     /// The entry for a glyph whose node didn't record: its center from the
@@ -177,7 +191,7 @@ impl<K: GlyphKey> PortLayer<K> {
     /// sequence it feeds in and whatever acceptance test it then applies to
     /// the winner. Geometrically at most one glyph sits under the pointer, so
     /// a rejected winner means "no snap", not "keep looking". Sibling of
-    /// [`Self::first_drag_started`].
+    /// [`Self::started_drag`].
     ///
     /// Tests the post-transform/clip rect, so it sees through palantir's
     /// drag-capture hover suppression.
@@ -194,13 +208,11 @@ impl<K: GlyphKey> PortLayer<K> {
         })
     }
 
-    /// First key in `keys` whose drag started this frame, or `None` — the
-    /// "which glyph did a fresh drag just latch onto" scan every drag-source
-    /// controller (connection/pin/event/subscription) needs, differing only
-    /// in the key sequence it feeds in (a node's ports, its events, or its
-    /// subscription pin).
-    pub(crate) fn first_drag_started(&self, mut keys: impl Iterator<Item = K>) -> Option<K> {
-        keys.find(|k| self.live.get(k).is_some_and(|i| i.drag_started))
+    /// The glyph a drag started on this frame, or `None` — what every
+    /// drag-source controller (connection, preview spawn, event wire) latches
+    /// on, each keeping only the kinds of glyph it starts from.
+    pub(crate) fn started_drag(&self) -> Option<K> {
+        self.started_drag
     }
 
     /// `true` while a drag started on this widget is still live.
@@ -304,9 +316,9 @@ impl CanvasGeometry {
     /// refills the per-frame snapshots whole, so nothing carries over from the
     /// frame before.
     pub(crate) fn rebuild(&mut self, ui: &Ui, graph_ctx: GraphCtx<'_>) {
-        self.ports.live.clear();
-        self.events.live.clear();
-        self.subs.live.clear();
+        self.ports.begin_frame();
+        self.events.begin_frame();
+        self.subs.begin_frame();
         self.node_screen.clear();
         for n in graph_ctx.nodes() {
             // Port offsets within a node are stable; the node's
@@ -412,6 +424,11 @@ pub(crate) mod internals {
         /// past frame's record of the node.
         pub(crate) fn seed_node_size(&mut self, id: NodeId, size: Size) {
             self.node_sizes.insert(id, size);
+        }
+
+        /// Whether the cross-frame size cache holds `id`.
+        pub(crate) fn caches_node(&self, id: NodeId) -> bool {
+            self.node_sizes.contains_key(&id)
         }
     }
 }
