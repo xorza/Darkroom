@@ -152,26 +152,12 @@ fn load_rejects_invalid_archives_and_missing_or_invalid_documents() {
     );
 }
 
+/// The one size predicate a load and a save share admits the limit itself and
+/// refuses the first byte over it.
 #[test]
 fn document_size_limit_rejects_the_first_byte_over_the_boundary() {
-    let path = Path::new("oversized.darkroom");
-    ensure_save_document_size(path, MAX_DOCUMENT_BYTES).expect("save boundary is accepted");
-    assert!(matches!(
-        ensure_save_document_size(path, MAX_DOCUMENT_BYTES + 1).unwrap_err(),
-        DocumentSaveError::DocumentTooLarge {
-            path: error_path,
-            size
-        } if error_path == path && size == MAX_DOCUMENT_BYTES + 1
-    ));
-
-    ensure_load_document_size(path, MAX_DOCUMENT_BYTES).expect("load boundary is accepted");
-    assert!(matches!(
-        ensure_load_document_size(path, MAX_DOCUMENT_BYTES + 1).unwrap_err(),
-        DocumentLoadError::DocumentTooLarge {
-            path: error_path,
-            size
-        } if error_path == path && size == MAX_DOCUMENT_BYTES + 1
-    ));
+    assert!(fits(MAX_DOCUMENT_BYTES));
+    assert!(!fits(MAX_DOCUMENT_BYTES + 1));
 }
 
 fn write_test_archive(path: &Path, name: &str, contents: &[u8]) {

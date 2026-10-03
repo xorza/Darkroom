@@ -277,16 +277,14 @@ impl GraphView {
             return Err(GraphViewValidationError::InvalidViewport);
         }
 
-        // A map guarantees unique keys, so counts plus reverse membership
-        // prove the graph and view contain exactly the same node set.
-        let mut node_items = 0usize;
         for (key, placement) in &self.item_placements {
             if !placement.pos.is_finite() {
                 return Err(GraphViewValidationError::NonFinitePosition { item: *key });
             }
-            node_items += 1;
         }
-        if node_items != graph.len() {
+        // A map guarantees unique keys, so counts plus reverse membership
+        // prove the graph and view contain exactly the same node set.
+        if self.item_placements.len() != graph.len() {
             return Err(GraphViewValidationError::NodeCount);
         }
         for node in graph.iter() {
