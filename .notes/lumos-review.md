@@ -57,14 +57,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 - [ ] `4.5` **The flat floor `MIN_NORMALIZED_FLAT = 0.1` is applied without a report** — `calibration_masters/prepared_flat/mod.rs:16,69,114`
   - It is applied with no count and no warning. Deep smooth vignetting is under-corrected. `[C]`
 
-## 6. Noise is estimated from whole-frame spread, which includes signal
-
-- [ ] `6.7` **Denoise σ at coarse scales comes from the scale's own coefficients** — `image_ops/denoise/mod.rs:330,351-362`
-  - Nebula structure raises σ_j, so faint filaments are removed.
-  - Use the multiresolution support (iterate on non-significant coefficients), or σ_I·σ_j^e with the B3 constants 0.889, 0.200, 0.086, 0.041, 0.020. `[P]`
-- [ ] `6.8` **Denoise uses one global σ per scale and ignores the stack's coverage/variance planes** — `image_ops/denoise/mod.rs:330-343`
-  - Low-coverage edges stay noisy. `[P]`
-
 ## 8. Missing-data masks are dropped after decode
 
 - [ ] `8.2` **Star detection never reads `nulls`** — `star_detection/` (no reference)
@@ -833,22 +825,6 @@ The combine bench (30 frames, `combine::bench`, release, one machine, same sessi
 - Winsorized is slower because it now loops to a fixed point (the old code rejected once), and each pass estimates again.
 - The median code did not change. Run alone, it is 87 ms before and 88 ms after. In the sequence after the light preset it measures slower, which is an order effect of the allocator, not of the median path.
 
-## Phase 5. Lattice, noise estimation, mesh, weights and variance (S5, S10, C1)
-
-0. Done: `CcdNoise` (`math/noise/ccd_noise.rs`), with `FrameStats` carrying the sky per slot and the electrons per unit; `SampleNoise`, `FrameWeights` and `Slots` in the combine; `RejectionScale::CcdModel` on sigma clip. `FrameNoise` as stored metadata waits for the consumer that needs it (C2's master subtraction).
-1. Done: `CfaLattice` (`io/image/cfa/cfa_lattice.rs`) holds the per-phase same-colour stencils, Euclidean and taken in whole shells, and the 2-periodic deinterleave. The defect and null repair and both CFA cosmic-ray scans use it. The flat normalization and `DifferenceNoise` read the colour from `CfaType::color_at` and need no stencil.
-2. Add the two noise estimators and `FrameStats` background noise.
-3. Done: bad-tile fill and sliver merge; `ColourMesh` (`background_mesh/colour_mesh.rs`), a mesh per colour with the noise about each tile's plane, replaces `DarkBackground` and gives the cosmic-ray noise its local sky and σ. Open: the mesh reads the frame's `NO_DATA` flags as its mask (with the detection planes of phase 7).
-4. Done: per-slot weights, not normalized; the variance plane `Σwᵢ²vᵢ/(Σwᵢ)²` with `RunReport::variance_background_only`; drizzle on the same formula per channel, with gated pixels holding no weight, variance or coverage, and zero-weight taps marking no coverage. Open: the `dispersion` plane.
-5. Move denoise to the B3 constants and the variance plane.
-- **Tests:**
-  - MRS on white noise of σ 0.01 plus a ramp from 0 to 1: within 3 standard errors of 0.01. The MAD of the ramp alone is 0.25 (median 0.5, deviations uniform on [0, 0.5]), so MAD gives 1.4826·0.25 = 0.37, 37× too large.
-  - A Bayer master with σ 0.01, 0.02, 0.02 and 0.03 per colour: each estimate within 3 standard errors.
-  - Variance with equal weights, σ 1 and 2: (1 + 4)/4 = 1.25. Inverse-variance weights for σ 1 and 2 are 1 and 0.25: (1 + 0.0625·4)/1.25² = 0.8 = 1/(1 + 0.25).
-  - A frame with a bad blue channel loses weight in blue only.
-  - A fully masked tile takes the interpolation of its neighbours.
-- **Closes:** group 6, group 7 except the parts of S1, 2.2, 2.7, 18.3 to 18.6, 26.3, 26.5.
-
 ## Phase 6. Ingest and calibration plan (S7, C2)
 
 1. Write the ingest stage with `FrameSource`, `FrameOp` and `FrameRecord`. Move the four entry points onto it, one at a time. Each move is a refactor, so its output must be bit-identical to the output before it, on the existing fixtures.
@@ -866,6 +842,7 @@ The combine bench (30 frames, `combine::bench`, release, one machine, same sessi
 
 1. Return `PreparedFrame`. Measure on `measure`, and threshold and deblend on `detect`.
 2. Rewrite the multi-threshold walk. Move the `max_area` filter before deblending, and pool the grids.
+3. Give the background mesh the frame's `NO_DATA` flags as its mask (8.2), and the detector `FrameStats::noise` from the ingest in place of its own estimate.
 - **Tests:**
   - A Gaussian star of FWHM 2 on a demosaiced frame keeps 100% of its flux. Today 56% remains.
   - On pure noise filtered to FWHM 4, the fraction of pixels above 4σ is 3.2e-5 within its binomial interval. Today it is about 5%.
@@ -935,6 +912,7 @@ The combine bench (30 frames, `combine::bench`, release, one machine, same sessi
 - Performance: the rest of group 24, each with a bench before and after.
 - Docs: the rest of group 25. A doc that a phase above rewrites is fixed in that phase.
 - Style: the rest of group 26. Dependencies: group 27.
+- The optional `dispersion` plane of C1: the weighted scatter of the survivors.
 - Markesteijn 3-pass as an option (16.12). SCNR Maximum Neutral, Maximum Mask and an Average Neutral amount (19.8).
 - **Closes:** 16.12, 18.1, 18.2, 19.8, 22.2 to 22.4, the rest of groups 24 to 27. 20.3 stays open until CFA drizzle enters the scope.
 

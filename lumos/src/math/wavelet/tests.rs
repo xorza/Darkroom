@@ -1,5 +1,5 @@
 use crate::internals::prelude::*;
-use crate::math::wavelet::{atrous_smooth, max_scales, reflect};
+use crate::math::wavelet::{atrous_smooth, max_scales, reflect, white_noise_sigma};
 
 fn pattern(size: Size2us) -> Buffer2<f32> {
     let px = (0..size.pixel_count())
@@ -98,5 +98,28 @@ fn atrous_smooth_is_the_b3_convolution() {
                 );
             }
         }
+    }
+}
+
+/// The layers' white-noise σ against the same closed form evaluated in NumPy, and so against the
+/// published 0.889, 0.200, 0.086, 0.041, 0.020 to their three digits. The first by hand:
+/// `Σw₀² = 1 − 2·(6/16)² + (70/256)² = 0.793517`, whose root is 0.890796. The sums are of a few
+/// dozen products of dyadic fractions, so f64 holds 1e-15.
+#[test]
+fn layer_sigmas_have_their_closed_form() {
+    let numpy = [
+        0.890_796_310_278_758_4,
+        0.200_663_851_024_418_97,
+        0.085_507_504_753_369_93,
+        0.041_217_444_374_316_2,
+        0.020_424_966_592_781_434,
+        0.010_189_759_249_213_292,
+    ];
+    for (scale, expected) in numpy.into_iter().enumerate() {
+        assert!(
+            (white_noise_sigma(scale) - expected).abs() < 1e-15,
+            "scale {scale}: {}",
+            white_noise_sigma(scale)
+        );
     }
 }

@@ -6,6 +6,7 @@ use crate::internals::images::{gray_image as gray, rgb_image as rgb};
 use crate::internals::prelude::*;
 use crate::internals::synthetic::metrics::pixel_stats;
 use crate::internals::synthetic::patterns;
+use crate::stack_product::quality_map::QualityMap;
 
 /// A flat `bg` with white Gaussian noise of `sigma`.
 fn noisy(size: Size2us, bg: f32, sigma: f32, seed: u64) -> Vec<f32> {
@@ -232,4 +233,90 @@ fn denoise_handles_images_smaller_than_the_kernel() {
         &[0.42],
         "1x1 has no detail to remove"
     );
+}
+
+/// A zero variance plane says no frame reached any pixel: every threshold is 0, and the denoise
+/// leaves the image bit for bit, hard or soft.
+#[test]
+fn a_zero_variance_plane_leaves_the_image() {
+    let size = Size2us::new(64, 48);
+    let pixels = noisy(size, 0.3, 0.02, 7);
+    for threshold in [Threshold::Hard, Threshold::Soft] {
+        let mut image = LinearImage::from_pixels(ImageDimensions::new(size, 1), pixels.clone());
+        let variance = QualityMap::Shared(Buffer2::new_default(size.width, size.height));
+        Denoise {
+            threshold,
+            strength: 1.0,
+            ..Denoise::default()
+        }
+        .apply_with_variance(&mut image, &variance)
+        .unwrap();
+        assert_eq!(image.channel(0).pixels(), &pixels[..], "{threshold:?}");
+    }
+}
+
+/// The threshold scales with the root of the variance: the image times 4 with the variance times
+/// 16 denoises to the output times 4, bit for bit, since every step scales by a power of two.
+#[test]
+fn the_variance_threshold_scales_with_the_data() {
+    let size = Size2us::new(64, 64);
+    let pixels = noisy(size, 0.25, 0.03, 9);
+    let denoise = Denoise {
+        threshold: Threshold::Hard,
+        ..Denoise::default()
+    };
+    let run = |scale: f32| {
+        let mut image = LinearImage::from_pixels(
+            ImageDimensions::new(size, 1),
+            pixels.iter().map(|&value| value * scale).collect(),
+        );
+        let variance = QualityMap::Shared(Buffer2::new_filled(
+            size.width,
+            size.height,
+            0.03 * 0.03 * scale * scale,
+        ));
+        denoise.apply_with_variance(&mut image, &variance).unwrap();
+        image.channel(0).pixels().to_vec()
+    };
+    let unit = run(1.0);
+    let scaled = run(4.0);
+    for (a, b) in unit.iter().zip(&scaled) {
+        assert_eq!(a * 4.0, *b);
+    }
+}
+
+/// Structure that fills the frame is not noise (review 6.7). A 0.05 checker of sines with a 32 px
+/// period over the whole 128 × 128 frame, and white noise of σ 0.001. Each scale's threshold is 3
+/// × 0.001 × its white-noise response, at most 0.0027, so the sines' coefficients stay; what the
+/// four scales remove is noise, at most 3σ times the responses' sum, about 0.0037 at a pixel. A σ
+/// read off each scale's coefficients would see the sines at the coarse scales, put the threshold
+/// above them, and take them out, moving pixels by up to 0.05.
+#[test]
+fn structure_filling_the_frame_survives() {
+    let size = Size2us::new(128, 128);
+    let mut rng = TestRng::new(31);
+    let pixels: Vec<f32> = (0..size.pixel_count())
+        .map(|index| {
+            let (x, y) = ((index % 128) as f32, (index / 128) as f32);
+            let phase = core::f32::consts::TAU / 32.0;
+            0.5 + 0.05 * (phase * x).sin() * (phase * y).sin() + 0.001 * rng.next_gaussian_f32()
+        })
+        .collect();
+    let mut image = LinearImage::from_pixels(ImageDimensions::new(size, 1), pixels.clone());
+    Denoise {
+        scales: 4,
+        k: 3.0,
+        threshold: Threshold::Hard,
+        strength: 1.0,
+    }
+    .apply(&mut image)
+    .unwrap();
+    let moved = image
+        .channel(0)
+        .pixels()
+        .iter()
+        .zip(&pixels)
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f32, f32::max);
+    assert!(moved < 0.006, "the denoise moved a pixel by {moved}");
 }
