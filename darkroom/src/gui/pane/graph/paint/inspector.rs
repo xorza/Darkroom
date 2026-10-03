@@ -249,7 +249,7 @@ impl Inspectors {
                 if node.outputs().len() > 0 {
                     section(ui, theme, "Outputs");
                     for output in node.outputs() {
-                        port_row(ui, theme, library, output.name(), &output.ty(), None);
+                        port_row(ui, theme, library, output.name(), output.ty(), None);
                     }
                 }
 

@@ -26,9 +26,11 @@ pub(crate) mod output_type_cache;
 
 use std::collections::BTreeSet;
 
-use scenarium::{Graph, InputPort, Library, NodeId, OutputPort, OutputTypes, Subscription};
+use scenarium::{
+    DataType, Graph, InputPort, Library, NodeId, OutputPort, OutputTypes, Subscription,
+};
 
-use crate::core::document::{Document, GraphView, StackedItem, Viewport};
+use crate::core::document::{Document, GraphView, PortKind, PortRef, StackedItem, Viewport};
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
@@ -154,6 +156,25 @@ impl<'a> GraphCtx<'a> {
     /// asks a port for its type, never the table for a port.
     pub(super) fn output_types(self) -> &'a OutputTypes {
         self.output_types
+    }
+
+    /// The type of `port` — an input's declared type, or an output's resolved
+    /// one — read straight off the graph, the library and the type table, or
+    /// `None` for a port this graph does not hold. For a per-wire reader that
+    /// has no node context and wants none.
+    pub(crate) fn port_type(self, port: PortRef) -> Option<&'a DataType> {
+        match port.kind {
+            PortKind::Input => self
+                .body()
+                .find(port.node_id)?
+                .func(self.library())?
+                .inputs
+                .get(port.port_idx)
+                .map(|input| &input.data_type),
+            PortKind::Output => self
+                .output_types
+                .get(OutputPort::new(port.node_id, port.port_idx)),
+        }
     }
 
     /// This graph's nodes, in no particular order.

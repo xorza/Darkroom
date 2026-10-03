@@ -89,7 +89,7 @@ fn a_wire_drops_when_its_start_node_leaves_the_scene() {
     // Undo runs before the canvas prepass, so the node a wire grew out
     // of can vanish mid-drag. The gesture has to let go: a commit
     // against a dead producer is refused at the edit boundary anyway
-    // (silently), and until then `port_data_type` reports the start as
+    // (silently), and until then `GraphCtx::port_type` reports the start as
     // untyped, which `scan_snap_target` reads as "compatible with
     // anything" — so a stranded wire would snap onto ports it should
     // never accept.

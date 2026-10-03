@@ -67,12 +67,11 @@ impl<'a> OutputCtx<'a> {
     /// `Node::func` lookup resolved, at an index that func declares. Degrading
     /// to `Any` would paint a stale port a plausible colour and let a scope
     /// composed without a refresh go unnoticed.
-    pub(crate) fn ty(self) -> DataType {
+    pub(crate) fn ty(self) -> &'a DataType {
         self.node
             .graph_ctx
             .output_types()
             .get(self.port())
             .expect("the scope's table is resolved against the graph it carries")
-            .clone()
     }
 }

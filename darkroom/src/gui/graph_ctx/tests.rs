@@ -1,12 +1,12 @@
 use scenarium::testing::graph::NodeSpec;
 use scenarium::testing::graph::TestGraph;
 use scenarium::{
-    Binding, CacheMode, ConstValue, DataType, FuncId, Graph, InputPort, Node, NodeKind,
+    Binding, CacheMode, ConstValue, DataType, FuncId, Graph, InputPort, Node, NodeId, NodeKind,
 };
 
-use crate::core::document::PortKind;
 use crate::core::document::TabRef;
 use crate::core::document::harness::DocFixture;
+use crate::core::document::{PortKind, PortRef};
 use crate::gui::graph_ctx::harness::GraphCtxFixture;
 
 /// Composing a context no longer asks whether anyone is looking — the
@@ -263,9 +263,11 @@ fn a_wildcard_output_follows_the_wire_it_mirrors_from_the_next_read_on() {
             .graph_ctx()
             .node(consumer)
             .expect("the passthrough resolves")
-            .output(0)
+            .outputs()
+            .next()
             .expect("it declares one output")
             .ty()
+            .clone()
     };
 
     assert_eq!(
@@ -283,6 +285,27 @@ fn a_wildcard_output_follows_the_wire_it_mirrors_from_the_next_read_on() {
         resolved_output(&mut fixture),
         DataType::Int,
         "the next read follows the new wire — nothing was invalidated in between"
+    );
+
+    // `port_type`, the per-wire read, answers the same off the graph and the
+    // table: the input's declared type, the output's resolved one, and `None`
+    // for a port no node holds.
+    let graph_ctx = fixture.graph_ctx();
+    assert_eq!(
+        graph_ctx.port_type(PortRef::input(consumer, 0)),
+        Some(&DataType::Any)
+    );
+    assert_eq!(
+        graph_ctx.port_type(PortRef::output(consumer, 0)),
+        Some(&DataType::Int)
+    );
+    assert_eq!(
+        graph_ctx.port_type(PortRef::output(producer, 0)),
+        Some(&DataType::Int)
+    );
+    assert_eq!(
+        graph_ctx.port_type(PortRef::input(NodeId::unique(), 0)),
+        None
     );
 }
 

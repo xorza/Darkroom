@@ -9,7 +9,7 @@ use crate::gui::EventRef;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
-use crate::gui::state::run_state::ExecStatus;
+use crate::gui::state::run_state::{ExecStatus, NodeRunState};
 use crate::gui::theme::Theme;
 use crate::gui::theme::const_value_editor_theme::ConstValueEditorTheme;
 
@@ -63,7 +63,9 @@ pub(crate) struct NodeCtx<'a> {
     func: Option<&'a Func>,
     /// The input ports the last run could not feed, by index — one lookup
     /// per node rather than one per port.
-    missing_inputs: &'a [usize],
+    /// What the last run said about this node, looked up once when the node
+    /// resolves rather than at every status, memory or port read.
+    run: Option<&'a NodeRunState>,
     /// Whether the pointer is over this node's body — `false` until a caller
     /// that holds a `Ui` sets it through [`Self::with_hover`].
     ///
@@ -101,7 +103,7 @@ impl<'a> NodeCtx<'a> {
             pos,
             node,
             func,
-            missing_inputs: graph_ctx.run_state().missing_inputs(node_id),
+            run: graph_ctx.run_state().node(node_id),
             hovered: false,
         }
     }
@@ -246,14 +248,14 @@ impl<'a> NodeCtx<'a> {
     /// Outcome of the last graph run. Drives the node's status-glow shadow
     /// and (for `Executed`) the header time label.
     pub(crate) fn exec_status(self) -> ExecStatus {
-        self.graph_ctx.run_state().status(self.id)
+        self.run.map(NodeRunState::status).unwrap_or_default()
     }
 
     /// RAM this node's cached output currently holds (system vs GPU).
     /// Non-zero only for nodes that retain a value; drives the node body's
     /// memory readout, hidden when zero.
     pub(crate) fn ram(self) -> RamUsage {
-        self.graph_ctx.run_state().ram(self.id)
+        self.run.map(NodeRunState::ram).unwrap_or_default()
     }
 
     /// This node's input ports, in declaration order. Empty for a stub, which
@@ -284,12 +286,6 @@ impl<'a> NodeCtx<'a> {
             .iter()
             .enumerate()
             .map(move |(port_idx, output)| OutputCtx::new(self, port_idx, output))
-    }
-
-    /// One output port by index.
-    pub(crate) fn output(self, port_idx: usize) -> Option<OutputCtx<'a>> {
-        let declared = self.func?.outputs.get(port_idx)?;
-        Some(OutputCtx::new(self, port_idx, declared))
     }
 
     /// This node's event (emitter) ports. Events carry no data type — they
@@ -332,6 +328,6 @@ impl<'a> NodeCtx<'a> {
     /// port wired to a disabled or itself-unfed producer counts too, not just
     /// an unbound one.
     pub(super) fn missing_inputs(self) -> &'a [usize] {
-        self.missing_inputs
+        self.run.map_or(&[], NodeRunState::missing_inputs)
     }
 }

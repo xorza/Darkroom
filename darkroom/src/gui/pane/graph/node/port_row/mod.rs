@@ -442,16 +442,14 @@ fn output_cell(
 ) {
     let theme = ncx.theme();
     let port = output.port_ref();
-    // Resolved once for the fill and the tooltip: a wildcard output follows
-    // its mirror chain on every read, so the cell asks once.
     let ty = output.ty();
     let fill = port_color(
         theme,
-        &ty,
+        ty,
         PortKind::Output,
         dcx.geometry().ports.is_hovered(port),
     );
-    let tip = tip_for(ui, ncx, output.description(), &ty, None);
+    let tip = tip_for(ui, ncx, output.description(), ty, None);
     let wid = port_circle_wid(port);
     let overhang = theme.port_overhang();
     let cell = Panel::hstack()
@@ -479,17 +477,13 @@ fn output_cell(
     // at the end of this pass, and the second pass a double-click earns
     // re-arranges every node that lost a wire.
     if glyph.double_clicked {
-        let fed: Vec<_> = ncx
-            .graph_ctx
-            .connections()
-            .filter(|(_, producer)| {
-                producer.node_id == port.node_id && producer.port_idx == port.port_idx
-            })
-            .map(|(consumer, _)| consumer)
-            .collect();
         out.extend_graph(
-            fed.into_iter()
-                .map(|c| GraphIntent::set_input(c.into(), None)),
+            ncx.graph_ctx
+                .connections()
+                .filter(|(_, producer)| {
+                    producer.node_id == port.node_id && producer.port_idx == port.port_idx
+                })
+                .map(|(consumer, _)| GraphIntent::set_input(consumer.into(), None)),
         );
     }
     open_port_context_menu(ui, menu_id, cell_secondary || glyph.secondary_clicked);
