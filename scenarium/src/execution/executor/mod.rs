@@ -17,6 +17,7 @@
 //! only once its producers settle: the loop prepares that identity off-thread, re-stamps at
 //! reach time, and serves the cache on a hit.
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use tokio::task;
@@ -242,11 +243,11 @@ impl Executor {
                 // that would have keyed it, and it is no more a failure there. A node the
                 // cut left uncached ran nothing either.
                 NodeOutcome::Failed {
-                    error: RunError::Cancelled { .. },
+                    error: RunError::Cancelled,
                     ..
                 }
                 | NodeOutcome::Skipped {
-                    error: RunError::Cancelled { .. },
+                    error: RunError::Cancelled,
                 }
                 | NodeOutcome::Cut { cached: false } => None,
                 // A genuine failure did run, so it counts among the executed.
@@ -386,10 +387,7 @@ impl ExecutionFrame<'_, '_> {
         let hydrated = self.cache.hydrate_reuse(program, node_idx, demand).await;
         match hydrated {
             ReuseOutcome::Missed => {
-                let error = RunError::CacheLoadFailed {
-                    func_id: program[node_idx].func_id,
-                };
-                self.mark_skipped(node_idx, error);
+                self.mark_skipped(node_idx, RunError::CacheLoadFailed);
             }
             ReuseOutcome::Served => {
                 self.node_outcomes[node_idx] = NodeOutcome::Reused;
@@ -429,10 +427,7 @@ impl ExecutionFrame<'_, '_> {
             // The run is being torn down, so there is nothing to start here:
             // invoking would begin work the cancel exists to stop.
             Err(StampError::Cancelled) => {
-                let run_error = RunError::Cancelled {
-                    func_id: program[node_idx].func_id,
-                };
-                self.mark_skipped(node_idx, run_error);
+                self.mark_skipped(node_idx, RunError::Cancelled);
                 false
             }
             // A path that would not read denies this node a *cache key*, not
@@ -473,12 +468,10 @@ impl ExecutionFrame<'_, '_> {
         let program = self.program;
         let e_node = &program[node_idx];
         let node_id = program.node_ids[node_idx];
-        let func_id = e_node.func_id;
 
         if self.has_errored_dependency(node_idx) {
             self.abandon_input_reads(node_idx);
-            let error = RunError::SkippedUpstream { func_id };
-            self.mark_skipped(node_idx, error);
+            self.mark_skipped(node_idx, RunError::SkippedUpstream);
             return;
         }
 
@@ -511,11 +504,8 @@ impl ExecutionFrame<'_, '_> {
                 .map_err(|e| match e {
                     // A lambda that bailed on cancel reports it truthfully;
                     // surface it as a cancel rather than a generic invoke error.
-                    InvokeError::Cancelled => RunError::Cancelled { func_id },
-                    other => RunError::Invoke {
-                        func_id,
-                        message: other.to_string(),
-                    },
+                    InvokeError::Cancelled => RunError::Cancelled,
+                    other => RunError::Invoke(Arc::new(other)),
                 })
         };
         let run_time = invoke_start.elapsed().as_secs_f64();
@@ -526,14 +516,14 @@ impl ExecutionFrame<'_, '_> {
         // an aborted run — map that to `Cancelled` too so its output isn't cached. A genuine
         // error stands on its own, even mid-cancel.
         let result = match result {
-            Ok(()) if self.ctx.cancel.is_cancelled() => Err(RunError::Cancelled { func_id }),
+            Ok(()) if self.ctx.cancel.is_cancelled() => Err(RunError::Cancelled),
             Ok(()) => match self.cache[node_idx].unbound_demanded_outputs(demand) {
                 outputs if outputs.is_empty() => Ok(()),
-                outputs => Err(RunError::OutputsNotProduced { func_id, outputs }),
+                outputs => Err(RunError::OutputsNotProduced { outputs }),
             },
             other => other,
         };
-        let cancelled = matches!(&result, Err(RunError::Cancelled { .. }));
+        let cancelled = matches!(&result, Err(RunError::Cancelled));
         let slot = &mut self.cache[node_idx];
         let succeeded = match result {
             // The fresh output now corresponds to this node's current digest; record it so

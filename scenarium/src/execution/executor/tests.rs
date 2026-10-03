@@ -4,8 +4,6 @@
 //! which read *is* the subject, so a fixture that left retention to a default
 //! would be asserting on something it never said.
 
-use std::sync::Arc;
-
 use super::*;
 use crate::containers::column::Idx;
 use crate::graph::func::lambda::FuncLambda;
@@ -226,10 +224,7 @@ async fn unbound_output_errors_only_when_demanded() {
         run.error(a),
         Some(RunError::OutputsNotProduced { outputs, .. }) if outputs == &[0, 1]
     ));
-    assert!(matches!(
-        run.error(b),
-        Some(RunError::SkippedUpstream { .. })
-    ));
+    assert!(matches!(run.error(b), Some(RunError::SkippedUpstream)));
 
     // Undemanded, the same silent lambda is no error at all: the port stays
     // `Unbound` and the node is reported clean.

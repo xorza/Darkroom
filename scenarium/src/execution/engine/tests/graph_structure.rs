@@ -1,4 +1,5 @@
 use super::*;
+use crate::graph::error::GraphValidationError;
 
 #[tokio::test]
 async fn basic_run() {
@@ -55,12 +56,12 @@ fn update_rejects_func_missing_from_lib_and_keeps_prior_program() {
     assert_eq!(e.engine.compiled().e_nodes.len(), 5);
 
     // Recompiling the same graph against a library that defines none of its
-    // funcs is rejected with a message naming a missing func.
+    // funcs is rejected, naming a missing func.
     e.graph.library = Library::default();
-    let CompileError { message } = e.try_reinstall().unwrap_err();
+    let CompileError { source } = e.try_reinstall().unwrap_err();
     assert!(
-        message.contains("absent from the library"),
-        "message should explain the missing func, got: {message}"
+        matches!(source, GraphValidationError::MissingFunc { .. }),
+        "the cause is the missing func, got: {source}"
     );
 
     // The rejection happens before any mutation, so the prior program is

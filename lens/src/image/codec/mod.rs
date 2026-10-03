@@ -1,10 +1,10 @@
 //! Streaming disk-cache codec for [`Image`].
 
-use std::error;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use imaginarium::{ChannelCount, ColorFormat, ImageDesc, SampleType};
+use scenarium::CodecError;
 use scenarium::CustomValue;
 use scenarium::CustomValueCodec;
 use scenarium::TypeEntry;
@@ -15,8 +15,6 @@ use crate::image::Image;
 /// 3: the format is two bytes, channel count and sample type.
 const VERSION: u32 = 3;
 const HEADER_LEN: u64 = 2 + 8 + 8;
-
-type BoxError = Box<dyn error::Error + Send + Sync>;
 
 #[derive(Debug)]
 struct ImageCodec;
@@ -31,7 +29,7 @@ impl CustomValueCodec for ImageCodec {
         &self,
         value: &dyn CustomValue,
         writer: &mut (dyn AsyncWrite + Unpin + Send),
-    ) -> Result<(), BoxError> {
+    ) -> Result<(), CodecError> {
         let image = value
             .as_any()
             .downcast_ref::<Image>()
@@ -56,7 +54,7 @@ impl CustomValueCodec for ImageCodec {
         &self,
         reader: &mut (dyn AsyncRead + Unpin + Send),
         byte_len: u64,
-    ) -> Result<Arc<dyn CustomValue>, BoxError> {
+    ) -> Result<Arc<dyn CustomValue>, CodecError> {
         if byte_len < HEADER_LEN {
             return Err(format!("image cache payload is only {byte_len} bytes").into());
         }

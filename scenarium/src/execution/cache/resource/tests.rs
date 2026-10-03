@@ -10,6 +10,7 @@ use crate::graph::identity::FuncId;
 use crate::testing::program::ProgramBuilder;
 use crate::{ConstValue, DataType};
 use std::fs;
+use std::io;
 use std::slice;
 
 fn fingerprint_with(job: &mut StampJob, path: &str) -> Digest {
@@ -42,8 +43,8 @@ fn directory_identity_tracks_entry_changes() {
             let unreadable = StampJob::default().stamp(&path, &CancelToken::never());
             drop(locked);
             assert!(
-                unreadable.is_err(),
-                "an unlistable directory must surface its error, not a stamp: {unreadable:?}",
+                matches!(&unreadable, Err(StampError::Io { path, .. }) if path == dir.path()),
+                "an unlistable directory surfaces its error, naming it: {unreadable:?}",
             );
             assert_eq!(
                 fingerprint(&path),
@@ -89,7 +90,9 @@ fn one_unreadable_path_does_not_cost_the_pass() {
             path
         })
         .collect::<Vec<_>>();
-    let missing_paths = (0..3).map(|i| in_dir(format!("missing-{i}.bin")));
+    let missing_paths = (0..3)
+        .map(|i| in_dir(format!("missing-{i}.bin")))
+        .collect::<Vec<_>>();
     let stamped_paths = |job: &StampJob| {
         let mut paths = job
             .stamped
@@ -101,14 +104,20 @@ fn one_unreadable_path_does_not_cost_the_pass() {
     };
 
     let mut job = StampJob::default();
-    for path in present_paths.iter().cloned().chain(missing_paths) {
-        job.request(&path);
+    for path in present_paths.iter().chain(&missing_paths) {
+        job.request(path);
     }
     let resolved = job.run(&CancelToken::never());
+    let Err(StampError::Io { path, source }) = &resolved else {
+        panic!("a path that would not read is still reported: {resolved:?}");
+    };
     assert!(
-        resolved.is_err(),
-        "a path that would not read is still reported: {resolved:?}",
+        missing_paths
+            .iter()
+            .any(|missing| path.as_os_str() == missing.as_str()),
+        "the report names a path that would not read: {path:?}",
     );
+    assert_eq!(source.kind(), io::ErrorKind::NotFound);
     let mut expected = present_paths.clone();
     expected.sort();
     assert_eq!(

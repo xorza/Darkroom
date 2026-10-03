@@ -14,6 +14,7 @@
 use thiserror::Error;
 
 use crate::execution::identity::{NodeIdx, OutputAddr};
+use crate::graph::error::GraphValidationError;
 use crate::graph::identity::{FuncId, NodeId};
 use std::fmt;
 use std::fmt::Display;
@@ -26,9 +27,10 @@ use std::fmt::Formatter;
 /// [`Error`](crate::execution::error::Error) — the two can't be confused at the type
 /// level, and only `compile` produces it.
 #[derive(Debug, Error)]
-#[error("invalid graph: {message}")]
+#[error("invalid graph: {source}")]
 pub struct CompileError {
-    pub message: String,
+    #[source]
+    pub source: GraphValidationError,
 }
 
 /// Self-consistency checks for the compile artifact. Each fallible `validate` has an

@@ -99,11 +99,11 @@ async fn a_probed_blob_that_stops_decoding_fails_its_node_and_self_heals() {
         "the reuse verdict already pruned the producer, so nothing recomputes"
     );
     assert!(
-        matches!(run.error("mult"), Some(RunError::CacheLoadFailed { .. })),
+        matches!(run.error("mult"), Some(RunError::CacheLoadFailed)),
         "the node whose cache stopped loading fails, rather than serving nothing"
     );
     assert!(
-        matches!(run.error("print"), Some(RunError::SkippedUpstream { .. })),
+        matches!(run.error("print"), Some(RunError::SkippedUpstream)),
         "its consumer skips as errored-upstream"
     );
     assert!(!run.cached().contains(&"mult"));
