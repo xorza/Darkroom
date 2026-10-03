@@ -15,6 +15,7 @@ use std::cmp::Ordering;
 use crate::math::vec2us::Vec2us;
 
 pub(super) mod component;
+pub(super) mod component_pixels;
 pub(super) mod deblend_buffers;
 pub(super) mod local_maxima;
 pub(super) mod multi_threshold;
@@ -227,6 +228,7 @@ pub(crate) mod internals {
                 n_thresholds,
                 min_contrast,
                 min_separation,
+                min_area: 1,
                 connectivity: Connectivity::Eight,
             },
             &mut DeblendBuffers::default(),

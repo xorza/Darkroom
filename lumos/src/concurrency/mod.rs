@@ -107,6 +107,21 @@ impl<T> Drop for JobScratchLease<'_, T> {
     }
 }
 
+/// What one slot of a bounded map finished with: the values of the indices it took, and the
+/// failure that stopped it, if one did.
+#[derive(Debug)]
+struct SlotOutcome<R, E> {
+    values: Vec<(usize, R)>,
+    failure: Option<Failure<E>>,
+}
+
+/// A job's failure and the index it failed at.
+#[derive(Debug)]
+struct Failure<E> {
+    index: usize,
+    error: E,
+}
+
 /// Run `job` over `0..len` with one slot bound to each in-flight index, at most `slots.len()` of
 /// them at a time, and splice the results back into index order.
 ///
@@ -117,6 +132,10 @@ impl<T> Drop for JobScratchLease<'_, T> {
 /// The first failure stops workers from *taking* further indices. Ones already running still
 /// finish, and a worker that read the index counter just before the failure landed may run one
 /// more — so the bound on wasted work is a slot's worth, not zero.
+///
+/// Of several failures the one at the lowest index is returned, which makes it the same failure a
+/// sequential map would return: indices are claimed in order, so every index below a failing one
+/// was claimed before it and runs to its end.
 pub(crate) fn try_par_map_bounded<S, R, E>(
     len: usize,
     slots: &mut [S],
@@ -131,8 +150,13 @@ where
 
     let next = AtomicUsize::new(0);
     let failed = AtomicBool::new(false);
-    let mut outcomes: Vec<Result<Vec<(usize, R)>, E>> =
-        slots.iter().map(|_| Ok(Vec::new())).collect();
+    let mut outcomes: Vec<SlotOutcome<R, E>> = slots
+        .iter()
+        .map(|_| SlotOutcome {
+            values: Vec::new(),
+            failure: None,
+        })
+        .collect();
 
     // `scope` + one `spawn` per slot rather than `slots.par_iter_mut()`: rayon splits a parallel
     // iterator only while threads are idle, so on a busy pool it could hand every slot to a
@@ -141,31 +165,40 @@ where
         for (slot, outcome) in slots.iter_mut().zip(outcomes.iter_mut()) {
             let (next, failed, job) = (&next, &failed, &job);
             scope.spawn(move |_| {
-                let mut mine = Vec::new();
                 loop {
                     let index = next.fetch_add(1, Ordering::Relaxed);
                     if index >= len || failed.load(Ordering::Acquire) {
                         break;
                     }
                     match job(slot, index) {
-                        Ok(value) => mine.push((index, value)),
+                        Ok(value) => outcome.values.push((index, value)),
                         Err(error) => {
                             failed.store(true, Ordering::Release);
-                            *outcome = Err(error);
+                            outcome.failure = Some(Failure { index, error });
                             return;
                         }
                     }
                 }
-                *outcome = Ok(mine);
             });
         }
     });
 
     let mut ordered: Vec<Option<R>> = (0..len).map(|_| None).collect();
+    let mut first_failure: Option<Failure<E>> = None;
     for outcome in outcomes {
-        for (index, value) in outcome? {
+        for (index, value) in outcome.values {
             ordered[index] = Some(value);
         }
+        if let Some(failure) = outcome.failure
+            && first_failure
+                .as_ref()
+                .is_none_or(|first| failure.index < first.index)
+        {
+            first_failure = Some(failure);
+        }
+    }
+    if let Some(failure) = first_failure {
+        return Err(failure.error);
     }
     Ok(ordered
         .into_iter()

@@ -294,6 +294,93 @@ mod tests {
         );
     }
 
+    /// Review phase 7 and S9: detection does not depend on the frame's scale, its zero point or
+    /// its orientation. The star field is put on the exact grid of `Affine::CASES`; its saturation
+    /// is flagged by the decoder, with no flags, so no level stated in the frame's units enters.
+    /// - Under a power-of-two scale every sum, median and product scales exactly, so the stars
+    ///   are the same, bit for bit, their flux scaled.
+    /// - Under a pedestal each sample rounds by up to half an ulp of the largest sample, `u`,
+    ///   before the sky takes the pedestal out. Against the faintest star's peak `A`, scaled, that
+    ///   moves a centroid by at most the stamp radius, 7 px at FWHM 4, times `u / (s·A)`. The sky
+    ///   itself is computed at the pedestal's magnitude in f32 — the Pearson mode `2.5·median −
+    ///   1.5·mean`, the plane fit, the bicubic spline — and rounds by a few ulps of it, which every
+    ///   pixel of a flux's 15 × 15 stamp carries alike: 32 `u` per pixel bound a flux's change by
+    ///   `225·32·u / (s·F)` of the faintest flux `F`.
+    /// - Rotated by 180°, on a frame of whole tiles, the mesh's tiles and samples map onto
+    ///   themselves, so every star maps onto its own; only the order of a few sums changes, which
+    ///   moves a centroid by under 1e-9 px.
+    #[test]
+    fn detection_is_invariant_to_scale_zero_point_and_rotation() {
+        use crate::internals::invariance::Affine;
+        use crate::internals::prelude::*;
+
+        let frame = Scenario::default().frame();
+        let size = Size2us::new(frame.image.width(), frame.image.height());
+        let base: Vec<f32> = frame
+            .image
+            .channel(0)
+            .pixels()
+            .iter()
+            .map(|&value| Affine::quantize(value))
+            .collect();
+        let detect = |pixels: Vec<f32>| {
+            let mut image = gray_image(size, pixels);
+            image.metadata.saturation_flagged = true;
+            StarDetector::default().detect(&image).stars
+        };
+        let reference = detect(base.clone());
+        assert!(reference.len() > 10, "{}", reference.len());
+        let faintest =
+            |of: fn(&Star) -> f32| reference.iter().map(of).fold(f32::INFINITY, f32::min);
+        let (peak, flux) = (faintest(|star| star.peak), faintest(|star| star.flux));
+
+        for case in Affine::CASES {
+            let stars = detect(case.apply_all(&base));
+            assert_eq!(stars.len(), reference.len(), "{case:?}");
+            for (star, expected) in stars.iter().zip(&reference) {
+                let ratio = star.flux / case.scale / expected.flux - 1.0;
+                if case.offset == 0.0 {
+                    assert_eq!(star.pos, expected.pos, "{case:?}");
+                    assert_eq!(ratio, 0.0, "{case:?}");
+                } else {
+                    let rounding = f64::from((case.offset + case.scale) * f32::EPSILON / 2.0);
+                    let moved = (star.pos - expected.pos).length();
+                    assert!(
+                        moved <= 7.0 * rounding / f64::from(case.scale * peak),
+                        "{case:?}: {moved}"
+                    );
+                    assert!(
+                        f64::from(ratio.abs())
+                            <= 225.0 * 32.0 * rounding / f64::from(case.scale * flux),
+                        "{case:?}: {ratio}"
+                    );
+                }
+            }
+        }
+
+        let flip = |pos: DVec2| {
+            DVec2::new(
+                size.width as f64 - 1.0 - pos.x,
+                size.height as f64 - 1.0 - pos.y,
+            )
+        };
+        let order = |a: &DVec2, b: &DVec2| a.y.total_cmp(&b.y).then(a.x.total_cmp(&b.x));
+        let mut rotated: Vec<DVec2> = detect(base.iter().rev().copied().collect())
+            .iter()
+            .map(|star| flip(star.pos))
+            .collect();
+        let mut expected: Vec<DVec2> = reference.iter().map(|star| star.pos).collect();
+        rotated.sort_by(order);
+        expected.sort_by(order);
+        assert_eq!(rotated.len(), expected.len());
+        for (rotated, expected) in rotated.iter().zip(&expected) {
+            assert!(
+                (*rotated - *expected).length() < 1e-9,
+                "{rotated} vs {expected}"
+            );
+        }
+    }
+
     #[test]
     fn fwhm_source_distinguishes_measured_from_supplied() {
         // `value` reports what the detector ran with; only a measured one is `was_estimated`.

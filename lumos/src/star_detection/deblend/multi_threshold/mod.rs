@@ -1,412 +1,77 @@
-//! Multi-threshold deblending, after SExtractor (Bertin & Arnouts 1996, A&AS 117, 393).
+//! Multi-threshold deblending, after SExtractor (Bertin & Arnouts 1996, A&AS 117, 393) as SEP
+//! implements it in `deblend.c`.
 //!
-//! 1. Cut the component's residual at `n_thresholds` levels spaced exponentially from the
-//!    detection threshold to its peak.
-//! 2. Build a tree of how its pixels above each level split into connected regions.
-//! 3. A branch is its own object when it holds at least `min_contrast` of the flux the whole
-//!    component holds above the detection threshold.
+//! 1. Cut the component at `n_thresholds − 1` levels spaced exponentially between the detection
+//!    threshold and its peak. At each level, every object of the level below splits into the
+//!    connected regions of its pixels above the level that hold at least `min_area` pixels.
+//! 2. An object is significant when its flux above its own level, `Σv − t·n`, exceeds
+//!    `min_contrast` of the whole component's flux.
+//! 3. From the top level down, an object with two or more significant sons splits: each son that
+//!    is significant and split nowhere below becomes a star, and a split marks every ancestor as
+//!    split. A component that split nowhere is one star.
 
-use std::ops::{Index, Range};
-
-use crate::math::size2us::Size2us;
-use crate::math::urect::URect;
-use crate::math::vec2us::Vec2us;
 use crate::star_detection::config::detection_config::Connectivity;
 use crate::star_detection::deblend::component::Component;
+use crate::star_detection::deblend::component_pixels::ComponentPixels;
 use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::deblend::{Pixel, peaks_too_close};
 
-/// Sentinel value indicating no pixel value at grid position.
-const NO_PIXEL: f32 = f32::NEG_INFINITY;
+/// A pixel that belongs to no object of the current level: below it, or in a region too small to
+/// be one.
+const NO_OBJECT: u32 = u32::MAX;
 
 /// What the multi-threshold deblender reads from the detection configuration.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct MultiThresholdParams {
-    /// Levels between the detection threshold and the peak.
+    /// The levels of the ladder, the detection threshold included.
     pub(crate) n_thresholds: usize,
-    /// A branch's share of the component's flux above the detection threshold.
+    /// A branch's share of the component's flux.
     pub(crate) min_contrast: f32,
-    /// Minimum distance between sibling branches' peaks, in pixels.
+    /// Minimum distance between the peaks of two stars of one component, in pixels.
     pub(crate) min_separation: usize,
+    /// The fewest pixels a region above a level holds to be an object, as SEP's `minarea`.
+    pub(crate) min_area: usize,
     /// How the pixels above a level join into regions — the labeling's own rule.
     pub(crate) connectivity: Connectivity,
 }
 
-/// Half-open bounding box of a pixel set. Both grids size themselves from this, then differ only
-/// in whether they pad it — `PixelGrid` does, for unchecked neighbour reads; `NodeGrid` does not.
-///
-/// Returns `URect::empty()` for an empty slice; both callers return before that can matter.
-fn bounding_box(pixels: &[Pixel]) -> URect {
-    let mut bbox = URect::empty();
-    for p in pixels {
-        bbox.include(p.pos);
-    }
-    bbox
-}
-
-/// Grid-based pixel lookup for fast neighbor access during connected component finding.
-///
-/// Flat arrays indexed by local coordinates within the bounding box, in place of a hash map
-/// keyed by position.
-///
-/// One generation counter marks both the values and the visited set as current, so a reset is
-/// O(1) instead of clearing O(n) cells: a cell holds a pixel, or was visited, when its stamp
-/// equals `current_generation`.
-#[derive(Debug, Default)]
-struct PixelGrid {
-    /// Pixel values indexed by local coordinates.
-    values: Vec<f32>,
-    /// Generation when each cell's value was last set.
-    values_generation: Vec<u32>,
-    /// Generation when each cell was last visited.
-    visited_generation: Vec<u32>,
-    /// Incremented on each `reset_with_pixels`.
-    current_generation: u32,
-    /// Bounding box offset — one cell outside the component's top-left corner.
-    offset: Vec2us,
-    /// Grid extent, the bbox plus one cell of boundary padding on every side.
-    size: Size2us,
-}
-
-impl PixelGrid {
-    /// Reset and populate the grid with new pixels, reusing allocations when possible.
-    ///
-    /// The grid is sized to fit the bounding box of all pixels plus a 1-pixel
-    /// border to simplify boundary checks in neighbor traversal.
-    fn reset_with_pixels(&mut self, pixels: &[Pixel]) {
-        if pixels.is_empty() {
-            self.size = Size2us::default();
-            return;
-        }
-
-        // Skip 0 because generation arrays are initialized to 0 — wrapping to 0
-        // would make all cells appear valid.
-        self.current_generation = self.current_generation.wrapping_add(1);
-        if self.current_generation == 0 {
-            self.current_generation = 1;
-        }
-
-        let bbox = bounding_box(pixels);
-
-        // Guaranteed 1-pixel border on all sides for safe unchecked neighbor access. The grid is
-        // indexed by (pos - offset), so the border cells sit at local coordinate 0 on each axis;
-        // they hold no pixel value (the generation check returns NO_PIXEL), so BFS never
-        // propagates into them. `wrapping_sub` is for a component touching row or column 0: the
-        // offset wraps to usize::MAX and the index arithmetic wraps back with it.
-        let offset = Vec2us::new(bbox.min.x.wrapping_sub(1), bbox.min.y.wrapping_sub(1));
-        let size = Size2us::new(bbox.width() + 2, bbox.height() + 2);
-
-        let cells = size.pixel_count();
-
-        // Grow vectors if needed (never shrink — reuse allocations)
-        if self.values.len() < cells {
-            self.values.resize(cells, 0.0);
-        }
-        if self.values_generation.len() < cells {
-            self.values_generation.resize(cells, 0);
-        }
-        if self.visited_generation.len() < cells {
-            self.visited_generation.resize(cells, 0);
-        }
-
-        self.offset = offset;
-        self.size = size;
-
-        let generation = self.current_generation;
-        for p in pixels {
-            let idx = size.index_of(Vec2us::new(
-                p.pos.x.wrapping_sub(offset.x),
-                p.pos.y.wrapping_sub(offset.y),
-            ));
-            // SAFETY: idx is within size because p.pos is within bounding box + border
-            unsafe {
-                *self.values.get_unchecked_mut(idx) = p.value;
-                *self.values_generation.get_unchecked_mut(idx) = generation;
-            }
-        }
-    }
-
-    /// Get pixel value at local index, or `NO_PIXEL` if not present in current generation.
-    #[inline]
-    unsafe fn get_value_unchecked(&self, idx: usize) -> f32 {
-        // SAFETY: every operation below relies only on the precondition this function's own
-        // safety contract already states.
-        unsafe {
-            if *self.values_generation.get_unchecked(idx) == self.current_generation {
-                *self.values.get_unchecked(idx)
-            } else {
-                NO_PIXEL
-            }
-        }
-    }
-
-    /// Check visited and mark at local index. Returns true if newly visited.
-    #[inline]
-    unsafe fn try_mark_visited_unchecked(&mut self, idx: usize) -> bool {
-        // SAFETY: every operation below relies only on the precondition this function's own
-        // safety contract already states.
-        unsafe {
-            let gen_ptr = self.visited_generation.get_unchecked_mut(idx);
-            if *gen_ptr == self.current_generation {
-                false
-            } else {
-                *gen_ptr = self.current_generation;
-                true
-            }
-        }
-    }
-}
-
-/// Grid-based node assignment for tracking which tree node each pixel belongs to.
-///
-/// A flat array in place of a hash map keyed by position, reset in O(1) by a generation counter.
-#[derive(Debug, Default)]
-struct NodeGrid {
-    /// Node index for each pixel position.
-    nodes: Vec<u32>,
-    /// Generation when each cell's node was last set.
-    nodes_generation: Vec<u32>,
-    /// Current generation counter.
-    current_generation: u32,
-    /// Bounding box offset — the component's top-left corner in image coordinates.
-    offset: Vec2us,
-    /// Grid extent.
-    size: Size2us,
-}
-
-impl NodeGrid {
-    /// Initialize the grid from component pixels, reusing allocation when possible.
-    /// Uses generation counter to avoid O(n) clearing.
-    fn reset_with_pixels(&mut self, pixels: &[Pixel]) {
-        if pixels.is_empty() {
-            self.size = Size2us::default();
-            return;
-        }
-
-        self.current_generation = self.current_generation.wrapping_add(1);
-        if self.current_generation == 0 {
-            self.current_generation = 1;
-        }
-
-        // No border here, unlike `PixelGrid`: this grid is only ever indexed through
-        // `cell_index`, which bounds-checks.
-        let bbox = bounding_box(pixels);
-        self.offset = bbox.min;
-        self.size = Size2us::new(bbox.width(), bbox.height());
-
-        let cells = self.size.pixel_count();
-        if self.nodes.len() < cells {
-            self.nodes.resize(cells, 0);
-        }
-        if self.nodes_generation.len() < cells {
-            self.nodes_generation.resize(cells, 0);
-        }
-    }
-
-    /// Local cell index for an image position, or None if outside the grid.
-    #[inline]
-    fn cell_index(&self, pos: Vec2us) -> Option<usize> {
-        // wrapping_sub keeps the underflow case (position left of / above the offset) inside the
-        // one `contains` check below instead of needing a separate signed comparison.
-        let local = Vec2us::new(
-            pos.x.wrapping_sub(self.offset.x),
-            pos.y.wrapping_sub(self.offset.y),
-        );
-        self.size.contains(local).then(|| self.size.index_of(local))
-    }
-
-    /// Get node index at position, or None if unassigned.
-    #[inline]
-    fn get(&self, pos: Vec2us) -> Option<usize> {
-        let idx = self.cell_index(pos)?;
-        if self.nodes_generation[idx] == self.current_generation {
-            Some(self.nodes[idx] as usize)
-        } else {
-            None
-        }
-    }
-
-    /// Set node index at position.
-    #[inline]
-    fn set(&mut self, pos: Vec2us, node_idx: usize) {
-        let Some(idx) = self.cell_index(pos) else {
-            return;
-        };
-        self.nodes[idx] = node_idx as u32;
-        self.nodes_generation[idx] = self.current_generation;
-    }
-}
-
-/// A node in the deblending tree.
-#[derive(Debug, Clone)]
-struct DeblendNode {
-    /// Peak position and value.
-    peak: Pixel,
-    /// Residual flux of the branch: the sum over its pixels above the level it split at.
-    flux: f32,
-    /// Branches that split from this node at a higher level, brightest by flux first: they are
-    /// added together, so they are one run of the tree.
-    children: Range<u32>,
-}
-
-/// A set of pixel regions held in one flat buffer.
-///
-/// Every region's pixels sit end to end in `pixels`, delimited by `ends`. Regions are found and
-/// consumed inside a single threshold level and nothing ever takes ownership of one, so they can
-/// share a buffer that is simply truncated for reuse.
-#[derive(Debug, Default)]
-struct RegionSet {
-    /// Every region's pixels, concatenated.
-    pixels: Vec<Pixel>,
-    /// End offset of each region in `pixels`. Region `i` starts where region `i - 1` ended, and
-    /// the first at 0 — regions are only ever appended, never removed, so the starts stay
-    /// implicit.
-    ends: Vec<u32>,
-}
-
-impl RegionSet {
-    /// Keeps both allocations; the next search refills them.
-    fn clear(&mut self) {
-        self.pixels.clear();
-        self.ends.clear();
-    }
-
-    const fn len(&self) -> usize {
-        self.ends.len()
-    }
-
-    /// Close the run of pixels appended since the last region as a region of its own.
-    fn close_region(&mut self) {
-        debug_assert!(
-            u32::try_from(self.pixels.len()).is_ok(),
-            "a component cannot exceed u32 pixels"
-        );
-        self.ends.push(self.pixels.len() as u32);
-    }
-
-    fn iter(&self) -> impl Iterator<Item = &[Pixel]> {
-        (0..self.len()).map(|i| &self[i])
-    }
-}
-
-impl Index<usize> for RegionSet {
-    type Output = [Pixel];
-
-    fn index(&self, index: usize) -> &[Pixel] {
-        let start = if index == 0 { 0 } else { self.ends[index - 1] };
-        &self.pixels[start as usize..self.ends[index] as usize]
-    }
-}
-
-/// The scratch a connected-region search reuses: the grid it labels and the queue it walks. Both
-/// are needed by every search, so they travel together.
-#[derive(Debug, Default)]
-struct RegionScratch {
-    /// Grid for fast pixel lookup.
-    grid: PixelGrid,
-    /// BFS queue for connected component finding (flat grid indices).
-    queue: Vec<u32>,
-}
-
-impl RegionScratch {
-    /// Run BFS from a seed pixel, appending the connected region to `out`.
-    ///
-    /// Returns false when the seed was already visited, leaving `out` untouched.
-    #[inline]
-    fn bfs_region(
-        &mut self,
-        seed: &Pixel,
-        connectivity: Connectivity,
-        out: &mut RegionSet,
-    ) -> bool {
-        let Self { grid, queue } = self;
-        // Hoisted out of the loop below: `grid` is borrowed mutably inside it, so the extent and
-        // offset can't be re-read from the struct there.
-        let size = grid.size;
-        let offset = grid.offset;
-        let width = size.width;
-
-        let start_idx = size.index_of(Vec2us::new(
-            seed.pos.x.wrapping_sub(offset.x),
-            seed.pos.y.wrapping_sub(offset.y),
-        ));
-
-        // SAFETY: pixel is within grid bounds (placed during reset_with_pixels)
-        if unsafe { !grid.try_mark_visited_unchecked(start_idx) } {
-            return false;
-        }
-
-        queue.clear();
-        queue.push(start_idx as u32);
-
-        while let Some(idx) = queue.pop() {
-            let idx = idx as usize;
-            // SAFETY: idx was validated when pushed to queue
-            let value = unsafe { grid.get_value_unchecked(idx) };
-            let local = size.point_of(idx);
-            out.pixels.push(Pixel {
-                pos: Vec2us::new(
-                    local.x.wrapping_add(offset.x),
-                    local.y.wrapping_add(offset.y),
-                ),
-                value,
-            });
-            // SAFETY: grid has guaranteed 1-pixel border (wrapping_sub in reset_with_pixels),
-            // so all 8 neighbors of any valid pixel are in-bounds.
-            unsafe { visit_neighbors_grid(idx, width, connectivity, grid, queue) };
-        }
-
-        out.close_region();
-        true
-    }
-}
-
-/// A region of the current level and the node it grew from.
+/// One object of the tree: a connected region of the component above the level it was cut at.
 #[derive(Debug, Clone, Copy)]
-struct GrownRegion {
+struct TreeObject {
+    /// The object of the level below it lies in; the root's is its own index.
     parent: u32,
-    /// The region's index in the level's set.
-    index: u32,
-}
-
-/// A child region with the two facts its ranking and its node need: flux and peak.
-#[derive(Debug, Clone, Copy)]
-struct RankedRegion {
-    flux: f32,
     peak: Pixel,
-    /// The region's index in the set it was found in.
-    index: u32,
+    /// `Σv − t·n` over its pixels: the flux it holds above its level.
+    flux_above: f32,
 }
 
-/// The multi-threshold deblender's working sets, reused from component to component.
+/// The multi-threshold deblender's working sets, reused from component to component. Every one
+/// is in proportion to the component's pixels or to its tree.
 #[derive(Debug, Default)]
 pub(crate) struct TreeBuffers {
-    /// Collected component pixels.
-    component_pixels: Vec<Pixel>,
-    /// Node assignment grid.
-    pixel_to_node: NodeGrid,
-    /// Pixels above current threshold.
-    above_threshold: Vec<Pixel>,
-    /// The regions the component broke into at the current threshold level.
-    regions: RegionSet,
-    /// The level's regions with the node each grew from, grouped by node.
-    parents: Vec<GrownRegion>,
-    /// One split's regions ranked by flux.
-    child_order: Vec<RankedRegion>,
-    region_scratch: RegionScratch,
-    /// The tree of one component; node 0 is its root.
-    tree: Vec<DeblendNode>,
-    /// The tree's significant leaves.
-    leaves: Vec<u32>,
+    /// Per pixel: the object of the current level it lies in, or [`NO_OBJECT`].
+    object_of: Vec<u32>,
+    /// Per pixel: the level it was last reached at.
+    visited: Vec<u32>,
+    /// The region being grown, as pixel indices.
+    members: Vec<u32>,
+    queue: Vec<u32>,
+    objects: Vec<TreeObject>,
+    /// The sons of each object, by object, delimited by `son_starts`.
+    sons: Vec<u32>,
+    son_starts: Vec<u32>,
+    /// Per object: no object under it split.
+    unsplit: Vec<bool>,
+    /// The objects that stand as stars.
+    stars: Vec<u32>,
 }
 
-/// Split `component` by its multi-threshold tree onto `out`: one region when fewer than two
-/// branches pass the contrast test, else one region per passing branch, brightest by flux first.
-/// Returns how many it pushed.
+/// Split `component` by its multi-threshold tree onto `out`: one region when it splits nowhere,
+/// else one region per star, brightest by flux above its level first. Returns how many it pushed.
 ///
-/// `floor` is the detection threshold at the component, in residual units — the lowest level of
-/// the ladder, as SExtractor's `DETECT_THRESH` is. It must be positive.
+/// `floor` is the detection threshold at the component, in the units of its values — the lowest
+/// level of the ladder, as SExtractor's `DETECT_THRESH` is. It must be positive.
 pub(crate) fn deblend_multi_threshold(
     component: &Component<'_>,
     floor: f32,
@@ -417,48 +82,57 @@ pub(crate) fn deblend_multi_threshold(
     debug_assert!(floor > 0.0, "the ladder starts at a positive threshold");
     debug_assert!(params.n_thresholds >= 1, "the ladder has at least one step");
     let DeblendBuffers {
+        pixels,
         peaks,
         assignment,
-        tree: buffers,
+        tree,
         ..
     } = buffers;
     peaks.clear();
     let peak = component.peak();
 
-    // Branches are disjoint subsets of the root's pixels, all above a positive floor, so no two
-    // can each hold `min_contrast ≥ 1` of the root's flux; and a peak at or below the floor
-    // leaves the ladder no room to split.
+    // Stars are disjoint subsets of the component, each holding more than `min_contrast` of its
+    // flux above a positive level, so at most one can for `min_contrast ≥ 1`; and a peak at or
+    // below the floor leaves the ladder no room to split.
     if params.min_contrast >= 1.0 || peak.value <= floor {
         return component.split_at(peaks, assignment, out);
     }
 
-    build_deblend_tree(
-        component,
-        ThresholdLadder {
-            low: floor,
-            high: peak.value,
-            n_thresholds: params.n_thresholds,
-        },
-        params,
-        buffers,
-    );
-    let TreeBuffers { tree, leaves, .. } = buffers;
-    find_significant_branches(tree, params.min_contrast, leaves);
-    if leaves.len() > 1 {
-        leaves.sort_unstable_by(|&a, &b| {
-            tree[b as usize]
-                .flux
-                .total_cmp(&tree[a as usize].flux)
+    pixels.fill(component);
+    let ladder = ThresholdLadder {
+        low: floor,
+        high: peak.value,
+        n_thresholds: params.n_thresholds,
+    };
+    tree.build(pixels, peak, ladder, params);
+    let root_flux: f64 = pixels.pixels.iter().map(|p| f64::from(p.value)).sum();
+    tree.find_stars((f64::from(params.min_contrast) * root_flux) as f32);
+
+    let TreeBuffers { objects, stars, .. } = tree;
+    if stars.len() > 1 {
+        stars.sort_unstable_by(|&a, &b| {
+            objects[b as usize]
+                .flux_above
+                .total_cmp(&objects[a as usize].flux_above)
                 .then(a.cmp(&b))
         });
-        peaks.extend(leaves.iter().map(|&i| tree[i as usize].peak));
+        let min_sep_sq = params.min_separation * params.min_separation;
+        for &star in stars.iter() {
+            let candidate = objects[star as usize].peak;
+            if !peaks
+                .iter()
+                .any(|kept: &Pixel| peaks_too_close(candidate.pos, kept.pos, min_sep_sq))
+            {
+                peaks.push(candidate);
+            }
+        }
     }
     component.split_at(peaks, assignment, out)
 }
 
-/// The exponentially spaced ladder one component is cut at: the floor to start
-/// from, the peak to reach, and how many steps in between. The three are only
-/// meaningful together — level `i` sits at `low * (high / low) ^ (i / n)`.
+/// The exponentially spaced ladder one component is cut at: the floor to start from, the peak to
+/// reach, and how many steps in between. The three are only meaningful together — level `i` sits
+/// at `low * (high / low) ^ (i / n)`.
 #[derive(Debug, Clone, Copy)]
 struct ThresholdLadder {
     low: f32,
@@ -467,291 +141,171 @@ struct ThresholdLadder {
 }
 
 impl ThresholdLadder {
-    /// Level `i` of `0..=n_thresholds`: `low` itself at 0, `high` up to rounding at `n`.
+    /// Level `i` of `0..n_thresholds`: `low` itself at 0.
     fn level(self, i: usize) -> f32 {
         self.low * (self.high / self.low).powf(i as f32 / self.n_thresholds as f32)
     }
 }
 
-/// Build the deblending tree in `buffers.tree` by tracking connectivity at each level.
-///
-/// The root is the whole component, holding the flux above `ladder.low`; levels `0..=n` then
-/// split it, from `low` itself up to the peak. Exponential spacing puts the levels densest at the
-/// faint end, where neighbours first separate.
-fn build_deblend_tree(
-    component: &Component<'_>,
-    ladder: ThresholdLadder,
-    params: MultiThresholdParams,
-    buffers: &mut TreeBuffers,
-) {
-    let low = ladder.low;
+impl TreeBuffers {
+    /// Build the tree of `pixels`, whose brightest is `peak`: the root is the whole component,
+    /// and levels `1..n_thresholds` cut every object of the level below into its regions above
+    /// the level holding at least `min_area` pixels. Exponential spacing puts the levels densest at
+    /// the faint end, where neighbours first separate.
+    fn build(
+        &mut self,
+        pixels: &ComponentPixels,
+        peak: Pixel,
+        ladder: ThresholdLadder,
+        params: MultiThresholdParams,
+    ) {
+        let count = pixels.pixels.len();
+        self.object_of.clear();
+        self.object_of.resize(count, 0);
+        self.visited.clear();
+        self.visited.resize(count, 0);
+        self.objects.clear();
+        self.objects.push(TreeObject {
+            parent: 0,
+            peak,
+            flux_above: 0.0,
+        });
 
-    let TreeBuffers {
-        component_pixels,
-        pixel_to_node,
-        tree,
-        ..
-    } = buffers;
-    component_pixels.clear();
-    component_pixels.extend(component.pixels());
-    pixel_to_node.reset_with_pixels(component_pixels);
-    for p in component_pixels.iter() {
-        pixel_to_node.set(p.pos, 0);
-    }
-    tree.clear();
-    tree.push(DeblendNode {
-        peak: component.peak(),
-        flux: component_pixels
-            .iter()
-            .filter(|p| p.value >= low)
-            .map(|p| p.value)
-            .sum(),
-        children: 0..0,
-    });
-
-    for level in 0..=ladder.n_thresholds {
-        let threshold = ladder.level(level);
-
-        let TreeBuffers {
-            component_pixels,
-            above_threshold,
-            regions,
-            region_scratch,
-            ..
-        } = buffers;
-        above_threshold.clear();
-        above_threshold.extend(component_pixels.iter().filter(|p| p.value >= threshold));
-        if above_threshold.is_empty() {
-            break;
-        }
-
-        find_connected_regions_grid(
-            above_threshold,
-            params.connectivity,
-            regions,
-            region_scratch,
-        );
-        process_level(buffers, params);
-    }
-}
-
-/// Find the splits of the current level and add their branches to the tree.
-///
-/// Each region of the level lies inside the pixels of one node: the branch it grew from. A node
-/// two or more regions grew from split here. The regions are grouped by node in one pass, so a
-/// level costs its pixel count however many regions it holds.
-fn process_level(buffers: &mut TreeBuffers, params: MultiThresholdParams) {
-    let TreeBuffers {
-        pixel_to_node,
-        regions,
-        parents,
-        child_order,
-        tree,
-        ..
-    } = buffers;
-
-    parents.clear();
-    parents.extend(regions.iter().enumerate().filter_map(|(index, region)| {
-        find_single_parent_grid(region, pixel_to_node).map(|parent| GrownRegion {
-            parent: parent as u32,
-            index: index as u32,
-        })
-    }));
-    parents.sort_unstable_by_key(|grown| (grown.parent, grown.index));
-    for group in parents.chunk_by(|a, b| a.parent == b.parent) {
-        let parent = group[0].parent as usize;
-        // A node splits once. The regions its split did not keep — too close to a brighter
-        // sibling — stay part of it; splitting them again at a later level would replace the
-        // children it already has.
-        if group.len() < 2 || !tree[parent].children.is_empty() {
-            continue;
-        }
-        create_child_nodes(
-            tree,
-            pixel_to_node,
-            parent,
-            regions,
-            group,
-            child_order,
-            params.min_separation,
-        );
-    }
-}
-
-/// Find the single parent node for a region using grid lookup, or None if multiple/no parents.
-#[inline]
-fn find_single_parent_grid(region: &[Pixel], pixel_to_node: &NodeGrid) -> Option<usize> {
-    let mut parent: Option<usize> = None;
-
-    for p in region {
-        if let Some(idx) = pixel_to_node.get(p.pos) {
-            match parent {
-                None => parent = Some(idx),
-                Some(existing) if existing != idx => return None,
-                _ => {}
+        for level in 1..ladder.n_thresholds {
+            let threshold = ladder.level(level);
+            let stamp = u32::try_from(level).expect("the ladder holds at most u32 levels");
+            let before = self.objects.len();
+            for seed in 0..count {
+                let parent = self.object_of[seed];
+                if pixels.pixels[seed].value < threshold
+                    || parent == NO_OBJECT
+                    || self.visited[seed] == stamp
+                {
+                    continue;
+                }
+                self.grow(pixels, seed, threshold, stamp, params.connectivity);
+                let sum: f64 = self
+                    .members
+                    .iter()
+                    .map(|&member| f64::from(pixels.pixels[member as usize].value))
+                    .sum();
+                let object = if self.members.len() < params.min_area {
+                    NO_OBJECT
+                } else {
+                    let peak = Pixel::brightest(
+                        self.members
+                            .iter()
+                            .map(|&member| pixels.pixels[member as usize]),
+                    )
+                    .expect("a region holds its seed");
+                    self.objects.push(TreeObject {
+                        parent,
+                        peak,
+                        flux_above: (sum - f64::from(threshold) * self.members.len() as f64) as f32,
+                    });
+                    u32::try_from(self.objects.len() - 1).expect("a tree holds below u32 objects")
+                };
+                for &member in &self.members {
+                    self.object_of[member as usize] = object;
+                }
+            }
+            if self.objects.len() == before {
+                break;
             }
         }
     }
 
-    parent
-}
-
-/// Add the regions of `group`, which `parent_idx` split into, as its children: brightest by flux
-/// first, each at least `min_separation` from every brighter sibling kept.
-fn create_child_nodes(
-    tree: &mut Vec<DeblendNode>,
-    pixel_to_node: &mut NodeGrid,
-    parent_idx: usize,
-    regions: &RegionSet,
-    group: &[GrownRegion],
-    child_order: &mut Vec<RankedRegion>,
-    min_separation: usize,
-) {
-    child_order.clear();
-    child_order.extend(group.iter().map(|grown| {
-        let region = &regions[grown.index as usize];
-        RankedRegion {
-            flux: region.iter().map(|p| p.value).sum(),
-            peak: Pixel::brightest(region.iter().copied()).expect("a region holds a pixel"),
-            index: grown.index,
-        }
-    }));
-    child_order.sort_unstable_by(|a, b| b.flux.total_cmp(&a.flux).then(a.index.cmp(&b.index)));
-
-    let min_sep_sq = min_separation * min_separation;
-    let first = tree.len();
-    for ranked in child_order.iter() {
-        let too_close = tree[first..]
-            .iter()
-            .any(|sibling| peaks_too_close(ranked.peak.pos, sibling.peak.pos, min_sep_sq));
-        if too_close {
-            continue;
-        }
-
-        let child_idx = tree.len();
-        for p in &regions[ranked.index as usize] {
-            pixel_to_node.set(p.pos, child_idx);
-        }
-        let start = child_idx as u32;
-        tree.push(DeblendNode {
-            peak: ranked.peak,
-            flux: ranked.flux,
-            children: start..start,
-        });
-    }
-
-    tree[parent_idx].children = first as u32..tree.len() as u32;
-}
-
-/// Collect into `leaves` the nodes of `tree` that stand as separate objects under the contrast
-/// test, from the root at index 0.
-fn find_significant_branches(tree: &[DeblendNode], min_contrast: f32, leaves: &mut Vec<u32>) {
-    leaves.clear();
-    if let Some(root) = tree.first() {
-        collect_significant_leaves(tree, 0, min_contrast * root.flux, leaves);
-    }
-}
-
-/// Recursively collect leaf nodes that pass the contrast criterion.
-///
-/// Per the SExtractor algorithm a branch is a separate object when its flux is at least
-/// `min_contrast` of the root's flux, not of its immediate parent — so the bar `min_flux` is one
-/// value per component instead of shrinking with depth. A parent-relative bar over-splits the
-/// bright wings of large/saturated stars in crowded fields, injecting spurious detections that
-/// poison registration's triangle matching.
-///
-/// The depth is at most `n_thresholds + 1` (one level per split), which
-/// `MAX_DEBLEND_N_THRESHOLDS` bounds.
-fn collect_significant_leaves(
-    tree: &[DeblendNode],
-    node_idx: usize,
-    min_flux: f32,
-    leaves: &mut Vec<u32>,
-) {
-    let node = &tree[node_idx];
-    let passing = node
-        .children
-        .clone()
-        .filter(|&child| tree[child as usize].flux >= min_flux);
-
-    // Fewer than two children clear the bar: this node is one object.
-    if passing.clone().count() <= 1 {
-        leaves.push(node_idx as u32);
-        return;
-    }
-    for child in passing {
-        collect_significant_leaves(tree, child as usize, min_flux, leaves);
-    }
-}
-
-/// Find connected regions using grid-based BFS, replacing whatever `regions` held.
-fn find_connected_regions_grid(
-    pixels: &[Pixel],
-    connectivity: Connectivity,
-    regions: &mut RegionSet,
-    scratch: &mut RegionScratch,
-) {
-    regions.clear();
-    if pixels.is_empty() {
-        return;
-    }
-    scratch.grid.reset_with_pixels(pixels);
-
-    for p in pixels {
-        scratch.bfs_region(p, connectivity, regions);
-    }
-}
-
-/// Visit the neighbours `connectivity` names using grid-based lookup with flat indices.
-///
-/// This is the hot path - fully unchecked since the grid always has a 1-pixel
-/// border (guaranteed by `wrapping_sub` in `reset_with_pixels`). Border cells have
-/// `NO_PIXEL` via generation check so they won't propagate BFS further.
-///
-/// # Safety
-/// `idx` must be a valid local index within the grid with at least 1 cell of
-/// padding on all sides.
-#[inline]
-unsafe fn visit_neighbors_grid(
-    idx: usize,
-    width: usize,
-    connectivity: Connectivity,
-    grid: &mut PixelGrid,
-    queue: &mut Vec<u32>,
-) {
-    // SAFETY: every operation below relies only on the precondition this function's own
-    // safety contract already states.
-    unsafe {
-        let up = idx - width;
-        let down = idx + width;
-
-        try_visit_idx(up, grid, queue);
-        try_visit_idx(idx - 1, grid, queue);
-        try_visit_idx(idx + 1, grid, queue);
-        try_visit_idx(down, grid, queue);
-        if connectivity == Connectivity::Eight {
-            try_visit_idx(up - 1, grid, queue);
-            try_visit_idx(up + 1, grid, queue);
-            try_visit_idx(down - 1, grid, queue);
-            try_visit_idx(down + 1, grid, queue);
+    /// Into `members`, the connected pixels at or above `threshold` reached from `seed`, each
+    /// marked visited at `stamp`. The pixels above a level nest inside the regions of the level
+    /// below, so all of them lie in the seed's object.
+    fn grow(
+        &mut self,
+        pixels: &ComponentPixels,
+        seed: usize,
+        threshold: f32,
+        stamp: u32,
+        connectivity: Connectivity,
+    ) {
+        let Self {
+            visited,
+            members,
+            queue,
+            ..
+        } = self;
+        members.clear();
+        queue.clear();
+        visited[seed] = stamp;
+        queue.push(seed as u32);
+        while let Some(index) = queue.pop() {
+            members.push(index);
+            pixels.for_each_neighbour(index as usize, connectivity, |neighbour| {
+                if visited[neighbour] != stamp && pixels.pixels[neighbour].value >= threshold {
+                    visited[neighbour] = stamp;
+                    queue.push(neighbour as u32);
+                }
+            });
         }
     }
-}
 
-/// Try to visit a neighbor at a flat grid index. Fully unchecked.
-///
-/// # Safety
-/// `idx` must be a valid index within the grid arrays.
-#[inline]
-unsafe fn try_visit_idx(idx: usize, grid: &mut PixelGrid, queue: &mut Vec<u32>) {
-    // SAFETY: every operation below relies only on the precondition this function's own
-    // safety contract already states.
-    unsafe {
-        if grid.get_value_unchecked(idx) == NO_PIXEL {
+    /// Into `stars`, the objects that stand as stars when a significant one holds more than
+    /// `min_flux` above its level.
+    ///
+    /// The objects are visited from the last cut down, so every object's sons are decided before
+    /// it is. An object with two or more significant sons splits, and each of them that is
+    /// unsplit is a star. As in SEP, the bar is one value for the component, not a share of the
+    /// parent: a parent-relative bar over-splits the bright wings of large stars.
+    fn find_stars(&mut self, min_flux: f32) {
+        let Self {
+            objects,
+            sons,
+            son_starts,
+            unsplit,
+            stars,
+            ..
+        } = self;
+        let count = objects.len();
+        stars.clear();
+        if count < 3 {
             return;
         }
-        if grid.try_mark_visited_unchecked(idx) {
-            queue.push(idx as u32);
+        // The sons of every object, grouped by parent in index order: a count per parent, a
+        // running sum to each parent's start, a placement that advances each start to its end,
+        // and a shift that turns the ends back into starts.
+        son_starts.clear();
+        son_starts.resize(count + 1, 0);
+        for object in &objects[1..] {
+            son_starts[object.parent as usize + 1] += 1;
+        }
+        for index in 0..count {
+            son_starts[index + 1] += son_starts[index];
+        }
+        sons.clear();
+        sons.resize(count - 1, 0);
+        for (index, object) in objects.iter().enumerate().skip(1) {
+            let slot = &mut son_starts[object.parent as usize];
+            sons[*slot as usize] = index as u32;
+            *slot += 1;
+        }
+        son_starts.copy_within(0..count, 1);
+        son_starts[0] = 0;
+
+        let significant = |object: u32| objects[object as usize].flux_above > min_flux;
+        unsplit.clear();
+        unsplit.resize(count, true);
+        for index in (0..count).rev() {
+            let own = &sons[son_starts[index] as usize..son_starts[index + 1] as usize];
+            unsplit[index] = own.iter().all(|&son| unsplit[son as usize]);
+            if own.iter().filter(|&&son| significant(son)).count() > 1 {
+                stars.extend(
+                    own.iter()
+                        .copied()
+                        .filter(|&son| unsplit[son as usize] && significant(son)),
+                );
+                unsplit[index] = false;
+            }
+        }
+        if unsplit[0] {
+            stars.clear();
         }
     }
 }
