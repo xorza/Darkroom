@@ -62,7 +62,7 @@ pub use graph::Graph;
 pub use graph::NodeRef;
 pub use graph::Subscription;
 pub use graph::detached::DetachedNode;
-pub use graph::error::GraphValidationError;
+pub use graph::error::{DetachedNodeError, GraphValidationError};
 pub use graph::func::error::{FuncValidationError, InvokeError, InvokeResult, OverrideRule};
 pub use graph::func::event::{AsyncEvent, AsyncEventFn, EventLambda};
 pub use graph::func::lambda::{AsyncLambda, AsyncLambdaFn, FuncLambda, Invocation, OutputDemand};

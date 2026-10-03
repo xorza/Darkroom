@@ -627,10 +627,9 @@ fn assert_quiet(doc: &mut Document, intent: GraphIntent, what: &str) {
 
 #[test]
 fn insertions_reusing_an_identity_are_refused_instead_of_panicking() {
-    // Both of these would otherwise abort the process inside the write half:
-    // a live id trips `Graph::insert`'s own duplicate-id panic, and a nil one
-    // trips the assert in `Graph::find`. Refusing at the gate is what turns a
-    // would-be process abort into a stated precondition.
+    // A live id would otherwise abort the process inside the write half, on
+    // `Graph::insert`'s own duplicate-id panic, and a nil one names nothing a
+    // widget could have read. Refusing at the gate states both.
     let mut fixture = DocFixture::default();
     let live = fixture.stub_at(Vec2::ZERO);
     let mut doc = fixture.doc;
@@ -712,8 +711,7 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
             seeded(vec![(InputPort::new(fresh, 0), Binding::bind(fresh, 0))]),
         ),
         (
-            // Only one could survive, and the record would then disagree with
-            // the graph — `Graph::attach_node` asserts on the malformed record.
+            // Only one could survive, so `DetachedNode::new` refuses the record.
             "AddNode seeding one port twice",
             seeded(vec![
                 (

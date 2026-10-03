@@ -5,12 +5,12 @@ use ron::value::RawValue;
 
 use crate::execution::compile::compiled_graph::ExecutionBinding;
 use crate::graph::Graph;
-use crate::graph::error::GraphValidationError;
+use crate::graph::error::{DetachedNodeError, GraphValidationError};
 use crate::graph::func::Func;
 use crate::graph::identity::FuncId;
 use crate::graph::node::{CacheMode, Node, NodeKind};
 use crate::graph::output_types::OutputTypes;
-use crate::graph::{Binding, InputPort, NodeId, OutputPort, Subscription};
+use crate::graph::{Binding, BindingEntry, InputPort, NodeId, OutputPort, Subscription};
 use crate::testing;
 use crate::testing::graph::{NodeSpec, TestGraph};
 use crate::{ConstValue, DataType, DetachedNode};
@@ -528,50 +528,108 @@ fn subscribe_unsubscribe_is_subscribed() {
     assert_eq!(g.graph.subscriptions().count(), 0);
 }
 
+/// A detached node carries exactly the wiring that touched it, and attaching it
+/// restores the graph. `DetachedNode::new` puts a record from outside in the
+/// graph's order and refuses one that could not have come out of a graph; a
+/// record that could has to meet a graph it fits, or the attach panics with the
+/// graph untouched. A nil id is simply absent from every lookup.
 #[test]
-fn wiring_snapshot_round_trips_through_serde_and_restore() -> TestResult {
+fn a_detached_node_restores_its_wiring_and_malformed_records_are_refused() {
     let mut g = TestGraph::sample();
+    assert!(g.graph.find(NodeId::nil()).is_none());
+    assert!(g.library.by_id(FuncId::nil()).is_none());
     let sum = g.id("sum");
-    // Add a subscription that touches `sum` so both arms are exercised.
-    g.subscribe("get_a", 0, "sum");
     let get_a = g.id("get_a");
-
-    let bindings = g.graph.bindings_touching(sum);
-    assert_eq!(bindings.len(), 3);
+    let mult = g.id("mult");
+    // A subscription that touches `sum`, so both kinds of wiring travel.
+    g.subscribe("get_a", 0, "sum");
+    assert_eq!(g.graph.bindings_touching(sum).len(), 3);
 
     let before = g.graph.clone_verbatim();
     let edges_before = g.graph.edges().count();
     let detached = g.remove("sum");
     assert_eq!(g.graph.edges().count(), edges_before - 3);
     assert!(!g.graph.is_subscribed(get_a, 0, sum));
+    assert_eq!(detached.bindings().len(), 3);
+    assert_eq!(detached.subscriptions().len(), 1);
 
-    let serialized = serialize(&detached, SerdeFormat::Bitcode)?;
-    let decoded: DetachedNode = deserialize(&serialized, SerdeFormat::Bitcode)?;
-    assert_eq!(decoded, detached);
+    let rebuild = |bindings: Vec<BindingEntry>, subscriptions: Vec<Subscription>| {
+        DetachedNode::new(sum, detached.node().clone(), bindings, subscriptions)
+    };
+    let mut reversed = detached.bindings().to_vec();
+    reversed.reverse();
+    assert_eq!(
+        rebuild(reversed, detached.subscriptions().to_vec()),
+        Ok(detached.clone()),
+        "a record from outside is put in the graph's order"
+    );
 
-    let mut nil_id = detached.clone();
-    nil_id.node_id = NodeId::nil();
-    let mut mismatched = detached.clone();
-    mismatched.node_id = NodeId::unique();
-    for invalid in [nil_id, mismatched] {
-        let serialized = serialize(&invalid, SerdeFormat::Ron)?;
-        let decoded_invalid: DetachedNode = deserialize(&serialized, SerdeFormat::Ron)?;
-        let detached_graph = g.graph.clone_verbatim();
-        let result = panic::catch_unwind(AssertUnwindSafe(|| {
-            g.graph.attach_node(decoded_invalid);
-        }));
-        assert!(result.is_err());
-        assert_eq!(
-            g.graph, detached_graph,
-            "failed attachment mutated the graph"
-        );
+    let foreign_port = InputPort::new(mult, 1);
+    let foreign = BindingEntry {
+        port: foreign_port,
+        binding: Binding::Const(1i64.into()),
+    };
+    let first = detached.bindings()[0].clone();
+    let elsewhere = Subscription {
+        emitter: get_a,
+        event_idx: 0,
+        subscriber: mult,
+    };
+    let own = detached.subscriptions()[0];
+    let refusals = [
+        (
+            DetachedNode::new(
+                NodeId::nil(),
+                detached.node().clone(),
+                Vec::new(),
+                Vec::new(),
+            ),
+            DetachedNodeError::NilNodeId,
+        ),
+        (
+            rebuild(vec![foreign], Vec::new()),
+            DetachedNodeError::ForeignBinding { port: foreign_port },
+        ),
+        (
+            rebuild(vec![first.clone(), first.clone()], Vec::new()),
+            DetachedNodeError::DuplicateBinding { port: first.port },
+        ),
+        (
+            rebuild(Vec::new(), vec![elsewhere]),
+            DetachedNodeError::ForeignSubscription {
+                subscription: elsewhere,
+            },
+        ),
+        (
+            rebuild(Vec::new(), vec![own, own]),
+            DetachedNodeError::DuplicateSubscription { subscription: own },
+        ),
+    ];
+    for (result, error) in refusals {
+        assert_eq!(result, Err(error));
     }
 
-    g.graph.attach_node(decoded);
+    // Serialized, a record round-trips; deserializing goes through the same
+    // refusals, so a record edited into a nil id fails to decode.
+    let bytes = serialize(&detached, SerdeFormat::Bitcode).unwrap();
+    let decoded: DetachedNode = deserialize(&bytes, SerdeFormat::Bitcode).unwrap();
+    assert_eq!(decoded, detached);
+    let text = String::from_utf8(serialize(&detached, SerdeFormat::Ron).unwrap()).unwrap();
+    let nil = text.replace(&sum.to_string(), &NodeId::nil().to_string());
+    assert_ne!(nil, text, "the id is spelled in the text");
+    assert!(deserialize::<DetachedNode>(nil.as_bytes(), SerdeFormat::Ron).is_err());
 
+    g.graph.attach_node(detached.clone());
     assert_eq!(g.graph, before);
-
-    Ok(())
+    let attached = g.graph.clone_verbatim();
+    let twice = panic::catch_unwind(AssertUnwindSafe(|| {
+        g.graph.attach_node(detached);
+    }));
+    assert!(
+        twice.is_err(),
+        "a node already in the graph is not attached again"
+    );
+    assert_eq!(g.graph, attached, "a refused attach leaves the graph alone");
 }
 
 /// Placing a node seeds a const binding for every input its declaration gave a

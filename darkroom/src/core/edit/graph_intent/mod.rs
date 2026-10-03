@@ -320,15 +320,8 @@ impl GraphIntent {
                     pos,
                     z: view.front_z(),
                 };
-                UndoStep::NodePresence(Box::new(NodePresence::insertion(
-                    DetachedNode {
-                        node_id,
-                        node,
-                        bindings,
-                        subscriptions: Vec::new(),
-                    },
-                    placement,
-                )))
+                let detached = DetachedNode::new(node_id, node, bindings, Vec::new())?;
+                UndoStep::NodePresence(Box::new(NodePresence::insertion(detached, placement)))
             }
             Self::RemoveNode { node_id } => {
                 validate::non_nil_node(node_id, "RemoveNode")?;
