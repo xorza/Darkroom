@@ -48,11 +48,7 @@ Short paths are relative to `lumos/src/stacking/star_detection/`.
 ### lumos — registration
 Paths are relative to `lumos/src/stacking/registration/`.
 
-- [ ] `ransac/tests/estimator.rs:625-630` — `similarity_near_unity_scale`: tolerance 1e-4 against a true scale of 1.0001 (`1.0001 - 1.0 = 9.99999999999890e-5 < 1e-4`), so a recovered scale of 1.0 passes. The data are exact, so assert to ~1e-12.
-- [ ] `ransac/tests/scoring.rs:64-89` — `score_hypothesis_early_exit` makes every point an outlier, so `inliers.len() < n` holds with or without early exit (it is 0 either way). `score <= -1.0` also holds without early exit, where the full score is −50. Assert `score == -1.5`: the exit is strict `>`, so it happens on the third point, not the second as the comment at `:75` claims.
-- [ ] `ransac/tests/plausibility.rs:378-413` — `plausibility_with_outliers_filters_bad_hypotheses` estimates `TransformType::Translation`, whose rotation is always 0 and scale always 1, so `max_rotation` and `scale_range` cannot reject anything. It is a copy of `estimator.rs:66` (`ransac_with_outliers`). Use Similarity, with outliers that produce out-of-range samples.
-- [ ] `ransac/tests/local_optimization.rs:79`, `triangle/tests/matching.rs:218`, `:344`, `:377` — `>=` comparisons that pass when the parameter is ignored (both runs equal): LO on/off, `check_orientation`, `ratio_tolerance`, `min_votes`. `:304`'s comment even says the counts "should produce different match counts". Use fixtures where the outcomes differ and assert both exact values (A→X, B→Y, X≠Y).
-- [ ] `ransac/tests/progressive.rs:70-114`, `:117-154`, `:157-194` and `ransac/tests/scoring.rs:156` — `progressive_ransac_uses_weights`, `_finds_solution_faster`, `estimate_with_varying_confidence` and `weighted_sample_into_returns_k_unique` never show that the confidences matter. Uniform sampling passes every one of them, and "faster" compares iterations against nothing. Add a weighted-vs-uniform comparison (sample frequencies, or iteration counts under a fixed seed).
+- [ ] `triangle/tests/matching.rs:218`, `:344`, `:377` — `>=` comparisons that pass when the parameter is ignored (both runs equal): `check_orientation`, `ratio_tolerance`, `min_votes`. `:304`'s comment even says the counts "should produce different match counts". Use fixtures where the outcomes differ and assert both exact values (A→X, B→Y, X≠Y).
 - [ ] `triangle/tests/voting.rs:112-121` — `vote_matrix_dense_saturating_add` stops at 1000 votes, while the u16 saturation it is named for happens at 65535. Saturation is never reached.
 - [ ] `triangle/tests/geometry.rs:216-243` and `:309-339`, and `triangle/tests/matching.rs:462-500` — the "boundary" tests probe nowhere near the boundary. The side ratio is 10.05 against a limit of 10, and the tolerances 0.3 and 0.5 sit around differences of 0.4 and 0.2. Probe exactly at the limit (ratio 10, tolerance equal to dr) to pin strict versus inclusive.
 
@@ -140,10 +136,7 @@ Short paths are relative to `lumos/src/stacking/star_detection/`.
 ### lumos — registration
 Paths are relative to `lumos/src/stacking/registration/`.
 
-- [ ] `ransac/tests/estimator.rs:36-37`, `:61-62`, `:99-100`, `:201-202`, `:280-281`, `:335`, `:370`, `:424`, `:460`, `:491-492`, `:519-520`, `:559-560`, `:587`; `ransac/tests/progressive.rs:25-26`, `:62-63`, `:152-153`, `:192-193`, `:239-240`; `ransac/tests/local_optimization.rs:25-26`; `ransac/tests/plausibility.rs:125-126`, `:411-412` — exact data, tolerances 0.01–1.0. `ransac_homography` (`:375`) and `ransac_100_percent_inliers` (`:285`) check only the inlier count, never the transform.
-- [ ] `ransac/tests/transforms.rs:266`, `:318` — homography estimates from exact points are checked to 0.5 px, while the affine twins (`:184`, `:229`) use 1e-8/1e-6. The 4-point homography is an exact solve. `:105` gives a Euclidean fit of similarity data 0.05 rad, but the constrained least-squares rotation equals the true angle, so it can be asserted exactly.
 - [ ] `distortion/sip/tests/results.rs:127-130` against `:161-167` — the doc says "SIP order 3 models a radial r² term exactly, so the recovered correction has to match that, not merely approach it", yet the row allows rms < 0.01, max_residual < 0.05 and max_correction ± 0.1. The same exact-fit data is asserted at 0.01 in `sip/tests/correction.rs:57`, `:110`, `:135`, `distortion/sip/tests/reference.rs:33`, `:100`, `:160` and `sip/tests/fitting.rs:278`. `fitting.rs:196` uses `> 0.9×` and `fitting.rs:362-366` allows ±0.5 on a ratio that is exactly 5 (the fit is linear in the targets). `correction.rs:194-199` should assert `corr_barrel == -corr_pincushion`.
-- [ ] `ransac/magsac/tests.rs:110-116`, `:133-138` — the comments hand-compute exact losses (0.31606, 0.44239, and 0.5·(1−e^{−(χ²−0.01)/2})), but the assertions are `< 0.03` and `|Δ| > 0.1`. Assert the computed values.
 - [ ] `tuning.rs:93` — `max_sigma_from_fwhm(0.0) > 0.0`; the floor makes it exactly 0.5.
 - [ ] `distortion/tps/tests.rs:427` (the comment at `:425` says ~0.1 px, the tolerance is 0.5), `:905`, `:910`, `:1011` — TPS reproduces affine maps exactly, yet the tolerance is 0.5 px.
 
@@ -196,7 +189,6 @@ Paths are relative to `lumos/src/stacking/registration/`.
 
 - [ ] `spatial/tests.rs` — every k-d tree fixture has ≤ 50 points on a line or a grid. There is no brute-force cross-check of `k_nearest_into`, `nearest_one` and `radius_indices_into` on seeded random 2-D sets of a few hundred points, which is the standard oracle for this structure and the only way to reach deep splits.
 - [ ] `transform/tests.rs:83-94` — `rotation_angle` is tested only at scale 1 and `scale_factor` only at angle 0. At angle 0 `scale_factor` reduces to |a|, so dropping the `c` term would pass. `apply_inverse`, `inverse` and `compose` are never tested on a homography (`:313-401` covers translation and similarity only).
-- [ ] `ransac/tests/transforms.rs:27-31`, `:69-77`, `:149-157`, `:196-202`, `:279-293` — five copies of "too few points". Exactly `min_points()` is tested only for the homography (`:255`), never for translation (1), Euclidean or similarity (2), or affine (3). Write one table over `TransformType` that derives both counts from `min_points()`.
 
 ### lumos — combine, drizzle
 Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
@@ -361,12 +353,9 @@ Paths are relative to `lumos/src/stacking/registration/`.
   - `transform/tests.rs:123-132` (a 0.01-tolerance version of `:422-433`).
   - `spatial/tests.rs:368-374` (the same as `build_empty`); `:703-768`, `:307-366` (k-nearest cases outside the table that replaced 13 such tests); `:376-517` (8 radius tests that should be one table); `:19-46` and `:519-533` (`get_point` checked three times).
   - `distortion/sip/tests/fitting.rs:244-259` (a length-only test), `:42-92` and `:214-242` (the undistorted fixture twice, both covered by `results.rs` "undistorted") and `:285-335` (the same as `results.rs:284`).
-  - `ransac/tests/math.rs:144-246` (12 degeneracy tests that should be one table) and `:281-305` (orderings implied by the pinned counts).
-  - `ransac/tests/plausibility.rs:3-303` (the reject and accept cases as one table).
   - `triangle/tests/formation.rs:77-95` (implied by `:97`).
   - `triangle/tests/invariant.rs:10-40`, `:77-91` (three tests on one fixture).
   - The 3-4-5 triangle is rebuilt about 10 times across `geometry.rs` and `invariant.rs`, and the square-plus-centre five points about 12 times across `matching.rs`, `voting.rs`, `formation.rs` and `invariant.rs`.
-- [ ] `ransac/tests/mod.rs:13-19` — `make_estimator` and `estimator_with_max_sigma` are one-line wrappers around `RansacEstimator::new(config, sigma)`.
 
 ### lumos — combine, drizzle
 Paths are relative to `lumos/src/stacking/`, except those that start with `lumos/` or `src/` (`lumos/src/`).
@@ -484,10 +473,6 @@ Paths are relative to `lumos/src/stacking/registration/`.
   - `triangle/tests/formation.rs:62-67` ("Actually the loop needs…")
   - `distortion/sip/tests/fitting.rs:202-205`, where a dead `_max_corr_center` sits beside a comment abandoning it
 - [ ] Wrong comments:
-  - `tests/image_registration.rs:129` ("Noiseless fixture": `star_field` uses `Camera::realistic`, `noiseless: false`).
-  - `tests/warping.rs:608-609` (says the linear transform is identity, but it is a translation) and `:655` ("gradient pattern", but it is a star field).
-  - `resample/row/tests.rs:282`, `:384` ("Disable clamping"; no clamping exists).
-  - `ransac/tests/scoring.rs:75` ("after 2 points"; it is 3).
   - `spatial/tests.rs:748` versus `:763`: two different hand sums for the same distance (409258.37 against 409267.37). The first is wrong.
   - `triangle/tests/geometry.rs:288-292` ("2-1-sqrt(5) triangle", but the sides are 2, 1.005, 1.005).
 

@@ -1,21 +1,31 @@
 //! Choosing which correspondences a hypothesis is built from.
 //!
 //! Uniform random sampling wastes iterations on pairs the triangle vote already found
-//! unconvincing. Sampling ramps through three phases instead — the top quarter by confidence,
-//! then the top half, then everything — weighted for the first two, so good candidates are
-//! front-loaded without ever excluding a pair the later phases might need.
+//! unconvincing. Two guided phases come first — the top quarter by confidence, then the top half,
+//! each sampled weighted by confidence — so a good hypothesis is usually found early, and sampling
+//! is uniform over every pair after them.
+//!
+//! The guided phases have a fixed length, and the adaptive stop counts only the uniform iterations
+//! after them. The stop's guarantee — an all-inlier sample drawn with the configured confidence — is
+//! a statement about uniform sampling of the whole set. Counted over guided iterations it would end
+//! a run whose samples never left the top quarter, and a larger consensus among the other pairs
+//! would never be drawn.
 
 use std::cmp::Ordering;
 
 use rand::prelude::*;
 
-/// Progressive sampling: 3 phases from high-confidence pool to full pool.
-/// This front-loads good candidates, improving early convergence.
-pub(super) const SAMPLING_PHASES: usize = 3;
-/// Pool fraction per phase: top 25% → top 50% → full pool.
-pub(super) const PHASE_POOL_FRACTIONS: [f64; 3] = [0.25, 0.50, 1.0];
-/// Whether each phase uses weighted sampling (vs uniform random).
-pub(super) const PHASE_WEIGHTED: [bool; 3] = [true, true, false];
+use crate::stacking::registration::ransac::transforms::adaptive_iterations;
+
+/// The share of the pairs, by confidence, each guided phase samples from: the top quarter, then
+/// the top half.
+pub(super) const GUIDED_POOL_FRACTIONS: [f64; 2] = [0.25, 0.50];
+
+/// Iterations in each guided phase: enough to draw an all-inlier sample of `sample_size` with
+/// `confidence` from a pool at least half inliers — the pools a guided phase is worth its cost on.
+pub(super) fn guided_phase_iterations(sample_size: usize, confidence: f64) -> usize {
+    adaptive_iterations(0.5, sample_size, confidence)
+}
 
 /// Create a `ChaCha8Rng` from an optional seed.
 ///
@@ -92,9 +102,9 @@ pub(super) fn random_sample_into<R: Rng>(
 
     // Partial Fisher-Yates: shuffle first k elements, recording swap targets
     buffer.clear();
-    // k is always small (2-4 for RANSAC min_samples), stack array suffices
+    // k is a minimal sample, at most a homography's 4, so a stack array suffices.
     let mut swap_targets = [0usize; 8];
-    assert!(
+    debug_assert!(
         k <= swap_targets.len(),
         "k={k} exceeds swap tracking capacity"
     );

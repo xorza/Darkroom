@@ -1,413 +1,145 @@
 use super::*;
 
+/// A hypothesis is plausible when its rotation is at most `max_rotation` in magnitude and its scale
+/// inside `scale_range`, either check off when its limit is `None`.
 #[test]
-fn plausibility_rejects_large_rotation() {
-    let ref_points = make_grid(5, 4, 50.0);
-    let known = Transform::similarity(DVec2::new(5.0, -3.0), 30.0_f64.to_radians(), 1.0);
-    let target_points = apply_all(&known, &ref_points);
-
-    let estimator = make_estimator(RansacConfig {
-        seed: Some(42),
-        max_rotation: Some(10.0_f64.to_radians()),
-        scale_range: None,
-        ..Default::default()
-    });
-    let result = estimate_uniform(
-        &estimator,
-        &ref_points,
-        &target_points,
-        TransformType::Similarity,
-    );
-
-    assert!(
-        result.is_none(),
-        "Should reject 30deg rotation with 10deg limit"
-    );
-}
-
-#[test]
-fn plausibility_rejects_negative_rotation() {
-    let ref_points = make_grid(5, 4, 50.0);
-    let known = Transform::similarity(DVec2::new(5.0, -3.0), -30.0_f64.to_radians(), 1.0);
-    let target_points = apply_all(&known, &ref_points);
-
-    let estimator = make_estimator(RansacConfig {
-        seed: Some(42),
-        max_rotation: Some(10.0_f64.to_radians()),
-        scale_range: None,
-        ..Default::default()
-    });
-    let result = estimate_uniform(
-        &estimator,
-        &ref_points,
-        &target_points,
-        TransformType::Similarity,
-    );
-
-    assert!(
-        result.is_none(),
-        "Should reject -30deg rotation with 10deg limit"
-    );
-}
-
-#[test]
-fn plausibility_rejects_large_scale() {
-    let ref_points = make_grid(5, 4, 50.0);
-    let known = Transform::similarity(DVec2::new(5.0, -3.0), 0.0, 2.0);
-    let target_points = apply_all(&known, &ref_points);
-
-    let estimator = make_estimator(RansacConfig {
-        seed: Some(42),
-        max_rotation: None,
-        scale_range: Some((0.8, 1.2)),
-        ..Default::default()
-    });
-    let result = estimate_uniform(
-        &estimator,
-        &ref_points,
-        &target_points,
-        TransformType::Similarity,
-    );
-
-    assert!(
-        result.is_none(),
-        "Should reject scale 2.0 with (0.8, 1.2) range"
-    );
-}
-
-#[test]
-fn plausibility_rejects_small_scale() {
-    let ref_points = make_grid(5, 4, 50.0);
-    let known = Transform::similarity(DVec2::new(0.0, 0.0), 0.0, 0.5);
-    let target_points = apply_all(&known, &ref_points);
-
-    let estimator = make_estimator(RansacConfig {
-        seed: Some(42),
-        max_rotation: None,
-        scale_range: Some((0.8, 1.2)),
-        ..Default::default()
-    });
-    let result = estimate_uniform(
-        &estimator,
-        &ref_points,
-        &target_points,
-        TransformType::Similarity,
-    );
-
-    assert!(
-        result.is_none(),
-        "Should reject scale 0.5 with (0.8, 1.2) range"
-    );
-}
-
-#[test]
-fn plausibility_accepts_within_bounds() {
-    let ref_points = make_grid(5, 4, 50.0);
-    let angle = 5.0_f64.to_radians();
-    let scale = 1.1;
-    let known = Transform::similarity(DVec2::new(5.0, -3.0), angle, scale);
-    let target_points = apply_all(&known, &ref_points);
-
-    let estimator = make_estimator(RansacConfig {
-        seed: Some(42),
-        max_rotation: Some(10.0_f64.to_radians()),
-        scale_range: Some((0.8, 1.2)),
-        ..Default::default()
-    });
-    let result = estimate_uniform(
-        &estimator,
-        &ref_points,
-        &target_points,
-        TransformType::Similarity,
-    )
-    .unwrap();
-
-    assert_close!(result.transform.rotation_angle(), angle, 0.02);
-    assert_close!(result.transform.scale_factor(), scale, 0.02);
-}
-
-#[test]
-fn plausibility_disabled_accepts_everything() {
-    let ref_points = make_grid(5, 4, 50.0);
-    let known = Transform::similarity(DVec2::new(5.0, -3.0), PI / 4.0, 2.0);
-    let target_points = apply_all(&known, &ref_points);
-
-    let estimator = make_estimator(RansacConfig {
-        seed: Some(42),
-        max_rotation: None,
-        scale_range: None,
-        ..Default::default()
-    });
-    let result = estimate_uniform(
-        &estimator,
-        &ref_points,
-        &target_points,
-        TransformType::Similarity,
-    )
-    .unwrap();
-
-    assert_eq!(result.inliers.len(), 20);
-}
-
-#[test]
-fn plausibility_rotation_boundary() {
-    let ref_points = make_grid(5, 4, 50.0);
-    let max_rotation = 10.0_f64.to_radians();
-
-    // 9.9 degrees -- should pass
-    let angle_pass = 9.9_f64.to_radians();
-    let known = Transform::similarity(DVec2::new(5.0, -3.0), angle_pass, 1.0);
-    let target_points = apply_all(&known, &ref_points);
-
-    let estimator = make_estimator(RansacConfig {
-        seed: Some(42),
-        max_rotation: Some(max_rotation),
-        scale_range: None,
-        ..Default::default()
-    });
-    assert!(
-        estimate_uniform(
-            &estimator,
-            &ref_points,
-            &target_points,
-            TransformType::Similarity
-        )
-        .is_some(),
-        "9.9deg should pass 10deg limit"
-    );
-
-    // 10.5 degrees -- should fail
-    let angle_fail = 10.5_f64.to_radians();
-    let known = Transform::similarity(DVec2::new(5.0, -3.0), angle_fail, 1.0);
-    let target_points = apply_all(&known, &ref_points);
-
-    let estimator = make_estimator(RansacConfig {
-        seed: Some(42),
-        max_rotation: Some(max_rotation),
-        scale_range: None,
-        ..Default::default()
-    });
-    assert!(
-        estimate_uniform(
-            &estimator,
-            &ref_points,
-            &target_points,
-            TransformType::Similarity
-        )
-        .is_none(),
-        "10.5deg should fail 10deg limit"
-    );
-}
-
-#[test]
-fn plausibility_scale_boundary() {
-    let ref_points = make_grid(5, 4, 50.0);
-
-    // 1.15 scale -- should pass (0.8, 1.2)
-    let known = Transform::similarity(DVec2::new(0.0, 0.0), 0.0, 1.15);
-    let target_points = apply_all(&known, &ref_points);
-
-    let estimator = make_estimator(RansacConfig {
-        seed: Some(42),
-        max_rotation: None,
-        scale_range: Some((0.8, 1.2)),
-        ..Default::default()
-    });
-    assert!(
-        estimate_uniform(
-            &estimator,
-            &ref_points,
-            &target_points,
-            TransformType::Similarity
-        )
-        .is_some(),
-        "1.15 scale should pass (0.8, 1.2)"
-    );
-
-    // 1.25 scale -- should fail (0.8, 1.2)
-    let known = Transform::similarity(DVec2::new(0.0, 0.0), 0.0, 1.25);
-    let target_points = apply_all(&known, &ref_points);
-
-    let estimator = make_estimator(RansacConfig {
-        seed: Some(42),
-        max_rotation: None,
-        scale_range: Some((0.8, 1.2)),
-        ..Default::default()
-    });
-    assert!(
-        estimate_uniform(
-            &estimator,
-            &ref_points,
-            &target_points,
-            TransformType::Similarity
-        )
-        .is_none(),
-        "1.25 scale should fail (0.8, 1.2)"
-    );
-}
-
-#[test]
-fn plausibility_combined_rotation_and_scale() {
-    let ref_points = make_grid(5, 4, 50.0);
-    let config_base = RansacConfig {
-        seed: Some(42),
-        max_rotation: Some(10.0_f64.to_radians()),
-        scale_range: Some((0.8, 1.2)),
-        ..Default::default()
+fn plausibility_hand_cases() {
+    let ten_degrees = Some(10.0f64.to_radians());
+    let usual = Some((0.8, 1.2));
+    let similarity = |angle_deg: f64, scale| {
+        Transform::similarity(DVec2::new(5.0, -3.0), angle_deg.to_radians(), scale)
     };
-
-    // Rotation OK (5deg) but scale too large (1.5) -- should fail
-    let known = Transform::similarity(DVec2::new(5.0, -3.0), 5.0_f64.to_radians(), 1.5);
-    let target_points = apply_all(&known, &ref_points);
-    let estimator = make_estimator(config_base.clone());
-    assert!(
-        estimate_uniform(
-            &estimator,
-            &ref_points,
-            &target_points,
-            TransformType::Similarity
-        )
-        .is_none(),
-        "Should fail: rotation OK, scale out of range"
-    );
-
-    // Scale OK (1.1) but rotation too large (20deg) -- should fail
-    let known = Transform::similarity(DVec2::new(5.0, -3.0), 20.0_f64.to_radians(), 1.1);
-    let target_points = apply_all(&known, &ref_points);
-    let estimator = make_estimator(config_base.clone());
-    assert!(
-        estimate_uniform(
-            &estimator,
-            &ref_points,
-            &target_points,
-            TransformType::Similarity
-        )
-        .is_none(),
-        "Should fail: scale OK, rotation out of range"
-    );
-
-    // Both within range -- should pass
-    let known = Transform::similarity(DVec2::new(5.0, -3.0), 5.0_f64.to_radians(), 1.1);
-    let target_points = apply_all(&known, &ref_points);
-    let estimator = make_estimator(config_base);
-    assert!(
-        estimate_uniform(
-            &estimator,
-            &ref_points,
-            &target_points,
-            TransformType::Similarity
-        )
-        .is_some(),
-        "Should pass when both within bounds"
-    );
+    for (transform, max_rotation, scale_range, plausible, why) in [
+        (
+            similarity(9.9, 1.0),
+            ten_degrees,
+            None,
+            true,
+            "9.9° inside 10°",
+        ),
+        (
+            similarity(10.5, 1.0),
+            ten_degrees,
+            None,
+            false,
+            "10.5° past 10°",
+        ),
+        (
+            similarity(-10.5, 1.0),
+            ten_degrees,
+            None,
+            false,
+            "−10.5° past 10°",
+        ),
+        (
+            similarity(0.0, 1.15),
+            None,
+            usual,
+            true,
+            "1.15 inside (0.8, 1.2)",
+        ),
+        (similarity(0.0, 1.25), None, usual, false, "1.25 above 1.2"),
+        (similarity(0.0, 0.75), None, usual, false, "0.75 below 0.8"),
+        (
+            similarity(5.0, 1.5),
+            ten_degrees,
+            usual,
+            false,
+            "rotation fine, scale not",
+        ),
+        (
+            similarity(15.0, 1.05),
+            ten_degrees,
+            usual,
+            false,
+            "scale fine, rotation not",
+        ),
+        (similarity(5.0, 1.05), ten_degrees, usual, true, "both fine"),
+        (similarity(45.0, 3.0), None, None, true, "both checks off"),
+        (
+            Transform::translation(DVec2::new(100.0, -50.0)),
+            Some(1.0f64.to_radians()),
+            Some((0.99, 1.01)),
+            true,
+            "a translation has rotation 0 and scale 1",
+        ),
+    ] {
+        let estimator = seeded(
+            1.0,
+            RansacConfig {
+                max_rotation,
+                scale_range,
+                ..Default::default()
+            },
+        );
+        assert_eq!(estimator.is_plausible(&transform), plausible, "{why}");
+    }
 }
 
+/// `estimate` holds every hypothesis to the limits: a 30° similarity has no plausible fit under a
+/// 10° limit, and a 5° one at scale 1.05 fits all 20 points.
 #[test]
-fn plausibility_translation_unaffected() {
-    // Pure translation should always pass tight plausibility checks
+fn estimate_honours_the_plausibility_limits() {
     let ref_points = make_grid(5, 4, 50.0);
-    let target_points: Vec<DVec2> = ref_points
-        .iter()
-        .map(|p| *p + DVec2::new(100.0, -50.0))
+    let estimator = seeded(1.0, RansacConfig::default());
+    let rotated = apply_all(
+        &Transform::similarity(DVec2::new(5.0, -3.0), 30.0f64.to_radians(), 1.0),
+        &ref_points,
+    );
+    assert!(
+        estimate_uniform(&estimator, &ref_points, &rotated, TransformType::Similarity).is_none()
+    );
+    let mild = apply_all(
+        &Transform::similarity(DVec2::new(5.0, -3.0), 5.0f64.to_radians(), 1.05),
+        &ref_points,
+    );
+    let result =
+        estimate_uniform(&estimator, &ref_points, &mild, TransformType::Similarity).unwrap();
+    assert_eq!(result.inliers, (0..20).collect::<Vec<_>>());
+}
+
+/// The limits decide between two consistent groups. Twenty pairs agree on a 2° similarity and thirty
+/// on a quarter turn: with the limits off, the larger group wins; with the default 10° limit, its
+/// every hypothesis is refused and the smaller, plausible group is the answer.
+#[test]
+fn the_limits_steer_ransac_to_the_plausible_group() {
+    let plausible = Transform::similarity(DVec2::new(10.0, -5.0), 2.0f64.to_radians(), 1.01);
+    let quarter_turn = Transform::similarity(DVec2::new(3000.0, 0.0), PI / 2.0, 1.0);
+    let small = make_grid(5, 4, 50.0);
+    let large: Vec<DVec2> = make_grid(6, 5, 50.0)
+        .into_iter()
+        .map(|p| p + DVec2::new(1000.0, 1000.0))
+        .collect();
+    let ref_points: Vec<DVec2> = small.iter().chain(&large).copied().collect();
+    let target_points: Vec<DVec2> = apply_all(&plausible, &small)
+        .into_iter()
+        .chain(apply_all(&quarter_turn, &large))
         .collect();
 
-    let estimator = make_estimator(RansacConfig {
-        seed: Some(42),
-        max_rotation: Some(1.0_f64.to_radians()),
-        scale_range: Some((0.99, 1.01)),
-        ..Default::default()
-    });
+    let limited = seeded(1.0, RansacConfig::default());
     let result = estimate_uniform(
-        &estimator,
-        &ref_points,
-        &target_points,
-        TransformType::Translation,
-    )
-    .unwrap();
-
-    assert_eq!(result.inliers.len(), 20);
-}
-
-#[test]
-fn plausibility_progressive_ransac_respects_checks() {
-    // Progressive RANSAC should also reject implausible transforms
-    let ref_points = make_grid(5, 4, 50.0);
-    let known = Transform::similarity(DVec2::new(5.0, -3.0), 30.0_f64.to_radians(), 1.0);
-    let target_points = apply_all(&known, &ref_points);
-    let confidences = vec![0.9; 20];
-
-    let estimator = make_estimator(RansacConfig {
-        seed: Some(42),
-        max_rotation: Some(10.0_f64.to_radians()),
-        ..Default::default()
-    });
-    let result = estimator.estimate(
-        &make_matches_with_confidence(&confidences),
+        &limited,
         &ref_points,
         &target_points,
         TransformType::Similarity,
-    );
+    )
+    .unwrap();
+    assert_eq!(result.inliers, (0..20).collect::<Vec<_>>());
 
-    assert!(
-        result.is_none(),
-        "Progressive RANSAC should reject 30deg rotation"
-    );
-
-    // But should accept 5deg
-    let known = Transform::similarity(DVec2::new(5.0, -3.0), 5.0_f64.to_radians(), 1.05);
-    let target_points = apply_all(&known, &ref_points);
-
-    let estimator = make_estimator(RansacConfig {
-        seed: Some(42),
-        max_rotation: Some(10.0_f64.to_radians()),
-        scale_range: Some((0.8, 1.2)),
-        ..Default::default()
-    });
-    let result = estimator
-        .estimate(
-            &make_matches_with_confidence(&confidences),
-            &ref_points,
-            &target_points,
-            TransformType::Similarity,
-        )
-        .unwrap();
-
-    assert_eq!(result.inliers.len(), 20);
-}
-
-#[test]
-fn plausibility_with_outliers_filters_bad_hypotheses() {
-    // 15 inliers + 2 outliers that would produce wild transforms if sampled
-    let ref_points: Vec<DVec2> = make_grid(5, 3, 50.0);
-    let offset = DVec2::new(10.0, -5.0);
-    let mut target_points: Vec<DVec2> = ref_points.iter().map(|p| *p + offset).collect();
-
-    let mut ref_with_outliers = ref_points.clone();
-    ref_with_outliers.push(DVec2::new(100.0, 100.0));
-    ref_with_outliers.push(DVec2::new(200.0, 50.0));
-    target_points.push(DVec2::new(500.0, -300.0));
-    target_points.push(DVec2::new(-100.0, 800.0));
-
-    let estimator = estimator_with_max_sigma(
-        0.67,
+    let unlimited = seeded(
+        1.0,
         RansacConfig {
-            seed: Some(42),
-            max_rotation: Some(5.0_f64.to_radians()),
-            scale_range: Some((0.9, 1.1)),
+            max_rotation: None,
+            scale_range: None,
             ..Default::default()
         },
     );
     let result = estimate_uniform(
-        &estimator,
-        &ref_with_outliers,
+        &unlimited,
+        &ref_points,
         &target_points,
-        TransformType::Translation,
+        TransformType::Similarity,
     )
     .unwrap();
-
-    assert_eq!(result.inliers.len(), 15);
-
-    let t = result.transform.translation_components();
-    assert!((t.x - 10.0).abs() < 0.1);
-    assert!((t.y - (-5.0)).abs() < 0.1);
+    assert_eq!(result.inliers, (20..50).collect::<Vec<_>>());
 }

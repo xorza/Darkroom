@@ -64,29 +64,43 @@ fn weighted_sample_into_pool_smaller_than_k() {
     assert_eq!(sorted, vec![5, 10, 15]);
 }
 
+/// Weighted sampling draws each index with probability proportional to its weight: for one draw,
+/// A-Res picks the largest key `uᵢ^(1/wᵢ)`, which is index `i` with probability `wᵢ/Σw`. Weights
+/// `i + 1` over 20 indices sum to 210, so in 21 000 draws index `i` is expected `100·(i + 1)`
+/// times, with binomial standard deviation `√(N·p·(1 − p))`; every count lands within five of them.
+/// Uniform sampling would give every index 1050 and miss by far more. Draws of four are distinct
+/// and from the pool.
 #[test]
-fn weighted_sample_into_returns_k_unique() {
+fn weighted_sampling_follows_the_weights() {
     use rand::SeedableRng;
     let mut rng = SmallRng::seed_from_u64(42);
     let pool: Vec<usize> = (0..20).collect();
     let weights: Vec<f64> = (0..20).map(|i| f64::from(i) + 1.0).collect();
-    let k = 4;
     let mut buffer = Vec::new();
     let mut scratch = Vec::new();
 
-    for _ in 0..100 {
-        weighted_sample_into(&mut rng, &pool, &weights, k, &mut buffer, &mut scratch);
-        assert_eq!(buffer.len(), k);
+    const DRAWS: usize = 21_000;
+    let mut counts = [0usize; 20];
+    for _ in 0..DRAWS {
+        weighted_sample_into(&mut rng, &pool, &weights, 1, &mut buffer, &mut scratch);
+        counts[buffer[0]] += 1;
+    }
+    for (i, &count) in counts.iter().enumerate() {
+        let p = (i as f64 + 1.0) / 210.0;
+        let expected = DRAWS as f64 * p;
+        let sigma = (DRAWS as f64 * p * (1.0 - p)).sqrt();
+        assert!(
+            (count as f64 - expected).abs() <= 5.0 * sigma,
+            "index {i}: {count} draws, expected {expected} ± {sigma}"
+        );
+    }
 
-        // All unique
+    for _ in 0..100 {
+        weighted_sample_into(&mut rng, &pool, &weights, 4, &mut buffer, &mut scratch);
         let mut sorted = buffer.clone();
         sorted.sort_unstable();
         sorted.dedup();
-        assert_eq!(sorted.len(), k, "Duplicates in weighted sample: {buffer:?}");
-
-        // All from pool
-        for &idx in &buffer {
-            assert!(idx < 20);
-        }
+        assert_eq!(sorted.len(), 4, "duplicates in {buffer:?}");
+        assert!(buffer.iter().all(|&idx| idx < 20));
     }
 }

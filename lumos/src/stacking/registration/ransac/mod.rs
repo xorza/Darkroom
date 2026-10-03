@@ -28,7 +28,7 @@ use glam::DVec2;
 use crate::stacking::registration::point_pairs::PointPairs;
 use crate::stacking::registration::ransac::config::RansacConfig;
 use crate::stacking::registration::ransac::sampling::{
-    PHASE_POOL_FRACTIONS, PHASE_WEIGHTED, SAMPLING_PHASES, make_rng, random_sample_into,
+    GUIDED_POOL_FRACTIONS, guided_phase_iterations, make_rng, random_sample_into,
     weighted_sample_into,
 };
 use crate::stacking::registration::transform::{Transform, TransformType};
@@ -196,17 +196,19 @@ impl RansacEstimator {
 
     /// Core RANSAC loop with MAGSAC++ scoring.
     ///
-    /// The `sample_fn` closure fills `sample_indices` buffer each iteration.
-    /// It receives `(iteration, max_iterations, &mut sample_buf)`.
+    /// `sample_fn` fills the sample for each iteration, numbered from 1. The first
+    /// `guided_iterations` are the sampler's guided warm-up, which the adaptive bound does not
+    /// count — see `sampling`.
     fn ransac_loop(
         &self,
         ref_points: &[DVec2],
         target_points: &[DVec2],
-        n: usize,
-        min_samples: usize,
         transform_type: TransformType,
-        mut sample_fn: impl FnMut(usize, usize, &mut Vec<usize>),
+        guided_iterations: usize,
+        mut sample_fn: impl FnMut(usize, &mut Vec<usize>),
     ) -> Option<RansacResult> {
+        let n = ref_points.len();
+        let min_samples = transform_type.min_points();
         let scorer = MagsacScorer::new(self.max_sigma);
 
         // `None` until a hypothesis scores at all. `scratch` is where the next hypothesis is
@@ -219,17 +221,18 @@ impl RansacEstimator {
         let mut lo_buffers = LocalOptBuffers::with_capacity(n);
 
         let max_iter = self.config.max_iterations;
-        // The adaptive bound of the best hypothesis so far, checked on every iteration: once the
-        // iterations run reach it, an all-inlier sample has been drawn with the configured
-        // confidence, whether or not anything has improved on that hypothesis since.
+        // The adaptive bound of the best hypothesis so far, in uniform iterations, checked on every
+        // iteration: once that many have run, an all-inlier sample has been drawn with the
+        // configured confidence, whether or not anything has improved on that hypothesis since.
         let mut iteration_bound = max_iter;
         let mut iterations = 0;
 
-        while iterations < iteration_bound {
+        while iterations < max_iter
+            && iterations.saturating_sub(guided_iterations) < iteration_bound
+        {
             iterations += 1;
 
-            // Fill sample indices via the provided strategy
-            sample_fn(iterations, max_iter, &mut sample_indices);
+            sample_fn(iterations, &mut sample_indices);
 
             // Extract sample points (reusing buffers)
             sample.gather(&sample_indices, ref_points, target_points);
@@ -331,9 +334,8 @@ impl RansacEstimator {
 
     /// Estimate transformation from star matches.
     ///
-    /// Uses match confidence scores to guide hypothesis sampling via 3-phase
-    /// progressive sampling: early iterations preferentially sample high-confidence
-    /// matches, converging faster than uniform random sampling.
+    /// Uses match confidence scores to guide the first hypotheses — see `sampling` — and samples
+    /// uniformly after them.
     ///
     /// # Arguments
     /// * `matches` - Star matches with confidence scores from triangle matching
@@ -394,20 +396,15 @@ impl RansacEstimator {
         // Persistent key buffer for weighted A-Res sampling (avoids a per-iteration allocation).
         let mut weighted_scratch: Vec<(usize, f64)> = Vec::new();
 
+        let phase_length = guided_phase_iterations(min_samples, self.config.confidence);
         self.ransac_loop(
             &ref_points,
             &target_points,
-            n,
-            min_samples,
             transform_type,
-            |iteration, max_iter, sample_buf| {
-                // Progressive sampling: phases ramp from high-confidence pool to full pool
-                let phase = (iteration * SAMPLING_PHASES / max_iter).min(SAMPLING_PHASES - 1);
-                let pool_size =
-                    ((n as f64 * PHASE_POOL_FRACTIONS[phase]).ceil() as usize).max(min_samples);
-                let use_weighted = PHASE_WEIGHTED[phase];
-
-                if use_weighted {
+            GUIDED_POOL_FRACTIONS.len() * phase_length,
+            |iteration, sample_buf| {
+                if let Some(&fraction) = GUIDED_POOL_FRACTIONS.get((iteration - 1) / phase_length) {
+                    let pool_size = ((n as f64 * fraction).ceil() as usize).max(min_samples);
                     weighted_sample_into(
                         &mut rng,
                         &sorted_indices[..pool_size],
