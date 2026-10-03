@@ -12,7 +12,7 @@ use crate::astro::nodes::runtime;
 use common::Introspect;
 
 use crate::config_node::{ConfigValue, config_data_type};
-use crate::image::IMAGE_DATA_TYPE;
+use crate::image::{IMAGE_DATA_TYPE, Image};
 use scenarium::Invocation;
 use std::mem;
 
@@ -59,7 +59,7 @@ fn register_stretch(library: &mut Library) {
         .description("Auto-stretches a linear frame to a viewable image (display tone curve).")
         .category("Astro")
         .pure()
-        .input(frame_input("Image"))
+        .input(Image::input("Image"))
         .input(preset::input::<StretchKnobs, StretchPreset>("Method"))
         .output(
             FuncOutput::new("Image", IMAGE_DATA_TYPE.clone())
@@ -74,7 +74,7 @@ fn register_background(library: &mut Library) {
         "Extract Background",
         "Fits and removes a smooth sky-background gradient.",
         vec![
-            frame_input("Image"),
+            Image::input("Image"),
             preset::input::<ExtractBackground, BackgroundModeKind>("Config"),
         ],
         FuncLambda::new(
@@ -100,7 +100,7 @@ fn register_denoise(library: &mut Library) {
         "Denoise",
         "Wavelet denoise (starlet coefficient thresholding).",
         vec![
-            frame_input("Image"),
+            Image::input("Image"),
             float_input("Strength", 0.85, "Denoise strength in [0, 1]."),
             config_override_input::<Denoise>(),
         ],
@@ -132,7 +132,7 @@ fn register_scnr(library: &mut Library) {
         "SCNR",
         "Removes the residual green cast (SCNR).",
         vec![
-            frame_input("Image"),
+            Image::input("Image"),
             preset::input::<ScnrKnobs, ScnrKind>("Method"),
         ],
         FuncLambda::new(
@@ -156,7 +156,7 @@ fn register_neutralize(library: &mut Library) {
         NEUTRALIZE_BACKGROUND_FUNC_ID,
         "Neutralize Background",
         "Shifts each channel so the background reads neutral gray.",
-        vec![frame_input("Image")],
+        vec![Image::input("Image")],
         FuncLambda::new(
             move |Invocation {
                       inputs, outputs, ..
@@ -179,7 +179,7 @@ fn register_hdr(library: &mut Library) {
         "HDR Compression",
         "Compresses large-scale dynamic range (multiscale HDR).",
         vec![
-            frame_input("Image"),
+            Image::input("Image"),
             float_input("Amount", 0.5, "Compression amount in [0, 1]."),
             config_override_input::<Hdr>(),
         ],
@@ -211,7 +211,7 @@ fn register_local_contrast(library: &mut Library) {
         "Local Contrast",
         "Local contrast enhancement (CLAHE).",
         vec![
-            frame_input("Image"),
+            Image::input("Image"),
             float_input("Strength", 0.8, "Local-contrast strength in [0, 1]."),
             config_override_input::<LocalContrast>(),
         ],
@@ -242,10 +242,6 @@ fn register_local_contrast(library: &mut Library) {
 fn config_override_input<T: Introspect>() -> FuncInput {
     FuncInput::optional("Config", config_data_type::<T>())
         .description("Optional detailed config; overrides the inline knob when wired.")
-}
-
-fn frame_input(name: &str) -> FuncInput {
-    FuncInput::required(name, IMAGE_DATA_TYPE.clone()).description("Image to process.")
 }
 
 fn float_input(name: &str, default: f32, description: &str) -> FuncInput {

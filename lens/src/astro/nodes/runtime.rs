@@ -1,49 +1,38 @@
 //! Shared blocking-runtime adapters for astro node implementations.
 
 use common::CancelToken;
-use lumos::{LinearImage, MlError, OpError};
+use lumos::{LinearImage, OpError};
 use scenarium::{DynamicValue, InvokeError, InvokeResult};
 
 use crate::image::Image;
 use std::error;
 use tokio::task;
 
+/// An in-place `lumos` op over the planes of a required image input, on the
+/// blocking pool, handing back the image it leaves.
 pub(crate) async fn run_frame_op<F>(value: DynamicValue, op: F) -> InvokeResult<DynamicValue>
 where
     F: FnOnce(&mut LinearImage) -> Result<(), OpError> + Send + 'static,
 {
-    let planar = image_to_planar(value);
-    let out = task::spawn_blocking(move || {
-        let mut planar = planar;
+    run_on_planes(value, move |mut planar| {
         op(&mut planar)?;
-        Ok::<_, OpError>(planar)
+        Ok::<_, OpError>(DynamicValue::from_custom(Image::from(planar)))
     })
     .await
-    .map_err(InvokeError::external)?
-    .map_err(InvokeError::external)?;
-    Ok(DynamicValue::from_custom(Image::from(out)))
 }
 
-pub(crate) async fn run_ml<R, F>(value: DynamicValue, op: F) -> InvokeResult<R>
+/// `op` over the planes of a required image input, on the blocking pool.
+pub(crate) async fn run_on_planes<R, E, F>(value: DynamicValue, op: F) -> InvokeResult<R>
 where
-    F: FnOnce(LinearImage) -> Result<R, MlError> + Send + 'static,
+    F: FnOnce(LinearImage) -> Result<R, E> + Send + 'static,
+    E: error::Error + Send + Sync + 'static,
     R: Send + 'static,
 {
-    let planar = image_to_planar(value);
+    let planar = Image::take_planar(value);
     task::spawn_blocking(move || op(planar))
         .await
         .map_err(InvokeError::external)?
         .map_err(InvokeError::external)
-}
-
-/// The planes the `lumos` ops run on. An input produced by another astro node is already planar and
-/// is taken as-is, so a chain of astro nodes never repacks; only an edge coming from the
-/// `imaginarium` side converts, and only once.
-fn image_to_planar(value: DynamicValue) -> LinearImage {
-    match value.into_custom::<Image>() {
-        Ok(image) => image.to_planar(),
-        Err(value) => value.required_custom::<Image>().planar().into_owned(),
-    }
 }
 
 pub(crate) async fn run_cancellable<T, E, F>(cancel: CancelToken, op: F) -> InvokeResult<T>
@@ -62,6 +51,3 @@ where
         Err(error) => Err(InvokeError::external(error)),
     }
 }
-
-#[cfg(test)]
-mod tests;

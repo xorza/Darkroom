@@ -75,13 +75,7 @@ fn register_save(library: &mut Library) {
                         .to_owned();
                     // Saving needs the pixels by value anyway, so take them when this is the last
                     // holder and copy only when it is not.
-                    let cpu_image = match value.into_custom::<Image>() {
-                        Ok(image) => image.to_interleaved(),
-                        Err(value) => value
-                            .required_custom::<Image>()
-                            .interleaved()
-                            .into_owned(),
-                    };
+                    let cpu_image = Image::take_interleaved(value);
                     task::spawn_blocking(move || {
                         match conversion_target(&format, cpu_image.desc().color_format) {
                             Some(target) => cpu_image.convert_to(target).save_file(path),

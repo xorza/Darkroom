@@ -14,7 +14,7 @@ use std::fmt::Formatter;
 use std::sync::Arc;
 
 use lumos::LinearImage;
-use scenarium::{CustomValue, DataType, RamUsage, TypeId};
+use scenarium::{CustomValue, DataType, DynamicValue, FuncInput, RamUsage, TypeId};
 
 pub const IMAGE_TYPE_ID: TypeId = TypeId::literal("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2");
 
@@ -57,8 +57,33 @@ enum Pixels {
 }
 
 impl Image {
+    /// A required image input to process, named `name`.
+    pub(crate) fn input(name: &str) -> FuncInput {
+        FuncInput::required(name, IMAGE_DATA_TYPE).description("Image to process.")
+    }
+
+    /// The interleaved pixels of a required image input, owned: moved out
+    /// when the value is their last holder and copied when it is not,
+    /// repacked from planes either way if that is what they are.
+    pub(crate) fn take_interleaved(value: DynamicValue) -> imaginarium::Image {
+        match value.into_custom::<Image>() {
+            Ok(image) => image.into_interleaved(),
+            Err(value) => value.required_custom::<Image>().interleaved().into_owned(),
+        }
+    }
+
+    /// [`take_interleaved`](Self::take_interleaved)'s planar counterpart: an
+    /// already-planar last holder is moved untouched, the case an all-astro
+    /// chain hits at every node.
+    pub(crate) fn take_planar(value: DynamicValue) -> LinearImage {
+        match value.into_custom::<Image>() {
+            Ok(image) => image.into_planar(),
+            Err(value) => value.required_custom::<Image>().planar().into_owned(),
+        }
+    }
+
     /// Takes the interleaved form, repacking from planes if that is what this holds.
-    pub fn to_interleaved(self) -> imaginarium::Image {
+    fn into_interleaved(self) -> imaginarium::Image {
         match self.pixels {
             Pixels::InterleavedCpu(image) => image,
             Pixels::PlanarCpu(planar) => imaginarium::Image::from(&planar),
@@ -67,21 +92,10 @@ impl Image {
 
     /// Takes the planes, deinterleaving if that is what this holds. An image that is already planar
     /// is returned untouched and uncopied — the case an all-astro chain hits at every node.
-    pub fn to_planar(self) -> LinearImage {
+    fn into_planar(self) -> LinearImage {
         match self.pixels {
             Pixels::PlanarCpu(planar) => planar,
             Pixels::InterleavedCpu(image) => LinearImage::from(&image),
-        }
-    }
-
-    /// The interleaved form for in-place mutation, repacking this image if it holds planes.
-    pub fn interleaved_mut(&mut self) -> &mut imaginarium::Image {
-        if let Pixels::PlanarCpu(planar) = &self.pixels {
-            self.pixels = Pixels::InterleavedCpu(imaginarium::Image::from(planar));
-        }
-        match &mut self.pixels {
-            Pixels::InterleavedCpu(image) => image,
-            Pixels::PlanarCpu(_) => unreachable!("the planar case was just repacked"),
         }
     }
 
@@ -96,9 +110,9 @@ impl Image {
         }
     }
 
-    /// [`Self::to_planar`] for an image still shared with other consumers, which therefore has to be
+    /// [`Self::into_planar`] for an image still shared with other consumers, which therefore has to be
     /// copied rather than taken.
-    pub fn planar(&self) -> Cow<'_, LinearImage> {
+    pub(crate) fn planar(&self) -> Cow<'_, LinearImage> {
         match &self.pixels {
             Pixels::PlanarCpu(planar) => Cow::Borrowed(planar),
             Pixels::InterleavedCpu(image) => Cow::Owned(LinearImage::from(image)),
@@ -106,7 +120,7 @@ impl Image {
     }
 
     /// Dimensions and format, without repacking either way.
-    pub fn desc(&self) -> imaginarium::ImageDesc {
+    pub(crate) fn desc(&self) -> imaginarium::ImageDesc {
         match &self.pixels {
             Pixels::InterleavedCpu(image) => image.desc(),
             Pixels::PlanarCpu(planar) => imaginarium::ImageDesc::new(
@@ -193,7 +207,7 @@ mod tests {
         // rather than repacking at each one.
         let planar = planar_master();
         let planes = planar.channel(0).pixels().as_ptr();
-        let out = Image::from(planar).to_planar();
+        let out = Image::from(planar).into_planar();
         assert_eq!(out.channel(0).pixels().as_ptr(), planes);
     }
 
@@ -205,7 +219,7 @@ mod tests {
             image.desc(),
             imaginarium::ImageDesc::new(2, 1, imaginarium::ColorFormat::RGB_F32)
         );
-        assert_eq!(image.to_interleaved().bytes(), interleaved_bytes());
+        assert_eq!(image.into_interleaved().bytes(), interleaved_bytes());
     }
 
     #[test]
@@ -226,10 +240,62 @@ mod tests {
         assert!(matches!(planar.interleaved(), Cow::Owned(_)));
     }
 
+    /// An input already produced by another astro node is planar, so `Image::take_planar` hands its
+    /// planes straight on — no repack between astro nodes, which is the whole point of the graph
+    /// carrying planar frames. A shared one still has to be copied, and pointer identity of the plane
+    /// allocation tells the two apart.
     #[test]
-    fn mutating_repacks_the_image_itself() {
-        let mut image = Image::from(planar_master());
-        assert_eq!(image.interleaved_mut().desc().width, 2);
-        assert!(matches!(image.pixels, Pixels::InterleavedCpu(_)));
+    fn a_planar_input_is_taken_without_repacking_and_a_shared_one_is_cloned() {
+        let dimensions = lumos::ImageDimensions::new((4, 3), 1);
+
+        let planar = LinearImage::from_planar_channels(dimensions, [vec![0.25f32; 12]]);
+        let planes = planar.channel(0).pixels().as_ptr();
+        let unique = DynamicValue::from_custom(Image::from(planar));
+        let out = Image::take_planar(unique);
+        assert_eq!(
+            out.channel(0).pixels().as_ptr(),
+            planes,
+            "unique planar input: the planes are moved, not repacked"
+        );
+
+        let planar = LinearImage::from_planar_channels(dimensions, [vec![0.25f32; 12]]);
+        let planes = planar.channel(0).pixels().as_ptr();
+        let shared = DynamicValue::from_custom(Image::from(planar));
+        let second_holder = shared.clone();
+        let out = Image::take_planar(shared);
+        assert_ne!(
+            out.channel(0).pixels().as_ptr(),
+            planes,
+            "shared planar input: the planes are deep-cloned"
+        );
+        assert_eq!(out.dimensions(), dimensions);
+        let original = second_holder.as_custom::<Image>().unwrap();
+        assert_eq!(
+            original.desc(),
+            imaginarium::ImageDesc::new(4, 3, imaginarium::ColorFormat::L_F32),
+            "the shared original stays intact behind the other holder"
+        );
+    }
+
+    /// The other side of the boundary: an input from the `imaginarium` domain is interleaved, so it
+    /// does convert — once, here, rather than inside every op.
+    #[test]
+    fn an_interleaved_input_deinterleaves_at_the_domain_boundary() {
+        // 2x1 RGB: pixels (0.125, 0.25, 0.375) and (0.5, 0.625, 0.75).
+        let samples = [0.125f32, 0.25, 0.375, 0.5, 0.625, 0.75];
+        let raw = imaginarium::Image::new_with_data(
+            imaginarium::ImageDesc::new(2, 1, imaginarium::ColorFormat::RGB_F32),
+            samples.iter().flat_map(|v| v.to_le_bytes()).collect(),
+        )
+        .unwrap();
+        let bytes = raw.bytes().as_ptr();
+        let out = Image::take_planar(DynamicValue::from_custom(Image::from(raw.clone())));
+        assert_eq!(out.channel(0).pixels(), &[0.125, 0.5]);
+        assert_eq!(out.channel(1).pixels(), &[0.25, 0.625]);
+        assert_eq!(out.channel(2).pixels(), &[0.375, 0.75]);
+
+        // Staying in the interleaved domain moves a last holder's samples too.
+        let kept = Image::take_interleaved(DynamicValue::from_custom(Image::from(raw)));
+        assert_eq!(kept.bytes().as_ptr(), bytes, "moved, not copied");
     }
 }
