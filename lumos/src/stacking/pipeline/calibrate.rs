@@ -4,6 +4,7 @@ use std::path::Path;
 
 use common::CancelToken;
 
+use crate::error::FrameDimensionMismatch;
 use crate::io::cancelled::Cancelled;
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage};
 use crate::io::image::error::ImageError;
@@ -13,6 +14,7 @@ use crate::io::image::load_context::LoadContext;
 use crate::memory::run_memory::RunMemory;
 use crate::memory::{MemoryPlan, PerFrameBytes, RunShape};
 use crate::stacking::calibration_masters::CalibrationMasters;
+use crate::stacking::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::stacking::calibration_masters::cosmic_ray::reject_cosmic_rays;
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::pipeline::align::{log_detection, register_warp_and_stack};
@@ -20,7 +22,7 @@ use crate::stacking::pipeline::config::AlignStackConfig;
 use crate::stacking::pipeline::detector_pool::DetectorPool;
 use crate::stacking::pipeline::frame::DetectedFrame;
 use crate::stacking::pipeline::result::{AlignStackResult, Error};
-use crate::stacking::pipeline::tier::FrameTier;
+use crate::stacking::pipeline::tier::StagePlan;
 use crate::stacking::progress::stage_counter::StageCounter;
 use crate::stacking::progress::{ProgressCallback, StackingStage};
 
@@ -49,7 +51,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     if light_paths.is_empty() {
         return Err(Error::NoFrames);
     }
-    config.validate()?;
+    config.validate(light_paths.len())?;
     let total = light_paths.len();
     // Sample the machine once, here, and hand the reading to every stage below, so the tier
     // decision, the chunk sizes and the decode ceiling are derived from the same figure.
@@ -80,13 +82,13 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
         rayon::current_num_threads(),
         memory.planning(),
     );
-    let tier = FrameTier::for_plan(&plan, &config.stack.cache, memory)?;
+    let stage = StagePlan::new(&plan, &config.stack.cache, memory)?;
 
     tracing::info!(
         frames = total,
         planning_mb = memory.planning() / (1024 * 1024),
         concurrency = plan.decode_concurrency,
-        spilling = tier.spills(),
+        spilling = stage.tier.spills(),
         "Loading, calibrating and demosaicing raw lights (RAW decode — the slow phase)"
     );
     // Bound how many frames are in flight: the RAW decode (libraw) is the one uninterruptible
@@ -103,11 +105,20 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
             if cancel.is_cancelled() {
                 return Err(Error::Stack(StackError::Cancelled));
             }
-            let image = decode_calibrate_demosaic(path.as_ref(), masters, config, &load_context)?;
+            let image = decode_calibrate_demosaic(
+                path.as_ref(),
+                masters,
+                config.cosmic_ray.as_ref(),
+                &load_context,
+            )?;
+            // Checked here, at decode, rather than after every frame has been detected: a frame
+            // from another sensor fails the run before the rest are paid for.
+            FrameDimensionMismatch::check(index, output, image.dimensions())
+                .map_err(|mismatch| Error::Stack(mismatch.into()))?;
             // Detect while the decoded frame is still in hand, so the spilled tier reads it back
             // once (for the warp) rather than twice.
             let result = detector.detect(&image);
-            let image = tier.hold(&format!("calib_{index}"), image)?;
+            let image = stage.tier.hold(&format!("calib_{index}"), image)?;
             let n = done.complete_one();
             log_detection(n, total, &result);
             Ok(DetectedFrame {
@@ -118,14 +129,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
         })
     }?;
 
-    register_warp_and_stack(
-        detected,
-        config,
-        tier,
-        plan.warp_concurrency,
-        progress,
-        cancel,
-    )
+    register_warp_and_stack(detected, config, stage, progress, cancel)
 }
 
 /// Load one raw light, apply the calibration masters, optionally reject cosmic rays, and
@@ -133,7 +137,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
 fn decode_calibrate_demosaic(
     path: &Path,
     masters: &CalibrationMasters,
-    config: &AlignStackConfig,
+    cosmic_ray: Option<&CosmicRayConfig>,
     context: &LoadContext,
 ) -> Result<LinearImage, Error> {
     let mut cfa = match CfaImage::from_file(path, context) {
@@ -149,10 +153,14 @@ fn decode_calibrate_demosaic(
         }
     };
     masters.calibrate(&mut cfa)?;
-    if let Some(cr) = &config.cosmic_ray {
+    if let Some(cosmic_ray) = cosmic_ray {
         // Dispatched per CFA type inside `reject_cosmic_rays` (mono / Bayer-deinterleave /
         // X-Trans same-color).
-        let removed = reject_cosmic_rays(&mut cfa, cr);
+        let removed =
+            reject_cosmic_rays(&mut cfa, cosmic_ray).map_err(|source| Error::CosmicRay {
+                path: path.to_path_buf(),
+                source,
+            })?;
         tracing::info!(removed, "rejected cosmic rays");
     }
     // Demosaic is the other heavy step; it polls `cancel` internally and bails mid-pass.

@@ -36,13 +36,6 @@ impl RemoveStars {
         }
     }
 
-    /// Tile stride in px; overlap is `WINDOW − stride`.
-    #[must_use]
-    pub fn stride(mut self, stride: usize) -> Self {
-        self.onnx.stride = stride;
-        self
-    }
-
     /// Replace `image` with the starless layer, discarding the stars.
     ///
     /// The ONNX inference dominates either way, but this skips the whole-image unscreen pass

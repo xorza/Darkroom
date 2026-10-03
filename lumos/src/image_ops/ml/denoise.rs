@@ -27,13 +27,6 @@ impl MlDenoise {
         }
     }
 
-    /// Tile stride in px; overlap is `WINDOW − stride`.
-    #[must_use]
-    pub fn stride(mut self, stride: usize) -> Self {
-        self.onnx.stride = stride;
-        self
-    }
-
     pub fn apply(&self, image: &mut LinearImage) -> Result<(), MlError> {
         let denoised = self.onnx.run(image)?;
         *image = denoised;

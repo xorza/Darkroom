@@ -29,6 +29,28 @@ fn small_n_resolve_downgrades_below_min_frames() {
     assert_eq!(StackConfig::flat().small_n.resolve(sigma, 8), sigma);
 }
 
+/// Manual weights follow their frames past a drop: inputs 1 and 3 gone from five leave the
+/// weights of 0, 2 and 4. Other weightings carry through untouched.
+#[test]
+fn for_survivors_keeps_the_weights_of_the_frames_left() {
+    let config = StackConfig {
+        weighting: Weighting::Manual(vec![1.0, 2.0, 3.0, 4.0, 5.0]),
+        ..Default::default()
+    };
+    let Weighting::Manual(weights) = config.for_survivors(&[1, 3]).weighting else {
+        panic!("manual stays manual")
+    };
+    assert_eq!(weights, [1.0, 3.0, 5.0]);
+    let Weighting::Manual(all) = config.for_survivors(&[]).weighting else {
+        panic!("manual stays manual")
+    };
+    assert_eq!(all, [1.0, 2.0, 3.0, 4.0, 5.0]);
+    assert!(matches!(
+        StackConfig::default().for_survivors(&[0]).weighting,
+        Weighting::Equal
+    ));
+}
+
 #[test]
 fn default_config() {
     let config = StackConfig::default();

@@ -8,7 +8,8 @@ use crate::error::FrameDimensionMismatch;
 use crate::io::image::cfa::CfaType;
 use crate::io::image::fits::cfa::save_cfa_fits;
 use crate::stacking::calibration_masters::CalibrationMasters;
-use crate::stacking::combine::config::{CombineMethod, StackConfig};
+use crate::stacking::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
+use crate::stacking::combine::config::{CombineMethod, StackConfig, Weighting};
 use crate::stacking::combine::error::{Error as StackError, StackConfigError};
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::pipeline::align::{align_and_stack, register_warp_and_stack};
@@ -16,7 +17,7 @@ use crate::stacking::pipeline::calibrate::calibrate_align_stack;
 use crate::stacking::pipeline::config::{AlignStackConfig, Reference};
 use crate::stacking::pipeline::frame::{DetectedFrame, PipelineFrame};
 use crate::stacking::pipeline::result::Error;
-use crate::stacking::pipeline::tier::FrameTier;
+use crate::stacking::pipeline::tier::{FrameTier, StagePlan};
 use crate::stacking::progress::{ProgressCallback, StackingProgress, StackingStage};
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::resample::warp;
@@ -198,6 +199,31 @@ fn drops_unregisterable_frame_and_stacks_the_rest() {
         result.alignment.registered, 3,
         "reference + two aligned frames"
     );
+
+    // Manual weights are one per input light; the dropped frames take theirs with them, so the
+    // three survivors combine under three weights rather than failing on five.
+    let weighted = AlignStackConfig {
+        stack: StackConfig {
+            weighting: Weighting::Manual(vec![1.0, 9.0, 2.0, 9.0, 3.0]),
+            ..Default::default()
+        },
+        ..config
+    };
+    let frames = vec![
+        base.clone(),
+        blank(),
+        shifted(&base, &reg, 5.0, 3.0),
+        blank(),
+        shifted(&base, &reg, -4.0, 6.0),
+    ];
+    let result = align_and_stack(
+        frames,
+        &weighted,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .expect("manual weights follow the survivors");
+    assert_eq!(result.alignment.dropped, vec![1, 3]);
 }
 
 #[test]
@@ -358,8 +384,10 @@ fn a_bad_registration_config_is_never_mistaken_for_frames_that_would_not_match()
     let error = register_warp_and_stack(
         detected,
         &config,
-        FrameTier::Ram,
-        1,
+        StagePlan {
+            tier: FrameTier::Ram,
+            warp_concurrency: 1,
+        },
         ProgressCallback::default(),
         CancelToken::never(),
     )
@@ -497,6 +525,71 @@ fn public_input_errors() {
         panic!("expected a detection config error, got {error:?}")
     };
     assert_eq!((invalid.field, invalid.value), ("sigma_threshold", 0.0));
+
+    // Checked at entry, before any frame is worked: a weight count that does not match the
+    // lights, a cosmic-ray config the detector cannot run, and a light with a non-finite sample.
+    let dims = ImageDimensions::new((4, 4), 1);
+    let flat = || LinearImage::from_pixels(dims, vec![0.1; 16]);
+    let run = |lights: Vec<LinearImage>, config: &AlignStackConfig| {
+        align_and_stack(
+            lights,
+            config,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap_err()
+    };
+    let manual = AlignStackConfig {
+        stack: StackConfig {
+            weighting: Weighting::Manual(vec![1.0]),
+            ..Default::default()
+        },
+        ..AlignStackConfig::default()
+    };
+    let error = run(vec![flat(), flat()], &manual);
+    assert!(
+        matches!(
+            error,
+            Error::Stack(StackError::Config(
+                StackConfigError::ManualWeightCountMismatch {
+                    expected: 2,
+                    actual: 1
+                }
+            ))
+        ),
+        "{error:?}"
+    );
+
+    let cosmic = AlignStackConfig {
+        cosmic_ray: Some(CosmicRayConfig {
+            niter: 0,
+            ..Default::default()
+        }),
+        ..AlignStackConfig::default()
+    };
+    let Error::CosmicRayConfig(invalid) = run(vec![flat()], &cosmic) else {
+        panic!("expected a cosmic-ray config error")
+    };
+    assert_eq!(invalid.field, "cosmic-ray niter");
+
+    let mut pixels = vec![0.1; 16];
+    pixels[5] = f32::NAN;
+    let error = run(
+        vec![flat(), LinearImage::from_pixels(dims, pixels)],
+        &AlignStackConfig::default(),
+    );
+    assert!(
+        matches!(
+            error,
+            Error::Stack(StackError::NonFiniteImageSample {
+                index: 1,
+                channel: 0,
+                pixel: 5,
+                ..
+            })
+        ),
+        "{error:?}"
+    );
 }
 
 fn bits(buffer: &Buffer2<f32>) -> Vec<u32> {
@@ -521,6 +614,69 @@ fn write_mono_cfa_light(directory: &Path, index: usize, image: &LinearImage) -> 
     cfa.metadata.exposure_time = Some(10.0 + index as f64);
     save_cfa_fits(&path, &cfa).expect("write synthetic CFA FITS light");
     path
+}
+
+/// The RAW front end checks each light as it decodes: a light whose dimensions differ from the
+/// first light's header is refused at its own index, and parametric cosmic-ray noise on a light
+/// whose decoder recorded no ADC step — a float FITS — names that light.
+#[test]
+fn the_raw_front_end_checks_each_light_at_decode() {
+    let scratch = TempDir::new("lumos_decode_checks");
+    let flat = |side: usize| {
+        LinearImage::from_pixels(
+            ImageDimensions::new((side, side), 1),
+            vec![0.1; side * side],
+        )
+    };
+    let paths = [
+        write_mono_cfa_light(scratch.path(), 0, &flat(32)),
+        write_mono_cfa_light(scratch.path(), 1, &flat(32)),
+        write_mono_cfa_light(scratch.path(), 2, &flat(16)),
+    ];
+    let run = |paths: &[PathBuf], config: &AlignStackConfig| {
+        calibrate_align_stack(
+            paths,
+            &CalibrationMasters::default(),
+            config,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap_err()
+    };
+
+    let error = run(&paths, &AlignStackConfig::default());
+    let Error::Stack(StackError::DimensionMismatch(FrameDimensionMismatch {
+        index,
+        expected,
+        actual,
+    })) = error
+    else {
+        panic!("expected a dimension mismatch, got {error:?}");
+    };
+    assert_eq!(
+        (index, expected, actual),
+        (
+            2,
+            ImageDimensions::new((32, 32), 1),
+            ImageDimensions::new((16, 16), 1)
+        )
+    );
+
+    let parametric = AlignStackConfig {
+        cosmic_ray: Some(CosmicRayConfig {
+            noise: NoiseEstimation::Parametric {
+                gain: 1.5,
+                read_noise: 5.0,
+            },
+            ..Default::default()
+        }),
+        ..AlignStackConfig::default()
+    };
+    let error = run(&paths[..1], &parametric);
+    let Error::CosmicRay { path, .. } = error else {
+        panic!("expected the light without an ADC step to be named, got {error:?}");
+    };
+    assert_eq!(path, paths[0]);
 }
 
 /// Both front ends report the same stages for the same work, so a progress consumer can read the

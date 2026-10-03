@@ -1,4 +1,5 @@
 use crate::bit_buffer2::BitBuffer2;
+use crate::io::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::math::statistics::median_mut;
 use crate::stacking::calibration_masters::cosmic_ray::config::NoiseEstimation;
@@ -47,7 +48,7 @@ fn removes_cosmic_rays_preserves_stars() {
     let star_vals: Vec<f32> = star_cores.iter().map(|&p| data[size.index_of(p)]).collect();
 
     let mut img = cfa_from_plane(data, CfaType::Mono);
-    let count = reject_cosmic_rays(&mut img, &CosmicRayConfig::default());
+    let count = reject_cosmic_rays(&mut img, &CosmicRayConfig::default()).unwrap();
     let out = img.data.pixels();
 
     // Every injected CR is removed (the spike drops back toward sky, ≪ 0.95).
@@ -80,7 +81,8 @@ fn clean_field_few_false_positives() {
     let count = reject_cosmic_rays(
         &mut cfa_from_plane(field.pixels, CfaType::Mono),
         &CosmicRayConfig::default(),
-    );
+    )
+    .unwrap();
     assert!(count <= 2, "clean field should flag ~0 CRs, got {count}");
 }
 
@@ -98,14 +100,16 @@ fn sigclip_controls_sensitivity() {
             sigclip: 3.0,
             ..Default::default()
         },
-    );
+    )
+    .unwrap();
     let strict = reject_cosmic_rays(
         &mut cfa_from_plane(data, CfaType::Mono),
         &CosmicRayConfig {
             sigclip: 60.0,
             ..Default::default()
         },
-    );
+    )
+    .unwrap();
     assert!(
         sensitive > strict,
         "lower sigclip must flag more: sensitive={sensitive}, strict={strict}"
@@ -126,17 +130,19 @@ fn empirical_and_parametric_both_catch_a_bright_cr() {
         NoiseEstimation::Parametric {
             gain: 1.5,
             read_noise: 5.0,
-            full_scale: 4095.0,
         },
     ] {
         let mut img = cfa_from_plane(data.clone(), CfaType::Mono);
+        // A 12-bit ADC: one step is 1/4095 of a sample unit.
+        img.quantization_sigma = Some(QUANTIZATION_SIGMA_PER_STEP / 4095.0);
         let count = reject_cosmic_rays(
             &mut img,
             &CosmicRayConfig {
                 noise,
                 ..Default::default()
             },
-        );
+        )
+        .unwrap();
         assert!(count >= 1, "bright CR missed");
         assert!(
             img.data.pixels()[size.index_of(cr)] < 0.2,
@@ -174,7 +180,7 @@ fn bayer_removes_cosmic_rays_preserves_star() {
         data[size.index_of(p)] = 0.95;
     }
     let mut img = cfa_from_plane(data, CfaType::Bayer(CfaPattern::Rggb));
-    let count = reject_cosmic_rays(&mut img, &CosmicRayConfig::default());
+    let count = reject_cosmic_rays(&mut img, &CosmicRayConfig::default()).unwrap();
     let out = img.data.pixels();
     for &p in &crs {
         assert!(
@@ -222,7 +228,7 @@ fn bayer_tight_star_eaten_is_a_known_limitation() {
         data[size.index_of(p)] = 0.95;
     }
     let mut img = cfa_from_plane(data, CfaType::Bayer(CfaPattern::Rggb));
-    reject_cosmic_rays(&mut img, &CosmicRayConfig::default());
+    reject_cosmic_rays(&mut img, &CosmicRayConfig::default()).unwrap();
     let out = img.data.pixels();
     // CR rejection still works — the injected CRs are removed.
     for &p in &crs {
@@ -266,7 +272,7 @@ fn xtrans_removes_cosmic_ray_preserves_flat_field() {
     data[size.index_of(cr)] = 0.95;
 
     let mut img = cfa_from_plane(Buffer2::new(size.width, size.height, data), cfa);
-    let count = reject_cosmic_rays(&mut img, &CosmicRayConfig::default());
+    let count = reject_cosmic_rays(&mut img, &CosmicRayConfig::default()).unwrap();
     let out = img.data.pixels();
 
     assert!(count >= 1, "X-Trans CR missed");
@@ -357,4 +363,110 @@ fn replace_flagged_matches_a_snapshot_reference() {
     assert_eq!(got[at(9, 2)], pixels[at(9, 2)]);
     // ...while a repairable hit actually moved.
     assert_ne!(got[at(6, 6)], pixels[at(6, 6)]);
+}
+
+/// Each field at the edge of what the detector can run with: the default passes, and every row
+/// breaks exactly one field and is rejected on it.
+#[test]
+fn validate_rejects_each_field_out_of_range() {
+    assert_eq!(CosmicRayConfig::default().validate(), Ok(()));
+    let parametric = |gain, read_noise| NoiseEstimation::Parametric { gain, read_noise };
+    for (field, config) in [
+        (
+            "cosmic-ray sigclip",
+            CosmicRayConfig {
+                sigclip: 0.0,
+                ..Default::default()
+            },
+        ),
+        (
+            "cosmic-ray sigclip",
+            CosmicRayConfig {
+                sigclip: f32::NAN,
+                ..Default::default()
+            },
+        ),
+        (
+            "cosmic-ray objlim",
+            CosmicRayConfig {
+                objlim: -1.0,
+                ..Default::default()
+            },
+        ),
+        (
+            "cosmic-ray sigfrac",
+            CosmicRayConfig {
+                sigfrac: 0.0,
+                ..Default::default()
+            },
+        ),
+        (
+            "cosmic-ray sigfrac",
+            CosmicRayConfig {
+                sigfrac: 1.5,
+                ..Default::default()
+            },
+        ),
+        (
+            "cosmic-ray niter",
+            CosmicRayConfig {
+                niter: 0,
+                ..Default::default()
+            },
+        ),
+        (
+            "cosmic-ray gain",
+            CosmicRayConfig {
+                noise: parametric(0.0, 5.0),
+                ..Default::default()
+            },
+        ),
+        (
+            "cosmic-ray read_noise",
+            CosmicRayConfig {
+                noise: parametric(1.5, -1.0),
+                ..Default::default()
+            },
+        ),
+    ] {
+        let error = config.validate().unwrap_err();
+        assert_eq!(error.field, field, "{config:?}");
+    }
+    let edge = CosmicRayConfig {
+        sigfrac: 1.0,
+        niter: 1,
+        noise: parametric(1.5, 0.0),
+        ..Default::default()
+    };
+    assert_eq!(edge.validate(), Ok(()));
+}
+
+/// The parametric model reads the frame's ADU scale off its quantization σ: a 12-bit step,
+/// `(1/√12)/4095` in sample units, gives back 4095 ADU per unit, to the two roundings of the
+/// quotient and its inverse. A frame without one cannot use the model; the empirical one needs
+/// nothing from the frame.
+#[test]
+fn the_parametric_model_takes_its_scale_from_the_frame() {
+    let estimation = NoiseEstimation::Parametric {
+        gain: 1.5,
+        read_noise: 5.0,
+    };
+    let NoiseModel::Parametric { full_scale, .. } =
+        NoiseModel::resolve(&estimation, Some(QUANTIZATION_SIGMA_PER_STEP / 4095.0)).unwrap()
+    else {
+        panic!("a parametric estimation resolves to the parametric model")
+    };
+    assert_close!(full_scale, 4095.0, 2.0 * f32::EPSILON);
+    assert_eq!(NoiseModel::resolve(&estimation, None), Err(UnknownAdcStep));
+    assert_eq!(
+        NoiseModel::resolve(&NoiseEstimation::Empirical, None),
+        Ok(NoiseModel::Empirical)
+    );
+
+    let mut image = cfa_from_plane(synthetic_field().pixels, CfaType::Mono);
+    let config = CosmicRayConfig {
+        noise: estimation,
+        ..Default::default()
+    };
+    assert_eq!(reject_cosmic_rays(&mut image, &config), Err(UnknownAdcStep));
 }

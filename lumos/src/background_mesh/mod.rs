@@ -71,8 +71,7 @@ impl TileGrid {
     }
 
     fn matches_layout(&self, dimensions: Size2us, tile_size: usize) -> bool {
-        self.dimensions == dimensions
-            && self.tile_size == clamped_tile_size(dimensions, tile_size)
+        self.dimensions == dimensions && self.tile_size == clamped_tile_size(dimensions, tile_size)
     }
 
     /// Second derivative in Y at `tile` for the natural cubic spline, for one plane.

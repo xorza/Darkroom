@@ -32,7 +32,13 @@ impl MeshWorkspace {
         sigma_clip_iterations: usize,
         median_filter: bool,
     ) -> &TileGrid {
-        self.fill_tile_stats(pixels, mask, tile_size, sigma_clip_iterations, median_filter);
+        self.fill_tile_stats(
+            pixels,
+            mask,
+            tile_size,
+            sigma_clip_iterations,
+            median_filter,
+        );
         let tiles_y = self.grid.as_ref().unwrap().stats.height();
         self.spline_values.resize(tiles_y, 0.0);
         self.spline_d2.resize(tiles_y, 0.0);
@@ -56,7 +62,13 @@ impl MeshWorkspace {
         sigma_clip_iterations: usize,
         median_filter: bool,
     ) -> &TileGrid {
-        self.fill_tile_stats(pixels, mask, tile_size, sigma_clip_iterations, median_filter);
+        self.fill_tile_stats(
+            pixels,
+            mask,
+            tile_size,
+            sigma_clip_iterations,
+            median_filter,
+        );
         self.grid.as_ref().unwrap()
     }
 

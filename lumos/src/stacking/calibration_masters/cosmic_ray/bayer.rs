@@ -10,6 +10,7 @@ use rayon::prelude::*;
 use crate::math::size2us::Size2us;
 use crate::stacking::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::stacking::calibration_masters::cosmic_ray::mono::MonoDetector;
+use crate::stacking::calibration_masters::cosmic_ray::noise_model::NoiseModel;
 
 /// The Bayer detector: a mono detector, plus the buffer each phase is deinterleaved into.
 ///
@@ -22,9 +23,9 @@ pub(super) struct BayerDetector<'a> {
 }
 
 impl<'a> BayerDetector<'a> {
-    pub(super) fn new(config: &'a CosmicRayConfig) -> Self {
+    pub(super) fn new(config: &'a CosmicRayConfig, noise: NoiseModel) -> Self {
         Self {
-            mono: MonoDetector::new(config),
+            mono: MonoDetector::new(config, noise),
             plane: Vec::new(),
         }
     }
