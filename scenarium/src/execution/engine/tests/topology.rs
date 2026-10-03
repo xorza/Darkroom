@@ -78,7 +78,7 @@ async fn cached_output_survives_node_removal() {
         1,
         "the survivor must not recompute after an unrelated node's removal"
     );
-    assert!(run.cached().contains(&"a"));
+    assert_eq!(run.cached(), ["a"]);
     assert_eq!(e.output_i64("a", 0), Some(2));
 }
 

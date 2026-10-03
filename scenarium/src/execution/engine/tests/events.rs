@@ -91,7 +91,7 @@ async fn bootstrap_prepares_no_events_without_subscribers() {
 
     let run = e.run_sinks().await;
 
-    assert!(run.ran().contains(&"emit"));
+    assert_eq!(run.ran(), ["emit", "recv"]);
     assert!(
         run.armed_events.is_empty(),
         "emit's event has no subscribers, so nothing is armed"

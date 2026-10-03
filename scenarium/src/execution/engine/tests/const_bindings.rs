@@ -31,7 +31,7 @@ async fn const_binding_invokes_only_once() {
     e.edit(|g| g.constant("mult", 0, 3i64));
     let run = e.run_sinks().await;
     assert_eq!(run.ran(), ["Print"], "mult did not recompute");
-    assert!(run.cached().contains(&"mult"), "mult reused");
+    assert_eq!(run.cached(), ["mult"], "mult reused");
 
     // Different const value: mult's digest changes ⇒ cache miss ⇒ re-execute.
     e.edit(|g| g.constant("mult", 0, 4i64));

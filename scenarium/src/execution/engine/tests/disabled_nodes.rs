@@ -125,7 +125,7 @@ async fn disabling_a_producer_rekeys_its_cached_consumer() {
         ["7"],
         "the cached 49 was keyed on the live producer"
     );
-    assert!(run.ran().contains(&"mult"));
+    assert_eq!(run.ran(), ["src", "mult", "print"]);
 
     // Enabled again, the producer's key comes back, and so does the value cached under it.
     e.edit(|g| g.enable("feed"));

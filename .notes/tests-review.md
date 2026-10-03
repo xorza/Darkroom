@@ -25,15 +25,6 @@ Paths are relative to the repository root.
 - [ ] `darkroom/src/gui/pane/viewer/camera.rs:83-90`, `:106-111` — the "on a 2x display … physical px" cases never pass a scale factor, because `fit_viewport` and `zoom_about_pane_center` take none. These are the same logical-space computation on a smaller image, labelled as DPI coverage. Rewrite the comments to say what is computed, or test the scale path where it actually lives.
 - [ ] `darkroom/src/gui/pane/graph/gesture/new_node/tests.rs:69-76` — the same doc paragraph appears twice on `assert_fits`.
 
-## Loose tolerances where the exact answer is known
-Deterministic, often noiseless fixtures are asserted with bands that have no stated reason. A regression of the size of the band passes. In some cases the band hides a production bug.
-
-### scenarium, common
-Paths without a crate prefix are relative to `scenarium/src/`.
-
-- [ ] There are 49 membership checks of the form `run.ran().contains(&"x")` / `run.cached().contains(&"x")`, in `engine/tests/cache_persistence/{blob_recovery,cache_modes,frontier}.rs`, `const_bindings.rs`, `node_seeds.rs`, `topology.rs`, `resource_binds.rs` and `events.rs`. Each run's full set is knowable, and an extra node recomputing goes unnoticed. Assert exact `ran()`/`cached()` lists, as `frontier.rs:193-197` already does. `blob_recovery.rs:218` (`calls.count() > after_run1`) should be `== 2`.
-- [ ] Error kinds are asserted by Display substring: `engine/tests/error_propagation.rs:19,26` (`.contains("upstream")`) and `execution/executor/tests.rs:165-166`. Match `RunError::Invoke { .. }` / `RunError::SkippedUpstream { .. }` as `executor/tests.rs:493-504` does. `executor/tests.rs:564-566` uses `is_some()` where the variants are known.
-
 ## Risky behavior with no test
 Branches with real failure modes that no test reaches.
 
@@ -47,10 +38,6 @@ Paths are relative to the repository root.
 
 ## Second sources of truth: tests and harness re-implement production or each other
 A copy of a formula, a constant or a pipeline step changes with the code it copies, or drifts away from it. Either way it cannot catch the bug it exists for.
-
-### scenarium, common
-Paths without a crate prefix are relative to `scenarium/src/`.
-
 
 ### darkroom, lens, imaginarium, quickbench, root `test_resources/`
 Paths are relative to the repository root.

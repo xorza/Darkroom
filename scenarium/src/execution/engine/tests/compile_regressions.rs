@@ -176,8 +176,9 @@ async fn update_with_a_grown_output_list_retires_the_shorter_snapshot() {
         });
     });
     let run = e.run_sinks().await;
-    assert!(
-        run.ran().contains(&"generate"),
+    assert_eq!(
+        run.ran(),
+        ["generate", "print"],
         "the retired value recomputes"
     );
     assert_eq!(e.outputs("generate").len(), 2);
