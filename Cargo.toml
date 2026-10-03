@@ -48,6 +48,24 @@ cast_ptr_alignment = "allow"
 cast_possible_wrap = "allow"
 # Backticks in docs are reviewed, not linted: every proper noun was one more exception to list.
 doc_markdown = "allow"
+# Digit grouping is style only, and it hides the `RRGGBB` pattern of a hex colour.
+unreadable_literal = "allow"
+# State and config structs carry independent flags; the enum or bitflags it asks for fits neither.
+struct_excessive_bools = "allow"
+# The `use super::*` the gated `internals` and `tests` modules open with is the house style.
+wildcard_imports = "allow"
+# `Instant - Duration` and `Duration - Duration` already panic on underflow; the
+# `checked_sub(..).unwrap()` it asks for panics the same way, only longer.
+unchecked_time_subtraction = "allow"
+# A suffix every field shares is usually a unit or an encoding (`_ns`, `_q`), and a field named
+# after its struct (`Window::window`) is often the plainest name it has.
+struct_field_names = "allow"
+# Arms with equal bodies often stay apart on purpose: a guard, a fallback, or bindings of
+# different types that no `|` pattern can join.
+match_same_arms = "allow"
+# A method is the house home for what works on a type, even when the body reads no field
+# (a pipeline's `draw`) or reads one only under `cfg(test)`.
+unused_self = "allow"
 absolute_paths = "warn"
 allow_attributes = "warn"
 allow_attributes_without_reason = "warn"
@@ -59,13 +77,14 @@ dbg_macro = "warn"
 decimal_bitwise_operands = "warn"
 default_trait_access = "warn"
 ignore_without_reason = "warn"
+imprecise_flops = "warn"
 items_after_statements = "warn"
 items_after_test_module = "warn"
 large_stack_arrays = "warn"
 large_types_passed_by_value = "warn"
+lossy_float_literal = "warn"
 manual_let_else = "warn"
 map_unwrap_or = "warn"
-match_same_arms = "warn"
 match_wildcard_for_single_variants = "warn"
 # `const fn` by default: every fn that can be one is.
 missing_const_for_fn = "warn"
@@ -78,19 +97,17 @@ return_self_not_must_use = "warn"
 self_named_module_files = "warn"
 semicolon_if_nothing_returned = "warn"
 should_panic_without_expect = "warn"
-struct_field_names = "warn"
 todo = "warn"
 trivially_copy_pass_by_ref = "warn"
 unnecessary_debug_formatting = "warn"
 unnecessary_wraps = "warn"
-unreadable_literal = "warn"
-unused_self = "warn"
 used_underscore_binding = "warn"
 
 [lints.rustdoc]
 broken_intra_doc_links = "warn"
 private_intra_doc_links = "warn"
 redundant_explicit_links = "warn"
+unescaped_backticks = "warn"
 
 [features]
 default = []
@@ -146,16 +163,9 @@ required-features = ["bench"]
 [package.metadata.cargo-machete]
 ignored = ["strum"]
 
-[profile.bench]
-debug = "line-tables-only"
-opt-level = 3
-strip = "none"
-split-debuginfo = "off"
-
+# `bench` inherits this whole.
 [profile.release]
 debug = "line-tables-only"
-strip = "none"
-opt-level = 3
 split-debuginfo = "off"
 
 # Dependencies optimized in dev and test builds; this crate itself stays unoptimized.
