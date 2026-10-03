@@ -283,5 +283,32 @@ fn sync_parent(_parent: &Path) -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(any(test, feature = "internals"))]
+pub mod internals {
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    /// The publication temporaries beside `destination`: every file named
+    /// like the ones a publication writes before it renames, which one that
+    /// failed must not leave behind.
+    pub fn publication_temp_files(destination: &Path) -> Vec<PathBuf> {
+        let prefix = format!("{}.", destination.file_name().unwrap().to_string_lossy());
+        fs::read_dir(destination.parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|candidate| {
+                candidate
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with(&prefix)
+                    && candidate
+                        .extension()
+                        .is_some_and(|extension| extension == "tmp")
+            })
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests;

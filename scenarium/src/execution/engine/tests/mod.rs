@@ -8,7 +8,7 @@ use crate::execution::seeds::RunSeeds;
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::error::InvokeError;
 use crate::graph::func::lambda::{Invocation, OutputDemand};
-use crate::graph::identity::{NodeId, OutputPort};
+use crate::graph::identity::NodeId;
 use crate::graph::node::CacheMode;
 use crate::library::Library;
 use crate::testing::calls::Calls;
@@ -16,7 +16,6 @@ use crate::testing::engine::{ReportedRun, RunOutcome, TestEngine};
 use crate::testing::graph::{NodeSpec, TestGraph};
 use crate::{ConstValue, DataType, DynamicValue};
 use common::CancelToken;
-use tokio::sync::Mutex;
 
 mod argument_values;
 mod behavior;

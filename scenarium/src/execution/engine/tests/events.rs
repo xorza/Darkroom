@@ -39,7 +39,7 @@ async fn execute_events_runs_subscribers() {
     let EventPair { g, calls } = event_pair();
     let mut e = TestEngine::over(g);
 
-    let tick = e.event("emit", 0);
+    let tick = e.graph.event("emit", 0);
     let run = e.run_events([tick]).await;
 
     // recv subscribes to emit's tick, so recv is the root and emit runs as
@@ -73,7 +73,7 @@ async fn bootstrap_prepares_events_and_bypasses_source_cache() {
     g.cache("emit", CacheMode::Ram);
     let mut e = TestEngine::over(g);
 
-    let tick = e.event("emit", 0);
+    let tick = e.graph.event("emit", 0);
     for expected in [1, 2] {
         let run = e.run_event_sources().await;
         assert_eq!(calls.count(), expected, "a pure, cached source re-runs");
@@ -129,7 +129,7 @@ async fn run_sinks_node_runs_all_sinks_on_event() {
     g.subscribe("emit", 0, "trigger");
 
     let mut e = TestEngine::over(g);
-    let run = e.run_events([e.event("emit", 0)]).await;
+    let run = e.run_events([e.graph.event("emit", 0)]).await;
 
     // The sink cone ran; emit is neither a sink nor in that cone, so it did
     // not. The `RunSinks` node is itself a sink, so it runs its no-op lambda
@@ -154,7 +154,7 @@ async fn event_without_run_sinks_sink_runs_nothing() {
     g.wire("source", 0, "sink", 0);
 
     let mut e = TestEngine::over(g);
-    let run = e.run_events([e.event("emit", 0)]).await;
+    let run = e.run_events([e.graph.event("emit", 0)]).await;
 
     assert!(run.ran().is_empty());
     assert_eq!(source_calls.count(), 0);

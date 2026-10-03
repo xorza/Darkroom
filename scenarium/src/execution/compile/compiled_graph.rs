@@ -266,6 +266,19 @@ pub(crate) mod internals {
             self.e_nodes.push(e_node);
             node_idx
         }
+
+        /// A program of portless nodes under `node_ids` — enough for a host
+        /// test that only resolves authored ids against a program. Sorted on
+        /// the way in, like the real walk.
+        pub fn bare(node_ids: impl IntoIterator<Item = NodeId>) -> CompiledGraph {
+            let mut node_ids: Vec<NodeId> = node_ids.into_iter().collect();
+            node_ids.sort_unstable();
+            let mut compiled = CompiledGraph::default();
+            for node_id in node_ids {
+                compiled.push(node_id, ExecutionNode::bare());
+            }
+            compiled
+        }
     }
 
     /// Id lookups for a unit test that stood a program up by hand and knows its

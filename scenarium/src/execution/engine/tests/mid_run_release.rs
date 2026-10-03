@@ -5,7 +5,7 @@ use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::mem;
-use std::sync::Mutex as StdMutex;
+use std::sync::Mutex;
 
 use crate::async_lambda;
 use crate::library::TypeEntry;
@@ -26,11 +26,11 @@ struct LiveTracker {
 /// its last reference (cache slot or invoke buffer) drops — exactly what peak RAM tracks.
 #[derive(Debug)]
 struct Tracked {
-    tracker: Arc<StdMutex<LiveTracker>>,
+    tracker: Arc<Mutex<LiveTracker>>,
 }
 
 impl Tracked {
-    fn new(tracker: Arc<StdMutex<LiveTracker>>) -> Self {
+    fn new(tracker: Arc<Mutex<LiveTracker>>) -> Self {
         {
             let mut t = tracker.lock().unwrap();
             t.current += 1;
@@ -69,10 +69,7 @@ fn tracked() -> DataType {
 }
 
 /// A pure custom→custom node emitting a fresh [`Tracked`] on every call.
-fn relay(
-    tracker: Arc<StdMutex<LiveTracker>>,
-    mode: CacheMode,
-) -> impl FnOnce(NodeSpec) -> NodeSpec {
+fn relay(tracker: Arc<Mutex<LiveTracker>>, mode: CacheMode) -> impl FnOnce(NodeSpec) -> NodeSpec {
     move |n: NodeSpec| {
         n.pure()
             .cache(mode)
@@ -99,7 +96,7 @@ fn tracked_graph() -> TestGraph {
 /// `relay_mode`, and return the peak number of tracked outputs resident at
 /// once.
 async fn chain_peak(relay_mode: CacheMode) -> usize {
-    let tracker = Arc::new(StdMutex::new(LiveTracker::default()));
+    let tracker = Arc::new(Mutex::new(LiveTracker::default()));
     let mut g = tracked_graph();
     for stage in 0..4 {
         g.add(
@@ -154,8 +151,8 @@ struct ProbeRun {
 /// whether it was uniquely owned (`into_custom` succeeded) — the observable
 /// contract of the executor's move-on-last-use.
 async fn probe_run(relay_mode: CacheMode, probes: usize) -> ProbeRun {
-    let tracker = Arc::new(StdMutex::new(LiveTracker::default()));
-    let reads = Arc::new(StdMutex::new(Vec::new()));
+    let tracker = Arc::new(Mutex::new(LiveTracker::default()));
+    let reads = Arc::new(Mutex::new(Vec::new()));
 
     let mut g = tracked_graph();
     g.add("relay", relay(Arc::clone(&tracker), relay_mode));

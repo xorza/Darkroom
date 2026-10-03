@@ -1,4 +1,5 @@
 use super::*;
+use crate::execution::cache::disk_store::DiskStore;
 use crate::testing::graph::NodeSpec;
 use std::fs;
 
@@ -7,7 +8,7 @@ use std::fs;
 #[tokio::test]
 async fn a_successful_eviction_reports_nothing() {
     let mut w = TestWorker::over(TestGraph::sample());
-    let compiled = w.compile();
+    let compiled = w.graph.program();
     let get_a = w.id("get_a");
 
     w.settle([
@@ -35,7 +36,7 @@ async fn an_eviction_failure_uses_the_general_worker_error_report() {
     let mut w = TestWorker::over(TestGraph::sample());
     let blocked = w.id("get_a");
     // A directory where the blob file belongs: removal fails on it.
-    let blocked_path = dir.join(blocked.as_uuid().simple().to_string());
+    let blocked_path = DiskStore::new(Some(dir.path().to_path_buf())).blob_path(blocked);
     fs::create_dir(&blocked_path).unwrap();
 
     w.settle([
@@ -168,7 +169,7 @@ async fn a_flush_failure_uses_the_general_worker_error_report() {
     // A directory where the blob file belongs: the body streams into the
     // temporary beside it, and the publication onto the destination fails.
     let blocked = w.id("square");
-    let blocked_path = dir.join(blocked.as_uuid().simple().to_string());
+    let blocked_path = DiskStore::new(Some(dir.path().to_path_buf())).blob_path(blocked);
     fs::create_dir(&blocked_path).unwrap();
 
     // The sweep the host asks for once the store is attached.

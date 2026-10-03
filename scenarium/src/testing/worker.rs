@@ -23,10 +23,9 @@ use crate::ConstValue;
 use crate::elements::system_library::system_library;
 use crate::elements::worker_events_library::worker_events_library;
 use crate::execution::cache::disk_store::DiskStore;
-use crate::execution::compile::Compiler;
 use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::error::Error;
-use crate::graph::identity::{EventPort, NodeId};
+use crate::graph::identity::NodeId;
 use crate::testing::engine::RunOutcome;
 use crate::testing::graph::TestGraph;
 use crate::worker::Worker;
@@ -123,20 +122,10 @@ impl TestWorker {
         self.graph.id(name)
     }
 
-    /// This graph compiled, as a message would carry it. Panics on a compile
-    /// error: a fixture that does not compile is a broken fixture.
-    pub(crate) fn compile(&self) -> Arc<CompiledGraph> {
-        Arc::new(
-            Compiler::default()
-                .compile(&self.graph.graph, &self.graph.library)
-                .expect("the fixture graph compiles"),
-        )
-    }
-
     /// `Update` carrying this graph as it stands — sent again after an edit.
     pub(crate) fn update(&self) -> WorkerMessage {
         WorkerMessage::Update {
-            compiled: self.compile(),
+            compiled: self.graph.program(),
         }
     }
 
@@ -146,17 +135,10 @@ impl TestWorker {
     }
 
     /// An event port on a named node.
-    pub(crate) fn event(&self, name: &str, event_idx: usize) -> EventPort {
-        EventPort {
-            node_id: self.id(name),
-            event_idx,
-        }
-    }
-
     /// `Run` seeded with one firing of that event.
     pub(crate) fn fire(&self, name: &str, event_idx: usize) -> WorkerMessage {
         WorkerMessage::FireEvents {
-            events: vec![self.event(name, event_idx)],
+            events: vec![self.graph.event(name, event_idx)],
         }
     }
 

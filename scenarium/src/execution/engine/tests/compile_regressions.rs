@@ -1,8 +1,9 @@
+use std::slice;
+
 use super::*;
 
 use crate::graph::func::FuncInput;
 use crate::graph::func::FuncOutput;
-use crate::graph::output_types::OutputTypes;
 use crate::{FsPathConfig, FsPathMode};
 
 /// The output pool is range-addressed: when a consumer precedes its producer
@@ -19,38 +20,20 @@ fn output_metadata_follows_ranges_when_consumer_precedes_producer() {
     g.add("make_str", |n| n.returns("s"));
     g.wire("make_str", 0, "sink", 0);
 
-    let e = TestEngine::over(g);
-    let program = e.engine.compiled();
+    let compiled = g.compile();
 
     for (name, expected) in [("make_int", DataType::Int), ("make_str", DataType::String)] {
         assert_eq!(
-            program.outputs[program.by_id(e.id(name)).outputs][0],
-            expected,
+            compiled.output_types(name),
+            [expected],
             "{name} reads its own type, not its neighbour's"
         );
     }
 }
 
-/// The authoring-side type at one output port, for the tests that compare
-/// what the editor would paint against what the compiled program carries.
-///
-/// A miss is the fixture naming a port that is not declared — never something
-/// to read as `Any`, which is what an unresolvable *chain* resolves to. Since
-/// `DataType::default()` is itself `Any`, defaulting here would let a resolver
-/// that recorded nothing pass every `Any` case below vacuously.
-fn authoring_output_type(g: &TestGraph, name: &str) -> DataType {
-    let mut types = OutputTypes::default();
-    types.update(&g.graph, &g.library);
-    types
-        .get(OutputPort::new(g.id(name), 0))
-        .expect("the fixture names a declared output port")
-        .clone()
-}
-
 #[test]
 fn compiled_output_types_match_authoring_resolution() {
     let path_type = DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFile)));
-    let passthrough = |n: NodeSpec| n.input(DataType::Any).wildcard(0);
 
     let mut g = TestGraph::new();
     g.add("fixed", |n| n.output(DataType::Int));
@@ -59,17 +42,17 @@ fn compiled_output_types_match_authoring_resolution() {
     let mut previous = "fixed".to_string();
     for hop in 0..70 {
         let name = format!("hop{hop}");
-        g.add(&name, passthrough);
+        g.add(&name, NodeSpec::passthrough);
         g.wire(&previous, 0, &name, 0);
         previous = name;
     }
-    g.add("scalar_const", passthrough);
+    g.add("scalar_const", NodeSpec::passthrough);
     g.constant("scalar_const", 0, true);
-    g.add("ambiguous_const", passthrough);
+    g.add("ambiguous_const", NodeSpec::passthrough);
     g.constant("ambiguous_const", 0, ConstValue::Enum("A".into()));
     g.add("typed_const", |n| n.input(path_type.clone()).wildcard(0));
     g.constant("typed_const", 0, ConstValue::FsPath("input.fit".into()));
-    g.add("unbound", passthrough);
+    g.add("unbound", NodeSpec::passthrough);
 
     let cases = [
         ("fixed", DataType::Int),
@@ -81,16 +64,15 @@ fn compiled_output_types_match_authoring_resolution() {
     ];
     let authored: Vec<DataType> = cases
         .iter()
-        .map(|(name, _)| authoring_output_type(&g, name))
+        .map(|(name, _)| g.output_type(name, 0))
         .collect();
 
-    let e = TestEngine::over(g);
-    let program = e.engine.compiled();
+    let compiled = g.compile();
     for ((name, expected), authored) in cases.iter().zip(authored) {
         assert_eq!(&authored, expected, "authoring resolution for {name}");
         assert_eq!(
-            &program.outputs[program.by_id(e.id(name)).outputs][0],
-            expected,
+            compiled.output_types(name),
+            slice::from_ref(expected),
             "compiled resolution for {name}"
         );
     }
@@ -99,18 +81,13 @@ fn compiled_output_types_match_authoring_resolution() {
 #[test]
 fn authoring_and_compiled_output_resolution_break_cycles_as_any() {
     let mut g = TestGraph::new();
-    g.add("passthrough", |n| n.input(DataType::Any).wildcard(0));
+    g.add("passthrough", NodeSpec::passthrough);
     g.wire("passthrough", 0, "passthrough", 0);
-    assert_eq!(authoring_output_type(&g, "passthrough"), DataType::Any);
+    assert_eq!(g.output_type("passthrough", 0), DataType::Any);
 
     // The same wire, compiled: the walk resolves the wildcard through the
     // binding it just interned, and the cycle closes on `Any` there too.
-    let e = TestEngine::over(g);
-    let program = e.engine.compiled();
-    assert_eq!(
-        program.outputs[program.by_id(e.id("passthrough")).outputs][0],
-        DataType::Any
-    );
+    assert_eq!(g.compile().output_types("passthrough"), [DataType::Any]);
 }
 
 /// An install may carry an evolved library: changed inputs and lambdas must

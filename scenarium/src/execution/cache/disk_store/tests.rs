@@ -1,11 +1,12 @@
 use std::any::Any;
 use std::fmt;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use common::TempFile;
+use common::file_utils::internals::publication_temp_files;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
 use crate::data::codec::Codecs;
@@ -54,18 +55,6 @@ async fn store_expecting(
         Some(&expected),
         "expected {expected:?}, got {outcome:?}"
     );
-}
-
-fn publication_temp_files(path: &Path) -> Vec<PathBuf> {
-    let prefix = format!("{}.", path.file_name().unwrap().to_string_lossy());
-    fs::read_dir(path.parent().unwrap())
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .filter(|candidate| {
-            let name = candidate.file_name().unwrap().to_string_lossy();
-            name.starts_with(&prefix) && name.ends_with(".tmp")
-        })
-        .collect()
 }
 
 const BLOB_TYPE: TypeId = TypeId::literal("78391861-24da-4368-a3a5-2a6b7a47f112");

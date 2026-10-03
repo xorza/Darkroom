@@ -4,7 +4,7 @@ use common::TempDir;
 
 use crate::execution::cache::runtime::error::CacheNodeError;
 use crate::execution::schedule::NodeState;
-use std::sync::Mutex as StdMutex;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// `src → mult(mode) → print`, both of mult's inputs fed by the source.

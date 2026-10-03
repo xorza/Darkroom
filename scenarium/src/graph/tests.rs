@@ -9,7 +9,6 @@ use crate::graph::error::{DetachedNodeError, GraphValidationError};
 use crate::graph::func::Func;
 use crate::graph::identity::FuncId;
 use crate::graph::node::{CacheMode, Node, NodeKind};
-use crate::graph::output_types::OutputTypes;
 use crate::graph::{Binding, BindingEntry, InputPort, NodeId, OutputPort, Subscription};
 use crate::testing;
 use crate::testing::graph::{NodeSpec, TestGraph};
@@ -19,27 +18,6 @@ use std::panic;
 use std::panic::AssertUnwindSafe;
 
 type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
-
-/// The effective type at one of `name`'s output ports, through the graph's one
-/// resolver.
-///
-/// Every case below names a port a resolvable node declares, so the table
-/// covers it. A miss is the fixture naming a port that is not there — not an
-/// `Any` to assert on, which is what an unresolvable *chain* gives.
-fn output_type(g: &TestGraph, name: &str, port: usize) -> DataType {
-    let mut types = OutputTypes::default();
-    types.update(&g.graph, &g.library);
-    types
-        .get(OutputPort::new(g.id(name), port))
-        .expect("the fixture names a declared output port")
-        .clone()
-}
-
-/// A passthrough node — one `Any` input, one wildcard output mirroring it. The
-/// generic hop for testing wildcard type resolution through a node.
-fn passthrough(n: NodeSpec) -> NodeSpec {
-    n.input(DataType::Any).wildcard(0)
-}
 
 #[test]
 fn validate_passes_for_valid_graph() {
@@ -242,30 +220,30 @@ fn resolve_output_type_follows_passthrough_chain() {
     // (wildcard) output, but the resolved type must be the producer's `Int`.
     let mut g = TestGraph::new();
     g.add("src", |n| n.pure().output(DataType::Int));
-    g.add("pass1", passthrough);
+    g.add("pass1", NodeSpec::passthrough);
     g.instance("pass2", "pass1");
     g.wire("src", 0, "pass1", 0);
     g.wire("pass1", 0, "pass2", 0);
 
     // The producer reports its own declared type.
-    assert_eq!(output_type(&g, "src", 0), DataType::Int);
+    assert_eq!(g.output_type("src", 0), DataType::Int);
     // Each passthrough mirrors what flows through, transitively.
-    assert_eq!(output_type(&g, "pass1", 0), DataType::Int);
-    assert_eq!(output_type(&g, "pass2", 0), DataType::Int);
+    assert_eq!(g.output_type("pass1", 0), DataType::Int);
+    assert_eq!(g.output_type("pass2", 0), DataType::Int);
 
     // An unbound value input leaves the passthrough polymorphic (`Any`),
     // so its output accepts any consumer again.
     g.unbind("pass1", 0);
-    assert_eq!(output_type(&g, "pass1", 0), DataType::Any);
+    assert_eq!(g.output_type("pass1", 0), DataType::Any);
     // The taint flows downstream: pass2 now reads pass1's `Any`.
-    assert_eq!(output_type(&g, "pass2", 0), DataType::Any);
+    assert_eq!(g.output_type("pass2", 0), DataType::Any);
 
     // A scalar const carries its type, so the output resolves to it (and
     // propagates downstream) — a const isn't "no type".
     g.constant("pass1", 0, ConstValue::Bool(true));
-    assert_eq!(output_type(&g, "pass1", 0), DataType::Bool);
+    assert_eq!(g.output_type("pass1", 0), DataType::Bool);
     assert_eq!(
-        output_type(&g, "pass2", 0),
+        g.output_type("pass2", 0),
         DataType::Bool,
         "the const's type propagates through the second passthrough too"
     );
@@ -274,7 +252,7 @@ fn resolve_output_type_follows_passthrough_chain() {
     // enum literal on an `Any` (wildcard) input — stays polymorphic rather
     // than panicking. (The passthrough's value input is `Any`-declared.)
     g.constant("pass1", 0, ConstValue::Enum("X".into()));
-    assert_eq!(output_type(&g, "pass1", 0), DataType::Any);
+    assert_eq!(g.output_type("pass1", 0), DataType::Any);
 }
 
 #[test]
@@ -296,8 +274,8 @@ fn resolve_output_type_uses_declared_type_for_typed_const_input() {
     // bare `ConstValue` lacks.
     g.constant("reroute", 0, ConstValue::FsPath("/tmp/x".into()));
     g.constant("reroute", 1, ConstValue::Enum("A".into()));
-    assert_eq!(output_type(&g, "reroute", 0), fs_ty);
-    assert_eq!(output_type(&g, "reroute", 1), enum_ty);
+    assert_eq!(g.output_type("reroute", 0), fs_ty);
+    assert_eq!(g.output_type("reroute", 1), enum_ty);
 }
 
 #[test]
@@ -305,7 +283,7 @@ fn type_mismatched_wiring_lowers_as_unbound_through_wildcard_chains() {
     let mut g = TestGraph::new();
     g.add("float_src", |n| n.pure().output(DataType::Float));
     g.add("str_src", |n| n.pure().output(DataType::String));
-    g.add("pass1", passthrough);
+    g.add("pass1", NodeSpec::passthrough);
     g.instance("pass2", "pass1");
     g.add("sink", |n| n.sink().input(DataType::Float));
     g.wire("float_src", 0, "pass1", 0);
@@ -366,7 +344,7 @@ fn produces_cycle_detects_direct_and_transitive_loops() {
     // A passthrough is both consumer and producer, so it can chain:
     // a → b → c, with d left unconnected.
     let mut g = TestGraph::new();
-    g.add("a", passthrough);
+    g.add("a", NodeSpec::passthrough);
     g.instance("b", "a");
     g.instance("c", "a");
     g.instance("d", "a");
@@ -392,7 +370,7 @@ fn produces_cycle_detects_direct_and_transitive_loops() {
 #[test]
 fn produces_cycle_reaches_a_producer_past_a_const_and_an_unbound_port() {
     let mut g = TestGraph::new();
-    g.add("a", passthrough);
+    g.add("a", NodeSpec::passthrough);
     g.instance("b", "a");
     g.add("wide", |n| {
         n.input(DataType::Any)

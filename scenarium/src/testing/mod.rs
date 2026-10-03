@@ -12,7 +12,6 @@
 //! implementation.
 
 pub mod calls;
-pub mod compiled_graph_builder;
 #[cfg(test)]
 pub(crate) mod engine;
 pub mod func_invoker;

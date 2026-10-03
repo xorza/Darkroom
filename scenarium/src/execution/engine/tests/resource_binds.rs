@@ -1,7 +1,7 @@
 use super::*;
 
 use std::fs;
-use std::sync::Mutex as StdMutex;
+use std::sync::Mutex;
 
 use common::{TempDir, TempFile};
 
@@ -13,7 +13,7 @@ use crate::{FsPathConfig, FsPathMode};
 struct Observed {
     loads: Calls,
     annotates: Calls,
-    captured: Arc<StdMutex<String>>,
+    captured: Arc<Mutex<String>>,
 }
 
 impl Observed {

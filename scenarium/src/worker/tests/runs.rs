@@ -22,7 +22,7 @@ async fn events_are_deduplicated() {
     let mut w = TestWorker::frames();
     w.send(w.update());
 
-    let event = w.event("Frame Event", 0);
+    let event = w.graph.event("Frame Event", 0);
     w.send(WorkerMessage::FireEvents {
         events: vec![event, event, event],
     });

@@ -6,7 +6,7 @@ use super::*;
 #[tokio::test]
 async fn node_patches_stream_before_completion() {
     let mut w = TestWorker::printing("hi");
-    let compiled = w.compile();
+    let compiled = w.graph.program();
     let print = w.id("Print");
     w.send_many([
         WorkerMessage::Update {
@@ -96,7 +96,7 @@ async fn live_patches_reach_the_host_before_downstream_nodes_run() {
             }))
     });
     graph.wire("first", 0, "second", 0);
-    let compiled = TestWorker::over(graph).compile();
+    let compiled = graph.program();
 
     let entries = Arc::clone(&patch_entries);
     let (tx, mut rx) = mpsc::unbounded_channel::<WorkerReport>();

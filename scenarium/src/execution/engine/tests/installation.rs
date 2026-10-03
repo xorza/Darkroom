@@ -1,15 +1,9 @@
 use super::*;
 
-use crate::testing::program::ProgramBuilder;
-
 /// A program of `ids`, nothing but identities — enough for the pairing the
 /// engine establishes at install.
 fn program(ids: &[NodeId]) -> Arc<CompiledGraph> {
-    let mut prog = ProgramBuilder::default();
-    for &node_id in ids {
-        prog.node().id(node_id).add();
-    }
-    Arc::new(prog.into_program())
+    Arc::new(CompiledGraph::bare(ids.iter().copied()))
 }
 
 #[test]

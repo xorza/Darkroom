@@ -294,12 +294,12 @@ async fn a_both_mode_node_whose_store_failed_republishes_without_recomputing() {
 async fn redefined_output_type_rekeys_and_recomputes() {
     let dir = TempDir::new("wrong-type");
     let runs = Calls::default();
-    let received = Arc::new(StdMutex::new(f64::NAN));
+    let received = Arc::new(Mutex::new(f64::NAN));
 
     // `produce` is a pure, Disk-persisted source whose declared output type
     // and value are `Int` or `Float`. Its id and inputs stay unchanged,
     // isolating output-signature invalidation.
-    let build = |as_float: bool, runs: &Calls, received: &Arc<StdMutex<f64>>| {
+    let build = |as_float: bool, runs: &Calls, received: &Arc<Mutex<f64>>| {
         let received = Arc::clone(received);
         let value = if as_float {
             ConstValue::Float(1.5)

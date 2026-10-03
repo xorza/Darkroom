@@ -474,7 +474,7 @@ fn carries_the_disabled_flag_without_dropping_the_node() {
 fn stamps_each_output_with_the_resolved_type() {
     let mut g = TestGraph::new();
     g.add("producer", |n| n.pure().output(DataType::String));
-    g.add("pass", |n| n.pure().input(DataType::Any).wildcard(0));
+    g.add("pass", |n| n.pure().passthrough());
     g.wire("producer", 0, "pass", 0);
 
     assert_eq!(
@@ -580,7 +580,7 @@ fn drops_subscriptions_that_cannot_fire() {
 fn a_wildcard_chain_does_not_make_a_dropped_port_bindable() {
     let mut g = TestGraph::new();
     g.add("producer", |n| n.pure().output(DataType::Int));
-    g.add("pass", |n| n.pure().input(DataType::Any).wildcard(0));
+    g.add("pass", |n| n.pure().passthrough());
     // Port 99 does not exist: the library shrank under a saved document.
     let dropped = OutputPort::new(g.id("producer"), 99);
     g.wire("producer", 99, "pass", 0);

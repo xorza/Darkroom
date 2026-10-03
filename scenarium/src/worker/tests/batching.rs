@@ -69,14 +69,14 @@ async fn every_sync_in_a_batch_fires() {
 #[tokio::test(flavor = "current_thread")]
 async fn messages_ready_at_one_wake_reduce_together() {
     let mut w = TestWorker::printing("first");
-    let first = w.compile();
+    let first = w.graph.program();
     w.send(WorkerMessage::Update {
         compiled: Arc::clone(&first),
     });
     w.send(TestWorker::sinks());
 
     w.graph = TestWorker::print_graph("second");
-    let second = w.compile();
+    let second = w.graph.program();
     let second_print = w.id("Print");
     w.send(WorkerMessage::Update {
         compiled: Arc::clone(&second),
