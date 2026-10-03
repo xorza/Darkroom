@@ -311,7 +311,7 @@ impl TestEngine {
     pub(crate) fn inputs(&self, name: &str) -> Vec<Option<DynamicValue>> {
         let id = self.id(name);
         self.engine
-            .get_argument_values(&id)
+            .argument_values(id)
             .expect("the named node is installed")
             .inputs
     }
@@ -321,7 +321,7 @@ impl TestEngine {
     pub(crate) fn outputs(&self, name: &str) -> Vec<DynamicValue> {
         let id = self.id(name);
         self.engine
-            .get_argument_values(&id)
+            .argument_values(id)
             .expect("the named node is installed")
             .outputs
     }

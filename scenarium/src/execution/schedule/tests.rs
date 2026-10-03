@@ -264,11 +264,10 @@ mod planning {
         prog.node().sink().input(at(1)).outputs(1).add();
         prog.node().input(at(0)).outputs(1).add();
 
-        let mut planner = Planner::default();
-        let mut plan = RunSchedule::default();
-        let seeds = RunSeeds::sinks();
-        let result = planner.plan(prog.program(), &seeds, &mut plan);
-        assert!(matches!(result, Err(Error::CycleDetected { .. })));
+        assert!(matches!(
+            prog.try_plan(&RunSeeds::sinks()),
+            Err(Error::CycleDetected { .. })
+        ));
     }
 
     #[test]
@@ -282,11 +281,12 @@ mod planning {
         let b = prog.node().input(a.out(0)).outputs(1).add();
         let c = prog.node().sink().input(b.out(0)).outputs(1).add();
 
+        // One planner and one schedule across the calls below: each plan has
+        // to start from nothing, whatever the last one left.
         let mut planner = Planner::default();
         let mut p = RunSchedule::default();
-        let seeds = RunSeeds::nodes(vec![b.node_id]);
         planner
-            .plan(prog.program(), &seeds, &mut p)
+            .plan(prog.program(), &RunSeeds::nodes(vec![b.node_id]), &mut p)
             .expect("no cycle");
 
         assert_eq!(
@@ -429,15 +429,11 @@ mod planning {
 }
 
 mod resolving {
+    use crate::DynamicValue;
     use crate::execution::compile::compiled_graph::ExecutionBinding;
     use crate::execution::schedule::NodeState;
     use crate::graph::func::lambda::OutputDemand;
     use crate::testing::program::ProgramBuilder;
-    use crate::{ConstValue, DynamicValue};
-
-    fn value(value: i64) -> DynamicValue {
-        DynamicValue::Static(ConstValue::Int(value))
-    }
 
     #[tokio::test]
     async fn exact_demand_accepts_narrow_producer_cache_and_ignores_reused_reader() {
@@ -456,8 +452,8 @@ mod resolving {
         let run = prog
             .sweep()
             .root(sink)
-            .cached(source, [value(7), DynamicValue::Unbound])
-            .cached(cached, [value(8)])
+            .cached(source, [ProgramBuilder::value(7), DynamicValue::Unbound])
+            .cached(cached, [ProgramBuilder::value(8)])
             .run()
             .await;
 
@@ -543,7 +539,7 @@ mod resolving {
         let run = prog
             .sweep()
             .root(sink)
-            .cached(cached, [value(1)])
+            .cached(cached, [ProgramBuilder::value(1)])
             .run()
             .await;
 
