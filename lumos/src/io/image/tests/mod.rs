@@ -6,10 +6,8 @@ use crate::internals::prelude::*;
 use common::TempDir;
 use imaginarium::{ColorFormat, Image, ImageDesc};
 
-use crate::internals::fits::fits_transfer;
 use crate::io::image::PREVIEW_IMAGE_EXTENSIONS;
 use crate::io::image::error::ImageError;
-use crate::io::image::fits::provenance::FitsTransferProvenance;
 use fits_well::image::SampleType;
 
 use crate::frame_store::stackable_image::StackableImage;
@@ -120,9 +118,11 @@ fn load_full_example_fits() {
     assert_eq!(image.metadata.header_dimensions, vec![100, 100]);
 
     // BITPIX = 32 with BSCALE = 1, so the samples were divided by the declared span 2³² − 1 and
-    // the provenance carries that span back: the physical ADU value stays recoverable.
-    let FitsTransferProvenance { physical_scale, .. } = fits_transfer(&image);
-    assert_eq!(*physical_scale, 4_294_967_295.0_f64 as f32);
+    // the domain carries that span back: the physical ADU value stays recoverable.
+    // The divisor is computed in f32, where 2³² − 1 rounds to 2³².
+    let physical_scale = image.metadata.domain.as_ref().unwrap().scale;
+    assert_eq!(physical_scale, 4_294_967_296.0);
+    let physical_scale = physical_scale as f32;
     let pixel = image.channel(0)[image.dimensions().size().index_of(Vec2us::new(5, 20))];
     assert_close!(
         pixel,

@@ -54,9 +54,9 @@ impl SetFacts {
         if let Some(domain) = &facts.domain {
             let mismatch = |reference: &Stated<SampleDomain>| Error::SampleDomainMismatch {
                 index,
-                actual: domain.clone(),
+                actual: Box::new(domain.clone()),
                 reference_index: reference.index,
-                expected: reference.value.clone(),
+                expected: Box::new(reference.value.clone()),
             };
             if let Some(scale) = &self.scale
                 && domain.conversion_to(&scale.value).is_none()

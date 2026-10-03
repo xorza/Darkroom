@@ -1,10 +1,11 @@
+pub(crate) mod domain_keywords;
+
 use fits_well::header::Header;
 use fits_well::image::SampleType;
 
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::RowOrder;
-use crate::io::image::sample_domain::ScaleOrigin;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
 
@@ -45,6 +46,9 @@ pub(super) fn read_metadata(
         pixel_size_y: real("YPIXSZ"),
         data_max: real("DATAMAX"),
         provenance: None,
+        // The decoder fills both: they depend on the decode plan as well as the header.
+        domain: None,
+        quantization_sigma: None,
         calibrated: optional("LUMCAL", header.get_logical("LUMCAL")).unwrap_or(false),
     }
 }
@@ -57,10 +61,6 @@ fn optional<T>(keyword: &str, value: fits_well::Result<Option<T>>) -> Option<T> 
         None
     })
 }
-
-/// The lumos keyword recording the scale a written image's samples were normalized by. See
-/// `SampleScale` in the decoder for how a reader uses it.
-pub(crate) const SAMPLE_SCALE_KEYWORD: &str = "LUMSCALE";
 
 pub(super) fn write_image_metadata(
     header: &mut Header,
@@ -96,22 +96,11 @@ pub(super) fn write_image_metadata(
     if metadata.calibrated {
         header.set("LUMCAL", true)?;
     }
-    // The samples go out already normalized, so the scale they were normalized by is the one fact a
-    // reader cannot recover from the data. Only a declared scale is recorded: an assumed one is a
-    // guess the reader can make again, and recording it would promote it to a declaration.
-    if let Some(domain) = metadata.sample_domain()
-        && domain.origin == ScaleOrigin::Declared
-    {
-        header.set(SAMPLE_SCALE_KEYWORD, f64::from(domain.scale))?;
-    }
-    if let Some(unit) = metadata
-        .provenance
-        .as_ref()
-        .and_then(|provenance| provenance.transfer.fits())
-        .and_then(|transfer| transfer.unit.as_deref())
-    {
-        header.set("BUNIT", unit)?;
-    }
+    domain_keywords::write(
+        header,
+        metadata.domain.as_ref(),
+        metadata.quantization_sigma,
+    )?;
     Ok(())
 }
 
@@ -157,12 +146,6 @@ pub(super) fn write_cfa_metadata(header: &mut Header, cfa: &CfaImage) -> fits_we
         header.set("LUMWBG1", f64::from(green_1))?;
         header.set("LUMWBB", f64::from(blue))?;
         header.set("LUMWBG2", f64::from(green_2))?;
-    }
-    if let Some(sigma) = cfa.quantization_sigma {
-        if !sigma.is_finite() || sigma < 0.0 {
-            return Err(fits_well::FitsError::KeywordOutOfRange { name: "QNTZSIG" });
-        }
-        header.set("QNTZSIG", f64::from(sigma))?;
     }
     Ok(())
 }
@@ -389,20 +372,6 @@ fn read_camera_white_balance(header: &Header) -> fits_well::Result<Option<[f32; 
             expected: "all four white-balance multipliers or none",
         }),
     }
-}
-
-pub(super) fn read_quantization_sigma(header: &Header) -> fits_well::Result<Option<f32>> {
-    header
-        .get_real("QNTZSIG")?
-        .map(|value| {
-            let value = value as f32;
-            if value.is_finite() && value >= 0.0 {
-                Ok(value)
-            } else {
-                Err(fits_well::FitsError::KeywordOutOfRange { name: "QNTZSIG" })
-            }
-        })
-        .transpose()
 }
 
 /// The pointing right ascension: `RA` in degrees, else `OBJCTRA` in sexagesimal hours, else the

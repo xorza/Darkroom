@@ -6,12 +6,13 @@ use crate::calibration_masters::prepared_flat::{MIN_NORMALIZED_FLAT, apply, norm
 use crate::internals::assertions::bits;
 use crate::internals::cfa::make_cfa;
 use crate::io::image::cfa::CfaImage;
+use crate::io::image::sample_domain::DomainMap;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 
 fn prepare(flat: CfaImage, subtractor: Option<&CfaImage>) -> CfaImage {
     normalize(subtract(
         flat,
-        subtractor.map(|subtractor| (subtractor, 1.0)),
+        subtractor.map(|subtractor| (subtractor, DomainMap::IDENTITY)),
     ))
     .unwrap()
 }

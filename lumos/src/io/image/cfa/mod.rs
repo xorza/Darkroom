@@ -25,6 +25,7 @@ use crate::io::image::input_format::InputFormat;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::null_mask::NullMask;
+use crate::io::image::sample_domain::DomainMap;
 use crate::io::image::standard::scientific_rejection;
 use crate::io::raw;
 use crate::io::raw::demosaic::DemosaicMemory;
@@ -165,8 +166,6 @@ pub struct CfaImage {
     pub data: Buffer2<f32>,
     pub cfa_type: CfaType,
     pub metadata: ImageMetadata,
-    /// Source-quantization uncertainty in the current CFA sample units.
-    pub(crate) quantization_sigma: Option<f32>,
     /// Which pixels carry no measurement, for a source that declared any. The samples at those
     /// positions are a finite fill, not data — see [`NullMask`].
     pub(crate) nulls: Option<NullMask>,
@@ -194,10 +193,6 @@ impl StackableImage for CfaImage {
 
     fn cfa_type(&self) -> Option<CfaType> {
         Some(self.cfa_type)
-    }
-
-    fn quantization_sigma(&self) -> Option<f32> {
-        self.quantization_sigma
     }
 
     fn load(path: &Path, context: &LoadContext) -> Result<Self, ImageError> {
@@ -233,7 +228,6 @@ impl CfaImage {
             data,
             cfa_type,
             metadata,
-            quantization_sigma: None,
             nulls: None,
         }
     }
@@ -301,6 +295,11 @@ impl CfaImage {
             provenance.color = cfa_type.demosaiced_color();
             provenance.demosaic = cfa_type.demosaic_provenance();
         }
+        // Interpolation mixes samples, so one step's σ no longer bounds any of them. A mono sensor's
+        // samples pass through untouched and keep it.
+        if cfa_type != CfaType::Mono {
+            metadata.quantization_sigma = None;
+        }
         let pixels = self.data.into_vec();
         // The mask travels at its own extent, which `repair_nulls` above is what makes honest:
         // these pixels were reconstructed rather than measured, and the combine still has to know
@@ -344,15 +343,18 @@ impl CfaImage {
     }
 
     /// Subtract another `CfaImage` pixel-by-pixel (dark subtraction), each of its samples first
-    /// multiplied by `dark_scale` — the factor that expresses it in this frame's domain
-    /// ([`SampleDomain::conversion_to`](crate::SampleDomain::conversion_to)). A factor of exactly
-    /// one subtracts the samples as they are.
+    /// mapped through `map` — the map that expresses it in this frame's domain
+    /// ([`SampleDomain::conversion_to`](crate::SampleDomain::conversion_to)), which also moves its
+    /// pedestal onto this frame's. The identity map subtracts the samples as they are.
+    ///
+    /// When both frames declare a domain, this frame's pedestal becomes what
+    /// [`SampleDomain::after_subtracting`](crate::SampleDomain::after_subtracting) says.
     ///
     /// May produce negative pixel values when dark noise exceeds signal.
     /// This is intentional: the f32 pipeline preserves negatives, and stacking
     /// averages them out correctly. Clamping to zero would introduce a positive
     /// bias in the stacked result.
-    pub fn subtract(&mut self, dark: &CfaImage, dark_scale: f32) {
+    pub fn subtract(&mut self, dark: &CfaImage, map: DomainMap) {
         assert!(
             self.data.width() == dark.data.width() && self.data.height() == dark.data.height(),
             "CfaImage dimensions mismatch: {}x{} vs {}x{}",
@@ -361,22 +363,26 @@ impl CfaImage {
             dark.data.width(),
             dark.data.height()
         );
-        // An invariant the caller upholds, not bad input: `CalibrationMasters` derives the factor
+        // An invariant the caller upholds, not bad input: `CalibrationMasters` derives the map
         // from the two domains and refuses a pair with none. Only checked when both declare a
         // domain — a synthesized frame has none.
         debug_assert!(
-            match (self.metadata.sample_domain(), dark.metadata.sample_domain()) {
-                (Some(light), Some(dark)) => dark.conversion_to(&light) == Some(dark_scale),
+            match (&self.metadata.domain, &dark.metadata.domain) {
+                (Some(light), Some(dark)) => dark.conversion_to(light) == Some(map),
                 _ => true,
             },
-            "dark_scale {dark_scale} does not convert {:?} into {:?}",
-            dark.metadata.sample_domain(),
-            self.metadata.sample_domain()
+            "{map:?} does not convert {:?} into {:?}",
+            dark.metadata.domain,
+            self.metadata.domain
         );
+        let (gain, offset) = (map.gain as f32, map.offset as f32);
         self.data
             .par_iter_mut()
             .zip(dark.data.par_iter())
-            .for_each(|(l, d)| *l -= d * dark_scale);
+            .for_each(|(l, d)| *l -= d * gain + offset);
+        if let (Some(light), Some(dark)) = (&mut self.metadata.domain, &dark.metadata.domain) {
+            light.pedestal = light.after_subtracting(dark);
+        }
     }
 }
 

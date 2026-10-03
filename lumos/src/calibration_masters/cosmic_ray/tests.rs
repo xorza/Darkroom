@@ -140,7 +140,7 @@ fn empirical_and_parametric_both_catch_a_bright_cr() {
     ] {
         let mut img = cfa_from_plane(data.clone(), CfaType::Mono);
         // A 12-bit ADC: one step is 1/4095 of a sample unit.
-        img.quantization_sigma = Some(QUANTIZATION_SIGMA_PER_STEP / 4095.0);
+        img.metadata.quantization_sigma = Some(QUANTIZATION_SIGMA_PER_STEP / 4095.0);
         let count = reject_cosmic_rays(
             &mut img,
             &CosmicRayConfig {

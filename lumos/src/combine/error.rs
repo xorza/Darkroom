@@ -94,9 +94,9 @@ pub enum Error {
     )]
     SampleDomainMismatch {
         index: usize,
-        actual: SampleDomain,
+        actual: Box<SampleDomain>,
         reference_index: usize,
-        expected: SampleDomain,
+        expected: Box<SampleDomain>,
     },
 
     /// Two frames store their rows from opposite ends, so they are mirrored views of one field.

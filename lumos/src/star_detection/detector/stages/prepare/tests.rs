@@ -3,7 +3,6 @@ use crate::io::image::image_provenance::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
     SourceContainer, TransferProvenance,
 };
-use crate::io::raw::provenance::RawTransferProvenance;
 use crate::star_detection::detector::stages::prepare::*;
 
 /// Build a 16-pixel channel whose median is `center` and MAD is exactly `mad`
@@ -93,9 +92,7 @@ fn the_median_filter_follows_interpolation() {
         image.metadata.provenance = case.demosaic.map(|demosaic| ImageProvenance {
             container: SourceContainer::CameraRaw,
             decoder: DecoderProvenance::LibRaw,
-            transfer: TransferProvenance::RawNormalized(RawTransferProvenance {
-                physical_scale: 16_383.0,
-            }),
+            transfer: TransferProvenance::RawNormalized,
             color: ColorProvenance::SensorRgb,
             clipped: true,
             demosaic,

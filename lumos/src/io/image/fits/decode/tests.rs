@@ -1,5 +1,6 @@
 use crate::internals::prelude::*;
 
+use crate::io::image::sample_domain::Pedestal;
 use std::fs::File;
 
 use fits_well::FitsWriter;
@@ -21,10 +22,13 @@ fn load_context() -> LoadContext {
     LoadContext::new(CancelToken::never(), u64::MAX)
 }
 
+/// A cube read as RGB. Its float samples run to 400 with no `DATAMAX`, so they are said to be
+/// normalized: these tests are about plane layout, not scale.
 fn rgb_load_context() -> LoadContext {
     LoadContext {
         fits: FitsLoadOptions {
             cube: FitsCubeInterpretation::Rgb,
+            float_scale: FitsFloatScale::Normalized,
             ..Default::default()
         },
         ..load_context()
@@ -339,9 +343,11 @@ fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
             },
             cube: FitsCubeInterpretation::Rgb,
             checksum: FitsChecksumPolicy::VerifyIfPresent,
-            float_scale: FitsFloatScale::Auto,
+            // Samples of 10 to 40 with no DATAMAX: said to be normalized, or `Auto` refuses them.
+            float_scale: FitsFloatScale::Normalized,
             nulls: FitsNullPolicy::Mask,
             unstated_bayer_pattern: None,
+            pedestal: Pedestal::Unknown,
         },
         ..load_context()
     };

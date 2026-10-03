@@ -29,6 +29,7 @@ use crate::frame_store::frame_stats::FrameStats;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::io::image::image_dimensions::ImageDimensions;
+use crate::io::image::sample_domain::DomainMap;
 use crate::math::statistics::{MedianMad, mad_to_sigma, median_mut};
 use std::iter;
 
@@ -58,40 +59,46 @@ impl FrameNorm {
     ///
     /// Expressed in the domain of the first frame that declares one — the domain the stacked
     /// product records. With no normalization each frame is only converted into it (gain `scale_i /
-    /// scale_ref`); a fitted normalization maps every frame onto its reference frame, so its gains
-    /// and offsets are then converted from the reference frame's domain the same way. Frames whose
-    /// domains agree get exactly the norms they had before conversion existed.
+    /// scale_ref`, offset from the pedestals); a fitted normalization maps every frame onto its
+    /// reference frame, so its gains and offsets are then converted from the reference frame's
+    /// domain the same way. Frames whose domains agree get exactly the norms they had before
+    /// conversion existed.
     pub(crate) fn measure(
         frames: &[StoredFrame],
         dimensions: ImageDimensions,
         normalization: Normalization,
         cancel: &CancelToken,
     ) -> Result<Option<Vec<Self>>, Error> {
-        let to_domain = domain_factors(frames);
+        let to_domain = domain_maps(frames);
         if normalization == Normalization::None {
-            return Ok(to_domain.iter().any(|&factor| factor != 1.0).then(|| {
-                frames
-                    .iter()
-                    .zip(&to_domain)
-                    .map(|(frame, &factor)| FrameNorm {
-                        channels: (0..frame.source_stats.channels.len())
-                            .map(|_| ChannelNorm {
-                                gain: factor,
-                                offset: 0.0,
-                            })
-                            .collect(),
-                    })
-                    .collect()
-            }));
+            return Ok(to_domain
+                .iter()
+                .any(|&map| map != DomainMap::IDENTITY)
+                .then(|| {
+                    frames
+                        .iter()
+                        .zip(&to_domain)
+                        .map(|(frame, map)| FrameNorm {
+                            channels: (0..frame.source_stats.channels.len())
+                                .map(|_| ChannelNorm {
+                                    gain: map.gain as f32,
+                                    offset: map.offset as f32,
+                                })
+                                .collect(),
+                        })
+                        .collect()
+                }));
         }
         check_cancel(cancel)?;
         let reference = select_reference_frame(frames.iter().map(|frame| &frame.source_stats));
         let mut norms = fitted_frame_norms(frames, dimensions, normalization, reference, cancel)?;
-        let factor = to_domain[reference];
-        if factor != 1.0 {
+        // A fitted norm lands each frame on the reference frame's raw values; the reference's own
+        // map then carries those into the shared domain: `map(gain·x + offset)`.
+        let map = to_domain[reference];
+        if map != DomainMap::IDENTITY {
             for channel in norms.iter_mut().flat_map(|norm| norm.channels.iter_mut()) {
-                channel.gain *= factor;
-                channel.offset *= factor;
+                channel.gain = (map.gain * f64::from(channel.gain)) as f32;
+                channel.offset = (map.gain * f64::from(channel.offset) + map.offset) as f32;
             }
         }
         Ok(Some(norms))
@@ -125,14 +132,14 @@ const _: () = assert!(
     "a gather chunk starts on a mask word"
 );
 
-/// The factor that expresses each frame in the domain of the first frame declaring one; `1.0`
+/// The map that expresses each frame in the domain of the first frame declaring one; the identity
 /// for a frame that declares none, or when none does.
 ///
 /// The combine's constructors admit the set's facts first ([`SetFacts`]), so every declared domain
 /// converts.
 ///
 /// [`SetFacts`]: crate::combine::cache::set_facts::SetFacts
-fn domain_factors(frames: &[StoredFrame]) -> Vec<f32> {
+fn domain_maps(frames: &[StoredFrame]) -> Vec<DomainMap> {
     let reference = frames
         .iter()
         .find_map(|frame| frame.source_stats.facts.domain.as_ref());
@@ -143,7 +150,7 @@ fn domain_factors(frames: &[StoredFrame]) -> Vec<f32> {
                 (Some(domain), Some(reference)) => domain
                     .conversion_to(reference)
                     .expect("the frame set's sample domains were validated as convertible"),
-                _ => 1.0,
+                _ => DomainMap::IDENTITY,
             },
         )
         .collect()

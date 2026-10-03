@@ -13,8 +13,7 @@ use crate::io::image::sample_domain::SampleDomain;
 /// first.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct FrameFacts {
-    /// What one sample is worth — see
-    /// [`ImageMetadata::sample_domain`](crate::ImageMetadata::sample_domain).
+    /// What one sample is worth — see [`ImageMetadata::domain`](crate::ImageMetadata::domain).
     pub(crate) domain: Option<SampleDomain>,
     /// Which end of the image the first stored row belongs to — see [`RowOrder`].
     pub(crate) row_order: Option<RowOrder>,
@@ -25,7 +24,7 @@ pub(crate) struct FrameFacts {
 impl FrameFacts {
     pub(crate) fn of(image: &impl StackableImage) -> Self {
         Self {
-            domain: image.metadata().sample_domain(),
+            domain: image.metadata().domain.clone(),
             row_order: image.metadata().row_order(),
             cfa_type: image.cfa_type(),
         }

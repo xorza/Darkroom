@@ -21,6 +21,7 @@ use crate::combine::config::StackConfig;
 use crate::combine::error::Error;
 use crate::combine::stack::combine_cached;
 use crate::io::image::cfa::CfaImage;
+use crate::io::image::sample_domain::DomainMap;
 use crate::math::size2us::Size2us;
 use crate::memory::run_memory::RunMemory;
 use crate::progress::ProgressCallback;
@@ -295,7 +296,7 @@ impl CalibrationMasters {
     fn validate_against_light(&self, image: &CfaImage) -> Result<(), CalibrationError> {
         let light = image.cfa_type;
         let light_size = Size2us::new(image.data.width(), image.data.height());
-        let light_domain = image.metadata.sample_domain();
+        let light_domain = image.metadata.domain.as_ref();
 
         for (role, master) in self
             .masters
@@ -315,13 +316,13 @@ impl CalibrationMasters {
             // master has none, and refusing on that would reject every in-memory fixture.
             if role == MasterRole::Flat
                 && let (Some(light_domain), Some(master_domain)) =
-                    (&light_domain, master.metadata.sample_domain())
+                    (light_domain, &master.metadata.domain)
                 && !master_domain.units_agree(light_domain)
             {
                 return Err(CalibrationError::SampleDomainMismatch {
                     component: role,
                     frame: light_domain.clone(),
-                    master: master_domain,
+                    master: master_domain.clone(),
                 });
             }
             let master_size = Size2us::new(master.data.width(), master.data.height());
@@ -350,29 +351,29 @@ impl CalibrationMasters {
     }
 }
 
-/// The factor that expresses `master`'s samples in `frame`'s domain, for the master in `role`.
+/// The map that expresses `master`'s samples in `frame`'s domain, for the master in `role`.
 ///
-/// `1.0` when either declares no domain: a synthesized frame has none, and there is nothing to
-/// convert between. An error when the two cannot be related exactly — a different stated unit, or
-/// a span the decoder had to assume — because subtracting across such a gap silently does nothing.
+/// The identity when either declares no domain: a synthesized frame has none, and there is nothing
+/// to convert between. An error when the two cannot be related exactly — a different stated unit, a
+/// span the decoder had to assume, or a known pedestal against an unknown one — because subtracting
+/// across such a gap is silently wrong.
 fn master_scale(
     frame: &CfaImage,
     master: &CfaImage,
     role: MasterRole,
-) -> Result<f32, CalibrationError> {
-    let (Some(frame_domain), Some(master_domain)) = (
-        frame.metadata.sample_domain(),
-        master.metadata.sample_domain(),
-    ) else {
-        return Ok(1.0);
+) -> Result<DomainMap, CalibrationError> {
+    let (Some(frame_domain), Some(master_domain)) =
+        (&frame.metadata.domain, &master.metadata.domain)
+    else {
+        return Ok(DomainMap::IDENTITY);
     };
-    master_domain
-        .conversion_to(&frame_domain)
-        .ok_or(CalibrationError::SampleDomainMismatch {
+    master_domain.conversion_to(frame_domain).ok_or_else(|| {
+        CalibrationError::SampleDomainMismatch {
             component: role,
-            frame: frame_domain,
-            master: master_domain,
-        })
+            frame: frame_domain.clone(),
+            master: master_domain.clone(),
+        }
+    })
 }
 
 #[cfg(all(test, feature = "real-data"))]

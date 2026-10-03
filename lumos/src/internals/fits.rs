@@ -8,6 +8,7 @@ use fits_well::header::Header;
 use fits_well::image::Image;
 
 use crate::io::image::fits::provenance::FitsTransferProvenance;
+use crate::io::image::image_provenance::TransferProvenance;
 use crate::io::image::linear::LinearImage;
 
 /// Write `image` to `path` as a FITS file, with `header`'s cards when given.
@@ -19,10 +20,13 @@ pub(crate) fn write_fits(path: &Path, image: &Image, header: Option<&Header>) {
 
 /// The FITS transfer record of an image the FITS decoder produced.
 pub(crate) fn fits_transfer(image: &LinearImage) -> &FitsTransferProvenance {
-    image
+    match image
         .metadata
         .provenance
         .as_ref()
-        .and_then(|provenance| provenance.transfer.fits())
-        .expect("an image the FITS decoder produced")
+        .map(|provenance| &provenance.transfer)
+    {
+        Some(TransferProvenance::FitsNormalized(transfer)) => transfer,
+        other => panic!("expected an image the FITS decoder produced, got {other:?}"),
+    }
 }
