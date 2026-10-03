@@ -79,13 +79,7 @@ fn drizzle_config_invalid_parameters_return_exact_errors() {
         })
     );
 
-    for kernel in [
-        DrizzleKernel::Square,
-        DrizzleKernel::Turbo,
-        DrizzleKernel::Point,
-        DrizzleKernel::Gaussian,
-        DrizzleKernel::Lanczos,
-    ] {
+    for kernel in DrizzleKernel::ALL {
         let config = DrizzleConfig {
             scale: 1.0,
             pixfrac: 0.0,

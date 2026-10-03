@@ -1,271 +1,51 @@
 use super::*;
 
-/// Test square kernel with identity transform, uniform image, scale=1, pixfrac=1.
-///
-/// Each input pixel maps to exactly one output pixel with overlap = 1.0.
-/// Jacobian = scale² * pixfrac² = 1.0 (area of unit square in output space).
-/// Weight = overlap / jaco = 1.0 / 1.0 = 1.0.
-/// Output = input value.
-#[test]
-fn square_kernel_identity_uniform() {
-    let pixels: Vec<f32> = (0..25).map(|i| i as f32).collect();
-    let image = mono_image(Size2us::new(5, 5), pixels.clone());
-
-    let config = DrizzleConfig {
-        scale: 1.0,
-        pixfrac: 1.0,
-        kernel: DrizzleKernel::Square,
-        fill_value: 0.0,
-        min_weight_fraction: 0.0,
-        ..Default::default()
-    };
-    let mut acc = accumulator(ImageDimensions::new((5, 5), 1), config);
-    acc.add_image(image, &Transform::identity(), 1.0, None);
-    let result = acc.finalize().product;
-    let out = result.image.channel(0);
-
-    for (i, (&actual, &expected)) in out.iter().zip(pixels.iter()).enumerate() {
-        assert!(
-            (actual - expected).abs() < 1e-4,
-            "Pixel {i} should be {expected}, got {actual}"
-        );
-    }
-}
-
-/// Test square kernel with 45° rotation on uniform image.
-///
-/// Uniform value 3.0. After 45° rotation, the weighted mean at every covered
-/// interior pixel should still be 3.0 (weighted average of identical values).
-/// Also verify that there is meaningful coverage in the output interior.
-#[test]
-fn square_kernel_rotation() {
-    let image = constant_mono_image(Size2us::new(20, 20), 3.0);
-
-    // 45° rotation around center (10, 10)
-    let angle = FRAC_PI_4;
-    let cx = 10.0;
-    let cy = 10.0;
-    let transform = Transform::rotation_around(DVec2::new(cx, cy), angle);
-
-    let config = DrizzleConfig {
-        scale: 1.0,
-        pixfrac: 1.0,
-        kernel: DrizzleKernel::Square,
-        fill_value: 0.0,
-        min_weight_fraction: 0.0,
-        ..Default::default()
-    };
-    let mut acc = accumulator(ImageDimensions::new((20, 20), 1), config);
-    acc.add_image(image, &transform, 1.0, None);
-    let result = acc.finalize().product;
-    let out = result.image.channel(0);
-
-    // Verify coverage exists in the interior (rotated image should still cover center)
-    let center_coverage = result.coverage.as_ref().unwrap()[(10, 10)];
-    assert!(
-        center_coverage > 0.0,
-        "Center should have coverage, got {center_coverage}"
-    );
-
-    // All covered pixels should have value ~3.0 (uniform weighted mean)
-    let covered_pixels: Vec<f32> = out.iter().copied().filter(|&v| v > 0.01).collect();
-    assert!(
-        !covered_pixels.is_empty(),
-        "Should have some covered pixels"
-    );
-    for (i, &val) in covered_pixels.iter().enumerate() {
-        assert!(
-            (val - 3.0).abs() < 0.05,
-            "Covered pixel {i} should be ~3.0, got {val}"
-        );
-    }
-}
-
-/// Test square kernel with pixfrac < 1.0 produces smaller drops.
-///
-/// pixfrac=0.5 produces drops that are 0.5× the input pixel size, so they
-/// cover fewer output pixels than pixfrac=1.0.
-#[test]
-fn square_kernel_pixfrac() {
-    // Use translation (0.1, 0.1) to avoid perfectly centered drops
-    let transform = Transform::translation(DVec2::new(0.1, 0.1));
-
-    // Single bright pixel at (2,2)
-    let mut pixels1 = vec![0.0f32; 6 * 6];
-    pixels1[2 * 6 + 2] = 1.0;
-    let image1 = mono_image(Size2us::new(6, 6), pixels1);
-
-    let config1 = DrizzleConfig {
-        scale: 2.0,
-        pixfrac: 1.0,
-        kernel: DrizzleKernel::Square,
-        fill_value: 0.0,
-        min_weight_fraction: 0.0,
-        ..Default::default()
-    };
-    let mut acc1 = accumulator(ImageDimensions::new((6, 6), 1), config1);
-    acc1.add_image(image1, &transform, 1.0, None);
-    let r1 = acc1.finalize().product;
-    let covered_1 = r1.image.channel(0).iter().filter(|&&v| v > 0.01).count();
-
-    let mut pixels2 = vec![0.0f32; 6 * 6];
-    pixels2[2 * 6 + 2] = 1.0;
-    let image2 = mono_image(Size2us::new(6, 6), pixels2);
-
-    let config2 = DrizzleConfig {
-        scale: 2.0,
-        pixfrac: 0.5,
-        kernel: DrizzleKernel::Square,
-        fill_value: 0.0,
-        min_weight_fraction: 0.0,
-        ..Default::default()
-    };
-    let mut acc2 = accumulator(ImageDimensions::new((6, 6), 1), config2);
-    acc2.add_image(image2, &transform, 1.0, None);
-    let r2 = acc2.finalize().product;
-    let covered_2 = r2.image.channel(0).iter().filter(|&&v| v > 0.01).count();
-
-    assert!(
-        covered_1 > covered_2,
-        "pixfrac=1.0 should cover more pixels ({covered_1}) than pixfrac=0.5 ({covered_2})"
-    );
-}
-
-/// Test square kernel with per-pixel weights.
-///
-/// Uniform image = 5.0, pixel (1,1) excluded via weight=0.
-/// scale=1, pixfrac=1. Output (1,1) should be `fill_value`, others = 5.0.
-#[test]
-fn square_kernel_with_pixel_weights() {
-    let image = constant_mono_image(Size2us::new(4, 4), 5.0);
-
-    let mut pw = Buffer2::new_filled(4, 4, 1.0f32);
-    *pw.get_mut(1, 1) = 0.0;
-
-    let config = DrizzleConfig {
-        scale: 1.0,
-        pixfrac: 1.0,
-        kernel: DrizzleKernel::Square,
-        fill_value: -1.0,
-        min_weight_fraction: 0.0,
-        ..Default::default()
-    };
-    let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
-    acc.add_image(image, &Transform::identity(), 1.0, Some(&pw));
-    let result = acc.finalize().product;
-    let out = result.image.channel(0);
-
-    // (1,1) excluded → fill_value = -1.0
-    assert!(
-        (out[5] - (-1.0)).abs() < 1e-5,
-        "Excluded pixel (1,1) should be fill_value -1.0, got {}",
-        out[5]
-    );
-    // (0,0) normal → 5.0
-    assert!(
-        (out[0] - 5.0).abs() < 1e-5,
-        "Normal pixel (0,0) should be 5.0, got {}",
-        out[0]
-    );
-    // (2,2) normal → 5.0
-    assert!(
-        (out[2 * 4 + 2] - 5.0).abs() < 1e-5,
-        "Normal pixel (2,2) should be 5.0, got {}",
-        out[2 * 4 + 2]
-    );
-}
-
-/// Test square kernel with scale=2 on a single bright pixel.
-///
-/// scale=2, pixfrac=0.8: the drop is 0.8×0.8 of the input pixel. Input pixel (1,1)'s drop
-/// corners (0.6,0.6)..(1.4,1.4) land at output 2·p + ½, the quad [1.7, 3.3]² of area 2.56 =
-/// (pixfrac·scale)², covering 0.8 of cells 2 and 3 on each axis. Every input pixel's quad stays
-/// inside its own 2×2 block of cells, so the block reads the bright value undiluted — the same
-/// footprint as the turbo kernel — and the cells beside it belong to zero-valued neighbours.
-#[test]
-fn square_kernel_scale2_single_pixel() {
-    let mut pixels = vec![0.0f32; 4 * 4];
-    pixels[5] = 2.0; // pixel (1,1)
-    let image = mono_image(Size2us::new(4, 4), pixels);
-
-    let config = DrizzleConfig {
-        scale: 2.0,
-        pixfrac: 0.8,
-        kernel: DrizzleKernel::Square,
-        fill_value: 0.0,
-        min_weight_fraction: 0.0,
-        ..Default::default()
-    };
-    let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
-    acc.add_image(image, &Transform::identity(), 1.0, None);
-    let result = acc.finalize().product;
-    let out = result.image.channel(0);
-    let weight = result.weight.as_ref().unwrap().channel(0);
-    let w = 8usize;
-    let at = |x: usize, y: usize| out[y * w + x];
-
-    for (x, y) in [(2, 2), (3, 2), (2, 3), (3, 3)] {
-        assert_eq!(at(x, y), 2.0, "block ({x},{y})");
-    }
-    for (x, y) in [(1, 2), (4, 2), (2, 1), (2, 4)] {
-        assert_eq!(at(x, y), 0.0, "neighbour ({x},{y})");
-        assert!(weight[y * w + x] > 0.0, "neighbour ({x},{y}) is covered");
-    }
-}
-
-/// Test Jacobian correctness via the square (polygon-overlap) kernel where two input pixels
-/// with different values mix in one output cell.
+/// Two input pixels of different values mixing in one output cell, through the square kernel's
+/// clipped quadrilaterals.
 ///
 /// scale=2, pixfrac=1.0, shifted a quarter of an input pixel along x, so each quad lands half an
 /// output pixel off the grid. Pixel (0,0)=10 spans input x [−0.25, 0.75] → output [0, 2], and pixel
 /// (1,0)=20 spans [0.75, 1.75] → [2, 4]; along y both cover output rows 0 and 1 whole. Both quads
-/// have area (pixfrac·scale)² = 4 (the Jacobian), so each contributes weight overlap/4:
+/// have area (pixfrac·scale)² = 4, so each contributes its overlap over 4:
 ///   cell (1,0) = [0.5, 1.5]: only pixel (0,0), whole → 10.0
 ///   cell (2,0) = [1.5, 2.5]: half of each → equal-weight mean (10·0.125 + 20·0.125) / 0.25 = 15.0
 ///   cell (3,0) = [2.5, 3.5]: only pixel (1,0), whole → 20.0
 #[test]
-fn square_kernel_jacobian_weighted_average() {
-    let mut pixels = vec![0.0f32; 4 * 4];
-    pixels[0] = 10.0; // pixel (0,0)
-    pixels[1] = 20.0; // pixel (1,0)
-    let image = mono_image(Size2us::new(4, 4), pixels);
-
-    let config = DrizzleConfig {
-        scale: 2.0,
-        pixfrac: 1.0,
-        kernel: DrizzleKernel::Square,
-        fill_value: 0.0,
-        min_weight_fraction: 0.0,
-        ..Default::default()
-    };
-    let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
-    acc.add_image(
-        image,
+fn square_kernel_mixes_two_pixels_by_their_overlap() {
+    let mut pixels = vec![0.0f32; 16];
+    pixels[0] = 10.0;
+    pixels[1] = 20.0;
+    let product = drizzle_one(
+        Size2us::new(4, 4),
+        kernel_config(DrizzleKernel::Square, 2.0, 1.0),
+        gray_image(Size2us::new(4, 4), pixels),
         &Transform::translation(DVec2::new(0.25, 0.0)),
-        1.0,
         None,
     );
-    let result = acc.finalize().product;
-    let out = result.image.channel(0);
-
     // The overlaps are halves and wholes of quads whose area is a power of two, so every weight,
     // product and sum is exact and so is the mean.
     for (cell, expected) in [(1, 10.0), (2, 15.0), (3, 20.0)] {
-        assert_eq!(out[cell], expected, "cell ({cell},0)");
+        assert_eq!(
+            product.image.channel(0)[(cell, 0)],
+            expected,
+            "cell ({cell},0)"
+        );
     }
 }
 
-/// Square agrees with Turbo exactly while the drop stays axis-aligned, and measurably diverges
-/// once it does not — which is the whole reason the polygon-overlap kernel exists.
+/// Square agrees with Turbo while the drop stays axis-aligned — image and weight both — and
+/// diverges once it does not, which is the whole reason the polygon-overlap kernel exists.
 ///
-/// One axis, the transform: a translation leaves every drop an axis-aligned rectangle, the only
-/// shape Turbo can represent, so the two kernels must agree to rounding. A rotation makes it a
-/// general quadrilateral and they apportion flux differently. Both drop geometries are swept —
-/// unscaled full-size drops and scaled shrunken ones.
+/// A translation leaves every drop an axis-aligned rectangle, the only shape Turbo can represent,
+/// so the two compute the same shares by different arithmetic: a pixel of at most four deposits of
+/// values up to 9 differs by the two roundings of `2·4 + 1` operations each. A rotation makes the
+/// drop a general quadrilateral, and they apportion flux differently — by far more than that.
 #[test]
 fn square_matches_turbo_only_while_the_drop_stays_axis_aligned() {
+    let size = Size2us::new(10, 10);
     // A horizontal gradient: uniform data would agree under any kernel and prove nothing.
     let gradient: Vec<f32> = (0..100).map(|i| (i % 10) as f32).collect();
+    let agreement = 2.0 * (2.0 * 4.0 + 1.0) * f32::EPSILON * 9.0;
 
     for (transform_name, transform, axis_aligned) in [
         (
@@ -283,39 +63,41 @@ fn square_matches_turbo_only_while_the_drop_stays_axis_aligned() {
             let case = format!("{transform_name} at scale {scale}, pixfrac {pixfrac}");
             let render = |kernel| {
                 drizzle_one(
-                    10,
+                    size,
                     kernel_config(kernel, scale, pixfrac),
-                    mono_image(Size2us::new(10, 10), gradient.clone()),
+                    gray_image(size, gradient.clone()),
                     &transform,
                     None,
                 )
             };
             let turbo = render(DrizzleKernel::Turbo);
             let square = render(DrizzleKernel::Square);
-            let turbo = turbo.image.channel(0);
-            let square = square.image.channel(0);
 
-            let mut covered = 0;
             let mut max_diff = 0.0f32;
-            for (&t, &s) in turbo.iter().zip(square.iter()) {
-                if t.abs() > 0.01 && s.abs() > 0.01 {
-                    covered += 1;
+            let mut max_weight_diff = 0.0f32;
+            for (((&t, &s), &tw), &sw) in turbo
+                .image
+                .channel(0)
+                .iter()
+                .zip(square.image.channel(0).iter())
+                .zip(weight_plane(&turbo).iter())
+                .zip(weight_plane(&square).iter())
+            {
+                if tw > 0.0 && sw > 0.0 {
                     max_diff = max_diff.max((t - s).abs());
                 }
+                max_weight_diff = max_weight_diff.max((tw - sw).abs());
             }
-            assert!(
-                covered > 20,
-                "{case}: only {covered} covered pixels to compare"
-            );
 
             if axis_aligned {
                 assert!(
-                    max_diff < 1e-3,
-                    "{case}: kernels must agree on an axis-aligned drop, max diff {max_diff}"
+                    max_diff <= agreement && max_weight_diff <= agreement,
+                    "{case}: kernels must agree on an axis-aligned drop, image {max_diff}, \
+                     weight {max_weight_diff}"
                 );
             } else {
                 assert!(
-                    max_diff > 0.01,
+                    max_diff > 100.0 * agreement,
                     "{case}: kernels must diverge on a rotated drop, max diff {max_diff}"
                 );
             }
@@ -323,126 +105,40 @@ fn square_matches_turbo_only_while_the_drop_stays_axis_aligned() {
     }
 }
 
-/// Test flux conservation under rotation with non-uniform image.
+/// A rotated drop keeps its flux: every quadrilateral's shares sum to 1, so with every lit pixel's
+/// quadrilateral on the grid the deposited flux is the input's. A 4×4 patch of 10 at (8..12)² in a
+/// zero frame, turned 15° about (10, 10), lands well inside the 20×20 grid: Σ = 160. Each cell sums
+/// at most nine deposits, a relative 2·9·ε, and the total is taken in f64.
 ///
-/// A 20×20 image with a bright 4×4 patch (value=10.0) at center, rest=1.0.
-/// Rotate 15° around center. Total input flux = 4*4*10 + (400-16)*1 = 544.
-///
-/// After drizzle at scale=1, pixfrac=1 with Square kernel, the total weighted flux
-/// should be conserved: sum(data) = `sum(original_flux` * weight), and since each
-/// input pixel's total weight contribution sums to ~1.0 (for interior pixels where
-/// the full drop lands on the output grid), the total output flux should approximate
-/// the total input flux.
-///
-/// We check sum(output * `coverage_weight`) ≈ sum(input).
-/// More precisely: `sum(data_buf)` should equal sum(input * `per_pixel_total_weight`).
-/// For fully-covered interior pixels, each input pixel's overlap sums to jaco
-/// (the drop area in output space), and weight = overlap/jaco, so total weight = 1.0.
-/// Therefore `sum(output_pixel` * weight) ≈ `sum(input_pixel)` for interior pixels.
+/// The rotation fixes (10, 10), and the cell there reaches no further than 0.71 from it — inside the
+/// quadrilaterals of the patch's pixels around it — so it reads 10.
 #[test]
-fn square_kernel_flux_conservation() {
-    let mut pixels = vec![1.0f32; 20 * 20];
-    // Bright 4×4 patch at center (8..12, 8..12)
+fn a_rotated_square_drop_keeps_its_flux() {
+    let size = Size2us::new(20, 20);
+    let mut pixels = vec![0.0f32; size.pixel_count()];
     for y in 8..12 {
         for x in 8..12 {
             pixels[y * 20 + x] = 10.0;
         }
     }
-    let total_input_flux: f32 = pixels.iter().sum();
-    // = 16 * 10 + 384 * 1 = 544.0
-    assert_eq!(total_input_flux, 544.0);
-
-    let image = mono_image(Size2us::new(20, 20), pixels);
-
-    // 15° rotation around center
-    let angle = 15.0_f64.to_radians();
-    let cx = 10.0;
-    let cy = 10.0;
-    let transform = Transform::rotation_around(DVec2::new(cx, cy), angle);
-
-    let config = DrizzleConfig {
-        scale: 1.0,
-        pixfrac: 1.0,
-        kernel: DrizzleKernel::Square,
-        fill_value: 0.0,
-        min_weight_fraction: 0.0,
-        ..Default::default()
-    };
-    let mut acc = accumulator(ImageDimensions::new((20, 20), 1), config);
-    acc.add_image(image, &transform, 1.0, None);
-
-    // Before finalize, check raw weighted flux sum.
-    // data[c] = sum(flux * weight) per output pixel, weights[c] = sum(weight).
-    // total_data = sum over all output pixels of data = sum over all input pixels of
-    //   flux * sum_over_output_of(overlap/jaco)
-    // For each input pixel, sum_over_output_of(overlap) = total_overlap = jaco (the quad
-    // area), so sum_over_output_of(overlap/jaco) = 1.0 for fully interior pixels.
-    // Therefore total_data ≈ sum(flux) = 544 for interior pixels.
-    let data_sum = acc.accumulated_flux_sum(0);
-
-    // Allow ~10% margin for edge effects (rotated image has border pixels that
-    // partially fall outside the output grid)
-    assert!(
-        (data_sum - total_input_flux).abs() / total_input_flux < 0.10,
-        "Total weighted flux should be ~{}, got {} (error {:.1}%)",
-        total_input_flux,
-        data_sum,
-        (data_sum - total_input_flux).abs() / total_input_flux * 100.0
+    let mut acc = accumulator(
+        ImageDimensions::new(size, 1),
+        kernel_config(DrizzleKernel::Square, 1.0, 1.0),
     );
-
-    // Now finalize and check the bright patch is still bright
-    let result = acc.finalize().product;
-    let out = result.image.channel(0);
-
-    // The center pixel (10,10) should be close to 10.0 since it's in the middle of
-    // the bright patch (rotation around center preserves center pixel)
-    let center_val = out[10 * 20 + 10];
+    acc.add_image(
+        gray_image(size, pixels),
+        &Transform::rotation_around(DVec2::new(10.0, 10.0), 15.0_f64.to_radians()),
+        1.0,
+        None,
+    );
+    let flux = acc.accumulated_flux_sum(0);
     assert!(
-        (center_val - 10.0).abs() < 0.5,
-        "Center pixel should be ~10.0 (bright patch), got {center_val}"
+        (flux - 160.0).abs() <= 18.0 * f64::from(f32::EPSILON) * 160.0,
+        "Σ flux·w {flux}"
+    );
+    let centre = acc.finalize().product.image.channel(0)[(10, 10)];
+    assert!(
+        (centre - 10.0).abs() <= 19.0 * f32::EPSILON * 10.0,
+        "{centre}"
     );
 }
-
-/// Test two-frame weighted mean with Square kernel.
-///
-/// Frame 1: uniform 2.0, weight 1.0
-/// Frame 2: uniform 8.0, weight 3.0
-/// scale=1, pixfrac=1, identity transform.
-///
-/// Expected: (2.0 * 1.0 + 8.0 * 3.0) / (1.0 + 3.0) = 26.0 / 4.0 = 6.5
-#[test]
-fn square_kernel_two_frame_weighted_mean() {
-    let image1 = constant_mono_image(Size2us::new(6, 6), 2.0);
-    let image2 = constant_mono_image(Size2us::new(6, 6), 8.0);
-
-    let config = DrizzleConfig {
-        scale: 1.0,
-        pixfrac: 1.0,
-        kernel: DrizzleKernel::Square,
-        fill_value: 0.0,
-        min_weight_fraction: 0.0,
-        ..Default::default()
-    };
-    let mut acc = accumulator(ImageDimensions::new((6, 6), 1), config);
-    acc.add_image(image1, &Transform::identity(), 1.0, None);
-    acc.add_image(image2, &Transform::identity(), 3.0, None);
-    let result = acc.finalize().product;
-    let out = result.image.channel(0);
-
-    // All interior pixels should be 6.5
-    // (2*1 + 8*3) / (1+3) = 26/4 = 6.5
-    let center = out[3 * 6 + 3];
-    assert!(
-        (center - 6.5).abs() < 1e-4,
-        "Weighted mean should be 6.5, got {center}"
-    );
-
-    // Check a corner pixel too
-    assert!(
-        (out[0] - 6.5).abs() < 1e-4,
-        "Corner pixel should also be 6.5, got {}",
-        out[0]
-    );
-}
-
-//

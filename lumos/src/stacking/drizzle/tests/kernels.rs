@@ -1,86 +1,220 @@
+use std::f64::consts::PI;
+
 use super::*;
 
-/// Test turbo kernel drop size and overlap with hand-computed values.
+/// Output pixels a drop's deposits share at most: the Lanczos-3 and Gaussian neighbourhoods are 7×7.
+const MAX_DEPOSITS: f32 = 49.0;
+
+/// How far `Σ|wᵢ|` can exceed `Σwᵢ` at an interior pixel: Lanczos-3's negative lobes, about 1.3 per
+/// axis. The other kernels' weights are all positive, so it is 1 for them.
+const LOBE_EXCESS: f32 = 1.7;
+
+/// An image of `value` with `pixel` set to `bright`.
+fn one_pixel_image(size: Size2us, value: f32, pixel: Vec2us, bright: f32) -> LinearImage {
+    let mut pixels = vec![value; size.pixel_count()];
+    pixels[size.index_of(pixel)] = bright;
+    gray_image(size, pixels)
+}
+
+/// A pixel-weight map that lets only `pixel` deposit.
+fn only(size: Size2us, pixel: Vec2us) -> Buffer2<f32> {
+    let mut weights = Buffer2::new_filled(size.width, size.height, 0.0);
+    weights[(pixel.x, pixel.y)] = 1.0;
+    weights
+}
+
+/// Every pixel holding at least `gate` of the deepest weight reads `value`, and every other the
+/// fill: the gate is `min_weight_fraction`, and the product was made with it.
 ///
-/// Setup: 4×4 input, scale=2, pixfrac=0.8 → `drop_size` = 1.6, `half_drop` = 0.8. The output grid
-/// puts input pixel `i`'s footprint `[i − ½, i + ½]` on `[2i − ½, 2i + 1½]`, so its centre lands at
-/// `2i + ½`: input (1,1) at output (2.5, 2.5), its drop covering [1.7, 3.3]², 0.8 of cells 2 and 3
-/// on each axis.
-///
-/// Every input pixel's drop stays inside its own 2×2 block of cells, so no cell is shared: the
-/// four cells of (1,1)'s block read its undiluted value, and the cells beside them belong to
-/// zero-valued neighbours.
-#[test]
-fn turbo_kernel_overlap_exact() {
-    // Single bright pixel at (1,1) with value 2.0
-    let mut pixels = vec![0.0f32; 4 * 4];
-    pixels[5] = 2.0; // pixel (1,1) = index 1*4+1 = 5
-    let image = mono_image(Size2us::new(4, 4), pixels);
-
-    let config = DrizzleConfig::x2(); // scale=2, pixfrac=0.8
-    let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
-    acc.add_image(image, &Transform::identity(), 1.0, None);
-
-    let result = acc.finalize().product;
-    let out = result.image.channel(0);
-    let weight = result.weight.as_ref().unwrap().channel(0);
-    let w = 8usize;
-    let at = |x: usize, y: usize| out[y * w + x];
-
-    for (x, y) in [(2, 2), (3, 2), (2, 3), (3, 3)] {
-        assert_eq!(at(x, y), 2.0, "block ({x},{y})");
+/// For a constant, `Σ v·wᵢ / Σwᵢ` leaves only rounding. A pixel sums at most [`MAX_DEPOSITS`]
+/// products, each product and sum rounding once against a running total of at most `Σ|wᵢ|·|v|`,
+/// and the division once more. `Σ|wᵢ|` is at most [`LOBE_EXCESS`] times the deepest weight, and
+/// a pixel that passed the gate holds at least `gate` of it, so the ratio carries the rounding of
+/// `Σ|wᵢ|` over `Σwᵢ` by at most `LOBE_EXCESS / gate`.
+fn assert_constant_or_fill(product: &StackProduct, value: f32, fill: f32, gate: f32, case: &str) {
+    let weight = weight_plane(product);
+    let deepest = weight.pixels().iter().copied().fold(0.0f32, f32::max);
+    let threshold = (gate * deepest).max(f32::MIN_POSITIVE);
+    let bound = (2.0 * MAX_DEPOSITS + 1.0) * f32::EPSILON * value.abs() * LOBE_EXCESS / gate;
+    let mut covered = 0;
+    for (index, (&actual, &w)) in product
+        .image
+        .channel(0)
+        .pixels()
+        .iter()
+        .zip(weight.pixels())
+        .enumerate()
+    {
+        if w >= threshold {
+            covered += 1;
+            assert!(
+                (actual - value).abs() <= bound,
+                "{case} pixel {index}: {actual}, expected {value} (weight {w})"
+            );
+        } else {
+            assert_eq!(actual, fill, "{case} pixel {index} (weight {w})");
+        }
     }
-    for (x, y) in [(1, 2), (4, 2), (2, 1), (2, 4)] {
-        assert_eq!(at(x, y), 0.0, "neighbour ({x},{y})");
-        assert!(weight[y * w + x] > 0.0, "neighbour ({x},{y}) is covered");
+    assert!(covered > 0, "{case}: nothing was covered");
+}
+
+/// A constant reads back as itself wherever enough weight landed, and as the fill everywhere else:
+/// every kernel, under an identity, a sub-pixel shift and a rotation, for a positive and a negative
+/// constant — background-subtracted data sits around zero, and a clamp would bias it upwards.
+///
+/// The gate is half the deepest weight: where a rotated Lanczos window cancels to a sliver at the
+/// edge, the ratio would amplify its rounding without limit, and the gate is what production has
+/// for that.
+#[test]
+fn a_constant_reads_back_wherever_weight_landed() {
+    let size = Size2us::new(20, 20);
+    let transforms = [
+        ("identity", Transform::identity()),
+        ("shift", Transform::translation(DVec2::new(0.3, -0.2))),
+        (
+            "rotation",
+            Transform::rotation_around(DVec2::splat(9.5), 15.0f64.to_radians()),
+        ),
+    ];
+    const GATE: f32 = 0.5;
+    const FILL: f32 = -7.0;
+    for kernel in DrizzleKernel::ALL {
+        for (name, transform) in &transforms {
+            for value in [3.0, -0.5] {
+                let config = DrizzleConfig {
+                    fill_value: FILL,
+                    min_weight_fraction: GATE,
+                    ..usual_config(kernel)
+                };
+                let product =
+                    drizzle_one(size, config, constant_image(size, value), transform, None);
+                assert_constant_or_fill(&product, value, FILL, GATE, &format!("{kernel:?} {name}"));
+            }
+        }
     }
 }
 
-/// Test turbo kernel with non-integer translation producing asymmetric overlap.
-///
-/// Uniform image value=1.0, translation=(0.25, 0.0).
-/// scale=2, pixfrac=1.0 → `drop_size` = 2.0, `half_drop` = 1.0
-/// Pixel (0,0) center at (0.5+0.25, 0.5) = (0.75, 0.5), scaled to (1.5, 1.0).
-/// Drop from (0.5, 0.0) to (2.5, 2.0).
-///
-/// Output pixel (0,0) receives contributions from input (0,0) only:
-///   area = 0.5 * 1.0 = 0.5, weight = 0.5 * 0.25 = 0.125
-/// Output pixel (1,0) receives from (0,0) and (1,0):
-///   from (0,0): area=1.0, weight=0.25; from (1,0): area=1.0, weight=0.25
-///   total data = 1.0*0.25 + 1.0*0.25 = 0.5, total weight = 0.5 → output = 1.0
-///
-/// For uniform image, all covered pixels should be 1.0 (weighted mean of same value).
-/// Coverage varies: (0,0) has weight 0.125, (1,0) has weight 0.50.
+/// Two frames of 2 and 6 at frame weights 1 and 3 combine to `(2·1 + 6·3) / 4` = 5 wherever they
+/// landed, every kernel: both deposit through the same geometry, which divides out. The point
+/// kernel at scale 2 leaves three cells in four to the fill.
 #[test]
-fn turbo_kernel_fractional_shift() {
-    // Uniform image so weighted mean is always 1.0 regardless of overlap pattern
-    let image = constant_mono_image(Size2us::new(4, 4), 1.0);
-
-    let config = DrizzleConfig::x2().with_pixfrac(1.0); // drop_size = 2.0
-    let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
-    let transform = Transform::translation(DVec2::new(0.25, 0.0));
-    acc.add_image(image, &transform, 1.0, None);
-
-    let result = acc.finalize().product;
-    let out = result.image.channel(0);
-    let w = 8usize;
-
-    // A flux-preserving turbo kernel reproduces the uniform input value at every covered
-    // output pixel, regardless of the sub-pixel shift phase.
-    assert!(
-        out.iter()
-            .all(|&v| v.abs() < 1e-5 || (v - 1.0).abs() < 1e-5),
-        "every covered pixel reads the uniform value 1.0"
-    );
-    // Interior is covered (pixfrac=1 tiles the output) → input value.
-    assert!(
-        (out[2 * w + 3] - 1.0).abs() < 1e-5,
-        "interior pixel should be 1.0, got {}",
-        out[2 * w + 3]
-    );
+fn two_frames_combine_to_their_weighted_mean() {
+    let size = Size2us::new(12, 12);
+    for kernel in DrizzleKernel::ALL {
+        let mut acc = accumulator(ImageDimensions::new(size, 1), usual_config(kernel));
+        acc.add_image(constant_image(size, 2.0), &Transform::identity(), 1.0, None);
+        acc.add_image(constant_image(size, 6.0), &Transform::identity(), 3.0, None);
+        let product = acc.finalize().product;
+        // Two frames' deposits, at the larger value.
+        let bound = (4.0 * MAX_DEPOSITS + 1.0) * f32::EPSILON * 6.0 * LOBE_EXCESS;
+        for (index, (&value, &weight)) in product
+            .image
+            .channel(0)
+            .pixels()
+            .iter()
+            .zip(weight_plane(&product).pixels())
+            .enumerate()
+        {
+            let expected = if weight > 0.0 { 5.0 } else { 0.0 };
+            assert!(
+                (value - expected).abs() <= bound,
+                "{kernel:?} pixel {index}: {value}"
+            );
+        }
+    }
 }
 
-/// Test that `min_weight_fraction` works with normalized weights.
+/// At scale 2 and pixfrac 0.8 a drop is 1.6 output pixels wide, centred at `2p + ½`: input pixel
+/// `p`'s drop covers `[2p − 0.3, 2p + 1.3]`, 0.8 of cells `2p` and `2p + 1` and nothing of the cells
+/// beside them. Every cell holds a quarter of one drop — `0.8²/1.6²` — so it weighs 0.25 and reads
+/// its own pixel undiluted: the bright pixel (1, 1) fills cells 2 and 3 on each axis, and its
+/// neighbours' cells, covered just as much, read their 0. A shift of ½ input pixel moves every
+/// block one cell on, and leaves cell 0 to the fill. The square kernel's clipped quadrilateral is
+/// the same box while the map stays axis-aligned. Every quantity is exact in f32.
+#[test]
+fn one_bright_pixel_fills_its_own_block() {
+    let size = Size2us::new(6, 6);
+    let image = one_pixel_image(size, 0.0, Vec2us::new(1, 1), 2.0);
+    for kernel in [DrizzleKernel::Turbo, DrizzleKernel::Square] {
+        for shift in [0, 1] {
+            let transform = Transform::translation(DVec2::splat(0.5 * f64::from(shift)));
+            let config = DrizzleConfig {
+                fill_value: -9.0,
+                ..kernel_config(kernel, 2.0, 0.8)
+            };
+            let product = drizzle_one(size, config, image.clone(), &transform, None);
+            let weight = weight_plane(&product);
+            let block = 2 + shift as usize..4 + shift as usize;
+            for y in 0..12 {
+                for x in 0..12 {
+                    let covered = x >= shift as usize && y >= shift as usize;
+                    let expected = match (block.contains(&x) && block.contains(&y), covered) {
+                        (true, _) => (2.0, 0.25),
+                        (false, true) => (0.0, 0.25),
+                        (false, false) => (-9.0, 0.0),
+                    };
+                    assert_eq!(
+                        (product.image.channel(0)[(x, y)], weight[(x, y)]),
+                        expected,
+                        "{kernel:?} shift {shift} cell ({x}, {y}): value, weight"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// The pixel fraction sets the drop, and so which cells it reaches and with what share.
+///
+/// At scale 2 a shift of 0.1 input pixel puts pixel (2, 2) at output (4.7, 4.7). At pixfrac 1 its
+/// drop is `[3.7, 5.7]` per axis: 0.8 of cell 4, all of cell 5 and 0.2 of cell 6, shares 0.4, 0.5
+/// and 0.1 of its side 2 — nine cells. At pixfrac 0.3 it is `[4.4, 5.0]`: 0.1 of cell 4 and 0.5 of
+/// cell 5, shares 1/6 and 5/6 of its side 0.6 — four cells. A cell's weight is the product of its
+/// two shares. Turbo and the square kernel agree, the drop being axis-aligned.
+///
+/// 0.3 is not exact in f32: its rounding moves the drop's edges and area by a relative 4e-8, and
+/// the product of shares rounds once more, so 4ε holds.
+#[test]
+fn the_pixel_fraction_sets_the_cells_a_drop_reaches() {
+    let size = Size2us::new(6, 6);
+    let pixel = Vec2us::new(2, 2);
+    let transform = Transform::translation(DVec2::splat(0.1));
+    for kernel in [DrizzleKernel::Turbo, DrizzleKernel::Square] {
+        for (pixfrac, first, shares) in [
+            (1.0, 4, &[0.4, 0.5, 0.1][..]),
+            (0.3, 4, &[1.0 / 6.0, 5.0 / 6.0][..]),
+        ] {
+            let product = drizzle_one(
+                size,
+                kernel_config(kernel, 2.0, pixfrac),
+                constant_image(size, 1.0),
+                &transform,
+                Some(&only(size, pixel)),
+            );
+            let weight = weight_plane(&product);
+            let reached = weight.pixels().iter().filter(|&&w| w != 0.0).count();
+            assert_eq!(
+                reached,
+                shares.len() * shares.len(),
+                "{kernel:?} pixfrac {pixfrac}"
+            );
+            for (j, &share_y) in shares.iter().enumerate() {
+                for (i, &share_x) in shares.iter().enumerate() {
+                    let actual = f64::from(weight[(first + i, first + j)]);
+                    let expected = share_x * share_y;
+                    assert!(
+                        (actual - expected).abs() <= 4.0 * f64::from(f32::EPSILON),
+                        "{kernel:?} pixfrac {pixfrac} cell ({}, {}): {actual}, expected {expected}",
+                        first + i,
+                        first + j
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// `min_weight_fraction` gates against the deepest weight.
 ///
 /// pixfrac=0.5 at scale=2: every drop is one output pixel wide, and a shift of (0.1, 0) puts input
 /// pixel (i, j) at output (2i + 0.7, 2j + ½). Along x the drop [2i + 0.2, 2i + 1.2] covers 0.3 of
@@ -89,336 +223,248 @@ fn turbo_kernel_fractional_shift() {
 /// 0.6·0.35 = 0.21. The bright pixel (0,0)'s cells (1,0) and (1,1) weigh 0.35 and read 1.0; its
 /// cells (0,0) and (0,1) weigh 0.15 — covered, but below the threshold — and take the fill.
 #[test]
-fn min_weight_fraction_normalized() {
-    let mut pixels = vec![0.0f32; 4 * 4];
-    pixels[0] = 1.0;
-    let image = mono_image(Size2us::new(4, 4), pixels);
-
-    let config = DrizzleConfig::x2()
-        .with_pixfrac(0.5)
-        .with_min_weight_fraction(0.6);
-    let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
-    let transform = Transform::translation(DVec2::new(0.1, 0.0));
-    acc.add_image(image, &transform, 1.0, None);
-    let result = acc.finalize().product;
-    let out = result.image.channel(0);
-    let weight = result.weight.as_ref().unwrap().channel(0);
-    let w = 8;
-
-    for (x, y) in [(1, 0), (1, 1)] {
-        assert_eq!(out[y * w + x], 1.0, "cell ({x},{y}) kept");
-    }
-    for (x, y) in [(0, 0), (0, 1)] {
-        assert_eq!(out[y * w + x], 0.0, "cell ({x},{y}) below the threshold");
-        assert!(weight[y * w + x] > 0.0, "cell ({x},{y}) is covered");
-    }
-}
-
-/// Test Gaussian kernel produces flux-preserving smooth output.
-///
-/// A uniform 10×10 image with value 3.0 through Gaussian kernel should produce
-/// approximately 3.0 everywhere in the interior (edges may differ due to truncation).
-#[test]
-fn gaussian_kernel_uniform_preserves_value() {
-    let image = constant_mono_image(Size2us::new(10, 10), 3.0);
-
-    let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Gaussian);
-    let mut acc = accumulator(ImageDimensions::new((10, 10), 1), config);
-    acc.add_image(image, &Transform::identity(), 1.0, None);
-    let result = acc.finalize().product;
-
-    // Interior pixels should be ≈ 3.0 (Gaussian is normalized per-pixel)
-    let out = result.image.channel(0);
-    let w = 20usize;
-    // Check a pixel well inside the interior
-    let center_val = out[10 * w + 10];
-    assert!(
-        (center_val - 3.0).abs() < 0.05,
-        "Interior Gaussian value should be ~3.0, got {center_val}"
-    );
-}
-
-/// Test Lanczos kernel with scale=1, pixfrac=1.
-///
-/// For a uniform image at scale=1 pixfrac=1, Lanczos should also produce the same
-/// uniform value, since the normalized Lanczos weights sum to 1.
-#[test]
-fn lanczos_kernel_uniform_preserves_value() {
-    let image = constant_mono_image(Size2us::new(20, 20), 5.0);
-
+fn min_weight_fraction_gates_against_the_deepest_weight() {
+    let size = Size2us::new(4, 4);
     let config = DrizzleConfig {
-        scale: 1.0,
-        pixfrac: 1.0,
-        kernel: DrizzleKernel::Lanczos,
-        fill_value: 0.0,
-        min_weight_fraction: 0.0,
-        ..Default::default()
+        min_weight_fraction: 0.6,
+        ..kernel_config(DrizzleKernel::Turbo, 2.0, 0.5)
     };
-    let mut acc = accumulator(ImageDimensions::new((20, 20), 1), config);
-    acc.add_image(image, &Transform::identity(), 1.0, None);
-    let result = acc.finalize().product;
-
-    let out = result.image.channel(0);
-    // Interior pixel well away from borders
-    let center_val = out[10 * 20 + 10];
-    assert!(
-        (center_val - 5.0).abs() < 0.01,
-        "Lanczos uniform should be ~5.0, got {center_val}"
-    );
-}
-
-/// Negative data stays negative: background-subtracted frames sit around zero, and a clamp would
-/// bias every pixel below it upwards. A constant −0.5 comes out as −0.5 wherever the Lanczos window
-/// is whole — normalized weights reproduce a constant to the f32 sum of 49 taps, ≈ 49·ε·0.5 =
-/// 2.9e-6 — and a lone bright pixel's negative lobes survive.
-#[test]
-fn lanczos_keeps_negative_values() {
-    let config = DrizzleConfig {
-        scale: 1.0,
-        pixfrac: 1.0,
-        kernel: DrizzleKernel::Lanczos,
-        fill_value: 0.0,
-        min_weight_fraction: 0.0,
-        ..Default::default()
-    };
-    let size = Size2us::new(20, 20);
-    let mut acc = accumulator(ImageDimensions::new(size, 1), config.clone());
-    acc.add_image(
-        constant_mono_image(size, -0.5),
-        &Transform::identity(),
-        1.0,
+    let product = drizzle_one(
+        size,
+        config,
+        one_pixel_image(size, 0.0, Vec2us::new(0, 0), 1.0),
+        &Transform::translation(DVec2::new(0.1, 0.0)),
         None,
     );
-    let out = acc.finalize().product;
-    for y in 3..17 {
-        for x in 3..17 {
-            let value = out.image.channel(0)[(x, y)];
-            assert!((value + 0.5).abs() < 3e-6, "({x},{y}): {value}");
+    let out = product.image.channel(0);
+    let weight = weight_plane(&product);
+    for (x, y) in [(1, 0), (1, 1)] {
+        assert_eq!(out[(x, y)], 1.0, "cell ({x},{y}) kept");
+    }
+    for (x, y) in [(0, 0), (0, 1)] {
+        assert_eq!(out[(x, y)], 0.0, "cell ({x},{y}) below the threshold");
+        assert!(weight[(x, y)] > 0.0, "cell ({x},{y}) is covered");
+    }
+}
+
+/// Lanczos's negative lobes survive into the image. Shifted half a pixel along x, a lone 100 at
+/// (10, 10) lands at 10.5 and reaches output column 12 at distance 1½, where `L(1½) = −4/(3π²)`.
+/// Its taps run over distances ½, 1½, 2½ either side and sum to `(2/π²)(6 − 4/3 + 6/25)`, so the
+/// normalized tap is `(−4/3)/(2·368/75)` = −100/736, and every column receives the same sum of
+/// normalized taps from the whole frame — 1 — so pixel (12, 10) reads −10000/736.
+///
+/// Each tap is the f32 kernel, within 1e-6 of the true one (see `math::lanczos`'s tests): the
+/// numerator moves by that and the sum by six of them, at sizes 0.136 and 0.98. The deposits round
+/// to 49·ε of the bright one.
+#[test]
+fn lanczos_keeps_its_negative_lobes() {
+    let size = Size2us::new(20, 20);
+    let product = drizzle_one(
+        size,
+        kernel_config(DrizzleKernel::Lanczos, 1.0, 1.0),
+        one_pixel_image(size, 0.0, Vec2us::new(10, 10), 100.0),
+        &Transform::translation(DVec2::new(0.5, 0.0)),
+        None,
+    );
+    let actual = f64::from(product.image.channel(0)[(12, 10)]);
+    let expected: f64 = -10000.0 / 736.0;
+    let normalizer = 2.0 * 368.0 / (75.0 * PI * PI);
+    let tap = 1e-6;
+    let bound = 100.0 * (tap + 0.136 * 6.0 * tap / normalizer) / normalizer
+        + f64::from(MAX_DEPOSITS * f32::EPSILON) * expected.abs();
+    assert!(
+        (actual - expected).abs() <= bound,
+        "{actual}, expected {expected}"
+    );
+}
+
+/// The point kernel puts a pixel's whole weight on the one cell nearest its centre. At scale 2 that
+/// centre is `2p + ½`, the corner its 2×2 block of cells shares, a tie `f64::round` breaks upward:
+/// every input pixel lands on the odd cell `(2p + 1)`, at weight 1 and read back exactly, and the
+/// even cells take the fill with no weight and no coverage.
+#[test]
+fn the_point_kernel_lands_each_pixel_on_one_odd_cell() {
+    let size = Size2us::new(4, 4);
+    let image = gray_image(size, (0..16).map(|i| i as f32 + 1.0).collect());
+    let config = DrizzleConfig {
+        fill_value: -999.0,
+        ..kernel_config(DrizzleKernel::Point, 2.0, 0.8)
+    };
+    let product = drizzle_one(size, config, image, &Transform::identity(), None);
+    let weight = weight_plane(&product);
+    let coverage = product.coverage.as_ref().unwrap();
+    for y in 0..8 {
+        for x in 0..8 {
+            let expected = if x % 2 == 1 && y % 2 == 1 {
+                ((x / 2 + y / 2 * 4) as f32 + 1.0, 1.0, 1.0)
+            } else {
+                (-999.0, 0.0, 0.0)
+            };
+            assert_eq!(
+                (
+                    product.image.channel(0)[(x, y)],
+                    weight[(x, y)],
+                    coverage[(x, y)]
+                ),
+                expected,
+                "cell ({x}, {y}): value, weight, coverage"
+            );
         }
     }
-
-    let mut pixels = vec![0.0f32; size.pixel_count()];
-    pixels[10 * 20 + 10] = 100.0;
-    let mut acc = accumulator(ImageDimensions::new(size, 1), config);
-    acc.add_image(mono_image(size, pixels), &Transform::identity(), 1.0, None);
-    let out = acc.finalize().product;
-    let lowest = out
-        .image
-        .channel(0)
-        .iter()
-        .copied()
-        .fold(f32::INFINITY, f32::min);
-    assert!(
-        lowest < 0.0,
-        "the negative lobes were clamped away: {lowest}"
-    );
 }
 
-/// Test two-frame accumulation with different weights.
-///
-/// Frame 1: uniform value 2.0, weight 1.0
-/// Frame 2: uniform value 6.0, weight 3.0
-/// Expected weighted mean: (2.0*w1 + 6.0*w3) / (w1+w3) at each pixel.
-/// Since `pixel_weight` = `frame_weight` * overlap * `inv_area`, and both frames
-/// have the same overlap geometry, the weighted mean simplifies to:
-/// (2.0 * 1.0 + 6.0 * 3.0) / (1.0 + 3.0) = (2 + 18) / 4 = 5.0
+/// At scale 1 and pixfrac 1 a drop is its own output pixel, whole: the compact kernels copy the
+/// input and weigh every pixel 1, exactly.
 #[test]
-fn two_frame_weighted_mean() {
-    let image1 = constant_mono_image(Size2us::new(10, 10), 2.0);
-    let image2 = constant_mono_image(Size2us::new(10, 10), 6.0);
-
-    let config = DrizzleConfig::x2();
-    let mut acc = accumulator(ImageDimensions::new((10, 10), 1), config);
-    acc.add_image(image1, &Transform::identity(), 1.0, None);
-    acc.add_image(image2, &Transform::identity(), 3.0, None);
-    let result = acc.finalize().product;
-
-    let out = result.image.channel(0);
-    // Interior pixel
-    let center_val = out[10 * 20 + 10];
-    assert!(
-        (center_val - 5.0).abs() < 1e-5,
-        "Weighted mean should be 5.0, got {center_val}"
-    );
-}
-
-/// Test pixfrac changes the drop size and thus the weight distribution.
-///
-/// With scale=2 and non-integer-centered drop (via translation):
-/// pixfrac=1.0 → `drop_size=2.0`: large drop hits many output pixels
-/// pixfrac=0.3 → `drop_size=0.6`: small drop hits fewer output pixels
-#[test]
-fn pixfrac_changes_weight_distribution() {
-    // Use translation (0.1, 0.1) to avoid integer-centered drops
-    let transform = Transform::translation(DVec2::new(0.1, 0.1));
-
-    // pixfrac=1.0: drop_size=2.0, half=1.0
-    // Input (2,2) center (2.6,2.6) → output (5.2,5.2). Drop (4.2,4.2)→(6.2,6.2).
-    // Covers output pixels (4,4),(5,4),(6,4),(4,5),(5,5),(6,5),(4,6),(5,6),(6,6) = 9 pixels
-    let mut pixels1 = vec![0.0f32; 6 * 6];
-    pixels1[2 * 6 + 2] = 1.0;
-    let image1 = mono_image(Size2us::new(6, 6), pixels1);
-
-    let config1 = DrizzleConfig::x2().with_pixfrac(1.0);
-    let mut acc1 = accumulator(ImageDimensions::new((6, 6), 1), config1);
-    acc1.add_image(image1, &transform, 1.0, None);
-    let r1 = acc1.finalize().product;
-    let out1 = r1.image.channel(0);
-    let covered_1 = out1.iter().filter(|&&v| v > 0.01).count();
-
-    // pixfrac=0.3: drop_size=0.6, half=0.3
-    // Drop (4.9,4.9)→(5.5,5.5): overlaps (4,4),(5,4),(4,5),(5,5) = 4 pixels
-    let mut pixels2 = vec![0.0f32; 6 * 6];
-    pixels2[2 * 6 + 2] = 1.0;
-    let image2 = mono_image(Size2us::new(6, 6), pixels2);
-
-    let config2 = DrizzleConfig::x2().with_pixfrac(0.3);
-    let mut acc2 = accumulator(ImageDimensions::new((6, 6), 1), config2);
-    acc2.add_image(image2, &transform, 1.0, None);
-    let r2 = acc2.finalize().product;
-    let out2 = r2.image.channel(0);
-    let covered_2 = out2.iter().filter(|&&v| v > 0.01).count();
-
-    // pixfrac=1.0 should cover more output pixels than pixfrac=0.3
-    assert!(
-        covered_1 > covered_2,
-        "pixfrac=1.0 should cover more pixels ({covered_1}) than pixfrac=0.3 ({covered_2})"
-    );
-}
-
-/// Test RGB channels are handled independently.
-#[test]
-fn rgb_channels_independent() {
-    let mut pixels = vec![0.0f32; 4 * 4 * 3];
-    // Set pixel (1,1) to (1.0, 2.0, 3.0). Index = (1*4+1)*3 = 15.
-    let idx = 15;
-    pixels[idx] = 1.0;
-    pixels[idx + 1] = 2.0;
-    pixels[idx + 2] = 3.0;
-    let image = LinearImage::from_pixels(ImageDimensions::new((4, 4), 3), pixels);
-
-    let config = DrizzleConfig::x2();
-    let mut acc = accumulator(ImageDimensions::new((4, 4), 3), config);
-    acc.add_image(image, &Transform::identity(), 1.0, None);
-    let result = acc.finalize().product;
-
-    // Pixel (2,2) in output should have (1.0, 2.0, 3.0) (normalized by equal weight)
-    let r = result.image.channel(0);
-    let g = result.image.channel(1);
-    let b = result.image.channel(2);
-    let w = 8usize;
-    assert!(
-        (r[2 * w + 2] - 1.0).abs() < 1e-5,
-        "R should be 1.0, got {}",
-        r[2 * w + 2]
-    );
-    assert!(
-        (g[2 * w + 2] - 2.0).abs() < 1e-5,
-        "G should be 2.0, got {}",
-        g[2 * w + 2]
-    );
-    assert!(
-        (b[2 * w + 2] - 3.0).abs() < 1e-5,
-        "B should be 3.0, got {}",
-        b[2 * w + 2]
-    );
-}
-
-/// Test scale=1 with pixfrac=1 (shift-and-add equivalent).
-///
-/// At scale=1, pixfrac=1: `drop_size=1.0`, covering exactly one output pixel per input pixel.
-/// With identity transform, output should exactly equal input.
-#[test]
-fn scale1_pixfrac1_identity() {
-    let pixels: Vec<f32> = (0..25).map(|i| i as f32).collect();
-    let image = mono_image(Size2us::new(5, 5), pixels.clone());
-
-    let config = DrizzleConfig {
-        scale: 1.0,
-        pixfrac: 1.0,
-        kernel: DrizzleKernel::Turbo,
-        fill_value: 0.0,
-        min_weight_fraction: 0.0,
-        ..Default::default()
-    };
-    let mut acc = accumulator(ImageDimensions::new((5, 5), 1), config);
-    acc.add_image(image, &Transform::identity(), 1.0, None);
-    let result = acc.finalize().product;
-
-    let out = result.image.channel(0);
-    // Each input pixel center (ix+0.5, iy+0.5) → same in output.
-    // drop_size=1.0, half=0.5: drop from (ix, iy) to (ix+1, iy+1).
-    // Overlaps exactly output pixel (ix, iy) with area 1.0.
-    // inv_area = 1.0. weight = 1.0. output = value * 1.0 / 1.0 = value.
-    for (i, (&actual, &expected)) in out.iter().zip(pixels.iter()).enumerate() {
+fn unit_sampling_copies_the_input() {
+    let size = Size2us::new(5, 5);
+    let pixels: Vec<f32> = (0..25).map(|i| i as f32 * 0.75 - 4.0).collect();
+    for kernel in [
+        DrizzleKernel::Turbo,
+        DrizzleKernel::Square,
+        DrizzleKernel::Point,
+    ] {
+        let product = drizzle_one(
+            size,
+            kernel_config(kernel, 1.0, 1.0),
+            gray_image(size, pixels.clone()),
+            &Transform::identity(),
+            None,
+        );
+        assert_eq!(product.image.channel(0).pixels(), &pixels[..], "{kernel:?}");
         assert!(
-            (actual - expected).abs() < 1e-5,
-            "Pixel {i} should be {expected}, got {actual}"
+            weight_plane(&product).pixels().iter().all(|&w| w == 1.0),
+            "{kernel:?}"
         );
     }
 }
 
-/// Test that custom `fill_value` appears in uncovered pixels.
+/// An unmagnified drop deposits its frame weight in total, whatever its kernel spreads it over:
+/// the shares of a drop sum to 1, and a frame registered at unit scale is not magnified. One pixel
+/// at frame weight 2.5, well inside the grid, so nothing of it falls off.
 ///
-/// Point kernel at scale=2 leaves gaps: each input pixel lands on the odd cell (2·ix + 1, 2·iy + 1),
-/// so the even cells are uncovered. With `fill_value` = -999.0, those gaps contain -999.0.
+/// The weight plane's sum adds at most 49 deposits, each a share rounded once.
 #[test]
-fn fill_value_in_uncovered_pixels() {
-    let image = constant_mono_image(Size2us::new(4, 4), 1.0);
-
-    let config = DrizzleConfig {
-        scale: 2.0,
-        pixfrac: 0.8,
-        kernel: DrizzleKernel::Point,
-        fill_value: -999.0,
-        min_weight_fraction: 0.0,
-        ..Default::default()
-    };
-    let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
-    acc.add_image(image, &Transform::identity(), 1.0, None);
-    let result = acc.finalize().product;
-
-    let out = result.image.channel(0);
-    let w = 8usize;
-
-    // Covered pixel (1,1) ← input (0,0): value 1.0. Uncovered pixel (0,0): the fill.
-    assert_eq!(out[w + 1], 1.0, "covered pixel (1,1)");
-    assert_eq!(out[0], -999.0, "uncovered pixel (0,0)");
-    // Covered pixel (3,3) ← input (1,1), uncovered (2,2).
-    assert_eq!(out[3 * w + 3], 1.0, "covered pixel (3,3)");
-    assert_eq!(out[2 * w + 2], -999.0, "uncovered pixel (2,2)");
+fn an_unmagnified_drop_deposits_its_frame_weight() {
+    let size = Size2us::new(16, 16);
+    let pixel = Vec2us::new(7, 7);
+    for kernel in DrizzleKernel::ALL {
+        let mut acc = accumulator(ImageDimensions::new(size, 1), usual_config(kernel));
+        acc.add_image(
+            constant_image(size, 1.0),
+            &Transform::translation(DVec2::new(0.3, -0.2)),
+            2.5,
+            Some(&only(size, pixel)),
+        );
+        let product = acc.finalize().product;
+        let total: f32 = weight_plane(&product).pixels().iter().sum();
+        assert!(
+            (total - 2.5).abs() <= 2.0 * MAX_DEPOSITS * f32::EPSILON * 2.5 * LOBE_EXCESS,
+            "{kernel:?}: {total}"
+        );
+    }
 }
 
-/// Test that a zero-weight frame does not affect the output, and is not counted as covering it.
+/// A zero pixel weight keeps that pixel out of every kernel: a 100 under it never reaches the
+/// image, which reads the surrounding 4 wherever enough weight landed. And the cells it would have
+/// reached are each kernel's own footprint — which a frame with only that pixel weighted shows.
+/// Shifted by (0.3, −0.2), pixel (5, 5) lands at output (11.1, 10.1) at scale 2: a 1.6-wide box
+/// reaches cells 10–12 and 9–11, nine for Turbo and the square kernel; the point kernel takes one
+/// cell; the Gaussian (σ = 1.6/2.3548, radius ⌈3σ⌉ = 3) all 49 of its neighbourhood. At scale 1 it
+/// lands at (5.3, 4.8), and Lanczos-3, zero from distance 3 on, reaches six columns (2.3 to the
+/// left, 2.7 to the right) and six rows: 36.
 ///
-/// Frame 1: uniform 3.0, weight 1.0
-/// Frame 2: uniform 100.0, weight 0.0
-/// Result should be 3.0 everywhere (zero-weight frame contributes nothing), and coverage 1 frame in
-/// 2 — a frame that deposits nothing has reached nothing, which is the reading a zero *pixel* weight
-/// has always had.
+/// The gate is a quarter of the deepest weight: next to the excluded pixel a Lanczos window keeps
+/// little more than its lobes.
 #[test]
-fn zero_weight_frame_ignored() {
-    let image1 = constant_mono_image(Size2us::new(8, 8), 3.0);
-    let image2 = constant_mono_image(Size2us::new(8, 8), 100.0);
+fn a_zero_pixel_weight_keeps_the_pixel_out() {
+    let size = Size2us::new(12, 12);
+    let pixel = Vec2us::new(5, 5);
+    let transform = Transform::translation(DVec2::new(0.3, -0.2));
+    let mut excluded = Buffer2::new_filled(size.width, size.height, 1.0);
+    excluded[(pixel.x, pixel.y)] = 0.0;
+    const GATE: f32 = 0.25;
+    for (kernel, footprint) in [
+        (DrizzleKernel::Turbo, 9),
+        (DrizzleKernel::Square, 9),
+        (DrizzleKernel::Point, 1),
+        (DrizzleKernel::Gaussian, 49),
+        (DrizzleKernel::Lanczos, 36),
+    ] {
+        let config = DrizzleConfig {
+            fill_value: -1.0,
+            min_weight_fraction: GATE,
+            ..usual_config(kernel)
+        };
+        let product = drizzle_one(
+            size,
+            config.clone(),
+            one_pixel_image(size, 4.0, pixel, 100.0),
+            &transform,
+            Some(&excluded),
+        );
+        assert_constant_or_fill(&product, 4.0, -1.0, GATE, &format!("{kernel:?}"));
 
-    let config = DrizzleConfig::x2();
-    let mut acc = accumulator(ImageDimensions::new((8, 8), 1), config);
-    acc.add_image(image1, &Transform::identity(), 1.0, None);
-    acc.add_image(image2, &Transform::identity(), 0.0, None);
-    let result = acc.finalize().product;
+        let alone = drizzle_one(
+            size,
+            config,
+            constant_image(size, 4.0),
+            &transform,
+            Some(&only(size, pixel)),
+        );
+        let reached = weight_plane(&alone)
+            .pixels()
+            .iter()
+            .filter(|&&w| w != 0.0)
+            .count();
+        assert_eq!(reached, footprint, "{kernel:?}");
+    }
+}
 
-    let out = result.image.channel(0);
-    // Interior pixel: should be 3.0, not influenced by the 100.0 frame
-    let center = out[8 * 16 + 8];
-    assert!(
-        (center - 3.0).abs() < 1e-5,
-        "Zero-weight frame should not affect output, got {center}"
+/// Per-pixel weights scale a pixel's share: two frames of 2 and 6, the first's pixel (1, 1) at
+/// weight ½, combine there to `(2·½ + 6·1) / (½ + 1)` = 14/3 and elsewhere to 4 — at scale 1 and
+/// pixfrac 1, where every drop is its own pixel. A few roundings of values near 6.
+#[test]
+fn pixel_weights_scale_their_pixel_share() {
+    let size = Size2us::new(4, 4);
+    let mut half = Buffer2::new_filled(4, 4, 1.0f32);
+    half[(1, 1)] = 0.5;
+    let mut acc = accumulator(
+        ImageDimensions::new(size, 1),
+        kernel_config(DrizzleKernel::Turbo, 1.0, 1.0),
     );
-    assert_eq!(
-        result.coverage.as_ref().unwrap()[(8, 8)],
-        0.5,
-        "one of the two frames added carried any weight"
+    acc.add_image(
+        constant_image(size, 2.0),
+        &Transform::identity(),
+        1.0,
+        Some(&half),
     );
+    acc.add_image(constant_image(size, 6.0), &Transform::identity(), 1.0, None);
+    let product = acc.finalize().product;
+    let out = product.image.channel(0);
+    assert!((out[(1, 1)] - 14.0 / 3.0).abs() <= 4.0 * f32::EPSILON * 6.0);
+    assert_eq!(out[(0, 0)], 4.0);
+}
+
+/// A frame of weight zero deposits nothing and does not count as covering anything: one frame of 3
+/// and one of 100 at weight 0 read 3, at coverage one frame in two.
+#[test]
+fn a_zero_weight_frame_is_ignored() {
+    let size = Size2us::new(8, 8);
+    let mut acc = accumulator(
+        ImageDimensions::new(size, 1),
+        usual_config(DrizzleKernel::Turbo),
+    );
+    acc.add_image(constant_image(size, 3.0), &Transform::identity(), 1.0, None);
+    acc.add_image(
+        constant_image(size, 100.0),
+        &Transform::identity(),
+        0.0,
+        None,
+    );
+    let product = acc.finalize().product;
+    assert!(product.image.channel(0).pixels().iter().all(|&v| v == 3.0));
+    assert_eq!(product.coverage.as_ref().unwrap()[(8, 8)], 0.5);
 }
 
 /// A radial drop that hangs off the output grid loses the part that missed it.
@@ -431,9 +477,15 @@ fn zero_weight_frame_ignored() {
 #[test]
 fn radial_drops_lose_the_flux_that_misses_the_grid() {
     const SIDE: i64 = 8;
-    let image = constant_mono_image(Size2us::new(SIDE as usize, SIDE as usize), 1.0);
+    let size = Size2us::new(SIDE as usize, SIDE as usize);
     let config = kernel_config(DrizzleKernel::Gaussian, 1.0, 1.0);
-    let product = drizzle_one(SIDE as usize, config, image, &Transform::identity(), None);
+    let product = drizzle_one(
+        size,
+        config,
+        constant_image(size, 1.0),
+        &Transform::identity(),
+        None,
+    );
 
     // At scale 1 / pixfrac 1 the drop size is 1 output pixel, so σ = 1/2.3548 and the kernel is
     // truncated at ceil(3σ) = 2. Every drop centre lands on an integer output pixel, so the tap
@@ -453,324 +505,47 @@ fn radial_drops_lose_the_flux_that_misses_the_grid() {
     // 8 input pixels per axis, of which the two outermost lose part of their kernel: the axis sums
     // to 7.8888 rather than 8, so the grid holds 62.23 of the 64 it would with renormalization.
     let expected = (on_grid * on_grid) as f32;
-    assert!((expected - 62.233).abs() < 1e-2, "expected Σw {expected}");
 
-    let weight: f32 = product
-        .weight
-        .as_ref()
-        .unwrap()
-        .channel(0)
-        .pixels()
-        .iter()
-        .sum();
+    // Each weight sums up to 25 deposits, and the plane's sum adds 64 of them: 89 roundings.
+    let weight: f32 = weight_plane(&product).pixels().iter().sum();
     assert!(
-        (weight - expected).abs() < 1e-3 * expected,
+        (weight - expected).abs() <= 89.0 * f32::EPSILON * expected,
         "Σ weight {weight} must be the on-grid share {expected}, not the 64 renormalization would keep"
     );
     // The image is untouched by the shortfall: flux and weight fell together.
     let out = product.image.channel(0);
-    assert!((out[(0, 0)] - 1.0).abs() < 1e-5, "corner {}", out[(0, 0)]);
-    assert!((out[(4, 4)] - 1.0).abs() < 1e-5, "centre {}", out[(4, 4)]);
+    for (x, y) in [(0, 0), (4, 4)] {
+        assert!(
+            (out[(x, y)] - 1.0).abs() <= 51.0 * f32::EPSILON,
+            "({x}, {y})"
+        );
+    }
 }
 
-/// Test Gaussian kernel with translation on a uniform image.
-///
-/// Uniform value 4.0, translation (1.0, 0.5), scale=2, pixfrac=0.8.
-/// For a uniform image, the Gaussian-weighted mean at every interior pixel
-/// is 4.0 (weighted average of identical values).
-/// This tests that Gaussian + translation still preserves uniform values.
+/// Each channel of an RGB frame drizzles on its own: pixel (1, 1) of (1, 2, 3) fills its block of
+/// cells with those three values, exactly — see `one_bright_pixel_fills_its_own_block`.
 #[test]
-fn gaussian_kernel_with_translation() {
-    let image = constant_mono_image(Size2us::new(12, 12), 4.0);
-
-    let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Gaussian);
-    let mut acc = accumulator(ImageDimensions::new((12, 12), 1), config);
-    let transform = Transform::translation(DVec2::new(1.0, 0.5));
-    acc.add_image(image, &transform, 1.0, None);
-    let result = acc.finalize().product;
-
-    let out = result.image.channel(0);
-    let w = 24usize;
-
-    // Interior pixel well inside the translated region: should be ~4.0
-    let center = out[12 * w + 14];
-    assert!(
-        (center - 4.0).abs() < 0.05,
-        "Gaussian interior with translation should be ~4.0, got {center}"
-    );
-
-    // Another interior pixel
-    let other = out[10 * w + 10];
-    assert!(
-        (other - 4.0).abs() < 0.05,
-        "Gaussian interior pixel should be ~4.0, got {other}"
-    );
-
-    // Pixel far outside the translated input region: should be fill_value (0.0)
-    // Translation (1.0, 0.5) shifts input right+down. Output pixel (0,0) is far from any input.
-    assert!(
-        out[0].abs() < 1e-5,
-        "Far pixel should be 0.0, got {}",
-        out[0]
-    );
-}
-
-/// Test Lanczos kernel with translation preserves value for a uniform image.
-///
-/// Uniform image value 7.0, translation (0.3, -0.2), scale=1, pixfrac=1.
-/// Interior pixels should still be ~7.0 since the weighted mean of uniform values is invariant.
-#[test]
-fn lanczos_kernel_with_translation() {
-    let image = constant_mono_image(Size2us::new(20, 20), 7.0);
-
-    let config = DrizzleConfig {
-        scale: 1.0,
-        pixfrac: 1.0,
-        kernel: DrizzleKernel::Lanczos,
-        fill_value: 0.0,
-        min_weight_fraction: 0.0,
-        ..Default::default()
+fn rgb_channels_drizzle_independently() {
+    let size = Size2us::new(4, 4);
+    let plane = |value: f32| {
+        let mut pixels = vec![0.0f32; 16];
+        pixels[5] = value;
+        pixels
     };
-    let mut acc = accumulator(ImageDimensions::new((20, 20), 1), config);
-    let transform = Transform::translation(DVec2::new(0.3, -0.2));
-    acc.add_image(image, &transform, 1.0, None);
-    let result = acc.finalize().product;
-
-    let out = result.image.channel(0);
-    // Interior pixel well away from borders (Lanczos radius=3, so stay 4+ pixels inside)
-    let center = out[10 * 20 + 10];
-    assert!(
-        (center - 7.0).abs() < 0.05,
-        "Lanczos with translation should preserve uniform value ~7.0, got {center}"
+    let image = rgb_image(size, plane(1.0), plane(2.0), plane(3.0));
+    let mut acc = accumulator(
+        ImageDimensions::new(size, 3),
+        kernel_config(DrizzleKernel::Turbo, 2.0, 0.8),
     );
-
-    // Another interior pixel
-    let other = out[8 * 20 + 12];
-    assert!(
-        (other - 7.0).abs() < 0.05,
-        "Lanczos interior pixel should be ~7.0, got {other}"
-    );
-}
-
-/// Test that a pixel with weight 0.0 is fully excluded from the output.
-///
-/// Setup: 4×4 image, pixel (1,1) = 100.0, all others = 1.0.
-/// Weight map: pixel (1,1) = 0.0, all others = 1.0.
-/// scale=1, pixfrac=1 (identity mapping, one-to-one).
-///
-/// Without weight map: output (1,1) = 100.0.
-/// With weight map: pixel (1,1) contributes nothing. Output (1,1) receives
-/// only flux from neighboring drops that overlap it. With scale=1,pixfrac=1
-/// each input pixel maps to exactly one output pixel, so (1,1) gets no
-/// contribution at all → `fill_value` = 0.0.
-#[test]
-fn pixel_weight_zero_excludes_pixel() {
-    let mut pixels = vec![1.0f32; 4 * 4];
-    pixels[5] = 100.0; // (1,1) = row 1 * 4 + col 1 = 5 (bad pixel)
-    let image = mono_image(Size2us::new(4, 4), pixels);
-
-    let mut pw = Buffer2::new_filled(4, 4, 1.0f32);
-    *pw.get_mut(1, 1) = 0.0; // Exclude (1,1)
-
-    let config = DrizzleConfig {
-        scale: 1.0,
-        pixfrac: 1.0,
-        kernel: DrizzleKernel::Turbo,
-        fill_value: 0.0,
-        min_weight_fraction: 0.0,
-        ..Default::default()
-    };
-    let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
-    acc.add_image(image, &Transform::identity(), 1.0, Some(&pw));
-    let result = acc.finalize().product;
-    let out = result.image.channel(0);
-
-    // (1,1) = index 5, should be fill_value (0.0) — the bad pixel was excluded
-    assert!(
-        out[5].abs() < 1e-5,
-        "Bad pixel (1,1) should be excluded, got {}",
-        out[5]
-    );
-    // (0,0) should be 1.0 — normal pixel unaffected
-    assert!(
-        (out[0] - 1.0).abs() < 1e-5,
-        "Normal pixel (0,0) should be 1.0, got {}",
-        out[0]
-    );
-    // (2,2) should be 1.0
-    assert!(
-        (out[2 * 4 + 2] - 1.0).abs() < 1e-5,
-        "Normal pixel (2,2) should be 1.0, got {}",
-        out[2 * 4 + 2]
-    );
-}
-
-/// Test that per-pixel weights correctly scale contributions in weighted mean.
-///
-/// Two frames, same geometry (identity, scale=1, pixfrac=1):
-///   Frame 1: all pixels = 2.0, pixel weight at (1,1) = 0.5
-///   Frame 2: all pixels = 6.0, pixel weight at (1,1) = 1.0
-///
-/// At (1,1): weighted mean = (2.0 * 0.5 + 6.0 * 1.0) / (0.5 + 1.0) = 7.0 / 1.5 = 4.667
-/// At other pixels: weighted mean = (2.0 * 1.0 + 6.0 * 1.0) / (1.0 + 1.0) = 4.0
-#[test]
-fn pixel_weight_scales_contribution() {
-    let image1 = constant_mono_image(Size2us::new(4, 4), 2.0);
-    let image2 = constant_mono_image(Size2us::new(4, 4), 6.0);
-
-    let mut pw1 = Buffer2::new_filled(4, 4, 1.0f32);
-    *pw1.get_mut(1, 1) = 0.5;
-    let pw2 = Buffer2::new_filled(4, 4, 1.0f32);
-
-    let config = DrizzleConfig {
-        scale: 1.0,
-        pixfrac: 1.0,
-        kernel: DrizzleKernel::Turbo,
-        fill_value: 0.0,
-        min_weight_fraction: 0.0,
-        ..Default::default()
-    };
-    let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
-    acc.add_image(image1, &Transform::identity(), 1.0, Some(&pw1));
-    acc.add_image(image2, &Transform::identity(), 1.0, Some(&pw2));
-    let result = acc.finalize().product;
-    let out = result.image.channel(0);
-
-    // (1,1) = index 5: (2.0*0.5 + 6.0*1.0) / (0.5+1.0) = 7.0/1.5 = 4.6667
-    let expected_11 = 7.0 / 1.5;
-    assert!(
-        (out[5] - expected_11).abs() < 1e-5,
-        "Pixel (1,1) should be {:.4}, got {}",
-        expected_11,
-        out[5]
-    );
-    // (0,0): (2.0+6.0)/2.0 = 4.0
-    assert!(
-        (out[0] - 4.0).abs() < 1e-5,
-        "Pixel (0,0) should be 4.0, got {}",
-        out[0]
-    );
-}
-
-/// Test bad pixel mask: multiple zero-weight pixels in a uniform field.
-///
-/// 8×8 uniform image = 5.0. Weight map has 3 bad pixels at (2,3), (5,1), (7,7).
-/// scale=1, pixfrac=1. Bad pixels produce `fill_value`; all others = 5.0.
-#[test]
-fn pixel_weight_bad_pixel_mask() {
-    let image = constant_mono_image(Size2us::new(8, 8), 5.0);
-
-    let mut pw = Buffer2::new_filled(8, 8, 1.0f32);
-    *pw.get_mut(2, 3) = 0.0;
-    *pw.get_mut(5, 1) = 0.0;
-    *pw.get_mut(7, 7) = 0.0;
-
-    let config = DrizzleConfig {
-        scale: 1.0,
-        pixfrac: 1.0,
-        kernel: DrizzleKernel::Turbo,
-        fill_value: -1.0,
-        min_weight_fraction: 0.0,
-        ..Default::default()
-    };
-    let mut acc = accumulator(ImageDimensions::new((8, 8), 1), config);
-    acc.add_image(image, &Transform::identity(), 1.0, Some(&pw));
-    let result = acc.finalize().product;
-    let out = result.image.channel(0);
-
-    // Bad pixels → fill_value = -1.0
-    assert!(
-        (out[3 * 8 + 2] - (-1.0)).abs() < 1e-5,
-        "Bad pixel (2,3) should be fill, got {}",
-        out[3 * 8 + 2]
-    );
-    assert!(
-        (out[13] - (-1.0)).abs() < 1e-5, // (5,1) = row 1 * 8 + col 5
-        "Bad pixel (5,1) should be fill, got {}",
-        out[13]
-    );
-    assert!(
-        (out[7 * 8 + 7] - (-1.0)).abs() < 1e-5,
-        "Bad pixel (7,7) should be fill, got {}",
-        out[7 * 8 + 7]
-    );
-
-    // Good pixels → 5.0
-    assert!(
-        (out[0] - 5.0).abs() < 1e-5,
-        "Good pixel (0,0) should be 5.0, got {}",
-        out[0]
-    );
-    assert!(
-        (out[4 * 8 + 4] - 5.0).abs() < 1e-5,
-        "Good pixel (4,4) should be 5.0, got {}",
-        out[4 * 8 + 4]
-    );
-
-    // Count: 3 bad pixels → fill, 61 good → 5.0
-    let bad_count = out.iter().filter(|&&v| (v - (-1.0)).abs() < 1e-5).count();
-    let good_count = out.iter().filter(|&&v| (v - 5.0).abs() < 1e-5).count();
-    assert_eq!(bad_count, 3, "Expected 3 bad pixels");
-    assert_eq!(good_count, 61, "Expected 61 good pixels");
-}
-
-/// Test per-pixel weights with point kernel.
-///
-/// scale=2: input (ix,iy) lands on output (2·ix + 1, 2·iy + 1). Point kernel = 1 pixel.
-/// Pixel (1,1) = 10.0, weight = 0.0: nothing at output (3,3).
-/// Pixel (0,0) = 3.0, weight = 1.0: output (1,1) reads 3.0.
-#[test]
-fn pixel_weight_with_point_kernel() {
-    let mut pixels = vec![1.0f32; 4 * 4];
-    pixels[5] = 10.0; // (1,1) bad pixel
-    pixels[0] = 3.0;
-    let image = mono_image(Size2us::new(4, 4), pixels);
-
-    let mut pw = Buffer2::new_filled(4, 4, 1.0f32);
-    *pw.get_mut(1, 1) = 0.0;
-
-    let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Point);
-    let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
-    acc.add_image(image, &Transform::identity(), 1.0, Some(&pw));
-    let result = acc.finalize().product;
-    let out = result.image.channel(0);
-    let w = 8usize;
-
-    assert_eq!(out[3 * w + 3], 0.0, "excluded pixel (3,3) takes the fill");
-    assert_eq!(out[w + 1], 3.0, "good pixel (1,1)");
-}
-
-/// Test per-pixel weights with Gaussian kernel on a uniform image.
-///
-/// Uniform image = 4.0. One bad pixel at (5,5) with weight 0.0.
-/// Gaussian kernel spreads flux over multiple output pixels, so the bad pixel
-/// reduces coverage near its position but doesn't contaminate values.
-/// Interior pixels far from the bad pixel should still be ~4.0.
-#[test]
-fn pixel_weight_with_gaussian_kernel() {
-    let image = constant_mono_image(Size2us::new(12, 12), 4.0);
-
-    let mut pw = Buffer2::new_filled(12, 12, 1.0f32);
-    *pw.get_mut(5, 5) = 0.0;
-
-    let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Gaussian);
-    let mut acc = accumulator(ImageDimensions::new((12, 12), 1), config);
-    acc.add_image(image, &Transform::identity(), 1.0, Some(&pw));
-    let result = acc.finalize().product;
-    let out = result.image.channel(0);
-    let w = 24usize;
-
-    // Far from bad pixel: should be ~4.0
-    let far = out[2 * w + 2];
-    assert!(
-        (far - 4.0).abs() < 0.05,
-        "Far pixel should be ~4.0, got {far}"
-    );
-
-    // Another far pixel
-    let far2 = out[20 * w + 20];
-    assert!(
-        (far2 - 4.0).abs() < 0.05,
-        "Far pixel should be ~4.0, got {far2}"
-    );
+    acc.add_image(image, &Transform::identity(), 1.0, None);
+    let product = acc.finalize().product;
+    for (channel, expected) in [1.0, 2.0, 3.0].into_iter().enumerate() {
+        for (x, y) in [(2, 2), (3, 2), (2, 3), (3, 3)] {
+            assert_eq!(
+                product.image.channel(channel)[(x, y)],
+                expected,
+                "channel {channel} ({x}, {y})"
+            );
+        }
+    }
 }

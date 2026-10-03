@@ -8,7 +8,6 @@ mod synthetic;
 
 use crate::testing::prelude::*;
 use crate::testing::synthetic::fixtures::star_field;
-use std::f64::consts::{FRAC_PI_4, PI};
 
 use crate::error::FrameDimensionMismatch;
 use crate::io::image::load_context::LoadContext;
@@ -42,69 +41,39 @@ fn kernel_config(kernel: DrizzleKernel, scale: f32, pixfrac: f32) -> DrizzleConf
     }
 }
 
-/// Drizzle one mono frame of `side`×`side` and finalize.
+/// [`kernel_config`] at the sampling `kernel` is usually run at: scale 2 and pixfrac 0.8, except
+/// Lanczos, which is defined only at scale 1 and pixfrac 1.
+fn usual_config(kernel: DrizzleKernel) -> DrizzleConfig {
+    match kernel {
+        DrizzleKernel::Lanczos => kernel_config(kernel, 1.0, 1.0),
+        _ => kernel_config(kernel, 2.0, 0.8),
+    }
+}
+
+/// Drizzle one mono frame of `size` and finalize.
 fn drizzle_one(
-    side: usize,
+    size: Size2us,
     config: DrizzleConfig,
     image: LinearImage,
     transform: &Transform,
     pixel_weights: Option<&Buffer2<f32>>,
 ) -> StackProduct {
-    let mut acc = accumulator(ImageDimensions::new((side, side), 1), config);
+    let mut acc = accumulator(ImageDimensions::new(size, 1), config);
     acc.add_image(image, transform, 1.0, pixel_weights);
     acc.finalize().product
 }
 
-fn mono_image(size: Size2us, pixels: Vec<f32>) -> LinearImage {
-    LinearImage::from_pixels(ImageDimensions::new(size, 1), pixels)
+fn constant_image(size: Size2us, value: f32) -> LinearImage {
+    gray_image(size, vec![value; size.pixel_count()])
 }
 
-fn constant_mono_image(size: Size2us, value: f32) -> LinearImage {
-    mono_image(size, vec![value; size.pixel_count()])
-}
-
-fn assert_product_finite(product: &StackProduct) {
-    for channel in 0..product.image.channels() {
-        assert!(
-            product
-                .image
-                .channel(channel)
-                .iter()
-                .all(|value| value.is_finite())
-        );
-    }
-    assert!(
-        product
-            .coverage
-            .as_ref()
-            .unwrap()
-            .to_plane()
-            .pixels()
-            .iter()
-            .all(|value| value.is_finite())
-    );
-    for channel in 0..product.image.channels() {
-        assert!(
-            product
-                .weight
-                .as_ref()
-                .unwrap()
-                .channel(channel)
-                .pixels()
-                .iter()
-                .all(|value| value.is_finite())
-        );
-        assert!(
-            product
-                .linear_variance
-                .as_ref()
-                .unwrap()
-                .channel(channel)
-                .pixels()
-                .iter()
-                .all(|value| value.is_finite())
-        );
-    }
+/// The one weight plane drizzle shares between channels.
+fn weight_plane(product: &StackProduct) -> &Buffer2<f32> {
+    product
+        .weight
+        .as_ref()
+        .expect("weight was requested")
+        .channel(0)
 }
 
 fn drizzle_frames(
