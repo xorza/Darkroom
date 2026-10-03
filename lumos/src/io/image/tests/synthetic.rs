@@ -25,7 +25,7 @@ use crate::stacking::frame_store::frame_peek::FramePeek;
 use crate::stacking::frame_store::stackable_image::StackableImage;
 use crate::testing::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::testing::fits::write_fits;
-use crate::{CalibrationMasters, CalibrationSet, CfaImage, CfaType, PreviewImage};
+use crate::{CalibrationMasters, CalibrationSet, CfaImage, CfaType, PreviewImage, PreviewPixels};
 use common::TempDir;
 use fits_well::header::Header;
 use fits_well::image::{Image, Scaling};
@@ -705,6 +705,15 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
             ..
         })
     ));
+    assert!(
+        matches!(
+            PreviewImage::from_file(&path, &LoadContext::default())
+                .unwrap()
+                .into_pixels(),
+            PreviewPixels::Planes(_)
+        ),
+        "a demosaiced decode hands back its planes"
+    );
     let preview: imaginarium::Image = preview.into();
     assert_eq!(preview.desc().color_format, ColorFormat::RGB_F32);
     let preview_pixels = bytemuck::cast_slice::<u8, f32>(preview.bytes());

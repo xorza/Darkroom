@@ -15,7 +15,7 @@ use fits_well::image::SampleType;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::{ColorProvenance, ImageProvenance};
 use crate::io::image::load_context::LoadContext;
-use crate::io::image::preview_image::PreviewImage;
+use crate::io::image::preview_image::{PreviewImage, PreviewPixels};
 use crate::stacking::frame_store::stackable_image::StackableImage;
 
 #[test]
@@ -195,6 +195,11 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
 
     let scientific = LinearImage::from_file(&float_path, &LoadContext::default()).unwrap();
     assert_eq!(scientific.channel(0).pixels(), float_pixels);
+    let preview = PreviewImage::from_file(&float_path, &LoadContext::default()).unwrap();
+    assert!(
+        matches!(preview.into_pixels(), PreviewPixels::Interleaved(_)),
+        "a raster decode stays interleaved"
+    );
     let preview: Image = PreviewImage::from_file(&float_path, &LoadContext::default())
         .unwrap()
         .into();

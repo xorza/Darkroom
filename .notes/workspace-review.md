@@ -28,7 +28,6 @@ Severity: Medium — separate gestures merge into one entry, merges leave phanto
 ## Pixel layout is converted and copied at crate boundaries
 Severity: Medium — full-frame copies on every stack, load, cache write and GPU download, on images of hundreds of MB.
 
-- [ ] `lens/src/astro/nodes/io.rs` `register` (Load Astro Image) / `lumos/src/io/image/preview_image.rs` — `PreviewImage::from(LinearImage)` interleaves a FITS/RAW decode and the first astro node deinterleaves it again: two full copies per load. Let the preview product hand back its planes.
 
 ## `darkroom::core` claims to be frontend-free but imports `gui` and palantir
 Severity: Medium — the documented layering does not hold.

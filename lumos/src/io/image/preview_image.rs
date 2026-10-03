@@ -1,5 +1,6 @@
 //! A decoded display or inspection product, outside the scientific pipeline.
 
+use std::mem;
 use std::path::Path;
 
 use imaginarium::{ChannelCount, Image};
@@ -21,7 +22,21 @@ use crate::io::raw;
 #[derive(Debug)]
 pub struct PreviewImage {
     pub metadata: ImageMetadata,
-    image: Image,
+    pixels: PreviewPixels,
+}
+
+/// A preview's pixels in the layout its decoder produced, so a consumer that
+/// wants planes does not get them interleaved and deinterleave them again.
+#[derive(Debug)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "one per load, beside megabytes of pixels; boxing the planes would buy an indirection"
+)]
+pub enum PreviewPixels {
+    /// One `f32` plane per channel: a FITS or camera-RAW decode.
+    Planes(LinearImage),
+    /// Interleaved `f32` samples: a raster decode.
+    Interleaved(Image),
 }
 
 impl PreviewImage {
@@ -54,22 +69,33 @@ impl PreviewImage {
             }),
             ..Default::default()
         };
-        Ok(Self { metadata, image })
+        Ok(Self {
+            metadata,
+            pixels: PreviewPixels::Interleaved(image),
+        })
+    }
+
+    /// The pixels, in the layout the decoder produced.
+    pub fn into_pixels(self) -> PreviewPixels {
+        self.pixels
     }
 }
 
 impl From<LinearImage> for PreviewImage {
-    fn from(linear: LinearImage) -> Self {
-        let image = Image::from(&linear);
+    fn from(mut linear: LinearImage) -> Self {
         Self {
-            metadata: linear.metadata,
-            image,
+            metadata: mem::take(&mut linear.metadata),
+            pixels: PreviewPixels::Planes(linear),
         }
     }
 }
 
+/// The interleaved form, repacking a planar preview.
 impl From<PreviewImage> for Image {
     fn from(preview: PreviewImage) -> Self {
-        preview.image
+        match preview.pixels {
+            PreviewPixels::Planes(linear) => Image::from(&linear),
+            PreviewPixels::Interleaved(image) => image,
+        }
     }
 }

@@ -4,8 +4,7 @@ use scenarium::FuncId;
 use scenarium::async_lambda;
 use std::sync::{Arc, LazyLock};
 
-use imaginarium::Image as RawImage;
-use lumos::{LoadContext, PREVIEW_IMAGE_EXTENSIONS, PreviewImage, RAW_EXTENSIONS};
+use lumos::{LoadContext, PREVIEW_IMAGE_EXTENSIONS, PreviewImage, PreviewPixels, RAW_EXTENSIONS};
 use scenarium::{DataType, DynamicValue, FsPathConfig, FsPathMode};
 use scenarium::{Func, FuncInput, FuncOutput, Library};
 
@@ -49,11 +48,14 @@ pub(crate) fn register(library: &mut Library) {
                         cancel,
                         ..Default::default()
                     };
-                    PreviewImage::from_file(&path, &context).map(RawImage::from)
+                    PreviewImage::from_file(&path, &context)
                 })
                 .await?;
 
-                outputs[0] = DynamicValue::from_custom(Image::from(image));
+                outputs[0] = DynamicValue::from_custom(match image.into_pixels() {
+                    PreviewPixels::Planes(planes) => Image::from(planes),
+                    PreviewPixels::Interleaved(samples) => Image::from(samples),
+                });
                 Ok(())
             }),
         )
