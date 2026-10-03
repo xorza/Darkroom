@@ -1,12 +1,13 @@
 //! Astro path types and image loading.
 
 use scenarium::FuncId;
+use scenarium::async_lambda;
 use std::sync::{Arc, LazyLock};
 
 use imaginarium::Image as RawImage;
 use lumos::{LoadContext, PREVIEW_IMAGE_EXTENSIONS, PreviewImage, RAW_EXTENSIONS};
 use scenarium::{DataType, DynamicValue, FsPathConfig, FsPathMode};
-use scenarium::{Func, FuncInput, FuncLambda, FuncOutput, Library};
+use scenarium::{Func, FuncInput, FuncOutput, Library};
 
 use crate::astro::nodes::runtime;
 use crate::image::{IMAGE_DATA_TYPE, Image};
@@ -36,33 +37,25 @@ pub(crate) fn register(library: &mut Library) {
         Func::new(
             LOAD_ASTRO_IMAGE_FUNC_ID,
             "Load Astro Image",
-            FuncLambda::new(
-                move |Invocation {
-                          ctx,
-                          inputs,
-                          outputs,
-                          ..
-                      }| {
-                    let cancel = ctx.cancel_flag();
-                    Box::pin(async move {
-                        debug_assert_eq!(inputs.len(), 1);
-                        debug_assert_eq!(outputs.len(), 1);
+            async_lambda!(move |Invocation { ctx, inputs, outputs, .. }| {
+                cancel = ctx.cancel_flag(),
+            } => {
+                debug_assert_eq!(inputs.len(), 1);
+                debug_assert_eq!(outputs.len(), 1);
 
-                        let path = inputs[0].required_fs_path().to_owned();
-                        let image = runtime::run_cancellable(cancel, move |cancel| {
-                            let context = LoadContext {
-                                cancel,
-                                ..Default::default()
-                            };
-                            PreviewImage::from_file(&path, &context).map(RawImage::from)
-                        })
-                        .await?;
+                let path = inputs[0].required_fs_path().to_owned();
+                let image = runtime::run_cancellable(cancel, move |cancel| {
+                    let context = LoadContext {
+                        cancel,
+                        ..Default::default()
+                    };
+                    PreviewImage::from_file(&path, &context).map(RawImage::from)
+                })
+                .await?;
 
-                        outputs[0] = DynamicValue::from_custom(Image::from(image));
-                        Ok(())
-                    })
-                },
-            ),
+                outputs[0] = DynamicValue::from_custom(Image::from(image));
+                Ok(())
+            }),
         )
         .description("Loads a FITS/RAW/standard astronomical image.")
         .category("Astro")

@@ -6,6 +6,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::ops::Add;
 use std::ops::AddAssign;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use crate::{ConstValue, TypeId};
@@ -169,6 +170,17 @@ impl DynamicValue {
             .unwrap_or_else(|| self.misread("an enum variant"))
     }
 
+    /// The variant of a required input declared `Enum`, parsed as `T`. The
+    /// compiler checked the variant against the enum type's names, so this
+    /// holds for a `T` that reads those names. See
+    /// [`required_f64`](Self::required_f64).
+    #[track_caller]
+    pub fn required_enum_as<T: FromStr>(&self) -> T {
+        self.required_enum()
+            .parse()
+            .unwrap_or_else(|_unread| self.misread(any::type_name::<T>()))
+    }
+
     /// The path of a required input declared `FsPath` for one path. See
     /// [`required_f64`](Self::required_f64).
     #[track_caller]
@@ -262,11 +274,26 @@ impl From<&str> for DynamicValue {
 #[cfg(test)]
 mod tests {
     use std::panic;
+    use std::panic::AssertUnwindSafe;
 
     use super::*;
 
     #[derive(Debug)]
     struct Tag(&'static str);
+
+    /// An enum whose parse reads one name, `auto`.
+    #[derive(Debug, PartialEq)]
+    enum Pick {
+        Auto,
+    }
+
+    impl FromStr for Pick {
+        type Err = ();
+
+        fn from_str(name: &str) -> Result<Self, ()> {
+            (name == "auto").then_some(Pick::Auto).ok_or(())
+        }
+    }
 
     impl Display for Tag {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -315,6 +342,15 @@ mod tests {
         assert_eq!(string.required_string(), "text");
         let variant = DynamicValue::Static(ConstValue::Enum("auto".into()));
         assert_eq!(variant.required_enum(), "auto");
+        assert_eq!(variant.required_enum_as::<Pick>(), Pick::Auto);
+        let other = DynamicValue::Static(ConstValue::Enum("manual".into()));
+        assert!(
+            panic::catch_unwind(AssertUnwindSafe(|| other.required_enum_as::<Pick>()))
+                .unwrap_err()
+                .downcast_ref::<String>()
+                .unwrap()
+                .contains(any::type_name::<Pick>())
+        );
         let path = DynamicValue::Static(ConstValue::FsPath("a.fits".into()));
         assert_eq!(path.required_fs_path(), "a.fits");
         assert_eq!(path.required_fs_paths(), ["a.fits"]);

@@ -3,11 +3,12 @@
 use imaginarium::{Blend, BlendMode, ColorFormat, ContrastBrightness, Transform, Vec2};
 use scenarium::FuncId;
 use scenarium::Invocation;
+use scenarium::async_lambda;
 use scenarium::{ConstValue, DataType, DynamicValue, InvokeError};
-use scenarium::{Func, FuncInput, FuncLambda, FuncOutput, Library};
+use scenarium::{Func, FuncInput, FuncOutput, Library};
 
 use crate::config_node::enum_input;
-use crate::image::format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat, conversion_target};
+use crate::image::format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat};
 use crate::image::nodes::BLENDMODE_DATATYPE;
 use crate::image::{IMAGE_DATA_TYPE, Image};
 use std::mem;
@@ -29,23 +30,18 @@ fn register_brightness(library: &mut Library) {
         Func::new(
             BRIGHTNESS_CONTRAST_FUNC_ID,
             "Brightness / Contrast",
-            FuncLambda::new(
-                move |Invocation {
-                          inputs, outputs, ..
-                      }| {
-                    Box::pin(async move {
-                        debug_assert_eq!(inputs.len(), 3);
-                        debug_assert_eq!(outputs.len(), 1);
-                        let value = mem::take(&mut inputs[0]);
-                        let brightness = inputs[1].required_f64() as f32;
-                        let contrast = inputs[2].required_f64() as f32;
-                        let image =
-                            adjust_image(ContrastBrightness::new(contrast, brightness), value);
-                        outputs[0] = DynamicValue::from_custom(image);
-                        Ok(())
-                    })
-                },
-            ),
+            async_lambda!(move |Invocation {
+                                    inputs, outputs, ..
+                                }| {
+                debug_assert_eq!(inputs.len(), 3);
+                debug_assert_eq!(outputs.len(), 1);
+                let value = mem::take(&mut inputs[0]);
+                let brightness = inputs[1].required_f64() as f32;
+                let contrast = inputs[2].required_f64() as f32;
+                let image = adjust_image(ContrastBrightness::new(contrast, brightness), value);
+                outputs[0] = DynamicValue::from_custom(image);
+                Ok(())
+            }),
         )
         .description("Adjusts the brightness and contrast of an image.")
         .category("Image")
@@ -72,28 +68,25 @@ fn register_convert(library: &mut Library) {
         Func::new(
             CONVERT_FUNC_ID,
             "Convert",
-            FuncLambda::new(
-                move |Invocation {
-                          inputs, outputs, ..
-                      }| {
-                    Box::pin(async move {
-                        debug_assert_eq!(inputs.len(), 2);
-                        debug_assert_eq!(outputs.len(), 1);
-                        let value = mem::take(&mut inputs[0]);
-                        let format = inputs[1].required_enum();
-                        let converted = {
-                            let image = value.required_custom::<Image>();
-                            conversion_target(format, image.desc().color_format)
-                                .map(|target| image.interleaved().convert_to(target))
-                        };
-                        outputs[0] = match converted {
-                            Some(image) => DynamicValue::from_custom(Image::from(image)),
-                            None => value,
-                        };
-                        Ok(())
-                    })
-                },
-            ),
+            async_lambda!(move |Invocation {
+                                    inputs, outputs, ..
+                                }| {
+                debug_assert_eq!(inputs.len(), 2);
+                debug_assert_eq!(outputs.len(), 1);
+                let value = mem::take(&mut inputs[0]);
+                let format = inputs[1].required_enum_as::<ConversionFormat>();
+                let converted = {
+                    let image = value.required_custom::<Image>();
+                    format
+                        .target(image.desc().color_format)
+                        .map(|target| image.interleaved().convert_to(target))
+                };
+                outputs[0] = match converted {
+                    Some(image) => DynamicValue::from_custom(Image::from(image)),
+                    None => value,
+                };
+                Ok(())
+            }),
         )
         .description("Converts an image to a different color format.")
         .category("Image")
@@ -115,41 +108,34 @@ fn register_blend(library: &mut Library) {
         Func::new(
             BLEND_FUNC_ID,
             "Blend",
-            FuncLambda::new(
-                move |Invocation {
-                          inputs, outputs, ..
-                      }| {
-                    Box::pin(async move {
-                        debug_assert_eq!(inputs.len(), 4);
-                        debug_assert_eq!(outputs.len(), 1);
-                        let source = inputs[0].required_custom::<Image>();
-                        let destination = inputs[1].required_custom::<Image>();
-                        let mode = inputs[2]
-                            .required_enum()
-                            .parse::<BlendMode>()
-                            .expect("enum input is validated at the compile boundary");
-                        let alpha = inputs[3].required_f64() as f32;
-                        // Two independent wires: a different size or format is the user's
-                        // graph, not a broken invariant, and the blend kernel asserts on it.
-                        if destination.desc() != source.desc() {
-                            return Err(InvokeError::invalid_input(
-                                1,
-                                "an image with the source's size and format",
-                                destination.desc(),
-                            ));
-                        }
-                        let mut output = imaginarium::Image::new_black(source.desc())
-                            .map_err(InvokeError::external)?;
-                        Blend::new(mode, alpha).apply_cpu(
-                            &source.interleaved(),
-                            &destination.interleaved(),
-                            &mut output,
-                        );
-                        outputs[0] = DynamicValue::from_custom(Image::from(output));
-                        Ok(())
-                    })
-                },
-            ),
+            async_lambda!(move |Invocation {
+                                    inputs, outputs, ..
+                                }| {
+                debug_assert_eq!(inputs.len(), 4);
+                debug_assert_eq!(outputs.len(), 1);
+                let source = inputs[0].required_custom::<Image>();
+                let destination = inputs[1].required_custom::<Image>();
+                let mode = inputs[2].required_enum_as::<BlendMode>();
+                let alpha = inputs[3].required_f64() as f32;
+                // Two independent wires: a different size or format is the user's
+                // graph, not a broken invariant, and the blend kernel asserts on it.
+                if destination.desc() != source.desc() {
+                    return Err(InvokeError::invalid_input(
+                        1,
+                        "an image with the source's size and format",
+                        destination.desc(),
+                    ));
+                }
+                let mut output =
+                    imaginarium::Image::new_black(source.desc()).map_err(InvokeError::external)?;
+                Blend::new(mode, alpha).apply_cpu(
+                    &source.interleaved(),
+                    &destination.interleaved(),
+                    &mut output,
+                );
+                outputs[0] = DynamicValue::from_custom(Image::from(output));
+                Ok(())
+            }),
         )
         .description("Blends two images using the selected blend mode.")
         .category("Image")
@@ -174,79 +160,74 @@ fn register_blend(library: &mut Library) {
 
 fn register_transform(library: &mut Library) {
     library.add(
-        Func::new(TRANSFORM_FUNC_ID, "Transform", FuncLambda::new(
-                move |Invocation {
-                          inputs, outputs, ..
-                      }| {
-                    Box::pin(async move {
-                        debug_assert_eq!(inputs.len(), 6);
-                        debug_assert_eq!(outputs.len(), 1);
-                        let image = inputs[0]
-                            .required_custom::<Image>();
-                        let scalar = |index: usize| {
-                            inputs[index]
-                                .required_f64()
-                                as f32
-                        };
-                        let center = Vec2::new(
-                            image.desc().width as f32 / 2.0,
-                            image.desc().height as f32 / 2.0,
-                        );
-                        let scale = Vec2::new(scalar(1), scalar(2));
-                        let transform = Transform::new()
-                            .scale(scale)
-                            .rotate_around(scalar(3), center)
-                            .translate(Vec2::new(scalar(4), scalar(5)));
-                        if !transform.is_invertible() {
-                            return Err(InvokeError::invalid_input(
-                                1,
-                                "a scale, rotation and translation that make an invertible transform",
-                                (1..6).map(scalar).collect::<Vec<f32>>(),
-                            ));
-                        }
-                        let mut output = imaginarium::Image::new_black(image.desc())
-                            .map_err(InvokeError::external)?;
-                        transform.apply_cpu(&image.interleaved(), &mut output);
-                        outputs[0] = DynamicValue::from_custom(Image::from(output));
-                        Ok(())
-                    })
-                },
-            ))
-            .description("Applies scale, rotation, and translation to an image.")
-            .category("Image")
-            .pure()
-            .input(
-                FuncInput::required("Image", IMAGE_DATA_TYPE.clone())
-                    .description("Image to transform."),
-            )
-            .input(
-                FuncInput::required("Scale X", DataType::Float)
-                    .description("Horizontal scale factor. 1 leaves width unchanged.")
-                    .default(1.0),
-            )
-            .input(
-                FuncInput::required("Scale Y", DataType::Float)
-                    .description("Vertical scale factor. 1 leaves height unchanged.")
-                    .default(1.0),
-            )
-            .input(
-                FuncInput::required("Rotation", DataType::Float)
-                    .description("Rotation in radians, about the image center.")
-                    .default(0.0),
-            )
-            .input(
-                FuncInput::required("Translate X", DataType::Float)
-                    .description("Horizontal shift in pixels.")
-                    .default(0.0),
-            )
-            .input(
-                FuncInput::required("Translate Y", DataType::Float)
-                    .description("Vertical shift in pixels.")
-                    .default(0.0),
-            )
-            .output(
-                FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Transformed image."),
-            ),
+        Func::new(
+            TRANSFORM_FUNC_ID,
+            "Transform",
+            async_lambda!(move |Invocation {
+                                    inputs, outputs, ..
+                                }| {
+                debug_assert_eq!(inputs.len(), 6);
+                debug_assert_eq!(outputs.len(), 1);
+                let image = inputs[0].required_custom::<Image>();
+                let scalar = |index: usize| inputs[index].required_f64() as f32;
+                let center = Vec2::new(
+                    image.desc().width as f32 / 2.0,
+                    image.desc().height as f32 / 2.0,
+                );
+                let scale = Vec2::new(scalar(1), scalar(2));
+                let transform = Transform::new()
+                    .scale(scale)
+                    .rotate_around(scalar(3), center)
+                    .translate(Vec2::new(scalar(4), scalar(5)));
+                if !transform.is_invertible() {
+                    return Err(InvokeError::invalid_input(
+                        1,
+                        "a scale, rotation and translation that make an invertible transform",
+                        (1..6).map(scalar).collect::<Vec<f32>>(),
+                    ));
+                }
+                let mut output =
+                    imaginarium::Image::new_black(image.desc()).map_err(InvokeError::external)?;
+                transform.apply_cpu(&image.interleaved(), &mut output);
+                outputs[0] = DynamicValue::from_custom(Image::from(output));
+                Ok(())
+            }),
+        )
+        .description("Applies scale, rotation, and translation to an image.")
+        .category("Image")
+        .pure()
+        .input(
+            FuncInput::required("Image", IMAGE_DATA_TYPE.clone())
+                .description("Image to transform."),
+        )
+        .input(
+            FuncInput::required("Scale X", DataType::Float)
+                .description("Horizontal scale factor. 1 leaves width unchanged.")
+                .default(1.0),
+        )
+        .input(
+            FuncInput::required("Scale Y", DataType::Float)
+                .description("Vertical scale factor. 1 leaves height unchanged.")
+                .default(1.0),
+        )
+        .input(
+            FuncInput::required("Rotation", DataType::Float)
+                .description("Rotation in radians, about the image center.")
+                .default(0.0),
+        )
+        .input(
+            FuncInput::required("Translate X", DataType::Float)
+                .description("Horizontal shift in pixels.")
+                .default(0.0),
+        )
+        .input(
+            FuncInput::required("Translate Y", DataType::Float)
+                .description("Vertical shift in pixels.")
+                .default(0.0),
+        )
+        .output(
+            FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Transformed image."),
+        ),
     );
 }
 

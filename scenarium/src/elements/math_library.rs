@@ -1,7 +1,5 @@
 use crate::DataType;
-use crate::DynamicValue;
 use crate::async_lambda;
-use crate::graph::func::error::InvokeError;
 use crate::graph::func::lambda::Invocation;
 use crate::graph::func::{Func, FuncInput, FuncOutput};
 use crate::graph::identity::FuncId;
@@ -34,12 +32,6 @@ struct FloatOutputSpec {
     description: &'static str,
 }
 
-fn float_input(inputs: &[DynamicValue], idx: usize) -> Result<f64, InvokeError> {
-    inputs[idx]
-        .as_f64()
-        .ok_or_else(|| InvokeError::invalid_input(idx, "a number", &inputs[idx]))
-}
-
 fn declared_input(spec: FloatInputSpec) -> FuncInput {
     FuncInput::required(spec.name, DataType::Float)
         .description(spec.description)
@@ -66,7 +58,7 @@ fn unary_float_func(
                             }| {
             assert_eq!(inputs.len(), 1);
             assert_eq!(outputs.len(), 1);
-            outputs[0] = operation(float_input(inputs, 0)?).into();
+            outputs[0] = operation(inputs[0].required_f64()).into();
             Ok(())
         }),
     )
@@ -93,7 +85,7 @@ fn binary_float_func(
                             }| {
             assert_eq!(inputs.len(), 2);
             assert_eq!(outputs.len(), 1);
-            outputs[0] = operation(float_input(inputs, 0)?, float_input(inputs, 1)?).into();
+            outputs[0] = operation(inputs[0].required_f64(), inputs[1].required_f64()).into();
             Ok(())
         }),
     )
@@ -347,8 +339,8 @@ fn divide_func() -> Func {
                             }| {
             assert_eq!(inputs.len(), 2);
             assert_eq!(outputs.len(), 2);
-            let dividend = float_input(inputs, 0)?;
-            let divisor = float_input(inputs, 1)?;
+            let dividend = inputs[0].required_f64();
+            let divisor = inputs[1].required_f64();
             outputs[0] = (dividend / divisor).into();
             outputs[1] = (dividend % divisor).into();
             Ok(())
@@ -380,7 +372,8 @@ fn divide_func() -> Func {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ConstValue;
+    use crate::graph::func::error::InvokeError;
+    use crate::{ConstValue, DynamicValue};
     use crate::testing::func_invoker::FuncInvoker;
 
     async fn invoke(name: &str, values: &[DynamicValue]) -> Result<Vec<DynamicValue>, InvokeError> {
@@ -396,7 +389,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn operations_compute_exact_results_and_reject_text() {
+    async fn operations_compute_exact_results() {
         for (name, expected) in [
             ("Add", 5.0),
             ("Subtract", -1.0),
@@ -434,10 +427,5 @@ mod tests {
                 "the fixture tells the ops apart"
             );
         }
-
-        let text = DynamicValue::Static(ConstValue::String("not a number".into()));
-        assert!(invoke("Add", &[text.clone(), float(3.0)]).await.is_err());
-        assert!(invoke("Add", &[float(2.0), text.clone()]).await.is_err());
-        assert!(invoke("Sine", &[text]).await.is_err());
     }
 }

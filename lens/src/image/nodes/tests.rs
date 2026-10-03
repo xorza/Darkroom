@@ -4,19 +4,9 @@ use scenarium::testing::func_invoker::FuncInvoker;
 use imaginarium::ColorFormat;
 use scenarium::{ConstValue, DynamicValue};
 
-use crate::image::format::{AS_IS, CONVERSION_FORMAT_DATATYPE, conversion_target};
+use crate::image::format::{AS_IS, CONVERSION_FORMAT_DATATYPE};
 use crate::image::nodes::image_library;
 use crate::image::{IMAGE_DATA_TYPE, Image};
-
-#[test]
-fn conversion_target_collapses_as_is_and_matching_format() {
-    assert_eq!(conversion_target("As Is", ColorFormat::RGB_U8), None);
-    assert_eq!(conversion_target("RGB u8", ColorFormat::RGB_U8), None);
-    assert_eq!(
-        conversion_target("RGB u8", ColorFormat::RGBA_F32),
-        Some(ColorFormat::RGB_U8)
-    );
-}
 
 #[test]
 fn format_defaults_are_exact() {

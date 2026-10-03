@@ -17,10 +17,9 @@ use tokio::task;
 use tokio::time::timeout;
 
 use scenarium::Invocation;
+use scenarium::async_lambda;
 use scenarium::{ConstValue, DataType, FsPathConfig, FsPathMode};
-use scenarium::{
-    EventLambda, Func, FuncId, FuncInput, FuncLambda, FuncOutput, InvokeError, Library,
-};
+use scenarium::{EventLambda, Func, FuncId, FuncInput, FuncOutput, InvokeError, Library};
 
 const WATCH_DIRECTORY_FUNC_ID: FuncId =
     FuncId::from_u128(0x1318_c24c_2ac7_4a9a_a454_281b_dbdc_4ffc);
@@ -151,9 +150,7 @@ pub fn fs_watch_library() -> Library {
     let mut library = Library::default();
 
     library.add(
-        Func::new(WATCH_DIRECTORY_FUNC_ID, "Watch Directory", FuncLambda::new(
-                move |Invocation { event_state, inputs, outputs, .. }| {
-                    Box::pin(async move {
+        Func::new(WATCH_DIRECTORY_FUNC_ID, "Watch Directory", async_lambda!(move |Invocation { event_state, inputs, outputs, .. }| {
                         debug_assert_eq!(inputs.len(), 3);
                         debug_assert_eq!(outputs.len(), 1);
                         let path = inputs[0]
@@ -203,9 +200,7 @@ pub fn fs_watch_library() -> Library {
 
                         outputs[0] = ConstValue::FsPath(path).into();
                         Ok(())
-                    })
-                },
-            ))
+                    }))
             .category("System")
             .description(
                 "Passes a directory through unchanged and fires `Changed` when files are added, \

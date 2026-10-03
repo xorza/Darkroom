@@ -19,8 +19,8 @@ use std::fmt;
 use std::sync::Arc;
 
 use common::{FieldKind, FieldValue, Introspect};
-use scenarium::FuncLambda;
 use scenarium::Invocation;
+use scenarium::async_lambda;
 use scenarium::{ConstValue, CustomValue, DataType, DynamicValue, EnumVariants, TypeId};
 use scenarium::{Func, FuncId, FuncInput, FuncOutput};
 use scenarium::{InvokeError, Library, TypeEntry};
@@ -98,23 +98,18 @@ pub(crate) fn add_config_builder<T: Introspect + Clone + fmt::Debug + Send + Syn
     }
     // The lambda needs each field's kind to read its input value back.
     let kinds: Arc<[FieldKind]> = fields.iter().map(|field| field.kind).collect();
-    let lambda = FuncLambda::new(
-        move |Invocation {
-                  inputs, outputs, ..
-              }| {
-            let kinds = Arc::clone(&kinds);
-            Box::pin(async move {
-                let values: Vec<FieldValue> = kinds
-                    .iter()
-                    .zip(inputs)
-                    .map(|(kind, input)| field_value(kind, input))
-                    .collect();
-                let config = T::from_fields(&values).map_err(InvokeError::external)?;
-                outputs[0] = DynamicValue::from_custom(ConfigValue(config));
-                Ok(())
-            })
-        },
-    );
+    let lambda = async_lambda!(move |Invocation { inputs, outputs, .. }| {
+        kinds = Arc::clone(&kinds),
+    } => {
+        let values: Vec<FieldValue> = kinds
+            .iter()
+            .zip(inputs)
+            .map(|(kind, input)| field_value(kind, input))
+            .collect();
+        let config = T::from_fields(&values).map_err(InvokeError::external)?;
+        outputs[0] = DynamicValue::from_custom(ConfigValue(config));
+        Ok(())
+    });
     let mut func = Func::new(node_id, node_name, lambda)
         .category("Astro")
         .description(description)
