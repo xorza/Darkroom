@@ -369,8 +369,8 @@ fn compute_final_stats(values: &mut [f32], deviations: &mut [f32]) -> MedianMad 
 
 /// Iteratively clip `values`, then measure what survived.
 ///
-/// `deviations` must already be `values.len()` long; the two public entry points differ only in
-/// how they get it that way, so everything after the sizing lives here.
+/// `deviations` must already be `values.len()` long — [`ClippedStats::sigma_clipped`] sizes it
+/// through [`DeviationScratch`], and everything after the sizing lives here.
 fn sigma_clipped_core(
     values: &mut [f32],
     deviations: &mut [f32],

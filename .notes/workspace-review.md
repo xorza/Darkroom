@@ -19,11 +19,6 @@ Groups are named after their shared root cause and ordered by severity, then ben
 
 # Low — duplication, dead surface, local simplifications
 
-## Docs that describe code that no longer exists
-Severity: Low — prose that misleads readers about behaviour.
-
-- [ ] `lumos` — `star_detection/mod.rs` mentions "adaptive thresholding" and `measure_star` "Laplacian SNR" (neither exists), an orphan doc line sits above `compute_star`, `LabelMap::from_pool` says "Four (default)" (default is `Eight`), `compute_annulus_background` documents arguments it does not take; `Stretch::auto_stf`'s "0.25 is PixInsight's STF default" sits beside `0.2`, and `auto_asinh` is "gentler than STF's 0.25" though both are 0.2; `math/statistics` docs describe two entry points where one exists; `magsac/mod.rs` `MagsacScorer::new` derives `outlier_loss` from a removed formula; `ScratchBuffers` claims `for_each_init` allocation (it leases from `JobScratchPool`); `CacheConfig` says "(median, sigma-clipped)"; `stacking/mod.rs` omits `frame_store` and `stack_product`; `load_raw_cfa`'s doc is attached to `raw_cfa_frame_info`; `markesteijn`/`urect` cite a "pinned toolchain" the workspace does not have.
-
 ## Style rules not applied
 Severity: Low — breaches of the standing Rust rules.
 

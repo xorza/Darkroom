@@ -12,7 +12,8 @@
 //!
 //! 2. **Background**: Estimate per-pixel background and noise using tiled
 //!    sigma-clipped statistics with bilinear interpolation. Optional iterative
-//!    refinement or adaptive thresholding for nebulous fields.
+//!    refinement masks the detected sources and estimates again, for
+//!    nebulous fields.
 //!
 //! 3. **FWHM Estimation**: Optionally auto-estimate PSF FWHM from bright stars
 //!    for matched filtering.
