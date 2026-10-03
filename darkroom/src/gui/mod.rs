@@ -1,5 +1,6 @@
 pub(crate) mod app;
 pub(crate) mod dialogs;
+pub(crate) mod event_ref;
 pub(crate) mod graph_ctx;
 pub(crate) mod pane;
 pub(crate) mod requests;
@@ -21,13 +22,3 @@ pub(crate) const MAIN_WINDOW: WindowToken = WindowToken(0);
 /// here and let widget signatures stay `HostHandle` instead of repeating
 /// `<App>`.
 pub(crate) type HostHandle = palantir::HostHandle<App>;
-
-/// One event (emitter) port's identity. Events are indexed independently
-/// of data outputs, so they get their own ref rather than a `PortRef`
-/// kind. Domain-keyed like [`PortRef`](crate::core::document::PortRef) so geometry/drag code derives the
-/// glyph's `WidgetId` (`event_glyph_wid`) without a cache.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct EventRef {
-    pub(crate) node_id: scenarium::NodeId,
-    pub(crate) event_idx: usize,
-}

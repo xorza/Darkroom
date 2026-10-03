@@ -116,7 +116,7 @@ where
     R: Send,
     E: Send,
 {
-    assert!(!slots.is_empty(), "max_concurrent must be positive");
+    assert!(!slots.is_empty(), "a bounded map needs at least one slot");
 
     let next = AtomicUsize::new(0);
     let failed = AtomicBool::new(false);
@@ -179,6 +179,7 @@ where
     E: Send,
     F: Fn(usize, &T) -> Result<R, E> + Sync,
 {
+    assert!(max_concurrent > 0, "max_concurrent must be positive");
     let mut slots = vec![(); max_concurrent];
     try_par_map_bounded(items.len(), &mut slots, |(), index| {
         operation(index, &items[index])

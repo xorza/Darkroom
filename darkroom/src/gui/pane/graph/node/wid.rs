@@ -16,7 +16,7 @@ use palantir::{Ui, WidgetId};
 use scenarium::NodeId;
 
 use crate::core::document::PortRef;
-use crate::gui::EventRef;
+use crate::gui::event_ref::EventRef;
 
 /// A node-keyed widget id under `tag`.
 pub(crate) fn node(tag: &'static str, node_id: NodeId) -> WidgetId {

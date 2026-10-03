@@ -1,5 +1,6 @@
 pub(crate) mod error;
 pub(crate) mod graph_revision;
+pub(crate) mod node_key;
 pub(crate) mod open_document;
 
 use ::serde::{Deserialize, Serialize};
@@ -11,6 +12,7 @@ use std::mem;
 
 use crate::core::document::error::DocumentValidationError;
 use crate::core::document::error::GraphViewValidationError;
+use crate::core::document::node_key::NodeKey;
 use crate::core::preview;
 
 /// Whether a port consumes a binding (`Input`) or produces a value
@@ -43,6 +45,12 @@ pub(crate) struct PortRef {
     pub(crate) node_id: NodeId,
     pub(crate) kind: PortKind,
     pub(crate) port_idx: usize,
+}
+
+impl NodeKey for PortRef {
+    fn node(self) -> NodeId {
+        self.node_id
+    }
 }
 
 impl PortRef {

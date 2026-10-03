@@ -22,9 +22,10 @@ use palantir::widget::{LineCap, Shape};
 use palantir::{ColorRamp, Rect, RgbaF32, Size, Stroke, Ui};
 use scenarium::NodeId;
 
+use crate::core::document::node_key::NodeKey;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::ctx::DrawCtx;
-use crate::gui::pane::graph::frame::geometry::{GlyphKey, PortLayer};
+use crate::gui::pane::graph::frame::geometry::PortLayer;
 use crate::gui::pane::graph::gesture::breaker::BreakerProbe;
 use crate::gui::theme::color::toward;
 
@@ -170,7 +171,7 @@ pub(crate) struct GlyphDrag<A, B> {
     pub(crate) snap: Option<B>,
 }
 
-impl<A: GlyphKey, B: GlyphKey> GlyphDrag<A, B> {
+impl<A: NodeKey, B: NodeKey> GlyphDrag<A, B> {
     /// A drag off `from` with nothing snapped yet.
     pub(crate) fn new(from: A) -> Self {
         Self { from, snap: None }

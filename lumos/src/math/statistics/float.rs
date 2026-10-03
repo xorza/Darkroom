@@ -37,42 +37,62 @@ pub(crate) trait Float:
     fn is_nan(self) -> bool;
 }
 
-/// One impl per width, generated rather than copied. The pair this trait
-/// replaced had drifted into two doc comments explaining they were twins.
-macro_rules! impl_float {
-    ($($ty:ty),+ $(,)?) => {
-        $(
-            impl Float for $ty {
-                const ZERO: Self = 0.0;
-                const HALF: Self = 0.5;
+impl Float for f32 {
+    const ZERO: Self = 0.0;
+    const HALF: Self = 0.5;
 
-                #[inline]
-                fn total_cmp(&self, other: &Self) -> Ordering {
-                    <$ty>::total_cmp(self, other)
-                }
+    #[inline]
+    fn total_cmp(&self, other: &Self) -> Ordering {
+        f32::total_cmp(self, other)
+    }
 
-                #[inline]
-                fn fast_cmp(&self, other: &Self) -> Ordering {
-                    self.partial_cmp(other).unwrap_or(Ordering::Equal)
-                }
+    #[inline]
+    fn fast_cmp(&self, other: &Self) -> Ordering {
+        self.partial_cmp(other).unwrap_or(Ordering::Equal)
+    }
 
-                #[inline]
-                fn abs(self) -> Self {
-                    <$ty>::abs(self)
-                }
+    #[inline]
+    fn abs(self) -> Self {
+        f32::abs(self)
+    }
 
-                #[inline]
-                fn max(self, other: Self) -> Self {
-                    <$ty>::max(self, other)
-                }
+    #[inline]
+    fn max(self, other: Self) -> Self {
+        f32::max(self, other)
+    }
 
-                #[inline]
-                fn is_nan(self) -> bool {
-                    <$ty>::is_nan(self)
-                }
-            }
-        )+
-    };
+    #[inline]
+    fn is_nan(self) -> bool {
+        f32::is_nan(self)
+    }
 }
 
-impl_float!(f32, f64);
+impl Float for f64 {
+    const ZERO: Self = 0.0;
+    const HALF: Self = 0.5;
+
+    #[inline]
+    fn total_cmp(&self, other: &Self) -> Ordering {
+        f64::total_cmp(self, other)
+    }
+
+    #[inline]
+    fn fast_cmp(&self, other: &Self) -> Ordering {
+        self.partial_cmp(other).unwrap_or(Ordering::Equal)
+    }
+
+    #[inline]
+    fn abs(self) -> Self {
+        f64::abs(self)
+    }
+
+    #[inline]
+    fn max(self, other: Self) -> Self {
+        f64::max(self, other)
+    }
+
+    #[inline]
+    fn is_nan(self) -> bool {
+        f64::is_nan(self)
+    }
+}

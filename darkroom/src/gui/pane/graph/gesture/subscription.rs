@@ -3,7 +3,7 @@ use palantir::Ui;
 use scenarium::{NodeId, Subscription};
 
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::gui::EventRef;
+use crate::gui::event_ref::EventRef;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph::ctx::CanvasCtx;

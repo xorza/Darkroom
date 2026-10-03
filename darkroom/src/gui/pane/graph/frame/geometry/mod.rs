@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::hash::Hash;
 
 use glam::Vec2;
 use palantir::{Rect, ResponseState, Size, Ui};
 use scenarium::NodeId;
 
+use crate::core::document::node_key::NodeKey;
 use crate::core::document::{PortKind, PortRef};
-use crate::gui::EventRef;
+use crate::gui::event_ref::EventRef;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph::node::header::subscription_glyph_wid;
@@ -79,34 +79,6 @@ pub(crate) struct CanvasGeometry {
     node_screen: HashMap<NodeId, Rect>,
 }
 
-/// A glyph key that names the node its glyph hangs off — how a [`PortLayer`]
-/// evicts a deleted node's entries, and how a wire drag notices the node
-/// disappearing under it (`GraphCtx::contains`).
-/// Every glyph domain the canvas keys on has one: a data port and an emitter
-/// event belong to their node, and a subscription pin *is* its node (a
-/// subscription is whole-node, so its layer is keyed by `NodeId` directly).
-pub(crate) trait GlyphKey: Copy + Eq + Hash + Debug {
-    fn node(self) -> NodeId;
-}
-
-impl GlyphKey for PortRef {
-    fn node(self) -> NodeId {
-        self.node_id
-    }
-}
-
-impl GlyphKey for EventRef {
-    fn node(self) -> NodeId {
-        self.node_id
-    }
-}
-
-impl GlyphKey for NodeId {
-    fn node(self) -> NodeId {
-        self
-    }
-}
-
 /// One key-domain's port snapshot, split into two tiers by lifetime:
 ///
 /// - `live` is cleared and rebuilt every frame from last frame's responses.
@@ -139,7 +111,7 @@ impl<K> Default for PortLayer<K> {
     }
 }
 
-impl<K: GlyphKey> PortLayer<K> {
+impl<K: NodeKey> PortLayer<K> {
     /// Snapshot one widget into `live`, refreshing its persistent offset.
     fn record(&mut self, key: K, r: ResponseState, node_min: Vec2, node_pos: Vec2) {
         let info = snapshot(r, node_min, node_pos, key, &mut self.offsets);
@@ -392,7 +364,7 @@ impl CanvasGeometry {
 /// back to the cached offset so a just-shown graph still anchors. The center
 /// is `node_pos + offset` so a moved node's glyph tracks its current
 /// position. Shared by data ports, event glyphs, and subscription pins.
-fn snapshot<K: GlyphKey>(
+fn snapshot<K: NodeKey>(
     r: ResponseState,
     node_min: Vec2,
     node_pos: Vec2,
