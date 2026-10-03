@@ -61,10 +61,6 @@ impl CustomValueCodec for ImageCodec {
         Ok(())
     }
 
-    #[expect(
-        clippy::map_err_ignore,
-        reason = "a `TryFromIntError` says only that the value does not fit, which the error it becomes states"
-    )]
     async fn decode(
         &self,
         reader: &mut (dyn AsyncRead + Unpin + Send),

@@ -225,10 +225,6 @@ struct EncodedDefectMap {
     header: Header,
 }
 
-#[expect(
-    clippy::map_err_ignore,
-    reason = "a failed integer conversion carries nothing past the range the message names"
-)]
 fn encode_defect_map(map: &DefectMap) -> io::Result<EncodedDefectMap> {
     let (hot, cold) = (map.hot_indices(), map.cold_indices());
     let mut kinds = Vec::with_capacity(hot.len() + cold.len());
@@ -275,10 +271,6 @@ fn encode_defect_map(map: &DefectMap) -> io::Result<EncodedDefectMap> {
     Ok(EncodedDefectMap { table, header })
 }
 
-#[expect(
-    clippy::map_err_ignore,
-    reason = "a failed integer conversion carries nothing past the range the message names"
-)]
 fn read_defect_map(
     reader: &mut SliceReader<'_>,
     index: Option<usize>,

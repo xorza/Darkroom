@@ -48,10 +48,6 @@ impl Worker {
         self.run_cancel.cancel();
     }
 
-    #[expect(
-        clippy::map_err_ignore,
-        reason = "the unsent message is not needed once the receiver is gone"
-    )]
     pub fn send(&self, msg: WorkerMessage) -> Result<(), WorkerExited> {
         self.tx.send(msg).map_err(|_| WorkerExited)
     }
