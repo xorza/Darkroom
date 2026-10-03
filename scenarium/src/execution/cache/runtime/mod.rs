@@ -79,6 +79,11 @@ pub(crate) struct RuntimeCache {
     /// fold reads both together — a path's identity, and the producer slot
     /// that delivered the path.
     fs_paths: HashMap<String, FsPathId>,
+    /// The previous run's memo, kept for its keys: a path read again moves its
+    /// string from here to the queue, so a run over the paths of the last
+    /// allocates none. What no run asked for again is dropped a run later, so
+    /// the two hold at most two runs' paths.
+    previous_fs_paths: HashMap<String, FsPathId>,
     /// The off-thread walk that fills `fs_paths`: queue, then pass. It owns
     /// only what crosses to the blocking pool.
     stamp_job: StampJob,
@@ -179,6 +184,7 @@ impl RuntimeCache {
     pub(crate) fn clear(&mut self) {
         self.slots.clear();
         self.fs_paths.clear();
+        self.previous_fs_paths.clear();
         self.stamp_job.clear_queue();
     }
 
@@ -523,7 +529,8 @@ impl RuntimeCache {
         executing: impl IntoIterator<Item = NodeIdx>,
         cancel: CancelToken,
     ) {
-        // A fresh run identifies afresh.
+        // A fresh run identifies afresh, from the last run's keys.
+        mem::swap(&mut self.fs_paths, &mut self.previous_fs_paths);
         self.fs_paths.clear();
         self.stamp_job.clear_queue();
         #[expect(
@@ -575,10 +582,17 @@ impl RuntimeCache {
                 // An unset slot has nothing to walk, and queueing it would
                 // fail the whole pass on a `metadata("")` — costing every
                 // other node in the batch its pre-run identity.
-                if is_unset_path(path) || self.fs_paths.contains_key(path) {
+                if is_unset_path(path)
+                    || self.fs_paths.contains_key(path)
+                    || self.stamp_job.is_requested(path)
+                {
                     continue;
                 }
-                self.stamp_job.request(path);
+                let key = self
+                    .previous_fs_paths
+                    .remove_entry(path)
+                    .map_or_else(|| path.clone(), |(key, _)| key);
+                self.stamp_job.request(key);
             }
         }
     }
@@ -965,6 +979,20 @@ pub(crate) mod internals {
             let resolved = self.stamp_job.run(cancel);
             self.fs_paths.extend(self.stamp_job.drain_stamped());
             resolved
+        }
+
+        /// The key the run's memo holds `path` under, for a test about whose
+        /// allocation it is.
+        pub(crate) fn path_key(&self, path: &str) -> Option<&String> {
+            self.fs_paths.get_key_value(path).map(|(key, _)| key)
+        }
+
+        /// Re-key `path` with at least `capacity` bytes reserved — a key no
+        /// copy of the path would have, so a test can tell it apart.
+        pub(crate) fn widen_path_key(&mut self, path: &str, capacity: usize) {
+            let (mut key, identity) = self.fs_paths.remove_entry(path).unwrap();
+            key.reserve_exact(capacity);
+            self.fs_paths.insert(key, identity);
         }
 
         /// Plant a file identity without touching a filesystem, so a

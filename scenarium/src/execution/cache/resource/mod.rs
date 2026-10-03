@@ -71,11 +71,16 @@ pub(super) struct StampJob {
 }
 
 impl StampJob {
-    /// Queue `path` for the next pass, unless it is already queued.
-    pub(super) fn request(&mut self, path: &str) {
-        if !self.requests.contains(path) {
-            self.requests.insert(path.to_string());
-        }
+    /// Queue `path` for the next pass. The caller owns the key, so a path
+    /// it identified before is queued without a copy.
+    pub(super) fn request(&mut self, path: String) {
+        debug_assert!(!self.requests.contains(&path), "{path} is already queued");
+        self.requests.insert(path);
+    }
+
+    /// Whether `path` waits in the queue.
+    pub(super) fn is_requested(&self, path: &str) -> bool {
+        self.requests.contains(path)
     }
 
     /// Whether [`run`](Self::run) has anything to do — the check that keeps an
