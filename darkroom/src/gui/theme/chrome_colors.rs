@@ -19,7 +19,7 @@ pub(crate) struct ChromeColors {
     pub(crate) breaker_stroke: RgbaF32,
     /// Muted secondary foreground (palette `text_muted`). The
     /// de-emphasized accent shared across chrome: inactive/disabled header
-    /// chips, the pinned-inspector outline, and active-tab text — visible
+    /// chips and active-tab text — visible
     /// without competing with the bright accent (`badge_graph`) or
     /// full-strength text.
     pub(crate) text_muted: RgbaF32,

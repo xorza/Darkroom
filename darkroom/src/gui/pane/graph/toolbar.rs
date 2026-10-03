@@ -1,8 +1,7 @@
 //! The floating toolbar pinned to the graph view's top-left corner: a
 //! run/cancel toggle and an event-loop start/stop toggle side by side on one
-//! chrome pill — drawn only on the main graph's pane, since both act on the
-//! whole document — with three view-framing buttons (reset view, show all,
-//! show selected) stacked beneath on a second pill that every pane carries.
+//! chrome pill, with three view-framing buttons (reset view, show all, show
+//! selected) stacked beneath on a second pill.
 //! The frosted pills keep the toolbar legible over both the canvas and any
 //! node under it; the buttons are opaque chips raised off the pill. All carry
 //! hover tooltips; the toggles paint "toggled" while their action is in flight
@@ -20,8 +19,7 @@ use crate::gui::requests::Requests;
 use crate::gui::widgets::support::{dot, filled_rect, frame, play_triangle, stroked_rect};
 use crate::gui::widgets::toolbar::{BUTTON_GAP, Chip, TOOLBAR_MARGIN, pill};
 
-/// The toolbar's chip ids. One graph pane, so each is a fixed hash rather than
-/// keyed by the pane it sits on.
+/// The toolbar's chip ids. One graph pane, so each is a fixed hash.
 pub(crate) fn run_button_wid() -> WidgetId {
     WidgetId::from_hash("darkroom.graph.run_button")
 }

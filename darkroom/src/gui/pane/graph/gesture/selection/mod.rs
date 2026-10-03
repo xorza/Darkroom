@@ -35,8 +35,8 @@ pub(crate) struct SelectionUI {
     /// rebuild it every frame of every drag.
     /// [`Self::preview`] is what says whether the contents mean anything.
     swept: Vec<NodeId>,
-    /// The pane whose draw reads [`Self::swept`]. Empty when no band is
-    /// in flight — draw falls back to the committed selection. A slot of
+    /// Whether the draw reads [`Self::swept`]. Empty when no band is in
+    /// flight — draw falls back to the committed selection. A slot of
     /// its own, not the band's, because it deliberately outlives the band
     /// by one frame: the release frame paints the final selection while
     /// the `SetSelection` is still draining.
@@ -84,10 +84,9 @@ impl SelectionUI {
         !self.band.is_idle()
     }
 
-    /// The live swept set while a band is in flight over this pane,
-    /// for node/pin draw to paint against; `None` for every other pane and
-    /// when no band is active (the caller falls back to the pane's
-    /// committed selection).
+    /// The live swept set while a band is in flight, for node/pin draw to
+    /// paint against; `None` when no band is active (the caller falls back to
+    /// the committed selection).
     pub(crate) fn preview(&self) -> Option<&[NodeId]> {
         self.preview.get()?;
         Some(&self.swept)
@@ -100,10 +99,6 @@ impl SelectionUI {
     /// [`Self::preview`]); `Document`/undo are only touched once, by the
     /// committing `SetSelection` emitted on release. The context's Esc —
     /// resolved once by the canvas — drops the band without emitting.
-    ///
-    /// Called once per visible graph pane; a band in flight belongs to
-    /// exactly one of them, so every other pane's call returns
-    /// immediately rather than advancing the band in its own coordinates.
     pub(crate) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
         let graph_ctx = cx.graph_ctx();
         let resp = ui.response_for(outer_canvas_widget_id());
@@ -183,7 +178,7 @@ impl SelectionUI {
 
     /// Paint the in-progress rectangle. Drawn inside the inner canvas so
     /// its world coords ride the same pan/zoom transform as the nodes.
-    /// No-op when no gesture is active on this pane or the rect has
+    /// No-op when no gesture is active or the rect has
     /// no area yet.
     pub(crate) fn draw(&self, ui: &mut Ui, theme: &Theme) {
         let Some(band) = self.band.get() else {

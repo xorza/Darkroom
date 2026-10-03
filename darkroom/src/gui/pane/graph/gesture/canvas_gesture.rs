@@ -44,13 +44,11 @@ pub(crate) enum CanvasGesture {
     Deselect,
 }
 
-/// Resolve `target`'s bare-canvas gesture for this frame from that pane's
-/// outer-canvas response + modifiers. Drag-starts are checked before clicks
-/// (palantir reports `clicked`/`secondary_clicked` only on a release that
-/// *didn't* drag, but the explicit ordering keeps the precedence obvious).
-/// `None` when nothing latched — an idle canvas, or a press a node/port
-/// captured. With several panes open at most one can answer `Some`: the
-/// press lands on exactly one canvas.
+/// Resolve the bare-canvas gesture for this frame from the outer canvas's
+/// response + modifiers. Drag-starts are checked before clicks (palantir
+/// reports `clicked`/`secondary_clicked` only on a release that *didn't*
+/// drag, but the explicit ordering keeps the precedence obvious). `None` when
+/// nothing latched — an idle canvas, or a press a node/port captured.
 ///
 /// This only ever sees presses that *missed* every node and port: a
 /// node/badge widget captures its own press, so a right-click on a node

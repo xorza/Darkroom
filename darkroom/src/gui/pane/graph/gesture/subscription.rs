@@ -23,7 +23,8 @@ use crate::gui::requests::Requests;
 /// const checks, and links an emitter event glyph to a whole-node
 /// subscription pin (which only sink nodes expose — that's what makes
 /// "events connect only to subscribers" structural). What the two *do* share
-/// — latching, the release edge, pane ownership, the preview's free end — is
+/// — latching, the release edge, the fixed end's node, the preview's free
+/// end — is
 /// [`GlyphDrag`]'s. The drag can start from either end (mirroring a data
 /// wire's start-from-input-or-output): pull from an emitter and drop on a pin,
 /// or pull from a pin and drop on an emitter. Held-drag only; no const-drop or
@@ -47,7 +48,7 @@ enum InFlight {
 
 impl InFlight {
     /// The node at the drag's *fixed* end — whichever glyph the press
-    /// latched. Its graph is the pane that owns the gesture.
+    /// latched.
     fn node(self) -> NodeId {
         match self {
             InFlight::FromEmitter(drag) => drag.node(),
@@ -74,10 +75,6 @@ impl SubscriptionUI {
     /// end, and commit a `SetSubscription { subscribe: true }` on release over
     /// a valid target. The context's Esc — resolved once by the canvas —
     /// drops the wire.
-    ///
-    /// Swept over the whole scene once per frame — one press, one wire —
-    /// but the snap scans and the commit run against the pane holding the
-    /// drag's fixed end, so a subscription can't span two graphs.
     pub(crate) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
         let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
         // Latch a fresh drag only when idle. An emitter and a pin can't both
@@ -103,8 +100,8 @@ impl SubscriptionUI {
         let Some(mut state) = self.state.take() else {
             return;
         };
-        // A pane closed mid-drag, or a fixed end deleted under it, drops
-        // the wire — not re-latching is how.
+        // A fixed end deleted under the drag drops the wire — not
+        // re-latching is how.
         if !graph_ctx.contains(state.node()) {
             return;
         }
@@ -177,9 +174,6 @@ impl SubscriptionUI {
     /// preview keeps a committed wire's shape regardless of drag direction.
     pub(crate) fn draw_in_flight(&self, ui: &mut Ui, cx: CanvasCtx<'_>, canvas_origin: Vec2) {
         let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
-        // Scoped to the pane holding the drag's fixed end — see
-        // `ConnectionUI::draw_in_flight` for what an unscoped preview
-        // paints on the neighbouring canvases.
         let (p0, p3) = match self.state.get().copied() {
             None => return,
             Some(InFlight::FromEmitter(drag)) => {

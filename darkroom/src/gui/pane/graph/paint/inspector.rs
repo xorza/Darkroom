@@ -87,8 +87,8 @@ impl Inspectors {
         self.modes.get(&id).copied()
     }
 
-    /// Drop transient (`Open`) panels, keeping pinned ones. Called when
-    /// an outside action fires and on a tab switch.
+    /// Drop transient (`Open`) panels, keeping pinned ones. Called when an
+    /// outside action fires.
     pub(crate) fn close_unpinned(&mut self) {
         self.modes.retain(|_, m| *m == InspectMode::Pinned);
     }
@@ -129,7 +129,7 @@ impl Inspectors {
     /// nothing else — which is what lets this run once a frame beside the
     /// canvas's other sweeps rather than inside the record pass.
     ///
-    /// Asked of the document rather than of a pane: `modes` deliberately
+    /// Asked of the document rather than of the scene: `modes` deliberately
     /// survives a tab switch, so only the node being *gone* may drop an entry.
     pub(crate) fn retain_nodes(&mut self, keep: impl Fn(NodeId) -> bool) {
         self.modes.retain(|id, _| keep(*id));

@@ -46,11 +46,6 @@ impl NodeMenuUi {
         self.menu.is_open()
     }
 
-    /// Record the menu and resolve this frame's pick onto `out` — a run as
-    /// the [`AppCommand`] it means, the structural picks as ordinary intents.
-    ///
-    /// Opening is [`Self::open_on`]'s, called after the node draw that saw the
-    /// right-click; this only ever shows a menu already latched.
     /// Open the menu on `node`, which the record pass just saw right-clicked,
     /// and select it if it isn't already part of the selection — so the chosen
     /// action always targets a coherent set ("select then act"). A pick lands
@@ -73,6 +68,11 @@ impl NodeMenuUi {
         }
     }
 
+    /// Record the menu and resolve this frame's pick onto `out` — a run as
+    /// the [`AppCommand`] it means, the structural picks as ordinary intents.
+    ///
+    /// Opening is [`Self::open_on`]'s, called after the node draw that saw the
+    /// right-click; this only ever shows a menu already latched.
     pub(crate) fn apply(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
         let pick = self.menu.show(ui, "node_body_menu", |ui, popup, node_id| {
             let mut chosen = None;
@@ -111,8 +111,6 @@ impl NodeMenuUi {
         let Some(pick) = pick else {
             return;
         };
-        // `NodeContextMenu::show` answers `Some` only for the pane that opened
-        // the menu, so everything below is scoped to that pane.
         match pick.choice {
             MenuChoice::Run => out.push_app(AppCommand::Run(RunCommand::Node(pick.node_id))),
             MenuChoice::Duplicate { incoming } => {
