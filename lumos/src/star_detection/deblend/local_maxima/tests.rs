@@ -40,8 +40,11 @@ fn stars(size: Size2us, sigma: f32, stars: &[(f32, f32, f32)]) -> TestComponent 
 /// [`find_local_maxima`] into a fresh list.
 fn maxima(component: &Component<'_>, min_separation: usize, min_prominence: f32) -> Vec<Pixel> {
     let mut peaks = Vec::new();
+    let mut pixels = ComponentPixels::default();
+    pixels.fill(component);
     find_local_maxima(
         component,
+        &pixels,
         min_separation,
         min_prominence,
         &mut Vec::new(),

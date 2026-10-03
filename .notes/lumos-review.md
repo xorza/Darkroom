@@ -47,14 +47,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 
 ## 9. Star detection measures and splits on the wrong plane
 
-- [ ] `9.5` **Sub-threshold branches have no minimum area** — `star_detection/deblend/multi_threshold/mod.rs:528-534,601-641`
-  - A 1-pixel region is a valid node. SEP calls `lutz(..., minarea)` inside the deblend loop. `[C]`
-- [ ] `9.6` **The multi-threshold significance walk runs top-down and drops deeper splits** — `star_detection/deblend/multi_threshold/mod.rs:665-685`
-  - Example: root(100) → [A(80) → [A1(35), A2(30)], B(5)], contrast 0.2. lumos returns 1 object. SEP returns {A1, A2}.
-  - SEP `deblend.c` walks from the bottom up and propagates `ok[]`. `[C]`
-- [ ] `9.7` **Branch flux includes the pedestal below the split level** — `star_detection/deblend/multi_threshold/mod.rs:504-508,614`
-  - SExtractor/SEP test `fdflux − thresh·fdnpix > mincont·root`. Bumps on bright wings carry level × npix of host light, which over-splits the wings.
-  - The docs say "flux above that threshold". `[C]`
 
 ## 10. Shape metrics measure position, not shape
 
@@ -186,8 +178,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
   - `O_TMPFILE` or unlink-after-map lets the OS clean up after a crash. That removes the marker file and the pid scan.
   - It also blocks replacement of a file under a live map (the hazard in the SAFETY comment at `frame_store/frame_spill.rs:223`).
   - The pid check deletes another host's live run on a NAS share. `[P]`
-- [ ] `15.8` **Deblend grids are sized to the component bbox, kept per job, and not in the memory planner** — `star_detection/deblend/multi_threshold/mod.rs:90-111,194-204`, `star_detection/deblend/local_maxima/mod.rs:80`
-  - A satellite trail across a 24 MP frame allocates ≈480 MB per job. Deblending runs before the `max_area` filter (`star_detection/detector/stages/detect/mod.rs:124,142-148`). `[C]`
 - [ ] `15.9` **FITS checksum verification buffers the whole data unit, outside the budget, and reads it twice** — `io/image/fits/decode/selection.rs:134-150`, `io/image/fits/selected_fits.rs:78-89`
   - ≈124 MB extra for a 62 MP frame, on every Lumos-written CFA file. Accumulate the checksum per chunk during the decode. `[C]`
 
@@ -670,7 +660,7 @@ Still open, after S1 and S2: each master carries its noise, so the subtraction a
 
 ## C3. Detection: one plane to threshold, one plane to measure
 
-Built in phase 7, step 1, except the multi-threshold walk. As built:
+Built in phase 7. As built:
 
 - `PreparedFrame::new` combines the channels, measures the sky on the combined plane (the no-data pixels masked), refines it around the sources when asked, and takes it out: `measure`, never filtered. It holds the sky σ, the saturation mask, the no-data mask and the refined sources.
 - `PreparedFrame::detection_plane` copies `measure`, takes the 3×3 median when the frame was demosaiced and the matched filter when a FWHM is known, and measures the result's noise with the same mesh, around the sources and the no-data pixels. That holds under any correlation (9.2).
@@ -678,7 +668,8 @@ Built in phase 7, step 1, except the multi-threshold walk. As built:
 - The refinement thresholds the detection plane at `mask_sigma` and dilates by a disk (9.8).
 - The matched-filter PSF lives in `FwhmConfig` (26.11).
 
-Still to build: the multi-threshold walk runs bottom-up and propagates `ok[]`, as in SEP `deblend.c` (9.6). It measures flux above the split level (9.7) and applies `minarea` in the loop (9.5). The `max_area` filter runs before deblending, and the deblend grids come from the detector's pool (15.8).
+- The multi-threshold tree follows SEP `deblend.c`: every object of a level splits into its regions above the next level that hold `min_area` pixels (9.5), an object is significant by its flux above its own level (9.7), and a bottom-up pass propagates `ok` (9.6).
+- Both deblenders index the component's own pixels by row, so their scratch follows its pixels, not its box (15.8).
 
 ## C4. Measurement with a convergence contract and an error output
 
@@ -758,19 +749,13 @@ The combine bench (30 frames, `combine::bench`, release, one machine, same sessi
 - Winsorized is slower because it now loops to a fixed point (the old code rejected once), and each pass estimates again.
 - The median code did not change. Run alone, it is 87 ms before and 88 ms after. In the sequence after the light preset it measures slower, which is an order effect of the allocator, not of the median path.
 
-## Phase 7. Detection planes (C3)
+## Phase 7. Results
 
-Steps 1 and 3 are done. `PreparedFrame` holds the measurement plane (the channels' noise-weighted combination less the sky, never filtered), its sky σ, the saturation and the no-data masks, and the refined sources. `DetectionPlane` filters a copy (3×3 median when demosaiced, then the matched filter) and measures its noise on itself with the same mesh. The threshold and both deblenders read the detection plane in its own σ, and measurement reads the measurement plane. The refinement masks sources on the detection plane at `mask_sigma` (2 in the presets) with a disk. The no-data mask is the mesh mask and is cleared from every threshold. The matched filter's PSF shape is in `FwhmConfig`. Items 9.1, 9.2, 9.4, 9.8, 26.11 and 26.12 are closed, and 8.2 except its stamps. The detector's pool holds 4 planes, 1 label map and up to 4 bitmasks (`DETECTION_WORKING_PLANES` = 9).
-
-Two open points from step 1:
+Phase 7 is done. Two open points remain from it:
 - The detection plane's σ is measured per 64-px tile. On a plane correlated over about 36 px (FWHM 4) a tile holds some 110 independent samples, so its σ errs by about 11%, and a 2σ threshold passes about 11% more than it states. A larger tile for the detection plane's noise, or an error-weighted σ, would narrow it.
-- The detection plane no longer records a region's peak value; measurement reads the measurement plane at the peak pixel. Phase 8's converged centroid removes the dependence on the start pixel.
+- The `max_area` filter stays on the regions the deblenders make, not on the components before them, against the plan: a crowded group larger than `max_area` still splits into its stars (`a_crowded_group_splits_into_every_star`). The memory reason for the move is gone, because the deblenders' scratch follows the component's pixels.
 
-2. Rewrite the multi-threshold walk. Move the `max_area` filter before deblending, and pool the grids.
-- **Tests:**
-  - Review example 9.6, `root(100) → [A(80) → [A1(35), A2(30)], B(5)]` at contrast 0.2, returns {A1, A2}.
-  - Detections are invariant under x·s + o, and under a 180° rotation on a tile-aligned frame (S9).
-- **Closes:** 9.5, 9.6, 9.7, 15.8.
+Found on the way and fixed: the SNR floored its variance at `f32::EPSILON`, an absolute value that lost every star of a frame scaled by 2⁻¹⁶; it now holds σ to the frame's own floor and computes in f64. The bounded parallel map now returns the failure at the lowest index, so a set with two bad frames always reports the first.
 
 ## Phase 8. Numerics kit and measurement (S6, C4)
 

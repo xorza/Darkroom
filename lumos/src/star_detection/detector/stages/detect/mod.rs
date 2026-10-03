@@ -127,7 +127,9 @@ fn extract_candidates(
     let mut result = label_map
         .components()
         .par_iter()
-        .filter(|data| data.area > 0)
+        // A component smaller than `min_area` holds no region that large. One larger than
+        // `max_area` is still deblended: a crowded group splits into regions within it.
+        .filter(|data| data.area >= config.min_area.max(1))
         .fold(
             || (ExtractionResult::default(), deblend_buffers.acquire()),
             |(mut acc, mut buffers), data| {
@@ -145,6 +147,7 @@ fn extract_candidates(
                             n_thresholds,
                             min_contrast,
                             min_separation: config.deblend_min_separation,
+                            min_area: config.min_area,
                             connectivity: config.connectivity,
                         },
                         &mut buffers,

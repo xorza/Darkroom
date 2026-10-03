@@ -4,6 +4,7 @@
 //! --nocapture`
 
 use crate::internals::prelude::*;
+use crate::star_detection::deblend::component_pixels::ComponentPixels;
 use ::quickbench::quick_bench;
 use std::cmp::Reverse;
 use std::hint::black_box;
@@ -29,10 +30,14 @@ fn bench_find_local_maxima_6k_dense(b: ::quickbench::Bencher) {
     let large_components: Vec<_> = sorted_components.into_iter().take(100).collect();
 
     let (mut maxima, mut peaks, mut occupied) = (Vec::new(), Vec::new(), Vec::new());
+    let mut component_pixels = ComponentPixels::default();
     b.bench(|| {
         for component in &large_components {
+            let component = Component::new(black_box(component), &pixels, &labels);
+            component_pixels.fill(&component);
             find_local_maxima(
-                &Component::new(black_box(component), &pixels, &labels),
+                &component,
+                &component_pixels,
                 black_box(3),
                 black_box(0.3),
                 &mut maxima,

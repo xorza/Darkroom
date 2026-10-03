@@ -11,6 +11,7 @@ use imaginarium::Buffer2;
 
 use crate::math::vec2us::Vec2us;
 use crate::star_detection::deblend::component::Component;
+use crate::star_detection::deblend::component_pixels::ComponentPixels;
 use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::deblend::{Pixel, peaks_too_close};
@@ -26,14 +27,17 @@ pub(crate) fn deblend_local_maxima(
     out: &mut Vec<Region>,
 ) -> usize {
     let DeblendBuffers {
+        pixels,
         maxima,
         peaks,
         occupied,
         assignment,
         ..
     } = buffers;
+    pixels.fill(component);
     find_local_maxima(
         component,
+        pixels,
         min_separation,
         min_prominence,
         maxima,
@@ -42,8 +46,8 @@ pub(crate) fn deblend_local_maxima(
     component.split_at(peaks, assignment, out)
 }
 
-/// Where [`find_local_maxima`] puts the peaks it keeps, and the box-sized map of them it checks
-/// each candidate's neighbourhood in — all `false` on entry and on return.
+/// Where [`find_local_maxima`] puts the peaks it keeps, and the per-pixel map of them it checks
+/// each candidate's neighbourhood in.
 #[derive(Debug)]
 struct Kept<'a> {
     peaks: &'a mut Vec<Pixel>,
@@ -55,10 +59,12 @@ struct Kept<'a> {
 ///
 /// All candidates are collected before any is kept: a candidate too close to a brighter one
 /// that is itself suppressed must still be kept, which a single pass in raster order cannot see.
-/// Each candidate checks only the kept peaks inside its separation, in a map of the box, so a
-/// component holding thousands of peaks costs candidates × separation², not candidates × peaks.
+/// Each candidate checks only the kept peaks inside its separation, in a map of the component's
+/// pixels, so a component holding thousands of peaks costs candidates × separation², not
+/// candidates × peaks, and its memory follows its pixels, not its box.
 fn find_local_maxima(
     component: &Component<'_>,
+    pixels: &ComponentPixels,
     min_separation: usize,
     min_prominence: f32,
     maxima: &mut Vec<Pixel>,
@@ -69,41 +75,34 @@ fn find_local_maxima(
     let min_peak_value = component.peak().value * min_prominence;
     maxima.clear();
     maxima.extend(
-        component
-            .pixels()
+        pixels
+            .pixels
+            .iter()
+            .copied()
             .filter(|&p| p.value >= min_peak_value && is_local_maximum(p, residual)),
     );
     maxima.sort_unstable_by(Pixel::brighter_first);
 
-    let bbox = component.bbox();
-    let width = bbox.width();
-    occupied.resize(occupied.len().max(bbox.area()), false);
+    occupied.clear();
+    occupied.resize(pixels.pixels.len(), false);
     let reach = min_separation.saturating_sub(1);
     let min_sep_sq = min_separation * min_separation;
     peaks.clear();
     for &candidate in maxima.iter() {
-        let local = candidate.pos - bbox.min;
-        let (x0, x1) = (
-            local.x.saturating_sub(reach),
-            (local.x + reach).min(width - 1),
-        );
-        let (y0, y1) = (
-            local.y.saturating_sub(reach),
-            (local.y + reach).min(bbox.height() - 1),
-        );
-        let crowded = (y0..=y1).any(|y| {
-            (x0..=x1).any(|x| {
-                occupied[y * width + x] && peaks_too_close(local, Vec2us::new(x, y), min_sep_sq)
+        let pos = candidate.pos;
+        let crowded = (pos.y.saturating_sub(reach)..=pos.y + reach).any(|y| {
+            (pos.x.saturating_sub(reach)..=pos.x + reach).any(|x| {
+                let near = Vec2us::new(x, y);
+                pixels.index_of(near).is_some_and(|index| occupied[index])
+                    && peaks_too_close(pos, near, min_sep_sq)
             })
         });
         if !crowded {
-            occupied[local.y * width + local.x] = true;
+            occupied[pixels
+                .index_of(pos)
+                .expect("a maximum is a pixel of the component")] = true;
             peaks.push(candidate);
         }
-    }
-    for peak in peaks.iter() {
-        let local = peak.pos - bbox.min;
-        occupied[local.y * width + local.x] = false;
     }
 }
 

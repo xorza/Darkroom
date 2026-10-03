@@ -162,28 +162,20 @@ fn snr_uses_normalized_noise_units() {
     assert_ne!(modeled, background_only);
 }
 
-/// A vanishing sky variance must not make SNR jump. The floor is on the variance, so both sides
-/// of it divide by a square root; flooring the *quotient* instead would put a 2896× step here.
+/// The SNR depends on the flux against the noise, not on the frame's scale: flux 2 against σ 0.02
+/// over 4 pixels is 50, and scaled by 2⁻²⁰ or 2⁻⁶⁰, both together, bit for bit the same, since a
+/// power of two scales every product and the square root exactly.
 #[test]
-fn snr_stays_continuous_as_sky_noise_vanishes() {
-    // Four pixels, so total variance is 4σ² and the f32::EPSILON floor bites at
-    // σ = sqrt(EPSILON/4) = 1.726e-4.
-    let above = compute_snr(1.0, 2.0e-4, 4, None); // 4σ² = 1.6e-7, just above the floor
-    let below = compute_snr(1.0, 1.0e-4, 4, None); // 4σ² = 4.0e-8, floored
-    let zero = compute_snr(1.0, 0.0, 4, None);
-
-    // 1/sqrt(1.6e-7) = 2500.
-    assert!((above - 2500.0).abs() < 0.5, "above = {above}");
-    // Floored: 1/sqrt(f32::EPSILON) = 2896.31.
-    let floored = 1.0 / f32::EPSILON.sqrt();
-    assert!((below - floored).abs() < 0.5, "below = {below}");
-    assert_eq!(
-        zero, below,
-        "everything under the floor lands on the same SNR"
-    );
-
-    // The step across the floor is a factor of 1.16, not 2896.
-    assert!(below / above < 1.2, "discontinuous: {above} -> {below}");
+fn snr_is_invariant_to_the_frames_scale() {
+    let native = compute_snr(2.0, 0.02, 4, None);
+    assert!((native - 50.0).abs() < 1e-5, "{native}");
+    for scale in [2.0f32.powi(-20), 2.0f32.powi(-60)] {
+        assert_eq!(
+            compute_snr(2.0 * scale, 0.02 * scale, 4, None).to_bits(),
+            native.to_bits(),
+            "scale {scale}"
+        );
+    }
 }
 
 /// Both profile fits accept or reject a centre through one predicate, so its bounds are pinned

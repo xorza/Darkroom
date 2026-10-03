@@ -517,11 +517,14 @@ fn compute_star(
     let fwhm = cov.fwhm();
     let eccentricity = cov.eccentricity();
 
+    // Held to the frame's own floor, as every threshold holds its σ: a stamp of constant sky
+    // measures no noise at all.
     let avg_noise = match local {
         Some(local) => local.noise,
         None if noise_count > 0 => (noise_sum / noise_count as f64) as f32,
         None => sky.noise.row(centre.y)[centre.x],
-    };
+    }
+    .max(sky.floor);
 
     let npix = (2 * stamp_radius + 1).pow(2);
     let flux_f32 = flux as f32;
@@ -556,19 +559,14 @@ fn compute_star(
 /// Otherwise, uses simplified background-dominated formula:
 /// `SNR = flux / (σ_sky × sqrt(npix))`
 fn compute_snr(flux: f32, sky_noise: f32, npix: usize, noise_model: Option<&NoiseModel>) -> f32 {
-    let sky_var = sky_noise * sky_noise;
-
+    let sky_noise = f64::from(sky_noise);
+    // In f64, which holds the variance of a σ at the frame's floor in any domain: an f32 floor on
+    // the variance was an absolute one, and lost every star of a frame scaled by 2⁻¹⁶.
     let total_var = match noise_model {
-        Some(noise) => {
-            noise.variance_normalized(f64::from(flux), f64::from(sky_noise), npix) as f32
-        }
-        None => npix as f32 * sky_var,
+        Some(noise) => noise.variance_normalized(f64::from(flux), sky_noise, npix),
+        None => npix as f64 * sky_noise * sky_noise,
     };
-
-    // Floor the variance rather than branching on it: dividing by `total_var` in one arm and by
-    // its square root in the other put a 2896× step at the boundary. `max` also swallows a
-    // non-finite variance, since it returns the other operand for NaN.
-    flux / total_var.max(f32::EPSILON).sqrt()
+    (f64::from(flux) / total_var.sqrt()) as f32
 }
 
 #[cfg(all(test, feature = "bench"))]
