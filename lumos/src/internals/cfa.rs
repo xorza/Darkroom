@@ -35,7 +35,6 @@ pub(crate) fn cfa_from_plane(data: Buffer2<f32>, cfa_type: CfaType) -> CfaImage 
         data,
         cfa_type,
         metadata: ImageMetadata::default(),
-        quantization_sigma: None,
         nulls: None,
     }
 }

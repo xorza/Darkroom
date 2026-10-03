@@ -5,13 +5,13 @@ use imaginarium::Buffer2;
 use lumos::{
     AlignStackError, AlignStackResult, AlignmentSummary, CacheConfig, CalibrationComponent,
     CalibrationError, CalibrationMasters, CalibrationSet, CfaPattern, CombineMethod, Coverage,
-    DefectSummary, DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame,
+    DefectSummary, DomainMap, DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame,
     FitsChecksumPolicy, FitsChecksumProvenance, FitsChecksumState, FitsCubeInterpretation,
     FitsFloatScale, FitsHduProvenance, FitsHduSelector, FitsLoadOptions, FitsNullPolicy,
     FitsTransferProvenance, FrameStoreError, GesdConfig, ImageDimensions, ImageMetadata,
     InterpolationMethod, InvalidConfigField, LinearFitClipConfig, LinearImage, LoadContext,
-    MasterRole, MatchIndices, NoiseModel, Normalization, PercentileClipConfig, QualityMap,
-    QualityPlanes, RansacConfig, RawTransferProvenance, RegistrationCatalog, RegistrationConfig,
+    MasterRole, MatchIndices, NoiseModel, Normalization, Pedestal, PercentileClipConfig,
+    QualityMap, QualityPlanes, RansacConfig, RegistrationCatalog, RegistrationConfig,
     RegistrationError, RegistrationMatchingConfig, Rejection, SampleDomain, ScaleOrigin,
     SigmaClipConfig, SipConfig, SmallN, StackConfig, StackConfigError, StackError, StackProduct,
     StarDetectionBackgroundConfig, StarDetectionCandidateConfig, StarDetectionConfig,
@@ -36,18 +36,16 @@ fn file_loading_policy_is_available_from_the_crate_root() {
             float_scale: FitsFloatScale::FullScale(65_535.0),
             nulls: FitsNullPolicy::Reject,
             unstated_bayer_pattern: Some(CfaPattern::Grbg),
+            pedestal: Pedestal::Unknown,
         },
     };
     // The default is the standard-conforming one: a null is data the format defines, not a reason
     // to refuse the file.
     assert_eq!(FitsLoadOptions::default().nulls, FitsNullPolicy::Mask);
 
-    let provenance = TransferProvenance::FitsNormalized(FitsTransferProvenance {
+    let _ = TransferProvenance::FitsNormalized(FitsTransferProvenance {
         bscale: 1.0,
         bzero: 0.0,
-        physical_scale: 65_535.0,
-        scale_origin: ScaleOrigin::Declared,
-        unit: Some("adu".to_owned()),
         hdu: FitsHduProvenance {
             index: 3,
             extname: Some("SCI".to_owned()),
@@ -58,33 +56,28 @@ fn file_loading_policy_is_available_from_the_crate_root() {
             checksum: FitsChecksumState::Valid,
         },
     });
-    // Both decoders answer the same question about their samples, so a caller can compare two
-    // frames' domains without knowing which produced them. The FITS answer carries the declared
-    // BUNIT; a RAW frame states none, which is why the two still convert here.
-    let fits = provenance.sample_domain().unwrap();
+    // A caller compares two frames' domains without knowing which decoder produced them. A FITS
+    // frame that kept a 2048-ADU pedestal relates to a RAW frame with none by the scale ratio and an
+    // offset that moves the pedestal away.
+    let fits = SampleDomain {
+        scale: 65_535.0,
+        origin: ScaleOrigin::Declared,
+        pedestal: Pedestal::Kept(2048.0),
+        unit: Some("adu".to_owned()),
+    };
+    let raw = SampleDomain {
+        scale: 16_383.0,
+        origin: ScaleOrigin::Declared,
+        pedestal: Pedestal::Removed,
+        unit: None,
+    };
     assert_eq!(
-        fits,
-        SampleDomain {
-            scale: 65_535.0,
-            origin: ScaleOrigin::Declared,
-            unit: Some("adu".to_owned()),
-        }
+        fits.conversion_to(&raw),
+        Some(DomainMap {
+            gain: 65_535.0 / 16_383.0,
+            offset: -2048.0 / 16_383.0,
+        })
     );
-    let raw = TransferProvenance::RawNormalized(RawTransferProvenance {
-        physical_scale: 65_535.0,
-    })
-    .sample_domain()
-    .unwrap();
-    assert_eq!(
-        raw,
-        SampleDomain {
-            scale: 65_535.0,
-            origin: ScaleOrigin::Declared,
-            unit: None,
-        }
-    );
-    assert_eq!(fits.conversion_to(&raw), Some(1.0));
-    assert_eq!(TransferProvenance::UnspecifiedRaster.sample_domain(), None);
 }
 
 #[test]
@@ -314,7 +307,6 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
         coverage: Some(Coverage::PerPixel(Buffer2::new(2, 1, vec![1.0, 0.5]))),
         weight: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![2.0, 1.0]))),
         linear_variance: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![0.5, 1.0]))),
-        quantization_sigma: Some(0.001),
         cfa_type: None,
     };
     let _: AlignStackResult = AlignStackResult {

@@ -122,34 +122,11 @@ Sigma clip is the default and the light preset. Winsorized is the bias and dark 
   - A 120 s dark on 300 s lights removes 40% of the thermal signal and amp glow, and calibration still reports success.
   - There is no dark scaling or optimization (PixInsight "Optimize", Siril `-opt`). Scaling also needs a bias-free dark, but the masters store the dark with its bias.
   - The RAW CFA loader does not record exposure (`io/raw/mod.rs:1131-1148`), so a check has nothing to compare. `[C]`
-- [ ] `4.4` **`SampleDomain` models scale only, not the zero point** — `io/image/sample_domain.rs:52-61`, `io/image/image_provenance.rs:176-184`
-  - RAW is (v − black)/span. Integer FITS is v/65535 with the pedestal kept. Both have unit None, so `conversion_to` calls them "exactly convertible".
-  - A master dark from Siril-converted FITS (black kept), applied to RAW lights, subtracts the black a second time. Every light goes negative by ≈black/span (≈0.13), with no error. `[C]` mechanism, `[P]` frequency.
 - [ ] `4.5` **The flat floor `MIN_NORMALIZED_FLAT = 0.1` is applied without a report** — `calibration_masters/prepared_flat/mod.rs:16,69,114`
   - It is applied with no count and no warning. Deep smooth vignetting is under-corrected. `[C]`
 
 ## 5. Sample scale and quantization σ do not survive I/O
 
-- [ ] `5.1` **A reloaded `QNTZSIG` is divided by `LUMSCALE` a second time** — `io/image/fits/decode/mod.rs:94-107`, writer `io/image/fits/metadata/mod.rs:99-106,161-166`
-  - The writer stores the normalized σ. On reload, `physical_scale = LUMSCALE` (`decode/pixels.rs:111`), and σ is divided by it.
-  - A RAW-derived frame (span 15360) comes back with σ 15360× too small. This affects every reloaded master and every saved CFA frame.
-  - Downstream effects:
-    - the cosmic-ray `full_scale` (`calibration_masters/cosmic_ray/noise_model.rs:32`)
-    - the defect floor (`calibration_masters/defect_map/mod.rs:308`)
-    - combine σ (`combine/stack/quantization.rs`)
-  - The round-trip tests write no provenance, so they miss it.
-  - Derive both σ figures from `sample_scale.divisor` (the FITS decode plan's `SampleScale`). For integer HDUs the step is `QSPS/(2^bits−1)`, so no f32 BSCALE detour is needed. `[C]`
-- [ ] `5.2` **An assumed float scale does not round-trip, so a saved master is refused later** — `io/image/fits/metadata/mod.rs:99-106`, `io/image/fits/decode/plan.rs:155-164`
-  - A float ADU frame with DATAMAX 65535 decodes as divisor 65535 (Assumed). It is saved with DATAMAX 1.0 and no `LUMSCALE`, and it reloads as divisor 1.
-  - `master_scale` then fails with `SampleDomainMismatch`. The writer comment ("the reader can make the guess again") is false. `[C]`
-- [ ] `5.3` **A float FITS in ADU with no DATAMAX loads as-is** — `io/image/fits/decode/plan.rs:155-164`, consumer `star_detection/detector/mod.rs:114`
-  - The saturation level becomes 0.95 ADU, so almost every star is flagged as saturated.
-  - The normalize pass already reads every sample. Fail when max ≫ 1 and no scale is declared.
-  - The doc calls the DATAMAX>10 rule "Siril's", but Siril applies it to a scanned maximum. `[C]` path, `[P]` frequency.
-- [ ] `5.4` **The ADC step comes from the container, not the ADC** — `io/image/fits/decode/mod.rs:102-107`
-  - 12/14-bit data left-justified in BITPIX 16 gets σ 16× or 4× too small. The trailing-zero count of the OR of all samples gives the real step. `[P]`
-- [ ] `5.5` **RAW quantization assumes 1-ADU steps** — `io/raw/mod.rs:1154`
-  - Curve-compressed RAWs (Sony cRAW, Nikon lossy NEF, Canon C-RAW) have steps of 2–8+ ADU at highlights. Derive the step from `color.curve`, or report `None`. `[P]`
 - [ ] `5.6` **Quantization tracking uses channel 0's gain for every channel** — `combine/stack/quantization.rs:52,66` `[C]`
 
 ## 6. Noise is estimated from whole-frame spread, which includes signal
@@ -750,6 +727,7 @@ pub(crate) struct FrameNoise {   // per channel, in image units
 }
 ```
 
+- Built in phase 2: `SampleDomain` (f64 scale, pedestal, affine `conversion_to`, `after_subtracting`) and `ImageMetadata::quantization_sigma` are stored metadata, and the FITS codec is `io/image/fits/metadata/domain_keywords.rs`. `FrameNoise` and `CcdNoise` come with the noise estimator in phase 5, because their background term is measured there.
 - Both become stored fields of `ImageMetadata`, not values computed again from the provenance. Operations update them through methods:
   - `subtract(master)` sets the pedestal to `Removed` and adds the master's own variance to `background`.
   - `scale_by(c)` multiplies the noise terms by |c| and divides `electrons_per_unit` by c.
@@ -978,22 +956,6 @@ Closes group 16 except 16.12, and 17.4 to 17.7 (17.1 to 17.3 close in phase 0). 
 
 Each phase builds and passes the verification chain on its own. A phase closes its items, and those items are then deleted from this file, together with the phase. Phase order follows the dependencies. Each phase adds its stage to the S9 harness.
 
-## Phase 2. Sample contract and noise record (S2)
-
-1. Make `SampleDomain` and `FrameNoise` stored metadata, with their update methods. Fill them in every decoder.
-2. Write the FITS keyword codec. Remove `QNTZSIG` and the two `quantization_sigma` fields.
-3. Add the step from the OR of raw samples and the float-maximum check to the normalize pass.
-4. Change `conversion_to` to the affine map, and update `master_scale` and `CfaImage::subtract`.
-5. Add `CcdNoise`.
-- **Tests:**
-  - A table-driven round trip over every origin and pedestal: `decode(encode(d)) == d`.
-  - A RAW frame with span 15360 reloads with the same quantization σ (today it is 15360× too small).
-  - Left-justified 12-bit data in BITPIX 16: the OR has 4 trailing zeros, so the step is 16·|BSCALE|.
-  - A Siril-style dark that holds only its kept pedestal of 2048 ADU, applied to a RAW light with black 2048, leaves the light unchanged. The same dark with an unknown pedestal is refused.
-  - `subtract` changes the pedestal from `Kept` to `Removed`. `scale_by(2)` doubles `background` and halves `electrons_per_unit`.
-  - `CcdNoise` with background 0.01, signal 0.5 above sky and 1000 e⁻ per unit: 1e-4 + 0.5/1000 = 6e-4.
-- **Closes:** 4.4, 5.1 to 5.5.
-
 ## Phase 3. Pixel flags and run report (S1, S8)
 
 0. Add `RunReport` to `StackProduct` and `AlignStackResult`. Its first entries are the flag counts of this phase.
@@ -1029,6 +991,7 @@ Each phase builds and passes the verification chain on its own. A phase closes i
 
 ## Phase 5. Lattice, noise estimation, mesh, weights and variance (S5, S10, C1)
 
+0. Add `FrameNoise` and `CcdNoise` (S2): the background term is the noise this phase measures.
 1. Add `CfaLattice`, and move `SameColorMedian`, the cosmic-ray detectors and the flat normalization onto it.
 2. Add the two noise estimators and `FrameStats` background noise.
 3. Give `background_mesh` the lattice, the flags, bad-tile interpolation and the sliver merge. Remove `DarkBackground`. Move the cosmic-ray background onto the mesh.

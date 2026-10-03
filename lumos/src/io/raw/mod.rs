@@ -1,7 +1,6 @@
 pub(crate) mod demosaic;
 mod error;
 mod normalize;
-pub(crate) mod provenance;
 pub(crate) mod raw_files;
 
 use libraw_sys as sys;
@@ -32,10 +31,10 @@ use crate::io::image::image_provenance::{
 };
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
+use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::io::raw::demosaic::sensor_layout::SensorLayout;
 use crate::io::raw::demosaic::xtrans::XTransNormalization;
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
-use crate::io::raw::provenance::RawTransferProvenance;
 use common::CancelToken;
 use demosaic::bayer::{BayerImage, CfaPattern, rcd};
 use demosaic::xtrans;
@@ -463,9 +462,32 @@ struct UnpackedRaw {
     raw_xtrans_pattern: Option<XTransPattern>,
     camera_white_balance: Option<[f32; 4]>,
     iso: Option<u32>,
+    /// Whether LibRaw's linearization curve is the identity up to `maximum`. A compressed format
+    /// (Sony cRAW, Nikon lossy NEF, Canon C-RAW) maps its codes through a curve whose steps grow
+    /// to several ADU in the highlights, so one ADU is no longer the quantization step.
+    linear_curve: bool,
 }
 
 impl UnpackedRaw {
+    /// Sensor ADU above black over `maximum − black`, from the file itself.
+    fn sample_domain(&self) -> SampleDomain {
+        SampleDomain {
+            scale: f64::from(self.black_level.span()),
+            origin: ScaleOrigin::Declared,
+            pedestal: Pedestal::Removed,
+            // No RAW format states a unit for sensor counts, and inventing one here would make a
+            // RAW frame disagree with a FITS frame that spells the same thing differently.
+            unit: None,
+        }
+    }
+
+    /// One ADU's uniform-error σ in the normalized domain, or `None` when a compressed curve makes
+    /// the step vary.
+    fn quantization_sigma(&self) -> Option<f32> {
+        self.linear_curve
+            .then(|| QUANTIZATION_SIGMA_PER_STEP / self.black_level.span())
+    }
+
     /// Get the raw u16 image pointer and total pixel count.
     /// Returns the pointer and count, or an error if null.
     fn raw_image_slice(&self) -> Result<&[u16], ImageError> {
@@ -854,6 +876,13 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
     let cam_mul = unsafe { (*inner).color.cam_mul };
     let camera_white_balance = canonical_camera_white_balance(cfa_type, cam_mul);
     let iso = extract_iso(inner);
+    // SAFETY: inner is valid, and color.curve is initialized after unpack.
+    let curve = unsafe { &(*inner).color.curve };
+    let last_code = (maximum_raw as usize).min(curve.len() - 1);
+    let linear_curve = curve[..=last_code]
+        .iter()
+        .enumerate()
+        .all(|(code, &value)| usize::from(value) == code);
 
     Ok(UnpackedRaw {
         libraw,
@@ -869,6 +898,7 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
         raw_xtrans_pattern,
         camera_white_balance,
         iso,
+        linear_curve,
     })
 }
 
@@ -997,7 +1027,7 @@ pub(crate) fn load_raw(path: &Path, context: &LoadContext) -> Result<LinearImage
     let active = raw.layout.active;
     let iso = raw.iso;
     let camera_white_balance = raw.camera_white_balance;
-    let physical_scale = raw.black_level.span();
+    let domain = raw.sample_domain();
 
     let decoded = match raw.cfa_type {
         Some(CfaType::Mono) => {
@@ -1054,6 +1084,7 @@ pub(crate) fn load_raw(path: &Path, context: &LoadContext) -> Result<LinearImage
     } = decoded;
 
     let metadata = ImageMetadata {
+        domain: Some(domain),
         iso,
         header_dimensions: vec![
             dimensions.height(),
@@ -1064,7 +1095,7 @@ pub(crate) fn load_raw(path: &Path, context: &LoadContext) -> Result<LinearImage
         provenance: Some(ImageProvenance {
             container: SourceContainer::CameraRaw,
             decoder: DecoderProvenance::LibRaw,
-            transfer: TransferProvenance::RawNormalized(RawTransferProvenance { physical_scale }),
+            transfer: TransferProvenance::RawNormalized,
             color,
             // Every arm above lands inside [0, 1]: the mono path clamps as it normalizes, libraw's
             // fallback divides by the integer maximum, and both demosaic paths clamp their output.
@@ -1129,15 +1160,15 @@ pub(crate) fn load_raw_cfa(path: &Path, context: &LoadContext) -> Result<CfaImag
     // dark/bias means aren't biased upward by clipping the sub-pedestal tail.
     let pixels = raw.extract_cfa_pixels::<false>()?;
     let metadata = ImageMetadata {
+        domain: Some(raw.sample_domain()),
+        quantization_sigma: raw.quantization_sigma(),
         iso: raw.iso,
         header_dimensions: vec![raw.layout.active.height, raw.layout.active.width, 1],
         camera_white_balance: raw.camera_white_balance,
         provenance: Some(ImageProvenance {
             container: SourceContainer::CameraRaw,
             decoder: DecoderProvenance::LibRaw,
-            transfer: TransferProvenance::RawNormalized(RawTransferProvenance {
-                physical_scale: raw.black_level.span(),
-            }),
+            transfer: TransferProvenance::RawNormalized,
             color: ColorProvenance::SensorCfa,
             clipped: false,
             demosaic: DemosaicProvenance::None,
@@ -1151,7 +1182,6 @@ pub(crate) fn load_raw_cfa(path: &Path, context: &LoadContext) -> Result<CfaImag
         data: Buffer2::new(raw.layout.active.width, raw.layout.active.height, pixels),
         cfa_type,
         metadata,
-        quantization_sigma: Some(QUANTIZATION_SIGMA_PER_STEP / raw.black_level.span),
         // A sensor reports a value for every photosite; no RAW format has an undefined-sample
         // convention to decode.
         nulls: None,

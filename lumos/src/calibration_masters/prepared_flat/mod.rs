@@ -10,16 +10,17 @@ use rayon::prelude::*;
 
 use crate::calibration_masters::error::CalibrationError;
 use crate::io::image::cfa::{CfaImage, CfaType};
+use crate::io::image::sample_domain::DomainMap;
 use crate::math::vec2us::Vec2us;
 
 // Bounds amplification at dead/near-zero photosites while keeping every pixel calibrated.
 const MIN_NORMALIZED_FLAT: f32 = 0.1;
 
-/// Subtract the flat's own bias or flat-dark, given with the factor that expresses its samples in
+/// Subtract the flat's own bias or flat-dark, given with the map that expresses its samples in
 /// the flat's domain.
-pub(super) fn subtract(mut flat: CfaImage, subtractor: Option<(&CfaImage, f32)>) -> CfaImage {
-    if let Some((subtractor, scale)) = subtractor {
-        flat.subtract(subtractor, scale);
+pub(super) fn subtract(mut flat: CfaImage, subtractor: Option<(&CfaImage, DomainMap)>) -> CfaImage {
+    if let Some((subtractor, map)) = subtractor {
+        flat.subtract(subtractor, map);
     }
 
     flat

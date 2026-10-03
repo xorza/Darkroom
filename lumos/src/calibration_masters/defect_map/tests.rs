@@ -168,7 +168,7 @@ fn quantization_floor_scales_with_bit_depth_and_master_count() {
                 }
 
                 let mut dark = make_cfa(size, pixels, CfaType::Mono);
-                dark.quantization_sigma = Some(sigma);
+                dark.metadata.quantization_sigma = Some(sigma);
                 dark.metadata.gain = Some(gain);
                 let detected = DefectMap::new(dark.size())
                     .detect_hot(&dark, 5.0, &CancelToken::never())
@@ -204,7 +204,7 @@ fn cfa_stack_propagates_raw_quantization_into_hot_detection() {
                 pixels[index] += 4.0 * master_sigma;
             }
             let mut image = make_cfa(Size2us::new(width, height), pixels, CfaType::Mono);
-            image.quantization_sigma = Some(source_sigma);
+            image.metadata.quantization_sigma = Some(source_sigma);
             image
         })
         .collect();
@@ -213,7 +213,7 @@ fn cfa_stack_propagates_raw_quantization_into_hot_detection() {
     let product =
         run_stacking(&cache, &StackConfig::default()).expect("this cache is never cancelled");
     assert!(
-        (product.quantization_sigma.unwrap() - master_sigma).abs() < f32::EPSILON,
+        (product.image.metadata.quantization_sigma.unwrap() - master_sigma).abs() < f32::EPSILON,
         "eight equal surviving frames must propagate σ/√8"
     );
     // Defect detection consumes the mosaic master, the same projection `stack_cfa_master` makes.

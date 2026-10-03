@@ -8,8 +8,8 @@
 //! anything else is taken as already normalized — which is what round-trips a Lumos-written master.
 //!
 //! Everything expressed in the file's sample units follows the samples through that division:
-//! `DATAMAX`, a declared `QNTZSIG`, and the `BSCALE`-derived ADC step. The divisor is recorded as
-//! [`crate::FitsTransferProvenance::physical_scale`] so the physical value stays recoverable.
+//! `DATAMAX`, and the ADC step read off the stored integers. The divisor is recorded in the image's
+//! [`crate::SampleDomain`] so the physical value stays recoverable.
 //!
 //! The division does not make two frames mean the same thing — `BUNIT` is what says *what* they
 //! measure, and a `Jy/beam` frame and a `count/s` one land on the same `[0, 1]` looking identical.
@@ -22,12 +22,12 @@ use std::path::Path;
 use fits_well::io::SliceReader;
 
 use crate::io::cancelled::Cancelled;
-use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
+use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType};
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode::plan::FitsHduDescription;
 use crate::io::image::fits::decode::selected_fits::SelectedFits;
 use crate::io::image::fits::error::{fits_err, fits_unsupported};
-use crate::io::image::fits::metadata::{read_cfa_from_headers, read_quantization_sigma};
+use crate::io::image::fits::metadata::read_cfa_from_headers;
 use crate::io::image::fits::options::FitsCubeInterpretation;
 use crate::io::image::fits::provenance::{FitsChecksumProvenance, FitsChecksumState};
 use crate::io::image::image_metadata::ImageMetadata;
@@ -76,11 +76,7 @@ impl DecodedFitsImage {
         })
     }
 
-    fn into_cfa(
-        self,
-        path: &Path,
-        declared_quantization_sigma: Option<f32>,
-    ) -> Result<CfaImage, ImageError> {
+    fn into_cfa(self, path: &Path) -> Result<CfaImage, ImageError> {
         if !self.pixels.dimensions().is_grayscale() {
             return Err(fits_unsupported(
                 path,
@@ -94,22 +90,6 @@ impl DecodedFitsImage {
             ));
         };
 
-        // A declared QNTZSIG and a BSCALE-derived ADC step are both in the file's sample units, so
-        // both follow the samples through the division the decoder already applied.
-        let fits_transfer = self
-            .metadata
-            .provenance
-            .as_ref()
-            .and_then(|provenance| provenance.transfer.fits());
-        let physical_scale = fits_transfer.map_or(1.0, |transfer| transfer.physical_scale);
-        let quantization_sigma = declared_quantization_sigma
-            .map(|sigma| sigma / physical_scale)
-            .or_else(|| {
-                let transfer = fits_transfer?;
-                self.metadata.sample_type?.is_integer().then(|| {
-                    transfer.bscale.abs() as f32 / physical_scale * QUANTIZATION_SIGMA_PER_STEP
-                })
-            });
         let Self {
             mut metadata,
             pixels,
@@ -123,7 +103,6 @@ impl DecodedFitsImage {
             data: pixels.into_l(),
             cfa_type,
             metadata,
-            quantization_sigma,
             nulls,
         })
     }
@@ -144,7 +123,7 @@ pub(crate) fn load_preview_fits(
     let decoded = read_selected_image(path, context)?;
     if decoded.cfa_type.is_some() {
         Ok(decoded
-            .into_cfa(path, None)?
+            .into_cfa(path)?
             .demosaic(&context.cancel)
             .map_err(|Cancelled| ImageError::cancelled(path))?)
     } else {
@@ -157,12 +136,9 @@ fn read_selected_image(path: &Path, context: &LoadContext) -> Result<DecodedFits
 }
 
 pub(crate) fn load_cfa_fits(path: &Path, context: &LoadContext) -> Result<CfaImage, ImageError> {
-    let selected = SelectedFits::open(path, context)?;
-    let quantization_sigma =
-        read_quantization_sigma(selected.header()).map_err(|source| fits_err(path, source))?;
-    selected
+    SelectedFits::open(path, context)?
         .read(path, context)?
-        .into_cfa(path, quantization_sigma)
+        .into_cfa(path)
 }
 
 pub(crate) fn read_cfa_hdu(
@@ -179,8 +155,6 @@ pub(crate) fn read_cfa_hdu(
         context.fits.float_scale,
         context.memory_limit_bytes,
     )?;
-    let quantization_sigma = read_quantization_sigma(&reader.hdus()[index].header)
-        .map_err(|source| fits_err(path, source))?;
     let header = reader.hdus()[index].header.clone();
     let selected = selection::selected_hdu(path, reader.hdus(), index)?;
     pixels::read_decoded_hdu(
@@ -199,7 +173,7 @@ pub(crate) fn read_cfa_hdu(
                 .map(|image| image.physical_f32())
         },
     )?
-    .into_cfa(path, quantization_sigma)
+    .into_cfa(path)
 }
 
 pub(crate) fn fits_cfa_frame_info(

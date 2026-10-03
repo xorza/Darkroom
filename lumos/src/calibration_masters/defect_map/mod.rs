@@ -307,6 +307,7 @@ fn detect_hot_pixels(
 
 fn residual_sigma_floor(image: &CfaImage) -> f32 {
     if let Some(sigma) = image
+        .metadata
         .quantization_sigma
         .filter(|sigma| sigma.is_finite() && *sigma > 0.0)
     {

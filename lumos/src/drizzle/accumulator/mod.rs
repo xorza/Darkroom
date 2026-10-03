@@ -334,9 +334,6 @@ impl DrizzleAccumulator {
                 .weight
                 .then_some(QualityMap::Shared(self.weight)),
             linear_variance: self.weight_sq.map(QualityMap::Shared),
-            // Drizzle redistributes flux by geometry rather than combining aligned samples, so
-            // there is no per-frame quantization step to propagate.
-            quantization_sigma: None,
             // Drizzle takes demosaiced frames, which carry no mosaic.
             cfa_type: None,
         };

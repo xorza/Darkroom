@@ -20,7 +20,7 @@ use crate::io::image::fits::options::{
     FitsCubeInterpretation, FitsFloatScale, FitsLoadOptions, FitsNullPolicy,
 };
 use crate::io::image::load_context::LoadContext;
-use crate::io::image::sample_domain::ScaleOrigin;
+use crate::io::image::sample_domain::{DomainMap, ScaleOrigin};
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::memory::run_memory::RunMemory;
 
@@ -110,8 +110,12 @@ fn optional_metadata_degrades_and_load_deciding_keywords_fail() {
 fn fits_float32_round_trips_pixels_and_order() {
     let size = Size2us::new(32usize, 24usize);
     // The asymmetric physical scale catches both transposition and accidental frame-max scaling.
+    // Divided by 8 to stay below the maximum an undeclared float scale may reach; exact, since 8 is
+    // a power of two.
     let pixels: Vec<f32> = (0..size.height)
-        .flat_map(|y| (0..size.width).map(move |x| -12.0 + y as f32 * 3.0 + x as f32 * 0.25))
+        .flat_map(|y| {
+            (0..size.width).map(move |x| (-12.0 + y as f32 * 3.0 + x as f32 * 0.25) / 8.0)
+        })
         .collect();
     let image = Image::new(
         vec![size.width, size.height], // fits-well is NAXIS1-first: [width, height]
@@ -169,7 +173,7 @@ fn fits_integer_samples_are_divided_by_the_span_their_header_declares() {
 
     let loaded = write_and_load("uint16", &image).unwrap();
     // |BSCALE| × (2¹⁶ − 1) = 65535, recorded so a later stage can ask what one sample is worth.
-    assert_eq!(loaded.metadata.sample_domain().unwrap().scale, 65_535.0);
+    assert_eq!(loaded.metadata.domain.as_ref().unwrap().scale, 65_535.0);
     let pixels = loaded.channel(0).pixels();
     assert_eq!(pixels[0], 0.0);
     assert_eq!(pixels[4], 1.0);
@@ -200,9 +204,12 @@ fn a_float_fits_scale_can_be_declared_when_the_header_does_not() {
         ..LoadContext::default()
     };
 
-    // No DATAMAX, so `Auto` takes the samples as they stand — the case the declaration exists for.
-    let auto = load_linear_fits(&path, &with_scale(FitsFloatScale::Auto)).unwrap();
-    assert_eq!(auto.channel(0).pixels(), &pixels[..]);
+    // No DATAMAX, so `Auto` takes the samples as normalized, and they reach 65535: refused, which is
+    // the case the declaration exists for.
+    assert!(matches!(
+        load_linear_fits(&path, &with_scale(FitsFloatScale::Auto)),
+        Err(ImageError::FitsUnsupported { reason, .. }) if reason.contains("nothing declares their scale")
+    ));
 
     // Declared: divided, and the span recorded so a later stage can compare it against another
     // frame's.
@@ -212,7 +219,7 @@ fn a_float_fits_scale_can_be_declared_when_the_header_does_not() {
         declared.channel(0).pixels(),
         &[0.0, 0.250_003_8, 0.500_007_6, 1.0]
     );
-    assert_eq!(declared.metadata.sample_domain().unwrap().scale, 65_535.0);
+    assert_eq!(declared.metadata.domain.as_ref().unwrap().scale, 65_535.0);
 
     // `Normalized` refuses the header's evidence, for a DATAMAX that describes the sensor rather
     // than the samples.
@@ -233,34 +240,35 @@ fn a_float_fits_scale_can_be_declared_when_the_header_does_not() {
     }
 }
 
+/// σ describes one ADC step, so it is only comparable to the samples once it is divided by the same
+/// span they were. The step is read off the stored integers: 12-bit data written left-justified
+/// into BITPIX 16 steps by 16 stored units (review item 5.4), and the container's step of one
+/// would understate σ 16×.
 #[test]
-fn fits_quantization_sigma_follows_the_samples_into_the_normalized_domain() {
-    // σ describes one ADC step, so it is only comparable to the samples if it is divided by the
-    // same span they were. Both the BSCALE-derived step and a file's declared QNTZSIG go through
-    // that division, which is what keeps two frames' σ values commensurate.
-    let raw = [0u16, 16384, 32768, 65535];
-    let image = Image::from_u16(vec![4, 1], &raw).unwrap();
-
+fn fits_quantization_sigma_follows_the_adc_step_into_the_normalized_domain() {
     let mut header = Header::new();
     header.set("BAYERPAT", "RGGB").unwrap();
     let dir = TempDir::new("lumos-fits-roundtrip");
-    let path = write_with_header(&dir, "cfa_uint16_sigma", &image, &header);
-    let loaded = load_cfa_fits(&path, &LoadContext::default()).unwrap();
-    // BITPIX = 16, BSCALE = 1 → divisor 65535, so one ADU is 1/65535 and its uniform-error σ is
-    // (1/√12) / 65535 = 0.28867513 / 65535 = 4.4049001e-6.
-    let sigma = loaded.quantization_sigma.unwrap();
-    assert_close!(sigma, 4.404_9e-6, 1e-11, "{sigma}");
-
-    // A declared QNTZSIG is in the file's sample units and takes the same division: 2 ADU maps to
-    // 2 / 65535 = 3.05181e-5, not to 2.
-    let mut declared = Header::new();
-    declared.set("BAYERPAT", "RGGB").unwrap();
-    declared.set("QNTZSIG", 2.0).unwrap();
-    let declared_path = write_with_header(&dir, "cfa_uint16_declared_sigma", &image, &declared);
-    let declared_loaded = load_cfa_fits(&declared_path, &LoadContext::default()).unwrap();
-    let declared_sigma = declared_loaded.quantization_sigma.unwrap();
-    assert_close!(declared_sigma, 2.0 / 65_535.0, 1e-11, "{declared_sigma}");
-    assert_close!(declared_sigma, 3.051_81e-5, 1e-9, "{declared_sigma}");
+    let sigma_of = |name: &str, raw: &[u16]| {
+        let image = Image::from_u16(vec![raw.len(), 1], raw).unwrap();
+        let path = write_with_header(&dir, name, &image, &header);
+        load_cfa_fits(&path, &LoadContext::default())
+            .unwrap()
+            .metadata
+            .quantization_sigma
+            .unwrap()
+    };
+    // Full 16-bit data: 32767 is odd, so no trailing zero is shared and the step is one ADU. The
+    // divisor is 65535, so σ = (1/√12) / 65535 = 0.28867513 / 65535 = 4.4049001e-6.
+    let full = sigma_of("cfa_uint16_full", &[0, 16_384, 32_768, 65_535]);
+    assert_close!(full, 4.404_9e-6, 1e-11, "{full}");
+    // 12-bit samples shifted left by four: every stored value (v − 32768 under BZERO) is a
+    // multiple of 16, so the step is 16 ADU and σ = 16 × 4.4049001e-6 = 7.0478402e-5.
+    let shifted = sigma_of("cfa_uint16_12bit", &[0, 16, 65_280, 32_768]);
+    assert_close!(shifted, 7.047_840_2e-5, 1e-10, "{shifted}");
+    // A frame of zeros shares every trailing zero, which says nothing: the container's step stands.
+    let zeros = sigma_of("cfa_uint16_zeros", &[32_768; 4]);
+    assert_close!(zeros, 4.404_9e-6, 1e-11, "{zeros}");
 }
 
 #[test]
@@ -272,18 +280,37 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     let pixels = vec![-5.0f32, 0.0, 0.5, 65_535.0];
     let image = Image::new(vec![4, 1], pixels.clone()).unwrap();
 
-    // No DATAMAX: taken as already normalized. This is the Lumos-written master's case, and it is
-    // also the one third-party ADU file this rule cannot rescue.
-    let bare = write_and_load("float32_no_datamax", &image).unwrap();
+    // No DATAMAX: taken as already normalized, which these samples are not. The decode scans them,
+    // and a maximum of 65535 past Siril's threshold of 10 is refused rather than loaded with its
+    // saturation level at 0.95 ADU (review item 5.3). The caller can still say they are normalized.
+    assert!(matches!(
+        write_and_load("float32_no_datamax", &image),
+        Err(ImageError::FitsUnsupported { reason, .. }) if reason.contains("nothing declares their scale")
+    ));
+    let dir = TempDir::new("lumos-fits-roundtrip");
+    let bare_path = write_with_header(&dir, "float32_bare", &image, &Header::new());
+    let normalized_options = LoadContext {
+        fits: FitsLoadOptions {
+            float_scale: FitsFloatScale::Normalized,
+            ..Default::default()
+        },
+        ..LoadContext::default()
+    };
+    let bare = load_linear_fits(&bare_path, &normalized_options).unwrap();
     assert_eq!(bare.channel(0).pixels(), &pixels[..]);
 
-    // DATAMAX ≈ 1: a normalized frame saying so. Left alone.
+    // DATAMAX ≈ 1: a normalized frame saying so. Left alone — and refused when its samples
+    // contradict it.
     let mut normalized_header = Header::new();
     normalized_header.set("DATAMAX", 1.0).unwrap();
-    let dir = TempDir::new("lumos-fits-roundtrip");
-    let normalized_path = write_with_header(&dir, "float32_datamax_1", &image, &normalized_header);
+    let contradicted = write_with_header(&dir, "float32_datamax_1_adu", &image, &normalized_header);
+    assert!(load_linear_fits(&contradicted, &LoadContext::default()).is_err());
+    let unit_pixels = vec![-0.25f32, 0.0, 0.5, 1.0];
+    let unit_image = Image::new(vec![4, 1], unit_pixels.clone()).unwrap();
+    let normalized_path =
+        write_with_header(&dir, "float32_datamax_1", &unit_image, &normalized_header);
     let normalized = load_linear_fits(&normalized_path, &LoadContext::default()).unwrap();
-    assert_eq!(normalized.channel(0).pixels(), &pixels[..]);
+    assert_eq!(normalized.channel(0).pixels(), &unit_pixels[..]);
     assert_eq!(normalized.metadata.data_max, Some(1.0));
 
     // DATAMAX = 65535: a saturation level far above unity, so the samples are ADU and divide by
@@ -304,8 +331,8 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     // The two frames hold the same ADU data and were divided by spans 65535 apart, which is exactly
     // the mismatch a stack has to be able to detect. The sample domain is what makes it detectable
     // — both frames otherwise present as `FitsNormalized` and compare equal on every other axis.
-    let bare_domain = bare.metadata.sample_domain().unwrap();
-    let adu_domain = adu.metadata.sample_domain().unwrap();
+    let bare_domain = bare.metadata.domain.clone().unwrap();
+    let adu_domain = adu.metadata.domain.clone().unwrap();
     assert_eq!(bare_domain.scale, 1.0);
     assert_eq!(adu_domain.scale, 65_535.0);
     assert_eq!(bare_domain.origin, ScaleOrigin::Assumed);
@@ -463,7 +490,7 @@ fn fits_bunit_travels_with_the_samples_and_separates_frames_the_span_cannot() {
         load_linear_fits(&path, &LoadContext::default())
             .unwrap()
             .metadata
-            .sample_domain()
+            .domain
             .unwrap()
     };
 
@@ -477,14 +504,14 @@ fn fits_bunit_travels_with_the_samples_and_separates_frames_the_span_cannot() {
     // Trailing blanks are not significant in a FITS string, so padding is not a mismatch...
     let padded = load("float32_bunit_padded", "Jy/beam   ");
     assert_eq!(padded.unit.as_deref(), Some("Jy/beam"));
-    assert_eq!(padded.conversion_to(&jansky), Some(1.0));
+    assert_eq!(padded.conversion_to(&jansky), Some(DomainMap::IDENTITY));
 
     // ...and an all-blank BUNIT states no unit rather than an empty one, which leaves the frame
     // comparable to anything on the same span instead of disagreeing with all of them.
     let blank = load("float32_bunit_blank", "   ");
     assert_eq!(blank.unit, None);
-    assert_eq!(blank.conversion_to(&jansky), Some(1.0));
-    assert_eq!(blank.conversion_to(&counts), Some(1.0));
+    assert_eq!(blank.conversion_to(&jansky), Some(DomainMap::IDENTITY));
+    assert_eq!(blank.conversion_to(&counts), Some(DomainMap::IDENTITY));
 
     // Case is part of the unit: mega- and milli-jansky per steradian are 10^9 apart, and folding
     // case here would hide exactly the mismatch this check exists to catch.
@@ -505,7 +532,15 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
     let float_image = Image::new(vec![3, 2], float_pixels).unwrap();
     let dir = TempDir::new("lumos-fits-roundtrip");
     let float_path = write_with_header(&dir, "float32_null", &float_image, &Header::new());
-    let float = load_linear_fits(&float_path, &LoadContext::default()).unwrap();
+    // ADU with no declared scale, which `Auto` refuses; the caller says how to read them.
+    let float_context = LoadContext {
+        fits: FitsLoadOptions {
+            float_scale: FitsFloatScale::Normalized,
+            ..Default::default()
+        },
+        ..LoadContext::default()
+    };
+    let float = load_linear_fits(&float_path, &float_context).unwrap();
 
     // BITPIX = 16 with BSCALE/BZERO identity, and -32768 declared as BLANK. fits-well maps that
     // stored value to NaN, which is the same thing the float file handed over.
@@ -553,7 +588,7 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
     let strict = LoadContext {
         fits: FitsLoadOptions {
             nulls: FitsNullPolicy::Reject,
-            ..Default::default()
+            ..float_context.fits.clone()
         },
         ..LoadContext::default()
     };
@@ -802,9 +837,6 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
             transfer: crate::TransferProvenance::FitsNormalized(crate::FitsTransferProvenance {
                 bscale: 1.0,
                 bzero: 0.0,
-                // A float FITS carries no declared full scale, so it is taken as already
-                // normalized and its samples pass through undivided.
-                physical_scale: 1.0,
                 ..
             },),
             color: ColorProvenance::SensorRgb,
@@ -813,6 +845,9 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
             ..
         })
     ));
+    // A float FITS carries no declared full scale, so it is taken as already normalized and its
+    // samples pass through undivided.
+    assert_eq!(demosaiced.metadata.domain.as_ref().unwrap().scale, 1.0);
     for y in 6..size.height - 6 {
         for x in 6..size.width - 6 {
             let channel = pattern.color_at(Vec2us::new(x, y)) as usize;

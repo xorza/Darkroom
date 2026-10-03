@@ -27,10 +27,6 @@ pub(crate) trait StackableImage: Send + Sync + Debug + Sized {
     fn cfa_type(&self) -> Option<CfaType>;
     fn load(path: &Path, context: &LoadContext) -> Result<Self, ImageError>;
 
-    fn quantization_sigma(&self) -> Option<f32> {
-        None
-    }
-
     /// Which of the image's pixels carry no measurement, for a source that declared any.
     ///
     /// No default: both implementors know the answer, and a default of "none" would let a decoder

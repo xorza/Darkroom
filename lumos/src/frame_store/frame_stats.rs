@@ -33,7 +33,7 @@ impl FrameStats {
     /// once any frame is partially covering.
     pub(crate) fn measure(image: &impl StackableImage) -> Self {
         let dimensions = image.dimensions();
-        let quantization_sigma = image.quantization_sigma();
+        let quantization_sigma = image.metadata().quantization_sigma;
         let facts = FrameFacts::of(image);
         let nulls = image.nulls();
         let channels = (0..dimensions.channels())

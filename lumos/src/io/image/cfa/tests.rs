@@ -2,11 +2,7 @@ use crate::internals::assertions::assert_close;
 use crate::internals::cfa::XTRANS_PATTERN;
 use crate::internals::cfa::make_cfa;
 use crate::io::image::cfa::*;
-use crate::io::image::image_provenance::{
-    DecoderProvenance, ImageProvenance, RowOrder, SourceContainer, TransferProvenance,
-};
-use crate::io::image::sample_domain::ScaleOrigin;
-use crate::io::raw::provenance::RawTransferProvenance;
+use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use common::TempDir;
 use std::fs;
 
@@ -42,7 +38,6 @@ fn a_masters_nulls_survive_the_fits_round_trip() {
         data: Buffer2::new(2, 2, vec![0.1f32, 0.2, 0.3, 0.4]),
         cfa_type: CfaType::Mono,
         metadata: ImageMetadata::default(),
-        quantization_sigma: None,
         nulls: NullMask::of_non_finite(Size2us::new(2usize, 2usize), &[&[0.0, f32::NAN, 0.0, 0.0]]),
     };
     let dir = TempDir::new("lumos-cfa-nulls");
@@ -61,45 +56,52 @@ fn a_masters_nulls_survive_the_fits_round_trip() {
     assert_eq!([data[0], data[2], data[3]], [0.1f32, 0.3, 0.4]);
 }
 
-/// A master records the span its samples were normalized by, so a reload keeps the domain it was
-/// stacked in — a RAW-sourced master is still a declared `maximum − black`, bit for bit, and still
-/// calibrates the RAW lights it was built for. Without the record, the float samples reload with an
-/// assumed scale of 1 and every light is refused.
+/// A master records its whole domain and its quantization σ, so a reload gives back exactly what
+/// was saved, for every origin and every pedestal. Review items 5.1 and 5.2: before, a reload
+/// divided the σ by the span a second time (15360× too small for a RAW master), and an assumed
+/// scale was not recorded, so the reload had an assumed scale of 1 and the master was refused.
 #[test]
-fn a_masters_declared_sample_domain_survives_the_fits_round_trip() {
+fn a_masters_sample_domain_and_quantization_survive_the_fits_round_trip() {
     let directory = TempDir::new("lumos-cfa-domain");
-    for span in [15_360.0f32, 1_234.567_8] {
-        let mut master = make_cfa(Size2us::new(2, 2), vec![0.25; 4], CfaType::Mono);
-        master.metadata.provenance = Some(ImageProvenance {
-            container: SourceContainer::CameraRaw,
-            decoder: DecoderProvenance::LibRaw,
-            transfer: TransferProvenance::RawNormalized(RawTransferProvenance {
-                physical_scale: span,
-            }),
-            color: ColorProvenance::Monochrome,
-            clipped: false,
-            demosaic: DemosaicProvenance::None,
-            row_order: RowOrder::TopDown,
-        });
-        let path = directory.path().join(format!("master_{span}.fits"));
-        master.save_fits(&path).unwrap();
-        let loaded = CfaImage::from_file(&path, &LoadContext::default()).unwrap();
+    let mut case = 0;
+    for origin in [ScaleOrigin::Declared, ScaleOrigin::Assumed] {
+        for pedestal in [Pedestal::Removed, Pedestal::Kept(2048.0), Pedestal::Unknown] {
+            for (scale, unit) in [
+                (15_360.0, None),
+                (1_234.567_8, Some("ADU")),
+                (65_535.0, None),
+            ] {
+                case += 1;
+                let mut master = make_cfa(Size2us::new(2, 2), vec![0.25; 4], CfaType::Mono);
+                let domain = SampleDomain {
+                    scale,
+                    origin,
+                    pedestal,
+                    unit: unit.map(str::to_owned),
+                };
+                master.metadata.domain = Some(domain.clone());
+                master.metadata.quantization_sigma = Some(QUANTIZATION_SIGMA_PER_STEP / 15_360.0);
+                let path = directory.path().join(format!("master_{case}.fits"));
+                master.save_fits(&path).unwrap();
+                let loaded = CfaImage::from_file(&path, &LoadContext::default()).unwrap();
 
-        let domain = loaded
-            .metadata
-            .sample_domain()
-            .expect("a FITS master has a domain");
-        assert_eq!(domain.scale.to_bits(), span.to_bits(), "span {span}");
-        assert_eq!(domain.origin, ScaleOrigin::Declared, "span {span}");
-        assert_eq!(
-            loaded.data.to_vec(),
-            vec![0.25; 4],
-            "samples are stored normalized"
-        );
-        assert_eq!(
-            domain.conversion_to(&master.metadata.sample_domain().unwrap()),
-            Some(1.0)
-        );
+                assert_eq!(loaded.metadata.domain, Some(domain.clone()), "{domain}");
+                assert_eq!(
+                    loaded.metadata.quantization_sigma, master.metadata.quantization_sigma,
+                    "{domain}"
+                );
+                assert_eq!(
+                    loaded.data.to_vec(),
+                    vec![0.25; 4],
+                    "samples are stored normalized"
+                );
+                assert_eq!(
+                    loaded.metadata.domain.unwrap().conversion_to(&domain),
+                    Some(DomainMap::IDENTITY),
+                    "{domain}"
+                );
+            }
+        }
     }
 }
 
@@ -110,9 +112,9 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
         cfa_type: CfaType::Bayer(CfaPattern::Bggr),
         metadata: ImageMetadata {
             camera_white_balance: Some([2.0, 1.0, 1.5, 1.0]),
+            quantization_sigma: Some(0.000_01),
             ..Default::default()
         },
-        quantization_sigma: Some(0.000_01),
         nulls: None,
     };
     let dir = TempDir::new("lumos-cfa-roundtrip");
@@ -130,7 +132,7 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
         loaded.metadata.camera_white_balance,
         Some([2.0, 1.0, 1.5, 1.0])
     );
-    assert_eq!(loaded.quantization_sigma, Some(0.000_01));
+    assert_eq!(loaded.metadata.quantization_sigma, Some(0.000_01));
 
     let original = fs::read(&path).unwrap();
     let mut invalid_version = original.clone();
@@ -179,7 +181,6 @@ fn master_cfa_fits_round_trips_mono_and_xtrans_patterns() {
             data: Buffer2::new(2, 2, vec![0.1f32, 0.2, 0.3, 0.4]),
             cfa_type,
             metadata: ImageMetadata::default(),
-            quantization_sigma: None,
             nulls: None,
         };
         let path = dir.join(format!("master_{name}.fits"));
@@ -197,7 +198,7 @@ fn subtract_takes_the_dark_off_every_sample() {
     let mut light = make_cfa(Size2us::new(2, 2), vec![0.5, 0.6, 0.7, 0.8], CfaType::Mono);
     let dark = make_cfa(Size2us::new(2, 2), vec![0.1, 0.1, 0.1, 0.1], CfaType::Mono);
 
-    light.subtract(&dark, 1.0);
+    light.subtract(&dark, DomainMap::IDENTITY);
 
     assert_close!(light.data[0], 0.4, 1e-6);
     assert_close!(light.data[1], 0.5, 1e-6);
@@ -206,7 +207,8 @@ fn subtract_takes_the_dark_off_every_sample() {
 }
 
 /// The dark is expressed in the light's domain before it is subtracted: on a span four times the
-/// light's, a dark sample of 0.125 is worth 0.5. Dyadic values, so the result is exact.
+/// light's, a dark sample of 0.125 is worth 0.5, and an offset of −0.25 moves its pedestal onto the
+/// light's. Dyadic values, so the result is exact.
 #[test]
 fn subtract_converts_the_dark_into_the_lights_domain_first() {
     let mut light = make_cfa(
@@ -216,9 +218,28 @@ fn subtract_converts_the_dark_into_the_lights_domain_first() {
     );
     let dark = make_cfa(Size2us::new(2, 2), vec![0.125; 4], CfaType::Mono);
 
-    light.subtract(&dark, 4.0);
-
+    light.subtract(
+        &dark,
+        DomainMap {
+            gain: 4.0,
+            offset: 0.0,
+        },
+    );
     assert_eq!(light.data.pixels(), &[0.25, 0.5, 0.0, 0.125]);
+
+    let mut light = make_cfa(
+        Size2us::new(2, 2),
+        vec![0.75, 1.0, 0.5, 0.625],
+        CfaType::Mono,
+    );
+    light.subtract(
+        &dark,
+        DomainMap {
+            gain: 4.0,
+            offset: -0.25,
+        },
+    );
+    assert_eq!(light.data.pixels(), &[0.5, 0.75, 0.25, 0.375]);
 }
 
 #[test]
@@ -226,7 +247,7 @@ fn subtract_converts_the_dark_into_the_lights_domain_first() {
 fn subtract_dimension_mismatch() {
     let mut light = make_cfa(Size2us::new(2, 2), vec![0.5; 4], CfaType::Mono);
     let dark = make_cfa(Size2us::new(3, 3), vec![0.1; 9], CfaType::Mono);
-    light.subtract(&dark, 1.0);
+    light.subtract(&dark, DomainMap::IDENTITY);
 }
 
 #[test]
@@ -237,7 +258,7 @@ fn data_len() {
         ImageMetadata::default(),
     );
     assert_eq!(img.data.len(), 200);
-    assert_eq!(img.quantization_sigma, None);
+    assert_eq!(img.metadata.quantization_sigma, None);
 }
 
 /// LibRaw's `filters` and `colors` classify a sensor: one colour is mono whatever the word says,

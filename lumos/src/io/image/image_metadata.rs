@@ -56,25 +56,28 @@ pub struct ImageMetadata {
     /// Maximum valid pixel value (saturation level).
     pub data_max: Option<f64>,
     pub provenance: Option<ImageProvenance>,
+    /// What one sample is worth in the source's own terms: the span its decoder divided by, the
+    /// pedestal it still carries, and the unit.
+    ///
+    /// `None` for an image this crate synthesized rather than decoded, and for a preview raster
+    /// that declared no domain. Two frames are commensurate when both answer and
+    /// [`SampleDomain::conversion_to`] relates the answers; when either is `None` there is nothing
+    /// to compare, which is not the same as agreeing. Calibration updates the pedestal when it
+    /// subtracts a master.
+    pub domain: Option<SampleDomain>,
+    /// The uncertainty one quantization step adds to a sample, `step / √12`, in the samples' own
+    /// units: a lower bound on any sample's noise.
+    ///
+    /// Set by a decoder that knows the step — a RAW with a linear curve, an integer FITS — and by
+    /// the combine for a master. A demosaic clears it: interpolation mixes samples, so the bound no
+    /// longer describes one of them.
+    pub quantization_sigma: Option<f32>,
     /// Set by `CalibrationMasters::calibrate` — guards against applying the dark/flat twice
     /// (the FITS `CALSTAT` convention). Travels with the frame through demosaic.
     pub calibrated: bool,
 }
 
 impl ImageMetadata {
-    /// What one sample is worth in the source's own terms — the span its decoder divided by, and
-    /// the unit that span was in.
-    ///
-    /// `None` for an image this crate synthesized rather than decoded, and for a preview raster
-    /// that declared no domain. Two frames are commensurate when both answer and
-    /// [`SampleDomain::conversion_to`] relates the answers; when either is `None` there is nothing
-    /// to compare, which is not the same as agreeing.
-    pub fn sample_domain(&self) -> Option<SampleDomain> {
-        self.provenance
-            .as_ref()
-            .and_then(|provenance| provenance.transfer.sample_domain())
-    }
-
     /// Which end of the image the first stored row belongs to, or `None` for an image this crate
     /// synthesized rather than decoded.
     ///

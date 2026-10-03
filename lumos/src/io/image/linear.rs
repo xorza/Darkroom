@@ -20,6 +20,7 @@ use crate::io::image::input_format::InputFormat;
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::null_mask::NullMask;
+use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::io::image::standard::{f32_target_format, read_standard_image, scientific_rejection};
 
 /// A one- or three-channel floating-point image in a linear numeric domain.
@@ -103,6 +104,14 @@ impl LinearImage {
             demosaic: DemosaicProvenance::None,
             // Every raster format this path reads stores its first row at the top.
             row_order: RowOrder::TopDown,
+        });
+        // A float raster is taken as it stands, so one sample is one unit of whatever the file
+        // already held — which it does not name, and whose span and zero point it does not state.
+        image.metadata.domain = Some(SampleDomain {
+            scale: 1.0,
+            origin: ScaleOrigin::Assumed,
+            pedestal: Pedestal::Unknown,
+            unit: None,
         });
         Ok(image)
     }

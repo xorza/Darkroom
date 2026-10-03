@@ -8,7 +8,7 @@ use fits_well::io::{BLOCK_SIZE, Hdu, HduKind};
 
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::error::{fits_err, fits_unsupported};
-use crate::io::image::fits::metadata::SAMPLE_SCALE_KEYWORD;
+use crate::io::image::fits::metadata::domain_keywords;
 use crate::io::image::fits::options::{FitsCubeInterpretation, FitsFloatScale};
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::sample_domain::ScaleOrigin;
@@ -94,13 +94,13 @@ impl FitsDecodePlan {
 /// Anything else — a `DATAMAX` of about 1, or none at all — is taken as already normalized, which
 /// is PixInsight's default for a float FITS and what keeps a Lumos-written master round-tripping.
 ///
-/// The test is on the *header*, never on the pixels, and that is where this departs from Siril:
-/// with `DATAMAX` absent it scans the data instead (three sampled pixels on the partial-read path,
-/// which is why its full and partial reads can disagree about the same file). A divisor read off
-/// each frame's own extrema differs frame to frame, which is exactly what
-/// [`crate::combine`] now rejects a frame set for. An unnormalized float FITS carrying no
-/// `DATAMAX` therefore reaches the pipeline as it stands; the display stage measures its own range
-/// rather than the decoder guessing one.
+/// The divisor comes from the *header*, never from the pixels, and that is where this departs from
+/// Siril: with `DATAMAX` absent it scans the data instead (three sampled pixels on the partial-read
+/// path, which is why its full and partial reads can disagree about the same file). A divisor read
+/// off each frame's own extrema differs frame to frame, which is exactly what [`crate::combine`]
+/// rejects a frame set for. The scan still decides one thing: a frame taken as normalized whose
+/// samples reach past Siril's threshold is refused rather than loaded as it stands
+/// ([`SampleScale::verify_normalized`]).
 fn sample_scale(
     path: &Path,
     header: &Header,
@@ -110,8 +110,9 @@ fn sample_scale(
 ) -> Result<SampleScale, ImageError> {
     let divided_by = |divisor: f32, origin| SampleScale {
         divisor,
-        physical: divisor,
+        physical: f64::from(divisor),
         origin,
+        verify_normalized: false,
     };
     let steps = match stored {
         FitsBitpix::U8 => f64::from(u8::MAX),
@@ -122,19 +123,24 @@ fn sample_scale(
             // A lumos-written file stores its samples already normalized and records the scale
             // they were normalized by; that record beats every guess below.
             if let Some(recorded) = header
-                .get_real(SAMPLE_SCALE_KEYWORD)
+                .get_real(domain_keywords::SAMPLE_SCALE)
                 .map_err(|source| fits_err(path, source))?
             {
                 if !recorded.is_finite() || recorded <= 0.0 {
                     return Err(fits_unsupported(
                         path,
-                        format!("{SAMPLE_SCALE_KEYWORD} {recorded} must be finite and positive"),
+                        format!(
+                            "{} {recorded} must be finite and positive",
+                            domain_keywords::SAMPLE_SCALE
+                        ),
                     ));
                 }
                 return Ok(SampleScale {
                     divisor: 1.0,
-                    physical: recorded as f32,
-                    origin: ScaleOrigin::Declared,
+                    physical: recorded,
+                    origin: domain_keywords::read_origin(header)
+                        .map_err(|source| fits_err(path, source))?,
+                    verify_normalized: false,
                 });
             }
             return match float_scale {
@@ -156,11 +162,15 @@ fn sample_scale(
                     let data_max = header
                         .get_real("DATAMAX")
                         .map_err(|source| fits_err(path, source))?;
-                    let divisor = match data_max {
-                        Some(max) if max > FLOAT_ADU_DATAMAX_MIN => FLOAT_ADU_DIVISOR,
-                        _ => 1.0,
-                    };
-                    Ok(divided_by(divisor, ScaleOrigin::Assumed))
+                    Ok(match data_max {
+                        Some(max) if max > FLOAT_ADU_DATAMAX_MIN => {
+                            divided_by(FLOAT_ADU_DIVISOR, ScaleOrigin::Assumed)
+                        }
+                        _ => SampleScale {
+                            verify_normalized: true,
+                            ..divided_by(1.0, ScaleOrigin::Assumed)
+                        },
+                    })
                 }
             };
         }
@@ -192,8 +202,20 @@ pub(super) struct SampleScale {
     pub(super) divisor: f32,
     /// Multiply a decoded sample by this to recover the file's physical value. Equal to `divisor`
     /// except for a lumos-written file, whose samples were stored already divided.
-    pub(super) physical: f32,
+    pub(super) physical: f64,
     pub(super) origin: ScaleOrigin,
+    /// The samples were taken as already normalized because nothing declared otherwise, so the
+    /// decode checks that they are: a maximum past [`FLOAT_ADU_DATAMAX_MIN`] is ADU, and loading it
+    /// as normalized would put the saturation level at 0.95 ADU.
+    pub(super) verify_normalized: bool,
+}
+
+impl SampleScale {
+    /// Whether a frame whose samples reach `maximum` after the division is what this scale says it
+    /// is. Only an unchecked "already normalized" can be wrong this way.
+    pub(super) fn accepts_maximum(&self, maximum: f32) -> bool {
+        !self.verify_normalized || f64::from(maximum) <= FLOAT_ADU_DATAMAX_MIN
+    }
 }
 
 pub(super) fn preflight_fits_image(

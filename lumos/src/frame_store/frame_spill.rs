@@ -30,7 +30,7 @@ use crate::frame_store::stored_plane::StoredPlane;
 /// `sidecar_layout_is_pinned` checks. Bitcode is not self-describing, so a file written with
 /// another layout decodes into plausible nonsense instead of failing. [`SIDECAR_FORMAT`] is derived
 /// from this pin, so the change that moves the layout also changes the tag every sidecar carries.
-pub(crate) const SIDECAR_PIN: &str = "26eb8398fbbba964";
+pub(crate) const SIDECAR_PIN: &str = "e9ed1f80c314d8e8";
 
 /// The tag every sidecar carries.
 const SIDECAR_FORMAT: u64 = cache_key::pins_fingerprint(&[SIDECAR_PIN]);
@@ -269,7 +269,7 @@ mod tests {
     use crate::frame_store::frame_stats::FrameStats;
     use crate::io::image::cfa::CfaType;
     use crate::io::image::image_provenance::RowOrder;
-    use crate::io::image::sample_domain::{SampleDomain, ScaleOrigin};
+    use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
     use crate::io::raw::demosaic::bayer::CfaPattern;
     use crate::math::statistics::MedianMad;
 
@@ -284,6 +284,7 @@ mod tests {
                 domain: Some(SampleDomain {
                     scale: 65535.0,
                     origin: ScaleOrigin::Declared,
+                    pedestal: Pedestal::Kept(2048.0),
                     unit: Some("ADU".to_owned()),
                 }),
                 row_order: Some(RowOrder::BottomUp),

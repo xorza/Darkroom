@@ -51,7 +51,7 @@ pub(crate) fn reject_cosmic_rays(
     image: &mut CfaImage,
     config: &CosmicRayConfig,
 ) -> Result<usize, UnknownAdcStep> {
-    let noise = NoiseModel::resolve(&config.noise, image.quantization_sigma)?;
+    let noise = NoiseModel::resolve(&config.noise, image.metadata.quantization_sigma)?;
     let size = Size2us::new(image.data.width(), image.data.height());
     // Disjoint fields: the pixels go in by `&mut`, the CFA type is read beside them.
     let pixels = image.data.pixels_mut();

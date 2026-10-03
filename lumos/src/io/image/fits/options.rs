@@ -1,3 +1,4 @@
+use crate::io::image::sample_domain::Pedestal;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 
 /// Selects the image HDU decoded from a FITS container.
@@ -95,6 +96,11 @@ pub struct FitsLoadOptions {
     /// given as `BAYERPAT` would give it. `None` refuses such a frame rather than guess one of
     /// four.
     pub unstated_bayer_pattern: Option<CfaPattern>,
+    /// The pedestal a frame's values carry, in its physical units, when the header records none.
+    /// Only a lumos-written file records one; a third-party file usually keeps the camera offset in
+    /// the data and says nothing, so the default is [`Pedestal::Unknown`], which calibration then
+    /// refuses to relate to a frame whose pedestal is known.
+    pub pedestal: Pedestal,
 }
 
 impl Default for FitsLoadOptions {
@@ -110,6 +116,7 @@ impl Default for FitsLoadOptions {
             // the standard defines.
             nulls: FitsNullPolicy::Mask,
             unstated_bayer_pattern: None,
+            pedestal: Pedestal::Unknown,
         }
     }
 }

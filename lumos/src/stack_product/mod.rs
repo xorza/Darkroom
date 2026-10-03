@@ -53,13 +53,6 @@ pub struct StackProduct {
     /// Present for weighted means and drizzle, using their actual surviving/contributing samples.
     /// Absent for median output because a median is not a linear combination.
     pub linear_variance: Option<QualityMap>,
-    /// Source-quantization uncertainty carried through the combine, in the stacked image's
-    /// sample units.
-    ///
-    /// Present when every input frame declared one and the frame set carries no coverage, which
-    /// is what lets a surviving sample be traced back to the frame whose sigma and normalization
-    /// gain it inherited. `None` otherwise.
-    pub quantization_sigma: Option<f32>,
     /// The mosaic pattern every frame shared, for a stack of undemosaiced sensor frames; `None`
     /// for any other stack.
     pub cfa_type: Option<CfaType>,
@@ -86,7 +79,6 @@ impl StackProduct {
                 .cfa_type
                 .expect("a CFA master is stacked from mosaic frames"),
             metadata: self.image.metadata,
-            quantization_sigma: self.quantization_sigma,
             nulls: self.image.nulls,
         }
     }
@@ -107,12 +99,12 @@ mod tests {
             (0..dimensions.sample_count()).map(|i| i as f32).collect(),
         );
         image.metadata.exposure_time = Some(30.0);
+        image.metadata.quantization_sigma = Some(0.25);
         StackProduct {
             image,
             coverage: None,
             weight: None,
             linear_variance: None,
-            quantization_sigma: Some(0.25),
             cfa_type,
         }
     }
@@ -126,7 +118,7 @@ mod tests {
         assert_eq!(master.data.pixels(), &[0.0, 1.0]);
         assert_eq!(master.cfa_type, pattern);
         assert_eq!(master.metadata.exposure_time, Some(30.0));
-        assert_eq!(master.quantization_sigma, Some(0.25));
+        assert_eq!(master.metadata.quantization_sigma, Some(0.25));
         assert!(master.nulls.is_none());
     }
 

@@ -17,15 +17,12 @@ use crate::internals::assertions::bits;
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::sky_field::{Sky, SkyField};
 use crate::io::image::cfa::{CfaImage, CfaType};
-use crate::io::image::fits::provenance::{
-    FitsChecksumProvenance, FitsChecksumState, FitsHduProvenance, FitsTransferProvenance,
-};
 use crate::io::image::image_provenance::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
     SourceContainer, TransferProvenance,
 };
 use crate::io::image::null_mask::NullMask;
-use crate::io::image::sample_domain::ScaleOrigin;
+use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::math::statistics::MedianMad;
 use crate::registration::config::{self, InterpolationMethod};
 use crate::registration::resample;
@@ -66,7 +63,7 @@ fn make_cfa_stack_cache(
                 pixels,
                 CfaType::Mono,
             );
-            image.quantization_sigma = Some(sigma);
+            image.metadata.quantization_sigma = Some(sigma);
             image
         })
         .collect();
@@ -105,7 +102,7 @@ fn cfa_stack_quantization_uses_normalization_and_actual_rejection_survivors() {
         ((0.25f32 * 0.01).powi(2) + (0.75f32 * 2.0 * 0.02).powi(2)).sqrt();
     assert_eq!(normalized.image.channel(0).pixels().to_vec(), vec![0.4; 2]);
     assert_eq!(
-        normalized.quantization_sigma,
+        normalized.image.metadata.quantization_sigma,
         Some(expected_normalized_sigma),
         "weighted normalized σ must use each frame's own source σ and gain"
     );
@@ -121,7 +118,7 @@ fn cfa_stack_quantization_uses_normalization_and_actual_rejection_survivors() {
     let expected_median_sigma = 0.01 * (3.0f32 / 5.0).sqrt();
     assert_eq!(median.image.channel(0).pixels().to_vec(), vec![0.4; 2]);
     assert_eq!(
-        median.quantization_sigma,
+        median.image.metadata.quantization_sigma,
         Some(expected_median_sigma),
         "an equal-source three-frame median must use the exact uniform order statistic"
     );
@@ -135,7 +132,7 @@ fn cfa_stack_quantization_uses_normalization_and_actual_rejection_survivors() {
     let winsorized = run_stacking(&winsorized_cache, &StackConfig::winsorized(2.5))
         .expect("this cache is never cancelled");
     assert_eq!(
-        winsorized.quantization_sigma,
+        winsorized.image.metadata.quantization_sigma,
         Some(0.02),
         "nonlinear unequal-source combines must retain the conservative largest σ"
     );
@@ -162,7 +159,7 @@ fn cfa_stack_quantization_uses_normalization_and_actual_rejection_survivors() {
     // relative.
     let expected_rejected_sigma = f64::from(0.01f32) / 7.0f64.sqrt();
     assert_close!(
-        rejected.quantization_sigma.unwrap(),
+        rejected.image.metadata.quantization_sigma.unwrap(),
         expected_rejected_sigma,
         2.0 * f64::from(f32::EPSILON) * expected_rejected_sigma,
         "the global CFA floor must use the least-reduced pixel's seven survivors"
@@ -507,41 +504,22 @@ fn stack_images_rejects_frames_whose_rows_run_from_opposite_ends() {
 
 #[test]
 fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
-    type Declared<'a> = Option<(f32, ScaleOrigin, Option<&'a str>)>;
+    type Declared<'a> = Option<(f64, ScaleOrigin, Option<&'a str>)>;
 
     // The case decode-time normalization introduced: a `uint16` FITS is divided by 65535, a
     // `float32` one holding the same ADU is taken as already normalized and divided by 1. Both
     // present as `FitsNormalized` and agree on every other axis, and `Normalization::Global` would
     // absorb the 65535× into its fitted gain and hand back a plausible-looking stack.
-    let domain =
-        |physical_scale: f32, scale_origin: ScaleOrigin, unit: Option<&str>| ImageProvenance {
-            container: SourceContainer::Fits,
-            decoder: DecoderProvenance::FitsWell,
-            transfer: TransferProvenance::FitsNormalized(FitsTransferProvenance {
-                bscale: 1.0,
-                bzero: 0.0,
-                physical_scale,
-                scale_origin,
-                unit: unit.map(str::to_owned),
-                hdu: FitsHduProvenance {
-                    index: 0,
-                    extname: None,
-                    extver: None,
-                },
-                checksum: FitsChecksumProvenance {
-                    datasum: FitsChecksumState::NotChecked,
-                    checksum: FitsChecksumState::NotChecked,
-                },
-            }),
-            color: ColorProvenance::Monochrome,
-            clipped: false,
-            demosaic: DemosaicProvenance::None,
-            row_order: RowOrder::TopDown,
-        };
+    // FITS files from anyone but lumos record no pedestal.
+    let domain = |scale: f64, origin: ScaleOrigin, unit: Option<&str>| SampleDomain {
+        scale,
+        origin,
+        pedestal: Pedestal::Unknown,
+        unit: unit.map(str::to_owned),
+    };
     let frame = |declared: Declared<'_>| {
         let mut image = LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0; 4]);
-        image.metadata.provenance =
-            declared.map(|(scale, origin, unit)| domain(scale, origin, unit));
+        image.metadata.domain = declared.map(|(scale, origin, unit)| domain(scale, origin, unit));
         image
     };
     let stack = |frames: [Declared<'_>; 2]| {
@@ -578,6 +556,26 @@ fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
     ])
     .unwrap();
     assert_eq!(converted.image.channel(0).pixels(), &[1.5; 4]);
+
+    // Known pedestals convert by an offset. Frame 0 keeps 0.5 on unit scale and frame 1 has none,
+    // so frame 1's 1.0 is 1.0 + 0.5 = 1.5 in frame 0's domain and the mean is 1.25.
+    let pedestal_frame = |pedestal| {
+        let mut image = LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0; 4]);
+        image.metadata.domain = Some(SampleDomain {
+            pedestal,
+            ..domain(1.0, ScaleOrigin::Declared, None)
+        });
+        image
+    };
+    let offset = combine(
+        vec![
+            pedestal_frame(Pedestal::Kept(0.5)).into(),
+            pedestal_frame(Pedestal::Removed).into(),
+        ],
+        &StackConfig::default(),
+    )
+    .unwrap();
+    assert_eq!(offset.image.channel(0).pixels(), &[1.25; 4]);
 
     // The same rejection with no span to give it away: one span, two quantities. Without BUNIT
     // these two frames are indistinguishable, and a surface brightness would be averaged with a

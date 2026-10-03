@@ -16,19 +16,11 @@ use crate::internals::cfa::cfa_from_plane;
 use crate::internals::cfa::{constant_cfa, make_cfa};
 use crate::internals::prelude::*;
 use crate::io::image::cfa::{CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
-use crate::io::image::fits::provenance::{
-    FitsChecksumProvenance, FitsChecksumState, FitsHduProvenance, FitsTransferProvenance,
-};
-use crate::io::image::image_provenance::{
-    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
-    SourceContainer, TransferProvenance,
-};
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::preview_image::PreviewImage;
-use crate::io::image::sample_domain::{SampleDomain, ScaleOrigin};
+use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
-use crate::io::raw::provenance::RawTransferProvenance;
 use crate::progress::ProgressCallback;
 use crate::{
     CalibrationComponent, CalibrationMasters, CalibrationSet, DefectSummary, ImageError,
@@ -230,13 +222,13 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
         (MasterRole::FlatDark, 0.5),
     ] {
         let mut master = constant_cfa(Size2us::new(2, 2), 0.25, CfaType::Mono);
-        master.metadata.provenance = Some(raw_provenance(65_532.0));
+        master.metadata.domain = Some(raw_domain(65_532.0));
         let mut images = CalibrationSet::default();
         *images.get_mut(component) = Some(master);
         let masters = bundle(images);
 
         let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
-        light.metadata.provenance = Some(raw_provenance(16_383.0));
+        light.metadata.domain = Some(raw_domain(16_383.0));
         assert_eq!(masters.calibrate(&mut light), Ok(()), "{component:?}");
         assert_eq!(light.data.pixels(), &[expected; 4], "{component:?}");
     }
@@ -246,29 +238,21 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
     // Refused for the master the light subtracts, before the light is touched.
     for component in [MasterRole::Dark, MasterRole::Bias] {
         let mut master = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
-        master.metadata.provenance = Some(fits_provenance(1.0, None, ScaleOrigin::Assumed));
+        master.metadata.domain = Some(fits_domain(1.0, None, ScaleOrigin::Assumed));
         let mut images = CalibrationSet::default();
         *images.get_mut(component) = Some(master);
         let masters = bundle(images);
 
         let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
-        light.metadata.provenance = Some(raw_provenance(16_383.0));
+        light.metadata.domain = Some(raw_domain(16_383.0));
         let original_data = light.data.to_vec();
 
         assert_eq!(
             masters.calibrate(&mut light),
             Err(CalibrationError::SampleDomainMismatch {
                 component,
-                frame: SampleDomain {
-                    scale: 16_383.0,
-                    origin: ScaleOrigin::Declared,
-                    unit: None,
-                },
-                master: SampleDomain {
-                    scale: 1.0,
-                    origin: ScaleOrigin::Assumed,
-                    unit: None,
-                },
+                frame: raw_domain(16_383.0),
+                master: fits_domain(1.0, None, ScaleOrigin::Assumed),
             })
         );
         assert_eq!(light.data.pixels(), original_data);
@@ -279,31 +263,21 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
     // names different quantities. The subtraction would run and report success.
     {
         let mut master = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
-        master.metadata.provenance =
-            Some(fits_provenance(1.0, Some("count/s"), ScaleOrigin::Declared));
+        master.metadata.domain = Some(fits_domain(1.0, Some("count/s"), ScaleOrigin::Declared));
         let mut images = CalibrationSet::default();
         *images.get_mut(MasterRole::Dark) = Some(master);
         let masters = bundle(images);
 
         let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
-        light.metadata.provenance =
-            Some(fits_provenance(1.0, Some("Jy/beam"), ScaleOrigin::Declared));
+        light.metadata.domain = Some(fits_domain(1.0, Some("Jy/beam"), ScaleOrigin::Declared));
         let original_data = light.data.to_vec();
 
         assert_eq!(
             masters.calibrate(&mut light),
             Err(CalibrationError::SampleDomainMismatch {
                 component: MasterRole::Dark,
-                frame: SampleDomain {
-                    scale: 1.0,
-                    origin: ScaleOrigin::Declared,
-                    unit: Some("Jy/beam".to_owned()),
-                },
-                master: SampleDomain {
-                    scale: 1.0,
-                    origin: ScaleOrigin::Declared,
-                    unit: Some("count/s".to_owned()),
-                },
+                frame: fits_domain(1.0, Some("Jy/beam"), ScaleOrigin::Declared),
+                master: fits_domain(1.0, Some("count/s"), ScaleOrigin::Declared),
             })
         );
         assert_eq!(light.data.pixels(), original_data);
@@ -313,13 +287,12 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
         // calibrates once the master stops naming a quantity — the unit is the axis, not its
         // presence.
         let mut master = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
-        master.metadata.provenance = Some(fits_provenance(1.0, None, ScaleOrigin::Declared));
+        master.metadata.domain = Some(fits_domain(1.0, None, ScaleOrigin::Declared));
         let mut images = CalibrationSet::default();
         *images.get_mut(MasterRole::Dark) = Some(master);
         let masters = bundle(images);
         let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
-        light.metadata.provenance =
-            Some(fits_provenance(1.0, Some("Jy/beam"), ScaleOrigin::Declared));
+        light.metadata.domain = Some(fits_domain(1.0, Some("Jy/beam"), ScaleOrigin::Declared));
         assert_eq!(masters.calibrate(&mut light), Ok(()));
     }
 
@@ -340,13 +313,13 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
         (None, None),
     ] {
         let mut master = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
-        master.metadata.provenance = master_span.map(raw_provenance);
+        master.metadata.domain = master_span.map(raw_domain);
         let mut images = CalibrationSet::default();
         *images.get_mut(MasterRole::Dark) = Some(master);
         let masters = bundle(images);
 
         let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
-        light.metadata.provenance = light_span.map(raw_provenance);
+        light.metadata.domain = light_span.map(raw_domain);
         assert_eq!(
             masters.calibrate(&mut light),
             Ok(()),
@@ -355,48 +328,63 @@ fn calibrate_rejects_mismatched_cfa_before_mutation() {
     }
 }
 
-/// A RAW decode's provenance at `physical_scale`, for pairing frames that differ only in domain.
-fn raw_provenance(physical_scale: f32) -> ImageProvenance {
-    ImageProvenance {
-        container: SourceContainer::CameraRaw,
-        decoder: DecoderProvenance::LibRaw,
-        transfer: TransferProvenance::RawNormalized(RawTransferProvenance { physical_scale }),
-        color: ColorProvenance::SensorCfa,
-        clipped: false,
-        demosaic: DemosaicProvenance::None,
-        row_order: RowOrder::TopDown,
+/// Review item 4.4. A dark that kept its pedestal of 2048 ADU on a 65536 span, applied to a RAW
+/// light with the black removed on a 16384 span: the map is gain 4 and offset −2048/16384 = −0.125,
+/// so a dark holding only the pedestal, 2048/65536 = 0.03125, maps to 4 × 0.03125 − 0.125 = 0 and
+/// leaves the light as it was. Before, the scale alone was applied, and the light lost 0.125.
+/// Dyadic values, so the result is exact. The light's pedestal is then removed, and a dark whose
+/// pedestal nobody recorded is refused rather than guessed.
+#[test]
+fn a_dark_that_kept_its_pedestal_subtracts_only_its_signal() {
+    let kept = SampleDomain {
+        scale: 65_536.0,
+        origin: ScaleOrigin::Declared,
+        pedestal: Pedestal::Kept(2048.0),
+        unit: None,
+    };
+    let calibrate = |pedestal| {
+        let mut dark = constant_cfa(Size2us::new(2, 2), 0.031_25, CfaType::Mono);
+        dark.metadata.domain = Some(SampleDomain {
+            pedestal,
+            ..kept.clone()
+        });
+        let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
+        light.metadata.domain = Some(raw_domain(16_384.0));
+        bundle(CalibrationSet {
+            dark: Some(dark),
+            ..Default::default()
+        })
+        .calibrate(&mut light)
+        .map(|()| light)
+    };
+
+    let light = calibrate(Pedestal::Kept(2048.0)).unwrap();
+    assert_eq!(light.data.pixels(), &[0.5; 4]);
+    assert_eq!(light.metadata.domain.unwrap().pedestal, Pedestal::Removed);
+    assert!(matches!(
+        calibrate(Pedestal::Unknown),
+        Err(CalibrationError::SampleDomainMismatch { .. })
+    ));
+}
+
+/// A RAW decode's domain over a span of `scale`, for pairing frames that differ only in domain.
+fn raw_domain(scale: f64) -> SampleDomain {
+    SampleDomain {
+        scale,
+        origin: ScaleOrigin::Declared,
+        pedestal: Pedestal::Removed,
+        unit: None,
     }
 }
 
-/// The same, for the one decoder that can also declare what its samples measure.
-fn fits_provenance(
-    physical_scale: f32,
-    unit: Option<&str>,
-    scale_origin: ScaleOrigin,
-) -> ImageProvenance {
-    ImageProvenance {
-        container: SourceContainer::Fits,
-        decoder: DecoderProvenance::FitsWell,
-        transfer: TransferProvenance::FitsNormalized(FitsTransferProvenance {
-            bscale: 1.0,
-            bzero: 0.0,
-            physical_scale,
-            scale_origin,
-            unit: unit.map(str::to_owned),
-            hdu: FitsHduProvenance {
-                index: 0,
-                extname: None,
-                extver: None,
-            },
-            checksum: FitsChecksumProvenance {
-                datasum: FitsChecksumState::NotChecked,
-                checksum: FitsChecksumState::NotChecked,
-            },
-        }),
-        color: ColorProvenance::SensorCfa,
-        clipped: false,
-        demosaic: DemosaicProvenance::None,
-        row_order: RowOrder::TopDown,
+/// The same, for the one decoder that can also declare what its samples measure. A third-party
+/// FITS file records no pedestal.
+fn fits_domain(scale: f64, unit: Option<&str>, origin: ScaleOrigin) -> SampleDomain {
+    SampleDomain {
+        scale,
+        origin,
+        pedestal: Pedestal::Unknown,
+        unit: unit.map(str::to_owned),
     }
 }
 
@@ -808,8 +796,10 @@ fn defect_detection_zero_median_no_false_positives() {
     let dark = CfaImage {
         data: Buffer2::new(10, 10, data),
         cfa_type: CfaType::Mono,
-        metadata: ImageMetadata::default(),
-        quantization_sigma: Some(QUANTIZATION_SIGMA_PER_STEP / 4095.0),
+        metadata: ImageMetadata {
+            quantization_sigma: Some(QUANTIZATION_SIGMA_PER_STEP / 4095.0),
+            ..ImageMetadata::default()
+        },
         nulls: None,
     };
 
@@ -873,7 +863,6 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
             camera_white_balance: Some([2.0, 1.0, 1.5, 1.0]),
             ..Default::default()
         },
-        quantization_sigma: None,
         nulls: None,
     };
     let mut masters = bundle(CalibrationSet {
@@ -882,7 +871,13 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         bias: Some(constant_cfa(Size2us::new(4, 4), 0.1, cfa_type)),
         flat_dark: None,
     });
-    masters.masters.dark.as_mut().unwrap().quantization_sigma = Some(0.000_02);
+    masters
+        .masters
+        .dark
+        .as_mut()
+        .unwrap()
+        .metadata
+        .quantization_sigma = Some(0.000_02);
     let prepared_bits = bits(masters.masters.flat.as_ref().unwrap().data.pixels());
 
     let mut expected = constant_cfa(Size2us::new(4, 4), 0.75, cfa_type);
@@ -979,7 +974,13 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         Some([2.0, 1.0, 1.5, 1.0])
     );
     assert_eq!(
-        loaded.masters.dark.as_ref().unwrap().quantization_sigma,
+        loaded
+            .masters
+            .dark
+            .as_ref()
+            .unwrap()
+            .metadata
+            .quantization_sigma,
         Some(0.000_02)
     );
     assert_eq!(

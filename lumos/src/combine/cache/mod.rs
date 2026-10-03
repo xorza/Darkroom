@@ -27,6 +27,7 @@ use crate::error::FrameDimensionMismatch;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_plane::StoredPlane;
 use crate::io::image::cfa::CfaImage;
+use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::memory::ChunkMemoryLayout;
@@ -177,7 +178,12 @@ impl FrameCache {
         // Every frame carries the first one's pattern: `SetFacts` held them to it.
         let cfa_type = self.frames[0].source_stats.facts.cfa_type;
         let image = LinearImage {
-            metadata: self.core.metadata.clone(),
+            // The reference frame's metadata, with the combine's own quantization σ: what the
+            // reference's decoder recorded describes one frame, not the stack.
+            metadata: ImageMetadata {
+                quantization_sigma,
+                ..self.core.metadata.clone()
+            },
             pixels,
             // A stacked pixel is missing only where no frame reached it, which is what `coverage`
             // below reports — a second, coarser record of the same thing would only be able to
@@ -201,7 +207,6 @@ impl FrameCache {
                 }),
                 weight,
                 linear_variance,
-                quantization_sigma,
                 cfa_type,
             };
         }
@@ -260,7 +265,6 @@ impl FrameCache {
             coverage: Some(Coverage::PerPixel(coverage)),
             weight,
             linear_variance,
-            quantization_sigma,
             cfa_type,
         }
     }
