@@ -977,3 +977,28 @@ fn calibrated_demosaic_preserves_out_of_range_samples() {
         }
     }
 }
+
+/// A FITS `DATAMAX` lets the decoder flag saturation on the samples as decoded, before any
+/// calibration moves them. DATAMAX = 4000 ADU on a uint16 frame: the level is 0.95 × 4000 = 3800,
+/// so 3800 and 4000 are flagged and 3799 is not. Without DATAMAX nothing is flagged, and the image
+/// says so, which leaves detection to test the samples itself.
+#[test]
+fn a_fits_datamax_flags_saturation_at_decode() {
+    let dir = TempDir::new("lumos-fits-roundtrip");
+    let image = Image::from_u16(vec![4, 1], &[100, 3799, 3800, 4000]).unwrap();
+    let mut header = Header::new();
+    header.set("DATAMAX", 4000.0).unwrap();
+    let path = write_with_header(&dir, "uint16_datamax", &image, &header);
+    let loaded = load_linear_fits(&path, &LoadContext::default()).unwrap();
+    assert!(loaded.metadata.saturation_flagged);
+    let flags = loaded.flags.as_ref().unwrap();
+    let saturated: Vec<bool> = (0..4)
+        .map(|index| flags.at(index).intersects(Flags::SATURATED))
+        .collect();
+    assert_eq!(saturated, [false, false, true, true]);
+
+    let path = write_with_header(&dir, "uint16_bare", &image, &Header::new());
+    let bare = load_linear_fits(&path, &LoadContext::default()).unwrap();
+    assert!(!bare.metadata.saturation_flagged);
+    assert!(bare.flags.is_none());
+}

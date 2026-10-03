@@ -125,6 +125,18 @@ impl CfaType {
         }
     }
 
+    /// How far the demosaic of this pattern reads from an output pixel: an input photosite this far
+    /// away can change it. Both demosaics decide directions from neighbourhoods of interpolated
+    /// values, so the reach is the chained steps', not one kernel's. An impulse on random texture
+    /// moves pixels up to 10 away by more than 2⁻¹⁶ of itself, for both
+    /// (`the_demosaic_support_bounds_every_impulse_response`).
+    pub(crate) const fn demosaic_support(self) -> usize {
+        match self {
+            Self::Mono => 0,
+            Self::Bayer(_) | Self::XTrans(_) => 10,
+        }
+    }
+
     /// What the colour of a demosaiced frame of this pattern means.
     pub(crate) const fn demosaiced_color(self) -> ColorProvenance {
         match self {
@@ -305,10 +317,13 @@ impl CfaImage {
             metadata.quantization_sigma = None;
         }
         let pixels = self.data.into_vec();
-        // The flags travel at their own extent, which `repair_nulls` above is what makes honest:
-        // these pixels were reconstructed rather than measured, and the combine still has to know
-        // that.
-        let flags = self.flags;
+        // `NO_DATA` travels at its own extent, which `repair_nulls` above is what makes honest: these
+        // pixels were reconstructed rather than measured, and the combine still has to know that.
+        // Every other fact spreads as far as the demosaic reads.
+        let mut flags = self.flags;
+        if let Some(flags) = &mut flags {
+            flags.dilate(cfa_type.demosaic_support(), Flags::NO_DATA);
+        }
 
         Ok(match cfa_type {
             CfaType::Mono => {

@@ -182,10 +182,6 @@ AGENTS.md promises photometry-grade error bars. These planes cannot give them.
 - [ ] `9.2` **The matched-filter threshold assumes white noise, but the median plane is strongly correlated** — `star_detection/convolution/mod.rs:39-81`
   - The true filtered σ is 2.18–2.63× the σ in the map (filter FWHM 2.5–6). A "4σ" threshold is then ≈1.6σ, so ≈5% of sky pixels pass it on OSC frames.
   - Measure the noise of the filtered plane itself. That is exact under any correlation (demosaic, resampling). `[C]`
-- [ ] `9.3` **Saturation is flagged on the channel-combined median plane** — `star_detection/detector/mod.rs:182-184`, `star_detection/detector/stages/prepare/mod.rs:94-104`
-  - A star clipped in G only, (0.6, 1.0, 0.6), combines to 0.8, which is below 0.95.
-  - The median also pulls a small clipped core below the level.
-  - Flag saturation on the input channels before `prepare`. `[C]`
 - [ ] `9.4` **Both deblenders split on the unfiltered residual, in units that do not match detection** — `star_detection/detector/stages/detect/mod.rs:59-103,182-205`, `star_detection/deblend/component.rs:394-410`, `star_detection/deblend/local_maxima/mod.rs:68-75`
   - The footprint is cut at σ in filtered-SNR units. The multi-threshold floor is in residual units (≈3× lower at FWHM 4).
   - Level 0 (`multi_threshold/mod.rs:512`) breaks the footprint into noise islands, and those islands become children.
@@ -953,15 +949,15 @@ Each phase builds and passes the verification chain on its own. A phase closes i
 
 0. Add `RunReport` to `StackProduct` and `AlignStackResult`. Its first entries are the flag counts of this phase.
 1. Done: `PixelFlags` replaced `NullMask` (`NO_DATA`), drizzle skips flagged pixels, and RAW `zero_is_bad` zeros are flagged through a `libraw-sys` shim.
-2. Set `SATURATED` in the RAW and FITS decoders.
-3. Carry the flags through calibration, the demosaic, the warp, spills and FITS.
+2. Done: the RAW decoder flags `SATURATED` per channel from `linear_max` or `maximum`, a FITS `DATAMAX` flags it too, `ImageMetadata::saturation_flagged` records which, the demosaic dilates flags by its measured reach of 10, and detection reads the flags or tests each input channel.
+3. Carry the flags through calibration, the warp, the kept decode cache and FITS. A warped frame keeps `saturation_flagged` from its source today but no flags; the warp must carry them.
 4. Read them in the combine (exclusion and survivor floor) and in drizzle. Remove the f32 planes of `for_unwarped`.
 - **Tests:**
   - A star clipped at the raw limit in G only is flagged. The flag survives dark subtraction and flat division.
   - One flagged pixel in a Lanczos-3 warp with a shift of (0.5, 0.5) flags exactly 6 × 6 = 36 output pixels. At half-pixel phase none of the 6 taps per axis is zero.
   - 10 frames, 3 of them saturated at a pixel: the output is the mean of the other 7. All 10 saturated: the output pixel is flagged `SATURATED`.
   - A frame with a NaN border drizzles to the same output as the frame cropped. A Panasonic zero is `NO_DATA`, not `−black/span`.
-- **Closes:** 9.3 (8.1 and 8.3 are closed).
+- **Closes:** nothing left beyond the steps above (8.1, 8.3 and 9.3 are closed).
 
 ## Phase 4. Spread, sorted window and rejection driver (S3, S4, C1 gather)
 

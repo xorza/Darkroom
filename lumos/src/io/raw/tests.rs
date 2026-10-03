@@ -4,7 +4,6 @@ use crate::internals::assertions::{assert_close, assert_close_slice};
 use crate::internals::cfa::XTRANS_PATTERN;
 
 use crate::io::raw::*;
-use std::array;
 
 #[test]
 fn load_raw_invalid_path() {
@@ -746,18 +745,25 @@ fn no_black() -> Box<[u32; 4104]> {
         .expect("4104 entries")
 }
 
-/// A `zero_is_bad` camera's zero photosites are flagged, at their position in the visible area
-/// (review item 8.3). LibRaw's `open_bayer` sets the flag from `procflags & 2`, which stands in for
-/// a Panasonic file. The 24 × 24 buffer reads 1000 everywhere except two zeros: one inside the
-/// visible area at raw (5, 7), which is visible (4, 6) under the one-pixel margins, and one in the
-/// masked margin at raw (0, 0), which is not part of the image. Without the flag nothing is flagged.
+/// The raw values settle two flags at decode (review items 8.3 and 9.3). LibRaw's `open_bayer`
+/// stands in for a camera file: it sets `zero_is_bad` from `procflags & 2`, `maximum` to
+/// 65536 − 2⁰ = 65535 and black to its argument, here 1000. The saturation level is then
+/// 1000 + 0.95 × (65535 − 1000) = 62308.25.
+///
+/// The 24 × 24 buffer reads 2000 everywhere, under one-pixel margins, except:
+/// - a zero at raw (5, 7), visible (4, 6): `NO_DATA` when the camera says zeros are dead;
+/// - a zero at raw (0, 0) in the masked margin, which is not part of the image;
+/// - 62309 at raw (10, 10), visible (9, 9): saturated;
+/// - 62308 at raw (12, 12), visible (11, 11): just below the level.
 #[test]
-fn a_zero_is_bad_cameras_zero_photosites_carry_no_data() {
+fn the_raw_values_settle_no_data_and_saturation() {
     const SIDE: usize = 24;
     let flags_for = |procflags: u8| {
-        let mut samples = vec![1000u16; SIDE * SIDE];
+        let mut samples = vec![2000u16; SIDE * SIDE];
         samples[7 * SIDE + 5] = 0;
         samples[0] = 0;
+        samples[10 * SIDE + 10] = 62_309;
+        samples[12 * SIDE + 12] = 62_308;
         let mut bytes: Vec<u8> = samples
             .iter()
             .flat_map(|sample| sample.to_le_bytes())
@@ -783,17 +789,23 @@ fn a_zero_is_bad_cameras_zero_photosites_carry_no_data() {
                 0x94, // RGGB in LibRaw's filter byte
                 0,
                 0,
-                0,
+                1000,
             )
         };
         assert_eq!(opened, 0);
         let raw = unpack(state, Path::new("bayer-dump")).unwrap();
-        raw.zero_flags().unwrap()
+        raw.decode_flags().unwrap().unwrap()
     };
 
-    let flags = flags_for(2).expect("a zero inside the visible area");
+    let flags = flags_for(2);
     assert_eq!(flags.size(), Size2us::new(SIDE - 2, SIDE - 2));
     assert_eq!(flags.count(Flags::NO_DATA), 1);
     assert_eq!(flags.at_pos(Vec2us::new(4, 6)), Flags::NO_DATA);
-    assert!(flags_for(0).is_none());
+    assert_eq!(flags.count(Flags::SATURATED), 1);
+    assert_eq!(flags.at_pos(Vec2us::new(9, 9)), Flags::SATURATED);
+    assert_eq!(flags.at_pos(Vec2us::new(11, 11)), Flags::default());
+    // A camera without the convention reads its zero as a value: not missing, not saturated.
+    let flags = flags_for(0);
+    assert_eq!(flags.count(Flags::NO_DATA), 0);
+    assert_eq!(flags.at_pos(Vec2us::new(4, 6)), Flags::default());
 }
