@@ -39,8 +39,8 @@ fn emphasis_tiers_fade_dim_and_lift() {
     assert_close(dimmed.b, 0.0);
     // Emphasis keeps the full color and lifts the width by 1.25×.
     assert_eq!(rest.tint(c, true), c);
-    assert_eq!(rest.width(2.0, true), 2.5);
-    assert_eq!(rest.width(2.0, false), 2.0);
+    assert_eq!(WireEmphasis::width(2.0, true), 2.5);
+    assert_eq!(WireEmphasis::width(2.0, false), 2.0);
     // Endpoint hover carries the emphasis at rest…
     assert!(rest.hovered(true));
     assert!(!rest.hovered(false));
@@ -137,9 +137,13 @@ fn paint_ramps_differing_ends_and_flattens_equal_ones() {
 }
 
 #[test]
-fn a_glyph_key_names_the_node_its_glyph_hangs_off() {
+fn a_node_key_names_the_node_its_glyph_hangs_off() {
+    use scenarium::NodeId;
+
+    use crate::core::document::node_key::NodeKey;
     use crate::core::document::{PortKind, PortRef};
-    use crate::gui::EventRef;
+    use crate::gui::event_ref::EventRef;
+    use crate::gui::pane::graph::paint::wire::glyph_drag::GlyphDrag;
 
     let node = NodeId::unique();
     // A port and an emitter event belong to their node…

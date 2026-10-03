@@ -24,7 +24,7 @@
 //! Total: 18P f32 arena, where P = width × height (+ 3P for the planar output buffers)
 //! ```
 //!
-//! Region A holds green_dir (4 directions), written in Step 2, read through Step 6.
+//! Region A holds `green_dir` (4 directions), written in Step 2, read through Step 6.
 //! Region E holds directional `[red, blue]` pairs, written in Step 3 and read through Step 6.
 //! Region B is used as `drv` in Steps 4–5, then as four `u32` scores per pixel in Step 6.
 //! Region C is used as `gmin` in Steps 1–2, then reinterpreted as `homo` (u8) in Steps 5–6.
@@ -32,24 +32,28 @@
 
 use common::CancelToken;
 
+use crate::io::cancelled::Cancelled;
+use crate::io::raw::demosaic::DemosaicMemory;
 use crate::io::raw::demosaic::xtrans::XTransImage;
 use crate::io::raw::demosaic::xtrans::hex_lookup::HexLookup;
 use crate::io::raw::demosaic::xtrans::markesteijn_steps;
 use crate::io::raw::demosaic::xtrans::markesteijn_steps::PlanarRgbMut;
-use crate::io::raw::demosaic::{Cancelled, DemosaicMemory};
 use crate::math::size2us::Size2us;
 
 /// Number of interpolation directions (4 for 1-pass: H, V, D1, D2).
 pub(crate) const NDIR: usize = 4;
-const ARENA_WORDS_PER_PIXEL: usize = 18;
+/// Words per pixel of each arena region, in arena order: A, E, B, C, D.
+const REGION_WORDS: [usize; 5] = [NDIR, 2 * NDIR, NDIR, 1, 1];
+const ARENA_WORDS_PER_PIXEL: usize =
+    REGION_WORDS[0] + REGION_WORDS[1] + REGION_WORDS[2] + REGION_WORDS[3] + REGION_WORDS[4];
 
-pub(crate) fn demosaic_memory(size: Size2us) -> DemosaicMemory {
+pub(crate) const fn demosaic_memory(size: Size2us) -> DemosaicMemory {
     let pixels = size.width.saturating_mul(size.height);
     let output_words = pixels.saturating_mul(3);
     let peak_words = pixels.saturating_mul(1 + ARENA_WORDS_PER_PIXEL + 3);
     DemosaicMemory {
-        output_bytes: output_words.saturating_mul(std::mem::size_of::<f32>()),
-        peak_bytes: peak_words.saturating_mul(std::mem::size_of::<f32>()),
+        output_bytes: output_words.saturating_mul(size_of::<f32>()),
+        peak_bytes: peak_words.saturating_mul(size_of::<f32>()),
     }
 }
 
@@ -78,8 +82,6 @@ impl DemosaicArena {
     fn new(size: Size2us) -> Self {
         let total = ARENA_WORDS_PER_PIXEL * size.pixel_count();
 
-        // SAFETY: Every element in every region is fully written by parallel passes
-        // before being read. See per-step comments in demosaic().
         let storage = vec![0.0f32; total];
 
         tracing::debug!(
@@ -93,60 +95,53 @@ impl DemosaicArena {
         Self { storage }
     }
 
-    fn final_blend_buffers(&mut self) -> FinalBlendBuffers<'_> {
-        const {
-            assert!(std::mem::size_of::<f32>() == std::mem::size_of::<u32>());
-            assert!(std::mem::align_of::<f32>() >= std::mem::align_of::<u32>());
-            assert!(NDIR * std::mem::size_of::<f32>() == std::mem::size_of::<[u32; NDIR]>());
-            assert!(std::mem::align_of::<f32>() >= std::mem::align_of::<[u32; NDIR]>());
-        }
+    /// The five regions, split once at their fixed offsets.
+    fn regions(&mut self) -> ArenaRegions<'_> {
         debug_assert_eq!(self.storage.len() % ARENA_WORDS_PER_PIXEL, 0);
         let pixels = self.storage.len() / ARENA_WORDS_PER_PIXEL;
-
-        let (regions_ae, regions_bcd) = self.storage.split_at_mut(12 * pixels);
-        let (region_b, regions_cd) = regions_bcd.split_at_mut(4 * pixels);
-        let (region_c, region_d) = regions_cd.split_at_mut(pixels);
-        let green_dir = &regions_ae[..4 * pixels];
-        let colors = bytemuck::cast_slice(&regions_ae[4 * pixels..]);
-        let scores = bytemuck::cast_slice_mut(region_b);
-        let homo = bytemuck::cast_slice(region_c);
-        let sat = bytemuck::cast_slice_mut(region_d);
-
-        FinalBlendBuffers {
-            green_dir,
-            colors,
-            scores,
-            homo,
-            sat,
-        }
+        let (a, rest) = self.storage.split_at_mut(REGION_WORDS[0] * pixels);
+        let (e, rest) = rest.split_at_mut(REGION_WORDS[1] * pixels);
+        let (b, rest) = rest.split_at_mut(REGION_WORDS[2] * pixels);
+        let (c, d) = rest.split_at_mut(REGION_WORDS[3] * pixels);
+        ArenaRegions { a, e, b, c, d }
     }
+}
+
+/// The arena's regions, named as in the module docs. Each step takes the ones it reads and
+/// writes, viewed as the type it keeps there at that step.
+#[derive(Debug)]
+struct ArenaRegions<'a> {
+    a: &'a mut [f32],
+    e: &'a mut [f32],
+    b: &'a mut [f32],
+    c: &'a mut [f32],
+    d: &'a mut [f32],
 }
 
 /// Demosaic an X-Trans image using Markesteijn 1-pass algorithm.
 ///
 /// Returns unclipped planar channels `[R, G, B]`, each `width * height`.
 pub(crate) fn demosaic(
-    xtrans: &XTransImage,
+    xtrans: &XTransImage<'_>,
     cancel: &CancelToken,
 ) -> Result<[Vec<f32>; 3], Cancelled> {
     use std::time::Instant;
 
-    let width = xtrans.active.width;
-    let height = xtrans.active.height;
+    let width = xtrans.layout.active.width;
+    let height = xtrans.layout.active.height;
     let pixels = width * height;
 
     // Build lookup tables
     let hex = HexLookup::new(&xtrans.raw_pattern);
     // Allocate all working memory in one shot
-    let mut arena = DemosaicArena::new(xtrans.active);
+    let mut arena = DemosaicArena::new(xtrans.layout.active);
 
     // Step 1: Compute green min/max bounds for non-green pixels
     // Writes: Region C (gmin), Region D (gmax)
     let t = Instant::now();
     {
-        let (before_d, region_d) = arena.storage.split_at_mut(17 * pixels);
-        let region_c = &mut before_d[16 * pixels..];
-        markesteijn_steps::compute_green_minmax(xtrans, &hex, region_c, region_d);
+        let regions = arena.regions();
+        markesteijn_steps::compute_green_minmax(xtrans, &hex, regions.c, regions.d);
     }
     tracing::debug!(
         "  Step 1 (green min/max): {:.1}ms",
@@ -160,10 +155,8 @@ pub(crate) fn demosaic(
     }
     let t = Instant::now();
     {
-        let (before_c, cd) = arena.storage.split_at_mut(16 * pixels);
-        let region_a = &mut before_c[..4 * pixels];
-        let (region_c, region_d) = cd.split_at(pixels);
-        markesteijn_steps::interpolate_green(xtrans, &hex, region_c, region_d, region_a);
+        let regions = arena.regions();
+        markesteijn_steps::interpolate_green(xtrans, &hex, regions.c, regions.d, regions.a);
     }
     tracing::debug!(
         "  Step 2 (green interp): {:.1}ms",
@@ -177,13 +170,9 @@ pub(crate) fn demosaic(
     }
     let t = Instant::now();
     {
-        let (region_a, rest) = arena.storage.split_at_mut(4 * pixels);
-        let region_e = &mut rest[..8 * pixels];
-        // SAFETY: `[f32; 2]` has the same alignment as f32 and exactly covers Region E.
-        let colors = unsafe {
-            std::slice::from_raw_parts_mut(region_e.as_mut_ptr() as *mut [f32; 2], NDIR * pixels)
-        };
-        markesteijn_steps::reconstruct_colors(xtrans, &hex, region_a, colors);
+        let regions = arena.regions();
+        let colors: &mut [[f32; 2]] = bytemuck::cast_slice_mut(regions.e);
+        markesteijn_steps::reconstruct_colors(xtrans, &hex, regions.a, colors);
     }
     tracing::debug!(
         "  Step 3 (red/blue reconstruction): {:.1}ms",
@@ -197,14 +186,9 @@ pub(crate) fn demosaic(
     }
     let t = Instant::now();
     {
-        let (region_a, rest) = arena.storage.split_at_mut(4 * pixels);
-        let (region_e, rest) = rest.split_at_mut(8 * pixels);
-        let region_b = &mut rest[..4 * pixels];
-        // SAFETY: Region E was fully initialized as `[f32; 2]` in Step 3.
-        let colors = unsafe {
-            std::slice::from_raw_parts(region_e.as_ptr() as *const [f32; 2], NDIR * pixels)
-        };
-        markesteijn_steps::compute_derivatives(xtrans, region_a, colors, region_b);
+        let regions = arena.regions();
+        let colors: &[[f32; 2]] = bytemuck::cast_slice(regions.e);
+        markesteijn_steps::compute_derivatives(xtrans, regions.a, colors, regions.b);
     }
     tracing::debug!(
         "  Step 4 (derivatives): {:.1}ms",
@@ -218,14 +202,10 @@ pub(crate) fn demosaic(
     }
     let t = Instant::now();
     {
-        let (before_d, region_d) = arena.storage.split_at_mut(17 * pixels);
-        let (before_c, region_c) = before_d.split_at_mut(16 * pixels);
-        let drv = &before_c[12 * pixels..];
-        // SAFETY: Region C (f32 at [16P..17P]) reinterpreted as u8 for homo.
-        // gmin data is dead after Step 2. f32 alignment (4) satisfies u8 alignment (1).
-        let homo =
-            unsafe { std::slice::from_raw_parts_mut(region_c.as_mut_ptr() as *mut u8, pixels * 4) };
-        markesteijn_steps::compute_homogeneity(drv, xtrans.active, homo, region_d);
+        let regions = arena.regions();
+        // gmin is dead after Step 2, so its words now hold four `u8` homogeneity counts each.
+        let homo: &mut [u8] = bytemuck::cast_slice_mut(regions.c);
+        markesteijn_steps::compute_homogeneity(regions.b, xtrans.layout.active, homo, regions.d);
     }
     tracing::debug!(
         "  Step 5 (homogeneity): {:.1}ms",
@@ -235,7 +215,6 @@ pub(crate) fn demosaic(
     // Step 6: Final blend.
     // Reads: Regions A, E, and C. Reuses B for scores and D for the SAT, and writes planar
     // [R, G, B] directly into the output buffers.
-    // SAFETY: blend_final writes every element of each output buffer.
     if cancel.is_cancelled() {
         return Err(Cancelled);
     }
@@ -244,10 +223,16 @@ pub(crate) fn demosaic(
     let mut b = vec![0.0f32; pixels];
     let t = Instant::now();
     {
-        let buffers = arena.final_blend_buffers();
+        let regions = arena.regions();
         markesteijn_steps::blend_final(
             xtrans,
-            buffers,
+            FinalBlendBuffers {
+                green_dir: regions.a,
+                colors: bytemuck::cast_slice(regions.e),
+                scores: bytemuck::cast_slice_mut(regions.b),
+                homo: bytemuck::cast_slice(regions.c),
+                sat: bytemuck::cast_slice_mut(regions.d),
+            },
             PlanarRgbMut {
                 r: &mut r,
                 g: &mut g,

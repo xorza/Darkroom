@@ -32,7 +32,7 @@ impl Default for LinearFitClipConfig {
 }
 
 impl LinearFitClipConfig {
-    pub fn new(sigma_low: f32, sigma_high: f32, max_iterations: u32) -> Self {
+    pub const fn new(sigma_low: f32, sigma_high: f32, max_iterations: u32) -> Self {
         Self {
             sigma: SigmaBounds::asymmetric(sigma_low, sigma_high),
             max_iterations,
@@ -94,34 +94,29 @@ impl LinearFitClipConfig {
                 // Sort remaining values with index co-array
                 scratch.sort_with_indices(values, len);
 
-                // Fit line y = a + b*x through sorted values, x = sorted position
+                // Fit `y = mean + b·(x − x̄)` through the sorted values, `x` the sorted position.
+                // Centred on `x̄ = (n − 1)/2`, the positions sum to zero and their squares to
+                // `n(n² − 1)/12` exactly, so the slope is `Σ(x − x̄)·y` over that: no position sums
+                // to accumulate and no `n·Σx² − (Σx)²` to cancel. `len > 3` keeps it positive.
                 let n = len as f32;
-                let mut sum_x = 0.0f32;
-                let mut sum_y = 0.0f32;
-                let mut sum_xy = 0.0f32;
-                let mut sum_xx = 0.0f32;
-
-                for (i, &v) in values[..len].iter().enumerate() {
-                    let x = i as f32;
-                    sum_x += x;
-                    sum_y += v;
-                    sum_xy += x * v;
-                    sum_xx += x * x;
-                }
-
-                let denom = n * sum_xx - sum_x * sum_x;
-                if denom.abs() < f32::EPSILON {
-                    break;
-                }
-
-                let b = (n * sum_xy - sum_x * sum_y) / denom;
-                let a = (sum_y - b * sum_x) / n;
+                let count = len as f64;
+                let centre = (count - 1.0) / 2.0;
+                let (sum_y, sum_xy) = values[..len].iter().enumerate().fold(
+                    (0.0f64, 0.0f64),
+                    |(sum_y, sum_xy), (i, &v)| {
+                        let v = f64::from(v);
+                        (sum_y + v, sum_xy + (i as f64 - centre) * v)
+                    },
+                );
+                let b = (sum_xy / (count * (count * count - 1.0) / 12.0)) as f32;
+                let mean = (sum_y / count) as f32;
+                let centre = centre as f32;
 
                 // Sigma = mean absolute deviation of residuals from fit
                 let sigma: f32 = values[..len]
                     .iter()
                     .enumerate()
-                    .map(|(i, &v)| (v - (a + b * i as f32)).abs())
+                    .map(|(i, &v)| (v - (mean + b * (i as f32 - centre))).abs())
                     .sum::<f32>()
                     / n;
 
@@ -135,7 +130,7 @@ impl LinearFitClipConfig {
                     &mut scratch.indices,
                     len,
                     SigmaBounds::asymmetric(self.sigma.low * sigma, self.sigma.high * sigma),
-                    |i| a + b * i as f32,
+                    |i| mean + b * (i as f32 - centre),
                 );
 
                 if write_idx == len {

@@ -9,7 +9,7 @@ use crate::gui::theme::palette::Palette;
 /// dock's tabs. Named for the shape rather than the node, because all
 /// three read from it — a header band derives its own tighter radius from
 /// [`Self::inner_radius`] rather than carrying fields of its own.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub(crate) struct CardTheme {
     /// Body fill.
     pub(crate) fill: RgbaF32,
@@ -38,16 +38,8 @@ pub(crate) struct CardTheme {
     pub(crate) min_height: f32,
 }
 
-/// Result of [`Theme::card_border`](crate::gui::theme::Theme::card_border): the
-/// resolved outline color. The width is [`CardTheme::border_width_total`] —
-/// constant, so selecting never resizes a card.
-#[derive(Clone, Debug)]
-pub(crate) struct CardBorder {
-    pub(crate) color: RgbaF32,
-}
-
 impl CardTheme {
-    pub(super) fn from_palette(p: &Palette) -> Self {
+    pub(super) const fn from_palette(p: &Palette) -> Self {
         Self {
             fill: p.node_fill,
             border: p.node_border,
@@ -60,11 +52,11 @@ impl CardTheme {
         }
     }
 
-    /// The stroke width a card actually draws — always the *selection* width
-    /// (`border_width * 2`) regardless of selection state, so selecting one
-    /// never resizes it (only its colour changes). Named so the doubling
-    /// can't drift between the call sites that must agree on it: the stroke
-    /// itself, [`Self::inner_radius`], and [`Theme::port_overhang_for`](crate::gui::theme::Theme::port_overhang_for).
+    /// The stroke width a card actually draws — always the *selection* width (`border_width * 2`)
+    /// regardless of selection state, so selecting one never resizes it (only its colour changes).
+    /// Named so the doubling can't drift between the call sites that must agree on it: the stroke
+    /// itself, [`Self::inner_radius`], and
+    /// [`Theme::port_overhang_for`](crate::gui::theme::Theme::port_overhang_for).
     #[inline]
     pub(crate) fn border_width_total(&self) -> f32 {
         self.border_width * 2.0
@@ -83,7 +75,7 @@ impl CardTheme {
     /// panels — so they all read as the same kind of surface. Only the blur
     /// scales with how high a surface sits; colour and offset are fixed.
     #[inline]
-    pub(crate) fn elevation_shadow(&self, blur: f32) -> Shadow {
+    pub(crate) const fn elevation_shadow(&self, blur: f32) -> Shadow {
         Shadow::drop(self.ambient_shadow, glam::Vec2::new(0.0, 3.0), blur)
     }
 }

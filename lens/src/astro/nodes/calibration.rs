@@ -1,25 +1,26 @@
 //! Calibration-master node and source-aware on-disk master cache.
 
+use scenarium::FuncId;
+use scenarium::async_lambda;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
 
-use common::CancelToken;
 use common::file_utils::{self, PublicationMode};
+use common::{CancelToken, FileIdentity};
 use lumos::ProgressCallback;
 use lumos::{
-    CalibrationMasters, CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD, LoadContext,
-    StackConfig, stack_cfa_master,
+    CalibrationMasters, CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD, LoadContext, MasterRole,
+    stack_cfa_master,
 };
 use scenarium::Invocation;
-use scenarium::{DataType, DynamicValue, Func, FuncInput, FuncLambda, FuncOutput, Library};
+use scenarium::{DataType, DynamicValue, Func, FuncInput, FuncOutput, Library};
 
 use crate::astro::masters::{MASTERS_DATA_TYPE, Masters};
 use crate::astro::nodes::io::ASTRO_RAW_PATHS_DATA_TYPE;
 use crate::astro::nodes::runtime;
 
-const CACHE_PRESENT: &str = "present:";
+const BUILD_MASTERS_FUNC_ID: FuncId = FuncId::literal("f2f6f1ff-5b10-409c-900f-d6b48750a529");
 
 #[derive(Debug, thiserror::Error)]
 enum FrameSetKeyError {
@@ -39,6 +40,8 @@ enum BuildMastersError {
     FrameSet(#[from] FrameSetKeyError),
     #[error(transparent)]
     Stack(#[from] lumos::StackError),
+    #[error(transparent)]
+    Calibration(#[from] lumos::CalibrationError),
     #[error("failed to update calibration cache '{path}': {source}", path = .path.display())]
     Cache {
         path: PathBuf,
@@ -57,69 +60,62 @@ struct RoleCachePaths {
 
 pub(crate) fn register(library: &mut Library) {
     library.add(
-        Func::new("f2f6f1ff-5b10-409c-900f-d6b48750a529", "Build Masters")
-            .description(
-                "Stacks selected raw calibration frames (darks/flats/bias/flat-darks) into \
+        Func::new(
+            BUILD_MASTERS_FUNC_ID,
+            "Build Masters",
+            async_lambda!(move |Invocation { ctx, inputs, outputs, .. }| {
+                cancel = ctx.cancel_flag(),
+            } => {
+                debug_assert_eq!(inputs.len(), 6);
+                debug_assert_eq!(outputs.len(), 1);
+
+                let frames = |index: usize| {
+                    inputs[index].as_fs_paths().map(|paths| {
+                        paths.iter().map(PathBuf::from).collect::<Vec<PathBuf>>()
+                    })
+                };
+                let frame_sets = [frames(0), frames(1), frames(2), frames(3)];
+                let sigma = inputs[4].required_f64() as f32;
+                let cache = inputs[5].required_bool();
+
+                let masters = runtime::run_cancellable(cancel, move |cancel| {
+                    build_masters_cached(frame_sets, sigma, cache, &cancel)
+                })
+                .await?;
+                outputs[0] = DynamicValue::from_custom(Masters::from(masters));
+                Ok(())
+            }),
+        )
+        .description(
+            "Stacks selected raw calibration frames (darks/flats/bias/flat-darks) into \
                  calibration masters. With `cache` on, each master is written next to its \
                  same-directory source frames and reused while that selection is unchanged.",
-            )
-            .category("Astro")
-            .pure()
-            .inputs([
-                frames_input("Darks", "dark frames"),
-                frames_input("Flats", "flat frames"),
-                frames_input("Bias", "bias frames"),
-                frames_input("Flat Darks", "flat-dark frames"),
-            ])
-            .input(
-                FuncInput::required("Sigma", DataType::Float)
-                    .description("Sigma-clipping rejection threshold when stacking.")
-                    .default(DEFAULT_SIGMA_THRESHOLD as f64),
-            )
-            .input(
-                FuncInput::required("Cache", DataType::Bool)
-                    .description("Write each master next to its frames and reuse it next run.")
-                    .default(true),
-            )
-            .output(
-                FuncOutput::new("Masters", MASTERS_DATA_TYPE.clone())
-                    .description("Calibration masters for the wired roles."),
-            )
-            .lambda(FuncLambda::new(
-                move |Invocation {
-                          ctx,
-                          inputs,
-                          outputs,
-                          ..
-                      }| {
-                    let cancel = ctx.cancel_flag();
-                    Box::pin(async move {
-                        debug_assert_eq!(inputs.len(), 6);
-                        debug_assert_eq!(outputs.len(), 1);
-
-                        let frames = |index: usize| {
-                            inputs[index].as_fs_paths().map(|paths| {
-                                paths.iter().map(PathBuf::from).collect::<Vec<PathBuf>>()
-                            })
-                        };
-                        let frame_sets = [frames(0), frames(1), frames(2), frames(3)];
-                        let sigma = inputs[4]
-                            .as_f64()
-                            .map(|value| value as f32)
-                            .expect("sigma input type is validated at the compile boundary");
-                        let cache = inputs[5]
-                            .as_bool()
-                            .expect("cache input type is validated at the compile boundary");
-
-                        let masters = runtime::run_cancellable(cancel, move |cancel| {
-                            build_masters_cached(frame_sets, sigma, cache, cancel)
-                        })
-                        .await?;
-                        outputs[0] = DynamicValue::from_custom(Masters::from(masters));
-                        Ok(())
-                    })
-                },
-            )),
+        )
+        .category("Astro")
+        .pure()
+        .inputs([
+            frames_input("Darks", "dark frames"),
+            frames_input("Flats", "flat frames"),
+            frames_input("Bias", "bias frames"),
+            frames_input("Flat Darks", "flat-dark frames"),
+        ])
+        .input(
+            FuncInput::required("Sigma", DataType::Float)
+                .description(
+                    "Hot-pixel defect threshold: a master-dark pixel more than this many sigma \
+                     above its color's dark background is a defect. Values below 1 count as 1.",
+                )
+                .default(f64::from(DEFAULT_SIGMA_THRESHOLD)),
+        )
+        .input(
+            FuncInput::required("Cache", DataType::Bool)
+                .description("Write each master next to its frames and reuse it next run.")
+                .default(true),
+        )
+        .output(
+            FuncOutput::new("Masters", MASTERS_DATA_TYPE)
+                .description("Calibration masters for the wired roles."),
+        ),
     );
 }
 
@@ -132,11 +128,11 @@ fn build_masters_cached(
     frame_sets: [Option<Vec<PathBuf>>; 4],
     sigma: f32,
     cache: bool,
-    cancel: CancelToken,
+    cancel: &CancelToken,
 ) -> Result<CalibrationMasters, BuildMastersError> {
     let [darks, flats, bias, flat_darks] = frame_sets;
     let role = |frames: Option<Vec<PathBuf>>,
-                config: StackConfig,
+                role: MasterRole,
                 file: &str|
      -> Result<Option<CfaImage>, BuildMastersError> {
         if cancel.is_cancelled() {
@@ -148,15 +144,18 @@ fn build_masters_cached(
         if frames.is_empty() {
             return Ok(None);
         }
-        let source_key = frame_set_key(&frames)?;
-        let cache_paths = cache.then(|| role_cache_paths(&frames, file)).transpose()?;
+        // Keyed only with the cache on: the key is a `stat` per frame, and one that fails would
+        // fail a node that never reads the cache.
+        let cached = cache
+            .then(|| -> Result<_, BuildMastersError> {
+                let paths = role_cache_paths(&frames, file)?;
+                Ok((paths, frame_set_key(&frames)?))
+            })
+            .transpose()?;
 
-        if let Some(cache_paths) = &cache_paths {
+        if let Some((cache_paths, expected_marker)) = &cached {
             match fs::read_to_string(&cache_paths.marker).ok().as_deref() {
-                Some(marker)
-                    if marker == format!("{CACHE_PRESENT}{source_key}")
-                        && cache_paths.master.is_file() =>
-                {
+                Some(marker) if marker == expected_marker && cache_paths.master.is_file() => {
                     let context = LoadContext {
                         cancel: cancel.clone(),
                         ..Default::default()
@@ -174,17 +173,20 @@ fn build_masters_cached(
             }
         }
 
-        let master =
-            stack_cfa_master(&frames, config, ProgressCallback::default(), cancel.clone())?
-                .expect("a non-empty calibration frame set produces a master");
-        if let Some(cache_paths) = cache_paths {
+        let master = stack_cfa_master(
+            &frames,
+            role.stack_config(),
+            ProgressCallback::default(),
+            cancel.clone(),
+        )?
+        .expect("a non-empty calibration frame set produces a master");
+        if let Some((cache_paths, marker)) = cached {
             master
                 .save_fits(&cache_paths.master)
                 .map_err(|source| BuildMastersError::Cache {
                     path: cache_paths.master.clone(),
                     source,
                 })?;
-            let marker = format!("{CACHE_PRESENT}{source_key}");
             file_utils::publish_bytes(
                 &cache_paths.marker,
                 marker.as_bytes(),
@@ -200,10 +202,10 @@ fn build_masters_cached(
 
     CalibrationMasters::from_images(
         CalibrationSet {
-            dark: role(darks, StackConfig::dark(), "master_dark.fits")?,
-            flat: role(flats, StackConfig::flat(), "master_flat.fits")?,
-            bias: role(bias, StackConfig::bias(), "master_bias.fits")?,
-            flat_dark: role(flat_darks, StackConfig::dark(), "master_flat_dark.fits")?,
+            dark: role(darks, MasterRole::Dark, "master_dark.fits")?,
+            flat: role(flats, MasterRole::Flat, "master_flat.fits")?,
+            bias: role(bias, MasterRole::Bias, "master_bias.fits")?,
+            flat_dark: role(flat_darks, MasterRole::FlatDark, "master_flat_dark.fits")?,
         },
         sigma,
         cancel,
@@ -239,20 +241,14 @@ fn frame_set_key(frames: &[PathBuf]) -> Result<String, FrameSetKeyError> {
             .file_name()
             .expect("raw frame path has a file name")
             .as_encoded_bytes();
-        let metadata = fs::metadata(frame).map_err(|source| FrameSetKeyError::Metadata {
+        let identity = FileIdentity::of(frame).map_err(|source| FrameSetKeyError::Metadata {
             path: frame.clone(),
             source,
         })?;
-        let modified = metadata
-            .modified()
-            .ok()
-            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-            .map(|duration| duration.as_nanos())
-            .unwrap_or(0);
         hasher.update(&(name.len() as u64).to_le_bytes());
         hasher.update(name);
-        hasher.update(&metadata.len().to_le_bytes());
-        hasher.update(&modified.to_le_bytes());
+        hasher.update(&identity.len.to_le_bytes());
+        hasher.update(&identity.mtime_ns.to_le_bytes());
     }
     Ok(hasher.finalize().to_hex().to_string())
 }
@@ -267,19 +263,19 @@ fn cache_marker_path(cache_path: &Path) -> PathBuf {
 }
 
 #[cfg(test)]
-pub(super) mod internals {
-    use std::path::PathBuf;
-
-    pub(crate) fn frame_set_key(frames: &[PathBuf]) -> Result<String, String> {
-        super::frame_set_key(frames).map_err(|error| error.to_string())
-    }
-}
-
-#[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::io;
     use std::path::PathBuf;
+    use std::slice;
 
-    use crate::astro::nodes::calibration::{BuildMastersError, role_cache_paths};
+    use common::TempDir;
+
+    use common::CancelToken;
+
+    use crate::astro::nodes::calibration::{
+        BuildMastersError, FrameSetKeyError, build_masters_cached, frame_set_key, role_cache_paths,
+    };
 
     #[test]
     fn role_cache_requires_one_source_directory() {
@@ -309,5 +305,54 @@ mod tests {
                 other
             } if first == mixed[0] && other == mixed[1]
         ));
+    }
+
+    #[test]
+    fn master_source_key_changes_with_the_frame_set() {
+        let dir = TempDir::new("lens-master-source-key");
+        let first = dir.join("a.raf");
+        let second = dir.join("b.raf");
+        fs::write(&first, b"a").unwrap();
+        let one_frame = frame_set_key(slice::from_ref(&first)).unwrap();
+        assert_eq!(frame_set_key(slice::from_ref(&first)).unwrap(), one_frame);
+
+        fs::write(&second, b"bb").unwrap();
+        let two_frames = frame_set_key(&[first.clone(), second.clone()]).unwrap();
+        assert_ne!(two_frames, one_frame);
+        // The key follows the selection order: a reordered set sums in another
+        // order, so its master can differ in the last bits.
+        let reordered = frame_set_key(&[second.clone(), first.clone()]).unwrap();
+        assert_ne!(reordered, two_frames);
+        fs::write(&first, b"aaa").unwrap();
+        let edited = frame_set_key(&[first.clone(), second]).unwrap();
+        assert_ne!(edited, two_frames);
+        assert_ne!(frame_set_key(&[]).unwrap(), edited);
+
+        fs::remove_file(&first).unwrap();
+        let error = frame_set_key(slice::from_ref(&first)).unwrap_err();
+        assert!(matches!(
+            error,
+            FrameSetKeyError::Metadata { path, source }
+                if path == first && source.kind() == io::ErrorKind::NotFound
+        ));
+    }
+
+    /// A missing frame fails the key's `stat` with the cache on, and with it off the key is never
+    /// computed: the stack is what reports the missing file.
+    #[test]
+    fn frame_set_key_runs_only_with_the_cache_on() {
+        let dir = TempDir::new("lens-master-key-cache-off");
+        let missing = dir.join("missing.raf");
+        let build = |cache| {
+            build_masters_cached(
+                [Some(vec![missing.clone()]), None, None, None],
+                3.0,
+                cache,
+                &CancelToken::never(),
+            )
+            .unwrap_err()
+        };
+        assert!(matches!(build(true), BuildMastersError::FrameSet(_)));
+        assert!(matches!(build(false), BuildMastersError::Stack(_)));
     }
 }

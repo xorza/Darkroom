@@ -22,9 +22,9 @@ async fn events_are_deduplicated() {
     let mut w = TestWorker::frames();
     w.send(w.update());
 
-    let event = w.event("Frame Event", 0);
-    w.send(WorkerMessage::Run {
-        seeds: RunSeeds::events(vec![event, event, event]),
+    let event = w.graph.event("Frame Event", 0);
+    w.send(WorkerMessage::FireEvents {
+        events: vec![event, event, event],
     });
 
     assert_eq!(w.run().await.logs(), ["1"]);
@@ -53,12 +53,7 @@ async fn node_seeds_override_a_disabled_node_and_run_only_its_cone() {
     let mut w = TestWorker::over(graph);
     let sum = w.id("sum");
 
-    w.send_many([
-        w.update(),
-        WorkerMessage::Run {
-            seeds: RunSeeds::nodes(vec![sum]),
-        },
-    ]);
+    w.send_many([w.update(), WorkerMessage::RunNodes { nodes: vec![sum] }]);
 
     let run = w.run().await;
     assert_eq!(
@@ -88,7 +83,7 @@ async fn a_disabled_sink_stays_out_of_sink_runs() {
     assert!(run.missing_inputs().is_empty());
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn a_cancel_with_no_active_run_does_not_reach_the_next_one() {
     let mut w = TestWorker::printing("hi");
 
@@ -100,11 +95,18 @@ async fn a_cancel_with_no_active_run_does_not_reach_the_next_one() {
     assert_eq!(run.ran_node_count, 1, "the run completed in full");
 }
 
+/// A `Sync` sent behind a run is acknowledged only after the run reported:
+/// the completion is already queued when `settle` returns.
 #[tokio::test]
 async fn sync_fires_after_execution() {
     let mut w = TestWorker::frames();
 
     w.settle([w.update(), w.fire("Frame Event", 0)]).await;
 
-    w.run().await;
+    assert!(
+        w.drain()
+            .iter()
+            .any(|report| matches!(report, WorkerReport::Completed(_))),
+        "the run completed before the sync was acknowledged"
+    );
 }

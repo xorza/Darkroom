@@ -8,15 +8,13 @@
 use crate::stacking::registration::transform::Transform;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::tests::{
-    detected_positions, synthetic_config, truth_positions,
+    MATCH_RADIUS, detected_positions, synthetic_config, truth_positions,
 };
 use crate::testing::prelude::*;
 use crate::testing::synthetic::camera::Camera;
 use crate::testing::synthetic::metrics::{match_catalogs, score_detection};
 use crate::testing::synthetic::observe::{Observation, render};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
-
-const MATCH_RADIUS: f64 = 4.0;
 
 /// Median per-axis shift between two matched detection catalogs (`shifted − reference`).
 /// The median over many stars averages down per-star centroid scatter.
@@ -53,42 +51,6 @@ fn shifted_detections(
 }
 
 #[test]
-fn subpixel_shift_recovered_to_sub_tenth_pixel() {
-    let shift = DVec2::new(0.15, 0.23);
-    let scene = Scene::random_field(
-        Size2us::new(256, 256),
-        24,
-        (8.0, 14.0),
-        BackgroundField::Uniform { level: 0.1 },
-        16.0,
-        42,
-    );
-    let camera = Camera::realistic(4.0);
-    let config = synthetic_config();
-
-    let reference = render(&scene, &camera, &Observation::reference(1));
-    let ref_det = detected_positions(&reference, &config);
-    // The detector recovers essentially every injected star on this bright field.
-    let comp = score_detection(&truth_positions(&reference), &ref_det, MATCH_RADIUS).completeness();
-    assert!(comp >= 0.95, "reference completeness {comp:.3}");
-
-    let shifted_det = shifted_detections(&scene, &camera, shift, 2, &config);
-    let recovered = median_shift(&ref_det, &shifted_det);
-    assert!(
-        (recovered.x - shift.x).abs() < 0.1,
-        "dx {:.4} vs true {:.4}",
-        recovered.x,
-        shift.x
-    );
-    assert!(
-        (recovered.y - shift.y).abs() < 0.1,
-        "dy {:.4} vs true {:.4}",
-        recovered.y,
-        shift.y
-    );
-}
-
-#[test]
 fn subpixel_shift_recovered_across_offsets() {
     let scene = Scene::random_field(
         Size2us::new(256, 256),
@@ -107,6 +69,7 @@ fn subpixel_shift_recovered_across_offsets() {
     assert!(comp >= 0.95, "reference completeness {comp:.3}");
 
     let shifts = [
+        DVec2::new(0.15, 0.23),
         DVec2::new(0.1, 0.0),
         DVec2::new(0.0, 0.1),
         DVec2::new(0.25, 0.25),

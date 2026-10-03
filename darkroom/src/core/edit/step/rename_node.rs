@@ -16,7 +16,11 @@ pub(crate) struct RenameNode {
 
 impl Reversible for RenameNode {
     fn write(&self, doc: &mut Document, dir: Direction) {
-        doc.graph.find_mut(self.node_id).unwrap().name = self.name.half(dir).clone();
+        doc.graph
+            .find_mut(self.node_id)
+            .unwrap()
+            .name
+            .clone_from(self.name.half(dir));
     }
 
     fn is_noop(&self) -> bool {
@@ -31,5 +35,9 @@ impl Reversible for RenameNode {
     /// below it.
     fn invalidates_cached_geometry(&self) -> bool {
         true
+    }
+
+    fn retypes_outputs(&self) -> bool {
+        false
     }
 }

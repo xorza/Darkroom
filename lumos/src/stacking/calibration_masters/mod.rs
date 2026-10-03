@@ -1,258 +1,40 @@
 //! Calibration master frame creation and management.
 
+pub(crate) mod calibration_component;
+pub(crate) mod calibration_set;
 pub(crate) mod cosmic_ray;
 pub(crate) mod defect_map;
 pub(crate) mod error;
 mod fits;
+pub(crate) mod master_role;
 mod prepared_flat;
 
-#[cfg(all(test, feature = "internals"))]
-mod bench;
-#[cfg(all(test, feature = "real-data"))]
-mod real_data_tests;
-#[cfg(test)]
-mod tests;
-
+use std::io;
 use std::path::Path;
 
 use common::CancelToken;
-use rayon::prelude::*;
 
-use crate::io::image::cfa::{CfaFrameInfo, CfaImage};
-use crate::io::image::error::ImageError;
-use crate::io::image::load_context::LoadContext;
+use crate::io::image::cfa::CfaImage;
 use crate::math::size2us::Size2us;
-use crate::memory;
+use crate::memory::run_memory::RunMemory;
+use crate::stacking::calibration_masters::defect_map::DefectMap;
 use crate::stacking::calibration_masters::error::CalibrationError;
 use crate::stacking::combine::cache::FrameCache;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::stack::combine_cached;
-use crate::stacking::frame_store::FramePeek;
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::stack_product::quality_planes::QualityPlanes;
-use defect_map::DefectMap;
 
+use crate::stacking::calibration_masters::calibration_component::CalibrationComponent;
+use crate::stacking::calibration_masters::calibration_set::CalibrationSet;
+use crate::stacking::calibration_masters::master_role::MasterRole;
 /// Default sigma threshold for defect detection.
 ///
 /// A pixel is flagged as defective if it exceeds the per-color residual median by more than
 /// `sigma_threshold × σ`, where robust bulk statistics and source resolution determine σ.
 /// PixInsight uses 3.0; 5.0 is more conservative (fewer false positives).
 pub const DEFAULT_SIGMA_THRESHOLD: f32 = 5.0;
-
-/// Four calibration roles carrying values of one common type.
-///
-/// Named fields prevent swapping roles when `T` is the same for all four. Raw inputs use path
-/// slices, while prebuilt inputs use optional CFA images.
-#[derive(Debug, Default)]
-pub struct CalibrationSet<T> {
-    /// Thermal-noise calibration data.
-    pub dark: T,
-    /// Vignetting and dust correction data.
-    pub flat: T,
-    /// Read-noise calibration data.
-    pub bias: T,
-    /// Dark calibration data taken at the flat exposure time.
-    pub flat_dark: T,
-}
-
-impl<T> CalibrationSet<T> {
-    /// The value for `role`. Total, because a set holds one of everything [`MasterRole`] names.
-    pub fn get(&self, role: MasterRole) -> &T {
-        match role {
-            MasterRole::Dark => &self.dark,
-            MasterRole::Flat => &self.flat,
-            MasterRole::Bias => &self.bias,
-            MasterRole::FlatDark => &self.flat_dark,
-        }
-    }
-
-    /// [`Self::get`] by unique reference, for filling a set one role at a time.
-    pub(crate) fn get_mut(&mut self, role: MasterRole) -> &mut T {
-        match role {
-            MasterRole::Dark => &mut self.dark,
-            MasterRole::Flat => &mut self.flat,
-            MasterRole::Bias => &mut self.bias,
-            MasterRole::FlatDark => &mut self.flat_dark,
-        }
-    }
-
-    /// The four roles in calibration order, each with the component that names it. The single
-    /// place that decides what "all the roles" means — a caller that iterates cannot miss one,
-    /// and adding a fifth is a compile error here rather than a silent omission elsewhere.
-    pub fn iter(&self) -> impl Iterator<Item = (MasterRole, &T)> {
-        MasterRole::ALL
-            .into_iter()
-            .map(|role| (role, self.get(role)))
-    }
-
-    /// The four roles by value, in [`MasterRole::ALL`] order.
-    ///
-    /// An array rather than an iterator because the concurrent half of
-    /// [`CalibrationMasters::from_files`] hands it straight to rayon, which parallelizes `[T; N]`
-    /// but not an array iterator. [`Self::from_roles`] is its inverse; the two are the only place
-    /// the field-to-role correspondence is written, and `roles_round_trip_in_master_order` pins it.
-    pub(crate) fn into_roles(self) -> [(MasterRole, T); 4] {
-        [
-            (MasterRole::Dark, self.dark),
-            (MasterRole::Flat, self.flat),
-            (MasterRole::Bias, self.bias),
-            (MasterRole::FlatDark, self.flat_dark),
-        ]
-    }
-
-    /// Rebuild a set from values in [`MasterRole::ALL`] order.
-    pub(crate) fn from_roles(roles: [T; 4]) -> Self {
-        let [dark, flat, bias, flat_dark] = roles;
-        Self {
-            dark,
-            flat,
-            bias,
-            flat_dark,
-        }
-    }
-
-    /// Convert every role, in calibration order, stopping at the first failure.
-    pub(crate) fn try_map<U, E>(
-        self,
-        mut convert: impl FnMut(MasterRole, T) -> Result<U, E>,
-    ) -> Result<CalibrationSet<U>, E> {
-        let [dark, flat, bias, flat_dark] = self.into_roles();
-        Ok(CalibrationSet {
-            dark: convert(dark.0, dark.1)?,
-            flat: convert(flat.0, flat.1)?,
-            bias: convert(bias.0, bias.1)?,
-            flat_dark: convert(flat_dark.0, flat_dark.1)?,
-        })
-    }
-}
-
-impl CalibrationSet<Option<CfaImage>> {
-    /// The sensor extent every present master shares, or `None` when the set is empty.
-    ///
-    /// The masters are combined pixel-for-pixel by flat index — dark subtracted from flat,
-    /// defects detected on one and corrected on another — so a set that spans two sensors has no
-    /// coherent interpretation. Reported as an error rather than left to the individual
-    /// operations, which each assert on only the pair they touch and cover the set unevenly: a
-    /// bias in a set with no flat is never anyone's operand.
-    fn common_dimensions(&self) -> Result<Option<Size2us>, CalibrationError> {
-        let mut expected = None;
-        for (role, master) in self
-            .iter()
-            .filter_map(|(role, master)| master.as_ref().map(|master| (role, master)))
-        {
-            let size = Size2us::new(master.data.width(), master.data.height());
-            match expected {
-                None => expected = Some(size),
-                Some(expected) if expected == size => {}
-                Some(expected) => {
-                    return Err(CalibrationError::DimensionMismatch {
-                        component: role.into(),
-                        expected,
-                        master: size,
-                    });
-                }
-            }
-        }
-        Ok(expected)
-    }
-}
-
-/// One of the four master frames a bundle can carry.
-///
-/// Split from [`CalibrationComponent`] so that everything indexed by role — every
-/// [`CalibrationSet`] accessor — is total. The defect map is a component of a bundle but not a
-/// master, and folding it in here made each of those return an `Option` for a case that could
-/// never arise.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MasterRole {
-    /// Master dark frame.
-    Dark,
-    /// Master flat frame.
-    Flat,
-    /// Master bias frame.
-    Bias,
-    /// Master dark frame taken at the flat exposure time.
-    FlatDark,
-}
-
-impl MasterRole {
-    /// The four roles, in calibration order. Adding a fifth is a compile error in
-    /// [`CalibrationSet`] rather than a silent omission wherever roles are walked.
-    pub const ALL: [Self; 4] = [Self::Dark, Self::Flat, Self::Bias, Self::FlatDark];
-
-    /// The role's `EXTNAME` in a saved bundle — the name a writer stamps on its HDU and a reader
-    /// recognizes it by, so the two cannot disagree about where a role lives.
-    pub(crate) fn extname(self) -> &'static str {
-        match self {
-            Self::Dark => "MASTER_DARK",
-            Self::Flat => "MASTER_FLAT",
-            Self::Bias => "MASTER_BIAS",
-            Self::FlatDark => "MASTER_FLAT_DARK",
-        }
-    }
-
-    /// Whether this role is stored already prepared — bias/flat-dark subtracted, per-colour
-    /// normalized and clamped. Only the flat is; the others are stored as stacked.
-    pub(crate) fn prepared(self) -> bool {
-        matches!(self, Self::Flat)
-    }
-}
-
-impl std::fmt::Display for MasterRole {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Dark => "dark",
-            Self::Flat => "flat",
-            Self::Bias => "bias",
-            Self::FlatDark => "flat-dark",
-        })
-    }
-}
-
-/// Anything a [`CalibrationMasters`] bundle can carry: one of the master frames, or the defect
-/// map derived from them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CalibrationComponent {
-    /// One of the four stacked master frames.
-    Master(MasterRole),
-    /// Defect map derived from a dark, flat, or both.
-    Defects,
-}
-
-impl CalibrationComponent {
-    /// The component's `EXTNAME` in a saved bundle.
-    pub(crate) fn extname(self) -> &'static str {
-        match self {
-            Self::Master(role) => role.extname(),
-            Self::Defects => "DEFECT_MAP",
-        }
-    }
-
-    /// The component an `EXTNAME` names, or `None` for an extension this format does not define.
-    pub(crate) fn from_extname(extname: &str) -> Option<Self> {
-        MasterRole::ALL
-            .into_iter()
-            .map(Self::Master)
-            .chain([Self::Defects])
-            .find(|component| component.extname() == extname)
-    }
-}
-
-impl From<MasterRole> for CalibrationComponent {
-    fn from(role: MasterRole) -> Self {
-        Self::Master(role)
-    }
-}
-
-impl std::fmt::Display for CalibrationComponent {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Master(role) => role.fmt(f),
-            Self::Defects => f.write_str("defects"),
-        }
-    }
-}
 
 /// Read-only defect statistics derived from a calibration bundle.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -276,88 +58,13 @@ pub struct CalibrationMasters {
     defect_map: Option<DefectMap>,
 }
 
-/// Frame-weighted share of the memory budget for one role when [`CalibrationMasters::from_files`]
-/// loads the roles concurrently: proportional to the role's frame count. Two properties matter — the
-/// shares sum to at most `available` (flooring, so concurrent loads can't overcommit RAM), and a
-/// role fits its share *exactly* when the whole set fits the budget (so no role is pushed to disk
-/// while the total fits). An empty role gets nothing; a degenerate `total == 0` gets the whole
-/// budget (no divide-by-zero).
-fn weighted_budget(available: u64, role_frames: usize, total: usize) -> u64 {
-    if total == 0 {
-        return available;
-    }
-    // `available · role_frames` can't overflow u64 for any real RAM size × frame count.
-    available * role_frames as u64 / total as u64
-}
-
-/// Whether all of `frames`' roles fit in RAM at once — the in-memory-vs-disk decision for the whole
-/// set. The per-frame footprint is peeked from one frame's header (all calibration frames share a
-/// sensor) without a full decode. No frames, or a peek failure, returns `true`: per-role tiering is
-/// memory-safe regardless, so this only governs whether to *optimize* for staying in RAM.
-///
-/// The footprint includes the two quality planes a frame carries when its source declared pixels
-/// with no measurement, which the same header settles well enough to charge for: an integer
-/// `BITPIX` with no `BLANK` keyword cannot produce a null at all, and anything else is charged as
-/// though it does. See `FitsDecodePlan::may_carry_nulls` for why that errs only towards reserving
-/// planes a frame turns out not to need.
-fn frames_fit_in_memory<P: AsRef<Path> + Sync>(
-    frames: &CalibrationSet<&[P]>,
-    total_frames: usize,
-    available: u64,
-    context: &LoadContext,
-) -> Result<bool, Error> {
-    let Some(first) = frames
-        .iter()
-        .map(|(_, paths)| *paths)
-        .find(|paths| !paths.is_empty())
-        .map(|paths| &paths[0])
-    else {
-        return Ok(true);
-    };
-    match CfaFrameInfo::from_file(first.as_ref(), context) {
-        Ok(info) => Ok(memory::fits_in_memory(
-            FramePeek::from(info).resident_bytes(),
-            total_frames,
-            available,
-        )),
-        Err(ImageError::Cancelled { .. }) => Err(Error::Cancelled),
-        Err(_) => Ok(true),
-    }
-}
-
-/// One role's stack waiting to run: the frames, and the preset they combine under.
-///
-/// The unit [`CalibrationMasters::from_files`] schedules, so the concurrent and sequential paths
-/// differ only in which iterator drives them rather than in what each role does.
-#[derive(Debug)]
-struct RoleStack<'a, P> {
-    paths: &'a [P],
-    config: StackConfig,
-}
-
-impl<P: AsRef<Path> + Sync> RoleStack<'_, P> {
-    /// Charge this role its frame-weighted share of `available`, for roles that load concurrently.
-    fn with_shared_budget(mut self, available: u64, total_frames: usize) -> Self {
-        self.config.cache.available_memory =
-            Some(weighted_budget(available, self.paths.len(), total_frames));
-        self
-    }
-
-    fn run(self, cancel: CancelToken) -> Result<Option<CfaImage>, Error> {
-        stack_cfa_master(self.paths, self.config, ProgressCallback::default(), cancel)
-    }
-}
-
-/// Stack one calibration role's raw CFA frames into a single master, using that
-/// role's preset `config` (`StackConfig::dark()` / `flat()` / `bias()`).
+/// Stack one calibration role's raw CFA frames into a single master, under `config` — the
+/// role's preset is [`MasterRole::stack_config`]. Returns `None` if `paths` is empty.
 ///
 /// The preset carries its own small-frame fallback (`StackConfig::small_n`): the combine engine
 /// downgrades to the median below the preset's `min_frames` (e.g. `flat()` below 8), so no
-/// frame-count special-casing is needed here. Returns `None` if `paths` is empty.
-///
-/// The per-role half of [`CalibrationMasters::from_files`], public so a caller
-/// can stack/cache each role independently and assemble the set with
-/// [`CalibrationMasters::from_images`].
+/// frame-count special-casing is needed here. Stack each role this way, then assemble the set
+/// with [`CalibrationMasters::from_images`].
 pub fn stack_cfa_master(
     paths: &[impl AsRef<Path> + Sync],
     config: StackConfig,
@@ -369,7 +76,7 @@ pub fn stack_cfa_master(
     if paths.is_empty() {
         return Ok(None);
     }
-
+    let memory = RunMemory::read(config.cache.memory_override);
     // A master is mosaic data for the calibration stage to consume, not a science product: the
     // ancillary planes would be allocated and written per pixel for nothing.
     let config = StackConfig {
@@ -379,7 +86,7 @@ pub fn stack_cfa_master(
     // `cancel` rides on the cache from construction, so the RAW-decode load loop
     // polls it too (not just the combine).
     let product = combine_cached(&config, paths.len(), "cfa paths", || {
-        FrameCache::from_cfa_paths(paths, &config.cache, config.normalization, progress, cancel)
+        FrameCache::from_cfa_paths(paths, &config, memory, progress, cancel)
     })?;
 
     Ok(Some(product.into_cfa_master()))
@@ -402,8 +109,8 @@ impl CalibrationMasters {
     /// Defect statistics, or `None` when no dark or flat supplied a defect map.
     pub fn defect_summary(&self) -> Option<DefectSummary> {
         self.defect_map.as_ref().map(|map| DefectSummary {
-            hot_pixels: map.hot_indices.len(),
-            cold_pixels: map.cold_indices.len(),
+            hot_pixels: map.hot_indices().len(),
+            cold_pixels: map.cold_indices().len(),
             percentage: map.percentage(),
         })
     }
@@ -424,16 +131,16 @@ impl CalibrationMasters {
     ///
     /// The flat is already bias/flat-dark subtracted, per-color normalized, and clamped in this
     /// representation. Loading the bundle does not repeat flat preparation or defect detection.
-    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+    pub fn save(&self, path: &Path) -> io::Result<()> {
         fits::save(path, self)
     }
 
     /// Load a bundle written by [`Self::save`] without rebuilding its prepared flat or defect map.
-    pub fn load(path: &Path) -> std::io::Result<Self> {
+    pub fn load(path: &Path) -> io::Result<Self> {
         fits::load(path)
     }
 
-    /// Create CalibrationMasters from pre-built CFA images.
+    /// Create `CalibrationMasters` from pre-built CFA images.
     ///
     /// Generates defect map from the CFA dark if provided.
     /// `images.flat_dark` is a dark frame taken at the flat's exposure time — used
@@ -443,18 +150,20 @@ impl CalibrationMasters {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Cancelled`] if cancellation is requested before defect detection completes.
+    /// A [`CalibrationError`] when the masters do not describe one sensor or the flat has no
+    /// positive mean to normalize by, and [`CalibrationError::Cancelled`] if cancellation is
+    /// requested before defect detection completes.
     pub fn from_images(
         images: CalibrationSet<Option<CfaImage>>,
         sigma_threshold: f32,
-        cancel: CancelToken,
-    ) -> Result<Self, Error> {
+        cancel: &CancelToken,
+    ) -> Result<Self, CalibrationError> {
         if cancel.is_cancelled() {
-            return Err(Error::Cancelled);
+            return Err(CalibrationError::Cancelled);
         }
         // Before any of the work below, all of which combines the masters by flat pixel index and
         // asserts on only the pair it touches.
-        images.common_dimensions()?;
+        let dimensions = images.common_dimensions()?;
 
         let CalibrationSet {
             dark,
@@ -462,27 +171,38 @@ impl CalibrationMasters {
             bias,
             flat_dark,
         } = images;
-        let flat_subtractor = flat_dark.as_ref().or(bias.as_ref());
+        let flat_subtractor = match (&flat, &flat_dark, &bias) {
+            (Some(flat), Some(subtractor), _) => Some((
+                subtractor,
+                master_scale(flat, subtractor, MasterRole::FlatDark)?,
+            )),
+            (Some(flat), None, Some(subtractor)) => Some((
+                subtractor,
+                master_scale(flat, subtractor, MasterRole::Bias)?,
+            )),
+            _ => None,
+        };
         let subtracted_flat = flat.map(|flat| prepared_flat::subtract(flat, flat_subtractor));
 
         // Hot pixels from the dark, cold/dead pixels from the subtracted flat — None if neither
         // exists. Detection must precede normalization's near-zero floor.
         let defect_map = if dark.is_some() || subtracted_flat.is_some() {
-            let mut map = DefectMap::default();
+            let mut map =
+                DefectMap::new(dimensions.expect("a present master gives the set its dimensions"));
             if let Some(dark) = dark.as_ref() {
-                map = map.detect_hot(dark, sigma_threshold, &cancel)?;
+                map = map.detect_hot(dark, sigma_threshold, cancel)?;
             }
             if let Some(flat) = subtracted_flat.as_ref() {
-                map = map.detect_cold(flat, &cancel)?;
+                map = map.detect_cold(flat, cancel)?;
             }
             Some(map)
         } else {
             None
         };
 
-        let flat = subtracted_flat.map(prepared_flat::normalize);
+        let flat = subtracted_flat.map(prepared_flat::normalize).transpose()?;
         if cancel.is_cancelled() {
-            return Err(Error::Cancelled);
+            return Err(CalibrationError::Cancelled);
         }
 
         Ok(Self {
@@ -508,7 +228,7 @@ impl CalibrationMasters {
         // built here it always agrees; a file can disagree.
         if let (Some(expected), Some(defects)) = (
             expected,
-            self.defect_map.as_ref().and_then(|map| map.dimensions),
+            self.defect_map.as_ref().map(DefectMap::dimensions),
         ) && expected != defects
         {
             return Err(CalibrationError::DimensionMismatch {
@@ -518,101 +238,6 @@ impl CalibrationMasters {
             });
         }
         Ok(())
-    }
-
-    /// Create CalibrationMasters by stacking raw CFA files.
-    ///
-    /// Each role stacks under its own preset, through the full pipeline (rejection, normalization,
-    /// chunked processing): darks, biases and flat-darks are a Winsorized mean at any frame count,
-    /// flats a σ-clipped mean that falls back to the median below 8 frames. Empty slices produce
-    /// `None` for that master.
-    ///
-    /// `sigma_threshold` controls defect detection sensitivity (see
-    /// [`DEFAULT_SIGMA_THRESHOLD`]).
-    ///
-    /// The roles are independent stacks. When the whole set **fits in RAM** they run
-    /// **concurrently** to fill cores left idle by any one role's serial phases (first-frame decode,
-    /// stats/reference selection), with the budget split per role (frame-weighted) so the concurrent
-    /// loads provably can't overcommit — the per-role peaks sum to at most the usable budget.
-    ///
-    /// When the set does **not** fit in RAM, splitting the budget would force roles to disk-tier;
-    /// running them **sequentially with the full budget each** (freed between roles) keeps every
-    /// role that individually fits in RAM, which beats parallel-on-disk. The fit check peeks one
-    /// frame's header for the per-frame footprint (all calibration frames share a sensor).
-    ///
-    /// Returns [`Error::Cancelled`] when cancellation is requested during loading, stacking, or
-    /// defect detection.
-    pub fn from_files<P: AsRef<Path> + Sync>(
-        frames: CalibrationSet<&[P]>,
-        sigma_threshold: f32,
-        cancel: CancelToken,
-    ) -> Result<Self, Error> {
-        if cancel.is_cancelled() {
-            return Err(Error::Cancelled);
-        }
-        let total_frames: usize = frames.iter().map(|(_, paths)| paths.len()).sum();
-        // One reading for the whole calibration run: the fit check below and the decode ceiling
-        // the context carries are both sized against it, so no role can be tiered against one
-        // figure and decoded against another.
-        let available = memory::available_memory();
-        let context = LoadContext::new(cancel.clone(), memory::memory_budget(available));
-        let concurrent = frames_fit_in_memory(&frames, total_frames, available, &context)?;
-
-        // The one role → preset table. Each preset carries its own small-frame fallback
-        // (`StackConfig::small_n`), so no frame-count special-casing is needed here.
-        let jobs = CalibrationSet {
-            dark: RoleStack {
-                paths: frames.dark,
-                config: StackConfig::dark(),
-            },
-            flat: RoleStack {
-                paths: frames.flat,
-                config: StackConfig::flat(),
-            },
-            bias: RoleStack {
-                paths: frames.bias,
-                config: StackConfig::bias(),
-            },
-            // A flat-dark is a dark taken at the flat's exposure time, so it stacks as one.
-            flat_dark: RoleStack {
-                paths: frames.flat_dark,
-                config: StackConfig::dark(),
-            },
-        };
-        // Concurrent roles split the budget by frame count, so their combined in-flight decodes
-        // provably cannot overcommit. Run sequentially, each role gets the whole budget instead:
-        // its cache frees before the next one loads, so a share would push a role that fits in RAM
-        // onto disk for nothing.
-        let jobs = jobs.into_roles().map(|(_, job)| {
-            if concurrent {
-                job.with_shared_budget(available, total_frames)
-            } else {
-                job
-            }
-        });
-
-        // Independent stacks on the shared rayon pool — work-stealing interleaves their parallel
-        // sections, filling the gaps a single sequential role would leave idle. Four concurrent
-        // stacks cannot share one progress callback: each reports its own (current, total) against
-        // a different frame count, so the streams would interleave into nonsense. Watch a single
-        // role by stacking it with `stack_cfa_master`.
-        let masters: Vec<Option<CfaImage>> = if concurrent {
-            jobs.into_par_iter()
-                .map(|job| job.run(cancel.clone()))
-                .collect::<Result<_, Error>>()?
-        } else {
-            jobs.into_iter()
-                .map(|job| job.run(cancel.clone()))
-                .collect::<Result<_, Error>>()?
-        };
-
-        Self::from_images(
-            CalibrationSet::from_roles(
-                masters.try_into().expect("four roles in, four masters out"),
-            ),
-            sigma_threshold,
-            cancel,
-        )
     }
 
     /// Calibrate a raw CFA light frame in place.
@@ -628,19 +253,24 @@ impl CalibrationMasters {
     /// or when a master's Mono, Bayer, or X-Trans pattern differs from the light. Validation
     /// completes before the light is mutated.
     pub fn calibrate(&self, image: &mut CfaImage) -> Result<(), CalibrationError> {
-        // Double application would silently subtract the dark / divide the flat twice.
-        assert!(
-            !image.metadata.calibrated,
-            "calibrate() called on an already-calibrated frame"
-        );
+        // Double application would subtract the dark and divide the flat twice. The flag comes
+        // from the file (`LUMCAL`), so this is input to refuse, not an invariant to assert.
+        if image.metadata.calibrated {
+            return Err(CalibrationError::AlreadyCalibrated);
+        }
         self.validate_against_light(image)?;
+        // 1. Dark subtraction (or bias), in the light's own domain.
+        let subtracted = match (&self.masters.dark, &self.masters.bias) {
+            (Some(dark), _) => Some((dark, MasterRole::Dark)),
+            (None, Some(bias)) => Some((bias, MasterRole::Bias)),
+            (None, None) => None,
+        };
+        let subtracted = subtracted
+            .map(|(master, role)| master_scale(image, master, role).map(|scale| (master, scale)))
+            .transpose()?;
         image.metadata.calibrated = true;
-
-        // 1. Dark subtraction
-        if let Some(ref dark) = self.masters.dark {
-            image.subtract(dark);
-        } else if let Some(ref bias) = self.masters.bias {
-            image.subtract(bias);
+        if let Some((master, scale)) = subtracted {
+            image.subtract(master, scale);
         }
 
         // 2. Flat division
@@ -663,11 +293,7 @@ impl CalibrationMasters {
     /// `CfaImage::subtract`'s assert. Masters are read from user-chosen files, so a set that does
     /// not fit the light is bad input, not a broken invariant.
     fn validate_against_light(&self, image: &CfaImage) -> Result<(), CalibrationError> {
-        let light = image
-            .metadata
-            .cfa_type
-            .as_ref()
-            .ok_or(CalibrationError::MissingLightCfaPattern)?;
+        let light = image.cfa_type;
         let light_size = Size2us::new(image.data.width(), image.data.height());
         let light_domain = image.metadata.sample_domain();
 
@@ -676,27 +302,25 @@ impl CalibrationMasters {
             .iter()
             .filter_map(|(role, master)| master.as_ref().map(|master| (role, master)))
         {
-            let master_pattern = master
-                .metadata
-                .cfa_type
-                .as_ref()
-                .ok_or(CalibrationError::MissingMasterCfaPattern { component: role })?;
-            if master_pattern != light {
+            if master.cfa_type != light {
                 return Err(CalibrationError::CfaPatternMismatch {
                     component: role,
-                    light: light.clone(),
-                    master: master_pattern.clone(),
+                    expected: light,
+                    master: master.cfa_type,
                 });
             }
-            // Only when both declare one: a synthesized master has no domain to compare, and
-            // refusing on that would reject every in-memory fixture.
-            if let (Some(light_domain), Some(master_domain)) =
-                (&light_domain, master.metadata.sample_domain())
-                && !light_domain.commensurate_with(&master_domain)
+            // The flat divides a normalized copy of itself, so its own scale cancels; only a
+            // different stated unit disqualifies it. The subtracted master's scale is checked where
+            // it is converted (`master_scale`). Only when both declare a domain: a synthesized
+            // master has none, and refusing on that would reject every in-memory fixture.
+            if role == MasterRole::Flat
+                && let (Some(light_domain), Some(master_domain)) =
+                    (&light_domain, master.metadata.sample_domain())
+                && !master_domain.units_agree(light_domain)
             {
                 return Err(CalibrationError::SampleDomainMismatch {
                     component: role,
-                    light: light_domain.clone(),
+                    frame: light_domain.clone(),
                     master: master_domain,
                 });
             }
@@ -712,7 +336,7 @@ impl CalibrationMasters {
 
         // The defect map indexes the light by flat index too, and it is the one component that
         // can be present without a master of its own to have been checked above.
-        if let Some(defects) = self.defect_map.as_ref().and_then(|map| map.dimensions)
+        if let Some(defects) = self.defect_map.as_ref().map(DefectMap::dimensions)
             && defects != light_size
         {
             return Err(CalibrationError::DimensionMismatch {
@@ -725,3 +349,75 @@ impl CalibrationMasters {
         Ok(())
     }
 }
+
+/// The factor that expresses `master`'s samples in `frame`'s domain, for the master in `role`.
+///
+/// `1.0` when either declares no domain: a synthesized frame has none, and there is nothing to
+/// convert between. An error when the two cannot be related exactly — a different stated unit, or
+/// a span the decoder had to assume — because subtracting across such a gap silently does nothing.
+fn master_scale(
+    frame: &CfaImage,
+    master: &CfaImage,
+    role: MasterRole,
+) -> Result<f32, CalibrationError> {
+    let (Some(frame_domain), Some(master_domain)) = (
+        frame.metadata.sample_domain(),
+        master.metadata.sample_domain(),
+    ) else {
+        return Ok(1.0);
+    };
+    master_domain
+        .conversion_to(&frame_domain)
+        .ok_or(CalibrationError::SampleDomainMismatch {
+            component: role,
+            frame: frame_domain,
+            master: master_domain,
+        })
+}
+
+#[cfg(all(test, feature = "real-data"))]
+pub(crate) mod internals {
+    use std::path::Path;
+
+    use common::CancelToken;
+
+    use crate::stacking::calibration_masters::calibration_set::CalibrationSet;
+
+    use crate::stacking::calibration_masters::master_role::MasterRole;
+
+    use crate::stacking::calibration_masters::{CalibrationMasters, stack_cfa_master};
+    use crate::stacking::progress::ProgressCallback;
+
+    /// Every role stacked under its preset, then the set assembled — what a caller does role by
+    /// role.
+    pub(crate) fn masters_from_files<P: AsRef<Path> + Sync>(
+        frames: CalibrationSet<&[P]>,
+        sigma_threshold: f32,
+    ) -> CalibrationMasters {
+        let stack = |paths: &[P], role: MasterRole| {
+            stack_cfa_master(
+                paths,
+                role.stack_config(),
+                ProgressCallback::default(),
+                CancelToken::never(),
+            )
+            .expect("stack a calibration master")
+        };
+        CalibrationMasters::from_images(
+            CalibrationSet {
+                dark: stack(frames.dark, MasterRole::Dark),
+                flat: stack(frames.flat, MasterRole::Flat),
+                bias: stack(frames.bias, MasterRole::Bias),
+                flat_dark: stack(frames.flat_dark, MasterRole::FlatDark),
+            },
+            sigma_threshold,
+            &CancelToken::never(),
+        )
+        .expect("assemble calibration masters")
+    }
+}
+
+#[cfg(all(test, feature = "bench"))]
+mod bench;
+#[cfg(test)]
+mod tests;

@@ -31,6 +31,7 @@
 //! to its brightness and burns bright star cores toward white.
 
 use crate::image_ops::rgb::Rgb;
+use arrayvec::ArrayVec;
 use common::IntrospectEnum;
 use rayon::prelude::*;
 
@@ -38,13 +39,10 @@ use crate::error::InvalidConfigField;
 use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::image_ops::error::OpError;
 use crate::io::image::linear::LinearImage;
+use crate::math::statistics::subsample::{MAX_STATISTIC_SAMPLES, Subsample};
 use crate::math::statistics::{MedianMad, median_mut};
 
-#[cfg(all(test, feature = "internals"))]
-mod bench;
 mod simd;
-#[cfg(test)]
-mod tests;
 
 /// Midtones balance is clamped away from the degenerate endpoints `0`/`1`, where the MTF
 /// collapses every interior value onto a single output.
@@ -92,9 +90,16 @@ pub enum ColorMode {
     ColorPreserving,
     /// Stretch each channel independently. For an **auto** method each channel derives its own
     /// parameters from its own statistics, which neutralizes the background toward gray but ties
-    /// color to brightness; an explicit method (`Asinh`/`Ghs`) applies the same fixed curve to every
-    /// channel (no neutralization). For a quick screen preview.
+    /// color to brightness; an explicit method (`Asinh`/`Ghs`) applies the same fixed curve to
+    /// every channel (no neutralization). For a quick screen preview.
     PerChannel,
+}
+
+impl StretchMethod {
+    /// The background level the automatic presets place the median on.
+    pub const AUTO_TARGET_BACKGROUND: f32 = 0.2;
+    /// How many σ below the median the STF preset puts the black point.
+    pub const STF_SHADOW_SIGMAS: f32 = 1.5;
 }
 
 /// A stretch to apply to a stacked image. Output is always clamped to `[0, 1]`.
@@ -106,63 +111,45 @@ pub struct Stretch {
 
 impl Stretch {
     /// Color-preserving normalized-arcsinh auto-stretch — the recommended best-quality default.
-    pub fn auto_asinh() -> Self {
+    pub const fn auto_asinh() -> Self {
         Self {
-            // A touch gentler than STF's 0.25 — asinh's softer highlights read better slightly darker.
             method: StretchMethod::AutoAsinh {
-                target_background: 0.2,
+                target_background: StretchMethod::AUTO_TARGET_BACKGROUND,
             },
             color: ColorMode::ColorPreserving,
         }
     }
 
     /// Color-preserving STF (MTF) auto-stretch — the standard automatic "screen stretch".
-    pub fn auto_stf() -> Self {
+    pub const fn auto_stf() -> Self {
         Self {
-            // 0.25 is PixInsight's STF default target background.
             method: StretchMethod::AutoStf {
-                shadow_sigmas: 1.5,
-                target_background: 0.2,
+                shadow_sigmas: StretchMethod::STF_SHADOW_SIGMAS,
+                target_background: StretchMethod::AUTO_TARGET_BACKGROUND,
             },
             color: ColorMode::ColorPreserving,
         }
-    }
-
-    /// Color-preserving Generalized Hyperbolic Stretch with no shadow/highlight
-    /// protection (`lp = 0`, `hp = 1`). `d` = strength, `b` = curve family, `sp` = symmetry point.
-    pub fn ghs(d: f32, b: f32, sp: f32) -> Self {
-        Self {
-            method: StretchMethod::Ghs {
-                d,
-                b,
-                sp,
-                lp: 0.0,
-                hp: 1.0,
-            },
-            color: ColorMode::ColorPreserving,
-        }
-    }
-
-    /// Set how the curve is applied across color channels.
-    pub fn color(mut self, color: ColorMode) -> Self {
-        self.color = color;
-        self
     }
 
     /// Apply this non-linear stretch to a stacked image in place.
     ///
     /// # Errors
-    /// [`OpError::InvalidConfig`] on out-of-range parameters.
+    /// [`OpError::InvalidConfig`] on out-of-range parameters, and
+    /// [`OpError::UnreachableBackground`] when an auto method cannot place the measured background
+    /// on its target. The image is unchanged on error.
     pub fn apply(&self, image: &mut LinearImage) -> Result<(), OpError> {
         self.validate()?;
         match self.color {
             ColorMode::ColorPreserving => {
-                // Auto methods derive the curve from the combined intensity (one curve for the image).
-                let curve = explicit_curve(self.method)
-                    .unwrap_or_else(|| build_curve(&mut subsample_intensity(image), self.method));
+                // Auto methods derive the curve from the combined intensity (one curve for the
+                // image).
+                let curve = match explicit_curve(self.method) {
+                    Some(curve) => curve,
+                    None => build_curve(&mut subsample_intensity(image), self.method)?,
+                };
                 apply_color_preserving_image(image, curve);
             }
-            ColorMode::PerChannel => apply_per_channel_image(image, self.method),
+            ColorMode::PerChannel => apply_per_channel_image(image, self.method)?,
         }
         Ok(())
     }
@@ -232,19 +219,28 @@ fn ensure_target_background(t: f32) -> Result<(), InvalidConfigField> {
 /// Per-channel stretch: each channel gets its own auto curve from its own statistics (explicit
 /// methods share one curve across channels), applied to its own plane. Channels are independent, so
 /// nothing here reads a value another channel already changed.
-fn apply_per_channel_image(image: &mut LinearImage, method: StretchMethod) {
+///
+/// Every channel's curve is built before any channel is written, so a channel whose background is
+/// out of reach leaves the whole image untouched.
+fn apply_per_channel_image(image: &mut LinearImage, method: StretchMethod) -> Result<(), OpError> {
+    let mut curves = ArrayVec::<Curve, 3>::new();
     for plane in image.planes_mut() {
-        let plane = plane.pixels_mut();
-        let curve =
-            explicit_curve(method).unwrap_or_else(|| build_curve(&mut subsample(plane), method));
-        apply_curve_plane(plane, curve);
+        curves.push(match explicit_curve(method) {
+            Some(curve) => curve,
+            None => build_curve(&mut subsample(plane.pixels()), method)?,
+        });
     }
+    for (plane, curve) in image.planes_mut().zip(curves) {
+        apply_curve_plane(plane.pixels_mut(), curve);
+    }
+    Ok(())
 }
 
-/// Uniform-stride subsample of a plane, capped at `MAX_STRETCH_SAMPLES` for the curve's median/MAD.
+/// A [`Subsample`] of a plane for the curve's median/MAD.
 fn subsample(plane: &[f32]) -> Vec<f32> {
-    let stride = (plane.len() / MAX_STRETCH_SAMPLES).max(1);
-    plane.iter().step_by(stride).copied().collect()
+    Subsample::new(plane.len(), MAX_STATISTIC_SAMPLES)
+        .of(plane)
+        .collect()
 }
 
 /// Curves that need no image statistics — built straight from their parameters. Returns `None` for
@@ -259,33 +255,23 @@ fn explicit_curve(method: StretchMethod) -> Option<Curve> {
     }
 }
 
-/// Cap on the sample count for the auto methods' median/MAD. A robust median+MAD converges far below
-/// this, so a uniform-stride subsample is statistically identical to selecting over every pixel —
-/// and avoids two full-resolution quickselects (matches `color_calibration` / `denoise`).
-const MAX_STRETCH_SAMPLES: usize = 1_000_000;
-
 /// Uniform-stride subsample of the combined intensity `I = (r+g+b)/3` (the sample itself for mono),
 /// computed from the planes directly — never materializing the full intensity plane just to throw
 /// all but every `stride`-th value away. Identical samples to subsampling
 /// [`LinearImage::intensity_plane`](crate::io::image::linear::LinearImage::intensity_plane).
 fn subsample_intensity(image: &LinearImage) -> Vec<f32> {
     let plane = image.channel(0).pixels();
-    let stride = (plane.len() / MAX_STRETCH_SAMPLES).max(1);
+    let sample = Subsample::new(plane.len(), MAX_STATISTIC_SAMPLES);
     if !image.is_rgb() {
-        return plane.iter().step_by(stride).copied().collect();
+        return sample.of(plane).collect();
     }
     let (g, b) = (image.channel(1).pixels(), image.channel(2).pixels());
-    // The one place the interleaved layout was genuinely better: a stride-`n` walk got r, g and b
-    // of each sampled pixel from a single cache line, where three planes cost three lines and three
-    // TLB streams. Running it in parallel hides that latency — the work is a pure map over indices.
-    //
-    // Indexed rather than `zip(g).zip(b).step_by(stride)` for a second reason: `step_by` on a
-    // nested `Zip` walks every element and discards all but each stride-th, reading all three planes
-    // in full instead of the 1/stride of them this needs.
-    (0..plane.len().div_ceil(stride))
+    // A stride-`n` walk over three planes costs three cache lines and three TLB streams per sampled
+    // pixel; running it in parallel hides that latency — the work is a pure map over indices.
+    (0..sample.count())
         .into_par_iter()
-        .map(|sample| {
-            let i = sample * stride;
+        .map(|k| {
+            let i = sample.index(k);
             Rgb {
                 r: plane[i],
                 g: g[i],
@@ -301,6 +287,14 @@ fn subsample_intensity(image: &LinearImage) -> Vec<f32> {
 /// valid display value.
 trait ToneCurve: Copy + Sync {
     fn eval(&self, x: f32) -> f32;
+
+    /// [`Self::eval`] over a block of samples, in place — where a curve with a vector kernel takes
+    /// it over.
+    fn eval_block(&self, block: &mut [f32]) {
+        for value in block {
+            *value = self.eval(*value);
+        }
+    }
 }
 
 /// STF: a linear clip-rescale `[black, 1] → [0, 1]`, then `MTF(midtones, ·)`.
@@ -312,22 +306,35 @@ struct StfCurve {
 }
 
 impl StfCurve {
-    fn new(median: f32, sigma: f32, shadow_sigmas: f32, target_bkg: f32) -> Self {
-        let black = (median - shadow_sigmas * sigma).clamp(0.0, 1.0);
-        let inv_range = if black < 1.0 {
-            1.0 / (1.0 - black)
-        } else {
-            1.0
+    /// The curve that puts `median` on `target_bkg`, or an error when no midtones balance in
+    /// `[MIDTONES_MIN, MIDTONES_MAX]` does: a median at or below the black point (nothing above
+    /// black to lift) or at white.
+    fn new(median: f32, sigma: f32, shadow_sigmas: f32, target_bkg: f32) -> Result<Self, OpError> {
+        let unreachable = || OpError::UnreachableBackground {
+            method: "auto STF",
+            median,
+            target: target_bkg,
         };
-        let rescaled_median = ((median - black) * inv_range).clamp(0.0, 1.0);
+        let black = (median - shadow_sigmas * sigma).clamp(0.0, 1.0);
+        if black >= 1.0 {
+            return Err(unreachable());
+        }
+        let inv_range = 1.0 / (1.0 - black);
+        let rescaled_median = (median - black) * inv_range;
+        if !(rescaled_median > 0.0 && rescaled_median < 1.0) {
+            return Err(unreachable());
+        }
         // MTF's Möbius self-inverse identity: MTF(MTF(t, x0), x0) = t, so the midtones balance
         // that maps the rescaled median onto the target background is just MTF(target, median).
-        let midtones = mtf(target_bkg, rescaled_median).clamp(MIDTONES_MIN, MIDTONES_MAX);
-        Self {
+        let midtones = mtf(target_bkg, rescaled_median);
+        if !(MIDTONES_MIN..=MIDTONES_MAX).contains(&midtones) {
+            return Err(unreachable());
+        }
+        Ok(Self {
             black,
             inv_range,
             midtones,
-        }
+        })
     }
 }
 
@@ -368,36 +375,40 @@ impl ToneCurve for AsinhCurve {
         // highlights (or negative post-subtraction pixels) still land in display range.
         ((x * self.inv_beta).asinh() * self.inv_norm).clamp(0.0, 1.0)
     }
+
+    fn eval_block(&self, block: &mut [f32]) {
+        simd::asinh_plane(block, *self);
+    }
 }
 
-/// `b`-special-cases collapse below this — `b = −1` (logarithmic) and `b = 0` (exponential) are
-/// genuine limits where the general forms divide by `b` or `b + 1`.
-const GHS_EPS: f32 = 1e-6;
-
-/// GHS base hyperbolic function `T(u)` for `u ≥ 0`, selected on `b`. `T(0) = 0` in
-/// every case, which is what makes the curve continuous at the symmetry point.
+/// GHS base hyperbolic function `T(u)` for `u ≥ 0`, selected on `b`. `T(0) = 0` in every case,
+/// which is what makes the curve continuous at the symmetry point.
+///
+/// Written through `ln_1p`/`expm1` so it stays accurate as `b` nears its two limits: the textbook
+/// `1 − (1 + b·d·u)^(−1/b)` cancels as `b → 0` (in f32, 18.6% off at `b = 2e-6`, `d = 5`) and the
+/// `b < 0` form divides by `b + 1` as `b → −1`. Only the limits themselves, `b = 0` (exponential)
+/// and `b = −1` (logarithmic), take their own forms — the general ones are `0/0` there exactly.
+/// Each branch fixes its own scale, which the curve's normalization divides out.
 fn ghs_base_t(d: f32, b: f32, u: f32) -> f32 {
-    if (b + 1.0).abs() < GHS_EPS {
-        (1.0 + d * u).ln()
-    } else if b.abs() < GHS_EPS {
-        1.0 - (-d * u).exp()
+    if b == 0.0 {
+        -(-d * u).exp_m1()
+    } else if b == -1.0 {
+        (d * u).ln_1p() / d
     } else if b < 0.0 {
-        (1.0 - (1.0 - b * d * u).powf((b + 1.0) / b)) / (d * (b + 1.0))
+        -(((b + 1.0) / b) * (-b * d * u).ln_1p()).exp_m1() / (d * (b + 1.0))
     } else {
-        1.0 - (1.0 + b * d * u).powf(-1.0 / b)
+        -(-(b * d * u).ln_1p() / b).exp_m1()
     }
 }
 
 /// Derivative `T'(u)` of [`ghs_base_t`] — the slope of the linear shadow/highlight tails.
 fn ghs_base_tp(d: f32, b: f32, u: f32) -> f32 {
-    if (b + 1.0).abs() < GHS_EPS {
-        d / (1.0 + d * u)
-    } else if b.abs() < GHS_EPS {
+    if b == 0.0 {
         d * (-d * u).exp()
     } else if b < 0.0 {
-        (1.0 - b * d * u).powf(1.0 / b)
+        ((-b * d * u).ln_1p() / b).exp()
     } else {
-        d * (1.0 + b * d * u).powf(-(1.0 + b) / b)
+        d * (-((1.0 + b) / b) * (b * d * u).ln_1p()).exp()
     }
 }
 
@@ -406,7 +417,7 @@ fn ghs_base_tp(d: f32, b: f32, u: f32) -> f32 {
 /// monotonic. Four base evaluations are precomputed here; `eval` does two per pixel.
 #[derive(Debug, Clone, Copy)]
 struct GhsCurve {
-    /// `d ≈ 0` ⇒ the transform is the identity; short-circuit (the normalization would be `0/0`).
+    /// `d = 0`, or a range too small to normalize: the transform is the identity.
     identity: bool,
     d: f32,
     b: f32,
@@ -440,15 +451,17 @@ impl GhsCurve {
             t0: 0.0,
             inv_range: 1.0,
         };
-        if d < GHS_EPS {
-            return zero;
-        }
         let t_sp_lp = ghs_base_t(d, b, sp - lp);
         let tp_sp_lp = ghs_base_tp(d, b, sp - lp);
         let t_hp_sp = ghs_base_t(d, b, hp - sp);
         let tp_hp_sp = ghs_base_tp(d, b, hp - sp);
         let t0 = -lp * tp_sp_lp - t_sp_lp; // T1(0)
         let t1 = (1.0 - hp) * tp_hp_sp + t_hp_sp; // T4(1)
+        // `d = 0` is the identity, and a `d` so small that the curve's range underflows is it too:
+        // the normalization would divide by zero.
+        if d == 0.0 || !(t1 - t0).is_normal() {
+            return zero;
+        }
         Self {
             identity: false,
             t_sp_lp,
@@ -509,33 +522,43 @@ fn mtf(m: f32, x: f32) -> f32 {
 /// Choose the arcsinh softening `β` so a background of `median` maps to `target_background`.
 ///
 /// `g(β) = asinh(median/β) / asinh(1/β)` is monotonically decreasing in `β`, ranging from ~1 as
-/// `β → 0` (strong, log-like) to `median` as `β → ∞` (near-linear). Bisect `log₁₀ β` to hit the
-/// target, which must lie in `(median, 1)`.
-fn solve_asinh_beta(median: f32, target_background: f32) -> f32 {
-    // The reachable target lies in `(median, 1)`. Cap the lower bound at the upper one so a
-    // near-white median (not expected on a linear stack, but possible per-channel) can't invert the
-    // clamp range and panic.
-    let hi = 1.0 - 1e-4;
-    let target = target_background.clamp((median + 1e-4).min(hi), hi);
-    let (mut lo, mut hi) = (-5.0f32, 5.0f32);
-    for _ in 0..50 {
-        let mid = 0.5 * (lo + hi);
-        let beta = 10.0f32.powf(mid);
-        let g = (median / beta).asinh() / (1.0 / beta).asinh();
-        if g > target {
+/// `β → 0` (strong, log-like) to `median` as `β → ∞` (near-linear), so a reachable target lies in
+/// `(median, 1)`. Bisect `log₁₀ β` over `[−30, 5]` — wide enough for medians down to ~1e-20 — and
+/// then check the result, because a target past the range's end converges onto the bound rather
+/// than onto the target.
+fn solve_asinh_beta(median: f32, target_background: f32) -> Result<f32, OpError> {
+    let unreachable = || OpError::UnreachableBackground {
+        method: "auto asinh",
+        median,
+        target: target_background,
+    };
+    if !(median > 0.0 && median < target_background) {
+        return Err(unreachable());
+    }
+    let g = |beta: f32| (median / beta).asinh() / (1.0 / beta).asinh();
+    let (mut lo, mut hi) = (-30.0f32, 5.0f32);
+    for _ in 0..60 {
+        let mid = f32::midpoint(lo, hi);
+        if g(10.0f32.powf(mid)) > target_background {
             lo = mid;
         } else {
             hi = mid;
         }
     }
-    10.0f32.powf(0.5 * (lo + hi))
+    let beta = 10.0f32.powf(f32::midpoint(lo, hi));
+    // A reachable target is met to the f32 accuracy of the two `asinh` evaluations (a few ulp,
+    // ~1e-6); a target past the range's end misses by far more than this.
+    if (g(beta) - target_background).abs() > 1e-4 {
+        return Err(unreachable());
+    }
+    Ok(beta)
 }
 
-/// Build a curve for a statistics-driven (auto) method from a (reorderable) sample set. The explicit
-/// methods are resolved by [`explicit_curve`] before any samples are materialized, so they never
-/// reach here.
-fn build_curve(samples: &mut [f32], method: StretchMethod) -> Curve {
-    match method {
+/// Build a curve for a statistics-driven (auto) method from a (reorderable) sample set. The
+/// explicit methods are resolved by [`explicit_curve`] before any samples are materialized, so they
+/// never reach here.
+fn build_curve(samples: &mut [f32], method: StretchMethod) -> Result<Curve, OpError> {
+    Ok(match method {
         StretchMethod::AutoStf {
             shadow_sigmas,
             target_background,
@@ -546,16 +569,19 @@ fn build_curve(samples: &mut [f32], method: StretchMethod) -> Curve {
                 background.sigma(),
                 shadow_sigmas,
                 target_background,
-            ))
+            )?)
         }
         StretchMethod::AutoAsinh { target_background } => {
             let median = median_mut(samples);
-            Curve::Asinh(AsinhCurve::new(solve_asinh_beta(median, target_background)))
+            Curve::Asinh(AsinhCurve::new(solve_asinh_beta(
+                median,
+                target_background,
+            )?))
         }
         StretchMethod::Asinh { .. } | StretchMethod::Ghs { .. } => {
             unreachable!("explicit methods are built by explicit_curve, not build_curve")
         }
-    }
+    })
 }
 
 /// Stretch one plane. Resolves the curve type once, then runs a monomorphized loop.
@@ -569,43 +595,24 @@ fn apply_curve_plane(plane: &mut [f32], curve: Curve) {
 
 fn map_plane<C: ToneCurve>(plane: &mut [f32], curve: C) {
     plane
-        .par_chunks_mut(crate::image_ops::SAMPLES_PER_BLOCK)
-        .for_each(|block| {
-            for value in block {
-                *value = curve.eval(*value);
-            }
-        });
+        .par_chunks_mut(SAMPLES_PER_BLOCK)
+        .for_each(|block| curve.eval_block(block));
 }
 
-/// Map one pixel under color-preserving stretch: run `curve` on the combined
-/// intensity and scale every channel by `f(I)/I`, with a hue-preserving highlight
-/// cap.
+/// Map one pixel under color-preserving stretch: `curve` on the combined intensity, the pixel moved
+/// to that intensity with its hue kept ([`Rgb::with_intensity`]).
 fn color_preserve_pixel<C: ToneCurve>(px: Rgb, curve: &C) -> Rgb {
-    let intensity = px.intensity();
-    // Sub-background pixels (≤ 0, possible after background subtraction) map to black.
-    if intensity <= 0.0 {
-        return Rgb::ZERO;
-    }
-    let scaled = px.scale(curve.eval(intensity) / intensity);
-    // Hue-preserving highlight cap: when a channel exceeds 1, divide all three by the max.
-    let maxc = scaled.r.max(scaled.g).max(scaled.b);
-    if maxc > 1.0 {
-        scaled.scale(1.0 / maxc)
-    } else {
-        scaled
-    }
+    px.with_intensity(curve.eval(px.intensity()))
 }
 
 /// Color-preserving stretch. Resolves the curve type once.
 ///
 /// On a grayscale image the combined intensity *is* the single channel, so "scale each channel by
-/// `f(I)/I`" reduces to evaluating the curve on that channel — `map_samples`, not `map_rgb`.
+/// `f(I)/I`" reduces to the curve on that plane.
 fn apply_color_preserving_image(image: &mut LinearImage, curve: Curve) {
     if !image.is_rgb() {
-        match curve {
-            Curve::Stf(c) => image.map_samples(|l| c.eval(l)),
-            Curve::Asinh(c) => image.map_samples(|l| c.eval(l)),
-            Curve::Ghs(c) => image.map_samples(|l| c.eval(l)),
+        for plane in image.planes_mut() {
+            apply_curve_plane(plane.pixels_mut(), curve);
         }
         return;
     }
@@ -627,3 +634,8 @@ fn apply_color_preserving_asinh(image: &mut LinearImage, c: AsinhCurve) {
         .zip(b.par_chunks_mut(SAMPLES_PER_BLOCK))
         .for_each(|((r, g), b)| simd::asinh_color_preserve(r, g, b, c));
 }
+
+#[cfg(all(test, feature = "bench"))]
+mod bench;
+#[cfg(test)]
+mod tests;

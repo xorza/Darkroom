@@ -2,8 +2,10 @@ use glam::Vec2;
 use scenarium::{Binding, NodeKind};
 
 use crate::core::document::harness::DocFixture;
+use crate::core::preview;
 use crate::gui::pane::graph::harness::CanvasHarness;
 use crate::gui::pane::graph::node::port_row::port_circle_wid;
+use std::sync::Arc;
 
 /// Ctrl+drag off an output port spawns a preview node already reading it, as
 /// one batch — the one-gesture counterpart to the port menu's "Add preview".
@@ -25,7 +27,7 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
     let mut fixture = DocFixture::probes(1);
     fixture
         .library
-        .add(preview_func(std::sync::Arc::<PreviewSink>::default()));
+        .add(preview_func(Arc::<PreviewSink>::default()));
     let producer = fixture.node(0);
     let out_port = PortRef::output(producer, 0);
 
@@ -51,8 +53,6 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
     h.ui.set_modifiers(Modifiers::default());
     h.ui.release_button(PointerButton::Left);
 
-    // The harness carries the pane assertion: the spawn is raised against the
-    // port's own pane, not whichever one happens to be focused.
     let adds: Vec<_> = spawned
         .iter()
         .filter(|intent| matches!(intent, GraphIntent::AddNode { .. }))
@@ -62,7 +62,7 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
         unreachable!("filtered to AddNode");
     };
     assert!(
-        matches!(node.kind, NodeKind::Func(id) if crate::core::preview::is_preview(id)),
+        matches!(node.kind, NodeKind::Func(id) if preview::is_preview(id)),
         "the spawned node is a preview"
     );
     assert!(

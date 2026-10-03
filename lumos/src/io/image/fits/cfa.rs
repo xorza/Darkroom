@@ -1,3 +1,4 @@
+use std::io;
 use std::path::Path;
 
 use common::file_utils;
@@ -11,7 +12,9 @@ use crate::io::image::fits::error::{fits_err, fits_to_io, fits_unsupported};
 use crate::io::image::fits::metadata::{write_cfa_metadata, write_image_metadata};
 
 pub(crate) const CFA_FITS_FORMAT: &str = "CFAIMAGE";
-pub(crate) const CFA_FITS_VERSION: i64 = 1;
+/// 2: the sample scale is recorded (`LUMSCALE`); a version-1 master would reload with an assumed
+/// scale of 1 and is rebuilt instead.
+pub(crate) const CFA_FITS_VERSION: i64 = 2;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CfaFitsHduMetadata<'a> {
@@ -65,7 +68,7 @@ pub(super) fn validate_cfa_image_header(path: &Path, image: &Header) -> Result<b
     Ok(is_lumos_cfa)
 }
 
-pub(crate) fn save_cfa_fits(path: &Path, image: &CfaImage) -> std::io::Result<()> {
+pub(crate) fn save_cfa_fits(path: &Path, image: &CfaImage) -> io::Result<()> {
     let encoded = CfaFitsHdu::encode(
         image,
         CfaFitsHduMetadata {
@@ -77,17 +80,14 @@ pub(crate) fn save_cfa_fits(path: &Path, image: &CfaImage) -> std::io::Result<()
     file_utils::publish(path, file_utils::PublicationMode::Durable, |file| {
         FitsWriter::new(&mut *file)
             .with_checksums()
-            .write_image_with_header(&encoded.image, &encoded.header)
+            .write_image(&encoded.image, Some(&encoded.header))
             .map_err(fits_to_io)
     })
 }
 
 impl CfaFitsHdu {
     /// Build the image and header a CFA HDU writes, from `cfa` plus the per-HDU metadata.
-    pub(crate) fn encode(
-        cfa: &CfaImage,
-        hdu_metadata: CfaFitsHduMetadata<'_>,
-    ) -> std::io::Result<Self> {
+    pub(crate) fn encode(cfa: &CfaImage, hdu_metadata: CfaFitsHduMetadata<'_>) -> io::Result<Self> {
         let mut header = Header::new();
         header
             .set("LUMOSFMT", CFA_FITS_FORMAT)
@@ -111,11 +111,10 @@ impl CfaFitsHdu {
             // mask. Without it the samples under those pixels — a decoder fill, or the same-colour
             // median `CfaImage::repair_nulls` put there — would reload as measurements, which is
             // the fabrication the mask exists to prevent.
-            for (index, sample) in samples.iter_mut().enumerate() {
-                if nulls.is_null(index) {
-                    *sample = f32::NAN;
-                }
-            }
+            let width = cfa.data.width();
+            nulls
+                .bits()
+                .for_each_set(|pos| samples[pos.y * width + pos.x] = f32::NAN);
         }
         let image =
             Image::new([cfa.data.width(), cfa.data.height()], samples).map_err(fits_to_io)?;

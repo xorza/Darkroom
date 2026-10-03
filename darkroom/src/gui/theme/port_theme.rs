@@ -13,7 +13,7 @@ use crate::gui::theme::palette::Palette;
 /// roster and the type roster together and so stays a function over the
 /// whole [`Theme`](crate::gui::theme::Theme). Every colour here is a
 /// resting one; the pointer lift is applied at that call site.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub(crate) struct PortTheme {
     /// Positional colour for untyped input ports.
     pub(crate) input: RgbaF32,
@@ -44,7 +44,7 @@ pub(crate) struct PortTheme {
 }
 
 impl PortTheme {
-    pub(super) fn from_palette(p: &Palette) -> Self {
+    pub(super) const fn from_palette(p: &Palette) -> Self {
         Self {
             input: p.input_port,
             output: p.output_port,

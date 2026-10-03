@@ -8,7 +8,9 @@
 //! node body, so selection, dragging, the breaker, and the input wire all come
 //! from the node machinery unchanged.
 
+use std::fmt;
 use std::fmt::Display;
+use std::fmt::Formatter;
 
 use imaginarium::ColorFormat;
 use palantir::prelude::*;
@@ -18,12 +20,14 @@ use scenarium::NodeId;
 
 use crate::core::document::TabRef;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
+use crate::gui::pane::graph::node::wid;
 use crate::gui::requests::Requests;
 use crate::gui::state::preview_store::{PreviewImage, StoredContent};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::format::fmt_bytes;
 use crate::gui::widgets::support::{
-    CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, bare_value, footer_background, labeled_value, sized_text,
+    CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, ROW_GAP, bare_value, footer_background, labeled_value,
+    sized_text,
 };
 
 /// Minimum body width for a preview node, canvas-world units. Wider than a
@@ -45,7 +49,7 @@ const EMPTY_LABEL: &str = "No value yet";
 /// Stable id for a preview's value area. Reconstructible from the node, so the
 /// canvas-level scan can read last frame's click without a cache.
 pub(crate) fn preview_image_wid(node_id: NodeId) -> WidgetId {
-    WidgetId::from_hash(("graph.node.preview_image", node_id))
+    wid::node("preview_image", node_id)
 }
 
 /// Draw one preview node's value area, plus the image info footer when there is
@@ -63,11 +67,10 @@ pub(super) fn preview_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
         .justify(Justify::Center)
         // Only an image opens a viewer, so only an image is clickable.
         .sense(if has_image { Sense::CLICK } else { Sense::NONE })
-        .show(ui, |ui| match stored.and_then(StoredContent::image) {
-            Some(image) => {
+        .show(ui, |ui| {
+            if let Some(image) = stored.and_then(StoredContent::image) {
                 ui.add_shape(Shape::image(image.preview.handle.clone()).fit(ImageFit::Contain));
-            }
-            None => {
+            } else {
                 // `message` is complementary to `image`, so this covers a
                 // formatted non-image value and a value that failed to prepare
                 // alike; `EMPTY_LABEL` covers having nothing at all.
@@ -104,10 +107,10 @@ pub(super) fn preview_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
     }
 }
 
-/// The image's info footer: resolution, pixel format (channel layout + bit
-/// depth), and original source size — styled like a node body's memory footer
-/// ([`memory_row`](crate::gui::pane::graph::node::memory_row)), so every read-only fact strip in the app
-/// reads as the same kind of thing.
+/// The image's info footer: resolution, pixel format (channel layout + bit depth), and original
+/// source size — styled like a node body's memory footer
+/// ([`memory_row`](crate::gui::pane::graph::node::memory_row)), so every read-only fact strip in
+/// the app reads as the same kind of thing.
 fn info_row(ui: &mut Ui, theme: &Theme, image: &PreviewImage) {
     Panel::hstack()
         .id_salt("preview_info")
@@ -126,7 +129,7 @@ fn info_row(ui: &mut Ui, theme: &Theme, image: &PreviewImage) {
             Panel::hstack()
                 .id_salt("preview_info_size")
                 .size((Sizing::HUG, Sizing::HUG))
-                .gap(4.0)
+                .gap(ROW_GAP)
                 .child_align(Align::v(VAlign::Center))
                 .show(ui, |ui| {
                     labeled_value(ui, theme, "Source", fmt_bytes(image.source_bytes as u64));
@@ -143,8 +146,8 @@ fn info_row(ui: &mut Ui, theme: &Theme, image: &PreviewImage) {
 struct FormatLabel(ColorFormat);
 
 impl Display for FormatLabel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let bits = self.0.channel_size.byte_count() as u32 * 8;
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let bits = self.0.sample_type.bits();
         write!(f, "{} \u{b7} {bits}-bit", self.0.channel_count)
     }
 }

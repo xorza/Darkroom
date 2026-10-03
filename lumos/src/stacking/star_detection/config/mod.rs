@@ -14,9 +14,11 @@ pub(crate) mod measurement_config;
 use crate::stacking::star_detection::config::background_config::{
     BackgroundConfig, BackgroundRefinement,
 };
-use crate::stacking::star_detection::config::detection_config::{Connectivity, DetectionConfig};
+use crate::stacking::star_detection::config::detection_config::{
+    Connectivity, Deblend, DetectionConfig,
+};
 use crate::stacking::star_detection::config::filter_config::FilterConfig;
-use crate::stacking::star_detection::config::fwhm_config::FwhmConfig;
+use crate::stacking::star_detection::config::fwhm_config::{FwhmConfig, FwhmMode};
 use crate::stacking::star_detection::config::measurement_config::{
     CentroidMethod, LocalBackgroundMethod, MeasurementConfig,
 };
@@ -69,8 +71,7 @@ impl Config {
     pub fn wide_field() -> Self {
         Self {
             fwhm: FwhmConfig {
-                expected: 6.0,
-                auto_estimate: true,
+                mode: Some(FwhmMode::Auto { fallback: 6.0 }),
                 min_stars: 15,
                 ..Default::default()
             },
@@ -98,8 +99,7 @@ impl Config {
     pub fn high_resolution() -> Self {
         Self {
             fwhm: FwhmConfig {
-                expected: 2.5,
-                auto_estimate: true,
+                mode: Some(FwhmMode::Auto { fallback: 2.5 }),
                 min_stars: 15,
                 ..Default::default()
             },
@@ -130,19 +130,23 @@ impl Config {
     pub fn crowded_field() -> Self {
         Self {
             background: BackgroundConfig {
-                refinement: BackgroundRefinement::Iterative { iterations: 2 },
+                refinement: BackgroundRefinement::Iterative {
+                    iterations: 2,
+                    mask_dilation: 3,
+                },
                 ..Default::default()
             },
             detection: DetectionConfig {
-                deblend_n_thresholds: 32,
+                deblend: Deblend::MultiThreshold {
+                    n_thresholds: 32,
+                    min_contrast: 0.005,
+                },
                 deblend_min_separation: 2,
-                deblend_min_prominence: 0.15,
-                deblend_min_contrast: 0.005,
                 connectivity: Connectivity::Eight,
                 ..Default::default()
             },
             fwhm: FwhmConfig {
-                auto_estimate: true,
+                mode: Some(FwhmMode::Auto { fallback: 4.0 }),
                 ..Default::default()
             },
             filter: FilterConfig {
@@ -161,10 +165,12 @@ impl Config {
     pub fn precise_ground() -> Self {
         Self {
             background: BackgroundConfig {
-                mask_dilation: 5,
                 tile_size: 128,
                 sigma_clip_iterations: 3,
-                refinement: BackgroundRefinement::Iterative { iterations: 3 },
+                refinement: BackgroundRefinement::Iterative {
+                    iterations: 3,
+                    mask_dilation: 5,
+                },
             },
             detection: DetectionConfig {
                 sigma_threshold: 3.0,
@@ -172,15 +178,15 @@ impl Config {
                 max_area: 2000,
                 edge_margin: 15,
                 connectivity: Connectivity::Eight,
+                deblend: Deblend::MultiThreshold {
+                    n_thresholds: 32,
+                    min_contrast: 0.003,
+                },
                 deblend_min_separation: 2,
-                deblend_min_prominence: 0.15,
-                deblend_n_thresholds: 32,
-                deblend_min_contrast: 0.003,
                 ..Default::default()
             },
             fwhm: FwhmConfig {
-                expected: 3.0,
-                auto_estimate: true,
+                mode: Some(FwhmMode::Auto { fallback: 3.0 }),
                 min_stars: 30,
                 estimation_sigma_factor: 2.5,
             },
@@ -191,7 +197,7 @@ impl Config {
             },
             filter: FilterConfig {
                 min_snr: 15.0,
-                max_fwhm_deviation: 4.0,
+                max_fwhm_deviation: Some(4.0),
                 duplicate_min_separation: 5.0,
                 ..Default::default()
             },

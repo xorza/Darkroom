@@ -1,14 +1,17 @@
 use super::*;
 use common::TempFile;
 
-use crate::ConstValue;
+use crate::containers::column::Column;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::OutputSnapshot;
+use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::compile::compiled_graph::ExecutionBinding;
 use crate::execution::identity::{NodeIdx, OutputAddr};
+use crate::execution::schedule::NodeState;
 use crate::graph::identity::FuncId;
 use crate::testing::program::node_builder::NodeBuilder;
 use crate::testing::program::{Placed, ProgramBuilder};
+use std::fs;
 
 /// A content-cacheable node of func `func`, declaring `count` `Int` outputs.
 ///
@@ -16,6 +19,13 @@ use crate::testing::program::{Placed, ProgramBuilder};
 /// signature folds into the digest, and one case below pins the resulting bytes.
 fn pure(prog: &mut ProgramBuilder, func: u128, count: usize) -> NodeBuilder<'_> {
     typed(prog, func, &vec![DataType::Int; count])
+}
+
+/// Every node of `program` running this run, so every bound producer's stamp folds.
+fn running(program: &CompiledGraph) -> Column<NodeIdx, NodeState> {
+    let mut states = Column::default();
+    states.reset(program.e_nodes.len(), NodeState::Run);
+    states
 }
 
 /// [`pure`] with explicit output types, for the signature-folding cases.
@@ -40,7 +50,7 @@ impl Digests {
         for idx in 0..program.e_nodes.len() {
             let node_idx = NodeIdx(idx as u32);
             cache.prepare_node_blocking(program, node_idx);
-            cache.stamp_digest(program, node_idx);
+            cache.stamp_digest(program, &running(program), node_idx);
         }
         Self(cache)
     }
@@ -78,6 +88,27 @@ fn deterministic_and_per_function_distinct() {
     assert_ne!(first.at(a), first.at(b));
     assert_ne!(first.at(b), first.at(c));
     assert_ne!(first.at(a), first.at(c));
+
+    // Move only when the node encoding changes on purpose — read the new numbers off the
+    // failure and update them here, with the cache format version. Any other failure is
+    // accidental drift, which silently invalidates every persisted cache blob. `b` pins a
+    // bound input's fold (its producer's digest), `c` a const input's.
+    assert_eq!(
+        first.at(b),
+        Some(Digest([
+            53, 69, 189, 102, 111, 172, 24, 129, 255, 170, 245, 82, 11, 210, 206, 13, 11, 183, 72,
+            154, 72, 115, 155, 184, 130, 217, 195, 156, 199, 32, 25, 141
+        ])),
+        "bound-input node digest"
+    );
+    assert_eq!(
+        first.at(c),
+        Some(Digest([
+            58, 119, 99, 187, 180, 27, 225, 87, 60, 24, 69, 201, 1, 173, 77, 66, 17, 150, 151, 11,
+            233, 74, 204, 197, 208, 36, 101, 69, 15, 74, 49, 130
+        ])),
+        "const-input node digest"
+    );
 
     p.program_mut().by_id_mut(a.node_id).func_id = FuncId::from_u128(11);
     let refunced = Digests::of(&p);
@@ -158,9 +189,9 @@ fn fs_path_folds_file_identity_and_path() {
     };
 
     let (p, single) = path_node(ConstValue::FsPath(path.clone()));
-    std::fs::write(file, b"x").unwrap(); // len 1
+    fs::write(file, b"x").unwrap(); // len 1
     let d_len1 = Digests::of(&p).at(single);
-    std::fs::write(file, b"xyz").unwrap(); // len 3 — file identity changed
+    fs::write(file, b"xyz").unwrap(); // len 3 — file identity changed
     let d_len3 = Digests::of(&p).at(single);
     assert_ne!(
         d_len1, d_len3,
@@ -168,7 +199,7 @@ fn fs_path_folds_file_identity_and_path() {
     );
 
     let unselected = TempFile::with_extension("scenarium-digest-unselected", "bin");
-    std::fs::write(unselected.path(), b"not selected").unwrap();
+    fs::write(unselected.path(), b"not selected").unwrap();
     assert_eq!(
         Digests::of(&p).at(single),
         d_len3,
@@ -176,12 +207,12 @@ fn fs_path_folds_file_identity_and_path() {
     );
 
     let second = TempFile::with_extension("scenarium-digest-second", "bin");
-    std::fs::write(second.path(), b"second").unwrap();
+    fs::write(second.path(), b"second").unwrap();
     let second_path = second.to_str();
     let (two_file_prog, both) =
         path_node(ConstValue::FsPaths(vec![path.clone(), second_path.clone()]));
     let two_files = Digests::of(&two_file_prog).at(both);
-    std::fs::write(second.path(), b"second changed").unwrap();
+    fs::write(second.path(), b"second changed").unwrap();
     let second_edited = Digests::of(&two_file_prog).at(both);
     assert_ne!(
         two_files, second_edited,
@@ -198,7 +229,7 @@ fn fs_path_folds_file_identity_and_path() {
     // A path that is not there has no identity to fold at all: the node
     // is left without a digest, and the executor fails it at its turn
     // rather than keying it on an absence.
-    std::fs::remove_file(file).unwrap();
+    fs::remove_file(file).unwrap();
     assert_eq!(
         Digests::of(&p).at(single),
         None,
@@ -228,7 +259,7 @@ fn fs_path_folds_file_identity_and_path() {
     // One unset port must not cost the *run* its batched stamping: before the
     // walk skipped it, `metadata("")` failed the whole shared pass, and which
     // of the other nodes had already landed was `HashSet` drain order.
-    std::fs::write(file, b"x").unwrap();
+    fs::write(file, b"x").unwrap();
     let mut batch = ProgramBuilder::default();
     let blank_node = pure(&mut batch, 11, 1)
         .const_input(ConstValue::FsPath(String::new()))
@@ -243,10 +274,12 @@ fn fs_path_folds_file_identity_and_path() {
         .prepare_nodes_blocking(batched, [blank_node.node_idx, real_node.node_idx])
         .expect("an unset path is not a walk failure");
     assert!(
-        cache.node_digest(batched, real_node.node_idx).is_some(),
+        cache
+            .node_digest(batched, &running(batched), real_node.node_idx)
+            .is_some(),
         "a named path still stamps when batched beside an unset one"
     );
-    std::fs::remove_file(file).unwrap();
+    fs::remove_file(file).unwrap();
 
     // The path string is folded on top of the file identity, so two nodes
     // reading equal files under different names still key apart. Planted
@@ -257,7 +290,7 @@ fn fs_path_folds_file_identity_and_path() {
         let mut cache = RuntimeCache::default();
         cache.install_for_test(p.program());
         cache.stamp_file(path, 4, 7);
-        cache.node_digest(p.program(), node.node_idx)
+        cache.node_digest(p.program(), &running(p.program()), node.node_idx)
     };
     let here = "definitely-missing-elsewhere";
     let there = "definitely-missing-somewhere";
@@ -311,7 +344,9 @@ fn bound_fs_path_folds_delivered_file_identity() {
         let program = p.program();
         let mut cache = RuntimeCache::default();
         cache.install_for_test(program);
-        let stamped = cache.node_digest(program, producer.node_idx).unwrap();
+        let stamped = cache
+            .node_digest(program, &running(program), producer.node_idx)
+            .unwrap();
         cache[producer.node_idx].current_digest = Some(stamped);
         if let Some(value) = value {
             cache.hydrate(producer.node_idx, OutputSnapshot::new(vec![value]), stamped);
@@ -319,13 +354,13 @@ fn bound_fs_path_folds_delivered_file_identity() {
         cache.prepare_node_blocking(program, declared.node_idx);
         cache.prepare_node_blocking(program, control.node_idx);
         DigestPair {
-            typed: cache.node_digest(program, declared.node_idx),
-            plain: cache.node_digest(program, control.node_idx),
+            typed: cache.node_digest(program, &running(program), declared.node_idx),
+            plain: cache.node_digest(program, &running(program), control.node_idx),
         }
     };
     let fs_path = || Some(DynamicValue::Static(ConstValue::FsPath(path.clone())));
 
-    std::fs::write(file, b"x").unwrap(); // len 1
+    fs::write(file, b"x").unwrap(); // len 1
     let DigestPair {
         typed: typed_len1,
         plain: plain_len1,
@@ -337,7 +372,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
         "an unchanged file folds identically"
     );
 
-    std::fs::write(file, b"xyz").unwrap(); // len 3 — the file identity changed
+    fs::write(file, b"xyz").unwrap(); // len 3 — the file identity changed
     let DigestPair {
         typed: typed_len3,
         plain: plain_len3,
@@ -352,7 +387,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
     );
 
     let second = TempFile::with_extension("scenarium-digest-bound-fs-second", "bin");
-    std::fs::write(second.path(), b"second").unwrap();
+    fs::write(second.path(), b"second").unwrap();
     let fs_paths = || {
         Some(DynamicValue::Static(ConstValue::FsPaths(vec![
             path.clone(),
@@ -360,13 +395,13 @@ fn bound_fs_path_folds_delivered_file_identity() {
         ])))
     };
     let typed_list = digests_with(fs_paths()).typed;
-    std::fs::write(second.path(), b"second changed").unwrap();
+    fs::write(second.path(), b"second changed").unwrap();
     assert_ne!(
         digests_with(fs_paths()).typed,
         typed_list,
         "a wired path list re-keys when any selected file changes"
     );
-    std::fs::remove_file(second.path()).unwrap();
+    fs::remove_file(second.path()).unwrap();
 
     // An unset slot keys on its *position*, which is what the marker buys over
     // skipping the slot: a Bind fold writes no authored strings alongside the
@@ -390,7 +425,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
         "where the unset slot sits is part of the key"
     );
 
-    std::fs::remove_file(file).unwrap();
+    fs::remove_file(file).unwrap();
     let DigestPair {
         typed: typed_missing,
         plain: plain_missing,
@@ -428,7 +463,9 @@ fn bound_fs_path_folds_delivered_file_identity() {
     let program = p.program();
     let mut cache = RuntimeCache::default();
     cache.install_for_test(program);
-    let stamped = cache.node_digest(program, producer.node_idx).unwrap();
+    let stamped = cache
+        .node_digest(program, &running(program), producer.node_idx)
+        .unwrap();
     cache[producer.node_idx].current_digest = Some(stamped);
     cache.hydrate(
         producer.node_idx,
@@ -438,7 +475,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
     cache[producer.node_idx].current_digest = Some(Digest([9; 32]));
     cache.prepare_node_blocking(program, declared.node_idx);
     assert_eq!(
-        cache.node_digest(program, declared.node_idx),
+        cache.node_digest(program, &running(program), declared.node_idx),
         None,
         "a path value produced under an old producer digest is unreadable"
     );
@@ -556,8 +593,8 @@ fn impure_node_and_its_dependents_are_none() {
     );
 }
 
-/// The [`DigestHasher`] builder is deterministic, encodes PODs little-endian and
-/// width-typed, length-prefixes strings so concatenations can't collide, and folds a
+/// The [`DigestHasher`] builder is deterministic, encodes PODs as exactly their little-endian
+/// bytes, length-prefixes strings so concatenations can't collide, and folds a
 /// nested digest as its raw bytes.
 #[test]
 fn digest_hasher_encodes_deterministically_and_without_collisions() {
@@ -615,6 +652,45 @@ fn digest_hasher_encodes_deterministically_and_without_collisions() {
         "a bool flip changes the digest"
     );
 
+    // Each POD folds exactly its little-endian bytes, and a string its u64 length then its
+    // bytes: the same digest as writing those bytes by hand.
+    let bytes = |raw: &[&[u8]]| {
+        hash_with(&|h| {
+            for part in raw {
+                h.write_bytes(part);
+            }
+        })
+    };
+    assert_eq!(u64_1, bytes(&[&1u64.to_le_bytes()]), "u64 is 8 LE bytes");
+    assert_eq!(
+        hash_with(&|h| {
+            h.write_pod(0x0102_0304u32);
+        }),
+        bytes(&[&[4, 3, 2, 1]]),
+        "u32 is 4 LE bytes"
+    );
+    assert_eq!(
+        hash_with(&|h| {
+            h.write_pod(-1.5f64);
+        }),
+        bytes(&[&(-1.5f64).to_bits().to_le_bytes()]),
+        "f64 is its bit pattern's 8 LE bytes"
+    );
+    assert_eq!(
+        hash_with(&|h| {
+            h.write_pod(true);
+        }),
+        bytes(&[&[1]]),
+        "bool is one byte"
+    );
+    assert_eq!(
+        hash_with(&|h| {
+            h.write_str("ab");
+        }),
+        bytes(&[&2u64.to_le_bytes(), b"ab"]),
+        "a string is its u64 length then its bytes"
+    );
+
     // write_digest folds the nested digest's raw 32 bytes — same as write_bytes(&inner.0).
     let inner = {
         let mut h = DigestHasher::new();
@@ -630,4 +706,36 @@ fn digest_hasher_encodes_deterministically_and_without_collisions() {
         }),
         "write_digest folds the digest's raw bytes"
     );
+}
+
+/// A bound input whose producer does not run this run folds as unbound, which is what the
+/// executor delivers there: the consumer keys exactly as its unbound twin does. With the producer
+/// running, it folds the producer's stamp instead.
+#[test]
+fn a_skipped_producer_folds_its_consumer_as_unbound() {
+    let mut p = ProgramBuilder::default();
+    let producer = pure(&mut p, 10, 1).add();
+    let bound = pure(&mut p, 20, 1).input(producer.out(0)).add();
+    let unbound = pure(&mut p, 20, 1).input(ExecutionBinding::None).add();
+    let program = p.program();
+    let mut cache = RuntimeCache::default();
+    cache.install_for_test(program);
+
+    let mut states = running(program);
+    cache.stamp_digest(program, &states, producer.node_idx);
+    let digest = |cache: &RuntimeCache, states: &Column<NodeIdx, NodeState>, node: Placed| {
+        cache.node_digest(program, states, node.node_idx)
+    };
+    assert_ne!(
+        digest(&cache, &states, bound),
+        digest(&cache, &states, unbound)
+    );
+    for skipped in [NodeState::Disabled, NodeState::MissingInputs] {
+        states[producer.node_idx] = skipped;
+        assert_eq!(
+            digest(&cache, &states, bound),
+            digest(&cache, &states, unbound),
+            "{skipped:?}"
+        );
+    }
 }

@@ -1,4 +1,6 @@
 use crate::graph::identity::FuncId;
+use std::panic;
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -8,7 +10,6 @@ use crate::graph::func::error::InvokeError;
 use crate::graph::func::lambda::Invocation;
 use crate::graph::func::{Func, FuncInput};
 use crate::library::{Library, TypeEntry};
-use crate::runtime::context::ContextStore;
 use crate::testing;
 use crate::testing::func_invoker::FuncInvoker;
 use crate::{
@@ -29,8 +30,7 @@ impl CustomValueCodec for StubCodec {
         &self,
         _value: &dyn CustomValue,
         _writer: &mut (dyn AsyncWrite + Unpin + Send),
-        _ctx: &mut ContextStore,
-    ) -> std::result::Result<(), CodecError> {
+    ) -> Result<(), CodecError> {
         unreachable!()
     }
 
@@ -38,8 +38,7 @@ impl CustomValueCodec for StubCodec {
         &self,
         _reader: &mut (dyn AsyncRead + Unpin + Send),
         _byte_len: u64,
-        _ctx: &mut ContextStore,
-    ) -> std::result::Result<Arc<dyn CustomValue>, CodecError> {
+    ) -> Result<Arc<dyn CustomValue>, CodecError> {
         unreachable!()
     }
 }
@@ -48,36 +47,106 @@ impl CustomValueCodec for StubCodec {
 fn registration_rejects_duplicate_ids_without_replacing_entries() {
     let func_id = FuncId::unique();
     let mut library = Library::default();
-    library.add(testing::with_stub_lambda(Func::new(func_id, "Before")));
-    let duplicate_func = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        library.add(testing::with_stub_lambda(Func::new(func_id, "After")));
+    library.add(testing::stub_func(func_id, "Before"));
+    let duplicate_func = panic::catch_unwind(AssertUnwindSafe(|| {
+        library.add(testing::stub_func(func_id, "After"));
     }));
     assert!(duplicate_func.is_err());
     assert_eq!(library.by_id(func_id).unwrap().name, "Before");
 
     let type_id = TypeId::unique();
     library.register_type(type_id, TypeEntry::custom("Before"));
-    let duplicate_type = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let duplicate_type = panic::catch_unwind(AssertUnwindSafe(|| {
         library.register_type(type_id, TypeEntry::custom("After"));
     }));
     assert!(duplicate_type.is_err());
-    assert_eq!(library.types[&type_id].display_name(), "Before");
+    assert_eq!(
+        library.type_entry(type_id).unwrap().display_name(),
+        "Before"
+    );
 }
 
+/// An identical type registers again as a no-op, which is what lets two
+/// libraries sharing a type merge; any difference — name, variants, codec
+/// instance, or kind — is a conflict. The codec handle a program keeps is the
+/// library's at that moment: a later registration copies the map rather than
+/// changing it under the program.
 #[test]
-fn add_rejects_invalid_function_declarations() {
-    for func in [
-        Func::new(FuncId::nil(), "nil"),
-        Func::new(FuncId::unique(), "wildcard")
-            .input(FuncInput::required("value", DataType::Any))
-            .wildcard_output("value", 1),
-        Func::new(FuncId::unique(), "missing"),
-    ] {
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            Library::default().add(func);
+fn an_identical_type_registers_again_and_a_conflict_panics() {
+    let codec: Arc<dyn CustomValueCodec> = Arc::new(StubCodec);
+    let custom = TypeId::unique();
+    let named = TypeId::unique();
+    let mut library = Library::default();
+    library.register_type(
+        custom,
+        TypeEntry::custom_with_codec("Blob", Arc::clone(&codec)),
+    );
+    library.register_type(
+        named,
+        TypeEntry::enum_with_variants("Mode", vec!["a".into()]),
+    );
+    let held = Arc::clone(library.codecs());
+
+    library.register_type(
+        custom,
+        TypeEntry::custom_with_codec("Blob", Arc::clone(&codec)),
+    );
+    library.register_type(
+        named,
+        TypeEntry::enum_with_variants("Mode", vec!["a".into()]),
+    );
+    assert_eq!(library.types().len(), 2);
+    assert!(
+        Arc::ptr_eq(&held, library.codecs()),
+        "a no-op registration leaves the handle alone"
+    );
+
+    let conflicts = [
+        (
+            custom,
+            TypeEntry::custom_with_codec("Other", Arc::clone(&codec)),
+        ),
+        (
+            custom,
+            TypeEntry::custom_with_codec("Blob", Arc::new(StubCodec)),
+        ),
+        (custom, TypeEntry::custom("Blob")),
+        (
+            named,
+            TypeEntry::enum_with_variants("Mode", vec!["b".into()]),
+        ),
+        (named, TypeEntry::custom("Mode")),
+    ];
+    for (type_id, entry) in conflicts {
+        let conflict = panic::catch_unwind(AssertUnwindSafe(|| {
+            library.register_type(type_id, entry);
         }));
-        assert!(result.is_err(), "invalid declaration was registered");
+        assert!(conflict.is_err());
     }
+
+    let added = TypeId::unique();
+    library.register_type(
+        added,
+        TypeEntry::custom_with_codec("Added", Arc::new(StubCodec)),
+    );
+    assert!(library.codecs().get(added).is_some());
+    assert!(library.codecs().get(custom).is_some());
+    assert!(
+        held.get(added).is_none(),
+        "the handle a program kept is unchanged"
+    );
+    assert!(
+        library.codecs().get(named).is_none(),
+        "an enum has no codec"
+    );
+}
+
+/// `add` refuses what `Func::validate` refuses, naming the rule; the rules
+/// themselves are `validate`'s tests.
+#[test]
+#[should_panic(expected = "invalid function declaration: NilId")]
+fn add_refuses_a_declaration_validate_refuses() {
+    Library::default().add(testing::stub_func(FuncId::nil(), "nil"));
 }
 
 /// A func declaring a type as an enum while that type is registered
@@ -97,7 +166,7 @@ fn an_enum_declaration_over_a_custom_registration_is_refused_either_order() {
     let type_id = TypeId::unique();
     let mut library = Library::default();
     library.register_type(type_id, TypeEntry::custom("Opaque"));
-    let func_after = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let func_after = panic::catch_unwind(AssertUnwindSafe(|| {
         library.add(modal_func(type_id, "fast"));
     }));
     assert!(
@@ -115,7 +184,7 @@ fn an_enum_declaration_over_a_custom_registration_is_refused_either_order() {
     let type_id = TypeId::unique();
     let mut library = Library::default();
     library.add(modal_func(type_id, "fast"));
-    let type_after = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let type_after = panic::catch_unwind(AssertUnwindSafe(|| {
         library.register_type(type_id, TypeEntry::custom("Opaque"));
     }));
     assert!(
@@ -123,7 +192,7 @@ fn an_enum_declaration_over_a_custom_registration_is_refused_either_order() {
         "registering a custom type a func declares as an enum must be refused",
     );
     assert!(
-        !library.types.contains_key(&type_id),
+        library.type_entry(type_id).is_none(),
         "the refused type is not installed",
     );
     // The id stays free for the declaration that was actually meant.
@@ -138,20 +207,18 @@ fn an_enum_declaration_over_a_custom_registration_is_refused_either_order() {
 fn an_enum_declared_only_by_an_output_still_blocks_a_custom_registration() {
     let type_id = TypeId::unique();
     let mut library = Library::default();
-    library.add(testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "emit")
+    library.add(
+        testing::stub_func(FuncId::unique(), "emit")
             .output(FuncOutput::new("mode", DataType::Enum(type_id))),
-    ));
+    );
     library.register_type(type_id, TypeEntry::custom("Opaque"));
 }
 
 /// A func whose `mode` input defaults to the enum variant `default`.
 fn modal_func(type_id: TypeId, default: &str) -> Func {
-    testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "modal").input(
-            FuncInput::optional("mode", DataType::Enum(type_id))
-                .default(ConstValue::Enum(default.into())),
-        ),
+    testing::stub_func(FuncId::unique(), "modal").input(
+        FuncInput::optional("mode", DataType::Enum(type_id))
+            .default(ConstValue::Enum(default.into())),
     )
 }
 
@@ -197,7 +264,7 @@ fn register_type_rejecting_an_earlier_enum_default_installs_nothing() {
     let mut library = Library::default();
     library.add(modal_func(type_id, "slothful"));
 
-    let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let rejected = panic::catch_unwind(AssertUnwindSafe(|| {
         library.register_type(type_id, mode_entry());
     }));
     let message = *rejected
@@ -210,7 +277,7 @@ fn register_type_rejecting_an_earlier_enum_default_installs_nothing() {
     );
 
     assert!(
-        !library.types.contains_key(&type_id),
+        library.type_entry(type_id).is_none(),
         "the refused entry must not stay installed",
     );
     assert_eq!(library.enum_variants(type_id), None);
@@ -248,33 +315,35 @@ fn type_entry_kinds_expose_only_valid_codec_attachments() {
     assert!(library.codecs().get(enum_id).is_none());
 }
 
-/// A func reached by id computes, and its node state carries between calls
-/// the way it does between two runs of one node.
+/// A func computes through the invoker, and its node state carries between
+/// calls the way it does between two runs of one node.
 #[tokio::test]
-async fn invoke_by_id_and_index() -> Result<(), InvokeError> {
+async fn an_invoked_func_keeps_its_node_state_between_calls() -> Result<(), InvokeError> {
     // The body stashes what it computed in the node's own state, which is
     // what the second call below reads back.
     let mut library = Library::default();
     library.add(
-        Func::new(FuncId::unique(), "sum")
-            .pure()
-            .input(FuncInput::required("A", DataType::Int))
-            .input(FuncInput::required("B", DataType::Int))
-            .output(FuncOutput::new("Sum", DataType::Int))
-            .lambda(async_lambda!(|Invocation {
-                                       state,
-                                       inputs,
-                                       outputs,
-                                       ..
-                                   }| {
+        Func::new(
+            FuncId::unique(),
+            "sum",
+            async_lambda!(|Invocation {
+                               state,
+                               inputs,
+                               outputs,
+                               ..
+                           }| {
                 let total = inputs[0].as_i64().unwrap() + inputs[1].as_i64().unwrap();
                 state.set(total);
                 outputs[0] = ConstValue::Int(total).into();
                 Ok(())
-            })),
+            }),
+        )
+        .pure()
+        .input(FuncInput::required("A", DataType::Int))
+        .input(FuncInput::required("B", DataType::Int))
+        .output(FuncOutput::new("Sum", DataType::Int)),
     );
-    let sum = library.by_name("sum").unwrap().id;
-    let sum = library.by_id(sum).unwrap();
+    let sum = library.by_name("sum").unwrap();
     let int = |value: i64| DynamicValue::Static(ConstValue::Int(value));
     let mut node = FuncInvoker::default();
 

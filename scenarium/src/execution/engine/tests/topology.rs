@@ -1,8 +1,6 @@
 use super::*;
 
-use common::FloatExt;
-
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn removing_node_rebuilds_id_keyed_edges() {
     let mut e = TestEngine::over(TestGraph::sample_values(2, 5));
     assert_eq!(e.engine.compiled().e_nodes.len(), 5);
@@ -19,14 +17,14 @@ async fn removing_node_rebuilds_id_keyed_edges() {
     // sum = get_a(2) + none(0) = 2; mult = sum(2) * none(default 1) = 2.
     assert!(matches!(
         e.inputs("sum")[0],
-        Some(DynamicValue::Static(ConstValue::Float(v))) if v.approximately_eq(2.0)
+        Some(DynamicValue::Static(ConstValue::Float(v))) if v == 2.0
     ));
     assert!(e.inputs("sum")[1].is_none());
     assert_eq!(e.output_i64("sum", 0), Some(2));
     assert_eq!(e.output_i64("mult", 0), Some(2));
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn empty_graph_executes_cleanly() {
     let mut e = TestEngine::over(TestGraph::new());
     assert!(e.engine.is_empty());
@@ -42,13 +40,13 @@ async fn empty_graph_executes_cleanly() {
 /// Two independent chains (`a → print_a`, `b → print_b`) both execute, and
 /// both sources are Pure, so their outputs are cached across runs. Removing
 /// one chain must preserve the survivor's id-keyed slot.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn cached_output_survives_node_removal() {
     let (calls_a, calls_b) = (Calls::default(), Calls::default());
     let mut g = TestGraph::new();
     g.add("a", |n| n.counted(2i64, &calls_a).cache(CacheMode::Ram));
     g.add("b", |n| n.counted(5i64, &calls_b).cache(CacheMode::Ram));
-    g.add("print_a", |n| n.records());
+    g.add("print_a", NodeSpec::records);
     g.instance("print_b", "print_a");
     g.wire("a", 0, "print_a", 0);
     g.wire("b", 0, "print_b", 0);
@@ -56,6 +54,13 @@ async fn cached_output_survives_node_removal() {
     let mut e = TestEngine::over(g);
     let run = e.run_sinks().await;
     assert_eq!(run.ran_node_count, 4, "both sinks and both sources");
+    let mut ran = run.ran();
+    ran.sort_unstable();
+    assert_eq!(
+        ran,
+        ["a", "b", "print_a", "print_b"],
+        "the instance reports under its own name"
+    );
     let mut logged = run.logs();
     logged.sort_unstable();
     assert_eq!(logged, ["2", "5"]);
@@ -73,18 +78,18 @@ async fn cached_output_survives_node_removal() {
         1,
         "the survivor must not recompute after an unrelated node's removal"
     );
-    assert!(run.cached().contains(&"a"));
+    assert_eq!(run.cached(), ["a"]);
     assert_eq!(e.output_i64("a", 0), Some(2));
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn repeated_structural_churn_stays_correct() {
     // Grow→shrink the graph repeatedly on ONE engine, re-executing each
     // step. Stresses the packed pools and the id-keyed rebuild across many
     // updates (pools grow 2→4 then shrink 4→2 each round).
     let mut g = TestGraph::new();
     g.add("a", |n| n.returns(2i64));
-    g.add("print_a", |n| n.records());
+    g.add("print_a", NodeSpec::records);
     g.wire("a", 0, "print_a", 0);
 
     let mut e = TestEngine::over(g);

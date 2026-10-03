@@ -12,13 +12,16 @@
 //! cargo run --release --example full_pipeline
 //! ```
 
+#![expect(clippy::print_stdout, reason = "an example reports to the terminal")]
+
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use common::{CancelToken, file_utils};
+use common::CancelToken;
 use lumos::{
-    AlignStackConfig, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD,
-    ProgressCallback, RAW_EXTENSIONS, calibrate_align_stack,
+    AlignStackConfig, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, MasterRole,
+    ProgressCallback, calibrate_align_stack, stack_cfa_master,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -43,8 +46,7 @@ fn main() {
     // Step 2 — raw lights → calibrated, registered, stacked master, in one call.
     // (`calibrate_align_stack` narrates its own load → detect → register → stack phases.)
     let light_paths =
-        file_utils::files_with_extensions(&calibration_dir.join("Lights"), RAW_EXTENSIONS)
-            .expect("scan raw light frames");
+        lumos::raw_files(&calibration_dir.join("Lights")).expect("scan raw light frames");
     assert!(!light_paths.is_empty(), "no light frames found in Lights/");
     tracing::info!(
         lights = light_paths.len(),
@@ -75,7 +77,7 @@ fn main() {
         .parent()
         .unwrap()
         .join("test_output/stacked_result.tiff");
-    std::fs::create_dir_all(output.parent().unwrap()).expect("create output directory");
+    fs::create_dir_all(output.parent().unwrap()).expect("create output directory");
     let image: imaginarium::Image = result.product.image.into();
     image.save_file(&output).expect("save stacked master");
     tracing::info!(path = %output.display(), "Saved stacked master");
@@ -97,8 +99,7 @@ fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
     let load = |subdir: &str| -> Vec<PathBuf> {
         let dir = calibration_dir.join(subdir);
         if dir.exists() {
-            file_utils::files_with_extensions(&dir, RAW_EXTENSIONS)
-                .expect("scan raw calibration frames")
+            lumos::raw_files(&dir).expect("scan raw calibration frames")
         } else {
             Vec::new()
         }
@@ -113,16 +114,25 @@ fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
         "Calibration frames"
     );
 
-    let empty: Vec<PathBuf> = Vec::new();
-    let masters = CalibrationMasters::from_files(
+    // Each role stacks under its own preset; the set is assembled once every master exists.
+    let stack = |paths: &[PathBuf], role: MasterRole| {
+        stack_cfa_master(
+            paths,
+            role.stack_config(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .expect("failed to stack a calibration master")
+    };
+    let masters = CalibrationMasters::from_images(
         CalibrationSet {
-            dark: &darks,
-            flat: &flats,
-            bias: &bias,
-            flat_dark: &empty,
+            dark: stack(&darks, MasterRole::Dark),
+            flat: stack(&flats, MasterRole::Flat),
+            bias: stack(&bias, MasterRole::Bias),
+            flat_dark: None,
         },
         DEFAULT_SIGMA_THRESHOLD,
-        CancelToken::never(),
+        &CancelToken::never(),
     )
     .expect("failed to build calibration masters");
 
@@ -138,5 +148,9 @@ fn create_calibration_masters(calibration_dir: &Path) -> CalibrationMasters {
 
 fn init_tracing() {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "a subscriber already installed keeps logging; the example needs no second"
+    )]
     let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
 }

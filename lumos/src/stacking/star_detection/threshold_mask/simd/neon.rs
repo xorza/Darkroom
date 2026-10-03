@@ -1,6 +1,7 @@
 //! NEON SIMD implementation for packed threshold mask.
 
 use std::ops::Range;
+use std::slice;
 
 use std::arch::aarch64::*;
 
@@ -8,8 +9,9 @@ use crate::stacking::star_detection::threshold_mask::ThresholdParams;
 use crate::stacking::star_detection::threshold_mask::simd::process_words_scalar;
 
 /// NEON packed threshold kernel. `WITH_BG` selects `bg + σ·noise` vs `σ·noise` (filtered); `bg` is
-/// unused and may be empty when `WITH_BG` is false. Uses unfused multiply-then-add (not `vfmaq_f32`)
-/// to stay bit-exact with the scalar / AVX2 / SSE backends at the `px == threshold` boundary.
+/// unused and may be empty when `WITH_BG` is false. Uses unfused multiply-then-add (not
+/// `vfmaq_f32`) to stay bit-exact with the scalar / AVX2 / SSE backends at the `px == threshold`
+/// boundary.
 pub(super) unsafe fn process_words_neon<const WITH_BG: bool>(
     pixels: &[f32],
     bg: &[f32],
@@ -48,10 +50,10 @@ pub(super) unsafe fn process_words_neon<const WITH_BG: bool>(
 
                     // `vcgtq_f32` already yields a uint32x4_t lane mask.
                     let cmp = vcgtq_f32(px_vec, threshold_vec);
-                    let mask = ((vgetq_lane_u32(cmp, 0) & 1) as u64)
-                        | (((vgetq_lane_u32(cmp, 1) & 1) as u64) << 1)
-                        | (((vgetq_lane_u32(cmp, 2) & 1) as u64) << 2)
-                        | (((vgetq_lane_u32(cmp, 3) & 1) as u64) << 3);
+                    let mask = u64::from(vgetq_lane_u32(cmp, 0) & 1)
+                        | (u64::from(vgetq_lane_u32(cmp, 1) & 1) << 1)
+                        | (u64::from(vgetq_lane_u32(cmp, 2) & 1) << 2)
+                        | (u64::from(vgetq_lane_u32(cmp, 3) & 1) << 3);
 
                     bits |= mask << (group * 4);
                 }
@@ -64,7 +66,7 @@ pub(super) unsafe fn process_words_neon<const WITH_BG: bool>(
                     bg,
                     noise,
                     threshold,
-                    std::slice::from_mut(word),
+                    slice::from_mut(word),
                     base_pixel..pixel_span.end,
                 );
             }

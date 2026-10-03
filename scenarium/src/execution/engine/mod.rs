@@ -4,6 +4,7 @@
 
 mod error;
 
+use std::result;
 use std::sync::Arc;
 
 use common::{CancelToken, is_debug};
@@ -24,19 +25,18 @@ use crate::execution::schedule::planner::Planner;
 use crate::execution::seeds::RunSeeds;
 use crate::graph::identity::NodeId;
 
-/// The run-side pipeline container. Shares the installed program and its
-/// execution-attribution map, the reusable `schedule` buffer, the `planner`
-/// (scheduling scratch), the cross-run `cache` (per-node outputs + state, plus its
-/// owned [`DiskStore`] file persistence and the caching policy), and the `executor`
-/// (run loop + context). Compilation happens on the host ([`Compiler`](crate::execution::compile::Compiler));
-/// the engine only ever receives ready [`CompiledGraph`]s. Not serializable — the
-/// persistent form is the [`CompiledGraph`] alone.
+/// The run-side pipeline container. Shares the installed program and its execution-attribution map,
+/// the reusable `schedule` buffer, the `planner` (scheduling scratch), the cross-run `cache`
+/// (per-node outputs + state, plus its owned [`DiskStore`] file persistence and the caching
+/// policy), and the `executor` (run loop + context). Compilation happens on the host
+/// ([`Compiler`](crate::execution::compile::Compiler)); the engine only ever receives ready
+/// [`CompiledGraph`]s. Not serializable — the persistent form is the [`CompiledGraph`] alone.
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionEngine {
-    /// The installed immutable artifact. Replaced only by [`Self::install`],
-    /// which reconciles `cache` onto it in the same step, so the two never move
-    /// independently.
-    compiled: Option<Arc<CompiledGraph>>,
+    /// The installed immutable artifact — the empty program until the first
+    /// install. Replaced only by [`Self::install`] and [`Self::clear`], which
+    /// move `cache` with it, so the two never move independently.
+    compiled: Arc<CompiledGraph>,
     /// The cross-run cache, its slots index-aligned to `compiled`'s dense node
     /// space. The cache holds no artifact handle of its own — a program reaches
     /// its methods as an argument, from whoever is reading the pair — so "the
@@ -55,15 +55,14 @@ pub(crate) struct ExecutionEngine {
 
 impl ExecutionEngine {
     pub(crate) fn is_empty(&self) -> bool {
-        self.compiled
-            .as_deref()
-            .is_none_or(|compiled| compiled.e_nodes.is_empty())
+        self.compiled.e_nodes.is_empty()
     }
 
+    /// Install the empty program and drop every slot. The schedule keeps its
+    /// buffers: the next run plans into them from scratch.
     pub(crate) fn clear(&mut self) {
-        self.compiled = None;
+        self.compiled = Arc::default();
         self.cache.clear();
-        self.schedule = RunSchedule::default();
     }
 
     /// Install a host-compiled [`CompiledGraph`] as the current program, replacing the
@@ -78,9 +77,8 @@ impl ExecutionEngine {
     /// The schedule isn't cleared here: every `execute` re-`plan`s from scratch and nothing
     /// reads the reusable buffer between an install and the next run.
     pub(crate) fn install(&mut self, compiled: Arc<CompiledGraph>) {
-        let previous = self.compiled.as_deref();
-        self.cache.reconcile(previous, &compiled);
-        self.compiled = Some(compiled);
+        self.cache.reconcile(&self.compiled, &compiled);
+        self.compiled = compiled;
         self.validate_debug();
     }
 
@@ -103,27 +101,20 @@ impl ExecutionEngine {
         &mut self,
         node_ids: impl IntoIterator<Item = NodeId>,
     ) -> Vec<CacheNodeFailure> {
-        let Some(compiled) = self.compiled.as_deref() else {
-            return Vec::new();
-        };
-        self.cache.evict(compiled, node_ids).await
+        self.cache.evict(&self.compiled, node_ids).await
     }
 
     /// `reporter` receives live feedback ahead of the final outcome: progress before and
-    /// after each node's lambda runs, and the pinned outputs of a node that produces or
-    /// reuses one (or is itself a pinned root), so a GUI preview updates without polling.
-    /// When `cancel` is set mid-run, scheduling stops after the in-flight node and the
-    /// caller-owned outcome is marked `cancelled`. The outcome also owns triggers
-    /// initialized successfully by an `event_sources` seed.
+    /// after each node's lambda runs. When `cancel` is set mid-run, scheduling stops after
+    /// the in-flight node and the caller-owned outcome is marked `cancelled`. The outcome
+    /// also owns triggers initialized successfully by an `event_sources` seed.
     pub(crate) async fn execute(
         &mut self,
-        mut seeds: RunSeeds,
+        seeds: &RunSeeds,
         reporter: &mut dyn RunReporter,
         cancel: CancelToken,
         outcome: &mut ExecutionOutcome,
     ) -> Result<()> {
-        outcome.clear();
-
         // Phase 2: schedule into the reusable buffer. Purely structural —
         // reachability + topological order + missing-input verdicts + walk roots, no
         // cache/digest state. Node seeds already identify exact compiled roots.
@@ -131,11 +122,8 @@ impl ExecutionEngine {
         // This function is the one place the three passes below run, and they must run
         // in this order over the one buffer; each asserts `RunSchedule::validate` in
         // debug, which is what catches a schedule spanning some other program.
-        let compiled = self
-            .compiled
-            .as_deref()
-            .expect("execution requires an installed compiled graph");
-        self.planner.plan(compiled, &seeds, &mut self.schedule)?;
+        let compiled: &CompiledGraph = &self.compiled;
+        self.planner.plan(compiled, seeds, &mut self.schedule)?;
 
         // Phase 2a: prepare filesystem identities away from the async worker. The stamps are
         // reused for repeated paths and any late bound-path restamp this run.
@@ -176,8 +164,6 @@ impl ExecutionEngine {
         self.executor
             .collect_outcome(compiled, &self.schedule, self.cache.node_ram(), outcome);
 
-        outcome.triggered_events.append(&mut seeds.events);
-
         Ok(())
     }
 
@@ -194,32 +180,19 @@ impl ExecutionEngine {
         &mut self,
         node_ids: impl IntoIterator<Item = NodeId>,
     ) -> CacheFlushReport {
-        let Some(compiled) = self.compiled.as_deref() else {
-            return CacheFlushReport::default();
-        };
-        self.cache
-            .flush(compiled, node_ids, &mut self.executor.ctx_manager.contexts)
-            .await
+        self.cache.flush(&self.compiled, node_ids).await
     }
 
     /// [`flush_cache`](Self::flush_cache) over every installed node, for when the
     /// worker attaches a new [`DiskStore`]. This makes values computed while the
     /// store was memory-only durable once a document receives a cache root.
     pub(crate) async fn flush_all_caches(&mut self) -> CacheFlushReport {
-        let Some(compiled) = self.compiled.as_deref() else {
-            return CacheFlushReport::default();
-        };
-        self.cache
-            .flush_all(compiled, &mut self.executor.ctx_manager.contexts)
-            .await
+        self.cache.flush_all(&self.compiled).await
     }
 
     /// Self-consistency of the installed artifact and the cache aligned to it.
-    fn validate(&self) -> std::result::Result<(), InstallValidationError> {
-        let program = self
-            .compiled
-            .as_deref()
-            .expect("validation requires an installed compiled graph");
+    fn validate(&self) -> result::Result<(), InstallValidationError> {
+        let program: &CompiledGraph = &self.compiled;
         if self.cache.slot_count() != program.e_nodes.len() {
             return Err(InstallValidationError::NodeCount {
                 slots: self.cache.slot_count(),
@@ -257,6 +230,7 @@ impl ExecutionEngine {
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::execution::identity::NodeIdx;
+    use std::result;
 
     use crate::DynamicValue;
     use crate::execution::cache::disk_store::DiskStore;
@@ -285,9 +259,7 @@ pub(crate) mod internals {
         /// Production reaches the artifact and its cache through the methods
         /// above, which is what keeps the two moving together.
         pub(crate) fn compiled(&self) -> &CompiledGraph {
-            self.compiled
-                .as_deref()
-                .expect("execution requires an installed compiled graph")
+            &self.compiled
         }
 
         /// Compile + install in one step — the shape the in-tree tests are
@@ -297,7 +269,7 @@ pub(crate) mod internals {
             &mut self,
             graph: &Graph,
             library: &Library,
-        ) -> std::result::Result<(), compile::error::CompileError> {
+        ) -> result::Result<(), compile::error::CompileError> {
             self.install(compile::Compiler::default().compile(graph, library)?.into());
             Ok(())
         }
@@ -315,10 +287,7 @@ pub(crate) mod internals {
                 events: events.to_vec(),
                 node_ids: Vec::new(),
             };
-            let compiled = self
-                .compiled
-                .as_deref()
-                .expect("execution preparation requires an installed compiled graph");
+            let compiled: &CompiledGraph = &self.compiled;
             self.planner.plan(compiled, &seeds, &mut self.schedule)?;
             self.schedule.resolve(compiled, &mut self.cache).await;
             Ok(())
@@ -333,21 +302,15 @@ pub(crate) mod internals {
                 .expect("introspection names a node of the installed program")
         }
 
-        /// The nodes that recomputed in the last run, in the order the schedule
-        /// reached them — deps before consumers.
-        ///
-        /// `process_order` holds every reachable runnable node; this keeps the
-        /// ones that actually invoked a lambda rather than reusing a cache.
-        /// Before any run `node_ran` answers `true` for all of them, so a
-        /// plan-only test reads it as the runnable schedule.
-        pub(crate) fn ran_in_schedule_order(&self) -> Vec<NodeId> {
+        /// The runnable nodes of the last plan, in the order the schedule
+        /// walks them — deps before consumers.
+        pub(crate) fn schedule_order(&self) -> Vec<NodeId> {
             self.schedule
                 .process_order
                 .iter()
                 .copied()
                 .filter(|&node_idx| self.schedule.states[node_idx].is_runnable())
                 .map(|node_idx| self.compiled().node_ids[node_idx])
-                .filter(|&node_id| self.node_ran(node_id))
                 .collect()
         }
 
@@ -369,24 +332,10 @@ pub(crate) mod internals {
             &self.schedule.outputs.readers[self.compiled().by_id(node_id).outputs]
         }
 
-        /// Whether `node_id` recomputed (rather than reused a cache) in the last run.
-        pub(crate) fn node_ran(&self, node_id: NodeId) -> bool {
-            self.executor.ran(self.compiled(), node_id)
-        }
-
         /// Resident-only argument values, test inspection only: reads whatever is
         /// in RAM, so a disk-only (not-yet-hydrated) node reads back empty.
-        pub(crate) fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
-            self.get_argument_values_at(*node_id)
-        }
-
-        pub(crate) fn get_argument_values_at(&self, node_id: NodeId) -> Option<ArgumentValues> {
-            self.compiled().node(node_id)?;
-            Some(self.argument_values_at(node_id))
-        }
-
-        fn argument_values_at(&self, node_id: NodeId) -> ArgumentValues {
-            let e_node = &self.compiled().by_id(node_id);
+        pub(crate) fn argument_values(&self, node_id: NodeId) -> Option<ArgumentValues> {
+            let e_node = &self.compiled()[self.compiled().node(node_id)?];
 
             let inputs = self.compiled().inputs[e_node.inputs]
                 .iter()
@@ -402,10 +351,10 @@ pub(crate) mod internals {
 
             let outputs = self.cache[self.node_idx(node_id)]
                 .output_values()
-                .map(|outputs| outputs.to_vec())
+                .map(<[DynamicValue]>::to_vec)
                 .unwrap_or_default();
 
-            ArgumentValues { inputs, outputs }
+            Some(ArgumentValues { inputs, outputs })
         }
 
         /// The runtime slot for a stable id — test introspection.

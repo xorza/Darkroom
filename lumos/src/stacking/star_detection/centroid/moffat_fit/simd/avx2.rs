@@ -1,44 +1,28 @@
-//! AVX2+FMA SIMD implementation for MoffatFixedBeta batch operations.
+//! AVX2+FMA SIMD implementation for `MoffatFixedBeta` batch operations.
 //!
 //! Processes 4 f64 pixels per AVX2 iteration for `evaluate_and_jacobian`
-//! and `compute_chi2`. Supports HalfInt, Int, and General PowStrategy variants.
+//! and `compute_chi2`. Supports `HalfInt`, Int, and General `PowStrategy` variants.
 
 use crate::stacking::star_detection::centroid::lm_optimizer::{FitData, LMModel, NormalEquations};
 use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFixedBeta, PowStrategy};
 use crate::stacking::star_detection::centroid::simd::hsum;
 use std::arch::x86_64::*;
 
-/// SIMD `int_pow`: compute u^n for each lane using repeated squaring.
+/// SIMD `int_pow`: `u^n` per lane by squaring, the scalar `int_pow`'s multiplications in its order.
 #[target_feature(enable = "avx2,fma")]
 #[inline]
 unsafe fn simd_int_pow(u: __m256d, n: u32) -> __m256d {
-    match n {
-        0 => _mm256_set1_pd(1.0),
-        1 => u,
-        2 => _mm256_mul_pd(u, u),
-        3 => _mm256_mul_pd(_mm256_mul_pd(u, u), u),
-        4 => {
-            let u2 = _mm256_mul_pd(u, u);
-            _mm256_mul_pd(u2, u2)
+    let mut result = _mm256_set1_pd(1.0);
+    let mut base = u;
+    let mut exp = n;
+    while exp > 0 {
+        if exp & 1 == 1 {
+            result = _mm256_mul_pd(result, base);
         }
-        5 => {
-            let u2 = _mm256_mul_pd(u, u);
-            _mm256_mul_pd(_mm256_mul_pd(u2, u2), u)
-        }
-        _ => {
-            let mut result = _mm256_set1_pd(1.0);
-            let mut base = u;
-            let mut exp = n;
-            while exp > 0 {
-                if exp & 1 == 1 {
-                    result = _mm256_mul_pd(result, base);
-                }
-                base = _mm256_mul_pd(base, base);
-                exp >>= 1;
-            }
-            result
-        }
+        base = _mm256_mul_pd(base, base);
+        exp >>= 1;
     }
+    result
 }
 
 /// SIMD `fast_pow_neg`: compute u^(-beta) for 4 lanes at once.
@@ -76,7 +60,7 @@ unsafe fn simd_fast_pow_neg(u: __m256d, strategy: PowStrategy) -> __m256d {
 /// Fuses model evaluation, Jacobian, and Hessian/gradient accumulation
 /// to avoid storing intermediate jacobian/residuals arrays.
 ///
-/// For N=5 (MoffatFixedBeta), accumulates 15 upper-triangle hessian elements,
+/// For N=5 (`MoffatFixedBeta`), accumulates 15 upper-triangle hessian elements,
 /// 5 gradient elements, and chi² directly in AVX2 registers.
 ///
 /// # Safety

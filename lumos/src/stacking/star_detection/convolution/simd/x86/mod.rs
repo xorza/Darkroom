@@ -1,24 +1,27 @@
 //! SSE4.1 and AVX2 implementations of row convolution.
 //!
-//! These implementations use SIMD intrinsics to process multiple pixels
-//! in parallel, achieving 4-8× speedup over scalar code.
+//! Every lane accumulates its taps in the scalar path's order with an unfused multiply then add,
+//! so each backend is bit-identical to the scalar reference: the threshold that reads the
+//! filtered image is itself unfused to be exact at `px == threshold`, which a fused sum here
+//! would undo.
 
-// Allow indexed loops - necessary for SIMD code patterns where we need
-// explicit index control for pointer arithmetic
-#![allow(clippy::needless_range_loop)]
+#![expect(
+    clippy::needless_range_loop,
+    reason = "the edge columns index `output` beside pointer arithmetic on the same `x`"
+)]
 
 use std::arch::x86_64::*;
 
 use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::convolution::simd::{Kernel2d, convolve_pixel_scalar};
 
-/// Convolve a row using AVX2 + FMA intrinsics.
+/// Convolve a row using AVX2 intrinsics.
 ///
 /// Processes 8 pixels at a time using 256-bit vectors.
 ///
 /// # Safety
-/// Caller must ensure AVX2 and FMA are available (use `is_x86_feature_detected!`).
-#[target_feature(enable = "avx2,fma")]
+/// Caller must ensure AVX2 is available (use `is_x86_feature_detected!`).
+#[target_feature(enable = "avx2")]
 pub(super) unsafe fn convolve_row_avx2(
     input: &[f32],
     output: &mut [f32],
@@ -37,10 +40,11 @@ pub(super) unsafe fn convolve_row_avx2(
         }
 
         // Process 8 pixels at a time in the middle section. A column is SIMD-safe only if its whole
-        // kernel window stays in bounds (the interior does no mirroring). The widest source read for
-        // the 8-wide block at x is `(x + 7) + (kernel.len() - 1) - radius`; requiring it `<= width-1`
-        // gives the bound below. Derived from `kernel.len()` rather than assuming the symmetric
-        // `2*radius+1`, so the SIMD interior matches the scalar mirror reference for any kernel.
+        // kernel window stays in bounds (the interior does no mirroring). The widest source read
+        // for the 8-wide block at x is `(x + 7) + (kernel.len() - 1) - radius`; requiring it `<=
+        // width-1` gives the bound below. Derived from `kernel.len()` rather than assuming the
+        // symmetric `2*radius+1`, so the SIMD interior matches the scalar mirror reference for any
+        // kernel.
         let safe_start = radius;
         let safe_end = (width + radius + 1).saturating_sub(8 + kernel.len());
 
@@ -61,8 +65,7 @@ pub(super) unsafe fn convolve_row_avx2(
                 // Load 8 input values
                 let vals = _mm256_loadu_ps(input.as_ptr().add(sx));
 
-                // Multiply-accumulate
-                sum = _mm256_fmadd_ps(vals, kv, sum);
+                sum = _mm256_add_ps(sum, _mm256_mul_ps(vals, kv));
             }
 
             // Store 8 output values
@@ -103,10 +106,10 @@ pub(super) unsafe fn convolve_row_sse41(
         }
 
         // Process 4 pixels at a time in the middle section. A column is SIMD-safe only if its whole
-        // kernel window stays in bounds (the interior does no mirroring). The widest source read for
-        // the 4-wide block at x is `(x + 3) + (kernel.len() - 1) - radius`; requiring it `<= width-1`
-        // gives the bound below — via `kernel.len()` (not the symmetric `2*radius+1`) so the SIMD
-        // interior matches the scalar mirror reference for any kernel.
+        // kernel window stays in bounds (the interior does no mirroring). The widest source read
+        // for the 4-wide block at x is `(x + 3) + (kernel.len() - 1) - radius`; requiring it `<=
+        // width-1` gives the bound below — via `kernel.len()` (not the symmetric `2*radius+1`) so
+        // the SIMD interior matches the scalar mirror reference for any kernel.
         let safe_start = radius;
         let safe_end = (width + radius + 1).saturating_sub(4 + kernel.len());
 
@@ -127,7 +130,6 @@ pub(super) unsafe fn convolve_row_sse41(
                 // Load 4 input values
                 let vals = _mm_loadu_ps(input.as_ptr().add(sx));
 
-                // Multiply-accumulate (no FMA, so separate mul and add)
                 sum = _mm_add_ps(sum, _mm_mul_ps(vals, kv));
             }
 
@@ -144,14 +146,18 @@ pub(super) unsafe fn convolve_row_sse41(
     }
 }
 
-/// Convolve one output column-row `y` (8 columns at a time, AVX2+FMA).
+/// Convolve one output column-row `y` (8 columns at a time, AVX2).
 ///
 /// The production column pass calls this per row across rayon workers; `out_row` is the single
 /// output row (length `width`), `y` its absolute row index for mirror-edge input addressing.
 ///
 /// # Safety
-/// Caller must ensure AVX2+FMA is available.
-#[target_feature(enable = "avx2,fma")]
+/// Caller must ensure AVX2 is available.
+#[target_feature(enable = "avx2")]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "pixel coordinates and kernel taps index a slice, whose length Rust caps at isize::MAX"
+)]
 pub(super) unsafe fn convolve_cols_row_avx2(
     input: &[f32],
     out_row: &mut [f32],
@@ -169,7 +175,7 @@ pub(super) unsafe fn convolve_cols_row_avx2(
             for (k, &kval) in kernel.iter().enumerate() {
                 let sy = mirror_index(y as isize + k as isize - radius as isize, size.height);
                 let vals = _mm256_loadu_ps(input.as_ptr().add(sy * size.width + x));
-                sum = _mm256_fmadd_ps(vals, _mm256_set1_ps(kval), sum);
+                sum = _mm256_add_ps(sum, _mm256_mul_ps(vals, _mm256_set1_ps(kval)));
             }
             _mm256_storeu_ps(out_row.as_mut_ptr().add(x), sum);
             x += 8;
@@ -193,6 +199,10 @@ pub(super) unsafe fn convolve_cols_row_avx2(
 /// # Safety
 /// Caller must ensure SSE4.1 is available.
 #[target_feature(enable = "sse4.1")]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "pixel coordinates and kernel taps index a slice, whose length Rust caps at isize::MAX"
+)]
 pub(super) unsafe fn convolve_cols_row_sse41(
     input: &[f32],
     out_row: &mut [f32],
@@ -233,14 +243,18 @@ pub(super) unsafe fn convolve_cols_row_sse41(
 /// Processes 8 output pixels at a time.
 ///
 /// # Safety
-/// Caller must ensure AVX2 and FMA are available.
-#[target_feature(enable = "avx2,fma")]
+/// Caller must ensure AVX2 is available.
+#[target_feature(enable = "avx2")]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "pixel coordinates and kernel taps index a slice, whose length Rust caps at isize::MAX"
+)]
 pub(super) unsafe fn convolve_2d_row_avx2(
     input: &[f32],
     output_row: &mut [f32],
     size: Size2us,
     y: usize,
-    kernel: Kernel2d,
+    kernel: Kernel2d<'_>,
 ) {
     unsafe {
         use crate::stacking::star_detection::convolution::simd::mirror_index;
@@ -258,18 +272,15 @@ pub(super) unsafe fn convolve_2d_row_avx2(
 
                 for kx in 0..kernel.size() {
                     let kval = kernel.at(ky, kx);
-                    if kval.abs() < 1e-10 {
-                        continue;
-                    }
 
                     let kv = _mm256_set1_ps(kval);
                     let base_sx = x as isize + kx as isize - radius;
 
-                    if base_sx >= 0 && base_sx + 8 <= size.width as isize {
-                        let vals = _mm256_loadu_ps(
-                            input.as_ptr().add(input_row_offset + base_sx as usize),
-                        );
-                        sum = _mm256_fmadd_ps(vals, kv, sum);
+                    if let Ok(start) = usize::try_from(base_sx)
+                        && start + 8 <= size.width
+                    {
+                        let vals = _mm256_loadu_ps(input.as_ptr().add(input_row_offset + start));
+                        sum = _mm256_add_ps(sum, _mm256_mul_ps(vals, kv));
                     } else {
                         let mut vals = [0.0f32; 8];
                         for i in 0..8 {
@@ -278,7 +289,7 @@ pub(super) unsafe fn convolve_2d_row_avx2(
                             vals[i] = input[input_row_offset + sx];
                         }
                         let vvals = _mm256_loadu_ps(vals.as_ptr());
-                        sum = _mm256_fmadd_ps(vvals, kv, sum);
+                        sum = _mm256_add_ps(sum, _mm256_mul_ps(vvals, kv));
                     }
                 }
             }
@@ -310,12 +321,16 @@ pub(super) unsafe fn convolve_2d_row_avx2(
 /// # Safety
 /// Caller must ensure SSE4.1 is available.
 #[target_feature(enable = "sse4.1")]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "pixel coordinates and kernel taps index a slice, whose length Rust caps at isize::MAX"
+)]
 pub(super) unsafe fn convolve_2d_row_sse41(
     input: &[f32],
     output_row: &mut [f32],
     size: Size2us,
     y: usize,
-    kernel: Kernel2d,
+    kernel: Kernel2d<'_>,
 ) {
     unsafe {
         use crate::stacking::star_detection::convolution::simd::mirror_index;
@@ -333,16 +348,14 @@ pub(super) unsafe fn convolve_2d_row_sse41(
 
                 for kx in 0..kernel.size() {
                     let kval = kernel.at(ky, kx);
-                    if kval.abs() < 1e-10 {
-                        continue;
-                    }
 
                     let kv = _mm_set1_ps(kval);
                     let base_sx = x as isize + kx as isize - radius;
 
-                    if base_sx >= 0 && base_sx + 4 <= size.width as isize {
-                        let vals =
-                            _mm_loadu_ps(input.as_ptr().add(input_row_offset + base_sx as usize));
+                    if let Ok(start) = usize::try_from(base_sx)
+                        && start + 4 <= size.width
+                    {
+                        let vals = _mm_loadu_ps(input.as_ptr().add(input_row_offset + start));
                         sum = _mm_add_ps(sum, _mm_mul_ps(vals, kv));
                     } else {
                         let mut vals = [0.0f32; 4];
@@ -376,6 +389,3 @@ pub(super) unsafe fn convolve_2d_row_sse41(
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

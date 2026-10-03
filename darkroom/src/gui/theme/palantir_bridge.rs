@@ -14,7 +14,7 @@ use crate::gui::theme::type_scale::TypeScale;
 ///   canvas, so a chip dissolves into the pane below it.
 /// - `elem` and `node_fill` are one colour by design: nodes and palantir's
 ///   own surfaces sit on the same tier.
-pub(super) fn palantir_palette_for(p: &Palette) -> palantir::Palette {
+pub(super) const fn palantir_palette_for(p: &Palette) -> palantir::Palette {
     palantir::Palette {
         text: p.text,
         text_muted: p.text_muted,
@@ -58,7 +58,7 @@ pub(super) struct BridgeRoles<'a> {
 /// Takes the type scale rather than reaching for a private menu-font
 /// const: menu rows are ordinary UI text, so they read
 /// [`TypeScale::body`] like every other surface at that tier.
-pub(super) fn palantir_theme_for(p: &palantir::Palette, r: BridgeRoles<'_>) -> palantir::Theme {
+pub(super) fn palantir_for(p: &palantir::Palette, r: BridgeRoles<'_>) -> palantir::Theme {
     let BridgeRoles {
         chrome_fill, text, ..
     } = r;
@@ -88,6 +88,10 @@ pub(super) fn palantir_theme_for(p: &palantir::Palette, r: BridgeRoles<'_>) -> p
     theme
 }
 
+/// The corner radius of the lift behind a hovered tab-close button: a small
+/// glyph's chip, rounder than a square and flatter than a pill.
+const CLOSE_LIFT_RADIUS: f32 = 3.0;
+
 /// Darkroom's own tab chips over palantir's recipe.
 ///
 /// Palantir derives its strip from the palette alone, which lands the
@@ -112,7 +116,7 @@ fn tab_roles(theme: &mut palantir::Theme, p: &palantir::Palette, r: BridgeRoles<
     tabs.inactive.disabled.background = chip(p.elem);
     // The chrome lift behind a hovered close button is the same header
     // band a node's title wears.
-    let lift = Background::rounded(r.header_fill, Corners::all(3.0));
+    let lift = Background::rounded(r.header_fill, Corners::all(CLOSE_LIFT_RADIUS));
     tabs.close.hovered.background = lift.clone();
     tabs.close.active.background = lift;
     // Chips at the menu scale, like every other chrome label.

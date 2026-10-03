@@ -1,7 +1,7 @@
 //! Row-major 3x3 matrix of f64 values.
 
 use glam::DVec2;
-use std::ops::{Index, IndexMut, Mul};
+use std::ops::{Index, IndexMut};
 
 /// Row-major 3x3 matrix of f64 values.
 ///
@@ -130,27 +130,6 @@ impl DMat3 {
     }
 }
 
-impl Default for DMat3 {
-    #[inline]
-    fn default() -> Self {
-        Self::identity()
-    }
-}
-
-impl From<[f64; 9]> for DMat3 {
-    #[inline]
-    fn from(data: [f64; 9]) -> Self {
-        Self { data }
-    }
-}
-
-impl From<DMat3> for [f64; 9] {
-    #[inline]
-    fn from(m: DMat3) -> Self {
-        m.data
-    }
-}
-
 impl Index<usize> for DMat3 {
     type Output = f64;
     #[inline]
@@ -163,90 +142,6 @@ impl IndexMut<usize> for DMat3 {
     #[inline]
     fn index_mut(&mut self, idx: usize) -> &mut f64 {
         &mut self.data[idx]
-    }
-}
-
-impl Mul for DMat3 {
-    type Output = DMat3;
-    #[inline]
-    fn mul(self, rhs: DMat3) -> DMat3 {
-        self.mul_mat(&rhs)
-    }
-}
-
-impl Mul<DVec2> for DMat3 {
-    type Output = DVec2;
-    /// Homogeneous point transform: `matrix * point`.
-    #[inline]
-    fn mul(self, rhs: DVec2) -> DVec2 {
-        self.transform_point(rhs)
-    }
-}
-
-impl Mul<f64> for DMat3 {
-    type Output = DMat3;
-    /// Scalar multiplication: `matrix * scalar`.
-    #[inline]
-    fn mul(self, rhs: f64) -> DMat3 {
-        let mut out = self;
-        for v in out.data.iter_mut() {
-            *v *= rhs;
-        }
-        out
-    }
-}
-
-impl Mul<DMat3> for f64 {
-    type Output = DMat3;
-    /// Scalar multiplication: `scalar * matrix`.
-    #[inline]
-    fn mul(self, rhs: DMat3) -> DMat3 {
-        rhs * self
-    }
-}
-
-/// Construction and element access used only by tests.
-#[cfg(test)]
-mod internals {
-    use super::*;
-
-    impl DMat3 {
-        /// Create from three row arrays.
-        pub(crate) const fn from_rows(row0: [f64; 3], row1: [f64; 3], row2: [f64; 3]) -> Self {
-            Self {
-                data: [
-                    row0[0], row0[1], row0[2], row1[0], row1[1], row1[2], row2[0], row2[1], row2[2],
-                ],
-            }
-        }
-
-        /// Consume and return the underlying array.
-        pub(crate) const fn to_array(self) -> [f64; 9] {
-            self.data
-        }
-
-        /// Mutable element access, to perturb individual entries.
-        pub(crate) fn as_array_mut(&mut self) -> &mut [f64; 9] {
-            &mut self.data
-        }
-
-        /// Frobenius norm of the difference from the identity matrix. Test-only diagnostic.
-        pub(crate) fn deviation_from_identity(&self) -> f64 {
-            let d = &self.data;
-            let d0 = d[0] - 1.0;
-            let d4 = d[4] - 1.0;
-            let d8 = d[8] - 1.0;
-            (d0 * d0
-                + d[1] * d[1]
-                + d[2] * d[2]
-                + d[3] * d[3]
-                + d4 * d4
-                + d[5] * d[5]
-                + d[6] * d[6]
-                + d[7] * d[7]
-                + d8 * d8)
-                .sqrt()
-        }
     }
 }
 

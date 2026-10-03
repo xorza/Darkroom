@@ -36,6 +36,7 @@ use crate::graph::identity::NodeId;
 use crate::testing::program::node_builder::NodeBuilder;
 use crate::testing::program::runs::Runs;
 use crate::testing::program::sweep::Sweep;
+use crate::{ConstValue, DynamicValue};
 
 /// Where one node landed: the stable id a host names it by, and the dense
 /// index every per-run column is keyed on.
@@ -73,6 +74,11 @@ pub(crate) struct ProgramBuilder {
 }
 
 impl ProgramBuilder {
+    /// The integer value a fixture's nodes produce and its caches hold.
+    pub(crate) fn value(value: i64) -> DynamicValue {
+        DynamicValue::Static(ConstValue::Int(value))
+    }
+
     /// Open a node. Nothing lands until [`NodeBuilder::add`].
     pub(crate) fn node(&mut self) -> NodeBuilder<'_> {
         NodeBuilder::new(self)
@@ -142,16 +148,27 @@ impl ProgramBuilder {
         schedule
     }
 
-    /// [`staged`](Self::staged) at the planner's positive verdict with every
-    /// node a plain root — the structural plan a whole-program run starts from.
-    ///
-    /// For a fixture driving a pass *below* the planner, where arranging a
-    /// graph that would provoke this plan says nothing the test is about.
-    pub(crate) fn planned(&self) -> RunSchedule {
-        let mut schedule = self.staged(NodeState::Cut);
+    /// [`staged`](Self::staged) at `initial` with every node a plain root.
+    fn rooted(&self, initial: NodeState) -> RunSchedule {
+        let mut schedule = self.staged(initial);
         for placed in &self.placed {
             schedule.add_root(placed.node_idx, RootFlags::PLAIN);
         }
         schedule
+    }
+
+    /// [`rooted`](Self::rooted) at the planner's positive verdict — the
+    /// structural plan a whole-program run starts from.
+    ///
+    /// For a fixture driving a pass *below* the planner, where arranging a
+    /// graph that would provoke this plan says nothing the test is about.
+    pub(crate) fn planned(&self) -> RunSchedule {
+        self.rooted(NodeState::Cut)
+    }
+
+    /// [`rooted`](Self::rooted) with every node cleared to run — the
+    /// executor's stated schedule.
+    pub(super) fn running(&self) -> RunSchedule {
+        self.rooted(NodeState::Run)
     }
 }

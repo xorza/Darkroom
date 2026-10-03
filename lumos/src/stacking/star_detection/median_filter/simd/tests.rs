@@ -1,24 +1,33 @@
 use crate::stacking::star_detection::median_filter::simd::*;
-use crate::testing::prelude::*;
+use crate::testing::simd_check::backend::Backend;
+use crate::testing::simd_check::{SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar};
+use imaginarium::SimdTier;
 
-/// Every shape and width against the scalar reference, replacing eleven near-identical tests
-/// that each covered one shape. The borders carry no 3x3 window, so only the interior is
-/// comparable; width 3 leaves exactly one interior column, which is the minimum-width case.
+/// Every backend the host has, over every shape and width it admits, against the scalar
+/// reference. Min/max networks compute no new values, so they agree exactly. The borders carry no
+/// 3x3 window, so only the interior is comparable.
 #[test]
 fn median_filter_row_simd_matches_scalar() {
-    assert_simd_matches_scalar(SWEEP_WIDTHS, 1e-5, |shape, width| {
+    type RowFn = unsafe fn(&[f32], &[f32], &[f32], &mut [f32], usize);
+    let backends: &[Backend<RowFn>] = &[
+        #[cfg(target_arch = "x86_64")]
+        Backend::with_min_width(SimdTier::Avx2, x86::median_filter_row_avx2, 12),
+        #[cfg(target_arch = "x86_64")]
+        Backend::with_min_width(SimdTier::Sse41, x86::median_filter_row_sse41, 8),
+        #[cfg(target_arch = "aarch64")]
+        Backend::with_min_width(SimdTier::Neon, neon::median_filter_row_neon, 8),
+    ];
+    assert_simd_matches_scalar(backends, SWEEP_WIDTHS, 0.0, |kernel, shape, width| {
         let above = shape.row(width, 0);
         let curr = shape.row(width, 1);
         let below = shape.row(width, 2);
         let mut scalar = vec![0.0f32; width];
         let mut simd = vec![0.0f32; width];
         median_filter_row_scalar(&above, &curr, &below, &mut scalar, width);
-        median_filter_row_simd(&above, &curr, &below, &mut simd, width);
+        // SAFETY: the harness runs only backends whose tier this CPU has, at widths they admit.
+        unsafe { kernel(&above, &curr, &below, &mut simd, width) };
         let interior = 1..width - 1;
-        ScalarSimd {
-            scalar: scalar[interior.clone()].to_vec(),
-            simd: simd[interior].to_vec(),
-        }
+        ScalarSimd::new(scalar[interior.clone()].to_vec(), simd[interior].to_vec())
     });
 }
 
@@ -62,13 +71,13 @@ fn median9_scalar_known_values() {
     // Sorted: 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9
     // Median should be 0.5 (index 4)
     let result = median9_scalar(0.5, 0.1, 0.9, 0.2, 0.8, 0.3, 0.7, 0.4, 0.6);
-    assert!((result - 0.5).abs() < 1e-6, "Expected 0.5, got {}", result);
+    assert!((result - 0.5).abs() < 1e-6, "Expected 0.5, got {result}");
 }
 
 #[test]
 fn median9_scalar_all_same() {
     let result = median9_scalar(0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5);
-    assert!((result - 0.5).abs() < 1e-6, "Expected 0.5, got {}", result);
+    assert!((result - 0.5).abs() < 1e-6, "Expected 0.5, got {result}");
 }
 
 #[test]
@@ -92,10 +101,7 @@ fn median9_scalar_various_orderings() {
         );
         assert!(
             (result - expected_median).abs() < 1e-6,
-            "Ordering {}: expected {}, got {}",
-            idx,
-            expected_median,
-            result
+            "Ordering {idx}: expected {expected_median}, got {result}"
         );
     }
 }
@@ -107,8 +113,7 @@ fn median9_scalar_with_duplicates() {
     // Sorted: 0.1, 0.1, 0.3, 0.5, 0.5, 0.5, 0.7, 0.9, 0.9 -> median is 0.5
     assert!(
         (result - 0.5).abs() < 1e-6,
-        "Duplicates test: expected 0.5, got {}",
-        result
+        "Duplicates test: expected 0.5, got {result}"
     );
 }
 
@@ -119,7 +124,6 @@ fn median9_scalar_extreme_values() {
     // Sorted: MIN, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, MAX -> median is 3.0
     assert!(
         (result - 3.0).abs() < 1e-6,
-        "Extreme values test: expected 3.0, got {}",
-        result
+        "Extreme values test: expected 3.0, got {result}"
     );
 }

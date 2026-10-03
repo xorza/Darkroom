@@ -2,7 +2,7 @@
 
 use crate::math::vec2us::Vec2us;
 
-// `usize::min`/`max` are not const-stable on the pinned toolchain.
+// `Ord::min`/`max` are trait methods, which a `const fn` cannot call.
 const fn min_usize(a: usize, b: usize) -> usize {
     if a < b { a } else { b }
 }
@@ -19,23 +19,23 @@ pub(crate) struct URect {
 }
 
 impl URect {
+    /// The rectangle from `min` to `max`. `min ≤ max` on both axes is the caller's contract,
+    /// checked in debug builds: a rectangle is built per tile and per component, and the one
+    /// with `min > max` is [`Self::empty`].
     #[inline]
     pub(crate) const fn new(min: Vec2us, max: Vec2us) -> Self {
-        assert!(min.x <= max.x && min.y <= max.y, "invalid rectangle bounds");
+        debug_assert!(min.x <= max.x && min.y <= max.y, "invalid rectangle bounds");
         Self { min, max }
     }
 
+    /// The identity of [`Self::include`]: bounds inverted so that the first point included
+    /// becomes the whole rectangle. It covers no pixel.
     #[inline]
     pub(crate) const fn empty() -> Self {
         Self {
             min: Vec2us::new(usize::MAX, usize::MAX),
             max: Vec2us::ZERO,
         }
-    }
-
-    #[inline]
-    pub(crate) const fn is_empty(self) -> bool {
-        self.min.x >= self.max.x || self.min.y >= self.max.y
     }
 
     // Saturating, not plain subtraction: `empty()` inverts the bounds to seed accumulation,
@@ -70,27 +70,6 @@ impl URect {
         self.min.y = min_usize(self.min.y, point.y);
         self.max.x = max_usize(self.max.x, point.x + 1);
         self.max.y = max_usize(self.max.y, point.y + 1);
-    }
-
-    #[inline]
-    pub(crate) const fn union(self, other: Self) -> Self {
-        if self.is_empty() {
-            return other;
-        }
-        if other.is_empty() {
-            return self;
-        }
-
-        Self::new(
-            Vec2us::new(
-                min_usize(self.min.x, other.min.x),
-                min_usize(self.min.y, other.min.y),
-            ),
-            Vec2us::new(
-                max_usize(self.max.x, other.max.x),
-                max_usize(self.max.y, other.max.y),
-            ),
-        )
     }
 }
 

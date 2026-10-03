@@ -1,6 +1,7 @@
 //! Registration's handling of the star lists it is handed: too few, degenerate FWHM,
 //! mismatched counts.
 
+use crate::stacking::registration::tests::helpers::register;
 use crate::stacking::registration::*;
 
 // Registration reads only `pos` and `fwhm`, so these fixtures set the FWHM under test and
@@ -24,9 +25,8 @@ fn median_fwhm_basic() {
 
 #[test]
 fn median_fwhm_even_count_averages_the_middle_pair() {
-    // Four stars: [2.0, 3.0, 4.0, 5.0] -> (3.0 + 4.0) / 2 = 3.5. The old full sort read the
-    // upper middle (4.0); quickselect averages, matching how the detector's own median FWHM
-    // is computed.
+    // Four stars: [2.0, 3.0, 4.0, 5.0] -> (3.0 + 4.0) / 2 = 3.5, the middle pair averaged as the
+    // detector's own median FWHM is.
     let ref_stars = vec![
         Star::at(DVec2::ZERO).with_fwhm(2.0),
         Star::at(DVec2::ZERO).with_fwhm(5.0),

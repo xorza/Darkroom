@@ -21,9 +21,10 @@
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::fmt;
 use std::fmt::Display;
+use std::fmt::Formatter;
 
-use glam::Vec2;
 use palantir::prelude::*;
 use palantir::{FontWeight, TextInput, TextWrap, ZoomFactor};
 use scenarium::DataType;
@@ -65,6 +66,10 @@ pub(crate) struct Inspectors {
     modes: BTreeMap<NodeId, InspectMode>,
 }
 
+/// The panel's shadow blur: a node body's is the status glow's, and the panel
+/// floats above the bodies, so it casts the softer shadow of a higher surface.
+const PANEL_SHADOW_BLUR: f32 = 12.0;
+
 /// Fixed panel width in canvas (pre-transform) units.
 const PANEL_WIDTH: f32 = 280.0;
 /// Most recent log lines shown per node, so the panel stays bounded.
@@ -72,7 +77,7 @@ const LOG_LINE_CAP: usize = 20;
 
 /// Next state in the `Closed → Open → Pinned → Closed` cycle. `None`
 /// is the `Closed` state.
-fn cycle(mode: Option<InspectMode>) -> Option<InspectMode> {
+const fn cycle(mode: Option<InspectMode>) -> Option<InspectMode> {
     match mode {
         None => Some(InspectMode::Open),
         Some(InspectMode::Open) => Some(InspectMode::Pinned),
@@ -86,8 +91,8 @@ impl Inspectors {
         self.modes.get(&id).copied()
     }
 
-    /// Drop transient (`Open`) panels, keeping pinned ones. Called when
-    /// an outside action fires and on a tab switch.
+    /// Drop transient (`Open`) panels, keeping pinned ones. Called when an
+    /// outside action fires.
     pub(crate) fn close_unpinned(&mut self) {
         self.modes.retain(|_, m| *m == InspectMode::Pinned);
     }
@@ -128,7 +133,7 @@ impl Inspectors {
     /// nothing else — which is what lets this run once a frame beside the
     /// canvas's other sweeps rather than inside the record pass.
     ///
-    /// Asked of the document rather than of a pane: `modes` deliberately
+    /// Asked of the document rather than of the scene: `modes` deliberately
     /// survives a tab switch, so only the node being *gone* may drop an entry.
     pub(crate) fn retain_nodes(&mut self, keep: impl Fn(NodeId) -> bool) {
         self.modes.retain(|id, _| keep(*id));
@@ -153,15 +158,14 @@ impl Inspectors {
             // ever record.
             let node_w = geometry
                 .node_world_rect(node)
-                .map(|r| r.size.w)
-                .unwrap_or(theme.card.min_width);
+                .map_or(theme.card.min_width, |r| r.size.w);
             let pos = node.pos + Vec2::new(node_w + theme.floating_widget_gap, 0.0);
             let ncx = node.with_hover(wid::hovered(ui, node.id));
-            self.draw_one(ui, ncx, mode, pos);
+            Self::draw_one(ui, ncx, mode, pos);
         }
     }
 
-    fn draw_one(&self, ui: &mut Ui, ncx: NodeCtx<'_>, mode: InspectMode, pos: Vec2) {
+    fn draw_one(ui: &mut Ui, ncx: NodeCtx<'_>, mode: InspectMode, pos: Vec2) {
         let (theme, node) = (ncx.theme(), ncx);
         let logs = ncx.graph_ctx.run_state().logs(node.id);
         let error = ncx.graph_ctx.run_state().error(node.id);
@@ -174,14 +178,10 @@ impl Inspectors {
             InspectMode::Open => RgbaF32::TRANSPARENT,
         };
         let chrome = Background::rounded(theme.card.fill, Corners::all(theme.card.corner_radius))
-            .with_border(Stroke::new(border, 1.0))
+            .with_border(Stroke::new(border, theme.card.border_width))
             // Same elevation swatch as the node bodies, so every floating
             // surface casts one kind of shadow (bigger blur — the panel sits higher).
-            .with_shadow(Shadow::drop(
-                theme.card.ambient_shadow,
-                Vec2::new(0.0, 3.0),
-                12.0,
-            ));
+            .with_shadow(theme.card.elevation_shadow(PANEL_SHADOW_BLUR));
         Panel::vstack()
             .id(inspect_panel_wid(node.id))
             .position(pos)
@@ -249,7 +249,7 @@ impl Inspectors {
                 if node.outputs().len() > 0 {
                     section(ui, theme, "Outputs");
                     for output in node.outputs() {
-                        port_row(ui, theme, library, output.name(), &output.ty(), None);
+                        port_row(ui, theme, library, output.name(), output.ty(), None);
                     }
                 }
 
@@ -274,11 +274,11 @@ impl Inspectors {
     }
 }
 
-/// RgbaF32 for a log line by level: info reads as muted body text, warn
+/// `RgbaF32` for a log line by level: info reads as muted body text, warn
 /// reuses the missing-inputs glow (orange), error the errored glow (red).
 fn log_color(theme: &Theme, ui: &Ui, level: LogLevel) -> RgbaF32 {
     match level {
-        LogLevel::Info => ui.theme().text.color.with_alpha(0.85),
+        LogLevel::Info => ui.theme().text.color,
         LogLevel::Warn => theme.status.warning,
         LogLevel::Error => theme.status.error,
     }
@@ -366,7 +366,7 @@ impl<'a> PortLabel<'a> {
 }
 
 impl Display for PortLabel<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_str(self.name)?;
         match &self.ty_name {
             Some(ty_name) => write!(f, " · {ty_name}"),
@@ -423,12 +423,12 @@ fn status_text(ui: &mut Ui, status: ExecStatus) -> TextInput<'static> {
 
 /// Stable id for a node's inspector toggle chip in the header.
 pub(crate) fn inspect_badge_wid(node_id: NodeId) -> WidgetId {
-    WidgetId::from_hash(("graph.node.inspect_badge", node_id))
+    wid::node("inspect_badge", node_id)
 }
 
 /// Stable id for a node's floating inspection panel.
 pub(super) fn inspect_panel_wid(node_id: NodeId) -> WidgetId {
-    WidgetId::from_hash(("graph.node.inspect_panel", node_id))
+    wid::node("inspect_panel", node_id)
 }
 
 #[cfg(test)]
@@ -445,8 +445,8 @@ mod tests {
 
         // Type repeats the name (case-insensitively) → the name alone, no
         // "Image · Image" stutter; distinct type → "name · type". A path
-        // port still announces its type when the name differs — the old
-        // formatter dropped it entirely for valueless path ports.
+        // port announces its type when the name differs, with no value
+        // shown or with one.
         let cases: [(&str, &DataType, &str); 4] = [
             ("Float", &DataType::Float, "Float"),
             ("Brightness", &DataType::Float, "Brightness · float"),

@@ -1,4 +1,4 @@
-//! AVX2 backends for the sum operations (x86_64).
+//! AVX2 backends for the sum operations (`x86_64`).
 
 use std::arch::x86_64::*;
 
@@ -43,9 +43,9 @@ pub(super) unsafe fn sum_f32(values: &[f32]) -> f64 {
 /// Both weighted-mean totals over the same elements.
 ///
 /// The lane split, the reduction order and the scalar tail match [`sum_f32`] exactly. That is what
-/// makes `weighted_mean_f32` with unit weights reproduce `mean_f32` bit for bit: `v * 1.0` is exact,
-/// so this walks the identical values through the identical accumulation and lands on the identical
-/// f64 total.
+/// makes `weighted_mean_f32` with unit weights reproduce `mean_f32` bit for bit: `v * 1.0` is
+/// exact, so this walks the identical values through the identical accumulation and lands on the
+/// identical f64 total.
 ///
 /// # Safety
 /// Caller must ensure AVX2 is available.

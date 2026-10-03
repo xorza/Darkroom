@@ -1,13 +1,15 @@
 //! One node's body: the widget that records it, and what recording it reports.
 
-use glam::Vec2;
+use std::sync::Arc;
+
 use palantir::prelude::*;
 
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph::ctx::DrawCtx;
-use crate::gui::pane::graph::gesture::breaker::BreakerProbe;
-use crate::gui::pane::graph::gesture::drag_anchor::selected_group_positions;
+use crate::gui::pane::graph::gesture::breaker::breaker_probe::BreakerProbe;
+use crate::gui::pane::graph::gesture::group_drag;
 use crate::gui::pane::graph::node::header::{header, status_row, subscription_pin};
 use crate::gui::pane::graph::node::memory_row::memory_row;
 use crate::gui::pane::graph::node::port_row::ports_row;
@@ -40,13 +42,14 @@ pub(super) struct NodeResponse {
 /// what [`NodeUI`] holds is per-node: there is one pointer so one drag, and
 /// `row_tracks` is deliberately one buffer the whole frame slices out of.
 /// Per-widget state would reintroduce the allocation it exists to avoid.
+#[derive(Debug)]
 pub(super) struct NodeWidget<'a> {
     state: &'a mut NodeUI,
     ncx: NodeCtx<'a>,
 }
 
 impl<'a> NodeWidget<'a> {
-    pub(super) fn new(state: &'a mut NodeUI, ncx: NodeCtx<'a>) -> Self {
+    pub(super) const fn new(state: &'a mut NodeUI, ncx: NodeCtx<'a>) -> Self {
         Self { state, ncx }
     }
 
@@ -62,8 +65,8 @@ impl<'a> NodeWidget<'a> {
 
         // Probe the body against the breaker polyline. Hit → recolor border
         // red and flag the node for deletion on release. The rect is the same
-        // `node_world_rect` the cull above and the rubber band test — this
-        // frame's position plus the cached measured size — so all three agree
+        // `node_world_rect` the cull and the rubber band test — this frame's
+        // position plus the cached measured size — so all three agree
         // on where the node is even when the document moved it out from under
         // a live gesture (an undo, say). A node that has never
         // recorded has no size yet, so the breaker can't catch it until next
@@ -78,17 +81,16 @@ impl<'a> NodeWidget<'a> {
         let selected = dcx.is_selected(ncx.id);
         // The border width is *always* the selection width so selecting a
         // node never resizes it (stroke folds into padding — width-gated,
-        // not color-gated). Only the color changes, a 4-tier decision: the
-        // breaker alarm wins, then the missing-stub color, then
-        // `Theme::card_border`'s own broken/selected/resting 3-tier (broken
-        // can't recur here since it's already handled, but the helper still
+        // not color-gated). Only the color changes: the breaker alarm wins,
+        // then the missing-stub color, then `Theme::card_border`'s selected
+        // or resting color.
         let border_width = theme.card.border_width_total();
         let border = if node.missing() && !broken {
             // A stub for a node whose func is gone from the library: paint it
             // in the error color so it reads as broken-but-deletable.
             theme.status.error
         } else {
-            theme.card_border(broken, selected).color
+            theme.card_border(broken, selected)
         };
         // Sample modifiers before the panel borrows `ui` for the rest
         // of this scope (the click handler below can't reborrow it).
@@ -178,13 +180,16 @@ impl<'a> NodeWidget<'a> {
             // group together;
             // grabbing an unselected node selects only it and drags it
             // alone.
-            let start_positions = if selected {
-                selected_group_positions(dcx)
+            let members = if selected {
+                group_drag::selected_group(dcx)
             } else {
                 out.extend_graph(GraphIntent::click(false, ncx.graph_ctx.selected(), node.id));
-                vec![(node.id, node.pos)]
+                Arc::from([DragStart {
+                    node: node.id,
+                    pos: node.pos,
+                }])
             };
-            state.drag.latch(node.id, start_positions, handle);
+            state.drag.latch(node.id, members, handle, out);
         }
         response
     }
@@ -193,7 +198,7 @@ impl<'a> NodeWidget<'a> {
 /// The accent color for a node's last-run status, or `None` when it
 /// didn't run. Shared by the body glow and the header time label so they
 /// read as one cue.
-pub(crate) fn exec_color(theme: &Theme, status: ExecStatus) -> Option<RgbaF32> {
+pub(crate) const fn exec_color(theme: &Theme, status: ExecStatus) -> Option<RgbaF32> {
     match status {
         ExecStatus::None => None,
         ExecStatus::Cached => Some(theme.status.info),
@@ -210,7 +215,7 @@ pub(crate) fn exec_color(theme: &Theme, status: ExecStatus) -> Option<RgbaF32> {
 /// crossing beneath it. The ambient color is the theme's elevation swatch
 /// (`node_ambient_shadow`), shared with the inspector panels so all
 /// elevated surfaces cast one kind of shadow.
-fn node_shadow(theme: &Theme, status: ExecStatus) -> Shadow {
+const fn node_shadow(theme: &Theme, status: ExecStatus) -> Shadow {
     match exec_color(theme, status) {
         // Blur/spread sized so the glow carries elevation too — it replaces
         // the ambient shadow, and a tighter halo would leave a just-run node

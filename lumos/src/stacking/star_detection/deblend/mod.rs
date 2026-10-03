@@ -12,130 +12,46 @@
 
 use std::cmp::Ordering;
 
-use arrayvec::ArrayVec;
-
-use crate::math::urect::URect;
 use crate::math::vec2us::Vec2us;
-use crate::stacking::star_detection::labeling::LabelMap;
-use imaginarium::Buffer2;
 
+pub(super) mod component;
+pub(super) mod deblend_buffers;
 pub(super) mod local_maxima;
 pub(super) mod multi_threshold;
 pub(super) mod region;
 
-use region::Region;
-
-#[cfg(test)]
-mod tests;
-
-/// Maximum number of peaks/candidates per component.
-/// Components with more peaks than this will have excess peaks ignored.
-const MAX_PEAKS: usize = 8;
-
 /// A pixel with its coordinates and value.
 #[derive(Debug, Clone, Copy)]
-struct Pixel {
-    pub pos: Vec2us,
-    pub value: f32,
+pub(crate) struct Pixel {
+    pub(crate) pos: Vec2us,
+    pub(crate) value: f32,
 }
 
-/// Data for a connected component (allocation-free).
-///
-/// Instead of storing pixel coordinates, we store the component label
-/// and iterate over the bounding box on-demand, checking the labels buffer.
-#[derive(Debug, Clone, Copy, Default)]
-pub(super) struct ComponentData {
-    /// Bounding box of the component.
-    pub bbox: URect,
-    /// Component label in the labels buffer.
-    pub label: u32,
-    /// Number of pixels in the component (pre-computed).
-    pub area: usize,
-}
-
-impl ComponentData {
-    /// Iterate over all pixels in this component.
-    ///
-    /// Scans the bounding box and yields pixels that match the component label.
-    #[inline]
-    fn iter_pixels<'a>(
-        &'a self,
-        pixels: &'a Buffer2<f32>,
-        labels: &'a LabelMap,
-    ) -> impl Iterator<Item = Pixel> + 'a {
-        let width = pixels.width();
-        let bbox = &self.bbox;
-        (bbox.min.y..bbox.max.y).flat_map(move |y| {
-            (bbox.min.x..bbox.max.x).filter_map(move |x| {
-                let idx = y * width + x;
-                if labels[idx] == self.label {
-                    Some(Pixel {
-                        pos: Vec2us::new(x, y),
-                        value: pixels[idx],
-                    })
-                } else {
-                    None
-                }
-            })
-        })
+impl Pixel {
+    /// The brightest of `pixels`, the first in iteration order among equals; `None` when there
+    /// are none.
+    fn brightest(pixels: impl IntoIterator<Item = Self>) -> Option<Self> {
+        pixels
+            .into_iter()
+            .reduce(|best, p| if p.value > best.value { p } else { best })
     }
 
-    /// Find the peak pixel (maximum value) in this component.
-    #[inline]
-    fn find_peak(&self, pixels: &Buffer2<f32>, labels: &LabelMap) -> Pixel {
-        self.iter_pixels(pixels, labels)
-            .max_by(|a, b| a.value.partial_cmp(&b.value).unwrap_or(Ordering::Equal))
-            .expect("component must have at least one pixel")
+    /// Brightest first; equal values in raster order (row, then column), so a ranking does not
+    /// depend on the order its input arrived in.
+    fn brighter_first(a: &Self, b: &Self) -> Ordering {
+        b.value
+            .total_cmp(&a.value)
+            .then(a.pos.y.cmp(&b.pos.y))
+            .then(a.pos.x.cmp(&b.pos.x))
     }
-}
-
-/// Assign every pixel of `data` to its nearest `peak` (squared-Euclidean Voronoi; the first peak wins
-/// ties) and build one [`Region`] per peak, accumulating bounding box and area and dropping peaks that
-/// captured no pixels. Peaks beyond [`MAX_PEAKS`] are ignored. This is the shared tail of both the
-/// local-maxima and multi-threshold deblenders.
-fn assign_to_nearest_peak(
-    data: &ComponentData,
-    pixels: &Buffer2<f32>,
-    labels: &LabelMap,
-    peaks: &[Pixel],
-) -> ArrayVec<Region, MAX_PEAKS> {
-    let mut result = ArrayVec::new();
-    if peaks.is_empty() {
-        return result;
-    }
-    let peaks = &peaks[..peaks.len().min(MAX_PEAKS)];
-
-    // Per-peak (bbox, area) accumulators, indexed like `peaks`.
-    let mut acc = [(URect::empty(), 0usize); MAX_PEAKS];
-    for pixel in data.iter_pixels(pixels, labels) {
-        let nearest = nearest_peak_index(pixel.pos, peaks);
-        acc[nearest].0.include(pixel.pos);
-        acc[nearest].1 += 1;
-    }
-
-    for (peak, &(bbox, area)) in peaks.iter().zip(acc.iter()) {
-        if area > 0 {
-            assert!(
-                bbox.contains(peak.pos),
-                "assigned region must contain its peak"
-            );
-            result.push(Region {
-                bbox,
-                peak: peak.pos,
-                peak_value: peak.value,
-                area,
-            });
-        }
-    }
-    result
 }
 
 /// Squared Euclidean distance between two pixel positions — the one peak-separation
 /// metric shared by the Voronoi assignment and every min-separation check.
 #[inline]
-fn dist_sq(a: Vec2us, b: Vec2us) -> usize {
-    let dx = (a.x as i32 - b.x as i32).unsigned_abs() as usize;
-    let dy = (a.y as i32 - b.y as i32).unsigned_abs() as usize;
+const fn dist_sq(a: Vec2us, b: Vec2us) -> usize {
+    let dx = a.x.abs_diff(b.x);
+    let dy = a.y.abs_diff(b.y);
     dx * dx + dy * dy
 }
 
@@ -159,34 +75,64 @@ fn nearest_peak_index(pos: Vec2us, peaks: &[Pixel]) -> usize {
 /// `min_separation * min_separation`, pre-squared by the caller since peak-separation
 /// checks run in a loop over many candidate pairs.
 #[inline]
-fn peaks_too_close(a: Vec2us, b: Vec2us, min_sep_sq: usize) -> bool {
+const fn peaks_too_close(a: Vec2us, b: Vec2us, min_sep_sq: usize) -> bool {
     dist_sq(a, b) < min_sep_sq
 }
 
 #[cfg(test)]
-mod internals {
-    use crate::math::size2us::Size2us;
-    use crate::math::vec2us::Vec2us;
+pub(crate) mod internals {
+    #[cfg(feature = "bench")]
+    use crate::bit_buffer2::BitBuffer2;
     use imaginarium::Buffer2;
-    use smallvec::SmallVec;
 
+    use crate::math::size2us::Size2us;
     use crate::math::urect::URect;
+    use crate::math::vec2us::Vec2us;
+    use crate::stacking::star_detection::config::detection_config::Connectivity;
+    use crate::stacking::star_detection::deblend::component::Component;
+    use crate::stacking::star_detection::deblend::deblend_buffers::DeblendBuffers;
     use crate::stacking::star_detection::deblend::multi_threshold::{
-        DeblendBuffers, deblend_multi_threshold,
+        MultiThresholdParams, deblend_multi_threshold,
     };
     use crate::stacking::star_detection::deblend::region::Region;
-    use crate::stacking::star_detection::deblend::{ComponentData, MAX_PEAKS};
     use crate::stacking::star_detection::labeling::LabelMap;
-    use crate::testing::synthetic::star_profiles::SyntheticStar;
+    use crate::stacking::star_detection::labeling::component_data::ComponentData;
+    use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
+    use glam::Vec2;
 
+    /// Rendered stars and the one label covering every pixel they light above 0.001.
     #[derive(Debug)]
-    pub(super) struct TestComponent {
-        pub(super) pixels: Buffer2<f32>,
-        pub(super) labels: LabelMap,
-        pub(super) data: ComponentData,
+    pub(crate) struct TestComponent {
+        pub(crate) pixels: Buffer2<f32>,
+        pub(crate) labels: LabelMap,
+        pub(crate) data: ComponentData,
     }
 
-    pub(super) fn make_test_component(size: Size2us, stars: &[SyntheticStar]) -> TestComponent {
+    /// A 1.0 star at (30, 50) and a `secondary` one at (70, 50), σ 2.5, on 100×100: two disjoint
+    /// blobs under one label.
+    pub(super) fn separated_pair(secondary: f32) -> TestComponent {
+        make_test_component(
+            Size2us::new(100, 100),
+            &[
+                SyntheticStar::new(
+                    Vec2::new(30.0, 50.0),
+                    1.0,
+                    StarProfile::Gaussian { sigma: 2.5 },
+                ),
+                SyntheticStar::new(
+                    Vec2::new(70.0, 50.0),
+                    secondary,
+                    StarProfile::Gaussian { sigma: 2.5 },
+                ),
+            ],
+        )
+    }
+
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "synthetic fixtures are small images with non-negative coordinates"
+    )]
+    pub(crate) fn make_test_component(size: Size2us, stars: &[SyntheticStar]) -> TestComponent {
         let mut pixels = Buffer2::new_filled(size.width, size.height, 0.0f32);
         let mut labels = Buffer2::new_filled(size.width, size.height, 0u32);
         let mut bbox = URect::empty();
@@ -230,23 +176,65 @@ mod internals {
         }
     }
 
+    /// The multi-threshold deblender on `component` with fresh buffers and 8-connectivity, its
+    /// ladder floored at the component's faintest pixel — the detection threshold a synthetic
+    /// component cut at a positive level stands for.
     pub(super) fn deblend_multi_threshold_test(
-        data: &ComponentData,
-        pixels: &Buffer2<f32>,
-        labels: &LabelMap,
+        component: &Component<'_>,
         n_thresholds: usize,
         min_separation: usize,
         min_contrast: f32,
-    ) -> SmallVec<[Region; MAX_PEAKS]> {
-        let mut buffers = DeblendBuffers::new();
-        deblend_multi_threshold(
-            data,
-            pixels,
-            labels,
+    ) -> Vec<Region> {
+        let floor = component
+            .pixels()
+            .map(|p| p.value)
+            .fold(f32::INFINITY, f32::min);
+        deblend_multi_threshold_floored(
+            component,
+            floor,
             n_thresholds,
             min_separation,
             min_contrast,
-            &mut buffers,
         )
     }
+
+    /// The pixels of `pixels` above `threshold`, labelled with 4-connectivity: the components the
+    /// deblender benches run on.
+    #[cfg(feature = "bench")]
+    pub(crate) fn label_above(pixels: &Buffer2<f32>, threshold: f32) -> LabelMap {
+        let mut mask = BitBuffer2::new_filled(Size2us::new(pixels.width(), pixels.height()), false);
+        for (idx, &value) in pixels.iter().enumerate() {
+            if value > threshold {
+                mask.set(idx, true);
+            }
+        }
+        LabelMap::from_mask(&mask, Connectivity::Four)
+    }
+
+    /// [`deblend_multi_threshold_test`] with the ladder's floor given.
+    pub(super) fn deblend_multi_threshold_floored(
+        component: &Component<'_>,
+        floor: f32,
+        n_thresholds: usize,
+        min_separation: usize,
+        min_contrast: f32,
+    ) -> Vec<Region> {
+        let mut regions = Vec::new();
+        deblend_multi_threshold(
+            component,
+            floor,
+            MultiThresholdParams {
+                n_thresholds,
+                min_contrast,
+                min_separation,
+                connectivity: Connectivity::Eight,
+            },
+            &mut DeblendBuffers::default(),
+            &mut regions,
+        );
+        regions
+    }
 }
+
+#[cfg(test)]
+mod tests;

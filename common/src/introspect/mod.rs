@@ -8,7 +8,8 @@
 //! With Common's `introspect-derive` feature, derive with
 //! `#[derive(Introspect)]`. Enum-typed fields implement [`IntrospectEnum`]
 //! (variant list + string round-trip) — derive it with
-//! `#[derive(IntrospectEnum)]` plus a stable `#[config(type_id = "…")]` UUID.
+//! `#[derive(IntrospectEnum)]` plus a stable `#[config(type_id = "…")]` UUID; the
+//! struct derive takes one too, for the value it builds.
 //!
 //! Both derives are self-contained: a type describes itself with nothing but
 //! its own definition and a `Default`. That is what lets the crate that *owns*
@@ -17,10 +18,16 @@
 //!
 //! ```ignore
 //! #[derive(Default, Introspect)]
+//! #[config(type_id = "0e6f…")]
 //! struct Knobs { tile_size: usize, #[config(label = "σ")] sigma: f32 }
 //! let fields = Knobs::fields();              // [{name:"tile_size", kind:Int, ..}, ..]
 //! let knobs = Knobs::from_fields(&values)?;  // checked typed rebuild
 //! ```
+
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::num::TryFromIntError;
 
 /// The exact integer type represented by an introspected field.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,7 +47,7 @@ pub enum IntegerKind {
 }
 
 impl IntegerKind {
-    fn type_name(self) -> &'static str {
+    const fn type_name(self) -> &'static str {
         match self {
             Self::I8 => "i8",
             Self::I16 => "i16",
@@ -66,7 +73,7 @@ pub enum FloatKind {
 }
 
 impl FloatKind {
-    fn type_name(self) -> &'static str {
+    const fn type_name(self) -> &'static str {
         match self {
             Self::F32 => "f32",
             Self::F64 => "f64",
@@ -81,8 +88,8 @@ pub enum IntegerValue {
     Unsigned(u128),
 }
 
-impl std::fmt::Display for IntegerValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for IntegerValue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Signed(value) => value.fmt(f),
             Self::Unsigned(value) => value.fmt(f),
@@ -95,18 +102,19 @@ macro_rules! impl_integer_value {
         $(
             impl From<$ty> for IntegerValue {
                 fn from(value: $ty) -> Self {
-                    Self::Signed(value as i128)
+                    Self::Signed(i128::try_from(value).expect("i128 holds every signed primitive"))
                 }
             }
 
             impl TryFrom<IntegerValue> for $ty {
-                type Error = ();
+                type Error = TryFromIntError;
 
                 fn try_from(value: IntegerValue) -> Result<Self, Self::Error> {
-                    match value {
-                        IntegerValue::Signed(value) => Self::try_from(value).map_err(|_| ()),
-                        IntegerValue::Unsigned(value) => Self::try_from(value).map_err(|_| ()),
-                    }
+                    // `?` lifts the `Infallible` of the same-width conversion.
+                    Ok(match value {
+                        IntegerValue::Signed(value) => Self::try_from(value)?,
+                        IntegerValue::Unsigned(value) => Self::try_from(value)?,
+                    })
                 }
             }
         )+
@@ -115,18 +123,19 @@ macro_rules! impl_integer_value {
         $(
             impl From<$ty> for IntegerValue {
                 fn from(value: $ty) -> Self {
-                    Self::Unsigned(value as u128)
+                    Self::Unsigned(u128::try_from(value).expect("u128 holds every unsigned primitive"))
                 }
             }
 
             impl TryFrom<IntegerValue> for $ty {
-                type Error = ();
+                type Error = TryFromIntError;
 
                 fn try_from(value: IntegerValue) -> Result<Self, Self::Error> {
-                    match value {
-                        IntegerValue::Signed(value) => Self::try_from(value).map_err(|_| ()),
-                        IntegerValue::Unsigned(value) => Self::try_from(value).map_err(|_| ()),
-                    }
+                    // `?` lifts the `Infallible` of the same-width conversion.
+                    Ok(match value {
+                        IntegerValue::Signed(value) => Self::try_from(value)?,
+                        IntegerValue::Unsigned(value) => Self::try_from(value)?,
+                    })
                 }
             }
         )+
@@ -150,7 +159,7 @@ pub enum FieldValue {
 }
 
 /// The kind of a reflected field (drives which editor widget a consumer shows).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum FieldKind {
     Int(IntegerKind),
     Float(FloatKind),
@@ -158,12 +167,12 @@ pub enum FieldKind {
     Str,
     Enum {
         /// Stable UUID identity, independent of Rust and display names.
-        type_id: String,
-        display_name: String,
-        variants: Vec<String>,
+        type_id: &'static str,
+        display_name: &'static str,
+        variants: &'static [&'static str],
     },
     /// An optional field of the inner kind (not required).
-    Option(Box<FieldKind>),
+    Option(&'static FieldKind),
 }
 
 /// A numeric field value that cannot be represented by its declared Rust type.
@@ -194,11 +203,13 @@ impl IntrospectError {
 }
 
 #[doc(hidden)]
-pub trait IntrospectInteger: Copy + Into<IntegerValue> + TryFrom<IntegerValue, Error = ()> {
+pub trait IntrospectInteger:
+    Copy + Into<IntegerValue> + TryFrom<IntegerValue, Error = TryFromIntError>
+{
     const KIND: IntegerKind;
 
     fn from_field_value(field: &'static str, value: IntegerValue) -> Result<Self, IntrospectError> {
-        Self::try_from(value).map_err(|()| IntrospectError::integer(field, value, Self::KIND))
+        Self::try_from(value).map_err(|_| IntrospectError::integer(field, value, Self::KIND))
     }
 }
 
@@ -267,18 +278,25 @@ impl IntrospectFloat for f64 {
 #[derive(Clone, Debug)]
 pub struct FieldDesc {
     /// The Rust field name.
-    pub name: String,
+    pub name: &'static str,
     /// Human label (`#[config(label = "...")]` or the name title-cased).
-    pub label: String,
+    pub label: &'static str,
     pub kind: FieldKind,
     pub default: FieldValue,
     /// `false` only for `Option<_>` fields.
     pub required: bool,
 }
 
-/// A struct whose fields can be described and rebuilt generically.
-/// Derive with `#[derive(Introspect)]`.
+/// A struct whose fields can be described and rebuilt generically. Derive with
+/// `#[derive(Introspect)]` and a stable `#[config(type_id = "…")]` UUID, plus an
+/// optional `name = "…"` for the display name (the type's own name otherwise).
+///
+/// [`Self::TYPE_ID`] is the built value's identity on the wire and on disk, so it
+/// may not change once a document has been saved with it.
 pub trait Introspect: Default {
+    const TYPE_ID: &'static str;
+    const DISPLAY_NAME: &'static str;
+
     /// Field descriptors in declaration order.
     fn fields() -> Vec<FieldDesc>;
     /// Rebuild from per-field values (declaration order). A missing or
@@ -298,14 +316,15 @@ pub trait Introspect: Default {
 pub trait IntrospectEnum: Sized {
     const TYPE_ID: &'static str;
     const DISPLAY_NAME: &'static str;
+    /// Every variant's string, in declaration order.
+    const VARIANTS: &'static [&'static str];
+    /// Every variant's label for a person, in declaration order: display
+    /// only, never stored.
+    const LABELS: &'static [&'static str];
 
-    fn variants() -> Vec<String>;
-    fn to_variant(&self) -> String;
+    fn to_variant(&self) -> &'static str;
     fn from_variant(name: &str) -> Option<Self>;
 }
-
-#[cfg(any(test, feature = "introspect-derive"))]
-pub use common_derive::{Introspect, IntrospectEnum};
 
 #[cfg(test)]
 mod tests;

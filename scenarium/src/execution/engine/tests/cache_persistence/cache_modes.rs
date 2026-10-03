@@ -1,3 +1,5 @@
+use std::fs;
+
 use super::*;
 
 /// A `Both` value remains resident even when a later run neither executes
@@ -14,7 +16,7 @@ async fn both_value_stays_resident_outside_the_active_frontier() {
     g.add("src", |n| n.counted(1i64, &calls).cache(CacheMode::Ram));
     g.add("sum", |n| n.sum().cache(CacheMode::Both));
     g.add("mult", |n| n.mult().cache(CacheMode::Both));
-    g.add("print", |n| n.records());
+    g.add("print", NodeSpec::records);
     g.wire("src", 0, "sum", 0);
     g.wire("src", 0, "sum", 1);
     g.wire("sum", 0, "mult", 0);
@@ -50,14 +52,15 @@ async fn both_value_stays_resident_outside_the_active_frontier() {
     e.attach_disk_store(empty.path());
     e.edit(|g| g.constant("mult", 1, 3i64));
     let run = e.run_sinks().await;
-    assert!(
-        run.cached().contains(&"sum"),
-        "sum is reused from retained RAM"
+    assert_eq!(
+        run.cached(),
+        ["src", "sum"],
+        "src and sum are reused from retained RAM"
     );
-    assert!(!run.ran().contains(&"sum"), "sum does not recompute");
-    assert!(
-        run.ran().contains(&"mult"),
-        "the changed downstream recomputes"
+    assert_eq!(
+        run.ran(),
+        ["mult", "print"],
+        "only the changed downstream recomputes"
     );
     assert!(
         e.holds_output("sum"),
@@ -76,28 +79,29 @@ async fn assert_mode_behavior(mode: CacheMode) {
 
     let mut e = TestEngine::over(source_mult_print(mode, 1, &calls)).with_disk_store(dir.path());
     let run1 = e.run_sinks().await;
-    assert!(
-        run1.ran().contains(&"mult"),
+    assert_eq!(
+        run1.ran(),
+        ["src", "mult", "print"],
         "{mode:?}: mult computes on the cold run"
     );
 
     let run2 = e.run_sinks().await;
     if mode == CacheMode::None {
-        assert!(
-            run2.ran().contains(&"mult"),
+        assert_eq!(
+            run2.ran(),
+            ["src", "mult", "print"],
             "None recomputes every run its value is needed"
         );
-        assert!(
-            !run2.cached().contains(&"mult"),
-            "None is never reported cached"
-        );
+        assert!(run2.cached().is_empty(), "None is never reported cached");
     } else {
-        assert!(
-            run2.cached().contains(&"mult"),
+        assert_eq!(
+            run2.cached(),
+            ["mult"],
             "{mode:?} reuses its cached output on run 2"
         );
-        assert!(
-            !run2.ran().contains(&"mult"),
+        assert_eq!(
+            run2.ran(),
+            ["print"],
             "{mode:?} does not recompute on run 2"
         );
     }
@@ -128,27 +132,26 @@ async fn assert_mode_behavior(mode: CacheMode) {
     let mut e = e.reopen();
     let reopen = e.run_sinks().await;
     if mode.persists_to_disk() {
-        assert!(
-            reopen.cached().contains(&"mult"),
+        assert_eq!(
+            reopen.cached(),
+            ["mult"],
             "{mode:?} reloads mult from disk on reopen"
         );
-        assert!(
-            !reopen.ran().contains(&"src"),
+        assert_eq!(
+            reopen.ran(),
+            ["print"],
             "{mode:?}: the cut prunes src behind the disk hit"
         );
     } else {
-        assert!(
-            reopen.ran().contains(&"mult"),
-            "{mode:?} has no disk blob, so mult recomputes on reopen"
+        assert_eq!(
+            reopen.ran(),
+            ["src", "mult", "print"],
+            "{mode:?} has no disk blob, so src and mult recompute on reopen"
         );
         assert!(
-            !reopen.cached().contains(&"mult"),
+            reopen.cached().is_empty(),
             "{mode:?} must not be reported cached on reopen — with nothing on \
              disk there is nothing a fresh engine could have reused"
-        );
-        assert!(
-            reopen.ran().contains(&"src"),
-            "{mode:?}: src recomputes to feed mult"
         );
     }
 }
@@ -183,7 +186,7 @@ async fn none_upstream_does_not_disable_downstream_disk_cache() {
     g.add("src", |n| n.counted(1i64, &calls));
     g.add("a", |n| n.sum().cache(CacheMode::None));
     g.add("b", |n| n.mult().cache(CacheMode::Disk));
-    g.add("print", |n| n.records());
+    g.add("print", NodeSpec::records);
     g.wire("src", 0, "a", 0);
     g.wire("src", 0, "a", 1);
     g.wire("a", 0, "b", 0);
@@ -192,8 +195,9 @@ async fn none_upstream_does_not_disable_downstream_disk_cache() {
 
     let mut e = TestEngine::over(g).with_disk_store(dir.path());
     let cold = e.run_sinks().await;
-    assert!(
-        cold.ran().contains(&"a") && cold.ran().contains(&"b"),
+    assert_eq!(
+        cold.ran(),
+        ["src", "a", "b", "print"],
         "the cold run computes A and B"
     );
     assert!(
@@ -206,15 +210,12 @@ async fn none_upstream_does_not_disable_downstream_disk_cache() {
     // A's own reuse-cut.
     let mut e = e.reopen();
     let reopen = e.run_sinks().await;
-    assert!(
-        reopen.cached().contains(&"b"),
-        "B reloads from disk on reopen"
+    assert_eq!(reopen.cached(), ["b"], "B reloads from disk on reopen");
+    assert_eq!(
+        reopen.ran(),
+        ["print"],
+        "A(None) and src are cut behind the disk hit, not recomputed"
     );
-    assert!(
-        !reopen.ran().contains(&"a"),
-        "A(None) is cut behind the disk hit, not recomputed"
-    );
-    assert!(!reopen.ran().contains(&"src"), "src is cut behind A too");
 }
 
 /// Disabling RAM retention releases a surviving slot during install rather
@@ -225,7 +226,7 @@ async fn disabling_ram_retention_releases_resident_value_on_install() {
         let dir = TempDir::new(&format!("ram-downgrade-{mode:?}"));
         let mut g = TestGraph::new();
         g.add("mult", |n| n.mult().cache(CacheMode::Ram));
-        g.add("print", |n| n.records());
+        g.add("print", NodeSpec::records);
         g.constant("mult", 0, 2i64);
         g.constant("mult", 1, 3i64);
         g.wire("mult", 0, "print", 0);
@@ -259,7 +260,7 @@ async fn enabling_disk_persists_the_resident_value_without_a_run() {
     let mut g = TestGraph::new();
     g.add("sum", |n| n.sum().cache(CacheMode::Ram));
     g.add("mult", |n| n.mult().cache(CacheMode::Ram));
-    g.add("print", |n| n.records());
+    g.add("print", NodeSpec::records);
     g.constant("sum", 0, 2i64);
     g.constant("sum", 1, 3i64);
     g.wire("sum", 0, "mult", 0);
@@ -276,9 +277,10 @@ async fn enabling_disk_persists_the_resident_value_without_a_run() {
     // the store the executor makes after an invoke, so a second run adds
     // nothing to disk either.
     let rerun = e.run_sinks().await;
-    assert!(
-        rerun.cached().contains(&"mult"),
-        "mult reuses its RAM value"
+    assert_eq!(
+        rerun.cached(),
+        ["mult", "sum"],
+        "mult and sum reuse their RAM values"
     );
     assert_eq!(dir.entry_count(), 0);
 
@@ -299,12 +301,14 @@ async fn enabling_disk_persists_the_resident_value_without_a_run() {
     // which is what proves the flush wrote the value and not an empty frame.
     let mut e = e.reopen();
     let reopen = e.run_sinks().await;
-    assert!(
-        reopen.cached().contains(&"mult"),
+    assert_eq!(
+        reopen.cached(),
+        ["mult"],
         "the flushed blob is reused on reopen"
     );
-    assert!(
-        !reopen.ran().contains(&"sum"),
+    assert_eq!(
+        reopen.ran(),
+        ["print"],
         "sum is cut behind the disk hit rather than recomputed"
     );
     assert_eq!(reopen.logs(), ["20"], "the blob carries (2 + 3) * 4");
@@ -327,10 +331,14 @@ async fn impure_cone_persist_node_is_not_disk_cached() {
     let mut e = e.reopen();
     let run = e.run_sinks().await;
     assert!(
-        !run.cached().contains(&"mult"),
+        run.cached().is_empty(),
         "an impure-cone node must not be disk-cached"
     );
-    assert!(run.ran().contains(&"mult"), "mult recomputes on reopen");
+    assert_eq!(
+        run.ran(),
+        ["src", "mult", "print"],
+        "mult recomputes on reopen"
+    );
 }
 
 /// A persisted node whose blob is on disk but whose custom output type has
@@ -340,89 +348,26 @@ async fn impure_cone_persist_node_is_not_disk_cached() {
 /// disk instead.
 #[tokio::test]
 async fn missing_codec_skips_disk_cache_instead_of_panicking() {
-    use std::any::Any;
-    use std::fmt;
-
-    use async_trait::async_trait;
-    use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
-
-    use crate::data::codec::error::CodecError;
     use crate::library::TypeEntry;
-    use crate::runtime::context::{ContextStore, ContextType};
-    use crate::{CustomValue, CustomValueCodec, TypeId};
-
-    /// Decode-side context resource: proves a codec can reach the runtime
-    /// store while reconstructing a value read from disk.
-    #[derive(Debug, Default)]
-    struct DecodeProbe {
-        decodes: usize,
-    }
-    const DECODE_PROBE: ContextType<DecodeProbe> = ContextType::new(DecodeProbe::default);
-
-    const BLOB_TYPE: &str = "50be7976-6d55-4567-8389-13107b1698ba";
-
-    #[derive(Debug)]
-    struct Blob(Vec<u8>);
-    impl fmt::Display for Blob {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(f, "Blob({} bytes)", self.0.len())
-        }
-    }
-    impl CustomValue for Blob {
-        fn type_id(&self) -> TypeId {
-            BLOB_TYPE.into()
-        }
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
-        fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
-            self
-        }
-    }
-
-    #[derive(Debug)]
-    struct BlobCodec;
-    #[async_trait]
-    impl CustomValueCodec for BlobCodec {
-        fn version(&self) -> u32 {
-            0
-        }
-
-        async fn encode(
-            &self,
-            value: &dyn CustomValue,
-            writer: &mut (dyn AsyncWrite + Unpin + Send),
-            _ctx: &mut ContextStore,
-        ) -> std::result::Result<(), CodecError> {
-            writer
-                .write_all(&value.as_any().downcast_ref::<Blob>().unwrap().0)
-                .await?;
-            Ok(())
-        }
-
-        async fn decode(
-            &self,
-            reader: &mut (dyn AsyncRead + Unpin + Send),
-            byte_len: u64,
-            ctx: &mut ContextStore,
-        ) -> std::result::Result<Arc<dyn CustomValue>, CodecError> {
-            ctx.get(DECODE_PROBE).decodes += 1;
-            let mut bytes = Vec::with_capacity(usize::try_from(byte_len)?);
-            reader.read_to_end(&mut bytes).await?;
-            Ok(Arc::new(Blob(bytes)))
-        }
-    }
+    use crate::testing::blob::{BLOB_TYPE, Blob, BlobCodec};
 
     // A pure, disk-persisted sink emitting a custom `Blob`. The type's codec
-    // is registered only when `with_codec` — and the store takes its codecs
+    // is registered only when `with_codec` — and the program takes its codecs
     // from this same library, so that one flag decides both.
+    let decodes = Calls::default();
     let build = |with_codec: bool, recompute: &Calls| {
         let recompute = recompute.clone();
         let mut g = TestGraph::new();
         g.library.register_type(
             BLOB_TYPE,
             if with_codec {
-                TypeEntry::custom_with_codec("Blob", Arc::new(BlobCodec))
+                TypeEntry::custom_with_codec(
+                    "Blob",
+                    Arc::new(BlobCodec {
+                        decodes: decodes.clone(),
+                        ..BlobCodec::default()
+                    }),
+                )
             } else {
                 TypeEntry::custom("Blob")
             },
@@ -433,7 +378,7 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
             n.pure()
                 .sink()
                 .cache(CacheMode::Disk)
-                .output(DataType::Custom(BLOB_TYPE.into()))
+                .output(DataType::Custom(BLOB_TYPE))
                 .lambda(crate::async_lambda!(
                     move |Invocation { outputs, .. }| { counter = recompute.clone() } => {
                         counter.bump();
@@ -453,22 +398,12 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
     e.run_sinks().await;
     assert_eq!(recompute.count(), 1, "the cold run computes");
 
-    // Reopen with the codec: served from disk, and the hydration decode
-    // reaches the engine's own runtime context store.
+    // Reopen with the codec: served from disk, through one decode.
     let mut e = e.reopen();
     let run = e.run_sinks().await;
     assert_eq!(recompute.count(), 1, "codec present ⇒ served from disk");
-    assert!(run.cached().contains(&"make_blob"));
-    assert_eq!(
-        e.engine
-            .executor
-            .ctx_manager
-            .contexts
-            .get(DECODE_PROBE)
-            .decodes,
-        1,
-        "the hydration decode reached the engine's runtime context store"
-    );
+    assert_eq!(run.cached(), ["make_blob"]);
+    assert_eq!(decodes.count(), 1, "the hydration decoded the blob once");
 
     // Reopen WITHOUT the codec: the blob is present but undecodable, so it
     // is not flagged available — recompute, no panic.
@@ -476,11 +411,38 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
     let run = e.run_sinks().await;
     assert_eq!(recompute.count(), 2, "a missing codec ⇒ recompute");
     assert!(
-        !run.cached().contains(&"make_blob"),
+        run.cached().is_empty(),
         "an undecodable blob is not a cache hit"
     );
-    assert!(
-        run.ran().contains(&"make_blob"),
+    assert_eq!(
+        run.ran(),
+        ["make_blob"],
         "the node recomputes instead of tripping a failed frontier load"
     );
+
+    // Still without the codec, a `Both` value stays in RAM and no blob is
+    // written for it: the store refuses the type before touching the disk.
+    fs::remove_file(e.blob_path("make_blob")).unwrap();
+    e.edit(|g| g.cache("make_blob", CacheMode::Both));
+    e.run_sinks().await;
+    assert_eq!(
+        recompute.count(),
+        3,
+        "the edit released the disk-only value"
+    );
+    let run = e.run_sinks().await;
+    assert_eq!(run.cached(), ["make_blob"], "served from RAM");
+    assert!(!e.blob_path("make_blob").exists());
+
+    // An install that brings the codec back owes the resident value its blob,
+    // and the next reuse writes it without recomputing. The rebuilt fixture
+    // mints the same ids, so the slot and its value carry over.
+    e.edit(|g| {
+        *g = build(true, &recompute);
+        g.cache("make_blob", CacheMode::Both);
+    });
+    let run = e.run_sinks().await;
+    assert_eq!(run.cached(), ["make_blob"], "served from RAM");
+    assert_eq!(recompute.count(), 3);
+    assert!(e.blob_path("make_blob").exists(), "the debt was paid");
 }

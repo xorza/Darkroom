@@ -4,16 +4,17 @@
 //! `Display` reports which masters the bundle carries.
 
 use std::any::Any;
-use std::sync::{Arc, LazyLock};
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::sync::Arc;
 
 use lumos::CalibrationMasters;
 use scenarium::{CustomValue, DataType, RamUsage, TypeId};
 
-pub(crate) static MASTERS_TYPE_ID: LazyLock<TypeId> =
-    LazyLock::new(|| "db1bc978-1d0b-4ffc-9a74-6220eff8908e".into());
+pub(crate) const MASTERS_TYPE_ID: TypeId = TypeId::literal("db1bc978-1d0b-4ffc-9a74-6220eff8908e");
 
-pub(crate) static MASTERS_DATA_TYPE: LazyLock<DataType> =
-    LazyLock::new(|| DataType::Custom(*MASTERS_TYPE_ID));
+pub(crate) const MASTERS_DATA_TYPE: DataType = DataType::Custom(MASTERS_TYPE_ID);
 
 /// Calibration masters carried through the node graph.
 #[derive(Debug)]
@@ -23,7 +24,7 @@ pub(crate) struct Masters {
 
 impl CustomValue for Masters {
     fn type_id(&self) -> TypeId {
-        *MASTERS_TYPE_ID
+        MASTERS_TYPE_ID
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -43,8 +44,8 @@ impl CustomValue for Masters {
     }
 }
 
-impl std::fmt::Display for Masters {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for Masters {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let mut components = self.masters.components().peekable();
         if components.peek().is_none() {
             return f.write_str("no masters");
@@ -83,15 +84,13 @@ mod tests {
             CalibrationSet {
                 dark: Some(CfaImage::from_plane(
                     Buffer2::new_filled(4, 4, 0.1),
-                    ImageMetadata {
-                        cfa_type: Some(CfaType::Mono),
-                        ..ImageMetadata::default()
-                    },
+                    CfaType::Mono,
+                    ImageMetadata::default(),
                 )),
                 ..CalibrationSet::default()
             },
             5.0,
-            CancelToken::never(),
+            &CancelToken::never(),
         )
         .unwrap()
     }

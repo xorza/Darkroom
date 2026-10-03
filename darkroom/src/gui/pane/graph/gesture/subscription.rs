@@ -3,14 +3,15 @@ use palantir::Ui;
 use scenarium::{NodeId, Subscription};
 
 use crate::core::edit::graph_intent::GraphIntent;
-use crate::gui::EventRef;
+use crate::gui::event_ref::EventRef;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
 use crate::gui::pane::graph::node::port_color::event_color;
-use crate::gui::pane::graph::paint::wire::{GlyphDrag, Wire, WirePass, WireTint};
+use crate::gui::pane::graph::paint::wire::glyph_drag::GlyphDrag;
+use crate::gui::pane::graph::paint::wire::{Wire, WirePass, WireTint};
 use crate::gui::requests::Requests;
 
 /// Owns the in-flight subscription wire — an emitter *or* subscriber drag.
@@ -23,8 +24,8 @@ use crate::gui::requests::Requests;
 /// const checks, and links an emitter event glyph to a whole-node
 /// subscription pin (which only sink nodes expose — that's what makes
 /// "events connect only to subscribers" structural). What the two *do* share
-/// — latching, the release edge, pane ownership, the preview's free end — is
-/// [`GlyphDrag`]'s. The drag can start from either end (mirroring a data
+/// — latching, the release edge, the fixed end's node, the preview's free
+/// end — is [`GlyphDrag`]'s. The drag can start from either end (mirroring a data
 /// wire's start-from-input-or-output): pull from an emitter and drop on a pin,
 /// or pull from a pin and drop on an emitter. Held-drag only; no const-drop or
 /// new-node spawn.
@@ -47,7 +48,7 @@ enum InFlight {
 
 impl InFlight {
     /// The node at the drag's *fixed* end — whichever glyph the press
-    /// latched. Its graph is the pane that owns the gesture.
+    /// latched.
     fn node(self) -> NodeId {
         match self {
             InFlight::FromEmitter(drag) => drag.node(),
@@ -65,7 +66,7 @@ impl SubscriptionUI {
     /// Whether a subscription-wire gesture is in flight — feeds the
     /// wire-fade tier. (A method, not a `pub(crate)` field: `InFlight` is
     /// module-private.)
-    pub(crate) fn is_dragging(&self) -> bool {
+    pub(crate) const fn is_dragging(&self) -> bool {
         self.state.get().is_some()
     }
 
@@ -74,23 +75,19 @@ impl SubscriptionUI {
     /// end, and commit a `SetSubscription { subscribe: true }` on release over
     /// a valid target. The context's Esc — resolved once by the canvas —
     /// drops the wire.
-    ///
-    /// Swept over the whole scene once per frame — one press, one wire —
-    /// but the snap scans and the commit run against the pane holding the
-    /// drag's fixed end, so a subscription can't span two graphs.
     pub(crate) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
         let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
         // Latch a fresh drag only when idle. An emitter and a pin can't both
         // start one this frame (distinct widget-id spaces, one press), so
         // trying the emitter scan first is arbitrary, not a conflict.
         if self.state.is_idle() {
-            let emitters = graph_ctx.nodes().flat_map(NodeCtx::event_refs);
-            // Only sink nodes render a pin, so only they can start a reverse
-            // event drag.
-            let pins = graph_ctx.nodes().filter(|n| n.sink()).map(|n| n.id);
-            let latched = GlyphDrag::latch(&geometry.events, emitters)
+            // Every event glyph is an emitter, and only sink nodes render a
+            // pin, so whatever glyph a drag started on can start this one.
+            let latched = GlyphDrag::latch(&geometry.events, |_| true)
                 .map(InFlight::FromEmitter)
-                .or_else(|| GlyphDrag::latch(&geometry.subs, pins).map(InFlight::FromSubscriber));
+                .or_else(|| {
+                    GlyphDrag::latch(&geometry.subs, |_| true).map(InFlight::FromSubscriber)
+                });
             if let Some(latched) = latched
                 && graph_ctx.contains(latched.node())
             {
@@ -103,8 +100,8 @@ impl SubscriptionUI {
         let Some(mut state) = self.state.take() else {
             return;
         };
-        // A pane closed mid-drag, or a fixed end deleted under it, drops
-        // the wire — not re-latching is how.
+        // A fixed end deleted under the drag drops the wire — not
+        // re-latching is how.
         if !graph_ctx.contains(state.node()) {
             return;
         }
@@ -177,9 +174,6 @@ impl SubscriptionUI {
     /// preview keeps a committed wire's shape regardless of drag direction.
     pub(crate) fn draw_in_flight(&self, ui: &mut Ui, cx: CanvasCtx<'_>, canvas_origin: Vec2) {
         let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
-        // Scoped to the pane holding the drag's fixed end — see
-        // `ConnectionUI::draw_in_flight` for what an unscoped preview
-        // paints on the neighbouring canvases.
         let (p0, p3) = match self.state.get().copied() {
             None => return,
             Some(InFlight::FromEmitter(drag)) => {

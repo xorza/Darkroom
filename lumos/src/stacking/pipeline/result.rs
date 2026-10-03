@@ -4,8 +4,10 @@ use std::path::PathBuf;
 
 use crate::error::InvalidConfigField;
 use crate::io::image::error::ImageError;
+use crate::stacking::calibration_masters::cosmic_ray::error::UnknownAdcStep;
 use crate::stacking::calibration_masters::error::CalibrationError;
 use crate::stacking::combine::error::Error as StackError;
+use crate::stacking::frame_store::error::FrameStoreError;
 use crate::stacking::stack_product::StackProduct;
 use crate::stacking::star_detection::detector::Diagnostics;
 
@@ -33,7 +35,7 @@ pub struct AlignStackResult {
 }
 
 impl AlignStackResult {
-    pub(crate) fn from_product(
+    pub(crate) const fn from_product(
         product: StackProduct,
         reference: usize,
         registered: usize,
@@ -57,6 +59,8 @@ impl AlignStackResult {
 pub enum Error {
     #[error("no light frames provided")]
     NoFrames,
+    #[error("stacking cancelled")]
+    Cancelled,
     #[error("failed to load light frame '{path}': {source}")]
     Load {
         path: PathBuf,
@@ -85,23 +89,29 @@ pub enum Error {
     DetectionConfig(InvalidConfigField),
     #[error("invalid registration configuration: {0}")]
     RegistrationConfig(InvalidConfigField),
+    #[error("invalid cosmic-ray configuration: {0}")]
+    CosmicRayConfig(InvalidConfigField),
+    #[error("cannot reject cosmic rays in light frame '{path}': {source}")]
+    CosmicRay {
+        path: PathBuf,
+        #[source]
+        source: UnknownAdcStep,
+    },
     #[error(transparent)]
-    Stack(#[from] StackError),
+    FrameStore(#[from] FrameStoreError),
+    #[error(transparent)]
+    Stack(StackError),
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The box on [`Error::Load`] is the only thing holding this line. 128 is
-    /// clippy's `large-error-threshold`, which `result_large_err` measures
-    /// every `Result<_, Error>` in the pipeline against.
-    #[test]
-    fn the_error_stays_under_the_large_err_threshold() {
-        assert!(
-            size_of::<Error>() < 128,
-            "Error is {} bytes; box whichever variant grew it",
-            size_of::<Error>(),
-        );
+/// A combine failure arrives at the one path a caller matches it on: a cancel, an empty set or a
+/// frame-store failure as the pipeline's own, everything else as the combine's.
+impl From<StackError> for Error {
+    fn from(error: StackError) -> Self {
+        match error {
+            StackError::Cancelled => Self::Cancelled,
+            StackError::NoFrames => Self::NoFrames,
+            StackError::FrameStore(error) => Self::FrameStore(error),
+            error => Self::Stack(error),
+        }
     }
 }

@@ -7,12 +7,12 @@
 //! reused by `stacking::star_detection::background` (full-res background+noise map for detection)
 //! and `background_extraction` (tile-centre samples feeding the gradient surface fit).
 
+pub(crate) mod mesh_axis;
 pub(crate) mod spline;
-#[cfg(test)]
-mod tests;
 pub(crate) mod tile_stats;
 pub(crate) mod workspace;
 
+use crate::background_mesh::mesh_axis::MeshAxis;
 use crate::background_mesh::spline::solve_natural_spline_d2;
 use crate::background_mesh::tile_stats::{TileComponent, TileD2y, TileStats};
 use crate::background_mesh::workspace::TileScratch;
@@ -24,13 +24,15 @@ use crate::math::urect::URect;
 use crate::math::vec2us::Vec2us;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
+use std::mem;
+use std::ops::RangeInclusive;
 
 /// Tile grid with precomputed centers and spline coefficients for interpolation.
 #[derive(Debug)]
 pub(crate) struct TileGrid {
     pub(crate) stats: Buffer2<TileStats>,
     /// Second derivatives in Y for the natural cubic spline, both planes per tile.
-    /// Layout: tiles_x * tiles_y, row-major (same as stats).
+    /// Layout: `tiles_x` * `tiles_y`, row-major (same as stats).
     d2y: Vec<TileD2y>,
     /// Precomputed X-coordinates of tile centers (one per tile column).
     pub(crate) centers_x: Vec<f32>,
@@ -40,7 +42,7 @@ pub(crate) struct TileGrid {
 }
 
 impl TileGrid {
-    /// Create an uninitialized TileGrid with preallocated buffers.
+    /// Create an uninitialized `TileGrid` with preallocated buffers.
     ///
     /// `tile_size` is clamped to the image dimensions rather than panicking on a small image:
     /// a sub-tile_size image yields a coarse (possibly single-tile) grid, which the spline
@@ -54,26 +56,14 @@ impl TileGrid {
             dimensions.width,
             dimensions.height
         );
-        let tile_size = tile_size.min(dimensions.width).min(dimensions.height);
-        let tiles_x = dimensions.width.div_ceil(tile_size);
-        let tiles_y = dimensions.height.div_ceil(tile_size);
+        let tile_size = clamped_tile_size(dimensions, tile_size);
+        let columns = MeshAxis::new(dimensions.width, tile_size);
+        let rows = MeshAxis::new(dimensions.height, tile_size);
+        let (tiles_x, tiles_y) = (columns.count(), rows.count());
         let n = tiles_x * tiles_y;
 
-        // Precompute tile center X-coordinates (invariant across rows)
-        let centers_x: Vec<f32> = (0..tiles_x)
-            .map(|tx| {
-                let x_start = tx * tile_size;
-                let x_end = (x_start + tile_size).min(dimensions.width);
-                (x_start + x_end) as f32 * 0.5
-            })
-            .collect();
-        let centers_y: Vec<f32> = (0..tiles_y)
-            .map(|ty| {
-                let y_start = ty * tile_size;
-                let y_end = (y_start + tile_size).min(dimensions.height);
-                (y_start + y_end) as f32 * 0.5
-            })
-            .collect();
+        let centers_x = (0..tiles_x).map(|tile| columns.centre(tile)).collect();
+        let centers_y = (0..tiles_y).map(|tile| rows.centre(tile)).collect();
         Self {
             stats: Buffer2::new_default(tiles_x, tiles_y),
             d2y: vec![TileD2y::default(); n],
@@ -85,18 +75,31 @@ impl TileGrid {
     }
 
     fn matches_layout(&self, dimensions: Size2us, tile_size: usize) -> bool {
-        self.dimensions == dimensions
-            && self.tile_size == tile_size.min(dimensions.width).min(dimensions.height)
+        self.dimensions == dimensions && self.tile_size == clamped_tile_size(dimensions, tile_size)
     }
 
     /// Second derivative in Y at `tile` for the natural cubic spline, for one plane.
     #[inline]
     pub(crate) fn d2y(&self, component: TileComponent, tile: Vec2us) -> f32 {
-        self.d2y[tile.to_index(self.stats.width())].get(component)
+        self.d2y[tile.y * self.stats.width() + tile.x].get(component)
     }
 
     /// Find the tile index whose center is at or before the given Y position.
     #[inline]
+    /// The least and the greatest tile σ.
+    pub(crate) fn sigma_range(&self) -> RangeInclusive<f32> {
+        let stats = self.stats.pixels();
+        let low = stats
+            .iter()
+            .map(|tile| tile.sigma)
+            .fold(f32::INFINITY, f32::min);
+        let high = stats
+            .iter()
+            .map(|tile| tile.sigma)
+            .fold(f32::NEG_INFINITY, f32::max);
+        low..=high
+    }
+
     pub(crate) fn find_lower_tile_y(&self, pos: f32) -> usize {
         // tiles_y >= 1 always (the grid is built from an image with at least one tile row).
         let tiles_y = self.stats.height();
@@ -123,9 +126,8 @@ impl TileGrid {
         tile_scratch: &JobScratchPool<TileScratch>,
     ) {
         let tiles_x = self.stats.width();
-        let tile_size = self.tile_size;
-        let width = self.dimensions.width;
-        let height = self.dimensions.height;
+        let columns = MeshAxis::new(self.dimensions.width, self.tile_size);
+        let rows = MeshAxis::new(self.dimensions.height, self.tile_size);
 
         self.stats
             .pixels_mut()
@@ -134,31 +136,27 @@ impl TileGrid {
             .for_each_init(
                 || tile_scratch.acquire(),
                 |scratch, (idx, out)| {
-                    let TileScratch { values, deviations } = &mut **scratch;
                     let tx = idx % tiles_x;
                     let ty = idx / tiles_x;
 
-                    let start = Vec2us::new(tx * tile_size, ty * tile_size);
                     let tile = URect::new(
-                        start,
-                        Vec2us::new(
-                            (start.x + tile_size).min(width),
-                            (start.y + tile_size).min(height),
-                        ),
+                        Vec2us::new(columns.start(tx), rows.start(ty)),
+                        Vec2us::new(columns.end(tx), rows.end(ty)),
                     );
 
-                    *out = TileStats::compute(
-                        pixels,
-                        mask,
-                        tile,
-                        sigma_clip_iterations,
-                        values,
-                        deviations,
-                    );
+                    *out = TileStats::compute(pixels, mask, tile, sigma_clip_iterations, scratch);
                 },
             );
     }
 
+    /// The 3×3 median of every tile, to reject tiles a bright object spoiled.
+    ///
+    /// Past the grid's edge the window reads the grid point-reflected through the nearest edge
+    /// tile, `2·v(edge) − v(mirror)`: the linear continuation of the sky there. A window cut at the
+    /// edge instead — SExtractor's — is lopsided, so its median pulls every edge tile half a tile
+    /// toward the interior on any sky gradient; the reflected window is symmetric about its centre
+    /// on a plane, whose median is then the centre exactly, at the corners too. One spoiled edge
+    /// tile still loses the vote: at a corner it and its reflections make 4 of the 9 values.
     fn apply_median_filter(&mut self, scratch: &mut Buffer2<TileStats>) {
         let tiles_x = self.stats.width();
         let tiles_y = self.stats.height();
@@ -167,36 +165,40 @@ impl TileGrid {
             return;
         }
 
-        let src = self.stats.pixels();
+        let src = &self.stats;
         let dst = scratch.pixels_mut();
+        let last = Vec2us::new(tiles_x - 1, tiles_y - 1);
 
         dst.par_iter_mut().enumerate().for_each(|(idx, out)| {
-            let tx = idx % tiles_x;
-            let ty = idx / tiles_x;
+            let tile = Vec2us::new(idx % tiles_x, idx / tiles_x);
 
             let mut skies = [0.0f32; 9];
             let mut sigmas = [0.0f32; 9];
             let mut count = 0;
 
-            for dy in -1i32..=1 {
-                for dx in -1i32..=1 {
-                    let nx = tx as i32 + dx;
-                    let ny = ty as i32 + dy;
-
-                    if nx >= 0 && nx < tiles_x as i32 && ny >= 0 && ny < tiles_y as i32 {
-                        let neighbor = src[ny as usize * tiles_x + nx as usize];
-                        skies[count] = neighbor.sky;
-                        sigmas[count] = neighbor.sigma;
-                        count += 1;
-                    }
+            for dy in -1isize..=1 {
+                for dx in -1isize..=1 {
+                    let x = Reflection::of(tile.x, dx, last.x);
+                    let y = Reflection::of(tile.y, dy, last.y);
+                    let edge = src[(x.pivot, y.pivot)];
+                    let (sky, sigma) = if x.pivot == x.mirror && y.pivot == y.mirror {
+                        (edge.sky, edge.sigma)
+                    } else {
+                        let inner = src[(x.mirror, y.mirror)];
+                        (2.0 * edge.sky - inner.sky, 2.0 * edge.sigma - inner.sigma)
+                    };
+                    skies[count] = sky;
+                    sigmas[count] = sigma;
+                    count += 1;
                 }
             }
 
-            out.sky = median_mut(&mut skies[..count]);
-            out.sigma = median_mut(&mut sigmas[..count]);
+            out.sky = median_mut(&mut skies);
+            // A steep σ gradient can reflect below zero, which no noise level is.
+            out.sigma = median_mut(&mut sigmas).max(0.0);
         });
 
-        std::mem::swap(&mut self.stats, scratch);
+        mem::swap(&mut self.stats, scratch);
     }
 
     /// Precompute second derivatives in Y for natural cubic spline interpolation.
@@ -241,3 +243,40 @@ impl TileGrid {
         }
     }
 }
+
+/// The tile a window offset reads along one axis: `pivot` and `mirror` are both the neighbour
+/// itself inside `0..=last`, else the edge tile it reflects through and that tile's inner
+/// neighbour, whose difference continues the grid linearly.
+#[derive(Debug, Clone, Copy)]
+struct Reflection {
+    pivot: usize,
+    mirror: usize,
+}
+
+impl Reflection {
+    /// The neighbour `delta` from `index` on an axis whose last tile is `last` ≥ 1.
+    const fn of(index: usize, delta: isize, last: usize) -> Reflection {
+        let (pivot, mirror) = match index.checked_add_signed(delta) {
+            Some(neighbour) if neighbour <= last => (neighbour, neighbour),
+            Some(_) => (last, last - 1),
+            None => (0, 1),
+        };
+        Reflection { pivot, mirror }
+    }
+}
+
+/// The tile size a grid over `dimensions` uses: `tile_size`, cut to the image's shorter side so
+/// a tile never exceeds the frame.
+const fn clamped_tile_size(dimensions: Size2us, tile_size: usize) -> usize {
+    let side = if dimensions.width < dimensions.height {
+        dimensions.width
+    } else {
+        dimensions.height
+    };
+    if tile_size < side { tile_size } else { side }
+}
+
+#[cfg(all(test, feature = "bench"))]
+mod bench;
+#[cfg(test)]
+mod tests;

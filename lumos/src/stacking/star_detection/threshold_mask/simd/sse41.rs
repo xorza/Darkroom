@@ -3,6 +3,7 @@
 use std::ops::Range;
 
 use std::arch::x86_64::*;
+use std::slice;
 
 use crate::stacking::star_detection::threshold_mask::ThresholdParams;
 use crate::stacking::star_detection::threshold_mask::simd::process_words_scalar;
@@ -49,7 +50,7 @@ pub(super) unsafe fn process_words_sse<const WITH_BG: bool>(
                     };
 
                     let cmp = _mm_cmpgt_ps(px_vec, threshold_vec);
-                    let mask = _mm_movemask_ps(cmp) as u64;
+                    let mask = u64::from(_mm_movemask_ps(cmp).cast_unsigned());
 
                     bits |= mask << (group * 4);
                 }
@@ -62,7 +63,7 @@ pub(super) unsafe fn process_words_sse<const WITH_BG: bool>(
                     bg,
                     noise,
                     threshold,
-                    std::slice::from_mut(word),
+                    slice::from_mut(word),
                     base_pixel..pixel_span.end,
                 );
             }

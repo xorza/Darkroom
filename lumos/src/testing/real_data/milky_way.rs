@@ -5,10 +5,10 @@
 //! Gated behind the `real-data` feature.
 
 use crate::io::image::linear::LinearImage;
-use crate::io::image::load_context::LoadContext;
 use crate::math::statistics::median_mut;
+use crate::testing::init_tracing;
+use crate::testing::real_data;
 use crate::testing::visual;
-use crate::testing::{calibration_dir, init_tracing};
 use crate::{
     ColorMode, Denoise, Hdr, LocalContrast, NeutralizeBackground, Scnr, Stretch, StretchMethod,
 };
@@ -26,8 +26,8 @@ fn assert_displayable(image: &LinearImage, label: &str) {
             (lo.min(v), hi.max(v))
         });
     // The renorm `NeutralizeBackground` shifts the background additively (so it dips negative — as
-    // in the reference renorm image; save_png clamps the floor). Only the highlight ceiling is a hard
-    // display limit; the floor just shouldn't be absurd.
+    // in the reference renorm image; save_png clamps the floor). Only the highlight ceiling is a
+    // hard display limit; the floor just shouldn't be absurd.
     assert!(
         max <= 1.0 + 1e-3 && min > -0.5,
         "{label} is displayable: min {min} max {max}"
@@ -35,12 +35,9 @@ fn assert_displayable(image: &LinearImage, label: &str) {
 }
 
 #[test]
-#[ignore = "real-data image-processing test; run explicitly with --ignored"]
 fn milky_way_best_pipeline() {
     init_tracing();
-    let path = calibration_dir().join("stacked_light.tiff");
-    let mut img =
-        LinearImage::from_file(&path, &LoadContext::default()).expect("load stacked_light.tiff");
+    let mut img = real_data::linear_master();
 
     NeutralizeBackground.apply(&mut img).unwrap(); // equalize the green-elevated background
     Denoise::default().apply(&mut img).unwrap(); // gentle wavelet denoise (MW-tuned default)
@@ -58,7 +55,7 @@ fn milky_way_best_pipeline() {
     NeutralizeBackground.apply(&mut img).unwrap(); // re-neutralize the now-display-domain background
     eprintln!("stretched base: median {:.3}", median(&img));
     assert_displayable(&img, "stretched base");
-    visual::save_linear(&img, "milky_way/stretched.png");
+    visual::save_linear(&img, "milky_way/stretched");
 
     // HDR: gently compress the bright star-cloud cores to reveal detail (small amount; too much
     // flattens the large-scale brightness).
@@ -81,5 +78,5 @@ fn milky_way_best_pipeline() {
 
     eprintln!("enhanced: median {:.3}", median(&img));
     assert_displayable(&img, "enhanced");
-    visual::save_linear(&img, "milky_way/enhanced.png");
+    visual::save_linear(&img, "milky_way/enhanced");
 }

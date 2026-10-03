@@ -5,8 +5,6 @@
 
 use std::fmt::Display;
 
-use glam::Vec2;
-
 use palantir::prelude::*;
 use palantir::widget::Shape;
 use palantir::{FontFamily, ResponseSnapshot, TextInput};
@@ -91,6 +89,10 @@ pub(crate) fn header_background(theme: &Theme, corner_radius: f32) -> Background
     )
 }
 
+/// The gap between the items of one row on a node card: a port's glyph and
+/// its label, a header's chips.
+pub(crate) const ROW_GAP: f32 = 4.0;
+
 /// Horizontal/vertical padding of a card's header band, named beside the
 /// footer pair below so a header and a footer on the same card can't be
 /// tuned apart by accident.
@@ -134,11 +136,16 @@ pub(crate) fn dot(ui: &mut Ui, cx: f32, cy: f32, r: f32, color: RgbaF32) {
 /// stays per-caller: a 30px toolbar button carries proportionally less glyph
 /// than an 18px header badge.
 pub(crate) fn play_triangle(ui: &mut Ui, s: f32, fill: f32, color: RgbaF32) {
+    play_triangle_at(ui, s, Vec2::splat(s * 0.5), fill, color);
+}
+
+/// [`play_triangle`] centred on `c` rather than on the box — for a mark that
+/// shares its box with another, like the event-loop button's bar.
+pub(crate) fn play_triangle_at(ui: &mut Ui, s: f32, c: Vec2, fill: f32, color: RgbaF32) {
     let half_h = s * fill * 0.5;
     let half_w = half_h * (5.0 / 6.0);
     let r = s * 0.05;
     let nudge = half_w * 0.2;
-    let c = Vec2::splat(s * 0.5);
     ui.add_shape(
         Shape::triangle(
             c + Vec2::new(nudge - half_w + r, r - half_h),

@@ -1,22 +1,20 @@
 //! Detection-quality metric curves on forward-model fields.
 //!
-//! The migrated pipeline tests assert pass/fail thresholds; these assert the *shape* of the
-//! detector's response through the `metrics` graders: completeness and reliability are high on a
-//! bright field, astrometry is sub-pixel, completeness falls for fainter (lower-SNR) sources, and
-//! a source-free noise field yields essentially no false positives, completeness falls under
-//! crowding, and the `min_snr` knob gates the faint end.
+//! The *shape* of the detector's response through the `metrics` graders, where the pipeline tests
+//! hold it to exact per-star claims: completeness and reliability are high on a bright field,
+//! astrometry is sub-pixel, completeness falls for fainter (lower-SNR) sources and under crowding,
+//! a source-free noise field yields essentially no false positives, and the `min_snr` knob gates
+//! the faint end.
 
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::stacking::star_detection::tests::{
-    Placement, Scenario, detected_positions, synthetic_config, truth_positions,
+    MATCH_RADIUS, Placement, Scenario, detected_positions, synthetic_config, truth_positions,
 };
 use crate::testing::prelude::*;
 use crate::testing::synthetic::camera::Camera;
 use crate::testing::synthetic::metrics::{astrometric_rms, score_detection};
 use crate::testing::synthetic::observe::{Observation, render};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
-
-const MATCH_RADIUS: f64 = 4.0;
 
 #[test]
 fn completeness_and_reliability_high_for_bright_field() {

@@ -1,14 +1,18 @@
+use scenarium::testing::graph::NodeSpec;
 use scenarium::testing::graph::TestGraph;
-use scenarium::{Binding, CacheMode, DataType, Graph, InputPort, Node, NodeKind};
+use scenarium::{
+    Binding, CacheMode, ConstValue, DataType, FuncId, Graph, InputPort, Node, NodeId, NodeKind,
+};
 
-use crate::core::document::PortKind;
 use crate::core::document::TabRef;
 use crate::core::document::harness::DocFixture;
+use crate::core::document::{PortKind, PortRef};
 use crate::gui::graph_ctx::harness::GraphCtxFixture;
+use crate::gui::graph_ctx::output_ctx::OutputCtx;
 
-/// Composing a context no longer asks whether anyone is looking — the
-/// document, the library and the run resolve either way — so visibility rides
-/// along as a field for the one pass that runs before the tab set settles.
+/// Composing a context does not ask whether anyone is looking — the document,
+/// the library and the run resolve either way — so visibility rides along as a
+/// field for the one pass that runs before the tab set settles.
 ///
 /// It tracks the *active tab*, never the graph's contents, and the two come
 /// apart in both directions: an empty graph on a Graph tab is a real pane (a
@@ -38,7 +42,7 @@ fn only_runnable_sinks_expose_the_disable_toggle() {
     // The third node names a func the library has never held.
     let mut g = TestGraph::new();
     let plain = g.add("plain", |n| n.output(DataType::Int));
-    let sink = g.add("sink_func", |n| n.sink());
+    let sink = g.add("sink_func", NodeSpec::sink);
     let ghost = g.graph.add(Node::new(NodeKind::Func(FuncId::unique())));
     let mut fixture = GraphCtxFixture::over(g);
     let graph_ctx = fixture.graph_ctx();
@@ -67,9 +71,9 @@ fn a_missing_func_reads_as_a_deletable_stub() {
     let mut graph = Graph::default();
     let mut known: Node = library.by_name("Add").unwrap().into();
     known.disabled = true;
-    let mut ghost = Node::new(NodeKind::Func(
-        "7a0265e1-9631-45bd-8ecd-1e923b67a58c".into(),
-    ));
+    let mut ghost = Node::new(NodeKind::Func(FuncId::literal(
+        "7a0265e1-9631-45bd-8ecd-1e923b67a58c",
+    )));
     ghost.name = "astro_to_image".into();
     let known_id = graph.add(known);
     let ghost_id = graph.add(ghost);
@@ -96,7 +100,7 @@ fn a_missing_func_reads_as_a_deletable_stub() {
 
     // The resolved node, by contrast, exposes its real ports.
     assert!(
-        known_node.inputs().len() > 0,
+        known_node.inputs().len() == 2,
         "the resolved func still reports its interface"
     );
 
@@ -131,7 +135,7 @@ fn func_events_read_in_order_alongside_outputs() {
     assert_eq!(event_names, ["Always", "FPS"], "events read in order");
     assert_eq!(n.event_refs().count(), 2, "one ref per declared event");
 
-    let output_names: Vec<&str> = n.outputs().map(|o| o.name()).collect();
+    let output_names: Vec<&str> = n.outputs().map(OutputCtx::name).collect();
     assert_eq!(
         output_names,
         ["Delta", "Frame #"],
@@ -195,22 +199,20 @@ fn cache_mode_reads_verbatim_per_node() {
 
 #[test]
 fn impure_flag_reads_from_func_behavior() {
-    // Three funcs differing only in the flags the header gate reads: a `Pure`
-    // one (offers the storage toggles), an `Impure` one (no content digest,
-    // so the toggles are hidden), and a self-caching one.
+    // Three funcs differing only in what the header gate reads: a `Pure` one
+    // (offers the storage toggles), an `Impure` one (no content digest, so the
+    // toggles are hidden), and an outputless sink (nothing to store).
     let mut g = TestGraph::new();
     let pure_id = g.add("pure_src", |n| n.pure().output(DataType::Int));
     let impure_id = g.add("impure_src", |n| n.output(DataType::Int));
-    let self_cached_id = g.add("self_cached", |n| {
-        n.pure().uncacheable().output(DataType::Int)
-    });
+    let outputless_id = g.add("outputless", |n| n.sink().input(DataType::Int));
 
     let mut fixture = GraphCtxFixture::over(g);
     let graph_ctx = fixture.graph_ctx();
 
     let pure = graph_ctx.node(pure_id).unwrap();
     let impure = graph_ctx.node(impure_id).unwrap();
-    let self_cached = graph_ctx.node(self_cached_id).unwrap();
+    let outputless = graph_ctx.node(outputless_id).unwrap();
 
     assert!(!pure.impure(), "a Pure func keeps its cache chips");
     assert!(impure.impure(), "an Impure func hides its cache chips");
@@ -226,12 +228,8 @@ fn impure_flag_reads_from_func_behavior() {
     assert!(pure.cache_controls());
     assert!(!impure.cache_controls());
     assert!(
-        self_cached.can_evict_cache(),
-        "self-caching funcs can still have cached downstream consumers"
-    );
-    assert!(
-        !self_cached.cache_controls(),
-        "self-caching funcs hide Scenarium storage controls"
+        !outputless.cache_controls() && !outputless.can_evict_cache(),
+        "an outputless func has nothing to store or evict"
     );
     assert!(!pure.sink() && !impure.sink());
 }
@@ -263,9 +261,11 @@ fn a_wildcard_output_follows_the_wire_it_mirrors_from_the_next_read_on() {
             .graph_ctx()
             .node(consumer)
             .expect("the passthrough resolves")
-            .output(0)
+            .outputs()
+            .next()
             .expect("it declares one output")
             .ty()
+            .clone()
     };
 
     assert_eq!(
@@ -283,5 +283,78 @@ fn a_wildcard_output_follows_the_wire_it_mirrors_from_the_next_read_on() {
         resolved_output(&mut fixture),
         DataType::Int,
         "the next read follows the new wire — nothing was invalidated in between"
+    );
+
+    // `port_type`, the per-wire read, answers the same off the graph and the
+    // table: the input's declared type, the output's resolved one, and `None`
+    // for a port no node holds.
+    let graph_ctx = fixture.graph_ctx();
+    assert_eq!(
+        graph_ctx.port_type(PortRef::input(consumer, 0)),
+        Some(&DataType::Any)
+    );
+    assert_eq!(
+        graph_ctx.port_type(PortRef::output(consumer, 0)),
+        Some(&DataType::Int)
+    );
+    assert_eq!(
+        graph_ctx.port_type(PortRef::output(producer, 0)),
+        Some(&DataType::Int)
+    );
+    assert_eq!(
+        graph_ctx.port_type(PortRef::input(NodeId::unique(), 0)),
+        None
+    );
+}
+
+/// An input reads as set aside exactly while the input declared to override
+/// it holds something: unbound or `Null` leaves the knob in force, a
+/// constant or a wire from an enabled node sets it aside and names the
+/// overrider, and a wire from a disabled node leaves it in force again.
+#[test]
+fn an_input_reads_as_set_aside_while_its_overrider_holds_something() {
+    let mut g = TestGraph::new();
+    let knob = g.add("knob", |n| {
+        n.input(DataType::Float)
+            .const_only()
+            .optional(DataType::Float)
+            .overrides(0)
+    });
+    let feed = g.add("feed", |n| n.output(DataType::Float));
+    let config = InputPort::new(knob, 1);
+    let mut fixture = GraphCtxFixture::over(g);
+    let set_aside = |fixture: &mut GraphCtxFixture, binding: Option<Binding>| {
+        fixture
+            .open
+            .document
+            .graph
+            .set_input_binding(config, binding);
+        let graph_ctx = fixture.graph_ctx();
+        let node = graph_ctx.node(knob).unwrap();
+        (
+            node.input(0).unwrap().overridden_by().map(str::to_owned),
+            node.input(1).unwrap().overridden_by().map(str::to_owned),
+        )
+    };
+
+    assert_eq!(set_aside(&mut fixture, None), (None, None));
+    assert_eq!(
+        set_aside(&mut fixture, Some(Binding::Const(ConstValue::Null))),
+        (None, None)
+    );
+    assert_eq!(
+        set_aside(&mut fixture, Some(Binding::Const(ConstValue::Float(2.0)))),
+        (Some("in1".to_owned()), None),
+        "a constant sets the knob aside, and the overrider itself is never set aside"
+    );
+    assert_eq!(
+        set_aside(&mut fixture, Some(Binding::bind(feed, 0))),
+        (Some("in1".to_owned()), None)
+    );
+    fixture.open.document.graph.find_mut(feed).unwrap().disabled = true;
+    assert_eq!(
+        set_aside(&mut fixture, Some(Binding::bind(feed, 0))),
+        (None, None),
+        "a disabled producer delivers nothing, so the knob is in force"
     );
 }

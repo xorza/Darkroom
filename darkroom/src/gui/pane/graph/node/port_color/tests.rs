@@ -44,7 +44,7 @@ fn a_typed_ports_color_varies_by_type_and_hover_but_not_by_column() {
     }
 }
 
-/// Every port lifts through one rule now, so an untyped port rests on its
+/// Every port lifts through one rule, so an untyped port rests on its
 /// positional colour and hovers to the same emphasis a typed one would.
 #[test]
 fn null_falls_back_to_positional_port_color() {
@@ -70,11 +70,6 @@ fn null_falls_back_to_positional_port_color() {
 #[test]
 fn custom_types_keyed_by_type_id() {
     let t = Theme::default();
-    // Same id → same color.
-    assert_eq!(
-        port_color(&t, &custom(7), PortKind::Input, false),
-        port_color(&t, &custom(7), PortKind::Input, false),
-    );
     // Ids in adjacent ramp slots → different colors (ramp entries
     // are distinct, len > 1).
     assert_ne!(
@@ -84,7 +79,7 @@ fn custom_types_keyed_by_type_id() {
     // The lens image type bypasses the ramp for its owned hue, which no
     // ramp entry may duplicate — a hash pick must never impersonate the
     // image color.
-    let image_ty = DataType::Custom(*lens::IMAGE_TYPE_ID);
+    let image_ty = DataType::Custom(lens::IMAGE_TYPE_ID);
     assert_eq!(
         port_color(&t, &image_ty, PortKind::Input, false),
         t.type_colors.image

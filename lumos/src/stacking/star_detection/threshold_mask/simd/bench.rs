@@ -7,7 +7,19 @@ use crate::testing::prelude::*;
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
-fn create_bench_data(size: usize) -> (Buffer2<f32>, Buffer2<f32>, Buffer2<f32>) {
+/// Pixel, background and noise planes for one threshold pass.
+#[derive(Debug)]
+struct BenchData {
+    pixels: Buffer2<f32>,
+    bg: Buffer2<f32>,
+    noise: Buffer2<f32>,
+}
+
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "synthetic fixtures are small images with non-negative coordinates"
+)]
+fn create_bench_data(size: usize) -> BenchData {
     let mut pixels_data = vec![0.0f32; size];
     let mut bg_data = vec![1.0f32; size];
     let mut noise_data = vec![0.1f32; size];
@@ -22,16 +34,16 @@ fn create_bench_data(size: usize) -> (Buffer2<f32>, Buffer2<f32>, Buffer2<f32>) 
     let height = size / width;
     let actual_size = width * height;
 
-    (
-        Buffer2::new(width, height, pixels_data[..actual_size].to_vec()),
-        Buffer2::new(width, height, bg_data[..actual_size].to_vec()),
-        Buffer2::new(width, height, noise_data[..actual_size].to_vec()),
-    )
+    BenchData {
+        pixels: Buffer2::new(width, height, pixels_data[..actual_size].to_vec()),
+        bg: Buffer2::new(width, height, bg_data[..actual_size].to_vec()),
+        noise: Buffer2::new(width, height, noise_data[..actual_size].to_vec()),
+    }
 }
 
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_threshold_mask_4k(b: ::quickbench::Bencher) {
-    let (pixels, bg, noise) = create_bench_data(4096 * 4096);
+    let BenchData { pixels, bg, noise } = create_bench_data(4096 * 4096);
     let mut mask = BitBuffer2::new_filled(Size2us::new(4096, 4096), false);
     let pixel_end = pixels.len();
 

@@ -2,6 +2,7 @@ use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::stacking::calibration_masters::defect_map::sampling::collect_color_samples;
 use crate::stacking::calibration_masters::defect_map::*;
 use ::quickbench::quick_bench;
+use std::hint;
 
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_collect_color_samples(b: quickbench::Bencher) {
@@ -12,11 +13,5 @@ fn bench_collect_color_samples(b: quickbench::Bencher) {
         (0..size.pixel_count()).map(|i| (i % 1000) as f32).collect(),
     );
     let cfa = CfaType::Bayer(CfaPattern::Rggb);
-    b.bench(|| {
-        std::hint::black_box(collect_color_samples(
-            std::hint::black_box(&data),
-            Some(&cfa),
-            0,
-        ))
-    });
+    b.bench(|| hint::black_box(collect_color_samples(hint::black_box(&data), cfa, 0)));
 }

@@ -3,24 +3,16 @@
 //! intra-op threading — concurrent Sessions were measured slower and memory-hungry on this
 //! memory-bound model.
 //!
-//! Run: `cargo test -p lumos --release --features ml,real-data ml_full_image -- --ignored --nocapture`.
+//! Run: `cargo test -p lumos --release --features ml,real-data ml_full_image -- --ignored
+//! --nocapture`.
 
 use std::time::Instant;
 
+use crate::image_ops::ml::backend::internals::tile_count;
 use crate::image_ops::ml::star_removal::RemoveStars;
 use crate::testing::init_tracing;
-use crate::testing::real_data::ml_support::{onnx_weights, stretched_master};
-
-/// Count of 512-wide tiles covering `dim` at `stride` — mirrors the backend's `tile_starts`.
-fn tiles_1d(dim: usize, stride: usize) -> usize {
-    const WINDOW: usize = 512;
-    let (mut n, mut x) = (1usize, 0usize);
-    while x + WINDOW < dim {
-        x += stride;
-        n += 1;
-    }
-    n
-}
+use crate::testing::real_data;
+use crate::testing::real_data::ml_support::onnx_weights;
 
 #[test]
 #[ignore = "perf probe: loads the 125MB model and processes the whole frame; run manually"]
@@ -29,9 +21,9 @@ fn ml_full_image_timing() {
     let Some(weights) = onnx_weights("STARNET2_ONNX", "StarNet2_weights.onnx") else {
         return;
     };
-    let img = stretched_master();
+    let img = real_data::display_master();
     let (w, h, stride) = (img.width(), img.height(), 256usize);
-    let tiles = tiles_1d(w, stride) * tiles_1d(h, stride);
+    let tiles = tile_count(w, stride) * tile_count(h, stride);
 
     let t = Instant::now();
     RemoveStars::new(weights).split(img).expect("star removal");

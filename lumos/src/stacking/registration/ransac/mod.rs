@@ -12,9 +12,6 @@
 //! 4. Keeping the best model
 //! 5. Refining with least squares on inliers
 
-#[cfg(test)]
-mod tests;
-
 pub(crate) mod config;
 mod magsac;
 mod sampling;
@@ -24,22 +21,27 @@ use magsac::MagsacScorer;
 use transforms::{adaptive_iterations, estimate_transform};
 
 use std::cmp::Ordering;
+use std::mem;
 
 use glam::DVec2;
 
 use crate::stacking::registration::point_pairs::PointPairs;
 use crate::stacking::registration::ransac::config::RansacConfig;
 use crate::stacking::registration::ransac::sampling::{
-    PHASE_POOL_FRACTIONS, PHASE_WEIGHTED, SAMPLING_PHASES, make_rng, random_sample_into,
+    GUIDED_POOL_FRACTIONS, guided_phase_iterations, make_rng, random_sample_into,
     weighted_sample_into,
 };
+use crate::stacking::registration::result::RansacFailureReason;
 use crate::stacking::registration::transform::{Transform, TransformType};
 use crate::stacking::registration::triangle::voting::PointMatch;
 
 /// Pre-allocated buffers for local optimization (LO-RANSAC) to avoid per-iteration allocations.
 #[derive(Debug)]
 struct LocalOptBuffers {
+    /// The inliers of the refinement that is currently best.
     inlier_buf: Vec<usize>,
+    /// The inliers of the refit being scored.
+    scored: Vec<usize>,
     points: PointPairs,
 }
 
@@ -47,6 +49,7 @@ impl LocalOptBuffers {
     fn with_capacity(n: usize) -> Self {
         Self {
             inlier_buf: Vec::with_capacity(n),
+            scored: Vec::with_capacity(n),
             points: PointPairs::with_capacity(n),
         }
     }
@@ -65,21 +68,6 @@ struct ScoredHypothesis {
     inliers: Vec<usize>,
 }
 
-impl ScoredHypothesis {
-    /// An empty hypothesis, scored worse than anything that will be compared against it.
-    ///
-    /// `transform` is a placeholder: "nothing found yet" is carried by `inliers` staying below
-    /// the model's minimum sample count, and no reader reaches the transform without clearing
-    /// that bar first.
-    fn empty(inlier_capacity: usize) -> Self {
-        Self {
-            transform: Transform::identity(),
-            score: f64::NEG_INFINITY,
-            inliers: Vec::with_capacity(inlier_capacity),
-        }
-    }
-}
-
 /// Minimum cross-product magnitude to consider points non-collinear.
 /// For points separated by ~1 pixel, a cross product of 1.0 corresponds
 /// to ~1 pixel perpendicular offset — below this, the sample is too
@@ -93,10 +81,15 @@ pub(super) struct RansacResult {
     pub(super) transform: Transform,
     /// Indices of inlier matches.
     pub(super) inliers: Vec<usize>,
-    /// RANSAC iterations performed — a diagnostic; the adaptive-early-termination
-    /// test asserts on it (no production reader yet).
-    #[cfg_attr(not(test), allow(dead_code))]
-    iterations: usize,
+}
+
+/// Why RANSAC produced no model: the reason, how many iterations ran, and the most inliers any
+/// hypothesis gathered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct RansacFailure {
+    pub(super) reason: RansacFailureReason,
+    pub(super) iterations: usize,
+    pub(super) best_inlier_count: usize,
 }
 
 /// RANSAC estimator for robust transformation fitting.
@@ -154,21 +147,11 @@ impl RansacEstimator {
         let min_samples = transform_type.min_points();
         let mut current_transform = hypothesis.transform;
 
-        // Use inlier_buf as the "current best" and a local scratch for scoring.
+        // `inlier_buf` holds the current best's inliers, `scored` the refit being scored. The
+        // hypothesis beat the running best, so its score is complete and is where LO starts.
         buffers.inlier_buf.clear();
         buffers.inlier_buf.extend_from_slice(&hypothesis.inliers);
-        let mut scratch_inliers = Vec::with_capacity(buffers.inlier_buf.len());
-
-        // Compute initial score
-        let initial_score = score_hypothesis(
-            ref_points,
-            target_points,
-            &current_transform,
-            scorer,
-            &mut scratch_inliers,
-            f64::NEG_INFINITY,
-        );
-        let mut current_score = initial_score;
+        let mut current_score = hypothesis.score;
 
         for _ in 0..self.config.lo_iterations {
             if buffers.inlier_buf.len() < min_samples {
@@ -180,13 +163,12 @@ impl RansacEstimator {
                 .points
                 .gather(&buffers.inlier_buf, ref_points, target_points);
 
-            let refined = match estimate_transform(
+            let Some(refined) = estimate_transform(
                 &buffers.points.reference,
                 &buffers.points.target,
                 transform_type,
-            ) {
-                Some(t) => t,
-                None => break,
+            ) else {
+                break;
             };
 
             // Score with refined transform
@@ -195,18 +177,18 @@ impl RansacEstimator {
                 target_points,
                 &refined,
                 scorer,
-                &mut scratch_inliers,
+                &mut buffers.scored,
                 current_score,
             );
 
             // Check for convergence (no improvement)
-            if scratch_inliers.len() <= buffers.inlier_buf.len() && new_score <= current_score {
+            if buffers.scored.len() <= buffers.inlier_buf.len() && new_score <= current_score {
                 break;
             }
 
             // Update if improved
             current_transform = refined;
-            std::mem::swap(&mut buffers.inlier_buf, &mut scratch_inliers);
+            mem::swap(&mut buffers.inlier_buf, &mut buffers.scored);
             current_score = new_score;
         }
 
@@ -218,42 +200,49 @@ impl RansacEstimator {
         if current_score > hypothesis.score && self.is_plausible(&current_transform) {
             hypothesis.transform = current_transform;
             hypothesis.score = current_score;
-            std::mem::swap(&mut hypothesis.inliers, &mut buffers.inlier_buf);
+            mem::swap(&mut hypothesis.inliers, &mut buffers.inlier_buf);
         }
     }
 
     /// Core RANSAC loop with MAGSAC++ scoring.
     ///
-    /// The `sample_fn` closure fills `sample_indices` buffer each iteration.
-    /// It receives `(iteration, max_iterations, &mut sample_buf)`.
+    /// `sample_fn` fills the sample for each iteration, numbered from 1. The first
+    /// `guided_iterations` are the sampler's guided warm-up, which the adaptive bound does not
+    /// count — see `sampling`.
     fn ransac_loop(
         &self,
         ref_points: &[DVec2],
         target_points: &[DVec2],
-        n: usize,
-        min_samples: usize,
         transform_type: TransformType,
-        mut sample_fn: impl FnMut(usize, usize, &mut Vec<usize>),
-    ) -> Option<RansacResult> {
-        // Initialize MAGSAC++ scorer
+        guided_iterations: usize,
+        mut sample_fn: impl FnMut(usize, &mut Vec<usize>),
+    ) -> Result<RansacResult, RansacFailure> {
+        let n = ref_points.len();
+        let min_samples = transform_type.min_points();
         let scorer = MagsacScorer::new(self.max_sigma);
 
-        let mut best = ScoredHypothesis::empty(0);
-
-        // Pre-allocate buffers to avoid per-iteration allocations
+        // `None` until a hypothesis scores at all. `scratch` is where the next hypothesis is
+        // scored; a new best takes it and hands the old best's buffer back, so the loop allocates
+        // nothing after its first improvement.
+        let mut best: Option<ScoredHypothesis> = None;
+        let mut scratch: Vec<usize> = Vec::with_capacity(n);
         let mut sample_indices: Vec<usize> = Vec::with_capacity(min_samples);
         let mut sample = PointPairs::with_capacity(min_samples);
-        let mut current = ScoredHypothesis::empty(n);
         let mut lo_buffers = LocalOptBuffers::with_capacity(n);
 
-        let mut iterations = 0;
         let max_iter = self.config.max_iterations;
+        // The adaptive bound of the best hypothesis so far, in uniform iterations, checked on every
+        // iteration: once that many have run, an all-inlier sample has been drawn with the
+        // configured confidence, whether or not anything has improved on that hypothesis since.
+        let mut iteration_bound = max_iter;
+        let mut iterations = 0;
 
-        while iterations < max_iter {
+        while iterations < max_iter
+            && iterations.saturating_sub(guided_iterations) < iteration_bound
+        {
             iterations += 1;
 
-            // Fill sample indices via the provided strategy
-            sample_fn(iterations, max_iter, &mut sample_indices);
+            sample_fn(iterations, &mut sample_indices);
 
             // Extract sample points (reusing buffers)
             sample.gather(&sample_indices, ref_points, target_points);
@@ -264,112 +253,106 @@ impl RansacEstimator {
             }
 
             // Estimate transformation from sample
-            let transform =
-                match estimate_transform(&sample.reference, &sample.target, transform_type) {
-                    Some(t) => t,
-                    None => continue,
-                };
+            let Some(transform) =
+                estimate_transform(&sample.reference, &sample.target, transform_type)
+            else {
+                continue;
+            };
 
             // Reject physically implausible hypotheses early (before expensive scoring)
             if !self.is_plausible(&transform) {
                 continue;
             }
 
-            // Score with MAGSAC++ (preemptive: skip if cannot beat current best)
-            current.transform = transform;
-            current.score = score_hypothesis(
+            // Score with MAGSAC++, preemptively: a hypothesis that cannot beat the best stops
+            // scoring early, and its `scratch` is then incomplete — which is why only one that
+            // beats the best is ever read further.
+            let best_score = best.as_ref().map_or(f64::NEG_INFINITY, |best| best.score);
+            let score = score_hypothesis(
                 ref_points,
                 target_points,
                 &transform,
                 &scorer,
-                &mut current.inliers,
-                best.score,
+                &mut scratch,
+                best_score,
             );
+            if score <= best_score {
+                continue;
+            }
+            let mut candidate = ScoredHypothesis {
+                transform,
+                score,
+                inliers: mem::take(&mut scratch),
+            };
 
             // Local Optimization: refine only new-best hypotheses (standard LO-RANSAC)
-            if self.config.local_optimization
-                && current.score > best.score
-                && current.inliers.len() >= min_samples
-            {
+            if self.config.local_optimization && candidate.inliers.len() >= min_samples {
                 self.local_optimization(
                     ref_points,
                     target_points,
-                    &mut current,
+                    &mut candidate,
                     &scorer,
                     &mut lo_buffers,
                 );
             }
 
-            // Update best if improved. The swap hands `current` the old best's inlier buffer,
-            // which the next iteration's scoring refills.
-            if current.score > best.score {
-                std::mem::swap(&mut best, &mut current);
-
-                // Adaptive iteration count based on inlier ratio
-                let inlier_ratio = best.inliers.len() as f64 / n as f64;
-                if inlier_ratio >= self.config.min_inlier_ratio {
-                    let adaptive_max =
-                        adaptive_iterations(inlier_ratio, min_samples, self.config.confidence);
-                    if iterations >= adaptive_max {
-                        break;
-                    }
-                }
+            let inlier_ratio = candidate.inliers.len() as f64 / n as f64;
+            if inlier_ratio >= self.config.min_inlier_ratio {
+                iteration_bound =
+                    adaptive_iterations(inlier_ratio, min_samples, self.config.confidence)
+                        .min(max_iter);
+            }
+            if let Some(previous) = best.replace(candidate) {
+                scratch = previous.inliers;
             }
         }
 
-        // Final refinement with least squares on all inliers. Too few inliers to re-estimate
-        // from is also how "no hypothesis was ever accepted" reads — `best` starts empty.
-        if best.inliers.len() >= min_samples {
-            lo_buffers
-                .points
-                .gather(&best.inliers, ref_points, target_points);
-
-            let refined = estimate_transform(
-                &lo_buffers.points.reference,
-                &lo_buffers.points.target,
-                transform_type,
-            );
-
-            // The loop's scratch, reused to score the refit.
-            let mut scratch_inliers = current.inliers;
-
-            if let Some(refined) = refined
-                && refined.is_valid()
-                && self.is_plausible(&refined)
-            {
-                let refined_score = score_hypothesis(
-                    ref_points,
-                    target_points,
-                    &refined,
-                    &scorer,
-                    &mut scratch_inliers,
-                    best.score,
-                );
-
-                if refined_score >= best.score && scratch_inliers.len() >= min_samples {
-                    return Some(RansacResult {
-                        transform: refined,
-                        inliers: scratch_inliers,
-                        iterations,
-                    });
-                }
-            }
-
-            return Some(RansacResult {
-                transform: best.transform,
-                inliers: best.inliers,
+        // Final refinement with least squares on all inliers. A best with fewer inliers than a
+        // minimal sample has nothing to re-estimate from, and is no model.
+        let best_inlier_count = best.as_ref().map_or(0, |best| best.inliers.len());
+        let Some(best) = best.filter(|best| best.inliers.len() >= min_samples) else {
+            return Err(RansacFailure {
+                reason: RansacFailureReason::NoInliersFound,
                 iterations,
+                best_inlier_count,
             });
+        };
+        lo_buffers
+            .points
+            .gather(&best.inliers, ref_points, target_points);
+        let refined = estimate_transform(
+            &lo_buffers.points.reference,
+            &lo_buffers.points.target,
+            transform_type,
+        );
+        if let Some(refined) = refined
+            && self.is_plausible(&refined)
+        {
+            let refined_score = score_hypothesis(
+                ref_points,
+                target_points,
+                &refined,
+                &scorer,
+                &mut scratch,
+                best.score,
+            );
+            if refined_score >= best.score && scratch.len() >= min_samples {
+                return Ok(RansacResult {
+                    transform: refined,
+                    inliers: scratch,
+                });
+            }
         }
-
-        None
+        Ok(RansacResult {
+            transform: best.transform,
+            inliers: best.inliers,
+        })
     }
 
     /// Estimate transformation from star matches.
     ///
-    /// Uses match confidence scores to guide hypothesis sampling via 3-phase
-    /// progressive sampling: early iterations preferentially sample high-confidence
-    /// matches, converging faster than uniform random sampling.
+    /// Uses match confidence scores to guide the first hypotheses — see `sampling` — and samples
+    /// uniformly after them.
     ///
     /// # Arguments
     /// * `matches` - Star matches with confidence scores from triangle matching
@@ -378,31 +361,39 @@ impl RansacEstimator {
     /// * `transform_type` - Type of transformation to estimate
     ///
     /// # Returns
-    /// Best transformation found, or None if estimation failed.
+    /// Best transformation found, or why there is none.
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "the sampling fraction of a match count is non-negative"
+    )]
     pub(super) fn estimate(
         &self,
         matches: &[PointMatch],
         ref_stars: &[DVec2],
         target_stars: &[DVec2],
         transform_type: TransformType,
-    ) -> Option<RansacResult> {
-        if matches.is_empty() {
-            return None;
+    ) -> Result<RansacResult, RansacFailure> {
+        let min_samples = transform_type.min_points();
+        if matches.len() < min_samples {
+            return Err(RansacFailure {
+                reason: RansacFailureReason::TooFewMatches,
+                iterations: 0,
+                best_inlier_count: 0,
+            });
         }
 
         // Extract point pairs and confidences from matches
-        let ref_points: Vec<DVec2> = matches.iter().map(|m| ref_stars[m.ref_idx]).collect();
-        let target_points: Vec<DVec2> =
-            matches.iter().map(|m| target_stars[m.target_idx]).collect();
+        let ref_points: Vec<DVec2> = matches
+            .iter()
+            .map(|m| ref_stars[m.indices.reference])
+            .collect();
+        let target_points: Vec<DVec2> = matches
+            .iter()
+            .map(|m| target_stars[m.indices.target])
+            .collect();
         let confidences: Vec<f64> = matches.iter().map(|m| m.confidence).collect();
 
         let n = ref_points.len();
-        let min_samples = transform_type.min_points();
-
-        if n < min_samples {
-            return None;
-        }
-
         let mut rng = make_rng(self.config.seed);
 
         // Build sorted index by confidence (descending)
@@ -425,20 +416,15 @@ impl RansacEstimator {
         // Persistent key buffer for weighted A-Res sampling (avoids a per-iteration allocation).
         let mut weighted_scratch: Vec<(usize, f64)> = Vec::new();
 
+        let phase_length = guided_phase_iterations(min_samples, self.config.confidence);
         self.ransac_loop(
             &ref_points,
             &target_points,
-            n,
-            min_samples,
             transform_type,
-            |iteration, max_iter, sample_buf| {
-                // Progressive sampling: phases ramp from high-confidence pool to full pool
-                let phase = (iteration * SAMPLING_PHASES / max_iter).min(SAMPLING_PHASES - 1);
-                let pool_size =
-                    ((n as f64 * PHASE_POOL_FRACTIONS[phase]).ceil() as usize).max(min_samples);
-                let use_weighted = PHASE_WEIGHTED[phase];
-
-                if use_weighted {
+            GUIDED_POOL_FRACTIONS.len() * phase_length,
+            |iteration, sample_buf| {
+                if let Some(&fraction) = GUIDED_POOL_FRACTIONS.get((iteration - 1) / phase_length) {
+                    let pool_size = ((n as f64 * fraction).ceil() as usize).max(min_samples);
                     weighted_sample_into(
                         &mut rng,
                         &sorted_indices[..pool_size],
@@ -534,3 +520,6 @@ fn score_hypothesis(
     // Negate so higher score = better model
     -total_loss
 }
+
+#[cfg(test)]
+mod tests;

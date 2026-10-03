@@ -4,14 +4,13 @@
 //! either a `Buffer2` in RAM or a memory map over a file, and every read goes through the same
 //! [`StoredPlane::chunk`] either way.
 
-use std::fs::File;
-use std::mem::size_of;
-use std::path::PathBuf;
+use std::path::Path;
 
 use imaginarium::Buffer2;
 use memmap2::Mmap;
 
 use crate::stacking::frame_store::error::FrameStoreError;
+use crate::stacking::frame_store::frame_spill;
 
 /// One planar f32 buffer, either resident or memory-mapped.
 #[derive(Debug)]
@@ -21,21 +20,21 @@ pub(crate) enum StoredPlane {
 }
 
 impl StoredPlane {
+    /// Write `pixels` to `path` as the plane file [`Self::map`] reads back.
+    pub(crate) fn write(path: &Path, pixels: &[f32]) -> Result<(), FrameStoreError> {
+        frame_spill::write_file(path, bytemuck::cast_slice(pixels))
+    }
+
     /// Memory-map a spilled plane file.
-    pub(crate) fn map(path: PathBuf) -> Result<Self, FrameStoreError> {
-        let file = File::open(&path).map_err(|source| FrameStoreError::OpenFile {
-            path: path.clone(),
-            source,
-        })?;
-        let mmap = unsafe {
-            Mmap::map(&file).map_err(|source| FrameStoreError::MemoryMap {
-                path: path.clone(),
-                source,
-            })?
-        };
+    pub(crate) fn map(path: &Path) -> Result<Self, FrameStoreError> {
+        let mmap = frame_spill::map_file(path)?;
         #[cfg(unix)]
         {
             use memmap2::Advice;
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "read-ahead advice is a hint: a kernel that refuses it reads the plane all the same"
+            )]
             let _ = mmap.advise(Advice::Sequential);
         }
         Ok(Self::Mapped(mmap))

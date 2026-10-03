@@ -5,11 +5,12 @@ use crate::stacking::registration::triangle::voting::MatchIndices;
 use glam::DVec2;
 
 use crate::error::InvalidConfigField;
-use crate::stacking::registration::distortion::sip::SipFitResult;
+use crate::stacking::registration::distortion::sip::SipPolynomial;
 use crate::stacking::registration::transform::{Transform, TransformType, WarpTransform};
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
 
-/// Minimum inlier count for a meaningful quality score (below this the fit is unreliable).
-const QUALITY_MIN_INLIERS: usize = 4;
 /// RMS error decay scale: `quality_error = exp(-rms / SCALE)`. At rms=2.0, factor ≈ 0.37.
 const QUALITY_ERROR_SCALE: f64 = 2.0;
 /// Inlier saturation point: `quality_count = min(inliers / SAT, 1.0)`. Full credit at 20+ inliers.
@@ -24,8 +25,8 @@ pub enum RegistrationCatalog {
     Target,
 }
 
-impl std::fmt::Display for RegistrationCatalog {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for RegistrationCatalog {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             RegistrationCatalog::Reference => f.write_str("reference"),
             RegistrationCatalog::Target => f.write_str("target"),
@@ -36,23 +37,17 @@ impl std::fmt::Display for RegistrationCatalog {
 /// Reason for RANSAC failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RansacFailureReason {
-    /// No inliers found after all iterations.
+    /// Fewer candidate matches than the model's minimal sample: RANSAC never ran.
+    TooFewMatches,
+    /// No hypothesis gathered a minimal sample's worth of inliers in the iterations run.
     NoInliersFound,
-    /// Point set is degenerate (collinear, coincident, etc.).
-    DegeneratePointSet,
-    /// Matrix computation failed (singular matrix).
-    SingularMatrix,
-    /// Found some inliers but not enough to meet threshold.
-    InsufficientInliers,
 }
 
-impl std::fmt::Display for RansacFailureReason {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for RansacFailureReason {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
+            RansacFailureReason::TooFewMatches => write!(f, "too few matches to sample"),
             RansacFailureReason::NoInliersFound => write!(f, "no inliers found"),
-            RansacFailureReason::DegeneratePointSet => write!(f, "degenerate point set"),
-            RansacFailureReason::SingularMatrix => write!(f, "singular matrix"),
-            RansacFailureReason::InsufficientInliers => write!(f, "insufficient inliers"),
         }
     }
 }
@@ -69,8 +64,8 @@ pub struct FailedRung {
     pub error: Box<RegistrationError>,
 }
 
-impl std::fmt::Display for FailedRung {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for FailedRung {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}: {}", self.model, self.error)
     }
 }
@@ -112,6 +107,10 @@ pub enum RegistrationError {
     /// No matching star patterns found.
     #[error("No matching star patterns found between images")]
     NoMatchingPatterns,
+    /// The fit, after match recovery, rests on fewer star pairs than
+    /// [`min_matches`](crate::RegistrationConfig) asks for.
+    #[error("Too few inliers: found {found}, need {required}")]
+    TooFewInliers { found: usize, required: usize },
     /// RANSAC failed to find valid transformation.
     #[error(
         "RANSAC failed: {reason} (iterations: {iterations}, best inlier count: {best_inlier_count})"
@@ -127,9 +126,6 @@ pub enum RegistrationError {
     /// Registration accuracy too low.
     #[error("Registration accuracy too low: {rms_error:.3} pixels (max: {max_allowed:.3})")]
     AccuracyTooLow { rms_error: f64, max_allowed: f64 },
-    /// Star detection failed.
-    #[error("Star detection failed: {0}")]
-    StarDetection(String),
     /// A configuration parameter is outside its valid range.
     #[error("Invalid configuration: {0}")]
     InvalidConfig(#[from] InvalidConfigField),
@@ -162,30 +158,16 @@ pub enum RegistrationError {
 /// Corresponding stars in the reference and target inputs with their final fit residual.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StarMatch {
-    /// Index into the reference star slice.
-    pub reference: usize,
-    /// Index into the target star slice.
-    pub target: usize,
+    pub indices: MatchIndices,
     /// Distance between the transformed reference star and target star, in pixels.
     pub residual: f64,
-}
-
-impl StarMatch {
-    /// A pair with the residual measured against a fitted transform.
-    pub(crate) fn measured(indices: MatchIndices, residual: f64) -> Self {
-        Self {
-            reference: indices.reference,
-            target: indices.target,
-            residual,
-        }
-    }
 }
 
 /// Result of image registration.
 #[derive(Debug, Clone)]
 pub struct RegistrationResult {
     transform: Transform,
-    sip_fit: Option<SipFitResult>,
+    sip: Option<SipPolynomial>,
     matched_stars: Vec<StarMatch>,
     elapsed_ms: f64,
 }
@@ -193,7 +175,7 @@ pub struct RegistrationResult {
 impl RegistrationResult {
     pub(crate) fn new(
         transform: Transform,
-        sip_fit: Option<SipFitResult>,
+        sip: Option<SipPolynomial>,
         matched_stars: Vec<StarMatch>,
     ) -> Self {
         debug_assert!(
@@ -203,20 +185,20 @@ impl RegistrationResult {
         );
         Self {
             transform,
-            sip_fit,
+            sip,
             matched_stars,
             elapsed_ms: 0.0,
         }
     }
 
     /// Computed transformation from reference coordinates to target coordinates.
-    pub fn transform(&self) -> Transform {
+    pub const fn transform(&self) -> Transform {
         self.transform
     }
 
-    /// SIP fit and its diagnostics, when nonlinear distortion correction was requested.
-    pub fn sip_fit(&self) -> Option<&SipFitResult> {
-        self.sip_fit.as_ref()
+    /// The SIP distortion correction, when one was requested.
+    pub const fn sip(&self) -> Option<&SipPolynomial> {
+        self.sip.as_ref()
     }
 
     /// Corresponding stars and their residuals under the final fitted transform.
@@ -225,7 +207,7 @@ impl RegistrationResult {
     }
 
     /// Number of matched stars used by the fitted transform.
-    pub fn num_inliers(&self) -> usize {
+    pub const fn num_inliers(&self) -> usize {
         self.matched_stars.len()
     }
 
@@ -243,28 +225,16 @@ impl RegistrationResult {
         }
     }
 
-    /// Maximum residual error in pixels.
-    pub fn max_error(&self) -> f64 {
-        self.matched_stars
-            .iter()
-            .map(|star_match| star_match.residual)
-            .fold(0.0, f64::max)
-    }
-
-    /// Registration quality score from `0.0` to `1.0`.
+    /// Registration quality score from `0.0` to `1.0`: `exp(−rms / 2)` times the inlier count's
+    /// share of 20. A result exists only above `min_matches` inliers, so no floor is needed here.
     pub fn quality_score(&self) -> f64 {
-        let num_inliers = self.num_inliers();
-        if num_inliers < QUALITY_MIN_INLIERS {
-            0.0
-        } else {
-            let error_factor = (-self.rms_error() / QUALITY_ERROR_SCALE).exp();
-            let count_factor = (num_inliers as f64 / QUALITY_INLIER_SATURATION).min(1.0);
-            error_factor * count_factor
-        }
+        let error_factor = (-self.rms_error() / QUALITY_ERROR_SCALE).exp();
+        let count_factor = (self.num_inliers() as f64 / QUALITY_INLIER_SATURATION).min(1.0);
+        error_factor * count_factor
     }
 
     /// Registration processing time in milliseconds.
-    pub fn elapsed_ms(&self) -> f64 {
+    pub const fn elapsed_ms(&self) -> f64 {
         self.elapsed_ms
     }
 
@@ -272,12 +242,12 @@ impl RegistrationResult {
     pub fn warp_transform(&self) -> WarpTransform {
         WarpTransform {
             transform: self.transform,
-            sip: self.sip_fit.as_ref().map(|r| r.polynomial.clone()),
+            sip: self.sip.clone(),
         }
     }
 
     /// Set the elapsed time.
-    pub(crate) fn with_elapsed(mut self, ms: f64) -> Self {
+    pub(crate) const fn with_elapsed(mut self, ms: f64) -> Self {
         self.elapsed_ms = ms;
         self
     }

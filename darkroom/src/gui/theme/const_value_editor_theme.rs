@@ -5,8 +5,8 @@ use palantir::{Brush, ButtonTheme, DragValueTheme, TextEditTheme};
 const VALUE_EDITOR_WIDTH: f32 = 100.0;
 /// Upper bound on the value column: editors fill the column up to here, then a
 /// long value (a wide enum/preset dropdown, a long path) ellipsizes instead of
-/// stretching the node out. Read by both `Theme::build` and
-/// [`ConstValueEditorTheme::from_palette`], which sizes the editor itself.
+/// stretching the node out. Read by [`ConstValueEditorTheme::from_palette`],
+/// which sizes the editor itself.
 const VALUE_EDITOR_MAX_WIDTH: f32 = 240.0;
 
 /// Per-widget theme bundle for the inline static-value editor on a
@@ -15,7 +15,7 @@ const VALUE_EDITOR_MAX_WIDTH: f32 = 240.0;
 /// editor derived from it) which the numeric fields use directly and the
 /// `Button`/`ComboBox` siblings (path pick, enum, presets) borrow via
 /// `drag_value.chip`, and the fixed field width.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub(crate) struct ConstValueEditorTheme {
     pub(crate) drag_value: DragValueTheme,
     /// Minimum logical-px width of the value column — editors fill it down to

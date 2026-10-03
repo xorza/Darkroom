@@ -15,6 +15,15 @@ pub enum OpError {
         rank: usize,
         required_rank: usize,
     },
+    /// An auto stretch cannot map the measured background onto its target: the median sits at or
+    /// below zero (nothing for a brightening curve to lift), or the curve's range does not reach
+    /// the target from it.
+    #[error("{method} cannot map a background median of {median} to the target {target}")]
+    UnreachableBackground {
+        method: &'static str,
+        median: f32,
+        target: f32,
+    },
 }
 
 #[cfg(test)]
@@ -30,8 +39,11 @@ mod tests {
     use crate::math::size2us::Size2us;
     use crate::testing::images::gray_image;
 
-    /// One case per op that owns a `validate`, so an op added without the `self.validate()?`
-    /// prologue this module describes fails here rather than panicking somewhere in its kernel.
+    /// Every op that owns a `validate`, at each bound its config can break, so an op added
+    /// without the `self.validate()?` prologue this module describes fails here rather than
+    /// panicking somewhere in its kernel. Where an op skips its work at a zero strength or amount,
+    /// the row sets that zero too: the config is still rejected, so validation runs before the
+    /// shortcut.
     #[test]
     fn every_op_apply_rejects_an_invalid_config() {
         fn rejects(field: &str, apply: impl Fn(&mut LinearImage) -> Result<(), OpError>) {
@@ -43,13 +55,15 @@ mod tests {
             );
         }
 
-        rejects("background extraction degree", |image| {
-            ExtractBackground {
-                degree: 0,
-                ..Default::default()
-            }
-            .apply(image)
-        });
+        for degree in [0, 7] {
+            rejects("background extraction degree", |image| {
+                ExtractBackground {
+                    degree,
+                    ..Default::default()
+                }
+                .apply(image)
+            });
+        }
         rejects("SCNR amount", |image| Scnr::additive_mask(1.5).apply(image));
         rejects("denoise strength", |image| {
             Denoise {
@@ -58,16 +72,40 @@ mod tests {
             }
             .apply(image)
         });
+        rejects("denoise k", |image| {
+            Denoise {
+                k: 0.0,
+                strength: 0.0,
+                ..Default::default()
+            }
+            .apply(image)
+        });
+        rejects("hdr amount", |image| {
+            Hdr {
+                amount: 1.5,
+                ..Default::default()
+            }
+            .apply(image)
+        });
         rejects("hdr scales", |image| {
             Hdr {
                 scales: 0,
-                ..Default::default()
+                amount: 0.0,
             }
             .apply(image)
         });
         rejects("local contrast tiles", |image| {
             LocalContrast {
                 tiles: 0,
+                strength: 0.0,
+                ..Default::default()
+            }
+            .apply(image)
+        });
+        rejects("local contrast clip_limit", |image| {
+            LocalContrast {
+                clip_limit: 0.5,
+                strength: 0.0,
                 ..Default::default()
             }
             .apply(image)
@@ -75,6 +113,19 @@ mod tests {
         rejects("asinh beta", |image| {
             Stretch {
                 method: StretchMethod::Asinh { beta: 0.0 },
+                color: ColorMode::ColorPreserving,
+            }
+            .apply(image)
+        });
+        rejects("ghs d", |image| {
+            Stretch {
+                method: StretchMethod::Ghs {
+                    d: -1.0,
+                    b: 0.0,
+                    sp: 0.5,
+                    lp: 0.0,
+                    hp: 1.0,
+                },
                 color: ColorMode::ColorPreserving,
             }
             .apply(image)

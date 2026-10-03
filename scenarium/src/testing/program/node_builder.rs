@@ -4,12 +4,12 @@ use crate::execution::compile::compiled_graph::{
     ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode,
 };
 use crate::graph::func::FuncBehavior;
-use crate::graph::func::event::EventLambda;
 use crate::graph::func::lambda::FuncLambda;
 use crate::graph::identity::{FuncId, NodeId};
 use crate::graph::node::CacheMode;
+use crate::testing;
 use crate::testing::program::{Placed, ProgramBuilder};
-use crate::{ConstValue, DataType, async_lambda};
+use crate::{ConstValue, DataType};
 
 /// One node under construction. Ports are accumulated here and packed into the
 /// program's columns by [`add`](Self::add), so a node's runs are contiguous the
@@ -20,7 +20,7 @@ pub(crate) struct NodeBuilder<'a> {
     e_node: ExecutionNode,
     inputs: Vec<ExecutionInput>,
     outputs: Vec<DataType>,
-    events: usize,
+    events: Vec<ExecutionEvent>,
     node_id: Option<NodeId>,
 }
 
@@ -28,10 +28,10 @@ impl<'a> NodeBuilder<'a> {
     pub(super) fn new(owner: &'a mut ProgramBuilder) -> Self {
         Self {
             owner,
-            e_node: ExecutionNode::default(),
+            e_node: ExecutionNode::bare(),
             inputs: Vec::new(),
             outputs: Vec::new(),
-            events: 0,
+            events: Vec::new(),
             node_id: None,
         }
     }
@@ -75,27 +75,13 @@ impl<'a> NodeBuilder<'a> {
         self
     }
 
-    /// A no-op body, for a node the sweep or the run loop must treat as
-    /// runnable rather than `MissingLambda`.
-    pub(crate) fn stub(self) -> Self {
-        self.lambda(async_lambda!(|_| { Ok(()) }))
-    }
-
-    /// A node a cache could serve: content-cacheable, so it earns a digest, and
-    /// implemented, so the sweep does not verdict it `MissingLambda` first.
-    ///
-    /// The two together are what "could this be reused" takes, which is why
-    /// every sweep fixture states them.
-    pub(crate) fn reusable(self) -> Self {
-        self.pure().stub()
-    }
-
     /// An optional input reading `binding`.
     pub(crate) fn input(self, binding: ExecutionBinding) -> Self {
         self.push_input(ExecutionInput {
             required: false,
             stamps_fs_path: false,
             binding,
+            overridden_by: None,
         })
     }
 
@@ -106,6 +92,7 @@ impl<'a> NodeBuilder<'a> {
             required: true,
             stamps_fs_path: false,
             binding,
+            overridden_by: None,
         })
     }
 
@@ -122,6 +109,7 @@ impl<'a> NodeBuilder<'a> {
             required: false,
             stamps_fs_path: true,
             binding,
+            overridden_by: None,
         })
     }
 
@@ -139,6 +127,20 @@ impl<'a> NodeBuilder<'a> {
 
     pub(crate) fn output_types(mut self, types: impl IntoIterator<Item = DataType>) -> Self {
         self.outputs.extend(types);
+        self
+    }
+
+    /// Declare one event whose subscribers are `subscribers`, in order.
+    pub(crate) fn event(mut self, subscribers: impl IntoIterator<Item = Placed>) -> Self {
+        let subscribers = self
+            .owner
+            .program
+            .subscribers
+            .append(subscribers.into_iter().map(|node| node.node_idx));
+        self.events.push(ExecutionEvent {
+            subscribers,
+            lambda: testing::stub_event(),
+        });
         self
     }
 
@@ -167,13 +169,7 @@ impl<'a> NodeBuilder<'a> {
         }
         e_node.inputs = owner.program.inputs.append(inputs);
         e_node.outputs = owner.program.outputs.append(outputs);
-        e_node.events = owner
-            .program
-            .events
-            .append((0..events).map(|_| ExecutionEvent {
-                subscribers: Vec::new(),
-                lambda: EventLambda::default(),
-            }));
+        e_node.events = owner.program.events.append(events);
         let node_idx = owner.program.push(node_id, e_node);
         let placed = Placed { node_id, node_idx };
         owner.placed.push(placed);

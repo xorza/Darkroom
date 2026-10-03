@@ -13,18 +13,14 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::error::InvalidConfigField;
+use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::image_ops::error::OpError;
 use crate::image_ops::wavelet::{atrous_smooth, max_scales};
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
-use crate::math::statistics::{mad_to_sigma, mad_with_scratch, median_mut};
-
-#[cfg(test)]
-mod tests;
-
-/// Subsample cap for the per-scale noise estimate (uniform stride above this; exact below). A robust
-/// MAD converges far below this, matching `color_calibration`'s subsampled-background precedent.
-const MAX_NOISE_SAMPLES: usize = 500_000;
+use crate::math::statistics::MedianMad;
+use crate::math::statistics::subsample::{MAX_STATISTIC_SAMPLES, Subsample};
+use std::mem;
 
 /// How to attenuate a wavelet coefficient that falls below the per-scale threshold.
 ///
@@ -36,7 +32,8 @@ pub enum Threshold {
     /// Keep coefficients with `|w| ≥ t` unchanged, zero the rest. Preserves photometry of strong
     /// features but can ring around bright stars.
     Hard,
-    /// Shrink every coefficient toward zero by `t` (`sign(w)·max(|w|−t, 0)`). Smoother, less ringing.
+    /// Shrink every coefficient toward zero by `t` (`sign(w)·max(|w|−t, 0)`). Smoother, less
+    /// ringing.
     Soft,
 }
 
@@ -68,6 +65,7 @@ impl Threshold {
 /// Run on linear data, after color calibration and before the stretch. No-op-safe on any size (the
 /// scale count is clamped to what the dimensions support).
 #[derive(Debug, Clone, Copy, Introspect)]
+#[config(type_id = "ab942729-dc49-4518-aae4-9008bd33cea1")]
 pub struct Denoise {
     /// Number of wavelet scales `J`. Each scale `j` targets structure ~`2^j` px wide; more scales
     /// reach larger noise (mottle) at the cost of touching more real extended signal. Clamped to
@@ -78,8 +76,8 @@ pub struct Denoise {
     pub k: f32,
     /// Hard (default) or soft coefficient thresholding.
     pub threshold: Threshold,
-    /// Blend of the denoised result with the original, in `[0, 1]`: `1` = full denoise, `0` = no-op.
-    /// Applied as a fraction of the removed noise, so it's a single global strength dial.
+    /// Blend of the denoised result with the original, in `[0, 1]`: `1` = full denoise, `0` =
+    /// no-op. Applied as a fraction of the removed noise, so it's a single global strength dial.
     pub strength: f32,
 }
 
@@ -95,30 +93,6 @@ impl Default for Denoise {
 }
 
 impl Denoise {
-    /// Set the wavelet scale count `J`.
-    pub fn scales(mut self, scales: usize) -> Self {
-        self.scales = scales;
-        self
-    }
-
-    /// Set the threshold in per-scale noise σ.
-    pub fn k(mut self, k: f32) -> Self {
-        self.k = k;
-        self
-    }
-
-    /// Set hard or soft thresholding.
-    pub fn threshold(mut self, threshold: Threshold) -> Self {
-        self.threshold = threshold;
-        self
-    }
-
-    /// Set the denoise/original blend in `[0, 1]`.
-    pub fn strength(mut self, strength: f32) -> Self {
-        self.strength = strength;
-        self
-    }
-
     /// Denoise every channel of `image` in place via starlet wavelet thresholding.
     ///
     /// # Errors
@@ -174,8 +148,6 @@ struct DenoiseScratch {
     tmp: Buffer2<f32>,
     /// Subsampled coefficients for the per-scale noise estimate.
     samples: Vec<f32>,
-    /// Scratch for the MAD's inner median.
-    dev: Vec<f32>,
 }
 
 impl DenoiseScratch {
@@ -185,7 +157,6 @@ impl DenoiseScratch {
             c_next: Buffer2::new_default(size.width, size.height),
             tmp: Buffer2::new_default(size.width, size.height),
             samples: Vec::new(),
-            dev: Vec::new(),
         }
     }
 }
@@ -206,7 +177,6 @@ fn denoise_plane(
         c_next,
         tmp,
         samples,
-        dev,
     } = scratch;
 
     c_curr.pixels_mut().copy_from_slice(plane);
@@ -217,37 +187,39 @@ fn denoise_plane(
         // The detail plane w_j = c_j − c_{j+1} is never materialized: its noise σ comes from a
         // strided subsample, and the threshold-removed part is recomputed inline below — saving a
         // full read+write pass over the plane each scale.
-        let sigma = estimate_sigma(c_curr.pixels(), c_next.pixels(), samples, dev);
+        let sigma = estimate_sigma(c_curr.pixels(), c_next.pixels(), samples);
         let t = k * sigma;
 
         // Subtract the strength-weighted noise removed at this scale from the running result.
         plane
-            .par_iter_mut()
-            .zip(c_curr.pixels().par_iter())
-            .zip(c_next.pixels().par_iter())
-            .for_each(|((p, &cc), &cn)| {
-                let w = cc - cn;
-                *p -= strength * (w - threshold.apply(w, t));
+            .par_chunks_mut(SAMPLES_PER_BLOCK)
+            .zip(c_curr.pixels().par_chunks(SAMPLES_PER_BLOCK))
+            .zip(c_next.pixels().par_chunks(SAMPLES_PER_BLOCK))
+            .for_each(|((plane, curr), next)| {
+                for ((p, &cc), &cn) in plane.iter_mut().zip(curr).zip(next) {
+                    let w = cc - cn;
+                    *p -= strength * (w - threshold.apply(w, t));
+                }
             });
 
-        std::mem::swap(c_curr, c_next); // c_curr = c_{j+1}
+        mem::swap(c_curr, c_next); // c_curr = c_{j+1}
     }
 }
 
-/// Robust per-scale noise σ of the detail `w = curr − next`: `1.4826 · MAD` of a uniform-stride
-/// subsample, computing each sampled `w` on the fly (the full detail plane is never materialized).
-fn estimate_sigma(curr: &[f32], next: &[f32], samples: &mut Vec<f32>, dev: &mut Vec<f32>) -> f32 {
-    let stride = (curr.len() / MAX_NOISE_SAMPLES).max(1);
+/// Robust per-scale noise σ of the detail `w = curr − next`: `1.4826 · MAD` of a [`Subsample`],
+/// computing each sampled `w` on the fly (the full detail plane is never materialized).
+fn estimate_sigma(curr: &[f32], next: &[f32], samples: &mut Vec<f32>) -> f32 {
     samples.clear();
     samples.extend(
-        curr.iter()
-            .zip(next.iter())
-            .step_by(stride)
-            .map(|(&c, &n)| c - n),
+        Subsample::new(curr.len(), MAX_STATISTIC_SAMPLES)
+            .indices()
+            .map(|i| curr[i] - next[i]),
     );
     if samples.is_empty() {
         return 0.0;
     }
-    let median = median_mut(samples);
-    mad_to_sigma(mad_with_scratch(samples, median, dev))
+    MedianMad::of_mut(samples).sigma()
 }
+
+#[cfg(test)]
+mod tests;

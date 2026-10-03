@@ -9,7 +9,7 @@ pub(super) unsafe fn normalize_chunk_neon<const CLAMP: bool>(
     input: &[u16],
     output: &mut [f32],
     black: f32,
-    inv_range: f32,
+    span: f32,
 ) {
     // SAFETY: All NEON intrinsics in this function are safe because:
     // - NEON is guaranteed available on aarch64
@@ -17,7 +17,7 @@ pub(super) unsafe fn normalize_chunk_neon<const CLAMP: bool>(
     // - All pointer arithmetic stays within bounds of the slices
     unsafe {
         let black_vec = vdupq_n_f32(black);
-        let inv_range_vec = vdupq_n_f32(inv_range);
+        let span_vec = vdupq_n_f32(span);
 
         let chunks = input.len() / 4;
         let remainder = input.len() % 4;
@@ -38,7 +38,7 @@ pub(super) unsafe fn normalize_chunk_neon<const CLAMP: bool>(
             } else {
                 subtracted
             };
-            let normalized = vmulq_f32(floored, inv_range_vec);
+            let normalized = vdivq_f32(floored, span_vec);
             let result = if CLAMP {
                 vminq_f32(normalized, vdupq_n_f32(1.0))
             } else {
@@ -53,7 +53,7 @@ pub(super) unsafe fn normalize_chunk_neon<const CLAMP: bool>(
         let start = chunks * 4;
         for i in 0..remainder {
             let idx = start + i;
-            output[idx] = normalize_one::<CLAMP>(input[idx], black, inv_range);
+            output[idx] = normalize_one::<CLAMP>(input[idx], black, span);
         }
     }
 }

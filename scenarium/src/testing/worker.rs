@@ -23,22 +23,20 @@ use crate::ConstValue;
 use crate::elements::system_library::system_library;
 use crate::elements::worker_events_library::worker_events_library;
 use crate::execution::cache::disk_store::DiskStore;
-use crate::execution::compile::Compiler;
 use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::error::Error;
-use crate::execution::seeds::RunSeeds;
-use crate::graph::identity::{EventPort, NodeId};
+use crate::graph::identity::NodeId;
 use crate::testing::engine::RunOutcome;
 use crate::testing::graph::TestGraph;
 use crate::worker::Worker;
+use crate::worker::activity::WorkerActivity;
 use crate::worker::error::WorkerError;
 use crate::worker::protocol::{WorkerMessage, WorkerReport};
-use crate::worker::status::{WorkerStatus, WorkerStatusKind};
 
 /// How long a wait here gives the worker before failing the test — generous
 /// enough that a loaded machine does not flake, bounded so a wedged worker
 /// fails instead of hanging the suite.
-const PATIENCE: Duration = Duration::from_secs(5);
+pub(crate) const PATIENCE: Duration = Duration::from_secs(5);
 
 /// A [`TestGraph`] with a live worker over it.
 #[derive(Debug)]
@@ -62,6 +60,10 @@ impl TestWorker {
         let worker = Worker::new(move |report| {
             // The receiver outlives the worker in every test here; a closed
             // channel means the fixture is being torn down.
+            #[expect(
+                clippy::unused_result_ok,
+                reason = "a report sent during teardown has no reader"
+            )]
             tx.send(report).ok();
         });
         Self {
@@ -120,49 +122,29 @@ impl TestWorker {
         self.graph.id(name)
     }
 
-    /// This graph compiled, as a message would carry it. Panics on a compile
-    /// error: a fixture that does not compile is a broken fixture.
-    pub(crate) fn compile(&self) -> Arc<CompiledGraph> {
-        Arc::new(
-            Compiler::default()
-                .compile(&self.graph.graph, &self.graph.library)
-                .expect("the fixture graph compiles"),
-        )
-    }
-
     /// `Update` carrying this graph as it stands — sent again after an edit.
     pub(crate) fn update(&self) -> WorkerMessage {
         WorkerMessage::Update {
-            compiled: self.compile(),
+            compiled: self.graph.program(),
         }
     }
 
     /// `Run` seeded with every sink — the "compute the document" entry.
     pub(crate) fn sinks() -> WorkerMessage {
-        WorkerMessage::Run {
-            seeds: RunSeeds::sinks(),
-        }
+        WorkerMessage::RunSinks
     }
 
     /// An event port on a named node.
-    pub(crate) fn event(&self, name: &str, event_idx: usize) -> EventPort {
-        EventPort {
-            node_id: self.id(name),
-            event_idx,
-        }
-    }
-
     /// `Run` seeded with one firing of that event.
     pub(crate) fn fire(&self, name: &str, event_idx: usize) -> WorkerMessage {
-        WorkerMessage::Run {
-            seeds: RunSeeds::events(vec![self.event(name, event_idx)]),
+        WorkerMessage::FireEvents {
+            events: vec![self.graph.event(name, event_idx)],
         }
     }
 
-    /// `SetDiskStore` pointing the cache's disk tier at `root`, using this
-    /// graph's own codecs.
-    pub(crate) fn disk_store(&self, root: impl Into<PathBuf>) -> WorkerMessage {
-        WorkerMessage::SetDiskStore(DiskStore::new(&self.graph.library, Some(root.into())))
+    /// `SetDiskStore` pointing the cache's disk tier at `root`.
+    pub(crate) fn disk_store(root: impl Into<PathBuf>) -> WorkerMessage {
+        WorkerMessage::SetDiskStore(DiskStore::new(Some(root.into())))
     }
 
     pub(crate) fn send(&self, msg: WorkerMessage) {
@@ -199,37 +181,47 @@ impl TestWorker {
             .await
             .expect("the worker published nothing in time")
             .expect("the worker's report channel closed");
-        match &report {
-            WorkerReport::Installed { compiled, .. } => self.installed = Some(Arc::clone(compiled)),
-            WorkerReport::Cleared => self.installed = None,
-            WorkerReport::Status(_) | WorkerReport::Error(_) => {}
-        }
+        self.observe(&report);
         report
     }
 
-    /// The next status of any kind, skipping installs and errors.
-    pub(crate) async fn status(&mut self) -> Arc<WorkerStatus> {
+    /// Track which program the worker holds, from a report read off the stream.
+    fn observe(&mut self, report: &WorkerReport) {
+        match report {
+            WorkerReport::Installed { compiled, .. } => self.installed = Some(Arc::clone(compiled)),
+            WorkerReport::Cleared => self.installed = None,
+            WorkerReport::Activity(_)
+            | WorkerReport::Progress { .. }
+            | WorkerReport::Completed(_)
+            | WorkerReport::Error(_) => {}
+        }
+    }
+
+    /// The worker's activity as the next report that states it gives it — an activity change,
+    /// or a completed run's resting activity — skipping everything else.
+    pub(crate) async fn activity(&mut self) -> WorkerActivity {
         loop {
-            if let WorkerReport::Status(status) = self.report().await {
-                return status;
+            match self.report().await {
+                WorkerReport::Activity(activity) => return activity,
+                WorkerReport::Completed(summary) => return summary.activity,
+                _ => {}
             }
         }
     }
 
     /// The next finished run, or the error that ended it — skipping everything
     /// a run publishes on the way there.
-    pub(crate) async fn finished(&mut self) -> std::result::Result<RunOutcome, Error> {
+    pub(crate) async fn finished(&mut self) -> Result<RunOutcome, Error> {
         loop {
             match self.report().await {
-                WorkerReport::Status(status)
-                    if matches!(status.kind, WorkerStatusKind::Completed { .. }) =>
-                {
-                    return Ok(RunOutcome::published(&self.graph, &status));
+                WorkerReport::Completed(summary) => {
+                    return Ok(RunOutcome::published(&self.graph, &summary));
                 }
                 WorkerReport::Error(WorkerError::Execution { error }) => return Err(error),
                 WorkerReport::Installed { .. }
                 | WorkerReport::Cleared
-                | WorkerReport::Status(_)
+                | WorkerReport::Activity(_)
+                | WorkerReport::Progress { .. }
                 | WorkerReport::Error(
                     WorkerError::CacheEviction { .. } | WorkerError::CacheFlush { .. },
                 ) => {}
@@ -256,13 +248,7 @@ impl TestWorker {
     pub(crate) fn drain(&mut self) -> Vec<WorkerReport> {
         let mut drained = Vec::new();
         while let Ok(report) = self.reports.try_recv() {
-            match &report {
-                WorkerReport::Installed { compiled, .. } => {
-                    self.installed = Some(Arc::clone(compiled))
-                }
-                WorkerReport::Cleared => self.installed = None,
-                WorkerReport::Status(_) | WorkerReport::Error(_) => {}
-            }
+            self.observe(&report);
             drained.push(report);
         }
         drained
@@ -274,12 +260,28 @@ impl TestWorker {
         assert!(extra.is_err(), "unexpected worker report: {extra:?}");
     }
 
-    /// Assert no run finishes within `d`.
+    /// [`settle`](Self::settle) `msgs`, then assert the batch completed no run.
     ///
-    /// Activity and patch statuses are not runs and do not count — the claim
-    /// is that nothing *executed*, which is what "silent no-op" means.
-    pub(crate) async fn nothing_runs_within(&mut self, d: Duration) {
-        let outcome = timeout(d, self.finished()).await;
-        assert!(outcome.is_err(), "unexpected run: {outcome:?}");
+    /// The worker executes a batch's run before it answers the batch's `Sync`,
+    /// so every run the batch caused has reported by the time `settle` returns.
+    /// Activity and patch statuses are not runs and do not count — the claim is
+    /// that nothing *executed*, which is what "silent no-op" means.
+    pub(crate) async fn settle_without_run(
+        &mut self,
+        msgs: impl IntoIterator<Item = WorkerMessage>,
+    ) {
+        self.settle(msgs).await;
+        let runs: Vec<WorkerReport> = self
+            .drain()
+            .into_iter()
+            .filter(|report| matches!(report, WorkerReport::Completed(_)))
+            .collect();
+        assert!(runs.is_empty(), "unexpected run: {runs:?}");
+    }
+
+    /// Assert that nothing has run since the last read, and that nothing is about
+    /// to: a bare [`settle_without_run`](Self::settle_without_run).
+    pub(crate) async fn assert_no_run(&mut self) {
+        self.settle_without_run(None::<WorkerMessage>).await;
     }
 }

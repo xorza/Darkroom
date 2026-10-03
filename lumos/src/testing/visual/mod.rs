@@ -1,18 +1,22 @@
 //! Debug image output for visual tests: PNG writers, tone mapping, and annotated overlays.
 //!
-//! These write to `test_output/` for a human to look at; nothing here is asserted on. The
+//! These write to `test_output/` for a human to look at, and only when
+//! `DARKROOM_TEST_OUTPUT` is set; nothing here is asserted on. The
 //! grading a test actually asserts lives in [`report`] and
 //! [`metrics`](crate::testing::synthetic::metrics).
 
 pub(crate) mod comparison;
 pub(crate) mod report;
 
+use common::internals;
 use image::GrayImage;
 use imaginarium::{ColorFormat, Image, ImageDesc};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[cfg(feature = "real-data")]
 use crate::bit_buffer2::BitBuffer2;
+#[cfg(feature = "real-data")]
+use crate::io::image::linear::LinearImage;
 use crate::{
     math::size2us::Size2us, stacking::star_detection::star::Star,
     testing::synthetic::observe::ObservedSource,
@@ -38,17 +42,24 @@ pub(crate) enum ToneMap {
     Asinh,
 }
 
+/// The minimum and a non-zero span.
+#[derive(Debug)]
+struct Range {
+    lo: f32,
+    span: f32,
+}
+
 impl ToneMap {
     /// Map `pixels` into `[0, 1]`.
     fn apply(self, pixels: &[f32]) -> Vec<f32> {
         match self {
             ToneMap::Clamp => pixels.iter().map(|&p| p.clamp(0.0, 1.0)).collect(),
             ToneMap::AutoRange => {
-                let (lo, span) = Self::range(pixels);
+                let Range { lo, span } = Self::range(pixels);
                 pixels.iter().map(|&p| (p - lo) / span).collect()
             }
             ToneMap::Asinh => {
-                let (lo, span) = Self::range(pixels);
+                let Range { lo, span } = Self::range(pixels);
                 // astropy-style AsinhStretch: y = asinh(x/a) / asinh(1/a), a = soft knee.
                 let a = 0.1f32;
                 let denom = (1.0 / a).asinh();
@@ -64,20 +75,31 @@ impl ToneMap {
     }
 
     /// Minimum and a non-zero span, for the two mappings that normalise against the data.
-    fn range(pixels: &[f32]) -> (f32, f32) {
+    fn range(pixels: &[f32]) -> Range {
         let lo = pixels.iter().copied().fold(f32::INFINITY, f32::min);
         let hi = pixels.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-        (lo, (hi - lo).max(1e-10))
+        Range {
+            lo,
+            span: (hi - lo).max(1e-10),
+        }
     }
 }
 
-/// Build an output path with the configured test image extension.
-/// Takes a base path and replaces or adds the extension from `TEST_OUTPUT_IMAGE_EXT`.
-pub(crate) fn output_path(base: &Path) -> std::path::PathBuf {
-    base.with_extension(TEST_OUTPUT_IMAGE_EXT)
+/// Where the debug image `name` goes, with the configured extension, or `None` when debug output
+/// is off ([`internals::debug_output_path`]).
+///
+/// # Panics
+/// When `name` carries an extension of its own: the configured format decides it, so one in the
+/// name would be replaced without a word.
+pub(crate) fn debug_file(name: &str) -> Option<PathBuf> {
+    assert!(
+        Path::new(name).extension().is_none(),
+        "debug image {name:?} names an extension; the output format ({TEST_OUTPUT_IMAGE_EXT}) sets it"
+    );
+    internals::debug_output_path(name).map(|path| path.with_extension(TEST_OUTPUT_IMAGE_EXT))
 }
 
-/// Convert an f32 grayscale plane to an imaginarium RGB_F32 image under `tone`.
+/// Convert an f32 grayscale plane to an imaginarium `RGB_F32` image under `tone`.
 pub(crate) fn gray_to_rgb(pixels: &[f32], size: Size2us, tone: ToneMap) -> Image {
     let desc = ImageDesc::new(size.width, size.height, ColorFormat::RGB_F32);
     let rgb: Vec<f32> = tone
@@ -89,11 +111,13 @@ pub(crate) fn gray_to_rgb(pixels: &[f32], size: Size2us, tone: ToneMap) -> Image
 }
 
 /// Save imaginarium Image to file using the configured test output format.
-/// Converts to RGB_U8 if needed since some formats don't support float data.
-pub(crate) fn save_image(image: Image, path: &Path) {
-    let out = output_path(path);
-    let image_u8 = if image.desc().color_format.channel_type == imaginarium::ChannelType::Float {
-        image.convert(ColorFormat::RGB_U8).unwrap()
+/// Converts to `RGB_U8` if needed since some formats don't support float data.
+pub(crate) fn save_image(image: Image, name: &str) {
+    let Some(out) = debug_file(name) else {
+        return;
+    };
+    let image_u8 = if image.desc().color_format.sample_type.is_float() {
+        image.convert(ColorFormat::RGB_U8)
     } else {
         image
     };
@@ -101,6 +125,7 @@ pub(crate) fn save_image(image: Image, path: &Path) {
 }
 
 /// Convert an f32 plane to an 8-bit grayscale image under `tone`.
+#[expect(clippy::cast_sign_loss, reason = "a tone-mapped value lies in [0, 1]")]
 fn to_gray(pixels: &[f32], size: Size2us, tone: ToneMap) -> GrayImage {
     let bytes: Vec<u8> = tone
         .apply(pixels)
@@ -146,6 +171,10 @@ pub(crate) fn labels_to_rgb(labels: &imaginarium::Buffer2<u32>) -> image::RgbIma
 
 /// Convert HSV to RGB color.
 #[cfg(feature = "real-data")]
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "hue, saturation and value lie in [0, 1]"
+)]
 fn hsv_to_rgb(h: f32, s: f32, v: f32) -> image::Rgb<u8> {
     use image::Rgb;
 
@@ -173,31 +202,32 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> image::Rgb<u8> {
 /// conversion. The multi-channel counterpart to [`save`], which takes one f32 plane and tone-maps
 /// it here; this one has colour to preserve and no single plane to map.
 #[cfg(feature = "real-data")]
-pub(crate) fn save_linear(image: &crate::io::image::linear::LinearImage, name: &str) {
-    use common::internals::test_output_path;
-
-    let path = test_output_path(name);
-    std::fs::create_dir_all(path.parent().unwrap()).expect("create test_output dir");
-    imaginarium::Image::from(image)
+pub(crate) fn save_linear(image: &LinearImage, name: &str) {
+    let Some(path) = debug_file(name) else {
+        return;
+    };
+    Image::from(image)
         .convert(ColorFormat::RGB_U8)
-        .expect("convert to RGB_U8")
         .save_file(&path)
         .expect("save png");
     eprintln!("wrote {}", path.display());
 }
 
 /// Write an f32 plane as an 8-bit image under `tone`, with the configured extension.
-pub(crate) fn save(pixels: &[f32], size: Size2us, path: &Path, tone: ToneMap) {
-    to_gray(pixels, size, tone)
-        .save(output_path(path))
-        .expect("write debug image");
+pub(crate) fn save(pixels: &[f32], size: Size2us, name: &str, tone: ToneMap) {
+    if let Some(path) = debug_file(name) {
+        to_gray(pixels, size, tone)
+            .save(path)
+            .expect("write debug image");
+    }
 }
 
 /// Save RGB image to file using the configured test output format.
 #[cfg(feature = "real-data")]
-pub(crate) fn save_rgb(image: &image::RgbImage, path: &Path) {
-    let out = output_path(path);
-    image.save(&out).expect("Failed to save RGB image");
+pub(crate) fn save_rgb(image: &image::RgbImage, name: &str) {
+    if let Some(out) = debug_file(name) {
+        image.save(&out).expect("Failed to save RGB image");
+    }
 }
 
 /// Save comparison image showing ground truth vs detected stars.
@@ -207,23 +237,26 @@ pub(crate) fn save_comparison(
     ground_truth: &[ObservedSource],
     detected: &[Star],
     match_radius: f32,
-    path: &Path,
+    name: &str,
 ) {
-    let image = create_comparison_image(pixels, size, ground_truth, detected, match_radius);
-    save_image(image, path);
+    if debug_file(name).is_some() {
+        let image = create_comparison_image(pixels, size, ground_truth, detected, match_radius);
+        save_image(image, name);
+    }
 }
 
 /// Save mask to file using the configured test output format.
 #[cfg(feature = "real-data")]
-pub(crate) fn save_mask(mask: &BitBuffer2, path: &Path) {
-    let out = output_path(path);
-    let img = mask_to_gray(mask);
-    img.save(&out).expect("Failed to save mask image");
+pub(crate) fn save_mask(mask: &BitBuffer2, name: &str) {
+    if let Some(out) = debug_file(name) {
+        mask_to_gray(mask)
+            .save(&out)
+            .expect("Failed to save mask image");
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::math::size2us::Size2us;
     use crate::testing::visual::*;
 
     /// Each mapping over the same plane, so the three rules are pinned against one another.
@@ -246,15 +279,12 @@ mod tests {
         assert_eq!(img.get_pixel(1, 0).0[0], 84);
         assert_eq!(img.get_pixel(1, 1).0[0], 255);
 
-        // Asinh: same endpoints, but the knee lifts the midtones well above AutoRange.
+        // Asinh: same endpoints, and the knee lifts the midtones. 0.4 and 0.6 sit a third and two
+        // thirds up the range, and asinh(x/0.1)/asinh(10) maps them to 0.6400 and 0.8658: 163.2
+        // and 220.8 of 255, truncated.
         let img = to_gray(&[0.2, 0.4, 0.6, 0.8], size, ToneMap::Asinh);
-        assert_eq!(img.get_pixel(0, 0).0[0], 0);
-        assert_eq!(img.get_pixel(1, 1).0[0], 255);
-        assert!(
-            img.get_pixel(1, 0).0[0] > 84,
-            "asinh must lift 0.4 above AutoRange's 84, got {}",
-            img.get_pixel(1, 0).0[0]
-        );
+        let row = |y| [img.get_pixel(0, y).0[0], img.get_pixel(1, y).0[0]];
+        assert_eq!([row(0), row(1)], [[0, 163], [220, 255]]);
     }
 
     /// A flat plane has no range to stretch; the guarded span must not divide by zero.

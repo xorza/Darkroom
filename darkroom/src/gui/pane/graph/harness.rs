@@ -7,7 +7,6 @@
 //! through it differs. A test that skipped a phase would be exercising a
 //! frame the app never performs.
 
-use glam::{UVec2, Vec2};
 use palantir::DockOp;
 use palantir::internals::UiHarness;
 use palantir::prelude::*;
@@ -15,13 +14,15 @@ use scenarium::NodeId;
 
 use crate::core::document::harness::DocFixture;
 use crate::core::document::{Document, PortRef, TabRef};
+use crate::core::edit::document_request::DocumentRequest;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::graph_ctx::harness::GraphCtxFixture;
 use crate::gui::pane::graph::GraphUI;
 use crate::gui::pane::graph::node::port_row::port_circle_wid;
 use crate::gui::pane::graph::node::wid;
-use crate::gui::requests::{DocumentRequest, Requests};
+use crate::gui::requests::Requests;
+use std::iter;
 
 /// Surface every canvas test records at unless it is about size. Wide enough
 /// that [`DocFixture`]'s row of nodes lands on screen uncropped.
@@ -94,7 +95,8 @@ impl CanvasHarness {
         let mut out = ui.frame_value(|recorder: &mut Ui| Self::record(graph_ui, ctx, recorder));
         view_ops.clear();
         let intents: Vec<GraphIntent> = out
-            .drain_document()
+            .document()
+            .drain()
             .filter_map(|request| match request {
                 DocumentRequest::Graph(intent) => Some(intent),
                 DocumentRequest::View(op) => {
@@ -104,7 +106,7 @@ impl CanvasHarness {
             })
             .collect();
         commands.clear();
-        commands.extend(std::iter::from_fn(|| out.pop_app()));
+        commands.extend(iter::from_fn(|| out.pop_app()));
         intents
     }
 

@@ -1,4 +1,5 @@
 use super::*;
+use std::future;
 
 /// The whole loop lifecycle end to end. The second run is the one an event
 /// *lambda* drove — it can only have come from the firing, since the
@@ -24,7 +25,7 @@ async fn start_then_stop() {
     w.drain();
     w.settle([WorkerMessage::StopEventLoop]).await;
     w.drain();
-    w.nothing_runs_within(QUIET).await;
+    w.assert_no_run().await;
 }
 
 #[tokio::test]
@@ -50,7 +51,7 @@ async fn sink_seeds_with_start_event_loop_complete_once() {
     ]);
 
     assert_eq!(w.run().await.logs(), ["hi"]);
-    w.nothing_runs_within(QUIET).await;
+    w.assert_no_run().await;
 }
 
 /// Either message arriving while the loop is already running stops the
@@ -147,7 +148,7 @@ async fn one_task_panicking_stops_the_loop() {
     w.graph.edit_func("Frame Event", |func| {
         func.events[0].event_lambda =
             EventLambda::new(|_state| Box::pin(async { panic!("event loop stopped") }));
-        func.events[1].event_lambda = EventLambda::new(|_state| Box::pin(std::future::pending()));
+        func.events[1].event_lambda = EventLambda::new(|_state| Box::pin(future::pending()));
     });
     w.graph.subscribe("Frame Event", 1, "Print");
     let frame_event = w.id("Frame Event");
@@ -157,9 +158,14 @@ async fn one_task_panicking_stops_the_loop() {
     let mut activities = Vec::new();
     loop {
         match w.report().await {
-            WorkerReport::Status(status) => {
-                if activities.last() != Some(&status.activity) {
-                    activities.push(status.activity);
+            WorkerReport::Activity(activity) => {
+                if activities.last() != Some(&activity) {
+                    activities.push(activity);
+                }
+            }
+            WorkerReport::Completed(summary) => {
+                if activities.last() != Some(&summary.activity) {
+                    activities.push(summary.activity);
                 }
             }
             WorkerReport::Error(WorkerError::Execution {
@@ -171,6 +177,7 @@ async fn one_task_panicking_stops_the_loop() {
             }
             WorkerReport::Installed { .. }
             | WorkerReport::Cleared
+            | WorkerReport::Progress { .. }
             | WorkerReport::Error(
                 WorkerError::Execution { .. }
                 | WorkerError::CacheEviction { .. }

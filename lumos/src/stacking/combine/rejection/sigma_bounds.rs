@@ -20,7 +20,7 @@ pub struct SigmaBounds {
 
 impl SigmaBounds {
     /// The same threshold either side.
-    pub fn symmetric(sigma: f32) -> Self {
+    pub const fn symmetric(sigma: f32) -> Self {
         Self {
             low: sigma,
             high: sigma,
@@ -28,7 +28,7 @@ impl SigmaBounds {
     }
 
     /// Separate thresholds — e.g. clipping bright satellite trails harder than dark pixels.
-    pub fn asymmetric(low: f32, high: f32) -> Self {
+    pub const fn asymmetric(low: f32, high: f32) -> Self {
         Self { low, high }
     }
 
@@ -37,7 +37,7 @@ impl SigmaBounds {
     ///
     /// Reports under the field names a caller sets, `sigma_low` and `sigma_high`, rather than this
     /// type's own — the error names what the user wrote, not how it is stored.
-    pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
+    pub(super) fn validate(self) -> Result<(), InvalidConfigField> {
         InvalidConfigField::finite("sigma_low", "finite and positive", self.low, |value| {
             value > 0.0
         })?;

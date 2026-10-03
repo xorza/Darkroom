@@ -1,14 +1,13 @@
 //! Cache configuration for disk-backed stacking operations.
 
+use std::env;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::memory;
-
-/// Common configuration for cache-based stacking methods (median, sigma-clipped).
+/// Configuration of the frame cache every combine method reads its frames through.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CacheConfig {
-    /// Directory for decoded image cache.
+    /// Root the spill files go under. A run writes only into a subdirectory it creates there, and
+    /// never removes anything it did not create — see `SpillDirectory`.
     pub cache_dir: PathBuf,
     /// Keep the spill cache after stacking, for re-processing or for inspecting what spilled.
     ///
@@ -16,26 +15,20 @@ pub struct CacheConfig {
     /// behind costs the whole stack's worth of disk per run. Opt in when you mean to reuse or
     /// examine them, and delete the directory yourself.
     pub keep_cache: bool,
-    /// Available memory override in bytes. If None, queries system for available memory.
-    pub available_memory: Option<u64>,
+    /// Plan the tiers as if the machine had this many bytes available, instead of what the system
+    /// reports. It never raises what one file's decode may allocate, which stays bound by the
+    /// system reading.
+    pub memory_override: Option<u64>,
 }
 
 impl Default for CacheConfig {
     fn default() -> Self {
         Self {
-            cache_dir: unique_cache_dir(),
+            cache_dir: env::temp_dir().join("lumos_cache"),
             keep_cache: false,
-            available_memory: None,
+            memory_override: None,
         }
     }
-}
-
-fn unique_cache_dir() -> PathBuf {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir()
-        .join("lumos_cache")
-        .join(format!("{}-{}", std::process::id(), id))
 }
 
 impl CacheConfig {
@@ -46,34 +39,6 @@ impl CacheConfig {
             ..Default::default()
         }
     }
-
-    /// This config with its planning figure pinned to `system_available` — the one way to settle
-    /// what the run plans against.
-    ///
-    /// A run takes a single system reading at its entry and hands the resolved config to every
-    /// stage, so the tier decision and every chunk sizing size against the same figure: a plan
-    /// built from one reading can disagree with chunking built from another, and each reading costs
-    /// a syscall. A config that already carries an override keeps it — [`Self::available_memory`] is
-    /// a *planning* override ("size the tiers as if the machine had this much") and resolution never
-    /// overrides an override.
-    pub(crate) fn resolved_with(&self, system_available: u64) -> Self {
-        Self {
-            available_memory: Some(self.available_memory.unwrap_or(system_available)),
-            ..self.clone()
-        }
-    }
-
-    /// What to plan against: the pinned figure, or a fresh system reading if nobody pinned one.
-    ///
-    /// The counterpart to [`Self::resolved_with`] and the only reader — every in-tree path resolves
-    /// before the config reaches the cache, so the fallback is what keeps a hand-built config
-    /// usable rather than something a caller has to think about ordering around. It deliberately
-    /// does not govern what a decoder may allocate for one file; that budget comes from the system
-    /// reading directly.
-    pub(crate) fn planning_memory(&self) -> u64 {
-        self.available_memory
-            .unwrap_or_else(memory::available_memory)
-    }
 }
 
 #[cfg(test)]
@@ -81,16 +46,13 @@ mod tests {
     use crate::stacking::combine::cache_config::*;
 
     #[test]
-    fn default_config_uses_unique_process_cache_directories() {
-        let first = CacheConfig::default();
-        let second = CacheConfig::default();
-
-        assert!(first.cache_dir.parent().unwrap().ends_with("lumos_cache"));
-        assert_eq!(first.cache_dir.parent(), second.cache_dir.parent());
-        assert_ne!(first.cache_dir, second.cache_dir);
+    fn default_config_spills_under_one_temp_root() {
+        // Every run shares the root; each run's own subdirectory is what keeps them apart.
+        let config = CacheConfig::default();
+        assert_eq!(config.cache_dir, env::temp_dir().join("lumos_cache"));
         // The spill cache is cleaned up unless a caller asks otherwise, in every build profile.
-        assert!(!first.keep_cache);
-        assert_eq!(first.available_memory, None);
+        assert!(!config.keep_cache);
+        assert_eq!(config.memory_override, None);
     }
 
     #[test]
@@ -100,16 +62,6 @@ mod tests {
 
         assert_eq!(config.cache_dir, directory);
         assert!(!config.keep_cache);
-        assert_eq!(config.available_memory, None);
-    }
-
-    #[test]
-    fn available_memory_override_takes_precedence() {
-        let config = CacheConfig {
-            available_memory: Some(123_456),
-            ..Default::default()
-        };
-
-        assert_eq!(config.planning_memory(), 123_456);
+        assert_eq!(config.memory_override, None);
     }
 }

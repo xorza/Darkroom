@@ -8,11 +8,11 @@ use super::*;
 /// the two combined in one batch — is silently nothing.
 #[tokio::test]
 async fn every_seed_is_a_silent_noop() {
-    let stale_event = || WorkerMessage::Run {
-        seeds: RunSeeds::events(vec![EventPort {
+    let stale_event = || WorkerMessage::FireEvents {
+        events: vec![EventPort {
             node_id: NodeId::unique(),
             event_idx: 0,
-        }]),
+        }],
     };
     let batches: [Vec<WorkerMessage>; 4] = [
         vec![TestWorker::sinks()],
@@ -24,8 +24,6 @@ async fn every_seed_is_a_silent_noop() {
     for batch in batches {
         let mut w = TestWorker::over(TestGraph::new());
 
-        w.settle(batch).await;
-
-        w.nothing_runs_within(QUIET).await;
+        w.settle_without_run(batch).await;
     }
 }

@@ -1,6 +1,6 @@
 //! The crate's one architecture-dispatch prologue.
 //!
-//! Every hand-written SIMD kernel is reached through [`dispatch!`], which expands to the x86_64
+//! Every hand-written SIMD kernel is reached through [`dispatch!`], which expands to the `x86_64`
 //! feature ladder, the aarch64 NEON arm and the scalar fallback in one fixed shape. One macro
 //! rather than a ladder per kernel family, so nothing can disagree on arm order, on where the
 //! `unsafe` block and its SAFETY note go, or on which spelling keeps the compiler from calling
@@ -15,10 +15,6 @@
 /// f32 lanes in one AVX2 vector register.
 #[cfg(target_arch = "x86_64")]
 pub(crate) const AVX2_F32_LANES: usize = 8;
-
-/// f32 lanes in one SSE vector register.
-#[cfg(target_arch = "x86_64")]
-pub(crate) const SSE_F32_LANES: usize = 4;
 
 /// f32 lanes in one NEON vector register.
 #[cfg(target_arch = "aarch64")]
@@ -46,18 +42,33 @@ pub(crate) const NEON_F32_LANES: usize = 4;
 /// feature detected, the `aarch64` arm runs only on aarch64, where NEON is unconditional. A
 /// backend with any further precondition (a minimum length, a bound) states it in `if <guard>`,
 /// which is checked in the same expression.
+#[cfg_attr(
+    not(target_arch = "aarch64"),
+    expect(
+        unused_macro_rules,
+        reason = "the `@neon` rules expand only where an `aarch64` arm compiles"
+    )
+)]
+#[cfg_attr(
+    not(target_arch = "x86_64"),
+    expect(
+        unused_macro_rules,
+        reason = "the `@available` and `@x86` rules expand only where an `x86` arm compiles"
+    )
+)]
 macro_rules! dispatch {
     (@available avx2) => {
-        ::imaginarium::cpu_features::has_avx2()
+        ::imaginarium::SimdTier::Avx2.is_supported()
     };
     (@available avx2_fma) => {
-        ::imaginarium::cpu_features::has_avx2_fma()
+        ::imaginarium::SimdTier::Avx2Fma.is_supported()
     };
     (@available sse4_1) => {
-        ::imaginarium::cpu_features::has_sse4_1()
+        ::imaginarium::SimdTier::Sse41.is_supported()
     };
+    // SSE2 is part of the x86_64 baseline.
     (@available sse2) => {
-        ::imaginarium::cpu_features::has_sse2()
+        true
     };
 
     (@x86 $feat:ident, $call:expr) => {
@@ -71,8 +82,10 @@ macro_rules! dispatch {
         }
     };
 
+    // An unguarded arm still goes through `if`: a bare `return` would make the scalar fallback
+    // unreachable on aarch64 only, which no single lint expectation can state for both targets.
     (@neon $call:expr) => {
-        return unsafe { $call };
+        $crate::simd::dispatch!(@neon $call, true)
     };
     (@neon $call:expr, $guard:expr) => {
         if $guard {
@@ -97,7 +110,6 @@ macro_rules! dispatch {
                 $crate::simd::dispatch!(@neon $neon_call $(, $neon_guard)?);
             }
         )?
-        #[allow(unreachable_code)]
         return $scalar;
     }};
 }
@@ -106,6 +118,9 @@ pub(crate) use dispatch;
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_arch = "x86_64")]
+    use imaginarium::SimdTier;
+
     /// Every arm returns the tag of the backend it stands for, so a test can name which rung the
     /// ladder took on the machine it is running on without any SIMD in the picture.
     fn taken(force_scalar: bool) -> &'static str {
@@ -139,15 +154,16 @@ mod tests {
     fn a_false_guard_falls_through_to_scalar_and_a_true_one_does_not() {
         assert_eq!(taken(true), "scalar");
 
-        let expected = if cfg!(target_arch = "aarch64") {
-            "neon"
-        } else if cfg!(target_arch = "x86_64") && imaginarium::cpu_features::has_avx2_fma() {
-            "avx2_fma"
-        } else if cfg!(target_arch = "x86_64") && imaginarium::cpu_features::has_sse4_1() {
-            "sse4_1"
-        } else {
-            "scalar"
+        #[cfg(target_arch = "x86_64")]
+        let expected = match SimdTier::widest() {
+            Some(tier) if tier >= SimdTier::Avx2Fma => "avx2_fma",
+            Some(tier) if tier >= SimdTier::Sse41 => "sse4_1",
+            _ => "scalar",
         };
+        #[cfg(target_arch = "aarch64")]
+        let expected = "neon";
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        let expected = "scalar";
         assert_eq!(taken(false), expected);
     }
 
@@ -165,7 +181,7 @@ mod tests {
         }
 
         #[cfg(target_arch = "x86_64")]
-        if imaginarium::cpu_features::has_sse4_1() {
+        if SimdTier::Sse41.is_supported() {
             assert_eq!(skip_first(true), "sse4_1");
         }
         #[cfg(target_arch = "aarch64")]

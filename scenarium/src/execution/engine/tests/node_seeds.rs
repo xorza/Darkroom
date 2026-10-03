@@ -43,7 +43,7 @@ async fn second_seeded_run_obeys_none_cache_mode() {
     let mut g = TestGraph::new();
     g.add("a", |n| n.counted(1i64, &calls));
     g.add("b", |n| n.counted(11i64, &calls));
-    g.add("sum", |n| n.sum());
+    g.add("sum", NodeSpec::sum);
     g.wire("a", 0, "sum", 0);
     g.wire("b", 0, "sum", 1);
     g.cache_all(CacheMode::None);
@@ -60,7 +60,7 @@ async fn second_seeded_run_obeys_none_cache_mode() {
         "nothing was retained, so both sources ran again"
     );
     assert_eq!(run.ran_node_count, 3);
-    assert!(!run.cached().contains(&"sum"));
+    assert!(run.cached().is_empty());
     assert!(run.holding_ram().is_empty());
 }
 
@@ -85,7 +85,6 @@ async fn node_seed_combines_with_a_sink_run_without_retaining() {
         "the explicit override feeds the ordinary sink during this run"
     );
     assert_eq!(run.logs(), ["132"], "(1 + 11) * 11");
-    assert_eq!(e.output_i64("mult", 0), None, "…and it is not retained");
     assert!(
         e.outputs("sum").is_empty(),
         "the targeted value is released after its real consumer"

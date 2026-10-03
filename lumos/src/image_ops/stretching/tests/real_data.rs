@@ -2,11 +2,10 @@
 //! write viewable JPEGs for visual inspection. Gated behind the `real-data` feature (the dataset
 //! lives in `test_data/lumos_data/`).
 
-use crate::io::image::linear::LinearImage;
-use crate::io::image::load_context::LoadContext;
 use crate::math::statistics::median_mut;
+use crate::testing::init_tracing;
+use crate::testing::real_data;
 use crate::testing::visual;
-use crate::testing::{calibration_dir, init_tracing};
 use crate::{ColorMode, NeutralizeBackground, Scnr, Stretch, StretchMethod};
 
 #[derive(Debug)]
@@ -28,21 +27,18 @@ fn stats(pixels: &[f32]) -> Stats {
 }
 
 #[test]
-#[ignore = "real-data image-processing test; run explicitly with --ignored"]
 fn stretch_stacked_light() {
     init_tracing();
 
-    let path = calibration_dir().join("stacked_light.tiff");
-    let mut image =
-        LinearImage::from_file(&path, &LoadContext::default()).expect("load stacked_light.tiff");
+    let mut image = real_data::linear_master();
     assert!(image.width() > 0 && image.height() > 0);
 
     NeutralizeBackground.apply(&mut image).unwrap();
 
-    // A linear stacked deep-sky frame, before any display stretch: the calibrated background sits at
-    // zero (a near-zero median — symmetric read noise dips some background pixels slightly negative,
-    // which is correct calibration, not a defect) with a bright stellar tail whose peaks exceed 1.
-    // The stretch caps the display output back into [0,1].
+    // A linear stacked deep-sky frame, before any display stretch: the calibrated background sits
+    // at zero (a near-zero median — symmetric read noise dips some background pixels slightly
+    // negative, which is correct calibration, not a defect) with a bright stellar tail whose peaks
+    // exceed 1. The stretch caps the display output back into [0,1].
     let input = stats(image.intensity_plane().pixels());
     eprintln!("input {}x{}: {input:?}", image.width(), image.height());
     assert!(
@@ -59,7 +55,19 @@ fn stretch_stacked_light() {
         ("asinh", Stretch::auto_asinh()),
         // GHS applied cold to linear data: the background sits at ~0, so the symmetry point is at 0
         // and the strength D must be large (the b=-1 logarithmic family lifts the faint signal).
-        ("ghs", Stretch::ghs(5000.0, -1.0, 0.0)),
+        (
+            "ghs",
+            Stretch {
+                method: StretchMethod::Ghs {
+                    d: 5000.0,
+                    b: -1.0,
+                    sp: 0.0,
+                    lp: 0.0,
+                    hp: 1.0,
+                },
+                color: ColorMode::ColorPreserving,
+            },
+        ),
     ] {
         let mut stretched = image.clone();
         config.apply(&mut stretched).unwrap();
@@ -83,11 +91,11 @@ fn stretch_stacked_light() {
         );
 
         Scnr::average_neutral().apply(&mut stretched).unwrap();
-        visual::save_linear(&stretched, &format!("stretch/stacked_light_{name}.png"));
+        visual::save_linear(&stretched, &format!("stretch/stacked_light_{name}"));
     }
 
-    // Two-stage Milky-Way contrast — the realistic GHS workflow. A gentle auto-asinh first lifts the
-    // dust into the mid-shadows (background median ~0.2), where GHS parameters are intuitive: a
+    // Two-stage Milky-Way contrast — the realistic GHS workflow. A gentle auto-asinh first lifts
+    // the dust into the mid-shadows (background median ~0.2), where GHS parameters are intuitive: a
     // contrast pass centered just above the background (`sp` on the dust), with `lp` keeping the
     // background dark and `hp` protecting the star cores. Far easier to focus on the Milky Way than
     // tuning GHS cold on linear data.
@@ -112,5 +120,5 @@ fn stretch_stacked_light() {
         "asinh+ghs output stays in [0,1]: {out:?}"
     );
     Scnr::average_neutral().apply(&mut staged).unwrap();
-    visual::save_linear(&staged, "stretch/stacked_light_asinh_ghs.png");
+    visual::save_linear(&staged, "stretch/stacked_light_asinh_ghs");
 }

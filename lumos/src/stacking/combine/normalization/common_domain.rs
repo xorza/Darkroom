@@ -18,7 +18,7 @@ use crate::stacking::combine::CANCEL_POLL_CHUNK;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::error::check_cancel;
 use crate::stacking::combine::pixel_coverage::PixelCoverage;
-use crate::stacking::frame_store::StoredFrame;
+use crate::stacking::frame_store::stored_frame::StoredFrame;
 use crate::stacking::frame_store::stored_plane::StoredPlane;
 
 #[derive(Debug)]
@@ -31,9 +31,9 @@ pub(crate) struct CommonDomain {
 impl CommonDomain {
     /// The all-valid mask an intersection starts from: one bit per pixel, one row.
     ///
-    /// Its own function so `mem_budget` can weigh exactly what [`Self::build`] allocates rather
-    /// than a copy of the expression that could drift from it.
-    pub(crate) fn full_mask(pixel_count: usize) -> BitBuffer2 {
+    /// Its own function so the tests can weigh exactly what [`Self::build`] allocates rather than
+    /// a copy of the expression that could drift from it.
+    fn full_mask(pixel_count: usize) -> BitBuffer2 {
         BitBuffer2::new_filled(Size2us::new(pixel_count, 1), true)
     }
 
@@ -100,4 +100,35 @@ fn intersect_domain(
         *word &= incoming;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::stacking::combine::normalization::common_domain::CommonDomain;
+
+    /// The common-domain mask is one bit per pixel, not one byte.
+    ///
+    /// Nothing else would notice a revert to `Vec<bool>`: the combine would still be correct, still
+    /// pass every test, and simply hold eight times the mask. At 6144² that is 37.7 MB against 4.7
+    /// MB — on top of the frame data the loader is already budgeting for, and invisible to
+    /// `load_budget_is_respected_across_configs`, which models frames rather than scratch.
+    #[test]
+    fn common_domain_mask_stays_one_bit_per_pixel() {
+        for pixels in [1024 * 1024usize, 6144 * 6144] {
+            let mask = CommonDomain::full_mask(pixels);
+            let packed = mask.words.len() * size_of::<u64>();
+            let unpacked = pixels * size_of::<bool>();
+
+            // Rows pad to 128 bits, so a single-row mask carries at most 15 bytes of slack.
+            assert!(
+                packed >= pixels / 8 && packed <= pixels / 8 + 16,
+                "{pixels} px: {packed} B is not one bit per pixel (+padding)"
+            );
+            assert_eq!(
+                unpacked / packed,
+                8,
+                "{pixels} px: packing should be 8x, got {unpacked} B unpacked vs {packed} B packed"
+            );
+        }
+    }
 }

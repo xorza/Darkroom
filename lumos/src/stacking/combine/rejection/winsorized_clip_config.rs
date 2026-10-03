@@ -5,7 +5,7 @@
 use crate::error::InvalidConfigField;
 use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::stacking::combine::rejection::sigma_bounds::SigmaBounds;
-use crate::stacking::combine::rejection::{begin_rejection, compact_within};
+use crate::stacking::combine::rejection::{begin_rejection, compact_within, sorted_median};
 
 /// Configuration for winsorized sigma clipping.
 ///
@@ -41,20 +41,20 @@ impl Default for WinsorizedClipConfig {
 }
 
 impl WinsorizedClipConfig {
-    pub fn new(sigma: f32) -> Self {
+    pub const fn new(sigma: f32) -> Self {
         Self {
             sigma: SigmaBounds::symmetric(sigma),
         }
     }
 
-    pub fn new_asymmetric(sigma_low: f32, sigma_high: f32) -> Self {
+    pub const fn new_asymmetric(sigma_low: f32, sigma_high: f32) -> Self {
         Self {
             sigma: SigmaBounds::asymmetric(sigma_low, sigma_high),
         }
     }
 
     /// Validate the clip thresholds.
-    pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
+    pub(super) fn validate(self) -> Result<(), InvalidConfigField> {
         self.sigma.validate()
     }
 
@@ -69,19 +69,12 @@ impl WinsorizedClipConfig {
     /// The median is then the middle element (O(1)) every pass — replacing the per-iteration
     /// quickselect + buffer copy that dominated this hot path. `winsorized_stddev` is an
     /// order-independent sum, so sorting changes neither the center nor the sigma.
-    pub(super) fn robust_estimate(
-        &self,
-        values: &[f32],
-        working: &mut Vec<f32>,
-    ) -> WinsorizedEstimate {
+    pub(super) fn robust_estimate(values: &[f32], working: &mut Vec<f32>) -> WinsorizedEstimate {
         working.clear();
         working.extend_from_slice(values);
         working.sort_unstable_by(f32::total_cmp);
 
-        // `select_nth_unstable`'s median (index len/2) equals the sorted element at that index,
-        // so `working[mid]` reproduces the previous `median_fast` result exactly.
-        let mid = working.len() / 2;
-        let mut center = working[mid];
+        let mut center = sorted_median(working);
         let mut sigma = winsorized_stddev(working, center) * WINSORIZED_CORRECTION;
 
         if sigma < f32::EPSILON {
@@ -98,7 +91,7 @@ impl WinsorizedClipConfig {
                 *v = v.clamp(low_bound, high_bound);
             }
 
-            center = working[mid];
+            center = sorted_median(working);
             let sigma_new = winsorized_stddev(working, center) * WINSORIZED_CORRECTION;
 
             if sigma_new < f32::EPSILON {
@@ -119,12 +112,12 @@ impl WinsorizedClipConfig {
     /// Phase 2: Reject outliers using the robust estimate from phase 1.
     ///
     /// Standard sigma clipping with the [`WinsorizedEstimate`] and the caller's thresholds.
-    pub(super) fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
+    pub(super) fn reject(self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
         if let Some(survivors) = begin_rejection(values, scratch, 3) {
             return survivors;
         }
 
-        let estimate = self.robust_estimate(values, &mut scratch.estimate_values);
+        let estimate = Self::robust_estimate(values, &mut scratch.estimate_values);
 
         if estimate.sigma < f32::EPSILON {
             return values.len();

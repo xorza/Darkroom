@@ -5,11 +5,11 @@ use scenarium::{CacheMode, Func, FuncEvent, Node, NodeId, NodeKind, RamUsage};
 
 use crate::core::document::{PortKind, PortRef};
 use crate::core::preview;
-use crate::gui::EventRef;
+use crate::gui::event_ref::EventRef;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
-use crate::gui::state::run_state::ExecStatus;
+use crate::gui::state::run_state::{ExecStatus, NodeRunState};
 use crate::gui::theme::Theme;
 use crate::gui::theme::const_value_editor_theme::ConstValueEditorTheme;
 
@@ -61,9 +61,9 @@ pub(crate) struct NodeCtx<'a> {
     /// guessing; that is the stub, and it is what a new accessor here must
     /// keep doing.
     func: Option<&'a Func>,
-    /// The input ports the last run could not feed, by index — one lookup
-    /// per node rather than one per port.
-    missing_inputs: &'a [usize],
+    /// What the last run said about this node, looked up once when the node
+    /// resolves rather than at every status, memory or port read.
+    run: Option<&'a NodeRunState>,
     /// Whether the pointer is over this node's body — `false` until a caller
     /// that holds a `Ui` sets it through [`Self::with_hover`].
     ///
@@ -80,23 +80,30 @@ pub(crate) struct NodeCtx<'a> {
 }
 
 impl<'a> NodeCtx<'a> {
-    /// Resolve `node_id` against the graph, or `None` when the graph does not
-    /// hold it — a placement left behind by a delete.
-    pub(super) fn resolve(graph_ctx: GraphCtx<'a>, node_id: NodeId, pos: Vec2) -> Option<Self> {
-        let node = graph_ctx.body().find(node_id)?;
+    /// Resolve the placed `node_id` against the graph.
+    ///
+    /// # Panics
+    ///
+    /// If the graph holds no `node_id`: callers resolve placements, and the
+    /// document holds a placement exactly for every node.
+    pub(super) fn resolve(graph_ctx: GraphCtx<'a>, node_id: NodeId, pos: Vec2) -> Self {
+        let node = graph_ctx
+            .body()
+            .find(node_id)
+            .expect("every placement names a node the graph holds");
         // `None` has exactly one meaning: a `NodeKind::Func` whose id the
         // library no longer holds. A special node's declaration is hardcoded,
-        // so `Graph::node_func` resolves it unconditionally.
-        let func = graph_ctx.body().node_func(node, graph_ctx.library());
-        Some(Self {
+        // so `Node::func` resolves it unconditionally.
+        let func = node.func(graph_ctx.library());
+        Self {
             graph_ctx,
             id: node_id,
             pos,
             node,
             func,
-            missing_inputs: graph_ctx.run_state().missing_inputs(node_id),
+            run: graph_ctx.run_state().node(node_id),
             hovered: false,
-        })
+        }
     }
 
     /// This node with the pointer-over question answered, resolved once by the
@@ -105,14 +112,14 @@ impl<'a> NodeCtx<'a> {
     /// Takes the answer rather than a `Ui`: the widget id it comes off is
     /// `gui::pane::graph::node`'s (`wid::hovered`), and this type sits below
     /// that module.
-    pub(crate) fn with_hover(self, hovered: bool) -> Self {
+    pub(crate) const fn with_hover(self, hovered: bool) -> Self {
         Self { hovered, ..self }
     }
 
     /// Whether the port rows build their hover tooltips: their text is
     /// composed per port per frame, and no port can be showing one while the
     /// pointer is elsewhere, so only the node under it pays.
-    pub(crate) fn tips(self) -> bool {
+    pub(crate) const fn tips(self) -> bool {
         self.hovered
     }
 
@@ -120,7 +127,7 @@ impl<'a> NodeCtx<'a> {
     /// over the node surfaces the (otherwise invisible) chips at half
     /// strength — the edit affordance appears exactly when the pointer is in
     /// the neighborhood, and geometry never changes.
-    pub(crate) fn sve(self) -> &'a ConstValueEditorTheme {
+    pub(crate) const fn sve(self) -> &'a ConstValueEditorTheme {
         let theme = self.graph_ctx.theme();
         if self.hovered {
             &theme.const_value_editor_revealed
@@ -130,7 +137,7 @@ impl<'a> NodeCtx<'a> {
     }
 
     /// The palette and metrics this node paints from.
-    pub(crate) fn theme(self) -> &'a Theme {
+    pub(crate) const fn theme(self) -> &'a Theme {
         self.graph_ctx.theme()
     }
 
@@ -157,19 +164,19 @@ impl<'a> NodeCtx<'a> {
     /// against an older library), so its interface can't be resolved.
     /// Rendered as a portless error stub the user can still select and
     /// delete — never silently dropped.
-    pub(crate) fn missing(self) -> bool {
+    pub(crate) const fn missing(self) -> bool {
         self.func.is_none()
     }
 
     /// Excluded from execution (`Node::disabled`). Sink headers expose the
     /// toggle; the body paints any authored disabled node dimmed.
-    pub(crate) fn disabled(self) -> bool {
+    pub(crate) const fn disabled(self) -> bool {
         self.node.disabled
     }
 
     /// Where this node's output is cached. The header's two storage chips
     /// toggle its RAM and disk bits.
-    pub(crate) fn cache(self) -> CacheMode {
+    pub(crate) const fn cache(self) -> CacheMode {
         self.node.cache
     }
 
@@ -189,7 +196,7 @@ impl<'a> NodeCtx<'a> {
     /// content digest, so no cache mode is ever honored; the header paints
     /// the `~` marker off this. Declared, like [`Self::sink`].
     pub(crate) fn impure(self) -> bool {
-        self.func.is_some_and(|f| f.impure())
+        self.func.is_some_and(Func::impure)
     }
 
     /// A preview node: its body shows the value wired into it instead of the
@@ -202,12 +209,11 @@ impl<'a> NodeCtx<'a> {
     }
 
     /// Whether the header offers the RAM/disk storage chips. An impure func
-    /// has no content digest to key a cache on, and a func that declares
-    /// itself uncacheable or exposes no outputs has nothing to store — a
-    /// `missing` stub for both reasons at once.
+    /// has no content digest to key a cache on, and a func with no outputs
+    /// has nothing to store — a `missing` stub for both reasons at once.
     pub(crate) fn cache_controls(self) -> bool {
         self.func
-            .is_some_and(|f| !f.uncacheable && !f.outputs.is_empty() && !f.impure())
+            .is_some_and(|f| !f.outputs.is_empty() && !f.impure())
     }
 
     /// Whether the header offers runtime cache eviction — it needs a
@@ -233,21 +239,21 @@ impl<'a> NodeCtx<'a> {
     /// fact, not a lookup in a compiled program — the palette and the header
     /// record every frame, including before the first compile, so an
     /// affordance can't wait on one.
-    pub(crate) fn runnable(self) -> bool {
+    pub(crate) const fn runnable(self) -> bool {
         !self.missing()
     }
 
     /// Outcome of the last graph run. Drives the node's status-glow shadow
     /// and (for `Executed`) the header time label.
     pub(crate) fn exec_status(self) -> ExecStatus {
-        self.graph_ctx.run_state().status(self.id)
+        self.run.map(NodeRunState::status).unwrap_or_default()
     }
 
     /// RAM this node's cached output currently holds (system vs GPU).
     /// Non-zero only for nodes that retain a value; drives the node body's
     /// memory readout, hidden when zero.
     pub(crate) fn ram(self) -> RamUsage {
-        self.graph_ctx.run_state().ram(self.id)
+        self.run.map(NodeRunState::ram).unwrap_or_default()
     }
 
     /// This node's input ports, in declaration order. Empty for a stub, which
@@ -258,6 +264,11 @@ impl<'a> NodeCtx<'a> {
             .iter()
             .enumerate()
             .map(move |(port_idx, input)| InputCtx::new(self, port_idx, input))
+    }
+
+    /// The func this node instantiates, `None` for one the library lacks.
+    pub(super) const fn func(self) -> Option<&'a Func> {
+        self.func
     }
 
     /// One input port by index.
@@ -273,12 +284,6 @@ impl<'a> NodeCtx<'a> {
             .iter()
             .enumerate()
             .map(move |(port_idx, output)| OutputCtx::new(self, port_idx, output))
-    }
-
-    /// One output port by index.
-    pub(crate) fn output(self, port_idx: usize) -> Option<OutputCtx<'a>> {
-        let declared = self.func?.outputs.get(port_idx)?;
-        Some(OutputCtx::new(self, port_idx, declared))
     }
 
     /// This node's event (emitter) ports. Events carry no data type — they
@@ -321,6 +326,6 @@ impl<'a> NodeCtx<'a> {
     /// port wired to a disabled or itself-unfed producer counts too, not just
     /// an unbound one.
     pub(super) fn missing_inputs(self) -> &'a [usize] {
-        self.missing_inputs
+        self.run.map_or(&[], NodeRunState::missing_inputs)
     }
 }

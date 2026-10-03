@@ -10,16 +10,17 @@
 //! from its own latch candidates under the same modifier
 //! ([`preview_drag_modifier`]), so exactly one controller claims the press.
 
+use std::sync::Arc;
+
 use palantir::Ui;
 use scenarium::NodeId;
 
-use crate::core::document::{PortKind, PortRef};
+use crate::core::document::PortKind;
+use crate::core::edit::graph_intent::drag_start::DragStart;
 use crate::core::preview;
-use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::ctx::CanvasCtx;
-use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
 use crate::gui::pane::graph::gesture::canvas_gesture::preview_drag_modifier;
-use crate::gui::pane::graph::gesture::drag_anchor::GroupDrag;
+use crate::gui::pane::graph::gesture::group_drag::GroupDrag;
 use crate::gui::pane::graph::node::port_row::{add_preview_intents, port_circle_wid};
 use crate::gui::requests::Requests;
 
@@ -35,17 +36,26 @@ impl PreviewDrag {
         self.drag.reset();
     }
 
-    /// Swept once per frame over the whole scene: only one pointer drag can be
-    /// in flight, and `PortRef` is document-unique, so the pane comes from the
-    /// port's own node rather than from the caller.
+    /// Whether a spawned preview is being dragged.
+    pub(crate) const fn in_flight(&self) -> bool {
+        self.drag.in_flight()
+    }
+
+    /// Advance the drag in flight, or latch a new one off a Ctrl+drag on an
+    /// output port. Swept once per frame over the whole scene: only one
+    /// pointer drag can be in flight.
     pub(crate) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
         let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
         // A live drag owns the frame; only once it ends does the latch scan
         // below get a look at this frame's presses.
-        if self.drag.advance(ui, graph_ctx, out) || !preview_drag_modifier(ui) {
+        if self.drag.advance(ui, graph_ctx, cx.cancelled(), out) || !preview_drag_modifier(ui) {
             return;
         }
-        let Some(port) = scan_output_drag_start(geometry, graph_ctx) else {
+        let Some(port) = geometry
+            .ports
+            .started_drag()
+            .filter(|port| port.kind == PortKind::Output)
+        else {
             return;
         };
         if !graph_ctx.contains(port.node_id) {
@@ -70,19 +80,13 @@ impl PreviewDrag {
         // A brand-new node is in no selection yet, so it drags alone. The
         // anchor is the port circle — the widget that owns this press; the node
         // itself has not been recorded yet and has no response to poll.
+        let members = Arc::from([DragStart {
+            node: node_id,
+            pos: center,
+        }]);
         self.drag
-            .latch(node_id, vec![(node_id, center)], port_circle_wid(port));
+            .latch(node_id, members, port_circle_wid(port), out);
     }
-}
-
-/// First output port whose circle began a drag this frame. Unfiltered by pane:
-/// only one press exists, so the caller resolves the winner's pane once rather
-/// than paying a lookup per candidate node.
-fn scan_output_drag_start(geometry: &CanvasGeometry, graph_ctx: GraphCtx<'_>) -> Option<PortRef> {
-    let keys = graph_ctx
-        .nodes()
-        .flat_map(|node| node.ports(PortKind::Output));
-    geometry.ports.first_drag_started(keys)
 }
 
 #[cfg(test)]

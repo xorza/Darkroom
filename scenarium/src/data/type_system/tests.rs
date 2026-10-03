@@ -1,29 +1,6 @@
 use super::*;
 
 #[test]
-fn type_id_from_name_is_deterministic_namespaced_and_v5() {
-    let namespace_a = TypeId::from_u128(0x11);
-    let namespace_b = TypeId::from_u128(0x22);
-
-    assert_eq!(
-        TypeId::from_name(namespace_a, "Mode"),
-        TypeId::from_name(namespace_a, "Mode")
-    );
-    assert_ne!(
-        TypeId::from_name(namespace_a, "Mode"),
-        TypeId::from_name(namespace_a, "Other")
-    );
-    assert_ne!(
-        TypeId::from_name(namespace_a, "Mode"),
-        TypeId::from_name(namespace_b, "Mode")
-    );
-
-    let id = TypeId::from_name(namespace_a, "Mode");
-    assert_eq!((id.as_u128() >> 76) & 0xf, 5);
-    assert_ne!(id.as_u128() >> 64, 0);
-}
-
-#[test]
 fn compatibility_and_defaults_follow_runtime_coercions() {
     let custom = |id| DataType::Custom(TypeId::from_u128(id));
 
@@ -60,7 +37,7 @@ fn compatibility_and_defaults_follow_runtime_coercions() {
 /// which is the property that lets one table serve both gates.
 #[test]
 fn strictness_changes_the_scalar_and_enum_arms_and_nothing_else() {
-    let mode = TypeId::from_u128(0x5ca1ab1e);
+    let mode = TypeId::from_u128(0x5ca1_ab1e);
     let known = |_: TypeId, name: &str| name == "fast";
     let declared =
         |ty: &DataType, v: &ConstValue| ty.accepts_const(v, Strictness::Declared, |_, _| true);

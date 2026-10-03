@@ -17,6 +17,7 @@
 //! only once its producers settle: the loop prepares that identity off-thread, re-stamps at
 //! reach time, and serves the cache on a hit.
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use tokio::task;
@@ -29,7 +30,7 @@ use crate::containers::column::Column;
 use crate::execution::identity::{NodeIdx, OutputAddr, OutputIdx};
 use crate::execution::report::EventTrigger;
 use crate::execution::report::{ExecutionOutcome, LogLevel, NodeExecutionStatus, NodeStatus};
-use crate::execution::report::{RunPhase, RunProgress, RunReporter};
+use crate::execution::report::{RunPhase, RunReporter};
 use crate::graph::func::error::InvokeError;
 use crate::graph::func::lambda::{Invocation, OutputDemand};
 use crate::graph::identity::EventPort;
@@ -61,7 +62,7 @@ enum NodeOutcome {
     /// Its lambda ran and succeeded, taking `secs`.
     Ran { secs: f64 },
     /// Its lambda ran but errored — an invoke failure, or a cancel mid-invoke.
-    Failed { secs: f64, error: RunError },
+    Failed { error: RunError },
     /// Never ran — an upstream dependency errored, its func has no implementation attached,
     /// or the cached output it was resolved to reuse failed to load.
     Skipped { error: RunError },
@@ -69,7 +70,7 @@ enum NodeOutcome {
 
 impl NodeOutcome {
     /// The run error the node carries — a failed run, or a node skipped for an error.
-    fn error(&self) -> Option<&RunError> {
+    const fn error(&self) -> Option<&RunError> {
         match self {
             NodeOutcome::Failed { error, .. } | NodeOutcome::Skipped { error } => Some(error),
             _ => None,
@@ -83,7 +84,7 @@ pub(crate) struct Executor {
     /// Per-*invoke* scratch: the node's resolved inputs, refilled for each node that runs.
     inputs: Vec<DynamicValue>,
     /// The run's mutable copy of the resolved live binding counts. Input consumption or
-    /// retirement decrements it; production demand and host pins remain immutable.
+    /// retirement decrements it; the resolved demand stays as the sweep left it.
     remaining_reads: RemainingOutputReads,
     /// Per-run outcome per node (see [`NodeOutcome`]), aligned to the program's
     /// dense node vector. Reused across runs and rebuilt each run.
@@ -160,7 +161,6 @@ impl Executor {
         } = request;
 
         outcome.clear();
-        let start = Instant::now();
         // Hold the cancel flag on the context so lambdas can poll it inside
         // off-thread work, and so the loop-top / post-loop checks below read
         // one source.
@@ -201,7 +201,6 @@ impl Executor {
         }
 
         self.ctx_manager.current_node = None;
-        outcome.elapsed_secs = start.elapsed().as_secs_f64();
         outcome.logs.append(&mut self.ctx_manager.logs);
         outcome.cancelled = self.ctx_manager.cancel.is_cancelled();
     }
@@ -241,32 +240,30 @@ impl Executor {
                 // A cancelled node didn't complete, so it has neither a run to report nor a
                 // failure of its own — the run as a whole is what was cancelled. `Skipped`
                 // alongside `Failed`: a cancel can land before the invoke, on the path walk
-                // that would have keyed it, and it is no more a failure there.
+                // that would have keyed it, and it is no more a failure there. A node the
+                // cut left uncached ran nothing either.
                 NodeOutcome::Failed {
-                    error: RunError::Cancelled { .. },
+                    error: RunError::Cancelled,
                     ..
                 }
                 | NodeOutcome::Skipped {
-                    error: RunError::Cancelled { .. },
-                } => None,
-                // A genuine failure did run: one row carries both the attempt's time and the
-                // reason it ended, so nothing has to reconcile a node listed as two things.
-                NodeOutcome::Failed { secs, error } => {
+                    error: RunError::Cancelled,
+                }
+                | NodeOutcome::Cut { cached: false } => None,
+                // A genuine failure did run, so it counts among the executed.
+                NodeOutcome::Failed { error } => {
                     outcome.ran_node_count += 1;
                     Some(NodeExecutionStatus::Errored {
-                        elapsed_secs: Some(*secs),
                         error: error.clone(),
                     })
                 }
                 NodeOutcome::Skipped { error } => Some(NodeExecutionStatus::Errored {
-                    elapsed_secs: None,
                     error: error.clone(),
                 }),
                 // The planner may have stopped at this node for want of an input — the one
                 // verdict that isn't the run loop's to give, since a node it never reached
                 // holds no outcome of its own.
-                NodeOutcome::Pending => self.missing_inputs(program, schedule, node_idx),
-                NodeOutcome::Cut { cached: false } => None,
+                NodeOutcome::Pending => Self::missing_inputs(program, schedule, node_idx),
             };
             let ram = node_ram[node_idx];
             if status.is_none() && ram.total() == 0 {
@@ -287,7 +284,6 @@ impl Executor {
     /// reached its verdict with) rather than stored: only the rare missing node pays for it,
     /// so it isn't worth a column spanning the program.
     fn missing_inputs(
-        &self,
         program: &CompiledGraph,
         schedule: &RunSchedule,
         node_idx: NodeIdx,
@@ -298,7 +294,7 @@ impl Executor {
         let ports: Vec<usize> = program.inputs[program[node_idx].inputs]
             .iter()
             .enumerate()
-            .filter(|(_, input)| schedule.input_missing(input))
+            .filter(|(_, input)| schedule.input_missing(program, input))
             .map(|(port_idx, _)| port_idx)
             .collect();
         debug_assert!(
@@ -332,9 +328,9 @@ struct ExecutionFrame<'a, 'r> {
 }
 
 impl ExecutionFrame<'_, '_> {
-    /// One node's turn. The resolved disposition decides which of the four things happens,
-    /// and it is authoritative — a [`NodeState::Reuse`] is never re-derived here, since its
-    /// producers may already be pruned (see [`resolve`](crate::execution::schedule::RunSchedule::resolve)).
+    /// One node's turn. The resolved disposition decides which of the four things happens, and it
+    /// is authoritative — a [`NodeState::Reuse`] is never re-derived here, since its producers may
+    /// already be pruned (see [`resolve`](crate::execution::schedule::RunSchedule::resolve)).
     async fn run_node(&mut self, node_idx: NodeIdx) {
         let e_node = &self.program[node_idx];
         let demand = &self.schedule.outputs.demand[e_node.outputs];
@@ -353,12 +349,6 @@ impl ExecutionFrame<'_, '_> {
                 self.node_outcomes[node_idx] = NodeOutcome::Cut {
                     cached: self.cache.is_resident_current(node_idx),
                 };
-            }
-            NodeState::MissingLambda => {
-                let error = RunError::MissingLambda {
-                    func_id: e_node.func_id,
-                };
-                self.mark_skipped(node_idx, error);
             }
             NodeState::Reuse => self.serve_reuse(node_idx, demand).await,
             // Reuse is settled *before* the errored-dependency check inside `invoke_node`: a
@@ -394,16 +384,10 @@ impl ExecutionFrame<'_, '_> {
     /// errored-upstream.
     async fn serve_reuse(&mut self, node_idx: NodeIdx, demand: &[OutputDemand]) {
         let program = self.program;
-        let hydrated = self
-            .cache
-            .hydrate_reuse(program, node_idx, demand, &mut self.ctx.contexts)
-            .await;
+        let hydrated = self.cache.hydrate_reuse(program, node_idx, demand).await;
         match hydrated {
             ReuseOutcome::Missed => {
-                let error = RunError::CacheLoadFailed {
-                    func_id: program[node_idx].func_id,
-                };
-                self.mark_skipped(node_idx, error);
+                self.mark_skipped(node_idx, RunError::CacheLoadFailed);
             }
             ReuseOutcome::Served => {
                 self.node_outcomes[node_idx] = NodeOutcome::Reused;
@@ -437,16 +421,13 @@ impl ExecutionFrame<'_, '_> {
         let cancel = self.ctx.cancel.clone();
         let hydrated = self
             .cache
-            .restamp_and_hydrate(program, node_idx, demand, &mut self.ctx.contexts, cancel)
+            .restamp_and_hydrate(program, &self.schedule.states, node_idx, demand, cancel)
             .await;
         match hydrated {
             // The run is being torn down, so there is nothing to start here:
             // invoking would begin work the cancel exists to stop.
             Err(StampError::Cancelled) => {
-                let run_error = RunError::Cancelled {
-                    func_id: program[node_idx].func_id,
-                };
-                self.mark_skipped(node_idx, run_error);
+                self.mark_skipped(node_idx, RunError::Cancelled);
                 false
             }
             // A path that would not read denies this node a *cache key*, not
@@ -487,13 +468,10 @@ impl ExecutionFrame<'_, '_> {
         let program = self.program;
         let e_node = &program[node_idx];
         let node_id = program.node_ids[node_idx];
-        let func_id = e_node.func_id;
-        debug_assert!(!e_node.lambda.is_none());
 
         if self.has_errored_dependency(node_idx) {
             self.abandon_input_reads(node_idx);
-            let error = RunError::SkippedUpstream { func_id };
-            self.mark_skipped(node_idx, error);
+            self.mark_skipped(node_idx, RunError::SkippedUpstream);
             return;
         }
 
@@ -507,10 +485,8 @@ impl ExecutionFrame<'_, '_> {
         // Attribute any logs this node emits to it (read by `ContextManager::log`).
         self.ctx.current_node = Some(node_id);
         let invoke_start = Instant::now();
-        self.reporter.progress(RunProgress {
-            node_id,
-            phase: RunPhase::Started { at: invoke_start },
-        });
+        self.reporter
+            .progress(node_id, RunPhase::Started { at: invoke_start });
 
         let result = {
             let slot = self.cache[node_idx].invoke_slot(e_node.outputs.len as usize);
@@ -528,11 +504,8 @@ impl ExecutionFrame<'_, '_> {
                 .map_err(|e| match e {
                     // A lambda that bailed on cancel reports it truthfully;
                     // surface it as a cancel rather than a generic invoke error.
-                    InvokeError::Cancelled => RunError::Cancelled { func_id },
-                    other => RunError::Invoke {
-                        func_id,
-                        message: other.to_string(),
-                    },
+                    InvokeError::Cancelled => RunError::Cancelled,
+                    other => RunError::Invoke(Arc::new(other)),
                 })
         };
         let run_time = invoke_start.elapsed().as_secs_f64();
@@ -543,14 +516,14 @@ impl ExecutionFrame<'_, '_> {
         // an aborted run — map that to `Cancelled` too so its output isn't cached. A genuine
         // error stands on its own, even mid-cancel.
         let result = match result {
-            Ok(()) if self.ctx.cancel.is_cancelled() => Err(RunError::Cancelled { func_id }),
+            Ok(()) if self.ctx.cancel.is_cancelled() => Err(RunError::Cancelled),
             Ok(()) => match self.cache[node_idx].unbound_demanded_outputs(demand) {
                 outputs if outputs.is_empty() => Ok(()),
-                outputs => Err(RunError::OutputsNotProduced { func_id, outputs }),
+                outputs => Err(RunError::OutputsNotProduced { outputs }),
             },
             other => other,
         };
-        let cancelled = matches!(&result, Err(RunError::Cancelled { .. }));
+        let cancelled = matches!(&result, Err(RunError::Cancelled));
         let slot = &mut self.cache[node_idx];
         let succeeded = match result {
             // The fresh output now corresponds to this node's current digest; record it so
@@ -562,22 +535,22 @@ impl ExecutionFrame<'_, '_> {
             }
             Err(error) => {
                 slot.clear_output();
-                self.node_outcomes[node_idx] = NodeOutcome::Failed {
-                    secs: run_time,
-                    error,
-                };
+                self.node_outcomes[node_idx] = NodeOutcome::Failed { error };
                 false
             }
         };
-        // No `Finished` for the cancelled node — it didn't complete; the consumer would
-        // otherwise paint it executed live.
+        // No finish for the cancelled node — it didn't complete.
         if !cancelled {
-            self.reporter.progress(RunProgress {
-                node_id,
-                phase: RunPhase::Finished {
+            let phase = if succeeded {
+                RunPhase::Succeeded {
                     elapsed_secs: run_time,
-                },
-            });
+                }
+            } else {
+                RunPhase::Failed {
+                    elapsed_secs: run_time,
+                }
+            };
+            self.reporter.progress(node_id, phase);
         }
         if !succeeded {
             return;
@@ -597,20 +570,14 @@ impl ExecutionFrame<'_, '_> {
         // because there one asked. The slot still records it, inside the store.
         let _ = self
             .cache
-            .store_node(
-                program,
-                node_idx,
-                StorePolicy::KnownMiss,
-                &mut self.ctx.contexts,
-            )
+            .store_node(program, node_idx, StorePolicy::KnownMiss)
             .await;
         self.release_drained_outputs(node_idx);
     }
 
     /// Drop `node_id` from this run: clear any stale cached output so it isn't served as
     /// this run's result, and record the outcome under the caller's reason —
-    /// [`RunError::SkippedUpstream`] for an errored dependency,
-    /// [`RunError::MissingLambda`] for a func with no implementation, or
+    /// [`RunError::SkippedUpstream`] for an errored dependency, or
     /// [`RunError::CacheLoadFailed`] for a probed blob that no longer loads.
     fn mark_skipped(&mut self, node_idx: NodeIdx, error: RunError) {
         self.cache[node_idx].clear_output();
@@ -629,7 +596,7 @@ impl ExecutionFrame<'_, '_> {
     }
 
     /// Hand the run's outcome the triggers a freshly initialized event source owns — only
-    /// events that have a subscriber and an implementation can fire.
+    /// events that have a subscriber can fire.
     fn collect_event_triggers(&mut self, node_idx: NodeIdx, event_state: &SharedAnyState) {
         let program = self.program;
         let node_id = program.node_ids[node_idx];
@@ -637,7 +604,7 @@ impl ExecutionFrame<'_, '_> {
             program.events[program[node_idx].events]
                 .iter()
                 .enumerate()
-                .filter(|(_, event)| !event.subscribers.is_empty() && !event.lambda.is_none())
+                .filter(|(_, event)| !event.subscribers.is_empty())
                 .map(|(event_idx, event)| EventTrigger {
                     event: EventPort { node_id, event_idx },
                     lambda: event.lambda.clone(),
@@ -651,6 +618,8 @@ impl ExecutionFrame<'_, '_> {
         for input in &self.program.inputs[self.program[node_idx].inputs] {
             let binding = &input.binding;
             let value = match binding {
+                // A const-only target, so no read was planned for it.
+                _ if self.program.overridden(input, &self.schedule.states) => DynamicValue::Unbound,
                 ExecutionBinding::None => DynamicValue::Unbound,
                 ExecutionBinding::Const(value) => value.into(),
                 ExecutionBinding::Bind(addr) if !self.producer_runs(*addr) => {
@@ -728,10 +697,8 @@ impl ExecutionFrame<'_, '_> {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use crate::execution::compile::compiled_graph::CompiledGraph;
-    use crate::execution::executor::{Executor, NodeOutcome};
+    use crate::execution::executor::Executor;
     use crate::execution::identity::OutputIdx;
-    use crate::graph::identity::NodeId;
 
     impl Executor {
         /// How many planned reads of one output the last run left uncompleted —
@@ -740,22 +707,6 @@ pub(crate) mod internals {
         /// in production.
         pub(crate) fn remaining_reads(&self, output_idx: OutputIdx) -> u32 {
             self.remaining_reads.counts[output_idx]
-        }
-
-        /// Whether `node_id` actually recomputed its lambda in the last run — i.e.
-        /// wasn't reused from RAM/disk. Before any run (empty outcomes) every node
-        /// reads as "ran", so plan-only introspection still sees the full schedule;
-        /// an id absent from the installed program is a caller bug and panics.
-        pub(crate) fn ran(&self, program: &CompiledGraph, node_id: NodeId) -> bool {
-            let node_idx = program
-                .node(node_id)
-                .expect("an id absent from the installed program is a caller bug");
-            self.outcomes.get(node_idx).is_none_or(|outcome| {
-                matches!(
-                    outcome,
-                    NodeOutcome::Ran { .. } | NodeOutcome::Failed { .. }
-                )
-            })
         }
     }
 }

@@ -1,15 +1,17 @@
-use std::mem::size_of;
 use std::path::Path;
 
+use fits_well::FitsError;
 use fits_well::header::Header;
-use fits_well::image::{Bitpix as FitsBitpix, SampleType};
+use fits_well::image::Scaling;
+use fits_well::image::{Bitpix as FitsBitpix, ImageMetadata, SampleType};
 use fits_well::io::{BLOCK_SIZE, Hdu, HduKind};
 
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::error::{fits_err, fits_unsupported};
+use crate::io::image::fits::metadata::SAMPLE_SCALE_KEYWORD;
 use crate::io::image::fits::options::{FitsCubeInterpretation, FitsFloatScale};
 use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::image_metadata::BitPix;
+use crate::io::image::sample_domain::ScaleOrigin;
 
 const FITS_DECODE_CHUNK_BYTES: usize = 4 * 1024 * 1024;
 
@@ -26,16 +28,21 @@ const FLOAT_ADU_DIVISOR: f32 = 65_535.0;
 pub(super) struct FitsHduDescription<'a> {
     header: &'a Header,
     kind: HduKind,
+    image: ImageMetadata<'a>,
     source_bytes: u64,
 }
 
 impl<'a> FitsHduDescription<'a> {
     pub(super) fn from_hdu(path: &Path, hdu: &'a Hdu) -> Result<Self, ImageError> {
-        let source_bytes = padded_data_bytes(path, hdu.data_bytes)?;
+        let image = hdu.image().map_err(|source| match source {
+            FitsError::NotAnImage => fits_unsupported(path, "selected HDU is not an image"),
+            source => fits_err(path, source),
+        })?;
         Ok(Self {
             header: &hdu.header,
             kind: hdu.kind,
-            source_bytes,
+            image,
+            source_bytes: padded_data_bytes(path, hdu.data_bytes)?,
         })
     }
 }
@@ -44,11 +51,10 @@ impl<'a> FitsHduDescription<'a> {
 pub(super) struct FitsDecodePlan {
     pub(super) shape: Vec<usize>,
     pub(super) dimensions: ImageDimensions,
-    pub(super) bitpix: BitPix,
-    pub(super) scaling: fits_well::image::Scaling,
-    /// Divide a physical sample by this to reach the pipeline's `[0, 1]` domain; multiply a
-    /// decoded sample by it to recover the physical value. See [`sample_divisor`].
-    pub(super) sample_divisor: f32,
+    pub(super) sample_type: SampleType,
+    pub(super) scaling: Scaling,
+    /// How the stored samples reach the pipeline's `[0, 1]` domain. See [`sample_scale`].
+    pub(super) sample_scale: SampleScale,
     pub(super) source_bytes: u64,
     pub(super) decoded_bytes: u64,
     pub(super) peak_bytes: u64,
@@ -66,8 +72,8 @@ impl FitsDecodePlan {
     /// A floating-point one carries its nulls in-band as IEEE NaN, with nothing in the header to
     /// announce them, so it answers `true` whether or not any are actually there. Wrong only in the
     /// direction that over-reserves.
-    pub(super) fn may_carry_nulls(&self) -> bool {
-        !self.bitpix.is_integer() || self.scaling.blank.is_some()
+    pub(super) const fn may_carry_nulls(&self) -> bool {
+        !self.sample_type.is_integer() || self.scaling.blank.is_some()
     }
 }
 
@@ -85,8 +91,8 @@ impl FitsDecodePlan {
 /// A floating-point `BITPIX` declares no full scale, so the only evidence available is `DATAMAX`: a
 /// declared saturation level above [`FLOAT_ADU_DATAMAX_MIN`] means the samples are ADU rather than
 /// `[0, 1]` and they are divided by [`FLOAT_ADU_DIVISOR`], the threshold and divisor Siril uses.
-/// Anything else — a `DATAMAX` of about 1, or none at all — is taken as already normalized, which is
-/// PixInsight's default for a float FITS and what keeps a Lumos-written master round-tripping.
+/// Anything else — a `DATAMAX` of about 1, or none at all — is taken as already normalized, which
+/// is PixInsight's default for a float FITS and what keeps a Lumos-written master round-tripping.
 ///
 /// The test is on the *header*, never on the pixels, and that is where this departs from Siril:
 /// with `DATAMAX` absent it scans the data instead (three sampled pixels on the partial-read path,
@@ -95,21 +101,46 @@ impl FitsDecodePlan {
 /// [`crate::stacking::combine`] now rejects a frame set for. An unnormalized float FITS carrying no
 /// `DATAMAX` therefore reaches the pipeline as it stands; the display stage measures its own range
 /// rather than the decoder guessing one.
-fn sample_divisor(
+fn sample_scale(
     path: &Path,
     header: &Header,
     stored: FitsBitpix,
-    scaling: &fits_well::image::Scaling,
+    scaling: &Scaling,
     float_scale: FitsFloatScale,
-) -> Result<f32, ImageError> {
+) -> Result<SampleScale, ImageError> {
+    let divided_by = |divisor: f32, origin| SampleScale {
+        divisor,
+        physical: divisor,
+        origin,
+    };
     let steps = match stored {
         FitsBitpix::U8 => f64::from(u8::MAX),
         FitsBitpix::I16 => f64::from(u16::MAX),
         FitsBitpix::I32 => f64::from(u32::MAX),
         FitsBitpix::I64 => u64::MAX as f64,
         FitsBitpix::F32 | FitsBitpix::F64 => {
+            // A lumos-written file stores its samples already normalized and records the scale
+            // they were normalized by; that record beats every guess below.
+            if let Some(recorded) = header
+                .get_real(SAMPLE_SCALE_KEYWORD)
+                .map_err(|source| fits_err(path, source))?
+            {
+                if !recorded.is_finite() || recorded <= 0.0 {
+                    return Err(fits_unsupported(
+                        path,
+                        format!("{SAMPLE_SCALE_KEYWORD} {recorded} must be finite and positive"),
+                    ));
+                }
+                return Ok(SampleScale {
+                    divisor: 1.0,
+                    physical: recorded as f32,
+                    origin: ScaleOrigin::Declared,
+                });
+            }
             return match float_scale {
-                FitsFloatScale::Normalized => Ok(1.0),
+                // "Already normalized" says where the samples sit, not what a unit of them is
+                // worth in the source's own terms, so the scale stays a guess.
+                FitsFloatScale::Normalized => Ok(divided_by(1.0, ScaleOrigin::Assumed)),
                 FitsFloatScale::FullScale(scale) => {
                     // The caller's own figure, so it is checked here rather than trusted: a
                     // non-positive one would invert or erase the samples.
@@ -119,16 +150,17 @@ fn sample_divisor(
                             format!("declared floating-point full scale {scale} must be positive"),
                         ));
                     }
-                    Ok(scale)
+                    Ok(divided_by(scale, ScaleOrigin::Declared))
                 }
                 FitsFloatScale::Auto => {
                     let data_max = header
                         .get_real("DATAMAX")
                         .map_err(|source| fits_err(path, source))?;
-                    Ok(match data_max {
+                    let divisor = match data_max {
                         Some(max) if max > FLOAT_ADU_DATAMAX_MIN => FLOAT_ADU_DIVISOR,
                         _ => 1.0,
-                    })
+                    };
+                    Ok(divided_by(divisor, ScaleOrigin::Assumed))
                 }
             };
         }
@@ -149,7 +181,19 @@ fn sample_divisor(
             format!("BSCALE {bscale} overflows the normalization scale for {stored:?} samples"),
         ));
     }
-    Ok(divisor as f32)
+    Ok(divided_by(divisor as f32, ScaleOrigin::Declared))
+}
+
+/// How one HDU's stored samples reach the pipeline's `[0, 1]` domain, and what a decoded unit is
+/// worth.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct SampleScale {
+    /// The decoder divides every stored (physical) sample by this.
+    pub(super) divisor: f32,
+    /// Multiply a decoded sample by this to recover the file's physical value. Equal to `divisor`
+    /// except for a lumos-written file, whose samples were stored already divided.
+    pub(super) physical: f32,
+    pub(super) origin: ScaleOrigin,
 }
 
 pub(super) fn preflight_fits_image(
@@ -159,37 +203,11 @@ pub(super) fn preflight_fits_image(
     float_scale: FitsFloatScale,
     memory_limit_bytes: u64,
 ) -> Result<FitsDecodePlan, ImageError> {
-    if !matches!(
-        hdu.kind,
-        HduKind::Primary | HduKind::Image | HduKind::CompressedImage
-    ) {
-        return Err(fits_unsupported(path, "selected HDU is not an image"));
-    }
-
-    let shape = if hdu.kind == HduKind::CompressedImage {
-        compressed_shape(hdu.header).map_err(|source| fits_err(path, source))?
-    } else {
-        hdu.header.axes().map_err(|source| fits_err(path, source))?
-    };
-    let dimensions = dimensions_from_shape(path, &shape, cube)?;
-    let stored_bitpix = if hdu.kind == HduKind::CompressedImage {
-        let code = hdu
-            .header
-            .get_integer("ZBITPIX")
-            .map_err(|source| fits_err(path, source))?
-            .ok_or_else(|| fits_unsupported(path, "compressed image is missing ZBITPIX"))?;
-        FitsBitpix::from_code(code).map_err(|source| fits_err(path, source))?
-    } else {
-        hdu.header
-            .bitpix()
-            .map_err(|source| fits_err(path, source))?
-    };
-    let scaling = hdu
-        .header
-        .scaling()
-        .map_err(|source| fits_err(path, source))?;
-    let bitpix = map_bitpix(SampleType::from_scaling(stored_bitpix, &scaling));
-    let sample_divisor = sample_divisor(path, hdu.header, stored_bitpix, &scaling, float_scale)?;
+    let dimensions = dimensions_from_shape(path, hdu.image.shape, cube)?;
+    let stored_bitpix = hdu.image.bitpix;
+    let scaling = hdu.image.scaling;
+    let sample_type = SampleType::from_scaling(stored_bitpix, &scaling);
+    let sample_scale = sample_scale(path, hdu.header, stored_bitpix, &scaling, float_scale)?;
     let decoded_bytes = checked_size_bytes(
         path,
         dimensions.sample_count(),
@@ -246,11 +264,11 @@ pub(super) fn preflight_fits_image(
     )?;
 
     Ok(FitsDecodePlan {
-        shape,
+        shape: hdu.image.shape.to_vec(),
         dimensions,
-        bitpix,
+        sample_type,
         scaling,
-        sample_divisor,
+        sample_scale,
         source_bytes: hdu.source_bytes,
         decoded_bytes,
         peak_bytes,
@@ -280,8 +298,7 @@ fn enforce_fits_budget(
         return Err(fits_unsupported(
             path,
             format!(
-                "{name} requires {required} bytes, exceeding the FITS load budget of {} bytes",
-                memory_limit_bytes
+                "{name} requires {required} bytes, exceeding the FITS load budget of {memory_limit_bytes} bytes"
             ),
         ));
     }
@@ -298,26 +315,6 @@ fn padded_data_bytes(path: &Path, bytes: u64) -> Result<u64, ImageError> {
         .ok_or_else(|| fits_unsupported(path, "FITS padded data-unit size overflows u64"))
 }
 
-fn compressed_shape(header: &Header) -> fits_well::Result<Vec<usize>> {
-    let rank = header
-        .get_integer("ZNAXIS")?
-        .ok_or(fits_well::FitsError::MissingKeyword { name: "ZNAXIS" })?;
-    let rank = usize::try_from(rank)
-        .ok()
-        .filter(|rank| *rank <= 999)
-        .ok_or(fits_well::FitsError::KeywordOutOfRange { name: "ZNAXIS" })?;
-    (1..=rank)
-        .map(|axis| {
-            let key = format!("ZNAXIS{axis}");
-            let value = header
-                .get_integer(&key)?
-                .ok_or(fits_well::FitsError::MissingKeyword { name: "ZNAXISn" })?;
-            usize::try_from(value)
-                .map_err(|_| fits_well::FitsError::KeywordOutOfRange { name: "ZNAXISn" })
-        })
-        .collect()
-}
-
 pub(super) fn dimensions_from_shape(
     path: &Path,
     shape: &[usize],
@@ -330,8 +327,7 @@ pub(super) fn dimensions_from_shape(
         ));
     }
     let (width, height, channels) = match shape {
-        [width, height] => (*width, *height, 1),
-        [width, height, 1] => (*width, *height, 1),
+        [width, height] | [width, height, 1] => (*width, *height, 1),
         [width, height, 3] if cube == FitsCubeInterpretation::Rgb => (*width, *height, 3),
         [_, _, 3] => Err(fits_unsupported(
             path,
@@ -348,6 +344,15 @@ pub(super) fn dimensions_from_shape(
             ));
         }
     };
+    if width > ImageDimensions::MAX_SIDE || height > ImageDimensions::MAX_SIDE {
+        return Err(fits_unsupported(
+            path,
+            format!(
+                "FITS image {width}x{height} has a side past {} px",
+                ImageDimensions::MAX_SIDE
+            ),
+        ));
+    }
     let pixel_count = width
         .checked_mul(height)
         .ok_or_else(|| fits_unsupported(path, format!("FITS pixel count overflows: {shape:?}")))?;
@@ -357,34 +362,31 @@ pub(super) fn dimensions_from_shape(
     Ok(ImageDimensions::new((width, height), channels))
 }
 
-fn map_bitpix(sample_type: SampleType) -> BitPix {
-    match sample_type {
-        SampleType::I8 | SampleType::U8 => BitPix::UInt8,
-        SampleType::I16 => BitPix::Int16,
-        SampleType::U16 => BitPix::UInt16,
-        SampleType::I32 => BitPix::Int32,
-        SampleType::U32 => BitPix::UInt32,
-        SampleType::I64 | SampleType::U64 => BitPix::Int64,
-        SampleType::F32 => BitPix::Float32,
-        SampleType::F64 => BitPix::Float64,
-    }
-}
-
 #[cfg(test)]
 pub(super) mod internals {
     use fits_well::header::Header;
+    use fits_well::image::{Bitpix, ImageMetadata};
     use fits_well::io::HduKind;
 
     use crate::io::image::fits::decode::plan::FitsHduDescription;
 
-    pub(crate) fn description(
-        header: &Header,
+    /// An HDU of `kind` whose image is `shape` samples of `bitpix`, scaled as `header`
+    /// declares.
+    pub(crate) fn description<'a>(
+        header: &'a Header,
         kind: HduKind,
+        shape: &'a [usize],
+        bitpix: Bitpix,
         source_bytes: u64,
-    ) -> FitsHduDescription<'_> {
+    ) -> FitsHduDescription<'a> {
         FitsHduDescription {
             header,
             kind,
+            image: ImageMetadata {
+                shape,
+                bitpix,
+                scaling: header.scaling().unwrap(),
+            },
             source_bytes,
         }
     }

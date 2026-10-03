@@ -1,4 +1,5 @@
 use super::*;
+use crate::execution::report::NodeExecutionStatus;
 
 use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
@@ -14,7 +15,7 @@ fn shifting_source(cell: Arc<AtomicI64>) -> impl FnOnce(NodeSpec) -> NodeSpec {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn simple_compute() {
     let b = Arc::new(AtomicI64::new(5));
     let mut g = TestGraph::new();
@@ -22,7 +23,7 @@ async fn simple_compute() {
     g.add("b", shifting_source(Arc::clone(&b)));
     g.add("sum", |n| n.sum().cache(CacheMode::Ram));
     g.add("mult", |n| n.mult().cache(CacheMode::Ram));
-    g.add("print", |n| n.records());
+    g.add("print", NodeSpec::records);
     g.wire("a", 0, "sum", 0);
     g.wire("b", 0, "sum", 1);
     g.wire("sum", 0, "mult", 0);
@@ -45,7 +46,7 @@ async fn simple_compute() {
     assert_eq!(run.logs(), ["63"], "sum = 2 + 7 = 9, mult = 9 * 7 = 63");
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn schedule_stable_across_repeated_runs() {
     let mut e = TestEngine::over(TestGraph::sample());
 
@@ -74,7 +75,7 @@ async fn schedule_stable_across_repeated_runs() {
 /// Output buffers are wiped before a re-running node is invoked, so an
 /// unwritten output cannot retain a prior run's value. This sink has no
 /// demanded outputs, so leaving one port `Unbound` is valid.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn unwritten_output_port_is_cleared_before_reexecution() {
     use crate::async_lambda;
 
@@ -94,7 +95,7 @@ async fn unwritten_output_port_is_cleared_before_reexecution() {
             .lambda(async_lambda!(
                 move |Invocation { outputs, .. }| { invocations = Arc::clone(&invocations) } => {
                     let run = invocations.fetch_add(1, Ordering::Relaxed);
-                    outputs[0] = ConstValue::Int(100 + run as i64).into();
+                    outputs[0] = ConstValue::Int(100 + i64::try_from(run).unwrap()).into();
                     if run == 0 {
                         // Only the first run writes the second port.
                         outputs[1] = ConstValue::Int(20).into();
@@ -132,4 +133,23 @@ async fn unwritten_output_port_is_cleared_before_reexecution() {
         matches!(e.output("partial_writer", 1), Some(DynamicValue::Unbound)),
         "the unwritten port is cleared before invoke, not left holding 20"
     );
+}
+
+#[tokio::test]
+async fn executed_nodes_reported() {
+    let mut e = TestEngine::over(TestGraph::sample());
+
+    let run = e.run_sinks().await;
+
+    assert_eq!(run.ran(), ["get_b", "get_a", "sum", "mult", "Print"]);
+    assert_eq!(run.ran_node_count, 5);
+    assert!(run.errored().is_empty());
+    assert!(run.missing_inputs().is_empty());
+
+    for name in run.ran() {
+        let Some(NodeExecutionStatus::Executed { elapsed_secs }) = run.status(name) else {
+            panic!("{name} ran, so it reports an elapsed time");
+        };
+        assert!(*elapsed_secs >= 0.0, "{name} has negative elapsed_secs");
+    }
 }

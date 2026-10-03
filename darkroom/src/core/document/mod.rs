@@ -1,4 +1,6 @@
 pub(crate) mod error;
+pub(crate) mod graph_revision;
+pub(crate) mod node_key;
 pub(crate) mod open_document;
 
 use ::serde::{Deserialize, Serialize};
@@ -6,9 +8,11 @@ use glam::Vec2;
 use palantir::DockState;
 use scenarium::{DetachedNode, Graph as CoreGraph, InputPort, NodeId, NodeKind, OutputPort};
 use std::collections::{BTreeMap, BTreeSet};
+use std::mem;
 
 use crate::core::document::error::DocumentValidationError;
 use crate::core::document::error::GraphViewValidationError;
+use crate::core::document::node_key::NodeKey;
 use crate::core::preview;
 
 /// Whether a port consumes a binding (`Input`) or produces a value
@@ -22,7 +26,7 @@ pub(crate) enum PortKind {
 }
 
 impl PortKind {
-    pub(crate) fn opposite(self) -> Self {
+    pub(crate) const fn opposite(self) -> Self {
         match self {
             PortKind::Input => PortKind::Output,
             PortKind::Output => PortKind::Input,
@@ -43,10 +47,16 @@ pub(crate) struct PortRef {
     pub(crate) port_idx: usize,
 }
 
+impl NodeKey for PortRef {
+    fn node(self) -> NodeId {
+        self.node_id
+    }
+}
+
 impl PortRef {
     /// `node_id`'s `port_idx`th input — the left-column counterpart of the
     /// graph's [`InputPort`].
-    pub(crate) fn input(node_id: NodeId, port_idx: usize) -> Self {
+    pub(crate) const fn input(node_id: NodeId, port_idx: usize) -> Self {
         Self {
             node_id,
             kind: PortKind::Input,
@@ -56,7 +66,7 @@ impl PortRef {
 
     /// `node_id`'s `port_idx`th output — the right-column counterpart of the
     /// graph's [`OutputPort`].
-    pub(crate) fn output(node_id: NodeId, port_idx: usize) -> Self {
+    pub(crate) const fn output(node_id: NodeId, port_idx: usize) -> Self {
         Self {
             node_id,
             kind: PortKind::Output,
@@ -253,21 +263,36 @@ impl GraphView {
             .map_or(0, |top| top.saturating_add(1))
     }
 
+    /// The depth that puts `key` in front of every *other* item, or its own depth when it already
+    /// paints last. Paint order is `(z, NodeId)`, so a tie on depth puts the higher id in front.
+    /// `None` when `key` has no placement.
+    pub(crate) fn raised_z(&self, key: NodeId) -> Option<u32> {
+        let own = self.item_placements.get(&key)?.z;
+        let top_other = self
+            .item_placements
+            .iter()
+            .filter(|(id, _)| **id != key)
+            .map(|(id, placement)| (placement.z, *id))
+            .max();
+        Some(match top_other {
+            Some((top_z, top_id)) if (top_z, top_id) > (own, key) => top_z.saturating_add(1),
+            _ => own,
+        })
+    }
+
     fn validate(&self, graph: &CoreGraph) -> Result<(), GraphViewValidationError> {
         if !self.viewport.is_valid() {
             return Err(GraphViewValidationError::InvalidViewport);
         }
 
-        // A map guarantees unique keys, so counts plus reverse membership
-        // prove the graph and view contain exactly the same node set.
-        let mut node_items = 0usize;
         for (key, placement) in &self.item_placements {
             if !placement.pos.is_finite() {
                 return Err(GraphViewValidationError::NonFinitePosition { item: *key });
             }
-            node_items += 1;
         }
-        if node_items != graph.len() {
+        // A map guarantees unique keys, so counts plus reverse membership
+        // prove the graph and view contain exactly the same node set.
+        if self.item_placements.len() != graph.len() {
             return Err(GraphViewValidationError::NodeCount);
         }
         for node in graph.iter() {
@@ -288,10 +313,10 @@ impl GraphView {
 /// positioning it, and the pane layout showing it. The `Library` it resolves
 /// against lives one level up on `App` (runtime-owned).
 ///
-/// The two halves are public because a caller that touches both wants them
+/// The fields are public because a caller that touches several wants them
 /// borrowed together, and destructuring is what proves they are disjoint —
-/// a pair of accessor methods would each borrow the whole `Document` and
-/// couldn't be held at once.
+/// accessor methods would each borrow the whole `Document` and couldn't be
+/// held at once.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Document {
     pub(crate) graph: CoreGraph,
@@ -399,7 +424,7 @@ impl Document {
             .find(node_id)
             .is_some_and(|node| match node.kind {
                 NodeKind::Func(func_id) => preview::is_preview(func_id),
-                _ => false,
+                NodeKind::Special(_) => false,
             })
     }
 
@@ -423,17 +448,29 @@ impl Document {
         // layout out for the call splits them: the predicate borrows a
         // `Document` whose layout is a placeholder, and it never asks about
         // one. Cold path only — the fast path above already returned.
-        let mut layout = std::mem::replace(&mut self.layout, Self::new_layout());
+        let mut layout = mem::replace(&mut self.layout, Self::new_layout());
         layout.retain_tabs(|tab| self.holds_tab(tab));
         self.layout = layout;
     }
 
     /// Full structural validation for untrusted documents.
+    ///
+    /// The layout is held to what [`Self::new_layout`] builds: the graph tab
+    /// pinned, which palantir's own load check already makes present, and
+    /// this editor's dock seed.
     pub(crate) fn validate(&self) -> Result<(), DocumentValidationError> {
         self.graph.validate()?;
         self.main_view
             .validate(&self.graph)
             .map_err(|source| DocumentValidationError::MainView { source })?;
+
+        let tab = self.layout.pinned();
+        if tab != TabRef::Graph {
+            return Err(DocumentValidationError::PinnedTab { tab });
+        }
+        if self.layout.dock_id() != Self::new_layout().dock_id() {
+            return Err(DocumentValidationError::ForeignDock);
+        }
 
         for tab in self.layout.all_tabs() {
             if !self.holds_tab(tab) {
@@ -462,6 +499,7 @@ pub(crate) mod harness;
 mod tests {
     use common::SerdeFormat;
     use scenarium::Node;
+    use std::sync::Arc;
 
     use super::*;
     use crate::core::document::harness::DocFixture;
@@ -472,26 +510,19 @@ mod tests {
     /// all of them at once, and nothing can be retained by one sweep while
     /// another has released it.
     ///
-    /// Re-diverging the predicates is what this catches: they were four
-    /// separate spellings of `graph.find(..).is_some()` before, and nothing
-    /// said which were meant to differ.
+    /// Re-diverging the predicates is what this catches.
     #[test]
     fn node_liveness_is_one_rule_with_two_declared_narrowings() {
         let mut fixture = DocFixture::default();
-        let preview_func = crate::core::preview::preview_func(Default::default());
+        let preview_func = preview::preview_func(Arc::default());
         fixture.library.add(preview_func.clone());
         let preview = fixture.doc.graph.add(Node::from(&preview_func));
         let plain = fixture.stub_at(Vec2::ZERO);
         let mut doc = fixture.doc;
 
-        // The shared rule answers for both kinds; the preview narrowing is a
-        // strict subset of it, never a different question.
+        // The shared rule answers for both kinds.
         for node in [preview, plain] {
             assert!(doc.holds_node(node), "the document holds {node:?}");
-            assert!(
-                !doc.holds_preview_node(node) || doc.holds_node(node),
-                "the preview narrowing cannot outlive the rule it narrows"
-            );
         }
         assert!(doc.holds_preview_node(preview));
         assert!(
@@ -546,9 +577,27 @@ mod tests {
         );
     }
 
+    /// The sample validates, and a layout that pins another tab, or was
+    /// saved under another dock seed, does not — each would pass palantir's
+    /// own load check.
     #[test]
-    fn document_passes_validation() {
-        DocFixture::sample().doc.validate().unwrap();
+    fn validation_holds_the_layout_to_the_editors_dock() {
+        let mut doc = DocFixture::sample().doc;
+        doc.validate().unwrap();
+
+        doc.layout = DockState::new(DOCK_SEED, TabRef::Preferences);
+        assert!(matches!(
+            doc.validate(),
+            Err(DocumentValidationError::PinnedTab {
+                tab: TabRef::Preferences
+            })
+        ));
+
+        doc.layout = DockState::new("another.dock", TabRef::Graph);
+        assert!(matches!(
+            doc.validate(),
+            Err(DocumentValidationError::ForeignDock)
+        ));
     }
 
     /// Paint order is a total order over `(z, NodeId)`, so items sharing the

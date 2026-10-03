@@ -1,174 +1,184 @@
 //! Light-frame calibration, registration, and stacking node.
 
-use std::path::PathBuf;
-
-use imaginarium::Image as RawImage;
 use lumos::ProgressCallback;
-use lumos::{AlignStackConfig, CalibrationMasters, LinearImage, Reference, calibrate_align_stack};
+use lumos::{
+    AlignStackConfig, CalibrationMasters, LinearImage, QualityPlanes, Reference,
+    calibrate_align_stack,
+};
+use scenarium::async_lambda;
 use scenarium::{
-    DataType, DynamicValue, Func, FuncInput, FuncLambda, FuncOutput, InvokeError, Library,
+    DataType, DynamicValue, Func, FuncId, FuncInput, FuncOutput, Invocation, InvokeError,
+    InvokeResult, Library, OutputDemand,
 };
 
-use crate::astro::config::preset;
-use crate::astro::config::stacking::{
-    CombineKnobs, CombinePreset, DetectionKnobs, DetectionPreset, RegistrationKnobs,
-    RegistrationPreset,
-};
+use crate::astro::config::preset::Preset;
+use crate::astro::config::stacking::{CombineMethodChoice, DetectionPreset, RegistrationPreset};
 use crate::astro::masters::{MASTERS_DATA_TYPE, Masters};
 use crate::astro::nodes::io::ASTRO_RAW_PATHS_DATA_TYPE;
 use crate::astro::nodes::runtime;
 use crate::image::{IMAGE_DATA_TYPE, Image};
-use scenarium::Invocation;
 
-#[derive(Debug, thiserror::Error)]
-enum LightFramesError {
-    #[error("no light frames selected")]
-    Empty,
+const STACK_LIGHTS_FUNC_ID: FuncId = FuncId::literal("b02f5c42-7bda-48f6-81dd-81338efbb126");
+
+/// The input the reference frame index arrives on.
+const REFERENCE: usize = 8;
+
+/// The ancillary planes a run computes: coverage and weight for a reader of
+/// their outputs, and never the variance, which the node does not output.
+const fn quality(demand: &[OutputDemand]) -> QualityPlanes {
+    QualityPlanes {
+        coverage: !demand[1].is_skip(),
+        weight: !demand[2].is_skip(),
+        variance: false,
+    }
 }
 
-fn light_frames(paths: &[String]) -> Result<Vec<PathBuf>, LightFramesError> {
-    let frames: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
-    if frames.is_empty() {
-        return Err(LightFramesError::Empty);
+/// The alignment reference: the frame an index names, or, unset, the
+/// richest frame. A negative index names no frame.
+fn reference(index: &DynamicValue) -> InvokeResult<Reference> {
+    if matches!(index, DynamicValue::Unbound) {
+        return Ok(Reference::Auto);
     }
-    Ok(frames)
+    let index = index.required_i64();
+    usize::try_from(index)
+        .map(Reference::Index)
+        .map_err(|_negative| InvokeError::invalid_input(REFERENCE, "a frame index", index))
 }
 
 pub(crate) fn register(library: &mut Library) {
+    DetectionPreset::register(library);
+    RegistrationPreset::register(library);
+    CombineMethodChoice::register(library);
     library.add(
-        Func::new("b02f5c42-7bda-48f6-81dd-81338efbb126", "Stack Lights")
-            .description("Calibrates, aligns, and stacks selected light frames into one image.")
-            .category("Astro")
-            .pure()
-            .input(
-                FuncInput::required("Lights", ASTRO_RAW_PATHS_DATA_TYPE.clone())
-                    .description("Camera-RAW light frames to stack."),
-            )
-            .input(
-                FuncInput::optional("Masters", MASTERS_DATA_TYPE.clone())
-                    .description("Optional calibration masters. Unwired means no calibration."),
-            )
-            .input(preset::input::<DetectionKnobs, DetectionPreset>(
-                "Detection",
-            ))
-            .input(preset::input::<RegistrationKnobs, RegistrationPreset>(
-                "Registration",
-            ))
-            .input(preset::input::<CombineKnobs, CombinePreset>("Combine"))
-            .input(
-                FuncInput::required("Reference", DataType::Int)
-                    .description(
-                        "Alignment reference frame index; −1 auto-picks the richest frame.",
+        Func::new(
+            STACK_LIGHTS_FUNC_ID,
+            "Stack Lights",
+            async_lambda!(move |Invocation { ctx, inputs, demand, outputs, .. }| {
+                cancel = ctx.cancel_flag(),
+                quality = quality(demand),
+            } => {
+                debug_assert_eq!(inputs.len(), 9);
+                debug_assert_eq!(outputs.len(), 3);
+
+                let lights = inputs[0].required_fs_paths().to_vec();
+                let masters_value = inputs[1].clone();
+                let mut stack = CombineMethodChoice::resolve(&inputs[6], &inputs[7]);
+                stack.quality = quality;
+                let reference = reference(&inputs[REFERENCE])?;
+                let config = AlignStackConfig {
+                    detection: DetectionPreset::resolve(&inputs[2], &inputs[3]),
+                    registration: RegistrationPreset::resolve(&inputs[4], &inputs[5]),
+                    stack,
+                    reference,
+                    cosmic_ray: None,
+                };
+
+                let result = runtime::run_cancellable(cancel, move |cancel| {
+                    let empty = CalibrationMasters::default();
+                    let masters = masters_value
+                        .as_custom::<Masters>()
+                        .map_or(&empty, |masters| &masters.masters);
+                    calibrate_align_stack(
+                        &lights,
+                        masters,
+                        &config,
+                        ProgressCallback::default(),
+                        cancel,
                     )
-                    .default(-1_i64),
-            )
-            .output(FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Stacked image."))
-            .output(
-                FuncOutput::new("Coverage", IMAGE_DATA_TYPE.clone())
-                    .description("Per-pixel frame-count map."),
-            )
-            .output(
-                FuncOutput::new("Weight", IMAGE_DATA_TYPE.clone())
-                    .description("Per-pixel accumulated weight map."),
-            )
-            .lambda(FuncLambda::new(
-                move |Invocation {
-                          ctx,
-                          inputs,
-                          outputs,
-                          ..
-                      }| {
-                    let cancel = ctx.cancel_flag();
-                    Box::pin(async move {
-                        debug_assert_eq!(inputs.len(), 6);
-                        debug_assert_eq!(outputs.len(), 3);
+                })
+                .await?;
 
-                        let light_paths = inputs[0]
-                            .as_fs_paths()
-                            .expect("lights input type is validated at the compile boundary");
-                        let lights = light_frames(light_paths).map_err(InvokeError::external)?;
-
-                        let masters_value = inputs[1].clone();
-                        let detection =
-                            preset::resolve::<DetectionKnobs, DetectionPreset>(&inputs[2]);
-                        let registration =
-                            preset::resolve::<RegistrationKnobs, RegistrationPreset>(&inputs[3]);
-                        let stack = preset::resolve::<CombineKnobs, CombinePreset>(&inputs[4]);
-                        let reference = match inputs[5]
-                            .as_i64()
-                            .expect("reference input type is validated at the compile boundary")
-                        {
-                            index if index >= 0 => Reference::Index(index as usize),
-                            _ => Reference::Auto,
-                        };
-                        let config = AlignStackConfig {
-                            detection,
-                            registration,
-                            stack,
-                            reference,
-                            cosmic_ray: None,
-                        };
-
-                        let result = runtime::run_cancellable(cancel, move |cancel| {
-                            let empty = CalibrationMasters::default();
-                            let masters = masters_value
-                                .as_custom::<Masters>()
-                                .map(|masters| &masters.masters)
-                                .unwrap_or(&empty);
-                            calibrate_align_stack(
-                                &lights,
-                                masters,
-                                &config,
-                                ProgressCallback::default(),
-                                cancel,
-                            )
-                        })
-                        .await?;
-
-                        // The node advertises coverage and weight outputs, so the stack is
-                        // configured to produce them.
-                        let coverage = LinearImage::from(
-                            result
-                                .product
-                                .coverage
-                                .expect("coverage requested by the stacking config"),
-                        );
-                        let weight = LinearImage::from(
-                            result
-                                .product
-                                .weight
-                                .expect("weight requested by the stacking config"),
-                        );
-                        outputs[0] = DynamicValue::from_custom(Image::from(RawImage::from(
-                            &result.product.image,
-                        )));
-                        outputs[1] =
-                            DynamicValue::from_custom(Image::from(RawImage::from(&coverage)));
-                        outputs[2] =
-                            DynamicValue::from_custom(Image::from(RawImage::from(&weight)));
-                        Ok(())
-                    })
-                },
-            )),
+                let product = result.product;
+                outputs[0] = DynamicValue::from_custom(Image::from(product.image));
+                if quality.coverage {
+                    let coverage = product
+                        .coverage
+                        .expect("the stack produces the coverage it was asked for");
+                    outputs[1] =
+                        DynamicValue::from_custom(Image::from(LinearImage::from(coverage)));
+                }
+                if quality.weight {
+                    let weight = product
+                        .weight
+                        .expect("the stack produces the weight it was asked for");
+                    outputs[2] =
+                        DynamicValue::from_custom(Image::from(LinearImage::from(weight)));
+                }
+                Ok(())
+            }),
+        )
+        .description("Calibrates, aligns, and stacks selected light frames into one image.")
+        .category("Astro")
+        .pure()
+        .input(
+            FuncInput::required("Lights", ASTRO_RAW_PATHS_DATA_TYPE.clone())
+                .description("Camera-RAW light frames to stack."),
+        )
+        .input(
+            FuncInput::optional("Masters", MASTERS_DATA_TYPE)
+                .description("Optional calibration masters. Unwired means no calibration."),
+        )
+        .input(DetectionPreset::picker("Detection"))
+        .input(DetectionPreset::config_input("Detection Config", 2))
+        .input(RegistrationPreset::picker("Registration"))
+        .input(RegistrationPreset::config_input("Registration Config", 4))
+        .input(CombineMethodChoice::picker("Combine"))
+        .input(CombineMethodChoice::config_input("Combine Config", 6))
+        .input(
+            FuncInput::optional("Reference", DataType::Int)
+                .description("Alignment reference frame index; unset picks the richest frame."),
+        )
+        .output(FuncOutput::new("Image", IMAGE_DATA_TYPE).description("Stacked image."))
+        .output(
+            FuncOutput::new("Coverage", IMAGE_DATA_TYPE).description("Per-pixel frame-count map."),
+        )
+        .output(
+            FuncOutput::new("Weight", IMAGE_DATA_TYPE)
+                .description("Per-pixel accumulated weight map."),
+        ),
     );
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use lumos::{QualityPlanes, Reference};
+    use scenarium::{DynamicValue, OutputDemand};
 
-    use crate::astro::nodes::stacking::light_frames;
+    use crate::astro::nodes::stacking::{quality, reference};
+
+    /// Each ancillary plane is computed exactly when its output has a reader.
+    #[test]
+    fn the_stack_computes_the_planes_its_readers_demand() {
+        use OutputDemand::{Produce, Skip};
+        let planes = |demand: [OutputDemand; 3]| {
+            let QualityPlanes {
+                coverage,
+                weight,
+                variance,
+            } = quality(&demand);
+            [coverage, weight, variance]
+        };
+        assert_eq!(planes([Produce, Skip, Skip]), [false, false, false]);
+        assert_eq!(planes([Produce, Produce, Skip]), [true, false, false]);
+        assert_eq!(planes([Skip, Skip, Produce]), [false, true, false]);
+        assert_eq!(planes([Produce, Produce, Produce]), [true, true, false]);
+    }
 
     #[test]
-    fn light_frame_selection_requires_input_and_preserves_order() {
-        let selected = ["lights/b.raf".to_string(), "lights/a.raf".to_string()];
+    fn an_unset_reference_is_automatic_and_a_negative_one_is_refused() {
+        assert!(matches!(
+            reference(&DynamicValue::Unbound),
+            Ok(Reference::Auto)
+        ));
+        assert!(matches!(
+            reference(&DynamicValue::from(3_i64)),
+            Ok(Reference::Index(3))
+        ));
         assert_eq!(
-            light_frames(&selected).unwrap(),
-            [PathBuf::from("lights/b.raf"), PathBuf::from("lights/a.raf")]
-        );
-        assert_eq!(
-            light_frames(&[]).unwrap_err().to_string(),
-            "no light frames selected"
+            reference(&DynamicValue::from(-1_i64))
+                .unwrap_err()
+                .to_string(),
+            "input 8 must be a frame index, got -1"
         );
     }
 }

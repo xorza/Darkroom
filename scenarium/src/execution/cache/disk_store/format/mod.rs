@@ -2,6 +2,7 @@
 
 use std::io::{self, SeekFrom};
 
+use tokio::io::Take;
 use tokio::io::{
     AsyncRead, AsyncReadExt as _, AsyncSeek, AsyncSeekExt as _, AsyncWrite, AsyncWriteExt as _,
 };
@@ -11,11 +12,10 @@ use crate::data::codec::Codecs;
 use crate::data::codec::error::CodecFormatError;
 use crate::execution::cache::digest::Digest;
 use crate::graph::func::lambda::OutputDemand;
-use crate::runtime::context::ContextStore;
 use crate::{ConstValue, DynamicValue, TypeId};
 
 const MAGIC: &[u8; 8] = b"SCENBLOB";
-const FORMAT_VERSION: u32 = 9;
+const FORMAT_VERSION: u32 = 10;
 const FIXED_LEN: usize = 8 + 4 + 32 + 4 + 8;
 const DESCRIPTOR_LEN: usize = 1 + 3 + 16 + 4 + 8;
 const BODY_LEN_OFFSET: u64 = (8 + 4 + 32 + 4) as u64;
@@ -29,7 +29,7 @@ enum OutputKind {
 }
 
 impl OutputKind {
-    fn tag(self) -> u8 {
+    const fn tag(self) -> u8 {
         match self {
             Self::Unbound => 0,
             Self::Static => 1,
@@ -60,7 +60,6 @@ pub(super) async fn write<W>(
     digest: Digest,
     outputs: &[DynamicValue],
     codecs: &Codecs,
-    ctx: &mut ContextStore,
 ) -> codec::error::Result<()>
 where
     W: AsyncWrite + AsyncSeek + Unpin + Send,
@@ -96,7 +95,7 @@ where
                     .get(type_id)
                     .expect("custom output codec was checked while writing descriptors");
                 codec
-                    .encode(value.as_ref(), writer, ctx)
+                    .encode(value.as_ref(), writer)
                     .await
                     .map_err(|source| CodecFormatError::Encode { type_id, source })?;
             }
@@ -141,11 +140,10 @@ where
     Ok(prefix.is_some_and(|prefix| prefix.output_count == outputs.len()))
 }
 
-/// Whether this blob can serve `demand` under `digest`: [`read`] stopped after its header
-/// check. Reads the fixed prefix plus one descriptor per output and stops, so a reuse
-/// verdict costs one small sequential read instead of decoding the body (and needs no
-/// [`ContextStore`]). Sharing `read_header` is what keeps a probe's verdict and the later
-/// read's from drifting apart.
+/// Whether this blob can serve `demand` under `digest`: [`read`] stopped after its header check.
+/// Reads the fixed prefix plus one descriptor per output and stops, so a reuse verdict costs one
+/// small sequential read instead of decoding the body. Sharing `read_header` is what keeps a
+/// probe's verdict and the later read's from drifting apart.
 pub(super) async fn covers_demand<R>(
     reader: &mut R,
     file_len: u64,
@@ -166,7 +164,6 @@ pub(super) async fn read<R>(
     file_len: u64,
     digest: Digest,
     codecs: &Codecs,
-    ctx: &mut ContextStore,
     demand: &[OutputDemand],
 ) -> codec::error::Result<Option<Vec<DynamicValue>>>
 where
@@ -191,7 +188,7 @@ where
                     .expect("custom codec was validated while reading the header");
                 let mut payload = (&mut *reader).take(descriptor.payload_len);
                 let value = codec
-                    .decode(&mut payload, descriptor.payload_len, ctx)
+                    .decode(&mut payload, descriptor.payload_len)
                     .await
                     .map_err(|source| CodecFormatError::Decode { type_id, source })?;
                 require_consumed(&payload)?;
@@ -240,7 +237,7 @@ async fn scan_header<R>(
     digest: Digest,
     codecs: &Codecs,
     mut accept: impl FnMut(usize, OutputDescriptor) -> bool,
-) -> io::Result<Option<HeaderPrefix>>
+) -> codec::error::Result<Option<HeaderPrefix>>
 where
     R: AsyncRead + Unpin,
 {
@@ -254,9 +251,9 @@ where
             .checked_add(descriptor.payload_len)
             .ok_or_else(|| invalid_data("cache payload lengths overflow u64"))?;
         if let OutputKind::Custom { type_id, version } = descriptor.kind
-            && !codecs
+            && codecs
                 .get(type_id)
-                .is_some_and(|codec| codec.version() == version)
+                .is_none_or(|codec| codec.version() != version)
         {
             return Ok(None);
         }
@@ -276,7 +273,7 @@ async fn read_prefix<R>(
     reader: &mut R,
     file_len: u64,
     digest: Digest,
-) -> io::Result<Option<HeaderPrefix>>
+) -> codec::error::Result<Option<HeaderPrefix>>
 where
     R: AsyncRead + Unpin,
 {
@@ -310,6 +307,17 @@ where
         output_count,
         body_len,
     }))
+}
+
+/// The first custom type among `outputs` that `codecs` cannot encode — the
+/// verdict [`write`] would reach, answered before anything is written.
+pub(super) fn unsupported_type(outputs: &[DynamicValue], codecs: &Codecs) -> Option<TypeId> {
+    outputs.iter().find_map(|value| match value {
+        DynamicValue::Custom(value) if codecs.get(value.type_id()).is_none() => {
+            Some(value.type_id())
+        }
+        _ => None,
+    })
 }
 
 fn descriptor_for(value: &DynamicValue, codecs: &Codecs) -> codec::error::Result<OutputDescriptor> {
@@ -358,7 +366,9 @@ async fn write_descriptor(
     writer.write_all(&bytes).await
 }
 
-async fn read_descriptor(reader: &mut (impl AsyncRead + Unpin)) -> io::Result<OutputDescriptor> {
+async fn read_descriptor(
+    reader: &mut (impl AsyncRead + Unpin),
+) -> codec::error::Result<OutputDescriptor> {
     let mut bytes = [0; DESCRIPTOR_LEN];
     reader.read_exact(&mut bytes).await?;
     if bytes[1..4] != [0; 3] {
@@ -558,7 +568,7 @@ async fn read_array<const N: usize>(reader: &mut (impl AsyncRead + Unpin)) -> io
     Ok(bytes)
 }
 
-fn require_consumed<R: AsyncRead>(reader: &tokio::io::Take<R>) -> codec::error::Result<()> {
+fn require_consumed<R: AsyncRead>(reader: &Take<R>) -> codec::error::Result<()> {
     if reader.limit() == 0 {
         Ok(())
     } else {
@@ -578,7 +588,7 @@ fn require_payload_len(actual: u64, expected: u64) -> codec::error::Result<()> {
     }
 }
 
-fn header_len(output_count: usize) -> usize {
+pub(super) fn header_len(output_count: usize) -> usize {
     checked_header_len(output_count).expect("a cache header length must fit in memory")
 }
 
@@ -600,16 +610,17 @@ fn descriptor_payload_len_offset(index: usize) -> u64 {
         + PAYLOAD_LEN_OFFSET
 }
 
-fn invalid_data(message: &'static str) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, message)
+fn invalid_data(message: &'static str) -> CodecFormatError {
+    CodecFormatError::Frame(message.into())
 }
 
 #[cfg(test)]
 pub(crate) mod internals {
-    /// Byte offset of the first output payload: where a test corrupts a blob body while
-    /// leaving the header — and so a reuse probe's verdict — intact.
-    pub(crate) fn body_offset(output_count: usize) -> usize {
-        super::header_len(output_count)
+    /// Rewrite `blob`'s format version to the one before the current: the header a blob from an
+    /// earlier build carries, which every read refuses.
+    pub(crate) fn age_format(blob: &mut [u8]) {
+        let older = super::FORMAT_VERSION - 1;
+        blob[8..12].copy_from_slice(&older.to_le_bytes());
     }
 }
 

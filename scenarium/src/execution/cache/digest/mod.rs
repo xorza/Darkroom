@@ -75,7 +75,7 @@ macro_rules! digest_pod_ints {
         })*
     };
 }
-digest_pod_ints!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128);
+digest_pod_ints!(u32, u64, u128, i64, i128);
 
 impl DigestPod for f32 {
     fn write_le(self, hasher: &mut DigestHasher) {
@@ -89,7 +89,7 @@ impl DigestPod for f64 {
 }
 impl DigestPod for bool {
     fn write_le(self, hasher: &mut DigestHasher) {
-        hasher.write_bytes(&[self as u8]);
+        hasher.write_bytes(&[u8::from(self)]);
     }
 }
 

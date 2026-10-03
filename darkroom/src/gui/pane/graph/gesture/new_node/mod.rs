@@ -3,6 +3,7 @@
 //! [`NodePalette`].
 
 pub(crate) mod node_palette;
+pub(crate) mod palette_rows;
 
 use glam::Vec2;
 use palantir::{Ui, WidgetId};
@@ -12,6 +13,7 @@ use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
 use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::gesture::canvas_gesture::CanvasGesture;
 use crate::gui::pane::graph::gesture::new_node::node_palette::NodePalette;
+use crate::gui::pane::graph::gesture::new_node::palette_rows::PaletteRows;
 use crate::gui::pane::graph::paint::anchored_menu::AnchoredMenu;
 use crate::gui::requests::Requests;
 
@@ -40,6 +42,8 @@ pub(crate) struct NewNodeUi {
     /// filters the listed entries by name (a matching category name shows
     /// that whole column). Empty ⇒ everything shows.
     search: Search,
+    /// The rows the search matched, filtered again only when it changes.
+    rows: PaletteRows,
 }
 
 /// The palette's search text and its case-folded copy.
@@ -54,10 +58,17 @@ struct Search {
 }
 
 impl Search {
-    fn fold(&mut self) {
+    /// Fold this frame's text, and report whether the fold changed — the
+    /// palette's cue to filter its rows again. Compared before it is
+    /// rebuilt, so an unchanged query costs one pass and no write.
+    fn fold(&mut self) -> bool {
+        let lowered = || self.text.chars().flat_map(char::to_lowercase);
+        if lowered().eq(self.folded.chars()) {
+            return false;
+        }
         self.folded.clear();
-        self.folded
-            .extend(self.text.chars().flat_map(char::to_lowercase));
+        self.folded.extend(lowered());
+        true
     }
 }
 
@@ -70,6 +81,11 @@ impl NewNodeUi {
         self.resume_floating = None;
         self.search.text.clear();
         self.search.folded.clear();
+    }
+
+    /// Whether the palette is open.
+    pub(crate) const fn in_flight(&self) -> bool {
+        self.menu.is_open()
     }
 
     pub(crate) fn apply(
@@ -99,10 +115,10 @@ impl NewNodeUi {
         }
 
         // Everything below is per-open work — the height arithmetic reads
-        // the display and a last-frame rect — so nothing but an open
-        // palette on *this* pane should pay for it. `show` would answer
-        // `None` anyway, but only after its arguments were built.
-        if !self.menu.open_on() {
+        // the display and a last-frame rect — so nothing but an open palette
+        // should pay for it. `show` would answer `None` anyway, but only
+        // after its arguments were built.
+        if !self.menu.is_open() {
             return;
         }
 
@@ -113,13 +129,9 @@ impl NewNodeUi {
         // (`max_height` minus the chrome above it) keeps it from eating the
         // header's space — a `Hug` scroll otherwise claims the full cap.
         let surface = ui.display().logical_rect();
-        let max_height = graph_ctx
-            .theme()
-            .new_node_popup_max_height
-            .min(surface.size.h - 16.0)
-            .max(120.0);
+        let max_height = popup_cap(graph_ctx.theme().new_node_popup_max_height, surface.size.h);
         let scroll_cap = (max_height - chrome_above_results(ui)).max(MIN_RESULTS_HEIGHT);
-        let search = &mut self.search;
+        let (search, rows) = (&mut self.search, &mut self.rows);
         // Rows are picked at the position the *open* captured, not wherever
         // the pointer has drifted to by the frame of the click.
         let pos = self.world_pos;
@@ -129,7 +141,7 @@ impl NewNodeUi {
             .menu
             .show(ui, "new_node_popup", Some(max_height), |ui, popup| {
                 let palette = NodePalette::new(graph_ctx, pos);
-                palette.body(ui, popup, search, scroll_cap, just_opened)
+                palette.body(ui, popup, search, rows, scroll_cap, just_opened)
             });
 
         if let Some(intent) = chosen {
@@ -143,10 +155,26 @@ impl NewNodeUi {
 
     /// Take the source of a wire whose drop spawned a node this frame — the
     /// canvas re-floats it on `ConnectionUI`. `None` on a plain palette open.
-    pub(crate) fn take_resume_floating(&mut self) -> Option<PortRef> {
+    pub(crate) const fn take_resume_floating(&mut self) -> Option<PortRef> {
         self.resume_floating.take()
     }
 }
+
+/// The palette's height cap: the theme's, held inside a window `surface_h`
+/// tall by [`POPUP_WINDOW_MARGIN`], and never below [`POPUP_MIN_HEIGHT`].
+fn popup_cap(theme_max: f32, surface_h: f32) -> f32 {
+    theme_max
+        .min(surface_h - POPUP_WINDOW_MARGIN)
+        .max(POPUP_MIN_HEIGHT)
+}
+
+/// What the palette leaves of a short window's height, so it never touches
+/// the window's edge.
+const POPUP_WINDOW_MARGIN: f32 = 16.0;
+
+/// Floor under the palette's height: a window too short for the theme's cap
+/// still gets a palette with a search field and a few rows.
+const POPUP_MIN_HEIGHT: f32 = 120.0;
 
 /// Gap (px) below the search field, before the results scroll.
 const SEARCH_ROW_GAP: f32 = 8.0;

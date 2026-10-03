@@ -51,6 +51,10 @@ unsafe impl GlobalAlloc for CountingAllocator {
 /// failure than a miscount, and the counters are the one thing here that
 /// must never panic.
 #[inline]
+#[expect(
+    clippy::let_underscore_must_use,
+    reason = "a thread being torn down has no counters left, and its allocations go uncounted"
+)]
 fn track() {
     let _ = IN_AUDIT.try_with(|in_audit| {
         if in_audit.get() {

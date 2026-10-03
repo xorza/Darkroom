@@ -1,8 +1,9 @@
 //! [`TypeScale`]: the theme's type sizes.
 
 /// Font sizes by tier in the visual hierarchy — the typographic half of a
-/// [`Theme`](crate::gui::theme::Theme), beside the [`ChromeColors`](crate::gui::theme::chrome_colors::ChromeColors) palette half and the layout
-/// dimensions.
+/// [`Theme`](crate::gui::theme::Theme), beside the
+/// [`ChromeColors`](crate::gui::theme::chrome_colors::ChromeColors) palette
+/// half and the layout dimensions.
 ///
 /// Named by *prominence*, never by the surface that happens to use a tier, so
 /// a new surface picks one by asking how loud its text should be rather than
@@ -13,7 +14,7 @@
 /// Palette-independent, so unlike
 /// [`ChromeColors`](crate::gui::theme::chrome_colors::ChromeColors) there is
 /// no `from_palette` here: a single [`Self::DEFAULT`] is the whole story.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub(crate) struct TypeScale {
     /// The loudest tier: a floating panel's own heading — the inspector's node
     /// title.

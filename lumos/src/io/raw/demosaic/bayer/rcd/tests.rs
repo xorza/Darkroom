@@ -1,6 +1,4 @@
-use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::bayer::rcd::{EPS, MIN_SIGNED_DENOMINATOR_RATIO, estimate_green};
-use crate::testing::prelude::*;
 
 fn canonical_green(neighbor_green: f32, center_lpf: f32, same_color_lpf: f32) -> f32 {
     neighbor_green * (center_lpf + center_lpf) / (EPS + center_lpf + same_color_lpf)
@@ -44,127 +42,35 @@ fn cancelling_green_estimate_blends_halfway_at_half_the_condition_limit() {
     let same_color_lpf = -(EPS + center_lpf) * (1.0 - condition) / (1.0 + condition);
     let additive = neighbor_green + (center_lpf - same_color_lpf) * 0.125;
     let canonical = canonical_green(neighbor_green, center_lpf, same_color_lpf);
-    let expected = 0.5 * (additive + canonical);
+    let expected = f32::midpoint(additive, canonical);
     let actual = estimate_green(neighbor_green, center_lpf, same_color_lpf);
 
     assert!((actual - expected).abs() < 1e-6);
 }
 
-#[derive(Debug, Clone, Copy)]
-enum Neighborhood {
-    Edge,
-    Impulse,
-    ChromaticStar,
-    Noise,
-}
-
-fn neighborhood_value(neighborhood: Neighborhood, channel: usize, pos: Vec2us) -> f32 {
-    match neighborhood {
-        Neighborhood::Edge => {
-            if pos.x < 4 {
-                [0.7, 0.4, 0.2][channel]
-            } else {
-                [0.1, 0.3, 0.8][channel]
-            }
-        }
-        Neighborhood::Impulse => {
-            let impulse = if pos.x == 4 && pos.y == 2 { 0.9 } else { 0.0 };
-            [0.05 + impulse, 0.08, 0.03][channel]
-        }
-        Neighborhood::ChromaticStar => {
-            let dx = pos.x as f32 - 3.5;
-            let dy = pos.y as f32 - 2.0;
-            let profile = (-0.5 * (dx * dx + dy * dy)).exp();
-            0.02 + [0.9, 0.5, 0.2][channel] * profile
-        }
-        Neighborhood::Noise => {
-            let sample = (pos.x * 17 + pos.y * 29 + channel * 11) % 31;
-            0.02 + sample as f32 / 62.0
-        }
-    }
-}
-
-fn neighborhood_lpf(cfa: &[f32], width: usize, y: usize, x: usize) -> f32 {
-    let index = y * width + x;
-    cfa[index]
-        + 0.5 * (cfa[index - width] + cfa[index + width] + cfa[index - 1] + cfa[index + 1])
-        + 0.25
-            * (cfa[index - width - 1]
-                + cfa[index - width + 1]
-                + cfa[index + width - 1]
-                + cfa[index + width + 1])
-}
-
-fn reference_signed_green(neighbor_green: f32, center_lpf: f32, same_color_lpf: f32) -> f32 {
-    let neighbor_green = f64::from(neighbor_green);
-    let center_lpf = f64::from(center_lpf);
-    let same_color_lpf = f64::from(same_color_lpf);
-    let epsilon = f64::from(EPS);
-    let numerator = neighbor_green * (center_lpf + center_lpf);
-    let denominator = epsilon + center_lpf + same_color_lpf;
-    if center_lpf >= 0.0 && same_color_lpf >= 0.0 {
-        return (numerator / denominator) as f32;
-    }
-
-    let scale = epsilon + center_lpf.abs() + same_color_lpf.abs();
-    let transition = f64::from(MIN_SIGNED_DENOMINATOR_RATIO) * scale;
-    if denominator.abs() >= transition {
-        return (numerator / denominator) as f32;
-    }
-
-    let additive = neighbor_green + (center_lpf - same_color_lpf) * 0.125;
-    let t = denominator.abs() / transition;
-    let curve = t * (3.0 - 2.0 * t);
-    let ratio_weight = t * curve;
-    let weighted_ratio = numerator * denominator.signum() * curve / transition;
-    (additive * (1.0 - ratio_weight) + weighted_ratio) as f32
-}
-
+/// The estimate is continuous where it switches from the ratio to the blend. At the switch,
+/// `t = |denominator| / transition` is 1 and the blend puts all its weight on the ratio, so
+/// denominators just outside and just inside give values that differ by the forms' slopes times
+/// the step. In `t` the ratio's slope is the ratio itself (under 8·|green| by the condition limit)
+/// and the blend's is the additive estimate, so a step of 2e-5 moves either by under
+/// 2e-5 · (8·|green| + |additive|).
 #[test]
-fn signed_scene_neighborhoods_match_f64_reference_across_zero() {
-    const WIDTH: usize = 7;
-    const HEIGHT: usize = 5;
-    const CENTER_X: usize = 4;
-    const SAME_COLOR_X: usize = 2;
-    const Y: usize = 2;
-
-    let pattern = CfaPattern::Rggb;
-    for neighborhood in [
-        Neighborhood::Edge,
-        Neighborhood::Impulse,
-        Neighborhood::ChromaticStar,
-        Neighborhood::Noise,
-    ] {
-        let cfa: Vec<f32> = (0..HEIGHT)
-            .flat_map(|y| {
-                (0..WIDTH).map(move |x| {
-                    neighborhood_value(
-                        neighborhood,
-                        pattern.color_at(Vec2us::new(x, y)),
-                        Vec2us::new(x, y),
-                    )
-                })
-            })
-            .collect();
-        let center_lpf = neighborhood_lpf(&cfa, WIDTH, Y, CENTER_X);
-        let same_color_lpf = neighborhood_lpf(&cfa, WIDTH, Y, SAME_COLOR_X);
-        let neighbor_green = cfa[Y * WIDTH + 3];
-
-        for (label, anchor) in [("center", center_lpf), ("same-color", same_color_lpf)] {
-            for target in [-2.0 * EPS, -EPS, -0.5 * EPS, 0.0, 0.5 * EPS, EPS, 2.0 * EPS] {
-                let pedestal = (target - anchor) * 0.25;
-                let shifted_neighbor = neighbor_green + pedestal;
-                let shifted_center = center_lpf + 4.0 * pedestal;
-                let shifted_same_color = same_color_lpf + 4.0 * pedestal;
-                let actual = estimate_green(shifted_neighbor, shifted_center, shifted_same_color);
-                let expected =
-                    reference_signed_green(shifted_neighbor, shifted_center, shifted_same_color);
-                let tolerance = 2e-6 * expected.abs().max(1.0);
-                assert!(
-                    (actual - expected).abs() <= tolerance,
-                    "{neighborhood:?} {label} LPF={target}: expected {expected}, got {actual}"
-                );
-            }
-        }
+fn the_green_estimate_is_continuous_across_the_switch() {
+    let condition = f64::from(MIN_SIGNED_DENOMINATOR_RATIO);
+    let epsilon = f64::from(EPS);
+    for (green, center) in [(0.25f64, 1.0f64), (-0.5, 2.0), (1.5, 0.3)] {
+        // The negative same-colour LPF that puts the denominator at `t` times the transition:
+        // EPS + c + s = t·R·(EPS + c − s), solved for s.
+        let same_color_at = |t: f64| {
+            (t * condition * (epsilon + center) - (epsilon + center)) / (1.0 + t * condition)
+        };
+        let at = |t: f64| estimate_green(green as f32, center as f32, same_color_at(t) as f32);
+        let (outside, inside) = (at(1.0 + 1e-5), at(1.0 - 1e-5));
+        let additive = green + (center - same_color_at(1.0)) * 0.125;
+        let bound = 2e-5 * (8.0 * green.abs() + additive.abs());
+        assert!(
+            f64::from((outside - inside).abs()) < bound,
+            "green {green}, center {center}: {outside} outside vs {inside} inside"
+        );
     }
 }

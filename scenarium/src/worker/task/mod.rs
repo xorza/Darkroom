@@ -1,7 +1,9 @@
 use std::fmt;
+use std::mem;
 use std::sync::Arc;
 
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::task;
 use tokio_util::sync::CancellationToken;
 
 use common::CancelToken;
@@ -10,9 +12,11 @@ use crate::execution::cache::runtime::cache_flush_report::CacheFlushReport;
 use crate::execution::engine::ExecutionEngine;
 use crate::execution::error::Error;
 use crate::execution::report::ExecutionOutcome;
-use crate::execution::report::{RunProgress, RunReporter};
+use crate::execution::report::{RunPhase, RunReporter};
 use crate::execution::seeds::RunSeeds;
 use crate::graph::identity::EventPort;
+use crate::graph::identity::NodeId;
+use crate::worker::activity::WorkerActivity;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand};
 use crate::worker::error::WorkerError;
 use crate::worker::event_loop::{
@@ -20,7 +24,7 @@ use crate::worker::event_loop::{
 };
 use crate::worker::pause_gate::PauseGate;
 use crate::worker::protocol::{WorkerMessage, WorkerReport};
-use crate::worker::status::{WorkerActivity, WorkerStatusPublisher};
+use crate::worker::run_summary::RunSummaryPublisher;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EventLoopTransition {
@@ -30,7 +34,7 @@ enum EventLoopTransition {
 }
 
 impl EventLoopTransition {
-    fn for_intent(intent: &BatchIntent, event_loop_active: bool) -> Self {
+    const fn for_intent(intent: &BatchIntent, event_loop_active: bool) -> Self {
         match intent.loop_request {
             Some(LoopCommand::Start) => Self::Rebuild,
             Some(LoopCommand::Stop) => Self::Stop,
@@ -70,7 +74,7 @@ impl PendingRun {
         // Moved out rather than copied field by field: the batch's seeds *are*
         // the run's, and taking them leaves the intent empty for whatever the
         // rest of this batch still does.
-        let mut seeds = std::mem::take(&mut intent.seeds);
+        let mut seeds = mem::take(&mut intent.seeds);
         // Rebuilding the loop means re-initializing every event source, so the
         // bootstrap run demands them whether or not a message asked.
         seeds.event_sources |= start_event_loop;
@@ -95,7 +99,7 @@ pub(crate) struct WorkerTask<ExecutionCallback> {
     run_cancel: CancelToken,
     shutdown: CancellationToken,
     engine: ExecutionEngine,
-    status: WorkerStatusPublisher,
+    summary: RunSummaryPublisher,
     outcome: ExecutionOutcome,
     intent: BatchIntent,
     messages: Vec<WorkerMessage>,
@@ -120,7 +124,7 @@ where
             run_cancel,
             shutdown,
             engine: ExecutionEngine::default(),
-            status: WorkerStatusPublisher::default(),
+            summary: RunSummaryPublisher::default(),
             outcome: ExecutionOutcome::default(),
             intent: BatchIntent::default(),
             messages: Vec::new(),
@@ -133,7 +137,7 @@ where
     pub(crate) async fn run(mut self) {
         while self.next_intent().await.is_some() {
             self.apply_intent().await;
-            tokio::task::yield_now().await;
+            task::yield_now().await;
         }
         self.stop_event_loop().await;
     }
@@ -144,7 +148,7 @@ where
             self.event_buffer.clear();
             let wake = tokio::select! {
                 biased;
-                _ = self.shutdown.cancelled() => WorkerWake::Stopped,
+                () = self.shutdown.cancelled() => WorkerWake::Stopped,
                 count = self.message_rx.recv_many(&mut self.messages, usize::MAX) => match count {
                     0 => WorkerWake::Stopped,
                     _ => WorkerWake::Ready,
@@ -224,12 +228,14 @@ where
         // stop is not — its `execute` reports `Executing` directly, without
         // a transient `Idle` flashing in between.
         if stopped_loop && !ran {
-            (self.callback)(WorkerReport::Status(
-                self.status.activity(WorkerActivity::Idle),
-            ));
+            (self.callback)(WorkerReport::Activity(WorkerActivity::Idle));
         }
 
         for reply in self.intent.syncs.drain(..) {
+            #[expect(
+                clippy::let_underscore_must_use,
+                reason = "a requester that stopped waiting needs no reply"
+            )]
             let _ = reply.send(());
         }
     }
@@ -273,7 +279,7 @@ where
                 .await;
             self.report_flush(report, FlushReporting::Requested);
         }
-        if std::mem::take(&mut self.intent.flush_all_caches) {
+        if mem::take(&mut self.intent.flush_all_caches) {
             let report = self.engine.flush_all_caches().await;
             self.report_flush(report, FlushReporting::Sweep);
         }
@@ -309,16 +315,15 @@ where
             return;
         }
         let activity = self.executing_activity();
-        (self.callback)(WorkerReport::Status(self.status.activity(activity)));
+        (self.callback)(WorkerReport::Activity(activity));
         let _pause_guard = self.event_loop_pause_gate.close();
         let mut reporter = WorkerRunReporter {
-            status: &mut self.status,
             callback: &self.callback,
         };
         let result = self
             .engine
             .execute(
-                run.seeds,
+                &run.seeds,
                 &mut reporter,
                 self.run_cancel.clone(),
                 &mut self.outcome,
@@ -329,7 +334,7 @@ where
             Ok(()) => {
                 if run.start_event_loop && !self.shutdown.is_cancelled() {
                     assert!(self.event_loop.is_none());
-                    let triggers = std::mem::take(&mut self.outcome.event_triggers);
+                    let triggers = mem::take(&mut self.outcome.event_triggers);
                     if !triggers.is_empty() {
                         self.event_loop = Some(
                             ActiveEventLoop::start(triggers, self.event_loop_pause_gate.clone())
@@ -339,13 +344,13 @@ where
                     }
                 }
                 let activity = self.resting_activity();
-                (self.callback)(WorkerReport::Status(
-                    self.status.completed(activity, &mut self.outcome),
+                (self.callback)(WorkerReport::Completed(
+                    self.summary.publish(activity, &mut self.outcome),
                 ));
             }
             Err(error) => {
                 let activity = self.resting_activity();
-                (self.callback)(WorkerReport::Status(self.status.activity(activity)));
+                (self.callback)(WorkerReport::Activity(activity));
                 (self.callback)(WorkerReport::Error(WorkerError::Execution { error }));
             }
         }
@@ -378,9 +383,7 @@ where
         }
         tracing::info!("Event loop stopped");
         if report_idle {
-            (self.callback)(WorkerReport::Status(
-                self.status.activity(WorkerActivity::Idle),
-            ));
+            (self.callback)(WorkerReport::Activity(WorkerActivity::Idle));
         }
         for panic in panics {
             (self.callback)(WorkerReport::Error(WorkerError::Execution {
@@ -392,14 +395,14 @@ where
         }
     }
 
-    fn executing_activity(&self) -> WorkerActivity {
+    const fn executing_activity(&self) -> WorkerActivity {
         match &self.event_loop {
             Some(_) => WorkerActivity::ExecutingEventLoop,
             None => WorkerActivity::Executing,
         }
     }
 
-    fn resting_activity(&self) -> WorkerActivity {
+    const fn resting_activity(&self) -> WorkerActivity {
         match &self.event_loop {
             Some(_) => WorkerActivity::EventLoop,
             None => WorkerActivity::Idle,
@@ -407,12 +410,9 @@ where
     }
 }
 
-/// Publishes a run's live feedback to the host as the run loop produces it. Owns the
-/// borrows a report needs — the status publisher's retained allocation and the host
-/// callback — so the executor can hand each event straight over instead of queueing it for
-/// a relay to drain.
+/// Publishes a run's live feedback to the host as the run loop produces it, by value, so the
+/// executor can hand each event straight over instead of queueing it for a relay to drain.
 struct WorkerRunReporter<'a, C> {
-    status: &'a mut WorkerStatusPublisher,
     callback: &'a C,
 }
 
@@ -426,10 +426,8 @@ impl<C> RunReporter for WorkerRunReporter<'_, C>
 where
     C: Fn(WorkerReport) + Sync,
 {
-    fn progress(&mut self, progress: RunProgress) {
-        let mut patch = self.status.patch();
-        patch.push(progress);
-        (self.callback)(WorkerReport::Status(patch.finish()));
+    fn progress(&mut self, node_id: NodeId, phase: RunPhase) {
+        (self.callback)(WorkerReport::Progress { node_id, phase });
     }
 }
 

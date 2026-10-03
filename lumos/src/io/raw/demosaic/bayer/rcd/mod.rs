@@ -13,8 +13,9 @@ use common::CancelToken;
 use rayon::prelude::*;
 
 use crate::concurrency::UnsafeSendPtr;
+use crate::io::cancelled::Cancelled;
+use crate::io::raw::demosaic::DemosaicMemory;
 use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern};
-use crate::io::raw::demosaic::{Cancelled, DemosaicMemory};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
@@ -24,6 +25,12 @@ const EPSSQ: f32 = 1e-10;
 const MIN_SIGNED_DENOMINATOR_RATIO: f32 = 0.25;
 /// Border size required by the algorithm (pixels on each side).
 const BORDER: usize = 4;
+/// The band bilinear interpolation fills. RCD's stages chain stencils — the direction maps and
+/// low-pass filter reach 4 pixels, and the colour steps read values earlier steps computed up to 3
+/// pixels further out — so a pixel nearer an edge than this reads values no stage computed. A
+/// test pins the reach: from this distance in, a frame demosaics bit for bit as it does inside a
+/// larger one. `RawTherapee`'s RCD interpolates a 9-pixel border for the same reason.
+pub(crate) const INTERPOLATED_BORDER: usize = 10;
 
 pub(crate) fn demosaic_memory(raw: Size2us, active: Size2us) -> DemosaicMemory {
     let raw_pixels = raw.width.saturating_mul(raw.height);
@@ -39,10 +46,10 @@ pub(crate) fn demosaic_memory(raw: Size2us, active: Size2us) -> DemosaicMemory {
     DemosaicMemory {
         output_bytes: active_pixels
             .saturating_mul(3)
-            .saturating_mul(std::mem::size_of::<f32>()),
+            .saturating_mul(size_of::<f32>()),
         peak_bytes: directional_peak
             .max(output_peak)
-            .saturating_mul(std::mem::size_of::<f32>()),
+            .saturating_mul(size_of::<f32>()),
     }
 }
 
@@ -57,7 +64,7 @@ struct Strides {
 }
 
 impl Strides {
-    fn new(rw: usize, rh: usize) -> Self {
+    const fn new(rw: usize, rh: usize) -> Self {
         Self {
             rw,
             rh,
@@ -110,18 +117,18 @@ fn avg4_diag(buf: &[f32], idx: usize, w1: usize) -> f32 {
 /// Input: Bayer data and margin info. Calibrated samples may be outside `[0, 1]`.
 /// Output: planar RGB f32 channels for the active area (width × height).
 pub(crate) fn demosaic(
-    bayer: &BayerImage,
+    bayer: &BayerImage<'_>,
     cancel: &CancelToken,
 ) -> Result<[Vec<f32>; 3], Cancelled> {
-    let width = bayer.active.width;
-    let height = bayer.active.height;
-    let rw = bayer.raw.width;
-    let rh = bayer.raw.height;
-    let tm = bayer.margin.y;
-    let lm = bayer.margin.x;
+    let width = bayer.layout.active.width;
+    let height = bayer.layout.active.height;
+    let rw = bayer.layout.raw.width;
+    let rh = bayer.layout.raw.height;
+    let tm = bayer.layout.margin.y;
+    let lm = bayer.layout.margin.x;
     let cfa = bayer.data;
     let pattern = bayer.raw_cfa_pattern;
-    let npix = bayer.raw.pixel_count();
+    let npix = bayer.layout.raw.pixel_count();
 
     // Cooperative cancel: each stage below is a full-image parallel pass. A
     // check between stages lets a cancelled run bail within one stage (~tens of
@@ -333,7 +340,9 @@ pub(crate) fn demosaic(
                 if ry < 3 || ry + 3 >= rh {
                     return;
                 }
-                let col_start = 3 + ((ry + 1) & 1);
+                // The red and blue sites of this row, which step 4.1 reads back: the first
+                // non-green column at or past 3 (librtprocess: `3 + (fc(row, 1) & 1)`).
+                let col_start = 3 + (pattern.color_at(Vec2us::new(1, ry)) & 1);
                 let mut rx = col_start;
                 while rx < rw.saturating_sub(3) {
                     let idx = ry * rw + rx;
@@ -407,13 +416,12 @@ pub(crate) fn demosaic(
     if cancel.is_cancelled() {
         return Err(Cancelled);
     }
-    border_interpolate(&mut rgb_r, &mut rgb_b, &mut rgb_g, cfa, &pattern, s);
+    border_interpolate(&mut rgb_r, &mut rgb_b, &mut rgb_g, cfa, pattern, s);
 
     // Per-row contiguous copy (margins cropped); cheaper than the interleaved
     // scatter and lets the caller take the buffers zero-copy.
 
     let active = width * height;
-    // SAFETY: the per-row copy_from_slice below writes every element of each buffer.
     let mut out_r = vec![0.0f32; active];
     let mut out_g = vec![0.0f32; active];
     let mut out_b = vec![0.0f32; active];
@@ -635,13 +643,13 @@ fn step4_3_rb_at_green(
         });
 }
 
-/// Simple bilinear border interpolation for pixels within `border` pixels of the edge.
+/// Bilinear interpolation of the pixels within [`INTERPOLATED_BORDER`] of the raw buffer's edge.
 fn border_interpolate(
     rgb_r: &mut [f32],
     rgb_b: &mut [f32],
     rgb_g: &mut [f32],
     cfa: &[f32],
-    pattern: &CfaPattern,
+    pattern: CfaPattern,
     s: Strides,
 ) {
     let Strides {
@@ -649,7 +657,7 @@ fn border_interpolate(
         rh: height,
         ..
     } = s;
-    let border = BORDER;
+    let border = INTERPOLATED_BORDER;
     let rgb_channels: [&mut [f32]; 3] = [rgb_r, rgb_g, rgb_b];
 
     for (ic, rgb_ch) in rgb_channels.into_iter().enumerate() {
@@ -662,37 +670,37 @@ fn border_interpolate(
                 rgb_ch[idx] = cfa[idx];
                 return;
             }
+            // The pixel `(dy, dx)` away, when it lies inside the buffer.
+            let neighbour = |dy: isize, dx: isize| {
+                ry.checked_add_signed(dy)
+                    .zip(rx.checked_add_signed(dx))
+                    .filter(|&(ny, nx)| ny < height && nx < width)
+            };
             let mut sum = 0.0f32;
             let mut count = 0u32;
-            for dy in -1i32..=1 {
-                for dx in -1i32..=1 {
+            for dy in -1isize..=1 {
+                for dx in -1isize..=1 {
                     if dy == 0 && dx == 0 {
                         continue;
                     }
-                    let ny = ry as i32 + dy;
-                    let nx = rx as i32 + dx;
-                    if ny >= 0 && ny < height as i32 && nx >= 0 && nx < width as i32 {
-                        let nidx = ny as usize * width + nx as usize;
-                        if pattern.color_at(Vec2us::new(nx as usize, ny as usize)) == ic {
-                            sum += cfa[nidx];
-                            count += 1;
-                        }
+                    if let Some((ny, nx)) = neighbour(dy, dx)
+                        && pattern.color_at(Vec2us::new(nx, ny)) == ic
+                    {
+                        sum += cfa[ny * width + nx];
+                        count += 1;
                     }
                 }
             }
             if count > 0 {
                 rgb_ch[idx] = sum / count as f32;
             } else {
-                for dy in -2i32..=2 {
-                    for dx in -2i32..=2 {
-                        let ny = ry as i32 + dy;
-                        let nx = rx as i32 + dx;
-                        if ny >= 0 && ny < height as i32 && nx >= 0 && nx < width as i32 {
-                            let nidx = ny as usize * width + nx as usize;
-                            if pattern.color_at(Vec2us::new(nx as usize, ny as usize)) == ic {
-                                sum += cfa[nidx];
-                                count += 1;
-                            }
+                for dy in -2isize..=2 {
+                    for dx in -2isize..=2 {
+                        if let Some((ny, nx)) = neighbour(dy, dx)
+                            && pattern.color_at(Vec2us::new(nx, ny)) == ic
+                        {
+                            sum += cfa[ny * width + nx];
+                            count += 1;
                         }
                     }
                 }

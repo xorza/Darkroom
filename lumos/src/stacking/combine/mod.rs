@@ -25,7 +25,7 @@ pub(crate) mod pixel_coverage;
 pub(crate) mod rejection;
 pub(crate) mod stack;
 
-#[cfg(all(test, feature = "internals"))]
+#[cfg(all(test, feature = "bench"))]
 mod bench;
 #[cfg(test)]
 mod tests;

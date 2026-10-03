@@ -13,12 +13,19 @@
 //! cargo run --release --example quick_align -- /path/to/reference.fits /path/to/target.fits /path/to/output.tiff
 //! ```
 
+#![expect(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "an example reports to the terminal"
+)]
+
 use lumos::{
     InterpolationMethod, LinearImage, LoadContext, RegistrationConfig, StarDetector, WarpParams,
     register, warp,
 };
 use std::env;
 use std::path::Path;
+use std::process;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -28,7 +35,7 @@ fn main() {
             args[0]
         );
         eprintln!("Supported formats: linear FITS and floating-point TIFF");
-        std::process::exit(1);
+        process::exit(1);
     }
 
     let ref_path = Path::new(&args[1]);
@@ -87,7 +94,7 @@ fn main() {
         method: InterpolationMethod::Lanczos3,
         ..Default::default()
     };
-    let aligned = warp(&target_image, &result.warp_transform(), &warp_config).image;
+    let aligned = warp(&target_image, &result.warp_transform(), warp_config).image;
 
     // Save result
     println!("Saving aligned image to: {}", output_path.display());

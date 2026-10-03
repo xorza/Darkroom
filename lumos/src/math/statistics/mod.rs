@@ -4,8 +4,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::math::statistics::float::Float;
 use crate::math::sum::mean_f32;
+use std::iter;
 
 pub(crate) mod float;
+pub(crate) mod subsample;
 
 /// A distribution's location and spread — what one pass over the values measures.
 ///
@@ -13,7 +15,7 @@ pub(crate) mod float;
 /// demand. Carrying the MAD rather than an already-scaled sigma is what keeps "median and MAD"
 /// and "median and sigma" one type instead of two, and applies the 1.4826 factor exactly once,
 /// where the caller needs Gaussian units.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub(crate) struct MedianMad {
     pub(crate) median: f32,
     pub(crate) mad: f32,
@@ -57,14 +59,12 @@ pub(crate) fn abs_deviation_inplace<F: Float>(values: &mut [F], median: F) {
 /// MAD (Median Absolute Deviation) to standard deviation conversion factor.
 ///
 /// For a normal distribution σ ≈ 1.4826 × MAD; the factor is `1 / Φ⁻¹(3/4)`, where Φ⁻¹ is the
-/// inverse normal CDF. Carried to the eight significant digits it has always had rather than the
-/// full double-precision 1.482602218505602 — the two agree to within an `f32` ulp, so extending it
-/// would move nothing single-precision, only the SIP clip threshold.
+/// inverse normal CDF, carried to full double precision. A test holds it to the normal CDF.
 ///
 /// `f64` is the canonical form, with [`MAD_TO_SIGMA_F32`] cast from it so the two precisions cannot
 /// round apart. Reaching the `f64` users through `f64::from` on the `f32` constant instead would
 /// spend an `f32` round-trip inside an `f64` computation for nothing.
-pub(crate) const MAD_TO_SIGMA: f64 = 1.4826022;
+pub(crate) const MAD_TO_SIGMA: f64 = 1.482_602_218_505_602;
 
 /// [`MAD_TO_SIGMA`] in the precision the `f32` paths multiply in.
 ///
@@ -128,11 +128,8 @@ pub(crate) fn robust_sigma_f64(data: &[f64], scratch: &mut Vec<f64>) -> f64 {
     MAD_TO_SIGMA * mad_with_scratch(data, median, scratch)
 }
 
-/// Fast approximate median: one partition under [`Float::fast_cmp`], no NaN handling.
-///
-/// Returns the upper-middle element for even-length arrays (no averaging). That convention is
-/// what lets a caller that sorted and indexed `[len / 2]` switch to this and get the same value
-/// out: a full sort's element at that rank is exactly what one selection returns.
+/// Median under [`Float::fast_cmp`], with no NaN handling: one partition, plus a scan of the lower
+/// half for an even count, whose median is the mean of the two middle elements.
 ///
 /// `data` must contain no NaN: comparing one orders it `Equal` against everything, which is not
 /// a total order, and `select_nth_unstable_by` is then free to return any element. Not unsound —
@@ -147,9 +144,13 @@ pub(crate) fn median_fast<F: Float>(data: &mut [F]) -> F {
         "median_fast requires NaN-free data; use median_mut for data that may hold NaN"
     );
 
-    let mid = data.len() / 2;
-    let (_, median, _) = data.select_nth_unstable_by(mid, F::fast_cmp);
-    *median
+    let len = data.len();
+    let (lower, median, _) = data.select_nth_unstable_by(len / 2, F::fast_cmp);
+    if len % 2 == 1 {
+        return *median;
+    }
+    let below = lower.iter().copied().reduce(F::max).unwrap();
+    (below + *median) * F::HALF
 }
 
 /// Replace `scratch` with `|value - median|` for each of `values`, leaving it exactly as long.
@@ -229,7 +230,7 @@ impl<const N: usize> DeviationScratch for arrayvec::ArrayVec<f32, N> {
     /// `len` of it is ever used. Panics when `len > N` — a fixed buffer cannot grow.
     fn sized_to(&mut self, len: usize) -> &mut [f32] {
         self.clear();
-        self.extend(std::iter::repeat_n(0.0f32, len));
+        self.extend(iter::repeat_n(0.0f32, len));
         self.as_mut_slice()
     }
 }
@@ -285,6 +286,7 @@ impl ClippedStats {
 }
 
 /// Result of a single sigma-clipping iteration.
+#[derive(Debug)]
 enum ClipResult {
     /// Converged: no values were clipped (or sigma ≈ 0). Final stats.
     Converged(MedianMad),
@@ -294,7 +296,7 @@ enum ClipResult {
     TooFew,
 }
 
-/// Core sigma-clipping iteration logic shared between Vec and ArrayVec versions.
+/// Core sigma-clipping iteration logic shared between Vec and `ArrayVec` versions.
 #[inline]
 fn sigma_clip_iteration(
     values: &mut [f32],
@@ -368,8 +370,8 @@ fn compute_final_stats(values: &mut [f32], deviations: &mut [f32]) -> MedianMad 
 
 /// Iteratively clip `values`, then measure what survived.
 ///
-/// `deviations` must already be `values.len()` long; the two public entry points differ only in
-/// how they get it that way, so everything after the sizing lives here.
+/// `deviations` must already be `values.len()` long — [`ClippedStats::sigma_clipped`] sizes it
+/// through [`DeviationScratch`], and everything after the sizing lives here.
 fn sigma_clipped_core(
     values: &mut [f32],
     deviations: &mut [f32],
@@ -401,5 +403,5 @@ fn sigma_clipped_core(
 #[cfg(test)]
 mod tests;
 
-#[cfg(all(test, feature = "internals"))]
+#[cfg(all(test, feature = "bench"))]
 mod bench;

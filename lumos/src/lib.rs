@@ -34,9 +34,6 @@ pub(crate) mod memory;
 pub(crate) mod simd;
 pub(crate) mod stacking;
 
-#[cfg(test)]
-pub(crate) mod testing;
-
 pub use error::{FrameDimensionMismatch, InvalidConfigField};
 pub use io::image::PREVIEW_IMAGE_EXTENSIONS;
 pub use io::image::cfa::{CfaImage, CfaType};
@@ -49,27 +46,32 @@ pub use io::image::fits::provenance::{
     FitsChecksumProvenance, FitsChecksumState, FitsHduProvenance, FitsTransferProvenance,
 };
 pub use io::image::image_dimensions::ImageDimensions;
-pub use io::image::image_metadata::{BitPix, ImageMetadata};
+pub use io::image::image_metadata::ImageMetadata;
 pub use io::image::image_provenance::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
     SourceContainer, TransferProvenance,
 };
 pub use io::image::linear::LinearImage;
 pub use io::image::load_context::LoadContext;
-pub use io::image::preview_image::PreviewImage;
-pub use io::image::sample_domain::SampleDomain;
+pub use io::image::preview_image::{PreviewImage, PreviewPixels};
+pub use io::image::sample_domain::{SampleDomain, ScaleOrigin};
 pub use io::raw::RAW_EXTENSIONS;
 pub use io::raw::demosaic::bayer::CfaPattern;
+pub use io::raw::demosaic::xtrans::xtrans_pattern::{XTransPattern, XTransPatternError};
 pub use io::raw::provenance::RawTransferProvenance;
+pub use io::raw::raw_files::raw_files;
 pub use math::size2us::Size2us;
 pub use math::vec2us::Vec2us;
 pub use stacking::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
+pub use stacking::calibration_masters::cosmic_ray::error::UnknownAdcStep;
 pub use stacking::calibration_masters::defect_map::DefectMap;
 pub use stacking::calibration_masters::error::CalibrationError;
 
+pub use stacking::calibration_masters::calibration_component::CalibrationComponent;
+pub use stacking::calibration_masters::calibration_set::CalibrationSet;
+pub use stacking::calibration_masters::master_role::MasterRole;
 pub use stacking::calibration_masters::{
-    CalibrationComponent, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD,
-    DefectSummary, MasterRole, stack_cfa_master,
+    CalibrationMasters, DEFAULT_SIGMA_THRESHOLD, DefectSummary, stack_cfa_master,
 };
 
 pub use stacking::star_detection::config::Config as StarDetectionConfig;
@@ -77,10 +79,12 @@ pub use stacking::star_detection::config::background_config::{
     BackgroundConfig as StarDetectionBackgroundConfig, BackgroundRefinement,
 };
 pub use stacking::star_detection::config::detection_config::{
-    Connectivity, DetectionConfig as StarDetectionCandidateConfig,
+    Connectivity, Deblend, DetectionConfig as StarDetectionCandidateConfig,
 };
 pub use stacking::star_detection::config::filter_config::FilterConfig as StarDetectionFilterConfig;
-pub use stacking::star_detection::config::fwhm_config::FwhmConfig as StarDetectionFwhmConfig;
+pub use stacking::star_detection::config::fwhm_config::{
+    FwhmConfig as StarDetectionFwhmConfig, FwhmMode,
+};
 pub use stacking::star_detection::config::measurement_config::{
     CentroidMethod, LocalBackgroundMethod, MeasurementConfig as StarDetectionMeasurementConfig,
     NoiseModel,
@@ -103,10 +107,12 @@ pub use stacking::registration::result::{
     FailedRung, RansacFailureReason, RegistrationCatalog, RegistrationError, RegistrationResult,
     StarMatch,
 };
+pub use stacking::registration::transform::inverse_warp::{InverseMapped, InverseWarp};
 pub use stacking::registration::transform::{
     Transform, TransformModel, TransformType, WarpTransform,
 };
 pub use stacking::registration::triangle::TriangleConfig;
+pub use stacking::registration::triangle::voting::MatchIndices;
 
 pub use stacking::combine::cache_config::CacheConfig;
 pub use stacking::combine::config::{CombineMethod, Normalization, SmallN, StackConfig, Weighting};
@@ -135,6 +141,7 @@ pub use stacking::pipeline::result::{
 
 pub use stacking::drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
 pub use stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
+pub use stacking::drizzle::drizzle_result::DrizzleResult;
 pub use stacking::drizzle::error::{DrizzleConfigError, DrizzleError};
 pub use stacking::drizzle::stack::{drizzle_images, drizzle_stack};
 
@@ -158,3 +165,6 @@ pub use image_ops::ml::backend::{MlError, TiledOnnxConfig};
 pub use image_ops::ml::denoise::MlDenoise;
 #[cfg(feature = "ml")]
 pub use image_ops::ml::star_removal::{RemoveStars, StarRemovalResult};
+
+#[cfg(test)]
+pub(crate) mod testing;

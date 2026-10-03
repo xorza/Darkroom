@@ -116,6 +116,10 @@ impl SyntheticStar {
     }
 
     /// Add into `pixels`, visiting only the pixels within [`Self::radius`].
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "synthetic fixtures are small images with non-negative coordinates"
+    )]
     pub(crate) fn add_to(self, pixels: &mut Buffer2<f32>) {
         let (width, height) = (pixels.width(), pixels.height());
         let radius = self.radius();
@@ -154,20 +158,11 @@ impl SyntheticStar {
     }
 }
 
-/// Convert Moffat parameters to FWHM.
-fn moffat_fwhm(alpha: f32, beta: f32) -> f32 {
-    2.0 * alpha * (2.0f32.powf(1.0 / beta) - 1.0).sqrt()
-}
-
-/// Convert FWHM to the Moffat alpha parameter, for a given beta.
-pub(crate) fn fwhm_to_moffat_alpha(fwhm: f32, beta: f32) -> f32 {
-    fwhm / (2.0 * (2.0f32.powf(1.0 / beta) - 1.0).sqrt())
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::math::fwhm::{fwhm_to_sigma, sigma_to_fwhm};
+    use crate::math::fwhm::{fwhm_beta_to_alpha, fwhm_to_sigma};
     use crate::testing::synthetic::star_profiles::*;
+    use std::f32::consts::FRAC_PI_2;
 
     const GAUSSIAN_2: StarProfile = StarProfile::Gaussian { sigma: 2.0 };
 
@@ -241,7 +236,7 @@ mod tests {
             StarProfile::Elliptical {
                 sigma_x: 4.0,
                 sigma_y: 2.0,
-                angle: std::f32::consts::FRAC_PI_2,
+                angle: FRAC_PI_2,
             },
         );
         assert!(turned.value_at(32.0, 38.0) > turned.value_at(38.0, 32.0));
@@ -257,7 +252,7 @@ mod tests {
             Vec2::splat(32.0),
             1.0,
             StarProfile::Moffat {
-                alpha: fwhm_to_moffat_alpha(fwhm, beta),
+                alpha: fwhm_beta_to_alpha(fwhm, beta),
                 beta,
             },
         );
@@ -282,26 +277,12 @@ mod tests {
         // 8α vs 4σ: for equal FWHM the Moffat box is the larger one.
         let beta = 2.5;
         let moffat = StarProfile::Moffat {
-            alpha: fwhm_to_moffat_alpha(4.0, beta),
+            alpha: fwhm_beta_to_alpha(4.0, beta),
             beta,
         };
         let gaussian = StarProfile::Gaussian {
             sigma: fwhm_to_sigma(4.0),
         };
         assert!(moffat.radius() > gaussian.radius());
-    }
-
-    #[test]
-    fn moffat_fwhm_conversion_round_trips() {
-        let beta = 2.5;
-        let fwhm = 4.0;
-        let alpha = fwhm_to_moffat_alpha(fwhm, beta);
-        assert!((moffat_fwhm(alpha, beta) - fwhm).abs() < 0.001);
-    }
-
-    #[test]
-    fn fwhm_sigma_conversion_round_trips() {
-        let fwhm = 4.0;
-        assert!((sigma_to_fwhm(fwhm_to_sigma(fwhm)) - fwhm).abs() < 0.001);
     }
 }

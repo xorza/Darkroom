@@ -1,20 +1,20 @@
-use crate::graph::Binding;
 use crate::graph::identity::FuncId;
 use crate::graph::identity::{InputPort, NodeId};
+use crate::graph::{Binding, BindingEntry};
 pub(crate) mod error;
 pub(crate) mod event;
 pub(crate) mod lambda;
 mod macros;
+pub(crate) mod signature;
 
 use crate::data::type_system::Strictness;
-use crate::graph::func::error::FuncValidationError;
+use crate::graph::func::error::{FuncValidationError, OverrideRule};
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::lambda::FuncLambda;
 use crate::graph::node::CacheMode;
 use crate::{ConstValue, DataType, TypeId};
-use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum FuncBehavior {
     // could return different values for same inputs
     #[default]
@@ -23,55 +23,58 @@ pub enum FuncBehavior {
     Pure,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ValueVariant {
     pub name: String,
     pub value: ConstValue,
-    /// Human label shown in the editor's picker dropdown. Display-only — the
-    /// value bound on pick is [`ValueVariant::value`], never this. Defaults to
-    /// `name` via [`ValueVariant::new`]; override with [`ValueVariant::display`]
-    /// to show a friendlier label than a raw/serialized `name`.
-    #[serde(default)]
-    pub display_name: String,
+    /// A friendlier dropdown label than `name`, when there is one. See
+    /// [`label`](Self::label).
+    pub display: Option<String>,
 }
 
 impl ValueVariant {
     /// A picker variant whose dropdown label is its `name`.
     pub fn new(name: impl Into<String>, value: ConstValue) -> Self {
-        let name = name.into();
         Self {
-            display_name: name.clone(),
-            name,
+            name: name.into(),
             value,
+            display: None,
         }
     }
 
     /// Override the dropdown label (leaving `name`/`value` untouched).
-    pub fn display(mut self, display_name: impl Into<String>) -> Self {
-        self.display_name = display_name.into();
+    #[must_use]
+    pub fn display(mut self, label: impl Into<String>) -> Self {
+        self.display = Some(label.into());
         self
+    }
+
+    /// The label the editor's picker shows: the display label, else `name`.
+    /// Display-only — the value bound on pick is [`value`](Self::value).
+    pub fn label(&self) -> &str {
+        self.display.as_deref().unwrap_or(&self.name)
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FuncInput {
     pub name: String,
     pub required: bool,
     pub data_type: DataType,
     /// One-line human explanation shown as the port's hover tooltip in the
     /// editor (units, range, meaning). Display-only — execution never reads it.
-    #[serde(default)]
     pub description: Option<String>,
     /// When set, this input may only hold a `Const` literal — wiring an upstream
     /// output into it (a `Bind`) is rejected by graph validation and blocked in
     /// the editor. For inputs a node reads as configuration, so a stray
     /// connection can't silently defeat that.
-    #[serde(default)]
     pub const_only: bool,
-    #[serde(default)]
     pub default_value: Option<ConstValue>,
-    #[serde(default)]
     pub value_variants: Vec<ValueVariant>,
+    /// The input this one overrides: while this input delivers a value, the
+    /// target is set aside — not delivered, not digested, not required. The
+    /// target is `const_only`, so setting it aside never strands a producer.
+    pub overrides: Option<usize>,
 }
 
 impl FuncInput {
@@ -85,6 +88,7 @@ impl FuncInput {
             const_only: false,
             default_value: None,
             value_variants: Vec::new(),
+            overrides: None,
         }
     }
 
@@ -99,16 +103,19 @@ impl FuncInput {
             const_only: false,
             default_value: None,
             value_variants: Vec::new(),
+            overrides: None,
         }
     }
 
     /// Seed this input's const default value.
+    #[must_use]
     pub fn default(mut self, value: impl Into<ConstValue>) -> Self {
         self.default_value = Some(value.into());
         self
     }
 
     /// Attach the port's hover-tooltip text. See [`FuncInput::description`].
+    #[must_use]
     pub fn description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
         self
@@ -116,12 +123,21 @@ impl FuncInput {
 
     /// Restrict this input to a `Const` literal — no upstream `Bind`. See
     /// [`FuncInput::const_only`].
-    pub fn const_only(mut self) -> Self {
+    #[must_use]
+    pub const fn const_only(mut self) -> Self {
         self.const_only = true;
         self
     }
 
+    /// Override input `target` of the same func. See [`FuncInput::overrides`].
+    #[must_use]
+    pub const fn overrides(mut self, target: usize) -> Self {
+        self.overrides = Some(target);
+        self
+    }
+
     /// Attach the editor picker variants (`ValueVariant`s).
+    #[must_use]
     pub fn variants(mut self, variants: Vec<ValueVariant>) -> Self {
         self.value_variants = variants;
         self
@@ -163,7 +179,7 @@ impl FuncInput {
 /// An output port's type: either a fixed [`DataType`], or a *wildcard* that
 /// mirrors an input. A sum type (rather than a `DataType` + an
 /// `Option<mirror>`) so a wildcard can't carry a stray concrete type.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OutputType {
     /// A fixed, declared output type.
     Fixed(DataType),
@@ -186,13 +202,12 @@ impl OutputType {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FuncOutput {
     pub name: String,
     pub ty: OutputType,
     /// One-line human explanation shown as the port's hover tooltip in the
     /// editor. Display-only — execution never reads it.
-    #[serde(default)]
     pub description: Option<String>,
 }
 
@@ -206,6 +221,7 @@ impl FuncOutput {
     }
 
     /// Attach the port's hover-tooltip text. See [`FuncOutput::description`].
+    #[must_use]
     pub fn description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
         self
@@ -218,17 +234,12 @@ pub struct FuncEvent {
     pub event_lambda: EventLambda,
 }
 
-#[derive(Default, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct Func {
     pub id: FuncId,
     pub name: String,
     pub category: String,
     pub sink: bool,
-
-    /// Node manages its own output caching, so the editor's disk-cache (persist)
-    /// toggle is meaningless on it and hidden.
-    /// `false` (the default) means a normal node that offers the toggle.
-    pub uncacheable: bool,
 
     /// The [`CacheMode`] a freshly created node of this func copies into its
     /// `cache`. Defaults to [`CacheMode::None`] (no caching); raise it with the
@@ -247,58 +258,66 @@ pub struct Func {
 }
 
 impl Func {
-    /// Start a func definition. Defaults: `Impure`, non-sink, empty
-    /// category/inputs/outputs/events and a `None` lambda — set the rest with the
-    /// chained builders below.
-    pub fn new(id: impl Into<FuncId>, name: impl Into<String>) -> Self {
+    /// Start a func definition around its implementation. Defaults: `Impure`,
+    /// non-sink, cached nowhere, with no category, ports or events — set the
+    /// rest with the chained builders below.
+    pub fn new(id: FuncId, name: impl Into<String>, lambda: FuncLambda) -> Self {
         Self {
-            id: id.into(),
+            id,
             name: name.into(),
-            ..Default::default()
+            category: String::new(),
+            sink: false,
+            default_cache_mode: CacheMode::None,
+            behavior: FuncBehavior::Impure,
+            description: None,
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            events: Vec::new(),
+            lambda,
         }
     }
 
+    #[must_use]
     pub fn category(mut self, category: impl Into<String>) -> Self {
         self.category = category.into();
         self
     }
 
+    #[must_use]
     pub fn description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
         self
     }
 
     /// Mark the func `Pure` (same inputs → same outputs; cacheable).
-    pub fn pure(mut self) -> Self {
+    #[must_use]
+    pub const fn pure(mut self) -> Self {
         self.behavior = FuncBehavior::Pure;
         self
     }
 
-    pub fn sink(mut self) -> Self {
+    #[must_use]
+    pub const fn sink(mut self) -> Self {
         self.sink = true;
-        self
-    }
-
-    /// Hide the editor's disk-cache (persist) toggle for this node — for nodes
-    /// that cache their output themselves. See [`Func::uncacheable`].
-    pub fn uncacheable(mut self) -> Self {
-        self.uncacheable = true;
         self
     }
 
     /// Set the [`CacheMode`] that new nodes of this func adopt (see
     /// [`Func::default_cache_mode`]). Defaults to [`CacheMode::None`]; raise it
     /// for funcs whose output is worth caching by default.
-    pub fn default_cache_mode(mut self, mode: CacheMode) -> Self {
+    #[must_use]
+    pub const fn default_cache_mode(mut self, mode: CacheMode) -> Self {
         self.default_cache_mode = mode;
         self
     }
 
+    #[must_use]
     pub fn input(mut self, input: FuncInput) -> Self {
         self.inputs.push(input);
         self
     }
 
+    #[must_use]
     pub fn inputs(mut self, inputs: impl IntoIterator<Item = FuncInput>) -> Self {
         self.inputs.extend(inputs);
         self
@@ -307,6 +326,7 @@ impl Func {
     /// Add an output port. Build it with [`FuncOutput::new`], optionally chaining
     /// [`FuncOutput::description`] — mirrors the [`Func::input`] +
     /// [`FuncInput`] builder pattern.
+    #[must_use]
     pub fn output(mut self, output: FuncOutput) -> Self {
         self.outputs.push(output);
         self
@@ -315,6 +335,7 @@ impl Func {
     /// Add a *wildcard* output that mirrors input `mirrors_input`'s resolved
     /// type — a polymorphic passthrough / reroute port. See
     /// [`OutputType::Wildcard`].
+    #[must_use]
     pub fn wildcard_output(mut self, name: impl Into<String>, mirrors_input: usize) -> Self {
         self.outputs.push(FuncOutput {
             name: name.into(),
@@ -326,6 +347,7 @@ impl Func {
         self
     }
 
+    #[must_use]
     pub fn event(mut self, name: impl Into<String>, event_lambda: EventLambda) -> Self {
         self.events.push(FuncEvent {
             name: name.into(),
@@ -334,30 +356,35 @@ impl Func {
         self
     }
 
-    pub fn lambda(mut self, lambda: FuncLambda) -> Self {
-        self.lambda = lambda;
-        self
-    }
-
     /// Whether this func recomputes every run — it has no content digest, so
     /// no cache mode is honored on a node instantiating it.
     ///
-    /// A method rather than a field like [`sink`](Self::sink) and
-    /// [`uncacheable`](Self::uncacheable) because it reads off
-    /// [`behavior`](Self::behavior), which names more than this one question.
+    /// A method rather than a field like [`sink`](Self::sink) because it
+    /// reads off [`behavior`](Self::behavior), which names more than this one
+    /// question.
     pub fn impure(&self) -> bool {
         self.behavior == FuncBehavior::Impure
     }
 
+    /// The index of the input declared to override input `target`, if one is.
+    /// [`validate`](Self::validate) holds a target to one overrider.
+    pub fn overrider_of(&self, target: usize) -> Option<usize> {
+        self.inputs
+            .iter()
+            .position(|input| input.overrides == Some(target))
+    }
+
     /// The const bindings a fresh instance starts with: one per input that
     /// declares a default, at that input's port index.
-    pub fn default_bindings(&self, node_id: NodeId) -> impl Iterator<Item = (InputPort, Binding)> {
+    pub fn default_bindings(&self, node_id: NodeId) -> impl Iterator<Item = BindingEntry> {
         self.inputs
             .iter()
             .enumerate()
             .filter_map(move |(port_idx, input)| {
-                let default = input.default_value.clone()?;
-                Some((InputPort::new(node_id, port_idx), Binding::Const(default)))
+                Some(BindingEntry {
+                    port: InputPort::new(node_id, port_idx),
+                    binding: Binding::Const(input.default_value.clone()?),
+                })
             })
     }
 
@@ -392,6 +419,18 @@ impl Func {
                 });
             }
         }
+        for (input_idx, input) in self.inputs.iter().enumerate() {
+            if let Some(target) = input.overrides
+                && let Err(rule) = self.check_override(input_idx, target)
+            {
+                return Err(FuncValidationError::InvalidOverride {
+                    func_id: self.id,
+                    input_idx,
+                    target,
+                    rule,
+                });
+            }
+        }
         for (output_idx, output) in self.outputs.iter().enumerate() {
             match &output.ty {
                 OutputType::Fixed(DataType::Custom(type_id) | DataType::Enum(type_id)) => {
@@ -415,8 +454,33 @@ impl Func {
                 OutputType::Fixed(_) => {}
             }
         }
-        if self.lambda.is_none() {
-            return Err(FuncValidationError::MissingLambda { func_id: self.id });
+        Ok(())
+    }
+
+    /// Whether input `input_idx` may override input `target`: an optional
+    /// input over another, `const_only` one that nothing else overrides, and
+    /// no chain — the override is one hop, resolved without a fixed point.
+    fn check_override(&self, input_idx: usize, target: usize) -> Result<(), OverrideRule> {
+        let Some(overridden) = self.inputs.get(target) else {
+            return Err(OverrideRule::TargetOutOfRange);
+        };
+        if target == input_idx {
+            return Err(OverrideRule::SelfTarget);
+        }
+        if self.inputs[input_idx].required {
+            return Err(OverrideRule::RequiredOverride);
+        }
+        if !overridden.const_only {
+            return Err(OverrideRule::WirableTarget);
+        }
+        if overridden.overrides.is_some() || self.overrider_of(input_idx).is_some() {
+            return Err(OverrideRule::Chain);
+        }
+        if self.inputs[..input_idx]
+            .iter()
+            .any(|input| input.overrides == Some(target))
+        {
+            return Err(OverrideRule::SharedTarget);
         }
         Ok(())
     }
@@ -427,27 +491,28 @@ mod tests {
     use crate::graph::identity::FuncId;
     use std::sync::Arc;
 
-    use crate::async_lambda;
+    use crate::graph::func::error::{FuncValidationError, OverrideRule};
+    use crate::graph::func::lambda::FuncLambda;
     use crate::graph::func::{Func, FuncInput, FuncOutput, ValueVariant};
     use crate::graph::node::CacheMode;
+    use crate::testing;
     use crate::{ConstValue, DataType, FsPathConfig, FsPathMode, TypeId};
 
     #[test]
     fn validate_rejects_invalid_identities_wildcards_and_defaults() {
-        let nil_input = Func::new(FuncId::unique(), "input").input(FuncInput::required(
+        let nil_input = testing::stub_func(FuncId::unique(), "input").input(FuncInput::required(
             "value",
             DataType::Custom(TypeId::nil()),
         ));
-        let nil_output = Func::new(FuncId::unique(), "output")
+        let nil_output = testing::stub_func(FuncId::unique(), "output")
             .output(FuncOutput::new("value", DataType::Enum(TypeId::nil())));
-        let invalid_wildcard = Func::new(FuncId::unique(), "wildcard")
+        let invalid_wildcard = testing::stub_func(FuncId::unique(), "wildcard")
             .input(FuncInput::required("value", DataType::Any))
             .wildcard_output("value", 1);
-        let missing_lambda = Func::new(FuncId::unique(), "missing");
         let invalid = [
             (
                 "function id must not be nil".to_owned(),
-                Func::new(FuncId::nil(), "nil"),
+                testing::stub_func(FuncId::nil(), "nil"),
             ),
             (
                 format!(
@@ -470,10 +535,6 @@ mod tests {
                 ),
                 invalid_wildcard,
             ),
-            (
-                format!("function {:?} has no implementation", missing_lambda.id),
-                missing_lambda,
-            ),
         ];
 
         for (expected, func) in invalid {
@@ -483,7 +544,7 @@ mod tests {
         // Declared defaults are held to exact kinds (no scalar coercion) —
         // an authoring mismatch fails at registration, not in a document.
         let default_mismatch = |input: FuncInput| {
-            let func = Func::new(FuncId::unique(), "default").input(input);
+            let func = testing::stub_func(FuncId::unique(), "default").input(input);
             let expected = format!(
                 "function {:?} input 0 declares a default that matches neither its type nor its picker variants",
                 func.id
@@ -513,9 +574,70 @@ mod tests {
             .default(ConstValue::FsPath("a.fits".into())),
         );
 
+        // An override is one hop from an optional input onto a const-only one
+        // nothing else overrides.
+        let preset = || FuncInput::required("preset", DataType::Int).const_only();
+        let config = |target| FuncInput::optional("config", DataType::Int).overrides(target);
+        let override_rows = [
+            (
+                vec![preset(), config(2)],
+                1,
+                2,
+                OverrideRule::TargetOutOfRange,
+            ),
+            (vec![config(0)], 0, 0, OverrideRule::SelfTarget),
+            (
+                vec![
+                    preset(),
+                    FuncInput::required("config", DataType::Int).overrides(0),
+                ],
+                1,
+                0,
+                OverrideRule::RequiredOverride,
+            ),
+            (
+                vec![FuncInput::required("preset", DataType::Int), config(0)],
+                1,
+                0,
+                OverrideRule::WirableTarget,
+            ),
+            (
+                vec![
+                    preset(),
+                    FuncInput::optional("middle", DataType::Int)
+                        .const_only()
+                        .overrides(0),
+                    config(1),
+                ],
+                1,
+                0,
+                OverrideRule::Chain,
+            ),
+            (
+                vec![preset(), config(0), config(0)],
+                2,
+                0,
+                OverrideRule::SharedTarget,
+            ),
+        ];
+        for (inputs, input_idx, target, rule) in override_rows {
+            let func = Func::new(FuncId::unique(), "override", FuncLambda::stub()).inputs(inputs);
+            assert_eq!(
+                func.validate(),
+                Err(FuncValidationError::InvalidOverride {
+                    func_id: func.id,
+                    input_idx,
+                    target,
+                    rule,
+                }),
+                "{rule}"
+            );
+        }
+
         // Well-formed declarations: exact kinds, a variant member, Null on an
-        // optional input, `Any` accepting any literal, and a valid wildcard.
-        Func::new(FuncId::unique(), "ok")
+        // optional input, `Any` accepting any literal, a valid wildcard and a
+        // valid override.
+        let ok = Func::new(FuncId::unique(), "ok", FuncLambda::stub())
             .input(FuncInput::optional("int", DataType::Int).default(2i64))
             .input(FuncInput::optional("any", DataType::Any).default("text"))
             .input(FuncInput::optional("unset", DataType::Int).default(ConstValue::Null))
@@ -531,27 +653,53 @@ mod tests {
                 )
                 .default(ConstValue::FsPaths(vec!["a.fits".into()])),
             )
-            .wildcard_output("value", 0)
-            .lambda(async_lambda!(|_| { Ok(()) }))
-            .validate()
-            .unwrap();
+            .input(preset())
+            .input(config(5))
+            .wildcard_output("value", 0);
+        ok.validate().unwrap();
+        // `config` (input 6) overrides `preset` (input 5); nothing overrides `config`.
+        assert_eq!(ok.overrider_of(5), Some(6));
+        assert_eq!(ok.overrider_of(6), None);
+    }
+
+    #[test]
+    fn a_variant_label_is_its_display_else_its_name() {
+        let plain = ValueVariant::new("auto_stf", ConstValue::Int(1));
+        assert_eq!(plain.label(), "auto_stf");
+        let friendly = plain.clone().display("Auto STF");
+        assert_eq!(friendly.label(), "Auto STF");
+        assert_eq!(
+            friendly.name, "auto_stf",
+            "the name is what saved graphs bind"
+        );
     }
 
     #[test]
     fn default_cache_mode_defaults_to_none_and_builder_overrides() {
-        // Out of the box a func caches nothing — both `Func::default()` and the
-        // `Func::new` builder start at `CacheMode::None`.
-        assert_eq!(Func::default().default_cache_mode, CacheMode::None);
+        // Out of the box a func caches nothing.
         assert_eq!(
-            Func::new(FuncId::unique(), "f").default_cache_mode,
+            testing::stub_func(FuncId::unique(), "f").default_cache_mode,
             CacheMode::None
         );
 
         // The builder sets a hotter default; distinct inputs map to distinct
         // stored modes (not a fixed constant).
         for mode in [CacheMode::Ram, CacheMode::Disk, CacheMode::Both] {
-            let func = Func::new(FuncId::unique(), "f").default_cache_mode(mode);
+            let func = testing::stub_func(FuncId::unique(), "f").default_cache_mode(mode);
             assert_eq!(func.default_cache_mode, mode, "{mode:?} is stored verbatim");
         }
+    }
+
+    #[test]
+    fn node_events_expose_names_and_arity() {
+        let emitter = testing::stub_func(FuncId::unique(), "ticker")
+            .event("tick", testing::stub_event())
+            .event("tock", testing::stub_event());
+        assert_eq!(emitter.events.len(), 2);
+        let names: Vec<&str> = emitter.events.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, ["tick", "tock"]);
+
+        let silent = testing::stub_func(FuncId::unique(), "silent");
+        assert!(silent.events.is_empty());
     }
 }

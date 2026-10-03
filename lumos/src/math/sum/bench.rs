@@ -7,7 +7,13 @@
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
+#[cfg(target_arch = "x86_64")]
+use crate::math::sum::avx2;
+#[cfg(target_arch = "aarch64")]
+use crate::math::sum::neon;
 use crate::math::sum::{scalar, sum_f32, weighted_mean_f32};
+#[cfg(target_arch = "x86_64")]
+use imaginarium::SimdTier;
 
 const BENCH_SIZE: usize = 10_000;
 /// The 6/10/12/24 rungs are what make `AVX2_SUM_F32_CROSSOVER` reproducible: stepping 4, 8, 16
@@ -36,13 +42,13 @@ fn bench_sum_f32(b: ::quickbench::Bencher) {
 
     #[cfg(target_arch = "aarch64")]
     b.bench_labeled("neon", || unsafe {
-        black_box(crate::math::sum::neon::sum_f32(black_box(&data)))
+        black_box(neon::sum_f32(black_box(&data)))
     });
 
     #[cfg(target_arch = "x86_64")]
-    if imaginarium::cpu_features::has_avx2() {
+    if SimdTier::Avx2.is_supported() {
         b.bench_labeled("avx2", || unsafe {
-            black_box(crate::math::sum::avx2::sum_f32(black_box(&data)))
+            black_box(avx2::sum_f32(black_box(&data)))
         });
     }
 
@@ -60,19 +66,13 @@ fn bench_weighted_mean_f32(b: ::quickbench::Bencher) {
 
     #[cfg(target_arch = "aarch64")]
     b.bench_labeled("neon", || unsafe {
-        black_box(crate::math::sum::neon::weighted_sums(
-            black_box(&data),
-            black_box(&weights),
-        ))
+        black_box(neon::weighted_sums(black_box(&data), black_box(&weights)))
     });
 
     #[cfg(target_arch = "x86_64")]
-    if imaginarium::cpu_features::has_avx2() {
+    if SimdTier::Avx2.is_supported() {
         b.bench_labeled("avx2", || unsafe {
-            black_box(crate::math::sum::avx2::weighted_sums(
-                black_box(&data),
-                black_box(&weights),
-            ))
+            black_box(avx2::weighted_sums(black_box(&data), black_box(&weights)))
         });
     }
 
@@ -96,15 +96,15 @@ fn bench_sum_f32_crossover(b: ::quickbench::Bencher) {
         #[cfg(target_arch = "aarch64")]
         b.bench_labeled(&format!("neon_{len}"), || {
             for _ in 0..calls {
-                black_box(unsafe { crate::math::sum::neon::sum_f32(black_box(&data)) });
+                black_box(unsafe { neon::sum_f32(black_box(&data)) });
             }
         });
 
         #[cfg(target_arch = "x86_64")]
-        if imaginarium::cpu_features::has_avx2() {
+        if SimdTier::Avx2.is_supported() {
             b.bench_labeled(&format!("avx2_{len}"), || {
                 for _ in 0..calls {
-                    black_box(unsafe { crate::math::sum::avx2::sum_f32(black_box(&data)) });
+                    black_box(unsafe { avx2::sum_f32(black_box(&data)) });
                 }
             });
         }
@@ -127,18 +127,16 @@ fn bench_weighted_sums_crossover(b: ::quickbench::Bencher) {
         #[cfg(target_arch = "aarch64")]
         b.bench_labeled(&format!("neon_{len}"), || {
             for _ in 0..calls {
-                black_box(unsafe {
-                    crate::math::sum::neon::weighted_sums(black_box(&data), black_box(&weights))
-                });
+                black_box(unsafe { neon::weighted_sums(black_box(&data), black_box(&weights)) });
             }
         });
 
         #[cfg(target_arch = "x86_64")]
-        if imaginarium::cpu_features::has_avx2() {
+        if SimdTier::Avx2.is_supported() {
             b.bench_labeled(&format!("avx2_{len}"), || {
                 for _ in 0..calls {
                     black_box(unsafe {
-                        crate::math::sum::avx2::weighted_sums(black_box(&data), black_box(&weights))
+                        avx2::weighted_sums(black_box(&data), black_box(&weights))
                     });
                 }
             });

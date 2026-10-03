@@ -6,7 +6,7 @@ use super::*;
 /// failed rather than the node as a whole, and the verdict is stable: what
 /// actually *runs* can differ as pure nodes start reusing their cache, but
 /// the missing set cannot flap.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn required_missing_propagates_downstream() {
     let mut e = TestEngine::over(TestGraph::sample());
     e.edit(|g| g.unbind("sum", 0));
@@ -74,7 +74,7 @@ async fn optional_unbound_does_not_propagate() {
 /// consumer chain, so the executor never reads the absent output. Regression
 /// for the worker panicking in `collect_inputs` ("missing output values") —
 /// the planned-only siblings above can't catch it since they never execute.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn optional_bind_to_gated_upstream_is_gated() {
     let mut e = TestEngine::over(TestGraph::sample());
     e.edit(|g| {

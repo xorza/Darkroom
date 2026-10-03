@@ -1,11 +1,11 @@
 use super::*;
+use scenarium::testing::func_invoker::FuncInvoker;
 use scenarium::{AnyState, ConstValue, ContextManager, OutputDemand, SharedAnyState};
 
 #[test]
 fn the_declaration_is_a_sink_that_produces_nothing() {
     let func = preview_func(Arc::default());
     assert!(func.sink, "an ambient sinks run must reach it");
-    assert!(func.uncacheable, "no output to persist");
     assert!(func.outputs.is_empty());
     assert!(func.events.is_empty());
     assert_eq!(func.inputs.len(), 1);
@@ -31,6 +31,8 @@ async fn invoking_publishes_the_latest_value_per_node() {
     let func = preview_func(Arc::clone(&sink));
     let first = NodeId::default();
 
+    // Built by hand rather than through `FuncInvoker`: the test reads the
+    // input slot back after the call, which the invoker does not hand out.
     let invoke = async |value: i64| {
         let mut ctx = ContextManager::default();
         ctx.set_current_node(first);
@@ -52,11 +54,16 @@ async fn invoking_publishes_the_latest_value_per_node() {
 
     invoke(7).await;
     invoke(8).await;
-    let drained = sink.drain();
+    let mut drained = HashMap::new();
+    sink.drain_into(&mut drained);
     assert_eq!(drained.len(), 1, "one entry per node, not per invoke");
-    assert_eq!(drained[0].0, first);
-    assert_eq!(drained[0].1.as_i64(), Some(8), "the later value wins");
-    assert!(sink.drain().is_empty(), "a drain empties the sink");
+    assert_eq!(drained[&first].as_i64(), Some(8), "the later value wins");
+
+    // The drained map's storage goes back to the sink with the next drain,
+    // which finds nothing.
+    drained.clear();
+    sink.drain_into(&mut drained);
+    assert!(drained.is_empty(), "a drain empties the sink");
 }
 
 /// An invoke with no attribution is an executor bug, not a runtime state,
@@ -66,16 +73,8 @@ async fn invoking_publishes_the_latest_value_per_node() {
 #[should_panic(expected = "only readable inside a lambda invoke")]
 async fn an_unattributed_invoke_is_a_bug_not_a_silent_no_op() {
     let func = preview_func(Arc::default());
-    let mut inputs = [DynamicValue::Static(ConstValue::Int(1))];
-    func.lambda
-        .invoke(Invocation {
-            ctx: &mut ContextManager::default(),
-            state: &mut AnyState::default(),
-            event_state: &SharedAnyState::default(),
-            inputs: &mut inputs,
-            demand: &[] as &[OutputDemand],
-            outputs: &mut [],
-        })
+    FuncInvoker::default()
+        .call(&func, [DynamicValue::Static(ConstValue::Int(1))])
         .await
         .unwrap();
 }

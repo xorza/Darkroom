@@ -2,19 +2,18 @@
 //! the linear domain, then stretch and SCNR into a viewable image — saving only the final result.
 //! Gated behind the `real-data` feature.
 
-use crate::image_ops::internals::channel_plane;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::load_context::LoadContext;
 use crate::math::statistics::{mad_to_sigma, mad_with_scratch, median_mut};
+use crate::testing::init_tracing;
+use crate::testing::real_data;
 use crate::testing::visual;
-use crate::testing::{calibration_dir, init_tracing};
 use crate::{Denoise, NeutralizeBackground, Scnr, Stretch};
 
 /// Robust high-frequency noise of a channel: the MAD-sigma of adjacent-pixel differences. Slow
 /// gradients and extended signal cancel in the difference, so this isolates the pixel-scale noise
 /// that denoising removes (unlike a global sigma, which is dominated by real structure).
 fn highfreq_noise(image: &LinearImage, channel: usize) -> f32 {
-    let buf = channel_plane(image, channel);
+    let buf = image.channel(channel).clone();
     let width = buf.width();
     let px = buf.pixels();
     let n = px.len();
@@ -32,15 +31,10 @@ fn highfreq_noise(image: &LinearImage, channel: usize) -> f32 {
 }
 
 #[test]
-#[ignore = "real-data image-processing test; run explicitly with --ignored"]
 fn denoise_reduces_linear_noise() {
     init_tracing();
 
-    let mut img = LinearImage::from_file(
-        calibration_dir().join("stacked_light.tiff"),
-        &LoadContext::default(),
-    )
-    .expect("load");
+    let mut img = real_data::linear_master();
 
     // Neutralize the background first so denoising runs on color-calibrated linear data.
     NeutralizeBackground.apply(&mut img).unwrap();
@@ -68,5 +62,5 @@ fn denoise_reduces_linear_noise() {
     // Finish the display chain — stretch then clean any residual green — and save the final image.
     Stretch::auto_stf().apply(&mut img).unwrap();
     Scnr::average_neutral().apply(&mut img).unwrap();
-    visual::save_linear(&img, "denoise/stacked_light_denoised.png");
+    visual::save_linear(&img, "denoise/stacked_light_denoised");
 }

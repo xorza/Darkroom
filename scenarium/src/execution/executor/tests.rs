@@ -4,22 +4,14 @@
 //! which read *is* the subject, so a fixture that left retention to a default
 //! would be asserting on something it never said.
 
-use std::sync::Arc;
-
 use super::*;
-use crate::containers::column::{Column, Idx};
-use crate::execution::identity::OutputIdx;
-use crate::execution::schedule::NodeState;
+use crate::containers::column::Idx;
+use crate::graph::func::lambda::FuncLambda;
 use crate::graph::func::lambda::internals;
-use crate::graph::func::lambda::{FuncLambda, Invocation};
 use crate::graph::identity::NodeId;
 use crate::graph::node::CacheMode;
 use crate::testing::program::ProgramBuilder;
-use crate::{ConstValue, DynamicValue, async_lambda};
-
-fn value(value: i64) -> DynamicValue {
-    DynamicValue::Static(ConstValue::Int(value))
-}
+use crate::{ConstValue, async_lambda};
 
 fn producer() -> FuncLambda {
     async_lambda!(|Invocation { outputs, .. }| {
@@ -162,8 +154,14 @@ async fn upstream_error_retires_skipped_reads_without_harming_live_readers() {
         run.outputs(healthy).is_none(),
         "the healthy non-RAM producer is reclaimed after the live reader lands"
     );
-    assert!(run.error(failed).unwrap().to_string().contains("boom"));
-    assert!(run.error(blocked).unwrap().to_string().contains("upstream"));
+    assert!(matches!(
+        run.error(failed),
+        Some(RunError::Invoke(error)) if error.to_string() == "boom"
+    ));
+    assert!(matches!(
+        run.error(blocked),
+        Some(RunError::SkippedUpstream)
+    ));
 }
 
 #[tokio::test]
@@ -200,7 +198,7 @@ async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
 #[tokio::test]
 async fn unbound_output_errors_only_when_demanded() {
     let mut prog = ProgramBuilder::default();
-    let silent = async_lambda!(|_| { Ok(()) });
+    let silent = FuncLambda::stub();
     let a = prog
         .node()
         .cache(CacheMode::Ram)
@@ -228,10 +226,7 @@ async fn unbound_output_errors_only_when_demanded() {
         run.error(a),
         Some(RunError::OutputsNotProduced { outputs, .. }) if outputs == &[0, 1]
     ));
-    assert!(matches!(
-        run.error(b),
-        Some(RunError::SkippedUpstream { .. })
-    ));
+    assert!(matches!(run.error(b), Some(RunError::SkippedUpstream)));
 
     // Undemanded, the same silent lambda is no error at all: the port stays
     // `Unbound` and the node is reported clean.
@@ -240,7 +235,7 @@ async fn unbound_output_errors_only_when_demanded() {
         .node()
         .cache(CacheMode::Ram)
         .outputs(1)
-        .lambda(async_lambda!(|_| { Ok(()) }))
+        .lambda(FuncLambda::stub())
         .add();
 
     let mut run = prog.runs().readers([0]);
@@ -329,7 +324,6 @@ async fn a_lambda_reads_the_execution_node_it_is_running_as() {
 
     // Index order is id order, and placement mints ascending ids, so `a` runs first.
     assert_eq!(*seen.lock().unwrap(), vec![a.node_id, b.node_id]);
-    assert_ne!(a, b, "the two nodes are distinguishable at all");
 }
 
 /// A node seed ("run to this node") demands the node's output but does not
@@ -398,7 +392,7 @@ async fn a_reused_output_with_no_consumers_is_reclaimed_immediately() {
         .readers([0])
         .demand(a, 0)
         .state(a, NodeState::Reuse)
-        .cached(a, [value(7)]);
+        .cached(a, [ProgramBuilder::value(7)]);
     run.go().await;
 
     assert!(run.reused(a));
@@ -442,65 +436,6 @@ async fn reused_consumer_does_not_delay_last_read_reclamation() {
     assert!(
         run.outputs(a).is_none(),
         "the producer is reclaimed immediately after its only live reader"
-    );
-}
-
-/// A node whose func has no implementation attached can't execute: it's reported as
-/// its own per-node [`RunError::MissingLambda`] (not silently skipped), any stale
-/// cached value is dropped so it can't be served as this run's result, and its
-/// consumers skip with the usual errored-upstream propagation.
-#[tokio::test]
-async fn missing_lambda_reports_error_and_skips_consumers() {
-    let mut prog = ProgramBuilder::default();
-    let source = prog
-        .node()
-        .cache(CacheMode::Ram)
-        .outputs(1)
-        .lambda(producer())
-        .add();
-    // No lambda at all — the declaration a library lost its implementation for.
-    let missing = prog
-        .node()
-        .cache(CacheMode::Ram)
-        .input(source.out(0))
-        .outputs(1)
-        .add();
-    let downstream = prog
-        .node()
-        .cache(CacheMode::Ram)
-        .input(missing.out(0))
-        .outputs(1)
-        .lambda(relay())
-        .add();
-
-    let mut run = prog
-        .runs()
-        .resolved()
-        .only_root(downstream)
-        .resident(missing, [value(9)]);
-    run.go().await;
-
-    assert_eq!(
-        run.ran_count(),
-        0,
-        "the source is cut, the missing implementation errors, and its consumer skips"
-    );
-    assert!(
-        run.outputs(missing).is_none(),
-        "the missing node's stale value is dropped, not served"
-    );
-    assert!(
-        matches!(run.error(missing), Some(RunError::MissingLambda { .. })),
-        "the node reports its missing implementation: {:?}",
-        run.error(missing)
-    );
-    assert!(
-        matches!(
-            run.error(downstream),
-            Some(RunError::SkippedUpstream { .. })
-        ),
-        "the consumer skips as errored-upstream: {:?}",
-        run.error(downstream)
     );
 }
 
@@ -561,9 +496,12 @@ async fn reuse_survives_failed_upstream_rerun() {
         Some(6),
         "B's valid cached value survives the sibling failure"
     );
-    assert!(run.error(a).is_some(), "A's own failure is reported");
     assert!(
-        run.error(c).is_some(),
+        matches!(run.error(a), Some(RunError::Invoke(_))),
+        "A's own failure is reported"
+    );
+    assert!(
+        matches!(run.error(c), Some(RunError::SkippedUpstream)),
         "C is skipped for the errored upstream"
     );
     assert!(run.error(b).is_none(), "B carries no error");

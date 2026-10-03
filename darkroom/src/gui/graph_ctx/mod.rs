@@ -15,19 +15,22 @@
 //! field read, a hash lookup, or a slice index, so a per-widget call is
 //! O(1) and nothing has to be rebuilt when the document moves. The one answer
 //! that cannot come off a declaration — a wildcard output's resolved type —
-//! is read out of the [`OutputTypes`] table the context carries, resolved once
-//! by [`GraphCtx::new`] rather than per read (see
+//! is read out of the [`OutputTypes`] table the context carries, which the
+//! caller resolves once per graph edit rather than per read (see
 //! [`OutputCtx::ty`](output_ctx::OutputCtx::ty)).
 
 pub(crate) mod input_ctx;
 pub(crate) mod node_ctx;
 pub(crate) mod output_ctx;
+pub(crate) mod output_type_cache;
 
 use std::collections::BTreeSet;
 
-use scenarium::{Graph, InputPort, Library, NodeId, OutputPort, OutputTypes, Subscription};
+use scenarium::{
+    DataType, Graph, InputPort, Library, NodeId, OutputPort, OutputTypes, Subscription,
+};
 
-use crate::core::document::{Document, GraphView, StackedItem, Viewport};
+use crate::core::document::{Document, GraphView, PortKind, PortRef, StackedItem, Viewport};
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
@@ -63,9 +66,9 @@ pub(crate) struct GraphCtx<'a> {
     /// once for the whole graph, so reading one is a lookup rather than a
     /// walk. See [`OutputCtx::ty`](output_ctx::OutputCtx::ty).
     ///
-    /// Resolved by [`Self::new`] against the document the `window` carries, and
-    /// exclusively borrowed for as long as this context lives — so it cannot be
-    /// a graph edit behind, and nothing can move it out from under a reader.
+    /// Resolved by the caller against the document the `window` carries, and
+    /// borrowed for as long as this context lives — so nothing can move it out
+    /// from under a reader.
     output_types: &'a OutputTypes,
     /// Whether a pane is showing this graph, snapshot when the context was
     /// composed. See [`Self::is_visible`].
@@ -81,20 +84,12 @@ impl<'a> GraphCtx<'a> {
     /// answered "no nodes, so no pane" would leave a fresh document with no
     /// canvas to place its first node on.
     ///
-    /// **Resolves `output_types` against that document on the way in**, which
-    /// is why it arrives `&mut` and leaves shared. A context's readers answer a
-    /// wildcard port off that table, so its freshness is not a contract for
-    /// callers to keep — composing a context *is* the refresh, and the borrow
-    /// then lasts as long as the context, so nothing can edit the graph out from
-    /// under it. Darkroom edits between passes and composes a context per pass,
-    /// so each pass pays one resolve over the document it was handed.
-    ///
-    /// The table is threaded in rather than owned because the context is `Copy`:
-    /// the caller keeps the allocation across frames, and a refresh reuses its
-    /// capacity instead of building a map per pass.
-    pub(crate) fn new(window: WindowCtx<'a>, output_types: &'a mut OutputTypes) -> Self {
+    /// `output_types` must be resolved against that document — see
+    /// [`OutputTypeCache`](output_type_cache::OutputTypeCache), which resolves
+    /// it again only after an edit that can retype an output. The table is
+    /// threaded in rather than owned because the context is `Copy`.
+    pub(crate) fn new(window: WindowCtx<'a>, output_types: &'a OutputTypes) -> Self {
         let doc = window.document();
-        output_types.update(&doc.graph, window.app().library());
         Self {
             is_visible: doc.shows_graph(),
             window,
@@ -109,7 +104,7 @@ impl<'a> GraphCtx<'a> {
     /// field read. The hit sweep is the one reader — it runs at the top of the
     /// frame, before the navigation phase settles which tabs are active, so it
     /// cannot assume a canvas.
-    pub(crate) fn is_visible(self) -> bool {
+    pub(crate) const fn is_visible(self) -> bool {
         self.is_visible
     }
 
@@ -119,26 +114,26 @@ impl<'a> GraphCtx<'a> {
     /// shown graph — a duplicate copies wiring the projection alone can't
     /// describe. Prefer [`Self::body`] / [`Self::view`], which say which
     /// half is being read.
-    pub(crate) fn document(self) -> &'a Document {
+    pub(crate) const fn document(self) -> &'a Document {
         self.window.document()
     }
 
     /// The authoring graph this pane shows.
-    pub(crate) fn body(self) -> &'a Graph {
+    pub(crate) const fn body(self) -> &'a Graph {
         &self.document().graph
     }
 
     /// Its view metadata: placements, viewport, committed selection.
-    pub(crate) fn view(self) -> &'a GraphView {
+    pub(crate) const fn view(self) -> &'a GraphView {
         &self.document().main_view
     }
 
-    pub(crate) fn viewport(self) -> Viewport {
+    pub(crate) const fn viewport(self) -> Viewport {
         self.view().viewport
     }
 
     /// The palette and metrics every widget in this pane paints from.
-    pub(crate) fn theme(self) -> &'a Theme {
+    pub(crate) const fn theme(self) -> &'a Theme {
         self.window.app().theme()
     }
 
@@ -152,22 +147,40 @@ impl<'a> GraphCtx<'a> {
     /// The last run's results, for the readers that want more of a node than
     /// its [`NodeCtx`] surfaces — its logs, its failure message, the value
     /// a preview published.
-    pub(crate) fn run_state(self) -> &'a RunState {
+    pub(crate) const fn run_state(self) -> &'a RunState {
         self.window.app().run_state()
     }
 
     /// This graph's resolved output types. `pub(super)` because the one
     /// reader is [`OutputCtx::ty`](output_ctx::OutputCtx::ty) — a widget
     /// asks a port for its type, never the table for a port.
-    pub(super) fn output_types(self) -> &'a OutputTypes {
+    pub(super) const fn output_types(self) -> &'a OutputTypes {
         self.output_types
+    }
+
+    /// The type of `port` — an input's declared type, or an output's resolved
+    /// one — read straight off the graph, the library and the type table, or
+    /// `None` for a port this graph does not hold. For a per-wire reader that
+    /// has no node context and wants none.
+    pub(crate) fn port_type(self, port: PortRef) -> Option<&'a DataType> {
+        match port.kind {
+            PortKind::Input => self
+                .body()
+                .find(port.node_id)?
+                .func(self.library())?
+                .inputs
+                .get(port.port_idx)
+                .map(|input| &input.data_type),
+            PortKind::Output => self
+                .output_types
+                .get(OutputPort::new(port.node_id, port.port_idx)),
+        }
     }
 
     /// This graph's nodes, in no particular order.
     ///
-    /// Driven by the view's placements rather than the graph's own node list,
-    /// since only a placed node has somewhere to be. A placement whose node is
-    /// gone is skipped rather than faked.
+    /// Driven by the view's placements, which name exactly the graph's nodes,
+    /// since a placement carries the position a node is drawn at.
     ///
     /// Unordered because almost nothing needs the stack: scanning for
     /// emitters, resolving a drag anchor, framing the viewport and hit-testing
@@ -177,7 +190,7 @@ impl<'a> GraphCtx<'a> {
         self.view()
             .item_placements
             .iter()
-            .filter_map(move |(id, placement)| NodeCtx::resolve(self, *id, placement.pos))
+            .map(move |(id, placement)| NodeCtx::resolve(self, *id, placement.pos))
     }
 
     /// This graph's node ids back-to-front into `out`: later entries draw in
@@ -193,10 +206,10 @@ impl<'a> GraphCtx<'a> {
     }
 
     /// One node of this graph, or `None` for an id it does not hold — a node
-    /// deleted since the caller read the id, or one belonging to another pane.
+    /// deleted since the caller read the id.
     pub(crate) fn node(self, node_id: NodeId) -> Option<NodeCtx<'a>> {
         let placement = *self.view().item_placements.get(&node_id)?;
-        NodeCtx::resolve(self, node_id, placement.pos)
+        Some(NodeCtx::resolve(self, node_id, placement.pos))
     }
 
     pub(crate) fn contains(self, node_id: NodeId) -> bool {
@@ -214,7 +227,7 @@ impl<'a> GraphCtx<'a> {
     }
 
     /// This graph's committed selection.
-    pub(crate) fn selected(self) -> &'a BTreeSet<NodeId> {
+    pub(crate) const fn selected(self) -> &'a BTreeSet<NodeId> {
         &self.view().selected
     }
 

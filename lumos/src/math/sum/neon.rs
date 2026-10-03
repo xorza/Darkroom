@@ -15,8 +15,7 @@ pub(super) unsafe fn sum_f32(values: &[f32]) -> f64 {
         let mut sum_lo = vdupq_n_f64(0.0);
         let mut sum_hi = vdupq_n_f64(0.0);
 
-        let chunks = values.chunks_exact(4);
-        let tail = chunks.remainder();
+        let (chunks, tail) = values.as_chunks::<4>();
 
         for chunk in chunks {
             let v = vld1q_f32(chunk.as_ptr());
@@ -31,9 +30,9 @@ pub(super) unsafe fn sum_f32(values: &[f32]) -> f64 {
 /// Both weighted-mean totals over the same elements.
 ///
 /// The lane split, the reduction order and the scalar tail match [`sum_f32`] exactly. That is what
-/// makes `weighted_mean_f32` with unit weights reproduce `mean_f32` bit for bit: `v * 1.0` is exact,
-/// so this walks the identical values through the identical accumulation and lands on the identical
-/// f64 total.
+/// makes `weighted_mean_f32` with unit weights reproduce `mean_f32` bit for bit: `v * 1.0` is
+/// exact, so this walks the identical values through the identical accumulation and lands on the
+/// identical f64 total.
 ///
 /// # Safety
 /// None of its own; see [`sum_f32`].
@@ -44,12 +43,10 @@ pub(super) unsafe fn weighted_sums(values: &[f32], weights: &[f32]) -> WeightedS
         let mut weight_lo = vdupq_n_f64(0.0);
         let mut weight_hi = vdupq_n_f64(0.0);
 
-        let value_chunks = values.chunks_exact(4);
-        let weight_chunks = weights.chunks_exact(4);
-        let value_tail = value_chunks.remainder();
-        let weight_tail = weight_chunks.remainder();
+        let (value_chunks, value_tail) = values.as_chunks::<4>();
+        let (weight_chunks, weight_tail) = weights.as_chunks::<4>();
 
-        for (value_chunk, weight_chunk) in value_chunks.zip(weight_chunks) {
+        for (value_chunk, weight_chunk) in value_chunks.iter().zip(weight_chunks) {
             let v = vld1q_f32(value_chunk.as_ptr());
             let w = vld1q_f32(weight_chunk.as_ptr());
 

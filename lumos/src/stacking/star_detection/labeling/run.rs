@@ -23,7 +23,7 @@ impl Run {
     /// Eight-connectivity reaches one pixel further each way, so a run touching this one only
     /// at a diagonal still falls inside the window.
     #[inline]
-    pub(super) fn search_window(&self, connectivity: Connectivity) -> Range<u32> {
+    pub(super) const fn search_window(&self, connectivity: Connectivity) -> Range<u32> {
         match connectivity {
             Connectivity::Four => self.start..self.end,
             Connectivity::Eight => self.start.saturating_sub(1)..self.end + 1,
@@ -33,7 +33,7 @@ impl Run {
 
 /// Check if two runs from adjacent rows are connected.
 #[inline]
-pub(super) fn runs_connected(prev: &Run, curr: &Run, connectivity: Connectivity) -> bool {
+pub(super) const fn runs_connected(prev: &Run, curr: &Run, connectivity: Connectivity) -> bool {
     match connectivity {
         Connectivity::Four => prev.start < curr.end && prev.end > curr.start,
         Connectivity::Eight => prev.start < curr.end + 1 && prev.end + 1 > curr.start,

@@ -19,14 +19,11 @@ use std::sync::Arc;
 use hashbrown::HashMap;
 
 use crate::async_lambda;
-#[cfg(test)]
-use crate::execution::compile::Compiler;
-#[cfg(test)]
-use crate::execution::compile::error::CompileError;
 use crate::graph::detached::DetachedNode;
-use crate::graph::func::error::InvokeError;
 use crate::graph::func::event::EventLambda;
+use crate::graph::func::lambda::internals as lambda;
 use crate::graph::func::lambda::{FuncLambda, Invocation};
+use crate::graph::func::signature::FuncSignature;
 use crate::graph::func::{Func, FuncInput, FuncOutput};
 use crate::graph::identity::{FuncId, InputPort, NodeId};
 use crate::graph::node::special::SpecialNode;
@@ -34,8 +31,6 @@ use crate::graph::node::{CacheMode, Node, NodeKind};
 use crate::graph::{Binding, Graph};
 use crate::library::Library;
 use crate::testing::calls::Calls;
-#[cfg(test)]
-use crate::testing::graph::compiled::Compiled;
 use crate::{ConstValue, DataType, DynamicValue};
 
 /// A graph, the library it resolves against, and the names its nodes answer to.
@@ -122,7 +117,7 @@ impl TestGraph {
     /// than registered.
     pub fn add_special(&mut self, name: &str, special: SpecialNode) -> NodeId {
         let mut node = Node::new(NodeKind::Special(special));
-        node.name = name.to_owned();
+        name.clone_into(&mut node.name);
         let node_id = NodeId::from_u128(self.mint());
         self.graph.insert(node_id, node);
         self.bind_name(name, node_id);
@@ -188,7 +183,7 @@ impl TestGraph {
     pub fn source_sink_loose() -> Self {
         let mut g = Self::new();
         g.add("source", |n| n.pure().output(DataType::Int));
-        g.add("sink", |n| n.records());
+        g.add("sink", NodeSpec::records);
         g.add("loose", |n| n.pure().output(DataType::Int));
         g.wire("source", 0, "sink", 0);
         g
@@ -236,6 +231,10 @@ impl TestGraph {
         self.node_mut(name).disabled = true;
     }
 
+    pub fn enable(&mut self, name: &str) {
+        self.node_mut(name).disabled = false;
+    }
+
     pub fn cache(&mut self, name: &str, mode: CacheMode) {
         self.node_mut(name).cache = mode;
     }
@@ -266,6 +265,25 @@ impl TestGraph {
             .expect("the named node's func is registered");
         edit(&mut func);
         self.library.add(func);
+    }
+
+    /// [`edit_func`](Self::edit_func) for an edit that moves ports, with the
+    /// graph adopting the new ones: every node of the func records the new
+    /// signature, as an author who accepted the change would leave it. Without
+    /// that, the guard refuses the nodes the edit left behind.
+    pub fn evolve_func(&mut self, name: &str, edit: impl FnOnce(&mut Func)) {
+        self.edit_func(name, edit);
+        let func_id = self.func_id(name);
+        let signature = FuncSignature::of(self.library.by_id(func_id).unwrap());
+        let nodes: Vec<NodeId> = self
+            .graph
+            .iter()
+            .filter(|node| node.kind == NodeKind::Func(func_id))
+            .map(|node| node.id)
+            .collect();
+        for node in nodes {
+            self.graph.find_mut(node).unwrap().signature = Some(signature);
+        }
     }
 
     /// Replace what `name` declares with a body that always fails — the
@@ -325,11 +343,14 @@ impl TestGraph {
     fn place(&mut self, func: &Func) -> NodeId {
         let node_id = NodeId::from_u128(self.mint());
         self.graph.insert(node_id, Node::from(func));
-        self.graph.bindings.extend(func.default_bindings(node_id));
+        self.graph.bindings.extend(
+            func.default_bindings(node_id)
+                .map(|entry| (entry.port, entry.binding)),
+        );
         node_id
     }
 
-    fn mint(&mut self) -> u128 {
+    const fn mint(&mut self) -> u128 {
         self.next_id += 1;
         self.next_id
     }
@@ -342,7 +363,7 @@ impl TestGraph {
 
 /// The body both `fails` methods install, so the two cannot drift.
 fn failing_lambda(message: &'static str) -> FuncLambda {
-    async_lambda!(move |_| { Err(InvokeError::external(std::io::Error::other(message))) })
+    async_lambda!(move |_| { Err(lambda::failure(message)) })
 }
 
 /// One node's declaration under construction — [`Func`]'s builders, plus the
@@ -360,31 +381,30 @@ impl NodeSpec {
         // A stub body by default, because `Library::add` rejects a func with
         // no implementation and most fixtures never invoke one.
         Self {
-            func: Func::new(func_id, name).lambda(async_lambda!(|_| { Ok(()) })),
+            func: Func::new(func_id, name, FuncLambda::stub()),
         }
     }
 
+    #[must_use]
     pub fn pure(mut self) -> Self {
         self.func = self.func.pure();
         self
     }
 
+    #[must_use]
     pub fn sink(mut self) -> Self {
         self.func = self.func.sink();
         self
     }
 
-    pub fn uncacheable(mut self) -> Self {
-        self.func = self.func.uncacheable();
-        self
-    }
-
     /// The [`CacheMode`] nodes of this func start at.
+    #[must_use]
     pub fn cache(mut self, mode: CacheMode) -> Self {
         self.func = self.func.default_cache_mode(mode);
         self
     }
 
+    #[must_use]
     pub fn input(mut self, data_type: DataType) -> Self {
         let name = format!("in{}", self.func.inputs.len());
         self.func = self.func.input(FuncInput::required(name, data_type));
@@ -393,6 +413,7 @@ impl NodeSpec {
 
     /// A required input that may only hold a literal — wiring an upstream
     /// output into it is what graph validation rejects.
+    #[must_use]
     pub fn const_only(mut self) -> Self {
         let last = self
             .func
@@ -403,6 +424,19 @@ impl NodeSpec {
         self
     }
 
+    /// The input declared before this call overrides input `target`.
+    #[must_use]
+    pub fn overrides(mut self, target: usize) -> Self {
+        let last = self
+            .func
+            .inputs
+            .last_mut()
+            .expect("`overrides` applies to the input declared before it");
+        last.overrides = Some(target);
+        self
+    }
+
+    #[must_use]
     pub fn optional(mut self, data_type: DataType) -> Self {
         let name = format!("in{}", self.func.inputs.len());
         self.func = self.func.input(FuncInput::optional(name, data_type));
@@ -411,6 +445,7 @@ impl NodeSpec {
 
     /// An optional input carrying a declared default, so a fresh node of this
     /// func starts with that literal already bound.
+    #[must_use]
     pub fn defaulted(mut self, data_type: DataType, value: impl Into<ConstValue>) -> Self {
         let name = format!("in{}", self.func.inputs.len());
         self.func = self
@@ -419,26 +454,37 @@ impl NodeSpec {
         self
     }
 
+    #[must_use]
     pub fn output(mut self, data_type: DataType) -> Self {
         let name = format!("out{}", self.func.outputs.len());
         self.func = self.func.output(FuncOutput::new(name, data_type));
         self
     }
 
+    /// One `Any` input and one wildcard output mirroring it — the generic hop
+    /// for wildcard type resolution through a node.
+    #[must_use]
+    pub fn passthrough(self) -> Self {
+        self.input(DataType::Any).wildcard(0)
+    }
+
     /// An output mirroring input `mirrors` — a passthrough / reroute port.
+    #[must_use]
     pub fn wildcard(mut self, mirrors: usize) -> Self {
         let name = format!("out{}", self.func.outputs.len());
         self.func = self.func.wildcard_output(name, mirrors);
         self
     }
 
+    #[must_use]
     pub fn event(mut self, name: &str, lambda: EventLambda) -> Self {
         self.func = self.func.event(name, lambda);
         self
     }
 
+    #[must_use]
     pub fn lambda(mut self, lambda: FuncLambda) -> Self {
-        self.func = self.func.lambda(lambda);
+        self.func.lambda = lambda;
         self
     }
 
@@ -447,6 +493,7 @@ impl NodeSpec {
     /// Declare the ports first — this supplies only the implementation, and
     /// panics at run time if the node declares no output to write.
     /// [`observes`](Self::observes) is the form for a node with none.
+    #[must_use]
     pub fn compute(
         self,
         body: impl Fn(&[DynamicValue]) -> ConstValue + Send + Sync + 'static,
@@ -465,6 +512,7 @@ impl NodeSpec {
     /// For a sink whose effect is recorded outside the graph. Unlike
     /// [`compute`](Self::compute) it declares and writes no output, so it fits
     /// a node that has none.
+    #[must_use]
     pub fn observes(self, body: impl Fn(&[DynamicValue]) + Send + Sync + 'static) -> Self {
         let body = Arc::new(body);
         self.lambda(async_lambda!(
@@ -478,6 +526,7 @@ impl NodeSpec {
     /// A pure source of one constant: declares the output too, typed from the
     /// literal (`Any` for a literal that names no type of its own — a path, an
     /// enum variant, `Null`).
+    #[must_use]
     pub fn returns(self, value: impl Into<ConstValue>) -> Self {
         let value = value.into();
         let data_type = DataType::Any.or_const_type(&value);
@@ -489,12 +538,10 @@ impl NodeSpec {
     /// [`returns`](Self::returns), counting each call — the source every "did
     /// the upstream recompute" fixture is built on, since `calls` says both
     /// whether the node ran and how often.
+    #[must_use]
     pub fn counted(self, value: impl Into<ConstValue>, calls: &Calls) -> Self {
         let value = value.into();
-        let data_type = DataType::Any.or_const_type(&value);
-        self.pure()
-            .output(data_type)
-            .compute(calls.returning(value))
+        self.returns(value.clone()).compute(calls.returning(value))
     }
 
     /// A pure two-input arithmetic node: `in0 op in1`, both `Int`, one `Int`
@@ -503,6 +550,7 @@ impl NodeSpec {
     /// The second input is **optional and defaults to `identity`**, so a
     /// fixture may leave it unbound or const-bind it to move the node's digest
     /// without touching its producers.
+    #[must_use]
     pub fn arith(self, identity: i64, op: fn(i64, i64) -> i64) -> Self {
         self.pure()
             .input(DataType::Int)
@@ -516,11 +564,13 @@ impl NodeSpec {
     }
 
     /// [`arith`](Self::arith) adding its inputs, identity `0`.
+    #[must_use]
     pub fn sum(self) -> Self {
         self.arith(0, |a, b| a + b)
     }
 
     /// [`arith`](Self::arith) multiplying its inputs, identity `1`.
+    #[must_use]
     pub fn mult(self) -> Self {
         self.arith(1, |a, b| a * b)
     }
@@ -530,6 +580,7 @@ impl NodeSpec {
     ///
     /// [`TestGraph::fails`] is the same body installed on a declaration the
     /// fixture did not spec itself.
+    #[must_use]
     pub fn fails(self, message: &'static str) -> Self {
         self.lambda(failing_lambda(message))
     }
@@ -541,6 +592,7 @@ impl NodeSpec {
     /// **Declares its own port**: one required `Any` input, which is the one it
     /// logs. Adding another input before this leaves that port unfed, which
     /// blocks the node rather than logging anything.
+    #[must_use]
     pub fn records(self) -> Self {
         self.sink().input(DataType::Any).lambda(async_lambda!(
             move |Invocation { ctx, inputs, .. }| {
@@ -552,24 +604,69 @@ impl NodeSpec {
 }
 
 #[cfg(test)]
-impl TestGraph {
-    /// Lower this fixture, keeping the names. Panics on a compile error —
-    /// for the tests where the refusal *is* the subject, see
-    /// [`try_compile`](Self::try_compile).
-    pub(crate) fn compile(&self) -> Compiled {
-        self.try_compile().expect("the fixture graph compiles")
-    }
-
-    pub(crate) fn try_compile(&self) -> std::result::Result<Compiled, CompileError> {
-        Ok(Compiled::new(
-            Compiler::default().compile(&self.graph, &self.library)?,
-            self.ids.clone(),
-        ))
-    }
-}
+pub(crate) mod compiled;
 
 #[cfg(test)]
-pub(crate) mod compiled;
+mod internals {
+    use std::sync::Arc;
+
+    use crate::DataType;
+    use crate::execution::compile::Compiler;
+    use crate::execution::compile::compiled_graph::CompiledGraph;
+    use crate::execution::compile::error::CompileError;
+    use crate::graph::identity::{EventPort, NodeId, OutputPort};
+    use crate::graph::output_types::OutputTypes;
+    use crate::testing::graph::TestGraph;
+    use crate::testing::graph::compiled::Compiled;
+
+    impl TestGraph {
+        /// Every node the fixture named, under that name — which, for an
+        /// [`instance`](Self::instance), is not the node's own (its func's).
+        pub(crate) fn names(&self) -> impl Iterator<Item = (NodeId, &str)> {
+            self.ids
+                .iter()
+                .map(|(name, node_id)| (*node_id, name.as_str()))
+        }
+
+        /// The effective type at `name`'s output `port`, through the graph's one
+        /// resolver — what the editor paints.
+        ///
+        /// A miss is the fixture naming a port that is not declared — never an
+        /// `Any` to assert on, which is what an unresolvable *chain* resolves to.
+        pub(crate) fn output_type(&self, name: &str, port: usize) -> DataType {
+            let mut types = OutputTypes::default();
+            types.update(&self.graph, &self.library);
+            types
+                .get(OutputPort::new(self.id(name), port))
+                .expect("the fixture names a declared output port")
+                .clone()
+        }
+
+        /// `name`'s event `event_idx`.
+        pub(crate) fn event(&self, name: &str, event_idx: usize) -> EventPort {
+            EventPort::new(self.id(name), event_idx)
+        }
+
+        /// This fixture lowered, as an install or a message carries it.
+        pub(crate) fn program(&self) -> Arc<CompiledGraph> {
+            Arc::new(self.compile().program)
+        }
+
+        /// Lower this fixture, keeping the names. Panics on a compile error —
+        /// for the tests where the refusal *is* the subject, see
+        /// [`try_compile`](Self::try_compile).
+        pub(crate) fn compile(&self) -> Compiled {
+            self.try_compile().expect("the fixture graph compiles")
+        }
+
+        pub(crate) fn try_compile(&self) -> Result<Compiled, CompileError> {
+            Ok(Compiled::new(
+                Compiler::default().compile(&self.graph, &self.library)?,
+                self.ids.clone(),
+            ))
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests;

@@ -174,7 +174,6 @@ fn bench_elliptical_convolve_1k(b: ::quickbench::Bencher) {
         .channel(0)
         .clone();
     let mut output = Buffer2::new_default(1024, 1024);
-    let mut temp = Buffer2::new_default(1024, 1024);
     let sigma = 2.0;
     let axis_ratio = 0.7;
     let angle = 0.5;
@@ -186,7 +185,6 @@ fn bench_elliptical_convolve_1k(b: ::quickbench::Bencher) {
             black_box(axis_ratio),
             black_box(angle),
             black_box(&mut output),
-            black_box(&mut temp),
         );
     });
 }
@@ -217,7 +215,6 @@ fn bench_elliptical_vs_circular_1k(b: ::quickbench::Bencher) {
             black_box(0.7),
             black_box(0.5),
             black_box(&mut output),
-            black_box(&mut temp),
         );
     });
 }
@@ -228,22 +225,18 @@ fn bench_matched_filter_1k(b: ::quickbench::Bencher) {
         .image
         .channel(0)
         .clone();
-    let background = Buffer2::new_filled(1024, 1024, 0.1);
     let mut output = Buffer2::new_default(1024, 1024);
-    let mut scratch = Buffer2::new_default(1024, 1024);
     let mut temp = Buffer2::new_default(1024, 1024);
     let fwhm = 4.0;
 
     b.bench_labeled("circular", || {
         matched_filter(
             black_box(&pixels),
-            black_box(&background),
             black_box(fwhm),
             black_box(1.0),
             black_box(0.0),
             black_box(&mut MatchedFilterBuffers {
                 output: &mut output,
-                subtraction_scratch: &mut scratch,
                 temp: &mut temp,
             }),
         );
@@ -252,13 +245,11 @@ fn bench_matched_filter_1k(b: ::quickbench::Bencher) {
     b.bench_labeled("elliptical", || {
         matched_filter(
             black_box(&pixels),
-            black_box(&background),
             black_box(fwhm),
             black_box(0.7),
             black_box(0.5),
             black_box(&mut MatchedFilterBuffers {
                 output: &mut output,
-                subtraction_scratch: &mut scratch,
                 temp: &mut temp,
             }),
         );
@@ -271,22 +262,18 @@ fn bench_matched_filter_4k(b: ::quickbench::Bencher) {
         .image
         .channel(0)
         .clone();
-    let background = Buffer2::new_filled(4096, 4096, 0.1);
     let mut output = Buffer2::new_default(4096, 4096);
-    let mut scratch = Buffer2::new_default(4096, 4096);
     let mut temp = Buffer2::new_default(4096, 4096);
     let fwhm = 4.0;
 
     b.bench(|| {
         matched_filter(
             black_box(&pixels),
-            black_box(&background),
             black_box(fwhm),
             black_box(1.0),
             black_box(0.0),
             black_box(&mut MatchedFilterBuffers {
                 output: &mut output,
-                subtraction_scratch: &mut scratch,
                 temp: &mut temp,
             }),
         );

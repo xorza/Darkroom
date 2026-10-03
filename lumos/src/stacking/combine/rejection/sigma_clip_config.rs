@@ -4,7 +4,9 @@ use crate::error::InvalidConfigField;
 use crate::math::statistics::mad_to_sigma;
 use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::stacking::combine::rejection::sigma_bounds::SigmaBounds;
-use crate::stacking::combine::rejection::{begin_rejection, sorted_mad, validate_max_iterations};
+use crate::stacking::combine::rejection::{
+    begin_rejection, sorted_mad, sorted_median, validate_max_iterations,
+};
 
 /// Configuration for sigma clipping.
 ///
@@ -30,7 +32,7 @@ impl Default for SigmaClipConfig {
 
 impl SigmaClipConfig {
     /// Create symmetric sigma clipping (same threshold for low and high).
-    pub fn new(sigma: f32, max_iterations: u32) -> Self {
+    pub const fn new(sigma: f32, max_iterations: u32) -> Self {
         Self {
             sigma: SigmaBounds::symmetric(sigma),
             max_iterations,
@@ -38,7 +40,7 @@ impl SigmaClipConfig {
     }
 
     /// Create asymmetric sigma clipping with separate low/high thresholds.
-    pub fn new_asymmetric(sigma_low: f32, sigma_high: f32, max_iterations: u32) -> Self {
+    pub const fn new_asymmetric(sigma_low: f32, sigma_high: f32, max_iterations: u32) -> Self {
         Self {
             sigma: SigmaBounds::asymmetric(sigma_low, sigma_high),
             max_iterations,
@@ -102,7 +104,7 @@ impl SigmaClipConfig {
                 break;
             }
 
-            let center = active[len / 2];
+            let center = sorted_median(active);
             let sigma = mad_to_sigma(sorted_mad(active, center));
 
             if sigma < f32::EPSILON {
@@ -155,8 +157,8 @@ impl SigmaClipConfig {
         let mut min1 = f32::MAX;
         let mut max1 = f32::MIN;
         for &v in values {
-            sum += v as f64;
-            sum_sq += (v as f64) * (v as f64);
+            sum += f64::from(v);
+            sum_sq += f64::from(v) * f64::from(v);
             if v < min1 {
                 min1 = v;
             }
@@ -164,7 +166,7 @@ impl SigmaClipConfig {
                 max1 = v;
             }
         }
-        let (min1, max1) = (min1 as f64, max1 as f64);
+        let (min1, max1) = (f64::from(min1), f64::from(max1));
 
         // Trimmed mean and variance: exclude the single most extreme min and max
         let trimmed_n = (n - 2) as f64;
@@ -174,7 +176,7 @@ impl SigmaClipConfig {
         // Var = E[X²] - E[X]² with Bessel's correction
         let variance = (trimmed_sum_sq - trimmed_sum * trimmed_sum / trimmed_n) / (trimmed_n - 1.0);
 
-        if variance < f32::EPSILON as f64 {
+        if variance < f64::from(f32::EPSILON) {
             // Trimmed data is constant. The full path would compute MAD=0, sigma=0
             // and break without rejecting. Early exit matches that behavior.
             return true;
@@ -184,6 +186,6 @@ impl SigmaClipConfig {
 
         // Check: can any value exceed the threshold from the trimmed center?
         let max_dev = (max1 - trimmed_mean).abs().max((min1 - trimmed_mean).abs());
-        max_dev <= min_sigma_k as f64 * stddev
+        max_dev <= f64::from(min_sigma_k) * stddev
     }
 }

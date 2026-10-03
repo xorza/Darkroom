@@ -12,17 +12,11 @@ use crate::error::InvalidConfigField;
 use crate::image_ops::error::OpError;
 use crate::io::image::linear::LinearImage;
 use crate::math::statistics::ClippedStats;
-
-#[cfg(test)]
-mod tests;
+use crate::math::statistics::subsample::{MAX_STATISTIC_SAMPLES, Subsample};
 
 /// Sigma-clip parameters for the robust per-channel background estimate (rejects stars/nebula).
 const BACKGROUND_KAPPA: f32 = 2.5;
 const BACKGROUND_ITERATIONS: usize = 5;
-/// Cap on the per-channel sample size for the background estimate (uniform stride for larger
-/// channels, matching `defect_map`'s `MAX_MEDIAN_SAMPLES`). A robust background median converges
-/// well below this; small images stay exact (stride 1).
-const MAX_BACKGROUND_SAMPLES: usize = 1_000_000;
 
 /// Neutralize the per-channel sky background so the background is a neutral gray (R=G=B).
 ///
@@ -56,9 +50,8 @@ impl NeutralizeBackground {
     }
 }
 
-/// Per-channel sigma-clipped median background of an RGB image. Used by
-/// [`NeutralizeBackground::apply`] and the colour-calibration tests/fixtures.
-pub(crate) fn channel_backgrounds(image: &LinearImage) -> Rgb {
+/// Per-channel sigma-clipped median background of an RGB image.
+fn channel_backgrounds(image: &LinearImage) -> Rgb {
     let mut scratch = Vec::new();
     Rgb {
         r: channel_background(image.channel(0), &mut scratch),
@@ -67,11 +60,11 @@ pub(crate) fn channel_backgrounds(image: &LinearImage) -> Rgb {
     }
 }
 
-/// One channel's robust (sigma-clipped median) background: subsample the plane at a uniform stride
-/// capped at `MAX_BACKGROUND_SAMPLES` (exact for small images) and take its sigma-clipped median.
+/// One channel's robust (sigma-clipped median) background, from a [`Subsample`] of the plane.
 fn channel_background(plane: &[f32], scratch: &mut Vec<f32>) -> f32 {
-    let stride = (plane.len() / MAX_BACKGROUND_SAMPLES).max(1);
-    let mut s: Vec<f32> = plane.iter().step_by(stride).copied().collect();
+    let mut s: Vec<f32> = Subsample::new(plane.len(), MAX_STATISTIC_SAMPLES)
+        .of(plane)
+        .collect();
     ClippedStats::sigma_clipped(&mut s, scratch, BACKGROUND_KAPPA, BACKGROUND_ITERATIONS).median
 }
 
@@ -98,7 +91,7 @@ impl Default for Scnr {
 impl Scnr {
     /// Average Neutral: `G' = min(G, (R+B)/2)` — a full-strength clamp of green to the red/blue
     /// average. The default.
-    pub fn average_neutral() -> Self {
+    pub const fn average_neutral() -> Self {
         Self {
             method: ScnrMethod::AverageNeutral,
         }
@@ -107,7 +100,7 @@ impl Scnr {
     /// Additive Mask with blend `amount` ∈ `[0,1]` (0 = no change, 1 = full strength): attenuates
     /// rather than clamps, so genuine teal (OIII planetary nebulae) survives. `m = min(1, R+B)`,
     /// `G' = G·(1−amount)·(1−m) + m·G`.
-    pub fn additive_mask(amount: f32) -> Self {
+    pub const fn additive_mask(amount: f32) -> Self {
         Self {
             method: ScnrMethod::AdditiveMask { amount },
         }
@@ -130,7 +123,7 @@ impl Scnr {
         Ok(())
     }
 
-    fn validate(&self) -> Result<(), InvalidConfigField> {
+    fn validate(self) -> Result<(), InvalidConfigField> {
         if let ScnrMethod::AdditiveMask { amount } = self.method {
             InvalidConfigField::finite("SCNR amount", "finite and in [0, 1]", amount, |value| {
                 (0.0..=1.0).contains(&value)
@@ -141,10 +134,10 @@ impl Scnr {
 }
 
 /// Average Neutral: clamp green to the red/blue average.
-fn scnr_average_neutral(px: Rgb) -> Rgb {
+const fn scnr_average_neutral(px: Rgb) -> Rgb {
     Rgb {
         r: px.r,
-        g: px.g.min(0.5 * (px.r + px.b)),
+        g: px.g.min(f32::midpoint(px.r, px.b)),
         b: px.b,
     }
 }
@@ -158,3 +151,6 @@ fn scnr_additive_mask(px: Rgb, amount: f32) -> Rgb {
         b: px.b,
     }
 }
+
+#[cfg(test)]
+mod tests;

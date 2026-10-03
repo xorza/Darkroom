@@ -1,15 +1,26 @@
+use crate::testing::synthetic::backgrounds::Vignette;
 use crate::testing::synthetic::camera::{BiasField, FlatField, SensorDefects};
 use crate::testing::synthetic::metrics::pixel_stats;
 use crate::testing::synthetic::observe::*;
-use crate::testing::synthetic::scene::{BackgroundField, Scene};
+use crate::testing::synthetic::scene::BackgroundField;
 
-fn argmax_xy(pixels: &[f32], width: usize) -> (usize, usize) {
+/// Where the brightest pixel is.
+#[derive(Debug)]
+struct Peak {
+    x: usize,
+    y: usize,
+}
+
+fn argmax_xy(pixels: &[f32], width: usize) -> Peak {
     let (i, _) = pixels
         .iter()
         .enumerate()
         .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
         .unwrap();
-    (i % width, i / width)
+    Peak {
+        x: i % width,
+        y: i / width,
+    }
 }
 
 #[test]
@@ -44,7 +55,7 @@ fn source_lands_at_transformed_position() {
     };
     let frame = render(&scene, &Camera::ideal(3.0), &obs);
     assert_eq!(frame.truth.sources[0].pos, DVec2::new(25.0, 17.0));
-    let (px, py) = argmax_xy(frame.image.channel(0).pixels(), 64);
+    let Peak { x: px, y: py } = argmax_xy(frame.image.channel(0).pixels(), 64);
     assert_eq!((px, py), (25, 17));
 }
 
@@ -71,7 +82,11 @@ fn flat_applied_to_clean_truth() {
     };
     let camera = Camera {
         flat: FlatField {
-            vignette: Some((1.0, 0.5, 2.0)),
+            vignette: Some(Vignette {
+                center: 1.0,
+                edge: 0.5,
+                falloff: 2.0,
+            }),
             channel_gain: [1.0; 3],
         },
         ..Camera::ideal(3.0)
@@ -114,15 +129,17 @@ fn dither_shifts_peak() {
         5.0,
         BackgroundField::Uniform { level: 0.0 },
     );
-    let frames = observe_dithered(
-        &scene,
-        &Camera::ideal(3.0),
-        &[DVec2::new(0.0, 0.0), DVec2::new(8.0, 0.0)],
-        1.0,
-        1,
-    );
-    let (x0, _) = argmax_xy(frames[0].image.channel(0).pixels(), 64);
-    let (x1, _) = argmax_xy(frames[1].image.channel(0).pixels(), 64);
+    let frame = |dx: f64| {
+        let obs = Observation {
+            transform: Transform::translation(DVec2::new(dx, 0.0)),
+            exposure_s: 1.0,
+            seeing_scale: 1.0,
+            seed: 1,
+        };
+        render(&scene, &Camera::ideal(3.0), &obs)
+    };
+    let Peak { x: x0, .. } = argmax_xy(frame(0.0).image.channel(0).pixels(), 64);
+    let Peak { x: x1, .. } = argmax_xy(frame(8.0).image.channel(0).pixels(), 64);
     assert_eq!(x0, 20);
     assert_eq!(x1, 28);
 }
@@ -132,7 +149,7 @@ fn bias_and_defects_applied() {
     let scene = Scene {
         size: Size2us::new(32, 32),
         sources: vec![],
-        background: BackgroundField::Uniform { level: 0.0 },
+        background: BackgroundField::Uniform { level: 0.2 },
     };
     let camera = Camera {
         bias: BiasField {
@@ -147,12 +164,11 @@ fn bias_and_defects_applied() {
     };
     let frame = render(&scene, &camera, &Observation::reference(1));
     let px = frame.image.channel(0).pixels();
-    // Ordinary pixel = bias only.
-    assert!((px[0] - 0.05).abs() < 1e-6);
-    // Hot pixel = bias + excess.
-    assert!((px[10 * 32 + 10] - 0.55).abs() < 1e-6);
-    // Dead pixel forced low (applied after bias).
-    assert_eq!(px[5 * 32 + 5], 0.0);
+    // Ordinary pixel = signal + bias; hot pixel adds its excess; a dead pixel has no signal, so it
+    // reads the bias alone. The ideal camera's flat is 1, so each sum is these f32 additions.
+    assert_eq!(px[0], 0.2 + 0.05);
+    assert_eq!(px[10 * 32 + 10], 0.2 + 0.05 + 0.5);
+    assert_eq!(px[5 * 32 + 5], 0.05);
 }
 
 #[test]

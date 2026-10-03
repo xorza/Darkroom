@@ -8,11 +8,11 @@
 use std::f64::consts::PI;
 
 use crate::math::size2us::Size2us;
-use crate::testing::TestRng;
 use crate::testing::synthetic::backgrounds::{
-    NebulaConfig, add_gradient_background, add_nebula_background, add_uniform_background,
+    NebulaConfig, Vignette, add_gradient_background, add_nebula_background, add_uniform_background,
     add_vignette_background,
 };
+use crate::testing::test_rng::TestRng;
 use glam::DVec2;
 
 /// A true point source (star) in sky coordinates. Its on-sensor shape comes entirely from
@@ -29,19 +29,9 @@ pub(crate) struct TrueSource {
 /// normalized units. Delegates to the existing `backgrounds` generators.
 #[derive(Debug, Clone)]
 pub(crate) enum BackgroundField {
-    Uniform {
-        level: f32,
-    },
-    Gradient {
-        start: f32,
-        end: f32,
-        angle: f32,
-    },
-    Vignette {
-        center: f32,
-        edge: f32,
-        falloff: f32,
-    },
+    Uniform { level: f32 },
+    Gradient { start: f32, end: f32, angle: f32 },
+    Vignette(Vignette),
     Nebula(NebulaConfig),
 }
 
@@ -52,13 +42,11 @@ impl BackgroundField {
         match self {
             BackgroundField::Uniform { level } => add_uniform_background(&mut pixels, *level),
             BackgroundField::Gradient { start, end, angle } => {
-                add_gradient_background(&mut pixels, size, *start, *end, *angle)
+                add_gradient_background(&mut pixels, size, *start, *end, *angle);
             }
-            BackgroundField::Vignette {
-                center,
-                edge,
-                falloff,
-            } => add_vignette_background(&mut pixels, size, *center, *edge, *falloff),
+            BackgroundField::Vignette(vignette) => {
+                add_vignette_background(&mut pixels, size, *vignette);
+            }
             BackgroundField::Nebula(cfg) => add_nebula_background(&mut pixels, size, cfg),
         }
         pixels
@@ -83,7 +71,7 @@ impl LogUniformFlux {
         }
     }
 
-    fn sample(&self, rng: &mut TestRng) -> f32 {
+    fn sample(self, rng: &mut TestRng) -> f32 {
         (self.log_min + rng.next_f32() * (self.log_max - self.log_min)).exp()
     }
 }
@@ -146,6 +134,10 @@ impl Scene {
     /// A centrally-concentrated field: most sources packed into a Gaussian core, the rest a
     /// sparse halo — a crowded cluster for deblend/labeling stress. Fluxes are log-uniform in
     /// `flux_range`; deterministic in `seed`.
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "synthetic fixtures are small images with non-negative coordinates"
+    )]
     pub(crate) fn cluster(
         size: Size2us,
         count: usize,
@@ -165,8 +157,8 @@ impl Scene {
             let pos = if i < core_count {
                 // Rejection-sample a central Gaussian back into bounds.
                 loop {
-                    let x = cx + rng.next_gaussian_f32() as f64 * core_sigma;
-                    let y = cy + rng.next_gaussian_f32() as f64 * core_sigma;
+                    let x = cx + f64::from(rng.next_gaussian_f32()) * core_sigma;
+                    let y = cy + f64::from(rng.next_gaussian_f32()) * core_sigma;
                     if x >= margin
                         && x < size.width as f64 - margin
                         && y >= margin
@@ -192,11 +184,6 @@ impl Scene {
             background,
         }
     }
-
-    /// True source positions as a catalog (for matching against detector output).
-    fn positions(&self) -> Vec<DVec2> {
-        self.sources.iter().map(|s| s.pos).collect()
-    }
 }
 
 #[cfg(test)]
@@ -204,25 +191,21 @@ mod tests {
     use crate::testing::synthetic::metrics::pixel_stats;
     use crate::testing::synthetic::scene::*;
 
+    /// The scene renders each background through its generator, so a uniform level is that
+    /// level exactly and a gradient reaches both end levels exactly.
     #[test]
-    fn uniform_background_renders_constant() {
-        let bg = BackgroundField::Uniform { level: 0.1 };
-        let buf = bg.render(Size2us::new(32, 16));
+    fn backgrounds_render_their_levels() {
+        let buf = BackgroundField::Uniform { level: 0.25 }.render(Size2us::new(32, 16));
         assert_eq!(buf.len(), 32 * 16);
-        assert!(buf.iter().all(|&p| (p - 0.1).abs() < 1e-6));
-    }
+        assert!(buf.iter().all(|&p| p == 0.25));
 
-    #[test]
-    fn gradient_background_spans_endpoints() {
-        // Horizontal 0→1 gradient: left edge ≈ 0, right edge ≈ 1.
         let bg = BackgroundField::Gradient {
             start: 0.0,
             end: 1.0,
             angle: 0.0,
         };
         let buf = bg.render(Size2us::new(64, 4));
-        assert!(buf[0] < 0.05, "left {}", buf[0]);
-        assert!(buf[63] > 0.95, "right {}", buf[63]);
+        assert_eq!((buf[0], buf[63], buf[64], buf[127]), (0.0, 1.0, 0.0, 1.0));
     }
 
     #[test]
@@ -259,7 +242,7 @@ mod tests {
             BackgroundField::Uniform { level: 0.0 },
         );
         assert_eq!(scene.sources.len(), 1);
-        assert_eq!(scene.positions(), vec![DVec2::new(32.0, 32.0)]);
+        assert_eq!(scene.sources[0].pos, DVec2::new(32.0, 32.0));
         // Empty-sky background really is empty.
         assert_eq!(
             pixel_stats(&scene.background.render(Size2us::new(64, 64))).mean,
@@ -287,8 +270,8 @@ mod tests {
             .iter()
             .filter(|s| ((s.pos.x - cx).powi(2) + (s.pos.y - cy).powi(2)).sqrt() < r)
             .count();
-        // A uniform field would put only ~π r² / (size.width·size.height) ≈ 4.5% in that disk; clustering must
-        // pack far more (the 80% core inside ~1σ ⇒ well over a third).
+        // A uniform field would put only ~π r² / (size.width·size.height) ≈ 4.5% in that disk;
+        // clustering must pack far more (the 80% core inside ~1σ ⇒ well over a third).
         let uniform_expectation = 500.0 * PI * r * r / (size.pixel_count()) as f64;
         assert!(
             central as f64 > uniform_expectation * 4.0 && central > 150,

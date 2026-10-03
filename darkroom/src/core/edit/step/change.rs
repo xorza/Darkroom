@@ -19,7 +19,7 @@ pub(crate) struct Change<T> {
 
 impl<T> Change<T> {
     /// The half `dir` writes.
-    pub(super) fn half(&self, dir: Direction) -> &T {
+    pub(super) const fn half(&self, dir: Direction) -> &T {
         match dir {
             Direction::Forward => &self.to,
             Direction::Backward => &self.from,
@@ -50,7 +50,7 @@ impl Direction {
     /// The direction that undoes this one — so
     /// [`Change::half`] of it is the half being overwritten, which is what a
     /// destructive write checks itself against.
-    pub(super) fn reversed(self) -> Self {
+    pub(super) const fn reversed(self) -> Self {
         match self {
             Self::Forward => Self::Backward,
             Self::Backward => Self::Forward,

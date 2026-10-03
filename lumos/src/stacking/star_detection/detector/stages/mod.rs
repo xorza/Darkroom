@@ -4,7 +4,7 @@
 //! management contained within.
 
 pub(crate) mod detect;
-pub(super) mod filter;
+pub(crate) mod filter;
 pub(crate) mod fwhm;
 pub(super) mod measure;
 pub(crate) mod prepare;

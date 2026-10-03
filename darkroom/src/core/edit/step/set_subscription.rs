@@ -46,4 +46,8 @@ impl Reversible for SetSubscription {
     fn invalidates_cached_geometry(&self) -> bool {
         false
     }
+
+    fn retypes_outputs(&self) -> bool {
+        false
+    }
 }

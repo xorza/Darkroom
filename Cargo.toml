@@ -19,7 +19,7 @@ edition = "2024"
 common = { path = "common" }
 quickbench = { path = "quickbench" }
 scenarium = { path = "scenarium" }
-imaginarium = { path = "imaginarium", features = ["wgpu"] }
+imaginarium = { path = "imaginarium" }
 lens = { path = "lens" }
 lumos = { path = "lumos" }
 palantir = { path = "palantir" }
@@ -55,7 +55,6 @@ syn = { version = "3.0", default-features = false, features = [
 memmap2 = { version = "0.9" }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff"] }
 sysinfo = { version = "0.39" }
-lz4_flex = { version = "0.14", features = ["std"] }
 bitcode = { version = "0.6", features = ["serde"] }
 blake3 = { version = "1.8" }
 windows-sys = { version = "0.61" }
@@ -103,71 +102,99 @@ debug = false
 incremental = false
 
 
-[profile.dev.package.wgpu]
-opt-level = 3
-[profile.dev.package.wgpu-core]
-opt-level = 3
-[profile.dev.package.wgpu-hal]
-opt-level = 3
-[profile.dev.package.wgpu-types]
-opt-level = 3
-[profile.dev.package.naga]
-opt-level = 3
-[profile.dev.package.gpu-allocator]
-opt-level = 3
-[profile.dev.package.image]
-opt-level = 3
-[profile.dev.package.tiff]
-opt-level = 3
-[profile.dev.package.spirv]
-opt-level = 3
-[profile.dev.package.ash]
-opt-level = 3
-[profile.dev.package.png]
-opt-level = 3
-[profile.dev.package.zune-jpeg]
-opt-level = 3
-[profile.dev.package.nalgebra]
-opt-level = 3
-[profile.dev.package.half]
-opt-level = 3
-[profile.dev.package.miniz_oxide]
-opt-level = 3
-[profile.dev.package.flate2]
-opt-level = 3
-[profile.dev.package.lz4_flex]
-opt-level = 3
-[profile.dev.package.fits-well]
-opt-level = 3
-[profile.dev.package.libraw-rs-sys]
-opt-level = 3
-[profile.dev.package.cosmic-text]
-opt-level = 3
-[profile.dev.package.swash]
-opt-level = 3
-[profile.dev.package.fontdb]
-opt-level = 3
-[profile.dev.package.ttf-parser]
-opt-level = 3
-[profile.dev.package."owned_ttf_parser"]
-opt-level = 3
-[profile.dev.package.font-types]
-opt-level = 3
-[profile.dev.package.read-fonts]
-opt-level = 3
-[profile.dev.package.skrifa]
+[profile.dev.package."*"]
 opt-level = 3
 
+# The submodules edited and debugged most stay unoptimized, like the workspace members. A
+# per-package entry takes precedence over "*".
+[profile.dev.package.palantir]
+opt-level = 0
+[profile.dev.package.imaginarium]
+opt-level = 0
+[profile.dev.package.quickbench]
+opt-level = 0
 
+
+# Warn, not deny: the verification chain runs clippy with `-D warnings`, and a build in the
+# middle of an edit keeps working. Every suppression in code is `#[expect(.., reason = "..")]`.
 [workspace.lints.rust]
-missing_debug_implementations = "deny"
-unreachable_pub = "deny"
+rust_2018_idioms = { level = "warn", priority = -1 }
+elided_lifetimes_in_paths = "warn"
+missing_debug_implementations = "warn"
+redundant_imports = "warn"
+trivial_numeric_casts = "warn"
+unreachable_pub = "warn"
+unused_lifetimes = "warn"
+unused_macro_rules = "warn"
+unused_qualifications = "warn"
 
 [workspace.lints.clippy]
-clone_on_ref_ptr = "deny"
-items_after_test_module = "deny"
+pedantic = { level = "warn", priority = -1 }
+# Documentation is reviewed, not linted, for these.
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+# `assert!(x.is_empty())` reads plainer than a comparison with an empty array.
+assert_is_empty = "allow"
+# `usize -> f32/f64` in numeric code: a hit says nothing unless the value passes 2^24, and the
+# code cannot show that.
+cast_precision_loss = "allow"
+# `f64 -> f32` narrowing is the design of the f32 pipelines.
+cast_possible_truncation = "allow"
+# Math code names things `x`, `y`, `dx`, `dy`, `cx`.
+similar_names = "allow"
+many_single_char_names = "allow"
+# Size is a review question, not a lint.
+too_many_lines = "allow"
+# `#[inline(always)]` on `#[target_feature]` SIMD helpers is deliberate.
+inline_always = "allow"
+# Exact comparison is deliberate: sample-domain scales, sentinels, tests of exact values.
+float_cmp = "allow"
+# Every pointer cast feeds an unaligned load (`_mm_loadu_*`).
+cast_ptr_alignment = "allow"
+absolute_paths = "warn"
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+assigning_clones = "warn"
+cast_lossless = "warn"
+cast_possible_wrap = "warn"
+cast_sign_loss = "warn"
+clone_on_ref_ptr = "warn"
+dbg_macro = "warn"
+decimal_bitwise_operands = "warn"
+default_trait_access = "warn"
+ignore_without_reason = "warn"
+items_after_statements = "warn"
+items_after_test_module = "warn"
+large_stack_arrays = "warn"
+large_types_passed_by_value = "warn"
+let_underscore_must_use = "warn"
+manual_let_else = "warn"
+map_unwrap_or = "warn"
+match_same_arms = "warn"
+match_wildcard_for_single_variants = "warn"
+# `const fn` by default: every fn that can be one is.
+missing_const_for_fn = "warn"
+missing_fields_in_debug = "warn"
+needless_pass_by_value = "warn"
+print_stderr = "warn"
+print_stdout = "warn"
+redundant_closure_for_method_calls = "warn"
+return_self_not_must_use = "warn"
+self_named_module_files = "warn"
+semicolon_if_nothing_returned = "warn"
+should_panic_without_expect = "warn"
+struct_field_names = "warn"
+todo = "warn"
+trivially_copy_pass_by_ref = "warn"
+unnecessary_debug_formatting = "warn"
+unnecessary_wraps = "warn"
+unreadable_literal = "warn"
+unused_result_ok = "warn"
+unused_self = "warn"
+used_underscore_binding = "warn"
 
 [workspace.lints.rustdoc]
-broken_intra_doc_links = "deny"
-private_intra_doc_links = "deny"
-redundant_explicit_links = "deny"
+broken_intra_doc_links = "warn"
+private_intra_doc_links = "warn"
+redundant_explicit_links = "warn"

@@ -1,25 +1,22 @@
-use std::any::Any;
-use std::fmt;
+use std::io;
 use std::io::Cursor;
+use std::io::SeekFrom;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, LazyLock};
 use std::task::{Context, Poll};
 
-use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncSeek, AsyncWrite, AsyncWriteExt as _, ReadBuf};
+use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf};
 
 use crate::data::codec::error::CodecFormatError;
 use crate::execution::cache::digest::Digest;
 use crate::execution::cache::disk_store::format::{
-    BODY_LEN_OFFSET, DESCRIPTOR_LEN, FIXED_LEN, FORMAT_VERSION, MAGIC, PAYLOAD_LEN_OFFSET,
-    covers_outputs, header_len, read, write,
+    BODY_LEN_OFFSET, DESCRIPTOR_LEN, FIXED_LEN, FORMAT_VERSION, PAYLOAD_LEN_OFFSET, covers_outputs,
+    header_len, read, write,
 };
 use crate::graph::func::lambda::OutputDemand;
-use crate::library::{Library, TypeEntry};
-use crate::runtime::context::ContextStore;
-use crate::{CodecError, ConstValue, CustomValue, CustomValueCodec, DynamicValue, TypeId};
-
-static BLOB_TYPE: LazyLock<TypeId> = LazyLock::new(TypeId::unique);
+use crate::library::Library;
+use crate::testing::blob::{Blob, BlobCodec};
+use crate::testing::calls::Calls;
+use crate::{ConstValue, DynamicValue};
 
 /// A demand mask over `output_count` outputs with `produced` marked demanded and the rest
 /// skipped — the shape the run loop hands the decoder.
@@ -42,7 +39,7 @@ where
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         output: &mut ReadBuf<'_>,
-    ) -> Poll<std::io::Result<()>> {
+    ) -> Poll<io::Result<()>> {
         if output.remaining() == 0 {
             return Poll::Ready(Ok(()));
         }
@@ -67,16 +64,16 @@ where
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         bytes: &[u8],
-    ) -> Poll<std::io::Result<usize>> {
+    ) -> Poll<io::Result<usize>> {
         let chunk_len = bytes.len().min(N);
         Pin::new(&mut self.get_mut().0).poll_write(cx, &bytes[..chunk_len])
     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         Pin::new(&mut self.get_mut().0).poll_flush(cx)
     }
 
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         Pin::new(&mut self.get_mut().0).poll_shutdown(cx)
     }
 }
@@ -85,120 +82,81 @@ impl<T, const N: usize> AsyncSeek for ChunkedIo<T, N>
 where
     T: AsyncSeek + Unpin,
 {
-    fn start_seek(self: Pin<&mut Self>, position: std::io::SeekFrom) -> std::io::Result<()> {
+    fn start_seek(self: Pin<&mut Self>, position: SeekFrom) -> io::Result<()> {
         Pin::new(&mut self.get_mut().0).start_seek(position)
     }
 
-    fn poll_complete(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<u64>> {
+    fn poll_complete(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<u64>> {
         Pin::new(&mut self.get_mut().0).poll_complete(cx)
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-struct Blob(Vec<u8>);
-
-impl fmt::Display for Blob {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Blob({} bytes)", self.0.len())
+fn library(version: u32, under_read: bool, decodes: Calls) -> Library {
+    BlobCodec {
+        version,
+        decodes,
+        under_read,
+        ..BlobCodec::default()
     }
-}
-
-impl CustomValue for Blob {
-    fn type_id(&self) -> TypeId {
-        *BLOB_TYPE
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
-        self
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-enum DecodeBehavior {
-    ReadAll,
-    ReadNone,
-}
-
-#[derive(Debug)]
-struct BlobCodec {
-    version: u32,
-    behavior: DecodeBehavior,
-    decode_calls: Arc<AtomicU64>,
-}
-
-#[async_trait::async_trait]
-impl CustomValueCodec for BlobCodec {
-    fn version(&self) -> u32 {
-        self.version
-    }
-
-    async fn encode(
-        &self,
-        value: &dyn CustomValue,
-        writer: &mut (dyn AsyncWrite + Unpin + Send),
-        _ctx: &mut ContextStore,
-    ) -> std::result::Result<(), CodecError> {
-        let blob = value
-            .as_any()
-            .downcast_ref::<Blob>()
-            .expect("BlobCodec is only registered for Blob");
-        writer.write_all(&blob.0).await?;
-        Ok(())
-    }
-
-    async fn decode(
-        &self,
-        reader: &mut (dyn AsyncRead + Unpin + Send),
-        byte_len: u64,
-        _ctx: &mut ContextStore,
-    ) -> std::result::Result<Arc<dyn CustomValue>, CodecError> {
-        self.decode_calls.fetch_add(1, Ordering::SeqCst);
-        let mut bytes = Vec::with_capacity(usize::try_from(byte_len)?);
-        if matches!(self.behavior, DecodeBehavior::ReadAll) {
-            reader.read_to_end(&mut bytes).await?;
-        }
-        Ok(Arc::new(Blob(bytes)))
-    }
-}
-
-fn library(version: u32, behavior: DecodeBehavior, decode_calls: Arc<AtomicU64>) -> Library {
-    let mut library = Library::default();
-    library.register_type(
-        *BLOB_TYPE,
-        TypeEntry::custom_with_codec(
-            "Blob",
-            Arc::new(BlobCodec {
-                version,
-                behavior,
-                decode_calls,
-            }),
-        ),
-    );
-    library
+    .library()
 }
 
 async fn encoded(digest: Digest, outputs: &[DynamicValue], library: &Library) -> Vec<u8> {
     let mut writer = ChunkedIo::<_, 3>(Cursor::new(Vec::new()));
-    write(
-        &mut writer,
-        digest,
-        outputs,
-        &library.codecs(),
-        &mut ContextStore::default(),
-    )
-    .await
-    .unwrap();
+    write(&mut writer, digest, outputs, library.codecs())
+        .await
+        .unwrap();
     writer.0.into_inner()
+}
+
+/// One small blob's exact bytes, written out by hand from the layout rather than from the
+/// format's own constants. They move only when the layout changes on purpose, which must also
+/// bump `FORMAT_VERSION`; any other failure here is accidental drift, which would make every
+/// blob on disk unreadable or, worse, read with the wrong meaning.
+#[tokio::test]
+async fn a_small_blob_has_the_pinned_layout() {
+    let library = library(7, false, Calls::default());
+    let outputs = [
+        DynamicValue::Unbound,
+        DynamicValue::Static(ConstValue::Int(-2)),
+        DynamicValue::Static(ConstValue::String("ab".into())),
+        DynamicValue::from_custom(Blob(vec![10, 11])),
+    ];
+    let bytes = encoded(Digest([0xab; 32]), &outputs, &library).await;
+
+    #[rustfmt::skip]
+    let expected: Vec<u8> = [
+        // Magic, format version 10, the digest, four outputs.
+        &b"SCENBLOB"[..],
+        &[10, 0, 0, 0],
+        &[0xab; 32],
+        &[4, 0, 0, 0],
+        // Body length: 9 (Int) + 11 (String) + 2 (Blob).
+        &[22, 0, 0, 0, 0, 0, 0, 0],
+        // One descriptor per output: tag, three zero bytes, the custom type id (16, little-endian),
+        // its codec version (4), the payload length (8).
+        &[0; 32],
+        &[1, 0, 0, 0], &[0; 16], &[0; 4], &[9, 0, 0, 0, 0, 0, 0, 0],
+        &[1, 0, 0, 0], &[0; 16], &[0; 4], &[11, 0, 0, 0, 0, 0, 0, 0],
+        &[2, 0, 0, 0],
+        // The blob type, 78391861-24da-4368-a3a5-2a6b7a47f112, little-endian.
+        &[0x12, 0xf1, 0x47, 0x7a, 0x6b, 0x2a, 0xa5, 0xa3, 0x68, 0x43, 0xda, 0x24, 0x61, 0x18, 0x39, 0x78],
+        &[7, 0, 0, 0], &[2, 0, 0, 0, 0, 0, 0, 0],
+        // Int: tag 2, -2 as little-endian two's complement.
+        &[2, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
+        // String: tag 4, its byte length, its bytes.
+        &[4, 2, 0, 0, 0, 0, 0, 0, 0, b'a', b'b'],
+        // The custom payload, as the codec wrote it.
+        &[10, 11],
+    ]
+    .concat();
+    assert_eq!(bytes, expected);
 }
 
 #[tokio::test]
 async fn indexed_header_checks_without_body_and_all_values_round_trip() {
-    let calls = Arc::new(AtomicU64::new(0));
-    let library = library(7, DecodeBehavior::ReadAll, Arc::clone(&calls));
+    let calls = Calls::default();
+    let library = library(7, false, calls.clone());
     let digest = Digest([3; 32]);
     let first_blob = (0u8..=255)
         .cycle()
@@ -228,15 +186,6 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
     ];
     let bytes = encoded(digest, &outputs, &library).await;
     let header_len = header_len(outputs.len());
-    assert_eq!(&bytes[..8], MAGIC);
-    assert_eq!(
-        u32::from_le_bytes(bytes[8..12].try_into().unwrap()),
-        FORMAT_VERSION
-    );
-    assert_eq!(
-        u64::from_le_bytes(bytes[48..56].try_into().unwrap()) as usize,
-        bytes.len() - header_len
-    );
 
     let mut header_only = Cursor::new(&bytes[..header_len]);
     assert!(
@@ -245,7 +194,7 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
             bytes.len() as u64,
             digest,
             &outputs,
-            &library.codecs(),
+            library.codecs(),
         )
         .await
         .unwrap()
@@ -257,23 +206,21 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
             &mut Cursor::new(&bytes),
             bytes.len() as u64,
             digest,
-            &library.codecs(),
-            &mut ContextStore::default(),
+            library.codecs(),
             &demand(outputs.len(), &[0]),
         )
         .await
         .unwrap()
         .is_none()
     );
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert_eq!(calls.count(), 0);
 
     let mut reader = ChunkedIo::<_, 2>(Cursor::new(&bytes));
     let restored = read(
         &mut reader,
         bytes.len() as u64,
         digest,
-        &library.codecs(),
-        &mut ContextStore::default(),
+        library.codecs(),
         &demand(outputs.len(), &[]),
     )
     .await
@@ -284,7 +231,7 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
         match (actual, expected) {
             (DynamicValue::Unbound, DynamicValue::Unbound) => {}
             (DynamicValue::Static(actual), DynamicValue::Static(expected)) => {
-                assert_eq!(actual, expected)
+                assert_eq!(actual, expected);
             }
             _ => panic!("restored value kind differs from the encoded value"),
         }
@@ -298,7 +245,7 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
         second_blob
     );
     assert_eq!(restored[11].as_i64(), Some(99));
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(calls.count(), 2);
 }
 
 #[tokio::test]
@@ -308,15 +255,14 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
         DynamicValue::from_custom(Blob(vec![10, 11, 12])),
         DynamicValue::Static(ConstValue::Int(77)),
     ];
-    let calls = Arc::new(AtomicU64::new(0));
-    let complete_library = library(1, DecodeBehavior::ReadAll, Arc::clone(&calls));
+    let calls = Calls::default();
+    let complete_library = library(1, false, calls.clone());
     let bytes = encoded(digest, &outputs, &complete_library).await;
     let restored = read(
         &mut Cursor::new(&bytes),
         bytes.len() as u64,
         digest,
-        &complete_library.codecs(),
-        &mut ContextStore::default(),
+        complete_library.codecs(),
         &demand(outputs.len(), &[]),
     )
     .await
@@ -328,27 +274,26 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
     );
     assert_eq!(restored[1].as_i64(), Some(77));
 
-    let underread_calls = Arc::new(AtomicU64::new(0));
-    let underread_library = library(1, DecodeBehavior::ReadNone, Arc::clone(&underread_calls));
+    let underread_calls = Calls::default();
+    let underread_library = library(1, true, underread_calls.clone());
     let error = read(
         &mut Cursor::new(&bytes),
         bytes.len() as u64,
         digest,
-        &underread_library.codecs(),
-        &mut ContextStore::default(),
+        underread_library.codecs(),
         &demand(outputs.len(), &[]),
     )
     .await
     .unwrap_err();
     assert!(matches!(error, CodecFormatError::Frame(_)));
-    assert_eq!(underread_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(underread_calls.count(), 1);
 }
 
 #[tokio::test]
 async fn descriptors_selectively_validate_codecs_and_coverage() {
     let digest = Digest([5; 32]);
-    let calls = Arc::new(AtomicU64::new(0));
-    let registered = library(2, DecodeBehavior::ReadAll, calls);
+    let calls = Calls::default();
+    let registered = library(2, false, calls);
     let outputs = vec![
         DynamicValue::Static(ConstValue::Int(1)),
         DynamicValue::from_custom(Blob(vec![2])),
@@ -361,7 +306,7 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
             bytes.len() as u64,
             digest,
             &outputs,
-            &registered.codecs(),
+            registered.codecs(),
         )
         .await
         .unwrap()
@@ -376,7 +321,7 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
             bytes.len() as u64,
             digest,
             &partial,
-            &registered.codecs(),
+            registered.codecs(),
         )
         .await
         .unwrap()
@@ -391,26 +336,26 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
             bytes.len() as u64,
             digest,
             &wrong_kind,
-            &registered.codecs(),
+            registered.codecs(),
         )
         .await
         .unwrap()
     );
 
-    let changed_calls = Arc::new(AtomicU64::new(0));
-    let changed = library(3, DecodeBehavior::ReadAll, Arc::clone(&changed_calls));
+    let changed_calls = Calls::default();
+    let changed = library(3, false, changed_calls.clone());
     assert!(
         !covers_outputs(
             &mut Cursor::new(&bytes),
             bytes.len() as u64,
             digest,
             &outputs,
-            &changed.codecs(),
+            changed.codecs(),
         )
         .await
         .unwrap()
     );
-    assert_eq!(changed_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(changed_calls.count(), 0);
 }
 
 #[tokio::test]
@@ -420,42 +365,56 @@ async fn malformed_header_lengths_tags_and_const_values_are_rejected() {
     let library = Library::default();
     let original = encoded(digest, &outputs, &library).await;
 
-    let mut malformed = Vec::new();
-    let mut wrong_magic = original.clone();
-    wrong_magic[0] ^= 0xff;
-    malformed.push(wrong_magic);
-    let mut wrong_version = original.clone();
-    wrong_version[8..12].copy_from_slice(&FORMAT_VERSION.wrapping_add(1).to_le_bytes());
-    malformed.push(wrong_version);
-    let mut reserved = original.clone();
-    reserved[FIXED_LEN + 1] = 1;
-    malformed.push(reserved);
-    let mut unknown_tag = original.clone();
-    unknown_tag[FIXED_LEN] = 9;
-    malformed.push(unknown_tag);
-    let mut wrong_payload_len = original.clone();
+    let corrupt = |edit: &dyn Fn(&mut Vec<u8>)| {
+        let mut bytes = original.clone();
+        edit(&mut bytes);
+        bytes
+    };
     let length_offset = FIXED_LEN + PAYLOAD_LEN_OFFSET as usize;
-    wrong_payload_len[length_offset..length_offset + 8].copy_from_slice(&3u64.to_le_bytes());
-    malformed.push(wrong_payload_len);
-    let mut wrong_body_len = original.clone();
-    wrong_body_len[BODY_LEN_OFFSET as usize..BODY_LEN_OFFSET as usize + 8]
-        .copy_from_slice(&3u64.to_le_bytes());
-    malformed.push(wrong_body_len);
-    let mut trailing = original.clone();
-    trailing.push(0);
-    malformed.push(trailing);
-
-    for bytes in malformed {
+    let body_offset = BODY_LEN_OFFSET as usize;
+    let cases: [(&str, Vec<u8>); 7] = [
+        (
+            "cache header has the wrong magic",
+            corrupt(&|b| b[0] ^= 0xff),
+        ),
+        (
+            "cache header has an unsupported version",
+            corrupt(&|b| b[8..12].copy_from_slice(&FORMAT_VERSION.wrapping_add(1).to_le_bytes())),
+        ),
+        (
+            "cache descriptor reserved bytes are not zero",
+            corrupt(&|b| b[FIXED_LEN + 1] = 1),
+        ),
+        (
+            "cache descriptor has an unknown value tag",
+            corrupt(&|b| b[FIXED_LEN] = 9),
+        ),
+        (
+            "cache descriptor lengths do not equal the declared body length",
+            corrupt(&|b| b[length_offset..length_offset + 8].copy_from_slice(&3u64.to_le_bytes())),
+        ),
+        (
+            "cache header and body lengths do not equal the file length",
+            corrupt(&|b| b[body_offset..body_offset + 8].copy_from_slice(&3u64.to_le_bytes())),
+        ),
+        (
+            "cache header and body lengths do not equal the file length",
+            corrupt(&|b| b.push(0)),
+        ),
+    ];
+    for (refusal, bytes) in cases {
+        let error = covers_outputs(
+            &mut Cursor::new(&bytes),
+            bytes.len() as u64,
+            digest,
+            &outputs,
+            library.codecs(),
+        )
+        .await
+        .unwrap_err();
         assert!(
-            covers_outputs(
-                &mut Cursor::new(&bytes),
-                bytes.len() as u64,
-                digest,
-                &outputs,
-                &library.codecs(),
-            )
-            .await
-            .is_err()
+            matches!(&error, CodecFormatError::Frame(message) if message == refusal),
+            "{refusal}: {error}"
         );
     }
 
@@ -465,8 +424,7 @@ async fn malformed_header_lengths_tags_and_const_values_are_rejected() {
         &mut Cursor::new(&invalid_bool),
         invalid_bool.len() as u64,
         digest,
-        &library.codecs(),
-        &mut ContextStore::default(),
+        library.codecs(),
         &demand(outputs.len(), &[]),
     )
     .await

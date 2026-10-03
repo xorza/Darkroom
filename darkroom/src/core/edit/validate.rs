@@ -13,21 +13,23 @@
 //! `Err`, and that is a bug in whatever raised it — see [`MalformedIntent`].
 //!
 //! Two failure modes motivate the split. Some of these guard *panics*:
-//! `Graph::find` asserts on a nil id, `Graph::insert` panics on a duplicate
-//! one, `Graph::attach_node` asserts that its record is well formed and that
-//! its node is absent. The rest guard *corruption*: state that applies cleanly
-//! and leaves a document `Document::validate` rejects — which, because saving
-//! validates only in debug builds, means a project that writes fine and won't
-//! reopen.
+//! `Graph::insert` panics on a duplicate id, and `Graph::attach_node` on a
+//! node already present. The rest guard *corruption*: state that applies cleanly
+//! and leaves a document `Document::validate` rejects — which saving refuses,
+//! so a project the user can no longer save.
 
 use glam::Vec2;
-use scenarium::{Binding, BindingEntry, Graph, InputPort, Node, NodeId, NodeKind};
+use scenarium::{Binding, BindingEntry, Graph, InputPort, Library, Node, NodeId, NodeKind};
 
 use crate::core::edit::error::MalformedIntent;
 
-/// An id the intent must actually name. Has to come first everywhere:
-/// [`Graph::find`] asserts on a nil id rather than answering `None`.
-pub(super) fn non_nil_node(node_id: NodeId, role: &'static str) -> Result<(), MalformedIntent> {
+/// An id the intent must actually name. A nil id is nothing a widget could
+/// have read out of the document, so it is malformed rather than stale — and
+/// it comes first, because the lookup would read it as merely absent.
+pub(super) const fn non_nil_node(
+    node_id: NodeId,
+    role: &'static str,
+) -> Result<(), MalformedIntent> {
     if node_id.is_nil() {
         return Err(MalformedIntent::NilNodeId { role });
     }
@@ -62,9 +64,10 @@ pub(super) fn fresh_node_id(graph: &Graph, node_id: NodeId) -> Result<(), Malfor
     Ok(())
 }
 
-/// A newly inserted node's kind has to name state the document already holds:
-/// a func the library resolves, or a built-in special.
-pub(super) fn insertable_kind(node: &Node) -> Result<(), MalformedIntent> {
+/// A newly inserted node's kind has to name something: a non-nil func id, or
+/// a built-in special. The func need not resolve — a duplicated stub stays a
+/// stub, as a loaded one does.
+pub(super) const fn insertable_kind(node: &Node) -> Result<(), MalformedIntent> {
     match &node.kind {
         NodeKind::Func(func_id) => {
             if func_id.is_nil() {
@@ -76,26 +79,28 @@ pub(super) fn insertable_kind(node: &Node) -> Result<(), MalformedIntent> {
     Ok(())
 }
 
-/// The bindings riding along with an insertion, normalized into the record
-/// `Graph::attach_node` takes: each one lands on `node_id`, no port twice, in
-/// ascending port order.
+/// The bindings riding along with an insertion: each one an input of the new
+/// node, read from a node the graph holds, never from the new node itself.
 ///
-/// Sorted here rather than demanded of the caller — a widget seeds a node
-/// from its func's declared defaults and has no reason to think about the
-/// order a graph's side tables keep. What sorting cannot fix is refused: a
-/// port belonging to some other node, the same port twice, and a wire the new
-/// node reads from itself.
+/// What an insertion adds to the record's own rules. Order and a port bound
+/// twice are [`DetachedNode::new`](scenarium::DetachedNode::new)'s, which takes
+/// these next.
 pub(super) fn seed_bindings(
     graph: &Graph,
+    library: &Library,
     node_id: NodeId,
-    bindings: Vec<(InputPort, Binding)>,
-) -> Result<Vec<BindingEntry>, MalformedIntent> {
-    let mut entries: Vec<BindingEntry> = Vec::with_capacity(bindings.len());
-    for (port, binding) in bindings {
+    node: &Node,
+    bindings: &[BindingEntry],
+) -> Result<(), MalformedIntent> {
+    for BindingEntry { port, binding } in bindings {
+        let port = *port;
         if port.node_id != node_id {
             return Err(MalformedIntent::ForeignSeedBinding { port });
         }
-        if let Binding::Bind(source) = &binding {
+        if let Binding::Bind(source) = binding {
+            if declares_const_only(node, library, port.port_idx) {
+                return Err(MalformedIntent::WiredConstOnly { port });
+            }
             // The one cycle an insertion can author: nothing reads the new
             // node yet, so the only loop it can close is through itself.
             if source.node_id == node_id {
@@ -105,13 +110,34 @@ pub(super) fn seed_bindings(
             // edge.
             present_node(graph, source.node_id, "binding producer")?;
         }
-        entries.push(BindingEntry { port, binding });
     }
-    entries.sort_unstable_by_key(|entry| entry.port);
-    if let Some(pair) = entries.windows(2).find(|pair| pair[0].port == pair[1].port) {
-        return Err(MalformedIntent::DuplicateSeedBinding { port: pair[0].port });
+    Ok(())
+}
+
+/// An input a wire may land on: not one its func declares const-only. The
+/// canvas's snap filter keeps a wire off such an input, so a bind here is a
+/// widget's bug — and it would fail every compile (`ConstOnlyBinding`).
+/// A node whose func the library lacks declares nothing, so it refuses
+/// nothing either.
+pub(super) fn wirable(
+    graph: &Graph,
+    library: &Library,
+    port: InputPort,
+) -> Result<(), MalformedIntent> {
+    let refuses = graph
+        .find(port.node_id)
+        .is_some_and(|node| declares_const_only(node, library, port.port_idx));
+    if refuses {
+        return Err(MalformedIntent::WiredConstOnly { port });
     }
-    Ok(entries)
+    Ok(())
+}
+
+/// Whether `node`'s func declares input `port_idx` const-only.
+fn declares_const_only(node: &Node, library: &Library, port_idx: usize) -> bool {
+    node.func(library)
+        .and_then(|func| func.inputs.get(port_idx))
+        .is_some_and(|input| input.const_only)
 }
 
 /// A node an insertion's wiring points at. Unlike [`live_node`] a miss is

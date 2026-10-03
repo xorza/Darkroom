@@ -6,9 +6,8 @@ use crate::image_ops::rgb::Rgb;
 use crate::testing::visual;
 
 use crate::image_ops::color_calibration::channel_backgrounds;
-use crate::io::image::linear::LinearImage;
-use crate::io::image::load_context::LoadContext;
-use crate::testing::{calibration_dir, init_tracing};
+use crate::testing::init_tracing;
+use crate::testing::real_data;
 use crate::{NeutralizeBackground, Scnr, Stretch};
 
 fn spread(bg: Rgb) -> f32 {
@@ -16,17 +15,13 @@ fn spread(bg: Rgb) -> f32 {
 }
 
 #[test]
-#[ignore = "real-data image-processing test; run explicitly with --ignored"]
 fn neutralize_then_stretch_removes_green() {
     init_tracing();
 
-    let image = LinearImage::from_file(
-        calibration_dir().join("stacked_light.tiff"),
-        &LoadContext::default(),
-    )
-    .expect("load");
+    let image = real_data::linear_master();
 
-    // The raw OSC stack has a colored (green-elevated) background: the per-channel backgrounds differ.
+    // The raw OSC stack has a colored (green-elevated) background: the per-channel backgrounds
+    // differ.
     let before = channel_backgrounds(&image);
     let spread_before = spread(before);
     eprintln!(
@@ -57,14 +52,14 @@ fn neutralize_then_stretch_removes_green() {
     );
 
     // Neutralized → stretch → save (compare against the un-neutralized green stretch from
-    // `stretching::real_data_tests`).
+    // `stretching::tests::real_data`).
     Stretch::auto_stf().apply(&mut img).unwrap();
-    visual::save_linear(&img, "color/stacked_light_neutralized_stf.png");
+    visual::save_linear(&img, "color/stacked_light_neutralized_stf");
 
     // Post-stretch Average-Neutral SCNR cleans any residual green left after neutralization.
     Scnr::average_neutral().apply(&mut img).unwrap();
-    visual::save_linear(&img, "color/stacked_light_neutralized_scnr.png");
+    visual::save_linear(&img, "color/stacked_light_neutralized_scnr");
 
     NeutralizeBackground.apply(&mut img).unwrap();
-    visual::save_linear(&img, "color/stacked_light_neutralized_scnr_renorm.png");
+    visual::save_linear(&img, "color/stacked_light_neutralized_scnr_renorm");
 }

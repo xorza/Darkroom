@@ -3,16 +3,16 @@
 pub(crate) mod error;
 
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::sync::Arc;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::data::codec::error::CodecError;
-use crate::runtime::context::ContextStore;
 use crate::{CustomValue, TypeId};
 
 #[async_trait::async_trait]
-pub trait CustomValueCodec: Send + Sync + std::fmt::Debug {
+pub trait CustomValueCodec: Send + Sync + Debug {
     /// Version of this codec's persisted representation. Increment it whenever
     /// previously encoded bytes must not be decoded by the current implementation.
     fn version(&self) -> u32;
@@ -21,27 +21,29 @@ pub trait CustomValueCodec: Send + Sync + std::fmt::Debug {
         &self,
         value: &dyn CustomValue,
         writer: &mut (dyn AsyncWrite + Unpin + Send),
-        ctx: &mut ContextStore,
-    ) -> std::result::Result<(), CodecError>;
+    ) -> Result<(), CodecError>;
 
     async fn decode(
         &self,
         reader: &mut (dyn AsyncRead + Unpin + Send),
         byte_len: u64,
-        ctx: &mut ContextStore,
-    ) -> std::result::Result<Arc<dyn CustomValue>, CodecError>;
+    ) -> Result<Arc<dyn CustomValue>, CodecError>;
 }
 
-/// The codec registry the disk store retains: `TypeId → codec`, extracted from
-/// the [`Library`](crate::library::Library) at store construction so cache I/O
-/// doesn't hold the whole registry (funcs, shared graphs, editor metadata).
+/// The disk codecs by type: kept by the [`Library`](crate::library::Library) as
+/// types register, and shared with every program compiled from it, so cache
+/// I/O reads the codecs of the program it serves.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Codecs {
-    pub(crate) by_type: HashMap<TypeId, Arc<dyn CustomValueCodec>>,
+    by_type: HashMap<TypeId, Arc<dyn CustomValueCodec>>,
 }
 
 impl Codecs {
     pub(crate) fn get(&self, type_id: TypeId) -> Option<&dyn CustomValueCodec> {
         self.by_type.get(&type_id).map(Arc::as_ref)
+    }
+
+    pub(crate) fn insert(&mut self, type_id: TypeId, codec: Arc<dyn CustomValueCodec>) {
+        self.by_type.insert(type_id, codec);
     }
 }

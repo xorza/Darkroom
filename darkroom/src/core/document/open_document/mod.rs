@@ -7,21 +7,22 @@
 //! that true — the two are one unit, replaced together when a different file
 //! is opened.
 
-pub(crate) mod replay_outcome;
-
+use std::path;
 use std::path::{Path, PathBuf};
 
 use crate::core::document::Document;
-use crate::core::document::open_document::replay_outcome::ReplayOutcome;
+use crate::core::document::graph_revision::GraphRevision;
 use crate::core::edit::action_stack::ActionStack;
+use crate::core::edit::document_queue::DocumentQueue;
+use crate::core::edit::document_request::DocumentRequest;
 use crate::core::edit::error::MalformedIntent;
 use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::edit::relayout::Relayout;
 use crate::core::edit::step::undo_step::UndoStep;
 use crate::core::io::document::{self, DocumentLoadError, DocumentSaveError};
 use crate::core::io::preferences::Preferences;
-use crate::core::status::StatusLog;
-use crate::gui::relayout::Relayout;
-use crate::gui::requests::{DocumentRequest, Requests};
+use crate::core::status::{StatusFamily, StatusLog};
+use scenarium::Library;
 
 /// Byte budget for the undo history's packed buffer (~1 MiB). Bounds
 /// memory rather than entry count — a single large edit can't be
@@ -39,12 +40,14 @@ const UNDO_HISTORY_BYTES: usize = 1 << 20;
 struct StepSignals {
     geometry_stale: bool,
     dirtied: bool,
+    retyped: bool,
 }
 
 impl StepSignals {
     fn fold(&mut self, step: &UndoStep) {
         self.geometry_stale |= step.invalidates_cached_geometry();
         self.dirtied |= step.dirties_document();
+        self.retyped |= step.retypes_outputs();
     }
 }
 
@@ -52,21 +55,26 @@ impl StepSignals {
 pub(crate) struct OpenDocument {
     pub(crate) document: Document,
     pub(crate) path: Option<PathBuf>,
-    /// Whether `document` differs from what is at `path` — the pair that
-    /// gives the flag its meaning, which is why it lives here rather than on
-    /// a frontend. Set by any content-changing edit (new edits, undo/redo
-    /// replay, direct graph mutations), cleared by [`Self::save_to`]. Pure
-    /// navigation (camera, selection, pane arrangement) leaves it alone; see
+    /// Whether `document` differs from what is at `path` — the pair that gives the flag its
+    /// meaning, which is why it lives here rather than on a frontend. Set by any content-changing
+    /// edit (new edits, undo/redo replay, direct graph mutations), cleared by [`Self::save_to`].
+    /// Pure navigation (camera, selection, pane arrangement) leaves it alone; see
     /// [`UndoStep::dirties_document`](crate::core::edit::step::undo_step::UndoStep::dirties_document).
     ///
     /// It can read "dirty" after an undo returns the document to its saved
     /// state — the safe direction (prompt rather than silently discard).
     pub(crate) dirty: bool,
+    /// The state of the graph its output types are resolved from; moved by
+    /// every edit, undo or redo that can retype an output.
+    revision: GraphRevision,
     /// This document's undo history. Beside the document rather than on a
     /// frontend because it *is* document state — opening another file
     /// replaces the pair, and no UI can outlive one and inherit the other's
     /// history.
     history: ActionStack,
+    /// The steps of the batch [`Self::commit`] is recording, kept so a frame's
+    /// edits allocate no list once it has grown. Empty between commits.
+    batch: Vec<UndoStep>,
 }
 
 impl Default for OpenDocument {
@@ -78,7 +86,9 @@ impl Default for OpenDocument {
             document: Document::default(),
             path: None,
             dirty: false,
+            revision: GraphRevision::fresh(),
             history: ActionStack::new(UNDO_HISTORY_BYTES),
+            batch: Vec::new(),
         }
     }
 }
@@ -89,8 +99,8 @@ impl OpenDocument {
     /// after the record. No-ops (and self-cancelling steps) are dropped, like
     /// the in-frame drain.
     #[must_use]
-    pub(crate) fn apply_edit(&mut self, intent: GraphIntent) -> Relayout {
-        self.commit([DocumentRequest::Graph(intent)])
+    pub(crate) fn apply_edit(&mut self, intent: GraphIntent, library: &Library) -> Relayout {
+        self.commit([DocumentRequest::Graph(intent)], library)
             .expect("a widget built a malformed intent")
     }
 
@@ -109,12 +119,16 @@ impl OpenDocument {
     /// on screen, and an edit applied outside a frame (a dialog result) has no
     /// business acting on it.
     #[must_use]
-    pub(crate) fn drain_requests(&mut self, requests: &mut Requests) -> Relayout {
+    pub(crate) fn drain_requests(
+        &mut self,
+        requests: &mut DocumentQueue,
+        library: &Library,
+    ) -> Relayout {
         // Usually nothing is queued, and the commit is what allocates.
         let relayout = if requests.is_empty() {
             Relayout::NotNeeded
         } else {
-            self.commit(requests.drain_document())
+            self.commit(requests.drain(), library)
                 .expect("a widget built a malformed intent")
         };
         // A tab whose node is gone can't stay open. Cheap when nothing died —
@@ -141,8 +155,9 @@ impl OpenDocument {
     /// this has to stage the batch first.
     ///
     /// No-op and stale intents are dropped per-intent, and an empty batch
-    /// records nothing. A *run* of intents becomes one undo entry, so a
-    /// gesture that emits N of them is still one Ctrl+Z.
+    /// records nothing. A *run* of intents becomes one undo entry, and a batch
+    /// that is one frame of a held gesture folds into that gesture's entry, so
+    /// a drag held for N frames is still one Ctrl+Z.
     ///
     /// Returns whether the batch stranded the canvas's cached geometry. The
     /// batch's other outcome — a dirtied document — is landed here; only the
@@ -150,9 +165,13 @@ impl OpenDocument {
     fn commit(
         &mut self,
         queued: impl IntoIterator<Item = DocumentRequest>,
+        library: &Library,
     ) -> Result<Relayout, MalformedIntent> {
-        let mut batch = Vec::new();
+        debug_assert!(self.batch.is_empty(), "the last commit left steps behind");
         let mut signals = StepSignals::default();
+        // The gesture of the batch's last step; it names the batch only when
+        // that step is the batch's one.
+        let mut gesture = None;
         for item in queued {
             let intent = match item {
                 DocumentRequest::Graph(intent) => intent,
@@ -164,43 +183,43 @@ impl OpenDocument {
                     continue;
                 }
             };
-            let Some(step) = intent.commit(&mut self.document)? else {
-                continue;
+            let frame_of = intent.gesture();
+            let step = match intent.commit(&mut self.document, library) {
+                Ok(Some(step)) => step,
+                Ok(None) => continue,
+                Err(malformed) => {
+                    self.batch.clear();
+                    return Err(malformed);
+                }
             };
             signals.fold(&step);
-            batch.push(step);
+            self.batch.push(step);
+            gesture = frame_of;
         }
-        self.history.push_current(&batch);
-        Ok(self.land(signals))
+        let gesture = gesture.filter(|_| self.batch.len() == 1);
+        self.history.push(&mut self.batch, gesture);
+        Ok(self.land(&signals))
     }
 
-    /// Replay the last entry backwards. Reports whether the canvas's cached
-    /// geometry was stranded; `took` says whether there was an entry at all.
+    /// Replay the last entry backwards, and report whether that stranded the
+    /// canvas's cached geometry. With nothing to undo it is a no-op.
     #[must_use]
-    pub(crate) fn undo(&mut self) -> ReplayOutcome {
+    pub(crate) fn undo(&mut self) -> Relayout {
         // Folded into a value first: the replay callback runs while the
         // history is mutably borrowed, so it cannot touch `self`.
         let mut signals = StepSignals::default();
-        let took = self
-            .history
+        self.history
             .undo(&mut self.document, &mut |step| signals.fold(step));
-        ReplayOutcome {
-            took,
-            relayout: self.land(signals),
-        }
+        self.land(&signals)
     }
 
     /// Replay the next entry forwards — the mirror of [`Self::undo`].
     #[must_use]
-    pub(crate) fn redo(&mut self) -> ReplayOutcome {
+    pub(crate) fn redo(&mut self) -> Relayout {
         let mut signals = StepSignals::default();
-        let took = self
-            .history
+        self.history
             .redo(&mut self.document, &mut |step| signals.fold(step));
-        ReplayOutcome {
-            took,
-            relayout: self.land(signals),
-        }
+        self.land(&signals)
     }
 
     /// Land folded [`StepSignals`]. The one place each signal's *effect* is
@@ -209,17 +228,34 @@ impl OpenDocument {
     /// Returns the one signal whose effect is a *call* rather than a stored
     /// flag, so it has to travel back to whoever holds the `Ui`.
     #[must_use]
-    fn land(&mut self, signals: StepSignals) -> Relayout {
+    fn land(&mut self, signals: &StepSignals) -> Relayout {
         // A content edit (or an undone/redone one) leaves the doc differing
         // from the last save — barring the exact round-trip back to it, where
         // we accept a stale "dirty" rather than tracking saved state
         // precisely.
         self.dirty |= signals.dirtied;
+        if signals.retyped {
+            self.revision = GraphRevision::fresh();
+        }
         Relayout::needed_if(signals.geometry_stale)
     }
 
-    pub(crate) fn load(path: PathBuf) -> Result<Self, DocumentLoadError> {
-        let document = document::load(&path)?;
+    /// The state of the graph that output types are resolved from.
+    pub(crate) const fn graph_revision(&self) -> GraphRevision {
+        self.revision
+    }
+
+    /// Open the document at `path`, holding each func node to the ports it was
+    /// authored against in `library`: a node whose func moved its ports is
+    /// refused by name, rather than loaded with its wiring on the wrong ports.
+    pub(crate) fn load(path: PathBuf, library: &Library) -> Result<Self, DocumentLoadError> {
+        let mut document = document::load(&path)?;
+        if let Err(source) = document.graph.reconcile_signatures(library) {
+            return Err(DocumentLoadError::InvalidDocument {
+                path,
+                source: source.into(),
+            });
+        }
         Ok(Self {
             document,
             path: Some(path),
@@ -229,16 +265,6 @@ impl OpenDocument {
 
     /// The document a launching frontend opens: `argument` when the command
     /// line named a file, otherwise the one `preferences` remembers.
-    pub(crate) fn open_at_launch(
-        argument: Option<PathBuf>,
-        preferences: &mut Preferences,
-        status: &mut StatusLog,
-    ) -> Self {
-        Self::open_at_launch_with(argument, preferences, status, Preferences::save)
-    }
-
-    /// [`Self::open_at_launch`] with the preferences write injected, so a test
-    /// can drive the path where forgetting a bad remembered document fails too.
     ///
     /// A named file outranks the remembered one, reopening preference
     /// included — the user asked for that document by name — and a named file
@@ -246,34 +272,35 @@ impl OpenDocument {
     /// back to the remembered one, which would read as the file having loaded.
     /// Either way it leaves the preferences alone: a command-line document is
     /// this launch's, and saving it is what makes it the remembered one.
-    fn open_at_launch_with(
+    ///
+    /// A remembered document that fails to load is reported to `status` and
+    /// forgotten in `preferences`, so the next launch starts clean instead of
+    /// failing again; persisting that is the caller's.
+    pub(crate) fn open_at_launch(
         argument: Option<PathBuf>,
         preferences: &mut Preferences,
         status: &mut StatusLog,
-        save_preferences: impl FnOnce(&Preferences) -> Result<(), String>,
+        library: &Library,
     ) -> Self {
         let Some(path) = argument else {
-            return Self::load_preferred(preferences, status, save_preferences);
+            return Self::load_preferred(preferences, status, library);
         };
         // Made absolute up front: the argument is relative to the shell's
         // working directory, which the file dialogs' anchor and the worker's
         // disk cache both outlive.
-        let path = std::path::absolute(&path).unwrap_or(path);
-        Self::load(path).unwrap_or_else(|error| {
-            status.error(format!("load failed: {error:#}"));
+        let path = path::absolute(&path).unwrap_or(path);
+        Self::load(path, library).unwrap_or_else(|error| {
+            status.error(StatusFamily::Document, format!("load failed: {error:#}"));
             Self::default()
         })
     }
 
     /// The document `preferences` remembers, or an empty one when there is
-    /// none or reopening is switched off. A failed load is reported to
-    /// `status` and forgets the remembered path, so the next launch starts
-    /// clean instead of failing again — which is why this takes the
-    /// preferences by `&mut` and persists them.
+    /// none or reopening is switched off.
     fn load_preferred(
         preferences: &mut Preferences,
         status: &mut StatusLog,
-        save_preferences: impl FnOnce(&Preferences) -> Result<(), String>,
+        library: &Library,
     ) -> Self {
         let Some(path) = preferences
             .document_path
@@ -282,14 +309,11 @@ impl OpenDocument {
         else {
             return Self::default();
         };
-        match Self::load(path) {
+        match Self::load(path, library) {
             Ok(open) => open,
             Err(error) => {
-                status.error(format!("load failed: {error:#}"));
+                status.error(StatusFamily::Document, format!("load failed: {error:#}"));
                 preferences.document_path = None;
-                if let Err(error) = save_preferences(preferences) {
-                    status.error(error);
-                }
                 Self::default()
             }
         }
@@ -320,6 +344,11 @@ pub(crate) mod internals {
                 document,
                 ..Self::default()
             }
+        }
+
+        /// Whether an undo would take an entry back.
+        pub(crate) fn can_undo(&self) -> bool {
+            self.history.can_undo()
         }
     }
 }

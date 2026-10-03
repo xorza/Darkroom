@@ -79,18 +79,26 @@ fn translation_components_return_the_offset_built_in() {
     assert_close!(tc.y, -3.0, EPSILON);
 }
 
+/// `rotation_angle` and `scale_factor` read a similarity's angle and scale at every scale and every
+/// angle: the scale enters the angle's `atan2` as a common factor and the angle the scale's
+/// `hypot` as `cos² + sin²` — dropping the `c` term would leave `|s·cos θ|`. A few ulps each.
 #[test]
-fn rotation_angle_recovers_the_euclidean_angle() {
-    let angle = 0.5;
-    let t = Transform::euclidean(DVec2::ZERO, angle);
-    assert_close!(t.rotation_angle(), angle, EPSILON);
-}
-
-#[test]
-fn scale_factor_recovers_the_similarity_scale() {
-    let scale = 2.5;
-    let t = Transform::similarity(DVec2::ZERO, 0.0, scale);
-    assert_close!(t.scale_factor(), scale, EPSILON);
+fn rotation_angle_and_scale_factor_at_every_scale_and_angle() {
+    for scale in [0.5, 1.0, 2.5] {
+        for angle in [-2.0, -0.3, 0.0, 0.5, 1.2, 2.5] {
+            let t = Transform::similarity(DVec2::new(3.0, -1.0), angle, scale);
+            assert!(
+                (t.rotation_angle() - angle).abs() <= 4.0 * f64::EPSILON * angle.abs().max(1.0),
+                "θ {angle} at s {scale}: {}",
+                t.rotation_angle()
+            );
+            assert!(
+                (t.scale_factor() - scale).abs() <= 4.0 * f64::EPSILON * scale,
+                "s {scale} at θ {angle}: {}",
+                t.scale_factor()
+            );
+        }
+    }
 }
 
 #[test]
@@ -102,7 +110,8 @@ fn is_valid_rejects_degenerate_and_singular_matrices() {
     let degenerate = Transform::from_matrix(
         DMat3::from_array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]),
         TransformType::Affine,
-    );
+    )
+    .unwrap();
     assert!(!degenerate.is_valid());
 
     // The upper-left 2×2 block is nonsingular, but the complete projective
@@ -121,97 +130,59 @@ fn homography_transform() {
 }
 
 #[test]
-fn homography_perspective() {
-    // Homography with perspective component
-    let t = Transform::homography([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.001, 0.0]);
-    let p = t.apply(DVec2::new(100.0, 0.0));
-    // w = 0.001 * 100 + 1 = 1.1
-    // x' = 100 / 1.1 ≈ 90.9
-    assert!((p.x - 90.909).abs() < 0.01);
-    assert_close!(p.y, 0.0, EPSILON);
-}
-
-#[test]
 fn warp_transform_new() {
     let t = Transform::translation(DVec2::new(10.0, 5.0));
     let wt = WarpTransform::new(t);
     assert!(!wt.has_sip());
-    assert!(wt.is_linear());
 
     let p = wt.apply(DVec2::new(1.0, 2.0));
     assert_close!(p.x, 11.0, EPSILON);
     assert_close!(p.y, 7.0, EPSILON);
 }
 
+/// A warp with SIP maps `p` to `T(p + c(p))`, bit for bit. The field `k·d·|d|²` about (50, 50) is a
+/// cubic, which an order-3 SIP represents exactly, so the fit recovers it to its solve's rounding —
+/// well under 1e-9 px on 100 points this size — even at the corner, outside the fitted grid, where
+/// `d` = (−50, −50) and the correction is `1e-4·(−50)·5000` = −25 px on each axis.
 #[test]
 fn warp_transform_with_sip() {
     use crate::stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
+    use crate::testing::synthetic::distortion::{RadialField, RadialPairs};
 
-    let transform = Transform::identity();
-
-    // Create a simple SIP from synthetic points with barrel distortion
-    let cx = 50.0;
-    let cy = 50.0;
-    let k = 1e-4;
-    let mut ref_pts = Vec::new();
-    let mut tgt_pts = Vec::new();
-    for gy in 0..10 {
-        for gx in 0..10 {
-            let rx = 5.0 + gx as f64 * 10.0;
-            let ry = 5.0 + gy as f64 * 10.0;
-            let dx = rx - cx;
-            let dy = ry - cy;
-            let r2 = dx * dx + dy * dy;
-            ref_pts.push(DVec2::new(rx, ry));
-            tgt_pts.push(DVec2::new(rx + k * dx * r2, ry + k * dy * r2));
-        }
-    }
+    let transform = Transform::similarity(DVec2::new(3.0, -2.0), 0.02, 1.01);
+    let field = RadialField {
+        transform,
+        start: 5,
+        step: 10,
+        extent: 95,
+        ..RadialField::new(DVec2::new(50.0, 50.0), 1e-4)
+    };
+    let RadialPairs { reference, target } = field.pairs();
     let sip_config = SipConfig {
         order: 3,
-        reference_point: Some(DVec2::new(cx, cy)),
+        reference_point: Some(field.centre),
         ..Default::default()
     };
-    let sip = SipPolynomial::fit_from_transform(&ref_pts, &tgt_pts, &transform, &sip_config)
+    let sip = SipPolynomial::fit_from_transform(&reference, &target, &transform, &sip_config)
         .unwrap()
         .polynomial;
 
-    let wt = WarpTransform::with_sip(transform, sip);
+    let wt = WarpTransform::with_sip(transform, sip.clone());
     assert!(wt.has_sip());
-    assert!(!wt.is_linear());
-
-    // Corner point should differ from identity
-    let corner = DVec2::new(0.0, 0.0);
-    let result = wt.apply(corner);
-    let no_sip = WarpTransform::new(transform).apply(corner);
-    assert!(
-        (result - no_sip).length() > 0.01,
-        "SIP should produce different coordinates"
-    );
-}
-
-#[test]
-fn warp_transform_is_linear() {
-    // Translation: linear
-    let wt = WarpTransform::new(Transform::translation(DVec2::new(1.0, 2.0)));
-    assert!(wt.is_linear());
-
-    // Euclidean: linear
-    let wt = WarpTransform::new(Transform::euclidean(DVec2::ZERO, 0.1));
-    assert!(wt.is_linear());
-
-    // Similarity: linear
-    let wt = WarpTransform::new(Transform::similarity(DVec2::ZERO, 0.1, 1.02));
-    assert!(wt.is_linear());
-
-    // Affine: linear
-    let wt = WarpTransform::new(Transform::affine([1.0, 0.0, 5.0, 0.0, 1.0, 3.0]));
-    assert!(wt.is_linear());
-
-    // Homography: not linear
-    let wt = WarpTransform::new(Transform::homography([
-        1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.001, 0.0,
-    ]));
-    assert!(!wt.is_linear());
+    for p in [
+        DVec2::ZERO,
+        DVec2::new(37.5, 81.25),
+        DVec2::new(120.0, -10.0),
+    ] {
+        assert_eq!(wt.apply(p), transform.apply(sip.correct(p)), "{p:?}");
+        let correction = sip.correct(p) - p;
+        assert!(
+            (correction - field.displacement(p)).length() < 1e-9,
+            "{p:?}: correction {correction:?}, field {:?}",
+            field.displacement(p)
+        );
+    }
+    assert_eq!(field.displacement(DVec2::ZERO), DVec2::new(-25.0, -25.0));
 }
 
 #[test]
@@ -234,9 +205,7 @@ fn warp_transform_apply_no_sip_matches_transform() {
 #[test]
 fn auto_sizes_its_gates_against_the_model_it_can_climb_to() {
     // The ladder ends at Homography, so every count `Auto` is measured by has to be Homography's
-    // — anything smaller would let a pair through that the last rung cannot fit. Previously
-    // `TransformType::Auto` answered Similarity's 2 here while every caller substituted
-    // Homography's 4, and only the fact that nothing called it kept the two from disagreeing.
+    // — anything smaller would let a pair through that the last rung cannot fit.
     assert_eq!(
         TransformModel::Auto.most_general(),
         TransformType::Homography
@@ -310,49 +279,54 @@ fn rotation_around_center() {
     );
 }
 
+/// The inverse undoes the transform, as a transform and through `apply`, for a translation, a
+/// similarity and a homography; composing a homography with its inverse is the identity, and the
+/// composition applies its right operand first. The round trips are a matrix inverse and a product
+/// in f64 on coordinates up to 500: a few ulps of 500, 1e-12.
 #[test]
-fn inverse_roundtrip_translation() {
-    // T(10, -5) then T^{-1} should give back the original point
-    let t = Transform::translation(DVec2::new(10.0, -5.0));
-    let p = DVec2::new(3.0, 7.0);
-
-    // apply then apply_inverse should return original
-    let mapped = t.apply(p);
-    let recovered = t.apply_inverse(mapped);
-    assert!(
-        (recovered.x - p.x).abs() < EPSILON,
-        "Roundtrip x: expected {}, got {}",
-        p.x,
-        recovered.x
-    );
-    assert!(
-        (recovered.y - p.y).abs() < EPSILON,
-        "Roundtrip y: expected {}, got {}",
-        p.y,
-        recovered.y
-    );
-}
-
-#[test]
-fn inverse_roundtrip_similarity() {
-    // Similarity with rotation and scale: roundtrip should recover original
-    let t = Transform::similarity(DVec2::new(7.0, -3.0), 0.7, 1.3);
-    let p = DVec2::new(100.0, 200.0);
-
-    let mapped = t.apply(p);
-    let recovered = t.apply_inverse(mapped);
-    assert!(
-        (recovered.x - p.x).abs() < 1e-8,
-        "Roundtrip x: expected {}, got {}",
-        p.x,
-        recovered.x
-    );
-    assert!(
-        (recovered.y - p.y).abs() < 1e-8,
-        "Roundtrip y: expected {}, got {}",
-        p.y,
-        recovered.y
-    );
+fn inverse_and_compose_round_trip_every_model() {
+    let homography = Transform::homography([1.02, 0.01, 10.0, -0.015, 0.98, -4.0, 2e-4, -1e-4]);
+    let points = [
+        DVec2::new(3.0, 7.0),
+        DVec2::new(100.0, 200.0),
+        DVec2::new(-250.0, 480.0),
+    ];
+    for t in [
+        Transform::translation(DVec2::new(10.0, -5.0)),
+        Transform::similarity(DVec2::new(7.0, -3.0), 0.7, 1.3),
+        homography,
+    ] {
+        let inverse = t.inverse();
+        for p in points {
+            let mapped = t.apply(p);
+            assert!(inverse.apply(mapped).distance(p) < 1e-12, "{t} at {p:?}");
+            assert!(
+                t.inverse().apply(mapped).distance(p) < 1e-12,
+                "{t} at {p:?}"
+            );
+            assert!(
+                t.compose(&inverse).apply(p).distance(p) < 1e-12,
+                "{t} at {p:?}"
+            );
+        }
+    }
+    let shift = Transform::translation(DVec2::new(5.0, -2.0));
+    for p in points {
+        assert!(
+            homography
+                .compose(&shift)
+                .apply(p)
+                .distance(homography.apply(shift.apply(p)))
+                < 1e-12
+        );
+        assert!(
+            shift
+                .compose(&homography)
+                .apply(p)
+                .distance(shift.apply(homography.apply(p)))
+                < 1e-12
+        );
+    }
 }
 
 #[test]
@@ -401,25 +375,6 @@ fn compose_rotation_then_translation() {
 }
 
 #[test]
-fn deviation_from_identity_is_the_frobenius_norm_of_the_difference() {
-    // Identity has zero deviation
-    let id = Transform::identity();
-    assert_close!(id.deviation_from_identity(), 0.0, EPSILON);
-
-    // Translation has non-zero deviation
-    let t = Transform::translation(DVec2::new(3.0, 4.0));
-    // Deviation is Frobenius norm of (M - I)
-    // M - I = [[0,0,3],[0,0,4],[0,0,0]]
-    // Frobenius = sqrt(9 + 16) = sqrt(25) = 5.0
-    let dev = t.deviation_from_identity();
-    assert!(
-        (dev - 5.0).abs() < EPSILON,
-        "Expected deviation 5.0, got {}",
-        dev
-    );
-}
-
-#[test]
 fn homography_perspective_hand_computed() {
     // Homography: h = [1, 0, 10, 0, 1, 20, 0.002, 0.001]
     // For point (200, 100):
@@ -435,14 +390,14 @@ fn homography_perspective_hand_computed() {
 #[test]
 fn display_translation() {
     let t = Transform::translation(DVec2::new(10.5, -3.2));
-    let s = format!("{}", t);
+    let s = format!("{t}");
     assert_eq!(s, "Translation(dx=10.50, dy=-3.20)");
 }
 
 #[test]
 fn display_euclidean() {
     let t = Transform::euclidean(DVec2::new(5.0, -2.0), 0.0);
-    let s = format!("{}", t);
+    let s = format!("{t}");
     // rotation_angle() = atan2(sin_a, cos_a) = atan2(0, 1) = 0
     assert_eq!(s, "Euclidean(dx=5.00, dy=-2.00, rot=0.000\u{b0})");
 }
@@ -450,7 +405,7 @@ fn display_euclidean() {
 #[test]
 fn display_similarity() {
     let t = Transform::similarity(DVec2::new(1.0, 2.0), 0.0, 1.5);
-    let s = format!("{}", t);
+    let s = format!("{t}");
     assert_eq!(
         s,
         "Similarity(dx=1.00, dy=2.00, rot=0.000\u{b0}, scale=1.5000)"
@@ -474,44 +429,86 @@ fn display_names_every_model_that_shares_the_four_component_form() {
 }
 
 #[test]
-#[should_panic(expected = "Cannot invert singular transform matrix")]
+#[should_panic(expected = "the transform is singular, or its inverse cannot be normalized")]
 fn inverse_singular_panics() {
     let degenerate = Transform::affine([0.0; 6]);
-    let _ = degenerate.inverse();
+    let _inverse = degenerate.inverse();
 }
 
 #[test]
 fn from_matrix_keeps_the_matrix_its_type_and_its_mapping() {
     let m = DMat3::from_array([2.0, 0.0, 5.0, 0.0, 3.0, -1.0, 0.0, 0.0, 1.0]);
-    let t = Transform::from_matrix(m, TransformType::Affine);
-    // (1, 1) -> (2*1 + 0*1 + 5, 0*1 + 3*1 + (-1)) = (7, 2)
-    let p = t.apply(DVec2::new(1.0, 1.0));
-    assert_close!(p.x, 7.0, EPSILON);
-    assert_close!(p.y, 2.0, EPSILON);
+    let t = Transform::from_matrix(m, TransformType::Affine).unwrap();
+    // (1, 1) -> (2·1 + 0·1 + 5, 0·1 + 3·1 − 1) = (7, 2), exactly.
+    assert_eq!(t.apply(DVec2::new(1.0, 1.0)), DVec2::new(7.0, 2.0));
     assert_eq!(t.transform_type(), TransformType::Affine);
     assert_eq!(t.matrix(), m.as_array());
 }
 
+/// Every matrix is stored with `m[8] = 1`. A homography of scale 2 is its normalized twin bit for
+/// bit — dividing by a power of two is exact — so every reader, the SIMD kernels' `h·y + 1` among
+/// them, sees the same matrix; and an affine `m[8]` one ulp off 1 comes back as exactly 1.
 #[test]
-#[should_panic(expected = "affine-or-simpler transforms require homogeneous bottom row [0, 0, 1]")]
-fn from_matrix_rejects_a_projective_bottom_row() {
-    let projective = DMat3::from_array([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.01, 0.0, 1.0]);
-    Transform::from_matrix(projective, TransformType::Affine);
+fn from_matrix_normalizes_the_homogeneous_scale() {
+    let twin = Transform::homography([1.1, 0.02, 30.0, -0.01, 0.95, -12.0, 1e-5, -2e-5]);
+    let doubled = DMat3::from_array(twin.matrix().map(|value| 2.0 * value));
+    let normalized = Transform::from_homography_matrix(doubled).unwrap();
+    assert_eq!(normalized.matrix(), twin.matrix());
+
+    let rounded = DMat3::from_array([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0 + f64::EPSILON]);
+    let affine = Transform::from_matrix(rounded, TransformType::Affine).unwrap();
+    assert_eq!(affine.matrix()[8], 1.0);
+    assert_eq!(affine.matrix()[0], 1.0 / (1.0 + f64::EPSILON));
+}
+
+/// `m[8]` below `MIN_HOMOGENEOUS_SCALE` of the largest entry cannot be divided out without moving
+/// a mapped point by more than the tolerance it is derived from; zero and non-finite entries
+/// cannot be divided out at all. A scale just above the floor is kept.
+#[test]
+fn from_matrix_refuses_what_it_cannot_normalize() {
+    let with_scale = |scale: f64| {
+        Transform::from_homography_matrix(DMat3::from_array([
+            1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, scale,
+        ]))
+    };
+    assert!(with_scale(MIN_HOMOGENEOUS_SCALE * 0.5).is_none());
+    assert!(with_scale(0.0).is_none());
+    assert!(with_scale(f64::NAN).is_none());
+    assert!(with_scale(MIN_HOMOGENEOUS_SCALE * 2.0).is_some());
+    let not_finite = DMat3::from_array([1.0, f64::INFINITY, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
+    assert!(Transform::from_homography_matrix(not_finite).is_none());
 }
 
 #[test]
-fn from_matrix_canonicalizes_affine_roundoff() {
-    let rounded = DMat3::from_array([
-        1.0,
-        0.0,
-        0.0,
-        0.0,
-        1.0,
-        0.0,
-        f64::EPSILON,
-        -f64::EPSILON,
-        1.0 + f64::EPSILON,
-    ]);
-    let transform = Transform::from_matrix(rounded, TransformType::Affine);
-    assert_eq!(&transform.matrix()[6..], &[0.0, 0.0, 1.0]);
+#[should_panic(expected = "a Affine transform has no perspective row")]
+fn from_matrix_rejects_a_projective_bottom_row() {
+    let projective = DMat3::from_array([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.01, 0.0, 1.0]);
+    let _ = Transform::from_matrix(projective, TransformType::Affine);
+}
+
+/// The closed-form Jacobian against a central difference. For an affine model it is the linear part
+/// exactly, wherever it is taken. For a homography the difference with step `h` has truncation error
+/// `h²/6·|T'''|`, far below 1e-12 for perspective terms of 1e-5, and rounding error `u·|T|/h`, about
+/// 3.3e-10 at `|T|` ≈ 3000; 1e-9 holds the sum.
+#[test]
+fn jacobian_is_the_derivative_of_apply() {
+    let affine = Transform::affine([1.2, -0.3, 40.0, 0.25, 0.9, -7.0]);
+    let linear = DMat2::from_cols(DVec2::new(1.2, 0.25), DVec2::new(-0.3, 0.9));
+    for p in [DVec2::ZERO, DVec2::new(1234.5, -987.25)] {
+        assert_eq!(affine.jacobian(p), linear);
+    }
+
+    let homography = Transform::homography([1.05, 0.02, 30.0, -0.01, 0.97, -12.0, 2e-5, -1e-5]);
+    let h = 1e-3;
+    for p in [DVec2::new(100.0, 200.0), DVec2::new(3000.0, 1500.0)] {
+        let jacobian = homography.jacobian(p);
+        for (axis, step) in [DVec2::new(h, 0.0), DVec2::new(0.0, h)]
+            .into_iter()
+            .enumerate()
+        {
+            let difference = (homography.apply(p + step) - homography.apply(p - step)) / (2.0 * h);
+            assert_close!(jacobian.col(axis).x, difference.x, 1e-9);
+            assert_close!(jacobian.col(axis).y, difference.y, 1e-9);
+        }
+    }
 }

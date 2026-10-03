@@ -1,15 +1,9 @@
 use super::*;
 
-use crate::testing::program::ProgramBuilder;
-
 /// A program of `ids`, nothing but identities — enough for the pairing the
 /// engine establishes at install.
 fn program(ids: &[NodeId]) -> Arc<CompiledGraph> {
-    let mut prog = ProgramBuilder::default();
-    for &node_id in ids {
-        prog.node().id(node_id).add();
-    }
-    Arc::new(prog.into_program())
+    Arc::new(CompiledGraph::bare(ids.iter().copied()))
 }
 
 #[test]
@@ -19,7 +13,7 @@ fn install_holds_one_canonical_artifact_for_the_engine_and_its_cache() {
 
     engine.install(Arc::clone(&compiled));
 
-    assert!(Arc::ptr_eq(engine.compiled.as_ref().unwrap(), &compiled));
+    assert!(Arc::ptr_eq(&engine.compiled, &compiled));
     engine.validate().unwrap();
 }
 
@@ -46,7 +40,7 @@ fn install_carries_slots_across_a_shifted_index_space() {
 #[test]
 fn validation_rejects_a_cache_with_the_wrong_node_count() {
     let engine = ExecutionEngine {
-        compiled: Some(program(&[NodeId::from_u128(1)])),
+        compiled: program(&[NodeId::from_u128(1)]),
         ..Default::default()
     };
 
@@ -68,15 +62,22 @@ fn func_nodes_keep_identity() {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn clear_resets_graph() {
     let mut e = TestEngine::over(TestGraph::sample());
     e.run_sinks().await;
     assert!(!e.engine.compiled().e_nodes.is_empty());
 
+    let planned = e.engine.schedule.process_order.capacity();
+    assert!(planned > 0);
+
     e.engine.clear();
 
-    assert!(e.engine.compiled.is_none());
-    assert!(e.engine.schedule.process_order.is_empty());
+    assert!(e.engine.is_empty());
     assert_eq!(e.engine.cache.slot_count(), 0);
+    assert_eq!(
+        e.engine.schedule.process_order.capacity(),
+        planned,
+        "the schedule keeps its buffers for the next run"
+    );
 }

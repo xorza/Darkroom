@@ -1,9 +1,10 @@
+use std::sync::Mutex;
+
 use super::*;
 
 use crate::async_lambda;
-use crate::graph::func::lambda::OutputDemand;
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn unused_output_marked_skip() {
     let seen: Arc<Mutex<Vec<OutputDemand>>> = Arc::new(Mutex::new(Vec::new()));
 
@@ -14,7 +15,7 @@ async fn unused_output_marked_skip() {
             .output(DataType::Int)
             .lambda(async_lambda!(
                 move |Invocation { demand, outputs, .. }| { seen = Arc::clone(&seen) } => {
-                    seen.lock().await.extend_from_slice(demand);
+                    seen.lock().unwrap().extend_from_slice(demand);
                     outputs[0] = ConstValue::Int(1).into();
                     outputs[1] = ConstValue::Int(2).into();
                     Ok(())
@@ -34,27 +35,27 @@ async fn unused_output_marked_skip() {
     );
     assert_eq!(e.readers("split"), [1, 0]);
     assert_eq!(
-        *seen.lock().await,
+        *seen.lock().unwrap(),
         [OutputDemand::Produce, OutputDemand::Skip],
         "the lambda saw the same demand the sweep resolved"
     );
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn cached_node_reruns_when_a_previously_skipped_output_becomes_needed() {
-    let calls = Arc::new(Mutex::new(0));
+    let calls = Calls::default();
     let received = Arc::new(Mutex::new(Vec::new()));
 
     let mut g = TestGraph::new();
     g.add("split", |n| {
-        let calls = Arc::clone(&calls);
+        let calls = calls.clone();
         n.pure()
             .cache(CacheMode::Ram)
             .output(DataType::Int)
             .output(DataType::Int)
             .lambda(async_lambda!(
-                move |Invocation { demand, outputs, .. }| { calls = Arc::clone(&calls) } => {
-                    *calls.lock().await += 1;
+                move |Invocation { demand, outputs, .. }| { calls = calls.clone() } => {
+                    calls.bump();
                     if !demand[0].is_skip() {
                         outputs[0] = ConstValue::Int(10).into();
                     }
@@ -69,7 +70,7 @@ async fn cached_node_reruns_when_a_previously_skipped_output_becomes_needed() {
         move |n: NodeSpec| {
             n.sink().input(DataType::Int).lambda(async_lambda!(
                 move |Invocation { inputs, .. }| { received = Arc::clone(&received) } => {
-                    received.lock().await.push(inputs[0].as_i64().unwrap());
+                    received.lock().unwrap().push(inputs[0].as_i64().unwrap());
                     Ok(())
                 }
             ))
@@ -89,8 +90,8 @@ async fn cached_node_reruns_when_a_previously_skipped_output_becomes_needed() {
     });
     e.run_sinks().await;
 
-    assert_eq!(*calls.lock().await, 2);
-    let mut received = received.lock().await.clone();
+    assert_eq!(calls.count(), 2);
+    let mut received = received.lock().unwrap().clone();
     received.sort_unstable();
     assert_eq!(received, [10, 10, 20]);
 }

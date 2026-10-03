@@ -1,7 +1,7 @@
-//! The `astro` domain — `lumos`-backed nodes (category `astro`). Astronomical
-//! frames flow on graph wires as the imaginarium-backed [`crate::image::Image`]
-//! (RGB_F32), the same currency the imaginarium image nodes use, so the two
-//! interoperate directly. See [`nodes`] for the node library.
+//! The `astro` domain — `lumos`-backed nodes (category `Astro`). Frames flow
+//! on graph wires as the same [`Image`](crate::image::Image) the image nodes
+//! pass: the astro nodes produce it planar, and an edge into an image node
+//! repacks it once. See [`nodes`] for the node library.
 
 mod config;
 mod masters;

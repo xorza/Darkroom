@@ -1,44 +1,28 @@
-//! NEON SIMD implementation for MoffatFixedBeta batch operations (aarch64).
+//! NEON SIMD implementation for `MoffatFixedBeta` batch operations (aarch64).
 //!
 //! Processes 2 f64 pixels per NEON iteration for `batch_build_normal_equations`
-//! and `batch_compute_chi2`. Supports HalfInt, Int, and General PowStrategy variants.
+//! and `batch_compute_chi2`. Supports `HalfInt`, Int, and General `PowStrategy` variants.
 
 use crate::stacking::star_detection::centroid::lm_optimizer::{FitData, LMModel, NormalEquations};
 use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFixedBeta, PowStrategy};
 use crate::stacking::star_detection::centroid::simd::hsum;
 use std::arch::aarch64::*;
 
-/// SIMD `int_pow`: compute u^n for each lane using repeated squaring.
+/// SIMD `int_pow`: `u^n` per lane by squaring, the scalar `int_pow`'s multiplications in its order.
 #[inline]
 unsafe fn simd_int_pow(u: float64x2_t, n: u32) -> float64x2_t {
     unsafe {
-        match n {
-            0 => vdupq_n_f64(1.0),
-            1 => u,
-            2 => vmulq_f64(u, u),
-            3 => vmulq_f64(vmulq_f64(u, u), u),
-            4 => {
-                let u2 = vmulq_f64(u, u);
-                vmulq_f64(u2, u2)
+        let mut result = vdupq_n_f64(1.0);
+        let mut base = u;
+        let mut exp = n;
+        while exp > 0 {
+            if exp & 1 == 1 {
+                result = vmulq_f64(result, base);
             }
-            5 => {
-                let u2 = vmulq_f64(u, u);
-                vmulq_f64(vmulq_f64(u2, u2), u)
-            }
-            _ => {
-                let mut result = vdupq_n_f64(1.0);
-                let mut base = u;
-                let mut exp = n;
-                while exp > 0 {
-                    if exp & 1 == 1 {
-                        result = vmulq_f64(result, base);
-                    }
-                    base = vmulq_f64(base, base);
-                    exp >>= 1;
-                }
-                result
-            }
+            base = vmulq_f64(base, base);
+            exp >>= 1;
         }
+        result
     }
 }
 
@@ -71,7 +55,7 @@ unsafe fn simd_fast_pow_neg(u: float64x2_t, strategy: PowStrategy) -> float64x2_
 
 /// Batch build normal equations (J^T J, J^T r, chi²) using NEON.
 ///
-/// For N=5 (MoffatFixedBeta), accumulates 15 upper-triangle hessian elements,
+/// For N=5 (`MoffatFixedBeta`), accumulates 15 upper-triangle hessian elements,
 /// 5 gradient elements, and chi² directly in NEON registers.
 pub(super) unsafe fn batch_build_normal_equations_neon(
     model: &MoffatFixedBeta,

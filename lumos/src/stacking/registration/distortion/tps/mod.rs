@@ -1,8 +1,11 @@
-// WIP: TPS distortion modeling is not yet integrated into the registration pipeline.
-// Its own tests are the only callers, so under `cfg(test)` nothing here is dead and the
-// gate narrows to the production build. Drop it once TPS is integrated as a post-RANSAC
-// distortion correction option.
-#![cfg_attr(not(test), allow(dead_code))]
+#![cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "TPS is kept as work in progress: its tests are its only callers until it \
+                  joins registration as a post-RANSAC distortion correction"
+    )
+)]
 
 //! Thin-Plate Spline (TPS) distortion modeling.
 //!
@@ -20,10 +23,10 @@ use crate::math::linear_system;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::registration::distortion::SINGULAR_THRESHOLD;
-use crate::stacking::registration::distortion::point_normalization::PointNormalization;
+use crate::stacking::registration::point_normalization::PointNormalization;
 
 /// Configuration for thin-plate spline fitting.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 struct TpsConfig {
     /// Regularization parameter (lambda). Higher values produce smoother
     /// interpolation but may not pass exactly through control points.
@@ -225,7 +228,7 @@ impl ThinPlateSpline {
     }
 
     /// Get the number of control points.
-    fn num_control_points(&self) -> usize {
+    const fn num_control_points(&self) -> usize {
         self.control_points.len()
     }
 
@@ -313,6 +316,10 @@ impl DistortionMap {
     /// * `image_width` - Image width in pixels
     /// * `image_height` - Image height in pixels
     /// * `grid_spacing` - Spacing between grid points
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "a size over a positive grid spacing is non-negative"
+    )]
     fn from_tps(tps: &ThinPlateSpline, image: Size2us, grid_spacing: f64) -> Self {
         let grid = Size2us::new(
             (image.width as f64 / grid_spacing).ceil() as usize + 1,
@@ -355,6 +362,10 @@ impl DistortionMap {
     }
 
     /// Interpolate the distortion at an arbitrary position.
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "a point before the grid saturates to its first cell, which then extrapolates"
+    )]
     fn interpolate(&self, p: DVec2) -> DVec2 {
         let gx = p.x / self.spacing;
         let gy = p.y / self.spacing;

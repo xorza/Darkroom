@@ -22,7 +22,7 @@ use crate::gui::theme::Theme;
 use crate::gui::theme::color::toward;
 use crate::gui::theme::type_colors::TypeColors;
 
-/// RgbaF32 for a port of type `ty` on the given side. Untyped (`Any`) ports
+/// `RgbaF32` for a port of type `ty` on the given side. Untyped (`Any`) ports
 /// defer to the theme's positional port colors; `hovered` lifts either one
 /// through [`emphasize`].
 pub(crate) fn port_color(theme: &Theme, ty: &DataType, kind: PortKind, hovered: bool) -> RgbaF32 {
@@ -34,14 +34,14 @@ pub(crate) fn port_color(theme: &Theme, ty: &DataType, kind: PortKind, hovered: 
     lit(base, hovered)
 }
 
-/// RgbaF32 for an event emitter glyph, subscription pin, or event wire.
+/// `RgbaF32` for an event emitter glyph, subscription pin, or event wire.
 /// Events carry no data type, so they use the theme's event colour rather
 /// than a type hue; `hovered` lifts it like every other port.
 pub(crate) fn event_color(theme: &Theme, hovered: bool) -> RgbaF32 {
     lit(theme.ports.event, hovered)
 }
 
-fn fallback(theme: &Theme, kind: PortKind) -> RgbaF32 {
+const fn fallback(theme: &Theme, kind: PortKind) -> RgbaF32 {
     match kind {
         PortKind::Input => theme.ports.input,
         PortKind::Output => theme.ports.output,
@@ -63,7 +63,7 @@ fn type_hue(t: &TypeColors, ty: &DataType) -> RgbaF32 {
         // Image is the dominant type on a darkroom canvas — it owns a fixed
         // hue instead of a hash pick, so its wires read as one deliberate
         // color (and can't land next to Float or the status purples).
-        DataType::Custom(id) if *id == *lens::IMAGE_TYPE_ID => t.image,
+        DataType::Custom(id) if *id == lens::IMAGE_TYPE_ID => t.image,
         DataType::Custom(id) | DataType::Enum(id) => ramp_pick(&t.ramp, id.as_u128()),
         DataType::Any => unreachable!("Any handled by fallback in port_color"),
     }
@@ -71,7 +71,7 @@ fn type_hue(t: &TypeColors, ty: &DataType) -> RgbaF32 {
 
 /// Pick a ramp entry from a type id so a given custom/enum type always
 /// lands on the same color.
-fn ramp_pick(ramp: &[RgbaF32], key: u128) -> RgbaF32 {
+const fn ramp_pick(ramp: &[RgbaF32], key: u128) -> RgbaF32 {
     ramp[(key % ramp.len() as u128) as usize]
 }
 

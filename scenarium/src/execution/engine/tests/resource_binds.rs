@@ -1,6 +1,7 @@
 use super::*;
 
-use std::sync::Mutex as StdMutex;
+use std::fs;
+use std::sync::Mutex;
 
 use common::{TempDir, TempFile};
 
@@ -12,7 +13,7 @@ use crate::{FsPathConfig, FsPathMode};
 struct Observed {
     loads: Calls,
     annotates: Calls,
-    captured: Arc<StdMutex<String>>,
+    captured: Arc<Mutex<String>>,
 }
 
 impl Observed {
@@ -45,7 +46,7 @@ fn loader(observed: Observed) -> impl FnOnce(NodeSpec) -> NodeSpec {
                 move |Invocation { inputs, outputs, .. }| { loads = observed.loads.clone() } => {
                     loads.bump();
                     let path = inputs[0].as_fs_path().unwrap().to_string();
-                    let text = std::fs::read_to_string(&path).map_err(InvokeError::external)?;
+                    let text = fs::read_to_string(&path).map_err(InvokeError::external)?;
                     outputs[0] = ConstValue::String(text).into();
                     Ok(())
                 }
@@ -117,14 +118,14 @@ fn path_graph(data_path: &str, mode: CacheMode, observed: Observed) -> TestGraph
 #[tokio::test]
 #[cfg(unix)]
 async fn an_unidentifiable_path_runs_the_node_uncached() {
-    use std::fs::Permissions;
-    use std::os::unix::fs::PermissionsExt;
+    use common::Unreadable;
 
     let dir = TempDir::new("locked");
     let data = dir.join("data.txt");
-    std::fs::write(&data, "v1").unwrap();
+    fs::write(&data, "v1").unwrap();
     let data_path = data.to_string_lossy().into_owned();
-    let lock = |mode| std::fs::set_permissions(dir.path(), Permissions::from_mode(mode)).unwrap();
+    // A process that reads through mode 000 cannot see the fixture: the test skips.
+    let lock = || Unreadable::new(dir.path());
     let warned = |run: &RunOutcome| {
         run.logs()
             .iter()
@@ -146,7 +147,7 @@ async fn an_unidentifiable_path_runs_the_node_uncached() {
             run.error(loader),
         );
         assert!(
-            matches!(run.error(dependent), Some(RunError::SkippedUpstream { .. })),
+            matches!(run.error(dependent), Some(RunError::SkippedUpstream)),
             "its dependent must skip as errored-upstream: {:?}",
             run.error(dependent),
         );
@@ -161,17 +162,21 @@ async fn an_unidentifiable_path_runs_the_node_uncached() {
     g.wire("load_text", 0, "capture", 0);
     let mut e = TestEngine::over(g);
 
-    lock(0o000);
+    let Some(locked) = lock() else {
+        return;
+    };
     let run = e.run_sinks().await;
-    lock(0o755);
+    drop(locked);
     assert_lambda_failed(&run, "load_text", "capture");
 
     // The same file reached through a producer's value, known only at the
     // node's turn. Same outcome, same route.
     let mut e = TestEngine::over(path_graph(&data_path, CacheMode::None, Observed::default()));
-    lock(0o000);
+    let Some(locked) = lock() else {
+        return;
+    };
     let run = e.run_sinks().await;
-    lock(0o755);
+    drop(locked);
     assert_lambda_failed(&run, "load_text", "annotate");
 
     // The case failing at stamp time got wrong. The path is just as
@@ -189,9 +194,11 @@ async fn an_unidentifiable_path_runs_the_node_uncached() {
     g.wire("ignores_path", 0, "capture", 0);
     let mut e = TestEngine::over(g);
 
-    lock(0o000);
+    let Some(locked) = lock() else {
+        return;
+    };
     let run = e.run_sinks().await;
-    lock(0o755);
+    drop(locked);
     assert!(
         warned(&run),
         "an unstampable path is still reported: {:?}",
@@ -202,10 +209,10 @@ async fn an_unidentifiable_path_runs_the_node_uncached() {
         "a path the lambda never reads must not fail it: {:?}",
         run.error("ignores_path"),
     );
-    assert!(
-        run.ran().contains(&"ignores_path"),
-        "and the node runs rather than being skipped: {:?}",
+    assert_eq!(
         run.ran(),
+        ["ignores_path", "capture"],
+        "and the node runs rather than being skipped"
     );
 }
 
@@ -218,7 +225,7 @@ async fn an_unidentifiable_path_runs_the_node_uncached() {
 #[tokio::test]
 async fn wired_path_rekeys_loader_on_file_change() {
     let data = TempFile::new("ram");
-    std::fs::write(data.path(), "v1").unwrap();
+    fs::write(data.path(), "v1").unwrap();
     let observed = Observed::default();
     let mut e = TestEngine::over(path_graph(&data.to_str(), CacheMode::Ram, observed.clone()));
 
@@ -248,7 +255,7 @@ async fn wired_path_rekeys_loader_on_file_change() {
     // Edit the file (different length ⇒ unambiguous identity change). The
     // loader re-keys off the delivered value's file identity and the change
     // propagates downstream — while the structural upstream stays a hit.
-    std::fs::write(data.path(), "v2-longer").unwrap();
+    fs::write(data.path(), "v2-longer").unwrap();
     let run = e.run_sinks().await;
     assert_eq!(
         observed.loads(),
@@ -284,7 +291,7 @@ async fn wired_path_rekeys_loader_on_file_change() {
 async fn wired_path_disk_reuse_survives_reopen_until_file_changes() {
     let dir = TempDir::new("disk");
     let data = TempFile::new("disk-data");
-    std::fs::write(data.path(), "v1").unwrap();
+    fs::write(data.path(), "v1").unwrap();
     let observed = Observed::default();
     let path = data.to_str();
 
@@ -319,7 +326,7 @@ async fn wired_path_disk_reuse_survives_reopen_until_file_changes() {
     // Reopen after an edit: the loader's key moved ⇒ recompute, propagating
     // downstream; the path producer's own digest is unchanged, so it stays a
     // disk hit feeding the recompute.
-    std::fs::write(data.path(), "v2-longer").unwrap();
+    fs::write(data.path(), "v2-longer").unwrap();
     let mut e = e.reopen();
     let run = e.run_sinks().await;
     assert_eq!(

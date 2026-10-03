@@ -1,13 +1,13 @@
 //! Live peak-RSS memory probe for the from-paths stacker — the manual, at-scale counterpart to the
-//! deterministic guards in `mem_budget_tests`.
+//! deterministic guards in `mem_budget`.
 //!
 //! Builds a stack of synthetic 16-bit FITS frames on disk, then combines them into one master
 //! through [`stack`] — the same memory-tiered `CacheCore` engine calibration-master creation
 //! (`stack_cfa_master`) drives. It *watches* how the pipeline behaves when the frames don't all fit
 //! in RAM: with a small budget the combiner spills each decoded frame to disk and mmaps it back
 //! (peak heap ≈ one chunk, flat in the frame count); with a large budget every frame stays resident
-//! (peak heap ≈ linear in the frame count). For an explicit numeric budget it also asserts peak heap
-//! stays within it — the live check the projection test in `mem_budget_tests` can only model.
+//! (peak heap ≈ linear in the frame count). For an explicit numeric budget it also asserts peak
+//! heap stays within it — the live check the projection test in `mem_budget` can only model.
 //!
 //! `#[ignore]`d because it's heavy and measurement-only: peak RSS is a per-process high-water mark,
 //! so run **one config per process** with a filter, exactly like the benches:
@@ -40,6 +40,8 @@
 //! (common for `/tmp`), the "disk" tier's mmap pages live in RAM and the measurement is a lie. The
 //! default (`<repo>/.tmp`) is disk-backed.
 
+use std::env;
+use std::hint;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -48,18 +50,22 @@ use std::time::Instant;
 
 use common::CancelToken;
 
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::math::size2us::Size2us;
+use crate::memory;
+use crate::memory::{MemoryPlan, RunShape};
 use crate::stacking::combine::config::{CombineMethod, StackConfig};
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::combine::stack::stack;
 use crate::stacking::progress::{ProgressCallback, StackingProgress, StackingStage};
+use crate::stacking::stack_product::quality_planes::QualityPlanes;
 use crate::testing::mem_probe::{
     BudgetChoice, MB, RssSampler, budget_ceiling_mb, ensure_frames, env_parse, parse_budget,
 };
 
 fn build_config(
     method: &str,
-    available_memory: Option<u64>,
+    memory_override: Option<u64>,
     cache_dir: PathBuf,
     keep: bool,
 ) -> StackConfig {
@@ -72,7 +78,7 @@ fn build_config(
         "sigma" => StackConfig::sigma_clipped(3.0),
         other => panic!("LUMOS_METHOD: expected sigma|median|mean, got {other:?}"),
     };
-    config.cache.available_memory = available_memory;
+    config.cache.memory_override = memory_override;
     config.cache.cache_dir = cache_dir;
     config.cache.keep_cache = keep;
     config
@@ -84,15 +90,14 @@ fn master_stack_memory_probe() -> io::Result<()> {
     let n: usize = env_parse("LUMOS_FRAMES", 24);
     let size = Size2us::new(env_parse("LUMOS_W", 6000), env_parse("LUMOS_H", 6000));
     let seed: u64 = env_parse("LUMOS_SEED", 1);
-    let method = std::env::var("LUMOS_METHOD").unwrap_or_else(|_| "sigma".into());
+    let method = env::var("LUMOS_METHOD").unwrap_or_else(|_| "sigma".into());
     let keep = env_parse("LUMOS_KEEP", 0) != 0;
     let budget = parse_budget("LUMOS_BUDGET", BudgetChoice::auto());
 
-    let base = std::env::var("LUMOS_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tmp/lumos_master_stack")
-        });
+    let base = env::var("LUMOS_DIR").map_or_else(
+        |_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tmp/lumos_master_stack"),
+        PathBuf::from,
+    );
     let frames_dir = base.join(format!("{}x{}_n{n}_s{seed}", size.width, size.height));
     let cache_dir = base.join("cache");
 
@@ -120,10 +125,21 @@ fn master_stack_memory_probe() -> io::Result<()> {
         "resident set  {:.2} GB if fully in-memory (Σ frames as f32)",
         resident_if_ram as f64 / 1e9
     );
-    if let Some(avail) = budget.available_memory {
-        // Mirror of the internal tier rule: usable = 75% of the budget; spill if the set exceeds it.
-        let usable = (avail as u128 * 75 / 100) as u64;
-        let tier = if resident_if_ram <= usable {
+    if let Some(avail) = budget.memory_override {
+        // The loader's own plan for this set: plain mono frames, every quality plane requested.
+        let dimensions = ImageDimensions::new(size, 1);
+        let frame = memory::frame_bytes(dimensions);
+        let plan = MemoryPlan::plan(
+            RunShape::decoded_stack(
+                n,
+                frame,
+                frame,
+                QualityPlanes::ALL.resident_bytes(dimensions),
+            ),
+            rayon::current_num_threads(),
+            avail,
+        );
+        let tier = if plan.fits_in_ram {
             "in-memory (resident)"
         } else {
             "disk (spill + mmap)"
@@ -148,13 +164,14 @@ fn master_stack_memory_probe() -> io::Result<()> {
         }
     );
 
-    let config = build_config(&method, budget.available_memory, cache_dir, keep);
+    let config = build_config(&method, budget.memory_override, cache_dir, keep);
 
     // Sample peak heap (RssAnon — the OOM-relevant, non-reclaimable metric) and total resident
     // (VmRSS, which includes reclaimable mmap'd spill pages) for the duration of the stack only.
     // Peak heap is split by phase: the *load* burst (concurrent decode transients — what the budget
     // must bound, the gate-closed / ungated peak) vs the *combine* steady state (resident frames +
-    // chunk buffers, the gate-open peak). The gate opens when the first Processing progress arrives.
+    // chunk buffers, the gate-open peak). The gate opens when the first Processing progress
+    // arrives.
     let sampler = RssSampler::start();
     let combining = sampler.gate();
 
@@ -174,10 +191,18 @@ fn master_stack_memory_probe() -> io::Result<()> {
                     p.total,
                     done as f64 / secs.max(1e-3)
                 );
+                #[expect(
+                    clippy::unused_result_ok,
+                    reason = "a progress line that fails to flush costs the probe nothing"
+                )]
                 io::stdout().flush().ok();
             }
             StackingStage::Combining => {
                 combining.open();
+                #[expect(
+                    clippy::unused_result_ok,
+                    reason = "only the first combining event stamps the start; a later one finds it set"
+                )]
                 combine_start_us
                     .compare_exchange(
                         0,
@@ -193,7 +218,7 @@ fn master_stack_memory_probe() -> io::Result<()> {
     };
 
     let result =
-        stack(&frames.paths, config, progress, CancelToken::never()).expect("stack failed");
+        stack(&frames.paths, &config, progress, CancelToken::never()).expect("stack failed");
     let total_secs = start.elapsed().as_secs_f64();
 
     let peak = sampler.finish();
@@ -201,19 +226,18 @@ fn master_stack_memory_probe() -> io::Result<()> {
     let load_secs = total_secs - combine_secs;
     let dims = result.image.dimensions();
     let mpix = (size.pixel_count() * n) as f64 / 1e6;
-    let anon_mb = peak.anon_mb;
-    let total_mb = peak.total_mb;
-    let load_anon_mb = peak.ungated_anon_mb;
-    let combine_anon_mb = peak.gated_anon_mb;
+    let anon_mb = peak.anon;
+    let total_mb = peak.total;
+    let load_anon_mb = peak.ungated_anon;
+    let combine_anon_mb = peak.gated_anon;
 
     println!("\n");
     println!("=== result ===");
     println!(
-        "master        {}×{} × {} ch, mean {:.4}",
+        "master        {}×{} × {} ch",
         dims.width(),
         dims.height(),
-        dims.channels(),
-        result.image.mean()
+        dims.channels()
     );
     println!(
         "time          {total_secs:.2}s total  ({load_secs:.2}s load + {combine_secs:.2}s combine)"
@@ -248,6 +272,6 @@ fn master_stack_memory_probe() -> io::Result<()> {
         println!("budget check  OK: peak heap {anon_mb} MB ≤ {budget_mb} MB budget");
     }
 
-    std::hint::black_box(&result);
+    hint::black_box(&result);
     Ok(())
 }

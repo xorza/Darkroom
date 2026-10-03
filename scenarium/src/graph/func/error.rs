@@ -19,8 +19,6 @@ pub enum FuncValidationError {
     NilId,
     #[error("Function with no outputs should be impure")]
     PureWithoutOutputs,
-    #[error("function {func_id:?} has no implementation")]
-    MissingLambda { func_id: FuncId },
     #[error("function {func_id:?} input {input_idx} has a nil nominal type id")]
     NilInputType { func_id: FuncId, input_idx: usize },
     #[error("function {func_id:?} output {output_idx} has a nil nominal type id")]
@@ -38,12 +36,38 @@ pub enum FuncValidationError {
         "function {func_id:?} input {input_idx} declares a default that matches neither its type nor its picker variants"
     )]
     InvalidDefault { func_id: FuncId, input_idx: usize },
+    #[error("function {func_id:?} input {input_idx} cannot override input {target}: {rule}")]
+    InvalidOverride {
+        func_id: FuncId,
+        input_idx: usize,
+        target: usize,
+        rule: OverrideRule,
+    },
+}
+
+/// The rule an input override declaration breaks.
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+pub enum OverrideRule {
+    #[error("there is no such input")]
+    TargetOutOfRange,
+    #[error("an input cannot override itself")]
+    SelfTarget,
+    #[error("a required input always delivers, so its target could never be read")]
+    RequiredOverride,
+    #[error("the target is not const-only, so its producer would run for nothing")]
+    WirableTarget,
+    #[error("an override cannot itself be overridden or override an override")]
+    Chain,
+    #[error("another input already overrides the target")]
+    SharedTarget,
 }
 
 #[derive(Debug, Error)]
 pub enum InvokeError {
-    #[error("{0}")]
-    External(#[source] Box<dyn error::Error + Send + Sync>),
+    /// A failure of the code the lambda called, kept whole: its message and
+    /// its own source chain are the error's.
+    #[error(transparent)]
+    External(Box<dyn error::Error + Send + Sync>),
     #[error("input {index} must be {expected}, got {actual}")]
     InvalidInput {
         index: usize,

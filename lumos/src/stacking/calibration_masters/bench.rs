@@ -5,16 +5,17 @@
 //! through the same engine benched in `stacking::combine::bench`
 //! (`bench_stack_{bias,dark,flat}_*`), so it isn't duplicated here.
 //!
-//! Run: `cargo test -p lumos --release calibration_masters::bench -- --ignored --nocapture`
+//! Run: `cargo test -p lumos --release --features bench calibration_masters::bench -- --ignored
+//! --nocapture`
 
-use crate::testing::XTRANS_PATTERN;
+use crate::testing::cfa::XTRANS_PATTERN;
 use crate::testing::prelude::*;
 use quickbench::quick_bench;
 use std::hint::black_box;
 
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::stacking::calibration_masters::cosmic_ray::reject_cosmic_rays;
-use crate::testing::make_cfa;
+use crate::testing::cfa::make_cfa;
 use crate::{
     CalibrationMasters, CalibrationSet, CfaImage, CfaType, CosmicRayConfig,
     DEFAULT_SIGMA_THRESHOLD, DefectMap,
@@ -24,22 +25,24 @@ use crate::{
 const W: usize = 2000;
 const H: usize = 1500;
 
-fn bayer() -> CfaType {
+const fn bayer() -> CfaType {
     CfaType::Bayer(CfaPattern::Rggb)
 }
 
-/// Deterministic pseudo-noise in `[base − amp, base + amp]`, plus ~0.1% `defect`-valued
-/// outliers so hot/cold detection has something to flag.
-fn cfa_pixels(base: f32, amp: f32, defect: f32, salt: u32) -> Vec<f32> {
+/// Seeded uniform noise in `[base − amp, base + amp]`, plus ~0.1% `defect`-valued outliers so
+/// hot/cold detection has something to flag.
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "synthetic fixtures are small images with non-negative coordinates"
+)]
+fn cfa_pixels(base: f32, amp: f32, defect: f32, seed: u64) -> Vec<f32> {
     let n = W * H;
-    let mut px = vec![0.0f32; n];
-    for (i, p) in px.iter_mut().enumerate() {
-        let hash = (i as u32).wrapping_mul(2654435761) ^ salt;
-        *p = base + (hash as f32 / u32::MAX as f32 - 0.5) * 2.0 * amp;
-    }
-    for k in 0..(n / 1000) {
-        let idx = ((k as u32).wrapping_mul(40503) ^ salt) as usize % n;
-        px[idx] = defect;
+    let mut rng = TestRng::new(seed);
+    let mut px: Vec<f32> = (0..n)
+        .map(|_| base + (rng.next_f32() - 0.5) * 2.0 * amp)
+        .collect();
+    for _ in 0..(n / 1000) {
+        px[(rng.next_f64() * n as f64) as usize] = defect;
     }
     px
 }
@@ -66,7 +69,7 @@ fn make_masters() -> CalibrationMasters {
             flat_dark: None,
         },
         DEFAULT_SIGMA_THRESHOLD,
-        CancelToken::never(),
+        &CancelToken::never(),
     )
     .unwrap()
 }
@@ -120,7 +123,7 @@ fn bench_defect_map_build_bayer(b: ::quickbench::Bencher) {
     );
     b.bench(|| {
         black_box(
-            DefectMap::default()
+            DefectMap::new(dark.size())
                 .detect_hot(
                     black_box(&dark),
                     DEFAULT_SIGMA_THRESHOLD,
@@ -134,18 +137,20 @@ fn bench_defect_map_build_bayer(b: ::quickbench::Bencher) {
 }
 
 /// A 1 MP faint-sky frame seeded with sharp single-pixel "cosmic-ray" spikes for L.A.Cosmic.
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "synthetic fixtures are small images with non-negative coordinates"
+)]
 fn cosmic_ray_frame(cfa: CfaType) -> CfaImage {
     const CR_W: usize = 1024;
     const CR_H: usize = 1024;
     let n = CR_W * CR_H;
-    let mut px = vec![0.0f32; n];
-    for (i, p) in px.iter_mut().enumerate() {
-        let hash = (i as u32).wrapping_mul(2654435761);
-        *p = 0.1 + (hash as f32 / u32::MAX as f32 - 0.5) * 0.01;
-    }
-    for k in 0..300 {
-        let idx = (k as u32).wrapping_mul(2246822519) as usize % n;
-        px[idx] = 0.95;
+    let mut rng = TestRng::new(1);
+    let mut px: Vec<f32> = (0..n)
+        .map(|_| 0.1 + (rng.next_f32() - 0.5) * 0.01)
+        .collect();
+    for _ in 0..300 {
+        px[(rng.next_f64() * n as f64) as usize] = 0.95;
     }
     make_cfa(Size2us::new(CR_W, CR_H), px, cfa)
 }
@@ -160,7 +165,7 @@ fn bench_cosmic_ray_reject_mono(b: ::quickbench::Bencher) {
     let config = CosmicRayConfig::default();
     b.bench(|| {
         let mut f = frame.clone();
-        black_box(reject_cosmic_rays(&mut f, black_box(&config)))
+        black_box(reject_cosmic_rays(&mut f, black_box(&config)).unwrap())
     });
 }
 
@@ -173,7 +178,7 @@ fn bench_cosmic_ray_reject_xtrans(b: ::quickbench::Bencher) {
     let config = CosmicRayConfig::default();
     b.bench(|| {
         let mut f = frame.clone();
-        black_box(reject_cosmic_rays(&mut f, black_box(&config)))
+        black_box(reject_cosmic_rays(&mut f, black_box(&config)).unwrap())
     });
 }
 
@@ -183,6 +188,6 @@ fn bench_cosmic_ray_reject_bayer(b: ::quickbench::Bencher) {
     let config = CosmicRayConfig::default();
     b.bench(|| {
         let mut f = frame.clone();
-        black_box(reject_cosmic_rays(&mut f, black_box(&config)))
+        black_box(reject_cosmic_rays(&mut f, black_box(&config)).unwrap())
     });
 }

@@ -16,12 +16,12 @@ pub enum CentroidMethod {
     WeightedMoments,
 
     /// 2D Gaussian profile fitting via Levenberg-Marquardt optimization.
-    /// High precision (~0.01 pixel accuracy) but ~8x slower than WeightedMoments.
+    /// High precision (~0.01 pixel accuracy) but ~8x slower than `WeightedMoments`.
     /// Best for well-sampled, symmetric PSFs.
     GaussianFit,
 
     /// 2D Moffat profile fitting with configurable beta parameter.
-    /// High precision (~0.01 pixel accuracy), similar speed to GaussianFit.
+    /// High precision (~0.01 pixel accuracy), similar speed to `GaussianFit`.
     /// Better model for atmospheric seeing (extended wings).
     /// Beta parameter controls wing slope: 2.5 typical for ground-based, 4.5 for space-based.
     MoffatFit {
@@ -33,9 +33,9 @@ pub enum CentroidMethod {
 
 impl CentroidMethod {
     /// Validate the centroid method configuration.
-    pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
+    pub(super) fn validate(self) -> Result<(), InvalidConfigField> {
         if let CentroidMethod::MoffatFit { beta } = self {
-            InvalidConfigField::finite("Moffat beta", "finite and in (0, 10]", *beta, |value| {
+            InvalidConfigField::finite("Moffat beta", "finite and in (0, 10]", beta, |value| {
                 value > 0.0 && value <= 10.0
             })?;
         }
@@ -50,7 +50,7 @@ pub enum LocalBackgroundMethod {
     #[default]
     GlobalMap,
     /// Compute local background using an annular region around the star.
-    /// Inner radius is based on stamp_radius, outer radius is 1.5× that.
+    /// Inner radius is based on `stamp_radius`, outer radius is 1.5× that.
     /// More accurate in regions with variable nebulosity.
     LocalAnnulus,
 }
@@ -70,7 +70,10 @@ pub struct NoiseModel {
 
 impl NoiseModel {
     /// Create a noise model whose signal scale already matches normalized Lumos pixels.
-    pub fn from_normalized(electrons_per_normalized_unit: f32, read_noise_electrons: f32) -> Self {
+    pub const fn from_normalized(
+        electrons_per_normalized_unit: f32,
+        read_noise_electrons: f32,
+    ) -> Self {
         Self {
             electrons_per_normalized_unit,
             read_noise_electrons,
@@ -82,7 +85,7 @@ impl NoiseModel {
     /// `signal` is the summed background-subtracted signal, `background_noise` is the empirical
     /// per-pixel background standard deviation, and `sample_count` is the number of summed pixels.
     pub(crate) fn variance_normalized(
-        &self,
+        self,
         signal: f64,
         background_noise: f64,
         sample_count: usize,
@@ -90,8 +93,8 @@ impl NoiseModel {
         debug_assert!(signal.is_finite() && signal >= 0.0);
         debug_assert!(background_noise.is_finite() && background_noise >= 0.0);
 
-        let electrons_per_unit = self.electrons_per_normalized_unit as f64;
-        let read_noise_normalized = self.read_noise_electrons as f64 / electrons_per_unit;
+        let electrons_per_unit = f64::from(self.electrons_per_normalized_unit);
+        let read_noise_normalized = f64::from(self.read_noise_electrons) / electrons_per_unit;
         signal / electrons_per_unit
             + sample_count as f64
                 * (background_noise * background_noise

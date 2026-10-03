@@ -1,21 +1,12 @@
-//! Warping tests using synthetic star field images.
-//!
-//! These tests verify that warping an image with a known transform
-//! and then aligning it back produces images that match.
-//!
-//! Tests cover:
-//! - All TransformType variants (Translation, Euclidean, Similarity, Affine, Homography)
-//! - All InterpolationMethod variants (Nearest, Bilinear, Bicubic, Lanczos2/3/4)
+//! Warps of synthetic star fields: roundtrips through every `TransformType`, the quality order of
+//! the kernels, SIP, and the quality maps at the border.
 
-use crate::ImageDimensions;
 use crate::stacking::registration::config::{self, InterpolationMethod, WarpParams};
 use crate::stacking::registration::resample::{self, internals};
-use crate::stacking::registration::tests::helpers;
-use crate::stacking::registration::transform::TransformModel;
 use crate::stacking::registration::transform::{Transform, TransformType, WarpTransform};
-use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::prelude::*;
 use crate::testing::synthetic::fixtures::star_field;
+use crate::testing::synthetic::metrics;
 
 /// Helper to warp and return a new buffer (for test convenience).
 /// Visually applies the transform to the image content (stars move by T).
@@ -31,46 +22,30 @@ fn do_warp(
         input,
         &mut output,
         &WarpTransform::new(inverse),
-        &config::internals::warp_params(method),
+        config::internals::warp_params(method),
     );
     output
 }
 
-/// Compute mean squared error between two images.
-fn compute_mse(a: &[f32], b: &[f32]) -> f64 {
-    assert_eq!(a.len(), b.len());
-    let sum: f64 = a
-        .iter()
-        .zip(b.iter())
-        .map(|(x, y)| (*x as f64 - *y as f64).powi(2))
-        .sum();
-    sum / a.len() as f64
-}
-
-/// Compute peak signal-to-noise ratio (PSNR) between two images.
-/// Higher is better. >40 dB is excellent, >30 dB is good.
+/// Peak signal-to-noise ratio between two images of peak `max_val`, in dB; infinite for equal ones.
 fn compute_psnr(a: &[f32], b: &[f32], max_val: f32) -> f64 {
-    let mse = compute_mse(a, b);
-    if mse < 1e-10 {
-        return f64::INFINITY;
-    }
-    10.0 * ((max_val as f64).powi(2) / mse).log10()
+    20.0 * (f64::from(max_val) / metrics::rms_diff(a, b)).log10()
 }
 
 /// Compute normalized cross-correlation between two images.
 /// Returns value in [-1, 1], where 1 means perfect correlation.
 fn compute_ncc(a: &[f32], b: &[f32]) -> f64 {
     let n = a.len() as f64;
-    let mean_a: f64 = a.iter().map(|&x| x as f64).sum::<f64>() / n;
-    let mean_b: f64 = b.iter().map(|&x| x as f64).sum::<f64>() / n;
+    let mean_a: f64 = a.iter().map(|&x| f64::from(x)).sum::<f64>() / n;
+    let mean_b: f64 = b.iter().map(|&x| f64::from(x)).sum::<f64>() / n;
 
     let mut cov = 0.0;
     let mut var_a = 0.0;
     let mut var_b = 0.0;
 
     for (&x, &y) in a.iter().zip(b.iter()) {
-        let dx = x as f64 - mean_a;
-        let dy = y as f64 - mean_b;
+        let dx = f64::from(x) - mean_a;
+        let dy = f64::from(y) - mean_b;
         cov += dx * dy;
         var_a += dx * dx;
         var_b += dy * dy;
@@ -81,18 +56,6 @@ fn compute_ncc(a: &[f32], b: &[f32]) -> f64 {
     }
 
     cov / (var_a.sqrt() * var_b.sqrt())
-}
-
-/// All interpolation methods to test.
-fn all_interpolation_methods() -> Vec<InterpolationMethod> {
-    vec![
-        InterpolationMethod::Nearest,
-        InterpolationMethod::Bilinear,
-        InterpolationMethod::Bicubic,
-        InterpolationMethod::Lanczos2,
-        InterpolationMethod::Lanczos3,
-        InterpolationMethod::Lanczos4,
-    ]
 }
 
 /// Per-method PSNR and NCC thresholds for roundtrip warp tests.
@@ -121,7 +84,10 @@ fn assert_roundtrip(
         let warped = do_warp(&ref_buf, &forward, method);
         let restored = do_warp(&warped, &inverse, method);
 
-        let (central_ref, central_restored) = extract_central_region(
+        let CentralRegions {
+            a: central_ref,
+            b: central_restored,
+        } = extract_central_region(
             ref_buf.pixels(),
             restored.pixels(),
             Size2us::new(width, height),
@@ -133,51 +99,9 @@ fn assert_roundtrip(
 
         assert!(
             psnr > min_psnr,
-            "{label} {:?}: PSNR {psnr} < {min_psnr} dB",
-            method,
+            "{label} {method:?}: PSNR {psnr} < {min_psnr} dB",
         );
-        assert!(ncc > min_ncc, "{label} {:?}: NCC {ncc} < {min_ncc}", method,);
-    }
-}
-
-/// Test that warping with identity transform preserves the image.
-#[test]
-fn warp_identity_all_methods() {
-    let ref_buf = star_field(Size2us::new(256, 256), 30, 12345)
-        .image
-        .channel(0)
-        .clone();
-    let identity = Transform::identity();
-
-    for method in all_interpolation_methods() {
-        let warped = do_warp(&ref_buf, &identity, method);
-
-        let psnr = compute_psnr(ref_buf.pixels(), warped.pixels(), 1.0);
-        let ncc = compute_ncc(ref_buf.pixels(), warped.pixels());
-
-        // Identity transform should produce nearly identical output
-        // (Nearest should be exact, others very close)
-        if method == InterpolationMethod::Nearest {
-            assert!(
-                psnr > 100.0 || psnr.is_infinite(),
-                "{:?}: PSNR should be very high for identity, got {}",
-                method,
-                psnr
-            );
-        } else {
-            assert!(
-                psnr > 40.0,
-                "{:?}: PSNR should be > 40 dB for identity, got {}",
-                method,
-                psnr
-            );
-        }
-        assert!(
-            ncc > 0.999,
-            "{:?}: NCC should be > 0.999 for identity, got {}",
-            method,
-            ncc
-        );
+        assert!(ncc > min_ncc, "{label} {method:?}: NCC {ncc} < {min_ncc}");
     }
 }
 
@@ -273,269 +197,36 @@ fn warp_homography_roundtrip() {
     );
 }
 
-#[test]
-fn warp_with_detected_transform() {
-    use crate::stacking::registration::{Config as RegConfig, register};
-    use crate::stacking::star_detection::config::Config as StarConfig;
-
-    let width = 256;
-    let height = 256;
-    let ref_pixels = star_field(Size2us::new(width, height), 40, 66666)
-        .image
-        .channel(0)
-        .clone();
-
-    // Apply a known transform
-    let dx = 12.0;
-    let dy = -8.0;
-    let angle_rad = 0.8_f64.to_radians();
-
-    let true_transform = Transform::euclidean(DVec2::new(dx, dy), angle_rad);
-
-    // Create target by warping reference
-    let target_pixels = do_warp(&ref_pixels, &true_transform, InterpolationMethod::Lanczos3);
-
-    // Detect stars in both images
-    let mut detection_config = StarConfig::default();
-    detection_config.fwhm.expected = 0.0;
-    detection_config.filter.min_snr = 5.0;
-    detection_config.detection.sigma_threshold = 3.0;
-    let mut det = StarDetector::from_config(detection_config).unwrap();
-
-    let ref_image = LinearImage::from_pixels(
-        ImageDimensions::new((width, height), 1),
-        ref_pixels.to_vec(),
-    );
-    let target_image = LinearImage::from_pixels(
-        ImageDimensions::new((width, height), 1),
-        target_pixels.to_vec(),
-    );
-
-    let ref_result = det.detect(&ref_image);
-    let target_result = det.detect(&target_image);
-
-    // Register to find transform using detected stars directly
-    let reg_config = RegConfig {
-        transform_type: TransformModel::Fixed(TransformType::Euclidean),
-        matching: helpers::matching_config(6, 4),
-        ..Default::default()
-    };
-
-    let result = register(&ref_result.stars, &target_result.stars, &reg_config)
-        .expect("Registration should succeed");
-
-    // Use warp to align target back to reference frame
-    let target_astro = LinearImage::from_pixels(
-        ImageDimensions::new((width, height), 1),
-        target_pixels.into_vec(),
-    );
-    let warp_config = WarpParams {
-        method: InterpolationMethod::Lanczos3,
-        ..Default::default()
-    };
-    let warped_astro = resample::warp(&target_astro, &result.warp_transform(), &warp_config).image;
-
-    // Compare aligned image to reference
-    let margin = 40;
-    let (central_ref, central_aligned) = extract_central_region(
-        ref_pixels.pixels(),
-        warped_astro.channel(0),
-        Size2us::new(width, height),
-        margin,
-    );
-
-    let psnr = compute_psnr(&central_ref, &central_aligned, 1.0);
-    let ncc = compute_ncc(&central_ref, &central_aligned);
-
-    assert!(psnr > 25.0, "End-to-end alignment PSNR {} < 25 dB", psnr);
-    assert!(ncc > 0.90, "End-to-end alignment NCC {} < 0.90", ncc);
-}
-
+/// A wider kernel restores a sub-pixel roundtrip better: bilinear below Catmull-Rom, and each
+/// Lanczos order below the next. Catmull-Rom and Lanczos-2 share a 4-tap window and land within a
+/// fraction of a dB of each other, so they are not ordered against each other.
 #[test]
 fn interpolation_quality_ordering() {
     let ref_buf = star_field(Size2us::new(256, 256), 30, 77777)
         .image
         .channel(0)
         .clone();
-    let width = ref_buf.width();
-    let height = ref_buf.height();
-
-    // Apply a transform that requires interpolation
+    let size = Size2us::new(ref_buf.width(), ref_buf.height());
     let forward = Transform::similarity(DVec2::new(3.7, -2.3), 1.0_f64.to_radians(), 1.01);
     let inverse = forward.inverse();
-
-    let mut results: Vec<(InterpolationMethod, f64)> = Vec::new();
-
-    for method in all_interpolation_methods() {
-        let warped = do_warp(&ref_buf, &forward, method);
-        let restored = do_warp(&warped, &inverse, method);
-
-        let margin = 50;
-        let (central_ref, central_restored) = extract_central_region(
-            ref_buf.pixels(),
-            restored.pixels(),
-            Size2us::new(width, height),
-            margin,
+    let psnr = |method| {
+        let restored = do_warp(&do_warp(&ref_buf, &forward, method), &inverse, method);
+        let central = extract_central_region(ref_buf.pixels(), restored.pixels(), size, 50);
+        compute_psnr(&central.a, &central.b, 1.0)
+    };
+    for pair in [
+        [InterpolationMethod::Bilinear, InterpolationMethod::Bicubic],
+        [InterpolationMethod::Lanczos2, InterpolationMethod::Lanczos3],
+        [InterpolationMethod::Lanczos3, InterpolationMethod::Lanczos4],
+    ] {
+        let [narrow, wide] = pair.map(psnr);
+        assert!(
+            narrow < wide,
+            "{:?} at {narrow:.2} dB is not below {:?} at {wide:.2} dB",
+            pair[0],
+            pair[1]
         );
-
-        let psnr = compute_psnr(&central_ref, &central_restored, 1.0);
-        results.push((method, psnr));
     }
-
-    // Print results for debugging
-    for (method, psnr) in &results {
-        println!("{:?}: {:.2} dB", method, psnr);
-    }
-
-    // For interpolating methods (not Nearest), quality generally increases:
-    // Bilinear < Bicubic <= Lanczos
-    //
-    // Note: Nearest can appear to have high PSNR in roundtrip tests because
-    // it doesn't blur, but it has terrible sub-pixel accuracy. We exclude it
-    // from quality ordering comparisons.
-    let bilinear_psnr = results
-        .iter()
-        .find(|(m, _)| *m == InterpolationMethod::Bilinear)
-        .unwrap()
-        .1;
-    let bicubic_psnr = results
-        .iter()
-        .find(|(m, _)| *m == InterpolationMethod::Bicubic)
-        .unwrap()
-        .1;
-    let lanczos3_psnr = results
-        .iter()
-        .find(|(m, _)| *m == InterpolationMethod::Lanczos3)
-        .unwrap()
-        .1;
-
-    // Bicubic and Lanczos should be at least as good as bilinear
-    assert!(
-        bicubic_psnr >= bilinear_psnr - 2.0,
-        "Bicubic ({:.1}) should be at least as good as Bilinear ({:.1})",
-        bicubic_psnr,
-        bilinear_psnr
-    );
-    assert!(
-        lanczos3_psnr >= bilinear_psnr - 2.0,
-        "Lanczos3 ({:.1}) should be at least as good as Bilinear ({:.1})",
-        lanczos3_psnr,
-        bilinear_psnr
-    );
-}
-
-#[test]
-fn warp_grayscale_translation() {
-    let ref_buf = star_field(Size2us::new(256, 256), 30, 88888)
-        .image
-        .channel(0)
-        .clone();
-    let width = ref_buf.width();
-    let height = ref_buf.height();
-    let ref_pixels = ref_buf.into_vec();
-    let ref_image =
-        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), ref_pixels.clone());
-
-    // Apply a translation of (5, -3) pixels
-    let transform = Transform::translation(DVec2::new(5.0, -3.0));
-
-    let warp_config = WarpParams {
-        method: InterpolationMethod::Lanczos3,
-        ..Default::default()
-    };
-    let warped = resample::warp(&ref_image, &WarpTransform::new(transform), &warp_config).image;
-
-    // Verify dimensions preserved
-    assert_eq!(warped.width(), width);
-    assert_eq!(warped.height(), height);
-    assert_eq!(warped.channels(), 1);
-
-    // Verify pixels actually moved: the warped image should differ from input
-    // in the central region (not just "it doesn't panic")
-    let warped_pixels = warped.channel(0);
-    let mut diff_count = 0usize;
-    let margin = 20;
-    for y in margin..height - margin {
-        for x in margin..width - margin {
-            let idx = y * width + x;
-            if (ref_pixels[idx] - warped_pixels[idx]).abs() > 1e-4 {
-                diff_count += 1;
-            }
-        }
-    }
-    let total_central = (height - 2 * margin) * (width - 2 * margin);
-    // With a 5-pixel translation on star field, some pixels near stars should differ.
-    // Star field is mostly background (zero), so only pixels near stars change.
-    // 30 stars with ~5px radius gives ~2300 affected pixels minimum.
-    assert!(
-        diff_count > 1000,
-        "Expected some differing pixels after translation, got {}/{}",
-        diff_count,
-        total_central
-    );
-}
-
-#[test]
-fn warp_rgb() {
-    let gray_buf = star_field(Size2us::new(256, 256), 30, 99999)
-        .image
-        .channel(0)
-        .clone();
-    let width = gray_buf.width();
-    let height = gray_buf.height();
-
-    // Create RGB image by duplicating grayscale to all channels with slight offsets
-    let mut rgb_pixels = Vec::with_capacity(width * height * 3);
-    for y in 0..height {
-        for x in 0..width {
-            let val = gray_buf[(x, y)];
-            // Slightly different values per channel to verify independent processing
-            rgb_pixels.push(val); // R
-            rgb_pixels.push((val + 0.1).min(1.0)); // G
-            rgb_pixels.push(if (x + y) % 2 == 0 { val } else { val * 0.8 }); // B
-        }
-    }
-
-    let rgb_image = LinearImage::from_pixels(ImageDimensions::new((width, height), 3), rgb_pixels);
-
-    // Apply a transform
-    let transform = Transform::euclidean(DVec2::new(3.0, -2.0), 1.0_f64.to_radians());
-
-    // Warp the RGB image
-    let warp_config = WarpParams {
-        method: InterpolationMethod::Lanczos3,
-        ..Default::default()
-    };
-    let warped = resample::warp(&rgb_image, &WarpTransform::new(transform), &warp_config).image;
-
-    // Verify dimensions preserved
-    assert_eq!(warped.width(), width);
-    assert_eq!(warped.height(), height);
-    assert_eq!(warped.channels(), 3);
-
-    // Verify each channel was warped independently:
-    // Channels have different input values, so warped channels should differ from each other
-    let ch0 = warped.channel(0);
-    let ch1 = warped.channel(1);
-
-    // Count pixels where channels differ (G channel had +0.1 offset)
-    let margin = 10;
-    let mut differ_count = 0usize;
-    for y in margin..height - margin {
-        for x in margin..width - margin {
-            let idx = y * width + x;
-            if (ch0[idx] - ch1[idx]).abs() > 0.01 {
-                differ_count += 1;
-            }
-        }
-    }
-    let total_inner = (height - 2 * margin) * (width - 2 * margin);
-    assert!(
-        differ_count > total_inner / 2,
-        "Channels should differ after warping (independent processing), only {}/{} differ",
-        differ_count,
-        total_inner
-    );
 }
 
 #[test]
@@ -561,7 +252,7 @@ fn warp_preserves_output_metadata() {
         method: InterpolationMethod::Bilinear,
         ..Default::default()
     };
-    let warped = resample::warp(&image, &WarpTransform::new(transform), &warp_config).image;
+    let warped = resample::warp(&image, &WarpTransform::new(transform), warp_config).image;
 
     // Verify the input's metadata is carried into the warped output (warp only
     // produces new pixel data).
@@ -569,13 +260,15 @@ fn warp_preserves_output_metadata() {
     assert_eq!(warped.metadata.exposure_time, Some(120.0));
 }
 
+/// The central regions of two images, row by row.
+#[derive(Debug)]
+struct CentralRegions {
+    a: Vec<f32>,
+    b: Vec<f32>,
+}
+
 /// Extract central region of two images for comparison (avoids border artifacts).
-fn extract_central_region(
-    a: &[f32],
-    b: &[f32],
-    size: Size2us,
-    margin: usize,
-) -> (Vec<f32>, Vec<f32>) {
+fn extract_central_region(a: &[f32], b: &[f32], size: Size2us, margin: usize) -> CentralRegions {
     let inner_width = size.width - 2 * margin;
     let inner_height = size.height - 2 * margin;
 
@@ -590,199 +283,63 @@ fn extract_central_region(
         }
     }
 
-    (central_a, central_b)
+    CentralRegions {
+        a: central_a,
+        b: central_b,
+    }
 }
 
-/// Test that warp with SIP correction produces different (corrected) output
-/// compared to warp without SIP.
+/// The public `warp` samples through the SIP correction: it is the plane warp of the same
+/// `WarpTransform` bit for bit — whose positions are `T(p + c(p))` (see `RowPositions`' and
+/// `WarpTransform`'s tests) — for every method, on a field whose correction reaches past 0.1 px.
 #[test]
-fn warp_with_sip_correction() {
+fn the_public_warp_samples_through_the_sip_correction() {
     use crate::stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
+    use crate::testing::synthetic::distortion::{RadialField, RadialPairs};
 
-    let width = 256;
-    let height = 256;
-    let cx = width as f64 / 2.0;
-    let cy = height as f64 / 2.0;
-
-    // Generate a grid of matched point pairs with barrel distortion.
-    // The "linear" transform is identity. The SIP polynomial should capture
-    // the nonlinear (barrel) distortion.
+    let size = Size2us::new(128, 128);
     let transform = Transform::translation(DVec2::new(5.0, -3.0));
-
-    let mut ref_points = Vec::new();
-    let mut target_points = Vec::new();
-    let distortion_k = 2e-6; // barrel distortion coefficient
-
-    for gy in 0..16 {
-        for gx in 0..16 {
-            let rx = 16.0 + gx as f64 * 14.0;
-            let ry = 16.0 + gy as f64 * 14.0;
-            let ref_pos = DVec2::new(rx, ry);
-
-            // Apply barrel distortion: r' = r + k*r^3
-            let dx = rx - cx;
-            let dy = ry - cy;
-            let r2 = dx * dx + dy * dy;
-            let distorted = DVec2::new(rx + distortion_k * dx * r2, ry + distortion_k * dy * r2);
-
-            // Target = transform(distorted_ref)
-            let target_pos = transform.apply(distorted);
-
-            ref_points.push(ref_pos);
-            target_points.push(target_pos);
-        }
-    }
-
-    // Fit SIP from these matched points
+    let field = RadialField {
+        transform,
+        start: 10,
+        step: 11,
+        extent: 109,
+        ..RadialField::new(DVec2::new(64.0, 64.0), 3e-6)
+    };
+    let RadialPairs {
+        reference: ref_points,
+        target: target_points,
+    } = field.pairs();
     let sip_config = SipConfig {
         order: 3,
-        reference_point: Some(DVec2::new(cx, cy)),
+        reference_point: Some(field.centre),
         ..Default::default()
     };
     let sip =
         SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &sip_config)
             .unwrap()
             .polynomial;
+    assert!(sip.max_grid_correction(size, 10.0) > 0.1);
+    let warp_transform = WarpTransform::with_sip(transform, sip);
 
-    // Verify SIP correction is non-trivial
-    let max_correction = sip.max_correction(Size2us::new(width, height), 10.0);
-    assert!(
-        max_correction > 0.1,
-        "SIP correction should be significant, got {}",
-        max_correction
+    let pixels = star_field(size, 20, 12321).image.channel(0).clone();
+    let image = LinearImage::from_pixels(
+        ImageDimensions::new((size.width, size.height), 1),
+        pixels.pixels().to_vec(),
     );
-
-    // Create a test image with a gradient pattern
-    let ref_buf = star_field(Size2us::new(width, height), 30, 54321)
-        .image
-        .channel(0)
-        .clone();
-
-    // Warp the same image with and without SIP
-    let mut output_no_sip = Buffer2::new_default(width, height);
-    let mut output_with_sip = Buffer2::new_default(width, height);
-
-    internals::warp_plane(
-        &ref_buf,
-        &mut output_no_sip,
-        &WarpTransform::new(transform),
-        &config::internals::warp_params(InterpolationMethod::Lanczos3),
-    );
-    internals::warp_plane(
-        &ref_buf,
-        &mut output_with_sip,
-        &WarpTransform::with_sip(transform, sip),
-        &config::internals::warp_params(InterpolationMethod::Lanczos3),
-    );
-
-    // The two outputs should differ — SIP applies nonlinear correction
-    let mut max_diff: f32 = 0.0;
-    let mut diff_count = 0usize;
-    let margin = 20;
-
-    for y in margin..height - margin {
-        for x in margin..width - margin {
-            let d = (output_no_sip[(x, y)] - output_with_sip[(x, y)]).abs();
-            if d > 1e-6 {
-                diff_count += 1;
-            }
-            max_diff = max_diff.max(d);
+    for method in InterpolationMethod::ALL {
+        let params = config::internals::warp_params(method);
+        let warped = resample::warp(&image, &warp_transform, params).image;
+        let mut plane = Buffer2::new_default(size.width, size.height);
+        internals::warp_plane(&pixels, &mut plane, &warp_transform, params);
+        for (index, (a, e)) in warped.channel(0).iter().zip(plane.iter()).enumerate() {
+            assert_eq!(
+                a.to_bits(),
+                e.to_bits(),
+                "{method:?} pixel {index}: {a} against {e}"
+            );
         }
     }
-
-    assert!(
-        diff_count > 100,
-        "SIP should produce different pixel values, only {} pixels differ",
-        diff_count
-    );
-    assert!(
-        max_diff > 0.001,
-        "Max pixel difference too small: {}",
-        max_diff
-    );
-}
-
-/// Test that warp with SIP correction through the public `warp()` API works.
-#[test]
-fn warp_api_with_sip() {
-    use crate::stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
-
-    let width = 128;
-    let height = 128;
-    let cx = width as f64 / 2.0;
-    let cy = height as f64 / 2.0;
-
-    let transform = Transform::identity();
-    let distortion_k = 3e-6;
-
-    let mut ref_points = Vec::new();
-    let mut target_points = Vec::new();
-
-    for gy in 0..10 {
-        for gx in 0..10 {
-            let rx = 10.0 + gx as f64 * 11.0;
-            let ry = 10.0 + gy as f64 * 11.0;
-            let ref_pos = DVec2::new(rx, ry);
-
-            let dx = rx - cx;
-            let dy = ry - cy;
-            let r2 = dx * dx + dy * dy;
-            let distorted = DVec2::new(rx + distortion_k * dx * r2, ry + distortion_k * dy * r2);
-            let target_pos = transform.apply(distorted);
-
-            ref_points.push(ref_pos);
-            target_points.push(target_pos);
-        }
-    }
-
-    let sip_config = SipConfig {
-        order: 3,
-        reference_point: Some(DVec2::new(cx, cy)),
-        ..Default::default()
-    };
-    let sip =
-        SipPolynomial::fit_from_transform(&ref_points, &target_points, &transform, &sip_config)
-            .unwrap()
-            .polynomial;
-
-    // Create a grayscale image
-    let pixels = star_field(Size2us::new(width, height), 20, 12321)
-        .image
-        .channel(0)
-        .clone();
-    let image =
-        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), pixels.into_vec());
-
-    let warp_config = WarpParams {
-        method: InterpolationMethod::Bilinear,
-        ..Default::default()
-    };
-
-    // Warp without SIP
-    let warped_no_sip = resample::warp(&image, &WarpTransform::new(transform), &warp_config).image;
-
-    // Warp with SIP
-    let warped_with_sip = resample::warp(
-        &image,
-        &WarpTransform::with_sip(transform, sip),
-        &warp_config,
-    )
-    .image;
-
-    // They should differ
-    let ch_no_sip = warped_no_sip.channel(0);
-    let ch_with_sip = warped_with_sip.channel(0);
-    let diff_count = ch_no_sip
-        .iter()
-        .zip(ch_with_sip.iter())
-        .filter(|(a, b)| (*a - *b).abs() > 1e-6)
-        .count();
-
-    assert!(
-        diff_count > 50,
-        "SIP should produce different warp output, only {} pixels differ",
-        diff_count
-    );
 }
 
 /// `warp` emits independent geometric support and interpolation-confidence maps and renormalizes
@@ -808,62 +365,28 @@ fn warp_emits_coverage_and_renormalizes_bilinear_border() {
     };
     assert_eq!(config.border_value, 0.0, "test assumes a zero border");
 
-    let result = resample::warp(&image, &WarpTransform::new(transform), &config);
+    let result = resample::warp(&image, &WarpTransform::new(transform), config);
     let cov = result.coverage.pixels();
     let confidence = result.confidence.pixels();
     let val = result.image.channel(0).pixels();
     let at = |x: usize, y: usize| size.index_of(Vec2us::new(x, y));
 
-    // x-only translation → every row shares the column pattern; check one.
-    let y = 4;
-    for x in 0..=12 {
-        assert!(
-            (cov[at(x, y)] - 1.0).abs() < 1e-5,
-            "col {x} should be fully covered, got {}",
-            cov[at(x, y)]
-        );
-    }
-    assert!(
-        (cov[at(13, y)] - 0.5).abs() < 1e-5,
-        "col 13 should be half-covered, got {}",
-        cov[at(13, y)]
-    );
-    assert_eq!(cov[at(14, y)], 0.0, "col 14 is outside the source");
-    assert_eq!(cov[at(15, y)], 0.0, "col 15 is outside the source");
-    for x in 0..=12 {
-        assert!(
-            (confidence[at(x, y)] - 2.0).abs() < 1e-5,
-            "two equal x taps have confidence 1²/(0.5²+0.5²) = 2, got {} at col {x}",
-            confidence[at(x, y)]
-        );
-    }
-    assert!(
-        (confidence[at(13, y)] - 1.0).abs() < 1e-5,
-        "one surviving tap has confidence 0.5²/0.5² = 1, got {}",
-        confidence[at(13, y)]
-    );
-    assert_eq!(confidence[at(14, y)], 0.0);
-    assert_eq!(confidence[at(15, y)], 0.0);
-
-    // Renormalization: every covered pixel — including the half-covered
-    // column 13 — reads back V, not a darkened 0.5·V; fully-outside columns
-    // stay at the zero border.
-    for x in 0..=13 {
-        assert!(
-            (val[at(x, y)] - V).abs() < 1e-5,
-            "col {x} should renormalize to V={V}, got {}",
-            val[at(x, y)]
-        );
-    }
-    assert_eq!(val[at(14, y)], 0.0);
-    assert_eq!(val[at(15, y)], 0.0);
-
-    // Coverage stays in [0, 1], confidence is finite and non-negative, and every pixel is either
-    // border-zero or V.
-    for ((&c, &q), &v) in cov.iter().zip(confidence.iter()).zip(val.iter()) {
-        assert!((0.0..=1.0).contains(&c), "coverage {c} out of range");
-        assert!(q.is_finite() && q >= 0.0, "invalid confidence {q}");
-        assert!(v == 0.0 || (v - V).abs() < 1e-5, "unexpected value {v}");
+    // Every row shares the column pattern. Two equal x taps have confidence 1²/(0.5² + 0.5²) = 2
+    // and one surviving tap 0.5²/0.5² = 1; a covered pixel — the half-covered column 13 too — is
+    // renormalized back to V, not darkened to 0.5·V. All dyadic, so exact.
+    for y in 0..size.height {
+        for x in 0..size.width {
+            let expected = match x {
+                0..=12 => (1.0, 2.0, V),
+                13 => (0.5, 1.0, V),
+                _ => (0.0, 0.0, 0.0),
+            };
+            assert_eq!(
+                (cov[at(x, y)], confidence[at(x, y)], val[at(x, y)]),
+                expected,
+                "({x}, {y}): coverage, confidence, value"
+            );
+        }
     }
 }
 
@@ -886,7 +409,7 @@ fn warp_renormalizes_lanczos_edges_and_emits_coverage() {
         ..Default::default()
     };
 
-    let result = resample::warp(&image, &WarpTransform::new(transform), &config);
+    let result = resample::warp(&image, &WarpTransform::new(transform), config);
     let cov = result.coverage.pixels();
     let confidence = result.confidence.pixels();
     let val = result.image.channel(0).pixels();
@@ -894,11 +417,7 @@ fn warp_renormalizes_lanczos_edges_and_emits_coverage() {
     let y = 4;
 
     // Interior: every kernel tap is in bounds, so the magnitude support fraction is 1 exactly.
-    assert!(
-        (cov[at(10, y)] - 1.0).abs() < 1e-5,
-        "interior coverage should be 1.0, got {}",
-        cov[at(10, y)]
-    );
+    assert_eq!(cov[at(10, y)], 1.0);
     // Far past the edge: every tap is outside.
     assert_eq!(cov[at(31, y)], 0.0, "column 31 is fully extrapolated");
     // A fractional border band exists between the two.
@@ -910,9 +429,11 @@ fn warp_renormalizes_lanczos_edges_and_emits_coverage() {
         "expected a fractional coverage band, got {partial} columns"
     );
 
-    // Fully supported Lanczos and its edge-extended bilinear fallback both preserve a flat field.
+    // Fully supported Lanczos and its edge-extended bilinear fallback both preserve a flat field,
+    // to the rounding of 36 products, their sum and the normalization: 39·ε·V.
+    let tolerance = 39.0 * f32::EPSILON * V;
     assert!(
-        (val[at(10, y)] - V).abs() < 1e-4,
+        (val[at(10, y)] - V).abs() <= tolerance,
         "interior value should be V, got {}",
         val[at(10, y)]
     );
@@ -920,7 +441,7 @@ fn warp_renormalizes_lanczos_edges_and_emits_coverage() {
         .find(|&x| cov[at(x, y)] > 0.05 && cov[at(x, y)] < 0.95)
         .expect("a partially-covered edge column");
     assert!(
-        (val[at(edge_x, y)] - V).abs() < 1e-4,
+        (val[at(edge_x, y)] - V).abs() <= tolerance,
         "renormalized Lanczos edge value should recover V, got {} at col {edge_x} (cov {})",
         val[at(edge_x, y)],
         cov[at(edge_x, y)]

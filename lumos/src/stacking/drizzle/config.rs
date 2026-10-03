@@ -10,12 +10,12 @@ pub enum DrizzleKernel {
     /// Square kernel: true polygon clipping via Sutherland-Hodgman / Green's theorem.
     /// Transforms all 4 corners of each input pixel drop, computes exact quadrilateral-
     /// to-output-pixel overlap area. Correct for any transform including rotation and shear.
-    /// Reference: STScI cdrizzlebox.c `do_kernel_square` / `boxer` / `sgarea`.
+    /// Reference: `STScI` cdrizzlebox.c `do_kernel_square` / `boxer` / `sgarea`.
     Square,
     /// Turbo kernel: axis-aligned rectangular drop centered on the transformed pixel center.
     /// Approximation of true square kernel — always aligned with output X/Y axes regardless
     /// of rotation. Fast and adequate when rotation between frames is small. Default.
-    /// (Named "turbo" in STScI DrizzlePac; "square" there uses full polygon clipping.)
+    /// (Named "turbo" in `STScI` `DrizzlePac`; "square" there uses full polygon clipping.)
     #[default]
     Turbo,
     /// Point kernel - single pixel contribution.
@@ -27,6 +27,17 @@ pub enum DrizzleKernel {
     /// Lanczos kernel for high-quality interpolation.
     /// Best quality but slowest. Only valid at pixfrac=1.0, scale=1.0.
     Lanczos,
+}
+
+impl DrizzleKernel {
+    /// Every kernel.
+    pub const ALL: [Self; 5] = [
+        Self::Square,
+        Self::Turbo,
+        Self::Point,
+        Self::Gaussian,
+        Self::Lanczos,
+    ];
 }
 
 /// Configuration for Drizzle stacking.
@@ -101,19 +112,22 @@ impl DrizzleConfig {
     }
 
     /// Set pixel fraction.
-    pub fn with_pixfrac(mut self, pixfrac: f32) -> Self {
+    #[must_use]
+    pub const fn with_pixfrac(mut self, pixfrac: f32) -> Self {
         self.pixfrac = pixfrac;
         self
     }
 
     /// Set kernel type.
-    pub fn with_kernel(mut self, kernel: DrizzleKernel) -> Self {
+    #[must_use]
+    pub const fn with_kernel(mut self, kernel: DrizzleKernel) -> Self {
         self.kernel = kernel;
         self
     }
 
     /// Set minimum coverage threshold.
-    pub fn with_min_weight_fraction(mut self, min_weight_fraction: f32) -> Self {
+    #[must_use]
+    pub const fn with_min_weight_fraction(mut self, min_weight_fraction: f32) -> Self {
         self.min_weight_fraction = min_weight_fraction;
         self
     }

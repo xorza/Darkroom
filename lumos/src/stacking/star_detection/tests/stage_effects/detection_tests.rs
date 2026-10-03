@@ -1,199 +1,137 @@
-//! Detection/thresholding stage tests.
-//!
-//! Tests the peak detection and thresholding logic.
+//! Thresholding and the area cut, through `detect_stars_test`, against the truth that rendered the
+//! frame: around every isolated source the candidate count is exact.
 
-use crate::stacking::star_detection::config::background_config::BackgroundConfig;
+#![expect(
+    clippy::cast_sign_loss,
+    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
+)]
+
 use crate::stacking::star_detection::config::detection_config::DetectionConfig;
 use crate::stacking::star_detection::detector::stages::detect::internals::detect_stars_test;
-use crate::stacking::star_detection::tests::Scenario;
+use crate::stacking::star_detection::tests::stage_effects::{background_estimate, peaks};
+use crate::stacking::star_detection::tests::{ISOLATION, Scenario, isolated, near};
 use crate::testing::init_tracing;
 use crate::testing::prelude::*;
-use crate::testing::visual::{ToneMap, gray_to_rgb, save, save_image};
-use common::internals::test_output_path;
+use crate::testing::visual::{ToneMap, gray_to_rgb, save_image};
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
 
-use crate::stacking::star_detection::tests::stage_effects::{
-    TILE_SIZE, background_estimate, matched_truths,
-};
+/// How far from a star's centre its candidate's peak pixel can lie. Noiseless, the peak is the
+/// nearest pixel, within √2/2; noise can lift a neighbour over it, but every pixel past 2 px holds
+/// at most e^(−4/2s²) = 0.5 of the star's peak (s = 1.70 px) against the nearest one's ≥ 0.92 —
+/// a gap of ≥ 6σ for the faintest star these tests hold to a candidate (16σ).
+const PEAK_RADIUS: f64 = 2.0;
 
-/// Create a detection overlay image showing candidates.
-fn create_detection_overlay(
-    pixels: &[f32],
-    size: Size2us,
-    candidates: &[(usize, usize)],
-    ground_truth: &[(f32, f32)],
-) -> imaginarium::Image {
-    let mut img = gray_to_rgb(pixels, size, ToneMap::AutoRange);
-
-    // Draw ground truth in blue
-    let blue = Color::rgb(0.3, 0.3, 1.0);
-    for (x, y) in ground_truth {
-        draw_circle(&mut img, Vec2::new(*x, *y), 8.0, blue, 1.0);
-    }
-
-    // Draw candidates in green
-    let green = Color::GREEN;
-    for &(x, y) in candidates {
-        draw_cross(&mut img, Vec2::new(x as f32, y as f32), 3.0, green, 1.0);
-    }
-
-    img
-}
-
-/// Test detection on sparse star field.
+/// Every isolated star of a sparse field is one candidate, peaked at its nearest pixel, and no
+/// candidate lies anywhere else: the default threshold over the scenario's bright stars, ≥ 5 px
+/// above it, keeps each one whole and the 4σ sky noise below the 5-px area floor.
 #[test]
-
-fn detection_sparse() {
+fn every_isolated_star_is_one_candidate() {
     init_tracing();
-
-    let size = Size2us::new(256, 256);
     let frame = Scenario {
         num_stars: 15,
         ..Default::default()
     }
     .frame();
     let pixels = frame.image.channel(0).clone();
-    let ground_truth = frame.truth.sources.clone();
-
-    // Save input
-    save(
-        pixels.pixels(),
-        size,
-        &test_output_path("synthetic_starfield/stage_det_sparse_input.png"),
-        ToneMap::Clamp,
+    let size = Size2us::new(pixels.width(), pixels.height());
+    let background = background_estimate(&pixels);
+    let candidates = detect_stars_test(
+        &background.residual_of(&pixels),
+        &background.sky_noise(),
+        &DetectionConfig::default(),
     );
+    let found = peaks(&candidates);
+    let stars: Vec<DVec2> = frame.truth.sources.iter().map(|s| s.pos).collect();
 
-    // Estimate background
-    let background = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: TILE_SIZE,
-            ..Default::default()
-        },
-    );
-
-    // Detect candidates
-    let det_config = DetectionConfig::default();
-    let candidates = detect_stars_test(&pixels, &background, &det_config);
-
-    println!("Ground truth: {} stars", ground_truth.len());
-    println!("Detected candidates: {}", candidates.len());
-
-    // Create overlay image
-    let truth_positions: Vec<(f32, f32)> = ground_truth
-        .iter()
-        .map(|s| (s.pos.x as f32, s.pos.y as f32))
-        .collect();
-    let candidate_positions: Vec<(usize, usize)> =
-        candidates.iter().map(|c| (c.peak.x, c.peak.y)).collect();
-    let overlay = create_detection_overlay(
-        pixels.pixels(),
-        size,
-        &candidate_positions,
-        &truth_positions,
-    );
-    save_image(
-        overlay,
-        &test_output_path("synthetic_starfield/stage_det_sparse_overlay.png"),
-    );
-
-    // Calculate detection rate
-    let match_radius = 5.0;
-    let mut matched = 0;
-    for (tx, ty) in &truth_positions {
-        for c in &candidates {
-            let dx = c.peak.x as f32 - tx;
-            let dy = c.peak.y as f32 - ty;
-            let dist = (dx * dx + dy * dy).sqrt();
-            if dist < match_radius {
-                matched += 1;
-                break;
-            }
-        }
+    let mut overlay = gray_to_rgb(pixels.pixels(), size, ToneMap::AutoRange);
+    for star in &stars {
+        draw_circle(
+            &mut overlay,
+            star.as_vec2(),
+            8.0,
+            Color::rgb(0.3, 0.3, 1.0),
+            1.0,
+        );
     }
+    for peak in &found {
+        draw_cross(&mut overlay, peak.as_vec2(), 3.0, Color::GREEN, 1.0);
+    }
+    save_image(overlay, "synthetic_starfield/stage_det_sparse_overlay");
 
-    let detection_rate = matched as f32 / ground_truth.len() as f32;
-    println!("Detection rate: {:.1}%", detection_rate * 100.0);
-
-    assert!(
-        detection_rate > 0.9,
-        "Detection rate {:.1}% should be > 90%",
-        detection_rate * 100.0
-    );
+    let lone = isolated(&stars, &[], size);
+    assert!(lone.len() >= 10, "{} of 15 stars are isolated", lone.len());
+    for star in &lone {
+        assert_eq!(near(*star, &found, PEAK_RADIUS), 1, "star at {star}");
+        assert_eq!(
+            near(*star, &found, ISOLATION),
+            1,
+            "around the star at {star}"
+        );
+    }
+    for peak in &found {
+        assert_eq!(
+            near(*peak, &stars, ISOLATION),
+            1,
+            "the candidate at {peak} is no star's"
+        );
+    }
 }
 
-/// Detection finds the same stars when every sample is scaled by a large constant factor.
-///
-/// The decoder's span sets a frame's magnitude — a 32-bit integer FITS is divided by `2³² − 1` and
-/// arrives near `1e-8`, five orders below a RAW frame. Every threshold in the detector is stated in
-/// σ, but the floors that keep a degenerate σ from collapsing them were once fixed constants, and a
-/// frame whose whole signal range sat below one of them detected nothing at all. Scaling a field
-/// that detects normally and requiring the identical result is what holds those floors to the
-/// frame.
+/// Detection is the same when every sample is scaled by 2⁻²⁰: the decoder's span sets a frame's
+/// magnitude — a 32-bit integer FITS arrives near 1e-8 — and every threshold is stated in σ, so
+/// nothing may hinge on an absolute constant. A power of two scales every sum, median and product
+/// of the estimate and the detector exactly, so the candidates are identical — peak, box and area
+/// — and each peak value is the native one times 2⁻²⁰, bit for bit.
 #[test]
 fn detection_is_invariant_to_the_frames_sample_scale() {
-    // Far enough to put a background near 1e-2 down at the 1e-7 an integer FITS reaches, and well
-    // below the 1e-6 the noise floor used to be pinned at.
-    const SCALE: f32 = 1e-5;
-
-    let frame = Scenario {
+    let scale = 2.0f32.powi(-20);
+    let pixels = Scenario {
         num_stars: 15,
         ..Default::default()
     }
-    .frame();
-    let pixels = frame.image.channel(0).clone();
-    let truths: Vec<(f32, f32)> = frame
-        .truth
-        .sources
-        .iter()
-        .map(|s| (s.pos.x as f32, s.pos.y as f32))
-        .collect();
-    let config = DetectionConfig::default();
-
-    let native = detect_stars_test(&pixels, &background_estimate(&pixels), &config);
-    let native_matched = matched_truths(&native, &truths, 5.0);
-    assert!(
-        native_matched > 0,
-        "fixture must detect something at its own scale"
-    );
-
+    .frame()
+    .image
+    .channel(0)
+    .clone();
     let scaled = Buffer2::new(
         pixels.width(),
         pixels.height(),
-        pixels.pixels().iter().map(|&v| v * SCALE).collect(),
+        pixels.pixels().iter().map(|&v| v * scale).collect(),
     );
-    // The estimate scales with the frame rather than bottoming out: at 1e-5 the tile σ and the
-    // floor derived from it are each exactly 1e-5 of their native values.
-    let scaled_bg = background_estimate(&scaled);
-    let native_bg = background_estimate(&pixels);
-    assert!(
-        (scaled_bg.noise_floor / native_bg.noise_floor - SCALE).abs() < SCALE * 1e-3,
-        "noise floor {:e} did not track the frame from {:e}",
-        scaled_bg.noise_floor,
-        native_bg.noise_floor
-    );
+    let config = DetectionConfig::default();
+    let detect = |pixels: &Buffer2<f32>| {
+        let background = background_estimate(pixels);
+        let candidates = detect_stars_test(
+            &background.residual_of(pixels),
+            &background.sky_noise(),
+            &config,
+        );
+        (background.noise_floor, candidates)
+    };
+    let (native_floor, native) = detect(&pixels);
+    let (scaled_floor, scaled) = detect(&scaled);
 
-    let scaled_detected = detect_stars_test(&scaled, &scaled_bg, &config);
-    assert_eq!(
-        matched_truths(&scaled_detected, &truths, 5.0),
-        native_matched,
-        "scaling every sample by {SCALE} changed the detections ({} vs {native_matched})",
-        matched_truths(&scaled_detected, &truths, 5.0)
-    );
+    assert!(!native.is_empty(), "the fixture detects at its own scale");
+    assert_eq!(scaled_floor, native_floor * scale);
+    assert_eq!(scaled.len(), native.len());
+    for (scaled, native) in scaled.iter().zip(&native) {
+        assert_eq!(
+            (scaled.peak, scaled.bbox, scaled.area),
+            (native.peak, native.bbox, native.area)
+        );
+        assert_eq!(scaled.peak_value, native.peak_value * scale);
+    }
 }
 
-/// Test detection with different sigma thresholds.
+/// The threshold decides per star: at `k`σ an isolated star whose noiseless residual peak `A` is at
+/// least `2·(k + 5)`σ is a candidate — its footprint above `(k + 5)`σ, where 5σ of noise cannot
+/// sink a pixel, spans r² = 2s²·ln 2 = 4 px² around the peak (s = 1.70 px), ≥ 12 pixels against
+/// the 5-px area floor — and one whose `A` is at most `(k − 5)`σ is not, as no pixel of it can
+/// rise 5σ to the threshold. The noiseless peak is the render's clean signal less the estimated
+/// sky; σ is the map's at the peak. Each sweep step moves stars from the first group to the second.
 #[test]
-
-fn detection_thresholds() {
-    init_tracing();
-
-    let width = 256;
-    let height = 256;
-
-    // Field with a mix of bright and faint stars over a shallow (noisy) well, so the faint half
-    // sits near the threshold and drops out as σ rises.
+fn the_threshold_decides_per_star() {
     let frame = Scenario {
         num_stars: 50,
         flux: (1.0, 10.0),
@@ -202,82 +140,44 @@ fn detection_thresholds() {
     }
     .frame();
     let pixels = frame.image.channel(0).clone();
-    let ground_truth = frame.truth.sources.clone();
+    let size = Size2us::new(pixels.width(), pixels.height());
+    let background = background_estimate(&pixels);
+    let residual = background.residual_of(&pixels);
+    let sky = background.sky_noise();
+    let stars: Vec<DVec2> = frame.truth.sources.iter().map(|s| s.pos).collect();
+    let lone = isolated(&stars, &[], size);
 
-    // Save input
-    save(
-        pixels.pixels(),
-        Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_det_thresholds_input.png"),
-        ToneMap::Clamp,
-    );
-
-    // Estimate background
-    let background = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: TILE_SIZE,
-            ..Default::default()
-        },
-    );
-
-    // The detection threshold is the central knob: raising σ must yield strictly fewer
-    // candidates overall and never more matches — a detector ignoring `sigma_threshold` would
-    // return a flat count across the sweep.
-    let truth_positions: Vec<(f32, f32)> = ground_truth
-        .iter()
-        .map(|s| (s.pos.x as f32, s.pos.y as f32))
-        .collect();
-    let mut counts: Vec<(f32, usize, usize)> = Vec::new();
-    for sigma in [2.0, 3.0, 5.0, 10.0] {
-        let det_config = DetectionConfig {
-            sigma_threshold: sigma,
+    let mut previous_detected = usize::MAX;
+    for k in [3.0f32, 5.0, 10.0, 20.0, 40.0] {
+        let config = DetectionConfig {
+            sigma_threshold: k,
             ..Default::default()
         };
-        let candidates = detect_stars_test(&pixels, &background, &det_config);
-        let matched = matched_truths(&candidates, &truth_positions, 5.0);
-        println!(
-            "sigma {sigma}: candidates {}, matched {matched}",
-            candidates.len()
-        );
-        counts.push((sigma, candidates.len(), matched));
+        let found = peaks(&detect_stars_test(&residual, &sky, &config));
+        let (mut detected, mut missed) = (0, 0);
+        for star in &lone {
+            let pixel = (star.x.round() as usize, star.y.round() as usize);
+            let peak = frame.truth.clean[pixel] - background.background[pixel];
+            let sigma = sky.noise[pixel].max(sky.floor);
+            if peak >= 2.0 * (k + 5.0) * sigma {
+                assert_eq!(near(*star, &found, PEAK_RADIUS), 1, "{k}σ: star at {star}");
+                detected += 1;
+            } else if peak <= (k - 5.0) * sigma {
+                assert_eq!(near(*star, &found, ISOLATION), 0, "{k}σ: star at {star}");
+                missed += 1;
+            }
+        }
+        assert!(detected <= previous_detected, "{k}σ: {detected} detected");
+        assert!(detected + missed > 0, "{k}σ decides no star");
+        previous_detected = detected;
     }
-    for w in counts.windows(2) {
-        assert!(
-            w[1].1 <= w[0].1,
-            "candidate count must not rise with threshold: σ {}→{} gave {}→{}",
-            w[0].0,
-            w[1].0,
-            w[0].1,
-            w[1].1
-        );
-        assert!(
-            w[1].2 <= w[0].2,
-            "match count must not rise with threshold: σ {}→{} matched {}→{}",
-            w[0].0,
-            w[1].0,
-            w[0].2,
-            w[1].2
-        );
-    }
-    assert!(
-        counts[0].1 > counts[3].1,
-        "2σ must detect strictly more candidates than 10σ: {} vs {}",
-        counts[0].1,
-        counts[3].1
-    );
 }
 
-/// Test detection area filtering.
+/// The area floor tells a cosmic ray from a star: a ray is one pixel, or three where it bled
+/// sideways, and a star's footprint is dozens. With the floor at 1 every isolated ray is a
+/// candidate; at 4 none is; every isolated star is one in both.
 #[test]
-
-fn detection_area_filter() {
-    init_tracing();
-
-    let width = 256;
-    let height = 256;
-
-    // Field with cosmic rays (small, sharp features) to exercise the area filter.
+fn the_area_floor_drops_cosmic_rays_and_keeps_stars() {
     let frame = Scenario {
         num_stars: 30,
         cosmic_rays: 20,
@@ -285,56 +185,42 @@ fn detection_area_filter() {
     }
     .frame();
     let pixels = frame.image.channel(0).clone();
-    let ground_truth = frame.truth.sources.clone();
-
-    // Save input
-    save(
-        pixels.pixels(),
-        Size2us::new(width, height),
-        &test_output_path("synthetic_starfield/stage_det_area_filter_input.png"),
-        ToneMap::Clamp,
-    );
-
-    // Estimate background
-    let background = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: TILE_SIZE,
-            ..Default::default()
-        },
-    );
-
-    // The area filter must discriminate small, sharp cosmic rays from real stars: a strict
-    // `[9,200]` minimum-area cut removes the single-pixel CR detections that a permissive
-    // `[3,1000]` cut keeps, while real stars (larger footprints) survive both.
-    let truth_positions: Vec<(f32, f32)> = ground_truth
+    let size = Size2us::new(pixels.width(), pixels.height());
+    let background = background_estimate(&pixels);
+    let residual = background.residual_of(&pixels);
+    let stars: Vec<DVec2> = frame.truth.sources.iter().map(|s| s.pos).collect();
+    let rays: Vec<DVec2> = frame
+        .truth
+        .cosmic_rays
         .iter()
-        .map(|s| (s.pos.x as f32, s.pos.y as f32))
+        .map(|ray| DVec2::new(ray.x as f64, ray.y as f64))
         .collect();
-    let run = |min_area: usize, max_area: usize| -> (usize, usize) {
-        let det_config = DetectionConfig {
+    let (lone_stars, lone_rays) = (isolated(&stars, &rays, size), isolated(&rays, &stars, size));
+    assert!(lone_rays.len() >= 5, "{} isolated rays", lone_rays.len());
+
+    for (min_area, rays_kept) in [(1, true), (4, false)] {
+        let config = DetectionConfig {
             min_area,
-            max_area,
             ..Default::default()
         };
-        let candidates = detect_stars_test(&pixels, &background, &det_config);
-        let matched = matched_truths(&candidates, &truth_positions, 5.0);
-        let false_positives = candidates.len().saturating_sub(matched);
-        (matched, false_positives)
-    };
-    let (permissive_matched, permissive_fp) = run(3, 1000);
-    let (strict_matched, strict_fp) = run(9, 200);
-    println!(
-        "permissive: matched {permissive_matched}, FP {permissive_fp}; strict: matched {strict_matched}, FP {strict_fp}"
-    );
-
-    assert!(
-        strict_fp < permissive_fp,
-        "strict area filter should reject CR false positives: strict FP {strict_fp} vs permissive {permissive_fp}"
-    );
-    // Real stars survive the strict filter (they are larger than the CR area cut).
-    assert!(
-        strict_matched >= permissive_matched.saturating_sub(2),
-        "strict filter should keep real stars: strict {strict_matched} vs permissive {permissive_matched}"
-    );
+        let found = peaks(&detect_stars_test(
+            &residual,
+            &background.sky_noise(),
+            &config,
+        ));
+        for ray in &lone_rays {
+            assert_eq!(
+                near(*ray, &found, PEAK_RADIUS),
+                usize::from(rays_kept),
+                "area ≥ {min_area}: ray at {ray}"
+            );
+        }
+        for star in &lone_stars {
+            assert_eq!(
+                near(*star, &found, PEAK_RADIUS),
+                1,
+                "area ≥ {min_area}: star at {star}"
+            );
+        }
+    }
 }

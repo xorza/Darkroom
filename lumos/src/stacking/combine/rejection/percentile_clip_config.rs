@@ -4,6 +4,7 @@
 use crate::error::InvalidConfigField;
 use crate::stacking::combine::rejection::begin_rejection;
 use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
+use std::ops::Range;
 
 /// Configuration for percentile clipping.
 ///
@@ -27,7 +28,7 @@ impl Default for PercentileClipConfig {
 }
 
 impl PercentileClipConfig {
-    pub fn new(low_percentile: f32, high_percentile: f32) -> Self {
+    pub const fn new(low_percentile: f32, high_percentile: f32) -> Self {
         Self {
             low_percentile,
             high_percentile,
@@ -35,7 +36,7 @@ impl PercentileClipConfig {
     }
 
     /// Validate that each end clips a sane share and that together they leave survivors.
-    pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
+    pub(super) fn validate(self) -> Result<(), InvalidConfigField> {
         InvalidConfigField::finite(
             "low_percentile",
             "finite and between 0 and 50",
@@ -62,7 +63,11 @@ impl PercentileClipConfig {
     /// Returns the half-open range of elements to keep after clipping
     /// the lowest `low_percentile`% and highest `high_percentile`%.
     /// Guarantees at least one element survives.
-    pub fn surviving_range(&self, n: usize) -> std::ops::Range<usize> {
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "validate holds both percentiles in [0, 50]"
+    )]
+    pub fn surviving_range(&self, n: usize) -> Range<usize> {
         let low_count = ((self.low_percentile / 100.0) * n as f32).floor() as usize;
         let high_count = ((self.high_percentile / 100.0) * n as f32).floor() as usize;
         let start = low_count;
@@ -79,7 +84,7 @@ impl PercentileClipConfig {
     ///
     /// Sorts values (with index co-array) and moves the surviving middle range
     /// to `values[..remaining]` and `indices[..remaining]`.
-    pub(super) fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
+    pub(super) fn reject(self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
         if let Some(survivors) = begin_rejection(values, scratch, 3) {
             return survivors;
         }

@@ -8,7 +8,7 @@ use palantir::{Background, Spacing, TextEditTheme, TextStyle};
 /// look is stripped to the bare editor surface (no padding/margin, no
 /// border, transparent fill) so the field's `Hug` height equals its
 /// plain `Text` twin and the row doesn't reshape on a swap.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub(crate) struct InlineRenameTheme {
     pub(crate) text_edit: TextEditTheme,
 }
@@ -24,20 +24,13 @@ impl InlineRenameTheme {
     }
 
     /// The flattening half of [`Self::from_palette`], over an existing
-    /// text-edit bundle rather than a palette — how an
-    /// [`InlineRename`](crate::gui::widgets::inline_rename::InlineRename)
-    /// with no `.style(…)` derives its look from ambient
-    /// [`palantir::Theme::text_edit`].
-    ///
-    /// Split out so the ambient path and this theme's own slot are
-    /// stripped by one function: a visual added here can't be flattened
-    /// in the configured bundle and left standing in the fallback.
+    /// text-edit bundle.
     ///
     /// [`Background::NONE`] wholesale rather than clearing fill and stroke
     /// by hand: `text_edit` may be an app-configured bundle, and a shadow
     /// or radius it carries would otherwise outlive the flattening and
     /// paint around a field that is supposed to read as a plain label.
-    pub(crate) fn flattened(text_edit: &TextEditTheme) -> Self {
+    fn flattened(text_edit: &TextEditTheme) -> Self {
         let mut style = TextEditTheme {
             defaults: SlotDefaults {
                 padding: Spacing::ZERO,

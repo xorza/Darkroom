@@ -1,5 +1,11 @@
 //! Filesystem watcher node library and its per-node watcher state.
 
+use std::fmt;
+use std::fmt::Debug;
+use std::fmt::Formatter;
+use std::fs;
+use std::future;
+use std::io;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -7,15 +13,16 @@ use std::time::Duration;
 use notify::event::ModifyKind;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::Notify;
+use tokio::task;
 use tokio::time::timeout;
 
 use scenarium::Invocation;
+use scenarium::async_lambda;
 use scenarium::{ConstValue, DataType, FsPathConfig, FsPathMode};
-use scenarium::{
-    EventLambda, Func, FuncId, FuncInput, FuncLambda, FuncOutput, InvokeError, Library,
-};
+use scenarium::{EventLambda, Func, FuncId, FuncInput, FuncOutput, InvokeError, Library};
 
-const WATCH_DIRECTORY_FUNC_ID: FuncId = FuncId::from_u128(0x1318c24c2ac74a9aa454281bdbdc4ffc);
+const WATCH_DIRECTORY_FUNC_ID: FuncId =
+    FuncId::from_u128(0x1318_c24c_2ac7_4a9a_a454_281b_dbdc_4ffc);
 
 /// Per-node state shared between the func lambda (which builds the OS watcher)
 /// and the `changed` event lambda (which awaits the next notification).
@@ -43,7 +50,7 @@ enum WatchError {
     Inspect {
         path: String,
         #[source]
-        source: std::io::Error,
+        source: io::Error,
     },
     #[error("watch path is not a directory: {path:?}")]
     NotDirectory { path: String },
@@ -59,7 +66,7 @@ enum WatchError {
 
 impl WatchState {
     fn new(path: &str, recursive: bool, debounce: Duration) -> Result<Self, WatchError> {
-        let metadata = std::fs::metadata(path).map_err(|source| WatchError::Inspect {
+        let metadata = fs::metadata(path).map_err(|source| WatchError::Inspect {
             path: path.to_owned(),
             source,
         })?;
@@ -75,7 +82,7 @@ impl WatchState {
         let callback_path = owned_path.clone();
         let mut watcher =
             notify::recommended_watcher(move |res: notify::Result<notify::Event>| match res {
-                Ok(event) if is_content_change(&event.kind) => callback_signal.notify_one(),
+                Ok(event) if is_content_change(event.kind) => callback_signal.notify_one(),
                 Ok(_) => {}
                 Err(error) => tracing::warn!(
                     path = %callback_path,
@@ -105,8 +112,8 @@ impl WatchState {
     }
 }
 
-impl std::fmt::Debug for WatchState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Debug for WatchState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("WatchState")
             .field("path", &self.path)
             .field("recursive", &self.recursive)
@@ -123,9 +130,9 @@ impl std::fmt::Debug for WatchState {
 /// catch-alls. The one carve-out is metadata-only `Modify`s (access/write time,
 /// permissions, ownership, xattrs) — that's where an access-time bump lands, so
 /// it's filtered too. `Modify(Any)` is still kept: some backends (macOS
-/// FSEvents) report a real write that coarsely, and dropping it would swallow
+/// `FSEvents`) report a real write that coarsely, and dropping it would swallow
 /// genuine changes.
-fn is_content_change(kind: &EventKind) -> bool {
+const fn is_content_change(kind: EventKind) -> bool {
     match kind {
         EventKind::Modify(ModifyKind::Metadata(_)) => false,
         EventKind::Create(_) | EventKind::Remove(_) | EventKind::Modify(_) => true,
@@ -143,7 +150,57 @@ pub fn fs_watch_library() -> Library {
     let mut library = Library::default();
 
     library.add(
-        Func::new(WATCH_DIRECTORY_FUNC_ID, "Watch Directory")
+        Func::new(WATCH_DIRECTORY_FUNC_ID, "Watch Directory", async_lambda!(move |Invocation { event_state, inputs, outputs, .. }| {
+                        debug_assert_eq!(inputs.len(), 3);
+                        debug_assert_eq!(outputs.len(), 1);
+                        let path = inputs[0]
+                            .required_fs_path()
+                            .to_string();
+                        let recursive = inputs[1]
+                            .required_bool();
+                        let debounce = Duration::from_millis(
+                            // A negative debounce is none.
+                            u64::try_from(inputs[2].required_i64())
+                            .unwrap_or(0),
+                        );
+
+                        if path.is_empty() {
+                            // Cleared path: tear the previous watcher down, or the old
+                            // directory keeps firing `Changed` (and holding its OS watch)
+                            // while the node outputs an empty path.
+                            event_state.lock().await.clear();
+                        } else {
+                            let needs_rebuild = event_state
+                                .lock()
+                                .await
+                                .get::<WatchState>()
+                                .is_none_or(|w| w.path != path || w.recursive != recursive);
+                            if needs_rebuild {
+                                let watch_path = path.clone();
+                                // Watch registration can block on slow or network filesystems.
+                                let replacement = task::spawn_blocking(move || {
+                                    WatchState::new(&watch_path, recursive, debounce)
+                                })
+                                .await
+                                .expect("filesystem watcher setup task panicked");
+                                let mut guard = event_state.lock().await;
+                                guard.clear();
+                                guard.set(replacement.map_err(InvokeError::external)?);
+                            } else {
+                                // Debounce is consumer-side — retune without
+                                // tearing down the live OS watch.
+                                event_state
+                                    .lock()
+                                    .await
+                                    .get_mut::<WatchState>()
+                                    .unwrap()
+                                    .debounce = debounce;
+                            }
+                        }
+
+                        outputs[0] = ConstValue::FsPath(path).into();
+                        Ok(())
+                    }))
             .category("System")
             .description(
                 "Passes a directory through unchanged and fires `Changed` when files are added, \
@@ -194,71 +251,11 @@ pub fn fs_watch_library() -> Library {
                                 {}
                             }
                             // No watcher (e.g. empty/invalid path): never fire.
-                            None => std::future::pending::<()>().await,
+                            None => future::pending::<()>().await,
                         }
                     })
                 }),
-            )
-            .lambda(FuncLambda::new(
-                move |Invocation { event_state, inputs, outputs, .. }| {
-                    Box::pin(async move {
-                        debug_assert_eq!(inputs.len(), 3);
-                        debug_assert_eq!(outputs.len(), 1);
-                        let path = inputs[0]
-                            .as_fs_path()
-                            .expect("directory input type is validated at the compile boundary")
-                            .to_string();
-                        let recursive = inputs[1]
-                            .as_bool()
-                            .expect("recursive input type is validated at the compile boundary");
-                        let debounce = Duration::from_millis(
-                            inputs[2]
-                                .as_i64()
-                                .expect(
-                                    "debounce input type is validated at the compile boundary",
-                                )
-                                .max(0) as u64,
-                        );
-
-                        if !path.is_empty() {
-                            let needs_rebuild = event_state
-                                .lock()
-                                .await
-                                .get::<WatchState>()
-                                .is_none_or(|w| w.path != path || w.recursive != recursive);
-                            if needs_rebuild {
-                                let watch_path = path.clone();
-                                // Watch registration can block on slow or network filesystems.
-                                let replacement = tokio::task::spawn_blocking(move || {
-                                    WatchState::new(&watch_path, recursive, debounce)
-                                })
-                                .await
-                                .expect("filesystem watcher setup task panicked");
-                                let mut guard = event_state.lock().await;
-                                guard.clear();
-                                guard.set(replacement.map_err(InvokeError::external)?);
-                            } else {
-                                // Debounce is consumer-side — retune without
-                                // tearing down the live OS watch.
-                                event_state
-                                    .lock()
-                                    .await
-                                    .get_mut::<WatchState>()
-                                    .unwrap()
-                                    .debounce = debounce;
-                            }
-                        } else {
-                            // Cleared path: tear the previous watcher down, or the old
-                            // directory keeps firing `Changed` (and holding its OS watch)
-                            // while the node outputs an empty path.
-                            event_state.lock().await.clear();
-                        }
-
-                        outputs[0] = ConstValue::FsPath(path).into();
-                        Ok(())
-                    })
-                },
-            )),
+            ),
     );
 
     library

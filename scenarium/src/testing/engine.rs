@@ -11,7 +11,9 @@
 //! the run ends, so a test can hold two runs side by side and compare them, and
 //! nothing it asserts is invalidated by the next `run_*` call.
 
+use std::fs;
 use std::path::PathBuf;
+use std::result;
 
 use hashbrown::HashMap;
 
@@ -22,15 +24,15 @@ use crate::execution::cache::runtime::error::CacheNodeFailure;
 use crate::execution::compile::error::CompileError;
 use crate::execution::engine::ExecutionEngine;
 use crate::execution::error::{Result, RunError};
-use crate::execution::report::RunPhase;
 use crate::execution::report::internals::{CollectingReporter, DiscardedReports};
 use crate::execution::report::{ExecutionOutcome, NodeExecutionStatus, NodeStatus};
+use crate::execution::report::{RunPhase, RunReporter};
 use crate::execution::schedule::NodeState;
 use crate::execution::seeds::RunSeeds;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::identity::{EventPort, NodeId};
 use crate::testing::graph::TestGraph;
-use crate::worker::status::{WorkerStatus, WorkerStatusKind};
+use crate::worker::run_summary::RunSummary;
 use crate::{DynamicValue, RamUsage};
 
 /// A [`TestGraph`] with a live engine over it.
@@ -92,7 +94,7 @@ impl TestEngine {
         self.try_reinstall().expect("the fixture graph compiles");
     }
 
-    pub(crate) fn try_reinstall(&mut self) -> std::result::Result<(), CompileError> {
+    pub(crate) fn try_reinstall(&mut self) -> result::Result<(), CompileError> {
         self.engine.update(&self.graph.graph, &self.graph.library)
     }
 
@@ -102,7 +104,7 @@ impl TestEngine {
     /// verdict already given was answered from the previous store.
     pub(crate) fn attach_disk_store(&mut self, root: impl Into<PathBuf>) {
         let root = root.into();
-        let store = DiskStore::new(&self.graph.library, Some(root.clone()));
+        let store = DiskStore::new(Some(root.clone()));
         self.engine.set_disk_store(store);
         self.disk_root = Some(root);
     }
@@ -131,8 +133,7 @@ impl TestEngine {
     /// The bytes of `name`'s blob. Panics if the store holds none.
     pub(crate) fn blob(&self, name: &str) -> Vec<u8> {
         let path = self.blob_path(name);
-        std::fs::read(&path)
-            .unwrap_or_else(|error| panic!("no blob at {}: {error}", path.display()))
+        fs::read(&path).unwrap_or_else(|error| panic!("no blob at {}: {error}", path.display()))
     }
 
     /// Run to these exact nodes — the "run to this node" / preview trigger.
@@ -163,14 +164,6 @@ impl TestEngine {
         .await
     }
 
-    /// An event port on a named node.
-    pub(crate) fn event(&self, name: &str, event_idx: usize) -> EventPort {
-        EventPort {
-            node_id: self.id(name),
-            event_idx,
-        }
-    }
-
     pub(crate) async fn run_sinks(&mut self) -> RunOutcome {
         self.run(RunSeeds::sinks()).await
     }
@@ -189,30 +182,19 @@ impl TestEngine {
 
     /// Run every sink, also handing back the live progress the run published.
     pub(crate) async fn run_sinks_reporting(&mut self) -> ReportedRun {
-        let TestEngine {
-            graph,
-            engine,
-            outcome,
-            ..
-        } = self;
         let mut reporter = CollectingReporter::default();
-        engine
-            .execute(
-                RunSeeds::sinks(),
-                &mut reporter,
-                CancelToken::never(),
-                outcome,
-            )
+        let run = self
+            .execute_with(&mut reporter, RunSeeds::sinks(), CancelToken::never())
             .await
             .expect("the run completes");
-        let names = NameMap::of(graph);
+        let names = NameMap::of(&self.graph);
         ReportedRun {
             progress: reporter
                 .progress
                 .iter()
-                .map(|event| (names.name(event.node_id), event.phase))
+                .map(|&(node_id, phase)| (names.name(node_id), phase))
                 .collect(),
-            run: RunOutcome::snapshot(graph, engine, outcome),
+            run,
         }
     }
 
@@ -271,15 +253,24 @@ impl TestEngine {
         seeds: RunSeeds,
         cancel: CancelToken,
     ) -> Result<RunOutcome> {
+        self.execute_with(&mut DiscardedReports, seeds, cancel)
+            .await
+    }
+
+    /// The one place a test run executes: under `reporter`, then read back.
+    async fn execute_with(
+        &mut self,
+        reporter: &mut dyn RunReporter,
+        seeds: RunSeeds,
+        cancel: CancelToken,
+    ) -> Result<RunOutcome> {
         let TestEngine {
             graph,
             engine,
             outcome,
             ..
         } = self;
-        engine
-            .execute(seeds, &mut DiscardedReports, cancel, outcome)
-            .await?;
+        engine.execute(&seeds, reporter, cancel, outcome).await?;
         Ok(RunOutcome::snapshot(graph, engine, outcome))
     }
 
@@ -320,7 +311,7 @@ impl TestEngine {
     pub(crate) fn inputs(&self, name: &str) -> Vec<Option<DynamicValue>> {
         let id = self.id(name);
         self.engine
-            .get_argument_values(&id)
+            .argument_values(id)
             .expect("the named node is installed")
             .inputs
     }
@@ -330,7 +321,7 @@ impl TestEngine {
     pub(crate) fn outputs(&self, name: &str) -> Vec<DynamicValue> {
         let id = self.id(name);
         self.engine
-            .get_argument_values(&id)
+            .argument_values(id)
             .expect("the named node is installed")
             .outputs
     }
@@ -370,16 +361,15 @@ pub(crate) struct ReportedRun {
 /// The per-node facts of one finished run, keyed by name.
 #[derive(Debug)]
 pub(crate) struct RunOutcome {
-    /// Names that invoked their lambda, in the order the schedule reached them
-    /// — deps before consumers, which is what makes this readable as the run.
+    /// Names that invoked their lambda and succeeded, in the order the
+    /// schedule reached them — deps before consumers, which is what makes
+    /// this readable as the run.
     ran: Vec<String>,
     /// Every row the run reported, in the program's node order.
     rows: Vec<(String, NodeStatus)>,
     logs: Vec<String>,
     pub(crate) ran_node_count: usize,
     pub(crate) cancelled: bool,
-    /// The events this run was seeded with, echoed back.
-    pub(crate) triggered_events: Vec<EventPort>,
     /// The events a successful event source armed for the loop to spawn.
     pub(crate) armed_events: Vec<EventPort>,
     pub(crate) cache_ram: RamUsage,
@@ -390,8 +380,9 @@ impl RunOutcome {
         let names = NameMap::of(graph);
         Self {
             ran: engine
-                .ran_in_schedule_order()
+                .schedule_order()
                 .into_iter()
+                .filter(|&node_id| outcome.ran(node_id))
                 .map(|node_id| names.name(node_id))
                 .collect(),
             rows: outcome
@@ -406,7 +397,6 @@ impl RunOutcome {
                 .collect(),
             ran_node_count: outcome.ran_node_count,
             cancelled: outcome.cancelled,
-            triggered_events: outcome.triggered_events.clone(),
             armed_events: outcome
                 .event_triggers
                 .iter()
@@ -416,24 +406,16 @@ impl RunOutcome {
         }
     }
 
-    /// The same snapshot taken from a status a [`Worker`] published.
+    /// The same snapshot taken from the summary a [`Worker`] published.
     ///
-    /// A status carries the run's rows and its whole-run header, and nothing
+    /// A summary carries the run's rows and its whole-run header, and nothing
     /// else: the worker publishes what the run *produced*, never how the
     /// schedule walked it. So this fills [`ran`](Self::ran) with the same names
-    /// sorted, and the events — which a status also does not carry — stay
+    /// sorted, and the events — which a summary also does not carry — stay
     /// empty.
     ///
     /// [`Worker`]: crate::worker::Worker
-    pub(crate) fn published(graph: &TestGraph, status: &WorkerStatus) -> Self {
-        let WorkerStatusKind::Completed {
-            executed_node_count,
-            cancelled,
-            ..
-        } = status.kind
-        else {
-            panic!("only a completed status carries a run");
-        };
+    pub(crate) fn published(graph: &TestGraph, status: &RunSummary) -> Self {
         let names = NameMap::of(graph);
         let mut outcome = Self {
             ran: Vec::new(),
@@ -447,9 +429,8 @@ impl RunOutcome {
                 .iter()
                 .map(|entry| entry.message.clone())
                 .collect(),
-            ran_node_count: executed_node_count,
-            cancelled,
-            triggered_events: Vec::new(),
+            ran_node_count: status.executed_node_count,
+            cancelled: status.cancelled,
             armed_events: Vec::new(),
             cache_ram: status.cache_ram,
         };
@@ -488,14 +469,7 @@ impl RunOutcome {
 
     /// Names still holding RAM after the run, sorted.
     pub(crate) fn holding_ram(&self) -> Vec<&str> {
-        let mut names: Vec<&str> = self
-            .rows
-            .iter()
-            .filter(|(_, row)| row.ram.total() > 0)
-            .map(|(name, _)| name.as_str())
-            .collect();
-        names.sort_unstable();
-        names
+        sorted_names(&self.rows, |row| row.ram.total() > 0)
     }
 
     /// Log lines the run emitted, in order — how a `records` node reports what
@@ -536,14 +510,7 @@ impl RunOutcome {
     /// predict, while a name list is readable and stable across a fixture whose
     /// ids move.
     fn with_status(&self, matches: impl Fn(&NodeExecutionStatus) -> bool) -> Vec<&str> {
-        let mut names: Vec<&str> = self
-            .rows
-            .iter()
-            .filter(|(_, row)| row.status.as_ref().is_some_and(&matches))
-            .map(|(name, _)| name.as_str())
-            .collect();
-        names.sort_unstable();
-        names
+        sorted_names(&self.rows, |row| row.status.as_ref().is_some_and(&matches))
     }
 }
 
@@ -566,7 +533,7 @@ impl PlanOutcome {
             .collect();
         Self {
             order: engine
-                .ran_in_schedule_order()
+                .schedule_order()
                 .into_iter()
                 .map(|node_id| names.name(node_id))
                 .collect(),
@@ -584,34 +551,43 @@ impl PlanOutcome {
 
     /// Names the planner cleared to run, sorted.
     pub(crate) fn runnable(&self) -> Vec<&str> {
-        self.where_state(|state| state.is_runnable())
+        self.where_state(NodeState::is_runnable)
     }
 
     /// Names blocked for want of a required input — the verdict that
     /// propagates to consumers.
     pub(crate) fn missing_inputs(&self) -> Vec<&str> {
-        self.where_state(|state| state.missing_required_inputs())
+        self.where_state(NodeState::missing_required_inputs)
     }
 
     pub(crate) fn state(&self, name: &str) -> NodeState {
         self.states
             .iter()
             .find(|(row_name, _)| row_name == name)
-            .map(|(_, state)| *state)
-            .unwrap_or_else(|| panic!("no node named {name:?} in the installed program"))
+            .map_or_else(
+                || panic!("no node named {name:?} in the installed program"),
+                |(_, state)| *state,
+            )
     }
 
     /// Sorted by name — see [`RunOutcome::cached`] for why.
     fn where_state(&self, matches: impl Fn(NodeState) -> bool) -> Vec<&str> {
-        let mut names: Vec<&str> = self
-            .states
-            .iter()
-            .filter(|(_, state)| *state != NodeState::Unvisited && matches(*state))
-            .map(|(name, _)| name.as_str())
-            .collect();
-        names.sort_unstable();
-        names
+        sorted_names(&self.states, |state| {
+            *state != NodeState::Unvisited && matches(*state)
+        })
     }
+}
+
+/// The names of the `rows` that `keep` holds for, sorted — the shape every
+/// set-like accessor above answers in.
+fn sorted_names<T>(rows: &[(String, T)], keep: impl Fn(&T) -> bool) -> Vec<&str> {
+    let mut names: Vec<&str> = rows
+        .iter()
+        .filter(|(_, row)| keep(row))
+        .map(|(name, _)| name.as_str())
+        .collect();
+    names.sort_unstable();
+    names
 }
 
 /// Ids back to the names the fixture gave them.
@@ -621,12 +597,14 @@ struct NameMap {
 }
 
 impl NameMap {
+    /// Named as the fixture named them, like
+    /// [`Compiled`](crate::testing::graph::compiled::Compiled): an instance node carries its func's
+    /// name, not its own.
     fn of(graph: &TestGraph) -> Self {
         Self {
             by_id: graph
-                .graph
-                .iter()
-                .map(|node| (node.id, node.name.clone()))
+                .names()
+                .map(|(node_id, name)| (node_id, name.to_owned()))
                 .collect(),
         }
     }

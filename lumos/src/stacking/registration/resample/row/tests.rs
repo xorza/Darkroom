@@ -1,352 +1,250 @@
+use std::f64::consts::PI;
+
 use crate::stacking::registration::config::{self, InterpolationMethod};
-use crate::stacking::registration::resample::{kernel, row};
+use crate::stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
+use crate::stacking::registration::resample::kernel::{LanczosOrder, internals};
+use crate::stacking::registration::resample::row;
+use crate::stacking::registration::resample::row_positions::RowPositions;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::testing::prelude::*;
-use crate::testing::synthetic::patterns;
 
-/// Naive scalar Lanczos3 row warp used as reference for testing the optimized version.
-fn lanczos_scalar(
+const LANCZOS: [InterpolationMethod; 3] = [
+    InterpolationMethod::Lanczos2,
+    InterpolationMethod::Lanczos3,
+    InterpolationMethod::Lanczos4,
+];
+
+/// Output row `y` of `input` warped by `transform` with `method`, border `border_value`.
+fn warp_row(
     input: &Buffer2<f32>,
-    output_row: &mut [f32],
-    output_y: usize,
-    wt: &WarpTransform,
-) {
-    let pixels = input.pixels();
-    let input_width = input.width();
-    let input_height = input.height();
-
-    let y = output_y as f64;
-    const A: usize = 3;
-
-    for (x, out_pixel) in output_row.iter_mut().enumerate() {
-        let src = wt.apply(DVec2::new(x as f64, y));
-        let Some(pos) =
-            row::source_position_in_footprint(src, Size2us::new(input_width, input_height))
-        else {
-            *out_pixel = 0.0;
-            continue;
-        };
-        let sx = pos.x;
-        let sy = pos.y;
-
-        let x0 = sx.floor() as i32;
-        let y0 = sy.floor() as i32;
-        let fx = sx - x0 as f32;
-        let fy = sy - y0 as f32;
-        let kx0 = x0 - 2;
-        let ky0 = y0 - 2;
-
-        if kx0 < 0 || ky0 < 0 || kx0 + 5 >= input_width as i32 || ky0 + 5 >= input_height as i32 {
-            *out_pixel = kernel::bilinear_sample(input, Vec2::new(sx, sy), 0.0);
-            continue;
-        }
-
-        let lut = kernel::get_lanczos_lut(A);
-
-        let mut wx = [0.0f32; 6];
-        for (i, w) in wx.iter_mut().enumerate() {
-            let dx = fx - (i as i32 - 2) as f32;
-            *w = lut.lookup(dx);
-        }
-
-        let mut wy = [0.0f32; 6];
-        for (j, w) in wy.iter_mut().enumerate() {
-            let dy = fy - (j as i32 - 2) as f32;
-            *w = lut.lookup(dy);
-        }
-
-        let mut sum = 0.0f32;
-        let mut w_in = 0.0f32;
-        for (j, &wyj) in wy.iter().enumerate() {
-            let py = y0 - 2 + j as i32;
-            for (i, &wxi) in wx.iter().enumerate() {
-                let px = x0 - 2 + i as i32;
-                let weight = wxi * wyj;
-                sum += pixels[py as usize * input_width + px as usize] * weight;
-                w_in += weight;
-            }
-        }
-
-        *out_pixel = if w_in.abs() < 1e-10 { 0.0 } else { sum / w_in };
-    }
+    y: usize,
+    transform: &WarpTransform,
+    method: InterpolationMethod,
+    border_value: f32,
+) -> Vec<f32> {
+    let size = Size2us::new(input.width(), input.height());
+    let mut positions = RowPositions::default();
+    positions.fill(y, size.width, transform, size);
+    let mut output = vec![f32::NAN; size.width];
+    row::sample_row(
+        input,
+        positions.positions(),
+        method,
+        border_value,
+        &mut output,
+    );
+    output
 }
 
-#[test]
-fn bilinear_identity() {
-    let width = 100;
-    let height = 100;
-    let input = patterns::diagonal_gradient(Size2us::new(width, height));
-    let identity = WarpTransform::new(Transform::identity());
-
-    let mut output_row = vec![0.0f32; width];
-    let y = 50;
-
-    row::bilinear(&input, &mut output_row, y, &identity, 0.0);
-
-    // With identity transform, output should match input
-    for x in 1..width - 1 {
-        let expected = input[(x, y)];
-        assert!(
-            (output_row[x] - expected).abs() < 0.01,
-            "Mismatch at x={}: {} vs {}",
-            x,
-            output_row[x],
-            expected
-        );
-    }
+/// A `size` image of signed, unstructured values.
+fn signed_field(size: Size2us) -> Buffer2<f32> {
+    Buffer2::new(
+        size.width,
+        size.height,
+        (0..size.pixel_count())
+            .map(|i| ((i * 13 + i / size.width * 7) % 31) as f32 / 9.0 - 1.7)
+            .collect(),
+    )
 }
 
-#[test]
-fn bilinear_translation() {
-    let width = 100;
-    let height = 100;
-    let input = patterns::diagonal_gradient(Size2us::new(width, height));
-
-    // Translate by (5, 3)
-    let transform = Transform::translation(DVec2::new(5.0, 3.0));
-    let inverse = WarpTransform::new(transform.inverse());
-
-    let mut output_row = vec![0.0f32; width];
-    let y = 50;
-
-    row::bilinear(&input, &mut output_row, y, &inverse, 0.0);
-
-    // Check that pixels are shifted
-    for (x, &output_val) in output_row.iter().enumerate().skip(10).take(width - 20) {
-        // Output at (x, y) should come from input at (x-5, y-3)
-        let src_x = x as i32 - 5;
-        let src_y = y as i32 - 3;
-        if src_x >= 0 && src_y >= 0 {
-            let expected = input[(src_x as usize, src_y as usize)];
-            assert!(
-                (output_val - expected).abs() < 0.01,
-                "Mismatch at x={}: {} vs {}",
-                x,
-                output_val,
-                expected
-            );
+/// A SIP correction of a mild radial field over `size`, on `transform`.
+fn sip_warp(size: Size2us, transform: Transform) -> WarpTransform {
+    let center = DVec2::new(size.width as f64 / 2.0, size.height as f64 / 2.0);
+    let mut reference = Vec::new();
+    for y in 0..size.height {
+        for x in 0..size.width {
+            reference.push(DVec2::new(x as f64, y as f64));
         }
     }
+    let target: Vec<DVec2> = reference
+        .iter()
+        .map(|&r| {
+            let d = r - center;
+            transform.apply(r + d * 1e-4 * d.length_squared())
+        })
+        .collect();
+    let config = SipConfig {
+        order: 3,
+        reference_point: Some(center),
+        ..SipConfig::default()
+    };
+    let fit = SipPolynomial::fit_from_transform(&reference, &target, &transform, &config).unwrap();
+    WarpTransform::with_sip(transform, fit.polynomial)
 }
 
+/// Every method on a row equals the single-point oracle at that pixel's position, across a
+/// translation, a rotation with scale, a homography and a SIP correction, on the top, middle and
+/// bottom rows of several image sizes — the narrow ones reach the edge on every row.
+///
+/// The oracle evaluates each method from its definition. Nearest, bilinear and bicubic sample the
+/// same position with the same arithmetic, so they agree exactly. Lanczos sums the same taps, but
+/// the vector kernel sums them in another order and the row multiplies by the reciprocal of the
+/// tap total where the oracle divides: `SIZE² + 3` roundings against the window's absolute sum.
 #[test]
-fn warp_row_simd_matches_scalar() {
-    let width = 128;
-    let height = 128;
-    let input = patterns::diagonal_gradient(Size2us::new(width, height));
-
-    // Test with various transforms
-    let transforms = vec![
-        Transform::identity(),
-        Transform::translation(DVec2::new(2.5, 1.7)),
-        Transform::similarity(DVec2::new(3.0, 2.0), 0.1, 1.05),
-    ];
-
-    for transform in transforms {
-        let inverse = WarpTransform::new(transform.inverse());
-
-        for y in [0, 50, height - 1] {
-            let mut output_simd = vec![0.0f32; width];
-            let mut output_scalar = vec![0.0f32; width];
-
-            row::bilinear(&input, &mut output_simd, y, &inverse, 0.0);
-            row::bilinear_scalar(&input, &mut output_scalar, y, &inverse, 0.0);
-
-            for x in 0..width {
-                // Tolerance slightly relaxed for SIMD/scalar differences due to
-                // different operation ordering and floating point precision
-                assert!(
-                    (output_simd[x] - output_scalar[x]).abs() < 1e-4,
-                    "Row {}, x={}: SIMD {} vs Scalar {}",
-                    y,
-                    x,
-                    output_simd[x],
-                    output_scalar[x]
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn warp_row_various_sizes() {
-    let height = 64;
-    let input_base = patterns::diagonal_gradient(Size2us::new(256, height));
-
-    // Test various widths including non-SIMD-aligned sizes
-    for width in [
-        1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 100, 128,
+fn sample_row_matches_the_single_point_oracle() {
+    let transforms = |size: Size2us| {
+        [
+            WarpTransform::new(Transform::translation(DVec2::new(0.37, -1.43))),
+            WarpTransform::new(Transform::similarity(DVec2::new(1.5, -0.75), 0.07, 1.03)),
+            WarpTransform::new(Transform::homography([
+                1.01, 0.02, 0.5, -0.015, 0.99, 0.75, 2e-3, -1e-3,
+            ])),
+            sip_warp(
+                size,
+                Transform::similarity(DVec2::new(0.25, 0.5), -0.04, 0.98),
+            ),
+        ]
+    };
+    for size in [
+        Size2us::new(9, 7),
+        Size2us::new(24, 20),
+        Size2us::new(41, 33),
     ] {
-        let input = Buffer2::new(
-            width,
-            height,
-            input_base
-                .pixels()
-                .iter()
-                .take(width * height)
-                .copied()
-                .collect(),
-        );
-        let identity = WarpTransform::new(Transform::identity());
-
-        let mut output_simd = vec![0.0f32; width];
-        let mut output_scalar = vec![0.0f32; width];
-        let y = height / 2;
-
-        row::bilinear(&input, &mut output_simd, y, &identity, 0.0);
-        row::bilinear_scalar(&input, &mut output_scalar, y, &identity, 0.0);
-
-        for x in 0..width {
-            assert!(
-                (output_simd[x] - output_scalar[x]).abs() < 1e-5,
-                "Width {}, x={}: SIMD {} vs Scalar {}",
-                width,
-                x,
-                output_simd[x],
-                output_scalar[x]
-            );
-        }
-    }
-}
-
-#[test]
-fn lanczos_scalar_identity() {
-    let width = 100;
-    let height = 100;
-    let input = patterns::diagonal_gradient(Size2us::new(width, height));
-    let identity = WarpTransform::new(Transform::identity());
-
-    let mut output_row = vec![0.0f32; width];
-    let y = 50;
-
-    lanczos_scalar(&input, &mut output_row, y, &identity);
-
-    // With identity transform, output should match input (within Lanczos ringing tolerance)
-    for x in 3..width - 3 {
-        let expected = input[(x, y)];
-        assert!(
-            (output_row[x] - expected).abs() < 0.02,
-            "Mismatch at x={}: {} vs {}",
-            x,
-            output_row[x],
-            expected
-        );
-    }
-}
-
-#[test]
-fn lanczos_scalar_various_sizes_match_optimized() {
-    // Verify scalar and optimized Lanczos3 produce identical results across widths.
-    // This replaces a weaker test that only checked is_finite().
-    let height = 64;
-    let input_base = patterns::diagonal_gradient(Size2us::new(256, height));
-    let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
-
-    for width in [1, 2, 3, 4, 5, 7, 8, 16, 33, 64, 100] {
-        let input = Buffer2::new(
-            width,
-            height,
-            input_base
-                .pixels()
-                .iter()
-                .take(width * height)
-                .copied()
-                .collect(),
-        );
-        let transform = Transform::translation(DVec2::new(1.5, 0.5));
-        let inverse = WarpTransform::new(transform.inverse());
-
-        let mut output_scalar = vec![0.0f32; width];
-        let mut output_fast = vec![0.0f32; width];
-        let y = height / 2;
-
-        lanczos_scalar(&input, &mut output_scalar, y, &inverse);
-        row::lanczos(&input, &mut output_fast, y, &inverse, &params);
-
-        for x in 0..width {
-            assert!(
-                (output_fast[x] - output_scalar[x]).abs() < 1e-4,
-                "Width {width}, x={x}: fast {} vs scalar {}",
-                output_fast[x],
-                output_scalar[x]
-            );
-        }
-    }
-}
-
-#[test]
-fn lanczos_matches_scalar() {
-    let width = 128;
-    let height = 128;
-    let input = patterns::diagonal_gradient(Size2us::new(width, height));
-    // Disable clamping to match unclamped scalar reference
-    let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
-
-    let transforms = vec![
-        Transform::identity(),
-        Transform::translation(DVec2::new(2.5, 1.7)),
-        Transform::similarity(DVec2::new(3.0, 2.0), 0.1, 1.05),
-    ];
-
-    for transform in transforms {
-        let inverse = WarpTransform::new(transform.inverse());
-
-        for y in [0, 50, height - 1] {
-            let mut output_fast = vec![0.0f32; width];
-            let mut output_scalar = vec![0.0f32; width];
-
-            row::lanczos(&input, &mut output_fast, y, &inverse, &params);
-            lanczos_scalar(&input, &mut output_scalar, y, &inverse);
-
-            for x in 0..width {
-                assert!(
-                    (output_fast[x] - output_scalar[x]).abs() < 1e-4,
-                    "Row {y}, x={x}: fast {} vs scalar {}",
-                    output_fast[x],
-                    output_scalar[x]
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn lanczos_preserves_signed_constants_at_interior_and_edges() {
-    let size = Size2us::new(24, 20);
-    let identity = WarpTransform::new(Transform::identity());
-
-    for method in [
-        InterpolationMethod::Lanczos2,
-        InterpolationMethod::Lanczos3,
-        InterpolationMethod::Lanczos4,
-    ] {
-        let params = config::internals::warp_params(method);
-        for expected in [-1.25, 0.0, 2.5] {
-            let input = patterns::uniform(size, expected);
-            for y in [0, 1, 4, 10, size.height - 1] {
-                let mut output = vec![0.0; size.width];
-                row::lanczos(&input, &mut output, y, &identity, &params);
-                for (x, actual) in output.into_iter().enumerate() {
-                    assert!(
-                        (actual - expected).abs() < 2e-5,
-                        "{method:?} ({x}, {y}): expected {expected}, got {actual}"
-                    );
+        let input = signed_field(size);
+        for transform in &transforms(size) {
+            for method in InterpolationMethod::ALL {
+                let params = config::internals::warp_params(method);
+                for y in [0, size.height / 2, size.height - 1] {
+                    let row = warp_row(&input, y, transform, method, params.border_value);
+                    for (x, &actual) in row.iter().enumerate() {
+                        let source = transform.apply(DVec2::new(x as f64, y as f64));
+                        let expected = internals::interpolate(&input, source, params);
+                        let taps = match method {
+                            InterpolationMethod::Lanczos2 => 16,
+                            InterpolationMethod::Lanczos3 => 36,
+                            InterpolationMethod::Lanczos4 => 64,
+                            _ => 0,
+                        };
+                        // The window's absolute sum is at most its taps times the largest sample
+                        // (1.7) times the largest product of normalized weights (1).
+                        let bound = (taps + 3) as f32 * f32::EPSILON * taps as f32 * 1.7;
+                        assert!(
+                            (actual - expected).abs() <= bound,
+                            "{method:?} {size:?} ({x}, {y}): row {actual}, oracle {expected}"
+                        );
+                    }
                 }
             }
         }
     }
 }
 
+/// One column of ones, sampled a quarter and a half pixel past it, against hand values. Each
+/// method has its own, so a method wired to another's kernel fails here.
+///
+/// The column is constant down the image, so the y weights divide out and the value is the x
+/// weight of the column's tap over the sum of the taps. Nearest at 4.25 is the column, 1, and at
+/// 4.5 rounds up past it, 0; bilinear is `1 − f`. Catmull-Rom gives the column `K(f)` of weights
+/// summing to 1: `K(0.25)` = 0.8671875 and `K(0.5)` = 0.5625. Lanczos-`a` at 4.5 has its taps at
+/// distances ½, 1½, …, `a − ½` in pairs, and with `s₁ = sin(π/8)`, `s₃ = sin(3π/8)`:
+/// - a = 2: `L(½) = 4√2/π²`, `L(1½) = −4√2/(9π²)`, so `1/(2(1 − 1/9))` = 9/16 — Catmull-Rom's
+///   value at ½, which is why bicubic is checked at 4.25 too;
+/// - a = 3: `L(½) = 6/π²`, `L(1½) = −4/(3π²)`, `L(2½) = 6/(25π²)`, so `3/(6 − 4/3 + 6/25)` =
+///   225/368;
+/// - a = 4: `L(k + ½) ∝ ±s/(2k + 1)²` with `s` = s₁, s₃, s₃, s₁, so
+///   `s₁/(2(s₁·48/49 − s₃·16/225))`.
+///
+/// The table entries at these distances are the f32 kernel, each off by 1e-6 at most (see
+/// `math::lanczos`'s tests); the ratio moves by that for its numerator and by up to `2a` of them
+/// for its sum, which is near 1. The 64 products and the sum round to 64·ε more.
 #[test]
-fn lanczos_is_translation_invariant_for_signed_data() {
-    let size = Size2us::new(24, 20);
+fn a_column_of_ones_samples_to_hand_values() {
+    let size = Size2us::new(10, 9);
     let input = Buffer2::new(
         size.width,
         size.height,
         (0..size.pixel_count())
-            .map(|i| ((i * 13 + i / size.width * 7) % 31) as f32 / 9.0 - 1.7)
+            .map(|i| if i % size.width == 4 { 1.0 } else { 0.0 })
             .collect(),
     );
+    let s1 = (PI / 8.0).sin();
+    let s3 = (3.0 * PI / 8.0).sin();
+    for (method, shift, expected) in [
+        (InterpolationMethod::Nearest, 0.25, 1.0),
+        (InterpolationMethod::Nearest, 0.5, 0.0),
+        (InterpolationMethod::Bilinear, 0.25, 0.75),
+        (InterpolationMethod::Bilinear, 0.5, 0.5),
+        (InterpolationMethod::Bicubic, 0.25, 0.867_187_5),
+        (InterpolationMethod::Bicubic, 0.5, 0.5625),
+        (InterpolationMethod::Lanczos2, 0.5, 9.0 / 16.0),
+        (InterpolationMethod::Lanczos3, 0.5, 225.0 / 368.0),
+        (
+            InterpolationMethod::Lanczos4,
+            0.5,
+            s1 / (2.0 * (s1 * 48.0 / 49.0 - s3 * 16.0 / 225.0)),
+        ),
+    ] {
+        let tolerance = LanczosOrder::of(method).map_or(0.0, |order| {
+            (2 * order.a() + 1) as f64 * 1e-6 + 64.0 * f64::from(f32::EPSILON)
+        });
+        let shift = WarpTransform::new(Transform::translation(DVec2::new(shift, 0.0)));
+        let actual = f64::from(warp_row(&input, 4, &shift, method, 0.0)[4]);
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "{method:?} {shift:?}: {actual}, expected {expected}"
+        );
+        let params = config::internals::warp_params(method);
+        let oracle = f64::from(internals::interpolate(
+            &input,
+            shift.apply(DVec2::new(4.0, 4.0)),
+            params,
+        ));
+        assert!(
+            (oracle - expected).abs() <= tolerance,
+            "{method:?} oracle: {oracle}, expected {expected}"
+        );
+    }
+}
+
+/// A row shifted half off the source takes the border where its positions leave the footprint and
+/// samples inside it: a translation by 1.75 moves output x to source x + 1.75, which passes the
+/// last pixel's half-pixel rim (3.5 on a 4-wide image) from x = 2 on.
+#[test]
+fn positions_outside_the_footprint_take_the_border() {
+    let input = Buffer2::new(4, 1, vec![10.0, 20.0, 30.0, 40.0]);
+    let shift = WarpTransform::new(Transform::translation(DVec2::new(1.75, 0.0)));
+    let row = warp_row(&input, 0, &shift, InterpolationMethod::Bilinear, -5.0);
+    // x = 0 → 1.75: 20 + 0.75·10 = 27.5; x = 1 → 2.75: 30 + 0.75·10 = 37.5.
+    assert_eq!(row, [27.5, 37.5, -5.0, -5.0]);
+}
+
+/// A constant reproduces itself to rounding, in the interior and at the edges, where bicubic drops
+/// its outside taps and Lanczos falls back to bilinear: the normalized weights sum to one, so only
+/// the f32 summation of up to 64 terms of size 2.5 is left, ≈ 64·ε·2.5 = 1.9e-5.
+#[test]
+fn every_method_preserves_signed_constants_at_interior_and_edges() {
+    let size = Size2us::new(24, 20);
+    // Both stay inside the footprint: the shift moves no position more than 0.43 px.
+    let transforms = [
+        WarpTransform::new(Transform::identity()),
+        WarpTransform::new(Transform::translation(DVec2::new(0.37, -0.43))),
+    ];
+    for method in InterpolationMethod::ALL {
+        for transform in &transforms {
+            for expected in [-1.25, 0.0, 2.5] {
+                let input = Buffer2::new_filled(size.width, size.height, expected);
+                for y in [0, 1, 4, 10, size.height - 1] {
+                    for (x, actual) in warp_row(&input, y, transform, method, 0.0)
+                        .into_iter()
+                        .enumerate()
+                    {
+                        assert!(
+                            (actual - expected).abs() < 2e-5,
+                            "{method:?} ({x}, {y}): expected {expected}, got {actual}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Adding a constant to every pixel adds it to every output, for the same reason: the offset
+/// passes through normalized weights, and 5e-5 holds the f32 sums of the two warps.
+#[test]
+fn lanczos_is_translation_invariant_for_signed_data() {
+    let size = Size2us::new(24, 20);
+    let input = signed_field(size);
     let offset = 2.25;
     let shifted = Buffer2::new(
         size.width,
@@ -354,18 +252,10 @@ fn lanczos_is_translation_invariant_for_signed_data() {
         input.pixels().iter().map(|value| value + offset).collect(),
     );
     let inverse = WarpTransform::new(Transform::translation(DVec2::new(0.37, -0.43)).inverse());
-
-    for method in [
-        InterpolationMethod::Lanczos2,
-        InterpolationMethod::Lanczos3,
-        InterpolationMethod::Lanczos4,
-    ] {
-        let params = config::internals::warp_params(method);
+    for method in LANCZOS {
         for y in [0, 1, 5, 10, size.height - 1] {
-            let mut output = vec![0.0; size.width];
-            let mut shifted_output = vec![0.0; size.width];
-            row::lanczos(&input, &mut output, y, &inverse, &params);
-            row::lanczos(&shifted, &mut shifted_output, y, &inverse, &params);
+            let output = warp_row(&input, y, &inverse, method, 0.0);
+            let shifted_output = warp_row(&shifted, y, &inverse, method, 0.0);
             for x in 1..size.width {
                 let actual_offset = shifted_output[x] - output[x];
                 assert!(
@@ -373,321 +263,6 @@ fn lanczos_is_translation_invariant_for_signed_data() {
                     "{method:?} ({x}, {y}): expected offset {offset}, got {actual_offset}"
                 );
             }
-        }
-    }
-}
-
-#[test]
-fn lanczos_various_sizes() {
-    let height = 64;
-    let input_base = patterns::diagonal_gradient(Size2us::new(256, height));
-    // Disable clamping to match unclamped scalar reference
-    let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
-
-    for width in [1, 2, 3, 7, 8, 16, 33, 64, 100] {
-        let input = Buffer2::new(
-            width,
-            height,
-            input_base
-                .pixels()
-                .iter()
-                .take(width * height)
-                .copied()
-                .collect(),
-        );
-        let transform = Transform::translation(DVec2::new(1.5, 0.5));
-        let inverse = WarpTransform::new(transform.inverse());
-
-        let mut output_fast = vec![0.0f32; width];
-        let mut output_scalar = vec![0.0f32; width];
-        let y = height / 2;
-
-        row::lanczos(&input, &mut output_fast, y, &inverse, &params);
-        lanczos_scalar(&input, &mut output_scalar, y, &inverse);
-
-        for x in 0..width {
-            assert!(
-                (output_fast[x] - output_scalar[x]).abs() < 1e-4,
-                "Width {width}, x={x}: fast {} vs scalar {}",
-                output_fast[x],
-                output_scalar[x]
-            );
-        }
-    }
-}
-
-#[test]
-fn bilinear_sample_hand_computed() {
-    // 3x3 image:
-    //   0  1  2
-    //   3  4  5
-    //   6  7  8
-    let data = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
-    let input = Buffer2::new(3, 3, data);
-
-    // At integer pixel (1, 1): exactly 4.0
-    assert!(
-        (kernel::bilinear_sample(&input, Vec2::new(1.0, 1.0), 0.0) - 4.0).abs() < 1e-6,
-        "At (1,1): expected 4.0, got {}",
-        kernel::bilinear_sample(&input, Vec2::new(1.0, 1.0), 0.0)
-    );
-
-    // At (0.5, 0.5): bilinear of [0,1,3,4]
-    // x0=0, y0=0, fx=0.5, fy=0.5
-    // p00=0, p10=1, p01=3, p11=4
-    // top = 0 + 0.5*(1-0) = 0.5
-    // bottom = 3 + 0.5*(4-3) = 3.5
-    // result = 0.5 + 0.5*(3.5 - 0.5) = 0.5 + 1.5 = 2.0
-    assert!(
-        (kernel::bilinear_sample(&input, Vec2::new(0.5, 0.5), 0.0) - 2.0).abs() < 1e-6,
-        "At (0.5, 0.5): expected 2.0, got {}",
-        kernel::bilinear_sample(&input, Vec2::new(0.5, 0.5), 0.0)
-    );
-
-    // At (1.5, 0.5): bilinear of [1,2,4,5]
-    // x0=1, y0=0, fx=0.5, fy=0.5
-    // p00=1, p10=2, p01=4, p11=5
-    // top = 1 + 0.5*(2-1) = 1.5
-    // bottom = 4 + 0.5*(5-4) = 4.5
-    // result = 1.5 + 0.5*(4.5 - 1.5) = 1.5 + 1.5 = 3.0
-    assert!(
-        (kernel::bilinear_sample(&input, Vec2::new(1.5, 0.5), 0.0) - 3.0).abs() < 1e-6,
-        "At (1.5, 0.5): expected 3.0, got {}",
-        kernel::bilinear_sample(&input, Vec2::new(1.5, 0.5), 0.0)
-    );
-
-    // At (0.25, 0.75): bilinear of [0,1,3,4]
-    // x0=0, y0=0, fx=0.25, fy=0.75
-    // top = 0 + 0.25*(1-0) = 0.25
-    // bottom = 3 + 0.25*(4-3) = 3.25
-    // result = 0.25 + 0.75*(3.25-0.25) = 0.25 + 2.25 = 2.5
-    assert!(
-        (kernel::bilinear_sample(&input, Vec2::new(0.25, 0.75), 0.0) - 2.5).abs() < 1e-6,
-        "At (0.25, 0.75): expected 2.5, got {}",
-        kernel::bilinear_sample(&input, Vec2::new(0.25, 0.75), 0.0)
-    );
-}
-
-#[test]
-fn bilinear_sample_border_value() {
-    // 2x2 image: [[10, 20], [30, 40]]
-    let input = Buffer2::new(2, 2, vec![10.0, 20.0, 30.0, 40.0]);
-
-    // Sampling outside uses border_value
-    // At (-1.0, 0.0): x0 = floor(-1.0) = -1, y0 = 0
-    // All four neighbors involve x=-1 or x=0
-    // p00 = sample(-1, 0) = border = -5.0
-    // p10 = sample(0, 0) = 10.0
-    // p01 = sample(-1, 1) = border = -5.0
-    // p11 = sample(0, 1) = 30.0
-    // fx = -1.0 - (-1) = 0.0, fy = 0.0
-    // top = -5.0 + 0.0*(10.0 - (-5.0)) = -5.0
-    // bottom = -5.0 + 0.0*(30.0 - (-5.0)) = -5.0
-    // result = -5.0 + 0.0*(...) = -5.0
-    assert!(
-        (kernel::bilinear_sample(&input, Vec2::new(-1.0, 0.0), -5.0) - (-5.0)).abs() < 1e-6,
-        "At (-1.0, 0.0): expected -5.0, got {}",
-        kernel::bilinear_sample(&input, Vec2::new(-1.0, 0.0), -5.0)
-    );
-}
-
-/// Naive scalar Lanczos row warp for arbitrary `a`, used as reference.
-fn lanczos_scalar_ref(
-    input: &Buffer2<f32>,
-    output_row: &mut [f32],
-    output_y: usize,
-    wt: &WarpTransform,
-    a: usize,
-) {
-    let pixels = input.pixels();
-    let input_width = input.width();
-    let input_height = input.height();
-    let y = output_y as f64;
-    let size = 2 * a;
-    let a_i32 = a as i32;
-    let lut = kernel::get_lanczos_lut(a);
-
-    for (x, out_pixel) in output_row.iter_mut().enumerate() {
-        let src = wt.apply(DVec2::new(x as f64, y));
-        let Some(pos) =
-            row::source_position_in_footprint(src, Size2us::new(input_width, input_height))
-        else {
-            *out_pixel = 0.0;
-            continue;
-        };
-        let sx = pos.x;
-        let sy = pos.y;
-        let x0 = sx.floor() as i32;
-        let y0 = sy.floor() as i32;
-        let fx = sx - x0 as f32;
-        let fy = sy - y0 as f32;
-        let kx0 = x0 - a_i32 + 1;
-        let ky0 = y0 - a_i32 + 1;
-
-        if kx0 < 0
-            || ky0 < 0
-            || kx0 + size as i32 > input_width as i32
-            || ky0 + size as i32 > input_height as i32
-        {
-            *out_pixel = kernel::bilinear_sample(input, pos, 0.0);
-            continue;
-        }
-
-        let mut wx = vec![0.0f32; size];
-        for (i, w) in wx.iter_mut().enumerate() {
-            *w = lut.lookup(fx - (i as i32 - a_i32 + 1) as f32);
-        }
-        let mut wy = vec![0.0f32; size];
-        for (j, w) in wy.iter_mut().enumerate() {
-            *w = lut.lookup(fy - (j as i32 - a_i32 + 1) as f32);
-        }
-        let mut sum = 0.0f32;
-        let mut w_in = 0.0f32;
-        for (j, &wyj) in wy.iter().enumerate() {
-            let py = y0 - a_i32 + 1 + j as i32;
-            for (i, &wxi) in wx.iter().enumerate() {
-                let px = x0 - a_i32 + 1 + i as i32;
-                let weight = wxi * wyj;
-                sum += pixels[py as usize * input_width + px as usize] * weight;
-                w_in += weight;
-            }
-        }
-        *out_pixel = if w_in.abs() < 1e-10 { 0.0 } else { sum / w_in };
-    }
-}
-
-#[test]
-fn lanczos2_matches_scalar_reference() {
-    let width = 128;
-    let height = 128;
-    let input = patterns::diagonal_gradient(Size2us::new(width, height));
-    let params = config::internals::warp_params(InterpolationMethod::Lanczos2);
-
-    for transform in [
-        Transform::identity(),
-        Transform::translation(DVec2::new(2.5, 1.7)),
-        Transform::similarity(DVec2::new(3.0, 2.0), 0.1, 1.05),
-    ] {
-        let inverse = WarpTransform::new(transform.inverse());
-        for y in [0, 50, height - 1] {
-            let mut output_fast = vec![0.0f32; width];
-            let mut output_scalar = vec![0.0f32; width];
-            row::lanczos(&input, &mut output_fast, y, &inverse, &params);
-            lanczos_scalar_ref(&input, &mut output_scalar, y, &inverse, 2);
-            for x in 0..width {
-                assert!(
-                    (output_fast[x] - output_scalar[x]).abs() < 1e-4,
-                    "L2 row {y}, x={x}: fast {} vs scalar {}",
-                    output_fast[x],
-                    output_scalar[x]
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn lanczos4_matches_scalar_reference() {
-    let width = 128;
-    let height = 128;
-    let input = patterns::diagonal_gradient(Size2us::new(width, height));
-    let params = config::internals::warp_params(InterpolationMethod::Lanczos4);
-
-    for transform in [
-        Transform::identity(),
-        Transform::translation(DVec2::new(2.5, 1.7)),
-        Transform::similarity(DVec2::new(3.0, 2.0), 0.1, 1.05),
-    ] {
-        let inverse = WarpTransform::new(transform.inverse());
-        for y in [0, 50, height - 1] {
-            let mut output_fast = vec![0.0f32; width];
-            let mut output_scalar = vec![0.0f32; width];
-            row::lanczos(&input, &mut output_fast, y, &inverse, &params);
-            lanczos_scalar_ref(&input, &mut output_scalar, y, &inverse, 4);
-            for x in 0..width {
-                assert!(
-                    (output_fast[x] - output_scalar[x]).abs() < 1e-4,
-                    "L4 row {y}, x={x}: fast {} vs scalar {}",
-                    output_fast[x],
-                    output_scalar[x]
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn lanczos2_various_sizes() {
-    let height = 64;
-    let input_base = patterns::diagonal_gradient(Size2us::new(256, height));
-    let params = config::internals::warp_params(InterpolationMethod::Lanczos2);
-
-    for width in [1, 2, 3, 7, 8, 16, 33, 64, 100] {
-        let input = Buffer2::new(
-            width,
-            height,
-            input_base
-                .pixels()
-                .iter()
-                .take(width * height)
-                .copied()
-                .collect(),
-        );
-        let transform = Transform::translation(DVec2::new(1.5, 0.5));
-        let inverse = WarpTransform::new(transform.inverse());
-
-        let mut output_fast = vec![0.0f32; width];
-        let mut output_scalar = vec![0.0f32; width];
-        let y = height / 2;
-
-        row::lanczos(&input, &mut output_fast, y, &inverse, &params);
-        lanczos_scalar_ref(&input, &mut output_scalar, y, &inverse, 2);
-
-        for x in 0..width {
-            assert!(
-                (output_fast[x] - output_scalar[x]).abs() < 1e-4,
-                "L2 width {width}, x={x}: fast {} vs scalar {}",
-                output_fast[x],
-                output_scalar[x]
-            );
-        }
-    }
-}
-
-#[test]
-fn lanczos4_various_sizes() {
-    let height = 64;
-    let input_base = patterns::diagonal_gradient(Size2us::new(256, height));
-    let params = config::internals::warp_params(InterpolationMethod::Lanczos4);
-
-    for width in [1, 2, 3, 7, 8, 16, 33, 64, 100] {
-        let input = Buffer2::new(
-            width,
-            height,
-            input_base
-                .pixels()
-                .iter()
-                .take(width * height)
-                .copied()
-                .collect(),
-        );
-        let transform = Transform::translation(DVec2::new(1.5, 0.5));
-        let inverse = WarpTransform::new(transform.inverse());
-
-        let mut output_fast = vec![0.0f32; width];
-        let mut output_scalar = vec![0.0f32; width];
-        let y = height / 2;
-
-        row::lanczos(&input, &mut output_fast, y, &inverse, &params);
-        lanczos_scalar_ref(&input, &mut output_scalar, y, &inverse, 4);
-
-        for x in 0..width {
-            assert!(
-                (output_fast[x] - output_scalar[x]).abs() < 1e-4,
-                "L4 width {width}, x={x}: fast {} vs scalar {}",
-                output_fast[x],
-                output_scalar[x]
-            );
         }
     }
 }

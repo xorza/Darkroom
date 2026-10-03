@@ -6,14 +6,14 @@
 //! editing the document — so the precedence among them lives in one match
 //! upstairs and never has to be kept disjoint by hand down here.
 //!
-//! [`drag_anchor`] and [`slot`] are the shared halves: the press-frame
-//! position snapshot behind every drag, and the one-gesture-lifetime slot the
-//! rest are built out of.
+//! [`group_drag`] and [`slot`] are the shared halves: the press-frame
+//! position snapshot behind every node drag, and the one-gesture-lifetime
+//! slot the rest are built out of.
 
 pub(crate) mod breaker;
 pub(crate) mod canvas_gesture;
 pub(crate) mod connection;
-pub(crate) mod drag_anchor;
+pub(crate) mod group_drag;
 pub(crate) mod new_node;
 pub(crate) mod node_menu;
 pub(crate) mod pan_zoom;

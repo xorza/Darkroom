@@ -2,266 +2,289 @@
 
 mod synthetic_skies;
 
-use crate::testing::prelude::*;
-use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use crate::{
-    math::size2us::Size2us,
-    stacking::star_detection::background::background_estimate::BackgroundEstimate,
-    stacking::star_detection::config::background_config::{BackgroundConfig, BackgroundRefinement},
-    stacking::star_detection::resources::DetectionResources,
-    testing::synthetic::background_map,
+use crate::math::statistics::mad_to_sigma;
+use crate::stacking::star_detection::background::background_estimate::{
+    BackgroundEstimate, Refinement,
 };
+use crate::stacking::star_detection::config::background_config::BackgroundConfig;
+use crate::stacking::star_detection::resources::DetectionResources;
+use crate::testing::prelude::*;
+use crate::testing::synthetic::background_map;
 
-#[test]
-fn uniform_background() {
-    let width = 128;
-    let height = 128;
-    let pixels = Buffer2::new_filled(width, height, 0.5);
-
-    let bg = background_map::estimate(
-        &pixels,
+/// The background and noise maps of `pixels` at `tile_size`.
+fn estimate(pixels: &Buffer2<f32>, tile_size: usize) -> BackgroundEstimate {
+    background_map::estimate(
+        pixels,
         &BackgroundConfig {
-            tile_size: 32,
+            tile_size,
             ..Default::default()
         },
-    );
-
-    for y in 0..height {
-        for x in 0..width {
-            let val = bg.background[(x, y)];
-            assert!(
-                (val - 0.5).abs() < 1e-4,
-                "Background at ({}, {}) = {}, expected 0.5",
-                x,
-                y,
-                val
-            );
-        }
-    }
+    )
 }
 
+/// A constant frame maps to its own value at every pixel and to no noise, bit for bit: every tile
+/// reads the value, the spline's rise between equal nodes is 0, and its curvature terms are 0 —
+/// over one tile, one row or column of tiles, a tile clamped to a small frame, and many.
 #[test]
-fn small_image_below_tile_size_does_not_panic() {
-    // A tile_size larger than the image must clamp to the image (a single tile) rather than panic;
-    // a uniform image then yields a uniform background at the pixel value.
-    let pixels = Buffer2::new_filled(20, 20, 0.7);
-
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 64, // larger than the 20x20 image → clamped to the image
-            ..Default::default()
-        },
-    );
-
-    for &val in bg.background.pixels() {
+fn constant_skies_come_back_exactly() {
+    for (width, height, tile_size, value) in [
+        (128, 128, 32, 0.5f32),
+        (20, 20, 64, 0.7),
+        (256, 64, 32, 0.4),
+        (32, 32, 32, 0.42),
+        (32, 128, 32, 0.42),
+        (128, 32, 32, 0.77),
+        (256, 256, 64, 0.33),
+        (128, 128, 16, 0.5),
+        (128, 128, 128, 0.5),
+    ] {
+        let background = estimate(&Buffer2::new_filled(width, height, value), tile_size);
+        let case = format!("{width}×{height} at tile {tile_size}");
+        assert_eq!(background.background.width(), width, "{case}");
+        assert_eq!(background.background.height(), height, "{case}");
         assert!(
-            (val - 0.7).abs() < 1e-4,
-            "expected uniform background 0.7, got {val}"
+            background.background.pixels().iter().all(|&v| v == value),
+            "{case}: background off {value}"
+        );
+        assert!(
+            background.noise.pixels().iter().all(|&v| v == 0.0),
+            "{case}: noise off 0"
         );
     }
 }
 
+/// A plane sky comes back as itself at every pixel, past the outer tile centres too and over the
+/// partial tiles a frame not a multiple of the tile leaves: each tile's samples are point-symmetric
+/// about its centre, so its sky is the plane there; the 3×3 median keeps a plane; and the natural
+/// spline through a plane's nodes is that plane, its end intervals continuing it. What is left is
+/// f32 rounding — of the samples, the spline's rise and its products, twice over (y, then x) —
+/// held to 8ε of the largest value.
 #[test]
-fn gradient_background() {
-    let width = 128;
-    let height = 128;
-    let pixels = Buffer2::new(
-        width,
-        height,
-        (0..height)
-            .flat_map(|y| (0..width).map(move |x| (x + y) as f32 / 256.0))
-            .collect(),
-    );
-
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-
-    let corner_00 = bg.background[(0, 0)];
-    let corner_end = bg.background[(127, 127)];
-    assert!(corner_end > corner_00, "Gradient not preserved");
-}
-
-#[test]
-fn background_with_stars() {
-    let width = 128;
-    let height = 128;
-    let mut pixels = Buffer2::new_filled(width, height, 0.1);
-
-    // Add bright spots (stars)
-    pixels[(64, 64)] = 1.0;
-    pixels[(32, 32)] = 0.9;
-    pixels[(96, 96)] = 0.95;
-
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-
-    // Median is robust to outliers
-    let center_bg = bg.background[(64, 64)];
-    assert!(
-        (center_bg - 0.1).abs() < 0.05,
-        "Background at star = {}, expected ~0.1",
-        center_bg
-    );
-}
-
-#[test]
-fn noise_estimation() {
-    let width = 128;
-    let height = 128;
-    let pixels = Buffer2::new_filled(width, height, 0.5);
-
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-
-    // For uniform data, MAD = 0, so noise estimate should be ~0
-    let noise = bg.noise[(64, 64)];
-    assert!(
-        noise < 1e-4,
-        "Noise = {}, expected ~0 for uniform image",
-        noise
-    );
-}
-
-#[test]
-fn non_square_image() {
-    let width = 256;
-    let height = 64;
-    let pixels = Buffer2::new_filled(width, height, 0.4);
-
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-
-    assert_eq!(bg.background.width(), width);
-    assert_eq!(bg.background.height(), height);
-    assert!((bg.background[(0, 0)] - 0.4).abs() < 0.01);
-    assert!((bg.background[(255, 63)] - 0.4).abs() < 0.01);
-}
-
-#[test]
-fn sigma_clipping_rejects_outliers() {
-    let width = 64;
-    let height = 64;
-    let mut pixels = Buffer2::new_filled(width, height, 0.2);
-
-    // 10% bright outliers
-    for i in 0..(width * height / 10) {
-        pixels[i * 10] = 0.95;
-    }
-
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-
-    let bg_val = bg.background[(32, 32)];
-    assert!(
-        (bg_val - 0.2).abs() < 0.05,
-        "Background = {}, expected ~0.2",
-        bg_val
-    );
-}
-
-#[test]
-fn interpolation_produces_valid_values() {
-    // Verify interpolation produces continuous (no NaN/Inf) values
-    let width = 64;
-    let height = 64;
-
-    let pixels = Buffer2::new(
-        width,
-        height,
-        (0..height)
-            .flat_map(|y| (0..width).map(move |x| (x + y) as f32 / 128.0))
-            .collect(),
-    );
-
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 16,
-            ..Default::default()
-        },
-    );
-
-    // Sample every 4th pixel instead of every pixel
-    for y in (0..height).step_by(4) {
-        for x in (0..width).step_by(4) {
-            let val = bg.background[(x, y)];
-            assert!(val.is_finite(), "NaN/Inf at ({},{})", x, y);
-            assert!(
-                (0.0..=1.0).contains(&val),
-                "Out of range at ({},{}): {}",
-                x,
-                y,
-                val
-            );
+fn plane_skies_come_back_exactly() {
+    for (width, height, tile_size, gradient) in [
+        (256, 192, 64, Vec2::new(1e-3, 0.0)),
+        (256, 192, 64, Vec2::new(0.0, 1e-3)),
+        (256, 192, 64, Vec2::new(1e-3, 2e-3)),
+        (200, 150, 64, Vec2::new(-1e-3, 1.5e-3)),
+        (160, 160, 32, Vec2::new(2e-3, -1e-3)),
+    ] {
+        let plane = |x: usize, y: usize| 0.5 + gradient.x * x as f32 + gradient.y * y as f32;
+        let pixels = Buffer2::new(
+            width,
+            height,
+            (0..width * height)
+                .map(|i| plane(i % width, i / width))
+                .collect(),
+        );
+        let background = estimate(&pixels, tile_size);
+        let largest = pixels.pixels().iter().fold(0.0f32, |m, &v| m.max(v.abs()));
+        let bound = 8.0 * f32::EPSILON * largest;
+        for y in 0..height {
+            for x in 0..width {
+                let error = (background.background[(x, y)] - plane(x, y)).abs();
+                assert!(
+                    error <= bound,
+                    "{width}×{height}, gradient {gradient}: ({x}, {y}) off by {error} > {bound}"
+                );
+            }
         }
     }
 }
 
-#[test]
-fn large_image() {
-    let width = 256;
-    let height = 256;
-    let pixels = Buffer2::new_filled(width, height, 0.33);
-
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 64,
-            ..Default::default()
-        },
-    );
-
-    assert!((bg.background[(0, 0)] - 0.33).abs() < 0.01);
-    assert!((bg.background[(127, 127)] - 0.33).abs() < 0.01);
-    assert!((bg.background[(255, 255)] - 0.33).abs() < 0.01);
+/// The second derivatives of the natural cubic spline through `(xs, ys)`, by the textbook
+/// tridiagonal system in f64: `h₋·m₋ + 2(h₋ + h₊)·m + h₊·m₊ = 6·(slope₊ − slope₋)`, `m` 0 at both
+/// ends.
+fn natural_spline(xs: &[f64], ys: &[f64]) -> Vec<f64> {
+    let n = xs.len();
+    let mut m = vec![0.0; n];
+    let (mut diagonal, mut rhs) = (vec![0.0; n], vec![0.0; n]);
+    for i in 1..n - 1 {
+        let (left, right) = (xs[i] - xs[i - 1], xs[i + 1] - xs[i]);
+        diagonal[i] = 2.0 * (left + right);
+        rhs[i] = 6.0 * ((ys[i + 1] - ys[i]) / right - (ys[i] - ys[i - 1]) / left);
+        if i > 1 {
+            let factor = left / diagonal[i - 1];
+            diagonal[i] -= factor * left;
+            rhs[i] -= factor * rhs[i - 1];
+        }
+    }
+    for i in (1..n - 1).rev() {
+        m[i] = (rhs[i] - (xs[i + 1] - xs[i]) * m[i + 1]) / diagonal[i];
+    }
+    m
 }
 
-#[test]
-fn different_tile_sizes() {
-    let width = 128;
-    let height = 128;
-    let data = vec![0.5; width * height];
+/// That spline at `x`, the end intervals' cubics continued past the outer knots.
+fn spline_at(xs: &[f64], ys: &[f64], m: &[f64], x: f64) -> f64 {
+    let k = xs[1..xs.len() - 1]
+        .iter()
+        .take_while(|&&knot| knot <= x)
+        .count();
+    let h = xs[k + 1] - xs[k];
+    let a = (xs[k + 1] - x) / h;
+    let b = 1.0 - a;
+    a * ys[k] + b * ys[k + 1] + ((a.powi(3) - a) * m[k] + (b.powi(3) - b) * m[k + 1]) * h * h / 6.0
+}
 
-    // Test representative tile sizes (min, mid, max)
-    for tile_size in [16, 64, 128] {
-        let pixels = Buffer2::new(width, height, data.clone());
-        let bg = background_map::estimate(
+/// Along one axis, five tiles of 32 px hold a checkerboard `vᵢ ± aᵢ`, the same across the other
+/// axis: each tile's median and mean are `vᵢ`, its MAD `aᵢ`, so its sky is `vᵢ` and its σ
+/// `mad_to_sigma(aᵢ)`, exactly (dyadic values, exact sums). Both sequences rise, which the 3×3
+/// median keeps. The maps along that axis are then the natural cubic splines through those tile
+/// values at the tile centres 15.5 + 32i — checked against an independent f64 spline at every
+/// pixel, the end intervals' extrapolation included, and constant across. The noise map is that
+/// spline clipped to the tile σ's range, which its extrapolation leaves at both ends. The f32
+/// spline differs from the f64 one by the rounding of its solve and evaluation, a few ulps of the
+/// values: ≤ 2.6e-8 measured, held to 4ε of the largest sky, 0.75.
+#[test]
+fn maps_follow_the_natural_spline_through_the_tile_skies() {
+    const SKY: [f32; 5] = [0.25, 0.3125, 0.375, 0.5, 0.75];
+    const SPREAD: [f32; 5] = [
+        1.0 / 128.0,
+        2.0 / 128.0,
+        4.0 / 128.0,
+        5.0 / 128.0,
+        8.0 / 128.0,
+    ];
+    let centres: Vec<f64> = (0..5).map(|i| 15.5 + 32.0 * f64::from(i)).collect();
+    let skies: Vec<f64> = SKY.iter().map(|&v| f64::from(v)).collect();
+    let sigmas: Vec<f64> = SPREAD.iter().map(|&a| f64::from(mad_to_sigma(a))).collect();
+    let (sky_m, sigma_m) = (
+        natural_spline(&centres, &skies),
+        natural_spline(&centres, &sigmas),
+    );
+
+    let bound = 4.0 * f64::from(f32::EPSILON) * 0.75;
+    for along_x in [true, false] {
+        let (width, height) = if along_x { (160, 96) } else { (96, 160) };
+        let pixels = Buffer2::new(
+            width,
+            height,
+            (0..width * height)
+                .map(|i| {
+                    let (x, y) = (i % width, i / width);
+                    let tile = if along_x { x } else { y } / 32;
+                    let sign = if (x + y) % 2 == 0 { 1.0 } else { -1.0 };
+                    SKY[tile] + sign * SPREAD[tile]
+                })
+                .collect(),
+        );
+        let background = estimate(&pixels, 32);
+        for y in 0..height {
+            for x in 0..width {
+                let at = if along_x { x } else { y } as f64;
+                let sky = spline_at(&centres, &skies, &sky_m, at);
+                let sigma = spline_at(&centres, &sigmas, &sigma_m, at).clamp(sigmas[0], sigmas[4]);
+                let axis = if along_x { "x" } else { "y" };
+                let (got_sky, got_sigma) = (
+                    f64::from(background.background[(x, y)]),
+                    f64::from(background.noise[(x, y)]),
+                );
+                assert!(
+                    (got_sky - sky).abs() <= bound,
+                    "along {axis}: sky at ({x}, {y}) {got_sky} vs {sky}"
+                );
+                assert!(
+                    (got_sigma - sigma).abs() <= bound,
+                    "along {axis}: σ at ({x}, {y}) {got_sigma} vs {sigma}"
+                );
+            }
+        }
+    }
+}
+
+/// Outliers in under half of a tile's pixels leave its sky exact: a tenth of the frame at 0.95 on
+/// a 0.2 sky gives a MAD of 0, so the clip keeps only the 0.2s, whose median and mean are 0.2.
+#[test]
+fn outliers_in_under_half_a_tile_leave_the_sky_exact() {
+    let mut pixels = Buffer2::new_filled(64, 64, 0.2f32);
+    for i in (0..64 * 64).step_by(10) {
+        pixels[i] = 0.95;
+    }
+    let background = estimate(&pixels, 32);
+    assert!(background.background.pixels().iter().all(|&v| v == 0.2));
+}
+
+/// `refine` masks what stands above the sky, dilated, and measures the sky again from the rest.
+///
+/// Every 32×32 tile holds a checkerboard `v ± a` (v = 0.25, a = 1/64) with a 4×4 core 8 above it
+/// and a 2-px halo 2a above it around the core. Unmasked, each tile counts 480 pixels at v − a and
+/// 504 at v + a below the core and the halo's highs, so its median is v + a; its MAD is 2a, which
+/// keeps the halo through the clip; and its mean sits 0.905a from the median, past the 0.3σ Pearson
+/// bound, so the sky is the median: v + a in every tile, which no median filter can undo. The mask
+/// stands at v + a + 4σ = v + 12.9a, which only the core clears. Undilated, the halo stays and the
+/// sky with it; dilated by 2 the mask covers exactly the 8×8 halo, leaving 480 of each checker
+/// value: the sky is v and σ is `mad_to_sigma(a)`, exactly, and a second pass, whose mask at v +
+/// 5.9a is the same, keeps them.
+#[test]
+fn refine_masks_the_stars_and_their_halos_out() {
+    const SKY: f32 = 0.25;
+    const SPREAD: f32 = 1.0 / 64.0;
+    let size = Size2us::new(128, 128);
+    let pixels = Buffer2::new(
+        size.width,
+        size.height,
+        (0..size.pixel_count())
+            .map(|i| {
+                let (x, y) = (i % size.width, i / size.width);
+                let sign = if (x + y) % 2 == 0 { 1.0 } else { -1.0 };
+                let lift = match (x % 32, y % 32) {
+                    (14..18, 14..18) => 8.0,
+                    (12..20, 12..20) => 2.0 * SPREAD,
+                    _ => 0.0,
+                };
+                SKY + sign * SPREAD + lift
+            })
+            .collect(),
+    );
+    let config = BackgroundConfig {
+        tile_size: 32,
+        ..Default::default()
+    };
+    let refined = |iterations, mask_dilation| {
+        let mut resources = DetectionResources::new(size);
+        let mut background = BackgroundEstimate::estimate(&pixels, &config, &mut resources);
+        background.refine(
             &pixels,
-            &BackgroundConfig {
-                tile_size,
-                ..Default::default()
+            &config,
+            Refinement {
+                iterations,
+                mask_dilation,
             },
+            4.0,
+            &mut resources,
+        );
+        background
+    };
+
+    let unrefined = estimate(&pixels, 32);
+    assert!(
+        unrefined
+            .background
+            .pixels()
+            .iter()
+            .all(|&v| v == SKY + SPREAD)
+    );
+    let undilated = refined(1, 0);
+    assert!(
+        undilated
+            .background
+            .pixels()
+            .iter()
+            .all(|&v| v == SKY + SPREAD)
+    );
+    for iterations in [1, 2] {
+        let clean = refined(iterations, 2);
+        assert!(
+            clean.background.pixels().iter().all(|&v| v == SKY),
+            "{iterations} passes"
         );
         assert!(
-            (bg.background[(64, 64)] - 0.5).abs() < 0.01,
-            "Failed for tile_size={}",
-            tile_size
+            clean
+                .noise
+                .pixels()
+                .iter()
+                .all(|&v| v == mad_to_sigma(SPREAD)),
+            "{iterations} passes"
         );
     }
 }
@@ -316,732 +339,4 @@ fn invalid_tile_sizes_return_exact_errors() {
         let invalid = config.validate().unwrap_err();
         assert_eq!((invalid.field, invalid.value), ("tile_size", value as f64));
     }
-}
-
-#[test]
-fn single_tile_image() {
-    // Image size equals tile size - exercises tx1 == tx0 branch in interpolation
-    let size = 32;
-    let pixels = Buffer2::new_filled(size, size, 0.42);
-
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-
-    // Single tile → no interpolation, all values should be exactly the tile median = 0.42
-    for y in (0..size).step_by(8) {
-        for x in (0..size).step_by(8) {
-            let val = bg.background[(x, y)];
-            assert!(
-                (val - 0.42).abs() < 1e-4,
-                "Background at ({}, {}) = {}, expected 0.42",
-                x,
-                y,
-                val
-            );
-        }
-    }
-}
-
-#[test]
-fn noise_estimation_with_actual_noise() {
-    // Image with real noise should have non-zero sigma estimation
-    let width = 128;
-    let height = 128;
-    let mut pixels = Buffer2::new_filled(width, height, 0.5);
-
-    // Add Gaussian-like noise pattern (deterministic for reproducibility)
-    for (i, val) in pixels.iter_mut().enumerate() {
-        let noise = ((i * 7919) % 1000) as f32 / 10000.0 - 0.05; // [-0.05, 0.05]
-        *val += noise;
-    }
-
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-
-    let noise = bg.noise[(64, 64)];
-    assert!(
-        noise > 0.01,
-        "Noise = {}, expected > 0.01 for noisy image",
-        noise
-    );
-    assert!(
-        noise < 0.15,
-        "Noise = {}, expected < 0.15 (not too high)",
-        noise
-    );
-}
-
-#[test]
-fn interpolation_smooth_at_tile_boundaries() {
-    // Verify interpolation is continuous at tile boundaries
-    let width = 128;
-    let height = 128;
-
-    // Create gradient that will have different values in each tile
-    let data: Vec<f32> = (0..height)
-        .flat_map(|y| (0..width).map(move |x| (x + y) as f32 / 256.0))
-        .collect();
-
-    let pixels = Buffer2::new(width, height, data);
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-
-    // Check that adjacent pixels have similar values (no discontinuities)
-    let max_jump = 0.05;
-    for y in 1..height {
-        for x in 1..width {
-            let val = bg.background[(x, y)];
-            let val_left = bg.background[(x - 1, y)];
-            let val_up = bg.background[(x, y - 1)];
-
-            assert!(
-                (val - val_left).abs() < max_jump,
-                "Discontinuity at ({}, {}): {} vs {} (left)",
-                x,
-                y,
-                val,
-                val_left
-            );
-            assert!(
-                (val - val_up).abs() < max_jump,
-                "Discontinuity at ({}, {}): {} vs {} (up)",
-                x,
-                y,
-                val,
-                val_up
-            );
-        }
-    }
-}
-
-#[test]
-fn iterative_background_uniform() {
-    // Uniform image should produce same result as non-iterative
-    let width = 128;
-    let height = 128;
-    let pixels = Buffer2::new_filled(width, height, 0.5);
-
-    let config = BackgroundConfig {
-        tile_size: 32,
-        ..Default::default()
-    };
-    let bg = background_map::estimate(&pixels, &config);
-
-    // All background values should be close to 0.5
-    for y in (0..height).step_by(10) {
-        for x in (0..width).step_by(10) {
-            let val = bg.background[(x, y)];
-            assert!(
-                (val - 0.5).abs() < 0.01,
-                "Background at ({}, {}) = {}, expected ~0.5",
-                x,
-                y,
-                val
-            );
-        }
-    }
-}
-
-#[test]
-fn iterative_background_with_bright_stars() {
-    // Background with bright stars should be better estimated with iterative refinement
-    let width = 128;
-    let height = 128;
-    let mut pixels = Buffer2::new_filled(width, height, 0.1f32);
-
-    // Add multiple bright Gaussian stars
-    let stars: [(i32, i32); 5] = [(32, 32), (64, 64), (96, 96), (32, 96), (96, 32)];
-    for (sx, sy) in stars {
-        SyntheticStar::new(
-            Vec2::new(sx as f32, sy as f32),
-            0.8,
-            StarProfile::Gaussian {
-                sigma: std::f32::consts::SQRT_2,
-            },
-        )
-        .add_to(&mut pixels);
-    }
-
-    // Non-iterative estimate
-    let bg_simple = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-
-    // Iterative estimate (should be better at excluding stars)
-    let config = BackgroundConfig {
-        refinement: BackgroundRefinement::Iterative { iterations: 2 },
-        mask_dilation: 5,
-        tile_size: 32,
-        sigma_clip_iterations: 2,
-    };
-    let bg_iterative = background_map::estimate(&pixels, &config);
-
-    // Check background at a point away from stars
-    let test_x = 16;
-    let test_y = 64;
-    let simple_bg = bg_simple.background[(test_x, test_y)];
-    let iter_bg = bg_iterative.background[(test_x, test_y)];
-
-    // Both should be close to 0.1, but iterative should be at least as good
-    assert!(
-        (iter_bg - 0.1).abs() < 0.05,
-        "Iterative background {} should be close to 0.1",
-        iter_bg
-    );
-    assert!(
-        (iter_bg - 0.1).abs() <= (simple_bg - 0.1).abs() + 0.01,
-        "Iterative {} should be at least as good as simple {} at estimating 0.1 background",
-        iter_bg,
-        simple_bg
-    );
-}
-
-#[test]
-fn iterative_background_preserves_gradient() {
-    // Background gradient should be preserved with iterative estimation
-    let width = 64;
-    let height = 64;
-    let mut pixels = Buffer2::new(
-        width,
-        height,
-        (0..height)
-            .flat_map(|y| (0..width).map(move |x| (x + y) as f32 / 128.0))
-            .collect::<Vec<f32>>(),
-    );
-
-    // Add a bright star
-    SyntheticStar::new(Vec2::splat(32.0), 0.5, StarProfile::Gaussian { sigma: 1.0 })
-        .add_to(&mut pixels);
-
-    let config = BackgroundConfig {
-        tile_size: 16,
-        ..Default::default()
-    };
-    let bg = background_map::estimate(&pixels, &config);
-
-    // Gradient should be preserved
-    let corner_00 = bg.background[(0, 0)];
-    let corner_end = bg.background[(63, 63)];
-    assert!(
-        corner_end > corner_00,
-        "Gradient not preserved: corner_00={}, corner_end={}",
-        corner_00,
-        corner_end
-    );
-}
-
-#[test]
-fn iterative_background_no_dilation() {
-    // Test iterative refinement with mask_dilation = 0
-    let width = 128;
-    let height = 128;
-    let mut pixels = Buffer2::new_filled(width, height, 0.2f32);
-
-    // Add a bright star
-    SyntheticStar::new(Vec2::splat(64.0), 0.7, StarProfile::Gaussian { sigma: 1.0 })
-        .add_to(&mut pixels);
-
-    let config = BackgroundConfig {
-        refinement: BackgroundRefinement::Iterative { iterations: 1 },
-        mask_dilation: 0, // No dilation
-        tile_size: 32,
-        sigma_clip_iterations: 2,
-    };
-    let bg = background_map::estimate(&pixels, &config);
-
-    // Background away from star should be close to 0.2
-    let val = bg.background[(16, 16)];
-    assert!(
-        (val - 0.2).abs() < 0.05,
-        "Background {} should be ~0.2",
-        val
-    );
-}
-
-#[test]
-fn iterative_background_config_default() {
-    let config = BackgroundConfig::default();
-
-    assert!(matches!(config.refinement, BackgroundRefinement::None));
-    assert_eq!(config.mask_dilation, 3);
-}
-
-#[test]
-fn iterative_background_no_refinement() {
-    // No refinement should work fine
-    let width = 64;
-    let height = 64;
-    let pixels = Buffer2::new_filled(width, height, 0.3);
-
-    let config = BackgroundConfig {
-        refinement: BackgroundRefinement::None,
-        tile_size: 32,
-        ..Default::default()
-    };
-    let bg = background_map::estimate(&pixels, &config);
-
-    let val = bg.background[(32, 32)];
-    assert!(
-        (val - 0.3).abs() < 0.01,
-        "Background {} should be ~0.3",
-        val
-    );
-}
-
-#[test]
-fn bicubic_reproduces_linear_gradient() {
-    // A linear gradient f(x,y) = ax + by + c should be reproduced exactly by
-    // natural cubic spline (cubic of a linear = linear, d2 = 0 everywhere)
-    let width = 128;
-    let height = 128;
-
-    // Linear gradient: f(x,y) = 0.001*x + 0.002*y + 0.1
-    let data: Vec<f32> = (0..height)
-        .flat_map(|y| (0..width).map(move |x| 0.001 * x as f32 + 0.002 * y as f32 + 0.1))
-        .collect();
-
-    let pixels = Buffer2::new(width, height, data.clone());
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-
-    // The gradient should be monotonically increasing and close to original.
-    // Note: The 3x3 median filter on tile statistics slightly smooths the gradient,
-    // so we verify monotonicity and bounded error rather than exact reproduction.
-    let corner_00 = bg.background[(32, 32)];
-    let corner_end = bg.background[(96, 96)];
-    let expected_00 = 0.001 * 32.0 + 0.002 * 32.0 + 0.1;
-    let expected_end = 0.001 * 96.0 + 0.002 * 96.0 + 0.1;
-
-    assert!(
-        corner_end > corner_00,
-        "Gradient not monotonically increasing: ({:.4}) vs ({:.4})",
-        corner_00,
-        corner_end
-    );
-
-    // Both endpoints should be in the right ballpark (within tile-level precision)
-    assert!(
-        (corner_00 - expected_00).abs() < 0.1,
-        "Interior point (32,32): expected ~{:.4}, got {:.4}",
-        expected_00,
-        corner_00
-    );
-    assert!(
-        (corner_end - expected_end).abs() < 0.1,
-        "Interior point (96,96): expected ~{:.4}, got {:.4}",
-        expected_end,
-        corner_end
-    );
-
-    // Key test: adjacent pixels should have very small differences (C2 smooth)
-    let mut max_jump = 0.0f32;
-    for y in 1..height - 1 {
-        for x in 1..width - 1 {
-            let jump_x = (bg.background[(x, y)] - bg.background[(x - 1, y)]).abs();
-            let jump_y = (bg.background[(x, y)] - bg.background[(x, y - 1)]).abs();
-            max_jump = max_jump.max(jump_x).max(jump_y);
-        }
-    }
-    assert!(
-        max_jump < 0.01,
-        "Max pixel-to-pixel jump {:.6} too large for smooth bicubic",
-        max_jump
-    );
-}
-
-#[test]
-fn bicubic_c1_continuity_at_tile_boundaries() {
-    // Verify first derivatives are continuous at tile boundaries.
-    // Numerical derivative across boundary should be smooth — the jump
-    // in the derivative should be small compared to the derivative itself.
-    let width = 256;
-    let height = 256;
-
-    // Quadratic background: f(x,y) = 0.00005*(x² + y²) + 0.1
-    let data: Vec<f32> = (0..height)
-        .flat_map(|y| (0..width).map(move |x| 0.00005 * (x * x + y * y) as f32 + 0.1))
-        .collect();
-
-    let pixels = Buffer2::new(width, height, data);
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 64,
-            ..Default::default()
-        },
-    );
-
-    // Check derivative continuity in X at tile boundary columns
-    // Tile size 64 → centers at 32, 96, 160, 224
-    // Boundaries are midway between centers: 64, 128, 192
-    let boundary_xs = [64, 128, 192];
-    let mut max_d2_jump = 0.0f32;
-
-    for &bx in &boundary_xs {
-        if bx + 2 >= width || bx < 2 {
-            continue;
-        }
-        for y in (40..height - 40).step_by(10) {
-            // Numerical second derivative: f''(x) ≈ f(x-1) - 2*f(x) + f(x+1)
-            let d2_left = bg.background[(bx - 2, y)] - 2.0 * bg.background[(bx - 1, y)]
-                + bg.background[(bx, y)];
-            let d2_right = bg.background[(bx, y)] - 2.0 * bg.background[(bx + 1, y)]
-                + bg.background[(bx + 2, y)];
-            let jump = (d2_right - d2_left).abs();
-            max_d2_jump = max_d2_jump.max(jump);
-        }
-    }
-
-    // With C2 bicubic spline, the second derivative jump should be very small
-    assert!(
-        max_d2_jump < 0.001,
-        "Max second derivative jump at tile boundary: {:.6} (should be < 0.001 for C2 spline)",
-        max_d2_jump
-    );
-}
-
-#[test]
-fn bicubic_smoother_than_bilinear_would_be() {
-    // Bicubic spline should produce smoother results (smaller max second derivative)
-    // than bilinear would. We verify this indirectly by checking that the second
-    // derivative is bounded, as bilinear would have discontinuous first derivatives.
-    let width = 128;
-    let height = 128;
-
-    let data: Vec<f32> = (0..height)
-        .flat_map(|y| (0..width).map(move |x| (x + y) as f32 / 256.0))
-        .collect();
-
-    let pixels = Buffer2::new(width, height, data);
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-
-    // Compute max numerical second derivative in X across the entire image
-    let mut max_d2 = 0.0f32;
-    for y in 0..height {
-        for x in 1..width - 1 {
-            let d2 = (bg.background[(x - 1, y)] - 2.0 * bg.background[(x, y)]
-                + bg.background[(x + 1, y)])
-                .abs();
-            max_d2 = max_d2.max(d2);
-        }
-    }
-
-    // With bicubic spline on a linear gradient, second derivative should be near zero
-    assert!(
-        max_d2 < 0.005,
-        "Max second derivative {:.6} too large for C2 spline on linear gradient",
-        max_d2
-    );
-}
-
-#[test]
-fn bicubic_c2_continuity_y_direction() {
-    // Same as bicubic_c1_continuity_at_tile_boundaries but for Y direction.
-    // With natural bicubic spline, second derivative should be continuous at Y tile boundaries.
-    let width = 256;
-    let height = 256;
-
-    // Quadratic background: f(x,y) = 0.00005*(x² + y²) + 0.1
-    let data: Vec<f32> = (0..height)
-        .flat_map(|y| (0..width).map(move |x| 0.00005 * (x * x + y * y) as f32 + 0.1))
-        .collect();
-
-    let pixels = Buffer2::new(width, height, data);
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 64,
-            ..Default::default()
-        },
-    );
-
-    // Tile size 64 → Y centers at 32, 96, 160, 224
-    // Boundaries midway: 64, 128, 192
-    let boundary_ys = [64, 128, 192];
-    let mut max_d2_jump = 0.0f32;
-
-    for &by in &boundary_ys {
-        if by + 2 >= height || by < 2 {
-            continue;
-        }
-        for x in (40..width - 40).step_by(10) {
-            // Numerical second derivative in Y: f''(y) ≈ f(y-1) - 2*f(y) + f(y+1)
-            let d2_above = bg.background[(x, by - 2)] - 2.0 * bg.background[(x, by - 1)]
-                + bg.background[(x, by)];
-            let d2_below = bg.background[(x, by)] - 2.0 * bg.background[(x, by + 1)]
-                + bg.background[(x, by + 2)];
-            let jump = (d2_below - d2_above).abs();
-            max_d2_jump = max_d2_jump.max(jump);
-        }
-    }
-
-    // With C2 bicubic spline, the second derivative jump should be very small
-    assert!(
-        max_d2_jump < 0.001,
-        "Max Y-direction second derivative jump at tile boundary: {:.6} (should be < 0.001 for C2 spline)",
-        max_d2_jump
-    );
-}
-
-#[test]
-fn noise_map_bicubic_interpolation() {
-    // Verify that the noise map is also interpolated with bicubic spline,
-    // not just constant or linear. Create an image with spatially varying noise.
-    let width = 128;
-    let height = 128;
-
-    // Background constant at 0.5, noise varies: left half has low noise, right half high noise.
-    // We achieve this by making pixel values in right tiles more spread out.
-    let data: Vec<f32> = (0..height)
-        .flat_map(|y| {
-            (0..width).map(move |x| {
-                // Deterministic pseudo-noise that increases with x
-                let base = 0.5;
-                let noise_amp = if x < 64 { 0.001 } else { 0.05 };
-                let noise = ((x * 7919 + y * 104729) % 1000) as f32 / 1000.0 - 0.5;
-                base + noise * noise_amp
-            })
-        })
-        .collect();
-
-    let pixels = Buffer2::new(width, height, data);
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-
-    // Noise at left side should be lower than noise at right side
-    let noise_left = bg.noise[(16, 64)];
-    let noise_right = bg.noise[(112, 64)];
-    assert!(
-        noise_right > noise_left,
-        "Noise should increase left→right: left={}, right={}",
-        noise_left,
-        noise_right
-    );
-
-    // Noise should be smoothly interpolated (no discontinuities)
-    let mut max_jump = 0.0f32;
-    for y in 1..height {
-        for x in 1..width {
-            let jump_x = (bg.noise[(x, y)] - bg.noise[(x - 1, y)]).abs();
-            let jump_y = (bg.noise[(x, y)] - bg.noise[(x, y - 1)]).abs();
-            max_jump = max_jump.max(jump_x).max(jump_y);
-        }
-    }
-    assert!(
-        max_jump < 0.01,
-        "Noise map max pixel-to-pixel jump {:.6} too large for smooth bicubic",
-        max_jump
-    );
-
-    // Noise values should all be finite. Small negatives are possible from
-    // cubic spline overshoot near zero but should be negligible.
-    for y in (0..height).step_by(4) {
-        for x in (0..width).step_by(4) {
-            let n = bg.noise[(x, y)];
-            assert!(n.is_finite(), "NaN/Inf noise at ({},{})", x, y);
-            assert!(n > -0.01, "Large negative noise at ({},{}): {}", x, y, n);
-        }
-    }
-}
-
-#[test]
-fn bicubic_single_tile_column() {
-    // With tiles_x=1, the X-direction solve gets n=1. Should produce constant fill.
-    let width = 32; // 1 tile column
-    let height = 128;
-    let pixels = Buffer2::new_filled(width, height, 0.42);
-
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-
-    // All background values should be ~0.42 (constant, no X interpolation)
-    for y in (0..height).step_by(8) {
-        for x in (0..width).step_by(8) {
-            let val = bg.background[(x, y)];
-            assert!(
-                (val - 0.42).abs() < 1e-3,
-                "Single tile column: bg({},{}) = {}, expected 0.42",
-                x,
-                y,
-                val
-            );
-        }
-    }
-}
-
-#[test]
-fn bicubic_two_tile_columns() {
-    // With tiles_x=2, natural spline has d2=0 at both endpoints (no interior points).
-    // Interpolation degenerates to linear between the two tile centers.
-    let width = 64; // 2 tile columns
-    let height = 64;
-
-    // Left tile at value 100, right tile at value 200
-    let data: Vec<f32> = (0..height)
-        .flat_map(|_| (0..width).map(|x| if x < 32 { 100.0 } else { 200.0 }))
-        .collect();
-
-    let pixels = Buffer2::new(width, height, data);
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-
-    // At left center (x=16): should be ~100
-    // At right center (x=48): should be ~200
-    // At midpoint (x=32): should be ~150 (linear interp between two tiles)
-    let left = bg.background[(16, 32)];
-    let mid = bg.background[(32, 32)];
-    let right = bg.background[(48, 32)];
-
-    assert!(
-        (left - 100.0).abs() < 5.0,
-        "Left center: expected ~100, got {}",
-        left
-    );
-    assert!(
-        (right - 200.0).abs() < 5.0,
-        "Right center: expected ~200, got {}",
-        right
-    );
-    // With only 2 tiles, natural spline = linear, so midpoint = average
-    assert!(
-        (mid - 150.0).abs() < 10.0,
-        "Midpoint: expected ~150 (linear), got {}",
-        mid
-    );
-    // Verify monotonicity
-    assert!(
-        right > mid && mid > left,
-        "Should be monotonic: left={}, mid={}, right={}",
-        left,
-        mid,
-        right
-    );
-}
-
-#[test]
-fn bicubic_single_tile_row() {
-    // With tiles_y=1, Y direction should be constant (no Y interpolation needed)
-    let width = 128;
-    let height = 32; // 1 tile row
-    let pixels = Buffer2::new_filled(width, height, 0.77);
-
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-
-    for y in (0..height).step_by(8) {
-        for x in (0..width).step_by(8) {
-            let val = bg.background[(x, y)];
-            assert!(
-                (val - 0.77).abs() < 1e-3,
-                "Single tile row: bg({},{}) = {}, expected 0.77",
-                x,
-                y,
-                val
-            );
-        }
-    }
-}
-
-#[test]
-fn bicubic_two_tile_rows() {
-    // With tiles_y=2, natural spline has d2=0 at both endpoints.
-    // Y interpolation degenerates to linear.
-    let width = 64;
-    let height = 64; // 2 tile rows
-
-    // Top tile at 50, bottom tile at 150
-    let data: Vec<f32> = (0..height)
-        .flat_map(|y| {
-            let val = if y < 32 { 50.0 } else { 150.0 };
-            std::iter::repeat_n(val, width)
-        })
-        .collect();
-
-    let pixels = Buffer2::new(width, height, data);
-    let bg = background_map::estimate(
-        &pixels,
-        &BackgroundConfig {
-            tile_size: 32,
-            ..Default::default()
-        },
-    );
-
-    // At top center (y=16): should be ~50
-    // At bottom center (y=48): should be ~150
-    let top = bg.background[(32, 16)];
-    let mid = bg.background[(32, 32)];
-    let bot = bg.background[(32, 48)];
-
-    assert!(
-        (top - 50.0).abs() < 5.0,
-        "Top center: expected ~50, got {}",
-        top
-    );
-    assert!(
-        (bot - 150.0).abs() < 5.0,
-        "Bottom center: expected ~150, got {}",
-        bot
-    );
-    assert!(
-        (mid - 100.0).abs() < 10.0,
-        "Midpoint: expected ~100 (linear), got {}",
-        mid
-    );
-    assert!(
-        bot > mid && mid > top,
-        "Should be monotonic: top={}, mid={}, bot={}",
-        top,
-        mid,
-        bot
-    );
 }

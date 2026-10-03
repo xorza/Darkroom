@@ -30,7 +30,7 @@ impl Default for GesdConfig {
 }
 
 impl GesdConfig {
-    pub fn new(alpha: f32, max_outliers: Option<usize>) -> Self {
+    pub const fn new(alpha: f32, max_outliers: Option<usize>) -> Self {
         Self {
             alpha,
             max_outliers,

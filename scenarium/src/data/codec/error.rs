@@ -8,20 +8,23 @@
 use thiserror::Error;
 
 use crate::data::type_system::TypeId;
+use std::error;
+use std::io;
+use std::result;
 
 /// The failure a [`CustomValueCodec`](crate::data::codec::CustomValueCodec)
 /// hands back. Codecs are written outside this crate — the value type, its
 /// representation, and whatever I/O reaching it takes are all the implementor's
 /// — so the error stays theirs to name, and this only asks that it can cross a
 /// thread and be reported.
-pub type CodecError = Box<dyn std::error::Error + Send + Sync>;
+pub type CodecError = Box<dyn error::Error + Send + Sync>;
 
 /// What the blob format itself rejected — distinct from [`CodecError`], which
 /// is whatever an individual codec handed back and which this wraps.
 #[derive(Debug, Error)]
 pub enum CodecFormatError {
     #[error("cache I/O failed: {0}")]
-    Io(#[from] std::io::Error),
+    Io(#[from] io::Error),
     #[error("malformed cached output frame: {0}")]
     Frame(String),
     #[error("encoding a {type_id:?} value failed: {source}")]
@@ -32,4 +35,4 @@ pub enum CodecFormatError {
     Decode { type_id: TypeId, source: CodecError },
 }
 
-pub(crate) type Result<T> = std::result::Result<T, CodecFormatError>;
+pub(crate) type Result<T> = result::Result<T, CodecFormatError>;

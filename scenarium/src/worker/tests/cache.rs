@@ -1,11 +1,14 @@
 use super::*;
+use crate::execution::cache::disk_store::DiskStore;
+use crate::testing::graph::NodeSpec;
+use std::fs;
 
 /// Eviction is fire-and-forget: it happens inside the batch, before the
 /// acknowledgement, and reports nothing when it succeeds.
 #[tokio::test]
 async fn a_successful_eviction_reports_nothing() {
     let mut w = TestWorker::over(TestGraph::sample());
-    let compiled = w.compile();
+    let compiled = w.graph.program();
     let get_a = w.id("get_a");
 
     w.settle([
@@ -33,11 +36,11 @@ async fn an_eviction_failure_uses_the_general_worker_error_report() {
     let mut w = TestWorker::over(TestGraph::sample());
     let blocked = w.id("get_a");
     // A directory where the blob file belongs: removal fails on it.
-    let blocked_path = dir.join(blocked.as_uuid().simple().to_string());
-    std::fs::create_dir(&blocked_path).unwrap();
+    let blocked_path = DiskStore::new(Some(dir.path().to_path_buf())).blob_path(blocked);
+    fs::create_dir(&blocked_path).unwrap();
 
     w.settle([
-        w.disk_store(dir.path()),
+        TestWorker::disk_store(dir.path()),
         w.update(),
         WorkerMessage::EvictCache {
             nodes: vec![blocked],
@@ -91,7 +94,7 @@ fn disk_cached_graph(calls: &Calls) -> TestGraph {
                 ConstValue::Int(value * value)
             })
     });
-    graph.add("print", |node| node.records());
+    graph.add("print", NodeSpec::records);
     graph.wire("source", 0, "square", 0);
     graph.wire("square", 0, "print", 0);
     graph
@@ -108,7 +111,11 @@ async fn a_disk_cached_node_survives_a_worker_restart() {
     let calls = Calls::default();
 
     let mut w = TestWorker::over(disk_cached_graph(&calls));
-    w.send_many([w.disk_store(dir.path()), w.update(), TestWorker::sinks()]);
+    w.send_many([
+        TestWorker::disk_store(dir.path()),
+        w.update(),
+        TestWorker::sinks(),
+    ]);
     let cold = w.run().await;
     assert_eq!(
         cold.ran(),
@@ -122,7 +129,11 @@ async fn a_disk_cached_node_survives_a_worker_restart() {
     // disk and is reused. Its input `source` feeds only the reused
     // `square`, which never reads it, so the pre-run cut prunes it.
     let mut w = w.restart();
-    w.send_many([w.disk_store(dir.path()), w.update(), TestWorker::sinks()]);
+    w.send_many([
+        TestWorker::disk_store(dir.path()),
+        w.update(),
+        TestWorker::sinks(),
+    ]);
     let warm = w.run().await;
     assert_eq!(
         calls.count(),
@@ -140,9 +151,8 @@ async fn a_disk_cached_node_survives_a_worker_restart() {
 
 /// A flush that wrote nothing reports through the same general error the host
 /// already shows for eviction, whether the store was just attached or the host
-/// named the node. Silence used to be the only answer either way, which reads
-/// exactly like success — while the node goes on showing itself disk-backed
-/// with nothing behind it.
+/// named the node. Silence would read exactly like success — while the node
+/// goes on showing itself disk-backed with nothing behind it.
 #[tokio::test]
 async fn a_flush_failure_uses_the_general_worker_error_report() {
     let dir = TempDir::new("flush-error");
@@ -158,12 +168,15 @@ async fn a_flush_failure_uses_the_general_worker_error_report() {
     // A directory where the blob file belongs: the body streams into the
     // temporary beside it, and the publication onto the destination fails.
     let blocked = w.id("square");
-    let blocked_path = dir.join(blocked.as_uuid().simple().to_string());
-    std::fs::create_dir(&blocked_path).unwrap();
+    let blocked_path = DiskStore::new(Some(dir.path().to_path_buf())).blob_path(blocked);
+    fs::create_dir(&blocked_path).unwrap();
 
     // The sweep the host asks for once the store is attached.
-    w.settle([w.disk_store(dir.path()), WorkerMessage::FlushAllCaches])
-        .await;
+    w.settle([
+        TestWorker::disk_store(dir.path()),
+        WorkerMessage::FlushAllCaches,
+    ])
+    .await;
     let WorkerReport::Error(WorkerError::CacheFlush {
         failures,
         unsupported,
@@ -210,32 +223,8 @@ async fn a_flush_failure_uses_the_general_worker_error_report() {
 /// named those nodes and their types are a standing fact about the library.
 #[tokio::test]
 async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
-    use std::any::Any;
-    use std::fmt;
-
     use crate::library::TypeEntry;
-    use crate::{CustomValue, DynamicValue, TypeId};
-
-    const BLOB_TYPE: &str = "9d17a6a2-8f97-4c74-a0b7-1b2c9a9f5f60";
-
-    #[derive(Debug)]
-    struct Blob;
-    impl fmt::Display for Blob {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str("Blob")
-        }
-    }
-    impl CustomValue for Blob {
-        fn type_id(&self) -> TypeId {
-            BLOB_TYPE.into()
-        }
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
-        fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
-            self
-        }
-    }
+    use crate::testing::blob::{BLOB_TYPE, Blob};
 
     let dir = TempDir::new("flush-unsupported");
     let mut graph = TestGraph::new();
@@ -248,9 +237,9 @@ async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
         node.pure()
             .sink()
             .cache(CacheMode::Both)
-            .output(DataType::Custom(BLOB_TYPE.into()))
+            .output(DataType::Custom(BLOB_TYPE))
             .lambda(async_lambda!(|Invocation { outputs, .. }| {
-                outputs[0] = DynamicValue::Custom(Arc::new(Blob));
+                outputs[0] = Blob::value([1]);
                 Ok(())
             }))
     });
@@ -260,8 +249,11 @@ async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
     w.send_many([w.update(), TestWorker::sinks()]);
     w.run().await;
 
-    w.settle([w.disk_store(dir.path()), WorkerMessage::FlushAllCaches])
-        .await;
+    w.settle([
+        TestWorker::disk_store(dir.path()),
+        WorkerMessage::FlushAllCaches,
+    ])
+    .await;
     w.quiet();
     assert_eq!(dir.entry_count(), 0, "nothing could be written");
 
@@ -285,8 +277,7 @@ async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
     };
     assert_eq!(skipped.node_id, w.id("make_blob"));
     assert_eq!(
-        skipped.type_id,
-        TypeId::from(BLOB_TYPE),
+        skipped.type_id, BLOB_TYPE,
         "the report names the type that cannot persist"
     );
     w.quiet();
@@ -299,51 +290,23 @@ async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
 /// cache that is already gone.
 #[tokio::test]
 async fn an_install_reports_the_cache_left_after_reconciling() {
-    use std::any::Any;
-    use std::fmt;
-
     use crate::library::TypeEntry;
-    use crate::{CustomValue, DynamicValue, TypeId};
+    use crate::testing::blob::{BLOB_TYPE, Blob};
 
-    const HEAVY_TYPE: &str = "c84cc23f-f313-4adb-8788-ef82c26691ae";
+    // A blob weighs its length.
     const HEAVY_CPU: usize = 4096;
-
-    #[derive(Debug)]
-    struct Heavy;
-    impl fmt::Display for Heavy {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str("Heavy")
-        }
-    }
-    impl CustomValue for Heavy {
-        fn type_id(&self) -> TypeId {
-            HEAVY_TYPE.into()
-        }
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
-        fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
-            self
-        }
-        fn ram_bytes(&self) -> RamUsage {
-            RamUsage {
-                cpu: HEAVY_CPU,
-                gpu: 0,
-            }
-        }
-    }
 
     let mut graph = TestGraph::new();
     graph
         .library
-        .register_type(HEAVY_TYPE, TypeEntry::custom("Heavy"));
+        .register_type(BLOB_TYPE, TypeEntry::custom("Blob"));
     graph.add("heavy", |node| {
         node.pure()
             .sink()
             .cache(CacheMode::Ram)
-            .output(DataType::Custom(HEAVY_TYPE.into()))
+            .output(DataType::Custom(BLOB_TYPE))
             .lambda(async_lambda!(|Invocation { outputs, .. }| {
-                outputs[0] = DynamicValue::Custom(Arc::new(Heavy));
+                outputs[0] = Blob::value(vec![0; HEAVY_CPU]);
                 Ok(())
             }))
     });
@@ -393,10 +356,9 @@ async fn an_install_reports_the_cache_left_after_reconciling() {
 /// unsaved document) would otherwise be a RAM hit on every later run —
 /// which never stores — and silently recompute on reopen.
 ///
-/// And attaching the store *alone* writes nothing. The sweep used to be
-/// inferred from the attach, which made every unrelated store swap — a document
-/// opened, a library edit rebuilding the codec map — pay for a sweep, and
-/// aimed some of them at the wrong root.
+/// And attaching the store *alone* writes nothing: a store is swapped for
+/// reasons that leave nothing owed — a document opened, or saved somewhere
+/// else — so the sweep is asked for, not inferred.
 #[tokio::test]
 async fn resident_disk_backed_values_are_flushed_when_asked_and_not_on_a_bare_attach() {
     let dir = TempDir::new("storeswap");
@@ -410,7 +372,7 @@ async fn resident_disk_backed_values_are_flushed_when_asked_and_not_on_a_bare_at
     w.run().await;
     assert_eq!(dir.entry_count(), 0);
 
-    w.settle([w.disk_store(dir.path())]).await;
+    w.settle([TestWorker::disk_store(dir.path())]).await;
     assert_eq!(
         dir.entry_count(),
         0,
@@ -430,10 +392,10 @@ async fn resident_disk_backed_values_are_flushed_when_asked_and_not_on_a_bare_at
 /// first, so nothing of the outgoing program can be written into the incoming
 /// one's root.
 ///
-/// This is the document-open path. It used to write the closed document's
-/// resident values into the opened document's cache directory, under ids
-/// nothing there would ever read — and since no cache root is ever pruned,
-/// those blobs were permanent.
+/// This is the document-open path. In the other order the closed document's
+/// resident values would land in the opened document's cache directory, under
+/// ids nothing there would ever read — and since no cache root is ever pruned,
+/// those blobs would be permanent.
 #[tokio::test]
 async fn a_batch_resolves_its_graph_before_the_store_it_repoints_to() {
     let outgoing = TempDir::new("outgoing-doc");
@@ -445,7 +407,7 @@ async fn a_batch_resolves_its_graph_before_the_store_it_repoints_to() {
     // The outgoing document: computed against its own store, value resident.
     let mut w = TestWorker::over(graph);
     w.send_many([
-        w.disk_store(outgoing.path()),
+        TestWorker::disk_store(outgoing.path()),
         w.update(),
         TestWorker::sinks(),
     ]);
@@ -457,7 +419,7 @@ async fn a_batch_resolves_its_graph_before_the_store_it_repoints_to() {
     // resident and really would follow the store to a new root.
     let elsewhere = TempDir::new("no-graph-op");
     w.settle([
-        w.disk_store(elsewhere.path()),
+        TestWorker::disk_store(elsewhere.path()),
         WorkerMessage::FlushAllCaches,
     ])
     .await;
@@ -473,7 +435,7 @@ async fn a_batch_resolves_its_graph_before_the_store_it_repoints_to() {
     // because the graph op ran first.
     w.settle([
         WorkerMessage::Clear,
-        w.disk_store(incoming.path()),
+        TestWorker::disk_store(incoming.path()),
         WorkerMessage::FlushAllCaches,
     ])
     .await;

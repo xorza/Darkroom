@@ -1,7 +1,7 @@
 //! Isotropic undecimated ("à trous" / **starlet**) wavelet transform: a B3-spline separable
 //! convolution with `2^j` hole spacing per scale. Redundant, shift-invariant, flux-conserving, and
-//! exact-reconstructing — `image == residual + Σ layers`, where the detail `w_{j+1} = c_j − c_{j+1}`
-//! telescopes out of successive smooths.
+//! exact-reconstructing — `image == residual + Σ layers`, where the detail `w_{j+1} = c_j −
+//! c_{j+1}` telescopes out of successive smooths.
 //!
 //! Shared multiscale primitive: both `denoise` (thresholds the details) and `hdr` (compresses the
 //! coarse residual) **stream** [`atrous_smooth`] over a rolling pair of planes and exploit the
@@ -10,9 +10,6 @@
 use crate::math::size2us::Size2us;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
-
-#[cfg(test)]
-mod tests;
 
 /// B3-spline low-pass filter `[1, 4, 6, 4, 1] / 16` — the separable à trous smoothing kernel.
 const B3: [f32; 5] = [1.0 / 16.0, 4.0 / 16.0, 6.0 / 16.0, 4.0 / 16.0, 1.0 / 16.0];
@@ -30,6 +27,10 @@ pub(crate) fn atrous_smooth(
 }
 
 /// Horizontal B3-spline convolution with taps at `x ± step` and `x ± 2·step` (mirror boundary).
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "pixel coordinates and tap steps index a slice, whose length Rust caps at isize::MAX"
+)]
 fn convolve_horizontal(src: &Buffer2<f32>, dst: &mut Buffer2<f32>, step: usize) {
     let width = src.width();
     let wi = width as isize;
@@ -76,6 +77,10 @@ fn convolve_horizontal(src: &Buffer2<f32>, dst: &mut Buffer2<f32>, step: usize) 
 }
 
 /// Vertical B3-spline convolution with taps at `y ± step` and `y ± 2·step` (mirror boundary).
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "pixel coordinates and tap steps index a slice, whose length Rust caps at isize::MAX"
+)]
 fn convolve_vertical(src: &Buffer2<f32>, dst: &mut Buffer2<f32>, step: usize) {
     let width = src.width();
     let height = src.height();
@@ -125,14 +130,8 @@ fn reflect(i: isize, n: isize) -> usize {
         return 0;
     }
     let period = 2 * (n - 1);
-    let mut m = i % period;
-    if m < 0 {
-        m += period;
-    }
-    if m >= n {
-        m = period - m;
-    }
-    m as usize
+    let m = i.rem_euclid(period);
+    if m >= n { period - m } else { m }.unsigned_abs()
 }
 
 /// Largest scale count for which the coarsest hole step stays within the image: `2^J ≤ min(w, h)`.
@@ -144,3 +143,6 @@ pub(crate) fn max_scales(size: Size2us) -> usize {
     }
     min_dim.ilog2() as usize
 }
+
+#[cfg(test)]
+mod tests;

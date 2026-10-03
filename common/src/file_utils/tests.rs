@@ -1,100 +1,19 @@
 use std::fs;
 use std::io;
 use std::io::{Seek as _, SeekFrom, Write as _};
-use std::path::PathBuf;
 use std::sync::{Arc, Barrier};
 
 use tokio::io::AsyncWriteExt as _;
 
-use crate::file_utils::{
-    AtomicFile, PublicationMode, SyncAtomicFile, files_with_extensions, publish, publish_bytes,
-    publish_with_replacement, replace,
-};
-use crate::internals::test_output_path;
-
-fn fixture_dir(name: &str) -> PathBuf {
-    let dir = test_output_path(&format!("common/file_utils/{name}"));
-    if dir.exists() {
-        fs::remove_dir_all(&dir).expect("remove stale file-utils fixture");
-    }
-    fs::create_dir_all(&dir).expect("create file-utils fixture");
-    dir
-}
-
-fn names(paths: &[PathBuf]) -> Vec<&str> {
-    paths
-        .iter()
-        .map(|path| path.file_name().unwrap().to_str().unwrap())
-        .collect()
-}
-
-fn publication_temp_files(path: &std::path::Path) -> Vec<PathBuf> {
-    let parent = path.parent().unwrap();
-    let prefix = format!("{}.", path.file_name().unwrap().to_string_lossy());
-    fs::read_dir(parent)
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .filter(|candidate| {
-            candidate
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .starts_with(&prefix)
-                && candidate
-                    .extension()
-                    .is_some_and(|extension| extension == "tmp")
-        })
-        .collect()
-}
-
-#[test]
-fn populated_directory_is_filtered_case_insensitively_and_sorted() {
-    let dir = fixture_dir("populated");
-    fs::write(dir.join("z.raf"), []).unwrap();
-    fs::write(dir.join("a.RAF"), []).unwrap();
-    fs::write(dir.join("ignored.fit"), []).unwrap();
-    fs::create_dir(dir.join("nested.raf")).unwrap();
-
-    let files = files_with_extensions(&dir, &["raf"]).unwrap();
-
-    assert_eq!(names(&files), ["a.RAF", "z.raf"]);
-    assert!(files.iter().all(|path| path.is_file()));
-}
-
-#[test]
-fn readable_empty_directory_is_distinct_from_scan_failure() {
-    let dir = fixture_dir("empty");
-    assert_eq!(
-        files_with_extensions(&dir, &["raf"]).unwrap(),
-        Vec::<PathBuf>::new()
-    );
-}
-
-#[test]
-fn missing_directory_returns_contextual_error() {
-    let dir = fixture_dir("missing");
-    fs::remove_dir(&dir).unwrap();
-
-    let error = files_with_extensions(&dir, &["raf"]).unwrap_err();
-
-    assert_eq!(error.kind(), io::ErrorKind::NotFound);
-    assert!(error.to_string().contains(&dir.display().to_string()));
-}
-
-#[test]
-fn file_instead_of_directory_returns_contextual_error() {
-    let dir = fixture_dir("not_directory");
-    let path = dir.join("frame.raf");
-    fs::write(&path, []).unwrap();
-
-    let error = files_with_extensions(&path, &["raf"]).unwrap_err();
-
-    assert!(error.to_string().contains(&path.display().to_string()));
-}
+use crate::TempDir;
+use crate::file_utils::internals::publication_temp_files;
+use crate::file_utils::{AtomicFile, PublicationMode, SyncAtomicFile, publish, publish_bytes};
+use std::thread;
 
 #[test]
 fn publication_replaces_complete_files_and_cleans_up_failures() {
-    let path = test_output_path("common/file_utils/publication/state.bin");
+    let dir = TempDir::new("common-publication");
+    let path = dir.join("state.bin");
     fs::write(&path, b"previous").unwrap();
 
     #[cfg(unix)]
@@ -133,30 +52,7 @@ fn publication_replaces_complete_files_and_cleans_up_failures() {
         "failed writes do not leave sibling temporary files"
     );
 
-    let error = publish_with_replacement(
-        &path,
-        PublicationMode::Cache,
-        |file| file.write_all(b"complete"),
-        |_source, _destination, _mode| {
-            Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "injected replacement failure",
-            ))
-        },
-    )
-    .unwrap_err();
-    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
-    assert_eq!(
-        fs::read(&path).unwrap(),
-        b"durable",
-        "a failed replacement preserves the prior complete file"
-    );
-    assert!(
-        publication_temp_files(&path).is_empty(),
-        "failed replacement removes the completed temporary file"
-    );
-
-    let directory_target = test_output_path("common/file_utils/publication/nonempty-directory");
+    let directory_target = dir.join("nonempty-directory");
     fs::create_dir_all(&directory_target).unwrap();
     fs::write(directory_target.join("keep"), b"old").unwrap();
     assert!(
@@ -169,10 +65,7 @@ fn publication_replaces_complete_files_and_cleans_up_failures() {
         "failed replacement does not leave a sibling temporary file"
     );
 
-    let missing_parent = test_output_path("common/file_utils/publication/missing-parent");
-    if missing_parent.exists() {
-        fs::remove_dir_all(&missing_parent).unwrap();
-    }
+    let missing_parent = dir.join("missing-parent");
     let missing_target = missing_parent.join("state.bin");
     let error = publish_bytes(&missing_target, b"new", PublicationMode::Durable).unwrap_err();
     assert_eq!(error.kind(), io::ErrorKind::NotFound);
@@ -181,18 +74,19 @@ fn publication_replaces_complete_files_and_cleans_up_failures() {
         "publication does not silently create a missing destination directory"
     );
 
-    let seek_target = test_output_path("common/file_utils/publication/seek.bin");
+    let seek_target = dir.join("seek.bin");
     let mut file = SyncAtomicFile::new(&seek_target, PublicationMode::Cache).unwrap();
     file.write_all(b"header____body").unwrap();
     assert_eq!(file.seek(SeekFrom::Start(6)).unwrap(), 6);
     file.write_all(b"data").unwrap();
-    file.commit_with_replacement(replace).unwrap();
+    file.commit().unwrap();
     assert_eq!(fs::read(seek_target).unwrap(), b"headerdatabody");
 }
 
 #[tokio::test]
 async fn two_phase_publication_commits_or_cleans_up() {
-    let path = test_output_path("common/file_utils/publication/two-phase.bin");
+    let dir = TempDir::new("common-publication");
+    let path = dir.join("two-phase.bin");
     fs::write(&path, b"previous").unwrap();
 
     let mut file = AtomicFile::new(&path, PublicationMode::Cache)
@@ -214,7 +108,8 @@ async fn two_phase_publication_commits_or_cleans_up() {
 
 #[test]
 fn concurrent_publications_never_interleave() {
-    let path = test_output_path("common/file_utils/publication/concurrent.bin");
+    let dir = TempDir::new("common-publication");
+    let path = dir.join("concurrent.bin");
     let payloads = (0..8)
         .map(|value| vec![b'0' + value; 32 * 1024])
         .collect::<Vec<_>>();
@@ -225,7 +120,7 @@ fn concurrent_publications_never_interleave() {
         .map(|payload| {
             let path = path.clone();
             let barrier = Arc::clone(&barrier);
-            std::thread::spawn(move || {
+            thread::spawn(move || {
                 barrier.wait();
                 publish_bytes(&path, &payload, PublicationMode::Cache).unwrap();
             })
@@ -241,20 +136,4 @@ fn concurrent_publications_never_interleave() {
         "the final file is exactly one writer's complete payload"
     );
     assert!(publication_temp_files(&path).is_empty());
-}
-
-#[cfg(unix)]
-#[test]
-fn unreadable_directory_returns_contextual_error() {
-    use std::os::unix::fs::PermissionsExt;
-
-    let dir = fixture_dir("unreadable");
-    let original = fs::metadata(&dir).unwrap().permissions();
-    fs::set_permissions(&dir, fs::Permissions::from_mode(0o0)).unwrap();
-    let result = files_with_extensions(&dir, &["raf"]);
-    fs::set_permissions(&dir, original).unwrap();
-
-    let error = result.unwrap_err();
-    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
-    assert!(error.to_string().contains(&dir.display().to_string()));
 }

@@ -1,5 +1,6 @@
 //! A decoded display or inspection product, outside the scientific pipeline.
 
+use std::mem;
 use std::path::Path;
 
 use imaginarium::{ChannelCount, Image};
@@ -9,21 +10,33 @@ use crate::io::image::fits::decode as fits_decode;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
-    TransferProvenance,
+    SourceContainer, TransferProvenance,
 };
+use crate::io::image::input_format::InputFormat;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
-use crate::io::image::standard::{
-    FITS_EXTENSIONS, STANDARD_IMAGE_EXTENSIONS, f32_target_format, file_extension,
-    read_standard_image, standard_container,
-};
+use crate::io::image::standard::{f32_target_format, read_standard_image};
 use crate::io::raw;
 
 /// A decoded display or inspection product that cannot enter the scientific pipeline directly.
 #[derive(Debug)]
 pub struct PreviewImage {
     pub metadata: ImageMetadata,
-    image: Image,
+    pixels: PreviewPixels,
+}
+
+/// A preview's pixels in the layout its decoder produced, so a consumer that
+/// wants planes does not get them interleaved and deinterleave them again.
+#[derive(Debug)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "one per load, beside megabytes of pixels; boxing the planes would buy an indirection"
+)]
+pub enum PreviewPixels {
+    /// One `f32` plane per channel: a FITS or camera-RAW decode.
+    Planes(LinearImage),
+    /// Interleaved `f32` samples: a raster decode.
+    Interleaved(Image),
 }
 
 impl PreviewImage {
@@ -31,56 +44,58 @@ impl PreviewImage {
     pub fn from_file<P: AsRef<Path>>(path: P, context: &LoadContext) -> Result<Self, ImageError> {
         let path = path.as_ref();
         context.check_cancelled(path)?;
-        let extension = file_extension(path);
+        let format = match InputFormat::of(path)? {
+            InputFormat::Fits => {
+                return fits_decode::load_preview_fits(path, context).map(Into::into);
+            }
+            InputFormat::CameraRaw => return raw::load_raw(path, context).map(Into::into),
+            InputFormat::Raster(format) => format,
+        };
+        let decoded = read_standard_image(path)?;
+        context.check_cancelled(path)?;
+        let alpha_dropped = decoded.desc().color_format.channel_count == ChannelCount::Rgba;
+        let target = f32_target_format(&decoded);
+        let image = decoded.convert(target);
+        let metadata = ImageMetadata {
+            provenance: Some(ImageProvenance {
+                container: SourceContainer::from(format),
+                decoder: DecoderProvenance::Imaginarium,
+                transfer: TransferProvenance::UnspecifiedRaster,
+                color: ColorProvenance::UnmanagedRaster { alpha_dropped },
+                clipped: false,
+                demosaic: DemosaicProvenance::None,
+                // Every raster format this path reads stores its first row at the top.
+                row_order: RowOrder::TopDown,
+            }),
+            ..Default::default()
+        };
+        Ok(Self {
+            metadata,
+            pixels: PreviewPixels::Interleaved(image),
+        })
+    }
 
-        if FITS_EXTENSIONS.contains(&extension.as_str()) {
-            return fits_decode::load_preview_fits(path, context).map(Into::into);
-        }
-
-        if raw::RAW_EXTENSIONS.contains(&extension.as_str()) {
-            return raw::load_raw(path, &context.cancel).map(Into::into);
-        }
-
-        if STANDARD_IMAGE_EXTENSIONS.contains(&extension.as_str()) {
-            let decoded = read_standard_image(path)?;
-            context.check_cancelled(path)?;
-            let alpha_dropped = decoded.desc().color_format.channel_count == ChannelCount::Rgba;
-            let target = f32_target_format(&decoded);
-            let image = decoded
-                .convert(target)
-                .expect("standard image converts to its f32 channel format");
-            let metadata = ImageMetadata {
-                provenance: Some(ImageProvenance {
-                    container: standard_container(&extension),
-                    decoder: DecoderProvenance::Imaginarium,
-                    transfer: TransferProvenance::UnspecifiedRaster,
-                    color: ColorProvenance::UnmanagedRaster { alpha_dropped },
-                    clipped: false,
-                    demosaic: DemosaicProvenance::None,
-                    // Every raster format this path reads stores its first row at the top.
-                    row_order: RowOrder::TopDown,
-                }),
-                ..Default::default()
-            };
-            return Ok(Self { metadata, image });
-        }
-
-        Err(ImageError::UnsupportedFormat { extension })
+    /// The pixels, in the layout the decoder produced.
+    pub fn into_pixels(self) -> PreviewPixels {
+        self.pixels
     }
 }
 
 impl From<LinearImage> for PreviewImage {
-    fn from(linear: LinearImage) -> Self {
-        let image = Image::from(&linear);
+    fn from(mut linear: LinearImage) -> Self {
         Self {
-            metadata: linear.metadata,
-            image,
+            metadata: mem::take(&mut linear.metadata),
+            pixels: PreviewPixels::Planes(linear),
         }
     }
 }
 
+/// The interleaved form, repacking a planar preview.
 impl From<PreviewImage> for Image {
     fn from(preview: PreviewImage) -> Self {
-        preview.image
+        match preview.pixels {
+            PreviewPixels::Planes(linear) => Image::from(&linear),
+            PreviewPixels::Interleaved(image) => image,
+        }
     }
 }

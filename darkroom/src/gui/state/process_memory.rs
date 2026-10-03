@@ -62,7 +62,10 @@ impl ProcessMemory {
                 false,
                 ProcessRefreshKind::nothing().with_memory(),
             );
-            self.bytes = self.system.process(self.pid).map_or(0, |p| p.memory());
+            self.bytes = self
+                .system
+                .process(self.pid)
+                .map_or(0, sysinfo::Process::memory);
         }
         self.bytes
     }
@@ -94,21 +97,35 @@ mod tests {
     fn due_gates_readings_to_one_per_interval() {
         let mut m = ProcessMemory::new();
         let t0 = Instant::now();
-        let at = |ms: u64| t0 + Duration::from_millis(ms);
+        let (interval, ms) = (SAMPLE_INTERVAL, Duration::from_millis(1));
 
-        // Hand-computed against SAMPLE_INTERVAL = 1000ms, sampling at t=0:
-        // due again at 1000, then (measured from 1000) at 2000, and a
-        // declined tick at 1500 must not move that schedule.
+        // Sampling at t=0: due again one interval later, then one interval
+        // after that reading, and a declined tick between them must not move
+        // that schedule.
         let cases = [
-            (0, true, "first reading"),
-            (1, false, "immediately after"),
-            (999, false, "one ms short of the interval"),
-            (1000, true, "exactly one interval later"),
-            (1500, false, "half an interval past the last reading"),
-            (2000, true, "measured from 1000, not from the declined 1500"),
+            (Duration::ZERO, true, "first reading"),
+            (ms, false, "immediately after"),
+            (
+                interval
+                    .checked_sub(ms)
+                    .expect("the interval is longer than 1 ms"),
+                false,
+                "one ms short of the interval",
+            ),
+            (interval, true, "exactly one interval later"),
+            (
+                interval + interval / 2,
+                false,
+                "half an interval past the last reading",
+            ),
+            (
+                interval * 2,
+                true,
+                "measured from the last reading, not the declined tick",
+            ),
         ];
-        for (ms, expected, why) in cases {
-            assert_eq!(m.due(at(ms)), expected, "t={ms}ms: {why}");
+        for (offset, expected, why) in cases {
+            assert_eq!(m.due(t0 + offset), expected, "t={offset:?}: {why}");
         }
     }
 

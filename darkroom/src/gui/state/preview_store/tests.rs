@@ -1,29 +1,24 @@
 use super::*;
 use palantir::internals::UiHarness;
+use std::sync::Arc;
 
 use imaginarium::{Image as RawImage, ImageDesc};
 use scenarium::{ConstValue, Node, NodeKind, SpecialNode};
 
 use crate::core::document::harness::DocFixture;
 use crate::core::preview::preview_func;
-
-fn image_value(width: usize, height: usize, format: ColorFormat) -> DynamicValue {
-    let desc = ImageDesc::new(width, height, format);
-    let bytes = vec![128; desc.row_bytes() * height];
-    let raw = RawImage::new_with_data(desc, bytes).unwrap();
-    DynamicValue::from_custom(LensImage::from(raw))
-}
+use crate::gui::state::preview_store::internals::image_value;
 
 /// A document holding one preview node at `node`. The id is the caller's, so a
 /// test can build the same node's document twice and have the store recognise
 /// it as one preview rather than two.
 ///
-/// No viewer tab: retention is the node's alone. Whether a viewer is open, and
-/// whether it is the visible tab, stopped mattering to the store when the
-/// full-resolution upload became the pane's own on-demand ask.
+/// No viewer tab: retention is the node's alone. A viewer asks for the
+/// full-resolution upload itself, so the store does not read whether one is
+/// open or visible.
 fn document_with_preview(node: NodeId) -> Document {
     let mut fixture = DocFixture::default();
-    let func = preview_func(Default::default());
+    let func = preview_func(Arc::default());
     fixture.library.add(func.clone());
     fixture.doc.graph.insert(node, Node::from(&func));
     fixture.doc

@@ -1,9 +1,34 @@
 //! Transformation matrix for image registration.
 
-use glam::DVec2;
+pub(crate) mod inverse_warp;
+
+use glam::{DMat2, DVec2};
 
 use crate::math::dmat3::DMat3;
 use crate::stacking::registration::distortion::sip::SipPolynomial;
+use crate::stacking::registration::transform::inverse_warp::InverseWarp;
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
+
+/// The unit roundoff of f64: half the gap between 1 and the next float.
+const UNIT_ROUNDOFF: f64 = f64::EPSILON / 2.0;
+/// The largest coordinate magnitude a transform is asked to map, in pixels: 2²⁰, far past any
+/// sensor and its dither or mosaic offset.
+const COORDINATE_RANGE: f64 = 1_048_576.0;
+/// How far normalizing a matrix may move a mapped point, in pixels: well under the registration's
+/// sub-pixel residuals.
+const NORMALIZATION_TOLERANCE_PX: f64 = 1e-3;
+/// The smallest `|m[8]|`, relative to the largest entry, that a matrix is normalized from.
+///
+/// `m[8]` comes out of the same arithmetic as the entries beside it, so its absolute rounding
+/// error is of order `u·M` for the largest entry `M`, and its relative error `u·M/|m[8]|`. Dividing
+/// by it scales entries 0–7 by that error while `m[8]` itself becomes exactly 1, which moves a
+/// mapped point by about `u·(M/|m[8]|)·|T(p)|`. Holding that to [`NORMALIZATION_TOLERANCE_PX`] for
+/// `|T(p)|` up to [`COORDINATE_RANGE`] needs `|m[8]|/M ≥ u·COORDINATE_RANGE/tolerance`, about
+/// 1.2e-7: a pure translation of over 8 million pixels, or a homography that sends the origin
+/// that far.
+const MIN_HOMOGENEOUS_SCALE: f64 = UNIT_ROUNDOFF * COORDINATE_RANGE / NORMALIZATION_TOLERANCE_PX;
 
 /// A concrete transformation model, in increasing degrees of freedom.
 ///
@@ -16,24 +41,23 @@ use crate::stacking::registration::distortion::sip::SipPolynomial;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TransformType {
     /// Translation only (2 DOF: dx, dy)
-    Translation = 0,
+    Translation,
     /// Translation + Rotation (3 DOF: dx, dy, angle)
-    Euclidean = 1,
+    Euclidean,
     /// Translation + Rotation + Uniform Scale (4 DOF)
-    Similarity = 2,
+    Similarity,
     /// Full affine (6 DOF: handles differential scaling and shear)
-    Affine = 3,
+    Affine,
     /// Projective/Homography (8 DOF: handles perspective)
-    Homography = 4,
+    Homography,
 }
 
 impl TransformType {
     /// Minimum number of point correspondences required to estimate this transform.
-    pub fn min_points(&self) -> usize {
+    pub const fn min_points(&self) -> usize {
         match self {
             TransformType::Translation => 1,
-            TransformType::Euclidean => 2,
-            TransformType::Similarity => 2,
+            TransformType::Euclidean | TransformType::Similarity => 2,
             TransformType::Affine => 3,
             TransformType::Homography => 4,
         }
@@ -62,7 +86,7 @@ impl TransformModel {
     ///
     /// What the star-count and match-count gates size against, since a run that may climb to
     /// homography has to arrive with enough points to fit one.
-    pub fn most_general(self) -> TransformType {
+    pub const fn most_general(self) -> TransformType {
         match self {
             Self::Fixed(transform_type) => transform_type,
             Self::Auto => TransformType::Homography,
@@ -90,8 +114,8 @@ impl Default for Transform {
     }
 }
 
-impl std::fmt::Display for Transform {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for Transform {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let t = self.translation_components();
         let rotation_deg = self.rotation_angle().to_degrees();
         let scale = self.scale_factor();
@@ -120,7 +144,7 @@ impl std::fmt::Display for Transform {
 
 impl Transform {
     /// Create identity transform.
-    pub fn identity() -> Self {
+    pub const fn identity() -> Self {
         Self {
             matrix: DMat3::identity(),
             transform_type: TransformType::Translation,
@@ -128,7 +152,7 @@ impl Transform {
     }
 
     /// Create translation transform.
-    pub fn translation(t: DVec2) -> Self {
+    pub const fn translation(t: DVec2) -> Self {
         Self {
             matrix: DMat3::from_array([1.0, 0.0, t.x, 0.0, 1.0, t.y, 0.0, 0.0, 1.0]),
             transform_type: TransformType::Translation,
@@ -156,7 +180,7 @@ impl Transform {
     }
 
     /// Create affine transform from 6 parameters [a, b, tx, c, d, ty].
-    pub fn affine(params: [f64; 6]) -> Self {
+    pub const fn affine(params: [f64; 6]) -> Self {
         Self {
             matrix: DMat3::from_array([
                 params[0], params[1], params[2], params[3], params[4], params[5], 0.0, 0.0, 1.0,
@@ -166,7 +190,7 @@ impl Transform {
     }
 
     /// Create homography from 8 parameters (9th element is 1.0).
-    pub fn homography(params: [f64; 8]) -> Self {
+    pub const fn homography(params: [f64; 8]) -> Self {
         Self {
             matrix: DMat3::from_array([
                 params[0], params[1], params[2], params[3], params[4], params[5], params[6],
@@ -177,7 +201,7 @@ impl Transform {
     }
 
     /// Create scale transform.
-    pub fn scale(s: DVec2) -> Self {
+    pub const fn scale(s: DVec2) -> Self {
         Self {
             matrix: DMat3::from_array([s.x, 0.0, 0.0, 0.0, s.y, 0.0, 0.0, 0.0, 1.0]),
             transform_type: TransformType::Affine,
@@ -197,36 +221,51 @@ impl Transform {
         }
     }
 
-    fn from_matrix(mut matrix: DMat3, transform_type: TransformType) -> Self {
-        if transform_type != TransformType::Homography {
-            assert!(
-                matrix[6].abs() <= 1e-12
-                    && matrix[7].abs() <= 1e-12
-                    && (matrix[8] - 1.0).abs() <= 1e-12,
-                "affine-or-simpler transforms require homogeneous bottom row [0, 0, 1]"
-            );
-            matrix[6] = 0.0;
-            matrix[7] = 0.0;
-            matrix[8] = 1.0;
+    /// Bring `matrix` to the representation every reader assumes, `m[8] = 1`; `None` when that
+    /// division would cost more precision than [`MIN_HOMOGENEOUS_SCALE`] allows, or an entry is
+    /// not finite.
+    ///
+    /// # Panics
+    /// When a model below [`TransformType::Homography`] carries a perspective row: every one of them
+    /// is built with `m[6] = m[7] = 0`, and products and inverses of them keep those exact zeros.
+    fn from_matrix(matrix: DMat3, transform_type: TransformType) -> Option<Self> {
+        let entries = matrix.as_array();
+        if !entries.iter().all(|value| value.is_finite()) {
+            return None;
         }
-        Self {
+        let largest = entries
+            .iter()
+            .fold(0.0f64, |acc, value| acc.max(value.abs()));
+        let scale = entries[8];
+        if scale == 0.0 || scale.abs() < MIN_HOMOGENEOUS_SCALE * largest {
+            return None;
+        }
+        let matrix = DMat3::from_array(entries.map(|value| value / scale));
+        assert!(
+            transform_type == TransformType::Homography || (matrix[6] == 0.0 && matrix[7] == 0.0),
+            "a {transform_type:?} transform has no perspective row, got [{}, {}]",
+            matrix[6],
+            matrix[7]
+        );
+        Some(Self {
             matrix,
             transform_type,
-        }
+        })
     }
 
-    /// Preserve the arbitrary homogeneous scale produced by the DLT solver.
-    pub(crate) fn from_homography_matrix(matrix: DMat3) -> Self {
+    /// A homography from a matrix of arbitrary homogeneous scale, such as a DLT solve's null
+    /// vector; `None` when [`Self::from_matrix`] cannot normalize it.
+    pub(crate) fn from_homography_matrix(matrix: DMat3) -> Option<Self> {
         Self::from_matrix(matrix, TransformType::Homography)
     }
 
     /// Row-major homogeneous matrix coefficients.
-    pub fn matrix(&self) -> &[f64; 9] {
+    pub const fn matrix(&self) -> &[f64; 9] {
         self.matrix.as_array()
     }
 
     /// The concrete model represented by this transform.
-    pub fn transform_type(&self) -> TransformType {
+    pub const fn transform_type(&self) -> TransformType {
         self.transform_type
     }
 
@@ -234,7 +273,7 @@ impl Transform {
     ///
     /// Given a transform T estimated from `register_stars(ref_stars, target_stars)`:
     /// - `T.apply(ref_point)` gives the corresponding target point
-    /// - `T.apply_inverse(target_point)` gives the corresponding reference point
+    /// - `T.inverse().apply(target_point)` gives the corresponding reference point
     ///
     /// # Image Warping
     ///
@@ -260,7 +299,7 @@ impl Transform {
     /// let target_pos = transform.apply(ref_pos);
     ///
     /// // And back again
-    /// let round_tripped = transform.apply_inverse(target_pos);
+    /// let round_tripped = transform.inverse().apply(target_pos);
     /// # Ok(())
     /// # }
     /// ```
@@ -268,37 +307,61 @@ impl Transform {
         self.matrix.transform_point(p)
     }
 
-    /// Apply inverse transform to map a point from TARGET coordinates to REFERENCE coordinates.
-    ///
-    /// This is the inverse of `apply()`. Given a point in the target image,
-    /// it returns the corresponding point in the reference image.
-    ///
-    /// See [`apply`](Self::apply) for more details on transform direction.
-    pub fn apply_inverse(&self, p: DVec2) -> DVec2 {
-        self.inverse().apply(p)
+    /// The inverse transform, or `None` when the matrix is singular or, for a homography, its
+    /// inverse sends the origin so far out that it cannot be normalized — see
+    /// [`Self::is_valid`], which holds exactly when this is `Some`.
+    #[must_use]
+    pub fn try_inverse(&self) -> Option<Self> {
+        Self::from_matrix(self.matrix.inverse()?, self.transform_type)
     }
 
-    /// Compute matrix inverse.
+    /// The inverse transform.
     ///
     /// # Panics
-    /// Panics if the matrix is singular (determinant near zero).
+    /// When [`Self::try_inverse`] is `None`: the matrix is singular, or the inverse of a
+    /// homography cannot be normalized.
+    #[must_use]
     pub fn inverse(&self) -> Self {
-        let inv = self
-            .matrix
-            .inverse()
-            .expect("Cannot invert singular transform matrix");
-        Self::from_matrix(inv, self.transform_type)
+        self.try_inverse()
+            .expect("the transform is singular, or its inverse cannot be normalized")
     }
 
-    /// Compose two transforms: self * other (apply other first, then self).
+    /// Compose two transforms: `self · other`, which applies `other` first. The result is the more
+    /// general of the two models.
+    ///
+    /// # Panics
+    /// When the product is a homography that sends the origin too far out to be normalized.
+    #[must_use]
     pub fn compose(&self, other: &Self) -> Self {
-        // Result type is the more complex of the two
-        let transform_type = self.transform_type.max(other.transform_type);
+        self.try_compose(other)
+            .expect("the product of two transforms cannot be normalized")
+    }
 
+    /// [`Self::compose`], or `None` when the product cannot be normalized — a fit from a
+    /// near-degenerate sample can carry entries so large that its homogeneous scale vanishes
+    /// beside them.
+    pub(crate) fn try_compose(&self, other: &Self) -> Option<Self> {
+        let transform_type = self.transform_type.max(other.transform_type);
         Self::from_matrix(self.matrix.mul_mat(&other.matrix), transform_type)
     }
 
-    /// Extract translation components as DVec2.
+    /// The Jacobian of [`Self::apply`] at `p`: how a small step at `p` moves its image.
+    ///
+    /// For `T(p) = (u, v) / w` with `u = a·x + b·y + c`, `v = d·x + e·y + f` and
+    /// `w = g·x + h·y + 1`, it is `[[a − X·g, b − X·h], [d − Y·g, e − Y·h]] / w` at the image
+    /// `(X, Y) = T(p)`; for every model below a homography `g = h = 0` and `w = 1`, so it is the
+    /// constant linear part. Columns are the images of the x and y steps.
+    pub fn jacobian(&self, p: DVec2) -> DMat2 {
+        let m = self.matrix.as_array();
+        let w = m[6] * p.x + m[7] * p.y + m[8];
+        let image = self.apply(p);
+        DMat2::from_cols(
+            DVec2::new(m[0] - image.x * m[6], m[3] - image.y * m[6]) / w,
+            DVec2::new(m[1] - image.x * m[7], m[4] - image.y * m[7]) / w,
+        )
+    }
+
+    /// Extract translation components as `DVec2`.
     pub fn translation_components(&self) -> DVec2 {
         DVec2::new(self.matrix[2], self.matrix[5])
     }
@@ -315,21 +378,10 @@ impl Transform {
         (a * a + c * c).sqrt()
     }
 
-    /// Check if this is a valid (non-degenerate) transformation.
-    ///
-    /// Requires every matrix element finite (an isolated NaN/inf in a translation
-    /// or perspective term would otherwise slip past a finite-determinant check)
-    /// and the represented transform non-singular.
+    /// Whether this is a usable transformation: every entry finite, and an inverse that
+    /// [`Self::try_inverse`] can represent.
     pub fn is_valid(&self) -> bool {
-        if !(0..9).all(|i| self.matrix[i].is_finite()) {
-            return false;
-        }
-        let det = if self.transform_type == TransformType::Homography {
-            self.matrix.determinant()
-        } else {
-            self.matrix[0] * self.matrix[4] - self.matrix[1] * self.matrix[3]
-        };
-        det.is_finite() && det.abs() > 1e-10
+        self.try_inverse().is_some()
     }
 }
 
@@ -348,7 +400,7 @@ pub struct WarpTransform {
 
 impl WarpTransform {
     /// Create a warp transform with no SIP correction.
-    pub fn new(transform: Transform) -> Self {
+    pub const fn new(transform: Transform) -> Self {
         Self {
             transform,
             sip: None,
@@ -356,7 +408,7 @@ impl WarpTransform {
     }
 
     /// Create a warp transform with SIP distortion correction.
-    pub fn with_sip(transform: Transform, sip: SipPolynomial) -> Self {
+    pub const fn with_sip(transform: Transform, sip: SipPolynomial) -> Self {
         Self {
             transform,
             sip: Some(sip),
@@ -372,27 +424,17 @@ impl WarpTransform {
         self.transform.apply(corrected)
     }
 
+    /// This warp run backwards, from target pixels to reference pixels — see [`InverseWarp`].
+    ///
+    /// # Panics
+    /// When the transform has no usable inverse ([`Transform::try_inverse`]).
+    pub fn inverse(&self) -> InverseWarp {
+        InverseWarp::new(self.transform.inverse(), self.sip.clone())
+    }
+
     /// Whether this transform has a nonlinear SIP component.
-    pub fn has_sip(&self) -> bool {
+    pub const fn has_sip(&self) -> bool {
         self.sip.is_some()
-    }
-
-    /// Whether this transform is purely linear (affine or simpler, no SIP).
-    /// When true, incremental stepping and SIMD can be used.
-    pub fn is_linear(&self) -> bool {
-        self.sip.is_none() && self.transform.transform_type() != TransformType::Homography
-    }
-}
-
-#[cfg(test)]
-mod internals {
-    use super::*;
-
-    impl Transform {
-        /// Frobenius norm of the difference from the identity matrix. Test-only diagnostic.
-        pub(crate) fn deviation_from_identity(&self) -> f64 {
-            self.matrix.deviation_from_identity()
-        }
     }
 }
 

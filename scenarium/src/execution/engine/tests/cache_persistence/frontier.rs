@@ -1,4 +1,5 @@
 use super::*;
+use std::fs;
 
 #[tokio::test]
 async fn explicit_cache_eviction_removes_the_downstream_ram_and_disk_cone() {
@@ -16,7 +17,7 @@ async fn explicit_cache_eviction_removes_the_downstream_ram_and_disk_cone() {
     });
     g.add("sum", |n| n.sum().cache(CacheMode::Both));
     g.add("mult", |n| n.mult().cache(CacheMode::Both));
-    g.add("print", |n| n.records());
+    g.add("print", NodeSpec::records);
     g.wire("src_a", 0, "sum", 0);
     g.wire("src_b", 0, "sum", 1);
     g.wire("sum", 0, "mult", 0);
@@ -58,22 +59,17 @@ async fn explicit_cache_eviction_removes_the_downstream_ram_and_disk_cone() {
     assert_eq!(a_calls.count(), 2);
     assert_eq!(b_calls.count(), 1);
     assert_eq!(run.logs(), ["132"]);
-    for name in evicted {
-        assert!(
-            run.ran().contains(&name),
-            "{name} must recompute after reopening"
-        );
-    }
-    assert!(
-        !run.ran().contains(&"src_b"),
-        "the retained sibling blob must still be reusable after reopening"
+    assert_eq!(
+        run.ran(),
+        evicted,
+        "the evicted cone recomputes, and the retained sibling blob is reused"
     );
 
     // A blob that cannot be deleted is reported, and the rest of the cone
     // still evicts — one failure is not a reason to abandon the sweep.
     let blocked = e.blob_path("src_a");
-    std::fs::remove_file(&blocked).unwrap();
-    std::fs::create_dir(&blocked).unwrap();
+    fs::remove_file(&blocked).unwrap();
+    fs::create_dir(&blocked).unwrap();
 
     let failures = e.evict(["src_a"]).await;
     let [failure] = failures.as_slice() else {
@@ -113,7 +109,7 @@ async fn shared_producer_read_by_a_running_consumer_is_not_cut() {
     let mut g = TestGraph::new();
     g.add("src", |n| n.counted(7i64, &calls));
     g.add("mult", |n| n.mult().cache(CacheMode::Disk));
-    g.add("print_mult", |n| n.records());
+    g.add("print_mult", NodeSpec::records);
     g.instance("print_direct", "print_mult");
     g.wire("src", 0, "mult", 0);
     g.wire("src", 0, "mult", 1);
@@ -133,14 +129,12 @@ async fn shared_producer_read_by_a_running_consumer_is_not_cut() {
         2,
         "src is still read by print_direct, so the cut must keep it"
     );
-    assert!(
-        run.ran().contains(&"src"),
+    assert_eq!(
+        run.ran(),
+        ["src", "print_direct", "print_mult"],
         "the shared producer runs for its executing consumer"
     );
-    assert!(
-        run.cached().contains(&"mult"),
-        "mult still reuses from disk"
-    );
+    assert_eq!(run.cached(), ["mult"], "mult still reuses from disk");
 }
 
 /// Two disk-cached nodes chained (`sum` → `mult`) under an executing sink.
@@ -159,7 +153,7 @@ async fn chained_disk_cache_hydrates_only_the_live_frontier() {
     g.add("src", |n| n.counted(7i64, &calls));
     g.add("sum", |n| n.sum().cache(CacheMode::Both));
     g.add("mult", |n| n.mult().cache(CacheMode::Both));
-    g.add("print", |n| n.records());
+    g.add("print", NodeSpec::records);
     g.wire("src", 0, "sum", 0);
     g.wire("src", 0, "sum", 1);
     g.wire("sum", 0, "mult", 0);
@@ -213,8 +207,9 @@ async fn chained_disk_cache_hydrates_only_the_live_frontier() {
 
     e.edit(|g| g.constant("mult", 1, 3i64));
     let run = e.run_sinks().await;
-    assert!(
-        run.ran().contains(&"sum"),
+    assert_eq!(
+        run.ran(),
+        ["src", "sum", "mult", "print"],
         "a value absent from the new store recomputes when needed"
     );
     assert_eq!(
@@ -231,7 +226,7 @@ async fn chained_disk_cache_hydrates_only_the_live_frontier() {
 ///
 /// The intervening run uses `Ram` mode so it can't overwrite the node's one
 /// disk blob (a `Disk`-mode run would — the blob is keyed by node id).
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn stale_ram_value_does_not_mask_a_valid_disk_blob() {
     let dir = TempDir::new("flip_back");
 
@@ -240,7 +235,7 @@ async fn stale_ram_value_does_not_mask_a_valid_disk_blob() {
     // function of the two consts.
     let mut g = TestGraph::new();
     g.add("mult", |n| n.mult().cache(CacheMode::Disk));
-    g.add("print", |n| n.records());
+    g.add("print", NodeSpec::records);
     g.constant("mult", 0, 2i64);
     g.constant("mult", 1, 3i64);
     g.wire("mult", 0, "print", 0);
@@ -276,8 +271,9 @@ async fn stale_ram_value_does_not_mask_a_valid_disk_blob() {
     );
 
     let run = e.run_sinks().await;
-    assert!(
-        !run.ran().contains(&"mult"),
+    assert_eq!(
+        run.ran(),
+        ["print"],
         "mult is a disk cache hit on flip-back, not recomputed — without \
          this a recompute would yield 6 regardless and the stale-RAM path \
          would go untested"
@@ -294,7 +290,7 @@ async fn stale_ram_value_does_not_mask_a_valid_disk_blob() {
 /// a downstream node executes. The sink checks the store dir is non-empty
 /// when it runs; that holds only because `mult` was persisted right after it
 /// finished. Batched-at-the-end storing would leave the dir empty here.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn persist_node_lands_on_disk_before_its_consumer_runs() {
     let dir = TempDir::new("per_node_store");
     let root = dir.path().to_path_buf();
@@ -307,9 +303,7 @@ async fn persist_node_lands_on_disk_before_its_consumer_runs() {
     g.add("watch", |n| {
         let (root, flag) = (root.clone(), Arc::clone(&blob_present));
         n.sink().input(DataType::Int).observes(move |_| {
-            let non_empty = std::fs::read_dir(&root)
-                .map(|mut entries| entries.next().is_some())
-                .unwrap_or(false);
+            let non_empty = fs::read_dir(&root).is_ok_and(|mut entries| entries.next().is_some());
             flag.store(non_empty, Ordering::SeqCst);
         })
     });
@@ -329,13 +323,13 @@ async fn persist_node_lands_on_disk_before_its_consumer_runs() {
 
 /// A flush must not write a value under a digest it wasn't produced under.
 /// After an input change recompiles the program, a node's resident value is
-/// stale w.r.t. its new digest; flushing it stamped with D_B would overwrite
-/// the node's blob with bytes a later run at D_B would load as a false hit.
+/// stale w.r.t. its new digest; flushing it stamped with `D_B` would overwrite
+/// the node's blob with bytes a later run at `D_B` would load as a false hit.
 ///
 /// `Both`, so the value is still resident when the flush reaches it, and a
 /// plan between the edit and the flush, so the slot's *current* digest really
-/// has moved to D_B — under `Disk` there would be no resident value to
-/// mis-stamp, and with no plan the slot would still be carrying D_A, either of
+/// has moved to `D_B` — under `Disk` there would be no resident value to
+/// mis-stamp, and with no plan the slot would still be carrying `D_A`, either of
 /// which leaves the flush nothing to get wrong.
 #[tokio::test]
 async fn flush_skips_a_value_stale_for_the_current_digest() {
@@ -343,7 +337,7 @@ async fn flush_skips_a_value_stale_for_the_current_digest() {
 
     let mut g = TestGraph::new();
     g.add("mult", |n| n.mult().cache(CacheMode::Both));
-    g.add("print", |n| n.records());
+    g.add("print", NodeSpec::records);
     g.constant("mult", 0, 2i64);
     g.constant("mult", 1, 3i64);
     g.wire("mult", 0, "print", 0);

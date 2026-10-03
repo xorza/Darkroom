@@ -1,10 +1,8 @@
 use super::*;
 
 use crate::execution::compile::Compiler;
-use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::graph::Graph;
 use crate::library::Library;
-use crate::worker::protocol::WorkerMessage;
 
 fn batch_intent(msgs: impl IntoIterator<Item = WorkerMessage>) -> BatchIntent {
     let mut intent = BatchIntent::default();
@@ -39,17 +37,15 @@ fn batch_intent_accumulates_simple_flags() {
         WorkerMessage::FlushCache {
             nodes: vec![node_id],
         },
-        WorkerMessage::Run {
-            seeds: RunSeeds::sinks(),
+        WorkerMessage::RunSinks,
+        WorkerMessage::FireEvents {
+            events: vec![event],
         },
-        WorkerMessage::Run {
-            seeds: RunSeeds::events(vec![event]),
+        WorkerMessage::RunNodes {
+            nodes: vec![node_id],
         },
-        WorkerMessage::Run {
-            seeds: RunSeeds::nodes(vec![node_id]),
-        },
-        WorkerMessage::Run {
-            seeds: RunSeeds::nodes(vec![node_id]),
+        WorkerMessage::RunNodes {
+            nodes: vec![node_id],
         },
         WorkerMessage::Sync { reply: reply_ack },
     ]);
@@ -57,16 +53,14 @@ fn batch_intent_accumulates_simple_flags() {
     assert!(matches!(intent.graph_state, Some(GraphOp::Clear)));
     assert!(matches!(intent.loop_request, Some(LoopCommand::Start)));
     assert!(intent.seeds.sinks);
-    assert_eq!(intent.seeds.events.len(), 1);
-    assert!(intent.seeds.events.contains(&event));
+    assert_eq!(intent.seeds.events, [event]);
     assert_eq!(
-        intent.seeds.node_ids.len(),
-        1,
+        intent.seeds.node_ids,
+        [node_id],
         "duplicate node seeds union to one"
     );
-    assert!(intent.seeds.node_ids.contains(&node_id));
-    assert!(intent.evict_cache.contains(&node_id));
-    assert!(intent.flush_cache.contains(&node_id));
+    assert_eq!(intent.evict_cache, [node_id]);
+    assert_eq!(intent.flush_cache, [node_id]);
     assert_eq!(intent.syncs.len(), 1);
 
     let event_capacity = intent.seeds.events.capacity();
@@ -104,14 +98,14 @@ fn batch_intent_deduplicates_events() {
     let mut intent = BatchIntent::default();
     intent.reset(
         [
-            WorkerMessage::Run {
-                seeds: RunSeeds::events(vec![event]),
+            WorkerMessage::FireEvents {
+                events: vec![event],
             },
-            WorkerMessage::Run {
-                seeds: RunSeeds::events(vec![event]),
+            WorkerMessage::FireEvents {
+                events: vec![event],
             },
-            WorkerMessage::Run {
-                seeds: RunSeeds::events(vec![event, event]),
+            WorkerMessage::FireEvents {
+                events: vec![event, event],
             },
         ],
         [event],
@@ -155,61 +149,40 @@ fn batch_intent_accumulates_unique_cache_nodes_in_order() {
     );
 }
 
-#[test]
-fn batch_intent_update_overwrites_earlier_update_in_same_batch() {
-    // Two Updates in one batch: the last one wins. This is
-    // implicit today (Option::replace) but worth pinning since
-    // callers do send [Update(A), Update(B)] during rapid edits.
-    let intent = batch_intent([
-        WorkerMessage::Update {
-            compiled: empty_compiled(),
-        },
-        WorkerMessage::Update {
-            compiled: empty_compiled(),
-        },
-    ]);
-
-    assert!(matches!(intent.graph_state, Some(GraphOp::Replace(_))));
-}
-
+/// Each slot keeps the last message that wrote it — a graph op by identity,
+/// so a burst of edits installs the newest program, and a loop request.
 #[test]
 fn batch_intent_last_write_wins_per_slot() {
-    type Expect = fn(&BatchIntent) -> bool;
-    let cases: [(&str, [WorkerMessage; 2], Expect); 4] = [
-        (
-            "Clear then Update -> last write (Update) wins",
-            [
-                WorkerMessage::Clear,
-                WorkerMessage::Update {
-                    compiled: empty_compiled(),
-                },
-            ],
-            |intent| matches!(intent.graph_state, Some(GraphOp::Replace(_))),
-        ),
-        (
-            "Update then Clear -> last write (Clear) wins",
-            [
-                WorkerMessage::Update {
-                    compiled: empty_compiled(),
-                },
-                WorkerMessage::Clear,
-            ],
-            |intent| matches!(intent.graph_state, Some(GraphOp::Clear)),
-        ),
-        (
-            "Start then Stop -> last write (Stop) wins",
-            [WorkerMessage::StartEventLoop, WorkerMessage::StopEventLoop],
-            |intent| matches!(intent.loop_request, Some(LoopCommand::Stop)),
-        ),
-        (
-            "Stop then Start -> last write (Start) wins",
-            [WorkerMessage::StopEventLoop, WorkerMessage::StartEventLoop],
-            |intent| matches!(intent.loop_request, Some(LoopCommand::Start)),
-        ),
-    ];
+    let first = empty_compiled();
+    let second = empty_compiled();
+    let update = |compiled: &Arc<CompiledGraph>| WorkerMessage::Update {
+        compiled: Arc::clone(compiled),
+    };
+    let replaced = |intent: &BatchIntent| match &intent.graph_state {
+        Some(GraphOp::Replace(compiled)) => Some(Arc::as_ptr(compiled)),
+        _ => None,
+    };
 
-    for (label, msgs, expected) in cases {
-        let intent = batch_intent(msgs);
-        assert!(expected(&intent), "{label}");
-    }
+    let intent = batch_intent([update(&first), update(&second)]);
+    assert_eq!(
+        replaced(&intent),
+        Some(Arc::as_ptr(&second)),
+        "Update then Update"
+    );
+    let intent = batch_intent([WorkerMessage::Clear, update(&first)]);
+    assert_eq!(
+        replaced(&intent),
+        Some(Arc::as_ptr(&first)),
+        "Clear then Update"
+    );
+    let intent = batch_intent([update(&first), WorkerMessage::Clear]);
+    assert!(
+        matches!(intent.graph_state, Some(GraphOp::Clear)),
+        "Update then Clear"
+    );
+
+    let intent = batch_intent([WorkerMessage::StartEventLoop, WorkerMessage::StopEventLoop]);
+    assert!(matches!(intent.loop_request, Some(LoopCommand::Stop)));
+    let intent = batch_intent([WorkerMessage::StopEventLoop, WorkerMessage::StartEventLoop]);
+    assert!(matches!(intent.loop_request, Some(LoopCommand::Start)));
 }

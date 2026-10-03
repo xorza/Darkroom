@@ -5,14 +5,14 @@
 // signal as `common::is_debug`; `release-max` inherits `release`, so it has it
 // off and gets the GUI subsystem.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![deny(unsafe_code)]
 
-#[cfg(test)]
-mod alloc_audit;
 mod core;
 mod gui;
 mod platform;
 
 use std::path::PathBuf;
+use std::process;
 
 use clap::Parser;
 use common::is_debug;
@@ -38,7 +38,7 @@ fn main() {
     let Cli { document } = Cli::parse();
     if let Err(error) = run_gui(document) {
         tracing::error!("darkroom: {error}");
-        std::process::exit(1);
+        process::exit(1);
     }
 }
 
@@ -60,7 +60,10 @@ fn run_gui(document: Option<PathBuf>) -> Result<(), WinitHostError> {
     if let Some(icon) = load_icon() {
         window = window.icon(icon);
     }
-    if let Some(w) = &preferences.window {
+    if let Ok(Preferences {
+        window: Some(w), ..
+    }) = &preferences
+    {
         window = window.inner_size(w.size).maximized(w.maximized);
         if let Some(pos) = w.position {
             window = window.position(pos);
@@ -103,6 +106,10 @@ fn load_icon() -> Option<Image> {
 
 /// Minimal stderr tracing subscriber, `RUST_LOG`-controlled (defaults to
 /// `info`). `try_init` is a no-op if a subscriber is already installed.
+#[expect(
+    clippy::let_underscore_must_use,
+    reason = "a subscriber that is already installed keeps serving, which is what `try_init` allows"
+)]
 fn init_tracing() {
     use tracing_subscriber::EnvFilter;
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
@@ -110,17 +117,20 @@ fn init_tracing() {
 }
 
 #[cfg(test)]
+#[expect(
+    unsafe_code,
+    reason = "a `GlobalAlloc` is an `unsafe` trait; the audit counts allocations"
+)]
+mod alloc_audit;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn load_icon_decodes_embedded_png() {
-        let rgba = image::load_from_memory(include_bytes!("../assets/icons/darkroom-256.png"))
-            .unwrap()
-            .to_rgba8();
-        assert_eq!(rgba.dimensions(), (256, 256));
-        assert_eq!(rgba.as_raw().len(), 256 * 256 * 4);
-        assert!(load_icon().is_some());
+        let icon = load_icon().expect("the embedded icon decodes");
+        assert_eq!(icon.size(), UVec2::new(256, 256));
     }
 
     #[test]

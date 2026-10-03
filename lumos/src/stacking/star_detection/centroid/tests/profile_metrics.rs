@@ -1,389 +1,197 @@
+#![expect(
+    clippy::cast_possible_wrap,
+    reason = "test fixtures are small images, with non-negative coordinates and offsets of a few dozen pixels"
+)]
+
 use super::*;
-use crate::stacking::star_detection::centroid::compute_stamp_radius;
 use crate::stacking::star_detection::centroid::stamp::StampFit;
-use crate::stacking::star_detection::centroid::stamp::StampGrid;
 
-/// Helper: run measure_star on a single-star image with given centroid method.
-fn measure_single_star(
-    pixels: &Buffer2<f32>,
-    bg_value: f32,
-    noise: f32,
-    peak_pos: DVec2,
-    centroid_method: CentroidMethod,
-) -> Star {
-    let width = pixels.width();
-    let height = pixels.height();
-    let bg = background_map::uniform(Size2us::new(width, height), bg_value, noise);
-    let config = MeasurementConfig {
-        centroid_method,
-        ..Default::default()
-    };
-    let region = Region {
-        bbox: URect::new(
-            Vec2us::new(
-                (peak_pos.x as usize).saturating_sub(5),
-                (peak_pos.y as usize).saturating_sub(5),
+/// A converged fit's widths replace the moment-based FWHM and eccentricity: the Gaussian's both,
+/// the Moffat's FWHM only — its single α says nothing of elongation, so eccentricity stays the
+/// moments'.
+///
+/// Each star is a clean sample of the fitted model, measured at the default seed FWHM 4.0 (stamp
+/// radius 7), so the fit lands on the truth: every width to [`EXACT_FIT`] of itself, which moves
+/// the FWHM — the equal-area √(w₁w₂) for the Gaussian, 2α√(2^(1/β) − 1) for the Moffat — by no
+/// more than that, plus ½ε of the f32 it is reported in. Eccentricity √(1 − λ₂/λ₁) is
+/// ill-conditioned at 0: two variances each 2·[`EXACT_FIT`] off read as √(4·[`EXACT_FIT`]), 2.1e-3,
+/// and the elongated star's √0.75 moves by λ₂/λ₁ · 4·[`EXACT_FIT`] / (2e) = 6.5e-7.
+///
+/// The radius-7 stamp cuts the wide stars, which biases their moments (the Moffat by 16%) and not
+/// the fit, so where the moments disagree with the truth the reported FWHM is the fit's.
+#[test]
+fn fits_report_their_own_widths() {
+    /// [`EXACT_FIT_PX2`]'s relative counterpart on a width, scaled by `(A + B) / A` = 1.125 for the
+    /// sky under these stars, as the fit modules' own exact rows are.
+    const EXACT_FIT: f64 = 1e-6 * 1.125;
+    struct Case {
+        name: &'static str,
+        profile: StarProfile,
+        method: CentroidMethod,
+        fwhm: f32,
+        /// `None` where the eccentricity is the moments'.
+        eccentricity: Option<f64>,
+        /// The moments' FWHM is off the truth by more than 1e-3 of it.
+        moments_biased: bool,
+    }
+    let cases = [
+        Case {
+            name: "round Gaussian",
+            profile: StarProfile::Gaussian { sigma: 2.0 },
+            method: CentroidMethod::GaussianFit,
+            fwhm: sigma_to_fwhm(2.0),
+            eccentricity: Some(0.0),
+            moments_biased: false,
+        },
+        Case {
+            name: "elongated Gaussian",
+            profile: StarProfile::Elliptical {
+                sigma_x: 2.0,
+                sigma_y: 4.0,
+                angle: 0.0,
+            },
+            method: CentroidMethod::GaussianFit,
+            fwhm: sigma_to_fwhm(8.0f32.sqrt()),
+            eccentricity: Some(0.75f64.sqrt()),
+            moments_biased: true,
+        },
+        Case {
+            name: "Moffat",
+            profile: StarProfile::Moffat {
+                alpha: 3.0,
+                beta: 2.5,
+            },
+            method: CentroidMethod::MoffatFit { beta: 2.5 },
+            fwhm: alpha_beta_to_fwhm(3.0, 2.5),
+            eccentricity: None,
+            moments_biased: true,
+        },
+    ];
+    let pos = DVec2::splat(64.0);
+    for case in cases {
+        let pixels =
+            SyntheticStar::new(pos.as_vec2(), 0.8, case.profile).stamp(Size2us::new(128, 128), 0.1);
+        let measured = Measured::flat(&pixels, 0.1, 0.01);
+        let region = measured.region_at(pos);
+        let measure = |centroid_method| {
+            let config = MeasurementConfig {
+                centroid_method,
+                ..Default::default()
+            };
+            measured
+                .measure(&region, &config, 4.0)
+                .expect("the star measures")
+        };
+        let star = measure(case.method);
+        let moments = measure(CentroidMethod::WeightedMoments);
+
+        let truth = f64::from(case.fwhm);
+        let bound = truth * (EXACT_FIT + f64::from(f32::EPSILON) / 2.0);
+        let error = (f64::from(star.fwhm) - truth).abs();
+        assert!(
+            error <= bound,
+            "{}: FWHM {} vs {truth}",
+            case.name,
+            star.fwhm
+        );
+        let moments_error = (f64::from(moments.fwhm) - truth).abs();
+        assert_eq!(
+            moments_error > 1e-3 * truth,
+            case.moments_biased,
+            "{}: moments FWHM {}",
+            case.name,
+            moments.fwhm
+        );
+
+        let eccentricity = f64::from(star.eccentricity);
+        match case.eccentricity {
+            Some(0.0) => assert!(
+                eccentricity <= (4.0 * EXACT_FIT).sqrt(),
+                "{}: eccentricity {eccentricity}",
+                case.name
             ),
-            Vec2us::new(
-                (peak_pos.x as usize + 6).min(width),
-                (peak_pos.y as usize + 6).min(height),
+            Some(expected) => assert!(
+                (eccentricity - expected).abs() <= 6.5e-7 + f64::from(f32::EPSILON),
+                "{}: eccentricity {eccentricity} vs {expected}",
+                case.name
             ),
-        ),
-        peak: Vec2us::new(peak_pos.x.round() as usize, peak_pos.y.round() as usize),
-        peak_value: pixels[peak_pos.y.round() as usize * width + peak_pos.x.round() as usize],
-        area: 50,
-    };
-    measure_star(
-        pixels,
-        &bg,
-        &region,
-        &config,
-        FwhmConfig::default().expected,
-        &StampGrid::new(compute_stamp_radius(FwhmConfig::default().expected)),
-    )
-    .expect("measure_star should succeed")
+            None => assert_eq!(star.eccentricity, moments.eccentricity, "{}", case.name),
+        }
+    }
 }
 
-/// GaussianFit: FWHM should come from fit sigma, not moments.
+/// The windowed covariance deconvolves its Gaussian window, `C = (C_obs⁻¹ − σ_w⁻²·I)⁻¹`, which is
+/// exact for a Gaussian source: it returns the source's own covariance, axes kept apart, from any
+/// seed window — one pass already lands, and the rest re-weight by the same answer.
 ///
-/// Circular Gaussian with sigma=2.0. True FWHM = 2.35482 * 2.0 = 4.70964.
-/// The fit recovers sigma accurately; moments are biased by the finite stamp.
+/// The stamps keep ≥ 4.67σ of each source along every axis: what they cut and the sampling leave
+/// ≤ 3.1e-8 of each variance (measured), under the 1e-7 asserted.
 #[test]
-fn gaussian_fit_fwhm_from_fit_params() {
-    let sigma = 2.0f32;
-    // True FWHM = FWHM_TO_SIGMA * sigma = 2.35482 * 2.0 = 4.70964
-    let true_fwhm = FWHM_TO_SIGMA * sigma;
-
-    let pos = DVec2::new(64.0, 64.0);
-    let pixels = SyntheticStar::new(
-        pos.as_vec2(),
-        0.8,
-        StarProfile::Elliptical {
-            sigma_x: sigma,
-            sigma_y: sigma,
-            angle: 0.0,
-        },
-    )
-    .stamp(Size2us::new(128, 128), 0.1);
-
-    let star = measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::GaussianFit);
-
-    // Fit-derived FWHM should be close to the true value
-    let fwhm_error = (star.fwhm - true_fwhm).abs();
-    assert!(
-        fwhm_error < 0.05,
-        "GaussianFit FWHM should match true value: got {}, expected {}, error {}",
-        star.fwhm,
-        true_fwhm,
-        fwhm_error
-    );
-}
-
-/// GaussianFit: eccentricity should come from fit sigma_x/sigma_y ratio.
-///
-/// Elongated Gaussian with sigma_x=2.0, sigma_y=4.0.
-/// True eccentricity = sqrt(1 - (sigma_min/sigma_max)^2) = sqrt(1 - (2/4)^2) = sqrt(0.75) ≈ 0.8660.
-#[test]
-fn gaussian_fit_eccentricity_from_fit_params() {
-    let sigma_x = 2.0f32;
-    let sigma_y = 4.0f32;
-    // e = sqrt(1 - (min/max)^2) = sqrt(1 - (2/4)^2) = sqrt(0.75) = 0.8660
-    let true_ecc = (1.0 - (sigma_x / sigma_y).powi(2)).sqrt();
-
-    let pos = DVec2::new(64.0, 64.0);
-    let pixels = SyntheticStar::new(
-        pos.as_vec2(),
-        0.8,
-        StarProfile::Elliptical {
-            sigma_x,
-            sigma_y,
-            angle: 0.0,
-        },
-    )
-    .stamp(Size2us::new(128, 128), 0.1);
-
-    let star = measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::GaussianFit);
-
-    let ecc_error = (star.eccentricity - true_ecc).abs();
-    assert!(
-        ecc_error < 0.05,
-        "GaussianFit eccentricity should match true value: got {}, expected {}, error {}",
-        star.eccentricity,
-        true_ecc,
-        ecc_error
-    );
-}
-
-/// GaussianFit: FWHM from fit is more accurate than from moments.
-///
-/// Moments-based FWHM is biased because:
-/// 1. Finite stamp includes wings that bias sum_r2 upward
-/// 2. Background subtraction imperfections
-///
-/// The fit models the Gaussian directly, recovering sigma more accurately.
-#[test]
-fn gaussian_fit_fwhm_more_accurate_than_moments() {
-    let sigma = 2.5f32;
-    let true_fwhm = FWHM_TO_SIGMA * sigma;
-
-    let pos = DVec2::new(64.0, 64.0);
-    let pixels = SyntheticStar::new(
-        pos.as_vec2(),
-        0.8,
-        StarProfile::Elliptical {
-            sigma_x: sigma,
-            sigma_y: sigma,
-            angle: 0.0,
-        },
-    )
-    .stamp(Size2us::new(128, 128), 0.1);
-
-    let fit_star = measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::GaussianFit);
-    let moments_star =
-        measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::WeightedMoments);
-
-    let fit_error = (fit_star.fwhm - true_fwhm).abs();
-    let moments_error = (moments_star.fwhm - true_fwhm).abs();
-
-    assert!(
-        fit_error < moments_error,
-        "GaussianFit FWHM error ({}) should be smaller than moments error ({}). \
-         fit_fwhm={}, moments_fwhm={}, true_fwhm={}",
-        fit_error,
-        moments_error,
-        fit_star.fwhm,
-        moments_star.fwhm,
-        true_fwhm
-    );
-}
-
-/// MoffatFit: FWHM should come from alpha_beta_to_fwhm(), not moments.
-///
-/// Moffat star with alpha=3.0, beta=2.5.
-/// True FWHM = 2 * alpha * sqrt(2^(1/beta) - 1)
-///           = 2 * 3.0 * sqrt(2^0.4 - 1)
-///           = 6.0 * sqrt(1.31951 - 1)
-///           = 6.0 * sqrt(0.31951)
-///           = 6.0 * 0.56525 ≈ 3.3915
-///
-/// Moments-based FWHM is severely biased for Moffat profiles because
-/// the extended wings contribute disproportionately to sum_r2.
-#[test]
-fn moffat_fit_fwhm_from_fit_params() {
-    let alpha = 3.0f32;
-    let beta = 2.5f32;
-    let true_fwhm = alpha_beta_to_fwhm(alpha, beta);
-    // Verify: 2 * 3.0 * sqrt(2^0.4 - 1) ≈ 3.3915
-    assert!(
-        (true_fwhm - 3.3915).abs() < 0.001,
-        "FWHM formula check: {}",
-        true_fwhm
-    );
-
-    let pos = DVec2::new(64.0, 64.0);
-    let pixels = SyntheticStar::new(pos.as_vec2(), 0.8, StarProfile::Moffat { alpha, beta })
-        .stamp(Size2us::new(128, 128), 0.1);
-
-    let star = measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::MoffatFit { beta });
-
-    let fwhm_error = (star.fwhm - true_fwhm).abs();
-    assert!(
-        fwhm_error < 0.15,
-        "MoffatFit FWHM should match true value: got {}, expected {}, error {}",
-        star.fwhm,
-        true_fwhm,
-        fwhm_error
-    );
-}
-
-/// MoffatFit: eccentricity stays moment-based (Moffat is circular).
-///
-/// For a circular Moffat profile, eccentricity should be near zero
-/// regardless of whether it comes from fit or moments.
-#[test]
-fn moffat_fit_eccentricity_stays_moment_based() {
-    let alpha = 3.0f32;
-    let beta = 2.5f32;
-    let pos = DVec2::new(64.0, 64.0);
-    let pixels = SyntheticStar::new(pos.as_vec2(), 0.8, StarProfile::Moffat { alpha, beta })
-        .stamp(Size2us::new(128, 128), 0.1);
-
-    let star = measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::MoffatFit { beta });
-
-    // Circular source → low eccentricity
-    assert!(
-        star.eccentricity < 0.15,
-        "Circular Moffat should have low eccentricity: got {}",
-        star.eccentricity
-    );
-}
-
-/// WeightedMoments: FWHM should be unchanged (no regression).
-///
-/// Circular Gaussian with sigma=2.5. True FWHM = 2.35482 * 2.5 = 5.887.
-/// Moments-based FWHM is biased upward by finite stamp size — the pre-existing
-/// behavior should be preserved exactly.
-#[test]
-fn moments_only_fwhm_unchanged() {
-    let sigma = 2.5f32;
-    let true_fwhm = FWHM_TO_SIGMA * sigma;
-
-    let pos = DVec2::new(64.0, 64.0);
-    let pixels = SyntheticStar::new(
-        pos.as_vec2(),
-        0.8,
-        StarProfile::Elliptical {
-            sigma_x: sigma,
-            sigma_y: sigma,
-            angle: 0.0,
-        },
-    )
-    .stamp(Size2us::new(128, 128), 0.1);
-
-    let star = measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::WeightedMoments);
-
-    // Moments-based FWHM has some bias from finite stamp and background subtraction.
-    // Verify it's reasonable (within 5% of true value).
-    let rel_error = (star.fwhm - true_fwhm).abs() / true_fwhm;
-    assert!(
-        rel_error < 0.05,
-        "WeightedMoments FWHM should be within 5% of true: got {}, true {}, rel_error {:.4}",
-        star.fwhm,
-        true_fwhm,
-        rel_error
-    );
-}
-
-/// MoffatFit: FWHM from fit is more accurate than moments for Moffat profiles.
-///
-/// Moffat profiles have heavy wings that heavily bias moment-based FWHM upward.
-/// The fit directly recovers alpha, giving accurate FWHM.
-#[test]
-fn moffat_fit_fwhm_more_accurate_than_moments() {
-    let alpha = 3.0f32;
-    let beta = 2.5f32;
-    let true_fwhm = alpha_beta_to_fwhm(alpha, beta);
-
-    let pos = DVec2::new(64.0, 64.0);
-    let pixels = SyntheticStar::new(pos.as_vec2(), 0.8, StarProfile::Moffat { alpha, beta })
-        .stamp(Size2us::new(128, 128), 0.1);
-
-    let fit_star = measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::MoffatFit { beta });
-    let moments_star =
-        measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::WeightedMoments);
-
-    let fit_error = (fit_star.fwhm - true_fwhm).abs();
-    let moments_error = (moments_star.fwhm - true_fwhm).abs();
-
-    assert!(
-        fit_error < moments_error,
-        "MoffatFit FWHM error ({}) should be smaller than moments error ({}). \
-         fit_fwhm={}, moments_fwhm={}, true_fwhm={}",
-        fit_error,
-        moments_error,
-        fit_star.fwhm,
-        moments_star.fwhm,
-        true_fwhm
-    );
-}
-
-#[test]
-fn windowed_covariance_recovers_gaussian_sigma() {
-    // A clean round Gaussian of σ=2.5: the window deconvolution must recover σ²
-    // on both axes (unbiased FWHM) with a ~zero cross term (round → ecc ≈ 0).
+fn windowed_covariance_deconvolves_to_the_source() {
     let size = Size2us::new(64, 64);
-    let pos = DVec2::new(32.0, 32.0);
-    let sigma = 2.5f32;
-    let pixels =
-        SyntheticStar::new(pos.as_vec2(), 1.0, StarProfile::Gaussian { sigma }).stamp(size, 0.0);
-    let bg = background_map::uniform(size, 0.0, 1.0);
-
-    let cov = windowed_covariance(&pixels, &bg, None, pos, 12, (sigma * sigma) as f64)
-        .expect("clean Gaussian should converge");
-
-    let expected = (sigma * sigma) as f64; // σ² per axis
-    assert!(
-        (cov.xx - expected).abs() < 0.1 * expected,
-        "cxx {} vs expected {expected}",
-        cov.xx
-    );
-    assert!(
-        (cov.yy - expected).abs() < 0.1 * expected,
-        "cyy {} vs expected {expected}",
-        cov.yy
-    );
-    assert!(
-        cov.xy.abs() < 0.05 * expected,
-        "cxy {} should be ~0",
-        cov.xy
-    );
+    let pos = DVec2::splat(32.0);
+    for (sigma_x, sigma_y, radius) in [(2.5f32, 2.5f32, 12), (3.0, 2.0, 14), (2.0, 3.0, 14)] {
+        let pixels = SyntheticStar::new(
+            pos.as_vec2(),
+            1.0,
+            StarProfile::Elliptical {
+                sigma_x,
+                sigma_y,
+                angle: 0.0,
+            },
+        )
+        .stamp(size, 0.0);
+        let measured = Measured::flat(&pixels, 0.0, 1.0);
+        let (xx, yy) = (f64::from(sigma_x).powi(2), f64::from(sigma_y).powi(2));
+        for seed in [1.0, f64::midpoint(xx, yy), 4.0 * xx.max(yy)] {
+            let cov = windowed_covariance(&measured.residual, 0.0, pos, radius, seed)
+                .expect("a clean Gaussian converges");
+            let name = format!("σ ({sigma_x}, {sigma_y}) from seed {seed}");
+            assert!((cov.xx / xx - 1.0).abs() <= 1e-7, "{name}: xx {}", cov.xx);
+            assert!((cov.yy / yy - 1.0).abs() <= 1e-7, "{name}: yy {}", cov.yy);
+            assert!(cov.xy.abs() <= 1e-7 * xx.min(yy), "{name}: xy {}", cov.xy);
+        }
+    }
 }
 
+/// Noise in the wings is what the window is for. At the matched window `σ_w = σ` the weighted moments
+/// are σ²/2 per axis and deconvolve back to σ², so noise n moves the axis ratio √(yy/xx) by
+/// `2 Σ wᵢ(fyᵢ² − fxᵢ²)nᵢ / (σ² Σ wᵢIᵢ)`, a scatter of `2σₙ √Σ wᵢ²(fyᵢ² − fxᵢ²)² / (σ² Σ wᵢIᵢ)` =
+/// 0.0135 on this star. Plain signed moments over the same stamp scatter by
+/// `σₙ √Σ(fyᵢ² − fxᵢ²)² / (2σ² Σ Iᵢ)` = 0.100, 7.4 times as much — the failure mode that inflated
+/// the eccentricity of round stars. The one draw here lands within 4 of the window's scatter, which
+/// plain moments would miss for most draws.
 #[test]
-fn windowed_covariance_recovers_elliptical_axes() {
-    // An elliptical Gaussian (σx=3, σy=2): a circular window is isotropic, so its
-    // deconvolution recovers both axis variances exactly — the measurement must
-    // not circularize the source (otherwise eccentricity would be lost).
+fn windowed_covariance_holds_wing_noise_to_its_propagated_scatter() {
+    const NOISE: f32 = 0.03;
     let size = Size2us::new(64, 64);
-    let pos = DVec2::new(32.0, 32.0);
-    let (sx, sy) = (3.0f32, 2.0f32);
-    let pixels = SyntheticStar::new(
-        pos.as_vec2(),
-        1.0,
-        StarProfile::Elliptical {
-            sigma_x: sx,
-            sigma_y: sy,
-            angle: 0.0,
-        },
-    )
-    .stamp(size, 0.0);
-    let bg = background_map::uniform(size, 0.0, 1.0);
-
-    let seed = ((sx * sx + sy * sy) / 2.0) as f64;
-    let cov = windowed_covariance(&pixels, &bg, None, pos, 14, seed)
-        .expect("clean elliptical Gaussian should converge");
-
-    assert!(
-        (cov.xx - (sx * sx) as f64).abs() < 0.12 * (sx * sx) as f64,
-        "cxx {} vs {}",
-        cov.xx,
-        sx * sx
-    );
-    assert!(
-        (cov.yy - (sy * sy) as f64).abs() < 0.12 * (sy * sy) as f64,
-        "cyy {} vs {}",
-        cov.yy,
-        sy * sy
-    );
-    // Recovered axis ratio tracks the input (not washed toward 1).
-    let ratio = (cov.yy / cov.xx).sqrt();
-    let expected_ratio = (sy / sx) as f64;
-    assert!(
-        (ratio - expected_ratio).abs() < 0.08,
-        "axis ratio {ratio} vs expected {expected_ratio}"
-    );
-}
-
-#[test]
-fn windowed_covariance_resists_wing_noise() {
-    // The PR2 failure mode: signed moments over a fixed stamp sum in far-wing
-    // noise, which inflates eccentricity for round stars. The window must suppress
-    // it — a round noisy star stays ~circular.
-    let size = Size2us::new(64, 64);
-    let pos = DVec2::new(32.0, 32.0);
+    let pos = DVec2::splat(32.0);
     let sigma = 2.5f32;
+    let radius = 12;
     let mut pixels =
         SyntheticStar::new(pos.as_vec2(), 1.0, StarProfile::Gaussian { sigma }).stamp(size, 0.1);
-    patterns::add_gaussian_noise(pixels.pixels_mut(), 0.03, 12345);
-    let bg = background_map::uniform(size, 0.1, 1.0);
+    patterns::add_gaussian_noise(pixels.pixels_mut(), NOISE, 12345);
+    let measured = Measured::flat(&pixels, 0.1, NOISE);
 
-    let cov = windowed_covariance(&pixels, &bg, None, pos, 12, (sigma * sigma) as f64)
-        .expect("noisy Gaussian should still converge");
+    let sigma_sq = f64::from(sigma).powi(2);
+    let mut spread = 0.0;
+    let mut weighted_signal = 0.0;
+    let arms = -(radius as i32)..=radius as i32;
+    for dy in arms.clone() {
+        for dx in arms.clone() {
+            let weight = (-f64::from(dx * dx + dy * dy) / (2.0 * sigma_sq)).exp();
+            spread += (weight * f64::from(dy * dy - dx * dx)).powi(2);
+            weighted_signal += weight * weight;
+        }
+    }
+    let scatter = 2.0 * f64::from(NOISE) * spread.sqrt() / (sigma_sq * weighted_signal);
 
+    let cov = windowed_covariance(&measured.residual, 0.0, pos, radius, sigma_sq)
+        .expect("a noisy Gaussian converges");
     let ratio = (cov.yy / cov.xx).sqrt();
     assert!(
-        (0.85..1.18).contains(&ratio),
-        "axis ratio {ratio} should stay ~1 under noise (no inflation)"
+        (ratio - 1.0).abs() <= 4.0 * scatter,
+        "axis ratio {ratio}, scatter {scatter}"
     );
 }
 

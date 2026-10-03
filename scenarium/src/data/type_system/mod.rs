@@ -1,7 +1,5 @@
-use std::str::FromStr;
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
 use strum::VariantNames;
 
 use common::id_type;
@@ -23,14 +21,7 @@ impl<T: VariantNames> EnumVariants for T {
 
 id_type!(TypeId);
 
-#[cfg(test)]
-impl TypeId {
-    fn from_name(namespace: TypeId, name: &str) -> Self {
-        uuid::Uuid::new_v5(&namespace.as_uuid(), name.as_bytes()).into()
-    }
-}
-
-#[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Hash)]
 pub enum FsPathMode {
     #[default]
     ExistingFile,
@@ -39,26 +30,26 @@ pub enum FsPathMode {
     Directory,
 }
 
-#[derive(Clone, Default, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, PartialEq, Eq, Hash)]
 pub struct FsPathConfig {
     pub mode: FsPathMode,
     pub extensions: Vec<String>,
 }
 
 impl FsPathConfig {
-    pub fn new(mode: FsPathMode) -> Self {
+    pub const fn new(mode: FsPathMode) -> Self {
         Self {
             mode,
             extensions: Vec::new(),
         }
     }
 
-    pub fn with_extensions(mode: FsPathMode, extensions: Vec<String>) -> Self {
+    pub const fn with_extensions(mode: FsPathMode, extensions: Vec<String>) -> Self {
         Self { mode, extensions }
     }
 }
 
-#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
 pub enum DataType {
     #[default]
     Any,
@@ -85,6 +76,10 @@ impl DataType {
     /// out which literals describe no type of their own and why. The match is
     /// deliberately exhaustive: a new [`ConstValue`] variant must fail to
     /// compile here rather than fall into `Any` unexamined.
+    #[expect(
+        clippy::match_same_arms,
+        reason = "each literal kind states its own reason for reporting `Any`"
+    )]
     pub(crate) fn or_const_type(self, value: &ConstValue) -> DataType {
         if !matches!(self, DataType::Any) {
             return self;
@@ -142,13 +137,12 @@ impl DataType {
         self == source
     }
 
-    /// The scalar coercion class, type side: `Float`/`Int`/`Bool` are one kind
-    /// to a runtime read, since
+    /// The scalar coercion class, type side: `Float`/`Int`/`Bool` are one kind to a runtime read,
+    /// since
     /// [`as_f64`](ConstValue::as_f64)/[`as_i64`](ConstValue::as_i64)/[`as_bool`](ConstValue::as_bool)
-    /// convert freely between them — `Bool` reads as `0`/`1`, `Float`
-    /// truncates to int, any nonzero reads as `true`.
-    /// [`ConstValue::is_numeric_scalar`] is the same class on the value side.
-    fn is_numeric_scalar(&self) -> bool {
+    /// convert freely between them — `Bool` reads as `0`/`1`, `Float` truncates to int, any nonzero
+    /// reads as `true`. [`ConstValue::is_numeric_scalar`] is the same class on the value side.
+    const fn is_numeric_scalar(&self) -> bool {
         matches!(self, DataType::Float | DataType::Int | DataType::Bool)
     }
 
@@ -216,21 +210,6 @@ pub(crate) enum Strictness {
     Declared,
     /// A document's authored `Const`, at compile.
     Authored,
-}
-
-impl FromStr for DataType {
-    type Err = ();
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "float" | "number" => Ok(DataType::Float),
-            "int" => Ok(DataType::Int),
-            "bool" => Ok(DataType::Bool),
-            "string" => Ok(DataType::String),
-            "path" => Ok(DataType::FsPath(Arc::new(FsPathConfig::default()))),
-            _ => Err(()),
-        }
-    }
 }
 
 #[cfg(test)]

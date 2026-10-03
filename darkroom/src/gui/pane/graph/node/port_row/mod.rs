@@ -8,10 +8,11 @@
 //! terminates a wire on — circle, event triangle, hit-box growth — is the
 //! shared [`PortGlyph`] widget's.
 
+use std::fmt;
 use std::fmt::Display;
+use std::fmt::Formatter;
 use std::sync::Arc;
 
-use glam::Vec2;
 use palantir::prelude::*;
 use palantir::{CloseHandle, InternedStr};
 use scenarium::Binding;
@@ -24,9 +25,9 @@ use scenarium::{ConstValue, DataType, FsPathConfig, FsPathMode, Func};
 use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::preview;
-use crate::gui::EventRef;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::edit::EditCommand;
+use crate::gui::event_ref::EventRef;
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
@@ -38,7 +39,7 @@ use crate::gui::requests::Requests;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::port_glyph::{PortGlyph, PortGlyphResponse};
-use crate::gui::widgets::support::tooltip_after;
+use crate::gui::widgets::support::{ROW_GAP, tooltip_after};
 
 /// Grid columns: inputs (hug), input values (hug, capped at `max_width` — so
 /// wide editors fit but a very long one ellipsizes; the numeric `DragValue`
@@ -86,7 +87,7 @@ pub(super) fn ports_row(
     // Every row of every node gets the same track, so the buffer is rebuilt
     // only when a wider node needs more of them or the theme moves the height
     // — not per node. Not a `const`: the height rides the theme's font size.
-    let track = Track::fixed(theme.palantir_theme.text.font_size_px * PORT_ROW_HEIGHT_EM);
+    let track = Track::fixed(ui.theme().text.font_size_px * PORT_ROW_HEIGHT_EM);
     if row_tracks.len() < n_rows || row_tracks.first() != Some(&track) {
         row_tracks.clear();
         row_tracks.resize(n_rows, track);
@@ -116,15 +117,22 @@ pub(super) fn ports_row(
 }
 
 /// A port's hover tooltip: its `description` (when the func declares one)
-/// above a dimmer type line, else just the type. `description` is the
-/// resolved [`InputCtx::description`] text (empty = none).
+/// above a dimmer type line, else just the type, and below them the input
+/// that sets this one aside, if one does. `description` is the resolved
+/// [`InputCtx::description`] text (empty = none).
 ///
 /// Built only for the node under the pointer — see [`ports_row`] — and
 /// interned straight into this pass's text arena, so a hovered node's ports
 /// author their tips with no `String` between them and the widget. `None`
 /// off that node, which [`tooltip_after`] and [`port_label`] both take as
 /// "no tooltip".
-fn tip_for(ui: &mut Ui, ncx: NodeCtx<'_>, description: &str, ty: &DataType) -> Option<InternedStr> {
+fn tip_for(
+    ui: &mut Ui,
+    ncx: NodeCtx<'_>,
+    description: &str,
+    ty: &DataType,
+    set_aside_by: Option<&str>,
+) -> Option<InternedStr> {
     if !ncx.tips() {
         return None;
     }
@@ -132,10 +140,16 @@ fn tip_for(ui: &mut Ui, ncx: NodeCtx<'_>, description: &str, ty: &DataType) -> O
         library: ncx.graph_ctx.library(),
         ty,
     };
-    Some(if description.is_empty() {
-        fmt!(ui, "{type_label}")
-    } else {
-        fmt!(ui, "{description}\n{type_label}")
+    Some(match (description.is_empty(), set_aside_by) {
+        (true, None) => fmt!(ui, "{type_label}"),
+        (false, None) => fmt!(ui, "{description}\n{type_label}"),
+        (true, Some(by)) => fmt!(ui, "{type_label}\nSet aside: \"{by}\" overrides it."),
+        (false, Some(by)) => {
+            fmt!(
+                ui,
+                "{description}\n{type_label}\nSet aside: \"{by}\" overrides it."
+            )
+        }
     })
 }
 
@@ -146,13 +160,11 @@ fn tip_for(ui: &mut Ui, ncx: NodeCtx<'_>, description: &str, ty: &DataType) -> O
 /// Opts into [`Sense::HOVER`] rather than capturing clicks: the label needs a
 /// trigger anchor for the tooltip, but the node body below it owns selection
 /// and drag, so the press has to fall through. Muted ink — the value column is
-/// each row's strong element, not the label.
-fn port_label(ui: &mut Ui, theme: &Theme, name: &str, tip: Option<InternedStr>) {
+/// each row's strong element, not the label — and fainter still for an input
+/// another sets aside (`set_aside`).
+fn port_label(ui: &mut Ui, theme: &Theme, name: &str, tip: Option<InternedStr>, set_aside: bool) {
     let snapshot = Text::new(name)
-        .style(&TextStyle {
-            color: theme.ports.label,
-            ..ui.theme().text
-        })
+        .style(&label_style(ui, theme, set_aside))
         .sense(Sense::HOVER)
         .show(ui)
         .snapshot();
@@ -224,6 +236,20 @@ fn open_port_context_menu(ui: &mut Ui, menu_id: WidgetId, secondary: bool) {
     }
 }
 
+/// The ink a port or event label wears: the ports' muted label ink, fainter
+/// still for an input another sets aside.
+fn label_style(ui: &Ui, theme: &Theme, set_aside: bool) -> TextStyle {
+    let color = if set_aside {
+        theme.colors.text_muted
+    } else {
+        theme.ports.label
+    };
+    TextStyle {
+        color,
+        ..ui.theme().text
+    }
+}
+
 /// Column 0: the input port circle + label, plus the right-click binding
 /// menu (anchored here, so right-clicking the circle or label opens it).
 /// The circle's `WidgetId` is the deterministic `port_circle_wid(port)`, so
@@ -237,7 +263,9 @@ fn input_label_cell(
 ) {
     let (theme, node) = (ncx.theme(), ncx);
     let port = input.port_ref();
-    let tip = tip_for(ui, ncx, input.description(), input.ty());
+    let set_aside_by = input.overridden_by();
+    let set_aside = set_aside_by.is_some();
+    let tip = tip_for(ui, ncx, input.description(), input.ty(), set_aside_by);
     // Flag a port only once a run actually failed on it — not on every unbound edit — so
     // the port keeps its data-type color while editing instead of flipping as you
     // bind/unbind. The run named the exact ports it could not feed, so only those light
@@ -275,25 +303,24 @@ fn input_label_cell(
         .align(Align::new(HAlign::Left, VAlign::Center))
         .size((Sizing::HUG, Sizing::HUG))
         .sense(Sense::CLICK)
-        .gap(4.0)
+        .gap(ROW_GAP)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
             // A const-only input can't be wired, so it has no connection anchor
             // — render just the label (+ its inline const editor).
-            if !input.const_only() {
-                let mut circle = PortGlyph::circle(wid, diameter)
-                    .fill(fill)
+            if input.const_only() {
+                port_label(ui, theme, input.name(), tip, set_aside);
+                PortGlyphResponse::default()
+            } else {
+                let mut circle = PortGlyph::circle(wid, diameter, fill)
                     .margin(margin)
                     .tip(tip);
                 if let Some(color) = outline {
                     circle = circle.outline(color);
                 }
                 let glyph = circle.show(ui);
-                port_label(ui, theme, input.name(), tip);
+                port_label(ui, theme, input.name(), tip, set_aside);
                 glyph
-            } else {
-                port_label(ui, theme, input.name(), tip);
-                PortGlyphResponse::default()
             }
         });
     // Open on right-click anywhere on the cell — circle or label. Pulled into
@@ -384,10 +411,13 @@ fn value_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputCtx<'_>, out: &mut Requ
     // Fill the value column so every editor is the same width (the column
     // hugs to the widest editor's content). `min_size` on the editors keeps
     // a sensible floor; the editor fills this cell, this cell fills the col.
+    // A knob another input sets aside is not what a run reads, so it does
+    // not take edits until the override is gone.
     let edited = Panel::hstack()
         .id_salt(("val", port.port_idx))
         .grid_cell((port.port_idx as u16, COL_VALUE))
         .size((Sizing::FILL, Sizing::FILL))
+        .disabled(input.overridden_by().is_some())
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
             value_editor::show(
@@ -418,16 +448,14 @@ fn output_cell(
 ) {
     let theme = ncx.theme();
     let port = output.port_ref();
-    // Resolved once for the fill and the tooltip: a wildcard output follows
-    // its mirror chain on every read, so the cell asks once.
     let ty = output.ty();
     let fill = port_color(
         theme,
-        &ty,
+        ty,
         PortKind::Output,
         dcx.geometry().ports.is_hovered(port),
     );
-    let tip = tip_for(ui, ncx, output.description(), &ty);
+    let tip = tip_for(ui, ncx, output.description(), ty, None);
     let wid = port_circle_wid(port);
     let overhang = theme.port_overhang();
     let cell = Panel::hstack()
@@ -436,12 +464,11 @@ fn output_cell(
         .align(Align::new(HAlign::Right, VAlign::Center))
         .size((Sizing::HUG, Sizing::HUG))
         .sense(Sense::CLICK)
-        .gap(4.0)
+        .gap(ROW_GAP)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            port_label(ui, theme, output.name(), tip);
-            PortGlyph::circle(wid, theme.ports.size)
-                .fill(fill)
+            port_label(ui, theme, output.name(), tip, false);
+            PortGlyph::circle(wid, theme.ports.size, fill)
                 .margin(Spacing::new(0.0, 0.0, -overhang, 0.0))
                 .tip(tip)
                 .show(ui)
@@ -456,17 +483,13 @@ fn output_cell(
     // at the end of this pass, and the second pass a double-click earns
     // re-arranges every node that lost a wire.
     if glyph.double_clicked {
-        let fed: Vec<_> = ncx
-            .graph_ctx
-            .connections()
-            .filter(|(_, producer)| {
-                producer.node_id == port.node_id && producer.port_idx == port.port_idx
-            })
-            .map(|(consumer, _)| consumer)
-            .collect();
         out.extend_graph(
-            fed.into_iter()
-                .map(|c| GraphIntent::set_input(c.into(), None)),
+            ncx.graph_ctx
+                .connections()
+                .filter(|(_, producer)| {
+                    producer.node_id == port.node_id && producer.port_idx == port.port_idx
+                })
+                .map(|(consumer, _)| GraphIntent::set_input(consumer.into(), None)),
         );
     }
     open_port_context_menu(ui, menu_id, cell_secondary || glyph.secondary_clicked);
@@ -548,8 +571,8 @@ fn event_cell(
     let theme = ncx.theme();
     let node_id = ncx.id;
     let overhang = theme.port_overhang();
-    let wid = event_glyph_wid(node_id, event_idx);
     let ev = EventRef { node_id, event_idx };
+    let wid = event_glyph_wid(ev);
     let fill = event_color(theme, dcx.geometry().events.is_hovered(ev));
     let tip = ncx.tips().then(|| fmt!(ui, "event: {}", event.name));
     Panel::hstack()
@@ -557,18 +580,14 @@ fn event_cell(
         .grid_cell((row as u16, COL_OUTPUT))
         .align(Align::new(HAlign::Right, VAlign::Center))
         .size((Sizing::HUG, Sizing::HUG))
-        .gap(4.0)
+        .gap(ROW_GAP)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            // Muted like the data-port labels (see `port_label`).
+            // Muted like the data-port labels.
             Text::new(event.name.as_str())
-                .style(&TextStyle {
-                    color: theme.ports.label,
-                    ..ui.theme().text
-                })
+                .style(&label_style(ui, theme, false))
                 .show(ui);
-            PortGlyph::arrow(wid, theme.ports.size)
-                .fill(fill)
+            PortGlyph::arrow(wid, theme.ports.size, fill)
                 .margin(Spacing::new(0.0, 0.0, -overhang, 0.0))
                 .tip(tip)
                 .show(ui);
@@ -577,8 +596,8 @@ fn event_cell(
 
 /// An event port glyph. A separate id space from data ports
 /// ([`port_circle_wid`]) because events are indexed independently of outputs.
-pub(crate) fn event_glyph_wid(node_id: NodeId, event_idx: usize) -> WidgetId {
-    WidgetId::from_hash(("graph.node", "event_glyph", node_id, event_idx))
+pub(crate) fn event_glyph_wid(event: EventRef) -> WidgetId {
+    wid::event("event_glyph", event)
 }
 
 /// Human-readable type for a port tooltip: the picker mode (and accepted
@@ -596,7 +615,7 @@ struct TypeLabel<'a> {
 }
 
 impl Display for TypeLabel<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let DataType::FsPath(cfg) = self.ty else {
             // Borrowed for every type the library knows; only an id with no
             // entry behind it builds a string, and that one is scenarium's.
@@ -675,7 +694,7 @@ mod tests {
     /// the node and its wire.
     #[test]
     fn add_preview_spawns_a_node_already_wired_to_the_port() {
-        let func = preview_func(Default::default());
+        let func = preview_func(Arc::default());
         let producer = NodeId::unique();
         let port = PortRef::output(producer, 2);
         let center = Vec2::new(100.0, 40.0);

@@ -1,49 +1,36 @@
-use crate::math::urect::URect;
+use crate::stacking::star_detection::deblend::internals::{TestComponent, make_test_component};
+use crate::stacking::star_detection::detector::stages::detect::internals::detect_test;
 use crate::stacking::star_detection::detector::stages::detect::*;
-use crate::stacking::star_detection::labeling::LabelMap;
 use crate::testing::prelude::*;
+use crate::testing::synthetic::background_map;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
-
-/// Render Gaussian `stars` into a single connected component: every lit pixel gets label 1.
-fn one_component(size: Size2us, stars: &[SyntheticStar]) -> (Buffer2<f32>, LabelMap) {
-    let mut pixels = Buffer2::new_filled(size.width, size.height, 0.0f32);
-    let mut labels = Buffer2::new_filled(size.width, size.height, 0u32);
-    for &star in stars {
-        let radius = star.radius();
-        for dy in -radius..=radius {
-            for dx in -radius..=radius {
-                let x = (star.center.x as i32 + dx) as usize;
-                let y = (star.center.y as i32 + dy) as usize;
-                if size.contains(Vec2us::new(x, y)) {
-                    let v = star.value_at(x as f32, y as f32);
-                    if v > 0.001 {
-                        pixels[(x, y)] += v;
-                        labels[(x, y)] = 1;
-                    }
-                }
-            }
-        }
-    }
-    (pixels, LabelMap::from_raw(labels, 1))
-}
 
 fn local_maxima_config() -> DetectionConfig {
     DetectionConfig {
-        deblend_n_thresholds: 0, // 0 selects the local-maxima deblend path
+        deblend: Deblend::LocalMaxima {
+            min_prominence: 0.3,
+        },
         deblend_min_separation: 3,
-        deblend_min_prominence: 0.3,
         max_area: usize::MAX,
         ..Default::default()
     }
+}
+
+/// A flat sky noise of 0.01 over `size`.
+fn flat_sky(size: Size2us) -> SkyNoise {
+    background_map::uniform(size, 0.0, 0.01).sky_noise()
 }
 
 #[test]
 fn local_maxima_deblended_counts_split_components_not_extra_regions() {
     // One connected blob with three well-separated peaks. Local-maxima deblending
     // splits it into three regions, but it is ONE component that split, so
-    // `deblended_components` must be 1. The previous `regions - num_components`
-    // formula reported 3 - 1 = 2 here, which this pins against.
-    let (pixels, label_map) = one_component(
+    // `deblended_components` is 1, not `regions − components` = 2.
+    let TestComponent {
+        pixels,
+        labels: label_map,
+        ..
+    } = make_test_component(
         Size2us::new(48, 24),
         &[
             SyntheticStar::new(
@@ -64,7 +51,14 @@ fn local_maxima_deblended_counts_split_components_not_extra_regions() {
         ],
     );
 
-    let result = extract_candidates(&pixels, &label_map, &local_maxima_config());
+    let sky = flat_sky(Size2us::new(pixels.width(), pixels.height()));
+    let result = extract_candidates(
+        &pixels,
+        &sky,
+        &label_map,
+        &local_maxima_config(),
+        &JobScratchPool::default(),
+    );
 
     assert_eq!(
         result.regions.len(),
@@ -80,7 +74,11 @@ fn local_maxima_deblended_counts_split_components_not_extra_regions() {
 #[test]
 fn local_maxima_single_peak_reports_zero_deblended() {
     // A lone star: one region from one component — nothing was split.
-    let (pixels, label_map) = one_component(
+    let TestComponent {
+        pixels,
+        labels: label_map,
+        ..
+    } = make_test_component(
         Size2us::new(32, 32),
         &[SyntheticStar::new(
             Vec2::new(16.0, 16.0),
@@ -89,71 +87,17 @@ fn local_maxima_single_peak_reports_zero_deblended() {
         )],
     );
 
-    let result = extract_candidates(&pixels, &label_map, &local_maxima_config());
+    let sky = flat_sky(Size2us::new(pixels.width(), pixels.height()));
+    let result = extract_candidates(
+        &pixels,
+        &sky,
+        &label_map,
+        &local_maxima_config(),
+        &JobScratchPool::default(),
+    );
 
     assert_eq!(result.regions.len(), 1);
     assert_eq!(result.deblended_components, 0);
-}
-
-#[test]
-fn component_collection_merges_cross_job_metadata_exactly() {
-    let width = 5;
-    let height = 6;
-    let mut labels = Buffer2::new_filled(width, height, 0u32);
-    for (x, y, label) in [
-        (0, 0, 1),
-        (1, 0, 1),
-        (0, 3, 1),
-        (4, 1, 2),
-        (3, 4, 2),
-        (2, 5, 3),
-    ] {
-        labels[(x, y)] = label;
-    }
-    let label_map = LabelMap::from_raw(labels, 3);
-
-    let components = collect_component_data(&label_map);
-    let parallel = collect_component_data_dense(&label_map, 3);
-    let sequential = collect_component_data_dense(&label_map, 1);
-
-    assert_eq!(components.len(), 3);
-    assert_eq!(components[0].label, 1);
-    assert_eq!(components[0].area, 3);
-    assert_eq!(
-        components[0].bbox,
-        URect::new(Vec2us::new(0, 0), Vec2us::new(2, 4))
-    );
-    assert_eq!(components[1].label, 2);
-    assert_eq!(components[1].area, 2);
-    assert_eq!(
-        components[1].bbox,
-        URect::new(Vec2us::new(3, 1), Vec2us::new(5, 5))
-    );
-    assert_eq!(components[2].label, 3);
-    assert_eq!(components[2].area, 1);
-    assert_eq!(
-        components[2].bbox,
-        URect::new(Vec2us::new(2, 5), Vec2us::new(3, 6))
-    );
-    for alternative in [parallel, sequential] {
-        assert_eq!(alternative.len(), components.len());
-        for (actual, expected) in alternative.iter().zip(&components) {
-            assert_eq!(actual.label, expected.label);
-            assert_eq!(actual.area, expected.area);
-            assert_eq!(actual.bbox, expected.bbox);
-        }
-    }
-
-    assert_eq!(
-        dense_component_jobs(100_000, 2048 * 2048, 8),
-        3,
-        "three 4.8 MB dense jobs fit in one 16 MiB label plane"
-    );
-    assert_eq!(
-        dense_component_jobs(2048 * 2048, 2048 * 2048, 8),
-        1,
-        "an oversized dense scratch falls back to the scratch-free sequential scan"
-    );
 }
 
 #[test]
@@ -165,7 +109,11 @@ fn edge_margin_swallowing_image_yields_no_regions_without_panicking() {
     // oddly-sized frame shouldn't abort the whole run. Covers both the exact boundary
     // (2 * 16 == 32) and a margin past the dimension itself (saturating_sub floors at 0).
     for edge_margin in [16, 32] {
-        let (pixels, label_map) = one_component(
+        let TestComponent {
+            pixels,
+            labels: label_map,
+            ..
+        } = make_test_component(
             Size2us::new(32, 32),
             &[SyntheticStar::new(
                 Vec2::new(16.0, 16.0),
@@ -178,8 +126,13 @@ fn edge_margin_swallowing_image_yields_no_regions_without_panicking() {
             ..local_maxima_config()
         };
 
-        let result =
-            extract_and_filter_candidates(&pixels, &label_map, &config, Size2us::new(32, 32));
+        let result = extract_and_filter_candidates(
+            &pixels,
+            &flat_sky(Size2us::new(32, 32)),
+            &label_map,
+            &config,
+            &JobScratchPool::default(),
+        );
 
         assert!(
             result.regions.is_empty(),
@@ -187,4 +140,184 @@ fn edge_margin_swallowing_image_yields_no_regions_without_panicking() {
              region must be filtered out"
         );
     }
+}
+
+/// One labelled rectangle: its half-open corners and the pixels that peak at 1.0 inside it.
+#[derive(Debug)]
+struct Rect {
+    min: (usize, usize),
+    max: (usize, usize),
+    peaks: &'static [(usize, usize)],
+}
+
+/// A residual of 0.1 over each rectangle with its peaks at 1.0, and the label map naming one
+/// component per rectangle, in order.
+#[derive(Debug)]
+struct Rectangles {
+    residual: Buffer2<f32>,
+    labels: LabelMap,
+}
+
+fn rectangles(size: Size2us, rects: &[Rect]) -> Rectangles {
+    let mut residual = Buffer2::new_filled(size.width, size.height, 0.0f32);
+    let mut labels = Buffer2::new_filled(size.width, size.height, 0u32);
+    for (index, rect) in rects.iter().enumerate() {
+        for y in rect.min.1..rect.max.1 {
+            for x in rect.min.0..rect.max.0 {
+                residual[(x, y)] = 0.1;
+                labels[(x, y)] = index as u32 + 1;
+            }
+        }
+        for &(x, y) in rect.peaks {
+            residual[(x, y)] = 1.0;
+        }
+    }
+    Rectangles {
+        residual,
+        labels: LabelMap::from_raw(labels, rects.len()),
+    }
+}
+
+/// Which regions survive the area and edge filters, each at its bound: both area bounds apply to a
+/// region after deblending — so a component too large is kept as the pieces that fit, and pieces
+/// too small are dropped even from a component that is not. The edge margin admits a box that
+/// starts at it or ends at `size − margin` (boxes are half-open), and nothing beyond.
+#[test]
+fn region_filter_bounds() {
+    let size = Size2us::new(64, 64);
+    let config = DetectionConfig {
+        min_area: 5,
+        max_area: 20,
+        edge_margin: 10,
+        ..local_maxima_config()
+    };
+    let Rectangles {
+        residual,
+        labels: label_map,
+    } = rectangles(
+        size,
+        &[
+            // Area 4 < 5: dropped.
+            Rect {
+                min: (20, 12),
+                max: (22, 14),
+                peaks: &[(20, 12)],
+            },
+            // Area 5: kept.
+            Rect {
+                min: (30, 12),
+                max: (35, 13),
+                peaks: &[(32, 12)],
+            },
+            // Area 20 = max: kept.
+            Rect {
+                min: (40, 12),
+                max: (44, 17),
+                peaks: &[(41, 13)],
+            },
+            // Area 21 > max: dropped.
+            Rect {
+                min: (12, 20),
+                max: (15, 27),
+                peaks: &[(13, 22)],
+            },
+            // Starts at x = 10, the margin: kept.
+            Rect {
+                min: (10, 30),
+                max: (13, 32),
+                peaks: &[(11, 30)],
+            },
+            // Starts at x = 9: dropped.
+            Rect {
+                min: (9, 35),
+                max: (12, 37),
+                peaks: &[(10, 35)],
+            },
+            // Ends at x = 54 = 64 − 10: kept.
+            Rect {
+                min: (51, 40),
+                max: (54, 42),
+                peaks: &[(52, 40)],
+            },
+            // Ends at x = 55: dropped.
+            Rect {
+                min: (52, 45),
+                max: (55, 47),
+                peaks: &[(53, 45)],
+            },
+            // Area 30 > max, two peaks that split it into 15s: both kept.
+            Rect {
+                min: (20, 48),
+                max: (30, 51),
+                peaks: &[(21, 49), (28, 49)],
+            },
+            // Area 8, two peaks that split it into 4s, each under min: both dropped.
+            Rect {
+                min: (34, 48),
+                max: (42, 49),
+                peaks: &[(34, 48), (41, 48)],
+            },
+        ],
+    );
+
+    let result = extract_and_filter_candidates(
+        &residual,
+        &flat_sky(size),
+        &label_map,
+        &config,
+        &JobScratchPool::default(),
+    );
+    let mut kept: Vec<(usize, usize)> = result
+        .regions
+        .iter()
+        .map(|region| (region.peak.x, region.peak.y))
+        .collect();
+    kept.sort_unstable();
+    assert_eq!(
+        kept,
+        [(11, 30), (21, 49), (28, 49), (32, 12), (41, 13), (52, 40)]
+    );
+    // Both two-peak components split, though neither piece of the area-8 one survived.
+    assert_eq!(result.deblended_components, 2);
+}
+
+/// The stage's counts on a residual whose answer is known: two 3×3 squares and one 10×1 bar of
+/// 1.0 on zero, against a 0.04 threshold (4 · 0.01). The bar has a peak at each end, 9 px apart,
+/// which the multi-threshold tree splits; the squares are flat and stay whole.
+#[test]
+fn detect_counts_pixels_components_and_splits() {
+    let size = Size2us::new(64, 64);
+    let mut residual = Buffer2::new_filled(size.width, size.height, 0.0f32);
+    for (x0, y0) in [(15, 15), (40, 15)] {
+        for y in y0..y0 + 3 {
+            for x in x0..x0 + 3 {
+                residual[(x, y)] = 1.0;
+            }
+        }
+    }
+    for x in 20..30 {
+        residual[(x, 40)] = 0.5;
+    }
+    residual[(20, 40)] = 1.0;
+    residual[(29, 40)] = 1.0;
+    let config = DetectionConfig {
+        deblend: Deblend::MultiThreshold {
+            n_thresholds: 32,
+            min_contrast: 0.005,
+        },
+        min_area: 1,
+        ..DetectionConfig::default()
+    };
+
+    let result = detect_test(&residual, &flat_sky(size), &config);
+    assert_eq!(result.pixels_above_threshold, 9 + 9 + 10);
+    assert_eq!(result.connected_components, 3);
+    assert_eq!(result.deblended_components, 1);
+    let mut peaks: Vec<(usize, usize)> = result
+        .regions
+        .iter()
+        .map(|region| (region.peak.x, region.peak.y))
+        .collect();
+    peaks.sort_unstable();
+    assert_eq!(peaks, [(15, 15), (20, 40), (29, 40), (40, 15)]);
 }

@@ -39,4 +39,8 @@ impl Reversible for SetInput {
         let Change { from, to } = &self.binding;
         matches!(from, Some(Binding::Const(_))) != matches!(to, Some(Binding::Const(_)))
     }
+
+    fn retypes_outputs(&self) -> bool {
+        true
+    }
 }

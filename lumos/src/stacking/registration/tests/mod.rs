@@ -1,16 +1,23 @@
-//! Synthetic data tests for registration.
+//! Tests for registration.
 //!
-//! - `transform_types`: Tests transform estimation from star position correspondences
-//! - `image_registration`: End-to-end tests with actual synthetic images
-//! - `warping`: Tests image warping with all transform types and interpolation methods
-//! - `robustness`: Tests for outliers, partial overlap, subpixel accuracy, edge cases
-//! - `helpers`: Shared test utilities (affine/homography application)
+//! - `robustness`: every model on catalogs of known correspondence — noise, outliers, partial
+//!   overlap, large rotations and scales, the smallest catalogs
+//! - `auto_ladder`: the `Auto` model ladder
+//! - `image_registration`: end to end on synthetic images
+//! - `warping`: image warping with every transform type and interpolation method
+//! - `input`: the star lists registration is handed — too few, degenerate, mismatched
+//! - `real_data` (feature `real-data`): the bundled dataset's lights detected and registered
+//! - `recovery`: match recovery after an initial transform estimate
+//! - `sip_distortion`: a known radial distortion recovered through `register()`
+//! - `helpers`: shared fixtures (stars under a transform, a fit's deviation, the seeded `register`)
 
+mod auto_ladder;
 mod helpers;
 mod image_registration;
 mod input;
+#[cfg(feature = "real-data")]
+mod real_data;
 mod recovery;
 mod robustness;
 mod sip_distortion;
-mod transform_types;
 mod warping;
