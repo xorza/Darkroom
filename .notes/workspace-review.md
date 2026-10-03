@@ -84,7 +84,6 @@ Severity: Low — `Option`s that must be `Some`, sentinels, and caches of comput
 ## scenarium flattens errors to strings and allocates path keys per run
 Severity: Low — precision lost where a caller would branch or show a cause.
 
-- [ ] `scenarium/src/execution/compile/compiled_graph.rs` `ExecutionEvent::subscribers: Vec<NodeIdx>` — one `Vec` per event port in an artifact rebuilt on every edit, breaking the flat layout the rest of the artifact follows.
 
 ## scenarium's graph API makes hosts mirror its private rules
 Severity: Low — release asserts on lookups and private well-formedness rules force darkroom and lens to re-implement them.

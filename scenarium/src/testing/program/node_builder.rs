@@ -132,8 +132,13 @@ impl<'a> NodeBuilder<'a> {
 
     /// Declare one event whose subscribers are `subscribers`, in order.
     pub(crate) fn event(mut self, subscribers: impl IntoIterator<Item = Placed>) -> Self {
+        let subscribers = self
+            .owner
+            .program
+            .subscribers
+            .append(subscribers.into_iter().map(|node| node.node_idx));
         self.events.push(ExecutionEvent {
-            subscribers: subscribers.into_iter().map(|node| node.node_idx).collect(),
+            subscribers,
             lambda: testing::stub_event(),
         });
         self

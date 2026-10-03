@@ -89,6 +89,10 @@ impl<I> Span<I> {
 
     /// The run's bounds in the column's flat space, for a caller slicing
     /// something else aligned to that space.
+    pub(crate) const fn is_empty(self) -> bool {
+        self.len == 0
+    }
+
     pub(crate) fn range(self) -> Range<usize> {
         let start = self.start as usize;
         start..start + self.len as usize

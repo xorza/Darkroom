@@ -33,6 +33,7 @@ pub(crate) mod consumer_cone;
 pub(crate) mod error;
 mod validate;
 
+use std::iter;
 use std::sync::Arc;
 
 use crate::DataType;
@@ -62,6 +63,9 @@ struct PendingNode {
     /// and the producer's own `outputs` run does not exist until the walk emits
     /// that node — which the id order may put after the consumer naming it.
     outputs: u32,
+    /// The node is disabled: it fires no events and receives none, which a
+    /// subscription is checked against before its subscriber is emitted.
+    disabled: bool,
 }
 
 /// How many ports the program will hold, totalled by the placement from the
@@ -157,8 +161,12 @@ impl Compiler {
             inputs: Column::with_capacity(totals.inputs),
             outputs: Column::with_capacity(totals.outputs),
             events: Column::with_capacity(totals.events),
+            subscribers: Column::with_capacity(graph.subscriptions().len()),
             codecs: Arc::clone(library.codecs()),
         };
+        // Ordered by emitter, then event, like the events the walk appends, so
+        // each event's subscribers are the run at the front of what is left.
+        let mut subscriptions = graph.subscriptions().peekable();
         // The id column is a projection of the placement, written once and never
         // read back — the walk resolves ids against `placed` itself.
         compiled
@@ -225,16 +233,34 @@ impl Compiler {
                         .unwrap_or_default()
                 }));
 
-            // Each event port lands with the half its own declaration answers
-            // for. The other half — who subscribes — belongs to the *emitter*,
-            // which the id order may put after the subscriber, so
-            // `wire_subscriptions` fills those lists once every node is placed.
+            // Each event lands with its subscribers, resolved through the
+            // placement, which already covers nodes the walk has not reached.
+            // A subscription to an event the func has since dropped sorts
+            // before the next node's and is passed over — the same drift
+            // tolerance the type gate applies to data edges.
             let node_events =
                 compiled
                     .events
-                    .append(func.events.iter().map(|event| ExecutionEvent {
-                        subscribers: Vec::new(),
-                        lambda: event.event_lambda.clone(),
+                    .append(func.events.iter().enumerate().map(|(event_idx, event)| {
+                        while subscriptions
+                            .next_if(|sub| (sub.emitter, sub.event_idx) < (node_id, event_idx))
+                            .is_some()
+                        {}
+                        let subscribers = compiled.subscribers.append(
+                            iter::from_fn(|| {
+                                subscriptions.next_if(|sub| {
+                                    sub.emitter == node_id && sub.event_idx == event_idx
+                                })
+                            })
+                            .filter(|sub| {
+                                !node.disabled && !self.placement(sub.subscriber).disabled
+                            })
+                            .map(|sub| self.idx(sub.subscriber)),
+                        );
+                        ExecutionEvent {
+                            subscribers,
+                            lambda: event.event_lambda.clone(),
+                        }
                     }));
 
             compiled.e_nodes.push(ExecutionNode {
@@ -250,8 +276,6 @@ impl Compiler {
                 lambda: func.lambda.clone(),
             });
         }
-
-        self.wire_subscriptions(graph, &mut compiled);
 
         // The placement counted these from the same declarations the walk read,
         // so a mismatch is the two disagreeing about the library — and every
@@ -292,6 +316,7 @@ impl Compiler {
             placed.push(PendingNode {
                 node_id: node.id,
                 outputs: func.outputs.len() as u32,
+                disabled: node.disabled,
             });
         }
         assert!(
@@ -314,6 +339,10 @@ impl Compiler {
             .binary_search_by_key(&node_id, |placed| placed.node_id)
             .expect("the placement covers every node the graph holds");
         NodeIdx(position as u32)
+    }
+
+    fn placement(&self, node_id: NodeId) -> &PendingNode {
+        &self.placed[self.idx(node_id).0 as usize]
     }
 
     /// [`Self::resolve`] behind the type gate: a wire whose resolved source type
@@ -358,7 +387,7 @@ impl Compiler {
     /// (the planner reports the consumer's missing input). The count comes off
     /// the placement rather than the producer's emitted node, which the id order
     /// may not have reached yet. The *node* is never missing:
-    /// `Graph::validate_shape` rejects a binding naming a producer the graph
+    /// `Graph::validate_with` rejects a binding naming a producer the graph
     /// does not hold, and the placement covers every node it does.
     fn resolve(&self, port: OutputPort) -> ExecutionBinding {
         let OutputPort { node_id, port_idx } = port;
@@ -370,43 +399,6 @@ impl Compiler {
             node_idx,
             port_idx: port_idx as u32,
         })
-    }
-
-    /// Give each placed event port the subscribers this graph wires to it.
-    ///
-    /// Run after the walk because a subscriber's slot belongs to the *emitter*,
-    /// which the id order may put after the subscriber. Nothing outside this
-    /// call can see the column part-wired: it is still a local of
-    /// [`Self::walk`], and every list is complete before it moves into the
-    /// artifact.
-    ///
-    /// A disabled node fires no events and receives none, and a subscription
-    /// past the emitter's run — an event the func has since dropped — wires
-    /// nothing: the same drift tolerance the type gate applies to data edges.
-    ///
-    /// Both verdicts come off the *placed* node rather than the authoring one.
-    /// The walk copied `disabled` onto every node it emitted and claimed the run
-    /// there too, so `graph` is read for the subscriptions alone — one placement
-    /// lookup per endpoint answers everything else, where going back to the
-    /// graph would hash each id a second time for a flag already in hand.
-    ///
-    /// Takes no compiler state: the placement answers for identity and the two
-    /// columns are the walk's own.
-    fn wire_subscriptions(&self, graph: &Graph, compiled: &mut CompiledGraph) {
-        for sub in graph.subscriptions() {
-            let emitter_idx = self.idx(sub.emitter);
-            let subscriber_idx = self.idx(sub.subscriber);
-            if compiled.e_nodes[emitter_idx].disabled || compiled.e_nodes[subscriber_idx].disabled {
-                continue;
-            }
-            let run = compiled.e_nodes[emitter_idx].events;
-            if sub.event_idx >= run.len as usize {
-                continue;
-            }
-            compiled.events[run.nth(sub.event_idx as u32)]
-                .subscribers
-                .push(subscriber_idx);
-        }
     }
 }
 

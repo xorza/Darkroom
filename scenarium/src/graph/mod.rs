@@ -331,7 +331,7 @@ impl Graph {
             })
             .collect()
     }
-    pub fn subscriptions(&self) -> impl Iterator<Item = Subscription> + '_ {
+    pub fn subscriptions(&self) -> impl ExactSizeIterator<Item = Subscription> + '_ {
         self.subscriptions.iter().copied()
     }
 

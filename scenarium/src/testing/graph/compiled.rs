@@ -101,8 +101,7 @@ impl Compiled {
     /// walk wired them. Empty means nothing subscribes, never "not wired yet".
     pub(crate) fn subscribers(&self, name: &str, event_idx: usize) -> Vec<&str> {
         let events = self.node(name).events;
-        self.program.events[events][event_idx]
-            .subscribers
+        self.program.subscribers[self.program.events[events][event_idx].subscribers]
             .iter()
             .map(|&node_idx| self.name(node_idx))
             .collect()

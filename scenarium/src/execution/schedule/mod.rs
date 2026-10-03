@@ -374,8 +374,7 @@ impl RunSchedule {
             else {
                 return Err(Error::EventSeedNotFound { event });
             };
-            let subs = &e_event.subscribers;
-            for &sub_idx in subs {
+            for &sub_idx in &program.subscribers[e_event.subscribers] {
                 if program[sub_idx].special == Some(SpecialNode::RunSinks) {
                     run_sinks = true;
                 } else {
