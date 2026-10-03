@@ -2,7 +2,7 @@
 
 > **When you address an item, delete it from this file.** Do not mark it done. The file lists open items only.
 
-Scope: all production code in `lumos/src/`. Paths below are relative to `lumos/src/`. Line numbers are from commit `da6cbc3b0`.
+Scope: all production code in `lumos/src/`. Paths below are relative to `lumos/src/`. Line numbers are from commit `da6cbc3b0`. The original `pipeline/` and `frame_store/` references came from a tree before the module restructure (`b17fe5b00`). They are corrected below against `da6cbc3b0`, which has the same `lumos/src/` as `9c8837ed7`.
 
 Each item has a tag:
 - `[C]` means the reviewer traced the code path or reproduced the arithmetic.
@@ -42,6 +42,7 @@ Sigma clip is the default and the light preset. Winsorized is the bias and dark 
     | 20 / 6 | 1.45 | 5.86 |
 
   - PixInsight PCL `WinsorizedSigmaClippingRejection` starts from 1.1926·Sn, a robust estimator. `[C]`
+  - Siril (`rejection_float.c`) also starts from a plain `siril_stats_float_sd`. So the robust start departs from Siril on purpose: it follows PCL, because the plain start fails the table above.
 - [ ] **Winsorized has no outer loop, no survivor floor, and no Huber location step** — `combine/rejection/winsorized_clip_config.rs:115-136`
   - It rejects once and returns. Siril loops `while changed && N > 3`. PixInsight loops until stable and keeps ≥ 3.
   - The centre is always the plain median. PCL re-takes the mean of the winsorized values.
@@ -58,7 +59,9 @@ Sigma clip is the default and the light preset. Winsorized is the bias and dark 
 
   - The method has no survivor floor (Siril: N − r ≤ 4).
   - With `max_iterations = 1` it never fits a line, so it is plain sigma clip.
-  - "Matches PixInsight/Siril" and "relationship to a reference value" (`:12`, `:51`) are false: the x-axis is the sorted rank. `[C]`
+  - Pass 0 (median ± k·1.4826·MAD) is a lumos addition. Siril fits the line from the first pass.
+  - "Relationship to a reference value" (`:12`) is false: the x-axis is the sorted rank.
+  - Correction: the sorted-rank x-axis and the mean-absolute-residual unit are Siril's own method (`rejection_float.c`, `LINEARFIT`). The growth of the rejection rate with N on clean data is a property of that reference method: sorted Gaussian samples follow the normal quantile curve, not a line. The lumos-only defects are the pass-0 unit change and the missing survivor floor. `[C]`
 - [ ] **The GESD automatic `max_outliers` cap is 2 below 25 frames and 10 above** — `combine/rejection/gesd_config.rs:50-51`
   - GESD resists masking only when r ≥ the true outlier count.
   - Example: n = 20, three outliers at 10σ, r = 2. It rejects 2 and keeps 1, so the mean moves by 0.55σ.
@@ -135,7 +138,7 @@ Sigma clip is the default and the light preset. Winsorized is the bias and dark 
     - the defect floor (`calibration_masters/defect_map/mod.rs:308`)
     - combine σ (`combine/stack/quantization.rs`)
   - The round-trip tests write no provenance, so they miss it.
-  - Derive both σ figures from `sample_scale.divisor`. For integer HDUs the step is `QSPS/(2^bits−1)`, so no f32 BSCALE detour is needed. `[C]`
+  - Derive both σ figures from `SampleDomain::scale`. For integer HDUs the step is `QSPS/(2^bits−1)`, so no f32 BSCALE detour is needed. `[C]`
 - [ ] **An assumed float scale does not round-trip, so a saved master is refused later** — `io/image/fits/metadata/mod.rs:99-106`, `io/image/fits/decode/plan.rs:155-164`
   - A float ADU frame with DATAMAX 65535 decodes as divisor 65535 (Assumed). It is saved with DATAMAX 1.0 and no `LUMSCALE`, and it reloads as divisor 1.
   - `master_scale` then fails with `SampleDomainMismatch`. The writer comment ("the reader can make the guess again") is false. `[C]`
@@ -347,19 +350,19 @@ AGENTS.md promises photometry-grade error bars. These planes cannot give them.
 - [ ] **The memory reading ignores cgroup limits** — `memory/mod.rs:20-43`
   - sysinfo `available_memory()` is the host `MemAvailable`. The GitHub runner containers (14g/8g, no swap) get OOM-killed instead of spilling.
   - Take min(available, `cgroup_limits().free_memory`). `[C]`
-- [ ] **`align_and_stack` counts its input frames twice** — `pipeline/align.rs:157-178`
+- [ ] **`align_and_stack` counts its input frames twice** — `pipeline/align.rs:75-96`, `memory/mod.rs:229-234`
   - `RunMemory::read` runs after the inputs are allocated, and the plan charges them again. 30 RGB 24 MP frames spill ≈14 GB that would fit. `[C]`
-- [ ] **On the spill tier, warp buffers stay allocated through the whole combine** — `pipeline/align.rs:311,400`
+- [ ] **On the spill tier, warp buffers stay allocated through the whole combine** — `pipeline/align.rs:228,317`
   - ≈3.8 GB for 8 workers on RGB 24 MP. The combine chunk sizing does not know about it. Drop them before the combine. `[C]`
-- [ ] **Spilled calibrated frames are never deleted after read-back** — `pipeline/tier.rs:268-277`, `pipeline/frame.rs:27-32`
+- [ ] **Spilled calibrated frames are never deleted after read-back** — `pipeline/tier.rs:81-92`, `pipeline/frame.rs:27-32`
   - The peak disk use is ≈2×.
-  - `StoredImage::load` copies the whole map into a new `Vec` (`frame_store/stored_image.rs:108-121`), where the warp could read the map directly. `[C]`
-- [ ] **With `keep_cache`, per-run spill files go into the shared cache, leak, and can collide** — `pipeline/tier.rs:255`, `frame_store/spill_directory.rs:56-63`
+  - `StoredImage::load` copies the whole map into a new `Vec` (`frame_store/stored_image.rs:50-63`), where the warp could read the map directly. `[C]`
+- [ ] **With `keep_cache`, per-run spill files go into the shared cache, leak, and can collide** — `pipeline/tier.rs:64-74`, `frame_store/spill_directory.rs:37-48`
   - `calib_{i}` and `warped_{i}` are never committed or reused. Two concurrent runs can map each other's `warped_3_c0.bin` and stack the wrong frame.
   - Per-run spills must always use a per-run directory. `[C]` leak, `[P]` collision.
-- [ ] **Per-run spills could be unlinked temp files** — `frame_store/spill_directory.rs:131-156`
+- [ ] **Per-run spills could be unlinked temp files** — `frame_store/spill_directory.rs:114-140`
   - `O_TMPFILE` or unlink-after-map lets the OS clean up after a crash. That removes the marker file and the pid scan.
-  - It also blocks replacement of a file under a live map (the hazard in the SAFETY comment at `frame_store/frame_spill.rs:400`).
+  - It also blocks replacement of a file under a live map (the hazard in the SAFETY comment at `frame_store/frame_spill.rs:223`).
   - The pid check deletes another host's live run on a NAS share. `[P]`
 - [ ] **Deblend grids are sized to the component bbox, kept per job, and not in the memory planner** — `star_detection/deblend/multi_threshold/mod.rs:90-111,194-204`, `star_detection/deblend/local_maxima/mod.rs:80`
   - A satellite trail across a 24 MP frame allocates ≈480 MB per job. Deblending runs before the `max_area` filter (`star_detection/detector/stages/detect/mod.rs:124,142-148`). `[C]`
@@ -465,13 +468,13 @@ AGENTS.md promises photometry-grade error bars. These planes cannot give them.
 
 ## 21. Reference choice and stage order
 
-- [ ] **`Reference::Auto` picks by star count only** — `pipeline/align.rs:433-436`, `pipeline/config.rs:32`
+- [ ] **`Reference::Auto` picks by star count only** — `pipeline/align.rs:350-353`, `pipeline/config.rs:15`
   - The median FWHM is already measured. Siril uses lowest FWHM or wFWHM. Ties go to the last index. `[C]`
 - [ ] **`Reference::Index` still spills every frame twice** — `pipeline/calibrate.rs:112-150`
   - When the anchor is known, decode → detect → register → warp → store needs one write. `[C]`
-- [ ] **`align_and_stack` runs a serial non-finite check over all inputs before detection** — `pipeline/align.rs:147-155`, `pipeline/frame_check.rs:170-190`
+- [ ] **`align_and_stack` runs a serial non-finite check over all inputs before detection** — `pipeline/align.rs:63-72`, `combine/cache/frame_check.rs:31-40`
   - The calibrated entry does it inside the parallel closure. `[C]`
-- [ ] **The result discards per-frame registration (transform, RMS, inliers)** — `pipeline/result.rs:209-216` `[C]`
+- [ ] **The result discards per-frame registration (transform, RMS, inliers)** — `pipeline/result.rs:25-55` `[C]`
 
 ## 22. Run-to-run determinism
 
@@ -577,7 +580,7 @@ AGENTS.md promises photometry-grade error bars. These planes cannot give them.
 - [ ] **`KernelPlan` is rebuilt per frame, although the doc says "once per run"** — `drizzle/accumulator/mod.rs:182`, `drizzle/accumulator/output_band.rs:38-42`
   - It has two `impl` blocks with `OutputBand` between them (`:92`, `:122`). `[C]`
 - [ ] **`drizzle_stack` takes a `LoadContext` whose `cancel` it ignores** — `drizzle/stack.rs:54-82`
-  - It honours `context.fits`, while `stack` always uses default FITS options (`frame_store/cache_key.rs:391-392`). Its memory ceiling comes from the caller, not from `CacheConfig`. `[C]`
+  - It honours `context.fits`, while `stack` always uses default FITS options (`memory/run_memory.rs:47-49`). Its memory ceiling comes from the caller, not from `CacheConfig`. `[C]`
 - [ ] **Entry points disagree on `progress`/`cancel`** — `drizzle_stack`/`drizzle_images` take references, all others take values (`drizzle/stack.rs:69-75` vs `combine/stack/mod.rs:112-117`). `[C]`
 - [ ] **`lib.rs:95-131` has 12 renamed re-exports** (`Config as StarDetectionConfig`, `Error as StackError`, …)
   - Rename the types, so rustc and docs show the public names. `[C]`
@@ -625,8 +628,8 @@ AGENTS.md promises photometry-grade error bars. These planes cannot give them.
 ## 27. Dependencies
 
 - [ ] **`parking_lot` (3 files) → `std::sync::Mutex`.**
-- [ ] **`blake3` has one production use, a filename stem** (`frame_store/frame_spill.rs:240`).
-  - The crate's FNV-1a (`frame_store/cache_key.rs:370`) does the same job. Keep `blake3` as a dev-dependency for the pin tests.
+- [ ] **`blake3` has one production use, a filename stem** (`frame_store/frame_spill.rs:63`).
+  - The crate's FNV-1a (`frame_store/cache_key.rs:62`) does the same job. Keep `blake3` as a dev-dependency for the pin tests.
 - [ ] **`smallvec` has two uses.** One is a `HashMap<_, SmallVec>` grid (`star_detection/detector/stages/filter/mod.rs:169`), which breaks the flat-collections rule.
 
 ---
@@ -679,3 +682,503 @@ The reviewers verified these parts against the references:
   - Page-aligned mapped slices.
   - `try_par_map_bounded` ordering.
   - Config validated before decode.
+
+---
+
+# Assessment of this review
+
+The review is accurate in substance. Spot checks against the code at `9c8837ed7` confirmed these items: 1.1, 1.2 (arithmetic again), 1.3, 1.4, 1.6, 1.7 (`0.42·150` gives 62 in f32), 1.9, 2.1, 3.1, 4.1, 5.1, 7.1, 9.1, 13.1, 15.1, 15.2, 15.3, 15.4, 15.5, 15.6, 17.1, 21.1 (ties go to the last index), 22.1 and 23.4.
+
+Item g.n below means the n-th item of group g, counted from the top of the group.
+
+Corrections, now applied in place above:
+
+- The `pipeline/` and `frame_store/` paths and lines came from an older tree. `pipeline/frame_check.rs` never existed. The mechanisms are real, so only the references changed.
+- Item 1.5 (linear fit): the sorted-rank x-axis is Siril's method, not a lumos invention. The lumos-only defects are the pass-0 unit change and the missing survivor floor.
+- Item 1.3 (winsorized): Siril also starts from a plain standard deviation. A robust start is a deliberate step past Siril, toward PCL.
+- Item 5.1 named a field `sample_scale.divisor`. The field is `SampleDomain::scale`.
+
+Two gaps in the review itself:
+
+- The groups are sorted by severity, but several fixes depend on others. For example, relative floors (group 2) need the quantization step (group 5), and registration weights (group 13) need per-star σ (group 12). The plan below orders the work by dependency.
+- Some items are missing features, not defects: CFA drizzle (20.3), SCNR Maximum Neutral (19.8) and Markesteijn 3-pass (16.12). They need a scope decision. They are not bugs.
+
+# Root causes
+
+The 27 groups come from ten structural causes. Each cause is a missing or incomplete type, a stage that two concerns share, or the same work written more than once.
+
+1. **The sample contract is incomplete, and operations do not update it.** `SampleDomain` holds scale, origin and unit, and it is computed again from the decode provenance at each read. The pedestal, the quantization step and the saturation level live in other places (`CfaImage::quantization_sigma`, `ImageMetadata::data_max`) or nowhere (the RAW black level). Dark subtraction and flat division change these facts, but nothing records the change. This causes 4.4, group 5 and part of group 2.
+2. **Pixel-quality facts have no common carrier.** Missing data is a `NullMask`. Saturation is a scalar test on calibrated data. Defects are index lists that are repaired and then forgotten. Cosmic rays are repaired and counted, and the flat floor is silent. Each consumer sees a different subset, and most consumers see none. This causes group 8, 9.3, 4.5, and part of groups 7 and 18.
+3. **No shared robust-statistics core.** Five rejection methods, `sigma_clip_iteration`, the detection weights, the frame statistics, the cosmic-ray noise and the denoise σ each estimate spread and test degeneracy in their own way, mostly with an absolute `f32::EPSILON`. This causes groups 1 and 2.
+4. **The combine loses frame identity.** The gather packs the covered frames to the front and keeps no frame index. This causes 1.9, 5.6 and part of group 7.
+5. **Noise is measured as spread, and no noise model exists.** `FrameStats` holds median and MAD only. The CCD equation is written once in star detection and once in the cosmic-ray model, and the combine has no form of it. This causes group 6, group 7 and group 12.
+6. **Calibration is a bag of optional masters.** `CalibrationSet<Option<CfaImage>>` cannot state which masters a light needs, which exposure a dark must match, or that a flat must be calibrated before integration. This causes group 4 and items 26.1 and 26.2.
+7. **Three ingest paths do the same job.** `combine/cache/loader`, `align_and_stack` and `calibrate_align_stack` each decode, check, measure statistics, choose a memory tier and build their own `RunShape`. The per-frame work (calibrate, cosmic rays, demosaic, detect) exists only in one of them. This causes 4.1, 15.3, 21.2, 21.3, 26.14, 26.15 and 26.21.
+8. **Star detection uses one plane for two jobs.** The same plane gives the threshold (needs smoothing) and the measurement (needs the raw PSF). The measurement then has no convergence contract and no error output. This causes groups 9, 10 and 11.
+9. **Registration fits once, on the hypothesis set.** The final transform comes from the RANSAC inliers of the brightest 200 stars, unweighted, with a wide gate and a non-robust model choice. Three modules solve least squares with three copies of the rank rule. This causes groups 3 and 13.
+10. **Run scratch and the persistent cache share one directory and one rule.** This causes group 15.
+
+Groups 14, 16, 17, 19, 20 and 22 to 27 are mostly local. The plan handles them in the phase of the code they touch.
+
+# Shared components
+
+These components are built once. The stage designs that follow use them, and no stage keeps a private copy. Each component names its consumers, so a later change reaches all of them.
+
+## S1. `PixelFlags`: one data-quality plane
+
+Replaces `NullMask`, the detector's saturation `BitBuffer2`, and the coverage planes that `FrameQuality::for_unwarped` builds from nulls. Closes 8.1, 8.3 and 9.3, and it carries 4.5 and the repairs of group 18.
+
+```rust
+/// One byte per pixel. Absent when no pixel carries a flag.
+pub(crate) struct PixelFlags { bits: Buffer2<u8> }
+
+NO_DATA      // the source holds no measurement (NaN, BLANK, LibRaw zero_is_bad)
+SATURATED    // the raw value reached the sensor's linear limit
+DEFECT       // hot or cold in the defect map
+COSMIC_RAY   // found by L.A.Cosmic
+REPAIRED     // the value is an interpolation from neighbours
+FLAT_FLOOR   // the flat divisor was clamped at MIN_NORMALIZED_FLAT
+```
+
+- Producers set flags where the fact is exact:
+  - The decoder sets `SATURATED` on the raw ADU, before any subtraction. The limit is LibRaw `color.linear_max` per channel when present, else `maximum`. FITS uses `DATAMAX`, else the integer range. After dark subtraction and flat division, the ceiling differs per pixel, so a scalar test on calibrated data cannot be exact.
+  - The decoder sets `NO_DATA` (today's `NullMask`), including the RAW `zero_is_bad` zeros.
+  - Calibration sets `DEFECT | REPAIRED` and `FLAT_FLOOR`. The cosmic-ray pass sets `COSMIC_RAY | REPAIRED`.
+- Operations carry the flags:
+  - The demosaic dilates every bit except `NO_DATA` by its own support radius on the same lattice.
+  - The warp sends `NO_DATA` through the masked path that exists today (it becomes coverage). It ORs the other bits over the non-zero taps of each output pixel.
+- Each consumer has an exclusion mask of bits:
+  - The combine excludes `NO_DATA` always. It excludes `SATURATED`, `COSMIC_RAY` and `REPAIRED` samples while enough unflagged samples remain for `min_survivors`. A saturated value is a lower bound, not a measurement. Thus a set of mixed exposures gives a correct high-dynamic-range core, and a core saturated in every frame is flagged `SATURATED` in the product.
+  - Detection excludes `NO_DATA` from the mesh, the threshold and the stamps, and it reads `SATURATED` for the star flag.
+  - Drizzle gives a flagged pixel no deposit (8.1).
+- The combine reads the byte plane directly, so an unwarped frame with nulls no longer needs two f32 planes. The byte plane costs a quarter of one f32 plane, and the memory planner charges it.
+- The stack product gets a `flags` plane (`NO_DATA`, `SATURATED`). FITS stores it as an image extension `LUMFLAGS` with `BITPIX = 8`, in the same way as the HST and JWST `DQ` arrays.
+
+Practice: HST and JWST pipelines carry a per-pixel `DQ` bit plane from the first step to the last, and each step decides by bits, not by repaired values. IRAF `imcombine` takes bad-pixel masks for the same reason.
+
+## S2. `SampleDomain` and `FrameNoise`: what a value means, and how noisy it is
+
+Closes 4.4 and 5.1 to 5.5. It is the base of the variance plane, the SNR, the rejection floor and the cosmic-ray model.
+
+```rust
+pub struct SampleDomain {
+    pub scale: f64,         // source units per normalized unit
+    pub origin: ScaleOrigin,
+    pub pedestal: Pedestal, // Removed | Kept(f64 source units) | Unknown
+    pub unit: Option<String>,
+}
+
+pub(crate) struct FrameNoise {   // per channel, in image units
+    background: f32,             // measured (S10), includes read and quantization noise
+    quantization: f32,           // step / √12, a lower bound
+    electrons_per_unit: Option<f32>, // egain × scale, when the gain is known
+}
+```
+
+- Both become stored fields of `ImageMetadata`, not values computed again from the provenance. Operations update them through methods:
+  - `subtract(master)` sets the pedestal to `Removed` and adds the master's own variance to `background`.
+  - `scale_by(c)` multiplies the noise terms by |c| and divides `electrons_per_unit` by c.
+  - The combine gives the product the reference frame's domain.
+- `conversion_to` returns an affine map (`gain`, `offset`). A `Kept` pedestal against a `Removed` one converts exactly when the level is known. `Unknown` against a different pedestal is refused (4.4).
+- The decoders fill the fields:
+  - RAW: pedestal `Removed`, step 1 ADU for a linear curve, and the largest curve step, or `None`, for a compressed one (5.5).
+  - Integer FITS: step `|BSCALE|·2^z`, where `z` is the trailing-zero count of the OR of all raw samples, accumulated in the normalize pass (5.4).
+  - Float FITS with no declared scale: the normalize pass keeps the maximum, and the decode fails when the maximum exceeds 1 (5.3).
+- One FITS codec, `io/image/fits/sample_domain_keywords.rs`, writes and reads `LUMSCALE`, `LUMSORIG`, `LUMPEDST`, `LUMQSIG`, `LUMEPU` and `BUNIT`. An assumed scale reloads as assumed (5.2). Every value is in image units, so a reload applies no second division (5.1).
+- `CcdNoise` is the one form of the CCD equation (Merline & Howell 1995):
+
+  `variance(x) = background² + max(x − sky, 0) / electrons_per_unit`
+
+  The source term is present only when the gain is known. Three consumers use it, and none of them keeps a copy:
+  - the combine variance plane (C1),
+  - the star SNR (C4),
+  - the parametric cosmic-ray noise (6.6).
+
+  The measured `background` already holds read noise and quantization noise. So no consumer adds them again. That is the mistake of 12.1.
+
+## S3. `Spread`: robust scale and its floor
+
+Closes 2.1 and 2.8. Consumers: the rejection driver (S4), `sigma_clip_iteration` in the background mesh, the frame statistics and the detection noise.
+
+- `Spread { centre, sigma }` comes from a sorted window: the median, and 1.4826·MAD with the small-sample consistency factors of Croux & Rousseeuw (1992) for n ≤ 9.
+- The spread has a floor:
+
+  `sigma_eff = max(sigma, floor)`, where `floor = max(window_background, |centre|·ε)`
+
+  - `window_background` is the RMS of `gain_i · background_i` over the frames in the window, from S2. It solves two problems that a per-pixel estimate cannot solve:
+    - On integer data with few distinct values, more than half the samples can tie, so MAD is 0 or one ADU. Today that stops rejection, and a cosmic ray in a bias stack survives.
+    - An outlier cannot raise the floor, because the frame noise is measured on the whole frame.
+  - `|centre|·ε` is one ULP at the centre. The samples near the centre are spaced by that ULP, so a smaller σ is not representable. The floor uses the centre, not the largest sample: one hot pixel at 1e6 would otherwise give a floor of 0.12 and turn off the rejection.
+  - When `sigma_eff` is 0, the window is constant, and nothing can be rejected. That happens only for synthetic data with no noise model.
+- The rule is scale-free: data × s + o gives the same decisions. The S9 harness proves this for every consumer.
+
+## S4. `SortedWindow` and one rejection driver
+
+Closes 1.1 to 1.9 and 24.17, and the dead arm `Rejection::None => values.len()` of 26.20. It replaces the five private loops.
+
+- Every pixel's samples are sorted together with their frame ids. For n ≤ 32, one sorting network sorts 8 pixels at once in the `F32x8` lanes, branch-free, with +∞ in the empty slots. This generalizes the `median9` network that `star_detection/median_filter/simd` already has. Above 32, a scalar sort runs.
+- The contract of every method is one function: from a sorted window `[lo, hi)`, give a narrower window. Sigma clip, winsorized, GESD and trim reject only from the ends by their nature. Linear fit is made to peel only from the ends, because in sorted order a middle value describes the shape of the distribution, not an outlier.
+- The driver owns the outer loop to a fixed point (with the `max_iterations` cap), the floor from S3, and the survivor rule:
+  - `StackConfig::min_survivors` (default 3, as in PixInsight) is validated `>= 1`.
+  - When a step proposes fewer than m survivors, the driver keeps the m samples nearest the current centre, with ties to the lower position. The result is deterministic, and a pixel never has zero survivors (1.8).
+- The median combine is the centre of the same sorted window. Median and rejection share one sort.
+- The window unit is `RejectionScale::Robust` (S3), the default. `RejectionScale::CcdModel` uses the per-pixel σ from `CcdNoise` (S2), as IRAF `imcombine reject=ccdclip` does. It needs the gain, and it removes the scale-estimation noise that small stacks suffer from.
+- The methods:
+  - **Sigma clip:** a band of ±kσ about the median. `no_outliers_possible` goes away (1.1, 1.2). The sorting network pays for its sort.
+  - **Winsorized:** follows PCL. The start is the robust σ. Each Huber step clamps at c = 1.5 and takes the location again from the mean of the clamped values. The outer loop runs until no sample changes (1.3, 1.4).
+  - **Linear fit:** the sorted values are regressed on expected normal order statistics (Blom scores, `Φ⁻¹((i − 3/8)/(n + 1/4))`). The slope is a σ in Gaussian units, and k means the same thing in every pass. Pass 0 goes away. The clean-data rejection rate stays at the Gaussian tail rate for every N (1.5). The scores are computed once per run, as one flat `Vec<f32>` with `starts`.
+  - **GESD:** automatic `max_outliers = ⌊0.3·n⌋`, capped by `n − min_survivors` (1.6).
+  - **Trim** (today's percentile): counts `⌊p·n/100⌋` in integers (1.7).
+- Every method only rejects. Winsorized gets survivor tracking like the others (1.9).
+
+## S5. `CfaLattice`: one description of the colour lattice
+
+Closes 26.3 and 26.5. Consumers: noise estimation (S10), cosmic rays, defect detection and repair, the background mesh, flat normalization, and the flag dilation of S1.
+
+- `CfaLattice` gives the colour of a pixel, the colour classes, and the same-colour neighbour stencils as one flat table per pattern phase. It has a fast path that deinterleaves a Bayer frame into four dense planes.
+- `SameColorMedian`, the cosmic-ray Bayer and X-Trans detectors, `DarkBackground` and the per-colour flat normalization use it in place of their own pattern dispatch.
+- The X-Trans tie-break is Euclidean with a symmetric order (18.4). Bayer green repair includes the four diagonal greens (18.3).
+
+## S6. A numerics kit
+
+Closes 2.5, 13.5 and the solver parts of 11.8. Each item replaces copies that exist today.
+
+- `LmController<N>`: Nielsen's ρ update of λ, the Madsen–Nielsen–Tingleff stop tests, and a Cholesky solve of the Marquardt-scaled system with the relative pivot `pivot <= n·ε·max(diag)`. A model supplies its `NormalEquations<N>` and its χ², as the centroid models already do through `LMModel`. Consumers: the Gaussian and Moffat fits, and the homography refinement with N = 8.
+- `Lstsq`: an SVD solve with the rank tolerance `rows·ε·σ_max`. Today the SIP fit, the background extraction and the homography DLT each hold a copy of this rule. The final registration fit (C5) uses it too.
+- `Irls`: Cauchy or Tukey weights from a MAD scale of the residuals, with a stop on the change of the weighted χ². Consumers: the final registration fit, the second pass of the stamp fit, and the Deming photometric normalization.
+
+## S7. One ingest stage
+
+Closes 4.1 (with C2), 15.3, 21.2, 21.3, 26.14, 26.15 and 26.21.
+
+```rust
+enum FrameSource<'a> { Paths(&'a [PathBuf]), Frames(Vec<LinearImage>) }
+enum FrameOp<'a> { Subtract(&'a MasterBias), Calibrate(&'a CalibrationPlan),
+                   CosmicRay(CosmicRayConfig), Demosaic, Detect(&'a DetectorPool) }
+struct FrameRecord { image: PipelineFrame, flags: Option<PixelFlags>,
+                     stats: FrameStats, stars: Option<Vec<Star>> }
+```
+
+- One function runs `source → ops → checks → statistics → tier` for every entry point. It does the dimension check, the non-finite check (in the parallel closure, 21.3), the frame-facts admission and the cancel checks once.
+- Each `FrameOp` states its memory: its peak and its output for a given frame shape. The `RunShape` is built from the op list, and a `Frames` source charges no resident input again (15.3). The four hand-built shapes go away.
+- The entry points become short:
+  - `stack(paths)`: ingest with no ops, then combine.
+  - `stack_cfa_master` for flats: ingest with `Subtract`, then combine. Each flat sub is calibrated before the multiplicative normalization (4.1).
+  - `align_and_stack(frames)`: ingest with `Detect`, then register, warp and combine.
+  - `calibrate_align_stack`: ingest with `Calibrate`, `CosmicRay`, `Demosaic` and `Detect`. With `Reference::Index`, the op list also registers and warps, so each frame is written once (21.2).
+- Every entry takes `LoadContext` the same way and passes its FITS options and cancel token (26.14). Progress and cancel are passed the same way everywhere (26.15). `NoFrames` is checked once (26.21).
+
+## S8. `RunReport`: no silent decisions
+
+Every fallback and every check that was not possible goes into one report that the result returns: dropped frames and their reasons, calibration matches that could not be verified, floored flat pixels, interpolated background tiles, flag counts per bit, and a variance plane without a source term. Today these paths are a `tracing` line at most (4.2, 4.5, 2.2).
+
+## S9. A test kit for invariants and references
+
+- `internals/invariance.rs` runs a stage on transformed inputs and checks that the outputs transform exactly:
+  - affine data, x·s + o: survivor sets, detections and weights (up to the scale),
+  - a 180° rotation, on frames whose size is a multiple of the mesh tile: star positions map exactly,
+  - a permutation of the frames: the combine output is bit-identical.
+  Each phase adds its stage to the harness. This harness catches every regression of the class of group 2.
+- `internals/reference/` holds small golden fixtures from Siril, SEP, photutils, astroscrappy and librtprocess, with the scripts that made them. This extends the existing Markesteijn cross-check to RCD (16.13), detection and cosmic rays.
+
+## S10. Noise estimation on any lattice
+
+Closes 6.4 to 6.8, 2.7, 18.5 and 18.6. It uses S1, S3 and S5.
+
+- `FrameStats` gets the per-channel `background` noise of S2, measured before interpolation.
+- The estimator depends on the lattice:
+  - Full planes (mono, RGB): MRS noise (Starck & Murtagh). It takes the first B3 à trous layer, applies an iterated k-σ clip, and divides by the layer constant 0.889. The clip at k removes tail variance, so the estimate is also divided by the truncated-Gaussian factor `sqrt(1 − 2kφ(k)/(2Φ(k) − 1))`, which is 0.9866 at k = 3.
+  - CFA frames: MAD of the differences between nearest same-colour neighbours, divided by √2, per colour class (S5). The B3 kernel would mix colours on a mosaic.
+  - Both estimators skip pixels with `NO_DATA`.
+- One estimate serves every consumer: combine weights, reference normalization, the Deming noise ratio (6.1, 6.3), and the detection channel weights. The ingest gives the detector the statistics it already measured, so the detector no longer copies three planes for its weights (6.4, 2.7).
+- `background_mesh` becomes the one local-statistics engine:
+  - It takes a lattice and flags.
+  - A tile with too few valid pixels is interpolated from good neighbours, as photutils `exclude_percentile` and SExtractor bad meshes do (18.5).
+  - The last `MeshAxis` tile merges into its neighbour when it is narrower than half a tile (18.6).
+  - A per-colour mode replaces `DarkBackground` (26.5).
+  - The cosmic-ray pass takes its local background and σ from the mesh: `sqrt(m5 + rn² + bkg)` as in astroscrappy (6.5, 6.6).
+- Denoise uses the B3 constants 0.889, 0.200, 0.086, 0.041 and 0.020 from σ_I (6.7). It reads the stack's `variance` plane when it is present, so the threshold follows the local σ (6.8).
+
+# Stage designs
+
+## C1. Combine: weights, variance, flags
+
+Closes group 7, 2.2 and 6.1 to 6.3. It uses S1 to S4.
+
+- `CombineScratch` gets `frame_ids: Vec<u32>` beside `values` and `eff_weights`, filled in the same gather. Quantization tracking, per-channel gain and variance work under any coverage. `frame_indices_are_stable` goes away (5.6).
+- The weights are per channel, `w_ic = 1 / (g_ic² · background_ic²)` (6.2), and they are not normalized (7.2). Manual weights stay relative, and the docs say so. A background of 0 can only come from synthetic data with no noise. With `Weighting::Noise`, that is an error that names the frame (2.2).
+- `CombinedSample::variance = Σ wᵢ² vᵢ(x) / (Σ wᵢ)²`, with `vᵢ(x) = g_i² · CcdNoise_i(x) / confidence_i` (7.1). The plane is in image units², so `linear_variance` is renamed `variance`. Without the gain, the plane holds the background term only, and `RunReport` says so. The median has no variance plane, because no exact form exists.
+- An optional `dispersion` plane gives the weighted scatter of the survivors. It costs one Welford pass over data the rejection already holds, and it checks the model variance without a model.
+- Drizzle uses the same formula with drop weights. Flagged and gated pixels get zero weight, zero variance and zero coverage (7.3). A zero-weight deposit marks no coverage (7.4). The docs state that drizzle noise is correlated between output pixels (Fruchter & Hook 2002), and that the plane is the per-pixel variance only.
+
+## C2. Calibration as a typed plan
+
+Closes 4.2, 4.3, 4.5, 26.1 and 26.2. 4.1 closes through S7. It uses S1, S2, S7 and S8.
+
+- Typed masters replace `CalibrationSet<Option<CfaImage>>`: `MasterBias`, `MasterDark { thermal, exposure, temperature, bias: Included | Removed }`, and `PreparedFlat` with its divisor and its floored-pixel count (26.2). Each master carries its `FrameNoise`, so the subtraction adds its variance (S2).
+- `CalibrationPlan::new(masters, light_facts)` checks the plan before any light is touched:
+  - A flat without an additive subtractor is an error (4.2).
+  - A dark must match the light's exposure. It must also match the temperature when both frames declare one. A bias-removed dark with a bias may be scaled by `t_light / t_dark`. Any other mismatch is an error (4.3).
+  - A fact that one side does not declare cannot be compared. It is the same rule as `SampleDomain::units_agree`. The plan then records "unverified" for that fact in `RunReport`. It does not refuse, because a DSLR declares no temperature, and it does not pass the fact silently.
+- `CalibrationMasters` keeps only what `calibrate` reads: one subtractor, one `PreparedFlat` and one `DefectMap` (26.1).
+- Defect repair sets `DEFECT | REPAIRED`, and the flat floor sets `FLAT_FLOOR`. Both counts go into `RunReport` (4.5).
+
+## C3. Detection: one plane to threshold, one plane to measure
+
+Closes group 9 except 9.3 (S1), 8.2, 15.8, 26.11 and 26.12. It uses S1 and S10.
+
+- `prepare` returns a `PreparedFrame` that holds what travels together today in 5- and 6-argument functions (26.12):
+  - `measure`: the noise-weighted channel combination, never filtered,
+  - `detect`: `measure` minus sky, median-filtered when the frame is demosaiced, then matched-filtered,
+  - `sky` and its σ map,
+  - the flags.
+- The noise of `detect` is measured on `detect` with the same mesh. That is exact under any correlation (9.2). The threshold and both deblenders work on `detect` in the units of its own σ, as SEP does (9.4).
+- The multi-threshold walk runs bottom-up and propagates `ok[]`, as in SEP `deblend.c` (9.6). It measures flux above the split level (9.7) and applies `minarea` in the loop (9.5).
+- The refinement mask thresholds `detect` at 2σ with a circular footprint (9.8).
+- Every measurement reads `measure` (9.1).
+- The `max_area` filter runs before deblending, and the deblend grids come from the detector's pool (15.8).
+- The matched-filter PSF lives in one config (26.11).
+
+## C4. Measurement with a convergence contract and an error output
+
+Closes groups 10, 11 and 12, 2.3, 2.4, 2.6, 26.6 to 26.10, 24.12 and 24.13. It uses S2, S3 and S6.
+
+- A `MeasureGrid` holds what follows from the expected FWHM: the window σ, the stamp radius and the annulus radii (26.6, 26.9). The inner annulus radius encloses a stated flux fraction of a Moffat with β = 2.5 (11.7).
+- The windowed centroid subtracts the local sky first (11.3). It uses signed values (11.4) and the adaptive-moments Newton step `σ_w² / (σ_w² − C_obs)` (11.1). It stops on the bound `c/(1 − c)·‖Δ‖` of the remaining error.
+- The PSF models are integrated over the pixel. The Gaussian uses erf differences, which is exact (11.5). The Moffat uses Gauss–Legendre quadrature, with an order that keeps its error below 1% of the centroid noise at the minimum FWHM.
+- The fits run on `LmController` (S6), with fixed constants (26.7). A failure returns `None` (26.8). The IRLS pass runs only after a successful fit (11.9). The fit weight floor and the amplitude seed floor are fractions of the stamp's sky σ (2.4, 2.6).
+- A failed fit falls back to the converged windowed centroid (11.2). A fit that moves more than half the stamp radius is stamped again, once (11.6).
+- Every star gets `position_sigma` (12.4):
+  - after a fit, from `(JᵀWJ)⁻¹·χ²/(n − p)`,
+  - after the centroid fallback, from the windowed-moment error, as SExtractor `ERRX2WIN` computes it.
+  Registration needs a σ for every star, so no star leaves without one.
+- The SNR comes from `CcdNoise` (S2) with the sky-estimate term `n_pix(1 + n_pix/n_B)` (12.2) and the threshold's floor (12.3). Read noise is counted once (12.1). The variance floor is the S3 rule (2.3).
+- Shape metrics follow DAOFIND and photutils: `roundness1` from the pinwheel quadrant sum (10.1), `roundness2` from 1-D Gaussian fits to the marginals (10.2), and sharpness from the star's own peak (10.3). `max_fwhm_deviation` multiplies 1.4826·MAD (10.4).
+- A non-finite flux or SNR makes the star invalid, and `validate_catalog` checks every float field (11.10).
+
+## C5. Registration: hypothesis, then final fit
+
+Closes groups 3 and 13, 21.1, 21.4, 22.1, 26.17 and 26.18. It uses S6 and C4.
+
+1. **Hypothesis:** triangle matching and RANSAC on the brightest `max_stars`, as today.
+   - `max_rotation` defaults to `None` (3.1).
+   - `RansacConfig::seed` is a plain `u64` with a fixed default (22.1).
+   - LO-RANSAC accepts a refit on score only (13.7). The degeneracy tests are relative and test every triplet (13.8).
+   - Triangle flatness is one relative test, area / longest² ≥ c (13.9). A near-isosceles triangle is matched in both vertex orders (13.10).
+2. **Final fit** (`registration/final_fit/`), from the hypothesis transform:
+   - It matches the full catalogs with the k-d tree, without `SATURATED` stars (13.1, 13.4).
+   - It weights each pair by `1/(σ_ref² + σ_target²)` from `position_sigma`.
+   - It runs `Irls` (S6) with a Cauchy loss and a gate that shrinks with the scale (13.2).
+   - It solves the linear and SIP terms together with `Lstsq` (S6), with the SIP origin at the image centre (13.6, 26.17, 26.18). Homography gets `LmController` on the reprojection error (13.5).
+3. **Model choice:** GRIC (Torr 1998) on the same final matched set, with the residuals in units of `position_sigma` (13.3).
+4. `AlignStackResult` keeps each frame's registration (21.4).
+5. `Reference::Auto` picks the lowest median FWHM among frames with enough stars, with ties to the lowest index (21.1).
+
+## C6. Run resources
+
+Closes 15.1, 15.2 and 15.4 to 15.7. 15.9 closes in C7.
+
+- `RunMemory::read` takes `min(MemAvailable, cgroup limit − usage)` from `sysinfo::System::cgroup_limits` (15.2).
+- `DecodeCache` (persistent, content-keyed, only with `keep_cache`) and `RunScratch` (always private) replace one directory with two rules.
+- Every `RunScratch` file is deleted while it is open, on every platform:
+  - Unix unlinks the file after it is mapped.
+  - Windows opens it with `FILE_FLAG_DELETE_ON_CLOSE` and `FILE_SHARE_DELETE` through `std::os::windows::fs::OpenOptionsExt`.
+  A crash leaves nothing, and the marker file and the pid scan go away (15.6, 15.7). The plan must test this on the macOS laptop and on Windows before the marker code is removed.
+- The default root is disk-backed: `$XDG_CACHE_HOME/lumos`, then `~/.cache/lumos`, then `/var/tmp/lumos`. On Linux, a `tmpfs` root from `/proc/self/mountinfo` is refused with an error that names the path (15.1).
+- `StoredImage` gives its planes as slices of the map, and the warp reads them directly. A dropped frame frees its disk space at once (15.5).
+- The warp buffers drop before the combine starts (15.4).
+
+## C7. One RAW path and one FITS path
+
+Closes group 16 except 16.12, and 17.4 to 17.7 (17.1 to 17.3 close in phase 0). It uses S1 and S2.
+
+- The preview is `load_raw_cfa → CfaImage::demosaic → clamp` (16.1, 16.2).
+- `BlackLevel` keeps integer ADU as its only source. LibRaw's unrounded values are used where they exist (16.10). One pass computes `(v − black_row[x]) / span` (16.8). File values use checked arithmetic (16.9).
+- Both demosaics run on white-balanced CFA data and divide the balance out after (16.11). RCD writes into the caller's planes (16.3).
+- The LibRaw fallback sets `adjust_maximum_thr = 0`, `user_flip = 0` and `use_fuji_rotate = 0` (16.4, 16.5). SuperCCD and an unexpected `raw_pitch` are refused (16.6, 16.7).
+- `RAW_EXTENSIONS` takes LibRaw's list after `zero_is_bad` sets `NO_DATA` (17.4). `as_shot_wb_applied` is read (17.5).
+- `read_cfa_hdu` merges into the main FITS path with the caller's `LoadContext` (17.7). One alias table maps every keyword to its field (17.6). The checksum accumulates per chunk in the decode (15.9). The `LUMFLAGS` extension is read and written.
+
+# Implementation plan
+
+Each phase builds and passes the verification chain on its own. A phase closes its items, and those items are then deleted from this file, together with the phase. Phase order follows the dependencies. Each phase adds its stage to the S9 harness.
+
+## Phase 0. Independent correctness fixes
+
+- `sort_by_flux` → `total_cmp` (23.4). Union-find guards → `debug_assert!` (23.2). `UnsafeSendPtr` → raw pointers only (23.1). Union-find: since `parent[i] <= i`, one forward pass flattens every label (23.3).
+- Drizzle default kernel → Square (20.1). Config validation before the first decode (20.4). Input-row bound widened by `reach.output_rows` (20.2).
+- FITS: decoded height for the parity (17.1), `CFATYPE='MONO'` (17.2), stale `BAYERPAT` on a cube (17.3).
+- `BackgroundMode::Divide` with a mean `<= 0` → `OpError` (19.5).
+- **Tests:** a NaN flux sorts last. A 4175-row fpacked BOTTOM-UP frame with 100×100 tiles keeps its pattern (today `NAXIS2` is the 42 tile rows, an even count, so the pattern flips). A Lumos-written mono frame reloads.
+- **Closes:** 17.1 to 17.3, 19.5, 20.1, 20.2, 20.4, 23.1 to 23.4.
+
+## Phase 1. Test kit and run report (S8, S9)
+
+- Add `RunReport` to `StackProduct` and `AlignStackResult`. Add the invariance harness and the reference-fixture directory with its scripts.
+- **Tests:** the harness fails on a stage that is known to break scale invariance today (the sigma-clip shortcut at a scale of 2e-5). That proves the harness can fail.
+- **Closes:** none. Every later phase uses it.
+
+## Phase 2. Sample contract and noise record (S2)
+
+1. Make `SampleDomain` and `FrameNoise` stored metadata, with their update methods. Fill them in every decoder.
+2. Write the FITS keyword codec. Remove `QNTZSIG` and the two `quantization_sigma` fields.
+3. Add the step from the OR of raw samples and the float-maximum check to the normalize pass.
+4. Change `conversion_to` to the affine map, and update `master_scale` and `CfaImage::subtract`.
+5. Add `CcdNoise`.
+- **Tests:**
+  - A table-driven round trip over every origin and pedestal: `decode(encode(d)) == d`.
+  - A RAW frame with span 15360 reloads with the same quantization σ (today it is 15360× too small).
+  - Left-justified 12-bit data in BITPIX 16: the OR has 4 trailing zeros, so the step is 16·|BSCALE|.
+  - A Siril-style dark that holds only its kept pedestal of 2048 ADU, applied to a RAW light with black 2048, leaves the light unchanged. The same dark with an unknown pedestal is refused.
+  - `subtract` changes the pedestal from `Kept` to `Removed`. `scale_by(2)` doubles `background` and halves `electrons_per_unit`.
+  - `CcdNoise` with background 0.01, signal 0.5 above sky and 1000 e⁻ per unit: 1e-4 + 0.5/1000 = 6e-4.
+- **Closes:** 4.4, 5.1 to 5.5.
+
+## Phase 3. Pixel flags (S1)
+
+1. Add `PixelFlags`. Move `NullMask` into it as `NO_DATA`. Add `zero_is_bad`.
+2. Set `SATURATED` in the RAW and FITS decoders.
+3. Carry the flags through calibration, the demosaic, the warp, spills and FITS.
+4. Read them in the combine (exclusion and survivor floor) and in drizzle. Remove the f32 planes of `for_unwarped`.
+- **Tests:**
+  - A star clipped at the raw limit in G only is flagged. The flag survives dark subtraction and flat division.
+  - One flagged pixel in a Lanczos-3 warp with a shift of (0.5, 0.5) flags exactly 6 × 6 = 36 output pixels. At half-pixel phase none of the 6 taps per axis is zero.
+  - 10 frames, 3 of them saturated at a pixel: the output is the mean of the other 7. All 10 saturated: the output pixel is flagged `SATURATED`.
+  - A frame with a NaN border drizzles to the same output as the frame cropped. A Panasonic zero is `NO_DATA`, not `−black/span`.
+- **Closes:** 8.1, 8.3, 9.3.
+
+## Phase 4. Spread, sorted window and rejection driver (S3, S4, C1 gather)
+
+1. Add `Spread` with its floor. Port `sigma_clip_iteration`.
+2. Add the sorting network over `F32x8` lanes and `SortedWindow`. Bench it against today's shortcut and sort before the methods move.
+3. Write the driver. Port sigma clip, winsorized, GESD, trim and linear fit, in that order. Add `RejectionScale::CcdModel`.
+4. Add `frame_ids` to the gather. Remove `frame_indices_are_stable`.
+- **Tests:**
+  - Review example 1.2, `{−0.1, −0.05, 0, 0, 0, 0, 0.05, 0.1, 10, 10}` at k = 2.5 with no frame noise. Pass 1: median 0, MAD 0.05, σ 0.0741, band ±0.185, so both 10s go. Pass 2: MAD (0 + 0.05)/2 = 0.025, σ 0.0371, band ±0.0927, so ±0.1 go. Pass 3: MAD 0, constant window, stop. Exactly 6 survivors.
+  - 20 integer bias frames with a measured background of 0.7 ADU and one hit at +50 ADU: the floor is 0.7 ADU, so the band is ±1.75 ADU. The survivors are exactly the samples within 1.75 ADU of the median, which a hand count on the fixed data gives. Today MAD is 0 on this data and the hit survives.
+  - A hot pixel at 1e6 among samples of σ 1e-3 is rejected (it cannot raise the floor).
+  - Review example 1.1 scaled by 2e-5 gives the same survivors (S9).
+  - Winsorized, 10 frames, 3 outliers at +10σ: all 3 rejected.
+  - Linear fit on fixed-seed Gaussian data at k = 3 for N = 20, 50 and 200: the rejected fraction stays in the 99.9% binomial interval around 0.27%. That interval is the tolerance, and it states why it exists.
+  - GESD, n = 20, 3 outliers at 10σ: all 3 rejected (cap 6). Trim of 42% from 150: 63 low samples go, not 62.
+  - No method leaves fewer than `min_survivors`.
+  - The network sorts every permutation of 8 values correctly (40320 cases), and it matches the scalar sort on random lanes with empty slots.
+- **Bench:** the combine bench before and after. Record both numbers here.
+- **Closes:** group 1, 2.1, 2.8, 5.6, 24.17, part of 26.20.
+
+## Phase 5. Lattice, noise estimation, mesh, weights and variance (S5, S10, C1)
+
+1. Add `CfaLattice`, and move `SameColorMedian`, the cosmic-ray detectors and the flat normalization onto it.
+2. Add the two noise estimators and `FrameStats` background noise.
+3. Give `background_mesh` the lattice, the flags, bad-tile interpolation and the sliver merge. Remove `DarkBackground`. Move the cosmic-ray background onto the mesh.
+4. Make the weights per channel and not normalized. Add the variance and dispersion planes. Bring drizzle onto the same formula.
+5. Move denoise to the B3 constants and the variance plane.
+- **Tests:**
+  - MRS on white noise of σ 0.01 plus a ramp from 0 to 1: within 3 standard errors of 0.01. The MAD of the ramp alone is 0.25 (median 0.5, deviations uniform on [0, 0.5]), so MAD gives 1.4826·0.25 = 0.37, 37× too large.
+  - A Bayer master with σ 0.01, 0.02, 0.02 and 0.03 per colour: each estimate within 3 standard errors.
+  - Variance with equal weights, σ 1 and 2: (1 + 4)/4 = 1.25. Inverse-variance weights for σ 1 and 2 are 1 and 0.25: (1 + 0.0625·4)/1.25² = 0.8 = 1/(1 + 0.25).
+  - A frame with a bad blue channel loses weight in blue only.
+  - A fully masked tile takes the interpolation of its neighbours.
+- **Closes:** group 6, group 7 except the parts of S1, 2.2, 2.7, 18.3 to 18.6, 26.3, 26.5.
+
+## Phase 6. Ingest and calibration plan (S7, C2)
+
+1. Write the ingest stage with `FrameSource`, `FrameOp` and `FrameRecord`. Move the four entry points onto it, one at a time. Each move is a refactor, so its output must be bit-identical to the output before it, on the existing fixtures.
+2. Add the typed masters and `CalibrationPlan`, and record the RAW exposure.
+3. Build flat masters with `Subtract`. Reduce `CalibrationMasters`, and update the bundle format.
+4. Add the `Reference::Index` single-write path.
+- **Tests:**
+  - Review example 4.1: offset 0.02, flats at 0.5·f and 0.25·f. The corner/centre ratio of the master is 0.500 exactly. Today it is 0.509.
+  - A flat with no subtractor is refused. A 120 s dark on 300 s lights is refused without a bias, and it is scaled by 2.5 when it is bias-removed.
+  - A DSLR light and dark with no temperature: the plan runs, and the report holds one "unverified temperature".
+  - A plan for 30 resident RGB 24 MP frames on a machine with room for them stays in RAM.
+- **Closes:** 4.1 to 4.3, 4.5, 15.3, 21.2, 21.3, 26.1, 26.2, 26.14, 26.15, 26.21.
+
+## Phase 7. Detection planes (C3)
+
+1. Return `PreparedFrame`. Measure on `measure`, and threshold and deblend on `detect`.
+2. Rewrite the multi-threshold walk. Move the `max_area` filter before deblending, and pool the grids.
+- **Tests:**
+  - A Gaussian star of FWHM 2 on a demosaiced frame keeps 100% of its flux. Today 56% remains.
+  - On pure noise filtered to FWHM 4, the fraction of pixels above 4σ is 3.2e-5 within its binomial interval. Today it is about 5%.
+  - Review example 9.6, `root(100) → [A(80) → [A1(35), A2(30)], B(5)]` at contrast 0.2, returns {A1, A2}.
+  - Detections are invariant under x·s + o, and under a 180° rotation on a tile-aligned frame (S9).
+- **Closes:** group 9 except 9.3, 8.2, 15.8, 26.11, 26.12.
+
+## Phase 8. Numerics kit and measurement (S6, C4)
+
+1. Add `LmController`, `Lstsq` and `Irls`. Move the centroid fits, the SIP fit and the background extraction onto them.
+2. Add `MeasureGrid`, the converged centroid and the integrated models. Add `position_sigma` with both of its sources.
+3. Move the SNR onto `CcdNoise`. Add the DAOFIND shape metrics.
+- **Tests:**
+  - Review table 11.1 on noise-free stars: the bias at a 0.4 px start for FWHM 3, 4.5 and 6 is below 1e-4 px.
+  - An integrated fit of a star with FWHM 1.2 recovers 1.2 within the fit's σ. Today the bias is +16%.
+  - Round stars of FWHM 2 at uniform sub-pixel phase: the `NotRound` rate is at the noise rate, not 57%.
+  - Both sources of `position_sigma` agree with the scatter of 1000 fixed-seed noise draws, within the standard error of a variance from 1000 samples.
+  - `Lstsq` gives the same SIP and background solutions as today's code on the existing fixtures.
+- **Closes:** groups 10, 11 and 12, 2.3 to 2.6, 26.6 to 26.10, 24.12, 24.13.
+
+## Phase 9. Registration final fit (C5)
+
+1. Remove the rotation prior and the random seed. Fix LO acceptance and the degeneracy tests.
+2. Add `final_fit` and the homography LM. Add GRIC. Return each frame's registration.
+- **Tests:**
+  - A 180° rotated catalog registers.
+  - 50 true matches and one 4 px blend: Auto stays at Euclidean. Today the RMS is 0.57 px, and Auto goes to Affine.
+  - 2000 stars with a known transform: the scatter of the fitted parameters over fixed-seed draws matches the Cramér–Rao bound from the weighted Fisher information, within the Monte Carlo standard error.
+  - Two runs with the default config give bit-identical stacks.
+- **Closes:** groups 3 and 13, 21.1, 21.4, 22.1, 26.17, 26.18.
+
+## Phase 10. Resampling (group 14)
+
+- Add the Lanczos ringing clamp (PixInsight default 0.3). Stretch the kernel by `1/scale` when the warp's smallest singular value is below 1. For the masked path and the edge band, use the normalized valid-tap Lanczos, with a bilinear fallback below a stated tap sum.
+- Compute the tap weights once per pixel for all channels (24.4). Collapse SIP per row with Horner (24.5). Build the monomials once per Newton step (24.6).
+- **Tests:** a bright single pixel keeps its undershoot within the clamp. A 0.5× warp of a Nyquist grating gives no alias above the noise. SIMD and scalar stay bit-identical.
+- **Closes:** group 14, 24.4 to 24.6.
+
+## Phase 11. Run resources (C6)
+
+1. Read the cgroup limit.
+2. Split `DecodeCache` and `RunScratch`. Add delete-while-open, the disk-backed default and the tmpfs check.
+3. Let the warp read stored planes in place. Drop the warp buffers before the combine.
+- **Tests:** two concurrent `keep_cache` runs never open each other's scratch files. The scratch directory is empty while a run is in progress, on Linux, on the macOS laptop and on Windows. A `tmpfs` root from a fixture `mountinfo` is refused.
+- **Closes:** 15.1, 15.2, 15.4 to 15.7.
+
+## Phase 12. RAW and FITS paths (C7)
+
+1. Replace the preview path, and remove the list in 16.2.
+2. Add the integer `BlackLevel`, the one-pass normalize and checked file arithmetic.
+3. Add the white-balanced demosaic and the LibRaw fallback settings. Refuse SuperCCD and odd pitch. Widen the extension list.
+4. Merge the FITS entry points. Add the alias table and the streamed checksum.
+5. Add the RCD golden cross-check (16.13).
+- **Tests:** preview and science agree pixel for pixel in the former margin band. A Canon black level with `cblack` is exact against a hand sum in integers. A portrait frame through the fallback keeps W×H.
+- **Closes:** group 16 except 16.12, 15.9, 17.4 to 17.7.
+
+## Phase 13. Display operations
+
+- Subtract the black point before the colour ratio (19.1). Use the log-domain base for HDR (19.2), with a bounded ratio (19.3). Use the standard STF constants (19.4). Use one NaN policy in SIMD and scalar (19.6). Bound the ML tile stride (19.7). Use one `subsample_plane` helper (26.23).
+- **Tests:** faint Hα (0.055, 0.05, 0.05) above a sky of 0.05 keeps its hue after the stretch. The HDR halo pixel stays above 0.
+- **Closes:** 19.1 to 19.4, 19.6, 19.7, 26.23.
+
+## Phase 14. Remaining items
+
+- Determinism: fixed-chunk parallel sums (22.2), a sorted flat vote `Vec` (22.3), the error of the lowest slot index (22.4).
+- Cosmic rays and defects: 18.1 and 18.2.
+- Performance: the rest of group 24, each with a bench before and after.
+- Docs: the rest of group 25. A doc that a phase above rewrites is fixed in that phase.
+- Style: the rest of group 26. Dependencies: group 27.
+- Scope decisions for 16.12, 19.8 and 20.3.
+- **Closes:** 18.1, 18.2, 22.2 to 22.4, the rest of groups 24 to 27, and 16.12, 19.8 and 20.3 after their decisions.
+
+# Decisions to confirm
+
+Each item has a recommendation. Each needs an answer before its phase starts.
+
+1. **Linear-fit model (phase 4).** Recommended: normal-score regression, so that k is in σ units and the clean-data rejection rate is the same for every N. The alternative is Siril's exact rank fit with the survivor floor.
+2. **`min_survivors` default (phase 3).** Recommended: 3, as in PixInsight. Siril uses 4.
+3. **Flagged samples in the combine (phase 3).** Recommended: exclude `SATURATED`, `COSMIC_RAY` and `REPAIRED` samples while `min_survivors` unflagged samples remain. The alternative keeps the repaired and clipped values, as most amateur tools do.
+4. **Flag storage (phase 3).** Recommended: one byte plane. The alternative is one `BitBuffer2` per bit. It uses less memory when one bit is set, but each pixel then needs several reads and the warp needs one pass per bit.
+5. **Dark scaling (phase 6).** Recommended: exposure-ratio scaling only, for a bias-removed dark. PixInsight-style optimization can come later as an option.
+6. **Features, not defects.** CFA drizzle (20.3), SCNR Maximum Neutral and Maximum Mask (19.8), Markesteijn 3-pass (16.12). Recommended: 3-pass Markesteijn as an option. The other two wait.
+
+No phase needs a new dependency. `statrs` gives `Φ⁻¹` and `erf`. `sysinfo` gives the cgroup limits. `std` gives the Windows delete-on-close flags. `/proc/self/mountinfo` gives the file system type.
