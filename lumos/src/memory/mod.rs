@@ -295,6 +295,58 @@ impl MemoryPlan {
             warp_concurrency,
         }
     }
+
+    /// [`Self::plan`] for a run whose workers take each frame through the decode, the detection,
+    /// the warp and the store in one go, with nothing parked between: the lights of a run whose
+    /// reference is known.
+    ///
+    /// No decoded set is ever resident, only the warped one. A worker holds its detector's scratch
+    /// throughout, and the larger of its decode's peak and the source it warps. On the spill tier it
+    /// also keeps its warp buffers from one frame to the next. As in [`Self::plan`]'s decode pass,
+    /// the run is resident when the warped set fits beside one worker, and the workers fan out as
+    /// far as the rest allows. Both stages fan out alike, since every worker does both.
+    pub(crate) fn single_pass(shape: RunShape, threads: usize, available: u64) -> Self {
+        let RunShape {
+            frame_count,
+            decode,
+            held_bytes,
+            detection_bytes,
+            warp,
+            output_bytes,
+        } = shape;
+        assert!(
+            frame_count > 0,
+            "memory planning requires at least one frame"
+        );
+        debug_assert_eq!(held_bytes, 0, "a single pass decodes its own frames");
+        let warp = warp.expect("a single pass warps its frames");
+        let workers = frame_count.min(threads.max(1));
+        let usable = memory_budget(available);
+        let in_flight = decode
+            .peak_bytes
+            .max(decode.output_bytes)
+            .saturating_add(detection_bytes);
+        let warped_resident = (warp.warped as u64).saturating_mul(frame_count as u64);
+        let working_minimum = warped_resident.saturating_add(in_flight as u64);
+        let combine_peak = warped_resident.saturating_add(output_bytes as u64);
+        let fits_in_ram = working_minimum.max(combine_peak) <= usable;
+        let concurrency = if fits_in_ram {
+            load_concurrency(warp.warped, in_flight, frame_count, available, workers)
+        } else {
+            load_concurrency(
+                warp.warped,
+                in_flight.saturating_add(warp.warped),
+                0,
+                available,
+                workers,
+            )
+        };
+        Self {
+            fits_in_ram,
+            decode_concurrency: concurrency,
+            warp_concurrency: concurrency,
+        }
+    }
 }
 
 #[cfg(test)]

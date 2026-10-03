@@ -1,0 +1,85 @@
+//! [`RegisteredSet`]: every light's registration outcome, and the combine of the survivors.
+
+use common::CancelToken;
+
+use crate::combine::stack::stack_stored_frames;
+use crate::frame_store::stored_frame::StoredFrame;
+use crate::io::image::image_dimensions::ImageDimensions;
+use crate::io::image::image_metadata::ImageMetadata;
+use crate::pipeline::config::AlignStackConfig;
+use crate::pipeline::result::{AlignStackResult, Error};
+use crate::pipeline::tier::FrameTier;
+use crate::progress::ProgressCallback;
+use crate::star_detection::detector::Diagnostics;
+
+/// Every light's parked frame in input order, `None` for one that did not register, with what the
+/// combine of the survivors and the result need.
+#[derive(Debug)]
+pub(crate) struct RegisteredSet {
+    pub(crate) outcomes: Vec<Option<StoredFrame>>,
+    pub(crate) reference: usize,
+    /// The reference's: the master follows the alignment anchor, not whichever frame reaches the
+    /// combine first.
+    pub(crate) metadata: ImageMetadata,
+    pub(crate) dimensions: ImageDimensions,
+    /// Each light's detection funnel, in input order, including the lights that were dropped.
+    pub(crate) detection: Vec<Diagnostics>,
+}
+
+impl RegisteredSet {
+    /// Combine the frames that registered.
+    pub(crate) fn combine(
+        self,
+        tier: FrameTier,
+        config: &AlignStackConfig,
+        progress: ProgressCallback,
+        cancel: CancelToken,
+    ) -> Result<AlignStackResult, Error> {
+        if cancel.is_cancelled() {
+            return Err(Error::Cancelled);
+        }
+        let total = self.outcomes.len();
+        let mut frames = Vec::with_capacity(total);
+        let mut dropped = Vec::new();
+        // Ascending without a sort: the outcomes are in input order, the order
+        // `AlignmentSummary::dropped` documents.
+        for (index, outcome) in self.outcomes.into_iter().enumerate() {
+            match outcome {
+                Some(frame) => frames.push(frame),
+                None => dropped.push(index),
+            }
+        }
+        tracing::info!(
+            aligned = frames.len(),
+            dropped = dropped.len(),
+            "Registration complete"
+        );
+
+        // Only the reference survived: every other frame dropped. A lone reference input is fine;
+        // nothing aligned out of more than one input is an error.
+        if frames.len() <= 1 && total > 1 {
+            return Err(Error::AllFramesDropped { count: total - 1 });
+        }
+
+        let registered = frames.len();
+        tracing::info!(frames = registered, "Stacking aligned frames");
+        let stacked = stack_stored_frames(
+            frames,
+            tier.into_cache_tier(),
+            self.dimensions,
+            self.metadata,
+            &config.stack.for_survivors(&dropped),
+            progress,
+            cancel,
+        )?;
+        tracing::info!("Stack complete");
+
+        Ok(AlignStackResult::from_product(
+            stacked,
+            self.reference,
+            registered,
+            dropped,
+            self.detection,
+        ))
+    }
+}

@@ -8,6 +8,7 @@ use crate::calibration_masters::CalibrationMasters;
 use crate::calibration_masters::cosmic_ray;
 use crate::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::calibration_masters::cosmic_ray::reject_cosmic_rays;
+use crate::frame_store::stored_frame::StoredFrame;
 use crate::ingest::frame_admission::FrameAdmission;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::cancelled::Cancelled;
@@ -25,10 +26,14 @@ use crate::pipeline::calibrate::CalibrationNotes;
 use crate::pipeline::config::AlignStackConfig;
 use crate::pipeline::detector_pool::DetectorPool;
 use crate::pipeline::frame::{DetectedFrame, PipelineFrame};
-use crate::pipeline::result::Error;
+use crate::pipeline::frame_registrar::{FrameRegistrar, FrameToPark};
+use crate::pipeline::registered_set::RegisteredSet;
+use crate::pipeline::result::{AlignStackResult, Error};
 use crate::pipeline::tier::StagePlan;
 use crate::progress::stage_counter::StageCounter;
 use crate::progress::{ProgressCallback, StackingStage};
+use crate::registration::resample::WarpBuffers;
+use crate::star_detection::detector::Diagnostics;
 
 /// Where a registered stack's lights come from.
 #[derive(Debug)]
@@ -63,6 +68,14 @@ pub(crate) struct DetectedLights {
 struct LightShape {
     dimensions: ImageDimensions,
     run: RunShape,
+}
+
+/// One light through the single pass: its parked frame, `None` when it did not register, and its
+/// detection funnel.
+#[derive(Debug, Default)]
+struct PassedLight {
+    frame: Option<StoredFrame>,
+    diagnostics: Diagnostics,
 }
 
 /// The lights as the workers take them: a held frame moves out of its cell once.
@@ -176,37 +189,7 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
                     },
                 })
             }
-            Self::Raw(raw) => {
-                let first = raw.paths[0].as_ref();
-                let info =
-                    CfaFrameInfo::from_file(first, &run.context).map_err(|source| Error::Load {
-                        path: first.to_path_buf(),
-                        source: Box::new(source),
-                    })?;
-                let plane_bytes = info.dimensions.pixel_count() * size_of::<f32>();
-                let demosaic = info.cfa_type.demosaic_memory(info.dimensions);
-                let dimensions =
-                    ImageDimensions::new(info.dimensions.size(), info.cfa_type.num_colors());
-                // One frame's pass peaks at the largest of: the demosaic, the cosmic-ray pass over
-                // the mosaic, and the statistics, a copy of every channel beside the demosaiced
-                // frame.
-                let cosmic_ray = raw.cosmic_ray.map_or(0, |_| {
-                    plane_bytes + cosmic_ray::heap_bytes(&info.cfa_type, info.dimensions.size())
-                });
-                Ok(LightShape {
-                    dimensions,
-                    run: RunShape {
-                        frame_count: raw.paths.len(),
-                        decode: demosaic
-                            .with_peak_at_least(cosmic_ray)
-                            .with_peak_at_least(DECODE_TRANSIENT_FACTOR * demosaic.output_bytes),
-                        held_bytes: 0,
-                        detection_bytes: DETECTION_WORKING_PLANES * plane_bytes,
-                        warp: Some(PerFrameBytes::new(plane_bytes, demosaic.output_bytes)),
-                        output_bytes: quality.resident_bytes(dimensions),
-                    },
-                })
-            }
+            Self::Raw(raw) => raw.shape(config, run),
         }
     }
 }
@@ -223,7 +206,165 @@ impl<P: AsRef<Path> + Sync> Lights<'_, P> {
     }
 }
 
-impl<P> RawLights<'_, P> {
+impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
+    /// The run's shape, from the first file's header.
+    fn shape(&self, config: &AlignStackConfig, run: &IngestRun) -> Result<LightShape, Error> {
+        let first = self.paths[0].as_ref();
+        let info = CfaFrameInfo::from_file(first, &run.context).map_err(|source| Error::Load {
+            path: first.to_path_buf(),
+            source: Box::new(source),
+        })?;
+        let plane_bytes = info.dimensions.pixel_count() * size_of::<f32>();
+        let demosaic = info.cfa_type.demosaic_memory(info.dimensions);
+        let dimensions = ImageDimensions::new(info.dimensions.size(), info.cfa_type.num_colors());
+        // One frame's pass peaks at the largest of: the demosaic, the cosmic-ray pass over the
+        // mosaic, and the statistics, a copy of every channel beside the demosaiced frame.
+        let cosmic_ray = self.cosmic_ray.map_or(0, |_| {
+            plane_bytes + cosmic_ray::heap_bytes(&info.cfa_type, info.dimensions.size())
+        });
+        Ok(LightShape {
+            dimensions,
+            run: RunShape {
+                frame_count: self.paths.len(),
+                decode: demosaic
+                    .with_peak_at_least(cosmic_ray)
+                    .with_peak_at_least(DECODE_TRANSIENT_FACTOR * demosaic.output_bytes),
+                held_bytes: 0,
+                detection_bytes: DETECTION_WORKING_PLANES * plane_bytes,
+                warp: Some(PerFrameBytes::new(plane_bytes, demosaic.output_bytes)),
+                output_bytes: config.stack.quality.resident_bytes(dimensions),
+            },
+        })
+    }
+
+    /// Stack the lights against the light at index `reference` in one pass: the reference is
+    /// prepared and detected first and alone, then each worker takes a light through its
+    /// preparation, its detection, its registration, its warp and its store, so a light is
+    /// written once and no prepared set is ever parked.
+    pub(crate) fn stack_in_one_pass(
+        &self,
+        reference: usize,
+        config: &AlignStackConfig,
+        run: &IngestRun,
+        progress: ProgressCallback,
+    ) -> Result<AlignStackResult, Error> {
+        let total = self.paths.len();
+        if reference >= total {
+            return Err(Error::ReferenceOutOfRange {
+                index: reference,
+                count: total,
+            });
+        }
+        let shape = self.shape(config, run)?;
+        let plan = MemoryPlan::single_pass(
+            shape.run,
+            rayon::current_num_threads(),
+            run.memory.planning(),
+        );
+        let StagePlan {
+            tier,
+            warp_concurrency: workers,
+        } = StagePlan::new(&plan, &config.stack.ingest, run.memory)?;
+        tracing::info!(
+            frames = total,
+            reference,
+            planning_mb = run.memory.planning() / (1024 * 1024),
+            concurrency = workers,
+            spilling = tier.spills(),
+            "Preparing, detecting and registering lights in one pass"
+        );
+        let cancel = &run.context.cancel;
+        let admission = FrameAdmission::new(shape.dimensions, cancel);
+        let prepared = StageCounter::new(&progress, StackingStage::Preparing, total);
+        let mut detectors = DetectorPool::from_config(&config.detection, workers.min(total))
+            .map_err(Error::DetectionConfig)?;
+
+        if cancel.is_cancelled() {
+            return Err(Error::Cancelled);
+        }
+        let image = self.prepare(self.paths[reference].as_ref(), run)?;
+        let stats = admission.admit(reference, &image)?;
+        let result = detectors.first().detect(&image);
+        log_detection(prepared.complete_one(), total, &result);
+        let required = config
+            .registration
+            .matching
+            .required_stars(config.registration.transform_type);
+        if result.stars.len() < required {
+            return Err(Error::ReferenceInsufficientStars {
+                index: reference,
+                found: result.stars.len(),
+                required,
+            });
+        }
+        let metadata = image.metadata.clone();
+        let dimensions = image.dimensions();
+        let reference_diagnostics = result.diagnostics;
+        let registrar = FrameRegistrar::new(
+            reference,
+            result.stars,
+            config,
+            &tier,
+            total,
+            &progress,
+            cancel,
+        );
+        let mut buffers: Vec<Option<WarpBuffers>> = (0..workers.min(total)).map(|_| None).collect();
+        let reference_frame = registrar.park(
+            &mut buffers[0],
+            FrameToPark {
+                index: reference,
+                image,
+                stars: &[],
+                stats,
+            },
+        )?;
+
+        let others = detectors.try_map_with(total, &mut buffers, |detector, buffers, index| {
+            if index == reference {
+                return Ok(PassedLight::default());
+            }
+            if cancel.is_cancelled() {
+                return Err(Error::Cancelled);
+            }
+            let image = self.prepare(self.paths[index].as_ref(), run)?;
+            let stats = admission.admit(index, &image)?;
+            let result = detector.detect(&image);
+            log_detection(prepared.complete_one(), total, &result);
+            let frame = registrar.park(
+                buffers,
+                FrameToPark {
+                    index,
+                    image,
+                    stars: &result.stars,
+                    stats,
+                },
+            )?;
+            Ok(PassedLight {
+                frame,
+                diagnostics: result.diagnostics,
+            })
+        })?;
+        drop(registrar);
+
+        let mut outcomes = Vec::with_capacity(total);
+        let mut detection = Vec::with_capacity(total);
+        for light in others {
+            outcomes.push(light.frame);
+            detection.push(light.diagnostics);
+        }
+        outcomes[reference] = reference_frame;
+        detection[reference] = reference_diagnostics;
+        RegisteredSet {
+            outcomes,
+            reference,
+            metadata,
+            dimensions,
+            detection,
+        }
+        .combine(tier, config, progress, cancel.clone())
+    }
+
     /// Load one light, apply the masters, reject its cosmic rays when asked, and demosaic it.
     fn prepare(&self, path: &Path, run: &IngestRun) -> Result<LinearImage, Error> {
         let mut cfa = match CfaImage::from_file(path, &run.context) {

@@ -10,7 +10,7 @@ use crate::calibration_masters::CalibrationMasters;
 use crate::calibration_masters::calibration_outcome::CalibrationOutcome;
 use crate::ingest::ingest_run::IngestRun;
 use crate::pipeline::align::register_warp_and_stack;
-use crate::pipeline::config::AlignStackConfig;
+use crate::pipeline::config::{AlignStackConfig, Reference};
 use crate::pipeline::light_source::{LightSource, RawLights};
 use crate::pipeline::result::{AlignStackResult, Error};
 use crate::progress::ProgressCallback;
@@ -19,15 +19,20 @@ use crate::run_report::RunReport;
 /// Calibrate, align, and stack camera-RAW or mosaic-FITS light frames end to end.
 ///
 /// For each raw light: load it as a `CfaImage`, apply `masters` (dark/flat/defect) in place,
-/// demosaic to a `LinearImage`, and detect its stars — then hand the detected frames to the
-/// shared register → warp → combine body. A frame that fails to **load** is a hard error (bad
-/// input); a frame that fails to **register** is dropped and reported in
+/// demosaic to a `LinearImage`, and detect its stars, then register, warp and combine. A frame
+/// that fails to **load** is a hard error (bad input); a frame that fails to **register** is
+/// dropped and reported in
 /// [`AlignmentSummary::dropped`](crate::pipeline::result::AlignmentSummary::dropped).
+///
+/// With [`Reference::Index`] the reference is prepared first, and each other light then goes
+/// through its preparation, its registration and its warp in one pass, written once. With
+/// [`Reference::Auto`] every light is prepared and detected first, since the reference is the one
+/// with the most stars, and parked until it registers.
 ///
 /// The sensor geometry is peeked from the first frame's header without a decode, so the memory
 /// tier is chosen before any pixels are read. When the frame set plus its per-frame scratch
-/// won't fit the budget, every calibrated and warped frame goes through the frame store's
-/// memory maps and peak RAM stays flat in the frame count.
+/// won't fit the budget, every parked and warped frame goes through the frame store's memory maps
+/// and peak RAM stays flat in the frame count.
 ///
 /// For frames that are already calibrated (e.g. pre-processed FITS), skip this and call
 /// [`align_and_stack`](crate::pipeline::align::align_and_stack) directly.
@@ -44,15 +49,21 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     config.validate(light_paths.len())?;
     let run = IngestRun::new(&config.stack.ingest, cancel.clone());
     let notes = CalibrationNotes::default();
-    let detected = LightSource::Raw(RawLights {
+    let lights = RawLights {
         paths: light_paths,
         masters,
         cosmic_ray: config.cosmic_ray.as_ref(),
         notes: &notes,
-    })
-    .detect(config, &run, &progress)?;
-    let mut result =
-        register_warp_and_stack(detected.frames, config, detected.stage, progress, cancel)?;
+    };
+    let mut result = match config.reference {
+        Reference::Index(reference) => {
+            lights.stack_in_one_pass(reference, config, &run, progress)?
+        }
+        Reference::Auto => {
+            let detected = LightSource::Raw(lights).detect(config, &run, &progress)?;
+            register_warp_and_stack(detected.frames, config, detected.stage, progress, cancel)?
+        }
+    };
     notes.report_into(&mut result.product.report, masters);
     Ok(result)
 }

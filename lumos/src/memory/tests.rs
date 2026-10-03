@@ -184,6 +184,25 @@ fn held_frames_are_charged_only_what_the_run_adds() {
     assert!(MemoryPlan::plan(shape(0), 8, available_for_usable(17_424 * MB as u64)).fits_in_ram);
 }
 
+/// One pass over ten Bayer frames of 10 MiB planes, eight threads: a decode peaks at 7P, the
+/// detector holds 7P, and a warped frame is 5¼P. A worker holds 14P, and on the spill tier its 5¼P
+/// warp buffers too. Resident needs the 52½P warped set beside one worker, 66½P, where one worker
+/// fits; at 164½P all eight do. A byte below 66½P the run spills, and three 19¼P workers fit.
+#[test]
+fn a_single_pass_holds_the_warped_set_beside_its_workers() {
+    let plane_bytes = plane(10);
+    let shape = pipeline_shape(plane_bytes, bayer(plane_bytes), 10, 0);
+    let quarters = |count: u64| available_for_usable(count * plane_bytes as u64 / 4);
+    let at = |available| MemoryPlan::single_pass(shape, 8, available);
+    let concurrency = |plan: MemoryPlan| {
+        assert_eq!(plan.decode_concurrency, plan.warp_concurrency);
+        (plan.fits_in_ram, plan.decode_concurrency)
+    };
+    assert_eq!(concurrency(at(quarters(266))), (true, 1));
+    assert_eq!(concurrency(at(quarters(658))), (true, 8));
+    assert_eq!(concurrency(at(quarters(266) - 2)), (false, 3));
+}
+
 /// Rows per chunk by hand: the usable budget over the bytes a row of every input plane costs,
 /// after the resident planes, floored at `MIN_CHUNK_ROWS`.
 /// - 6000 px × 60 planes (3 channels × 20 frames) × 4 B = 1 440 000 B a row: 6 GiB usable of 8 is

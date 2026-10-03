@@ -10,7 +10,9 @@ pub(crate) mod calibrate;
 pub(crate) mod config;
 pub(crate) mod detector_pool;
 pub(crate) mod frame;
+pub(crate) mod frame_registrar;
 pub(crate) mod light_source;
+pub(crate) mod registered_set;
 pub(crate) mod result;
 pub(crate) mod tier;
 
