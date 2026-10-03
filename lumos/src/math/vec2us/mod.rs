@@ -21,12 +21,6 @@ impl Vec2us {
 
     /// Zero vector.
     pub const ZERO: Self = Self { x: 0, y: 0 };
-
-    /// Compute linear index for row-major layout.
-    #[inline]
-    pub const fn to_index(self, width: usize) -> usize {
-        self.y * width + self.x
-    }
 }
 
 impl Add for Vec2us {

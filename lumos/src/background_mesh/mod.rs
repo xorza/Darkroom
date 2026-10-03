@@ -7,10 +7,12 @@
 //! reused by `stacking::star_detection::background` (full-res background+noise map for detection)
 //! and `background_extraction` (tile-centre samples feeding the gradient surface fit).
 
+pub(crate) mod mesh_axis;
 pub(crate) mod spline;
 pub(crate) mod tile_stats;
 pub(crate) mod workspace;
 
+use crate::background_mesh::mesh_axis::MeshAxis;
 use crate::background_mesh::spline::solve_natural_spline_d2;
 use crate::background_mesh::tile_stats::{TileComponent, TileD2y, TileStats};
 use crate::background_mesh::workspace::TileScratch;
@@ -54,12 +56,13 @@ impl TileGrid {
             dimensions.height
         );
         let tile_size = clamped_tile_size(dimensions, tile_size);
-        let tiles_x = dimensions.width.div_ceil(tile_size);
-        let tiles_y = dimensions.height.div_ceil(tile_size);
+        let columns = MeshAxis::new(dimensions.width, tile_size);
+        let rows = MeshAxis::new(dimensions.height, tile_size);
+        let (tiles_x, tiles_y) = (columns.count(), rows.count());
         let n = tiles_x * tiles_y;
 
-        let centers_x = tile_centers(tiles_x, tile_size, dimensions.width);
-        let centers_y = tile_centers(tiles_y, tile_size, dimensions.height);
+        let centers_x = (0..tiles_x).map(|tile| columns.centre(tile)).collect();
+        let centers_y = (0..tiles_y).map(|tile| rows.centre(tile)).collect();
         Self {
             stats: Buffer2::new_default(tiles_x, tiles_y),
             d2y: vec![TileD2y::default(); n],
@@ -77,7 +80,7 @@ impl TileGrid {
     /// Second derivative in Y at `tile` for the natural cubic spline, for one plane.
     #[inline]
     pub(crate) fn d2y(&self, component: TileComponent, tile: Vec2us) -> f32 {
-        self.d2y[tile.to_index(self.stats.width())].get(component)
+        self.d2y[tile.y * self.stats.width() + tile.x].get(component)
     }
 
     /// Find the tile index whose center is at or before the given Y position.
@@ -108,9 +111,8 @@ impl TileGrid {
         tile_scratch: &JobScratchPool<TileScratch>,
     ) {
         let tiles_x = self.stats.width();
-        let tile_size = self.tile_size;
-        let width = self.dimensions.width;
-        let height = self.dimensions.height;
+        let columns = MeshAxis::new(self.dimensions.width, self.tile_size);
+        let rows = MeshAxis::new(self.dimensions.height, self.tile_size);
 
         self.stats
             .pixels_mut()
@@ -123,13 +125,9 @@ impl TileGrid {
                     let tx = idx % tiles_x;
                     let ty = idx / tiles_x;
 
-                    let start = Vec2us::new(tx * tile_size, ty * tile_size);
                     let tile = URect::new(
-                        start,
-                        Vec2us::new(
-                            (start.x + tile_size).min(width),
-                            (start.y + tile_size).min(height),
-                        ),
+                        Vec2us::new(columns.start(tx), rows.start(ty)),
+                        Vec2us::new(columns.end(tx), rows.end(ty)),
                     );
 
                     *out = TileStats::compute(
@@ -250,21 +248,6 @@ const fn reflect(index: usize, delta: isize, last: usize) -> (usize, usize) {
     }
 }
 
-/// The centre of each of `tiles` tiles of `tile_size` along an axis of `extent` pixels, in the
-/// pixel-index coordinates the maps are evaluated at: the mean index of the pixels the tile holds,
-/// so a plane's tile median sits exactly at its centre.
-fn tile_centers(tiles: usize, tile_size: usize, extent: usize) -> Vec<f32> {
-    (0..tiles)
-        .map(|tile| {
-            let start = tile * tile_size;
-            let end = (start + tile_size).min(extent);
-            (start + end - 1) as f32 * 0.5
-        })
-        .collect()
-}
-
-#[cfg(all(test, feature = "bench"))]
-mod bench;
 /// The tile size a grid over `dimensions` uses: `tile_size`, cut to the image's shorter side so
 /// a tile never exceeds the frame.
 const fn clamped_tile_size(dimensions: Size2us, tile_size: usize) -> usize {
@@ -276,5 +259,7 @@ const fn clamped_tile_size(dimensions: Size2us, tile_size: usize) -> usize {
     if tile_size < side { tile_size } else { side }
 }
 
+#[cfg(all(test, feature = "bench"))]
+mod bench;
 #[cfg(test)]
 mod tests;

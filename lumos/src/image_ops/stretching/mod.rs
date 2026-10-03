@@ -126,28 +126,6 @@ impl Stretch {
         }
     }
 
-    /// Color-preserving Generalized Hyperbolic Stretch with no shadow/highlight
-    /// protection (`lp = 0`, `hp = 1`). `d` = strength, `b` = curve family, `sp` = symmetry point.
-    pub fn ghs(d: f32, b: f32, sp: f32) -> Self {
-        Self {
-            method: StretchMethod::Ghs {
-                d,
-                b,
-                sp,
-                lp: 0.0,
-                hp: 1.0,
-            },
-            color: ColorMode::ColorPreserving,
-        }
-    }
-
-    /// Set how the curve is applied across color channels.
-    #[must_use]
-    pub fn color(mut self, color: ColorMode) -> Self {
-        self.color = color;
-        self
-    }
-
     /// Apply this non-linear stretch to a stacked image in place.
     ///
     /// # Errors

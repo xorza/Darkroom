@@ -2,7 +2,6 @@ use crate::io::image::cfa::CfaType;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::math::statistics;
-use crate::memory::ChunkMemoryLayout;
 use crate::stacking::combine::cache::*;
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::frame_store::frame_quality::{FramePlane, FrameQuality};
@@ -78,7 +77,11 @@ fn quality_plane_request_drops_variance_for_a_non_linear_combine() {
 fn validate_frames(frames: &[StoredFrame], dimensions: ImageDimensions) -> Result<(), Error> {
     let mut facts = SetFacts::default();
     for (index, frame) in frames.iter().enumerate() {
-        validate_frame(index, frame, dimensions, &mut facts, &CancelToken::never())?;
+        FrameCheck {
+            index,
+            cancel: &CancelToken::never(),
+        }
+        .stored(frame, dimensions, &mut facts)?;
     }
     Ok(())
 }
@@ -323,7 +326,7 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
     // Inputs: 3 frames × 1 channel, plus the coverage + confidence pair frames 1 and 2 each carry.
     // Residents: 3 channels × (pixels + weight + variance).
     assert_eq!(
-        weighted_chunk_memory_layout(&cache.frames, dimensions.channels(), QualityPlanes::ALL),
+        cache.weighted_layout(QualityPlanes::ALL),
         ChunkMemoryLayout {
             input_planes: 7,
             resident_planes: 9,
@@ -332,11 +335,7 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
 
     // Declining the quality planes drops their residency, so the same frames buy more rows.
     assert_eq!(
-        weighted_chunk_memory_layout(
-            &cache.frames,
-            dimensions.channels(),
-            QualityPlanes::IMAGE_ONLY
-        ),
+        cache.weighted_layout(QualityPlanes::IMAGE_ONLY),
         ChunkMemoryLayout {
             input_planes: 7,
             resident_planes: 3,
@@ -346,7 +345,7 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
     // The coverage pass reads only the two frames carrying frame quality, and adds the plane it is
     // accumulating to the combine's residents.
     assert_eq!(
-        coverage_chunk_memory_layout(&cache.frames, dimensions.channels(), QualityPlanes::ALL),
+        cache.coverage_layout(QualityPlanes::ALL),
         ChunkMemoryLayout {
             input_planes: 2,
             resident_planes: 10,
@@ -374,18 +373,22 @@ fn finish_product_uniform_equal_weights() {
     // at a full-frame master that is the difference between one number and 240 MB.
     let coverage = product.coverage.as_ref().unwrap();
     assert!(
-        matches!(coverage, Coverage::Uniform { value, .. } if *value == 1.0),
+        matches!(
+            coverage,
+            Coverage::Uniform { value, size } if *value == 1.0 && *size == Size2us::new(3, 2)
+        ),
         "fully-covered stack should not materialize a plane: {coverage:?}"
     );
-    assert!(coverage.per_pixel().is_none());
-    assert_eq!(coverage.size(), Size2us::new(3, 2));
-    // It still reads and materializes like the plane it stands for.
+    // It still materializes like the plane it stands for.
     assert_eq!(coverage.to_plane().pixels(), &[1.0; 6]);
-    for p in 0..6 {
-        assert_eq!(product.coverage.as_ref().unwrap()[p], 1.0);
-        assert_eq!(product.weight.as_ref().unwrap().channel(0)[p], 4.0);
-        assert_eq!(linear_variance.channel(0)[p], 0.25);
-    }
+    let Some(QualityMap::Shared(weight)) = product.weight.as_ref() else {
+        panic!("a mono stack has one weight plane");
+    };
+    let QualityMap::Shared(variance) = linear_variance else {
+        panic!("a mono stack has one variance plane");
+    };
+    assert_eq!(weight.pixels(), &[4.0; 6]);
+    assert_eq!(variance.pixels(), &[0.25; 6]);
 }
 
 #[test]

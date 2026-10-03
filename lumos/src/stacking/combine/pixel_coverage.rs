@@ -12,7 +12,7 @@
 /// Confidence is not part of the rule. A warp emits support and interpolation confidence together
 /// and agreeing on where the frame has data — the invariant
 /// [`FrameQuality`](crate::stacking::frame_store::frame_quality::FrameQuality) documents and
-/// [`validate_frame_quality`](crate::stacking::combine::cache::validation::validate_frame_quality)
+/// [`FrameCheck::quality_pair`](crate::stacking::combine::cache::frame_check::FrameCheck::quality_pair)
 /// enforces — so a pixel over the floor below is guaranteed a positive confidence to weight it by,
 /// and gating on that as well would only restate it. Confidence scales a contribution; coverage
 /// decides whether there is one.

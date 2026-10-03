@@ -26,7 +26,6 @@ const ROW_ALIGNMENT_BITS: usize = 128;
 #[derive(Debug)]
 struct BitLayout {
     stride: usize,
-    len: usize,
     num_words: usize,
 }
 
@@ -34,7 +33,6 @@ fn bit_layout(size: Size2us) -> BitLayout {
     if size.width == 0 || size.height == 0 {
         return BitLayout {
             stride: 0,
-            len: 0,
             num_words: 0,
         };
     }
@@ -44,8 +42,7 @@ fn bit_layout(size: Size2us) -> BitLayout {
         .div_ceil(ROW_ALIGNMENT_BITS)
         .checked_mul(ROW_ALIGNMENT_BITS)
         .expect("BitBuffer2 row stride overflow");
-    let len = size
-        .width
+    size.width
         .checked_mul(size.height)
         .expect("BitBuffer2 dimensions overflow");
     let total_bits = stride
@@ -54,7 +51,6 @@ fn bit_layout(size: Size2us) -> BitLayout {
     debug_assert_eq!(total_bits % BITS_PER_WORD, 0);
     BitLayout {
         stride,
-        len,
         num_words: total_bits / BITS_PER_WORD,
     }
 }
@@ -73,9 +69,8 @@ pub(crate) struct BitBuffer2 {
     /// unspecified — see the type's invariant before reading these word-wise.
     pub(crate) words: Vec<u64>,
     pub(crate) size: Size2us,
-    pub(crate) len: usize,
-    /// Number of bits per row including padding (aligned to 128 bits).
-    pub(crate) stride: usize,
+    /// Bits per row including padding: the width rounded up to 128.
+    stride: usize,
 }
 
 impl PooledBuffer for BitBuffer2 {
@@ -98,7 +93,6 @@ impl BitBuffer2 {
         Self {
             words,
             size,
-            len: layout.len,
             stride: layout.stride,
         }
     }
@@ -118,14 +112,12 @@ impl BitBuffer2 {
     /// Get a bit value at the given linear index (row-major, no padding).
     #[inline]
     pub(crate) fn get(&self, idx: usize) -> bool {
-        debug_assert!(idx < self.len);
         self.get_at(self.size.point_of(idx))
     }
 
     /// Set a bit value at the given linear index (row-major, no padding).
     #[inline]
     pub(crate) fn set(&mut self, idx: usize, value: bool) {
-        debug_assert!(idx < self.len);
         self.set_at(self.size.point_of(idx), value);
     }
 
@@ -253,6 +245,14 @@ impl BitBuffer2 {
         }
     }
 
+    /// Clear every bit `other` has set: `self &= !other`, a word at a time.
+    pub(crate) fn and_not(&mut self, other: &Self) {
+        debug_assert_eq!(self.size, other.size, "size mismatch");
+        for (word, &other) in self.words.iter_mut().zip(&other.words) {
+            *word &= !other;
+        }
+    }
+
     /// Call `visit` with the position of every set bit, row by row, skipping each clear word whole
     /// — a sparse mask costs a pass over its words, not over its pixels. Row padding is masked
     /// off, whatever it holds.
@@ -278,15 +278,6 @@ impl BitBuffer2 {
             }
         }
     }
-
-    /// Iterate over all bit values (row-major order, skipping padding).
-    #[inline]
-    pub(crate) fn iter(&self) -> BitIter<'_> {
-        BitIter {
-            buffer: self,
-            index: 0,
-        }
-    }
 }
 
 /// Index by linear index.
@@ -301,86 +292,26 @@ impl Index<usize> for BitBuffer2 {
     }
 }
 
-/// Index by (x, y) coordinates.
-impl Index<(usize, usize)> for BitBuffer2 {
-    type Output = bool;
-
-    #[inline]
-    fn index(&self, (x, y): (usize, usize)) -> &Self::Output {
-        if self.get_at(Vec2us::new(x, y)) {
-            &true
-        } else {
-            &false
-        }
-    }
-}
-
-// Note: IndexMut cannot be implemented for bit-packed storage because we cannot
-// return a mutable reference to a single bit. Use `set(idx, value)` or
-// `set_at(pos, value)` methods instead.
-
-/// Convert `BitBuffer2` to Vec<bool>.
-impl From<BitBuffer2> for Vec<bool> {
-    #[inline]
-    fn from(buf: BitBuffer2) -> Self {
-        buf.iter().collect()
-    }
-}
-
-/// Convert &`BitBuffer2` to Vec<bool>.
-impl From<&BitBuffer2> for Vec<bool> {
-    #[inline]
-    fn from(buf: &BitBuffer2) -> Self {
-        buf.iter().collect()
-    }
-}
-
-/// Iterator over bit values (row-major order, skipping padding).
-#[derive(Debug)]
-pub(crate) struct BitIter<'a> {
-    buffer: &'a BitBuffer2,
-    index: usize,
-}
-
-impl Iterator for BitIter<'_> {
-    type Item = bool;
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index == self.buffer.len {
-            return None;
-        }
-
-        let value = self.buffer.get(self.index);
-        self.index += 1;
-        Some(value)
-    }
-
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.buffer.len - self.index;
-        (remaining, Some(remaining))
-    }
-}
-
-impl ExactSizeIterator for BitIter<'_> {}
-
 #[cfg(test)]
 mod internals {
-    use crate::bit_buffer2::{BitBuffer2, bit_layout};
+    use crate::bit_buffer2::BitBuffer2;
     use crate::math::size2us::Size2us;
 
     impl BitBuffer2 {
+        /// Every bit in row-major order, padding skipped.
+        pub(crate) fn iter(&self) -> impl Iterator<Item = bool> + '_ {
+            (0..self.size.pixel_count()).map(|index| self.get(index))
+        }
+
         pub(crate) fn from_slice(size: Size2us, data: &[bool]) -> Self {
-            let layout = bit_layout(size);
             assert_eq!(
                 data.len(),
-                layout.len,
+                size.pixel_count(),
                 "data length {} does not match dimensions {}x{}={}",
                 data.len(),
                 size.width,
                 size.height,
-                layout.len
+                size.pixel_count()
             );
 
             let mut buffer = Self::new_default(size);

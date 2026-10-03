@@ -46,20 +46,6 @@ impl Default for Hdr {
 }
 
 impl Hdr {
-    /// Set the wavelet scale count.
-    #[must_use]
-    pub fn scales(mut self, scales: usize) -> Self {
-        self.scales = scales;
-        self
-    }
-
-    /// Set the compression strength in `[0, 1]`.
-    #[must_use]
-    pub fn amount(mut self, amount: f32) -> Self {
-        self.amount = amount;
-        self
-    }
-
     /// Compress the dynamic range of `image` in place.
     ///
     /// # Errors

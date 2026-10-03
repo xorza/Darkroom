@@ -58,7 +58,8 @@ impl CrMasks {
             let f_norm = (f[i] / noise[i]).max(FINE_STRUCTURE_SIGMA_FLOOR);
             significance[i] > sig_thresh && significance[i] > cfg.objlim * f_norm
         };
-        primary.fill_from_predicate(|i| !accumulated.get(i) && passes_contrast(i, cfg.sigclip));
+        primary.fill_from_predicate(|i| passes_contrast(i, cfg.sigclip));
+        primary.and_not(accumulated);
 
         let lowered = cfg.sigclip * cfg.sigfrac;
         flags.copy_from(primary);

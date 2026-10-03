@@ -3,6 +3,7 @@ use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 
 /// Which of an image's pixels carry no measurement.
 ///
@@ -56,9 +57,9 @@ impl NullMask {
         self.count
     }
 
-    /// Whether the pixel at this row-major index carries no measurement.
-    pub(crate) fn is_null(&self, index: usize) -> bool {
-        self.nulls.get(index)
+    /// Whether the pixel at `pos` carries no measurement.
+    pub(crate) fn is_null_at(&self, pos: Vec2us) -> bool {
+        self.nulls.get_at(pos)
     }
 
     /// The mask in the bit-buffer form a neighbour search takes, so a pixel reconstructed from its
@@ -74,14 +75,21 @@ impl NullMask {
     /// each output pixel. Bit-packed is how it is *stored*, one f32 per pixel is how it is used.
     pub(crate) fn validity_plane(&self) -> Buffer2<f32> {
         let size = self.nulls.size;
-        Buffer2::new(
-            size.width,
-            size.height,
-            (0..size.width * size.height)
-                .into_par_iter()
-                .map(|index| if self.is_null(index) { 0.0 } else { 1.0 })
-                .collect::<Vec<f32>>(),
-        )
+        let mut plane = Buffer2::new_default(size.width, size.height);
+        plane
+            .pixels_mut()
+            .par_chunks_mut(size.width)
+            .enumerate()
+            .for_each(|(y, row)| {
+                for (x, value) in row.iter_mut().enumerate() {
+                    *value = if self.is_null_at(Vec2us::new(x, y)) {
+                        0.0
+                    } else {
+                        1.0
+                    };
+                }
+            });
+        plane
     }
 }
 
@@ -110,7 +118,7 @@ mod tests {
             (4, true),
             (5, false),
         ] {
-            assert_eq!(mask.is_null(index), expected, "index {index}");
+            assert_eq!(mask.bits().get(index), expected, "index {index}");
         }
 
         // The same planes with the nulls removed produce no mask at all, so a caller cannot mistake
@@ -127,6 +135,6 @@ mod tests {
         let plane = [f32::NAN; 6];
         let mask = NullMask::of_non_finite(size, &[&plane]).unwrap();
         assert_eq!(mask.count(), size.pixel_count());
-        assert!((0..6).all(|index| mask.is_null(index)));
+        assert!((0..6).all(|index| mask.bits().get(index)));
     }
 }

@@ -242,8 +242,8 @@ fn estimate_affine(ref_points: &[DVec2], target_points: &[DVec2]) -> Option<Tran
     let a_norm = Transform::affine([a, b, e, c, d, f]);
     let transform = tar_norm
         .denormalizing_transform()
-        .compose(&a_norm)
-        .compose(&ref_norm.normalizing_transform());
+        .try_compose(&a_norm)?
+        .try_compose(&ref_norm.normalizing_transform())?;
     transform.is_valid().then_some(transform)
 }
 

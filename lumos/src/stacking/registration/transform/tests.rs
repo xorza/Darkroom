@@ -279,7 +279,7 @@ fn rotation_around_center() {
     );
 }
 
-/// The inverse undoes the transform, as a transform and as `apply_inverse`, for a translation, a
+/// The inverse undoes the transform, as a transform and through `apply`, for a translation, a
 /// similarity and a homography; composing a homography with its inverse is the identity, and the
 /// composition applies its right operand first. The round trips are a matrix inverse and a product
 /// in f64 on coordinates up to 500: a few ulps of 500, 1e-12.
@@ -300,7 +300,10 @@ fn inverse_and_compose_round_trip_every_model() {
         for p in points {
             let mapped = t.apply(p);
             assert!(inverse.apply(mapped).distance(p) < 1e-12, "{t} at {p:?}");
-            assert!(t.apply_inverse(mapped).distance(p) < 1e-12, "{t} at {p:?}");
+            assert!(
+                t.inverse().apply(mapped).distance(p) < 1e-12,
+                "{t} at {p:?}"
+            );
             assert!(
                 t.compose(&inverse).apply(p).distance(p) < 1e-12,
                 "{t} at {p:?}"

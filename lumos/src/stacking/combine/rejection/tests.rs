@@ -278,6 +278,21 @@ fn linear_fit_rejects_off_line_point_when_seed_pass_is_clean() {
     assert!((mean - 50.0).abs() < 1e-3, "expected mean 50, got {mean}");
 }
 
+/// A long stack keeps its line: 4001 frames on the ramp `1000 + i/4` and one 3 above where the
+/// ramp would continue. The seed pass keeps it (median 1500, σ ≈ 741, 3σ far past it). The fit's
+/// σ is the mean |residual|, about 3/4002 from the outlier plus the tilt it gives the line —
+/// `(x − x̄)·3/Sxx` with `Sxx = n(n² − 1)/12 ≈ 5.3e9`, under 1.2e-6 per position, 2.3e-3 at the
+/// ends — so 3σ is a few thousandths: every ramp frame stays, and the outlier, 3 off, goes.
+#[test]
+fn linear_fit_keeps_a_long_ramp_and_drops_its_outlier() {
+    let mut values: Vec<f32> = (0..4001).map(|i| 1000.0 + i as f32 / 4.0).collect();
+    values.push(1000.0 + 4001.0 / 4.0 + 3.0);
+    let mut s = scratch();
+    let remaining = LinearFitClipConfig::new(3.0, 3.0, 3).reject(&mut values, &mut s);
+    assert_eq!(remaining, 4001);
+    assert!(!s.indices[..remaining].contains(&4001));
+}
+
 #[test]
 fn sigma_clip_rejects_outlier_in_bright_high_magnitude_data() {
     // Guards the early-exit's numerical soundness (f64 accumulation): on high-magnitude pixels

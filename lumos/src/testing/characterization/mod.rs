@@ -8,7 +8,7 @@
 
 mod snapshot;
 
-use crate::image_ops::stretching::Stretch;
+use crate::image_ops::stretching::{ColorMode, Stretch, StretchMethod};
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::fits::cfa::save_cfa_fits;
 use crate::io::image::load_context::LoadContext;
@@ -301,7 +301,16 @@ fn stretch_snapshot() {
     for stretch in [
         Stretch::auto_asinh(),
         Stretch::auto_stf(),
-        Stretch::ghs(5.0, 0.0, 0.1),
+        Stretch {
+            method: StretchMethod::Ghs {
+                d: 5.0,
+                b: 0.0,
+                sp: 0.1,
+                lp: 0.0,
+                hp: 1.0,
+            },
+            color: ColorMode::ColorPreserving,
+        },
     ] {
         let mut image = rgb.clone();
         stretch.apply(&mut image).unwrap();

@@ -30,10 +30,8 @@ use crate::stacking::progress::stage_counter::StageCounter;
 use crate::stacking::progress::{ProgressCallback, StackingStage};
 
 use crate::stacking::combine::cache::core::{CacheCore, CacheTier};
+use crate::stacking::combine::cache::frame_check::FrameCheck;
 use crate::stacking::combine::cache::set_facts::SetFacts;
-use crate::stacking::combine::cache::validation::{
-    validate_image_samples, validate_stored_quality, validate_stored_samples,
-};
 use crate::stacking::frame_store::frame_facts::FrameFacts;
 
 #[derive(Debug)]
@@ -193,7 +191,7 @@ struct CheckedImage<I> {
     quality: FrameQuality<Buffer2<f32>>,
 }
 
-/// A decoded frame's per-frame checks, in the order `validate_frame` runs them — geometry, its
+/// A decoded frame's per-frame checks, in the order `FrameCheck::stored` runs them — geometry, its
 /// facts against `facts` when the set's are known, then its samples — and its statistics and
 /// quality planes.
 fn check_decoded<I: StackableImage>(
@@ -207,7 +205,7 @@ fn check_decoded<I: StackableImage>(
     if let Some(facts) = facts {
         facts.check(index, &FrameFacts::of(&image))?;
     }
-    validate_image_samples(&image, index, cancel)?;
+    FrameCheck { index, cancel }.samples(&image)?;
     Ok(CheckedImage {
         stats: FrameStats::measure(&image),
         quality: FrameQuality::for_unwarped(&image),
@@ -413,9 +411,10 @@ fn cache_frame<I: StackableImage>(
         if let Some(facts) = facts {
             facts.check(index, &frame.source_stats.facts)?;
         }
-        validate_stored_samples(&frame.channels, dimensions.pixel_count(), index, cancel)?;
+        let check = FrameCheck { index, cancel };
+        check.stored_samples(&frame.channels, dimensions.pixel_count())?;
         // Mapped from disk, so held to the pairing the combine divides by like any other planes.
-        validate_stored_quality(index, &frame, dimensions, cancel)?;
+        check.stored_quality(&frame, dimensions)?;
         return Ok(frame);
     }
 

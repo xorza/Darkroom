@@ -1,7 +1,7 @@
 //! Row-major 3x3 matrix of f64 values.
 
 use glam::DVec2;
-use std::ops::{Index, IndexMut, Mul};
+use std::ops::{Index, IndexMut};
 
 /// Row-major 3x3 matrix of f64 values.
 ///
@@ -130,27 +130,6 @@ impl DMat3 {
     }
 }
 
-impl Default for DMat3 {
-    #[inline]
-    fn default() -> Self {
-        Self::identity()
-    }
-}
-
-impl From<[f64; 9]> for DMat3 {
-    #[inline]
-    fn from(data: [f64; 9]) -> Self {
-        Self { data }
-    }
-}
-
-impl From<DMat3> for [f64; 9] {
-    #[inline]
-    fn from(m: DMat3) -> Self {
-        m.data
-    }
-}
-
 impl Index<usize> for DMat3 {
     type Output = f64;
     #[inline]
@@ -163,45 +142,6 @@ impl IndexMut<usize> for DMat3 {
     #[inline]
     fn index_mut(&mut self, idx: usize) -> &mut f64 {
         &mut self.data[idx]
-    }
-}
-
-impl Mul for DMat3 {
-    type Output = DMat3;
-    #[inline]
-    fn mul(self, rhs: DMat3) -> DMat3 {
-        self.mul_mat(&rhs)
-    }
-}
-
-impl Mul<DVec2> for DMat3 {
-    type Output = DVec2;
-    /// Homogeneous point transform: `matrix * point`.
-    #[inline]
-    fn mul(self, rhs: DVec2) -> DVec2 {
-        self.transform_point(rhs)
-    }
-}
-
-impl Mul<f64> for DMat3 {
-    type Output = DMat3;
-    /// Scalar multiplication: `matrix * scalar`.
-    #[inline]
-    fn mul(self, rhs: f64) -> DMat3 {
-        let mut out = self;
-        for v in &mut out.data {
-            *v *= rhs;
-        }
-        out
-    }
-}
-
-impl Mul<DMat3> for f64 {
-    type Output = DMat3;
-    /// Scalar multiplication: `scalar * matrix`.
-    #[inline]
-    fn mul(self, rhs: DMat3) -> DMat3 {
-        rhs * self
     }
 }
 

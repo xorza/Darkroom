@@ -211,11 +211,10 @@ fn master_stack_memory_probe() -> io::Result<()> {
     println!("\n");
     println!("=== result ===");
     println!(
-        "master        {}×{} × {} ch, mean {:.4}",
+        "master        {}×{} × {} ch",
         dims.width(),
         dims.height(),
-        dims.channels(),
-        result.image.mean()
+        dims.channels()
     );
     println!(
         "time          {total_secs:.2}s total  ({load_secs:.2}s load + {combine_secs:.2}s combine)"

@@ -56,7 +56,7 @@ fn register_with_sip_recovers_barrel_distortion() {
     .expect("SIP registration should succeed");
 
     assert!(
-        with_sip.sip_fit().is_some(),
+        with_sip.sip().is_some(),
         "a SIP polynomial should have been fitted"
     );
     // A linear transform cannot absorb the radial barrel → a visible residual remains.

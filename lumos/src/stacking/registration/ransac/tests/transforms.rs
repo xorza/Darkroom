@@ -133,3 +133,22 @@ fn a_euclidean_fit_of_scaled_data_keeps_the_rotation() {
         fit.rotation_angle()
     );
 }
+
+/// A minimal sample a hair off collinear passes the normal equations' determinant floor yet fits
+/// coefficients of order 1e7 once denormalized: three reference points a pixel apart, the third
+/// 3e-5 px off their line, against targets thousands of pixels apart. Such a fit has no
+/// normalizable product, and the estimate reports none rather than panicking in `compose`.
+#[test]
+fn a_near_collinear_affine_sample_gives_no_transform() {
+    let reference = [
+        DVec2::new(0.0, 0.0),
+        DVec2::new(1.0, 0.0),
+        DVec2::new(2.0, 0.00003),
+    ];
+    let target = [
+        DVec2::new(0.0, 0.0),
+        DVec2::new(3000.0, 1000.0),
+        DVec2::new(1000.0, 3000.0),
+    ];
+    assert!(estimate_transform(&reference, &target, TransformType::Affine).is_none());
+}

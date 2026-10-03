@@ -10,6 +10,8 @@ use common::CancelToken;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
+use crate::background_mesh::mesh_axis::MeshAxis;
+use crate::concurrency::JobScratchPool;
 use crate::io::image::cfa::CfaType;
 use crate::math::statistics::median_mut;
 use crate::math::vec2us::Vec2us;
@@ -50,41 +52,42 @@ impl DarkBackground {
             width > 0 && height > 0,
             "dark background needs non-zero dimensions"
         );
-        let tiles_x = width.div_ceil(DARK_BACKGROUND_TILE_SIZE);
-        let tiles_y = height.div_ceil(DARK_BACKGROUND_TILE_SIZE);
+        let columns = MeshAxis::new(width, DARK_BACKGROUND_TILE_SIZE.min(width));
+        let rows = MeshAxis::new(height, DARK_BACKGROUND_TILE_SIZE.min(height));
+        let (tiles_x, tiles_y) = (columns.count(), rows.count());
         let pattern = cfa_type;
         let num_colors = pattern.num_colors();
+        let scratch = JobScratchPool::<[Vec<f32>; 3]>::default();
 
         let mut tiles: Vec<DarkTile> = (0..tiles_x * tiles_y)
             .into_par_iter()
-            .map(|index| {
-                if cancel.is_cancelled() {
-                    return Err(CalibrationError::Cancelled);
-                }
-
-                let tx = index % tiles_x;
-                let ty = index / tiles_x;
-                let x_start = tx * width / tiles_x;
-                let x_end = (tx + 1) * width / tiles_x;
-                let y_start = ty * height / tiles_y;
-                let y_end = (ty + 1) * height / tiles_y;
-                let mut samples: [Vec<f32>; 3] = array::from_fn(|_| Vec::new());
-
-                for y in y_start..y_end {
-                    for x in x_start..x_end {
-                        let color = pattern.color_at(Vec2us::new(x, y)) as usize;
-                        samples[color].push(data[y * width + x]);
+            .map_init(
+                || scratch.acquire(),
+                |samples, index| {
+                    if cancel.is_cancelled() {
+                        return Err(CalibrationError::Cancelled);
                     }
-                }
 
-                let mut values = [f32::NAN; 3];
-                for color in 0..num_colors {
-                    if !samples[color].is_empty() {
-                        values[color] = median_mut(&mut samples[color]);
+                    let (tx, ty) = (index % tiles_x, index / tiles_x);
+                    for plane in samples.iter_mut() {
+                        plane.clear();
                     }
-                }
-                Ok(DarkTile { values })
-            })
+                    for y in rows.start(ty)..rows.end(ty) {
+                        for x in columns.start(tx)..columns.end(tx) {
+                            let color = pattern.color_at(Vec2us::new(x, y)) as usize;
+                            samples[color].push(data[y * width + x]);
+                        }
+                    }
+
+                    let mut values = [f32::NAN; 3];
+                    for color in 0..num_colors {
+                        if !samples[color].is_empty() {
+                            values[color] = median_mut(&mut samples[color]);
+                        }
+                    }
+                    Ok(DarkTile { values })
+                },
+            )
             .collect::<Result<_, CalibrationError>>()?;
 
         let missing: [bool; 3] = array::from_fn(|color| {
@@ -106,8 +109,8 @@ impl DarkBackground {
             }
         }
 
-        let centers_x = tile_centers(width, tiles_x);
-        let centers_y = tile_centers(height, tiles_y);
+        let centers_x: Vec<f32> = (0..tiles_x).map(|tile| columns.centre(tile)).collect();
+        let centers_y: Vec<f32> = (0..tiles_y).map(|tile| rows.centre(tile)).collect();
         Ok(Self {
             tiles: Buffer2::new(tiles_x, tiles_y, tiles),
             x_spans: interpolation_spans(width, &centers_x),
@@ -131,16 +134,6 @@ impl DarkBackground {
         );
         lerp(top, bottom, ys.fraction)
     }
-}
-
-fn tile_centers(length: usize, tile_count: usize) -> Vec<f32> {
-    (0..tile_count)
-        .map(|tile| {
-            let start = tile * length / tile_count;
-            let end = (tile + 1) * length / tile_count;
-            (start + end - 1) as f32 * 0.5
-        })
-        .collect()
 }
 
 fn interpolation_spans(length: usize, centers: &[f32]) -> Vec<InterpolationSpan> {

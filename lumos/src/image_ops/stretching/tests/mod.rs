@@ -476,7 +476,18 @@ fn ghs_end_to_end_lifts_the_background() {
     let mut px: Vec<f32> = (0..90).map(|i| 0.04 + (i % 3) as f32 * 0.01).collect();
     px.extend(iter::repeat_n(0.8f32, 10));
     let mut img = gray(Size2us::new(10, 10), px.clone());
-    Stretch::ghs(5.0, 0.0, 0.1).apply(&mut img).unwrap();
+    Stretch {
+        method: StretchMethod::Ghs {
+            d: 5.0,
+            b: 0.0,
+            sp: 0.1,
+            lp: 0.0,
+            hp: 1.0,
+        },
+        color: ColorMode::ColorPreserving,
+    }
+    .apply(&mut img)
+    .unwrap();
     let out = img.channel(0).to_vec();
     assert!(median_of(&out) > median_of(&px), "background lifted");
     assert!(out[95] > out[0], "stars stay brighter than the background");

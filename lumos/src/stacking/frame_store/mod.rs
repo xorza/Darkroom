@@ -28,7 +28,7 @@ use crate::stacking::frame_store::cache_key::CacheKey;
 use crate::stacking::frame_store::cache_key::DecoderKind;
 use crate::stacking::frame_store::error::FrameStoreError;
 use crate::stacking::frame_store::frame_quality::FrameQuality;
-use crate::stacking::frame_store::frame_spill::{Committed, FrameSpill, write_file, write_plane};
+use crate::stacking::frame_store::frame_spill::{Committed, FrameSpill, write_file};
 use crate::stacking::frame_store::frame_stats::FrameStats;
 use crate::stacking::frame_store::stored_plane::StoredPlane;
 
@@ -150,7 +150,7 @@ impl StoredFrame {
         let channels = spill.spill_channels(image)?;
         let quality = quality.try_map(|plane, buffer| {
             let path = spill.quality_path(plane);
-            write_plane(&path, buffer.pixels())?;
+            StoredPlane::write(&path, buffer.pixels())?;
             StoredPlane::map(path)
         })?;
         Ok(Self {

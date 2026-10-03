@@ -6,6 +6,17 @@ use crate::stacking::registration::resample::source_position::SourcePosition;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::testing::prelude::*;
 
+/// How many pixels each method's kernel reaches from its centre: one for nearest and bilinear,
+/// two for bicubic and Lanczos-2, and `a` for Lanczos-`a`.
+const fn kernel_radius(method: InterpolationMethod) -> usize {
+    match method {
+        InterpolationMethod::Nearest | InterpolationMethod::Bilinear => 1,
+        InterpolationMethod::Bicubic | InterpolationMethod::Lanczos2 => 2,
+        InterpolationMethod::Lanczos3 => 3,
+        InterpolationMethod::Lanczos4 => 4,
+    }
+}
+
 const TOL: f32 = 1e-5;
 const LANCZOS_ORDERS: [LanczosOrder; 3] =
     [LanczosOrder::Two, LanczosOrder::Three, LanczosOrder::Four];
@@ -250,7 +261,7 @@ fn support_and_confidence_vanish_together_across_every_border() {
     // and the span reaches a full kernel radius past both borders on each axis.
     const STEP: f32 = 0.157;
     for method in InterpolationMethod::ALL {
-        let radius = method.kernel_radius() as f32 + 1.0;
+        let radius = kernel_radius(method) as f32 + 1.0;
         let mut lowest_survivor = f32::INFINITY;
         let mut partial_support_seen = false;
         let mut uncovered_seen = false;
@@ -301,7 +312,7 @@ fn support_and_confidence_vanish_together_across_every_border() {
 fn coverage_is_continuous_and_monotonic_across_left_border() {
     let dims = Size2us::new(32, 32);
     for method in InterpolationMethod::ALL {
-        let radius = method.kernel_radius() as i32;
+        let radius = kernel_radius(method) as i32;
         let mut previous = 0.0;
         for integer in -radius..=radius {
             let coverage = quality_of(integer as f32 + 0.37, 16.0, dims, method).coverage;

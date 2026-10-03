@@ -148,10 +148,9 @@ fn pipeline_stack_budget_probe() -> io::Result<()> {
         )
         .expect("stack failed");
         println!(
-            "  [{}/{}] {stage:<14} mean {:.4}  ({:.2}s)",
+            "  [{}/{}] {stage:<14} ({:.2}s)",
             k + 1,
             stages.len(),
-            result.image.mean(),
             stage_start.elapsed().as_secs_f64()
         );
         black_box(&result);

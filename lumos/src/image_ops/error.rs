@@ -117,6 +117,18 @@ mod tests {
             }
             .apply(image)
         });
-        rejects("ghs d", |image| Stretch::ghs(-1.0, 0.0, 0.5).apply(image));
+        rejects("ghs d", |image| {
+            Stretch {
+                method: StretchMethod::Ghs {
+                    d: -1.0,
+                    b: 0.0,
+                    sp: 0.5,
+                    lp: 0.0,
+                    hp: 1.0,
+                },
+                color: ColorMode::ColorPreserving,
+            }
+            .apply(image)
+        });
     }
 }

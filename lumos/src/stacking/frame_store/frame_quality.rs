@@ -64,11 +64,11 @@ impl Display for FramePlane {
 /// The two planes agree pixel by pixel as well: `coverage == 0` exactly where `confidence == 0`.
 /// `registration::resample::quality::quality_at` establishes that — outside the source footprint
 /// both are zero, and inside it every branch gives a positive confidence wherever there is support
-/// — and [`validate_frame_quality`] holds caller-supplied planes to it, because the combine leans on
+/// — and [`FrameCheck::quality_pair`] holds caller-supplied planes to it, because the combine leans on
 /// it: a sample that clears the coverage floor is guaranteed a positive confidence to weight it by,
 /// and `source_noise_variance` a non-zero one to divide by.
 ///
-/// [`validate_frame_quality`]: crate::stacking::combine::cache::validation::validate_frame_quality
+/// [`FrameCheck::quality_pair`]: crate::stacking::combine::cache::frame_check::FrameCheck::quality_pair
 #[derive(Debug, Clone)]
 pub(crate) enum FrameQuality<P> {
     /// No quality planes at all — a frame that was never warped and whose source declared every

@@ -522,7 +522,7 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
             .unwrap_or_else(|| panic!("{name} frame must carry a mask"));
         assert_eq!(nulls.count(), 1, "{name}");
         for index in 0..6 {
-            assert_eq!(nulls.is_null(index), index == 2, "{name} index {index}");
+            assert_eq!(nulls.bits().get(index), index == 2, "{name} index {index}");
         }
     }
 
@@ -621,7 +621,7 @@ fn a_wholly_null_fits_image_loads_as_zero_with_every_pixel_masked() {
     assert_eq!(loaded.channel(0).pixels(), &[0.0; 4]);
     let nulls = loaded.nulls.as_ref().unwrap();
     assert_eq!(nulls.count(), 4);
-    assert!((0..4).all(|index| nulls.is_null(index)));
+    assert!((0..4).all(|index| nulls.bits().get(index)));
 }
 
 #[test]
@@ -789,7 +789,7 @@ fn fits_nulls_of_every_non_finite_kind_are_summarized_together() {
     assert_eq!(nulls.count(), 3);
     for index in 0..size.pixel_count() {
         assert_eq!(
-            nulls.is_null(index),
+            nulls.bits().get(index),
             matches!(index, 0 | 5 | 10),
             "index {index}"
         );

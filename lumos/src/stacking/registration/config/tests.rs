@@ -102,16 +102,6 @@ fn config_mosaic_preset() {
 }
 
 #[test]
-fn interpolation_method_kernel_radius() {
-    assert_eq!(InterpolationMethod::Nearest.kernel_radius(), 1);
-    assert_eq!(InterpolationMethod::Bilinear.kernel_radius(), 1);
-    assert_eq!(InterpolationMethod::Bicubic.kernel_radius(), 2);
-    assert_eq!(InterpolationMethod::Lanczos2.kernel_radius(), 2);
-    assert_eq!(InterpolationMethod::Lanczos3.kernel_radius(), 3);
-    assert_eq!(InterpolationMethod::Lanczos4.kernel_radius(), 4);
-}
-
-#[test]
 fn warp_params_defaults() {
     let default = WarpParams::default();
     assert_eq!(default.method, InterpolationMethod::Lanczos3);

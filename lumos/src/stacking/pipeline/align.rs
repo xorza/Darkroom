@@ -11,7 +11,7 @@ use crate::io::image::linear::LinearImage;
 use crate::io::raw::demosaic::DemosaicMemory;
 use crate::memory::run_memory::RunMemory;
 use crate::memory::{MemoryPlan, PerFrameBytes, RunShape};
-use crate::stacking::combine::cache::validation::validate_image_samples;
+use crate::stacking::combine::cache::frame_check::FrameCheck;
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::combine::stack::stack_stored_frames;
 use crate::stacking::frame_store::StoredFrame;
@@ -62,7 +62,11 @@ pub fn align_and_stack(
     for (index, light) in lights.iter().enumerate() {
         FrameDimensionMismatch::check(index, dimensions, light.dimensions())
             .map_err(|mismatch| Error::from(StackError::from(mismatch)))?;
-        validate_image_samples(light, index, &cancel)?;
+        FrameCheck {
+            index,
+            cancel: &cancel,
+        }
+        .samples(light)?;
     }
 
     // One reading for the run, for the tier decision and the combine's chunk sizes alike.

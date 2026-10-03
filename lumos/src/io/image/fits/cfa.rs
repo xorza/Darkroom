@@ -111,11 +111,10 @@ impl CfaFitsHdu {
             // mask. Without it the samples under those pixels — a decoder fill, or the same-colour
             // median `CfaImage::repair_nulls` put there — would reload as measurements, which is
             // the fabrication the mask exists to prevent.
-            for (index, sample) in samples.iter_mut().enumerate() {
-                if nulls.is_null(index) {
-                    *sample = f32::NAN;
-                }
-            }
+            let width = cfa.data.width();
+            nulls
+                .bits()
+                .for_each_set(|pos| samples[pos.y * width + pos.x] = f32::NAN);
         }
         let image =
             Image::new([cfa.data.width(), cfa.data.height()], samples).map_err(fits_to_io)?;
