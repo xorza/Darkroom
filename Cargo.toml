@@ -4,8 +4,13 @@ version = "0.1.0"
 edition = "2024"
 exclude = ["AGENTS.md", "CLAUDE.md"]
 
+# One lint set for every crate of the Darkroom workspace, copied here because a submodule does
+# not inherit it. Warn, not deny: the verification chain runs clippy with `-D warnings`, and a
+# build in the middle of an edit keeps working. Every suppression in code is
+# `#[expect(.., reason = "..")]`.
 [lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }
+elided_lifetimes_in_paths = "warn"
 missing_debug_implementations = "warn"
 redundant_imports = "warn"
 trivial_numeric_casts = "warn"
@@ -22,7 +27,8 @@ missing_panics_doc = "allow"
 must_use_candidate = "allow"
 # `assert!(x.is_empty())` reads plainer than a comparison with an empty array.
 assert_is_empty = "allow"
-# `usize -> f32/f64` in numeric code: a hit says nothing unless the value passes 2^24.
+# `usize -> f32/f64` in numeric code: a hit says nothing unless the value passes 2^24, and the
+# code cannot show that.
 cast_precision_loss = "allow"
 # `f64 -> f32` narrowing is the design of the f32 pipelines.
 cast_possible_truncation = "allow"
@@ -33,22 +39,51 @@ many_single_char_names = "allow"
 too_many_lines = "allow"
 # `#[inline(always)]` on `#[target_feature]` SIMD helpers is deliberate.
 inline_always = "allow"
-# Exact comparison is deliberate where it appears.
+# Exact comparison is deliberate: sample-domain scales, sentinels, tests of exact values.
 float_cmp = "allow"
-# Every pointer cast feeds an unaligned load.
+# Every pointer cast feeds an unaligned load (`_mm_loadu_*`).
 cast_ptr_alignment = "allow"
 absolute_paths = "warn"
 allow_attributes = "warn"
 allow_attributes_without_reason = "warn"
+assigning_clones = "warn"
+cast_lossless = "warn"
+cast_possible_wrap = "warn"
+cast_sign_loss = "warn"
 clone_on_ref_ptr = "warn"
 dbg_macro = "warn"
+decimal_bitwise_operands = "warn"
+default_trait_access = "warn"
+ignore_without_reason = "warn"
+items_after_statements = "warn"
 items_after_test_module = "warn"
+large_stack_arrays = "warn"
+large_types_passed_by_value = "warn"
 let_underscore_must_use = "warn"
+manual_let_else = "warn"
+map_unwrap_or = "warn"
+match_same_arms = "warn"
+match_wildcard_for_single_variants = "warn"
+# `const fn` by default: every fn that can be one is.
+missing_const_for_fn = "warn"
+missing_fields_in_debug = "warn"
+needless_pass_by_value = "warn"
 print_stderr = "warn"
 print_stdout = "warn"
+redundant_closure_for_method_calls = "warn"
+return_self_not_must_use = "warn"
 self_named_module_files = "warn"
+semicolon_if_nothing_returned = "warn"
+should_panic_without_expect = "warn"
+struct_field_names = "warn"
 todo = "warn"
+trivially_copy_pass_by_ref = "warn"
+unnecessary_debug_formatting = "warn"
+unnecessary_wraps = "warn"
+unreadable_literal = "warn"
 unused_result_ok = "warn"
+unused_self = "warn"
+used_underscore_binding = "warn"
 
 [lints.rustdoc]
 broken_intra_doc_links = "warn"
@@ -110,13 +145,13 @@ required-features = ["bench"]
 ignored = ["strum"]
 
 [profile.bench]
-debug = true
+debug = "line-tables-only"
 opt-level = 3
 strip = "none"
 split-debuginfo = "off"
 
 [profile.release]
-debug = true
+debug = "line-tables-only"
 strip = "none"
 opt-level = 3
 split-debuginfo = "off"
