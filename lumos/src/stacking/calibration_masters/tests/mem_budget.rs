@@ -71,7 +71,8 @@ fn cosmic_ray_float_scratch_is_five_frame_planes() {
             CfaType::Mono,
         ),
         &CosmicRayConfig::default(),
-    );
+    )
+    .unwrap();
     assert_eq!(repaired, 1, "the fixture must in-paint something");
 
     let floats = mono_scratch_floats(&mut data, size, &CosmicRayConfig::default());

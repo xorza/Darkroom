@@ -14,11 +14,12 @@ use crate::math::size2us::Size2us;
 use crate::math::statistics::{mad_fast, mad_to_sigma, median_mut};
 use crate::math::vec2us::Vec2us;
 
-use crate::stacking::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
+use crate::stacking::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::stacking::calibration_masters::cosmic_ray::masks::CrMasks;
 use crate::stacking::calibration_masters::cosmic_ray::mono::{
     degenerate_sigma, empirical_noise, parametric_noise_into,
 };
+use crate::stacking::calibration_masters::cosmic_ray::noise_model::NoiseModel;
 
 /// Radius (px) scanned for same-color neighbors — one X-Trans period (6×6) contains every color.
 /// Nearest same-color neighbors for the "fine" median; the coarse median uses all gathered.
@@ -57,6 +58,7 @@ struct XtransScratch {
 pub(super) struct XtransDetector<'a> {
     cfa: &'a CfaType,
     config: &'a CosmicRayConfig,
+    noise: NoiseModel,
     /// Same-colour neighbour geometry, built once per detector.
     ///
     /// Shared with the defect scan, which added it after finding that recomputing the neighbour set
@@ -67,13 +69,14 @@ pub(super) struct XtransDetector<'a> {
 }
 
 impl<'a> XtransDetector<'a> {
-    pub(super) fn new(config: &'a CosmicRayConfig, cfa: &'a CfaType) -> Self {
+    pub(super) fn new(config: &'a CosmicRayConfig, noise: NoiseModel, cfa: &'a CfaType) -> Self {
         let CfaType::XTrans(pattern) = cfa else {
             panic!("XtransDetector requires an X-Trans pattern, got {cfa:?}");
         };
         Self {
             cfa,
             config,
+            noise,
             offsets: XTransOffsets::new(pattern),
             scratch: XtransScratch::default(),
         }
@@ -101,7 +104,7 @@ impl<'a> XtransDetector<'a> {
                 mask: &masks.accumulated,
             };
             scratch.fill_structure(&scene, &self.offsets);
-            scratch.fill_noise(&scene, &self.config.noise);
+            scratch.fill_noise(&scene, self.noise);
             // S = L⁺/N, elementwise over the same extent, so it runs down the L⁺ buffer.
             for (l, &nz) in scratch.lplus.iter_mut().zip(&scratch.noise) {
                 *l /= nz;
@@ -185,7 +188,7 @@ impl XtransScratch {
     /// Empirical uses **per-color** background+σ (R/G/B sit at different sky levels after
     /// flat-fielding, so a whole-mosaic MAD would be inflated); parametric is color-independent
     /// (sensor gain), reusing the Poisson+read model on the same-color signal.
-    fn fill_noise(&mut self, scene: &CfaScene<'_>, noise: &NoiseEstimation) {
+    fn fill_noise(&mut self, scene: &CfaScene<'_>, noise: NoiseModel) {
         let Self {
             signal,
             noise: out,
@@ -194,8 +197,8 @@ impl XtransScratch {
             ..
         } = self;
         let size = scene.size;
-        match *noise {
-            NoiseEstimation::Empirical => {
+        match noise {
+            NoiseModel::Empirical => {
                 for vals in by_color.iter_mut() {
                     vals.clear();
                 }
@@ -224,7 +227,7 @@ impl XtransScratch {
                     empirical_noise(signal[i], bg, sigma)
                 }));
             }
-            NoiseEstimation::Parametric {
+            NoiseModel::Parametric {
                 gain,
                 read_noise,
                 full_scale,

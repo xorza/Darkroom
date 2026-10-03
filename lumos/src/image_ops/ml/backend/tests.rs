@@ -145,3 +145,24 @@ fn an_identity_model_reproduces_the_input() {
         }
     }
 }
+
+/// The stride covers the frame or is refused before any model loads: 0 never advances, and past
+/// the window the bands between tiles hold no output. 1 and 512 are the edges that run.
+#[test]
+fn the_stride_must_cover_the_frame() {
+    let config = |stride| TiledOnnxConfig {
+        weights: "unused.onnx".into(),
+        stride,
+    };
+    for stride in [1, 256, WINDOW] {
+        assert_eq!(config(stride).validate(), Ok(()), "{stride}");
+    }
+    for stride in [0, WINDOW + 1] {
+        let image = LinearImage::from(Buffer2::new_filled(WINDOW, WINDOW, 0.5f32));
+        let error = config(stride).run(&image).unwrap_err();
+        assert!(
+            matches!(&error, MlError::InvalidConfig(invalid) if invalid.field == "ML tile stride"),
+            "{stride}: {error:?}"
+        );
+    }
+}

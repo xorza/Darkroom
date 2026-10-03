@@ -16,6 +16,7 @@ use ort::value::TensorRef;
 
 use imaginarium::Buffer2;
 
+use crate::error::InvalidConfigField;
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
@@ -32,7 +33,8 @@ const FEATHER_MIN: f32 = 0.02;
 pub struct TiledOnnxConfig {
     /// Path to the caller-supplied ONNX model.
     pub weights: PathBuf,
-    /// Tile stride in px (overlap = `WINDOW − stride`). Default 256 (50% overlap).
+    /// Tile stride in px (overlap = `WINDOW − stride`), in `1..=512`: a wider stride would leave
+    /// bands no tile covers. Default 256 (50% overlap).
     pub stride: usize,
 }
 
@@ -43,6 +45,17 @@ impl TiledOnnxConfig {
             stride: 256,
         }
     }
+
+    /// A stride that covers the frame: at least one pixel, and no wider than the window, past
+    /// which the bands between tiles would hold no model output at all.
+    fn validate(&self) -> Result<(), InvalidConfigField> {
+        InvalidConfigField::check(
+            (1..=WINDOW).contains(&self.stride),
+            "ML tile stride",
+            "between 1 and 512",
+            self.stride as f64,
+        )
+    }
 }
 
 /// Why an ML filter failed.
@@ -50,6 +63,8 @@ impl TiledOnnxConfig {
 pub enum MlError {
     #[error("image must be at least {WINDOW}×{WINDOW}, got {}×{}", .0.width, .0.height)]
     TooSmall(Size2us),
+    #[error("invalid ML tiling configuration: {0}")]
+    InvalidConfig(#[from] InvalidConfigField),
     #[error("ONNX model error: {0}")]
     Model(String),
 }
@@ -68,12 +83,12 @@ impl TiledOnnxConfig {
     /// is a separate buffer from its input, and the tile loop reads the input long after it has
     /// begun writing the output.
     pub(crate) fn run(&self, image: &LinearImage) -> Result<LinearImage, MlError> {
+        self.validate()?;
         let planar = image;
         let size = Size2us::new(image.width(), image.height());
         if size.width < WINDOW || size.height < WINDOW {
             return Err(MlError::TooSmall(size));
         }
-        assert!(self.stride > 0, "TiledOnnxConfig.stride must be > 0");
         let mut session = Session::builder()
             .map_err(model_err)?
             .commit_from_file(&self.weights)

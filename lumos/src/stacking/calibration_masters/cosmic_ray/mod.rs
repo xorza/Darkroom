@@ -23,8 +23,10 @@
 
 mod bayer;
 pub(crate) mod config;
+pub(crate) mod error;
 pub(crate) mod masks;
 pub(crate) mod mono;
+pub(crate) mod noise_model;
 mod xtrans;
 
 use crate::io::image::cfa::{CfaImage, CfaType};
@@ -32,7 +34,9 @@ use crate::math::size2us::Size2us;
 
 use crate::stacking::calibration_masters::cosmic_ray::bayer::BayerDetector;
 use crate::stacking::calibration_masters::cosmic_ray::config::CosmicRayConfig;
+use crate::stacking::calibration_masters::cosmic_ray::error::UnknownAdcStep;
 use crate::stacking::calibration_masters::cosmic_ray::mono::MonoDetector;
+use crate::stacking::calibration_masters::cosmic_ray::noise_model::NoiseModel;
 use crate::stacking::calibration_masters::cosmic_ray::xtrans::XtransDetector;
 
 /// Floor for the **noise-normalized** fine structure `F/noise` in the contrast test (in σ units).
@@ -41,18 +45,23 @@ use crate::stacking::calibration_masters::cosmic_ray::xtrans::XtransDetector;
 const FINE_STRUCTURE_SIGMA_FLOOR: f32 = 0.01;
 
 /// Detect and in-paint cosmic rays in a single calibrated frame, in place, dispatching on its CFA
-/// type (mono / Bayer / X-Trans). Returns the number of CR pixels corrected.
-pub(crate) fn reject_cosmic_rays(image: &mut CfaImage, config: &CosmicRayConfig) -> usize {
+/// type (mono / Bayer / X-Trans). Returns the number of CR pixels corrected, or an error when
+/// the parametric noise model needs an ADC step the frame does not record.
+pub(crate) fn reject_cosmic_rays(
+    image: &mut CfaImage,
+    config: &CosmicRayConfig,
+) -> Result<usize, UnknownAdcStep> {
+    let noise = NoiseModel::resolve(&config.noise, image.quantization_sigma)?;
     let size = Size2us::new(image.data.width(), image.data.height());
     // Disjoint fields: the pixels go in by `&mut`, the CFA type is read beside them.
     let pixels = image.data.pixels_mut();
-    match &image.cfa_type {
+    Ok(match &image.cfa_type {
         // Bayer is 2×2-periodic → four dense same-color planes; reuse the mono detector per plane.
-        CfaType::Bayer(_) => BayerDetector::new(config).reject(pixels, size),
+        CfaType::Bayer(_) => BayerDetector::new(config, noise).reject(pixels, size),
         // X-Trans has no dense same-color sub-lattice → same-color stencils on the mosaic.
-        c @ CfaType::XTrans(_) => XtransDetector::new(config, c).reject(pixels, size),
-        CfaType::Mono => MonoDetector::new(config).reject(pixels, size),
-    }
+        c @ CfaType::XTrans(_) => XtransDetector::new(config, noise, c).reject(pixels, size),
+        CfaType::Mono => MonoDetector::new(config, noise).reject(pixels, size),
+    })
 }
 
 #[cfg(test)]

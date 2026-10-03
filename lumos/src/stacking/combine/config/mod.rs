@@ -173,6 +173,22 @@ impl Default for StackConfig {
 }
 
 impl StackConfig {
+    /// This configuration for the frames left once the input frames at `dropped` (ascending)
+    /// are gone: manual weights, given one per input frame, follow their frames; every other
+    /// setting applies unchanged.
+    pub(crate) fn for_survivors(&self, dropped: &[usize]) -> Self {
+        let mut config = self.clone();
+        if let Weighting::Manual(weights) = &mut config.weighting {
+            let mut index = 0;
+            weights.retain(|_| {
+                let kept = dropped.binary_search(&index).is_err();
+                index += 1;
+                kept
+            });
+        }
+        config
+    }
+
     /// Preset: sigma-clipped mean (most common for light frames).
     pub fn sigma_clipped(sigma: f32) -> Self {
         Self {

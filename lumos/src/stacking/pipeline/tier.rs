@@ -16,6 +16,27 @@ use crate::stacking::pipeline::frame::PipelineFrame;
 use crate::stacking::pipeline::result::Error;
 use crate::stacking::registration::resample::WarpBuffers;
 
+/// The memory decisions the register-warp stage reads, both taken from one [`MemoryPlan`]: where a
+/// frame parks, and how many frames are warped at once.
+#[derive(Debug)]
+pub(crate) struct StagePlan {
+    pub(crate) tier: FrameTier,
+    pub(crate) warp_concurrency: usize,
+}
+
+impl StagePlan {
+    pub(crate) fn new(
+        plan: &MemoryPlan,
+        cache: &CacheConfig,
+        memory: RunMemory,
+    ) -> Result<Self, Error> {
+        Ok(Self {
+            tier: FrameTier::for_plan(plan, cache, memory)?,
+            warp_concurrency: plan.warp_concurrency,
+        })
+    }
+}
+
 /// A frame in the store, plus the buffers the tier released — `None` when it kept them.
 #[derive(Debug)]
 pub(crate) struct StoredWarp {
@@ -39,11 +60,7 @@ pub(crate) enum FrameTier {
 
 impl FrameTier {
     /// Spill when the plan says the frame set plus its scratch will not fit.
-    pub(crate) fn for_plan(
-        plan: &MemoryPlan,
-        cache: &CacheConfig,
-        memory: RunMemory,
-    ) -> Result<Self, Error> {
+    fn for_plan(plan: &MemoryPlan, cache: &CacheConfig, memory: RunMemory) -> Result<Self, Error> {
         if plan.fits_in_ram {
             return Ok(Self::Ram);
         }

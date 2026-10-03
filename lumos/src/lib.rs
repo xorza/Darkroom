@@ -63,6 +63,7 @@ pub use io::raw::raw_files::raw_files;
 pub use math::size2us::Size2us;
 pub use math::vec2us::Vec2us;
 pub use stacking::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
+pub use stacking::calibration_masters::cosmic_ray::error::UnknownAdcStep;
 pub use stacking::calibration_masters::defect_map::DefectMap;
 pub use stacking::calibration_masters::error::CalibrationError;
 

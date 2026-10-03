@@ -160,7 +160,7 @@ fn bench_cosmic_ray_reject_mono(b: ::quickbench::Bencher) {
     let config = CosmicRayConfig::default();
     b.bench(|| {
         let mut f = frame.clone();
-        black_box(reject_cosmic_rays(&mut f, black_box(&config)))
+        black_box(reject_cosmic_rays(&mut f, black_box(&config)).unwrap())
     });
 }
 
@@ -173,7 +173,7 @@ fn bench_cosmic_ray_reject_xtrans(b: ::quickbench::Bencher) {
     let config = CosmicRayConfig::default();
     b.bench(|| {
         let mut f = frame.clone();
-        black_box(reject_cosmic_rays(&mut f, black_box(&config)))
+        black_box(reject_cosmic_rays(&mut f, black_box(&config)).unwrap())
     });
 }
 
@@ -183,6 +183,6 @@ fn bench_cosmic_ray_reject_bayer(b: ::quickbench::Bencher) {
     let config = CosmicRayConfig::default();
     b.bench(|| {
         let mut f = frame.clone();
-        black_box(reject_cosmic_rays(&mut f, black_box(&config)))
+        black_box(reject_cosmic_rays(&mut f, black_box(&config)).unwrap())
     });
 }

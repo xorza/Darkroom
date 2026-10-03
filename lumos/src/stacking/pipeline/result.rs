@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use crate::error::InvalidConfigField;
 use crate::io::image::error::ImageError;
+use crate::stacking::calibration_masters::cosmic_ray::error::UnknownAdcStep;
 use crate::stacking::calibration_masters::error::CalibrationError;
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::stack_product::StackProduct;
@@ -85,6 +86,14 @@ pub enum Error {
     DetectionConfig(InvalidConfigField),
     #[error("invalid registration configuration: {0}")]
     RegistrationConfig(InvalidConfigField),
+    #[error("invalid cosmic-ray configuration: {0}")]
+    CosmicRayConfig(InvalidConfigField),
+    #[error("cannot reject cosmic rays in light frame '{path}': {source}")]
+    CosmicRay {
+        path: PathBuf,
+        #[source]
+        source: UnknownAdcStep,
+    },
     #[error(transparent)]
     Stack(#[from] StackError),
 }

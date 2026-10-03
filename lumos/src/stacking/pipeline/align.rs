@@ -11,6 +11,7 @@ use crate::io::image::linear::LinearImage;
 use crate::io::raw::demosaic::DemosaicMemory;
 use crate::memory::run_memory::RunMemory;
 use crate::memory::{MemoryPlan, PerFrameBytes, RunShape};
+use crate::stacking::combine::cache::validation::validate_image_samples;
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::combine::stack::stack_stored_frames;
 use crate::stacking::frame_store::StoredFrame;
@@ -28,7 +29,7 @@ use crate::stacking::pipeline::config::{AlignStackConfig, Reference};
 use crate::stacking::pipeline::detector_pool::DetectorPool;
 use crate::stacking::pipeline::frame::{DetectedFrame, PipelineFrame};
 use crate::stacking::pipeline::result::{AlignStackResult, Error};
-use crate::stacking::pipeline::tier::FrameTier;
+use crate::stacking::pipeline::tier::StagePlan;
 
 /// Detect → register → warp → stack a set of light frames into one aligned, combined image.
 ///
@@ -37,6 +38,10 @@ use crate::stacking::pipeline::tier::FrameTier;
 /// register (too few stars, RANSAC failure, accuracy gate) are dropped and listed in
 /// [`AlignmentSummary::dropped`](crate::stacking::pipeline::result::AlignmentSummary::dropped);
 /// the stack proceeds with whatever aligned. A single input frame is returned as its own "stack".
+///
+/// Every light must share the first one's dimensions and hold only finite samples; both are
+/// checked before any work, so a bad input is reported as one instead of surfacing from the
+/// combine after a warp has spread it.
 ///
 /// The frames arrive decoded and resident, so the inputs are committed before this is called —
 /// but the warped outputs are a second full set, and those spill to the frame store when they
@@ -52,7 +57,13 @@ pub fn align_and_stack(
     if lights.is_empty() {
         return Err(Error::NoFrames);
     }
-    config.validate()?;
+    config.validate(lights.len())?;
+    let dimensions = lights[0].dimensions();
+    for (index, light) in lights.iter().enumerate() {
+        FrameDimensionMismatch::check(index, dimensions, light.dimensions())
+            .map_err(|mismatch| Error::Stack(mismatch.into()))?;
+        validate_image_samples(light, index, &cancel).map_err(Error::Stack)?;
+    }
 
     // One reading for the run, for the tier decision and the combine's chunk sizes alike.
     let memory = RunMemory::read(config.stack.cache.memory_override);
@@ -60,7 +71,6 @@ pub fn align_and_stack(
     // The inputs are already decoded and resident: their decode left exactly their own bytes and
     // has no transient, so only the warped outputs, the per-frame scratch and the combine's output
     // are still in question.
-    let dimensions = lights[0].dimensions();
     let frame_bytes = memory::frame_bytes(dimensions);
     let decoded = DemosaicMemory {
         output_bytes: frame_bytes,
@@ -79,13 +89,19 @@ pub fn align_and_stack(
         rayon::current_num_threads(),
         memory.planning(),
     );
-    let tier = FrameTier::for_plan(&plan, &config.stack.cache, memory)?;
+    let stage = StagePlan::new(&plan, &config.stack.cache, memory)?;
 
-    tracing::info!(frames = total, spilling = tier.spills(), "Detecting stars");
+    tracing::info!(
+        frames = total,
+        spilling = stage.tier.spills(),
+        "Detecting stars"
+    );
     let detected_count = StageCounter::new(&progress, StackingStage::Preparing, total);
     let detections = {
+        // Bounded like the calibrated entry's: the plan charges each in-flight frame the
+        // detector's whole working set.
         let mut detectors =
-            DetectorPool::from_config(&config.detection, total.min(rayon::current_num_threads()))
+            DetectorPool::from_config(&config.detection, plan.decode_concurrency.min(total))
                 .map_err(Error::DetectionConfig)?;
         detectors.try_map(&lights, |detector, _index, image| {
             // Cancelled: abort the batch rather than spend the rest of the budget detecting
@@ -113,14 +129,7 @@ pub fn align_and_stack(
         })
         .collect();
 
-    register_warp_and_stack(
-        detected,
-        config,
-        tier,
-        plan.warp_concurrency,
-        progress,
-        cancel,
-    )
+    register_warp_and_stack(detected, config, stage, progress, cancel)
 }
 
 /// The detection funnel — candidates → deblended → centroided → kept — shows how confidently
@@ -141,36 +150,40 @@ pub(crate) fn log_detection(frame: usize, total: usize, result: &DetectionResult
 /// Register every frame to the chosen reference, warp it, and combine the survivors.
 ///
 /// The single body behind both entry points. The front ends differ only in how a frame becomes
-/// a [`DetectedFrame`] — already decoded, or decoded and calibrated from a path — and `tier`
+/// a [`DetectedFrame`] — already decoded, or decoded and calibrated from a path — and `stage`
 /// decides whether a warped output stays resident or goes to the frame store. Everything from
 /// reference selection onward is the same work either way.
+///
+/// Both entries checked every frame's dimensions against the first before detection: `warp`
+/// reprojects into the *source* frame's grid, so a mismatch here would reach the combine as
+/// differently-sized planes.
 pub(crate) fn register_warp_and_stack(
     mut detected: Vec<DetectedFrame>,
     config: &AlignStackConfig,
-    tier: FrameTier,
-    warp_concurrency: usize,
+    stage: StagePlan,
     progress: ProgressCallback,
     cancel: CancelToken,
 ) -> Result<AlignStackResult, Error> {
+    let StagePlan {
+        tier,
+        warp_concurrency,
+    } = stage;
     let total = detected.len();
     if cancel.is_cancelled() {
         return Err(Error::Stack(StackError::Cancelled));
     }
-
-    // Fail before spending any registration work on a set that can't combine. `warp` reprojects
-    // into the *source* frame's grid, not the reference's, so mismatched inputs would otherwise
-    // reach the combine as differently-sized planes rather than as an error.
-    let expected = detected[0].image.dimensions();
-    for (index, frame) in detected.iter().enumerate() {
-        FrameDimensionMismatch::check(index, expected, frame.image.dimensions())
-            .map_err(|mismatch| Error::Stack(mismatch.into()))?;
-    }
+    debug_assert!(
+        detected
+            .iter()
+            .all(|frame| frame.image.dimensions() == detected[0].image.dimensions()),
+        "both entries check the dimensions before detection"
+    );
 
     // Taken before the frames are consumed below, so the funnel survives into the result in input
     // order — including for frames registration goes on to drop.
     let detection: Vec<Diagnostics> = detected
-        .iter()
-        .map(|frame| frame.diagnostics.clone())
+        .iter_mut()
+        .map(|frame| mem::take(&mut frame.diagnostics))
         .collect();
 
     let star_counts: Vec<usize> = detected.iter().map(|frame| frame.stars.len()).collect();
@@ -301,7 +314,7 @@ pub(crate) fn register_warp_and_stack(
         tier.into_cache_tier(),
         dimensions,
         metadata,
-        config.stack.clone(),
+        config.stack.for_survivors(&dropped),
         progress,
         cancel,
     )?;
