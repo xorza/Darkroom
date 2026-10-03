@@ -22,6 +22,8 @@ pub(crate) struct MeshWorkspace {
 }
 
 impl MeshWorkspace {
+    /// The tile grid of `pixels` with its statistics and the y-spline derivatives that
+    /// interpolating it reads.
     pub(crate) fn compute(
         &mut self,
         pixels: &Buffer2<f32>,
@@ -30,6 +32,42 @@ impl MeshWorkspace {
         sigma_clip_iterations: usize,
         median_filter: bool,
     ) -> &TileGrid {
+        self.fill_tile_stats(pixels, mask, tile_size, sigma_clip_iterations, median_filter);
+        let tiles_y = self.grid.as_ref().unwrap().stats.height();
+        self.spline_values.resize(tiles_y, 0.0);
+        self.spline_d2.resize(tiles_y, 0.0);
+        self.spline_scratch.resize(tiles_y.saturating_sub(2), 0.0);
+        let grid = self.grid.as_mut().unwrap();
+        grid.compute_y_spline_derivatives(
+            &mut self.spline_values,
+            &mut self.spline_d2,
+            &mut self.spline_scratch,
+        );
+        grid
+    }
+
+    /// The tile grid of `pixels` with its statistics only, for a caller that reads the tiles and
+    /// never interpolates between them.
+    pub(crate) fn tile_stats(
+        &mut self,
+        pixels: &Buffer2<f32>,
+        mask: Option<&BitBuffer2>,
+        tile_size: usize,
+        sigma_clip_iterations: usize,
+        median_filter: bool,
+    ) -> &TileGrid {
+        self.fill_tile_stats(pixels, mask, tile_size, sigma_clip_iterations, median_filter);
+        self.grid.as_ref().unwrap()
+    }
+
+    fn fill_tile_stats(
+        &mut self,
+        pixels: &Buffer2<f32>,
+        mask: Option<&BitBuffer2>,
+        tile_size: usize,
+        sigma_clip_iterations: usize,
+        median_filter: bool,
+    ) {
         let width = pixels.width();
         let height = pixels.height();
         let dimensions = Size2us::new(width, height);
@@ -53,20 +91,11 @@ impl MeshWorkspace {
         {
             self.median_filter_scratch = Some(Buffer2::new_default(tiles_x, tiles_y));
         }
-        self.spline_values.resize(tiles_y, 0.0);
-        self.spline_d2.resize(tiles_y, 0.0);
-        self.spline_scratch.resize(tiles_y.saturating_sub(2), 0.0);
         let grid = self.grid.as_mut().unwrap();
         grid.fill_tile_stats(pixels, mask, sigma_clip_iterations, &self.tile_scratch);
         if median_filter {
             grid.apply_median_filter(self.median_filter_scratch.as_mut().unwrap());
         }
-        grid.compute_y_spline_derivatives(
-            &mut self.spline_values,
-            &mut self.spline_d2,
-            &mut self.spline_scratch,
-        );
-        grid
     }
 
     pub(crate) fn clear(&mut self) {

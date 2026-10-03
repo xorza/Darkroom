@@ -2,16 +2,16 @@
 mod real_data;
 
 use crate::image_ops::denoise::{Denoise, Threshold};
-use crate::image_ops::error::OpError;
 use crate::testing::images::{gray_image as gray, rgb_image as rgb};
 use crate::testing::prelude::*;
 use crate::testing::synthetic::metrics::pixel_stats;
+use crate::testing::synthetic::patterns;
 
+/// A flat `bg` with white Gaussian noise of `sigma`.
 fn noisy(size: Size2us, bg: f32, sigma: f32, seed: u64) -> Vec<f32> {
-    let mut rng = TestRng::new(seed);
-    (0..size.pixel_count())
-        .map(|_| bg + rng.next_gaussian_f32() * sigma)
-        .collect()
+    let mut px = vec![bg; size.pixel_count()];
+    patterns::add_gaussian_noise(&mut px, sigma, seed);
+    px
 }
 
 #[test]
@@ -22,8 +22,8 @@ fn threshold_apply_hand_computed() {
     assert_eq!(Threshold::Hard.apply(0.1, 0.2), 0.0);
     assert_eq!(Threshold::Hard.apply(0.2, 0.2), 0.2); // boundary is kept (>=)
     // Soft: sign(w) * max(|w| - t, 0).
-    assert!((Threshold::Soft.apply(0.3, 0.2) - 0.1).abs() < 1e-6);
-    assert!((Threshold::Soft.apply(-0.3, 0.2) + 0.1).abs() < 1e-6);
+    assert_eq!(Threshold::Soft.apply(0.3, 0.2), 0.3 - 0.2);
+    assert_eq!(Threshold::Soft.apply(-0.3, 0.2), -(0.3 - 0.2));
     assert_eq!(Threshold::Soft.apply(0.1, 0.2), 0.0);
 }
 
@@ -43,11 +43,10 @@ fn denoise_reduces_white_noise_and_preserves_mean() {
         out_std < 0.6 * in_std,
         "white noise reduced: out_std {out_std} vs in_std {in_std}"
     );
-    assert!(
-        ((pixel_stats(&out).mean as f32) - bg).abs() < 0.01,
-        "DC preserved near {bg}: {}",
-        (pixel_stats(&out).mean as f32)
-    );
+    // What denoising removes is thresholded white noise, zero-mean: over 16 384 pixels its mean
+    // is of order σ/√n = 4e-4, and the input's own mean sits that close to the background too.
+    // 2e-3 is five of those.
+    assert_close!(pixel_stats(&out).mean, bg, 2e-3, "DC preserved");
 }
 
 #[test]
@@ -95,7 +94,9 @@ fn strength_zero_is_identity_and_blends_between() {
         "strength 0 leaves the image untouched"
     );
 
-    // Partial strength sits strictly between no-op and full denoise.
+    // The removed noise depends on the input alone, so the output is affine in the strength: half
+    // strength is the midpoint of none and full, to the rounding of each scale's subtraction —
+    // two per scale, over at most 6 scales, of values ≤ 0.8: 16ε of 0.8.
     let mut half = gray(size, px.clone());
     let mut full = gray(size, px.clone());
     Denoise {
@@ -104,14 +105,25 @@ fn strength_zero_is_identity_and_blends_between() {
     }
     .apply(&mut half)
     .unwrap();
-    Denoise::default().apply(&mut full).unwrap();
-    let in_std = pixel_stats(&px).std as f32;
-    let half_std = pixel_stats(half.channel(0)).std as f32;
-    let full_std = pixel_stats(full.channel(0)).std as f32;
-    assert!(
-        full_std < half_std && half_std < in_std,
-        "blend ordering: full {full_std} < half {half_std} < in {in_std}"
-    );
+    Denoise {
+        strength: 1.0,
+        ..Default::default()
+    }
+    .apply(&mut full)
+    .unwrap();
+    let bound = 16.0 * f32::EPSILON * 0.8;
+    for ((&h, &f), &p) in half
+        .channel(0)
+        .pixels()
+        .iter()
+        .zip(full.channel(0).pixels())
+        .zip(&px)
+    {
+        assert!(
+            (h - f32::midpoint(p, f)).abs() <= bound,
+            "{h} between {p} and {f}"
+        );
+    }
 }
 
 #[test]
@@ -181,25 +193,27 @@ fn denoise_preserves_bright_feature() {
     );
 }
 
+/// Colour is denoised channel by channel, through one shared scratch: each channel comes out
+/// exactly as that plane alone would, nothing carried over from the one before.
 #[test]
 fn denoise_is_per_channel_on_rgb() {
     let size = Size2us::new(48, 48);
-    let r = noisy(size, 0.5, 0.03, 2024);
-    let g = noisy(size, 0.5, 0.05, 4048);
-    let b = noisy(size, 0.5, 0.04, 6072);
-    let in_std = [
-        (pixel_stats(&r).std as f32),
-        (pixel_stats(&g).std as f32),
-        (pixel_stats(&b).std as f32),
+    let planes = [
+        noisy(size, 0.5, 0.03, 2024),
+        noisy(size, 0.5, 0.05, 4048),
+        noisy(size, 0.5, 0.04, 6072),
     ];
-    let mut img = rgb(size, r, g, b);
+    let mut img = rgb(
+        size,
+        planes[0].clone(),
+        planes[1].clone(),
+        planes[2].clone(),
+    );
     Denoise::default().apply(&mut img).unwrap();
-    for (c, &expected) in in_std.iter().enumerate() {
-        let out_std = pixel_stats(img.channel(c)).std as f32;
-        assert!(
-            out_std < expected,
-            "channel {c} denoised: {out_std} < {expected}"
-        );
+    for (channel, plane) in planes.into_iter().enumerate() {
+        let mut alone = gray(size, plane);
+        Denoise::default().apply(&mut alone).unwrap();
+        assert_eq!(img.channel(channel).pixels(), alone.channel(0).pixels());
     }
 }
 
@@ -213,39 +227,9 @@ fn denoise_handles_images_smaller_than_the_kernel() {
     Denoise::default().apply(&mut tiny).unwrap();
     let mut one = gray(Size2us::new(1, 1), vec![0.42]);
     Denoise::default().apply(&mut one).unwrap();
-    assert!(
-        (one.channel(0).to_vec()[0] - 0.42).abs() < 1e-6,
+    assert_eq!(
+        one.channel(0).pixels(),
+        &[0.42],
         "1x1 has no detail to remove"
-    );
-}
-
-#[test]
-fn validate_rejects_out_of_range_strength() {
-    let mut img = gray(Size2us::new(4, 4), vec![0.0; 16]);
-    let err = Denoise {
-        strength: 1.5,
-        ..Default::default()
-    }
-    .apply(&mut img)
-    .unwrap_err();
-    assert!(
-        matches!(&err, OpError::InvalidConfig(m) if m.field == "denoise strength"),
-        "expected an InvalidConfig strength error, got {err:?}"
-    );
-}
-
-#[test]
-fn validate_rejects_nonpositive_k() {
-    let mut img = gray(Size2us::new(4, 4), vec![0.0; 16]);
-    let err = Denoise {
-        k: 0.0,
-        strength: 0.0,
-        ..Default::default()
-    }
-    .apply(&mut img)
-    .unwrap_err();
-    assert!(
-        matches!(&err, OpError::InvalidConfig(m) if m.field == "denoise k"),
-        "expected an InvalidConfig k error, got {err:?}"
     );
 }

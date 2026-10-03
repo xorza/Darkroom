@@ -5,10 +5,9 @@
 //! Gated behind the `real-data` feature.
 
 use crate::io::image::linear::LinearImage;
-use crate::io::image::load_context::LoadContext;
 use crate::math::statistics::median_mut;
 use crate::testing::init_tracing;
-use crate::testing::real_data::dataset_dir;
+use crate::testing::real_data;
 use crate::testing::visual;
 use crate::{
     ColorMode, Denoise, Hdr, LocalContrast, NeutralizeBackground, Scnr, Stretch, StretchMethod,
@@ -38,9 +37,7 @@ fn assert_displayable(image: &LinearImage, label: &str) {
 #[test]
 fn milky_way_best_pipeline() {
     init_tracing();
-    let path = dataset_dir().join("stacked_light.tiff");
-    let mut img =
-        LinearImage::from_file(&path, &LoadContext::default()).expect("load stacked_light.tiff");
+    let mut img = real_data::linear_master();
 
     NeutralizeBackground.apply(&mut img).unwrap(); // equalize the green-elevated background
     Denoise::default().apply(&mut img).unwrap(); // gentle wavelet denoise (MW-tuned default)

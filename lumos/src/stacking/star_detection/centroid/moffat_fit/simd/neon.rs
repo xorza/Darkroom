@@ -8,37 +8,21 @@ use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFixedBeta, Pow
 use crate::stacking::star_detection::centroid::simd::hsum;
 use std::arch::aarch64::*;
 
-/// SIMD `int_pow`: compute u^n for each lane using repeated squaring.
+/// SIMD `int_pow`: `u^n` per lane by squaring, the scalar `int_pow`'s multiplications in its order.
 #[inline]
 unsafe fn simd_int_pow(u: float64x2_t, n: u32) -> float64x2_t {
     unsafe {
-        match n {
-            0 => vdupq_n_f64(1.0),
-            1 => u,
-            2 => vmulq_f64(u, u),
-            3 => vmulq_f64(vmulq_f64(u, u), u),
-            4 => {
-                let u2 = vmulq_f64(u, u);
-                vmulq_f64(u2, u2)
+        let mut result = vdupq_n_f64(1.0);
+        let mut base = u;
+        let mut exp = n;
+        while exp > 0 {
+            if exp & 1 == 1 {
+                result = vmulq_f64(result, base);
             }
-            5 => {
-                let u2 = vmulq_f64(u, u);
-                vmulq_f64(vmulq_f64(u2, u2), u)
-            }
-            _ => {
-                let mut result = vdupq_n_f64(1.0);
-                let mut base = u;
-                let mut exp = n;
-                while exp > 0 {
-                    if exp & 1 == 1 {
-                        result = vmulq_f64(result, base);
-                    }
-                    base = vmulq_f64(base, base);
-                    exp >>= 1;
-                }
-                result
-            }
+            base = vmulq_f64(base, base);
+            exp >>= 1;
         }
+        result
     }
 }
 

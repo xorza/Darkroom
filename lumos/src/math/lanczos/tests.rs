@@ -1,6 +1,7 @@
-use std::f32::consts::PI;
+use std::f64::consts::PI;
 
 use crate::math::lanczos::kernel;
+use crate::testing::assertions::assert_close;
 
 /// `sinc` at a nonzero integer reads `sin` of the rounded f32 product `n·π`, which is off a true
 /// zero by that rounding: at most half an ulp of `4π` (2⁻²¹ ≈ 4.8e-7) plus `n` times π's own
@@ -9,10 +10,10 @@ const TOL: f32 = 1e-6;
 
 #[test]
 fn lanczos_kernel_at_zero() {
-    // L(0, a) = 1.0 by definition (limit of sinc(x) * sinc(x/a) as x -> 0)
-    assert!((kernel(0.0, 2.0) - 1.0).abs() < TOL);
-    assert!((kernel(0.0, 3.0) - 1.0).abs() < TOL);
-    assert!((kernel(0.0, 4.0) - 1.0).abs() < TOL);
+    // L(0, a) = 1 by definition (the limit of sinc(x)·sinc(x/a) as x → 0), returned as is.
+    for a in [2.0, 3.0, 4.0] {
+        assert_eq!(kernel(0.0, a), 1.0);
+    }
 }
 
 #[test]
@@ -21,14 +22,8 @@ fn lanczos_kernel_at_integers() {
     // So L(n, a) = 0 for integer n != 0
     for a in [2.0, 3.0, 4.0] {
         for n in 1..(a as i32) {
-            let val = kernel(n as f32, a);
-            assert!(val.abs() < TOL, "L({n}, {a}) should be 0, got {val}");
-            let val_neg = kernel(-(n as f32), a);
-            assert!(
-                val_neg.abs() < TOL,
-                "L({}, {a}) should be 0, got {val_neg}",
-                -n
-            );
+            assert_close!(kernel(n as f32, a), 0.0, TOL, "L({n}, {a})");
+            assert_close!(kernel(-(n as f32), a), 0.0, TOL, "L(-{n}, {a})");
         }
     }
 }
@@ -53,27 +48,19 @@ fn lanczos_kernel_outside_support() {
 /// - a = 3: `sinc(π/6) = ½·6/π`, so `6/π²` = 0.607927;
 /// - a = 2: `sinc(π/4) = (√2/2)·4/π`, so `4√2/π²` = 0.573159.
 ///
-/// The two differ, so `a` reaches the window. f32 evaluation is within a few ulps of 0.6.
+/// The two differ, so `a` reaches the window. The f32 kernel rounds π, its two products, two
+/// quotients and two `sin`s by half an ulp or so each: within 8ε of the f64 values.
 #[test]
 fn lanczos_kernel_at_half() {
-    for (a, expected) in [(3.0, 6.0 / (PI * PI)), (2.0, 4.0 * 2f32.sqrt() / (PI * PI))] {
-        let actual = kernel(0.5, a);
-        assert!(
-            (actual - expected).abs() < TOL,
-            "L(0.5, {a}) = {expected}, got {actual}"
-        );
+    for (a, expected) in [(3.0, 6.0 / (PI * PI)), (2.0, 4.0 * 2f64.sqrt() / (PI * PI))] {
+        assert_close!(kernel(0.5, a), expected, 8.0 * f32::EPSILON, "L(0.5, {a})");
     }
 }
 
+/// `L(−x) = L(x)` exactly: `π·(−x)` is the negated product, and `sin` is odd bit for bit.
 #[test]
 fn lanczos_kernel_symmetry() {
-    // L(x) = L(-x) for all x
     for &x in &[0.1, 0.5, 1.0, 1.5, 2.5] {
-        let pos = kernel(x, 3.0);
-        let neg = kernel(-x, 3.0);
-        assert!(
-            (pos - neg).abs() < TOL,
-            "Symmetry broken: L({x}) = {pos}, L(-{x}) = {neg}"
-        );
+        assert_eq!(kernel(-x, 3.0), kernel(x, 3.0), "L(±{x})");
     }
 }

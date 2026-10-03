@@ -53,7 +53,7 @@ impl TileGrid {
             dimensions.width,
             dimensions.height
         );
-        let tile_size = tile_size.min(dimensions.width).min(dimensions.height);
+        let tile_size = clamped_tile_size(dimensions, tile_size);
         let tiles_x = dimensions.width.div_ceil(tile_size);
         let tiles_y = dimensions.height.div_ceil(tile_size);
         let n = tiles_x * tiles_y;
@@ -72,7 +72,7 @@ impl TileGrid {
 
     fn matches_layout(&self, dimensions: Size2us, tile_size: usize) -> bool {
         self.dimensions == dimensions
-            && self.tile_size == tile_size.min(dimensions.width).min(dimensions.height)
+            && self.tile_size == clamped_tile_size(dimensions, tile_size)
     }
 
     /// Second derivative in Y at `tile` for the natural cubic spline, for one plane.
@@ -266,5 +266,16 @@ fn tile_centers(tiles: usize, tile_size: usize, extent: usize) -> Vec<f32> {
 
 #[cfg(all(test, feature = "bench"))]
 mod bench;
+/// The tile size a grid over `dimensions` uses: `tile_size`, cut to the image's shorter side so
+/// a tile never exceeds the frame.
+const fn clamped_tile_size(dimensions: Size2us, tile_size: usize) -> usize {
+    let side = if dimensions.width < dimensions.height {
+        dimensions.width
+    } else {
+        dimensions.height
+    };
+    if tile_size < side { tile_size } else { side }
+}
+
 #[cfg(test)]
 mod tests;

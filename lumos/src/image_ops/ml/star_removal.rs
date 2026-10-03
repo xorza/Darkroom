@@ -124,19 +124,23 @@ mod tests {
         assert_eq!(orig.channel(2).pixels(), &[0.0]);
     }
 
+    /// Across 2.5 `SAMPLES_PER_BLOCK` chunks every sample unscreens its own pair. With
+    /// `s = (i mod 7)/8` and `o = 1 − (1 − s)·t`, `t = (i mod 5)/8`, the result is `1 − t` exactly
+    /// — all dyadic — while a chunk of `orig` read against another chunk of `starless` would pair
+    /// an `o` with the wrong `s`.
     #[test]
     fn build_stars_handles_a_block_boundary() {
-        // Exercise the `SAMPLES_PER_BLOCK`-chunked parallel path across more than one chunk
-        // (2.5 blocks of L samples) with a uniform (o, s) pair everywhere.
         let n = SAMPLES_PER_BLOCK * 2 + SAMPLES_PER_BLOCK / 2;
-        let mut orig = gray_image(Size2us::new(n, 1), vec![0.75; n]);
-        let starless = gray_image(Size2us::new(n, 1), vec![0.5; n]);
-        build_stars(&mut orig, &starless);
-        assert!(
-            orig.channel(0)
-                .pixels()
-                .iter()
-                .all(|&v| (v - 0.5).abs() < 1e-6)
+        let s = |i: usize| (i % 7) as f32 / 8.0;
+        let t = |i: usize| (i % 5) as f32 / 8.0;
+        let mut orig = gray_image(
+            Size2us::new(n, 1),
+            (0..n).map(|i| 1.0 - (1.0 - s(i)) * t(i)).collect(),
         );
+        let starless = gray_image(Size2us::new(n, 1), (0..n).map(s).collect());
+        build_stars(&mut orig, &starless);
+        for (i, &v) in orig.channel(0).pixels().iter().enumerate() {
+            assert_eq!(v, 1.0 - t(i), "sample {i}");
+        }
     }
 }

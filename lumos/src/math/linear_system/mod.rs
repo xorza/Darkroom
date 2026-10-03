@@ -10,7 +10,7 @@
 /// Solve `A·x = b` for `x`, overwriting both operands.
 ///
 /// `a` is row-major `n × n` with `n = b.len()`; on return `b` holds `x` and `a` holds the
-/// eliminated matrix. `None` when the matrix is singular: a pivot column whose largest remaining
+/// eliminated upper triangle, its strict lower triangle left as the row swaps moved it. `None` when the matrix is singular: a pivot column whose largest remaining
 /// magnitude is below `singular_below`, or one that is NaN.
 ///
 /// Destroying the inputs is what lets one routine serve a stack array, a fixed-capacity buffer and

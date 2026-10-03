@@ -1,4 +1,5 @@
 use crate::image_ops::rgb::Rgb;
+use crate::testing::assertions::assert_close;
 
 #[test]
 fn intensity_scale_and_zero_have_exact_channel_values() {
@@ -8,7 +9,8 @@ fn intensity_scale_and_zero_have_exact_channel_values() {
         b: 0.9,
     };
 
-    assert!((color.intensity() - 0.6).abs() < f32::EPSILON);
+    // (0.3 + 0.6 + 0.9)/3 rounds the two sums and the division: within ε of 0.6.
+    assert_close!(color.intensity(), 0.6, f32::EPSILON);
     assert_eq!(
         color.scale(2.0),
         Rgb {

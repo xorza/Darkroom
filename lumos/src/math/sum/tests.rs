@@ -7,6 +7,7 @@ use crate::math::sum::{mean_f32, scalar, sum_f32, weighted_mean_f32};
 use crate::simd::AVX2_F32_LANES;
 #[cfg(target_arch = "x86_64")]
 use crate::testing::simd_check;
+use crate::testing::test_rng::TestRng;
 #[cfg(target_arch = "x86_64")]
 use imaginarium::SimdTier;
 use std::iter;
@@ -49,17 +50,50 @@ fn sum_f32_rounds_to_the_same_f32_as_a_sequential_reference() {
     }
 }
 
-/// The f64 totals themselves may differ from sequential only by reassociation, which is bounded far
-/// below one f32 ULP of the sum's magnitude.
-#[test]
-fn sum_f32_stays_within_reassociation_error_of_a_sequential_reference() {
-    let values: Vec<f32> = (0..10_000).map(|i| 100.0 + (i as f32) * 0.01).collect();
-    let reference = sequential_f64(&values);
-    let error = (sum_f32(&values) - reference).abs();
+/// The sum of `values` by Neumaier's compensated summation in f64: every addition's rounding error
+/// carried in a second accumulator, which leaves it within `ε·|sum| + O(n·ε²)·Σ|xᵢ|` of the exact
+/// total — orders of magnitude inside the reassociation bound it is the reference for.
+fn exact_sum(values: &[f32]) -> f64 {
+    let (mut sum, mut compensation) = (0.0f64, 0.0f64);
+    for &value in values {
+        let value = f64::from(value);
+        let next = sum + value;
+        compensation += if sum.abs() >= value.abs() {
+            (sum - next) + value
+        } else {
+            (value - next) + sum
+        };
+        sum = next;
+    }
+    sum + compensation
+}
 
-    // n·2⁻⁵³ relative, with room to spare; an f32 accumulator would be ~2⁻²⁴ relative and fail.
-    let bound = reference.abs() * (values.len() as f64) * f64::EPSILON;
-    assert!(error <= bound, "error {error:e} exceeded bound {bound:e}");
+/// Reassociating an f64 sum moves it by at most `(n − 1)·ε·Σ|xᵢ|` (Higham, *Accuracy and Stability*,
+/// §4.2) from the exact total, whatever the order — the bound the backends' lane split must keep.
+/// The fixture spreads its magnitudes over twenty decades, so f64 partial sums do round: the
+/// sequential sum is off the exact one, and the bound is not met by exactness alone. An f32
+/// accumulator would be off by `n·2⁻²⁴` relative and fail it.
+#[test]
+fn sum_f32_stays_within_reassociation_error_of_the_exact_sum() {
+    let mut rng = TestRng::new(17);
+    let values: Vec<f32> = (0..10_000)
+        .map(|i| (rng.next_f32() - 0.3) * 10f32.powi(i % 20 - 10))
+        .collect();
+    let exact = exact_sum(&values);
+    assert_ne!(
+        sequential_f64(&values),
+        exact,
+        "the fixture's f64 sums round"
+    );
+    let absolute: f64 = values.iter().map(|&v| f64::from(v).abs()).sum();
+    let bound = (values.len() - 1) as f64 * f64::EPSILON * absolute;
+    for (path, total) in [
+        ("sum_f32", sum_f32(&values)),
+        ("scalar", scalar::sum_f32(&values)),
+    ] {
+        let error = (total - exact).abs();
+        assert!(error <= bound, "{path}: {error:e} past {bound:e}");
+    }
 }
 
 /// A wide accumulator recovers small values a naive f32 sum drops on the floor. Naive f32 would
@@ -70,9 +104,9 @@ fn sum_f32_recovers_values_a_narrow_accumulator_would_lose() {
     values.extend(iter::repeat_n(0.1f32, 10_000));
     values.push(-1e6f32);
 
-    // 10_000 × the f32 nearest 0.1, summed exactly in f64.
-    let expected = f64::from(0.1f32) * 10_000.0;
-    assert!((sum_f32(&values) - expected).abs() < 1e-9);
+    // 10 000 × the f32 nearest 0.1: every partial sum spans 2²⁰ down to 0.1's last bit at 2⁻²⁷, 47
+    // bits, so f64 holds each one exactly and the total is exact.
+    assert_eq!(sum_f32(&values), f64::from(0.1f32) * 10_000.0);
 }
 
 /// 100k ones is exactly representable at every partial sum, so any correct accumulator is exact.
@@ -212,39 +246,35 @@ fn weighted_mean_of_zero_total_weight_is_zero() {
     assert_eq!(weighted_mean_f32(&[1.0, 2.0, 3.0], &[0.0, 0.0, 0.0]), 0.0);
 }
 
-/// Crossing each backend's gate must not change the answer, so scalar and dispatched results have
-/// to agree either side of it. Lengths 3/4/5 straddle NEON's, 7/8/9 AVX2's.
+/// Crossing each backend's gate must not change the answer, on a smooth ramp and on large values
+/// cancelling against varying weights. Every product is exact in f64, and the sums err by at most
+/// `n·ε·1e6` ≈ 2e-7 absolute — 2e-10 in a mean over weights summing past 1 — far under a ulp of
+/// either mean in f32, so every order of summation rounds to the sequential f64 reference's f32.
+/// Lengths 3/4/5 straddle NEON's gate, 7/8/9 AVX2's.
 #[test]
-fn weighted_mean_agrees_with_scalar_across_every_gate() {
+fn weighted_mean_agrees_with_the_f64_reference_across_every_gate() {
     for len in LENGTHS {
-        let values: Vec<f32> = (0..len).map(|i| 500.0 + (i as f32) * 0.03).collect();
-        let weights: Vec<f32> = (0..len).map(|i| 2.0 - (i as f32) * 0.0001).collect();
-
-        let sums = scalar::weighted_sums(&values, &weights);
-        let expected = (sums.weighted_values / sums.weight_total) as f32;
-        assert_eq!(weighted_mean_f32(&values, &weights), expected, "len={len}");
+        let ramp: Vec<f32> = (0..len).map(|i| 500.0 + (i as f32) * 0.03).collect();
+        let ramp_weights: Vec<f32> = (0..len).map(|i| 2.0 - (i as f32) * 0.0001).collect();
+        let cancelling_weights: Vec<f32> = (0..len).map(|i| 1.0 + (i as f32) * 0.001).collect();
+        for (name, values, weights) in [
+            ("ramp", ramp, ramp_weights),
+            ("cancelling", cancelling_values(len), cancelling_weights),
+        ] {
+            let numerator: f64 = values
+                .iter()
+                .zip(&weights)
+                .map(|(&v, &w)| f64::from(v) * f64::from(w))
+                .sum();
+            let denominator: f64 = weights.iter().map(|&w| f64::from(w)).sum();
+            let expected = (numerator / denominator) as f32;
+            assert_eq!(
+                weighted_mean_f32(&values, &weights),
+                expected,
+                "{name}, len={len}"
+            );
+        }
     }
-}
-
-/// Large values cancelling against varying weights still has to land on the f64 reference.
-#[test]
-fn weighted_mean_survives_catastrophic_cancellation() {
-    let mut values = vec![1e6f32, -1e6f32];
-    let mut weights = vec![1.0f32, 1.0f32];
-    for i in 0..1000 {
-        values.push(0.1);
-        weights.push(1.0 + (i as f32) * 0.001);
-    }
-
-    let numerator: f64 = values
-        .iter()
-        .zip(&weights)
-        .map(|(&v, &w)| f64::from(v) * f64::from(w))
-        .sum();
-    let denominator: f64 = weights.iter().map(|&w| f64::from(w)).sum();
-    let expected = (numerator / denominator) as f32;
-
-    assert!((weighted_mean_f32(&values, &weights) - expected).abs() < 1e-4);
 }
 
 /// Every screen below is a `debug_assert!`: the combine runs once per output pixel, so a release

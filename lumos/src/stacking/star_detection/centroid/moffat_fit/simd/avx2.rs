@@ -8,37 +8,21 @@ use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFixedBeta, Pow
 use crate::stacking::star_detection::centroid::simd::hsum;
 use std::arch::x86_64::*;
 
-/// SIMD `int_pow`: compute u^n for each lane using repeated squaring.
+/// SIMD `int_pow`: `u^n` per lane by squaring, the scalar `int_pow`'s multiplications in its order.
 #[target_feature(enable = "avx2,fma")]
 #[inline]
 unsafe fn simd_int_pow(u: __m256d, n: u32) -> __m256d {
-    match n {
-        0 => _mm256_set1_pd(1.0),
-        1 => u,
-        2 => _mm256_mul_pd(u, u),
-        3 => _mm256_mul_pd(_mm256_mul_pd(u, u), u),
-        4 => {
-            let u2 = _mm256_mul_pd(u, u);
-            _mm256_mul_pd(u2, u2)
+    let mut result = _mm256_set1_pd(1.0);
+    let mut base = u;
+    let mut exp = n;
+    while exp > 0 {
+        if exp & 1 == 1 {
+            result = _mm256_mul_pd(result, base);
         }
-        5 => {
-            let u2 = _mm256_mul_pd(u, u);
-            _mm256_mul_pd(_mm256_mul_pd(u2, u2), u)
-        }
-        _ => {
-            let mut result = _mm256_set1_pd(1.0);
-            let mut base = u;
-            let mut exp = n;
-            while exp > 0 {
-                if exp & 1 == 1 {
-                    result = _mm256_mul_pd(result, base);
-                }
-                base = _mm256_mul_pd(base, base);
-                exp >>= 1;
-            }
-            result
-        }
+        base = _mm256_mul_pd(base, base);
+        exp >>= 1;
     }
+    result
 }
 
 /// SIMD `fast_pow_neg`: compute u^(-beta) for 4 lanes at once.

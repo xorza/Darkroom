@@ -32,41 +32,14 @@ use std::io::{self, Write};
 use std::time::Instant;
 
 use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::linear::LinearImage;
 use crate::testing::mem_probe::{MB, RssSampler, env_parse, measured};
+use crate::testing::synthetic::patterns;
 use crate::{Denoise, ExtractBackground, Stretch};
 
 /// The widest single op working set, in image-sized f32 planes: `Denoise`'s wavelet workspace
 /// (`c_curr`, `c_next`, `tmp`). `ExtractBackground`'s mesh is tile-resolution and `Stretch`'s
 /// subsample is capped at a million samples, so neither comes near it.
 const WORKING_PLANES: u64 = 3;
-
-/// A synthetic linear RGB master: sky gradient plus a hashed dither, with a sparse set of bright
-/// cores above 1.0 as a real stack has. The content only has to be representative enough that no op
-/// short-circuits — this probe measures allocation, not numerics.
-fn linear_master(dimensions: ImageDimensions) -> LinearImage {
-    let (width, height) = (dimensions.width(), dimensions.height());
-    let count = width * height;
-    let mut channels = [
-        vec![0.0f32; count],
-        vec![0.0f32; count],
-        vec![0.0f32; count],
-    ];
-    for y in 0..height {
-        for x in 0..width {
-            let index = y * width + x;
-            let sky = 0.02 + (y as f32 / height as f32) * 0.03;
-            let hash = (index as u32).wrapping_mul(2_654_435_761) as f32 / u32::MAX as f32;
-            let noise = (hash - 0.5) * 0.004;
-            // Every 9973rd pixel (a prime, so the cores don't align to a row) is a star core.
-            let core = if index % 9973 == 0 { 1.5 } else { 0.0 };
-            for (channel, plane) in channels.iter_mut().enumerate() {
-                plane[index] = sky * (1.0 - 0.1 * channel as f32) + noise + core;
-            }
-        }
-    }
-    LinearImage::from_planar_channels(dimensions, channels)
-}
 
 #[test]
 #[ignore = "manual live peak-RSS probe; run explicitly with a filter, one config per process"]
@@ -86,7 +59,7 @@ fn image_ops_memory_probe() {
         master_bytes / MB,
     );
 
-    let mut image = linear_master(dimensions);
+    let mut image = patterns::linear_rgb_master(dimensions);
 
     let sampler = RssSampler::start();
     let chain_gate = sampler.gate();

@@ -4,6 +4,7 @@ mod real_data;
 use crate::image_ops::stretching::*;
 use crate::testing::images::{gray_image as gray, rgb_image as rgb};
 use crate::testing::prelude::*;
+use std::f32::consts::LN_10;
 use std::iter;
 
 fn median_of(v: &[f32]) -> f32 {
@@ -11,26 +12,34 @@ fn median_of(v: &[f32]) -> f32 {
     median_mut(&mut c)
 }
 
+/// How far f32 `MTF(m, x) = (m − 1)x / ((2m − 1)x − m)` can sit from its exact value `v`: two
+/// roundings above the line, three in the denominator — which cancels by
+/// `κ = (|2m − 1|·x + m) / |(2m − 1)x − m|` — and the division, half an ulp each: `(3κ + 3)·ε/2`.
+fn mtf_bound(m: f32, x: f32, v: f32) -> f32 {
+    let kappa = ((2.0 * m - 1.0).abs() * x + m) / ((2.0 * m - 1.0) * x - m).abs();
+    (3.0 * kappa + 3.0) * f32::EPSILON / 2.0 * v
+}
+
+/// The fixed points, the identity and the direction: `MTF(m, 0) = 0` and `MTF(m, 1) = 1` take
+/// their own branches; `MTF(m, m) = (m − 1)m / (2m(m − 1)) = ½`; at `m = ½` the denominator is
+/// `−½` and `MTF = x` exactly; and at x = ¼, `m = ¾` darkens to `−1/16 / −5/8 = 0.1`, every operand
+/// exact and the quotient rounded once.
 #[test]
 fn mtf_fixed_points_identity_and_direction() {
     for &m in &[0.1f32, 0.25, 0.5, 0.75, 0.9] {
         assert_eq!(mtf(m, 0.0), 0.0, "MTF(m,0) = 0");
         assert_eq!(mtf(m, 1.0), 1.0, "MTF(m,1) = 1");
-        assert!((mtf(m, m) - 0.5).abs() < 1e-6, "MTF(m,m) = 0.5 for m={m}");
+        assert_close!(
+            mtf(m, m),
+            0.5,
+            mtf_bound(m, m, 0.5),
+            "MTF(m,m) = 0.5 for m={m}"
+        );
     }
-    // m = 0.5 is the identity (exactly, since 2m-1 = 0).
     for &x in &[0.1f32, 0.3, 0.7, 0.9] {
-        assert!((mtf(0.5, x) - x).abs() < 1e-6, "MTF(0.5,·) is the identity");
+        assert_eq!(mtf(0.5, x), x, "MTF(0.5,·) is the identity");
     }
-    // m < 0.5 brightens, m > 0.5 darkens — hand-computed at x = 0.25.
-    assert!(
-        (mtf(0.25, 0.25) - 0.5).abs() < 1e-6,
-        "m<0.5 brightens: 0.25 -> 0.5"
-    );
-    assert!(
-        (mtf(0.75, 0.25) - 0.1).abs() < 1e-6,
-        "m>0.5 darkens: 0.25 -> 0.1"
-    );
+    assert_eq!(mtf(0.75, 0.25), 0.1, "m > 0.5 darkens");
 }
 
 #[test]
@@ -45,16 +54,25 @@ fn mtf_monotonic_increasing() {
     }
 }
 
+/// The midtones balance that maps `x0` onto `t` is `MTF(t, x0)`: `MTF(MTF(t, x0), x0) = t`. The
+/// identity holds in f64 to its rounding; the f32 composition is the f64 one at the f32 `m` to
+/// [`mtf_bound`].
 #[test]
 fn mtf_self_inverse_identity() {
-    // The midtones balance that maps x0 -> t is MTF(t, x0), so MTF(MTF(t, x0), x0) = t.
+    let mtf64 = |m: f64, x: f64| ((m - 1.0) * x) / ((2.0 * m - 1.0) * x - m);
     for &x0 in &[0.02f32, 0.05, 0.1, 0.3] {
         for &t in &[0.1f32, 0.25, 0.4] {
-            let m = mtf(t, x0);
-            assert!(
-                (mtf(m, x0) - t).abs() < 1e-5,
-                "self-inverse (x0={x0}, t={t})"
+            let (x, target) = (f64::from(x0), f64::from(t));
+            assert_close!(
+                mtf64(mtf64(target, x), x),
+                target,
+                1e-14,
+                "f64, x0={x0}, t={t}"
             );
+            let m = mtf(t, x0);
+            let exact = mtf64(f64::from(m), x);
+            let got = mtf(m, x0);
+            assert_close!(got, exact, mtf_bound(m, x0, got), "x0={x0}, t={t}");
         }
     }
 }
@@ -63,40 +81,57 @@ fn mtf_self_inverse_identity() {
 fn asinh_endpoints_and_monotonic() {
     for &beta in &[0.01f32, 0.1, 1.0, 10.0] {
         let c = AsinhCurve::new(beta);
-        assert!(c.eval(0.0).abs() < 1e-7, "f(0) = 0 (beta={beta})");
-        assert!((c.eval(1.0) - 1.0).abs() < 1e-6, "f(1) = 1 (beta={beta})");
+        // asinh(0) = 0 exactly; asinh(1/β) times its own reciprocal rounds twice.
+        assert_eq!(c.eval(0.0), 0.0, "f(0) = 0 (beta={beta})");
+        assert_close!(c.eval(1.0), 1.0, f32::EPSILON, "f(1) = 1 (beta={beta})");
         let mut prev = f32::NEG_INFINITY;
         for i in 0..=100 {
             let y = c.eval(i as f32 / 100.0);
-            assert!(
-                y >= prev - 1e-7,
-                "asinh stretch must be monotonic (beta={beta})"
-            );
+            // x/β, asinhf, the scale and the clamp are each monotone, rounding included.
+            assert!(y >= prev, "asinh stretch must be monotonic (beta={beta})");
             prev = y;
         }
     }
 }
 
+/// The curve `asinh(x/β) / asinh(1/β)` in f64, at the f32 `β` the curve was built from.
+fn asinh_reference(beta: f32, x: f32) -> f64 {
+    let beta = f64::from(beta);
+    (f64::from(x) / beta).asinh() / (1.0 / beta).asinh()
+}
+
+/// The f32 curve rounds `1/β` and `x/β` (2ε on the argument, which `asinh` does not magnify),
+/// takes libm's `asinhf` twice (ε each), the reciprocal of the norm and the product (ε each): 7ε.
+const ASINH_EVAL_BOUND: f32 = 7.0 * f32::EPSILON;
+
+/// A smaller `β` lifts a faint value higher, and a large one nears the identity — at β = 1000,
+/// `x(1 + (1 − x²)/(6β²))` is 0.5 + 6e-8 at 0.5, inside one ulp. Hand-computed at β = 0.01:
+/// `f(0.1) = asinh(10)/asinh(100) = 2.998223/5.298342 = 0.565879`.
 #[test]
 fn asinh_beta_controls_strength() {
-    // Smaller beta = stronger stretch: a faint value is lifted higher.
     let aggressive = AsinhCurve::new(0.01).eval(0.05);
     let gentle = AsinhCurve::new(1.0).eval(0.05);
     assert!(
         aggressive > gentle,
         "smaller beta lifts faint signal more ({aggressive} vs {gentle})"
     );
-    // Large beta approaches the identity.
-    assert!(
-        (AsinhCurve::new(1000.0).eval(0.5) - 0.5).abs() < 1e-2,
-        "large beta ~ identity"
-    );
-    // Hand-computed: beta=0.01, f(0.1) = asinh(10)/asinh(100) = 2.99822/5.29842 = 0.56587.
-    assert!((AsinhCurve::new(0.01).eval(0.1) - 0.56587).abs() < 2e-3);
+    for (beta, x) in [(0.01f32, 0.05f32), (1.0, 0.05), (1000.0, 0.5), (0.01, 0.1)] {
+        let expected = asinh_reference(beta, x);
+        let got = AsinhCurve::new(beta).eval(x);
+        assert!(
+            (f64::from(got) - expected).abs() <= f64::from(ASINH_EVAL_BOUND) * expected,
+            "beta {beta}, x {x}: {got} vs {expected}"
+        );
+    }
+    assert!((asinh_reference(1000.0, 0.5) - 0.5).abs() < 1e-7);
+    assert!((asinh_reference(0.01, 0.1) - 0.565_879).abs() < 1e-6);
 }
 
 /// Every reachable median lands on its target, down to the near-zero sky a background
-/// subtraction leaves — the solver's own check is 1e-4, so the curve evaluated here meets it too.
+/// subtraction leaves. The bisection ends on adjacent f32 exponents `m = log₁₀ β` that bracket the
+/// target to the ~5ε its `g` rounds to; `|d ln g / d ln β| ≤ 1`, so one ulp of `m` moves `g` by at
+/// most `ln 10 · ulp(m)` relative. `10^m` rounds once more (ε), and the curve evaluated here
+/// differs from `g` by [`ASINH_EVAL_BOUND`]: together `ln 10 · ulp(m) + 13ε` relative.
 #[test]
 fn solve_beta_hits_target_background() {
     for &(median, target) in &[
@@ -108,9 +143,12 @@ fn solve_beta_hits_target_background() {
     ] {
         let beta = solve_asinh_beta(median, target).unwrap();
         let got = AsinhCurve::new(beta).eval(median);
+        let exponent = beta.log10().abs();
+        let ulp = exponent.next_up() - exponent;
+        let bound = (LN_10 * ulp + 13.0 * f32::EPSILON) * target;
         assert!(
-            (got - target).abs() < 1e-4,
-            "median {median} -> {got}, want {target}"
+            (got - target).abs() <= bound,
+            "median {median} -> {got}, want {target} within {bound:e}"
         );
     }
 }
@@ -129,13 +167,23 @@ fn auto_stretches_report_an_unreachable_background() {
             "asinh: median {median}"
         );
     }
-    for median in [0.0f32, -0.001, 1.0] {
+    // STF fails at each of its three checks: the black point at white (1.5 − 1.5σ clamps to 1); the
+    // median at or below black, or at white; and a midtones balance past its limits — 1e-5 over a
+    // black of 0 needs `MTF(0.2, 1e-5) ≈ 4e-5 < MIDTONES_MIN`, and 0.99999 one near 1.
+    for (median, sigma) in [
+        (1.5f32, 0.001f32),
+        (0.0, 0.001),
+        (-0.001, 0.001),
+        (1.0, 0.001),
+        (1e-5, 1.0),
+        (0.999_99, 1.0),
+    ] {
         assert!(
             matches!(
-                StfCurve::new(median, 0.001, 1.5, 0.2),
+                StfCurve::new(median, sigma, 1.5, 0.2),
                 Err(OpError::UnreachableBackground { .. })
             ),
-            "STF: median {median}"
+            "STF: median {median}, sigma {sigma}"
         );
     }
 
@@ -156,21 +204,17 @@ fn stf_params_hand_computed() {
     //   rescaled median = (0.1-0.08)/(1-0.08) = 0.0217391
     //   midtones = MTF(0.25, 0.0217391) = 0.0625
     //   eval(0.1) = MTF(0.0625, 0.0217391) = 0.25   (self-inverse: median maps to target)
+    //
+    // Each value takes a few f32 roundings along the way; 16ε of it holds them.
     let c = StfCurve::new(0.1, 0.02, 1.0, 0.25).unwrap();
-    assert!((c.black - 0.08).abs() < 1e-6, "black = {}", c.black);
+    let near = |got: f32, expected: f32| (got - expected).abs() <= 16.0 * f32::EPSILON * expected;
+    assert_eq!(c.black, 0.1 - 0.02, "black");
+    assert_eq!(c.inv_range, 1.0 / (1.0 - c.black), "inv_range");
+    assert!(near(c.midtones, 0.0625), "midtones = {}", c.midtones);
     assert!(
-        (c.inv_range - 1.0 / 0.92).abs() < 1e-5,
-        "inv_range = {}",
-        c.inv_range
-    );
-    assert!(
-        (c.midtones - 0.0625).abs() < 1e-5,
-        "midtones = {}",
-        c.midtones
-    );
-    assert!(
-        (c.eval(0.1) - 0.25).abs() < 1e-5,
-        "median maps to target background"
+        near(c.eval(0.1), 0.25),
+        "the median maps to the target: {}",
+        c.eval(0.1)
     );
 }
 
@@ -178,8 +222,8 @@ fn stf_params_hand_computed() {
 fn stf_shadow_sigmas_lower_the_black_point() {
     let b1 = StfCurve::new(0.1, 0.02, 1.0, 0.25).unwrap().black;
     let b3 = StfCurve::new(0.1, 0.02, 3.0, 0.25).unwrap().black;
-    assert!((b1 - 0.08).abs() < 1e-6);
-    assert!((b3 - 0.04).abs() < 1e-6);
+    assert_eq!(b1, 0.1 - 0.02);
+    assert_eq!(b3, 0.1 - 3.0 * 0.02);
     assert!(b3 < b1, "more shadow sigmas => lower black point");
 }
 
@@ -189,43 +233,52 @@ fn ghs_endpoints_and_monotonic_across_b_family() {
     for &b in &[-2.0f32, -1.4, -1.0, -0.3, 0.0, 0.5, 1.0, 3.0] {
         for &d in &[0.5f32, 2.0, 6.0] {
             let c = GhsCurve::new(d, b, 0.3, 0.0, 1.0);
-            assert!(c.eval(0.0).abs() < 1e-6, "f(0)=0 (b={b}, d={d})");
-            assert!((c.eval(1.0) - 1.0).abs() < 1e-5, "f(1)=1 (b={b}, d={d})");
+            assert_eq!(c.eval(0.0), 0.0, "f(0)=0 (b={b}, d={d})");
+            assert!(
+                (c.eval(1.0) - 1.0).abs() <= GHS_EVAL_BOUND,
+                "f(1)=1 (b={b}, d={d})"
+            );
             let mut prev = f32::NEG_INFINITY;
             for i in 0..=200 {
                 let y = c.eval(i as f32 / 200.0);
-                assert!(y >= prev - 1e-6, "monotonic (b={b}, d={d})");
+                assert!(y >= prev, "monotonic (b={b}, d={d})");
                 prev = y;
             }
         }
     }
 }
 
+/// The textbook GHS base `T(u)` in f64, per `b` branch.
+fn ghs_reference_t(d: f64, b: f64, u: f64) -> f64 {
+    if b == 0.0 {
+        1.0 - (-d * u).exp()
+    } else if b == -1.0 {
+        (1.0 + d * u).ln()
+    } else if b < 0.0 {
+        (1.0 - (1.0 - b * d * u).powf((b + 1.0) / b)) / (d * (b + 1.0))
+    } else {
+        1.0 - (1.0 + b * d * u).powf(-1.0 / b)
+    }
+}
+
+/// The textbook slope `T′(u)` of [`ghs_reference_t`].
+fn ghs_reference_tp(d: f64, b: f64, u: f64) -> f64 {
+    if b == 0.0 {
+        d * (-d * u).exp()
+    } else if b == -1.0 {
+        d / (1.0 + d * u)
+    } else if b < 0.0 {
+        (1.0 - b * d * u).powf(1.0 / b)
+    } else {
+        d * (1.0 + b * d * u).powf(-(1.0 + b) / b)
+    }
+}
+
 /// The textbook GHS, in f64: the base `T` and its slope per `b` branch, the mirror about `sp`, the
 /// linear tails past `lp` and `hp`, normalized to [0, 1].
 fn ghs_reference(d: f64, b: f64, sp: f64, lp: f64, hp: f64, x: f64) -> f64 {
-    let t = |u: f64| {
-        if b == 0.0 {
-            1.0 - (-d * u).exp()
-        } else if b == -1.0 {
-            (1.0 + d * u).ln()
-        } else if b < 0.0 {
-            (1.0 - (1.0 - b * d * u).powf((b + 1.0) / b)) / (d * (b + 1.0))
-        } else {
-            1.0 - (1.0 + b * d * u).powf(-1.0 / b)
-        }
-    };
-    let tp = |u: f64| {
-        if b == 0.0 {
-            d * (-d * u).exp()
-        } else if b == -1.0 {
-            d / (1.0 + d * u)
-        } else if b < 0.0 {
-            (1.0 - b * d * u).powf(1.0 / b)
-        } else {
-            d * (1.0 + b * d * u).powf(-(1.0 + b) / b)
-        }
-    };
+    let t = |u: f64| ghs_reference_t(d, b, u);
+    let tp = |u: f64| ghs_reference_tp(d, b, u);
     let raw = |x: f64| {
         if x < lp {
             tp(sp - lp) * (x - lp) - t(sp - lp)
@@ -287,57 +340,111 @@ fn ghs_matches_an_f64_reference_through_both_limits() {
     }
 }
 
+/// The slope the linear tails take is the base's derivative. Away from the limits of `b`, the
+/// textbook slope is the central difference of the textbook base in f64 (step 1e-5: truncation
+/// `h²·T‴/6` under 1e-8 of it for these `d`, rounding `ε·T/h` under 1e-10) — near them the
+/// textbook forms themselves cancel, by `1/|b + 1|`, too much for a difference. And at every `b`
+/// the f32 base and slope are the textbook ones, each at the scale its branch fixes — `1/d` at
+/// `b = −1`, 1 elsewhere, which normalization divides out — to 16ε relative.
 #[test]
-fn ghs_identity_when_d_zero() {
-    let c = GhsCurve::new(0.0, 1.0, 0.3, 0.1, 0.9);
-    for &x in &[0.0f32, 0.05, 0.3, 0.5, 0.9, 1.0] {
-        assert!((c.eval(x) - x).abs() < 1e-6, "d=0 is the identity at {x}");
+fn ghs_slope_is_the_derivative_of_the_base() {
+    let h = 1e-5;
+    for b in [-3.0f32, -1.0 - 1e-5, -1.0, -0.5, -2e-6, 0.0, 2e-6, 0.5, 2.0] {
+        for d in [0.5f32, 5.0] {
+            let (b64, d64) = (f64::from(b), f64::from(d));
+            let scale = if b == -1.0 { 1.0 / d64 } else { 1.0 };
+            for i in 1..20 {
+                let u = f64::from(i) / 20.0;
+                let far_from_the_limits = [-3.0, -1.0, -0.5, 0.0, 0.5, 2.0].contains(&b);
+                if far_from_the_limits {
+                    let difference = (ghs_reference_t(d64, b64, u + h)
+                        - ghs_reference_t(d64, b64, u - h))
+                        / (2.0 * h);
+                    let slope = ghs_reference_tp(d64, b64, u);
+                    assert!(
+                        (difference - slope).abs() <= 1e-7 * slope,
+                        "b {b}, d {d}, u {u}: {difference} vs {slope}"
+                    );
+                }
+                let near = |got: f32, expected: f64| {
+                    (f64::from(got) - expected).abs()
+                        <= 16.0 * f64::from(f32::EPSILON) * expected.abs()
+                };
+                let u32 = u as f32;
+                let t = ghs_reference_t(d64, b64, f64::from(u32)) * scale;
+                let tp = ghs_reference_tp(d64, b64, f64::from(u32)) * scale;
+                assert!(near(ghs_base_t(d, b, u32), t), "b {b}, d {d}, u {u}: T");
+                assert!(near(ghs_base_tp(d, b, u32), tp), "b {b}, d {d}, u {u}: T′");
+            }
+        }
     }
 }
 
 #[test]
-fn ghs_exponential_b0_hand_computed() {
-    // b=0, sp=lp=0, hp=1, D=2 reduces to f(x) = (1 - e^(-2x)) / (1 - e^(-2)).
-    let c = GhsCurve::new(2.0, 0.0, 0.0, 0.0, 1.0);
-    // f(0.5) = (1 - e^-1)/(1 - e^-2) = 0.632121/0.864665 = 0.731060.
-    assert!(
-        (c.eval(0.5) - 0.731_060).abs() < 1e-4,
-        "f(0.5) = {}",
-        c.eval(0.5)
-    );
-    // f(0.25) = (1 - e^-0.5)/(1 - e^-2) = 0.393469/0.864665 = 0.455056.
-    assert!(
-        (c.eval(0.25) - 0.455_056).abs() < 1e-4,
-        "f(0.25) = {}",
-        c.eval(0.25)
-    );
+fn ghs_identity_when_d_zero() {
+    let c = GhsCurve::new(0.0, 1.0, 0.3, 0.1, 0.9);
+    for &x in &[0.0f32, 0.05, 0.3, 0.5, 0.9, 1.0] {
+        assert_eq!(c.eval(x), x, "d=0 is the identity at {x}");
+    }
 }
 
+/// Every intermediate of `eval` lies in `[t0, T4(1)]`, the span the normalization maps to [0, 1],
+/// so each of its four roundings and the base's few costs at most ε of the output: 8ε absolute.
+const GHS_EVAL_BOUND: f32 = 8.0 * f32::EPSILON;
+
+/// `b = 0`, `sp = lp = 0`, `hp = 1`, `d = 2` reduces to `f(x) = (1 − e^(−2x)) / (1 − e^(−2))`:
+/// `f(0.5) = 0.632121/0.864665 = 0.731059`, `f(0.25) = 0.393469/0.864665 = 0.455054`. The f64
+/// reference is that closed form, and the curve meets it to [`GHS_EVAL_BOUND`].
+#[test]
+fn ghs_exponential_b0_hand_computed() {
+    let c = GhsCurve::new(2.0, 0.0, 0.0, 0.0, 1.0);
+    for (x, hand) in [(0.5f32, 0.731_059), (0.25, 0.455_054)] {
+        let closed = (1.0 - (-2.0 * f64::from(x)).exp()) / (1.0 - (-2.0f64).exp());
+        assert!((closed - hand).abs() < 1e-6, "{closed} vs {hand}");
+        let reference = ghs_reference(2.0, 0.0, 0.0, 0.0, 1.0, f64::from(x));
+        assert!(
+            (reference - closed).abs() < 1e-15,
+            "{reference} vs {closed}"
+        );
+        assert!(
+            (f64::from(c.eval(x)) - closed).abs() <= f64::from(GHS_EVAL_BOUND),
+            "f({x}) = {}",
+            c.eval(x)
+        );
+    }
+}
+
+/// The tails are straight: `f(0) = 0`, so `f(lp/2) = f(lp)/2`, and `f(1) = 1`, so
+/// `f(0.9) = (f(0.8) + 1)/2` — two evaluations' [`GHS_EVAL_BOUND`] apart at most.
 #[test]
 fn ghs_protection_tails_are_linear() {
     let c = GhsCurve::new(3.0, 1.0, 0.5, 0.2, 0.8);
-    // f(0)=0 and the [0, lp] segment is linear, so f(lp/2) = 0.5·f(lp).
+    assert_eq!(c.eval(0.0), 0.0);
+    assert_eq!(c.eval(1.0), 1.0);
     assert!(
-        (c.eval(0.1) - 0.5 * c.eval(0.2)).abs() < 1e-4,
+        (c.eval(0.1) - 0.5 * c.eval(0.2)).abs() <= 2.0 * GHS_EVAL_BOUND,
         "shadow tail linear from the origin"
     );
-    // f(1)=1 and the [hp, 1] segment is linear, so f(0.9) = (f(0.8) + 1)/2.
     assert!(
-        (c.eval(0.9) - f32::midpoint(c.eval(0.8), 1.0)).abs() < 1e-4,
+        (c.eval(0.9) - f32::midpoint(c.eval(0.8), 1.0)).abs() <= 2.0 * GHS_EVAL_BOUND,
         "highlight tail linear to white"
     );
 }
 
+/// No jump at `lp`, `sp` or `hp` (`b = −1.4` runs the general `b < 0` form): across one ulp of a
+/// breakpoint the curve moves by its slope there times that ulp, plus each side's
+/// [`GHS_EVAL_BOUND`]. The tails are tangent to the base, which
+/// [`ghs_slope_is_the_derivative_of_the_base`] holds, so the curve is C¹ there too.
 #[test]
 fn ghs_continuous_at_breakpoints() {
-    // C¹ construction => no jumps at lp, sp, hp (b=-1.4 ~ asinh exercises the general b<0 form).
-    let c = GhsCurve::new(2.5, -1.4, 0.4, 0.15, 0.85);
-    for &bp in &[0.15f32, 0.4, 0.85] {
-        let (below, above) = (c.eval(bp - 1e-3), c.eval(bp + 1e-3));
-        assert!(
-            (above - below).abs() < 1e-2,
-            "continuous at {bp}: {below} vs {above}"
-        );
+    let (d, b, sp, lp, hp) = (2.5, -1.4, 0.4, 0.15, 0.85);
+    let c = GhsCurve::new(d, b, sp, lp, hp);
+    for bp in [lp, sp, hp] {
+        let below = bp.next_down();
+        let slope = ghs_base_tp(d, b, (bp - sp).abs()) * c.inv_range;
+        let bound = slope * (bp - below) + 2.0 * GHS_EVAL_BOUND;
+        let jump = (c.eval(bp) - c.eval(below)).abs();
+        assert!(jump <= bound, "at {bp}: {jump:e} > {bound:e}");
     }
 }
 
@@ -365,15 +472,12 @@ fn ghs_d_controls_strength() {
 }
 
 #[test]
-fn ghs_end_to_end_lifts_background_and_stays_in_range() {
+fn ghs_end_to_end_lifts_the_background() {
     let mut px: Vec<f32> = (0..90).map(|i| 0.04 + (i % 3) as f32 * 0.01).collect();
     px.extend(iter::repeat_n(0.8f32, 10));
     let mut img = gray(Size2us::new(10, 10), px.clone());
     Stretch::ghs(5.0, 0.0, 0.1).apply(&mut img).unwrap();
     let out = img.channel(0).to_vec();
-    for &v in &out {
-        assert!((0.0..=1.0).contains(&v), "output in [0,1]: {v}");
-    }
     assert!(median_of(&out) > median_of(&px), "background lifted");
     assert!(out[95] > out[0], "stars stay brighter than the background");
 }
@@ -395,23 +499,14 @@ fn color_preserving_keeps_channel_ratio_and_caps_highlights() {
     let r = img.channel(0).to_vec();
     let g = img.channel(1).to_vec();
     let b = img.channel(2).to_vec();
-    // Pixel 0: ratio preserved, below the white point.
-    assert!(
-        (r[0] / g[0] - 2.0).abs() < 1e-3,
-        "R:G ratio preserved (px0)"
-    );
-    assert!((g[0] - b[0]).abs() < 1e-6, "G == B (px0)");
-    assert!(r[0] < 1.0, "px0 not clipped");
-    // Pixel 1: the guard caps the brightest channel at 1 but keeps the ratio exactly.
-    assert!(
-        (r[1] / g[1] - 2.0).abs() < 1e-3,
-        "R:G ratio preserved through the guard (px1)"
-    );
-    let max1 = r[1].max(g[1]).max(b[1]);
-    assert!(
-        (max1 - 1.0).abs() < 1e-4,
-        "brightest channel capped at 1, got {max1}"
-    );
+    // 0.3/0.15 is 2 exactly in f32; the one gain rounds each channel once (2ε on the ratio), the
+    // highlight cap once more (4ε), and leaves the brightest channel at 1 to its two roundings.
+    let ratio = |px: usize| r[px] / g[px];
+    assert!((ratio(0) - 2.0).abs() <= 4.0 * f32::EPSILON, "{}", ratio(0));
+    assert_eq!(g[0], b[0]);
+    assert!(r[0] < 1.0, "pixel 0 stays below white");
+    assert!((ratio(1) - 2.0).abs() <= 8.0 * f32::EPSILON, "{}", ratio(1));
+    assert!((r[1] - 1.0).abs() <= 2.0 * f32::EPSILON, "{}", r[1]);
 }
 
 #[test]
@@ -445,13 +540,14 @@ fn per_channel_neutralizes_color_preserving_keeps_it() {
         lr[0],
         lg[0]
     );
-    // Per-channel pushes each background to the same target -> neutral gray.
-    assert!(
-        (ur[0] - ug[0]).abs() < 0.05,
-        "per-channel neutralizes background ({}, {})",
-        ur[0],
-        ug[0]
-    );
+    // Per-channel maps each channel's own median — pixel 0 in both — onto the target: neutral
+    // grey, to a few f32 roundings (16ε).
+    for (channel, value) in [("red", ur[0]), ("green", ug[0])] {
+        assert!(
+            (value - 0.25).abs() <= 16.0 * f32::EPSILON * 0.25,
+            "{channel} background {value}"
+        );
+    }
 }
 
 #[test]
@@ -465,23 +561,42 @@ fn end_to_end_gray_auto_stf_brightens_background_to_target() {
     let input_median = median_of(&px);
 
     let mut img = gray(Size2us::new(10, 10), px);
-    Stretch::auto_stf().apply(&mut img).unwrap();
+    let stretch = Stretch::auto_stf();
+    let StretchMethod::AutoStf {
+        target_background, ..
+    } = stretch.method
+    else {
+        unreachable!("auto_stf is an auto STF")
+    };
+    stretch.apply(&mut img).unwrap();
     let out = img.channel(0).to_vec();
 
-    for &v in &out {
-        assert!((0.0..=1.0).contains(&v), "output out of [0,1]: {v}");
-    }
+    // The curve is built to map the median onto the target, to a few f32 roundings (16ε).
     let out_median = median_of(&out);
+    assert!(out_median > input_median, "{out_median} > {input_median}");
     assert!(
-        out_median > input_median,
-        "background brightened ({out_median} > {input_median})"
-    );
-    assert!(
-        (out_median - 0.25).abs() < 0.05,
-        "background lands near target 0.25, got {out_median}"
+        (out_median - target_background).abs() <= 16.0 * f32::EPSILON * target_background,
+        "the background lands on {target_background}: {out_median}"
     );
     // Monotonic mapping: a star pixel (input 0.6) stays brighter than the background.
     assert!(out[95] > out[0], "stars stay brighter than the background");
+}
+
+/// Past [`MAX_STATISTIC_SAMPLES`] pixels the auto stretches sample with a stride: 1001 × 1000 takes
+/// every second pixel. The samples read from the planes are those of the intensity plane.
+#[test]
+fn subsampled_intensity_is_the_intensity_plane_subsampled() {
+    let size = Size2us::new(1001, 1000);
+    let plane = |seed: u32| -> Vec<f32> {
+        (0..size.pixel_count() as u32)
+            .map(|i| (i.wrapping_mul(2_654_435_761).wrapping_add(seed) >> 8) as f32 / 16_777_216.0)
+            .collect()
+    };
+    let image = rgb(size, plane(1), plane(2), plane(3));
+    let sample = Subsample::new(size.pixel_count(), MAX_STATISTIC_SAMPLES);
+    assert_eq!(sample.count(), 500_500);
+    let expected: Vec<f32> = sample.of(image.intensity_plane().pixels()).collect();
+    assert_eq!(subsample_intensity(&image), expected);
 }
 
 #[test]
@@ -489,14 +604,4 @@ fn default_config_is_color_preserving_auto_asinh() {
     let cfg = Stretch::default();
     assert_eq!(cfg.color, ColorMode::ColorPreserving);
     assert!(matches!(cfg.method, StretchMethod::AutoAsinh { .. }));
-}
-
-#[test]
-fn rejects_out_of_range_config() {
-    let mut img = gray(Size2us::new(4, 4), vec![0.3; 16]);
-    let err = Stretch::ghs(-1.0, 0.0, 0.5).apply(&mut img).unwrap_err();
-    assert!(
-        matches!(&err, OpError::InvalidConfig(m) if m.field == "ghs d"),
-        "expected an InvalidConfig ghs error, got {err:?}"
-    );
 }
