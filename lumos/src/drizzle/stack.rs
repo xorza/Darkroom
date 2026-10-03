@@ -59,8 +59,8 @@ fn load_drizzle_frame<P: AsRef<Path>>(
 ///
 /// # Returns
 ///
-/// The drizzled result: image plus coverage, weight (`Σwᵢ`), and linear-variance
-/// (`Σwᵢ²/(Σwᵢ)²`) maps, and the count of input pixels a SIP warp could not place.
+/// The drizzled result: image plus coverage, weight (`Σwᵢ`) and variance (`Σwᵢ²·vᵢ/(Σwᵢ)²`) maps,
+/// and the count of input pixels a SIP warp could not place.
 ///
 /// # Errors
 ///

@@ -10,6 +10,7 @@ pub(crate) mod gesd_config;
 pub(crate) mod linear_fit_clip_config;
 pub(crate) mod normal_scores;
 pub(crate) mod pass;
+pub(crate) mod rejection_scale;
 pub(crate) mod scratch_buffers;
 pub(crate) mod sigma_bounds;
 pub(crate) mod sigma_clip_config;
@@ -20,11 +21,13 @@ pub(crate) mod winsorized_clip_config;
 use std::ops::Range;
 
 use crate::combine::cache::sample::{CombinedSample, PixelSamples};
+use crate::combine::cache::sample_noise::NoiseColumns;
 use crate::combine::rejection::gesd_config::GesdConfig;
 use crate::combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
 use crate::combine::rejection::pass::{Pass, Proposal};
 use crate::combine::rejection::scratch_buffers::{MethodScratch, ScratchBuffers};
 use crate::combine::rejection::sigma_clip_config::SigmaClipConfig;
+use crate::combine::rejection::sorted_samples::SortedSamples;
 use crate::combine::rejection::trim_config::TrimConfig;
 use crate::combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
 use crate::error::InvalidConfigField;
@@ -140,7 +143,8 @@ impl Rejection {
         }
     }
 
-    /// The window of the ascending `sorted` that survives.
+    /// The window of `sorted` that survives. The floor under every measured σ is the root mean
+    /// square of the samples' background noise, from `noise`.
     ///
     /// Passes run until one rejects nothing, or until the method's cap. When a pass proposes fewer
     /// than `min_survivors` samples, the driver keeps the `min_survivors` samples of the window
@@ -148,12 +152,18 @@ impl Rejection {
     /// and the samples it keeps are the ones the method trusted most.
     pub(crate) fn surviving_window(
         &self,
-        sorted: &[f32],
-        background: f32,
+        sorted: &SortedSamples,
+        noise: Option<NoiseColumns<'_>>,
         min_survivors: usize,
         scratch: &mut MethodScratch,
     ) -> Range<usize> {
         debug_assert!(min_survivors >= 1);
+        let background = match noise {
+            Some(noise) if self.measures_spread() => noise.background_rms(),
+            _ => 0.0,
+        };
+        let positions = sorted.positions();
+        let sorted = sorted.values();
         let mut window = 0..sorted.len();
         for index in 0..self.passes() {
             if window.len() <= min_survivors {
@@ -161,10 +171,12 @@ impl Rejection {
             }
             let pass = Pass {
                 sorted,
+                positions,
                 window: window.clone(),
                 index,
                 background,
                 min_survivors,
+                noise,
             };
             let Some(proposal) = self.narrow(&pass, scratch) else {
                 break;
@@ -207,7 +219,7 @@ impl Rejection {
         let PixelSamples {
             values,
             weights,
-            noise_variances,
+            noise,
             ..
         } = samples;
         debug_assert_eq!(values.len(), weights.len());
@@ -215,25 +227,15 @@ impl Rejection {
             scratch.survivors = None;
             let value = sum::weighted_mean_f32(values, weights);
             return if measure_quality {
-                CombinedSample::from_all(value, weights)
+                CombinedSample::from_survivors(value, weights, 0..values.len(), noise)
             } else {
                 CombinedSample::value_only(value, values.len())
             };
         }
 
         scratch.sorted.fill(values);
-        let background = match noise_variances {
-            Some(variances) if self.measures_spread() => {
-                (variances.iter().sum::<f32>() / variances.len() as f32).sqrt()
-            }
-            _ => 0.0,
-        };
-        let window = self.surviving_window(
-            scratch.sorted.values(),
-            background,
-            min_survivors,
-            &mut scratch.methods,
-        );
+        let window =
+            self.surviving_window(&scratch.sorted, noise, min_survivors, &mut scratch.methods);
         let positions = &scratch.sorted.positions()[window.clone()];
         scratch.weights.clear();
         scratch
@@ -241,16 +243,15 @@ impl Rejection {
             .extend(positions.iter().map(|&position| weights[position as usize]));
         let value =
             sum::weighted_mean_f32(&scratch.sorted.values()[window.clone()], &scratch.weights);
-        let count = window.len();
         let sample = if measure_quality {
             CombinedSample::from_survivors(
                 value,
                 weights,
-                count,
                 positions.iter().map(|&position| position as usize),
+                noise,
             )
         } else {
-            CombinedSample::value_only(value, count)
+            CombinedSample::value_only(value, window.len())
         };
         scratch.survivors = Some(window);
         sample

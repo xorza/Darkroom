@@ -307,7 +307,7 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
         image: LinearImage::from_pixels(ImageDimensions::new((2, 1), 1), vec![0.25, 0.75]),
         coverage: Some(Coverage::PerPixel(Buffer2::new(2, 1, vec![1.0, 0.5]))),
         weight: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![2.0, 1.0]))),
-        linear_variance: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![0.5, 1.0]))),
+        variance: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![0.5, 1.0]))),
         cfa_type: None,
         report: RunReport {
             excluded_samples: FlagCounts {
@@ -315,6 +315,7 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
                 ..FlagCounts::default()
             },
             kept_flagged_samples: FlagCounts::default(),
+            variance_background_only: true,
         },
     };
     let _: AlignStackResult = AlignStackResult {

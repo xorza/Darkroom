@@ -1,5 +1,6 @@
 //! What one reduced pixel carries out of the combine, and the buffers that get it there.
 
+use crate::combine::cache::sample_noise::NoiseColumns;
 use crate::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::io::image::pixel_flags::Flags;
 use crate::run_report::LocalFlagCounts;
@@ -25,9 +26,10 @@ pub(crate) struct CombineScratch {
     pub(super) eff_weights: Vec<f32>,
     pub(super) sample_flags: Vec<u8>,
     pub(super) frame_ids: Vec<u32>,
-    /// Each sample's noise variance, from [`SampleNoise`](crate::combine::cache::sample_noise::SampleNoise)
-    /// over the warp's confidence. Filled only when the combine asked for it.
-    pub(super) noise_variances: Vec<f32>,
+    /// The columns of [`NoiseColumns`], filled only when the combine asked for noise.
+    pub(super) noise_background: Vec<f32>,
+    pub(super) noise_sky: Vec<f32>,
+    pub(super) noise_inverse_electrons: Vec<f32>,
     pub(super) buffers: ScratchBuffers,
 }
 
@@ -38,8 +40,8 @@ pub(crate) struct PixelSamples<'a> {
     pub(crate) weights: &'a [f32],
     /// The frame each sample came from.
     pub(crate) frame_ids: &'a [u32],
-    /// Each sample's noise variance, when the combine measures a spread.
-    pub(crate) noise_variances: Option<&'a [f32]>,
+    /// Each sample's noise model, when the combine measures a spread or a variance.
+    pub(crate) noise: Option<NoiseColumns<'a>>,
     pub(crate) channel: usize,
 }
 
@@ -51,7 +53,9 @@ impl CombineScratch {
         self.eff_weights.resize(frame_count, 0.0);
         self.sample_flags.resize(frame_count, 0);
         self.frame_ids.resize(frame_count, 0);
-        self.noise_variances.resize(frame_count, 0.0);
+        self.noise_background.resize(frame_count, 0.0);
+        self.noise_sky.resize(frame_count, 0.0);
+        self.noise_inverse_electrons.resize(frame_count, 0.0);
         self.buffers.reserve(frame_count);
     }
 }
@@ -64,7 +68,9 @@ pub(super) struct GatheredSamples<'a> {
     pub(super) eff_weights: &'a mut [f32],
     pub(super) sample_flags: &'a mut [u8],
     pub(super) frame_ids: &'a mut [u32],
-    pub(super) noise_variances: &'a mut [f32],
+    pub(super) noise_background: &'a mut [f32],
+    pub(super) noise_sky: &'a mut [f32],
+    pub(super) noise_inverse_electrons: &'a mut [f32],
 }
 
 impl GatheredSamples<'_> {
@@ -102,7 +108,9 @@ impl GatheredSamples<'_> {
                 self.eff_weights[write] = self.eff_weights[read];
                 self.sample_flags[write] = self.sample_flags[read];
                 self.frame_ids[write] = self.frame_ids[read];
-                self.noise_variances[write] = self.noise_variances[read];
+                self.noise_background[write] = self.noise_background[read];
+                self.noise_sky[write] = self.noise_sky[read];
+                self.noise_inverse_electrons[write] = self.noise_inverse_electrons[read];
                 write += 1;
             }
         }
@@ -111,7 +119,7 @@ impl GatheredSamples<'_> {
 }
 
 /// One reduced channel sample: the combined value, how many samples reached it, and — when the
-/// caller asked for the quality planes — the effective weight of the survivors.
+/// caller asked for the quality planes — the survivors' weight and the variance of the value.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct CombinedSample {
     pub(crate) value: f32,
@@ -119,39 +127,42 @@ pub(crate) struct CombinedSample {
     /// and quantization-noise propagation keys on it.
     pub(crate) survivor_count: usize,
     pub(crate) weight: f32,
-    pub(crate) linear_variance: f32,
+    pub(crate) variance: f32,
 }
 
 impl CombinedSample {
-    /// A reduction whose survivors are all the inputs.
-    pub(crate) fn from_all(value: f32, weights: &[f32]) -> Self {
-        Self::from_survivors(value, weights, weights.len(), 0..weights.len())
-    }
-
-    /// A reduction over `survivor_indices` into `weights`, measuring their effective weight.
+    /// A weighted mean over the samples at `survivors`: the weight is `Σwᵢ`, and the variance is
+    /// `Σwᵢ²·vᵢ / (Σwᵢ)²` with each sample's model variance `vᵢ` taken at the combined value, the
+    /// estimate of the true signal. Taken at each sample's own value instead, an upward
+    /// fluctuation would carry a larger variance and pull the figure up. Without noise columns the
+    /// variance reads 0, for a reducer whose request has no variance plane.
     pub(crate) fn from_survivors(
         value: f32,
         weights: &[f32],
-        survivor_count: usize,
-        survivor_indices: impl IntoIterator<Item = usize>,
+        survivors: impl IntoIterator<Item = usize>,
+        noise: Option<NoiseColumns<'_>>,
     ) -> Self {
+        let mut count = 0usize;
         let mut weight = 0.0f32;
-        let mut weight_squared = 0.0f32;
-        for index in survivor_indices {
+        let mut weighted_variance = 0.0f32;
+        for index in survivors {
             let survivor_weight = weights[index];
+            count += 1;
             weight += survivor_weight;
-            weight_squared += survivor_weight * survivor_weight;
+            if let Some(noise) = noise {
+                weighted_variance +=
+                    survivor_weight * survivor_weight * noise.variance_at(index, value);
+            }
         }
-        let linear_variance = if weight > 0.0 {
-            weight_squared / (weight * weight)
-        } else {
-            0.0
-        };
         Self {
             value,
-            survivor_count,
+            survivor_count: count,
             weight,
-            linear_variance,
+            variance: if weight > 0.0 {
+                weighted_variance / (weight * weight)
+            } else {
+                0.0
+            },
         }
     }
 
@@ -162,7 +173,7 @@ impl CombinedSample {
             value,
             survivor_count,
             weight: 0.0,
-            linear_variance: 0.0,
+            variance: 0.0,
         }
     }
 }

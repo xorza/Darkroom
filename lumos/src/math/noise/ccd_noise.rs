@@ -1,0 +1,94 @@
+//! [`CcdNoise`]: the CCD equation for one frame's channel or colour.
+
+use crate::io::image::image_metadata::ImageMetadata;
+use crate::io::image::sample_domain::ScaleOrigin;
+
+/// The noise variance of a sample at value `x`, in the frame's own units (Merline & Howell 1995):
+///
+/// `variance(x) = background_variance + max(x − sky, 0) / electrons_per_unit`
+///
+/// `background_variance` is the white noise measured at the sky level, raised to the quantization
+/// floor: it already holds the read noise, the dark current, the quantization noise and the sky's
+/// own photon noise, so no consumer adds them again. The source term counts the photons above the
+/// sky, and only when the gain is known.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct CcdNoise {
+    pub(crate) background_variance: f32,
+    pub(crate) sky: f32,
+    pub(crate) electrons_per_unit: Option<f32>,
+}
+
+impl CcdNoise {
+    pub(crate) fn variance_at(self, x: f32) -> f32 {
+        self.background_variance
+            + self
+                .electrons_per_unit
+                .map_or(0.0, |electrons| (x - self.sky).max(0.0) / electrons)
+    }
+
+    /// Electrons per unit of an image's samples: the camera's electrons per ADU times the ADU one
+    /// unit is worth. Only a declared scale says what one unit is worth; an assumed one is a guess
+    /// the gain cannot be applied through.
+    pub(crate) fn electrons_per_unit(metadata: &ImageMetadata) -> Option<f32> {
+        let egain = metadata
+            .egain
+            .filter(|egain| egain.is_finite() && *egain > 0.0)?;
+        let domain = metadata.domain.as_ref()?;
+        (domain.origin == ScaleOrigin::Declared).then_some((egain * domain.scale) as f32)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::io::image::sample_domain::{Pedestal, SampleDomain};
+
+    /// Below the sky only the background counts; above it, each unit carries `1/electrons` more
+    /// variance. Background 0.25, sky 1, 4 electrons per unit: 0.25 at 0.5 and at 1, 0.25 + 2/4
+    /// at 3. Without a gain the source term is absent.
+    #[test]
+    fn the_source_term_counts_photons_above_the_sky() {
+        let noise = CcdNoise {
+            background_variance: 0.25,
+            sky: 1.0,
+            electrons_per_unit: Some(4.0),
+        };
+        assert_eq!(noise.variance_at(0.5), 0.25);
+        assert_eq!(noise.variance_at(1.0), 0.25);
+        assert_eq!(noise.variance_at(3.0), 0.75);
+        let no_gain = CcdNoise {
+            electrons_per_unit: None,
+            ..noise
+        };
+        assert_eq!(no_gain.variance_at(3.0), 0.25);
+    }
+
+    /// 1.5 e⁻/ADU over a declared scale of 65535 ADU per unit is 98302.5 electrons per unit. An
+    /// assumed scale, a missing domain or a non-positive gain give none.
+    #[test]
+    fn electrons_per_unit_needs_a_gain_and_a_declared_scale() {
+        let domain = |origin| SampleDomain {
+            scale: 65_535.0,
+            origin,
+            pedestal: Pedestal::Removed,
+            unit: None,
+        };
+        let metadata = |egain, domain| ImageMetadata {
+            egain,
+            domain,
+            ..Default::default()
+        };
+        assert_eq!(
+            CcdNoise::electrons_per_unit(&metadata(Some(1.5), Some(domain(ScaleOrigin::Declared)))),
+            Some(98_302.5)
+        );
+        for (egain, domain) in [
+            (Some(1.5), Some(domain(ScaleOrigin::Assumed))),
+            (Some(1.5), None),
+            (Some(0.0), Some(domain(ScaleOrigin::Declared))),
+            (None, Some(domain(ScaleOrigin::Declared))),
+        ] {
+            assert_eq!(CcdNoise::electrons_per_unit(&metadata(egain, domain)), None);
+        }
+    }
+}

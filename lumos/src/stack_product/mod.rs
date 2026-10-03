@@ -33,27 +33,29 @@ pub struct StackProduct {
     pub coverage: Option<Coverage>,
     /// WHT map: `Σwᵢ` over whatever formed the pixel.
     ///
-    /// Unlike [`Self::coverage`], this is *not* one quantity across producers, and cannot be — the
-    /// two weight different things:
-    ///
     /// - A statistical combine sums, per channel, each surviving frame's weight times its
-    ///   confidence at that pixel. `Equal` weighting leaves unit frame weights, so the sum is the
-    ///   survivor count scaled by confidence; `Noise` and `Manual` normalize the frame weights to
-    ///   1 across the set first. Per channel because rejection can retain different samples in
-    ///   each.
+    ///   confidence at that pixel. `Equal` weighting gives unit frame weights, so the sum is the
+    ///   survivor count scaled by confidence. `Noise` weighting gives each frame its inverse noise
+    ///   variance, not normalized, so with unit confidence the sum is the inverse variance of the
+    ///   mean. `Manual` weights are relative, and so is the sum.
     /// - Drizzle sums one shared plane of geometric drop weights: how much of each input pixel's
     ///   flux landed here, times the frame weight.
     ///
-    /// So the values are comparable *within* a product but not between producers, and a reader
-    /// should treat this as relative rather than absolute. What does hold either way: it is the
-    /// denominator the image was divided by, and [`Self::linear_variance`] is `Σwᵢ²/(Σwᵢ)²` over
-    /// these same weights, so the two planes are always mutually consistent.
+    /// It is the denominator the image was divided by, under the same weights as [`Self::variance`].
     pub weight: Option<QualityMap>,
-    /// Conditional linear-combine variance factor `Σwᵢ² / (Σwᵢ)²`.
+    /// The variance of each pixel's value, in the image's units squared: `Σwᵢ²·vᵢ / (Σwᵢ)²` over
+    /// the samples that formed it.
     ///
-    /// Present for weighted means and drizzle, using their actual surviving/contributing samples.
-    /// Absent for median output because a median is not a linear combination.
-    pub linear_variance: Option<QualityMap>,
+    /// `vᵢ` is the sample's CCD noise model: the frame's measured background noise, plus the photon
+    /// noise of the signal above the sky when the frame states its gain
+    /// ([`RunReport::variance_background_only`] says when one did not), carried through
+    /// normalization and divided by the warp's confidence. A statistical combine takes it at the
+    /// combined value; drizzle takes it at each input pixel's value. Drizzle spreads one input
+    /// pixel over several output pixels, so its noise correlates between neighbours (Fruchter &
+    /// Hook 2002): this plane is each pixel's own variance, not their covariance.
+    ///
+    /// Absent for median output, which has no exact variance.
+    pub variance: Option<QualityMap>,
     /// The mosaic pattern every frame shared, for a stack of undemosaiced sensor frames; `None`
     /// for any other stack.
     pub cfa_type: Option<CfaType>,
@@ -109,7 +111,7 @@ mod tests {
             image,
             coverage: None,
             weight: None,
-            linear_variance: None,
+            variance: None,
             cfa_type,
             report: RunReport::default(),
         }

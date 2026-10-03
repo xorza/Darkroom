@@ -1,5 +1,6 @@
 //! A stacked master's ancillary quality plane: one shared, or one per channel.
 
+use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 
 use crate::io::image::linear::LinearImage;
@@ -19,6 +20,18 @@ impl QualityMap {
         match pixels {
             LinearPixels::L(plane) => Self::Shared(plane),
             LinearPixels::Rgb(planes) => Self::PerChannel(planes),
+        }
+    }
+
+    /// One plane per image channel: shared for one channel, per channel for three.
+    ///
+    /// # Panics
+    /// For any other count, which no image has.
+    pub(crate) fn from_planes(planes: ArrayVec<Buffer2<f32>, 3>) -> Self {
+        match planes.len() {
+            1 => Self::Shared(planes.into_iter().next().expect("one plane")),
+            3 => Self::PerChannel(planes.into_inner().expect("three planes")),
+            count => panic!("an image has one or three channels, not {count}"),
         }
     }
 }

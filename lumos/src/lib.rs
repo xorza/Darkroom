@@ -132,6 +132,7 @@ pub use combine::error::{Error as StackError, StackConfigError};
 pub use combine::rejection::Rejection;
 pub use combine::rejection::gesd_config::GesdConfig;
 pub use combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
+pub use combine::rejection::rejection_scale::RejectionScale;
 pub use combine::rejection::sigma_clip_config::SigmaClipConfig;
 pub use combine::rejection::trim_config::TrimConfig;
 pub use combine::rejection::winsorized_clip_config::WinsorizedClipConfig;

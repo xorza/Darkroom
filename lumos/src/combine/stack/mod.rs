@@ -14,12 +14,13 @@ use common::CancelToken;
 use imaginarium::Buffer2;
 
 use crate::combine::cache::core::{CacheCore, CacheTier};
+use crate::combine::cache::frame_weights::FrameWeights;
 use crate::combine::cache::sample::{CombinedSample, PixelSamples};
 use crate::combine::cache::sample_noise::SampleNoise;
+use crate::combine::cache::slots::Slots;
 use crate::combine::cache::{CombineOutput, CombineRequest, FrameCache};
 use crate::combine::config::{CombineMethod, StackConfig, Weighting};
 use crate::combine::error::{Error, StackConfigError};
-use crate::combine::normalization::FrameNorm;
 use crate::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::combine::stack::quantization::{MaxSigma, SourceSigmas};
 use crate::frame_store::frame_quality::FrameQuality;
@@ -86,7 +87,7 @@ impl From<LinearImage> for StackFrame {
 /// # Returns
 ///
 /// A [`StackProduct`] whose coverage is the fraction of frames with geometric support at each
-/// pixel. Its per-channel weight map describes the surviving samples; `linear_variance` is
+/// pixel. Its per-channel weight map describes the surviving samples; `variance` is
 /// available for mean output and absent for median output.
 ///
 /// # Errors
@@ -220,49 +221,6 @@ pub(crate) fn combine_cached(
     run_stacking(&cache, config)
 }
 
-/// Resolve weights from the weighting strategy and pre-computed channel stats.
-///
-/// Returns normalized weights (sum to 1.0) or `None` for equal weighting.
-fn resolve_weights<'a>(
-    weighting: &Weighting,
-    stats: impl IntoIterator<Item = &'a FrameStats>,
-    frame_norms: Option<&[FrameNorm]>,
-) -> Option<Vec<f32>> {
-    match weighting {
-        Weighting::Equal => None,
-        Weighting::Noise => {
-            let mut stats = stats.into_iter().peekable();
-            assert!(stats.peek().is_some(), "noise weighting requires frames");
-            // Inverse variance of the frame *as combined*: normalization multiplies the frame by
-            // `gain`, scaling its noise to `gain·σ`, so w = 1/(gain·σ)² — the "pscale²" term.
-            // Without it a frame scaled up to match the reference is over-weighted by gain².
-            let weights: Vec<f32> = stats
-                .enumerate()
-                .map(|(frame_idx, fs)| {
-                    let sigma_sum: f32 = fs
-                        .channels
-                        .iter()
-                        .enumerate()
-                        .map(|(channel, c)| {
-                            let gain =
-                                frame_norms.map_or(1.0, |n| n[frame_idx].channels[channel].gain);
-                            gain * math::statistics::mad_to_sigma(c.mad)
-                        })
-                        .sum();
-                    let avg_sigma = sigma_sum / fs.channels.len() as f32;
-                    if avg_sigma > f32::EPSILON {
-                        1.0 / (avg_sigma * avg_sigma)
-                    } else {
-                        0.0
-                    }
-                })
-                .collect();
-            normalize_weights(&weights)
-        }
-        Weighting::Manual(w) => normalize_weights(w),
-    }
-}
-
 const fn validate_manual_weights(
     config: &StackConfig,
     frame_count: usize,
@@ -276,16 +234,6 @@ const fn validate_manual_weights(
         });
     }
     Ok(())
-}
-
-/// Normalize weights to sum to 1.0. Returns `None` if the total cannot be normalized.
-fn normalize_weights(weights: &[f32]) -> Option<Vec<f32>> {
-    let sum: f32 = weights.iter().sum();
-    if sum.is_finite() && sum > 0.0 {
-        Some(weights.iter().map(|w| w / sum).collect())
-    } else {
-        None
-    }
 }
 
 /// Warn when frame weighting was requested but the resolved combine is a median, which has no
@@ -325,12 +273,18 @@ pub(crate) fn run_stacking(
     warn_if_weights_ignored(method, &config.weighting);
     let weighted_combine = matches!(method, CombineMethod::Mean(_));
     let norms = cache.frame_norms.as_deref();
-    let weights = weighted_combine
-        .then(|| resolve_weights(&config.weighting, stats(), norms))
-        .flatten();
+    let slots = Slots::new(
+        cache.frames[0].source_stats.facts.cfa_type,
+        cache.core.dimensions.channels(),
+    );
+    let weights = if weighted_combine {
+        FrameWeights::resolve(&config.weighting, stats(), norms, slots)?
+    } else {
+        None
+    };
 
-    // A median is not a linear combination, so it has no variance factor to report whatever the
-    // caller asked for. Resolving here means the reducer never allocates a plane it would drop.
+    // A median is not a linear combination, so it has no variance to report whatever the caller
+    // asked for. Resolving here means the reducer never allocates a plane it would drop.
     let planes = config.quality.resolve(weighted_combine);
     let measure_quality = planes.weight || planes.variance;
 
@@ -345,26 +299,28 @@ pub(crate) fn run_stacking(
                 planes,
                 min_survivors,
                 noise: None,
+                slots,
             };
             let combined = cache.process_chunked(request, |samples, _| {
+                let count = samples.values.len();
                 let value = math::statistics::median_mut(samples.values);
                 if measure_quality {
-                    CombinedSample::from_all(value, samples.weights)
+                    CombinedSample::from_survivors(value, samples.weights, 0..count, None)
                 } else {
-                    CombinedSample::value_only(value, samples.values.len())
+                    CombinedSample::value_only(value, count)
                 }
             });
             (combined, sigma)
         }
         CombineMethod::Mean(rejection) => {
-            let noise = rejection.measures_spread().then(|| {
-                SampleNoise::new(stats(), norms, cache.frames[0].source_stats.facts.cfa_type)
-            });
+            let noise = (rejection.measures_spread() || planes.variance)
+                .then(|| SampleNoise::new(stats(), norms, slots));
             let request = CombineRequest {
-                weights: weights.as_deref(),
+                weights: weights.as_ref(),
                 planes,
                 min_survivors,
                 noise: noise.as_ref(),
+                slots,
             };
             let reduce = move |samples: PixelSamples<'_>, scratch: &mut ScratchBuffers| {
                 rejection.combine_mean(samples, min_survivors, scratch, measure_quality)
@@ -374,34 +330,46 @@ pub(crate) fn run_stacking(
                     // Rejection and coverage keep a different set of frames at every pixel, so the
                     // master's figure is the least-reduced pixel's: seed with every frame and raise
                     // it wherever a pixel had fewer.
-                    let frame_weights = weights.as_deref();
-                    let all_frames = (0..cache.core.dimensions.channels())
-                        .map(|channel| {
+                    let all_frames = (0..slots.count())
+                        .map(|slot| {
                             sigmas
-                                .combined_mean(frame_weights, norms, channel, 0..frame_count)
+                                .combined_mean(
+                                    norms,
+                                    slots.channel(slot),
+                                    (0..frame_count).map(|frame| {
+                                        let weight = weights
+                                            .as_ref()
+                                            .map_or(1.0, |weights| weights.weight(frame, slot));
+                                        (frame, weight)
+                                    }),
+                                )
                                 .expect("a validated stack has positive total weight")
                         })
                         .fold(0.0, f32::max);
                     let max_sigma = MaxSigma::seeded(all_frames);
                     let combined = cache.process_chunked(request, |samples, scratch| {
                         let PixelSamples {
-                            frame_ids, channel, ..
+                            frame_ids,
+                            weights,
+                            channel,
+                            ..
                         } = samples;
                         let sample = reduce(samples, scratch);
                         if sample.survivor_count != frame_count {
-                            let frame = |position: &u32| frame_ids[*position as usize] as usize;
+                            let survivor =
+                                |position: usize| (frame_ids[position] as usize, weights[position]);
                             max_sigma.record(match scratch.survivor_positions() {
                                 Some(positions) => sigmas.combined_mean(
-                                    frame_weights,
                                     norms,
                                     channel,
-                                    positions.iter().map(frame),
+                                    positions
+                                        .iter()
+                                        .map(|&position| survivor(position as usize)),
                                 ),
                                 None => sigmas.combined_mean(
-                                    frame_weights,
                                     norms,
                                     channel,
-                                    frame_ids.iter().map(|&id| id as usize),
+                                    (0..frame_ids.len()).map(survivor),
                                 ),
                             });
                         }

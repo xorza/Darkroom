@@ -68,8 +68,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
   - On a signal-dominated field, gain·MAD is the same for every frame, so Noise weighting degenerates to equal weights.
   - Gradients make the MAD larger, so frames with gradients are underweighted.
   - PixInsight weights by MRS noise (Starck & Murtagh, first wavelet layer). The same MAD also feeds reference selection and the Deming noise ratio. `[C]` mechanism.
-- [ ] `6.2` **One weight per frame, averaged over RGB** — `combine/stack/mod.rs:241-252`
-  - A frame with a bad blue channel is over-trusted in blue. PixInsight weights each channel separately. `[C]`
 - [ ] `6.3` **Reference normalization compares raw `average_mad` across sample domains** — `combine/normalization/mod.rs:190-205` `[C]`
 - [ ] `6.4` **Detection RGB weights use whole-frame MAD** — `star_detection/detector/stages/prepare/mod.rs:66-91`
   - A red nebula down-weights R. Each frame copies 3 planes and runs 2 quickselects per plane.
@@ -83,19 +81,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
   - Use the multiresolution support (iterate on non-significant coefficients), or σ_I·σ_j^e with the B3 constants 0.889, 0.200, 0.086, 0.041, 0.020. `[P]`
 - [ ] `6.8` **Denoise uses one global σ per scale and ignores the stack's coverage/variance planes** — `image_ops/denoise/mod.rs:330-343`
   - Low-coverage edges stay noisy. `[P]`
-
-## 7. The variance quality plane is not a variance
-
-AGENTS.md promises photometry-grade error bars. These planes cannot give them.
-
-- [ ] `7.1` **`linear_variance` = Σw²/(Σw)² holds no per-frame σ or gain** — `combine/cache/sample.rs:46-72`, documented at `stack_product/mod.rs:51-55`
-  - The variance of a weighted mean is Σwᵢ²gᵢ²σᵢ²/(Σw)². The combine already has σᵢ, gᵢ and q.
-  - Example: equal weights, σ 1 and 2. The plane gives 0.5, but the truth is 1.25. `[C]`
-- [ ] `7.2` **Noise and Manual weights are normalized to sum to 1** — `combine/stack/mod.rs:38-42`
-  - So the weight plane cannot serve as inverse variance either. `[C]`
-- [ ] `7.3` **Drizzle gives gated pixels `fill_value` with non-zero variance, weight and coverage** — `drizzle/accumulator/mod.rs:299-319` `[P]`
-- [ ] `7.4` **Drizzle Lanczos marks coverage for exactly-zero-weight deposits** — `drizzle/accumulator/output_band.rs:445-449` → `:513-519`
-  - Coverage reaches 3 px past the footprint, against `accumulator/mod.rs:168-170`. `[C]`
 
 ## 8. Missing-data masks are dropped after decode
 
@@ -878,11 +863,11 @@ The combine bench (30 frames, `combine::bench`, release, one machine, same sessi
 
 ## Phase 5. Lattice, noise estimation, mesh, weights and variance (S5, S10, C1)
 
-0. Add `FrameNoise` and `CcdNoise` (S2): the background term is the noise this phase measures. Then add `RejectionScale::CcdModel` to the driver (S4).
+0. Done: `CcdNoise` (`math/noise/ccd_noise.rs`), with `FrameStats` carrying the sky per slot and the electrons per unit; `SampleNoise`, `FrameWeights` and `Slots` in the combine; `RejectionScale::CcdModel` on sigma clip. `FrameNoise` as stored metadata waits for the consumer that needs it (C2's master subtraction).
 1. Add `CfaLattice`, and move `SameColorMedian`, the cosmic-ray detectors and the flat normalization onto it.
 2. Add the two noise estimators and `FrameStats` background noise.
 3. Give `background_mesh` the lattice, the flags, bad-tile interpolation and the sliver merge. Remove `DarkBackground`. Move the cosmic-ray background onto the mesh.
-4. Make the weights per channel and not normalized. Add the variance and dispersion planes. Bring drizzle onto the same formula.
+4. Done: per-slot weights, not normalized; the variance plane `Σwᵢ²vᵢ/(Σwᵢ)²` with `RunReport::variance_background_only`; drizzle on the same formula per channel, with gated pixels holding no weight, variance or coverage, and zero-weight taps marking no coverage. Open: the `dispersion` plane.
 5. Move denoise to the B3 constants and the variance plane.
 - **Tests:**
   - MRS on white noise of σ 0.01 plus a ramp from 0 to 1: within 3 standard errors of 0.01. The MAD of the ramp alone is 0.25 (median 0.5, deviations uniform on [0, 0.5]), so MAD gives 1.4826·0.25 = 0.37, 37× too large.
