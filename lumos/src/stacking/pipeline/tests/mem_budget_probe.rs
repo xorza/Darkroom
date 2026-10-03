@@ -46,9 +46,8 @@ use crate::io::image::cfa::CfaType;
 use crate::io::image::fits::cfa::save_cfa_fits;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
-use crate::io::raw::demosaic::DemosaicMemory;
 use crate::memory;
-use crate::memory::PerFrameBytes;
+use crate::memory::{DETECTION_WORKING_PLANES, PerFrameBytes};
 use crate::stacking::calibration_masters::calibration_set::CalibrationSet;
 use crate::stacking::calibration_masters::master_role::MasterRole;
 use crate::stacking::calibration_masters::{
@@ -348,18 +347,16 @@ fn align_stack_memory_probe() {
 
     // The RAM path's working set, by the planner's own accounting: the resident warped frames
     // (pixels plus their two quality planes) and the combine's output beside them, plus
-    // `threads ×` one frame's working set (the warp's source and output, or the detector's pool).
-    // Peak must stay within a generous 2× of that — a per-frame buffer leak in detection, warp, or
-    // the combine would push it over.
+    // `threads ×` one frame's working set (the warp's source and output, or the detector's pool
+    // and the statistics' copy of the frame). Peak must stay within a generous 2× of that — a
+    // per-frame buffer leak in detection, warp, or the combine would push it over.
     let threads = rayon::current_num_threads();
     let dimensions = ImageDimensions::new(size, channels);
-    let decoded = DemosaicMemory {
-        output_bytes: memory::frame_bytes(dimensions),
-        peak_bytes: memory::frame_bytes(dimensions),
-    };
-    let per_frame = PerFrameBytes::new(frame_bytes as usize, decoded);
+    let output_bytes = memory::frame_bytes(dimensions);
+    let per_frame = PerFrameBytes::new(frame_bytes as usize, output_bytes);
+    let detection = DETECTION_WORKING_PLANES * frame_bytes as usize + output_bytes;
     let resident = (n * per_frame.warped + QualityPlanes::ALL.resident_bytes(dimensions)) as u64;
-    let working = (threads * per_frame.working) as u64;
+    let working = (threads * per_frame.working.max(detection)) as u64;
     let ceiling_mb = two_x_ceiling_mb(resident, working);
 
     assert!(
@@ -385,6 +382,7 @@ fn align_stack_memory_probe() {
 #[test]
 #[ignore = "manual live peak-RSS probe; run explicitly with a filter, one config per process"]
 fn raw_lights_memory_probe() {
+    use crate::stacking::progress::StackingStage;
     use crate::testing::real_data;
 
     let n: usize = env_parse("LUMOS_RAW_FRAMES", usize::MAX);
@@ -399,13 +397,21 @@ fn raw_lights_memory_probe() {
     let mut config = AlignStackConfig::default();
     config.registration.ransac.seed = Some(1);
     config.stack.cache.memory_override = budget.memory_override;
+    // The gate opens as the preparing pass reports its last frame, so the peak splits into the
+    // decode and detect pass and the register, warp and combine passes after it.
     let sampler = RssSampler::start();
+    let gate = sampler.gate();
+    let progress = ProgressCallback::new(move |report| {
+        if report.stage != StackingStage::Preparing || report.current == report.total {
+            gate.open();
+        }
+    });
     let start = Instant::now();
     let result = calibrate_align_stack(
         lights,
         &CalibrationMasters::default(),
         &config,
-        ProgressCallback::default(),
+        progress,
         CancelToken::never(),
     )
     .expect("calibrate_align_stack");
@@ -424,6 +430,14 @@ fn raw_lights_memory_probe() {
         result.alignment.dropped.len()
     );
     println!("peak RssAnon  {anon_mb} MB   (heap — the OOM-relevant figure)");
+    println!(
+        "  ├ prepare   {} MB   (decode, demosaic, detect)",
+        peak.ungated_anon_mb
+    );
+    println!(
+        "  └ align     {} MB   (register, warp, combine)",
+        peak.gated_anon_mb
+    );
     println!(
         "peak VmRSS    {} MB   (total resident, incl. mmap'd spill)",
         peak.total_mb

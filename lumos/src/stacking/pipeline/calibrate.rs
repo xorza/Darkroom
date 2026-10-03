@@ -12,11 +12,15 @@ use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::memory::run_memory::RunMemory;
-use crate::memory::{MemoryPlan, PerFrameBytes, RunShape};
+use crate::memory::{
+    DECODE_TRANSIENT_FACTOR, DETECTION_WORKING_PLANES, MemoryPlan, PerFrameBytes, RunShape,
+};
 use crate::stacking::calibration_masters::CalibrationMasters;
+use crate::stacking::calibration_masters::cosmic_ray;
 use crate::stacking::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::stacking::calibration_masters::cosmic_ray::reject_cosmic_rays;
 use crate::stacking::combine::error::Error as StackError;
+use crate::stacking::frame_store::frame_stats::FrameStats;
 use crate::stacking::pipeline::align::{log_detection, register_warp_and_stack};
 use crate::stacking::pipeline::config::AlignStackConfig;
 use crate::stacking::pipeline::detector_pool::DetectorPool;
@@ -72,11 +76,20 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
         frame_info.dimensions.size(),
         frame_info.cfa_type.num_colors(),
     );
+    // One frame's pass peaks at the largest of: the demosaic, the cosmic-ray pass over the mosaic,
+    // and the statistics — a copy of every channel beside the demosaiced frame.
+    let cosmic_ray = config.cosmic_ray.as_ref().map_or(0, |_| {
+        plane_bytes + cosmic_ray::heap_bytes(&frame_info.cfa_type, frame_info.dimensions.size())
+    });
+    let decode = demosaic
+        .with_peak_at_least(cosmic_ray)
+        .with_peak_at_least(DECODE_TRANSIENT_FACTOR * demosaic.output_bytes);
     let plan = MemoryPlan::plan(
         RunShape {
             frame_count: total,
-            decode: demosaic,
-            warp: Some(PerFrameBytes::new(plane_bytes, demosaic)),
+            decode,
+            detection_bytes: DETECTION_WORKING_PLANES * plane_bytes,
+            warp: Some(PerFrameBytes::new(plane_bytes, demosaic.output_bytes)),
             output_bytes: config.stack.quality.resident_bytes(output),
         },
         rayon::current_num_threads(),
@@ -118,6 +131,10 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
             // Detect while the decoded frame is still in hand, so the spilled tier reads it back
             // once (for the warp) rather than twice.
             let result = detector.detect(&image);
+            // Measured here, before interpolation correlates neighbouring pixels and would
+            // understate the frame's noise, and while the frame is in hand: a spilled frame would
+            // otherwise be read back for it.
+            let stats = FrameStats::measure(&image);
             let image = stage.tier.hold(&format!("calib_{index}"), image)?;
             let n = done.complete_one();
             log_detection(n, total, &result);
@@ -125,6 +142,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
                 image,
                 stars: result.stars,
                 diagnostics: result.diagnostics,
+                stats,
             })
         })
     }?;

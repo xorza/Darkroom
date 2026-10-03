@@ -127,30 +127,26 @@ pub(crate) fn quality_plane_bytes(dimensions: ImageDimensions) -> usize {
 /// so a stage that grows its scratch cannot drift away from the planner silently.
 pub(crate) const DETECTION_WORKING_PLANES: usize = 7;
 
-/// What one frame costs the detect-register-warp stage, derived from the decoded frame rather
-/// than assumed — so a mono frame is not charged for channels it does not have, and a demosaiced
+/// What one frame costs the register-and-warp stage, derived from the decoded frame rather than
+/// assumed — so a mono frame is not charged for channels it does not have, and a demosaiced
 /// three-channel one is charged for all of them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PerFrameBytes {
     /// Resident once warped: the frame's own pixels plus its two quality planes.
     pub(crate) warped: usize,
-    /// Peak transient one in-flight frame adds, whichever stage wants more — the warp, which
-    /// holds the source and the warped output together until it drops the source, or detection
-    /// with its whole scratch pool.
+    /// What one in-flight warp holds: the source and the warped output together, until it drops
+    /// the source. All of it is transient for a spilled frame; a resident frame's warped output is
+    /// its share of the resident set, so it adds only the source beyond that.
     pub(crate) working: usize,
 }
 
 impl PerFrameBytes {
-    pub(crate) fn new(plane_bytes: usize, demosaic: DemosaicMemory) -> Self {
-        let warped = demosaic
-            .output_bytes
-            .saturating_add(FRAME_QUALITY_PLANES.saturating_mul(plane_bytes));
+    /// For a frame of `output_bytes` whose planes are `plane_bytes` each.
+    pub(crate) const fn new(plane_bytes: usize, output_bytes: usize) -> Self {
+        let warped = output_bytes.saturating_add(FRAME_QUALITY_PLANES.saturating_mul(plane_bytes));
         Self {
             warped,
-            working: demosaic
-                .output_bytes
-                .saturating_add(warped)
-                .max(DETECTION_WORKING_PLANES.saturating_mul(plane_bytes)),
+            working: output_bytes.saturating_add(warped),
         }
     }
 }
@@ -161,6 +157,9 @@ pub(crate) struct RunShape {
     pub(crate) frame_count: usize,
     /// One frame's decode: what it leaves resident, and its peak on the way there.
     pub(crate) decode: DemosaicMemory,
+    /// What each concurrent decode holds beside it for the whole pass: the star detector's
+    /// scratch pool, kept from frame to frame. Zero for a run that detects nothing.
+    pub(crate) detection_bytes: usize,
     /// What one frame costs the detect-register-warp stage; `None` for a run that combines its
     /// frames as they decoded.
     pub(crate) warp: Option<PerFrameBytes>,
@@ -186,6 +185,7 @@ impl RunShape {
                 peak_bytes: resident_bytes
                     .saturating_add((DECODE_TRANSIENT_FACTOR - 1).saturating_mul(frame_bytes)),
             },
+            detection_bytes: 0,
             warp: None,
             output_bytes,
         }
@@ -206,12 +206,16 @@ impl MemoryPlan {
     /// Decide whether a run stays resident or spills, and how wide decode and warp may fan out.
     ///
     /// The run fits in RAM only when each of its peaks does: decoding every frame (plus one
-    /// decode's transient), holding every warped frame while `workers` of them are being worked
-    /// on, and holding every frame beside the combine's resident output planes.
+    /// decode's transient and its detector), holding every warped frame while `workers` of them
+    /// are being worked on, and holding every frame beside the combine's resident output planes.
+    ///
+    /// A resident frame's own bytes count once, in the resident set, so what each in-flight frame
+    /// adds is only what it holds beyond them; a spilled frame's bytes are all transient.
     pub(crate) fn plan(shape: RunShape, threads: usize, available: u64) -> Self {
         let RunShape {
             frame_count,
             decode,
+            detection_bytes,
             warp,
             output_bytes,
         } = shape;
@@ -223,32 +227,39 @@ impl MemoryPlan {
         let (warped, working) = warp.map_or((decode.output_bytes, 0), |per_frame| {
             (per_frame.warped, per_frame.working)
         });
-        let decode_extra = decode.peak_bytes.saturating_sub(decode.output_bytes);
         let usable = memory_budget(available);
+        let resident_decode = decode
+            .peak_bytes
+            .saturating_sub(decode.output_bytes)
+            .saturating_add(detection_bytes);
+        let resident_warp = working.saturating_sub(warped);
 
         let decoded_resident = (decode.output_bytes as u64).saturating_mul(frame_count as u64);
-        let decode_minimum = decoded_resident.saturating_add(decode_extra as u64);
+        let decode_minimum = decoded_resident.saturating_add(resident_decode as u64);
         let warped_resident = (warped as u64).saturating_mul(frame_count as u64);
         let working_peak =
-            warped_resident.saturating_add((working as u64).saturating_mul(workers as u64));
+            warped_resident.saturating_add((resident_warp as u64).saturating_mul(workers as u64));
         let combine_peak = warped_resident.saturating_add(output_bytes as u64);
         let fits_in_ram = decode_minimum.max(working_peak).max(combine_peak) <= usable;
 
-        let (decode_resident_frames, decode_bytes) = if fits_in_ram {
-            (frame_count, decode_extra)
+        let (resident_frames, decode_bytes, warp_bytes) = if fits_in_ram {
+            (frame_count, resident_decode, resident_warp)
         } else {
-            (0, decode.peak_bytes.max(working))
+            (
+                0,
+                decode.peak_bytes.saturating_add(detection_bytes),
+                working,
+            )
         };
-        let warp_resident_frames = usize::from(fits_in_ram) * frame_count;
         let decode_concurrency = load_concurrency(
             decode.output_bytes,
             decode_bytes,
-            decode_resident_frames,
+            resident_frames,
             available,
             workers,
         );
         let warp_concurrency =
-            load_concurrency(warped, working, warp_resident_frames, available, workers);
+            load_concurrency(warped, warp_bytes, resident_frames, available, workers);
         Self {
             fits_in_ram,
             decode_concurrency,

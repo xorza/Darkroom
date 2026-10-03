@@ -29,6 +29,10 @@ const XTRANS_LARGE: usize = 24;
 /// Nearest unmasked same-color neighbors used to in-paint a flagged pixel.
 const XTRANS_REPLACE: usize = 12;
 
+/// Frame-sized `f32` planes the X-Trans detector holds: `lplus`, `f`, `signal`, `noise` and
+/// `frame`, and the three colour buckets, which share one plane's worth between them.
+pub(crate) const XTRANS_SCRATCH_PLANES: usize = 6;
+
 /// The CFA detector's per-pixel inputs and the scratch that builds them, allocated on the first
 /// iteration and reused by every one after it — [`MonoDetector`](super::mono::MonoDetector)'s rule on the X-Trans path.
 #[derive(Debug, Default)]
@@ -82,6 +86,15 @@ impl<'a> XtransDetector<'a> {
         }
     }
 
+    /// The bytes a detection on a `size` mosaic allocates beside it: the scratch planes and the
+    /// masks, or nothing on a mosaic too small to scan.
+    pub(super) fn heap_bytes(size: Size2us) -> usize {
+        if size.width < 7 || size.height < 7 {
+            return 0;
+        }
+        XTRANS_SCRATCH_PLANES * size.pixel_count() * size_of::<f32>() + CrMasks::heap_bytes(size)
+    }
+
     /// Detect and in-paint cosmic rays on the mosaic, in place, returning the CR pixel count.
     ///
     /// Median-based, so a ray inside a stencil cannot drag its own reference, and **without** the
@@ -95,6 +108,14 @@ impl<'a> XtransDetector<'a> {
         }
         let mut masks = CrMasks::new(size);
         let scratch = &mut self.scratch;
+        // Sized exactly up front, so the working set is the planes `XTRANS_SCRATCH_PLANES` counts:
+        // the buckets grown by pushing, and `frame` by the MADs before the snapshot, would each
+        // round their capacity up past it.
+        let counts = color_counts(self.cfa, size);
+        for (bucket, &count) in scratch.by_color.iter_mut().zip(&counts) {
+            bucket.reserve_exact(count);
+        }
+        scratch.frame.reserve_exact(size.pixel_count());
 
         for _ in 0..self.config.niter {
             let scene = CfaScene {
@@ -125,6 +146,27 @@ impl<'a> XtransDetector<'a> {
 
         masks.accumulated.count_ones()
     }
+}
+
+/// How many of a `size` mosaic's pixels are each colour. The pattern repeats every six pixels on
+/// both axes, so each of its 36 cells stands for every pixel congruent to it.
+fn color_counts(cfa: &CfaType, size: Size2us) -> [usize; 3] {
+    const PERIOD: usize = 6;
+    let repeats = |start: usize, extent: usize| {
+        if start < extent {
+            (extent - 1 - start) / PERIOD + 1
+        } else {
+            0
+        }
+    };
+    let mut counts = [0; 3];
+    for y in 0..PERIOD {
+        for x in 0..PERIOD {
+            let color = (cfa.color_at(Vec2us::new(x, y)) as usize).min(2);
+            counts[color] += repeats(x, size.width) * repeats(y, size.height);
+        }
+    }
+    counts
 }
 
 /// Read-only context for same-color gathering: the plane data, its size, the CFA pattern, and the
@@ -277,4 +319,68 @@ fn xtrans_replace(
             }
         },
     );
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use crate::io::image::cfa::CfaType;
+    use crate::math::size2us::Size2us;
+    use crate::stacking::calibration_masters::cosmic_ray::config::CosmicRayConfig;
+    use crate::stacking::calibration_masters::cosmic_ray::noise_model::NoiseModel;
+    use crate::stacking::calibration_masters::cosmic_ray::xtrans::{XtransDetector, XtransScratch};
+
+    /// Total capacity, in floats, of the X-Trans detector's working set after a run on `data`.
+    /// Destructured so a buffer added to [`XtransScratch`] fails to compile here.
+    pub(crate) fn xtrans_scratch_floats(data: &mut [f32], size: Size2us, cfa: &CfaType) -> usize {
+        let config = CosmicRayConfig::default();
+        let mut detector = XtransDetector::new(&config, NoiseModel::Empirical, cfa);
+        detector.reject(data, size);
+        let XtransScratch {
+            lplus,
+            f,
+            signal,
+            noise,
+            by_color,
+            frame,
+        } = &detector.scratch;
+        lplus.capacity()
+            + f.capacity()
+            + signal.capacity()
+            + noise.capacity()
+            + by_color.iter().map(Vec::capacity).sum::<usize>()
+            + frame.capacity()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::io::image::cfa::CfaType;
+    use crate::math::size2us::Size2us;
+    use crate::math::vec2us::Vec2us;
+    use crate::stacking::calibration_masters::cosmic_ray::xtrans::color_counts;
+    use crate::testing::cfa::XTRANS_PATTERN;
+
+    /// The period arithmetic against a pixel-by-pixel count, over every size up to two periods and
+    /// a pixel on each axis — whole periods, part periods and frames narrower than one.
+    #[test]
+    fn color_counts_match_a_pixel_by_pixel_count() {
+        let cfa = CfaType::XTrans(XTRANS_PATTERN);
+        for height in 0..=13 {
+            for width in 0..=13 {
+                let mut expected = [0; 3];
+                for y in 0..height {
+                    for x in 0..width {
+                        expected[(cfa.color_at(Vec2us::new(x, y)) as usize).min(2)] += 1;
+                    }
+                }
+                assert_eq!(
+                    color_counts(&cfa, Size2us::new(width, height)),
+                    expected,
+                    "{width}×{height}"
+                );
+            }
+        }
+        // One period holds 8 red, 20 green and 8 blue.
+        assert_eq!(color_counts(&cfa, Size2us::new(6, 6)), [8, 20, 8]);
+    }
 }

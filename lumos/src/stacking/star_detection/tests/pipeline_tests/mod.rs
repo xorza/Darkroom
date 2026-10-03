@@ -10,7 +10,7 @@ use crate::stacking::star_detection::tests::{MATCH_RADIUS, near};
 use crate::testing::prelude::*;
 use crate::testing::synthetic::background_map;
 use crate::testing::synthetic::observe::SimFrame;
-use crate::testing::visual::report::{compute_detection_metrics, save_metrics};
+use crate::testing::visual::report::{DetectionMetrics, save_metrics};
 use crate::testing::visual::{ToneMap, save, save_comparison};
 
 mod challenging_tests;
@@ -65,7 +65,7 @@ fn run_test(name: &str, prefix: &str, frame: &SimFrame, config: &Config, min_dec
         .unwrap()
         .detect(&frame.image)
         .stars;
-    let metrics = compute_detection_metrics(truth, &stars, MATCH_RADIUS as f32);
+    let metrics = DetectionMetrics::measure(truth, &stars, MATCH_RADIUS);
     save_comparison(
         pixels.pixels(),
         size,

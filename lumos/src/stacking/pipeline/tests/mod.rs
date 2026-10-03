@@ -12,6 +12,7 @@ use crate::stacking::calibration_masters::cosmic_ray::config::{CosmicRayConfig, 
 use crate::stacking::combine::config::{CombineMethod, StackConfig, Weighting};
 use crate::stacking::combine::error::{Error as StackError, StackConfigError};
 use crate::stacking::combine::rejection::Rejection;
+use crate::stacking::frame_store::frame_stats::FrameStats;
 use crate::stacking::pipeline::align::{align_and_stack, register_warp_and_stack};
 use crate::stacking::pipeline::calibrate::calibrate_align_stack;
 use crate::stacking::pipeline::config::{AlignStackConfig, Reference};
@@ -358,6 +359,7 @@ fn a_bad_registration_config_is_never_mistaken_for_frames_that_would_not_match()
             DetectedFrame {
                 stars: result.stars,
                 diagnostics: result.diagnostics,
+                stats: FrameStats::measure(&image),
                 image: PipelineFrame::Resident(image),
             }
         })

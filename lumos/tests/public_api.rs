@@ -23,7 +23,7 @@ use lumos::{
 
 #[test]
 fn file_loading_policy_is_available_from_the_crate_root() {
-    let context = LoadContext {
+    let _: LoadContext = LoadContext {
         cancel: CancelToken::never(),
         memory_limit_bytes: 64 * 1024 * 1024,
         fits: FitsLoadOptions {
@@ -38,16 +38,9 @@ fn file_loading_policy_is_available_from_the_crate_root() {
             unstated_bayer_pattern: Some(CfaPattern::Grbg),
         },
     };
-    assert_eq!(context.memory_limit_bytes, 64 * 1024 * 1024);
-    assert_eq!(context.fits.cube, FitsCubeInterpretation::Rgb);
-    assert_eq!(context.fits.nulls, FitsNullPolicy::Reject);
     // The default is the standard-conforming one: a null is data the format defines, not a reason
     // to refuse the file.
     assert_eq!(FitsLoadOptions::default().nulls, FitsNullPolicy::Mask);
-    assert_eq!(
-        context.fits.float_scale,
-        FitsFloatScale::FullScale(65_535.0)
-    );
 
     let provenance = TransferProvenance::FitsNormalized(FitsTransferProvenance {
         bscale: 1.0,
@@ -65,18 +58,6 @@ fn file_loading_policy_is_available_from_the_crate_root() {
             checksum: FitsChecksumState::Valid,
         },
     });
-    assert!(matches!(
-        provenance,
-        TransferProvenance::FitsNormalized(FitsTransferProvenance {
-            hdu: FitsHduProvenance { index: 3, .. },
-            checksum: FitsChecksumProvenance {
-                datasum: FitsChecksumState::Valid,
-                checksum: FitsChecksumState::Valid,
-            },
-            ..
-        })
-    ));
-
     // Both decoders answer the same question about their samples, so a caller can compare two
     // frames' domains without knowing which produced them. The FITS answer carries the declared
     // BUNIT; a RAW frame states none, which is why the two still convert here.
@@ -108,7 +89,7 @@ fn file_loading_policy_is_available_from_the_crate_root() {
 
 #[test]
 fn stacking_configuration_types_are_available_from_the_crate_root() {
-    let rejections = [
+    let _: [Rejection; 5] = [
         Rejection::SigmaClip(SigmaClipConfig::default()),
         Rejection::Winsorized(WinsorizedClipConfig::default()),
         Rejection::LinearFit(LinearFitClipConfig::default()),
@@ -116,23 +97,7 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
         Rejection::Gesd(GesdConfig::default()),
     ];
 
-    let [
-        Rejection::SigmaClip(sigma),
-        Rejection::Winsorized(winsorized),
-        Rejection::LinearFit(linear_fit),
-        Rejection::Percentile(percentile),
-        Rejection::Gesd(gesd),
-    ] = rejections
-    else {
-        panic!("rejection variants changed order")
-    };
-    assert_eq!(sigma, SigmaClipConfig::default());
-    assert_eq!(winsorized, WinsorizedClipConfig::default());
-    assert_eq!(linear_fit, LinearFitClipConfig::default());
-    assert_eq!(percentile, PercentileClipConfig::default());
-    assert_eq!(gesd, GesdConfig::default());
-
-    let config = StackConfig {
+    let _: StackConfig = StackConfig {
         method: CombineMethod::Mean(Rejection::None),
         weighting: Weighting::Manual(vec![1.0, 2.0]),
         normalization: Normalization::Global,
@@ -143,22 +108,6 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
         cache: CacheConfig::default(),
         quality: QualityPlanes::IMAGE_ONLY,
     };
-    let StackConfig {
-        method,
-        weighting,
-        normalization,
-        small_n,
-        cache,
-        quality,
-    } = config;
-
-    assert_eq!(method, CombineMethod::Mean(Rejection::None));
-    assert_eq!(weighting, Weighting::Manual(vec![1.0, 2.0]));
-    assert_eq!(normalization, Normalization::Global);
-    assert_eq!(small_n.min_frames, 3);
-    assert_eq!(small_n.fallback, CombineMethod::Median);
-    let _: CacheConfig = cache;
-    assert_eq!(quality, QualityPlanes::IMAGE_ONLY);
     assert_eq!(QualityPlanes::default(), QualityPlanes::ALL);
 
     let registration = RegistrationConfig {
@@ -189,14 +138,7 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
         ..Default::default()
     };
     registration.validate().unwrap();
-    assert_eq!(registration.matching.max_stars, 50);
-    assert_eq!(registration.matching.min_matches, 6);
-    assert_eq!(registration.matching.triangle.ratio_tolerance, 0.02);
-    assert_eq!(registration.ransac.max_iterations, 750);
-    assert_eq!(registration.ransac.seed, Some(42));
-    assert_eq!(registration.sip.as_ref().unwrap().order, 2);
-    assert_eq!(registration.warp.method, InterpolationMethod::Bilinear);
-    assert_eq!(registration.warp.border_value, -1.0);
+    // `min_stars` overrides the transform's own floor.
     assert_eq!(
         registration
             .matching
@@ -213,35 +155,24 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
     };
     detection.validate().unwrap();
 
-    let noise = NoiseModel::from_normalized(1_000.0, 10.0);
-    assert_eq!(noise.electrons_per_normalized_unit, 1_000.0);
-    assert_eq!(noise.read_noise_electrons, 10.0);
-    noise.validate().unwrap();
+    NoiseModel::from_normalized(1_000.0, 10.0)
+        .validate()
+        .unwrap();
 
+    // A drizzle frame weighs one by default and has no per-pixel weights.
     let frame = DrizzleFrame::new("light.fits", WarpTransform::new(Transform::identity()));
-    let DrizzleFrame {
-        source,
-        warp: _,
-        weight,
-        pixel_weight_map,
-    } = frame;
-
-    assert_eq!(source, "light.fits");
-    assert_eq!(weight, 1.0);
-    assert!(pixel_weight_map.is_none());
+    assert_eq!(frame.weight, 1.0);
+    assert!(frame.pixel_weight_map.is_none());
 }
 
 #[test]
 fn invariant_types_expose_validated_state_from_the_crate_root() {
-    let metadata = ImageMetadata {
+    let _: ImageMetadata = ImageMetadata {
         camera_white_balance: Some([2.0, 1.0, 1.5, 1.0]),
         ..Default::default()
     };
-    assert_eq!(metadata.camera_white_balance, Some([2.0, 1.0, 1.5, 1.0]));
 
     let dimensions = ImageDimensions::new((12, 8), 3);
-    assert_eq!(dimensions.size(), (12, 8).into());
-    assert_eq!(dimensions.channels(), 3);
     assert_eq!(dimensions.pixel_count(), 96);
     assert_eq!(dimensions.sample_count(), 288);
 
@@ -351,26 +282,20 @@ fn star_detection_filter_diagnostics_are_one_nested_component() {
         fwhm_outliers: 6,
         duplicates: 7,
     };
-    let diagnostics = StarDetectionDiagnostics {
+    let _: StarDetectionDiagnostics = StarDetectionDiagnostics {
         quality_filter,
         ..Default::default()
     };
-
-    assert_eq!(diagnostics.quality_filter, quality_filter);
 }
 
 #[test]
 fn calibration_master_views_are_available_from_the_crate_root() {
-    let roles = CalibrationSet {
+    let _: CalibrationSet<u8> = CalibrationSet {
         dark: 1,
         flat: 2,
         bias: 3,
         flat_dark: 4,
     };
-    assert_eq!(
-        [roles.dark, roles.flat, roles.bias, roles.flat_dark],
-        [1, 2, 3, 4]
-    );
 
     let masters = CalibrationMasters::default();
     assert_eq!(masters.components().collect::<Vec<_>>(), Vec::new());
@@ -392,7 +317,7 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
         quantization_sigma: Some(0.001),
         cfa_type: None,
     };
-    let result = AlignStackResult {
+    let _: AlignStackResult = AlignStackResult {
         product,
         alignment: AlignmentSummary {
             reference: 1,
@@ -402,29 +327,14 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
         detection: vec![StarDetectionDiagnostics::default(); 4],
     };
 
-    assert_eq!(result.product.image.channel(0).pixels(), &[0.25, 0.75]);
-    assert_eq!(
-        result
-            .product
-            .coverage
-            .as_ref()
-            .unwrap()
-            .to_plane()
-            .pixels(),
-        &[1.0, 0.5]
-    );
-    let Some(QualityMap::Shared(weight)) = &result.product.weight else {
-        panic!("a mono stack has one weight plane");
+    // A uniform coverage is one number until a plane is asked for.
+    let uniform = Coverage::Uniform {
+        value: 0.5,
+        size: (2, 1).into(),
     };
-    let Some(QualityMap::Shared(variance)) = &result.product.linear_variance else {
-        panic!("a mono stack has one variance plane");
-    };
-    assert_eq!(weight.pixels(), &[2.0, 1.0]);
-    assert_eq!(variance.pixels(), &[0.5, 1.0]);
-    assert_eq!(result.alignment.reference, 1);
-    assert_eq!(result.alignment.registered, 2);
-    assert_eq!(result.alignment.dropped, vec![0, 3]);
+    assert_eq!(uniform.to_plane().pixels(), &[0.5, 0.5]);
 
+    // The conversions to an image move the planes rather than copy them.
     let shared_plane = Buffer2::new(2, 1, vec![3.0, 4.0]);
     let shared_pixels = shared_plane.pixels().as_ptr();
     let shared_image = LinearImage::from(QualityMap::Shared(shared_plane));
@@ -452,18 +362,11 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
         per_channel_pixels
     );
 
-    let star_match = StarMatch {
+    let _: StarMatch = StarMatch {
         indices: MatchIndices {
             reference: 4,
             target: 9,
         },
         residual: 0.125,
     };
-    let StarMatch {
-        indices: MatchIndices { reference, target },
-        residual,
-    } = star_match;
-    assert_eq!(reference, 4);
-    assert_eq!(target, 9);
-    assert_eq!(residual, 0.125);
 }

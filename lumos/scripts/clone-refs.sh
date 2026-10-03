@@ -27,8 +27,7 @@ mkdir -p "$DEST"
 CORE=(
   # --- actual native dependencies, pinned to Cargo.lock ---
   "LibRaw|https://github.com/LibRaw/LibRaw|0.20.1|raw: unpack, adjust_bl() black levels, white balance"
-  "cfitsio|https://github.com/HEASARC/cfitsio||astro_image/fits: FITS I/O, header parsing"
-  "rust-fitsio|https://github.com/simonrw/rust-fitsio||astro_image/fits: the fitsio Rust binding lumos uses"
+  "cfitsio|https://github.com/HEASARC/cfitsio||io/image/fits: the FITS reference implementation, for the format rules fits-well reads"
 
   # --- calibration ---
   "ccdproc|https://github.com/astropy/ccdproc||calibration_masters: bias/dark/flat reduction, combine"
@@ -61,7 +60,7 @@ CORE=(
 EXTRA=(
   "RawTherapee|https://github.com/Beep6581/RawTherapee||raw/demosaic: RCD/AMaZE/Markesteijn upstream (large)"
   "opencv|https://github.com/opencv/opencv||registration: findHomography, DLT, RANSAC reference (large)"
-  "astropy|https://github.com/astropy/astropy||astro_image + registration: FITS, WCS, SIP polynomials (large)"
+  "astropy|https://github.com/astropy/astropy||io/image/fits + registration: FITS, WCS, SIP polynomials (large)"
   "drizzlepac|https://github.com/spacetelescope/drizzlepac||drizzle: full DrizzlePac pipeline"
   "DeepSkyStacker|https://github.com/deepskystacker/DSS||stacking/registration: alternate stacking pipeline"
   "kstars|https://github.com/KDE/kstars||all: KStars/Ekos capture+processing suite (large)"

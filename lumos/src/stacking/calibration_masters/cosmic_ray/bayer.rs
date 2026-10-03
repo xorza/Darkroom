@@ -30,6 +30,16 @@ impl<'a> BayerDetector<'a> {
         }
     }
 
+    /// The bytes a detection on a `size` mosaic allocates beside it: the largest phase plane and
+    /// the mono detector's scratch over it, or nothing when even that phase is too small to scan.
+    pub(super) fn heap_bytes(size: Size2us) -> usize {
+        let phase = Size2us::new(size.width.div_ceil(2), size.height.div_ceil(2));
+        match MonoDetector::heap_bytes(phase) {
+            0 => 0,
+            mono => phase.pixel_count() * size_of::<f32>() + mono,
+        }
+    }
+
     /// Clean every phase in place, returning the total CR pixel count across the four.
     ///
     /// Deinterleave and re-interleave are row-parallel like the detection between them. They are

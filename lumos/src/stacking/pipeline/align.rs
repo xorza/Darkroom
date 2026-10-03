@@ -10,7 +10,9 @@ use crate::error::FrameDimensionMismatch;
 use crate::io::image::linear::LinearImage;
 use crate::io::raw::demosaic::DemosaicMemory;
 use crate::memory::run_memory::RunMemory;
-use crate::memory::{MemoryPlan, PerFrameBytes, RunShape};
+use crate::memory::{
+    DECODE_TRANSIENT_FACTOR, DETECTION_WORKING_PLANES, MemoryPlan, PerFrameBytes, RunShape,
+};
 use crate::stacking::combine::cache::frame_check::FrameCheck;
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::combine::stack::stack_stored_frames;
@@ -72,22 +74,20 @@ pub fn align_and_stack(
     // One reading for the run, for the tier decision and the combine's chunk sizes alike.
     let memory = RunMemory::read(config.stack.cache.memory_override);
     let total = lights.len();
-    // The inputs are already decoded and resident: their decode left exactly their own bytes and
-    // has no transient, so only the warped outputs, the per-frame scratch and the combine's output
-    // are still in question.
+    // The inputs are already decoded and resident: what the preparing pass adds to each is the
+    // copy its statistics sort, beside the detector. On the spill tier that charges the input
+    // itself as well, which the caller already holds — one frame of slack per worker.
     let frame_bytes = memory::frame_bytes(dimensions);
-    let decoded = DemosaicMemory {
-        output_bytes: frame_bytes,
-        peak_bytes: frame_bytes,
-    };
+    let plane_bytes = dimensions.pixel_count() * size_of::<f32>();
     let plan = MemoryPlan::plan(
         RunShape {
             frame_count: total,
-            decode: decoded,
-            warp: Some(PerFrameBytes::new(
-                dimensions.pixel_count() * size_of::<f32>(),
-                decoded,
-            )),
+            decode: DemosaicMemory {
+                output_bytes: frame_bytes,
+                peak_bytes: DECODE_TRANSIENT_FACTOR * frame_bytes,
+            },
+            detection_bytes: DETECTION_WORKING_PLANES * plane_bytes,
+            warp: Some(PerFrameBytes::new(plane_bytes, frame_bytes)),
             output_bytes: config.stack.quality.resident_bytes(dimensions),
         },
         rayon::current_num_threads(),
@@ -114,9 +114,12 @@ pub fn align_and_stack(
                 return Err(Error::Cancelled);
             }
             let result = detector.detect(image);
+            // Measured before interpolation, which correlates neighbouring pixels and would
+            // otherwise understate the frame's noise.
+            let stats = FrameStats::measure(image);
             let n = detected_count.complete_one();
             log_detection(n, total, &result);
-            Ok(result)
+            Ok((result, stats))
         })
     }?;
 
@@ -126,10 +129,11 @@ pub fn align_and_stack(
     let detected: Vec<DetectedFrame> = lights
         .into_iter()
         .zip(detections)
-        .map(|(image, result)| DetectedFrame {
+        .map(|(image, (result, stats))| DetectedFrame {
             image: PipelineFrame::Resident(image),
             stars: result.stars,
             diagnostics: result.diagnostics,
+            stats,
         })
         .collect();
 
@@ -234,18 +238,15 @@ pub(crate) fn register_warp_and_stack(
                 return Ok(None);
             }
             let name = format!("warped_{index}");
+            let source_stats = detected.stats;
             if index == reference {
                 // The unwarped reference has full support and unit interpolation confidence.
                 let image = detected.image.into_image();
-                let source_stats = FrameStats::measure(&image);
                 return tier.store_reference(&name, image, source_stats).map(Some);
             }
 
             let n = registered_so_far.fetch_add(1, Ordering::Relaxed) + 1;
             let source = detected.image.into_image();
-            // Measured before interpolation, which correlates neighbouring pixels and would
-            // otherwise understate the frame's noise.
-            let source_stats = FrameStats::measure(&source);
             let registration = match register(&ref_stars, &detected.stars, &config.registration) {
                 Ok(registration) => registration,
                 // A pair that did not match is a frame to drop. An invalid config is not: it

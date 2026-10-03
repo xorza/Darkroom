@@ -274,15 +274,12 @@ mod tests {
         assert_eq!(img.get_pixel(1, 0).0[0], 84);
         assert_eq!(img.get_pixel(1, 1).0[0], 255);
 
-        // Asinh: same endpoints, but the knee lifts the midtones well above AutoRange.
+        // Asinh: same endpoints, and the knee lifts the midtones. 0.4 and 0.6 sit a third and two
+        // thirds up the range, and asinh(x/0.1)/asinh(10) maps them to 0.6400 and 0.8658: 163.2
+        // and 220.8 of 255, truncated.
         let img = to_gray(&[0.2, 0.4, 0.6, 0.8], size, ToneMap::Asinh);
-        assert_eq!(img.get_pixel(0, 0).0[0], 0);
-        assert_eq!(img.get_pixel(1, 1).0[0], 255);
-        assert!(
-            img.get_pixel(1, 0).0[0] > 84,
-            "asinh must lift 0.4 above AutoRange's 84, got {}",
-            img.get_pixel(1, 0).0[0]
-        );
+        let row = |y| [img.get_pixel(0, y).0[0], img.get_pixel(1, y).0[0]];
+        assert_eq!([row(0), row(1)], [[0, 163], [220, 255]]);
     }
 
     /// A flat plane has no range to stretch; the guarded span must not divide by zero.
