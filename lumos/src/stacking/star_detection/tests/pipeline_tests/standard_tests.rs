@@ -1,19 +1,11 @@
-//! Standard pipeline tests - full star detection on typical forward-model scenarios.
+//! Star detection on typical forward-model fields, held to what their truth decides exactly (see
+//! [`run_test`]).
 
-use crate::stacking::star_detection::config::Config;
-use crate::stacking::star_detection::tests::Scenario;
 use crate::stacking::star_detection::tests::pipeline_tests::run_test;
+use crate::stacking::star_detection::tests::{Scenario, synthetic_config};
 use crate::testing::init_tracing;
 use crate::testing::synthetic::camera::PsfModel;
 use crate::testing::synthetic::scene::BackgroundField;
-use crate::testing::visual::report::{PassCriteria, check_pass, standard_criteria};
-
-/// Detection config for synthetic images: disable the CFA matched filter so FWHM stays accurate.
-fn detection_config() -> Config {
-    let mut config = Config::default();
-    config.fwhm.mode = None;
-    config
-}
 
 /// Test: Sparse field with well-separated stars.
 #[test]
@@ -26,11 +18,7 @@ fn pipeline_sparse_field() {
     }
     .frame();
 
-    let metrics = run_test("sparse_field", "pipeline", &frame, &detection_config());
-
-    if let Err(failures) = check_pass(&metrics, &standard_criteria()) {
-        panic!("Sparse field test failed: {failures:?}");
-    }
+    run_test("sparse_field", "pipeline", &frame, &synthetic_config(), 12);
 }
 
 /// Test: Dense field with many stars.
@@ -44,19 +32,7 @@ fn pipeline_dense_field() {
     }
     .frame();
 
-    let metrics = run_test("dense_field", "pipeline", &frame, &detection_config());
-
-    // Crowding blends some neighbours, so the floor is below a sparse field's — but it is a
-    // real, enforced regression guard (observed ~81% completeness, 0 false positives).
-    let criteria = PassCriteria {
-        min_detection_rate: 0.75,
-        max_false_positive_rate: 0.05,
-        max_mean_centroid_error: 0.20,
-        max_fwhm_error: 0.10,
-    };
-    if let Err(failures) = check_pass(&metrics, &criteria) {
-        panic!("Dense field regressed: {failures:?}");
-    }
+    run_test("dense_field", "pipeline", &frame, &synthetic_config(), 19);
 }
 
 /// Test: Moffat profile stars (more realistic PSF).
@@ -79,23 +55,12 @@ fn pipeline_moffat_profile() {
     }
     .frame();
 
-    let metrics = run_test("moffat_profile", "pipeline", &frame, &detection_config());
-
-    // Moffat wings: Gaussian-fit FWHM and centroid matching carry some extra error.
-    let criteria = PassCriteria {
-        min_detection_rate: 0.85,
-        max_false_positive_rate: 0.05,
-        max_mean_centroid_error: 0.30,
-        max_fwhm_error: 0.20,
-    };
-    if let Err(failures) = check_pass(&metrics, &criteria) {
-        panic!("Moffat profile test failed: {failures:?}");
-    }
+    run_test("moffat_profile", "pipeline", &frame, &synthetic_config(), 8);
 }
 
-/// Test: Larger PSF (single instrument FWHM; legacy varied per-star).
+/// Test: a wider PSF, 4.5 px.
 #[test]
-fn pipeline_fwhm_range() {
+fn pipeline_wider_psf() {
     init_tracing();
 
     let frame = Scenario {
@@ -105,17 +70,7 @@ fn pipeline_fwhm_range() {
     }
     .frame();
 
-    let metrics = run_test("fwhm_range", "pipeline", &frame, &detection_config());
-
-    let criteria = PassCriteria {
-        min_detection_rate: 0.90,
-        max_false_positive_rate: 0.05,
-        max_mean_centroid_error: 0.30,
-        max_fwhm_error: 0.30,
-    };
-    if let Err(failures) = check_pass(&metrics, &criteria) {
-        panic!("FWHM range test failed: {failures:?}");
-    }
+    run_test("wider_psf", "pipeline", &frame, &synthetic_config(), 13);
 }
 
 /// Test: Wide dynamic range (bright to faint stars).
@@ -131,21 +86,7 @@ fn pipeline_dynamic_range() {
     }
     .frame();
 
-    let mut detection_config = detection_config();
-    detection_config.filter.min_snr = 5.0;
-    let metrics = run_test("dynamic_range", "pipeline", &frame, &detection_config);
-
-    // The faint end sits near the detection limit, so completeness is lower — but enforced as a
-    // real floor (observed ~77% completeness, 0 false positives, sub-0.35 px centroids).
-    let criteria = PassCriteria {
-        min_detection_rate: 0.70,
-        max_false_positive_rate: 0.05,
-        max_mean_centroid_error: 0.35,
-        max_fwhm_error: 0.10,
-    };
-    if let Err(failures) = check_pass(&metrics, &criteria) {
-        panic!("Dynamic range regressed: {failures:?}");
-    }
+    run_test("dynamic_range", "pipeline", &frame, &synthetic_config(), 16);
 }
 
 /// Test: Low noise (ideal conditions).
@@ -162,15 +103,5 @@ fn pipeline_low_noise() {
     }
     .frame();
 
-    let metrics = run_test("low_noise", "pipeline", &frame, &detection_config());
-
-    let criteria = PassCriteria {
-        min_detection_rate: 0.92,
-        max_false_positive_rate: 0.02,
-        max_mean_centroid_error: 0.25,
-        max_fwhm_error: 0.10,
-    };
-    if let Err(failures) = check_pass(&metrics, &criteria) {
-        panic!("Low noise test failed: {failures:?}");
-    }
+    run_test("low_noise", "pipeline", &frame, &synthetic_config(), 13);
 }

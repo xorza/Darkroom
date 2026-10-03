@@ -10,6 +10,7 @@
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use crate::stacking::registration::transform::Transform;
 use crate::testing::synthetic::camera::Camera;
 use crate::testing::synthetic::noise::{add_dark_current, add_read_noise, apply_shot_noise};
@@ -58,6 +59,8 @@ pub(crate) struct FrameTruth {
     pub(crate) clean: Buffer2<f32>,
     /// Sources as they land on the sensor (post-transform).
     pub(crate) sources: Vec<ObservedSource>,
+    /// Cosmic-ray hits a fixture added after the light path, empty from [`render`].
+    pub(crate) cosmic_rays: Vec<Vec2us>,
 }
 
 /// A rendered frame plus its ground truth.
@@ -162,6 +165,7 @@ pub(crate) fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFr
         truth: FrameTruth {
             clean,
             sources: observed,
+            cosmic_rays: Vec::new(),
         },
     }
 }

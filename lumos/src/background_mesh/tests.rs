@@ -1,7 +1,6 @@
 use crate::background_mesh::workspace::internals::compute_grid;
 use crate::background_mesh::*;
 use crate::math::statistics::mad_to_sigma;
-use std::iter;
 
 /// Number of sigma-clipping iterations for tests.
 const TEST_SIGMA_CLIP_ITERATIONS: usize = 2;
@@ -98,56 +97,6 @@ fn tile_grid_uniform_image() {
 }
 
 #[test]
-fn find_lower_tile_y_exact_center() {
-    let pixels = Buffer2::new_filled(64, 128, 0.5);
-    let grid = make_grid(&pixels, 32);
-
-    assert_eq!(grid.find_lower_tile_y(16.0), 0);
-    assert_eq!(grid.find_lower_tile_y(48.0), 1);
-    assert_eq!(grid.find_lower_tile_y(80.0), 2);
-    assert_eq!(grid.find_lower_tile_y(112.0), 3);
-}
-
-#[test]
-fn find_lower_tile_y_between_centers() {
-    let pixels = Buffer2::new_filled(64, 128, 0.5);
-    let grid = make_grid(&pixels, 32);
-
-    assert_eq!(grid.find_lower_tile_y(30.0), 0);
-    assert_eq!(grid.find_lower_tile_y(60.0), 1);
-    assert_eq!(grid.find_lower_tile_y(100.0), 2);
-}
-
-#[test]
-fn find_lower_tile_y_before_first_center() {
-    let pixels = Buffer2::new_filled(64, 128, 0.5);
-    let grid = make_grid(&pixels, 32);
-
-    assert_eq!(grid.find_lower_tile_y(0.0), 0);
-    assert_eq!(grid.find_lower_tile_y(10.0), 0);
-}
-
-#[test]
-fn find_lower_tile_y_after_last_center() {
-    let pixels = Buffer2::new_filled(64, 128, 0.5);
-    let grid = make_grid(&pixels, 32);
-
-    assert_eq!(grid.find_lower_tile_y(120.0), 3);
-    assert_eq!(grid.find_lower_tile_y(1000.0), 3);
-}
-
-#[test]
-fn find_lower_tile_y_single_tile() {
-    let pixels = Buffer2::new_filled(32, 32, 0.5);
-    let grid = make_grid(&pixels, 32);
-
-    assert_eq!(grid.stats.height(), 1);
-    assert_eq!(grid.find_lower_tile_y(0.0), 0);
-    assert_eq!(grid.find_lower_tile_y(16.0), 0);
-    assert_eq!(grid.find_lower_tile_y(100.0), 0);
-}
-
-#[test]
 fn tile_grid_with_mask_excludes_masked() {
     let width = 64;
     let height = 64;
@@ -213,31 +162,6 @@ fn tile_uses_few_unmasked_pixels_over_all_pixels() {
 }
 
 #[test]
-fn all_pixels_masked_fallback() {
-    let width = 64;
-    let height = 64;
-    let pixels = Buffer2::new_filled(width, height, 0.4);
-    let mask = BitBuffer2::new_filled(Size2us::new(width, height), true);
-
-    let grid = make_grid_with_mask(&pixels, 32, &mask);
-
-    let stats = grid.stats[(0, 0)];
-    assert!((stats.sky - 0.4).abs() < 0.05);
-}
-
-#[test]
-fn median_filter_skipped_for_small_grid() {
-    let pixels = Buffer2::new_filled(64, 64, 0.5);
-    let grid = make_grid(&pixels, 32);
-
-    assert_eq!(grid.stats.width(), 2);
-    assert_eq!(grid.stats.height(), 2);
-
-    let stats = grid.stats[(0, 0)];
-    assert!((stats.sky - 0.5).abs() < 0.01);
-}
-
-#[test]
 fn tile_stats_with_gradient() {
     let width = 64;
     let height = 64;
@@ -251,15 +175,6 @@ fn tile_stats_with_gradient() {
     let tl = grid.stats[(0, 0)];
     let br = grid.stats[(1, 1)];
     assert!(br.sky > tl.sky);
-}
-
-#[test]
-fn debug_impl() {
-    let pixels = Buffer2::new_filled(64, 64, 0.5);
-    let grid = make_grid(&pixels, 32);
-
-    let debug_str = format!("{grid:?}");
-    assert!(debug_str.contains("TileGrid"));
 }
 
 #[test]
@@ -352,15 +267,6 @@ fn negative_pixel_values() {
 
     let stats = grid.stats[(0, 0)];
     assert!((stats.sky - (-0.5)).abs() < 0.01);
-}
-
-#[test]
-fn find_lower_tile_y_negative_pos() {
-    let pixels = Buffer2::new_filled(64, 128, 0.5);
-    let grid = make_grid(&pixels, 32);
-
-    // Negative position should return 0
-    assert_eq!(grid.find_lower_tile_y(-10.0), 0);
 }
 
 #[test]
@@ -578,162 +484,6 @@ fn mask_excludes_sources_correctly() {
 }
 
 #[test]
-fn y_spline_derivatives_uniform_data() {
-    // Uniform image → all medians equal → d2y = 0 everywhere
-    let pixels = Buffer2::new_filled(128, 128, 0.5);
-    let grid = make_grid(&pixels, 32);
-
-    for ty in 0..grid.stats.height() {
-        for tx in 0..grid.stats.width() {
-            assert!(
-                grid.d2y(TileComponent::Sky, Vec2us::new(tx, ty)).abs() < 1e-6,
-                "d2y_sky({},{}) = {}, expected 0",
-                tx,
-                ty,
-                grid.d2y(TileComponent::Sky, Vec2us::new(tx, ty))
-            );
-            assert!(
-                grid.d2y(TileComponent::Sigma, Vec2us::new(tx, ty)).abs() < 1e-6,
-                "d2y_sigma({},{}) = {}, expected 0",
-                tx,
-                ty,
-                grid.d2y(TileComponent::Sigma, Vec2us::new(tx, ty))
-            );
-        }
-    }
-}
-
-#[test]
-fn y_spline_derivatives_single_row() {
-    // Single row of tiles → d2y = 0 (no Y interpolation)
-    let pixels = Buffer2::new_filled(128, 32, 0.5);
-    let grid = make_grid(&pixels, 32);
-
-    assert_eq!(grid.stats.height(), 1);
-    for tx in 0..grid.stats.width() {
-        assert_eq!(grid.d2y(TileComponent::Sky, Vec2us::new(tx, 0)), 0.0);
-        assert_eq!(grid.d2y(TileComponent::Sigma, Vec2us::new(tx, 0)), 0.0);
-    }
-}
-
-#[test]
-fn y_spline_derivatives_two_rows() {
-    // Two rows of tiles → natural spline gives d2 = 0 at both endpoints
-    let width = 64;
-    let height = 64;
-    let data: Vec<f32> = (0..height)
-        .flat_map(|y| iter::repeat_n(y as f32 / height as f32, width))
-        .collect();
-    let pixels = Buffer2::new(width, height, data);
-    let grid = make_grid(&pixels, 32);
-
-    assert_eq!(grid.stats.height(), 2);
-    for tx in 0..grid.stats.width() {
-        assert_eq!(grid.d2y(TileComponent::Sky, Vec2us::new(tx, 0)), 0.0);
-        assert_eq!(grid.d2y(TileComponent::Sky, Vec2us::new(tx, 1)), 0.0);
-    }
-}
-
-#[test]
-fn y_spline_derivatives_natural_bc() {
-    // With >= 3 rows, boundary d2 values should be 0 (natural BC)
-    let width = 64;
-    let height = 128;
-    let data: Vec<f32> = (0..height)
-        .flat_map(|y| iter::repeat_n(y as f32 / height as f32, width))
-        .collect();
-    let pixels = Buffer2::new(width, height, data);
-    let grid = make_grid(&pixels, 32);
-
-    assert_eq!(grid.stats.height(), 4);
-    for tx in 0..grid.stats.width() {
-        assert!(
-            grid.d2y(TileComponent::Sky, Vec2us::new(tx, 0)).abs() < 1e-6,
-            "Natural BC: d2y[{},0] = {}",
-            tx,
-            grid.d2y(TileComponent::Sky, Vec2us::new(tx, 0))
-        );
-        assert!(
-            grid.d2y(TileComponent::Sky, Vec2us::new(tx, 3)).abs() < 1e-6,
-            "Natural BC: d2y[{},3] = {}",
-            tx,
-            grid.d2y(TileComponent::Sky, Vec2us::new(tx, 3))
-        );
-    }
-}
-
-#[test]
-fn y_spline_derivatives_quadratic_gradient() {
-    // Create image where each row of tiles has quadratic Y values:
-    // f(y) = y² → tile medians should approximate y_center²
-    // With 4 tile rows (uniform h=32), same as test_solve_d2_quadratic_data
-    // but through the full pipeline.
-    let width = 64;
-    let height = 128; // 4 tile rows of 32
-    let data: Vec<f32> = (0..height)
-        .flat_map(|y| {
-            let val = (y as f32 / height as f32).powi(2); // [0, 1)
-            iter::repeat_n(val, width)
-        })
-        .collect();
-
-    let pixels = Buffer2::new(width, height, data);
-    let grid = make_grid(&pixels, 32);
-
-    assert_eq!(grid.stats.height(), 4);
-
-    // Natural BC: endpoints should be 0
-    for tx in 0..grid.stats.width() {
-        assert!(
-            grid.d2y(TileComponent::Sky, Vec2us::new(tx, 0)).abs() < 1e-5,
-            "d2y[{},0] = {}, expected 0",
-            tx,
-            grid.d2y(TileComponent::Sky, Vec2us::new(tx, 0))
-        );
-        assert!(
-            grid.d2y(TileComponent::Sky, Vec2us::new(tx, 3)).abs() < 1e-5,
-            "d2y[{},3] = {}, expected 0",
-            tx,
-            grid.d2y(TileComponent::Sky, Vec2us::new(tx, 3))
-        );
-    }
-
-    // Interior d2 should be nonzero (positive, since f''(y²) > 0)
-    for tx in 0..grid.stats.width() {
-        assert!(
-            grid.d2y(TileComponent::Sky, Vec2us::new(tx, 1)) > 1e-4,
-            "d2y[{},1] = {}, expected positive",
-            tx,
-            grid.d2y(TileComponent::Sky, Vec2us::new(tx, 1))
-        );
-        assert!(
-            grid.d2y(TileComponent::Sky, Vec2us::new(tx, 2)) > 1e-4,
-            "d2y[{},2] = {}, expected positive",
-            tx,
-            grid.d2y(TileComponent::Sky, Vec2us::new(tx, 2))
-        );
-    }
-
-    // All columns should have the same d2 values (uniform X data)
-    if grid.stats.width() >= 2 {
-        for ty in 0..grid.stats.height() {
-            let d0 = grid.d2y(TileComponent::Sky, Vec2us::new(0, ty));
-            for tx in 1..grid.stats.width() {
-                assert!(
-                    (grid.d2y(TileComponent::Sky, Vec2us::new(tx, ty)) - d0).abs() < 1e-5,
-                    "d2y[{},{}] = {} != d2y[0,{}] = {}",
-                    tx,
-                    ty,
-                    grid.d2y(TileComponent::Sky, Vec2us::new(tx, ty)),
-                    ty,
-                    d0
-                );
-            }
-        }
-    }
-}
-
-#[test]
 fn photutils_sextractor_comparison() {
     // Test case similar to photutils/SExtractor documentation examples
     // Background level 1000 with noise sigma ~10
@@ -871,5 +621,105 @@ fn median_filter_keeps_a_plane_and_drops_spoiled_tiles() {
     let grid = make_grid(&pixels, 32);
     for (tile, stats) in grid.stats.pixels().iter().enumerate() {
         assert_eq!(stats.sky, 50.0, "tile {tile}");
+    }
+}
+
+/// `find_lower_tile_y` is the last tile whose centre is at or before the position, and tile 0
+/// before the first centre: 32-px tiles over 128 rows centre at 15.5, 47.5, 79.5, 111.5.
+#[test]
+fn find_lower_tile_y_is_the_last_centre_at_or_before() {
+    let grid = make_grid(&Buffer2::new_filled(64, 128, 0.5), 32);
+    for (pos, tile) in [
+        (-10.0, 0),
+        (0.0, 0),
+        (15.5, 0),
+        (47.4, 0),
+        (47.5, 1),
+        (79.5, 2),
+        (111.4, 2),
+        (111.5, 3),
+        (1000.0, 3),
+    ] {
+        assert_eq!(grid.find_lower_tile_y(pos), tile, "y = {pos}");
+    }
+    let single = make_grid(&Buffer2::new_filled(32, 32, 0.5), 32);
+    for pos in [0.0, 15.5, 100.0] {
+        assert_eq!(single.find_lower_tile_y(pos), 0, "one tile, y = {pos}");
+    }
+}
+
+/// A tile masked whole reads every pixel instead: on the ramp `x/64` its sky is the ramp at the
+/// tile's centre column, 15.5/64 (dyadic, exact), where an unmasked neighbour reads its own.
+#[test]
+fn a_wholly_masked_tile_reads_all_its_pixels() {
+    let pixels = Buffer2::new(
+        64,
+        32,
+        (0..64 * 32).map(|i| (i % 64) as f32 / 64.0).collect(),
+    );
+    let mut mask = BitBuffer2::new_filled(Size2us::new(64, 32), false);
+    for y in 0..32 {
+        for x in 0..32 {
+            mask.set_at(Vec2us::new(x, y), true);
+        }
+    }
+    let grid = make_grid_with_mask(&pixels, 32, &mask);
+    assert_eq!(grid.stats[(0, 0)].sky, 15.5 / 64.0);
+    assert_eq!(grid.stats[(1, 0)].sky, 47.5 / 64.0);
+}
+
+/// Under three tiles on an axis the 3×3 median does not run: a 2×2 grid of distinct flat tiles
+/// keeps each tile's own sky, where a filter would have moved every one.
+#[test]
+fn a_grid_under_three_tiles_is_not_filtered() {
+    let skies = [[0.1f32, 0.2], [0.3, 0.9]];
+    let pixels = Buffer2::new(
+        64,
+        64,
+        (0..64 * 64)
+            .map(|i| skies[(i / 64) / 32][(i % 64) / 32])
+            .collect(),
+    );
+    let grid = make_grid(&pixels, 32);
+    for (ty, row) in skies.iter().enumerate() {
+        for (tx, &sky) in row.iter().enumerate() {
+            assert_eq!(grid.stats[(tx, ty)].sky, sky, "tile ({tx}, {ty})");
+        }
+    }
+}
+
+/// The y spline's second derivatives through the mesh: four tile rows of skies `k²·c` (c = 1/64)
+/// at a uniform 32 px solve, as `solve_d2_quadratic_data` does on unit spacing, to `d″ = [0, 2.4,
+/// 2.4, 0] · c/32²`, in every tile column; the flat σ plane has none. The 3×3 median keeps the
+/// rows: each window, reflected at the ends, is centred on its own value.
+#[test]
+fn y_spline_derivatives_through_the_mesh() {
+    const C: f32 = 1.0 / 64.0;
+    let pixels = Buffer2::new(
+        96,
+        128,
+        (0..96 * 128)
+            .map(|i| {
+                let k = (i / 96 / 32) as f32;
+                k * k * C
+            })
+            .collect(),
+    );
+    let grid = make_grid(&pixels, 32);
+    let interior = 2.4 * C / 1024.0;
+    for tx in 0..3 {
+        for (ty, expected) in [0.0, interior, interior, 0.0].into_iter().enumerate() {
+            let tile = Vec2us::new(tx, ty);
+            let d2 = grid.d2y(TileComponent::Sky, tile);
+            assert!(
+                (d2 - expected).abs() <= 4.0 * f32::EPSILON * interior,
+                "sky d″ at ({tx}, {ty}): {d2} vs {expected}"
+            );
+            assert_eq!(
+                grid.d2y(TileComponent::Sigma, tile),
+                0.0,
+                "σ d″ at ({tx}, {ty})"
+            );
+        }
     }
 }

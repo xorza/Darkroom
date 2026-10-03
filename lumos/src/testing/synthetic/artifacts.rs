@@ -17,7 +17,7 @@ pub(crate) fn add_cosmic_rays(
     count: usize,
     amplitude_range: (f32, f32),
     seed: u64,
-) -> Vec<(usize, usize)> {
+) -> Vec<Vec2us> {
     let height = pixels.len() / width;
     let mut positions = Vec::with_capacity(count);
 
@@ -42,7 +42,7 @@ pub(crate) fn add_cosmic_rays(
             }
         }
 
-        positions.push((x, y));
+        positions.push(Vec2us::new(x, y));
     }
 
     positions
