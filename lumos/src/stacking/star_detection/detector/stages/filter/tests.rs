@@ -16,7 +16,7 @@ fn filter_returns_the_diagnostics_stored_by_the_detector() {
             .with_fwhm(20.0),
         Star::at(DVec2::new(250.0, 10.0))
             .with_flux(130.0)
-            .with_peak(0.96),
+            .with_saturated(true),
         Star::at(DVec2::new(290.0, 10.0))
             .with_flux(120.0)
             .with_snr(5.0),
@@ -34,7 +34,7 @@ fn filter_returns_the_diagnostics_stored_by_the_detector() {
             }),
     ];
 
-    let outcome = FilterOutcome::from_stars(stars, &FilterConfig::default());
+    let outcome = FilterOutcome::from_stars(stars.clone(), &FilterConfig::default());
 
     assert_eq!(
         outcome
@@ -56,6 +56,24 @@ fn filter_returns_the_diagnostics_stored_by_the_detector() {
             duplicates: 1,
         }
     );
+
+    // With no FWHM deviation bound the 20.0-px star stays, and nothing counts as an outlier.
+    let unbounded = FilterOutcome::from_stars(
+        stars,
+        &FilterConfig {
+            max_fwhm_deviation: None,
+            ..FilterConfig::default()
+        },
+    );
+    assert_eq!(
+        unbounded
+            .stars
+            .iter()
+            .map(|star| star.flux)
+            .collect::<Vec<_>>(),
+        vec![200.0, 180.0, 170.0, 160.0, 150.0, 140.0]
+    );
+    assert_eq!(unbounded.diagnostics.fwhm_outliers, 0);
 }
 
 /// FWHM outlier rejection over every case that mattered, as one table.
@@ -114,21 +132,6 @@ fn filter_fwhm_outliers_over_every_case() {
     }
 
     let cases = vec![
-        // Both disabling conditions: a non-positive deviation short-circuits before any statistic
-        // is computed, so even a wildly spread set survives intact.
-        Case {
-            name: "zero deviation",
-            stars: ramp(10, 3.0, 1.0),
-            deviation: 0.0,
-            survivors: fluxes(100.0, 10),
-        },
-        Case {
-            name: "negative deviation",
-            stars: ramp(10, 3.0, 5.0),
-            deviation: -1.0,
-            survivors: fluxes(100.0, 10),
-        },
-        // Under five stars there is no reference to speak of, so nothing is filtered.
         Case {
             name: "four stars",
             stars: ramp(4, 3.0, 10.0),

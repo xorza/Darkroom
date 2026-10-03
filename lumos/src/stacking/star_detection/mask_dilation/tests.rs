@@ -7,6 +7,12 @@ use crate::bit_buffer2::BitBuffer2;
 use crate::stacking::star_detection::mask_dilation::dilate_mask;
 use crate::testing::prelude::*;
 
+/// `mask` dilated by `radius` into `dilated`, through the in-place kernel.
+fn dilate_into(mask: &BitBuffer2, radius: usize, dilated: &mut BitBuffer2) {
+    dilated.copy_from(mask);
+    dilate_mask(dilated, radius, &mut BitBuffer2::new_default(mask.size));
+}
+
 /// Verify dilation result against naive O(n²×r²) box dilation.
 fn assert_naive_dilation(mask: &BitBuffer2, dilated: &BitBuffer2, radius: usize, ctx: &str) {
     let size = Size2us::new(mask.size.width, mask.size.height);
@@ -37,7 +43,7 @@ fn assert_naive_dilation(mask: &BitBuffer2, dilated: &BitBuffer2, radius: usize,
 fn dilate_mask_empty() {
     let mask = BitBuffer2::from_slice(Size2us::new(3, 3), &[false; 9]);
     let mut dilated = BitBuffer2::new_filled(Size2us::new(3, 3), false);
-    dilate_mask(&mask, 1, &mut dilated);
+    dilate_into(&mask, 1, &mut dilated);
     assert!(dilated.iter().all(|x| !x));
 }
 
@@ -48,7 +54,7 @@ fn dilate_mask_single_pixel_radius_0() {
     mask_data[4] = true; // center
     let mask = BitBuffer2::from_slice(Size2us::new(3, 3), &mask_data);
     let mut dilated = BitBuffer2::new_filled(Size2us::new(3, 3), false);
-    dilate_mask(&mask, 0, &mut dilated);
+    dilate_into(&mask, 0, &mut dilated);
 
     assert_eq!(dilated.iter().filter(|x| *x).count(), 1);
     assert!(dilated.get(4));
@@ -61,7 +67,7 @@ fn dilate_mask_single_pixel_radius_1() {
     mask_data[2 * 5 + 2] = true; // center at (2, 2)
     let mask = BitBuffer2::from_slice(Size2us::new(5, 5), &mask_data);
     let mut dilated = BitBuffer2::new_filled(Size2us::new(5, 5), false);
-    dilate_mask(&mask, 1, &mut dilated);
+    dilate_into(&mask, 1, &mut dilated);
 
     // Should dilate to 3x3 square centered at (2,2)
     for y in 1..=3 {
@@ -83,7 +89,7 @@ fn dilate_mask_single_pixel_radius_2() {
     mask_data[3 * 7 + 3] = true; // center at (3, 3)
     let mask = BitBuffer2::from_slice(Size2us::new(7, 7), &mask_data);
     let mut dilated = BitBuffer2::new_filled(Size2us::new(7, 7), false);
-    dilate_mask(&mask, 2, &mut dilated);
+    dilate_into(&mask, 2, &mut dilated);
 
     // Should dilate to 5x5 square centered at (3,3)
     let mut count = 0;
@@ -103,7 +109,7 @@ fn dilate_mask_corner_pixel() {
     mask_data[0] = true;
     let mask = BitBuffer2::from_slice(Size2us::new(4, 4), &mask_data);
     let mut dilated = BitBuffer2::new_filled(Size2us::new(4, 4), false);
-    dilate_mask(&mask, 1, &mut dilated);
+    dilate_into(&mask, 1, &mut dilated);
 
     // Only 2x2 corner should be dilated
     assert!(dilated.get(0 * 4 + 0));
@@ -124,7 +130,7 @@ fn dilate_mask_preserves_original_pixels() {
     mask_data[24] = true;
     let mask = BitBuffer2::from_slice(Size2us::new(5, 5), &mask_data);
     let mut dilated = BitBuffer2::new_filled(Size2us::new(5, 5), false);
-    dilate_mask(&mask, 1, &mut dilated);
+    dilate_into(&mask, 1, &mut dilated);
 
     // All original pixels must be present
     assert!(dilated.get(0));
@@ -138,7 +144,7 @@ fn dilate_mask_radius_above_63_panics() {
     // Radius > 63 is out of contract (production caps dilation at 50).
     let mask = BitBuffer2::from_slice(Size2us::new(200, 1), &[false; 200]);
     let mut dilated = BitBuffer2::new_filled(Size2us::new(200, 1), false);
-    dilate_mask(&mask, 64, &mut dilated);
+    dilate_into(&mask, 64, &mut dilated);
 }
 
 /// Every dilation shape against the brute-force reference, at every pixel.
@@ -296,7 +302,7 @@ fn dilation_matches_the_brute_force_reference() {
         let mask = BitBuffer2::from_slice(case.size, &data);
         for &radius in case.radii {
             let mut dilated = BitBuffer2::new_filled(case.size, false);
-            dilate_mask(&mask, radius, &mut dilated);
+            dilate_into(&mask, radius, &mut dilated);
             assert_naive_dilation(
                 &mask,
                 &dilated,

@@ -95,8 +95,13 @@ fn main() {
 }
 
 fn print_diagnostics(diag: &lumos::StarDetectionDiagnostics) {
-    println!("  Median FWHM: {:.2} px", diag.median_fwhm);
-    println!("  Median SNR: {:.1}", diag.median_snr);
+    match (diag.median_fwhm, diag.median_snr) {
+        (Some(fwhm), Some(snr)) => {
+            println!("  Median FWHM: {fwhm:.2} px");
+            println!("  Median SNR: {snr:.1}");
+        }
+        _ => println!("  No stars measured"),
+    }
     println!("  Pipeline:");
     println!(
         "    Pixels above threshold: {}",

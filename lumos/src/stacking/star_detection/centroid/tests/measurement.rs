@@ -10,7 +10,12 @@ fn refine_centroid_centered_star() {
         .stamp(Size2us::new(width, height), 0.1);
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
-    let result = refine_centroid(&pixels, &bg, pos, TEST_STAMP_RADIUS, TEST_EXPECTED_FWHM);
+    let result = refine_centroid(
+        &bg.residual_of(&pixels),
+        pos,
+        TEST_STAMP_RADIUS,
+        TEST_EXPECTED_FWHM,
+    );
 
     assert!(result.is_some());
     let new_pos = result.unwrap();
@@ -36,8 +41,7 @@ fn refine_centroid_offset_converges() {
     let start_pos = DVec2::new(32.0, 33.0);
 
     let result = refine_centroid(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
         start_pos,
         TEST_STAMP_RADIUS,
         TEST_EXPECTED_FWHM,
@@ -64,8 +68,7 @@ fn refine_centroid_invalid_position_returns_none() {
 
     // Position too close to edge
     let result = refine_centroid(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
         DVec2::new(3.0, 32.0),
         TEST_STAMP_RADIUS,
         TEST_EXPECTED_FWHM,
@@ -82,8 +85,7 @@ fn refine_centroid_zero_flux_returns_none() {
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let result = refine_centroid(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
         DVec2::splat(32.0),
         TEST_STAMP_RADIUS,
         TEST_EXPECTED_FWHM,
@@ -103,8 +105,7 @@ fn refine_centroid_rejects_large_movement() {
     // Start far from the actual star - the stamp won't contain the star,
     // so there's no signal, which should cause rejection
     let result = refine_centroid(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
         DVec2::splat(32.0),
         TEST_STAMP_RADIUS,
         TEST_EXPECTED_FWHM,
@@ -132,7 +133,12 @@ fn refine_centroid_iterative_convergence() {
     let mut pos = DVec2::splat(32.0);
 
     for iteration in 0..MAX_MOMENTS_ITERATIONS {
-        let result = refine_centroid(&pixels, &bg, pos, TEST_STAMP_RADIUS, TEST_EXPECTED_FWHM);
+        let result = refine_centroid(
+            &bg.residual_of(&pixels),
+            pos,
+            TEST_STAMP_RADIUS,
+            TEST_EXPECTED_FWHM,
+        );
         assert!(result.is_some(), "Iteration {iteration} failed");
 
         let new_pos = result.unwrap();
@@ -159,8 +165,8 @@ fn compute_star_valid_star() {
 
     let peak = 0.73;
     let star = compute_star(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
         DVec2::splat(32.0),
         peak,
         TEST_STAMP_RADIUS,
@@ -182,30 +188,31 @@ fn compute_star_valid_star() {
 }
 
 #[test]
-fn compute_star_background_override_replaces_global_map() {
-    // Star (sigma 2.5, amplitude 0.8) on an exact 0.1 pedestal, with a global map matching
-    // the truth (bg 0.1, noise 0.01). An override of bg 0.05 under-subtracts every stamp
-    // pixel by exactly 0.05 (every pixel stays above both bg values, so `.max(0)` never
-    // clamps), hence: flux_override - flux_global = 0.05 * npix = 0.05 * 15² = 11.25.
-    // The override noise (0.05, vs the map's 0.01) must feed the simplified SNR formula
-    // `flux / (noise * sqrt(npix))`, and the override bg must reach the windowed
-    // covariance, where the unsubtracted 0.05 pedestal inflates the second moments and
-    // therefore the FWHM relative to the correctly-subtracted global-map run.
+fn compute_star_local_offset_removes_what_the_global_map_left() {
+    // Star (sigma 2.5, amplitude 0.8) on an exact 0.1 pedestal, with a global map that
+    // under-estimates it at 0.05 (noise 0.01): the residual still carries 0.05 at every pixel.
+    // A local offset of 0.05 removes it from every one of the 15² = 225 stamp pixels, so
+    // flux_global − flux_local = 0.05 · 225 = 11.25 (f32 sums of 225 terms near 1: within 1e-3).
+    // The local noise (0.05, vs the map's 0.01) must feed the simplified SNR formula
+    // `flux / (noise * sqrt(npix))`, and the offset must reach the windowed covariance, where
+    // the pedestal left in the global run inflates the second moments and so the FWHM.
     let width = 64;
     let height = 64;
     let pos = DVec2::splat(32.0);
     let pixels = SyntheticStar::new(pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma: 2.5 })
         .stamp(Size2us::new(width, height), 0.1);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.05, 0.01);
+    let residual = bg.residual_of(&pixels);
+    let sky = bg.sky_noise();
     let local_bg = LocalBackground {
-        bg: 0.05,
+        offset: 0.05,
         noise: 0.05,
     };
 
-    let global = compute_star(&pixels, &bg, pos, 0.0, TEST_STAMP_RADIUS, None, None).unwrap();
+    let global = compute_star(&residual, &sky, pos, 0.0, TEST_STAMP_RADIUS, None, None).unwrap();
     let local = compute_star(
-        &pixels,
-        &bg,
+        &residual,
+        &sky,
         pos,
         0.0,
         TEST_STAMP_RADIUS,
@@ -214,27 +221,26 @@ fn compute_star_background_override_replaces_global_map() {
     )
     .unwrap();
 
-    let npix = (2 * TEST_STAMP_RADIUS + 1).pow(2) as f32; // 15² = 225
-    let flux_diff = local.flux - global.flux;
-    let expected_diff = 0.05 * npix; // 11.25
+    let npix = (2 * TEST_STAMP_RADIUS + 1).pow(2) as f32;
+    let flux_diff = global.flux - local.flux;
     assert!(
-        (flux_diff - expected_diff).abs() < 1e-2,
-        "override bg must under-subtract exactly 0.05/pixel: flux diff {flux_diff}, expected {expected_diff}"
+        (flux_diff - 0.05 * npix).abs() < 1e-3,
+        "the local offset must remove exactly 0.05/pixel: flux diff {flux_diff}"
     );
 
     let expected_snr = local.flux / (0.05 * npix.sqrt());
     assert!(
-        (local.snr - expected_snr).abs() / expected_snr < 1e-3,
-        "override noise must feed the SNR: got {}, expected {expected_snr}",
+        (local.snr - expected_snr).abs() / expected_snr < 1e-6,
+        "local noise must feed the SNR: got {}, expected {expected_snr}",
         local.snr
     );
 
     assert!(
-        local.fwhm > global.fwhm,
-        "override bg must reach the windowed covariance: the unsubtracted pedestal should \
-         inflate FWHM (override {} vs global {})",
-        local.fwhm,
-        global.fwhm
+        global.fwhm > local.fwhm,
+        "the offset must reach the windowed covariance: the pedestal left in the global run \
+         should inflate its FWHM (global {} vs local {})",
+        global.fwhm,
+        local.fwhm
     );
 }
 
@@ -247,8 +253,8 @@ fn compute_star_invalid_position_returns_none() {
 
     // Position too close to edge
     let metrics = compute_star(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
         DVec2::new(3.0, 32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -267,8 +273,8 @@ fn compute_star_zero_flux_returns_none() {
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics = compute_star(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -302,8 +308,8 @@ fn compute_star_fwhm_scales_with_sigma() {
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics_small = compute_star(
-        &pixels_small,
-        &bg,
+        &bg.residual_of(&pixels_small),
+        &bg.sky_noise(),
         DVec2::splat(64.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -312,8 +318,8 @@ fn compute_star_fwhm_scales_with_sigma() {
     )
     .unwrap();
     let metrics_large = compute_star(
-        &pixels_large,
-        &bg,
+        &bg.residual_of(&pixels_large),
+        &bg.sky_noise(),
         DVec2::splat(64.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -345,8 +351,8 @@ fn compute_star_snr_scales_with_amplitude() {
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics_dim = compute_star(
-        &pixels_dim,
-        &bg,
+        &bg.residual_of(&pixels_dim),
+        &bg.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -355,8 +361,8 @@ fn compute_star_snr_scales_with_amplitude() {
     )
     .unwrap();
     let metrics_bright = compute_star(
-        &pixels_bright,
-        &bg,
+        &bg.residual_of(&pixels_bright),
+        &bg.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -392,8 +398,8 @@ fn elongated_star_high_eccentricity() {
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics = compute_star(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -430,8 +436,8 @@ fn circular_vs_elongated_eccentricity() {
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics_circular = compute_star(
-        &circular,
-        &bg,
+        &bg.residual_of(&circular),
+        &bg.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -440,8 +446,8 @@ fn circular_vs_elongated_eccentricity() {
     )
     .unwrap();
     let metrics_elongated = compute_star(
-        &elongated,
-        &bg,
+        &bg.residual_of(&elongated),
+        &bg.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -481,8 +487,7 @@ fn centroid_with_noisy_background() {
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.05); // Higher noise estimate
 
     let result = refine_centroid(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
         true_pos,
         TEST_STAMP_RADIUS,
         TEST_EXPECTED_FWHM,
@@ -512,8 +517,8 @@ fn snr_decreases_with_higher_noise() {
     let bg_high_noise = background_map::uniform(Size2us::new(width, height), 0.1, 0.1);
 
     let metrics_low = compute_star(
-        &pixels,
-        &bg_low_noise,
+        &bg_low_noise.residual_of(&pixels),
+        &bg_low_noise.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -522,8 +527,8 @@ fn snr_decreases_with_higher_noise() {
     )
     .unwrap();
     let metrics_high = compute_star(
-        &pixels,
-        &bg_high_noise,
+        &bg_high_noise.residual_of(&pixels),
+        &bg_high_noise.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -553,8 +558,8 @@ fn fwhm_formula_for_known_gaussian() {
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.001); // Very low noise
 
     let metrics = compute_star(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
         DVec2::splat(64.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -588,8 +593,8 @@ fn flux_proportional_to_amplitude() {
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics1 = compute_star(
-        &pixels_amp1,
-        &bg,
+        &bg.residual_of(&pixels_amp1),
+        &bg.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -598,8 +603,8 @@ fn flux_proportional_to_amplitude() {
     )
     .unwrap();
     let metrics2 = compute_star(
-        &pixels_amp2,
-        &bg,
+        &bg.residual_of(&pixels_amp2),
+        &bg.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -655,8 +660,8 @@ fn eccentricity_bounds() {
         ("elongated_y", elongated_y),
     ] {
         let metrics = compute_star(
-            &pixels,
-            &bg,
+            &bg.residual_of(&pixels),
+            &bg.sky_noise(),
             DVec2::splat(32.0),
             0.0,
             TEST_STAMP_RADIUS,
@@ -702,8 +707,8 @@ fn eccentricity_orientation_invariant() {
     .stamp(Size2us::new(width, height), 0.1);
 
     let metrics_x = compute_star(
-        &elongated_x,
-        &bg,
+        &bg.residual_of(&elongated_x),
+        &bg.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -712,8 +717,8 @@ fn eccentricity_orientation_invariant() {
     )
     .unwrap();
     let metrics_y = compute_star(
-        &elongated_y,
-        &bg,
+        &bg.residual_of(&elongated_y),
+        &bg.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -749,8 +754,8 @@ fn snr_formula_consistency() {
     let bg2 = background_map::uniform(Size2us::new(width, height), 0.1, noise2);
 
     let metrics1 = compute_star(
-        &pixels,
-        &bg1,
+        &bg1.residual_of(&pixels),
+        &bg1.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -759,8 +764,8 @@ fn snr_formula_consistency() {
     )
     .unwrap();
     let metrics2 = compute_star(
-        &pixels,
-        &bg2,
+        &bg2.residual_of(&pixels),
+        &bg2.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -792,8 +797,8 @@ fn metrics_with_high_background() {
 
     let bg = background_map::uniform(Size2us::new(width, height), 0.5, 0.02);
     let metrics = compute_star(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -824,8 +829,8 @@ fn fwhm_independent_of_amplitude() {
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics_dim = compute_star(
-        &pixels_dim,
-        &bg,
+        &bg.residual_of(&pixels_dim),
+        &bg.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -834,8 +839,8 @@ fn fwhm_independent_of_amplitude() {
     )
     .unwrap();
     let metrics_bright = compute_star(
-        &pixels_bright,
-        &bg,
+        &bg.residual_of(&pixels_bright),
+        &bg.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -894,8 +899,8 @@ fn eccentricity_increases_with_elongation() {
     .stamp(Size2us::new(width, height), 0.1);
 
     let ecc_1 = compute_star(
-        &ratio_1_1,
-        &bg,
+        &bg.residual_of(&ratio_1_1),
+        &bg.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -905,8 +910,8 @@ fn eccentricity_increases_with_elongation() {
     .unwrap()
     .eccentricity;
     let ecc_2 = compute_star(
-        &ratio_2_1,
-        &bg,
+        &bg.residual_of(&ratio_2_1),
+        &bg.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -916,8 +921,8 @@ fn eccentricity_increases_with_elongation() {
     .unwrap()
     .eccentricity;
     let ecc_3 = compute_star(
-        &ratio_3_1,
-        &bg,
+        &bg.residual_of(&ratio_3_1),
+        &bg.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -950,12 +955,13 @@ fn measure_star_returns_none_for_edge_candidate() {
     };
 
     let result = measure_star(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
+        &unsaturated(&pixels),
         &region,
         &config.measurement,
-        config.fwhm.expected,
-        &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
+        config.fwhm.mode.unwrap().seed(),
+        &StampGrid::new(compute_stamp_radius(config.fwhm.mode.unwrap().seed())),
     );
     assert!(
         result.is_none(),
@@ -999,7 +1005,8 @@ fn measure_star_multiple_stars_independent() {
         },
         ..Default::default()
     };
-    let candidates = detect_stars_test(&pixels, &bg, &config.detection);
+    let candidates =
+        detect_stars_test(&bg.residual_of(&pixels), &bg.sky_noise(), &config.detection);
 
     assert_eq!(candidates.len(), 2, "Should detect two stars");
 
@@ -1008,12 +1015,13 @@ fn measure_star_multiple_stars_independent() {
         .iter()
         .filter_map(|c| {
             measure_star(
-                &pixels,
-                &bg,
+                &bg.residual_of(&pixels),
+                &bg.sky_noise(),
+                &unsaturated(&pixels),
                 c,
                 &config.measurement,
-                config.fwhm.expected,
-                &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
+                config.fwhm.mode.unwrap().seed(),
+                &StampGrid::new(compute_stamp_radius(config.fwhm.mode.unwrap().seed())),
             )
         })
         .collect();
@@ -1051,17 +1059,19 @@ fn circular_star_roundness() {
         },
     );
     let config = Config::default();
-    let candidates = detect_stars_test(&pixels, &bg, &config.detection);
+    let candidates =
+        detect_stars_test(&bg.residual_of(&pixels), &bg.sky_noise(), &config.detection);
 
     assert_eq!(candidates.len(), 1);
 
     let star = measure_star(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
+        &unsaturated(&pixels),
         &candidates[0],
         &config.measurement,
-        config.fwhm.expected,
-        &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
+        config.fwhm.mode.unwrap().seed(),
+        &StampGrid::new(compute_stamp_radius(config.fwhm.mode.unwrap().seed())),
     )
     .expect("Should compute centroid");
 
@@ -1114,17 +1124,19 @@ fn elongated_x_star_roundness() {
         },
     );
     let config = Config::default();
-    let candidates = detect_stars_test(&pixels, &bg, &config.detection);
+    let candidates =
+        detect_stars_test(&bg.residual_of(&pixels), &bg.sky_noise(), &config.detection);
 
     assert!(!candidates.is_empty());
 
     let star = measure_star(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
+        &unsaturated(&pixels),
         &candidates[0],
         &config.measurement,
-        config.fwhm.expected,
-        &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
+        config.fwhm.mode.unwrap().seed(),
+        &StampGrid::new(compute_stamp_radius(config.fwhm.mode.unwrap().seed())),
     )
     .expect("Should compute centroid");
 
@@ -1174,17 +1186,19 @@ fn asymmetric_star_sround() {
         },
     );
     let config = Config::default();
-    let candidates = detect_stars_test(&pixels, &bg, &config.detection);
+    let candidates =
+        detect_stars_test(&bg.residual_of(&pixels), &bg.sky_noise(), &config.detection);
 
     assert!(!candidates.is_empty());
 
     let star = measure_star(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
+        &unsaturated(&pixels),
         &candidates[0],
         &config.measurement,
-        config.fwhm.expected,
-        &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
+        config.fwhm.mode.unwrap().seed(),
+        &StampGrid::new(compute_stamp_radius(config.fwhm.mode.unwrap().seed())),
     )
     .expect("Should compute centroid");
 
@@ -1240,20 +1254,28 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
     let region = Region {
         bbox: URect::new(Vec2us::new(28, 26), Vec2us::new(40, 38)),
         peak: Vec2us::new(34, 32),
-        peak_value: 1.0 + sky(34),
+        peak_value: 1.0,
         area: 40,
     };
-    let star = measure_star(&pixels, &bg, &region, &config, 4.0, &StampGrid::new(radius))
-        .expect("star should measure");
+    let star = measure_star(
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
+        &unsaturated(&pixels),
+        &region,
+        &config,
+        4.0,
+        &StampGrid::new(radius),
+    )
+    .expect("star should measure");
 
     // Same metrics pass, but with the sky annulus explicitly centred where the fit ended up.
     // `outer_radius` mirrors `measure_star`: ceil(1.5 x radius).
     let outer = (radius as f32 * 1.5).ceil() as usize;
-    let sky_at_fit =
-        compute_annulus_background(&pixels, star.pos, radius, outer).expect("annulus has samples");
+    let sky_at_fit = compute_annulus_background(&bg.residual_of(&pixels), star.pos, radius, outer)
+        .expect("annulus has samples");
     let expected = compute_star(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
         star.pos,
         region.peak_value,
         radius,
@@ -1297,12 +1319,67 @@ fn sky_noise_adds_no_flux_or_snr() {
     let bg = background_map::uniform(size, SKY, SIGMA);
 
     for radius in [7, 13, 15] {
-        let star = compute_star(&pixels, &bg, DVec2::splat(24.0), 0.0, radius, None, None)
-            .expect("one net +σ pixel is positive flux");
+        let star = compute_star(
+            &bg.residual_of(&pixels),
+            &bg.sky_noise(),
+            DVec2::splat(24.0),
+            0.0,
+            radius,
+            None,
+            None,
+        )
+        .expect("one net +σ pixel is positive flux");
         assert_eq!(
             star.flux, SIGMA,
             "r = {radius}: the signed sum of the stamp"
         );
         assert_eq!(star.snr, 1.0 / (2 * radius + 1) as f32, "r = {radius}");
+    }
+}
+
+#[test]
+fn empty_sky_stamps_measure_no_signal() {
+    // Pure zero-mean noise, σ = 0.01, the sky already removed. Each stamp's signed flux is a sum
+    // of npix independent N(0, σ²) samples, so SNR = flux / (σ·√npix) is N(0, 1): about half the
+    // stamps have no net signal and are not stars, and the rest stay low — over the ≤ 1156
+    // disjoint stamps here, P(any Z > 4.5) < 1156 · 3.4e-6 ≈ 0.004. Clipping each pixel at 0
+    // instead adds σ/√(2π) ≈ 0.399σ per pixel, an SNR of 0.399·√npix: 6.0 at r = 7, 10.8 at 13
+    // and 12.4 at 15, every stamp a "star".
+    let side = 496;
+    let size = Size2us::new(side, side);
+    let sigma = 0.01f32;
+    let mut rng = TestRng::new(7);
+    let residual = Buffer2::new(
+        side,
+        side,
+        (0..side * side)
+            .map(|_| sigma * rng.next_gaussian_f32())
+            .collect(),
+    );
+    let sky = background_map::uniform(size, 0.0, sigma).sky_noise();
+
+    for radius in [7usize, 13, 15] {
+        let stride = 2 * radius + 1;
+        let centres: Vec<usize> = (radius + 1..side - radius - 1).step_by(stride).collect();
+        let mut measured = 0usize;
+        for &cy in &centres {
+            for &cx in &centres {
+                let pos = DVec2::new(cx as f64, cy as f64);
+                if let Some(star) = compute_star(&residual, &sky, pos, 0.0, radius, None, None) {
+                    measured += 1;
+                    assert!(
+                        star.snr < 4.5,
+                        "r = {radius}: an empty stamp at {pos} measured SNR {}",
+                        star.snr
+                    );
+                }
+            }
+        }
+        // Binomial(N, ½) with N ≥ 225: the share measured is within 0.5 ± 0.15, over 4.5σ.
+        let share = measured as f64 / (centres.len() * centres.len()) as f64;
+        assert!(
+            (share - 0.5).abs() < 0.15,
+            "r = {radius}: {share} of empty stamps carried net signal"
+        );
     }
 }

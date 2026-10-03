@@ -11,7 +11,9 @@ use glam::DVec2;
 use imaginarium::Buffer2;
 
 use crate::math::size2us::Size2us;
-use crate::stacking::star_detection::centroid::lm_optimizer::FitData;
+use crate::stacking::star_detection::centroid::lm_optimizer::{
+    FitData, LMConfig, LMModel, LMResult,
+};
 use crate::stacking::star_detection::centroid::{MAX_STAMP_PIXELS, is_valid_stamp_position};
 use crate::stacking::star_detection::config::measurement_config::NoiseModel;
 
@@ -67,8 +69,8 @@ pub(super) struct FitNoise {
 }
 
 impl FitNoise {
-    /// Inverse-variance weight for one pixel, using the CCD noise model (the same per-pixel
-    /// decomposition as `compute_snr`):
+    /// Inverse-variance weight for a pixel whose expected value is `z`, using the CCD noise model
+    /// (the same per-pixel decomposition as `compute_snr`):
     /// `w = 1 / (signal/G + sky_noise² + (read_noise_electrons/G)²)`, where `G` is electrons per
     /// normalized unit.
     ///
@@ -112,6 +114,10 @@ pub(super) struct StampFit {
     pub(super) weights: Option<ArrayVec<f64, MAX_STAMP_PIXELS>>,
     /// Gaussian-equivalent width from the stamp's second moments, seeding the optimizer.
     pub(super) sigma_est: f32,
+    /// The noise behind `weights`, kept to reweight from the fitted model.
+    noise: Option<FitNoise>,
+    /// The sky level the signal is measured from.
+    sky: f64,
 }
 
 impl StampFit {
@@ -192,6 +198,8 @@ impl StampFit {
             local_pos: pos - origin,
             weights: noise.map(|_| weights),
             sigma_est: sigma_from_moments(sum_r2, sum_w, radius as f64),
+            noise,
+            sky,
         })
     }
 
@@ -199,6 +207,30 @@ impl StampFit {
     /// pixel values and weights owned per candidate.
     pub(super) fn data<'a>(&'a self, grid: &'a StampGrid) -> FitData<'a> {
         FitData::new(&grid.x, &grid.y, &self.stamp.z, self.weights.as_deref())
+    }
+
+    /// Fit `model` to the stamp from `initial`.
+    ///
+    /// A weighted fit then runs once more, with each weight taken from the first fit's model value
+    /// instead of the observed pixel, starting where the first ended. Weights from the data give
+    /// a pixel that fluctuated low a smaller variance and so a larger weight — Neyman's χ² — which
+    /// biases amplitude and width low; one pass of iteratively reweighted least squares replaces
+    /// that noise in the weights with the much smaller error of the first fit.
+    pub(super) fn fit<M: LMModel<N>, const N: usize>(
+        &mut self,
+        model: &M,
+        grid: &StampGrid,
+        initial: [f64; N],
+        config: &LMConfig,
+    ) -> LMResult<N> {
+        let first = model.fit(self.data(grid), initial, config);
+        let (Some(noise), Some(weights)) = (self.noise, self.weights.as_mut()) else {
+            return first;
+        };
+        for ((weight, &x), &y) in weights.iter_mut().zip(&grid.x).zip(&grid.y) {
+            *weight = noise.weight(model.evaluate(x, y, &first.params), self.sky);
+        }
+        model.fit(self.data(grid), first.params, config)
     }
 
     /// Amplitude seed: the stamp's peak above the sky, floored so the optimizer starts positive.

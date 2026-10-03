@@ -59,6 +59,9 @@ pub(super) struct MoffatFit {
     debug: internals::MoffatFitDebug,
 }
 
+/// The narrowest α the fit may take, in px; the widest is the stamp radius.
+const MIN_ALPHA: f64 = 0.5;
+
 /// Strategy for computing `u^(-beta)` efficiently.
 /// Pre-computed at model construction to avoid per-pixel branching.
 #[derive(Debug, Clone, Copy)]
@@ -184,7 +187,7 @@ impl LMModel<5> for MoffatFixedBeta {
     #[inline]
     fn constrain(&self, params: &mut [f64; 5]) {
         params[2] = params[2].max(0.01); // Amplitude > 0
-        params[3] = params[3].clamp(0.5, self.stamp_radius); // Alpha
+        params[3] = params[3].clamp(MIN_ALPHA, self.stamp_radius);
     }
 
     fn batch_build_normal_equations(
@@ -208,7 +211,8 @@ impl MoffatFit {
     /// shot-noisy bright core doesn't bias the fit (PR1); `None` is a plain unweighted fit.
     ///
     /// `None` also when the stamp falls outside the frame, holds too few pixels to constrain five
-    /// parameters, or the fit lands somewhere [`fit_is_plausible`] rejects.
+    /// parameters, or the fit lands somewhere [`fit_is_plausible`] rejects, or α ends pinned at one
+    /// of [`MoffatFixedBeta::constrain`]'s bounds — a width the data did not support.
     pub(super) fn new(
         pixels: &Buffer2<f32>,
         pos: DVec2,
@@ -218,12 +222,12 @@ impl MoffatFit {
         config: &MoffatFitConfig,
     ) -> Option<Self> {
         // Fixed-β Moffat fits 5 parameters [x0, y0, amplitude, alpha, background].
-        let fit = StampFit::prepare::<5>(pixels, pos, grid, background, noise)?;
+        let mut fit = StampFit::prepare::<5>(pixels, pos, grid, background, noise)?;
 
         // The seed is a Gaussian width; convert it to the equivalent alpha at the fixed β.
         let fwhm_est = sigma_to_fwhm(fit.sigma_est);
-        let initial_alpha =
-            fwhm_beta_to_alpha(fwhm_est, config.fixed_beta).clamp(0.5, grid.radius as f32);
+        let initial_alpha = fwhm_beta_to_alpha(fwhm_est, config.fixed_beta)
+            .clamp(MIN_ALPHA as f32, grid.radius as f32);
 
         let initial_params: [f64; 5] = [
             fit.local_pos.x,
@@ -234,12 +238,13 @@ impl MoffatFit {
         ];
 
         let model = MoffatFixedBeta::new(grid.radius as f64, f64::from(config.fixed_beta));
-        let result = model.fit(fit.data(grid), initial_params, &config.lm);
+        let result = fit.fit(&model, grid, initial_params, &config.lm);
 
         let [x0, y0, _, alpha, _] = result.params;
         let result_pos = fit.to_image(x0, y0);
 
-        if !fit_is_plausible(result_pos, pos, grid.radius, [alpha]) {
+        let alpha_free = alpha > MIN_ALPHA && alpha < grid.radius as f64;
+        if !alpha_free || !fit_is_plausible(result_pos, pos, grid.radius) {
             return None;
         }
 

@@ -222,7 +222,7 @@ fn detect_snapshot() {
             star.sharpness,
         ]);
     }
-    assert_snapshot("detection", &snapshot, "5b6ec34d421c9bf1");
+    assert_snapshot("detection", &snapshot, "9302cce68722278d");
 }
 
 #[test]

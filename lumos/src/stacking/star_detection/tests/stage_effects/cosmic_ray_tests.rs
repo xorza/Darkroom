@@ -43,7 +43,7 @@ fn cosmic_ray_rejection() {
 
     // Run detection - disable CFA filter and matched filter for synthetic images
     let mut detection_config = Config::default();
-    detection_config.fwhm.expected = 0.0;
+    detection_config.fwhm.mode = None;
 
     let image =
         LinearImage::from_pixels(ImageDimensions::new((width, height), 1), pixels_vec.clone());
@@ -160,7 +160,7 @@ fn detected_real_stars_have_low_sharpness() {
     let cr_positions = add_cosmic_rays(&mut pixels_vec, width, 10, (0.6, 0.9), 456);
 
     let mut detection_config = Config::default();
-    detection_config.fwhm.expected = 0.0;
+    detection_config.fwhm.mode = None;
     let image = LinearImage::from_pixels(ImageDimensions::new((width, height), 1), pixels_vec);
     let stars = StarDetector::from_config(detection_config)
         .unwrap()

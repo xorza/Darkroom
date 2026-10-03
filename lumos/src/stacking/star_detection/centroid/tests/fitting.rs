@@ -35,19 +35,21 @@ fn weighted_centroid_precision_statistical() {
                 },
                 ..Default::default()
             };
-            let candidates = detect_stars_test(&pixels, &bg, &config.detection);
+            let candidates =
+                detect_stars_test(&bg.residual_of(&pixels), &bg.sky_noise(), &config.detection);
 
             if candidates.is_empty() {
                 continue;
             }
 
             if let Some(star) = measure_star(
-                &pixels,
-                &bg,
+                &bg.residual_of(&pixels),
+                &bg.sky_noise(),
+                &unsaturated(&pixels),
                 &candidates[0],
                 &config.measurement,
-                config.fwhm.expected,
-                &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
+                config.fwhm.mode.unwrap().seed(),
+                &StampGrid::new(compute_stamp_radius(config.fwhm.mode.unwrap().seed())),
             ) {
                 let error =
                     ((star.pos.x - true_pos.x).powi(2) + (star.pos.y - true_pos.y).powi(2)).sqrt();
@@ -211,8 +213,8 @@ fn fwhm_estimation_accuracy() {
             .stamp(Size2us::new(width, height), 0.1);
 
         let metrics = compute_star(
-            &pixels,
-            &bg,
+            &bg.residual_of(&pixels),
+            &bg.sky_noise(),
             DVec2::splat(64.0),
             0.0,
             TEST_STAMP_RADIUS,
@@ -260,8 +262,8 @@ fn eccentricity_calculation_accuracy() {
         )
         .stamp(Size2us::new(width, height), 0.1);
         let metrics = compute_star(
-            &pixels,
-            &bg,
+            &bg.residual_of(&pixels),
+            &bg.sky_noise(),
             DVec2::splat(32.0),
             0.0,
             TEST_STAMP_RADIUS,
@@ -333,8 +335,8 @@ fn sharpness_point_vs_extended() {
     let compact = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 1.5 })
         .stamp(Size2us::new(width, height), 0.1);
     let metrics_compact = compute_star(
-        &compact,
-        &bg,
+        &bg.residual_of(&compact),
+        &bg.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -347,8 +349,8 @@ fn sharpness_point_vs_extended() {
     let extended = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 4.0 })
         .stamp(Size2us::new(width, height), 0.1);
     let metrics_extended = compute_star(
-        &extended,
-        &bg,
+        &bg.residual_of(&extended),
+        &bg.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -447,25 +449,16 @@ fn gaussian_fit_sigma_recovery() {
         let result =
             result.unwrap_or_else(|| panic!("Fit should return Some for sigma={true_sigma}"));
 
-        // Check that sigma values are accurate (convergence flag may be false if
-        // initial guess was already close, causing small parameter changes)
-        let sigma_error_x = (result.sigma.x - true_sigma).abs() / true_sigma;
-        let sigma_error_y = (result.sigma.y - true_sigma).abs() / true_sigma;
-
-        assert!(
-            sigma_error_x < 0.1,
-            "Sigma_x error {:.1}% too large for sigma={} (got={})",
-            sigma_error_x * 100.0,
-            true_sigma,
-            result.sigma.x
-        );
-        assert!(
-            sigma_error_y < 0.1,
-            "Sigma_y error {:.1}% too large for sigma={} (got={})",
-            sigma_error_y * 100.0,
-            true_sigma,
-            result.sigma.y
-        );
+        // Noiseless samples of a round Gaussian: covariance σ²·I, exact up to the f32 rounding
+        // of the pixels.
+        let c = result.covariance;
+        let var = f64::from(true_sigma * true_sigma);
+        for (got, want) in [(c.xx, var), (c.yy, var), (c.xy, 0.0)] {
+            assert!(
+                (got - want).abs() < EXACT_FIT_PX2,
+                "σ = {true_sigma}: {got} vs {want}"
+            );
+        }
     }
 }
 
@@ -522,8 +515,8 @@ fn ground_circular_source() {
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics = compute_star(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -558,8 +551,8 @@ fn ground_x_elongated() {
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics = compute_star(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -587,8 +580,8 @@ fn sround_symmetric_source() {
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics = compute_star(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
         DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
@@ -604,47 +597,31 @@ fn sround_symmetric_source() {
     );
 }
 
-/// Both profile fits accept or reject a result through one predicate, so its bounds are pinned
+/// Both profile fits accept or reject a centre through one predicate, so its bounds are pinned
 /// once here rather than per model.
-///
-/// Validation must reject a non-finite fit rather than pass it through: every comparison against
-/// NaN is false, so a check phrased as rejections ("bail if a width exceeds max") accepts one.
 #[test]
 fn fit_plausibility_rejects_non_finite_and_keeps_its_bounds() {
     use crate::stacking::star_detection::centroid::fit_is_plausible;
 
     let at = DVec2::splat(8.0);
     let radius = 8usize;
-    // Baseline: a centred, plausibly-sized fit is accepted, so the rejections below are the
-    // non-finite values and not some unrelated bound.
-    assert!(fit_is_plausible(at, at, radius, [2.0]));
-    assert!(fit_is_plausible(at, at, radius, [2.0, 2.0]));
+    assert!(fit_is_plausible(at, at, radius));
 
+    // `max_element` skips a NaN lane, so a NaN x beside a finite y must still be caught.
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-        // A single bad width fails whichever slot it occupies — the Moffat's lone alpha, or
-        // either of the Gaussian's two sigmas.
-        assert!(!fit_is_plausible(at, at, radius, [bad]), "alpha = {bad}");
         assert!(
-            !fit_is_plausible(at, at, radius, [bad, 2.0]),
-            "sigma_x = {bad}"
+            !fit_is_plausible(DVec2::new(bad, 8.0), at, radius),
+            "x = {bad}"
         );
         assert!(
-            !fit_is_plausible(at, at, radius, [2.0, bad]),
-            "sigma_y = {bad}"
+            !fit_is_plausible(DVec2::new(8.0, bad), at, radius),
+            "y = {bad}"
         );
-        let moved = DVec2::new(bad, 8.0);
-        assert!(!fit_is_plausible(moved, at, radius, [2.0]), "pos.x = {bad}");
     }
 
-    // Bounds are inclusive at both ends, and one step outside each is rejected.
-    assert!(fit_is_plausible(at, at, radius, [0.5, 16.0]));
-    assert!(!fit_is_plausible(at, at, radius, [0.49, 2.0]));
-    assert!(!fit_is_plausible(at, at, radius, [2.0, 16.01]));
-    // Centre exactly `stamp_radius` away is still inside; beyond it is not.
-    assert!(fit_is_plausible(DVec2::new(16.0, 8.0), at, radius, [2.0]));
-    assert!(!fit_is_plausible(DVec2::new(16.01, 8.0), at, radius, [2.0]));
-    // An empty width list is all-centre, all-accepted — no model produces one, but the `all`
-    // must not be what carries the position check.
-    assert!(fit_is_plausible(at, at, radius, []));
-    assert!(!fit_is_plausible(DVec2::new(16.01, 8.0), at, radius, []));
+    // A centre exactly `stamp_radius` away on either axis is still inside; beyond it is not.
+    assert!(fit_is_plausible(DVec2::new(16.0, 8.0), at, radius));
+    assert!(fit_is_plausible(DVec2::new(8.0, 0.0), at, radius));
+    assert!(!fit_is_plausible(DVec2::new(16.01, 8.0), at, radius));
+    assert!(!fit_is_plausible(DVec2::new(8.0, -0.01), at, radius));
 }

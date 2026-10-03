@@ -1,6 +1,7 @@
 //! Benchmarks for centroid computation.
 //!
 //! Run with: `cargo test -p lumos --release --features bench bench_centroid -- --ignored --nocapture`
+use crate::bit_buffer2::BitBuffer2;
 use crate::stacking::star_detection::centroid::compute_stamp_radius;
 use crate::stacking::star_detection::centroid::stamp::StampGrid;
 use crate::testing::prelude::*;
@@ -9,7 +10,7 @@ use crate::testing::synthetic::background_map;
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
-use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
+use crate::stacking::star_detection::background::sky_noise::SkyNoise;
 use crate::stacking::star_detection::centroid::compute_star;
 use crate::stacking::star_detection::centroid::covariance::windowed_covariance;
 use crate::stacking::star_detection::centroid::measure_star;
@@ -23,12 +24,13 @@ use crate::stacking::star_detection::detector::stages::detect::internals::detect
 use crate::testing::synthetic::fixtures::star_field;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 
-/// One Gaussian star at (32.3, 32.7) on a 64×64 field, or centred on a larger one, and its
-/// background estimate: the fixture every single-star bench below shares.
+/// One Gaussian star at (32.3, 32.7) on a 64×64 field, or centred on a larger one, less its
+/// estimated sky: the fixture every single-star bench below shares.
 #[derive(Debug)]
 struct SingleStar {
-    pixels: Buffer2<f32>,
-    bg: BackgroundEstimate,
+    residual: Buffer2<f32>,
+    sky: SkyNoise,
+    saturation: BitBuffer2,
 }
 
 impl SingleStar {
@@ -36,7 +38,11 @@ impl SingleStar {
         let pixels =
             SyntheticStar::new(pos, 0.8, StarProfile::Gaussian { sigma: 2.5 }).stamp(size, 0.1);
         let bg = background_map::estimate(&pixels, &BackgroundConfig::default());
-        SingleStar { pixels, bg }
+        SingleStar {
+            residual: bg.residual_of(&pixels),
+            sky: bg.sky_noise(),
+            saturation: BitBuffer2::new_filled(size, false),
+        }
     }
 
     fn field() -> SingleStar {
@@ -46,13 +52,14 @@ impl SingleStar {
 
 /// `measure_star` on one detected star under `config`.
 fn bench_measure_star(b: ::quickbench::Bencher, star: &SingleStar, config: &MeasurementConfig) {
-    let candidates = detect_stars_test(&star.pixels, &star.bg, &DetectionConfig::default());
+    let candidates = detect_stars_test(&star.residual, &star.sky, &DetectionConfig::default());
     let region = candidates.first().expect("Should detect star");
     let grid = StampGrid::new(compute_stamp_radius(4.0));
     b.bench(|| {
         black_box(measure_star(
-            black_box(&star.pixels),
-            black_box(&star.bg),
+            black_box(&star.residual),
+            black_box(&star.sky),
+            &star.saturation,
             black_box(region),
             black_box(config),
             4.0,
@@ -116,7 +123,14 @@ fn bench_measure_star_batch_100(b: ::quickbench::Bencher) {
         .channel(0)
         .clone();
     let bg = background_map::estimate(&pixels, &BackgroundConfig::default());
-    let candidates = detect_stars_test(&pixels, &bg, &DetectionConfig::default());
+    let residual = bg.residual_of(&pixels);
+    let sky = bg.sky_noise();
+    let saturation = BitBuffer2::new_filled(Size2us::new(pixels.width(), pixels.height()), false);
+    let candidates = detect_stars_test(
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
+        &DetectionConfig::default(),
+    );
     let regions: Vec<_> = candidates.iter().collect();
     let config = MeasurementConfig {
         centroid_method: CentroidMethod::WeightedMoments,
@@ -127,7 +141,7 @@ fn bench_measure_star_batch_100(b: ::quickbench::Bencher) {
     b.bench(|| {
         let stars: Vec<_> = regions
             .iter()
-            .filter_map(|r| measure_star(&pixels, &bg, r, &config, 4.0, &grid))
+            .filter_map(|r| measure_star(&residual, &sky, &saturation, r, &config, 4.0, &grid))
             .collect();
         black_box(stars)
     });
@@ -141,7 +155,14 @@ fn bench_measure_star_batch_6k_10000(b: ::quickbench::Bencher) {
         .channel(0)
         .clone();
     let bg = background_map::estimate(&pixels, &BackgroundConfig::default());
-    let candidates = detect_stars_test(&pixels, &bg, &DetectionConfig::default());
+    let residual = bg.residual_of(&pixels);
+    let sky = bg.sky_noise();
+    let saturation = BitBuffer2::new_filled(Size2us::new(pixels.width(), pixels.height()), false);
+    let candidates = detect_stars_test(
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
+        &DetectionConfig::default(),
+    );
     let regions: Vec<_> = candidates.iter().collect();
 
     let config_moments = MeasurementConfig {
@@ -162,7 +183,9 @@ fn bench_measure_star_batch_6k_10000(b: ::quickbench::Bencher) {
     b.bench_labeled("weighted_moments", || {
         let stars: Vec<_> = regions
             .iter()
-            .filter_map(|r| measure_star(&pixels, &bg, r, &config_moments, 4.0, &grid))
+            .filter_map(|r| {
+                measure_star(&residual, &sky, &saturation, r, &config_moments, 4.0, &grid)
+            })
             .collect();
         black_box(stars)
     });
@@ -170,7 +193,17 @@ fn bench_measure_star_batch_6k_10000(b: ::quickbench::Bencher) {
     b.bench_labeled("gaussian_fit", || {
         let stars: Vec<_> = regions
             .iter()
-            .filter_map(|r| measure_star(&pixels, &bg, r, &config_gaussian, 4.0, &grid))
+            .filter_map(|r| {
+                measure_star(
+                    &residual,
+                    &sky,
+                    &saturation,
+                    r,
+                    &config_gaussian,
+                    4.0,
+                    &grid,
+                )
+            })
             .collect();
         black_box(stars)
     });
@@ -178,7 +211,9 @@ fn bench_measure_star_batch_6k_10000(b: ::quickbench::Bencher) {
     b.bench_labeled("moffat_fit", || {
         let stars: Vec<_> = regions
             .iter()
-            .filter_map(|r| measure_star(&pixels, &bg, r, &config_moffat, 4.0, &grid))
+            .filter_map(|r| {
+                measure_star(&residual, &sky, &saturation, r, &config_moffat, 4.0, &grid)
+            })
             .collect();
         black_box(stars)
     });
@@ -190,8 +225,7 @@ fn bench_refine_centroid_single(b: ::quickbench::Bencher) {
     let star = SingleStar::field();
     b.bench(|| {
         black_box(refine_centroid(
-            black_box(&star.pixels),
-            black_box(&star.bg),
+            black_box(&star.residual),
             black_box(DVec2::splat(32.0)),
             black_box(7),
             black_box(4.0),
@@ -206,8 +240,7 @@ fn bench_refine_centroid_batch_1000(b: ::quickbench::Bencher) {
     b.bench(|| {
         for _ in 0..1000 {
             black_box(refine_centroid(
-                black_box(&star.pixels),
-                black_box(&star.bg),
+                black_box(&star.residual),
                 black_box(DVec2::splat(32.0)),
                 black_box(7),
                 black_box(4.0),
@@ -220,14 +253,14 @@ fn bench_refine_centroid_batch_1000(b: ::quickbench::Bencher) {
 fn bench_compute_star_single(b: ::quickbench::Bencher) {
     // Flux, SNR, sharpness, roundness and the windowed covariance for one candidate — everything
     // `measure_star` does after the centroid is settled.
-    let SingleStar { pixels, bg } = SingleStar::field();
+    let SingleStar { residual, sky, .. } = SingleStar::field();
     let pos = DVec2::new(32.3, 32.7);
-    let peak = pixels[(32, 33)];
+    let peak = residual[(32, 33)];
 
     b.bench(|| {
         black_box(compute_star(
-            black_box(&pixels),
-            black_box(&bg),
+            black_box(&residual),
+            black_box(&sky),
             black_box(pos),
             black_box(peak),
             black_box(7),
@@ -239,15 +272,15 @@ fn bench_compute_star_single(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_compute_star_batch_1000(b: ::quickbench::Bencher) {
-    let SingleStar { pixels, bg } = SingleStar::field();
+    let SingleStar { residual, sky, .. } = SingleStar::field();
     let pos = DVec2::new(32.3, 32.7);
-    let peak = pixels[(32, 33)];
+    let peak = residual[(32, 33)];
 
     b.bench(|| {
         for _ in 0..1000 {
             black_box(compute_star(
-                black_box(&pixels),
-                black_box(&bg),
+                black_box(&residual),
+                black_box(&sky),
                 black_box(pos),
                 black_box(peak),
                 black_box(7),
@@ -262,15 +295,14 @@ fn bench_compute_star_batch_1000(b: ::quickbench::Bencher) {
 fn bench_windowed_covariance_single(b: ::quickbench::Bencher) {
     // The adaptive-window moment loop nested inside `compute_star`: up to four re-reads of the
     // stamp's image and background rows, one per window iteration.
-    let SingleStar { pixels, bg } = SingleStar::field();
+    let SingleStar { residual, .. } = SingleStar::field();
     // Seeded as `compute_star` seeds it — sigma 2.5 gives sigma^2 = 6.25.
     let seed_sigma_sq = 6.25;
 
     b.bench(|| {
         black_box(windowed_covariance(
-            black_box(&pixels),
-            black_box(&bg),
-            None,
+            black_box(&residual),
+            0.0,
             black_box(DVec2::new(32.3, 32.7)),
             black_box(7),
             black_box(seed_sigma_sq),
@@ -280,15 +312,14 @@ fn bench_windowed_covariance_single(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_windowed_covariance_batch_1000(b: ::quickbench::Bencher) {
-    let SingleStar { pixels, bg } = SingleStar::field();
+    let SingleStar { residual, .. } = SingleStar::field();
     let seed_sigma_sq = 6.25;
 
     b.bench(|| {
         for _ in 0..1000 {
             black_box(windowed_covariance(
-                black_box(&pixels),
-                black_box(&bg),
-                None,
+                black_box(&residual),
+                0.0,
                 black_box(DVec2::new(32.3, 32.7)),
                 black_box(7),
                 black_box(seed_sigma_sq),

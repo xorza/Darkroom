@@ -32,13 +32,15 @@ fn measure_single_star(
         peak_value: pixels[peak_pos.y.round() as usize * width + peak_pos.x.round() as usize],
         area: 50,
     };
+    let expected_fwhm = FwhmConfig::default().mode.unwrap().seed();
     measure_star(
-        pixels,
-        &bg,
+        &bg.residual_of(pixels),
+        &bg.sky_noise(),
+        &unsaturated(pixels),
         &region,
         &config,
-        FwhmConfig::default().expected,
-        &StampGrid::new(compute_stamp_radius(FwhmConfig::default().expected)),
+        expected_fwhm,
+        &StampGrid::new(compute_stamp_radius(expected_fwhm)),
     )
     .expect("measure_star should succeed")
 }
@@ -296,8 +298,14 @@ fn windowed_covariance_recovers_gaussian_sigma() {
         SyntheticStar::new(pos.as_vec2(), 1.0, StarProfile::Gaussian { sigma }).stamp(size, 0.0);
     let bg = background_map::uniform(size, 0.0, 1.0);
 
-    let cov = windowed_covariance(&pixels, &bg, None, pos, 12, f64::from(sigma * sigma))
-        .expect("clean Gaussian should converge");
+    let cov = windowed_covariance(
+        &bg.residual_of(&pixels),
+        0.0,
+        pos,
+        12,
+        f64::from(sigma * sigma),
+    )
+    .expect("clean Gaussian should converge");
 
     let expected = f64::from(sigma * sigma); // σ² per axis
     assert!(
@@ -338,7 +346,7 @@ fn windowed_covariance_recovers_elliptical_axes() {
     let bg = background_map::uniform(size, 0.0, 1.0);
 
     let seed = f64::from(f32::midpoint(sx * sx, sy * sy));
-    let cov = windowed_covariance(&pixels, &bg, None, pos, 14, seed)
+    let cov = windowed_covariance(&bg.residual_of(&pixels), 0.0, pos, 14, seed)
         .expect("clean elliptical Gaussian should converge");
 
     assert!(
@@ -375,8 +383,14 @@ fn windowed_covariance_resists_wing_noise() {
     patterns::add_gaussian_noise(pixels.pixels_mut(), 0.03, 12345);
     let bg = background_map::uniform(size, 0.1, 1.0);
 
-    let cov = windowed_covariance(&pixels, &bg, None, pos, 12, f64::from(sigma * sigma))
-        .expect("noisy Gaussian should still converge");
+    let cov = windowed_covariance(
+        &bg.residual_of(&pixels),
+        0.0,
+        pos,
+        12,
+        f64::from(sigma * sigma),
+    )
+    .expect("noisy Gaussian should still converge");
 
     let ratio = (cov.yy / cov.xx).sqrt();
     assert!(

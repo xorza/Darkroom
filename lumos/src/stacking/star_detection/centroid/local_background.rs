@@ -1,8 +1,8 @@
-//! The sky level a star is measured against.
+//! The sky a star is measured against, beyond the global map the residual already removed.
 //!
-//! Either the global background map's value at the star, or a robust median over an annulus
-//! around it — the annulus tracks structure the tiled map smooths over, at the cost of needing
-//! enough in-bounds samples to be trustworthy.
+//! Either nothing — the map's level stands — or a robust median of the residual over an annulus
+//! around the star, the local sky the tiled map smoothed over, at the cost of needing enough
+//! in-bounds samples to be trustworthy.
 
 use arrayvec::ArrayVec;
 use glam::DVec2;
@@ -11,31 +11,19 @@ use imaginarium::Buffer2;
 use crate::math::statistics::ClippedStats;
 use crate::stacking::star_detection::centroid::MAX_ANNULUS_PIXELS;
 
-/// Flat per-stamp sky estimate: one (background, noise) pair valid at the stamp
-/// scale, as opposed to the per-pixel tiled global map.
+/// Flat per-stamp sky: the residual's offset from zero and its noise, valid at the stamp scale.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct LocalBackground {
-    pub(super) bg: f32,
+    /// The sky the residual still carries here, subtracted from every stamp pixel.
+    pub(super) offset: f32,
     pub(super) noise: f32,
 }
 
-/// Compute local background and noise using an annular region around the star.
-///
-/// The inner radius excludes the star's flux, and the outer radius samples
-/// the local sky. Uses sigma-clipped median for robustness.
-///
-/// # Arguments
-/// * `pixels` - Image data
-/// * `width` - Image width
-/// * `height` - Image height
-/// * `pos` - Star center position
-/// * `inner_radius` - Inner radius of annulus (excludes star)
-/// * `outer_radius` - Outer radius of annulus
-///
-/// # Returns
-/// The local background/noise, or None if not enough valid pixels
+/// The residual's sigma-clipped median and σ over the annulus between `inner_radius`, which keeps
+/// the star's flux out, and `outer_radius` about `pos`; `None` when fewer than 10 of its pixels
+/// lie in the frame.
 pub(super) fn compute_annulus_background(
-    pixels: &Buffer2<f32>,
+    residual: &Buffer2<f32>,
     pos: DVec2,
     inner_radius: usize,
     outer_radius: usize,
@@ -48,8 +36,8 @@ pub(super) fn compute_annulus_background(
     // Use stack-allocated ArrayVec to avoid heap allocation
     let mut values: ArrayVec<f32, MAX_ANNULUS_PIXELS> = ArrayVec::new();
 
-    let width = pixels.width() as isize;
-    let height = pixels.height() as isize;
+    let width = residual.width() as isize;
+    let height = residual.height() as isize;
     let outer_r_i32 = outer_radius as i32;
     for dy in -outer_r_i32..=outer_r_i32 {
         // Row bound first so the row slice — and its bounds check — is taken once, not per
@@ -58,7 +46,7 @@ pub(super) fn compute_annulus_background(
         if y < 0 || y >= height {
             continue;
         }
-        let row = pixels.row(y as usize);
+        let row = residual.row(y as usize);
 
         for dx in -outer_r_i32..=outer_r_i32 {
             let r2 = (dx * dx + dy * dy) as f32;
@@ -81,7 +69,7 @@ pub(super) fn compute_annulus_background(
     let mut deviations: ArrayVec<f32, MAX_ANNULUS_PIXELS> = ArrayVec::new();
     let stats = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 2);
     Some(LocalBackground {
-        bg: stats.median,
+        offset: stats.median,
         noise: stats.sigma,
     })
 }

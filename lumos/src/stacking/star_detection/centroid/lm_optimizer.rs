@@ -27,12 +27,6 @@ pub(super) struct LMConfig {
     pub(super) lambda_up: f64,
     /// Factor to decrease lambda on successful step.
     pub(super) lambda_down: f64,
-    /// Early termination when position parameters (first 2) converge to this threshold.
-    /// The optimizer stops once both x0 and y0 deltas are below this value,
-    /// even if other parameters (amplitude, sigma, background) are still changing.
-    /// Default is 0 (disabled). Set to 0.0001 for sub-pixel astrometric precision
-    /// in centroid-only use cases where non-position parameters don't matter.
-    pub(super) position_convergence_threshold: f64,
 }
 
 impl Default for LMConfig {
@@ -43,7 +37,6 @@ impl Default for LMConfig {
             initial_lambda: 0.001,
             lambda_up: 10.0,
             lambda_down: 0.1,
-            position_convergence_threshold: 0.0,
         }
     }
 }
@@ -296,13 +289,6 @@ pub(super) trait LMModel<const N: usize> {
 
                 let max_delta = delta.iter().copied().fold(0.0f64, |a, d| a.max(d.abs()));
                 if max_delta < config.convergence_threshold || chi2_rel_change < 1e-10 {
-                    converged = true;
-                    break;
-                }
-                // Early exit when only position accuracy matters
-                if delta[0].abs() < config.position_convergence_threshold
-                    && delta[1].abs() < config.position_convergence_threshold
-                {
                     converged = true;
                     break;
                 }

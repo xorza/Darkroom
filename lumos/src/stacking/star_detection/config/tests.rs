@@ -2,6 +2,13 @@ use crate::stacking::star_detection::config::detection_config::MAX_DEBLEND_N_THR
 use crate::stacking::star_detection::config::measurement_config::NoiseModel;
 use crate::stacking::star_detection::config::*;
 
+fn multi_threshold(n_thresholds: usize) -> Deblend {
+    Deblend::MultiThreshold {
+        n_thresholds,
+        min_contrast: 0.005,
+    }
+}
+
 fn configured(update: impl FnOnce(&mut Config)) -> Config {
     let mut config = Config::default();
     update(&mut config);
@@ -86,13 +93,13 @@ fn config_presets() {
 #[test]
 fn config_custom() {
     let config = configured(|config| {
-        config.fwhm.expected = 5.0;
+        config.fwhm.mode = Some(FwhmMode::Fixed(5.0));
         config.filter.min_snr = 15.0;
         config.detection.edge_margin = 20;
         config.measurement.noise_model = Some(NoiseModel::from_normalized(24_000.0, 5.0));
     });
 
-    assert!((config.fwhm.expected - 5.0).abs() < 1e-6);
+    assert_eq!(config.fwhm.mode, Some(FwhmMode::Fixed(5.0)));
     assert!((config.filter.min_snr - 15.0).abs() < 1e-6);
     assert_eq!(config.detection.edge_margin, 20);
     assert!(config.measurement.noise_model.is_some());
@@ -100,14 +107,18 @@ fn config_custom() {
 }
 
 #[test]
-fn config_with_auto_fwhm() {
-    let config = configured(|config| {
-        config.fwhm.auto_estimate = true;
-        config.fwhm.expected = 0.0;
-    });
-    assert!(config.fwhm.auto_estimate);
-    assert!((config.fwhm.expected - 0.0).abs() < 1e-6);
-    assert_eq!(config.validate(), Ok(()));
+fn fwhm_modes_validate_and_seed_from_their_value() {
+    // No filter at all, a fixed width, and an estimate that falls back to its own value: all
+    // valid, and the seed is the one width each carries.
+    for (mode, seed) in [
+        (None, None),
+        (Some(FwhmMode::Fixed(3.5)), Some(3.5)),
+        (Some(FwhmMode::Auto { fallback: 4.5 }), Some(4.5)),
+    ] {
+        let config = configured(|config| config.fwhm.mode = mode);
+        assert_eq!(config.validate(), Ok(()), "{mode:?}");
+        assert_eq!(mode.map(FwhmMode::seed), seed);
+    }
 }
 
 #[test]
@@ -124,27 +135,45 @@ fn inclusive_bounds_accept_their_edges() {
     // still pass. Every bound is expressed as the accepted half, so an inverted comparison
     // shows up here rather than as a config that silently stops working.
     type Edge = (&'static str, fn(&mut Config));
-    let edges: [Edge; 10] = [
+    let edges: [Edge; 11] = [
         ("read_noise 0", |c| {
             c.measurement.noise_model = Some(NoiseModel::from_normalized(1.0, 0.0));
         }),
         ("psf_axis_ratio 1", |c| c.detection.psf_axis_ratio = 1.0),
-        ("deblend_min_prominence 0", |c| {
-            c.detection.deblend_min_prominence = 0.0;
+        ("deblend min_prominence 0", |c| {
+            c.detection.deblend = Deblend::LocalMaxima {
+                min_prominence: 0.0,
+            };
         }),
-        ("deblend_min_prominence 1", |c| {
-            c.detection.deblend_min_prominence = 1.0;
+        ("deblend min_prominence 1", |c| {
+            c.detection.deblend = Deblend::LocalMaxima {
+                min_prominence: 1.0,
+            };
         }),
-        ("deblend_min_contrast 1", |c| {
-            c.detection.deblend_min_contrast = 1.0;
+        ("deblend min_contrast 1", |c| {
+            c.detection.deblend = Deblend::MultiThreshold {
+                n_thresholds: 2,
+                min_contrast: 1.0,
+            };
         }),
-        ("expected fwhm 0", |c| c.fwhm.expected = 0.0),
+        ("deblend min_contrast 0", |c| {
+            c.detection.deblend = Deblend::MultiThreshold {
+                n_thresholds: MAX_DEBLEND_N_THRESHOLDS,
+                min_contrast: 0.0,
+            };
+        }),
+        ("background refinement mask_dilation 50", |c| {
+            c.background.refinement = BackgroundRefinement::Iterative {
+                iterations: 10,
+                mask_dilation: 50,
+            };
+        }),
         ("estimation_sigma_factor 1", |c| {
             c.fwhm.estimation_sigma_factor = 1.0;
         }),
         ("max_sharpness 1", |c| c.filter.max_sharpness = 1.0),
-        ("max_fwhm_deviation 0", |c| {
-            c.filter.max_fwhm_deviation = 0.0;
+        ("max_fwhm_deviation None", |c| {
+            c.filter.max_fwhm_deviation = None;
         }),
         ("duplicate_min_separation 0", |c| {
             c.filter.duplicate_min_separation = 0.0;
@@ -172,21 +201,32 @@ fn config_invalid_parameters_return_exact_errors() {
         ),
         (
             configured(|config| {
-                config.background.refinement = BackgroundRefinement::Iterative { iterations: 0 };
+                config.background.refinement = BackgroundRefinement::Iterative {
+                    iterations: 0,
+                    mask_dilation: 3,
+                };
             }),
             "background refinement iterations",
             0.0,
         ),
         (
             configured(|config| {
-                config.background.refinement = BackgroundRefinement::Iterative { iterations: 11 };
+                config.background.refinement = BackgroundRefinement::Iterative {
+                    iterations: 11,
+                    mask_dilation: 3,
+                };
             }),
             "background refinement iterations",
             11.0,
         ),
         (
-            configured(|config| config.background.mask_dilation = 51),
-            "bg_mask_dilation",
+            configured(|config| {
+                config.background.refinement = BackgroundRefinement::Iterative {
+                    iterations: 1,
+                    mask_dilation: 51,
+                };
+            }),
+            "background refinement mask_dilation",
             51.0,
         ),
         (
@@ -195,9 +235,19 @@ fn config_invalid_parameters_return_exact_errors() {
             0.0,
         ),
         (
-            configured(|config| config.fwhm.expected = -1.0),
-            "expected_fwhm",
+            configured(|config| config.fwhm.mode = Some(FwhmMode::Fixed(-1.0))),
+            "fwhm Fixed",
             -1.0,
+        ),
+        (
+            configured(|config| config.fwhm.mode = Some(FwhmMode::Fixed(0.0))),
+            "fwhm Fixed",
+            0.0,
+        ),
+        (
+            configured(|config| config.fwhm.mode = Some(FwhmMode::Auto { fallback: 0.0 })),
+            "fwhm Auto fallback",
+            0.0,
         ),
         (
             configured(|config| config.detection.psf_axis_ratio = 0.0),
@@ -211,12 +261,12 @@ fn config_invalid_parameters_return_exact_errors() {
         ),
         (
             configured(|config| config.fwhm.min_stars = 4),
-            "min_stars_for_fwhm",
+            "fwhm min_stars",
             4.0,
         ),
         (
             configured(|config| config.fwhm.estimation_sigma_factor = 0.5),
-            "fwhm_estimation_sigma_factor",
+            "fwhm estimation_sigma_factor",
             0.5,
         ),
         (
@@ -225,25 +275,34 @@ fn config_invalid_parameters_return_exact_errors() {
             0.0,
         ),
         (
-            configured(|config| config.detection.deblend_min_prominence = 1.5),
-            "deblend_min_prominence",
+            configured(|config| {
+                config.detection.deblend = Deblend::LocalMaxima {
+                    min_prominence: 1.5,
+                };
+            }),
+            "deblend min_prominence",
             1.5,
         ),
         (
-            configured(|config| config.detection.deblend_n_thresholds = 1),
-            "deblend_n_thresholds",
+            configured(|config| config.detection.deblend = multi_threshold(1)),
+            "deblend n_thresholds",
             1.0,
         ),
         (
             configured(|config| {
-                config.detection.deblend_n_thresholds = MAX_DEBLEND_N_THRESHOLDS + 1;
+                config.detection.deblend = multi_threshold(MAX_DEBLEND_N_THRESHOLDS + 1);
             }),
-            "deblend_n_thresholds",
+            "deblend n_thresholds",
             (MAX_DEBLEND_N_THRESHOLDS + 1) as f64,
         ),
         (
-            configured(|config| config.detection.deblend_min_contrast = -0.1),
-            "deblend_min_contrast",
+            configured(|config| {
+                config.detection.deblend = Deblend::MultiThreshold {
+                    n_thresholds: 32,
+                    min_contrast: -0.1,
+                };
+            }),
+            "deblend min_contrast",
             // -0.1 has no exact f64 twin: compare against the f32 the field actually holds.
             f64::from(-0.1f32),
         ),
@@ -288,9 +347,14 @@ fn config_invalid_parameters_return_exact_errors() {
             0.0,
         ),
         (
-            configured(|config| config.filter.max_fwhm_deviation = -1.0),
+            configured(|config| config.filter.max_fwhm_deviation = Some(-1.0)),
             "max_fwhm_deviation",
             -1.0,
+        ),
+        (
+            configured(|config| config.filter.max_fwhm_deviation = Some(0.0)),
+            "max_fwhm_deviation",
+            0.0,
         ),
         (
             configured(|config| config.filter.duplicate_min_separation = -1.0),
@@ -332,40 +396,33 @@ fn a_bound_that_is_another_config_value_is_reported_with_it() {
         "max_area must be at least min_area (100), got 50"
     );
 
-    let invalid = configured(|config| config.detection.deblend_n_thresholds = 1)
+    let invalid = configured(|config| config.detection.deblend = multi_threshold(1))
         .validate()
         .unwrap_err();
     assert_eq!(
         invalid.to_string(),
         format!(
-            "deblend_n_thresholds must be 0, or between 2 and the deblend level cap ({MAX_DEBLEND_N_THRESHOLDS}), got 1"
+            "deblend n_thresholds must be between 2 and the deblend level cap ({MAX_DEBLEND_N_THRESHOLDS}), got 1"
         )
     );
 }
 
 #[test]
-fn config_deblend_n_thresholds_at_max_accepted() {
-    assert_eq!(
-        configured(|config| {
-            config.detection.deblend_n_thresholds = MAX_DEBLEND_N_THRESHOLDS;
-        })
-        .validate(),
-        Ok(())
-    );
-}
-
-#[test]
-fn config_deblend_multi_threshold() {
-    let config = configured(|config| config.detection.deblend_n_thresholds = 32);
-    assert!(config.detection.is_multi_threshold());
-    assert_eq!(config.validate(), Ok(()));
+fn config_deblend_n_thresholds_bounds_accepted() {
+    for n_thresholds in [2, 32, MAX_DEBLEND_N_THRESHOLDS] {
+        assert_eq!(
+            configured(|config| config.detection.deblend = multi_threshold(n_thresholds))
+                .validate(),
+            Ok(()),
+            "n_thresholds = {n_thresholds}"
+        );
+    }
 }
 
 #[test]
 fn config_wide_field_values() {
     let config = Config::wide_field();
-    assert!((config.fwhm.expected - 6.0).abs() < 1e-6);
-    assert!(config.fwhm.auto_estimate);
+    assert_eq!(config.fwhm.mode, Some(FwhmMode::Auto { fallback: 6.0 }));
     assert_eq!(config.detection.min_area, 7);
     assert_eq!(config.detection.max_area, 1500);
     assert_eq!(config.detection.edge_margin, 20);
@@ -384,19 +441,32 @@ fn config_precise_ground_values() {
         config.measurement.local_background,
         LocalBackgroundMethod::LocalAnnulus
     );
-    assert_eq!(config.detection.deblend_n_thresholds, 32);
+    assert_eq!(
+        config.detection.deblend,
+        Deblend::MultiThreshold {
+            n_thresholds: 32,
+            min_contrast: 0.003,
+        }
+    );
     assert!((config.filter.min_snr - 15.0).abs() < 1e-6);
+    assert_eq!(config.filter.max_fwhm_deviation, Some(4.0));
     assert_eq!(config.background.tile_size, 128);
+    assert!(matches!(
+        config.background.refinement,
+        BackgroundRefinement::Iterative {
+            iterations: 3,
+            mask_dilation: 5,
+        }
+    ));
     assert!((config.detection.sigma_threshold - 3.0).abs() < 1e-6);
-    assert!(config.fwhm.auto_estimate);
+    assert_eq!(config.fwhm.mode, Some(FwhmMode::Auto { fallback: 3.0 }));
     assert_eq!(config.fwhm.min_stars, 30);
 }
 
 #[test]
 fn config_high_resolution_values() {
     let config = Config::high_resolution();
-    assert!((config.fwhm.expected - 2.5).abs() < 1e-6);
-    assert!(config.fwhm.auto_estimate);
+    assert_eq!(config.fwhm.mode, Some(FwhmMode::Auto { fallback: 2.5 }));
     assert_eq!(config.detection.min_area, 3);
     assert_eq!(config.detection.max_area, 200);
     assert!((config.filter.min_snr - 15.0).abs() < 1e-6);
@@ -411,16 +481,23 @@ fn config_high_resolution_values() {
 #[test]
 fn config_crowded_field_values() {
     let config = Config::crowded_field();
-    assert_eq!(config.detection.deblend_n_thresholds, 32);
+    assert_eq!(
+        config.detection.deblend,
+        Deblend::MultiThreshold {
+            n_thresholds: 32,
+            min_contrast: 0.005,
+        }
+    );
     assert_eq!(config.detection.deblend_min_separation, 2);
-    assert!((config.detection.deblend_min_prominence - 0.15).abs() < 1e-6);
-    assert!((config.detection.deblend_min_contrast - 0.005).abs() < 1e-6);
     assert!(matches!(
         config.background.refinement,
-        BackgroundRefinement::Iterative { iterations: 2 }
+        BackgroundRefinement::Iterative {
+            iterations: 2,
+            mask_dilation: 3,
+        }
     ));
     assert!((config.filter.duplicate_min_separation - 3.0).abs() < 1e-6);
-    assert!(config.fwhm.auto_estimate);
+    assert_eq!(config.fwhm.mode, Some(FwhmMode::Auto { fallback: 4.0 }));
 }
 
 #[test]
@@ -432,8 +509,8 @@ fn config_rejects_non_finite_float_parameters() {
             f64::INFINITY,
         ),
         (
-            configured(|config| config.fwhm.expected = f32::INFINITY),
-            "expected_fwhm",
+            configured(|config| config.fwhm.mode = Some(FwhmMode::Fixed(f32::INFINITY))),
+            "fwhm Fixed",
             f64::INFINITY,
         ),
         (
@@ -443,19 +520,26 @@ fn config_rejects_non_finite_float_parameters() {
         ),
         (
             configured(|config| config.fwhm.estimation_sigma_factor = f32::INFINITY),
-            "fwhm_estimation_sigma_factor",
+            "fwhm estimation_sigma_factor",
             f64::INFINITY,
         ),
         (
             configured(|config| {
-                config.detection.deblend_min_prominence = f32::INFINITY;
+                config.detection.deblend = Deblend::LocalMaxima {
+                    min_prominence: f32::INFINITY,
+                };
             }),
-            "deblend_min_prominence",
+            "deblend min_prominence",
             f64::INFINITY,
         ),
         (
-            configured(|config| config.detection.deblend_min_contrast = f32::INFINITY),
-            "deblend_min_contrast",
+            configured(|config| {
+                config.detection.deblend = Deblend::MultiThreshold {
+                    n_thresholds: 32,
+                    min_contrast: f32::INFINITY,
+                };
+            }),
+            "deblend min_contrast",
             f64::INFINITY,
         ),
         (
@@ -479,7 +563,7 @@ fn config_rejects_non_finite_float_parameters() {
             f64::INFINITY,
         ),
         (
-            configured(|config| config.filter.max_fwhm_deviation = f32::INFINITY),
+            configured(|config| config.filter.max_fwhm_deviation = Some(f32::INFINITY)),
             "max_fwhm_deviation",
             f64::INFINITY,
         ),
@@ -497,15 +581,14 @@ fn config_rejects_non_finite_float_parameters() {
 }
 
 #[test]
-fn background_refinement_iterations() {
-    assert_eq!(BackgroundRefinement::None.iterations(), 0);
-    assert_eq!(
-        BackgroundRefinement::Iterative { iterations: 3 }.iterations(),
-        3
-    );
+fn background_refinement_validates_both_fields() {
     assert_eq!(BackgroundRefinement::None.validate(), Ok(()));
     assert_eq!(
-        BackgroundRefinement::Iterative { iterations: 3 }.validate(),
+        BackgroundRefinement::Iterative {
+            iterations: 3,
+            mask_dilation: 0,
+        }
+        .validate(),
         Ok(())
     );
 }
@@ -513,23 +596,15 @@ fn background_refinement_iterations() {
 #[test]
 fn background_refinement_invalid_iterations_return_exact_errors() {
     for iterations in [0, 11] {
-        let invalid = BackgroundRefinement::Iterative { iterations }
-            .validate()
-            .unwrap_err();
+        let invalid = BackgroundRefinement::Iterative {
+            iterations,
+            mask_dilation: 3,
+        }
+        .validate()
+        .unwrap_err();
         assert_eq!(
             invalid.to_string(),
             format!("background refinement iterations must be between 1 and 10, got {iterations}")
         );
     }
-}
-
-#[test]
-fn multi_threshold_is_off_at_zero_and_on_from_two() {
-    // 0 = disabled → false
-    let config = configured(|config| config.detection.deblend_n_thresholds = 0);
-    assert!(!config.detection.is_multi_threshold());
-
-    // >= 2 → true
-    let config = configured(|config| config.detection.deblend_n_thresholds = 2);
-    assert!(config.detection.is_multi_threshold());
 }

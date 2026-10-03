@@ -11,7 +11,7 @@ use crate::testing::visual::report::{PassCriteria, check_pass, standard_criteria
 /// Detection config for synthetic images: disable the CFA matched filter so FWHM stays accurate.
 fn detection_config() -> Config {
     let mut config = Config::default();
-    config.fwhm.expected = 0.0;
+    config.fwhm.mode = None;
     config
 }
 

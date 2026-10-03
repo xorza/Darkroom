@@ -25,6 +25,18 @@ const TEST_EXPECTED_FWHM: f32 = 5.9;
 
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 
+/// How close a profile fit to noiseless samples of its own model comes to the truth, in px².
+///
+/// The samples are f32, each rounded by up to 2⁻²⁴ ≈ 6e-8 of its value; through the fit that
+/// rounding moves the covariance by at most 1.6e-7 px² over the fixtures here (measured), so 1e-6
+/// holds it with room while staying far below any width error worth reporting.
+const EXACT_FIT_PX2: f64 = 1e-6;
+
+/// A saturation mask with no pixel set, the size of `pixels`.
+fn unsaturated(pixels: &Buffer2<f32>) -> BitBuffer2 {
+    BitBuffer2::new_filled(Size2us::new(pixels.width(), pixels.height()), false)
+}
+
 mod basic;
 mod convergence;
 mod fitting;

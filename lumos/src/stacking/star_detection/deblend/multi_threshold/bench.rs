@@ -7,63 +7,23 @@ use ::quickbench::quick_bench;
 use std::hint::black_box;
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::math::urect::URect;
 use crate::stacking::star_detection::config::detection_config::Connectivity;
-use crate::stacking::star_detection::deblend::ComponentData;
+use crate::stacking::star_detection::deblend::component::Component;
 use crate::stacking::star_detection::deblend::multi_threshold::{
-    DeblendBuffers, deblend_multi_threshold,
+    MultiThresholdParams, TreeBuffers, deblend_multi_threshold,
 };
 use crate::stacking::star_detection::labeling::LabelMap;
 use crate::testing::synthetic::fixtures::cluster_field;
 
-/// A label map and the components it labels.
-#[derive(Debug)]
-struct Components {
-    labels: LabelMap,
-    components: Vec<ComponentData>,
-}
-
-/// Create components from a pixel buffer for benchmarking.
-fn create_components_from_pixels(pixels: &Buffer2<f32>, threshold: f32) -> Components {
-    let width = pixels.width();
-    let height = pixels.height();
-
-    let mut mask = BitBuffer2::new_filled(Size2us::new(width, height), false);
+/// Label the pixels of `pixels` above `threshold`, for benchmarking.
+fn label_above(pixels: &Buffer2<f32>, threshold: f32) -> LabelMap {
+    let mut mask = BitBuffer2::new_filled(Size2us::new(pixels.width(), pixels.height()), false);
     for (idx, &value) in pixels.iter().enumerate() {
         if value > threshold {
             mask.set(idx, true);
         }
     }
-
-    let labels = LabelMap::from_mask(&mask, Connectivity::Four);
-    let num_labels = labels.num_labels();
-
-    let mut components = Vec::with_capacity(num_labels);
-    let mut bboxes = vec![URect::empty(); num_labels + 1];
-    let mut areas = vec![0usize; num_labels + 1];
-
-    for y in 0..height {
-        for x in 0..width {
-            let idx = y * width + x;
-            let label = labels[idx];
-            if label > 0 {
-                bboxes[label as usize].include(Vec2us::new(x, y));
-                areas[label as usize] += 1;
-            }
-        }
-    }
-
-    for label in 1..=num_labels {
-        if areas[label] > 0 {
-            components.push(ComponentData {
-                bbox: bboxes[label],
-                label: label as u32,
-                area: areas[label],
-            });
-        }
-    }
-
-    Components { labels, components }
+    LabelMap::from_mask(&mask, Connectivity::Four)
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
@@ -72,7 +32,8 @@ fn bench_deblend_multi_threshold_6k_dense(b: ::quickbench::Bencher) {
         .image
         .channel(0)
         .clone();
-    let Components { labels, components } = create_components_from_pixels(&pixels, 0.05);
+    let labels = label_above(&pixels, 0.05);
+    let components = labels.components();
 
     // Filter out huge components - multi-threshold is O(n * n_thresholds) per component
     // and not practical for >100k pixels
@@ -82,17 +43,19 @@ fn bench_deblend_multi_threshold_6k_dense(b: ::quickbench::Bencher) {
     let min_separation = 3;
     let min_contrast = 0.005;
 
-    let mut buffers = DeblendBuffers::new();
+    let mut buffers = TreeBuffers::default();
 
     b.bench(|| {
         for component in &reasonable_components {
             black_box(deblend_multi_threshold(
-                black_box(component),
-                black_box(&pixels),
-                black_box(&labels),
-                black_box(n_thresholds),
-                black_box(min_separation),
-                black_box(min_contrast),
+                &Component::new(black_box(component), &pixels, &labels),
+                0.05,
+                MultiThresholdParams {
+                    n_thresholds,
+                    min_contrast,
+                    min_separation,
+                    connectivity: Connectivity::Four,
+                },
                 &mut buffers,
             ));
         }
@@ -105,7 +68,8 @@ fn bench_deblend_multi_threshold_6k_dense_fewer_levels(b: ::quickbench::Bencher)
         .image
         .channel(0)
         .clone();
-    let Components { labels, components } = create_components_from_pixels(&pixels, 0.05);
+    let labels = label_above(&pixels, 0.05);
+    let components = labels.components();
 
     // Filter out huge components - multi-threshold is O(n^2) and not practical for >100k pixels
     let reasonable_components: Vec<_> = components
@@ -118,17 +82,19 @@ fn bench_deblend_multi_threshold_6k_dense_fewer_levels(b: ::quickbench::Bencher)
     let min_separation = 3;
     let min_contrast = 0.005;
 
-    let mut buffers = DeblendBuffers::new();
+    let mut buffers = TreeBuffers::default();
 
     b.bench(|| {
         for component in &reasonable_components {
             black_box(deblend_multi_threshold(
-                black_box(component),
-                black_box(&pixels),
-                black_box(&labels),
-                black_box(n_thresholds),
-                black_box(min_separation),
-                black_box(min_contrast),
+                &Component::new(black_box(component), &pixels, &labels),
+                0.05,
+                MultiThresholdParams {
+                    n_thresholds,
+                    min_contrast,
+                    min_separation,
+                    connectivity: Connectivity::Four,
+                },
                 &mut buffers,
             ));
         }
@@ -141,7 +107,8 @@ fn bench_multi_threshold_4k_dense(b: ::quickbench::Bencher) {
         .image
         .channel(0)
         .clone();
-    let Components { labels, components } = create_components_from_pixels(&pixels, 0.05);
+    let labels = label_above(&pixels, 0.05);
+    let components = labels.components();
 
     // Filter out huge components - multi-threshold is O(n^2) and not practical for >100k pixels
     let reasonable_components: Vec<_> = components.iter().filter(|c| c.area < 100_000).collect();
@@ -151,17 +118,19 @@ fn bench_multi_threshold_4k_dense(b: ::quickbench::Bencher) {
     let min_contrast = 0.005;
 
     // Reuse buffers across components (same as real pipeline via rayon fold)
-    let mut buffers = DeblendBuffers::new();
+    let mut buffers = TreeBuffers::default();
 
     b.bench(|| {
         for component in &reasonable_components {
             black_box(deblend_multi_threshold(
-                black_box(component),
-                black_box(&pixels),
-                black_box(&labels),
-                black_box(n_thresholds),
-                black_box(min_separation),
-                black_box(min_contrast),
+                &Component::new(black_box(component), &pixels, &labels),
+                0.05,
+                MultiThresholdParams {
+                    n_thresholds,
+                    min_contrast,
+                    min_separation,
+                    connectivity: Connectivity::Four,
+                },
                 &mut buffers,
             ));
         }

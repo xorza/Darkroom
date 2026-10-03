@@ -9,6 +9,15 @@ use crate::math::fwhm::sigma_to_fwhm;
 use crate::stacking::star_detection::convolution::*;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 
+/// `pixels` less `background`: the residual the matched filter takes.
+fn less(pixels: &Buffer2<f32>, background: &Buffer2<f32>) -> Buffer2<f32> {
+    let mut residual = pixels.clone();
+    for (value, &sky) in residual.iter_mut().zip(background.iter()) {
+        *value -= sky;
+    }
+    residual
+}
+
 #[test]
 fn gaussian_kernel_1d_normalization() {
     for sigma in [0.5, 1.0, 2.0, 3.0, 5.0] {
@@ -287,32 +296,26 @@ fn gaussian_convolve_small_image() {
 }
 
 #[test]
-fn matched_filter_subtracts_background() {
+fn matched_filter_of_a_zero_residual_is_zero() {
     let width = 32;
     let height = 32;
-    let background = Buffer2::new_filled(width, height, 0.3f32);
-    let pixels = Buffer2::new_filled(width, height, 0.3f32); // Same as background
+    let residual = Buffer2::new_filled(width, height, 0.0f32);
 
     let mut result = Buffer2::new_default(width, height);
-    let mut scratch = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
     matched_filter(
-        &pixels,
-        &background,
+        &residual,
         3.0,
         1.0,
         0.0,
         &mut MatchedFilterBuffers {
             output: &mut result,
-            subtraction_scratch: &mut scratch,
             temp: &mut temp,
         },
     );
 
-    // Result should be near zero
-    for v in &result {
-        assert!(v.abs() < 1e-5, "Flat field at background should give ~0");
-    }
+    // Every tap multiplies a zero: the sums are exactly zero, scaled or not.
+    assert!(result.iter().all(|&v| v == 0.0));
 }
 
 #[test]
@@ -328,17 +331,14 @@ fn matched_filter_detects_star() {
     pixels[(cx, cy)] = 0.5;
 
     let mut result = Buffer2::new_default(width, height);
-    let mut scratch = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
     matched_filter(
-        &pixels,
-        &background,
+        &less(&pixels, &background),
         3.0,
         1.0,
         0.0,
         &mut MatchedFilterBuffers {
             output: &mut result,
-            subtraction_scratch: &mut scratch,
             temp: &mut temp,
         },
     );
@@ -380,17 +380,14 @@ fn matched_filter_boosts_snr() {
 
     let fwhm = sigma_to_fwhm(sigma);
     let mut result = Buffer2::new_default(width, height);
-    let mut scratch = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
     matched_filter(
-        &pixels,
-        &background,
+        &less(&pixels, &background),
         fwhm,
         1.0,
         0.0,
         &mut MatchedFilterBuffers {
             output: &mut result,
-            subtraction_scratch: &mut scratch,
             temp: &mut temp,
         },
     );
@@ -422,17 +419,14 @@ fn matched_filter_preserves_negative_residuals() {
     let pixels = Buffer2::new_filled(width, height, 0.3f32); // Below background
 
     let mut result = Buffer2::new_default(width, height);
-    let mut scratch = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
     matched_filter(
-        &pixels,
-        &background,
+        &less(&pixels, &background),
         2.0,
         1.0,
         0.0,
         &mut MatchedFilterBuffers {
             output: &mut result,
-            subtraction_scratch: &mut scratch,
             temp: &mut temp,
         },
     );
@@ -466,19 +460,16 @@ fn matched_filter_noise_normalization() {
     let background = Buffer2::new_filled(width, height, bg_level);
 
     let mut result = Buffer2::new_default(width, height);
-    let mut scratch = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
 
     for axis_ratio in [1.0, 0.7] {
         matched_filter(
-            &pixels,
-            &background,
+            &less(&pixels, &background),
             4.0,
             axis_ratio,
             0.5,
             &mut MatchedFilterBuffers {
                 output: &mut result,
-                subtraction_scratch: &mut scratch,
                 temp: &mut temp,
             },
         );
@@ -511,31 +502,37 @@ fn matched_filter_noise_normalization() {
 }
 
 #[test]
-fn separable_vs_direct_equivalence() {
-    // For small images, compare separable to direct implementation
-    let width = 16;
-    let height = 16;
-    let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
+fn separable_matches_outer_product_2d() {
+    // The separable passes against one 2D pass with the outer-product kernel, both mirroring per
+    // axis: equal algebraically. On 16×16 the σ = 1.5 kernel fits (radius 5); on 8×8 the σ = 3
+    // kernel (radius 9) is wider than the image, the case that once took a separate direct path.
+    // A 2D tap sum adds n² products of values ≤ 1 against the separable 2n, so the two agree to
+    // n²·ε of f32.
+    for (side, sigma) in [(16, 1.5f32), (8, 3.0)] {
+        let mut pixels = Buffer2::new_filled(side, side, 0.0f32);
+        for (i, p) in pixels.iter_mut().enumerate() {
+            *p = ((i * 7 + 3) % 100) as f32 / 100.0;
+        }
 
-    // Random-ish pattern
-    for (i, p) in pixels.iter_mut().enumerate() {
-        *p = ((i * 7 + 3) % 100) as f32 / 100.0;
-    }
+        let mut result_sep = Buffer2::new_default(side, side);
+        let mut result_2d = Buffer2::new_default(side, side);
+        let mut temp = Buffer2::new_default(side, side);
+        gaussian_convolve(&pixels, sigma, &mut result_sep, &mut temp);
+        let kernel = gaussian_kernel_1d(sigma);
+        let size = kernel.len();
+        let weights = kernel
+            .iter()
+            .flat_map(|&ky| kernel.iter().map(move |&kx| ky * kx))
+            .collect();
+        convolve_2d(&pixels, &GaussianKernel2d { weights, size }, &mut result_2d);
 
-    let sigma = 1.5;
-
-    let mut result_sep = Buffer2::new_default(width, height);
-    let mut result_direct = Buffer2::new_default(width, height);
-    let mut temp = Buffer2::new_default(width, height);
-    gaussian_convolve(&pixels, sigma, &mut result_sep, &mut temp);
-    let kernel = gaussian_kernel_1d(sigma);
-    gaussian_convolve_2d_direct(&pixels, &kernel, &mut result_direct);
-
-    for (i, (&a, &b)) in result_sep.iter().zip(result_direct.iter()).enumerate() {
-        assert!(
-            (a - b).abs() < 1e-5,
-            "Separable and direct should match at {i}: {a} vs {b}"
-        );
+        let tolerance = (size * size) as f32 * f32::EPSILON;
+        for (i, (&a, &b)) in result_sep.iter().zip(result_2d.iter()).enumerate() {
+            assert!(
+                (a - b).abs() < tolerance,
+                "{side}x{side}, σ = {sigma}: separable and 2D differ at {i}: {a} vs {b}"
+            );
+        }
     }
 }
 
@@ -616,8 +613,7 @@ fn elliptical_convolve_uniform_image() {
     let pixels = Buffer2::new_filled(width, height, 0.5f32);
 
     let mut result = Buffer2::new_default(width, height);
-    let mut temp = Buffer2::new_default(width, height);
-    elliptical_gaussian_convolve(&pixels, 2.0, 0.5, 0.5, &mut result, &mut temp);
+    elliptical_gaussian_convolve(&pixels, 2.0, 0.5, 0.5, &mut result);
 
     for v in &result {
         assert!(
@@ -635,8 +631,7 @@ fn elliptical_convolve_preserves_flux() {
     pixels[(32, 32)] = 1.0;
 
     let mut result = Buffer2::new_default(width, height);
-    let mut temp = Buffer2::new_default(width, height);
-    elliptical_gaussian_convolve(&pixels, 2.0, 0.5, 0.3, &mut result, &mut temp);
+    elliptical_gaussian_convolve(&pixels, 2.0, 0.5, 0.3, &mut result);
 
     let input_sum: f32 = pixels.iter().sum();
     let output_sum: f32 = result.iter().sum();
@@ -657,8 +652,7 @@ fn elliptical_convolve_spreads_point_source() {
     pixels[(cx, cy)] = 1.0;
 
     let mut result = Buffer2::new_default(width, height);
-    let mut temp = Buffer2::new_default(width, height);
-    elliptical_gaussian_convolve(&pixels, 2.0, 0.5, 0.0, &mut result, &mut temp);
+    elliptical_gaussian_convolve(&pixels, 2.0, 0.5, 0.0, &mut result);
 
     // Peak should be reduced
     let peak = result.row(cy)[cx];
@@ -686,7 +680,7 @@ fn elliptical_convolve_axis_ratio_1_matches_circular() {
     let mut temp = Buffer2::new_default(width, height);
 
     gaussian_convolve(&pixels, sigma, &mut result_circular, &mut temp);
-    elliptical_gaussian_convolve(&pixels, sigma, 1.0, 0.0, &mut result_elliptical, &mut temp);
+    elliptical_gaussian_convolve(&pixels, sigma, 1.0, 0.0, &mut result_elliptical);
 
     for (i, (&a, &b)) in result_circular
         .iter()
@@ -711,10 +705,9 @@ fn elliptical_convolve_rotation_invariance() {
 
     let mut result_0 = Buffer2::new_default(width, height);
     let mut result_90 = Buffer2::new_default(width, height);
-    let mut temp = Buffer2::new_default(width, height);
 
-    elliptical_gaussian_convolve(&pixels, 2.0, 0.5, 0.0, &mut result_0, &mut temp);
-    elliptical_gaussian_convolve(&pixels, 2.0, 0.5, FRAC_PI_2, &mut result_90, &mut temp);
+    elliptical_gaussian_convolve(&pixels, 2.0, 0.5, 0.0, &mut result_0);
+    elliptical_gaussian_convolve(&pixels, 2.0, 0.5, FRAC_PI_2, &mut result_90);
 
     let sum_0: f32 = result_0.iter().sum();
     let sum_90: f32 = result_90.iter().sum();
@@ -754,8 +747,7 @@ fn elliptical_convolve_various_axis_ratios() {
     let mut peaks = Vec::new();
     for axis_ratio in [1.0, 0.8, 0.6, 0.4, 0.2] {
         let mut result = Buffer2::new_default(width, height);
-        let mut temp = Buffer2::new_default(width, height);
-        elliptical_gaussian_convolve(&pixels, 2.0, axis_ratio, 0.0, &mut result, &mut temp);
+        elliptical_gaussian_convolve(&pixels, 2.0, axis_ratio, 0.0, &mut result);
 
         let sum: f32 = result.iter().sum();
         assert!(

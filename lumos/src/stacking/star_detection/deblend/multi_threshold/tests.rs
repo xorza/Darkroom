@@ -1,9 +1,12 @@
 //! Tests for multi-threshold deblending.
 
 use crate::stacking::star_detection::deblend::internals::{
-    TestComponent, deblend_multi_threshold_test, make_test_component,
+    TestComponent, deblend_multi_threshold_floored, deblend_multi_threshold_test,
+    make_test_component,
 };
 use crate::stacking::star_detection::deblend::multi_threshold::*;
+use crate::stacking::star_detection::labeling::LabelMap;
+use crate::stacking::star_detection::labeling::component_data::ComponentData;
 use crate::testing::prelude::*;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use std::collections::HashSet;
@@ -32,7 +35,8 @@ fn single_star_no_deblending() {
             StarProfile::Gaussian { sigma: 3.0 },
         )],
     );
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
+    let result =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
 
     assert_eq!(result.len(), 1, "Single star should produce one object");
     assert!((result[0].peak.x as i32 - 50).abs() <= 1);
@@ -61,7 +65,8 @@ fn two_separated_stars_deblend() {
         ],
     );
 
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
+    let result =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
 
     assert_eq!(
         result.len(),
@@ -105,11 +110,11 @@ fn late_gaussian_split_uses_full_threshold_ladder() {
     );
 
     let threshold_count = 32;
-    let low = data
-        .iter_pixels(&pixels, &labels)
+    let low = Component::new(&data, &pixels, &labels)
+        .pixels()
         .map(|pixel| pixel.value)
         .fold(f32::MAX, f32::min);
-    let high = data.find_peak(&pixels, &labels).value;
+    let high = Component::new(&data, &pixels, &labels).peak().value;
     let low = low.max(high * 1e-6).max(f32::MIN_POSITIVE);
     let ratio = (high / low).max(1.0);
     let saddle = pixels[(50, 50)];
@@ -125,7 +130,12 @@ fn late_gaussian_split_uses_full_threshold_ladder() {
         "fixture must stay connected through the old four-level early-exit window, split at {split_level}"
     );
 
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, threshold_count, 3, 0.005);
+    let result = deblend_multi_threshold_test(
+        &Component::new(&data, &pixels, &labels),
+        threshold_count,
+        3,
+        0.005,
+    );
     let mut peaks: Vec<_> = result.iter().map(|region| region.peak.x).collect();
     peaks.sort_unstable();
 
@@ -158,7 +168,8 @@ fn faint_secondary_below_contrast() {
         ],
     );
 
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.01);
+    let result =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.01);
 
     assert_eq!(
         result.len(),
@@ -216,24 +227,10 @@ fn close_peaks_merge() {
         ],
     );
 
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 5, 0.005);
+    let result =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 5, 0.005);
 
     assert_eq!(result.len(), 1, "Close peaks should not be deblended");
-}
-
-#[test]
-fn empty_component() {
-    let pixels = Buffer2::new_filled(10, 10, 0.0f32);
-    let labels_buf = Buffer2::new_filled(10, 10, 0u32);
-    let labels = LabelMap::from_raw(labels_buf, 0);
-    let data = ComponentData {
-        bbox: URect::default(),
-        label: 1,
-        area: 0,
-    };
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
-
-    assert!(result.is_empty());
 }
 
 #[test]
@@ -258,7 +255,7 @@ fn deblend_disabled_with_high_contrast() {
         ],
     );
 
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 1.0);
+    let result = deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 1.0);
 
     assert_eq!(
         result.len(),
@@ -294,7 +291,8 @@ fn three_stars_deblend() {
         ],
     );
 
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
+    let result =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
 
     assert_eq!(
         result.len(),
@@ -336,7 +334,7 @@ fn hierarchical_deblend() {
         ],
     );
 
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.1);
+    let result = deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.1);
 
     assert!(
         result.len() >= 2,
@@ -364,7 +362,7 @@ fn deblend_contrast_bar_is_root_flux_not_parent() {
                 value: flux,
             },
             flux,
-            children: children.iter().copied().collect(),
+            children: children.iter().map(|&c| c as u32).collect(),
         }
     }
 
@@ -376,7 +374,8 @@ fn deblend_contrast_bar_is_root_flux_not_parent() {
         node(12.0, &[]),
     ];
 
-    let mut leaves: Vec<usize> = find_significant_branches(&tree, 0.2).to_vec();
+    let mut leaves = Vec::new();
+    find_significant_branches(&tree, 0.2, &mut leaves);
     leaves.sort_unstable();
     assert_eq!(
         leaves,
@@ -407,7 +406,8 @@ fn equal_brightness_stars() {
         ],
     );
 
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
+    let result =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
 
     assert_eq!(
         result.len(),
@@ -445,9 +445,11 @@ fn contrast_at_boundary() {
         ],
     );
 
-    let result_pass = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.09);
+    let result_pass =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.09);
 
-    let result_fail = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.15);
+    let result_fail =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.15);
 
     assert!(
         result_pass.len() >= result_fail.len(),
@@ -477,7 +479,8 @@ fn pixel_assignment_conservation() {
         ],
     );
 
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
+    let result =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
 
     let total_area: usize = result.iter().map(|o| o.area).sum();
     assert_eq!(
@@ -508,7 +511,8 @@ fn vertical_star_pair() {
         ],
     );
 
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
+    let result =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
 
     assert_eq!(result.len(), 2, "Vertically separated stars should deblend");
 
@@ -540,7 +544,8 @@ fn diagonal_star_pair() {
         ],
     );
 
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
+    let result =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
 
     assert_eq!(result.len(), 2, "Diagonally separated stars should deblend");
 }
@@ -550,20 +555,19 @@ fn create_child_nodes_diagonal_uses_euclidean_not_chebyshev() {
     // dx=dy=3, min_separation=4: Chebyshev distance is max(3,3)=3 (< 4, "too
     // close"), but squared Euclidean is 3²+3²=18 (>= 4²=16, "well separated").
     // create_child_nodes must agree with the squared-Euclidean metric that
-    // local_maxima::add_or_replace_peak and the shared nearest_peak_index/
-    // assign_to_nearest_peak Voronoi step use everywhere else in this module —
+    // local_maxima::find_local_maxima and the shared nearest_peak_index /
+    // Component::assign_to_nearest Voronoi step use everywhere else in this module —
     // not Chebyshev, which would wrongly merge these two.
-    let mut tree: DeblendTree = SmallVec::new();
-    tree.push(DeblendNode {
+    let mut tree = vec![DeblendNode {
         peak: Pixel {
             pos: Vec2us::new(50, 50),
             value: 1.0,
         },
         flux: 10.0,
-        children: SmallVec::new(),
-    });
+        children: ArrayVec::new(),
+    }];
     let parent_idx = 0;
-    let mut pixel_to_node = NodeGrid::empty();
+    let mut pixel_to_node = NodeGrid::default();
 
     let child_regions = region_set(&[
         &[Pixel {
@@ -576,7 +580,14 @@ fn create_child_nodes_diagonal_uses_euclidean_not_chebyshev() {
         }],
     ]);
 
-    create_child_nodes(&mut tree, &mut pixel_to_node, parent_idx, &child_regions, 4);
+    create_child_nodes(
+        &mut tree,
+        &mut pixel_to_node,
+        parent_idx,
+        &child_regions,
+        &mut Vec::new(),
+        4,
+    );
 
     assert_eq!(
         tree[parent_idx].children.len(),
@@ -607,8 +618,10 @@ fn n_thresholds_effect() {
             ),
         ],
     );
-    let result_few = deblend_multi_threshold_test(&data, &pixels, &labels, 4, 3, 0.005);
-    let result_many = deblend_multi_threshold_test(&data, &pixels, &labels, 64, 3, 0.005);
+    let result_few =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 4, 3, 0.005);
+    let result_many =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 64, 3, 0.005);
 
     assert!(
         result_many.len() >= result_few.len(),
@@ -631,7 +644,8 @@ fn single_pixel_component() {
         area: 1,
     };
 
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
+    let result =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
 
     assert_eq!(result.len(), 1, "Single pixel should produce one object");
     assert_eq!(result[0].area, 1);
@@ -665,7 +679,8 @@ fn flat_profile_no_deblend() {
         area,
     };
 
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
+    let result =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
 
     assert_eq!(
         result.len(),
@@ -675,13 +690,12 @@ fn flat_profile_no_deblend() {
 }
 
 #[test]
-fn zero_floor_pixel_does_not_prevent_deblending() {
-    // A component whose minimum pixel value is exactly 0.0 (e.g. a bounding box
-    // padded well past both stars' Gaussian falloff) used to send the exponential
-    // threshold ladder's `ratio = high/low` to infinity, producing NaN thresholds
-    // at every level above 0 (`>= NaN` is always false) and silently preventing
-    // any split. Regression test: two well-separated stars in such a component
-    // must still deblend into two objects.
+fn zero_valued_pixels_below_the_floor_do_not_prevent_deblending() {
+    // A component whose residual is exactly 0.0 over most of it (a bounding box padded well past
+    // both stars' Gaussian falloff), as a matched-filter detection's wings can be. The ladder
+    // starts at the detection threshold, not at the component's faintest pixel, so those pixels
+    // sit below every level, join no branch, and go to their nearest peak at the end: the two
+    // well-separated stars must still deblend into two objects that share the whole area.
     let width = 100;
     let height = 100;
     let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
@@ -732,8 +746,8 @@ fn zero_floor_pixel_does_not_prevent_deblending() {
     };
 
     // Sanity-check the setup actually reaches the reported bug's precondition.
-    let min_value = data
-        .iter_pixels(&pixels, &labels)
+    let min_value = Component::new(&data, &pixels, &labels)
+        .pixels()
         .map(|p| p.value)
         .fold(f32::MAX, f32::min);
     assert_eq!(
@@ -741,13 +755,20 @@ fn zero_floor_pixel_does_not_prevent_deblending() {
         "test setup must have an exact-zero floor pixel"
     );
 
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
+    let result = deblend_multi_threshold_floored(
+        &Component::new(&data, &pixels, &labels),
+        0.01,
+        32,
+        3,
+        0.005,
+    );
 
     assert_eq!(
         result.len(),
         2,
         "Two well-separated stars in a zero-floored component should still deblend"
     );
+    assert_eq!(result.iter().map(|r| r.area).sum::<usize>(), data.area);
 }
 
 #[test]
@@ -769,7 +790,8 @@ fn many_stars_max_peaks_limit() {
         data,
     } = make_test_component(Size2us::new(180, 100), &stars);
 
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
+    let result =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
 
     // Should not exceed MAX_PEAKS
     assert!(
@@ -808,7 +830,8 @@ fn large_tree_over_64_nodes() {
         data,
     } = make_test_component(Size2us::new(150, 150), &stars);
 
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 64, 3, 0.005);
+    let result =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 64, 3, 0.005);
 
     // Should find multiple objects
     assert!(result.len() >= 2, "Should find multiple objects");
@@ -842,7 +865,8 @@ fn very_large_tree_heap_fallback() {
         data,
     } = make_test_component(Size2us::new(150, 150), &stars);
 
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 128, 2, 0.001);
+    let result =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 128, 2, 0.001);
 
     // Should find multiple objects (exact count depends on merging)
     assert!(!result.is_empty(), "Should find at least one object");
@@ -875,9 +899,12 @@ fn buffer_reuse_consistency() {
         ],
     );
 
-    let result1 = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
-    let result2 = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
-    let result3 = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
+    let result1 =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
+    let result2 =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
+    let result3 =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
 
     // All runs should produce identical results
     assert_eq!(result1.len(), result2.len());
@@ -915,7 +942,8 @@ fn connected_regions_complex_shape() {
         ],
     );
 
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
+    let result =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
 
     // Should find both peaks
     assert_eq!(result.len(), 2, "Should find both peaks");
@@ -959,7 +987,8 @@ fn bbox_contains_all_peaks() {
         ],
     );
 
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
+    let result =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
 
     for candidate in &result {
         assert!(
@@ -994,7 +1023,8 @@ fn peak_values_match_image() {
         ],
     );
 
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
+    let result =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
 
     for candidate in &result {
         let actual_value = pixels[(candidate.peak.x, candidate.peak.y)];
@@ -1030,7 +1060,8 @@ fn single_threshold_level() {
         ],
     );
 
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 1, 3, 0.005);
+    let result =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 1, 3, 0.005);
 
     // Should still produce valid output
     assert!(!result.is_empty(), "Should produce at least one object");
@@ -1038,29 +1069,6 @@ fn single_threshold_level() {
     // Area conservation
     let total_area: usize = result.iter().map(|o| o.area).sum();
     assert_eq!(total_area, data.area, "Area should be conserved");
-}
-
-#[test]
-fn zero_threshold_level() {
-    // Test with n_thresholds = 0 (edge case - should still work)
-    let TestComponent {
-        pixels,
-        labels,
-        data,
-    } = make_test_component(
-        Size2us::new(100, 100),
-        &[SyntheticStar::new(
-            Vec2::new(50.0, 50.0),
-            1.0,
-            StarProfile::Gaussian { sigma: 2.5 },
-        )],
-    );
-
-    let result = deblend_multi_threshold_test(&data, &pixels, &labels, 0, 3, 0.005);
-
-    // Should produce single object
-    assert_eq!(result.len(), 1, "Should produce one object");
-    assert_eq!(result[0].area, data.area);
 }
 
 #[test]
@@ -1084,8 +1092,8 @@ fn pixel_grid_connected_regions() {
 
     let mut regions = RegionSet::default();
 
-    let mut scratch = RegionScratch::new();
-    find_connected_regions_grid(&pixels, &mut regions, &mut scratch, NO_REGION_LIMIT);
+    let mut scratch = RegionScratch::default();
+    find_connected_regions_grid(&pixels, Connectivity::Eight, &mut regions, &mut scratch);
 
     // All 3 pixels should be in one connected region (they're adjacent)
     assert_eq!(regions.len(), 1);
@@ -1113,8 +1121,8 @@ fn pixel_grid_reuse() {
             value: 2.0,
         },
     ];
-    let mut scratch = RegionScratch::new();
-    find_connected_regions_grid(&pixels1, &mut regions, &mut scratch, NO_REGION_LIMIT);
+    let mut scratch = RegionScratch::default();
+    find_connected_regions_grid(&pixels1, Connectivity::Eight, &mut regions, &mut scratch);
     assert_eq!(regions.len(), 2);
 
     // Reuse with different pixels — grid state should be properly reset
@@ -1128,7 +1136,7 @@ fn pixel_grid_reuse() {
             value: 4.0,
         },
     ];
-    find_connected_regions_grid(&pixels2, &mut regions, &mut scratch, NO_REGION_LIMIT);
+    find_connected_regions_grid(&pixels2, Connectivity::Eight, &mut regions, &mut scratch);
 
     // Two separate pixels should form two regions (not adjacent)
     assert_eq!(regions.len(), 2);
@@ -1143,8 +1151,8 @@ fn pixel_grid_single_pixel() {
 
     let mut regions = RegionSet::default();
 
-    let mut scratch = RegionScratch::new();
-    find_connected_regions_grid(&pixels, &mut regions, &mut scratch, NO_REGION_LIMIT);
+    let mut scratch = RegionScratch::default();
+    find_connected_regions_grid(&pixels, Connectivity::Eight, &mut regions, &mut scratch);
 
     assert_eq!(regions.len(), 1);
     assert_eq!(regions[0].len(), 1);
@@ -1153,7 +1161,7 @@ fn pixel_grid_single_pixel() {
 
 #[test]
 fn node_grid_empty() {
-    let grid = NodeGrid::empty();
+    let grid = NodeGrid::default();
     assert_eq!(grid.size, Size2us::default());
     assert!(grid.get(Vec2us::new(0, 0)).is_none());
 }
@@ -1175,7 +1183,7 @@ fn node_grid_basic_operations() {
         },
     ];
 
-    let mut grid = NodeGrid::empty();
+    let mut grid = NodeGrid::default();
     grid.reset_with_pixels(&pixels);
 
     // Initially all positions should be unassigned
@@ -1203,7 +1211,7 @@ fn node_grid_overwrite() {
         value: 1.0,
     }];
 
-    let mut grid = NodeGrid::empty();
+    let mut grid = NodeGrid::default();
     grid.reset_with_pixels(&pixels);
 
     grid.set(Vec2us::new(5, 5), 10);
@@ -1216,7 +1224,7 @@ fn node_grid_overwrite() {
 
 #[test]
 fn node_grid_reuse() {
-    let mut grid = NodeGrid::empty();
+    let mut grid = NodeGrid::default();
 
     // First use
     let pixels1 = vec![Pixel {
@@ -1248,7 +1256,7 @@ fn node_grid_large_indices() {
         value: 1.0,
     }];
 
-    let mut grid = NodeGrid::empty();
+    let mut grid = NodeGrid::default();
     grid.reset_with_pixels(&pixels);
 
     // Test with large node index (but within u32 range)
@@ -1270,7 +1278,7 @@ fn node_grid_boundary() {
         },
     ];
 
-    let mut grid = NodeGrid::empty();
+    let mut grid = NodeGrid::default();
     grid.reset_with_pixels(&pixels);
 
     grid.set(Vec2us::new(0, 0), 1);
@@ -1307,8 +1315,8 @@ fn find_connected_regions_grid_single_region() {
 
     let mut regions = RegionSet::default();
 
-    let mut scratch = RegionScratch::new();
-    find_connected_regions_grid(&pixels, &mut regions, &mut scratch, NO_REGION_LIMIT);
+    let mut scratch = RegionScratch::default();
+    find_connected_regions_grid(&pixels, Connectivity::Eight, &mut regions, &mut scratch);
 
     assert_eq!(regions.len(), 1, "Should find one connected region");
     assert_eq!(regions[0].len(), 4, "Region should contain all 4 pixels");
@@ -1340,8 +1348,8 @@ fn find_connected_regions_grid_two_regions() {
 
     let mut regions = RegionSet::default();
 
-    let mut scratch = RegionScratch::new();
-    find_connected_regions_grid(&pixels, &mut regions, &mut scratch, NO_REGION_LIMIT);
+    let mut scratch = RegionScratch::default();
+    find_connected_regions_grid(&pixels, Connectivity::Eight, &mut regions, &mut scratch);
 
     assert_eq!(regions.len(), 2, "Should find two separate regions");
     assert_eq!(
@@ -1367,8 +1375,8 @@ fn find_connected_regions_grid_diagonal_connectivity() {
 
     let mut regions = RegionSet::default();
 
-    let mut scratch = RegionScratch::new();
-    find_connected_regions_grid(&pixels, &mut regions, &mut scratch, NO_REGION_LIMIT);
+    let mut scratch = RegionScratch::default();
+    find_connected_regions_grid(&pixels, Connectivity::Eight, &mut regions, &mut scratch);
 
     assert_eq!(
         regions.len(),
@@ -1376,13 +1384,15 @@ fn find_connected_regions_grid_diagonal_connectivity() {
         "Diagonal neighbors should be connected (8-connectivity)"
     );
     assert_eq!(regions[0].len(), 2);
+
+    // Under 4-connectivity the same pair is two regions: the configured rule, not a fixed 8.
+    find_connected_regions_grid(&pixels, Connectivity::Four, &mut regions, &mut scratch);
+    assert_eq!(regions.len(), 2);
+    assert_eq!((regions[0].len(), regions[1].len()), (1, 1));
 }
 
 #[test]
 fn find_significant_branches_small_tree() {
-    // Test find_significant_branches with a small tree (stack allocation path)
-    use smallvec::SmallVec as SV;
-
     // Build a simple tree: root with 2 children
     let tree = vec![
         DeblendNode {
@@ -1391,7 +1401,7 @@ fn find_significant_branches_small_tree() {
                 value: 1.0,
             },
             flux: 100.0,
-            children: SV::from_slice(&[1, 2]),
+            children: [1, 2].into_iter().collect(),
         },
         DeblendNode {
             peak: Pixel {
@@ -1399,7 +1409,7 @@ fn find_significant_branches_small_tree() {
                 value: 0.8,
             },
             flux: 40.0,
-            children: SV::new(),
+            children: ArrayVec::new(),
         },
         DeblendNode {
             peak: Pixel {
@@ -1407,65 +1417,18 @@ fn find_significant_branches_small_tree() {
                 value: 0.7,
             },
             flux: 35.0,
-            children: SV::new(),
+            children: ArrayVec::new(),
         },
     ];
 
-    // With low contrast, both children should be returned as leaves
-    let leaves = find_significant_branches(&tree, 0.1);
-    assert_eq!(leaves.len(), 2);
-    assert!(leaves.contains(&1));
-    assert!(leaves.contains(&2));
+    // Bar 0.1·100 = 10: both children (40, 35) clear it, so each is its own leaf.
+    let mut leaves = Vec::new();
+    find_significant_branches(&tree, 0.1, &mut leaves);
+    assert_eq!(leaves, [1, 2]);
 
-    // With high contrast, children don't pass, root becomes leaf
-    let leaves = find_significant_branches(&tree, 0.9);
-    assert_eq!(leaves.len(), 1);
-    assert!(leaves.contains(&0));
-}
-
-#[test]
-fn find_significant_branches_heap_fallback() {
-    // Test find_significant_branches with a tree > MAX_TREE_SIZE (heap allocation path)
-    use smallvec::SmallVec as SV;
-
-    // Build a large tree with > 128 nodes
-    let mut tree = Vec::with_capacity(150);
-
-    // Root node with many children
-    let num_children = 140;
-    let child_indices: SV<[usize; 8]> = (1..=8.min(num_children)).collect();
-
-    tree.push(DeblendNode {
-        peak: Pixel {
-            pos: Vec2us::new(50, 50),
-            value: 1.0,
-        },
-        flux: 1000.0,
-        children: child_indices,
-    });
-
-    // Add many leaf nodes
-    for i in 1..=num_children {
-        tree.push(DeblendNode {
-            peak: Pixel {
-                pos: Vec2us::new(i, i),
-                value: 0.5,
-            },
-            flux: 10.0,
-            children: SV::new(),
-        });
-    }
-
-    assert!(
-        tree.len() > MAX_TREE_SIZE,
-        "Tree should exceed MAX_TREE_SIZE"
-    );
-
-    // Should use heap fallback but still work correctly
-    let leaves = find_significant_branches(&tree, 0.001);
-
-    // With very low contrast, children pass and become leaves
-    assert!(!leaves.is_empty());
+    // Bar 0.9·100 = 90: neither clears it, so the root stays one object.
+    find_significant_branches(&tree, 0.9, &mut leaves);
+    assert_eq!(leaves, [0]);
 }
 
 #[test]
@@ -1512,8 +1475,8 @@ fn visit_neighbors_grid_all_directions() {
 
     let mut regions = RegionSet::default();
 
-    let mut scratch = RegionScratch::new();
-    find_connected_regions_grid(&pixels, &mut regions, &mut scratch, NO_REGION_LIMIT);
+    let mut scratch = RegionScratch::default();
+    find_connected_regions_grid(&pixels, Connectivity::Eight, &mut regions, &mut scratch);
 
     assert_eq!(regions.len(), 1, "All pixels should be in one region");
     assert_eq!(regions[0].len(), 9, "All 9 pixels should be found");
@@ -1532,7 +1495,7 @@ fn pixel_grid_values_generation_isolation() {
             value: 42.0,
         })
         .collect();
-    let mut scratch = RegionScratch::new();
+    let mut scratch = RegionScratch::default();
     scratch.grid.reset_with_pixels(&pixels1);
 
     // Second population: small grid with only 2 pixels
@@ -1551,7 +1514,7 @@ fn pixel_grid_values_generation_isolation() {
     // BFS should only find the 2 pixels from the second population,
     // not the stale 100 pixels from the first.
     let mut regions = RegionSet::default();
-    find_connected_regions_grid(&pixels2, &mut regions, &mut scratch, NO_REGION_LIMIT);
+    find_connected_regions_grid(&pixels2, Connectivity::Eight, &mut regions, &mut scratch);
 
     assert_eq!(regions.len(), 1);
     assert_eq!(
@@ -1579,8 +1542,8 @@ fn pixel_grid_repeated_resets_same_positions() {
             },
         ];
 
-        let mut scratch = RegionScratch::new();
-        find_connected_regions_grid(&pixels, &mut regions, &mut scratch, NO_REGION_LIMIT);
+        let mut scratch = RegionScratch::default();
+        find_connected_regions_grid(&pixels, Connectivity::Eight, &mut regions, &mut scratch);
 
         assert_eq!(regions.len(), 1, "Round {round}: should find 1 region");
         assert_eq!(
@@ -1619,8 +1582,8 @@ fn connected_regions_pixels_at_coordinate_zero() {
 
     let mut regions = RegionSet::default();
 
-    let mut scratch = RegionScratch::new();
-    find_connected_regions_grid(&pixels, &mut regions, &mut scratch, NO_REGION_LIMIT);
+    let mut scratch = RegionScratch::default();
+    find_connected_regions_grid(&pixels, Connectivity::Eight, &mut regions, &mut scratch);
 
     assert_eq!(regions.len(), 1, "All 3 pixels should form one region");
     assert_eq!(regions[0].len(), 3);
@@ -1648,8 +1611,8 @@ fn connected_regions_two_groups_near_zero() {
 
     let mut regions = RegionSet::default();
 
-    let mut scratch = RegionScratch::new();
-    find_connected_regions_grid(&pixels, &mut regions, &mut scratch, NO_REGION_LIMIT);
+    let mut scratch = RegionScratch::default();
+    find_connected_regions_grid(&pixels, Connectivity::Eight, &mut regions, &mut scratch);
 
     assert_eq!(regions.len(), 2, "Should find 2 separate regions");
     assert_eq!(regions[0].len(), 1);
@@ -1676,47 +1639,13 @@ fn connected_regions_grid_basic() {
 
     let mut regions = RegionSet::default();
 
-    let mut scratch = RegionScratch::new();
-    find_connected_regions_grid(&pixels, &mut regions, &mut scratch, NO_REGION_LIMIT);
+    let mut scratch = RegionScratch::default();
+    find_connected_regions_grid(&pixels, Connectivity::Eight, &mut regions, &mut scratch);
 
     assert_eq!(regions.len(), 3, "Should find all 3 separate regions");
     for region in regions.iter() {
         assert_eq!(region.len(), 1);
     }
-}
-
-#[test]
-fn connected_regions_grid_capacity_limit() {
-    // Five separate pixels but a limit of 2 — should stop at 2
-    let pixels = vec![
-        Pixel {
-            pos: Vec2us::new(0, 0),
-            value: 1.0,
-        },
-        Pixel {
-            pos: Vec2us::new(10, 0),
-            value: 2.0,
-        },
-        Pixel {
-            pos: Vec2us::new(20, 0),
-            value: 3.0,
-        },
-        Pixel {
-            pos: Vec2us::new(30, 0),
-            value: 4.0,
-        },
-        Pixel {
-            pos: Vec2us::new(40, 0),
-            value: 5.0,
-        },
-    ];
-
-    let mut regions = RegionSet::default();
-
-    let mut scratch = RegionScratch::new();
-    find_connected_regions_grid(&pixels, &mut regions, &mut scratch, 2);
-
-    assert_eq!(regions.len(), 2, "Should stop at the region limit");
 }
 
 #[test]
@@ -1735,14 +1664,14 @@ fn connected_regions_grid_replaces_previous_contents() {
 
     let mut regions = RegionSet::default();
 
-    let mut scratch = RegionScratch::new();
-    find_connected_regions_grid(&pixels, &mut regions, &mut scratch, NO_REGION_LIMIT);
+    let mut scratch = RegionScratch::default();
+    find_connected_regions_grid(&pixels, Connectivity::Eight, &mut regions, &mut scratch);
     assert_eq!(regions.len(), 2);
     assert_eq!(regions.pixels.len(), 2, "one pixel per region");
 
     // Second call over the same input: two regions again, and the flat buffer holds two pixels
     // rather than four, which is what proves it was truncated and not appended to.
-    find_connected_regions_grid(&pixels, &mut regions, &mut scratch, NO_REGION_LIMIT);
+    find_connected_regions_grid(&pixels, Connectivity::Eight, &mut regions, &mut scratch);
     assert_eq!(regions.len(), 2);
     assert_eq!(
         regions.pixels.len(),
@@ -1764,7 +1693,7 @@ fn pixel_grid_generation_wrap_to_zero_guard() {
             value: 99.0,
         })
         .collect();
-    let mut scratch = RegionScratch::new();
+    let mut scratch = RegionScratch::default();
     scratch.grid.reset_with_pixels(&pixels_large);
 
     // Force generation counter to u32::MAX so next reset wraps
@@ -1790,7 +1719,12 @@ fn pixel_grid_generation_wrap_to_zero_guard() {
 
     // BFS should find exactly the 2 new pixels, not stale data
     let mut regions = RegionSet::default();
-    find_connected_regions_grid(&pixels_small, &mut regions, &mut scratch, NO_REGION_LIMIT);
+    find_connected_regions_grid(
+        &pixels_small,
+        Connectivity::Eight,
+        &mut regions,
+        &mut scratch,
+    );
 
     assert_eq!(regions.len(), 1);
     assert_eq!(

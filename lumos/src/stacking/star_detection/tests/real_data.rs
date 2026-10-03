@@ -16,7 +16,7 @@ use crate::stacking::registration::transform::TransformModel;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::config::measurement_config::{CentroidMethod, NoiseModel};
 use crate::stacking::star_detection::detector::StarDetector;
-use crate::stacking::star_detection::threshold_mask::{ThresholdParams, create_threshold_mask};
+use crate::stacking::star_detection::threshold_mask::ThresholdParams;
 use crate::testing::init_tracing;
 use crate::testing::real_data::{LightPair, dataset_path, first_and_last_lights};
 use glam::Vec2;
@@ -141,7 +141,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     use crate::stacking::star_detection::labeling::LabelMap;
     use crate::stacking::star_detection::mask_dilation::dilate_mask;
     use crate::stacking::star_detection::resources::DetectionResources;
-    use crate::stacking::star_detection::threshold_mask::create_threshold_mask_filtered;
+    use crate::stacking::star_detection::threshold_mask::create_residual_threshold_mask;
     use crate::testing::visual;
     use imaginarium::Buffer2;
 
@@ -201,65 +201,59 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     );
     println!("Saved: 04_subtracted");
 
-    // 5. FWHM estimation
-    let fwhm_source = fwhm::estimate(&grayscale, &background, &config, &mut pool);
+    // 5. FWHM estimation, on the residual with nothing marked saturated
+    let residual = background.residual_of(&grayscale);
+    let sky = background.sky_noise();
+    let mut saturation = pool.acquire_bit();
+    saturation.fill(false);
+    let fwhm_source = fwhm::estimate(&residual, &sky, &saturation, &config, &mut pool);
+    pool.release_bit(saturation);
     let fwhm = fwhm_source.value();
     println!("Estimated FWHM: {fwhm:?} ({fwhm_source:?})");
 
     // 6. Matched filter (if FWHM available)
-    let filtered_pixels: Option<Vec<f32>> = if let Some(fwhm_val) = fwhm {
-        let mut scratch = pool.acquire_f32();
-        let mut conv_scratch = pool.acquire_f32();
-        let mut conv_temp = pool.acquire_f32();
+    let filtered: Option<Buffer2<f32>> = fwhm.map(|fwhm_val| {
+        let mut output = pool.acquire_f32();
+        let mut temp = pool.acquire_f32();
         matched_filter(
-            &grayscale,
-            &background.background,
+            &residual,
             fwhm_val,
             config.detection.psf_axis_ratio,
             config.detection.psf_angle,
             &mut MatchedFilterBuffers {
-                output: &mut scratch,
-                subtraction_scratch: &mut conv_scratch,
-                temp: &mut conv_temp,
+                output: &mut output,
+                temp: &mut temp,
             },
         );
-        pool.release_f32(conv_temp);
-        pool.release_f32(conv_scratch);
-
-        let pixels = scratch.pixels().to_vec();
+        pool.release_f32(temp);
         visual::save(
-            &pixels,
+            output.pixels(),
             Size2us::new(width, height),
             &out("05_matched_filter"),
             visual::ToneMap::AutoRange,
         );
         println!("Saved: 05_matched_filter");
-
-        pool.release_f32(scratch);
-        Some(pixels)
-    } else {
+        output
+    });
+    if filtered.is_none() {
         println!("No FWHM — matched filter skipped");
-        None
-    };
+    }
 
     // 7. Threshold mask
     let mut mask = pool.acquire_bit();
     mask.fill(false);
     let threshold = ThresholdParams {
         sigma: config.detection.sigma_threshold,
-        min_noise: background.noise_floor,
+        min_noise: sky.floor,
     };
-    if let Some(ref filtered) = filtered_pixels {
-        let filtered_buf = Buffer2::new(width, height, filtered.clone());
-        create_threshold_mask_filtered(&filtered_buf, &background.noise, threshold, &mut mask);
-    } else {
-        create_threshold_mask(
-            &grayscale,
-            &background.background,
-            &background.noise,
-            threshold,
-            &mut mask,
-        );
+    create_residual_threshold_mask(
+        filtered.as_ref().unwrap_or(&residual),
+        &sky.noise,
+        threshold,
+        &mut mask,
+    );
+    if let Some(filtered) = filtered {
+        pool.release_f32(filtered);
     }
     let pixels_above = mask.count_ones();
     visual::save_mask(&mask, &out("06_threshold_mask"));
@@ -267,8 +261,10 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
 
     // 8. Dilated mask
     let mut dilated = pool.acquire_bit();
-    dilated.fill(false);
-    dilate_mask(&mask, 1, &mut dilated);
+    dilated.copy_from(&mask);
+    let mut scratch = pool.acquire_bit();
+    dilate_mask(&mut dilated, 1, &mut scratch);
+    pool.release_bit(scratch);
     let dilated_count = dilated.count_ones();
     visual::save_mask(&dilated, &out("07_dilated_mask"));
     println!("Saved: 07_dilated_mask ({dilated_count} pixels)");

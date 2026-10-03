@@ -275,13 +275,15 @@ fn scratch_reserve_streams_a_set_whose_frames_alone_would_fit() {
 #[test]
 fn streaming_concurrency_uses_the_selected_demosaic_peak() {
     let plane_bytes = plane(100);
+    // Mono's peak is detection's 7 planes, which the budget fits eight times; Bayer's is the
+    // warp's 3 + 5 = 8 planes, which it fits seven times.
     let expected = [
         (
             mono(plane_bytes),
             MemoryPlan {
                 fits_in_ram: false,
-                decode_concurrency: 7,
-                warp_concurrency: 7,
+                decode_concurrency: 8,
+                warp_concurrency: 8,
             },
         ),
         (
@@ -326,7 +328,8 @@ fn ram_tier_respects_algorithm_specific_concurrency_boundaries() {
     let (frames, threads) = (5, 4);
 
     // 570 MiB usable is exactly the RAM-tier boundary for the two three-channel demosaics:
-    // 5 warped planes × 5 frames + 8 working planes × 4 workers = 57 planes.
+    // 5 warped planes × 5 frames + 8 working planes × 4 workers = 57 planes, the working figure
+    // being the warp's 3 + 5 planes, above detection's 7.
     let boundary = available_for_usable(570 * MIB);
 
     // All three fit there, but the demosaic transients buy different decode fan-outs from the
@@ -346,7 +349,8 @@ fn ram_tier_respects_algorithm_specific_concurrency_boundaries() {
         assert!(plan.fits_in_ram);
     }
 
-    // A MiB under the boundary and the three-channel pair spills; mono's 47 planes still fit.
+    // A MiB under the boundary and the three-channel pair spills; mono's 43 planes (3 × 5 warped
+    // plus detection's 7 × 4) still fit.
     let under = available_for_usable(569 * MIB);
     for demosaic in [bayer(plane_bytes), xtrans(plane_bytes)] {
         assert!(!plan(plane_bytes, demosaic, frames, threads, under).fits_in_ram);

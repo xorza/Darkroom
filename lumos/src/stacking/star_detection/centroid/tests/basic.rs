@@ -22,17 +22,19 @@ fn centroid_accuracy() {
         },
     );
     let config = Config::default();
-    let candidates = detect_stars_test(&pixels, &bg, &config.detection);
+    let candidates =
+        detect_stars_test(&bg.residual_of(&pixels), &bg.sky_noise(), &config.detection);
 
     assert_eq!(candidates.len(), 1);
 
     let star = measure_star(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
+        &unsaturated(&pixels),
         &candidates[0],
         &config.measurement,
-        config.fwhm.expected,
-        &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
+        config.fwhm.mode.unwrap().seed(),
+        &StampGrid::new(compute_stamp_radius(config.fwhm.mode.unwrap().seed())),
     )
     .expect("Should compute centroid");
 
@@ -91,11 +93,15 @@ fn subpixel_result_is_independent_of_distance_from_the_origin() {
     let bg_near = background_map::uniform(near, 0.1, 0.01);
     let bg_far = background_map::uniform(far, 0.1, 0.01);
 
-    let near_pos = refine_centroid(&near_pixels, &bg_near, true_pos, radius, TEST_EXPECTED_FWHM)
-        .expect("near refine should succeed");
+    let near_pos = refine_centroid(
+        &bg_near.residual_of(&near_pixels),
+        true_pos,
+        radius,
+        TEST_EXPECTED_FWHM,
+    )
+    .expect("near refine should succeed");
     let far_pos = refine_centroid(
-        &far_pixels,
-        &bg_far,
+        &bg_far.residual_of(&far_pixels),
         true_pos + DVec2::new(SHIFT as f64, 0.0),
         radius,
         TEST_EXPECTED_FWHM,
@@ -145,17 +151,19 @@ fn fwhm_estimation() {
         },
         ..Default::default()
     };
-    let candidates = detect_stars_test(&pixels, &bg, &config.detection);
+    let candidates =
+        detect_stars_test(&bg.residual_of(&pixels), &bg.sky_noise(), &config.detection);
 
     assert_eq!(candidates.len(), 1);
 
     let star = measure_star(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
+        &unsaturated(&pixels),
         &candidates[0],
         &config.measurement,
-        config.fwhm.expected,
-        &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
+        config.fwhm.mode.unwrap().seed(),
+        &StampGrid::new(compute_stamp_radius(config.fwhm.mode.unwrap().seed())),
     )
     .expect("Should compute centroid");
 
@@ -186,15 +194,17 @@ fn circular_star_eccentricity() {
         },
     );
     let config = Config::default();
-    let candidates = detect_stars_test(&pixels, &bg, &config.detection);
+    let candidates =
+        detect_stars_test(&bg.residual_of(&pixels), &bg.sky_noise(), &config.detection);
 
     let star = measure_star(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
+        &unsaturated(&pixels),
         &candidates[0],
         &config.measurement,
-        config.fwhm.expected,
-        &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
+        config.fwhm.mode.unwrap().seed(),
+        &StampGrid::new(compute_stamp_radius(config.fwhm.mode.unwrap().seed())),
     )
     .expect("Should compute centroid");
 
@@ -222,15 +232,17 @@ fn snr_and_flux_values() {
         },
     );
     let config = Config::default();
-    let candidates = detect_stars_test(&pixels, &bg, &config.detection);
+    let candidates =
+        detect_stars_test(&bg.residual_of(&pixels), &bg.sky_noise(), &config.detection);
 
     let star = measure_star(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
+        &unsaturated(&pixels),
         &candidates[0],
         &config.measurement,
-        config.fwhm.expected,
-        &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
+        config.fwhm.mode.unwrap().seed(),
+        &StampGrid::new(compute_stamp_radius(config.fwhm.mode.unwrap().seed())),
     )
     .expect("Should compute centroid");
 

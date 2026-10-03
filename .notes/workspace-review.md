@@ -15,24 +15,6 @@ Groups are named after their shared root cause and ordered by severity, then ben
 
 # High — wrong results, data loss, crashes on user data
 
-## Deblending runs on sky-included pixel values
-Severity: High — prominence, the threshold ladder and the contrast test change with the sky level, not with the source.
-
-- [ ] `lumos/src/stacking/star_detection/detector/stages/detect/mod.rs` `DetectResult::from_image` — `extract_and_filter_candidates(pixels, …)` passes the raw grayscale plane to both deblenders; `stats.background` is in scope, and nothing upstream subtracts the sky.
-- [ ] `lumos/src/stacking/star_detection/deblend/local_maxima/mod.rs` `find_local_maxima` — `min_peak_value = global_peak.value * min_prominence` is a fraction of sky plus peak. A 0.02 star on a 0.1 sky: every pixel (≥ 0.1) clears 0.3 × 0.12 = 0.036, so every noise maximum in the wings `min_separation` apart becomes a peak.
-- [ ] `lumos/src/stacking/star_detection/deblend/multi_threshold/mod.rs` `deblend_multi_threshold` / `build_deblend_tree` — the ladder runs from the component's raw minimum to its raw peak: on a sky pedestal the exponential levels compress into `sky·(1…1+peak/sky)`; on near-zero sky `low` is floored to `high·1e-6`, putting most levels below the sky. `DeblendNode::flux` sums raw values, so every branch carries `sky·area` and the `min_contrast·root_flux` test favours large branches. SExtractor runs both the ladder and the contrast test on background-subtracted flux.
-
-## FWHM auto-estimation measures on the minimum stamp
-Severity: High — the estimate that sets the matched filter and the final stamp size is biased low for wide stars.
-
-- [ ] `lumos/src/stacking/star_detection/detector/stages/fwhm/mod.rs` `from_bright_stars` — calls `measure::measure(…, 0.0)`, so the stamp radius clamps to `MIN_STAMP_RADIUS = 4` (9×9) and the `refine_centroid` weighting σ to 1.0; the configured `fwhm.expected` seed is ignored. Re-running the windowed-covariance path on noiseless Gaussians at r=4 gives FWHM 5→4.89, 6→5.58, 7→6.05, 8→6.38, 10→6.78 (exact at the radius `compute_stamp_radius` would pick). `FWHM_MAX = 20` can never be reached. Seed the first pass with `expected`, or iterate the stamp to the measured width.
-
-## The Gaussian profile fit is axis-aligned but overrides eccentricity
-Severity: High — diagonally elongated stars pass the eccentricity filter under `GaussianFit` (the `high_resolution` preset).
-
-- [ ] `lumos/src/stacking/star_detection/centroid/gaussian_fit/mod.rs` `Gaussian2D` — parameters `[x0, y0, amp, σx, σy, bg]` have no rotation term; a star elongated at 45° fits with `σx ≈ σy`.
-- [ ] `lumos/src/stacking/star_detection/centroid/mod.rs` `measure_star` — `fit_eccentricity = sqrt(1−(σmin/σmax)²)` replaces the rotation-invariant covariance eccentricity, so that star reports ≈0 against `max_eccentricity = 0.5`. `fit_fwhm` is the geometric mean of axis-projected sigmas while the moments path uses `sqrt(trace/2)` — two FWHM definitions. The rotated-ellipse tests in `centroid/tests/robustness.rs` exercise only moments.
-
 ## A disabled producer's stale digest keys its consumer's cache
 Severity: High — a quietly wrong cache hit: a value computed with an input the run no longer delivers is served as current.
 
@@ -116,19 +98,6 @@ Severity: Medium — two copies of the role → preset table; ~150 lines of lumo
 - [ ] `lumos/src/lib.rs` exports `stack`, `stack_images`, `StackFrame`, `align_and_stack` and `DefectMap` (with `pub` `detect_hot`/`detect_cold`/`correct`) — none has a non-test caller in the workspace.
 - [ ] `lens/src/astro/nodes/calibration.rs` `register` — the "Sigma" input is described as the "Sigma-clipping rejection threshold when stacking", but it is the defect-detection threshold passed to `from_images`.
 
-## Star-measurement fits and peak selection keep what the data does not support
-Severity: Medium — FWHM from fits that stopped early or sit on a clamp; bright stars lose peaks to fainter ones in crowded components.
-
-- [ ] `lumos/src/stacking/star_detection/centroid/mod.rs` `measure_star` — sets `position_convergence_threshold`, so `LMModel::fit` declares `converged` once Δx0/Δy0 are tiny "even if other parameters … are still changing" (the `LMConfig` doc reserves that for centroid-only use), then reads σ/α as FWHM and eccentricity. `fit_is_plausible` admits widths in `0.5..=2r` while both `constrain` functions already clamp to `0.5..=r`, so it catches only NaN and accepts fits pinned at the clamp.
-- [ ] `lumos/src/stacking/star_detection/deblend/local_maxima/mod.rs` `add_or_replace_peak` — once 8 peaks are held (raster order), further well-separated peaks are dropped whatever their brightness; the sort happens afterwards. The replace branch swaps only the first too-close peak, so the new one can sit closer than `min_separation` to another. `deblend/multi_threshold/mod.rs` `process_higher_level` / `collect_significant_leaves` stop at `MAX_CHILDREN`/`MAX_PEAKS` in pixel or tree order before ranking by flux.
-
-## Star-detection config holds variant fields side by side with numeric sentinels, and bypasses its scratch pool
-Severity: Medium — meaningless combinations are representable, "no value" flows through as `0.0`, and the largest buffers are allocated per frame.
-
-- [ ] `lumos/src/stacking/star_detection/config/detection_config.rs` `DetectionConfig` — `deblend_n_thresholds == 0` selects local maxima; `deblend_min_prominence` applies only to that mode and `deblend_n_thresholds`/`deblend_min_contrast` only to multi-threshold. One `Deblend::{LocalMaxima{..}, MultiThreshold{..}}` field.
-- [ ] `config/fwhm_config.rs` `FwhmConfig` — `expected = 0` means disabled, `auto_estimate` turns `expected` into a fallback, `fwhm/mod.rs` adds `DEFAULT_FWHM = 4.0` (equal to the config default), and `StarDetector::detect` passes `fwhm.value().unwrap_or(0.0)` while `DetectResult::from_image` takes the same fact as `Option<f32>`. `config/background_config.rs` `mask_dilation` belongs inside `BackgroundRefinement::Iterative`; `max_fwhm_deviation = 0` silently disables the outlier filter. `validate` error names drifted from field names (`"expected_fwhm"`, `"min_stars_for_fwhm"`, `"fwhm_estimation_sigma_factor"`, `"bg_mask_dilation"`).
-- [ ] `detector/stages/detect/mod.rs` `collect_component_data_dense` — each job allocates `vec![ComponentData; num_labels]` (together up to a full u32 plane); `extract_candidates` builds `DeblendBuffers::new()` on every rayon fold split instead of using `JobScratchPool`. `labeling/mod.rs` `label_mask` allocates `UnionFind`, the label map and per-strip run vectors per call; `mask_dilation/mod.rs` `dilate_mask` allocates two `vec![0u64; height]` per vertical task, with `chunk_size = max(64, words/threads)` giving a 6000-px frame only 2 tasks and a column walk strided by `words_per_row`.
-
 ## Normalization and image ops lose precision they claim to keep
 Severity: Medium — measurable error on every real frame where an exact or stable form is available.
 
@@ -184,7 +153,6 @@ Severity: Low — `Option`s that must be `Some`, sentinels, and caches of comput
 
 - [ ] `lumos` combine — `defect_map/mod.rs` `DefectMap::dimensions: Option<Size2us>` is `None` only during the `Default` → `detect_hot` → `detect_cold` chain and `.expect`ed in `correct`; `hot_indices`/`cold_indices` are `pub` and documented ascending "for the binary-search invariant" that nothing uses, yet `fits.rs` `validate_sorted` rejects files on it; `count`/`percentage` double-count a pixel both hot and dead. `DefectMap::correct` rebuilds a full-sensor `BitBuffer2` from the immutable lists on every light.
 - [ ] `lumos` support — `bit_buffer2/mod.rs` `len`/`stride` (and `words`) are stored mutable `pub(crate)` beside the `size` they derive from; `get`/`set`/`Index<usize>`/`BitIter::next` do a div and mod per call via `Size2us::point_of`, inside per-pixel loops (`NullMask::is_null`, `cosmic_ray/masks.rs`, `cosmic_ray/xtrans.rs` `xtrans_replace`, `normalization::stratified_valid_indices` over a 37.7 M-bit domain). `math/urect/mod.rs` `URect::new` runs a release `assert!` on every construction (which pushed `markesteijn_steps` off the type) while `URect::empty` builds the `min > max` state `new` forbids. `concurrency/mod.rs` `JobScratchLease::value` is an `Option` that is `Some` for the lease's life (`ManuallyDrop`).
-- [ ] `lumos` star detection — `Diagnostics::final_star_count` restates `stars.len()`; `median_fwhm`/`median_snr` report `0.0` for "no stars", the placeholder `FwhmSource` was introduced to remove; `PixelGrid::visited_generation_counter` always equals `current_generation`.
 - [ ] `scenarium` — `execution/engine/mod.rs` `ExecutionEngine::compiled: Option<Arc<CompiledGraph>>` while `CompiledGraph::default()` is documented as the empty program (`expect`s in `execute`/`validate`, early returns elsewhere); `execute` and `Executor::run` both clear the same outcome; `ExecutionEngine::clear` drops the `RunSchedule` buffer the type exists to recycle. `schedule/planner.rs` `Planner::color` `White`/`Black` restate `RunSchedule::states`. `graph/func/mod.rs` `ValueVariant::display_name` copies `name`; `Func::uncacheable` is never read by the engine.
 - [ ] `darkroom` — `gui/frame/geometry/mod.rs` `PortLayer::record`/`snapshot` `node_min: Option<Vec2>` is always `Some`; `widgets/port_glyph.rs` `PortGlyph::new` defaults the fill to a `WHITE` every caller overrides; `theme/card_theme.rs` `CardBorder` is a one-field wrapper whose only caller reads `.color`; `Theme` derives serde (only a test uses it) and serializes derived values (`const_value_editor_revealed`, `inline_rename_title`, `menu_button`, `palantir_theme`) beside their sources; `Theme::build` stores `text: TypeScale::DEFAULT` and passes a separate `&TypeScale::DEFAULT` to `palantir_theme_for` / `menu_button_for`.
 
@@ -192,24 +160,13 @@ Severity: Low — `Option`s that must be `Some`, sentinels, and caches of comput
 Severity: Low — exact or better-conditioned forms exist.
 
 - [ ] `lumos/src/stacking/combine/rejection/linear_fit_clip_config.rs` `LinearFitClipConfig::reject` — accumulates `sum_x`/`sum_xx` per pixel in f32 though they are `n(n−1)/2` and `(n−1)n(2n−1)/6`; centring `x` removes the cancellation in `denom`, and the `denom.abs() < f32::EPSILON` guard cannot fire for n ≥ 4.
-- [ ] `lumos/src/stacking/star_detection/centroid/stamp.rs` `FitNoise::weight` — the shot-noise term uses observed `z − background` (Neyman χ²), biasing amplitude and width low when a `NoiseModel` is set.
 - [ ] `lumos/src/image_ops/local_contrast/mod.rs` `apply_luts` / `bin_of` — `lut[round(v·255)]` quantizes an f32 image to 256 levels (posterization); interpolate between bins. `build_tile_luts` gives clip-redistribution leftovers to the lowest bins (black bias; OpenCV strides), and `div_ceil` tiles can be empty yet get an identity LUT blended into neighbours.
 
 ## SIMD backends and duplicated kernels disagree where nothing says why
 Severity: Low — results vary by CPU.
 
-- [ ] `lumos` star-detection convolution — AVX2 and NEON use FMA, SSE4.1 and scalar don't, and their output feeds `create_threshold_mask_filtered`, whose backends were kept unfused to be bit-exact at `px == threshold`; `convolve_2d_row_{avx2,sse41,neon}` skip taps with `|k| < 1e-10`, the scalar path does not; `convolution/simd/neon.rs` `convolve_row_neon` structures edges and tails differently from AVX2/SSE under the same contract.
-- [ ] `lumos/src/stacking/star_detection/convolution/mod.rs` `gaussian_convolve_2d_direct` builds the outer-product kernel with the same per-axis `mirror_index` (algebraically the separable result); `elliptical_gaussian_convolve` repeats the circular test `matched_filter` just made.
 - [ ] `lumos/src/image_ops/stretching/simd/mod.rs` — the vectorized Cephes `asinh` serves only RGB colour-preserving stretches; mono and `PerChannel` call libm `asinhf` per sample (the cost the AVX2 doc puts at ~30%), so one curve uses two `asinh` implementations. `simd/{avx2,neon}.rs` document `asinh_*` as "exact for all real x" / "≈1–2 ULP"; `logf(x + √(x²+1))` is accurate only in absolute terms (relative error ~6e-8/x for small x, cancellation for negative x).
 - [ ] `lumos/src/image_ops/stretching/mod.rs` `map_plane` duplicates `LinearImage::map_samples` loop for loop (mono under `ColorPreserving` vs `PerChannel` take different paths for identical work); the monomorphizing `match curve` is written three times. `image_ops/mod.rs` `SAMPLES_PER_BLOCK` records that per-sample rayon dispatch dominates cheap ops, yet `hdr::hdr_map`'s final pass, `denoise::denoise_plane`'s subtraction, `LinearImage::apply_intensity_remap` and `intensity_plane` are per-sample `par_iter` zips; `LinearPixels::mean` hard-codes `8192`.
-
-## lumos star-detection deblender structure is asymmetric and partly duplicated
-Severity: Low.
-
-- [ ] `deblend/multi_threshold` `deblend_multi_threshold` returns a `SmallVec` that cannot spill while local maxima returns an `ArrayVec`; `create_single_object` duplicates the single-region construction in `deblend_local_maxima`; `find_region_peak` duplicates `ComponentData::find_peak`; `detect/mod.rs` `extract_candidates`' two branches duplicate the fold/reduce.
-- [ ] `multi_threshold` `visit_neighbors_grid` always uses 8-connectivity whatever `DetectionConfig::connectivity` says, so under `Four` diagonal-only splits are never seen.
-- [ ] `fwhm/mod.rs` `from_stars` restates the quality predicates instead of sharing them with `FilterOutcome::from_stars`, disagrees at the boundary (`sharpness < max` vs `<=`), and computes `final_mad` only for a log line.
-- [ ] `deblend/mod.rs` `assign_to_nearest_peak` (`assert!` per region) and `labeling/union_find.rs` `UnionFind::make_set` (`assert!` per run, capacity proven by construction) — release asserts on hot paths.
 
 ## lumos error types route through each other in both directions
 Severity: Low — callers must match the same failure at two paths.

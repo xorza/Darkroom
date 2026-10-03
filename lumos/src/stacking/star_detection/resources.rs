@@ -4,8 +4,11 @@
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::buffer_pool::BufferPool;
+use crate::concurrency::JobScratchPool;
 use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::background::workspace::BackgroundWorkspace;
+use crate::stacking::star_detection::deblend::deblend_buffers::DeblendBuffers;
+use crate::stacking::star_detection::labeling::labeler::Labeler;
 use imaginarium::Buffer2;
 
 /// Reusable buffers and stage workspaces for star detection.
@@ -36,7 +39,10 @@ pub(crate) struct DetectionResources {
     /// Label maps. Only one is live at a time, but pooling rather than holding a single slot
     /// means a second release keeps both instead of dropping one on the floor.
     labels: BufferPool<Buffer2<u32>>,
+    pub(crate) labeler: Labeler,
     pub(crate) background: BackgroundWorkspace,
+    /// The deblenders' working sets, one per rayon fold split.
+    pub(crate) deblend: JobScratchPool<DeblendBuffers>,
 }
 
 impl DetectionResources {
@@ -47,7 +53,9 @@ impl DetectionResources {
             floats: BufferPool::default(),
             bitmasks: BufferPool::default(),
             labels: BufferPool::default(),
+            labeler: Labeler::default(),
             background: BackgroundWorkspace::default(),
+            deblend: JobScratchPool::default(),
         }
     }
 
@@ -86,7 +94,9 @@ impl DetectionResources {
         self.floats.clear();
         self.bitmasks.clear();
         self.labels.clear();
+        self.labeler = Labeler::default();
         self.background.clear();
+        self.deblend = JobScratchPool::default();
     }
 
     /// Reset the pool for new dimensions, clearing all buffers.

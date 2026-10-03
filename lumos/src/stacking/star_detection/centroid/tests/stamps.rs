@@ -91,8 +91,7 @@ fn refine_centroid_adaptive_sigma_small_fwhm() {
 
     // Use small expected FWHM
     let result = refine_centroid(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
         DVec2::splat(32.0),
         TEST_STAMP_RADIUS,
         expected_fwhm,
@@ -123,8 +122,7 @@ fn refine_centroid_adaptive_sigma_large_fwhm() {
 
     // Use large expected FWHM
     let result = refine_centroid(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
         DVec2::splat(32.0),
         TEST_STAMP_RADIUS,
         expected_fwhm,
@@ -247,17 +245,19 @@ fn local_annulus_background_uniform() {
         },
         ..Default::default()
     };
-    let candidates = detect_stars_test(&pixels, &bg, &config.detection);
+    let candidates =
+        detect_stars_test(&bg.residual_of(&pixels), &bg.sky_noise(), &config.detection);
 
     assert!(!candidates.is_empty(), "Should detect star");
 
     let star = measure_star(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
+        &unsaturated(&pixels),
         &candidates[0],
         &config.measurement,
-        config.fwhm.expected,
-        &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
+        config.fwhm.mode.unwrap().seed(),
+        &StampGrid::new(compute_stamp_radius(config.fwhm.mode.unwrap().seed())),
     );
     assert!(star.is_some(), "Should compute centroid with LocalAnnulus");
 
@@ -293,14 +293,21 @@ fn local_annulus_vs_global_map() {
         },
         ..Default::default()
     };
-    let candidates = detect_stars_test(&pixels, &bg, &config_global.detection);
+    let candidates = detect_stars_test(
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
+        &config_global.detection,
+    );
     let star_global = measure_star(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
+        &unsaturated(&pixels),
         &candidates[0],
         &config_global.measurement,
-        config_global.fwhm.expected,
-        &StampGrid::new(compute_stamp_radius(config_global.fwhm.expected)),
+        config_global.fwhm.mode.unwrap().seed(),
+        &StampGrid::new(compute_stamp_radius(
+            config_global.fwhm.mode.unwrap().seed(),
+        )),
     )
     .expect("global centroid");
 
@@ -313,12 +320,15 @@ fn local_annulus_vs_global_map() {
         ..Default::default()
     };
     let star_annulus = measure_star(
-        &pixels,
-        &bg,
+        &bg.residual_of(&pixels),
+        &bg.sky_noise(),
+        &unsaturated(&pixels),
         &candidates[0],
         &config_annulus.measurement,
-        config_annulus.fwhm.expected,
-        &StampGrid::new(compute_stamp_radius(config_annulus.fwhm.expected)),
+        config_annulus.fwhm.mode.unwrap().seed(),
+        &StampGrid::new(compute_stamp_radius(
+            config_annulus.fwhm.mode.unwrap().seed(),
+        )),
     )
     .expect("annulus centroid");
 
@@ -366,17 +376,19 @@ fn local_annulus_near_edge_fallback() {
         },
         ..Default::default()
     };
-    let candidates = detect_stars_test(&pixels, &bg, &config.detection);
+    let candidates =
+        detect_stars_test(&bg.residual_of(&pixels), &bg.sky_noise(), &config.detection);
 
     if !candidates.is_empty() {
         // Should still work (falls back to global if annulus doesn't have enough pixels)
         let star = measure_star(
-            &pixels,
-            &bg,
+            &bg.residual_of(&pixels),
+            &bg.sky_noise(),
+            &unsaturated(&pixels),
             &candidates[0],
             &config.measurement,
-            config.fwhm.expected,
-            &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
+            config.fwhm.mode.unwrap().seed(),
+            &StampGrid::new(compute_stamp_radius(config.fwhm.mode.unwrap().seed())),
         );
         if let Some(s) = star {
             assert!(s.flux > 0.0, "Flux should be positive");

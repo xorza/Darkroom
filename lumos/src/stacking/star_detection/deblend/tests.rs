@@ -1,6 +1,7 @@
 //! Tests of the shared component data, and comparisons of `local_maxima` with
 //! `multi_threshold`.
 
+use crate::stacking::star_detection::deblend::component::Component;
 use crate::stacking::star_detection::deblend::internals::{
     TestComponent, deblend_multi_threshold_test, make_test_component,
 };
@@ -25,10 +26,16 @@ fn local_vs_multi_threshold_single_star() {
     );
 
     // Local maxima deblending (default: min_separation=3, min_prominence=0.3)
-    let local_result = deblend_local_maxima(&data, &pixels, &labels, 3, 0.3);
+    let local_result = deblend_local_maxima(
+        &Component::new(&data, &pixels, &labels),
+        3,
+        0.3,
+        &mut Vec::new(),
+    );
 
     // Multi-threshold deblending (default: n_thresholds=32, min_separation=3, min_contrast=0.005)
-    let mt_result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
+    let mt_result =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
 
     assert_eq!(local_result.len(), 1);
     assert_eq!(mt_result.len(), 1);
@@ -62,10 +69,16 @@ fn local_vs_multi_threshold_two_stars() {
     );
 
     // Local maxima deblending
-    let local_result = deblend_local_maxima(&data, &pixels, &labels, 3, 0.3);
+    let local_result = deblend_local_maxima(
+        &Component::new(&data, &pixels, &labels),
+        3,
+        0.3,
+        &mut Vec::new(),
+    );
 
     // Multi-threshold deblending
-    let mt_result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
+    let mt_result =
+        deblend_multi_threshold_test(&Component::new(&data, &pixels, &labels), 32, 3, 0.005);
 
     assert_eq!(local_result.len(), 2, "Local maxima should find 2 stars");
     assert_eq!(mt_result.len(), 2, "Multi-threshold should find 2 stars");
@@ -86,7 +99,7 @@ fn iter_pixels_count() {
         )],
     );
 
-    let iter_count = data.iter_pixels(&pixels, &labels).count();
+    let iter_count = Component::new(&data, &pixels, &labels).pixels().count();
     assert_eq!(
         iter_count, data.area,
         "iter_pixels should yield exactly area pixels"

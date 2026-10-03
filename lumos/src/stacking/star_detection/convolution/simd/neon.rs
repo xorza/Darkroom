@@ -1,6 +1,12 @@
 //! ARM NEON implementation of row convolution.
 //!
-//! Processes 4 pixels at a time using 128-bit vectors.
+//! Processes 4 pixels at a time using 128-bit vectors. Same structure and accumulation order as
+//! the x86 backends — unfused, every tap — so its output is bit-identical to the scalar path.
+
+#![expect(
+    clippy::needless_range_loop,
+    reason = "the edge columns index `output` beside pointer arithmetic on the same `x`"
+)]
 
 use std::arch::aarch64::*;
 
@@ -22,6 +28,14 @@ pub(super) unsafe fn convolve_row_neon(
     unsafe {
         let width = input.len();
 
+        // For small inputs, just use scalar
+        if width < 8 + 2 * radius {
+            for x in 0..width {
+                output[x] = convolve_pixel_scalar(input, kernel, radius, x, width);
+            }
+            return;
+        }
+
         // Process 4 pixels at a time in the middle section. A column is SIMD-safe only if its whole
         // kernel window stays in bounds (the interior does no mirroring). The widest source read for
         // the 4-wide block at x is `(x + 3) + (kernel.len() - 1) - radius`; requiring it `<= width-1`
@@ -31,49 +45,30 @@ pub(super) unsafe fn convolve_row_neon(
         let safe_end = (width + radius + 1).saturating_sub(4 + kernel.len());
 
         // Handle left edge with scalar
-        for (x, out) in output.iter_mut().enumerate().take(safe_start.min(width)) {
-            *out = convolve_pixel_scalar(input, kernel, radius, x, width);
+        for x in 0..safe_start {
+            output[x] = convolve_pixel_scalar(input, kernel, radius, x, width);
         }
 
-        // SIMD middle section. `safe_end` is the last fully-in-bounds block start, so the bound is
-        // `x <= safe_end` and not an `x + 4 <= safe_end + radius` variant: for radius > 4 — the
-        // common case — that over-reads one element and skips the mirroring at the boundary column.
+        // SIMD middle section
         let mut x = safe_start;
-        if safe_start < safe_end {
-            while x <= safe_end {
-                let mut sum = vdupq_n_f32(0.0);
+        while x <= safe_end {
+            let mut sum = vdupq_n_f32(0.0);
 
-                for (k, &kval) in kernel.iter().enumerate() {
-                    let kv = vdupq_n_f32(kval);
-                    let sx = x + k - radius;
-
-                    // Load 4 input values
-                    let vals = vld1q_f32(input.as_ptr().add(sx));
-
-                    // Multiply-accumulate (FMA)
-                    sum = vfmaq_f32(sum, vals, kv);
-                }
-
-                // Store 4 output values
-                vst1q_f32(output.as_mut_ptr().add(x), sum);
-                x += 4;
+            for (k, &kval) in kernel.iter().enumerate() {
+                let kv = vdupq_n_f32(kval);
+                let sx = x + k - radius;
+                let vals = vld1q_f32(input.as_ptr().add(sx));
+                sum = vaddq_f32(sum, vmulq_f32(vals, kv));
             }
+
+            vst1q_f32(output.as_mut_ptr().add(x), sum);
+            x += 4;
         }
 
-        // Handle remaining middle pixels with scalar (including when SIMD section was skipped)
-        while x < width.saturating_sub(radius) {
+        // Handle right edge with scalar
+        while x < width {
             output[x] = convolve_pixel_scalar(input, kernel, radius, x, width);
             x += 1;
-        }
-
-        // Handle right edge with scalar (mirroring)
-        for (x, out) in output
-            .iter_mut()
-            .enumerate()
-            .take(width)
-            .skip(width.saturating_sub(radius))
-        {
-            *out = convolve_pixel_scalar(input, kernel, radius, x, width);
         }
     }
 }
@@ -100,7 +95,7 @@ pub(super) unsafe fn convolve_cols_row_neon(
             for (k, &kval) in kernel.iter().enumerate() {
                 let sy = mirror_index(y as isize + k as isize - radius as isize, size.height);
                 let vals = vld1q_f32(input.as_ptr().add(sy * size.width + x));
-                sum = vfmaq_f32(sum, vals, vdupq_n_f32(kval));
+                sum = vaddq_f32(sum, vmulq_f32(vals, vdupq_n_f32(kval)));
             }
             vst1q_f32(out_row.as_mut_ptr().add(x), sum);
             x += 4;
@@ -147,9 +142,6 @@ pub(super) unsafe fn convolve_2d_row_neon(
 
                 for kx in 0..kernel.size() {
                     let kval = kernel.at(ky, kx);
-                    if kval.abs() < 1e-10 {
-                        continue;
-                    }
 
                     let kv = vdupq_n_f32(kval);
                     let base_sx = x as isize + kx as isize - radius;
@@ -157,7 +149,7 @@ pub(super) unsafe fn convolve_2d_row_neon(
                     if base_sx >= 0 && base_sx + 4 <= size.width as isize {
                         let vals =
                             vld1q_f32(input.as_ptr().add(input_row_offset + base_sx as usize));
-                        sum = vfmaq_f32(sum, vals, kv);
+                        sum = vaddq_f32(sum, vmulq_f32(vals, kv));
                     } else {
                         let mut vals = [0.0f32; 4];
                         for (i, val) in vals.iter_mut().enumerate() {
@@ -166,7 +158,7 @@ pub(super) unsafe fn convolve_2d_row_neon(
                             *val = input[input_row_offset + sx];
                         }
                         let vvals = vld1q_f32(vals.as_ptr());
-                        sum = vfmaq_f32(sum, vvals, kv);
+                        sum = vaddq_f32(sum, vmulq_f32(vvals, kv));
                     }
                 }
             }

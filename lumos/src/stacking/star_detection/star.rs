@@ -18,8 +18,10 @@ pub struct Star {
     pub eccentricity: f32,
     /// Signal-to-noise ratio.
     pub snr: f32,
-    /// Peak pixel value (for saturation detection).
+    /// Peak pixel value above the sky.
     pub peak: f32,
+    /// Whether the peak pixel reached the saturation level: its centroid and flux are unreliable.
+    pub saturated: bool,
     /// Sharpness metric (peak / `flux_in_core`). Cosmic rays have high sharpness (>0.8),
     /// real stars have lower sharpness (typically 0.2-0.6 depending on seeing).
     pub sharpness: f32,
@@ -27,19 +29,7 @@ pub struct Star {
     pub roundness: Roundness,
 }
 
-/// Default peak threshold (normalized) above which a star is treated as saturated.
-/// Saturated peaks give unreliable centroids, so the detection quality filters drop them.
-pub(crate) const SATURATION_PEAK: f32 = 0.95;
-
 impl Star {
-    /// Check if star is likely saturated.
-    ///
-    /// Stars with peak values near the maximum have unreliable centroids.
-    /// Typical threshold: 0.95 for normalized data.
-    pub fn is_saturated(&self, threshold: f32) -> bool {
-        self.peak > threshold
-    }
-
     /// Check if star is likely a cosmic ray (very sharp, single-pixel spike).
     ///
     /// Cosmic rays typically have sharpness > 0.7, while real stars are 0.2-0.5.
@@ -76,6 +66,7 @@ pub(crate) mod internals {
                 eccentricity: 0.1,
                 snr: 50.0,
                 peak: 0.5,
+                saturated: false,
                 sharpness: 0.3,
                 roundness: Roundness {
                     ground: 0.0,
@@ -114,6 +105,11 @@ pub(crate) mod internals {
             self
         }
 
+        pub(crate) fn with_saturated(mut self, saturated: bool) -> Self {
+            self.saturated = saturated;
+            self
+        }
+
         pub(crate) fn with_sharpness(mut self, sharpness: f32) -> Self {
             self.sharpness = sharpness;
             self
@@ -130,20 +126,9 @@ pub(crate) mod internals {
 mod tests {
     use crate::stacking::star_detection::star::*;
 
-    /// Position is irrelevant to the three predicates below; each test sets only its own field.
+    /// Position is irrelevant to the two predicates below; each test sets only its own field.
     fn star() -> Star {
         Star::at(DVec2::ZERO)
-    }
-
-    #[test]
-    fn saturation_compares_peak_against_the_given_threshold() {
-        assert!(star().with_peak(0.96).is_saturated(0.95));
-        // Strictly greater, so a peak sitting exactly on the threshold is not saturated.
-        assert!(!star().with_peak(0.95).is_saturated(0.95));
-        assert!(!star().with_peak(0.5).is_saturated(0.95));
-        // The threshold decides, not the peak: one peak, both verdicts.
-        assert!(star().with_peak(0.85).is_saturated(0.80));
-        assert!(!star().with_peak(0.85).is_saturated(0.90));
     }
 
     #[test]

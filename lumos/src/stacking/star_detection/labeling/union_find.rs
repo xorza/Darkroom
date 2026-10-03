@@ -8,7 +8,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Lock-free union-find over provisional run labels.
 ///
-/// Operations take `&self` because the strips share one instance across threads.
+/// Operations take `&self` because the strips share one instance across threads. [`Self::reset`]
+/// must run before each labeling.
+#[derive(Default)]
 pub(super) struct UnionFind {
     parent: Vec<AtomicU32>,
     next_label: AtomicU32,
@@ -23,27 +25,22 @@ impl Debug for UnionFind {
     }
 }
 
-/// Dense 1..=N relabeling from [`UnionFind::build_label_map`]: `map[provisional]` is the
-/// final label, and `count` is the number of distinct components (the max final label).
-#[derive(Debug)]
-pub(super) struct LabelMapping {
-    pub(super) map: Vec<u32>,
-    pub(super) count: usize,
-}
-
 impl UnionFind {
-    pub(super) fn new(capacity: usize) -> Self {
-        Self {
-            parent: (0..capacity).map(|_| AtomicU32::new(0)).collect(),
-            next_label: AtomicU32::new(1),
+    /// Start a labeling of at most `capacity` provisional labels. The parent table only grows; an
+    /// entry is written by [`Self::make_set`] before anything reads it, so stale entries from an
+    /// earlier labeling are never seen.
+    pub(super) fn reset(&mut self, capacity: usize) {
+        if self.parent.len() < capacity {
+            self.parent.resize_with(capacity, || AtomicU32::new(0));
         }
+        *self.next_label.get_mut() = 1;
     }
 
     #[inline]
     pub(super) fn make_set(&self) -> u32 {
         // SeqCst: labels must be globally unique across threads.
         let label = self.next_label.fetch_add(1, Ordering::SeqCst);
-        assert!(
+        debug_assert!(
             (label as usize) <= self.parent.len(),
             "UnionFind capacity exceeded: label {label} > capacity {}",
             self.parent.len()
@@ -106,9 +103,12 @@ impl UnionFind {
         (self.next_label.load(Ordering::Relaxed) - 1) as usize
     }
 
-    /// Build the dense 1..=N label mapping (single pass) together with the component count.
-    pub(super) fn build_label_map(&self, total_labels: usize) -> LabelMapping {
-        let mut map = vec![0u32; total_labels + 1];
+    /// Fill `map` with the dense 1..=N relabeling — `map[provisional]` is the final label — and
+    /// return N, the number of distinct components.
+    pub(super) fn build_label_map(&self, map: &mut Vec<u32>) -> usize {
+        let total_labels = self.label_count();
+        map.clear();
+        map.resize(total_labels + 1, 0);
         let mut count = 0u32;
 
         for i in 1..=total_labels {
@@ -120,9 +120,6 @@ impl UnionFind {
             map[i] = map[root as usize];
         }
 
-        LabelMapping {
-            map,
-            count: count as usize,
-        }
+        count as usize
     }
 }

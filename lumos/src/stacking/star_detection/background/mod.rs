@@ -8,6 +8,7 @@
 
 pub(crate) mod background_estimate;
 mod simd;
+pub(crate) mod sky_noise;
 pub(crate) mod workspace;
 
 #[cfg(all(test, feature = "bench"))]
