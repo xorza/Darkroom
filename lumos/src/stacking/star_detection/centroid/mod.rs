@@ -136,7 +136,6 @@ fn fit_is_plausible(result_pos: DVec2, input_pos: DVec2, stamp_radius: usize) ->
 /// region and computes:
 /// - Sub-pixel position using the configured centroid method
 /// - Quality metrics: flux, FWHM, eccentricity, SNR, sharpness, roundness
-/// - Laplacian SNR for cosmic ray detection
 ///
 /// Returns `None` if the candidate fails quality checks during measurement.
 ///

@@ -25,7 +25,8 @@ pub(crate) struct GesdScratch {
 
 /// Per-thread scratch buffers for stacking combine closures.
 ///
-/// Allocated once per rayon thread via `for_each_init` and reused across all pixels.
+/// Leased from a [`JobScratchPool`](crate::concurrency::JobScratchPool) per job and reused
+/// across all of its pixels.
 ///
 /// One lease carries every rejection method's working set, because the pool hands out one object
 /// and the method is chosen per pixel. Grouping each method's buffers into its own field keeps

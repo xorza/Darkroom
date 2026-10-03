@@ -1079,12 +1079,6 @@ pub(crate) fn load_raw(path: &Path, context: &LoadContext) -> Result<LinearImage
     Ok(image)
 }
 
-/// Load raw file and return un-demosaiced CFA data.
-///
-/// Returns single-channel f32 data with CFA pattern metadata.
-/// Used for calibration frame processing (darks, flats, bias)
-/// where hot pixel correction must happen before demosaicing.
-///
 /// Read output dimensions and sensor layout without the expensive `libraw_unpack`.
 pub(crate) fn raw_cfa_frame_info(
     path: &Path,
@@ -1114,6 +1108,11 @@ pub(crate) fn raw_cfa_frame_info(
     })
 }
 
+/// Load raw file and return un-demosaiced CFA data.
+///
+/// Returns single-channel f32 data with CFA pattern metadata.
+/// Used for calibration frame processing (darks, flats, bias)
+/// where hot pixel correction must happen before demosaicing.
 pub(crate) fn load_raw_cfa(path: &Path, context: &LoadContext) -> Result<CfaImage, ImageError> {
     context.check_cancelled(path)?;
     let raw = open_raw(path)?;

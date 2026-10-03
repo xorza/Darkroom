@@ -3,7 +3,7 @@
 use std::env;
 use std::path::PathBuf;
 
-/// Common configuration for cache-based stacking methods (median, sigma-clipped).
+/// Configuration of the frame cache every combine method reads its frames through.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CacheConfig {
     /// Root the spill files go under. A run writes only into a subdirectory it creates there, and

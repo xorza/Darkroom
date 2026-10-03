@@ -40,9 +40,9 @@ impl MagsacScorer {
         let max_sigma_sq = max_sigma * max_sigma;
         let threshold_sq = CHI2_99_2DOF * max_sigma_sq;
 
-        // Outlier loss = loss at the boundary, ensuring continuity
-        // For k=2: loss(threshold) = σ²_max/2 · γ(1, χ²/2) + threshold/4 · (1 - γ(1, χ²/2))
-        // At χ²/2 ≈ 4.605, γ(1, x) ≈ 0.99, so loss ≈ σ²_max/2
+        // An outlier costs the loss's saturation value, σ²_max/2. At the threshold the loss has
+        // reached γ(1, χ²/2) = 1 − e^(−4.605) = 0.99 of it, so the step to an outlier is up by
+        // 1%: the loss stays monotone.
         let outlier_loss = max_sigma_sq / 2.0;
 
         Self {
