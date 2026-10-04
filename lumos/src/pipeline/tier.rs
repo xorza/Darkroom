@@ -1,10 +1,11 @@
 //! Where the pipeline parks a frame between stages.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use crate::combine::cache::core::CacheTier;
 use crate::frame_store::frame_quality::FrameQuality;
-use crate::frame_store::frame_spill::FrameSpill;
 use crate::frame_store::frame_stats::FrameStats;
-use crate::frame_store::spill_directory::SpillDirectory;
+use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::io::image::image_metadata::ImageMetadata;
@@ -51,11 +52,13 @@ pub(crate) struct StoredWarp {
 #[derive(Debug)]
 pub(crate) enum FrameTier {
     Ram,
-    /// Spilled into `directory`; the combine reads it in row chunks sized against
-    /// `chunk_memory`, the run's planning figure.
+    /// Spilled to `scratch`; the combine reads it in row chunks sized against `chunk_memory`, the
+    /// run's planning figure. `parked` counts the calibrated lights written there before their
+    /// registration, for the run's report.
     Spill {
-        directory: SpillDirectory,
+        scratch: RunScratch,
         chunk_memory: u64,
+        parked: AtomicU64,
     },
 }
 
@@ -69,10 +72,11 @@ impl FrameTier {
         if plan.fits_in_ram {
             return Ok(Self::Ram);
         }
-        SpillDirectory::create(&ingest.cache_dir, ingest.keep_cache)
-            .map(|directory| Self::Spill {
-                directory,
+        RunScratch::create(&ingest.cache_dir)
+            .map(|scratch| Self::Spill {
+                scratch,
                 chunk_memory: memory.planning(),
+                parked: AtomicU64::new(0),
             })
             .map_err(Error::from)
     }
@@ -82,14 +86,24 @@ impl FrameTier {
     }
 
     /// Park a calibrated frame between detection and registration.
-    pub(crate) fn hold(&self, name: &str, image: LinearImage) -> Result<PipelineFrame, Error> {
+    pub(crate) fn hold(&self, image: LinearImage) -> Result<PipelineFrame, Error> {
         match self {
             Self::Ram => Ok(PipelineFrame::Resident(image)),
-            Self::Spill { directory, .. } => {
-                StoredImage::spill(&FrameSpill::new(directory.path(), name), &image)
-                    .map(PipelineFrame::Spilled)
-                    .map_err(Error::from)
+            Self::Spill {
+                scratch, parked, ..
+            } => {
+                let stored = StoredImage::spill(scratch, &image)?;
+                parked.fetch_add(1, Ordering::Relaxed);
+                Ok(PipelineFrame::Spilled(stored))
             }
+        }
+    }
+
+    /// The calibrated lights [`Self::hold`] wrote to disk.
+    pub(crate) fn parked_lights(&self) -> u64 {
+        match self {
+            Self::Ram => 0,
+            Self::Spill { parked, .. } => parked.load(Ordering::Relaxed),
         }
     }
 
@@ -102,7 +116,6 @@ impl FrameTier {
     /// straight into pages already faulted in rather than into a fresh set.
     pub(crate) fn store(
         &self,
-        name: &str,
         metadata: ImageMetadata,
         buffers: WarpBuffers,
         source_stats: FrameStats,
@@ -130,14 +143,8 @@ impl FrameTier {
                 frame: StoredFrame::from_memory(image, quality, source_stats),
                 reusable: None,
             }),
-            Self::Spill { directory, .. } => {
-                let frame = StoredFrame::spill(
-                    &FrameSpill::new(directory.path(), name),
-                    &image,
-                    &quality,
-                    source_stats,
-                )
-                .map_err(Error::from)?;
+            Self::Spill { scratch, .. } => {
+                let frame = StoredFrame::spill(scratch, &image, &quality, source_stats)?;
                 let FrameQuality::Planes {
                     coverage,
                     confidence,
@@ -163,33 +170,24 @@ impl FrameTier {
     /// source declared pixels with no measurement.
     pub(crate) fn store_reference(
         &self,
-        name: &str,
         image: LinearImage,
         source_stats: FrameStats,
     ) -> Result<StoredFrame, Error> {
         let quality = FrameQuality::for_unwarped(&image);
         match self {
             Self::Ram => Ok(StoredFrame::from_memory(image, quality, source_stats)),
-            Self::Spill { directory, .. } => StoredFrame::spill(
-                &FrameSpill::new(directory.path(), name),
-                &image,
-                &quality,
-                source_stats,
-            )
-            .map_err(Error::from),
+            Self::Spill { scratch, .. } => {
+                StoredFrame::spill(scratch, &image, &quality, source_stats).map_err(Error::from)
+            }
         }
     }
 
-    /// Hand the tier to the combine, which owns the directory until its memory maps have dropped.
-    pub(crate) fn into_cache_tier(self) -> CacheTier {
+    /// The tier the combine reads the stored frames through.
+    pub(crate) const fn cache_tier(&self) -> CacheTier {
         match self {
             Self::Ram => CacheTier::Resident,
-            Self::Spill {
-                directory,
-                chunk_memory,
-            } => CacheTier::Spilled {
-                directory,
-                chunk_memory,
+            Self::Spill { chunk_memory, .. } => CacheTier::Spilled {
+                chunk_memory: *chunk_memory,
             },
         }
     }

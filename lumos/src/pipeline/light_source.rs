@@ -150,7 +150,7 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
             let result = detector.detect(&image);
             let image = match lights {
                 Lights::Held(_) => PipelineFrame::Resident(image),
-                Lights::Raw(_) => stage.tier.hold(&format!("calib_{index}"), image)?,
+                Lights::Raw(_) => stage.tier.hold(image)?,
             };
             log_detection(done.complete_one(), total, &result);
             Ok(DetectedFrame {
@@ -361,7 +361,7 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
             dimensions,
             detection,
         }
-        .combine(tier, config, progress, cancel.clone())
+        .combine(&tier, config, progress, cancel.clone())
     }
 
     /// Load one light, apply the masters, reject its cosmic rays when asked, and demosaic it.

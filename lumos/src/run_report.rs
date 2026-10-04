@@ -26,6 +26,13 @@ pub struct RunReport {
     /// Photosites the flat's floor raised, corrected by less than their vignetting asks in every
     /// light.
     pub floored_flat_pixels: u64,
+    /// Frames the combine read from disk because the set did not fit in memory: zero for a run
+    /// that kept every frame resident.
+    pub spilled_frames: u64,
+    /// Calibrated lights written to disk between their detection and their registration, because
+    /// the reference was not known until every light was detected: zero for a resident run, and
+    /// for one whose reference was named, which registers each light as it arrives.
+    pub parked_lights: u64,
 }
 
 /// A count per data-quality flag a combine acts on. A sample with two flags counts under both.

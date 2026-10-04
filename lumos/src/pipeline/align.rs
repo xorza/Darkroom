@@ -159,7 +159,7 @@ pub(crate) fn register_warp_and_stack(
         dimensions,
         detection,
     }
-    .combine(tier, config, progress, cancel)
+    .combine(&tier, config, progress, cancel)
 }
 
 /// Choose the reference (alignment anchor) index, validating it has enough stars.

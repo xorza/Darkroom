@@ -93,7 +93,6 @@ pub(crate) struct CombineRequest<'a> {
 /// planes, and even an unwarped one does when its source declared pixels with no measurement.
 #[derive(Debug)]
 pub(crate) struct FrameCache {
-    // Stored planes drop before the spill directory owner in `core`.
     pub(crate) frames: Vec<StoredFrame>,
     /// Each frame's affine onto the reference, measured once at construction for the
     /// normalization the cache was built with; `None` when every frame is combined as it stands.
@@ -568,6 +567,11 @@ impl FrameCache {
                 kept_flagged_samples: kept_flagged.totals(),
                 variance_background_only: planes.variance
                     && noise.is_some_and(|noise| !noise.every_gain_known()),
+                spilled_frames: if self.core.tier.spills() {
+                    self.frames.len() as u64
+                } else {
+                    0
+                },
                 ..RunReport::default()
             },
         }

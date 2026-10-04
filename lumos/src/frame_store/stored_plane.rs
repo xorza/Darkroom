@@ -4,6 +4,7 @@
 //! either a `Buffer2` in RAM or a memory map over a file, and every read goes through the same
 //! [`StoredPlane::chunk`] either way.
 
+use std::fs::File;
 use std::marker::PhantomData;
 use std::path::Path;
 
@@ -18,7 +19,15 @@ use crate::frame_store::frame_spill;
 #[derive(Debug)]
 pub(crate) enum StoredPlane<T = f32> {
     Memory(Buffer2<T>),
-    Mapped(Mmap, PhantomData<T>),
+    Mapped {
+        map: Mmap,
+        /// The handle of a run-scratch file, which Windows deletes when its last handle closes:
+        /// held for the map's life, and dropped after it. Unix needs no handle, as the map keeps
+        /// an unlinked file alive by itself.
+        #[cfg(windows)]
+        file: Option<File>,
+        _type: PhantomData<T>,
+    },
 }
 
 impl<T: Pod> StoredPlane<T> {
@@ -29,13 +38,32 @@ impl<T: Pod> StoredPlane<T> {
 
     /// Memory-map a spilled plane file.
     pub(crate) fn map(path: &Path) -> Result<Self, FrameStoreError> {
-        let mmap = frame_spill::map_file(path)?;
+        Ok(Self::mapped(frame_spill::map_file(path)?, None))
+    }
+
+    /// Memory-map `file`, already open and written; `origin` names where it was for an error.
+    pub(crate) fn map_open(file: File, origin: &Path) -> Result<Self, FrameStoreError> {
+        // SAFETY: a run-scratch file has no name, so nothing but this handle can change it.
+        let map = unsafe { Mmap::map(&file) }.map_err(|source| FrameStoreError::MemoryMap {
+            path: origin.to_path_buf(),
+            source,
+        })?;
+        Ok(Self::mapped(map, Some(file)))
+    }
+
+    fn mapped(map: Mmap, file: Option<File>) -> Self {
         #[cfg(unix)]
         {
             use memmap2::Advice;
-            let _ = mmap.advise(Advice::Sequential);
+            let _ = map.advise(Advice::Sequential);
+            drop(file);
         }
-        Ok(Self::Mapped(mmap, PhantomData))
+        Self::Mapped {
+            map,
+            #[cfg(windows)]
+            file,
+            _type: PhantomData,
+        }
     }
 
     /// Samples the plane holds. The only geometry a stored plane knows — width and height are
@@ -44,7 +72,7 @@ impl<T: Pod> StoredPlane<T> {
     pub(crate) fn samples(&self) -> usize {
         match self {
             Self::Memory(buffer) => buffer.pixels().len(),
-            Self::Mapped(mmap, _) => mmap.len() / size_of::<T>(),
+            Self::Mapped { map, .. } => map.len() / size_of::<T>(),
         }
     }
 
@@ -52,8 +80,8 @@ impl<T: Pod> StoredPlane<T> {
     pub(crate) fn chunk(&self, start: usize, end: usize) -> &[T] {
         match self {
             Self::Memory(buffer) => &buffer[start..end],
-            Self::Mapped(mmap, _) => {
-                bytemuck::cast_slice(&mmap[start * size_of::<T>()..end * size_of::<T>()])
+            Self::Mapped { map, .. } => {
+                bytemuck::cast_slice(&map[start * size_of::<T>()..end * size_of::<T>()])
             }
         }
     }

@@ -30,7 +30,7 @@ impl RegisteredSet {
     /// Combine the frames that registered.
     pub(crate) fn combine(
         self,
-        tier: FrameTier,
+        tier: &FrameTier,
         config: &AlignStackConfig,
         progress: ProgressCallback,
         cancel: CancelToken,
@@ -65,9 +65,9 @@ impl RegisteredSet {
 
         let registered = frames.len();
         tracing::info!(frames = registered, "Stacking aligned frames");
-        let stacked = stack_stored_frames(
+        let mut stacked = stack_stored_frames(
             frames,
-            tier.into_cache_tier(),
+            tier.cache_tier(),
             self.dimensions,
             self.metadata,
             &config.stack.for_survivors(&dropped),
@@ -75,6 +75,7 @@ impl RegisteredSet {
             cancel,
         )?;
         tracing::info!("Stack complete");
+        stacked.report.parked_lights = tier.parked_lights();
 
         Ok(AlignStackResult::from_product(
             stacked,

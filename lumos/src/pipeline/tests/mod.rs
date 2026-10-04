@@ -827,9 +827,6 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
     let mut streaming_config = config;
     streaming_config.stack.ingest.memory_override = Some(1);
     streaming_config.stack.ingest.cache_dir = scratch.join("streaming_cache");
-    // Kept so the premise assertion below can observe that the spill tier really ran; the whole
-    // scratch tree goes away when `scratch` drops.
-    streaming_config.stack.ingest.keep_cache = true;
 
     let masters = CalibrationMasters::default();
     let run = |config: &AlignStackConfig| {
@@ -845,17 +842,30 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
     let ram = run(&ram_config);
     let streaming = run(&streaming_config);
 
-    // Premise: the two budgets must straddle the tier boundary. Only the streaming path creates a
-    // spill directory, so its presence — and the RAM path's lack of one — is what proves this test
-    // exercised two code paths rather than the same one twice.
-    assert!(
-        streaming_config.stack.ingest.cache_dir.is_dir(),
-        "streaming tier never spilled; both runs took the RAM path"
+    // Premise: the two budgets must straddle the tier boundary. The report says which frames went
+    // to disk, which is what proves this test exercised two code paths rather than the same one
+    // twice: the streaming run parks every light before the reference is known, then reads every
+    // registered frame back; the RAM run writes nothing. Neither leaves a file in its cache root.
+    let report = |result: &AlignStackResult| {
+        (
+            result.product.report.parked_lights,
+            result.product.report.spilled_frames,
+        )
+    };
+    assert_eq!(report(&ram), (0, 0), "RAM tier spilled to disk");
+    assert_eq!(
+        report(&streaming),
+        (paths.len() as u64, ram.alignment.registered() as u64),
+        "streaming tier did not park every light and read back every registered frame"
     );
-    assert!(
-        !ram_config.stack.ingest.cache_dir.exists(),
-        "RAM tier spilled to disk; both runs took the streaming path"
-    );
+    for config in [&ram_config, &streaming_config] {
+        let root = &config.stack.ingest.cache_dir;
+        assert!(
+            !root.exists() || std::fs::read_dir(root).unwrap().next().is_none(),
+            "{} kept a file",
+            root.display()
+        );
+    }
     assert_eq!(
         ram.alignment.dropped(),
         vec![2, 5],
@@ -877,40 +887,16 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
     // Naming the reference the automatic choice found takes each light through one pass, on both
     // tiers, and the stack is the same. The spilled one-pass run writes each light once, warped:
     // no calibrated light is parked before its registration, as the two-pass run parks every one.
-    let one_pass = |config: &AlignStackConfig, cache: &str| {
+    let one_pass = |config: &AlignStackConfig| {
         let mut config = config.clone();
         config.reference = Reference::Index(ram.alignment.reference);
-        config.stack.ingest.cache_dir = scratch.join(cache);
-        (run(&config), config.stack.ingest.cache_dir)
+        run(&config)
     };
-    let (ram_one_pass, _) = one_pass(&ram_config, "ram_one_pass_cache");
-    let (streaming_one_pass, one_pass_dir) = one_pass(&streaming_config, "one_pass_cache");
-    let spilled_names = |directory: &Path| {
-        let mut names = Vec::new();
-        let mut pending = vec![directory.to_path_buf()];
-        while let Some(directory) = pending.pop() {
-            for entry in std::fs::read_dir(&directory).unwrap() {
-                let path = entry.unwrap().path();
-                if path.is_dir() {
-                    pending.push(path);
-                } else {
-                    names.push(path.file_name().unwrap().to_string_lossy().into_owned());
-                }
-            }
-        }
-        names
-    };
-    let two_pass_names = spilled_names(&streaming_config.stack.ingest.cache_dir);
-    let one_pass_names = spilled_names(&one_pass_dir);
-    assert!(two_pass_names.iter().any(|name| name.starts_with("calib_")));
-    assert!(
-        one_pass_names
-            .iter()
-            .any(|name| name.starts_with("warped_"))
-    );
-    assert!(
-        !one_pass_names.iter().any(|name| name.starts_with("calib_")),
-        "{one_pass_names:?}"
+    let ram_one_pass = one_pass(&ram_config);
+    let streaming_one_pass = one_pass(&streaming_config);
+    assert_eq!(
+        report(&streaming_one_pass),
+        (0, ram.alignment.registered() as u64)
     );
 
     for (other, label) in [

@@ -23,7 +23,8 @@ fn cache_test_frame<I: StackableImage>(
     // No frame 0 admitted: these tests are about one frame's cache files, not the set it belongs to.
     let cancel = CancelToken::never();
     FrameDiskCache::<I> {
-        directory: cache_dir,
+        scratch: &RunScratch::create(cache_dir).unwrap(),
+        kept: Some(&DecodeCache::open(cache_dir).unwrap()),
         admission: &FrameAdmission::new(dimensions, &cancel),
         context: &LoadContext::new(CancelToken::never(), u64::MAX),
         step: None,
@@ -31,8 +32,13 @@ fn cache_test_frame<I: StackableImage>(
     .frame(source, index, None)
 }
 
-fn spill_of<'a, I: StackableImage>(cache_dir: &'a Path, source: &Path) -> FrameSpill<'a> {
-    FrameSpill::cached(cache_dir, &fs::canonicalize(source).unwrap(), I::DECODER)
+/// The directory of the decode cache under `cache_dir`.
+fn kept_directory(cache_dir: &Path) -> PathBuf {
+    DecodeCache::open(cache_dir).unwrap().path().to_path_buf()
+}
+
+fn spill_of<'a, I: StackableImage>(kept: &'a Path, source: &Path) -> FrameSpill<'a> {
+    FrameSpill::cached(kept, &fs::canonicalize(source).unwrap(), I::DECODER)
 }
 
 /// Overwrite sample `index` of a spilled plane in place, as anything outside lumos could.
@@ -74,7 +80,8 @@ fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
 
     // A sample and the statistics changed on disk come back as they are: the frame was mapped and
     // its statistics read, not measured again.
-    let spill = spill_of::<LinearImage>(temp_dir.path(), &source);
+    let kept = kept_directory(temp_dir.path());
+    let spill = spill_of::<LinearImage>(&kept, &source);
     poke(&spill.channel_path(0), 2, 102.0);
     let key = CacheKey::new(
         CachedSource::of(&source).unwrap().identity,
@@ -124,7 +131,8 @@ fn cache_frame_validates_a_reused_frame() {
         .save(&source)
         .unwrap();
     drop(cache_test_frame::<LinearImage>(temp_dir.path(), &source, dims, 1).unwrap());
-    let spill = spill_of::<LinearImage>(temp_dir.path(), &source);
+    let kept = kept_directory(temp_dir.path());
+    let spill = spill_of::<LinearImage>(&kept, &source);
 
     poke(&spill.channel_path(0), 2, f32::INFINITY);
     let error = cache_test_frame::<LinearImage>(temp_dir.path(), &source, dims, 1).unwrap_err();
@@ -182,9 +190,10 @@ fn a_cache_written_by_one_decoder_is_not_reused_by_another() {
         .unwrap();
 
     drop(cache_test_frame::<LinearImage>(temp_dir.path(), &source, dims, 0).unwrap());
+    let kept = kept_directory(temp_dir.path());
     assert_ne!(
-        spill_of::<LinearImage>(temp_dir.path(), &source).channel_path(0),
-        spill_of::<CfaImage>(temp_dir.path(), &source).channel_path(0)
+        spill_of::<LinearImage>(&kept, &source).channel_path(0),
+        spill_of::<CfaImage>(&kept, &source).channel_path(0)
     );
     let error = cache_test_frame::<CfaImage>(temp_dir.path(), &source, dims, 0).unwrap_err();
     assert!(matches!(error, Error::ImageLoad(_)), "{error:?}");
@@ -226,11 +235,9 @@ fn a_kept_disk_cache_is_reused_by_the_next_run() {
     };
 
     let first = run();
-    let CacheTier::Spilled { directory, .. } = &first.core.tier else {
-        panic!("a one-byte budget spills");
-    };
-    let directory = directory.path().to_path_buf();
+    assert!(first.core.tier.spills(), "a one-byte budget spills");
     drop(first);
+    let directory = kept_directory(&config.ingest.cache_dir);
     let key = |path: &Path| {
         CacheKey::new(
             CachedSource::of(path).unwrap().identity,
