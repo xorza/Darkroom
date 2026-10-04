@@ -453,3 +453,59 @@ fn demosaic_spreads_flags_by_its_support() {
             .intersects(Flags::SATURATED)
     );
 }
+
+/// Neutral detail through a sensor whose channels respond with gains 1/2, 1 and 1/1.5 keeps less
+/// false colour when the camera balance is applied before the demosaic: the direction decisions
+/// compare neighbours of different colours, and on the unbalanced mosaic the cast reads as
+/// structure. Balanced back up, red and blue should equal green; their RMS difference over the
+/// interior, measured, is 0.0013 against 0.0156 for RCD on a star of σ 1.3 px and 0.0008 against
+/// 0.0032 on a soft edge, and 0.0045 against 0.023 and 0.0008 against 0.0094 for Markesteijn. The
+/// test asks for a third of the unbalanced error at most, below the least ratio measured, 4.2.
+#[test]
+fn a_balanced_demosaic_keeps_neutral_detail_neutral() {
+    let size = Size2us::new(48, 48);
+    let gains = [2.0f32, 1.0, 1.5];
+    let star = |x: usize, y: usize| {
+        let (dx, dy) = (x as f32 - 23.6, y as f32 - 24.3);
+        0.1 + 0.8 * (-(dx * dx + dy * dy) / (2.0 * 1.3 * 1.3)).exp()
+    };
+    let soft_edge =
+        |x: usize, y: usize| 0.5 + 0.3 * ((x as f32 + 0.37 * y as f32 - 30.0) / 1.5).tanh();
+    let scenes: [&dyn Fn(usize, usize) -> f32; 2] = [&star, &soft_edge];
+    for cfa_type in [
+        CfaType::Bayer(CfaPattern::Rggb),
+        CfaType::XTrans(XTRANS_PATTERN),
+    ] {
+        for (scene_index, scene) in scenes.iter().enumerate() {
+            let samples: Vec<f32> = (0..size.pixel_count())
+                .map(|index| {
+                    let (x, y) = (index % size.width, index / size.width);
+                    scene(x, y) / gains[cfa_type.color_at(Vec2us::new(x, y)) as usize]
+                })
+                .collect();
+            let false_colour = |balance: Option<[f32; 4]>| {
+                let mut cfa = make_cfa(size, samples.clone(), cfa_type);
+                cfa.metadata.camera_white_balance = balance;
+                let image = cfa.demosaic(&CancelToken::never()).unwrap();
+                let (mut sum, mut count) = (0.0f64, 0);
+                for y in 12..36 {
+                    for x in 12..36 {
+                        let green = image.channel(1)[(x, y)];
+                        for (channel, gain) in [(0, gains[0]), (2, gains[2])] {
+                            let error = image.channel(channel)[(x, y)] * gain - green;
+                            sum += f64::from(error * error);
+                            count += 1;
+                        }
+                    }
+                }
+                (sum / f64::from(count)).sqrt()
+            };
+            let balanced = false_colour(Some([2.0, 1.0, 1.5, 1.0]));
+            let unbalanced = false_colour(None);
+            assert!(
+                balanced * 3.0 < unbalanced,
+                "{cfa_type:?} scene {scene_index}: balanced {balanced}, unbalanced {unbalanced}"
+            );
+        }
+    }
+}

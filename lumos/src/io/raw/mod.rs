@@ -38,8 +38,15 @@ use crate::io::image::pixel_flags::{Flags, PixelFlags, SATURATION_FRACTION};
 use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
 use imaginarium::Buffer2;
 
-/// Camera-RAW extensions accepted by this decoder.
-pub const RAW_EXTENSIONS: &[&str] = &["raf", "cr2", "cr3", "nef", "arw", "dng"];
+/// Camera-RAW extensions accepted by this decoder: the formats LibRaw decodes, as digiKam's
+/// libkdcraw lists them, with Canon's CR3 and GoPro's GPR that later LibRaw added. `.hdr`, which
+/// LibRaw reads for Hasselblad, is left out: it names Radiance HDR images far more often.
+pub const RAW_EXTENSIONS: &[&str] = &[
+    "3fr", "arw", "bay", "bmq", "cap", "cine", "cr2", "cr3", "crw", "cs1", "dc2", "dcr", "dng",
+    "drf", "dsc", "erf", "fff", "gpr", "ia", "iiq", "k25", "kc2", "kdc", "mdc", "mef", "mos",
+    "mrw", "nef", "nrw", "orf", "pef", "ptx", "pxn", "qtk", "raf", "raw", "rdc", "rw2", "rwl",
+    "rwz", "sr2", "srf", "srw", "sti", "x3f",
+];
 
 /// An open libraw instance and, where the platform needed one, the file bytes it parses in place.
 ///
@@ -97,12 +104,21 @@ impl Drop for ProcessedImageGuard {
     }
 }
 
-fn canonical_camera_white_balance(
+/// The balance left to apply to a file's samples, normalized so its smallest multiplier is 1:
+/// none for a monochrome sensor; unity where LibRaw reports the as-shot balance already in the
+/// samples (`LIBRAW_ASWB_APPLIED` in `as_shot_wb_applied`: a Sony YCC pseudo-RAW, a Nikon sRAW, an
+/// in-camera multi-exposure), as `cam_mul` would apply it twice; else `cam_mul`, a missing second
+/// green and X-Trans's taken from the first, or none when a multiplier is not positive and finite.
+fn camera_white_balance(
     cfa_type: Option<CfaType>,
     cam_mul: [f32; 4],
+    as_shot_wb_applied: i32,
 ) -> Option<[f32; 4]> {
     if cfa_type == Some(CfaType::Mono) {
         return None;
+    }
+    if as_shot_wb_applied & 1 != 0 {
+        return Some([1.0; 4]);
     }
 
     let mut multipliers = cam_mul;
@@ -592,9 +608,14 @@ fn unpack(libraw: LibrawState, path: &Path) -> Result<UnpackedRaw, ImageError> {
     }
     .map_err(|source| raw_err(path, source.to_string()))?;
 
-    // SAFETY: inner is valid, and color.cam_mul is initialized after unpack.
-    let cam_mul = unsafe { (*inner).color.cam_mul };
-    let camera_white_balance = canonical_camera_white_balance(cfa_type, cam_mul);
+    // SAFETY: inner is valid, and the color struct is initialized after unpack.
+    let camera_white_balance = unsafe {
+        camera_white_balance(
+            cfa_type,
+            (*inner).color.cam_mul,
+            (*inner).color.as_shot_wb_applied,
+        )
+    };
     let iso = extract_iso(inner);
     // SAFETY: inner is valid after unpack.
     let shutter = unsafe { (*inner).other.shutter };

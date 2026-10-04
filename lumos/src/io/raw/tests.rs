@@ -286,24 +286,38 @@ fn the_fallback_keeps_the_sensors_rows_and_columns() {
 fn camera_white_balance_is_canonicalized() {
     let bayer = Some(CfaType::Bayer(CfaPattern::Rggb));
     assert_eq!(
-        canonical_camera_white_balance(bayer, [4.0, 2.0, 3.0, 2.0]),
+        camera_white_balance(bayer, [4.0, 2.0, 3.0, 2.0], 0),
         Some([2.0, 1.0, 1.5, 1.0])
     );
     assert_eq!(
-        canonical_camera_white_balance(bayer, [2.0, 1.0, 1.5, 0.0]),
+        camera_white_balance(bayer, [2.0, 1.0, 1.5, 0.0], 0),
         Some([2.0, 1.0, 1.5, 1.0])
     );
     assert_eq!(
-        canonical_camera_white_balance(Some(CfaType::XTrans(XTRANS_PATTERN)), [2.0, 1.0, 1.5, 9.0]),
+        camera_white_balance(
+            Some(CfaType::XTrans(XTRANS_PATTERN)),
+            [2.0, 1.0, 1.5, 9.0],
+            0
+        ),
         Some([2.0, 1.0, 1.5, 1.0])
     );
     assert_eq!(
-        canonical_camera_white_balance(Some(CfaType::Mono), [2.0, 1.0, 1.5, 1.0]),
+        camera_white_balance(Some(CfaType::Mono), [2.0, 1.0, 1.5, 1.0], 0),
+        None
+    );
+    // Samples that already carry the as-shot balance have unity left to apply, whatever the
+    // multipliers say; a monochrome sensor has none either way.
+    assert_eq!(
+        camera_white_balance(bayer, [4.0, 2.0, 3.0, 2.0], 1),
+        Some([1.0; 4])
+    );
+    assert_eq!(
+        camera_white_balance(Some(CfaType::Mono), [4.0, 2.0, 3.0, 2.0], 1),
         None
     );
     // A sensor LibRaw processes itself (a linear DNG) still reports its multipliers.
     assert_eq!(
-        canonical_camera_white_balance(None, [4.0, 2.0, 3.0, 2.0]),
+        camera_white_balance(None, [4.0, 2.0, 3.0, 2.0], 0),
         Some([2.0, 1.0, 1.5, 1.0])
     );
 }
@@ -320,7 +334,7 @@ fn invalid_camera_white_balance_is_absent() {
 
     for input in invalid {
         assert!(
-            canonical_camera_white_balance(cfa_type, input).is_none(),
+            camera_white_balance(cfa_type, input, 0).is_none(),
             "{input:?}"
         );
     }

@@ -18,10 +18,14 @@ pub struct ImageMetadata {
     /// `None` for a source with no such declaration.
     pub sample_type: Option<SampleType>,
     pub header_dimensions: Vec<usize>,
-    /// Camera-recorded white-balance multipliers `[R, G1, B, G2]`, normalized so the smallest
-    /// multiplier is `1.0`. X-Trans and RAW metadata without a second green duplicate `G1`.
+    /// The multipliers that balance the samples as stored, `[R, G1, B, G2]`, normalized so the
+    /// smallest is `1.0`: the camera's as-shot balance, or unity for a RAW file whose samples
+    /// already carry it (LibRaw's `as_shot_wb_applied`). X-Trans and RAW metadata without a second
+    /// green duplicate `G1`.
     ///
-    /// Metadata only: RAW decoding and calibration keep unity white balance.
+    /// The samples keep the sensor's balance: the demosaic balances by these before it
+    /// interpolates, as its direction decisions assume balanced channels, and divides them out
+    /// after.
     pub camera_white_balance: Option<[f32; 4]>,
     /// Filter name (e.g. "Ha", "OIII", "L", "R"). Critical for narrowband.
     pub filter: Option<String>,
