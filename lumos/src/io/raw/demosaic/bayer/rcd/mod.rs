@@ -99,11 +99,24 @@ fn estimate_green(neighbor_green: f32, center_lpf: f32, same_color_lpf: f32) -> 
     additive * (1.0 - ratio_weight) + weighted_ratio
 }
 
-/// Mean of the four diagonal neighbours of `idx` (stride `w1`): the direction-discriminator's
-/// local average, used to pull a pixel's V/H (or P/Q) direction estimate toward its neighbourhood.
+/// Mean of the four diagonal neighbours of `idx` (stride `w1`) in the V/H direction map: the
+/// discriminator's local average, which pulls a pixel's estimate toward its neighbourhood.
+///
+/// Summed in pairs, and the P/Q map's in order, as librtprocess sums them: the cross-check holds
+/// the output to librtprocess's bits.
 #[inline(always)]
-fn avg4_diag(buf: &[f32], idx: usize, w1: usize) -> f32 {
-    0.25 * (buf[idx - w1 - 1] + buf[idx - w1 + 1] + buf[idx + w1 - 1] + buf[idx + w1 + 1])
+fn vh_neighbourhood(vh_dir: &[f32], idx: usize, w1: usize) -> f32 {
+    0.25 * ((vh_dir[idx - w1 - 1] + vh_dir[idx - w1 + 1])
+        + (vh_dir[idx + w1 - 1] + vh_dir[idx + w1 + 1]))
+}
+
+/// [`vh_neighbourhood`] in the P/Q direction map.
+#[inline(always)]
+fn pq_neighbourhood(pq_dir: &[f32], idx: usize, w1: usize) -> f32 {
+    0.25 * (pq_dir[idx - w1 - 1]
+        + pq_dir[idx - w1 + 1]
+        + pq_dir[idx + w1 - 1]
+        + pq_dir[idx + w1 + 1])
 }
 
 /// RCD demosaic implementation.
@@ -260,26 +273,21 @@ pub(crate) fn demosaic(
                 let idx = ry * rw + rx;
 
                 let cfai = cfa[idx];
+                // In pairs, as librtprocess sums them.
                 let n_grad = EPS
-                    + (cfa[idx - w1] - cfa[idx + w1]).abs()
-                    + (cfai - cfa[idx - w2]).abs()
-                    + (cfa[idx - w1] - cfa[idx - w3]).abs()
-                    + (cfa[idx - w2] - cfa[idx - w4]).abs();
+                    + ((cfa[idx - w1] - cfa[idx + w1]).abs() + (cfai - cfa[idx - w2]).abs())
+                    + ((cfa[idx - w1] - cfa[idx - w3]).abs()
+                        + (cfa[idx - w2] - cfa[idx - w4]).abs());
                 let s_grad = EPS
-                    + (cfa[idx - w1] - cfa[idx + w1]).abs()
-                    + (cfai - cfa[idx + w2]).abs()
-                    + (cfa[idx + w1] - cfa[idx + w3]).abs()
-                    + (cfa[idx + w2] - cfa[idx + w4]).abs();
+                    + ((cfa[idx - w1] - cfa[idx + w1]).abs() + (cfai - cfa[idx + w2]).abs())
+                    + ((cfa[idx + w1] - cfa[idx + w3]).abs()
+                        + (cfa[idx + w2] - cfa[idx + w4]).abs());
                 let w_grad = EPS
-                    + (cfa[idx - 1] - cfa[idx + 1]).abs()
-                    + (cfai - cfa[idx - 2]).abs()
-                    + (cfa[idx - 1] - cfa[idx - 3]).abs()
-                    + (cfa[idx - 2] - cfa[idx - 4]).abs();
+                    + ((cfa[idx - 1] - cfa[idx + 1]).abs() + (cfai - cfa[idx - 2]).abs())
+                    + ((cfa[idx - 1] - cfa[idx - 3]).abs() + (cfa[idx - 2] - cfa[idx - 4]).abs());
                 let e_grad = EPS
-                    + (cfa[idx - 1] - cfa[idx + 1]).abs()
-                    + (cfai - cfa[idx + 2]).abs()
-                    + (cfa[idx + 1] - cfa[idx + 3]).abs()
-                    + (cfa[idx + 2] - cfa[idx + 4]).abs();
+                    + ((cfa[idx - 1] - cfa[idx + 1]).abs() + (cfai - cfa[idx + 2]).abs())
+                    + ((cfa[idx + 1] - cfa[idx + 3]).abs() + (cfa[idx + 2] - cfa[idx + 4]).abs());
 
                 let lpfi = lpf[idx];
                 let n_est = estimate_green(cfa[idx - w1], lpfi, lpf[idx - w2]);
@@ -291,7 +299,7 @@ pub(crate) fn demosaic(
                 let h_est = (w_grad * e_est + e_grad * w_est) / (e_grad + w_grad);
 
                 let vh_central = vh_dir[idx];
-                let vh_neighbourhood = avg4_diag(&vh_dir, idx, w1);
+                let vh_neighbourhood = vh_neighbourhood(&vh_dir, idx, w1);
                 let vh_disc = if (0.5 - vh_central).abs() < (0.5 - vh_neighbourhood).abs() {
                     vh_neighbourhood
                 } else {
@@ -330,8 +338,9 @@ pub(crate) fn demosaic(
                 if ry < 3 || ry + 3 >= rh {
                     return;
                 }
-                // The red and blue sites of this row, which step 4.1 reads back: the first
-                // non-green column at or past 3 (librtprocess: `3 + (fc(row, 1) & 1)`).
+                // The red and blue sites of this row, the three along each diagonal of which
+                // step 4.1 sums, as RCD 2.3's closed forms do. librtprocess keeps the filter on odd
+                // columns only, so its step 4.1 reads some of the three beside the diagonal.
                 let col_start = 3 + (pattern.color_at(Vec2us::new(1, ry)) & 1);
                 let mut rx = col_start;
                 while rx < rw.saturating_sub(3) {
@@ -472,7 +481,7 @@ unsafe fn process_step4_2_row(
         let idx = ry * rw + rx;
 
         let pq_central = pq_dir[idx];
-        let pq_neighbourhood = avg4_diag(pq_dir, idx, w1);
+        let pq_neighbourhood = pq_neighbourhood(pq_dir, idx, w1);
         let pq_disc = if (0.5 - pq_central).abs() < (0.5 - pq_neighbourhood).abs() {
             pq_neighbourhood
         } else {
@@ -551,7 +560,7 @@ fn step4_3_rb_at_green(
                 let idx = ry * rw + rx;
 
                 let vh_central = vh_dir[idx];
-                let vh_neighbourhood = avg4_diag(vh_dir, idx, w1);
+                let vh_neighbourhood = vh_neighbourhood(vh_dir, idx, w1);
                 let vh_disc = if (0.5 - vh_central).abs() < (0.5 - vh_neighbourhood).abs() {
                     vh_neighbourhood
                 } else {
