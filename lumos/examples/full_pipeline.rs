@@ -62,10 +62,10 @@ fn main() {
     )
     .expect("calibrate_align_stack failed");
     tracing::info!(
-        registered = result.alignment.registered,
+        registered = result.alignment.registered(),
         total = light_paths.len(),
         reference = result.alignment.reference,
-        dropped = ?result.alignment.dropped,
+        dropped = ?result.alignment.dropped(),
         width = result.product.image.width(),
         height = result.product.image.height(),
         elapsed = elapsed(step),

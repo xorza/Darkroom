@@ -10,7 +10,8 @@ use crate::star_detection::config::Config as StarDetectionConfig;
 /// How the reference frame (the alignment anchor) is chosen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Reference {
-    /// The frame with the most detected stars — the strongest registration anchor.
+    /// The sharpest frame — the lowest median FWHM — among those with the stars registration
+    /// needs, ties to the lowest index.
     #[default]
     Auto,
     /// A specific frame, by index into the input slice.
