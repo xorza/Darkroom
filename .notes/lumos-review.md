@@ -35,10 +35,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 
 ## 24. Hot-path performance
 
-- [ ] `24.1` **The X-Trans border fill is serial and visits every pixel** — `io/raw/demosaic/xtrans/markesteijn/border.rs:8-16`
-  - It fills a band of 12 or 18 px, but its loop walks all W×H pixels and skips the interior. `[C]`
-- [ ] `24.2` **The tiled Markesteijn has no bench** — `io/raw/demosaic/xtrans/markesteijn/tile.rs`
-  - Its loops are scalar, and it reads the pattern through `% 3` and `% 6` per pixel. Measure it before a change. `[P]`
 - [ ] `24.3` **RCD uses a full-frame arena, not tiles** — `io/raw/demosaic/bayer/rcd/mod.rs:146-176,329-332`
   - RawTherapee's RCD tiles at 194. RCD is fully scalar. `[P]`
 - [ ] `24.7` **The elliptical matched filter is a full k² 2-D convolution** — `star_detection/convolution/mod.rs:125-163`
@@ -514,6 +510,8 @@ Found on the way and fixed: the SNR floored its variance at `f32::EPSILON`, an a
 8. Done: Markesteijn runs one pass or three (`MarkesteijnPasses`, on `LoadContext` and `IngestConfig`; the provenance records the count), ported from librtprocess in tiles of 114 with YPbPr at both counts. Every tile writes only the part its passes compute in full: 9 px inside its edges for one pass, 15 for three, the least at which no written pixel reads a colour no stage computed, which a test finds by seeding the uncomputed channels with ±1000 at every phase of the pattern. librtprocess writes all but 8 px, so its pixels beside a seam depend on where the tiles lie; here a crop demosaics bit for bit as inside a larger frame, at shifted phases. The 2×2 green blocks take red and blue in all four of one pass's directions: dcraw's loop runs to the direction count in steps of two, so it fills two and leaves the other two at zero (LibRaw issue 441). The interior is librtprocess's to the bit at both counts, with those two lines changed and one tile over the frame (`internals/reference/markesteijn_librtprocess.py`). The demosaic holds the input, the output and a tile per worker, about 2 MB, in place of the full-frame arena of 22 planes; the planner's tests take a fixed 22-plane decode for their heavy case. The flag spread follows the pass count: an impulse changes pixels up to 11 px away at one pass and 16 at three (10 before the green-block fix). Item 16.12 is closed, and of 24.3 the Markesteijn part; 24.1 and 24.2 name the tiled code. Deviations: the margins are wider than librtprocess's, so a tile writes 96² or 84² of its 114², not 98².
 
 9. Done: a mean combine can write a `dispersion` plane, the variance of each pixel's weighted mean as its survivors' scatter shows it, `Σwᵢ(xᵢ − x̄)² / ((n − 1)·Σwᵢ)`, with no noise model. It is unbiased where each sample's variance is inversely proportional to its weight, and with equal weights it is the squared standard error of the mean; NaN below two survivors. On frames whose noise is what their model says, its mean over a field matches the variance plane's within the scatter of a scatter, and a model that halves every σ makes the two differ by 4. `QualityPlanes::STANDARD` (coverage, weight, variance) is the default, and `ALL` adds the dispersion; a median and a drizzle produce none. Deviation: the sum is taken about the combined mean, already known, in place of a Welford pass.
+
+10. Done: Markesteijn has a bench (`bench_markesteijn_demosaic`, 26 MP of random samples), at 352 ms for one pass and 926 ms for three on the 6800U's 16 threads. The derivative, homogeneity and 5×5 sum stages walk row slices, the sums as five columns and then five rows, which takes a quarter of the time that went to bounds checks (251 and 866 ms). The tile is 96 px, where its buffers stay in a core's L2: 245 and 703 ms, against 431 and 1152 ms at 144. The border fill walks only its band, row by row in parallel. Now 202 and 655 ms, every digest unchanged. Items 24.1 and 24.2 are closed.
 
 # Decisions
 

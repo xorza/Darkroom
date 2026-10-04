@@ -17,8 +17,8 @@
 //!
 //! Each stage reads only what the stage before computed, which lies further from a tile's edge
 //! than its own input, so a tile computes its pixels in full only a margin inside its edges.
-//! librtprocess's tiles of [`TILE`] write all but 8 pixels at each side, nearer than that, so its
-//! pixels beside a seam depend on where the tiles lie. Here each tile writes only the part its
+//! librtprocess's tiles write all but 8 pixels at each side, nearer than that, so its pixels
+//! beside a seam depend on where the tiles lie. Here each tile writes only the part its
 //! passes compute in full, and the tiles overlap by twice the margin. The pixels nearest the
 //! frame's edge, which no tile computes in full, come from their neighbours. The interior is librtprocess's to the bit, run as one tile over the frame, which a test holds
 //! it to.
@@ -38,8 +38,11 @@ use crate::io::raw::demosaic::xtrans::markesteijn::hex_table::HexTable;
 use crate::io::raw::demosaic::xtrans::markesteijn::tile::{Tile, TilePlace};
 use crate::math::size2us::Size2us;
 
-/// The side of a tile: librtprocess's 114.
-const TILE: usize = 114;
+/// The side of a tile, where its buffers stay in a core's cache. On a Ryzen 7 6800U (512 KiB of L2
+/// per core) a 26 MP frame demosaics in 245 ms at one pass and 703 ms at three with tiles of 96,
+/// against 251 and 866 ms at librtprocess's 114 and 431 and 1152 ms at 144; below 84 the overlap
+/// each tile computes again costs more than the cache saves.
+const TILE: usize = 96;
 
 /// How many passes the X-Trans demosaic makes: four directions, or eight with the green computed
 /// again from nearer pixels — LibRaw's default and RawTherapee's best, at about twice the time.
@@ -168,5 +171,7 @@ pub(crate) fn demosaic(
     Ok([r, g, b])
 }
 
+#[cfg(all(test, feature = "bench"))]
+mod bench;
 #[cfg(test)]
 mod tests;
