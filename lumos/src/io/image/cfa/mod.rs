@@ -318,6 +318,25 @@ impl CfaImage {
         if cfa_type != CfaType::Mono {
             metadata.quantization_sigma = None;
         }
+        // The direction decisions compare neighbours of different colours, so they read a colour
+        // cast as structure: dcraw, RawTherapee, darktable and ART all balance before they
+        // demosaic. The gains are relative to green, and come back out after, so the samples keep
+        // the sensor's balance.
+        let gains = (cfa_type != CfaType::Mono)
+            .then_some(metadata.camera_white_balance)
+            .flatten()
+            .map(|[red, green, blue, _]| [red / green, 1.0, blue / green]);
+        if let Some(gains) = gains {
+            self.data
+                .pixels_mut()
+                .par_chunks_mut(width)
+                .enumerate()
+                .for_each(|(y, row)| {
+                    for (x, sample) in row.iter_mut().enumerate() {
+                        *sample *= gains[cfa_type.color_at(Vec2us::new(x, y)) as usize];
+                    }
+                });
+        }
         let pixels = self.data.into_vec();
         // `NO_DATA` travels at its own extent, which `repair_nulls` above is what makes honest: these
         // pixels were reconstructed rather than measured, and the combine still has to know that.
@@ -326,6 +345,14 @@ impl CfaImage {
         if let Some(flags) = &mut flags {
             flags.dilate(cfa_type.demosaic_support(), Flags::NO_DATA);
         }
+
+        let unbalance = |planes: &mut [Vec<f32>; 3]| {
+            if let Some(gains) = gains {
+                for (plane, gain) in planes.iter_mut().zip(gains) {
+                    plane.par_iter_mut().for_each(|sample| *sample /= gain);
+                }
+            }
+        };
 
         Ok(match cfa_type {
             CfaType::Mono => {
@@ -338,7 +365,8 @@ impl CfaImage {
             }
             CfaType::Bayer(cfa_pattern) => {
                 let bayer = BayerImage::new(&pixels, Size2us::new(width, height), cfa_pattern);
-                let planes = rcd::demosaic(&bayer, cancel)?;
+                let mut planes = rcd::demosaic(&bayer, cancel)?;
+                unbalance(&mut planes);
                 let dims = ImageDimensions::new((width, height), 3);
                 let mut image = LinearImage::from_planar_channels(dims, planes);
                 image.metadata = metadata;
@@ -346,8 +374,9 @@ impl CfaImage {
                 image
             }
             CfaType::XTrans(pattern) => {
-                let planes =
+                let mut planes =
                     xtrans::demosaic(&pixels, Size2us::new(width, height), pattern, cancel)?;
+                unbalance(&mut planes);
 
                 let dims = ImageDimensions::new((width, height), 3);
                 let mut image = LinearImage::from_planar_channels(dims, planes);
