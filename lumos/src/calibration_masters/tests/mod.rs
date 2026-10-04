@@ -669,7 +669,8 @@ fn calibrate_subtracts_the_dark_or_else_the_bias() {
 /// subtracting puts `signal·v` over `k·v`, normalized by `k·mean(v)`. Every level is dyadic, so
 /// both subtractions and the mean are exact; the divisor `v/mean(v)` and the division round once
 /// each, so every pixel lands within ε of `signal · mean(v)`. A flat that lost the wrong
-/// subtractor would be off by the difference over `k·v`.
+/// subtractor would be off by the difference over `k·v`. A flat-dark marked calibrated holds its
+/// thermal 1/64 alone, so the flat holds the bias under it, 1/32 + 1/64 = 3/64, and loses both.
 #[test]
 fn calibrate_divides_by_the_flat_less_its_own_subtractor() {
     let size = Size2us::new(2, 1);
@@ -677,12 +678,14 @@ fn calibrate_divides_by_the_flat_less_its_own_subtractor() {
     let mean_v = f32::midpoint(vignetting[0], vignetting[1]);
     let (dark, bias, flat_dark) = (0.0625f32, 0.03125f32, 0.015_625f32);
     let level = |value| constant_cfa(size, value, CfaType::Mono);
-    for (name, has_dark, has_bias, has_flat_dark) in [
-        ("flat alone", false, false, false),
-        ("dark and bias", true, true, false),
-        ("dark and flat-dark", true, false, true),
-        ("bias and flat-dark", false, true, true),
-        ("all three", true, true, true),
+    for (name, has_dark, has_bias, has_flat_dark, thermal_flat_dark) in [
+        ("flat alone", false, false, false, false),
+        ("dark and bias", true, true, false, false),
+        ("dark and flat-dark", true, false, true, false),
+        ("bias and flat-dark", false, true, true, false),
+        ("all three", true, true, true, false),
+        ("bias and thermal flat-dark", false, true, true, true),
+        ("all three, thermal flat-dark", true, true, true, true),
     ] {
         let light_sub = if has_dark {
             dark
@@ -691,7 +694,9 @@ fn calibrate_divides_by_the_flat_less_its_own_subtractor() {
         } else {
             0.0
         };
-        let flat_sub = if has_flat_dark {
+        let flat_sub = if thermal_flat_dark {
+            bias + flat_dark
+        } else if has_flat_dark {
             flat_dark
         } else if has_bias {
             bias
@@ -706,7 +711,11 @@ fn calibrate_divides_by_the_flat_less_its_own_subtractor() {
             dark: has_dark.then(|| level(dark)),
             flat: Some(make_cfa(size, flat, CfaType::Mono)),
             bias: has_bias.then(|| level(bias)),
-            flat_dark: has_flat_dark.then(|| level(flat_dark)),
+            flat_dark: has_flat_dark.then(|| {
+                let mut flat_dark = level(flat_dark);
+                flat_dark.metadata.calibrated = thermal_flat_dark;
+                flat_dark
+            }),
         });
         let mut light = make_cfa(size, light, CfaType::Mono);
         masters.calibrate(&mut light).unwrap();

@@ -8,6 +8,7 @@ pub(crate) mod input_format;
 pub(crate) mod linear;
 pub(crate) mod linear_pixels;
 pub(crate) mod load_context;
+pub(crate) mod mosaic_noise;
 pub(crate) mod pixel_flags;
 pub(crate) mod preview_image;
 pub(crate) mod sample_domain;

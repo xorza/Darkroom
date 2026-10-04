@@ -217,9 +217,11 @@ impl FrameCache {
             .all(|frame| frame.source_stats.facts.saturation_flagged);
         let image = LinearImage {
             // The reference frame's metadata, with the combine's own quantization σ and saturation
-            // record: what the reference's decoder recorded describes one frame, not the stack.
+            // record, and no mosaic noise: what the reference's decoder and demosaic recorded
+            // describes one frame, not the stack.
             metadata: ImageMetadata {
                 quantization_sigma,
+                mosaic_noise: None,
                 saturation_flagged,
                 ..self.core.metadata.clone()
             },

@@ -24,6 +24,7 @@ use crate::io::image::image_provenance::{ColorProvenance, DemosaicProvenance};
 use crate::io::image::input_format::InputFormat;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
+use crate::io::image::mosaic_noise::MosaicNoise;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::io::image::sample_domain::DomainMap;
 use crate::io::raw;
@@ -327,9 +328,18 @@ impl CfaImage {
             provenance.color = cfa_type.demosaiced_color();
             provenance.demosaic = cfa_type.demosaic_provenance(passes);
         }
-        // Interpolation mixes samples, so one step's σ no longer bounds any of them. A mono sensor's
-        // samples pass through untouched and keep it.
+        // Interpolation correlates neighbouring samples, which hides part of their noise from any
+        // later measurement, and mixes them, so one step's σ no longer bounds any of them. A mono
+        // sensor's samples pass through untouched and keep it.
         if cfa_type != CfaType::Mono {
+            let flags = self.flags.as_ref();
+            metadata.mosaic_noise = Some(MosaicNoise::measure(
+                self.data.pixels(),
+                Size2us::new(width, height),
+                &cfa_type,
+                |index| flags.is_some_and(|flags| flags.at(index) != QualityFlags::default()),
+                metadata.quantization_sigma,
+            ));
             metadata.quantization_sigma = None;
         }
         // The direction decisions compare neighbours of different colours, so they read a colour

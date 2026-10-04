@@ -3,6 +3,7 @@
 use fits_well::image::SampleType;
 
 use crate::io::image::image_provenance::{DemosaicProvenance, ImageProvenance, RowOrder};
+use crate::io::image::mosaic_noise::MosaicNoise;
 use crate::io::image::sample_domain::SampleDomain;
 
 /// Metadata and provenance shared by sensor, linear, and preview image products.
@@ -76,6 +77,10 @@ pub struct ImageMetadata {
     /// the combine for a master. A demosaic clears it: interpolation mixes samples, so the bound no
     /// longer describes one of them.
     pub quantization_sigma: Option<f32>,
+    /// The white noise of the mosaic a demosaic made this frame from, which a measurement of the
+    /// frame would understate. Set by the demosaic; `None` for any frame not demosaiced, and for a
+    /// master, which the combine made.
+    pub mosaic_noise: Option<MosaicNoise>,
     /// Whether the decoder flagged every saturated pixel in the image's flags. A RAW decode and a
     /// FITS with a `DATAMAX` can; anything else leaves a consumer to test the samples itself.
     pub saturation_flagged: bool,

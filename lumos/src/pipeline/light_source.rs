@@ -95,9 +95,9 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
     /// Plan the run, then decode or take each light, check and measure it, detect its stars and
     /// park it where the tier says, as many at once as the plan allows.
     ///
-    /// The statistics are measured before interpolation correlates neighbouring pixels and would
-    /// understate the frame's noise, and while the frame is in hand: a spilled frame would
-    /// otherwise be read back for them.
+    /// The statistics are measured before the warp correlates neighbouring pixels, and while the
+    /// frame is in hand: a spilled frame would otherwise be read back for them. A demosaiced
+    /// light's noise is the one its demosaic measured on the mosaic.
     pub(crate) fn detect(
         self,
         config: &AlignStackConfig,
