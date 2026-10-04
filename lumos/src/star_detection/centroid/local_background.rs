@@ -8,7 +8,9 @@ use arrayvec::ArrayVec;
 use glam::DVec2;
 use imaginarium::Buffer2;
 
+use crate::bit_buffer2::BitBuffer2;
 use crate::math::statistics::ClippedStats;
+use crate::math::vec2us::Vec2us;
 use crate::star_detection::centroid::measure_grid::AnnulusRadii;
 
 /// Flat per-stamp sky: the residual's offset from zero and its noise, valid at the stamp scale.
@@ -26,6 +28,7 @@ impl LocalBackground {
     /// the star's flux out; `None` when fewer than 10 of its pixels lie in the frame.
     pub(super) fn measure(
         residual: &Buffer2<f32>,
+        no_data: Option<&BitBuffer2>,
         pos: DVec2,
         annulus: AnnulusRadii,
     ) -> Option<Self> {
@@ -36,14 +39,18 @@ impl LocalBackground {
         let (width, height) = (residual.width(), residual.height());
         let reach =
             isize::try_from(annulus.outer).expect("an annulus is a few hundred pixels across");
-        // The annulus pixels inside the frame, row by row, as image positions.
+        // The annulus pixels inside the frame that hold a measurement, row by row, as image
+        // positions.
         let pixels = || {
             (-reach..=reach).flat_map(move |dy| {
                 let y = usize::try_from(icy + dy).ok().filter(|&y| y < height);
                 (-reach..=reach).filter_map(move |dx| {
                     let r2 = dx.unsigned_abs().pow(2) + dy.unsigned_abs().pow(2);
                     let x = usize::try_from(icx + dx).ok().filter(|&x| x < width)?;
-                    (inner_r2..=outer_r2).contains(&r2).then_some((x, y?))
+                    let at = (x, y?);
+                    let measured =
+                        no_data.is_none_or(|no_data| !no_data.get_at(Vec2us::new(at.0, at.1)));
+                    ((inner_r2..=outer_r2).contains(&r2) && measured).then_some(at)
                 })
             })
         };

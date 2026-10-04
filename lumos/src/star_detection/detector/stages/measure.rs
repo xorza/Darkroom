@@ -4,7 +4,7 @@
 //! and quality metrics for each candidate star, on the measurement plane.
 
 use crate::star_detection::centroid::measure_grid::MeasureGrid;
-use crate::star_detection::centroid::measure_star;
+use crate::star_detection::centroid::{MeasurePlanes, measure_star};
 use crate::star_detection::config::measurement_config::MeasurementConfig;
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::detector::stages::prepared_frame::PreparedFrame;
@@ -39,9 +39,12 @@ pub(crate) fn measure(
         .par_iter()
         .filter_map(|region| {
             measure_star(
-                &frame.measure,
-                &frame.sky,
-                &frame.saturation,
+                MeasurePlanes {
+                    residual: &frame.measure,
+                    sky: &frame.sky,
+                    saturation: &frame.saturation,
+                    no_data: frame.no_data.as_ref(),
+                },
                 region,
                 config,
                 &grid,
