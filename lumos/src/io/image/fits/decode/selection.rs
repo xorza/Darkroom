@@ -142,16 +142,24 @@ pub(super) fn verify_selected_checksum(
     context: &LoadContext,
 ) -> Result<FitsChecksumProvenance, ImageError> {
     if policy == FitsChecksumPolicy::Ignore {
-        return Ok(FitsChecksumProvenance {
-            datasum: FitsChecksumState::NotChecked,
-            checksum: FitsChecksumState::NotChecked,
-        });
+        return Ok(FitsChecksumProvenance::NOT_CHECKED);
     }
     context.check_cancelled(path)?;
     let report = reader
         .verify_checksum(index)
         .map_err(|source| ImageError::fits(path, source))?;
     context.check_cancelled(path)?;
+    judge_checksum(report, index, path, policy)
+}
+
+/// HDU `index`'s checksum `report` under `policy`: an error where the policy refuses it, else the
+/// provenance it gives. `policy` is not [`FitsChecksumPolicy::Ignore`], which reads nothing.
+pub(super) fn judge_checksum(
+    report: ChecksumReport,
+    index: usize,
+    path: &Path,
+    policy: FitsChecksumPolicy,
+) -> Result<FitsChecksumProvenance, ImageError> {
     match policy {
         FitsChecksumPolicy::Ignore => unreachable!("ignore policy returned before verification"),
         FitsChecksumPolicy::VerifyIfPresent => {

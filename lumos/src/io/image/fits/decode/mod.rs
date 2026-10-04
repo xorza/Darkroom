@@ -181,10 +181,10 @@ pub(crate) fn read_cfa_hdu(
         &header,
         plan,
         selected,
-        checksum,
         path,
         context,
         &mut HduSections::new(reader, index),
+        |_| Ok(checksum),
     )?;
     if let Some(flags_hdu) = flags_hdu {
         context.check_cancelled(path)?;

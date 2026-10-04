@@ -76,8 +76,9 @@ impl SelectedFits {
         &self.reader.hdus()[self.selected.index].header
     }
 
-    /// Verify the checksum the options ask for — or, for an image Lumos wrote, require it — and
-    /// decode the selected image, with its flags extension, whose checksum is always required.
+    /// Decode the selected image, with the checksum the options ask for — or, for an image Lumos
+    /// wrote, require it — summed from the bytes the decode reads, and its flags extension, whose
+    /// checksum is always required.
     pub(super) fn read(
         mut self,
         path: &Path,
@@ -88,13 +89,6 @@ impl SelectedFits {
         } else {
             context.fits.checksum
         };
-        let checksum = selection::verify_selected_checksum(
-            &mut self.reader,
-            self.selected.index,
-            path,
-            policy,
-            context,
-        )?;
         if let Some(flags_hdu) = self.flags_hdu {
             selection::verify_selected_checksum(
                 &mut self.reader,
@@ -108,7 +102,7 @@ impl SelectedFits {
         let mut decoded = pixels::read_stream_hdu(
             &mut self.reader,
             self.selected,
-            checksum,
+            policy,
             path,
             self.plan,
             context,

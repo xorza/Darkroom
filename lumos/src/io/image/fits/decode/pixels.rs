@@ -18,12 +18,13 @@ use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode::DecodedFitsImage;
 use crate::io::image::fits::decode::hdu_sections::{HduSections, SectionRead};
 use crate::io::image::fits::decode::plan::FitsDecodePlan;
+use crate::io::image::fits::decode::selection;
 
 use crate::io::image::fits::metadata::domain_keywords;
 use crate::io::image::fits::metadata::{
     read_cfa_from_headers, read_metadata, read_row_order, read_text,
 };
-use crate::io::image::fits::options::FitsNullPolicy;
+use crate::io::image::fits::options::{FitsChecksumPolicy, FitsNullPolicy};
 use crate::io::image::fits::provenance::{
     FitsChecksumProvenance, FitsHduProvenance, FitsTransferProvenance,
 };
@@ -39,35 +40,59 @@ use crate::io::image::sample_domain::SampleDomain;
 use crate::math::statistics::median_mut;
 use crate::math::statistics::subsample::Subsample;
 
+/// Decode the selected HDU of a file, its checksum checked under `policy` from the bytes the decode
+/// reads, and judged before anything is returned: a refused checksum fails the load as before the
+/// decode it would, at the cost of the decode.
 pub(super) fn read_stream_hdu(
     reader: &mut StreamReader<File>,
     selected: FitsHduProvenance,
-    checksum: FitsChecksumProvenance,
+    policy: FitsChecksumPolicy,
     path: &Path,
     plan: FitsDecodePlan,
     context: &LoadContext,
 ) -> Result<DecodedFitsImage, ImageError> {
     let index = selected.index;
     let header = reader.hdus()[index].header.clone();
+    if policy == FitsChecksumPolicy::Ignore {
+        return read_decoded_hdu(
+            &header,
+            plan,
+            selected,
+            path,
+            context,
+            &mut HduSections::new(reader, index),
+            |_| Ok(FitsChecksumProvenance::NOT_CHECKED),
+        );
+    }
+    let mut sections =
+        HduSections::summed(reader, index).map_err(|source| ImageError::fits(path, source))?;
     read_decoded_hdu(
         &header,
         plan,
         selected,
-        checksum,
         path,
         context,
-        &mut HduSections::new(reader, index),
+        &mut sections,
+        |sections| {
+            context.check_cancelled(path)?;
+            let report = sections
+                .finish_checksum()
+                .map_err(|source| ImageError::fits(path, source))?;
+            selection::judge_checksum(report, index, path, policy)
+        },
     )
 }
 
-pub(super) fn read_decoded_hdu(
+/// Decode HDU `hdu` through `sections`, and take its checksum provenance from `checksum` once the
+/// planes are read.
+pub(super) fn read_decoded_hdu<S: SectionRead>(
     header: &Header,
     plan: FitsDecodePlan,
     hdu: FitsHduProvenance,
-    checksum: FitsChecksumProvenance,
     path: &Path,
     context: &LoadContext,
-    sections: &mut impl SectionRead,
+    sections: &mut S,
+    checksum: impl FnOnce(&mut S) -> Result<FitsChecksumProvenance, ImageError>,
 ) -> Result<DecodedFitsImage, ImageError> {
     tracing::debug!(
         source_bytes = plan.source_bytes,
@@ -105,6 +130,7 @@ pub(super) fn read_decoded_hdu(
     for channel in 0..channel_count {
         planes.push(read_fits_plane(path, &plan, channel, context, sections)?);
     }
+    let checksum = checksum(sections)?;
     let scan = planes
         .iter()
         .map(|plane| plane.scan)
