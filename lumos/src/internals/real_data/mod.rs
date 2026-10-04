@@ -82,7 +82,7 @@ pub(crate) fn display_master() -> LinearImage {
     let mut img = linear_master();
     NeutralizeBackground.apply(&mut img).unwrap();
     Stretch::auto_stf().apply(&mut img).unwrap();
-    Scnr::average_neutral().apply(&mut img).unwrap();
+    Scnr::average_neutral(1.0).apply(&mut img).unwrap();
     img
 }
 

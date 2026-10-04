@@ -90,7 +90,7 @@ fn bench_denoise(b: ::quickbench::Bencher) {
 fn bench_scnr(b: ::quickbench::Bencher) {
     let master = real_data::display_master();
     bench_op(b, &master, |img| {
-        Scnr::average_neutral().apply(img).unwrap();
+        Scnr::average_neutral(1.0).apply(img).unwrap();
     });
 }
 
