@@ -3,6 +3,7 @@ use crate::io::image::pixel_flags::{Flags, PixelFlags};
 use crate::registration::config::{InterpolationMethod, WarpParams};
 use crate::registration::resample;
 use crate::registration::resample::WarpBuffers;
+use crate::registration::resample::source_image::SourceImage;
 use crate::registration::transform::{Transform, WarpTransform};
 
 /// A constant read back through normalized weights: each f32 sum of up to 64 terms rounds by
@@ -298,11 +299,11 @@ fn warp_into_overwrites_dirty_buffers_completely() {
                     }
                     sentinel.coverage.pixels_mut().fill(f32::NAN);
                     sentinel.confidence.pixels_mut().fill(f32::NAN);
-                    sentinel.warp_into(image, transform, params);
+                    sentinel.warp_into(&SourceImage::of(image), transform, params);
 
                     let mut reused = WarpBuffers::new(dimensions);
-                    reused.warp_into(&previous, &transforms[0], params);
-                    reused.warp_into(image, transform, params);
+                    reused.warp_into(&SourceImage::of(&previous), &transforms[0], params);
+                    reused.warp_into(&SourceImage::of(image), transform, params);
 
                     for buffers in [&sentinel, &reused] {
                         for channel in 0..channels {

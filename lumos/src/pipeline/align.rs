@@ -143,7 +143,7 @@ pub(crate) fn register_warp_and_stack(
                 buffers,
                 FrameToPark {
                     index,
-                    image: detected.image.into_image(),
+                    image: detected.image,
                     stars: &detected.stars,
                     stats: detected.stats,
                 },
@@ -151,6 +151,9 @@ pub(crate) fn register_warp_and_stack(
         },
     )?;
     drop(registrar);
+    // A worker's buffers are a warped frame's worth each, and the combine sizes its chunks
+    // against the memory without them.
+    drop(warp_buffers);
 
     RegisteredSet {
         outcomes,

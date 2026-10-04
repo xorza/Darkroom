@@ -13,9 +13,9 @@ use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::io::image::linear::LinearImage;
 use crate::io::image::pixel_flags::{Flags, PixelFlags, Reach};
 use crate::math::vec2us::Vec2us;
+use crate::registration::resample::source_image::{SourceImage, SourcePlane};
 use crate::registration::resample::source_position::SourcePosition;
 
 /// The sources a null-aware warp samples, prepared once per masked frame: every channel with its
@@ -36,16 +36,18 @@ pub(crate) struct MaskedSources {
 impl MaskedSources {
     /// `image`'s sources under `flags`, which hold `NO_DATA`, for a kernel whose windows read
     /// `reach` around their cell.
-    pub(crate) fn new(image: &LinearImage, flags: &PixelFlags, reach: Reach) -> Self {
-        let zeroed = (0..image.channels())
-            .map(|channel| {
-                let source = image.channel(channel);
-                let mut zeroed = Buffer2::new_default(source.width(), source.height());
-                let width = source.width();
+    pub(crate) fn new(image: &SourceImage<'_>, flags: &PixelFlags, reach: Reach) -> Self {
+        let size = image.size();
+        let zeroed = image
+            .planes
+            .iter()
+            .map(|source| {
+                let mut zeroed = Buffer2::new_default(size.width, size.height);
+                let width = size.width;
                 zeroed
                     .pixels_mut()
                     .par_chunks_mut(width)
-                    .zip(source.pixels().par_chunks(width))
+                    .zip(source.pixels.par_chunks(width))
                     .enumerate()
                     .for_each(|(y, (row, source_row))| {
                         for (x, (value, &sample)) in row.iter_mut().zip(source_row).enumerate() {
@@ -71,13 +73,20 @@ impl MaskedSources {
     }
 
     /// The channels with their nulls at zero.
-    pub(crate) fn planes(&self) -> impl Iterator<Item = &Buffer2<f32>> {
-        self.zeroed.iter()
+    pub(crate) fn planes(&self) -> impl Iterator<Item = SourcePlane<'_>> {
+        self.zeroed.iter().map(Self::plane)
     }
 
     /// 1 where the source holds a measurement, 0 at a null.
-    pub(crate) const fn validity(&self) -> &Buffer2<f32> {
-        &self.validity
+    pub(crate) fn validity(&self) -> SourcePlane<'_> {
+        Self::plane(&self.validity)
+    }
+
+    fn plane(buffer: &Buffer2<f32>) -> SourcePlane<'_> {
+        SourcePlane {
+            pixels: buffer.pixels(),
+            width: buffer.width(),
+        }
     }
 
     /// Whether a window sampling `position` can read a null. A position in the footprint's rim

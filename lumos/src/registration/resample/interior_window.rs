@@ -4,11 +4,10 @@
 //! The sums are [`TapWindow`](crate::registration::resample::tap_window::TapWindow)'s for such a
 //! window, from the same weights; only the order of their additions differs.
 
-use imaginarium::Buffer2;
-
 use crate::math::size2us::Size2us;
 use crate::registration::resample::kernel::warp_kernel::{TapRange, WarpKernel};
 use crate::registration::resample::ringing_clamp::{LobeSums, LobeWeights};
+use crate::registration::resample::source_image::SourcePlane;
 use crate::registration::resample::source_position::SourcePosition;
 use crate::registration::resample::tap_window::RowLanes;
 use crate::simd::{F32_LANES, F32x8, Isa};
@@ -102,10 +101,10 @@ impl<V: F32x8> InteriorWindow<V> {
 
     /// `Σ L·f` over the window of `plane`.
     #[inline(always)]
-    pub(crate) fn total<S: Isa<F32 = V>>(&self, isa: S, plane: &Buffer2<f32>) -> f32 {
+    pub(crate) fn total<S: Isa<F32 = V>>(&self, isa: S, plane: SourcePlane<'_>) -> f32 {
         let mut sum = isa.splat_f32(0.0);
         for (j, &wy) in self.wy[..self.rows].iter().enumerate() {
-            let on_row = self.lanes.load(isa, plane.pixels(), self.row(plane, j)) * self.wx;
+            let on_row = self.lanes.load(isa, plane.pixels, self.row(plane, j)) * self.wx;
             sum = on_row.mul_add(isa.splat_f32(wy), sum);
         }
         sum.reduce_sum()
@@ -113,12 +112,12 @@ impl<V: F32x8> InteriorWindow<V> {
 
     /// The window of `plane` summed as [`LobeSums`] reads it.
     #[inline(always)]
-    pub(crate) fn lobe_sums<S: Isa<F32 = V>>(&self, isa: S, plane: &Buffer2<f32>) -> LobeSums {
+    pub(crate) fn lobe_sums<S: Isa<F32 = V>>(&self, isa: S, plane: SourcePlane<'_>) -> LobeSums {
         let zero = isa.splat_f32(0.0);
         let (x_positive, x_negative) = (self.wx.max(zero), self.wx.min(zero));
         let (mut positive, mut negative, mut below_zero) = (zero, zero, zero);
         for (j, &wy) in self.wy[..self.rows].iter().enumerate() {
-            let values = self.lanes.load(isa, plane.pixels(), self.row(plane, j));
+            let values = self.lanes.load(isa, plane.pixels, self.row(plane, j));
             let light = values.max(zero);
             let on_positive = light * x_positive;
             let on_negative = light * x_negative;
@@ -140,7 +139,7 @@ impl<V: F32x8> InteriorWindow<V> {
     }
 
     #[inline(always)]
-    const fn row(&self, plane: &Buffer2<f32>, j: usize) -> usize {
-        (self.y + j) * plane.width() + self.x
+    const fn row(&self, plane: SourcePlane<'_>, j: usize) -> usize {
+        (self.y + j) * plane.width + self.x
     }
 }

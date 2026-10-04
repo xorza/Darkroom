@@ -167,17 +167,27 @@ impl FrameTier {
     }
 
     /// Park a reference frame, which is stored unwarped: it carries quality planes only if its
-    /// source declared pixels with no measurement.
+    /// source declared pixels with no measurement. One already parked on disk keeps its planes
+    /// there.
     pub(crate) fn store_reference(
         &self,
-        image: LinearImage,
+        frame: PipelineFrame,
         source_stats: FrameStats,
     ) -> Result<StoredFrame, Error> {
-        let quality = FrameQuality::for_unwarped(&image);
-        match self {
-            Self::Ram => Ok(StoredFrame::from_memory(image, quality, source_stats)),
-            Self::Spill { scratch, .. } => {
+        match (self, frame) {
+            (Self::Ram, PipelineFrame::Resident(image)) => {
+                let quality = FrameQuality::for_unwarped(&image);
+                Ok(StoredFrame::from_memory(image, quality, source_stats))
+            }
+            (Self::Spill { scratch, .. }, PipelineFrame::Resident(image)) => {
+                let quality = FrameQuality::for_unwarped(&image);
                 StoredFrame::spill(scratch, &image, &quality, source_stats).map_err(Error::from)
+            }
+            (Self::Spill { scratch, .. }, PipelineFrame::Spilled(stored)) => stored
+                .into_frame(scratch, source_stats)
+                .map_err(Error::from),
+            (Self::Ram, PipelineFrame::Spilled(_)) => {
+                unreachable!("the RAM tier parks no frame on disk")
             }
         }
     }
