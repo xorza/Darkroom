@@ -226,7 +226,7 @@ fn register_snapshot() {
     let reference = field();
     let target = warped(&reference, dither()).image;
     let mut config = RegistrationConfig::default();
-    config.ransac.seed = Some(0x5EED);
+    config.ransac.seed = 0x5EED;
     let result = register(&detect(&reference), &detect(&target), &config).unwrap();
     let mut snapshot = Snapshot::default();
     snapshot

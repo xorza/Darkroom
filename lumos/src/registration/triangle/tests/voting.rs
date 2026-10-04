@@ -152,6 +152,33 @@ fn similar_triangles_vote_for_their_vertices() {
     }
 }
 
+/// A near-isosceles triangle whose two shorter sides trade places under noise still votes for its
+/// true vertices. Over (0, 0)–(10, 0), the apex 0.01 px left of the axis, (4.99, 3), makes the
+/// side from the origin the shortest, √33.9001 against √34.1001; 0.01 px right, the other side is.
+/// The roles of the base vertices swap, and with them the orientation each triangle reads, so the
+/// order alone pairs each base vertex with the other, and the orientation check refuses even that.
+/// The sides differ by 0.0017 of the longest, inside the 0.01 tolerance: the swapped order votes,
+/// once for each true pair.
+#[test]
+fn a_near_isosceles_triangle_votes_in_both_orders() {
+    let base = [DVec2::new(0.0, 0.0), DVec2::new(10.0, 0.0)];
+    let with_apex = |x: f64| [base[0], base[1], DVec2::new(x, 3.0)];
+    let reference = triangles_of(&with_apex(4.99), 3);
+    let target = triangles_of(&with_apex(5.01), 3);
+    let invariant_tree = build_invariant_tree(&reference).unwrap();
+    let votes = vote_for_correspondences(
+        &target,
+        &reference,
+        &invariant_tree,
+        &TriangleConfig::default(),
+        3,
+        3,
+    );
+    let mut counted = votes.nonzero_entries();
+    counted.sort_unstable();
+    assert_eq!(counted, vec![(0, 0, 1), (1, 1, 1), (2, 2, 1)]);
+}
+
 /// A triangle only votes for one within the ratio tolerance: an equilateral one, ratios (1, 1),
 /// against a thin one, ratios (0.5001, 0.5001), at 0.01, draws nothing.
 #[test]

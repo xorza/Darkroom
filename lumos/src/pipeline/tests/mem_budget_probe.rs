@@ -395,7 +395,7 @@ fn raw_lights_memory_probe() {
     println!("budget        {}", budget.label);
 
     let mut config = AlignStackConfig::default();
-    config.registration.ransac.seed = Some(1);
+    config.registration.ransac.seed = 1;
     config.stack.ingest.memory_override = budget.memory_override;
     // The gate opens as the preparing pass reports its last frame, so the peak splits into the
     // decode and detect pass and the register, warp and combine passes after it.

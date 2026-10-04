@@ -156,7 +156,12 @@ pub fn register(
 
     // Triangle matching
     let t0 = Instant::now();
-    let matches = match_triangles(&ref_tree, &target_tree, &config.matching.triangle);
+    let matches = match_triangles(
+        &ref_tree,
+        &target_tree,
+        &config.matching.triangle,
+        max_sigma,
+    );
     let triangle_ms = t0.elapsed().as_secs_f64() * 1000.0;
     tracing::debug!(
         triangle_ms,

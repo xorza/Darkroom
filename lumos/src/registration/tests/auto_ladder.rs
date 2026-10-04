@@ -6,8 +6,9 @@ use crate::internals::prelude::*;
 use crate::internals::synthetic::transforms::{add_star_noise, generate_random_stars};
 use crate::registration::distortion::sip::SipConfig;
 use crate::registration::ransac::config::RansacConfig;
+use crate::registration::register;
 use crate::registration::result::RegistrationError;
-use crate::registration::tests::helpers::{self, FWHM_TIGHT, map_stars, register};
+use crate::registration::tests::helpers::{self, FWHM_TIGHT, map_stars};
 use crate::registration::transform::{Transform, TransformModel};
 use crate::registration::{Config, TransformType};
 
@@ -147,14 +148,15 @@ fn a_rung_that_fit_survives_a_later_rung_failing() {
     let target = add_star_noise(
         &map_stars(&ref_stars, &Transform::translation(DVec2::new(5.0, -3.0))),
         1.4,
-        31,
+        32,
     );
     let config = Config {
         matching: helpers::matching_config(8, 6),
         sip: Some(SipConfig::default()),
-        // Sampling is seeded from the system otherwise, and this fixture is deliberately marginal.
+        // The fixture is deliberately marginal — 1.4 px of noise against a scorer scale of 0.67 px —
+        // so which rungs fit hangs on the samples drawn and the matches made.
         ransac: RansacConfig {
-            seed: Some(2),
+            seed: 2,
             ..Default::default()
         },
         ..Default::default()
@@ -222,7 +224,7 @@ fn every_rung_failing_reports_every_reason() {
             ..Default::default()
         }),
         ransac: RansacConfig {
-            seed: Some(2),
+            seed: 2,
             ..Default::default()
         },
         ..Default::default()

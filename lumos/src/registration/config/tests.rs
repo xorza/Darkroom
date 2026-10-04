@@ -30,7 +30,8 @@ fn config_default_values() {
     assert_eq!(config.ransac.max_iterations, 2000);
     assert_eq!(config.ransac.confidence, 0.995);
     assert_eq!(config.ransac.min_inlier_ratio, 0.3);
-    assert!(config.ransac.seed.is_none());
+    assert_eq!(config.ransac.seed, 0);
+    assert!(config.ransac.max_rotation.is_none());
     assert!(config.ransac.local_optimization);
     assert_eq!(config.ransac.lo_iterations, 10);
     assert_eq!(config.max_rms_error, 2.0);

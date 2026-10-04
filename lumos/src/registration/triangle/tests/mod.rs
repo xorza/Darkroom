@@ -27,15 +27,20 @@ const SQUARE_AND_CENTRE: [DVec2; 5] = [
     DVec2::new(5.0, 5.0),
 ];
 
-/// Five points none of whose ten triangles is within 0.05 of another on both ratios (pinned by
-/// `irregular_triangles_are_pairwise_dissimilar`), so a triangle can only vote for itself.
+/// Five points none of whose ten triangles is within 0.05 of another on both ratios, and none with
+/// two sides within 0.02 of each other (pinned by `irregular_triangles_are_pairwise_dissimilar`),
+/// so a triangle can only vote for itself, in its one vertex order.
 const IRREGULAR: [DVec2; 5] = [
     DVec2::new(0.0, 0.0),
     DVec2::new(30.0, 0.0),
-    DVec2::new(15.0, 40.0),
-    DVec2::new(50.0, 20.0),
-    DVec2::new(-10.0, 1.0),
+    DVec2::new(28.0, 42.0),
+    DVec2::new(12.0, 39.0),
+    DVec2::new(-5.0, 21.0),
 ];
+
+/// The noise scale the fixtures are matched at: the floor `max_sigma_from_fwhm` holds every
+/// registration to.
+const NOISE_SCALE: f64 = 0.5;
 
 /// A tree over `points`, which a fixture never leaves empty.
 fn tree(points: &[DVec2]) -> KdTree {
@@ -48,7 +53,7 @@ fn match_points(reference: &[DVec2], target: &[DVec2], config: &TriangleConfig) 
     if reference.is_empty() || target.is_empty() {
         return Vec::new();
     }
-    match_triangles(&tree(reference), &tree(target), config)
+    match_triangles(&tree(reference), &tree(target), config, NOISE_SCALE)
 }
 
 /// [`form_triangles_kdtree`] over a point set; no triangles for an empty one.
@@ -56,7 +61,7 @@ fn triangles_of(points: &[DVec2], k_neighbors: usize) -> Vec<Triangle> {
     if points.is_empty() {
         return Vec::new();
     }
-    form_triangles_kdtree(&tree(points), k_neighbors)
+    form_triangles_kdtree(&tree(points), k_neighbors, NOISE_SCALE)
 }
 
 /// Build a dense `VoteMatrix` from (`ref_idx`, `target_idx`, votes) entries.

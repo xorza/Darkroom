@@ -131,10 +131,35 @@ pub(super) fn build_invariant_tree(triangles: &[Triangle]) -> Option<KdTree> {
     KdTree::build(invariants)
 }
 
+/// The vertex permutations of a triangle: role `i` of one takes role `roles[i]` of the other, and
+/// an odd permutation reverses the orientation.
+const PERMUTATIONS: [([usize; 3], bool); 6] = [
+    ([0, 1, 2], false),
+    ([1, 2, 0], false),
+    ([2, 0, 1], false),
+    ([1, 0, 2], true),
+    ([0, 2, 1], true),
+    ([2, 1, 0], true),
+];
+
+/// Whether sides `i` and `j` of either triangle are equal within `tolerance` of the longest, so
+/// noise can trade their vertices' roles.
+fn tied(a: &Triangle, b: &Triangle, i: usize, j: usize, tolerance: f64) -> bool {
+    let ratio = |triangle: &Triangle, side: usize| match side {
+        0 => triangle.ratios.0,
+        1 => triangle.ratios.1,
+        _ => 1.0,
+    };
+    (ratio(a, i) - ratio(a, j)).abs() < tolerance || (ratio(b, i) - ratio(b, j)).abs() < tolerance
+}
+
 /// Vote for point correspondences based on matching triangles.
 ///
 /// For each pair of similar triangles, votes for vertex correspondences
-/// based on the sorted side lengths (vertices correspond by position in sorted order).
+/// based on the sorted side lengths (vertices correspond by position in sorted order). Where two
+/// sides are equal within the ratio tolerance, noise can swap their order, and with it the vertex
+/// roles and the orientation the triangle reads; every permutation that trades only such roles
+/// votes too, its orientation test reversed when it is odd.
 ///
 /// Uses dense matrix for small point counts (faster due to direct indexing),
 /// sparse `HashMap` for large counts (memory efficient).
@@ -168,17 +193,17 @@ pub(super) fn vote_for_correspondences(
                 continue;
             }
 
-            // Check orientation if required
-            if config.check_orientation && ref_tri.orientation != target_tri.orientation {
-                continue;
-            }
-
-            // Vote for all three vertex correspondences
-            // Since sides are sorted by length, vertices should correspond in order
-            for i in 0..3 {
-                let ref_pt = ref_tri.indices[i];
-                let target_pt = target_tri.indices[i];
-                vote_matrix.increment(ref_pt, target_pt);
+            let tolerance = config.ratio_tolerance;
+            for (roles, odd) in PERMUTATIONS {
+                let admissible = (0..3)
+                    .all(|i| roles[i] == i || tied(ref_tri, target_tri, i, roles[i], tolerance));
+                let same_orientation = ref_tri.orientation == target_tri.orientation;
+                if !admissible || (config.check_orientation && same_orientation == odd) {
+                    continue;
+                }
+                for (i, &role) in roles.iter().enumerate() {
+                    vote_matrix.increment(ref_tri.indices[i], target_tri.indices[role]);
+                }
             }
         }
     }

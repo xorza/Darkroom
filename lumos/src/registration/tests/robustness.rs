@@ -7,8 +7,9 @@ use crate::internals::synthetic::transforms::{
     add_spurious_star_list, add_star_noise, generate_random_stars,
 };
 use crate::registration::ransac::config::RansacConfig;
+use crate::registration::register;
 use crate::registration::spatial::KdTree;
-use crate::registration::tests::helpers::{self, FWHM_NORMAL, map_stars, max_deviation, register};
+use crate::registration::tests::helpers::{self, FWHM_NORMAL, map_stars, max_deviation};
 use crate::registration::transform::{Transform, TransformModel};
 use crate::registration::triangle::voting::{MatchIndices, PointMatch};
 use crate::registration::{Config, RegistrationError, TransformType, estimate_and_refine};
@@ -372,6 +373,31 @@ fn large_rotations_and_scales_register() {
     ]);
 }
 
+/// A meridian flip turns the field by 180°, and an alt-az session turns it by any angle: under the
+/// default limits, which set no rotation limit, both register exactly, for a rigid and a similarity
+/// model.
+#[test]
+fn a_meridian_flip_registers_under_the_default_limits() {
+    use TransformType::*;
+    run(&[
+        Scenario::new(
+            "180°",
+            Euclidean,
+            about_centre(1000.0, DVec2::new(12.0, -7.0), 180.0, 1.0),
+        ),
+        Scenario::new(
+            "180° at scale 1.01",
+            Similarity,
+            about_centre(1000.0, DVec2::new(-30.0, 4.0), 180.0, 1.01),
+        ),
+        Scenario::new(
+            "37°",
+            Euclidean,
+            about_centre(1000.0, DVec2::new(5.0, 9.0), 37.0, 1.0),
+        ),
+    ]);
+}
+
 /// Missing and spurious stars are left out of the match, and the fit stays exact.
 #[test]
 fn missing_and_spurious_stars_are_left_out() {
@@ -617,7 +643,7 @@ fn a_fit_on_fewer_inliers_than_min_matches_is_refused() {
         transform_type: TransformModel::Fixed(TransformType::Translation),
         ..Config::default()
     };
-    config.ransac.seed = Some(1);
+    config.ransac.seed = 1;
     let error = estimate_and_refine(
         &reference,
         &KdTree::build(target).unwrap(),
