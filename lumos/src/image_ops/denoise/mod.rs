@@ -264,7 +264,7 @@ enum PlaneNoise<'a> {
     Variance(&'a [f32]),
 }
 
-/// Reusable buffers for [`denoise_plane`], allocated once and shared across channels.
+/// Reusable buffers for [`Denoise::denoise_plane`], allocated once and shared across channels.
 #[derive(Debug)]
 struct DenoiseScratch {
     /// Current smooth `c_j` (and, after the loop, the coarse residual `c_J`).

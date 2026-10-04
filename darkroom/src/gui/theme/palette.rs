@@ -18,7 +18,7 @@ const AYU_GRAPHITE: &str = include_str!("../../../assets/ayu-graphite.ron");
 ///
 /// Every entry is a *resting* colour. A port lifts under the pointer by
 /// blending toward white (see
-/// [`port_color`](crate::gui::pane::graph::node::port_color)), because the
+/// [`hover_lift`](crate::gui::theme::color::hover_lift)), because the
 /// palette's brightest tint has nothing above it to lift into.
 ///
 /// **Roles may share a hue; roles that share a *context* may not.** The

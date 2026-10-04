@@ -29,7 +29,7 @@
 //!    Per-color tile medians are bilinearly interpolated into a smooth dark-current model before
 //!    thresholding, which keeps isolated pixels and same-color clusters as positive residuals. A
 //!    pixel the model calls hot is confirmed against a robust plane through its colour's photosites
-//!    6 to 8 pixels around it ([`RingReference`](ring_reference::RingReference)), so amp glow that
+//!    6 to 8 pixels around it ([`RingReference`]), so amp glow that
 //!    curves faster than the tiles, or rises past the outer ones, does not become a defect.
 //!
 //! 5. **Adaptive sampling for large images:**

@@ -189,8 +189,8 @@ impl<P> FrameQuality<P> {
     ///
     /// Its inverse, and here for the same reason: which plane is which is decided in this file
     /// alone, so a writer and a later reader cannot disagree. The caller establishes that both are
-    /// there — a commit that
-    /// [`carries_quality`](crate::frame_store::frame_spill::Committed::carries_quality), with both
+    /// there — a commit whose
+    /// [`Carries::quality`](crate::frame_store::frame_spill::Carries::quality) is set, with both
     /// planes [on disk](crate::frame_store::frame_spill::FrameSpill::quality_on_disk) — which is
     /// why this reads a plane rather than looking for one.
     pub(crate) fn read_spilled<E>(

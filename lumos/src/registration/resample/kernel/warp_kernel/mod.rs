@@ -261,8 +261,8 @@ impl WarpKernel {
     }
 }
 
-/// Catmull-Rom (`A = −½`) at non-negative distances, each lane in the scalar
-/// [`bicubic_kernel`](crate::registration::resample::kernel::internals::bicubic_kernel)'s operation order.
+/// Catmull-Rom (`A = −½`) at non-negative distances, each lane in the operation order of the scalar
+/// test reference, `kernel::internals::bicubic_kernel`.
 #[inline(always)]
 fn bicubic_lanes<S: Isa>(isa: S, x: S::F32) -> S::F32 {
     const A: f32 = -0.5;

@@ -310,7 +310,7 @@ where
 }
 
 /// The first custom type among `outputs` that `codecs` cannot encode — the
-/// verdict [`write`] would reach, answered before anything is written.
+/// verdict [`write()`] would reach, answered before anything is written.
 pub(super) fn unsupported_type(outputs: &[DynamicValue], codecs: &Codecs) -> Option<TypeId> {
     outputs.iter().find_map(|value| match value {
         DynamicValue::Custom(value) if codecs.get(value.type_id()).is_none() => {

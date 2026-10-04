@@ -5,11 +5,11 @@
 //! addressed by name, which is what a fixture reaches for. [`calls`] is the
 //! counter its counted bodies are built on.
 //!
-//! What is left in this file is [`with_stub_lambda`], the one thing the
-//! harness deliberately cannot supply: [`NodeSpec`](graph::NodeSpec) names
-//! ports `in0`/`out0` by position, so a test about how an editor *renders* a
-//! port has to state its own [`Func`] — and `Library::add` rejects one with no
-//! implementation.
+//! What is left in this file is [`stub_func`] and [`stub_event`], the
+//! do-nothing bodies the harness deliberately cannot supply:
+//! [`NodeSpec`](graph::NodeSpec) names ports `in0`/`out0` by position, so a
+//! test about how an editor *renders* a port has to state its own [`Func`] —
+//! and a `Func` cannot be built without an implementation.
 
 #[cfg(test)]
 pub(crate) mod blob;
