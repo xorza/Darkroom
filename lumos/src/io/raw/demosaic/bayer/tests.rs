@@ -3,7 +3,6 @@
 use crate::internals::prelude::*;
 use crate::io::raw::demosaic::bayer::rcd::INTERPOLATED_BORDER;
 use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern, rcd};
-use crate::io::raw::demosaic::sensor_layout::SensorLayout;
 use rayon::ThreadPoolBuilder;
 
 /// Every phase round-trips through its `BAYERPAT` spelling, in any case and with blanks around
@@ -95,108 +94,26 @@ fn flip_both_axes() {
     );
 }
 
+/// A frame must hold one sample per pixel of a size that is not empty.
 #[test]
-fn raw_origin_pattern_preserves_visible_color_for_every_margin_phase() {
-    let visible_patterns = [
-        CfaPattern::Rggb,
-        CfaPattern::Bggr,
-        CfaPattern::Grbg,
-        CfaPattern::Gbrg,
-    ];
-
-    for visible in visible_patterns {
-        for top_margin in 0..2 {
-            for left_margin in 0..2 {
-                let raw = visible.at_raw_origin(top_margin, left_margin);
-                for y in 0..4 {
-                    for x in 0..4 {
-                        assert_eq!(
-                            raw.color_at(Vec2us::new(x + left_margin, y + top_margin)),
-                            visible.color_at(Vec2us::new(x, y)),
-                            "{visible:?}, margin ({top_margin}, {left_margin}), ({y}, {x})"
-                        );
-                    }
-                }
-            }
-        }
+fn a_bayer_image_holds_its_size_in_samples() {
+    let bayer = BayerImage::new(&[0.0; 6], Size2us::new(3, 2), CfaPattern::Rggb);
+    assert_eq!(bayer.size, Size2us::new(3, 2));
+    for (samples, size) in [
+        (4, Size2us::new(0, 2)),
+        (4, Size2us::new(2, 0)),
+        (3, Size2us::new(2, 2)),
+    ] {
+        let data = vec![0.0f32; samples];
+        let refused = std::panic::catch_unwind(|| {
+            BayerImage::new(&data, size, CfaPattern::Rggb);
+        });
+        assert!(refused.is_err(), "{samples} samples for {size:?}");
     }
 }
 
-#[test]
-#[should_panic(expected = "Output dimensions must be non-zero")]
-fn bayer_image_zero_width() {
-    let data = vec![0.0f32; 4];
-    let layout = SensorLayout {
-        raw: Size2us::new(2, 2),
-        active: Size2us::new(0, 2),
-        margin: Vec2us::ZERO,
-    };
-    BayerImage::with_margins(&data, layout, CfaPattern::Rggb);
-}
-
-#[test]
-#[should_panic(expected = "Output dimensions must be non-zero")]
-fn bayer_image_zero_height() {
-    let data = vec![0.0f32; 4];
-    let layout = SensorLayout {
-        raw: Size2us::new(2, 2),
-        active: Size2us::new(2, 0),
-        margin: Vec2us::ZERO,
-    };
-    BayerImage::with_margins(&data, layout, CfaPattern::Rggb);
-}
-
-#[test]
-#[should_panic(expected = "Data length")]
-fn bayer_image_wrong_data_length() {
-    let data = vec![0.0f32; 3];
-    let size = Size2us::new(2, 2);
-    BayerImage::with_margins(&data, SensorLayout::cropped(size), CfaPattern::Rggb);
-}
-
-#[test]
-#[should_panic(expected = "Top margin")]
-fn bayer_image_margin_exceeds_height() {
-    let data = vec![0.0f32; 4];
-    let size = Size2us::new(2, 2);
-    let layout = SensorLayout {
-        raw: size,
-        active: size,
-        margin: Vec2us::new(0, 1),
-    };
-    BayerImage::with_margins(&data, layout, CfaPattern::Rggb);
-}
-
-#[test]
-#[should_panic(expected = "Left margin")]
-fn bayer_image_margin_exceeds_width() {
-    let data = vec![0.0f32; 4];
-    let size = Size2us::new(2, 2);
-    let layout = SensorLayout {
-        raw: size,
-        active: size,
-        margin: Vec2us::new(1, 0),
-    };
-    BayerImage::with_margins(&data, layout, CfaPattern::Rggb);
-}
-
-#[test]
-fn bayer_image_valid() {
-    let data = vec![0.0f32; 16];
-    let layout = SensorLayout {
-        raw: Size2us::new(4, 4),
-        active: Size2us::new(2, 2),
-        margin: Vec2us::new(1, 1),
-    };
-    let bayer = BayerImage::with_margins(&data, layout, CfaPattern::Rggb);
-    assert_eq!(bayer.layout.raw, Size2us::new(4, 4));
-    assert_eq!(bayer.layout.active, Size2us::new(2, 2));
-    assert_eq!(bayer.layout.margin, Vec2us::new(1, 1));
-}
-
-/// Helper: create a `BayerImage` from a flat CFA array with no margins.
 fn make_bayer(data: &[f32], size: Size2us, cfa: CfaPattern) -> BayerImage<'_> {
-    BayerImage::with_margins(data, SensorLayout::cropped(size), cfa)
+    BayerImage::new(data, size, cfa)
 }
 
 #[test]
@@ -257,45 +174,32 @@ fn mosaic(size: Size2us, pattern: CfaPattern, scene: impl Fn(Vec2us, usize) -> f
         .collect()
 }
 
-/// A constant colour per channel — uniform grey and two distinct (R, G, B) — through every phase,
-/// with and without masked margins, comes back as itself at every pixel, the interpolated border
-/// included, and each native sample exactly.
+/// A constant colour per channel — uniform grey and two distinct (R, G, B) — through every phase
+/// comes back as itself at every pixel, the interpolated border included, and each native sample
+/// exactly.
 ///
 /// The ratio correction scales by `2·lpf / (EPS + 2·lpf)`, off by `EPS / (2·lpf)` relative; these
 /// colours put every low-pass value at 2 or above, so each of the two chained corrections is off
 /// by at most 2.5e-6 of a value below 1, plus a few f32 roundings: under 5e-6 together. The border
 /// averages equal neighbours and is exact up to rounding.
 #[test]
-fn constant_colour_reconstructs_on_every_phase_and_margin() {
-    let active = Size2us::new(40, 36);
+fn constant_colour_reconstructs_on_every_phase() {
+    let size = Size2us::new(40, 36);
     for pattern in CfaPattern::ALL {
         for colour in [[0.5; 3], [0.8, 0.5, 0.2], [0.1, 0.9, 0.4]] {
-            for margin in [Vec2us::ZERO, Vec2us::new(5, 4), Vec2us::new(4, 5)] {
-                let raw = Size2us::new(active.width + 2 * margin.x, active.height + 2 * margin.y);
-                let raw_pattern = pattern.at_raw_origin(margin.y, margin.x);
-                let data = mosaic(raw, raw_pattern, |_, channel| colour[channel]);
-                let layout = SensorLayout {
-                    raw,
-                    active,
-                    margin,
-                };
-                let planes = rcd::demosaic(
-                    &BayerImage::with_margins(&data, layout, raw_pattern),
-                    &CancelToken::never(),
-                )
-                .unwrap();
-                for (index, pos) in (0..active.pixel_count()).map(|i| (i, active.point_of(i))) {
-                    let native = pattern.color_at(pos);
-                    assert_eq!(planes[native][index].to_bits(), colour[native].to_bits());
-                    for channel in 0..3 {
-                        let value = planes[channel][index];
-                        assert_close!(
-                            value,
-                            colour[channel],
-                            5e-6,
-                            "{pattern:?} {colour:?} margin {margin:?} channel {channel} at {pos:?}: {value}"
-                        );
-                    }
+            let data = mosaic(size, pattern, |_, channel| colour[channel]);
+            let planes = demosaic(&data, size, pattern);
+            for (index, pos) in (0..size.pixel_count()).map(|i| (i, size.point_of(i))) {
+                let native = pattern.color_at(pos);
+                assert_eq!(planes[native][index].to_bits(), colour[native].to_bits());
+                for channel in 0..3 {
+                    let value = planes[channel][index];
+                    assert_close!(
+                        value,
+                        colour[channel],
+                        5e-6,
+                        "{pattern:?} {colour:?} channel {channel} at {pos:?}: {value}"
+                    );
                 }
             }
         }
@@ -322,7 +226,8 @@ fn rcd_beyond_the_border_matches_a_larger_frame() {
         .collect();
     for pattern in CfaPattern::ALL {
         let whole = demosaic(&samples, large, pattern);
-        let part = demosaic(&crop, small, pattern.at_raw_origin(offset, offset));
+        // An even offset keeps the crop on the larger frame's phase.
+        let part = demosaic(&crop, small, pattern);
         for (channel, (part_plane, whole_plane)) in part.iter().zip(&whole).enumerate() {
             for (index, value) in part_plane.iter().enumerate() {
                 let pos = small.point_of(index);

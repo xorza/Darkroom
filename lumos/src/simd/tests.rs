@@ -122,10 +122,6 @@ impl Kernel for Battery {
                 isa.load_f32_at(&concatenated, start),
             );
         }
-        f32s(
-            "u16".to_string(),
-            isa.load_u16(&[0, 1, 2, 255, 256, 4095, 65_534, 65_535]),
-        );
         let integers = isa.load_f64(&[-1022.0, -1.0, 0.0, 1023.0]);
         f64s.push(("pow2i".to_string(), integers.pow2i()));
         f64s.push((

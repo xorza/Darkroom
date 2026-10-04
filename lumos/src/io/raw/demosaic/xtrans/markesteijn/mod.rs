@@ -127,14 +127,14 @@ pub(crate) fn demosaic(
 ) -> Result<[Vec<f32>; 3], Cancelled> {
     use std::time::Instant;
 
-    let width = xtrans.layout.active.width;
-    let height = xtrans.layout.active.height;
+    let width = xtrans.size.width;
+    let height = xtrans.size.height;
     let pixels = width * height;
 
     // Build lookup tables
-    let hex = HexLookup::new(&xtrans.raw_pattern);
+    let hex = HexLookup::new(&xtrans.pattern);
     // Allocate all working memory in one shot
-    let mut arena = DemosaicArena::new(xtrans.layout.active);
+    let mut arena = DemosaicArena::new(xtrans.size);
 
     // Step 1: Compute green min/max bounds for non-green pixels
     // Writes: Region C (gmin), Region D (gmax)
@@ -205,7 +205,7 @@ pub(crate) fn demosaic(
         let regions = arena.regions();
         // gmin is dead after Step 2, so its words now hold four `u8` homogeneity counts each.
         let homo: &mut [u8] = bytemuck::cast_slice_mut(regions.c);
-        markesteijn_steps::compute_homogeneity(regions.b, xtrans.layout.active, homo, regions.d);
+        markesteijn_steps::compute_homogeneity(regions.b, xtrans.size, homo, regions.d);
     }
     tracing::debug!(
         "  Step 5 (homogeneity): {:.1}ms",
