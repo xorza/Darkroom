@@ -97,7 +97,7 @@ fn moment_metrics_of_gaussian_stars() {
             angle: 0.0,
         };
         let pixels = SyntheticStar::new(at.as_vec2(), 0.8, profile).stamp(size, 0.1);
-        let radius = compute_stamp_radius(sigma_to_fwhm(sigma_x.max(sigma_y)));
+        let radius = MeasureGrid::stamp_radius(sigma_to_fwhm(sigma_x.max(sigma_y)));
         let star = Measured::flat(&pixels, 0.1, 0.01)
             .compute(at, radius)
             .expect("a star");

@@ -75,14 +75,13 @@ impl FitNoise {
     ///
     /// Down-weights the shot-noisy bright core so the fit is the ML estimator instead of
     /// over-weighting high-signal pixels (which biases the sub-pixel centroid/FWHM/flux). The
-    /// variance is floored so a zero-variance pixel cannot produce an infinite weight.
+    /// caller holds `sky_noise` to the frame's floor, so the variance is positive in any domain.
     #[inline]
     pub(super) fn weight(&self, z: f64, background: f64) -> f64 {
         let signal = (z - background).max(0.0);
         1.0 / self
             .noise_model
             .variance_normalized(signal, f64::from(self.sky_noise), 1)
-            .max(1e-12)
     }
 }
 
@@ -225,16 +224,18 @@ impl StampFit {
         Some(model.fit(self.data(grid), first.params).unwrap_or(first))
     }
 
-    /// Amplitude seed: the stamp's peak above the sky, floored so the optimizer starts positive.
-    pub(super) fn amplitude_seed(&self, background: f32) -> f64 {
-        f64::from((self.stamp.peak - background).max(0.01))
+    /// Amplitude seed: the stamp's peak above the sky; `None` when the peak is not above it, and
+    /// the stamp holds no star to fit.
+    pub(super) fn amplitude_seed(&self) -> Option<f64> {
+        let seed = f64::from(self.stamp.peak) - self.sky;
+        (seed > 0.0).then_some(seed)
     }
 
-    /// The smallest amplitude a fit may take: a millionth of the seed, so positive — a profile of
-    /// zero amplitude has no centre or width to fit — and relative to the star rather than to the
-    /// data's units. A fit pinned there found no star in the stamp.
-    pub(super) fn min_amplitude(&self, background: f32) -> f64 {
-        1e-6 * self.amplitude_seed(background)
+    /// The smallest amplitude a fit from `seed` may take: a millionth of it, so positive — a
+    /// profile of zero amplitude has no centre or width to fit — and relative to the star rather
+    /// than to the data's units. A fit pinned there found no star in the stamp.
+    pub(super) fn min_amplitude(seed: f64) -> f64 {
+        1e-6 * seed
     }
 
     /// Lift a fitted centre out of the stamp frame back into image coordinates.

@@ -22,10 +22,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 
 **Failure scenario:** 16-bit data in a 32-bit integer FITS normalizes by 2³²−1, so σ ≈ 2e-9. Every floor below then trips.
 
-- [ ] `2.4` **Fit weight floor 1e-12** — `star_detection/centroid/stamp.rs:84`
-  - On such data every weight is equal, so the "weighted" fit runs unweighted. `[C]`
-- [ ] `2.6` **Amplitude seed floored at 0.01 normalized** — `star_detection/centroid/stamp.rs:228-237`
-  - 0.01 is 655 ADU at 16 bit. The fit costs about one extra LM iteration. `[C]`
 
 ## 3. The default registration prior rejects real sessions
 
@@ -67,9 +63,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 
 ## 11. Centroids stop before they converge
 
-- [ ] `11.1` **The default `WeightedMoments` stops after 10 plain fixed-point steps** — `star_detection/centroid/mod.rs:84,299-316,397`
-  - The error contracts by c = σ_s²/(σ_s²+σ_w²) per step (0.61 at the matched window). Reaching 1e-4 needs ≈15 steps.
-  - Bias at a 0.4 px start offset:
 
     | Star FWHM (window 3) | Bias after 10 steps | Converged |
     |---|---|---|
@@ -80,19 +73,9 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
   - Wide stars in field corners are hit hardest.
   - SExtractor XWIN uses `x += 2·Σ…` with σ_w = σ_s, which is exact in one step for a Gaussian. The adaptive-moments Newton step scales the shift by σ_w²/(σ_w² − C_obs).
   - A step-size stop also understates the remaining error by c/(1−c). `[C]`
-- [ ] `11.2` **A rejected or non-converged fit falls back to the 2-step moments seed** — `star_detection/centroid/mod.rs:179-185,236-253`
-  - Bias −0.155 px at a 0.4 px offset, up to −0.30 px for wide stars.
-  - This happens for undersampled stars, saturated stars, close pairs, and LM giving up. `[C]`
-- [ ] `11.3` **`LocalAnnulus`: the moments run before the local sky is measured and never subtract it** — `star_detection/centroid/mod.rs:185` vs `:209`
-  - A pedestal of 0.2× peak raises the bias from −0.0035 to −0.0146 px. `[C]`
-- [ ] `11.4` **`max(0)` clipping adds a rectified-noise pedestal to the moments** — `star_detection/centroid/mod.rs:381`
-  - Contraction slows. SExtractor uses signed values. `[P]`
 - [ ] `11.5` **The PSF is evaluated at pixel centres, not integrated over the pixel** — `star_detection/centroid/gaussian_fit/mod.rs:271-277`, `star_detection/centroid/moffat_fit/mod.rs:156-161`, `star_detection/centroid/covariance.rs`
   - FWHM bias: +16% at FWHM 1.2, +5.9% at 2, +2.6% at 3. `MIN_SIGMA` allows fits down to FWHM 1.18, where this dominates.
   - For a Gaussian, an erf-integrated model is exact. `[P]`
-- [ ] `11.6` **A fit may move up to the full `stamp_radius` and is never re-stamped** — `star_detection/centroid/mod.rs:139-141` vs `:400` `[P]`
-- [ ] `11.7` **The annulus starts at the stamp radius, inside the Moffat wings** — `star_detection/centroid/mod.rs:199-207,292-294`
-  - It removes ≈4% of the flux at β 2.5 and FWHM 3. `[P]`
 - [ ] `11.10` **A NaN in the residual reaches `Star.flux` and `snr`** — `star_detection/centroid/mod.rs:466-471`
   - A NaN SNR passes `snr < min_snr`, and `validate_catalog` checks only `pos` and `fwhm`. `[P]`
 
@@ -103,8 +86,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 - [ ] `12.2` **The sky-estimate error term n_pix(1 + n_pix/n_B) is missing** — `star_detection/centroid/mod.rs:557-571`
   - Sky-limited SNR reads up to 1.48× high in `LocalAnnulus` mode. `[C]`
 - [ ] `12.3` **Measurement ignores `SkyNoise::floor`, which the threshold applies** — `star_detection/centroid/mod.rs:191,492,522` `[C]`
-- [ ] `12.4` **There is no per-star positional uncertainty** — `star_detection/centroid/lm_optimizer.rs:211-216`, `star_detection/star.rs`
-  - (JᵀWJ)⁻¹·χ²/(n−p) is one solve on a Hessian that already exists. Registration needs it for weights (group 13). `[C]` absent.
 
 ## 13. The final registration fit discards precision
 
@@ -320,11 +301,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 ## 26. One fact in two places, wide signatures, and style deviations
 
 - [ ] `26.4` **`StackConfig::bias()` and `dark()` are identical** — `combine/config/mod.rs:265-282` `[C]`
-- [ ] `26.6` **`measure_star` takes `expected_fwhm` and a grid built from it, then asserts that they agree** — `star_detection/centroid/mod.rs:168-173`
-  - The grid can carry the window σ and the annulus radius, which removes arguments from `moments_centroid`, `refine_centroid`, `compute_star` and `windowed_covariance`. `[C]`
-- [ ] `26.9` **`MAX_ANNULUS_OUTER_RADIUS` copies the formula of `annulus_outer_radius`** — `star_detection/centroid/mod.rs:71` vs `:292` `[C]`
-- [ ] `26.10` **`amplitude_seed`/`min_amplitude` take `background` again** — `star_detection/centroid/stamp.rs:228,235`
-  - `StampFit.sky` already holds it. `[C]`
 - [ ] `26.13` **`KernelPlan` is rebuilt per frame, although the doc says "once per run"** — `drizzle/accumulator/mod.rs:182`, `drizzle/accumulator/output_band.rs:38-42`
   - It has two `impl` blocks with `OutputBand` between them (`:92`, `:122`). `[C]`
 - [ ] `26.16` **`lib.rs:95-131` has 12 renamed re-exports** (`Config as StarDetectionConfig`, `Error as StackError`, …)
@@ -745,7 +721,8 @@ Found on the way and fixed: the SNR floored its variance at `f32::EPSILON`, an a
 ## Phase 8. Numerics kit and measurement (S6, C4)
 
 1. Done: `LmController` (Nielsen's λ update, a Cholesky solve of the Marquardt-scaled system with a relative pivot, and stop tests that hold at any scale — a negligible accepted or Gauss–Newton step in the scaled norm, a Gauss–Newton decrease of χ² under 1e-12 of it, or a gradient orthogonal to the residuals) carries the centroid fits, which now return `None` when they fail and reweight only after a success. `Lstsq` holds the one SVD rank rule the SIP fit and the background extraction share. `Irls` waits for its first robust consumer, the final registration fit (phase 9). Items 2.3, 2.5, 11.8, 11.9, 24.13, 26.7 and 26.8 are closed.
-2. Add `MeasureGrid`, the converged centroid and the integrated models. Add `position_sigma` with both of its sources.
+2. Done except the integrated models: `MeasureGrid` holds the stamp, the window σ and the annulus (from where a β = 2.5 Moffat holds 99% of its flux). `WindowedCentroid` subtracts the local sky, weights the signed signal, takes the adaptive-moments Newton step and stops on the bound `c/(1 − c)·‖Δ‖`; a failed fit falls back to it, and a fit that moves more than half the stamp radius is stamped again once. Every star carries `position_sigma`, from the fit's `(JᵀWJ)⁻¹·χ²/(n − p)` or the windowed centroid's propagated noise; both match the scatter of 1000 noise draws. The fits' weight and amplitude seed floors are relative. Items 2.4, 2.6, 11.1 to 11.4, 11.6, 11.7, 12.4, 26.6, 26.9 and 26.10 are closed.
+   Still open: the integrated models (11.5). A rotated Gaussian has no closed-form pixel integral; the exact route integrates along x by erf differences and along y by Gauss–Legendre, which changes the fits' vector kernels from per-pixel to per-sub-row accumulation.
 3. Move the SNR onto `CcdNoise`. Add the DAOFIND shape metrics.
 - **Tests:**
   - Review table 11.1 on noise-free stars: the bias at a 0.4 px start for FWHM 3, 4.5 and 6 is below 1e-4 px.

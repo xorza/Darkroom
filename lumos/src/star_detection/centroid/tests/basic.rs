@@ -13,7 +13,7 @@ use super::*;
 /// The default method is ten weighted-moments steps with a window of `σ_w = 0.8 · σ(seed FWHM 4.0)`
 /// = 1.359 px, each step shrinking the error by `c = σ² / (σ² + σ_w²)` — see
 /// `moments_contract_and_fits_ignore_the_seed`. The flux sums the residual over the
-/// (2r+1)² stamp around the rounded centroid, r = `compute_stamp_radius(4.0)` = 7, and the
+/// (2r+1)² stamp around the rounded centroid, r = `MeasureGrid::stamp_radius(4.0)` = 7, and the
 /// samples are point values of a separable profile: A · Σᵢ g(i − x₀) · Σⱼ g(j − y₀).
 #[test]
 fn a_detected_star_measures_as_on_its_true_sky() {
@@ -30,7 +30,7 @@ fn a_detected_star_measures_as_on_its_true_sky() {
         },
         ..Default::default()
     };
-    let radius = compute_stamp_radius(SEED_FWHM);
+    let radius = MeasureGrid::stamp_radius(SEED_FWHM);
     let window_sigma = f64::from(0.8 * fwhm_to_sigma(SEED_FWHM));
     for (x, y, sigma) in [(64.3, 64.7, 2.5f32), (64.0, 64.0, 3.0), (64.6, 63.8, 3.0)] {
         let truth = DVec2::new(x, y);
@@ -150,9 +150,9 @@ fn a_detected_star_measures_as_on_its_true_sky() {
 ///
 /// The two stamps are byte-identical — one buffer is the other blitted `SHIFT` columns to the
 /// right — so the only thing that differs is the magnitude of the coordinates the centroid
-/// arithmetic runs on. An f32 carrier quantizes to 4.88e-4 px at x ≈ 6000, which is both coarser
-/// than the agreement asserted here and coarser than `CENTROID_CONVERGENCE_THRESHOLD`, so the
-/// moments loop's own stopping test would degrade to "the value stopped changing at all".
+/// arithmetic runs on. An f32 carrier quantizes to 4.88e-4 px at x ≈ 6000, coarser than the
+/// windowed centroid's tolerance of 1e-5 px; each centre here lies within that tolerance of one
+/// converged point, so the two agree to twice it.
 #[test]
 fn subpixel_result_is_independent_of_distance_from_the_origin() {
     const SHIFT: usize = 5968;
@@ -176,39 +176,26 @@ fn subpixel_result_is_independent_of_distance_from_the_origin() {
     }
     let far_pixels = Buffer2::new(far.width, far.height, far_data);
 
-    let radius = compute_stamp_radius(TEST_EXPECTED_FWHM);
-    let bg_near = background_map::uniform(near, 0.1, 0.01);
-    let bg_far = background_map::uniform(far, 0.1, 0.01);
-
-    let near_pos = refine_centroid(
-        &bg_near.residual_of(&near_pixels),
-        true_pos,
-        radius,
-        TEST_EXPECTED_FWHM,
-    )
-    .expect("near refine should succeed");
-    let far_pos = refine_centroid(
-        &bg_far.residual_of(&far_pixels),
-        true_pos + DVec2::new(SHIFT as f64, 0.0),
-        radius,
-        TEST_EXPECTED_FWHM,
-    )
-    .expect("far refine should succeed");
+    let near_pos = Measured::flat(&near_pixels, 0.1, 0.01)
+        .windowed(true_pos, TEST_EXPECTED_FWHM)
+        .expect("the near centroid converges")
+        .pos;
+    let far_pos = Measured::flat(&far_pixels, 0.1, 0.01)
+        .windowed(true_pos + DVec2::new(SHIFT as f64, 0.0), TEST_EXPECTED_FWHM)
+        .expect("the far centroid converges")
+        .pos;
 
     let drift = (far_pos.x - SHIFT as f64 - near_pos.x).abs();
     assert!(
-        drift < 1e-9,
+        drift < 2e-5,
         "same pixels drifted {drift} px between x≈32 and x≈{}: near={}, far={}",
         SHIFT + 32,
         near_pos.x,
         far_pos.x - SHIFT as f64
     );
-    // Not bit-identical: the per-column Gaussian weights are computed from `px - pos_x`, whose
-    // rounding differs between x ≈ 32 and x ≈ 6000, and those weights feed the y accumulator too.
-    // A few f64 ulp, six orders of magnitude below the f32 quantization this replaces.
     let y_drift = (far_pos.y - near_pos.y).abs();
     assert!(
-        y_drift < 1e-9,
+        y_drift < 2e-5,
         "y drifted {y_drift} px under an x-only shift"
     );
 }

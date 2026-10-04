@@ -5,8 +5,6 @@
 use crate::bit_buffer2::BitBuffer2;
 use crate::internals::prelude::*;
 use crate::internals::synthetic::background_map;
-use crate::star_detection::centroid::compute_stamp_radius;
-use crate::star_detection::centroid::stamp::StampGrid;
 
 use ::quickbench::quick_bench;
 use std::hint::black_box;
@@ -16,8 +14,9 @@ use crate::internals::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::star_detection::background::sky_noise::SkyNoise;
 use crate::star_detection::centroid::compute_star;
 use crate::star_detection::centroid::covariance::windowed_covariance;
+use crate::star_detection::centroid::measure_grid::MeasureGrid;
 use crate::star_detection::centroid::measure_star;
-use crate::star_detection::centroid::refine_centroid;
+use crate::star_detection::centroid::windowed_centroid::{WindowedCentroid, WindowedInputs};
 use crate::star_detection::config::background_config::BackgroundConfig;
 use crate::star_detection::config::detection_config::DetectionConfig;
 use crate::star_detection::config::measurement_config::{
@@ -55,7 +54,7 @@ impl SingleStar {
 fn bench_measure_star(b: ::quickbench::Bencher, star: &SingleStar, config: &MeasurementConfig) {
     let candidates = detect_stars_test(&star.residual, &star.sky, &DetectionConfig::default());
     let region = candidates.first().expect("Should detect star");
-    let grid = StampGrid::new(compute_stamp_radius(4.0));
+    let grid = MeasureGrid::new(4.0);
     b.bench(|| {
         black_box(measure_star(
             black_box(&star.residual),
@@ -63,7 +62,6 @@ fn bench_measure_star(b: ::quickbench::Bencher, star: &SingleStar, config: &Meas
             &star.saturation,
             black_box(region),
             black_box(config),
-            4.0,
             black_box(&grid),
         ))
     });
@@ -138,11 +136,11 @@ fn bench_measure_star_batch_100(b: ::quickbench::Bencher) {
         ..Default::default()
     };
 
-    let grid = StampGrid::new(compute_stamp_radius(4.0));
+    let grid = MeasureGrid::new(4.0);
     b.bench(|| {
         let stars: Vec<_> = regions
             .iter()
-            .filter_map(|r| measure_star(&residual, &sky, &saturation, r, &config, 4.0, &grid))
+            .filter_map(|r| measure_star(&residual, &sky, &saturation, r, &config, &grid))
             .collect();
         black_box(stars)
     });
@@ -179,14 +177,12 @@ fn bench_measure_star_batch_6k_10000(b: ::quickbench::Bencher) {
         ..Default::default()
     };
 
-    let grid = StampGrid::new(compute_stamp_radius(4.0));
+    let grid = MeasureGrid::new(4.0);
 
     b.bench_labeled("weighted_moments", || {
         let stars: Vec<_> = regions
             .iter()
-            .filter_map(|r| {
-                measure_star(&residual, &sky, &saturation, r, &config_moments, 4.0, &grid)
-            })
+            .filter_map(|r| measure_star(&residual, &sky, &saturation, r, &config_moments, &grid))
             .collect();
         black_box(stars)
     });
@@ -194,17 +190,7 @@ fn bench_measure_star_batch_6k_10000(b: ::quickbench::Bencher) {
     b.bench_labeled("gaussian_fit", || {
         let stars: Vec<_> = regions
             .iter()
-            .filter_map(|r| {
-                measure_star(
-                    &residual,
-                    &sky,
-                    &saturation,
-                    r,
-                    &config_gaussian,
-                    4.0,
-                    &grid,
-                )
-            })
+            .filter_map(|r| measure_star(&residual, &sky, &saturation, r, &config_gaussian, &grid))
             .collect();
         black_box(stars)
     });
@@ -212,39 +198,29 @@ fn bench_measure_star_batch_6k_10000(b: ::quickbench::Bencher) {
     b.bench_labeled("moffat_fit", || {
         let stars: Vec<_> = regions
             .iter()
-            .filter_map(|r| {
-                measure_star(&residual, &sky, &saturation, r, &config_moffat, 4.0, &grid)
-            })
+            .filter_map(|r| measure_star(&residual, &sky, &saturation, r, &config_moffat, &grid))
             .collect();
         black_box(stars)
     });
 }
 
 #[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
-fn bench_refine_centroid_single(b: ::quickbench::Bencher) {
-    // Single refine_centroid call - isolates the exp() hot path
+fn bench_windowed_centroid_batch_1000(b: ::quickbench::Bencher) {
+    // 1000 converged windowed centroids from the peak pixel.
     let star = SingleStar::field();
-    b.bench(|| {
-        black_box(refine_centroid(
-            black_box(&star.residual),
-            black_box(DVec2::splat(32.0)),
-            black_box(7),
-            black_box(4.0),
-        ))
-    });
-}
-
-#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
-fn bench_refine_centroid_batch_1000(b: ::quickbench::Bencher) {
-    // 1000 refine_centroid calls to amplify exp() cost
-    let star = SingleStar::field();
+    let grid = MeasureGrid::new(4.0);
+    let inputs = WindowedInputs {
+        offset: 0.0,
+        sky_sigma: 0.01,
+        noise_model: None,
+    };
     b.bench(|| {
         for _ in 0..1000 {
-            black_box(refine_centroid(
+            black_box(WindowedCentroid::measure(
                 black_box(&star.residual),
                 black_box(DVec2::splat(32.0)),
-                black_box(7),
-                black_box(4.0),
+                &grid,
+                inputs,
             ));
         }
     });

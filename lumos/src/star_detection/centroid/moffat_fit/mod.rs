@@ -15,13 +15,13 @@ mod simd;
 use crate::math::fwhm::{alpha_beta_to_fwhm, fwhm_beta_to_alpha, sigma_to_fwhm};
 use crate::math::lm_controller::NormalEquations;
 use crate::simd::Kernel;
-use crate::star_detection::centroid::fit_is_plausible;
 use crate::star_detection::centroid::lm_optimizer::{FitData, LMModel};
 use crate::star_detection::centroid::moffat_fit::simd::MoffatBatch;
 use crate::star_detection::centroid::simd::{Chi2Kernel, NormalEquationsKernel};
 use crate::star_detection::centroid::stamp::FitNoise;
 use crate::star_detection::centroid::stamp::StampFit;
 use crate::star_detection::centroid::stamp::StampGrid;
+use crate::star_detection::centroid::{fit_is_plausible, position_sigma};
 use glam::DVec2;
 use imaginarium::Buffer2;
 
@@ -33,6 +33,8 @@ pub(super) struct MoffatFit {
     pub(super) pos: DVec2,
     /// FWHM computed from alpha and beta.
     pub(super) fwhm: f32,
+    /// `√((σ_x² + σ_y²)/2)` of `pos`, from the fit's `(JᵀWJ)⁻¹·χ²/(n − p)`.
+    pub(super) position_sigma: f64,
     /// Fit diagnostics that no production caller reads — `measure_star` only uses
     /// `pos`/`fwhm` — but that tests need to verify LM convergence against
     /// synthetic ground truth. Gated rather than carried and ignored, so a release build
@@ -187,6 +189,7 @@ impl MoffatFit {
     ) -> Option<Self> {
         // Fixed-β Moffat fits 5 parameters [x0, y0, amplitude, alpha, background].
         let mut fit = StampFit::prepare::<5>(pixels, pos, grid, background, noise)?;
+        let amplitude_seed = fit.amplitude_seed()?;
 
         // The seed is a Gaussian width; convert it to the equivalent alpha at the fixed β.
         let fwhm_est = sigma_to_fwhm(fit.sigma_est);
@@ -196,7 +199,7 @@ impl MoffatFit {
         let initial_params: [f64; 5] = [
             fit.local_pos.x,
             fit.local_pos.y,
-            fit.amplitude_seed(background),
+            amplitude_seed,
             f64::from(initial_alpha),
             f64::from(background),
         ];
@@ -204,7 +207,7 @@ impl MoffatFit {
         let model = MoffatFixedBeta::new(
             grid.radius as f64,
             f64::from(beta),
-            fit.min_amplitude(background),
+            StampFit::min_amplitude(amplitude_seed),
         );
         let result = fit.fit(&model, grid, initial_params)?;
 
@@ -219,6 +222,7 @@ impl MoffatFit {
 
         Some(Self {
             pos: result_pos,
+            position_sigma: position_sigma(&result, fit.stamp.z.len())?,
             fwhm: alpha_beta_to_fwhm(alpha as f32, beta),
             #[cfg(test)]
             debug: internals::MoffatFitDebug::of(&result),

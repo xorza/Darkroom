@@ -2,30 +2,21 @@
 //! scatter the noise propagates to it, so the error falls with the star's amplitude as derived.
 
 use super::*;
-use std::f64::consts::PI;
 
 /// One field of round Gaussians on a 0.1 sky with white noise σₙ = 0.01, its sky estimated at the
-/// default tile size, each star measured from its nearest pixel at the matched FWHM 4.0 (σ = 1.70).
+/// default tile size, each star measured from its nearest pixel at the matched FWHM 4.0, lands
+/// within five of the position σ it reports, per axis, by either method. The converged windowed
+/// centre is not moved by a flat sky error, whose windowed offset vanishes at the centre, so the
+/// reported σ, the pixel noise's alone, bounds it.
 ///
-/// Per axis, five times the scatter each method propagates bounds its error:
-/// - The Gaussian fit is efficient on its own model: the Cramér–Rao bound `√(2/π)·σₙ/A`. Its
-///   sky is a free parameter, so the estimate's error does not reach it.
-/// - The moments fixed point `p = F(p)` moves by `δF / (1 − c)`, with `c` = 1/1.64 the step's
-///   contraction and `δF` one step's noise, `σₙ·√Σ(w·dx)² / Σ w·I` (`one_noisy_step_scatters_as_propagated`).
-///   To that add what ten steps leave of the seed, and the pull of a sky estimated off by δ,
-///   `δ·Σ w·|dx| / Σ w·I` per step.
-///
-/// The fit is checked to have converged — a failed fit falls back to the moments silently — by its
+/// The fit is checked to have converged — a failed fit falls back to the windowed centre — by its
 /// FWHM, which replaces the moments' only then.
 #[test]
-fn noisy_stars_land_within_their_propagated_scatter() {
-    const NOISE: f64 = 0.01;
+fn noisy_stars_land_within_their_reported_sigma() {
+    const NOISE: f32 = 0.01;
     const SKY: f32 = 0.1;
     let fwhm = 4.0f32;
-    let sigma = f64::from(fwhm_to_sigma(fwhm));
-    let radius = compute_stamp_radius(fwhm);
-    let window_sq = (0.8 * sigma).powi(2);
-    let contraction = sigma.powi(2) / (sigma.powi(2) + window_sq);
+    let sigma = fwhm_to_sigma(fwhm);
     let stars = [
         (DVec2::new(50.0, 50.0), 0.28f32),
         (DVec2::new(100.3, 50.2), 0.28),
@@ -38,45 +29,15 @@ fn noisy_stars_land_within_their_propagated_scatter() {
     ];
     let mut pixels = Buffer2::new_filled(256, 256, SKY);
     for &(centre, amplitude) in &stars {
-        SyntheticStar::new(
-            centre.as_vec2(),
-            amplitude,
-            StarProfile::Gaussian {
-                sigma: sigma as f32,
-            },
-        )
-        .add_exact(&mut pixels);
+        SyntheticStar::new(centre.as_vec2(), amplitude, StarProfile::Gaussian { sigma })
+            .add_exact(&mut pixels);
     }
-    patterns::add_gaussian_noise(pixels.pixels_mut(), NOISE as f32, 42);
+    patterns::add_gaussian_noise(pixels.pixels_mut(), NOISE, 42);
     let background = background_map::estimate(&pixels, &BackgroundConfig::default());
-    let sky_error = background
-        .background
-        .iter()
-        .map(|&level| f64::from((level - SKY).abs()))
-        .fold(0.0, f64::max);
     let measured = Measured::of(&pixels, &background);
 
     for &(centre, amplitude) in &stars {
         let truth = centre.as_vec2().as_dvec2();
-        let amplitude = f64::from(amplitude);
-        let seed = truth.round();
-        let (mut spread, mut pull, mut light) = (0.0f64, 0.0f64, 0.0f64);
-        let r = radius as i32;
-        for dy in -r..=r {
-            for dx in -r..=r {
-                let offset = seed + DVec2::new(f64::from(dx), f64::from(dy)) - truth;
-                let weight = (-offset.length_squared() / (2.0 * window_sq)).exp();
-                let star = amplitude * (-offset.length_squared() / (2.0 * sigma.powi(2))).exp();
-                spread += (weight * offset.x).powi(2).max((weight * offset.y).powi(2));
-                pull += weight * offset.x.abs().max(offset.y.abs());
-                light += weight * star;
-            }
-        }
-        let moments_bound =
-            (5.0 * NOISE * spread.sqrt() + sky_error * pull) / light / (1.0 - contraction)
-                + 1.01 * (seed - truth).length() * contraction.powi(10);
-        let fit_bound = 5.0 * (2.0 / PI).sqrt() * NOISE / amplitude;
-
         let region = measured.region_at(truth);
         let measure = |centroid_method| {
             let config = MeasurementConfig {
@@ -91,13 +52,70 @@ fn noisy_stars_land_within_their_propagated_scatter() {
         let fit = measure(CentroidMethod::GaussianFit);
         assert_ne!(fit.fwhm, moments.fwhm, "{truth}: the fit converged");
 
-        for (method, star, bound) in [("moments", moments, moments_bound), ("fit", fit, fit_bound)]
-        {
+        for (method, star) in [("moments", moments), ("fit", fit)] {
             let error = (star.pos - truth).abs().max_element();
             assert!(
-                error <= bound,
-                "{truth}, A {amplitude}, {method}: {error} > {bound}"
+                error <= 5.0 * star.position_sigma,
+                "{truth}, A {amplitude}, {method}: {error} > 5 × {}",
+                star.position_sigma
             );
         }
+    }
+}
+
+/// Both sources of the position σ agree with the scatter they predict: one star of amplitude 0.3
+/// and σ 1.7 at a sub-pixel offset under 1000 fixed-seed draws of white noise σₙ = 0.01. The mean
+/// square error about the truth, per axis, is a variance from 2000 samples (x and y), so it
+/// carries a standard error of `√(2/2000)` = 3.2% of itself; the mean reported σ² must lie within
+/// 3 of those, 9.5%. The truth's own bias is far below the noise: a Gaussian is its own model
+/// and the windowed centre lands on it within 1e-5 px.
+#[test]
+fn the_position_sigma_matches_the_scatter() {
+    const DRAWS: u64 = 1000;
+    const NOISE: f32 = 0.01;
+    let fwhm = 4.0f32;
+    let truth = DVec2::new(16.3, 15.6);
+    let clean = SyntheticStar::new(
+        truth.as_vec2(),
+        0.3,
+        StarProfile::Gaussian {
+            sigma: fwhm_to_sigma(fwhm),
+        },
+    )
+    .stamp(Size2us::new(32, 32), 0.1);
+    let grid = MeasureGrid::new(fwhm);
+    let (mut windowed_scatter, mut windowed_reported) = (0.0f64, 0.0f64);
+    let (mut fit_scatter, mut fit_reported) = (0.0f64, 0.0f64);
+    for seed in 0..DRAWS {
+        let mut pixels = clean.clone();
+        patterns::add_gaussian_noise(pixels.pixels_mut(), NOISE, seed);
+        let residual =
+            background_map::uniform(Size2us::new(32, 32), 0.1, NOISE).residual_of(&pixels);
+        let windowed = WindowedCentroid::measure(
+            &residual,
+            truth.round(),
+            &grid,
+            WindowedInputs {
+                offset: 0.0,
+                sky_sigma: NOISE,
+                noise_model: None,
+            },
+        )
+        .unwrap();
+        windowed_scatter += (windowed.pos - truth).length_squared() / 2.0;
+        windowed_reported += windowed.sigma * windowed.sigma;
+        let fit = GaussianFit::new(&residual, windowed.pos, &grid.stamp, 0.0, None).unwrap();
+        fit_scatter += (fit.pos - truth).length_squared() / 2.0;
+        fit_reported += fit.position_sigma * fit.position_sigma;
+    }
+    for (source, scatter, reported) in [
+        ("windowed", windowed_scatter, windowed_reported),
+        ("fit", fit_scatter, fit_reported),
+    ] {
+        let ratio = reported / scatter;
+        assert!(
+            (ratio - 1.0).abs() <= 0.095,
+            "{source}: reported/scatter {ratio}"
+        );
     }
 }
