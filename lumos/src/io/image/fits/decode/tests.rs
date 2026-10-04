@@ -168,7 +168,8 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
     .unwrap();
     assert_eq!(plan.source_bytes, 241_920);
     assert_eq!(plan.decoded_bytes, 120_000);
-    assert_eq!(plan.peak_bytes, 320_000);
+    // The 120 000 decoded bytes, and two stored chunks of the whole 100 rows at 8 bytes a sample.
+    assert_eq!(plan.peak_bytes, 280_000);
     assert_eq!(plan.rows_per_chunk, 100);
     plan::preflight_fits_image(
         path,
@@ -188,7 +189,7 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
         )
         .unwrap_err(),
     );
-    assert!(reason.starts_with("estimated peak memory requires 320000 bytes"));
+    assert!(reason.starts_with("estimated peak memory requires 280000 bytes"));
     // A flags extension is held beside the decoded 120 000 bytes as read, and as the decode's own
     // flag plane: 2 bytes for each of the 10 000 pixels, 140 000 in all.
     plan.admit_flags_extension(path, 140_000).unwrap();

@@ -25,6 +25,7 @@ use crate::io::cancelled::Cancelled;
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType};
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::cfa::{CFA_FITS_FORMAT, validate_cfa_image_header};
+use crate::io::image::fits::decode::hdu_sections::HduSections;
 use crate::io::image::fits::decode::plan::FitsHduDescription;
 use crate::io::image::fits::decode::selected_fits::SelectedFits;
 
@@ -39,6 +40,7 @@ use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::pixel_flags::PixelFlags;
 
+mod hdu_sections;
 mod pixels;
 mod plan;
 mod selected_fits;
@@ -175,12 +177,15 @@ pub(crate) fn read_cfa_hdu(
     }
     let header = reader.hdus()[index].header.clone();
     let selected = selection::selected_hdu(path, reader.hdus(), index)?;
-    let mut decoded =
-        pixels::read_decoded_hdu(&header, plan, selected, checksum, path, context, |ranges| {
-            reader
-                .read_image_section(index, &ranges)
-                .map(|image| image.physical_f32())
-        })?;
+    let mut decoded = pixels::read_decoded_hdu(
+        &header,
+        plan,
+        selected,
+        checksum,
+        path,
+        context,
+        &mut HduSections::new(reader, index),
+    )?;
     if let Some(flags_hdu) = flags_hdu {
         context.check_cancelled(path)?;
         let stored = reader
@@ -223,5 +228,7 @@ pub(crate) fn fits_cfa_frame_info(
     })
 }
 
+#[cfg(all(test, feature = "bench"))]
+mod bench;
 #[cfg(test)]
 mod tests;
