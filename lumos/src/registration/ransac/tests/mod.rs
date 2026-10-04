@@ -7,12 +7,8 @@ use std::f64::consts::PI;
 
 use rand::rngs::SmallRng;
 
-/// The seed a test that names none runs with, so every run draws the same samples.
-const TEST_SEED: u64 = 0x5EED;
-
-/// An estimator for `max_sigma`, seeded with [`TEST_SEED`] unless `config` names its own seed.
-fn seeded(max_sigma: f64, mut config: RansacConfig) -> RansacEstimator {
-    config.seed.get_or_insert(TEST_SEED);
+/// An estimator for `max_sigma` under `config`.
+fn estimator(max_sigma: f64, config: RansacConfig) -> RansacEstimator {
     RansacEstimator::new(config, max_sigma)
 }
 

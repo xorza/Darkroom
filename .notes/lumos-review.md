@@ -23,13 +23,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 **Failure scenario:** 16-bit data in a 32-bit integer FITS normalizes by 2³²−1, so σ ≈ 2e-9. Every floor below then trips.
 
 
-## 3. The default registration prior rejects real sessions
-
-- [ ] `3.1` **Default `max_rotation` = 10° drops every frame after a meridian flip** — `registration/ransac/config.rs:35`, `registration/ransac/mod.rs:113-127`, `pipeline/config.rs:24`
-  - A German-equatorial flip is a 180° rotation. Triangle matching survives it, but every RANSAC hypothesis fails `is_plausible`. The pipeline then drops the frame as "registration failed".
-  - Alt-az mounts (smart telescopes) pass 10° of field rotation in one session.
-  - Siril, PixInsight and DSS register across a flip by default. `[C]`
-
 ## 8. Missing-data masks are dropped after decode
 
 - [ ] `8.2` **Star detection does not handle `nulls` in its stamps** — `star_detection/centroid/`
@@ -54,16 +47,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
   - The monomials are not orthogonal to the affine terms, so this is one Gauss–Seidel step, not the joint optimum.
   - The result also depends on the per-frame default reference point (`sip/mod.rs:180-183`).
   - astrometry.net `fit_sip_wcs` fits both together. `[C]`
-- [ ] `13.7` **LO-RANSAC can commit a refit whose score was cut short** — `registration/ransac/mod.rs:185-192,200`
-  - It accepts a refit on inlier count when the score dropped. The preemptive scorer then exits early, so the inlier list is a prefix and the score is overstated.
-  - Accept on score only (Chum 2003). `[C]`
-- [ ] `13.8` **RANSAC degeneracy tests depend on scale and miss some cases** — `registration/ransac/mod.rs:75,448-483`
-  - The collinearity test uses an absolute cross product of 1 px². It tests only triplets that include p₀.
-  - OpenCV `checkSubset` tests every triplet and rejects orientation flips. `[P]`
-- [ ] `13.9` **Triangle flatness uses absolute thresholds, and three tests overlap** — `registration/triangle/geometry.rs:14,70-72,85-89,108-110`
-  - One relative test (area/longest² ≥ c) replaces all three. `[C]`
-- [ ] `13.10` **The vertex order of near-isosceles triangles is unstable** — `registration/triangle/geometry.rs:55-60` `[P]`
-
 ## 14. Resampling: ringing, aliasing, unstable normalization
 
 - [ ] `14.1` **Lanczos has no ringing clamp** — `registration/resample/row/simd/mod.rs:66-89`
@@ -184,8 +167,6 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 
 ## 22. Run-to-run determinism
 
-- [ ] `22.1` **The RANSAC default seed is random** — `registration/ransac/config.rs:14,32`, `registration/ransac/sampling.rs:37`
-  - Each run gives different stacked pixels. This defeats the SIMD bit-exactness work in `simd/mod.rs:8-14`. `[C]`
 - [ ] `22.2` **Parallel float reductions are order-nondeterministic** — `calibration_masters/prepared_flat/mod.rs:61,79-97`
   - rayon `sum`/`reduce`. Use fixed chunking. `[P]`
 - [ ] `22.3` **The triangle vote matrix switches to a SipHash `HashMap` from 500×500** — `registration/triangle/voting.rs:28,52-57`
@@ -692,7 +673,8 @@ Found on the way and fixed: the SNR floored its variance at `f32::EPSILON`, an a
 
 ## Phase 9. Registration final fit (C5)
 
-1. Remove the rotation prior and the random seed. Fix LO acceptance and the degeneracy tests.
+1. Done: no rotation limit by default, and a fixed default seed (`RansacConfig::seed: u64`, 0). LO-RANSAC takes a refit on its score alone. A minimal sample is degenerate when any pair is closer than the scorer's noise scale, or any triplet stands lower than it over its longest side. Near-isosceles triangles vote in every vertex order their tied sides admit, with the orientation test reversed for an odd permutation. Items 3.1, 13.7 to 13.10 and 22.1 are closed.
+   Deviation (13.9): a triangle is kept while it stands at least the noise scale high over its longest side, not by a share of that side. The invariants `s₀/L` and `s₁/L` move by about σ/L whatever the shape, so Groth's side-ratio limit, which protects invariants built on the shortest side, does not apply; a relative height limit cut real matches in a dense field. A flat triangle loses its orientation, and that is what the noise-scale test guards.
 2. Add `final_fit` and the homography LM. Add GRIC. Return each frame's registration.
 - **Tests:**
   - A 180° rotated catalog registers.

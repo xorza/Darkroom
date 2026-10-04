@@ -11,13 +11,15 @@ pub struct RansacConfig {
     pub confidence: f64,
     /// Minimum inlier ratio before adaptive early termination. Default: 0.3.
     pub min_inlier_ratio: f64,
-    /// Random seed for reproducible sampling. Default: random.
-    pub seed: Option<u64>,
+    /// The sampler's seed: the same seed on the same input gives the same transform, bit for bit.
+    /// Default: 0.
+    pub seed: u64,
     /// Whether to refine promising hypotheses with LO-RANSAC. Default: true.
     pub local_optimization: bool,
     /// Maximum LO-RANSAC refinement iterations. Default: 10.
     pub lo_iterations: usize,
-    /// Maximum absolute rotation in radians. Default: 10 degrees.
+    /// Maximum absolute rotation in radians, or `None` for any. Default: `None` — a meridian flip
+    /// turns the field by 180°, and an alt-az mount turns it through a session.
     pub max_rotation: Option<f64>,
     /// Accepted uniform-scale range. Default: 0.8 to 1.2.
     pub scale_range: Option<(f64, f64)>,
@@ -29,10 +31,10 @@ impl Default for RansacConfig {
             max_iterations: 2000,
             confidence: 0.995,
             min_inlier_ratio: 0.3,
-            seed: None,
+            seed: 0,
             local_optimization: true,
             lo_iterations: 10,
-            max_rotation: Some(10.0_f64.to_radians()),
+            max_rotation: None,
             scale_range: Some((0.8, 1.2)),
         }
     }

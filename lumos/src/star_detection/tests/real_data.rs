@@ -250,7 +250,7 @@ fn weighted_fit_registration_rms() {
             ..RegistrationConfig::default()
         };
         // Seeded, so the two runs differ only in their centroids.
-        reg_config.ransac.seed = Some(0x5EED);
+        reg_config.ransac.seed = 0x5EED;
         let r = register(&s1, &s2, &reg_config).expect("registration should succeed");
         Registered {
             rms: r.rms_error(),

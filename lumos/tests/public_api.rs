@@ -118,7 +118,7 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
         },
         ransac: RansacConfig {
             max_iterations: 750,
-            seed: Some(42),
+            seed: 42,
             ..Default::default()
         },
         sip: Some(SipConfig {

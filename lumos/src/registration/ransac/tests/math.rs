@@ -1,8 +1,10 @@
 use super::*;
 
-/// A sample is degenerate when two of its points are under 1 px apart — `dist² < 1`, so exactly
-/// 1 px is not — or when it has three or more points within a cross product of 1 of the line
-/// through the first two.
+/// A sample is degenerate at a noise scale of 1 px when two of its points are under 1 px apart —
+/// exactly 1 px is not — or when any three of them form a triangle less than 1 px high over its
+/// longest side. The height is what the noise blurs, whatever the triangle's size: 0.5 px off a
+/// 1000 px baseline is as degenerate as 0.5 px off a 10 px one, and three collinear points that
+/// leave out the first are caught too.
 #[test]
 fn degenerate_samples() {
     let p = DVec2::new;
@@ -24,14 +26,24 @@ fn degenerate_samples() {
             "collinear on y = x",
         ),
         (
-            &[p(0.0, 0.0), p(10.0, 0.0), p(20.0, 0.1)][..],
+            &[p(0.0, 0.0), p(10.0, 0.0), p(5.0, 0.5)][..],
             true,
-            "within a cross product of 1 of the line: 10·0.1 = 1",
+            "0.5 px high over a 10 px side",
+        ),
+        (
+            &[p(0.0, 0.0), p(1000.0, 0.0), p(500.0, 0.5)][..],
+            true,
+            "0.5 px high over a 1000 px side",
+        ),
+        (
+            &[p(0.0, 0.0), p(1000.0, 0.0), p(500.0, 2.0)][..],
+            false,
+            "2 px high over a 1000 px side",
         ),
         (
             &[p(0.0, 0.0), p(10.0, 0.0), p(5.0, 10.0)][..],
             false,
-            "a triangle: cross product 100",
+            "a triangle 10 px high",
         ),
         (
             &[p(0.0, 0.0), p(10.0, 0.0), p(10.0, 10.0), p(0.1, 0.1)][..],
@@ -44,12 +56,17 @@ fn degenerate_samples() {
             "a collinear quad",
         ),
         (
+            &[p(0.0, 50.0), p(0.0, 0.0), p(50.0, 0.0), p(100.0, 0.0)][..],
+            true,
+            "a quad whose last three are collinear",
+        ),
+        (
             &[p(0.0, 0.0), p(100.0, 0.0), p(100.0, 100.0), p(0.0, 100.0)][..],
             false,
             "a square",
         ),
     ] {
-        assert_eq!(is_sample_degenerate(points), degenerate, "{why}");
+        assert_eq!(is_sample_degenerate(points, 1.0), degenerate, "{why}");
     }
 }
 

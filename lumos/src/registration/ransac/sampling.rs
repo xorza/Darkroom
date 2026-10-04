@@ -27,15 +27,9 @@ pub(super) fn guided_phase_iterations(sample_size: usize, confidence: f64) -> us
     adaptive_iterations(0.5, sample_size, confidence)
 }
 
-/// Create a `ChaCha8Rng` from an optional seed.
-///
-/// When `seed` is `None`, seeds from `thread_rng()` for non-deterministic behavior.
-/// Always using `ChaCha8Rng` avoids enum dispatch overhead on every RNG call.
-pub(super) fn make_rng(seed: Option<u64>) -> rand_chacha::ChaCha8Rng {
-    match seed {
-        Some(s) => rand_chacha::ChaCha8Rng::seed_from_u64(s),
-        None => rand_chacha::ChaCha8Rng::seed_from_u64(rand::rng().next_u64()),
-    }
+/// The sampler's generator, from the configured seed.
+pub(super) fn make_rng(seed: u64) -> rand_chacha::ChaCha8Rng {
+    rand_chacha::ChaCha8Rng::seed_from_u64(seed)
 }
 
 /// Weighted sampling of k unique indices from a pool.

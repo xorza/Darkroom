@@ -692,7 +692,7 @@ fn both_front_ends_report_the_same_stages() {
     };
 
     let mut config = AlignStackConfig::default();
-    config.registration.ransac.seed = Some(0x5EED_0F5E);
+    config.registration.ransac.seed = 0x5EED_0F5E;
 
     let (raw_reports, raw_progress) = recorder();
     let paths: Vec<PathBuf> = frames
@@ -779,7 +779,7 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
         .collect();
 
     let mut config = AlignStackConfig::default();
-    config.registration.ransac.seed = Some(0x5EED_0F5E);
+    config.registration.ransac.seed = 0x5EED_0F5E;
 
     let mut ram_config = config.clone();
     ram_config.stack.ingest.memory_override = Some(u64::MAX);

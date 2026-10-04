@@ -64,7 +64,7 @@ fn plausibility_hand_cases() {
             "a translation has rotation 0 and scale 1",
         ),
     ] {
-        let estimator = seeded(
+        let estimator = estimator(
             1.0,
             RansacConfig {
                 max_rotation,
@@ -76,12 +76,20 @@ fn plausibility_hand_cases() {
     }
 }
 
+/// The 10° rotation limit the plausibility tests set; the default sets none.
+fn ten_degree_limit() -> RansacConfig {
+    RansacConfig {
+        max_rotation: Some(10.0f64.to_radians()),
+        ..Default::default()
+    }
+}
+
 /// `estimate` holds every hypothesis to the limits: a 30° similarity has no plausible fit under a
 /// 10° limit, and a 5° one at scale 1.05 fits all 20 points.
 #[test]
 fn estimate_honours_the_plausibility_limits() {
     let ref_points = make_grid(5, 4, 50.0);
-    let estimator = seeded(1.0, RansacConfig::default());
+    let estimator = estimator(1.0, ten_degree_limit());
     let rotated = apply_all(
         &Transform::similarity(DVec2::new(5.0, -3.0), 30.0f64.to_radians(), 1.0),
         &ref_points,
@@ -107,8 +115,8 @@ fn estimate_honours_the_plausibility_limits() {
 }
 
 /// The limits decide between two consistent groups. Twenty pairs agree on a 2° similarity and
-/// thirty on a quarter turn: with the limits off, the larger group wins; with the default 10°
-/// limit, its every hypothesis is refused and the smaller, plausible group is the answer.
+/// thirty on a quarter turn: with the limits off, the larger group wins; with a 10° limit, its
+/// every hypothesis is refused and the smaller, plausible group is the answer.
 #[test]
 fn the_limits_steer_ransac_to_the_plausible_group() {
     let plausible = Transform::similarity(DVec2::new(10.0, -5.0), 2.0f64.to_radians(), 1.01);
@@ -124,7 +132,7 @@ fn the_limits_steer_ransac_to_the_plausible_group() {
         .chain(apply_all(&quarter_turn, &large))
         .collect();
 
-    let limited = seeded(1.0, RansacConfig::default());
+    let limited = estimator(1.0, ten_degree_limit());
     let result = estimate_uniform(
         &limited,
         &ref_points,
@@ -134,7 +142,7 @@ fn the_limits_steer_ransac_to_the_plausible_group() {
     .unwrap();
     assert_eq!(result.inliers, (0..20).collect::<Vec<_>>());
 
-    let unlimited = seeded(
+    let unlimited = estimator(
         1.0,
         RansacConfig {
             max_rotation: None,

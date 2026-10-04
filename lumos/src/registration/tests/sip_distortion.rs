@@ -9,8 +9,8 @@ use crate::internals::synthetic::distortion::RadialField;
 use crate::internals::synthetic::transforms::{generate_random_positions, positions_to_stars};
 use crate::registration::Config;
 use crate::registration::distortion::sip::SipConfig;
+use crate::registration::register;
 use crate::registration::tests::helpers;
-use crate::registration::tests::helpers::register;
 use crate::registration::transform::Transform;
 
 #[test]
