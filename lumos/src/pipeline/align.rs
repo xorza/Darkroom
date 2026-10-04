@@ -9,11 +9,6 @@ use common::CancelToken;
 use crate::concurrency;
 use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::linear::LinearImage;
-use crate::progress::progress_callback::ProgressCallback;
-use crate::registration::resample::WarpBuffers;
-use crate::star_detection::detector::DetectionResult;
-use crate::star_detection::detector::Diagnostics;
-
 use crate::pipeline::config::{AlignStackConfig, Reference};
 use crate::pipeline::detected_frame::DetectedFrame;
 use crate::pipeline::error::AlignStackError;
@@ -22,6 +17,10 @@ use crate::pipeline::frame_tier::StagePlan;
 use crate::pipeline::light_source::LightSource;
 use crate::pipeline::registered_set::RegisteredSet;
 use crate::pipeline::result::AlignStackResult;
+use crate::progress::progress_callback::ProgressCallback;
+use crate::registration::resample::WarpBuffers;
+use crate::star_detection::detector::DetectionResult;
+use crate::star_detection::detector::Diagnostics;
 
 /// Detect → register → warp → stack a set of light frames into one aligned, combined image.
 ///

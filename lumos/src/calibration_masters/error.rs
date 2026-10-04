@@ -33,8 +33,13 @@ pub enum CalibrationError {
     /// the offset to every light.
     #[error("the flat holds an offset, and the set has no bias or flat-dark to subtract it")]
     FlatWithoutSubtractor,
-    /// The light still holds an additive offset and the set has a flat but no dark or bias:
-    /// `(S + b)/flat` puts the offset `b` under the flat's vignetting.
+    /// A bias or flat-dark had a master subtracted when it was stacked, so the offset it exists
+    /// to remove is no longer in it: subtracted, it would leave the offset in the frame.
+    #[error("the {component} master is already calibrated, and holds no offset to subtract")]
+    CalibratedSubtractor { component: MasterRole },
+    /// The light still holds an additive offset and the set has a flat but nothing that removes
+    /// the offset — no bias, and no dark that still holds it: `(S + b)/flat` puts the offset `b`
+    /// under the flat's vignetting.
     #[error("the light holds an offset, and the set has a flat but no dark or bias to subtract it")]
     LightWithoutSubtractor,
     /// The dark was exposed for another time than the light, and it still holds the bias, so it

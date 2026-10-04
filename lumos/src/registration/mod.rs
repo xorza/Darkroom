@@ -59,21 +59,22 @@ pub(crate) mod transform;
 pub(crate) mod triangle;
 mod tuning;
 
-use crate::registration::final_fit::{FinalFit, FinalFitFailure, FitCatalogs, FitModel, SipModel};
-use crate::registration::registration_config::RegistrationConfig;
-use crate::registration::spatial::KdTree;
-use result::{FailedModel, RegistrationCatalog, RegistrationError, RegistrationResult};
-use transform::{TransformModel, TransformType};
-
 use std::time::Instant;
 
 use glam::DVec2;
 
 use crate::math::statistics::median_mut;
+use crate::registration::final_fit::{FinalFit, FinalFitFailure, FitCatalogs, FitModel, SipModel};
+use crate::registration::ransac::RansacEstimator;
+use crate::registration::registration_config::RegistrationConfig;
+use crate::registration::result::{
+    FailedModel, RegistrationCatalog, RegistrationError, RegistrationResult,
+};
+use crate::registration::spatial::KdTree;
+use crate::registration::transform::{TransformModel, TransformType};
+use crate::registration::triangle::matching;
+use crate::registration::triangle::voting::{MatchIndices, PointMatch};
 use crate::star_detection::star::Star;
-use ransac::RansacEstimator;
-use triangle::matching::match_triangles;
-use triangle::voting::{MatchIndices, PointMatch};
 
 /// Register two sets of star positions.
 ///
@@ -170,7 +171,7 @@ pub fn register(
 
     // Triangle matching
     let t0 = Instant::now();
-    let matches = match_triangles(
+    let matches = matching::match_triangles(
         &ref_tree,
         &target_tree,
         &config.matching.triangle,

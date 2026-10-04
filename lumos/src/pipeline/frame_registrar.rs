@@ -23,7 +23,7 @@ use crate::star_detection::star::Star;
 /// tier. The reference parks unwarped.
 #[derive(Debug)]
 pub(crate) struct FrameRegistrar<'a> {
-    pub(crate) reference: usize,
+    reference: usize,
     reference_stars: Vec<Star>,
     config: &'a AlignStackConfig,
     tier: &'a FrameTier,

@@ -1,7 +1,6 @@
 //! [`LightSource`]: where a registered stack's lights come from, and the stage that detects them.
 
 use std::path::Path;
-
 use std::sync::Mutex;
 
 use crate::calibration_masters::CalibrationMasters;

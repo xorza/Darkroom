@@ -210,10 +210,15 @@ impl BlackLevel {
             })
     }
 
-    /// The visible area of `raw` as `(v − black(x, y)) / span`, in one pass: the subtraction is
-    /// exact in f64 for every black LibRaw or the file states, and the quotient rounds to f32 once,
-    /// correctly — an f64 quotient rounds to f32 without a second error, as f64 carries more than
-    /// twice f32's digits. `channel` names each pixel's LibRaw colour channel.
+    /// The visible area of `raw` as `(v − black(x, y)) / span`, in one pass. `channel` names each
+    /// pixel's LibRaw colour channel.
+    ///
+    /// Where every black term is a whole ADU, `v − black` and `span` are integers below 2¹⁶, exact
+    /// in f32, and their f64 quotient narrowed to f32 is the correctly rounded one: f64 carries
+    /// more than 2·24 + 2 bits. A fractional term — a masked mean, a DNG's rational level — is not
+    /// an f32 operand, so the sum, difference and quotient each round in f64 first, a relative
+    /// error of a few 2⁻⁵³, and the f32 result can miss the correct rounding where the quotient
+    /// lies that close to a halfway point.
     pub(crate) fn normalize(
         &self,
         raw: &[u16],

@@ -97,7 +97,9 @@ fn a_masters_flags_survive_the_fits_round_trip() {
 
 /// A flags extension that is not the one Lumos wrote is refused, each behind a valid checksum so
 /// the check behind it is what fires: a bit no flag has, a `NO_DATA` the NaNs do not state either
-/// way, another geometry, another version, and an extension that names no image of the file.
+/// way, another geometry, another version, and an extension that names no image of the file. Its
+/// checksum is judged before its bytes: a byte changed behind the stored checksum reads as that,
+/// not as the `NO_DATA` it also drops.
 #[test]
 fn a_flags_extension_lumos_did_not_write_is_refused() {
     type Edit = fn(&mut Header, &mut Vec<u8>);
@@ -168,6 +170,19 @@ fn a_flags_extension_lumos_did_not_write_is_refused() {
             "{name}: {error:?}"
         );
     }
+
+    // The flags are the last HDU, and their 6 bytes open its one 2880-byte data block.
+    write();
+    let mut file = fs::read(&path).unwrap();
+    let flags_start = file.len() - 2880;
+    file[flags_start + 1] = 0;
+    fs::write(&path, &file).unwrap();
+    let error = CfaImage::from_file(&path, &LoadContext::default()).unwrap_err();
+    assert!(
+        matches!(&error, ImageError::FitsUnsupported { reason, .. }
+            if reason.contains("HDU 1 requires valid DATASUM and CHECKSUM")),
+        "{error:?}"
+    );
 }
 
 /// A master records its whole domain and its quantization σ, so a reload gives back exactly what

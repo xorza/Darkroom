@@ -1176,7 +1176,9 @@ fn with_pedestal(mut frame: CfaImage, pedestal: Pedestal) -> CfaImage {
 /// A flat or a light that may still hold an offset is never divided without a subtractor
 /// (review 4.2): `(S + b)/flat` puts the offset under the vignetting. A flat whose pedestal the
 /// decoder removed, as a RAW decode does, needs none; one that kept it or does not say is refused.
-/// The light's rule is the same, once the bundle holds a flat and no dark or bias.
+/// The light's rule is the same, once the bundle holds a flat and no bias or dark that holds the
+/// offset: a dark marked calibrated lost its bias when it was stacked, and removes none. A bias or
+/// flat-dark marked calibrated has no offset left to remove, and is refused.
 #[test]
 fn an_offset_is_never_divided_by_the_flat() {
     let size = Size2us::new(4, 4);
@@ -1209,6 +1211,34 @@ fn an_offset_is_never_divided_by_the_flat() {
         Err(CalibrationError::LightWithoutSubtractor)
     );
     assert!(!kept.metadata.calibrated);
+    let mut thermal = constant_cfa(size, 0.0625, CfaType::Mono);
+    thermal.metadata.calibrated = true;
+    let with_thermal_dark = bundle(CalibrationSet {
+        flat: Some(flat(Pedestal::Removed)),
+        dark: Some(thermal),
+        ..Default::default()
+    });
+    assert_eq!(
+        with_thermal_dark.calibrate(&mut kept),
+        Err(CalibrationError::LightWithoutSubtractor)
+    );
+    for role in [MasterRole::Bias, MasterRole::FlatDark] {
+        let mut subtractor = constant_cfa(size, 0.125, CfaType::Mono);
+        subtractor.metadata.calibrated = true;
+        let mut set = CalibrationSet {
+            flat: Some(flat(Pedestal::Kept(256.0))),
+            ..Default::default()
+        };
+        match role {
+            MasterRole::Bias => set.bias = Some(subtractor),
+            _ => set.flat_dark = Some(subtractor),
+        }
+        assert_eq!(
+            CalibrationMasters::from_images(set, DEFAULT_SIGMA_THRESHOLD, &CancelToken::never())
+                .unwrap_err(),
+            CalibrationError::CalibratedSubtractor { component: role },
+        );
+    }
     let mut removed = with_pedestal(constant_cfa(size, 0.5, CfaType::Mono), Pedestal::Removed);
     assert_eq!(
         masters.calibrate(&mut removed),
@@ -1225,6 +1255,9 @@ fn an_offset_is_never_divided_by_the_flat() {
 /// - At the light's own exposure, or within 1% of it, no scale; with an exposure undeclared on
 ///   either side, no scale and the outcome says it was not compared.
 /// - Temperatures 1.5 °C apart are refused; with one undeclared, as a DSLR's, the outcome says so.
+/// - A dark marked calibrated, its bias taken per frame when it was stacked, holds the thermal
+///   0.0625 alone and is not given the bias a second time: with the bias the light is 0.21875
+///   again, and without it the light keeps its bias, 0.5 − 0.15625 = 0.34375.
 #[test]
 fn a_dark_is_matched_to_the_light() {
     let size = Size2us::new(4, 4);
@@ -1298,6 +1331,30 @@ fn a_dark_is_matched_to_the_light() {
             ..CalibrationOutcome::default()
         })
     );
+
+    let thermal = || {
+        let mut dark = constant_cfa(size, 0.0625, CfaType::Mono);
+        dark.metadata.exposure_time = Some(120.0);
+        dark.metadata.ccd_temp = Some(-10.0);
+        dark.metadata.calibrated = true;
+        dark
+    };
+    for (bias, expected) in [(Some(bias()), 0.218_75), (None, 0.343_75)] {
+        let stacked_calibrated = bundle(CalibrationSet {
+            dark: Some(thermal()),
+            bias,
+            ..Default::default()
+        });
+        let mut scaled = light(Some(300.0), Some(-10.0));
+        assert_eq!(
+            stacked_calibrated.calibrate(&mut scaled),
+            Ok(CalibrationOutcome {
+                dark_scale: Some(2.5),
+                ..CalibrationOutcome::default()
+            })
+        );
+        assert_eq!(scaled.data.pixels(), &[expected; 16]);
+    }
 }
 
 /// Each flat takes its bias before the flats are normalized and combined (review 4.1). Two 8 × 8

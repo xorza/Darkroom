@@ -92,7 +92,7 @@ impl FitModel {
         self.transform.parameter_count()
             + self
                 .sip
-                .map_or(0, |sip| 2 * SipPolynomial::required_points(sip.order) / 3)
+                .map_or(0, |sip| 2 * SipPolynomial::term_count(sip.order))
     }
 
     /// The pairs the model needs: the transform's minimal sample, or the SIP fit's floor.

@@ -53,10 +53,17 @@ fn term_exponents_order_5() {
     assert_eq!(terms[12], (5, 0));
 }
 
+/// Every term lies in `2 ≤ p + q ≤ order`, and the closed-form count is the table's length: 0 at
+/// order 1, then the 3, 7, 12 and 18 counted by hand above.
 #[test]
 fn term_exponents_all_satisfy_constraints() {
-    for order in 2..=5 {
+    for order in 1..=5 {
         let terms = term_exponents(order);
+        assert_eq!(
+            SipPolynomial::term_count(order),
+            terms.len(),
+            "order {order}"
+        );
         for &(p, q) in &terms {
             let total = p + q;
             assert!(

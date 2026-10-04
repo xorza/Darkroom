@@ -48,7 +48,7 @@ impl InverseWarp {
 
     /// The reference point `t` came from, and the Jacobian of the inverse there; `None` when the
     /// correction cannot be inverted at `t` — the Newton iteration met a singular Jacobian, left
-    /// the finite numbers, or did not converge in [`NEWTON_MAX_ITERATIONS`] steps. A position that
+    /// the finite numbers, or did not converge within its iteration cap. A position that
     /// did not converge is never returned.
     pub fn apply(&self, t: DVec2) -> Option<InverseMapped> {
         let linear = self.to_reference.jacobian(t);

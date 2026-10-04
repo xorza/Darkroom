@@ -195,13 +195,16 @@ impl CalibrationMasters {
     /// The flat's additive part is removed here only when its stack did not remove it per frame
     /// ([`stack_cfa_master`] with a subtractor marks it calibrated): by the flat-dark, else the
     /// bias. A flat that still holds an offset with neither is refused. Cold pixels are detected on
-    /// that flat, hot pixels on the dark; with a bias, the dark keeps its thermal signal alone.
+    /// that flat, hot pixels on the dark; with a bias, the dark keeps its thermal signal alone. A
+    /// dark marked calibrated lost its bias when it was stacked and is not subtracted again, and a
+    /// bias or flat-dark marked calibrated has no offset left to remove, so it is refused.
     /// `sigma_threshold` controls defect detection sensitivity (see [`DEFAULT_SIGMA_THRESHOLD`]).
     ///
     /// # Errors
     ///
-    /// A [`CalibrationError`] when the masters do not describe one sensor, the flat has no positive
-    /// mean to normalize by or holds an offset nothing removes, and [`CalibrationError::Cancelled`]
+    /// A [`CalibrationError`] when the masters do not describe one sensor, a subtractor is already
+    /// calibrated, the flat has no positive mean to normalize by or holds an offset nothing
+    /// removes, and [`CalibrationError::Cancelled`]
     /// if cancellation is requested before defect detection completes.
     pub fn from_images(
         images: CalibrationSet<Option<CfaImage>>,
@@ -221,6 +224,17 @@ impl CalibrationMasters {
             bias,
             flat_dark,
         } = images;
+        for (role, master) in [
+            (MasterRole::Bias, &bias),
+            (MasterRole::FlatDark, &flat_dark),
+        ] {
+            if master
+                .as_ref()
+                .is_some_and(|master| master.metadata.calibrated)
+            {
+                return Err(CalibrationError::CalibratedSubtractor { component: role });
+            }
+        }
         let subtracted_flat = flat
             .map(|mut flat| {
                 if flat.metadata.calibrated {
@@ -263,6 +277,13 @@ impl CalibrationMasters {
 
         let dark = dark
             .map(|mut dark| -> Result<MasterDark, CalibrationError> {
+                // Stacked with a subtractor, the dark lost its bias frame by frame.
+                if dark.metadata.calibrated {
+                    return Ok(MasterDark {
+                        image: dark,
+                        bias: DarkBias::Removed,
+                    });
+                }
                 let Some(bias) = &bias else {
                     return Ok(MasterDark {
                         image: dark,
@@ -379,7 +400,12 @@ impl CalibrationMasters {
             })
             .map(|bias| master_scale(image, bias, MasterRole::Bias).map(|map| (bias, map)))
             .transpose()?;
-        if self.flat.is_some() && dark.is_none() && bias.is_none() && holds_offset(image) {
+        let removes_offset = bias.is_some()
+            || self
+                .dark
+                .as_ref()
+                .is_some_and(|dark| dark.bias == DarkBias::Included);
+        if self.flat.is_some() && !removes_offset && holds_offset(image) {
             return Err(CalibrationError::LightWithoutSubtractor);
         }
 
