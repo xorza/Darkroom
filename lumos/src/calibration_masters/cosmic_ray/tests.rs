@@ -4,6 +4,7 @@
 )]
 
 use crate::calibration_masters::cosmic_ray::config::NoiseEstimation;
+use crate::calibration_masters::cosmic_ray::masks::CrMasks;
 use crate::calibration_masters::cosmic_ray::mono::replace_flagged;
 use crate::calibration_masters::cosmic_ray::*;
 use crate::internals::cfa::XTRANS_PATTERN;
@@ -75,9 +76,10 @@ fn removes_cosmic_rays_preserves_stars() {
             out[size.index_of(p)]
         );
     }
-    // The 7 injected, and (13, 54): it shares the 2×2 subsample block of the CR at (12, 54), which
-    // lifts its significance past the growth threshold `sigfrac · sigclip`.
-    assert_eq!(count, 8);
+    // The 7 injected, and the two pixels the growth takes beside them: (13, 54) beside (12, 54), and
+    // (51, 49) diagonal to (50, 50), each inside its hit's box and clearing `sigfrac · sigclip`. The
+    // growth tests no contrast, as astroscrappy's does not.
+    assert_eq!(count, 9);
 }
 
 #[test]
@@ -497,4 +499,44 @@ fn a_faint_hit_on_a_gradient_is_caught() {
             .intersects(QualityFlags::COSMIC_RAY),
         "the hit was missed"
     );
+}
+
+/// The growth is astroscrappy's: the box about every hit, kept where `S' > sigclip`, then the box
+/// about that, kept where `S' > sigclip·sigfrac`, with no contrast test on either. On an 8×3 frame
+/// with `sigclip` 5, `sigfrac` 0.3 (so 1.5) and `objlim` 5, row 1 holds the hit P at x = 2 (S' 10,
+/// no fine structure), A at x = 3 (S' 6, but fine structure 10 σ, so it fails the contrast), B at
+/// x = 4 and C at x = 5 (S' 2 each), and E at x = 0 (S' 6, fine structure 10 σ, so no hit of its
+/// own); D below P has S' 2. P is the hit. A is
+/// in its box and clears `sigclip`: the first ring takes it, contrast or not. B is in A's box and
+/// clears 1.5, and so is D in P's: the second ring takes both. C is in no first-ring pixel's box,
+/// and E in none at all. Four pixels: P, A, B and D. One ring with the contrast took two.
+#[test]
+fn the_mask_grows_in_astroscrappys_two_rings() {
+    let size = Size2us::new(8, 3);
+    let at = |x: usize, y: usize| y * size.width + x;
+    let mut significance = vec![0.0f32; size.pixel_count()];
+    let mut fine = vec![0.0f32; size.pixel_count()];
+    let noise = vec![1.0f32; size.pixel_count()];
+    significance[at(2, 1)] = 10.0;
+    significance[at(3, 1)] = 6.0;
+    fine[at(3, 1)] = 10.0;
+    significance[at(4, 1)] = 2.0;
+    significance[at(5, 1)] = 2.0;
+    significance[at(0, 1)] = 6.0;
+    fine[at(0, 1)] = 10.0;
+    significance[at(2, 2)] = 2.0;
+    let cfg = CosmicRayConfig {
+        sigclip: 5.0,
+        sigfrac: 0.3,
+        objlim: 5.0,
+        ..CosmicRayConfig::default()
+    };
+    let mut masks = CrMasks::new(size);
+    assert_eq!(masks.detect_and_grow(&significance, &fine, &noise, &cfg), 4);
+    let flagged: Vec<usize> = (0..size.pixel_count())
+        .filter(|&index| masks.accumulated.get(index))
+        .collect();
+    assert_eq!(flagged, [at(2, 1), at(3, 1), at(4, 1), at(2, 2)]);
+    // A second pass finds nothing new: every pixel it would take is held already.
+    assert_eq!(masks.detect_and_grow(&significance, &fine, &noise, &cfg), 0);
 }
