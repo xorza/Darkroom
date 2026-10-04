@@ -12,8 +12,8 @@ const PASSES: [MarkesteijnPasses; 2] = [MarkesteijnPasses::One, MarkesteijnPasse
 /// FNV-1a 64 digest of the output inside the pass count's border: the planes in order, then rows,
 /// then columns, each f32's little-endian bytes. The script changes two lines: the 2×2 green
 /// blocks take red and blue in all four of one pass's directions, not two, and one tile covers the
-/// frame, whose seams would differ from an untiled run. The 160×120 frame spans two of lumos's
-/// tiles, so their seam is in the digest. The scenes use only correctly rounded operations, so
+/// frame, whose seams would differ from an untiled run. The 160×120 frame spans several of lumos's
+/// tiles, so their seams are in the digest. The scenes use only correctly rounded operations, so
 /// their samples are the same bits on every platform. The two pass counts give different digests,
 /// so the count reaches the output.
 #[test]
@@ -179,7 +179,7 @@ fn margin_is_the_least_that_reads_only_computed_colours() {
                 top: 3 + phase,
                 left: 3 + phase,
             };
-            let extent = Size2us::new(113, 111);
+            let extent = Size2us::new(TILE - 1, TILE - 3);
             let size = Size2us::new(place.left + extent.width + 3, place.top + extent.height + 3);
             let data: Vec<f32> = (0..size.pixel_count())
                 .map(|_| 0.1 + 0.8 * rng.next_f32())

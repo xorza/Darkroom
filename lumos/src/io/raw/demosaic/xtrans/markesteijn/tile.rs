@@ -29,6 +29,8 @@ pub(super) struct Tile {
     homo: Vec<u8>,
     homosum: Vec<u8>,
     homosummax: Vec<u8>,
+    /// Each row's homogeneity summed over five columns, for one direction at a time: at most 45.
+    row_sums: Vec<u8>,
     green_bounds: Vec<[f32; 2]>,
     /// The colour differences of a solitary green pixel, by colour and direction.
     dcolor: [[f32; 6]; 3],
@@ -58,6 +60,7 @@ impl Tile {
             homo: vec![0; directions * TILE * TILE],
             homosum: vec![0; directions * TILE * TILE],
             homosummax: vec![0; TILE * TILE],
+            row_sums: vec![0; TILE * TILE],
             green_bounds: vec![[0.0; 2]; TILE * HALF_TILE],
             dcolor: [[0.0; 6]; 3],
         }
@@ -69,7 +72,7 @@ impl Tile {
             + 3 * YUV_SIDE * YUV_SIDE * size_of::<f32>()
             + directions * DRV_SIDE * DRV_SIDE * size_of::<f32>()
             + 2 * directions * TILE * TILE
-            + TILE * TILE
+            + 2 * TILE * TILE
             + TILE * HALF_TILE * size_of::<[f32; 2]>()
     }
 
@@ -529,33 +532,58 @@ impl Tile {
     /// Every direction's ITU-R BT.2020 YPbPr, and the squared second difference of each along its
     /// own direction.
     fn derivatives(&mut self, mrow: usize, mcol: usize) {
-        const DIRECTION_STEPS: [isize; 4] =
-            [1, TILE as isize, TILE as isize + 1, TILE as isize - 1];
+        /// Each direction's step, as rows and columns.
+        const DIRECTION_STEPS: [[isize; 2]; 4] = [[0, 1], [1, 0], [1, 1], [1, -1]];
         let plane = YUV_SIDE * YUV_SIDE;
         for d in 0..self.directions {
+            let (y_plane, rest) = self.yuv.split_at_mut(plane);
+            let (pb_plane, pr_plane) = rest.split_at_mut(plane);
             for row in 4..mrow - 4 {
-                for col in 4..mcol - 4 {
-                    let [r, g, b] = self.rgb[Self::at(d, row, col)];
-                    let y = 0.2627 * r + 0.6780 * g + 0.0593 * b;
-                    let at = (row - 4) * YUV_SIDE + (col - 4);
-                    self.yuv[at] = y;
-                    self.yuv[plane + at] = (b - y) * 0.56433;
-                    self.yuv[2 * plane + at] = (r - y) * 0.67815;
+                let rgb = &self.rgb[Self::at(d, row, 4)..Self::at(d, row, mcol - 4)];
+                let at = (row - 4) * YUV_SIDE;
+                let span = at..at + rgb.len();
+                for (((&[r, g, b], y), pb), pr) in rgb
+                    .iter()
+                    .zip(&mut y_plane[span.clone()])
+                    .zip(&mut pb_plane[span.clone()])
+                    .zip(&mut pr_plane[span])
+                {
+                    let luma = 0.2627 * r + 0.6780 * g + 0.0593 * b;
+                    *y = luma;
+                    *pb = (b - luma) * 0.56433;
+                    *pr = (r - luma) * 0.67815;
                 }
             }
-            let step = DIRECTION_STEPS[d & 3];
-            let f = if step == 1 { 1 } else { step - 8 };
+            let [dr, dc] = DIRECTION_STEPS[d & 3];
+            let count = mcol - 10;
             for row in 5..mrow - 5 {
-                for col in 5..mcol - 5 {
-                    let at = (row - 4) * YUV_SIDE + (col - 4);
-                    let second = |channel: usize| {
-                        let base = channel * plane + at;
-                        let v = |offset: isize| self.yuv[base.wrapping_add_signed(offset)];
-                        let s = 2.0 * v(0) - v(f) - v(-f);
-                        s * s
-                    };
-                    self.drv[(d * DRV_SIDE + (row - 5)) * DRV_SIDE + (col - 5)] =
-                        second(0) + second(1) + second(2);
+                let out_at = (d * DRV_SIDE + (row - 5)) * DRV_SIDE;
+                let out = &mut self.drv[out_at..out_at + count];
+                // The yuv planes start at row and column 4, so column 5 is 1 in.
+                let centre = (row - 4) * YUV_SIDE + 1;
+                let step = dr * YUV_SIDE as isize + dc;
+                let next = centre.wrapping_add_signed(step);
+                let prev = centre.wrapping_add_signed(-step);
+                for (channel, values) in [
+                    &self.yuv[..plane],
+                    &self.yuv[plane..2 * plane],
+                    &self.yuv[2 * plane..],
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let lines = values[centre..centre + count]
+                        .iter()
+                        .zip(&values[next..next + count])
+                        .zip(&values[prev..prev + count]);
+                    for (drv, ((&v, &forward), &back)) in out.iter_mut().zip(lines) {
+                        let s = 2.0 * v - forward - back;
+                        if channel == 0 {
+                            *drv = s * s;
+                        } else {
+                            *drv += s * s;
+                        }
+                    }
                 }
             }
         }
@@ -564,61 +592,81 @@ impl Tile {
     /// How many of each pixel's 3×3 neighbours vary least, at most eight times the least, in each
     /// direction.
     fn homogeneity(&mut self, mrow: usize, mcol: usize) {
-        let drv = |d: usize, row: usize, col: usize| {
-            self.drv[(d * DRV_SIDE + (row - 5)) * DRV_SIDE + (col - 5)]
-        };
+        let count = mcol - 12;
+        let mut threshold = [0.0f32; TILE];
+        let threshold = &mut threshold[..count];
         for row in 6..mrow - 6 {
-            for col in 6..mcol - 6 {
-                let mut tr = if drv(0, row, col) < drv(1, row, col) {
-                    drv(0, row, col)
-                } else {
-                    drv(1, row, col)
-                };
+            // The derivative planes start at row and column 5, so column 6 is 1 in.
+            let line = |d: usize, row: usize| {
+                let at = (d * DRV_SIDE + (row - 5)) * DRV_SIDE;
+                &self.drv[at..at + DRV_SIDE]
+            };
+            for (col, tr) in threshold.iter_mut().enumerate() {
+                let (first, second) = (line(0, row)[col + 1], line(1, row)[col + 1]);
+                let mut least = if first < second { first } else { second };
                 for d in 2..self.directions {
-                    tr = if drv(d, row, col) < tr {
-                        drv(d, row, col)
-                    } else {
-                        tr
-                    };
+                    let value = line(d, row)[col + 1];
+                    least = if value < least { value } else { least };
                 }
-                tr *= 8.0;
-                for d in 0..self.directions {
-                    let mut count = 0u8;
-                    for v in 0..3 {
-                        for h in 0..3 {
-                            count += u8::from(drv(d, row + v - 1, col + h - 1) <= tr);
+                *tr = least * 8.0;
+            }
+            for d in 0..self.directions {
+                let (above, centre, below) = (line(d, row - 1), line(d, row), line(d, row + 1));
+                let out_at = Self::at(d, row, 6);
+                let out = &mut self.homo[out_at..out_at + count];
+                for (col, (homo, &tr)) in out.iter_mut().zip(threshold.iter()).enumerate() {
+                    let mut hits = 0u8;
+                    for line in [above, centre, below] {
+                        for &value in &line[col..col + 3] {
+                            hits += u8::from(value <= tr);
                         }
                     }
-                    self.homo[Self::at(d, row, col)] = count;
+                    *homo = hits;
                 }
             }
         }
     }
 
     /// Each direction's homogeneity summed over 5×5, and the largest sum less an eighth of it,
-    /// over the tile's own part.
+    /// over the tile's own part: five columns along each row, then five of those rows.
     fn homogeneity_sums(&mut self, own: &OwnedPart) {
+        let cols = own.cols.clone();
         for d in 0..self.directions {
+            for row in own.rows.start - 2..own.rows.end + 2 {
+                let homo =
+                    &self.homo[Self::at(d, row, cols.start - 2)..Self::at(d, row, cols.end + 2)];
+                let sums = &mut self.row_sums[row * TILE + cols.start..row * TILE + cols.end];
+                for (sum, window) in sums.iter_mut().zip(homo.windows(5)) {
+                    *sum = window.iter().sum();
+                }
+            }
             for row in own.rows.clone() {
-                for col in own.cols.clone() {
-                    let mut sum = 0u32;
-                    for v in 0..5 {
-                        for h in 0..5 {
-                            sum += u32::from(self.homo[Self::at(d, row + v - 2, col + h - 2)]);
-                        }
+                let out_at = Self::at(d, row, cols.start);
+                let out = &mut self.homosum[out_at..out_at + cols.len()];
+                out.copy_from_slice(
+                    &self.row_sums[(row - 2) * TILE + cols.start..(row - 2) * TILE + cols.end],
+                );
+                for v in row - 1..=row + 2 {
+                    let sums = &self.row_sums[v * TILE + cols.start..v * TILE + cols.end];
+                    for (total, &sum) in out.iter_mut().zip(sums) {
+                        *total += sum;
                     }
-                    self.homosum[Self::at(d, row, col)] =
-                        u8::try_from(sum).expect("25 counts of at most 9");
                 }
             }
         }
         for row in own.rows.clone() {
-            for col in own.cols.clone() {
-                let mut maxval = self.homosum[Self::at(0, row, col)];
-                for d in 1..self.directions {
-                    maxval = maxval.max(self.homosum[Self::at(d, row, col)]);
+            let out = &mut self.homosummax[row * TILE + cols.start..row * TILE + cols.end];
+            out.copy_from_slice(
+                &self.homosum[Self::at(0, row, cols.start)..Self::at(0, row, cols.end)],
+            );
+            for d in 1..self.directions {
+                let sums = &self.homosum[Self::at(d, row, cols.start)..Self::at(d, row, cols.end)];
+                for (most, &sum) in out.iter_mut().zip(sums) {
+                    *most = (*most).max(sum);
                 }
-                self.homosummax[row * TILE + col] = maxval - (maxval >> 3);
+            }
+            for most in out.iter_mut() {
+                *most -= *most >> 3;
             }
         }
     }
