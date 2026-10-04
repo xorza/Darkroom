@@ -664,6 +664,8 @@ Found on the way and fixed: the SNR floored its variance at `f32::EPSILON`, an a
 
 - Add the Lanczos ringing clamp (PixInsight default 0.3). Stretch the kernel by `1/scale` when the warp's smallest singular value is below 1. For the masked path and the edge band, use the normalized valid-tap Lanczos, with a bilinear fallback below a stated tap sum.
 - Compute the tap weights once per pixel for all channels (24.4). Collapse SIP per row with Horner (24.5). Build the monomials once per Newton step (24.6).
+
+1. Done: a SIP row collapses to two polynomials in `u` (`SipPolynomial::row`, Horner per pixel), and the 2k RGB SIP warp bench goes from 49.6 ms to 44.5 ms. A Newton step takes the correction and its Jacobian from one set of powers (`SipPolynomial::local`), and `InverseWarp::position` skips the final Jacobian that drizzle's placement discarded. Items 24.5 and 24.6 are closed.
 - **Tests:** a bright single pixel keeps its undershoot within the clamp. A 0.5× warp of a Nyquist grating gives no alias above the noise. SIMD and scalar stay bit-identical.
 - **Closes:** group 14, 24.4 to 24.6.
 
