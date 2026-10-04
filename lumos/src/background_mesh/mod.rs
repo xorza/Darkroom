@@ -89,8 +89,6 @@ impl TileGrid {
         self.d2y[tile.y * self.stats.width() + tile.x].get(component)
     }
 
-    /// Find the tile index whose center is at or before the given Y position.
-    #[inline]
     /// The least and the greatest tile σ.
     pub(crate) fn sigma_range(&self) -> RangeInclusive<f32> {
         let stats = self.stats.pixels();
@@ -105,6 +103,8 @@ impl TileGrid {
         low..=high
     }
 
+    /// Find the tile index whose center is at or before the given Y position.
+    #[inline]
     pub(crate) fn find_lower_tile_y(&self, pos: f32) -> usize {
         // tiles_y >= 1 always (the grid is built from an image with at least one tile row).
         let tiles_y = self.stats.height();

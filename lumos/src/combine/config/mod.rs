@@ -119,7 +119,7 @@ pub enum Normalization {
 /// // Simple sigma-clipped stacking (default)
 /// let result = stack(
 ///     &paths,
-///     StackConfig::default(),
+///     &StackConfig::default(),
 ///     ProgressCallback::default(),
 ///     CancelToken::never(),
 /// )?;
@@ -135,7 +135,7 @@ pub enum Normalization {
 /// };
 /// let result = stack(
 ///     &paths,
-///     config,
+///     &config,
 ///     ProgressCallback::default(),
 ///     CancelToken::never(),
 /// )?;

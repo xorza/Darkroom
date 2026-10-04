@@ -1,4 +1,5 @@
-//! Memory planning and RAM/mmap storage shared by stacking stages.
+//! RAM/mmap frame storage shared by stacking stages. What a run may hold, and the plan that keeps
+//! it there, is in `memory`.
 
 pub(crate) mod cache_key;
 pub(crate) mod decode_cache;

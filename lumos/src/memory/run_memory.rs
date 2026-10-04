@@ -9,8 +9,8 @@ pub(crate) struct RunMemory {
     /// The available memory the system reported at the entry.
     system: u64,
     /// What the run's tier decisions and chunk sizes plan against: the caller's override when it
-    /// gave one, else the system reading — and for one of several stacks run side by side, its
-    /// share of that.
+    /// gave one, else the system reading. Several stacks run side by side each read the whole
+    /// system figure; a caller that runs them so divides it through the override.
     planning: u64,
 }
 

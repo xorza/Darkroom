@@ -104,11 +104,14 @@ impl From<LinearImage> for StackFrame {
 ///
 /// Pass [`ProgressCallback::default()`] when you don't need progress reporting.
 ///
-/// ```ignore
-/// use lumos::{stack, StackConfig, ProgressCallback};
+/// ```no_run
+/// use common::CancelToken;
+/// use lumos::{ProgressCallback, StackConfig, stack};
 ///
-/// let result = stack(&paths, StackConfig::default(), ProgressCallback::default(), CancelToken::never())?;
-/// let result = stack(&paths, StackConfig::median(), ProgressCallback::default(), CancelToken::never())?;
+/// let paths = ["frame1.fits", "frame2.fits", "frame3.fits"];
+/// let result = stack(&paths, &StackConfig::default(), ProgressCallback::default(), CancelToken::never())?;
+/// let result = stack(&paths, &StackConfig::median(), ProgressCallback::default(), CancelToken::never())?;
+/// # Ok::<(), lumos::StackError>(())
 /// ```
 pub fn stack<P: AsRef<Path> + Sync>(
     paths: &[P],

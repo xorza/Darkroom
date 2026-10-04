@@ -1,24 +1,23 @@
 //! RANSAC (Random Sample Consensus) for robust transformation estimation.
 //!
-//! This module implements RANSAC with MAGSAC++ scoring to robustly estimate
-//! transformations in the presence of outliers. MAGSAC++ (Barath & Matas 2020)
-//! eliminates the need for manual threshold tuning by marginalizing over a
-//! range of noise scales.
+//! This module implements RANSAC with a truncated Welsch loss to robustly estimate
+//! transformations in the presence of outliers: each point's residual is graded continuously at
+//! the noise scale `σ_max`, rather than cut at a hand-tuned inlier threshold.
 //!
 //! The algorithm works by:
 //! 1. Randomly sampling minimal point sets
 //! 2. Computing candidate transformations
-//! 3. Scoring with MAGSAC++ (continuous likelihood, not binary inlier/outlier)
+//! 3. Scoring with the truncated Welsch loss (continuous, not binary inlier/outlier)
 //! 4. Keeping the best model
 //! 5. Refining with least squares on inliers
 
 pub(crate) mod config;
-mod magsac;
 mod sampling;
 pub(super) mod transforms;
+mod welsch;
 
-use magsac::MagsacScorer;
 use transforms::{adaptive_iterations, estimate_transform};
+use welsch::WelschScorer;
 
 use std::cmp::Ordering;
 use std::mem;
@@ -134,7 +133,7 @@ impl RansacEstimator {
         ref_points: &[DVec2],
         target_points: &[DVec2],
         hypothesis: &mut ScoredHypothesis,
-        scorer: &MagsacScorer,
+        scorer: &WelschScorer,
         buffers: &mut LocalOptBuffers,
     ) {
         let transform_type = hypothesis.transform.transform_type();
@@ -195,7 +194,7 @@ impl RansacEstimator {
         }
     }
 
-    /// Core RANSAC loop with MAGSAC++ scoring.
+    /// Core RANSAC loop with truncated Welsch scoring.
     ///
     /// `sample_fn` fills the sample for each iteration, numbered from 1. The first
     /// `guided_iterations` are the sampler's guided warm-up, which the adaptive bound does not
@@ -210,7 +209,7 @@ impl RansacEstimator {
     ) -> Result<RansacResult, RansacFailure> {
         let n = ref_points.len();
         let min_samples = transform_type.min_points();
-        let scorer = MagsacScorer::new(self.max_sigma);
+        let scorer = WelschScorer::new(self.max_sigma);
 
         // `None` until a hypothesis scores at all. `scratch` is where the next hypothesis is
         // scored; a new best takes it and hands the old best's buffer back, so the loop allocates
@@ -256,7 +255,7 @@ impl RansacEstimator {
                 continue;
             }
 
-            // Score with MAGSAC++, preemptively: a hypothesis that cannot beat the best stops
+            // Score preemptively: a hypothesis that cannot beat the best stops
             // scoring early, and its `scratch` is then incomplete — which is why only one that
             // beats the best is ever read further.
             let best_score = best.as_ref().map_or(f64::NEG_INFINITY, |best| best.score);
@@ -460,7 +459,7 @@ fn is_sample_degenerate(points: &[DVec2], noise_scale: f64) -> bool {
     false
 }
 
-/// Score a hypothesis using MAGSAC++ scoring.
+/// Score a hypothesis by the truncated Welsch loss.
 ///
 /// Returns negative total loss (higher score = better model).
 /// Also populates the inliers buffer with indices of points within threshold.
@@ -474,7 +473,7 @@ fn score_hypothesis(
     ref_points: &[DVec2],
     target_points: &[DVec2],
     transform: &Transform,
-    scorer: &MagsacScorer,
+    scorer: &WelschScorer,
     inliers: &mut Vec<usize>,
     best_score: f64,
 ) -> f64 {

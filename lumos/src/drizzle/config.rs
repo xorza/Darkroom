@@ -17,13 +17,14 @@ pub enum DrizzleKernel {
     /// Turbo kernel: axis-aligned rectangular drop centered on the transformed pixel center.
     /// Approximation of true square kernel — always aligned with output X/Y axes regardless
     /// of rotation, so it is exact only at rotations of 0°, 90° and 180°.
-    /// (Named "turbo" in `STScI` `DrizzlePac`; "square" there uses full polygon clipping.)
+    /// (Named "turbo" in `STScI` `DrizzlePac`; "square" there integrates the transformed polygon's
+    /// edges, as [`Self::Square`] does.)
     Turbo,
     /// Point kernel - single pixel contribution.
     /// Fastest but requires very good dithering.
     Point,
-    /// Gaussian droplet with configurable FWHM.
-    /// Smoother output, slight flux redistribution.
+    /// Gaussian droplet whose FWHM is the drop size, `pixfrac·scale` output pixels, as in
+    /// `STScI` drizzle. Smoother output, slight flux redistribution.
     Gaussian,
     /// Lanczos kernel for high-quality interpolation.
     /// Best quality but slowest. Only valid at pixfrac=1.0, scale=1.0.
@@ -130,7 +131,7 @@ impl DrizzleConfig {
         self
     }
 
-    /// Set minimum coverage threshold.
+    /// Set the fill gate, [`Self::min_weight_fraction`].
     #[must_use]
     pub const fn with_min_weight_fraction(mut self, min_weight_fraction: f32) -> Self {
         self.min_weight_fraction = min_weight_fraction;

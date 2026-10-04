@@ -82,8 +82,8 @@ const MAD_TO_SIGMA_F32: f32 = MAD_TO_SIGMA as f32;
 /// here `−2·ln(0.01)`.
 ///
 /// Lives here rather than beside either caller because registration gates 2-D residuals twice, at
-/// the same confidence: MAGSAC's outlier boundary uses it squared, match recovery uses its square
-/// root as a radius. Two literals drifted apart once already (9.21 against a rounded 3.03).
+/// the same confidence: the RANSAC scorer's outlier boundary uses it squared, match recovery uses
+/// its square root as a radius. Two literals drifted apart once already (9.21 against a rounded 3.03).
 pub(crate) const CHI2_99_2DOF: f64 = 9.210_340_371_976_182;
 
 /// Convert MAD to standard deviation (assuming normal distribution).

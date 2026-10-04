@@ -7,11 +7,12 @@
 //!
 //! The detection pipeline consists of 6 stages:
 //!
-//! 1. **Prepare**: Convert to grayscale, apply defect map correction, median
-//!    filter for CFA images.
+//! 1. **Prepare**: Combine the channels, each weighted by its noise, into one plane; mark the
+//!    saturated pixels and those with no data. A demosaiced frame's detection plane takes a 3×3
+//!    median first; the plane measurement reads is never filtered.
 //!
 //! 2. **Background**: Estimate per-pixel background and noise using tiled
-//!    sigma-clipped statistics with bilinear interpolation. Optional iterative
+//!    sigma-clipped statistics with natural-cubic-spline interpolation. Optional iterative
 //!    refinement masks the detected sources and estimates again, for
 //!    nebulous fields.
 //!
@@ -31,22 +32,25 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
-//! use lumos::star_detection::{Config, StarDetector};
+//! ```no_run
+//! use lumos::{InvalidConfigField, LinearImage, StarDetectionConfig, StarDetector};
 //!
+//! # fn example(image: &LinearImage) -> Result<(), InvalidConfigField> {
 //! // Use a preset configuration
-//! let config = Config::wide_field();
+//! let config = StarDetectionConfig::wide_field();
 //!
 //! // Or customize from defaults
-//! let mut config = Config::default();
+//! let mut config = StarDetectionConfig::default();
 //! config.filter.min_snr = 15.0;
 //! config.detection.sigma_threshold = 3.0;
 //!
 //! // Detect stars
 //! let mut detector = StarDetector::from_config(config)?;
-//! let result = detector.detect(&image);
+//! let result = detector.detect(image);
 //!
 //! println!("Found {} stars", result.stars.len());
+//! # Ok(())
+//! # }
 //! ```
 
 pub(crate) mod background;

@@ -27,7 +27,7 @@ fn sigma_and_recovery_radius_track_the_psf_width() {
     // ...including the degenerate catalog that would otherwise trip RansacEstimator's assert.
     assert_eq!(max_sigma_from_fwhm(0.0), 0.5);
 
-    // Squaring the radius must land on the boundary MAGSAC scores against, or the two gates
+    // Squaring the radius must land on the boundary the RANSAC scorer judges by, or the two gates
     // disagree about the same point: a square root and a square apart, a few ulps.
     let boundary_sq = CHI2_99_2DOF * sigma * sigma;
     assert!((radius * radius - boundary_sq).abs() <= 4.0 * f64::EPSILON * boundary_sq);

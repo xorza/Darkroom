@@ -1,12 +1,11 @@
-//! MAGSAC++-inspired scoring for threshold-free robust estimation.
+//! Robust scoring of a RANSAC hypothesis by a truncated Welsch loss.
 //!
-//! Inspired by MAGSAC++ (Barath & Matas 2020): instead of a binary inlier/outlier decision, each
-//! point gets a continuous loss that grades how well it fits, removing manual threshold tuning.
-//!
-//! This is **not** the paper's exact `ρ` (which uses the n=4 `DoF` incomplete gammas). It is a
-//! lighter monotone saturating loss built on the closed-form `γ(1, x) = 1 − exp(−x)` (no lookup
-//! table): quadratic (≈ r²/4) near zero, saturating at `σ²_max/2`. It is monotone non-decreasing
-//! in the residual — the property a robust loss must have.
+//! Instead of a binary inlier/outlier decision, each point gets a continuous loss that grades how
+//! well it fits: the Welsch (Leclerc) loss `ρ(r) = (σ²_max/2)·(1 − exp(−r²/(2σ²_max)))`, quadratic
+//! (≈ r²/4) near zero and saturating at `σ²_max/2`, held at that value past the χ² 99% boundary. It
+//! is monotone non-decreasing in the residual — the property a robust loss must have. MAGSAC++
+//! (Barath & Matas 2020) marginalizes its loss over noise scales up to `σ_max`; this takes one
+//! scale, `σ_max`, so it is not MAGSAC++.
 
 use crate::math::statistics::CHI2_99_2DOF;
 
@@ -16,12 +15,9 @@ fn gamma_k2(x: f64) -> f64 {
     if x <= 0.0 { 0.0 } else { 1.0 - (-x).exp() }
 }
 
-/// MAGSAC++-inspired scorer for threshold-free inlier evaluation.
-///
-/// Computes a continuous, monotone saturating loss instead of a binary inlier decision (see the
-/// module docs — this is a lighter loss than the paper's exact `ρ`).
+/// Scores a hypothesis's residuals by the truncated Welsch loss of the module docs.
 #[derive(Debug)]
-pub(super) struct MagsacScorer {
+pub(super) struct WelschScorer {
     /// Maximum sigma squared (`σ²_max`)
     max_sigma_sq: f64,
     /// Outlier loss (assigned to points beyond threshold)
@@ -30,8 +26,8 @@ pub(super) struct MagsacScorer {
     threshold_sq: f64,
 }
 
-impl MagsacScorer {
-    /// Create a new MAGSAC++ scorer.
+impl WelschScorer {
+    /// The scorer at noise scale `max_sigma`.
     ///
     /// # Arguments
     /// * `max_sigma` - Maximum noise scale in pixels. Points with residuals
@@ -52,7 +48,7 @@ impl MagsacScorer {
         }
     }
 
-    /// Compute MAGSAC++ loss for a single point.
+    /// The loss of a single point.
     ///
     /// Lower loss = better fit. The loss smoothly transitions from 0
     /// (perfect fit) to `outlier_loss` (clear outlier).
