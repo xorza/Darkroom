@@ -10,7 +10,7 @@ use rayon::prelude::*;
 
 use std::ops::Range;
 
-use crate::concurrency::JobScratchPool;
+use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::drizzle::accumulator::frame_source::FrameSource;
 use crate::drizzle::accumulator::kernel_plan::KernelPlan;
 use crate::drizzle::accumulator::output_band::{OutputBand, RadialScratch};

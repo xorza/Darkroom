@@ -27,7 +27,7 @@ use crate::io::image::preview_image::PreviewImage;
 use crate::io::image::sample_domain::{DomainMap, Pedestal, SampleDomain, ScaleOrigin};
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
-use crate::progress::ProgressCallback;
+use crate::progress::progress_callback::ProgressCallback;
 use crate::{
     CalibrationComponent, CalibrationMasters, CalibrationSet, DefectSummary, ImageError,
     ImageMetadata, MasterRole,

@@ -36,6 +36,72 @@ pub(crate) struct MultiThresholdParams {
     pub(crate) connectivity: Connectivity,
 }
 
+impl MultiThresholdParams {
+    /// Split `component` by its multi-threshold tree onto `out`: one region when it splits nowhere,
+    /// else one region per star, brightest by flux above its level first. Returns how many it pushed.
+    ///
+    /// `floor` is the detection threshold at the component, in the units of its values — the lowest
+    /// level of the ladder, as SExtractor's `DETECT_THRESH` is. It must be positive.
+    pub(crate) fn deblend(
+        self,
+        component: &Component<'_>,
+        floor: f32,
+        buffers: &mut DeblendBuffers,
+        out: &mut Vec<Region>,
+    ) -> usize {
+        let params = self;
+        debug_assert!(floor > 0.0, "the ladder starts at a positive threshold");
+        debug_assert!(params.n_thresholds >= 1, "the ladder has at least one step");
+        let DeblendBuffers {
+            pixels,
+            peaks,
+            assignment,
+            tree,
+            ..
+        } = buffers;
+        peaks.clear();
+        let peak = component.peak();
+
+        // Stars are disjoint subsets of the component, each holding more than `min_contrast` of its
+        // flux above a positive level, so at most one can for `min_contrast ≥ 1`; and a peak at or
+        // below the floor leaves the ladder no room to split.
+        if params.min_contrast >= 1.0 || peak.value <= floor {
+            return component.split_at(peaks, assignment, out);
+        }
+
+        pixels.fill(component);
+        let ladder = ThresholdLadder {
+            low: floor,
+            high: peak.value,
+            n_thresholds: params.n_thresholds,
+        };
+        tree.build(pixels, peak, ladder, params);
+        let root_flux: f64 = pixels.pixels.iter().map(|p| f64::from(p.value)).sum();
+        tree.find_stars((f64::from(params.min_contrast) * root_flux) as f32);
+
+        let TreeBuffers { objects, stars, .. } = tree;
+        if stars.len() > 1 {
+            stars.sort_unstable_by(|&a, &b| {
+                objects[b as usize]
+                    .flux_above
+                    .total_cmp(&objects[a as usize].flux_above)
+                    .then(a.cmp(&b))
+            });
+            let min_sep_sq = params.min_separation * params.min_separation;
+            for &star in stars.iter() {
+                let candidate = objects[star as usize].peak;
+                if !peaks
+                    .iter()
+                    .any(|kept: &Pixel| peaks_too_close(candidate.pos, kept.pos, min_sep_sq))
+                {
+                    peaks.push(candidate);
+                }
+            }
+        }
+        component.split_at(peaks, assignment, out)
+    }
+}
+
 /// One object of the tree: a connected region of the component above the level it was cut at.
 #[derive(Debug, Clone, Copy)]
 struct TreeObject {
@@ -65,69 +131,6 @@ pub(crate) struct TreeBuffers {
     unsplit: Vec<bool>,
     /// The objects that stand as stars.
     stars: Vec<u32>,
-}
-
-/// Split `component` by its multi-threshold tree onto `out`: one region when it splits nowhere,
-/// else one region per star, brightest by flux above its level first. Returns how many it pushed.
-///
-/// `floor` is the detection threshold at the component, in the units of its values — the lowest
-/// level of the ladder, as SExtractor's `DETECT_THRESH` is. It must be positive.
-pub(crate) fn deblend_multi_threshold(
-    component: &Component<'_>,
-    floor: f32,
-    params: MultiThresholdParams,
-    buffers: &mut DeblendBuffers,
-    out: &mut Vec<Region>,
-) -> usize {
-    debug_assert!(floor > 0.0, "the ladder starts at a positive threshold");
-    debug_assert!(params.n_thresholds >= 1, "the ladder has at least one step");
-    let DeblendBuffers {
-        pixels,
-        peaks,
-        assignment,
-        tree,
-        ..
-    } = buffers;
-    peaks.clear();
-    let peak = component.peak();
-
-    // Stars are disjoint subsets of the component, each holding more than `min_contrast` of its
-    // flux above a positive level, so at most one can for `min_contrast ≥ 1`; and a peak at or
-    // below the floor leaves the ladder no room to split.
-    if params.min_contrast >= 1.0 || peak.value <= floor {
-        return component.split_at(peaks, assignment, out);
-    }
-
-    pixels.fill(component);
-    let ladder = ThresholdLadder {
-        low: floor,
-        high: peak.value,
-        n_thresholds: params.n_thresholds,
-    };
-    tree.build(pixels, peak, ladder, params);
-    let root_flux: f64 = pixels.pixels.iter().map(|p| f64::from(p.value)).sum();
-    tree.find_stars((f64::from(params.min_contrast) * root_flux) as f32);
-
-    let TreeBuffers { objects, stars, .. } = tree;
-    if stars.len() > 1 {
-        stars.sort_unstable_by(|&a, &b| {
-            objects[b as usize]
-                .flux_above
-                .total_cmp(&objects[a as usize].flux_above)
-                .then(a.cmp(&b))
-        });
-        let min_sep_sq = params.min_separation * params.min_separation;
-        for &star in stars.iter() {
-            let candidate = objects[star as usize].peak;
-            if !peaks
-                .iter()
-                .any(|kept: &Pixel| peaks_too_close(candidate.pos, kept.pos, min_sep_sq))
-            {
-                peaks.push(candidate);
-            }
-        }
-    }
-    component.split_at(peaks, assignment, out)
 }
 
 /// The exponentially spaced ladder one component is cut at: the floor to start from, the peak to

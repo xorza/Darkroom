@@ -30,7 +30,7 @@ use crate::io::image::load_context::LoadContext;
 use crate::io::image::sample_domain::{DomainMap, ScaleOrigin};
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::memory::run_memory::RunMemory;
-use crate::progress::ProgressCallback;
+use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::transform::{Transform, WarpTransform};
 
 use crate::frame_store::stackable_image::StackableImage;
@@ -378,7 +378,7 @@ fn a_mismatched_frame_set_stops_before_the_third_frame_decodes() {
     use crate::combine::config::Normalization;
     use crate::combine::error::StackError;
     use crate::ingest::ingest_config::IngestConfig;
-    use crate::progress::ProgressCallback;
+    use crate::progress::progress_callback::ProgressCallback;
 
     let dir = TempDir::new("lumos-frame-set");
     let image = Image::new(vec![4, 1], vec![0.0f32, 0.25, 0.5, 1.0]).unwrap();

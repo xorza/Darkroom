@@ -21,7 +21,7 @@ use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::pixel_flags::PixelFlags;
 use crate::io::image::sample_domain::{Pedestal, SampleDomain, ScaleOrigin};
-use crate::io::image::standard::{f32_target_format, read_standard_image, scientific_rejection};
+use crate::io::image::standard::{f32_target_format, read_standard_image};
 
 /// A one- or three-channel floating-point image in a linear numeric domain.
 #[derive(Debug, Clone)]
@@ -48,7 +48,7 @@ impl LinearImage {
         let format = match InputFormat::of(path)? {
             InputFormat::Fits => return fits_decode::load_linear_fits(path, context),
             InputFormat::CameraRaw => {
-                return Err(scientific_rejection(
+                return Err(ImageError::scientific_rejection(
                     path,
                     "camera RAW must be loaded as CfaImage and calibrated before demosaicing",
                 ));
@@ -56,7 +56,7 @@ impl LinearImage {
             InputFormat::Raster(format) => format,
         };
         if format != FileFormat::Tiff {
-            return Err(scientific_rejection(
+            return Err(ImageError::scientific_rejection(
                 path,
                 "PNG and JPEG are preview-only because their transfer and color transforms are not decoded",
             ));
@@ -66,7 +66,7 @@ impl LinearImage {
         context.check_cancelled(path)?;
         let desc = decoded.desc();
         if desc.width > ImageDimensions::MAX_SIDE || desc.height > ImageDimensions::MAX_SIDE {
-            return Err(scientific_rejection(
+            return Err(ImageError::scientific_rejection(
                 path,
                 format!(
                     "{}x{} has a side past {} px",
@@ -77,13 +77,13 @@ impl LinearImage {
             ));
         }
         if !decoded.desc().color_format.sample_type.is_float() {
-            return Err(scientific_rejection(
+            return Err(ImageError::scientific_rejection(
                 path,
                 "scientific raster input must be a floating-point TIFF",
             ));
         }
         if decoded.desc().color_format.channel_count == ChannelCount::Rgba {
-            return Err(scientific_rejection(
+            return Err(ImageError::scientific_rejection(
                 path,
                 "scientific raster input must not contain an alpha channel",
             ));

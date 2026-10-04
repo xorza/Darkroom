@@ -24,14 +24,14 @@ use crate::ingest::ingest_run::IngestRun;
 use crate::io::image::error::ImageError;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::load_context::LoadContext;
-use crate::memory;
-use crate::memory::{MemoryPlan, RunShape};
+use crate::memory::memory_plan::{MemoryPlan, RunShape};
 
 use crate::frame_store::stackable_image::StackableImage;
 
 use crate::frame_store::stored_frame::StoredFrame;
+use crate::progress::progress_callback::ProgressCallback;
+use crate::progress::stacking_progress::StackingStage;
 use crate::progress::stage_counter::StageCounter;
-use crate::progress::{ProgressCallback, StackingStage};
 
 use crate::combine::cache::core::{CacheCore, CacheTier};
 use crate::combine::cache::frame_check::FrameCheck;
@@ -90,7 +90,7 @@ pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
         RunShape::decoded_stack(
             paths.len(),
             peek.resident_bytes(),
-            memory::frame_bytes(dimensions),
+            dimensions.frame_bytes(),
             config.quality.resident_bytes(dimensions),
         ),
         rayon::current_num_threads(),

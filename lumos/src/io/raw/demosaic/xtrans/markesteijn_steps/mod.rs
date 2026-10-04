@@ -11,7 +11,7 @@ use crate::io::raw::demosaic::xtrans::markesteijn::{FinalBlendBuffers, NDIR};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
-use crate::concurrency::UnsafeSendPtr;
+use crate::concurrency::unsafe_send_ptr::UnsafeSendPtr;
 use std::mem;
 
 /// Direction offsets for derivative computation.

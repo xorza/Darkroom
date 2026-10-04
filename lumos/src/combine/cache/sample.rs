@@ -17,7 +17,7 @@ const SOFT_EXCLUDED: QualityFlags = QualityFlags::SATURATED
 /// packed to the front, with their weights, flags, frames and noise in the same order, and the
 /// rejection methods' own working buffers.
 ///
-/// Leased from a [`JobScratchPool`](crate::concurrency::JobScratchPool) rather than built in a
+/// Leased from a [`JobScratchPool`](crate::concurrency::job_scratch_pool::JobScratchPool) rather than built in a
 /// `for_each_init` init closure, because the row loop runs once per chunk per channel — a fresh
 /// init would rebuild every vector on each of those.
 #[derive(Debug, Default)]

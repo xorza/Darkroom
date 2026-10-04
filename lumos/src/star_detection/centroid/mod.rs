@@ -26,8 +26,8 @@ use crate::math::lm_controller::LmFit;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::star_detection::background::sky_noise::SkyNoise;
-use crate::star_detection::centroid::covariance::{Cov2, MIN_SIGMA_SQ, windowed_covariance};
-use crate::star_detection::centroid::local_background::compute_annulus_background;
+use crate::star_detection::centroid::covariance::{Cov2, MIN_SIGMA_SQ};
+use crate::star_detection::centroid::local_background::LocalBackground;
 use crate::star_detection::centroid::measure_grid::{MAX_STAMP_RADIUS, MeasureGrid};
 use crate::star_detection::centroid::star_noise::StarNoise;
 use crate::star_detection::centroid::windowed_centroid::{WindowedCentroid, WindowedInputs};
@@ -120,9 +120,7 @@ pub(super) fn measure_star(
     // the stamp only where nothing better was measured.
     let annulus_at = |at: DVec2| match config.local_background {
         LocalBackgroundMethod::GlobalMap => None,
-        LocalBackgroundMethod::LocalAnnulus => {
-            compute_annulus_background(residual, at, grid.annulus)
-        }
+        LocalBackgroundMethod::LocalAnnulus => LocalBackground::measure(residual, at, grid.annulus),
     };
     let start_annulus = annulus_at(start);
     let (local_offset, local_noise) = start_annulus
@@ -321,12 +319,11 @@ fn compute_star(
     // window from the plain moment; fall back to the plain moments if it can't converge to a
     // valid (positive-definite) covariance.
     let seed_sigma_sq = ((sum_x2 + sum_y2) / weight_sum / 2.0).max(MIN_SIGMA_SQ);
-    let cov =
-        windowed_covariance(residual, offset, pos, stamp_radius, seed_sigma_sq).unwrap_or(Cov2 {
-            xx: sum_x2 / weight_sum,
-            yy: sum_y2 / weight_sum,
-            xy: sum_xy / weight_sum,
-        });
+    let cov = Cov2::windowed(residual, offset, pos, stamp_radius, seed_sigma_sq).unwrap_or(Cov2 {
+        xx: sum_x2 / weight_sum,
+        yy: sum_y2 / weight_sum,
+        xy: sum_xy / weight_sum,
+    });
     // The PSF's own shape, as the fits report it. A source the moments place inside a pixel is
     // unresolved: FWHM 0, and no elongation to measure.
     let shape = cov.less_pixel();

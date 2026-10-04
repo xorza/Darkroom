@@ -8,9 +8,9 @@ use crate::io::image::image_metadata::ImageMetadata;
 use crate::pipeline::config::AlignStackConfig;
 use crate::pipeline::error::AlignStackError;
 use crate::pipeline::frame_registrar::ParkedFrame;
+use crate::pipeline::frame_tier::FrameTier;
 use crate::pipeline::result::AlignStackResult;
-use crate::pipeline::tier::FrameTier;
-use crate::progress::ProgressCallback;
+use crate::progress::progress_callback::ProgressCallback;
 use crate::star_detection::detector::Diagnostics;
 
 /// Every light's parked frame in input order — `None` only where the run was cancelled — with

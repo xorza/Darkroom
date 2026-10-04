@@ -23,7 +23,7 @@ use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::fits::cfa::save_cfa_fits;
 use crate::io::image::load_context::LoadContext;
 use crate::io::raw::demosaic::bayer::CfaPattern;
-use crate::progress::ProgressCallback;
+use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::config::Config as RegistrationConfig;
 use crate::registration::register;
 use crate::registration::resample::{WarpResult, warp};

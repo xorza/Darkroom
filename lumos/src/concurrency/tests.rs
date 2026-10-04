@@ -5,7 +5,8 @@ use std::sync::{Arc, Barrier};
 
 use rayon::ThreadPoolBuilder;
 
-use crate::concurrency::{JobScratchPool, try_par_map_bounded_owned, try_par_map_limited};
+use crate::concurrency::job_scratch_pool::JobScratchPool;
+use crate::concurrency::{try_par_map_bounded_owned, try_par_map_limited};
 
 #[test]
 fn job_scratch_leases_are_exclusive_and_reused() {

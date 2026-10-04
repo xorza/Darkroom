@@ -1,4 +1,4 @@
-//! Where the pipeline parks a frame between stages.
+//! [`FrameTier`]: where the pipeline parks a frame between stages.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -10,12 +10,12 @@ use crate::frame_store::stored_frame::StoredFrame;
 use crate::ingest::ingest_config::IngestConfig;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
-use crate::memory::MemoryPlan;
+use crate::memory::memory_plan::MemoryPlan;
 use crate::memory::run_memory::RunMemory;
 
 use crate::frame_store::stored_image::StoredImage;
 use crate::pipeline::error::AlignStackError;
-use crate::pipeline::frame::PipelineFrame;
+use crate::pipeline::pipeline_frame::PipelineFrame;
 use crate::registration::resample::WarpBuffers;
 
 /// The memory decisions the register-warp stage reads, both taken from one [`MemoryPlan`]: where a

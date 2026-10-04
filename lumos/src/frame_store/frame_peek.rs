@@ -6,7 +6,6 @@ use crate::frame_store::stackable_image::StackableImage;
 use crate::io::image::cfa::CfaFrameInfo;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::pixel_flags::QualityFlags;
-use crate::memory;
 
 /// What one frame is worth to a memory estimate, before the rest of the set is read.
 ///
@@ -35,11 +34,11 @@ impl FramePeek {
     /// quality planes if it may carry them.
     pub(crate) const fn resident_bytes(self) -> usize {
         let quality = if self.may_carry_nulls {
-            memory::quality_plane_bytes(self.dimensions)
+            self.dimensions.quality_plane_bytes()
         } else {
             0
         };
-        memory::frame_bytes(self.dimensions) + memory::flag_plane_bytes(self.dimensions) + quality
+        self.dimensions.frame_bytes() + self.dimensions.flag_plane_bytes() + quality
     }
 }
 

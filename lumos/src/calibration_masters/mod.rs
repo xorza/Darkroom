@@ -30,7 +30,7 @@ use crate::io::image::cfa::CfaImage;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::sample_domain::{DomainMap, Pedestal};
 use crate::math::size2us::Size2us;
-use crate::progress::ProgressCallback;
+use crate::progress::progress_callback::ProgressCallback;
 use crate::stack_product::quality_planes::QualityPlanes;
 
 use crate::calibration_masters::calibration_component::CalibrationComponent;
@@ -542,7 +542,7 @@ pub(crate) mod internals {
 
     use crate::calibration_masters::{CalibrationMasters, stack_cfa_master};
     use crate::io::image::cfa::CfaImage;
-    use crate::progress::ProgressCallback;
+    use crate::progress::progress_callback::ProgressCallback;
 
     /// Every role stacked under its preset, the flats with their flat-dark or bias taken from each
     /// frame, then the set assembled — what a caller does role by role.

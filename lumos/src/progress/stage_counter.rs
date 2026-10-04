@@ -2,7 +2,8 @@
 
 use std::sync::Mutex;
 
-use crate::progress::{ProgressCallback, StackingStage};
+use crate::progress::progress_callback::ProgressCallback;
+use crate::progress::stacking_progress::StackingStage;
 
 /// A stage's completed-unit count that parallel workers share.
 ///
@@ -51,8 +52,9 @@ mod tests {
 
     use rayon::prelude::*;
 
+    use crate::progress::progress_callback::ProgressCallback;
+    use crate::progress::stacking_progress::StackingStage;
     use crate::progress::stage_counter::StageCounter;
-    use crate::progress::{ProgressCallback, StackingStage};
 
     /// Workers finishing in any order still hand the callback `1..=total`, in order.
     #[test]

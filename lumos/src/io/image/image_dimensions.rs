@@ -1,5 +1,6 @@
 //! Pixel extent plus channel count, validated once at construction.
 
+use crate::memory;
 use std::fmt;
 
 use crate::math::size2us::Size2us;
@@ -86,6 +87,26 @@ impl ImageDimensions {
 
     pub const fn is_rgb(&self) -> bool {
         self.channels == 3
+    }
+
+    /// Bytes the image's pixels occupy, planar f32.
+    pub(crate) const fn frame_bytes(&self) -> usize {
+        self.sample_count() * size_of::<f32>()
+    }
+
+    /// Bytes the quality planes add to a frame that carries them.
+    ///
+    /// One plane per pixel rather than per sample: coverage and confidence are channel-independent,
+    /// so an RGB frame pays for two planes here, not six.
+    pub(crate) const fn quality_plane_bytes(&self) -> usize {
+        memory::FRAME_QUALITY_PLANES * self.pixel_count() * size_of::<f32>()
+    }
+
+    /// Bytes a frame's flag plane adds: one per pixel, whatever its channel count. Charged to every
+    /// frame, since a decoder that flags saturation, and a calibration that flags its repairs, give
+    /// one to most frames.
+    pub(crate) const fn flag_plane_bytes(&self) -> usize {
+        self.pixel_count()
     }
 }
 

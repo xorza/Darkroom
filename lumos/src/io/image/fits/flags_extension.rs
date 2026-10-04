@@ -11,7 +11,7 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::io::image::error::ImageError;
-use crate::io::image::fits::error::{fits_err, fits_to_io, fits_unsupported};
+use crate::io::image::fits::error::fits_to_io;
 use crate::io::image::fits::metadata::read_text;
 use crate::io::image::pixel_flags::{PixelFlags, QualityFlags};
 use crate::math::size2us::Size2us;
@@ -76,7 +76,7 @@ impl FlagsExtension {
     /// Whether `hdu` is a flags extension, which describes another image rather than being one.
     pub(crate) fn describes_another(path: &Path, hdu: &Hdu) -> Result<bool, ImageError> {
         Ok(read_text(&hdu.header, "EXTNAME")
-            .map_err(|source| fits_err(path, source))?
+            .map_err(|source| ImageError::fits(path, source))?
             .is_some_and(|extname| extname.eq_ignore_ascii_case(FLAGS_EXTNAME)))
     }
 
@@ -111,9 +111,9 @@ impl FlagsExtension {
         for (index, hdu) in hdus.iter().enumerate() {
             if Self::describes_another(path, hdu)? {
                 let image = read_text(&hdu.header, IMAGE_KEYWORD)
-                    .map_err(|source| fits_err(path, source))?
+                    .map_err(|source| ImageError::fits(path, source))?
                     .ok_or_else(|| {
-                        fits_unsupported(
+                        ImageError::fits_unsupported(
                             path,
                             format!("{FLAGS_EXTNAME} HDU {index} names no image"),
                         )
@@ -129,7 +129,7 @@ impl FlagsExtension {
         for (position, claim) in claims.iter().enumerate() {
             let same = |name: &String| name.eq_ignore_ascii_case(&claim.image);
             if !images.iter().any(same) {
-                return Err(fits_unsupported(
+                return Err(ImageError::fits_unsupported(
                     path,
                     format!(
                         "{FLAGS_EXTNAME} HDU {} is for {:?}, which is no image of the file",
@@ -141,7 +141,7 @@ impl FlagsExtension {
                 .iter()
                 .any(|earlier| same(&earlier.image))
             {
-                return Err(fits_unsupported(
+                return Err(ImageError::fits_unsupported(
                     path,
                     format!("two {FLAGS_EXTNAME} HDUs claim image {:?}", claim.image),
                 ));
@@ -153,14 +153,15 @@ impl FlagsExtension {
     /// Refuse a flags HDU that is not this format's: another version, another type or scaling, or
     /// another geometry than the `size` image it is for.
     fn check(path: &Path, hdu: &Hdu, size: Size2us) -> Result<(), ImageError> {
-        let refuse = |reason: &str| fits_unsupported(path, format!("{FLAGS_EXTNAME}: {reason}"));
+        let refuse =
+            |reason: &str| ImageError::fits_unsupported(path, format!("{FLAGS_EXTNAME}: {reason}"));
         let header = &hdu.header;
         let format = header
             .get_text("LUMOSFMT")
-            .map_err(|source| fits_err(path, source))?;
+            .map_err(|source| ImageError::fits(path, source))?;
         let version = header
             .get_integer("LUMOSVER")
-            .map_err(|source| fits_err(path, source))?;
+            .map_err(|source| ImageError::fits(path, source))?;
         if format != Some(FLAGS_FORMAT) || version != Some(FLAGS_VERSION) {
             return Err(refuse(&format!(
                 "format {format:?} version {version:?}; expected {FLAGS_FORMAT} version \
@@ -170,7 +171,9 @@ impl FlagsExtension {
         if hdu.kind != HduKind::Image {
             return Err(refuse("not an uncompressed image extension"));
         }
-        let image = hdu.image().map_err(|source| fits_err(path, source))?;
+        let image = hdu
+            .image()
+            .map_err(|source| ImageError::fits(path, source))?;
         if image.bitpix != Bitpix::U8 || image.scaling != Scaling::IDENTITY {
             return Err(refuse("not unscaled BITPIX = 8 bytes"));
         }
@@ -212,7 +215,7 @@ impl FlagsExtension {
             } else {
                 "NO_DATA disagrees with the image's NaN".to_owned()
             };
-            return Err(fits_unsupported(
+            return Err(ImageError::fits_unsupported(
                 path,
                 format!("{FLAGS_EXTNAME} at ({x}, {y}): {reason}"),
             ));
@@ -234,8 +237,8 @@ impl FlagsExtension {
 /// The name a flags extension refers to the image at HDU `index` by: its `EXTNAME`, or
 /// [`PRIMARY`] for an unnamed primary HDU; `None` for an unnamed extension, which none can name.
 fn image_name(path: &Path, hdus: &[Hdu], index: usize) -> Result<Option<String>, ImageError> {
-    let extname =
-        read_text(&hdus[index].header, "EXTNAME").map_err(|source| fits_err(path, source))?;
+    let extname = read_text(&hdus[index].header, "EXTNAME")
+        .map_err(|source| ImageError::fits(path, source))?;
     Ok(match extname {
         Some(extname) => Some(extname),
         None => (index == 0).then(|| PRIMARY.to_owned()),

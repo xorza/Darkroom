@@ -19,7 +19,7 @@ use crate::combine::stack::stack;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::math::size2us::Size2us;
-use crate::progress::ProgressCallback;
+use crate::progress::progress_callback::ProgressCallback;
 use common::TempDir;
 use std::fs;
 use std::path::Path;

@@ -12,7 +12,7 @@ use std::hint::black_box;
 
 use crate::combine::config::StackConfig;
 use crate::combine::stack::{StackFrame, stack_images};
-use crate::progress::ProgressCallback;
+use crate::progress::progress_callback::ProgressCallback;
 
 /// A 1 MP mono frame: smooth background + per-frame offset/gain (so normalization has work to do) +
 /// ~0.2% bright outliers (so rejection has something to clip).

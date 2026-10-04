@@ -27,7 +27,7 @@ use crate::io::image::error::ImageError;
 use crate::io::image::fits::cfa::{CFA_FITS_FORMAT, validate_cfa_image_header};
 use crate::io::image::fits::decode::plan::FitsHduDescription;
 use crate::io::image::fits::decode::selected_fits::SelectedFits;
-use crate::io::image::fits::error::{fits_err, fits_unsupported};
+
 use crate::io::image::fits::flags_extension::FlagsExtension;
 use crate::io::image::fits::metadata::read_cfa_from_headers;
 use crate::io::image::fits::options::FitsCubeInterpretation;
@@ -38,7 +38,6 @@ use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::pixel_flags::PixelFlags;
-use crate::io::image::standard::scientific_rejection;
 
 mod pixels;
 mod plan;
@@ -65,7 +64,7 @@ impl DecodedFitsImage {
             .cfa_type
             .is_some_and(|cfa_type| cfa_type != CfaType::Mono)
         {
-            return Err(scientific_rejection(
+            return Err(ImageError::scientific_rejection(
                 path,
                 "mosaic FITS must be loaded as CfaImage and calibrated before demosaicing",
             ));
@@ -80,13 +79,13 @@ impl DecodedFitsImage {
 
     fn into_cfa(self, path: &Path) -> Result<CfaImage, ImageError> {
         if !self.pixels.dimensions().is_grayscale() {
-            return Err(fits_unsupported(
+            return Err(ImageError::fits_unsupported(
                 path,
                 "scientific CFA input must have exactly one image plane",
             ));
         }
         let Some(cfa_type) = self.cfa_type else {
-            return Err(fits_unsupported(
+            return Err(ImageError::fits_unsupported(
                 path,
                 "scientific CFA FITS input is missing validated CFA pattern metadata",
             ));
@@ -157,7 +156,7 @@ pub(crate) fn read_cfa_hdu(
     context.check_cancelled(path)?;
     let hdu = &reader.hdus()[index];
     if !validate_cfa_image_header(path, &hdu.header)? {
-        return Err(fits_unsupported(
+        return Err(ImageError::fits_unsupported(
             path,
             format!("HDU {index} is not a Lumos {CFA_FITS_FORMAT} image"),
         ));
@@ -186,7 +185,7 @@ pub(crate) fn read_cfa_hdu(
         context.check_cancelled(path)?;
         let stored = reader
             .read_image(flags_hdu)
-            .map_err(|source| fits_err(path, source))?
+            .map_err(|source| ImageError::fits(path, source))?
             .decode();
         decoded.flags = FlagsExtension::join(path, stored, size, decoded.flags.as_ref())?;
     }
@@ -200,7 +199,7 @@ pub(crate) fn fits_cfa_frame_info(
     let selected = SelectedFits::open(path, context)?;
     let dimensions = selected.plan.dimensions;
     if !dimensions.is_grayscale() {
-        return Err(fits_unsupported(
+        return Err(ImageError::fits_unsupported(
             path,
             "scientific CFA input must have exactly one image plane",
         ));
@@ -210,9 +209,9 @@ pub(crate) fn fits_cfa_frame_info(
         dimensions.height(),
         context.fits.unstated_bayer_pattern,
     )
-    .map_err(|source| fits_err(path, source))?
+    .map_err(|source| ImageError::fits(path, source))?
     .ok_or_else(|| {
-        fits_unsupported(
+        ImageError::fits_unsupported(
             path,
             "scientific CFA FITS input is missing validated CFA pattern metadata",
         )

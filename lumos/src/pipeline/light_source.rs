@@ -16,22 +16,22 @@ use crate::io::image::error::ImageError;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::io::raw::demosaic::DemosaicMemory;
-use crate::memory;
-use crate::memory::{
-    DECODE_TRANSIENT_FACTOR, DETECTION_WORKING_PLANES, MemoryPlan, PerFrameBytes, RunShape,
-};
+use crate::memory::memory_plan::{MemoryPlan, PerFrameBytes, RunShape};
+use crate::memory::{DECODE_TRANSIENT_FACTOR, DETECTION_WORKING_PLANES};
 use crate::pipeline::align::log_detection;
 use crate::pipeline::calibrate::CalibrationNotes;
 use crate::pipeline::config::AlignStackConfig;
+use crate::pipeline::detected_frame::DetectedFrame;
 use crate::pipeline::detector_pool::DetectorPool;
 use crate::pipeline::error::AlignStackError;
-use crate::pipeline::frame::{DetectedFrame, PipelineFrame};
 use crate::pipeline::frame_registrar::{FrameRegistrar, FrameToPark, ParkedFrame};
+use crate::pipeline::frame_tier::StagePlan;
+use crate::pipeline::pipeline_frame::PipelineFrame;
 use crate::pipeline::registered_set::RegisteredSet;
 use crate::pipeline::result::AlignStackResult;
-use crate::pipeline::tier::StagePlan;
+use crate::progress::progress_callback::ProgressCallback;
+use crate::progress::stacking_progress::StackingStage;
 use crate::progress::stage_counter::StageCounter;
-use crate::progress::{ProgressCallback, StackingStage};
 use crate::registration::resample::WarpBuffers;
 use crate::star_detection::detector::Diagnostics;
 
@@ -175,7 +175,7 @@ impl<P: AsRef<Path> + Sync> LightSource<'_, P> {
         match self {
             Self::Held(frames) => {
                 let dimensions = frames[0].dimensions();
-                let frame_bytes = memory::frame_bytes(dimensions);
+                let frame_bytes = dimensions.frame_bytes();
                 let plane_bytes = dimensions.pixel_count() * size_of::<f32>();
                 Ok(LightShape {
                     dimensions,

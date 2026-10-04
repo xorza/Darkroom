@@ -61,12 +61,12 @@ use crate::io::image::cfa::CfaType;
 use crate::io::image::fits::cfa::save_cfa_fits;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
-use crate::memory;
-use crate::memory::{DETECTION_WORKING_PLANES, PerFrameBytes};
+use crate::memory::DETECTION_WORKING_PLANES;
+use crate::memory::memory_plan::PerFrameBytes;
 use crate::pipeline::align::align_and_stack;
 use crate::pipeline::calibrate::calibrate_align_stack;
 use crate::pipeline::config::{AlignStackConfig, Reference};
-use crate::progress::ProgressCallback;
+use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::config::Config as RegistrationConfig;
 use crate::registration::resample::warp;
 use crate::registration::transform::{Transform, WarpTransform};
@@ -353,7 +353,7 @@ fn align_stack_memory_probe() {
     // per-frame buffer leak in detection, warp, or the combine would push it over.
     let threads = rayon::current_num_threads();
     let dimensions = ImageDimensions::new(size, channels);
-    let output_bytes = memory::frame_bytes(dimensions);
+    let output_bytes = dimensions.frame_bytes();
     let per_frame = PerFrameBytes::new(frame_bytes as usize, output_bytes);
     let detection = DETECTION_WORKING_PLANES * frame_bytes as usize + output_bytes;
     let resident = (n * per_frame.warped + QualityPlanes::ALL.resident_bytes(dimensions)) as u64;
@@ -384,7 +384,7 @@ fn align_stack_memory_probe() {
 #[ignore = "manual live peak-RSS probe; run explicitly with a filter, one config per process"]
 fn raw_lights_memory_probe() {
     use crate::internals::real_data;
-    use crate::progress::StackingStage;
+    use crate::progress::stacking_progress::StackingStage;
 
     let n: usize = env_parse("LUMOS_RAW_FRAMES", usize::MAX);
     let budget = parse_budget("LUMOS_RAW_BUDGET", BudgetChoice::mb(4096));

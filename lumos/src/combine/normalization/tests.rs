@@ -10,7 +10,7 @@ use crate::internals::prelude::*;
 use crate::internals::synthetic::patterns;
 use crate::internals::synthetic::sky_field::{Sky, SkyField};
 use crate::math::statistics::mad_to_sigma;
-use crate::progress::ProgressCallback;
+use crate::progress::progress_callback::ProgressCallback;
 
 /// Statistics with one `(median, mad)` per channel and nothing else stated.
 fn channel_stats(channels: &[(f32, f32)]) -> FrameStats {

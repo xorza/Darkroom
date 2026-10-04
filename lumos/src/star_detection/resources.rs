@@ -4,7 +4,7 @@
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::buffer_pool::BufferPool;
-use crate::concurrency::JobScratchPool;
+use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::math::size2us::Size2us;
 use crate::star_detection::background::workspace::BackgroundWorkspace;
 use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
@@ -18,7 +18,7 @@ use imaginarium::Buffer2;
 ///
 /// This recycles planes between the *sequential* stages of one detection, which is why
 /// `acquire_*`/`release_*` take `&mut self` — unlike
-/// [`JobScratchPool`](crate::concurrency::JobScratchPool) it never hands scratch to concurrent
+/// [`JobScratchPool`](crate::concurrency::job_scratch_pool::JobScratchPool) it never hands scratch to concurrent
 /// jobs. A stage acquires its planes, is free to work them across rayon workers itself, and
 /// releases them before the next stage runs.
 ///

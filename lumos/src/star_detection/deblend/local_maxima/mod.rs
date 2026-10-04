@@ -16,34 +16,48 @@ use crate::star_detection::deblend::deblend_buffers::DeblendBuffers;
 use crate::star_detection::deblend::region::Region;
 use crate::star_detection::deblend::{Pixel, peaks_too_close};
 
-/// Split `component` at its local maxima onto `out`: one region when fewer than two survive,
-/// else one region per surviving peak. Returns how many it pushed. `buffers` is scratch the
-/// caller keeps across components.
-pub(crate) fn deblend_local_maxima(
-    component: &Component<'_>,
-    min_separation: usize,
-    min_prominence: f32,
-    buffers: &mut DeblendBuffers,
-    out: &mut Vec<Region>,
-) -> usize {
-    let DeblendBuffers {
-        pixels,
-        maxima,
-        peaks,
-        occupied,
-        assignment,
-        ..
-    } = buffers;
-    pixels.fill(component);
-    find_local_maxima(
-        component,
-        pixels,
-        min_separation,
-        min_prominence,
-        maxima,
-        Kept { peaks, occupied },
-    );
-    component.split_at(peaks, assignment, out)
+/// What the local-maxima deblender reads from the detection configuration.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LocalMaximaParams {
+    /// Minimum distance from a kept peak to every brighter one kept, in pixels.
+    pub(crate) min_separation: usize,
+    /// A local maximum's least value, as a share of the component's brightest pixel.
+    pub(crate) min_prominence: f32,
+}
+
+impl LocalMaximaParams {
+    /// Split `component` at its local maxima onto `out`: one region when fewer than two survive,
+    /// else one region per surviving peak. Returns how many it pushed. `buffers` is scratch the
+    /// caller keeps across components.
+    pub(crate) fn deblend(
+        self,
+        component: &Component<'_>,
+        buffers: &mut DeblendBuffers,
+        out: &mut Vec<Region>,
+    ) -> usize {
+        let Self {
+            min_separation,
+            min_prominence,
+        } = self;
+        let DeblendBuffers {
+            pixels,
+            maxima,
+            peaks,
+            occupied,
+            assignment,
+            ..
+        } = buffers;
+        pixels.fill(component);
+        find_local_maxima(
+            component,
+            pixels,
+            min_separation,
+            min_prominence,
+            maxima,
+            Kept { peaks, occupied },
+        );
+        component.split_at(peaks, assignment, out)
+    }
 }
 
 /// Where [`find_local_maxima`] puts the peaks it keeps, and the per-pixel map of them it checks

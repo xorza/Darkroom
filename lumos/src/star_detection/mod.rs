@@ -61,7 +61,6 @@ mod deblend;
 pub(crate) mod detection_plane;
 pub(crate) mod detector;
 mod labeling;
-mod mask_dilation;
 mod median_filter;
 pub(crate) mod resources;
 pub(crate) mod roundness;

@@ -47,4 +47,28 @@ impl ImageError {
             path: path.to_path_buf(),
         }
     }
+
+    /// fits-well's `source` failure reading `path`.
+    pub(crate) fn fits(path: &Path, source: fits_well::FitsError) -> Self {
+        Self::Fits {
+            path: path.to_path_buf(),
+            source,
+        }
+    }
+
+    /// A FITS file at `path` this decoder refuses, for `reason`.
+    pub(crate) fn fits_unsupported(path: &Path, reason: impl Into<String>) -> Self {
+        Self::FitsUnsupported {
+            path: path.to_path_buf(),
+            reason: reason.into(),
+        }
+    }
+
+    /// An image at `path` refused as scientific input, for `reason`.
+    pub(crate) fn scientific_rejection(path: &Path, reason: impl Into<String>) -> Self {
+        Self::ScientificInputRejected {
+            path: path.to_path_buf(),
+            reason: reason.into(),
+        }
+    }
 }

@@ -6,7 +6,7 @@ use std::ops::Range;
 use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::concurrency::UnsafeSendPtr;
+use crate::concurrency::unsafe_send_ptr::UnsafeSendPtr;
 use crate::math::vec2us::Vec2us;
 use crate::star_detection::config::detection_config::Connectivity;
 use crate::star_detection::labeling::LabelMap;

@@ -16,7 +16,7 @@ use crate::io::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode::DecodedFitsImage;
 use crate::io::image::fits::decode::plan::FitsDecodePlan;
-use crate::io::image::fits::error::{fits_err, fits_unsupported};
+
 use crate::io::image::fits::metadata::domain_keywords;
 use crate::io::image::fits::metadata::{
     read_cfa_from_headers, read_metadata, read_row_order, read_text,
@@ -79,11 +79,11 @@ pub(super) fn read_decoded_hdu(
             plan.dimensions.height(),
             context.fits.unstated_bayer_pattern,
         )
-        .map_err(|source| fits_err(path, source))?
+        .map_err(|source| ImageError::fits(path, source))?
     } else {
         None
     };
-    let row_order = read_row_order(header).map_err(|source| fits_err(path, source))?;
+    let row_order = read_row_order(header).map_err(|source| ImageError::fits(path, source))?;
     // The unit is half the sample domain, which decides whether frames combine. An all-blank BUNIT
     // parses to the single significant space §4.2.1.1 requires, which states no unit rather than an
     // empty one — left alone it would disagree with every real unit. Surrounding blanks are a
@@ -91,7 +91,7 @@ pub(super) fn read_decoded_hdu(
     // downstream is then plain equality — see `SampleDomain::conversion_to` for why it stops there
     // and does not fold case.
     let unit = read_text(header, "BUNIT")
-        .map_err(|source| fits_err(path, source))?
+        .map_err(|source| ImageError::fits(path, source))?
         .map(|unit| unit.trim().to_owned())
         .filter(|unit| !unit.is_empty());
     let channel_count = if plan.dimensions.is_rgb() { 3 } else { 1 };
@@ -110,7 +110,7 @@ pub(super) fn read_decoded_hdu(
         .map(|plane| plane.scan)
         .fold(SampleScan::EMPTY, SampleScan::merge);
     if !plan.sample_scale.accepts_maximum(scan.maximum) {
-        return Err(fits_unsupported(
+        return Err(ImageError::fits_unsupported(
             path,
             format!(
                 "floating-point samples reach {}, but nothing declares their scale; \
@@ -119,7 +119,7 @@ pub(super) fn read_decoded_hdu(
             ),
         ));
     }
-    let header_err = |source| fits_err(path, source);
+    let header_err = |source| ImageError::fits(path, source);
     let quantization_sigma =
         match domain_keywords::read_quantization_sigma(header).map_err(header_err)? {
             Some(sigma) => Some(sigma),
@@ -238,7 +238,7 @@ fn resolve_flags(
         // Samples, not pixels: this counts each channel's nulls separately, and the index is in the
         // channel-major sample space the count belongs to. The pixel figure needs the mask, which
         // this branch does not build.
-        return Err(fits_unsupported(
+        return Err(ImageError::fits_unsupported(
             path,
             format!(
                 "image contains {count} null/non-finite samples; first at linear index {first_index}"
@@ -353,10 +353,10 @@ fn read_fits_plane(
         let row_end = row_start.saturating_add(plan.rows_per_chunk).min(height);
         let expected_chunk = (row_end - row_start) * width;
         let mut pixels = read_pixels(channel_ranges(plan, channel, row_start..row_end))
-            .map_err(|source| fits_err(path, source))?;
+            .map_err(|source| ImageError::fits(path, source))?;
         context.check_cancelled(path)?;
         if pixels.len() != expected_chunk {
-            return Err(fits_unsupported(
+            return Err(ImageError::fits_unsupported(
                 path,
                 format!(
                     "channel {channel} rows {row_start}..{row_end} contain {} pixels; expected {expected_chunk}",
@@ -373,9 +373,7 @@ fn read_fits_plane(
             integer,
             &context.cancel,
         )
-        .map_err(|Cancelled| ImageError::Cancelled {
-            path: path.to_path_buf(),
-        })?;
+        .map_err(|Cancelled| ImageError::cancelled(path))?;
         scan = scan.merge(chunk_scan);
         // Each chunk locates its nulls in its own index space; the plane's is what a caller can act
         // on, so the offset is applied here rather than threaded into the pass.

@@ -1,8 +1,8 @@
 //! Tests for morphological dilation.
 
 use crate::bit_buffer2::BitBuffer2;
+use crate::bit_buffer2::dilation::dilate_mask;
 use crate::internals::prelude::*;
-use crate::star_detection::mask_dilation::dilate_mask;
 
 /// `mask` dilated by `radius` into `dilated`, through the in-place kernel.
 fn dilate_into(mask: &BitBuffer2, radius: usize, dilated: &mut BitBuffer2) {

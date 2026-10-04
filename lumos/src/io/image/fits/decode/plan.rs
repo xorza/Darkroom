@@ -7,7 +7,7 @@ use fits_well::image::{Bitpix as FitsBitpix, ImageMetadata, SampleType};
 use fits_well::io::{BLOCK_SIZE, Hdu, HduKind};
 
 use crate::io::image::error::ImageError;
-use crate::io::image::fits::error::{fits_err, fits_unsupported};
+
 use crate::io::image::fits::metadata::domain_keywords;
 use crate::io::image::fits::options::{FitsCubeInterpretation, FitsFloatScale};
 use crate::io::image::image_dimensions::ImageDimensions;
@@ -35,8 +35,10 @@ pub(super) struct FitsHduDescription<'a> {
 impl<'a> FitsHduDescription<'a> {
     pub(super) fn from_hdu(path: &Path, hdu: &'a Hdu) -> Result<Self, ImageError> {
         let image = hdu.image().map_err(|source| match source {
-            FitsError::NotAnImage => fits_unsupported(path, "selected HDU is not an image"),
-            source => fits_err(path, source),
+            FitsError::NotAnImage => {
+                ImageError::fits_unsupported(path, "selected HDU is not an image")
+            }
+            source => ImageError::fits(path, source),
         })?;
         Ok(Self {
             header: &hdu.header,
@@ -89,10 +91,9 @@ impl FitsDecodePlan {
             2,
             "FITS flags extension",
         )?;
-        let required = self
-            .decoded_bytes
-            .checked_add(flag_bytes)
-            .ok_or_else(|| fits_unsupported(path, "FITS flags memory size overflows u64"))?;
+        let required = self.decoded_bytes.checked_add(flag_bytes).ok_or_else(|| {
+            ImageError::fits_unsupported(path, "FITS flags memory size overflows u64")
+        })?;
         enforce_fits_budget(
             path,
             "decoded output with its flags",
@@ -149,10 +150,10 @@ fn sample_scale(
             // they were normalized by; that record beats every guess below.
             if let Some(recorded) = header
                 .get_real(domain_keywords::SAMPLE_SCALE)
-                .map_err(|source| fits_err(path, source))?
+                .map_err(|source| ImageError::fits(path, source))?
             {
                 if !recorded.is_finite() || recorded <= 0.0 {
-                    return Err(fits_unsupported(
+                    return Err(ImageError::fits_unsupported(
                         path,
                         format!(
                             "{} {recorded} must be finite and positive",
@@ -164,7 +165,7 @@ fn sample_scale(
                     divisor: 1.0,
                     physical: recorded,
                     origin: domain_keywords::read_origin(header)
-                        .map_err(|source| fits_err(path, source))?,
+                        .map_err(|source| ImageError::fits(path, source))?,
                     verify_normalized: false,
                 });
             }
@@ -176,7 +177,7 @@ fn sample_scale(
                     // The caller's own figure, so it is checked here rather than trusted: a
                     // non-positive one would invert or erase the samples.
                     if !scale.is_finite() || scale <= 0.0 {
-                        return Err(fits_unsupported(
+                        return Err(ImageError::fits_unsupported(
                             path,
                             format!("declared floating-point full scale {scale} must be positive"),
                         ));
@@ -186,7 +187,7 @@ fn sample_scale(
                 FitsFloatScale::Auto => {
                     let data_max = header
                         .get_real("DATAMAX")
-                        .map_err(|source| fits_err(path, source))?;
+                        .map_err(|source| ImageError::fits(path, source))?;
                     Ok(match data_max {
                         Some(max) if max > FLOAT_ADU_DATAMAX_MIN => {
                             divided_by(FLOAT_ADU_DIVISOR, ScaleOrigin::Assumed)
@@ -204,14 +205,14 @@ fn sample_scale(
     // non-finite one leaves no span to normalize into. Reject rather than emit infinities.
     let bscale = scaling.bscale;
     if !bscale.is_finite() || bscale == 0.0 {
-        return Err(fits_unsupported(
+        return Err(ImageError::fits_unsupported(
             path,
             format!("BSCALE {bscale} leaves no scale to normalize integer samples by"),
         ));
     }
     let divisor = bscale.abs() * steps;
     if !divisor.is_finite() || divisor <= 0.0 {
-        return Err(fits_unsupported(
+        return Err(ImageError::fits_unsupported(
             path,
             format!("BSCALE {bscale} overflows the normalization scale for {stored:?} samples"),
         ));
@@ -262,15 +263,15 @@ pub(super) fn preflight_fits_image(
         "decoded FITS output",
     )?;
     let row_samples = dimensions.width();
-    let row_f32_bytes = row_samples
-        .checked_mul(size_of::<f32>())
-        .ok_or_else(|| fits_unsupported(path, "FITS output row size overflows usize"))?;
+    let row_f32_bytes = row_samples.checked_mul(size_of::<f32>()).ok_or_else(|| {
+        ImageError::fits_unsupported(path, "FITS output row size overflows usize")
+    })?;
     let rows_per_chunk = (FITS_DECODE_CHUNK_BYTES / row_f32_bytes.max(1))
         .max(1)
         .min(dimensions.height());
-    let chunk_samples = row_samples
-        .checked_mul(rows_per_chunk)
-        .ok_or_else(|| fits_unsupported(path, "FITS decode chunk size overflows usize"))?;
+    let chunk_samples = row_samples.checked_mul(rows_per_chunk).ok_or_else(|| {
+        ImageError::fits_unsupported(path, "FITS decode chunk size overflows usize")
+    })?;
     let native_chunk_bytes = checked_size_bytes(
         path,
         chunk_samples,
@@ -294,7 +295,7 @@ pub(super) fn preflight_fits_image(
                 Some(bytes)
             }
         })
-        .ok_or_else(|| fits_unsupported(path, "FITS peak memory size overflows u64"))?;
+        .ok_or_else(|| ImageError::fits_unsupported(path, "FITS peak memory size overflows u64"))?;
 
     enforce_fits_budget(
         path,
@@ -332,7 +333,7 @@ fn checked_size_bytes(
     elements
         .checked_mul(element_bytes)
         .and_then(|bytes| u64::try_from(bytes).ok())
-        .ok_or_else(|| fits_unsupported(path, format!("{name} size overflows usize")))
+        .ok_or_else(|| ImageError::fits_unsupported(path, format!("{name} size overflows usize")))
 }
 
 fn enforce_fits_budget(
@@ -342,7 +343,7 @@ fn enforce_fits_budget(
     memory_limit_bytes: u64,
 ) -> Result<(), ImageError> {
     if required > memory_limit_bytes {
-        return Err(fits_unsupported(
+        return Err(ImageError::fits_unsupported(
             path,
             format!(
                 "{name} requires {required} bytes, exceeding the FITS load budget of {memory_limit_bytes} bytes"
@@ -359,7 +360,9 @@ fn padded_data_bytes(path: &Path, bytes: u64) -> Result<u64, ImageError> {
     bytes
         .checked_add(BLOCK_SIZE as u64 - 1)
         .map(|padded| padded / BLOCK_SIZE as u64 * BLOCK_SIZE as u64)
-        .ok_or_else(|| fits_unsupported(path, "FITS padded data-unit size overflows u64"))
+        .ok_or_else(|| {
+            ImageError::fits_unsupported(path, "FITS padded data-unit size overflows u64")
+        })
 }
 
 pub(super) fn dimensions_from_shape(
@@ -368,7 +371,7 @@ pub(super) fn dimensions_from_shape(
     cube: FitsCubeInterpretation,
 ) -> Result<ImageDimensions, ImageError> {
     if shape.contains(&0) {
-        return Err(fits_unsupported(
+        return Err(ImageError::fits_unsupported(
             path,
             format!("FITS image axes must be nonzero, got {shape:?}"),
         ));
@@ -376,23 +379,23 @@ pub(super) fn dimensions_from_shape(
     let (width, height, channels) = match shape {
         [width, height] | [width, height, 1] => (*width, *height, 1),
         [width, height, 3] if cube == FitsCubeInterpretation::Rgb => (*width, *height, 3),
-        [_, _, 3] => Err(fits_unsupported(
+        [_, _, 3] => Err(ImageError::fits_unsupported(
             path,
             "three-plane FITS cube requires FitsCubeInterpretation::Rgb",
         ))?,
-        [_, _, channels] => Err(fits_unsupported(
+        [_, _, channels] => Err(ImageError::fits_unsupported(
             path,
             format!("Unsupported channel count (NAXIS3): {channels}"),
         ))?,
         _ => {
-            return Err(fits_unsupported(
+            return Err(ImageError::fits_unsupported(
                 path,
                 format!("Unsupported number of dimensions: {}", shape.len()),
             ));
         }
     };
     if width > ImageDimensions::MAX_SIDE || height > ImageDimensions::MAX_SIDE {
-        return Err(fits_unsupported(
+        return Err(ImageError::fits_unsupported(
             path,
             format!(
                 "FITS image {width}x{height} has a side past {} px",
@@ -400,12 +403,12 @@ pub(super) fn dimensions_from_shape(
             ),
         ));
     }
-    let pixel_count = width
-        .checked_mul(height)
-        .ok_or_else(|| fits_unsupported(path, format!("FITS pixel count overflows: {shape:?}")))?;
-    pixel_count
-        .checked_mul(channels)
-        .ok_or_else(|| fits_unsupported(path, format!("FITS sample count overflows: {shape:?}")))?;
+    let pixel_count = width.checked_mul(height).ok_or_else(|| {
+        ImageError::fits_unsupported(path, format!("FITS pixel count overflows: {shape:?}"))
+    })?;
+    pixel_count.checked_mul(channels).ok_or_else(|| {
+        ImageError::fits_unsupported(path, format!("FITS sample count overflows: {shape:?}"))
+    })?;
     Ok(ImageDimensions::new((width, height), channels))
 }
 

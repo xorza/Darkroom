@@ -1,119 +1,10 @@
 //! Concurrency helpers for Rayon work and reusable per-job resources.
 
-use std::mem::ManuallyDrop;
-use std::ops::Deref;
-use std::ops::DerefMut;
-use std::sync::atomic::{AtomicUsize, Ordering};
+pub(crate) mod job_scratch_pool;
+pub(crate) mod unsafe_send_ptr;
 
 use std::sync::Mutex;
-
-/// A raw pointer that may cross into Rayon closures, for writes the caller keeps disjoint.
-///
-/// Only a raw pointer: wrapping any `Copy` value would make a `&Cell<_>` `Sync` from safe code.
-/// `T: Send` because the writes move `T` values onto other threads.
-///
-/// SAFETY: Caller must ensure disjoint access from each thread.
-///
-/// Access the inner value via `.get()` — never `.0` — so that Edition 2024
-/// closures capture `&UnsafeSendPtr` (which is Sync) rather than the inner
-/// pointer field.
-#[derive(Debug)]
-pub(crate) struct UnsafeSendPtr<T>(*mut T);
-unsafe impl<T: Send> Send for UnsafeSendPtr<T> {}
-unsafe impl<T: Send> Sync for UnsafeSendPtr<T> {}
-
-impl<T> Clone for UnsafeSendPtr<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<T> Copy for UnsafeSendPtr<T> {}
-
-impl<T> UnsafeSendPtr<T> {
-    pub(crate) const fn new(ptr: *mut T) -> Self {
-        Self(ptr)
-    }
-
-    pub(crate) const fn get(&self) -> *mut T {
-        self.0
-    }
-}
-
-/// The `for_each_init` init for scratch that has to outlive the parallel call.
-///
-/// Rayon runs an init closure once per worker and drops what it returns when the call ends,
-/// which is the right shape when the call *is* the operation — a demosaic pass allocates its row
-/// buffers straight into the init (`io/raw/demosaic/xtrans/markesteijn_steps.rs`) because nothing
-/// in the RAW path outlives one frame. Reach for a pool only when the same loop runs many times
-/// over: once per chunk per channel in the combine, once per tile row in the background mesh.
-/// Then the init becomes `|| pool.acquire()` and the lease hands its value back on drop, so the
-/// next call finds it warm. Both are the same mechanism; the pool is just a smarter init.
-///
-/// Values come back with **unspecified contents** — a fresh one is `Default`, a reused one keeps
-/// whatever the last holder left in it. Size or clear on acquire.
-#[derive(Debug)]
-pub(crate) struct JobScratchPool<T> {
-    values: Mutex<Vec<T>>,
-}
-
-impl<T> Default for JobScratchPool<T> {
-    fn default() -> Self {
-        Self {
-            values: Mutex::new(Vec::new()),
-        }
-    }
-}
-
-impl<T: Default> JobScratchPool<T> {
-    /// Take a value from the pool, or build a fresh one when it is empty.
-    pub(crate) fn acquire(&self) -> JobScratchLease<'_, T> {
-        let value = self
-            .values
-            .lock()
-            .expect("no holder of this lock panicked")
-            .pop()
-            .unwrap_or_default();
-        JobScratchLease {
-            value: ManuallyDrop::new(value),
-            pool: &self.values,
-        }
-    }
-}
-
-/// A value on loan from a [`JobScratchPool`], returned to it when dropped.
-#[derive(Debug)]
-pub(crate) struct JobScratchLease<'a, T> {
-    /// Held for the lease's whole life and moved back into the pool by `drop`, which is why it is
-    /// not dropped in place.
-    value: ManuallyDrop<T>,
-    pool: &'a Mutex<Vec<T>>,
-}
-
-impl<T> Deref for JobScratchLease<'_, T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.value
-    }
-}
-
-impl<T> DerefMut for JobScratchLease<'_, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.value
-    }
-}
-
-impl<T> Drop for JobScratchLease<'_, T> {
-    fn drop(&mut self) {
-        // SAFETY: `value` is taken exactly once, here, and the lease is never read after its drop.
-        let value = unsafe { ManuallyDrop::take(&mut self.value) };
-        self.pool
-            .lock()
-            .expect("no holder of this lock panicked")
-            .push(value);
-    }
-}
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// What one slot of a bounded map finished with: the values of the indices it took, and the
 /// failure that stopped it, if one did.
@@ -272,26 +163,6 @@ where
             .expect("each index is claimed by exactly one worker");
         operation(slot, index, item)
     })
-}
-
-#[cfg(test)]
-pub(crate) mod internals {
-    use crate::concurrency::JobScratchPool;
-
-    pub(crate) fn job_count<T>(pool: &JobScratchPool<T>) -> usize {
-        pool.values
-            .lock()
-            .expect("no holder of this lock panicked")
-            .len()
-    }
-
-    pub(crate) fn all_by<T>(pool: &JobScratchPool<T>, predicate: impl Fn(&T) -> bool) -> bool {
-        pool.values
-            .lock()
-            .expect("no holder of this lock panicked")
-            .iter()
-            .all(predicate)
-    }
 }
 
 #[cfg(test)]

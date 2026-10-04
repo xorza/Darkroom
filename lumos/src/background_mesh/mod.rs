@@ -19,7 +19,7 @@ use crate::background_mesh::spline::solve_natural_spline_d2;
 use crate::background_mesh::tile_stats::{Eligible, TileComponent, TileD2y, TileStats};
 use crate::background_mesh::workspace::TileScratch;
 use crate::bit_buffer2::BitBuffer2;
-use crate::concurrency::JobScratchPool;
+use crate::concurrency::job_scratch_pool::JobScratchPool;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::median_mut;
 use crate::math::urect::URect;

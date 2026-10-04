@@ -15,7 +15,6 @@ use crate::io::image::fits::decode::plan::{
     FitsDecodePlan, FitsHduDescription, preflight_fits_image,
 };
 use crate::io::image::fits::decode::selection;
-use crate::io::image::fits::error::fits_err;
 use crate::io::image::fits::flags_extension::FlagsExtension;
 use crate::io::image::fits::options::FitsChecksumPolicy;
 use crate::io::image::fits::provenance::FitsHduProvenance;
@@ -45,7 +44,7 @@ impl SelectedFits {
             path: path.to_path_buf(),
             source,
         })?;
-        let reader = FitsReader::open(file).map_err(|source| fits_err(path, source))?;
+        let reader = FitsReader::open(file).map_err(|source| ImageError::fits(path, source))?;
         context.check_cancelled(path)?;
         validate_cfa_container_format(path, reader.hdus().first().map(|hdu| &hdu.header))?;
         let selected = selection::select_image_hdu(path, reader.hdus(), &context.fits.hdu)?;
@@ -119,7 +118,7 @@ impl SelectedFits {
             let stored = self
                 .reader
                 .read_image(flags_hdu)
-                .map_err(|source| fits_err(path, source))?
+                .map_err(|source| ImageError::fits(path, source))?
                 .decode();
             decoded.flags = FlagsExtension::join(path, stored, size, decoded.flags.as_ref())?;
         }

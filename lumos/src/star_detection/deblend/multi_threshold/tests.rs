@@ -12,7 +12,7 @@ use crate::star_detection::deblend::internals::{
     TestComponent, deblend_multi_threshold_floored, deblend_multi_threshold_test,
     make_test_component, separated_pair,
 };
-use crate::star_detection::deblend::local_maxima::deblend_local_maxima;
+use crate::star_detection::deblend::local_maxima::LocalMaximaParams;
 use crate::star_detection::deblend::multi_threshold::*;
 use crate::star_detection::labeling::LabelMap;
 use crate::star_detection::labeling::component_data::ComponentData;
@@ -758,19 +758,14 @@ fn buffer_reuse_consistency() {
             .pixels()
             .map(|p| p.value)
             .fold(f32::INFINITY, f32::min);
-        deblend_multi_threshold(
-            &component,
-            floor,
-            MultiThresholdParams {
-                n_thresholds: 32,
-                min_contrast: 0.005,
-                min_separation: 3,
-                min_area: 1,
-                connectivity: Connectivity::Eight,
-            },
-            buffers,
-            &mut regions,
-        );
+        MultiThresholdParams {
+            n_thresholds: 32,
+            min_contrast: 0.005,
+            min_separation: 3,
+            min_area: 1,
+            connectivity: Connectivity::Eight,
+        }
+        .deblend(&component, floor, buffers, &mut regions);
         regions
             .iter()
             .map(|region| (region.peak, region.bbox, region.area))
@@ -873,16 +868,16 @@ fn a_region_under_min_area_is_no_object() {
         .fold(f32::INFINITY, f32::min);
     let split = |min_area| {
         let mut regions = Vec::new();
-        deblend_multi_threshold(
+        MultiThresholdParams {
+            n_thresholds: 32,
+            min_contrast: 0.001,
+            min_separation: 1,
+            min_area,
+            connectivity: Connectivity::Eight,
+        }
+        .deblend(
             &component,
             floor,
-            MultiThresholdParams {
-                n_thresholds: 32,
-                min_contrast: 0.001,
-                min_separation: 1,
-                min_area,
-                connectivity: Connectivity::Eight,
-            },
             &mut DeblendBuffers::default(),
             &mut regions,
         );
@@ -920,20 +915,19 @@ fn the_scratch_follows_the_pixels_not_the_box() {
     let component = Component::new(&data, &pixels, &labels);
     let mut buffers = DeblendBuffers::default();
     let mut regions = Vec::new();
-    deblend_multi_threshold(
-        &component,
-        0.5,
-        MultiThresholdParams {
-            n_thresholds: 32,
-            min_contrast: 0.005,
-            min_separation: 3,
-            min_area: 1,
-            connectivity: Connectivity::Eight,
-        },
-        &mut buffers,
-        &mut regions,
-    );
-    deblend_local_maxima(&component, 3, 0.3, &mut buffers, &mut regions);
+    MultiThresholdParams {
+        n_thresholds: 32,
+        min_contrast: 0.005,
+        min_separation: 3,
+        min_area: 1,
+        connectivity: Connectivity::Eight,
+    }
+    .deblend(&component, 0.5, &mut buffers, &mut regions);
+    LocalMaximaParams {
+        min_separation: 3,
+        min_prominence: 0.3,
+    }
+    .deblend(&component, &mut buffers, &mut regions);
     assert_eq!(buffers.pixels.pixels.len(), 1000);
     assert!(buffers.tree.object_of.capacity() < 2000);
     assert!(buffers.tree.visited.capacity() < 2000);
