@@ -25,17 +25,6 @@ pub enum InterpolationMethod {
 }
 
 impl InterpolationMethod {
-    /// How far the kernel reaches from a sample's source cell: an output pixel reads source columns
-    /// `cell − radius + 1 ..= cell + radius`, and the same rows. Nearest reads the cell or the next.
-    pub(crate) const fn tap_radius(self) -> usize {
-        match self {
-            Self::Nearest | Self::Bilinear => 1,
-            Self::Bicubic | Self::Lanczos2 => 2,
-            Self::Lanczos3 => 3,
-            Self::Lanczos4 => 4,
-        }
-    }
-
     /// Every method, from the cheapest to the widest kernel.
     pub const ALL: [Self; 6] = [
         Self::Nearest,
@@ -47,6 +36,9 @@ impl InterpolationMethod {
     ];
 }
 
+/// PixInsight's default ringing clamp threshold (PCL's `__PCL_LANCZOS_CLAMPING_THRESHOLD`).
+const DEFAULT_CLAMPING_THRESHOLD: f32 = 0.3;
+
 /// Configuration for inverse-mapped image resampling.
 #[derive(Debug, Clone, Copy)]
 pub struct WarpParams {
@@ -57,6 +49,11 @@ pub struct WarpParams {
     /// Positions inside the footprint with partial kernel support are reconstructed from real
     /// source pixels only.
     pub border_value: f32,
+    /// The ringing clamp of a kernel with negative lobes (Bicubic and the Lanczos family), as
+    /// PixInsight's: where the negative lobes take more than this share of what the positive lobes
+    /// carry, their weight is cut back smoothly, and to nothing once they would cancel it. In
+    /// `[0, 1]`, lower clamps harder; `None` turns the clamp off. Default 0.3.
+    pub clamping_threshold: Option<f32>,
 }
 
 impl Default for WarpParams {
@@ -64,13 +61,23 @@ impl Default for WarpParams {
         Self {
             method: InterpolationMethod::default(),
             border_value: 0.0,
+            clamping_threshold: Some(DEFAULT_CLAMPING_THRESHOLD),
         }
     }
 }
 
 impl WarpParams {
     fn validate(self) -> Result<(), InvalidConfigField> {
-        InvalidConfigField::finite_only("warp border_value", self.border_value)
+        InvalidConfigField::finite_only("warp border_value", self.border_value)?;
+        if let Some(threshold) = self.clamping_threshold {
+            InvalidConfigField::check(
+                (0.0..=1.0).contains(&threshold),
+                "warp clamping_threshold",
+                "between 0 and 1",
+                f64::from(threshold),
+            )?;
+        }
+        Ok(())
     }
 }
 

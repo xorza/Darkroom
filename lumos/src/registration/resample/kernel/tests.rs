@@ -29,7 +29,11 @@ fn a_lanczos_table_read_is_within_half_a_step_of_the_kernel() {
         let a = order.a() as f64;
         for k in 0..=order.a() * LANCZOS_LUT_RESOLUTION {
             let x = (k as f64 * step) as f32;
-            assert_eq!(lut.lookup_positive(x), lut.values[k], "a = {a}, entry {k}");
+            assert_eq!(
+                lut.at(x * LANCZOS_LUT_RESOLUTION as f32),
+                lut.values[k],
+                "a = {a}, entry {k}"
+            );
         }
 
         let slope = PI * 0.5 * (1.0 + 1.0 / a);
@@ -39,8 +43,9 @@ fn a_lanczos_table_read_is_within_half_a_step_of_the_kernel() {
         for k in (0..order.a() * LANCZOS_LUT_RESOLUTION).step_by(7) {
             let midpoint = ((k as f64 + 0.5) * step) as f32;
             for x in [midpoint.next_down(), midpoint, midpoint.next_up()] {
-                let error =
-                    (f64::from(lut.lookup_positive(x)) - lanczos_f64(f64::from(x), a)).abs();
+                let error = (f64::from(lut.at(x * LANCZOS_LUT_RESOLUTION as f32))
+                    - lanczos_f64(f64::from(x), a))
+                .abs();
                 assert!(
                     error <= bound,
                     "a = {a}, x = {x}: off by {error}, bound {bound}"
@@ -79,15 +84,12 @@ fn bicubic_kernel_hand_values() {
         (2.0, 0.0),
         (2.5, 0.0),
     ] {
-        assert_eq!(kernel::bicubic_kernel(x), expected, "K({x})");
-        assert_eq!(kernel::bicubic_kernel(-x), expected, "K(-{x})");
+        assert_eq!(kernel::internals::bicubic_kernel(x), expected, "K({x})");
+        assert_eq!(kernel::internals::bicubic_kernel(-x), expected, "K(-{x})");
     }
-    let fall = kernel::bicubic_kernel(1.0 - 1e-4) - kernel::bicubic_kernel(1.0 + 1e-4);
+    let fall = kernel::internals::bicubic_kernel(1.0 - 1e-4)
+        - kernel::internals::bicubic_kernel(1.0 + 1e-4);
     assert!((fall - 1e-4).abs() < 1e-6, "{fall}");
-    assert_eq!(
-        kernel::bicubic_weights(0.25),
-        [-0.070_312_5, 0.867_187_5, 0.226_562_5, -0.023_437_5]
-    );
 }
 
 /// The nearest pixel, a half rounding up: on `[[10, 20], [30, 40]]`, (0.4, 0.4) is pixel (0, 0),
@@ -107,106 +109,9 @@ fn nearest_rounds_a_half_up() {
     ] {
         let position = SourcePosition::within(DVec2::new(x, y), size).unwrap();
         assert_eq!(
-            kernel::nearest_sample(&input, position),
+            input.pixels()[kernel::nearest_index(size, position)],
             expected,
             "({x}, {y})"
         );
     }
-}
-
-/// A 3×3 ramp 0..8, sampled between pixel centres and blended by hand:
-/// at (0.5, 0.5) top 0 → 1 is 0.5, bottom 3 → 4 is 3.5, and halfway between them 2;
-/// at (1.5, 0.5) the same over 1, 2, 4, 5 gives 3; at (0.25, 0.75) top 0.25, bottom 3.25,
-/// three quarters of the way 2.5; in the rim at (2.25, 2.4) both axes hold to the last centre, 8.
-/// A constant 7 reads back 7 anywhere: the blend adds `f·0`. All exact in f32.
-#[test]
-fn bilinear_sample_hand_computed() {
-    let input = Buffer2::new(3, 3, (0..9).map(|i| i as f32).collect());
-    let constant = Buffer2::new_filled(3, 3, 7.0);
-    let size = Size2us::new(3, 3);
-    for (x, y, expected) in [
-        (1.0, 1.0, 4.0),
-        (0.5, 0.5, 2.0),
-        (1.5, 0.5, 3.0),
-        (0.25, 0.75, 2.5),
-        (2.25, 2.4, 8.0),
-    ] {
-        let position = SourcePosition::within(DVec2::new(x, y), size).unwrap();
-        assert_eq!(
-            kernel::bilinear_sample(&input, position),
-            expected,
-            "({x}, {y})"
-        );
-        assert_eq!(
-            kernel::bilinear_sample(&constant, position),
-            7.0,
-            "({x}, {y})"
-        );
-    }
-}
-
-/// Bilinear reproduces a plane and Catmull-Rom a quadratic — any `xⁱyʲ` with `i, j ≤ 2`, since its
-/// 1-D weights reproduce `1, x, x²` — at every interior fraction, to rounding.
-///
-/// The rounding: the pixels are the f32 field (½ ulp each), and each of the up to 16 products and
-/// sums rounds once against the running magnitude, at most `Σ|w|·max|v|`; Catmull-Rom's
-/// `Σ|w|` peaks at `f = ½`, `(2·0.5625 + 2·0.0625)² = 1.5625`. So `34·ε·1.5625·max|v|`.
-///
-/// Bilinear does not reproduce the quadratic, which is what makes the second claim a test: at a
-/// cell's centre it averages the four corners, which overshoots `x²` by `¼` and reproduces `xy`
-/// exactly, so on `0.02x² − 0.03xy + 0.05y² + …` it is high by `(0.02 + 0.05)/4 = 0.0175`.
-#[test]
-fn bilinear_and_bicubic_reproduce_their_polynomials() {
-    let size = Size2us::new(12, 10);
-    let plane = |x: f64, y: f64| 0.25 * x - 0.5 * y + 3.0;
-    let quadratic =
-        |x: f64, y: f64| 0.02 * x * x - 0.03 * x * y + 0.05 * y * y + 0.1 * x - 0.2 * y + 1.0;
-    let image = |field: &dyn Fn(f64, f64) -> f64| {
-        Buffer2::new(
-            size.width,
-            size.height,
-            (0..size.pixel_count())
-                .map(|i| field((i % size.width) as f64, (i / size.width) as f64) as f32)
-                .collect(),
-        )
-    };
-    let plane_image = image(&plane);
-    let quadratic_image = image(&quadratic);
-    let largest = |image: &Buffer2<f32>| image.pixels().iter().fold(0.0f32, |m, v| m.max(v.abs()));
-    let plane_bound = 34.0 * f32::EPSILON * largest(&plane_image);
-    let quadratic_bound = 34.0 * f32::EPSILON * 1.5625 * largest(&quadratic_image);
-
-    for (fx, fy) in [(0.125, 0.375), (0.5, 0.5), (0.8, 0.1)] {
-        for cell_y in 1..size.height - 2 {
-            for cell_x in 1..size.width - 2 {
-                let p = DVec2::new(cell_x as f64 + fx, cell_y as f64 + fy);
-                let position = SourcePosition::within(p, size).unwrap();
-                // The kernels sample the narrowed fraction, so the truth is taken there.
-                let (x, y) = (
-                    f64::from(position.cell_x) + f64::from(position.fx),
-                    f64::from(position.cell_y) + f64::from(position.fy),
-                );
-                let linear = f64::from(kernel::bilinear_sample(&plane_image, position));
-                assert!(
-                    (linear - plane(x, y)).abs() <= f64::from(plane_bound),
-                    "bilinear at {p:?}: {linear} against {}",
-                    plane(x, y)
-                );
-                let cubic = f64::from(kernel::bicubic_sample(&quadratic_image, position));
-                assert!(
-                    (cubic - quadratic(x, y)).abs() <= f64::from(quadratic_bound),
-                    "bicubic at {p:?}: {cubic} against {}",
-                    quadratic(x, y)
-                );
-            }
-        }
-    }
-
-    let centre = SourcePosition::within(DVec2::new(5.5, 4.5), size).unwrap();
-    let overshoot =
-        f64::from(kernel::bilinear_sample(&quadratic_image, centre)) - quadratic(5.5, 4.5);
-    assert!(
-        (overshoot - 0.0175).abs() <= f64::from(quadratic_bound),
-        "bilinear on the quadratic is off by {overshoot}"
-    );
 }

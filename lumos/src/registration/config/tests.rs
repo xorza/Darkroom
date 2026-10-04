@@ -111,6 +111,19 @@ fn warp_params_defaults() {
     let default = WarpParams::default();
     assert_eq!(default.method, InterpolationMethod::Lanczos3);
     assert_eq!(default.border_value, 0.0);
+    assert_eq!(default.clamping_threshold, Some(0.3));
+    // Both ends of the range are thresholds PixInsight accepts, and `None` is the clamp off.
+    for clamping_threshold in [Some(0.0), Some(1.0), None] {
+        Config {
+            warp: WarpParams {
+                clamping_threshold,
+                ..Default::default()
+            },
+            ..Config::default()
+        }
+        .validate()
+        .unwrap();
+    }
 }
 
 #[test]
@@ -333,6 +346,26 @@ fn config_validation_rejects_invalid() {
                 ..Config::default()
             },
             "warp border_value",
+        ),
+        (
+            Config {
+                warp: WarpParams {
+                    clamping_threshold: Some(1.5),
+                    ..Default::default()
+                },
+                ..Config::default()
+            },
+            "warp clamping_threshold",
+        ),
+        (
+            Config {
+                warp: WarpParams {
+                    clamping_threshold: Some(f32::NAN),
+                    ..Default::default()
+                },
+                ..Config::default()
+            },
+            "warp clamping_threshold",
         ),
     ];
 

@@ -9,24 +9,29 @@ use crate::concurrency::{JobScratchPool, UnsafeSendPtr};
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
-use crate::io::image::pixel_flags::{Flags, PixelFlags, Reach};
+use crate::io::image::pixel_flags::{Flags, PixelFlags};
 use crate::registration::config::WarpParams;
-use crate::registration::resample::masked_warp::MaskedSources;
+use crate::registration::resample::frame_sampler::{
+    FrameSampler, RowOutput, SampleMethod, WindowAxes,
+};
+use crate::registration::resample::masked_sources::MaskedSources;
 use crate::registration::resample::row_positions::RowPositions;
 use crate::registration::transform::WarpTransform;
 
+mod frame_sampler;
+mod interior_window;
 mod kernel;
-mod masked_warp;
-mod quality;
-mod row;
+mod masked_sources;
+mod ringing_clamp;
 mod row_positions;
 mod source_position;
+mod tap_window;
 
 /// Output of [`warp`]: the aligned image plus per-pixel support and confidence maps.
 ///
-/// `coverage[p] ∈ [0, 1]` is the fraction of interpolation-kernel magnitude supported by real
-/// source pixels. It is a geometric inclusion mask, not a statistical weight. `confidence[p]` is
-/// the inverse white-noise variance implied by the normalized interpolation coefficients.
+/// `coverage[p] ∈ [0, 1]` is the share of the interpolation kernel's magnitude that lands on real
+/// source pixels. It is an inclusion mask, not a statistical weight. `confidence[p]` is the inverse
+/// white-noise variance implied by the normalized interpolation coefficients.
 #[derive(Debug)]
 pub struct WarpResult {
     pub image: LinearImage,
@@ -100,12 +105,12 @@ pub(crate) struct WarpBuffers {
     pub(crate) rows: JobScratchPool<RowScratch>,
 }
 
-/// What one row of a warp works in: the row's source positions, and for a masked frame the row of
-/// support every channel divides by.
+/// What one row of a warp works in: the row's source positions, and the tap axes of the pixel it
+/// is sampling.
 #[derive(Debug, Default)]
 pub(crate) struct RowScratch {
     positions: RowPositions,
-    support: Vec<f32>,
+    axes: WindowAxes,
 }
 
 impl WarpBuffers {
@@ -150,30 +155,25 @@ impl WarpBuffers {
         );
         let size = dimensions.size();
         let width = size.width;
+        let method = SampleMethod::for_frame(config, warp_transform, size);
+        let reach = method.reach();
         // The source declared pixels with no measurement, so every output pixel is reconstructed
-        // from its surviving taps and the maps are reduced by how many of them there were.
+        // from its taps that hold data, and its coverage is the share of the kernel they carry.
         let masked = image
             .flags
             .as_ref()
             .filter(|flags| flags.contains(Flags::NO_DATA))
-            .map(|flags| MaskedSources::new(image, flags));
+            .map(|flags| MaskedSources::new(image, flags, reach));
+        let sampler = FrameSampler::new(method, image, masked.as_ref(), config.border_value);
         // Grown by the kernel's reach once, so each output pixel reads one byte at its source cell
-        // rather than one per tap: the cell's flags then cover `cell − radius + 1 ..= cell + radius`
-        // on both axes, the source pixels the kernel's window reads.
+        // rather than one per tap: the cell's flags then cover every source pixel its window reads.
         let source_flags = image
             .flags
             .as_ref()
             .filter(|flags| flags.contains_other_than(Flags::NO_DATA))
             .and_then(|flags| flags.without(Flags::NO_DATA))
             .map(|mut flags| {
-                let radius = config.method.tap_radius();
-                flags.dilate_window(
-                    Reach {
-                        before: radius - 1,
-                        after: radius,
-                    },
-                    Flags::default(),
-                );
+                flags.dilate_window(reach, Flags::default());
                 flags
             });
         let mut flag_plane = source_flags
@@ -190,7 +190,6 @@ impl WarpBuffers {
                         confidence_row: &mut [f32]| {
             scratch.positions.fill(y, width, warp_transform, size);
             let positions = scratch.positions.positions();
-            quality::write_row(positions, size, config.method, coverage_row, confidence_row);
             if let (Some(source), Some(rows)) = (&source_flags, flag_rows) {
                 // SAFETY: each output row is written by exactly one call, at its own offset.
                 let row = unsafe { slice::from_raw_parts_mut(rows.get().add(y * width), width) };
@@ -203,27 +202,15 @@ impl WarpBuffers {
                     });
                 }
             }
-            match &masked {
-                None => {
-                    for (channel, output_row) in channel_rows.iter_mut().enumerate() {
-                        row::sample_row(
-                            image.channel(channel),
-                            positions,
-                            config.method,
-                            config.border_value,
-                            output_row,
-                        );
-                    }
-                }
-                Some(masked) => masked.warp_row(
-                    positions,
-                    config,
-                    &mut scratch.support,
-                    channel_rows,
-                    coverage_row,
-                    confidence_row,
-                ),
-            }
+            sampler.sample_row(
+                positions,
+                &mut scratch.axes,
+                RowOutput {
+                    channels: channel_rows,
+                    coverage: coverage_row,
+                    confidence: confidence_row,
+                },
+            );
         };
 
         let Self {
@@ -278,38 +265,28 @@ impl WarpBuffers {
 #[cfg(test)]
 pub(super) mod internals {
     use imaginarium::Buffer2;
-    use rayon::prelude::*;
 
-    use crate::math::size2us::Size2us;
+    use crate::io::image::image_dimensions::ImageDimensions;
+    use crate::io::image::linear::LinearImage;
     use crate::registration::config::WarpParams;
-    use crate::registration::resample::row;
-    use crate::registration::resample::row_positions::RowPositions;
+    use crate::registration::resample;
     use crate::registration::transform::WarpTransform;
 
-    /// One plane warped on its own, without the quality maps — the shape the kernel tests and the
-    /// plane benches compare.
+    /// One plane warped on its own — the shape the kernel tests and the plane benches compare.
     pub(crate) fn warp_plane(
         input: &Buffer2<f32>,
         output: &mut Buffer2<f32>,
         transform: &WarpTransform,
         params: WarpParams,
     ) {
-        let size = Size2us::new(input.width(), input.height());
-        debug_assert_eq!((output.width(), output.height()), (size.width, size.height));
+        let image = LinearImage::from_pixels(
+            ImageDimensions::new((input.width(), input.height()), 1),
+            input.pixels().to_vec(),
+        );
+        let warped = resample::warp(&image, transform, params);
         output
             .pixels_mut()
-            .par_chunks_mut(size.width)
-            .enumerate()
-            .for_each_init(RowPositions::default, |positions, (y, output_row)| {
-                positions.fill(y, size.width, transform, size);
-                row::sample_row(
-                    input,
-                    positions.positions(),
-                    params.method,
-                    params.border_value,
-                    output_row,
-                );
-            });
+            .copy_from_slice(warped.image.channel(0).pixels());
     }
 }
 

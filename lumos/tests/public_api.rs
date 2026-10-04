@@ -128,6 +128,7 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
         warp: WarpParams {
             method: InterpolationMethod::Bilinear,
             border_value: -1.0,
+            clamping_threshold: None,
         },
         ..Default::default()
     };

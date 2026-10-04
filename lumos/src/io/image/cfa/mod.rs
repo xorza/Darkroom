@@ -275,9 +275,9 @@ impl CfaImage {
     /// Replace every null with the median of its same-colour neighbours.
     ///
     /// The demosaic reads a neighbourhood, so whatever sits under a null reaches output pixels the
-    /// mask does not cover. The resampler answers the same problem by dividing the warped image by
-    /// the warped validity plane — `resample::masked_warp` — but an adaptive kernel like RCD or
-    /// Markesteijn offers no such plane to divide by. Leaving the decoder's frame-median fill there
+    /// mask does not cover. The resampler answers the same problem by sampling over the taps that
+    /// hold data and normalizing by their weight — `resample::masked_sources` — but an adaptive
+    /// kernel like RCD or Markesteijn offers no such weights to normalize by. Leaving the decoder's frame-median fill there
     /// would spread a value with no local meaning; a same-colour neighbour median spreads a
     /// plausible one, so what escapes the mask is interpolation error rather than fabrication.
     ///
