@@ -19,9 +19,9 @@ use crate::star_detection::centroid::covariance::Cov2;
 use crate::star_detection::centroid::gaussian_fit::simd::GaussianBatch;
 use crate::star_detection::centroid::lm_optimizer::{FitData, LMModel};
 use crate::star_detection::centroid::simd::{Chi2Kernel, NormalEquationsKernel};
-use crate::star_detection::centroid::stamp::FitNoise;
 use crate::star_detection::centroid::stamp::StampFit;
 use crate::star_detection::centroid::stamp::StampGrid;
+use crate::star_detection::centroid::star_noise::StarNoise;
 use crate::star_detection::centroid::{fit_is_plausible, position_sigma};
 use glam::DVec2;
 use imaginarium::Buffer2;
@@ -137,7 +137,7 @@ impl GaussianFit {
         pos: DVec2,
         grid: &StampGrid,
         background: f32,
-        noise: Option<FitNoise>,
+        noise: Option<StarNoise>,
     ) -> Option<Self> {
         let mut fit = StampFit::prepare::<7>(pixels, pos, grid, background, noise)?;
         let amplitude_seed = fit.amplitude_seed()?;

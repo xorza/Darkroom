@@ -15,7 +15,7 @@ use crate::registration::config::Config as RegistrationConfig;
 use crate::registration::register;
 use crate::registration::transform::TransformModel;
 use crate::star_detection::config::Config;
-use crate::star_detection::config::measurement_config::{CentroidMethod, NoiseModel};
+use crate::star_detection::config::measurement_config::CentroidMethod;
 use crate::star_detection::detector::StarDetector;
 use crate::star_detection::threshold_mask::ThresholdParams;
 use glam::Vec2;
@@ -219,7 +219,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
 /// PR1 validation: inverse-variance-weighted PSF fitting should not worsen (and ideally
 /// improves) registration RMS vs unweighted, by producing lower-variance sub-pixel
 /// centroids. Runs the pair of lights through `GaussianFit` with and without a
-/// `NoiseModel`, registers each, and compares.
+/// gain, registers each, and compares.
 #[test]
 fn weighted_fit_registration_rms() {
     /// What one registration of the pair reported.
@@ -235,12 +235,12 @@ fn weighted_fit_registration_rms() {
     } = first_and_last_lights();
 
     // 30,000 e-/normalized unit is representative of physical gain × the 14-bit signal range.
-    let noise_model = NoiseModel::from_normalized(30_000.0, 30.0);
+    let noise_model = 30_000.0;
 
-    let register_with = |noise: Option<NoiseModel>| {
+    let register_with = |noise: Option<f32>| {
         let mut config = Config::precise_ground();
         config.measurement.centroid_method = CentroidMethod::GaussianFit;
-        config.measurement.noise_model = noise;
+        config.measurement.electrons_per_unit = noise;
         let mut detector = StarDetector::from_config(config).unwrap();
         let s1 = detector.detect(&img1).stars;
         let s2 = detector.detect(&img2).stars;

@@ -192,35 +192,26 @@ fn windowed_covariance_holds_wing_noise_to_its_propagated_scatter() {
 
 #[test]
 fn inverse_variance_weights_downweight_bright_pixels() {
-    // CCD per-pixel variance = signal/G + sky² + (read_e/G)², G = e-/normalized unit.
-    let bg = 0.1;
-    let sky_noise = 0.02; // sky_var = 4e-4
-    let noise = FitNoise {
-        sky_noise,
-        noise_model: NoiseModel::from_normalized(1_000.0, 10.0),
+    // Variance by the CCD equation: σ² + signal/e, with σ = 0.02 (σ² = 4e-4) holding the read
+    // noise, and e = 1000 electrons per unit. Weights are the inverse:
+    // signal 0.0: 1/4e-4            = 2500
+    // signal 0.5: 1/(4e-4 + 5e-4)   ≈ 1111.11
+    // signal 1.0: 1/(4e-4 + 1e-3)   ≈ 714.29
+    // In f64 from decimal inputs, so within 1e-9 relative.
+    let bg = 0.125;
+    let noise = StarNoise {
+        background_sigma: 0.02,
+        electrons_per_unit: Some(1_000.0),
     };
-    let data_z = [0.1, 0.6, 1.1]; // signals 0.0, 0.5, 1.0
-
-    let w: Vec<f64> = data_z.iter().map(|&z| noise.weight(z, bg)).collect();
-
-    // signal 0.0: 1/(0      + 4e-4 + 1e-4) = 2000
-    // signal 0.5: 1/(5e-4   + 5e-4)        = 1000
-    // signal 1.0: 1/(1e-3   + 5e-4)        ≈ 666.67
-    //
-    // Within 1e-3, not 1e-9: `sky_noise` is f32 here because that is what production carries, so
-    // 0.02 quantizes and sky_var lands just under a clean 4e-4, moving w0 by 7e-5. The tolerance
-    // is still 5e-7 relative.
-    assert!((w[0] - 2000.0).abs() < 1e-3, "w0 = {}", w[0]);
-    assert!((w[1] - 1000.0).abs() < 1e-3, "w1 = {}", w[1]);
-    assert!((w[2] - 666.666_666_666_666_6).abs() < 1e-3, "w2 = {}", w[2]);
-    assert!(
-        w[0] > w[1] && w[1] > w[2],
-        "weight must fall as signal rises"
-    );
+    for (signal, weight) in [(0.0, 2500.0), (0.5, 1e4 / 9.0), (1.0, 5e3 / 7.0)] {
+        let w = 1.0 / noise.variance(signal);
+        assert!((w - weight).abs() <= 1e-9 * weight, "signal {signal}: {w}");
+    }
 
     // The same weights reach the fit through `prepare`'s single pass, which is the only production
-    // path to them — a flat stamp above the sky must weigh every pixel identically.
-    let pixels = Buffer2::new_filled(32, 32, 0.6f32);
+    // path to them — a flat stamp 0.5 above the sky (dyadic, so exact) must weigh every pixel as
+    // the signal 0.5 above.
+    let pixels = Buffer2::new_filled(32, 32, 0.625f32);
     let fit = StampFit::prepare::<6>(
         &pixels,
         DVec2::splat(16.0),
@@ -232,7 +223,9 @@ fn inverse_variance_weights_downweight_bright_pixels() {
     let weights = fit.weights.expect("a noise model means a weighted fit");
     assert_eq!(weights.len(), 7 * 7);
     assert!(
-        weights.iter().all(|&v| (v - 1000.0).abs() < 1e-3),
+        weights
+            .iter()
+            .all(|&v| (v - 1e4 / 9.0).abs() <= 1e-9 * 1e4 / 9.0),
         "{weights:?}"
     );
 }

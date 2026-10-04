@@ -205,11 +205,23 @@ fn validate_catalog(stars: &[Star], catalog: RegistrationCatalog) -> Result<(), 
                 position: star.pos,
             });
         }
-        if !star.fwhm.is_finite() {
-            return Err(RegistrationError::InvalidStarFwhm {
+        let fields = [
+            ("FWHM", f64::from(star.fwhm)),
+            ("flux", f64::from(star.flux)),
+            ("SNR", f64::from(star.snr)),
+            ("peak", f64::from(star.peak)),
+            ("sharpness", f64::from(star.sharpness)),
+            ("eccentricity", f64::from(star.eccentricity)),
+            ("GROUND", f64::from(star.roundness.ground)),
+            ("SROUND", f64::from(star.roundness.sround)),
+            ("position σ", star.position_sigma),
+        ];
+        if let Some(&(field, value)) = fields.iter().find(|(_, value)| !value.is_finite()) {
+            return Err(RegistrationError::InvalidStarField {
                 catalog,
                 index,
-                value: star.fwhm,
+                field,
+                value,
             });
         }
     }

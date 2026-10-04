@@ -16,6 +16,7 @@ pub(crate) mod measure_grid;
 mod moffat_fit;
 mod simd;
 pub(crate) mod stamp;
+mod star_noise;
 mod windowed_centroid;
 
 use glam::DVec2;
@@ -26,17 +27,15 @@ use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::star_detection::background::sky_noise::SkyNoise;
 use crate::star_detection::centroid::covariance::{Cov2, MIN_SIGMA_SQ, windowed_covariance};
-use crate::star_detection::centroid::local_background::{
-    LocalBackground, compute_annulus_background,
-};
+use crate::star_detection::centroid::local_background::compute_annulus_background;
 use crate::star_detection::centroid::measure_grid::{MAX_STAMP_RADIUS, MeasureGrid};
-use crate::star_detection::centroid::stamp::FitNoise;
+use crate::star_detection::centroid::star_noise::StarNoise;
 use crate::star_detection::centroid::windowed_centroid::{WindowedCentroid, WindowedInputs};
 use crate::star_detection::config::measurement_config::{
-    CentroidMethod, LocalBackgroundMethod, MeasurementConfig, NoiseModel,
+    CentroidMethod, LocalBackgroundMethod, MeasurementConfig,
 };
 use crate::star_detection::deblend::region::Region;
-use crate::star_detection::roundness::Roundness;
+use crate::star_detection::roundness::{Roundness, RoundnessStamp};
 use crate::star_detection::star::Star;
 use gaussian_fit::GaussianFit;
 use imaginarium::Buffer2;
@@ -126,14 +125,14 @@ pub(super) fn measure_star(
         }
     };
     let start_annulus = annulus_at(start);
-    let LocalBackground {
-        offset: local_offset,
-        noise: local_noise,
-    } = start_annulus.unwrap_or_else(|| LocalBackground {
-        offset: 0.0,
-        noise: sky.noise[(region.peak.x, region.peak.y)],
-    });
-    let local_noise = local_noise.max(sky.floor);
+    let (local_offset, local_noise) = start_annulus
+        .map_or((0.0, sky.noise[(region.peak.x, region.peak.y)]), |local| {
+            (local.offset, local.noise)
+        });
+    let noise = StarNoise {
+        background_sigma: f64::from(local_noise.max(sky.floor)),
+        electrons_per_unit: config.electrons_per_unit.map(f64::from),
+    };
 
     let windowed = WindowedCentroid::measure(
         residual,
@@ -141,8 +140,7 @@ pub(super) fn measure_star(
         grid,
         WindowedInputs {
             offset: local_offset,
-            sky_sigma: local_noise,
-            noise_model: config.noise_model.as_ref(),
+            noise,
         },
     )?;
     let mut pos = windowed.pos;
@@ -151,10 +149,9 @@ pub(super) fn measure_star(
     // A converged fit's widths replace the moment-based FWHM and eccentricity.
     let mut fit_fwhm: Option<f32> = None;
     let mut fit_eccentricity: Option<f32> = None;
-    let fit_noise = config.noise_model.map(|noise_model| FitNoise {
-        sky_noise: local_noise,
-        noise_model,
-    });
+    // Weighted by the CCD equation only when the star's own photons are known; with the
+    // background's noise alone every pixel weighs the same.
+    let fit_noise = noise.electrons_per_unit.is_some().then_some(noise);
     match config.centroid_method {
         CentroidMethod::GaussianFit => {
             let fit = restamped(
@@ -195,16 +192,21 @@ pub(super) fn measure_star(
         annulus_at(pos)
     };
 
-    // Flux, SNR, sharpness and roundness come from the stamp whatever the method.
+    // Flux, SNR, sharpness and roundness come from the stamp whatever the method; where the
+    // annulus measured the sky, against its offset, its noise and its sample count.
     let mut star = compute_star(
         residual,
-        sky,
         pos,
-        // The region's own peak value is the detection plane's, filtered.
-        residual[(region.peak.x, region.peak.y)],
         stamp_radius,
-        annulus_background,
-        config.noise_model.as_ref(),
+        grid.window_sigma,
+        StarBackground {
+            offset: annulus_background.map_or(0.0, |local| local.offset),
+            noise: annulus_background.map_or(noise, |local| StarNoise {
+                background_sigma: f64::from(local.noise.max(sky.floor)),
+                ..noise
+            }),
+            sky_samples: annulus_background.map(|local| local.samples),
+        },
     )?;
     star.saturated = saturation.get_at(region.peak);
     star.position_sigma = position_sigma;
@@ -238,93 +240,66 @@ fn restamped<T>(
     ((centre(&second) - moved).abs().max_element() <= half).then_some(second)
 }
 
-/// Symmetric 2×2 covariance (px²) for windowed second moments.
-/// Construct a star and compute its quality metrics at the given position.
-///
-/// Uses f64 accumulators for numerical stability.
-///
-/// If `noise_model` is provided, uses the full CCD noise equation:
-/// `SNR = flux / sqrt(flux/G + npix × (σ_sky² + (read_noise_electrons/G)²))`,
-/// where `G` is electrons per normalized unit.
-///
-/// Otherwise, uses the simplified background-dominated formula:
-/// `SNR = flux / (σ_sky × sqrt(npix))`
-///
-/// `local`, when set, is the [`LocalBackgroundMethod::LocalAnnulus`] estimate: a sky offset the
-/// residual still carries at this stamp and the stamp's own noise, both valid at the stamp scale.
-/// It applies to every consumer here — flux/marginals, the windowed covariance behind
-/// FWHM/eccentricity, and the SNR noise — so all metrics share one sky convention.
+/// What a star's metrics are measured against: the local sky the residual still carries, the noise
+/// of the star's pixels, and how many samples the sky was measured from, when an annulus measured
+/// it.
+#[derive(Debug, Clone, Copy)]
+struct StarBackground {
+    offset: f32,
+    noise: StarNoise,
+    sky_samples: Option<usize>,
+}
+
+/// Construct a star and compute its quality metrics at the given position, against `background`,
+/// over a stamp of `stamp_radius`: flux, the star's own peak above the sky, FWHM and eccentricity
+/// from the windowed covariance, the SNR by the CCD equation, the sharpness of its own peak, and
+/// the DAOFIND roundness against a PSF of `psf_sigma`. `None` when the stamp leaves the frame or
+/// holds no star — no net or no positive light, a non-finite flux or SNR, or a marginal with no
+/// height — and the position σ is the caller's to set.
 fn compute_star(
     residual: &Buffer2<f32>,
-    sky: &SkyNoise,
     pos: DVec2,
-    peak: f32,
     stamp_radius: usize,
-    local: Option<LocalBackground>,
-    noise_model: Option<&NoiseModel>,
+    psf_sigma: f64,
+    background: StarBackground,
 ) -> Option<Star> {
-    let width = residual.width();
-    let height = residual.height();
-    let offset = local.map_or(0.0, |local| local.offset);
+    let offset = background.offset;
+    let centre = stamp_centre(
+        pos,
+        Size2us::new(residual.width(), residual.height()),
+        stamp_radius,
+    )?;
 
-    let centre = stamp_centre(pos, Size2us::new(width, height), stamp_radius)?;
-
-    // Flux, core flux and peak sum the *signed* residual: sky noise is zero-mean, and clipping each
-    // pixel at zero would turn it into a positive bias of about 0.4σ per pixel. The second moments
-    // and the marginals are weights, and a weight cannot be negative, so they take the clipped
-    // residual and normalize by its own sum.
+    // Flux and core flux sum the *signed* residual: sky noise is zero-mean, and clipping each pixel
+    // at zero would turn it into a positive bias of about 0.4σ per pixel. The second moments are
+    // weights, and a weight cannot be negative, so they take the clipped residual and normalize by
+    // its own sum.
     let mut flux = 0.0f64;
     let mut weight_sum = 0.0f64;
     let mut core_flux = 0.0f64;
     let mut sum_x2 = 0.0f64;
     let mut sum_y2 = 0.0f64;
     let mut sum_xy = 0.0f64;
-    let mut noise_sum = 0.0f64;
-    let mut noise_count = 0usize;
-    let mut peak_value = f64::NEG_INFINITY;
-
     let stamp_size = 2 * stamp_radius + 1;
-    let mut marginal_x = [0.0f64; MAX_STAMP_SIZE];
-    let mut marginal_y = [0.0f64; MAX_STAMP_SIZE];
+    let mut stamp = [0.0f64; MAX_STAMP_PIXELS];
 
-    // `my`, `mx` index the stamp from its corner; `ady`, `adx` are the distances from its centre.
-    let outer_ring_threshold = stamp_radius.saturating_sub(2).pow(2);
     for (my, y) in (centre.y - stamp_radius..=centre.y + stamp_radius).enumerate() {
         let px_row = residual.row(y);
-        let noise_row = sky.noise.row(y);
         let ady = my.abs_diff(stamp_radius);
         for (mx, x) in (centre.x - stamp_radius..=centre.x + stamp_radius).enumerate() {
-            let adx = mx.abs_diff(stamp_radius);
-
             let signal = f64::from(px_row[x] - offset);
+            stamp[my * stamp_size + mx] = signal;
             let value = signal.max(0.0);
-
             flux += signal;
             weight_sum += value;
-            peak_value = peak_value.max(signal);
-
-            if adx <= 1 && ady <= 1 {
+            if mx.abs_diff(stamp_radius) <= 1 && ady <= 1 {
                 core_flux += signal;
             }
-
-            marginal_x[mx] += value;
-            marginal_y[my] += value;
-
-            // Weighted second moments for FWHM and eccentricity. Kept in this loop rather than
-            // recomputed on the rare `windowed_covariance` failure below: a second traversal there
-            // measured no better than these three multiply-adds, which are a small share of an
-            // already branchy loop body.
             let fx = x as f64 - pos.x;
             let fy = y as f64 - pos.y;
             sum_x2 += value * fx * fx;
             sum_y2 += value * fy * fy;
             sum_xy += value * fx * fy;
-
-            let r2 = adx * adx + ady * ady;
-            if local.is_none() && r2 > outer_ring_threshold {
-                noise_sum += f64::from(noise_row[x]);
-                noise_count += 1;
-            }
         }
     }
 
@@ -333,11 +308,10 @@ fn compute_star(
         return None;
     }
 
-    // Adaptive windowed second moments: Gaussian-weight by an iteratively-matched
-    // window to suppress wing noise, then deconvolve the window so FWHM/eccentricity
-    // stay unbiased. Seed the window from the plain moment; fall back to the plain
-    // moments if it can't converge to a valid (positive-definite) covariance.
-    // `sum_x2 + sum_y2` is Σ value·r², the radial moment the window is seeded from.
+    // Adaptive windowed second moments: Gaussian-weight by an iteratively-matched window to
+    // suppress wing noise, then deconvolve the window so FWHM/eccentricity stay unbiased. Seed the
+    // window from the plain moment; fall back to the plain moments if it can't converge to a
+    // valid (positive-definite) covariance.
     let seed_sigma_sq = ((sum_x2 + sum_y2) / weight_sum / 2.0).max(MIN_SIGMA_SQ);
     let cov =
         windowed_covariance(residual, offset, pos, stamp_radius, seed_sigma_sq).unwrap_or(Cov2 {
@@ -346,61 +320,38 @@ fn compute_star(
             xy: sum_xy / weight_sum,
         });
 
-    let fwhm = cov.fwhm();
-    let eccentricity = cov.eccentricity();
-
-    // Held to the frame's own floor, as every threshold holds its σ: a stamp of constant sky
-    // measures no noise at all.
-    let avg_noise = match local {
-        Some(local) => local.noise,
-        None if noise_count > 0 => (noise_sum / noise_count as f64) as f32,
-        None => sky.noise.row(centre.y)[centre.x],
+    let npix = stamp_size * stamp_size;
+    let snr = background.noise.snr(flux, npix, background.sky_samples);
+    if !flux.is_finite() || !snr.is_finite() {
+        return None;
     }
-    .max(sky.floor);
-
-    let npix = (2 * stamp_radius + 1).pow(2);
-    let flux_f32 = flux as f32;
-
-    let snr = compute_snr(flux_f32, avg_noise, npix, noise_model);
-
-    let sharpness = if core_flux > f64::EPSILON {
-        (peak_value / core_flux).clamp(0.0, 1.0) as f32
+    // The star's own peak, at its centre pixel: the brightest pixel of the stamp may be a
+    // companion's, and its sharpness then reads 1.
+    let peak = stamp[stamp_radius * stamp_size + stamp_radius];
+    let sharpness = if core_flux > 0.0 {
+        (peak / core_flux).clamp(0.0, 1.0) as f32
     } else {
         1.0
     };
+    let roundness = Roundness::measure(RoundnessStamp {
+        values: &stamp[..npix],
+        radius: stamp_radius,
+        psf_sigma,
+    })?;
 
     Some(Star {
         pos,
         // The caller's, from the centroid or the fit that found `pos`.
         position_sigma: f64::NAN,
-        flux: flux_f32,
-        fwhm,
-        eccentricity,
-        snr,
-        peak,
+        flux: flux as f32,
+        fwhm: cov.fwhm(),
+        eccentricity: cov.eccentricity(),
+        snr: snr as f32,
+        peak: peak as f32,
         saturated: false,
         sharpness,
-        roundness: Roundness::from_marginals(&marginal_x[..stamp_size], &marginal_y[..stamp_size]),
+        roundness,
     })
-}
-
-/// Compute SNR using the configured sensor noise model when available.
-///
-/// Uses the full CCD noise equation when the model is provided:
-/// `SNR = flux / sqrt(flux/G + npix × (σ_sky² + (read_noise_electrons/G)²))`,
-/// where `G` is electrons per normalized unit.
-///
-/// Otherwise, uses simplified background-dominated formula:
-/// `SNR = flux / (σ_sky × sqrt(npix))`
-fn compute_snr(flux: f32, sky_noise: f32, npix: usize, noise_model: Option<&NoiseModel>) -> f32 {
-    let sky_noise = f64::from(sky_noise);
-    // In f64, which holds the variance of a σ at the frame's floor in any domain: an f32 floor on
-    // the variance was an absolute one, and lost every star of a frame scaled by 2⁻¹⁶.
-    let total_var = match noise_model {
-        Some(noise) => noise.variance_normalized(f64::from(flux), sky_noise, npix),
-        None => npix as f64 * sky_noise * sky_noise,
-    };
-    (f64::from(flux) / total_var.sqrt()) as f32
 }
 
 #[cfg(all(test, feature = "bench"))]

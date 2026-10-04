@@ -102,7 +102,6 @@ pub use star_detection::config::filter_config::FilterConfig as StarDetectionFilt
 pub use star_detection::config::fwhm_config::{FwhmConfig as StarDetectionFwhmConfig, FwhmMode};
 pub use star_detection::config::measurement_config::{
     CentroidMethod, LocalBackgroundMethod, MeasurementConfig as StarDetectionMeasurementConfig,
-    NoiseModel,
 };
 pub use star_detection::detector::{
     DetectionResult as StarDetectionResult, Diagnostics as StarDetectionDiagnostics, FwhmSource,

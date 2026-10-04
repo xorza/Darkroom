@@ -10,15 +10,15 @@ use lumos::{
     FitsHduProvenance, FitsHduSelector, FitsLoadOptions, FitsNullPolicy, FitsTransferProvenance,
     FlagCounts, FrameStoreError, GesdConfig, ImageDimensions, ImageMetadata, IngestConfig,
     InterpolationMethod, InvalidConfigField, LinearFitClipConfig, LinearImage, LoadContext,
-    MasterRole, MatchIndices, NoiseModel, Normalization, Pedestal, QualityMap, QualityPlanes,
-    RansacConfig, RegistrationCatalog, RegistrationConfig, RegistrationError,
-    RegistrationMatchingConfig, Rejection, RunReport, SampleDomain, ScaleOrigin, SigmaClipConfig,
-    SipConfig, SmallN, StackConfig, StackConfigError, StackError, StackProduct,
-    StarDetectionBackgroundConfig, StarDetectionCandidateConfig, StarDetectionConfig,
-    StarDetectionDiagnostics, StarDetectionFilterConfig, StarDetectionFwhmConfig,
-    StarDetectionMeasurementConfig, StarDetectionQualityFilterDiagnostics, StarDetector, StarMatch,
-    TransferProvenance, Transform, TransformModel, TransformType, TriangleConfig, TrimConfig,
-    WarpParams, WarpTransform, Weighting, WinsorizedClipConfig,
+    MasterRole, MatchIndices, Normalization, Pedestal, QualityMap, QualityPlanes, RansacConfig,
+    RegistrationCatalog, RegistrationConfig, RegistrationError, RegistrationMatchingConfig,
+    Rejection, RunReport, SampleDomain, ScaleOrigin, SigmaClipConfig, SipConfig, SmallN,
+    StackConfig, StackConfigError, StackError, StackProduct, StarDetectionBackgroundConfig,
+    StarDetectionCandidateConfig, StarDetectionConfig, StarDetectionDiagnostics,
+    StarDetectionFilterConfig, StarDetectionFwhmConfig, StarDetectionMeasurementConfig,
+    StarDetectionQualityFilterDiagnostics, StarDetector, StarMatch, TransferProvenance, Transform,
+    TransformModel, TransformType, TriangleConfig, TrimConfig, WarpParams, WarpTransform,
+    Weighting, WinsorizedClipConfig,
 };
 
 #[test]
@@ -149,10 +149,6 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
     };
     detection.validate().unwrap();
 
-    NoiseModel::from_normalized(1_000.0, 10.0)
-        .validate()
-        .unwrap();
-
     // A drizzle frame weighs one by default and has no per-pixel weights.
     let frame = DrizzleFrame::new("light.fits", WarpTransform::new(Transform::identity()));
     assert_eq!(frame.weight, 1.0);
@@ -254,10 +250,11 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
         AlignStackError::Calibration(CalibrationError::AlreadyCalibrated)
     ));
 
-    let registration_error = RegistrationError::InvalidStarFwhm {
+    let registration_error = RegistrationError::InvalidStarField {
         catalog: RegistrationCatalog::Target,
         index: 7,
-        value: f32::INFINITY,
+        field: "FWHM",
+        value: f64::INFINITY,
     };
     assert_eq!(
         registration_error.to_string(),

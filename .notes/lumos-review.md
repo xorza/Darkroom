@@ -35,57 +35,11 @@ Groups are sorted by severity × benefit. Correctness comes first, then precisio
 - [ ] `8.2` **Star detection does not handle `nulls` in its stamps** — `star_detection/centroid/`
   - The mesh leaves the pixels with no data out, and the threshold clears them. A stamp that holds them still reads their fill as a measurement. `[C]`
 
-## 9. Star detection measures and splits on the wrong plane
-
-
-## 10. Shape metrics measure position, not shape
-
-- [ ] `10.1` **SROUND measures sub-pixel phase** — `star_detection/roundness/mod.rs:42-46`, fed by `star_detection/centroid/mod.rs:454-545`
-  - It is the marginal asymmetry about the stamp's centre pixel (`pos.round()`), so a star off the pixel centre is "lopsided".
-  - Round stars rejected as `NotRound` (uniform phase):
-
-    | FWHM | Default threshold 0.5 | Threshold 0.3 |
-    |---|---|---|
-    | 2 | 57% | 85% |
-    | 2.5 | 21% | 73% |
-    | 3 | 3% | 57% |
-
-  - Auto-FWHM goes through `Rejection::of`, so it is biased upward.
-  - Use the DAOFIND/photutils `roundness1` pinwheel quadrant sum: translation cancels to first order, and it catches 45° elongation. Nothing catches diagonal elongation today. `[C]`
-- [ ] `10.2` **GROUND is not DAOFIND ROUND** — `star_detection/roundness/mod.rs`
-  - It uses the max-sample marginals and no factor 2, so the scale is half of DAOFIND's and it depends on phase. DAOFIND fits 1-D Gaussians to the marginals.
-  - The docs claim "the DAOFIND roundness metrics". `[C]`
-- [ ] `10.3` **Sharpness divides the whole stamp's peak by the 3×3 core flux** — `star_detection/centroid/mod.rs:471,530-534`
-  - The fainter star of a pair 5 px apart gets ratio 1.0 > 0.7, so it is rejected as `CosmicRay`.
-  - The `star.rs:275-285` docs give two different thresholds (0.8 and 0.7). Neither matches DAOFIND's sharpness. `[C]`
-- [ ] `10.4` **`max_fwhm_deviation` is documented as "MAD-scaled" but multiplies the raw MAD** — `star_detection/config/filter_config.rs:16`, `star_detection/detector/stages/filter/mod.rs:119-120`
-  - 3 raw MAD ≈ 2.0σ. `[C]`
-
 ## 11. Centroids stop before they converge
 
-
-    | Star FWHM (window 3) | Bias after 10 steps | Converged |
-    |---|---|---|
-    | 3 | −0.0035 px | −0.0002 px |
-    | 4.5 | −0.034 px | — |
-    | 6 | −0.092 px | — |
-
-  - Wide stars in field corners are hit hardest.
-  - SExtractor XWIN uses `x += 2·Σ…` with σ_w = σ_s, which is exact in one step for a Gaussian. The adaptive-moments Newton step scales the shift by σ_w²/(σ_w² − C_obs).
-  - A step-size stop also understates the remaining error by c/(1−c). `[C]`
 - [ ] `11.5` **The PSF is evaluated at pixel centres, not integrated over the pixel** — `star_detection/centroid/gaussian_fit/mod.rs:271-277`, `star_detection/centroid/moffat_fit/mod.rs:156-161`, `star_detection/centroid/covariance.rs`
   - FWHM bias: +16% at FWHM 1.2, +5.9% at 2, +2.6% at 3. `MIN_SIGMA` allows fits down to FWHM 1.18, where this dominates.
   - For a Gaussian, an erf-integrated model is exact. `[P]`
-- [ ] `11.10` **A NaN in the residual reaches `Star.flux` and `snr`** — `star_detection/centroid/mod.rs:466-471`
-  - A NaN SNR passes `snr < min_snr`, and `validate_catalog` checks only `pos` and `fwhm`. `[P]`
-
-## 12. SNR follows neither the CCD equation nor the measured noise
-
-- [ ] `12.1` **Read noise is counted twice** — `star_detection/config/measurement_config.rs:87-102`, used at `star_detection/centroid/mod.rs:562` and `star_detection/centroid/stamp.rs:79-85`
-  - The empirical background σ already holds RN². Merline & Howell add RN² to the sky shot term only. `[C]`
-- [ ] `12.2` **The sky-estimate error term n_pix(1 + n_pix/n_B) is missing** — `star_detection/centroid/mod.rs:557-571`
-  - Sky-limited SNR reads up to 1.48× high in `LocalAnnulus` mode. `[C]`
-- [ ] `12.3` **Measurement ignores `SkyNoise::floor`, which the threshold applies** — `star_detection/centroid/mod.rs:191,492,522` `[C]`
 
 ## 13. The final registration fit discards precision
 
@@ -634,7 +588,7 @@ Built in phase 7. As built:
 
 ## C4. Measurement with a convergence contract and an error output
 
-Closes groups 10, 11 and 12, 2.3, 2.4, 2.6, 26.6 to 26.10, 24.12 and 24.13. It uses S2, S3 and S6.
+Closes groups 10, 11 and 12, 2.3, 2.4, 2.6, 26.6 to 26.10 and 24.13. It uses S2, S3 and S6.
 
 - A `MeasureGrid` holds what follows from the expected FWHM: the window σ, the stamp radius and the annulus radii (26.6, 26.9). The inner annulus radius encloses a stated flux fraction of a Moffat with β = 2.5 (11.7).
 - The windowed centroid subtracts the local sky first (11.3). It uses signed values (11.4) and the adaptive-moments Newton step `σ_w² / (σ_w² − C_obs)` (11.1). It stops on the bound `c/(1 − c)·‖Δ‖` of the remaining error.
@@ -645,8 +599,11 @@ Closes groups 10, 11 and 12, 2.3, 2.4, 2.6, 26.6 to 26.10, 24.12 and 24.13. It u
   - after a fit, from `(JᵀWJ)⁻¹·χ²/(n − p)`,
   - after the centroid fallback, from the windowed-moment error, as SExtractor `ERRX2WIN` computes it.
   Registration needs a σ for every star, so no star leaves without one.
-- The SNR comes from `CcdNoise` (S2) with the sky-estimate term `n_pix(1 + n_pix/n_B)` (12.2) and the threshold's floor (12.3). Read noise is counted once (12.1). The variance floor is the S3 rule (2.3).
+- The SNR is the CCD equation (Merline & Howell 1995) with the sky-estimate term `n_pix(1 + n_pix/n_B)` (12.2), on the background σ held to the threshold's floor (12.3). The background σ already holds the read noise, so it is counted once (12.1). The variance floor is the S3 rule (2.3).
+  - As built: the equation is `StarNoise` in `centroid/`, not `CcdNoise`. Measurement reads the residual, so the sky level that `CcdNoise` carries is gone, and the sums are f64. `MeasurementConfig::electrons_per_unit` replaces the `NoiseModel`; without it, the source term is absent and the fits are unweighted.
 - Shape metrics follow DAOFIND and photutils: `roundness1` from the pinwheel quadrant sum (10.1), `roundness2` from 1-D Gaussian fits to the marginals (10.2), and sharpness from the star's own peak (10.3). `max_fwhm_deviation` multiplies 1.4826·MAD (10.4).
+  - As built: both roundness metrics read DAOFIND's cutout, of radius `max(2, ⌊1.5σ⌋)` for the expected PSF. On the whole stamp, a neighbour 8 px away read −0.66 and rejected both stars of a pair. Both read the unconvolved samples: DAOFIND's convolved `roundness1` reads a round FWHM-2 star's phase up to 0.45, the unconvolved one up to 0.36. Each metric lies in `[−2, 2]`, so `max_roundness` validates in `(0, 2]`.
+  - Sharpness stays the peak over the 3×3 core, not DAOFIND's `(peak − mean of the rest)/convolved peak`: the cosmic-ray cut at 0.7 is calibrated on it, and the fix 10.3 asks for is the star's own peak.
 - A non-finite flux or SNR makes the star invalid, and `validate_catalog` checks every float field (11.10).
 
 ## C5. Registration: hypothesis, then final fit
@@ -723,14 +680,15 @@ Found on the way and fixed: the SNR floored its variance at `f32::EPSILON`, an a
 1. Done: `LmController` (Nielsen's λ update, a Cholesky solve of the Marquardt-scaled system with a relative pivot, and stop tests that hold at any scale — a negligible accepted or Gauss–Newton step in the scaled norm, a Gauss–Newton decrease of χ² under 1e-12 of it, or a gradient orthogonal to the residuals) carries the centroid fits, which now return `None` when they fail and reweight only after a success. `Lstsq` holds the one SVD rank rule the SIP fit and the background extraction share. `Irls` waits for its first robust consumer, the final registration fit (phase 9). Items 2.3, 2.5, 11.8, 11.9, 24.13, 26.7 and 26.8 are closed.
 2. Done except the integrated models: `MeasureGrid` holds the stamp, the window σ and the annulus (from where a β = 2.5 Moffat holds 99% of its flux). `WindowedCentroid` subtracts the local sky, weights the signed signal, takes the adaptive-moments Newton step and stops on the bound `c/(1 − c)·‖Δ‖`; a failed fit falls back to it, and a fit that moves more than half the stamp radius is stamped again once. Every star carries `position_sigma`, from the fit's `(JᵀWJ)⁻¹·χ²/(n − p)` or the windowed centroid's propagated noise; both match the scatter of 1000 noise draws. The fits' weight and amplitude seed floors are relative. Items 2.4, 2.6, 11.1 to 11.4, 11.6, 11.7, 12.4, 26.6, 26.9 and 26.10 are closed.
    Still open: the integrated models (11.5). A rotated Gaussian has no closed-form pixel integral; the exact route integrates along x by erf differences and along y by Gauss–Legendre, which changes the fits' vector kernels from per-pixel to per-sub-row accumulation.
-3. Move the SNR onto `CcdNoise`. Add the DAOFIND shape metrics.
+3. Done: the SNR is the CCD equation with the sky-estimate term, on the background σ held to the frame's floor, and the fits weigh by the same equation when the gain is known. GROUND and SROUND are photutils' `roundness2` and `roundness1` on DAOFIND's cutout, and the tests pin them to photutils' formulas reproduced in numpy. Sharpness reads the star's own centre pixel. `validate_catalog` checks every float field of a star. Items 10.1 to 10.4, 11.10 and 12.1 to 12.3 are closed. 24.12 needs a SIMD `ln`, so it moves to phase 14 with the rest of group 24.
+   Effect on the characterization field: 34 stars pass, against 30. The 30 keep their positions, fluxes, FWHMs and eccentricities exactly. The 4 new ones are blended neighbours that the whole-stamp roundness rejected. Registration finds 32 inliers, against 27, and its worst corner error falls from 4.6e-3 px to 3.4e-3 px.
 - **Tests:**
   - Review table 11.1 on noise-free stars: the bias at a 0.4 px start for FWHM 3, 4.5 and 6 is below 1e-4 px.
   - An integrated fit of a star with FWHM 1.2 recovers 1.2 within the fit's σ. Today the bias is +16%.
   - Round stars of FWHM 2 at uniform sub-pixel phase: the `NotRound` rate is at the noise rate, not 57%.
   - Both sources of `position_sigma` agree with the scatter of 1000 fixed-seed noise draws, within the standard error of a variance from 1000 samples.
   - `Lstsq` gives the same SIP and background solutions as today's code on the existing fixtures.
-- **Closes:** groups 10, 11 and 12, 2.3 to 2.6, 26.6 to 26.10, 24.12, 24.13.
+- **Closes:** groups 10, 11 and 12, 2.3 to 2.6, 26.6 to 26.10, 24.13.
 
 ## Phase 9. Registration final fit (C5)
 
