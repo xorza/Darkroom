@@ -154,14 +154,13 @@ pub(crate) fn demosaic(
     places.par_iter().try_for_each_init(
         || Tile::new(passes.directions()),
         |tile, &place| {
-            if cancel.is_cancelled() {
-                return Err(Cancelled);
-            }
+            Cancelled::check(cancel)?;
             // SAFETY: the planes cover the frame, and the tiles at `step` own disjoint parts.
             unsafe { tile.demosaic(xtrans, &hex, place, passes.count(), passes.margin(), out) };
             Ok(())
         },
     )?;
+    Cancelled::check(cancel)?;
     let border = if places.is_empty() {
         width.max(height)
     } else {

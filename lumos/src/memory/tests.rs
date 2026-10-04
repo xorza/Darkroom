@@ -2,7 +2,7 @@ use crate::internals::cfa::XTRANS_PATTERN;
 use crate::io::image::cfa::CfaType;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::raw::demosaic::DemosaicMemory;
-use crate::io::raw::demosaic::bayer::CfaPattern;
+use crate::io::raw::demosaic::bayer::{CfaPattern, rcd};
 use crate::io::raw::demosaic::xtrans::markesteijn;
 use crate::math::size2us::Size2us;
 use crate::memory::chunk_memory_layout::{ChunkMemoryLayout, MIN_CHUNK_ROWS};
@@ -193,14 +193,14 @@ fn held_frames_are_charged_only_what_the_run_adds() {
     assert!(MemoryPlan::plan(shape(0), 8, available_for_usable(17_424 * MB as u64)).fits_in_ram);
 }
 
-/// One pass over ten Bayer frames of 10 MiB planes, eight threads: a decode peaks at 7P, the
+/// One pass over ten frames of 10 MiB planes, eight threads: a decode peaks at 7P, the
 /// detector holds 7P, and a warped frame is 5¼P. A worker holds 14P, and on the spill tier its 5¼P
 /// warp buffers too. Resident needs the 52½P warped set beside one worker, 66½P, where one worker
 /// fits; at 164½P all eight do. A byte below 66½P the run spills, and three 19¼P workers fit.
 #[test]
 fn a_single_pass_holds_the_warped_set_beside_its_workers() {
     let plane_bytes = plane(10);
-    let shape = pipeline_shape(plane_bytes, bayer(plane_bytes), 10, 0);
+    let shape = pipeline_shape(plane_bytes, three_channel(plane_bytes, 7), 10, 0);
     let quarters = |count: u64| available_for_usable(count * plane_bytes as u64 / 4);
     let at = |available| MemoryPlan::single_pass(shape, 8, available);
     let concurrency = |plan: MemoryPlan| {
@@ -249,51 +249,47 @@ fn plane(mib: u64) -> usize {
 }
 
 /// What each demosaic costs for a frame whose planes are `plane_bytes`, from the demosaics' own
-/// accounting: a one-row frame, so RCD's half-width planes are exactly half of it.
+/// accounting, on a one-row frame.
 fn demosaic(cfa_type: CfaType, plane_bytes: usize) -> DemosaicMemory {
-    let width = plane_bytes / size_of::<f32>();
-    assert!(
-        width.is_multiple_of(2),
-        "an even width keeps RCD's half planes exact"
-    );
-    cfa_type.demosaic_memory(ImageDimensions::new((width, 1), 1))
+    cfa_type.demosaic_memory(ImageDimensions::new((plane_bytes / size_of::<f32>(), 1), 1))
 }
 
 fn mono(plane_bytes: usize) -> DemosaicMemory {
     demosaic(CfaType::Mono, plane_bytes)
 }
 
+/// A three-channel decode that peaks at `planes` planes. Fixed, where the demosaics' own peaks
+/// carry the pool's tile buffers, which vary with the machine: 7 is the planner under a decode
+/// heavier than its output and its statistics, 22 under one far heavier.
+fn three_channel(plane_bytes: usize, planes: usize) -> DemosaicMemory {
+    DemosaicMemory {
+        output_bytes: 3 * plane_bytes,
+        peak_bytes: planes * plane_bytes,
+    }
+}
+
 fn bayer(plane_bytes: usize) -> DemosaicMemory {
     demosaic(CfaType::Bayer(CfaPattern::Rggb), plane_bytes)
 }
 
-/// A three-channel decode that peaks at 22 planes: the planner under a decode far heavier than its
-/// output. Fixed, where X-Trans's own peak carries the pool's tile buffers, which vary with the
-/// machine.
-fn heavy(plane_bytes: usize) -> DemosaicMemory {
-    DemosaicMemory {
-        output_bytes: 3 * plane_bytes,
-        peak_bytes: 22 * plane_bytes,
-    }
-}
-
 /// The planes the boundary arithmetic below is written in: output and peak are 1 and 1 planes for
-/// mono, 3 and 7 for RCD (six full planes and two half ones in its directional pass, four and the
-/// output in its last). Markesteijn's are 3 and 4 (the frame and the output) and the pool's tile
-/// buffers.
+/// mono. Both demosaics' are 3 and 4 (the frame and the output) and the pool's tile buffers.
 #[test]
 fn demosaic_costs_in_planes() {
     let plane_bytes = plane(10);
-    for (memory, output, peak) in [(mono(plane_bytes), 1, 1), (bayer(plane_bytes), 3, 7)] {
-        assert_eq!(memory.output_bytes, output * plane_bytes);
-        assert_eq!(memory.peak_bytes, peak * plane_bytes);
+    let memory = mono(plane_bytes);
+    assert_eq!(memory.output_bytes, plane_bytes);
+    assert_eq!(memory.peak_bytes, plane_bytes);
+    for (memory, workspace) in [
+        (bayer(plane_bytes), rcd::workspace_bytes()),
+        (
+            demosaic(CfaType::XTrans(XTRANS_PATTERN), plane_bytes),
+            markesteijn::workspace_bytes(),
+        ),
+    ] {
+        assert_eq!(memory.output_bytes, 3 * plane_bytes);
+        assert_eq!(memory.peak_bytes, 4 * plane_bytes + workspace);
     }
-    let xtrans = demosaic(CfaType::XTrans(XTRANS_PATTERN), plane_bytes);
-    assert_eq!(xtrans.output_bytes, 3 * plane_bytes);
-    assert_eq!(
-        xtrans.peak_bytes,
-        4 * plane_bytes + markesteijn::workspace_bytes()
-    );
 }
 
 /// The smallest availability whose budget is `usable`: the inverse of [`memory_budget`].
@@ -354,14 +350,14 @@ fn a_warp_holds_its_source_beside_the_warped_frame() {
     }
 }
 
-/// 100 MiB planes, ten heavy-decode frames, eight workers, 6 GiB = 61.44P usable. The warped set alone
+/// 100 MiB planes, ten frames of a 22P decode, eight workers, 6 GiB = 61.44P usable. The warped set alone
 /// is 52½P, and the decode pass 30P + one 26P transient; it is the eight workers' 3P sources on top
 /// of the warped set, 76½P, that force the spill.
 #[test]
 fn scratch_reserve_streams_a_set_whose_frames_alone_would_fit() {
     let plane_bytes = plane(100);
     let (frames, threads, available) = (10, 8, 8 * GB);
-    let demosaic = heavy(plane_bytes);
+    let demosaic = three_channel(plane_bytes, 22);
 
     let warped = PerFrameBytes::new(plane_bytes, demosaic.output_bytes).warped;
     assert!((warped * frames) as u64 <= memory_budget(available));
@@ -372,9 +368,9 @@ fn scratch_reserve_streams_a_set_whose_frames_alone_would_fit() {
 /// - Mono stays resident: the decode pass is 10P + 8P (its 1P statistics copy and the 7P detector),
 ///   the warp 32½P + 8 × 1P. Decodes take 8P each from the 51.44P beyond the frames: six. The
 ///   warp's 1P sources fit all eight workers.
-/// - Bayer spills on the warp, 52½P + 8 × 3P = 76½P. Spilled, a decode is its 7P peak and the 7P
+/// - The 7P decode spills on the warp, 52½P + 8 × 3P = 76½P. Spilled, a decode is its 7P peak and the 7P
 ///   detector, 14P: four fit. A warp is 8¼P: seven.
-/// - The heavy decode spills likewise. A decode is its 22P peak and the detector, 29P: two fit.
+/// - The 22P decode spills likewise. A decode is its 22P peak and the detector, 29P: two fit.
 #[test]
 fn fan_out_follows_each_demosaics_peak() {
     let plane_bytes = plane(100);
@@ -388,7 +384,7 @@ fn fan_out_follows_each_demosaics_peak() {
             },
         ),
         (
-            bayer(plane_bytes),
+            three_channel(plane_bytes, 7),
             MemoryPlan {
                 fits_in_ram: false,
                 decode_concurrency: 4,
@@ -396,7 +392,7 @@ fn fan_out_follows_each_demosaics_peak() {
             },
         ),
         (
-            heavy(plane_bytes),
+            three_channel(plane_bytes, 22),
             MemoryPlan {
                 fits_in_ram: false,
                 decode_concurrency: 2,
@@ -408,13 +404,13 @@ fn fan_out_follows_each_demosaics_peak() {
     }
 }
 
-/// 10 MiB planes, five heavy-decode frames, eight workers, 614.4P usable: the decode pass is 15P + 26P
+/// 10 MiB planes, five frames of a 22P decode, eight workers, 614.4P usable: the decode pass is 15P + 26P
 /// and the warp 26¼P + 5 × 3P, so it fits, and the frame count binds both fan-outs.
 #[test]
 fn small_set_uses_all_workers_in_ram() {
     let plane_bytes = plane(10);
     assert_eq!(
-        plan(plane_bytes, heavy(plane_bytes), 5, 8, 8 * GB),
+        plan(plane_bytes, three_channel(plane_bytes, 22), 5, 8, 8 * GB),
         MemoryPlan {
             fits_in_ram: true,
             decode_concurrency: 5,
@@ -424,7 +420,7 @@ fn small_set_uses_all_workers_in_ram() {
 }
 
 /// 10 MiB planes, five frames, four workers. Each demosaic's RAM-tier boundary is its larger peak:
-/// the heavy decode's pass, 5 × 3P + 26P = 41P, above its warp's 5 × 5¼P + 4 × 3P = 38¼P; Bayer's
+/// the 22P decode's pass, 5 × 3P + 26P = 41P, above its warp's 5 × 5¼P + 4 × 3P = 38¼P; the 7P one's
 /// warp, 38¼P, above its 26P decode pass; mono's warp, 5 × 3¼P + 4 × 1P = 20¼P, above its 13P
 /// decode pass. In quarter planes: 164, 153 and 81.
 #[test]
@@ -432,8 +428,8 @@ fn ram_tier_respects_algorithm_specific_concurrency_boundaries() {
     let plane_bytes = plane(10);
     let (frames, threads) = (5, 4);
     for (demosaic, boundary_quarters) in [
-        (heavy(plane_bytes), 164),
-        (bayer(plane_bytes), 153),
+        (three_channel(plane_bytes, 22), 164),
+        (three_channel(plane_bytes, 7), 153),
         (mono(plane_bytes), 81),
     ] {
         let boundary = available_for_usable(boundary_quarters * 10 * MIB / 4);
@@ -442,11 +438,12 @@ fn ram_tier_respects_algorithm_specific_concurrency_boundaries() {
     }
 
     // At 41P all three fit, and their decode transients buy different fan-outs from what the
-    // resident outputs leave: the heavy decode's 26P one of 26P, Bayer's 11P two, mono's 8P four of 36P.
+    // resident outputs leave: the 22P decode's 26P one of 26P, the 7P one's 11P two, mono's 8P four of
+    // 36P.
     let at = available_for_usable(410 * MIB);
     for (demosaic, decode_concurrency) in [
-        (heavy(plane_bytes), 1),
-        (bayer(plane_bytes), 2),
+        (three_channel(plane_bytes, 22), 1),
+        (three_channel(plane_bytes, 7), 2),
         (mono(plane_bytes), 4),
     ] {
         assert_eq!(
@@ -455,13 +452,13 @@ fn ram_tier_respects_algorithm_specific_concurrency_boundaries() {
         );
     }
 
-    // Headroom scales the heavy decode's fan-out: 67P usable leaves 52P, two transients; 93P leaves 78P,
+    // Headroom scales the 22P decode's fan-out: 67P usable leaves 52P, two transients; 93P leaves 78P,
     // three.
     for (usable_planes, decode_concurrency) in [(67, 2), (93, 3)] {
         assert_eq!(
             plan(
                 plane_bytes,
-                heavy(plane_bytes),
+                three_channel(plane_bytes, 22),
                 frames,
                 threads,
                 available_for_usable(usable_planes * 10 * MIB),
@@ -475,7 +472,7 @@ fn ram_tier_respects_algorithm_specific_concurrency_boundaries() {
 /// For every frame size, count, worker count and budget, the planned fan-out keeps each stage's
 /// projected peak — the resident set plus `concurrency ×` what one in-flight frame adds to it —
 /// within the usable budget, unless not even one frame fits and the fan-out is pinned to 1. Swept
-/// for the pipeline's shape over each demosaic and the heavy decode, and for stacks decoded
+/// for the pipeline's shape over each demosaic and the fixed decodes, and for stacks decoded
 /// straight into the combine.
 #[test]
 fn planned_concurrency_never_overshoots_its_tier_budget() {
@@ -487,7 +484,8 @@ fn planned_concurrency_never_overshoots_its_tier_budget() {
                 mono(plane_bytes),
                 bayer(plane_bytes),
                 demosaic(CfaType::XTrans(XTRANS_PATTERN), plane_bytes),
-                heavy(plane_bytes),
+                three_channel(plane_bytes, 7),
+                three_channel(plane_bytes, 22),
             ]
             .map(|demosaic| pipeline_shape(plane_bytes, demosaic, frames, 0))
             .into_iter()
@@ -542,7 +540,7 @@ fn planned_concurrency_never_overshoots_its_tier_budget() {
     }
 }
 
-/// 100 MiB planes, twenty heavy-decode frames, sixteen workers.
+/// 100 MiB planes, twenty frames of a 22P decode, sixteen workers.
 /// - 2 GiB → 15.36P usable: spilled, under one 29P decode and two 8¼P warps; both pinned or bound
 ///   to 1.
 /// - 16 GiB → 122.88P: the warp, 105P + 16 × 3P, still spills; four 29P decodes and fourteen
@@ -551,7 +549,7 @@ fn planned_concurrency_never_overshoots_its_tier_budget() {
 #[test]
 fn budget_flips_the_tier_and_scales_streaming_fanout() {
     let plane_bytes = plane(100);
-    let demosaic = heavy(plane_bytes);
+    let demosaic = three_channel(plane_bytes, 22);
     let (frames, threads) = (20, 16);
     for (available, expected) in [
         (

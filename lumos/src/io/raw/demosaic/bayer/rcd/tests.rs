@@ -1,7 +1,10 @@
 use common::CancelToken;
 
+use crate::concurrency::unsafe_send_ptr::UnsafeSendPtr;
+use crate::internals::test_rng::TestRng;
+use crate::io::raw::demosaic::bayer::rcd::tile::{OutputPlanes, Tile, TilePlace};
 use crate::io::raw::demosaic::bayer::rcd::{
-    EPS, INTERPOLATED_BORDER, MIN_SIGNED_DENOMINATOR_RATIO, demosaic, estimate_green,
+    EPS, INTERPOLATED_BORDER, MIN_SIGNED_DENOMINATOR_RATIO, TILE, demosaic, estimate_green,
 };
 use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern};
 use crate::math::size2us::Size2us;
@@ -185,6 +188,60 @@ fn rcd_matches_librtprocess_bit_for_bit() {
                 }
             }
             assert_eq!(digest, expected, "{name}, {pattern:?}: {digest:#018x}");
+        }
+    }
+}
+
+/// A tile writes the same bits whatever its buffers held before: every cell a pixel it writes
+/// reads, a stage computed for this tile. Run on a frame of one whole tile and on the cut-short
+/// tile at its far corner, after buffers filled with +1000 and with −1000, in each Bayer phase.
+#[test]
+fn a_tile_writes_nothing_that_reads_another_tiles_leftovers() {
+    let size = Size2us::new(TILE + 40, TILE + 30);
+    let mut rng = TestRng::new(11);
+    let data: Vec<f32> = (0..size.pixel_count())
+        .map(|_| 0.1 + 0.8 * rng.next_f32())
+        .collect();
+    for pattern in CfaPattern::ALL {
+        for place in [
+            TilePlace {
+                top: 0,
+                left: 0,
+                size: Size2us::new(TILE, TILE),
+            },
+            TilePlace {
+                top: size.height - 100,
+                left: size.width - 90,
+                size: Size2us::new(90, 100),
+            },
+        ] {
+            let run = |poison: f32| {
+                let mut planes = [(); 3].map(|()| vec![f32::NAN; size.pixel_count()]);
+                let [r, g, b] = &mut planes;
+                let out = OutputPlanes {
+                    r: UnsafeSendPtr::new(r.as_mut_ptr()),
+                    g: UnsafeSendPtr::new(g.as_mut_ptr()),
+                    b: UnsafeSendPtr::new(b.as_mut_ptr()),
+                };
+                let mut tile = Tile::new();
+                tile.poison(poison);
+                // SAFETY: the planes cover the frame, and this is the only tile.
+                unsafe { tile.demosaic(&data, size.width, pattern, place, out) };
+                planes
+            };
+            let (high, low) = (run(1000.0), run(-1000.0));
+            for (high, low) in high.iter().zip(&low) {
+                for (index, (a, b)) in high.iter().zip(low).enumerate() {
+                    assert_eq!(
+                        a.to_bits(),
+                        b.to_bits(),
+                        "{pattern:?}, {place:?} at {index}"
+                    );
+                }
+            }
+            let written = high[0].iter().filter(|value| !value.is_nan()).count();
+            let side = |extent: usize| extent - 2 * INTERPOLATED_BORDER;
+            assert_eq!(written, side(place.size.width) * side(place.size.height));
         }
     }
 }
