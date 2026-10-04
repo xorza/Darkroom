@@ -402,7 +402,7 @@ impl<P: AsRef<Path> + Sync> RawLights<'_, P> {
             tracing::info!(removed, "rejected cosmic rays");
         }
         // The demosaic polls the cancel token between its passes.
-        cfa.demosaic(&run.context.cancel)
+        cfa.demosaic(run.context.xtrans_passes, &run.context.cancel)
             .map_err(|Cancelled| AlignStackError::Cancelled)
     }
 }

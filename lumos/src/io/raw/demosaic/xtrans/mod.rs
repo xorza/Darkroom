@@ -6,12 +6,11 @@
 //! The X-Trans pattern has ~55% green, ~22.5% red, and ~22.5% blue pixels arranged
 //! so that every row and column contains all three colors.
 //!
-//! Uses the Markesteijn 1-pass algorithm: directional interpolation in 4 directions
-//! with homogeneity-based selection for high-quality output.
+//! Uses the Markesteijn algorithm, one pass or three: directional interpolation with
+//! homogeneity-based selection.
 
 mod hex_lookup;
 pub(crate) mod markesteijn;
-mod markesteijn_steps;
 pub(crate) mod xtrans_pattern;
 
 use std::time::Instant;
@@ -19,6 +18,7 @@ use std::time::Instant;
 use common::CancelToken;
 
 use crate::io::cancelled::Cancelled;
+use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::io::raw::demosaic::xtrans::xtrans_pattern::XTransPattern;
 use crate::math::size2us::Size2us;
 
@@ -28,11 +28,12 @@ pub(crate) fn demosaic(
     data: &[f32],
     size: Size2us,
     pattern: XTransPattern,
+    passes: MarkesteijnPasses,
     cancel: &CancelToken,
 ) -> Result<[Vec<f32>; 3], Cancelled> {
     let xtrans = XTransImage::new(data, size, pattern);
     let demosaic_start = Instant::now();
-    let rgb_pixels = markesteijn::demosaic(&xtrans, cancel)?;
+    let rgb_pixels = markesteijn::demosaic(&xtrans, passes, cancel)?;
     tracing::info!(
         "X-Trans Markesteijn demosaicing {}x{} took {:.2}ms",
         size.width,

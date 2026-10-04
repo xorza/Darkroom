@@ -105,6 +105,7 @@ fn a_uniform_frame_demosaics_to_itself() {
         &[0.5; 144],
         Size2us::new(12, 12),
         test_pattern(),
+        MarkesteijnPasses::One,
         &CancelToken::never(),
     )
     .unwrap();
@@ -121,7 +122,14 @@ fn f32_demosaic_preserves_signed_native_samples() {
     let data: Vec<f32> = (0..size.pixel_count())
         .map(|index| (index % 17) as f32 * 0.25 - 2.0)
         .collect();
-    let rgb = demosaic(&data, size, pattern, &CancelToken::never()).unwrap();
+    let rgb = demosaic(
+        &data,
+        size,
+        pattern,
+        MarkesteijnPasses::One,
+        &CancelToken::never(),
+    )
+    .unwrap();
     for y in 0..size.height {
         for x in 0..size.width {
             let channel = pattern.color_at(Vec2us::new(x, y)) as usize;
@@ -148,7 +156,16 @@ fn f32_demosaic_is_equivariant_to_a_uniform_pedestal() {
         .map(|index| 0.2 + (index * 37 % 101) as f32 / 200.0)
         .collect();
     let shifted: Vec<f32> = base.iter().map(|value| value + pedestal).collect();
-    let run = |data: &[f32]| demosaic(data, size, test_pattern(), &CancelToken::never()).unwrap();
+    let run = |data: &[f32]| {
+        demosaic(
+            data,
+            size,
+            test_pattern(),
+            MarkesteijnPasses::One,
+            &CancelToken::never(),
+        )
+        .unwrap()
+    };
     let base_rgb = run(&base);
     let shifted_rgb = run(&shifted);
     for (channel, (base_channel, shifted_channel)) in base_rgb.iter().zip(&shifted_rgb).enumerate()
@@ -175,7 +192,14 @@ fn f32_demosaic_is_equivariant_to_a_uniform_pedestal() {
             }
         })
         .collect();
-    let rgb = demosaic(&blocks, contrast, test_pattern(), &CancelToken::never()).unwrap();
+    let rgb = demosaic(
+        &blocks,
+        contrast,
+        test_pattern(),
+        MarkesteijnPasses::One,
+        &CancelToken::never(),
+    )
+    .unwrap();
     assert!(
         rgb.iter()
             .flatten()

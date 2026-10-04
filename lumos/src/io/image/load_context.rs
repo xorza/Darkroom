@@ -6,6 +6,7 @@ use common::CancelToken;
 
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::options::FitsLoadOptions;
+use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::memory;
 
 /// Cancellation, resource controls, and format policy shared by file decoders.
@@ -17,6 +18,8 @@ pub struct LoadContext {
     pub memory_limit_bytes: u64,
     /// FITS-specific policy; ignored by non-FITS decoders.
     pub fits: FitsLoadOptions,
+    /// How many passes an X-Trans demosaic makes; ignored for every other mosaic.
+    pub xtrans_passes: MarkesteijnPasses,
 }
 
 impl LoadContext {
@@ -26,6 +29,7 @@ impl LoadContext {
             cancel,
             memory_limit_bytes,
             fits: FitsLoadOptions::default(),
+            xtrans_passes: MarkesteijnPasses::default(),
         }
     }
 

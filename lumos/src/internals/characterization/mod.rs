@@ -23,6 +23,7 @@ use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::fits::cfa::save_cfa_fits;
 use crate::io::image::load_context::LoadContext;
 use crate::io::raw::demosaic::bayer::CfaPattern;
+use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::progress::progress_callback::ProgressCallback;
 use crate::registration::config::Config as RegistrationConfig;
 use crate::registration::register;
@@ -191,7 +192,9 @@ fn calibrate_snapshot() {
     snapshot.f32s(light.data.pixels());
     assert_snapshot("calibration", &snapshot, "1ba31cc65bd2b343");
 
-    let demosaiced = light.demosaic(&CancelToken::never()).unwrap();
+    let demosaiced = light
+        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
+        .unwrap();
     let mut snapshot = Snapshot::default();
     image_snapshot(&mut snapshot, &demosaiced);
     assert_snapshot("demosaic", &snapshot, "0951c9f7b35a4fde");

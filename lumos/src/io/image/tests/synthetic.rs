@@ -8,6 +8,7 @@
 
 use crate::internals::prelude::*;
 use crate::io::image::pixel_flags::QualityFlags;
+use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use std::fs::File;
 use std::path::Path;
 use std::path::PathBuf;
@@ -885,8 +886,12 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     masters.calibrate(&mut equivalent).unwrap();
     assert_eq!(loaded.data, equivalent.data);
 
-    let demosaiced = loaded.demosaic(&CancelToken::never()).unwrap();
-    let equivalent_demosaiced = equivalent.demosaic(&CancelToken::never()).unwrap();
+    let demosaiced = loaded
+        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
+        .unwrap();
+    let equivalent_demosaiced = equivalent
+        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
+        .unwrap();
     for channel in 0..3 {
         assert_eq!(
             demosaiced.channel(channel),
@@ -966,7 +971,7 @@ fn demosaic_uniform_bayer_recovers_colour() {
         }
     }
     let image = make_cfa(size, mosaic, cfa)
-        .demosaic(&CancelToken::never())
+        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
         .unwrap();
 
     // A uniform colour must demosaic back to that colour. RCD is gradient-based, so a perfectly
@@ -1014,7 +1019,7 @@ fn calibrated_demosaic_preserves_out_of_range_samples() {
     ] {
         for expected in [-0.25f32, 1.25] {
             let image = make_cfa(size, vec![expected; size.pixel_count()], cfa)
-                .demosaic(&CancelToken::never())
+                .demosaic(MarkesteijnPasses::One, &CancelToken::never())
                 .unwrap();
 
             for channel in 0..3 {

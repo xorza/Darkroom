@@ -311,7 +311,7 @@ impl UnpackedRaw {
             let path = self.path.clone();
             let mut image = self
                 .into_cfa_image()?
-                .demosaic(&context.cancel)
+                .demosaic(context.xtrans_passes, &context.cancel)
                 .map_err(|Cancelled| ImageError::cancelled(&path))?;
             // The demosaic's own reach leaves the range, ~1.06 out of RCD and ~1.16 out of
             // Markesteijn at a step edge, and the frame arrives with its noise below black: the

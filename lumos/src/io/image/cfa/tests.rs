@@ -24,7 +24,9 @@ fn a_null_is_repaired_from_its_same_colour_neighbours_before_demosaic() {
     let mut cfa = make_cfa(size, pixels, CfaType::Mono);
     cfa.flags = PixelFlags::of_non_finite(size, &[&nulls]);
 
-    let demosaiced = cfa.demosaic(&CancelToken::never()).unwrap();
+    let demosaiced = cfa
+        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
+        .unwrap();
     assert_eq!(demosaiced.channel(0).pixels()[5], 0.5);
     // The mask stays at its own extent: this pixel was reconstructed, not measured, and the combine
     // still has to gate on that.
@@ -423,11 +425,17 @@ fn each_pattern_names_its_demosaic() {
         ),
         (
             CfaType::XTrans(XTRANS_PATTERN),
-            DemosaicProvenance::LumosMarkesteijn,
+            DemosaicProvenance::LumosMarkesteijn {
+                passes: MarkesteijnPasses::Three,
+            },
             ColorProvenance::SensorRgb,
         ),
     ] {
-        assert_eq!(cfa_type.demosaic_provenance(), demosaic, "{cfa_type:?}");
+        assert_eq!(
+            cfa_type.demosaic_provenance(MarkesteijnPasses::Three),
+            demosaic,
+            "{cfa_type:?}"
+        );
         assert_eq!(cfa_type.demosaiced_color(), color, "{cfa_type:?}");
     }
 }
@@ -475,13 +483,15 @@ fn every_pattern_names_the_colour_at_each_position() {
 /// No input photosite moves an output pixel farther away than `CfaType::demosaic_support`. An
 /// impulse of 20 on random texture, at several phases of each pattern, changes no output pixel past
 /// the support by more than 2⁻¹⁶ of the impulse. A wider survey, 40 textures at 6 phases on 128²
-/// frames, reached exactly 10 for both demosaics; this sample reaches 9 for RCD.
+/// frames, reached exactly 10 for RCD and 11 and 16 for Markesteijn's one and three passes, by any
+/// change at all for Markesteijn; this sample reaches 9, 11 and 14.
 #[test]
 fn the_demosaic_support_bounds_every_impulse_response() {
     const SIDE: usize = 64;
-    for cfa_type in [
-        CfaType::Bayer(CfaPattern::Rggb),
-        CfaType::XTrans(XTRANS_PATTERN),
+    for (cfa_type, passes) in [
+        (CfaType::Bayer(CfaPattern::Rggb), MarkesteijnPasses::One),
+        (CfaType::XTrans(XTRANS_PATTERN), MarkesteijnPasses::One),
+        (CfaType::XTrans(XTRANS_PATTERN), MarkesteijnPasses::Three),
     ] {
         let size = Size2us::new(SIDE, SIDE);
         let mut reach = 0usize;
@@ -491,14 +501,14 @@ fn the_demosaic_support_bounds_every_impulse_response() {
                 .map(|_| 0.2 + 0.3 * rng.next_f32())
                 .collect();
             let reference = make_cfa(size, base.clone(), cfa_type)
-                .demosaic(&CancelToken::never())
+                .demosaic(passes, &CancelToken::never())
                 .unwrap();
             for (cx, cy) in [(30usize, 30usize), (31, 30), (31, 31), (33, 32)] {
                 let mut pixels = base.clone();
                 pixels[cy * SIDE + cx] = 20.0;
                 let threshold = (20.0 - base[cy * SIDE + cx]) / 65_536.0;
                 let hit = make_cfa(size, pixels, cfa_type)
-                    .demosaic(&CancelToken::never())
+                    .demosaic(passes, &CancelToken::never())
                     .unwrap();
                 for channel in 0..3 {
                     for y in 0..SIDE {
@@ -515,8 +525,8 @@ fn the_demosaic_support_bounds_every_impulse_response() {
             }
         }
         assert!(
-            reach <= cfa_type.demosaic_support(),
-            "{cfa_type:?}: {reach}"
+            reach <= cfa_type.demosaic_support(passes),
+            "{cfa_type:?}, {passes:?}: {reach}"
         );
     }
 }
@@ -536,7 +546,11 @@ fn demosaic_spreads_flags_by_its_support() {
         index if index == 40 * 48 + 40 => QualityFlags::NO_DATA,
         _ => QualityFlags::default(),
     });
-    let flags = cfa.demosaic(&CancelToken::never()).unwrap().flags.unwrap();
+    let flags = cfa
+        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
+        .unwrap()
+        .flags
+        .unwrap();
     assert_eq!(flags.count(QualityFlags::SATURATED), 21 * 21);
     assert_eq!(flags.count(QualityFlags::NO_DATA), 1);
     assert!(
@@ -583,7 +597,9 @@ fn a_balanced_demosaic_keeps_neutral_detail_neutral() {
             let false_colour = |balance: Option<[f32; 4]>| {
                 let mut cfa = make_cfa(size, samples.clone(), cfa_type);
                 cfa.metadata.camera_white_balance = balance;
-                let image = cfa.demosaic(&CancelToken::never()).unwrap();
+                let image = cfa
+                    .demosaic(MarkesteijnPasses::One, &CancelToken::never())
+                    .unwrap();
                 let (mut sum, mut count) = (0.0f64, 0);
                 for y in 12..36 {
                     for x in 12..36 {

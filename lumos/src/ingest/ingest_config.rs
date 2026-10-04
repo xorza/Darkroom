@@ -5,6 +5,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 use crate::io::image::fits::options::FitsLoadOptions;
+use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 
 /// How a run reads its frames and where it parks them: the decode policy, the memory it plans
 /// against, and the frame cache every combine reads its frames through.
@@ -29,6 +30,8 @@ pub struct IngestConfig {
     pub memory_override: Option<u64>,
     /// How FITS frames are read; ignored for every other format.
     pub fits: FitsLoadOptions,
+    /// How many passes an X-Trans demosaic makes; ignored for every other mosaic.
+    pub xtrans_passes: MarkesteijnPasses,
 }
 
 impl Default for IngestConfig {
@@ -38,6 +41,7 @@ impl Default for IngestConfig {
             keep_cache: false,
             memory_override: None,
             fits: FitsLoadOptions::default(),
+            xtrans_passes: MarkesteijnPasses::default(),
         }
     }
 }

@@ -1,5 +1,6 @@
 use common::TempDir;
 
+use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use common::CancelToken;
 
 use crate::internals::cfa::XTRANS_PATTERN;
@@ -166,7 +167,7 @@ fn the_preview_is_the_clamped_science_frame_and_ignores_the_margins() {
     let science = bayer_dump(&samples(0), SIDE, 0, 1004)
         .into_cfa_image()
         .unwrap()
-        .demosaic(&CancelToken::never())
+        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
         .unwrap();
     assert_eq!(
         dark.dimensions(),

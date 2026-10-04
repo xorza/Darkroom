@@ -7,9 +7,9 @@ use std::sync::Mutex;
 /// The `for_each_init` init for scratch that has to outlive the parallel call.
 ///
 /// Rayon runs an init closure once per worker and drops what it returns when the call ends,
-/// which is the right shape when the call *is* the operation — a demosaic pass allocates its row
-/// buffers straight into the init (`io/raw/demosaic/xtrans/markesteijn_steps.rs`) because nothing
-/// in the RAW path outlives one frame. Reach for a pool only when the same loop runs many times
+/// which is the right shape when the call *is* the operation — the X-Trans demosaic allocates its
+/// tile buffers straight into the init (`io/raw/demosaic/xtrans/markesteijn/mod.rs`) because
+/// nothing in the RAW path outlives one frame. Reach for a pool only when the same loop runs many times
 /// over: once per chunk per channel in the combine, once per tile row in the background mesh.
 /// Then the init becomes `|| pool.acquire()` and the lease hands its value back on drop, so the
 /// next call finds it warm. Both are the same mechanism; the pool is just a smarter init.

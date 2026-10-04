@@ -27,6 +27,7 @@ impl IngestRun {
                 cancel,
                 memory_limit_bytes: memory.decode_ceiling(),
                 fits: config.fits.clone(),
+                xtrans_passes: config.xtrans_passes,
             },
         }
     }

@@ -1,248 +1,170 @@
-//! Markesteijn 1-pass demosaicing for X-Trans sensors.
+//! Markesteijn demosaicing for X-Trans sensors, one pass or three.
 //!
-//! Implements Frank Markesteijn's directional interpolation algorithm with
-//! homogeneity-based direction selection. Produces significantly better quality
-//! than bilinear interpolation, especially for star profiles in astrophotography.
+//! Frank Markesteijn's directional interpolation with homogeneity-based direction selection, as
+//! dcraw's `xtrans_interpolate` and librtprocess's `markesteijn_demosaic` implement it, in tiles:
+//! 1. green in four directions from each non-green pixel's hexagon, held to its bounds;
+//! 2. red and blue by Markesteijn's three geometry-specific stages; three passes add four more
+//!    directions, whose green is computed again from the interpolated values of nearer pixels.
+//!    The stage for 2×2 blocks of green fills every direction: dcraw's fills two of one pass's
+//!    four and leaves the others' red and blue at zero (LibRaw issue 441);
+//! 3. each direction's ITU-R BT.2020 YPbPr and its second differences along the direction;
+//! 4. per direction, how many 3×3 neighbours vary least, summed over 5×5;
+//! 5. the mean of the directions within an eighth of the most homogeneous.
 //!
-//! The algorithm:
-//! 1. Interpolates green in 4 directions using weighted hexagonal neighbors
-//! 2. Reconstructs red and blue with Markesteijn's three geometry-specific stages
-//! 3. Computes perceptual derivatives from the directional RGB candidates
-//! 4. Builds homogeneity maps to identify the best direction(s) per pixel
-//! 5. Blends the best directions into the final RGB output
+//! Every pass uses YPbPr. librtprocess offers CIELab for three passes, through the camera's colour
+//! matrix, which a calibrated frame does not carry; the derivatives only choose a direction, and
+//! librtprocess calls the two nearly indistinguishable.
 //!
-//! ## Memory layout
-//!
-//! All working memory is preallocated in a single contiguous arena (`DemosaicArena`)
-//! so the peak is explicit and visible. Buffers with non-overlapping lifetimes share
-//! the same memory region:
-//!
-//! ```text
-//! [ A: green_dir (4P) | E: red_blue_dir (8P) | B: drv (4P) | C: gmin/homo (P) | D: gmax/threshold (P) ]
-//! Total: 18P f32 arena, where P = width × height (+ 3P for the planar output buffers)
-//! ```
-//!
-//! Region A holds `green_dir` (4 directions), written in Step 2, read through Step 6.
-//! Region E holds directional `[red, blue]` pairs, written in Step 3 and read through Step 6.
-//! Region B is used as `drv` in Steps 4–5, then as four `u32` scores per pixel in Step 6.
-//! Region C is used as `gmin` in Steps 1–2, then reinterpreted as `homo` (u8) in Steps 5–6.
-//! Region D is used as `gmax` in Steps 1–2, `threshold` in Step 5, then a `u32` SAT in Step 6.
+//! Each stage reads only what the stage before computed, which lies further from a tile's edge
+//! than its own input, so a tile computes its pixels in full only a margin inside its edges.
+//! librtprocess's tiles of [`TILE`] write all but 8 pixels at each side, nearer than that, so its
+//! pixels beside a seam depend on where the tiles lie. Here each tile writes only the part its
+//! passes compute in full, and the tiles overlap by twice the margin. The pixels nearest the
+//! frame's edge, which no tile computes in full, come from their neighbours. The interior is librtprocess's to the bit, run as one tile over the frame, which a test holds
+//! it to.
+
+mod border;
+mod hex_table;
+mod tile;
 
 use common::CancelToken;
+use rayon::prelude::*;
 
+use crate::concurrency::unsafe_send_ptr::UnsafeSendPtr;
 use crate::io::cancelled::Cancelled;
 use crate::io::raw::demosaic::DemosaicMemory;
 use crate::io::raw::demosaic::xtrans::XTransImage;
-use crate::io::raw::demosaic::xtrans::hex_lookup::HexLookup;
-use crate::io::raw::demosaic::xtrans::markesteijn_steps;
-use crate::io::raw::demosaic::xtrans::markesteijn_steps::PlanarRgbMut;
+use crate::io::raw::demosaic::xtrans::markesteijn::hex_table::HexTable;
+use crate::io::raw::demosaic::xtrans::markesteijn::tile::{Tile, TilePlace};
 use crate::math::size2us::Size2us;
 
-/// Number of interpolation directions (4 for 1-pass: H, V, D1, D2).
-pub(crate) const NDIR: usize = 4;
-/// Words per pixel of each arena region, in arena order: A, E, B, C, D.
-const REGION_WORDS: [usize; 5] = [NDIR, 2 * NDIR, NDIR, 1, 1];
-const ARENA_WORDS_PER_PIXEL: usize =
-    REGION_WORDS[0] + REGION_WORDS[1] + REGION_WORDS[2] + REGION_WORDS[3] + REGION_WORDS[4];
+/// The side of a tile: librtprocess's 114.
+const TILE: usize = 114;
 
-pub(crate) const fn demosaic_memory(size: Size2us) -> DemosaicMemory {
-    let pixels = size.width.saturating_mul(size.height);
-    let output_words = pixels.saturating_mul(3);
-    let peak_words = pixels.saturating_mul(1 + ARENA_WORDS_PER_PIXEL + 3);
+/// How many passes the X-Trans demosaic makes: four directions, or eight with the green computed
+/// again from nearer pixels — LibRaw's default and RawTherapee's best, at about twice the time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MarkesteijnPasses {
+    #[default]
+    One,
+    Three,
+}
+
+impl MarkesteijnPasses {
+    const fn count(self) -> usize {
+        match self {
+            Self::One => 1,
+            Self::Three => 3,
+        }
+    }
+
+    const fn directions(self) -> usize {
+        match self {
+            Self::One => 4,
+            Self::Three => 8,
+        }
+    }
+
+    /// How far inside its edges a tile computes its pixels in full: the least at which none
+    /// reads a colour no stage computed, which a test finds at every phase of the pattern. Each
+    /// further pass computes green again from colours 2 to 4 pixels away.
+    const fn margin(self) -> usize {
+        match self {
+            Self::One => 9,
+            Self::Three => 15,
+        }
+    }
+
+    /// The pixels nearest the frame's edge that come from their neighbours: the first tile starts
+    /// 3 pixels in, for the reach of the green interpolation, and writes from its margin.
+    const fn border(self) -> usize {
+        3 + self.margin()
+    }
+}
+
+/// Where each tile along an axis of `extent` pixels starts: from 3, every `step`, until one reaches
+/// 3 pixels from the far edge.
+fn tile_starts(extent: usize, step: usize) -> impl Iterator<Item = usize> {
+    let count = extent.saturating_sub(6 + TILE).div_ceil(step) + 1;
+    (0..count).map(move |index| 3 + index * step)
+}
+
+/// The output planes, written by every tile at the pixels it alone owns.
+#[derive(Debug, Clone, Copy)]
+struct OutputPlanes {
+    r: UnsafeSendPtr<f32>,
+    g: UnsafeSendPtr<f32>,
+    b: UnsafeSendPtr<f32>,
+}
+
+/// The output's three planes, and the peak: the caller's input, the output, and the workers' tile
+/// buffers. The workers are the pool's, which demosaics running at once share, so the charge to
+/// each is an upper bound.
+pub(crate) fn demosaic_memory(size: Size2us) -> DemosaicMemory {
+    let plane_bytes = size
+        .width
+        .saturating_mul(size.height)
+        .saturating_mul(size_of::<f32>());
+    let output_bytes = plane_bytes.saturating_mul(3);
     DemosaicMemory {
-        output_bytes: output_words.saturating_mul(size_of::<f32>()),
-        peak_bytes: peak_words.saturating_mul(size_of::<f32>()),
+        output_bytes,
+        peak_bytes: plane_bytes
+            .saturating_add(output_bytes)
+            .saturating_add(workspace_bytes()),
     }
 }
 
-/// Preallocated arena for all Markesteijn demosaic working memory.
-///
-/// Single contiguous allocation with regions that are reused across steps.
-/// See module-level docs for the full layout and lifetime diagram.
-#[derive(Debug)]
-struct DemosaicArena {
-    storage: Vec<f32>,
+/// The tile buffers of every worker of the pool, at most one each: a worker makes its tile for a
+/// run of tiles and drops it before it takes other work. Charged at eight directions, the most.
+pub(crate) fn workspace_bytes() -> usize {
+    rayon::current_num_threads().saturating_mul(Tile::bytes(8))
 }
 
-/// The five arena regions the final blend reads and scribbles in, handed over as a
-/// set because the arena aliases them out of one allocation and the blend is the
-/// only caller that wants them all.
-#[derive(Debug)]
-pub(super) struct FinalBlendBuffers<'a> {
-    pub(super) green_dir: &'a [f32],
-    pub(super) colors: &'a [[f32; 2]],
-    pub(super) scores: &'a mut [[u32; NDIR]],
-    pub(super) homo: &'a [u8],
-    pub(super) sat: &'a mut [u32],
-}
-
-impl DemosaicArena {
-    fn new(size: Size2us) -> Self {
-        let total = ARENA_WORDS_PER_PIXEL * size.pixel_count();
-
-        let storage = vec![0.0f32; total];
-
-        tracing::debug!(
-            "Demosaic arena: {:.1} MB ({} × {} × {} × 4 bytes)",
-            (total * 4) as f64 / (1024.0 * 1024.0),
-            size.width,
-            size.height,
-            ARENA_WORDS_PER_PIXEL,
-        );
-
-        Self { storage }
-    }
-
-    /// The five regions, split once at their fixed offsets.
-    fn regions(&mut self) -> ArenaRegions<'_> {
-        debug_assert_eq!(self.storage.len() % ARENA_WORDS_PER_PIXEL, 0);
-        let pixels = self.storage.len() / ARENA_WORDS_PER_PIXEL;
-        let (a, rest) = self.storage.split_at_mut(REGION_WORDS[0] * pixels);
-        let (e, rest) = rest.split_at_mut(REGION_WORDS[1] * pixels);
-        let (b, rest) = rest.split_at_mut(REGION_WORDS[2] * pixels);
-        let (c, d) = rest.split_at_mut(REGION_WORDS[3] * pixels);
-        ArenaRegions { a, e, b, c, d }
-    }
-}
-
-/// The arena's regions, named as in the module docs. Each step takes the ones it reads and
-/// writes, viewed as the type it keeps there at that step.
-#[derive(Debug)]
-struct ArenaRegions<'a> {
-    a: &'a mut [f32],
-    e: &'a mut [f32],
-    b: &'a mut [f32],
-    c: &'a mut [f32],
-    d: &'a mut [f32],
-}
-
-/// Demosaic an X-Trans image using Markesteijn 1-pass algorithm.
+/// Demosaic an X-Trans frame with `passes` passes.
 ///
 /// Returns unclipped planar channels `[R, G, B]`, each `width * height`.
 pub(crate) fn demosaic(
     xtrans: &XTransImage<'_>,
+    passes: MarkesteijnPasses,
     cancel: &CancelToken,
 ) -> Result<[Vec<f32>; 3], Cancelled> {
-    use std::time::Instant;
-
-    let width = xtrans.size.width;
-    let height = xtrans.size.height;
+    let Size2us { width, height } = xtrans.size;
     let pixels = width * height;
-
-    // Build lookup tables
-    let hex = HexLookup::new(&xtrans.pattern);
-    // Allocate all working memory in one shot
-    let mut arena = DemosaicArena::new(xtrans.size);
-
-    // Step 1: Compute green min/max bounds for non-green pixels
-    // Writes: Region C (gmin), Region D (gmax)
-    let t = Instant::now();
-    {
-        let regions = arena.regions();
-        markesteijn_steps::compute_green_minmax(xtrans, &hex, regions.c, regions.d);
-    }
-    tracing::debug!(
-        "  Step 1 (green min/max): {:.1}ms",
-        t.elapsed().as_secs_f64() * 1000.0
-    );
-
-    // Step 2: Interpolate green in 4 directions
-    // Reads: Region C (gmin), Region D (gmax). Writes: Region A (green_dir).
-    if cancel.is_cancelled() {
-        return Err(Cancelled);
-    }
-    let t = Instant::now();
-    {
-        let regions = arena.regions();
-        markesteijn_steps::interpolate_green(xtrans, &hex, regions.c, regions.d, regions.a);
-    }
-    tracing::debug!(
-        "  Step 2 (green interp): {:.1}ms",
-        t.elapsed().as_secs_f64() * 1000.0
-    );
-
-    // Step 3: Reconstruct red and blue using the three canonical geometry stages.
-    // Reads: Region A (green_dir). Writes: Region E (red_blue_dir).
-    if cancel.is_cancelled() {
-        return Err(Cancelled);
-    }
-    let t = Instant::now();
-    {
-        let regions = arena.regions();
-        let colors: &mut [[f32; 2]] = bytemuck::cast_slice_mut(regions.e);
-        markesteijn_steps::reconstruct_colors(xtrans, &hex, regions.a, colors);
-    }
-    tracing::debug!(
-        "  Step 3 (red/blue reconstruction): {:.1}ms",
-        t.elapsed().as_secs_f64() * 1000.0
-    );
-
-    // Step 4: Compute YPbPr derivatives.
-    // Reads: Regions A and E. Writes: Region B.
-    if cancel.is_cancelled() {
-        return Err(Cancelled);
-    }
-    let t = Instant::now();
-    {
-        let regions = arena.regions();
-        let colors: &[[f32; 2]] = bytemuck::cast_slice(regions.e);
-        markesteijn_steps::compute_derivatives(xtrans, regions.a, colors, regions.b);
-    }
-    tracing::debug!(
-        "  Step 4 (derivatives): {:.1}ms",
-        t.elapsed().as_secs_f64() * 1000.0
-    );
-
-    // Step 5: Build homogeneity maps from derivatives.
-    // Reads: Region B. Writes: Region C (homo via u8 reinterpret), Region D (threshold).
-    if cancel.is_cancelled() {
-        return Err(Cancelled);
-    }
-    let t = Instant::now();
-    {
-        let regions = arena.regions();
-        // gmin is dead after Step 2, so its words now hold four `u8` homogeneity counts each.
-        let homo: &mut [u8] = bytemuck::cast_slice_mut(regions.c);
-        markesteijn_steps::compute_homogeneity(regions.b, xtrans.size, homo, regions.d);
-    }
-    tracing::debug!(
-        "  Step 5 (homogeneity): {:.1}ms",
-        t.elapsed().as_secs_f64() * 1000.0
-    );
-
-    // Step 6: Final blend.
-    // Reads: Regions A, E, and C. Reuses B for scores and D for the SAT, and writes planar
-    // [R, G, B] directly into the output buffers.
-    if cancel.is_cancelled() {
-        return Err(Cancelled);
-    }
     let mut r = vec![0.0f32; pixels];
     let mut g = vec![0.0f32; pixels];
     let mut b = vec![0.0f32; pixels];
-    let t = Instant::now();
-    {
-        let regions = arena.regions();
-        markesteijn_steps::blend_final(
-            xtrans,
-            FinalBlendBuffers {
-                green_dir: regions.a,
-                colors: bytemuck::cast_slice(regions.e),
-                scores: bytemuck::cast_slice_mut(regions.b),
-                homo: bytemuck::cast_slice(regions.c),
-                sat: bytemuck::cast_slice_mut(regions.d),
-            },
-            PlanarRgbMut {
-                r: &mut r,
-                g: &mut g,
-                b: &mut b,
-            },
-        );
-    }
-    tracing::debug!(
-        "  Step 6 (blend): {:.1}ms",
-        t.elapsed().as_secs_f64() * 1000.0
-    );
-
+    let hex = HexTable::new(xtrans.pattern, width);
+    let border = passes.border();
+    let step = TILE - 2 * passes.margin();
+    let places: Vec<TilePlace> = if width > 2 * border && height > 2 * border {
+        tile_starts(height, step)
+            .flat_map(|top| tile_starts(width, step).map(move |left| TilePlace { top, left }))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let out = OutputPlanes {
+        r: UnsafeSendPtr::new(r.as_mut_ptr()),
+        g: UnsafeSendPtr::new(g.as_mut_ptr()),
+        b: UnsafeSendPtr::new(b.as_mut_ptr()),
+    };
+    places.par_iter().try_for_each_init(
+        || Tile::new(passes.directions()),
+        |tile, &place| {
+            if cancel.is_cancelled() {
+                return Err(Cancelled);
+            }
+            // SAFETY: the planes cover the frame, and the tiles at `step` own disjoint parts.
+            unsafe { tile.demosaic(xtrans, &hex, place, passes.count(), passes.margin(), out) };
+            Ok(())
+        },
+    )?;
+    let border = if places.is_empty() {
+        width.max(height)
+    } else {
+        border
+    };
+    border::fill(xtrans, [&mut r, &mut g, &mut b], border);
     Ok([r, g, b])
 }
 
