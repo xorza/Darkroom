@@ -844,7 +844,7 @@ fn single_threshold_level() {
     assert_eq!(total_area, data.area, "Area should be conserved");
 }
 
-/// Review item 9.5: a region above a level is an object only with `min_area` pixels. A star of
+/// A region above a level is an object only with `min_area` pixels. A star of
 /// σ 2 and amplitude 1 at (15, 15) with a spike of 0.3 at (19, 15) on its wing: the spike pixel
 /// reads 0.3 + e^(−2) = 0.435 against its neighbours' 0.325 and below, so at the 28th level of the
 /// ladder from the floor of 0.001 to 1, 0.001 · 1000^(27/32) = 0.339, it is a region of its own
@@ -892,7 +892,7 @@ fn a_region_under_min_area_is_no_object() {
     assert_eq!(split(2), [(15, 15)]);
 }
 
-/// Review item 15.8: the scratch follows the component's pixels, not its box. A diagonal line of
+/// The scratch follows the component's pixels, not its box. A diagonal line of
 /// 1000 pixels has a box of 10⁶; after both deblenders the per-pixel buffers hold 1000 entries and
 /// the row index 1001, where a grid over the box held 10⁶ cells each.
 #[test]

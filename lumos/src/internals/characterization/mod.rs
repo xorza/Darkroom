@@ -14,8 +14,9 @@ use crate::calibration_masters::{CalibrationMasters, DEFAULT_SIGMA_THRESHOLD};
 use crate::combine::config::StackConfig;
 use crate::combine::stack::{StackFrame, stack_images};
 use crate::frame_store::cache_key::DECODE_PINS;
+use crate::frame_store::frame_stats::FrameStats;
 use crate::image_ops::stretching::{ColorMode, Stretch, StretchMethod};
-use crate::internals::cfa::make_cfa;
+use crate::internals::cfa::{XTRANS_PATTERN, make_cfa};
 use crate::internals::characterization::snapshot::Snapshot;
 use crate::internals::prelude::*;
 use crate::internals::synthetic::fixtures::star_field;
@@ -192,12 +193,58 @@ fn calibrate_snapshot() {
     snapshot.f32s(light.data.pixels());
     assert_snapshot("calibration", &snapshot, "1ba31cc65bd2b343");
 
+    let mut snapshot = Snapshot::default();
+    let xtrans = make_cfa(
+        size,
+        light.data.pixels().to_vec(),
+        CfaType::XTrans(XTRANS_PATTERN),
+    );
     let demosaiced = light
         .demosaic(MarkesteijnPasses::One, &CancelToken::never())
         .unwrap();
-    let mut snapshot = Snapshot::default();
     image_snapshot(&mut snapshot, &demosaiced);
-    assert_snapshot("demosaic", &snapshot, "0951c9f7b35a4fde");
+    for passes in [MarkesteijnPasses::One, MarkesteijnPasses::Three] {
+        let demosaiced = xtrans
+            .clone()
+            .demosaic(passes, &CancelToken::never())
+            .unwrap();
+        image_snapshot(&mut snapshot, &demosaiced);
+    }
+    assert_decode("demosaic", &snapshot, DECODE_PINS.demosaic);
+}
+
+/// The statistics a kept frame is committed with: the star field as a mono frame, as an RGGB
+/// mosaic, and as that mosaic demosaiced, whose noise is the mosaic's.
+#[test]
+fn frame_stats_snapshot() {
+    if !pinned_host() {
+        return;
+    }
+    let mono = field();
+    let mosaic = make_cfa(
+        Size2us::new(192, 192),
+        mono.channel(0).pixels().to_vec(),
+        CfaType::Bayer(CfaPattern::Rggb),
+    );
+    let demosaiced = mosaic
+        .clone()
+        .demosaic(MarkesteijnPasses::One, &CancelToken::never())
+        .unwrap();
+    let mut snapshot = Snapshot::default();
+    for stats in [
+        FrameStats::measure(&mono),
+        FrameStats::measure(&mosaic),
+        FrameStats::measure(&demosaiced),
+    ] {
+        for channel in &stats.channels {
+            snapshot.f32s(&[channel.median, channel.mad]);
+        }
+        snapshot
+            .f32s(&stats.noise)
+            .f32s(&stats.sky)
+            .f32s(&[stats.quantization_sigma.unwrap_or(-1.0)]);
+    }
+    assert_decode("frame statistics", &snapshot, DECODE_PINS.frame_stats);
 }
 
 #[test]

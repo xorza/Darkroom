@@ -257,7 +257,7 @@ mod tests {
         }
     }
 
-    /// Review item 4.4: a dark from a Siril-converted FITS keeps the black level, 2048 ADU, in a
+    /// A dark from a Siril-converted FITS keeps the black level, 2048 ADU, in a
     /// 16-bit domain, and a RAW light has it removed over a span of 15360. The map is gain
     /// 65535/15360 and offset −2048/15360, so a dark sample holding only the pedestal,
     /// 2048/65535, maps to exactly zero in the light's domain instead of subtracting the black a

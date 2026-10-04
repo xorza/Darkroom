@@ -255,7 +255,7 @@ mod tests {
 
     /// The nearest eight: mono's are the 8-connected ring; a Bayer red's are the stride-2 ring at
     /// distances 2 and 2√2; a Bayer green's are its four diagonal greens at √2 and the four at 2,
-    /// where the stride-2 ring alone left the nearest four out (review 18.3).
+    /// not the stride-2 ring, which leaves the nearest four out.
     #[test]
     fn the_nearest_eight_are_the_nearest_rings() {
         let ring = |step: i32, diagonal: i32| {
@@ -279,7 +279,7 @@ mod tests {
 
     /// Every X-Trans phase takes whole shells of equal distance: no same-colour neighbour outside the
     /// selection is as near as the farthest one in it, so no direction at a shared distance is
-    /// favoured (review 18.4). And the selection holds at least the 24 asked for.
+    /// favoured. And the selection holds at least the 24 asked for.
     #[test]
     fn x_trans_takes_whole_shells() {
         let lattice = CfaLattice::new(&CfaType::XTrans(XTRANS_PATTERN));

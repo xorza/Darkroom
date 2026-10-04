@@ -10,10 +10,13 @@ use crate::frame_store::run_scratch::RunScratch;
 use crate::frame_store::stored_frame::StoredFrame;
 use crate::frame_store::stored_image::StoredImage;
 use crate::frame_store::stored_plane::StoredPlane;
+use crate::io::image::fits::options::{FitsHduSelector, FitsLoadOptions};
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
+use crate::io::image::load_context::LoadContext;
 use crate::io::image::pixel_flags::PixelFlags;
 use crate::io::image::pixel_flags::QualityFlags;
+use crate::io::raw::demosaic::xtrans::markesteijn::MarkesteijnPasses;
 use crate::mount_table::MountTable;
 use common::{FileIdentity, TempDir};
 use imaginarium::Buffer2;
@@ -261,18 +264,17 @@ fn an_unwarped_frames_nulls_become_the_pair_the_combine_gates_on() {
 /// A cached frame comes back whole or not at all. Its quality planes return with its channels —
 /// reusing the channels without them would put the fill under its nulls into the stack as data on
 /// every run after the first — and a frame committed with them is rebuilt when one or both are
-/// gone, rather than read as a frame with no nulls. Another key finds nothing.
+/// gone, rather than read as a frame with no nulls. Another key finds nothing: another decode
+/// version, decoder, X-Trans pass count or FITS HDU.
 #[test]
 fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
     let directory = TempDir::new("frame_store_cached_quality");
     let dimensions = ImageDimensions::new((2, 2), 1);
-    let key = CacheKey::new(
-        FileIdentity {
-            len: 16,
-            mtime_ns: 1,
-        },
-        DecoderKind::Linear,
-    );
+    let identity = FileIdentity {
+        len: 16,
+        mtime_ns: 1,
+    };
+    let key = CacheKey::new(identity, DecoderKind::Linear, &LoadContext::default());
     let mut image = LinearImage::from_pixels(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
     image.flags = PixelFlags::of_non_finite(dimensions.size(), &[&[1.0, 2.0, f32::NAN, 4.0]]);
     let cache = |name, image: &LinearImage| {
@@ -305,7 +307,23 @@ fn a_cached_frame_is_reused_only_whole_and_under_its_key() {
         decoder: DecoderKind::Cfa,
         ..key
     };
-    for other in [other_version, other_decoder] {
+    let three_passes = LoadContext {
+        xtrans_passes: MarkesteijnPasses::Three,
+        ..LoadContext::default()
+    };
+    let second_hdu = LoadContext {
+        fits: FitsLoadOptions {
+            hdu: FitsHduSelector::Index(1),
+            ..FitsLoadOptions::default()
+        },
+        ..LoadContext::default()
+    };
+    let other_options = [three_passes, second_hdu]
+        .map(|context| CacheKey::new(identity, DecoderKind::Linear, &context));
+    for other in [other_version, other_decoder]
+        .into_iter()
+        .chain(other_options)
+    {
         assert!(
             StoredFrame::reuse(&spill, other, dimensions)
                 .unwrap()

@@ -91,7 +91,7 @@ fn skewed_tile_sky_sits_below_median() {
 /// block at 5.0, three quarters of it left, so it reads 0.4 exactly. Tile (0,0) keeps two
 /// unmasked rows of 32 at 0.2 under 30 masked rows at 0.9 — read whole it would answer 0.9 — which
 /// is under half of it: a bad tile, it takes the median of its good ring, 0.4, 0.6 and 0.8, so
-/// 0.6 (review 18.5). A 2 × 2 grid is not median-filtered.
+/// 0.6. A 2 × 2 grid is not median-filtered.
 #[test]
 fn masked_pixels_never_reach_the_statistics() {
     let mut pixels = Buffer2::new(

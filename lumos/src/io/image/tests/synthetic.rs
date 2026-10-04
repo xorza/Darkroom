@@ -252,7 +252,7 @@ fn a_float_fits_scale_can_be_declared_when_the_header_does_not() {
 
 /// σ describes one ADC step, so it is only comparable to the samples once it is divided by the same
 /// span they were. The step is read off the stored integers: 12-bit data written left-justified
-/// into BITPIX 16 steps by 16 stored units (review item 5.4), and the container's step of one
+/// into BITPIX 16 steps by 16 stored units, and the container's step of one
 /// would understate σ 16×.
 #[test]
 fn fits_quantization_sigma_follows_the_adc_step_into_the_normalized_domain() {
@@ -292,7 +292,7 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
 
     // No DATAMAX: taken as already normalized, which these samples are not. The decode scans them,
     // and a maximum of 65535 past Siril's threshold of 10 is refused rather than loaded with its
-    // saturation level at 0.95 ADU (review item 5.3). The caller can still say they are normalized.
+    // saturation level at 0.95 ADU. The caller can still say they are normalized.
     assert!(matches!(
         write_and_load("float32_no_datamax", &image),
         Err(ImageError::FitsUnsupported { reason, .. }) if reason.contains("nothing declares their scale")

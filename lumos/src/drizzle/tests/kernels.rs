@@ -562,11 +562,11 @@ fn rgb_channels_drizzle_independently() {
     }
 }
 
-/// A tap where the Lanczos window ends deposits nothing and reaches nothing (review 7.4). Shifted
+/// A tap where the Lanczos window ends deposits nothing and reaches nothing. Shifted
 /// half a pixel along x, a lone pixel at (6, 6) lands at (6.5, 6) at scale 1. Its neighbourhood is
 /// the 7 × 7 about the rounded centre (7, 6): columns 4 to 10 at distances −2.5 to 3.5, rows 3 to 9
 /// at distances −3 to 3. `L` is 0 from distance 3 on, so column 10 and rows 3 and 9 receive exactly
-/// zero weight from it, where every tap used to mark its cell. A first, unshifted frame covers
+/// zero weight from it and are not marked covered by it. A first, unshifted frame covers
 /// every cell, so the gate keeps those cells, and their coverage counts that frame alone: 1/2.
 #[test]
 fn a_zero_lanczos_tap_marks_no_coverage() {

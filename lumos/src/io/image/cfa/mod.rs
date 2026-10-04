@@ -286,14 +286,16 @@ impl CfaImage {
     /// The demosaic reads a neighbourhood, so whatever sits under a null reaches output pixels the
     /// mask does not cover. The resampler answers the same problem by sampling over the taps that
     /// hold data and normalizing by their weight — `resample::masked_sources` — but an adaptive
-    /// kernel like RCD or Markesteijn offers no such weights to normalize by. Leaving the decoder's frame-median fill there
-    /// would spread a value with no local meaning; a same-colour neighbour median spreads a
-    /// plausible one, so what escapes the mask is interpolation error rather than fabrication.
+    /// kernel like RCD or Markesteijn offers no such weights to normalize by. Leaving the decoder's
+    /// frame-median fill there would spread a value with no local meaning; a same-colour neighbour
+    /// median spreads a plausible one, so what escapes the mask is interpolation error rather than
+    /// fabrication.
     ///
     /// The same repair [`DefectMap`](crate::DefectMap) applies to hot and cold pixels, for the same
-    /// reason and through the same neighbour search — mask included, so a cluster of nulls is never
-    /// repaired from its own members. Calibration runs it once its arithmetic is done, so a pixel a
-    /// master left without a measurement holds a fill, not a difference against a bound.
+    /// reason and through the same neighbour search — mask included, so a null is never repaired
+    /// from another null, nor from a value another repair made. Calibration runs it once its
+    /// arithmetic is done, so a pixel a master left without a measurement holds a fill, not a
+    /// difference against a bound.
     pub(crate) fn repair_nulls(&mut self) {
         let Some(flags) = self
             .flags
@@ -304,10 +306,11 @@ impl CfaImage {
         };
         let lattice = CfaLattice::new(&self.cfa_type);
         let size = Size2us::new(self.data.width(), self.data.height());
-        let mask = flags.mask_of(QualityFlags::NO_DATA);
+        let nulls = flags.mask_of(QualityFlags::NO_DATA);
+        let mask = flags.mask_of(QualityFlags::NO_DATA.union(QualityFlags::REPAIRED));
         let mut scratch = Gathered::default();
         // The mask keeps every null out of every repair, so the order of the repairs is free.
-        mask.for_each_set(|pos| {
+        nulls.for_each_set(|pos| {
             let repaired = lattice.median(&self.data, pos, Some(&mask), &mut scratch);
             self.data[size.index_of(pos)] = repaired;
         });

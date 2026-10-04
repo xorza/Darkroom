@@ -86,6 +86,7 @@ fn cache_frame_reuses_a_committed_frame_until_its_source_changes() {
     let key = CacheKey::new(
         CachedSource::of(&source).unwrap().identity,
         DecoderKind::Linear,
+        &LoadContext::default(),
     );
     let mut sentinel = spill.committed(key).unwrap().stats;
     sentinel.channels[0].median = 99.0;
@@ -159,6 +160,7 @@ fn cache_frame_validates_a_reused_frame() {
     let key = CacheKey::new(
         CachedSource::of(&source).unwrap().identity,
         DecoderKind::Linear,
+        &LoadContext::default(),
     );
     let stats = FrameStats::measure(&image);
     drop(StoredFrame::cache(&spill, key, &image, &quality, stats).unwrap());
@@ -242,6 +244,7 @@ fn a_kept_disk_cache_is_reused_by_the_next_run() {
         CacheKey::new(
             CachedSource::of(path).unwrap().identity,
             DecoderKind::Linear,
+            &LoadContext::default(),
         )
     };
     for path in &paths {

@@ -214,7 +214,7 @@ fn prepare_rgb_red_star_survives() {
     );
 }
 
-/// Review item 9.3. Without decoder flags the test runs per channel at 0.95 of the ceiling: a
+/// Without decoder flags the test runs per channel at 0.95 of the ceiling: a
 /// star clipped in green alone, (0.6, 1.0, 0.6), is saturated, though its channels average
 /// 0.73; (0.9, 0.9, 0.9) is not. With decoder flags only the flags count, so a calibrated pixel
 /// that a flat lifted to 0.99 is not saturated, and a flagged one at 0.5 is.
@@ -268,7 +268,7 @@ fn demosaiced_noise(size: Size2us, seed: u64) -> LinearImage {
     image
 }
 
-/// Review item 9.2. On a demosaiced frame of pure noise, the detection plane at FWHM 4 passes about
+/// On a demosaiced frame of pure noise, the detection plane at FWHM 4 passes about
 /// the fraction of sky its threshold states, because its noise is measured on it: above 2σ the
 /// Gaussian tail is 0.02275. Filtered pixels are correlated over some 36 px at FWHM 4, so a 64-px
 /// tile holds about 110 independent samples, and its σ carries an 11% relative error. A threshold
@@ -301,7 +301,7 @@ fn the_detection_threshold_passes_the_sky_it_states() {
     assert!(white > 3.0 * 0.02275, "{white}");
 }
 
-/// Review item 8.2. A 64 × 64 corner with no data, filled with the sky's 0.1, on white noise of σ
+/// A 64 × 64 corner with no data, filled with the sky's 0.1, on white noise of σ
 /// 0.01: its tile is masked out of the mesh and filled from its neighbours, so the sky's σ there is
 /// the frame's, within 10%, five times what a 4096-sample MAD errs by, and not the fill's 0, which
 /// would sink the threshold onto the fill. No pixel of the corner joins a candidate: of the 12 288

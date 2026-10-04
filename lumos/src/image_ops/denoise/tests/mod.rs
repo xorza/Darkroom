@@ -285,7 +285,7 @@ fn the_variance_threshold_scales_with_the_data() {
     }
 }
 
-/// Structure that fills the frame is not noise (review 6.7). A 0.05 checker of sines with a 32 px
+/// Structure that fills the frame is not noise. A 0.05 checker of sines with a 32 px
 /// period over the whole 128 × 128 frame, and white noise of σ 0.001. Each scale's threshold is 3
 /// × 0.001 × its white-noise response, at most 0.0027, so the sines' coefficients stay; what the
 /// four scales remove is noise, at most 3σ times the responses' sum, about 0.0037 at a pixel. A σ

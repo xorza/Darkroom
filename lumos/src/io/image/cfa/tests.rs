@@ -230,9 +230,9 @@ fn a_demosaiced_frame_keeps_its_mosaics_noise() {
 }
 
 /// A master records its whole domain and its quantization σ, so a reload gives back exactly what
-/// was saved, for every origin and every pedestal. Review items 5.1 and 5.2: before, a reload
-/// divided the σ by the span a second time (15360× too small for a RAW master), and an assumed
-/// scale was not recorded, so the reload had an assumed scale of 1 and the master was refused.
+/// was saved, for every origin and every pedestal: the σ is not divided by the span a second time
+/// (15360× too small for a RAW master), and an assumed scale reloads as assumed rather than as a
+/// scale of 1 the master would be refused for.
 #[test]
 fn a_masters_sample_domain_and_quantization_survive_the_fits_round_trip() {
     let directory = TempDir::new("lumos-cfa-domain");

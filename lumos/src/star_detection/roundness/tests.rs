@@ -32,8 +32,7 @@ const PHOTUTILS_F32: f32 = 1e-7;
 /// A round star reads 0 on both when centred. Off the centre both read the phase, to second order
 /// for SROUND: at FWHM 2, on the 5 × 5 cutout, its worst over a 21 × 21 phase grid is 0.3637, at the
 /// corner (½, ½), under the default `max_roundness` of 0.5. Measured on DAOFIND's convolved samples
-/// instead, the same star reads up to 0.45. Review item 10.1 found the former SROUND above 0.5 for 57% of
-/// FWHM-2 stars.
+/// instead, the same star reads up to 0.45.
 #[test]
 fn a_round_star_reads_only_its_phase() {
     let sigma = 2.0 / 2.354_82;

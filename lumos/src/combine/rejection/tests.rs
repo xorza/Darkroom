@@ -478,7 +478,7 @@ fn the_fit_reads_the_centre_and_sigma_off_the_normal_scores() {
 
 /// On clean Gaussian samples at 3σ the rejected share falls with the count, toward the Gaussian
 /// tail share of 0.27%; Siril's rank-based fit grows with it instead (4.4%, 6.3% and 7.8% at 20,
-/// 50 and 200 samples, review 1.5).
+/// 50 and 200 samples).
 ///
 /// The expected shares come from the SciPy reference `internals/reference/linear_fit_rate.py` over
 /// 10⁶, 4·10⁵ and 10⁵ trials: 1.1638%, 0.6147% and 0.3769%, with per-trial standard
@@ -535,7 +535,7 @@ fn linear_fit_rejects_clean_data_at_a_rate_that_falls_with_the_count() {
 /// - `three_of_ten`, seven samples from −1.5 to 1 and three at 10 (σ of the seven 0.85, so the
 ///   three sit near 12σ) at 3σ: median 0.25, MAD 1, σ 1.62; the first clamp holds the 10s at
 ///   2.69, and the clamped copy, never released, keeps them there. The band drops all three. The
-///   old start, 1.134 × the plain standard deviation, put all three inside the clamp (review 1.3).
+///   old start, 1.134 × the plain standard deviation, put all three inside the clamp.
 /// - Three samples are no more than the minimum.
 #[test]
 fn winsorized_keeps_exactly_the_samples_its_band_holds() {
@@ -689,7 +689,7 @@ fn gesd_drops_an_outlier_and_keeps_clean_sets() {
 /// is 8.5/√(271.32/19) = 2.249, under its critical value 2.708: the three mask each other. The
 /// second removal reaches 2.717 against 2.681, and the third 3.700 against 2.652. The automatic cap
 /// ⌊0.3·20⌋ = 6 reaches the third and drops all three. The old cap of 2 stopped at the second and
-/// kept one 10 (review 1.6).
+/// kept one 10.
 #[test]
 fn gesd_tests_far_enough_to_unmask_three_outliers() {
     let mut values: Vec<f32> = (0..17).map(|i| -1.6 + 0.2 * i as f32).collect();

@@ -427,7 +427,7 @@ impl<I: StackableImage> FrameDiskCache<'_, I> {
             None => (CachedSource::of(path)?, None),
         };
         let spill = FrameSpill::cached(kept.path(), &source.canonical, I::DECODER);
-        let key = CacheKey::new(source.identity, I::DECODER);
+        let key = CacheKey::new(source.identity, I::DECODER, self.context);
 
         if decoded_image.is_none()
             && let Some(frame) = StoredFrame::reuse(&spill, key, dimensions)?
