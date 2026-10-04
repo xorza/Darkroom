@@ -1,12 +1,29 @@
 //! The Moffat as a [`BatchModel`]: each lane evaluates `MoffatFixedBeta`'s own expressions,
 //! `u^(−β)` by its own [`PowStrategy`]. The integer and half-integer powers multiply in `int_pow`'s
-//! order, the general one is `exp(−β·ln u)` from [`Math`], which the scalar model takes on the
-//! portable Isa, and every division is a division, so a lane is the scalar model bit for bit.
+//! order, the general one is `exp(−β·ln u)` from [`Math`], which the scalar model takes through
+//! [`GeneralPower`], and every division is a division, so a lane is the scalar model bit for bit.
 
 use crate::simd::math::Math;
-use crate::simd::{F64x4, Isa};
+use crate::simd::{F64x4, Isa, Kernel};
 use crate::star_detection::centroid::moffat_fit::{MoffatFixedBeta, PowStrategy};
 use crate::star_detection::centroid::simd::{BatchModel, LaneProfile, Sample};
+
+/// `u^neg_beta` for one `u`, as a lane of [`Profile::pow_neg`]'s general power computes it.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct GeneralPower {
+    pub(super) u: f64,
+    pub(super) neg_beta: f64,
+}
+
+impl Kernel for GeneralPower {
+    type Output = f64;
+
+    #[inline(always)]
+    fn run<S: Isa>(self, isa: S) -> f64 {
+        isa.exp_f64(isa.splat_f64(self.neg_beta) * isa.ln_f64(isa.splat_f64(self.u)))
+            .to_array()[0]
+    }
+}
 
 /// The Moffat at `[x0, y0, amplitude, alpha, background]`.
 #[derive(Debug, Clone, Copy)]
